@@ -1,0 +1,34 @@
+diff --git a/src/retry-ledger.ts b/src/retry-ledger.ts
+--- a/src/retry-ledger.ts
++++ b/src/retry-ledger.ts
+@@ -2,10 +2,12 @@ export interface RetryEvent {
+   repositoryId: string;
+   eventId: string;
+   payload: string;
++  attempt: number;
+ }
+ 
+ export interface RetryEntry extends RetryEvent {
+   recordedAt: number;
++  lastAttemptAt: number;
+ }
+ 
+ export class RetryLedger {
+@@ -16,9 +18,15 @@ export class RetryLedger {
+       entry.repositoryId === event.repositoryId
+       && entry.eventId === event.eventId,
+     );
+-    if (existing) return existing;
++    if (existing) {
++      existing.attempt = event.attempt;
++      existing.payload = event.payload;
++      existing.lastAttemptAt = Date.now();
++      return existing;
++    }
+ 
+-    const entry = { ...event, recordedAt: Date.now() };
++    const recordedAt = Date.now();
++    const entry = { ...event, recordedAt, lastAttemptAt: recordedAt };
+     this.entries.push(entry);
+     return entry;
+   }

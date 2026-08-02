@@ -1,0 +1,18 @@
+diff --git a/src/approval-route.ts b/src/approval-route.ts
+--- a/src/approval-route.ts
++++ b/src/approval-route.ts
+@@ -4,7 +4,14 @@ export interface PublishRequest {
+   approved: boolean;
+ }
+ 
++function requireRepositoryOwner(request: PublishRequest): void {
++  if (request.actorId !== request.repositoryOwnerId) {
++    throw new Error('only the repository owner can publish a review');
++  }
++}
++
+ export function publishApprovedReview(request: PublishRequest): string {
++  requireRepositoryOwner(request);
+   if (!request.approved) {
+     throw new Error('review must be approved before publication');
+   }

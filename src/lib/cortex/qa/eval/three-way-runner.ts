@@ -28,9 +28,6 @@
  *      src/lib/cortex/qa/eval/three-way-runner.ts
  */
 
-import nodeFs from 'node:fs';
-import nodeOs from 'node:os';
-import nodePath from 'node:path';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
@@ -40,10 +37,10 @@ import { classifyQuestion } from '@/lib/cortex/qa/classifier';
 import { composeClassA, composeClassB, type SseEmit } from '@/lib/cortex/qa/composer';
 import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
 import { STRICT_JSON_SYSTEM_PROMPTS_V1 } from '@/lib/prompts/v1';
-import { retrieveAll, unionMerge } from '@/lib/cortex/qa/retrieve';
 import type { Citation, TypedRow } from '@/lib/cortex/qa/types';
 
 import { buildBlindTopRows, buildGrepTopRows, buildStrongGrepTopRows } from './baselines';
+import { resolveEvalRepoPath } from './repo-path';
 import { renderJudgePrompt } from '../../../../../tests/qa-eval/judge';
 
 // ── Case types (mirror runner.ts) ─────────────────────────────────────────────
@@ -95,32 +92,6 @@ const JUDGE_FAILED: JudgeResult = {
   notes: 'judge-failed',
 };
 
-/**
- * Cases carry a placeholder repo path so no operator home directory ships in
- * the public repo (2026-07-30 path redaction). Resolve it to a real checkout at
- * run time — otherwise every condition (Brain, grep, strong-grep) is asked about
- * a repository that does not exist and scores near zero, which reads as a
- * catastrophic regression rather than a broken harness.
- */
-function resolveEvalRepoPath(declared: string): string {
-  const candidates = [process.env.O8_EVAL_REPO_PATH?.trim(), declared].filter(
-    (v): v is string => Boolean(v),
-  );
-  for (const candidate of candidates) {
-    if (nodeFs.existsSync(nodePath.join(candidate, '.git'))) return candidate;
-  }
-  try {
-    const registry = JSON.parse(
-      nodeFs.readFileSync(nodePath.join(nodeOs.homedir(), '.o8', 'repos.json'), 'utf-8'),
-    ) as { repos?: Array<{ localPath?: string }> };
-    const first = registry.repos?.find((r) => r.localPath && nodeFs.existsSync(r.localPath));
-    if (first?.localPath) return first.localPath;
-  } catch {
-    // fall through to the declared path
-  }
-  return declared;
-}
-
 function parseJudgeJson(raw: string): JudgeResult | null {
   const match = raw.match(/\{[\s\S]*\}/);
   if (!match) return null;
@@ -168,8 +139,6 @@ async function realJudge(input: {
 
 // ── Condition runners ─────────────────────────────────────────────────────────
 
-type Condition = 'full' | 'grep' | 'strongGrep' | 'blind';
-
 interface ComposeOutput {
   answer: string;
   citations: ExpectedCitation[];
@@ -204,7 +173,7 @@ async function runCompose(
  * + retrieveAll + unionMerge + composer in one call).
  */
 async function runConditionFull(qc: QaCase): Promise<ComposeOutput> {
-  const result = await askCortex(qc.question, resolveEvalRepoPath(qc.repoPath), { bypassCache: true });
+  const result = await askCortex(qc.question, resolveEvalRepoPath(qc.repoPath).repoPath, { bypassCache: true });
   return {
     answer: result.answer,
     citations: result.citations.map((c) => ({ kind: c.kind, rowId: c.rowId })),
@@ -221,7 +190,7 @@ async function runConditionAlt(
   cls: 'A' | 'B',
   topRows: TypedRow[],
 ): Promise<ComposeOutput> {
-  return runCompose(cls, qc.question, resolveEvalRepoPath(qc.repoPath), topRows);
+  return runCompose(cls, qc.question, resolveEvalRepoPath(qc.repoPath).repoPath, topRows);
 }
 
 // ── Aggregation ───────────────────────────────────────────────────────────────
@@ -351,7 +320,7 @@ async function main(): Promise<void> {
     let grepRows: TypedRow[] = [];
     let grepOut: ComposeOutput;
     try {
-      grepRows = await buildGrepTopRows(qc.question, resolveEvalRepoPath(qc.repoPath), 15);
+      grepRows = await buildGrepTopRows(qc.question, resolveEvalRepoPath(qc.repoPath).repoPath, 15);
       grepOut = await runConditionAlt(qc, classification, grepRows);
     } catch (err) {
       console.warn(`        grep threw: ${err instanceof Error ? err.message : err}`);
@@ -362,7 +331,7 @@ async function main(): Promise<void> {
     let strongGrepRows: TypedRow[] = [];
     let strongGrepOut: ComposeOutput;
     try {
-      strongGrepRows = await buildStrongGrepTopRows(qc.question, resolveEvalRepoPath(qc.repoPath));
+      strongGrepRows = await buildStrongGrepTopRows(qc.question, resolveEvalRepoPath(qc.repoPath).repoPath);
       strongGrepOut = await runConditionAlt(qc, classification, strongGrepRows);
     } catch (err) {
       console.warn(`        strongGrep threw: ${err instanceof Error ? err.message : err}`);

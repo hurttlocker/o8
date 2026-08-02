@@ -41,6 +41,14 @@ function noteFor(value, fallback) {
   return fallback;
 }
 
+function repoRelativePath(value) {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const absolute = path.resolve(process.cwd(), value);
+  const relative = path.relative(process.cwd(), absolute);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return null;
+  return relative.split(path.sep).join('/');
+}
+
 function gitSha() {
   const result = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { encoding: 'utf8' });
   return result.status === 0 ? result.stdout.trim() : 'unknown';
@@ -106,6 +114,9 @@ function priorScorecard(version, sha, targetPath) {
 }
 
 function priorValue(prior, track, metric) {
+  if (prior?.[track]?.status === 'invalid' || prior?.tracks?.[track]?.status === 'invalid') {
+    return null;
+  }
   return numberOrNull(prior?.tracks?.[track]?.metrics?.[metric]?.value);
 }
 
@@ -209,32 +220,74 @@ function buildMemoryTrack(memory, prior) {
   return {
     automatable: true,
     status: memory ? 'ok' : 'not run',
-    sourceResults: memory?.sourceResults ?? null,
+    sourceResults: repoRelativePath(memory?.sourceResults),
     metrics: result,
   };
 }
 
 function buildGovernanceTrack(governance, prior) {
-  if (!governance) return { automatable: false, status: MANUAL_NOT_RUN };
-  const catchRate = governance.lastRun?.catchRate ?? governance.catchRate ?? governance.metrics?.catch_rate;
-  const fpRate = governance.lastRun?.fpRate ?? governance.fpRate ?? governance.metrics?.fp_rate;
+  if (!governance) return { automatable: true, status: 'automated — not run this release' };
+  const catchSummary = governance.summary?.catch;
+  const falsePositiveSummary = governance.summary?.falsePositive;
+  const caught = numberOrNull(catchSummary?.caught);
+  const plantedTotal = numberOrNull(catchSummary?.total);
+  const falsePositives = numberOrNull(falsePositiveSummary?.flagged);
+  const cleanTotal = numberOrNull(falsePositiveSummary?.total);
+  const validCounts = [caught, plantedTotal, falsePositives, cleanTotal]
+    .every((value) => Number.isInteger(value) && value >= 0)
+    && plantedTotal > 0
+    && cleanTotal > 0
+    && caught <= plantedTotal
+    && falsePositives <= cleanTotal;
+  if (!validCounts) {
+    return {
+      automatable: true,
+      status: 'invalid governance result — numerator and denominator counts are required',
+    };
+  }
+  const catchRate = caught / plantedTotal;
+  const falsePositiveRate = falsePositives / cleanTotal;
+  const priorFalsePositiveRate = priorValue(prior, 'governance', 'false_positive_rate')
+    ?? priorValue(prior, 'governance', 'fp_rate');
+  const reviewerBackendCount = Array.isArray(governance.reviewerBackends)
+    ? new Set(governance.reviewerBackends).size
+    : numberOrNull(governance.lastRun?.reviewerBackendCount);
   return {
-    automatable: false,
-    status: 'ok',
-    lastRun: governance.lastRun ?? null,
+    automatable: true,
+    status: governance.summary?.inconclusive > 0 ? 'completed with inconclusive reviews' : 'ok',
+    scopeStatement: governance.scopeStatement ?? null,
+    lastRun: {
+      generatedAt: governance.generatedAt ?? governance.lastRun?.date ?? null,
+      reviewerBackendCount,
+      fixtureCount: governance.fixtureCount ?? governance.lastRun?.nDiffs ?? null,
+      inconclusive: governance.summary?.inconclusive ?? null,
+      blindExecution: governance.blindExecution ? {
+        shuffled: governance.blindExecution.shuffled === true,
+        groundTruthWithheldFromReviewer: governance.blindExecution.groundTruthWithheldFromReviewer === true,
+        isolatedRepositoryPerInput: governance.blindExecution.isolatedRepositoryPerInput === true,
+      } : null,
+    },
     metrics: {
-      catch_rate: metricEntry({
-        value: numberOrNull(catchRate),
-        direction: 'higher-better',
-        threshold: 0.05,
-        prior: priorValue(prior, 'governance', 'catch_rate'),
-      }),
-      fp_rate: metricEntry({
-        value: numberOrNull(fpRate),
-        direction: 'lower-better',
-        threshold: 0.05,
-        prior: priorValue(prior, 'governance', 'fp_rate'),
-      }),
+      catch_rate: {
+        ...metricEntry({
+          value: numberOrNull(catchRate),
+          direction: 'higher-better',
+          threshold: 0.05,
+          prior: priorValue(prior, 'governance', 'catch_rate'),
+        }),
+        numerator: caught,
+        denominator: plantedTotal,
+      },
+      false_positive_rate: {
+        ...metricEntry({
+          value: numberOrNull(falsePositiveRate),
+          direction: 'lower-better',
+          threshold: 0.05,
+          prior: priorFalsePositiveRate,
+        }),
+        numerator: falsePositives,
+        denominator: cleanTotal,
+      },
     },
   };
 }
@@ -263,14 +316,18 @@ function formatValue(value) {
 
 function renderMetricRows(trackName, track) {
   if (!track.metrics) return `## ${trackName}\n_${track.status}_\n`;
-  const rows = ['| Metric | Value | Prior | Direction | Delta |', '| --- | ---: | ---: | --- | --- |'];
+  const rows = ['| Metric | Value | N | Prior | Direction | Delta |', '| --- | ---: | ---: | ---: | --- | --- |'];
   for (const [name, metric] of Object.entries(track.metrics)) {
-    rows.push(`| ${name} | ${formatValue(metric.value)} | ${formatValue(metric.priorValue)} | ${metric.direction} | ${metric.delta} |`);
+    const sample = typeof metric.numerator === 'number' && typeof metric.denominator === 'number'
+      ? `${metric.numerator}/${metric.denominator}`
+      : '-';
+    rows.push(`| ${name} | ${formatValue(metric.value)} | ${sample} | ${formatValue(metric.priorValue)} | ${metric.direction} | ${metric.delta} |`);
   }
   return `## ${trackName}\n${rows.join('\n')}\n`;
 }
 
 function renderMarkdown(card, priorSource) {
+  const governanceScope = card.tracks.governance.scopeStatement;
   const lines = [
     '# o8 Benchmark Scorecard',
     '',
@@ -279,6 +336,7 @@ function renderMarkdown(card, priorSource) {
     `Timestamp: ${card.timestamp}`,
     `Node: ${card.node}`,
     `Prior: ${priorSource ?? 'none'}`,
+    ...(governanceScope ? [`Governance scope: ${governanceScope}`] : []),
     '',
     renderMetricRows('Speed', card.tracks.speed),
     renderMetricRows('Memory', card.tracks.memory),
@@ -289,14 +347,17 @@ function renderMarkdown(card, priorSource) {
 }
 
 function printSummary(card) {
-  console.log('track\tmetric\tvalue\tdelta');
+  console.log('[bench-score] track\tmetric\tvalue\tn\tdelta');
   for (const [trackName, track] of Object.entries(card.tracks)) {
     if (!track.metrics) {
-      console.log(`${trackName}\t-\t-\t${track.status}`);
+      console.log(`[bench-score] ${trackName}\t-\t-\t-\t${track.status}`);
       continue;
     }
     for (const [metricName, metric] of Object.entries(track.metrics)) {
-      console.log(`${trackName}\t${metricName}\t${formatValue(metric.value)}\t${metric.delta}`);
+      const sample = typeof metric.numerator === 'number' && typeof metric.denominator === 'number'
+        ? `${metric.numerator}/${metric.denominator}`
+        : '-';
+      console.log(`[bench-score] ${trackName}\t${metricName}\t${formatValue(metric.value)}\t${sample}\t${metric.delta}`);
     }
   }
 }
@@ -333,12 +394,12 @@ function main() {
   fs.writeFileSync(mdPath, markdown);
   fs.writeFileSync(latestPath, markdown);
   printSummary(card);
-  console.log(`wrote ${jsonPath}`);
+  console.log(`[bench-score] wrote ${jsonPath}`);
 }
 
 try {
   main();
 } catch (err) {
-  console.error(`bench:score failed without throwing: ${err instanceof Error ? err.message : String(err)}`);
+  console.error(`[bench-score] failed without throwing: ${err instanceof Error ? err.message : String(err)}`);
   process.exitCode = 0;
 }

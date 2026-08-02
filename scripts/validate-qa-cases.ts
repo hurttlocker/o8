@@ -8,7 +8,9 @@
  *   3. At least 30 cases
  *   4. Exactly 5 cases per seeded category across the 6 original categories
  *   5. Every case has the required fields with the right types
- *   6. (warning, not failure) every expectedCitations[].rowId resolves against
+ *   6. Every declared repoPath resolves to a real Git checkout using the same
+ *      environment -> declared -> registry precedence as the eval runners
+ *   7. (warning, not failure) every expectedCitations[].rowId resolves against
  *      the live ~/.o8/cortex-ide.db. Fresh clones don't have rows yet, so we
  *      warn instead of fail — the runner is responsible for the runtime gate.
  *
@@ -19,6 +21,8 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import process from 'node:process';
+
+import { resolveEvalRepoPath } from '../src/lib/cortex/qa/eval/repo-path';
 
 type Category =
   | 'ownership'
@@ -343,6 +347,29 @@ async function validate(): Promise<ValidationResult> {
 
   // Only do the live-DB probe when structural validation already passed —
   // probing a malformed file just produces noisy warnings.
+  if (result.errors.length === 0) {
+    const declaredPaths = new Set((cases as QaCase[]).map((qaCase) => qaCase.repoPath));
+    for (const declaredPath of declaredPaths) {
+      const resolution = resolveEvalRepoPath(declaredPath);
+      if (resolution.source === 'unresolved') {
+        const attempted = resolution.attemptedPaths.length > 0
+          ? resolution.attemptedPaths.map((candidate) => JSON.stringify(candidate)).join(', ')
+          : '(none)';
+        result.errors.push(
+          `repoPath ${JSON.stringify(declaredPath)} is unresolvable: no candidate contains .git (tried ${attempted}; registry ${resolution.registryPath})`,
+        );
+      } else if (resolution.source === 'environment') {
+        result.warnings.push(
+          `declared repoPath ${JSON.stringify(declaredPath)} was not selected; O8_EVAL_REPO_PATH overrides it with ${JSON.stringify(resolution.repoPath)}`,
+        );
+      } else if (resolution.source === 'registry') {
+        result.warnings.push(
+          `declared repoPath ${JSON.stringify(declaredPath)} does not resolve; substituting ${JSON.stringify(resolution.repoPath)} via registry fallback`,
+        );
+      }
+    }
+  }
+
   if (result.errors.length === 0) {
     await probeCitations(cases as QaCase[], result.warnings);
   }

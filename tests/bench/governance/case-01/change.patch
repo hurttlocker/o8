@@ -1,0 +1,16 @@
+diff --git a/src/review-policy.ts b/src/review-policy.ts
+--- a/src/review-policy.ts
++++ b/src/review-policy.ts
+@@ -7,6 +7,12 @@ export function canPublishReview(request: ReviewRequest): boolean {
+   return request.approved;
+ }
+ 
++export function requireRepositoryOwner(request: ReviewRequest): void {
++  if (request.actorId !== request.repositoryOwnerId) {
++    throw new Error('only the repository owner can publish a review');
++  }
++}
++
+ export function publishReview(request: ReviewRequest): string {
+   if (!canPublishReview(request)) {
+     throw new Error('review must be approved before publication');

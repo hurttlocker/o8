@@ -4,8 +4,8 @@ This suite makes release claims measurable instead of anecdotal. It wraps the ex
 
 ## Tracks
 
-- Automatable: speed and memory.
-- Operator-driven: governance and coding. These are always recorded with `automatable:false` because they depend on human-driven review or worktree head-to-head runs.
+- Automatable: speed, memory, and governance.
+- Operator-driven: coding. It remains `automatable:false` because it depends on a human-driven worktree head-to-head run.
 
 ## Release Run
 
@@ -21,7 +21,17 @@ Then read:
 tests/bench/scorecards/latest.md
 ```
 
-`bench:all` runs speed, memory, then scoring. Speed writes `tests/bench/latest/speed.json`; memory writes `tests/bench/latest/memory.json`; scoring writes `scorecard-<version>-<sha>.json`, a matching `.md`, and refreshes `latest.md`.
+`bench:all` runs speed, memory, the blind governance review, then scoring. Speed writes `tests/bench/latest/speed.json`; memory writes `tests/bench/latest/memory.json`; governance writes `tests/bench/latest/governance.json`; scoring writes `scorecard-<version>-<sha>.json`, a matching `.md`, and refreshes `latest.md`.
+
+Run governance alone with:
+
+```sh
+npm run bench:governance
+```
+
+The governance command preflights five committed patch fixtures through TypeScript and ESLint, shuffles and neutrally labels them, sends only task, acceptance criteria, and diff to the active AI reviewer, and records catch rate and false-positive rate with denominators. It then refreshes the version-stamped scorecard. The result measures the AI review tier, not the human approval gate above it.
+
+The corrected blind boundary has not yet completed an end-to-end run, so no governance scorecard is committed with this harness. Treat the track as unvalidated until a later run completes under that boundary.
 
 ## Thresholds
 
@@ -30,15 +40,7 @@ tests/bench/scorecards/latest.md
 - Judge variance is roughly ±5pp, so the ±0.05 threshold suppresses normal noise.
 - `socket_avg_conns` is informational and never receives a regression tag.
 
-## Manual Tracks
-
-Governance:
-
-```sh
-cp tests/bench/governance.template.json tests/bench/latest/governance.json
-```
-
-Run the 5-diff governance review->refix workflow, fill `catchRate`, `fpRate`, `date`, `version`, and `nDiffs`, then run `npm run bench:score`.
+## Manual Track
 
 Coding:
 
@@ -48,4 +50,4 @@ cp tests/bench/coding.template.json tests/bench/latest/coding.json
 
 Run the 3-arm worktree head-to-head, fill `passRate`, `arms`, `winner`, `date`, and `version`, then run `npm run bench:score`.
 
-If governance or coding are absent for a release, the scorecard records them as `manual — not run this release`.
+If governance is absent for a release, the scorecard records it as `automated — not run this release`. If coding is absent, the scorecard records it as `manual — not run this release`.

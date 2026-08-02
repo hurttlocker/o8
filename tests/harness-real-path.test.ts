@@ -28,15 +28,36 @@ initRepo(secondRepoDir);
 
 const reviewer = vi.hoisted(() => ({
   calls: 0,
+  mode: 'approve' as 'approve' | 'tool',
+  sessionThreadIds: [] as Array<string | null | undefined>,
+  turnOptions: [] as Array<{
+    permissionMode?: string;
+    toolProfile?: string;
+    threadId?: string | null;
+    signal?: AbortSignal;
+  }>,
 }));
 
 vi.mock('@/lib/lane/orchestrator-backends/registry', () => ({
   getActiveReviewerBackend: () => ({
     id: 'codex',
     label: 'Codex test reviewer',
-    ensureSession: () => ({ status: 'idle' }),
-    sendTurn: async (_repo: string, _prompt: string, onEvent: (event: unknown) => void) => {
+    ensureSession: (_repo: string, _agent?: string, threadId?: string | null) => {
+      reviewer.sessionThreadIds.push(threadId);
+      return { status: 'ready' };
+    },
+    sendTurn: async (
+      _repo: string,
+      _prompt: string,
+      onEvent: (event: unknown) => void,
+      options: (typeof reviewer.turnOptions)[number],
+    ) => {
       reviewer.calls += 1;
+      reviewer.turnOptions.push(options);
+      if (reviewer.mode === 'tool') {
+        onEvent({ type: 'tool_use', name: 'Read', input: { path: 'tests/bench/governance/manifest.json' } });
+        return;
+      }
       onEvent({
         type: 'text',
         text: JSON.stringify({ verdict: 'approve', summary: 'Patch satisfies the supplied contract.', findings: [] }),
@@ -46,6 +67,7 @@ vi.mock('@/lib/lane/orchestrator-backends/registry', () => ({
 }));
 
 const harnessRoute = await import('@/app/api/harness/route');
+const { evaluateDiff } = await import('@/lib/harness/evaluator');
 const { createLane } = await import('@/lib/lane/registry');
 const { mintPacketWorkerToken } = await import('@/lib/auth/packet-worker-token');
 const { closeDb } = await import('@/lib/db');
@@ -265,6 +287,13 @@ describe.sequential('harness real path', () => {
     });
     expect(evaluation).toMatchObject({ verdict: 'approve', reviewerBackend: 'codex' });
     expect(reviewer.calls).toBe(1);
+    const threadId = reviewer.sessionThreadIds.at(-1);
+    expect(threadId).toMatch(/^thoughts-harness-evaluate-/);
+    expect(reviewer.turnOptions.at(-1)).toMatchObject({
+      permissionMode: 'plan',
+      toolProfile: 'propose',
+      threadId,
+    });
 
     const oversizedEvaluation = await harnessRoute.POST(request({
       action: 'evaluate_diff',
@@ -316,6 +345,24 @@ describe.sequential('harness real path', () => {
       repoPath: secondRepoDir,
     });
     expect(importedFeatures.features.some((feature) => feature.title === 'Render the widget safely')).toBe(true);
+  });
+
+  it('marks a blind evaluation inconclusive when the reviewer calls a tool', async () => {
+    reviewer.mode = 'tool';
+    try {
+      const evaluation = await evaluateDiff({
+        repoPath: repoDir,
+        task: 'Review only the supplied patch.',
+        diff: 'diff --git a/widget.ts b/widget.ts\n--- a/widget.ts\n+++ b/widget.ts\n@@ -1 +1 @@\n-export const value = 1;\n+export const value = 2;\n',
+        disallowTools: true,
+      });
+
+      expect(evaluation.verdict).toBe('inconclusive');
+      expect(evaluation.summary).toContain('Blind review protocol breach');
+      expect(reviewer.turnOptions.at(-1)?.signal?.aborted).toBe(true);
+    } finally {
+      reviewer.mode = 'approve';
+    }
   });
 
   it('binds worker writes to their packet repo and sprint while keeping lifecycle mutation operator-only', async () => {

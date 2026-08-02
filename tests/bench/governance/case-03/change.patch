@@ -1,0 +1,18 @@
+diff --git a/src/projection-store.ts b/src/projection-store.ts
+--- a/src/projection-store.ts
++++ b/src/projection-store.ts
+@@ -4,11 +4,13 @@ export interface RepositoryProjection {
+ }
+ 
+ const projectionsByRepository = new Map<string, RepositoryProjection>();
++let lastProjection: RepositoryProjection | undefined;
+ 
+ export function writeProjection(projection: RepositoryProjection): void {
+   projectionsByRepository.set(projection.repositoryId, projection);
++  lastProjection = projection;
+ }
+ 
+ export function readProjection(repositoryId: string): RepositoryProjection | null {
+-  return projectionsByRepository.get(repositoryId) ?? null;
++  return projectionsByRepository.get(repositoryId) ?? lastProjection ?? null;
+ }

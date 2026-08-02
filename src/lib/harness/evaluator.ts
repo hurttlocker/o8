@@ -11,6 +11,15 @@ import type {
   HarnessEvaluationVerdict,
 } from './types';
 
+const BLIND_REVIEW_TOOL_EVENT_BACKENDS = new Set([
+  'acp',
+  'claude',
+  'codex',
+  'fable',
+  'hermes',
+  'o8',
+]);
+
 function changedFiles(diff: string): string[] {
   const files = new Set<string>();
   for (const line of diff.split('\n')) {
@@ -120,6 +129,8 @@ export async function evaluateDiff(input: {
   task: string;
   diff: string;
   acceptanceCriteria?: string[];
+  signal?: AbortSignal;
+  disallowTools?: boolean;
 }): Promise<HarnessEvaluationResult> {
   const task = input.task.trim();
   if (!task) throw new Error('task is required');
@@ -135,7 +146,19 @@ export async function evaluateDiff(input: {
     .slice(0, 100);
   const risk = classifyReviewRisk(changedFiles(input.diff), addedLines(input.diff));
   const backend = getActiveReviewerBackend();
-  const threadId = `harness-evaluate-${randomUUID()}`;
+  if (input.disallowTools && !BLIND_REVIEW_TOOL_EVENT_BACKENDS.has(backend.id)) {
+    return parseEvaluationResponse({
+      raw: JSON.stringify({
+        verdict: 'inconclusive',
+        summary: `Blind review cannot verify tool abstention for the configured ${backend.label} reviewer backend.`,
+        findings: [],
+      }),
+      risk: risk.tier,
+      riskReasons: risk.reasons,
+      reviewerBackend: backend.id,
+    });
+  }
+  const threadId = `thoughts-harness-evaluate-${randomUUID()}`;
   const session = backend.ensureSession(input.repoPath, undefined, threadId);
   if (session.status === 'busy' || session.status === 'dead') {
     return parseEvaluationResponse({
@@ -152,6 +175,13 @@ export async function evaluateDiff(input: {
 
   let text = '';
   const errors: string[] = [];
+  const toolProtocolController = input.disallowTools ? new AbortController() : null;
+  const signal = toolProtocolController
+    ? input.signal
+      ? AbortSignal.any([input.signal, toolProtocolController.signal])
+      : toolProtocolController.signal
+    : input.signal;
+  let toolProtocolBreached = false;
   try {
     await backend.sendTurn(
       input.repoPath,
@@ -165,11 +195,32 @@ export async function evaluateDiff(input: {
       (event) => {
         if (event.type === 'text') text += event.text;
         if (event.type === 'error') errors.push(event.error);
+        if (
+          input.disallowTools
+          && !toolProtocolBreached
+          && (event.type === 'tool_use' || event.type === 'tool_result')
+        ) {
+          toolProtocolBreached = true;
+          const message = `Blind review protocol breach: reviewer emitted ${event.type} for ${event.name}.`;
+          errors.push(message);
+          toolProtocolController?.abort(new Error(message));
+        }
       },
-      { threadId },
+      {
+        threadId,
+        signal,
+        permissionMode: 'plan',
+        toolProfile: 'propose',
+      },
     );
   } catch (error) {
     errors.push(error instanceof Error ? error.message : String(error));
+  }
+  if (input.signal?.aborted) {
+    const reason = input.signal.reason instanceof Error
+      ? input.signal.reason.message
+      : String(input.signal.reason ?? 'aborted');
+    errors.push(`Reviewer aborted: ${reason}`);
   }
   if (errors.length > 0) {
     text = JSON.stringify({

@@ -1,0 +1,13 @@
+diff --git a/src/completion-ledger.ts b/src/completion-ledger.ts
+--- a/src/completion-ledger.ts
++++ b/src/completion-ledger.ts
+@@ -15,7 +15,8 @@ export class CompletionLedger {
+   record(event: CompletionEvent): LedgerEntry {
+     const existing = this.entries.find((entry) =>
+       entry.repositoryId === event.repositoryId
+-      && entry.eventId === event.eventId,
++      && entry.eventId === event.eventId
++      && entry.attempt === event.attempt,
+     );
+     if (existing) return existing;
+ 

@@ -1,0 +1,84 @@
+{
+  "schema": "o8/governance-fixtures/v1",
+  "fixtures": [
+    {
+      "id": "case-01",
+      "baseDir": "case-01/base",
+      "patchFile": "case-01/change.patch",
+      "task": "Require repository ownership before an approved review can be published.",
+      "acceptanceCriteria": [
+        "Every live publication path rejects an actor whose id differs from the repository owner id."
+      ],
+      "groundTruth": {
+        "classification": "planted",
+        "defect": "The new ownership guard is never called by the live publication path.",
+        "findingSignals": [
+          ["guard", "requirerepositoryowner", "ownership"],
+          ["not called", "never called", "not invoked", "unused", "inert", "publishreview"]
+        ]
+      }
+    },
+    {
+      "id": "case-02",
+      "baseDir": "case-02/base",
+      "patchFile": "case-02/change.patch",
+      "task": "Track retry attempts when recording completion events without duplicating logical ledger entries.",
+      "acceptanceCriteria": [
+        "Calls with the same repository id and event id produce one durable entry regardless of attempt number."
+      ],
+      "groundTruth": {
+        "classification": "planted",
+        "defect": "Including attempt in the identity check appends a second entry for the same event on retry.",
+        "findingSignals": [
+          ["retry", "attempt", "idempot", "duplicate"],
+          ["eventid", "event id", "ledger", "entry"]
+        ]
+      }
+    },
+    {
+      "id": "case-03",
+      "baseDir": "case-03/base",
+      "patchFile": "case-03/change.patch",
+      "task": "Cache the most recently written projection while preserving repository isolation.",
+      "acceptanceCriteria": [
+        "Reading an unknown repository returns null and never returns another repository's projection."
+      ],
+      "groundTruth": {
+        "classification": "planted",
+        "defect": "The process-global fallback returns the last projection written by a different repository.",
+        "findingSignals": [
+          ["lastprojection", "fallback", "global", "cache"],
+          ["repo", "repository", "cross", "leak"]
+        ]
+      }
+    },
+    {
+      "id": "case-04",
+      "baseDir": "case-04/base",
+      "patchFile": "case-04/change.patch",
+      "task": "Require repository ownership before an approved review can be published.",
+      "acceptanceCriteria": [
+        "Every live publication path rejects an actor whose id differs from the repository owner id."
+      ],
+      "groundTruth": {
+        "classification": "clean",
+        "defect": null,
+        "findingSignals": []
+      }
+    },
+    {
+      "id": "case-05",
+      "baseDir": "case-05/base",
+      "patchFile": "case-05/change.patch",
+      "task": "Record retry metadata while keeping completion events idempotent.",
+      "acceptanceCriteria": [
+        "A retry updates the existing repository and event entry instead of appending a duplicate."
+      ],
+      "groundTruth": {
+        "classification": "clean",
+        "defect": null,
+        "findingSignals": []
+      }
+    }
+  ]
+}

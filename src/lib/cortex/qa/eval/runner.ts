@@ -14,7 +14,6 @@
  */
 
 import { promises as fs } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 
@@ -22,6 +21,7 @@ import { askCortex } from '@/lib/cortex/qa/ask';
 import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
 import { STRICT_JSON_SYSTEM_PROMPTS_V1 } from '@/lib/prompts/v1';
 import { renderJudgePrompt } from '../../../../../tests/qa-eval/judge';
+import { resolveEvalRepoPath } from './repo-path';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -225,46 +225,21 @@ function emptyAgg(): CategoryAgg {
 
 // ── Main entrypoint ────────────────────────────────────────────────────────────
 
-/**
- * Cases carry a placeholder repo path so no operator's home directory ships in
- * the public repo. Resolve it to a real checkout at run time, or the eval asks
- * every condition about a repository that does not exist and scores near zero
- * across the board — which reads as a catastrophic regression rather than a
- * broken harness (2026-08-02).
- */
-async function resolveEvalRepoPath(declared: string): Promise<string> {
-  const fromEnv = process.env.O8_EVAL_REPO_PATH?.trim();
-  const candidates = [fromEnv, declared].filter((v): v is string => Boolean(v));
-  for (const candidate of candidates) {
-    try {
-      const stat = await fs.stat(path.join(candidate, '.git'));
-      if (stat) return candidate;
-    } catch {
-      // try the next candidate
-    }
-  }
-  const registryPath = path.join(os.homedir(), '.o8', 'repos.json');
-  try {
-    const registry = JSON.parse(await fs.readFile(registryPath, 'utf-8')) as {
-      repos?: Array<{ localPath?: string }>;
-    };
-    const first = registry.repos?.find((r) => typeof r.localPath === 'string' && r.localPath);
-    if (first?.localPath) return first.localPath;
-  } catch {
-    // fall through to the declared path
-  }
-  return declared;
-}
-
 export async function runEval(): Promise<RunSummary> {
   const casesPath = path.resolve(process.cwd(), 'tests/qa-eval/cases.json');
   const raw = await fs.readFile(casesPath, 'utf-8');
   const file = JSON.parse(raw) as CasesFile;
 
   const declaredPath = file.cases[0]?.repoPath ?? '';
-  const evalRepoPath = await resolveEvalRepoPath(declaredPath);
-  if (evalRepoPath !== declaredPath) {
-    console.warn(`[qa-eval] cases declare repoPath ${declaredPath}; running against ${evalRepoPath}`);
+  const resolution = resolveEvalRepoPath(declaredPath);
+  if (resolution.source === 'unresolved') {
+    throw new Error(`QA eval repository could not be resolved from declared path ${JSON.stringify(declaredPath)}`);
+  }
+  const evalRepoPath = resolution.repoPath;
+  if (resolution.source === 'environment') {
+    console.warn(`[qa-eval] O8_EVAL_REPO_PATH overrides declared repoPath ${declaredPath}; running against ${evalRepoPath}`);
+  } else if (resolution.source === 'registry') {
+    console.warn(`[qa-eval] declared repoPath ${declaredPath} does not resolve; running against ${evalRepoPath} via registry fallback`);
   }
 
   const perCategory: Record<Category, CategoryAgg> = {
