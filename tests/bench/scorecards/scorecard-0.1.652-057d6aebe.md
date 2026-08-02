@@ -38,3 +38,7 @@ Governance scope: This benchmark measures the AI review tier. It does not measur
 
 ## Coding
 _manual — not run this release_
+
+> **MEMORY TRACK INVALID** — stale ground truth (#1681); values nulled, not a regression baseline.
+>
+> **GOVERNANCE — read counts, not rates.** N=3 planted / 2 clean. The gate blocked zero clean diffs: one clean control was correctly approved with a non-blocking nit (counted as a false positive by the strict rule), the other returned inconclusive. "100% false-positive rate" without this detail would misinform.

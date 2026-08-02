@@ -1,0 +1,191 @@
+{
+  "version": "0.1.652",
+  "gitSha": "057d6aebe",
+  "timestamp": "2026-08-02T07:34:00.145Z",
+  "node": "v22.22.2",
+  "tracks": {
+    "speed": {
+      "automatable": true,
+      "status": "ok",
+      "metrics": {
+        "dashboard_cold_ttfb_ms": {
+          "value": 12,
+          "priorValue": 12,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "unchanged",
+          "deltaValue": 0
+        },
+        "dashboard_warm_ttfb_ms": {
+          "value": 9,
+          "priorValue": 9,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "unchanged",
+          "deltaValue": 0
+        },
+        "bootstrap_warm_total_ms": {
+          "value": 3,
+          "priorValue": 3,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "unchanged",
+          "deltaValue": 0
+        },
+        "cli_status_median_ms": {
+          "value": 233,
+          "priorValue": 233,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "unchanged",
+          "deltaValue": 0
+        },
+        "mcp_client_minus_server_p50_ms": {
+          "value": null,
+          "priorValue": null,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "baseline",
+          "deltaValue": null,
+          "note": "metric not found"
+        },
+        "socket_avg_conns": {
+          "value": 5.58,
+          "priorValue": 5.58,
+          "direction": "informational",
+          "threshold": null,
+          "delta": "informational",
+          "deltaValue": null
+        }
+      }
+    },
+    "memory": {
+      "automatable": true,
+      "status": "ok",
+      "sourceResults": "tests/qa-eval/three-way-results-2026-08-02T06-25-16-406Z.json",
+      "metrics": {
+        "overall_full_accuracy": {
+          "value": 0.31315789473684214,
+          "priorValue": null,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "delta_full_vs_strongGrep": {
+          "value": 0.23157894736842108,
+          "priorValue": null,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "ownership_full_accuracy": {
+          "value": 0.51,
+          "priorValue": null,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "decisions_full_accuracy": {
+          "value": 0.47000000000000003,
+          "priorValue": null,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "processes_full_accuracy": {
+          "value": 0.74,
+          "priorValue": null,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "incidents_full_accuracy": {
+          "value": 0.2,
+          "priorValue": null,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "specs_full_accuracy": {
+          "value": 0.06999999999999999,
+          "priorValue": null,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "cross-repo_full_accuracy": {
+          "value": 0.39,
+          "priorValue": null,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "literal-lookup_full_accuracy": {
+          "value": 0,
+          "priorValue": null,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "baseline",
+          "deltaValue": null
+        }
+      }
+    },
+    "governance": {
+      "automatable": true,
+      "status": "completed with inconclusive reviews",
+      "scopeStatement": "This benchmark measures the AI review tier. It does not measure the human approval gate above it.",
+      "lastRun": {
+        "generatedAt": "2026-08-02T07:33:59.775Z",
+        "reviewerBackendCount": 1,
+        "fixtureCount": 5,
+        "inconclusive": 1,
+        "blindExecution": {
+          "shuffled": true,
+          "groundTruthWithheldFromReviewer": true,
+          "isolatedRepositoryPerInput": true
+        }
+      },
+      "metrics": {
+        "catch_rate": {
+          "value": 1,
+          "priorValue": null,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "baseline",
+          "deltaValue": null,
+          "numerator": 3,
+          "denominator": 3
+        },
+        "false_positive_rate": {
+          "value": 1,
+          "priorValue": null,
+          "direction": "lower-better",
+          "threshold": 0.05,
+          "delta": "baseline",
+          "deltaValue": null,
+          "numerator": 2,
+          "denominator": 2
+        }
+      }
+    },
+    "coding": {
+      "automatable": false,
+      "status": "manual \u2014 not run this release"
+    }
+  },
+  "memory": {
+    "status": "invalid",
+    "invalidReason": "Ground truth is stale: the 38 cases encode the repository as of 2026-06-01. literal-lookup scores 0.00 for every condition including strong-grep, which recorded 100% in June \u2014 those questions ask for values no longer in the tree. The harness path bug is fixed, but no memory figure from this release is valid. Do not use as a regression baseline. Tracked in #1681."
+  },
+  "governance": {
+    "interpretationNote": "Read the counts, not the rates. N is very small (3 planted, 2 clean). The false-positive metric uses a deliberately strict definition: ANY finding on a clean control counts, including a non-blocking one attached to an approve verdict. In this run the gate BLOCKED ZERO clean diffs \u2014 one clean control was correctly approved with a non-blocking nit, and the other returned inconclusive (tool-use abort) rather than a verdict. Reporting \"100% false-positive rate\" without this detail would misinform."
+  }
+}
