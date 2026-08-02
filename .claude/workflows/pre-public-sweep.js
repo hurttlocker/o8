@@ -7,7 +7,7 @@ export const meta = {
 const target = typeof args === 'string' ? args : JSON.stringify(args)
 phase('Sweep')
 const SURFACES = [
-  'WORKING TREE of ' + target + ': grep tracked files for attribution shapes (possessive comparisons like SomeName's X vs ours, borrow/inspired/teardown/-style framing, social links, handles), secrets patterns, internal paths. Plain substrings, never \\b (git grep -E ignores it).',
+  'WORKING TREE of ' + target + ': grep tracked files for attribution shapes (possessive comparisons like <Name> X vs ours, borrow/inspired/teardown/-style framing, social links, handles), secrets patterns, internal paths. Plain substrings, never \\b (git grep -E ignores it).',
   'FULL HISTORY of ' + target + ': commit messages across all refs, plus every doc blob that ever existed (git log --all --raw for *.md), plus paths ever deleted from tree (tree deletion is NOT history removal — enumerate services/, internal docs, anything de-publicized). Script loops to files, validate against one known-positive.',
   'GITHUB SURFACES of ' + target + ': all issue titles/bodies/comments, PR bodies, releases, repo metadata. Note per-hit: open/closed, comment count, cross-refs. Remember merged PRs are immutable and issue edit history is public.',
 ]

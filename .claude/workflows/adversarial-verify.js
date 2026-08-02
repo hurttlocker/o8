@@ -1,7 +1,7 @@
 export const meta = {
   name: 'adversarial-verify',
   description: 'Refuter panel: N independent skeptics attack a claim/feature before it closes',
-  whenToUse: 'Before closing any feature, fix, or claim on the builder's word. Args: the claim + how to check it.',
+  whenToUse: "Before closing any feature, fix, or claim on the builder's word. Args: the claim + how to check it.",
   phases: [{ title: 'Refute' }, { title: 'Verdict' }],
 }
 const claim = typeof args === 'string' ? args : JSON.stringify(args)
