@@ -524,6 +524,7 @@ try {
   for (const asset of nativeBundle.betterSqlite3.assets) {
     console.log(`   ${asset.cacheSource === 'cache' ? 'cache' : 'cached download'}: ${asset.cachePath}`);
   }
+  console.log(`📦 Signed and verified ${nativeBundle.nativeSigning.binaries.length} nested Mach-O binaries`);
 } catch (error) {
   console.error(`❌ multi-ABI native addon export failed: ${error.message}`);
   process.exit(1);

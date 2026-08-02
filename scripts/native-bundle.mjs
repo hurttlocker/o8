@@ -3,17 +3,21 @@
 import {
   chmodSync,
   copyFileSync,
+  closeSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
+  readdirSync,
   readFileSync,
+  readSync,
   renameSync,
   rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -23,6 +27,119 @@ const NODE_RELEASE_INDEX_URL = 'https://nodejs.org/dist/index.json';
 const BETTER_SQLITE3_ADDON = 'better_sqlite3.node';
 const NODE_PTY_ADDON = 'pty.node';
 const NODE_PTY_HELPER = 'spawn-helper';
+export const DEFAULT_APPLE_SIGNING_IDENTITY = 'Developer ID Application: Marquise Hurtt (3U3MXN796S)';
+const MACH_O_MAGICS = new Set([
+  'feedface',
+  'cefaedfe',
+  'feedfacf',
+  'cffaedfe',
+  'cafebabe',
+  'bebafeca',
+  'cafebabf',
+  'bfbafeca',
+]);
+
+function commandError(error) {
+  return error?.stderr?.toString().trim()
+    || error?.stdout?.toString().trim()
+    || error?.message
+    || String(error);
+}
+
+export function resolveAppleSigningIdentity(env = process.env) {
+  return env.APPLE_SIGNING_IDENTITY?.trim() || DEFAULT_APPLE_SIGNING_IDENTITY;
+}
+
+export function isMachOFile(filePath) {
+  const header = Buffer.alloc(4);
+  let descriptor;
+  try {
+    descriptor = openSync(filePath, 'r');
+    if (readSync(descriptor, header, 0, header.length, 0) !== header.length) return false;
+    return MACH_O_MAGICS.has(header.toString('hex'));
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
+export function findMachOBinaries(rootPath) {
+  const resolvedRoot = resolve(rootPath);
+  if (!existsSync(resolvedRoot)) {
+    throw new Error(`[native-sign] missing native module root: ${resolvedRoot}`);
+  }
+
+  const binaries = [];
+  const visit = (directory) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const entryPath = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        visit(entryPath);
+      } else if (entry.isFile() && isMachOFile(entryPath)) {
+        binaries.push(entryPath);
+      }
+    }
+  };
+  visit(resolvedRoot);
+
+  return binaries.sort((left, right) => {
+    const depthDelta = relative(resolvedRoot, right).split(sep).length
+      - relative(resolvedRoot, left).split(sep).length;
+    return depthDelta || left.localeCompare(right);
+  });
+}
+
+export function verifyMachOSignatures(
+  rootPath,
+  { run = execFileSync, log = console.log } = {},
+) {
+  const binaries = findMachOBinaries(rootPath);
+  if (binaries.length === 0) {
+    throw new Error(`[native-sign] no Mach-O binaries found under ${resolve(rootPath)}`);
+  }
+
+  for (const filePath of binaries) {
+    try {
+      run('codesign', ['--verify', '--strict', '--verbose=2', filePath], { stdio: 'pipe' });
+    } catch (error) {
+      throw new Error(`[native-sign] signature verification failed for ${filePath}: ${commandError(error)}`);
+    }
+  }
+  log(`[native-sign] verified ${binaries.length} nested Mach-O signatures`);
+  return binaries;
+}
+
+export function signMachOBinaries(
+  rootPath,
+  {
+    identity = resolveAppleSigningIdentity(),
+    run = execFileSync,
+    log = console.log,
+  } = {},
+) {
+  const binaries = findMachOBinaries(rootPath);
+  if (binaries.length === 0) {
+    throw new Error(`[native-sign] no Mach-O binaries found under ${resolve(rootPath)}`);
+  }
+
+  for (const filePath of binaries) {
+    try {
+      run('codesign', [
+        '--force',
+        '--timestamp',
+        '--options',
+        'runtime',
+        '--sign',
+        identity,
+        filePath,
+      ], { stdio: 'pipe' });
+    } catch (error) {
+      throw new Error(`[native-sign] failed to sign ${filePath}: ${commandError(error)}`);
+    }
+  }
+  log(`[native-sign] signed ${binaries.length} nested Mach-O binaries with ${identity}`);
+  verifyMachOSignatures(rootPath, { run, log });
+  return { binaries, identity };
+}
 
 function readMachOArchitecture(filePath) {
   const header = readFileSync(filePath).subarray(0, 8);
@@ -223,6 +340,7 @@ export async function prepareNativeBundle({ projectRoot, serverRoot, cacheRoot }
     nodeAbis,
   });
   removePackagedNativeBuildOutputs(resolvedServerRoot);
+  const nativeSigning = signMachOBinaries(join(resolvedServerRoot, 'node_modules'));
 
   const manifest = {
     schema: 'o8/native-addon-abis/v1',
@@ -234,7 +352,7 @@ export async function prepareNativeBundle({ projectRoot, serverRoot, cacheRoot }
     },
   };
   writeFileSync(join(resolvedServerRoot, NATIVE_ABI_MANIFEST), `${JSON.stringify(manifest, null, 2)}\n`);
-  return { nodeAbis, nodeIndex, betterSqlite3, nodePty };
+  return { nodeAbis, nodeIndex, betterSqlite3, nodePty, nativeSigning };
 }
 
 function readNativeAbiManifest(serverRoot) {
@@ -310,6 +428,7 @@ export function verifyNativeBundle(serverRoot, log = console.log) {
       throw new Error(`[native-gate] FAILED ${label}: ${error.message}`);
     }
   }
+  verifyMachOSignatures(join(resolvedServerRoot, 'node_modules'), { log });
   return verified;
 }
 
@@ -328,6 +447,7 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
         console.log(`[native-export] ${asset.cacheSource === 'cache' ? 'using cache' : 'cached download'} ${asset.cachePath}`);
       }
       console.log(`[native-export] node-pty ${result.nodePty.version} Node-API prebuilds copied for every supported ABI`);
+      console.log(`[native-export] signed ${result.nativeSigning.binaries.length} nested Mach-O binaries with ${result.nativeSigning.identity}`);
     } else {
       verifyNativeBundle(targetArg);
     }
