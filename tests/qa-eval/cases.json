@@ -1,19 +1,19 @@
 {
-  "$comment": "30-question Q&A eval set for the Cortex Engineering Brain (epic #915 sub-issue 3 wave A). 5 questions per category over 6 categories: ownership / decisions / processes / incidents / specs / cross-repo. Ground truth pulled from ~/.o8/cortex-ide.db (session_outcomes, github_pull_requests, projects, project_repos), ~/.o8/directives/*.md, and the locked architecture comment on epic #915 itself. Questions marked knownGap are designed to surface ingestion holes — the runner classifies them as gaps, not failures. expectedCitations rowIds reference real rows where applicable; the validator warns if a rowId can't be resolved against a live DB but does NOT fail the build (DBs differ across machines). Phase 1.5 (#915 path-to-70): expectedCitations rewritten so rowIds match the kind-prefixed format the composer emits (e.g. \"directive-seed-cortex-ide-...\"). Dead runtime IDs (d-17757638..., d-17757636...) deduped via #948 were dropped — the seed citation already covers the same content. Issue numbers translated to issue_ids per github_issues.issue_id.",
+  "$comment": "38-question Q&A eval set for the Cortex Engineering Brain, rebuilt on 2026-08-02 against the current o8 tree, git history, ~/.o8 directives, and ~/.o8/cortex-ide.db. Every case records an independently re-derivable sourceOfTruth. The answer key was not derived through o8 ask, cortex_ask, or any other Brain surface. Category counts remain 5 each for ownership, decisions, processes, incidents, specs, and cross-repo, plus 8 literal-lookup cases.",
   "version": 1,
-  "generatedAt": "2026-04-29",
+  "generatedAt": "2026-08-02",
   "cases": [
     {
       "id": "qa-001",
       "category": "ownership",
       "repoPath": "/workspace/o8",
-      "question": "Which directives in the cortex-ide repo are scoped specifically to the cortex-ide repo (scope: repo) versus globally?",
-      "expectedAnswer": "Six directives are scope: repo for cortex-ide — the 800-line file ceiling, glass-chrome-preserved, inline-styles-only, no-native-form-controls-in-packets, palette-vars, and phosphor-svg-only seeds. Two directives are scope: global (typecheck-before-commit, surgical-changes).",
+      "question": "Which seeded directives are scoped specifically to the o8 repo, and which seeded directives are global?",
+      "expectedAnswer": "Six seeded directives are repo-scoped to o8: the 800-line file ceiling, glass-chrome-preserved, inline-styles-only, no-native-form-controls-in-packets, palette-vars, and phosphor-svg-only directives. Two seeded directives are global: typecheck-before-commit and surgical-changes.",
+      "sourceOfTruth": "~/.o8/directives/seed-cortex-ide-{800-line-ceiling,glass-chrome-preserved,inline-styles-only,no-native-form-controls-in-packets,palette-vars,phosphor-svg-only}.md:2-6; ~/.o8/directives/seed-global-{typecheck-before-commit,surgical-changes}.md:2-5",
       "expectedFacts": [
-        "Mentions 800-line file ceiling",
-        "Mentions inline styles only",
-        "Mentions phosphor SVG only",
-        "Identifies typecheck-before-commit and surgical-changes as global scope"
+        "Names the six repo-scoped seeded directives",
+        "Identifies repoName o8 for the repo-scoped seeds",
+        "Identifies typecheck-before-commit and surgical-changes as global"
       ],
       "expectedCitations": [
         {
@@ -43,12 +43,13 @@
       "id": "qa-002",
       "category": "ownership",
       "repoPath": "/workspace/o8",
-      "question": "Which project does the cortex-ide repo belong to, and what other repos are in that project?",
-      "expectedAnswer": "cortex-ide belongs to the o8 project (slug: o8, id: proj-5d0d9e02-015). The other repo in that project is o8-site (the marketing site).",
+      "question": "Which project contains the o8 repo, and which repositories are registered in that project as of the 2026-08-02 ground-truth rebuild?",
+      "expectedAnswer": "o8 belongs to the o8 project (slug o8, id proj-5d0d9e02-015). The project contains nine registered repos: o8, o8-site, o8-mobile, o8-license-server, o8-relay, ginsu, o8-business, o8-security, and matori.",
+      "sourceOfTruth": "~/.o8/cortex-ide.db projects row id=proj-5d0d9e02-015 and project_repos rows project_id=proj-5d0d9e02-015; ~/.o8/projects.json:4-16",
       "expectedFacts": [
-        "Mentions o8 project / proj-5d0d9e02-015",
-        "Mentions o8-site as the sibling repo",
-        "References the project_repos linking table or projects table"
+        "Names the o8 project and id proj-5d0d9e02-015",
+        "States that the project contains nine registered repos",
+        "Names o8-site, o8-mobile, o8-license-server, o8-relay, ginsu, o8-business, o8-security, and matori"
       ],
       "expectedCitations": [
         {
@@ -58,6 +59,10 @@
         {
           "kind": "project_repo",
           "rowId": "project_repo-70954348-8e56-41dd-ac10-5b4e91964fc2"
+        },
+        {
+          "kind": "project_repo",
+          "rowId": "project_repo-8911d44e-2746-4ced-a08a-35c9e0543f90"
         },
         {
           "kind": "project_repo",
@@ -74,14 +79,23 @@
       "id": "qa-003",
       "category": "ownership",
       "repoPath": "/workspace/o8",
-      "question": "Who authored the most recent merged PRs in cortex-ide?",
-      "expectedAnswer": null,
-      "knownGap": "github-author-ingestion-incomplete",
+      "question": "Which registered repository is the main repo for the o8 project?",
+      "expectedAnswer": "The o8 project's main_repo_id is 70954348-8e56-41dd-ac10-5b4e91964fc2, which maps to the registered repo named o8.",
+      "sourceOfTruth": "~/.o8/cortex-ide.db projects row id=proj-5d0d9e02-015; ~/.o8/repos.json:5-7",
       "expectedFacts": [
-        "Either returns the author_login from github_pull_requests rows OR explicitly states the data is missing",
-        "Does not invent fictional GitHub usernames"
+        "Names main_repo_id 70954348-8e56-41dd-ac10-5b4e91964fc2",
+        "Maps that repository id to o8"
       ],
-      "expectedCitations": [],
+      "expectedCitations": [
+        {
+          "kind": "project",
+          "rowId": "project-proj-5d0d9e02-015"
+        },
+        {
+          "kind": "project_repo",
+          "rowId": "project_repo-70954348-8e56-41dd-ac10-5b4e91964fc2"
+        }
+      ],
       "rubric": {
         "factual_accuracy_threshold": 0.7,
         "citation_correctness_threshold": 0,
@@ -92,23 +106,15 @@
       "id": "qa-004",
       "category": "ownership",
       "repoPath": "/workspace/o8",
-      "question": "Which runtime owns the most recently merged session outcomes in cortex-ide?",
-      "expectedAnswer": "Codex owns the majority of recent successful merges — the dispatch-context-injection-743, recall-card-742, mcp-register-codebase-memory-740, codebase-memory-runtime-download-755, and recall-card-symbol-graph-row outcomes are all codex. Gemini owns auto-index-repos-741 and dispatch-popover-placement-752.",
+      "question": "Which directories own orchestrator backend selection and worker runtime execution, and can those two roles use different systems for one turn?",
+      "expectedAnswer": "Orchestrator backends live in src/lib/lane/orchestrator-backends/ and decide which system drives an orchestration turn. Worker/runtime adapters live in src/lib/runtimes/ and normalize worker execution behind the runtime registry and capability contract. The active orchestrator and dispatched worker can be different systems.",
+      "sourceOfTruth": "AGENTS.md:11-16; docs/internals/system-architecture.md:26-32",
       "expectedFacts": [
-        "Identifies codex as the dominant runtime in recent outcomes",
-        "Names at least one specific gemini outcome",
-        "References the runtime column in session_outcomes"
+        "Names src/lib/lane/orchestrator-backends/",
+        "Names src/lib/runtimes/",
+        "States that orchestrator backend and worker runtime are independent"
       ],
-      "expectedCitations": [
-        {
-          "kind": "outcome",
-          "rowId": "outcome-seed-Users-marquisehurtt-cortex-ide-1d-codex-feat-dispatch-context-injection-743"
-        },
-        {
-          "kind": "outcome",
-          "rowId": "outcome-seed-Users-marquisehurtt-cortex-ide-2d-gemini-feat-auto-index-repos-741"
-        }
-      ],
+      "expectedCitations": [],
       "rubric": {
         "factual_accuracy_threshold": 0.7,
         "citation_correctness_threshold": 0.5,
@@ -119,12 +125,13 @@
       "id": "qa-005",
       "category": "ownership",
       "repoPath": "/workspace/o8",
-      "question": "Which directive owner enforces the rule that packet metadata rows can't use native select or input controls?",
-      "expectedAnswer": "The seed-cortex-ide-no-native-form-controls-in-packets directive (scope: repo, repoName: cortex-ide, priority: 7). It points to ThoughtsMissionPanel and the packet-meta-rows pattern as the canonical example to copy.",
+      "question": "Which directive owner enforces the rule that packet metadata rows cannot use native select or input controls?",
+      "expectedAnswer": "The seed-cortex-ide-no-native-form-controls-in-packets directive owns the rule. It is scoped to repoName o8 at priority 7 and points to ThoughtsMissionPanel and the packet-meta-rows pattern as the examples to copy.",
+      "sourceOfTruth": "~/.o8/directives/seed-cortex-ide-no-native-form-controls-in-packets.md:2-12",
       "expectedFacts": [
-        "Names the directive id seed-cortex-ide-no-native-form-controls-in-packets",
-        "Mentions ThoughtsMissionPanel as the reference implementation",
-        "Mentions packet-meta-rows pattern"
+        "Names seed-cortex-ide-no-native-form-controls-in-packets",
+        "Identifies repoName o8 and priority 7",
+        "Mentions ThoughtsMissionPanel and packet-meta-rows"
       ],
       "smokeExpectedFacts": [
         "no-native-form-controls-in-packets",
@@ -147,12 +154,13 @@
       "id": "qa-006",
       "category": "decisions",
       "repoPath": "/workspace/o8",
-      "question": "Why does cortex-ide forbid CSS classes and require inline styles?",
-      "expectedAnswer": "iOS Safari and the Tauri webview have shipped reliability issues with class-based styling. The seed-cortex-ide-inline-styles-only directive marks this as a permanent rule, not a stylistic preference. All styling lives in style={{ }} props on JSX, with as React.CSSProperties used for vendor-prefixed or non-standard CSS properties.",
+      "question": "Why does o8 forbid CSS classes and require inline styles?",
+      "expectedAnswer": "iOS Safari and the Tauri webview have shipped reliability issues with class-based styling. The inline-styles-only directive makes this a permanent reliability rule: JSX styling belongs in style={{ }} props, with React.CSSProperties used for vendor-prefixed or non-standard properties.",
+      "sourceOfTruth": "~/.o8/directives/seed-cortex-ide-inline-styles-only.md:2-12",
       "expectedFacts": [
-        "Names iOS Safari and Tauri webview as the reliability driver",
+        "Names iOS Safari and the Tauri webview as the reliability driver",
         "Identifies the rule as permanent",
-        "References the seed-cortex-ide-inline-styles-only directive (or seed-cortex-ide-inline-styles-only or d-1775763867817-183404ef)"
+        "Requires style props and allows React.CSSProperties for non-standard properties"
       ],
       "expectedCitations": [
         {
@@ -171,11 +179,12 @@
       "category": "decisions",
       "repoPath": "/workspace/o8",
       "question": "Why are React icon component imports (lucide-react, @phosphor-icons/react) banned in favor of raw SVG?",
-      "expectedAnswer": "Neither lucide-react nor @phosphor-icons/react renders correctly inside the Tauri webview, so the seed-cortex-ide-phosphor-svg-only directive bans the component imports and requires extracting raw SVG path data from @phosphor-icons/react/dist/defs/. A 85-icon shim system in src/lib/icons/ covers the common cases; HTML entities are preferred for trivial actions.",
+      "expectedAnswer": "The React icon components do not render correctly inside the Tauri webview, so the phosphor-svg-only directive requires raw SVG path data from @phosphor-icons/react/dist/defs/. The src/lib/icons/ shim covers 85 common icons, and trivial actions should use HTML entities.",
+      "sourceOfTruth": "~/.o8/directives/seed-cortex-ide-phosphor-svg-only.md:2-12",
       "expectedFacts": [
         "Names Tauri webview rendering as the cause",
-        "Mentions extracting from @phosphor-icons/react/dist/defs/",
-        "Mentions src/lib/icons/ shim system or 85 icons"
+        "Mentions @phosphor-icons/react/dist/defs/",
+        "Mentions the 85-icon src/lib/icons/ shim"
       ],
       "smokeExpectedFacts": [
         "tauri webview",
@@ -198,19 +207,16 @@
       "id": "qa-008",
       "category": "decisions",
       "repoPath": "/workspace/o8",
-      "question": "Why did the team choose FTS5 + structured SQL over a vector store for the Cortex Q&A retrieval layer?",
-      "expectedAnswer": "Per the locked architecture comment on epic #915, the prior open-source Cortex shipped 88/501 real embeddings and 413 silent fallbacks to zero-vectors under load — vector retrieval had a silent failure mode. FTS5 BM25 has no silent-failure mode (it returns ranked tokens or nothing), is in-process and sub-200ms, and is indexed-on-write via SQLite triggers. Three retrievers run in parallel — structured SQL, FTS5 lexical, and codebase-memory-mcp graph — composed by an LLM with typed citations.",
+      "question": "When Cortex memory conflicts with the current repository, what wins, and what provenance and failure rules constrain the answer?",
+      "expectedAnswer": "Current repository state outranks stale memory. Synthesized answers retain inspectable citations and explicit project scope. Missing or malformed indexes fail closed or degrade to narrower retrieval; they never manufacture evidence, and memory cannot bypass tests, principal checks, or approval gates.",
+      "sourceOfTruth": "docs/internals/cortex-memory-integration.md:44-50",
       "expectedFacts": [
-        "References 413/501 silent zero-vector fallbacks (the OSS-Cortex post-mortem number)",
-        "States BM25 has no silent failure mode",
-        "Names the three retrievers (SQL, FTS5, graph / codebase-memory-mcp)"
+        "States that current repository state outranks stale memory",
+        "Requires inspectable citations and explicit project scope",
+        "States that missing indexes fail closed or degrade without manufacturing evidence",
+        "States that memory cannot bypass tests or approval gates"
       ],
-      "expectedCitations": [
-        {
-          "kind": "issue",
-          "rowId": "issue-4353815519"
-        }
-      ],
+      "expectedCitations": [],
       "rubric": {
         "factual_accuracy_threshold": 0.7,
         "citation_correctness_threshold": 0.5,
@@ -221,12 +227,13 @@
       "id": "qa-009",
       "category": "decisions",
       "repoPath": "/workspace/o8",
-      "question": "Why is the o8-site marketing repo deployed to Vercel while the cortex-ide repo is not?",
-      "expectedAnswer": "cortex-ide is a Tauri v2 desktop app — it ships as a native installer (.dmg/.msi/.deb) via cargo tauri build, not a web deploy. Its Next.js backend runs locally on the user's machine. o8-site is a standalone Next.js marketing site (landing + changelog) and is the one and only Vercel surface for the o8 project.",
+      "question": "Why is o8-site deployed as a web project while the o8 repository is not?",
+      "expectedAnswer": "o8 is a Tauri v2 desktop application that packages the web frontend, a local Next.js server, the WebSocket bridge, native helpers, and the o8 CLI into native builds. o8-site is the standalone web surface and is the project's Vercel deployment.",
+      "sourceOfTruth": "docs/operations/deployment.md:1-3; ~/.o8/directives/spec-ingest__o8-site__readme__deploy.md:11-20",
       "expectedFacts": [
-        "Identifies cortex-ide as a Tauri desktop app",
-        "Identifies o8-site as the Vercel surface",
-        "References the .dmg/installer flow OR the local-Next-backend nature"
+        "Identifies o8 as a Tauri desktop application",
+        "Mentions the packaged local Next.js server and WebSocket bridge",
+        "Identifies o8-site as the web deployment"
       ],
       "expectedCitations": [],
       "rubric": {
@@ -239,19 +246,15 @@
       "id": "qa-010",
       "category": "decisions",
       "repoPath": "/workspace/o8",
-      "question": "What is the locked LLM routing strategy for Cortex Q&A — which model handles lookup vs reasoning?",
-      "expectedAnswer": "Two-tier routing keyed by question class. Class A (lookup, deterministic SQL only) uses Gemini 2.5 Flash with a 200-500ms total budget. Class B (reasoning) uses Claude Sonnet streaming compose with a citation-discipline prompt at 1-3s total. A Flash classifier picks the class and emits 3-5 BM25 query variants in one 50ms call. Local fallback is opencode/gpt-5-nano if no API keys are present.",
+      "question": "When can a worker runtime use a declarative catalog entry, and when does the runtime contract require a specialized adapter?",
+      "expectedAnswer": "A CLI with argv-based launch or resume and line, JSONL, or NDJSON output can use one declarative catalog entry. Setting resumeArgs to null declares a truthful one-shot runtime. Stateful process control that cannot be expressed through argv and output patterns, such as bidirectional permission responses, requires a specialized owned-session adapter and AgentRuntime registration.",
+      "sourceOfTruth": "docs/internals/runtime-adapter-contract.md:11-17,43-47,64-83",
       "expectedFacts": [
-        "Names Gemini 2.5 Flash for Class A lookup",
-        "Names Claude Sonnet for Class B reasoning",
-        "Mentions the Flash classifier OR the local opencode/gpt-5-nano fallback"
+        "Allows a declarative entry for argv-based launch or resume with line-oriented output",
+        "States that null resumeArgs means one-shot",
+        "Requires a specialized adapter for stateful or bidirectional process control"
       ],
-      "expectedCitations": [
-        {
-          "kind": "issue",
-          "rowId": "issue-4353815519"
-        }
-      ],
+      "expectedCitations": [],
       "rubric": {
         "factual_accuracy_threshold": 0.7,
         "citation_correctness_threshold": 0.5,
@@ -263,10 +266,12 @@
       "category": "processes",
       "repoPath": "/workspace/o8",
       "question": "What is the required local check before every commit?",
-      "expectedAnswer": "Run npx tsc --noEmit before every commit. The seed-global-typecheck-before-commit directive marks this as no-exceptions on shared codebases. For Next.js repos prefer npm run typecheck (clears the typegen cache before checking).",
+      "expectedAnswer": "Run npx tsc --noEmit before every commit. The global typecheck directive marks this as mandatory on shared codebases; npm run typecheck is the fuller Next.js variant that regenerates types before TypeScript runs.",
+      "sourceOfTruth": "AGENTS.md:59-65; ~/.o8/directives/seed-global-typecheck-before-commit.md:2-10",
       "expectedFacts": [
         "Names npx tsc --noEmit",
-        "References the typecheck directive OR npm run typecheck variant"
+        "States that it is mandatory before every commit",
+        "Mentions npm run typecheck as the fuller Next.js variant"
       ],
       "smokeExpectedFacts": [
         "npx tsc --noemit",
@@ -289,12 +294,13 @@
       "id": "qa-012",
       "category": "processes",
       "repoPath": "/workspace/o8",
-      "question": "What is the file size ceiling and which files are explicitly waived?",
-      "expectedAnswer": "Files must stay under 800 lines. If a change would push past 800, decompose first by extracting helpers, hooks, sub-components, or modules. Layout orchestrators (src/app/dashboard/page.tsx) and multiplexers (src/ws-server.ts) are explicitly waived.",
+      "question": "What is the default file-size ceiling, and which files are currently waived?",
+      "expectedAnswer": "The default ceiling is 800 lines. The current mechanical waivers are src/app/dashboard/page.tsx, src/ws-server.ts, src/lib/worktree/manager.ts, and src/lib/lane/commands.ts. A new waiver requires an explicit user decision.",
+      "sourceOfTruth": "AGENTS.md:71-80",
       "expectedFacts": [
-        "States 800 lines",
-        "Names src/app/dashboard/page.tsx as waived",
-        "Names src/ws-server.ts as waived"
+        "States the 800-line default ceiling",
+        "Names all four current waivers",
+        "States that new waivers require an explicit user decision"
       ],
       "expectedCitations": [
         {
@@ -313,11 +319,12 @@
       "category": "processes",
       "repoPath": "/workspace/o8",
       "question": "What is the surgical-changes rule for this codebase?",
-      "expectedAnswer": "Every changed line must trace back to the request. Don't improve adjacent code, comments, or formatting. Don't refactor what isn't broken. Match existing style even if you'd write it differently. If you notice unrelated dead code or a tempting refactor, mention it — don't silently delete or rewrite it. Drift in unrelated areas is the #1 source of bad reviews.",
+      "expectedAnswer": "Every changed line must trace back to the request. Do not improve or refactor adjacent code, comments, or formatting; match the existing style and report unrelated cleanup opportunities instead of silently rewriting them.",
+      "sourceOfTruth": "~/.o8/directives/seed-global-surgical-changes.md:2-10",
       "expectedFacts": [
-        "States 'every changed line traces to the request'",
-        "Mentions drift in unrelated areas being a top review issue OR matches existing style",
-        "Forbids silent rewrites of adjacent code"
+        "States that every changed line traces to the request",
+        "Forbids adjacent refactors and formatting cleanup",
+        "Requires reporting unrelated opportunities instead of silently changing them"
       ],
       "expectedCitations": [
         {
@@ -335,13 +342,14 @@
       "id": "qa-014",
       "category": "processes",
       "repoPath": "/workspace/o8",
-      "question": "How do we ship a new release of the o8 desktop app — what command sequence does the daily-driver loop use?",
-      "expectedAnswer": "npm version patch (sync-version.mjs hook updates package.json + src-tauri/tauri.conf.json + src-tauri/Cargo.toml in one commit, then npm tags v0.1.X+1), then git push --follow-tags, then npm run ship (cargo tauri build with signing key + dev-mcp-plugin feature, then scripts/release.mjs uploads the signed assets to GitHub Releases). The installed app picks up the update via the UpdateBanner polling hurttlocker/o8 releases.",
+      "question": "What command sequence does the guarded daily-driver release loop use for o8?",
+      "expectedAnswer": "Use Node 22, run npm version patch so sync-version.mjs updates package.json, src-tauri/tauri.conf.json, and src-tauri/Cargo.toml and creates the version tag; run git push --follow-tags; then run npm run ship to build the signed app and upload the release assets. The installed app's UpdateCard discovers and verifies the signed update.",
+      "sourceOfTruth": "CLAUDE.md:417-440",
       "expectedFacts": [
-        "Names npm version patch as the version bump",
+        "Requires Node 22",
+        "Names npm version patch and the three synchronized manifests",
         "Names git push --follow-tags",
-        "Names npm run ship",
-        "References the auto-update flow / UpdateBanner / GitHub Releases"
+        "Names npm run ship and the signed update flow"
       ],
       "expectedCitations": [],
       "rubric": {
@@ -354,12 +362,14 @@
       "id": "qa-015",
       "category": "processes",
       "repoPath": "/workspace/o8",
-      "question": "Which API route prefixes are gated by the loopback + ws-token middleware in src/middleware.ts?",
-      "expectedAnswer": "The middleware gates /api/panel/, /api/orchestrator/, /api/directives, /api/cortex/, /api/runtime/, /api/lanes, /api/worktrees, /api/review/, /api/board/, /api/command-center/, /api/claude-code/, /api/codex/, /api/operator/, and /api/setup/. Loopback origins (127.0.0.1, localhost, tauri://localhost, same-origin) pass automatically; cross-origin must present Authorization: Bearer <ws-token>. Allowlist is /api/setup/* GET only, /api/v2/auth/*, /api/panel/github-device/*, /api/panel/status.",
+      "question": "What decision ladder does the current default-deny API middleware apply to an /api request?",
+      "expectedAnswer": "The middleware first permits narrowly defined self-authenticating routes whose handlers verify their own credentials, then checks read-only and any-method allowlists, then trusted loopback, then a ws-token or active device bearer. Requests that match none of those paths return 401. There is no fail-open gated-prefix list.",
+      "sourceOfTruth": "docs/internals/loopback-api.md:15-35",
       "expectedFacts": [
-        "Names /api/panel/, /api/orchestrator/, /api/cortex/, /api/lanes (or any 4+ of the gated prefixes)",
-        "Mentions loopback host check + Bearer token",
-        "References the allowlist or /api/setup/* GET-only carve-out"
+        "States that the API is default-deny",
+        "Orders self-authenticating routes, allowlists, loopback, and bearer fallback",
+        "States that unmatched requests return 401",
+        "States that there is no fail-open gated-prefix list"
       ],
       "expectedCitations": [],
       "rubric": {
@@ -372,19 +382,16 @@
       "id": "qa-016",
       "category": "incidents",
       "repoPath": "/workspace/o8",
-      "question": "What happened on the fix/midnight-blob-rgba-sweep branch and why was it reverted?",
-      "expectedAnswer": "The Gemini-run dispatch tried to swap hardcoded rgba whites for palette vars in chrome surfaces. The pass collapsed glass into solid blobs across NavRail, status bar, and command palette — the low-opacity rgba whites are intentionally the glass tint over the macOS vibrancy backdrop, not arbitrary colors. The branch was reverted before merge. This led to the seed-cortex-ide-glass-chrome-preserved directive being added.",
+      "question": "What failure caused the glass-chrome-preserved directive to be added?",
+      "expectedAnswer": "A blanket replacement of low-opacity rgba whites with solid palette tokens collapsed the macOS vibrancy chrome into opaque blobs. Those translucent whites are intentional tints on the surrounding chrome, while workspace, chat, and terminal surfaces are intentionally solid, so rgba sweeps must be visually verified instead of applied wholesale.",
+      "sourceOfTruth": "~/.o8/directives/seed-cortex-ide-glass-chrome-preserved.md:2-12",
       "expectedFacts": [
-        "Identifies the runtime as gemini",
-        "Names NavRail / status bar / command palette as collapsed surfaces",
-        "States the fix was reverted (outcome=failed)",
-        "Optionally mentions the resulting glass-chrome-preserved directive"
+        "States that low-opacity rgba whites were replaced wholesale",
+        "Explains that glass chrome collapsed into opaque blobs",
+        "Distinguishes glass chrome from intentionally solid content surfaces",
+        "Requires visual verification before rgba sweeps"
       ],
       "expectedCitations": [
-        {
-          "kind": "outcome",
-          "rowId": "outcome-seed-Users-marquisehurtt-cortex-ide-7d-gemini-fix-midnight-blob-rgba-sweep"
-        },
         {
           "kind": "directive",
           "rowId": "directive-seed-cortex-ide-glass-chrome-preserved"
@@ -400,13 +407,14 @@
       "id": "qa-017",
       "category": "incidents",
       "repoPath": "/workspace/o8",
-      "question": "Which packet finished only partial and what work was left over?",
-      "expectedAnswer": "The feat/packet-meta-rows-restyle outcome (codex, partial). Branch + repo rows landed cleanly, but the runtime + summary rows were still using a native select that needed a popover follow-up.",
+      "question": "Which packet finished only partial, and what work was left over?",
+      "expectedAnswer": "The feat/packet-meta-rows-restyle outcome finished partial. Branch and repo rows landed, but the runtime and summary rows still used a native select and needed a popover follow-up.",
+      "sourceOfTruth": "~/.o8/cortex-ide.db session_outcomes row id=seed-Users-marquisehurtt-cortex-ide-6d-codex-feat-packet-meta-rows-restyle",
       "expectedFacts": [
-        "Names the feat/packet-meta-rows-restyle branch",
-        "States outcome=partial",
-        "Identifies the runtime/summary rows as the leftover work",
-        "Mentions the native-select-to-popover migration"
+        "Names feat/packet-meta-rows-restyle",
+        "States outcome partial",
+        "Identifies runtime and summary rows as the leftover work",
+        "Mentions the native-select-to-popover follow-up"
       ],
       "expectedCitations": [
         {
@@ -425,11 +433,12 @@
       "category": "incidents",
       "repoPath": "/workspace/o8",
       "question": "Why did the orchestrator-empty-state-copy outcome get flagged by the reviewer even though it shipped?",
-      "expectedAnswer": "The opencode-run polish/orchestrator-empty-state-copy outcome rewrote the empty-state copy and quick-action card layout. The reviewer flagged the new copy as off-brand vs the locked design language.",
+      "expectedAnswer": "The polish/orchestrator-empty-state-copy outcome rewrote the empty-state copy and quick-action card layout. The reviewer flagged the new copy as off-brand relative to the locked design language.",
+      "sourceOfTruth": "~/.o8/cortex-ide.db session_outcomes row id=seed-Users-marquisehurtt-cortex-ide-5d-opencode-polish-orchestrator-empty-state-copy",
       "expectedFacts": [
-        "Names the runtime as opencode",
-        "Names the outcome as polish/orchestrator-empty-state-copy",
-        "States that the reviewer flagged it as off-brand vs the locked design language"
+        "Names polish/orchestrator-empty-state-copy",
+        "Mentions the empty-state copy and quick-action layout rewrite",
+        "States that the copy was flagged as off-brand"
       ],
       "smokeExpectedFacts": [
         "orchestrator-empty-state-copy",
@@ -452,12 +461,13 @@
       "id": "qa-019",
       "category": "incidents",
       "repoPath": "/workspace/o8",
-      "question": "Has the o8_view_eval webview tool family ever failed to ship cleanly? What was the failure mode?",
-      "expectedAnswer": "Yes — the so-1776188979528-a3yz23te outcome (codex, failed) for the inline 'add o8_view_* webview tool family to operator-mcp-server' attempt. The session went idle between runs; even though the client + tools files were added and wired, the commit didn't go through cleanly. A separate failure (so-1776188344936-92de5fx8) attempted to surface webview tool availability in MCP diagnostics — git refused that commit because only an unrelated .claude/settings.json was seen as modified.",
+      "question": "Did the first o8_view webview-tool attempts ship cleanly, and what failed?",
+      "expectedAnswer": "No. Outcome so-1776188979528-a3yz23te added and wired the client and tools but went idle between runs before a clean commit. Outcome so-1776188344936-92de5fx8 tried to expose tool availability in diagnostics, but git refused the commit because only an unrelated settings file appeared modified.",
+      "sourceOfTruth": "~/.o8/cortex-ide.db session_outcomes rows id=so-1776188979528-a3yz23te and id=so-1776188344936-92de5fx8",
       "expectedFacts": [
-        "Identifies at least one failed outcome related to o8_view_*",
-        "Names the runtime as codex",
-        "Mentions either the idle-between-runs symptom OR the git-refused-commit symptom"
+        "Identifies both failed outcome ids",
+        "Mentions the idle-between-runs failure",
+        "Mentions git refusing the diagnostics commit because only an unrelated settings file was modified"
       ],
       "expectedCitations": [
         {
@@ -479,17 +489,19 @@
       "id": "qa-020",
       "category": "incidents",
       "repoPath": "/workspace/o8",
-      "question": "What CSS color literal pattern broke midnight theme and which commit contains the post-mortem?",
-      "expectedAnswer": null,
-      "knownGap": "commit-sha-recall-not-yet-ingested",
+      "question": "Which browser API assumption crashed the dashboard in v0.1.252, and what guard pattern prevents a repeat?",
+      "expectedAnswer": "The macOS WKWebView did not implement window.requestIdleCallback or window.cancelIdleCallback even though TypeScript's DOM types allowed them. Unguarded mount-time calls in footer-ports and supervisor-inbox-badge crashed the dashboard in v0.1.252; v0.1.253 hotfixed the failure. Callers must feature-detect with typeof ... === 'function' and use a setTimeout or no-op fallback.",
+      "sourceOfTruth": "~/.o8/directives/cortex-ide-wkwebview-api-guard.md:2-32",
       "expectedFacts": [
-        "Mentions hardcoded rgba(255,255,255,0.xx) becoming a light-gray blob in midnight",
-        "Either cites commit 929ffdf OR explicitly states the commit history is not available in the substrate"
+        "Names requestIdleCallback and cancelIdleCallback as absent",
+        "States that unguarded mount-time calls crashed v0.1.252",
+        "Names v0.1.253 as the hotfix",
+        "Requires typeof function guards and a fallback"
       ],
       "expectedCitations": [
         {
           "kind": "directive",
-          "rowId": "directive-seed-cortex-ide-palette-vars"
+          "rowId": "directive-cortex-ide-wkwebview-api-guard"
         }
       ],
       "rubric": {
@@ -502,19 +514,17 @@
       "id": "qa-021",
       "category": "specs",
       "repoPath": "/workspace/o8",
-      "question": "What are the four FTS5 virtual tables planned for schema v14 to support Cortex Q&A?",
-      "expectedAnswer": "outcomes_fts(summary, plan_text) with content='session_outcomes', directives_fts(title, body) materialized from disk on directive write, prs_fts(title, body) with content='github_pull_requests', and issues_fts(title, body) with content='github_issues'. Triggers on parent tables keep the FTS coherent. A new qa_eval_runs(question_id, expected, actual, score, run_at) table is added for the eval harness.",
+      "question": "Which evidence inputs does the current Cortex memory specification index?",
+      "expectedAnswer": "Cortex indexes repository documentation, operator-authored directives and accepted rules, completed session outcomes plus review and approval history, structured project and repository records, and facts extracted by the distillation pipeline. Source identity remains attached to each record.",
+      "sourceOfTruth": "docs/internals/cortex-memory-integration.md:5-15",
       "expectedFacts": [
-        "Names outcomes_fts, directives_fts, prs_fts, issues_fts (all four)",
-        "Mentions triggers keeping FTS coherent",
-        "Mentions the qa_eval_runs eval harness table"
+        "Names repository documentation",
+        "Names directives and accepted rules",
+        "Names completed outcomes, reviews, and approvals",
+        "Names project/repository records and distilled facts",
+        "States that source identity stays attached"
       ],
-      "expectedCitations": [
-        {
-          "kind": "issue",
-          "rowId": "issue-4353815519"
-        }
-      ],
+      "expectedCitations": [],
       "rubric": {
         "factual_accuracy_threshold": 0.7,
         "citation_correctness_threshold": 0.5,
@@ -525,19 +535,15 @@
       "id": "qa-022",
       "category": "specs",
       "repoPath": "/workspace/o8",
-      "question": "What latency budgets are locked for the three Q&A question classes?",
-      "expectedAnswer": "Class A (lookup, deterministic SQL only): 250ms p95 target with a 500ms hard ceiling. Class A+ (lookup + Flash compose): 800ms p95 target with a 1.5s hard ceiling. Class B (reasoning + Sonnet streaming compose): 2.0s TTFT and 4s TTLT p95 targets, with a 6s hard ceiling.",
+      "question": "Which agent and squad statuses does the fleet-state specification define?",
+      "expectedAnswer": "Agent statuses are idle, running, waiting, reviewing, blocked, and failed. Squad statuses are healthy, watching, degraded, and blocked. The shared vocabulary lets desktop, mobile, and runtime adapters distinguish execution, expected waiting, review bottlenecks, recoverable intervention, and terminal failure.",
+      "sourceOfTruth": "docs/internals/fleet-state-model.md:5-49",
       "expectedFacts": [
-        "Names Class A 250ms p95 / 500ms ceiling",
-        "Names Class A+ 800ms p95 / 1.5s ceiling",
-        "Names Class B 2.0s TTFT / 4s TTLT / 6s ceiling"
+        "Names all six agent statuses",
+        "Names all four squad statuses",
+        "Explains that the status vocabulary is shared across surfaces"
       ],
-      "expectedCitations": [
-        {
-          "kind": "issue",
-          "rowId": "issue-4353815519"
-        }
-      ],
+      "expectedCitations": [],
       "rubric": {
         "factual_accuracy_threshold": 0.7,
         "citation_correctness_threshold": 0.5,
@@ -548,19 +554,16 @@
       "id": "qa-023",
       "category": "specs",
       "repoPath": "/workspace/o8",
-      "question": "What is the cache key shape and TTL for the Cortex Q&A retrieval layer?",
-      "expectedAnswer": "Cache key is sha256(question + repoPath + max(directives.updated_at, outcomes.completed_at)). TTL is 30s. Invalidated on directive write or outcome insert.",
+      "question": "Which Tauri surface and label does the native-browser specification require, and which Tauri surface does it reject?",
+      "expectedAnswer": "The spec requires a stable child WebviewWindow labeled browser-view. The native host injects and evaluates the page agent in that owned window so it can drive the DOM across origins. It rejects Tauri multiwebview because that API is unstable and has positioning, resize, focus, and child-selection blockers.",
+      "sourceOfTruth": "docs/internals/native-browser-webview-spec.md:9-20,28-39,45-55",
       "expectedFacts": [
-        "Names sha256 hash over question + repoPath + max-timestamp",
-        "States 30s TTL",
-        "Mentions invalidation on directive write or outcome insert"
+        "Requires a child WebviewWindow",
+        "Names the browser-view label",
+        "Rejects Tauri multiwebview",
+        "Explains that host-owned eval provides DOM access across origins"
       ],
-      "expectedCitations": [
-        {
-          "kind": "issue",
-          "rowId": "issue-4353815519"
-        }
-      ],
+      "expectedCitations": [],
       "rubric": {
         "factual_accuracy_threshold": 0.7,
         "citation_correctness_threshold": 0.5,
@@ -571,19 +574,15 @@
       "id": "qa-024",
       "category": "specs",
       "repoPath": "/workspace/o8",
-      "question": "What are the two output modes for the Cortex Q&A surface and what triggers each?",
-      "expectedAnswer": "Memory mode (terse) emits a one-line answer plus citation chips for Class-A questions. Brain mode (verbose) emits a paragraph with inline citations and a contradiction footer for Class-B reasoning questions. The mode is picked by question class, not by the user.",
+      "question": "Where do managed worktrees default today, how is that root overridden, and what legacy layout is still discovered?",
+      "expectedAnswer": "Managed worktrees default to ~/.o8/worktrees/<repo-key>/.cortex-worktrees/. O8_WORKTREE_ROOT overrides the root. src/lib/worktree/root-layout.ts still discovers repository-local .cortex-worktrees/ stores for backward compatibility.",
+      "sourceOfTruth": "docs/internals/worktree-storage-path-decision.md:1-7",
       "expectedFacts": [
-        "Names memory mode for terse / Class-A",
-        "Names brain mode for verbose / Class-B",
-        "States that the mode is picked by class, not by user"
+        "Names ~/.o8/worktrees/<repo-key>/.cortex-worktrees/",
+        "Names O8_WORKTREE_ROOT",
+        "Mentions repository-local .cortex-worktrees/ backward compatibility"
       ],
-      "expectedCitations": [
-        {
-          "kind": "issue",
-          "rowId": "issue-4353815519"
-        }
-      ],
+      "expectedCitations": [],
       "rubric": {
         "factual_accuracy_threshold": 0.7,
         "citation_correctness_threshold": 0.5,
@@ -594,24 +593,22 @@
       "id": "qa-025",
       "category": "specs",
       "repoPath": "/workspace/o8",
-      "question": "What is the regression-gate threshold for the Q&A eval harness?",
-      "expectedAnswer": "Any category dropping below 70% factual_accuracy fails CI. The eval set is 30 questions split 5 per category across ownership / decisions / processes / incidents / specs / cross-repo. Sonnet-as-judge scores each on the rubric {factual_accuracy, citation_correctness, hallucination_count}.",
+      "question": "What structural contract does validate:qa-cases enforce, and which dimensions does the judge score?",
+      "expectedAnswer": "The validator requires at least 30 cases, exactly five cases in each of the six seeded categories, allows literal-lookup as the seventh category, validates required fields and repo-path resolution, and warns rather than fails when live citation rows are absent. The judge scores factual_accuracy, citation_correctness, and hallucination_count.",
+      "sourceOfTruth": "scripts/validate-qa-cases.ts:1-17,27-78,89-145; tests/qa-eval/judge.ts:9-18,35-39",
       "expectedFacts": [
-        "Names 70% threshold",
-        "Names 30 questions / 5 per category",
-        "Names the rubric fields factual_accuracy, citation_correctness, hallucination_count"
+        "Names at least 30 total cases",
+        "Names exactly five per seeded category",
+        "Names literal-lookup as the seventh allowed category",
+        "Names repo-path validation and citation warnings",
+        "Names factual_accuracy, citation_correctness, and hallucination_count"
       ],
       "smokeExpectedFacts": [
-        "70%",
-        "factual_accuracy",
-        "5 per category"
+        "at least 30",
+        "five",
+        "factual_accuracy"
       ],
-      "expectedCitations": [
-        {
-          "kind": "issue",
-          "rowId": "issue-4353815519"
-        }
-      ],
+      "expectedCitations": [],
       "rubric": {
         "factual_accuracy_threshold": 0.7,
         "citation_correctness_threshold": 0.5,
@@ -622,13 +619,14 @@
       "id": "qa-026",
       "category": "cross-repo",
       "repoPath": "/workspace/o8",
-      "question": "What invariants does o8-site explicitly carry over from the cortex-ide desktop app?",
-      "expectedAnswer": "Per the o8-site README, four invariants carry over: inline styles only (style={{ }}, never className); longhand padding (paddingTop / paddingLeft, never padding shorthand); no emoji (raw SVG or HTML entities only); and glass tokens (var(--t-surface), var(--t-border)) for panels rather than hardcoded rgba(255,255,255,0.xx).",
+      "question": "Which interface invariants does o8-site explicitly carry over from the o8 desktop app?",
+      "expectedAnswer": "o8-site carries over four invariants: inline styles instead of className, longhand padding instead of padding shorthand, no emoji in favor of raw SVG or HTML entities, and glass tokens for panels instead of hardcoded rgba-white surfaces.",
+      "sourceOfTruth": "~/.o8/directives/spec-ingest__o8-site__readme__invariants-carried-from-o8-desktop.md:11-18",
       "expectedFacts": [
         "Names inline styles only",
         "Names longhand padding",
         "Names no emoji",
-        "Names glass tokens / palette vars"
+        "Names glass tokens instead of hardcoded rgba"
       ],
       "expectedCitations": [
         {
@@ -650,12 +648,13 @@
       "id": "qa-027",
       "category": "cross-repo",
       "repoPath": "/workspace/o8",
-      "question": "Which repo in the o8 project is the deployable Vercel surface and which is not?",
-      "expectedAnswer": "o8-site is the Vercel surface — the README explicitly says 'do not deploy the cortex-ide repo to Vercel — that's a Tauri desktop app. This landing site is the one and only Vercel surface for o8.' cortex-ide ships as a native installer via cargo tauri build.",
+      "question": "Which repository is the o8 project's web deployment, and which repository ships as the desktop application?",
+      "expectedAnswer": "o8-site is the standalone web deployment. The o8 repository ships as a Tauri desktop application with native updater-capable builds; it is not the web deployment.",
+      "sourceOfTruth": "~/.o8/directives/spec-ingest__o8-site__readme__deploy.md:11-20; docs/operations/deployment.md:1-3,22-28",
       "expectedFacts": [
-        "Identifies o8-site as the Vercel surface",
-        "Identifies cortex-ide as Tauri desktop, not Vercel",
-        "References the o8-site README or the explicit 'one and only Vercel surface' wording"
+        "Identifies o8-site as the web deployment",
+        "Identifies o8 as the Tauri desktop application",
+        "Distinguishes web deployment from native updater-capable builds"
       ],
       "expectedCitations": [
         {
@@ -673,17 +672,19 @@
       "id": "qa-028",
       "category": "cross-repo",
       "repoPath": "/workspace/o8",
-      "question": "Both o8-site and cortex-ide use Plus Jakarta Sans. Is that a coincidence or an explicit decision?",
-      "expectedAnswer": "Explicit decision. The o8-site README states 'Plus Jakarta Sans (matches the desktop app)' as a stack choice. The cortex-ide repo locked Plus Jakarta Sans during the Apr 12 fleet UX overhaul (see typography memory and the /text specimen page).",
+      "question": "Do o8-site and the o8 desktop app currently use the same font stack?",
+      "expectedAnswer": "No. The ingested o8-site stack specifies Plus Jakarta Sans. The desktop design specification superseded its old Plus Jakarta Sans lock with var(--font-sans-system), using the native system stack; the rollback happened in May 2026 and was re-locked in June.",
+      "sourceOfTruth": "~/.o8/directives/spec-ingest__o8-site__readme__stack.md:11-16; DESIGN.md:108-116,578-584",
       "expectedFacts": [
-        "States it's an explicit decision, not coincidence",
-        "References the o8-site stack note OR the cortex-ide typography decision",
-        "Optionally names the /text specimen page"
+        "States that the font stacks differ",
+        "Names Plus Jakarta Sans for o8-site",
+        "Names var(--font-sans-system) for desktop",
+        "Mentions that the desktop webfont lock was rolled back"
       ],
       "smokeExpectedFacts": [
         "plus jakarta sans",
-        "explicit",
-        "o8-site"
+        "font-sans-system",
+        "differ"
       ],
       "expectedCitations": [],
       "rubric": {
@@ -696,12 +697,13 @@
       "id": "qa-029",
       "category": "cross-repo",
       "repoPath": "/workspace/o8",
-      "question": "How many session_outcomes rows currently exist for the o8-site repo?",
-      "expectedAnswer": null,
-      "knownGap": "o8-site-not-yet-dispatched",
+      "question": "As of the 2026-08-02 ground-truth rebuild, how many session_outcomes rows exist for the o8-site repo?",
+      "expectedAnswer": "There are 9 session_outcomes rows whose repo_path ends in /o8-site. They span 2026-06-01T12:23:24.160Z through 2026-07-05T01:17:54.489Z.",
+      "sourceOfTruth": "~/.o8/cortex-ide.db session_outcomes rows WHERE repo_path LIKE '%/o8-site' (COUNT(*)=9, MIN(completed_at)=2026-06-01T12:23:24.160Z, MAX(completed_at)=2026-07-05T01:17:54.489Z)",
       "expectedFacts": [
-        "Either returns 0 / no outcomes ingested OR explicitly states the o8-site repo has not been dispatched against yet",
-        "Does not invent fictional o8-site outcome rows"
+        "States that there are 9 rows",
+        "Scopes the count to repo_path ending in /o8-site",
+        "Names the earliest and latest completed_at timestamps"
       ],
       "expectedCitations": [],
       "rubric": {
@@ -714,12 +716,14 @@
       "id": "qa-030",
       "category": "cross-repo",
       "repoPath": "/workspace/o8",
-      "question": "What's the AGENTS.md file in o8-site say, and does cortex-ide have an equivalent?",
-      "expectedAnswer": "o8-site's AGENTS.md (referenced from CLAUDE.md via @AGENTS.md) wraps the Next.js agent rules — a 'this is NOT the Next.js you know' callout that forces agents to read node_modules/next/dist/docs/ before writing code, because the version has breaking changes from training data. cortex-ide's CLAUDE.md is the equivalent surface — a much longer file covering architecture, commands, and the critical NEVER/ALWAYS rules.",
+      "question": "What does o8-site's AGENTS.md require before writing Next.js code, and what is the equivalent instruction surface in o8?",
+      "expectedAnswer": "o8-site's AGENTS.md warns that its Next.js version has breaking changes and requires reading the relevant node_modules/next/dist/docs/ guide before writing code. o8 has its own AGENTS.md execution guide, while CLAUDE.md carries broader product and architecture context.",
+      "sourceOfTruth": "~/.o8/directives/spec-ingest__o8-site__agents__overview.md:11-19; AGENTS.md:1-3",
       "expectedFacts": [
-        "Names the 'this is NOT the Next.js you know' wording or the breaking-changes callout",
-        "Identifies cortex-ide's CLAUDE.md as the equivalent surface",
-        "Mentions reading node_modules/next/dist/docs/ before writing code"
+        "Mentions the Next.js breaking-changes warning",
+        "Requires reading node_modules/next/dist/docs/",
+        "Identifies o8 AGENTS.md as the execution guide",
+        "Identifies CLAUDE.md as broader context"
       ],
       "expectedCitations": [],
       "rubric": {
@@ -732,11 +736,12 @@
       "id": "qa-031",
       "category": "literal-lookup",
       "repoPath": "/workspace/o8",
-      "question": "In the Tauri sidecar (src-tauri/src/lib.rs), what port range does API_PORT_RANGE probe for the API port, and what range does WS_PORT_RANGE probe for the WebSocket port?",
-      "expectedAnswer": "API_PORT_RANGE is 3001..3050 and WS_PORT_RANGE is 3002..3100.",
+      "question": "In src-tauri/src/lib.rs, what exact ranges do PROD_API_PORT_RANGE and PROD_WS_PORT_RANGE contain?",
+      "expectedAnswer": "PROD_API_PORT_RANGE is 47100..47105 and PROD_WS_PORT_RANGE is 47105..47110.",
+      "sourceOfTruth": "src-tauri/src/lib.rs:671-672",
       "expectedFacts": [
-        "3001..3050",
-        "3002..3100"
+        "47100..47105",
+        "47105..47110"
       ],
       "expectedCitations": [],
       "rubric": {
@@ -749,13 +754,15 @@
       "id": "qa-032",
       "category": "literal-lookup",
       "repoPath": "/workspace/o8",
-      "question": "What are the exact API paths mapped in the IPC_ROUTES table in src/lib/tauri/ipc-fetch.ts, and which Rust command does '/api/panel/commits' map to?",
-      "expectedAnswer": "IPC_ROUTES maps five paths: /api/panel/repos (read_repos), /api/panel/commits (read_local_commits), /api/worktrees (read_worktrees), /api/panel/approvals (read_approvals), and /api/panel/workspaces (read_workspaces). '/api/panel/commits' maps to read_local_commits.",
+      "question": "What exact API paths are mapped in IPC_ROUTES in src/lib/tauri/ipc-fetch.ts, and which command handles /api/panel/commits?",
+      "expectedAnswer": "IPC_ROUTES maps /api/panel/repos to read_repos, /api/panel/commits to read_local_commits, /api/worktrees to read_worktrees, /api/panel/approvals to read_approvals, and /api/panel/workspaces to read_workspaces. The commits path is handled by read_local_commits.",
+      "sourceOfTruth": "src/lib/tauri/ipc-fetch.ts:27-53",
       "expectedFacts": [
-        "/api/panel/commits",
-        "read_local_commits",
-        "read_repos",
-        "read_worktrees"
+        "/api/panel/repos and read_repos",
+        "/api/panel/commits and read_local_commits",
+        "/api/worktrees and read_worktrees",
+        "/api/panel/approvals and read_approvals",
+        "/api/panel/workspaces and read_workspaces"
       ],
       "expectedCitations": [],
       "rubric": {
@@ -768,10 +775,14 @@
       "id": "qa-033",
       "category": "literal-lookup",
       "repoPath": "/workspace/o8",
-      "question": "What is the exact string value of DEFAULT_CODEX_MODEL in src/lib/lane/codex-orchestrator-session.ts?",
-      "expectedAnswer": "DEFAULT_CODEX_MODEL is 'gpt-5.5'.",
+      "question": "What exact arrays define DEV_API_PORT_BLOCK and DEV_WS_PORT_BLOCK in src/lib/panel/port-constants.ts, and what defaults do they produce?",
+      "expectedAnswer": "DEV_API_PORT_BLOCK is [47120, 47121, 47122, 47123, 47124] and DEV_WS_PORT_BLOCK is [47125, 47126, 47127, 47128, 47129]. Their first entries produce DEFAULT_DEV_API_PORT 47120 and DEFAULT_DEV_WS_PORT 47125.",
+      "sourceOfTruth": "src/lib/panel/port-constants.ts:4-10",
       "expectedFacts": [
-        "gpt-5.5"
+        "[47120, 47121, 47122, 47123, 47124]",
+        "[47125, 47126, 47127, 47128, 47129]",
+        "DEFAULT_DEV_API_PORT 47120",
+        "DEFAULT_DEV_WS_PORT 47125"
       ],
       "expectedCitations": [],
       "rubric": {
@@ -784,10 +795,12 @@
       "id": "qa-034",
       "category": "literal-lookup",
       "repoPath": "/workspace/o8",
-      "question": "What is the exact string value of OPENCODE_DEFAULT_MODEL in src/lib/opencode/owned.ts?",
-      "expectedAnswer": "OPENCODE_DEFAULT_MODEL is 'opencode/gpt-5-nano'.",
+      "question": "What are DEFAULT_LIMIT and DEFAULT_CONCURRENCY in src/lib/transcripts/bootstrap.ts?",
+      "expectedAnswer": "DEFAULT_LIMIT is 80 and DEFAULT_CONCURRENCY is 2.",
+      "sourceOfTruth": "src/lib/transcripts/bootstrap.ts:4-5",
       "expectedFacts": [
-        "opencode/gpt-5-nano"
+        "DEFAULT_LIMIT 80",
+        "DEFAULT_CONCURRENCY 2"
       ],
       "expectedCitations": [],
       "rubric": {
@@ -800,8 +813,9 @@
       "id": "qa-035",
       "category": "literal-lookup",
       "repoPath": "/workspace/o8",
-      "question": "In src/ws-server.ts, what are the values of the three backpressure constants BACKPRESSURE_LIMIT, BACKPRESSURE_QUEUE_LIMIT, and BACKPRESSURE_FLUSH_MS?",
-      "expectedAnswer": "BACKPRESSURE_LIMIT is 64 * 1024 (64KB), BACKPRESSURE_QUEUE_LIMIT is 32 messages, and BACKPRESSURE_FLUSH_MS is 50 (ms).",
+      "question": "In src/lib/ws-server/channels.ts, what are BACKPRESSURE_LIMIT, BACKPRESSURE_QUEUE_LIMIT, and BACKPRESSURE_FLUSH_MS?",
+      "expectedAnswer": "BACKPRESSURE_LIMIT is 64 * 1024 bytes, BACKPRESSURE_QUEUE_LIMIT is 32 messages, and BACKPRESSURE_FLUSH_MS is 50 milliseconds.",
+      "sourceOfTruth": "src/lib/ws-server/channels.ts:14-19",
       "expectedFacts": [
         "64 * 1024",
         "32",
@@ -818,10 +832,11 @@
       "id": "qa-036",
       "category": "literal-lookup",
       "repoPath": "/workspace/o8",
-      "question": "What is the current value of DB_SCHEMA_VERSION in src/lib/db/index.ts (the latest schema migration marker version)?",
-      "expectedAnswer": "DB_SCHEMA_VERSION is 27.",
+      "question": "What is the current DB_SCHEMA_VERSION in src/lib/db/index.ts?",
+      "expectedAnswer": "DB_SCHEMA_VERSION is 36.",
+      "sourceOfTruth": "src/lib/db/index.ts:36-44",
       "expectedFacts": [
-        "27"
+        "36"
       ],
       "expectedCitations": [],
       "rubric": {
@@ -834,11 +849,13 @@
       "id": "qa-037",
       "category": "literal-lookup",
       "repoPath": "/workspace/o8",
-      "question": "In src/lib/mcp/o8-webview-client.ts, what exact Unix socket path template does O8WebviewClient construct in its constructor?",
-      "expectedAnswer": "It builds the socket path as /tmp/tauri-mcp-o8-${username}.sock, where username comes from os.userInfo().username.",
+      "question": "What exact fallback Unix socket template does resolveO8WebviewSocketPath return in src/lib/mcp/o8-webview-socket.ts?",
+      "expectedAnswer": "The fallback template is /tmp/tauri-mcp-o8-${username}.sock, where username defaults to userInfo().username. An explicit O8_TAURI_MCP_SOCKET overrides it.",
+      "sourceOfTruth": "src/lib/mcp/o8-webview-socket.ts:1-19",
       "expectedFacts": [
-        "/tmp/tauri-mcp-o8-",
-        ".sock"
+        "/tmp/tauri-mcp-o8-${username}.sock",
+        "userInfo().username",
+        "O8_TAURI_MCP_SOCKET"
       ],
       "expectedCitations": [],
       "rubric": {
@@ -851,8 +868,9 @@
       "id": "qa-038",
       "category": "literal-lookup",
       "repoPath": "/workspace/o8",
-      "question": "What is the value of TILE_LAYOUT_VERSION in src/lib/tiles/operations.ts?",
+      "question": "What is TILE_LAYOUT_VERSION in src/lib/tiles/operations.ts?",
       "expectedAnswer": "TILE_LAYOUT_VERSION is 4.",
+      "sourceOfTruth": "src/lib/tiles/operations.ts:12-16",
       "expectedFacts": [
         "4"
       ],
