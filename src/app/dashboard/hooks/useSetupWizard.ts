@@ -5,6 +5,7 @@ import { normalizeDetection } from '../utils';
 
 export function useSetupWizard() {
   const [setupWizardOpen, setSetupWizardOpen] = useState(false);
+  const [setupCheckComplete, setSetupCheckComplete] = useState(false);
   const [setupDetection, setSetupDetection] = useState<DetectionResult | null>(null);
   const [setupCompleteError, setSetupCompleteError] = useState<string | null>(null);
   const setupCheckedRef = useRef(false);
@@ -29,6 +30,7 @@ export function useSetupWizard() {
         // Show the onboarding screen immediately — detection runs in background
         setSetupWizardOpen(true);
       } catch { /* silent — don't block dashboard */ }
+      finally { setSetupCheckComplete(true); }
     })();
   }, []);
 
@@ -66,6 +68,7 @@ export function useSetupWizard() {
   return {
     handleSetupComplete,
     setupCompleteError,
+    setupCheckComplete,
     setupDetection,
     setupWizardOpen,
     setSetupWizardOpen,

@@ -9,6 +9,17 @@ export type ProductEventName =
   | 'merge.approved'
   | 'repo.added';
 
+/** Exact first-run disclosure for the complete wire allowlist. Keep the field
+ * wording aligned with docs/user/product-telemetry-privacy.md. */
+export const PRODUCT_EVENT_DISCLOSURES = [
+  { event: 'app.opened', fields: 'no properties' },
+  { event: 'brain.asked', fields: 'no properties' },
+  { event: 'orchestrator.message', fields: 'no properties' },
+  { event: 'dispatch.started', fields: 'runtime — known worker-runtime enum' },
+  { event: 'merge.approved', fields: 'runtime — known worker-runtime enum; pushed — boolean' },
+  { event: 'repo.added', fields: 'hasRemote — boolean; isGitRepo — boolean' },
+] as const satisfies ReadonlyArray<{ event: ProductEventName; fields: string }>;
+
 export type ProductEventProps = Partial<{
   runtime: OrchestratorRuntime;
   pushed: boolean;

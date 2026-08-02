@@ -87,6 +87,7 @@ export interface OperatorDefaults {
   updateAutoApply: UpdateAutoApply;
   collideAggregator: CollideAggregator;
   productTelemetryEnabled: boolean;
+  telemetryConsentAnswered: boolean;
   telemetryOptIn: boolean;
   telemetryIngestUrl: string;
   crashReportsEnabled: boolean;

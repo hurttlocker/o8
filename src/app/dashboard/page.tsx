@@ -163,6 +163,7 @@ const LazySettingsPage = retryingLazy(() => import('@/components/desktop/Setting
 const LazyAutomationsPage = retryingLazy(() => import('@/components/desktop/AutomationsPage').then(m => ({ default: m.AutomationsPage })), { label: 'Automations' });
 const LazyCustomizePage = retryingLazy(() => import('@/components/desktop/CustomizePage').then(m => ({ default: m.CustomizePage })), { label: 'Customize' });
 const LazyOnboarding = retryingLazy(() => import('@/components/desktop/Onboarding').then(m => ({ default: m.Onboarding })), { label: 'Onboarding' });
+const LazyTelemetryConsentCard = retryingLazy(() => import('@/components/desktop/TelemetryConsentCard').then(m => ({ default: m.TelemetryConsentCard })), { label: 'Telemetry consent' });
 const LazyCommandPalette = retryingLazy(() => import('@/components/desktop/CommandPalette').then(m => ({ default: m.CommandPalette })), { label: 'Command palette' });
 const LazyKeyboardShortcutsOverlay = retryingLazy(() => import('@/components/desktop/KeyboardShortcutsOverlay').then(m => ({ default: m.KeyboardShortcutsOverlay })), { label: 'Keyboard shortcuts' });
 const LazyDesignModeOverlay = retryingLazy(() => import('@/components/desktop/DesignModeOverlay').then(m => ({ default: m.DesignModeOverlay })), { label: 'Design mode' });
@@ -1399,7 +1400,7 @@ function DashboardInner() {
     return () => safeCancelIdleCallback(id);
   }, []);
 
-  const { handleSetupComplete, setSetupWizardOpen, setupCompleteError, setupWizardOpen } = useSetupWizard();
+  const { handleSetupComplete, setSetupWizardOpen, setupCheckComplete, setupCompleteError, setupWizardOpen } = useSetupWizard();
 
   const refreshWorkspaceLifecycle = useCallback(async () => {
     try {
@@ -5812,6 +5813,9 @@ function DashboardInner() {
           thoughts→workspace merge. */}
 
       {/* ── First Launch Onboarding ── */}
+      <Suspense fallback={null}>
+        <LazyTelemetryConsentCard blocked={!setupCheckComplete || setupWizardOpen} />
+      </Suspense>
       {setupWizardOpen && (
         <Suspense fallback={null}>
           <LazyOnboarding onComplete={handleSetupComplete} completionError={setupCompleteError} />

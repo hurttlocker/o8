@@ -1,8 +1,19 @@
 import { describe, expect, it } from 'vitest';
 
-import { sanitizeProductEvent } from './events';
+import { PRODUCT_EVENT_DISCLOSURES, sanitizeProductEvent } from './events';
 
 describe('product telemetry payload allowlist', () => {
+  it('discloses all six wire events exactly once', () => {
+    expect(PRODUCT_EVENT_DISCLOSURES).toEqual([
+      { event: 'app.opened', fields: 'no properties' },
+      { event: 'brain.asked', fields: 'no properties' },
+      { event: 'orchestrator.message', fields: 'no properties' },
+      { event: 'dispatch.started', fields: 'runtime — known worker-runtime enum' },
+      { event: 'merge.approved', fields: 'runtime — known worker-runtime enum; pushed — boolean' },
+      { event: 'repo.added', fields: 'hasRemote — boolean; isGitRepo — boolean' },
+    ]);
+  });
+
   it('accepts only known events and their exact coarse fields', () => {
     expect(sanitizeProductEvent('merge.approved', {
       runtime: 'codex',

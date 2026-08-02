@@ -277,14 +277,11 @@ export interface OperatorDefaults {
   updateAutoApply: UpdateAutoApply;
   /** Collide aggregator override. Auto follows the active composer backend. */
   collideAggregator: CollideAggregator;
-  /** Coarse product-usage telemetry. Explicit opt-in, persisted, and default off. */
-  productTelemetryEnabled: boolean;
-  /** Crash-log upload opt-in; local capture continues while off. Env: `O8_TELEMETRY_OPT_IN`. */
-  telemetryOptIn: boolean;
-  /** Crash-log endpoint, consulted only when telemetryOptIn is on. */
-  telemetryIngestUrl: string;
-  /** Scrubbed Sentry crash/error sharing, packaged builds only and default off. */
-  crashReportsEnabled: boolean;
+  /** Coarse product-usage telemetry. Explicit opt-in, persisted, and default off. */ productTelemetryEnabled: boolean;
+  /** First-run telemetry prompt was answered with both independent choices. */ telemetryConsentAnswered: boolean;
+  /** Crash-log upload opt-in; local capture continues while off. Env: `O8_TELEMETRY_OPT_IN`. */ telemetryOptIn: boolean;
+  /** Crash-log endpoint, consulted only when telemetryOptIn is on. */ telemetryIngestUrl: string;
+  /** Scrubbed Sentry crash/error sharing, packaged builds only and default off. */ crashReportsEnabled: boolean;
   /**
    * Prefix for branches o8 opens from GitHub issues (`<prefix>/<n>-<slug>`).
    * **Default `'issue'`** — byte-identical to the previous hardcoded literal.
@@ -386,12 +383,10 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   updateAutoApply: 'off',
   collideAggregator: 'auto',
   productTelemetryEnabled: false,
-  // Crash telemetry OFF by default — local capture only, nothing uploaded.
-  telemetryOptIn: false,
+  telemetryConsentAnswered: false,
+  telemetryOptIn: false, // Local capture only, nothing uploaded.
   telemetryIngestUrl: '',
-  // Sentry crash/error reports OFF by default. Operators must affirmatively
-  // enable transmission even when a packaged build has a DSN.
-  crashReportsEnabled: false,
+  crashReportsEnabled: false, // Transmission always requires explicit consent.
   // Byte-identical to the previous hardcoded `issue/` branch literal.
   branchPrefix: 'issue',
   // Agent commit attribution OFF — commits carry the raw message as before.
@@ -449,6 +444,7 @@ interface StoredOperatorDefaults {
   autoApplyUpdates?: 'off' | 'when-idle';
   collideAggregator?: CollideAggregator;
   productTelemetryEnabled?: boolean;
+  telemetryConsentAnswered?: boolean;
   telemetryOptIn?: boolean;
   telemetryIngestUrl?: string;
   crashReportsEnabled?: boolean;
@@ -588,6 +584,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
     result.collideAggregator = stored.collideAggregator;
   }
   if (typeof stored.productTelemetryEnabled === 'boolean') result.productTelemetryEnabled = stored.productTelemetryEnabled;
+  if (typeof stored.telemetryConsentAnswered === 'boolean') result.telemetryConsentAnswered = stored.telemetryConsentAnswered;
   if (typeof stored.telemetryOptIn === 'boolean') {
     result.telemetryOptIn = stored.telemetryOptIn;
   }
@@ -732,6 +729,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     updateAutoApply: envApplyUpdates ?? fileValues.updateAutoApply ?? OPERATOR_DEFAULTS_FALLBACK.updateAutoApply,
     collideAggregator: envCollideAgg ?? fileValues.collideAggregator ?? OPERATOR_DEFAULTS_FALLBACK.collideAggregator,
     productTelemetryEnabled: fileValues.productTelemetryEnabled ?? OPERATOR_DEFAULTS_FALLBACK.productTelemetryEnabled,
+    telemetryConsentAnswered: fileValues.telemetryConsentAnswered ?? OPERATOR_DEFAULTS_FALLBACK.telemetryConsentAnswered,
     telemetryOptIn: envTelemetry ?? fileValues.telemetryOptIn ?? OPERATOR_DEFAULTS_FALLBACK.telemetryOptIn,
     telemetryIngestUrl: envTelemetryUrl ?? fileValues.telemetryIngestUrl ?? OPERATOR_DEFAULTS_FALLBACK.telemetryIngestUrl,
     crashReportsEnabled: envCrash ?? fileValues.crashReportsEnabled ?? OPERATOR_DEFAULTS_FALLBACK.crashReportsEnabled,
@@ -788,6 +786,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     updateAutoApply: envApplyUpdates !== null ? 'env' : fileValues.updateAutoApply !== undefined ? 'file' : 'default',
     collideAggregator: envCollideAgg !== null ? 'env' : fileValues.collideAggregator !== undefined ? 'file' : 'default',
     productTelemetryEnabled: fileValues.productTelemetryEnabled !== undefined ? 'file' : 'default',
+    telemetryConsentAnswered: fileValues.telemetryConsentAnswered !== undefined ? 'file' : 'default',
     telemetryOptIn: envTelemetry !== null ? 'env' : fileValues.telemetryOptIn !== undefined ? 'file' : 'default',
     telemetryIngestUrl: envTelemetryUrl !== null ? 'env' : fileValues.telemetryIngestUrl !== undefined ? 'file' : 'default',
     crashReportsEnabled: envCrash !== null ? 'env' : fileValues.crashReportsEnabled !== undefined ? 'file' : 'default',
@@ -1001,6 +1000,7 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>): Pr
     stored.collideAggregator = update.collideAggregator;
   }
   if (update.productTelemetryEnabled !== undefined) stored.productTelemetryEnabled = Boolean(update.productTelemetryEnabled);
+  if (update.telemetryConsentAnswered !== undefined) stored.telemetryConsentAnswered = Boolean(update.telemetryConsentAnswered);
   if (update.telemetryOptIn !== undefined) {
     stored.telemetryOptIn = Boolean(update.telemetryOptIn);
   }

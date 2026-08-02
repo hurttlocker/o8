@@ -20,8 +20,8 @@ use std::time::Duration;
 use crate::entitlement;
 
 /// Live mirror of the operator toggle — refreshed by the 30s watcher and read in
-/// `before_send`. Defaults ON (matches the operator-defaults fallback).
-static CRASH_REPORTS_ENABLED: AtomicBool = AtomicBool::new(true);
+/// `before_send`. Defaults OFF so consent absence can never create consent.
+static CRASH_REPORTS_ENABLED: AtomicBool = AtomicBool::new(false);
 
 /// Canonical o8 data dir (`~/.o8`, overridable). Kept local so this module stays
 /// dependency-free, mirroring `entitlement::o8_data_dir`.
@@ -37,18 +37,19 @@ fn o8_data_dir() -> PathBuf {
 }
 
 /// Read the "Crash & error reports" toggle from `~/.o8/operator-defaults.json`
-/// (`crashReportsEnabled`). Default ON when the file/key is absent. Never panics.
+/// (`crashReportsEnabled`). Missing, unreadable, malformed, or non-boolean state
+/// resolves to OFF. Never panics.
 fn read_toggle() -> bool {
     let path = o8_data_dir().join("operator-defaults.json");
     let Ok(raw) = std::fs::read_to_string(path) else {
-        return true;
+        return false;
     };
     let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
-        return true;
+        return false;
     };
     match value.get("crashReportsEnabled") {
         Some(serde_json::Value::Bool(b)) => *b,
-        _ => true,
+        _ => false,
     }
 }
 
@@ -302,7 +303,80 @@ pub fn maybe_trigger_crash_test() {
 
 #[cfg(test)]
 mod tests {
-    use super::scrub_paths;
+    use super::{read_toggle, scrub_paths};
+    use std::path::Path;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Mutex;
+
+    static TOGGLE_ENV_LOCK: Mutex<()> = Mutex::new(());
+    static NEXT_TEST_DIR: AtomicU64 = AtomicU64::new(0);
+
+    fn read_toggle_from(setup: impl FnOnce(&Path)) -> bool {
+        let _lock = TOGGLE_ENV_LOCK.lock().expect("toggle test env lock");
+        let previous_o8 = std::env::var_os("O8_DATA_DIR");
+        let previous_cortex = std::env::var_os("CORTEX_IDE_DATA_DIR");
+        let test_dir = std::env::temp_dir().join(format!(
+            "o8-telemetry-toggle-{}-{}",
+            std::process::id(),
+            NEXT_TEST_DIR.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&test_dir);
+        std::fs::create_dir_all(&test_dir).expect("create toggle test dir");
+        std::env::set_var("O8_DATA_DIR", &test_dir);
+        std::env::remove_var("CORTEX_IDE_DATA_DIR");
+
+        setup(&test_dir.join("operator-defaults.json"));
+        let result = read_toggle();
+
+        match previous_o8 {
+            Some(value) => std::env::set_var("O8_DATA_DIR", value),
+            None => std::env::remove_var("O8_DATA_DIR"),
+        }
+        match previous_cortex {
+            Some(value) => std::env::set_var("CORTEX_IDE_DATA_DIR", value),
+            None => std::env::remove_var("CORTEX_IDE_DATA_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(test_dir);
+        result
+    }
+
+    #[test]
+    fn missing_toggle_file_fails_closed_through_real_reader() {
+        assert!(!read_toggle_from(|_| {}));
+    }
+
+    #[test]
+    fn malformed_toggle_json_fails_closed_through_real_reader() {
+        assert!(!read_toggle_from(|path| {
+            std::fs::write(path, "{not-json").expect("write malformed toggle");
+        }));
+    }
+
+    #[test]
+    fn unknown_toggle_shape_fails_closed_through_real_reader() {
+        assert!(!read_toggle_from(|path| {
+            std::fs::write(path, r#"{"telemetry":{"crashReportsEnabled":true}}"#)
+                .expect("write unknown toggle shape");
+        }));
+    }
+
+    #[test]
+    fn unreadable_toggle_path_fails_closed_through_real_reader() {
+        assert!(!read_toggle_from(|path| {
+            std::fs::create_dir(path).expect("create unreadable toggle path");
+        }));
+    }
+
+    #[test]
+    fn explicit_boolean_toggle_round_trips_through_real_reader() {
+        assert!(read_toggle_from(|path| {
+            std::fs::write(path, r#"{"crashReportsEnabled":true}"#).expect("write enabled toggle");
+        }));
+        assert!(!read_toggle_from(|path| {
+            std::fs::write(path, r#"{"crashReportsEnabled":false}"#)
+                .expect("write disabled toggle");
+        }));
+    }
 
     #[test]
     fn collapses_macos_home_username_keeps_path() {

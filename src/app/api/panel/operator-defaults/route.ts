@@ -308,6 +308,19 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.productTelemetryEnabled = body.productTelemetryEnabled;
   }
 
+  if (body.telemetryConsentAnswered !== undefined) {
+    if (typeof body.telemetryConsentAnswered !== 'boolean') {
+      throw new Error('telemetryConsentAnswered must be boolean.');
+    }
+    if (
+      body.telemetryConsentAnswered
+      && (typeof body.productTelemetryEnabled !== 'boolean' || typeof body.crashReportsEnabled !== 'boolean')
+    ) {
+      throw new Error('Answering telemetry consent requires both productTelemetryEnabled and crashReportsEnabled.');
+    }
+    update.telemetryConsentAnswered = body.telemetryConsentAnswered;
+  }
+
   if (body.telemetryOptIn !== undefined) {
     if (typeof body.telemetryOptIn !== 'boolean') {
       throw new Error('telemetryOptIn must be boolean.');
