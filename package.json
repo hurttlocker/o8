@@ -1,7 +1,7 @@
 {
   "name": "o8",
   "version": "0.1.652",
-  "description": "o8 — governance layer for autonomous engineering teams. Approvals, audit, organizational memory.",
+  "description": "o8 \u2014 governance layer for autonomous engineering teams. Approvals, audit, organizational memory.",
   "license": "MIT",
   "productName": "o8",
   "private": true,
@@ -65,7 +65,8 @@
     "build:cli": "node cli/esbuild.config.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "dogfood:symon-localization": "node scripts/watch-symon-localization.mjs"
+    "dogfood:symon-localization": "node scripts/watch-symon-localization.mjs",
+    "bench:coding": "NODE_OPTIONS=--import=./scripts/register-server-only-stub.mjs tsx scripts/bench/run-coding.ts"
   },
   "dependencies": {
     "@ai-sdk/gateway": "^3.0.109",

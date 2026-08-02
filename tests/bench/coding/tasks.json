@@ -1,0 +1,21 @@
+{
+  "schema": "o8/coding-tasks/v1",
+  "note": "Real issues, each run from a base commit where the issue was still open. Keep this set stable across releases — changing the tasks makes release-over-release comparison meaningless. If a task must be replaced, record it in the run notes.",
+  "tasks": [
+    {
+      "issue": 1065,
+      "base": "1530f7099",
+      "label": "MCP ABI re-exec (medium, process/startup)"
+    },
+    {
+      "issue": 1144,
+      "base": "1530f7099",
+      "label": "lane reconciliation (hard, live state)"
+    },
+    {
+      "issue": 928,
+      "base": "1530f7099",
+      "label": "memory-folder projection (greenfield, checklist)"
+    }
+  ]
+}
