@@ -5,6 +5,7 @@ import type {
   OrchestratorReviewFinding,
 } from '@/lib/approvals/types';
 import type { Lane } from '@/lib/lane/types';
+import type { ReviewCoverageEvidence } from '@/lib/orchestrator/task-contract-coverage';
 
 export interface OrchestratorReviewRecordInput {
   findings: OrchestratorReviewFinding[];
@@ -12,6 +13,7 @@ export interface OrchestratorReviewRecordInput {
   approved: boolean;
   diffSha?: string;
   reviewedHeadSha?: string;
+  contractCoverageEvidence?: ReviewCoverageEvidence;
   requiresSecondPass?: boolean;
   rawText?: string;
   parseWarning?: string;
@@ -57,6 +59,7 @@ export function normalizeOrchestratorReview(review: OrchestratorReviewRecordInpu
     approved: review.approved,
     diffSha: trimOptional(review.diffSha),
     reviewedHeadSha: trimOptional(review.reviewedHeadSha),
+    contractCoverageEvidence: review.contractCoverageEvidence,
     requiresSecondPass: review.requiresSecondPass === true,
     rawText: trimOptional(review.rawText),
     parseWarning: trimOptional(review.parseWarning),
@@ -127,6 +130,7 @@ export function buildOrchestratorReviewApprovalInput(
       approved: review.approved,
       findings: review.findings,
       ...(review.reviewedHeadSha ? { reviewedHeadSha: review.reviewedHeadSha } : {}),
+      ...(review.contractCoverageEvidence ? { contractCoverageEvidence: review.contractCoverageEvidence } : {}),
       requiresSecondPass: review.requiresSecondPass === true,
       secondPassAgreed: false,
       ...(review.parseWarning ? { parseWarning: review.parseWarning } : {}),

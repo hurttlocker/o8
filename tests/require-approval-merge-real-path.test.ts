@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
 const { publishRealtimeMutation } = vi.hoisted(() => ({
   publishRealtimeMutation: vi.fn(async () => {}),
@@ -27,6 +28,7 @@ const reviewStateRoute = await import('@/app/api/orchestrator/review-state/route
 const { mintPacketWorkerToken } = await import('@/lib/auth/packet-worker-token');
 const { recordMission } = await import('@/lib/db/missions-store');
 const { dispatch } = await import('@/lib/lane/commands');
+const { assessDurableApprovedReview } = await import('@/lib/lane/durable-review-approval');
 const { decideSurfaceMerge } = await import('@/lib/lane/surface-merge-decision');
 const { archiveLane, createLane, getLane } = await import('@/lib/lane/registry');
 const { withRepoActionLock } = await import('@/lib/lane/repo-action-lock');
@@ -178,7 +180,12 @@ async function createBudgetBlockedLane(label: string) {
   return { lane, repo, reviewedHeadSha };
 }
 
-function persistDispatcherMission(packetId: string, repoPath: string, orchestratorThreadId: string) {
+function persistDispatcherMission(
+  packetId: string,
+  repoPath: string,
+  orchestratorThreadId: string,
+  packetOverrides: Partial<OrchestratorPacket> = {},
+) {
   const missionId = `mission-surface-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const missionState = normalizeOrchestratorMissionState({
     version: 2,
@@ -209,6 +216,7 @@ function persistDispatcherMission(packetId: string, repoPath: string, orchestrat
       lane: null,
       orchestratorThreadId,
       dispatcher: { surface: 'orchestrator', id: orchestratorThreadId },
+      ...packetOverrides,
     }],
     updatedAt: new Date().toISOString(),
   });
@@ -243,7 +251,21 @@ function mergeRequest(token: string, packetId: string): NextRequest {
   });
 }
 
-function reviewRequest(token: string, packetId: string, reviewedHeadSha: string): NextRequest {
+function reviewRequest(
+  token: string,
+  packetId: string,
+  reviewedHeadSha: string,
+  contractCoverageEvidence?: {
+    contractVersion: number;
+    headSha: string;
+    entries: Array<{
+      requirementId: string;
+      productionPath: string;
+      anchor?: string;
+      verification?: string;
+    }>;
+  },
+): NextRequest {
   return new NextRequest('http://localhost:3001/api/orchestrator/review', {
     method: 'POST',
     headers: {
@@ -255,6 +277,7 @@ function reviewRequest(token: string, packetId: string, reviewedHeadSha: string)
       packetId,
       approved: true,
       reviewedHeadSha,
+      contractCoverageEvidence,
       findings: [{
         file: 'safe.ts',
         severity: 'note',
@@ -280,6 +303,61 @@ afterEach(() => {
 });
 
 describe('requireApproval merge governance through the real command path', () => {
+  it('persists task-contract evidence through the review route and clears the durable coverage gate', async () => {
+    const fixture = await createStandardLane('contract-evidence', false);
+    const taskContract = {
+      version: 1 as const,
+      requirements: [{
+        id: 'R1',
+        source: 'Persist reviewed requirement evidence.',
+        expectedBehavior: 'The durable review reads evidence from approval args.',
+        productionPath: 'file.txt',
+        verification: 'Read the committed file.',
+      }],
+      smallestRoute: [{
+        path: 'file.txt',
+        requirements: ['R1'],
+        reason: 'The task changes one existing file.',
+      }],
+      exclusions: [],
+    };
+    persistDispatcherMission(
+      fixture.lane.packetId!,
+      fixture.repo,
+      `thoughts-contract-${Date.now()}`,
+      { taskContract, taskContractRequired: true },
+    );
+
+    const response = await reviewRoute.POST(reviewRequest(
+      getOrCreateWsToken(),
+      fixture.lane.packetId!,
+      fixture.reviewedHeadSha,
+      {
+        contractVersion: 1,
+        headSha: fixture.reviewedHeadSha,
+        entries: [{
+          requirementId: 'R1',
+          productionPath: 'file.txt',
+          anchor: 'standard change',
+          verification: 'Read the committed file.',
+        }],
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    const approval = listApprovalsForContext({ laneId: fixture.lane.id })
+      .find((candidate) => candidate.toolName === 'orchestrator_review');
+    expect(approval?.args?.contractCoverageEvidence).toMatchObject({
+      contractVersion: 1,
+      headSha: fixture.reviewedHeadSha,
+      entries: [{ requirementId: 'R1', productionPath: 'file.txt' }],
+    });
+    await expect(assessDurableApprovedReview(fixture.lane)).resolves.toMatchObject({
+      approved: true,
+      contractCoverage: { status: 'passed', missingRequirementIds: [] },
+    });
+  }, 30_000);
+
   it('does not let a pending review waive spoken merge-gate blockers', async () => {
     const fixture = await createBudgetBlockedLane('pending-spoken-review');
     recordOrchestratorReview(fixture.lane.packetId!, {

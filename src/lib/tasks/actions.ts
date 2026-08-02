@@ -373,6 +373,7 @@ export async function createTask(input: TaskCreateInput): Promise<TaskMutationRe
         body: input.sourceIssue.body ?? summary,
         url: input.sourceIssue.url ?? undefined,
       } : null,
+      taskContractRequired: true,
       prompt: buildProjectBriefPromptV1(taskBrief, summary),
       ...(allowedFiles.length > 0 ? { allowedFiles, predictedFiles: allowedFiles } : {}),
     };

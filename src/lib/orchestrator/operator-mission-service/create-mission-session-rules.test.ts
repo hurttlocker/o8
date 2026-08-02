@@ -51,11 +51,13 @@ describe('createMission stamps orchestratorThreadId onto persisted packets', () 
     expect(packet).toBeDefined();
     expect(packet!.orchestratorThreadId).toBe('thoughts-e2e');
     expect(packet!.dispatcher).toEqual({ surface: 'orchestrator', id: 'thoughts-e2e' });
+    expect(packet!.taskContractRequired).toBe(true);
 
     // And the worker prompt built from that persisted packet inherits the rules.
     const prompt = await buildPacketPrompt(packet!, persisted.packets);
     expect(prompt).toContain('<Operator session rules (binding)>');
     expect(prompt).toContain('- never bypass the review gate');
+    expect(prompt).toContain('Pre-edit task contract:');
   });
 
   it('omits the field when the input carries no thread id', async () => {
@@ -70,5 +72,49 @@ describe('createMission stamps orchestratorThreadId onto persisted packets', () 
     expect(packet).toBeDefined();
     expect(packet!.orchestratorThreadId).toBeUndefined();
     expect(packet!.dispatcher).toEqual({ surface: 'operator', id: 'desktop' });
+  });
+
+  it('persists an opt-in quality-search seed with one sealed contract', async () => {
+    const taskContract = {
+      version: 1 as const,
+      requirements: [{
+        id: 'R1',
+        source: 'do the thing',
+        expectedBehavior: 'The thing is done.',
+        productionPath: 'entry -> implementation',
+        verification: 'focused test',
+      }],
+      smallestRoute: [{
+        path: 'src/implementation.ts',
+        requirements: ['R1'],
+        reason: 'The implementation owns the behavior.',
+      }],
+      exclusions: [],
+    };
+    const result = await createMission({
+      issues: [{ number: 90003, title: 'inline: searched task', body: 'do the thing', url: '' }],
+      repoPath,
+      runtime: 'codex',
+      constraints: '',
+      qualitySearch: { taskContract },
+    });
+    const persisted = currentMissionState();
+    const packet = persisted.packets.find((candidate) => candidate.id === result.packets[0]!.id);
+
+    expect(packet?.taskContract).toEqual(taskContract);
+    expect(packet?.qualitySearch).toEqual({
+      version: 1,
+      role: null,
+      repairAttempts: 0,
+      receipt: null,
+    });
+
+    await expect(createMission({
+      issues: [{ number: 90004, title: 'inline: unsupported search', body: 'do the thing', url: '' }],
+      repoPath,
+      runtime: 'gemini',
+      constraints: '',
+      qualitySearch: { taskContract },
+    })).rejects.toThrow('not supported by the selected worker runtime');
   });
 });

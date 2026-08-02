@@ -59,6 +59,19 @@ export async function createMission(input: CreateMissionInput) {
   if (!Array.isArray(input.issues) || input.issues.length === 0) {
     throw new Error('At least one loaded issue is required.');
   }
+  if (input.qualitySearch && input.issues.length !== 1) {
+    throw new Error('Quality search requires exactly one task per mission.');
+  }
+  if (input.qualitySearch && input.comparisonModels?.length) {
+    throw new Error('Quality search cannot be combined with a separate comparison fan-out.');
+  }
+  if (input.qualitySearch && input.huddle) {
+    throw new Error('Quality search already uses a sealed contract and cannot be combined with huddle mode.');
+  }
+  const qualitySearchRuntime = input.issues[0]?.runtime ?? input.runtime;
+  if (input.qualitySearch && qualitySearchRuntime !== 'codex' && qualitySearchRuntime !== 'claude-code') {
+    throw new Error('Quality search is not supported by the selected worker runtime yet.');
+  }
 
   const loadedIssues = input.issues.map((issue, index) => normalizeLoadedIssue(issue, index));
   const duplicateIssueNumber = loadedIssues.find((issue, index) => (
@@ -189,6 +202,13 @@ export async function createMission(input: CreateMissionInput) {
       ...(issueMeta ? { issue: issueMeta } : {}),
       ...(typeof input.useBrain === 'boolean' ? { useBrain: input.useBrain } : {}),
       ...(typeof input.huddle === 'boolean' ? { huddle: input.huddle } : {}),
+      taskContractRequired: true,
+      ...(input.qualitySearch
+        ? {
+            taskContract: input.qualitySearch.taskContract,
+            qualitySearch: { version: 1 as const, role: null, repairAttempts: 0 },
+          }
+        : {}),
       // #1329 — carry the dispatching orchestrator thread id so the worker
       // inherits that thread's session rules via `buildPacketPrompt`.
       ...(typeof input.orchestratorThreadId === 'string' && input.orchestratorThreadId.trim()

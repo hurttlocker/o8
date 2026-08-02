@@ -74,6 +74,40 @@ describe('best-of-N fan-out', () => {
     expect(new Set(out.packets.map((p) => p.branchTarget)).size).toBe(3);
   });
 
+  it('turns an armed quality-search seed into two deliberate roles on one sealed contract', () => {
+    const taskContract = {
+      version: 1 as const,
+      requirements: [{
+        id: 'R1',
+        source: 'Complete the route.',
+        expectedBehavior: 'The route works.',
+        productionPath: 'route -> service',
+        verification: 'focused test',
+      }],
+      smallestRoute: [{
+        path: 'src/route.ts',
+        requirements: ['R1'],
+        reason: 'The route owns the behavior.',
+      }],
+      exclusions: [],
+    };
+    const out = fanOutComparisonPackets(stateWithSeed({
+      assignedModel: 'frontier-model',
+      taskContract,
+      taskContractRequired: true,
+      qualitySearch: { version: 1, role: null, repairAttempts: 0 },
+    }));
+
+    expect(out.packets).toHaveLength(2);
+    expect(out.packets.map((packet) => packet.qualitySearch?.role)).toEqual([
+      'minimal_complete',
+      'robustness_complete',
+    ]);
+    expect(out.packets.map((packet) => packet.assignedModel)).toEqual(['frontier-model', 'frontier-model']);
+    expect(out.packets.map((packet) => packet.taskContract)).toEqual([taskContract, taskContract]);
+    expect(out.packets[0]?.comparisonGroupId).toMatch(/^quality-/);
+  });
+
   it('is a no-op (same reference) for a packet without comparisonModels', () => {
     const state = stateWithSeed({});
     const out = fanOutComparisonPackets(state);

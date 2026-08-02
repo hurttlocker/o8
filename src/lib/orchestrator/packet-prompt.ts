@@ -7,6 +7,11 @@ import { getTopRulesForPacket, readRepoScopedRules } from '@/lib/dispatch/rules-
 import { readPacketAttemptLearnings, type AttemptLearning } from '@/lib/orchestrator/attempt-log';
 import { readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
 import { buildPacketSpecPromptSection } from '@/lib/orchestrator/packet-spec';
+import {
+  buildPacketTaskContractInstructions,
+  buildSealedPacketTaskContractInstructions,
+} from '@/lib/orchestrator/packet-task-contract';
+import { buildQualitySearchRolePrompt } from '@/lib/orchestrator/quality-search';
 import { buildSessionRulesBlock } from '@/lib/orchestrator/session-rules-prompt';
 import { buildPacketSelfReviewInstructions } from '@/lib/orchestrator/self-review';
 import { DEVIATIONS_CLAUSE } from '@/lib/orchestrator/packet-deviations';
@@ -308,6 +313,14 @@ export async function buildPacketPrompt(
   // block so weaker models see adjacent risk surfaces up-front.
   const edgeCaseSections = renderEdgeCaseSections(packet.edgeCaseSites);
   const sandboxVerificationSections = buildSandboxVerificationSections(packet);
+  const taskContractSections = packet.taskContract
+    ? buildSealedPacketTaskContractInstructions(packet.taskContract)
+    : packet.taskContractRequired
+      ? buildPacketTaskContractInstructions()
+      : [];
+  const qualitySearchRoleSection = packet.qualitySearch?.role
+    ? buildQualitySearchRolePrompt(packet.qualitySearch.role)
+    : null;
   // 2026-06-11 — "Workers use the Brain". Per-packet override > operator
   // setting ('auto' = non-frontier runtimes only). Tells the worker about
   // `o8 ask` so it queries org memory instead of re-deriving it via search.
@@ -406,6 +419,8 @@ export async function buildPacketPrompt(
     ...readBudgetSections,
     ...edgeCaseSections,
     ...sandboxVerificationSections,
+    ...taskContractSections,
+    qualitySearchRoleSection,
     // #1490 — standing deviations clause. Every worker keeps an
     // implementation-notes.md and logs forced departures from the plan under a
     // '## Deviations' heading; review reads it back and surfaces it.

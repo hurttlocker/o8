@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
+import { QUALITY_SEARCH_ROLES } from '@/lib/orchestrator/quality-search';
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
 
 /**
@@ -13,8 +14,8 @@ import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchest
  * `create_mission`, which stamps the seed packet.
  */
 
-function buildComparisonGroupId() {
-  return `cmp-${Date.now()}-${randomUUID().slice(0, 8)}`;
+function buildComparisonGroupId(qualitySearch: boolean) {
+  return `${qualitySearch ? 'quality' : 'cmp'}-${Date.now()}-${randomUUID().slice(0, 8)}`;
 }
 
 /**
@@ -31,9 +32,19 @@ export function fanOutComparisonPackets(state: OrchestratorMissionState): Orches
   let changed = false;
 
   for (const packet of state.packets) {
-    const comparisonModels = (packet.comparisonModels ?? [])
+    const qualitySearchSeed = packet.qualitySearch?.version === 1
+      && packet.qualitySearch.role === null
+      && Boolean(packet.taskContract)
+      && !packet.comparisonGroupId;
+    const configuredModels = (packet.comparisonModels ?? [])
       .map((model) => model.trim())
       .filter(Boolean);
+    const qualitySearchModel = packet.workerRouting?.selectedModel
+      ?? packet.assignedModel
+      ?? packet.runtime;
+    const comparisonModels = qualitySearchSeed
+      ? [qualitySearchModel, qualitySearchModel]
+      : configuredModels;
     const shouldFanOut = comparisonModels.length > 0 && !packet.comparisonGroupId;
 
     if (!shouldFanOut) {
@@ -42,17 +53,20 @@ export function fanOutComparisonPackets(state: OrchestratorMissionState): Orches
     }
 
     changed = true;
-    const comparisonGroupId = buildComparisonGroupId();
+    const comparisonGroupId = buildComparisonGroupId(qualitySearchSeed);
     activeComparisonGroups.add(comparisonGroupId);
     console.log(
       `[best-of-n] Fanning out ${packet.id} into ${comparisonModels.length} comparison lane${comparisonModels.length === 1 ? '' : 's'} (${comparisonModels.join(', ')})`,
     );
 
     comparisonModels.forEach((model, index) => {
+      const qualitySearchRole = qualitySearchSeed ? QUALITY_SEARCH_ROLES[index] : undefined;
       nextPackets.push({
         ...packet,
         id: `${packet.id}-cmp-${index}`,
-        title: `${packet.title} (${model})`,
+        title: qualitySearchRole
+          ? `${packet.title} (${qualitySearchRole === 'minimal_complete' ? 'smallest complete' : 'robustness'})`
+          : `${packet.title} (${model})`,
         branchTarget: `${packet.branchTarget}-cmp-${index}`,
         queueState: 'queued',
         releaseState: 'pending',
@@ -67,6 +81,15 @@ export function fanOutComparisonPackets(state: OrchestratorMissionState): Orches
         comparisonGroupId,
         comparisonIndex: index,
         assignedModel: model,
+        ...(qualitySearchRole
+          ? {
+              qualitySearch: {
+                version: 1 as const,
+                role: qualitySearchRole,
+                repairAttempts: packet.qualitySearch?.repairAttempts ?? 0,
+              },
+            }
+          : {}),
       });
     });
   }

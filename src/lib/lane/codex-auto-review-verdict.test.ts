@@ -47,7 +47,7 @@ describe('Codex auto-review verdict fallback', () => {
       reviewTurnId: 'review-turn-codex-verdict-test',
       rawText: [
         'Review complete.',
-        'CODEX_AUTO_REVIEW: {"approved":true,"findings":[]}',
+        `CODEX_AUTO_REVIEW: {"approved":true,"findings":[],"contractCoverageEvidence":{"contractVersion":1,"headSha":"${head}","entries":[{"requirementId":"R1","productionPath":"README.md","anchor":"line 1","verification":"read rendered content"}]}}`,
       ].join('\n'),
     });
 
@@ -79,6 +79,16 @@ describe('Codex auto-review verdict fallback', () => {
       secondPassAgreed: false,
       reviewTurnId: 'review-turn-codex-verdict-test',
       reviewTurnOutcome: 'completed',
+      contractCoverageEvidence: {
+        contractVersion: 1,
+        headSha: head,
+        entries: [{
+          requirementId: 'R1',
+          productionPath: 'README.md',
+          anchor: 'line 1',
+          verification: 'read rendered content',
+        }],
+      },
     });
 
     const events = approval ? listApprovalEvents(approval.id) : [];

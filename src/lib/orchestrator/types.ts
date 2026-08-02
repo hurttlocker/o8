@@ -1,6 +1,7 @@
 // Orchestrator domain types — runtimes, packets, lanes
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
 import type { LaneMergeMode } from '@/lib/lane/merge-mode';
+import type { QualitySearchPacketState } from '@/lib/orchestrator/quality-search';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorRuntime, RuntimeWorkerProvider } from '@/lib/orchestrator/runtime-capabilities';
 
@@ -159,6 +160,34 @@ export interface OrchestratorDecompositionMetadata {
   lineCount: number;
 }
 
+export interface PacketTaskContractRequirement {
+  id: string;
+  /** Exact task wording or a concise, traceable anchor to it. */
+  source: string;
+  /** Observable behavior the implementation must produce. */
+  expectedBehavior: string;
+  /** Real entry point and call path expected to exercise the behavior. */
+  productionPath: string;
+  /** Command or concrete evidence that will prove the requirement. */
+  verification: string;
+}
+
+export interface PacketTaskContractRoute {
+  /** Repo-relative file or bounded change unit in the smallest credible design. */
+  path: string;
+  /** Requirement IDs served by this change unit. */
+  requirements: string[];
+  /** Why this unit belongs in the smallest complete route. */
+  reason: string;
+}
+
+export interface PacketTaskContract {
+  version: 1;
+  requirements: PacketTaskContractRequirement[];
+  smallestRoute: PacketTaskContractRoute[];
+  exclusions: string[];
+}
+
 export interface OrchestratorPacket {
   id: string;
   referenceLabel: string;
@@ -241,6 +270,9 @@ export interface OrchestratorPacket {
   comparisonIndex?: number;
   /** The model this specific packet runs on (set during fan-out). */
   assignedModel?: string | null;
+  /** Opt-in two-candidate search state. The seed has a null role; fan-out
+   * assigns one bounded role to each isolated candidate. */
+  qualitySearch?: QualitySearchPacketState;
   /** Cheap-tier packet has had a same-house frontier escalation suggested. */
   tierEscalated?: boolean;
   /** Files predicted to be touched, computed from packet scope vs skeleton cache */
@@ -342,6 +374,19 @@ export interface OrchestratorPacket {
     capturedAt: string;
   } | null;
   /**
+   * First machine-readable task contract emitted by the worker before edits.
+   * Captured from the runtime transcript at completion, persisted on the packet,
+   * and supplied unchanged to every review pass. Missing means coverage and the
+   * claimed smallest route were never made auditable.
+   */
+  taskContract?: PacketTaskContract | null;
+  /**
+   * True for packets created after the contract-first quality pipeline was
+   * enabled. Legacy/in-flight packets omit it so review does not retroactively
+   * fail work dispatched before the worker received contract instructions.
+   */
+  taskContractRequired?: boolean;
+  /**
    * HTML packet explainer + quiz (#1491). Generated fire-and-forget when the
    * packet reaches review — a self-contained explainer artifact plus a
    * structured quiz the human-UI approve gate reads. `status` drives the review
@@ -432,6 +477,7 @@ export interface PacketContext {
   changedFiles: string[];
   attemptLearnings?: string[];
   selfReview?: PacketSelfReview;
+  taskContract?: PacketTaskContract;
   reviewFindings?: OrchestratorReviewFinding[];
   patterns?: string[];
   conflictZones?: string[];

@@ -1,6 +1,13 @@
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
 import type { MergeCheckResult } from '@/lib/lane/preview-merge';
-import type { OrchestratorRuntime, PacketDispatcherAttribution, WorkerIntent, WorkerProvider } from '@/lib/orchestrator/types';
+import type { ReviewCoverageEvidence } from '@/lib/orchestrator/task-contract-coverage';
+import type {
+  OrchestratorRuntime,
+  PacketDispatcherAttribution,
+  PacketTaskContract,
+  WorkerIntent,
+  WorkerProvider,
+} from '@/lib/orchestrator/types';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 
 export interface LoadedIssue {
@@ -64,6 +71,11 @@ export interface CreateMissionInput {
    * the one runtime. Clamped to ≤4 at the route. Omit for a normal single packet.
    */
   comparisonModels?: string[];
+  /** Opt-in bounded quality search. Restricted to one task and one sealed
+   * contract so both candidates start from identical requirements. */
+  qualitySearch?: {
+    taskContract: PacketTaskContract;
+  };
 }
 
 export interface DispatchMissionInput {
@@ -80,6 +92,8 @@ export interface SubmitReviewInput {
   findings: OrchestratorReviewFinding[];
   approved: boolean;
   reviewedHeadSha?: string;
+  /** Per-requirement evidence bound to the sealed contract and reviewed HEAD. */
+  contractCoverageEvidence?: ReviewCoverageEvidence;
   /** #732 — Directives the review verified were respected by the diff. */
   directivesApplied?: string[];
   /** #732 — Directives the review found contradicted by the diff. */

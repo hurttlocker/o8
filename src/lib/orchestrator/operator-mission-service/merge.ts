@@ -4,6 +4,7 @@ import type { MergeOrderRecommendation } from '@/lib/worktree/conflicts';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import type { ApproveAndMergeInput, MergePacketResult, PickComparisonWinnerInput } from './types';
 import { autoResolveMergedPacketVerificationIncidents } from '@/lib/supervisor/merged-incident-resolution';
+import { attachQualitySearchReceipt, ensureComparisonWinnerReview, resolveQualitySearchComparison } from './quality-search-selection';
 type LaneRegistryModule = typeof import('@/lib/lane/registry');
 type ActivePacketLane = NonNullable<ReturnType<LaneRegistryModule['findLatestLaneByPacket']>>;
 
@@ -832,30 +833,33 @@ export async function pickComparisonWinner(input: PickComparisonWinnerInput) {
     { currentMissionState },
     { withLockedState },
     { archiveLane },
-    { submitPacketReview },
     { recordLaneEvent },
   ] = await Promise.all([
     loadShared(),
     loadControlPlane(),
     loadLaneRegistry(),
-    loadReview(),
     loadLaneEvents(),
   ]);
   const state = currentMissionState();
-  const winner = state.packets.find((candidate) => candidate.id === input.packetId);
-  if (!winner) {
+  const requestedWinner = state.packets.find((candidate) => candidate.id === input.packetId);
+  if (!requestedWinner) {
     throw new Error(`Packet ${input.packetId} not found.`);
   }
 
-  const comparisonGroupId = winner.comparisonGroupId?.trim();
+  const comparisonGroupId = requestedWinner.comparisonGroupId?.trim();
   if (!comparisonGroupId) {
-    throw new Error(`Packet ${winner.id} is not part of a comparison group.`);
+    throw new Error(`Packet ${requestedWinner.id} is not part of a comparison group.`);
   }
 
   const comparisonPackets = state.packets.filter((packet) => packet.comparisonGroupId === comparisonGroupId);
   if (comparisonPackets.length < 2) {
     throw new Error(`Comparison group ${comparisonGroupId} has no alternate candidates to compare.`);
   }
+  const qualityResolution = await resolveQualitySearchComparison({ comparisonPackets, comparisonGroupId, requestedWinner });
+  if (qualityResolution.terminalResult) return qualityResolution.terminalResult;
+  const qualitySearchGroup = qualityResolution.enabled;
+  const winner = qualityResolution.winner;
+  const qualitySearchReceipt = qualityResolution.receipt;
 
   const archivedPacketIds = comparisonPackets
     .filter((packet) => packet.id !== winner.id)
@@ -873,6 +877,7 @@ export async function pickComparisonWinner(input: PickComparisonWinnerInput) {
       }
 
       if (packet.id === winner.id) {
+        attachQualitySearchReceipt(packet, qualitySearchReceipt);
         packet.lastEventAt = archivedAt;
         packet.lastEventLabel = 'comparison_winner_selected';
         if (packet.lane) {
@@ -883,6 +888,7 @@ export async function pickComparisonWinner(input: PickComparisonWinnerInput) {
       }
 
       packet.archivedAt = archivedAt;
+      attachQualitySearchReceipt(packet, qualitySearchReceipt);
       packet.status = 'archived';
       packet.queueState = 'held';
       packet.blockedReason = null;
@@ -902,16 +908,7 @@ export async function pickComparisonWinner(input: PickComparisonWinnerInput) {
     autoResolveMergedPacketVerificationIncidents({ packetId, event: 'comparison_loser_archived' });
   }
 
-  // Gap A (governance): record the operator's pick as an APPROVING review BEFORE
-  // the merge, so the gate sees a HEAD-matched review instead of falling through to
-  // risk-tier and stalling on a pending "human review required". submitPacketReview
-  // captures the winner's current HEAD itself. Best-effort: a failed record must not
-  // swallow the merge attempt (the gate still surfaces any real blocker).
-  try {
-    await submitPacketReview({ packetId: winner.id, findings: [], approved: true });
-  } catch (error) {
-    console.error('[comparison-pick] winner review record failed:', error);
-  }
+  await ensureComparisonWinnerReview(qualitySearchGroup, winner.id);
 
   // Gap B (audit): the pick is a first-class, governed decision — record it on the
   // winner's lane so the ledger answers "why W over X, Y" (parity with browser_acted).
@@ -921,6 +918,7 @@ export async function pickComparisonWinner(input: PickComparisonWinnerInput) {
         groupId: comparisonGroupId,
         winnerPacketId: winner.id,
         archivedPacketIds,
+        ...(qualitySearchReceipt ? { qualitySearch: qualitySearchReceipt } : {}),
       });
     } catch (error) {
       console.error('[comparison-pick] comparison_resolved event failed:', error);
@@ -936,5 +934,6 @@ export async function pickComparisonWinner(input: PickComparisonWinnerInput) {
     ...mergeResult,
     groupId: comparisonGroupId,
     archivedPacketIds,
+    ...(qualitySearchReceipt ? { qualitySearch: qualitySearchReceipt } : {}),
   };
 }

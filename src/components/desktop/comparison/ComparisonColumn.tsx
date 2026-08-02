@@ -15,8 +15,8 @@ const COMPARISON_BASE = 'main';
  * One column of the N-up compare matrix — a single best-of-N candidate's diff,
  * read straight from its isolated worktree. Instances the SAME proven units the
  * single-worktree Review surface uses (`useWorkspaceChanges` + `ReviewFileRow`),
- * just parameterized by this candidate's `worktreePath`. Read-only here; the gated
- * "pick winner" lands in a later stage.
+ * just parameterized by this candidate's `worktreePath`. The column stays read-only;
+ * the matrix owns the gated selection action.
  */
 
 // Stable signal objects — the matrix doesn't drive ReviewFileRow's keyboard-nav /
@@ -51,6 +51,11 @@ export function ComparisonColumn({
   const preview = useMergePreview(candidate.packet.id, candidate.complete);
   const { packet } = candidate;
   const model = packet.assignedModel || packet.runtime || `candidate ${index + 1}`;
+  const roleLabel = packet.qualitySearch?.role === 'minimal_complete'
+    ? 'smallest complete route'
+    : packet.qualitySearch?.role === 'robustness_complete'
+      ? 'robustness route'
+      : null;
   const fileCount = changes.files.length;
   // Open diffs inline for small changesets, collapse dense ones (each row
   // lazy-fetches its diff on open, and a matrix multiplies that by N columns).
@@ -113,6 +118,11 @@ export function ComparisonColumn({
             ? 'loading…'
             : `${fileCount} file${fileCount === 1 ? '' : 's'} · +${changes.totalAdditions} −${changes.totalDeletions}`}
         </span>
+        {roleLabel ? (
+          <span style={{ fontSize: 10.5, fontWeight: 400, letterSpacing: '-0.2px', color: 'var(--t-text-muted)' }}>
+            {roleLabel}
+          </span>
+        ) : null}
         {candidate.complete ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 1, minWidth: 0 }}>
             {preview.loading ? (

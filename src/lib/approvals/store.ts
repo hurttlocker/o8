@@ -684,6 +684,7 @@ export function recordOrchestratorReview(
       approved: normalizedReview.approved,
       findings: normalizedReview.findings,
       ...(normalizedReview.reviewedHeadSha ? { reviewedHeadSha: normalizedReview.reviewedHeadSha } : {}),
+      ...(normalizedReview.contractCoverageEvidence ? { contractCoverageEvidence: normalizedReview.contractCoverageEvidence } : {}),
       requiresSecondPass: normalizedReview.requiresSecondPass === true,
       secondPassAgreed: approval.args?.secondPassAgreed === true ? true : false,
       ...(normalizedReview.parseWarning ? { parseWarning: normalizedReview.parseWarning } : {}),
@@ -693,7 +694,6 @@ export function recordOrchestratorReview(
     },
     audit: [...approval.audit, reviewEvent],
   };
-
   let nextApproval = reviewedApproval;
   if (normalizedReview.approved && allFindingsResolved(normalizedReview.findings) && reviewedApproval.status === 'pending') {
     const resolvedAt = Date.now();

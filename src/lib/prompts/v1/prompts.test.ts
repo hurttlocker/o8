@@ -62,6 +62,70 @@ describe('programmatic prompt catalog v1', () => {
     });
     expect(review).toContain('An agent has completed work on lane "Prompt work"');
     expect(review).toContain('lane_command with verb "merge"');
+    expect(review).not.toContain('## Pre-edit task contract');
+    expect(review).not.toContain('MINIMALITY:');
+  });
+
+  it('carries the same task contract into both review passes', () => {
+    const taskContract = {
+      version: 1 as const,
+      requirements: [{
+        id: 'R1',
+        source: 'Require contract-first review.',
+        expectedBehavior: 'Both reviewers verify the same requirement.',
+        productionPath: 'worker prompt -> completion context -> review prompt',
+        verification: 'prompt builder tests',
+      }],
+      smallestRoute: [{
+        path: 'src/lib/prompts/v1/review.ts',
+        requirements: ['R1'],
+        reason: 'The shared builder owns both review protocols.',
+      }],
+      exclusions: [],
+    };
+    const review = buildAutoReviewPromptV1({
+      lane: { id: 'lane-1', label: 'Contract work', branch: 'issue/contract', packetId: 'pkt-1' },
+      depth: 'standard',
+      worktreePath: '/tmp/worktree',
+      diffSummary: 'One file changed.',
+      selfReviewSection: '## Agent self-review',
+      deviationsEntries: [],
+      taskContract,
+      taskContractRequired: true,
+    });
+    const blind = buildBlindSecondPassPromptV1({
+      laneLabel: 'Contract work',
+      branch: 'issue/contract',
+      packetId: 'pkt-1',
+      diffSummary: 'One file changed.',
+      cwd: '/tmp/worktree',
+      highRiskReasons: ['review contract changed'],
+      taskContract,
+      taskContractRequired: true,
+    });
+
+    for (const prompt of [review, blind]) {
+      expect(prompt).toContain('R1: Both reviewers verify the same requirement.');
+      expect(prompt).toContain('review.ts -> R1');
+      expect(prompt).toContain('MINIMALITY');
+    }
+    expect(review).toContain('include contractCoverageEvidence');
+    expect(review).toContain('reviewedHeadSha must equal contractCoverageEvidence.headSha');
+  });
+
+  it('fails contract-armed review closed when the worker omitted the contract', () => {
+    const review = buildAutoReviewPromptV1({
+      lane: { id: 'lane-1', label: 'Missing contract', branch: 'issue/contract' },
+      depth: 'deep-dive',
+      worktreePath: '/tmp/worktree',
+      diffSummary: 'One file changed.',
+      selfReviewSection: '## Agent self-review',
+      deviationsEntries: [],
+      taskContractRequired: true,
+    });
+
+    expect(review).toContain('Structured contract: missing');
+    expect(review).toContain('You may NOT approve if the pre-edit task contract is missing');
   });
 
   it('keeps the native Symon template versioned and time-parameterized', () => {

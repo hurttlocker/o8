@@ -1,8 +1,9 @@
 import type { LaneMergeMode } from '@/lib/lane/merge-mode';
-import { normalizeDecompositionMetadata, normalizePacketDispatcher, normalizePacketType } from '@/lib/orchestrator/normalize/decomposition';
+import { normalizeDecompositionMetadata, normalizePacketDispatcher, normalizePacketTaskContractFields, normalizePacketType } from '@/lib/orchestrator/normalize/decomposition';
 import { normalizeRuntimeStatusToOrchestratorStatus } from '@/lib/orchestrator/runtime-status';
 import { runtimeTruthHasActiveWriter } from '@/lib/orchestrator/runtime-truth';
 import { normalizePacketRecovery } from '@/lib/lane/recovery-info';
+import { normalizeQualitySearchPacketState } from '@/lib/orchestrator/quality-search';
 import { hydrateOrchestratorTurnPinEntry, installOrchestratorTurnPinFetchPatch, persistOrchestratorTurnPin, readCachedOrchestratorTurnPin, stageOrchestratorTurnPin } from '@/lib/orchestrator/turn-pins';
 import {
   normalizeRequestedRuntime,
@@ -42,9 +43,7 @@ const ORCHESTRATOR_MODEL_STORAGE_PREFIX = 'o8:orchestrator:model:';
 const ORCHESTRATOR_PRELUDE_STORAGE_PREFIX = 'o8:orchestrator:resume-prelude:';
 const STALE_LANE_REASON = 'Previously bound workspace lane is missing. Re-launch to reattach.';
 const MAX_RECOVERY_ATTEMPTS = 2;
-// #1469 — human sentences for the lane-event labels that park a lane
-// awaiting_input. The real failure reason must reach the packet card, not
-// just next-server.log.
+// #1469 — human sentences for labels that park a lane awaiting_input; the real failure must reach the packet card.
 function friendlyAwaitingInputReason(label: string | null | undefined): string | null {
   switch (label) {
     case 'rebase_conflict':
@@ -411,6 +410,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
       ? Math.floor(packet.comparisonIndex)
       : undefined,
     assignedModel: (typeof packet.assignedModel === 'string' && packet.assignedModel.trim()) || null,
+    qualitySearch: normalizeQualitySearchPacketState(packet.qualitySearch),
     tierEscalated: packet.tierEscalated === true ? true : undefined,
     predictedFiles: Array.isArray(packet.predictedFiles)
       ? packet.predictedFiles.map((file) => String(file).trim()).filter(Boolean).slice(0, 64)
@@ -444,7 +444,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     edgeCaseSites: normalizePacketEdgeCaseSites(packet.edgeCaseSites),
     // #1490 — deviations + #1491 — explainer: preserved verbatim when valid,
     // stripped silently when malformed so existing callers never break.
-    deviations: normalizePacketDeviations(packet.deviations),
+    deviations: normalizePacketDeviations(packet.deviations), ...normalizePacketTaskContractFields(packet),
     explainer: normalizePacketExplainer(packet.explainer),
     // #1492 — buy-in doc: preserved verbatim when valid, stripped when malformed.
     buyinDoc: normalizePacketBuyinDoc(packet.buyinDoc),

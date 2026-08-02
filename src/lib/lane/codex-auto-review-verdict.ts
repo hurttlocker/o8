@@ -1,5 +1,6 @@
 import type { ApprovalAuditEvent, OrchestratorReviewFinding } from '@/lib/approvals/types';
 import { parseReviewFindings } from '@/lib/orchestrator/review-finding-input';
+import { readCoverageEvidence, type ReviewCoverageEvidence } from '@/lib/orchestrator/task-contract-coverage';
 import type { Lane } from './types';
 
 const CODEX_AUTO_REVIEW_MARKER = 'CODEX_AUTO_REVIEW:';
@@ -9,6 +10,7 @@ export interface ParsedCodexAutoReviewVerdict {
   approved: boolean;
   findings: OrchestratorReviewFinding[];
   rawText: string;
+  contractCoverageEvidence?: ReviewCoverageEvidence;
   parseWarning?: string;
 }
 
@@ -121,7 +123,8 @@ export function appendCodexAutoReviewVerdictInstructions(prompt: string): string
     '## Codex auto-review fallback',
     '',
     'If submit_review is unavailable in this runtime, still complete the review and end with one final machine-readable line:',
-    `${CODEX_AUTO_REVIEW_MARKER} {"approved":true,"findings":[]}`,
+    `${CODEX_AUTO_REVIEW_MARKER} {"approved":true,"findings":[],"contractCoverageEvidence":{"contractVersion":1,"headSha":"<git rev-parse HEAD>","entries":[{"requirementId":"R1","productionPath":"src/example.ts","anchor":"symbol or line","verification":"command or observed behavior"}]}}`,
+    'When the review prompt contains a pre-edit task contract, contractCoverageEvidence is required and must contain every sealed requirement ID. Omit it only for legacy reviews with no task contract.',
     'For requested changes, set approved to false and include findings with file, line when known, severity (bug|rule_violation|note), description, and status (fixed|accepted|deferred).',
     'Do not put any text after the CODEX_AUTO_REVIEW line.',
   ].join('\n');
@@ -151,6 +154,9 @@ export function parseCodexAutoReviewVerdict(rawText: string): ParsedCodexAutoRev
 
   try {
     const findings = parsePayloadFindings(payload);
+    const contractCoverageEvidence = readCoverageEvidence({
+      contractCoverageEvidence: payload.contractCoverageEvidence,
+    }) ?? undefined;
     if (!approved && findings.length === 0) {
       return {
         approved: false,
@@ -159,7 +165,7 @@ export function parseCodexAutoReviewVerdict(rawText: string): ParsedCodexAutoRev
         parseWarning: 'rejected verdict had no structured findings',
       };
     }
-    return { approved, findings, rawText: raw };
+    return { approved, findings, rawText: raw, contractCoverageEvidence };
   } catch (error) {
     return {
       approved: false,
@@ -201,6 +207,7 @@ export async function recordCodexAutoReviewVerdict(input: {
     reviewer: 'codex',
     approved: verdict.approved,
     reviewedHeadSha,
+    contractCoverageEvidence: verdict.contractCoverageEvidence,
     requiresSecondPass: verdict.approved && input.requiresSecondPass,
     rawText: verdict.parseWarning ? verdict.rawText : undefined,
     parseWarning: verdict.parseWarning,

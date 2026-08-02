@@ -14,7 +14,7 @@ import { execFileSync } from 'node:child_process';
 import { isSafeGitRef } from '@/lib/git/refs';
 import { capturePacketCompletionContext, readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
 import { readPacketDeviations, type PacketDeviations } from '@/lib/orchestrator/packet-deviations';
-import type { PacketSelfReview } from '@/lib/orchestrator/types';
+import type { PacketSelfReview, PacketTaskContract } from '@/lib/orchestrator/types';
 import { buildAutoReviewPromptV1 } from '@/lib/prompts/v1';
 import { runMergeGate, formatMergeGateForReview, type MergeGateResult } from './merge-gate';
 import { extractAddedLines, getLaneDiffFacts, parseDiffStat } from './lane-diff-facts';
@@ -413,6 +413,8 @@ function buildReviewPrompt(
   reviewScreenshot?: LaneReviewScreenshotReference | null,
   reviewWorktreePath?: string,
   deviations?: PacketDeviations | null,
+  taskContract?: PacketTaskContract | null,
+  taskContractRequired = false,
 ): string {
   const mergeGateSection = mergeGateResult ? formatMergeGateForReview(mergeGateResult) : null;
   const reviewRisk = classifyReviewRisk(changedFiles, addedLines);
@@ -434,6 +436,8 @@ function buildReviewPrompt(
     mechanicalChecksSummary,
     reviewScreenshot,
     adversarialReviewProtocol,
+    taskContract,
+    taskContractRequired,
   });
 }
 
@@ -466,11 +470,18 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
   // where the worker went off-plan. Null (no notes file / no heading) persists
   // as null so the surfaces render the asserted "No deviations reported" line.
   let deviations: PacketDeviations | null = null;
+  let taskContractRequired = false;
   if (lane.packetId) {
     try {
       deviations = readPacketDeviations(lane.worktreePath || lane.repoPath);
+      const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+      taskContractRequired = readOrchestratorControlPlaneState().packets
+        .find((packet) => packet.id === lane.packetId)?.taskContractRequired === true;
       const { patchMissionPacket } = await import('@/lib/orchestrator/operator-mission-service/packet-patch');
-      patchMissionPacket(lane.packetId, { deviations: deviations ?? null });
+      patchMissionPacket(lane.packetId, {
+        deviations: deviations ?? null,
+        taskContract: completionContext?.taskContract ?? null,
+      });
     } catch (error) {
       console.warn(`[auto-review] Failed to capture deviations for lane ${lane.id}:`, error);
     }
@@ -504,6 +515,8 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
     reviewScreenshot,
     diffSummary.cwd,
     deviations,
+    completionContext?.taskContract,
+    taskContractRequired,
   );
 
   // Dual-path routing (epic #1044): the `inAppOrchestratorEnabled` toggle is
@@ -593,7 +606,13 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
     return;
   }
 
-  const blindPrompt = buildBlindSecondPassPrompt(lane, diffSummary, reviewRisk.reasons);
+  const blindPrompt = buildBlindSecondPassPrompt(
+    lane,
+    diffSummary,
+    reviewRisk.reasons,
+    completionContext?.taskContract,
+    taskContractRequired,
+  );
   const secondPassThreadId = `thoughts-second-pass-${lane.id}-${randomUUID().slice(0, 8)}`;
   let secondPassText = '';
   const secondPassErrors: string[] = [];

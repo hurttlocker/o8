@@ -90,6 +90,12 @@ function fullPacketFixture() {
     comparisonGroupId: 'cmp-1',
     comparisonIndex: 1,
     assignedModel: 'gpt-5.5',
+    qualitySearch: {
+      version: 1,
+      role: 'robustness_complete',
+      repairAttempts: 0,
+      receipt: null,
+    },
     tierEscalated: true,
     predictedFiles: ['src/a.ts', 'src/b.ts'],
     workerIntent: 'reviewer',
@@ -130,6 +136,23 @@ function fullPacketFixture() {
       entries: ['Used a map instead of a set'],
       capturedAt: '2026-01-01T00:08:00.000Z',
     },
+    taskContract: {
+      version: 1,
+      requirements: [{
+        id: 'R1',
+        source: 'Issue body',
+        expectedBehavior: 'Preserve packet fields',
+        productionPath: 'normalizeOrchestratorMissionState -> normalizePacket',
+        verification: 'packet normalize test',
+      }],
+      smallestRoute: [{
+        path: 'src/lib/orchestrator/store.ts',
+        requirements: ['R1'],
+        reason: 'The normalize chokepoint owns packet persistence.',
+      }],
+      exclusions: ['No UI changes'],
+    },
+    taskContractRequired: true,
     explainer: {
       status: 'ready',
       artifactId: 'art-explainer-1',
@@ -177,12 +200,14 @@ describe('packet fields survive normalize', () => {
       tierEscalated: undefined,
       dispatchRuntimePin: undefined,
       orchestratorThreadId: undefined,
+      taskContractRequired: undefined,
     }));
 
     expect(normalized.packets[0].operatorStopped).toBeUndefined();
     expect(normalized.packets[0].tierEscalated).toBeUndefined();
     expect(normalized.packets[0].dispatchRuntimePin).toBeNull();
     expect(normalized.packets[0].orchestratorThreadId).toBeUndefined();
+    expect(normalized.packets[0].taskContractRequired).toBeUndefined();
   });
 
   it('truncates an oversized deviations raw body with an explicit marker', () => {

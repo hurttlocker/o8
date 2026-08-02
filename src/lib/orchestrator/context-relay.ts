@@ -13,6 +13,10 @@ import {
   parsePacketSelfReview,
   stripPacketSelfReview,
 } from '@/lib/orchestrator/self-review';
+import {
+  parsePacketTaskContract,
+  stripPacketTaskContract,
+} from '@/lib/orchestrator/packet-task-contract';
 import type { OrchestratorRuntime, PacketContext } from '@/lib/orchestrator/types';
 import { isDispatchableRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
@@ -161,6 +165,19 @@ function findLatestSelfReview(entries: RuntimeTranscriptEntry[]): PacketContext[
   }
 
   return buildMissingPacketSelfReview();
+}
+
+function findFirstTaskContract(entries: RuntimeTranscriptEntry[]): PacketContext['taskContract'] {
+  for (const entry of entries) {
+    if (entry.role !== 'assistant' || !entry.text.trim()) {
+      continue;
+    }
+    const taskContract = parsePacketTaskContract(entry.text);
+    if (taskContract) {
+      return taskContract;
+    }
+  }
+  return undefined;
 }
 
 function buildChangedFileList(entries: RuntimeTranscriptEntry[], runtimeChangedFiles: Array<{ path: string }>): string[] {
@@ -432,6 +449,7 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
   const telemetry = telemetryResult.status === 'fulfilled' ? telemetryResult.value : undefined;
   const lastAssistantEntry = findLastAssistantEntry(transcript);
   const selfReview = findLatestSelfReview(transcript);
+  const taskContract = findFirstTaskContract(transcript);
   const matchingApprovals = listApprovalsForContext({
     packetId: normalizedPacketId,
     laneId: lane?.id ?? undefined,
@@ -453,12 +471,16 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
       : {}),
     summary: buildPacketSummary({
       lifecycleSummary: normalizeSummaryText(agent?.runtimeSurface?.lifecycle?.summary ?? '', SUMMARY_LIMIT),
-      assistantSummary: normalizeSummaryText(stripPacketSelfReview(lastAssistantEntry?.text ?? ''), SUMMARY_LIMIT),
+      assistantSummary: normalizeSummaryText(
+        stripPacketTaskContract(stripPacketSelfReview(lastAssistantEntry?.text ?? '')),
+        SUMMARY_LIMIT,
+      ),
       note: findRecentNote(transcript, lastAssistantEntry?.id ?? null),
       changedFiles,
     }),
     changedFiles,
     selfReview,
+    ...(taskContract ? { taskContract } : {}),
     completedAt: agent?.runtimeSurface?.lifecycle?.lastRunFinishedAt
       ?? latestTranscriptTimestamp(transcript)
       ?? new Date().toISOString(),

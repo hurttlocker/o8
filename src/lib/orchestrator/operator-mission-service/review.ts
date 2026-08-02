@@ -16,6 +16,7 @@ import type {
   OrchestratorPacketReview,
   OrchestratorPacketReviewFinding,
 } from '@/lib/orchestrator/types';
+import type { ReviewCoverageEvidence } from '@/lib/orchestrator/task-contract-coverage';
 import { currentMissionState, log } from './shared';
 import type { SubmitReviewInput } from './types';
 
@@ -132,6 +133,7 @@ function recordPacketReviewAudit(
   approved: boolean,
   summary: string,
   reviewedHeadSha: string | undefined,
+  contractCoverageEvidence: ReviewCoverageEvidence | undefined,
   reviewTurn: { id: string; outcome: 'active' | 'completed' },
 ) {
   const lane = findLaneByPacket(packet.id);
@@ -150,6 +152,7 @@ function recordPacketReviewAudit(
       approved,
       findings,
       reviewedHeadSha,
+      contractCoverageEvidence,
       requiresSecondPass,
       secondPassAgreed: false,
       reviewTurnId: reviewTurn.id,
@@ -222,6 +225,7 @@ export async function submitPacketReview(input: SubmitReviewInput) {
     input.approved,
     summary,
     reviewedHeadSha,
+    input.contractCoverageEvidence,
     reviewTurn,
   );
 

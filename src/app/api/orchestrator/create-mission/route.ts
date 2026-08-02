@@ -5,6 +5,7 @@ import { createMission, type ExistingBranchPolicy, type LoadedIssue } from '@/li
 import { getOperatorDefaultsSync, resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
 import { isSingleSubCheapTierWorker, resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-profile';
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { normalizePacketTaskContract } from '@/lib/orchestrator/packet-task-contract';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import {
   formatDispatchableRuntimeChoices,
@@ -67,6 +68,13 @@ function normalizeComparisonModels(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const models = value.map((model) => String(model).trim()).filter(Boolean).slice(0, MAX_COMPARISON_MODELS);
   return models.length > 0 ? models : undefined;
+}
+
+function normalizeQualitySearch(value: unknown) {
+  const record = asRecord(value);
+  if (!record) return null;
+  const taskContract = normalizePacketTaskContract(record.taskContract);
+  return taskContract ? { taskContract } : null;
 }
 
 function resolveDispatcher(request: NextRequest, record: Record<string, unknown>): PacketDispatcherAttribution {
@@ -188,6 +196,18 @@ export async function POST(request: NextRequest) {
   if (record.existingBranchPolicy !== undefined && !existingBranchPolicy) {
     return operatorError('invalid_request', 'existingBranchPolicy must be one of: "auto", "reset", "continue", "error".', 400);
   }
+  const qualitySearch = record.qualitySearch === undefined
+    ? undefined
+    : normalizeQualitySearch(record.qualitySearch);
+  if (record.qualitySearch !== undefined && !qualitySearch) {
+    return operatorError('invalid_request', 'qualitySearch.taskContract must be a valid version 1 task contract.', 400);
+  }
+  if (qualitySearch && record.comparisonModels !== undefined) {
+    return operatorError('invalid_request', 'qualitySearch cannot be combined with comparisonModels.', 400);
+  }
+  if (qualitySearch && record.huddle === true) {
+    return operatorError('invalid_request', 'qualitySearch already uses a sealed contract and cannot be combined with huddle mode.', 400);
+  }
 
   try {
     const result = await createMission({
@@ -203,7 +223,7 @@ export async function POST(request: NextRequest) {
       sequential: record.sequential === true,
       existingBranchPolicy,
       ...(typeof record.useBrain === 'boolean' ? { useBrain: record.useBrain } : {}),
-      ...(huddle ? { huddle } : {}),
+      ...(huddle && !qualitySearch ? { huddle } : {}),
       // #1329 — carry the dispatching orchestrator thread id so workers inherit
       // its session rules. Optional; thread-less callers omit it.
       ...(typeof record.orchestratorThreadId === 'string' && record.orchestratorThreadId.trim()
@@ -213,6 +233,7 @@ export async function POST(request: NextRequest) {
       ...(normalizeComparisonModels(record.comparisonModels)
         ? { comparisonModels: normalizeComparisonModels(record.comparisonModels) }
         : {}),
+      ...(qualitySearch ? { qualitySearch } : {}),
     });
     return operatorSuccess(result, 201);
   } catch (error) {

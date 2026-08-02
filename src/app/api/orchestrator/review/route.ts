@@ -3,6 +3,7 @@ import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { submitPacketReview } from '@/lib/orchestrator/operator-mission-service';
 import { parseReviewFindings } from '@/lib/orchestrator/review-finding-input';
+import { readCoverageEvidence } from '@/lib/orchestrator/task-contract-coverage';
 import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
 
 export const runtime = 'nodejs';
@@ -30,6 +31,16 @@ export async function POST(request: NextRequest) {
   if (typeof record.approved !== 'boolean') {
     return operatorError('invalid_request', 'approved is required.', 400);
   }
+  const contractCoverageEvidence = record.contractCoverageEvidence === undefined
+    ? undefined
+    : readCoverageEvidence({ contractCoverageEvidence: record.contractCoverageEvidence });
+  if (record.contractCoverageEvidence !== undefined && !contractCoverageEvidence) {
+    return operatorError(
+      'invalid_request',
+      'contractCoverageEvidence must include contractVersion, headSha, and requirement entries.',
+      400,
+    );
+  }
 
   try {
     const result = await submitPacketReview({
@@ -39,6 +50,7 @@ export async function POST(request: NextRequest) {
       reviewedHeadSha: typeof record.reviewedHeadSha === 'string' && record.reviewedHeadSha.trim()
         ? record.reviewedHeadSha.trim()
         : undefined,
+      contractCoverageEvidence: contractCoverageEvidence ?? undefined,
     });
     return operatorSuccess(result);
   } catch (error) {

@@ -10,12 +10,16 @@
  *   o8 mission create   --title "…" [--body "…"] [--repo <path>] [--runtime r]
  *                       [--model m] [--constraints "…"] [--sequential]
  *                       [--compare m1,m2] [--huddle] [--brain] [--number n]
+ *                       [--quality-search-contract <json-file>]
  *   o8 mission dispatch [--mission <id>]
  *   o8 mission status   [--mission <id>] [--cost]
  *   o8 mission stop     --mission <id>
  *   o8 mission wait     [--mission <id>] [--packet <id>] [--timeout <ms|5m|90s>] [--poll ms]
  *   o8 mission tail     [--mission <id>] [--timeout <ms|5m|90s>] [--poll ms]
  */
+
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 import { apiFetch, CliError, EXIT, SLOW_MUTATION_TIMEOUT_MS } from '../api.js';
 import { resolveConfig } from '../config.js';
@@ -189,6 +193,24 @@ async function runMissionCreate(mode: OutputMode, rest: string[]): Promise<numbe
   const comparisonModels = compareRaw
     ? compareRaw.split(',').map((m) => m.trim()).filter(Boolean)
     : undefined;
+  const qualitySearchContractPath = flag(rest, 'quality-search-contract')?.trim();
+  if (qualitySearchContractPath && comparisonModels?.length) {
+    throw new CliError('invalid_args', '--quality-search-contract cannot be combined with --compare.', EXIT.INVALID_ARGS);
+  }
+  if (qualitySearchContractPath && hasFlag(rest, 'huddle')) {
+    throw new CliError('invalid_args', '--quality-search-contract cannot be combined with --huddle.', EXIT.INVALID_ARGS);
+  }
+  let qualitySearch: { taskContract: unknown } | undefined;
+  if (qualitySearchContractPath) {
+    try {
+      qualitySearch = {
+        taskContract: JSON.parse(readFileSync(resolve(qualitySearchContractPath), 'utf8')) as unknown,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new CliError('invalid_args', `Unable to read quality-search contract: ${message}`, EXIT.INVALID_ARGS);
+    }
+  }
 
   const body: Record<string, unknown> = {
     repoPath,
@@ -204,6 +226,7 @@ async function runMissionCreate(mode: OutputMode, rest: string[]): Promise<numbe
   if (hasFlag(rest, 'huddle')) body.huddle = true;
   if (hasFlag(rest, 'brain')) body.useBrain = true;
   if (comparisonModels && comparisonModels.length > 0) body.comparisonModels = comparisonModels;
+  if (qualitySearch) body.qualitySearch = qualitySearch;
 
   const cfg = resolveConfig();
   const res = await apiFetch<OperatorResponse<CreateMissionResult>>(cfg, '/api/orchestrator/create-mission', {

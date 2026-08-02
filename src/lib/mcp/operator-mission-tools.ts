@@ -77,8 +77,7 @@ import type {
   RerunWithFeedbackInput,
   SubmitReviewInput,
 } from '@/lib/orchestrator/operator-mission-service';
-import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
-import type { WorkerIntent, WorkerProvider } from '@/lib/orchestrator/types';
+import type { OrchestratorRuntime, PacketTaskContract, WorkerIntent, WorkerProvider } from '@/lib/orchestrator/types';
 import { getDataDir } from '@/lib/data-dir-migration';
 
 const execFileAsync = promisify(execFile);
@@ -114,6 +113,7 @@ interface CreateMissionInput {
   huddle?: boolean;
   /** Best-of-N (item 3) — forwarded to the create-mission API, clamped ≤4 there. */
   comparisonModels?: string[];
+  qualitySearch?: { taskContract: PacketTaskContract };
   /** #1329 — the orchestrator's active thread id, so workers inherit its session rules. */
   orchestratorThreadId?: string;
 }
@@ -139,6 +139,7 @@ interface CreateMissionInlineInput {
   huddle?: boolean;
   /** Best-of-N (item 3) — forwarded to the create-mission API, clamped ≤4 there. */
   comparisonModels?: string[];
+  qualitySearch?: { taskContract: PacketTaskContract };
   /** #1329 — the orchestrator's active thread id, so workers inherit its session rules. */
   orchestratorThreadId?: string;
 }
@@ -396,6 +397,7 @@ export async function createMission(input: CreateMissionInput) {
           useBrain: input.useBrain,
           huddle: input.huddle,
           comparisonModels: input.comparisonModels,
+          qualitySearch: input.qualitySearch,
           orchestratorThreadId: input.orchestratorThreadId,
           dispatcher: { surface: 'orchestrator', id: input.orchestratorThreadId ?? 'operator-mcp' },
         } satisfies CreateMissionRequest),
@@ -441,6 +443,7 @@ export async function createMissionInline(input: CreateMissionInlineInput) {
           useBrain: input.useBrain,
           huddle: input.huddle,
           comparisonModels: input.comparisonModels,
+          qualitySearch: input.qualitySearch,
           orchestratorThreadId: input.orchestratorThreadId,
           dispatcher: { surface: 'orchestrator', id: input.orchestratorThreadId ?? 'operator-mcp' },
         } satisfies CreateMissionRequest),
@@ -497,6 +500,7 @@ export async function submitPacketReview(input: SubmitReviewInput) {
           findings: input.findings,
           approved: input.approved,
           reviewedHeadSha: input.reviewedHeadSha,
+          contractCoverageEvidence: input.contractCoverageEvidence,
         } satisfies SubmitReviewInput),
       },
     );

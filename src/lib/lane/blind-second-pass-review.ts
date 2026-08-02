@@ -1,4 +1,5 @@
 import type { ApprovalRecord } from '@/lib/approvals/types';
+import type { PacketTaskContract } from '@/lib/orchestrator/types';
 import { buildBlindSecondPassPromptV1 } from '@/lib/prompts/v1';
 import type { Lane } from './types';
 
@@ -59,6 +60,8 @@ export function buildBlindSecondPassPrompt(
   lane: Lane,
   diffSummary: BlindSecondPassDiffSummary,
   highRiskReasons: string[],
+  taskContract?: PacketTaskContract | null,
+  taskContractRequired = false,
 ): string {
   return buildBlindSecondPassPromptV1({
     laneLabel: lane.label,
@@ -67,6 +70,8 @@ export function buildBlindSecondPassPrompt(
     diffSummary: diffSummary.summary,
     cwd: diffSummary.cwd,
     highRiskReasons,
+    taskContract,
+    taskContractRequired,
   });
 }
 

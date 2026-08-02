@@ -47,11 +47,9 @@ import {
   textResult,
 } from './shared';
 import type { WorkerIntent, WorkerProvider } from '@/lib/orchestrator/types';
-
-const WORKER_PROVIDER_OPTIONS: WorkerProvider[] = [
-  ...listDispatchableWorkerProviders(),
-  'minimax',
-];
+import { parseMissionCandidateMode, QUALITY_SEARCH_INPUT_SCHEMA } from './quality-search-input';
+import { CONTRACT_COVERAGE_EVIDENCE_SCHEMA, parseContractCoverageEvidenceInput } from './review-coverage-input';
+const WORKER_PROVIDER_OPTIONS: WorkerProvider[] = [...listDispatchableWorkerProviders(), 'minimax'];
 
 export const MISSION_TOOLS: McpTool[] = [
   {
@@ -127,6 +125,7 @@ export const MISSION_TOOLS: McpTool[] = [
           items: { type: 'string' },
           description: 'Best-of-N — race the task across N candidates (one per model string), each in its own isolated worktree. The operator then compares the N diffs side-by-side and merges the winner through the review gate, archiving the losers. Same model repeated (["codex","codex","codex"]) runs N attempts of one runtime; mix runtimes (["codex","gemini"]) to compare them. Max 4. Omit for a single packet. Use when a task is worth a bake-off — risky, ambiguous, or when you want the best of several attempts.',
         },
+        qualitySearch: QUALITY_SEARCH_INPUT_SCHEMA,
         orchestratorThreadId: {
           type: 'string',
           description: 'Session-rule inheritance (#1329) — your active orchestrator thread id (e.g. "thoughts-…"). When set, every worker prompt carries the thread\'s active "Operator session rules (binding)" block and dispatch records a rules_applied lane event. Omit when dispatching outside a rule-bearing thread.',
@@ -618,6 +617,7 @@ export const MISSION_TOOLS: McpTool[] = [
           type: 'string',
           description: 'Optional worktree HEAD SHA that was reviewed. If omitted, o8 captures the lane worktree HEAD at review time.',
         },
+        contractCoverageEvidence: CONTRACT_COVERAGE_EVIDENCE_SCHEMA,
         directivesApplied: {
           type: 'array',
           description: '#732 — Directives the diff RESPECTED. List the directive title or filename (as returned by get_packet_scope). Surfaces in the Packet Review Card so the operator can see governance enforcement.',
@@ -816,12 +816,9 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
     // #1329 — session-rule inheritance. When the orchestrator passes its active
     // thread id, workers inherit that thread's operator session rules.
     const orchestratorThreadId = optionalString(args, 'orchestratorThreadId') || undefined;
-    // Best-of-N (item 3): clamp candidates to ≤4 (the handler calls the service
-    // directly, so it does its own clamp like the create-mission route does).
-    const comparisonModelsRaw = Array.isArray(args.comparisonModels)
-      ? args.comparisonModels.map((model) => String(model).trim()).filter(Boolean).slice(0, 4)
-      : [];
-    const comparisonModels = comparisonModelsRaw.length > 0 ? comparisonModelsRaw : undefined;
+    const candidateMode = parseMissionCandidateMode(args, huddle);
+    if (!candidateMode.ok) return textResult(candidateMode.error, true);
+    const { comparisonModels, qualitySearch } = candidateMode;
 
     if (inlineIssues) {
       // #453 — Auto-assign synthetic numbers when not provided. Centralized so
@@ -848,6 +845,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
         useBrain,
         huddle,
         comparisonModels,
+        qualitySearch,
         orchestratorThreadId,
       });
       if (shouldDispatch && createResult && !('error' in createResult)) {
@@ -881,6 +879,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
       useBrain,
       huddle,
       comparisonModels,
+      qualitySearch,
       orchestratorThreadId,
     });
     if (shouldDispatch && createResult && !('error' in createResult)) {
@@ -1290,12 +1289,12 @@ export async function handleSubmitReview(args: Record<string, unknown>): Promise
     if (typeof args.approved !== 'boolean') {
       throw new Error('approved is required');
     }
-
     const result = await submitPacketReview({
       packetId: requiredString(args, 'packetId'),
       findings: parseReviewFindings(args.findings),
       approved: args.approved,
       reviewedHeadSha: optionalString(args, 'reviewedHeadSha') || undefined,
+      contractCoverageEvidence: parseContractCoverageEvidenceInput(args.contractCoverageEvidence),
       directivesApplied: parseDirectivesApplied(args.directivesApplied),
       directivesViolated: parseDirectivesViolated(args.directivesViolated),
     });
