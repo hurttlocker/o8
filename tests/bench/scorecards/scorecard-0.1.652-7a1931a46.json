@@ -1,0 +1,244 @@
+{
+  "version": "0.1.652",
+  "gitSha": "7a1931a46",
+  "timestamp": "2026-08-02T21:29:58.528Z",
+  "node": "v22.22.2",
+  "tracks": {
+    "speed": {
+      "automatable": true,
+      "status": "ok",
+      "metrics": {
+        "dashboard_cold_ttfb_ms": {
+          "value": 16,
+          "priorValue": 12,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "unchanged",
+          "deltaValue": 4
+        },
+        "dashboard_warm_ttfb_ms": {
+          "value": 11,
+          "priorValue": 9,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "unchanged",
+          "deltaValue": 2
+        },
+        "bootstrap_warm_total_ms": {
+          "value": 22,
+          "priorValue": 3,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "unchanged",
+          "deltaValue": 19
+        },
+        "cli_status_median_ms": {
+          "value": 353,
+          "priorValue": 233,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "regressed",
+          "deltaValue": 120
+        },
+        "mcp_client_minus_server_p50_ms": {
+          "value": null,
+          "priorValue": null,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "baseline",
+          "deltaValue": null,
+          "note": "metric not found"
+        },
+        "socket_avg_conns": {
+          "value": 5.87,
+          "priorValue": 5.58,
+          "direction": "informational",
+          "threshold": null,
+          "delta": "informational",
+          "deltaValue": null
+        }
+      }
+    },
+    "memory": {
+      "automatable": true,
+      "status": "ok",
+      "sourceResults": "tests/qa-eval/three-way-results-2026-08-02T06-25-16-406Z.json",
+      "metrics": {
+        "overall_full_accuracy": {
+          "value": 0.31315789473684214,
+          "priorValue": null,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "delta_full_vs_strongGrep": {
+          "value": 0.23157894736842108,
+          "priorValue": null,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "ownership_full_accuracy": {
+          "value": 0.51,
+          "priorValue": null,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "decisions_full_accuracy": {
+          "value": 0.47000000000000003,
+          "priorValue": null,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "processes_full_accuracy": {
+          "value": 0.74,
+          "priorValue": null,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "incidents_full_accuracy": {
+          "value": 0.2,
+          "priorValue": null,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "specs_full_accuracy": {
+          "value": 0.06999999999999999,
+          "priorValue": null,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "cross-repo_full_accuracy": {
+          "value": 0.39,
+          "priorValue": null,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "literal-lookup_full_accuracy": {
+          "value": 0,
+          "priorValue": null,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "baseline",
+          "deltaValue": null
+        }
+      }
+    },
+    "governance": {
+      "automatable": true,
+      "status": "ok",
+      "scopeStatement": "This benchmark measures the AI review tier. It does not measure the human approval gate above it.",
+      "lastRun": {
+        "generatedAt": "2026-08-02T21:29:57.927Z",
+        "reviewerBackendCount": 1,
+        "fixtureCount": 20,
+        "inconclusive": {
+          "total": 0,
+          "planted": 0,
+          "clean": 0
+        },
+        "blindExecution": {
+          "shuffled": true,
+          "groundTruthWithheldFromReviewer": true,
+          "isolatedRepositoryPerInput": true
+        }
+      },
+      "metrics": {
+        "catch_rate": {
+          "value": 1,
+          "priorValue": 1,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "unchanged",
+          "deltaValue": 0,
+          "numerator": 10,
+          "denominator": 10
+        },
+        "clean_diffs_blocked": {
+          "value": 0,
+          "priorValue": null,
+          "direction": "lower-better",
+          "threshold": 0.05,
+          "delta": "baseline",
+          "deltaValue": null,
+          "numerator": 0,
+          "denominator": 10
+        },
+        "clean_diffs_with_any_finding": {
+          "value": 0.2,
+          "priorValue": 1,
+          "direction": "lower-better",
+          "threshold": 0.05,
+          "delta": "improved",
+          "deltaValue": -0.8,
+          "numerator": 2,
+          "denominator": 10
+        }
+      }
+    },
+    "coding": {
+      "automatable": false,
+      "status": "incomplete",
+      "lastRun": {
+        "generatedAt": "2026-08-02T19:51:20.385Z",
+        "protocol": {
+          "seed": 20260802,
+          "paired": true,
+          "conditions": [
+            "codex-raw",
+            "codex-contract",
+            "claude-raw",
+            "claude-contract"
+          ],
+          "judges": [
+            "codex",
+            "claude"
+          ],
+          "turnsPerArm": 1,
+          "repairTurnsPerArm": 0,
+          "armTimeoutSeconds": 2400,
+          "judgeTimeoutSeconds": 1800,
+          "mappingUnsealedAfterAllVerdicts": true,
+          "rawAndTreatmentShareTaskBaseRulesAndBudget": true
+        },
+        "productBarCleared": false
+      },
+      "metrics": {
+        "decisive_contract_wins": {
+          "value": 0,
+          "priorValue": null,
+          "direction": "higher-better",
+          "threshold": 0,
+          "delta": "baseline",
+          "deltaValue": null,
+          "numerator": 0,
+          "denominator": 0
+        },
+        "contract_excellent_outputs": {
+          "value": 0,
+          "priorValue": null,
+          "direction": "higher-better",
+          "threshold": 0,
+          "delta": "baseline",
+          "deltaValue": null,
+          "numerator": 0,
+          "denominator": 0
+        }
+      }
+    }
+  }
+}
