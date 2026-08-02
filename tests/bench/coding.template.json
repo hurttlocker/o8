@@ -1,12 +1,10 @@
 {
+  "schema": "o8/coding-benchmark/v2",
   "track": "coding",
   "automatable": false,
-  "lastRun": {
-    "date": "",
-    "version": "",
-    "arms": [],
-    "winner": "",
-    "passRate": null
-  },
-  "rerunInstructions": "Copy to tests/bench/latest/coding.json. Run the 3-arm worktree head-to-head. Fill passRate (0-1), arms, winner, date, version. Commit before bench:score."
+  "status": "not run",
+  "tasksScored": 0,
+  "paired": {},
+  "contractImprovesQuality": false,
+  "rerunInstructions": "Run npm run bench:coding, then npm run bench:coding:collect and npm run bench:coding:judge. Do not hand-fill scores."
 }

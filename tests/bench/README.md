@@ -5,7 +5,7 @@ This suite makes release claims measurable instead of anecdotal. It wraps the ex
 ## Tracks
 
 - Automatable: speed, memory, and governance.
-- Operator-driven: coding. It remains `automatable:false` because it depends on a human-driven worktree head-to-head run.
+- Operator-triggered: coding. It remains `automatable:false` because collection launches paid external workers and must be started deliberately.
 
 ## Release Run
 
@@ -38,14 +38,35 @@ The governance command preflights 20 committed patch fixtures through TypeScript
 - Judge variance is roughly ±5pp, so the ±0.05 threshold suppresses normal noise.
 - `socket_avg_conns` is informational and never receives a regression tag.
 
-## Manual Track
+## Coding Track
 
-Coding:
+The coding track runs paired raw and contract-first arms for the two initial
+runtime families. Every arm receives the same task, base, repository rules, one
+turn, and timeout. A task is scored only when all four arms pass the independent
+mechanical gates and both blinded judges return complete verdicts.
+
+Preflight without launching workers:
 
 ```sh
-cp tests/bench/coding.template.json tests/bench/latest/coding.json
+npm run bench:coding
 ```
 
-Run the 3-arm worktree head-to-head, fill `passRate`, `arms`, `winner`, `date`, and `version`, then run `npm run bench:score`.
+Collection and judging are separate so the paid phase is explicit and its raw
+artifacts remain inspectable between phases:
 
-If governance is absent for a release, the scorecard records it as `automated — not run this release`. If coding is absent, the scorecard records it as `manual — not run this release`.
+```sh
+npm run bench:coding:collect
+npm run bench:coding:judge
+npm run bench:score
+```
+
+The default run ID is `contract-v1`. Set `O8_BENCH_RUN_ID` before both commands
+for later repetitions. Collection refuses to overwrite an existing run ID, so a
+failed or unfavorable run remains in the receipts instead of disappearing.
+
+`npm run bench:coding:all` runs collection and judging in one operator-triggered
+command. The runner writes its receipts under the system temporary directory and
+the decoded result to `tests/bench/latest/coding.json`. The fixed tasks and rubric
+must not be edited after a run starts; record any deviation instead.
+
+If governance is absent for a release, the scorecard records it as `automated — not run this release`. If coding is absent, the scorecard records it as `operator-triggered — not run this release`.

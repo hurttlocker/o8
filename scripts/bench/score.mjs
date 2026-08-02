@@ -15,7 +15,7 @@ const CATEGORIES = [
 
 const SCORECARD_DIR = path.resolve(process.cwd(), 'tests/bench/scorecards');
 const LATEST_DIR = path.resolve(process.cwd(), 'tests/bench/latest');
-const MANUAL_NOT_RUN = 'manual — not run this release';
+const OPERATOR_TRIGGERED_NOT_RUN = 'operator-triggered — not run this release';
 
 function readJsonOptional(filePath) {
   try {
@@ -315,7 +315,50 @@ function buildGovernanceTrack(governance, prior) {
 }
 
 function buildCodingTrack(coding, prior) {
-  if (!coding) return { automatable: false, status: MANUAL_NOT_RUN };
+  if (!coding) return { automatable: false, status: OPERATOR_TRIGGERED_NOT_RUN };
+  if (coding.schema === 'o8/coding-benchmark/v2') {
+    const runtimeSummaries = Object.values(coding.paired ?? {});
+    const pairedContests = runtimeSummaries.reduce((sum, entry) => sum + (numberOrNull(entry?.tasks) ?? 0), 0);
+    const decisiveContractWins = runtimeSummaries.reduce(
+      (sum, entry) => sum + (numberOrNull(entry?.decisiveContractWins) ?? 0),
+      0,
+    );
+    const contractExcellentOutputs = Object.entries(coding.excellentOutputs ?? {})
+      .filter(([condition]) => condition.endsWith('-contract'))
+      .reduce((sum, [, value]) => sum + (numberOrNull(value) ?? 0), 0);
+    const contractOutputs = (numberOrNull(coding.tasksScored) ?? 0) * runtimeSummaries.length;
+    return {
+      automatable: false,
+      status: coding.tasksScored > 0 ? 'ok' : 'incomplete',
+      lastRun: {
+        generatedAt: coding.generatedAt ?? null,
+        protocol: coding.protocol ?? null,
+        productBarCleared: coding.contractImprovesQuality === true,
+      },
+      metrics: {
+        decisive_contract_wins: {
+          ...metricEntry({
+            value: decisiveContractWins,
+            direction: 'higher-better',
+            threshold: 0,
+            prior: priorValue(prior, 'coding', 'decisive_contract_wins'),
+          }),
+          numerator: decisiveContractWins,
+          denominator: pairedContests,
+        },
+        contract_excellent_outputs: {
+          ...metricEntry({
+            value: contractExcellentOutputs,
+            direction: 'higher-better',
+            threshold: 0,
+            prior: priorValue(prior, 'coding', 'contract_excellent_outputs'),
+          }),
+          numerator: contractExcellentOutputs,
+          denominator: contractOutputs,
+        },
+      },
+    };
+  }
   const passRate = coding.lastRun?.passRate ?? coding.passRate ?? coding.metrics?.pass_rate;
   return {
     automatable: false,

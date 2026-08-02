@@ -1,102 +1,272 @@
 /**
- * Coding-track runner — head-to-head first-diff quality, automated.
+ * Paired coding benchmark runner.
  *
- * Two phases, runnable separately because the first is slow and expensive:
+ * Phases are explicit because collection launches expensive external workers:
  *
- *   --collect   build one worktree per (task x condition), run the arm, save the diff
- *   --judge     blind the saved diffs, judge each task, write tests/bench/latest/coding.json
- *
- * With no flag it runs both.
- *
- * WHY THE JUDGE IS A CLI PROCESS: the 2026-08-02 run tried six in-process judge
- * agents and every one completed its analysis and then failed to return it. A
- * judge that writes a JSON file to disk either produced a verdict or did not —
- * there is no silent-loss mode. Do not replace this with an in-process agent.
+ *   --preflight  verify fixed tasks, bases, and required CLIs without mutation
+ *   --collect    run one raw and one contract-first arm per initial runtime
+ *   --judge      blind complete task sets and score them with two judges
+ *   --all        collect, then judge
  */
 
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { DEVIATIONS_CLAUSE } from '../../src/lib/orchestrator/packet-deviations';
+import {
+  PACKET_TASK_CONTRACT_TAG_START,
+  buildPacketTaskContractInstructions,
+} from '../../src/lib/orchestrator/packet-task-contract';
 import {
   CODING_CONDITIONS,
+  CODING_JUDGES,
+  CODING_RUNTIMES,
   type CodingCondition,
+  type CodingJudge,
+  type CodingRuntime,
+  type CodingSubScores,
   type CodingTask,
   type CodingVerdict,
   blindCodingDiffs,
   meanSubScores,
+  runtimeForCondition,
   scoreCodingResults,
   scrubAuthorship,
+  treatmentForCondition,
 } from './coding';
 
 const REPO_ROOT = process.cwd();
 const TASKS_FILE = path.join(REPO_ROOT, 'tests/bench/coding/tasks.json');
-const WORK_ROOT = path.join(os.tmpdir(), 'o8-bench-coding');
+const RUN_ID = (process.env.O8_BENCH_RUN_ID ?? 'contract-v1').trim();
+if (!/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(RUN_ID)) {
+  throw new Error('O8_BENCH_RUN_ID must contain only letters, numbers, dot, underscore, and hyphen');
+}
+const WORK_ROOT = path.join(os.tmpdir(), 'o8-bench-coding', RUN_ID);
 const LATEST_DIR = path.join(REPO_ROOT, 'tests/bench/latest');
+const COLLECTION_FILE = path.join(WORK_ROOT, 'collection.json');
+const JUDGING_FILE = path.join(WORK_ROOT, 'judging.json');
+const ARM_TIMEOUT_SECONDS = 2_400;
+const JUDGE_TIMEOUT_SECONDS = 1_800;
+const DEFAULT_SEED = 20_260_802;
+let cachedRepoSlug: string | null = null;
 
-const RAW_BRIEF = `You are implementing a real GitHub issue in this repository, which is a clean
-checkout at the commit where the issue was still open.
+const RAW_BRIEF = `You are implementing a real issue in this repository from a clean checkout
+at the commit where the issue was still open.
 
-Produce the best first diff you can — correct, minimal, and fit for this codebase.
-Conventions are in CLAUDE.md and AGENTS.md at the repo root and are binding.
-Implement the issue fully without expanding scope beyond what it asks.
-Verify with \`npx tsc --noEmit\` (must exit 0) and \`npx eslint\` on files you changed.
-Leave your work UNCOMMITTED. Do not commit, push, or create branches.
-Do not modify tests to make something pass.`;
+Produce the best first diff you can: correct, minimal, and fit for this codebase.
+Repository instructions at the root are binding. Implement every requirement without
+expanding the requested scope. You have one turn and the fixed time budget enforced by
+the runner. You may inspect, implement, test, and repair within that turn.
 
-const GOVERNED_EXTRA = `
-You are a dispatched o8 worker executing a packet.
-Files follow an 800-line maximum; extract focused modules rather than exceeding it.
-Cross-process seams, persistence paths, and authorization changes must be exercised
-through the REAL production entry point — a helper-only test does not prove callers
-can reach the behavior.
-Self-review gate: review your own diff against the task, fix anything that would
-BREAK it (typecheck failure, runtime crash, scope creep, security risk), capping fix
-attempts at two per issue, then report.`;
+Leave the work uncommitted. Do not commit, push, create branches, or alter benchmark
+artifacts. Do not weaken or rewrite tests to make the implementation pass.`;
 
-const REVIEW_TRACE = `Adversarially review your own diff before calling it done. Run \`git diff\` and produce
-four explicit traces, citing specific lines — "looks correct" without a citation is not
-an answer.
-1. GUARD/PREDICATE — for every condition added or changed, what makes it true, what
-   makes it false, and is the true branch reachable from a real caller?
-2. SCOPE/PARTITION — enumerate the cases the task covers and show which line handles
-   each. Name any case that falls through to nothing.
-3. SUB-REQUIREMENT COVERAGE — list every requirement in the issue and cite the line
-   satisfying it. Mark any you did not implement.
-4. EXECUTION-PATH — follow one real invocation from entry point to effect and confirm
-   the new code is on that path.
-Fix what the traces expose, cap fixes at two per finding, re-run \`npx tsc --noEmit\`,
-and leave work UNCOMMITTED.`;
+const CONTRACT_INTERVENTION = [
+  'Contract-first intervention:',
+  ...buildPacketTaskContractInstructions(),
+  DEVIATIONS_CLAUSE,
+].join('\n');
+
+const JUDGE_PROMPT = `You are an impartial senior code reviewer scoring candidate diffs for the
+same issue. You do not know which runtime or treatment produced them. Judge only the
+code and base repository; do not speculate about authorship.
+
+Mechanical checks are reported separately and do not affect the score. Find what a
+compiler cannot establish: unreachable behavior, omitted requirements, excess public
+surface, unnecessary refactors, weak error paths, and state leaking across scopes.
+
+Score each candidate 0-10 as the mean of four equally weighted sub-scores:
+  correctness      - does it satisfy every issue requirement on the real code path?
+  scopeDiscipline  - is every changed unit necessary, with no omitted requirement?
+  robustness       - are failure paths and state boundaries handled correctly?
+  fit              - does it match the surrounding code and architecture?
+
+Do not reward length or brevity by itself. A smaller diff wins only when coverage and
+correctness are equal. Review only; do not edit the repository.
+
+Write only a JSON array to the requested output file, one object per candidate:
+[{"blindLabel":"A","subScores":{"correctness":0,"scopeDiscipline":0,"robustness":0,"fit":0},"mostSeriousDefect":"..."}]`;
+
+interface CommandReceipt {
+  command: string;
+  status: number | null;
+  signal: string | null;
+  durationMs: number;
+  timedOut: boolean;
+  stderrBytes: number;
+  spawnErrorCode: string | null;
+}
+
+interface MechanicalReceipt {
+  typecheck: CommandReceipt;
+  eslint: CommandReceipt | null;
+  lintedFiles: string[];
+}
+
+interface ArmReceipt {
+  task: number;
+  condition: CodingCondition;
+  runtime: CodingRuntime;
+  treatment: 'raw' | 'contract';
+  base: string;
+  worktree: string;
+  promptPath: string;
+  replyPath: string;
+  diffPath: string;
+  turns: 1;
+  repairTurns: 0;
+  operatorInterventions: 0;
+  timeoutSeconds: number;
+  spawn: CommandReceipt;
+  send: CommandReceipt;
+  stop: CommandReceipt;
+  contractObserved: boolean | null;
+  changedFiles: string[];
+  additions: number;
+  deletions: number;
+  mechanical: MechanicalReceipt;
+  valid: boolean;
+  invalidReasons: string[];
+}
+
+interface CollectionReceipt {
+  schema: 'o8/coding-collection/v2';
+  runId: string;
+  createdAt: string;
+  seed: number;
+  armTimeoutSeconds: number;
+  conditions: CodingCondition[];
+  arms: ArmReceipt[];
+}
+
+interface JudgeReceipt {
+  task: number;
+  judge: CodingJudge;
+  promptPath: string;
+  outputPath: string;
+  replyPath: string;
+  command: CommandReceipt;
+  valid: boolean;
+  invalidReason: string | null;
+}
+
+function writeJson(filePath: string, value: unknown): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
+}
 
 function readTasks(): CodingTask[] {
-  const parsed = JSON.parse(fs.readFileSync(TASKS_FILE, 'utf-8')) as { tasks: CodingTask[] };
+  const parsed = JSON.parse(fs.readFileSync(TASKS_FILE, 'utf8')) as { tasks?: CodingTask[] };
   if (!Array.isArray(parsed.tasks) || parsed.tasks.length === 0) {
     throw new Error('tests/bench/coding/tasks.json has no tasks');
+  }
+  for (const task of parsed.tasks) {
+    if (!Number.isInteger(task.issue) || task.issue <= 0 || !task.base?.trim() || !task.label?.trim()) {
+      throw new Error(`invalid coding task fixture: ${JSON.stringify(task)}`);
+    }
   }
   return parsed.tasks;
 }
 
 function issueText(issue: number): string {
+  if (!cachedRepoSlug) {
+    cachedRepoSlug = execFileSync(
+      'gh',
+      ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'],
+      { cwd: REPO_ROOT, encoding: 'utf8' },
+    ).trim();
+  }
+  if (!cachedRepoSlug) throw new Error('could not resolve the current repository slug');
   try {
     return execFileSync(
       'gh',
-      ['issue', 'view', String(issue), '-R', 'hurttlocker/o8', '--json', 'title,body',
+      ['issue', 'view', String(issue), '-R', cachedRepoSlug, '--json', 'title,body',
         '--jq', '"# " + .title + "\\n\\n" + .body'],
-      { encoding: 'utf-8', maxBuffer: 4 * 1024 * 1024 },
+      { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 },
     ).trim();
   } catch {
-    throw new Error(`could not read issue #${issue} via gh — is gh authenticated?`);
+    throw new Error(`could not read issue #${issue} through the authenticated repository CLI`);
   }
+}
+
+function runCommand(
+  command: string,
+  args: string[],
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number } = {},
+): { receipt: CommandReceipt; stdout: string; stderr: string } {
+  const startedAt = Date.now();
+  const result: SpawnSyncReturns<string> = spawnSync(command, args, {
+    cwd: options.cwd,
+    env: options.env,
+    encoding: 'utf8',
+    maxBuffer: 32 * 1024 * 1024,
+    timeout: options.timeoutMs,
+  });
+  const errorCode = result.error && 'code' in result.error ? String(result.error.code) : '';
+  return {
+    receipt: {
+      command: command === 'ginsu' && args[0] === 'send'
+        ? `ginsu send ${args[1] ?? '(unknown)'} <PROMPT>`
+        : [command, ...args].join(' '),
+      status: result.status,
+      signal: result.signal,
+      durationMs: Date.now() - startedAt,
+      timedOut: errorCode === 'ETIMEDOUT',
+      stderrBytes: Buffer.byteLength(result.stderr || '', 'utf8'),
+      spawnErrorCode: errorCode || null,
+    },
+    stdout: result.stdout || '',
+    stderr: result.stderr || result.error?.message || '',
+  };
+}
+
+function seededShuffle(seed: number) {
+  let state = seed >>> 0;
+  const next = () => {
+    state = (state * 1_664_525 + 1_013_904_223) >>> 0;
+    return state / 4_294_967_296;
+  };
+  return <T,>(items: T[]): T[] => {
+    const copy = [...items];
+    for (let index = copy.length - 1; index > 0; index -= 1) {
+      const swapIndex = Math.floor(next() * (index + 1));
+      [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
+    }
+    return copy;
+  };
 }
 
 function armDir(issue: number, condition: CodingCondition): string {
   return path.join(WORK_ROOT, `t${issue}-${condition}`);
 }
 
-function prepareWorktree(issue: number, condition: CodingCondition, base: string): string {
-  const dir = armDir(issue, condition);
-  fs.rmSync(dir, { recursive: true, force: true });
+function assertManagedWorktreePath(managedRoot: string, dir: string, expectedName: string): void {
+  const resolvedRoot = path.resolve(managedRoot);
+  const resolved = path.resolve(dir);
+  const expected = path.join(resolvedRoot, expectedName);
+  if (resolved !== expected || path.dirname(resolved) !== resolvedRoot || resolved === resolvedRoot) {
+    throw new Error(`refusing unmanaged benchmark worktree path: ${dir}`);
+  }
+  if (fs.existsSync(resolved) && fs.lstatSync(resolved).isSymbolicLink()) {
+    throw new Error(`refusing benchmark worktree symlink: ${resolved}`);
+  }
+}
+
+function prepareDetachedWorktree(
+  managedRoot: string,
+  dir: string,
+  expectedName: string,
+  base: string,
+): string {
+  assertManagedWorktreePath(managedRoot, dir, expectedName);
+  if (fs.existsSync(dir)) {
+    const removal = runCommand('git', ['worktree', 'remove', '--force', dir], { cwd: REPO_ROOT });
+    if (removal.receipt.status !== 0 || fs.existsSync(dir)) {
+      throw new Error(`could not safely replace benchmark worktree ${dir}: ${removal.stderr.trim().slice(0, 500)}`);
+    }
+  }
   execFileSync('git', ['worktree', 'add', '-q', '--detach', dir, base], { cwd: REPO_ROOT });
   const modules = path.join(dir, 'node_modules');
   if (!fs.existsSync(modules)) {
@@ -105,198 +275,470 @@ function prepareWorktree(issue: number, condition: CodingCondition, base: string
   return dir;
 }
 
-/** Run one arm through ginsu, which owns the per-engine CLI invocation. */
-function runArm(issue: number, condition: CodingCondition, dir: string, prompt: string): void {
-  const engine = condition === 'claude-alone' ? 'claude' : 'codex';
-  const worker = `bc${issue}${condition.replace(/[^a-z]/g, '')}`;
-  spawnSync('ginsu', ['spawn', worker, dir, '--engine', engine], { encoding: 'utf-8' });
-  spawnSync('ginsu', ['send', worker, prompt], {
-    encoding: 'utf-8',
-    env: { ...process.env, GINSU_TIMEOUT: '2400' },
-    maxBuffer: 16 * 1024 * 1024,
-  });
-  if (condition === 'o8-governed') {
-    spawnSync('ginsu', ['send', worker, REVIEW_TRACE], {
-      encoding: 'utf-8',
-      env: { ...process.env, GINSU_TIMEOUT: '2400' },
-      maxBuffer: 16 * 1024 * 1024,
-    });
-  }
-  spawnSync('ginsu', ['stop', worker], { encoding: 'utf-8' });
+function prepareArmWorktree(task: CodingTask, condition: CodingCondition): string {
+  const name = `t${task.issue}-${condition}`;
+  return prepareDetachedWorktree(WORK_ROOT, armDir(task.issue, condition), name, task.base);
 }
 
-function captureDiff(dir: string, out: string): void {
+function promptFor(condition: CodingCondition, issue: string): string {
+  const treatment = treatmentForCondition(condition);
+  return [
+    RAW_BRIEF,
+    treatment === 'contract' ? CONTRACT_INTERVENTION : null,
+    '---',
+    issue,
+  ].filter((section): section is string => section !== null).join('\n\n');
+}
+
+function stagedDiffFacts(dir: string, diffPath: string): {
+  changedFiles: string[];
+  additions: number;
+  deletions: number;
+} {
   execFileSync('git', ['add', '-A', '--', ':!node_modules', ':!implementation-notes.md'], { cwd: dir });
-  const diff = execFileSync('git', ['diff', '--cached'], {
-    cwd: dir, encoding: 'utf-8', maxBuffer: 32 * 1024 * 1024,
-  });
-  fs.writeFileSync(out, diff);
-  execFileSync('git', ['reset', '-q'], { cwd: dir });
+  try {
+    const diff = execFileSync('git', ['diff', '--cached', '--binary'], {
+      cwd: dir,
+      encoding: 'utf8',
+      maxBuffer: 32 * 1024 * 1024,
+    });
+    fs.writeFileSync(diffPath, diff);
+    const changedFiles = execFileSync('git', ['diff', '--cached', '--name-only'], { cwd: dir, encoding: 'utf8' })
+      .split('\n').map((entry) => entry.trim()).filter(Boolean);
+    const numstat = execFileSync('git', ['diff', '--cached', '--numstat'], { cwd: dir, encoding: 'utf8' });
+    let additions = 0;
+    let deletions = 0;
+    for (const line of numstat.split('\n')) {
+      const [added, deleted] = line.split('\t');
+      if (/^\d+$/.test(added ?? '')) additions += Number(added);
+      if (/^\d+$/.test(deleted ?? '')) deletions += Number(deleted);
+    }
+    return { changedFiles, additions, deletions };
+  } finally {
+    execFileSync('git', ['reset', '-q'], { cwd: dir });
+  }
 }
 
-function collect(tasks: CodingTask[]): void {
+function runMechanicalChecks(dir: string, changedFiles: string[]): MechanicalReceipt {
+  const typecheck = runCommand('npx', ['tsc', '--noEmit'], {
+    cwd: dir,
+    timeoutMs: 10 * 60 * 1_000,
+  }).receipt;
+  const lintedFiles = changedFiles.filter((file) => (
+    /\.(?:[cm]?[jt]sx?)$/.test(file) && fs.existsSync(path.join(dir, file))
+  ));
+  const eslint = lintedFiles.length > 0
+    ? runCommand('npx', ['eslint', ...lintedFiles], {
+        cwd: dir,
+        timeoutMs: 10 * 60 * 1_000,
+      }).receipt
+    : null;
+  return { typecheck, eslint, lintedFiles };
+}
+
+function emptyCommand(command: string): CommandReceipt {
+  return {
+    command,
+    status: null,
+    signal: null,
+    durationMs: 0,
+    timedOut: false,
+    stderrBytes: 0,
+    spawnErrorCode: null,
+  };
+}
+
+function runArm(task: CodingTask, condition: CodingCondition, issue: string): ArmReceipt {
+  const runtime = runtimeForCondition(condition);
+  const treatment = treatmentForCondition(condition);
+  const dir = prepareArmWorktree(task, condition);
+  const artifactDir = path.join(WORK_ROOT, 'artifacts');
+  fs.mkdirSync(artifactDir, { recursive: true });
+  const promptPath = path.join(artifactDir, `prompt-${task.issue}-${condition}.md`);
+  const replyPath = path.join(artifactDir, `reply-${task.issue}-${condition}.txt`);
+  const diffPath = path.join(artifactDir, `raw-${task.issue}-${condition}.diff`);
+  const prompt = promptFor(condition, issue);
+  fs.writeFileSync(promptPath, prompt);
+
+  const worker = `bc${task.issue}${condition.replace(/[^a-z]/g, '')}`;
+  const spawn = runCommand('ginsu', ['spawn', worker, dir, '--engine', runtime], { cwd: REPO_ROOT });
+  let send = { receipt: emptyCommand('ginsu send'), stdout: '', stderr: '' };
+  let stop = { receipt: emptyCommand('ginsu stop'), stdout: '', stderr: '' };
+  if (spawn.receipt.status === 0) {
+    try {
+      send = runCommand('ginsu', ['send', worker, prompt], {
+        cwd: REPO_ROOT,
+        env: { ...process.env, GINSU_TIMEOUT: String(ARM_TIMEOUT_SECONDS) },
+        timeoutMs: (ARM_TIMEOUT_SECONDS + 60) * 1_000,
+      });
+    } finally {
+      stop = runCommand('ginsu', ['stop', worker], { cwd: REPO_ROOT, timeoutMs: 60_000 });
+    }
+  }
+  fs.writeFileSync(replyPath, send.stdout);
+
+  const diffFacts = stagedDiffFacts(dir, diffPath);
+  const mechanical = runMechanicalChecks(dir, diffFacts.changedFiles);
+  const contractObserved = treatment === 'contract'
+    ? send.stdout.includes(PACKET_TASK_CONTRACT_TAG_START)
+    : null;
+  const invalidReasons = [
+    spawn.receipt.status !== 0 ? 'worker spawn failed' : null,
+    send.receipt.status !== 0 ? 'worker turn failed' : null,
+    stop.receipt.status !== 0 ? 'worker stop failed' : null,
+    diffFacts.changedFiles.length === 0 ? 'no diff produced' : null,
+    treatment === 'contract' && !contractObserved ? 'task contract was not observable in the worker reply' : null,
+    mechanical.typecheck.status !== 0 ? 'typecheck failed' : null,
+    mechanical.eslint && mechanical.eslint.status !== 0 ? 'eslint failed' : null,
+  ].filter((reason): reason is string => reason !== null);
+
+  return {
+    task: task.issue,
+    condition,
+    runtime,
+    treatment,
+    base: task.base,
+    worktree: dir,
+    promptPath,
+    replyPath,
+    diffPath,
+    turns: 1,
+    repairTurns: 0,
+    operatorInterventions: 0,
+    timeoutSeconds: ARM_TIMEOUT_SECONDS,
+    spawn: spawn.receipt,
+    send: send.receipt,
+    stop: stop.receipt,
+    contractObserved,
+    ...diffFacts,
+    mechanical,
+    valid: invalidReasons.length === 0,
+    invalidReasons,
+  };
+}
+
+function collectionSeed(): number {
+  const parsed = Number(process.env.O8_BENCH_SEED ?? DEFAULT_SEED);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 0xffff_ffff) {
+    throw new Error('O8_BENCH_SEED must be an unsigned 32-bit integer');
+  }
+  return parsed;
+}
+
+function collect(tasks: CodingTask[]): CollectionReceipt {
+  if (fs.existsSync(COLLECTION_FILE)) {
+    throw new Error(
+      `benchmark run ${RUN_ID} already has a collection; set O8_BENCH_RUN_ID to a new value rather than overwriting it`,
+    );
+  }
   fs.mkdirSync(WORK_ROOT, { recursive: true });
+  const seed = collectionSeed();
+  const shuffle = seededShuffle(seed);
+  const collection: CollectionReceipt = {
+    schema: 'o8/coding-collection/v2',
+    runId: RUN_ID,
+    createdAt: new Date().toISOString(),
+    seed,
+    armTimeoutSeconds: ARM_TIMEOUT_SECONDS,
+    conditions: [...CODING_CONDITIONS],
+    arms: [],
+  };
+  writeJson(COLLECTION_FILE, collection);
+
   for (const task of tasks) {
     const issue = issueText(task.issue);
-    for (const condition of CODING_CONDITIONS) {
-      const dir = prepareWorktree(task.issue, condition, task.base);
-      const brief = condition === 'o8-governed'
-        ? `${RAW_BRIEF}\n${GOVERNED_EXTRA}\n\n---\n\n${issue}`
-        : `${RAW_BRIEF}\n\n---\n\n${issue}`;
-      console.log(`[coding] running ${condition} on #${task.issue}`);
-      runArm(task.issue, condition, dir, brief);
-      captureDiff(dir, path.join(WORK_ROOT, `raw-${task.issue}-${condition}.diff`));
+    fs.mkdirSync(path.join(WORK_ROOT, 'artifacts'), { recursive: true });
+    fs.writeFileSync(path.join(WORK_ROOT, 'artifacts', `issue-${task.issue}.md`), issue);
+    for (const condition of shuffle(CODING_CONDITIONS)) {
+      console.log(`[coding] collecting ${condition} on #${task.issue}`);
+      const receipt = runArm(task, condition, issue);
+      collection.arms.push(receipt);
+      writeJson(COLLECTION_FILE, collection);
+      console.log(
+        `[coding] ${condition} valid=${receipt.valid} files=${receipt.changedFiles.length} ` +
+        `+${receipt.additions}/-${receipt.deletions} reasons=${receipt.invalidReasons.join('; ') || 'none'}`,
+      );
     }
   }
+  return collection;
 }
 
-/** Deterministic shuffle so a run is reproducible from its seed. */
-function seededShuffle(seed: number) {
-  let state = seed;
-  const next = () => {
-    state = (state * 1664525 + 1013904223) % 4294967296;
-    return state / 4294967296;
-  };
-  return <T,>(items: T[]): T[] => {
-    const copy = [...items];
-    for (let i = copy.length - 1; i > 0; i -= 1) {
-      const j = Math.floor(next() * (i + 1));
-      [copy[i], copy[j]] = [copy[j], copy[i]];
-    }
-    return copy;
-  };
+function isScore(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 10;
 }
 
-const JUDGE_PROMPT = `You are an impartial code reviewer scoring candidate diffs for the SAME GitHub issue.
-You do not know which tool produced any of them. Judge only the code; do not speculate
-about authorship.
-
-All diffs already pass \`npx tsc --noEmit\` and eslint, so mechanical correctness tells
-you nothing. Find what the compiler cannot see: a guard that can never fire, a branch
-nothing reaches, a requirement silently unimplemented, state leaking across repos.
-
-Score each 0-10 as the mean of four equally weighted sub-scores:
-  correctness      — does it do what the issue asked, on the real code path?
-  scopeDiscipline  — every changed line traceable to the request; penalize unrequested
-                     refactors AND missed sub-requirements equally
-  robustness       — error paths, edge cases, no state leaks
-  fit              — matches surrounding conventions
-
-Do not assume the longest diff is best or the shortest most elegant. Decide on evidence.
-
-Write ONLY a JSON array to the output file, one object per diff:
-[{"blindLabel":"A","subScores":{"correctness":0,"scopeDiscipline":0,"robustness":0,"fit":0},"mostSeriousDefect":"..."}]`;
-
-function judgeTask(
+function parseJudgeOutput(
   task: CodingTask,
-  inputs: { blindLabel: string; diffPath: string }[],
-  outFile: string,
+  judge: CodingJudge,
+  outputPath: string,
+  expectedLabels: string[],
 ): CodingVerdict[] {
-  const listing = inputs.map((i) => `- ${i.blindLabel}: ${i.diffPath}`).join('\n');
-  const prompt = `${JUDGE_PROMPT}
-
-ISSUE TEXT: ${path.join(WORK_ROOT, `issue-${task.issue}.md`)}
-DIFFS TO SCORE:
-${listing}
-
-Write the JSON array to: ${outFile}
-Write the file even if you are uncertain — a missing file is a lost verdict.`;
-
-  const worker = `bjudge${task.issue}`;
-  spawnSync('ginsu', ['spawn', worker, REPO_ROOT, '--engine', 'codex'], { encoding: 'utf-8' });
-  spawnSync('ginsu', ['send', worker, prompt], {
-    encoding: 'utf-8',
-    env: { ...process.env, GINSU_TIMEOUT: '1800' },
-    maxBuffer: 16 * 1024 * 1024,
-  });
-  spawnSync('ginsu', ['stop', worker], { encoding: 'utf-8' });
-
-  if (!fs.existsSync(outFile)) {
-    console.warn(`[coding] judge produced no verdict file for #${task.issue} — task skipped`);
-    return [];
-  }
-  const parsed = JSON.parse(fs.readFileSync(outFile, 'utf-8')) as Array<{
-    blindLabel: string;
-    subScores: CodingVerdict['subScores'];
-    mostSeriousDefect?: string;
+  const parsed = JSON.parse(fs.readFileSync(outputPath, 'utf8')) as Array<{
+    blindLabel?: unknown;
+    subScores?: Partial<Record<keyof CodingSubScores, unknown>>;
+    mostSeriousDefect?: unknown;
   }>;
-  return parsed.map((entry) => ({
-    task: task.issue,
-    blindLabel: entry.blindLabel,
-    subScores: entry.subScores,
-    total: meanSubScores(entry.subScores),
-    mostSeriousDefect: entry.mostSeriousDefect ?? '',
-  }));
+  if (!Array.isArray(parsed)) throw new Error('judge output is not an array');
+  const seen = new Set<string>();
+  const verdicts = parsed.map((entry) => {
+    const blindLabel = typeof entry.blindLabel === 'string' ? entry.blindLabel.trim() : '';
+    if (!expectedLabels.includes(blindLabel) || seen.has(blindLabel)) {
+      throw new Error(`judge returned unexpected or duplicate label ${JSON.stringify(blindLabel)}`);
+    }
+    seen.add(blindLabel);
+    const subScores = entry.subScores;
+    if (!subScores
+      || !isScore(subScores.correctness)
+      || !isScore(subScores.scopeDiscipline)
+      || !isScore(subScores.robustness)
+      || !isScore(subScores.fit)) {
+      throw new Error(`judge returned invalid sub-scores for ${blindLabel}`);
+    }
+    return {
+      task: task.issue,
+      blindLabel,
+      judge,
+      subScores: {
+        correctness: subScores.correctness,
+        scopeDiscipline: subScores.scopeDiscipline,
+        robustness: subScores.robustness,
+        fit: subScores.fit,
+      },
+      total: meanSubScores(subScores as CodingSubScores),
+      mostSeriousDefect: typeof entry.mostSeriousDefect === 'string' ? entry.mostSeriousDefect.trim() : '',
+    };
+  });
+  if (seen.size !== expectedLabels.length) {
+    throw new Error(`judge returned ${seen.size}/${expectedLabels.length} required labels`);
+  }
+  return verdicts;
 }
 
-function judge(tasks: CodingTask[]): void {
+function runJudge(
+  task: CodingTask,
+  judge: CodingJudge,
+  inputs: Array<{ blindLabel: string; diffPath: string }>,
+  baseDir: string,
+): { verdicts: CodingVerdict[]; receipt: JudgeReceipt } {
+  const artifactDir = path.join(WORK_ROOT, 'artifacts');
+  const judgeInputDir = path.dirname(inputs[0]?.diffPath ?? '');
+  const promptPath = path.join(artifactDir, `judge-prompt-${task.issue}-${judge}.md`);
+  const outputPath = path.join(judgeInputDir, 'verdict.json');
+  const replyPath = path.join(artifactDir, `judge-reply-${task.issue}-${judge}.txt`);
+  const issuePath = path.join(judgeInputDir, 'issue.md');
+  const listing = inputs.map((input) => `- ${input.blindLabel}: ${input.diffPath}`).join('\n');
+  const prompt = `${JUDGE_PROMPT}\n\nISSUE TEXT: ${issuePath}\nBASE REPOSITORY: ${baseDir}\n` +
+    `DIFFS TO SCORE:\n${listing}\n\nWrite the JSON array to: ${outputPath}\n` +
+    'Write the file even when uncertain; a missing file is an incomplete benchmark.';
+  fs.writeFileSync(promptPath, prompt);
+  if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+
+  const worker = `bjudge${task.issue}${judge}`;
+  const spawn = runCommand('ginsu', ['spawn', worker, baseDir, '--engine', judge], { cwd: REPO_ROOT });
+  let send = { receipt: spawn.receipt, stdout: '', stderr: spawn.stderr };
+  if (spawn.receipt.status === 0) {
+    try {
+      send = runCommand('ginsu', ['send', worker, prompt], {
+        cwd: REPO_ROOT,
+        env: { ...process.env, GINSU_TIMEOUT: String(JUDGE_TIMEOUT_SECONDS) },
+        timeoutMs: (JUDGE_TIMEOUT_SECONDS + 60) * 1_000,
+      });
+    } finally {
+      runCommand('ginsu', ['stop', worker], { cwd: REPO_ROOT, timeoutMs: 60_000 });
+    }
+  }
+  fs.writeFileSync(replyPath, send.stdout);
+
+  let verdicts: CodingVerdict[] = [];
+  let invalidReason: string | null = null;
+  try {
+    if (send.receipt.status !== 0) throw new Error('judge turn failed');
+    if (!fs.existsSync(outputPath)) throw new Error('judge produced no output file');
+    verdicts = parseJudgeOutput(task, judge, outputPath, inputs.map((input) => input.blindLabel));
+    const status = execFileSync('git', ['status', '--porcelain'], { cwd: baseDir, encoding: 'utf8' }).trim();
+    if (status) throw new Error('judge modified its base worktree');
+  } catch (error) {
+    invalidReason = error instanceof Error ? error.message : String(error);
+    verdicts = [];
+  }
+
+  return {
+    verdicts,
+    receipt: {
+      task: task.issue,
+      judge,
+      promptPath,
+      outputPath,
+      replyPath,
+      command: send.receipt,
+      valid: invalidReason === null,
+      invalidReason,
+    },
+  };
+}
+
+function readCollection(): CollectionReceipt {
+  const parsed = JSON.parse(fs.readFileSync(COLLECTION_FILE, 'utf8')) as CollectionReceipt;
+  if (parsed.schema !== 'o8/coding-collection/v2' || parsed.runId !== RUN_ID || !Array.isArray(parsed.arms)) {
+    throw new Error('collection.json is missing or uses an unsupported schema');
+  }
+  return parsed;
+}
+
+function judge(tasks: CodingTask[], collection: CollectionReceipt): void {
+  if (fs.existsSync(JUDGING_FILE)) {
+    throw new Error(
+      `benchmark run ${RUN_ID} already has judging receipts; use a new run ID rather than replacing verdicts`,
+    );
+  }
   const verdicts: CodingVerdict[] = [];
+  const judgeReceipts: JudgeReceipt[] = [];
   const mappings: Record<number, Record<string, CodingCondition>> = {};
-  const shuffle = seededShuffle(Number(process.env.O8_BENCH_SEED ?? 20260802));
+  const shuffle = seededShuffle(collection.seed);
+  const judgingStartedAt = new Date().toISOString();
+  writeJson(JUDGING_FILE, {
+    schema: 'o8/coding-judging/v2',
+    runId: RUN_ID,
+    startedAt: judgingStartedAt,
+    receipts: judgeReceipts,
+    blindVerdicts: verdicts,
+  });
 
   for (const task of tasks) {
-    const available: Record<string, string> = {};
+    const available: Partial<Record<CodingCondition, string>> = {};
     for (const condition of CODING_CONDITIONS) {
-      const raw = path.join(WORK_ROOT, `raw-${task.issue}-${condition}.diff`);
-      if (!fs.existsSync(raw)) continue;
-      const blindDir = path.join(WORK_ROOT, 'blind');
-      fs.mkdirSync(blindDir, { recursive: true });
-      const scrubbed = path.join(blindDir, `t${task.issue}-${condition}.diff`);
-      fs.writeFileSync(scrubbed, scrubAuthorship(fs.readFileSync(raw, 'utf-8')));
-      available[condition] = scrubbed;
+      const receipt = collection.arms.find((arm) => (
+        arm.task === task.issue && arm.condition === condition && arm.valid
+      ));
+      if (receipt && fs.existsSync(receipt.diffPath)) available[condition] = receipt.diffPath;
     }
-    if (Object.keys(available).length < 2) {
-      console.warn(`[coding] #${task.issue}: fewer than two arms produced a diff — skipped`);
+    if (Object.keys(available).length !== CODING_CONDITIONS.length) {
+      console.warn(`[coding] #${task.issue}: incomplete valid arm set; task excluded from scoring`);
       continue;
     }
 
-    const { inputs, mapping } = blindCodingDiffs(task.issue, available, shuffle);
-    // Re-file under the neutral label so the judge never sees a condition name.
-    const relabelled = inputs.map((input) => {
-      const dest = path.join(WORK_ROOT, 'blind', `task${task.issue}-${input.blindLabel}.diff`);
-      fs.copyFileSync(input.diffPath, dest);
-      return { blindLabel: input.blindLabel, diffPath: dest };
-    });
-    mappings[task.issue] = mapping;
-    fs.writeFileSync(path.join(WORK_ROOT, `issue-${task.issue}.md`), issueText(task.issue));
+    const blinded = blindCodingDiffs(task.issue, available, shuffle);
+    mappings[task.issue] = blinded.mapping;
 
-    verdicts.push(
-      ...judgeTask(task, relabelled, path.join(WORK_ROOT, `verdict-${task.issue}.json`)),
-    );
+    for (const judgeRuntime of CODING_JUDGES) {
+      const judgeScope = fs.mkdtempSync(path.join(os.tmpdir(), `o8-blind-${task.issue}-`));
+      const inputDir = path.join(judgeScope, 'inputs');
+      fs.mkdirSync(inputDir);
+      fs.copyFileSync(
+        path.join(WORK_ROOT, 'artifacts', `issue-${task.issue}.md`),
+        path.join(inputDir, 'issue.md'),
+      );
+      const relabelled = blinded.inputs.map((input) => {
+        const dest = path.join(inputDir, `${input.blindLabel}.diff`);
+        fs.writeFileSync(dest, scrubAuthorship(fs.readFileSync(input.diffPath, 'utf8')));
+        return { blindLabel: input.blindLabel, diffPath: dest };
+      });
+      const baseDir = prepareDetachedWorktree(judgeScope, path.join(judgeScope, 'base'), 'base', task.base);
+      console.log(`[coding] judging #${task.issue} with judge ${judgeRuntime}`);
+      const result = runJudge(task, judgeRuntime, relabelled, baseDir);
+      verdicts.push(...result.verdicts);
+      judgeReceipts.push(result.receipt);
+      writeJson(JUDGING_FILE, {
+        schema: 'o8/coding-judging/v2',
+        runId: RUN_ID,
+        startedAt: judgingStartedAt,
+        receipts: judgeReceipts,
+        blindVerdicts: verdicts,
+      });
+    }
   }
 
   const summary = scoreCodingResults(tasks, verdicts, mappings);
   fs.mkdirSync(LATEST_DIR, { recursive: true });
-  fs.writeFileSync(
-    path.join(LATEST_DIR, 'coding.json'),
-    JSON.stringify({ generatedAt: new Date().toISOString(), ...summary }, null, 2),
-  );
+  writeJson(path.join(LATEST_DIR, 'coding.json'), {
+    schema: 'o8/coding-benchmark/v2',
+    runId: RUN_ID,
+    generatedAt: new Date().toISOString(),
+    protocol: {
+      seed: collection.seed,
+      paired: true,
+      conditions: CODING_CONDITIONS,
+      judges: CODING_JUDGES,
+      turnsPerArm: 1,
+      repairTurnsPerArm: 0,
+      armTimeoutSeconds: ARM_TIMEOUT_SECONDS,
+      judgeTimeoutSeconds: JUDGE_TIMEOUT_SECONDS,
+      mappingUnsealedAfterAllVerdicts: true,
+      rawAndTreatmentShareTaskBaseRulesAndBudget: true,
+    },
+    collection,
+    judging: { receipts: judgeReceipts, mappings },
+    ...summary,
+  });
+  writeJson(JUDGING_FILE, {
+    schema: 'o8/coding-judging/v2',
+    runId: RUN_ID,
+    startedAt: judgingStartedAt,
+    completedAt: new Date().toISOString(),
+    receipts: judgeReceipts,
+    blindVerdicts: verdicts,
+  });
 
-  console.log(`[coding] tasks scored: ${summary.tasksScored}`);
+  console.log(`[coding] complete tasks scored: ${summary.tasksScored}`);
   for (const result of summary.results) {
-    const scores = Object.entries(result.scores)
-      .map(([condition, value]) => `${condition}=${value}`).join('  ');
-    console.log(
-      `[coding] #${result.task} ${scores}  winner=${result.winner}` +
-      `  margin=${result.margin}${result.decisive ? '' : ' (within noise)'}`,
-    );
+    for (const runtime of CODING_RUNTIMES) {
+      const pair = result.pairs[runtime];
+      console.log(
+        `[coding] #${result.task} ${runtime} raw=${pair.raw} contract=${pair.contract} ` +
+        `margin=${pair.contractMargin}${pair.decisive ? '' : ' (within noise)'}`,
+      );
+    }
   }
-  console.log(`[coding] wins: ${JSON.stringify(summary.wins)}`);
-  console.log(`[coding] decisive wins: ${JSON.stringify(summary.decisiveWins)}`);
-  console.log(
-    `[coding] governed pipeline improves first-diff quality: ` +
-    `${summary.governedImprovesQuality ? 'YES' : 'NO'} (pre-registered bar: >=2 decisive wins)`,
-  );
+  console.log(`[coding] paired summary: ${JSON.stringify(summary.paired)}`);
+  console.log(`[coding] contract-first clears product bar: ${summary.contractImprovesQuality ? 'YES' : 'NO'}`);
   console.log(`[coding] ${summary.note}`);
+}
+
+function preflight(tasks: CodingTask[]): void {
+  const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: REPO_ROOT, encoding: 'utf8' }).trim();
+  if (path.resolve(root) !== path.resolve(REPO_ROOT)) {
+    throw new Error(`run the coding benchmark from the repository root: ${root}`);
+  }
+  if (!fs.existsSync(path.join(REPO_ROOT, 'node_modules'))) {
+    throw new Error('node_modules is missing; run npm install before the benchmark');
+  }
+  for (const command of ['ginsu', 'gh']) {
+    const check = runCommand(command, ['--help'], { cwd: REPO_ROOT, timeoutMs: 30_000 });
+    if (check.receipt.status !== 0) throw new Error(`${command} is unavailable`);
+  }
+  for (const task of tasks) {
+    execFileSync('git', ['cat-file', '-e', `${task.base}^{commit}`], { cwd: REPO_ROOT });
+    issueText(task.issue);
+  }
+  console.log(
+    `[coding] preflight OK: ${tasks.length} fixed tasks, ${CODING_CONDITIONS.length} paired arms/task, ` +
+    `${CODING_JUDGES.length} judges, seed=${collectionSeed()}, run=${RUN_ID}`,
+  );
 }
 
 function main(): void {
   const tasks = readTasks();
   const args = new Set(process.argv.slice(2));
-  const doCollect = args.has('--collect') || args.size === 0;
-  const doJudge = args.has('--judge') || args.size === 0;
-  if (doCollect) collect(tasks);
-  if (doJudge) judge(tasks);
+  const allowed = new Set(['--preflight', '--collect', '--judge', '--all']);
+  const unknown = [...args].filter((arg) => !allowed.has(arg));
+  if (unknown.length > 0) throw new Error(`unknown coding benchmark flag: ${unknown.join(', ')}`);
+  if (args.size !== 1) {
+    throw new Error('choose exactly one phase: --preflight, --collect, --judge, or --all');
+  }
+  if (args.has('--preflight')) {
+    preflight(tasks);
+    return;
+  }
+  if (args.has('--collect')) {
+    collect(tasks);
+    return;
+  }
+  if (args.has('--judge')) {
+    judge(tasks, readCollection());
+    return;
+  }
+  const collection = collect(tasks);
+  judge(tasks, collection);
 }
 
 main();

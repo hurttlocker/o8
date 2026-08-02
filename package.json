@@ -66,7 +66,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "dogfood:symon-localization": "node scripts/watch-symon-localization.mjs",
-    "bench:coding": "NODE_OPTIONS=--import=./scripts/register-server-only-stub.mjs tsx scripts/bench/run-coding.ts"
+    "bench:coding": "NODE_OPTIONS=--import=./scripts/register-server-only-stub.mjs tsx scripts/bench/run-coding.ts --preflight",
+    "bench:coding:collect": "NODE_OPTIONS=--import=./scripts/register-server-only-stub.mjs tsx scripts/bench/run-coding.ts --collect",
+    "bench:coding:judge": "NODE_OPTIONS=--import=./scripts/register-server-only-stub.mjs tsx scripts/bench/run-coding.ts --judge",
+    "bench:coding:all": "NODE_OPTIONS=--import=./scripts/register-server-only-stub.mjs tsx scripts/bench/run-coding.ts --all"
   },
   "dependencies": {
     "@ai-sdk/gateway": "^3.0.109",
