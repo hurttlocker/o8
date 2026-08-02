@@ -1,0 +1,85 @@
+# Pre-registration — o8 benchmark re-run, August 2026
+
+**Written before any measurement was taken.** Committed first so the rubric cannot
+be adjusted to fit the outcome. If any part of this is changed after a number is
+seen, the change and its reason must be recorded in a "Deviations" section below,
+not silently edited.
+
+Baseline being re-tested: *"o8 — What It Actually Does (Honest Benchmark)"*,
+2026-06-01/02.
+
+## The question
+
+Since June we added skills, changed dispatched-worker briefs, added the
+adversarial review protocol (four forced traces before approval), and changed the
+underlying models. Any of those could plausibly improve **first-diff quality**,
+not just catch-rate.
+
+> **Does o8 now make the models write better code, not just make merges safer?**
+
+## Hypotheses, stated before the run
+
+- **H1 (primary, coding).** o8-governed first-diff quality is *not* better than
+  raw Codex or raw Claude. June: o8-governed won **0 of 3**. Predicted August:
+  still 0–1 of 3. I expect this to remain **no**.
+- **H2 (governance).** o8's review tier still catches more bugs than merge-on-green.
+  June: **2/3** caught (3/3 in a reconstruction-based re-audit), **0/2** false
+  alarms. Predicted August: ≥2/3 catch, ≤1 false alarm.
+- **H3 (memory).** Brain overall accuracy holds within run-to-run noise of the
+  0.1.252 run of record (**68.6%** Brain vs **39.5%** strong-grep). Predicted:
+  Brain within ±6 points, still ahead of strong-grep by ≥20 points.
+- **H4 (speed).** No regression against the previous release scorecard.
+
+**What would change the headline claim.** H1 is falsified — and the June doc's
+central finding retired — only if o8-governed wins **≥2 of 3** tasks on blind
+judging *and* the margin is more than one point on the 0–10 scale. A 1-point edge
+on one task is noise at this N and will be reported as noise.
+
+## Scoring rubric (fixed now)
+
+Each diff scored **0–10** by a judge that is not told which condition produced it.
+Sub-scores, equally weighted:
+
+1. **Correctness** — does it actually do what the issue asked, on the real code path?
+2. **Scope discipline** — every changed line traceable to the request; no
+   unrequested refactor, no missed sub-requirement.
+3. **Robustness** — error paths, edge cases, no state leaks across repos/sessions.
+4. **Fit** — matches surrounding conventions; would pass review in this codebase.
+
+Mechanical gates recorded separately, never folded into the judge score:
+`npx tsc --noEmit` and `npx eslint` on changed files, pass/fail.
+
+**Blinding procedure.** Diffs are written to files named only `A`, `B`, `C` per
+task, with a shuffled mapping stored outside the judging context. Author-revealing
+markers (worktree paths, branch names, commit trailers, agent chatter) are stripped
+before judging. The mapping is opened only after all scores are recorded.
+
+**Best-shot rule for the cheaper alternative.** Raw Codex and raw Claude get the
+same issue text, the same clean base, and the same "make it correct and minimal"
+framing that o8's worker brief provides. No handicap, no truncated context. If the
+raw arm is disadvantaged by the harness in any way, that is a finding to report,
+not a result to keep.
+
+## Reporting rules
+
+- Every figure carries its **N**. Point estimates, never rates.
+- Anything reconstructed, proxied, or re-derived rather than measured live is
+  labelled as such at the point of use.
+- **Every sub-contest o8 loses is reported.** A clean sweep is treated as evidence
+  of a broken method, not a good product.
+- Three failed attempts on any track → stop, revert, report the blocker. A partial
+  run with an honest gap beats a complete run with a filled-in guess.
+
+## Known threats to validity, noted in advance
+
+- **The base moved.** o8's git history was rewritten 2026-08-01, so June's base
+  commit SHAs no longer exist. Content is preserved; the equivalent tree must be
+  located by content and that substitution disclosed.
+- **The judge and the subject share a model family.** Same limitation as June.
+- **I am benchmarking the product I am running on**, which is a conflict of
+  interest no amount of procedure fully removes. The mitigations are pre-registration,
+  blinding, and publishing losses.
+
+## Deviations from this plan
+
+*(Any change after the first measurement gets recorded here, with the reason.)*
