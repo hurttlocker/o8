@@ -161,3 +161,36 @@ decisive wins rather than one.
 Nothing else changes: same three tasks, same base, same 2x2 design, same
 `NOISE_MARGIN`, same immutable run IDs, same requirement to publish every loss
 and every invalid arm.
+
+---
+
+## Amendment 3: shipped-output experiment (recorded before collection)
+
+The first-diff experiment remains intact, but it does not measure the governed
+pipeline's merge-safety claim. A second experiment in the same immutable run now
+scores the artifact that would ship through each path.
+
+The tasks are exactly issues #1676, #1678, and #1679. Each task starts from the
+same full `main` commit recorded in the collection receipt. The arms are
+`adhoc-codex`, `adhoc-claude`, and `governed`. The ad-hoc artifact is the model's
+single-pass diff. The governed artifact is the packet diff only after the real
+mission dispatch, auto-review, autonomous refix, durable approval, and read-only
+merge preview reach `wouldMerge=true`. The harness never calls merge or any
+operator approval command.
+
+Collection refuses to start unless the operator's existing approval posture is
+`always`. Auto-review normally attempts a merge after recording its verdict, so
+this fixed safety interlock holds the real pipeline at the final approval boundary
+without racing it, changing settings, or approving on the operator's behalf. A
+governed arm is invalid if it stalls, asks for a human decision before becoming
+merge-ready, releases instead of holding, produces a truncated or empty diff, or
+reports a merge base different from the recorded commit.
+
+Before judging, the harness removes task-contract, implementation-note, and
+review-artifact patches, replaces recorded worktree, mission, packet, lane, worker,
+and branch provenance, then scans the blinded diff for both exact and generic
+markers. Any surviving marker aborts judging. The same two judges and rubric score
+all three shipped diffs. A winner is decisive only when its averaged margin exceeds
+`NOISE_MARGIN` and both judges independently rank it above every other arm;
+disagreement is reported as `judges disagree`. Every invalid arm and every governed
+loss remains in the receipt and report.

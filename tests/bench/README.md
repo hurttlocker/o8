@@ -45,6 +45,14 @@ runtime families. Every arm receives the same task, base, repository rules, one
 turn, and timeout. A task is scored only when all four arms pass the independent
 mechanical gates and both blinded judges return complete verdicts.
 
+The same collection also runs a separate shipped-output experiment on issues
+#1676, #1678, and #1679. It compares two single-pass ad-hoc diffs with the diff
+that survives real mission dispatch, auto-review, autonomous refix, and merge
+preview. The exact `main` commit is recorded in the receipt, and judging aborts
+if worktree, mission, packet, lane, branch, or review-artifact provenance survives
+blinding. Collection requires the `always` approval posture so the real pipeline
+cannot merge while the benchmark captures its merge-ready diff.
+
 Preflight without launching workers:
 
 ```sh

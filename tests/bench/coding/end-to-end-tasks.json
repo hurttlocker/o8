@@ -1,0 +1,18 @@
+{
+  "schema": "o8/coding-end-to-end-tasks/v1",
+  "note": "Operator-selected open issues for the governed-pipeline experiment. Do not substitute, add, or drop tasks after the run is preregistered.",
+  "tasks": [
+    {
+      "issue": 1676,
+      "label": "WS server crashes never reach Sentry"
+    },
+    {
+      "issue": 1678,
+      "label": "First-run friction"
+    },
+    {
+      "issue": 1679,
+      "label": "Sentry dogfooding environment tags"
+    }
+  ]
+}

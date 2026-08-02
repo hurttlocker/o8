@@ -16,7 +16,6 @@ import path from 'node:path';
 
 import { DEVIATIONS_CLAUSE } from '../../src/lib/orchestrator/packet-deviations';
 import {
-  PACKET_TASK_CONTRACT_TAG_START,
   buildPacketTaskContractInstructions,
 } from '../../src/lib/orchestrator/packet-task-contract';
 import {
@@ -36,6 +35,19 @@ import {
   scrubAuthorship,
   treatmentForCondition,
 } from './coding';
+import {
+  CODING_TASK_CONTRACT_FILE,
+  readCodingTaskContract,
+} from './coding-task-contract';
+import { JUDGE_PROMPT, RAW_BRIEF } from './coding-prompts';
+import { judgeEndToEnd } from './judge-coding-end-to-end';
+import {
+  collectEndToEnd,
+  createEndToEndCollection,
+  preflightEndToEnd,
+  readEndToEndTasks,
+  type EndToEndCollectionReceipt,
+} from './run-coding-end-to-end';
 
 const REPO_ROOT = process.cwd();
 const TASKS_FILE = path.join(REPO_ROOT, 'tests/bench/coding/tasks.json');
@@ -52,42 +64,12 @@ const JUDGE_TIMEOUT_SECONDS = 1_800;
 const DEFAULT_SEED = 20_260_802;
 let cachedRepoSlug: string | null = null;
 
-const RAW_BRIEF = `You are implementing a real issue in this repository from a clean checkout
-at the commit where the issue was still open.
-
-Produce the best first diff you can: correct, minimal, and fit for this codebase.
-Repository instructions at the root are binding. Implement every requirement without
-expanding the requested scope. You have one turn and the fixed time budget enforced by
-the runner. You may inspect, implement, test, and repair within that turn.
-
-Leave the work uncommitted. Do not commit, push, create branches, or alter benchmark
-artifacts. Do not weaken or rewrite tests to make the implementation pass.`;
-
 const CONTRACT_INTERVENTION = [
   'Contract-first intervention:',
   ...buildPacketTaskContractInstructions(),
+  `6. In addition to the assistant-message block, write the same contract JSON object, without tags or a Markdown fence, to ${CODING_TASK_CONTRACT_FILE} in the worktree root before any implementation edit. This artifact is mandatory and must remain unchanged after it is written.`,
   DEVIATIONS_CLAUSE,
 ].join('\n');
-
-const JUDGE_PROMPT = `You are an impartial senior code reviewer scoring candidate diffs for the
-same issue. You do not know which runtime or treatment produced them. Judge only the
-code and base repository; do not speculate about authorship.
-
-Mechanical checks are reported separately and do not affect the score. Find what a
-compiler cannot establish: unreachable behavior, omitted requirements, excess public
-surface, unnecessary refactors, weak error paths, and state leaking across scopes.
-
-Score each candidate 0-10 as the mean of four equally weighted sub-scores:
-  correctness      - does it satisfy every issue requirement on the real code path?
-  scopeDiscipline  - is every changed unit necessary, with no omitted requirement?
-  robustness       - are failure paths and state boundaries handled correctly?
-  fit              - does it match the surrounding code and architecture?
-
-Do not reward length or brevity by itself. A smaller diff wins only when coverage and
-correctness are equal. Review only; do not edit the repository.
-
-Write only a JSON array to the requested output file, one object per candidate:
-[{"blindLabel":"A","subScores":{"correctness":0,"scopeDiscipline":0,"robustness":0,"fit":0},"mostSeriousDefect":"..."}]`;
 
 interface CommandReceipt {
   command: string;
@@ -139,6 +121,7 @@ interface CollectionReceipt {
   armTimeoutSeconds: number;
   conditions: CodingCondition[];
   arms: ArmReceipt[];
+  endToEnd: EndToEndCollectionReceipt;
 }
 
 interface JudgeReceipt {
@@ -295,7 +278,16 @@ function stagedDiffFacts(dir: string, diffPath: string): {
   additions: number;
   deletions: number;
 } {
-  execFileSync('git', ['add', '-A', '--', ':!node_modules', ':!implementation-notes.md'], { cwd: dir });
+  // Bare `git add -A` — passing any pathspec puts git in explicit mode, where a
+  // gitignored match (the node_modules symlink each arm needs) warns and exits
+  // non-zero, aborting the whole collection. Without a pathspec git silently
+  // skips ignored paths, so benchmark-only artifacts are unstaged explicitly instead.
+  execFileSync('git', ['add', '-A'], { cwd: dir });
+  execFileSync(
+    'git',
+    ['reset', '-q', '--', 'implementation-notes.md', CODING_TASK_CONTRACT_FILE],
+    { cwd: dir },
+  );
   try {
     const diff = execFileSync('git', ['diff', '--cached', '--binary'], {
       cwd: dir,
@@ -377,17 +369,19 @@ function runArm(task: CodingTask, condition: CodingCondition, issue: string): Ar
   }
   fs.writeFileSync(replyPath, send.stdout);
 
+  const contractObserved = treatment === 'contract'
+    ? readCodingTaskContract(dir) !== null
+    : null;
   const diffFacts = stagedDiffFacts(dir, diffPath);
   const mechanical = runMechanicalChecks(dir, diffFacts.changedFiles);
-  const contractObserved = treatment === 'contract'
-    ? send.stdout.includes(PACKET_TASK_CONTRACT_TAG_START)
-    : null;
   const invalidReasons = [
     spawn.receipt.status !== 0 ? 'worker spawn failed' : null,
     send.receipt.status !== 0 ? 'worker turn failed' : null,
     stop.receipt.status !== 0 ? 'worker stop failed' : null,
     diffFacts.changedFiles.length === 0 ? 'no diff produced' : null,
-    treatment === 'contract' && !contractObserved ? 'task contract was not observable in the worker reply' : null,
+    treatment === 'contract' && !contractObserved
+      ? `task contract artifact ${CODING_TASK_CONTRACT_FILE} was missing, malformed, empty, or unmapped`
+      : null,
     mechanical.typecheck.status !== 0 ? 'typecheck failed' : null,
     mechanical.eslint && mechanical.eslint.status !== 0 ? 'eslint failed' : null,
   ].filter((reason): reason is string => reason !== null);
@@ -425,12 +419,13 @@ function collectionSeed(): number {
   return parsed;
 }
 
-function collect(tasks: CodingTask[]): CollectionReceipt {
+function collect(tasks: CodingTask[], endToEndTasks = readEndToEndTasks(REPO_ROOT)): CollectionReceipt {
   if (fs.existsSync(COLLECTION_FILE)) {
     throw new Error(
       `benchmark run ${RUN_ID} already has a collection; set O8_BENCH_RUN_ID to a new value rather than overwriting it`,
     );
   }
+  const endToEnd = createEndToEndCollection(REPO_ROOT, RUN_ID, endToEndTasks);
   fs.mkdirSync(WORK_ROOT, { recursive: true });
   const seed = collectionSeed();
   const shuffle = seededShuffle(seed);
@@ -442,6 +437,7 @@ function collect(tasks: CodingTask[]): CollectionReceipt {
     armTimeoutSeconds: ARM_TIMEOUT_SECONDS,
     conditions: [...CODING_CONDITIONS],
     arms: [],
+    endToEnd,
   };
   writeJson(COLLECTION_FILE, collection);
 
@@ -460,6 +456,15 @@ function collect(tasks: CodingTask[]): CollectionReceipt {
       );
     }
   }
+  collectEndToEnd({
+    repoRoot: REPO_ROOT,
+    workRoot: WORK_ROOT,
+    collection: endToEnd,
+    onUpdate: (receipt) => {
+      collection.endToEnd = receipt;
+      writeJson(COLLECTION_FILE, collection);
+    },
+  });
   return collection;
 }
 
@@ -579,7 +584,11 @@ function runJudge(
 
 function readCollection(): CollectionReceipt {
   const parsed = JSON.parse(fs.readFileSync(COLLECTION_FILE, 'utf8')) as CollectionReceipt;
-  if (parsed.schema !== 'o8/coding-collection/v2' || parsed.runId !== RUN_ID || !Array.isArray(parsed.arms)) {
+  if (parsed.schema !== 'o8/coding-collection/v2'
+    || parsed.runId !== RUN_ID
+    || !Array.isArray(parsed.arms)
+    || parsed.endToEnd?.schema !== 'o8/coding-end-to-end-collection/v1'
+    || parsed.endToEnd.runId !== RUN_ID) {
     throw new Error('collection.json is missing or uses an unsupported schema');
   }
   return parsed;
@@ -649,6 +658,12 @@ function judge(tasks: CodingTask[], collection: CollectionReceipt): void {
   }
 
   const summary = scoreCodingResults(tasks, verdicts, mappings);
+  const endToEnd = judgeEndToEnd({
+    repoRoot: REPO_ROOT,
+    workRoot: WORK_ROOT,
+    seed: collection.seed,
+    collection: collection.endToEnd,
+  });
   fs.mkdirSync(LATEST_DIR, { recursive: true });
   writeJson(path.join(LATEST_DIR, 'coding.json'), {
     schema: 'o8/coding-benchmark/v2',
@@ -668,6 +683,7 @@ function judge(tasks: CodingTask[], collection: CollectionReceipt): void {
     },
     collection,
     judging: { receipts: judgeReceipts, mappings },
+    endToEnd,
     ...summary,
   });
   writeJson(JUDGING_FILE, {
@@ -683,9 +699,16 @@ function judge(tasks: CodingTask[], collection: CollectionReceipt): void {
   for (const result of summary.results) {
     for (const runtime of CODING_RUNTIMES) {
       const pair = result.pairs[runtime];
+      const rawCondition = `${runtime}-raw` as CodingCondition;
+      const contractCondition = `${runtime}-contract` as CodingCondition;
+      const perJudge = CODING_JUDGES.map((judgeRuntime) => (
+        `${judgeRuntime}:raw=${result.judgeScores[rawCondition][judgeRuntime]}` +
+        `,contract=${result.judgeScores[contractCondition][judgeRuntime]}`
+      )).join(' ');
       console.log(
-        `[coding] #${result.task} ${runtime} raw=${pair.raw} contract=${pair.contract} ` +
-        `margin=${pair.contractMargin}${pair.decisive ? '' : ' (within noise)'}`,
+        `[coding] #${result.task} ${runtime} ${perJudge} ` +
+        `average:raw=${pair.raw},contract=${pair.contract} margin=${pair.contractMargin} ` +
+        `judgeAgreement=${pair.judgeAgreement} outcome=${pair.outcome} decisive=${pair.decisive}`,
       );
     }
   }
@@ -710,14 +733,20 @@ function preflight(tasks: CodingTask[]): void {
     execFileSync('git', ['cat-file', '-e', `${task.base}^{commit}`], { cwd: REPO_ROOT });
     issueText(task.issue);
   }
+  const endToEnd = preflightEndToEnd(REPO_ROOT, readEndToEndTasks(REPO_ROOT));
   console.log(
     `[coding] preflight OK: ${tasks.length} fixed tasks, ${CODING_CONDITIONS.length} paired arms/task, ` +
     `${CODING_JUDGES.length} judges, seed=${collectionSeed()}, run=${RUN_ID}`,
+  );
+  console.log(
+    `[coding:e2e] preflight OK: issues=1676,1678,1679, arms=3/task, base=${endToEnd.baseCommit}, ` +
+    `approval=${endToEnd.approvalMode}${endToEnd.approvalMode === 'always' ? '' : ' (collection will fail closed)'}`,
   );
 }
 
 function main(): void {
   const tasks = readTasks();
+  const endToEndTasks = readEndToEndTasks(REPO_ROOT);
   const args = new Set(process.argv.slice(2));
   const allowed = new Set(['--preflight', '--collect', '--judge', '--all']);
   const unknown = [...args].filter((arg) => !allowed.has(arg));
@@ -730,14 +759,14 @@ function main(): void {
     return;
   }
   if (args.has('--collect')) {
-    collect(tasks);
+    collect(tasks, endToEndTasks);
     return;
   }
   if (args.has('--judge')) {
     judge(tasks, readCollection());
     return;
   }
-  const collection = collect(tasks);
+  const collection = collect(tasks, endToEndTasks);
   judge(tasks, collection);
 }
 

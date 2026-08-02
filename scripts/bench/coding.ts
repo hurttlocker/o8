@@ -62,6 +62,8 @@ export interface CodingPairResult {
   /** Positive means the contract-first arm scored higher. */
   contractMargin: number;
   winner: CodingTreatment | null;
+  judgeAgreement: boolean;
+  outcome: CodingTreatment | 'tie' | 'judges disagree';
   decisive: boolean;
 }
 
@@ -73,6 +75,8 @@ export interface CodingTaskResult {
   winner: CodingCondition | null;
   /** Gap between best and second-best arm. */
   margin: number;
+  judgeAgreement: boolean;
+  outcome: CodingCondition | 'tie' | 'judges disagree';
   decisive: boolean;
   pairs: Record<CodingRuntime, CodingPairResult>;
 }
@@ -165,17 +169,27 @@ function rounded(value: number): number {
 function buildPair(
   runtime: CodingRuntime,
   scores: Record<CodingCondition, number>,
+  judgeScores: Record<CodingCondition, Record<CodingJudge, number>>,
 ): CodingPairResult {
-  const raw = scores[`${runtime}-raw`];
-  const contract = scores[`${runtime}-contract`];
+  const rawCondition = `${runtime}-raw` as CodingCondition;
+  const contractCondition = `${runtime}-contract` as CodingCondition;
+  const raw = scores[rawCondition];
+  const contract = scores[contractCondition];
   const contractMargin = rounded(contract - raw);
+  const direction = Math.sign(contractMargin);
+  const judgeAgreement = direction !== 0 && CODING_JUDGES.every((judge) => (
+    Math.sign(judgeScores[contractCondition][judge] - judgeScores[rawCondition][judge]) === direction
+  ));
+  const winner = contractMargin > 0 ? 'contract' : contractMargin < 0 ? 'raw' : null;
   return {
     runtime,
     raw,
     contract,
     contractMargin,
-    winner: contractMargin > 0 ? 'contract' : contractMargin < 0 ? 'raw' : null,
-    decisive: Math.abs(contractMargin) > NOISE_MARGIN,
+    winner,
+    judgeAgreement,
+    outcome: winner === null ? 'tie' : judgeAgreement ? winner : 'judges disagree',
+    decisive: judgeAgreement && Math.abs(contractMargin) > NOISE_MARGIN,
   };
 }
 
@@ -227,14 +241,20 @@ export function scoreCodingResults(
     const runnerUp = ranked[1][1];
     const winner = best === runnerUp ? null : ranked[0][0];
     const margin = rounded(best - runnerUp);
-    const decisive = margin > NOISE_MARGIN;
+    const judgeAgreement = winner !== null && CODING_JUDGES.every((judge) => (
+      CODING_CONDITIONS.every((condition) => (
+        condition === winner || judgeScores[winner][judge] > judgeScores[condition][judge]
+      ))
+    ));
+    const outcome = winner === null ? 'tie' : judgeAgreement ? winner : 'judges disagree';
+    const decisive = judgeAgreement && margin > NOISE_MARGIN;
     if (winner) {
       wins[winner] += 1;
       if (decisive) decisiveWins[winner] += 1;
     }
 
     const pairs = Object.fromEntries(CODING_RUNTIMES.map((runtime) => {
-      const pair = buildPair(runtime, scores);
+      const pair = buildPair(runtime, scores, judgeScores);
       const summary = paired[runtime];
       summary.tasks += 1;
       if (pair.winner === 'contract') {
@@ -249,7 +269,18 @@ export function scoreCodingResults(
       return [runtime, pair];
     })) as Record<CodingRuntime, CodingPairResult>;
 
-    results.push({ task: task.issue, label: task.label, scores, judgeScores, winner, margin, decisive, pairs });
+    results.push({
+      task: task.issue,
+      label: task.label,
+      scores,
+      judgeScores,
+      winner,
+      margin,
+      judgeAgreement,
+      outcome,
+      decisive,
+      pairs,
+    });
   }
 
   const ranges = Object.fromEntries(CODING_CONDITIONS.map((condition) => {
@@ -272,7 +303,8 @@ export function scoreCodingResults(
     contractImprovesQuality,
     note:
       `N=${results.length} complete tasks, each scored by N=${CODING_JUDGES.length} blinded judges. ` +
-      `A paired win is decisive only when the absolute margin exceeds ${NOISE_MARGIN} point. ` +
+      `A paired win is decisive only when the absolute averaged margin exceeds ${NOISE_MARGIN} point ` +
+      `and both judges agree on its direction. ` +
       `The contract-first intervention clears the product bar only with at least two decisive wins ` +
       `for each initial runtime. Excellent output means score >=${EXCELLENT_SCORE}. Report counts, never rates.`,
   };
