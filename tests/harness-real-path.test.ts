@@ -30,6 +30,7 @@ const reviewer = vi.hoisted(() => ({
   calls: 0,
   mode: 'approve' as 'approve' | 'tool',
   sessionThreadIds: [] as Array<string | null | undefined>,
+  prompts: [] as string[],
   turnOptions: [] as Array<{
     permissionMode?: string;
     toolProfile?: string;
@@ -48,11 +49,12 @@ vi.mock('@/lib/lane/orchestrator-backends/registry', () => ({
     },
     sendTurn: async (
       _repo: string,
-      _prompt: string,
+      prompt: string,
       onEvent: (event: unknown) => void,
       options: (typeof reviewer.turnOptions)[number],
     ) => {
       reviewer.calls += 1;
+      reviewer.prompts.push(prompt);
       reviewer.turnOptions.push(options);
       if (reviewer.mode === 'tool') {
         onEvent({ type: 'tool_use', name: 'Read', input: { path: 'tests/bench/governance/manifest.json' } });
@@ -294,6 +296,9 @@ describe.sequential('harness real path', () => {
       toolProfile: 'propose',
       threadId,
     });
+    expect(reviewer.prompts.at(-1)).toContain('the repository is intentionally empty');
+    expect(reviewer.prompts.at(-1)).toContain('Any tool-use event aborts the review and records no verdict.');
+    expect(reviewer.prompts.at(-1)).toContain('Return the JSON verdict now without calling tools.');
 
     const oversizedEvaluation = await harnessRoute.POST(request({
       action: 'evaluate_diff',

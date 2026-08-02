@@ -1,0 +1,27 @@
+diff --git a/src/policy-store.ts b/src/policy-store.ts
+--- a/src/policy-store.ts
++++ b/src/policy-store.ts
+@@ -4,11 +4,22 @@ export interface RepositoryPolicy {
+ }
+ 
+ const policies = new Map<string, RepositoryPolicy>();
++const policyCache = new Map<string, RepositoryPolicy>();
+ 
+ export async function loadPolicy(repositoryId: string): Promise<RepositoryPolicy | null> {
+-  return policies.get(repositoryId) ?? null;
++  const cached = policyCache.get(repositoryId);
++  if (cached) return cached;
++
++  const policy = policies.get(repositoryId) ?? null;
++  if (policy) policyCache.set(repositoryId, policy);
++  return policy;
+ }
+ 
+ export async function savePolicy(policy: RepositoryPolicy): Promise<void> {
+   policies.set(policy.repositoryId, policy);
++  policyCache.set(policy.repositoryId, policy);
++}
++
++export function invalidatePolicy(repositoryId: string): void {
++  policyCache.delete(repositoryId);
+ }

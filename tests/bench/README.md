@@ -29,9 +29,7 @@ Run governance alone with:
 npm run bench:governance
 ```
 
-The governance command preflights five committed patch fixtures through TypeScript and ESLint, shuffles and neutrally labels them, sends only task, acceptance criteria, and diff to the active AI reviewer, and records catch rate and false-positive rate with denominators. It then refreshes the version-stamped scorecard. The result measures the AI review tier, not the human approval gate above it.
-
-The corrected blind boundary has not yet completed an end-to-end run, so no governance scorecard is committed with this harness. Treat the track as unvalidated until a later run completes under that boundary.
+The governance command preflights 20 committed patch fixtures through TypeScript and ESLint, shuffles and neutrally labels them, and sends only task, acceptance criteria, and diff to the active AI reviewer. It records planted defects caught, clean diffs blocked, clean diffs with any finding, and inconclusive reviews with explicit denominators. It then refreshes the version-stamped scorecard. The result measures the AI review tier, not the human approval gate above it.
 
 ## Thresholds
 

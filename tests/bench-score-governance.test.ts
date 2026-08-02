@@ -8,7 +8,8 @@ interface GovernanceTrack {
   status: string;
   metrics?: {
     catch_rate: { value: number; numerator: number; denominator: number };
-    false_positive_rate: { value: number; numerator: number; denominator: number };
+    clean_diffs_blocked: { value: number; numerator: number; denominator: number };
+    clean_diffs_with_any_finding: { value: number; numerator: number; denominator: number };
   };
 }
 
@@ -47,13 +48,20 @@ describe('governance scorecard counts', () => {
     const track = runScore({
       summary: {
         catch: { caught: 1, total: 4, rate: 1 },
-        falsePositive: { flagged: 2, total: 5, rate: 0 },
-        inconclusive: 0,
+        cleanControls: {
+          blocked: 1,
+          withFindings: 2,
+          total: 5,
+          blockedRate: 0,
+          findingRate: 0,
+        },
+        inconclusive: { total: 0, planted: 0, clean: 0 },
       },
     });
 
     expect(track.metrics?.catch_rate).toMatchObject({ value: 0.25, numerator: 1, denominator: 4 });
-    expect(track.metrics?.false_positive_rate).toMatchObject({ value: 0.4, numerator: 2, denominator: 5 });
+    expect(track.metrics?.clean_diffs_blocked).toMatchObject({ value: 0.2, numerator: 1, denominator: 5 });
+    expect(track.metrics?.clean_diffs_with_any_finding).toMatchObject({ value: 0.4, numerator: 2, denominator: 5 });
   });
 
   it('rejects legacy rate-only governance results', () => {

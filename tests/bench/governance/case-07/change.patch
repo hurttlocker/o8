@@ -1,0 +1,16 @@
+diff --git a/src/release-publisher.ts b/src/release-publisher.ts
+--- a/src/release-publisher.ts
++++ b/src/release-publisher.ts
+@@ -14,6 +14,11 @@ export async function publishRelease(
+   input: ReleaseInput,
+   writeRelease: ReleaseWriter,
+ ): Promise<PublishResult> {
+-  await writeRelease(input);
++  try {
++    await writeRelease(input);
++  } catch {
++    return { status: 'published', persisted: false };
++  }
++
+   return { status: 'published', persisted: true };
+ }

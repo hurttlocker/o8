@@ -41,6 +41,18 @@ function percent(rate: number): string {
   return `${(rate * 100).toFixed(1)}%`;
 }
 
+function fixtureShapes(
+  fixtures: ReturnType<typeof loadGovernanceFixtures>,
+  classification: 'planted' | 'clean',
+): Record<string, number> {
+  const counts = new Map<string, number>();
+  for (const fixture of fixtures) {
+    if (fixture.groundTruth.classification !== classification) continue;
+    counts.set(fixture.shape, (counts.get(fixture.shape) ?? 0) + 1);
+  }
+  return Object.fromEntries([...counts.entries()].sort(([left], [right]) => left.localeCompare(right)));
+}
+
 function createBlindReviewRepo(): string {
   const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'o8-governance-review-'));
   execFileSync('git', ['init', '-q', '--initial-branch=main'], { cwd: repoPath });
@@ -85,12 +97,16 @@ async function main(): Promise<void> {
   const summary = scoreGovernanceResults(results);
   const reviewerBackends = [...new Set(results.map((result) => result.evaluation.reviewerBackend ?? 'unknown'))];
   const payload = {
-    schema: 'o8/governance-benchmark/v1',
+    schema: 'o8/governance-benchmark/v2',
     generatedAt: new Date().toISOString(),
     version: packageVersion(),
     gitSha: gitSha(),
     fixtureManifest: 'tests/bench/governance/manifest.json',
     fixtureCount: fixtures.length,
+    fixtureComposition: {
+      planted: fixtureShapes(fixtures, 'planted'),
+      clean: fixtureShapes(fixtures, 'clean'),
+    },
     reviewerBackends,
     scopeStatement,
     blindExecution: {
@@ -102,6 +118,7 @@ async function main(): Promise<void> {
       reviewerToolProfile: 'propose',
       reviewerToolsForbidden: true,
       toolProtocolBreachIsInconclusive: true,
+      suppliedPatchIsSelfContained: true,
     },
     mechanicalGates: {
       typescript: { passed: true, fixtures: fixtures.length },
@@ -112,6 +129,7 @@ async function main(): Promise<void> {
     results: results.map((result) => ({
       neutralLabel: result.neutralLabel,
       fixtureId: result.fixture.id,
+      shape: result.fixture.shape,
       classification: result.fixture.groundTruth.classification,
       defect: result.fixture.groundTruth.defect,
       verdict: result.evaluation.verdict,
@@ -129,8 +147,9 @@ async function main(): Promise<void> {
 
   console.log(`[governance] ${scopeStatement}`);
   console.log(`[governance] Catch rate: ${summary.catch.caught}/${summary.catch.total} (${percent(summary.catch.rate)}) planted defects found.`);
-  console.log(`[governance] False-positive rate: ${summary.falsePositive.flagged}/${summary.falsePositive.total} (${percent(summary.falsePositive.rate)}) clean diffs wrongly flagged.`);
-  console.log(`[governance] Inconclusive reviews: ${summary.inconclusive}/${fixtures.length}.`);
+  console.log(`[governance] Clean diffs BLOCKED: ${summary.cleanControls.blocked}/${summary.cleanControls.total} (${percent(summary.cleanControls.blockedRate)}) received request_changes.`);
+  console.log(`[governance] Clean diffs with any finding: ${summary.cleanControls.withFindings}/${summary.cleanControls.total} (${percent(summary.cleanControls.findingRate)}), including non-blocking findings on approve verdicts.`);
+  console.log(`[governance] Inconclusive reviews: ${summary.inconclusive.total}/${fixtures.length} (${summary.inconclusive.planted} planted, ${summary.inconclusive.clean} clean); reported separately and never treated as a catch, clean block, or clean finding.`);
   console.log(`[governance] wrote ${outputPath}`);
 }
 

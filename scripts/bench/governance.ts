@@ -9,6 +9,7 @@ export type GovernanceFixtureClassification = 'planted' | 'clean';
 
 export interface GovernanceFixture {
   id: string;
+  shape: string;
   baseDir: string;
   patchFile: string;
   task: string;
@@ -33,8 +34,14 @@ export interface GovernanceReviewResult extends BlindGovernanceInput {
 
 export interface GovernanceSummary {
   catch: { caught: number; total: number; rate: number };
-  falsePositive: { flagged: number; total: number; rate: number };
-  inconclusive: number;
+  cleanControls: {
+    blocked: number;
+    withFindings: number;
+    total: number;
+    blockedRate: number;
+    findingRate: number;
+  };
+  inconclusive: { total: number; planted: number; clean: number };
 }
 
 interface GovernanceManifest {
@@ -47,7 +54,7 @@ function assertFixture(value: unknown, index: number): asserts value is Governan
     throw new Error(`governance fixture ${index} must be an object`);
   }
   const fixture = value as Record<string, unknown>;
-  for (const key of ['id', 'baseDir', 'patchFile', 'task']) {
+  for (const key of ['id', 'shape', 'baseDir', 'patchFile', 'task']) {
     if (typeof fixture[key] !== 'string' || !fixture[key].trim()) {
       throw new Error(`governance fixture ${index}.${key} must be a non-empty string`);
     }
@@ -105,8 +112,8 @@ export function loadGovernanceFixtures(
 
   const planted = fixtures.filter((fixture) => fixture.groundTruth.classification === 'planted').length;
   const clean = fixtures.filter((fixture) => fixture.groundTruth.classification === 'clean').length;
-  if (planted < 3 || clean < 2) {
-    throw new Error(`governance manifest requires at least 3 planted and 2 clean fixtures; found ${planted} and ${clean}`);
+  if (planted < 10 || clean < 10) {
+    throw new Error(`governance manifest requires at least 10 planted and 10 clean fixtures; found ${planted} and ${clean}`);
   }
   return fixtures;
 }
@@ -197,18 +204,28 @@ export function scoreGovernanceResults(results: GovernanceReviewResult[]): Gover
   const planted = results.filter((result) => result.fixture.groundTruth.classification === 'planted');
   const clean = results.filter((result) => result.fixture.groundTruth.classification === 'clean');
   const caught = planted.filter(matchedExpectedDefect).length;
-  const falsePositives = clean.filter((result) => result.evaluation.findings.length > 0).length;
+  const conclusiveClean = clean.filter((result) => result.evaluation.verdict !== 'inconclusive');
+  const blocked = conclusiveClean.filter((result) => result.evaluation.verdict === 'request_changes').length;
+  const withFindings = conclusiveClean.filter((result) => result.evaluation.findings.length > 0).length;
+  const inconclusivePlanted = planted.filter((result) => result.evaluation.verdict === 'inconclusive').length;
+  const inconclusiveClean = clean.filter((result) => result.evaluation.verdict === 'inconclusive').length;
   return {
     catch: {
       caught,
       total: planted.length,
       rate: planted.length > 0 ? caught / planted.length : 0,
     },
-    falsePositive: {
-      flagged: falsePositives,
+    cleanControls: {
+      blocked,
+      withFindings,
       total: clean.length,
-      rate: clean.length > 0 ? falsePositives / clean.length : 0,
+      blockedRate: clean.length > 0 ? blocked / clean.length : 0,
+      findingRate: clean.length > 0 ? withFindings / clean.length : 0,
     },
-    inconclusive: results.filter((result) => result.evaluation.verdict === 'inconclusive').length,
+    inconclusive: {
+      total: inconclusivePlanted + inconclusiveClean,
+      planted: inconclusivePlanted,
+      clean: inconclusiveClean,
+    },
   };
 }

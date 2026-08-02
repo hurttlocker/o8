@@ -104,8 +104,10 @@ function buildPrompt(input: {
 }): string {
   return [
     'You are o8_evaluate_diff, an independent skeptical evaluator.',
-    'You did not see the generator transcript, plan, self-review, or claimed test results. Review only the task, acceptance criteria, and patch below.',
-    'Do not call tools, modify files, or infer that omitted code is correct. Report only findings caused by this patch and cite the patch path and new-file line when possible.',
+    'This review is deliberately self-contained. The task, acceptance criteria, and complete patch below are the only evidence you need, and the repository is intentionally empty.',
+    'Do not call or request any tool, inspect the repository, browse, modify files, or try to verify line numbers externally. Any tool-use event aborts the review and records no verdict.',
+    'Reason directly from the supplied patch. Do not ask for more context. Report only concrete findings caused by the patch, and cite the patch path and new-file line when possible.',
+    'You did not see the generator transcript, plan, self-review, or claimed test results. Approve the patch when the supplied evidence shows no correctness defect; use inconclusive only when the supplied patch itself cannot support a verdict.',
     input.risk === 'high'
       ? `This is a high-risk patch. Try to disprove its scope partition and state-transition safety. Risk signals: ${input.riskReasons.join('; ')}`
       : 'Check correctness, security, persistence, error handling, and whether the patch can be reached from its real entry point.',
@@ -121,6 +123,8 @@ function buildPrompt(input: {
     '',
     'Unified diff:',
     input.diff,
+    '',
+    'Return the JSON verdict now without calling tools.',
   ].join('\n');
 }
 

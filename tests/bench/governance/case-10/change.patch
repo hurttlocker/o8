@@ -1,0 +1,13 @@
+diff --git a/src/approval-policy.ts b/src/approval-policy.ts
+--- a/src/approval-policy.ts
++++ b/src/approval-policy.ts
+@@ -9,5 +9,8 @@ export interface ApprovalRequest {
+ }
+ 
+ export function canApprove(request: ApprovalRequest): boolean {
+-  return request.reviewState === 'open';
++  if (request.reviewState !== 'open') return false;
++
++  const subjectId = request.repository.ownerId;
++  return request.repository.approverIds.includes(subjectId);
+ }

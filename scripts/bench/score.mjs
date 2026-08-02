@@ -228,17 +228,19 @@ function buildMemoryTrack(memory, prior) {
 function buildGovernanceTrack(governance, prior) {
   if (!governance) return { automatable: true, status: 'automated — not run this release' };
   const catchSummary = governance.summary?.catch;
-  const falsePositiveSummary = governance.summary?.falsePositive;
+  const cleanSummary = governance.summary?.cleanControls;
   const caught = numberOrNull(catchSummary?.caught);
   const plantedTotal = numberOrNull(catchSummary?.total);
-  const falsePositives = numberOrNull(falsePositiveSummary?.flagged);
-  const cleanTotal = numberOrNull(falsePositiveSummary?.total);
-  const validCounts = [caught, plantedTotal, falsePositives, cleanTotal]
+  const cleanBlocked = numberOrNull(cleanSummary?.blocked);
+  const cleanWithFindings = numberOrNull(cleanSummary?.withFindings);
+  const cleanTotal = numberOrNull(cleanSummary?.total);
+  const validCounts = [caught, plantedTotal, cleanBlocked, cleanWithFindings, cleanTotal]
     .every((value) => Number.isInteger(value) && value >= 0)
     && plantedTotal > 0
     && cleanTotal > 0
     && caught <= plantedTotal
-    && falsePositives <= cleanTotal;
+    && cleanBlocked <= cleanTotal
+    && cleanWithFindings <= cleanTotal;
   if (!validCounts) {
     return {
       automatable: true,
@@ -246,21 +248,31 @@ function buildGovernanceTrack(governance, prior) {
     };
   }
   const catchRate = caught / plantedTotal;
-  const falsePositiveRate = falsePositives / cleanTotal;
-  const priorFalsePositiveRate = priorValue(prior, 'governance', 'false_positive_rate')
+  const cleanBlockRate = cleanBlocked / cleanTotal;
+  const cleanFindingRate = cleanWithFindings / cleanTotal;
+  const priorCleanFindingRate = priorValue(prior, 'governance', 'clean_diffs_with_any_finding')
+    ?? priorValue(prior, 'governance', 'false_positive_rate')
     ?? priorValue(prior, 'governance', 'fp_rate');
+  const inconclusiveSummary = governance.summary?.inconclusive;
+  const inconclusiveTotal = numberOrNull(
+    typeof inconclusiveSummary === 'object' && inconclusiveSummary !== null
+      ? inconclusiveSummary.total
+      : inconclusiveSummary,
+  ) ?? 0;
   const reviewerBackendCount = Array.isArray(governance.reviewerBackends)
     ? new Set(governance.reviewerBackends).size
     : numberOrNull(governance.lastRun?.reviewerBackendCount);
   return {
     automatable: true,
-    status: governance.summary?.inconclusive > 0 ? 'completed with inconclusive reviews' : 'ok',
+    status: inconclusiveTotal > 0 ? 'completed with inconclusive reviews' : 'ok',
     scopeStatement: governance.scopeStatement ?? null,
     lastRun: {
       generatedAt: governance.generatedAt ?? governance.lastRun?.date ?? null,
       reviewerBackendCount,
       fixtureCount: governance.fixtureCount ?? governance.lastRun?.nDiffs ?? null,
-      inconclusive: governance.summary?.inconclusive ?? null,
+      inconclusive: typeof inconclusiveSummary === 'object' && inconclusiveSummary !== null
+        ? inconclusiveSummary
+        : { total: inconclusiveTotal, planted: null, clean: null },
       blindExecution: governance.blindExecution ? {
         shuffled: governance.blindExecution.shuffled === true,
         groundTruthWithheldFromReviewer: governance.blindExecution.groundTruthWithheldFromReviewer === true,
@@ -278,14 +290,24 @@ function buildGovernanceTrack(governance, prior) {
         numerator: caught,
         denominator: plantedTotal,
       },
-      false_positive_rate: {
+      clean_diffs_blocked: {
         ...metricEntry({
-          value: numberOrNull(falsePositiveRate),
+          value: numberOrNull(cleanBlockRate),
           direction: 'lower-better',
           threshold: 0.05,
-          prior: priorFalsePositiveRate,
+          prior: priorValue(prior, 'governance', 'clean_diffs_blocked'),
         }),
-        numerator: falsePositives,
+        numerator: cleanBlocked,
+        denominator: cleanTotal,
+      },
+      clean_diffs_with_any_finding: {
+        ...metricEntry({
+          value: numberOrNull(cleanFindingRate),
+          direction: 'lower-better',
+          threshold: 0.05,
+          prior: priorCleanFindingRate,
+        }),
+        numerator: cleanWithFindings,
         denominator: cleanTotal,
       },
     },

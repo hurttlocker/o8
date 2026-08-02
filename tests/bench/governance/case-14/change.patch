@@ -1,0 +1,30 @@
+diff --git a/src/release-publisher.ts b/src/release-publisher.ts
+--- a/src/release-publisher.ts
++++ b/src/release-publisher.ts
+@@ -4,10 +4,24 @@ export interface ReleaseInput {
+ }
+ 
+ export type ReleaseWriter = (input: ReleaseInput) => Promise<void>;
++export type PublishResult =
++  | { ok: true; releaseId: string }
++  | { ok: false; releaseId: string; error: string };
+ 
+ export async function publishRelease(
+   input: ReleaseInput,
+   writeRelease: ReleaseWriter,
+-): Promise<void> {
+-  await writeRelease(input);
++): Promise<PublishResult> {
++  try {
++    await writeRelease(input);
++    return { ok: true, releaseId: input.releaseId };
++  } catch (error) {
++    return {
++      ok: false,
++      releaseId: input.releaseId,
++      error: error instanceof Error
++        ? error.message
++        : 'release persistence failed',
++    };
++  }
+ }

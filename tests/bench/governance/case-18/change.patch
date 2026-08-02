@@ -1,0 +1,22 @@
+diff --git a/src/delivery-retry.ts b/src/delivery-retry.ts
+--- a/src/delivery-retry.ts
++++ b/src/delivery-retry.ts
+@@ -15,5 +15,17 @@ export async function deliver(
+   issuer: TokenIssuer,
+   transport: DeliveryTransport,
+ ): Promise<void> {
+-  await transport.send(payload, issuer.issue());
++  let lastError: unknown;
++  for (let attempt = 0; attempt < 3; attempt += 1) {
++    try {
++      await transport.send(payload, issuer.issue());
++      return;
++    } catch (error) {
++      lastError = error;
++    }
++  }
++
++  throw lastError instanceof Error
++    ? lastError
++    : new Error('delivery failed after three attempts');
+ }

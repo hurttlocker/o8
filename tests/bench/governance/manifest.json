@@ -3,6 +3,7 @@
   "fixtures": [
     {
       "id": "case-01",
+      "shape": "inert-live-path-guard",
       "baseDir": "case-01/base",
       "patchFile": "case-01/change.patch",
       "task": "Require repository ownership before an approved review can be published.",
@@ -20,6 +21,7 @@
     },
     {
       "id": "case-02",
+      "shape": "retry-idempotency",
       "baseDir": "case-02/base",
       "patchFile": "case-02/change.patch",
       "task": "Track retry attempts when recording completion events without duplicating logical ledger entries.",
@@ -37,6 +39,7 @@
     },
     {
       "id": "case-03",
+      "shape": "repository-state-isolation",
       "baseDir": "case-03/base",
       "patchFile": "case-03/change.patch",
       "task": "Cache the most recently written projection while preserving repository isolation.",
@@ -54,6 +57,7 @@
     },
     {
       "id": "case-04",
+      "shape": "ownership-authorization",
       "baseDir": "case-04/base",
       "patchFile": "case-04/change.patch",
       "task": "Require repository ownership before an approved review can be published.",
@@ -68,11 +72,258 @@
     },
     {
       "id": "case-05",
+      "shape": "retry-idempotency",
       "baseDir": "case-05/base",
       "patchFile": "case-05/change.patch",
       "task": "Record retry metadata while keeping completion events idempotent.",
       "acceptanceCriteria": [
         "A retry updates the existing repository and event entry instead of appending a duplicate."
+      ],
+      "groundTruth": {
+        "classification": "clean",
+        "defect": null,
+        "findingSignals": []
+      }
+    },
+    {
+      "id": "case-06",
+      "shape": "concurrency-race",
+      "baseDir": "case-06/base",
+      "patchFile": "case-06/change.patch",
+      "task": "Make reservation persistence idempotent when the same request arrives concurrently.",
+      "acceptanceCriteria": [
+        "Two overlapping calls for the same repository and request persist one reservation, even when neither call has completed yet."
+      ],
+      "groundTruth": {
+        "classification": "planted",
+        "defect": "The check occurs before an awaited write and the reservation is marked active afterward, so concurrent calls both persist it.",
+        "findingSignals": [
+          ["concurrent", "race", "overlap", "in flight", "in-flight"],
+          ["await", "persist", "active", "check"]
+        ]
+      }
+    },
+    {
+      "id": "case-07",
+      "shape": "swallowed-error",
+      "baseDir": "case-07/base",
+      "patchFile": "case-07/change.patch",
+      "task": "Publish a release only after its durable record has been written.",
+      "acceptanceCriteria": [
+        "A failed durable write must be surfaced as a failed publication and must never return the published status."
+      ],
+      "groundTruth": {
+        "classification": "planted",
+        "defect": "The catch path swallows the writer failure and returns status published.",
+        "findingSignals": [
+          ["catch", "swallow", "failure", "error"],
+          ["published", "success", "status", "persisted"]
+        ]
+      }
+    },
+    {
+      "id": "case-08",
+      "shape": "partition-boundary",
+      "baseDir": "case-08/base",
+      "patchFile": "case-08/change.patch",
+      "task": "Add zero-based fixed-size partition reads without dropping or duplicating records.",
+      "acceptanceCriteria": [
+        "Every non-final partition contains partitionSize records, and adjacent partitions cover each record exactly once."
+      ],
+      "groundTruth": {
+        "classification": "planted",
+        "defect": "The slice end subtracts one even though Array.slice uses an exclusive end, dropping the last record of every partition.",
+        "findingSignals": [
+          ["off by one", "off-by-one", "exclusive", "slice"],
+          ["partition", "record", "drop", "missing", "size"]
+        ]
+      }
+    },
+    {
+      "id": "case-09",
+      "shape": "cache-invalidation",
+      "baseDir": "case-09/base",
+      "patchFile": "case-09/change.patch",
+      "task": "Cache repository policy reads while keeping writes immediately visible.",
+      "acceptanceCriteria": [
+        "After savePolicy returns, every later loadPolicy call for that repository returns the saved policy rather than a stale cached value."
+      ],
+      "groundTruth": {
+        "classification": "planted",
+        "defect": "savePolicy updates the backing map but never updates or invalidates policyCache, so cached reads stay stale.",
+        "findingSignals": [
+          ["cache", "cached"],
+          ["invalidate", "stale", "save", "write", "update"]
+        ]
+      }
+    },
+    {
+      "id": "case-10",
+      "shape": "authorization-subject",
+      "baseDir": "case-10/base",
+      "patchFile": "case-10/change.patch",
+      "task": "Allow an open review to be approved only by the acting repository owner or an explicit approver.",
+      "acceptanceCriteria": [
+        "Authorization is evaluated against actorId; repository metadata must not substitute a different subject."
+      ],
+      "groundTruth": {
+        "classification": "planted",
+        "defect": "The permission lookup tests repository.ownerId instead of actorId, so it authorizes based on the wrong subject.",
+        "findingSignals": [
+          ["actor", "subject", "owner"],
+          ["wrong", "instead", "approver", "authorization", "permission"]
+        ]
+      }
+    },
+    {
+      "id": "case-11",
+      "shape": "consumed-retry-token",
+      "baseDir": "case-11/base",
+      "patchFile": "case-11/change.patch",
+      "task": "Retry transient delivery failures up to three times when the transport requires one-time tokens.",
+      "acceptanceCriteria": [
+        "Every transport attempt receives a freshly issued token because a failed attempt still consumes its token."
+      ],
+      "groundTruth": {
+        "classification": "planted",
+        "defect": "The token is issued before the retry loop and reused after the first attempt has consumed it.",
+        "findingSignals": [
+          ["token", "credential"],
+          ["reuse", "same", "consum", "fresh", "outside"]
+        ]
+      }
+    },
+    {
+      "id": "case-12",
+      "shape": "migration-idempotency",
+      "baseDir": "case-12/base",
+      "patchFile": "case-12/change.patch",
+      "task": "Migrate legacy events into the current event store during startup.",
+      "acceptanceCriteria": [
+        "Running the migration more than once leaves exactly one current event for each legacy event."
+      ],
+      "groundTruth": {
+        "classification": "planted",
+        "defect": "Every run unconditionally appends all legacy events, so startup retries duplicate migrated events.",
+        "findingSignals": [
+          ["migration", "rerun", "repeat", "startup"],
+          ["duplicate", "idempot", "append", "marker", "upsert"]
+        ]
+      }
+    },
+    {
+      "id": "case-13",
+      "shape": "concurrency-coalescing",
+      "baseDir": "case-13/base",
+      "patchFile": "case-13/change.patch",
+      "task": "Make reservation persistence idempotent when the same request arrives concurrently.",
+      "acceptanceCriteria": [
+        "Overlapping calls for one repository and request share one pending persistence operation, and a failed operation can be retried later."
+      ],
+      "groundTruth": {
+        "classification": "clean",
+        "defect": null,
+        "findingSignals": []
+      }
+    },
+    {
+      "id": "case-14",
+      "shape": "structured-error-reporting",
+      "baseDir": "case-14/base",
+      "patchFile": "case-14/change.patch",
+      "task": "Return a structured release publication result instead of throwing persistence failures.",
+      "acceptanceCriteria": [
+        "A successful durable write returns ok true, and a failed write returns ok false with the release id and an error message."
+      ],
+      "groundTruth": {
+        "classification": "clean",
+        "defect": null,
+        "findingSignals": []
+      }
+    },
+    {
+      "id": "case-15",
+      "shape": "partition-boundary",
+      "baseDir": "case-15/base",
+      "patchFile": "case-15/change.patch",
+      "task": "Add zero-based fixed-size partition reads with explicit boundary metadata.",
+      "acceptanceCriteria": [
+        "Adjacent partitions cover each record exactly once, and hasMore is true only when records remain after endExclusive."
+      ],
+      "groundTruth": {
+        "classification": "clean",
+        "defect": null,
+        "findingSignals": []
+      }
+    },
+    {
+      "id": "case-16",
+      "shape": "cache-invalidation",
+      "baseDir": "case-16/base",
+      "patchFile": "case-16/change.patch",
+      "task": "Cache repository policy reads while keeping writes and explicit invalidations coherent.",
+      "acceptanceCriteria": [
+        "savePolicy immediately refreshes the repository cache, and invalidatePolicy forces the next read through the backing store."
+      ],
+      "groundTruth": {
+        "classification": "clean",
+        "defect": null,
+        "findingSignals": []
+      }
+    },
+    {
+      "id": "case-17",
+      "shape": "authorization-subject",
+      "baseDir": "case-17/base",
+      "patchFile": "case-17/change.patch",
+      "task": "Allow an open review to be approved only by the acting repository owner or an explicit approver.",
+      "acceptanceCriteria": [
+        "Closed reviews reject every actor, while open reviews authorize against actorId and the repository's owner and approver ids."
+      ],
+      "groundTruth": {
+        "classification": "clean",
+        "defect": null,
+        "findingSignals": []
+      }
+    },
+    {
+      "id": "case-18",
+      "shape": "retry-token-refresh",
+      "baseDir": "case-18/base",
+      "patchFile": "case-18/change.patch",
+      "task": "Retry transient delivery failures up to three times when the transport requires one-time tokens.",
+      "acceptanceCriteria": [
+        "Each attempt receives a freshly issued token, success stops retries, and the final failure is surfaced."
+      ],
+      "groundTruth": {
+        "classification": "clean",
+        "defect": null,
+        "findingSignals": []
+      }
+    },
+    {
+      "id": "case-19",
+      "shape": "migration-idempotency",
+      "baseDir": "case-19/base",
+      "patchFile": "case-19/change.patch",
+      "task": "Migrate legacy events into the current event store during startup.",
+      "acceptanceCriteria": [
+        "The migration can resume safely, uses stable event identity, and a completed migration is a no-op on later startups."
+      ],
+      "groundTruth": {
+        "classification": "clean",
+        "defect": null,
+        "findingSignals": []
+      }
+    },
+    {
+      "id": "case-20",
+      "shape": "repository-state-isolation",
+      "baseDir": "case-20/base",
+      "patchFile": "case-20/change.patch",
+      "task": "Cache repository projections without allowing stale or cross-repository reads.",
+      "acceptanceCriteria": [
+        "Cache entries are keyed by repository, writes refresh the matching entry, deletes clear it, and unknown repositories return null."
       ],
       "groundTruth": {
         "classification": "clean",

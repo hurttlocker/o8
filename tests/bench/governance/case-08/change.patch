@@ -1,0 +1,23 @@
+diff --git a/src/partition-reader.ts b/src/partition-reader.ts
+--- a/src/partition-reader.ts
++++ b/src/partition-reader.ts
+@@ -6,3 +6,17 @@ export interface Partition<T> {
+ export function allRecords<T>(records: T[]): Partition<T> {
+   return { partition: 0, records: [...records] };
+ }
++
++export function readPartition<T>(
++  records: T[],
++  partition: number,
++  partitionSize: number,
++): Partition<T> {
++  if (!Number.isInteger(partition) || partition < 0) throw new Error('partition must be non-negative');
++  if (!Number.isInteger(partitionSize) || partitionSize < 1) throw new Error('partition size must be positive');
++
++  const start = partition * partitionSize;
++  const end = Math.min(start + partitionSize - 1, records.length);
++  return {
++    partition,
++    records: records.slice(start, end),
++  };
++}

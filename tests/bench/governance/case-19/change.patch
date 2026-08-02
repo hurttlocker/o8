@@ -1,0 +1,24 @@
+diff --git a/src/event-migration.ts b/src/event-migration.ts
+--- a/src/event-migration.ts
++++ b/src/event-migration.ts
+@@ -14,3 +14,20 @@ export interface MigrationStore {
+   upsertEvent(event: MigratedEvent): Promise<void>;
+   markMigrationComplete(name: string): Promise<void>;
+ }
++
++const migrationName = 'legacy-events-v1';
++
++export async function migrateLegacyEvents(store: MigrationStore): Promise<number> {
++  if (await store.hasCompletedMigration(migrationName)) return 0;
++
++  const legacyEvents = await store.listLegacyEvents();
++  for (const event of legacyEvents) {
++    await store.upsertEvent({
++      ...event,
++      migratedFrom: 'legacy',
++    });
++  }
++
++  await store.markMigrationComplete(migrationName);
++  return legacyEvents.length;
++}
