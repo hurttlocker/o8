@@ -12,6 +12,15 @@ export interface QualitySearchCandidateEvidence {
   taskContractFingerprint: string | null;
   requirementCount: number;
   contractCoveragePassed: boolean;
+  /**
+   * Structured coverage verdict from the durable review gate. Selection must
+   * distinguish "coverage incomplete" from "code is bad" — without these, a
+   * candidate with one mis-cited production path is indistinguishable from a
+   * rejected review, and targeted repair has nothing to aim at.
+   */
+  contractCoverageStatus: 'passed' | 'failed' | 'not-applicable' | 'unknown';
+  missingRequirementIds: string[];
+  coverageFailureReasons: string[];
   reviewApproved: boolean;
   reviewPinnedToHead: boolean;
   mergeGatePassed: boolean;
@@ -114,6 +123,19 @@ function normalizeCandidateEvidence(value: unknown): QualitySearchCandidateEvide
       ? raw.taskContractFingerprint.trim()
       : null,
     requirementCount: count(raw.requirementCount),
+    // Absent coverage normalizes to 'unknown', never to 'passed'. A field that
+    // evaporates on round-trip must fail closed, not authorize a merge.
+    contractCoverageStatus: raw.contractCoverageStatus === 'passed'
+      || raw.contractCoverageStatus === 'failed'
+      || raw.contractCoverageStatus === 'not-applicable'
+      ? raw.contractCoverageStatus
+      : 'unknown',
+    missingRequirementIds: Array.isArray(raw.missingRequirementIds)
+      ? raw.missingRequirementIds.filter((id): id is string => typeof id === 'string' && id.length > 0)
+      : [],
+    coverageFailureReasons: Array.isArray(raw.coverageFailureReasons)
+      ? raw.coverageFailureReasons.filter((reason): reason is string => typeof reason === 'string' && reason.length > 0)
+      : [],
     contractCoveragePassed: raw.contractCoveragePassed === true,
     reviewApproved: raw.reviewApproved === true,
     reviewPinnedToHead: raw.reviewPinnedToHead === true,

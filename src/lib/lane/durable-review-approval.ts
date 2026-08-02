@@ -46,7 +46,7 @@ function reviewedHeadForApproval(approval: ApprovalRecord): string | undefined {
  * work that predates the pipeline would be a regression, not a safety win.
  */
 async function assessContractCoverage(
-  lane: Pick<Lane, 'packetId' | 'worktreePath' | 'repoPath'>,
+  lane: Pick<Lane, 'packetId' | 'worktreePath' | 'repoPath' | 'baseBranch'>,
   approval: ApprovalRecord,
   reviewedHeadSha: string,
 ): Promise<ContractCoverageResult | null> {
@@ -60,9 +60,22 @@ async function assessContractCoverage(
     if (!packet) return null;
     contractRequired = packet.taskContractRequired === true;
     contract = packet.taskContract ?? null;
-  } catch {
-    // Cannot establish whether a contract applies — treat as legacy.
-    return null;
+  } catch (error) {
+    // A packet binding exists but its contract requirement could not be read.
+    // Treating that as legacy would let an unverifiable packet merge, so this
+    // fails closed. Genuine legacy packets are the `!packet` case above, which
+    // returns null and is judged exactly as before.
+    console.error(
+      `[contract-coverage] control-plane state unreadable for packet ${lane.packetId}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return {
+      status: 'failed',
+      reason: 'Packet state could not be read, so contract coverage is unverifiable.',
+      contractVersion: null,
+      reviewedHeadSha,
+      checks: [],
+      missingRequirementIds: [],
+    };
   }
   if (!contractRequired) return null;
 
@@ -70,12 +83,23 @@ async function assessContractCoverage(
     const { evaluateContractCoverage, readCoverageEvidence } =
       await import('@/lib/orchestrator/task-contract-coverage');
     const cwd = lane.worktreePath || lane.repoPath || '';
+    const changed = await listChangedPathsForCoverage(cwd, lane.baseBranch ?? 'main', reviewedHeadSha);
+    if (!changed.resolved) {
+      return {
+        status: 'failed',
+        reason: 'The packet diff base could not be resolved, so coverage could not be checked against the full change.',
+        contractVersion: contract?.version ?? null,
+        reviewedHeadSha,
+        checks: [],
+        missingRequirementIds: contract?.requirements.map((requirement) => requirement.id) ?? [],
+      };
+    }
     return evaluateContractCoverage({
       contract,
       contractRequired: true,
       evidence: readCoverageEvidence(approval.args),
       reviewedHeadSha,
-      changedPaths: await listChangedPathsForCoverage(cwd),
+      changedPaths: changed.paths,
     });
   } catch (error) {
     console.error(
@@ -92,31 +116,58 @@ async function assessContractCoverage(
   }
 }
 
-/** Paths the packet's change touched, as the gate's notion of "in the change". */
-async function listChangedPathsForCoverage(cwd: string): Promise<string[]> {
-  if (!cwd) return [];
+/**
+ * Paths the packet changed, resolved against the packet's real diff base rather
+ * than the previous commit.
+ *
+ * `HEAD~1..HEAD` was wrong: a multi-commit packet that touched a file in an
+ * earlier commit would have its evidence rejected as "not in the change", which
+ * fails a correct review for a bookkeeping reason. This reuses the same base
+ * resolution merge preview uses, so the gate and the preview agree on what the
+ * packet actually changed.
+ */
+async function listChangedPathsForCoverage(
+  cwd: string,
+  baseBranch: string,
+  headSha: string,
+): Promise<{ paths: string[]; resolved: boolean }> {
+  if (!cwd) return { paths: [], resolved: false };
   const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');
   const run = promisify(execFile);
-  const collect = async (args: string[]): Promise<string[]> => {
+
+  const collect = async (args: string[]): Promise<string[] | null> => {
     try {
       const { stdout } = await run('git', args, { cwd, maxBuffer: 8 * 1024 * 1024 });
       return stdout.split('\n').map((line) => line.trim()).filter(Boolean);
     } catch {
-      return [];
+      return null;
     }
   };
-  const [committed, working] = await Promise.all([
-    collect(['diff', '--name-only', 'HEAD~1..HEAD']),
-    collect(['diff', '--name-only', 'HEAD']),
-  ]);
-  return Array.from(new Set([...committed, ...working]));
+
+  let comparisonRef: string | null = null;
+  try {
+    const { resolvePacketDiffBase } = await import('@/lib/diff/base-resolution');
+    const resolution = await resolvePacketDiffBase(cwd, baseBranch || 'main', headSha);
+    comparisonRef = resolution.mergeBase ?? resolution.comparisonRef ?? null;
+  } catch {
+    comparisonRef = null;
+  }
+
+  // Committed range across the whole packet, plus anything still in the tree.
+  const committed = comparisonRef ? await collect(['diff', '--name-only', `${comparisonRef}..${headSha}`]) : null;
+  const working = await collect(['diff', '--name-only', 'HEAD']);
+
+  // If we could not establish the packet's range, say so rather than silently
+  // grading against a narrower set of files than the packet really touched.
+  if (committed === null) return { paths: working ?? [], resolved: false };
+  return { paths: Array.from(new Set([...committed, ...(working ?? [])])), resolved: true };
 }
 
 // Durable approved-review reader. This is the only signal that authorizes a
 // non-user merge or PR action to skip the operator approval card.
 export async function assessDurableApprovedReview(
-  lane: Pick<Lane, 'id' | 'packetId' | 'sessionKey' | 'worktreePath' | 'repoPath'>,
+  lane: Pick<Lane, 'id' | 'packetId' | 'sessionKey' | 'worktreePath' | 'repoPath' | 'baseBranch'>,
 ): Promise<DurableReviewAssessment> {
   try {
     const [{ listApprovalsForContext }, { normalizeHeadSha, readHeadSha }] = await Promise.all([
@@ -210,7 +261,7 @@ export async function supersedeDurableApprovedReviews(packetId: string, reason: 
 }
 
 export async function hasDurableApprovedReview(
-  lane: Pick<Lane, 'id' | 'packetId' | 'sessionKey' | 'worktreePath' | 'repoPath'>,
+  lane: Pick<Lane, 'id' | 'packetId' | 'sessionKey' | 'worktreePath' | 'repoPath' | 'baseBranch'>,
 ): Promise<boolean> {
   return (await assessDurableApprovedReview(lane)).approved;
 }

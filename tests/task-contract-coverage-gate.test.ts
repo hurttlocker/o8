@@ -14,6 +14,7 @@ import {
   readCoverageEvidence,
   type ReviewCoverageEvidence,
 } from '@/lib/orchestrator/task-contract-coverage';
+import { normalizeQualitySearchPacketState } from '@/lib/orchestrator/quality-search';
 import type { PacketTaskContract } from '@/lib/orchestrator/types';
 
 const HEAD = 'a'.repeat(40);
@@ -176,5 +177,81 @@ describe('task-contract coverage gate', () => {
       },
     });
     expect(partial?.entries.map((e) => e.requirementId)).toEqual(['R2']);
+  });
+});
+
+describe('coverage evidence survives the selection round-trip', () => {
+  const baseCandidate = {
+    packetId: 'p1',
+    role: 'minimal_complete',
+    headSha: HEAD,
+    diffFingerprint: 'f',
+    taskContractFingerprint: 't',
+    requirementCount: 2,
+    contractCoveragePassed: true,
+    reviewApproved: true,
+    reviewPinnedToHead: true,
+    mergeGatePassed: true,
+    failedChecks: [],
+    changedFiles: 1,
+    additions: 1,
+    deletions: 0,
+    newPublicSurfaces: 0,
+  };
+
+  function roundTrip(candidate: Record<string, unknown>) {
+    // Driven through the exported entry point selection actually uses, not the
+    // private normalizer — a field can only be trusted if it survives this path.
+    const state = normalizeQualitySearchPacketState({
+      version: 1,
+      role: 'minimal_complete',
+      repairAttempts: 0,
+      receipt: {
+        version: 1,
+        createdAt: new Date(0).toISOString(),
+        outcome: 'repair',
+        reason: 'coverage incomplete',
+        candidates: [candidate],
+      },
+    });
+    return state?.receipt?.candidates[0];
+  }
+
+  it('normalizes absent coverage to unknown, never to passed', () => {
+    const normalized = roundTrip(baseCandidate);
+    expect(normalized?.contractCoverageStatus).toBe('unknown');
+    expect(normalized?.missingRequirementIds).toEqual([]);
+  });
+
+  it('carries the exact missing requirement ids through to repair feedback', () => {
+    const normalized = roundTrip({
+      ...baseCandidate,
+      contractCoverageStatus: 'failed',
+      missingRequirementIds: ['R2', ''],
+      coverageFailureReasons: ['cited-path-not-in-change', 42],
+    });
+    expect(normalized?.contractCoverageStatus).toBe('failed');
+    expect(normalized?.missingRequirementIds).toEqual(['R2']);
+    expect(normalized?.coverageFailureReasons).toEqual(['cited-path-not-in-change']);
+  });
+
+  it('keeps a coverage failure distinguishable from a rejected review', () => {
+    const coverageFailure = roundTrip({
+      ...baseCandidate,
+      reviewApproved: true,
+      contractCoverageStatus: 'failed',
+      missingRequirementIds: ['R2'],
+    });
+    const rejectedReview = roundTrip({
+      ...baseCandidate,
+      reviewApproved: false,
+      contractCoverageStatus: 'not-applicable',
+      missingRequirementIds: [],
+    });
+    // Same boolean would have collapsed these two into one signal.
+    expect(coverageFailure?.reviewApproved).toBe(true);
+    expect(coverageFailure?.contractCoverageStatus).toBe('failed');
+    expect(rejectedReview?.reviewApproved).toBe(false);
+    expect(rejectedReview?.contractCoverageStatus).toBe('not-applicable');
   });
 });

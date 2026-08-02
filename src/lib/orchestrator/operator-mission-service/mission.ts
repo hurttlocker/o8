@@ -202,9 +202,14 @@ export async function createMission(input: CreateMissionInput) {
       ...(issueMeta ? { issue: issueMeta } : {}),
       ...(typeof input.useBrain === 'boolean' ? { useBrain: input.useBrain } : {}),
       ...(typeof input.huddle === 'boolean' ? { huddle: input.huddle } : {}),
-      taskContractRequired: true,
+      // Contract-first is opt-in, not ambient. `taskContractRequired` makes the
+      // coverage gate mandatory, and contract capture from the worker transcript
+      // is best-effort — so arming it universally would make any packet whose
+      // contract failed to parse unmergeable through the governed path. Ordinary
+      // dispatch keeps its prior behavior until the capture path has a record.
       ...(input.qualitySearch
         ? {
+            taskContractRequired: true,
             taskContract: input.qualitySearch.taskContract,
             qualitySearch: { version: 1 as const, role: null, repairAttempts: 0 },
           }

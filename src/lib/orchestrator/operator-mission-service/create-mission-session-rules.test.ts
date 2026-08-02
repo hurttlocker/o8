@@ -51,13 +51,19 @@ describe('createMission stamps orchestratorThreadId onto persisted packets', () 
     expect(packet).toBeDefined();
     expect(packet!.orchestratorThreadId).toBe('thoughts-e2e');
     expect(packet!.dispatcher).toEqual({ surface: 'orchestrator', id: 'thoughts-e2e' });
-    expect(packet!.taskContractRequired).toBe(true);
+    // Contract-first is opt-in. An ordinary packet must NOT be armed: the
+    // coverage gate is mandatory once this is true, while contract capture is
+    // best-effort, so arming it here would make any packet whose contract failed
+    // to parse unmergeable through the governed path.
+    expect(packet!.taskContractRequired).toBeUndefined();
 
     // And the worker prompt built from that persisted packet inherits the rules.
     const prompt = await buildPacketPrompt(packet!, persisted.packets);
     expect(prompt).toContain('<Operator session rules (binding)>');
     expect(prompt).toContain('- never bypass the review gate');
-    expect(prompt).toContain('Pre-edit task contract:');
+    // An unarmed packet gets no contract instructions, so its worker is never
+    // asked for a contract the coverage gate would then demand evidence against.
+    expect(prompt).not.toContain('Pre-edit task contract:');
   });
 
   it('omits the field when the input carries no thread id', async () => {
@@ -102,6 +108,8 @@ describe('createMission stamps orchestratorThreadId onto persisted packets', () 
     const packet = persisted.packets.find((candidate) => candidate.id === result.packets[0]!.id);
 
     expect(packet?.taskContract).toEqual(taskContract);
+    // The quality-search path is the one that arms the gate.
+    expect(packet?.taskContractRequired).toBe(true);
     expect(packet?.qualitySearch).toEqual({
       version: 1,
       role: null,

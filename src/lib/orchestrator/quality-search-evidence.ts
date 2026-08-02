@@ -54,6 +54,9 @@ function unavailableEvidence(packet: OrchestratorPacket, role: QualitySearchRole
       : null,
     requirementCount: packet.taskContract?.requirements.length ?? 0,
     contractCoveragePassed: false,
+    contractCoverageStatus: 'unknown',
+    missingRequirementIds: [],
+    coverageFailureReasons: ['evidence-unavailable'],
     reviewApproved: packet.review?.approved === true,
     reviewPinnedToHead: false,
     mergeGatePassed: false,
@@ -63,6 +66,40 @@ function unavailableEvidence(packet: OrchestratorPacket, role: QualitySearchRole
     deletions: 0,
     newPublicSurfaces: 0,
   };
+}
+
+
+interface CandidateCoverage {
+  status: 'passed' | 'failed' | 'not-applicable' | 'unknown';
+  missingRequirementIds: string[];
+  failureReasons: string[];
+}
+
+/**
+ * Read the durable review gate's structured coverage verdict for this lane.
+ * Never synthesizes a verdict: an unreadable gate reports `unknown`, which is
+ * not the same as `passed` and must never be treated as one.
+ */
+async function readDurableContractCoverage(
+  lane: Parameters<typeof getLaneSpokenDiffFacts>[0],
+): Promise<CandidateCoverage> {
+  try {
+    const { assessDurableApprovedReview } = await import('@/lib/lane/durable-review-approval');
+    const assessment = await assessDurableApprovedReview(lane);
+    const coverage = assessment.contractCoverage;
+    if (!coverage) return { status: 'not-applicable', missingRequirementIds: [], failureReasons: [] };
+    return {
+      status: coverage.status,
+      missingRequirementIds: coverage.missingRequirementIds,
+      failureReasons: Array.from(new Set(
+        coverage.checks
+          .map((check) => check.failureReason)
+          .filter((reason): reason is NonNullable<typeof reason> => reason !== null),
+      )),
+    };
+  } catch {
+    return { status: 'unknown', missingRequirementIds: [], failureReasons: ['coverage-unreadable'] };
+  }
 }
 
 export async function collectQualitySearchCandidateEvidence(
@@ -90,6 +127,7 @@ export async function collectQualitySearchCandidateEvidence(
       },
     );
     const numstat = parseNumstat(numstatOutput);
+    const coverage = await readDurableContractCoverage(lane);
     const reviewApproved = packet.review?.approved === true;
     const reviewPinnedToHead = reviewApproved
       && Boolean(packet.review?.reviewedHeadSha)
@@ -104,8 +142,13 @@ export async function collectQualitySearchCandidateEvidence(
         : null,
       requirementCount: packet.taskContract?.requirements.length ?? 0,
       // The durable review gate is the authority for structured contract
-      // coverage. Selection never infers coverage from diff size or worker prose.
-      contractCoveragePassed: reviewApproved,
+      // coverage. Selection never infers coverage from diff size or worker prose,
+      // and never from review approval alone — approval and coverage are
+      // different signals and are reported separately.
+      contractCoveragePassed: coverage.status === 'passed' || coverage.status === 'not-applicable',
+      contractCoverageStatus: coverage.status,
+      missingRequirementIds: coverage.missingRequirementIds,
+      coverageFailureReasons: coverage.failureReasons,
       reviewApproved,
       reviewPinnedToHead,
       mergeGatePassed: preview.wouldMerge,
