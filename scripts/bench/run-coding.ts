@@ -46,6 +46,7 @@ import {
   CODING_TASK_CONTRACT_FILE,
   readCodingTaskContract,
 } from './coding-task-contract';
+import { benchmarkIssueText } from './coding-github-issue';
 import {
   assertUnusedCodingRunId,
   collectStandaloneEndToEnd,
@@ -86,7 +87,6 @@ const JUDGING_FILE = path.join(WORK_ROOT, 'judging.json');
 const ARM_TIMEOUT_SECONDS = 2_400;
 const JUDGE_TIMEOUT_SECONDS = 1_800;
 const DEFAULT_SEED = 20_260_802;
-let cachedRepoSlug: string | null = null;
 
 const CONTRACT_INTERVENTION = [
   'Contract-first intervention:',
@@ -168,24 +168,7 @@ function readTasks(): CodingTask[] {
 }
 
 function issueText(issue: number): string {
-  if (!cachedRepoSlug) {
-    cachedRepoSlug = execFileSync(
-      'gh',
-      ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'],
-      { cwd: REPO_ROOT, encoding: 'utf8' },
-    ).trim();
-  }
-  if (!cachedRepoSlug) throw new Error('could not resolve the current repository slug');
-  try {
-    return execFileSync(
-      'gh',
-      ['issue', 'view', String(issue), '-R', cachedRepoSlug, '--json', 'title,body',
-        '--jq', '"# " + .title + "\\n\\n" + .body'],
-      { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 },
-    ).trim();
-  } catch {
-    throw new Error(`could not read issue #${issue} through the authenticated repository CLI`);
-  }
+  return benchmarkIssueText(REPO_ROOT, issue);
 }
 
 function runCommand(

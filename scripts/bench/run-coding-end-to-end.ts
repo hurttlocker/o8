@@ -13,6 +13,7 @@ import {
   type ArmErrorReceipt,
   type ArmOutcomeTotals,
 } from './coding-arm-outcome';
+import { benchmarkIssueText, readBenchmarkGitHubIssue } from './coding-github-issue';
 import type { DurableReconciliationReceipt } from './coding-durable-reconciliation';
 import {
   diffFactsFromUnifiedDiff,
@@ -144,17 +145,7 @@ function currentBranch(repoRoot: string): string {
 }
 
 function issueText(repoRoot: string, issue: number): string {
-  const slug = execFileSync(
-    'gh',
-    ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'],
-    { cwd: repoRoot, encoding: 'utf8' },
-  ).trim();
-  return execFileSync(
-    'gh',
-    ['issue', 'view', String(issue), '-R', slug, '--json', 'title,body',
-      '--jq', '"# " + .title + "\\n\\n" + .body'],
-    { cwd: repoRoot, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 },
-  ).trim();
+  return benchmarkIssueText(repoRoot, issue);
 }
 
 export function preflightEndToEnd(repoRoot: string, tasks: EndToEndTask[]): {
@@ -166,17 +157,8 @@ export function preflightEndToEnd(repoRoot: string, tasks: EndToEndTask[]): {
   if (currentBranch(repoRoot) !== 'main') {
     throw new Error('end-to-end benchmark must run from main');
   }
-  const slug = execFileSync(
-    'gh',
-    ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'],
-    { cwd: repoRoot, encoding: 'utf8' },
-  ).trim();
   for (const task of tasks) {
-    const state = execFileSync(
-      'gh',
-      ['issue', 'view', String(task.issue), '-R', slug, '--json', 'state', '--jq', '.state'],
-      { cwd: repoRoot, encoding: 'utf8' },
-    ).trim();
+    const state = readBenchmarkGitHubIssue(repoRoot, task.issue).state.toUpperCase();
     if (state !== 'OPEN') throw new Error(`end-to-end issue #${task.issue} is not open`);
   }
   return {
