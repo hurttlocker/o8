@@ -1,5 +1,7 @@
 import { getApproval } from '../../src/lib/approvals/store';
 import type { DurableReviewAssessment } from '../../src/lib/lane/durable-review-approval';
+import type { LaneStatus } from '../../src/lib/lane/types';
+import type { OrchestratorPacketStatus } from '../../src/lib/orchestrator/types';
 import { TurnStatus } from './coding-arm-outcome';
 import type { EndToEndCommandReceipt } from './coding-end-to-end-command';
 
@@ -23,6 +25,86 @@ export type GovernedPipelineOutcome =
   | 'stream-lost'
   | 'timeout'
   | null;
+
+export type GovernedConvergenceAction =
+  | 'capture-approved'
+  | 'request-refix'
+  | 'fail-blocked'
+  | 'fail-terminal'
+  | 'wait';
+
+/**
+ * Decide the governed arm from the lane lifecycle, not the packet queue.
+ *
+ * Mission packets become `released` as soon as they leave the dispatch queue,
+ * while their lane can still be running, reviewing, or refixing. The lane is
+ * the production state machine. A review is settled only after the durable
+ * gate authorizes the current HEAD, no review turn is active, no later
+ * invalidation exists, and the worker has returned to `reviewing`.
+ */
+export function governedConvergenceAction(input: {
+  packetStatus: OrchestratorPacketStatus | null;
+  laneStatus: LaneStatus | null;
+  reviewApproved: boolean | null;
+  durableReviewApproved: boolean;
+  reviewTurnActive: boolean;
+  reviewInvalidated: boolean;
+}): GovernedConvergenceAction {
+  if (
+    input.laneStatus === 'reviewing'
+    && !input.reviewTurnActive
+    && !input.reviewInvalidated
+  ) {
+    if (input.reviewApproved === true && input.durableReviewApproved) return 'capture-approved';
+    if (input.reviewApproved === false) return 'request-refix';
+  }
+
+  if (input.laneStatus !== null) {
+    switch (input.laneStatus) {
+      case 'failed':
+      case 'completed':
+      case 'archived':
+        return 'fail-terminal';
+      case 'awaiting_input':
+      case 'awaiting_orchestrator':
+      case 'awaiting_human':
+        return 'fail-blocked';
+      case 'idle':
+      case 'launching':
+      case 'running':
+      case 'paused':
+      case 'recovering':
+      case 'reviewing':
+      case 'merging':
+        return 'wait';
+    }
+    const exhaustive: never = input.laneStatus;
+    throw new Error(`unclassified governed lane status: ${String(exhaustive)}`);
+  }
+
+  if (input.packetStatus !== null) {
+    switch (input.packetStatus) {
+      case 'failed':
+      case 'archived':
+        return 'fail-terminal';
+      case 'blocked':
+        return 'fail-blocked';
+      case 'draft':
+      case 'queued':
+      case 'launching':
+      case 'idle':
+      case 'running':
+      case 'awaiting_review':
+      case 'recovering':
+      case 'released':
+        return 'wait';
+    }
+    const exhaustive: never = input.packetStatus;
+    throw new Error(`unclassified governed packet status: ${String(exhaustive)}`);
+  }
+
+  return 'wait';
+}
 
 export function governedPipelineTerminalStatus(
   outcome: GovernedPipelineOutcome,

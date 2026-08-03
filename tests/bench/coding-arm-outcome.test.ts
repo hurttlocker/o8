@@ -19,7 +19,10 @@ import {
   type DurablePacketState,
 } from '../../scripts/bench/coding-durable-reconciliation';
 import { endToEndMeasurementNotes } from '../../scripts/bench/coding-end-to-end';
-import { governedPipelineTerminalStatus } from '../../scripts/bench/coding-end-to-end-review';
+import {
+  governedConvergenceAction,
+  governedPipelineTerminalStatus,
+} from '../../scripts/bench/coding-end-to-end-review';
 
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
@@ -44,6 +47,9 @@ function governedDurableState(
     recoveredDiff: '',
     terminalStatus: TurnStatus.Completed,
     terminalEvent: 'status_change@2026-08-03T12:00:00.000Z',
+    latestReview: null,
+    activeReviewTurnIds: [],
+    reviewInvalidatedAfterLatest: false,
     eventCount: 1,
     error: null,
     ...overrides,
@@ -126,6 +132,87 @@ describe('coding benchmark arm outcomes', () => {
     }
   });
 
+  it('reconstructs the latest review cycle from durable lane events', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'o8-coding-review-cycle-'));
+    try {
+      const database = new Database(path.join(root, 'cortex-ide.db'));
+      database.exec(`
+        CREATE TABLE lanes (
+          id TEXT PRIMARY KEY,
+          packet_id TEXT NOT NULL,
+          status TEXT NOT NULL,
+          outcome TEXT,
+          branch TEXT NOT NULL,
+          worktree_path TEXT,
+          session_key TEXT,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE lane_events (
+          lane_id TEXT NOT NULL,
+          verb TEXT NOT NULL,
+          payload_json TEXT NOT NULL,
+          timestamp TEXT NOT NULL
+        );
+      `);
+      database.prepare(`
+        INSERT INTO lanes (
+          id, packet_id, status, outcome, branch, worktree_path, session_key, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run('lane-review', 'pkt-review', 'reviewing', null, 'packet/review', null, 'session-review', '2026-08-03');
+      const insertEvent = database.prepare(`
+        INSERT INTO lane_events (lane_id, verb, payload_json, timestamp)
+        VALUES (?, ?, ?, ?)
+      `);
+      insertEvent.run('lane-review', 'review_turn_started', JSON.stringify({
+        reviewTurnId: 'review-turn-1',
+        surface: 'auto-review',
+      }), '2026-08-03T12:00:00.000Z');
+      insertEvent.run('lane-review', 'review_recorded', JSON.stringify({
+        approved: true,
+        reviewedHeadSha: 'old-head',
+        auditApprovalId: 'approval-old',
+        summary: 'first review',
+      }), '2026-08-03T12:01:00.000Z');
+      insertEvent.run('lane-review', 'review_turn_finished', JSON.stringify({
+        reviewTurnId: 'review-turn-1',
+      }), '2026-08-03T12:02:00.000Z');
+      insertEvent.run('lane-review', 'review_invalidated', JSON.stringify({
+        reason: 'head moved',
+      }), '2026-08-03T12:03:00.000Z');
+      insertEvent.run('lane-review', 'review_turn_started', JSON.stringify({
+        reviewTurnId: 'review-turn-2',
+        surface: 'auto-review',
+      }), '2026-08-03T12:04:00.000Z');
+      insertEvent.run('lane-review', 'review_recorded', JSON.stringify({
+        approved: false,
+        reviewedHeadSha: 'new-head',
+        auditApprovalId: 'approval-new',
+        summary: 'changes requested',
+      }), '2026-08-03T12:05:00.000Z');
+      database.close();
+
+      const durable = readDurablePacketState({
+        packetId: 'pkt-review',
+        expectedBase: 'unused-base',
+        dataDir: root,
+        completionBoundary: 'governed-review',
+        includeWorktreeDiff: false,
+      });
+
+      expect(durable.latestReview).toEqual({
+        approved: false,
+        summary: 'changes requested',
+        recordedAt: '2026-08-03T12:05:00.000Z',
+        reviewedHeadSha: 'new-head',
+        auditApprovalId: 'approval-new',
+      });
+      expect(durable.activeReviewTurnIds).toEqual(['review-turn-2']);
+      expect(durable.reviewInvalidatedAfterLatest).toBe(false);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('keeps an observed failure measurable and eligible for scoring', () => {
     const result = classifyArmStatus({ status: TurnStatus.Failed, source: 'stream' });
 
@@ -148,6 +235,64 @@ describe('coding benchmark arm outcomes', () => {
     expect(result.outcome).toBe('failed');
     expect(result.terminalStatus).toBe(TurnStatus.Failed);
     expect(isScorableArmOutcome(result.outcome)).toBe(true);
+  });
+
+  it('waits through released, review, and refix states until approval is settled', () => {
+    const base = {
+      packetStatus: 'released' as const,
+      reviewTurnActive: false,
+      reviewInvalidated: false,
+    };
+
+    expect(governedConvergenceAction({
+      ...base,
+      laneStatus: 'reviewing',
+      reviewApproved: null,
+      durableReviewApproved: false,
+    })).toBe('wait');
+    expect(governedConvergenceAction({
+      ...base,
+      laneStatus: 'running',
+      reviewApproved: true,
+      durableReviewApproved: true,
+    })).toBe('wait');
+    expect(governedConvergenceAction({
+      ...base,
+      laneStatus: 'reviewing',
+      reviewApproved: false,
+      durableReviewApproved: false,
+    })).toBe('request-refix');
+    expect(governedConvergenceAction({
+      ...base,
+      laneStatus: 'reviewing',
+      reviewApproved: true,
+      durableReviewApproved: true,
+      reviewTurnActive: true,
+    })).toBe('wait');
+    expect(governedConvergenceAction({
+      ...base,
+      laneStatus: 'reviewing',
+      reviewApproved: true,
+      durableReviewApproved: true,
+      reviewInvalidated: true,
+    })).toBe('wait');
+    expect(governedConvergenceAction({
+      ...base,
+      laneStatus: 'reviewing',
+      reviewApproved: true,
+      durableReviewApproved: true,
+    })).toBe('capture-approved');
+  });
+
+  it('uses a terminal lane over a non-terminal packet queue status', () => {
+    expect(governedConvergenceAction({
+      packetStatus: 'released',
+      laneStatus: 'failed',
+      reviewApproved: null,
+      durableReviewApproved: false,
+      reviewTurnActive: false,
+      reviewInvalidated: false,
+    })).toBe('fail-terminal');
   });
 
   it('keeps a completed no-diff turn valid and eligible for scoring', () => {

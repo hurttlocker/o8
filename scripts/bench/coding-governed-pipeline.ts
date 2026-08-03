@@ -3,6 +3,8 @@ import {
   assessDurableApprovedReview,
   type DurableReviewAssessment,
 } from '../../src/lib/lane/durable-review-approval';
+import type { LaneStatus } from '../../src/lib/lane/types';
+import type { OrchestratorPacketStatus } from '../../src/lib/orchestrator/types';
 import {
   TurnStatus,
   classifyArmStatus,
@@ -21,6 +23,7 @@ import {
   type EndToEndCommandReceipt,
 } from './coding-end-to-end-command';
 import {
+  governedConvergenceAction,
   governedPipelineTerminalStatus,
   refixFeedback,
   reviewAttemptFromStatus,
@@ -153,6 +156,48 @@ function parseMergePreview(text: string): GovernedMergePreviewReceipt {
   };
 }
 
+function laneStatus(value: unknown): LaneStatus | null {
+  if (typeof value !== 'string') return null;
+  switch (value) {
+    case 'idle':
+    case 'launching':
+    case 'running':
+    case 'paused':
+    case 'awaiting_input':
+    case 'awaiting_orchestrator':
+    case 'awaiting_human':
+    case 'recovering':
+    case 'reviewing':
+    case 'merging':
+    case 'failed':
+    case 'completed':
+    case 'archived':
+      return value;
+    default:
+      return null;
+  }
+}
+
+function packetStatus(value: unknown): OrchestratorPacketStatus | null {
+  if (typeof value !== 'string') return null;
+  switch (value) {
+    case 'draft':
+    case 'queued':
+    case 'launching':
+    case 'idle':
+    case 'running':
+    case 'awaiting_review':
+    case 'recovering':
+    case 'failed':
+    case 'blocked':
+    case 'released':
+    case 'archived':
+      return value;
+    default:
+      return null;
+  }
+}
+
 async function assessDurableReview(input: {
   durable: Pick<DurablePacketState, 'laneId' | 'sessionKey' | 'worktreePath'>;
   packetId: string;
@@ -201,7 +246,8 @@ export async function driveGovernedPipeline(input: {
   let diffTruncated = false;
   let shippedDiff = '';
   let readCommandsPassed = true;
-  let lastPacketStatus = '';
+  let lastPacketStatus: OrchestratorPacketStatus | null = null;
+  let lastLaneStatus: LaneStatus | null = null;
 
   const deadline = Date.now() + GOVERNED_TIMEOUT_SECONDS * 1_000;
   while (
@@ -210,7 +256,7 @@ export async function driveGovernedPipeline(input: {
     && input.dispatch.status === 0
     && Date.now() < deadline
   ) {
-    if (lastPacketStatus === 'awaiting_review') waitBeforeReviewProbe(deadline);
+    if (lastLaneStatus === 'reviewing') waitBeforeReviewProbe(deadline);
     const remaining = deadline - Date.now();
     if (remaining <= 0) break;
     const waitMs = Math.min(GOVERNED_WAIT_SLICE_MS, remaining);
@@ -253,7 +299,8 @@ export async function driveGovernedPipeline(input: {
       pipelineFailureReason = 'mission wait lost the governed packet';
       break;
     }
-    lastPacketStatus = typeof packet.status === 'string' ? packet.status : '';
+    lastPacketStatus = packetStatus(packet.status);
+    lastLaneStatus = laneStatus(packet.lane?.status);
     laneId = typeof packet.lane?.laneId === 'string' ? packet.lane.laneId : laneId;
     sessionKey = typeof packet.lane?.sessionKey === 'string' ? packet.lane.sessionKey : sessionKey;
     branch = typeof packet.lane?.branch === 'string' ? packet.lane.branch : branch;
@@ -265,7 +312,19 @@ export async function driveGovernedPipeline(input: {
     branch = typeof agent?.branch === 'string' ? agent.branch : branch;
     worktree = typeof agent?.repoPath === 'string' ? agent.repoPath : worktree;
 
-    const review = packet.review ?? null;
+    const durableSnapshot = readDurablePacketState({
+      packetId: input.packetId,
+      expectedBase: input.base,
+      completionBoundary: 'governed-review',
+      includeWorktreeDiff: false,
+    });
+    laneId = durableSnapshot.laneId ?? laneId;
+    sessionKey = durableSnapshot.sessionKey ?? sessionKey;
+    branch = durableSnapshot.branch ?? branch;
+    worktree = durableSnapshot.worktreePath ?? worktree;
+    lastLaneStatus = laneStatus(durableSnapshot.laneStatus) ?? lastLaneStatus;
+
+    const review = durableSnapshot.latestReview ?? packet.review ?? null;
     const reviewKey = review ? reviewAttemptKey(review) : null;
     if (review && reviewKey && !observedReviewKeys.has(reviewKey)) {
       observedReviewKeys.add(reviewKey);
@@ -289,7 +348,21 @@ export async function driveGovernedPipeline(input: {
       if (currentAttempt) currentAttempt.durableAssessment = durableReview;
     }
 
-    if (durableReview?.approved === true && laneId && worktree) {
+    const reviewApproved = review?.approved === true
+      ? true
+      : review?.approved === false
+        ? false
+        : null;
+    const convergenceAction = governedConvergenceAction({
+      packetStatus: lastPacketStatus,
+      laneStatus: lastLaneStatus,
+      reviewApproved,
+      durableReviewApproved: durableReview?.approved === true,
+      reviewTurnActive: durableSnapshot.activeReviewTurnIds.length > 0,
+      reviewInvalidated: durableSnapshot.reviewInvalidatedAfterLatest,
+    });
+
+    if (convergenceAction === 'capture-approved' && laneId && worktree) {
       const previewResult = runEndToEndCommand(
         input.o8CliPath,
         ['packet', 'merge-preview', '--packet', input.packetId],
@@ -363,7 +436,26 @@ export async function driveGovernedPipeline(input: {
       const approvedHead = typeof approvedRecord?.args?.reviewedHeadSha === 'string'
         ? approvedRecord.args.reviewedHeadSha
         : approvedRecord?.metadata?.['Reviewed HEAD'] ?? null;
-      if (postDiffAssessment.approved && capturedHead !== null && capturedHead === approvedHead) {
+      const postDiffDurable = readDurablePacketState({
+        packetId: input.packetId,
+        expectedBase: input.base,
+        completionBoundary: 'governed-review',
+        includeWorktreeDiff: false,
+      });
+      const latestReviewMatches = postDiffDurable.latestReview?.approved === true
+        && postDiffDurable.latestReview.auditApprovalId === postDiffAssessment.approvalId
+        && postDiffDurable.latestReview.reviewedHeadSha === capturedHead;
+      const laneStillSettled = postDiffDurable.laneStatus === 'reviewing'
+        && postDiffDurable.activeReviewTurnIds.length === 0
+        && !postDiffDurable.reviewInvalidatedAfterLatest;
+      if (
+        postDiffAssessment.approved
+        && capturedHead !== null
+        && capturedHead === approvedHead
+        && postDiffDurable.headSha === capturedHead
+        && latestReviewMatches
+        && laneStillSettled
+      ) {
         shippedDiff = typeof diffResultPayload.diff === 'string' ? diffResultPayload.diff : '';
         diffTruncated = diffResultPayload.truncated === true;
         diffHeadSha = capturedHead;
@@ -380,7 +472,7 @@ export async function driveGovernedPipeline(input: {
       }
     }
 
-    if (review?.approved === false && currentAttempt && currentAttempt.refix === null) {
+    if (convergenceAction === 'request-refix' && currentAttempt && currentAttempt.refix === null) {
       if (reviewAttempts.length >= MAX_GOVERNED_REVIEW_ATTEMPTS) {
         pipelineOutcome = 'review-bound-exhausted';
         pipelineFailureReason = `review rejected the governed output ${reviewAttempts.length} times`;
@@ -405,27 +497,23 @@ export async function driveGovernedPipeline(input: {
         break;
       }
       durableReview = null;
-      lastPacketStatus = '';
+      lastPacketStatus = null;
+      lastLaneStatus = null;
       continue;
     }
 
-    if (lastPacketStatus === 'released') {
-      pipelineOutcome = 'released';
-      pipelineFailureReason = 'pipeline released before the review-approved artifact was captured';
-      break;
-    }
-    if (lastPacketStatus === 'failed' || lastPacketStatus === 'archived') {
+    if (convergenceAction === 'fail-terminal') {
       pipelineOutcome = 'failed';
       pipelineFailureReason = typeof packet.blockedReason === 'string'
         ? packet.blockedReason
-        : lastPacketStatus;
+        : `lane reached ${lastLaneStatus ?? lastPacketStatus ?? 'a terminal state'}`;
       break;
     }
-    if (lastPacketStatus === 'blocked' && review?.approved !== false) {
+    if (convergenceAction === 'fail-blocked') {
       pipelineOutcome = 'blocked';
       pipelineFailureReason = typeof packet.blockedReason === 'string'
         ? packet.blockedReason
-        : 'packet blocked';
+        : `lane blocked in ${lastLaneStatus ?? lastPacketStatus ?? 'an unknown state'}`;
       break;
     }
   }

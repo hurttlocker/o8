@@ -34,6 +34,14 @@ interface DurableLaneEventRow {
   timestamp: string;
 }
 
+export interface DurableReviewEvent {
+  approved: boolean;
+  summary: string;
+  recordedAt: string;
+  reviewedHeadSha: string | null;
+  auditApprovalId: string | null;
+}
+
 export interface DurablePacketState {
   view: DurableStateView;
   completionBoundary: DurableCompletionBoundary;
@@ -50,6 +58,9 @@ export interface DurablePacketState {
   recoveredDiff: string;
   terminalStatus: TurnStatus.Completed | TurnStatus.Interrupted | TurnStatus.Failed | null;
   terminalEvent: string | null;
+  latestReview: DurableReviewEvent | null;
+  activeReviewTurnIds: string[];
+  reviewInvalidatedAfterLatest: boolean;
   eventCount: number;
   error: string | null;
 }
@@ -143,7 +154,19 @@ function eventTerminalStatus(
     : null;
 }
 
-function readWorktree(worktreePath: string | null, expectedBase: string): {
+function eventPayload(event: DurableLaneEventRow): Record<string, unknown> | null {
+  try {
+    return JSON.parse(event.payload_json) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function isGovernedReviewSurface(value: unknown): boolean {
+  return value === 'auto-review' || value === 'merge-gate-review';
+}
+
+function readWorktree(worktreePath: string | null, expectedBase: string, includeDiff: boolean): {
   exists: boolean;
   headSha: string | null;
   diffBase: string | null;
@@ -158,6 +181,9 @@ function readWorktree(worktreePath: string | null, expectedBase: string): {
       cwd: worktreePath,
       encoding: 'utf8',
     }).trim();
+    if (!includeDiff) {
+      return { exists: true, headSha, diffBase: expectedBase, diff: '', error: null };
+    }
     const diff = execFileSync('git', ['diff', '--binary', expectedBase, 'HEAD'], {
       cwd: worktreePath,
       encoding: 'utf8',
@@ -180,6 +206,7 @@ export function readDurablePacketState(input: {
   expectedBase: string;
   dataDir?: string;
   completionBoundary?: DurableCompletionBoundary;
+  includeWorktreeDiff?: boolean;
 }): DurablePacketState {
   const completionBoundary = input.completionBoundary ?? 'worker-turn';
   const empty: DurablePacketState = {
@@ -198,6 +225,9 @@ export function readDurablePacketState(input: {
     recoveredDiff: '',
     terminalStatus: null,
     terminalEvent: null,
+    latestReview: null,
+    activeReviewTurnIds: [],
+    reviewInvalidatedAfterLatest: false,
     eventCount: 0,
     error: null,
   };
@@ -223,7 +253,27 @@ export function readDurablePacketState(input: {
     `).all(lane.id) as DurableLaneEventRow[];
     let terminalStatus: DurablePacketState['terminalStatus'] = null;
     let terminalEvent: string | null = null;
+    let latestReview: DurableReviewEvent | null = null;
+    let reviewInvalidatedAfterLatest = false;
+    const activeReviewTurnIds = new Set<string>();
     for (const event of events) {
+      const payload = eventPayload(event);
+      if (event.verb === 'review_turn_started' && payload && isGovernedReviewSurface(payload.surface)) {
+        if (typeof payload.reviewTurnId === 'string') activeReviewTurnIds.add(payload.reviewTurnId);
+      } else if (event.verb === 'review_turn_finished' && payload) {
+        if (typeof payload.reviewTurnId === 'string') activeReviewTurnIds.delete(payload.reviewTurnId);
+      } else if (event.verb === 'review_recorded' && payload && typeof payload.approved === 'boolean') {
+        latestReview = {
+          approved: payload.approved,
+          summary: typeof payload.summary === 'string' ? payload.summary : '',
+          recordedAt: event.timestamp,
+          reviewedHeadSha: typeof payload.reviewedHeadSha === 'string' ? payload.reviewedHeadSha : null,
+          auditApprovalId: typeof payload.auditApprovalId === 'string' ? payload.auditApprovalId : null,
+        };
+        reviewInvalidatedAfterLatest = false;
+      } else if (event.verb === 'review_invalidated' && latestReview) {
+        reviewInvalidatedAfterLatest = true;
+      }
       const status = eventTerminalStatus(event, completionBoundary);
       if (status !== null) {
         terminalStatus = status;
@@ -237,7 +287,11 @@ export function readDurablePacketState(input: {
         terminalEvent = `lanes.status=${lane.status}`;
       }
     }
-    const worktree = readWorktree(lane.worktree_path, input.expectedBase);
+    const worktree = readWorktree(
+      lane.worktree_path,
+      input.expectedBase,
+      input.includeWorktreeDiff !== false,
+    );
     return {
       view: worktree.exists && worktree.error === null ? 'full' : 'summary',
       completionBoundary,
@@ -254,6 +308,9 @@ export function readDurablePacketState(input: {
       recoveredDiff: worktree.diff,
       terminalStatus,
       terminalEvent,
+      latestReview,
+      activeReviewTurnIds: [...activeReviewTurnIds],
+      reviewInvalidatedAfterLatest,
       eventCount: events.length,
       error: worktree.error,
     };
@@ -334,6 +391,9 @@ export function reconcileArmWithDurableState(input: {
     diffBase: input.durable.diffBase,
     terminalStatus: durableTerminal,
     terminalEvent: durableTerminalEvent,
+    latestReview: input.durable.latestReview,
+    activeReviewTurnIds: input.durable.activeReviewTurnIds,
+    reviewInvalidatedAfterLatest: input.durable.reviewInvalidatedAfterLatest,
     eventCount: input.durable.eventCount,
     error: input.durable.error,
   };
