@@ -68,7 +68,12 @@ function packetFixture(
   repoPath: string,
   packetId: string,
   laneId: string,
-  options: { branch?: string; runtime?: 'codex' | 'claude-code'; sessionKey?: string } = {},
+  options: {
+    branch?: string;
+    runtime?: 'codex' | 'claude-code';
+    sessionKey?: string;
+    status?: OrchestratorPacket['status'];
+  } = {},
 ): OrchestratorPacket {
   const branch = options.branch ?? 'packet';
   const runtime = options.runtime ?? 'codex';
@@ -84,7 +89,7 @@ function packetFixture(
     dependencyPacketIds: [],
     queueState: 'held',
     releaseState: 'pending',
-    status: 'awaiting_review',
+    status: options.status ?? 'awaiting_review',
     blockedReason: null,
     lastEventAt: null,
     lastEventLabel: null,
@@ -310,6 +315,71 @@ describe('merged-by-ancestry reconciliation', () => {
 
     await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({ merged: 0 });
     expect(getLane(lane.id)?.status).toBe('running');
+  }, 20_000);
+
+  it('never archives a launching lane while its queued packet branch still matches the base', async () => {
+    const { clone } = makeRepo('o8-packet-cold-launch');
+    const packetId = 'pkt-cold-launch';
+    const lane = createLane({
+      repoPath: clone,
+      worktreePath: clone,
+      branch: 'packet',
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId,
+    });
+    laneIds.push(lane.id);
+    setLaneStatus(lane.id, 'launching', 'orchestrator', 'launching_session');
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      missionId: 'mission-cold-launch',
+      repoPath: clone,
+      packets: [packetFixture(clone, packetId, lane.id, { status: 'queued' })],
+    });
+
+    await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({
+      scanned: 0,
+      merged: 0,
+      skipped: 0,
+    });
+    expect(getLane(lane.id)).toMatchObject({
+      status: 'launching',
+      outcome: null,
+    });
+    expect(persistedPacket(packetId)).toMatchObject({
+      status: 'queued',
+      releaseState: 'pending',
+      archivedAt: null,
+    });
+  }, 20_000);
+
+  it('requires the lane to settle even when the packet already says awaiting review', async () => {
+    const { clone } = makeRepo('o8-packet-lane-still-launching');
+    const packetId = 'pkt-lane-still-launching';
+    const lane = createLane({
+      repoPath: clone,
+      worktreePath: clone,
+      branch: 'packet',
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId,
+    });
+    laneIds.push(lane.id);
+    setLaneStatus(lane.id, 'launching', 'orchestrator', 'launching_session');
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      missionId: 'mission-lane-still-launching',
+      repoPath: clone,
+      packets: [packetFixture(clone, packetId, lane.id)],
+    });
+
+    await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({
+      scanned: 1,
+      merged: 0,
+      skipped: 1,
+    });
+    expect(getLane(lane.id)).toMatchObject({ status: 'launching', outcome: null });
+    expect(persistedPacket(packetId)).toMatchObject({ status: 'awaiting_review', archivedAt: null });
   }, 20_000);
 
   it('keeps an awaiting packet whose isolated worker branch and owned transcript are still live', async () => {

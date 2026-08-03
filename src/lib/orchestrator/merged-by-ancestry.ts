@@ -64,6 +64,25 @@ const LANE_ONLY_SWEEPABLE_STATUSES = new Set<string>([
   'released',
 ]);
 
+// Packet-backed lanes need the same settled-state proof. In particular, a
+// newly opened lane is already `launching` while its packet is still persisted
+// as `queued`; its branch intentionally matches the base until provisioning
+// finishes. Treating that ancestry as a merge archives the worktree underneath
+// the required pre-launch typecheck.
+const PACKET_SWEEPABLE_STATUSES = new Set<OrchestratorPacket['status']>([
+  'idle',
+  'awaiting_review',
+  'failed',
+  'blocked',
+]);
+const PACKET_LANE_SWEEPABLE_STATUSES = new Set<Lane['status']>([
+  'idle',
+  'paused',
+  'reviewing',
+  'failed',
+  'completed',
+]);
+
 export interface MergedByAncestrySweepResult {
   scanned: number;
   merged: number;
@@ -343,7 +362,9 @@ function buildCandidates(): Candidate[] {
   const packetCandidates = readOrchestratorControlPlaneState().packets
     .filter((packet) => {
       const terminal = packetTerminalState(packet);
-      return terminal !== 'released' && terminal !== 'archived';
+      return terminal !== 'released'
+        && terminal !== 'archived'
+        && PACKET_SWEEPABLE_STATUSES.has(packet.status);
     })
     .map((packet) => {
       const laneId = packet.lane?.laneId?.trim() || null;
@@ -523,6 +544,14 @@ export async function sweepPacketsMergedByAncestry(): Promise<MergedByAncestrySw
 
   for (const candidate of candidates) {
     const key = candidateKey(candidate);
+    if (
+      candidate.packet
+      && candidate.lane
+      && !PACKET_LANE_SWEEPABLE_STATUSES.has(candidate.lane.status)
+    ) {
+      skipped += 1;
+      continue;
+    }
     // A candidate whose detect() has been timing out is parked with growing
     // backoff — skip re-spawning its git pipeline until the window opens.
     if (detectBackoff.shouldSkip(key, now)) {

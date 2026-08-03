@@ -9,25 +9,15 @@ import {
 import { fanOutComparisonPackets } from '@/lib/orchestrator/comparison-fanout';
 import { buildDagMetadata, hasLaneBinding } from '@/lib/orchestrator/dag';
 import { buildRemainingLaunchBudget, runDispatchTick } from '@/lib/orchestrator/dispatch';
+import { applyHeadlessTickDeadline } from '@/lib/orchestrator/headless-tick-deadline';
 import { hasRegistryPendingHeadlessWork, listActiveMissionRegistryEntries, missionHasPendingHeadlessWork, persistMissionRegistryState, withMissionRegistryState } from '@/lib/orchestrator/mission-registry';
 import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
-import type { OrchestratorMissionState, OrchestratorRuntime } from '@/lib/orchestrator/types';
-import { resolveParallelCapSync } from '@/lib/operator/defaults';
+import type { OrchestratorMissionState } from '@/lib/orchestrator/types';
 
 const DEFAULT_INTERVAL_MS = 10_000;
 const MIN_INTERVAL_MS = 1_000;
 const PRUNE_INTERVAL_MS = 10 * 60_000;
 const IDLE_HEARTBEAT_TICKS = 6;
-// #1111 — Per-tick deadline. When a tick wedges (we've seen 86-failure
-// streaks where withLockedState or pruneWorktrees hangs indefinitely), the
-// singleton tickPromise was poisoning every subsequent caller. After this
-// deadline elapses we clear the singleton so the next caller can start
-// fresh; the wedged tick keeps running in the background and its results
-// (state writes, lifecycle events) eventually land. Sized generously since
-// a healthy tick is ~hundreds of ms — 30s is "something is genuinely broken,
-// don't block the world on it."
-const TICK_DEADLINE_MS = 30_000;
-
 interface HeadlessSprintTickResult {
   launched: number;
   active: number;
@@ -341,6 +331,15 @@ export async function runHeadlessSprintTick(options: { releasePacketIds?: string
     return idleResult;
   }
 
+  // A cold dispatch creates its lane before provisioning the worktree and
+  // running the required base typecheck. Remember the lanes that were already
+  // launching so only work started by this tick can extend its deadline.
+  const launchingLaneIdsAtStart = new Set(
+    listLanes()
+      .filter((lane) => lane.status === 'launching')
+      .map((lane) => lane.id),
+  );
+
   const innerPromise: Promise<HeadlessSprintTickResult> = (async () => {
     let result: HeadlessSprintTickResult;
 
@@ -353,27 +352,18 @@ export async function runHeadlessSprintTick(options: { releasePacketIds?: string
     return result;
   })();
 
-  // #1111 — Race the work against a deadline. Whichever resolves first
-  // wins; the loser keeps running in the background (we can't really kill
-  // a stuck `withLockedState` block). On deadline, we clear the singleton
-  // so the next caller starts a fresh tick instead of inheriting our wedge.
-  let deadlineHandle: ReturnType<typeof setTimeout> | null = null;
-  const deadlinePromise = new Promise<HeadlessSprintTickResult>((_, reject) => {
-    deadlineHandle = setTimeout(() => {
-      reject(new Error(`Headless tick exceeded ${TICK_DEADLINE_MS}ms deadline`));
-    }, TICK_DEADLINE_MS);
-  });
-
-  // When the inner work succeeds (or fails fast), make sure the deadline
-  // timer doesn't keep the process alive past tickPromise reset.
-  void innerPromise.finally(() => {
-    if (deadlineHandle) {
-      clearTimeout(deadlineHandle);
-      deadlineHandle = null;
-    }
-  });
-
-  tickPromise = Promise.race([innerPromise, deadlinePromise])
+  // #1111 — Keep the short wedge deadline for ordinary ticks, but a cold
+  // launch has a real three-minute typecheck bound. Give only a lane that this
+  // tick moved into `launching` one bounded extension, preventing the old 30s
+  // timeout from clearing the singleton and dispatching the packet twice.
+  tickPromise = applyHeadlessTickDeadline(innerPromise, {
+    canExtendForLaunch: () => listLanes().some(
+      (lane) => lane.status === 'launching' && !launchingLaneIdsAtStart.has(lane.id),
+    ),
+    onExtended: (deadlineMs) => {
+      console.log(`[headless] Cold launch still provisioning; extended tick deadline to ${deadlineMs}ms`);
+    },
+  })
     .catch((error) => {
       console.error(`[headless] Tick failed: ${error instanceof Error ? error.message : String(error)}`);
       throw error;
