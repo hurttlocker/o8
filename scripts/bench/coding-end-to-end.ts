@@ -109,8 +109,12 @@ export function findEndToEndBlindingLeaks(diff: string, provenanceMarkers: strin
     .filter((marker) => marker && diff.includes(marker))
     .map((marker) => `provenance marker ${JSON.stringify(marker)}`);
 
+  const diffHeaders = diff
+    .split('\n')
+    .filter((line) => line.startsWith('diff --git '))
+    .join('\n');
   for (const marker of EXCLUDED_ARTIFACT_MARKERS) {
-    if (diff.toLowerCase().includes(marker)) leaks.push(`artifact marker ${marker}`);
+    if (diffHeaders.toLowerCase().includes(marker)) leaks.push(`artifact marker ${marker}`);
   }
   for (const { label, pattern } of GENERIC_BLINDING_MARKERS) {
     if (pattern.test(diff)) leaks.push(label);

@@ -193,6 +193,33 @@ describe('coding benchmark hardening', () => {
     expect(blinded).not.toContain(branch);
   });
 
+  it('allows product paths in diff bodies while keeping artifact paths out of judge input', () => {
+    const productDiff = [
+      'diff --git a/src/config.ts b/src/config.ts',
+      '--- a/src/config.ts',
+      '+++ b/src/config.ts',
+      '@@ -1,2 +1,2 @@',
+      ' // Existing operator data lives under ~/.o8/',
+      '-export const enabled = false;',
+      '+export const enabled = true;',
+      '',
+    ].join('\n');
+    const artifactDiff = [
+      'diff --git a/.o8/review.json b/.o8/review.json',
+      'new file mode 100644',
+      '--- /dev/null',
+      '+++ b/.o8/review.json',
+      '@@ -0,0 +1 @@',
+      '+{}',
+      '',
+    ].join('\n');
+
+    const blindedProduct = blindEndToEndDiff(productDiff, []);
+    expect(() => assertEndToEndDiffIsBlind(blindedProduct, [])).not.toThrow();
+    expect(blindedProduct).toContain('~/.o8/');
+    expect(blindEndToEndDiff(artifactDiff, [])).toBe('');
+  });
+
   it('requires judge agreement for a decisive shipped-diff winner', () => {
     const endToEndMapping: Record<string, EndToEndCondition> = {
       A: 'adhoc-codex',
