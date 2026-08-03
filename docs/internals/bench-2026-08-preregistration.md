@@ -333,3 +333,21 @@ base. It keeps every rule in Amendments 5 through 7, including the same prompts,
 judges, seed, two-hour governed bound, isolated source-backed control plane, and
 separate reporting of every prior failure. This remains the one-task
 continuation; it does not expand into the preregistered three-task run.
+
+---
+
+## Amendment 9: source-server launch correction (recorded before collection)
+
+Run `e2e-track5-1679-v11` created an infrastructure-aborted receipt with zero
+completed arms. The isolated source server had been started from the clean
+benchmark clone, whose `node_modules` symlink points outside that clone.
+Turbopack rejects such a symlink and exited before collection; the harness then
+failed its five backend probes because no API port file existed. This run is not
+a product measurement and no artifact or score will be reported from it.
+
+The source server will instead run from the repaired primary checkout, where
+`node_modules` is a real directory, while retaining a fresh isolated data
+directory and fixed API and WebSocket ports. Artifact generation still runs
+from the clean clone at the same commit. A fresh immutable run ID is required;
+all task, arm, prompt, judge, rubric, convergence, and reporting rules remain
+unchanged.
