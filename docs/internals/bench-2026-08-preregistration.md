@@ -306,3 +306,30 @@ reads the same issue title, body, and open state through GitHub's REST issue
 endpoint. The selected issue, prompt text, base, arms, rubric, and scoring rules do
 not change. Run ID v10 remains unused until this repaired preflight succeeds and
 collection writes its first immutable receipt.
+
+---
+
+## Amendment 8: live-packet reaper repair (recorded before collection)
+
+Run `e2e-track5-1679-v10` completed with two valid ad-hoc arms and one failed
+governed arm. The governed path passed worktree provisioning and the required
+prelaunch typecheck, attached a real worker session, entered `running`, and
+recorded worker transcript activity. About 70 seconds after launch, the
+worktree reaper archived the lane as `no_changes` while that transcript was
+still advancing. No diff or review was produced, so this remains a scored
+terminal pipeline failure under the locked three-outcome contract.
+
+The reaper's generic ancestry path treated any packet branch whose tip was
+reachable from its base as already merged. A new branch intentionally equals
+its base until the worker's first commit, so this condition was not sufficient
+evidence while a packet was launching or running. Packet-backed ancestry
+reconciliation now remains solely in the packet-aware reconciler, which reads
+both packet and lane state, while the reaper's legacy lane-only path is limited
+to settled statuses. A real-worktree regression test recreates the v10 state
+and requires the running packet and worktree to survive the reaper tick.
+
+A fresh immutable run repeats all three arms for issue #1679 from the new fixed
+base. It keeps every rule in Amendments 5 through 7, including the same prompts,
+judges, seed, two-hour governed bound, isolated source-backed control plane, and
+separate reporting of every prior failure. This remains the one-task
+continuation; it does not expand into the preregistered three-task run.
