@@ -39,6 +39,10 @@ import {
   type EndToEndTask,
 } from './coding-end-to-end';
 import {
+  GOVERNED_EXISTING_BRANCH_POLICY,
+  governedMissionCreateArgs,
+} from './coding-governed-mission';
+import {
   refixFeedback,
   governedPipelineTerminalStatus,
   reviewAttemptFromStatus,
@@ -118,6 +122,7 @@ export interface EndToEndCollectionReceipt {
   createdAt: string;
   baseCommit: string;
   approvalMode: RequireApproval;
+  governedExistingBranchPolicy: typeof GOVERNED_EXISTING_BRANCH_POLICY;
   conditions: EndToEndCondition[];
   tasks: EndToEndTask[];
   arms: EndToEndArmReceipt[];
@@ -191,6 +196,7 @@ export function createEndToEndCollection(
     createdAt: new Date().toISOString(),
     baseCommit,
     approvalMode,
+    governedExistingBranchPolicy: GOVERNED_EXISTING_BRANCH_POLICY,
     conditions: [...END_TO_END_CONDITIONS],
     tasks: tasks.map((task) => ({ ...task })),
     arms: [],
@@ -383,13 +389,12 @@ async function collectGovernedArm(input: {
   }
   const diffPath = path.join(input.artifactDir, `shipped-${input.task.issue}-governed.diff`);
   const missionTitle = input.issue.split('\n', 1)[0]?.replace(/^#\s*/, '') || input.task.label;
-  const create = runEndToEndCommand('o8', [
-    'mission', 'create',
-    '--title', missionTitle,
-    '--body', input.issue,
-    '--repo', input.repoRoot,
-    '--number', String(input.task.issue),
-  ], { cwd: input.repoRoot, timeoutMs: 2 * 60_000 });
+  const create = runEndToEndCommand('o8', governedMissionCreateArgs({
+    title: missionTitle,
+    body: input.issue,
+    repoRoot: input.repoRoot,
+    issue: input.task.issue,
+  }), { cwd: input.repoRoot, timeoutMs: 2 * 60_000 });
   const streamErrors: ArmErrorReceipt[] = [];
   if (create.receipt.status !== 0) {
     streamErrors.push({ message: 'mission creation failed', willRetry: false });

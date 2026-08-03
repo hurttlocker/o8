@@ -17,6 +17,7 @@ import {
   readDurablePacketState,
   reconcileArmWithDurableState,
 } from '../../scripts/bench/coding-durable-reconciliation';
+import { endToEndMeasurementNotes } from '../../scripts/bench/coding-end-to-end';
 
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
@@ -105,6 +106,35 @@ describe('coding benchmark arm outcomes', () => {
     expect(result.terminalStatus).toBe(TurnStatus.Failed);
     expect(isScorableArmOutcome(result.outcome)).toBe(true);
     expect(countArmOutcomes([result])).toEqual({ valid: 0, failed: 1, invalid: 0 });
+  });
+
+  it('keeps a completed no-diff turn valid and eligible for scoring', () => {
+    const status = ginsuTurnStatus({
+      status: 0,
+      signal: null,
+      timedOut: false,
+      stdout: 'No changes were necessary.',
+      stderr: '',
+    });
+    const result = classifyArmStatus({ status, source: 'stream' });
+    const notes = endToEndMeasurementNotes({
+      condition: 'adhoc-claude',
+      expectedBase: 'abc123',
+      changedFiles: [],
+      commandsPassed: true,
+      mechanicalPassed: true,
+      durableReviewApproved: null,
+      reviewAttempts: 0,
+      maxReviewAttempts: 3,
+      diffBase: null,
+      diffTruncated: false,
+      pipelineFailureReason: null,
+    });
+
+    expect(notes).toContain('no shipped diff produced');
+    expect(result.outcome).toBe('valid');
+    expect(result.terminalStatus).toBe(TurnStatus.Completed);
+    expect(isScorableArmOutcome(result.outcome)).toBe(true);
   });
 
   it('classifies a missing terminal event as invalid and never as failed', () => {
