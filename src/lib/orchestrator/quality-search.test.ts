@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { fingerprintQualitySearchContract } from '@/lib/orchestrator/quality-search-contract-fingerprint';
 import {
-  fingerprintQualitySearchContract,
   selectQualitySearchCandidate,
   type QualitySearchCandidateEvidence,
 } from '@/lib/orchestrator/quality-search';

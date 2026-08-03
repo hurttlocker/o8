@@ -4,8 +4,8 @@ import { promisify } from 'node:util';
 import { getLaneSpokenDiffFacts } from '@/lib/lane/lane-diff-facts';
 import { buildPreviewForLane } from '@/lib/lane/preview-merge';
 import { findLatestLaneByPacket } from '@/lib/lane/registry';
+import { fingerprintQualitySearchContract } from '@/lib/orchestrator/quality-search-contract-fingerprint';
 import {
-  fingerprintQualitySearchContract,
   type QualitySearchCandidateEvidence,
   type QualitySearchRole,
 } from '@/lib/orchestrator/quality-search';

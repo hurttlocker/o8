@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement, type Dispatch, type SetStateAction } from 'react';
+import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -28,27 +28,34 @@ describe('workspace chat draft retention', () => {
   });
 
   it('restores through the real retention hook after unmount and remount', async () => {
-    let setDraft: Dispatch<SetStateAction<string>> = () => {};
-    let setQueuedContextCards: Dispatch<SetStateAction<Array<{ id: string; text: string; title: string; meta: string[] }>>> = () => {};
     function Harness() {
       const retained = useWorkspaceChatDraftRetention('chat-hook');
-      setDraft = retained.setDraft;
-      setQueuedContextCards = retained.setQueuedContextCards;
-      return createElement('div', { 'data-draft': retained.draft, 'data-context-count': retained.queuedContextCards.length });
+      return createElement(
+        'div',
+        { 'data-draft': retained.draft, 'data-context-count': retained.queuedContextCards.length },
+        createElement('button', {
+          'data-set-draft': true,
+          onClick: () => retained.setDraft('still here'),
+        }),
+        createElement('button', {
+          'data-set-context': true,
+          onClick: () => retained.setQueuedContextCards(Array.from(
+            { length: MAX_QUEUED_CONTEXT_CARDS_PER_DRAFT + 3 },
+            (_, index) => ({ id: `context-${index}`, text: 'context', title: 'Context', meta: [] }),
+          )),
+        }),
+      );
     }
 
     const host = document.createElement('div');
     document.body.appendChild(host);
     const root = createRoot(host);
     await act(async () => root.render(createElement(Harness)));
-    await act(async () => setDraft('still here'));
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-set-draft]')?.click());
     await act(async () => root.render(null));
     await act(async () => root.render(createElement(Harness)));
     expect(host.querySelector('[data-draft]')?.getAttribute('data-draft')).toBe('still here');
-    await act(async () => setQueuedContextCards(Array.from(
-      { length: MAX_QUEUED_CONTEXT_CARDS_PER_DRAFT + 3 },
-      (_, index) => ({ id: `context-${index}`, text: 'context', title: 'Context', meta: [] }),
-    )));
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-set-context]')?.click());
     expect(host.querySelector('[data-draft]')?.getAttribute('data-context-count'))
       .toBe(String(MAX_QUEUED_CONTEXT_CARDS_PER_DRAFT));
     await act(async () => root.unmount());
