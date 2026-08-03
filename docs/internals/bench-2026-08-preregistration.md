@@ -351,3 +351,23 @@ directory and fixed API and WebSocket ports. Artifact generation still runs
 from the clean clone at the same commit. A fresh immutable run ID is required;
 all task, arm, prompt, judge, rubric, convergence, and reporting rules remain
 unchanged.
+
+---
+
+## Amendment 10: completed post-fix continuation (recorded after collection)
+
+Run `e2e-track5-1679-v12` completed from base
+`69795ec97e0951b6a79a62f11cf075a5ae29ec10` with three valid arms, zero failed
+arms, and zero invalid arms. The governed packet passed the prelaunch typecheck,
+attached a real worker, committed a six-file diff, exited cleanly, and received
+an approved review whose reviewed SHA matched the settled worktree HEAD. No
+refix round was needed, nothing was merged, and the runner restored
+`requireApproval` to `high-risk` after collection.
+
+Both blinded judge receipts were valid. Raw Codex scored 9.4 and 8.9 for a 9.2
+average; governed Codex scored 8.6 and 8.8 for an 8.7 average; raw Claude scored
+8.4 and 7.6 for an 8.0 average. Both judges ranked raw Codex above governed, but
+the averaged 0.5 margin is below `NOISE_MARGIN=1`, so the locked decision is
+non-decisive. This continuation records zero governed wins and zero decisive
+governed wins. It remains conditional on the observed repairs and does not
+replace or pool with v8's primary end-to-end loss.

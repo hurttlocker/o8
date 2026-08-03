@@ -2,9 +2,9 @@
 
 *First run 2026-06-01/02. Re-run and substantially rebuilt 2026-08-02/03 against v0.1.652.*
 
-Hypothesis and scoring rules were committed before measurement — see [the pre-registration](../internals/bench-2026-08-preregistration.md). Amendments 1–3 predate the data they govern; Amendment 4 is a post-collection incident disclosure that records two pre-score harness repairs without changing the artifacts, rubric, seed, or decision rule. Read *What changed since June* before quoting any figure.
+Hypothesis and scoring rules were committed before measurement — see [the pre-registration](../internals/bench-2026-08-preregistration.md). Amendments 1–3 predate the data they govern; Amendment 4 discloses the first completed run, Amendments 5–9 record each failure and repair before its post-fix continuation, and Amendment 10 records the completed continuation without changing its rules. Read *What changed since June* before quoting any figure.
 
-This document reports what we can defend. Where a track lost, it says so. Where a result was withdrawn, it says why. Two of our own prior figures are retired below, and the shipped-output experiment reports an empty governed artifact rather than hiding a pipeline failure.
+This document reports what we can defend. Where a track lost, it says so. Where a result was withdrawn, it says why. Two of our own prior figures are retired below, and the shipped-output experiment keeps its original empty governed artifact alongside a separately labelled post-fix continuation.
 
 ---
 
@@ -14,7 +14,7 @@ This document reports what we can defend. Where a track lost, it says so. Where 
 - **Governance.** **10 of 10** planted defects caught, **0 of 10** clean diffs blocked, 0 inconclusive, across 20 committed fixtures anyone can re-run. This is the strongest evidence here.
 - **Memory.** The Brain scores **0.34** against ripgrep's 0.09 and a no-context floor of 0.01 (N=38) — a 3.8× edge on a question set that cannot be guessed.
 - **Speed.** No regressions. Warm TTFB 9 ms.
-- **Shipped output.** **Decisive loss, N=1.** The two ad-hoc artifacts scored 6.3 and 8.6; the governed arm failed before review and scored 0.0. That is an end-to-end pipeline loss, not evidence about review quality after a successful launch.
+- **Shipped output.** **Initial decisive loss; post-fix tie, each N=1.** The original governed arm failed before review and scored 0.0. After repairing cold-launch timing, external-worktree dependencies, and live-branch reaping, all arms completed: raw Codex scored 9.2, governed Codex 8.7, and raw Claude 8.0. Both judges preferred raw Codex to governed, but the 0.5 margin is inside the pre-registered one-point noise band.
 
 **The honest one-liner is unchanged from June: o8 does not make models better coders.** What we can now say is narrower and better evidenced — a pre-edit contract measurably helps some models, and the merge gate catches what mechanical checks cannot.
 
@@ -127,9 +127,11 @@ No regressions. June's structural fix (boot request fan-out, −50% requests) ha
 
 ---
 
-## Track 5 — Shipped output: governed 0.0 after a pre-review failure
+## Track 5 — Shipped output: initial pipeline loss, post-fix tie
 
-**On one real issue, the two ad-hoc artifacts scored 6.3 and 8.6; the governed arm failed before review and scored 0.0.** Both blinded judges agreed on the direction. The winning ad-hoc arm cleared the other ad-hoc arm by 2.3 points, above the pre-registered one-point noise margin.
+**The first completed run was a decisive end-to-end loss:** on one real issue, the two ad-hoc artifacts scored 6.3 and 8.6 while the governed arm failed before review and scored 0.0. Both blinded judges agreed on the direction, and the winning ad-hoc arm cleared the other ad-hoc arm by 2.3 points, above the pre-registered one-point noise margin.
+
+**The conditional post-fix continuation was a tie:** all three arms completed, with raw Codex at 9.2, governed Codex at 8.7, and raw Claude at 8.0. Both judges ranked raw Codex above governed, but the 0.5 averaged margin is below the locked one-point noise threshold. This is not a governed win, and it is not a decisive governed loss.
 
 The question worth answering is not whose *first* diff is better. It is: take a real issue, have a raw model write a diff you merge on green, versus route the same issue through the governed pipeline — **which one ships better code?**
 
@@ -137,6 +139,8 @@ Path A (ad-hoc): a raw model writes a diff, merged on green. What ships is the f
 Path B (governed): the same issue goes through dispatch, review, refix, and the merge gate. What ships is whatever survives to review-approved.
 
 The governed arm is scored at **review-approved**, not merged, because the human approval card is the product's intended behaviour rather than something to route around. A terminal pipeline failure is still a measurement under the pre-registered validity contract, so it ships an empty artifact and remains in the score. Nothing is merged and nothing is approved by the harness.
+
+**Original run (`e2e-track5-1679-v8`)**
 
 | Arm | Judge 1 | Judge 2 | Average |
 |---|---:|---:|---:|
@@ -148,9 +152,23 @@ Run `e2e-track5-1679-v8` used issue #1679 at base `b9fa7c98242de0589fa83d88503a0
 
 **Why the governed arm scored zero:** its durable lane opened, entered `launching`, then was archived 17 seconds later as `no_changes` because its untouched branch was equal to `origin/main`. Worktree provisioning subsequently reported a base-typecheck failure. The exact typecheck passed when run directly on the same clean base in about 50 seconds, while the dispatch log records a 30-second headless deadline. The logs therefore point to a launch race: the healthy-but-slow cold-start check outlived its transport, and ancestry reconciliation treated the still-untouched launching branch as already merged. No worker or review turn ran, and no governed diff existed to substitute.
 
-That distinction matters. **This is a decisive end-to-end loss for the governed path, because it shipped nothing. It does not tell us whether review and refix improve code after dispatch succeeds.** Re-running the same task until the pipeline launched would turn a measured failure into selection bias, so this report keeps the loss.
+That distinction matters. **This is a decisive end-to-end loss for the governed path, because it shipped nothing. It does not tell us whether review and refix improve code after dispatch succeeds.** Re-running the same task after observing the loss creates a conditional post-fix measurement, so the original result remains primary and is never pooled with the continuation.
 
-**Six collection attempts produced no score.** Every failure was ours, not the pipeline's, and each was a different fault: a specification whose constraints could not both hold; a liveness probe that aborted a healthy run on one transient blip; leftover lanes blocking mission creation through a CLI that could not pass the parameter the error message demanded; a diff captured before review ran; a clean worker exit misread as a failure; and a recorded base commit that disagreed with the branch the pipeline actually diffed against. Two of those produced confident, wrong results before being caught — in opposite directions.
+**Post-fix continuation (`e2e-track5-1679-v12`)**
+
+| Arm | Codex judge | Claude judge | Average |
+|---|---:|---:|---:|
+| Raw Codex | 9.4 | 8.9 | **9.2** |
+| Governed Codex | 8.6 | 8.8 | **8.7** |
+| Raw Claude | 8.4 | 7.6 | **8.0** |
+
+Run `e2e-track5-1679-v12` used the same issue #1679 at base `69795ec97e0951b6a79a62f11cf075a5ae29ec10`. Its collection receipt contains three valid arms, zero failed arms, and zero invalid arms. The governed worker passed the prelaunch typecheck, committed a six-file diff, exited cleanly, and received an approved review at the same current HEAD in about eight minutes. Both blinded judge receipts are valid. No refix round was needed, nothing was merged, and the harness restored the operator's `high-risk` approval posture after collection.
+
+Three intervening continuations remain part of the audit trail. v9 failed before launch because an external managed worktree could not resolve the repository's dependencies. v10 passed that gate and launched a real worker, but the worktree reaper archived its still-running branch before the first commit. v11 completed no arms and is classified as an infrastructure abort because the isolated source server never started. The dependency and reaper failures are observed pipeline losses; the infrastructure abort is not a product measurement.
+
+The same-family comparison that addresses the product claim is governed Codex versus raw Codex. The governed artifact trailed by 0.5, inside noise, so this N=1 continuation provides no evidence that review improved the code. It does establish that the repaired pipeline can reach and capture settled review approval without operator intervention.
+
+**Before v8, six collection attempts produced no score.** Every failure was ours, not the product's, and each was a different harness fault: a specification whose constraints could not both hold; a liveness probe that aborted a healthy run on one transient blip; leftover lanes blocking mission creation through a CLI that could not pass the parameter the error message demanded; a diff captured before review ran; a clean worker exit misread as a failure; and a recorded base commit that disagreed with the branch the pipeline actually diffed against. Two of those produced confident, wrong results before being caught — in opposite directions.
 
 **What was nevertheless established, by direct observation on a real issue (#1679):**
 
@@ -199,7 +217,7 @@ Interruption is not failure. Classification is an exhaustive switch with no wild
 - **Informed** — a 3.8× edge over ripgrep on organizational questions that cannot be guessed or grepped.
 - **Fast** — measured, version-stamped, no regressions.
 
-**What the evidence does not support:** that the governed path ships better code end to end. Track 5 now has a measured loss: the governed arm failed before review and scored 0.0 against two non-empty ad-hoc artifacts. The run measures the whole shipping path, so the failure counts, but it gives no estimate of review-and-refix quality conditional on a successful dispatch.
+**What the evidence does not support:** that the governed path ships better code end to end. Track 5 retains the original measured pipeline loss, and its conditional post-fix continuation has governed Codex trailing raw Codex by 0.5 inside noise. The repaired path reached approved review, but this N=1 result does not show review improving the code.
 
 ---
 
@@ -210,7 +228,7 @@ Interruption is not failure. Classification is an exhaustive switch with no wild
 3. **Judge self-preference is real and measured.** Cross-model comparisons are withdrawn. The paired coding design is structurally immune; memory and governance still use a single judge family and inherit unquantified risk.
 4. **Governance measures the AI review tier**, not the human gate above it.
 5. **Memory literal-lookup cases are probably over-specified**; that row should not be quoted until re-checked.
-6. **Shipped output is N=1 and failed before review.** Its 0.0 governed score is an end-to-end reliability result, not an estimate of how review changes a worker's code. The 8.6 versus 6.3 ordering between the two ad-hoc arms is also a cross-family comparison and should not be generalized from one task.
+6. **Each shipped-output result is N=1 on the same task.** The original 0.0 governed score is an end-to-end reliability result. The post-fix 8.7 versus 9.2 same-family comparison is conditional on three observed product repairs and remains inside noise. Neither can be generalized into a quality rate.
 7. **We benchmark the product we run on.** Mitigations: pre-registration committed before measurement, sealed blinding, published losses, discarded runs when blinding was compromised, and the validity contract above.
 
 ---
@@ -220,7 +238,7 @@ Interruption is not failure. Classification is an exhaustive switch with no wild
 - Pre-registration and amendments: [`docs/internals/bench-2026-08-preregistration.md`](../internals/bench-2026-08-preregistration.md)
 - Automated tracks: `npm run bench:speed` / `bench:memory` / `bench:governance` → version-stamped scorecard with regression detection
 - Coding: `npm run bench:coding`; fixed tasks in `tests/bench/coding/tasks.json`; base `1530f7099`
-- Shipped output: `npx tsx scripts/bench/run-coding.ts --preflight --e2e`, then `--e2e`, then `--e2e-judge`; reported run `e2e-track5-1679-v8`, base `b9fa7c982`
+- Shipped output: `npx tsx scripts/bench/run-coding.ts --preflight --e2e`, then `--e2e`, then `--e2e-judge`; primary run `e2e-track5-1679-v8`, base `b9fa7c982`; conditional post-fix run `e2e-track5-1679-v12`, base `69795ec97`
 - Governance fixtures: `tests/bench/governance/` — twenty committed diffs, re-appliable individually
 - Harness validity contract: `scripts/bench/coding-arm-outcome.ts`, `scripts/bench/coding-durable-reconciliation.ts`, `scripts/bench/coding-run-control.ts`
 
