@@ -242,3 +242,29 @@ two ad-hoc arms and 0.0 for governed. Both judges agreed on direction; the winni
 margin over the runner-up was 2.3, above `NOISE_MARGIN=1`. This is an N=1 decisive
 end-to-end governed loss. Because the governed arm failed before review, it is not
 evidence about review-and-refix quality conditional on successful dispatch.
+
+---
+
+## Amendment 5: post-fix single-task continuation (recorded before collection)
+
+Run `e2e-track5-1679-v8` remains the primary whole-pipeline result and will not be
+replaced. The operator directed a post-fix continuation after the failure was
+traced to two product defects: an ordinary 30-second headless tick deadline was
+shorter than the required 180-second cold-launch typecheck, and the ancestry
+reconciler could archive a lane that was still launching because its untouched
+branch matched the base.
+
+The continuation selects only issue #1679 and uses a fresh immutable run ID. It
+runs all three arms from one new base containing the product fix, uses the same
+prompts, rubric, seed, judges, noise margin, three-outcome validity contract, and
+two-hour governed-arm bound, and still stops at settled review approval without
+merging or operator approval. The source revision and CLI resolution are recorded
+in the receipt. Collection runs against an isolated source-backed control plane so
+the installed application cannot contribute old reconciliation behavior.
+
+This is a conditional post-fix measurement selected after observing the v8 loss,
+so it cannot erase or be pooled silently with v8. Reporting will show both runs:
+v8 as the original N=1 whole-pipeline loss, and this continuation as evidence
+about whether the repaired path reaches review convergence and what its surviving
+artifact scores. If the governed arm fails again or reaches its two-hour bound,
+that terminal failure is scored and reported under the same locked rules.
