@@ -624,14 +624,7 @@ function compilePureNodeBundle(label, entry) {
 // repo registry + lane tables) and node-pty is used by the terminal bridge.
 const NATIVE_EXTERNALS = '--external:node-pty --external:better-sqlite3 --external:bindings';
 
-// @sentry/node uses dynamic require-in-the-middle instrumentation that does not
-// bundle cleanly with esbuild — keep it external so ws-server.mjs `import()`s it
-// at runtime from out/server/node_modules (present via the Next standalone
-// trace). A dormant build never reaches the dynamic import, so a missing module
-// degrades to a no-op rather than a bundle failure.
-const SENTRY_EXTERNAL = '--external:@sentry/node';
-
-compileServerBundle('ws-server', 'src/ws-server.ts', `${NATIVE_EXTERNALS} ${SENTRY_EXTERNAL}`);
+compileServerBundle('ws-server', 'src/ws-server.ts', NATIVE_EXTERNALS);
 
 // terminal-host fork target (#1498 follow-up). ws-server forks this when
 // O8_TERMINAL_HOST=child so node-pty spawn + data pump run in a separate
@@ -743,6 +736,15 @@ for (const bundle of REQUIRED_BUNDLES) {
       process.exit(1);
     }
   }
+}
+
+// The WS process reports its own crashes, so its Sentry SDK must be compiled
+// into the artifact rather than resolved from the pruned standalone runtime.
+const wsImplementationPath = join(server, 'ws-server-impl.mjs');
+const wsImplementation = readFileSync(wsImplementationPath, 'utf8');
+if (/\b(?:import|require)\s*\(\s*['\"]@sentry\/node['\"]\s*\)/.test(wsImplementation)) {
+  console.error(`❌ WS bundle still externalizes @sentry/node: ${wsImplementationPath}`);
+  process.exit(1);
 }
 
 const size = execSync(`du -sh "${server}" 2>/dev/null`).toString().trim().split('\\t')[0];

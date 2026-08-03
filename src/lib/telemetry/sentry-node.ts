@@ -47,11 +47,9 @@ export async function initSentryNode(surface: NodeSurface): Promise<boolean> {
     // Dormant unless a DSN was baked into a packaged build.
     const dsn = resolveSentryDsn();
     if (!isPackaged() || !dsn) return false;
-    surfaces.add(surface);
-
     const cfg = resolveSentryConfig();
     // Dynamic import so a dormant install (the common dev/test case) never even
-    // loads the SDK. Marked external in the ws-server esbuild bundle.
+    // loads the SDK.
     const Sentry = await import('@sentry/node');
 
     Sentry.init({
@@ -71,14 +69,15 @@ export async function initSentryNode(surface: NodeSurface): Promise<boolean> {
       founder: cfg.founder, // boolean only — never the operator number
       surface,
     });
+    surfaces.add(surface);
 
-    try {
-      console.log(`[telemetry] Sentry (node) initialized for "${surface}"`);
-    } catch {
-      /* swallow */
-    }
+    console.log(`[telemetry] Sentry (node) initialized for "${surface}"`);
     return true;
-  } catch {
+  } catch (error) {
+    console.warn(
+      `[telemetry] Sentry (node) initialization failed for "${surface}"; crash reporting is unavailable:`,
+      error,
+    );
     return false;
   }
 }

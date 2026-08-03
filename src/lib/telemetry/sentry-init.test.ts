@@ -1,7 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { isPackaged, resolveSentryConfig, resolveSentryDsn } from './sentry-config';
 import { initSentryNode } from './sentry-node';
+
+vi.mock('@sentry/node', () => {
+  throw new Error('Sentry SDK unavailable');
+});
 
 /**
  * Proves the "ship it dormant" contract: with no DSN present (the default in the
@@ -54,5 +58,20 @@ describe('sentry — dormant without a DSN', () => {
   it('initSentryNode returns false and never loads @sentry/node without a DSN', async () => {
     await expect(initSentryNode('server')).resolves.toBe(false);
     await expect(initSentryNode('ws')).resolves.toBe(false);
+  });
+
+  it('warns when packaged startup cannot load Sentry', async () => {
+    process.env.O8_PACKAGED_APP = '1';
+    process.env.O8_SENTRY_DSN = 'https://public@o0.ingest.sentry.io/1';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      await expect(initSentryNode('ws')).resolves.toBe(false);
+      expect(warn).toHaveBeenCalledWith(
+        '[telemetry] Sentry (node) initialization failed for "ws"; crash reporting is unavailable:',
+        expect.any(Error),
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
