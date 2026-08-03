@@ -494,6 +494,29 @@ describe('worktree reaper PR merge reconciliation', () => {
     expect(event).toBeUndefined();
   });
 
+  it('does not archive a running packet whose new branch still equals its base', async () => {
+    const repoPath = makeRepo();
+    const branch = 'inline/running-before-first-commit';
+    const worktreePath = makePacketWorktree(repoPath, branch, 'packet-pkt-running-before-first-commit');
+    const lane = createLane({
+      repoPath,
+      branch,
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId: 'pkt-running-before-first-commit',
+      worktreePath,
+    });
+    markStatus(lane.id, 'running');
+
+    await runWorktreeReaperTick();
+
+    expect(getLane(lane.id)).toMatchObject({
+      status: 'running',
+      worktreePath,
+    });
+    expect(existsSync(worktreePath)).toBe(true);
+  });
+
   it('startup sweep removes terminal and abandoned orphan clones while protecting recent orphans + active/context dirs', async () => {
     const repoPath = makeRepo();
     const worktreeRoot = join(repoPath, '.cortex-worktrees');

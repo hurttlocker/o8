@@ -33,6 +33,19 @@ const STALE_REVIEW_THRESHOLD_MS = 2 * 60 * 60_000;  // 2 hours
 const ABANDONED_IDLE_THRESHOLD_MS = 8 * 60 * 60_000; // 8 hours
 const MAX_TARGETED_PR_REFRESHES_PER_TICK = 5;
 
+// Packet-backed ancestry reconciliation belongs to merged-by-ancestry.ts,
+// which reads both packet and lane state before deciding that work is settled.
+// This reaper only sees the lane row, so a freshly created branch that still
+// equals its base is indistinguishable from a branch whose work was merged.
+// Restrict the legacy lane-only path to settled states and never race a live
+// packet's launch, worker, review, or refix cycle.
+const LANE_ONLY_ANCESTRY_REAPABLE_STATUSES = new Set<Lane['status']>([
+  'idle',
+  'paused',
+  'reviewing',
+  'failed',
+]);
+
 let reaperTimer: ReturnType<typeof setInterval> | null = null;
 
 interface MergedCleanResolution {
@@ -370,14 +383,18 @@ export async function runWorktreeReaperTick(): Promise<void> {
       continue;
     }
 
-    // Case 2: branch tip already merged into base (common when the operator
-    // cherry-picks onto main manually or merges via another workflow).
-    // Safe to archive at any lane age — the work has already landed.
-    // Applies to all active statuses so paused/idle lanes whose work
-    // shipped via another path also retire cleanly. Gated on
-    // `branch !== baseBranch` so un-isolated lanes (session running on the
-    // base branch directly) don't trivially trip the merge check.
-    if (lane.branch && lane.baseBranch && lane.branch !== lane.baseBranch) {
+    // Case 2: a packetless, settled branch tip is already merged into base
+    // (common when the operator cherry-picks onto main manually). Packet-backed
+    // lanes are handled by the packet-aware merged-by-ancestry reconciler. A
+    // live packet branch intentionally equals the base until its first commit,
+    // so ancestry alone is not proof that its work has landed.
+    if (
+      !lane.packetId
+      && LANE_ONLY_ANCESTRY_REAPABLE_STATUSES.has(lane.status)
+      && lane.branch
+      && lane.baseBranch
+      && lane.branch !== lane.baseBranch
+    ) {
       const merged = await branchIsMergedIntoBase(
         lane.repoPath,
         lane.branch,
