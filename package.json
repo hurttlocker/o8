@@ -1,7 +1,7 @@
 {
   "name": "o8",
-  "version": "0.1.652",
-  "description": "o8 \u2014 governance layer for autonomous engineering teams. Approvals, audit, organizational memory.",
+  "version": "0.1.653",
+  "description": "o8 — governance layer for autonomous engineering teams. Approvals, audit, organizational memory.",
   "license": "MIT",
   "productName": "o8",
   "private": true,
