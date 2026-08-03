@@ -10,6 +10,7 @@
  *   o8 mission create   --title "…" [--body "…"] [--repo <path>] [--runtime r]
  *                       [--model m] [--constraints "…"] [--sequential]
  *                       [--compare m1,m2] [--huddle] [--brain] [--number n]
+ *                       [--existingBranchPolicy auto|reset|continue|error]
  *                       [--quality-search-contract <json-file>]
  *   o8 mission dispatch [--mission <id>]
  *   o8 mission status   [--mission <id>] [--cost]
@@ -71,6 +72,11 @@ interface MissionStopResult {
   [key: string]: unknown;
 }
 
+type ExistingBranchPolicy = 'auto' | 'reset' | 'continue' | 'error';
+
+const EXISTING_BRANCH_POLICY_ERROR =
+  'existingBranchPolicy must be one of: auto, reset, continue, error.';
+
 // Mirror of PACKET_ATTENTION_STATUSES in operator-handlers/mission.ts — the set
 // `wait_for_mission_ready` treats as "needs the operator's attention". Kept in
 // sync by the Stage-7 parity audit; duplicated here because the CLI is a
@@ -111,6 +117,14 @@ function flag(rest: string[], name: string): string | null {
 
 function hasFlag(rest: string[], name: string): boolean {
   return rest.includes(`--${name}`);
+}
+
+export function parseExistingBranchPolicy(value: unknown): ExistingBranchPolicy | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (value === 'auto' || value === 'reset' || value === 'continue' || value === 'error') {
+    return value;
+  }
+  throw new CliError('invalid_args', EXISTING_BRANCH_POLICY_ERROR, EXIT.INVALID_ARGS);
 }
 
 export function parseMissionStopArgs(rest: string[]): { missionId: string } {
@@ -193,6 +207,7 @@ async function runMissionCreate(mode: OutputMode, rest: string[]): Promise<numbe
   const comparisonModels = compareRaw
     ? compareRaw.split(',').map((m) => m.trim()).filter(Boolean)
     : undefined;
+  const existingBranchPolicy = parseExistingBranchPolicy(flag(rest, 'existingBranchPolicy'));
   const qualitySearchContractPath = flag(rest, 'quality-search-contract')?.trim();
   if (qualitySearchContractPath && comparisonModels?.length) {
     throw new CliError('invalid_args', '--quality-search-contract cannot be combined with --compare.', EXIT.INVALID_ARGS);
@@ -226,6 +241,7 @@ async function runMissionCreate(mode: OutputMode, rest: string[]): Promise<numbe
   if (hasFlag(rest, 'huddle')) body.huddle = true;
   if (hasFlag(rest, 'brain')) body.useBrain = true;
   if (comparisonModels && comparisonModels.length > 0) body.comparisonModels = comparisonModels;
+  if (existingBranchPolicy) body.existingBranchPolicy = existingBranchPolicy;
   if (qualitySearch) body.qualitySearch = qualitySearch;
 
   const cfg = resolveConfig();
