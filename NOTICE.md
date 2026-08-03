@@ -52,6 +52,54 @@ endorses o8.
 - Use in o8: icons plus raw regular-weight SVG path data inlined into Tauri
   webview source, including `src/components/mobile-split-shell/DevHostFrame.tsx`
 
+## Lucide Icons
+
+- Package and version: `lucide-react` 0.577.0
+- Copyright: Copyright (c) for portions of Lucide are held by Cole Bemis
+  2013-2026 as part of Feather (MIT). All other copyright (c) for Lucide are
+  held by Lucide Contributors 2026.
+- License: ISC, with portions derived from Feather under MIT
+- Upstream: <https://github.com/lucide-icons/lucide>
+- Use in o8: icon glyph data imported from the package and rendered through
+  `src/components/desktop/lucide-shims.tsx`, which draws each icon's
+  `__iconNode` data as raw SVG to work around a Tauri webview rendering
+  failure in the library's React component tree
+
+The ISC permission notice reproduced from the package:
+
+> Permission to use, copy, modify, and/or distribute this software for any
+> purpose with or without fee is hereby granted, provided that the above
+> copyright notice and this permission notice appear in all copies.
+>
+> THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+> WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+> MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+> ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+> WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+> ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+> OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+The Feather-derived portions additionally carry Cole Bemis's MIT notice; the
+MIT permission text at the end of this file applies to them.
+
+## Tabler Icons
+
+- Package and version: `@tabler/icons-react` 3.44.0
+- Copyright: Copyright (c) 2020-2026 Paweł Kuna
+- License: MIT
+- Upstream: <https://github.com/tabler/tabler-icons>
+- Use in o8: icon glyph data imported from the package and rendered through
+  `src/components/desktop/tabler-shims.tsx` using the same raw-SVG approach as
+  the Lucide shim, for specific glyphs chosen on legibility grounds
+
+## Iconoir
+
+- Package and version: `iconoir-react` 7.11.0
+- Copyright: Copyright (c) 2021 Daniel Martin
+- License: MIT
+- Upstream: <https://github.com/iconoir-icons/iconoir>
+- Use in o8: selected interface icons
+
 ## Paper Design Shaders
 
 - Packages and versions: `@paper-design/shaders` 0.0.76 and
@@ -174,8 +222,8 @@ notice records that provenance caveat and should remain with distributions.
 ## MIT permission notice for third-party works
 
 The copyright notices above and the following terms apply to the Lisse,
-Phosphor Icons, tauri-plugin-mcp, IntentUI, and Roughdraft works identified in
-this file:
+Phosphor Icons, Tabler Icons, Iconoir, the Feather-derived portions of Lucide,
+tauri-plugin-mcp, IntentUI, and Roughdraft works identified in this file:
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
