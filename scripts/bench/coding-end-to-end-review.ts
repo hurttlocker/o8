@@ -15,6 +15,7 @@ export interface PacketDiffReceipt {
 export type GovernedPipelineOutcome =
   | 'review-approved'
   | 'review-bound-exhausted'
+  | 'merge-preview-blocked'
   | 'blocked'
   | 'control-error'
   | 'failed'
@@ -31,13 +32,14 @@ export function governedPipelineTerminalStatus(
     case 'review-approved':
       return TurnStatus.Completed;
     case 'review-bound-exhausted':
+    case 'merge-preview-blocked':
     case 'blocked':
+    case 'control-error':
     case 'failed':
     case 'released':
-      return TurnStatus.Failed;
-    case 'control-error':
-    case 'stream-lost':
     case 'timeout':
+      return TurnStatus.Failed;
+    case 'stream-lost':
       return null;
   }
   const exhaustive: never = outcome;

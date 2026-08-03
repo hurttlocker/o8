@@ -16,6 +16,7 @@ import {
 const MAX_DIFF_BYTES = 32 * 1024 * 1024;
 
 export type DurableStateView = 'notLoaded' | 'summary' | 'full';
+export type DurableCompletionBoundary = 'worker-turn' | 'governed-review';
 
 interface DurableLaneRow {
   id: string;
@@ -35,6 +36,7 @@ interface DurableLaneEventRow {
 
 export interface DurablePacketState {
   view: DurableStateView;
+  completionBoundary: DurableCompletionBoundary;
   packetId: string;
   laneId: string | null;
   laneStatus: string | null;
@@ -83,18 +85,21 @@ function isLaneStatus(value: string): value is LaneStatus {
 function turnStatusFromLane(
   status: LaneStatus,
   outcome: string | null,
+  completionBoundary: DurableCompletionBoundary,
 ): DurablePacketState['terminalStatus'] {
+  const completed = completionBoundary === 'worker-turn' ? TurnStatus.Completed : null;
   switch (status) {
     case 'reviewing':
+      return completed;
     case 'completed':
-      return TurnStatus.Completed;
+      return completed;
     case 'failed':
       return TurnStatus.Failed;
     case 'paused':
       return TurnStatus.Interrupted;
     case 'archived':
       if (outcome === 'merged' || outcome === 'no_changes' || outcome === 'pr_opened') {
-        return TurnStatus.Completed;
+        return completed;
       }
       if (outcome === 'closed_unmerged') return TurnStatus.Failed;
       if (outcome === 'discarded' || outcome === 'archived_recoverable') return TurnStatus.Interrupted;
@@ -113,7 +118,10 @@ function turnStatusFromLane(
   throw new Error(`unclassified lane status: ${String(exhaustive)}`);
 }
 
-function eventTerminalStatus(event: DurableLaneEventRow): DurablePacketState['terminalStatus'] {
+function eventTerminalStatus(
+  event: DurableLaneEventRow,
+  completionBoundary: DurableCompletionBoundary,
+): DurablePacketState['terminalStatus'] {
   let payload: Record<string, unknown>;
   try {
     payload = JSON.parse(event.payload_json) as Record<string, unknown>;
@@ -121,6 +129,7 @@ function eventTerminalStatus(event: DurableLaneEventRow): DurablePacketState['te
     return null;
   }
   if (event.verb === 'runtime_process_exit') {
+    if (completionBoundary === 'governed-review') return null;
     if (payload.classification === 'signal-kill') return TurnStatus.Interrupted;
     if (payload.completedTurn === true) {
       if (payload.exitCode === 0) return TurnStatus.Completed;
@@ -129,7 +138,9 @@ function eventTerminalStatus(event: DurableLaneEventRow): DurablePacketState['te
     return null;
   }
   if (event.verb !== 'status_change' || typeof payload.status !== 'string') return null;
-  return isLaneStatus(payload.status) ? turnStatusFromLane(payload.status, null) : null;
+  return isLaneStatus(payload.status)
+    ? turnStatusFromLane(payload.status, null, completionBoundary)
+    : null;
 }
 
 function readWorktree(worktreePath: string | null, expectedBase: string): {
@@ -168,9 +179,12 @@ export function readDurablePacketState(input: {
   packetId: string;
   expectedBase: string;
   dataDir?: string;
+  completionBoundary?: DurableCompletionBoundary;
 }): DurablePacketState {
+  const completionBoundary = input.completionBoundary ?? 'worker-turn';
   const empty: DurablePacketState = {
     view: 'notLoaded',
+    completionBoundary,
     packetId: input.packetId,
     laneId: null,
     laneStatus: null,
@@ -210,14 +224,14 @@ export function readDurablePacketState(input: {
     let terminalStatus: DurablePacketState['terminalStatus'] = null;
     let terminalEvent: string | null = null;
     for (const event of events) {
-      const status = eventTerminalStatus(event);
+      const status = eventTerminalStatus(event, completionBoundary);
       if (status !== null) {
         terminalStatus = status;
         terminalEvent = `${event.verb}@${event.timestamp}`;
       }
     }
     if (isLaneStatus(lane.status)) {
-      const laneTerminal = turnStatusFromLane(lane.status, lane.outcome);
+      const laneTerminal = turnStatusFromLane(lane.status, lane.outcome, completionBoundary);
       if (laneTerminal !== null) {
         terminalStatus = laneTerminal;
         terminalEvent = `lanes.status=${lane.status}`;
@@ -226,6 +240,7 @@ export function readDurablePacketState(input: {
     const worktree = readWorktree(lane.worktree_path, input.expectedBase);
     return {
       view: worktree.exists && worktree.error === null ? 'full' : 'summary',
+      completionBoundary,
       packetId: input.packetId,
       laneId: lane.id,
       laneStatus: lane.status,
@@ -267,18 +282,46 @@ export function reconcileArmWithDurableState(input: {
   streamStatus: TurnStatus | null;
   streamErrors?: ArmErrorReceipt[];
   durable: DurablePacketState;
+  governedReview?: { approved: boolean; approvalId: string | null } | null;
+  preserveObservedFailure?: boolean;
 }): ArmClassification & { durableReconciliation: DurableReconciliationReceipt } {
-  const streamTerminal = terminalOrNull(input.streamStatus);
-  const durableTerminal = input.durable.terminalStatus;
-  const disagreement = streamTerminal !== durableTerminal;
-  const useDurable = durableTerminal !== null && disagreement;
+  const governedBoundary = input.durable.completionBoundary === 'governed-review';
+  const governedReviewCompleted = governedBoundary
+    && input.governedReview?.approved === true;
+  const observedStreamTerminal = terminalOrNull(input.streamStatus);
+  const eligibleStreamStatus = governedBoundary
+    && observedStreamTerminal === TurnStatus.Completed
+    && !governedReviewCompleted
+    ? null
+    : input.streamStatus;
+  const streamTerminal = terminalOrNull(eligibleStreamStatus);
+  const durableCompletionRejected = governedBoundary
+    && input.durable.terminalStatus === TurnStatus.Completed
+    && !governedReviewCompleted;
+  const durableTerminal = governedReviewCompleted
+    ? TurnStatus.Completed
+    : durableCompletionRejected
+      ? null
+      : input.durable.terminalStatus;
+  const durableTerminalEvent = governedReviewCompleted
+    ? `durable_review=${input.governedReview?.approvalId ?? 'approved-current-head'}`
+    : durableCompletionRejected
+      ? null
+      : input.durable.terminalEvent;
+  const disagreement = observedStreamTerminal !== durableTerminal;
+  // A current-head approval proves governed completion only when the stream did
+  // not observe a later settled failure such as a blocked merge preview.
+  const useDurable = durableTerminal !== null
+    && disagreement
+    && !(input.preserveObservedFailure === true && streamTerminal === TurnStatus.Failed);
   const classification = classifyArmStatus({
-    status: useDurable ? durableTerminal : input.streamStatus,
+    status: useDurable ? durableTerminal : eligibleStreamStatus,
     source: useDurable ? 'durable-state-reconciliation' : 'stream',
     errors: input.streamErrors,
   });
   const durableStateReceipt: Omit<DurablePacketState, 'recoveredDiff'> = {
     view: input.durable.view,
+    completionBoundary: input.durable.completionBoundary,
     packetId: input.durable.packetId,
     laneId: input.durable.laneId,
     laneStatus: input.durable.laneStatus,
@@ -289,17 +332,21 @@ export function reconcileArmWithDurableState(input: {
     worktreeExists: input.durable.worktreeExists,
     headSha: input.durable.headSha,
     diffBase: input.durable.diffBase,
-    terminalStatus: input.durable.terminalStatus,
-    terminalEvent: input.durable.terminalEvent,
+    terminalStatus: durableTerminal,
+    terminalEvent: durableTerminalEvent,
     eventCount: input.durable.eventCount,
     error: input.durable.error,
   };
   return {
     ...classification,
     classificationReason: useDurable
-      ? `durable state won: ${input.durable.terminalEvent ?? durableTerminal}; ` +
+      ? `durable state won: ${durableTerminalEvent ?? durableTerminal}; ` +
         `stream terminal status was ${streamTerminal ?? 'not observed'}`
-      : classification.classificationReason,
+      : governedBoundary
+        && observedStreamTerminal === TurnStatus.Completed
+        && !governedReviewCompleted
+        ? 'governed completion rejected: no durable approved review for the current HEAD'
+        : classification.classificationReason,
     durableReconciliation: {
       ...durableStateReceipt,
       streamStatus: input.streamStatus,
