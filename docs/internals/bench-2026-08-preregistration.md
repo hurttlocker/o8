@@ -268,3 +268,29 @@ v8 as the original N=1 whole-pipeline loss, and this continuation as evidence
 about whether the repaired path reaches review convergence and what its surviving
 artifact scores. If the governed arm fails again or reaches its two-hour bound,
 that terminal failure is scored and reported under the same locked rules.
+
+---
+
+## Amendment 6: external-worktree dependency repair (recorded before collection)
+
+Run `e2e-track5-1679-v9` completed with two valid ad-hoc arms and one failed
+governed arm. The launch was no longer archived and the 30-second deadline no
+longer killed it, but the required base typecheck failed before a worker started.
+The same base passed when checked in the repository clone. A direct reproduction
+showed why: managed worktrees live under the data directory, outside the repo, but
+the gate assumed Node dependency resolution could walk up to the repo's
+`node_modules`. The external worktree therefore reported missing Node modules and
+types even though every dependency input matched the clean base.
+
+The product now links the repo's `node_modules` into a managed worktree before the
+gate only when `package.json` and every supported lockfile are byte-identical.
+Mismatched dependencies still fail closed, and the typecheck itself is unchanged.
+A real-entry regression test creates an external managed worktree and requires its
+prelaunch typecheck to pass through that link.
+
+A fresh immutable run repeats all three arms for issue #1679 from the new fixed
+base. It keeps every rule in Amendment 5, including the same prompts, judges,
+seed, two-hour governed bound, isolated source-backed control plane, and separate
+reporting of v8 and v9. This third run is explicitly post-fix and selected after
+two launch failures; it is evidence about the repaired pipeline, not a replacement
+for either observed failure.
