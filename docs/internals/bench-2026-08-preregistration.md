@@ -294,3 +294,15 @@ seed, two-hour governed bound, isolated source-backed control plane, and separat
 reporting of v8 and v9. This third run is explicitly post-fix and selected after
 two launch failures; it is evidence about the repaired pipeline, not a replacement
 for either observed failure.
+
+---
+
+## Amendment 7: REST issue preflight (recorded before collection)
+
+The first v10 preflight stopped before creating a receipt because the authenticated
+GitHub GraphQL quota was exhausted. REST quota remained available, and no arm or
+judge started. The harness now honors the pinned benchmark repository slug and
+reads the same issue title, body, and open state through GitHub's REST issue
+endpoint. The selected issue, prompt text, base, arms, rubric, and scoring rules do
+not change. Run ID v10 remains unused until this repaired preflight succeeds and
+collection writes its first immutable receipt.
