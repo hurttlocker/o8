@@ -194,3 +194,51 @@ all three shipped diffs. A winner is decisive only when its averaged margin exce
 `NOISE_MARGIN` and both judges independently rank it above every other arm;
 disagreement is reported as `judges disagree`. Every invalid arm and every governed
 loss remains in the receipt and report.
+
+---
+
+## Amendment 4: Track 5 terminal-failure result and judging incident record
+
+This amendment is recorded after collection and before publication. It discloses
+the execution environment and two pre-score harness repairs; it does not change
+the collected artifacts, task, rubric, seed, noise margin, or decision rule.
+
+Run `e2e-track5-1679-v8` selected only issue #1679 and recorded base
+`b9fa7c98242de0589fa83d88503a0b7d3f05da47`. Collection ran against a clean
+temporary clone of that `origin/main` because the primary checkout contained
+committed harness repairs that were not all on the remote. The rebuilt repository
+CLI was supplied through `O8_BENCH_O8_CLI`, and its canonical path and override
+source are in the receipt.
+
+The three-outcome contract supersedes Amendment 3's older statement that every
+stalled or empty governed arm is invalid. A terminal state observed as failure is
+`failed`, scored, and reported. Only the absence of a terminal state is `invalid`
+and excluded. This switch and the durable convergence wait were implemented and
+tested before this collection.
+
+The collection produced two valid ad-hoc arms and one failed governed arm. The
+governed lane entered `launching`, was durably archived as `no_changes` when its
+untouched branch equaled `origin/main`, and then recorded worktree provisioning
+failure. No worker or review ran. The same clean-base typecheck passed directly in
+about 50 seconds; the dispatch log records a 30-second headless deadline. The
+result therefore retains an empty governed artifact as an observed pipeline
+failure rather than reclassifying it as invalid or recollecting the task.
+
+The first judging attempt stopped before spawning a judge because an unchanged
+product comment containing `~/.o8/` matched an artifact-path marker. Artifact
+markers are now checked only in `diff --git` path headers, while exact and generic
+provenance markers are still checked throughout the blinded diff. A regression
+test covers both the allowed product-body path and excluded artifact path.
+
+That pre-score exception had already written an empty judging progress receipt.
+The runner now validates every blinded input before creating a new receipt and may
+resume an existing receipt only when it belongs to the same run and contains zero
+judge receipts and zero verdicts. Its original `startedAt` is preserved. Any
+receipt containing one result remains immutable. No judge had seen a candidate
+and no score existed when these two repairs were made.
+
+Both blinded judges then completed validly. The averages were 6.3 and 8.6 for the
+two ad-hoc arms and 0.0 for governed. Both judges agreed on direction; the winning
+margin over the runner-up was 2.3, above `NOISE_MARGIN=1`. This is an N=1 decisive
+end-to-end governed loss. Because the governed arm failed before review, it is not
+evidence about review-and-refix quality conditional on successful dispatch.

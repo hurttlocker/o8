@@ -2,9 +2,9 @@
 
 *First run 2026-06-01/02. Re-run and substantially rebuilt 2026-08-02/03 against v0.1.652.*
 
-Hypothesis and scoring rules were committed before any measurement — see [the pre-registration](../internals/bench-2026-08-preregistration.md) and its amendments, both timestamped in git and both predating the data they govern. Read *What changed since June* before quoting any figure.
+Hypothesis and scoring rules were committed before measurement — see [the pre-registration](../internals/bench-2026-08-preregistration.md). Amendments 1–3 predate the data they govern; Amendment 4 is a post-collection incident disclosure that records two pre-score harness repairs without changing the artifacts, rubric, seed, or decision rule. Read *What changed since June* before quoting any figure.
 
-This document reports what we can defend. Where a track lost, it says so. Where a result was withdrawn, it says why. Two of our own prior figures are retired below, and one experiment is reported as unmeasured rather than quietly dropped.
+This document reports what we can defend. Where a track lost, it says so. Where a result was withdrawn, it says why. Two of our own prior figures are retired below, and the shipped-output experiment reports an empty governed artifact rather than hiding a pipeline failure.
 
 ---
 
@@ -14,7 +14,7 @@ This document reports what we can defend. Where a track lost, it says so. Where 
 - **Governance.** **10 of 10** planted defects caught, **0 of 10** clean diffs blocked, 0 inconclusive, across 20 committed fixtures anyone can re-run. This is the strongest evidence here.
 - **Memory.** The Brain scores **0.34** against ripgrep's 0.09 and a no-context floor of 0.01 (N=38) — a 3.8× edge on a question set that cannot be guessed.
 - **Speed.** No regressions. Warm TTFB 9 ms.
-- **Shipped output.** **Not scored.** Six attempts, six harness faults of our own, no number. What we did observe directly is in Track 5, including the review gate rejecting a worker that misreported its own work.
+- **Shipped output.** **Decisive loss, N=1.** The two ad-hoc artifacts scored 6.3 and 8.6; the governed arm failed before review and scored 0.0. That is an end-to-end pipeline loss, not evidence about review quality after a successful launch.
 
 **The honest one-liner is unchanged from June: o8 does not make models better coders.** What we can now say is narrower and better evidenced — a pre-edit contract measurably helps some models, and the merge gate catches what mechanical checks cannot.
 
@@ -127,16 +127,28 @@ No regressions. June's structural fix (boot request fan-out, −50% requests) ha
 
 ---
 
-## Track 5 — Shipped output: NOT SCORED
+## Track 5 — Shipped output: governed 0.0 after a pre-review failure
 
-**There is no score in this track, and we are not going to imply one.** What follows is what was observed while trying to produce it.
+**On one real issue, the two ad-hoc artifacts scored 6.3 and 8.6; the governed arm failed before review and scored 0.0.** Both blinded judges agreed on the direction. The winning ad-hoc arm cleared the other ad-hoc arm by 2.3 points, above the pre-registered one-point noise margin.
 
 The question worth answering is not whose *first* diff is better. It is: take a real issue, have a raw model write a diff you merge on green, versus route the same issue through the governed pipeline — **which one ships better code?**
 
 Path A (ad-hoc): a raw model writes a diff, merged on green. What ships is the first diff.
 Path B (governed): the same issue goes through dispatch, review, refix, and the merge gate. What ships is whatever survives to review-approved.
 
-The governed arm is scored at **review-approved**, not merged, because the human approval card is the product's intended behaviour rather than something to route around. Nothing is merged and nothing is approved by the harness.
+The governed arm is scored at **review-approved**, not merged, because the human approval card is the product's intended behaviour rather than something to route around. A terminal pipeline failure is still a measurement under the pre-registered validity contract, so it ships an empty artifact and remains in the score. Nothing is merged and nothing is approved by the harness.
+
+| Arm | Judge 1 | Judge 2 | Average |
+|---|---:|---:|---:|
+| Ad-hoc A | 5.3 | 7.3 | **6.3** |
+| Ad-hoc B | 8.3 | 8.8 | **8.6** |
+| Governed | 0.0 | 0.0 | **0.0** |
+
+Run `e2e-track5-1679-v8` used issue #1679 at base `b9fa7c98242de0589fa83d88503a0b7d3f05da47`. The receipt contains two valid arms, one failed arm, zero invalid arms, two valid judge receipts, and N=1 scored task.
+
+**Why the governed arm scored zero:** its durable lane opened, entered `launching`, then was archived 17 seconds later as `no_changes` because its untouched branch was equal to `origin/main`. Worktree provisioning subsequently reported a base-typecheck failure. The exact typecheck passed when run directly on the same clean base in about 50 seconds, while the dispatch log records a 30-second headless deadline. The logs therefore point to a launch race: the healthy-but-slow cold-start check outlived its transport, and ancestry reconciliation treated the still-untouched launching branch as already merged. No worker or review turn ran, and no governed diff existed to substitute.
+
+That distinction matters. **This is a decisive end-to-end loss for the governed path, because it shipped nothing. It does not tell us whether review and refix improve code after dispatch succeeds.** Re-running the same task until the pipeline launched would turn a measured failure into selection bias, so this report keeps the loss.
 
 **Six collection attempts produced no score.** Every failure was ours, not the pipeline's, and each was a different fault: a specification whose constraints could not both hold; a liveness probe that aborted a healthy run on one transient blip; leftover lanes blocking mission creation through a CLI that could not pass the parameter the error message demanded; a diff captured before review ran; a clean worker exit misread as a failure; and a recorded base commit that disagreed with the branch the pipeline actually diffed against. Two of those produced confident, wrong results before being caught — in opposite directions.
 
@@ -147,15 +159,13 @@ The governed arm is scored at **review-approved**, not merged, because the human
 - **Approvals are head-locked.** An approval was recorded, the agent committed again, and the system invalidated its own approval rather than let it outlive the code it covered. Re-review then approved the settled state.
 - **The review gate caught two things a compiler cannot.** On one packet it rejected a worker that had written notes claiming it bundled a dependency and passed five tests, while committing nothing but the notes. On another it rejected a plausible, well-scoped refactor with the finding that it did not actually fix the issue.
 
-Those last two are worth more than the number this track was meant to produce. Track 2's 10-of-10 comes from fixtures with defects we planted ourselves. This is the gate catching a live worker misreporting its own work, and a wrong fix that passed `tsc` and eslint, on real issues, unprompted.
-
-**What none of it establishes** is the comparison this track exists for: whether the governed path ships *better* code than an ad-hoc one. That requires a scored artifact from both paths, and we do not have one. The track stays open.
+Those observations remain useful, but they are not part of the N=1 score above. Track 2's 10-of-10 comes from fixtures with defects we planted ourselves; these were live examples of the gate catching a worker misreport and a wrong fix that passed `tsc` and eslint.
 
 ---
 
 ## Methodology integrity: how this benchmark can lie to you
 
-A benchmark that only reports results is hiding half its failure modes. Ours failed four times in ways that had nothing to do with the product, and two of those produced *plausible-looking numbers* before we caught them. What follows is what broke and what now prevents it, because a reader has no way to audit this from the outside.
+A benchmark that only reports results is hiding half its failure modes. Ours failed repeatedly in ways that had nothing to do with the product, and two of those produced *plausible-looking numbers* before we caught them. What follows is what broke and what now prevents it, because a reader has no way to audit this from the outside.
 
 **We could not distinguish "I failed to measure" from "I measured a failure."** A backend process died partway through a run. The harness kept feeding arms to a dead service and recorded them as pipeline failures. The resulting output looked exactly like a product losing — and was reported internally as such — when in fact every arm had completed successfully, with committed diffs sitting on disk the whole time.
 
@@ -173,7 +183,7 @@ Interruption is not failure. Classification is an exhaustive switch with no wild
 
 **The harness could drive a different CLI build than the repository it recorded.** The governed arm now resolves its control CLI once during preflight: `O8_BENCH_O8_CLI` when explicitly set, otherwise `cli/dist/o8.mjs` when that repo artifact exists, otherwise `o8` on `PATH`. The receipt records the canonical path and selection source, and preflight requires the CLI to advertise the `--existingBranchPolicy` capability; it also says plainly when the repo artifact is missing and a PATH fallback is selected. This makes CLI selection auditable, but it does not prove that an existing repo artifact was freshly built from the recorded commit, so `baseCommit` still describes the repository under test rather than automatically identifying the binary driving it.
 
-**Other integrity properties.** Run IDs are immutable — the harness refuses to overwrite an existing receipt, so a result cannot be quietly re-collected after someone sees it. Approval mode is flipped only as a safety guard so nothing can auto-merge mid-run, and it is restored through a layered path that survives the backend dying. Blinding is verified by scanning each diff for authorship markers before judging, and judging fails loudly if any survive.
+**Other integrity properties.** Collection run IDs are immutable, so a result cannot be quietly re-collected after someone sees it. Judging validates every blinded input before creating its progress receipt; it may resume only a receipt with zero judge results, and becomes immutable as soon as one result exists. Approval mode is flipped only as a safety guard so nothing can auto-merge mid-run, and it is restored through a layered path that survives the backend dying. Blinding is verified by scanning each diff for authorship markers before judging, and judging fails loudly if any survive.
 
 **What this does not fix.** These guards make invalid runs *visible*; they do not make small-N results large. Every caveat in the Limitations section still stands.
 
@@ -189,7 +199,7 @@ Interruption is not failure. Classification is an exhaustive switch with no wild
 - **Informed** — a 3.8× edge over ripgrep on organizational questions that cannot be guessed or grepped.
 - **Fast** — measured, version-stamped, no regressions.
 
-**What the evidence does not support:** that the governed path ships better code end to end. That is Track 5, it is unscored after six attempts, and we would rather say so than imply it. The observations recorded there — the gate rejecting a worker that misreported its own work, the orchestrator steering itself off a polluted base, approvals invalidating when the code moves — are real and directly witnessed, but they are anecdotes from a broken harness, not a measurement.
+**What the evidence does not support:** that the governed path ships better code end to end. Track 5 now has a measured loss: the governed arm failed before review and scored 0.0 against two non-empty ad-hoc artifacts. The run measures the whole shipping path, so the failure counts, but it gives no estimate of review-and-refix quality conditional on a successful dispatch.
 
 ---
 
@@ -200,7 +210,7 @@ Interruption is not failure. Classification is an exhaustive switch with no wild
 3. **Judge self-preference is real and measured.** Cross-model comparisons are withdrawn. The paired coding design is structurally immune; memory and governance still use a single judge family and inherit unquantified risk.
 4. **Governance measures the AI review tier**, not the human gate above it.
 5. **Memory literal-lookup cases are probably over-specified**; that row should not be quoted until re-checked.
-6. **Shipped output is unscored.** Track 5 has produced no number in six attempts. Its observations are witnessed anecdotes, not measurements, and should be quoted as such.
+6. **Shipped output is N=1 and failed before review.** Its 0.0 governed score is an end-to-end reliability result, not an estimate of how review changes a worker's code. The 8.6 versus 6.3 ordering between the two ad-hoc arms is also a cross-family comparison and should not be generalized from one task.
 7. **We benchmark the product we run on.** Mitigations: pre-registration committed before measurement, sealed blinding, published losses, discarded runs when blinding was compromised, and the validity contract above.
 
 ---
@@ -210,6 +220,7 @@ Interruption is not failure. Classification is an exhaustive switch with no wild
 - Pre-registration and amendments: [`docs/internals/bench-2026-08-preregistration.md`](../internals/bench-2026-08-preregistration.md)
 - Automated tracks: `npm run bench:speed` / `bench:memory` / `bench:governance` → version-stamped scorecard with regression detection
 - Coding: `npm run bench:coding`; fixed tasks in `tests/bench/coding/tasks.json`; base `1530f7099`
+- Shipped output: `npx tsx scripts/bench/run-coding.ts --preflight --e2e`, then `--e2e`, then `--e2e-judge`; reported run `e2e-track5-1679-v8`, base `b9fa7c982`
 - Governance fixtures: `tests/bench/governance/` — twenty committed diffs, re-appliable individually
 - Harness validity contract: `scripts/bench/coding-arm-outcome.ts`, `scripts/bench/coding-durable-reconciliation.ts`, `scripts/bench/coding-run-control.ts`
 
