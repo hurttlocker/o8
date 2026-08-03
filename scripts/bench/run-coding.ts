@@ -23,18 +23,25 @@ import {
   CODING_JUDGES,
   CODING_RUNTIMES,
   type CodingCondition,
-  type CodingJudge,
   type CodingRuntime,
-  type CodingSubScores,
   type CodingTask,
   type CodingVerdict,
   blindCodingDiffs,
-  meanSubScores,
   runtimeForCondition,
   scoreCodingResults,
   scrubAuthorship,
   treatmentForCondition,
 } from './coding';
+import type { EndToEndTask } from './coding-end-to-end';
+import {
+  classifyArmStatus,
+  countArmOutcomes,
+  ginsuTurnStatus,
+  isScorableArmOutcome,
+  type ArmClassification,
+  type ArmErrorReceipt,
+  type ArmOutcomeTotals,
+} from './coding-arm-outcome';
 import {
   CODING_TASK_CONTRACT_FILE,
   readCodingTaskContract,
@@ -45,7 +52,17 @@ import {
   judgeStandaloneEndToEnd,
   preflightStandaloneEndToEnd,
 } from './coding-end-to-end-cli';
-import { JUDGE_PROMPT, RAW_BRIEF } from './coding-prompts';
+import { createAbortedEndToEndCollection } from './coding-end-to-end-receipt';
+import { runCodingJudge, type CodingJudgeReceipt } from './coding-judge-runner';
+import { RAW_BRIEF } from './coding-prompts';
+import {
+  abortedRunControl,
+  O8BackendAbortError,
+  runBackendGuardedCollection,
+  runningRunControl,
+  withTemporaryRequireApproval,
+  type BenchmarkRunControlReceipt,
+} from './coding-run-control';
 import { judgeEndToEnd } from './judge-coding-end-to-end';
 import {
   collectEndToEnd,
@@ -93,7 +110,7 @@ interface MechanicalReceipt {
   lintedFiles: string[];
 }
 
-interface ArmReceipt {
+interface ArmReceipt extends ArmClassification {
   task: number;
   condition: CodingCondition;
   runtime: CodingRuntime;
@@ -115,8 +132,7 @@ interface ArmReceipt {
   additions: number;
   deletions: number;
   mechanical: MechanicalReceipt;
-  valid: boolean;
-  invalidReasons: string[];
+  measurementNotes: string[];
 }
 
 interface CollectionReceipt {
@@ -127,18 +143,9 @@ interface CollectionReceipt {
   armTimeoutSeconds: number;
   conditions: CodingCondition[];
   arms: ArmReceipt[];
+  outcomeTotals: ArmOutcomeTotals;
   endToEnd: EndToEndCollectionReceipt;
-}
-
-interface JudgeReceipt {
-  task: number;
-  judge: CodingJudge;
-  promptPath: string;
-  outputPath: string;
-  replyPath: string;
-  command: CommandReceipt;
-  valid: boolean;
-  invalidReason: string | null;
+  runControl: BenchmarkRunControlReceipt;
 }
 
 function writeJson(filePath: string, value: unknown): void {
@@ -380,7 +387,7 @@ function runArm(task: CodingTask, condition: CodingCondition, issue: string): Ar
     : null;
   const diffFacts = stagedDiffFacts(dir, diffPath);
   const mechanical = runMechanicalChecks(dir, diffFacts.changedFiles);
-  const invalidReasons = [
+  const measurementNotes = [
     spawn.receipt.status !== 0 ? 'worker spawn failed' : null,
     send.receipt.status !== 0 ? 'worker turn failed' : null,
     stop.receipt.status !== 0 ? 'worker stop failed' : null,
@@ -391,6 +398,16 @@ function runArm(task: CodingTask, condition: CodingCondition, issue: string): Ar
     mechanical.typecheck.status !== 0 ? 'typecheck failed' : null,
     mechanical.eslint && mechanical.eslint.status !== 0 ? 'eslint failed' : null,
   ].filter((reason): reason is string => reason !== null);
+  const errors: ArmErrorReceipt[] = [
+    spawn.receipt.status !== 0 ? { message: 'worker spawn failed', willRetry: false } : null,
+    send.receipt.status !== 0 ? { message: 'worker turn failed', willRetry: false } : null,
+    stop.receipt.status !== 0 ? { message: 'worker stop failed', willRetry: false } : null,
+  ].filter((error): error is ArmErrorReceipt => error !== null);
+  const classification = classifyArmStatus({
+    status: spawn.receipt.status === 0 ? ginsuTurnStatus({ ...send.receipt, ...send }) : null,
+    source: 'stream',
+    errors,
+  });
 
   return {
     task: task.issue,
@@ -412,8 +429,8 @@ function runArm(task: CodingTask, condition: CodingCondition, issue: string): Ar
     contractObserved,
     ...diffFacts,
     mechanical,
-    valid: invalidReasons.length === 0,
-    invalidReasons,
+    ...classification,
+    measurementNotes,
   };
 }
 
@@ -425,8 +442,10 @@ function collectionSeed(): number {
   return parsed;
 }
 
-async function collect(tasks: CodingTask[], endToEndTasks = readEndToEndTasks(REPO_ROOT)): Promise<CollectionReceipt> {
-  assertUnusedCodingRunId(WORK_ROOT, RUN_ID);
+async function collectWhileApprovalHeld(
+  tasks: CodingTask[],
+  endToEndTasks: EndToEndTask[],
+): Promise<CollectionReceipt> {
   const endToEnd = createEndToEndCollection(REPO_ROOT, RUN_ID, endToEndTasks);
   fs.mkdirSync(WORK_ROOT, { recursive: true });
   const seed = collectionSeed();
@@ -439,149 +458,96 @@ async function collect(tasks: CodingTask[], endToEndTasks = readEndToEndTasks(RE
     armTimeoutSeconds: ARM_TIMEOUT_SECONDS,
     conditions: [...CODING_CONDITIONS],
     arms: [],
+    outcomeTotals: countArmOutcomes([]),
     endToEnd,
+    runControl: runningRunControl(),
   };
   writeJson(COLLECTION_FILE, collection);
 
-  for (const task of tasks) {
-    const issue = issueText(task.issue);
-    fs.mkdirSync(path.join(WORK_ROOT, 'artifacts'), { recursive: true });
-    fs.writeFileSync(path.join(WORK_ROOT, 'artifacts', `issue-${task.issue}.md`), issue);
-    for (const condition of shuffle(CODING_CONDITIONS)) {
+  const issues = new Map<number, string>();
+  const pendingArms = tasks.flatMap((task) => (
+    shuffle(CODING_CONDITIONS).map((condition) => ({ task, condition }))
+  ));
+  await runBackendGuardedCollection({
+    arms: pendingArms,
+    runArm: ({ task, condition }) => {
+      let issue = issues.get(task.issue);
+      if (!issue) {
+        issue = issueText(task.issue);
+        issues.set(task.issue, issue);
+        fs.mkdirSync(path.join(WORK_ROOT, 'artifacts'), { recursive: true });
+        fs.writeFileSync(path.join(WORK_ROOT, 'artifacts', `issue-${task.issue}.md`), issue);
+      }
       console.log(`[coding] collecting ${condition} on #${task.issue}`);
-      const receipt = runArm(task, condition, issue);
+      return runArm(task, condition, issue);
+    },
+    commitArm: (receipt) => {
       collection.arms.push(receipt);
-      writeJson(COLLECTION_FILE, collection);
+      collection.outcomeTotals = countArmOutcomes(collection.arms);
       console.log(
-        `[coding] ${condition} valid=${receipt.valid} files=${receipt.changedFiles.length} ` +
-        `+${receipt.additions}/-${receipt.deletions} reasons=${receipt.invalidReasons.join('; ') || 'none'}`,
+        `[coding] ${receipt.condition} outcome=${receipt.outcome} files=${receipt.changedFiles.length} ` +
+        `+${receipt.additions}/-${receipt.deletions} notes=${receipt.measurementNotes.join('; ') || 'none'}`,
       );
-    }
-  }
+    },
+    onRunControl: (receipt) => {
+      collection.runControl = {
+        ...receipt,
+        status: receipt.status === 'completed' ? 'running' : receipt.status,
+      };
+      writeJson(COLLECTION_FILE, collection);
+    },
+  });
   await collectEndToEnd({
     repoRoot: REPO_ROOT,
     workRoot: WORK_ROOT,
     collection: endToEnd,
     onUpdate: (receipt) => {
       collection.endToEnd = receipt;
+      collection.runControl = {
+        ...receipt.runControl,
+        status: receipt.runControl.status === 'completed' ? 'running' : receipt.runControl.status,
+        completedArms: collection.arms.length + receipt.runControl.completedArms,
+      };
       writeJson(COLLECTION_FILE, collection);
     },
   });
+  collection.runControl = {
+    status: 'completed',
+    completedArms: collection.arms.length + collection.endToEnd.arms.length,
+    abortReason: null,
+    backendDetail: null,
+  };
+  writeJson(COLLECTION_FILE, collection);
   return collection;
 }
 
-function isScore(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 10;
-}
-
-function parseJudgeOutput(
-  task: CodingTask,
-  judge: CodingJudge,
-  outputPath: string,
-  expectedLabels: string[],
-): CodingVerdict[] {
-  const parsed = JSON.parse(fs.readFileSync(outputPath, 'utf8')) as Array<{
-    blindLabel?: unknown;
-    subScores?: Partial<Record<keyof CodingSubScores, unknown>>;
-    mostSeriousDefect?: unknown;
-  }>;
-  if (!Array.isArray(parsed)) throw new Error('judge output is not an array');
-  const seen = new Set<string>();
-  const verdicts = parsed.map((entry) => {
-    const blindLabel = typeof entry.blindLabel === 'string' ? entry.blindLabel.trim() : '';
-    if (!expectedLabels.includes(blindLabel) || seen.has(blindLabel)) {
-      throw new Error(`judge returned unexpected or duplicate label ${JSON.stringify(blindLabel)}`);
-    }
-    seen.add(blindLabel);
-    const subScores = entry.subScores;
-    if (!subScores
-      || !isScore(subScores.correctness)
-      || !isScore(subScores.scopeDiscipline)
-      || !isScore(subScores.robustness)
-      || !isScore(subScores.fit)) {
-      throw new Error(`judge returned invalid sub-scores for ${blindLabel}`);
-    }
-    return {
-      task: task.issue,
-      blindLabel,
-      judge,
-      subScores: {
-        correctness: subScores.correctness,
-        scopeDiscipline: subScores.scopeDiscipline,
-        robustness: subScores.robustness,
-        fit: subScores.fit,
-      },
-      total: meanSubScores(subScores as CodingSubScores),
-      mostSeriousDefect: typeof entry.mostSeriousDefect === 'string' ? entry.mostSeriousDefect.trim() : '',
-    };
-  });
-  if (seen.size !== expectedLabels.length) {
-    throw new Error(`judge returned ${seen.size}/${expectedLabels.length} required labels`);
-  }
-  return verdicts;
-}
-
-function runJudge(
-  task: CodingTask,
-  judge: CodingJudge,
-  inputs: Array<{ blindLabel: string; diffPath: string }>,
-  baseDir: string,
-): { verdicts: CodingVerdict[]; receipt: JudgeReceipt } {
-  const artifactDir = path.join(WORK_ROOT, 'artifacts');
-  const judgeInputDir = path.dirname(inputs[0]?.diffPath ?? '');
-  const promptPath = path.join(artifactDir, `judge-prompt-${task.issue}-${judge}.md`);
-  const outputPath = path.join(judgeInputDir, 'verdict.json');
-  const replyPath = path.join(artifactDir, `judge-reply-${task.issue}-${judge}.txt`);
-  const issuePath = path.join(judgeInputDir, 'issue.md');
-  const listing = inputs.map((input) => `- ${input.blindLabel}: ${input.diffPath}`).join('\n');
-  const prompt = `${JUDGE_PROMPT}\n\nISSUE TEXT: ${issuePath}\nBASE REPOSITORY: ${baseDir}\n` +
-    `DIFFS TO SCORE:\n${listing}\n\nWrite the JSON array to: ${outputPath}\n` +
-    'Write the file even when uncertain; a missing file is an incomplete benchmark.';
-  fs.writeFileSync(promptPath, prompt);
-  if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
-
-  const worker = `bjudge${task.issue}${judge}`;
-  const spawn = runCommand('ginsu', ['spawn', worker, baseDir, '--engine', judge], { cwd: REPO_ROOT });
-  let send = { receipt: spawn.receipt, stdout: '', stderr: spawn.stderr };
-  if (spawn.receipt.status === 0) {
-    try {
-      send = runCommand('ginsu', ['send', worker, prompt], {
-        cwd: REPO_ROOT,
-        env: { ...process.env, GINSU_TIMEOUT: String(JUDGE_TIMEOUT_SECONDS) },
-        timeoutMs: (JUDGE_TIMEOUT_SECONDS + 60) * 1_000,
-      });
-    } finally {
-      runCommand('ginsu', ['stop', worker], { cwd: REPO_ROOT, timeoutMs: 60_000 });
-    }
-  }
-  fs.writeFileSync(replyPath, send.stdout);
-
-  let verdicts: CodingVerdict[] = [];
-  let invalidReason: string | null = null;
+async function collect(
+  tasks: CodingTask[],
+  endToEndTasks = readEndToEndTasks(REPO_ROOT),
+): Promise<CollectionReceipt> {
+  assertUnusedCodingRunId(WORK_ROOT, RUN_ID);
   try {
-    if (send.receipt.status !== 0) throw new Error('judge turn failed');
-    if (!fs.existsSync(outputPath)) throw new Error('judge produced no output file');
-    verdicts = parseJudgeOutput(task, judge, outputPath, inputs.map((input) => input.blindLabel));
-    const status = execFileSync('git', ['status', '--porcelain'], { cwd: baseDir, encoding: 'utf8' }).trim();
-    if (status) throw new Error('judge modified its base worktree');
+    return await withTemporaryRequireApproval(() => collectWhileApprovalHeld(tasks, endToEndTasks));
   } catch (error) {
-    invalidReason = error instanceof Error ? error.message : String(error);
-    verdicts = [];
+    if (error instanceof O8BackendAbortError && !fs.existsSync(COLLECTION_FILE)) {
+      const endToEnd = createAbortedEndToEndCollection(REPO_ROOT, RUN_ID, endToEndTasks, error);
+      const collection: CollectionReceipt = {
+        schema: 'o8/coding-collection/v2',
+        runId: RUN_ID,
+        createdAt: new Date().toISOString(),
+        seed: collectionSeed(),
+        armTimeoutSeconds: ARM_TIMEOUT_SECONDS,
+        conditions: [...CODING_CONDITIONS],
+        arms: [],
+        outcomeTotals: countArmOutcomes([]),
+        endToEnd,
+        runControl: abortedRunControl(error),
+      };
+      fs.mkdirSync(WORK_ROOT, { recursive: true });
+      writeJson(COLLECTION_FILE, collection);
+    }
+    throw error;
   }
-
-  return {
-    verdicts,
-    receipt: {
-      task: task.issue,
-      judge,
-      promptPath,
-      outputPath,
-      replyPath,
-      command: send.receipt,
-      valid: invalidReason === null,
-      invalidReason,
-    },
-  };
 }
 
 function readCollection(): CollectionReceipt {
@@ -593,6 +559,12 @@ function readCollection(): CollectionReceipt {
     || parsed.endToEnd.runId !== RUN_ID) {
     throw new Error('collection.json is missing or uses an unsupported schema');
   }
+  if (parsed.runControl?.status === 'infrastructure-aborted') {
+    throw new Error(
+      `${parsed.runControl.abortReason ?? 'coding collection infrastructure-aborted'}; ` +
+      `arms completed before abort=${parsed.runControl.completedArms}`,
+    );
+  }
   return parsed;
 }
 
@@ -603,7 +575,7 @@ function judge(tasks: CodingTask[], collection: CollectionReceipt): void {
     );
   }
   const verdicts: CodingVerdict[] = [];
-  const judgeReceipts: JudgeReceipt[] = [];
+  const judgeReceipts: CodingJudgeReceipt[] = [];
   const mappings: Record<number, Record<string, CodingCondition>> = {};
   const shuffle = seededShuffle(collection.seed);
   const judgingStartedAt = new Date().toISOString();
@@ -619,12 +591,12 @@ function judge(tasks: CodingTask[], collection: CollectionReceipt): void {
     const available: Partial<Record<CodingCondition, string>> = {};
     for (const condition of CODING_CONDITIONS) {
       const receipt = collection.arms.find((arm) => (
-        arm.task === task.issue && arm.condition === condition && arm.valid
+        arm.task === task.issue && arm.condition === condition && isScorableArmOutcome(arm.outcome)
       ));
       if (receipt && fs.existsSync(receipt.diffPath)) available[condition] = receipt.diffPath;
     }
     if (Object.keys(available).length !== CODING_CONDITIONS.length) {
-      console.warn(`[coding] #${task.issue}: incomplete valid arm set; task excluded from scoring`);
+      console.warn(`[coding] #${task.issue}: incomplete scorable arm set; task excluded from scoring`);
       continue;
     }
 
@@ -646,7 +618,16 @@ function judge(tasks: CodingTask[], collection: CollectionReceipt): void {
       });
       const baseDir = prepareDetachedWorktree(judgeScope, path.join(judgeScope, 'base'), 'base', task.base);
       console.log(`[coding] judging #${task.issue} with judge ${judgeRuntime}`);
-      const result = runJudge(task, judgeRuntime, relabelled, baseDir);
+      const result = runCodingJudge({
+        task,
+        judge: judgeRuntime,
+        inputs: relabelled,
+        baseDir,
+        repoRoot: REPO_ROOT,
+        workRoot: WORK_ROOT,
+        timeoutSeconds: JUDGE_TIMEOUT_SECONDS,
+        runCommand,
+      });
       verdicts.push(...result.verdicts);
       judgeReceipts.push(result.receipt);
       writeJson(JUDGING_FILE, {
@@ -684,6 +665,7 @@ function judge(tasks: CodingTask[], collection: CollectionReceipt): void {
       rawAndTreatmentShareTaskBaseRulesAndBudget: true,
     },
     collection,
+    outcomeTotals: countArmOutcomes([...collection.arms, ...collection.endToEnd.arms]),
     judging: { receipts: judgeReceipts, mappings },
     endToEnd,
     ...summary,
@@ -742,7 +724,7 @@ function preflight(tasks: CodingTask[]): void {
   );
   console.log(
     `[coding:e2e] preflight OK: issues=1676,1678,1679, arms=3/task, base=${endToEnd.baseCommit}, ` +
-    `approval=${endToEnd.approvalMode}${endToEnd.approvalMode === 'always' ? '' : ' (collection will fail closed)'}`,
+    `approval=${endToEnd.approvalMode} (collection temporarily uses always)`,
   );
 }
 

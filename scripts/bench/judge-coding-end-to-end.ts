@@ -10,6 +10,7 @@ import {
   type CodingVerdict,
   meanSubScores,
 } from './coding';
+import { countArmOutcomes, isScorableArmOutcome, type ArmOutcomeTotals } from './coding-arm-outcome';
 import {
   END_TO_END_CONDITIONS,
   assertEndToEndDiffIsBlind,
@@ -19,11 +20,11 @@ import {
   type EndToEndScoringSummary,
   type EndToEndTask,
 } from './coding-end-to-end';
+import type { EndToEndCommandReceipt } from './coding-end-to-end-command';
 import { JUDGE_PROMPT } from './coding-prompts';
 import type {
   EndToEndArmReceipt,
   EndToEndCollectionReceipt,
-  EndToEndCommandReceipt,
 } from './run-coding-end-to-end';
 
 const MAX_DIFF_BYTES = 32 * 1024 * 1024;
@@ -42,6 +43,13 @@ interface EndToEndJudgeReceipt {
 export interface EndToEndExperimentResult extends EndToEndScoringSummary {
   baseCommit: string;
   conditions: EndToEndCondition[];
+  outcomeTotals: ArmOutcomeTotals;
+  failedArms: Array<{
+    task: number;
+    condition: EndToEndCondition;
+    diffPath: string;
+    reason: string;
+  }>;
   invalidArms: Array<{
     task: number;
     condition: EndToEndCondition;
@@ -253,6 +261,12 @@ export function judgeEndToEnd(input: {
   seed: number;
   collection: EndToEndCollectionReceipt;
 }): EndToEndExperimentResult {
+  if (input.collection.runControl?.status === 'infrastructure-aborted') {
+    throw new Error(
+      `${input.collection.runControl.abortReason ?? 'coding collection infrastructure-aborted'}; ` +
+      `arms completed before abort=${input.collection.runControl.completedArms}`,
+    );
+  }
   const judgingPath = path.join(input.workRoot, 'end-to-end-judging.json');
   if (fs.existsSync(judgingPath)) {
     throw new Error('end-to-end judging receipt already exists; use a new immutable run ID');
@@ -273,10 +287,10 @@ export function judgeEndToEnd(input: {
 
   for (const task of input.collection.tasks) {
     const arms = END_TO_END_CONDITIONS.map((condition) => input.collection.arms.find((arm) => (
-      arm.task === task.issue && arm.condition === condition && arm.valid
+      arm.task === task.issue && arm.condition === condition && isScorableArmOutcome(arm.outcome)
     )));
     if (arms.some((arm) => !arm)) {
-      console.warn(`[coding:e2e] #${task.issue}: incomplete valid arm set; task excluded from scoring`);
+      console.warn(`[coding:e2e] #${task.issue}: incomplete scorable arm set; task excluded from scoring`);
       continue;
     }
     const conditions = shuffle([...END_TO_END_CONDITIONS]);
@@ -328,11 +342,17 @@ export function judgeEndToEnd(input: {
   }
 
   const summary = scoreEndToEndResults(input.collection.tasks, verdicts, mappings, shippedDiffs);
-  const invalidArms = input.collection.arms.filter((arm) => !arm.valid).map((arm) => ({
+  const failedArms = input.collection.arms.filter((arm) => arm.outcome === 'failed').map((arm) => ({
     task: arm.task,
     condition: arm.condition,
     diffPath: arm.diffPath,
-    reasons: arm.invalidReasons,
+    reason: arm.classificationReason,
+  }));
+  const invalidArms = input.collection.arms.filter((arm) => arm.outcome === 'invalid').map((arm) => ({
+    task: arm.task,
+    condition: arm.condition,
+    diffPath: arm.diffPath,
+    reasons: [arm.classificationReason, ...arm.measurementNotes],
     reviewAttempts: arm.governed?.reviewAttempts?.map((attempt) => ({
       attempt: attempt.attempt,
       summary: attempt.summary,
@@ -347,10 +367,10 @@ export function judgeEndToEnd(input: {
     );
     const result = summary.results.find((candidate) => candidate.task === task.issue);
     if (!result) {
-      const invalid = taskArms.filter((arm) => !arm.valid);
+      const invalid = taskArms.filter((arm) => arm.outcome === 'invalid');
       console.log(
         `[coding:e2e] #${task.issue} unscored: ` +
-        invalid.map((arm) => `${arm.condition}=${arm.invalidReasons.join('; ')}`).join(' | '),
+        invalid.map((arm) => `${arm.condition}=${arm.classificationReason}`).join(' | '),
       );
       continue;
     }
@@ -378,6 +398,8 @@ export function judgeEndToEnd(input: {
     ...summary,
     baseCommit: input.collection.baseCommit,
     conditions: [...END_TO_END_CONDITIONS],
+    outcomeTotals: countArmOutcomes(input.collection.arms),
+    failedArms,
     invalidArms,
     judging: { receipts, mappings },
   };

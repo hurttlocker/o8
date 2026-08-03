@@ -1,6 +1,9 @@
 import { getApproval } from '../../src/lib/approvals/store';
 import type { DurableReviewAssessment } from '../../src/lib/lane/durable-review-approval';
-import type { EndToEndCommandReceipt } from './run-coding-end-to-end';
+import { TurnStatus } from './coding-arm-outcome';
+import type { EndToEndCommandReceipt } from './coding-end-to-end-command';
+
+export type { DiffFacts } from './coding-end-to-end-command';
 
 export interface PacketDiffReceipt {
   diff?: unknown;
@@ -13,15 +16,32 @@ export type GovernedPipelineOutcome =
   | 'review-approved'
   | 'review-bound-exhausted'
   | 'blocked'
+  | 'control-error'
   | 'failed'
   | 'released'
+  | 'stream-lost'
   | 'timeout'
   | null;
 
-export interface DiffFacts {
-  changedFiles: string[];
-  additions: number;
-  deletions: number;
+export function governedPipelineTerminalStatus(
+  outcome: GovernedPipelineOutcome,
+): TurnStatus.Completed | TurnStatus.Failed | null {
+  if (outcome === null) return null;
+  switch (outcome) {
+    case 'review-approved':
+      return TurnStatus.Completed;
+    case 'review-bound-exhausted':
+    case 'blocked':
+    case 'failed':
+    case 'released':
+      return TurnStatus.Failed;
+    case 'control-error':
+    case 'stream-lost':
+    case 'timeout':
+      return null;
+  }
+  const exhaustive: never = outcome;
+  throw new Error(`unclassified governed pipeline outcome: ${String(exhaustive)}`);
 }
 
 export interface MechanicalReceipt {
