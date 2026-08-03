@@ -11,6 +11,7 @@ import {
   type EndToEndCollectionReceipt,
 } from './run-coding-end-to-end';
 import { createAbortedEndToEndCollection } from './coding-end-to-end-receipt';
+import { o8CliPreflightSummary } from './coding-o8-cli';
 import { O8BackendAbortError, withTemporaryRequireApproval } from './coding-run-control';
 
 function writeJson(filePath: string, value: unknown): void {
@@ -57,12 +58,13 @@ export function preflightStandaloneEndToEnd(input: {
   if (!fs.existsSync(path.join(root, 'node_modules'))) {
     throw new Error('node_modules is missing; run npm install before the benchmark');
   }
-  for (const command of ['ginsu', 'gh', 'o8']) assertTool(command, root);
+  for (const command of ['ginsu', 'gh']) assertTool(command, root);
   const tasks = readEndToEndTasks(root);
   const result = preflightEndToEnd(root, tasks);
   console.log(
-    `[coding:e2e] preflight OK: run=${input.runId}, issues=1676,1678,1679, ` +
-    `arms=3/task, base=${result.baseCommit}, approval=${result.approvalMode} ` +
+    `[coding:e2e] preflight OK: run=${input.runId}, issues=${tasks.map((task) => task.issue).join(',')}, ` +
+    `arms=3/task, base=${result.baseCommit}, approval=${result.approvalMode}, ` +
+    `${o8CliPreflightSummary(result.o8Cli)} ` +
     `(collection temporarily uses always), collection=not started`,
   );
 }

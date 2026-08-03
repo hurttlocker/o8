@@ -53,6 +53,7 @@ import {
   preflightStandaloneEndToEnd,
 } from './coding-end-to-end-cli';
 import { createAbortedEndToEndCollection } from './coding-end-to-end-receipt';
+import { o8CliPreflightSummary } from './coding-o8-cli';
 import { runCodingJudge, type CodingJudgeReceipt } from './coding-judge-runner';
 import { RAW_BRIEF } from './coding-prompts';
 import {
@@ -702,7 +703,7 @@ function judge(tasks: CodingTask[], collection: CollectionReceipt): void {
   console.log(`[coding] ${summary.note}`);
 }
 
-function preflight(tasks: CodingTask[]): void {
+function preflight(tasks: CodingTask[], endToEndTasks: EndToEndTask[]): void {
   const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: REPO_ROOT, encoding: 'utf8' }).trim();
   if (path.resolve(root) !== path.resolve(REPO_ROOT)) {
     throw new Error(`run the coding benchmark from the repository root: ${root}`);
@@ -718,14 +719,16 @@ function preflight(tasks: CodingTask[]): void {
     execFileSync('git', ['cat-file', '-e', `${task.base}^{commit}`], { cwd: REPO_ROOT });
     issueText(task.issue);
   }
-  const endToEnd = preflightEndToEnd(REPO_ROOT, readEndToEndTasks(REPO_ROOT));
+  const endToEnd = preflightEndToEnd(REPO_ROOT, endToEndTasks);
   console.log(
     `[coding] preflight OK: ${tasks.length} fixed tasks, ${CODING_CONDITIONS.length} paired arms/task, ` +
     `${CODING_JUDGES.length} judges, seed=${collectionSeed()}, run=${RUN_ID}`,
   );
   console.log(
-    `[coding:e2e] preflight OK: issues=1676,1678,1679, arms=3/task, base=${endToEnd.baseCommit}, ` +
-    `approval=${endToEnd.approvalMode} (collection temporarily uses always)`,
+    `[coding:e2e] preflight OK: issues=${endToEndTasks.map((task) => task.issue).join(',')}, ` +
+    `arms=3/task, base=${endToEnd.baseCommit}, ` +
+    `approval=${endToEnd.approvalMode}, ${o8CliPreflightSummary(endToEnd.o8Cli)} ` +
+    '(collection temporarily uses always)',
   );
 }
 
@@ -761,7 +764,7 @@ async function main(): Promise<void> {
   const tasks = readTasks();
   const endToEndTasks = readEndToEndTasks(REPO_ROOT);
   if (args.has('--preflight')) {
-    preflight(tasks);
+    preflight(tasks, endToEndTasks);
     return;
   }
   if (args.has('--collect')) {

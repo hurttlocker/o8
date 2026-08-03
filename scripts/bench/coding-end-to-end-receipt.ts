@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { resolveRequireApprovalSync } from '../../src/lib/operator/defaults';
 import { END_TO_END_CONDITIONS, type EndToEndTask } from './coding-end-to-end';
 import { countArmOutcomes } from './coding-arm-outcome';
+import { endToEndTaskSelection } from './coding-end-to-end-tasks';
 import { GOVERNED_EXISTING_BRANCH_POLICY } from './coding-governed-mission';
 import { abortedRunControl, type O8BackendAbortError } from './coding-run-control';
 import type { EndToEndCollectionReceipt } from './run-coding-end-to-end';
@@ -19,7 +20,9 @@ export function createAbortedEndToEndCollection(
     createdAt: new Date().toISOString(),
     baseCommit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).trim(),
     approvalMode: resolveRequireApprovalSync(),
+    o8Cli: null,
     governedExistingBranchPolicy: GOVERNED_EXISTING_BRANCH_POLICY,
+    taskSelection: endToEndTaskSelection(tasks),
     conditions: [...END_TO_END_CONDITIONS],
     tasks: tasks.map((task) => ({ ...task })),
     arms: [],
