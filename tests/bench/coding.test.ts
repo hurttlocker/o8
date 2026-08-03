@@ -20,7 +20,7 @@ import {
 import {
   assertEndToEndDiffIsBlind,
   blindEndToEndDiff,
-  endToEndInvalidReasons,
+  endToEndMeasurementNotes,
   scoreEndToEndResults,
   type EndToEndCondition,
 } from '../../scripts/bench/coding-end-to-end';
@@ -48,7 +48,7 @@ function verdict(condition: CodingCondition, judge: CodingJudge, total: number):
 }
 
 describe('coding benchmark hardening', () => {
-  it('rejects contract arms when the artifact is missing or malformed', () => {
+  it('reports a missing or malformed contract artifact as absent', () => {
     const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'o8-coding-contract-'));
     try {
       expect(readCodingTaskContract(worktree)).toBeNull();
@@ -116,10 +116,10 @@ describe('coding benchmark hardening', () => {
       diffTruncated: false,
       pipelineFailureReason: null,
     };
-    expect(endToEndInvalidReasons(reviewApproved)).toEqual([]);
+    expect(endToEndMeasurementNotes(reviewApproved)).toEqual([]);
   });
 
-  it('rejects a governed arm without a durable approved review and names the attempt bound', () => {
+  it('records governed review and mechanical defects as measurement notes', () => {
     const withoutApproval = {
       condition: 'governed' as const,
       expectedBase: 'abc123',
@@ -133,14 +133,14 @@ describe('coding benchmark hardening', () => {
       diffTruncated: false,
       pipelineFailureReason: null,
     };
-    expect(endToEndInvalidReasons(withoutApproval)).toContain(
+    expect(endToEndMeasurementNotes(withoutApproval)).toContain(
       'governed arm has no durable approved review for current HEAD',
     );
-    expect(endToEndInvalidReasons({
+    expect(endToEndMeasurementNotes({
       ...withoutApproval,
       reviewAttempts: 3,
     })).toContain('governed pipeline did not produce an approved review within 3 attempts');
-    expect(endToEndInvalidReasons({
+    expect(endToEndMeasurementNotes({
       ...withoutApproval,
       condition: 'adhoc-codex',
       mechanicalPassed: false,

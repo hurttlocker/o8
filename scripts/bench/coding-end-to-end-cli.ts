@@ -10,6 +10,8 @@ import {
   readEndToEndTasks,
   type EndToEndCollectionReceipt,
 } from './run-coding-end-to-end';
+import { createAbortedEndToEndCollection } from './coding-end-to-end-receipt';
+import { O8BackendAbortError, withTemporaryRequireApproval } from './coding-run-control';
 
 function writeJson(filePath: string, value: unknown): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -58,14 +60,10 @@ export function preflightStandaloneEndToEnd(input: {
   for (const command of ['ginsu', 'gh', 'o8']) assertTool(command, root);
   const tasks = readEndToEndTasks(root);
   const result = preflightEndToEnd(root, tasks);
-  if (result.approvalMode !== 'always') {
-    throw new Error(
-      `standalone end-to-end collection requires requireApproval=always; current=${result.approvalMode}`,
-    );
-  }
   console.log(
     `[coding:e2e] preflight OK: run=${input.runId}, issues=1676,1678,1679, ` +
-    `arms=3/task, base=${result.baseCommit}, approval=${result.approvalMode}, collection=not started`,
+    `arms=3/task, base=${result.baseCommit}, approval=${result.approvalMode} ` +
+    `(collection temporarily uses always), collection=not started`,
   );
 }
 
@@ -74,17 +72,32 @@ export async function collectStandaloneEndToEnd(input: {
   workRoot: string;
   runId: string;
 }): Promise<EndToEndCollectionReceipt> {
-  preflightStandaloneEndToEnd(input);
+  assertUnusedCodingRunId(input.workRoot, input.runId);
   const tasks = readEndToEndTasks(input.repoRoot);
-  const collection = createEndToEndCollection(input.repoRoot, input.runId, tasks);
   const collectionPath = standaloneCollectionPath(input.workRoot);
-  writeJson(collectionPath, collection);
-  return collectEndToEnd({
-    repoRoot: input.repoRoot,
-    workRoot: input.workRoot,
-    collection,
-    onUpdate: (receipt) => writeJson(collectionPath, receipt),
-  });
+  try {
+    return await withTemporaryRequireApproval(async () => {
+      preflightStandaloneEndToEnd(input);
+      const collection = createEndToEndCollection(input.repoRoot, input.runId, tasks);
+      writeJson(collectionPath, collection);
+      return collectEndToEnd({
+        repoRoot: input.repoRoot,
+        workRoot: input.workRoot,
+        collection,
+        onUpdate: (receipt) => writeJson(collectionPath, receipt),
+      });
+    });
+  } catch (error) {
+    if (error instanceof O8BackendAbortError && !fs.existsSync(collectionPath)) {
+      writeJson(collectionPath, createAbortedEndToEndCollection(
+        input.repoRoot,
+        input.runId,
+        tasks,
+        error,
+      ));
+    }
+    throw error;
+  }
 }
 
 export function judgeStandaloneEndToEnd(input: {

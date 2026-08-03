@@ -19,7 +19,7 @@ export interface EndToEndTask {
   label: string;
 }
 
-export interface EndToEndValidityInput {
+export interface EndToEndMeasurementInput {
   condition: EndToEndCondition;
   expectedBase: string;
   changedFiles: string[];
@@ -125,7 +125,7 @@ export function assertEndToEndDiffIsBlind(diff: string, provenanceMarkers: strin
   }
 }
 
-export function endToEndInvalidReasons(input: EndToEndValidityInput): string[] {
+export function endToEndMeasurementNotes(input: EndToEndMeasurementInput): string[] {
   const reasons = [
     !input.commandsPassed ? 'one or more arm commands failed' : null,
     input.changedFiles.length === 0 ? 'no shipped diff produced' : null,

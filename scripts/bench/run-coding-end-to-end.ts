@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync, type SpawnSyncReturns } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -10,13 +10,37 @@ import {
 import { resolveRequireApprovalSync, type RequireApproval } from '../../src/lib/operator/defaults';
 import type { CodingJudge } from './coding';
 import {
+  classifyArmStatus,
+  countArmOutcomes,
+  ginsuTurnStatus,
+  TurnStatus,
+  type ArmClassification,
+  type ArmErrorReceipt,
+  type ArmOutcomeTotals,
+} from './coding-arm-outcome';
+import {
+  readDurablePacketState,
+  reconcileArmWithDurableState,
+  type DurableReconciliationReceipt,
+} from './coding-durable-reconciliation';
+import {
+  diffFactsFromUnifiedDiff,
+  emptyEndToEndCommand,
+  jsonCommandWithReadRetries,
+  parseEndToEndJson,
+  runEndToEndCommand,
+  type EndToEndCommandReceipt,
+  type EndToEndCommandResult,
+} from './coding-end-to-end-command';
+import {
   END_TO_END_CONDITIONS,
-  endToEndInvalidReasons,
+  endToEndMeasurementNotes,
   type EndToEndCondition,
   type EndToEndTask,
 } from './coding-end-to-end';
 import {
   refixFeedback,
+  governedPipelineTerminalStatus,
   reviewAttemptFromStatus,
   reviewAttemptKey,
   type DiffFacts,
@@ -25,27 +49,20 @@ import {
   type MechanicalReceipt,
   type PacketDiffReceipt,
 } from './coding-end-to-end-review';
+import { assertExactEndToEndTasks } from './coding-end-to-end-tasks';
 import { CODING_TASK_CONTRACT_FILE } from './coding-task-contract';
 import { RAW_BRIEF } from './coding-prompts';
+import { runBackendGuardedCollection, runningRunControl, type BenchmarkRunControlReceipt } from './coding-run-control';
+
+export { readEndToEndTasks } from './coding-end-to-end-tasks';
 
 const ARM_TIMEOUT_SECONDS = 2_400;
 const GOVERNED_TIMEOUT_SECONDS = 7_200;
 const GOVERNED_POLL_MS = 5_000;
-const MAX_READ_ATTEMPTS = 3;
 export const MAX_GOVERNED_REVIEW_ATTEMPTS = 3;
 const MAX_DIFF_BYTES = 32 * 1024 * 1024;
 
-export interface EndToEndCommandReceipt {
-  command: string;
-  status: number | null;
-  signal: string | null;
-  durationMs: number;
-  timedOut: boolean;
-  stderrBytes: number;
-  spawnErrorCode: string | null;
-}
-
-export interface EndToEndArmReceipt {
+export interface EndToEndArmReceipt extends ArmClassification {
   task: number;
   condition: EndToEndCondition;
   base: string;
@@ -55,8 +72,7 @@ export interface EndToEndArmReceipt {
   additions: number;
   deletions: number;
   provenanceMarkers: string[];
-  valid: boolean;
-  invalidReasons: string[];
+  measurementNotes: string[];
   adhoc?: {
     runtime: CodingJudge;
     worktree: string;
@@ -92,6 +108,7 @@ export interface EndToEndArmReceipt {
     diffHeadSha: string | null;
     diffBase: string | null;
     diffTruncated: boolean;
+    durableReconciliation: DurableReconciliationReceipt | null;
   };
 }
 
@@ -104,64 +121,10 @@ export interface EndToEndCollectionReceipt {
   conditions: EndToEndCondition[];
   tasks: EndToEndTask[];
   arms: EndToEndArmReceipt[];
+  outcomeTotals: ArmOutcomeTotals;
+  runControl: BenchmarkRunControlReceipt;
 }
 
-interface CommandResult {
-  receipt: EndToEndCommandReceipt;
-  stdout: string;
-  stderr: string;
-}
-
-function runCommand(
-  command: string,
-  args: string[],
-  options: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number } = {},
-): CommandResult {
-  const startedAt = Date.now();
-  const result: SpawnSyncReturns<string> = spawnSync(command, args, {
-    cwd: options.cwd,
-    env: options.env,
-    encoding: 'utf8',
-    maxBuffer: MAX_DIFF_BYTES,
-    timeout: options.timeoutMs,
-  });
-  const errorCode = result.error && 'code' in result.error ? String(result.error.code) : '';
-  return {
-    receipt: {
-      command: (command === 'ginsu' && args[0] === 'send')
-        ? `ginsu send ${args[1] ?? '(unknown)'} <PROMPT>`
-        : [command, ...args].join(' '),
-      status: result.status,
-      signal: result.signal,
-      durationMs: Date.now() - startedAt,
-      timedOut: errorCode === 'ETIMEDOUT',
-      stderrBytes: Buffer.byteLength(result.stderr || '', 'utf8'),
-      spawnErrorCode: errorCode || null,
-    },
-    stdout: result.stdout || '',
-    stderr: result.stderr || result.error?.message || '',
-  };
-}
-
-function emptyCommand(command: string): EndToEndCommandReceipt {
-  return {
-    command,
-    status: null,
-    signal: null,
-    durationMs: 0,
-    timedOut: false,
-    stderrBytes: 0,
-    spawnErrorCode: null,
-  };
-}
-
-function parseJson<T>(text: string, label: string): T {
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    throw new Error(`${label} returned malformed JSON`);
-  }
-}
 
 function currentBaseCommit(repoRoot: string): string {
   return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).trim();
@@ -185,34 +148,11 @@ function issueText(repoRoot: string, issue: number): string {
   ).trim();
 }
 
-function assertExactTasks(tasks: EndToEndTask[]): void {
-  const expected = [1676, 1678, 1679];
-  const actual = tasks.map((task) => task.issue);
-  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-    throw new Error(`end-to-end tasks must be exactly ${expected.join(', ')} in that order`);
-  }
-}
-
-export function readEndToEndTasks(repoRoot: string): EndToEndTask[] {
-  const filePath = path.join(repoRoot, 'tests/bench/coding/end-to-end-tasks.json');
-  const parsed = parseJson<{ schema?: unknown; tasks?: EndToEndTask[] }>(fs.readFileSync(filePath, 'utf8'), filePath);
-  if (parsed.schema !== 'o8/coding-end-to-end-tasks/v1' || !Array.isArray(parsed.tasks)) {
-    throw new Error('end-to-end task fixture is missing or uses an unsupported schema');
-  }
-  assertExactTasks(parsed.tasks);
-  for (const task of parsed.tasks) {
-    if (!Number.isInteger(task.issue) || !task.label?.trim()) {
-      throw new Error(`invalid end-to-end task fixture: ${JSON.stringify(task)}`);
-    }
-  }
-  return parsed.tasks;
-}
-
 export function preflightEndToEnd(repoRoot: string, tasks: EndToEndTask[]): {
   baseCommit: string;
   approvalMode: RequireApproval;
 } {
-  assertExactTasks(tasks);
+  assertExactEndToEndTasks(tasks);
   if (currentBranch(repoRoot) !== 'main') {
     throw new Error('end-to-end benchmark must run from main');
   }
@@ -254,6 +194,8 @@ export function createEndToEndCollection(
     conditions: [...END_TO_END_CONDITIONS],
     tasks: tasks.map((task) => ({ ...task })),
     arms: [],
+    outcomeTotals: countArmOutcomes([]),
+    runControl: runningRunControl(),
   };
 }
 
@@ -277,7 +219,7 @@ function prepareDetachedWorktree(
 ): string {
   assertManagedWorktreePath(managedRoot, dir, expectedName);
   if (fs.existsSync(dir)) {
-    const removal = runCommand('git', ['worktree', 'remove', '--force', dir], { cwd: repoRoot });
+    const removal = runEndToEndCommand('git', ['worktree', 'remove', '--force', dir], { cwd: repoRoot });
     if (removal.receipt.status !== 0 || fs.existsSync(dir)) {
       throw new Error(`could not safely replace end-to-end worktree ${dir}`);
     }
@@ -315,12 +257,18 @@ function stagedDiffFacts(dir: string, diffPath: string): DiffFacts {
 }
 
 function runMechanicalChecks(dir: string, changedFiles: string[]): MechanicalReceipt {
-  const typecheck = runCommand('npx', ['tsc', '--noEmit'], { cwd: dir, timeoutMs: 10 * 60 * 1_000 }).receipt;
+  const typecheck = runEndToEndCommand('npx', ['tsc', '--noEmit'], {
+    cwd: dir,
+    timeoutMs: 10 * 60 * 1_000,
+  }).receipt;
   const lintedFiles = changedFiles.filter((file) => (
     /\.(?:[cm]?[jt]sx?)$/.test(file) && fs.existsSync(path.join(dir, file))
   ));
   const eslint = lintedFiles.length > 0
-    ? runCommand('npx', ['eslint', ...lintedFiles], { cwd: dir, timeoutMs: 10 * 60 * 1_000 }).receipt
+    ? runEndToEndCommand('npx', ['eslint', ...lintedFiles], {
+        cwd: dir,
+        timeoutMs: 10 * 60 * 1_000,
+      }).receipt
     : null;
   return { typecheck, eslint, lintedFiles };
 }
@@ -351,24 +299,24 @@ function collectAdhocArm(input: {
   fs.writeFileSync(promptPath, prompt);
 
   const worker = `be2e${input.task.issue}${runtime}`;
-  const spawn = runCommand('ginsu', ['spawn', worker, dir, '--engine', runtime], { cwd: input.repoRoot });
-  let send: CommandResult = { receipt: emptyCommand('ginsu send'), stdout: '', stderr: '' };
-  let stop: CommandResult = { receipt: emptyCommand('ginsu stop'), stdout: '', stderr: '' };
+  const spawn = runEndToEndCommand('ginsu', ['spawn', worker, dir, '--engine', runtime], { cwd: input.repoRoot });
+  let send: EndToEndCommandResult = { receipt: emptyEndToEndCommand('ginsu send'), stdout: '', stderr: '' };
+  let stop: EndToEndCommandResult = { receipt: emptyEndToEndCommand('ginsu stop'), stdout: '', stderr: '' };
   if (spawn.receipt.status === 0) {
     try {
-      send = runCommand('ginsu', ['send', worker, prompt], {
+      send = runEndToEndCommand('ginsu', ['send', worker, prompt], {
         cwd: input.repoRoot,
         env: { ...process.env, GINSU_TIMEOUT: String(ARM_TIMEOUT_SECONDS) },
         timeoutMs: (ARM_TIMEOUT_SECONDS + 60) * 1_000,
       });
     } finally {
-      stop = runCommand('ginsu', ['stop', worker], { cwd: input.repoRoot, timeoutMs: 60_000 });
+      stop = runEndToEndCommand('ginsu', ['stop', worker], { cwd: input.repoRoot, timeoutMs: 60_000 });
     }
   }
   fs.writeFileSync(replyPath, send.stdout);
   const diffFacts = stagedDiffFacts(dir, diffPath);
   const mechanical = runMechanicalChecks(dir, diffFacts.changedFiles);
-  const invalidReasons = endToEndInvalidReasons({
+  const measurementNotes = endToEndMeasurementNotes({
     condition: input.condition,
     expectedBase: input.base,
     changedFiles: diffFacts.changedFiles,
@@ -381,6 +329,16 @@ function collectAdhocArm(input: {
     diffTruncated: false,
     pipelineFailureReason: null,
   });
+  const errors: ArmErrorReceipt[] = [
+    spawn.receipt.status !== 0 ? { message: 'worker spawn failed', willRetry: false } : null,
+    send.receipt.status !== 0 ? { message: 'worker turn failed', willRetry: false } : null,
+    stop.receipt.status !== 0 ? { message: 'worker stop failed', willRetry: false } : null,
+  ].filter((error): error is ArmErrorReceipt => error !== null);
+  const classification = classifyArmStatus({
+    status: spawn.receipt.status === 0 ? ginsuTurnStatus({ ...send.receipt, ...send }) : null,
+    source: 'stream',
+    errors,
+  });
   return {
     task: input.task.issue,
     condition: input.condition,
@@ -389,8 +347,8 @@ function collectAdhocArm(input: {
     issuePath: input.issuePath,
     ...diffFacts,
     provenanceMarkers: [dir, worker],
-    valid: invalidReasons.length === 0,
-    invalidReasons,
+    ...classification,
+    measurementNotes,
     adhoc: {
       runtime,
       worktree: dir,
@@ -409,40 +367,6 @@ function sleepPoll(): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, GOVERNED_POLL_MS);
 }
 
-function jsonCommandWithReadRetries<T>(
-  command: string,
-  args: string[],
-  cwd: string,
-  label: string,
-): CommandResult & { data: T | null } {
-  let result: CommandResult = { receipt: emptyCommand([command, ...args].join(' ')), stdout: '', stderr: '' };
-  for (let attempt = 0; attempt < MAX_READ_ATTEMPTS; attempt += 1) {
-    result = runCommand(command, args, { cwd, timeoutMs: 60_000 });
-    if (result.receipt.status === 0) {
-      try {
-        return { ...result, data: parseJson<T>(result.stdout, label) };
-      } catch {
-        // A read command with malformed output gets the same bounded retry budget.
-      }
-    }
-    if (attempt + 1 < MAX_READ_ATTEMPTS) sleepPoll();
-  }
-  return { ...result, data: null };
-}
-
-function diffFactsFromUnifiedDiff(diff: string): DiffFacts {
-  const files = new Set<string>();
-  let additions = 0;
-  let deletions = 0;
-  for (const line of diff.split('\n')) {
-    const header = line.match(/^diff --git a\/(.+) b\/(.+)$/);
-    if (header?.[2]) files.add(header[2]);
-    else if (line.startsWith('+') && !line.startsWith('+++')) additions += 1;
-    else if (line.startsWith('-') && !line.startsWith('---')) deletions += 1;
-  }
-  return { changedFiles: [...files], additions, deletions };
-}
-
 async function collectGovernedArm(input: {
   repoRoot: string;
   artifactDir: string;
@@ -459,36 +383,52 @@ async function collectGovernedArm(input: {
   }
   const diffPath = path.join(input.artifactDir, `shipped-${input.task.issue}-governed.diff`);
   const missionTitle = input.issue.split('\n', 1)[0]?.replace(/^#\s*/, '') || input.task.label;
-  const create = runCommand('o8', [
+  const create = runEndToEndCommand('o8', [
     'mission', 'create',
     '--title', missionTitle,
     '--body', input.issue,
     '--repo', input.repoRoot,
     '--number', String(input.task.issue),
   ], { cwd: input.repoRoot, timeoutMs: 2 * 60_000 });
+  const streamErrors: ArmErrorReceipt[] = [];
+  if (create.receipt.status !== 0) {
+    streamErrors.push({ message: 'mission creation failed', willRetry: false });
+  }
 
   let missionId: string | null = null;
   let packetId: string | null = null;
   if (create.receipt.status === 0) {
     try {
-      const payload = parseJson<{ mission?: { missionId?: unknown; packets?: Array<{ id?: unknown }> } }>(
+      const payload = parseEndToEndJson<{
+        mission?: { missionId?: unknown; packets?: Array<{ id?: unknown }> };
+      }>(
         create.stdout,
         'o8 mission create',
       );
       missionId = typeof payload.mission?.missionId === 'string' ? payload.mission.missionId : null;
       const packets = payload.mission?.packets ?? [];
       packetId = packets.length === 1 && typeof packets[0]?.id === 'string' ? packets[0].id : null;
-    } catch {
+    } catch (error) {
       // Mission creation is mutating, so ambiguous output is invalid and is never retried.
+      streamErrors.push({
+        message: error instanceof Error ? error.message : String(error),
+        willRetry: false,
+      });
     }
+  }
+  if (create.receipt.status === 0 && (!missionId || !packetId)) {
+    streamErrors.push({ message: 'mission creation did not return one packet', willRetry: false });
   }
 
   const dispatch = missionId && packetId
-    ? runCommand('o8', ['mission', 'dispatch', '--mission', missionId, '--wait'], {
+    ? runEndToEndCommand('o8', ['mission', 'dispatch', '--mission', missionId, '--wait'], {
         cwd: input.repoRoot,
         timeoutMs: 10 * 60_000,
       })
-    : { receipt: emptyCommand('o8 mission dispatch'), stdout: '', stderr: '' };
+    : { receipt: emptyEndToEndCommand('o8 mission dispatch'), stdout: '', stderr: '' };
+  if (missionId && packetId && dispatch.receipt.status !== 0) {
+    streamErrors.push({ message: 'mission dispatch failed', willRetry: false });
+  }
 
   let statusPolls = 0;
   let finalStatusCommand: EndToEndCommandReceipt | null = null;
@@ -549,10 +489,12 @@ async function collectGovernedArm(input: {
       'o8 mission status',
     );
     statusPolls += 1;
+    streamErrors.push(...statusResult.errors);
     finalStatusCommand = statusResult.receipt;
     if (statusResult.receipt.status !== 0 || !statusResult.data) {
       readCommandsPassed = false;
-      pipelineOutcome = 'failed';
+      pipelineOutcome = 'stream-lost';
+      pipelineFailureReason = 'mission status stream could not be read after three attempts';
       break;
     }
     const statusPayload = statusResult.data;
@@ -602,10 +544,11 @@ async function collectGovernedArm(input: {
         input.repoRoot,
         'o8 packet diff',
       );
+      streamErrors.push(...diffResult.errors);
       packetDiffCommand = diffResult.receipt;
       if (diffResult.receipt.status !== 0 || !diffResult.data) {
         readCommandsPassed = false;
-        pipelineOutcome = 'failed';
+        pipelineOutcome = 'stream-lost';
         pipelineFailureReason = 'review-approved diff could not be read';
         break;
       }
@@ -650,12 +593,13 @@ async function collectGovernedArm(input: {
         approvalId: null,
         reason: 'The review was rejected.',
       };
-      const refix = runCommand('o8', [
+      const refix = runEndToEndCommand('o8', [
         'packet', 'rerun', '--packet', packetId, '--feedback', refixFeedback(currentAttempt, assessment),
       ], { cwd: input.repoRoot, timeoutMs: 10 * 60_000 });
       currentAttempt.refix = refix.receipt;
       if (refix.receipt.status !== 0) {
-        pipelineOutcome = 'failed';
+        streamErrors.push({ message: 'packet refix command failed', willRetry: false });
+        pipelineOutcome = 'control-error';
         pipelineFailureReason = 'rejected review could not enter the normal refix loop';
         break;
       }
@@ -685,6 +629,29 @@ async function collectGovernedArm(input: {
   if (!pipelineOutcome && missionId && packetId && dispatch.receipt.status === 0) {
     pipelineOutcome = 'timeout';
     pipelineFailureReason = 'governed pipeline timed out before a durable approved review';
+    streamErrors.push({ message: pipelineFailureReason, willRetry: false });
+  }
+  let streamStatus: TurnStatus | null = governedPipelineTerminalStatus(pipelineOutcome);
+  if (streamStatus === null && (create.receipt.signal || dispatch.receipt.signal)) {
+    streamStatus = TurnStatus.Interrupted;
+  }
+  let classification = classifyArmStatus({ status: streamStatus, source: 'stream', errors: streamErrors });
+  let durableReconciliation: DurableReconciliationReceipt | null = null;
+  if (packetId) {
+    const durable = readDurablePacketState({ packetId, expectedBase: input.base });
+    const reconciled = reconcileArmWithDurableState({ streamStatus, streamErrors, durable });
+    classification = reconciled;
+    durableReconciliation = reconciled.durableReconciliation;
+    laneId = durable.laneId ?? laneId;
+    sessionKey = durable.sessionKey ?? sessionKey;
+    branch = durable.branch ?? branch;
+    worktree = durable.worktreePath ?? worktree;
+    if (durable.view === 'full' && durable.terminalStatus !== null) {
+      shippedDiff = durable.recoveredDiff;
+      diffHeadSha = durable.headSha;
+      diffBase = durable.diffBase;
+      diffTruncated = false;
+    }
   }
   fs.writeFileSync(diffPath, shippedDiff);
   const diffFacts = diffFactsFromUnifiedDiff(shippedDiff);
@@ -696,7 +663,7 @@ async function collectGovernedArm(input: {
     && finalStatusCommand?.status === 0
     && reviewAttempts.every((attempt) => attempt.refix === null || attempt.refix.status === 0)
     && (pipelineOutcome !== 'review-approved' || packetDiffCommand?.status === 0);
-  const invalidReasons = endToEndInvalidReasons({
+  const measurementNotes = endToEndMeasurementNotes({
     condition: 'governed',
     expectedBase: input.base,
     changedFiles: diffFacts.changedFiles,
@@ -722,8 +689,8 @@ async function collectGovernedArm(input: {
     ...diffFacts,
     provenanceMarkers: [missionId, packetId, laneId, sessionKey, branch, worktree, ...statusMarkers]
       .filter((marker): marker is string => Boolean(marker)),
-    valid: invalidReasons.length === 0,
-    invalidReasons,
+    ...classification,
+    measurementNotes,
     governed: {
       artifactKind: 'review-approved-output',
       artifactMerged: false,
@@ -748,6 +715,7 @@ async function collectGovernedArm(input: {
       diffHeadSha,
       diffBase,
       diffTruncated,
+      durableReconciliation,
     },
   };
 }
@@ -760,11 +728,22 @@ export async function collectEndToEnd(input: {
 }): Promise<EndToEndCollectionReceipt> {
   const artifactDir = path.join(input.workRoot, 'artifacts', 'end-to-end');
   fs.mkdirSync(artifactDir, { recursive: true });
-  for (const task of input.collection.tasks) {
-    const issue = issueText(input.repoRoot, task.issue);
-    const issuePath = path.join(artifactDir, `issue-${task.issue}.md`);
-    fs.writeFileSync(issuePath, issue);
-    for (const condition of END_TO_END_CONDITIONS) {
+  const issues = new Map<number, { issue: string; issuePath: string }>();
+  const pendingArms = input.collection.tasks.flatMap((task) => (
+    END_TO_END_CONDITIONS.map((condition) => ({ task, condition }))
+  ));
+
+  await runBackendGuardedCollection({
+    arms: pendingArms,
+    runArm: async ({ task, condition }) => {
+      let issueInput = issues.get(task.issue);
+      if (!issueInput) {
+        const issue = issueText(input.repoRoot, task.issue);
+        const issuePath = path.join(artifactDir, `issue-${task.issue}.md`);
+        fs.writeFileSync(issuePath, issue);
+        issueInput = { issue, issuePath };
+        issues.set(task.issue, issueInput);
+      }
       console.log(`[coding:e2e] collecting ${condition} on #${task.issue}`);
       const arm = condition === 'governed'
         ? await collectGovernedArm({
@@ -772,8 +751,8 @@ export async function collectEndToEnd(input: {
             artifactDir,
             task,
             base: input.collection.baseCommit,
-            issue,
-            issuePath,
+            issue: issueInput.issue,
+            issuePath: issueInput.issuePath,
           })
         : collectAdhocArm({
             repoRoot: input.repoRoot,
@@ -782,16 +761,23 @@ export async function collectEndToEnd(input: {
             task,
             condition,
             base: input.collection.baseCommit,
-            issue,
-            issuePath,
+            issue: issueInput.issue,
+            issuePath: issueInput.issuePath,
           });
+      return arm;
+    },
+    commitArm: (arm) => {
       input.collection.arms.push(arm);
-      input.onUpdate(input.collection);
+      input.collection.outcomeTotals = countArmOutcomes(input.collection.arms);
       console.log(
-        `[coding:e2e] ${condition} valid=${arm.valid} files=${arm.changedFiles.length} ` +
-        `+${arm.additions}/-${arm.deletions} reasons=${arm.invalidReasons.join('; ') || 'none'}`,
+        `[coding:e2e] ${arm.condition} outcome=${arm.outcome} files=${arm.changedFiles.length} ` +
+        `+${arm.additions}/-${arm.deletions} notes=${arm.measurementNotes.join('; ') || 'none'}`,
       );
-    }
-  }
+    },
+    onRunControl: (receipt) => {
+      input.collection.runControl = receipt;
+      input.onUpdate(input.collection);
+    },
+  });
   return input.collection;
 }
