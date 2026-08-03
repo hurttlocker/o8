@@ -39,6 +39,12 @@ import {
   CODING_TASK_CONTRACT_FILE,
   readCodingTaskContract,
 } from './coding-task-contract';
+import {
+  assertUnusedCodingRunId,
+  collectStandaloneEndToEnd,
+  judgeStandaloneEndToEnd,
+  preflightStandaloneEndToEnd,
+} from './coding-end-to-end-cli';
 import { JUDGE_PROMPT, RAW_BRIEF } from './coding-prompts';
 import { judgeEndToEnd } from './judge-coding-end-to-end';
 import {
@@ -419,12 +425,8 @@ function collectionSeed(): number {
   return parsed;
 }
 
-function collect(tasks: CodingTask[], endToEndTasks = readEndToEndTasks(REPO_ROOT)): CollectionReceipt {
-  if (fs.existsSync(COLLECTION_FILE)) {
-    throw new Error(
-      `benchmark run ${RUN_ID} already has a collection; set O8_BENCH_RUN_ID to a new value rather than overwriting it`,
-    );
-  }
+async function collect(tasks: CodingTask[], endToEndTasks = readEndToEndTasks(REPO_ROOT)): Promise<CollectionReceipt> {
+  assertUnusedCodingRunId(WORK_ROOT, RUN_ID);
   const endToEnd = createEndToEndCollection(REPO_ROOT, RUN_ID, endToEndTasks);
   fs.mkdirSync(WORK_ROOT, { recursive: true });
   const seed = collectionSeed();
@@ -456,7 +458,7 @@ function collect(tasks: CodingTask[], endToEndTasks = readEndToEndTasks(REPO_ROO
       );
     }
   }
-  collectEndToEnd({
+  await collectEndToEnd({
     repoRoot: REPO_ROOT,
     workRoot: WORK_ROOT,
     collection: endToEnd,
@@ -744,30 +746,51 @@ function preflight(tasks: CodingTask[]): void {
   );
 }
 
-function main(): void {
-  const tasks = readTasks();
-  const endToEndTasks = readEndToEndTasks(REPO_ROOT);
+async function main(): Promise<void> {
   const args = new Set(process.argv.slice(2));
-  const allowed = new Set(['--preflight', '--collect', '--judge', '--all']);
+  const allowed = new Set(['--preflight', '--collect', '--judge', '--all', '--e2e', '--e2e-judge']);
   const unknown = [...args].filter((arg) => !allowed.has(arg));
   if (unknown.length > 0) throw new Error(`unknown coding benchmark flag: ${unknown.join(', ')}`);
-  if (args.size !== 1) {
-    throw new Error('choose exactly one phase: --preflight, --collect, --judge, or --all');
+  const standaloneInput = { repoRoot: REPO_ROOT, workRoot: WORK_ROOT, runId: RUN_ID };
+  if (args.has('--e2e') && args.has('--preflight') && args.size === 2) {
+    preflightStandaloneEndToEnd(standaloneInput);
+    return;
   }
+  if (args.has('--e2e') && (args.size === 1 || (args.has('--collect') && args.size === 2))) {
+    await collectStandaloneEndToEnd(standaloneInput);
+    return;
+  }
+  if ((args.has('--e2e-judge') && args.size === 1)
+    || (args.has('--e2e') && args.has('--judge') && args.size === 2)) {
+    judgeStandaloneEndToEnd({
+      ...standaloneInput,
+      seed: collectionSeed(),
+      latestDir: LATEST_DIR,
+    });
+    return;
+  }
+  if (args.size !== 1) {
+    throw new Error(
+      'choose one phase: --preflight, --collect, --judge, --all, --e2e, or --e2e-judge; ' +
+      'use --preflight --e2e to check the standalone experiment without collecting',
+    );
+  }
+  const tasks = readTasks();
+  const endToEndTasks = readEndToEndTasks(REPO_ROOT);
   if (args.has('--preflight')) {
     preflight(tasks);
     return;
   }
   if (args.has('--collect')) {
-    collect(tasks, endToEndTasks);
+    await collect(tasks, endToEndTasks);
     return;
   }
   if (args.has('--judge')) {
     judge(tasks, readCollection());
     return;
   }
-  const collection = collect(tasks, endToEndTasks);
+  const collection = await collect(tasks, endToEndTasks);
   judge(tasks, collection);
 }
 
-main();
+void main();

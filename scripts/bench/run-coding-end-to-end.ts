@@ -2,6 +2,11 @@ import { execFileSync, spawnSync, type SpawnSyncReturns } from 'node:child_proce
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { getApproval } from '../../src/lib/approvals/store';
+import {
+  assessDurableApprovedReview,
+  type DurableReviewAssessment,
+} from '../../src/lib/lane/durable-review-approval';
 import { resolveRequireApprovalSync, type RequireApproval } from '../../src/lib/operator/defaults';
 import type { CodingJudge } from './coding';
 import {
@@ -10,6 +15,16 @@ import {
   type EndToEndCondition,
   type EndToEndTask,
 } from './coding-end-to-end';
+import {
+  refixFeedback,
+  reviewAttemptFromStatus,
+  reviewAttemptKey,
+  type DiffFacts,
+  type GovernedPipelineOutcome,
+  type GovernedReviewAttemptReceipt,
+  type MechanicalReceipt,
+  type PacketDiffReceipt,
+} from './coding-end-to-end-review';
 import { CODING_TASK_CONTRACT_FILE } from './coding-task-contract';
 import { RAW_BRIEF } from './coding-prompts';
 
@@ -17,6 +32,7 @@ const ARM_TIMEOUT_SECONDS = 2_400;
 const GOVERNED_TIMEOUT_SECONDS = 7_200;
 const GOVERNED_POLL_MS = 5_000;
 const MAX_READ_ATTEMPTS = 3;
+export const MAX_GOVERNED_REVIEW_ATTEMPTS = 3;
 const MAX_DIFF_BYTES = 32 * 1024 * 1024;
 
 export interface EndToEndCommandReceipt {
@@ -27,21 +43,6 @@ export interface EndToEndCommandReceipt {
   timedOut: boolean;
   stderrBytes: number;
   spawnErrorCode: string | null;
-}
-
-interface MechanicalReceipt {
-  typecheck: EndToEndCommandReceipt;
-  eslint: EndToEndCommandReceipt | null;
-  lintedFiles: string[];
-}
-
-interface MergePreviewReceipt {
-  packetId: string;
-  wouldMerge: boolean;
-  blockers: string[];
-  branch: string | null;
-  diffBase?: { mergeBase?: string | null; comparisonRef?: string | null };
-  checks?: Array<{ name?: string; verdict?: string; detail?: string }>;
 }
 
 export interface EndToEndArmReceipt {
@@ -68,6 +69,8 @@ export interface EndToEndArmReceipt {
     mechanical: MechanicalReceipt;
   };
   governed?: {
+    artifactKind: 'review-approved-output';
+    artifactMerged: false;
     missionId: string | null;
     packetId: string | null;
     laneId: string | null;
@@ -80,12 +83,14 @@ export interface EndToEndArmReceipt {
     finalStatusCommand: EndToEndCommandReceipt | null;
     finalStatus: unknown;
     cost: unknown;
-    reviewApproved: boolean | null;
-    pipelineOutcome: 'merge-ready' | 'blocked' | 'failed' | 'released' | 'timeout' | null;
-    humanDecisionReason: string | null;
-    mergePreviewCommand: EndToEndCommandReceipt | null;
-    mergePreview: MergePreviewReceipt | null;
+    maxReviewAttempts: number;
+    reviewAttempts: GovernedReviewAttemptReceipt[];
+    durableReview: DurableReviewAssessment | null;
+    pipelineOutcome: GovernedPipelineOutcome;
+    pipelineFailureReason: string | null;
     packetDiffCommand: EndToEndCommandReceipt | null;
+    diffHeadSha: string | null;
+    diffBase: string | null;
     diffTruncated: boolean;
   };
 }
@@ -106,14 +111,6 @@ interface CommandResult {
   stdout: string;
   stderr: string;
 }
-
-interface DiffFacts {
-  changedFiles: string[];
-  additions: number;
-  deletions: number;
-}
-
-type GovernedPipelineOutcome = 'merge-ready' | 'blocked' | 'failed' | 'released' | 'timeout' | null;
 
 function runCommand(
   command: string,
@@ -377,12 +374,12 @@ function collectAdhocArm(input: {
     changedFiles: diffFacts.changedFiles,
     commandsPassed: [spawn, send, stop].every((result) => result.receipt.status === 0),
     mechanicalPassed: mechanical.typecheck.status === 0 && (!mechanical.eslint || mechanical.eslint.status === 0),
-    reviewApproved: null,
-    mergePreviewWouldMerge: null,
-    mergeBase: null,
+    durableReviewApproved: null,
+    reviewAttempts: 0,
+    maxReviewAttempts: MAX_GOVERNED_REVIEW_ATTEMPTS,
+    diffBase: null,
     diffTruncated: false,
-    pipelineOutcome: null,
-    humanDecisionReason: null,
+    pipelineFailureReason: null,
   });
   return {
     task: input.task.issue,
@@ -446,14 +443,14 @@ function diffFactsFromUnifiedDiff(diff: string): DiffFacts {
   return { changedFiles: [...files], additions, deletions };
 }
 
-function collectGovernedArm(input: {
+async function collectGovernedArm(input: {
   repoRoot: string;
   artifactDir: string;
   task: EndToEndTask;
   base: string;
   issue: string;
   issuePath: string;
-}): EndToEndArmReceipt {
+}): Promise<EndToEndArmReceipt> {
   const approvalMode = resolveRequireApprovalSync();
   if (approvalMode !== 'always') {
     throw new Error(
@@ -501,16 +498,17 @@ function collectGovernedArm(input: {
   let sessionKey: string | null = null;
   let branch: string | null = null;
   let worktree: string | null = null;
-  let reviewApproved: boolean | null = null;
+  let durableReview: DurableReviewAssessment | null = null;
   let pipelineOutcome: GovernedPipelineOutcome = null;
-  let humanDecisionReason: string | null = null;
-  let mergePreviewCommand: EndToEndCommandReceipt | null = null;
-  let mergePreview: MergePreviewReceipt | null = null;
+  let pipelineFailureReason: string | null = null;
   let packetDiffCommand: EndToEndCommandReceipt | null = null;
+  let diffHeadSha: string | null = null;
+  let diffBase: string | null = null;
   let diffTruncated = false;
   let shippedDiff = '';
-  let blockerObservations = 0;
   let readCommandsPassed = true;
+  const reviewAttempts: GovernedReviewAttemptReceipt[] = [];
+  const observedReviewKeys = new Set<string>();
 
   const deadline = Date.now() + GOVERNED_TIMEOUT_SECONDS * 1_000;
   while (missionId && packetId && dispatch.receipt.status === 0 && Date.now() < deadline) {
@@ -521,8 +519,20 @@ function collectGovernedArm(input: {
           id?: unknown;
           status?: unknown;
           blockedReason?: unknown;
-          lane?: { laneId?: unknown; branch?: unknown; repoPath?: unknown; sessionKey?: unknown } | null;
-          review?: { approved?: unknown } | null;
+          lane?: {
+            laneId?: unknown;
+            branch?: unknown;
+            repoPath?: unknown;
+            sessionKey?: unknown;
+            status?: unknown;
+          } | null;
+          review?: {
+            approved?: unknown;
+            summary?: unknown;
+            recordedAt?: unknown;
+            reviewedHeadSha?: unknown;
+            auditApprovalId?: unknown;
+          } | null;
         }>;
         agents?: Array<{
           packetId?: unknown;
@@ -560,104 +570,144 @@ function collectGovernedArm(input: {
     sessionKey = typeof agent?.sessionKey === 'string' ? agent.sessionKey : sessionKey;
     branch = typeof agent?.branch === 'string' ? agent.branch : branch;
     worktree = typeof agent?.repoPath === 'string' ? agent.repoPath : worktree;
-    reviewApproved = typeof packet?.review?.approved === 'boolean' ? packet.review.approved : null;
+
+    const review = packet?.review ?? null;
+    const key = review ? reviewAttemptKey(review) : null;
+    if (review && key && !observedReviewKeys.has(key)) {
+      observedReviewKeys.add(key);
+      reviewAttempts.push(reviewAttemptFromStatus(reviewAttempts.length + 1, review));
+    }
+    const currentAttempt = key
+      ? reviewAttempts.find((attempt) => attempt.approvalId === key)
+        ?? reviewAttempts.at(-1)
+        ?? null
+      : null;
+
+    if (laneId && worktree && review) {
+      durableReview = await assessDurableApprovedReview({
+        id: laneId,
+        packetId,
+        sessionKey,
+        worktreePath: worktree,
+        repoPath: input.repoRoot,
+        baseBranch: 'main',
+      });
+      if (currentAttempt) currentAttempt.durableAssessment = durableReview;
+    }
+
+    if (durableReview?.approved === true && laneId && worktree) {
+      const diffResult = jsonCommandWithReadRetries<PacketDiffReceipt>(
+        'o8',
+        ['packet', 'diff', packetId, '--max-bytes', String(MAX_DIFF_BYTES)],
+        input.repoRoot,
+        'o8 packet diff',
+      );
+      packetDiffCommand = diffResult.receipt;
+      if (diffResult.receipt.status !== 0 || !diffResult.data) {
+        readCommandsPassed = false;
+        pipelineOutcome = 'failed';
+        pipelineFailureReason = 'review-approved diff could not be read';
+        break;
+      }
+      const postDiffAssessment = await assessDurableApprovedReview({
+        id: laneId,
+        packetId,
+        sessionKey,
+        worktreePath: worktree,
+        repoPath: input.repoRoot,
+        baseBranch: 'main',
+      });
+      durableReview = postDiffAssessment;
+      if (currentAttempt) currentAttempt.durableAssessment = postDiffAssessment;
+      const capturedHead = typeof diffResult.data.headSha === 'string' ? diffResult.data.headSha : null;
+      const approvedRecord = postDiffAssessment.approvalId
+        ? getApproval(postDiffAssessment.approvalId)
+        : null;
+      const approvedHead = typeof approvedRecord?.args?.reviewedHeadSha === 'string'
+        ? approvedRecord.args.reviewedHeadSha
+        : approvedRecord?.metadata?.['Reviewed HEAD'] ?? null;
+      if (postDiffAssessment.approved && capturedHead !== null && capturedHead === approvedHead) {
+        shippedDiff = typeof diffResult.data.diff === 'string' ? diffResult.data.diff : '';
+        diffTruncated = diffResult.data.truncated === true;
+        diffHeadSha = capturedHead;
+        diffBase = diffResult.data.diffBase?.mergeBase
+          ?? diffResult.data.diffBase?.comparisonRef
+          ?? null;
+        pipelineOutcome = 'review-approved';
+        break;
+      }
+    }
+
+    if (review?.approved === false && currentAttempt && currentAttempt.refix === null) {
+      if (reviewAttempts.length >= MAX_GOVERNED_REVIEW_ATTEMPTS) {
+        pipelineOutcome = 'review-bound-exhausted';
+        break;
+      }
+      const assessment = durableReview ?? {
+        approved: false,
+        diffBudgetWaived: false,
+        highConfidence: false,
+        approvalId: null,
+        reason: 'The review was rejected.',
+      };
+      const refix = runCommand('o8', [
+        'packet', 'rerun', '--packet', packetId, '--feedback', refixFeedback(currentAttempt, assessment),
+      ], { cwd: input.repoRoot, timeoutMs: 10 * 60_000 });
+      currentAttempt.refix = refix.receipt;
+      if (refix.receipt.status !== 0) {
+        pipelineOutcome = 'failed';
+        pipelineFailureReason = 'rejected review could not enter the normal refix loop';
+        break;
+      }
+      durableReview = null;
+      sleepPoll();
+      continue;
+    }
 
     if (packetStatus === 'released') {
       pipelineOutcome = 'released';
-      humanDecisionReason = 'pipeline merged instead of holding at merge-ready';
+      pipelineFailureReason = 'pipeline released before the review-approved artifact was captured';
       break;
     }
     if (packetStatus === 'failed' || packetStatus === 'archived') {
       pipelineOutcome = 'failed';
-      humanDecisionReason = typeof packet?.blockedReason === 'string' ? packet.blockedReason : packetStatus;
+      pipelineFailureReason = typeof packet?.blockedReason === 'string' ? packet.blockedReason : packetStatus;
       break;
     }
-    if (packetStatus === 'blocked') {
+    if (packetStatus === 'blocked' && review?.approved !== false) {
       pipelineOutcome = 'blocked';
-      humanDecisionReason = typeof packet?.blockedReason === 'string' ? packet.blockedReason : 'packet blocked';
+      pipelineFailureReason = typeof packet?.blockedReason === 'string' ? packet.blockedReason : 'packet blocked';
       break;
-    }
-
-    if (reviewApproved === true) {
-      const previewResult = jsonCommandWithReadRetries<{ preview?: MergePreviewReceipt }>(
-        'o8',
-        ['packet', 'merge-preview', '--packet', packetId],
-        input.repoRoot,
-        'o8 packet merge-preview',
-      );
-      mergePreviewCommand = previewResult.receipt;
-      if (previewResult.receipt.status !== 0 || !previewResult.data) {
-        readCommandsPassed = false;
-        pipelineOutcome = 'failed';
-        break;
-      }
-      mergePreview = previewResult.data.preview ?? null;
-      if (mergePreview?.wouldMerge) {
-        const diffResult = jsonCommandWithReadRetries<{ diff?: unknown; truncated?: unknown }>(
-          'o8',
-          ['packet', 'diff', packetId, '--max-bytes', String(MAX_DIFF_BYTES)],
-          input.repoRoot,
-          'o8 packet diff',
-        );
-        packetDiffCommand = diffResult.receipt;
-        if (diffResult.receipt.status !== 0 || !diffResult.data) {
-          readCommandsPassed = false;
-          pipelineOutcome = 'failed';
-          break;
-        }
-        const diffPayload = diffResult.data;
-        shippedDiff = typeof diffPayload.diff === 'string' ? diffPayload.diff : '';
-        diffTruncated = diffPayload.truncated === true;
-        pipelineOutcome = 'merge-ready';
-        break;
-      }
-      blockerObservations += 1;
-      if (blockerObservations >= MAX_READ_ATTEMPTS) {
-        pipelineOutcome = 'blocked';
-        humanDecisionReason = mergePreview?.blockers.join(', ') || 'merge preview blocked';
-        break;
-      }
-    } else if (reviewApproved === false) {
-      blockerObservations += 1;
-      if (blockerObservations >= MAX_READ_ATTEMPTS) {
-        pipelineOutcome = 'blocked';
-        humanDecisionReason = 'review requested changes without an autonomous refix';
-        break;
-      }
-    } else {
-      blockerObservations = 0;
     }
     sleepPoll();
   }
 
   if (!pipelineOutcome && missionId && packetId && dispatch.receipt.status === 0) {
     pipelineOutcome = 'timeout';
-    humanDecisionReason = 'governed pipeline timed out before merge-ready';
+    pipelineFailureReason = 'governed pipeline timed out before a durable approved review';
   }
   fs.writeFileSync(diffPath, shippedDiff);
   const diffFacts = diffFactsFromUnifiedDiff(shippedDiff);
-  const mergeBase = mergePreview?.diffBase?.mergeBase ?? null;
   const commandsPassed = create.receipt.status === 0
     && Boolean(missionId)
     && Boolean(packetId)
     && dispatch.receipt.status === 0
     && readCommandsPassed
     && finalStatusCommand?.status === 0
-    && (pipelineOutcome !== 'merge-ready' || (
-      mergePreviewCommand?.status === 0 && packetDiffCommand?.status === 0
-    ));
+    && reviewAttempts.every((attempt) => attempt.refix === null || attempt.refix.status === 0)
+    && (pipelineOutcome !== 'review-approved' || packetDiffCommand?.status === 0);
   const invalidReasons = endToEndInvalidReasons({
     condition: 'governed',
     expectedBase: input.base,
     changedFiles: diffFacts.changedFiles,
     commandsPassed,
     mechanicalPassed: null,
-    reviewApproved,
-    mergePreviewWouldMerge: mergePreview?.wouldMerge ?? null,
-    mergeBase,
+    durableReviewApproved: durableReview?.approved ?? false,
+    reviewAttempts: reviewAttempts.length,
+    maxReviewAttempts: MAX_GOVERNED_REVIEW_ATTEMPTS,
+    diffBase,
     diffTruncated,
-    pipelineOutcome,
-    humanDecisionReason,
+    pipelineFailureReason,
   });
 
   const statusMarkers = finalStatus && typeof finalStatus === 'object'
@@ -675,6 +725,8 @@ function collectGovernedArm(input: {
     valid: invalidReasons.length === 0,
     invalidReasons,
     governed: {
+      artifactKind: 'review-approved-output',
+      artifactMerged: false,
       missionId,
       packetId,
       laneId,
@@ -687,23 +739,25 @@ function collectGovernedArm(input: {
       finalStatusCommand,
       finalStatus,
       cost,
-      reviewApproved,
+      maxReviewAttempts: MAX_GOVERNED_REVIEW_ATTEMPTS,
+      reviewAttempts,
+      durableReview,
       pipelineOutcome,
-      humanDecisionReason,
-      mergePreviewCommand,
-      mergePreview,
+      pipelineFailureReason,
       packetDiffCommand,
+      diffHeadSha,
+      diffBase,
       diffTruncated,
     },
   };
 }
 
-export function collectEndToEnd(input: {
+export async function collectEndToEnd(input: {
   repoRoot: string;
   workRoot: string;
   collection: EndToEndCollectionReceipt;
   onUpdate: (collection: EndToEndCollectionReceipt) => void;
-}): EndToEndCollectionReceipt {
+}): Promise<EndToEndCollectionReceipt> {
   const artifactDir = path.join(input.workRoot, 'artifacts', 'end-to-end');
   fs.mkdirSync(artifactDir, { recursive: true });
   for (const task of input.collection.tasks) {
@@ -713,7 +767,7 @@ export function collectEndToEnd(input: {
     for (const condition of END_TO_END_CONDITIONS) {
       console.log(`[coding:e2e] collecting ${condition} on #${task.issue}`);
       const arm = condition === 'governed'
-        ? collectGovernedArm({
+        ? await collectGovernedArm({
             repoRoot: input.repoRoot,
             artifactDir,
             task,

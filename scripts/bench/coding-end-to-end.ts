@@ -25,12 +25,12 @@ export interface EndToEndValidityInput {
   changedFiles: string[];
   commandsPassed: boolean;
   mechanicalPassed: boolean | null;
-  reviewApproved: boolean | null;
-  mergePreviewWouldMerge: boolean | null;
-  mergeBase: string | null;
+  durableReviewApproved: boolean | null;
+  reviewAttempts: number;
+  maxReviewAttempts: number;
+  diffBase: string | null;
   diffTruncated: boolean;
-  pipelineOutcome: 'merge-ready' | 'blocked' | 'failed' | 'released' | 'timeout' | null;
-  humanDecisionReason: string | null;
+  pipelineFailureReason: string | null;
 }
 
 export interface EndToEndTaskResult {
@@ -135,16 +135,17 @@ export function endToEndInvalidReasons(input: EndToEndValidityInput): string[] {
     reasons.push(input.mechanicalPassed !== true ? 'mechanical checks failed' : null);
   } else {
     reasons.push(
-      input.pipelineOutcome !== 'merge-ready'
-        ? `governed pipeline did not reach merge-ready state (${input.pipelineOutcome ?? 'unknown'})`
+      input.durableReviewApproved !== true && input.reviewAttempts >= input.maxReviewAttempts
+        ? `governed pipeline did not produce an approved review within ${input.maxReviewAttempts} attempts`
         : null,
-      input.reviewApproved !== true ? 'governed review was not approved' : null,
-      input.mergePreviewWouldMerge !== true ? 'merge preview did not pass' : null,
-      input.diffTruncated ? 'merge-ready diff was truncated' : null,
-      input.mergeBase !== input.expectedBase
-        ? `merge base ${input.mergeBase ?? '(missing)'} did not match recorded base ${input.expectedBase}`
+      input.durableReviewApproved !== true && input.reviewAttempts < input.maxReviewAttempts
+        ? 'governed arm has no durable approved review for current HEAD'
         : null,
-      input.humanDecisionReason ? `pipeline required human input: ${input.humanDecisionReason}` : null,
+      input.diffTruncated ? 'review-approved diff was truncated' : null,
+      input.diffBase !== input.expectedBase
+        ? `diff base ${input.diffBase ?? '(missing)'} did not match recorded base ${input.expectedBase}`
+        : null,
+      input.pipelineFailureReason ? `governed pipeline stopped: ${input.pipelineFailureReason}` : null,
     );
   }
 

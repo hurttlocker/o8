@@ -102,43 +102,50 @@ describe('coding benchmark hardening', () => {
     expect(result.decisive).toBe(false);
   });
 
-  it('requires governed output to be reviewed and merge-ready at the recorded base', () => {
-    const valid = {
+  it('accepts review-approved governed output without a merge or operator approval', () => {
+    const reviewApproved = {
       condition: 'governed' as const,
       expectedBase: 'abc123',
       changedFiles: ['src/example.ts'],
       commandsPassed: true,
       mechanicalPassed: null,
-      reviewApproved: true,
-      mergePreviewWouldMerge: true,
-      mergeBase: 'abc123',
+      durableReviewApproved: true,
+      reviewAttempts: 1,
+      maxReviewAttempts: 3,
+      diffBase: 'abc123',
       diffTruncated: false,
-      pipelineOutcome: 'merge-ready' as const,
-      humanDecisionReason: null,
+      pipelineFailureReason: null,
     };
-    expect(endToEndInvalidReasons(valid)).toEqual([]);
+    expect(endToEndInvalidReasons(reviewApproved)).toEqual([]);
+  });
+
+  it('rejects a governed arm without a durable approved review and names the attempt bound', () => {
+    const withoutApproval = {
+      condition: 'governed' as const,
+      expectedBase: 'abc123',
+      changedFiles: ['src/example.ts'],
+      commandsPassed: true,
+      mechanicalPassed: null,
+      durableReviewApproved: false,
+      reviewAttempts: 1,
+      maxReviewAttempts: 3,
+      diffBase: 'abc123',
+      diffTruncated: false,
+      pipelineFailureReason: null,
+    };
+    expect(endToEndInvalidReasons(withoutApproval)).toContain(
+      'governed arm has no durable approved review for current HEAD',
+    );
     expect(endToEndInvalidReasons({
-      ...valid,
-      reviewApproved: false,
-      mergePreviewWouldMerge: false,
-      mergeBase: 'different-base',
-      pipelineOutcome: 'blocked',
-      humanDecisionReason: 'review requested changes without an autonomous refix',
-    })).toEqual(expect.arrayContaining([
-      'governed pipeline did not reach merge-ready state (blocked)',
-      'governed review was not approved',
-      'merge preview did not pass',
-      'merge base different-base did not match recorded base abc123',
-      'pipeline required human input: review requested changes without an autonomous refix',
-    ]));
+      ...withoutApproval,
+      reviewAttempts: 3,
+    })).toContain('governed pipeline did not produce an approved review within 3 attempts');
     expect(endToEndInvalidReasons({
-      ...valid,
+      ...withoutApproval,
       condition: 'adhoc-codex',
       mechanicalPassed: false,
-      reviewApproved: null,
-      mergePreviewWouldMerge: null,
-      mergeBase: null,
-      pipelineOutcome: null,
+      durableReviewApproved: null,
+      diffBase: null,
     })).toContain('mechanical checks failed');
   });
 

@@ -69,7 +69,10 @@
     "bench:coding": "NODE_OPTIONS=--import=./scripts/register-server-only-stub.mjs tsx scripts/bench/run-coding.ts --preflight",
     "bench:coding:collect": "NODE_OPTIONS=--import=./scripts/register-server-only-stub.mjs tsx scripts/bench/run-coding.ts --collect",
     "bench:coding:judge": "NODE_OPTIONS=--import=./scripts/register-server-only-stub.mjs tsx scripts/bench/run-coding.ts --judge",
-    "bench:coding:all": "NODE_OPTIONS=--import=./scripts/register-server-only-stub.mjs tsx scripts/bench/run-coding.ts --all"
+    "bench:coding:all": "NODE_OPTIONS=--import=./scripts/register-server-only-stub.mjs tsx scripts/bench/run-coding.ts --all",
+    "bench:coding:e2e:preflight": "NODE_OPTIONS=--import=./scripts/register-server-only-stub.mjs tsx scripts/bench/run-coding.ts --preflight --e2e",
+    "bench:coding:e2e": "NODE_OPTIONS=--import=./scripts/register-server-only-stub.mjs tsx scripts/bench/run-coding.ts --e2e",
+    "bench:coding:e2e:judge": "NODE_OPTIONS=--import=./scripts/register-server-only-stub.mjs tsx scripts/bench/run-coding.ts --e2e-judge"
   },
   "dependencies": {
     "@ai-sdk/gateway": "^3.0.109",

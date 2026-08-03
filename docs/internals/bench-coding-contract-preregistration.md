@@ -51,4 +51,21 @@ A fresh sealed holdout is required before any broader product claim.
 
 ## Deviations
 
-None. No contract-first measurement has been collected under this protocol yet.
+### 2026-08-02: governed shipped-output success criterion
+
+Run `final-v3` exposed a contradiction in the separate governed shipped-output
+experiment. The experiment required `requireApproval=always`, prohibited the
+runner from acting as the operator, and still required a merge-ready result.
+Those constraints made the governed arm unable to satisfy its success criterion.
+
+The governed artifact is now the diff at the current HEAD when
+`assessDurableApprovedReview` returns approved, including its contract-coverage
+assessment. A merge, passing merge preview, and operator approval are outside
+the measurement. Rejected reviews enter the normal refix-and-review loop, with
+three total review attempts. If no durable approved review exists after the
+third attempt, the arm remains invalid with its findings and the explicit bound
+in the receipt.
+
+The twelve paired 2x2 arms from `final-v3` remain unchanged. Any repeat of only
+the shipped-output experiment uses the standalone end-to-end flags and a fresh
+immutable run ID, so the paired collection is neither recollected nor overwritten.

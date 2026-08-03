@@ -47,6 +47,7 @@ export interface EndToEndExperimentResult extends EndToEndScoringSummary {
     condition: EndToEndCondition;
     diffPath: string;
     reasons: string[];
+    reviewAttempts: Array<{ attempt: number; summary: string; findings: unknown[] }>;
   }>;
   judging: {
     receipts: EndToEndJudgeReceipt[];
@@ -332,6 +333,11 @@ export function judgeEndToEnd(input: {
     condition: arm.condition,
     diffPath: arm.diffPath,
     reasons: arm.invalidReasons,
+    reviewAttempts: arm.governed?.reviewAttempts?.map((attempt) => ({
+      attempt: attempt.attempt,
+      summary: attempt.summary,
+      findings: attempt.findings,
+    })) ?? [],
   }));
   for (const task of input.collection.tasks) {
     const taskArms = input.collection.arms.filter((arm) => arm.task === task.issue);

@@ -47,11 +47,14 @@ mechanical gates and both blinded judges return complete verdicts.
 
 The same collection also runs a separate shipped-output experiment on issues
 #1676, #1678, and #1679. It compares two single-pass ad-hoc diffs with the diff
-that survives real mission dispatch, auto-review, autonomous refix, and merge
-preview. The exact `main` commit is recorded in the receipt, and judging aborts
+that survives real mission dispatch, auto-review, and up to three normal
+refix-and-review attempts. The governed artifact is the diff whose current HEAD
+has a durable approved review, including any required contract coverage. It is
+review-approved output, not merged output. The exact `main` commit is recorded in the receipt, and judging aborts
 if worktree, mission, packet, lane, branch, or review-artifact provenance survives
 blinding. Collection requires the `always` approval posture so the real pipeline
-cannot merge while the benchmark captures its merge-ready diff.
+cannot merge while the benchmark captures the reviewed diff; the runner never
+approves a card or invokes merge preview.
 
 Preflight without launching workers:
 
@@ -76,5 +79,19 @@ failed or unfavorable run remains in the receipts instead of disappearing.
 command. The runner writes its receipts under the system temporary directory and
 the decoded result to `tests/bench/latest/coding.json`. The fixed tasks and rubric
 must not be edited after a run starts; record any deviation instead.
+
+The shipped-output experiment can run independently with a fresh immutable run
+ID, so a valid paired collection is not recollected or overwritten:
+
+```sh
+O8_BENCH_RUN_ID=<fresh-id> npm run bench:coding:e2e:preflight
+O8_BENCH_RUN_ID=<fresh-id> npm run bench:coding:e2e
+O8_BENCH_RUN_ID=<fresh-id> npm run bench:coding:e2e:judge
+```
+
+Standalone judging writes `tests/bench/latest/coding-end-to-end.json`, including
+cost receipts, every invalid arm and its reasons, the three-attempt review bound,
+and all recorded review findings. Collection and judging receipts under the run
+directory remain immutable.
 
 If governance is absent for a release, the scorecard records it as `automated — not run this release`. If coding is absent, the scorecard records it as `operator-triggered — not run this release`.
