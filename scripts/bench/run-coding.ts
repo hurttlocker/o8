@@ -516,6 +516,7 @@ async function collectWhileApprovalHeld(
     completedArms: collection.arms.length + collection.endToEnd.arms.length,
     abortReason: null,
     backendDetail: null,
+    backendProbe: collection.endToEnd.runControl.backendProbe,
   };
   writeJson(COLLECTION_FILE, collection);
   return collection;
