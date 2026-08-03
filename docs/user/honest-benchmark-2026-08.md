@@ -14,7 +14,7 @@ This document reports what we can defend. Where a track lost, it says so. Where 
 - **Governance.** **10 of 10** planted defects caught, **0 of 10** clean diffs blocked, 0 inconclusive, across 20 committed fixtures anyone can re-run. This is the strongest evidence here.
 - **Memory.** The Brain scores **0.34** against ripgrep's 0.09 and a no-context floor of 0.01 (N=38) — a 3.8× edge on a question set that cannot be guessed.
 - **Speed.** No regressions. Warm TTFB 9 ms.
-- **Shipped output.** See Track 5.
+- **Shipped output.** **Not scored.** Six attempts, six harness faults of our own, no number. What we did observe directly is in Track 5, including the review gate rejecting a worker that misreported its own work.
 
 **The honest one-liner is unchanged from June: o8 does not make models better coders.** What we can now say is narrower and better evidenced — a pre-edit contract measurably helps some models, and the merge gate catches what mechanical checks cannot.
 
@@ -127,16 +127,29 @@ No regressions. June's structural fix (boot request fan-out, −50% requests) ha
 
 ---
 
-## Track 5 — Shipped output
+## Track 5 — Shipped output: NOT SCORED
 
-*Results pending — this section is completed from run `e2e-v3` before publication.*
+**There is no score in this track, and we are not going to imply one.** What follows is what was observed while trying to produce it.
 
 The question worth answering is not whose *first* diff is better. It is: take a real issue, have a raw model write a diff you merge on green, versus route the same issue through the governed pipeline — **which one ships better code?**
 
 Path A (ad-hoc): a raw model writes a diff, merged on green. What ships is the first diff.
 Path B (governed): the same issue goes through dispatch, review, refix, and the merge gate. What ships is whatever survives to review-approved.
 
-Three currently-open issues, three arms each, same base, same blinded dual-judge procedure and rubric as Track 1. The governed arm is scored at **review-approved**, not merged, because the human approval card is the product's intended behaviour rather than something to route around. Nothing is merged and nothing is approved by the harness.
+The governed arm is scored at **review-approved**, not merged, because the human approval card is the product's intended behaviour rather than something to route around. Nothing is merged and nothing is approved by the harness.
+
+**Six collection attempts produced no score.** Every failure was ours, not the pipeline's, and each was a different fault: a specification whose constraints could not both hold; a liveness probe that aborted a healthy run on one transient blip; leftover lanes blocking mission creation through a CLI that could not pass the parameter the error message demanded; a diff captured before review ran; a clean worker exit misread as a failure; and a recorded base commit that disagreed with the branch the pipeline actually diffed against. Two of those produced confident, wrong results before being caught — in opposite directions.
+
+**What was nevertheless established, by direct observation on a real issue (#1679):**
+
+- **The governed pipeline reaches an approved review.** Dispatch to approval took about ten minutes.
+- **It self-corrects mid-flight.** The orchestrator detected that the worker's branch carried a polluted base and steered it — diagnosing, unprompted, the same harness fault that had taken three failed runs and a cross-model review for us to find.
+- **Approvals are head-locked.** An approval was recorded, the agent committed again, and the system invalidated its own approval rather than let it outlive the code it covered. Re-review then approved the settled state.
+- **The review gate caught two things a compiler cannot.** On one packet it rejected a worker that had written notes claiming it bundled a dependency and passed five tests, while committing nothing but the notes. On another it rejected a plausible, well-scoped refactor with the finding that it did not actually fix the issue.
+
+Those last two are worth more than the number this track was meant to produce. Track 2's 10-of-10 comes from fixtures with defects we planted ourselves. This is the gate catching a live worker misreporting its own work, and a wrong fix that passed `tsc` and eslint, on real issues, unprompted.
+
+**What none of it establishes** is the comparison this track exists for: whether the governed path ships *better* code than an ad-hoc one. That requires a scored artifact from both paths, and we do not have one. The track stays open.
 
 ---
 
@@ -176,6 +189,8 @@ Interruption is not failure. Classification is an exhaustive switch with no wild
 - **Informed** — a 3.8× edge over ripgrep on organizational questions that cannot be guessed or grepped.
 - **Fast** — measured, version-stamped, no regressions.
 
+**What the evidence does not support:** that the governed path ships better code end to end. That is Track 5, it is unscored after six attempts, and we would rather say so than imply it. The observations recorded there — the gate rejecting a worker that misreported its own work, the orchestrator steering itself off a polluted base, approvals invalidating when the code moves — are real and directly witnessed, but they are anecdotes from a broken harness, not a measurement.
+
 ---
 
 ## Limitations
@@ -185,7 +200,8 @@ Interruption is not failure. Classification is an exhaustive switch with no wild
 3. **Judge self-preference is real and measured.** Cross-model comparisons are withdrawn. The paired coding design is structurally immune; memory and governance still use a single judge family and inherit unquantified risk.
 4. **Governance measures the AI review tier**, not the human gate above it.
 5. **Memory literal-lookup cases are probably over-specified**; that row should not be quoted until re-checked.
-6. **We benchmark the product we run on.** Mitigations: pre-registration committed before measurement, sealed blinding, published losses, discarded runs when blinding was compromised, and the validity contract above.
+6. **Shipped output is unscored.** Track 5 has produced no number in six attempts. Its observations are witnessed anecdotes, not measurements, and should be quoted as such.
+7. **We benchmark the product we run on.** Mitigations: pre-registration committed before measurement, sealed blinding, published losses, discarded runs when blinding was compromised, and the validity contract above.
 
 ---
 
