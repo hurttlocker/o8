@@ -466,10 +466,12 @@ export class WorktreeManager {
     // and refuse to spawn the agent into a broken tree.
     //
     // Opt out with O8_SKIP_PRELAUNCH_TYPECHECK=1 if tsc is too slow / noisy for
-    // the dispatch loop. We use the repo-root tsc binary so we don't depend on
-    // the worktree having its own node_modules — Node module resolution walks
-    // up to the parent.
+    // the dispatch loop. Managed worktrees normally live outside the repo, so
+    // link the repo's dependencies only when every dependency input matches.
+    // The repo-root tsc binary alone is insufficient because module resolution
+    // starts from the external worktree's source files.
     if (process.env.O8_SKIP_PRELAUNCH_TYPECHECK !== '1') {
+      await this.linkMatchingNodeModules(worktreePath);
       const tscBin = path.join(this.repoRoot, 'node_modules', '.bin', 'tsc');
       try {
         await execFileAsync(tscBin, ['--noEmit', '--incremental', 'false'], {
@@ -478,11 +480,15 @@ export class WorktreeManager {
           maxBuffer: 8 * 1024 * 1024,
         });
       } catch (err) {
-        const stdout = (err as { stdout?: unknown })?.stdout;
-        const tscOutput = typeof stdout === 'string' ? stdout
-          : stdout instanceof Buffer ? stdout.toString('utf8')
-          : err instanceof Error ? err.message
-          : String(err);
+        const processError = err as { stdout?: unknown; stderr?: unknown };
+        const text = (value: unknown) => typeof value === 'string'
+          ? value
+          : value instanceof Buffer ? value.toString('utf8') : '';
+        const tscOutput = [
+          text(processError.stdout),
+          text(processError.stderr),
+          err instanceof Error ? err.message : String(err),
+        ].map((value) => value.trim()).filter(Boolean).join('\n');
         // Mirror the rebase-conflict cleanup path — tear down the bad tree so
         // we don't leak it on disk; remove the meta so the caller can retry.
         try {
@@ -984,22 +990,7 @@ export class WorktreeManager {
     const hasPackageJson = await this.pathExists(path.join(worktreePath, 'package.json'));
 
     if (hasPackageLock) {
-      // Check if lock file is identical to main repo (skip install)
-      const mainLock = await this.safeReadFile(path.join(this.repoRoot, 'package-lock.json'));
-      const wtLock = await this.safeReadFile(path.join(worktreePath, 'package-lock.json'));
-
-      if (mainLock && wtLock && mainLock === wtLock) {
-        // Same deps — symlink node_modules from main repo
-        try {
-          const mainNodeModules = path.join(this.repoRoot, 'node_modules');
-          const wtNodeModules = path.join(worktreePath, 'node_modules');
-          if (await this.pathExists(wtNodeModules)) return;
-          if (await this.pathExists(mainNodeModules)) {
-            await execFileAsync('ln', ['-s', mainNodeModules, wtNodeModules], { timeout: 5000 });
-            return;
-          }
-        } catch { /* fall through to npm ci */ }
-      }
+      if (await this.linkMatchingNodeModules(worktreePath)) return;
 
       await execFileAsync('npm', ['ci', '--prefer-offline'], {
         cwd: worktreePath,
@@ -1113,6 +1104,24 @@ export class WorktreeManager {
     }
 
     return true;
+  }
+
+  private async linkMatchingNodeModules(worktreePath: string): Promise<boolean> {
+    const sourcePath = path.join(this.repoRoot, 'node_modules');
+    const targetPath = path.join(worktreePath, 'node_modules');
+    if (await this.pathExists(targetPath)) return true;
+    if (!(await this.pathExists(sourcePath))) return false;
+    if (!(await this.nodeDependencyInputsMatch(worktreePath))) return false;
+
+    try {
+      await symlink(sourcePath, targetPath);
+      return true;
+    } catch (error) {
+      console.warn(
+        `[worktree] node_modules link failed for ${worktreePath}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return false;
+    }
   }
 
   private async bootstrapEnvFiles(worktreePath: string, opts: CreateWorktreeOptions): Promise<void> {
