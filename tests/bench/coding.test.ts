@@ -24,6 +24,7 @@ import {
   scoreEndToEndResults,
   type EndToEndCondition,
 } from '../../scripts/bench/coding-end-to-end';
+import { resolveJudgingProgress } from '../../scripts/bench/judge-coding-end-to-end';
 
 const task: CodingTask = { issue: 1, base: 'base', label: 'one' };
 const mapping = Object.fromEntries(CODING_CONDITIONS.map((condition, index) => (
@@ -218,6 +219,37 @@ describe('coding benchmark hardening', () => {
     expect(() => assertEndToEndDiffIsBlind(blindedProduct, [])).not.toThrow();
     expect(blindedProduct).toContain('~/.o8/');
     expect(blindEndToEndDiff(artifactDiff, [])).toBe('');
+  });
+
+  it('resumes only a zero-result judging receipt and preserves its start time', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'o8-coding-judge-receipt-'));
+    const judgingPath = path.join(root, 'end-to-end-judging.json');
+    const startedAt = '2026-08-03T17:20:00.000Z';
+    try {
+      fs.writeFileSync(judgingPath, `${JSON.stringify({
+        schema: 'o8/coding-end-to-end-judging/v1',
+        runId: 'immutable-run',
+        startedAt,
+        receipts: [],
+        blindVerdicts: [],
+      })}\n`);
+      expect(resolveJudgingProgress({ judgingPath, runId: 'immutable-run' })).toEqual({
+        startedAt,
+        createReceipt: false,
+      });
+
+      fs.writeFileSync(judgingPath, `${JSON.stringify({
+        schema: 'o8/coding-end-to-end-judging/v1',
+        runId: 'immutable-run',
+        startedAt,
+        receipts: [{ judge: 'codex' }],
+        blindVerdicts: [],
+      })}\n`);
+      expect(() => resolveJudgingProgress({ judgingPath, runId: 'immutable-run' }))
+        .toThrow('already contains results');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('requires judge agreement for a decisive shipped-diff winner', () => {

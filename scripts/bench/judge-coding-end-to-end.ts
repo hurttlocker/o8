@@ -40,6 +40,14 @@ interface EndToEndJudgeReceipt {
   invalidReason: string | null;
 }
 
+interface EndToEndJudgingProgressReceipt {
+  schema: 'o8/coding-end-to-end-judging/v1';
+  runId: string;
+  startedAt: string;
+  receipts: unknown[];
+  blindVerdicts: unknown[];
+}
+
 export interface EndToEndExperimentResult extends EndToEndScoringSummary {
   baseCommit: string;
   conditions: EndToEndCondition[];
@@ -110,6 +118,48 @@ function parseJson<T>(text: string, label: string): T {
     return JSON.parse(text) as T;
   } catch {
     throw new Error(`${label} returned malformed JSON`);
+  }
+}
+
+export function resolveJudgingProgress(input: {
+  judgingPath: string;
+  runId: string;
+  now?: string;
+}): { startedAt: string; createReceipt: boolean } {
+  if (!fs.existsSync(input.judgingPath)) {
+    return { startedAt: input.now ?? new Date().toISOString(), createReceipt: true };
+  }
+  const receipt = parseJson<Partial<EndToEndJudgingProgressReceipt>>(
+    fs.readFileSync(input.judgingPath, 'utf8'),
+    'end-to-end judging receipt',
+  );
+  if (
+    receipt.schema !== 'o8/coding-end-to-end-judging/v1'
+    || receipt.runId !== input.runId
+    || typeof receipt.startedAt !== 'string'
+    || !Array.isArray(receipt.receipts)
+    || !Array.isArray(receipt.blindVerdicts)
+  ) {
+    throw new Error('end-to-end judging receipt is malformed or belongs to another run');
+  }
+  if (receipt.receipts.length > 0 || receipt.blindVerdicts.length > 0) {
+    throw new Error('end-to-end judging receipt already contains results; use a new immutable run ID');
+  }
+  return { startedAt: receipt.startedAt, createReceipt: false };
+}
+
+function assertCollectedDiffsAreBlindable(collection: EndToEndCollectionReceipt): void {
+  for (const task of collection.tasks) {
+    for (const condition of END_TO_END_CONDITIONS) {
+      const arm = collection.arms.find((candidate) => (
+        candidate.task === task.issue
+        && candidate.condition === condition
+        && isScorableArmOutcome(candidate.outcome)
+      ));
+      if (!arm) continue;
+      const blinded = blindEndToEndDiff(fs.readFileSync(arm.diffPath, 'utf8'), arm.provenanceMarkers);
+      assertEndToEndDiffIsBlind(blinded, arm.provenanceMarkers);
+    }
   }
 }
 
@@ -268,22 +318,26 @@ export function judgeEndToEnd(input: {
     );
   }
   const judgingPath = path.join(input.workRoot, 'end-to-end-judging.json');
-  if (fs.existsSync(judgingPath)) {
-    throw new Error('end-to-end judging receipt already exists; use a new immutable run ID');
-  }
+  assertCollectedDiffsAreBlindable(input.collection);
+  const judgingProgress = resolveJudgingProgress({
+    judgingPath,
+    runId: input.collection.runId,
+  });
   const verdicts: CodingVerdict[] = [];
   const receipts: EndToEndJudgeReceipt[] = [];
   const mappings: Record<number, Record<string, EndToEndCondition>> = {};
   const shippedDiffs: Record<number, Partial<Record<EndToEndCondition, string>>> = {};
   const shuffle = seededShuffle(input.seed ^ 0xe2e2026);
-  const startedAt = new Date().toISOString();
-  writeJson(judgingPath, {
-    schema: 'o8/coding-end-to-end-judging/v1',
-    runId: input.collection.runId,
-    startedAt,
-    receipts,
-    blindVerdicts: verdicts,
-  });
+  const { startedAt } = judgingProgress;
+  if (judgingProgress.createReceipt) {
+    writeJson(judgingPath, {
+      schema: 'o8/coding-end-to-end-judging/v1',
+      runId: input.collection.runId,
+      startedAt,
+      receipts,
+      blindVerdicts: verdicts,
+    });
+  }
 
   for (const task of input.collection.tasks) {
     const arms = END_TO_END_CONDITIONS.map((condition) => input.collection.arms.find((arm) => (
