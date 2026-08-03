@@ -132,8 +132,11 @@ export interface EndToEndCollectionReceipt {
 }
 
 
-function currentBaseCommit(repoRoot: string): string {
-  return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).trim();
+export function currentBaseCommit(repoRoot: string): string {
+  return execFileSync('git', ['rev-parse', 'origin/main'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  }).trim();
 }
 
 function currentBranch(repoRoot: string): string {
