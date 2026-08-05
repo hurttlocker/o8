@@ -372,6 +372,18 @@ export const opencodeBackend: OrchestratorBackend = makeAcpBackend({
   },
 });
 
+/**
+ * The launch spec for an ACP backend, for callers that need to drive the agent
+ * outside a turn (the model-catalogue probe). Null when unavailable.
+ */
+export function resolveAcpLaunch(id: OrchestratorBackendId): AcpLaunch | null {
+  if (id === 'opencode') {
+    const bin = resolveOpencodeBinary();
+    return bin ? { command: bin, args: ['acp'] } : null;
+  }
+  return null;
+}
+
 /** Whether the opencode ACP agent is available (binary present AND executes). */
 export function isOpencodeAcpAvailable(): boolean {
   const bin = resolveOpencodeBinary();

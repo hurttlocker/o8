@@ -4,6 +4,7 @@ import { type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorBackendSetting } from './operator-defaults';
 import { MODEL_IDS } from '@/lib/models';
 import { useEntitlement } from '@/lib/entitlement/context';
+import { AcpModelPicker } from './AcpModelPicker';
 
 const EFFORT_LABELS: Record<ThinkingEffort, string> = {
   adaptive: 'adaptive',
@@ -53,9 +54,16 @@ type ComposerModelOption = {
 };
 
 type ComposerModelGroup = {
-  key: 'claude' | 'codex' | 'openclaw' | 'hermes' | 'o8';
+  key: 'claude' | 'codex' | 'openclaw' | 'hermes' | 'o8' | 'opencode';
   label: string;
   options: ComposerModelOption[];
+  /**
+   * True for houses whose model list is discovered from the running agent
+   * rather than declared here. Those render `AcpModelPicker` and leave
+   * `options` empty — hardcoding even a shortlist would drift from whatever
+   * the operator's install is actually authenticated for.
+   */
+  searchable?: boolean;
 };
 
 // Grouped by house (Q ruling 2026-07-11): a Claude drawer and a Codex drawer,
@@ -100,6 +108,16 @@ const COMPOSER_MODEL_GROUPS: ComposerModelGroup[] = [
     options: [
       { value: O8_FREE_MODEL_ID, label: 'o8', triggerLabel: 'o8', backend: 'o8', model: O8_FREE_MODEL_ID, sub: 'free · no usage' },
     ],
+  },
+  // The model-agnostic house (#1729). Not bound to a provider: its catalogue is
+  // whatever the local opencode install is authenticated for, read live from the
+  // ACP session, so the operator can orchestrate on OpenRouter/Google/xAI models
+  // — and keep working when the Claude and Codex subscriptions are exhausted.
+  {
+    key: 'opencode',
+    label: 'opencode',
+    options: [],
+    searchable: true,
   },
 ];
 
@@ -335,7 +353,7 @@ export function ModelThinkingChip({
   const modeLabel = collideActive ? 'Mixture of Agents' : ultraActive ? 'Fusion' : 'Solo';
   // Which house drawer is open in the model picker. Defaults to the active
   // backend's house so the current model is visible on open.
-  const [openHouse, setOpenHouse] = useState<'claude' | 'codex' | 'openclaw' | 'hermes' | 'o8'>(
+  const [openHouse, setOpenHouse] = useState<'claude' | 'codex' | 'openclaw' | 'hermes' | 'o8' | 'opencode'>(
     activeBackend === 'codex' || activeBackend === 'openclaw' || activeBackend === 'hermes' || activeBackend === 'o8'
       ? activeBackend
       : 'claude',
@@ -579,8 +597,28 @@ export function ModelThinkingChip({
                           <path d="m6 9 6 6 6-6" />
                         </svg>
                       </button>
+                      {/* A model-agnostic house has no fixed option list — its
+                          models come from the live agent, so it renders a
+                          searchable picker instead of a drawer of literals. */}
+                      {houseOpen && group.searchable ? (
+                        <AcpModelPicker
+                          backend={group.key}
+                          value={activeBackend === group.key ? (modelId ?? null) : null}
+                          width={MODEL_THINKING_MENU_WIDTH}
+                          onSelect={(picked: string) => {
+                            onModelChange?.(picked);
+                            if (activeBackend !== group.key) onBackendChange?.(group.key as OrchestratorBackendSetting);
+                            // Fan-out backends replace the selected backend at
+                            // send time, so a stale Collide/Swarm flag would
+                            // route the turn away from this pick entirely.
+                            onSetCollide?.(false);
+                            onSetSwarm?.(false);
+                            setOpen(false);
+                          }}
+                        />
+                      ) : null}
                       {/* Models nested under the open house. */}
-                      {houseOpen ? group.options.map((option) => {
+                      {houseOpen && !group.searchable ? group.options.map((option) => {
                         const active = activeBackend === option.backend && (!option.model || normalizedModelId === option.model);
                         return (
                           <button
