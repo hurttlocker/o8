@@ -1,0 +1,19 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "dictation",
+  "description": "Dictation pill overlay — app IPC only (#1734). The window had no capability before the app ACL manifest existed; it needs the app-command grant now that app commands are ACL-checked.",
+  "windows": [
+    "dictation"
+  ],
+  "remote": {
+    "urls": [
+      "http://localhost:*",
+      "http://127.0.0.1:*",
+      "https://localhost:*",
+      "https://127.0.0.1:*"
+    ]
+  },
+  "permissions": [
+    "allow-app-ipc"
+  ]
+}

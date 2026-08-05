@@ -2,9 +2,16 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "voice-settings",
   "description": "Standalone Voice settings window (Symon parity) opened from the dock (double-tap). Renders /voice-settings (the VoiceTab) independent of the main app, so voice settings + dictation history are reachable when the dock is all that's running. Needs a capability whose remote.urls matches the frontend origin AND whose windows includes 'voice-settings', or Tauri injects no __TAURI_INTERNALS__ and the settings can't read/write prefs.",
-  "windows": ["voice-settings"],
+  "windows": [
+    "voice-settings"
+  ],
   "remote": {
-    "urls": ["http://localhost:*", "http://127.0.0.1:*", "https://localhost:*", "https://127.0.0.1:*"]
+    "urls": [
+      "http://localhost:*",
+      "http://127.0.0.1:*",
+      "https://localhost:*",
+      "https://127.0.0.1:*"
+    ]
   },
   "permissions": [
     "core:default",
@@ -15,6 +22,7 @@
     "core:window:allow-close",
     "core:window:allow-hide",
     "core:window:allow-set-focus",
-    "core:window:allow-start-dragging"
+    "core:window:allow-start-dragging",
+    "allow-app-ipc"
   ]
 }

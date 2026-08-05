@@ -2,15 +2,26 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "overlay-windows",
   "description": "The four label-disciplined satellite webviews — dock (dictation pill), agent-partials (live transcription HUD), point-overlay (Symon pointer), spatial-ink (draw-on-screen ink). They were four separate capability files carrying BYTE-IDENTICAL permission sets and differing only in which window label they targeted; they are one capability with four windows now. Each window holds exactly the grants it held before — this is a merge, not a widening. WHY THEY NEED A CAPABILITY AT ALL: each renders a REMOTE-URL webview (the bundled-Next origin), and Tauri injects no __TAURI_INTERNALS__ into a remote-URL webview unless some capability's `remote.urls` matches that origin AND its `windows` includes the label. Without it isTauri() is false, listen()/emit() never attach, and the surface is inert — the dock paints its idle capsule but can never morph, the HUD stays blank, the pointer never paints, the operator can never draw. LABEL-DISCIPLINED: events only. NO window-control / updater / process / shell permissions — those stay main-only, enforced in dock_window.rs, agent_partials_window.rs, point_overlay.rs and spatial_ink_window.rs. WHY IT IS ONE FILE: every `remote.urls` entry is compiled into a urlpattern -> regex -> DFA at startup, inside generate_context!(), on the main thread. Four identical copies meant four times the compilation for zero additional grant. See the Speed PR.",
-  "windows": ["agent-partials", "dock", "point-overlay", "spatial-ink"],
+  "windows": [
+    "agent-partials",
+    "dock",
+    "point-overlay",
+    "spatial-ink"
+  ],
   "remote": {
-    "urls": ["http://localhost:*", "http://127.0.0.1:*", "https://localhost:*", "https://127.0.0.1:*"]
+    "urls": [
+      "http://localhost:*",
+      "http://127.0.0.1:*",
+      "https://localhost:*",
+      "https://127.0.0.1:*"
+    ]
   },
   "permissions": [
     "core:default",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "core:event:allow-emit",
-    "core:event:allow-emit-to"
+    "core:event:allow-emit-to",
+    "allow-app-ipc"
   ]
 }

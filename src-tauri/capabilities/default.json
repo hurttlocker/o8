@@ -2,9 +2,16 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "o8 default capabilities",
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "remote": {
-    "urls": ["http://localhost:*", "http://127.0.0.1:*", "https://localhost:*", "https://127.0.0.1:*"]
+    "urls": [
+      "http://localhost:*",
+      "http://127.0.0.1:*",
+      "https://localhost:*",
+      "https://127.0.0.1:*"
+    ]
   },
   "permissions": [
     "core:default",
@@ -34,7 +41,12 @@
     "clerk:default",
     {
       "identifier": "http:default",
-      "allow": [{ "url": "https://clerk.o8.run/*" }]
-    }
+      "allow": [
+        {
+          "url": "https://clerk.o8.run/*"
+        }
+      ]
+    },
+    "allow-app-ipc"
   ]
 }
