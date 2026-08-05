@@ -19,6 +19,25 @@ export const O8_CLIENT_ADDR_HEADER = 'x-o8-client-addr';
 
 const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 
+/**
+ * Origins the Tauri shell itself serves the boot/loader page from. WebKit
+ * (macOS/Linux) uses the custom scheme `tauri://localhost`; WebView2 (Windows)
+ * maps the same app content to `http(s)://tauri.localhost` instead. Exact
+ * strings only — deliberately NOT a `*.localhost` suffix match: browsers
+ * resolve every `*.localhost` name to loopback, so a suffix rule would let any
+ * web page served from e.g. `evil.localhost` through the gate.
+ */
+const TAURI_SHELL_ORIGINS = new Set([
+  'tauri://localhost',
+  'http://tauri.localhost',
+  'https://tauri.localhost',
+]);
+
+/** True when an Origin header value is the Tauri shell's own boot-page origin. */
+export function isTauriShellOrigin(origin?: string | null): boolean {
+  return origin != null && TAURI_SHELL_ORIGINS.has(origin);
+}
+
 /** True when a raw socket address (req.socket.remoteAddress) is loopback. */
 export function isLoopbackAddress(addr?: string | null): boolean {
   if (!addr) return false;

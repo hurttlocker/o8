@@ -6247,6 +6247,11 @@ const httpServer = createServer((req, res) => {
     `http://localhost:${apiPort}`,
     `http://127.0.0.1:${apiPort}`,
     'tauri://localhost',
+    // WebView2 (Windows) serves the same shell content from `tauri.localhost`
+    // instead of the tauri:// scheme. Exact strings — never a `*.localhost`
+    // suffix match (#1673 audit).
+    'http://tauri.localhost',
+    'https://tauri.localhost',
   ]);
   const origin = req.headers.origin ?? '';
   const isPrivateOrigin = /^https?:\/\/(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(origin);

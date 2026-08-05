@@ -321,6 +321,15 @@ describe('panelGateMiddleware — loopback trust', () => {
     );
     expect(res.status).toBe(401);
   });
+
+  it('does not treat the WebView2 shell origin as an operator credential', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://localhost:3001/api/orchestrator/threads', {
+        headers: { host: 'localhost:3001', origin: 'http://tauri.localhost' },
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
 });
 
 describe('panelGateMiddleware — socket truth is authoritative', () => {
@@ -786,6 +795,51 @@ describe('panelGateMiddleware — boot-gate identity probe (v0.1.600 stuck-boot 
       }),
     );
     expect(res.status).toBe(200);
+  });
+
+  // WebView2 (Windows) serves the shell from `http(s)://tauri.localhost`
+  // instead of the tauri:// scheme — the same boot probe must pass there
+  // (#1673 audit: the gate rejected the app's own requests on Windows).
+  it('passes the identity probe from the WebView2 boot-page origin (http)', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://127.0.0.1:47100/api/setup/identity', {
+        headers: {
+          host: '127.0.0.1:47100',
+          'x-o8-client-addr': '127.0.0.1',
+          origin: 'http://tauri.localhost',
+        },
+      }),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it('passes the identity probe from the WebView2 boot-page origin (https)', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://127.0.0.1:47100/api/setup/identity', {
+        headers: {
+          host: '127.0.0.1:47100',
+          'x-o8-client-addr': '127.0.0.1',
+          origin: 'https://tauri.localhost',
+        },
+      }),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  // Browsers resolve EVERY `*.localhost` name to loopback, so the shell
+  // origins are an exact-match set, never a suffix rule — a cross-site page
+  // served from another .localhost name stays outside the gate.
+  it('rejects the identity probe from a non-shell .localhost origin', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://127.0.0.1:47100/api/setup/identity', {
+        headers: {
+          host: '127.0.0.1:47100',
+          'x-o8-client-addr': '127.0.0.1',
+          origin: 'http://evil.localhost',
+        },
+      }),
+    );
+    expect(res.status).toBe(401);
   });
 
   it('still passes the identity probe from a loopback page origin (dev bridge)', () => {

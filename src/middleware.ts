@@ -31,6 +31,7 @@ import {
   hostHeaderToHostname,
   isLoopbackAddress,
   isLoopbackHostname,
+  isTauriShellOrigin,
 } from '@/lib/auth/loopback-request';
 import { getDataDir, migrateDataDirOnce } from '@/lib/data-dir-migration';
 // DB-free reader of the registry's derived active-token-hash file (#5). Importing
@@ -219,11 +220,13 @@ function isTrustedLocalRequest(req: NextRequest): boolean {
     } catch {
       // Malformed origin — fall through.
     }
-    // Tauri webview uses `tauri://localhost` as origin.
+    // Tauri webview boot-page origin: `tauri://localhost` on WebKit,
+    // `http(s)://tauri.localhost` on WebView2 (Windows). Exact-match set —
+    // never a `*.localhost` suffix rule (#1673 audit).
     // NOTE: `origin === req.nextUrl.origin` was deliberately REMOVED — a LAN
     // browser that loaded our page is same-origin too, which made the gate a
     // no-op for any phone/laptop on the network.
-    if (origin === 'tauri://localhost') return true;
+    if (isTauriShellOrigin(origin)) return true;
   }
 
   // sec-fetch-site from a browser is only meaningful when the page was served
@@ -263,7 +266,9 @@ function isTrustedLocalRequest(req: NextRequest): boolean {
 function readOriginIsLocalOrAbsent(req: NextRequest): boolean {
   const origin = req.headers.get('origin');
   if (!origin) return true;
-  if (origin === 'tauri://localhost') return true;
+  // Shell boot-page origins: tauri://localhost (WebKit) or
+  // http(s)://tauri.localhost (WebView2 on Windows) — exact-match set.
+  if (isTauriShellOrigin(origin)) return true;
   try {
     return isLoopbackHostname(new URL(origin).hostname);
   } catch {
