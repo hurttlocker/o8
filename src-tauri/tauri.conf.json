@@ -40,10 +40,6 @@
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": true,
-    "externalBin": [
-      "helpers/speech_recognizer",
-      "helpers/speech-local"
-    ],
     "resources": {
       "../out/server": "server/"
     },
