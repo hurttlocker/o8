@@ -158,11 +158,16 @@ export function OperatorDefaultsTab() {
   const foundersMode = founder !== null || plan === 'founder';
   // Hermes (ACP backend) only appears in the backend picker when its binary is present.
   const [hermesAvailable, setHermesAvailable] = useState(false);
+  const [opencodeAvailable, setOpencodeAvailable] = useState(false);
   useEffect(() => {
     let alive = true;
     fetch('/api/setup/orchestrator-backends')
       .then((r) => r.json())
-      .then((d) => { if (alive) setHermesAvailable(Boolean(d?.hermes)); })
+      .then((d) => {
+        if (!alive) return;
+        setHermesAvailable(Boolean(d?.hermes));
+        setOpencodeAvailable(Boolean(d?.opencode));
+      })
       .catch(() => { /* picker just omits Hermes */ });
     return () => { alive = false; };
   }, []);
@@ -507,6 +512,10 @@ export function OperatorDefaultsTab() {
                   // an existing choice stays visible + escapable.
                   ...(values.orchestratorBackend === 'openclaw' ? [{ value: 'openclaw', label: 'OpenClaw' }] : []),
                   ...(hermesAvailable || values.orchestratorBackend === 'hermes' ? [{ value: 'hermes', label: 'Hermes' }] : []),
+                  // Shown when the binary is present, mirroring Hermes. Without
+                  // this the composer could select opencode while Settings
+                  // rendered no selected segment at all.
+                  ...(opencodeAvailable || values.orchestratorBackend === 'opencode' ? [{ value: 'opencode', label: 'opencode' }] : []),
                   { value: 'collide', label: 'Collide' },
                 ]}
               />

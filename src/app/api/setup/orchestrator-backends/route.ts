@@ -9,14 +9,14 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 
-import { isHermesAvailable } from '@/lib/lane/orchestrator-backends/acp';
+import { isHermesAvailable, isOpencodeAcpAvailable } from '@/lib/lane/orchestrator-backends/acp';
 
 export async function GET() {
   try {
-    return NextResponse.json({ hermes: isHermesAvailable() });
+    return NextResponse.json({ hermes: isHermesAvailable(), opencode: isOpencodeAcpAvailable() });
   } catch (error) {
     return NextResponse.json(
-      { hermes: false, error: error instanceof Error ? error.message : String(error) },
+      { hermes: false, opencode: false, error: error instanceof Error ? error.message : String(error) },
       { status: 200 },
     );
   }

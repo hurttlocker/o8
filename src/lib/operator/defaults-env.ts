@@ -53,13 +53,13 @@ export function isWorkersUseBrain(value: unknown): value is WorkersUseBrain {
 
 /** Which backend drives the in-app Orchestrator. 'auto' = the legacy
  *  inAppOrchestratorEnabled derivation; a specific id forces that backend. */
-export type OrchestratorBackendSetting = 'auto' | 'codex' | 'claude' | 'openclaw' | 'hermes' | 'collide' | 'fable' | 'o8' | 'opencode';
+// Single source: the pure leaf, so client surfaces can share it without
+// dragging `server-only` into their bundle. Re-exported here for the existing
+// server call-sites.
+import { isOrchestratorBackendSetting, type OrchestratorBackendSetting } from './backend-setting';
 
-export function isOrchestratorBackendSetting(value: unknown): value is OrchestratorBackendSetting {
-  return value === 'auto' || value === 'codex' || value === 'claude' || value === 'openclaw'
-    || value === 'hermes' || value === 'collide' || value === 'fable' || value === 'o8'
-    || value === 'opencode';
-}
+export { isOrchestratorBackendSetting };
+export type { OrchestratorBackendSetting };
 
 /**
  * Which backend runs lane auto-reviews. 'follow' (default) rides the active

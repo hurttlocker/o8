@@ -14,13 +14,15 @@ interface OperatorDefaultsPayload {
   };
 }
 
-export type OrchestratorBackendSetting = 'auto' | 'codex' | 'claude' | 'openclaw' | 'hermes' | 'collide' | 'fable' | 'o8' | 'opencode';
+import {
+  isOrchestratorBackendSetting,
+  type OrchestratorBackendSetting,
+} from '@/lib/operator/backend-setting';
 
-export function isThoughtsOrchestratorBackendSetting(value: unknown): value is OrchestratorBackendSetting {
-  return value === 'auto' || value === 'codex' || value === 'claude' || value === 'openclaw'
-    || value === 'hermes' || value === 'collide' || value === 'fable' || value === 'o8'
-    || value === 'opencode';
-}
+export type { OrchestratorBackendSetting };
+
+// Named distinctly for its existing call-sites; the predicate itself is shared.
+export const isThoughtsOrchestratorBackendSetting = isOrchestratorBackendSetting;
 
 export interface ThoughtsOperatorDefaults {
   orchestratorModel: string;

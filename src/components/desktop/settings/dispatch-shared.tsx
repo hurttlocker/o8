@@ -35,7 +35,11 @@ export type SubscriptionProfile = 'both' | 'claude-only' | 'codex-only';
 export type DispatchRuntime = OrchestratorRuntime;
 export type ClassAComposer = 'auto' | 'haiku-cli' | 'sonnet-cli' | 'fastest';
 export type WorkersUseBrain = 'off' | 'auto' | 'all';
-export type OrchestratorBackendSetting = 'auto' | 'codex' | 'claude' | 'openclaw' | 'hermes' | 'collide';
+// Was a hand-maintained copy that had drifted three backends behind
+// (missing fable, o8, opencode) — see lib/operator/backend-setting.ts.
+import type { OrchestratorBackendSetting } from '@/lib/operator/backend-setting';
+
+export type { OrchestratorBackendSetting };
 export type ReviewerBackendSetting = 'follow' | 'codex' | 'claude';
 export type { UpdateAutoApply };
 export type CollideAggregator = 'auto' | 'claude' | 'codex';
