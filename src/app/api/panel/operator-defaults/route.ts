@@ -124,6 +124,20 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.orchestratorModel = model;
   }
 
+  // ACP model pins. Forwarded as-is — updateOperatorDefaults owns the real
+  // validation (isPlausibleAcpModelId, null = clear the pin). These were
+  // missing from this normalizer at first, so the Settings pickers' field-level
+  // save 400'd with "No supported fields" while the TOML path worked — the
+  // reachability trap: the setting existed everywhere except the path the UI
+  // actually posts through (live-hit on the shipped build, 2026-08-05).
+  for (const key of ['opencodeOrchestratorModel', 'opencodeWorkerModel'] as const) {
+    if (body[key] === undefined) continue;
+    if (body[key] !== null && typeof body[key] !== 'string') {
+      throw new Error(`${key} must be a model id string or null.`);
+    }
+    update[key] = body[key] as string | null;
+  }
+
   if (body.defaultDispatchRuntime !== undefined) {
     // Single-source guard (mirrors the orchestratorBackend pattern below): a
     // hand-rolled list here silently rejected cursor/grok/pi even though the
