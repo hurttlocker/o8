@@ -426,7 +426,5 @@ pub fn register_listeners(_app: &tauri::AppHandle) {}
 pub fn arm(_app: &tauri::AppHandle) {}
 #[cfg(not(target_os = "macos"))]
 pub fn disarm(_app: &tauri::AppHandle) {}
-#[cfg(not(target_os = "macos"))]
-pub fn take_spatial_context() -> Option<crate::agent::screen::SpatialContext> {
-    None
-}
+// No non-macOS take_spatial_context stub: its return type lives in the
+// macOS-gated agent module and its only caller is macOS-gated too (#1673).

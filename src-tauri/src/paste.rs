@@ -1561,6 +1561,7 @@ pub(crate) fn read_terminal_tail_via_accessibility() -> Option<String> {
     if text.is_empty() { None } else { Some(text) }
 }
 
+#[cfg(target_os = "macos")]
 pub(crate) fn grab_selection() -> Option<String> {
     // ── Strategy 1: Accessibility (no clipboard clobber) ──
     // AX APIs SIGILL/return-nothing off the main thread on macOS 15.7+ (same

@@ -4763,6 +4763,8 @@ fn make_window_zoom_instant(win: &tauri::WebviewWindow) {
 
 /// Read the voice preferences (`~/.o8/dictation.json`) for the settings panel,
 /// with API keys stripped. The config is mtime-cached, so writes apply live.
+/// macOS only — the pref store lives in the macOS-gated stt module (#1673).
+#[cfg(target_os = "macos")]
 #[tauri::command]
 fn voice_prefs_get() -> serde_json::Value {
     crate::stt::keys::config_public()
@@ -4771,7 +4773,8 @@ fn voice_prefs_get() -> serde_json::Value {
 /// Write one voice preference into `~/.o8/dictation.json` (read-modify-write).
 /// Takes effect on the next read without a relaunch (mtime cache). Keys:
 /// `ducking_enabled`, `sounds_enabled`, `dictionary` (array), `polish_instructions`,
-/// `reading_speed`, `tts_provider`, `tts_voice_id`, etc.
+/// `reading_speed`, `tts_provider`, `tts_voice_id`, etc. macOS only (#1673).
+#[cfg(target_os = "macos")]
 #[tauri::command]
 fn voice_prefs_set(key: String, value: serde_json::Value) -> Result<(), String> {
     crate::stt::keys::set_pref(&key, value)
@@ -5923,10 +5926,15 @@ pub fn run() {
             tts_speak,
             #[cfg(target_os = "macos")]
             symon_speak_status,
+            #[cfg(target_os = "macos")]
             tts_stop,
+            #[cfg(target_os = "macos")]
             tts_toggle_pause,
+            #[cfg(target_os = "macos")]
             tts_set_speed,
+            #[cfg(target_os = "macos")]
             tts_is_active,
+            #[cfg(target_os = "macos")]
             dock_set_expanded,
             dock_set_hit_rect,
             #[cfg(target_os = "macos")]
@@ -5947,8 +5955,11 @@ pub fn run() {
             browser_view_hide,
             #[cfg(target_os = "macos")]
             browser_view_show,
+            #[cfg(target_os = "macos")]
             open_voice_settings,
+            #[cfg(target_os = "macos")]
             voice_prefs_get,
+            #[cfg(target_os = "macos")]
             voice_prefs_set,
             dictation_history_get,
             dictation_history_clear,
