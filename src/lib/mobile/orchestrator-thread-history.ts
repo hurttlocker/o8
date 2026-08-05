@@ -64,6 +64,62 @@ function readHistoryRecord(tabId: string): OrchestratorHistoryRecord | null {
  * has no file yet or no usable turns. Reads straight from disk so it reflects
  * the user message ws-server persists just before calling the backend.
  */
+/**
+ * One message with its attribution — who actually produced it.
+ *
+ * `backend`/`model` are undefined for user messages (a human wrote them) and
+ * for assistant messages written before per-message stamping landed
+ * (2026-08-04). Undefined means UNKNOWN. Do not substitute the thread's
+ * current backend: that value moves with the newest agent, and using it as a
+ * fallback re-creates the exact mis-attribution the stamp prevents.
+ */
+export interface AttributedThreadMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  backend?: string;
+  model?: string;
+}
+
+/**
+ * The thread's messages WITH attribution, plus the indices where the
+ * responding agent changed — the seams a handoff renders at.
+ *
+ * A seam is only reported between two messages that both carry attribution.
+ * An unstamped legacy turn adjacent to a stamped one is not a handoff; it is
+ * missing data, and drawing a seam there would invent an event.
+ */
+export function readAttributedThreadMessages(
+  tabId: string | null | undefined,
+): { messages: AttributedThreadMessage[]; seams: number[] } {
+  if (!tabId) return { messages: [], seams: [] };
+  const record = readHistoryRecord(tabId);
+  if (!record?.messages) return { messages: [], seams: [] };
+
+  const messages: AttributedThreadMessage[] = [];
+  for (const message of record.messages) {
+    if (message.role !== 'user' && message.role !== 'assistant') continue;
+    if (typeof message.content !== 'string' || message.content.trim().length === 0) continue;
+    messages.push({
+      role: message.role,
+      content: message.content,
+      backend: typeof message.backend === 'string' && message.backend ? message.backend : undefined,
+      model: typeof message.model === 'string' && message.model ? message.model : undefined,
+    });
+  }
+
+  const seams: number[] = [];
+  let previous: { backend?: string; model?: string } | null = null;
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (message.role !== 'assistant' || !message.backend) continue;
+    if (previous?.backend && (previous.backend !== message.backend || previous.model !== message.model)) {
+      seams.push(index);
+    }
+    previous = { backend: message.backend, model: message.model };
+  }
+  return { messages, seams };
+}
+
 export function readOrchestratorThreadMessages(
   tabId: string | null | undefined,
 ): Array<{ role: 'user' | 'assistant'; content: string }> {
@@ -571,6 +627,13 @@ export function upsertMobileOrchestratorAssistantMessage(input: {
   const lastTimestamp = messages.length > 0 ? (messages[messages.length - 1]?.timestamp ?? 0) : 0;
   const timestamp = Math.max(baseTimestamp, lastTimestamp + 1);
 
+  // Attribution for THIS turn. Deliberately the explicit inputs only: falling
+  // back to `existing.backend` would stamp the previous agent's identity onto a
+  // message it did not write, which is precisely the mis-attribution this
+  // stamping exists to prevent. Unknown stays undefined.
+  const turnBackend = normalizeBackend(input.backend) ?? undefined;
+  const turnModel = typeof input.model === 'string' && input.model.trim() ? input.model.trim() : undefined;
+
   const existingIndex = messages.findIndex((m) => m?.id === input.messageId);
   let nextMessages: ChatHistoryMessage[];
   if (existingIndex >= 0) {
@@ -580,6 +643,10 @@ export function upsertMobileOrchestratorAssistantMessage(input: {
       role: 'assistant',
       content,
       persistedVersion: (nextMessages[existingIndex]?.persistedVersion ?? 0) + 1,
+      // Streaming upserts re-enter here many times per turn; keep whatever was
+      // stamped first rather than letting a later call with no backend blank it.
+      backend: nextMessages[existingIndex]?.backend ?? turnBackend,
+      model: nextMessages[existingIndex]?.model ?? turnModel,
     };
   } else {
     // Defensive: if the most recent assistant message has identical content,
@@ -597,6 +664,8 @@ export function upsertMobileOrchestratorAssistantMessage(input: {
           content,
           timestamp,
           persistedVersion: 1,
+          backend: turnBackend,
+          model: turnModel,
         },
       ];
     }

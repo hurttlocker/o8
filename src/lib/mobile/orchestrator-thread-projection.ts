@@ -16,6 +16,21 @@ export type ChatHistoryMessage = {
   content?: string;
   timestamp?: number;
   persistedVersion?: number;
+  /**
+   * Which backend + model produced THIS message.
+   *
+   * The record-level `backend`/`model` are "what runs next" and are overwritten
+   * on every turn, so once a thread changes hands they describe the newest
+   * agent and silently re-attribute every earlier turn to it. Per-message
+   * stamping is the only thing that keeps a mixed-agent transcript honest, and
+   * it cannot be backfilled — an unstamped turn is unattributable forever.
+   *
+   * Absent on messages written before 2026-08-04 and on user messages (a human
+   * wrote those). Readers must treat undefined as "unknown", never as "the
+   * thread's current backend".
+   */
+  backend?: string;
+  model?: string;
 };
 
 export type OrchestratorHistoryRecord = {
