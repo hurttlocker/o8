@@ -63,6 +63,12 @@ jobs:
           NEXT_TELEMETRY_DISABLED: 1
         with:
           args: --config src-tauri/tauri.portci.conf.json
+      # Instrumentation: round 3 showed the bundler PRINTING built installer
+      # paths while the upload step found the directory empty — list what
+      # actually exists on disk between the two so the discrepancy is visible.
+      - if: always()
+        shell: bash
+        run: ls -laR src-tauri/target/release/bundle 2>/dev/null || echo "bundle dir missing at upload time"
       # Upload every produced bundle form — first runs showed the exact
       # artifact names vary (AppImage vs AppImage.tar.gz etc.), so grab the
       # whole bundle tree and fail loudly if the build produced nothing.
