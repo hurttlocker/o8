@@ -32,7 +32,7 @@ import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
  * Gateway free model so the operator can exercise the full orchestrator UI with
  * no subscription draw; it has no tools and never dispatches (v1).
  */
-export type OrchestratorBackendId = 'codex' | 'claude' | 'openclaw' | 'hermes' | 'acp' | 'collide' | 'fable' | 'o8';
+export type OrchestratorBackendId = 'codex' | 'claude' | 'openclaw' | 'hermes' | 'acp' | 'collide' | 'fable' | 'o8' | 'opencode';
 
 /**
  * The single runtime validation point for the backend-id union. Callers that
@@ -42,7 +42,8 @@ export type OrchestratorBackendId = 'codex' | 'claude' | 'openclaw' | 'hermes' |
  */
 export function isOrchestratorBackendId(value: unknown): value is OrchestratorBackendId {
   return value === 'codex' || value === 'claude' || value === 'openclaw' || value === 'hermes'
-    || value === 'acp' || value === 'collide' || value === 'fable' || value === 'o8';
+    || value === 'acp' || value === 'collide' || value === 'fable' || value === 'o8'
+    || value === 'opencode';
 }
 
 export type OrchestratorSessionStatus = 'ready' | 'busy' | 'dead';

@@ -37,6 +37,13 @@ export const ORCHESTRATOR_BACKEND_BILLING: Record<OrchestratorBackendId, Orchest
   // no subscription pool, no per-token operator billing. `free` = no
   // metered-window policies apply (this is the first shipping `free` backend).
   o8: 'free',
+  // opencode routes through the operator's OWN provider credentials (OpenRouter,
+  // Google, xAI, or opencode's gateway), so cost tracks the model they pick,
+  // not a pool o8 knows about. `metered` is the safe read: it applies the
+  // decisions-only window policies, which cost a little context and never cost
+  // money. Claiming `subscription` here would disable those policies on a rail
+  // that can be genuinely per-token billed.
+  opencode: 'metered',
 };
 
 export function orchestratorBackendBillingClass(id: OrchestratorBackendId): OrchestratorBillingClass {

@@ -68,9 +68,10 @@ async function partB(): Promise<void> {
     assert.strictEqual(init.protocolVersion, 1, 'live hermes initialize → protocolVersion 1');
     assert(init.agentInfo?.name?.includes('hermes'), 'live hermes agentInfo.name is hermes');
 
-    const sessionId = await client.newSession(process.cwd(), []);
+    const { sessionId, configOptions } = await client.newSession(process.cwd(), []);
     assert(typeof sessionId === 'string' && sessionId.length > 0, 'live hermes session/new → sessionId');
-    console.log(`[acp-client-smoke] Part B (live hermes handshake) PASS — agent=${init.agentInfo?.name} v${init.agentInfo?.version}, session=${sessionId.slice(0, 8)}…`);
+    assert(Array.isArray(configOptions), 'live hermes session/new → configOptions array (may be empty)');
+    console.log(`[acp-client-smoke] Part B (live hermes handshake) PASS — agent=${init.agentInfo?.name} v${init.agentInfo?.version}, session=${sessionId.slice(0, 8)}…, configOptions=${configOptions.length}`);
   } finally {
     client.kill();
   }

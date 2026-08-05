@@ -12,7 +12,11 @@ export type DispatchDefaultOrchestratorBackend =
   // The free conversational backend never dispatches, but it remains a valid
   // orchestratorBackend setting while the worker default independently falls
   // through to Codex.
-  | 'o8';
+  | 'o8'
+  // opencode DOES dispatch (its ACP session loads o8's operator MCP server), so
+  // unlike 'o8' it is only listed here because the worker default is resolved
+  // independently — orchestrating on opencode does not force opencode workers.
+  | 'opencode';
 
 export interface ResolveDefaultDispatchRuntimeInput {
   explicitRuntime?: OrchestratorRuntime | null;

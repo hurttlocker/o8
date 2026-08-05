@@ -14,11 +14,12 @@ interface OperatorDefaultsPayload {
   };
 }
 
-export type OrchestratorBackendSetting = 'auto' | 'codex' | 'claude' | 'openclaw' | 'hermes' | 'collide' | 'fable' | 'o8';
+export type OrchestratorBackendSetting = 'auto' | 'codex' | 'claude' | 'openclaw' | 'hermes' | 'collide' | 'fable' | 'o8' | 'opencode';
 
 export function isThoughtsOrchestratorBackendSetting(value: unknown): value is OrchestratorBackendSetting {
   return value === 'auto' || value === 'codex' || value === 'claude' || value === 'openclaw'
-    || value === 'hermes' || value === 'collide' || value === 'fable' || value === 'o8';
+    || value === 'hermes' || value === 'collide' || value === 'fable' || value === 'o8'
+    || value === 'opencode';
 }
 
 export interface ThoughtsOperatorDefaults {

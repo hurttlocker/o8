@@ -41,6 +41,27 @@ export interface AcpInitializeResult {
 
 export type AcpStopReason = 'end_turn' | 'max_tokens' | 'max_turn_requests' | 'refusal' | 'cancelled' | string;
 
+/**
+ * One entry of `session/new`'s `configOptions` — the agent's own settings surface.
+ * opencode 1.4.3 returns `model` (a select carrying its FULL model catalogue plus
+ * the current value) and `mode`. This is why o8 never shells out to
+ * `opencode models`: the live session hands us the list, already scoped to
+ * whatever providers that install is authenticated for.
+ */
+export interface AcpConfigOption {
+  id: string;
+  name?: string;
+  category?: string;
+  type?: string;
+  currentValue?: string;
+  options?: Array<{ value: string; name?: string }>;
+}
+
+export interface AcpNewSessionResult {
+  sessionId: string;
+  configOptions: AcpConfigOption[];
+}
+
 interface JsonRpcResponse {
   jsonrpc: '2.0';
   id: number;
@@ -56,6 +77,37 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function str(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
+}
+
+/**
+ * Defensively narrow `session/new`'s `configOptions`; unknown shapes are dropped.
+ * PURE + exported so the model-picker contract is unit-tested against the real
+ * agent payload rather than against a hand-built fixture of itself.
+ */
+export function parseConfigOptions(value: unknown): AcpConfigOption[] {
+  if (!Array.isArray(value)) return [];
+  const parsed: AcpConfigOption[] = [];
+  for (const entry of value) {
+    const rec = asRecord(entry);
+    const id = rec ? str(rec.id) : null;
+    if (!rec || !id) continue;
+    const rawOptions = Array.isArray(rec.options) ? rec.options : [];
+    const options: Array<{ value: string; name?: string }> = [];
+    for (const opt of rawOptions) {
+      const o = asRecord(opt);
+      const v = o ? str(o.value) : null;
+      if (v) options.push({ value: v, name: str(o?.name) ?? undefined });
+    }
+    parsed.push({
+      id,
+      name: str(rec.name) ?? undefined,
+      category: str(rec.category) ?? undefined,
+      type: str(rec.type) ?? undefined,
+      currentValue: str(rec.currentValue) ?? undefined,
+      options,
+    });
+  }
+  return parsed;
 }
 
 /** Extract the text from an ACP ContentBlock ({type:'text', text}) defensively. */
@@ -235,11 +287,25 @@ export class AcpClient {
     };
   }
 
-  async newSession(cwd: string, mcpServers: AcpMcpServer[] = []): Promise<string> {
+  async newSession(cwd: string, mcpServers: AcpMcpServer[] = []): Promise<AcpNewSessionResult> {
     const result = asRecord(await this.request('session/new', { cwd, mcpServers }));
     const sessionId = result ? str(result.sessionId) : null;
     if (!sessionId) throw new Error('ACP session/new returned no sessionId');
-    return sessionId;
+    return { sessionId, configOptions: parseConfigOptions(result?.configOptions) };
+  }
+
+  /**
+   * Switch the session's model in place — `session/set_model` takes
+   * `{ sessionId, modelId }` (verified against opencode 1.4.3; `{model}` and
+   * `{model:{modelId}}` both fail param validation). Live on the running
+   * session, so the composer can change models mid-thread without respawning
+   * the agent or losing conversation context.
+   *
+   * Agents that don't implement the method reject with "Method not found";
+   * callers treat that as "this agent has no model axis" rather than fatal.
+   */
+  async setModel(sessionId: string, modelId: string): Promise<void> {
+    await this.request('session/set_model', { sessionId, modelId });
   }
 
   /** Run one prompt turn. Resolves with the stopReason when the agent finishes;

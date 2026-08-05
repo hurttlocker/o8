@@ -21,7 +21,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 
-import { AcpClient, mapStopReason, type AcpMcpServer } from '@/lib/acp/client';
+import { AcpClient, mapStopReason, type AcpConfigOption, type AcpMcpServer } from '@/lib/acp/client';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { toOpenclawJson } from '@/lib/mcp/tool-spine/emit-openclaw';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
@@ -46,12 +46,42 @@ interface AcpSession {
   sessionId: string | null;
   status: 'ready' | 'busy' | 'dead';
   createdAt: number;
+  /** `session/new`'s configOptions — the agent's own model/mode catalogue. */
+  configOptions: AcpConfigOption[];
+  /** Last model pushed via `session/set_model`, so we only switch on change. */
+  appliedModel: string | null;
   /** The current turn's event sink — set by sendTurn, cleared on completion. */
   onEvent?: (event: OrchestratorEvent) => void;
 }
 
 const sessions = new Map<string, AcpSession>();
 let acpRealtimeSeq = 0;
+
+/**
+ * Last-seen `configOptions` per backend id, so the model picker can render
+ * without holding a live session open. Populated on every handshake; empty
+ * until the operator's first turn on that backend (the picker falls back to
+ * "no models discovered yet" rather than a hardcoded list).
+ */
+const sessionConfigCache = new Map<OrchestratorBackendId, AcpConfigOption[]>();
+
+/** The `model` select out of a configOptions array, if the agent exposes one. */
+function modelConfigOption(options: AcpConfigOption[]): AcpConfigOption | null {
+  return options.find((opt) => opt.id === 'model' || opt.category === 'model') ?? null;
+}
+
+/**
+ * The models an ACP backend last reported it can run. Empty when that backend
+ * has never completed a handshake in this process.
+ */
+export function acpBackendModels(id: OrchestratorBackendId): Array<{ value: string; name?: string }> {
+  return modelConfigOption(sessionConfigCache.get(id) ?? [])?.options ?? [];
+}
+
+/** Whichever model the backend reported as current at its last handshake. */
+export function acpBackendCurrentModel(id: OrchestratorBackendId): string | null {
+  return modelConfigOption(sessionConfigCache.get(id) ?? [])?.currentValue ?? null;
+}
 
 function sessionKey(backendId: string, repoPath: string, threadId?: string | null): string {
   return `${backendId}::${repoPath}::${threadId ?? 'default'}`;
@@ -132,6 +162,8 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
       sessionId: null,
       status: 'ready',
       createdAt: Date.now(),
+      configOptions: [],
+      appliedModel: null,
       client: new AcpClient({
         command: launch.command,
         args: launch.args,
@@ -154,8 +186,33 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
   async function ensureHandshake(session: AcpSession): Promise<string> {
     if (session.sessionId) return session.sessionId;
     await session.client.initialize();
-    session.sessionId = await session.client.newSession(session.repoPath, o8McpServersForAcp(session.repoPath));
+    const created = await session.client.newSession(session.repoPath, o8McpServersForAcp(session.repoPath));
+    session.sessionId = created.sessionId;
+    session.configOptions = created.configOptions;
+    // The agent reports what it booted with, so a composer pick that already
+    // matches costs no set_model round-trip on the first turn.
+    session.appliedModel = modelConfigOption(session.configOptions)?.currentValue ?? null;
+    if (session.configOptions.length) {
+      sessionConfigCache.set(id, session.configOptions);
+    }
     return session.sessionId;
+  }
+
+  /**
+   * Push the composer's model onto the live session. Skipped when unchanged, and
+   * never fatal: an agent without a model axis rejects `session/set_model` with
+   * "Method not found", which must not take the turn down with it — the turn
+   * simply runs on whatever the agent already had.
+   */
+  async function applyModel(session: AcpSession, sessionId: string, model?: string): Promise<void> {
+    const requested = model?.trim();
+    if (!requested || requested === session.appliedModel) return;
+    try {
+      await session.client.setModel(sessionId, requested);
+      session.appliedModel = requested;
+    } catch (err) {
+      console.log(`[acp-orchestrator] ${label} refused model ${requested}: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   return {
@@ -172,7 +229,21 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
     async sendTurn(repoPath, message, onEvent, options?: OrchestratorTurnOptions): Promise<void> {
       const session = ensureSync(repoPath, options?.threadId);
       session.status = 'busy';
-      session.onEvent = onEvent;
+
+      // Silent-empty-turn guard. opencode's `session/set_model` validates
+      // NOTHING — a model the install isn't authenticated for, and even a
+      // outright bogus id, both return success and then produce a turn that
+      // ends `end_turn` with zero assistant output (verified 2026-08-04 against
+      // opencode 1.4.3 with `opencode/minimax-m2.5-free` and
+      // `openrouter/does/not-exist`). Reporting that as a clean `done` shows the
+      // operator an empty reply and no reason, which is the worst outcome. Count
+      // real output so a turn that produced none can say why.
+      let produced = 0;
+      const countingOnEvent = (event: OrchestratorEvent) => {
+        if (event.type === 'text' || event.type === 'thinking' || event.type === 'tool_use') produced += 1;
+        onEvent(event);
+      };
+      session.onEvent = countingOnEvent;
 
       const watchdog = setTimeout(() => {
         session.status = 'dead';
@@ -186,8 +257,18 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
 
       try {
         const sessionId = await ensureHandshake(session);
+        await applyModel(session, sessionId, options?.model);
         const stopReason = await session.client.prompt(sessionId, message);
-        const doneOrError = mapStopReason(stopReason, sessionId);
+        const doneOrError = produced === 0 && stopReason === 'end_turn'
+          ? ({
+            type: 'error',
+            error: session.appliedModel
+              ? `${label} finished the turn without producing any output on model "${session.appliedModel}". `
+                + 'That model is usually not authenticated for this install, or the id does not exist — '
+                + 'this agent accepts unknown model ids silently. Pick a different model.'
+              : `${label} finished the turn without producing any output.`,
+          } satisfies OrchestratorEvent)
+          : mapStopReason(stopReason, sessionId);
         onEvent(doneOrError);
         publishAcpLifecycle(id, session, doneOrError);
       } catch (err) {
@@ -246,6 +327,66 @@ export const hermesBackend: OrchestratorBackend = makeAcpBackend({
     return { command: bin, args: ['acp', '--accept-hooks'], env: { HOME: governed.home } };
   },
 });
+
+/** Resolve the `opencode` binary (PATH-ish); null when not installed. */
+function resolveOpencodeBinary(): string | null {
+  for (const candidate of [
+    process.env.O8_OPENCODE_BIN,
+    `${process.env.HOME ?? ''}/.npm-global/bin/opencode`,
+    '/opt/homebrew/bin/opencode',
+    '/usr/local/bin/opencode',
+    `${process.env.HOME ?? ''}/.local/bin/opencode`,
+    `${process.env.HOME ?? ''}/.opencode/bin/opencode`,
+  ]) {
+    if (candidate && existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
+ * opencode via `opencode acp` — the model-agnostic orchestrator.
+ *
+ * Unlike every other backend, this one is not bound to a provider house: the
+ * session's own `configOptions.model` select is the catalogue, scoped to
+ * whatever providers the local install is authenticated for. Verified against
+ * opencode 1.4.3 on 2026-08-04:
+ *   - NDJSON JSON-RPC on stdio, protocolVersion 1 — the shape AcpClient sends;
+ *   - o8's operator MCP server loads over stdio (`toolCount=92`), so this
+ *     backend can genuinely dispatch rather than only converse;
+ *   - `session/new` returns 864 model options including `/low` + `/high`
+ *     reasoning variants, so thinking level rides the model id;
+ *   - `session/set_model {sessionId, modelId}` switches models on the live
+ *     session, no respawn.
+ *
+ * `mcpCapabilities` advertises only `{http, sse}`, which reads like stdio is
+ * unsupported. It is not — stdio is the ACP baseline and those flags mark the
+ * extra transports. Don't "fix" the injection path on the strength of that.
+ */
+export const opencodeBackend: OrchestratorBackend = makeAcpBackend({
+  id: 'opencode',
+  label: 'opencode',
+  resolveLaunch: () => {
+    const bin = resolveOpencodeBinary();
+    if (!bin) return null;
+    return { command: bin, args: ['acp'] };
+  },
+});
+
+/** Whether the opencode ACP agent is available (binary present AND executes). */
+export function isOpencodeAcpAvailable(): boolean {
+  const bin = resolveOpencodeBinary();
+  if (!bin) return false;
+  if (opencodeHealthCache !== null) return opencodeHealthCache;
+  try {
+    const probe = spawnSync(bin, ['--version'], { timeout: 5_000, stdio: 'ignore' });
+    opencodeHealthCache = probe.status === 0;
+  } catch {
+    opencodeHealthCache = false;
+  }
+  return opencodeHealthCache;
+}
+
+let opencodeHealthCache: boolean | null = null;
 
 /** Generic ACP escape hatch — any ACP agent via O8_ACP_COMMAND / O8_ACP_ARGS. */
 export const acpBackend: OrchestratorBackend = makeAcpBackend({

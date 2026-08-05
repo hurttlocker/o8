@@ -17,7 +17,7 @@ import { resolveOrchestratorBackendId, resolveReviewerBackendId } from './active
 import { claudeBackend } from './claude';
 import { codexBackend } from './codex';
 import { openclawBackend } from './openclaw';
-import { acpBackend, hermesBackend } from './acp';
+import { acpBackend, hermesBackend, opencodeBackend } from './acp';
 import { collideBackend } from './moa';
 import { fableBackend } from './fable';
 import { o8Backend } from './o8';
@@ -48,6 +48,7 @@ const BACKENDS: Partial<Record<OrchestratorBackendId, OrchestratorBackend>> = {
   openclaw: withOrchestrationMode(openclawBackend),
   hermes: withOrchestrationMode(hermesBackend),
   acp: withOrchestrationMode(acpBackend),
+  opencode: withOrchestrationMode(opencodeBackend),
   collide: withOrchestrationMode(collideBackend),
   fable: withOrchestrationMode(fableBackend),
   o8: withOrchestrationMode(o8Backend),
