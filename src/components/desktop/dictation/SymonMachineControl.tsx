@@ -13,6 +13,86 @@ interface ListedMachine extends SymonMachineIdentity {
   available: boolean;
 }
 
+/**
+ * Minimized state (Q 2026-08-05): the orb can collapse into a thin line in
+ * the status bar near the "?" — persisted so it survives reloads, synced
+ * across the orb and the status-bar line via a window event.
+ */
+const ORB_MINIMIZED_KEY = 'o8:symon-orb:minimized';
+const ORB_MINIMIZED_EVENT = 'o8:symon-orb-minimized';
+
+export function isSymonOrbMinimized(): boolean {
+  try { return window.localStorage.getItem(ORB_MINIMIZED_KEY) === '1'; } catch { return false; }
+}
+
+export function setSymonOrbMinimized(minimized: boolean): void {
+  try {
+    if (minimized) window.localStorage.setItem(ORB_MINIMIZED_KEY, '1');
+    else window.localStorage.removeItem(ORB_MINIMIZED_KEY);
+  } catch { /* localStorage unavailable — session-only */ }
+  window.dispatchEvent(new CustomEvent(ORB_MINIMIZED_EVENT, { detail: { minimized } }));
+}
+
+export function useSymonOrbMinimized(): boolean {
+  const [minimized, setMinimized] = useState(false);
+  useEffect(() => {
+    setMinimized(isSymonOrbMinimized());
+    const onChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ minimized?: boolean }>).detail;
+      setMinimized(detail?.minimized === true);
+    };
+    window.addEventListener(ORB_MINIMIZED_EVENT, onChange);
+    return () => window.removeEventListener(ORB_MINIMIZED_EVENT, onChange);
+  }, []);
+  return minimized;
+}
+
+/**
+ * The thin status-bar line the orb collapses into — mounted by
+ * DesktopStatusBar beside the "?" button. Renders nothing while the orb is
+ * expanded. Click restores the orb to his seat by the composer.
+ */
+export function SymonOrbStatusLine() {
+  const minimized = useSymonOrbMinimized();
+  const [hovered, setHovered] = useState(false);
+  if (!minimized) return null;
+  return (
+    <button
+      type="button"
+      aria-label="Restore Symon"
+      title="Symon is minimized — click to restore"
+      onClick={() => setSymonOrbMinimized(false)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 22,
+        height: 22,
+        borderRadius: 6,
+        borderWidth: 0,
+        background: hovered ? 'var(--t-hover)' : 'transparent',
+        cursor: 'pointer',
+        padding: 0,
+        transition: 'background 120ms ease',
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          width: 14,
+          height: 3,
+          borderRadius: 999,
+          background: 'conic-gradient(from 210deg at 50% 50%, #88d1f1, #b1b4e5 32%, #f5b8c4 62%, #f4c977 82%, #88d1f1)',
+          opacity: hovered ? 1 : 0.75,
+          transition: 'opacity 120ms ease',
+        }}
+      />
+    </button>
+  );
+}
+
 export function SymonMachineControl() {
   const prefersReducedMotion = useReducedMotion();
   const [active, setActive] = useState<SymonMachineIdentity>(DEFAULT_SYMON_MACHINE);
@@ -23,7 +103,39 @@ export function SymonMachineControl() {
   const [switching, setSwitching] = useState(false);
   const [error, setError] = useState('');
   const [open, setOpen] = useState(false);
+  const [rightOffset, setRightOffset] = useState(16);
+  const minimized = useSymonOrbMinimized();
   const rootRef = useRef<HTMLDivElement>(null);
+
+  // Track the CENTER pane's right edge (TileContainer's data-o8-workspace
+  // root) so the orb keeps his seat beside the composer when the right panel
+  // opens/closes/resizes. ResizeObserver catches panel drags; the re-query on
+  // each pass survives the pane element being rebuilt across layout changes.
+  useEffect(() => {
+    let observer: ResizeObserver | null = null;
+    let observed: Element | null = null;
+    const compute = () => {
+      const pane = document.querySelector('[data-o8-workspace="1"]');
+      if (pane !== observed && observer) {
+        if (observed) observer.unobserve(observed);
+        if (pane) observer.observe(pane);
+        observed = pane;
+      }
+      if (!pane) { setRightOffset(16); return; }
+      const rect = pane.getBoundingClientRect();
+      setRightOffset(Math.max(16, Math.round(window.innerWidth - rect.right) + 16));
+    };
+    observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(compute) : null;
+    compute();
+    window.addEventListener('resize', compute);
+    const requery = setInterval(compute, 2000);
+    return () => {
+      window.removeEventListener('resize', compute);
+      clearInterval(requery);
+      observer?.disconnect();
+      observer = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -76,6 +188,7 @@ export function SymonMachineControl() {
   }, [open]);
 
   if (!isTauri()) return null;
+  if (minimized) return null;
 
   return (
     <div
@@ -84,8 +197,12 @@ export function SymonMachineControl() {
       style={{
         position: 'fixed',
         bottom: 120,
-        right: 16,
+        // Anchored to the CENTER pane's right edge, not the viewport — with
+        // the right panel open, a viewport anchor floated the orb over the
+        // panel instead of his usual seat beside the composer (Q 2026-08-05).
+        right: rightOffset,
         zIndex: 50,
+        transition: 'right 220ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
     >
       <AnimatePresence>
@@ -158,6 +275,39 @@ export function SymonMachineControl() {
                 </option>
               ))}
             </select>
+            <button
+              type="button"
+              aria-label="Minimize Symon to the status bar"
+              onClick={() => { setOpen(false); setSymonOrbMinimized(true); }}
+              onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover)'; event.currentTarget.style.color = 'var(--t-text)'; }}
+              onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; event.currentTarget.style.color = 'var(--t-text-muted)'; }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 7,
+                width: '100%',
+                minHeight: 24,
+                marginTop: 7,
+                paddingTop: 0,
+                paddingRight: 6,
+                paddingBottom: 0,
+                paddingLeft: 6,
+                borderRadius: 7,
+                borderWidth: 0,
+                background: 'transparent',
+                color: 'var(--t-text-muted)',
+                cursor: 'pointer',
+                textAlign: 'left',
+                fontFamily: 'var(--font-sans-system)',
+                fontSize: 11.5,
+                fontWeight: 400,
+                letterSpacing: '-0.1px',
+                transition: 'background 120ms ease, color 120ms ease',
+              }}
+            >
+              <span aria-hidden style={{ display: 'inline-flex', width: 12, height: 2.5, borderRadius: 999, background: 'currentColor', opacity: 0.7, flexShrink: 0 }} />
+              Minimize to status bar
+            </button>
           </motion.div>
         ) : null}
       </AnimatePresence>
