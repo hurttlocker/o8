@@ -161,7 +161,7 @@ export const STATUS_TOOLS: McpTool[] = [
         },
         orchestratorBackend: {
           type: 'string',
-          enum: ['auto', 'codex', 'claude', 'openclaw', 'hermes', 'collide', 'fable'],
+          enum: ['auto', 'codex', 'claude', 'openclaw', 'hermes', 'collide', 'fable', 'opencode'],
           description: 'Active in-app orchestrator backend. Use "codex" for Codex GPT-5.5, "claude" for Claude Code, or "auto" for legacy toggle resolution.',
         },
         collideAggregator: {
@@ -201,6 +201,14 @@ export const STATUS_TOOLS: McpTool[] = [
         defaultDispatchModel: {
           type: 'string',
           description: 'Default worker model id. Pass an empty string to restore the selected runtime default.',
+        },
+        opencodeOrchestratorModel: {
+          type: 'string',
+          description: 'Pinned opencode orchestrator model id, e.g. "openrouter/deepseek/deepseek-v4-flash". Pass an empty string to clear the pin.',
+        },
+        opencodeWorkerModel: {
+          type: 'string',
+          description: 'Pinned opencode worker model id. Pass an empty string to clear the pin.',
         },
         workersUseBrain: {
           type: 'string',
@@ -244,6 +252,8 @@ const OPERATOR_DEFAULTS_KEYS = [
   'parallelCap',
   'defaultDispatchRuntime',
   'defaultDispatchModel',
+  'opencodeOrchestratorModel',
+  'opencodeWorkerModel',
   'workersUseBrain',
   'crossHouseWorkerFallback',
   'healBotEnabled',
@@ -275,6 +285,10 @@ export async function handleOperatorDefaults(args: Record<string, unknown>): Pro
     const update: Record<string, unknown> = {};
     for (const key of OPERATOR_DEFAULTS_KEYS) {
       if (args[key] !== undefined) update[key] = args[key];
+    }
+    const EMPTY_STRING_MEANS_NULL = new Set(['opencodeOrchestratorModel', 'opencodeWorkerModel']);
+    for (const key of EMPTY_STRING_MEANS_NULL) {
+      if (update[key] === '') update[key] = null;
     }
     const data = Object.keys(update).length === 0
       ? await apiFetch('/api/panel/operator-defaults')
