@@ -1229,6 +1229,19 @@ function handleReboundOrchestratorEvent(record: OrchestratorTurnRecord, event: O
     case 'collide_phase':
     case 'collide_proposal':
       break;
+    // The seam needs no record write: per-message backend/model attribution
+    // (#1730) already persists it, so a reloaded thread re-derives the same
+    // seam. This live event exists to render it without waiting for a reload.
+    case 'handoff':
+      break;
+    default: {
+      // Exhaustiveness guard. Without it a new OrchestratorEvent variant
+      // compiles clean and is silently dropped — which is exactly what
+      // 'handoff' did until this was added.
+      const unhandled: never = event;
+      void unhandled;
+      break;
+    }
   }
 
   if (wsMsg) broadcastToOrchestratorSession(sessionName, wsMsg);
@@ -4997,6 +5010,27 @@ async function handleOrchestratorSendMsgOnce(
               channel: 'orchestrator',
               event: 'collide-phase',
               data: { phase: event.phase, proposers: event.proposers ?? [], repoPath, threadId, backend: turnBackend.id, agent: turnAgentTag },
+            });
+            break;
+
+          // ── Handoff (#1730) — the responding agent changed mid-thread.
+          //    Forwarded ahead of the receiving agent's first token so the
+          //    transcript draws the seam in place. `lossless` rides along
+          //    because the operator needs to know whether the new agent
+          //    inherited the real session or a replay.
+          case 'handoff':
+            wsMsg = JSON.stringify({
+              channel: 'orchestrator',
+              event: 'handoff',
+              data: {
+                from: event.from,
+                to: event.to,
+                lossless: event.lossless,
+                repoPath,
+                threadId,
+                backend: turnBackend.id,
+                agent: turnAgentTag,
+              },
             });
             break;
 

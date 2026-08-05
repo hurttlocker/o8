@@ -16,7 +16,24 @@ export type OrchestratorEvent =
   //    or the persisted assistant text; these two carry it to the faint pre-roll
   //    card. The aggregator's reply still flows through `text` as the sole answer.
   | { type: 'collide_phase'; phase: 'proposing' | 'synthesizing'; proposers?: string[] }
-  | { type: 'collide_proposal'; proposer: string; text: string; breach?: boolean };
+  | { type: 'collide_proposal'; proposer: string; text: string; breach?: boolean }
+  // ── Handoff (#1730) — the responding agent changed mid-thread. Emitted at the
+  //    seam, before the receiving agent's first token, so the transcript can
+  //    render the block inline rather than reconstructing it afterwards.
+  //
+  //    `lossless` is a claim about CONTEXT, not about quality: true means the
+  //    receiving agent inherited the real conversation state rather than a
+  //    replay or a summary. Verified true for an ACP same-session model swap
+  //    (2026-08-04: deepseek stored a codeword, grok-4.5 recalled it on the
+  //    same sessionId). A cross-runtime handoff is a cold start with injected
+  //    context and must report false — the operator needs to know which one
+  //    they got, because only one of them can be trusted to remember.
+  | {
+    type: 'handoff';
+    from: { backend: string; model: string | null } | null;
+    to: { backend: string; model: string };
+    lossless: boolean;
+  };
 
 type ContentBlock = {
   type?: string;

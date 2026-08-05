@@ -51,6 +51,12 @@ interface AcpSession {
   configOptions: AcpConfigOption[];
   /** Last model pushed via `session/set_model`, so we only switch on change. */
   appliedModel: string | null;
+  /**
+   * Turns this session has actually completed. Guards the handoff seam: setting
+   * a model before the first turn is configuration, not a change of hands, and
+   * emitting a seam there would show the operator a handoff from nobody.
+   */
+  completedTurns: number;
   /** The current turn's event sink — set by sendTurn, cleared on completion. */
   onEvent?: (event: OrchestratorEvent) => void;
 }
@@ -178,6 +184,7 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
       createdAt: Date.now(),
       configOptions: [],
       appliedModel: null,
+      completedTurns: 0,
       client: new AcpClient({
         command: launch.command,
         args: launch.args,
@@ -218,14 +225,32 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
    * "Method not found", which must not take the turn down with it — the turn
    * simply runs on whatever the agent already had.
    */
-  async function applyModel(session: AcpSession, sessionId: string, model?: string): Promise<void> {
+  async function applyModel(
+    session: AcpSession,
+    sessionId: string,
+    model: string | undefined,
+    onEvent: (event: OrchestratorEvent) => void,
+  ): Promise<void> {
     // Precedence: the composer's per-turn pick, then the operator's pinned
     // default, then whatever the agent booted with. The last one is a real
     // option, not a failure — an unpinned backend still runs.
     const requested = (model?.trim() || defaultModelFor(id)) ?? undefined;
     if (!requested || requested === session.appliedModel) return;
+    const previous = session.appliedModel;
     try {
       await session.client.setModel(sessionId, requested);
+      // Only a switch on a session that has already answered something is a
+      // handoff. `lossless: true` is earned here specifically: the ACP session
+      // id is unchanged, so the receiving model inherits the real conversation
+      // rather than a replay (verified live 2026-08-04).
+      if (session.completedTurns > 0 && previous !== requested) {
+        onEvent({
+          type: 'handoff',
+          from: previous ? { backend: id, model: previous } : null,
+          to: { backend: id, model: requested },
+          lossless: true,
+        });
+      }
       session.appliedModel = requested;
     } catch (err) {
       console.log(`[acp-orchestrator] ${label} refused model ${requested}: ${err instanceof Error ? err.message : String(err)}`);
@@ -274,7 +299,7 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
 
       try {
         const sessionId = await ensureHandshake(session);
-        await applyModel(session, sessionId, options?.model);
+        await applyModel(session, sessionId, options?.model, countingOnEvent);
         const stopReason = await session.client.prompt(sessionId, message);
         const doneOrError = produced === 0 && stopReason === 'end_turn'
           ? ({
@@ -286,6 +311,7 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
               : `${label} finished the turn without producing any output.`,
           } satisfies OrchestratorEvent)
           : mapStopReason(stopReason, sessionId);
+        if (doneOrError.type === 'done') session.completedTurns += 1;
         onEvent(doneOrError);
         publishAcpLifecycle(id, session, doneOrError);
       } catch (err) {
