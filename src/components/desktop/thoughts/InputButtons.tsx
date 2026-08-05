@@ -573,17 +573,16 @@ export function InputButtons({
 
       </div>
 
-      {/* Right cluster — runtime: context meter · mode · fleet worker ·
-          model · thinking · send (Q ruling 2026-08-05). The mode chip owns
-          its own switcher; the fleet chip appears only when the mode
-          dispatches and selects the worker runtime inline. Pinned, never
-          shrinks or clips. */}
+      {/* Right cluster — runtime: mode · context meter · model · thinking ·
+          fleet worker · send (Q re-ruling 2026-08-05: reads left→right, so the
+          orchestrator model comes BEFORE the fleet worker it dispatches — the
+          old order looked like the fleet model was driving the orchestrator).
+          The mode chip owns its own switcher; the fleet chip appears only when
+          the mode dispatches, one visual step smaller than the model chip.
+          Pinned, never shrinks or clips. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
       {composerMode && onComposerModeChange ? (
         <ComposerModeChip mode={composerMode} onModeChange={onComposerModeChange} />
-      ) : null}
-      {composerMode && composerMode !== 'solo' ? (
-        <FleetWorkerChip compact={compact} />
       ) : null}
       {inlineMeterSlot ? (
         <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -607,6 +606,9 @@ export function InputButtons({
           collideEnabled={collideEnabled}
           onSetCollide={onSetCollide}
         />
+      ) : null}
+      {composerMode && composerMode !== 'solo' ? (
+        <FleetWorkerChip compact={compact} />
       ) : null}
 
       {/* Send — ↵ enter key when idle, square stop while working

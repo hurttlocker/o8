@@ -263,7 +263,7 @@ export function FleetWorkerChip({ compact = false }: { compact?: boolean }) {
         style={{
           display: 'inline-flex',
           alignItems: 'center',
-          gap: 5,
+          gap: 4,
           height: 20,
           paddingLeft: 7,
           paddingRight: 7,
@@ -272,8 +272,11 @@ export function FleetWorkerChip({ compact = false }: { compact?: boolean }) {
           background: 'transparent',
           color: 'var(--t-text-faint)',
           cursor: 'pointer',
-          fontSize: 10.5,
-          fontWeight: 500,
+          // One visual step BELOW the orchestrator model chip (10.5/300): the
+          // worker is subordinate — same size/weight read as if the fleet model
+          // were driving the orchestrator (Q re-ruling 2026-08-05).
+          fontSize: 9.5,
+          fontWeight: 300,
           letterSpacing: '-0.05px',
           fontFamily: 'var(--font-sans-system)',
           whiteSpace: 'nowrap',
@@ -284,7 +287,7 @@ export function FleetWorkerChip({ compact = false }: { compact?: boolean }) {
         onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--t-text)'; }}
         onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--t-text-faint)'; }}
       >
-        <LayersGlyph />
+        <LayersGlyph size={10} />
         {chipText}
       </button>
 
