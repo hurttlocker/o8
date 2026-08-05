@@ -199,21 +199,13 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: src-tauri
-      # The optional dev-mcp-plugin dep is a path dep at ../../tauri-plugin-mcp
-      # (relative to src-tauri). Cargo resolves optional path deps' manifests
-      # even when the feature is off, so a fresh clone fails resolution before
-      # compiling anything (dispatch run 31041947967). Stub an empty lib crate
-      # at the expected path; the feature stays off so the stub never builds.
-      # The stub's dep graph diverges from the committed lock, so this job runs
-      # plain `cargo check` — restore --locked once the plugin is vendored or
-      # published.
-      - run: cargo init --lib ../tauri-plugin-mcp --name tauri-plugin-mcp
       # tauri's codegen validates frontendDist AND bundle resources at compile
       # time; CI never runs the Next build, so stub both directories it points
-      # at (../out/frontend, ../out/server).
+      # at (../out/frontend, ../out/server). The dev-mcp-plugin dep needs no
+      # stub anymore — the plugin is vendored in-repo (tauri-plugin-mcp/).
       - run: New-Item -ItemType Directory -Force -Path out/frontend, out/server | Out-Null
         shell: pwsh
-      - run: cargo check
+      - run: cargo check --locked
         working-directory: src-tauri
 
   rust-check-linux:
@@ -237,8 +229,6 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: src-tauri
-      # Same plugin stub + no --locked as the Windows gate (see comment there).
-      - run: cargo init --lib ../tauri-plugin-mcp --name tauri-plugin-mcp
       - run: mkdir -p out/frontend out/server
-      - run: cargo check
+      - run: cargo check --locked
         working-directory: src-tauri

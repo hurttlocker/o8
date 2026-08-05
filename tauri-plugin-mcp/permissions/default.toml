@@ -1,0 +1,5 @@
+"$schema" = "schemas/schema.json"
+
+[default]
+description = "Allows the JS bridge command(s) used by tauri-plugin-mcp's eval-based correlator."
+permissions = ["allow-mcp-result"]
