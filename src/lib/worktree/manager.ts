@@ -38,6 +38,7 @@ import { getApfsCowCapability } from './apfs';
 import { worktreeActivityMtimeMs } from './activity';
 import { resetTrackedWorkspaceChanges } from './clean';
 import { allowWorktreeRemoval } from './live-process-guard';
+import { removeLockedDir } from './remove-locked-dir';
 import { resolveWorktreeRootLayout } from './root-layout';
 import {
   gitCommandErrorMessage,
@@ -46,6 +47,8 @@ import {
 
 const execFileAsync = promisify(execFile);
 const META_FILENAME = '.meta.json';
+// #1673 — lock-fallback quarantine dir (Windows EBUSY/EPERM survivor slot).
+const TRASH_DIR_NAME = '.o8-trash';
 const CLAUDE_WORKTREE_DIR = '.claude/worktrees';
 const STALE_THRESHOLD_MS = 24 * 60 * 60_000; // 24 hours
 const AUTO_PRUNE_COOLDOWN_MS = 6 * 60 * 60_000; // 6 hours
@@ -1367,13 +1370,22 @@ export class WorktreeManager {
       }
     }
 
+    const trashBase = path.join(containingBase, TRASH_DIR_NAME);
+
     if ((entry?.isolationKind ?? 'git-worktree') === 'apfs-cow-clone') {
       if (await this.pathExists(worktreePath)) {
         if (!(await allowWorktreeRemoval(worktreePath, {
           logPrefix: 'worktree-cleanup',
           overrideLiveGuard: opts?.overrideLiveGuard,
         }))) return false;
-        await rm(worktreePath, { recursive: true, force: true });
+        // #1673 — Windows can hold a file handle open inside worktreePath
+        // (running node, git, Defender); retry-then-quarantine instead of a
+        // raw rm that throws EBUSY/EPERM mid-cleanup.
+        const removal = await removeLockedDir(worktreePath, { quarantineBase: trashBase, logPrefix: 'worktree-cleanup' });
+        if (removal.status === 'failed') {
+          console.error(`[worktree-cleanup] FAILED to remove or quarantine ${worktreePath}`);
+          return false;
+        }
       }
     } else {
       // Remove the git worktree
@@ -1385,12 +1397,21 @@ export class WorktreeManager {
         overrideLiveGuard: opts?.overrideLiveGuard,
       }))) return false;
 
+      let gitRemoveFailedOnLock = false;
       try {
         await execFileAsync('git', args, { cwd: this.repoRoot, timeout: 15_000 });
       } catch (err) {
-        // If directory already gone, that's fine
+        // If directory already gone, that's fine. #1673 — on Windows, git
+        // itself can refuse removal because a handle inside the worktree is
+        // still open (EBUSY/EPERM/"Unlink of file" style messages); fall
+        // through to the F39 rm-fallback below instead of throwing, so the
+        // lock-retry + quarantine path gets a chance. Any OTHER git refusal
+        // (e.g. a dirty tree without --force) must keep throwing — we never
+        // force-delete work git is protecting.
         const msg = err instanceof Error ? err.message : '';
-        if (!msg.includes('is not a working tree')) throw err;
+        const isLockClassGitError = /EBUSY|EPERM|Permission denied|Unlink of file/.test(msg);
+        if (!msg.includes('is not a working tree') && !isLockClassGitError) throw err;
+        gitRemoveFailedOnLock = isLockClassGitError;
       }
 
       // F39 (#1031): even when `git worktree remove` succeeds OR bails with
@@ -1403,7 +1424,17 @@ export class WorktreeManager {
           logPrefix: 'worktree-cleanup-fallback',
           overrideLiveGuard: opts?.overrideLiveGuard,
         }))) return false;
-        await rm(worktreePath, { recursive: true, force: true });
+        const removal = await removeLockedDir(worktreePath, { quarantineBase: trashBase, logPrefix: 'worktree-cleanup-fallback' });
+        if (removal.status === 'failed') {
+          console.error(`[worktree-cleanup-fallback] FAILED to remove or quarantine ${worktreePath}`);
+          return false;
+        }
+        if (gitRemoveFailedOnLock) {
+          // Clear git's now-stale .git/worktrees registration for the path
+          // we just removed via the fallback so a future `git worktree add`
+          // at the same slot doesn't collide with a dangling entry.
+          await execFileAsync('git', ['worktree', 'prune'], { cwd: this.repoRoot, timeout: 10_000 }).catch(() => {});
+        }
       }
     }
 
@@ -1490,6 +1521,8 @@ export class WorktreeManager {
         const entries = await readdir(worktreeBase, { withFileTypes: true }).catch(() => []);
         for (const entry of entries) {
           if (!entry.isDirectory()) continue;
+          // #1673 — the quarantine dir itself is never an orphan candidate.
+          if (entry.name === TRASH_DIR_NAME) continue;
           if (!entry.name.startsWith('packet-')) continue;
           const orphanPath = path.join(worktreeBase, entry.name);
           const canonicalOrphanPath = await this.canonicalPath(orphanPath);
@@ -1505,9 +1538,29 @@ export class WorktreeManager {
           }
           if (now - mtime <= maxAgeMs) continue;
           if (!(await allowWorktreeRemoval(orphanPath, { logPrefix: 'worktree-prune-orphan' }))) continue;
-          await rm(orphanPath, { recursive: true, force: true });
-          console.log(`[worktree-prune] Reaped orphan ${entry.name} (no meta, no git, age ${Math.round((now - mtime) / 3_600_000)}h)`);
+          // #1673 — lock-retry + quarantine instead of a raw rm that throws
+          // EBUSY/EPERM on Windows.
+          const removal = await removeLockedDir(orphanPath, {
+            quarantineBase: path.join(worktreeBase, TRASH_DIR_NAME),
+            logPrefix: 'worktree-prune-orphan',
+          });
+          if (removal.status === 'failed') {
+            console.warn(`[worktree-prune] FAILED to remove or quarantine orphan ${entry.name}`);
+            continue;
+          }
+          console.log(`[worktree-prune] Reaped orphan ${entry.name} (no meta, no git, age ${Math.round((now - mtime) / 3_600_000)}h, ${removal.status})`);
           pruned.push(entry.name);
+        }
+
+        // #1673 — best-effort retry pass over previously quarantined entries.
+        // A dir that was locked at quarantine time may have released its
+        // handle by now; still-locked entries just get retried on the next
+        // sweep. Failures here are never fatal to the prune pass.
+        const trashDir = path.join(worktreeBase, TRASH_DIR_NAME);
+        const trashEntries = await readdir(trashDir, { withFileTypes: true }).catch(() => []);
+        for (const trashEntry of trashEntries) {
+          const trashedPath = path.join(trashDir, trashEntry.name);
+          await rm(trashedPath, { recursive: true, force: true }).catch(() => {});
         }
       }
     } catch (err) {
