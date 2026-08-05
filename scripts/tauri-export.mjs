@@ -515,19 +515,27 @@ for (const mod of nativeModules) {
   }
 }
 
-try {
-  const nativeBundle = await prepareNativeBundle({ projectRoot: root, serverRoot: server });
-  const abiSummary = Object.entries(nativeBundle.nodeAbis)
-    .map(([major, abi]) => `Node ${major}=ABI ${abi}`)
-    .join(', ');
-  console.log(`📦 Bundled better-sqlite3 + node-pty x64 + arm64 (${abiSummary})`);
-  for (const asset of nativeBundle.betterSqlite3.assets) {
-    console.log(`   ${asset.cacheSource === 'cache' ? 'cache' : 'cached download'}: ${asset.cachePath}`);
+// The multi-ABI bundle (darwin x64 + arm64 prebuilds, codesigned) exists
+// because macOS ships ONE artifact to both arches. Off-macOS builds (#1673,
+// #1672) are single-platform: the host-compiled modules copied above are the
+// right ones, and codesign doesn't exist there.
+if (process.platform === 'darwin') {
+  try {
+    const nativeBundle = await prepareNativeBundle({ projectRoot: root, serverRoot: server });
+    const abiSummary = Object.entries(nativeBundle.nodeAbis)
+      .map(([major, abi]) => `Node ${major}=ABI ${abi}`)
+      .join(', ');
+    console.log(`📦 Bundled better-sqlite3 + node-pty x64 + arm64 (${abiSummary})`);
+    for (const asset of nativeBundle.betterSqlite3.assets) {
+      console.log(`   ${asset.cacheSource === 'cache' ? 'cache' : 'cached download'}: ${asset.cachePath}`);
+    }
+    console.log(`📦 Signed and verified ${nativeBundle.nativeSigning.binaries.length} nested Mach-O binaries`);
+  } catch (error) {
+    console.error(`❌ multi-ABI native addon export failed: ${error.message}`);
+    process.exit(1);
   }
-  console.log(`📦 Signed and verified ${nativeBundle.nativeSigning.binaries.length} nested Mach-O binaries`);
-} catch (error) {
-  console.error(`❌ multi-ABI native addon export failed: ${error.message}`);
-  process.exit(1);
+} else {
+  console.log('📦 Non-darwin build: keeping host-compiled native modules (no multi-ABI bundle, no codesign)');
 }
 
 // ── Compile WS server ──

@@ -9,10 +9,14 @@ function runStep(label, command, args) {
     cwd: root,
     stdio: 'inherit',
     env: process.env,
+    // npm/npx are .cmd shims on Windows — spawnSync can't exec them without a
+    // shell (and Node ≥20.12 refuses to). Args here are simple, no quoting risk.
+    shell: process.platform === 'win32',
   });
 
   if (result.status !== 0) {
-    console.warn(`[postinstall] ${label} failed with exit code ${result.status ?? 'unknown'}`);
+    const reason = result.error ? result.error.message : `exit code ${result.status ?? 'unknown'}`;
+    console.warn(`[postinstall] ${label} failed: ${reason}`);
   }
 }
 
