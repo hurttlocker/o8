@@ -65,6 +65,10 @@ jobs:
       - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           NEXT_TELEMETRY_DISABLED: 1
+          # linuxdeploy's strip pass is a notorious CI failure ("failed to run
+          # linuxdeploy" with stderr swallowed — run 31056828226, where deb and
+          # rpm bundled fine and only AppImage died). Standard remedy.
+          NO_STRIP: true
         with:
           args: --config src-tauri/tauri.portci.conf.json
       # Instrumentation: round 3 showed the bundler PRINTING built installer
@@ -76,7 +80,10 @@ jobs:
       # Upload every produced bundle form — first runs showed the exact
       # artifact names vary (AppImage vs AppImage.tar.gz etc.), so grab the
       # whole bundle tree and fail loudly if the build produced nothing.
+      # if: always() — a partial bundle (deb + rpm good, AppImage failed) is
+      # still worth capturing; the empty-dir error covers the nothing case.
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: o8-port-${{ matrix.platform }}
           path: src-tauri/target/release/bundle/
