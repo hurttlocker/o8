@@ -27,6 +27,7 @@ import { toOpenclawJson } from '@/lib/mcp/tool-spine/emit-openclaw';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import type { RealtimeMutationRecord } from '@/lib/realtime/types';
+import { resolveOpencodeOrchestratorModelSync } from '@/lib/operator/defaults';
 import { governHermesProfile } from './hermes-profile';
 import type {
   OrchestratorBackend,
@@ -64,6 +65,19 @@ let acpRealtimeSeq = 0;
  * "no models discovered yet" rather than a hardcoded list).
  */
 const sessionConfigCache = new Map<OrchestratorBackendId, AcpConfigOption[]>();
+
+/**
+ * The operator's pinned default model for a backend, or null when unpinned.
+ * Only opencode has a setting today; other ACP agents run on their own default.
+ */
+function defaultModelFor(id: OrchestratorBackendId): string | null {
+  if (id !== 'opencode') return null;
+  try {
+    return resolveOpencodeOrchestratorModelSync();
+  } catch {
+    return null;
+  }
+}
 
 /** The `model` select out of a configOptions array, if the agent exposes one. */
 function modelConfigOption(options: AcpConfigOption[]): AcpConfigOption | null {
@@ -205,7 +219,10 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
    * simply runs on whatever the agent already had.
    */
   async function applyModel(session: AcpSession, sessionId: string, model?: string): Promise<void> {
-    const requested = model?.trim();
+    // Precedence: the composer's per-turn pick, then the operator's pinned
+    // default, then whatever the agent booted with. The last one is a real
+    // option, not a failure — an unpinned backend still runs.
+    const requested = (model?.trim() || defaultModelFor(id)) ?? undefined;
     if (!requested || requested === session.appliedModel) return;
     try {
       await session.client.setModel(sessionId, requested);

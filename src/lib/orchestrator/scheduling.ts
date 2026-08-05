@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import { surfaceEdgeCases } from '@/lib/dispatch/edge-case-surfacer';
 import { computeReadBudget, resolveModelTier } from '@/lib/dispatch/read-budget';
 import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
+import { resolveOpencodeWorkerModelSync } from '@/lib/operator/defaults';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import { getLane, findLaneByPacket, listLanes } from '@/lib/lane/registry';
 import { salvagedWorkBlockReason } from '@/lib/supervisor/heal-guard';
@@ -67,6 +68,22 @@ export function buildRemainingLaunchBudget(): DispatchLaunchBudget {
 const RECOVERY_COOLDOWN_MS = 60_000;
 const SESSION_RECOVERY_COMMIT_MESSAGE = 'auto-commit: session recovery';
 const execFileAsync = promisify(execFile);
+
+/**
+ * The operator's pinned worker model for a runtime, or null when unpinned.
+ * Only opencode is model-agnostic enough to need this today — every other
+ * runtime is bound to its own provider house, where the capability-map default
+ * is already the right answer.
+ */
+function operatorWorkerModelFor(runtime: OrchestratorRuntime): string | null {
+  if (runtime !== 'opencode') return null;
+  try {
+    return resolveOpencodeWorkerModelSync();
+  } catch {
+    return null;
+  }
+}
+
 
 // #1551 — one canonical work-tree probe, shared with both orchestrator spawn
 // preflights (repo-preflight.ts) so the dispatch gate and the spawn gate can
@@ -291,10 +308,15 @@ async function dispatchPacket(
       laneResult.lane?.baseBranch ?? 'main',
       laneResult.lane?.worktreePath ?? null,
     ),
-    // Fallback ladder: explicit packet model → capability-map default → undefined.
-    // This ensures Gemini/opencode dispatches actually pin the flagship model
-    // from the capability map instead of letting the CLI pick a cheaper default.
-    model: (workerRouting.selectedModel ?? getRuntimeCapability(workerRouting.selectedRuntime).defaultModel) ?? undefined,
+    // Fallback ladder: explicit packet model → operator's pinned worker model
+    // for this runtime → capability-map default → undefined. The operator pin
+    // sits between the two so a per-packet choice still wins, while an unpinned
+    // dispatch keeps the old capability-map behaviour exactly.
+    model: (
+      workerRouting.selectedModel
+      ?? operatorWorkerModelFor(workerRouting.selectedRuntime)
+      ?? getRuntimeCapability(workerRouting.selectedRuntime).defaultModel
+    ) ?? undefined,
     effort: workerRouting.selectedEffort ?? undefined,
     actor: 'orchestrator',
   });

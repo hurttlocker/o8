@@ -38,6 +38,7 @@ import {
   type OperatorDefaultsResponse,
   type ThinkingEffort,
 } from './dispatch-shared';
+import { AcpModelPickerPopover } from './AcpModelPickerPopover';
 
 // ── Runtime detection (real, via /api/setup/detect) ──
 
@@ -354,6 +355,44 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
                   }}
                 />
               </TrailingCluster>
+            }
+          />
+        </SettingsGroup>
+      </section>
+
+      {/* ── opencode (model-agnostic) ── */}
+      <section style={{ marginTop: 28 }}>
+        <SettingsGroup
+          header="opencode models"
+          footnote="opencode is not bound to one provider — these lists come from your own install, so they show exactly the models your provider keys can reach. Leave either unset to use whatever opencode itself defaults to. The composer can still override the orchestrator model for a single turn."
+        >
+          <SettingsRow
+            icon={<CpuIcon />}
+            label="Orchestrator model"
+            subtitle={lockedSub('opencodeOrchestratorModel', values.opencodeOrchestratorModel ?? 'Unset — opencode picks')}
+            accessory={
+              <AcpModelPickerPopover
+                label={values.opencodeOrchestratorModel ?? 'Choose'}
+                value={values.opencodeOrchestratorModel}
+                onSelect={(next) => { updateField('opencodeOrchestratorModel', next); }}
+                onClear={() => { updateField('opencodeOrchestratorModel', null); }}
+                disabled={envLocked('opencodeOrchestratorModel') || busyField === 'opencodeOrchestratorModel'}
+              />
+            }
+            divider
+          />
+          <SettingsRow
+            icon={<CpuIcon />}
+            label="Worker model"
+            subtitle={lockedSub('opencodeWorkerModel', values.opencodeWorkerModel ?? 'Unset — the adapter default')}
+            accessory={
+              <AcpModelPickerPopover
+                label={values.opencodeWorkerModel ?? 'Choose'}
+                value={values.opencodeWorkerModel}
+                onSelect={(next) => { updateField('opencodeWorkerModel', next); }}
+                onClear={() => { updateField('opencodeWorkerModel', null); }}
+                disabled={envLocked('opencodeWorkerModel') || busyField === 'opencodeWorkerModel'}
+              />
             }
           />
         </SettingsGroup>

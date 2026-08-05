@@ -59,6 +59,13 @@ export interface OperatorDefaults {
   thinkingEffort: ThinkingEffort;
   promptCachingEnabled: boolean;
   orchestratorModel: string;
+  /**
+   * opencode ACP model pins. Null = unset, meaning the agent's own default.
+   * Discovered ids, so there is no fixed option list to type them against —
+   * the picker only offers what the local agent reported.
+   */
+  opencodeOrchestratorModel: string | null;
+  opencodeWorkerModel: string | null;
   defaultDispatchRuntime: DispatchRuntime;
   workerRuntimes: DispatchRuntime[];
   codexWorkerEffort: ThinkingEffort;

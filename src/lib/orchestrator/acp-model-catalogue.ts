@@ -21,8 +21,17 @@
  * effort when the id WITHOUT it is itself present in the catalogue.
  */
 
-/** Suffixes an ACP agent may append to a model id to select reasoning depth. */
-const EFFORT_SUFFIXES = new Set(['minimal', 'low', 'medium', 'high', 'max']);
+/**
+ * Suffixes an ACP agent may append to a model id to select reasoning depth.
+ *
+ * DERIVED from the live opencode 1.4.3 catalogue, not guessed: every tail whose
+ * un-suffixed id also appears in the list. Guessing cost me `none` and `xhigh`
+ * on the first pass — 132 variants that would have rendered as separate base
+ * models, with a test that agreed because it shared the same wrong set.
+ * If a future agent adds a depth word, the catalogue test's independently
+ * derived expectation fails rather than silently splitting the model.
+ */
+const EFFORT_SUFFIXES = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 
 export interface CatalogueEffort {
   /** The suffix word, e.g. 'low'. */
@@ -47,7 +56,7 @@ export interface CatalogueGroup {
   models: CatalogueModel[];
 }
 
-const EFFORT_ORDER = ['minimal', 'low', 'medium', 'high', 'max'];
+const EFFORT_ORDER = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 
 function splitSuffix(id: string): { base: string; effort: string } | null {
   const cut = id.lastIndexOf('/');

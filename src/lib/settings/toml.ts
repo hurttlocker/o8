@@ -4,6 +4,8 @@ import path from 'node:path';
 
 import { parse, stringify } from 'smol-toml';
 
+import { isPlausibleAcpModelId } from '@/lib/orchestrator/acp-model-id';
+
 import { isSupportedModelId, SUPPORTED_MODEL_IDS } from '@/lib/models';
 import type { OperatorDefaults } from '@/lib/operator/defaults';
 import {
@@ -26,6 +28,13 @@ type TomlRecord = Record<string, unknown>;
 interface TomlField<T> {
   path: readonly [string, string];
   parse: (value: unknown, key: string) => T;
+  /**
+   * How the value is written back to TOML, when that differs from `parse`.
+   * TOML has no null, so a nullable field whose value is null would be dropped
+   * by stringify and then vanish from the reparsed key set. Such fields
+   * serialize null as "" and parse "" back to null.
+   */
+  serialize?: (value: T) => unknown;
 }
 
 function invalid(key: string, expected: string): never {
@@ -60,6 +69,29 @@ function orchestratorModelField(section: string, key: string): TomlField<Operato
       return isSupportedModelId(trimmed)
         ? trimmed
         : invalid(tomlKey, `a supported model id; received ${JSON.stringify(trimmed)}; valid values are ${SUPPORTED_MODEL_IDS.map((model) => JSON.stringify(model)).join(', ')}`);
+    },
+  };
+}
+
+/**
+ * A DISCOVERED model id (opencode/ACP). Unlike orchestratorModelField this
+ * cannot check membership in SUPPORTED_MODEL_IDS — the valid set lives in the
+ * operator's agent, not in this repo — so it validates shape only. An empty
+ * string means "no pin, use the agent's own default" and parses to null.
+ */
+function acpModelIdField(section: string, key: string): TomlField<string | null> {
+  return {
+    path: [section, key],
+    // "" is the on-disk spelling of "unset" — see TomlField.serialize.
+    serialize: (value) => value ?? '',
+    parse: (value, tomlKey) => {
+      if (value === null) return null;
+      if (typeof value !== 'string') return invalid(tomlKey, 'a model id string');
+      const trimmed = value.trim();
+      if (!trimmed) return null;
+      return isPlausibleAcpModelId(trimmed)
+        ? trimmed
+        : invalid(tomlKey, `a model id shaped provider/model, optionally with a /low or /high suffix; received ${JSON.stringify(trimmed)}`);
     },
   };
 }
@@ -154,6 +186,8 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   mergeTestReplayEnabled: booleanField('review', 'merge_test_replay_enabled'),
   requireApproval: enumField('review', 'require_approval', 'one of "high-risk", "surface", "always", or "never"', (value): value is OperatorDefaults['requireApproval'] => value === 'high-risk' || value === 'surface' || value === 'always' || value === 'never'),
   orchestratorModel: orchestratorModelField('models', 'orchestrator_model'),
+  opencodeOrchestratorModel: acpModelIdField('models', 'opencode_orchestrator_model'),
+  opencodeWorkerModel: acpModelIdField('models', 'opencode_worker_model'),
   defaultDispatchRuntime: enumField('models', 'default_dispatch_runtime', 'a dispatchable runtime name', isDispatchRuntime),
   workerRuntimes: dispatchRuntimeListField('models', 'worker_runtimes'),
   codexWorkerEffort: enumField('models', 'codex_worker_effort', 'a valid thinking effort', isThinkingEffort),
@@ -255,7 +289,10 @@ export function parseOperatorDefaultsToml(raw: string): Partial<OperatorDefaults
   const values: Partial<OperatorDefaults> = {};
 
   for (const operatorKey of OPERATOR_DEFAULTS_TOML_KEYS) {
-    const field = OPERATOR_DEFAULTS_TOML_MAPPING[operatorKey] as TomlField<OperatorDefaults[typeof operatorKey]>;
+    // Double cast: `serialize` makes TomlField contravariant in T, so a direct
+    // widening cast is (correctly) rejected. The loop only ever pairs a field
+    // with its own key, so erasing the parameter type here is sound.
+    const field = OPERATOR_DEFAULTS_TOML_MAPPING[operatorKey] as unknown as TomlField<unknown>;
     const rawValue = readPath(document, field);
     if (rawValue === undefined) continue;
     const tomlKey = field.path.join('.');
@@ -277,9 +314,10 @@ export function serializeOperatorDefaultsToml(
   const document = existingRaw === undefined ? {} : parseDocument(existingRaw);
   for (const operatorKey of OPERATOR_DEFAULTS_TOML_KEYS) {
     if (!Object.prototype.hasOwnProperty.call(values, operatorKey)) continue;
-    const field = OPERATOR_DEFAULTS_TOML_MAPPING[operatorKey] as TomlField<unknown>;
+    const field = OPERATOR_DEFAULTS_TOML_MAPPING[operatorKey] as unknown as TomlField<unknown>;
     const tomlKey = field.path.join('.');
-    writePath(document, field, field.parse(values[operatorKey], tomlKey));
+    const parsed = field.parse(values[operatorKey], tomlKey);
+    writePath(document, field, field.serialize ? field.serialize(parsed) : parsed);
   }
   return stringify(document);
 }

@@ -22,7 +22,20 @@ const options = LIVE_MODELS as Array<{ value: string; name?: string }>;
 const catalogue = buildModelCatalogue(options);
 
 describe('buildModelCatalogue — against the live opencode payload', () => {
-  it('accounts for every id exactly once, as a base model or an effort variant', () => {
+  // Derived from the fixture WITHOUT reusing the module's effort set. The first
+  // version of this test hardcoded 523/341, which matched the implementation
+  // because both used the same incomplete suffix list — it stayed green while
+  // 132 `none`/`xhigh` variants rendered as separate base models. Ground truth
+  // is structural: a tail is an effort exactly when the un-suffixed id also
+  // exists, whatever the word is.
+  const ids = new Set(options.map((o) => o.value));
+  const trueVariants = options.filter((o) => {
+    const cut = o.value.lastIndexOf('/');
+    return cut > 0 && ids.has(o.value.slice(0, cut));
+  });
+  const trueBases = options.length - trueVariants.length;
+
+  it('splits bases and effort variants the way the data says, not the way the code assumes', () => {
     const bases = catalogueSize(catalogue);
     const efforts = catalogue.reduce(
       (n, g) => n + g.models.reduce((m, model) => m + model.efforts.length, 0),
@@ -30,9 +43,17 @@ describe('buildModelCatalogue — against the live opencode payload', () => {
     );
     expect(options).toHaveLength(864);
     expect(bases + efforts).toBe(864);
-    // Measured against the live list: 523 bases, 341 effort variants.
-    expect(bases).toBe(523);
-    expect(efforts).toBe(341);
+    expect(bases).toBe(trueBases);
+    expect(efforts).toBe(trueVariants.length);
+  });
+
+  it('recognizes every depth word the catalogue actually uses', () => {
+    // If the agent ships a new suffix, this fails instead of silently splitting.
+    const dataWords = new Set(trueVariants.map((o) => o.value.slice(o.value.lastIndexOf('/') + 1)));
+    const parsedWords = new Set(
+      catalogue.flatMap((g) => g.models).flatMap((m) => m.efforts.map((e) => e.effort)),
+    );
+    expect([...dataWords].sort()).toEqual([...parsedWords].sort());
   });
 
   it('does NOT eat three-segment ids whose tail is a model name', () => {
@@ -43,7 +64,7 @@ describe('buildModelCatalogue — against the live opencode payload', () => {
     const threeSegmentBases = catalogue
       .flatMap((g) => g.models)
       .filter((m) => m.id.split('/').length === 3);
-    expect(threeSegmentBases.length).toBeGreaterThan(300);
+    expect(threeSegmentBases.length).toBeGreaterThan(200);
   });
 
   it('groups the real providers', () => {

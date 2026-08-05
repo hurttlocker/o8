@@ -25,6 +25,8 @@ import {
 
 export { isSubscriptionProfile };
 
+import { normalizeAcpModelId, isPlausibleAcpModelId } from '@/lib/orchestrator/acp-model-id';
+
 import { isOrchestratorBackendSetting, isReviewerBackendSetting, isCollideAggregator, isPrLinkDestination, sanitizeBranchPrefix, type OrchestratorBackendSetting, type ReviewerBackendSetting, type CollideAggregator, type PrLinkDestination } from './defaults-env';
 import {
   isDispatchRuntime,
@@ -150,6 +152,14 @@ export interface OperatorDefaults {
   /** Human approval posture for lane merges. Hard governance gates still apply. */
   requireApproval: RequireApproval;
   orchestratorModel: string;
+  /**
+   * Model for the opencode ACP orchestrator. Null = whatever the agent booted
+   * with. Kept separate from `orchestratorModel` because these ids are
+   * DISCOVERED from the local agent, not drawn from SUPPORTED_MODEL_IDS.
+   */
+  opencodeOrchestratorModel: string | null;
+  /** Model for dispatched opencode workers. Null = the adapter default. */
+  opencodeWorkerModel: string | null;
   defaultDispatchRuntime: OrchestratorRuntime;
   workerRuntimes: OrchestratorRuntime[];
   /** Default Codex worker effort. 'adaptive' preserves runtime default behavior. */
@@ -343,6 +353,8 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   mergeTestReplayEnabled: false,
   requireApproval: 'high-risk',
   orchestratorModel: MODEL_IDS.orchestratorDefault,
+  opencodeOrchestratorModel: null,
+  opencodeWorkerModel: null,
   defaultDispatchRuntime: 'codex',
   workerRuntimes: ['codex'],
   codexWorkerEffort: 'adaptive',
@@ -414,6 +426,8 @@ interface StoredOperatorDefaults {
   mergeTestReplayEnabled?: boolean;
   requireApproval?: RequireApproval;
   orchestratorModel?: string;
+  opencodeOrchestratorModel?: string | null;
+  opencodeWorkerModel?: string | null;
   defaultDispatchRuntime?: OrchestratorRuntime;
   defaultDispatchRuntimeExplicit?: boolean;
   workerRuntimes?: OrchestratorRuntime[];
@@ -502,6 +516,12 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   }
   if (isRequireApproval(stored.requireApproval)) {
     result.requireApproval = stored.requireApproval;
+  }
+  for (const key of ['opencodeOrchestratorModel', 'opencodeWorkerModel'] as const) {
+    // A stored id that no longer parses is dropped rather than surfaced: the
+    // resolved value falls back to null (agent default), which still runs.
+    const normalized = normalizeAcpModelId(stored[key]);
+    if (normalized) result[key] = normalized;
   }
   if (typeof stored.orchestratorModel === 'string' && stored.orchestratorModel.trim()) {
     result.orchestratorModel = stored.orchestratorModel.trim();
@@ -694,6 +714,9 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
       fileValues.mergeTestReplayEnabled ?? OPERATOR_DEFAULTS_FALLBACK.mergeTestReplayEnabled,
     requireApproval: fileValues.requireApproval ?? OPERATOR_DEFAULTS_FALLBACK.requireApproval,
     orchestratorModel: envModel ?? fileValues.orchestratorModel ?? OPERATOR_DEFAULTS_FALLBACK.orchestratorModel,
+    opencodeOrchestratorModel:
+      fileValues.opencodeOrchestratorModel ?? OPERATOR_DEFAULTS_FALLBACK.opencodeOrchestratorModel,
+    opencodeWorkerModel: fileValues.opencodeWorkerModel ?? OPERATOR_DEFAULTS_FALLBACK.opencodeWorkerModel,
     defaultDispatchRuntime,
     workerRuntimes: fileValues.workerRuntimes ?? OPERATOR_DEFAULTS_FALLBACK.workerRuntimes,
     codexWorkerEffort:
@@ -754,6 +777,8 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     mergeTestReplayEnabled: fileValues.mergeTestReplayEnabled !== undefined ? 'file' : 'default',
     requireApproval: fileValues.requireApproval !== undefined ? 'file' : 'default',
     orchestratorModel: envModel !== null ? 'env' : fileValues.orchestratorModel !== undefined ? 'file' : 'default',
+    opencodeOrchestratorModel: fileValues.opencodeOrchestratorModel !== undefined ? 'file' : 'default',
+    opencodeWorkerModel: fileValues.opencodeWorkerModel !== undefined ? 'file' : 'default',
     defaultDispatchRuntime: envRuntime !== null ? 'env' : fileValues.defaultDispatchRuntimeExplicit ? 'file' : 'default',
     workerRuntimes: fileValues.workerRuntimes !== undefined ? 'file' : 'default',
     codexWorkerEffort:
@@ -884,6 +909,18 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>): Pr
       throw new Error(`orchestratorModel ${JSON.stringify(trimmed)} is unsupported; valid values are ${SUPPORTED_MODEL_IDS.map((model) => JSON.stringify(model)).join(', ')}.`);
     }
     stored.orchestratorModel = trimmed;
+  }
+  for (const key of ['opencodeOrchestratorModel', 'opencodeWorkerModel'] as const) {
+    const value = update[key];
+    if (value === undefined) continue;
+    // null is meaningful: "no pin, use whatever the agent booted with".
+    if (value === null) { stored[key] = null; continue; }
+    if (!isPlausibleAcpModelId(value)) {
+      throw new Error(
+        `${key} ${JSON.stringify(value)} is not a usable model id. Expect provider/model, optionally with a /low or /high suffix — pick one from the model list rather than typing it.`,
+      );
+    }
+    stored[key] = value.trim();
   }
   if (update.defaultDispatchRuntime !== undefined) {
     if (!isDispatchRuntime(update.defaultDispatchRuntime)) {
@@ -1179,6 +1216,20 @@ export function resolveCrossHouseWorkerFallbackSync(): boolean {
  */
 export function resolveOrchestratorBackendSync(): OrchestratorBackendSetting {
   return getOperatorDefaultsSync().values.orchestratorBackend;
+}
+
+/**
+ * The operator's pinned model for the opencode ACP orchestrator, or null to run
+ * on whatever the agent boots with. Discovered ids, so no SUPPORTED_MODEL_IDS
+ * check — see acp-model-id.ts for why that is shape-only.
+ */
+export function resolveOpencodeOrchestratorModelSync(): string | null {
+  return getOperatorDefaultsSync().values.opencodeOrchestratorModel;
+}
+
+/** The operator's pinned model for dispatched opencode workers, or null. */
+export function resolveOpencodeWorkerModelSync(): string | null {
+  return getOperatorDefaultsSync().values.opencodeWorkerModel;
 }
 
 /** Which backend runs lane auto-reviews ('follow' → ride the orchestrator). */
