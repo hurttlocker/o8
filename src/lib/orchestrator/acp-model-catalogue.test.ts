@@ -16,6 +16,7 @@ import {
   catalogueSize,
   findCatalogueModel,
   shortModelLabel,
+  stripRedundantProviderPrefix,
 } from './acp-model-catalogue';
 import LIVE_MODELS from './__fixtures__/opencode-1.4.3-models.json';
 
@@ -138,6 +139,37 @@ describe('filterCatalogue', () => {
 
   it('returns everything for an empty query', () => {
     expect(catalogueSize(filterCatalogue(catalogue, '   '))).toBe(catalogueSize(catalogue));
+  });
+});
+
+describe('stripRedundantProviderPrefix', () => {
+  it('drops the display prefix when it names the row’s own provider group', () => {
+    expect(stripRedundantProviderPrefix('OpenRouter/DeepSeek V4 Pro', 'openrouter')).toBe('DeepSeek V4 Pro');
+    expect(stripRedundantProviderPrefix('xAI/Grok 4.5', 'xai')).toBe('Grok 4.5');
+    // Display prefix and provider id are not equal strings — the match is
+    // normalized containment, which is what makes this case work at all.
+    expect(stripRedundantProviderPrefix('OpenCode Zen/DeepSeek V4 Flash Free (New)', 'opencode')).toBe('DeepSeek V4 Flash Free (New)');
+  });
+
+  it('leaves labels alone when the slash is not a provider prefix', () => {
+    expect(stripRedundantProviderPrefix('GPT-4/Turbo', 'openrouter')).toBe('GPT-4/Turbo');
+    expect(stripRedundantProviderPrefix('DeepSeek V4 Flash', 'openrouter')).toBe('DeepSeek V4 Flash');
+    expect(stripRedundantProviderPrefix('/leading-slash', 'openrouter')).toBe('/leading-slash');
+  });
+
+  it('makes the colliding DeepSeek V4 rows distinct at last — the live regression', () => {
+    // At menu width, four openrouter DeepSeek V4 rows all ellipsized to
+    // "OpenRouter/DeepSeek V4…" (2026-08-05). The fixture-derived claim: after
+    // stripping, each label in that family starts with its discriminator, so
+    // no two collide within the first characters a 300px row can show.
+    const family = catalogue
+      .filter((g) => g.provider === 'openrouter')
+      .flatMap((g) => g.models)
+      .filter((m) => m.id.includes('deepseek-v4'));
+    expect(family.length).toBeGreaterThanOrEqual(3);
+    const stripped = family.map((m) => stripRedundantProviderPrefix(m.label, 'openrouter'));
+    for (const label of stripped) expect(label.startsWith('OpenRouter/')).toBe(false);
+    expect(new Set(stripped).size).toBe(stripped.length);
   });
 });
 

@@ -22,6 +22,7 @@ import {
   catalogueSize,
   findCatalogueModel,
   shortModelLabel,
+  stripRedundantProviderPrefix,
   type CatalogueGroup,
 } from '@/lib/orchestrator/acp-model-catalogue';
 
@@ -269,11 +270,16 @@ export function AcpModelPicker({ backend, value, onSelect, repoPath, width = 320
                       onMouseEnter={(event) => { if (!isActive) event.currentTarget.style.background = 'var(--t-hover)'; }}
                       onMouseLeave={(event) => { if (!isActive) event.currentTarget.style.background = 'transparent'; }}
                     >
+                      {/* The group header already names the provider, so both
+                          lines drop their leading provider segment — at menu
+                          width that prefix is what pushed the Flash/Pro
+                          discriminator past the ellipsis. Display only: title
+                          and set_model keep the full id. */}
                       <span style={{ display: 'block', fontSize: 13, lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {model.label}
+                        {stripRedundantProviderPrefix(model.label, group.provider)}
                       </span>
                       <span style={{ display: 'block', fontSize: 9, lineHeight: 1.2, color: isActive ? 'var(--t-accent)' : 'var(--t-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {model.id}
+                        {model.id.startsWith(`${group.provider}/`) ? model.id.slice(group.provider.length + 1) : model.id}
                       </span>
                     </button>
                     {/* Effort variants exist only when the agent reported suffix

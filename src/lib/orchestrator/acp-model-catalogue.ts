@@ -179,6 +179,31 @@ export function catalogueSize(groups: CatalogueGroup[]): number {
 }
 
 /**
+ * Drop a label's leading provider segment when the row already sits under that
+ * provider's group header.
+ *
+ * Every one of the 864 live opencode names is `<ProviderDisplay>/<ModelName>`
+ * ("OpenRouter/DeepSeek V4 Pro"). At menu width that prefix is what pushes the
+ * discriminating tail past the ellipsis — four DeepSeek V4 rows all rendered as
+ * "OpenRouter/DeepSeek V4…" (live-hit 2026-08-05). The display prefix is not
+ * the provider id verbatim ("OpenCode Zen" vs `opencode`), so the match
+ * normalizes both and accepts either containing the other; a name whose first
+ * segment is NOT the group's provider ("GPT-4/Turbo") passes through untouched.
+ * Search filters on the unstripped label — this is render-time only.
+ */
+export function stripRedundantProviderPrefix(label: string, provider: string): string {
+  const cut = label.indexOf('/');
+  if (cut <= 0) return label;
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const prefix = norm(label.slice(0, cut));
+  const prov = norm(provider);
+  if (!prefix || !prov) return label;
+  if (!prefix.startsWith(prov) && !prov.startsWith(prefix)) return label;
+  const rest = label.slice(cut + 1).trim();
+  return rest || label;
+}
+
+/**
  * Resolve which catalogue entry a stored model id refers to, so the picker can
  * show the active row after a reload. Handles both a base id and an effort
  * variant id.

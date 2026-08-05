@@ -38,6 +38,11 @@ const EFFORT_LEVEL: Record<ThinkingEffort, number> = {
 
 const SWARM_ACCENT = 'var(--t-brand-orange, #FF5A1F)';
 const MODEL_THINKING_MENU_WIDTH = 200;
+// The searchable (ACP) house renders two-line model rows — a label plus the
+// full provider-qualified id — and at 200px four DeepSeek V4 rows truncated
+// identically (live-hit 2026-08-05). The menu widens only while that house is
+// open; the fixed houses keep their locked 200px geometry.
+const SEARCHABLE_HOUSE_MENU_WIDTH = 300;
 
 // Synthetic model id for the free o8 backend — there is no underlying model name
 // exposed in the UI (monetization doctrine: we own the brand, hide the model).
@@ -362,10 +367,14 @@ export function ModelThinkingChip({
   // Which house drawer is open in the model picker. Defaults to the active
   // backend's house so the current model is visible on open.
   const [openHouse, setOpenHouse] = useState<'claude' | 'codex' | 'openclaw' | 'hermes' | 'o8' | 'opencode'>(
-    activeBackend === 'codex' || activeBackend === 'openclaw' || activeBackend === 'hermes' || activeBackend === 'o8'
+    activeBackend === 'codex' || activeBackend === 'openclaw' || activeBackend === 'hermes' || activeBackend === 'o8' || activeBackend === 'opencode'
       ? activeBackend
       : 'claude',
   );
+  // The ACP house needs a wider menu than the fixed drawers (see the width
+  // constants) — derived from the open house, not the active backend, so the
+  // menu resizes the moment the operator expands opencode.
+  const searchableHouseOpen = COMPOSER_MODEL_GROUPS.some((group) => group.searchable && group.key === openHouse);
   // Thinking levels are only KNOWN for the Claude-family and Codex backends
   // ('auto' resolves to one of them). Every other runtime uses its default
   // effort and the thinking trigger stays hidden — no bespoke picker for
@@ -542,7 +551,7 @@ export function ModelThinkingChip({
           role="menu"
           aria-label="Model and thinking"
           style={{
-            width: MODEL_THINKING_MENU_WIDTH,
+            width: searchableHouseOpen ? SEARCHABLE_HOUSE_MENU_WIDTH : MODEL_THINKING_MENU_WIDTH,
             paddingTop: 7,
             paddingRight: 5,
             paddingBottom: 5,
@@ -612,7 +621,7 @@ export function ModelThinkingChip({
                         <AcpModelPicker
                           backend={group.key}
                           value={activeBackend === group.key ? (modelId ?? null) : null}
-                          width={MODEL_THINKING_MENU_WIDTH}
+                          width={SEARCHABLE_HOUSE_MENU_WIDTH}
                           onSelect={(picked: string) => {
                             onModelChange?.(picked);
                             if (activeBackend !== group.key) onBackendChange?.(group.key as OrchestratorBackendSetting);
