@@ -46,11 +46,8 @@ tauri-plugin-autostart = "2"
 # dictation, ⌘⇧, open-settings). The Fn / double-tap-Fn gestures stay on the raw
 # CGEventTap in fn_hotkey.rs (modifier-only gestures the plugin can't bind).
 tauri-plugin-global-shortcut = "2"
-# Voice P4 TTS: native audio playback for read-aloud / "say" / spoken Ask
-# answers (ElevenLabs + Google direct → MP3 → rodio). Pinned to 0.19 to match
-# aqua's stack — rodio 0.20+ changed the OutputStream/Sink/Decoder APIs the
-# lifted playback code uses.
-rodio = "0.19"
+# (rodio + cpal moved to the macOS target table below — the voice stack is
+# macOS-only, and on Linux they drag in alsa-sys which needs system headers.)
 # Already in the lock graph transitively (Tauri's async runtime). Promoted to a
 # direct dep so the TTS playback thread can build its own current-thread runtime
 # for async reqwest synth before handing MP3 bytes to !Send rodio. Zero binary
@@ -144,7 +141,6 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 chrono = "0.4"
 tauri-plugin-clerk = "0.1.1"
 tauri-plugin-http = "2.5.9"
-cpal = "0.17.1"
 
 # Shutdown safety net (issue #719). Both crates are already in the lock graph
 # transitively; promoting them to direct deps is zero binary cost. Used to
@@ -166,6 +162,14 @@ libc = "0.2"
 #   - core-graphics: the CGEventTap (Fn capture) + synthetic Cmd+V CGEvent.
 #   - core-foundation: CFDictionary/CFString/CFRunLoop for the AX + tap plumbing.
 [target.'cfg(target_os = "macos")'.dependencies]
+# ── Audio (voice stack is macOS-only, #1673) ──
+# rodio: TTS playback for read-aloud / "say" / spoken Ask answers (ElevenLabs +
+# Google direct → MP3 → rodio) + the sound.rs cue worker. Pinned to 0.19 to
+# match aqua's stack — rodio 0.20+ changed the OutputStream/Sink/Decoder APIs
+# the lifted playback code uses.
+rodio = "0.19"
+# cpal: stt/capture.rs input-device streaming for local Whisper capture.
+cpal = "0.17.1"
 security-framework = "3.7"
 objc2 = "0.6"
 # NSString/NSData/NSJSONSerialization power browser_view::eval_result — the host
