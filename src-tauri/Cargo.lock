@@ -3630,7 +3630,7 @@ dependencies = [
 
 [[package]]
 name = "o8"
-version = "0.1.650"
+version = "0.1.653"
 dependencies = [
  "base64 0.22.1",
  "block2",

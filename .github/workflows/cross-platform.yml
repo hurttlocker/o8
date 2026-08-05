@@ -1,0 +1,96 @@
+name: Cross-platform
+
+# Windows + Linux compile gate for the Rust shell (#1673, #1672).
+#
+# Why this exists: every job in ci.yml is ubuntu-latest and Node-only, so
+# nothing in this repo compiles the Tauri crate on ANY platform. The audited
+# Windows/Linux blockers therefore cannot fail anything — they are invisible
+# until someone tries a build by hand on hardware most contributors do not
+# have. A contributor without a Mac can write and verify a fix here.
+#
+# Cost: the repo is public, so windows-latest and ubuntu-latest runners are
+# free. Still scoped to PRs that actually touch the Rust shell (paths filter
+# below) rather than every PR, because a cold Tauri dep graph is slow and
+# most changes here are TypeScript.
+#
+# WHAT THIS CATCHES: the Rust compile-time class — un-cfg-gated Unix
+# shellouts, Darwin-only APIs called unconditionally, platform-specific
+# imports. That is the larger half of the audit.
+#
+# WHAT IT DOES NOT CATCH, deliberately: bundle-time failures. tauri.conf.json
+# declares `externalBin: [helpers/speech_recognizer, helpers/speech-local]`
+# unconditionally, and those are macOS Swift helpers — `tauri build` on
+# Windows would fail looking for a -x86_64-pc-windows-msvc.exe sidecar that
+# does not exist. `cargo check` never reads the bundle config. Catching that
+# needs a full `tauri build`, which is minutes not seconds; it belongs behind
+# workflow_dispatch once the compile class is green, the same shape ci.yml's
+# `build` job already uses.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src-tauri/**'
+      - '.github/workflows/cross-platform.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cross-platform-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    name: cargo check (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      # Report both platforms on one run — a Linux-only failure should not hide
+      # whether Windows also broke.
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: Windows
+          - os: ubuntu-latest
+            name: Linux
+    steps:
+      - uses: actions/checkout@v4
+
+      # Tauri v2 system deps. Absent these the webkit2gtk crate fails to
+      # configure and the job reports a dependency error rather than the code
+      # problem it exists to find.
+      - name: Install Linux system dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            build-essential
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Keyed on the lockfile: the Tauri dep graph dominates wall-clock, and a
+      # cold build is minutes while a warm one is seconds.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: ${{ matrix.os }}
+
+      # `out/server` is a build artifact (scripts/tauri-export.mjs) that the
+      # bundle config lists as a resource. cargo check does not read bundle
+      # config, but tauri's build script can trip on a missing path — create it
+      # empty so a failure here is about the Rust code, not a missing artifact.
+      - name: Stub the bundled-server resource directory
+        shell: bash
+        run: mkdir -p out/server
+
+      - name: cargo check
+        working-directory: src-tauri
+        run: cargo check --all-targets --locked
