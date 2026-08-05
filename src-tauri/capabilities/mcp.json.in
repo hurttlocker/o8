@@ -1,9 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "mcp",
-  "description": "tauri-plugin-mcp eval_and_await JS bridge — only active when built with --features dev-mcp-plugin (#932)",
+  "description": "tauri-plugin-mcp eval_and_await JS bridge — only active when built with --features dev-mcp-plugin (#932). The remote block is load-bearing (#1733): the app page is served from http://127.0.0.1:<port>, which Tauri treats as a REMOTE origin, and since Tauri 2.11 remote content can only invoke commands a capability explicitly grants to its origin. Without it every eval executes but `plugin:mcp|mcp_result` is ACL-denied, so results never return and all eval-based webview tools time out.",
   "windows": ["*"],
   "webviews": ["*"],
+  "remote": {
+    "urls": ["http://localhost:*", "http://127.0.0.1:*", "https://localhost:*", "https://127.0.0.1:*"]
+  },
   "permissions": [
     "mcp:default"
   ]
