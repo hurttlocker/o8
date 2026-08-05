@@ -341,11 +341,12 @@ All Glass is a MODE, not a playground: one recipe, zero user adjusters, permanen
 - **Exit sweep**: overrides apply with inline-`important` (a globals.css `!important` kills the gradient otherwise) and are force-removed BEFORE the target palette repaints on exit. No mode-specific override may survive the transition.
 - **Verification**: theme-contract edits need a hard reload (HMR does not re-run the theme effect), and glass must be judged through display captures because window captures disable live backdrop sampling.
 
-## Composer clusters + "+" switcher — LOCKED
+## Composer clusters + mode/fleet chips — LOCKED (re-ruled 2026-08-05)
 
-- **Left cluster = intent**: `+` (attach & mode switcher) · mode chip · mic. **Right cluster = runtime**: context meter · model · thinking · send. Nothing crosses sides.
-- **Modes** (the + menu's top section): Solo / Multitask / Mixture of Agents — locked semantics: Solo = the orchestrator dispatches nothing and works with its own tools; Multitask = dispatches parallel worker packets; MoA = coordinates multiple independent planning passes before dispatch. Mode = one visible `[Mode: …]` directive line prepended at send; slash commands pass through. Modes persist across sends.
-- **Chip**: always visible beside `+`; Solo renders faint (default stays quiet), active modes render accent; click reopens the switcher; title = mode description.
+- **Left cluster = intent**: `+` (attach only) · mic. **Right cluster = runtime story**: context meter · mode chip · fleet worker chip · model · thinking · send. Nothing crosses sides. (Supersedes the 07-17 layout that kept the mode chip beside `+` — Q 2026-08-05: the right side reads as one story, "mode → who does the work → which orchestrator model drives it".)
+- **Modes** (now the mode chip's own popover): Solo / Multitask / Mixture of Agents — locked semantics: Solo = the orchestrator dispatches nothing and works with its own tools; Multitask = dispatches parallel worker packets; MoA = coordinates multiple independent planning passes before dispatch. Mode = one visible `[Mode: …]` directive line prepended at send; slash commands pass through. Modes persist across sends.
+- **Mode chip**: standalone in the right cluster; Solo renders faint (default stays quiet), active modes render accent; click opens its own switcher; title = mode description. The `+` menu no longer carries a mode section.
+- **Fleet worker chip** (Q 2026-08-05): appears ONLY when the mode dispatches (Multitask / MoA) — layers icon + `<Runtime> · <model>` in faint chrome text; click opens the fleet-worker popover (runtime rows with each runtime's resolved worker model right-aligned; selecting persists `defaultDispatchRuntime`). Solo hides it — nothing dispatches, so no fleet chrome.
 - **Placeholder teaches the mode** — rewritten per mode, no extra chrome.
 - **The model picker is models + thinking ONLY** — its Mode section is deleted; never reintroduce intent controls there.
 - **Popover recipe** (the locked composer-menu style): 240px drawer, flat single-line rows 26px (radius 7, 12.5px label, check right), ONE faint caption line (fixed height, hover-follows) instead of per-row sublabels, flat rows for actions — never bordered input-bubbles.

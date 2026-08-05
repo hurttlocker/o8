@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ComposerChipCompactContext } from './composer-compact-context';
 import { ComposerPopover } from './chat-panel/ComposerPopover';
 import { AttachFilesButton } from './AttachFilesButton';
+import { ComposerModeChip, FleetWorkerChip } from './ComposerFleetChips';
 import type { ComposerMode } from './composer-mode';
 import { MicButton } from './MicButton';
 import { SessionRulesChip } from './SessionRulesChip';
@@ -560,23 +561,30 @@ export function InputButtons({
         <SessionRulesChip threadId={sessionRulesThreadId} repoPath={repoPath} />
       ) : null}
 
-      {/* Left cluster = intent: attach/+, mode chip, mic (Q ruling 2026-07-17
-          — supersedes 07-11's mic-next-to-Send). Context meter moved RIGHT
-          beside the model selector. */}
+      {/* Left cluster = intent: attach/+ and mic (Q ruling 2026-08-05 —
+          supersedes 07-17: the mode chip moved to the RIGHT cluster so the
+          right side reads mode → fleet worker → orchestrator model). */}
       <AttachFilesButton
         onUploadDiskFiles={onUploadDiskFiles}
         onFileReferenceSelect={onFileReferenceSelect}
-        mode={composerMode}
-        onModeChange={onComposerModeChange}
         repoPath={repoPath}
       />
       <MicButton />
 
       </div>
 
-      {/* Right cluster — runtime: context meter · model · thinking · send
-          (Q ruling 2026-07-17). Pinned, never shrinks or clips. */}
+      {/* Right cluster — runtime: context meter · mode · fleet worker ·
+          model · thinking · send (Q ruling 2026-08-05). The mode chip owns
+          its own switcher; the fleet chip appears only when the mode
+          dispatches and selects the worker runtime inline. Pinned, never
+          shrinks or clips. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+      {composerMode && onComposerModeChange ? (
+        <ComposerModeChip mode={composerMode} onModeChange={onComposerModeChange} />
+      ) : null}
+      {composerMode && composerMode !== 'solo' ? (
+        <FleetWorkerChip compact={compact} />
+      ) : null}
       {inlineMeterSlot ? (
         <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
           {inlineMeterSlot}
