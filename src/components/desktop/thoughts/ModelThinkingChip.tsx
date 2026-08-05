@@ -5,6 +5,7 @@ import type { OrchestratorBackendSetting } from './operator-defaults';
 import { MODEL_IDS } from '@/lib/models';
 import { useEntitlement } from '@/lib/entitlement/context';
 import { AcpModelPicker } from './AcpModelPicker';
+import { shortModelLabel as acpShortModelLabel } from '@/lib/orchestrator/acp-model-catalogue';
 
 const EFFORT_LABELS: Record<ThinkingEffort, string> = {
   adaptive: 'adaptive',
@@ -345,10 +346,17 @@ export function ModelThinkingChip({
   const activeModelOption = COMPOSER_MODEL_GROUPS
     .flatMap((g) => g.options)
     .find((o) => activeBackend === o.backend && (!o.model || normalizedModelId === o.model));
-  const triggerModelLabel = activeModelOption?.triggerLabel ?? activeModelOption?.label ?? modelLabel;
+  // A searchable house has no static options, so activeModelOption never
+  // matches and the chip would fall back to the PROVIDER name — the exact
+  // thing the Q ruling below says it must not do. Derive the model's own short
+  // name from its id instead.
+  const searchableHouseLabel = COMPOSER_MODEL_GROUPS.some((g) => g.searchable && g.key === activeBackend)
+    ? acpShortModelLabel(normalizedModelId)
+    : null;
+  const triggerModelLabel = activeModelOption?.triggerLabel ?? activeModelOption?.label ?? searchableHouseLabel ?? modelLabel;
   // Collide's aggregator is now the model you actually picked (Q ruling
   // 2026-07-11) — the label follows it, not a hardcoded house.
-  const shortModelLabel = (activeModelOption?.triggerLabel ?? modelLabel).replace(/^Codex\s+/i, '').replace(/^GPT-5\.6\s+/i, '');
+  const shortModelLabel = (activeModelOption?.triggerLabel ?? searchableHouseLabel ?? modelLabel).replace(/^Codex\s+/i, '').replace(/^GPT-5\.6\s+/i, '');
   const decideLabel = `${shortModelLabel} decides`;
   const modeLabel = collideActive ? 'Mixture of Agents' : ultraActive ? 'Fusion' : 'Solo';
   // Which house drawer is open in the model picker. Defaults to the active

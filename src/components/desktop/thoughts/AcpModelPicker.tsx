@@ -21,8 +21,43 @@ import {
   filterCatalogue,
   catalogueSize,
   findCatalogueModel,
+  shortModelLabel,
   type CatalogueGroup,
 } from '@/lib/orchestrator/acp-model-catalogue';
+
+/**
+ * Recently picked model ids, newest first, per backend.
+ *
+ * 391 models is a search box, but the model you drive daily should be one
+ * click — searching for the same id every session is the difference between a
+ * picker that works and one that is pleasant. Kept in localStorage rather than
+ * operator defaults because this is per-surface muscle memory, not
+ * configuration worth syncing or validating.
+ */
+const RECENTS_LIMIT = 5;
+
+function recentsKey(backend: string): string {
+  return `o8:acp-model-recents:${backend}`;
+}
+
+function readRecents(backend: string): string[] {
+  try {
+    const raw = window.localStorage.getItem(recentsKey(backend));
+    const parsed = raw ? JSON.parse(raw) : null;
+    return Array.isArray(parsed) ? parsed.filter((v) => typeof v === 'string').slice(0, RECENTS_LIMIT) : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberRecent(backend: string, modelId: string): void {
+  try {
+    const next = [modelId, ...readRecents(backend).filter((v) => v !== modelId)].slice(0, RECENTS_LIMIT);
+    window.localStorage.setItem(recentsKey(backend), JSON.stringify(next));
+  } catch {
+    // A picker that cannot remember is still a working picker.
+  }
+}
 
 interface AcpModelPickerProps {
   backend: string;
@@ -48,7 +83,11 @@ export function AcpModelPicker({ backend, value, onSelect, repoPath, width = 320
   // Bumped by Retry. The effect keys off it, so a refresh is a re-run rather
   // than an imperative fetch that has to manage its own loading state.
   const [reloadKey, setReloadKey] = useState(0);
+  const [recents, setRecents] = useState<string[]>([]);
   const searchRef = useRef<HTMLInputElement>(null);
+
+  // localStorage is client-only; read after mount, never during render.
+  useEffect(() => { setRecents(readRecents(backend)); }, [backend]);
 
   useEffect(() => {
     let cancelled = false;
@@ -79,6 +118,11 @@ export function AcpModelPicker({ backend, value, onSelect, repoPath, width = 320
   }, []);
 
   useEffect(() => { if (state === 'ready') searchRef.current?.focus(); }, [state]);
+
+  const choose = useCallback((modelId: string) => {
+    rememberRecent(backend, modelId);
+    onSelect(modelId);
+  }, [backend, onSelect]);
 
   const filtered = useMemo(() => filterCatalogue(groups, query), [groups, query]);
   const total = useMemo(() => catalogueSize(groups), [groups]);
@@ -132,6 +176,51 @@ export function AcpModelPicker({ backend, value, onSelect, repoPath, width = 320
         <StatusLine text={`No model matches “${query}”.`} />
       ) : null}
 
+      {/* Recents only when idle: while searching, the query IS the intent and a
+          pinned strip on top just eats rows. */}
+      {state === 'ready' && !query.trim() && recents.length > 0 ? (
+        <div style={{ paddingRight: 6, paddingLeft: 6, paddingBottom: 4 }}>
+          <div style={{ ...ROW_TEXT, fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--t-text-faint)', paddingTop: 4, paddingBottom: 3, paddingLeft: 4 }}>
+            Recent
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            {recents.map((id) => {
+              const isActive = value === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => { choose(id); }}
+                  title={id}
+                  style={{
+                    ...ROW_TEXT,
+                    fontSize: 11,
+                    maxWidth: '100%',
+                    minHeight: 22,
+                    paddingTop: 3,
+                    paddingRight: 8,
+                    paddingBottom: 3,
+                    paddingLeft: 8,
+                    borderWidth: 1,
+                    borderStyle: 'solid',
+                    borderColor: isActive ? 'var(--t-accent)' : 'var(--t-border)',
+                    borderRadius: 999,
+                    background: isActive ? 'var(--t-accent-soft)' : 'transparent',
+                    color: isActive ? 'var(--t-accent)' : 'var(--t-text)',
+                    cursor: 'pointer',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {shortModelLabel(id) ?? id}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
       {state === 'ready' && shown > 0 ? (
         <div role="listbox" aria-label="Models" style={{ overflowY: 'auto', overflowX: 'hidden', paddingBottom: 6 }}>
           {filtered.map((group) => (
@@ -159,7 +248,7 @@ export function AcpModelPicker({ backend, value, onSelect, repoPath, width = 320
                       type="button"
                       role="option"
                       aria-selected={isActive && !active?.effort}
-                      onClick={() => { onSelect(model.id); }}
+                      onClick={() => { choose(model.id); }}
                       title={model.id}
                       style={{
                         ...ROW_TEXT,
@@ -198,7 +287,7 @@ export function AcpModelPicker({ backend, value, onSelect, repoPath, width = 320
                             <button
                               key={variant.id}
                               type="button"
-                              onClick={() => { onSelect(variant.id); }}
+                              onClick={() => { choose(variant.id); }}
                               title={variant.id}
                               style={{
                                 ...ROW_TEXT,

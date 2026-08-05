@@ -152,6 +152,27 @@ export function filterCatalogue(groups: CatalogueGroup[], query: string): Catalo
   return out;
 }
 
+/**
+ * A short human label for a raw model id, without needing the catalogue loaded.
+ *
+ * The composer chip has to name the running model the moment a thread restores,
+ * before any probe has returned — and a chip reading
+ * `openrouter/deepseek/deepseek-v4-flash` is unreadable at chip size. Effort
+ * variants keep their suffix, because `deepseek-v4-flash high` and
+ * `deepseek-v4-flash` are different choices the operator made deliberately.
+ */
+export function shortModelLabel(modelId: string | null | undefined): string | null {
+  if (!modelId) return null;
+  const trimmed = modelId.trim();
+  if (!trimmed) return null;
+  const split = splitSuffix(trimmed);
+  if (split) {
+    const base = split.base.slice(split.base.lastIndexOf('/') + 1);
+    return `${base} ${split.effort}`;
+  }
+  return trimmed.slice(trimmed.lastIndexOf('/') + 1);
+}
+
 /** Total model count across groups — for the picker's "N models" affordance. */
 export function catalogueSize(groups: CatalogueGroup[]): number {
   return groups.reduce((total, group) => total + group.models.length, 0);

@@ -15,6 +15,7 @@ import {
   filterCatalogue,
   catalogueSize,
   findCatalogueModel,
+  shortModelLabel,
 } from './acp-model-catalogue';
 import LIVE_MODELS from './__fixtures__/opencode-1.4.3-models.json';
 
@@ -155,5 +156,28 @@ describe('degenerate input', () => {
 
   it('returns null for an unknown stored model', () => {
     expect(findCatalogueModel(catalogue, 'openrouter/does/not-exist')).toBeNull();
+  });
+});
+
+describe('shortModelLabel — what the composer chip shows', () => {
+  it('reduces a provider-qualified id to the model name', () => {
+    expect(shortModelLabel('openrouter/deepseek/deepseek-v4-flash')).toBe('deepseek-v4-flash');
+    expect(shortModelLabel('xai/grok-4.5')).toBe('grok-4.5');
+    expect(shortModelLabel('opencode/big-pickle')).toBe('big-pickle');
+  });
+
+  it('keeps the effort, because that was a separate deliberate choice', () => {
+    expect(shortModelLabel('google/gemini-3-pro-image/high')).toBe('gemini-3-pro-image high');
+  });
+
+  it('does not mistake a model name for an effort suffix', () => {
+    // The 337-id trap again: `deepseek-v4-pro` is a name, not a depth.
+    expect(shortModelLabel('openrouter/deepseek/deepseek-v4-pro')).toBe('deepseek-v4-pro');
+  });
+
+  it('survives ids with no provider segment and empty input', () => {
+    expect(shortModelLabel('bare')).toBe('bare');
+    expect(shortModelLabel(null)).toBeNull();
+    expect(shortModelLabel('   ')).toBeNull();
   });
 });

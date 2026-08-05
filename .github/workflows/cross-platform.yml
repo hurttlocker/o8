@@ -74,11 +74,14 @@ jobs:
             libssl-dev \
             build-essential
 
-      - uses: dtolnay/rust-toolchain@stable
+      # Third-party actions are pinned to a full commit SHA, not a tag —
+      # repo policy, enforced by tests/workflow-policy.test.ts. Tags are
+      # mutable, so `@stable` is a supply-chain hole in CI.
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
 
       # Keyed on the lockfile: the Tauri dep graph dominates wall-clock, and a
       # cold build is minutes while a warm one is seconds.
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           workspaces: src-tauri -> target
           key: ${{ matrix.os }}
