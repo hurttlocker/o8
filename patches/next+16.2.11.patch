@@ -1,0 +1,22 @@
+diff --git a/node_modules/next/dist/build/webpack/plugins/flight-client-entry-plugin.js b/node_modules/next/dist/build/webpack/plugins/flight-client-entry-plugin.js
+index 0840474..0c769c0 100644
+--- a/node_modules/next/dist/build/webpack/plugins/flight-client-entry-plugin.js
++++ b/node_modules/next/dist/build/webpack/plugins/flight-client-entry-plugin.js
+@@ -701,7 +701,7 @@ class FlightClientEntryPlugin {
+         for(let id in pluginState.serverActions){
+             const { layer, ...action } = pluginState.serverActions[id];
+             for(let name in action.workers){
+-                const modId = pluginState.serverActionModules[name][layer[name] === _constants.WEBPACK_LAYERS.actionBrowser ? 'client' : 'server'];
++                const modId = (pluginState.serverActionModules[name] ?? pluginState.serverActionModules[name.replace(/\\/g, '/')] ?? pluginState.serverActionModules[name.replace(/\//g, '\\')])[layer[name] === _constants.WEBPACK_LAYERS.actionBrowser ? 'client' : 'server'];
+                 action.workers[name] = modId;
+             }
+             serverActions[id] = action;
+@@ -709,7 +709,7 @@ class FlightClientEntryPlugin {
+         for(let id in pluginState.edgeServerActions){
+             const { layer, ...action } = pluginState.edgeServerActions[id];
+             for(let name in action.workers){
+-                const modId = pluginState.edgeServerActionModules[name][layer[name] === _constants.WEBPACK_LAYERS.actionBrowser ? 'client' : 'server'];
++                const modId = (pluginState.edgeServerActionModules[name] ?? pluginState.edgeServerActionModules[name.replace(/\\/g, '/')] ?? pluginState.edgeServerActionModules[name.replace(/\//g, '\\')])[layer[name] === _constants.WEBPACK_LAYERS.actionBrowser ? 'client' : 'server'];
+                 action.workers[name] = modId;
+             }
+             edgeServerActions[id] = action;
