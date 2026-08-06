@@ -323,6 +323,22 @@ export const ORCHESTRATOR_RUNTIMES = {
     tier: 'frontier',
     description: 'xAI Grok Build coding CLI (grok-4.5) with headless JSON-schema output — sub-billed via SuperGrok.',
   },
+  'prime-agent': {
+    label: 'Prime Agent',
+    shortLabel: 'Prime',
+    dispatchable: true,
+    requiresModel: false,
+    accentColor: '#0ea5e9',
+    binaryName: 'prime-agent',
+    workerProvider: 'prime-agent',
+    authHouse: 'prime-agent',
+    reasoningEffort: false,
+    // Standard, not frontier: runs on the operator's own provider keys via
+    // prime-agent's own config, so it qualifies for the "Workers use the
+    // Brain" auto mode like Gemini/opencode.
+    tier: 'standard',
+    description: "Open-source RLM coding harness CLI (json-mode JSONL output); runs on the operator's own provider keys.",
+  },
 } satisfies Record<string, OrchestratorRuntimeCapability>;
 
 export type OrchestratorRuntime = keyof typeof ORCHESTRATOR_RUNTIMES;
@@ -379,5 +395,5 @@ export function getRuntimeCapability(runtime: OrchestratorRuntime): CatalogRunti
 /** Runtimes that ship in the dispatch picker. Mirrors the canonical capability set. */
 export const V1_DISPATCH_RUNTIMES: OrchestratorRuntime[] = listDispatchableRuntimes();
 
-// Thirteen seats at the table. The fourteenth is yours:
+// Fourteen seats at the table. The fifteenth is yours:
 // docs/internals/runtime-adapter-contract.md is the chair.

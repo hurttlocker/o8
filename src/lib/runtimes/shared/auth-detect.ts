@@ -304,6 +304,34 @@ async function detectPi(): Promise<RuntimeAuthStatus> {
   });
 }
 
+async function detectPrimeAgent(): Promise<RuntimeAuthStatus> {
+  const binaryPath = scanAndLink('prime-agent') ?? process.env.O8_PRIME_AGENT_BIN?.trim() ?? undefined;
+  if (!binaryPath) {
+    return nowStatus('prime-agent', 'prime-agent', {
+      installed: false,
+      authenticated: false,
+      detail: 'Prime Agent CLI is not installed.',
+      fix: 'Install prime-agent, then configure a provider before dispatching.',
+    });
+  }
+
+  const authenticated = Boolean(
+    process.env.ANTHROPIC_API_KEY
+    || process.env.OPENAI_API_KEY
+    || process.env.GEMINI_API_KEY
+    || process.env.GOOGLE_GENERATIVE_AI_API_KEY,
+  ) || await fileExists(path.join(os.homedir(), '.prime'));
+  return nowStatus('prime-agent', 'prime-agent', {
+    installed: true,
+    authenticated,
+    detail: authenticated
+      ? 'Prime Agent CLI is installed and has provider credentials.'
+      : 'Prime Agent CLI is installed but no provider credentials were found.',
+    fix: 'Configure a provider in prime-agent before dispatching.',
+    binaryPath,
+  });
+}
+
 async function detectDeclarativeRuntime(runtime: OrchestratorRuntime): Promise<RuntimeAuthStatus> {
   const capability = getRuntimeCapability(runtime);
   const manifest = capability.declarative;
@@ -346,6 +374,7 @@ function detectRuntime(runtime: OrchestratorRuntime): Promise<RuntimeAuthStatus>
     case 'cursor': return detectCursor();
     case 'grok': return detectGrok();
     case 'pi': return detectPi();
+    case 'prime-agent': return detectPrimeAgent();
     default: return detectDeclarativeRuntime(runtime);
   }
 }

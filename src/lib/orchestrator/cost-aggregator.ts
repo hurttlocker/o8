@@ -175,6 +175,7 @@ export async function aggregateMissionCost(state: OrchestratorMissionState): Pro
     cursor: emptyRuntimeTokenSummary(),
     grok: emptyRuntimeTokenSummary(),
     pi: emptyRuntimeTokenSummary(),
+    'prime-agent': emptyRuntimeTokenSummary(),
   };
 
   let totalCostUsd = 0;
