@@ -70,7 +70,11 @@ jobs:
           # rpm bundled fine and only AppImage died). Standard remedy.
           NO_STRIP: true
         with:
-          args: --config src-tauri/tauri.portci.conf.json
+          # --verbose so the bundler passes through linuxdeploy's own stderr —
+          # without it the AppImage failure is a bare "failed to run
+          # linuxdeploy" (rounds 5-7, with NO_STRIP and the gstreamer set
+          # already ruled out as cures).
+          args: --verbose --config src-tauri/tauri.portci.conf.json
       # Instrumentation: round 3 showed the bundler PRINTING built installer
       # paths while the upload step found the directory empty — list what
       # actually exists on disk between the two so the discrepancy is visible.
