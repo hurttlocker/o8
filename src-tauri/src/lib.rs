@@ -233,10 +233,41 @@ fn o8_data_dir() -> String {
     if let Ok(dir) = std::env::var("CORTEX_IDE_DATA_DIR") {
         return dir;
     }
-    let home = std::env::var("HOME").unwrap_or_default();
+    let home = home_dir_string();
     let new_dir = format!("{}/.o8", home);
     migrate_data_dir_once(&home, &new_dir);
     new_dir
+}
+
+/// `$HOME`, falling back to `%USERPROFILE%`. Windows sets only the latter, so
+/// the plain `var("HOME")` this replaced resolved to "" there — child logs and
+/// prefs landed at `/.o8/...` (drive root, access denied) and were lost
+/// (#1673 VM smoke).
+fn home_dir_string() -> String {
+    std::env::var("HOME")
+        .ok()
+        .filter(|h| !h.is_empty())
+        .or_else(|| std::env::var("USERPROFILE").ok().filter(|h| !h.is_empty()))
+        .unwrap_or_default()
+}
+
+/// Windows `resource_dir()` (and anything else touched by
+/// `std::fs::canonicalize`) comes back `\\?\C:\...`. Node.js cannot resolve a
+/// script entry through the extended-length prefix — `resolveMainPath` dies
+/// with EISDIR lstat'ing `C:` — so every path handed to a Node child must be
+/// a plain drive path (#1673 VM smoke). No-op for `\\?\UNC\` shares and on
+/// non-Windows.
+fn strip_extended_length_prefix(p: std::path::PathBuf) -> std::path::PathBuf {
+    if cfg!(windows) {
+        let s = p.to_string_lossy();
+        if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+            return std::path::PathBuf::from(format!(r"\\{}", rest));
+        }
+        if let Some(rest) = s.strip_prefix(r"\\?\") {
+            return std::path::PathBuf::from(rest.to_string());
+        }
+    }
+    p
 }
 
 fn migrate_data_dir_once(home: &str, new_dir: &str) {
@@ -582,13 +613,22 @@ fn ensure_codebase_memory_binary(app: AppHandle) {
             return;
         }
 
-        // Extract via system `tar` / `unzip`. Both ship on every macOS
-        // and Linux host; Windows ships unzip via PowerShell's
-        // Expand-Archive but we don't ship a Windows installer today.
+        // Extract via system `tar` / `unzip`. Both ship on every macOS and
+        // Linux host. Windows has no `unzip`, but its bundled bsdtar
+        // (`tar.exe`, Win10 1803+) extracts zip archives natively — the
+        // `unzip` spawn just failed "program not found" there (#1673).
         let extract_result: Result<(), String> = (|| {
             let archive_str = archive_path.to_string_lossy();
             let tmp_str = tmp_root.to_string_lossy();
-            if is_zip {
+            if is_zip && cfg!(windows) {
+                let status = Command::new("tar")
+                    .args(["-xf", &archive_str, "-C", &tmp_str])
+                    .status()
+                    .map_err(|e| format!("tar(zip) spawn: {}", e))?;
+                if !status.success() {
+                    return Err(format!("tar(zip) exit {}", status));
+                }
+            } else if is_zip {
                 let status = Command::new("unzip")
                     .args(["-o", &archive_str, "-d", &tmp_str])
                     .status()
@@ -6528,7 +6568,9 @@ pub fn run() {
 
 
             // ── Start bundled Next.js server ──
-            let resource_dir = app.path().resource_dir().expect("failed to resolve resource dir");
+            let resource_dir = strip_extended_length_prefix(
+                app.path().resource_dir().expect("failed to resolve resource dir"),
+            );
             let server_dir = resource_dir.join("server");
             let server_js = server_dir.join("server.js");
 

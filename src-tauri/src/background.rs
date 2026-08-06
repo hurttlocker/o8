@@ -31,7 +31,14 @@ fn data_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("CORTEX_IDE_DATA_DIR") {
         return PathBuf::from(dir);
     }
-    let home = std::env::var("HOME").unwrap_or_default();
+    // HOME then USERPROFILE — Windows sets only the latter; a bare
+    // var("HOME") made this a relative ".o8" that hit Access-denied under
+    // Program Files (#1673 VM smoke).
+    let home = std::env::var("HOME")
+        .ok()
+        .filter(|h| !h.is_empty())
+        .or_else(|| std::env::var("USERPROFILE").ok().filter(|h| !h.is_empty()))
+        .unwrap_or_default();
     PathBuf::from(home).join(".o8")
 }
 

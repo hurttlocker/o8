@@ -127,6 +127,11 @@ function prepareNodePty(serverRoot, arch = process.arch, abi = process.versions.
 }
 
 function prepareNativeAddons(serverRoot, arch = process.arch, abi = process.versions.modules) {
+  // The prebuild layout this selects (`prebuilds/node-v*/darwin-<arch>`) only
+  // exists in the macOS dual-arch bundle. Off-darwin bundles ship the
+  // host-compiled build/Release binaries and must load them untouched —
+  // running the selector there threw at boot and killed the server (#1673).
+  if (process.platform !== 'darwin') return;
   prepareBetterSqlite3(serverRoot, arch, abi);
   prepareNodePty(serverRoot, arch, abi);
 }

@@ -144,8 +144,16 @@ const loaderHtml = `<!DOCTYPE html>
         attempts++;
         setTimeout(tick, delay);
       } else {
+        // Deadline passed: surface the hint but NEVER stop probing. A cold
+        // Windows first boot spends 25s+ in node preflight alone before the
+        // server even spawns — a terminal give-up here turns a slow boot into
+        // a permanent false "failed" screen (#1673 VM smoke).
         const fail = document.getElementById('stage');
-        if (fail) fail.innerHTML = '<span style="color:#FF5A1F">server failed to start — install node 22+ at <span style="color:#111">nodejs.org</span></span>';
+        if (fail && !fail.dataset.failed) {
+          fail.dataset.failed = '1';
+          fail.innerHTML = '<span style="color:#FF5A1F">still waiting for the server — if this never resolves, install node 22+ at <span style="color:#111">nodejs.org</span></span>';
+        }
+        setTimeout(tick, 1000);
       }
     }
     // Probe immediately. The window now paints before the sidecar is spawned, so
@@ -435,7 +443,13 @@ try {
 // Select the immutable packaged prebuild for the user's Node ABI and
 // architecture before either package loads. This must never copy or chmod files
 // inside the signed app bundle; native-bundle.mjs removes build/ at export time.
-require('./native-addon-runtime.cjs').prepareNativeAddons(__dirname);
+// macOS only: the multi-ABI prebuild layout exists solely for the darwin
+// dual-arch artifact. Windows/Linux bundles keep the host-compiled
+// build/Release binaries, which load through the normal require path —
+// running the darwin selector there crashed the server at boot (#1673).
+if (process.platform === 'darwin') {
+  require('./native-addon-runtime.cjs').prepareNativeAddons(__dirname);
+}
 
 const http = require('node:http');
 const https = require('node:https');
@@ -620,7 +634,7 @@ function compileServerBundle(label, entry, external = []) {
       outfile: `out/server/${implementation}`,
       external,
     });
-    writeFileSync(join(server, `${label}.mjs`), `// Generated ABI-and-architecture-selecting entry for ${label}.\nimport { createRequire } from 'node:module';\nimport { dirname } from 'node:path';\nimport { fileURLToPath } from 'node:url';\nconst require = createRequire(import.meta.url);\nrequire('./native-addon-runtime.cjs').prepareNativeAddons(dirname(fileURLToPath(import.meta.url)));\nawait import('./${implementation}');\n`);
+    writeFileSync(join(server, `${label}.mjs`), `// Generated ABI-and-architecture-selecting entry for ${label}.\nimport { createRequire } from 'node:module';\nimport { dirname } from 'node:path';\nimport { fileURLToPath } from 'node:url';\nconst require = createRequire(import.meta.url);\n// darwin only: the multi-ABI prebuild selector exists for the dual-arch macOS\n// bundle; Windows/Linux load host-compiled build/Release directly (#1673).\nif (process.platform === 'darwin') {\n  require('./native-addon-runtime.cjs').prepareNativeAddons(dirname(fileURLToPath(import.meta.url)));\n}\nawait import('./${implementation}');\n`);
     console.log(`📦 Compiled ${label}.mjs + ${implementation}`);
   } catch (e) {
     console.error(`❌ ${label} compilation failed — refusing to ship a broken bundle`);
