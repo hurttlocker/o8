@@ -1,6 +1,7 @@
-import { existsSync, lstatSync, mkdirSync, readlinkSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname } from 'node:path';
+import { delimiter, dirname } from 'node:path';
+import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 export interface CliInstallCandidate {
@@ -19,22 +20,51 @@ export interface CliInstallResult {
   candidates: CliInstallCandidate[];
 }
 
-function cliCandidates(): string[] {
-  const home = homedir();
+// #1741 (part of #1673): Windows has no PATH-lookup symlink model (no
+// shebang, no execute bit) and file symlinks need elevation/Developer Mode —
+// same risk the Windows port audit already flagged for node_modules
+// symlinks. So the single Windows candidate is a directory we own and copy
+// a `.cmd`/`.ps1` wrapper into, not a symlink target. `<home>/.o8/bin`
+// matches the `.o8` data-dir convention the rest of the app already uses
+// (see `resolveCliDataDir` in config.ts and `well_known_cli_bin_dirs` in the
+// Rust CLI locator).
+export function cliCandidates(platform: NodeJS.Platform = process.platform, home: string = homedir()): string[] {
+  if (platform === 'win32') {
+    // path.win32 (not the bare `join`) so this stays correct when tested on
+    // a POSIX host with an injected 'win32' platform, not just at runtime.
+    return [path.win32.join(home, '.o8', 'bin', 'o8.cmd')];
+  }
   const candidates: string[] = [];
-  if (process.platform === 'darwin' && process.arch === 'arm64') {
+  if (platform === 'darwin' && process.arch === 'arm64') {
     candidates.push('/opt/homebrew/bin/o8');
   }
-  if (process.platform === 'darwin' || process.platform === 'linux') {
+  if (platform === 'darwin' || platform === 'linux') {
     candidates.push('/usr/local/bin/o8');
   }
   candidates.push(`${home}/.local/bin/o8`);
   return [...new Set(candidates)];
 }
 
-function directoryOnPath(target: string): boolean {
+export function directoryOnPath(target: string, pathEnv: string = process.env.PATH ?? '', platform: NodeJS.Platform = process.platform): boolean {
+  if (platform === 'win32') {
+    const dir = path.win32.dirname(target).replace(/\\+$/, '').toLowerCase();
+    return pathEnv
+      .split(path.win32.delimiter)
+      .some((entry) => entry.replace(/\\+$/, '').toLowerCase() === dir);
+  }
   const dir = dirname(target);
-  return (process.env.PATH ?? '').split(':').includes(dir);
+  return pathEnv.split(delimiter).includes(dir);
+}
+
+// Content for the Windows `.cmd`/`.ps1` shims, templated with the resolved
+// path to the currently-running o8.mjs bundle (mirrors the ones baked at
+// build time in scripts/tauri-export.mjs, but re-derived here so `doctor
+// --repair` can re-point them at a moved/updated install).
+export function windowsShimContents(source: string): { cmd: string; ps1: string } {
+  return {
+    cmd: `@echo off\r\nsetlocal\r\nset "NODE_BIN=%O8_NODE_BIN%"\r\nif not defined NODE_BIN set "NODE_BIN=node"\r\n"%NODE_BIN%" "${source}" %*\r\n`,
+    ps1: `$ErrorActionPreference = 'Stop'\r\n$nodeBin = $env:O8_NODE_BIN\r\nif ([string]::IsNullOrEmpty($nodeBin)) { $nodeBin = 'node' }\r\n& $nodeBin "${source}" @args\r\nexit $LASTEXITCODE\r\n`,
+  };
 }
 
 function findNode(): { ok: boolean; path: string | null } {
@@ -42,7 +72,11 @@ function findNode(): { ok: boolean; path: string | null } {
     return { ok: true, path: process.env.O8_NODE_BIN };
   }
   try {
-    const out = execFileSync('sh', ['-lc', 'command -v node'], { encoding: 'utf8' }).trim();
+    // `where` is a real Windows executable (System32\where.exe), not a shell
+    // builtin, so it runs the same way `sh -lc` does below: no shell needed.
+    const out = process.platform === 'win32'
+      ? execFileSync('where', ['node'], { encoding: 'utf8' }).trim().split(/\r?\n/)[0]
+      : execFileSync('sh', ['-lc', 'command -v node'], { encoding: 'utf8' }).trim();
     return out ? { ok: true, path: out } : { ok: false, path: null };
   } catch {
     return { ok: false, path: null };
@@ -63,6 +97,23 @@ export function repairCliInstall(source: string): CliInstallResult {
 
     try {
       mkdirSync(dirname(target), { recursive: true });
+
+      // Windows: no shebang/execute-bit/symlink-without-elevation model, so
+      // write the `.cmd` (+ sibling `.ps1`) wrapper directly instead of the
+      // POSIX symlink dance below (#1741).
+      if (process.platform === 'win32') {
+        const { cmd, ps1 } = windowsShimContents(source);
+        const ps1Target = target.replace(/\.cmd$/, '.ps1');
+        const alreadyCurrent = existsSync(target) && readFileSync(target, 'utf8') === cmd;
+        writeFileSync(target, cmd);
+        writeFileSync(ps1Target, ps1);
+        candidate.status = alreadyCurrent ? 'already-linked' : 'linked';
+        candidate.detail = alreadyCurrent ? `already points to ${source}` : `wrote shim pointing to ${source}`;
+        installedAt = target;
+        candidates.push(candidate);
+        break;
+      }
+
       if (existsSync(target)) {
         const meta = lstatSync(target);
         if (meta.isSymbolicLink()) {

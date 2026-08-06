@@ -756,6 +756,25 @@ exec "$NODE_BIN" "$DIR/o8.mjs" "$@"
   // on Windows the mode bits are a no-op, which is fine (cmd runs by extension).
   chmodSync(CLI_BIN_DST, 0o755);
   chmodSync(CLI_BUNDLE_DST, 0o755);
+
+  // Windows has no shebang/symlink/execute-bit model, so PATH lookup needs an
+  // actual .cmd (cmd.exe/PATHEXT) and .ps1 (PowerShell) entry next to the same
+  // o8.mjs bundle above (#1741, part of #1673). Emitted unconditionally —
+  // these are inert text files on macOS/Linux and cost nothing to ship.
+  const CLI_CMD_DST = join(CLI_BIN_DIR, 'o8.cmd');
+  writeFileSync(CLI_CMD_DST, `@echo off\r
+setlocal\r
+set "NODE_BIN=%O8_NODE_BIN%"\r
+if not defined NODE_BIN set "NODE_BIN=node"\r
+"%NODE_BIN%" "%~dp0o8.mjs" %*\r
+`);
+  const CLI_PS1_DST = join(CLI_BIN_DIR, 'o8.ps1');
+  writeFileSync(CLI_PS1_DST, `$ErrorActionPreference = 'Stop'\r
+$nodeBin = $env:O8_NODE_BIN\r
+if ([string]::IsNullOrEmpty($nodeBin)) { $nodeBin = 'node' }\r
+& $nodeBin (Join-Path $PSScriptRoot 'o8.mjs') @args\r
+exit $LASTEXITCODE\r
+`);
 } else {
   console.warn('⚠️  CLI build config missing — skipping `o8` cli bundle');
 }

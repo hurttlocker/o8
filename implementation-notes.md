@@ -1,80 +1,58 @@
-# Windows Node runtime locator (#1740, part of #1673)
+# Implementation notes — #1741 Windows CLI shim + PATH registration
 
-## Problem
+## What shipped
 
-`run_node_preflight()` in `src-tauri/src/lib.rs` only ever resolved `node`
-via POSIX login shells (`resolve_node_via_login_shell()`: zsh → bash → sh →
-`which`) and `find_preferred_node_22()` (globs `$HOME/.nvm`, `.fnm`,
-`.volta`, Homebrew paths). None of that exists on Windows — `probe_login_shell()`
-and both of the above always return `None` there, so a Windows install with
-Node 22 correctly on PATH would still hit `NodePreflightError::Missing` when
-launched from Explorer (no inherited terminal PATH, mirroring the macOS
-Finder-launch problem this whole subsystem exists to solve).
+Add `prime-agent` as the 14th dispatchable runtime, following the specialized-adapter
+recipe in `docs/internals/runtime-adapter-contract.md`, modeled on `src/lib/grok/owned.ts`
+(one-shot JSON-mode process, not Pi's hand-rolled bidirectional RPC — prime-agent shares
+grok's shape for v1: launch/resume via argv, parse stdout after the fact).
 
-## Change
-
-- New module `src-tauri/src/windows_node_locate.rs`: `resolve_node_via_where()`
-  (`where node`) plus `find_preferred_node_22()` scanning the official
-  installer / winget / choco fixed paths and the nvm-windows / Volta / fnm
-  version-manager roots. Root selection + version matching are pure,
-  env-injectable functions (`candidate_roots`, `find_preferred_node_22_via`)
-  with unit tests that run on any host via `cargo test --lib` — the module
-  declaration is `#[cfg(any(test, target_os = "windows"))]` so it compiles
-  in test builds everywhere but ships zero bytes/warnings on normal macOS
-  builds.
-- `run_node_preflight()` gained a `.or_else(resolve_node_windows)` step —
-  `resolve_node_windows()` is `cfg(windows)` → tries the new module;
-  `cfg(not(windows))` → `None` (byte-identical macOS/Linux behavior).
-- `augment_process_path()`: PATH was always split/joined on `:`, which
-  silently corrupts a real Windows (`;`-delimited) PATH when forwarding it to
-  spawned children (Next server, ws-server, MCP, dispatched workers). Now
-  uses `;` on Windows, `:` elsewhere (`cfg!(windows)` is a compile-time
-  constant, so macOS behavior is unchanged). Also fixed the adjacent log
-  line, which re-split the now-`;`-joined string on `:` purely for a count —
-  it now counts the pre-join Vec directly.
-- `cli_locate::well_known_cli_bin_dirs()` gained a `cfg(windows)` block for
-  the same version-manager dirs (nvm-windows/Volta/fnm), used by
-  `augment_process_path` to widen the PATH other dispatched CLIs (claude,
-  codex, gemini, gh) get found on.
-- `show_node_error_and_exit()`: extracted the "how to install Node" text into
-  `node_install_hint()`, cfg-split so the Windows dialog body points at
-  nodejs.org / winget / nvm-windows instead of brew/nvm. Delivery mechanism
-  (mshta) was already Windows-gated and unchanged. Left
-  `NodePreflightError::UnsupportedNativeAbi`'s body as-is (rare path, already
-  names a specific major to install — see Deviations).
-- `docs/internals/port-audit-windows.md`: appended a short "Update (#1740)"
-  note under the existing Node-discovery finding; did not touch structure or
-  other sections.
-
-## Verification
-
-- `cargo check --lib` (macOS): clean.
-- `cargo test --lib`: existing `node_preflight_tests` (macOS) unaffected;
-  new `windows_node_locate::tests` (4 cases: nvm-windows layout, fnm
-  layout, non-22 version rejection, fixed-root check) pass on macOS via the
-  `cfg(any(test, target_os = "windows"))` module gate.
-- No Windows machine available — the Windows-only code paths
-  (`resolve_node_via_where`, `find_preferred_node_22` wrapper,
-  `well_known_cli_bin_dirs`'s windows block) are `cfg(windows)`-gated and
-  were not exercised locally; they'll compile-check on `windows-latest` CI.
-  Confidence is based on std-only APIs (`Command`, `PathBuf`, `env::var`) and
-  documented nvm-windows/Volta/fnm/choco directory layouts.
-- `npx tsc --noEmit`: no TS files touched by this packet; not expected to be
-  affected, ran anyway per protocol.
+- `src/lib/prime-agent/owned.ts` — adapter built on `createOwnedSessionStore`. Launches
+  `prime-agent -p <prompt> --mode json --session-dir .o8-prime-agent-sessions`; resumes
+  via `-r <sessionId>`. `--session-dir` is a path relative to the spawn cwd, which the
+  shared store always sets to `session.repoPath` (the packet worktree), so prime-agent's
+  own JSONL state travels with the worktree instead of piling up in the shared
+  `~/.prime/agent/sessions/`. Parser reads the first JSONL line as the session header
+  (per the CLI facts) and defensively maps message/tool/result/error event shapes.
+- `src/lib/runtimes/prime-agent.ts` — `AgentRuntime` implementation, capability-gated on
+  `resolveCli` finding the `prime-agent` binary (absent binary → `discoverSessions()`
+  returns `[]`, matching every other adapter).
+- `src/lib/runtimes/prime-agent-cost-parser.ts` — conservative parser: reads embedded
+  usage/stats fields if present, never invents a cost estimate (unlike Grok's fixed-price
+  parser) since prime-agent runs on the operator's own provider/model choice.
+- `src/lib/orchestrator/runtime-capabilities.ts` — new `'prime-agent'` catalog entry,
+  `tier: 'standard'` (qualifies for Brain-auto), accent `#0ea5e9` (unused so far).
+- `src/lib/runtimes/index.ts` — registered adapter + cost parser + fleet-cache invalidation.
+- `docs/internals/runtime-adapter-contract.md` — updated runtime count (14→15 total,
+  13→14 dispatchable) and the specialized-runtimes list, within the packet's diff budget.
 
 ## Deviations
 
-- Left `NodePreflightError::UnsupportedNativeAbi`'s dialog body pointing at
-  brew/nvm command syntax even on Windows. That branch is a narrow edge case
-  (found Node's major isn't 22 or 24) whose message already names a specific
-  required major and an `nvm alias default` tip that doesn't map cleanly to
-  a shared generic hint. The mshta dialog still renders correctly on
-  Windows; only the suggested install command reads slightly off-brand. Not
-  part of the "missing/too old" acceptance criteria this issue calls out.
-- Did not touch `src/lib/mcp/operator-node22-locator.ts` (the MCP re-exec
-  locator flagged in the audit doc) or Node bundling — out of scope per the
-  task's Rust-side framing (`src-tauri/src/lib.rs` + `src-tauri/src/cli_locate.rs`).
-- Did not fix `cli_locate::scan_for_binary()`'s `:`-only PATH split — it's
-  only reachable from `#[cfg(target_os = "macos")] mod agent` today (verified
-  via grep), so it has no live Windows code path yet and touching it would be
-  unrelated scope creep for this issue.
+- **Skipped editing `src/lib/orchestrator/types.ts`.** The packet's step 4 assumed a
+  second `OrchestratorRuntime` union to update, but `types.ts` re-exports the type
+  directly from `runtime-capabilities.ts` (`export type { OrchestratorRuntime } from
+  '@/lib/orchestrator/runtime-capabilities'`) — exactly what the contract doc promises
+  ("that one entry generates... the `OrchestratorRuntime` type"). No edit was needed or
+  made there.
+- **Two switch cases tsc forced, as the contract doc predicted**: `src/lib/orchestrator/cost-aggregator.ts`
+  (`tokensByRuntime` exhaustive record) and `src/lib/runtime/registry.ts`
+  (`RUNTIME_BINARY_NAMES` exhaustive record, keyed by `LaneRuntime = OrchestratorRuntime`).
+  Both got a one-line `prime-agent` entry.
+- **A third case tsc could NOT catch, but `npm test` did**: `src/lib/runtimes/shared/auth-detect.ts`'s
+  `detectRuntime()` switch has a non-exhaustive `default` that falls through to
+  `detectDeclarativeRuntime()` — which throws for any non-declarative runtime missing a
+  `declarative` manifest. Since prime-agent is specialized (not declarative), every
+  dispatch-readiness check would have thrown at runtime. Added `detectPrimeAgent()`
+  (modeled on `detectPi()`/`detectOpencode()`: checks common provider env vars plus a
+  `~/.prime` directory) and a `case 'prime-agent'` in the switch. This file isn't in the
+  packet's 6-file list, but leaving it broken would mean prime-agent could register as a
+  runtime yet never pass an auth-readiness check — a real reachability gap the test
+  caught, not a hypothetical one.
+- **`--model` flag never passed.** prime-agent picks its own model via its own config
+  (task spec: "the adapter does NOT manage keys"); `requiresModel: false` and no
+  `defaultModel` in the capability entry, matching Pi/Goose rather than Grok/opencode.
+- Pre-existing, unrelated `npm test` failures (`act is not a function` in several
+  `src/components/desktop/**` tests) were confirmed present on the same commit with this
+  branch's changes stashed — not caused by this packet.
+
+Windows CLI shim + PATH registration (#1741): shipped `o8.cmd`/`o8.ps1` and first-run PATH registration; full summary in `docs/internals/port-audit-windows.md` "Status (#1741)".

@@ -39,6 +39,9 @@ mod window_state_sanitizer;
 // see the module doc comment.
 #[cfg(any(test, target_os = "windows"))]
 mod windows_node_locate;
+// #1741: PATH string logic is unconditional so `cargo test --lib` exercises
+// it on every host OS; only its `windows_impl` submodule is cfg-gated.
+mod windows_cli_path;
 // Plan-token + managed-inference proxy routing. macOS-only: reads keys via the
 // (macOS-gated) stt module, consumed by the macOS-gated agent / ai / stt paths.
 #[cfg(target_os = "macos")]
@@ -3150,11 +3153,18 @@ fn ensure_cli_on_path(cli_source: &Path) {
     std::env::set_var("O8_CLI_INSTALL_STATUS", format!("failed: {}", detail));
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Windows has no symlink-without-elevation story, so instead of linking we
+/// copy the bundled o8.cmd/o8.ps1/o8.mjs into `%USERPROFILE%\.o8\bin` and add
+/// that directory to `HKCU\Environment\Path` (#1741, part of #1673).
+#[cfg(target_os = "windows")]
+fn ensure_cli_on_path(cli_source: &Path) {
+    windows_cli_path::ensure_cli_on_path(cli_source);
+}
+
+#[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
 fn ensure_cli_on_path(_cli_source: &Path) {
-    // Windows + Linux symlink semantics differ enough to warrant a separate
-    // pass when those platforms come online. For now, the macOS .app is the
-    // only shipping surface that needs the symlink.
+    // Linux packaging isn't shipping yet — no symlink/PATH story needed
+    // until that surface comes online.
 }
 
 // ── Voice STT engine wiring (lifted from aqua/Symon, de-Symonized) ──

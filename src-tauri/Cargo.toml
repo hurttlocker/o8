@@ -150,6 +150,17 @@ tauri-plugin-http = "2.5.9"
 signal-hook = "0.3"
 libc = "0.2"
 
+# ── Windows CLI PATH registration (#1741, part of #1673) ──
+# Both crates are already resolved in the lock graph transitively (winreg via
+# tauri-plugin-autostart's auto-launch dep, windows-sys via winreg itself) —
+# promoting them to direct deps costs nothing extra, same precedent as the
+# reqwest/sha2/hex promotion above. winreg edits HKCU\Environment\Path (no
+# elevation needed); windows-sys broadcasts WM_SETTINGCHANGE afterward so
+# already-running shells (e.g. Explorer) pick up the change without a reboot.
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+
 # ── System-wide Symon fold: paste + global Fn hotkey (macOS only) ──
 # Versions pinned to aqua/Symon's exact stack so the lifted `paste.rs` +
 # `fn_hotkey.rs` compile verbatim and so this objc2 generation links cleanly

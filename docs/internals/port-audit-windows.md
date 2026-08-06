@@ -94,6 +94,7 @@ Scope: greenfield structural Windows risks in the current o8 implementation. Sta
 - Linux impact: No, assuming POSIX shell tools exist.
 - Known vs greenfield: Greenfield.
 - Direction: Emit `o8.cmd` and `o8.ps1` beside `o8.mjs`, register an app-local bin path, and use `%O8_NODE_BIN%` or the shared Node resolver.
+- Status (#1741): addressed for the shim + first-run PATH registration. `scripts/tauri-export.mjs` now emits `o8.cmd`/`o8.ps1` beside `o8.mjs`; `src-tauri/src/windows_cli_path.rs` copies them into `%USERPROFILE%\.o8\bin` and appends that directory to `HKCU\Environment\Path` on first launch (no elevation, mirrors the macOS symlink flow's contract); `cli/src/commands/install.ts`'s `o8 doctor --repair` gained the same win32 branch. Still open: uninstall does not remove the PATH entry — no NSIS `installerHooks`/`tauri.conf.json` schema could be verified from a macOS-only dev loop, so this needs a real Windows build to land safely. `remove_path_entry` in `windows_cli_path.rs` is unit-tested and ready to wire into that hook once one exists.
 
 ## WebView2, Origins, And Local Networking
 

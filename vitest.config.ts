@@ -14,7 +14,7 @@ export default defineConfig({
     environment: 'node',
     // Hermetic data dir for EVERY worker before any app module loads — see file.
     setupFiles: ['tests/setup-isolated-data-dir.ts'],
-    include: ['src/**/*.test.ts', 'tests/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'tests/**/*.test.ts', 'cli/**/*.test.ts'],
     // No globals — tests import { describe, it, expect } from 'vitest'
     // explicitly so tsc/eslint see real symbols.
     globals: false,
