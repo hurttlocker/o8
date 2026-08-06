@@ -5495,6 +5495,50 @@ fn take_pending_auth_callbacks() -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// The downstream seam for a `o8://` deep-link that arrives while the app is
+/// LIVE (#1742). macOS arrives via `RunEvent::Opened`; Windows/Linux arrive via
+/// `tauri-plugin-deep-link`'s `on_open_url` (single-instance forwarding). The
+/// frontend contract is identical on both, so no TS changes were needed to light
+/// up the new platforms.
+///
+/// Deliver through exactly ONE path. The ticket in the URL is a one-time Clerk
+/// token: buffering AND emitting delivered the same ticket twice, and the second
+/// exchange burned it with "sign in token has already been used" (live-hit
+/// 2026-07-05). Hot path (window exists) -> emit only. Cold start -> buffer only;
+/// the dashboard drains it via take_pending_auth_callbacks on mount.
+///
+/// The window check is what picks the branch, and it is only a correct proxy for
+/// "is the frontend listening?" on the macOS cold-launch path, where
+/// `RunEvent::Opened` fires BEFORE window creation. Do NOT route a cold-start
+/// URL through here on Windows/Linux: their drain runs inside `setup()`, where
+/// the main window already exists but its JS has not registered a listener yet,
+/// so the emit branch would burn the ticket into a void. That path calls
+/// `buffer_o8_auth_deep_links` directly instead.
+fn deliver_o8_auth_deep_links(app_handle: &AppHandle, links: Vec<String>) {
+    if links.is_empty() {
+        return;
+    }
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.emit("o8:auth-callback", &links);
+        let _ = window.show();
+        let _ = window.set_focus();
+    } else {
+        buffer_o8_auth_deep_links(links);
+    }
+}
+
+/// Park deep-links for the dashboard to drain on mount. The delivery of record
+/// whenever the frontend is not provably listening yet — see the asymmetry note
+/// on `deliver_o8_auth_deep_links`.
+fn buffer_o8_auth_deep_links(links: Vec<String>) {
+    if links.is_empty() {
+        return;
+    }
+    if let Ok(mut pending) = pending_auth_callbacks().lock() {
+        pending.extend(links);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// The tail of the bundled-server boot: everything that mutates this process's
 /// environment (PATH, `O8_NODE_BIN`, the AI keys) and spawns the sidecar
@@ -5839,6 +5883,41 @@ pub fn run() {
             None,
         ));
 
+    // ── Windows/Linux `o8://` deep-link delivery (#1742, part of #1673) ──
+    // macOS is untouched: the OS hands `o8://` URLs to the running app through
+    // RunEvent::Opened, and LaunchServices owns the registration. Windows and
+    // Linux instead LAUNCH THE BINARY AGAIN with the URL as argv[1], so both
+    // plugins are required:
+    //   - single-instance detects the already-running app, forwards argv to it
+    //     and exits the duplicate (without it, clicking a link would boot a
+    //     second o8 — two sidecars fighting over the SQLite WAL and the ports).
+    //     Its `deep-link` feature is what feeds that argv to the plugin below.
+    //   - deep-link parses argv against `plugins.deep-link.desktop.schemes` and
+    //     emits `deep-link://new-url`; setup() below funnels that into the same
+    //     `o8:auth-callback` / pending-buffer seam macOS uses.
+    // Order matters: single-instance FIRST (its callback resolves the deep-link
+    // plugin state, and it must claim the instance lock before anything else).
+    // The doomed second process still runs run()'s prologue before the plugin
+    // exits it — that is safe by construction: the orphan reaper skips anything
+    // whose parent is still alive (so it cannot touch the live instance's
+    // next-server/ws-server), and it is Unix-only, so on Windows it is a no-op.
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    {
+        builder = builder
+            .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+                // The `deep-link` feature already handed _argv to the deep-link
+                // plugin before this callback ran, so the URL is in flight. All
+                // that is left is to surface the window the user just asked for
+                // (a plain `o8` re-launch with no URL lands here too).
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+            }))
+            .plugin(tauri_plugin_deep_link::init());
+    }
+
     // Voice P3 hotkeys: OS-global keyboard shortcuts. Installing the plugin is
     // harmless on its own — the actual chord registrations live in the
     // `!preship_gate` macOS setup() block so the disposable pre-ship child app
@@ -6101,6 +6180,73 @@ pub fn run() {
             boot_trace("setup() entered (plugins INITIALISED)");
             #[cfg(target_os = "macos")]
             url_scheme_handler::reassert_o8_scheme_handler();
+            // ── Windows/Linux `o8://` (#1742) — the non-macOS half of the above ──
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+
+                // Hot path: a live app receiving a URL (fresh launch that
+                // single-instance forwarded, or this process's own argv replayed).
+                let deep_link_handle = app.handle().clone();
+                app.deep_link().on_open_url(move |event| {
+                    let links: Vec<String> = event
+                        .urls()
+                        .iter()
+                        .filter(|url| url.scheme() == "o8")
+                        .map(|url| url.as_str().to_string())
+                        .collect();
+                    deliver_o8_auth_deep_links(&deep_link_handle, links);
+                });
+
+                // Cold start: the plugin parsed argv during ITS setup, which
+                // Tauri runs before this closure — so the launch URL was emitted
+                // before the listener above existed. get_current() is the drain
+                // for exactly that window; without it a cold `o8://auth/callback`
+                // click would sign in to nothing.
+                //
+                // BUFFER, never emit. By the time setup() runs the main window
+                // exists (its absence here is the 0.1.598 regression the
+                // lifecycle block below warns about), so the emit branch of
+                // deliver_o8_auth_deep_links would fire into a webview whose JS
+                // has not registered the `o8:auth-callback` listener yet — and
+                // the Clerk ticket is one-time, so there is no second chance.
+                // The dashboard drains take_pending_auth_callbacks on mount,
+                // which is timing-independent.
+                if let Ok(Some(urls)) = app.deep_link().get_current() {
+                    let links: Vec<String> = urls
+                        .iter()
+                        .filter(|url| url.scheme() == "o8")
+                        .map(|url| url.as_str().to_string())
+                        .collect();
+                    buffer_o8_auth_deep_links(links);
+                }
+
+                // Runtime registration. The bundler already writes the scheme
+                // into the NSIS/WiX/deb/rpm installers, but that covers only
+                // installed builds — this catches `cargo tauri dev`, portable
+                // extractions, and AppImages the user never registered with an
+                // AppImage launcher. Idempotent (HKCU key rewrite on Windows;
+                // ~/.local/share/applications/*-handler.desktop + xdg-mime on
+                // Linux) and off the boot thread because the Linux path shells
+                // out to update-desktop-database + xdg-mime.
+                //
+                // UNINSTALL CLEANUP, honestly: the Windows NSIS/WiX uninstallers
+                // remove the keys THEY wrote (HKCU or HKLM per install mode), and
+                // deb/rpm removal drops the bundled .desktop file. Neither knows
+                // about what register_all() wrote at runtime — the per-user HKCU
+                // key from a machine-wide install, and the Linux
+                // `<bin>-handler.desktop` + mimeapps.list default under
+                // ~/.local/share + ~/.config. Those survive uninstall as dangling
+                // handlers pointing at a missing binary. The plugin exposes
+                // unregister() but there is no uninstall hook to call it from, so
+                // this is a known, accepted gap rather than a solved problem.
+                let register_handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    if let Err(err) = register_handle.deep_link().register_all() {
+                        log::warn!("[url-scheme] runtime o8:// registration failed: {err}");
+                    }
+                });
+            }
             let boot_identity = boot_identity.clone();
             // Nudge the user to move o8 to /Applications when it's running
             // translocated / from a DMG — otherwise dictation paste, Accessibility,
@@ -6888,21 +7034,9 @@ pub fn run() {
                     .filter(|url| url.scheme() == "o8")
                     .map(|url| url.as_str().to_string())
                     .collect();
-                if !auth_links.is_empty() {
-                    // Deliver through exactly ONE path. The ticket in the URL is a
-                    // one-time Clerk token: buffering AND emitting delivered the same
-                    // ticket twice, and the second exchange burned it with
-                    // "sign in token has already been used" (live-hit 2026-07-05).
-                    // Hot path (window exists) → emit only. Cold start → buffer only;
-                    // the dashboard drains it via take_pending_auth_callbacks on mount.
-                    if let Some(window) = _app_handle.get_webview_window("main") {
-                        let _ = window.emit("o8:auth-callback", &auth_links);
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    } else if let Ok(mut pending) = pending_auth_callbacks().lock() {
-                        pending.extend(auth_links.clone());
-                    }
-                }
+                // Single delivery seam, shared with the Windows/Linux deep-link
+                // plugin path (see deliver_o8_auth_deep_links).
+                deliver_o8_auth_deep_links(_app_handle, auth_links);
 
                 // Finder "Open With → o8" / dock drop (file:// URLs).
                 let paths: Vec<String> = urls

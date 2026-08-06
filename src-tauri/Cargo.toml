@@ -161,6 +161,29 @@ libc = "0.2"
 winreg = "0.55"
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
 
+# ── Windows/Linux `o8://` deep-link registration (#1742, part of #1673) ──
+# macOS registers the scheme through the bundle (Info.plist CFBundleURLTypes)
+# and reasserts it at runtime via LaunchServices (url_scheme_handler.rs); those
+# paths stay untouched. Windows needs HKCU\Software\Classes\o8 registry keys and
+# Linux needs an `x-scheme-handler/o8` .desktop association — both of which
+# tauri-plugin-deep-link writes at runtime from `plugins.deep-link.desktop.schemes`
+# (see tauri.windows.conf.json / tauri.linux.conf.json), and which the bundler
+# also stamps into the NSIS/WiX/deb/rpm installers from the same config key.
+#
+# Deliberately gated to the two platforms that need it rather than
+# `cfg(not(target_os = "macos"))`: single-instance compiles to an EMPTY crate on
+# android/ios (its lib.rs carries `#![cfg(not(any(android, ios)))]`), so a
+# not-macos gate would leave a latent compile break if o8 ever grows a Tauri
+# mobile target. macOS resolves neither crate either way — the whole point.
+#
+# `single-instance` carries the `deep-link` feature so a second launch forwards
+# its argv into the already-running instance's deep-link plugin instead of
+# booting a second app (that IS how Windows/Linux deliver a URL to a live app).
+# It must be registered BEFORE the deep-link plugin in the builder chain.
+[target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
+tauri-plugin-deep-link = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+
 # ── System-wide Symon fold: paste + global Fn hotkey (macOS only) ──
 # Versions pinned to aqua/Symon's exact stack so the lifted `paste.rs` +
 # `fn_hotkey.rs` compile verbatim and so this objc2 generation links cleanly
