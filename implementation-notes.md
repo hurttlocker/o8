@@ -1,6 +1,6 @@
-# Implementation notes — #1741 Windows CLI shim + PATH registration
+# Implementation notes
 
-## What shipped
+## Plan
 
 Add `prime-agent` as the 14th dispatchable runtime, following the specialized-adapter
 recipe in `docs/internals/runtime-adapter-contract.md`, modeled on `src/lib/grok/owned.ts`
