@@ -6,7 +6,7 @@ Scope: greenfield structural Windows risks in the current o8 implementation. Sta
 
 1. **Updater metadata publishes only Darwin artifacts, so Windows clients have no update channel** — BLOCKER — `scripts/release.mjs:48`, `scripts/release.mjs:50`, `scripts/release.mjs:109`, `scripts/release.mjs:114`
 2. **Tauri handles `o8://` callbacks only in a macOS `RunEvent::Opened` branch and has no Windows protocol registration** — BLOCKER — `src-tauri/src/lib.rs:4568`, `src-tauri/src/lib.rs:5624`, `src-tauri/src/lib.rs:5625`, `src-tauri/tauri.conf.json:68`
-3. **Tracked sidecar shutdown calls the Unix `kill` binary from un-cfg'd Rust used by update relaunch** — BLOCKER — `src-tauri/src/sidecar_lifecycle.rs:25`, `src-tauri/src/sidecar_lifecycle.rs:40`, `src-tauri/src/sidecar_lifecycle.rs:55`, `src-tauri/src/lib.rs:1772`
+3. **Tracked sidecar shutdown calls the Unix `kill` binary from un-cfg'd Rust used by update relaunch** — BLOCKER — **Fixed in #1739** — `src-tauri/src/sidecar_lifecycle.rs:25`, `src-tauri/src/sidecar_lifecycle.rs:40`, `src-tauri/src/sidecar_lifecycle.rs:55`, `src-tauri/src/lib.rs:1772`
 4. **Node 22/better-sqlite3 ABI pin has no Windows resolver while Node bundling is disabled** — BLOCKER — `src-tauri/src/lib.rs:1215`, `src-tauri/src/lib.rs:1236`, `scripts/bundle-node.mjs:23`, `scripts/bundle-node.mjs:28`
 5. **Packaged sidecars list macOS helper names only, including voice helpers not built for Windows** — BLOCKER — `src-tauri/tauri.conf.json:47`, `src-tauri/tauri.conf.json:48`, `src-tauri/tauri.conf.json:49`, `src-tauri/build.rs:80`
 6. **WebView local trust/CORS allowlists trust `tauri://localhost` but not WebView2 `.localhost` origins** — BLOCKER — `src/middleware.ts:150`, `src/middleware.ts:154`, `src/ws-server.ts:4558`, `src/ws-server.ts:4561`
@@ -50,6 +50,7 @@ Scope: greenfield structural Windows risks in the current o8 implementation. Sta
 - Linux impact: No for normal Linux hosts.
 - Known vs greenfield: Greenfield extension. The baseline calls out Unix signal/process-model gaps generally; this concrete un-cfg'd relaunch cleanup path is a separate blocker.
 - Direction: Introduce a platform process-tree supervisor: Job Objects on Windows, current signal path on Unix, and confirm port release before relaunch.
+- Status: **Fixed in #1739.** `kill_tracked_children()` now cfg-branches instead of un-cfg'd shelling to `kill`: the Unix TERM→wait→KILL escalation is unchanged, and Windows force-kills each tracked PID's full process tree via `taskkill /PID <pid> /T /F` in one shot (there is no SIGTERM-equivalent step to escalate from on Windows). A Job Object per spawned child remains the more thorough tree-ownership model and is still open if `taskkill` proves insufficient in practice.
 
 ### Crash-survivable worker spawn has a Windows branch but no matching tree ownership model
 

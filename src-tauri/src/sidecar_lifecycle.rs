@@ -18,7 +18,8 @@ pub(crate) fn register_child(pid: u32) {
     }
 }
 
-/// TERM + (after 1s) KILL every tracked child PID.
+/// TERM + (after 1s) KILL every tracked child PID on Unix; force-kill the
+/// full process tree via `taskkill` on Windows.
 ///
 /// Idempotent: the registry is drained on first call, so repeated exit events
 /// or a panic during shutdown cannot send another cleanup pass.
@@ -36,7 +37,18 @@ pub(crate) fn kill_tracked_children() {
         pids.len(),
         pids
     );
-    for pid in &pids {
+
+    #[cfg(unix)]
+    kill_tracked_children_unix(&pids);
+
+    #[cfg(windows)]
+    kill_tracked_children_windows(&pids);
+}
+
+/// SIGTERM every PID, wait 1s, then SIGKILL any survivor.
+#[cfg(unix)]
+fn kill_tracked_children_unix(pids: &[u32]) {
+    for pid in pids {
         let _ = Command::new("kill")
             .args(["-TERM", &pid.to_string()])
             .status();
@@ -44,7 +56,7 @@ pub(crate) fn kill_tracked_children() {
 
     std::thread::sleep(std::time::Duration::from_millis(1000));
 
-    for pid in &pids {
+    for pid in pids {
         let alive = Command::new("kill")
             .args(["-0", &pid.to_string()])
             .status()
@@ -57,6 +69,43 @@ pub(crate) fn kill_tracked_children() {
                 .status();
         }
     }
+}
+
+/// Windows has no `kill(1)`/SIGTERM to escalate from, so there is no
+/// graceful-then-forceful step here — `taskkill /T /F` force-kills the PID
+/// and its entire child tree in one shot (#1739: the prior un-cfg'd shellout
+/// to Unix `kill` silently no-op'd on Windows and orphaned every bundled
+/// Node child on app exit/update-relaunch). A Job Object per spawned child
+/// would be the more thorough tree-ownership model; `taskkill` closes the
+/// orphan risk with a much smaller diff.
+#[cfg(windows)]
+fn kill_tracked_children_windows(pids: &[u32]) {
+    for pid in pids {
+        match Command::new("taskkill")
+            .args(taskkill_tree_args(*pid))
+            .status()
+        {
+            Ok(status) if status.success() => {}
+            Ok(status) => log::warn!(
+                "[shutdown] taskkill /PID {} /T /F exited with {}",
+                pid,
+                status
+            ),
+            Err(e) => log::warn!(
+                "[shutdown] failed to spawn taskkill for PID {}: {}",
+                pid,
+                e
+            ),
+        }
+    }
+}
+
+/// Pure argv builder, kept un-gated so the Windows kill path has unit
+/// coverage that runs on every host platform (#1739) even though the actual
+/// `taskkill` spawn only happens under `cfg(windows)`.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn taskkill_tree_args(pid: u32) -> [String; 4] {
+    ["/PID".to_string(), pid.to_string(), "/T".to_string(), "/F".to_string()]
 }
 
 /// Install panic + Unix signal handlers before Tauri starts spawning children.
@@ -538,5 +587,18 @@ fn clean_stale_tauri_mcp_socket() {
                 ),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::taskkill_tree_args;
+
+    #[test]
+    fn taskkill_tree_args_force_kills_pid_and_tree() {
+        assert_eq!(
+            taskkill_tree_args(4242),
+            ["/PID".to_string(), "4242".to_string(), "/T".to_string(), "/F".to_string()]
+        );
     }
 }
