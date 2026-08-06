@@ -158,6 +158,7 @@ Scope: greenfield structural Windows risks in the current o8 implementation. Sta
 - Linux impact: No for Linux with standard shell tools.
 - Known vs greenfield: Known-adjacent. `lsof` is known; the broader npm script shell model is greenfield.
 - Direction: Replace package scripts with Node scripts or platform-specific npm script branches.
+- Status (#1744): the contributor path is shell-neutral. `build`/`start` became `scripts/build.mjs`/`scripts/start.mjs` (same env delta, `next` resolved through `require.resolve` and run under `process.execPath` rather than the `node_modules/.bin` shim, which is a `.cmd` on Windows); every inline `VAR=value` prefix now goes through `scripts/run.mjs`; `predev:cleanup:side` became `scripts/kill-port.mjs` (`lsof` on POSIX, `netstat -ano` + `taskkill /T /F` on Windows, parsers unit-tested in `tests/script-shell-neutral.test.ts`); `scripts/dev.mjs` resolves `next`/`tsx` the same way so `npm run dev` spawns a real child PID off POSIX. Deliberately left POSIX: `measure:*` (`bash` scripts, diagnostics only) and the release chain `ship`/`tauri:build:signed`/`tauri:build:nonotary` (`sh -c` with `$(cat ~/.tauri/…)`, already macOS-only signing/notarization). The Port Build workflow keeps `npm config set script-shell bash` until a Windows run proves the conversion.
 
 ## What The Inception Docs Already Cover
 

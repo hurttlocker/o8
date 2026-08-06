@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
+import { resolveSpawn } from './run-lib.mjs';
 
 const root = process.cwd();
 const stateDir = join(
@@ -77,7 +78,12 @@ async function cleanup() {
 }
 
 function run(label, command, args) {
-  const child = spawn(command, args, { cwd: root, env, stdio: 'inherit' });
+  // `next`/`tsx` come from node_modules/.bin, which is a POSIX symlink to the
+  // package's JS entry here but a .cmd shim on Windows that bare spawn() cannot
+  // exec. resolveSpawn() runs that JS entry under process.execPath instead, so
+  // the PID we remember below stays the real child on every platform (#1744).
+  const { file, args: spawnArgs, shell } = resolveSpawn(command, args);
+  const child = spawn(file, spawnArgs, { cwd: root, env, stdio: 'inherit', shell });
   remember(child.pid, label);
 
   const forward = (signal) => {

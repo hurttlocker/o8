@@ -2,57 +2,52 @@
 
 ## Plan
 
-Add `prime-agent` as the 14th dispatchable runtime, following the specialized-adapter
-recipe in `docs/internals/runtime-adapter-contract.md`, modeled on `src/lib/grok/owned.ts`
-(one-shot JSON-mode process, not Pi's hand-rolled bidirectional RPC — prime-agent shares
-grok's shape for v1: launch/resume via argv, parse stdout after the fact).
+Shell-neutral npm scripts (#1744) — inventory of all 60 scripts, then convert only what
+converts without risk.
 
-- `src/lib/prime-agent/owned.ts` — adapter built on `createOwnedSessionStore`. Launches
-  `prime-agent -p <prompt> --mode json --session-dir .o8-prime-agent-sessions`; resumes
-  via `-r <sessionId>`. `--session-dir` is a path relative to the spawn cwd, which the
-  shared store always sets to `session.repoPath` (the packet worktree), so prime-agent's
-  own JSONL state travels with the worktree instead of piling up in the shared
-  `~/.prime/agent/sessions/`. Parser reads the first JSONL line as the session header
-  (per the CLI facts) and defensively maps message/tool/result/error event shapes.
-- `src/lib/runtimes/prime-agent.ts` — `AgentRuntime` implementation, capability-gated on
-  `resolveCli` finding the `prime-agent` binary (absent binary → `discoverSessions()`
-  returns `[]`, matching every other adapter).
-- `src/lib/runtimes/prime-agent-cost-parser.ts` — conservative parser: reads embedded
-  usage/stats fields if present, never invents a cost estimate (unlike Grok's fixed-price
-  parser) since prime-agent runs on the operator's own provider/model choice.
-- `src/lib/orchestrator/runtime-capabilities.ts` — new `'prime-agent'` catalog entry,
-  `tier: 'standard'` (qualifies for Brain-auto), accent `#0ea5e9` (unused so far).
-- `src/lib/runtimes/index.ts` — registered adapter + cost parser + fleet-cache invalidation.
-- `docs/internals/runtime-adapter-contract.md` — updated runtime count (14→15 total,
-  13→14 dispatchable) and the specialized-runtimes list, within the packet's diff budget.
+- `scripts/run-lib.mjs` — shared plumbing. `resolveSpawn()` maps `next`/`tsx` to the JS
+  entry their `node_modules/.bin` symlink points at and runs it under `process.execPath`
+  (on Windows `.bin` holds a `.cmd` shim that Node >= 20.12 refuses to exec without a
+  shell); anything else keeps PATH resolution with `shell` on win32 only, the pattern
+  `scripts/postinstall.mjs` and `scripts/smoke.mjs` already use. `parseEnvPrefixArgv()`
+  splits `KEY=VALUE … -- cmd args` on the FIRST `=` so `NODE_OPTIONS=--import=…` survives.
+- `scripts/build.mjs` replaces the `sh -c` build one-liner; `scripts/start.mjs` replaces
+  `sh -c 'next start -p "${PORT:-3001}"'`; `scripts/run.mjs` is the generic `VAR=value`
+  prefix runner (11 call sites); `scripts/kill-port.mjs` replaces the
+  `lsof | xargs kill -9` side-stack cleanup with `lsof` on POSIX and
+  `netstat -ano` + `taskkill /PID <pid> /T /F` on Windows (same call the #1739 sidecar
+  reaper uses). Both `kill-port` parsers are pure and unit-tested.
+- `scripts/dev.mjs` — the one behavioral fix outside package.json: `run()` spawned bare
+  `next`/`tsx`, which is ENOENT on Windows. Routed through `resolveSpawn()` so the PID it
+  registers for cleanup stays the real child rather than a wrapper `cmd.exe`.
+- `tests/script-shell-neutral.test.ts` + two `.d.mts` declaration files (repo-wide
+  `allowJs: false`, so a `.ts` test cannot import a `.mjs` untyped).
+- `README.md` Quickstart: one sentence stating no Git Bash is needed. `port-audit-windows.md`:
+  Status line on the "Dev and diagnostic scripts are POSIX-shell-only" finding.
 
 ## Deviations
 
-- **Skipped editing `src/lib/orchestrator/types.ts`.** The packet's step 4 assumed a
-  second `OrchestratorRuntime` union to update, but `types.ts` re-exports the type
-  directly from `runtime-capabilities.ts` (`export type { OrchestratorRuntime } from
-  '@/lib/orchestrator/runtime-capabilities'`) — exactly what the contract doc promises
-  ("that one entry generates... the `OrchestratorRuntime` type"). No edit was needed or
-  made there.
-- **Two switch cases tsc forced, as the contract doc predicted**: `src/lib/orchestrator/cost-aggregator.ts`
-  (`tokensByRuntime` exhaustive record) and `src/lib/runtime/registry.ts`
-  (`RUNTIME_BINARY_NAMES` exhaustive record, keyed by `LaneRuntime = OrchestratorRuntime`).
-  Both got a one-line `prime-agent` entry.
-- **A third case tsc could NOT catch, but `npm test` did**: `src/lib/runtimes/shared/auth-detect.ts`'s
-  `detectRuntime()` switch has a non-exhaustive `default` that falls through to
-  `detectDeclarativeRuntime()` — which throws for any non-declarative runtime missing a
-  `declarative` manifest. Since prime-agent is specialized (not declarative), every
-  dispatch-readiness check would have thrown at runtime. Added `detectPrimeAgent()`
-  (modeled on `detectPi()`/`detectOpencode()`: checks common provider env vars plus a
-  `~/.prime` directory) and a `case 'prime-agent'` in the switch. This file isn't in the
-  packet's 6-file list, but leaving it broken would mean prime-agent could register as a
-  runtime yet never pass an auth-readiness check — a real reachability gap the test
-  caught, not a hypothetical one.
-- **`--model` flag never passed.** prime-agent picks its own model via its own config
-  (task spec: "the adapter does NOT manage keys"); `requiresModel: false` and no
-  `defaultModel` in the capability entry, matching Pi/Goose rather than Grok/opencode.
-- Pre-existing, unrelated `npm test` failures (`act is not a function` in several
-  `src/components/desktop/**` tests) were confirmed present on the same commit with this
-  branch's changes stashed — not caused by this packet.
+- **`ship`, `tauri:build:signed`, `tauri:build:nonotary` left as `sh -c` verbatim.** They
+  read the minisign key with `$(cat ~/.tauri/cortex-ide.key)` and `unset APPLE_ID …`,
+  and the whole chain (`cargo tauri build` + `sign-and-notarize`) is macOS-only. Converting
+  them would touch the release path for zero Windows benefit. `ship` and `tauri:prebuild`
+  are plain `&&` chains, which cmd.exe supports, so no change was needed there either.
+- **`measure:render|cli|socket|mcp` left as `bash scripts/*.sh`.** Neutralizing them means
+  rewriting four shell diagnostics, not the npm scripts; out of scope and documented instead.
+- **`.github/workflows/` untouched** per the packet. Port Build keeps
+  `npm config set script-shell bash` until a real Windows run proves this conversion.
 
-Windows CLI shim + PATH registration (#1741): shipped `o8.cmd`/`o8.ps1` and first-run PATH registration; full summary in `docs/internals/port-audit-windows.md` "Status (#1741)".
+## Notes for the operator
+
+- **How I convinced myself `build` is byte-equivalent on macOS.** The old command did four
+  things: run `bust-stale-patch-cache.mjs` and abort on non-zero; delete four env vars
+  (`env -u`); set `NODE_ENV`/`NODE_OPTIONS`; exec `next build --webpack`. `build.mjs` does the
+  same four in the same order with `spawnSync(…, {stdio:'inherit'})`, propagating the child's
+  status. The only substitution is `node <require.resolve('next/dist/bin/next')>` instead of
+  the PATH lookup for `next` — and `node_modules/.bin/next` is a symlink to exactly that file
+  with an `#!/usr/bin/env node` shebang, so under `npm run` (which puts the same node on PATH)
+  it is the same program under the same interpreter. Verified by a full green `npm run build`.
+- `${PORT:-3001}` falls back on unset **and** empty, which is what `process.env.PORT || '3001'`
+  does — not `??`.
+- `kill-port` matches listeners by foreign address (`0.0.0.0:0` / `[::]:0`) rather than the
+  `LISTENING` state word, which is localized on non-English Windows.
