@@ -60,24 +60,6 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm ci --prefer-offline
-      # #1745 diagnostics (Windows only, CI-only mutation): the webpack compile
-      # dies on EACCES junction-loop walks of the user profile that don't
-      # reproduce on macOS/Linux. Inject the fs tracer into the build script's
-      # NODE_OPTIONS so the run prints stacks for every outside-repo read.
-      # Remove this step once the walker is identified.
-      - if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          node -e '
-            const fs = require("fs");
-            const p = JSON.parse(fs.readFileSync("package.json", "utf8"));
-            p.scripts.build = p.scripts.build.replace(
-              "NODE_OPTIONS=--max-old-space-size=24576",
-              "NODE_OPTIONS=\"--max-old-space-size=8192 --require ./scripts/port-fs-trace.cjs\""
-            );
-            fs.writeFileSync("package.json", JSON.stringify(p, null, 2));
-          '
-          grep -o "port-fs-trace" package.json
       # Unsigned build. The config overlay disables updater artifacts — they
       # require the signing key, which never leaves the ship machine.
       - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
