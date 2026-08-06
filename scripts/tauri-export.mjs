@@ -4,7 +4,7 @@
  *   out/frontend/  → Tauri frontendDist (just the loader HTML)
  *   out/server/    → Tauri bundle resource (Next.js server + Node binary)
  */
-import { cpSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'fs';
+import { cpSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, readdirSync, chmodSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { prepareNativeBundle } from './native-bundle.mjs';
@@ -545,7 +545,20 @@ const { execSync } = await import('child_process');
 const chunksDir = join(server, '.next', 'server', 'chunks');
 if (existsSync(chunksDir)) {
   try {
-    const grepResult = execSync(`grep -roh "better-sqlite3-[a-f0-9]*" "${chunksDir}" 2>/dev/null | head -1`, { encoding: 'utf-8' }).trim();
+    // Pure Node instead of grep|head — neither exists for cmd.exe (#1673).
+    const hashRe = /better-sqlite3-[a-f0-9]+/;
+    let grepResult = '';
+    const scan = (dir) => {
+      if (grepResult) return;
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (grepResult) return;
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) { scan(full); continue; }
+        const m = hashRe.exec(readFileSync(full, 'utf-8'));
+        if (m) { grepResult = m[0]; return; }
+      }
+    };
+    scan(chunksDir);
     if (grepResult) {
       const aliasPath = join(server, 'node_modules', grepResult);
       if (!existsSync(aliasPath)) {
@@ -739,8 +752,10 @@ if [ -z "$NODE_BIN" ]; then
 fi
 exec "$NODE_BIN" "$DIR/o8.mjs" "$@"
 `);
-  execSync(`chmod +x "${CLI_BIN_DST}"`);
-  execSync(`chmod +x "${CLI_BUNDLE_DST}"`);
+  // chmodSync instead of a chmod shellout — cmd.exe has no chmod (#1673);
+  // on Windows the mode bits are a no-op, which is fine (cmd runs by extension).
+  chmodSync(CLI_BIN_DST, 0o755);
+  chmodSync(CLI_BUNDLE_DST, 0o755);
 } else {
   console.warn('⚠️  CLI build config missing — skipping `o8` cli bundle');
 }
@@ -767,7 +782,8 @@ if (/\b(?:import|require)\s*\(\s*['\"]@sentry\/node['\"]\s*\)/.test(wsImplementa
   process.exit(1);
 }
 
-const size = execSync(`du -sh "${server}" 2>/dev/null`).toString().trim().split('\\t')[0];
+let size = '';
+try { size = execSync(`du -sh "${server}" 2>/dev/null`).toString().trim().split('\t')[0]; } catch { size = '(size n/a on this platform)'; }
 console.log('\\n✅ Export complete');
 console.log(`   frontend/ → loader HTML`);
 console.log(`   server/ → ${size}`);
