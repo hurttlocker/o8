@@ -69,6 +69,7 @@ Scope: greenfield structural Windows risks in the current o8 implementation. Sta
 - Linux impact: Partial; Linux has some Unix version-manager coverage but no distro/package-manager story.
 - Known vs greenfield: Greenfield. The inception docs mention login-shell PATH; this is the deeper ABI distribution question.
 - Direction: Either bundle Node per platform or implement a shared Windows-aware Node 22 locator used by Rust sidecar, MCP, CLI, and worker entrypoints.
+- **Update (#1740):** the Tauri Rust sidecar boot path now has a Windows-native resolution strategy — `where node`, then nvm-windows/Volta/fnm/official-installer/winget/choco roots (`src-tauri/src/windows_node_locate.rs`, wired into `run_node_preflight` in `src-tauri/src/lib.rs`) — gated behind `cfg(target_os = "windows")` so macOS/Linux behavior is unchanged. `cli_locate::well_known_cli_bin_dirs()` gained matching Windows version-manager dirs for PATH augmentation. Node *bundling* and the MCP re-exec locator below remain open.
 
 ### MCP Node 22 re-exec repeats the Unix-only locator
 

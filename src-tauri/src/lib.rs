@@ -34,6 +34,11 @@ mod stt;
 mod tts;
 mod window_restore;
 mod window_state_sanitizer;
+// Windows-native Node.js discovery (#1740). Compiles on Windows targets or
+// under `cfg(test)` so its pure logic gets real unit coverage from macOS —
+// see the module doc comment.
+#[cfg(any(test, target_os = "windows"))]
+mod windows_node_locate;
 // Plan-token + managed-inference proxy routing. macOS-only: reads keys via the
 // (macOS-gated) stt module, consumed by the macOS-gated agent / ai / stt paths.
 #[cfg(target_os = "macos")]
@@ -1583,10 +1588,14 @@ fn augment_process_path(login_path: &str) {
     }
     let current = std::env::var("PATH").unwrap_or_default();
     let well_known = cli_locate::well_known_cli_bin_dirs();
+    // PATH entries are ':'-delimited on Unix, ';'-delimited on Windows —
+    // `current` is a real inherited PATH on both platforms, so this has to
+    // match the OS or every Windows PATH collapses into one bogus entry.
+    let path_sep = if cfg!(windows) { ';' } else { ':' };
     let mut merged: Vec<String> = Vec::new();
     for entry in login_path
-        .split(':')
-        .chain(current.split(':'))
+        .split(path_sep)
+        .chain(current.split(path_sep))
         .map(str::to_string)
         .chain(well_known.into_iter())
     {
@@ -1594,10 +1603,11 @@ fn augment_process_path(login_path: &str) {
             merged.push(entry);
         }
     }
-    let merged = merged.join(":");
+    let entry_count = merged.len();
+    let merged = merged.join(&path_sep.to_string());
     log::info!(
         "Augmented PATH from login shell + well-known CLI dirs ({} entries) for sidecar children",
-        merged.split(':').count()
+        entry_count
     );
     std::env::set_var("PATH", merged);
 }
@@ -1615,6 +1625,24 @@ fn check_node_version(node_bin: &str) -> Option<(u32, String)> {
 
 fn supports_native_node_major(major: u32) -> bool {
     SUPPORTED_NATIVE_NODE_MAJORS.contains(&major)
+}
+
+/// Windows-native fallback: `where node`, then the common install roots
+/// (nvm-windows / Volta / fnm / official installer / winget / choco).
+/// `resolve_node_via_login_shell()` above only knows zsh/bash/sh and always
+/// returns `None` on Windows (no such shells to probe), so this is the
+/// actual Windows discovery path (#1740). A no-op on macOS/Linux — one more
+/// `None` in an already-exhausted `.or_else` chain there, so behavior stays
+/// byte-identical.
+#[cfg(target_os = "windows")]
+fn resolve_node_windows() -> Option<String> {
+    windows_node_locate::resolve_node_via_where()
+        .or_else(|| windows_node_locate::find_preferred_node_22(check_node_version))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn resolve_node_windows() -> Option<String> {
+    None
 }
 
 #[cfg(test)]
@@ -1750,6 +1778,7 @@ fn run_node_preflight(shell_node: Option<&str>) -> Result<String, NodePreflightE
         .map(str::to_string)
         .or_else(resolve_node_via_login_shell)
         .or_else(find_preferred_node_22)
+        .or_else(resolve_node_windows)
         .ok_or(NodePreflightError::Missing)?;
     let (major, raw) = check_node_version(&node_bin).ok_or(NodePreflightError::Missing)?;
     if major >= MIN_NODE_MAJOR && supports_native_node_major(major) {
@@ -1781,6 +1810,30 @@ fn run_node_preflight(shell_node: Option<&str>) -> Result<String, NodePreflightE
     }
 }
 
+/// Platform-appropriate "how to install Node" text for the dialog bodies
+/// below. macOS/Linux point at brew/nvm; Windows has neither, so it points
+/// at the official installer / winget / nvm-windows instead (#1740).
+#[cfg(target_os = "windows")]
+fn node_install_hint() -> String {
+    "Install a supported version from https://nodejs.org, or run \
+     `winget install OpenJS.NodeJS.LTS`, then launch o8 again.\n\n\
+     If Node.js is already installed via nvm-windows, Volta, or fnm, make sure it\n\
+     is on PATH — open a new terminal after installing and confirm `node -v` works."
+        .to_string()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn node_install_hint() -> String {
+    format!(
+        "Install a supported version with `brew install node@{major}` / `nvm install {major}`\n\
+         or `brew install node@{latest}` / `nvm install {latest}`, then launch o8 again.\n\n\
+         If Node.js is already installed via nvm, fnm, or Volta, make sure it is\n\
+         available to a login shell (zsh/bash with -l flag).",
+        major = PREFERRED_NODE_MAJOR,
+        latest = LATEST_SUPPORTED_NODE_MAJOR
+    )
+}
+
 /// Show a native error dialog and exit. Uses platform-native tools so we
 /// don't need to pull in tauri-plugin-dialog.
 fn show_node_error_and_exit(err: NodePreflightError) -> ! {
@@ -1788,24 +1841,20 @@ fn show_node_error_and_exit(err: NodePreflightError) -> ! {
         NodePreflightError::Missing => (
             "Node.js not found",
             format!(
-                "o8 needs Node.js {major}.x or {latest}.x to run its backend.\n\n\
-                 Install one with `brew install node@{major}` / `nvm install {major}`\n\
-                 or `brew install node@{latest}` / `nvm install {latest}`, then launch o8 again.\n\n\
-                 If Node.js is already installed via nvm, fnm, or Volta, make sure it is\n\
-                 available to a login shell (zsh/bash with -l flag).",
+                "o8 needs Node.js {major}.x or {latest}.x to run its backend.\n\n{hint}",
                 major = PREFERRED_NODE_MAJOR,
-                latest = LATEST_SUPPORTED_NODE_MAJOR
+                latest = LATEST_SUPPORTED_NODE_MAJOR,
+                hint = node_install_hint()
             ),
         ),
         NodePreflightError::TooOld { raw } => (
             "Node.js is too old",
             format!(
-                "o8 needs Node.js {major}.x or {latest}.x but found {raw}.\n\n\
-                 Install a supported version with `brew install node@{major}` or `nvm install {major}`,\n\
-                 then launch o8 again.",
+                "o8 needs Node.js {major}.x or {latest}.x but found {raw}.\n\n{hint}",
                 major = PREFERRED_NODE_MAJOR,
                 latest = LATEST_SUPPORTED_NODE_MAJOR,
-                raw = raw
+                raw = raw,
+                hint = node_install_hint()
             ),
         ),
         NodePreflightError::UnsupportedNativeAbi { raw, major: found_major } => (

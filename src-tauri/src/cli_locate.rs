@@ -65,6 +65,26 @@ pub(crate) fn well_known_cli_bin_dirs() -> Vec<String> {
         ]);
     }
 
+    // Windows has no `$HOME`-anchored login-shell PATH to inherit from, so
+    // widen with the version-manager layouts a Finder^H^H Explorer launch
+    // would otherwise miss (#1740).
+    #[cfg(windows)]
+    if let Ok(user_profile) = std::env::var("USERPROFILE") {
+        let user_profile = PathBuf::from(user_profile);
+        dirs.extend(version_manager_bin_dirs(
+            user_profile.join(".fnm").join("node-versions"),
+            &["installation"],
+        ));
+        dirs.extend(version_manager_bin_dirs(
+            user_profile.join(".volta").join("tools").join("image").join("node"),
+            &[],
+        ));
+    }
+    #[cfg(windows)]
+    if let Ok(nvm_home) = std::env::var("NVM_HOME") {
+        dirs.extend(version_manager_bin_dirs(PathBuf::from(nvm_home), &[]));
+    }
+
     let mut out: Vec<String> = Vec::new();
     for dir in dirs {
         if !dir.is_dir() {
