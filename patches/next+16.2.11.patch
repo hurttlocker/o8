@@ -1,22 +1,36 @@
 diff --git a/node_modules/next/dist/build/webpack/plugins/flight-client-entry-plugin.js b/node_modules/next/dist/build/webpack/plugins/flight-client-entry-plugin.js
-index 0840474..0c769c0 100644
+index 0840474..19810a8 100644
 --- a/node_modules/next/dist/build/webpack/plugins/flight-client-entry-plugin.js
 +++ b/node_modules/next/dist/build/webpack/plugins/flight-client-entry-plugin.js
-@@ -701,7 +701,7 @@ class FlightClientEntryPlugin {
+@@ -682,6 +682,13 @@ class FlightClientEntryPlugin {
+         });
+     }
+     async createActionAssets(compilation) {
++        const __o8LookupActionModule = (mapping, key)=>{
++            const found = mapping[key] ?? mapping[key.replace(/\\/g, '/')] ?? mapping[key.replace(/\//g, '\\')];
++            if (!found) {
++                console.error('[o8-port] action-module lookup MISS for worker key', JSON.stringify(key), '— sample of available keys:', JSON.stringify(Object.keys(mapping).slice(0, 10)));
++            }
++            return found;
++        };
+         const serverActions = {};
+         const edgeServerActions = {};
+         (0, _utils1.traverseModules)(compilation, (mod, _chunk, chunkGroup, modId)=>{
+@@ -701,7 +708,7 @@ class FlightClientEntryPlugin {
          for(let id in pluginState.serverActions){
              const { layer, ...action } = pluginState.serverActions[id];
              for(let name in action.workers){
 -                const modId = pluginState.serverActionModules[name][layer[name] === _constants.WEBPACK_LAYERS.actionBrowser ? 'client' : 'server'];
-+                const modId = (pluginState.serverActionModules[name] ?? pluginState.serverActionModules[name.replace(/\\/g, '/')] ?? pluginState.serverActionModules[name.replace(/\//g, '\\')])[layer[name] === _constants.WEBPACK_LAYERS.actionBrowser ? 'client' : 'server'];
++                const modId = __o8LookupActionModule(pluginState.serverActionModules, name)[layer[name] === _constants.WEBPACK_LAYERS.actionBrowser ? 'client' : 'server'];
                  action.workers[name] = modId;
              }
              serverActions[id] = action;
-@@ -709,7 +709,7 @@ class FlightClientEntryPlugin {
+@@ -709,7 +716,7 @@ class FlightClientEntryPlugin {
          for(let id in pluginState.edgeServerActions){
              const { layer, ...action } = pluginState.edgeServerActions[id];
              for(let name in action.workers){
 -                const modId = pluginState.edgeServerActionModules[name][layer[name] === _constants.WEBPACK_LAYERS.actionBrowser ? 'client' : 'server'];
-+                const modId = (pluginState.edgeServerActionModules[name] ?? pluginState.edgeServerActionModules[name.replace(/\\/g, '/')] ?? pluginState.edgeServerActionModules[name.replace(/\//g, '\\')])[layer[name] === _constants.WEBPACK_LAYERS.actionBrowser ? 'client' : 'server'];
++                const modId = __o8LookupActionModule(pluginState.edgeServerActionModules, name)[layer[name] === _constants.WEBPACK_LAYERS.actionBrowser ? 'client' : 'server'];
                  action.workers[name] = modId;
              }
              edgeServerActions[id] = action;
