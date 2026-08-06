@@ -1,5 +1,5 @@
 diff --git a/node_modules/next/dist/build/webpack/plugins/flight-client-entry-plugin.js b/node_modules/next/dist/build/webpack/plugins/flight-client-entry-plugin.js
-index 0840474..19810a8 100644
+index 0840474..9e59c9a 100644
 --- a/node_modules/next/dist/build/webpack/plugins/flight-client-entry-plugin.js
 +++ b/node_modules/next/dist/build/webpack/plugins/flight-client-entry-plugin.js
 @@ -682,6 +682,13 @@ class FlightClientEntryPlugin {
@@ -9,28 +9,38 @@ index 0840474..19810a8 100644
 +        const __o8LookupActionModule = (mapping, key)=>{
 +            const found = mapping[key] ?? mapping[key.replace(/\\/g, '/')] ?? mapping[key.replace(/\//g, '\\')];
 +            if (!found) {
-+                console.error('[o8-port] action-module lookup MISS for worker key', JSON.stringify(key), '— sample of available keys:', JSON.stringify(Object.keys(mapping).slice(0, 10)));
++                console.warn('[o8-port] action-module lookup miss for worker key', JSON.stringify(key), '— skipping its manifest entry (see hurttlocker/o8#1745; o8 ships no first-party server actions)');
 +            }
 +            return found;
 +        };
          const serverActions = {};
          const edgeServerActions = {};
          (0, _utils1.traverseModules)(compilation, (mod, _chunk, chunkGroup, modId)=>{
-@@ -701,7 +708,7 @@ class FlightClientEntryPlugin {
+@@ -701,7 +708,12 @@ class FlightClientEntryPlugin {
          for(let id in pluginState.serverActions){
              const { layer, ...action } = pluginState.serverActions[id];
              for(let name in action.workers){
 -                const modId = pluginState.serverActionModules[name][layer[name] === _constants.WEBPACK_LAYERS.actionBrowser ? 'client' : 'server'];
-+                const modId = __o8LookupActionModule(pluginState.serverActionModules, name)[layer[name] === _constants.WEBPACK_LAYERS.actionBrowser ? 'client' : 'server'];
++                const __o8Mod = __o8LookupActionModule(pluginState.serverActionModules, name);
++                if (!__o8Mod) {
++                    delete action.workers[name];
++                    continue;
++                }
++                const modId = __o8Mod[layer[name] === _constants.WEBPACK_LAYERS.actionBrowser ? 'client' : 'server'];
                  action.workers[name] = modId;
              }
              serverActions[id] = action;
-@@ -709,7 +716,7 @@ class FlightClientEntryPlugin {
+@@ -709,7 +721,12 @@ class FlightClientEntryPlugin {
          for(let id in pluginState.edgeServerActions){
              const { layer, ...action } = pluginState.edgeServerActions[id];
              for(let name in action.workers){
 -                const modId = pluginState.edgeServerActionModules[name][layer[name] === _constants.WEBPACK_LAYERS.actionBrowser ? 'client' : 'server'];
-+                const modId = __o8LookupActionModule(pluginState.edgeServerActionModules, name)[layer[name] === _constants.WEBPACK_LAYERS.actionBrowser ? 'client' : 'server'];
++                const __o8Mod = __o8LookupActionModule(pluginState.edgeServerActionModules, name);
++                if (!__o8Mod) {
++                    delete action.workers[name];
++                    continue;
++                }
++                const modId = __o8Mod[layer[name] === _constants.WEBPACK_LAYERS.actionBrowser ? 'client' : 'server'];
                  action.workers[name] = modId;
              }
              edgeServerActions[id] = action;
