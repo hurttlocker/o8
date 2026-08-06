@@ -579,23 +579,34 @@ const ESM_BANNER = [
   'const __filename = __o8_fileURLToPath(import.meta.url);',
   'const __dirname = __o8_dirname(__filename);',
 ].join(' ');
-const SHARED_ESBUILD_ARGS = [
-  '--bundle',
-  '--platform=node',
-  '--format=esm',
-  `--alias:server-only=${SERVER_ONLY_STUB}`,
-  `--banner:js='${ESM_BANNER}'`,
-].join(' ');
+// esbuild's JS API instead of a shelled CLI string: the previous
+// single-quoted `--banner:js='...'` only survived POSIX shells — on Windows
+// cmd.exe the quotes aren't quoting, the banner shattered into fake input
+// files, and esbuild died with `Must use "outdir"` (#1673, first Windows run
+// to reach this script). The in-process API has no shell, no quoting, and no
+// npx-.cmd-shim problems on any platform.
+const { buildSync: esbuildBuildSync } = await import('esbuild');
+const SHARED_ESBUILD_OPTS = {
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  alias: { 'server-only': SERVER_ONLY_STUB },
+  banner: { js: ESM_BANNER },
+  absWorkingDir: root,
+  logLevel: 'warning',
+};
 
 // Standalone server compiles are LOAD-BEARING for the packaged app. If any
 // fail, fail the whole prebuild — don't warn-and-ship a broken bundle.
-function compileServerBundle(label, entry, extraArgs = '') {
+function compileServerBundle(label, entry, external = []) {
   try {
     const implementation = `${label}-impl.mjs`;
-    execSync(
-      `npx esbuild ${entry} ${SHARED_ESBUILD_ARGS} --outfile=out/server/${implementation} ${extraArgs}`,
-      { cwd: root, stdio: 'inherit' },
-    );
+    esbuildBuildSync({
+      ...SHARED_ESBUILD_OPTS,
+      entryPoints: [entry],
+      outfile: `out/server/${implementation}`,
+      external,
+    });
     writeFileSync(join(server, `${label}.mjs`), `// Generated ABI-and-architecture-selecting entry for ${label}.\nimport { createRequire } from 'node:module';\nimport { dirname } from 'node:path';\nimport { fileURLToPath } from 'node:url';\nconst require = createRequire(import.meta.url);\nrequire('./native-addon-runtime.cjs').prepareNativeAddons(dirname(fileURLToPath(import.meta.url)));\nawait import('./${implementation}');\n`);
     console.log(`📦 Compiled ${label}.mjs + ${implementation}`);
   } catch (e) {
@@ -611,10 +622,11 @@ function compileServerBundle(label, entry, extraArgs = '') {
 function compilePureNodeBundle(label, entry) {
   try {
     const implementation = `${label}-impl.mjs`;
-    execSync(
-      `npx esbuild ${entry} ${SHARED_ESBUILD_ARGS} --outfile=out/server/${implementation}`,
-      { cwd: root, stdio: 'inherit' },
-    );
+    esbuildBuildSync({
+      ...SHARED_ESBUILD_OPTS,
+      entryPoints: [entry],
+      outfile: `out/server/${implementation}`,
+    });
     writeFileSync(
       join(server, `${label}.mjs`),
       `// Generated lightweight entry for ${label}.\nawait import('./${implementation}');\n`,
@@ -630,7 +642,7 @@ function compilePureNodeBundle(label, entry) {
 // Native modules must be external — esbuild can't bundle .node addons.
 // better-sqlite3 is used by the db layer (imported transitively through
 // repo registry + lane tables) and node-pty is used by the terminal bridge.
-const NATIVE_EXTERNALS = '--external:node-pty --external:better-sqlite3 --external:bindings';
+const NATIVE_EXTERNALS = ['node-pty', 'better-sqlite3', 'bindings'];
 
 compileServerBundle('ws-server', 'src/ws-server.ts', NATIVE_EXTERNALS);
 
