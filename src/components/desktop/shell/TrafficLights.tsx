@@ -26,6 +26,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 
+import { isNonMacShell } from '@/lib/desktop/host-platform';
+
 const LIGHT = 12; // native diameter
 const GAP = 8; // native 20px center spacing → 8px between edges
 
@@ -230,16 +232,28 @@ async function importWindow() {
  * the legacy screen-pixel spacer that clears the still-visible native lights
  * (sized × --zoom-inverse because native lights ignore CSS zoom).
  *
- * The flag is read after mount (initialization_script sets it before the page
- * loads, but SSR can't see it) — one frame of spacer before the lights mount
- * is invisible behind the boot loader.
+ * Windows / Linux shells render NEITHER (#1743): those windows keep standard
+ * native decorations, so the OS already draws real controls in its own title
+ * bar — fake mac lights would be a second, non-functional set, and the spacer
+ * would reserve room for buttons that aren't in the client area at all.
+ *
+ * The flags are read after mount (initialization_script sets them before the
+ * page loads, but SSR can't see them) — one frame of spacer before the lights
+ * mount is invisible behind the boot loader.
  */
 export function TrafficLightsOrSpacer({ yNudge = 0, leadInPx = 1 }: { yNudge?: number; leadInPx?: number }) {
-  const [htmlLights, setHtmlLights] = useState(false);
+  const [mode, setMode] = useState<'spacer' | 'dom' | 'native'>('spacer');
   useEffect(() => {
-    setHtmlLights((window as unknown as { __O8_HTML_TRAFFIC_LIGHTS__?: boolean }).__O8_HTML_TRAFFIC_LIGHTS__ === true);
+    if (isNonMacShell()) {
+      setMode('native');
+      return;
+    }
+    if ((window as unknown as { __O8_HTML_TRAFFIC_LIGHTS__?: boolean }).__O8_HTML_TRAFFIC_LIGHTS__ === true) {
+      setMode('dom');
+    }
   }, []);
-  if (!htmlLights) {
+  if (mode === 'native') return null;
+  if (mode === 'spacer') {
     return <div style={{ width: 'calc(64px * var(--zoom-inverse, 1))', flexShrink: 0 }} />;
   }
   return <TrafficLights yNudge={yNudge} leadInPx={leadInPx} />;

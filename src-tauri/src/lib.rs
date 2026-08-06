@@ -64,8 +64,6 @@ use tauri::{
 };
 use tauri_plugin_notification::NotificationExt;
 use webview_latch::WebviewLatch;
-#[cfg(target_os = "windows")]
-use window_vibrancy::apply_blur;
 #[cfg(target_os = "macos")]
 use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
 
@@ -6572,12 +6570,22 @@ pub fn run() {
                     // DOM ones (TrafficLights.tsx). Old shells lack the flag →
                     // the strips keep the native-lights spacer fallback, which
                     // keeps dev-bridge (new frontend on the old installed
-                    // binary) rendering correctly.
+                    // binary) rendering correctly. Only the macOS shell hides
+                    // them (hide_native_traffic_lights is macOS-only); Windows
+                    // and Linux keep standard decorations, so the flag is
+                    // false there and the strips draw no controls (#1743).
+                    let html_traffic_lights = cfg!(target_os = "macos");
+                    // __O8_HOST_PLATFORM__ is the frontend's synchronous
+                    // platform read (#1743) — the pre-paint theme stamp needs
+                    // it in <head>, long before any IPC exists, to pick opaque
+                    // chrome off macOS. See lib/desktop/host-platform.ts.
                     let init_script = format!(
-                        "window.__O8_PORT_HINT__ = {}; window.__O8_EXPECTED_BOOT_ID__ = {}; window.__O8_HTML_TRAFFIC_LIGHTS__ = true;",
+                        "window.__O8_PORT_HINT__ = {}; window.__O8_EXPECTED_BOOT_ID__ = {}; window.__O8_HTML_TRAFFIC_LIGHTS__ = {}; window.__O8_HOST_PLATFORM__ = {:?};",
                         api_port,
                         serde_json::to_string(&boot_identity.boot_id)
-                            .unwrap_or_else(|_| "\"\"".into())
+                            .unwrap_or_else(|_| "\"\"".into()),
+                        html_traffic_lights,
+                        std::env::consts::OS,
                     );
                     tauri::WebviewWindowBuilder::from_config(app, config)?
                         .initialization_script(init_script)
@@ -6674,10 +6682,11 @@ pub fn run() {
                 #[cfg(target_os = "macos")]
                 hide_native_traffic_lights(&window);
 
-                #[cfg(target_os = "windows")]
-                if let Err(err) = apply_blur(&window, Some((24, 26, 30, 168))) {
-                    log::warn!("Failed to apply Windows blur: {}", err);
-                }
+                // No blur/acrylic backdrop off macOS (#1743): the Windows and
+                // Linux windows are decorated and OPAQUE (tauri.windows /
+                // tauri.linux conf overlays set transparent=false), and the
+                // frontend pins surface=solid there, so there is no
+                // translucent chrome for a backdrop to show through.
 
                 window.on_window_event(move |event| {
                     match event {

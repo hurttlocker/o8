@@ -22,9 +22,15 @@ function markWebMachine(): void {
   document.head.appendChild(meta);
 }
 
+/** Mirrors the Rust initialization script's __O8_HOST_PLATFORM__ stamp (#1743). */
+function stampHostPlatform(os: string): void {
+  (window as unknown as { __O8_HOST_PLATFORM__?: string }).__O8_HOST_PLATFORM__ = os;
+}
+
 describe('pre-paint theme stamp', () => {
   beforeEach(() => {
     localStorage.clear();
+    delete (window as unknown as { __O8_HOST_PLATFORM__?: string }).__O8_HOST_PLATFORM__;
     document.head.querySelectorAll('meta').forEach((meta) => meta.remove());
     for (const attribute of ['theme', 'palette', 'surface']) {
       document.documentElement.removeAttribute(`data-${attribute}`);
@@ -65,6 +71,40 @@ describe('pre-paint theme stamp', () => {
 
     expect(document.documentElement.dataset.surface).toBe('glass');
     expect(document.documentElement.dataset.palette).toBe('dark');
+  });
+
+  it('pins solid on a Windows shell, where no vibrancy material exists (#1743)', () => {
+    localStorage.setItem('cortex-theme-palette', 'dark');
+    localStorage.setItem('cortex-reduce-transparency', 'off');
+    localStorage.setItem('cortex-workspace-glass', 'true');
+    stampHostPlatform('windows');
+
+    runStamp();
+
+    expect(document.documentElement.dataset.surface).toBe('solid');
+    expect(document.documentElement.dataset.palette).toBe('dark');
+    expect(localStorage.getItem('cortex-workspace-glass')).toBe('true');
+  });
+
+  it('pins solid on a Linux shell too', () => {
+    localStorage.setItem('cortex-theme-palette', 'light');
+    localStorage.setItem('cortex-reduce-transparency', 'off');
+    stampHostPlatform('linux');
+
+    runStamp();
+
+    expect(document.documentElement.dataset.surface).toBe('solid');
+    expect(document.documentElement.dataset.palette).toBe('light');
+  });
+
+  it('leaves the macOS shell stamp on the glass path', () => {
+    localStorage.setItem('cortex-theme-palette', 'dark');
+    localStorage.setItem('cortex-reduce-transparency', 'off');
+    stampHostPlatform('macos');
+
+    runStamp();
+
+    expect(document.documentElement.dataset.surface).toBe('glass');
   });
 
   it('defaults a first-run visitor to light solid', () => {

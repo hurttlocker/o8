@@ -35,6 +35,7 @@ import {
   type ResolvedTheme,
 } from './registry';
 import { isWebMachineBrowserSurface } from '@/lib/connect/web-machine-surface';
+import { isNonMacShell } from '@/lib/desktop/host-platform';
 
 export type ReduceTransparency = 'on' | 'off' | 'system';
 
@@ -431,6 +432,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   // an effect subscribing to system setting changes.
   const [systemReduceTransparency] = useState(false);
   const webMachineSurface = isWebMachineBrowserSurface();
+  // Windows / Linux shells have no vibrancy backdrop for glass to bleed
+  // (#1743) — the same "nothing behind the chrome" condition as the relayed
+  // browser surface, so it takes the same forceSolid path.
+  const nonMacShell = isNonMacShell();
 
   const [workspaceGlass, setWorkspaceGlassState] = useState<boolean>(() => readWorkspaceGlass());
 
@@ -438,9 +443,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     () => resolveSurface(
       reduceTransparency,
       systemReduceTransparency,
-      webMachineSurface,
+      webMachineSurface || nonMacShell,
     ),
-    [reduceTransparency, systemReduceTransparency, webMachineSurface],
+    [reduceTransparency, systemReduceTransparency, webMachineSurface, nonMacShell],
   );
 
   // All Glass has no light/dark axis (Q 2026-07-16) — while on, the resolved
@@ -448,8 +453,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   // (the user's palette/surface preferences survive untouched for when the
   // mode turns off).
   // A browser has no native vibrancy material, so web-machine presentation
-  // ignores All Glass without changing the stored operator preference.
-  const effectiveWorkspaceGlass = workspaceGlass && !webMachineSurface;
+  // ignores All Glass without changing the stored operator preference. A
+  // Windows / Linux shell has none either (#1743) — same treatment.
+  const effectiveWorkspaceGlass = workspaceGlass && !webMachineSurface && !nonMacShell;
   const effectiveSurface = effectiveWorkspaceGlass ? 'glass' : surface;
   const palette = useMemo(
     () => getPalette(effectiveWorkspaceGlass ? 'dark' : paletteId),

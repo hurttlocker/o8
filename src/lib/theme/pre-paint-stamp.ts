@@ -36,15 +36,21 @@ export const PRE_PAINT_THEME_STAMP = `
       // the stored palette still shows, and nothing is written back.
       var webMachine = document.querySelector('meta[name="o8-auth-mode"]')
         ?.getAttribute('content') === 'web-machine';
+      // Windows / Linux shells have no vibrancy material either (#1743), so
+      // they take the same solid path. The global is stamped by the Rust
+      // initialization script at document-start — see lib/desktop/host-platform.ts.
+      var nonMacShell = window.__O8_HOST_PLATFORM__ === 'windows'
+        || window.__O8_HOST_PLATFORM__ === 'linux';
+      var noVibrancy = webMachine || nonMacShell;
       // ALL GLASS mode overrides both axes wholesale (mirrors effectiveSurface /
       // getPalette('dark') in context.tsx: workspace glass forces the dark-glass
       // theme regardless of the stored palette/transparency prefs). Missing this
       // painted a cream cover under a dark-glass boot.
-      if (!webMachine && ls.getItem('cortex-workspace-glass') === 'true') {
+      if (!noVibrancy && ls.getItem('cortex-workspace-glass') === 'true') {
         pal = 'dark';
         surface = 'glass';
       }
-      if (webMachine) surface = 'solid';
+      if (noVibrancy) surface = 'solid';
       var el = document.documentElement;
       el.dataset.theme = pal;
       el.dataset.palette = pal;

@@ -40,6 +40,7 @@ Scope: greenfield structural Windows risks in the current o8 implementation. Sta
 - Linux impact: Partial; Linux also needs non-macOS chrome, but Windows hit testing is the larger risk.
 - Known vs greenfield: Greenfield. The baseline covers vibrancy fallback, not titlebar and traffic-light chrome.
 - Direction: Build the main window with per-OS config or split config files so Windows gets native decorations/custom-titlebar logic explicitly.
+- Resolved (#1743): `src-tauri/tauri.windows.conf.json` and `src-tauri/tauri.linux.conf.json` overlay the main window with `decorations: true` + `transparent: false`; the macOS-only keys (overlay titlebar, hidden title, traffic-light position) simply drop out. **Editing the window object in `tauri.conf.json` means editing all three files** — tauri-utils merges platform overlays with RFC 7386 JSON Merge Patch, which REPLACES arrays wholesale, so `app.windows` has to be restated in full and a key added only to the base is silently lost off macOS. The frontend half: `window.__O8_HOST_PLATFORM__` (stamped by the main window's initialization script) pins `surface = 'solid'` and suppresses the DOM traffic lights off macOS.
 
 ## Sidecar And Process Lifecycle
 
