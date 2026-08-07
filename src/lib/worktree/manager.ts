@@ -152,6 +152,20 @@ export class WorktreeFetchUnreachableError extends Error {
  * subsequent merge fails with tsc errors that don't belong to the agent.
  * See #1107.
  */
+/**
+ * Executable names for the repo-local `tsc`, in resolution order.
+ *
+ * npm writes TWO files into node_modules/.bin: an extensionless shell script
+ * for POSIX, and a `.cmd` shim that is the only one Windows can execute.
+ * Pointing execFile at the bare name therefore fails on Windows even when
+ * TypeScript is installed — and because a failure here is reported as "the base
+ * branch is broken", that turned into a permanent, entirely misdiagnosed
+ * dispatch blocker on Windows. Same trap as #1758, second location.
+ */
+const TSC_BIN_CANDIDATES = process.platform === 'win32'
+  ? ['tsc.cmd', 'tsc.exe', 'tsc']
+  : ['tsc'];
+
 export class WorktreeBaseTypecheckError extends Error {
   public readonly baseBranch: string;
   public readonly worktreePath: string;
@@ -475,9 +489,11 @@ export class WorktreeManager {
     // link the repo's dependencies only when every dependency input matches.
     // The repo-root tsc binary alone is insufficient because module resolution
     // starts from the external worktree's source files.
-    if (process.env.O8_SKIP_PRELAUNCH_TYPECHECK !== '1') {
+    const tscBin = process.env.O8_SKIP_PRELAUNCH_TYPECHECK === '1'
+      ? null
+      : await this.resolveTscBinary(worktreePath);
+    if (tscBin) {
       await this.linkMatchingNodeModules(worktreePath);
-      const tscBin = path.join(this.repoRoot, 'node_modules', '.bin', 'tsc');
       try {
         await execFileAsync(tscBin, ['--noEmit', '--incremental', 'false'], {
           windowsHide: true,
@@ -1127,6 +1143,40 @@ export class WorktreeManager {
     }
 
     return true;
+  }
+
+  /**
+   * The repo-local `tsc` to gate a launch with, or null to skip the gate.
+   *
+   * Absence is not failure. The pre-launch typecheck exists to catch a base
+   * branch that is genuinely broken (#1107) — but it used to point execFile at
+   * an unchecked path, so a repo with no TypeScript at all (no tsconfig, or no
+   * install yet) raised ENOENT and was reported to the operator as "main HEAD
+   * is in an inconsistent state". That refused dispatch into every
+   * non-TypeScript repo, diagnosing a missing tool as a broken branch.
+   *
+   * Skipping when there is nothing to check keeps the gate meaningful for the
+   * repos it was written for and silent everywhere else.
+   */
+  private async resolveTscBinary(worktreePath: string): Promise<string | null> {
+    const exists = async (candidate: string) => {
+      try {
+        await access(candidate);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    if (!await exists(path.join(worktreePath, 'tsconfig.json'))) {
+      console.log('[worktree] no tsconfig.json — skipping the pre-launch typecheck');
+      return null;
+    }
+    for (const name of TSC_BIN_CANDIDATES) {
+      const candidate = path.join(this.repoRoot, 'node_modules', '.bin', name);
+      if (await exists(candidate)) return candidate;
+    }
+    console.log('[worktree] no repo-local tsc — skipping the pre-launch typecheck');
+    return null;
   }
 
   private async linkMatchingNodeModules(worktreePath: string): Promise<boolean> {
