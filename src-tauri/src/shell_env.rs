@@ -28,6 +28,8 @@ use std::path::Path;
 use std::process::Command;
 use std::time::UNIX_EPOCH;
 
+use crate::no_window::NoWindow;
+
 /// AI provider keys forwarded from the user's login shell to the sidecar
 /// children. A Finder launch doesn't read `~/.zshenv`, so without this the
 /// Gemini/Anthropic/OpenAI-backed features are dead in the installed app
@@ -81,7 +83,14 @@ pub fn probe_login_shell() -> LoginShellEnv {
     }
 
     for shell in ["zsh", "bash", "sh"] {
-        let Ok(out) = Command::new(shell).args(["-l", "-c", &script]).output() else {
+        // `.no_window()` matters here even though these are POSIX shells: a
+        // Windows box with Git Bash installed DOES resolve `sh`, and a console
+        // window the user can click into would suspend the probe mid-boot.
+        let Ok(out) = Command::new(shell)
+            .args(["-l", "-c", &script])
+            .no_window()
+            .output()
+        else {
             continue;
         };
         if !out.status.success() {
@@ -214,7 +223,11 @@ pub fn check_node_version_cached(node_bin: &str) -> Option<(u32, String)> {
     if let Some(hit) = cached_node_version(node_bin) {
         return Some(hit);
     }
-    let out = Command::new(node_bin).arg("--version").output().ok()?;
+    let out = Command::new(node_bin)
+        .arg("--version")
+        .no_window()
+        .output()
+        .ok()?;
     if !out.status.success() {
         return None;
     }

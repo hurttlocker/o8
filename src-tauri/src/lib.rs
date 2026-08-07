@@ -19,6 +19,9 @@ mod launch_updater;
 mod live_dictation;
 mod mac_perms;
 mod models;
+// Child processes must not open console windows on Windows — a console the
+// user can click into suspends the process (see the module doc).
+mod no_window;
 mod overlay_geometry;
 mod paste;
 mod point_overlay;
@@ -57,6 +60,8 @@ use std::collections::VecDeque;
 use std::path::Path;
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
+
+use crate::no_window::NoWindow;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent},
@@ -623,6 +628,7 @@ fn ensure_codebase_memory_binary(app: AppHandle) {
             if is_zip && cfg!(windows) {
                 let status = Command::new("tar")
                     .args(["-xf", &archive_str, "-C", &tmp_str])
+                    .no_window()
                     .status()
                     .map_err(|e| format!("tar(zip) spawn: {}", e))?;
                 if !status.success() {
@@ -639,6 +645,7 @@ fn ensure_codebase_memory_binary(app: AppHandle) {
             } else {
                 let status = Command::new("tar")
                     .args(["-xzf", &archive_str, "-C", &tmp_str])
+                    .no_window()
                     .status()
                     .map_err(|e| format!("tar spawn: {}", e))?;
                 if !status.success() {
@@ -1426,6 +1433,10 @@ fn spawn_bundled_ws_server(
         ws_cmd
             .arg(&ws_server_js)
             .current_dir(server_dir)
+            // No console window on Windows: this is a long-running background
+            // server whose output already goes to a log file, and a visible
+            // console is one the user can click into and suspend.
+            .no_window()
             .env("O8_NODE_BIN", node_bin)
             .env("WS_PORT", ws_port.to_string())
             .env("NEXT_ORIGIN", next_origin)
@@ -2028,6 +2039,7 @@ fn start_ws_server(project_dir: String) -> SidecarResult {
     match Command::new("npx")
         .args(["tsx", "src/ws-server.ts"])
         .current_dir(&project_dir)
+        .no_window()
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
@@ -2084,6 +2096,7 @@ fn read_repos() -> Result<serde_json::Value, String> {
 fn read_local_commits(repo: String, limit: Option<u32>) -> Result<serde_json::Value, String> {
     let limit = limit.unwrap_or(10).min(50);
     let output = Command::new("git")
+        .no_window()
         .args([
             "log",
             &format!("--max-count={}", limit),
@@ -2122,6 +2135,7 @@ fn read_local_commits(repo: String, limit: Option<u32>) -> Result<serde_json::Va
 #[tauri::command]
 fn read_worktrees(repo: String) -> Result<serde_json::Value, String> {
     let output = Command::new("git")
+        .no_window()
         .args(["worktree", "list", "--porcelain"])
         .current_dir(&repo)
         .output()
@@ -2178,6 +2192,7 @@ fn read_worktrees(repo: String) -> Result<serde_json::Value, String> {
 #[tauri::command]
 fn read_current_branch(repo: String) -> Result<serde_json::Value, String> {
     let output = Command::new("git")
+        .no_window()
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .current_dir(&repo)
         .output()
@@ -2191,6 +2206,7 @@ fn read_current_branch(repo: String) -> Result<serde_json::Value, String> {
 #[tauri::command]
 fn read_git_status(repo: String) -> Result<serde_json::Value, String> {
     let output = Command::new("git")
+        .no_window()
         .args(["status", "--porcelain"])
         .current_dir(&repo)
         .output()
@@ -5649,6 +5665,8 @@ fn finish_bundled_bootstrap(
     server_cmd
         .arg(&server_js)
         .current_dir(&server_dir)
+        // No console window on Windows — see the ws-server spawn above.
+        .no_window()
         .env("PORT", api_port.to_string())
         .env("HOSTNAME", "0.0.0.0")
         .env("NODE_ENV", "production")

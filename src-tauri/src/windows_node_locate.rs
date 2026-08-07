@@ -22,9 +22,15 @@ use std::path::PathBuf;
 /// `where node` — the Windows equivalent of `command -v node` / `which node`.
 /// `where` isn't a command on macOS/Linux, so this is only ever invoked from
 /// the `cfg(target_os = "windows")` call site in `run_node_preflight`.
+///
+/// MUST spawn with `.no_window()`. This probe gates the whole boot: without
+/// the flag it opens a console window, and a console the user clicks enters
+/// "Select" mode, which suspends the process — `where` then never returns and
+/// the app hangs on its splash screen with an empty server log and no error.
 #[cfg(target_os = "windows")]
 pub(crate) fn resolve_node_via_where() -> Option<String> {
-    let out = Command::new("where").arg("node").output().ok()?;
+    use crate::no_window::NoWindow;
+    let out = Command::new("where").arg("node").no_window().output().ok()?;
     if !out.status.success() {
         return None;
     }

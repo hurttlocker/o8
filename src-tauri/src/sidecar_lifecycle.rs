@@ -1,6 +1,9 @@
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 
+#[cfg(windows)]
+use crate::no_window::NoWindow;
+
 const SIDECAR_ENV_MARKER: &str = "O8_SIDECAR_PID=";
 
 // The Tauri parent spawns Node children (Next.js + ws-server) but must own
@@ -83,6 +86,7 @@ fn kill_tracked_children_windows(pids: &[u32]) {
     for pid in pids {
         match Command::new("taskkill")
             .args(taskkill_tree_args(*pid))
+            .no_window()
             .status()
         {
             Ok(status) if status.success() => {}
