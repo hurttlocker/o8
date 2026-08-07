@@ -11,9 +11,13 @@ export const dynamic = 'force-dynamic';
 // argv form (bin + fixed args) — the resolved path is appended as a final
 // positional arg and run via execFileSync (no shell), so a path can never be
 // shell-interpreted.
+const IS_WINDOWS = process.platform === 'win32';
+
 const EDITORS: Record<string, { bin: string; args: string[] }> = {
-  'finder':       { bin: 'open', args: [] },
-  'terminal':     { bin: 'open', args: ['-a', 'Terminal'] },
+  // `open` is macOS-only; Windows has explorer for the file manager and cmd
+  // for a shell. Without this the first two rows of the picker 500 on click.
+  'finder':       IS_WINDOWS ? { bin: 'explorer', args: [] } : { bin: 'open', args: [] },
+  'terminal':     IS_WINDOWS ? { bin: 'cmd', args: ['/c', 'start', 'cmd', '/k', 'cd', '/d'] } : { bin: 'open', args: ['-a', 'Terminal'] },
   'vscode':       { bin: 'code', args: [] },
   'cursor':       { bin: 'cursor', args: [] },
   'zed':          { bin: 'zed', args: [] },
@@ -28,8 +32,8 @@ const EDITORS: Record<string, { bin: string; args: string[] }> = {
 export async function GET() {
   try {
     const available: { id: string; name: string; available: boolean }[] = [
-      { id: 'finder', name: 'Finder', available: true },
-      { id: 'terminal', name: 'Terminal', available: true },
+      { id: 'finder', name: IS_WINDOWS ? 'File Explorer' : 'Finder', available: true },
+      { id: 'terminal', name: IS_WINDOWS ? 'Command Prompt' : 'Terminal', available: true },
     ];
 
     const editors = [
@@ -38,7 +42,7 @@ export async function GET() {
       { id: 'windsurf', name: 'Windsurf', bin: 'windsurf' },
       { id: 'zed', name: 'Zed', bin: 'zed' },
       { id: 'sublime', name: 'Sublime Text', bin: 'subl' },
-      { id: 'xcode', name: 'Xcode', bin: 'xcodebuild' },
+      ...(IS_WINDOWS ? [] : [{ id: 'xcode', name: 'Xcode', bin: 'xcodebuild' }]),
       { id: 'jetbrains', name: 'JetBrains', bin: 'idea' },
       { id: 'claude-code', name: 'Claude Code', bin: 'claude' },
     ];

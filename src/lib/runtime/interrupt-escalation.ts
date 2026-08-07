@@ -66,11 +66,16 @@ async function defaultKill(target: InterruptEscalationTarget, signal: InterruptE
     // hard tree-kill. Say so rather than letting the audit trail record a
     // graceful SIGINT that was really a /F, and surface a failed kill instead
     // of leaving the caller to infer success from a liveness check.
-    // taskkill also exits non-zero when the pid is already gone, which is
-    // success, not failure. Only a process still alive afterwards is a problem.
-    const { isPidAlive } = await import('@/lib/runtimes/shared/owned-session/helpers');
-    if (!await forceKillTreeWindows(target.pid) && isPidAlive(target.pid)) {
-      throw new Error(`taskkill could not stop pid ${target.pid} (requested ${signal})`);
+    // taskkill exits non-zero both when it is DENIED and when the pid is
+    // already gone. Those are opposite outcomes and the recorded pid cannot
+    // distinguish them: it is the interpreter, and the CLI grandchild can
+    // outlive it. Report the failure either way rather than inferring success
+    // from the interpreter's absence — inferring is precisely how this path
+    // reported confirmedDead for a worker that was still editing files.
+    if (!await forceKillTreeWindows(target.pid)) {
+      throw new Error(
+        `taskkill could not confirm the process tree for pid ${target.pid} was stopped (requested ${signal})`,
+      );
     }
     return;
   }

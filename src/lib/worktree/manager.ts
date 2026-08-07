@@ -1186,23 +1186,27 @@ export class WorktreeManager {
   private async linkMatchingNodeModules(worktreePath: string): Promise<boolean> {
     const sourcePath = path.join(this.repoRoot, 'node_modules');
     const targetPath = path.join(worktreePath, 'node_modules');
-    if (await this.pathExists(targetPath)) return true;
+    // Existence is not health. When the symlink fails (Windows without the
+    // privilege) a real `npm ci` runs under a timeout, and an install killed
+    // part-way leaves a node_modules that this check used to accept forever —
+    // after which the typecheck gate either skips (a silent merge) or fails on
+    // missing modules for good. Require the marker npm writes when an install
+    // COMPLETES, so a partial tree is retried instead of trusted.
+    if (await this.pathExists(path.join(targetPath, '.package-lock.json'))) return true;
+    if (await this.pathExists(targetPath) && await this.pathExists(path.join(targetPath, '.bin'))) return true;
     if (!(await this.pathExists(sourcePath))) return false;
     if (!(await this.nodeDependencyInputsMatch(worktreePath))) return false;
 
     try {
-      // A plain symlink needs SeCreateSymbolicLinkPrivilege on Windows, so for
-      // an ordinary user this always threw — every worktree then fell through
-      // to a real `npm ci` under a 120s cap, which a large repo does not
-      // finish. The partial node_modules left behind is worse than none,
-      // because the early-return above treats ANY node_modules as good and it
-      // is never reinstalled: the typecheck gate then either skips (silent
-      // merge) or fails forever on missing modules.
-      //
-      // A JUNCTION is the Windows answer for directory links and needs no
-      // privilege. Node ignores the type argument off Windows, so this is one
-      // code path.
-      await symlink(sourcePath, targetPath, 'junction');
+      // NOT a junction, deliberately. A junction would dodge Windows' symlink
+      // privilege requirement, but git-for-windows maps only
+      // IO_REPARSE_TAG_SYMLINK to a link — a junction stays a plain directory
+      // to it, so `git worktree remove --force` recurses INTO it and deletes
+      // the HOST repo's node_modules. Removal happens at three separate sites
+      // here, so guarding them is one forgotten call site away from destroying
+      // a user's dependencies on a platform we cannot test. A slow install is
+      // recoverable; deleting someone's files is not.
+      await symlink(sourcePath, targetPath);
       return true;
     } catch (error) {
       console.warn(

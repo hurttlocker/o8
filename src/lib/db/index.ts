@@ -243,9 +243,12 @@ function isPidAlive(pid: number | null | undefined): boolean {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
-    // ESRCH (gone) or EPERM (exists, other user) — treat only ESRCH-shaped as
-    // dead. A same-user o8 fleet never trips EPERM, so any throw == dead here.
+  } catch (error) {
+    // EPERM means the process EXISTS but cannot be signalled. The old comment
+    // here said a same-user fleet never trips EPERM — Windows falsified that:
+    // an elevated worker denies the query to a non-elevated server. Treating
+    // that as dead reaps reservations belonging to a live process.
+    if ((error as NodeJS.ErrnoException)?.code === 'EPERM') return true;
     return false;
   }
 }

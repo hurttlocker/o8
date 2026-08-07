@@ -202,6 +202,9 @@ export function createFleetComputer({
     return candidates.length > 0 ? Math.max(...candidates) : 0;
   }
 
+  // Bounded so an un-stoppable worker cannot hold a session open forever.
+  const MAX_STOP_ATTEMPTS = 3;
+
   async function markActiveRunOrphaned(session: OwnedSessionRecord, reason: string) {
     const activeRun = session.activeRun;
     if (!activeRun) return false;
@@ -224,10 +227,23 @@ export function createFleetComputer({
               // record at all — worse than the bug it replaced. Instead, flag
               // it, keep the pid, and let the caller skip archiving.
               if (!await forceKillTreeWindows(activeRun.pid) && isPidAlive(activeRun.pid)) {
-                stopFailed = true;
-                console.error(
-                  `[owned-store] Could not stop ${runtimeId} pid ${activeRun.pid}; keeping the session so a later sweep can retry.`,
-                );
+                // Retry a bounded number of times, then let it go. Holding the
+                // session forever keeps it reported as a live run and blocks
+                // resume permanently — trading a lost session for an immortal
+                // one. After the bound we archive with the failure recorded, so
+                // the operator sees WHY rather than nothing.
+                const attempts = (activeRun.stopAttempts ?? 0) + 1;
+                session.activeRun = { ...activeRun, stopAttempts: attempts };
+                if (attempts < MAX_STOP_ATTEMPTS) {
+                  stopFailed = true;
+                  console.error(
+                    `[owned-store] Could not stop ${runtimeId} pid ${activeRun.pid} (attempt ${attempts}/${MAX_STOP_ATTEMPTS}); keeping the session to retry.`,
+                  );
+                } else {
+                  console.error(
+                    `[owned-store] Giving up on ${runtimeId} pid ${activeRun.pid} after ${attempts} attempts; archiving with the failure recorded.`,
+                  );
+                }
               }
             } else {
               process.kill(-activeRun.pid, 'SIGINT');
@@ -238,8 +254,9 @@ export function createFleetComputer({
         console.warn(`[owned-store] Failed to interrupt orphaned ${runtimeId} session ${session.surfaceId}:`, error instanceof Error ? error.message : error);
       }
     }
-    const recordedReason = stopFailed
-      ? `${reason} The worker could not be stopped (pid ${activeRun.pid} still alive).`
+    const stopAttempts = session.activeRun?.stopAttempts ?? 0;
+    const recordedReason = stopAttempts > 0
+      ? `${reason} The worker could not be stopped after ${stopAttempts} attempt(s) (pid ${activeRun.pid}).`
       : reason;
     session.orphanedAt = orphanedAt;
     session.orphanedReason = recordedReason;

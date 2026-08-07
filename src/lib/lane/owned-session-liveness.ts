@@ -57,7 +57,12 @@ export function isPidAlive(pid: number | undefined): boolean {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
+  } catch (error) {
+    // EPERM means the process EXISTS but cannot be signalled — an elevated or
+    // other-user worker. Reading it as dead here while the fleet copy reads it
+    // as alive gives the two a split-brain: the reaper salvages and archives a
+    // lane the fleet still believes is running.
+    if ((error as NodeJS.ErrnoException)?.code === 'EPERM') return true;
     return false;
   }
 }

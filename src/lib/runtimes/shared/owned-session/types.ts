@@ -33,6 +33,8 @@ export interface OwnedChildExitOutcome {
 }
 
 export interface OwnedRunRecord {
+  /** Failed stop attempts for this run — bounds the orphan-sweep retry. */
+  stopAttempts?: number;
   id: string;
   mode: OwnedRunMode;
   prompt: string;

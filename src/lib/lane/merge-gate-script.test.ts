@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -29,20 +30,26 @@ describe('branch merge gate script', () => {
     expect(match?.[1]?.startsWith('file://')).toBe(true);
   });
 
-  it('stays loadable from a directory that is not the repo', () => {
-    // The exact shape of the regression: written to a temp dir, run from there.
+  it('actually runs from a directory that is not the repo', () => {
+    // The point of the whole exercise: assertions on the generated STRING miss
+    // any other syntax error, and this path is fail-closed, so an unrunnable
+    // script blocks every merge. Execute it for real.
     const dir = mkdtempSync(path.join(tmpdir(), 'o8-gate-script-'));
     try {
       const file = path.join(dir, 'gate.mts');
-      writeFileSync(file, branchGateScript(process.cwd()), 'utf-8');
-      const specifier = /await import\("([^"]+)"\)/.exec(branchGateScript(process.cwd()))?.[1];
-      expect(specifier).toBeTruthy();
-      // Resolvable without reference to the script's own location.
-      expect(specifier!).toBe(
-        pathToFileURL(path.join(process.cwd(), 'src', 'lib', 'lane', 'merge-gate.ts')).href,
-      );
+      // Import the module, then exit before doing any gate work.
+      const script = branchGateScript(process.cwd())
+        .replace(/const lane = [\s\S]*?\n\}\)\(\)/, "process.stdout.write('RAN_OK');\n})()");
+      writeFileSync(file, script, 'utf-8');
+      const out = execFileSync('npx', ['--no-install', 'tsx', file], {
+        cwd: process.cwd(),
+        encoding: 'utf-8',
+        timeout: 120_000,
+        windowsHide: true,
+      });
+      expect(out).toContain('RAN_OK');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, 150_000);
 });
