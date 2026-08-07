@@ -92,7 +92,7 @@ function windowsCliDirs(home: string): string[] {
  * as if the CLI were healthy. So real executable extensions win, and the bare
  * name stays last as a fallback.
  */
-function executableSuffixes(): string[] {
+export function executableSuffixes(): string[] {
   if (process.platform !== 'win32') return [''];
   const pathext = (process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD')
     .split(';')

@@ -18,6 +18,8 @@
 import { execFile } from 'node:child_process';
 import { stat } from 'node:fs';
 import path from 'node:path';
+
+import { executableSuffixes } from '@/lib/runtimes/shared/cli-locate';
 import { promisify } from 'node:util';
 
 import { ensureCliSymlink, wellKnownCliDirs } from './cli-locate';
@@ -269,11 +271,19 @@ async function resolveViaWhich(
 ): Promise<ResolvedCli | null> {
   for (const name of binaryNames(spec)) {
     try {
-      const { stdout } = await execFileAsync('which', [name], {
+      // `which` is POSIX-only; Windows ships `where`, which prints one match
+      // per line (and lists the extensionless npm script BEFORE the .cmd shim,
+      // so take the first line Windows can actually execute).
+      const lookup = process.platform === 'win32' ? 'where' : 'which';
+      const { stdout } = await execFileAsync(lookup, [name], {
         windowsHide: true,
         timeout: 3_000,
       });
-      const found = stdout.trim();
+      const matches = stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+      const found = process.platform === 'win32'
+        ? (matches.find((m) => executableSuffixes().some((ext) => ext && m.toLowerCase().endsWith(ext)))
+          ?? matches[0])
+        : matches[0];
       if (!found) continue;
       console.log(`[cli-resolver] 'which ${name}' found: ${found}`);
       const version = await probeVersion(found, spec);
@@ -342,7 +352,12 @@ async function resolveViaStaticFallbacks(
   const fallbacks = staticFallbackDirs();
   for (const { dir, source } of fallbacks) {
     for (const name of binaryNames(spec)) {
-      const candidate = path.join(dir, name);
+      // Windows marks executables by EXTENSION, and npm writes both an
+      // extensionless POSIX script and a .cmd shim into the same directory.
+      // Probing the bare name finds the script Windows cannot execute, and the
+      // spawn then dies with EINVAL before a process exists. See #1758.
+      for (const suffix of executableSuffixes()) {
+      const candidate = path.join(dir, `${name}${suffix}`);
       if (await canExec(candidate)) {
         console.log(`[cli-resolver] Static fallback found ${name} at ${candidate} (source: ${source}).`);
         const version = await probeVersion(candidate, spec);
@@ -352,6 +367,7 @@ async function resolveViaStaticFallbacks(
           version,
           detectedAt: Date.now(),
         };
+      }
       }
     }
   }
