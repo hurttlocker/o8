@@ -69,3 +69,39 @@ describe('prelaunch dependency resolution', () => {
     expect(path.dirname(worktree.path)).not.toBe(path.dirname(repo));
   }, 30_000);
 });
+
+/**
+ * The pre-launch typecheck gate (#1107) must SKIP quietly when there is nothing
+ * to check, and must never mistake a missing tool for a broken base branch —
+ * that misdiagnosis blocked every non-TypeScript repo and, on Windows, every
+ * repo at all (#1762). The sibling test above covers the other half: when a
+ * tsconfig and a repo-local tsc DO exist, the gate resolves and runs, with
+ * node_modules linked first.
+ */
+describe('prelaunch typecheck skip', () => {
+  it('creates the worktree when the repo has no TypeScript at all', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'o8-prelaunch-skip-'));
+    roots.push(root);
+    const origin = path.join(root, 'origin.git');
+    const repo = path.join(root, 'repo');
+    await execFileAsync('git', ['init', '--bare', origin]);
+    await execFileAsync('git', ['clone', origin, repo]);
+    await git(repo, ['checkout', '-b', 'main']);
+    // No tsconfig.json and no node_modules/.bin/tsc — the shape that used to
+    // raise ENOENT and get reported as "main HEAD is in an inconsistent state".
+    await writeFile(path.join(repo, 'README.md'), '# fixture\n');
+    await git(repo, ['add', 'README.md']);
+    await git(repo, ['commit', '-m', 'fixture']);
+    await git(repo, ['push', '-u', 'origin', 'main']);
+
+    const manager = new WorktreeManager(repo);
+    const worktree = await manager.create({
+      agentType: 'codex',
+      taskName: 'no typescript in this repo',
+    });
+
+    expect(worktree.path).toBeTruthy();
+    const stat = await lstat(worktree.path);
+    expect(stat.isDirectory()).toBe(true);
+  }, 60_000);
+});
