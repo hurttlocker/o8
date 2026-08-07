@@ -159,4 +159,45 @@ describe('a symlinked node_modules is never treated as unhealthy', () => {
     expect(await lstat(sentinel).then(() => true).catch(() => false)).toBe(true);
     expect((await lstat(worktreeModules)).isSymbolicLink()).toBe(true);
   }, 120_000);
+
+  it('also guards the NO-LOCKFILE branch, where npm install would run', async () => {
+    // The lockfile fixture above only exercises the `npm ci` branch, so the
+    // `|| hasPackageJson` half could be reverted and stay green. pnpm/yarn/bun
+    // repos take this path.
+    const root = await mkdtemp(path.join(tmpdir(), 'o8-nm-link-nolock-'));
+    roots.push(root);
+    const origin = path.join(root, 'origin.git');
+    const repo = path.join(root, 'repo');
+    await execFileAsync('git', ['init', '--bare', origin]);
+    await execFileAsync('git', ['clone', origin, repo]);
+    await git(repo, ['checkout', '-b', 'main']);
+    // A dependency npm can resolve OFFLINE, so `npm install` genuinely reifies
+    // node_modules. Without one npm never touches the directory and the test
+    // cannot tell a working guard from a missing one.
+    await mkdir(path.join(repo, 'dep'), { recursive: true });
+    await writeFile(path.join(repo, 'dep', 'package.json'), '{"name":"local-dep","version":"1.0.0"}\n');
+    await writeFile(
+      path.join(repo, 'package.json'),
+      '{"name":"fixture","private":true,"dependencies":{"local-dep":"file:./dep"}}\n',
+    );
+    await git(repo, ['add', 'package.json', 'dep/package.json']);
+    await git(repo, ['commit', '-m', 'fixture']);
+    await git(repo, ['push', '-u', 'origin', 'main']);
+
+    const hostModules = path.join(repo, 'node_modules');
+    await mkdir(path.join(hostModules, 'left-pad'), { recursive: true });
+    const sentinel = path.join(hostModules, 'left-pad', 'index.js');
+    await writeFile(sentinel, 'module.exports = 1;\n');
+
+    const manager = new WorktreeManager(repo);
+    const worktree = await manager.create({ agentType: 'codex', taskName: 'no lockfile' });
+    const worktreeModules = path.join(worktree.path, 'node_modules');
+    await rm(worktreeModules, { recursive: true, force: true }).catch(() => {});
+    await symlink(hostModules, worktreeModules);
+
+    await (manager as unknown as { runSetup(p: string): Promise<void> }).runSetup(worktree.path);
+
+    expect(await lstat(sentinel).then(() => true).catch(() => false)).toBe(true);
+    expect((await lstat(worktreeModules)).isSymbolicLink()).toBe(true);
+  }, 120_000);
 });

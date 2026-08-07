@@ -1029,11 +1029,15 @@ export class WorktreeManager {
     // symlinked at the host repo's — which reifies a full tree over the link at
     // best, and differs from `npm ci` only by an arborist implementation detail
     // that is not ours to rely on. A link is always "done" in either branch.
-    if (hasPackageLock || hasPackageJson) {
-      if (await this.linkMatchingNodeModules(worktreePath)) return;
-    }
+    // Skip only the NODE install when the link is in place — `return` here also
+    // skipped the pip/go/cargo steps below, which have nothing to do with
+    // node_modules. That was pre-existing for lockfile repos and I widened it
+    // to package.json-only repos; both are wrong.
+    const nodeDepsLinked = (hasPackageLock || hasPackageJson)
+      ? await this.linkMatchingNodeModules(worktreePath)
+      : false;
 
-    if (hasPackageLock) {
+    if (!nodeDepsLinked && hasPackageLock) {
       const npmCi = cliInvocation('npm', ['ci', '--prefer-offline']);
       await execFileAsync(npmCi.command, npmCi.args, {
         windowsHide: true,
@@ -1041,7 +1045,7 @@ export class WorktreeManager {
         timeout: 120_000,
         env: { ...process.env, NODE_ENV: 'development' },
       });
-    } else if (hasPackageJson) {
+    } else if (!nodeDepsLinked && hasPackageJson) {
       const npmInstall = cliInvocation('npm', ['install']);
       await execFileAsync(npmInstall.command, npmInstall.args, {
         windowsHide: true,
@@ -1202,7 +1206,13 @@ export class WorktreeManager {
     // a REAL directory left behind by a killed install; applying it to a link
     // would destroy the very thing it is inspecting.
     const linked = await lstat(targetPath).catch(() => null);
-    if (linked?.isSymbolicLink()) return true;
+    if (linked?.isSymbolicLink()) {
+      // A link whose target is gone is not "done" — it strands the worktree
+      // with an unusable node_modules forever. Remove the link itself (never
+      // its contents) and fall through to relink or install.
+      if (await this.pathExists(targetPath)) return true;
+      await rm(targetPath, { force: true }).catch(() => {});
+    }
     // Existence is not health. When the symlink fails (Windows without the
     // privilege) a real `npm ci` runs under a timeout, and an install killed
     // part-way leaves a node_modules that this check used to accept forever —

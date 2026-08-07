@@ -9,21 +9,22 @@ import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 export const dynamic = 'force-dynamic';
 
 // argv form (bin + fixed args) — the resolved path is appended as a final
-// positional arg and run via execFileSync (no shell), so a path can never be
-// shell-interpreted.
+// positional arg and run via execFileSync.
+//
+// That used to mean "never shell-interpreted", and on POSIX it still does. On
+// Windows it does NOT: entries below go through cmd.exe, which re-parses the
+// command line, and Node quotes only for spaces and quotes. A path containing
+// `&`, `|`, `^`, `<` or `>` — all legal in Windows filenames — would split the
+// line. Such paths are rejected outright rather than quoted, since no editor
+// integration is worth an argument-injection surface.
 const IS_WINDOWS = process.platform === 'win32';
 
 const EDITORS: Record<string, { bin: string; args: string[] }> = {
-  // `open` is macOS-only; Windows has explorer for the file manager and cmd
-  // for a shell. Without this the first two rows of the picker 500 on click.
-  // explorer.exe exits 1 even when it succeeds, so it cannot be run through the
-  // normal execFileSync path — `start` swallows the code.
-  // `start` takes an optional QUOTED TITLE first, so exactly one empty string —
-  // two would make the second the command and the path merely its argument.
-  // cmd.exe (not bare `cmd`) so cliInvocation does not wrap an interpreter in
-  // another interpreter.
-  'finder':       IS_WINDOWS ? { bin: 'cmd.exe', args: ['/d', '/c', 'start', ''] } : { bin: 'open', args: [] },
-  'terminal':     IS_WINDOWS ? { bin: 'cmd.exe', args: ['/d', '/c', 'start', '', 'cmd', '/k', 'cd', '/d'] } : { bin: 'open', args: ['-a', 'Terminal'] },
+  // `open` is macOS-only. explorer.exe is spawned DIRECTLY (not through
+  // `cmd /c start`) so no shell re-parses the path — its documented quirk is
+  // that it exits 1 even on success, which the caller tolerates.
+  'finder':       IS_WINDOWS ? { bin: 'explorer.exe', args: [] } : { bin: 'open', args: [] },
+  'terminal':     IS_WINDOWS ? { bin: 'cmd.exe', args: ['/d', '/k', 'cd', '/d'] } : { bin: 'open', args: ['-a', 'Terminal'] },
   'vscode':       { bin: 'code', args: [] },
   'cursor':       { bin: 'cursor', args: [] },
   'zed':          { bin: 'zed', args: [] },
@@ -125,11 +126,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Could not resolve repo path' }, { status: 404 });
     }
 
+    // Editor CLIs on Windows are .cmd shims (VS Code ships `code.cmd`), so most
+    // of these reach cmd.exe — which re-parses its command line. Reject the
+    // metacharacters that would split it rather than trying to quote around
+    // them; all are legal in Windows filenames, so this is a real path, not a
+    // theoretical one.
+    if (IS_WINDOWS && /[&|^<>%]/.test(localPath)) {
+      return NextResponse.json(
+        { error: 'Repo path contains a character that cannot be passed safely to the Windows shell.' },
+        { status: 400 },
+      );
+    }
+
     const { bin, args } = EDITORS[editor];
-    // Editor CLIs on Windows are .cmd shims (VS Code ships `code.cmd`), so
-    // "open in editor" would fail without the interpreter.
     const open = cliInvocation(bin, [...args, localPath]);
-    execFileSync(open.command, open.args, { windowsHide: true, encoding: 'utf-8', timeout: 5000 });
+    try {
+      execFileSync(open.command, open.args, { windowsHide: true, encoding: 'utf-8', timeout: 5000 });
+    } catch (spawnError) {
+      // explorer.exe returns 1 even when it succeeded; every other entry treats
+      // a non-zero exit as a real failure.
+      if (!(IS_WINDOWS && bin === 'explorer.exe')) throw spawnError;
+    }
     return NextResponse.json({ ok: true, editor, path: localPath });
   } catch (err) {
     console.error('[panel/open-in] Failed to open repo', err);
