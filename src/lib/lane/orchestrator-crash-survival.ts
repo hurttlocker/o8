@@ -240,6 +240,31 @@ export function isPidAlive(pid?: number): boolean {
   }
 }
 
+/**
+ * Liveness for a REHYDRATED turn — `isPidAlive`, bounded by wall clock.
+ *
+ * After a restart the pid on a turn record is evidence, not proof: the OS may
+ * have recycled it onto an unrelated process. `isPidAlive` deliberately treats
+ * EPERM as alive (a process that exists but cannot be signalled is not dead),
+ * which is right for the case it was written for and makes exactly this one
+ * unfalsifiable — a recycled pid owned by another user answers "alive" forever,
+ * and the session it gates stays `busy` for the life of the app with no turn
+ * ever settling.
+ *
+ * The bound is the ceiling a LIVE turn already has (PROCESS_TIMEOUT_MS, enforced
+ * by a watchdog timer that died with the process that owned it), measured from
+ * when the turn started. So this is the existing policy surviving the restart,
+ * not a new one: a turn that outlives the ceiling was going to be killed anyway.
+ */
+export function isRehydratedTurnAlive(
+  record: Pick<OrchestratorTurnRecord, 'pid' | 'startedAt'>,
+  maxAgeMs: number,
+  nowMs: number = Date.now(),
+): boolean {
+  if (nowMs - record.startedAt >= maxAgeMs) return false;
+  return isPidAlive(record.pid);
+}
+
 export function readJsonlLines(filePath: string, fromOffset = 0): { lines: string[]; offset: number } {
   if (!existsSync(filePath)) return { lines: [], offset: fromOffset };
   const raw = readFileSync(filePath, 'utf8');

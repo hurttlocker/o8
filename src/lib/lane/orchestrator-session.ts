@@ -74,6 +74,7 @@ import {
   fileSize,
   finishOrchestratorTurn,
   isPidAlive,
+  isRehydratedTurnAlive,
   listActiveOrchestratorTurns,
   openAppendFile,
   readJsonlLines,
@@ -260,7 +261,7 @@ function rehydrateInflightClaudeTurn(record: OrchestratorTurnRecord, options: Or
     return true;
   }
 
-  if (!isPidAlive(record.pid)) {
+  if (!isRehydratedTurnAlive(record, PROCESS_TIMEOUT_MS)) {
     settleOrchestratorTurn(session, w, null);
     return true;
   }
@@ -268,7 +269,7 @@ function rehydrateInflightClaudeTurn(record: OrchestratorTurnRecord, options: Or
   turn.stopCrashTail = tailJsonlFile({
     filePath: record.stdoutPath,
     fromOffset: fileSize(record.stdoutPath),
-    alive: () => isPidAlive(record.pid) && !turn.settled,
+    alive: () => isRehydratedTurnAlive(record, PROCESS_TIMEOUT_MS) && !turn.settled,
     onLine: (line) => handleClaudeJsonLine(session!, w, line),
     onEnd: () => {
       if (!turn.settled) settleOrchestratorTurn(session!, w, null);

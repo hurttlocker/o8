@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -9,11 +9,13 @@ import {
   createOrchestratorTurnRecordForFiles,
   finishOrchestratorTurn,
   isPidAlive,
+  isRehydratedTurnAlive,
   listActiveOrchestratorTurns,
   listOrchestratorTurnsForThread,
   readJsonlLines,
 } from './orchestrator-crash-survival';
 import { rehydrateCodexOrchestratorTurns } from './codex-orchestrator-session';
+import { PROCESS_TIMEOUT_MS } from './orchestrator-session-core';
 
 describe('orchestrator crash survival helpers', () => {
   let root: string;
@@ -112,6 +114,33 @@ describe('orchestrator crash survival helpers', () => {
   it('checks pid liveness without throwing', () => {
     expect(isPidAlive(process.pid)).toBe(true);
     expect(isPidAlive(0)).toBe(false);
+  });
+
+  it('bounds a rehydrated turn by wall clock so a live-looking pid cannot hold a session busy forever', () => {
+    // process.pid is alive AND signalable, so isPidAlive answers true every
+    // time — the same answer a RECYCLED pid owned by another user gives, since
+    // isPidAlive counts EPERM as alive. Nothing else settles the turn: the
+    // watchdog that would have killed it died with the process that owned it.
+    const record = createOrchestratorTurnRecord({
+      backend: 'codex',
+      sessionName: 'cortex-codex-orchestrator-stale',
+      repoPath: root,
+      threadId: 'thoughts-stale',
+      pid: process.pid,
+    });
+    const recordFile = join(root, 'orchestrator-turns', `${record.id}.json`);
+    const stored = JSON.parse(readFileSync(recordFile, 'utf8')) as { startedAt: number };
+    stored.startedAt = Date.now() - (PROCESS_TIMEOUT_MS + 60_000);
+    writeFileSync(recordFile, `${JSON.stringify(stored, null, 2)}\n`, 'utf8');
+
+    expect(isRehydratedTurnAlive({ pid: process.pid, startedAt: stored.startedAt }, PROCESS_TIMEOUT_MS)).toBe(false);
+
+    const count = rehydrateCodexOrchestratorTurns();
+
+    expect(count).toBe(1);
+    // The turn SETTLED rather than being left tailing behind a pid that never
+    // reports dead. An unsettled record stays active and its session stays busy.
+    expect(listActiveOrchestratorTurns()).toHaveLength(0);
   });
 
   it('replays a dead codex turn record into rebound events', () => {

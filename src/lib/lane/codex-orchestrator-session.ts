@@ -64,6 +64,7 @@ import {
   fileSize,
   finishOrchestratorTurn,
   isPidAlive,
+  isRehydratedTurnAlive,
   listActiveOrchestratorTurns,
   openAppendFile,
   readJsonlLines,
@@ -313,7 +314,7 @@ export function rehydrateCodexOrchestratorTurns(options: CodexOrchestratorRehydr
     for (const line of replay) {
       handleLine(line);
     }
-    if (!isPidAlive(record.pid)) {
+    if (!isRehydratedTurnAlive(record, PROCESS_TIMEOUT_MS)) {
       finishRecord();
       count += 1;
       continue;
@@ -321,7 +322,7 @@ export function rehydrateCodexOrchestratorTurns(options: CodexOrchestratorRehydr
     tailJsonlFile({
       filePath: record.stdoutPath,
       fromOffset: fileSize(record.stdoutPath),
-      alive: () => isPidAlive(record.pid),
+      alive: () => isRehydratedTurnAlive(record, PROCESS_TIMEOUT_MS),
       onLine: handleLine,
       onEnd: () => {
         finishRecord();
