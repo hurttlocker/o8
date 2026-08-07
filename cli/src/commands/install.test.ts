@@ -47,9 +47,14 @@ describe('windowsShimContents', () => {
     expect(cmd).not.toMatch(/[^\r]\n/);
   });
 
-  it('generates a .ps1 that forwards to the resolved source and propagates the exit code', () => {
-    const { ps1 } = windowsShimContents('C:\\Users\\me\\.o8\\bin\\o8.mjs');
-    expect(ps1).toContain('& $nodeBin "C:\\Users\\me\\.o8\\bin\\o8.mjs" @args');
-    expect(ps1).toContain('exit $LASTEXITCODE');
+  it('emits no .ps1 — one would shadow the .cmd and fail the default execution policy', () => {
+    // PowerShell resolves a bare `o8` to a sibling .ps1 before the .cmd, and an
+    // unsigned .ps1 is refused on a stock Windows install ("running scripts is
+    // disabled on this system"), so `o8 --version` died there while `o8.cmd
+    // --version` worked. Shipping only the .cmd lets PATHEXT reach it from both
+    // shells. Verified in a Windows 11 VM, 2026-08-06.
+    const shim = windowsShimContents('C:\\Users\\me\\.o8\\bin\\o8.mjs') as Record<string, unknown>;
+    expect(shim.ps1).toBeUndefined();
+    expect(Object.keys(shim)).toEqual(['cmd']);
   });
 });

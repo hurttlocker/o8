@@ -131,11 +131,18 @@ mod windows_impl {
 
     fn copy_shim_files(source_bin_dir: &Path, dest_bin_dir: &Path) -> std::io::Result<()> {
         std::fs::create_dir_all(dest_bin_dir)?;
-        for name in ["o8.cmd", "o8.ps1", "o8.mjs"] {
+        for name in ["o8.cmd", "o8.mjs"] {
             let src = source_bin_dir.join(name);
             if src.exists() {
                 std::fs::copy(&src, dest_bin_dir.join(name))?;
             }
+        }
+        // An o8.ps1 left by an older install still shadows o8.cmd in PowerShell
+        // and still fails the default execution policy, so upgrading alone
+        // would not heal the broken `o8` command — remove it.
+        let stale_ps1 = dest_bin_dir.join("o8.ps1");
+        if stale_ps1.exists() {
+            let _ = std::fs::remove_file(&stale_ps1);
         }
         Ok(())
     }

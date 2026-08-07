@@ -56,14 +56,19 @@ export function directoryOnPath(target: string, pathEnv: string = process.env.PA
   return pathEnv.split(delimiter).includes(dir);
 }
 
-// Content for the Windows `.cmd`/`.ps1` shims, templated with the resolved
-// path to the currently-running o8.mjs bundle (mirrors the ones baked at
-// build time in scripts/tauri-export.mjs, but re-derived here so `doctor
-// --repair` can re-point them at a moved/updated install).
-export function windowsShimContents(source: string): { cmd: string; ps1: string } {
+// Content for the Windows `.cmd` shim, templated with the resolved path to the
+// currently-running o8.mjs bundle (mirrors the one baked at build time in
+// scripts/tauri-export.mjs, but re-derived here so `doctor --repair` can
+// re-point it at a moved/updated install).
+//
+// No `.ps1` counterpart on purpose: PowerShell resolves a bare `o8` to a
+// sibling .ps1 ahead of the .cmd, and an unsigned .ps1 is refused under the
+// default execution policy, so shipping one breaks `o8` in PowerShell on a
+// stock Windows install. Without it, PATHEXT falls through to this .cmd, which
+// runs in both shells.
+export function windowsShimContents(source: string): { cmd: string } {
   return {
     cmd: `@echo off\r\nsetlocal\r\nset "NODE_BIN=%O8_NODE_BIN%"\r\nif not defined NODE_BIN set "NODE_BIN=node"\r\n"%NODE_BIN%" "${source}" %*\r\n`,
-    ps1: `$ErrorActionPreference = 'Stop'\r\n$nodeBin = $env:O8_NODE_BIN\r\nif ([string]::IsNullOrEmpty($nodeBin)) { $nodeBin = 'node' }\r\n& $nodeBin "${source}" @args\r\nexit $LASTEXITCODE\r\n`,
   };
 }
 
@@ -99,14 +104,16 @@ export function repairCliInstall(source: string): CliInstallResult {
       mkdirSync(dirname(target), { recursive: true });
 
       // Windows: no shebang/execute-bit/symlink-without-elevation model, so
-      // write the `.cmd` (+ sibling `.ps1`) wrapper directly instead of the
-      // POSIX symlink dance below (#1741).
+      // write the `.cmd` wrapper directly instead of the POSIX symlink dance
+      // below (#1741). Repair also clears any `.ps1` a previous version wrote,
+      // since that file shadows the .cmd in PowerShell and cannot execute
+      // under the default execution policy.
       if (process.platform === 'win32') {
-        const { cmd, ps1 } = windowsShimContents(source);
-        const ps1Target = target.replace(/\.cmd$/, '.ps1');
+        const { cmd } = windowsShimContents(source);
+        const stalePs1 = target.replace(/\.cmd$/, '.ps1');
         const alreadyCurrent = existsSync(target) && readFileSync(target, 'utf8') === cmd;
         writeFileSync(target, cmd);
-        writeFileSync(ps1Target, ps1);
+        try { rmSync(stalePs1, { force: true }); } catch { /* best-effort cleanup */ }
         candidate.status = alreadyCurrent ? 'already-linked' : 'linked';
         candidate.detail = alreadyCurrent ? `already points to ${source}` : `wrote shim pointing to ${source}`;
         installedAt = target;
