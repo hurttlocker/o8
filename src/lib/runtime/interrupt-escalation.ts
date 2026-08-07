@@ -4,6 +4,17 @@ import { isPidAlive, pidCommandLine } from '@/lib/runtimes/shared/owned-session/
 
 export type InterruptEscalationSignal = 'SIGINT' | 'SIGTERM' | 'SIGKILL';
 
+/**
+ * What the ladder ACTUALLY did, as opposed to which rung asked for it.
+ *
+ * On POSIX the two are the same — the rung's signal is delivered. Windows has
+ * exactly one mechanism (`taskkill /PID <pid> /T /F`), so all three rungs do the
+ * same forced tree-kill, and recording them as SIGINT/SIGTERM/SIGKILL tells the
+ * operator a worker was asked politely when it was actually shot. The audit
+ * trail for a stop button has to say which it was.
+ */
+export type InterruptEscalationMechanism = InterruptEscalationSignal | 'taskkill-tree';
+
 export interface InterruptEscalationTarget {
   pid?: number;
   tmuxSession?: string;
@@ -11,7 +22,10 @@ export interface InterruptEscalationTarget {
 }
 
 export interface InterruptEscalationStep {
+  /** The rung of the ladder — what was requested. */
   signal: InterruptEscalationSignal;
+  /** What was actually used. Differs from `signal` on Windows. */
+  mechanism: InterruptEscalationMechanism;
   sent: boolean;
   aliveAfter: boolean;
   error?: string;
@@ -41,6 +55,23 @@ const ESCALATION_STEPS: ReadonlyArray<{ signal: InterruptEscalationSignal; waitM
 
 function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * The mechanism `defaultKill` will use for this target on this platform.
+ *
+ * Derived rather than reported back by the kill so it is recorded correctly on
+ * the FAILURE path too — a taskkill that was denied is still a taskkill, and
+ * labelling that attempt 'SIGINT' is exactly the claim this exists to stop.
+ */
+export function interruptMechanism(
+  target: InterruptEscalationTarget,
+  signal: InterruptEscalationSignal,
+): InterruptEscalationMechanism {
+  // The tmux bridge delivers the real signal, whatever the host platform.
+  if (target.tmuxSession) return signal;
+  if (process.platform !== 'win32') return signal;
+  return 'taskkill-tree';
 }
 
 async function defaultIsAlive(target: InterruptEscalationTarget): Promise<boolean> {
@@ -110,6 +141,7 @@ export async function escalateInterrupt(
   }
 
   for (const step of ESCALATION_STEPS) {
+    const mechanism = interruptMechanism(target, step.signal);
     let sent = false;
     let error: string | undefined;
     try {
@@ -120,7 +152,7 @@ export async function escalateInterrupt(
     }
     await runtimeDeps.sleep(step.waitMs);
     const aliveAfter = await runtimeDeps.isAlive(target);
-    steps.push({ signal: step.signal, sent, aliveAfter, error });
+    steps.push({ signal: step.signal, mechanism, sent, aliveAfter, error });
     if (!aliveAfter) {
       return {
         attempted: true,
@@ -129,7 +161,7 @@ export async function escalateInterrupt(
         steps,
         pid: target.pid,
         tmuxSession: target.tmuxSession,
-        note: `Worker stopped after ${step.signal}.`,
+        note: `Worker stopped after ${mechanism}.`,
       };
     }
   }
@@ -141,8 +173,24 @@ export async function escalateInterrupt(
     steps,
     pid: target.pid,
     tmuxSession: target.tmuxSession,
-    note: 'Worker remained live after SIGINT, SIGTERM, and SIGKILL.',
+    note: `Worker remained live after ${describeAttempts(steps)}.`,
   };
+}
+
+/**
+ * Name what was tried, without repeating one mechanism three times. Windows
+ * runs the same tree-kill on every rung, so "SIGINT, SIGTERM, and SIGKILL"
+ * would describe an escalation that never happened.
+ */
+function describeAttempts(steps: InterruptEscalationStep[]): string {
+  const mechanisms = [...new Set(steps.map((step) => step.mechanism))];
+  if (mechanisms.length === 1 && steps.length > 1) {
+    return `${steps.length} ${mechanisms[0]} attempts`;
+  }
+  if (mechanisms.length > 1) {
+    return `${mechanisms.slice(0, -1).join(', ')}, and ${mechanisms[mechanisms.length - 1]}`;
+  }
+  return mechanisms[0] ?? 'no attempts';
 }
 
 function ownedRuntimeCommandLabel(surfaceId: string): string | null {

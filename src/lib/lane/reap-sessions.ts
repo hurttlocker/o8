@@ -70,16 +70,24 @@ export async function interruptLaneSessions(lanes: Lane[]): Promise<number> {
  * escalation ladder (`runtime/interrupt-escalation.ts`, PID-reuse-guarded) and
  * only reports `confirmed` after the process is verified gone (kill(pid,0) →
  * ESRCH). It emits a `kill_escalated` lane event per stage so the operator can
- * audit exactly which signal ended the worker (payload {stage, pid, confirmed}).
- * When even SIGKILL can't be confirmed, `confirmed:false` bubbles up so the
- * caller marks the lane `kill_unconfirmed` instead of pretending it stopped.
+ * audit exactly what ended the worker (payload {stage, pid, confirmed}) — the
+ * stage names the MECHANISM, which on Windows is a single forced tree-kill on
+ * every rung rather than three escalating signals.
+ * When even the last rung can't be confirmed, `confirmed:false` bubbles up so
+ * the caller marks the lane `kill_unconfirmed` instead of pretending it stopped.
  *
  * Owned dispatch workers (`codex-owned:` / `claude-code-owned:`) get the full
  * ladder. Discovered / gemini / opencode sessions fall back to the single-signal
  * interrupt (no live pid to probe) — best-effort, `verified:false` in the event.
  */
 export interface ConfirmedKillStage {
-  stage: 'SIGINT' | 'SIGTERM' | 'SIGKILL' | 'interrupt';
+  /**
+   * What actually ended (or failed to end) the worker, not which rung asked.
+   * `taskkill-tree` is the only mechanism Windows has, so all three rungs
+   * record it there — the ladder's own signal names would claim a graceful
+   * stop for a forced kill. `interrupt` is the unverified single-shot fallback.
+   */
+  stage: 'SIGINT' | 'SIGTERM' | 'SIGKILL' | 'taskkill-tree' | 'interrupt';
   confirmed: boolean;
   pid?: number;
 }
@@ -119,7 +127,7 @@ async function killTargetConfirmed(target: InterruptTarget): Promise<ConfirmedKi
     const result = await escalateInterruptOwnedSurface(target.sessionKey);
     if (result) {
       const stages: ConfirmedKillStage[] = result.steps.map((step) => ({
-        stage: step.signal,
+        stage: step.mechanism,
         confirmed: !step.aliveAfter,
         pid: result.pid,
       }));
