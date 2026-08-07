@@ -163,6 +163,25 @@ async function alreadyReleasedResultForPacket(
   if (mergeSha && lane?.repoPath) {
     const { isAncestorCommit } = await loadMergeTruth();
     if (await isAncestorCommit(lane.repoPath, mergeSha, 'HEAD')) {
+      // The recorded merge SHA being on main is NECESSARY BUT NOT SUFFICIENT
+      // (#1763). A packet reconciled while head == base — the "agent ran and
+      // changed nothing" shape, also reachable through retry and steer —
+      // records the BASE commit as its merge SHA. That commit is trivially on
+      // main's ancestry forever, so this check keeps passing even after the
+      // branch has advanced with real work. The result was approve-merge
+      // returning `merged: true` for a diff that never landed, which is the
+      // one failure a governance surface must never produce: nobody goes
+      // looking for work they were told was merged.
+      if (lane.branch && !(await isAncestorCommit(lane.repoPath, lane.branch, 'HEAD'))) {
+        console.error('[merge-truth] released packet branch advanced past its recorded merge', {
+          packetId: packet?.id,
+          branch: lane.branch,
+          mergeSha,
+          repoPath: lane.repoPath,
+        });
+        if (packet?.id) await clearStaleReleaseClaim(packet.id, 'stale_release_flag_branch_advanced');
+        return null;
+      }
       return buildAlreadyReleasedResult(mergeSha);
     }
     console.error('[merge-truth] stale released packet flag; merge SHA is not on main ancestry', {
