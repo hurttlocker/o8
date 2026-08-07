@@ -31,6 +31,7 @@ export async function GET(request: Request) {
   if (baseRef) {
     try {
       const diff = execFileSync('git', ['diff', '--no-color', ...wsArgs, `${baseRef}...HEAD`, '--', filePath], {
+        windowsHide: true,
         cwd: root,
         encoding: 'utf-8',
         timeout: 5000,
@@ -48,6 +49,7 @@ export async function GET(request: Request) {
     try {
       // Staged + unstaged changes against HEAD.
       diff = execFileSync('git', ['diff', '--no-color', ...wsArgs, 'HEAD', '--', filePath], {
+        windowsHide: true,
         cwd: root,
         encoding: 'utf-8',
         timeout: 5000,
@@ -59,6 +61,7 @@ export async function GET(request: Request) {
     let stagedDiff = '';
     try {
       stagedDiff = diff ? '' : execFileSync('git', ['diff', '--no-color', ...wsArgs, '--cached', '--', filePath], {
+        windowsHide: true,
         cwd: root,
         encoding: 'utf-8',
         timeout: 5000,
@@ -70,6 +73,7 @@ export async function GET(request: Request) {
     let isUntracked = false;
     try {
       const status = execFileSync('git', ['status', '--porcelain', '--', filePath], {
+        windowsHide: true,
         cwd: root,
         encoding: 'utf-8',
         timeout: 5000,
@@ -83,6 +87,7 @@ export async function GET(request: Request) {
     if (isUntracked && !diff && !stagedDiff) {
       try {
         execFileSync('git', ['diff', '--no-color', ...wsArgs, '--no-index', '/dev/null', filePath], {
+          windowsHide: true,
           cwd: root,
           encoding: 'utf-8',
           timeout: 5000,

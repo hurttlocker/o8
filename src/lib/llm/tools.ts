@@ -587,6 +587,7 @@ function runTerminalCommand(command: string, cwd?: string, repoRoot: string | nu
 
   try {
     const output = execSync(command, {
+      windowsHide: true,
       encoding: 'utf-8',
       timeout: COMMAND_TIMEOUT,
       cwd: workDir,
@@ -718,7 +719,7 @@ function listFiles(dirPath?: string, pattern?: string, repoRoot: string | null =
     const findArgs = pattern
       ? [resolved, '-maxdepth', '2', '-name', pattern, '-not', '-path', '*/node_modules/*', '-not', '-path', '*/.next/*']
       : [resolved, '-maxdepth', '1', '-not', '-name', '.*', '-not', '-name', 'node_modules'];
-    const output = execFileSync('find', findArgs, { encoding: 'utf-8', timeout: 5000, maxBuffer: 8 * 1024 * 1024 }).trim();
+    const output = execFileSync('find', findArgs, { windowsHide: true, encoding: 'utf-8', timeout: 5000, maxBuffer: 8 * 1024 * 1024 }).trim();
     const entries = output.split('\n').filter(Boolean).slice(0, 30).map(f => {
       const relPath = relative(repoRoot, f);
       try {
@@ -753,6 +754,7 @@ function searchCode(query: string, filePattern?: string, maxResults?: number, re
     let raw: string;
     try {
       raw = execFileSync('grep', ['-rn', ...includes, '-e', query, '.'], {
+        windowsHide: true,
         cwd: repoRoot,
         encoding: 'utf-8',
         timeout: 5000,

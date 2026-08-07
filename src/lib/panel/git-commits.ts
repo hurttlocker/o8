@@ -50,6 +50,7 @@ export function resolveWorkspaceRoot(workspace?: string | null) {
 
 function runGit(root: string, args: string[], maxBuffer = MAX_GIT_BUFFER) {
   return execFileSync('git', args, {
+    windowsHide: true,
     cwd: root,
     encoding: 'utf-8',
     timeout: 10_000,
@@ -60,6 +61,7 @@ function runGit(root: string, args: string[], maxBuffer = MAX_GIT_BUFFER) {
 function isGitRepo(root: string) {
   try {
     return execFileSync('git', ['rev-parse', '--is-inside-work-tree'], {
+      windowsHide: true,
       cwd: root,
       encoding: 'utf-8',
       timeout: 5_000,

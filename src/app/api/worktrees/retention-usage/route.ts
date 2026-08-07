@@ -43,7 +43,7 @@ async function countWorktrees(dir: string): Promise<number> {
 /** `du -sk` the worktree dir → bytes. Returns 0 when the dir is absent. */
 async function measureBytes(dir: string): Promise<number> {
   try {
-    const { stdout } = await execFileAsync('du', ['-sk', dir], { timeout: 8000 });
+    const { stdout } = await execFileAsync('du', ['-sk', dir], { windowsHide: true, timeout: 8000 });
     const kb = parseInt(stdout.split('\t')[0] ?? '0', 10);
     return Number.isFinite(kb) ? kb * 1024 : 0;
   } catch {

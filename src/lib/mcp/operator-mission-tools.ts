@@ -264,7 +264,7 @@ async function loadIssue(repoPath: string, issueRef: string): Promise<LoadedIssu
   const { stdout } = await execFileAsync(
     'gh',
     ['issue', 'view', normalizedIssueRef, '--json', 'number,title,body,url'],
-    { cwd: repoPath, maxBuffer: GH_MAX_BUFFER },
+    { windowsHide: true, cwd: repoPath, maxBuffer: GH_MAX_BUFFER },
   );
 
   const parsed = JSON.parse(stdout) as Partial<LoadedIssue>;

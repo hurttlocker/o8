@@ -589,12 +589,14 @@ export function createOwnedRunController({
       try {
         const child = process.platform === 'win32'
           ? spawn(spawnBinary, spawnArgs, {
+              windowsHide: true,
               cwd: session.repoPath,
               detached: true,
               stdio: [stdinPayload ? 'pipe' : 'ignore', stdoutFd, stderrFd],
               env: { ...process.env, ...spawnEnv },
             })
           : spawn('nice', ['-n', '10', spawnBinary, ...spawnArgs], {
+              windowsHide: true,
               cwd: session.repoPath,
               detached: true,
               stdio: [stdinPayload ? 'pipe' : 'ignore', stdoutFd, stderrFd],

@@ -878,6 +878,7 @@ function spawnOrchestratorProc(session: OrchestratorSession, w: WarmState, confi
   // (which names the healthy binary) or a confusing mid-turn tool error.
   assertOrchestratorRepoPath(session.repoPath);
   const proc = spawn(resolveClaudeBin(), args, {
+    windowsHide: true,
     cwd: session.repoPath,
     // BYO-key injection is Fable-scoped ONLY — never ambient process.env — so the
     // subscription-billed backends aren't re-billed against an API key.

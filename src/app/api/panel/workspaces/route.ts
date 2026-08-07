@@ -155,6 +155,7 @@ function resolveGitBranch(repoPath: string) {
   try {
     const resolved = resolveWorkspacePath(repoPath);
     const branch = execFileSync('git', ['-C', resolved, 'branch', '--show-current'], {
+      windowsHide: true,
       encoding: 'utf-8',
       timeout: 3000,
       stdio: ['ignore', 'pipe', 'ignore'],
@@ -182,6 +183,7 @@ function getActiveWorktreeBranches(repoPath: string): Set<string> {
   try {
     const resolved = resolveWorkspacePath(repoPath);
     const output = execFileSync('git', ['-C', resolved, 'worktree', 'list', '--porcelain'], {
+      windowsHide: true,
       encoding: 'utf-8',
       timeout: 3000,
       stdio: ['ignore', 'pipe', 'ignore'],
@@ -220,7 +222,7 @@ function getLocalDiffStats(workspace: string) {
     const cmd = isDefault
       ? 'git diff --shortstat 2>/dev/null'
       : 'git diff --shortstat origin/main..HEAD 2>/dev/null; git diff --shortstat 2>/dev/null';
-    const diffStat = execSync(cmd, { cwd, encoding: 'utf-8', timeout: 5000 }).trim();
+    const diffStat = execSync(cmd, { windowsHide: true, cwd, encoding: 'utf-8', timeout: 5000 }).trim();
 
     let additions = 0;
     let deletions = 0;

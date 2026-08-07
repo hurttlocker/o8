@@ -199,14 +199,17 @@ export async function getLiveReviewChangeSet(
 
   const [nameStatusRaw, numStatRaw, untrackedRaw] = await Promise.all([
     execFileAsync('git', ['-C', workspacePath, 'diff', '--name-status', '--relative', '-M', 'HEAD'], {
+      windowsHide: true,
       timeout: 5000,
       maxBuffer: 1024 * 1024,
     }).then((result) => result.stdout).catch(() => ''),
     execFileAsync('git', ['-C', workspacePath, 'diff', '--numstat', '--relative', '-M', 'HEAD'], {
+      windowsHide: true,
       timeout: 5000,
       maxBuffer: 1024 * 1024,
     }).then((result) => result.stdout).catch(() => ''),
     execFileAsync('git', ['-C', workspacePath, 'ls-files', '--others', '--exclude-standard'], {
+      windowsHide: true,
       timeout: 5000,
       maxBuffer: 1024 * 1024,
     }).then((result) => result.stdout).catch(() => ''),

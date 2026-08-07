@@ -35,6 +35,7 @@ function nodeMajor(version: string | undefined): number | null {
 function defaultReadVersion(candidate: string): string | null {
   try {
     return execFileSync(candidate, ['--version'], {
+      windowsHide: true,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
       timeout: 3000,

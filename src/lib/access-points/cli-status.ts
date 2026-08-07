@@ -39,7 +39,7 @@ function resolveNode(): { path: string | null; ok: boolean } {
     return { path: process.env.O8_NODE_BIN, ok: true };
   }
   try {
-    const out = execFileSync('sh', ['-lc', 'command -v node'], { encoding: 'utf8' }).trim();
+    const out = execFileSync('sh', ['-lc', 'command -v node'], { windowsHide: true, encoding: 'utf8' }).trim();
     return out ? { path: out, ok: true } : { path: null, ok: false };
   } catch {
     return { path: null, ok: false };

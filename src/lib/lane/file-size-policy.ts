@@ -49,6 +49,7 @@ export async function getOversizedChangedFilesForLane(
 
   try {
     const result = await execFileAsync('git', ['diff', '--name-only', `${lane.baseBranch}...HEAD`], {
+      windowsHide: true,
       cwd: lane.worktreePath,
       maxBuffer: 4 * 1024 * 1024,
     });
@@ -62,12 +63,14 @@ export async function getOversizedChangedFilesForLane(
     const lineCounts = await Promise.allSettled(
       changedFiles.map(async (filePath) => {
         const wcResult = await execFileAsync('wc', ['-l', filePath], {
+          windowsHide: true,
           cwd: lane.worktreePath!,
           maxBuffer: 256 * 1024,
         });
         let diffOutput = '';
         try {
           const diffResult = await execFileAsync('git', ['diff', '--numstat', `${lane.baseBranch}...HEAD`, '--', filePath], {
+            windowsHide: true,
             cwd: lane.worktreePath!,
             maxBuffer: 256 * 1024,
           });

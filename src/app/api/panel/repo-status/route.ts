@@ -64,6 +64,7 @@ function resolveRepoPath(raw: string) {
 
 async function runGit(cwd: string, args: string[], timeout = 4_000) {
   const { stdout } = await execFileAsync('git', args, {
+    windowsHide: true,
     cwd,
     timeout,
     maxBuffer: 512 * 1024,

@@ -169,6 +169,7 @@ export async function rejectSpokenReviewSnapshotDrift(input: {
 
 async function git(cwd: string, args: string[], env?: NodeJS.ProcessEnv) {
   return execFileAsync('git', args, {
+    windowsHide: true,
     cwd,
     env,
     timeout: 30_000,

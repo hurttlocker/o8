@@ -66,6 +66,7 @@ export function governHermesProfile(hermesBin: string): { home: string } | null 
   // config.yaml's `disabled_toolsets`, so we verify via `hermes tools list`.)
   try {
     execFileSync(hermesBin, ['tools', 'disable', ...HERMES_DENIED_TOOLSETS], {
+      windowsHide: true,
       env: { ...process.env, HOME: home },
       stdio: 'ignore',
       timeout: 20000,
@@ -89,6 +90,7 @@ export function isHermesProfileGoverned(home: string, hermesBin: string): boolea
   if (!existsSync(join(home, '.hermes', 'config.yaml'))) return false;
   try {
     const out = execFileSync(hermesBin, ['tools', 'list'], {
+      windowsHide: true,
       env: { ...process.env, HOME: home },
       encoding: 'utf8',
       timeout: 20000,

@@ -93,6 +93,7 @@ const RECONCILABLE_WORKTREE_STATUSES: ReadonlySet<LaneStatus> = new Set<LaneStat
 async function getLocalBranchSetForRepo(repoPath: string): Promise<Set<string> | null> {
   try {
     const { stdout } = await execFileAsync('git', ['branch', '--format=%(refname:short)'], {
+      windowsHide: true,
       cwd: repoPath,
       encoding: 'utf-8',
       timeout: 2_000,
@@ -119,6 +120,7 @@ async function recentMergeSubjectMentionsBranch(repoPath: string, baseBranch: st
       'git',
       ['log', '--format=%s', '-n', '50', baseBranch],
       {
+        windowsHide: true,
         cwd: repoPath,
         encoding: 'utf-8',
         timeout: 2_000,
@@ -135,6 +137,7 @@ async function recentMergeSubjectMentionsBranch(repoPath: string, baseBranch: st
 async function readRefSha(repoPath: string, ref: string): Promise<string | null> {
   try {
     const { stdout } = await execFileAsync('git', ['rev-parse', '--verify', ref], {
+      windowsHide: true,
       cwd: repoPath,
       encoding: 'utf-8',
       timeout: 2_000,
@@ -151,6 +154,7 @@ async function isAncestorCommit(repoPath: string, ancestorSha: string, descendan
     // Direction matters: the lane head must be the ancestor and the base ref
     // must be the descendant. Swapping these args caused #1457-style lies.
     await execFileAsync('git', ['merge-base', '--is-ancestor', ancestorSha, descendantRef], {
+      windowsHide: true,
       cwd: repoPath,
       timeout: 2_000,
     });

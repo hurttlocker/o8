@@ -81,6 +81,7 @@ function execGhWithToken(token: string) {
     'gh',
     ['auth', 'login', '--hostname', DEFAULT_HOSTNAME, '--git-protocol', 'https', '--with-token'],
     {
+      windowsHide: true,
       encoding: 'utf-8',
       timeout: 15000,
       input: `${token}\n`,
@@ -94,6 +95,7 @@ function execGhLogout(user: string) {
     'gh',
     ['auth', 'logout', '--hostname', DEFAULT_HOSTNAME, '--user', user],
     {
+      windowsHide: true,
       encoding: 'utf-8',
       timeout: 15000,
       env: { ...process.env, PATH: `${process.env.PATH}:/usr/local/bin:/opt/homebrew/bin` },

@@ -346,12 +346,14 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
         const { promisify } = await import('node:util');
         const execFileAsync = promisify(execFile);
         const { stdout: porcelain } = await execFileAsync('git', ['status', '--porcelain'], {
+          windowsHide: true,
           cwd: reviewCwd,
           maxBuffer: 10 * 1024 * 1024,
         });
         if (porcelain.trim().length > 0) {
           console.log(`[lane] request_review: dirty worktree detected in ${reviewCwd}, auto-committing`);
           await execFileAsync('git', ['add', '-A', '--', '.'], {
+            windowsHide: true,
             cwd: reviewCwd,
             maxBuffer: 10 * 1024 * 1024,
           });
@@ -362,10 +364,12 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           // `git add` pathspec — the latter errors ("paths are ignored") when an ignored
           // dir like node_modules exists in the worktree.
           await execFileAsync('git', ['reset', '-q', '--', '.claude', 'node_modules'], {
+            windowsHide: true,
             cwd: reviewCwd,
             maxBuffer: 10 * 1024 * 1024,
           });
           await execFileAsync('git', ['commit', '-m', 'auto-commit: agent work before review'], {
+            windowsHide: true,
             cwd: reviewCwd,
             maxBuffer: 10 * 1024 * 1024,
           });
@@ -557,7 +561,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           'push',
           'origin',
           `${reviewedSnapshotSha}:refs/heads/${lockedLane.branch}`,
-        ], { cwd: lockedLane.worktreePath });
+        ], { windowsHide: true, cwd: lockedLane.worktreePath });
 
         // Create PR via gh CLI
         const prTitle = lockedLane.label || `${lockedLane.branch}`;
@@ -567,7 +571,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           '--head', lockedLane.branch,
           '--title', prTitle,
           '--body', command.reviewSummary?.trim() || `Automated PR from lane \`${lockedLane.id}\`.\n\nRuntime: ${lockedLane.runtime}\nPacket: ${lockedLane.packetId ?? 'none'}`,
-        ], { cwd: lockedLane.repoPath });
+        ], { windowsHide: true, cwd: lockedLane.repoPath });
 
         const prUrl = prResult.stdout.trim();
         const prNumber = parsePullRequestNumber(prUrl);

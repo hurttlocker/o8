@@ -37,7 +37,7 @@ async function readCodexProcessRows(): Promise<LiveCodexProcess[]> {
     const { stdout } = await execFileAsync(
       'ps',
       ['-eo', 'pid=', '-o', 'ppid=', '-o', 'command='],
-      { maxBuffer: 512 * 1024, timeout: 3000 },
+      { windowsHide: true, maxBuffer: 512 * 1024, timeout: 3000 },
     );
     psOut = stdout;
   } catch {
@@ -63,7 +63,7 @@ async function readCodexProcessRows(): Promise<LiveCodexProcess[]> {
     const { stdout } = await execFileAsync(
       'lsof',
       ['-a', '-p', rows.map((row) => row.pid).join(','), '-d', 'cwd', '-Fn'],
-      { maxBuffer: 512 * 1024, timeout: 4000 },
+      { windowsHide: true, maxBuffer: 512 * 1024, timeout: 4000 },
     );
     let currentPid: number | null = null;
     for (const line of stdout.split('\n')) {

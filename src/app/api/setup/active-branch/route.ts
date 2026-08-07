@@ -45,6 +45,7 @@ async function resolveActiveRepo() {
 
 async function readCurrentBranch(repoPath: string) {
   const { stdout } = await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+    windowsHide: true,
     cwd: repoPath,
     timeout: 5_000,
   });

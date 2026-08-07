@@ -137,6 +137,7 @@ async function collectDiffStats(
 
   async function runGit(args: string[]): Promise<string> {
     const { stdout } = await execFileAsync('git', args, {
+      windowsHide: true,
       cwd: worktreePath as string,
       timeout: 5_000,
       maxBuffer: 512 * 1024,

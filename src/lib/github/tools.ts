@@ -37,7 +37,7 @@ export async function createGithubIssue(args: {
       }
     }
 
-    const output = execFileSync('gh', ghArgs, { encoding: 'utf-8', timeout: 15000 }).trim();
+    const output = execFileSync('gh', ghArgs, { windowsHide: true, encoding: 'utf-8', timeout: 15000 }).trim();
 
     const urlMatch = output.match(/(https:\/\/github\.com\/[^\s]+)/);
     const issueUrl = urlMatch ? urlMatch[1] : output;
@@ -64,9 +64,9 @@ export async function readGithubIssueOrPr(args: {
     // Try issue first, fall back to PR
     let raw: string;
     try {
-      raw = execFileSync('gh', ['issue', 'view', numStr, '--repo', repo, '--json', 'title,body,state,labels,assignees,comments,url'], { encoding: 'utf-8', timeout: 10000 }).trim();
+      raw = execFileSync('gh', ['issue', 'view', numStr, '--repo', repo, '--json', 'title,body,state,labels,assignees,comments,url'], { windowsHide: true, encoding: 'utf-8', timeout: 10000 }).trim();
     } catch {
-      raw = execFileSync('gh', ['pr', 'view', numStr, '--repo', repo, '--json', 'title,body,state,labels,assignees,comments,url,additions,deletions,files'], { encoding: 'utf-8', timeout: 10000 }).trim();
+      raw = execFileSync('gh', ['pr', 'view', numStr, '--repo', repo, '--json', 'title,body,state,labels,assignees,comments,url,additions,deletions,files'], { windowsHide: true, encoding: 'utf-8', timeout: 10000 }).trim();
     }
 
     const data = JSON.parse(raw);
@@ -101,7 +101,7 @@ export async function readGithubIssueOrPr(args: {
     // If it's a PR, get the diff too
     if (data.additions !== undefined) {
       try {
-        const diff = execFileSync('gh', ['pr', 'diff', numStr, '--repo', repo], { encoding: 'utf-8', timeout: 10000 }).trim();
+        const diff = execFileSync('gh', ['pr', 'diff', numStr, '--repo', repo], { windowsHide: true, encoding: 'utf-8', timeout: 10000 }).trim();
         if (diff) {
           const diffLines = diff.split('\n').slice(0, 200);
           lines.push('');
@@ -132,7 +132,7 @@ export async function createPullRequest(args: {
   baseBranch?: string;
 }): Promise<GitHubToolResult> {
   const repoRoot = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
-  const opts = { encoding: 'utf-8' as const, cwd: repoRoot, timeout: 15000 };
+  const opts = { windowsHide: true, encoding: 'utf-8' as const, cwd: repoRoot, timeout: 15000 };
 
   try {
     const { repo, branch, title, body, baseBranch } = args;

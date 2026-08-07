@@ -45,6 +45,7 @@ async function dfInfo(target: string): Promise<DfInfo | null> {
   const existing = await nearestExistingPath(target);
   try {
     const { stdout } = await execFileAsync('df', ['-P', existing], {
+      windowsHide: true,
       timeout: 5000,
     });
     const line = stdout.trim().split('\n')[1];
@@ -62,6 +63,7 @@ async function dfInfo(target: string): Promise<DfInfo | null> {
 async function isApfsMount(mount: string): Promise<boolean> {
   try {
     const { stdout } = await execFileAsync('diskutil', ['info', mount], {
+      windowsHide: true,
       timeout: 5000,
     });
     return /\bFile System Personality:\s+APFS\b/.test(stdout)

@@ -36,6 +36,7 @@ export async function runLaneRebaseTypecheck(input: {
   }
   try {
     await execFileAsync('npx', ['tsc', '--noEmit'], {
+      windowsHide: true,
       cwd: input.cwd,
       timeout: TYPECHECK_TIMEOUT_MS,
       maxBuffer: TYPECHECK_MAX_BUFFER_BYTES,

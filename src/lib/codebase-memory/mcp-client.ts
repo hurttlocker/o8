@@ -89,6 +89,7 @@ export async function withCodebaseMemoryToolSession<T>(
   let child: ReturnType<typeof spawn>;
   try {
     child = spawn(input.binPath, [], {
+      windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: input.cwd,
       env: { ...process.env },

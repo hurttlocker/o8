@@ -134,13 +134,13 @@ export function startChangePolling(repoPath: string): void {
     try {
       const diff = execSync(
         'git diff --name-only HEAD 2>/dev/null; git diff --name-only --cached 2>/dev/null',
-        { cwd: repoPath, encoding: 'utf-8', timeout: 3000 },
+        { windowsHide: true, cwd: repoPath, encoding: 'utf-8', timeout: 3000 },
       ).trim();
 
       // Also check for new untracked files
       const untracked = execSync(
         'git ls-files --others --exclude-standard 2>/dev/null | head -20',
-        { cwd: repoPath, encoding: 'utf-8', timeout: 3000 },
+        { windowsHide: true, cwd: repoPath, encoding: 'utf-8', timeout: 3000 },
       ).trim();
 
       const combined = `${diff}\n${untracked}`.trim();

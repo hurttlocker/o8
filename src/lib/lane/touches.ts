@@ -228,6 +228,7 @@ function listDiffFilesForLane(row: LaneTouchRow): string[] {
 
   try {
     const output = execFileSync('git', ['diff', '--name-only', `${row.base_branch}...HEAD`], {
+      windowsHide: true,
       cwd,
       encoding: 'utf-8',
       timeout: 10_000,

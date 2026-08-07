@@ -33,7 +33,7 @@ export async function GET(request: Request) {
         break;
     }
 
-    const output = execSync(cmd, { cwd: root, encoding: 'utf-8', timeout: 10000, maxBuffer: 256 * 1024 }).trim();
+    const output = execSync(cmd, { windowsHide: true, cwd: root, encoding: 'utf-8', timeout: 10000, maxBuffer: 256 * 1024 }).trim();
 
     const files = output.split('\n').filter(Boolean).map((line) => {
       const [addStr, delStr, ...pathParts] = line.split('\t');

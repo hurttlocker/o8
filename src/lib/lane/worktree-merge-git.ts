@@ -12,6 +12,7 @@ export async function git(
   opts: { timeout?: number; maxBuffer?: number } = {},
 ) {
   return execFileAsync('git', args, {
+    windowsHide: true,
     cwd,
     timeout: opts.timeout ?? 60_000,
     maxBuffer: opts.maxBuffer ?? 8 * 1024 * 1024,

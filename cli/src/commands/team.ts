@@ -80,6 +80,7 @@ function isFresh(iso: string | undefined, ttl = LIVE_TTL_MS): boolean {
 function roomDir(): string {
   try {
     const gitDir = execFileSync('git', ['rev-parse', '--absolute-git-dir'], {
+      windowsHide: true,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();

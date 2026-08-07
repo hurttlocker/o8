@@ -110,6 +110,7 @@ export function getIndexState(): IndexState {
 async function getCurrentHead(localPath: string): Promise<string | null> {
   try {
     const { stdout } = await execFileAsync('git', ['-C', localPath, 'rev-parse', 'HEAD'], {
+      windowsHide: true,
       maxBuffer: 64 * 1024,
       timeout: 10_000,
     });

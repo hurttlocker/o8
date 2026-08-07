@@ -30,6 +30,7 @@ function captureSafeId(value: string): string {
 
 async function git(cwd: string, args: string[], env?: Record<string, string>) {
   return execFileAsync('git', args, {
+    windowsHide: true,
     cwd,
     timeout: GIT_TIMEOUT_MS,
     maxBuffer: COMMAND_MAX_BUFFER,

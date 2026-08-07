@@ -88,7 +88,7 @@ export async function GET(request: Request): Promise<NextResponse<CompactGitLogR
     const { stdout } = await execFileAsync(
       'git',
       ['-C', repoPath, 'log', `--format=${format}`, '-n', String(limit)],
-      { maxBuffer: 1024 * 1024, timeout: 8000 },
+      { windowsHide: true, maxBuffer: 1024 * 1024, timeout: 8000 },
     );
 
     const now = Date.now();

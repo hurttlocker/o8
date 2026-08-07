@@ -144,6 +144,7 @@ export async function POST(req: NextRequest) {
   const stream = new ReadableStream({
     start(controller) {
       const child = spawn(codexBin, args, {
+        windowsHide: true,
         cwd: workingDir,
         env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
         stdio: ['pipe', 'pipe', 'pipe'],

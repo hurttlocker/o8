@@ -76,6 +76,7 @@ async function ensureDirectory(repoPath: string): Promise<void> {
 
 async function runGit(repoPath: string, args: string[]): Promise<string> {
   const { stdout } = await execFileAsync('git', ['-C', repoPath, ...args], {
+    windowsHide: true,
     encoding: 'utf8',
     maxBuffer: 1024 * 1024,
     timeout: 20_000,
@@ -98,7 +99,7 @@ async function runGitCommit(repoPath: string, message: string): Promise<boolean>
         '-m',
         message,
       ],
-      { maxBuffer: 1024 * 1024, timeout: 20_000 },
+      { windowsHide: true, maxBuffer: 1024 * 1024, timeout: 20_000 },
     );
     return true;
   } catch {
@@ -130,11 +131,13 @@ async function ensureGitRepo(repoPath: string): Promise<boolean> {
   }
   try {
     await execFileAsync('git', ['init', '-b', 'main', repoPath], {
+      windowsHide: true,
       maxBuffer: 1024 * 1024,
       timeout: 20_000,
     });
   } catch {
     await execFileAsync('git', ['init', repoPath], {
+      windowsHide: true,
       maxBuffer: 1024 * 1024,
       timeout: 20_000,
     });

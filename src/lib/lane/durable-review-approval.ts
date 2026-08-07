@@ -138,7 +138,7 @@ async function listChangedPathsForCoverage(
 
   const collect = async (args: string[]): Promise<string[] | null> => {
     try {
-      const { stdout } = await run('git', args, { cwd, maxBuffer: 8 * 1024 * 1024 });
+      const { stdout } = await run('git', args, { windowsHide: true, cwd, maxBuffer: 8 * 1024 * 1024 });
       return stdout.split('\n').map((line) => line.trim()).filter(Boolean);
     } catch {
       return null;

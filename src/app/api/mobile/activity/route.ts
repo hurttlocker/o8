@@ -192,6 +192,7 @@ async function collectRepoCommits(
         '--diff-merges=first-parent',
       ],
       {
+        windowsHide: true,
         timeout: 10_000,
         maxBuffer: 1024 * 1024,
         env: { ...process.env, LC_ALL: 'C' },

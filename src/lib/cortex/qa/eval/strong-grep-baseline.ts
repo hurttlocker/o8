@@ -49,7 +49,7 @@ function runRgCount(keyword: string, repoPath: string): Promise<string> {
     execFile(
       'rg',
       rgArgs(keyword),
-      { cwd: repoPath, maxBuffer: 8 * 1024 * 1024, timeout: 20_000 },
+      { windowsHide: true, cwd: repoPath, maxBuffer: 8 * 1024 * 1024, timeout: 20_000 },
       (err, stdout) => {
         if (!err) {
           resolve(stdout);

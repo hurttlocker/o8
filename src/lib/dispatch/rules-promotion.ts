@@ -106,10 +106,10 @@ async function countRecentReverts(repoPath: string, merges: Array<{ label: strin
     const since = new Date(merge.resolvedAt).toISOString();
     const until = new Date(merge.resolvedAt + (24 * 60 * 60 * 1000)).toISOString();
     try {
-      const { stdout: mergeLog } = await execFileAsync('git', ['log', '--all', `--since=${since}`, `--until=${until}`, '--format=%H%x09%s'], { cwd: repoPath, maxBuffer: 1024 * 1024 });
+      const { stdout: mergeLog } = await execFileAsync('git', ['log', '--all', `--since=${since}`, `--until=${until}`, '--format=%H%x09%s'], { windowsHide: true, cwd: repoPath, maxBuffer: 1024 * 1024 });
       const mergeSha = mergeLog.split('\n').find((line) => line.includes(`\tMerge lane ${merge.label} (`))?.split('\t')[0];
       if (!mergeSha) continue;
-      const { stdout: revertLog } = await execFileAsync('git', ['log', '--all', `--since=${since}`, `--until=${until}`, '--fixed-strings', '--grep', mergeSha, '--format=%H'], { cwd: repoPath, maxBuffer: 1024 * 1024 });
+      const { stdout: revertLog } = await execFileAsync('git', ['log', '--all', `--since=${since}`, `--until=${until}`, '--fixed-strings', '--grep', mergeSha, '--format=%H'], { windowsHide: true, cwd: repoPath, maxBuffer: 1024 * 1024 });
       reverted += revertLog.trim() ? 1 : 0;
     } catch {}
   }

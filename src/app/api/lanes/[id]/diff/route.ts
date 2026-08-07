@@ -67,9 +67,9 @@ export async function GET(
       const against = diffBase.mergeBase ?? diffBase.comparisonRef;
 
       const [stat, full] = await Promise.all([
-        execFileAsync('git', ['diff', '--stat', against], { cwd, maxBuffer: COMMAND_MAX_BUFFER })
+        execFileAsync('git', ['diff', '--stat', against], { windowsHide: true, cwd, maxBuffer: COMMAND_MAX_BUFFER })
           .then((r) => r.stdout).catch(() => ''),
-        execFileAsync('git', ['diff', against], { cwd, maxBuffer: COMMAND_MAX_BUFFER })
+        execFileAsync('git', ['diff', against], { windowsHide: true, cwd, maxBuffer: COMMAND_MAX_BUFFER })
           .then((r) => r.stdout).catch(() => ''),
       ]);
 

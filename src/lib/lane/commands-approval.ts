@@ -24,11 +24,11 @@ async function getDiffForLane(lane: Pick<Lane, 'baseBranch' | 'worktreePath' | '
   const execFileAsync = promisify(execFile);
 
   try {
-    const result = await execFileAsync('git', ['diff', `${lane.baseBranch}...HEAD`, '--no-color'], { cwd, maxBuffer: 10 * 1024 * 1024 });
+    const result = await execFileAsync('git', ['diff', `${lane.baseBranch}...HEAD`, '--no-color'], { windowsHide: true, cwd, maxBuffer: 10 * 1024 * 1024 });
     return result.stdout.trim();
   } catch {
     try {
-      const fallback = await execFileAsync('git', ['diff', 'HEAD~1', '--no-color'], { cwd, maxBuffer: 10 * 1024 * 1024 });
+      const fallback = await execFileAsync('git', ['diff', 'HEAD~1', '--no-color'], { windowsHide: true, cwd, maxBuffer: 10 * 1024 * 1024 });
       return fallback.stdout.trim();
     } catch {
       return '';

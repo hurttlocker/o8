@@ -142,7 +142,7 @@ export async function GET() {
   try {
     const raw = execSync(
       'lsof -i -P -n -sTCP:LISTEN -F pcn 2>/dev/null',
-      { encoding: 'utf-8', timeout: 5000 },
+      { windowsHide: true, encoding: 'utf-8', timeout: 5000 },
     ).trim();
 
     // Parse lsof output (field mode: p=pid, c=command, n=name).
@@ -180,7 +180,7 @@ export async function GET() {
       const pidList = uniquePids.join(',');
       const cwdByPid = new Map<number, string>();
       try {
-        const cwdRaw = execSync(`lsof -p ${pidList} -a -d cwd -Fn 2>/dev/null`, { encoding: 'utf-8', timeout: 3000 }).trim();
+        const cwdRaw = execSync(`lsof -p ${pidList} -a -d cwd -Fn 2>/dev/null`, { windowsHide: true, encoding: 'utf-8', timeout: 3000 }).trim();
         let pid = 0;
         for (const line of cwdRaw.split('\n')) {
           if (line.startsWith('p')) pid = parseInt(line.slice(1), 10);
@@ -190,7 +190,7 @@ export async function GET() {
 
       const cmdByPid = new Map<number, string>();
       try {
-        const psRaw = execSync(`ps -o pid=,command= -p ${pidList} 2>/dev/null`, { encoding: 'utf-8', timeout: 3000 }).trim();
+        const psRaw = execSync(`ps -o pid=,command= -p ${pidList} 2>/dev/null`, { windowsHide: true, encoding: 'utf-8', timeout: 3000 }).trim();
         for (const line of psRaw.split('\n')) {
           const m = line.trim().match(/^(\d+)\s+(.*)$/);
           if (m) cmdByPid.set(parseInt(m[1], 10), m[2]);

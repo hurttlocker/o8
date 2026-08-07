@@ -28,6 +28,7 @@ const STALE_THRESHOLD_DAYS = 3;
 function isGitRepo(repoPath: string): boolean {
   try {
     return execFileSync('git', ['-C', repoPath, 'rev-parse', '--is-inside-work-tree'], {
+      windowsHide: true,
       encoding: 'utf-8',
       timeout: 2000,
       stdio: ['ignore', 'pipe', 'ignore'],
@@ -53,6 +54,7 @@ function parseShortstat(raw: string): { additions: number; deletions: number } {
  *  callers treat a throw as "command failed". */
 function git(repoPath: string, args: string[], timeout = 5000): string {
   return execFileSync('git', ['-C', repoPath, ...args], {
+    windowsHide: true,
     encoding: 'utf-8',
     timeout,
     stdio: ['ignore', 'pipe', 'ignore'],
@@ -62,6 +64,7 @@ function git(repoPath: string, args: string[], timeout = 5000): string {
 function diskSizeForPath(targetPath: string): string | undefined {
   try {
     const out = execFileSync('du', ['-sh', targetPath], {
+      windowsHide: true,
       encoding: 'utf-8',
       timeout: 3000,
       stdio: ['ignore', 'pipe', 'ignore'],

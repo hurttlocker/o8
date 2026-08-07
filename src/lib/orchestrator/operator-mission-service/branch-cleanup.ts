@@ -73,6 +73,7 @@ function formatError(error: unknown) {
 async function localBranchExists(repoPath: string, branch: string): Promise<boolean> {
   try {
     await execFileAsync('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], {
+      windowsHide: true,
       cwd: repoPath,
       timeout: 5_000,
     });
@@ -101,6 +102,7 @@ function parseWorktreeList(stdout: string) {
 async function gitWorktreesForBranch(repoPath: string, branch: string) {
   try {
     const { stdout } = await execFileAsync('git', ['worktree', 'list', '--porcelain'], {
+      windowsHide: true,
       cwd: repoPath,
       timeout: 10_000,
     });
@@ -112,6 +114,7 @@ async function gitWorktreesForBranch(repoPath: string, branch: string) {
 
 async function pruneGitWorktreeMetadata(repoPath: string) {
   await execFileAsync('git', ['worktree', 'prune'], {
+    windowsHide: true,
     cwd: repoPath,
     timeout: 10_000,
   }).catch(() => {});
@@ -202,6 +205,7 @@ async function deleteLocalBranch(repoPath: string, branch: string) {
   }
 
   await execFileAsync('git', ['branch', '-D', branch], {
+    windowsHide: true,
     cwd: repoPath,
     timeout: 10_000,
   }).catch((error) => {

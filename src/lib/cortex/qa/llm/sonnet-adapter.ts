@@ -57,7 +57,7 @@ async function resolveClaudeBinForQa(): Promise<string | null> {
 
   // 2. which claude
   try {
-    const { stdout } = await execFileAsync('which', ['claude'], { timeout: 3_000 });
+    const { stdout } = await execFileAsync('which', ['claude'], { windowsHide: true, timeout: 3_000 });
     const found = stdout.trim();
     if (found) return found;
   } catch {
@@ -69,6 +69,7 @@ async function resolveClaudeBinForQa(): Promise<string | null> {
   for (const sh of [userShell, 'zsh', 'bash', 'sh']) {
     try {
       const { stdout } = await execFileAsync(sh, ['-l', '-c', 'command -v claude'], {
+        windowsHide: true,
         timeout: 10_000,
         env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
       });
@@ -109,6 +110,7 @@ async function detectTier(): Promise<TierResult> {
       // Quick sanity-check: `claude --version` must succeed.
       try {
         await execFileAsync(claudeBin, ['--version'], {
+          windowsHide: true,
           timeout: 5_000,
           env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
         });

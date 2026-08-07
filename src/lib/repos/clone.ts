@@ -88,7 +88,7 @@ export async function cloneRepoToDefaultLocation(cloneUrl: string, explicitName?
 
   await mkdir(root, { recursive: true });
 
-  const execOpts = { timeout: CLONE_TIMEOUT_MS, env: { ...process.env, GH_NO_UPDATE_NOTIFIER: '1', GIT_TERMINAL_PROMPT: '0' } };
+  const execOpts = { windowsHide: true, timeout: CLONE_TIMEOUT_MS, env: { ...process.env, GH_NO_UPDATE_NOTIFIER: '1', GIT_TERMINAL_PROMPT: '0' } };
 
   if (isGitHubUrl(url)) {
     try {

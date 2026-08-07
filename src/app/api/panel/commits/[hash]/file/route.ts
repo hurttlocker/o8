@@ -68,7 +68,7 @@ export async function GET(
       const nameStatus = execFileSync(
         'git',
         ['diff-tree', '--no-commit-id', '--name-status', '-r', '-M', hash, '--', filePath],
-        { cwd: root, encoding: 'utf-8', timeout: 5000 },
+        { windowsHide: true, cwd: root, encoding: 'utf-8', timeout: 5000 },
       ).trim();
       if (nameStatus) {
         status = normalizeStatus(nameStatus.split('\t')[0]);
@@ -84,7 +84,7 @@ export async function GET(
       commitContent = execFileSync(
         'git',
         ['show', `${hash}:${filePath}`],
-        { cwd: root, encoding: 'utf-8', timeout: 5000, maxBuffer: 1024 * 1024 },
+        { windowsHide: true, cwd: root, encoding: 'utf-8', timeout: 5000, maxBuffer: 1024 * 1024 },
       );
       commitSource = 'commit';
     } catch {
@@ -92,7 +92,7 @@ export async function GET(
         commitContent = execFileSync(
           'git',
           ['show', `${hash}^:${filePath}`],
-          { cwd: root, encoding: 'utf-8', timeout: 5000, maxBuffer: 1024 * 1024 },
+          { windowsHide: true, cwd: root, encoding: 'utf-8', timeout: 5000, maxBuffer: 1024 * 1024 },
         );
         commitSource = 'parent';
       } catch {

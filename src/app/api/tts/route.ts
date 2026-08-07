@@ -71,6 +71,7 @@ function runEdgeTTS(text: string, voice: string): Promise<Buffer> {
       '--text', text,
       '--write-media', '-',
     ], {
+      windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 30_000,
     });

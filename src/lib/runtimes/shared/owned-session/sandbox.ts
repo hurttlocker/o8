@@ -108,7 +108,7 @@ export async function resolveGitSandboxPaths(cwd: string): Promise<string[]> {
     const { stdout } = await execFileAsync(
       'git',
       ['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'],
-      { cwd, encoding: 'utf8', timeout: 5_000 },
+      { windowsHide: true, cwd, encoding: 'utf8', timeout: 5_000 },
     );
     return uniq(String(stdout).split(/\r?\n/).map((entry) => entry.trim()));
   } catch {

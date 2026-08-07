@@ -29,6 +29,7 @@ interface UniversalResult {
 function execFileQuiet(file: string, args: string[], opts?: { cwd?: string; timeout?: number }): string {
   try {
     return execFileSync(file, args, {
+      windowsHide: true,
       encoding: 'utf-8',
       timeout: opts?.timeout ?? 4000,
       maxBuffer: 512 * 1024,

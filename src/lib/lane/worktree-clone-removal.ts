@@ -15,6 +15,7 @@ function formatError(error: unknown) {
 async function pruneWorktrees(repoRoot: string, logPrefix: string) {
   try {
     await execFileAsync('git', ['worktree', 'prune'], {
+      windowsHide: true,
       cwd: repoRoot,
       timeout: 10_000,
     });
@@ -78,6 +79,7 @@ export async function removeCortexWorktreePath(input: {
 
   try {
     await execFileAsync('git', ['worktree', 'remove', '--force', input.worktreePath], {
+      windowsHide: true,
       cwd: input.repoRoot,
       timeout: 15_000,
     });

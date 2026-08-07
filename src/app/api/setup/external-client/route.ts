@@ -51,6 +51,7 @@ function resolveCli(name: string): string | null {
   // Try the inherited PATH first — fast path that works in dev.
   try {
     const direct = execFileSync('command', ['-v', name], {
+      windowsHide: true,
       encoding: 'utf-8',
       shell: '/bin/sh',
     } as never).trim();
@@ -64,6 +65,7 @@ function resolveCli(name: string): string | null {
   try {
     const shell = resolveShell();
     const out = execFileSync(shell, ['-lc', `command -v ${name}`], {
+      windowsHide: true,
       encoding: 'utf-8',
     }).trim();
     if (out && existsSync(out)) return out;
@@ -113,6 +115,7 @@ function buildServerConfig(): McpServerConfig {
 async function hermesStatus(cliPath: string): Promise<{ registered: boolean; raw: string }> {
   try {
     const { stdout } = await execFileAsync(cliPath, ['mcp', 'ls'], {
+      windowsHide: true,
       encoding: 'utf-8',
       timeout: 5000,
     });
@@ -127,7 +130,7 @@ async function hermesStatus(cliPath: string): Promise<{ registered: boolean; raw
 async function hermesInstall(cliPath: string, server: McpServerConfig): Promise<void> {
   // Wipe any prior entry first so re-install always lands the current shape.
   try {
-    await execFileAsync(cliPath, ['mcp', 'remove', 'o8'], { timeout: 5000 });
+    await execFileAsync(cliPath, ['mcp', 'remove', 'o8'], { windowsHide: true, timeout: 5000 });
   } catch {
     // remove fails when it doesn't exist — that's fine
   }
@@ -138,7 +141,7 @@ async function hermesInstall(cliPath: string, server: McpServerConfig): Promise<
   const args = hermesAddArgs(server);
 
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(cliPath, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(cliPath, args, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => {
@@ -166,7 +169,7 @@ async function hermesRemove(cliPath: string): Promise<void> {
   // `hermes mcp remove` prompts `Remove server 'o8'? [Y/n]:` interactively.
   // Same stdin-Y trick as install.
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(cliPath, ['mcp', 'remove', 'o8'], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(cliPath, ['mcp', 'remove', 'o8'], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => {
@@ -195,6 +198,7 @@ async function hermesRemove(cliPath: string): Promise<void> {
 async function openclawStatus(cliPath: string): Promise<{ registered: boolean; raw: string }> {
   try {
     await execFileAsync(cliPath, ['mcp', 'show', 'o8'], {
+      windowsHide: true,
       encoding: 'utf-8',
       timeout: 5000,
     });
@@ -210,6 +214,7 @@ async function openclawStatus(cliPath: string): Promise<{ registered: boolean; r
 async function openclawInstall(cliPath: string, server: McpServerConfig): Promise<void> {
   const payload = openclawSetPayload(server);
   await execFileAsync(cliPath, ['mcp', 'set', 'o8', payload], {
+    windowsHide: true,
     timeout: 30000,
     maxBuffer: 4 * 1024 * 1024,
   });
@@ -217,6 +222,7 @@ async function openclawInstall(cliPath: string, server: McpServerConfig): Promis
 
 async function openclawRemove(cliPath: string): Promise<void> {
   await execFileAsync(cliPath, ['mcp', 'unset', 'o8'], {
+    windowsHide: true,
     timeout: 30000,
     maxBuffer: 4 * 1024 * 1024,
   });

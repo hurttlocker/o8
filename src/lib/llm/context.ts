@@ -35,7 +35,7 @@ const workspaceContextCache = new Map<string, { context: WorkspaceContext; cache
 
 function safeExec(cmd: string, cwd: string, timeoutMs = 3000): string {
   try {
-    return execSync(cmd, { cwd, encoding: 'utf-8', timeout: timeoutMs }).trim();
+    return execSync(cmd, { windowsHide: true, cwd, encoding: 'utf-8', timeout: timeoutMs }).trim();
   } catch {
     return '';
   }

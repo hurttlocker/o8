@@ -463,6 +463,7 @@ async function readGitSummary(cwd: string, baseBranch?: string | null): Promise<
 
   try {
     const { stdout } = await execFileAsync('git', ['log', '-1', '--format=%H %s'], {
+      windowsHide: true,
       cwd,
       timeout: 15_000,
       maxBuffer: 10 * 1024 * 1024,
@@ -477,6 +478,7 @@ async function readGitSummary(cwd: string, baseBranch?: string | null): Promise<
     : ['diff', '--stat', 'HEAD~1'];
   try {
     const { stdout } = await execFileAsync('git', diffArgs, {
+      windowsHide: true,
       cwd,
       timeout: 15_000,
       maxBuffer: 10 * 1024 * 1024,
@@ -485,6 +487,7 @@ async function readGitSummary(cwd: string, baseBranch?: string | null): Promise<
   } catch {
     try {
       const { stdout } = await execFileAsync('git', ['diff', '--stat', 'HEAD~1'], {
+        windowsHide: true,
         cwd,
         timeout: 15_000,
         maxBuffer: 10 * 1024 * 1024,
@@ -1501,20 +1504,20 @@ function createDashTmuxSessionSync(
   try {
     // Idempotent: an existing session (re-attach after restart) is reused as-is.
     try {
-      execFileSync(tmuxBin, ['has-session', '-t', sessionName], { timeout: 3000, stdio: 'ignore' });
+      execFileSync(tmuxBin, ['has-session', '-t', sessionName], { windowsHide: true, timeout: 3000, stdio: 'ignore' });
       return true;
     } catch { /* not present — create it below */ }
     execFileSync(tmuxBin, [
       'new-session', '-d', '-s', sessionName,
       '-x', String(cols), '-y', String(rows),
       shell, '-l',
-    ], { cwd, timeout: 8000, env: env as NodeJS.ProcessEnv });
+    ], { windowsHide: true, cwd, timeout: 8000, env: env as NodeJS.ProcessEnv });
     // Large scrollback so Stage-3 capture-pane recovers real history; NO
     // remain-on-exit so the user's `exit` ends the session (interactive semantics).
-    execFileSync(tmuxBin, ['set-option', '-t', sessionName, 'history-limit', '50000'], { timeout: 3000, stdio: 'ignore' });
+    execFileSync(tmuxBin, ['set-option', '-t', sessionName, 'history-limit', '50000'], { windowsHide: true, timeout: 3000, stdio: 'ignore' });
     // Persistence must be INVISIBLE — hide the tmux status bar so a backed
     // terminal looks byte-identical to a plain shell (no green chrome row).
-    execFileSync(tmuxBin, ['set-option', '-t', sessionName, 'status', 'off'], { timeout: 3000, stdio: 'ignore' });
+    execFileSync(tmuxBin, ['set-option', '-t', sessionName, 'status', 'off'], { windowsHide: true, timeout: 3000, stdio: 'ignore' });
     console.log(`[ws-server] Created persistent dash tmux session: ${sessionName}`);
     return true;
   } catch (err) {
@@ -1540,7 +1543,7 @@ function listDashTmuxSessionsWithAge(): DashSessionInfo[] {
     const out = execFileSync(
       resolveTmuxBinary(),
       ['list-sessions', '-F', '#{session_name} #{session_created}'],
-      { timeout: 4000, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], env: sanitizePtyEnv() as NodeJS.ProcessEnv },
+      { windowsHide: true, timeout: 4000, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], env: sanitizePtyEnv() as NodeJS.ProcessEnv },
     );
     const rows: DashSessionInfo[] = [];
     for (const line of out.split('\n')) {
@@ -1568,6 +1571,7 @@ function captureTmuxPane(sessionName: string): string {
       resolveTmuxBinary(),
       ['capture-pane', '-p', '-e', '-S', '-', '-t', sessionName],
       {
+        windowsHide: true,
         timeout: 4000,
         encoding: 'utf-8',
         maxBuffer: TERMINAL_SCROLLBACK_MAX_BYTES,
@@ -1619,7 +1623,7 @@ function reapOrphanDashSessions() {
       terminalAttachments.delete(name);
     }
     try {
-      execFileSync(tmuxBin, ['kill-session', '-t', name], { timeout: 3000, stdio: 'ignore', env: sanitizePtyEnv() as NodeJS.ProcessEnv });
+      execFileSync(tmuxBin, ['kill-session', '-t', name], { windowsHide: true, timeout: 3000, stdio: 'ignore', env: sanitizePtyEnv() as NodeJS.ProcessEnv });
     } catch { /* already gone */ }
   }
   console.log(`[ws-server] [persistent-terminals] GC reaped ${toKill.length} orphan dash tmux session(s)`);
@@ -6200,11 +6204,13 @@ function terminateTerminalSession(sessionName: string, signal: string = 'SIGTERM
   try {
     const tmuxBin = resolveTmuxBinary();
     execFileSync(tmuxBin, ['has-session', '-t', sessionName], {
+      windowsHide: true,
       timeout: 2000,
       stdio: 'ignore',
       env: sanitizePtyEnv() as NodeJS.ProcessEnv,
     });
     execFileSync(tmuxBin, ['kill-session', '-t', sessionName], {
+      windowsHide: true,
       timeout: 3000,
       stdio: 'ignore',
       env: sanitizePtyEnv() as NodeJS.ProcessEnv,
@@ -7356,6 +7362,7 @@ async function pruneOrphanedCodexWorktreeBranches(repoPath: string): Promise<num
   // work in this function.
   try {
     await execFileAsync('git', ['worktree', 'prune'], {
+      windowsHide: true,
       cwd: repoPath,
       encoding: 'utf-8',
       timeout: 10_000,
@@ -7373,17 +7380,20 @@ async function pruneOrphanedCodexWorktreeBranches(repoPath: string): Promise<num
   // repoPath only removes the repo-side ref (clones keep their own).
   const [{ stdout: worktreeStdout }, branchOuts] = await Promise.all([
     execFileAsync('git', ['worktree', 'list', '--porcelain'], {
+      windowsHide: true,
       cwd: repoPath,
       encoding: 'utf-8',
       timeout: 10_000,
     }),
     Promise.all([
       execFileAsync('git', ['branch', '--list', 'worktree/codex/*', '--format=%(refname:short)'], {
+        windowsHide: true,
         cwd: repoPath,
         encoding: 'utf-8',
         timeout: 10_000,
       }).catch(() => ({ stdout: '' })),
       execFileAsync('git', ['branch', '--list', 'worktree/*/*', '--format=%(refname:short)'], {
+        windowsHide: true,
         cwd: repoPath,
         encoding: 'utf-8',
         timeout: 10_000,
@@ -7407,6 +7417,7 @@ async function pruneOrphanedCodexWorktreeBranches(repoPath: string): Promise<num
 
   for (const branch of orphanedBranches) {
     await execFileAsync('git', ['branch', '-D', branch], {
+      windowsHide: true,
       cwd: repoPath,
       encoding: 'utf-8',
       timeout: 10_000,
@@ -7464,6 +7475,7 @@ function broadcastDiffStats() {
   if (!hasReviewSubscribers()) return;
 
   execFile('sh', ['-c', 'git diff --shortstat origin/main..HEAD 2>/dev/null; git diff --shortstat 2>/dev/null'], {
+    windowsHide: true,
     cwd: REPO_ROOT,
     encoding: 'utf-8',
     timeout: 5000,
@@ -7806,9 +7818,9 @@ async function recoverFromPortInUse(): Promise<void> {
   }
 
   try {
-    const pids = execFileSync('lsof', ['-ti', `:${WS_PORT}`, '-sTCP:LISTEN'], { encoding: 'utf-8' }).trim();
+    const pids = execFileSync('lsof', ['-ti', `:${WS_PORT}`, '-sTCP:LISTEN'], { windowsHide: true, encoding: 'utf-8' }).trim();
     if (pids) {
-      execFileSync('kill', ['-9', ...pids.split('\n').filter(Boolean)], { encoding: 'utf-8' });
+      execFileSync('kill', ['-9', ...pids.split('\n').filter(Boolean)], { windowsHide: true, encoding: 'utf-8' });
       console.log(`[ws-server] Killed stale o8 process(es): ${pids.replace(/\n/g, ', ')}`);
     } else {
       console.log(`[ws-server] Port ${WS_PORT} reported in use but no listener found — retrying`);

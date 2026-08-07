@@ -61,7 +61,7 @@ async function resolveCodexBin(): Promise<string | null> {
 
   // 2. which codex
   try {
-    const { stdout } = await execFileAsync('which', ['codex'], { timeout: 3_000 });
+    const { stdout } = await execFileAsync('which', ['codex'], { windowsHide: true, timeout: 3_000 });
     const found = stdout.trim();
     if (found) {
       cachedCodexBin = found;
@@ -76,6 +76,7 @@ async function resolveCodexBin(): Promise<string | null> {
   for (const sh of [userShell, 'zsh', 'bash', 'sh']) {
     try {
       const { stdout } = await execFileAsync(sh, ['-l', '-c', 'command -v codex'], {
+        windowsHide: true,
         timeout: 10_000,
         env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
       });
@@ -192,6 +193,7 @@ export async function callCodex(prompt: string, opts: CallCodexOptions = {}): Pr
   try {
     await new Promise<void>((resolve, reject) => {
       const child = spawn(codexBin, cliArgs, {
+        windowsHide: true,
         cwd,
         env,
         stdio: ['pipe', 'pipe', 'pipe'],

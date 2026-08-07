@@ -58,6 +58,7 @@ export async function prewarmMcpServer(input: PrewarmInput): Promise<void> {
     try {
       const childEnv: NodeJS.ProcessEnv = { ...process.env, ...(input.env ?? {}) };
       child = spawn(input.command, argv, {
+        windowsHide: true,
         stdio: ['ignore', 'ignore', 'ignore'],
         env: childEnv,
       });

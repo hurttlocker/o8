@@ -29,7 +29,7 @@ export async function GET(request: Request) {
       String(limit),
     ];
     if (branch) logArgs.push(branch);
-    const logOutput = execFileSync('git', logArgs, { cwd: root, encoding: 'utf-8', timeout: 10000 });
+    const logOutput = execFileSync('git', logArgs, { windowsHide: true, cwd: root, encoding: 'utf-8', timeout: 10000 });
 
     const commits = logOutput.trim().split('\n').filter(Boolean).map(line => {
       try {
@@ -59,6 +59,7 @@ export async function GET(request: Request) {
     let currentBranch = 'main';
     try {
       currentBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+        windowsHide: true,
         cwd: root, encoding: 'utf-8', timeout: 3000,
       }).trim();
     } catch { /* silent */ }
@@ -67,6 +68,7 @@ export async function GET(request: Request) {
     let branches: string[] = [];
     try {
       branches = execFileSync('git', ['branch', '--format=%(refname:short)'], {
+        windowsHide: true,
         cwd: root, encoding: 'utf-8', timeout: 3000,
       }).trim().split('\n').map((b) => b.trim()).filter(Boolean).slice(0, 20);
     } catch { /* silent */ }

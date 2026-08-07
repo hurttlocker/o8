@@ -67,7 +67,7 @@ const SINGLE_NOTE_SYSTEM = 'You are continuing exactly one o8.md margin-note con
 
 function recentCommits(repoPath: string): string {
   try {
-    return execSync('git log --oneline -20', { cwd: repoPath, encoding: 'utf-8', timeout: 5_000 }).trim();
+    return execSync('git log --oneline -20', { windowsHide: true, cwd: repoPath, encoding: 'utf-8', timeout: 5_000 }).trim();
   } catch {
     return '';
   }

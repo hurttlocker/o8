@@ -288,6 +288,7 @@ async function spawnRpcProcess(session: PiSessionRecord, run: PiRunRecord, initi
   if (session.model) args.push('--model', session.model);
   if (session.piSessionFile && run.mode === 'resume') args.push('--session', session.piSessionFile);
   const child = spawn(binary, args, {
+    windowsHide: true,
     cwd: session.repoPath,
     stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },

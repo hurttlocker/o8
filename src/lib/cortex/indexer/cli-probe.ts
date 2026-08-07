@@ -46,7 +46,7 @@ async function resolveBin(
 
   // 2. which
   try {
-    const { stdout } = await execFileAsync('which', [name], { timeout: 3_000 });
+    const { stdout } = await execFileAsync('which', [name], { windowsHide: true, timeout: 3_000 });
     const found = stdout.trim();
     if (found) return found;
   } catch {
@@ -58,6 +58,7 @@ async function resolveBin(
   for (const sh of [userShell, 'zsh', 'bash', 'sh']) {
     try {
       const { stdout } = await execFileAsync(sh, ['-l', '-c', `command -v ${name}`], {
+        windowsHide: true,
         timeout: 10_000,
         env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
       });
@@ -75,6 +76,7 @@ async function resolveBin(
 async function verifyBin(bin: string): Promise<boolean> {
   try {
     await execFileAsync(bin, ['--version'], {
+      windowsHide: true,
       timeout: 5_000,
       env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
     });

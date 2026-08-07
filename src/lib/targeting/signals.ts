@@ -59,7 +59,7 @@ export function computeGitChurn(repoPath: string, windowDays = DEFAULT_CHURN_WIN
   try {
     const output = execSync(
       `git -c core.quotepath=false log --since="${windowDays} days ago" --name-only --format= --no-renames 2>/dev/null`,
-      { cwd: repoPath, encoding: 'utf-8', timeout: 8000, maxBuffer: 32 * 1024 * 1024 },
+      { windowsHide: true, cwd: repoPath, encoding: 'utf-8', timeout: 8000, maxBuffer: 32 * 1024 * 1024 },
     );
     return parseGitChurn(output);
   } catch {

@@ -210,7 +210,7 @@ async function readHeadSha(cwd: string): Promise<string | null> {
   // Full 40-char SHA. Worker agents diff this against the F42 HEAD-SHA
   // optimistic lock — short SHAs collide on busy repos.
   try {
-    const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd });
+    const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], { windowsHide: true, cwd });
     return stdout.trim() || null;
   } catch {
     return null;

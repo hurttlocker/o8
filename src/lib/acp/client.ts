@@ -192,6 +192,7 @@ export class AcpClient {
   constructor(opts: AcpClientOptions) {
     this.onEvent = opts.onEvent;
     this.proc = spawn(opts.command, opts.args, {
+      windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, ...(opts.env ?? {}) },
     });

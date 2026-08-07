@@ -164,7 +164,7 @@ export async function captureMacOsWindowRegion(
       '-R',
       `${rect.x},${rect.y},${rect.width},${rect.height}`,
       filePath,
-    ], { timeout: 10_000 });
+    ], { windowsHide: true, timeout: 10_000 });
 
     const image = await readFile(filePath);
     if (image.length === 0) {

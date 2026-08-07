@@ -372,7 +372,7 @@ function readDiff(parsed: ParsedFlags, repoPath: string): string {
     ? ['-C', repoPath, 'diff', '--no-ext-diff', '--unified=80', `${base}...HEAD`]
     : ['-C', repoPath, 'diff', '--no-ext-diff', '--unified=80', 'HEAD'];
   try {
-    return execFileSync('git', args, { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 });
+    return execFileSync('git', args, { windowsHide: true, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 });
   } catch (error) {
     throw new CliError('diff_failed', `Unable to read git diff: ${error instanceof Error ? error.message : String(error)}`, EXIT.INVALID_ARGS);
   }

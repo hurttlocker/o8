@@ -32,6 +32,7 @@ function gitErrorMessage(error: unknown): string {
 
 async function gitStdout(cwd: string, args: string[], timeout = DEFAULT_FETCH_TIMEOUT_MS): Promise<string> {
   const { stdout } = await execFileAsync('git', args, {
+    windowsHide: true,
     cwd,
     timeout,
     maxBuffer: COMMAND_MAX_BUFFER,

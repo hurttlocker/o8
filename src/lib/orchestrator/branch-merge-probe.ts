@@ -36,6 +36,7 @@ function normalizeRef(value: string, label: string): string {
 
 async function gitValue(repoPath: string, args: string[]): Promise<string> {
   const { stdout } = await execFileAsync('git', args, {
+    windowsHide: true,
     cwd: repoPath,
     timeout: GIT_TIMEOUT_MS,
     maxBuffer: GIT_MAX_BUFFER,

@@ -55,6 +55,7 @@ function safeExec(cmd: string, args: string[], timeoutMs = 2000, deadlineAt?: nu
   if (timeout === 0) return '';
   try {
     return execFileSync(cmd, args, {
+      windowsHide: true,
       encoding: 'utf-8',
       timeout,
       stdio: ['ignore', 'pipe', 'ignore'],
@@ -69,6 +70,7 @@ function safeWhich(bin: string, deadlineAt?: number): string {
   if (timeout === 0) return '';
   try {
     return execFileSync('which', [bin], {
+      windowsHide: true,
       encoding: 'utf-8',
       timeout,
       stdio: ['ignore', 'pipe', 'ignore'],

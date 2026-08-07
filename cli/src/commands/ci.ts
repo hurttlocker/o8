@@ -102,6 +102,7 @@ function runCheck(check: CiCheck, cwd: string): CheckResult {
     ? Math.max(1_000, Math.min(60 * 60 * 1000, check.timeoutMs!))
     : 10 * 60 * 1000;
   const result = spawnSync(check.command[0], check.command.slice(1), {
+    windowsHide: true,
     cwd,
     encoding: 'utf8',
     timeout,
@@ -142,6 +143,7 @@ async function harnessCall<T>(body: Record<string, unknown>, timeoutMs = 300_000
 function readDiff(repoPath: string, base: string | undefined): string {
   const target = base?.trim() || 'HEAD^';
   const result = spawnSync('git', ['-C', repoPath, 'diff', '--no-ext-diff', '--unified=80', `${target}...HEAD`], {
+    windowsHide: true,
     encoding: 'utf8',
     maxBuffer: 4 * 1024 * 1024,
     timeout: 30_000,

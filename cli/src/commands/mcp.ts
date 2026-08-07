@@ -10,6 +10,7 @@ type McpTarget = 'print' | 'claude-code' | 'cursor';
 function resolveProjectPath(): string {
   try {
     return execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      windowsHide: true,
       cwd: process.cwd(),
       encoding: 'utf8',
       timeout: 5_000,

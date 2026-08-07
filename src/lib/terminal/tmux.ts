@@ -35,7 +35,7 @@ let tmuxAvailableCache: boolean | null = null;
 export async function isTmuxAvailable(): Promise<boolean> {
   if (tmuxAvailableCache !== null) return tmuxAvailableCache;
   try {
-    await execFileAsync('tmux', ['-V'], { timeout: 3000 });
+    await execFileAsync('tmux', ['-V'], { windowsHide: true, timeout: 3000 });
     tmuxAvailableCache = true;
   } catch {
     tmuxAvailableCache = false;
@@ -91,6 +91,7 @@ export async function createTmuxSession(
       '-y', '30',        // initial height
       'sh', '-c', shellCmd,
     ], {
+      windowsHide: true,
       cwd,
       timeout: 10_000,
       env: { ...process.env },
@@ -99,7 +100,7 @@ export async function createTmuxSession(
     // Set remain-on-exit so output persists after the process finishes
     await execFileAsync('tmux', [
       'set-option', '-t', name, 'remain-on-exit', 'on',
-    ], { timeout: 3000 }).catch(() => { /* best effort */ });
+    ], { windowsHide: true, timeout: 3000 }).catch(() => { /* best effort */ });
 
     return { ok: true, sessionName: name };
   } catch (err) {
@@ -114,7 +115,7 @@ export async function createTmuxSession(
 /** Check if a tmux session exists. */
 export async function tmuxSessionExists(name: string): Promise<boolean> {
   try {
-    await execFileAsync('tmux', ['has-session', '-t', name], { timeout: 3000 });
+    await execFileAsync('tmux', ['has-session', '-t', name], { windowsHide: true, timeout: 3000 });
     return true;
   } catch {
     return false;
@@ -124,7 +125,7 @@ export async function tmuxSessionExists(name: string): Promise<boolean> {
 /** Kill a tmux session. */
 export async function killTmuxSession(name: string): Promise<void> {
   try {
-    await execFileAsync('tmux', ['kill-session', '-t', name], { timeout: 5000 });
+    await execFileAsync('tmux', ['kill-session', '-t', name], { windowsHide: true, timeout: 5000 });
   } catch {
     // Already gone or doesn't exist — that's fine
   }
@@ -133,7 +134,7 @@ export async function killTmuxSession(name: string): Promise<void> {
 /** Rename an existing tmux session. */
 export async function renameTmuxSession(currentName: string, nextName: string): Promise<void> {
   try {
-    await execFileAsync('tmux', ['rename-session', '-t', currentName, nextName], { timeout: 5000 });
+    await execFileAsync('tmux', ['rename-session', '-t', currentName, nextName], { windowsHide: true, timeout: 5000 });
   } catch {
     // Best effort only
   }
@@ -146,7 +147,7 @@ export async function listCortexTmuxSessions(): Promise<string[]> {
   try {
     const { stdout } = await execFileAsync('tmux', [
       'list-sessions', '-F', '#{session_name}',
-    ], { timeout: 3000 });
+    ], { windowsHide: true, timeout: 3000 });
 
     return stdout
       .trim()

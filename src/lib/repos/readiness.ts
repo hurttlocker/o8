@@ -27,6 +27,7 @@ async function pathExists(target: string) {
 async function getCurrentBranch(repoPath: string, fallbackBranch: string) {
   try {
     const { stdout } = await execFileAsync('git', ['branch', '--show-current'], {
+      windowsHide: true,
       cwd: repoPath,
       timeout: 5_000,
     });
@@ -39,6 +40,7 @@ async function getCurrentBranch(repoPath: string, fallbackBranch: string) {
 async function hasDirtyWorktree(repoPath: string) {
   try {
     const { stdout } = await execFileAsync('git', ['status', '--porcelain'], {
+      windowsHide: true,
       cwd: repoPath,
       timeout: 5_000,
     });

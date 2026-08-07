@@ -36,6 +36,7 @@ function isDispatchBranch(branch: string) {
 async function localBranchExists(repoPath: string, branch: string): Promise<boolean> {
   try {
     await execFileAsync('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], {
+      windowsHide: true,
       cwd: repoPath,
       timeout: 5_000,
     });
@@ -49,7 +50,7 @@ async function deleteLocalBranch(repoPath: string, branch: string): Promise<bool
   if (!isDispatchBranch(branch) || !(await localBranchExists(repoPath, branch))) {
     return false;
   }
-  await execFileAsync('git', ['branch', '-D', branch], { cwd: repoPath, timeout: 10_000 });
+  await execFileAsync('git', ['branch', '-D', branch], { windowsHide: true, cwd: repoPath, timeout: 10_000 });
   return true;
 }
 

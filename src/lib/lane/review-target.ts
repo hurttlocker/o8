@@ -39,6 +39,7 @@ export interface BranchUnresolvedPayload {
 
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, {
+    windowsHide: true,
     cwd,
     timeout: 5000,
     encoding: 'utf-8',

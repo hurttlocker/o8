@@ -111,6 +111,7 @@ async function readJsonRecord(filePath: string): Promise<Record<string, unknown>
 async function probeCodexAuth(binaryPath: string): Promise<boolean> {
   try {
     const { stdout, stderr } = await execFileAsync(binaryPath, ['login', 'status'], {
+      windowsHide: true,
       timeout: PROBE_TIMEOUT_MS,
       env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
       maxBuffer: 64 * 1024,

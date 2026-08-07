@@ -14,6 +14,7 @@ import { getDataDir } from '@/lib/data-dir-migration';
 function getRemoteSlug(repoPath: string): string | null {
   try {
     const remote = execSync('git remote get-url origin', {
+      windowsHide: true,
       cwd: repoPath,
       timeout: 3000,
       encoding: 'utf-8',

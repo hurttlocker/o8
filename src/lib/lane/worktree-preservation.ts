@@ -26,6 +26,7 @@ function branchSafeId(value: string): string {
 
 async function git(cwd: string, args: string[]) {
   return execFileAsync('git', args, {
+    windowsHide: true,
     cwd,
     timeout: 30_000,
     maxBuffer: COMMAND_MAX_BUFFER,

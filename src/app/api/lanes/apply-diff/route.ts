@@ -56,6 +56,7 @@ export async function POST(request: NextRequest) {
     await writeFile(patchPath, diffText, 'utf8');
 
     await execFileAsync('git', ['apply', patchPath], {
+      windowsHide: true,
       cwd: worktree.path,
       timeout: 30_000,
       maxBuffer: 10 * 1024 * 1024,

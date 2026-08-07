@@ -101,6 +101,7 @@ function parseLsofCwdOutput(raw: string): ProcessCwdRow[] {
 async function readProcessCwds(): Promise<ProcessCwdRow[]> {
   try {
     const { stdout } = await execFileAsync('lsof', ['-nP', '-d', 'cwd', '-F', 'pcn'], {
+      windowsHide: true,
       maxBuffer: 16 * 1024 * 1024,
       timeout: 3_000,
     });
@@ -174,6 +175,7 @@ function parsePsCommandOutput(raw: string): Map<number, ProcessCommandRow> {
 async function readProcessCommands(): Promise<Map<number, ProcessCommandRow>> {
   try {
     const { stdout } = await execFileAsync('ps', ['-axo', 'pid=,command='], {
+      windowsHide: true,
       maxBuffer: 16 * 1024 * 1024,
       timeout: 3_000,
     });

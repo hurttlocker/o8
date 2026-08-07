@@ -125,6 +125,7 @@ function relocatedLinesInHunk(hunk: string[], available: Map<string, number>): n
 export function getRelocatedDeletionCredits(cwd: string, baseBranch: string): Map<string, number> {
   try {
     const diff = execFileSync('git', ['diff', '--unified=0', '--no-color', '--no-ext-diff', `${baseBranch}...HEAD`], {
+      windowsHide: true,
       cwd,
       timeout: 15_000,
       encoding: 'utf8',

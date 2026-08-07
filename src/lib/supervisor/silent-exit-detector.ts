@@ -120,7 +120,7 @@ async function readCommitCount(cwd: string, baseBranch: string): Promise<number>
     const { stdout } = await execFileAsync(
       'git',
       ['rev-list', '--count', `${baseBranch}..HEAD`],
-      { cwd, timeout: GIT_COMMAND_TIMEOUT_MS, maxBuffer: GIT_COMMAND_MAX_BUFFER },
+      { windowsHide: true, cwd, timeout: GIT_COMMAND_TIMEOUT_MS, maxBuffer: GIT_COMMAND_MAX_BUFFER },
     );
     const parsed = Number.parseInt(stdout.trim(), 10);
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
@@ -134,7 +134,7 @@ async function readPorcelain(cwd: string): Promise<string> {
     const { stdout } = await execFileAsync(
       'git',
       ['status', '--porcelain'],
-      { cwd, timeout: GIT_COMMAND_TIMEOUT_MS, maxBuffer: GIT_COMMAND_MAX_BUFFER },
+      { windowsHide: true, cwd, timeout: GIT_COMMAND_TIMEOUT_MS, maxBuffer: GIT_COMMAND_MAX_BUFFER },
     );
     return stdout.trim();
   } catch {
@@ -147,7 +147,7 @@ async function readDiffStat(cwd: string, baseBranch: string): Promise<string> {
     const { stdout } = await execFileAsync(
       'git',
       ['diff', '--stat', `${baseBranch}...HEAD`],
-      { cwd, timeout: GIT_COMMAND_TIMEOUT_MS, maxBuffer: GIT_COMMAND_MAX_BUFFER },
+      { windowsHide: true, cwd, timeout: GIT_COMMAND_TIMEOUT_MS, maxBuffer: GIT_COMMAND_MAX_BUFFER },
     );
     return stdout.trim() || 'No diff stat available.';
   } catch {
@@ -160,7 +160,7 @@ async function readLastCommit(cwd: string): Promise<string> {
     const { stdout } = await execFileAsync(
       'git',
       ['log', '-1', '--format=%H %s'],
-      { cwd, timeout: GIT_COMMAND_TIMEOUT_MS, maxBuffer: GIT_COMMAND_MAX_BUFFER },
+      { windowsHide: true, cwd, timeout: GIT_COMMAND_TIMEOUT_MS, maxBuffer: GIT_COMMAND_MAX_BUFFER },
     );
     return stdout.trim() || 'No commits yet.';
   } catch {
@@ -173,7 +173,7 @@ async function readHeadSha(cwd: string): Promise<string | null> {
     const { stdout } = await execFileAsync(
       'git',
       ['rev-parse', 'HEAD'],
-      { cwd, timeout: GIT_COMMAND_TIMEOUT_MS, maxBuffer: GIT_COMMAND_MAX_BUFFER },
+      { windowsHide: true, cwd, timeout: GIT_COMMAND_TIMEOUT_MS, maxBuffer: GIT_COMMAND_MAX_BUFFER },
     );
     return stdout.trim() || null;
   } catch {
@@ -186,7 +186,7 @@ async function isAncestor(cwd: string, ancestor: string, ref: string): Promise<b
     await execFileAsync(
       'git',
       ['merge-base', '--is-ancestor', ancestor, ref],
-      { cwd, timeout: GIT_COMMAND_TIMEOUT_MS, maxBuffer: GIT_COMMAND_MAX_BUFFER },
+      { windowsHide: true, cwd, timeout: GIT_COMMAND_TIMEOUT_MS, maxBuffer: GIT_COMMAND_MAX_BUFFER },
     );
     return true;
   } catch {

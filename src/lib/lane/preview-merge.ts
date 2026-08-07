@@ -135,6 +135,7 @@ function hasApprovedOrchestratorReview(packetId: string): boolean {
 function readDirtyWorktreeDetail(cwd: string): string | null {
   try {
     const output = execFileSync('git', ['status', '--porcelain'], {
+      windowsHide: true,
       cwd,
       timeout: 5000,
       encoding: 'utf-8',

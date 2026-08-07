@@ -379,6 +379,7 @@ function spawnSession(
     );
   }
   const proc = spawn(claudeCodeBin(), buildClaudeStreamJsonArgs(model, permissionMode, normalizedResumeSessionId), {
+    windowsHide: true,
     cwd,
     env: {
       ...process.env,

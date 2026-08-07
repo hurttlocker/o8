@@ -133,6 +133,7 @@ function getAddedLines(cwd: string, baseBranch: string): AddedDiffLine[] {
   if (!isSafeGitRef(baseBranch)) return [];
   try {
     const diff = execFileSync('git', ['diff', `${baseBranch}...HEAD`, '--no-color'], {
+      windowsHide: true,
       cwd,
       timeout: 15_000,
       encoding: 'utf-8',
@@ -160,6 +161,7 @@ function getAddedLines(cwd: string, baseBranch: string): AddedDiffLine[] {
 
 function readHeadSha(cwd: string): string {
   return execFileSync('git', ['rev-parse', 'HEAD'], {
+    windowsHide: true,
     cwd,
     timeout: 5_000,
     encoding: 'utf-8',
@@ -176,6 +178,7 @@ function getDiffNumstat(cwd: string, baseBranch: string): DiffNumstat[] {
   if (!isSafeGitRef(baseBranch)) return [];
   try {
     const output = execFileSync('git', ['diff', '--numstat', `${baseBranch}...HEAD`], {
+      windowsHide: true,
       cwd,
       timeout: 10_000,
       encoding: 'utf-8',
@@ -206,6 +209,7 @@ function getChangedFiles(cwd: string, baseBranch: string): string[] {
   if (!isSafeGitRef(baseBranch)) return [];
   try {
     const output = execFileSync('git', ['diff', '--name-only', `${baseBranch}...HEAD`], {
+      windowsHide: true,
       cwd,
       timeout: 10_000,
       encoding: 'utf-8',
@@ -323,6 +327,7 @@ function runBranchMergeGate(
     }
 
     const output = execFileSync('npx', ['--no-install', 'tsx', '--eval', BRANCH_GATE_SCRIPT], {
+      windowsHide: true,
       cwd,
       env,
       timeout: 30_000,

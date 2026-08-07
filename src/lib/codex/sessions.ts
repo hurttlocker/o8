@@ -210,6 +210,7 @@ export async function queryCodexThreads(limit = 6) {
   ].join(' ');
 
   const { stdout } = await execFileAsync('sqlite3', ['-json', CODEX_STATE_DB, query], {
+    windowsHide: true,
     maxBuffer: 2 * 1024 * 1024,
   });
 
@@ -241,6 +242,7 @@ export async function queryCodexThreadById(threadId: string) {
   ].join(' ');
 
   const { stdout } = await execFileAsync('sqlite3', ['-json', CODEX_STATE_DB, query], {
+    windowsHide: true,
     maxBuffer: 512 * 1024,
   });
 
@@ -265,6 +267,7 @@ async function queryProcessBindings() {
   ].join(' ');
 
   const { stdout } = await execFileAsync('sqlite3', ['-json', CODEX_STATE_DB, query], {
+    windowsHide: true,
     maxBuffer: 2 * 1024 * 1024,
   });
 
@@ -274,6 +277,7 @@ async function queryProcessBindings() {
 async function readProcessCwd(pid: number) {
   try {
     const { stdout } = await execFileAsync('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'], {
+      windowsHide: true,
       maxBuffer: 256 * 1024,
     });
     const cwdLine = stdout
@@ -289,6 +293,7 @@ async function readProcessCwd(pid: number) {
 async function readProcessTermSessionId(pid: number) {
   try {
     const { stdout } = await execFileAsync('ps', ['eww', '-p', String(pid), '-o', 'command='], {
+      windowsHide: true,
       maxBuffer: 256 * 1024,
     });
     const match = stdout.match(/(?:^|\s)TERM_SESSION_ID=([^\s]+)/);
@@ -308,6 +313,7 @@ async function queryLiveCodexProcesses(pids: number[]) {
       'ps',
       ['-o', 'pid=', '-o', 'ppid=', '-o', 'tt=', '-o', 'etime=', '-o', 'command=', '-p', pids.join(',')],
       {
+        windowsHide: true,
         maxBuffer: 512 * 1024,
       },
     );
@@ -386,7 +392,7 @@ async function queryAllLiveCodexProcesses() {
     const { stdout: psOut } = await execFileAsync(
       'bash',
       ['-c', 'ps -eo pid=,command= | grep codex | grep -v grep'],
-      { maxBuffer: 256 * 1024 },
+      { windowsHide: true, maxBuffer: 256 * 1024 },
     );
 
     const allPids: number[] = [];

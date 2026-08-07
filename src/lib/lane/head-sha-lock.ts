@@ -24,6 +24,7 @@ export function normalizeHeadSha(value?: string | null) {
 
 export async function readHeadSha(cwd: string) {
   const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
+    windowsHide: true,
     cwd,
     timeout: 5000,
   });

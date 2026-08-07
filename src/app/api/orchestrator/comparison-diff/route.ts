@@ -33,7 +33,7 @@ export async function GET(request: Request) {
 
   const run = async (args: string[]) => {
     try {
-      const { stdout } = await execFileAsync('git', args, { cwd, timeout: 8000, maxBuffer: 10 * 1024 * 1024 });
+      const { stdout } = await execFileAsync('git', args, { windowsHide: true, cwd, timeout: 8000, maxBuffer: 10 * 1024 * 1024 });
       return stdout;
     } catch {
       return '';

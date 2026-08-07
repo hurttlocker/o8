@@ -55,6 +55,7 @@ export function resolveTmuxBinary(): string {
 
   try {
     return execSync('command -v tmux', {
+      windowsHide: true,
       encoding: 'utf-8',
       timeout: 3000,
       env: sanitizePtyEnv() as NodeJS.ProcessEnv,
@@ -70,6 +71,7 @@ export function tmuxSessionExists(sessionName: string): boolean {
 
   try {
     execFileSync(resolveTmuxBinary(), ['has-session', '-t', target], {
+      windowsHide: true,
       timeout: 2000,
       stdio: 'ignore',
       env: sanitizePtyEnv() as NodeJS.ProcessEnv,

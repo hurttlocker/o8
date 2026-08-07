@@ -516,6 +516,7 @@ async function executeShell(argumentsValue: Record<string, unknown>, repoRoot: s
 
   try {
     const { stdout, stderr } = await execFile(validated.executable, validated.args, {
+      windowsHide: true,
       cwd: repoRoot,
       encoding: 'utf8',
       timeout: SHELL_TIMEOUT_MS,
@@ -591,6 +592,7 @@ async function executeGithub(argumentsValue: Record<string, unknown>, repoRoot: 
 
   return new Promise<NativeToolResult>((resolveResult) => {
     const child = spawn('gh', validated.args, {
+      windowsHide: true,
       cwd: repoRoot,
       env: {
         ...process.env,

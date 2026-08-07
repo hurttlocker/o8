@@ -132,8 +132,9 @@ async function createPR(
 ): Promise<MergeResult> {
   // Commit any uncommitted changes
   try {
-    await execFileAsync('git', ['add', '-A'], { cwd: worktreePath, timeout: 10_000 });
+    await execFileAsync('git', ['add', '-A'], { windowsHide: true, cwd: worktreePath, timeout: 10_000 });
     await execFileAsync('git', ['commit', '-m', `chore: worktree changes from ${opts.agentType}`], {
+      windowsHide: true,
       cwd: worktreePath,
       timeout: 10_000,
     });
@@ -144,6 +145,7 @@ async function createPR(
   // Push branch
   try {
     await execFileAsync('git', ['push', '-u', 'origin', branch], {
+      windowsHide: true,
       cwd: worktreePath,
       timeout: 30_000,
     });
@@ -160,7 +162,7 @@ async function createPR(
   try {
     const { stdout: statOut } = await execFileAsync('git', [
       'diff', '--shortstat', `${opts.targetBranch}...HEAD`,
-    ], { cwd: worktreePath, timeout: 5000 });
+    ], { windowsHide: true, cwd: worktreePath, timeout: 5000 });
     diffstat = statOut.trim();
   } catch { /* non-critical */ }
 
@@ -192,7 +194,7 @@ async function createPR(
       '--body', prBody,
       '--base', opts.targetBranch,
       '--head', branch,
-    ], { cwd: worktreePath, timeout: 30_000 });
+    ], { windowsHide: true, cwd: worktreePath, timeout: 30_000 });
 
     const prUrl = stdout.trim();
     return {
@@ -221,8 +223,9 @@ async function mergeToTarget(
 ): Promise<MergeResult> {
   // Commit any uncommitted changes first
   try {
-    await execFileAsync('git', ['add', '-A'], { cwd: worktreePath, timeout: 10_000 });
+    await execFileAsync('git', ['add', '-A'], { windowsHide: true, cwd: worktreePath, timeout: 10_000 });
     await execFileAsync('git', ['commit', '-m', `chore: worktree changes`], {
+      windowsHide: true,
       cwd: worktreePath,
       timeout: 10_000,
     });
@@ -233,6 +236,7 @@ async function mergeToTarget(
   if (opts?.importBranchFromWorkspace) {
     try {
       await execFileAsync('git', ['fetch', worktreePath, `${branch}:refs/heads/${branch}`], {
+        windowsHide: true,
         cwd: repoRoot,
         timeout: 30_000,
       });
@@ -248,6 +252,7 @@ async function mergeToTarget(
   // Safety: refuse to merge if repo root has uncommitted changes
   try {
     const { stdout: dirtyCheck } = await execFileAsync('git', ['status', '--porcelain'], {
+      windowsHide: true,
       cwd: repoRoot,
       timeout: 5000,
     });
@@ -271,7 +276,7 @@ async function mergeToTarget(
   try {
     const { stdout: mergeCheck } = await execFileAsync('git', [
       'merge-tree', '--write-tree', targetBranch, branch,
-    ], { cwd: repoRoot, timeout: 10_000 });
+    ], { windowsHide: true, cwd: repoRoot, timeout: 10_000 });
 
     if (mergeCheck.includes('CONFLICT')) {
       return {
@@ -288,6 +293,7 @@ async function mergeToTarget(
   let originalBranch: string | null = null;
   try {
     const { stdout } = await execFileAsync('git', ['branch', '--show-current'], {
+      windowsHide: true,
       cwd: repoRoot,
       timeout: 5000,
     });
@@ -297,11 +303,13 @@ async function mergeToTarget(
   // Perform the merge
   try {
     await execFileAsync('git', ['checkout', targetBranch], {
+      windowsHide: true,
       cwd: repoRoot,
       timeout: 10_000,
     });
 
     await execFileAsync('git', ['merge', '--no-ff', branch, '-m', `Merge worktree: ${branch}`], {
+      windowsHide: true,
       cwd: repoRoot,
       timeout: 15_000,
     });
@@ -312,6 +320,7 @@ async function mergeToTarget(
     let pushError: string | undefined;
     try {
       await execFileAsync('git', ['push', 'origin', targetBranch], {
+        windowsHide: true,
         cwd: repoRoot,
         timeout: 60_000,
       });
@@ -324,6 +333,7 @@ async function mergeToTarget(
     // Restore original branch if it was different from target
     if (originalBranch && originalBranch !== targetBranch) {
       await execFileAsync('git', ['checkout', originalBranch], {
+        windowsHide: true,
         cwd: repoRoot,
         timeout: 10_000,
       }).catch(() => { /* best effort restore */ });
@@ -340,10 +350,11 @@ async function mergeToTarget(
     };
   } catch (err) {
     // Abort any partial merge
-    await execFileAsync('git', ['merge', '--abort'], { cwd: repoRoot, timeout: 5000 }).catch(() => {});
+    await execFileAsync('git', ['merge', '--abort'], { windowsHide: true, cwd: repoRoot, timeout: 5000 }).catch(() => {});
     // Restore original branch
     if (originalBranch) {
       await execFileAsync('git', ['checkout', originalBranch], {
+        windowsHide: true,
         cwd: repoRoot,
         timeout: 10_000,
       }).catch(() => {});

@@ -113,6 +113,7 @@ function writeState(state: WatcherState): void {
 async function resolvePollRef(repoPath: string, defaultBranch: string): Promise<string> {
   try {
     await execFileAsync('git', ['-C', repoPath, 'rev-parse', '--verify', `refs/remotes/origin/${defaultBranch}`], {
+      windowsHide: true,
       timeout: 5_000,
     });
     return `origin/${defaultBranch}`;
@@ -147,6 +148,7 @@ async function readRecentMerges(
         '--format=%H%x00%cI%x00%s%x00%B%x1e',
       ],
       {
+        windowsHide: true,
         maxBuffer: 1024 * 1024,
         timeout: 15_000,
       },

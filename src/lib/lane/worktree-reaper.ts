@@ -69,7 +69,7 @@ async function branchIsMergedIntoBase(
     await execFileAsync(
       'git',
       ['merge-base', '--is-ancestor', branch, baseBranch],
-      { cwd: repoPath, timeout: 5_000 },
+      { windowsHide: true, cwd: repoPath, timeout: 5_000 },
     );
     return true;
   } catch {
@@ -89,7 +89,7 @@ async function worktreeHasNoDiffAgainstBase(
     await execFileAsync(
       'git',
       ['diff', '--quiet', `${baseBranch}...HEAD`],
-      { cwd: worktreeCwd, timeout: 5_000 },
+      { windowsHide: true, cwd: worktreeCwd, timeout: 5_000 },
     );
     return true;
   } catch {
@@ -102,7 +102,7 @@ async function readTreeHash(repoPath: string, ref: string): Promise<string | nul
     const { stdout } = await execFileAsync(
       'git',
       ['rev-parse', `${ref}^{tree}`],
-      { cwd: repoPath, timeout: 5_000 },
+      { windowsHide: true, cwd: repoPath, timeout: 5_000 },
     );
     return stdout.trim() || null;
   } catch {
@@ -231,7 +231,7 @@ async function resolveRepoFullName(repoPath: string): Promise<string | null> {
     const { stdout } = await execFileAsync(
       'git',
       ['remote', 'get-url', 'origin'],
-      { cwd: repoPath, timeout: 5_000 },
+      { windowsHide: true, cwd: repoPath, timeout: 5_000 },
     );
     return repoSlugFromRemoteUrl(stdout);
   } catch {

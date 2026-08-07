@@ -154,7 +154,7 @@ export async function POST(request: Request) {
       'tell application "System Events" to activate',
       'POSIX path of (choose file with prompt "Open a file on the canvas" with invisibles)',
     ].join('\n');
-    const { stdout } = await execFileAsync('osascript', ['-e', script], { timeout: 120000 });
+    const { stdout } = await execFileAsync('osascript', ['-e', script], { windowsHide: true, timeout: 120000 });
     const path = stdout.trim();
     return NextResponse.json({ path: path || null });
   } catch {

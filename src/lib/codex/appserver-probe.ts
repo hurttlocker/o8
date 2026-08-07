@@ -129,6 +129,7 @@ async function runCommand(
 ): Promise<CommandResult> {
   try {
     const { stdout, stderr } = await execFileAsync(binaryPath, args, {
+      windowsHide: true,
       env,
       timeout: timeoutMs,
       maxBuffer: 256 * 1024,
@@ -266,6 +267,7 @@ async function probeStdioCapabilities(
 ): Promise<StdioCapabilityProbe> {
   return new Promise((resolve) => {
     const child = spawn(binaryPath, ['app-server', '--stdio'], {
+      windowsHide: true,
       env,
       stdio: ['pipe', 'pipe', 'ignore'],
     });

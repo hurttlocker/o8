@@ -19,9 +19,11 @@ export async function GET(request: Request) {
   const root = workspaceParam.startsWith('~') ? workspaceParam.replace('~', os.homedir()) : workspaceParam;
   try {
     const stat = execFileSync('git', ['diff', '--no-color', '--stat', 'HEAD'], {
+      windowsHide: true,
       cwd: root, encoding: 'utf-8', timeout: 8000, maxBuffer: 1024 * 1024,
     });
     let diff = execFileSync('git', ['diff', '--no-color', 'HEAD'], {
+      windowsHide: true,
       cwd: root, encoding: 'utf-8', timeout: 8000, maxBuffer: 4 * 1024 * 1024,
     });
     // `git diff HEAD` omits untracked (new) files — append them as new-file
@@ -30,12 +32,14 @@ export async function GET(request: Request) {
     // respects .gitignore); never stages or touches the index.
     try {
       const untracked = execFileSync('git', ['ls-files', '--others', '--exclude-standard'], {
+        windowsHide: true,
         cwd: root, encoding: 'utf-8', timeout: 5000, maxBuffer: 1024 * 1024,
       }).split('\n').map((line) => line.trim()).filter(Boolean);
       for (const file of untracked) {
         if (Buffer.byteLength(diff, 'utf-8') > maxBytes) break;
         try {
           execFileSync('git', ['diff', '--no-color', '--no-index', '--', '/dev/null', file], {
+            windowsHide: true,
             cwd: root, encoding: 'utf-8', timeout: 5000, maxBuffer: 1024 * 1024,
           });
         } catch (untrackedError) {
@@ -50,7 +54,7 @@ export async function GET(request: Request) {
     }
     let branch = '';
     try {
-      branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: root, encoding: 'utf-8', timeout: 3000 }).trim();
+      branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { windowsHide: true, cwd: root, encoding: 'utf-8', timeout: 3000 }).trim();
     } catch {
       // detached/fresh repo — branch stays blank
     }

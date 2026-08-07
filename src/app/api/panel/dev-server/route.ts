@@ -69,6 +69,7 @@ export async function POST(req: NextRequest) {
 
     // Spawn the dev server
     const child = spawn('sh', ['-c', command], {
+      windowsHide: true,
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,

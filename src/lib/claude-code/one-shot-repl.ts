@@ -91,6 +91,7 @@ export async function askClaudeOneShot(
 
   return new Promise<string>((resolve, reject) => {
     const child = spawn(opts.binary, buildOneShotArgs(opts.model, opts.effort), {
+      windowsHide: true,
       cwd,
       env,
       stdio: ['pipe', 'pipe', 'pipe'],

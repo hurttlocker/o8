@@ -81,7 +81,7 @@ export async function probeLiveProcessInside(
     const args = ['-a', '-d', 'cwd', '+D', target, '-t'];
     const { stdout } = options.runLsof
       ? await options.runLsof(target, args)
-      : await execFileAsync('lsof', args, { timeout: PROBE_TIMEOUT_MS });
+      : await execFileAsync('lsof', args, { windowsHide: true, timeout: PROBE_TIMEOUT_MS });
     return liveResult(stdout)
       ?? { status: 'inconclusive', reason: 'lsof exited 0 without reporting a PID' };
   } catch (err) {

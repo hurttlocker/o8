@@ -15,6 +15,7 @@ import { isOrchestratorHomePath } from '@/lib/orchestrator/repo-path';
 export function isGitWorkTreeSync(repoPath: string): boolean {
   try {
     return execFileSync('git', ['-C', repoPath, 'rev-parse', '--is-inside-work-tree'], {
+      windowsHide: true,
       encoding: 'utf-8',
       timeout: 5_000,
       maxBuffer: 128 * 1024,

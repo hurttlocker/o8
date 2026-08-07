@@ -31,6 +31,7 @@ export async function runCompletionTypecheck(cwd: string): Promise<CompletionTyp
   }
   try {
     const { stdout, stderr } = await execFileAsync('npx', ['tsc', '--noEmit'], {
+      windowsHide: true,
       cwd,
       timeout: TYPECHECK_TIMEOUT_MS,
       maxBuffer: COMMAND_MAX_BUFFER,
@@ -121,6 +122,7 @@ function normalizeAutoCommitMessage(message?: string | null): string {
 
 export async function autoCommitCompletionWorktree(cwd: string, commitMessage?: string | null): Promise<boolean> {
   const { stdout: porcelain } = await execFileAsync('git', ['status', '--porcelain'], {
+    windowsHide: true,
     cwd,
     maxBuffer: COMMAND_MAX_BUFFER,
   });
@@ -135,16 +137,19 @@ export async function autoCommitCompletionWorktree(cwd: string, commitMessage?: 
   // the safety-hook `.claude/settings.json` (otherwise blows the diff-budget merge
   // gate) and the `node_modules` symlink (otherwise pollutes the target repo's main).
   await execFileAsync('git', ['add', '-A', '--', '.'], {
+    windowsHide: true,
     cwd,
     maxBuffer: COMMAND_MAX_BUFFER,
   });
   await execFileAsync('git', ['reset', '-q', '--', '.claude', 'node_modules'], {
+    windowsHide: true,
     cwd,
     maxBuffer: COMMAND_MAX_BUFFER,
   });
   // If only o8-injected artifacts were dirty, nothing real remains to commit.
   try {
     await execFileAsync('git', ['diff', '--cached', '--quiet'], {
+      windowsHide: true,
       cwd,
       maxBuffer: COMMAND_MAX_BUFFER,
     });
@@ -153,6 +158,7 @@ export async function autoCommitCompletionWorktree(cwd: string, commitMessage?: 
     // non-zero exit => staged changes exist, proceed to commit
   }
   await execFileAsync('git', ['commit', '--no-verify', '-m', normalizeAutoCommitMessage(commitMessage)], {
+    windowsHide: true,
     cwd,
     maxBuffer: COMMAND_MAX_BUFFER,
   });
@@ -162,6 +168,7 @@ export async function autoCommitCompletionWorktree(cwd: string, commitMessage?: 
 export async function hasReviewableCompletionDiff(cwd: string, baseRef = 'main'): Promise<boolean> {
   try {
     await execFileAsync('git', ['diff', '--quiet', `${baseRef}...HEAD`], {
+      windowsHide: true,
       cwd,
       maxBuffer: COMMAND_MAX_BUFFER,
     });
@@ -176,6 +183,7 @@ export async function hasReviewableCompletionDiff(cwd: string, baseRef = 'main')
 
   try {
     await execFileAsync('git', ['diff', '--quiet', 'HEAD~1..HEAD'], {
+      windowsHide: true,
       cwd,
       maxBuffer: COMMAND_MAX_BUFFER,
     });

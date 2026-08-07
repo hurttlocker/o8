@@ -58,6 +58,7 @@ export async function runLaneRebaseTests(input: {
 
   try {
     await execFileAsync('npm', ['test', '--silent'], {
+      windowsHide: true,
       cwd: input.cwd,
       timeout: TEST_TIMEOUT_MS,
       maxBuffer: TEST_MAX_BUFFER_BYTES,

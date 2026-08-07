@@ -188,6 +188,7 @@ export async function buildMobileReviewUnits({
 
 async function runGit(cwd: string, args: string[], maxBuffer = MAX_DIFF_BYTES) {
   const { stdout } = await execFileAsync('git', args, {
+    windowsHide: true,
     cwd,
     timeout: 10_000,
     maxBuffer,

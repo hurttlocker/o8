@@ -70,6 +70,7 @@ class CodexAppServerClient {
     this.onNotification = options.onNotification;
     this.onExit = options.onExit;
     this.child = spawn(options.binaryPath, ['app-server', '--stdio'], {
+      windowsHide: true,
       env: {
         ...process.env,
         CODEX_HOME: options.codexHome,

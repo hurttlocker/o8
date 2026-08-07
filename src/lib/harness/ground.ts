@@ -28,6 +28,7 @@ const STOP_WORDS = new Set([
 function git(repoPath: string, args: string[], fallback: string | null = null): string | null {
   try {
     return execFileSync('git', ['-C', repoPath, ...args], {
+      windowsHide: true,
       encoding: 'utf8',
       maxBuffer: 8 * 1024 * 1024,
       stdio: ['ignore', 'pipe', 'ignore'],

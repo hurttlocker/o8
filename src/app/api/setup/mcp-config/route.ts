@@ -45,7 +45,7 @@ import { resolveO8WebviewSocketPath } from '@/lib/mcp/o8-webview-socket';
 
 function findCommand(name: string): string | null {
   try {
-    const which = execSync(`command -v ${name} 2>/dev/null`, { encoding: 'utf-8' }).trim();
+    const which = execSync(`command -v ${name} 2>/dev/null`, { windowsHide: true, encoding: 'utf-8' }).trim();
     return which || null;
   } catch {
     return null;

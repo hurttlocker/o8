@@ -364,6 +364,7 @@ async function readWorktreeSnapshot(cwd: string, baseBranch?: string | null): Pr
 async function hasDiff(cwd: string, baseRef: string): Promise<boolean> {
   try {
     await execFileAsync('git', ['diff', '--quiet', `${baseRef}...HEAD`], {
+      windowsHide: true,
       cwd,
       maxBuffer: COMMAND_MAX_BUFFER,
     });
@@ -375,6 +376,7 @@ async function hasDiff(cwd: string, baseRef: string): Promise<boolean> {
 
   try {
     await execFileAsync('git', ['diff', '--quiet', 'HEAD~1..HEAD'], {
+      windowsHide: true,
       cwd,
       maxBuffer: COMMAND_MAX_BUFFER,
     });
@@ -387,6 +389,7 @@ async function hasDiff(cwd: string, baseRef: string): Promise<boolean> {
 
 async function readGitStdout(cwd: string, args: string[]): Promise<string> {
   const { stdout } = await execFileAsync('git', args, {
+    windowsHide: true,
     cwd,
     maxBuffer: COMMAND_MAX_BUFFER,
   });

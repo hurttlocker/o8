@@ -150,7 +150,7 @@ async function listGithubRepos(limit: number): Promise<unknown[]> {
   const { stdout } = await execFileAsync(
     'gh',
     ['api', `/user/repos?per_page=${perPage}&sort=updated&affiliation=owner,collaborator,organization_member`],
-    { timeout: 15_000, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, GH_NO_UPDATE_NOTIFIER: '1' } },
+    { windowsHide: true, timeout: 15_000, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, GH_NO_UPDATE_NOTIFIER: '1' } },
   );
   const parsed = JSON.parse(stdout) as unknown;
   return Array.isArray(parsed) ? parsed : [];

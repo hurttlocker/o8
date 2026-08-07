@@ -178,17 +178,17 @@ async function getFileLineRanges(
     // Committed changes since base
     const { stdout: committed } = await execFileAsync('git', [
       'diff', '--unified=0', `${baseBranch}...HEAD`, '--', filePath,
-    ], { cwd: worktreePath, timeout: 5000 });
+    ], { windowsHide: true, cwd: worktreePath, timeout: 5000 });
 
     // Uncommitted changes
     const { stdout: uncommitted } = await execFileAsync('git', [
       'diff', '--unified=0', '--', filePath,
-    ], { cwd: worktreePath, timeout: 5000 });
+    ], { windowsHide: true, cwd: worktreePath, timeout: 5000 });
 
     // Staged changes
     const { stdout: staged } = await execFileAsync('git', [
       'diff', '--unified=0', '--cached', '--', filePath,
-    ], { cwd: worktreePath, timeout: 5000 });
+    ], { windowsHide: true, cwd: worktreePath, timeout: 5000 });
 
     // Merge all ranges
     const allRanges = [
@@ -265,7 +265,7 @@ async function getWorktreeChangeSize(worktree: WorktreeInfo): Promise<number> {
   try {
     const { stdout } = await execFileAsync('git', [
       'diff', '--shortstat', `${worktree.baseBranch}...HEAD`,
-    ], { cwd: worktree.path, timeout: 5000 });
+    ], { windowsHide: true, cwd: worktree.path, timeout: 5000 });
 
     // Parse: "3 files changed, 42 insertions(+), 8 deletions(-)"
     const insertions = stdout.match(/(\d+) insertion/)?.[1] ?? '0';

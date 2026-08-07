@@ -61,6 +61,7 @@ function countLines(content: string): number {
 async function resolveMergeSha(repoPath: string, mergeRef: string): Promise<string | null> {
   try {
     const { stdout } = await execFileAsync('git', ['rev-parse', '--verify', mergeRef], {
+      windowsHide: true,
       cwd: repoPath,
       maxBuffer: 1024 * 1024,
     });
@@ -86,7 +87,7 @@ async function readPreMergeLineCount(
     const { stdout } = await execFileAsync(
       'git',
       ['show', `${sha}^:${relativePath}`],
-      { cwd: repoPath, maxBuffer: 16 * 1024 * 1024 },
+      { windowsHide: true, cwd: repoPath, maxBuffer: 16 * 1024 * 1024 },
     );
     return countLines(stdout);
   } catch (error) {
@@ -96,6 +97,7 @@ async function readPreMergeLineCount(
     // is no parent, we can't run the diff — return null.
     try {
       await execFileAsync('git', ['cat-file', '-e', `${sha}^`], {
+        windowsHide: true,
         cwd: repoPath,
         maxBuffer: 128 * 1024,
       });
@@ -121,7 +123,7 @@ export async function findDecompositionCandidates(options: {
     const { stdout } = await execFileAsync(
       'git',
       ['show', '--name-only', '--pretty=', mergeSha],
-      { cwd: repoPath, maxBuffer: 4 * 1024 * 1024 },
+      { windowsHide: true, cwd: repoPath, maxBuffer: 4 * 1024 * 1024 },
     );
     touchedFiles = stdout
       .split('\n')

@@ -61,6 +61,7 @@ async function pathExists(targetPath: string): Promise<boolean> {
 async function isWorktreeDirty(worktreePath: string): Promise<'clean' | 'dirty' | 'unknown'> {
   try {
     const { stdout } = await execFileAsync('git', ['status', '--porcelain'], {
+      windowsHide: true,
       cwd: worktreePath,
       timeout: 5000,
     });
@@ -104,6 +105,7 @@ export async function removeMergedWorktree(
   if (!(await pathExists(worktreePath))) {
     try {
       await execFileAsync('git', ['worktree', 'prune'], {
+        windowsHide: true,
         cwd: lane.repoPath,
         timeout: 10_000,
       });
@@ -144,6 +146,7 @@ export async function removeMergedWorktree(
   }
   try {
     await execFileAsync('git', ['worktree', 'remove', '--force', worktreePath], {
+      windowsHide: true,
       cwd: lane.repoPath,
       timeout: 15_000,
     });
@@ -158,6 +161,7 @@ export async function removeMergedWorktree(
     ) {
       try {
         await execFileAsync('git', ['worktree', 'prune'], {
+          windowsHide: true,
           cwd: lane.repoPath,
           timeout: 10_000,
         });
@@ -177,6 +181,7 @@ export async function removeMergedWorktree(
   // Prune stale worktree list entries so `git worktree list` stays clean.
   try {
     await execFileAsync('git', ['worktree', 'prune'], {
+      windowsHide: true,
       cwd: lane.repoPath,
       timeout: 10_000,
     });

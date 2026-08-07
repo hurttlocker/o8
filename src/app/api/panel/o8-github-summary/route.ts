@@ -35,6 +35,7 @@ async function resolveWorkspaceRepoSlug(repoPath: unknown) {
   }
 
   const remoteUrl = execFileSync('git', ['remote', 'get-url', 'origin'], {
+    windowsHide: true,
     cwd: resolved.repoRoot,
     encoding: 'utf8',
     timeout: 5_000,

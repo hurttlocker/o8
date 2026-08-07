@@ -29,7 +29,7 @@ const PYTHON = process.env.O8_TTS_PYTHON || 'python3';
 function importsEdgeTts(): Promise<boolean> {
   return new Promise((resolve) => {
     try {
-      const proc = spawn(PYTHON, ['-c', 'import edge_tts'], { stdio: 'ignore', timeout: 10_000 });
+      const proc = spawn(PYTHON, ['-c', 'import edge_tts'], { windowsHide: true, stdio: 'ignore', timeout: 10_000 });
       proc.on('close', (code) => resolve(code === 0));
       proc.on('error', () => resolve(false));
     } catch {
@@ -48,7 +48,7 @@ function pipInstall(opts: { breakSystem?: boolean; user?: boolean }): Promise<{ 
       // Capture stdout too — pip writes some failures there, and the old
       // stderr-only capture produced the useless "failed. stderr:" (empty)
       // log that hid the free laptop's real failure (2026-07-12).
-      const proc = spawn(PYTHON, args, { stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 });
+      const proc = spawn(PYTHON, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 });
       let out = '';
       proc.stdout?.on('data', (chunk: Buffer) => { out += chunk.toString(); });
       proc.stderr?.on('data', (chunk: Buffer) => { out += chunk.toString(); });

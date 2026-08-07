@@ -19,6 +19,7 @@ export async function POST() {
     `;
 
     const result = execSync(`osascript -e '${script.replace(/'/g, "'\\''")}'`, {
+      windowsHide: true,
       encoding: 'utf-8',
       timeout: 60000, // 60s to give user time to browse
     }).trim();

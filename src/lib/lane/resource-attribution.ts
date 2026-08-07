@@ -93,7 +93,7 @@ async function sweepProcesses(): Promise<PsRow[]> {
     const { stdout } = await execFileAsync(
       'ps',
       ['-eo', 'pid=,ppid=,pcpu=,rss=,command='],
-      { maxBuffer: 8 * 1024 * 1024 },
+      { windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
     );
     const rows: PsRow[] = [];
     for (const line of stdout.split('\n')) {

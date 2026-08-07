@@ -108,6 +108,7 @@ async function testStdio(input: StdioTestInput, timeoutMs: number, npxFamily: bo
     const childEnv: NodeJS.ProcessEnv = { ...process.env, ...(input.env ?? {}) };
     try {
       child = spawn(input.command, input.args ?? [], {
+        windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe'],
         env: childEnv,
       });

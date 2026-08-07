@@ -108,6 +108,7 @@ async function git(
     return gitWithInput(cwd, args, options.input, options.timeout ?? 8_000);
   }
   const { stdout } = await execFileAsync('git', args, {
+    windowsHide: true,
     cwd,
     encoding: 'utf8',
     maxBuffer: 10 * 1024 * 1024,
@@ -124,6 +125,7 @@ function gitWithInput(
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn('git', args, {
+      windowsHide: true,
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
     });

@@ -44,7 +44,7 @@ export async function GET() {
 
     for (const editor of editors) {
       try {
-        execFileSync('which', [editor.bin], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+        execFileSync('which', [editor.bin], { windowsHide: true, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
         available.push({ id: editor.id, name: editor.name, available: true });
       } catch {
         available.push({ id: editor.id, name: editor.name, available: false });
@@ -114,7 +114,7 @@ export async function POST(req: NextRequest) {
     }
 
     const { bin, args } = EDITORS[editor];
-    execFileSync(bin, [...args, localPath], { encoding: 'utf-8', timeout: 5000 });
+    execFileSync(bin, [...args, localPath], { windowsHide: true, encoding: 'utf-8', timeout: 5000 });
     return NextResponse.json({ ok: true, editor, path: localPath });
   } catch (err) {
     console.error('[panel/open-in] Failed to open repo', err);

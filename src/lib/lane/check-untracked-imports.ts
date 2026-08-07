@@ -75,6 +75,7 @@ export function checkUntrackedImports(cwd: string, baseBranch: string): Untracke
 function getUntrackedFiles(cwd: string): Set<string> {
   try {
     const output = execFileSync('git', ['ls-files', '--others', '--exclude-standard'], {
+      windowsHide: true,
       cwd,
       encoding: 'utf-8',
       timeout: 10_000,
@@ -95,6 +96,7 @@ function getUntrackedFiles(cwd: string): Set<string> {
 function getChangedSourceFiles(cwd: string, baseBranch: string): string[] {
   try {
     const output = execFileSync('git', ['diff', '--name-only', '--diff-filter=ACMR', `${baseBranch}...HEAD`], {
+      windowsHide: true,
       cwd,
       encoding: 'utf-8',
       timeout: 10_000,

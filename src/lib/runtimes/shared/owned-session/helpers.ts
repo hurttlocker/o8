@@ -114,7 +114,7 @@ export function metadataPath(sessionDir: string) {
  */
 export async function pidCommandLine(pid: number): Promise<string | null> {
   try {
-    const { stdout } = await promisify(execFile)('ps', ['-o', 'command=', '-p', String(pid)]);
+    const { stdout } = await promisify(execFile)('ps', ['-o', 'command=', '-p', String(pid)], { windowsHide: true });
     const line = stdout.trim();
     return line || null;
   } catch {
@@ -151,6 +151,7 @@ export async function validateWorkspace(targetCwd: string) {
   // non-git directory; isolation/worktrees are separately gated on git.
   try {
     const { stdout } = await execFileAsync('git', ['-C', real, 'rev-parse', '--show-toplevel'], {
+      windowsHide: true,
       maxBuffer: 256 * 1024,
     });
     return path.resolve(stdout.trim());
@@ -163,6 +164,7 @@ export async function validateWorkspace(targetCwd: string) {
 export async function gitValue(repoPath: string, args: string[]) {
   try {
     const { stdout } = await execFileAsync('git', ['-C', repoPath, ...args], {
+      windowsHide: true,
       maxBuffer: 256 * 1024,
     });
     const value = stdout.trim();

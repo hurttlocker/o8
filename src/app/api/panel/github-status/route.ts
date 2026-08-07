@@ -45,6 +45,7 @@ function parseGhStatusOutput(output: string) {
 async function readLocalGhStatus() {
   try {
     const { stdout, stderr } = await exec('gh', ['auth', 'status', '--hostname', 'github.com'], {
+      windowsHide: true,
       timeout: 10_000,
       env: { ...process.env, GH_NO_UPDATE_NOTIFIER: '1' },
     });

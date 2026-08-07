@@ -5,6 +5,7 @@ const execFileAsync = promisify(execFile);
 
 async function git(cwd: string, args: string[], opts: { timeout?: number; maxBuffer?: number } = {}) {
   const { stdout } = await execFileAsync('git', args, {
+    windowsHide: true,
     cwd,
     timeout: opts.timeout ?? 10_000,
     maxBuffer: opts.maxBuffer ?? 8 * 1024 * 1024,
@@ -28,6 +29,7 @@ export async function isAncestorCommit(cwd: string, ancestorSha: string, descend
 function patchIdOfDiff(cwd: string, diff: string): string | null {
   if (!diff.trim()) return null;
   const result = spawnSync('git', ['patch-id', '--stable'], {
+    windowsHide: true,
     cwd,
     input: diff,
     timeout: 10_000,

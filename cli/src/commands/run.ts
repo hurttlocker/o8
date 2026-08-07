@@ -248,7 +248,7 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
     execFileSync(
       'tmux',
       ['new-session', '-d', '-s', session, '-x', '220', '-y', '50', 'sh', '-c', wrapper, 'o8run', ...command],
-      { timeout: 10_000, stdio: 'ignore' },
+      { windowsHide: true, timeout: 10_000, stdio: 'ignore' },
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -265,6 +265,7 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
   let panePid: number | null = null;
   try {
     const out = execFileSync('tmux', ['list-panes', '-t', session, '-F', '#{pane_pid}'], {
+      windowsHide: true,
       encoding: 'utf-8',
       timeout: 3_000,
     }).trim();
@@ -277,6 +278,7 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
   if (!detach) {
     try {
       execFileSync('tmux', ['pipe-pane', '-o', '-t', session, `cat >> ${sq(logFile)}`], {
+        windowsHide: true,
         timeout: 5_000,
         stdio: 'ignore',
       });
@@ -356,7 +358,7 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
   };
   const sessionAlive = (): boolean => {
     try {
-      execFileSync('tmux', ['has-session', '-t', session], { timeout: 3_000, stdio: 'ignore' });
+      execFileSync('tmux', ['has-session', '-t', session], { windowsHide: true, timeout: 3_000, stdio: 'ignore' });
       return true;
     } catch {
       return false;

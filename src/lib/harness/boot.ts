@@ -16,6 +16,7 @@ import {
 function git(repoPath: string, args: string[], fallback = ''): string {
   try {
     return execFileSync('git', ['-C', repoPath, ...args], {
+      windowsHide: true,
       encoding: 'utf8',
       maxBuffer: 4 * 1024 * 1024,
       stdio: ['ignore', 'pipe', 'ignore'],

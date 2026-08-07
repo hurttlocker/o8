@@ -37,7 +37,7 @@ export interface MirrorProofResult {
 
 async function gh(args: string[]): Promise<{ ok: boolean; stdout: string; stderr: string }> {
   try {
-    const { stdout, stderr } = await execFileP('gh', args, { timeout: GH_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 });
+    const { stdout, stderr } = await execFileP('gh', args, { windowsHide: true, timeout: GH_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 });
     return { ok: true, stdout: stdout.toString(), stderr: stderr.toString() };
   } catch (err) {
     const e = err as { stdout?: Buffer | string; stderr?: Buffer | string };

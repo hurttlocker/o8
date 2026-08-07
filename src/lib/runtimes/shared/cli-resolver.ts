@@ -205,6 +205,7 @@ async function probeVersion(
   const pattern = spec.versionPattern ?? /\b(\d+\.\d+\.\d+)\b/;
   try {
     const { stdout, stderr } = await execFileAsync(binPath, args, {
+      windowsHide: true,
       timeout: 5_000,
       env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
     });
@@ -269,6 +270,7 @@ async function resolveViaWhich(
   for (const name of binaryNames(spec)) {
     try {
       const { stdout } = await execFileAsync('which', [name], {
+        windowsHide: true,
         timeout: 3_000,
       });
       const found = stdout.trim();
@@ -311,6 +313,7 @@ async function resolveViaLoginShell(
     for (const name of binaryNames(spec)) {
       try {
         const { stdout } = await execFileAsync(sh, ['-l', '-c', `command -v ${name}`], {
+          windowsHide: true,
           timeout: 10_000,
           env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
         });

@@ -121,6 +121,7 @@ export async function collectQualitySearchCandidateEvidence(
       'git',
       ['diff', '--numstat', facts.against],
       {
+        windowsHide: true,
         cwd: lane.worktreePath || lane.repoPath,
         timeout: 10_000,
         maxBuffer: 4 * 1024 * 1024,

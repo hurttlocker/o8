@@ -53,6 +53,7 @@ function branchCandidates(target: PostMergeCleanupTarget) {
 async function localBranchExists(repoPath: string, branch: string) {
   try {
     await execFileAsync('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], {
+      windowsHide: true,
       cwd: repoPath,
       timeout: 5000,
     });
@@ -66,6 +67,7 @@ async function canInspectBranches(repoPath: string) {
   if (!existsSync(repoPath)) return false;
   try {
     await execFileAsync('git', ['rev-parse', '--git-dir'], {
+      windowsHide: true,
       cwd: repoPath,
       timeout: 5000,
     });
@@ -84,6 +86,7 @@ async function deleteBranch(repoPath: string, branch: string) {
 
   try {
     await execFileAsync('git', ['branch', '-d', branch], {
+      windowsHide: true,
       cwd: repoPath,
       timeout: 10_000,
     });
@@ -115,6 +118,7 @@ async function deleteBranches(target: PostMergeCleanupTarget) {
 async function pruneWorktrees(repoRoot: string) {
   try {
     await execFileAsync('git', ['worktree', 'prune'], {
+      windowsHide: true,
       cwd: repoRoot,
       timeout: 10_000,
     });
@@ -192,6 +196,7 @@ export async function capturePostMergeCleanupTarget(lane: CleanupLane): Promise<
   if (worktreePath) {
     try {
       const { stdout } = await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+        windowsHide: true,
         cwd: worktreePath,
         timeout: 5000,
       });

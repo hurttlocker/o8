@@ -605,6 +605,7 @@ export async function sendToCodexOrchestrator(
     const singleProcessGroup = options.orchestrationMode === 'single';
     try {
       proc = spawn(spawnBinary, spawnArgs, {
+        windowsHide: true,
         cwd: session.repoPath,
         env: spawnEnv,
         detached: crashEnabled || singleProcessGroup,

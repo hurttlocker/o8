@@ -63,6 +63,7 @@ function gitErrorMessage(error: unknown): string {
 
 async function runGit(cwd: string, args: string[], timeout = GIT_TIMEOUT_MS): Promise<string> {
   const { stdout } = await execFileAsync('git', args, {
+    windowsHide: true,
     cwd,
     timeout,
     maxBuffer: METADATA_MAX_BUFFER,
@@ -367,6 +368,7 @@ async function appendGitDiff(
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const child = spawn('git', args, {
+      windowsHide: true,
       cwd,
       env: { ...process.env, LC_ALL: 'C' },
       stdio: ['ignore', 'pipe', 'pipe'],

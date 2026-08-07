@@ -16,6 +16,7 @@ const identityCache = new Map<string, { identity: RepoGithubIdentity; expiresAt:
 function gitValue(repoPath: string, args: string[]): string | null {
   try {
     const value = execFileSync('git', ['-C', repoPath, ...args], {
+      windowsHide: true,
       encoding: 'utf8',
       timeout: 3000,
       stdio: ['ignore', 'pipe', 'ignore'],

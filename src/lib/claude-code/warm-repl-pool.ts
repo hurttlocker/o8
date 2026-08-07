@@ -94,6 +94,7 @@ function spawnWarmProc(binary: string, model: string, effort?: string): WarmProc
   let child: ChildProcessWithoutNullStreams;
   try {
     child = spawn(binary, args, {
+      windowsHide: true,
       cwd: os.tmpdir(),
       env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' },
       stdio: ['pipe', 'pipe', 'pipe'],

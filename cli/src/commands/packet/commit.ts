@@ -49,16 +49,16 @@ export async function runPacketCommit(mode: OutputMode, rest: string[]): Promise
   try {
     // Stage everything under the worktree root, then commit with an explicit
     // `-- .` pathspec so only worktree-root paths are committed.
-    await execFileAsync('git', ['add', '--', '.'], { cwd });
-    const { stdout: status } = await execFileAsync('git', ['status', '--porcelain'], { cwd });
+    await execFileAsync('git', ['add', '--', '.'], { windowsHide: true, cwd });
+    const { stdout: status } = await execFileAsync('git', ['status', '--porcelain'], { windowsHide: true, cwd });
     if (!status.trim()) {
       if (mode.human) printHumanKv([['committed', 'no'], ['note', 'worktree clean — nothing to commit']]);
       else printJson({ schema: 'o8/cli/packet.commit/v1', committed: false, note: 'Nothing to commit (worktree clean).' });
       return 0;
     }
 
-    await execFileAsync('git', ['commit', '-m', message, '--', '.'], { cwd });
-    const { stdout: shaOut } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd });
+    await execFileAsync('git', ['commit', '-m', message, '--', '.'], { windowsHide: true, cwd });
+    const { stdout: shaOut } = await execFileAsync('git', ['rev-parse', 'HEAD'], { windowsHide: true, cwd });
     const sha = shaOut.trim();
 
     if (mode.human) printHumanKv([['committed', 'yes'], ['sha', sha.slice(0, 12)], ['message', message]]);

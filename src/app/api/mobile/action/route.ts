@@ -620,6 +620,7 @@ async function handleMobileActionPost(request: NextRequest) {
           const codexBin = path.join(os.homedir(), '.npm-global', 'bin', 'codex');
           const args = ['exec', 'resume', threadId, message ?? '', '--json', '--dangerously-bypass-approvals-and-sandbox'];
           const stdout = execFileSync(codexBin, args, {
+            windowsHide: true,
             cwd: process.env.HOME || os.homedir(),
             timeout: 120_000,
             maxBuffer: 10 * 1024 * 1024,

@@ -16,6 +16,7 @@ function resolveRoot(workspace?: string | null) {
 
 function runGit(root: string, args: string[]) {
   const result = spawnSync('git', args, {
+    windowsHide: true,
     cwd: root,
     encoding: 'utf-8',
     timeout: 30_000,

@@ -52,6 +52,7 @@ function parseElapsedSeconds(raw: string): number {
 
 function listProcessRows(): ProcessRow[] {
   const output = execFileSync('ps', ['-e', '-o', 'pid=,ppid=,etime=,command='], {
+    windowsHide: true,
     encoding: 'utf-8',
     stdio: ['ignore', 'pipe', 'ignore'],
     timeout: 3000,
@@ -143,7 +144,7 @@ function killOrphanInstances(): void {
 // so a broken install fails loudly rather than silently.
 function checkBinary(name: string): boolean {
   try {
-    execSync(`command -v ${name} 2>/dev/null`, { stdio: 'ignore' });
+    execSync(`command -v ${name} 2>/dev/null`, { windowsHide: true, stdio: 'ignore' });
     return true;
   } catch {
     return false;

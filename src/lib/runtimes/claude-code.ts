@@ -189,7 +189,7 @@ async function resolveLiveSessionIdFromPid(pid: number) {
   try {
     const { stdout: cwdOut } = await execFileAsync(
       'lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'],
-      { timeout: 2000 },
+      { windowsHide: true, timeout: 2000 },
     );
     const cwdLine = cwdOut.split('\n').find((line) => line.startsWith('n/'));
     const cwd = cwdLine?.slice(1);
@@ -725,7 +725,7 @@ export async function findLiveClaudeProcesses(): Promise<LiveClaudeProcess[]> {
     // Find Claude Code CLI processes (not Claude Desktop app)
     const { stdout } = await execFileAsync(
       'bash', ['-c', 'ps -eo pid=,command= | grep -E "claude (--|-)" | grep -v grep | grep -v ".app/"'],
-      { timeout: 3000 },
+      { windowsHide: true, timeout: 3000 },
     );
     const pids: number[] = [];
     for (const line of stdout.trim().split('\n').filter(Boolean)) {
@@ -740,7 +740,7 @@ export async function findLiveClaudeProcesses(): Promise<LiveClaudeProcess[]> {
     try {
       const { stdout: cwdOut } = await execFileAsync(
         'lsof', ['-a', '-p', pids.join(','), '-d', 'cwd', '-Fn'],
-        { timeout: 4000 },
+        { windowsHide: true, timeout: 4000 },
       );
       // lsof output: "p<PID>\nn<path>\n" blocks per process
       let currentPid: number | null = null;
@@ -1242,6 +1242,7 @@ export const claudeCodeRuntime: AgentRuntime = {
     // Use git diff to find changed files
     try {
       const { stdout } = await execFileAsync('git', ['diff', '--numstat', 'HEAD'], {
+        windowsHide: true,
         cwd,
         timeout: 5000,
       });

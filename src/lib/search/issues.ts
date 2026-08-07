@@ -56,7 +56,7 @@ async function registeredRepoSlug(
       const { stdout } = await execFileAsync(
         'git',
         ['-C', repo.localPath, 'config', '--get', 'remote.origin.url'],
-        { encoding: 'utf-8', timeout: 2_500, maxBuffer: 128 * 1024 },
+        { windowsHide: true, encoding: 'utf-8', timeout: 2_500, maxBuffer: 128 * 1024 },
       );
       slug = normalizeRepoSlug(stdout.trim());
     } catch {

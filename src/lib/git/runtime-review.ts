@@ -11,6 +11,7 @@ const REVIEW_NOISE_PREFIXES = ['.cortex-worktrees/'];
 async function tryGit(repoPath: string, args: string[]) {
   try {
     const { stdout } = await execFileAsync('git', ['-C', repoPath, ...args], {
+      windowsHide: true,
       maxBuffer: 4 * 1024 * 1024,
     });
     return stdout.trim();

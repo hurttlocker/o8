@@ -25,6 +25,7 @@ export async function POST(request: Request) {
   try {
     // Check if file is untracked (needs rm) vs modified (needs checkout)
     const statusOutput = execFileSync('git', ['status', '--porcelain', '--', filePath], {
+      windowsHide: true,
       encoding: 'utf-8',
       timeout: 5000,
     }).trim();
@@ -38,12 +39,14 @@ export async function POST(request: Request) {
     if (statusCode === '??' || statusCode === 'A') {
       // Untracked or newly added — remove from index and working tree
       execFileSync('git', ['clean', '-f', '--', filePath], {
+        windowsHide: true,
         encoding: 'utf-8',
         timeout: 5000,
       });
     } else {
       // Modified/deleted — restore from HEAD
       execFileSync('git', ['checkout', 'HEAD', '--', filePath], {
+        windowsHide: true,
         encoding: 'utf-8',
         timeout: 5000,
       });

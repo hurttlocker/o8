@@ -388,6 +388,7 @@ async function ensureOpenclawGateway(port: number, openclawBin: string): Promise
     openclawBin,
     ['--profile', OPENCLAW_PROFILE, 'gateway', 'run', '--port', String(port)],
     {
+      windowsHide: true,
       env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
       stdio: ['ignore', 'pipe', 'pipe'],
     },
@@ -754,6 +755,7 @@ async function sendToOpenclawOrchestrator(
 
   return new Promise<void>((promiseResolve, promiseReject) => {
     const proc = spawn(openclawBin, args, {
+      windowsHide: true,
       cwd: session.repoPath,
       env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' },
       stdio: ['ignore', 'pipe', 'pipe'],

@@ -96,11 +96,13 @@ export async function closePacketUnmerged(input: {
       const preservedRef = `refs/heads/${lane.branch}`;
       try {
         await execFileAsync('git', ['fetch', lane.worktreePath, `${lane.branch}:refs/heads/${lane.branch}`], {
+          windowsHide: true,
           cwd: lane.repoPath,
           timeout: 30_000,
         });
         try {
           await execFileAsync('git', ['show-ref', '--verify', preservedRef], {
+            windowsHide: true,
             cwd: lane.repoPath,
             timeout: 10_000,
           });

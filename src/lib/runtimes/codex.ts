@@ -306,6 +306,7 @@ export const codexRuntime: AgentRuntime = {
       // Async execFile: the sync variant blocked the whole Node event loop
       // (every API route, the WS bridge, timers) for up to 120s per resume.
       await promisify(execFile)(codexBin, ['exec', 'resume', threadId, message, '--json', '--dangerously-bypass-approvals-and-sandbox', '-c', 'tools.image_generation=false'], {
+        windowsHide: true,
         cwd: process.env.HOME || os.homedir(),
         timeout: 120_000,
         maxBuffer: 10 * 1024 * 1024,

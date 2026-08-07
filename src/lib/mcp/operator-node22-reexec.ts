@@ -58,6 +58,7 @@ function reexecOnNode22IfNeeded(): void {
   }
 
   const result = spawnSync(plan.nodePath, plan.argv, {
+    windowsHide: true,
     env: { ...process.env, [NODE22_REEXEC_GUARD]: '1', [NODE22_CHECKED]: '1' },
     stdio: 'inherit',
   });

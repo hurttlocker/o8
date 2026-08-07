@@ -193,6 +193,7 @@ async function loadPullRequestFiles(pullRequestNumber: number) {
 
 async function runFile(command: string, args: string[]) {
   const { stdout } = await execFileAsync(command, args, {
+    windowsHide: true,
     cwd: REVIEW_REPO_ROOT,
     maxBuffer: 4 * 1024 * 1024,
   });
@@ -662,6 +663,7 @@ async function _fetchWorkspaceReviewSnapshot(options: WorkspaceReviewSnapshotOpt
 
   const runInContext = async (command: string, args: string[]) => {
     const { stdout } = await execFileAsync(command, args, {
+      windowsHide: true,
       cwd: repoRoot,
       maxBuffer: 4 * 1024 * 1024,
     });

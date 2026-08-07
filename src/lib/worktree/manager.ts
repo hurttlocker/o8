@@ -288,7 +288,7 @@ export class WorktreeManager {
       : this.worktreeBases.map((base) => path.join(base, id));
     const branchExists = async (name: string) => {
       try {
-        await execFileAsync('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${name}`], { cwd: this.repoRoot, timeout: 5_000 });
+        await execFileAsync('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${name}`], { windowsHide: true, cwd: this.repoRoot, timeout: 5_000 });
         return true;
       } catch {
         return false;
@@ -399,7 +399,7 @@ export class WorktreeManager {
       worktreePath,
       '-b', branchName,
       baseBranch,
-    ], { cwd: this.repoRoot, timeout: 30_000 });
+    ], { windowsHide: true, cwd: this.repoRoot, timeout: 30_000 });
 
     // Rebase onto origin/<baseBranch> before handing the worktree to an agent.
     // The worktree was branched from local <baseBranch>, which may be behind
@@ -421,6 +421,7 @@ export class WorktreeManager {
       try {
         if (await allowWorktreeRemoval(worktreePath, { logPrefix: 'worktree-create-rollback' })) {
           await execFileAsync('git', ['worktree', 'remove', worktreePath, '--force'], {
+            windowsHide: true,
             cwd: this.repoRoot,
             timeout: 15_000,
           });
@@ -428,6 +429,7 @@ export class WorktreeManager {
       } catch { /* tree may already be gone */ }
       try {
         await execFileAsync('git', ['branch', '-D', branchName], {
+          windowsHide: true,
           cwd: this.repoRoot,
           timeout: 5000,
         });
@@ -478,6 +480,7 @@ export class WorktreeManager {
       const tscBin = path.join(this.repoRoot, 'node_modules', '.bin', 'tsc');
       try {
         await execFileAsync(tscBin, ['--noEmit', '--incremental', 'false'], {
+          windowsHide: true,
           cwd: worktreePath,
           timeout: 180_000,
           maxBuffer: 8 * 1024 * 1024,
@@ -497,6 +500,7 @@ export class WorktreeManager {
         try {
           if (await allowWorktreeRemoval(worktreePath, { logPrefix: 'worktree-typecheck-rollback' })) {
             await execFileAsync('git', ['worktree', 'remove', worktreePath, '--force'], {
+              windowsHide: true,
               cwd: this.repoRoot,
               timeout: 15_000,
             });
@@ -504,6 +508,7 @@ export class WorktreeManager {
         } catch { /* tree may already be gone */ }
         try {
           await execFileAsync('git', ['branch', '-D', branchName], {
+            windowsHide: true,
             cwd: this.repoRoot,
             timeout: 5000,
           });
@@ -566,6 +571,7 @@ export class WorktreeManager {
 
     try {
       await execFileAsync('git', ['clone', '--local', '--no-checkout', this.repoRoot, worktreePath], {
+        windowsHide: true,
         cwd: this.repoRoot,
         timeout: 60_000,
       });
@@ -573,12 +579,14 @@ export class WorktreeManager {
       const originUrl = await this.getOriginUrl();
       if (originUrl) {
         await execFileAsync('git', ['remote', 'set-url', 'origin', originUrl], {
+          windowsHide: true,
           cwd: worktreePath,
           timeout: 5000,
         });
       }
 
       await execFileAsync('git', ['checkout', '-B', branchName, baseBranch], {
+        windowsHide: true,
         cwd: worktreePath,
         timeout: 30_000,
       });
@@ -610,6 +618,7 @@ export class WorktreeManager {
       try {
         await resetTrackedWorkspaceChanges(worktreePath);
         await execFileAsync('git', ['clean', '-fd'], {
+          windowsHide: true,
           cwd: worktreePath,
           timeout: 15_000,
         });
@@ -699,6 +708,7 @@ export class WorktreeManager {
     // fetch_unreachable supervisor inbox item.
     try {
       await execFileAsync('git', ['fetch', 'origin', baseBranch, '--quiet'], {
+        windowsHide: true,
         cwd: worktreePath,
         timeout: 60_000,
       });
@@ -735,6 +745,7 @@ export class WorktreeManager {
     let rebaseTarget = `origin/${baseBranch}`;
     try {
       await execFileAsync('git', ['rev-parse', '--verify', rebaseTarget], {
+        windowsHide: true,
         cwd: worktreePath,
         timeout: 5000,
       });
@@ -748,12 +759,12 @@ export class WorktreeManager {
         const { stdout: aheadRaw } = await execFileAsync(
           'git',
           ['rev-list', '--count', `${rebaseTarget}..${baseBranch}`],
-          { cwd: worktreePath, timeout: 5000 },
+          { windowsHide: true, cwd: worktreePath, timeout: 5000 },
         );
         const { stdout: behindRaw } = await execFileAsync(
           'git',
           ['rev-list', '--count', `${baseBranch}..${rebaseTarget}`],
-          { cwd: worktreePath, timeout: 5000 },
+          { windowsHide: true, cwd: worktreePath, timeout: 5000 },
         );
         const ahead = Number.parseInt(aheadRaw.trim(), 10) || 0;
         const behind = Number.parseInt(behindRaw.trim(), 10) || 0;
@@ -775,6 +786,7 @@ export class WorktreeManager {
       }
       rebaseArgs.push(rebaseTarget);
       await execFileAsync('git', rebaseArgs, {
+        windowsHide: true,
         cwd: worktreePath,
         timeout: 60_000,
       });
@@ -786,13 +798,14 @@ export class WorktreeManager {
       try {
         const { stdout } = await execFileAsync(
           'git', ['diff', '--name-only', '--diff-filter=U'],
-          { cwd: worktreePath, timeout: 5000 },
+          { windowsHide: true, cwd: worktreePath, timeout: 5000 },
         );
         conflictFiles = stdout.split('\n').map((line) => line.trim()).filter(Boolean);
       } catch { /* best effort */ }
 
       try {
         await execFileAsync('git', ['rebase', '--abort'], {
+          windowsHide: true,
           cwd: worktreePath,
           timeout: 10_000,
         });
@@ -828,7 +841,7 @@ export class WorktreeManager {
     try {
       const { stdout } = await execFileAsync(
         'git', ['log', '-1', '--format=%ct', baseBranch],
-        { cwd: worktreePath, timeout: 5000 },
+        { windowsHide: true, cwd: worktreePath, timeout: 5000 },
       );
       const commitUnixSeconds = parseInt(stdout.trim(), 10);
       if (!Number.isFinite(commitUnixSeconds) || commitUnixSeconds <= 0) {
@@ -996,12 +1009,14 @@ export class WorktreeManager {
       if (await this.linkMatchingNodeModules(worktreePath)) return;
 
       await execFileAsync('npm', ['ci', '--prefer-offline'], {
+        windowsHide: true,
         cwd: worktreePath,
         timeout: 120_000,
         env: { ...process.env, NODE_ENV: 'development' },
       });
     } else if (hasPackageJson) {
       await execFileAsync('npm', ['install'], {
+        windowsHide: true,
         cwd: worktreePath,
         timeout: 120_000,
         env: { ...process.env, NODE_ENV: 'development' },
@@ -1011,6 +1026,7 @@ export class WorktreeManager {
     // Python
     if (await this.pathExists(path.join(worktreePath, 'requirements.txt'))) {
       await execFileAsync('pip', ['install', '-r', 'requirements.txt'], {
+        windowsHide: true,
         cwd: worktreePath,
         timeout: 120_000,
       }).catch(() => { /* pip may not be available */ });
@@ -1019,6 +1035,7 @@ export class WorktreeManager {
     // Go
     if (await this.pathExists(path.join(worktreePath, 'go.mod'))) {
       await execFileAsync('go', ['mod', 'download'], {
+        windowsHide: true,
         cwd: worktreePath,
         timeout: 60_000,
       }).catch(() => { /* go may not be available */ });
@@ -1027,6 +1044,7 @@ export class WorktreeManager {
     // Rust
     if (await this.pathExists(path.join(worktreePath, 'Cargo.toml'))) {
       await execFileAsync('cargo', ['fetch'], {
+        windowsHide: true,
         cwd: worktreePath,
         timeout: 120_000,
       }).catch(() => { /* cargo may not be available */ });
@@ -1036,6 +1054,7 @@ export class WorktreeManager {
   private async getOriginUrl(): Promise<string | null> {
     try {
       const { stdout } = await execFileAsync('git', ['config', '--get', 'remote.origin.url'], {
+        windowsHide: true,
         cwd: this.repoRoot,
         timeout: 5000,
       });
@@ -1082,6 +1101,7 @@ export class WorktreeManager {
       try {
         await mkdir(path.dirname(targetPath), { recursive: true });
         await execFileAsync('cp', ['-cR', sourcePath, targetPath], {
+          windowsHide: true,
           timeout: 120_000,
         });
         hydrated.push(relativePath);
@@ -1225,7 +1245,7 @@ export class WorktreeManager {
       try {
         const { stdout: excludePathOutput } = await execFileAsync(
           'git', ['rev-parse', '--git-path', 'info/exclude'],
-          { cwd: worktreePath, timeout: 5000 },
+          { windowsHide: true, cwd: worktreePath, timeout: 5000 },
         );
         const resolvedExcludePath = excludePathOutput.trim();
         const excludePath = path.isAbsolute(resolvedExcludePath)
@@ -1254,6 +1274,7 @@ export class WorktreeManager {
       // that case) or not yet in the index.
       try {
         await execFileAsync('git', ['update-index', '--skip-worktree', '.claude/settings.json'], {
+          windowsHide: true,
           cwd: worktreePath,
           timeout: 10_000,
         });
@@ -1344,6 +1365,7 @@ export class WorktreeManager {
       if (opts?.mergedEquivalentHeadSha) {
         try {
           const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
+            windowsHide: true,
             cwd: worktreePath,
             timeout: 5000,
           });
@@ -1399,7 +1421,7 @@ export class WorktreeManager {
 
       let gitRemoveFailedOnLock = false;
       try {
-        await execFileAsync('git', args, { cwd: this.repoRoot, timeout: 15_000 });
+        await execFileAsync('git', args, { windowsHide: true, cwd: this.repoRoot, timeout: 15_000 });
       } catch (err) {
         // If directory already gone, that's fine. #1673 — on Windows, git
         // itself can refuse removal because a handle inside the worktree is
@@ -1433,7 +1455,7 @@ export class WorktreeManager {
           // Clear git's now-stale .git/worktrees registration for the path
           // we just removed via the fallback so a future `git worktree add`
           // at the same slot doesn't collide with a dangling entry.
-          await execFileAsync('git', ['worktree', 'prune'], { cwd: this.repoRoot, timeout: 10_000 }).catch(() => {});
+          await execFileAsync('git', ['worktree', 'prune'], { windowsHide: true, cwd: this.repoRoot, timeout: 10_000 }).catch(() => {});
         }
       }
     }
@@ -1442,6 +1464,7 @@ export class WorktreeManager {
     if (opts?.deleteBranch && entry) {
       const branchName = entry.branchName ?? `worktree/${entry.agentType}/${worktreeId}`;
       await execFileAsync('git', ['branch', '-D', branchName], {
+        windowsHide: true,
         cwd: this.repoRoot,
         timeout: 5000,
       }).catch(() => { /* branch may not exist */ });
@@ -1579,6 +1602,7 @@ export class WorktreeManager {
 
     // Also run git's built-in prune for any orphaned worktrees
     await execFileAsync('git', ['worktree', 'prune'], {
+      windowsHide: true,
       cwd: this.repoRoot,
       timeout: 10_000,
     }).catch(() => {});
@@ -1688,11 +1712,13 @@ export class WorktreeManager {
   private async hasUncommittedChanges(worktreePath: string): Promise<boolean> {
     try {
       const { stdout: toplevelRaw } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], {
+        windowsHide: true,
         cwd: worktreePath,
         timeout: 5000,
       });
       if (!(await this.samePath(toplevelRaw.trim(), worktreePath))) return true;
       const { stdout } = await execFileAsync('git', ['status', '--porcelain'], {
+        windowsHide: true,
         cwd: worktreePath,
         timeout: 5000,
       });
@@ -1737,7 +1763,7 @@ export class WorktreeManager {
       // and this preserve would commit the OPERATOR'S uncommitted work.
       const { stdout: toplevelRaw } = await execFileAsync(
         'git', ['rev-parse', '--show-toplevel'],
-        { cwd: worktreePath, timeout: 5000 },
+        { windowsHide: true, cwd: worktreePath, timeout: 5000 },
       );
       if (!(await this.samePath(toplevelRaw.trim(), worktreePath))) {
         console.error(`[worktree-prune] REFUSED preserve for ${worktreeId}: git toplevel ${toplevelRaw.trim()} != ${worktreePath} (repo-root write guard, #1404)`);
@@ -1746,7 +1772,7 @@ export class WorktreeManager {
 
       const { stdout: status } = await execFileAsync(
         'git', ['status', '--porcelain'],
-        { cwd: worktreePath, timeout: 5000 },
+        { windowsHide: true, cwd: worktreePath, timeout: 5000 },
       );
       if (!status.trim()) return 'clean';
 
@@ -1755,11 +1781,11 @@ export class WorktreeManager {
       try {
         await execFileAsync(
           'git', ['add', '-A'],
-          { cwd: worktreePath, timeout: 10_000 },
+          { windowsHide: true, cwd: worktreePath, timeout: 10_000 },
         );
         await execFileAsync(
           'git', ['commit', '-m', 'chore: preserve agent work before worktree cleanup'],
-          { cwd: worktreePath, timeout: 10_000 },
+          { windowsHide: true, cwd: worktreePath, timeout: 10_000 },
         );
         console.log(`[worktree-prune] Auto-committed changes in ${worktreeId}`);
         return 'committed';
@@ -1794,6 +1820,7 @@ export class WorktreeManager {
     let headSha: string;
     try {
       const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
+        windowsHide: true,
         cwd: worktreePath,
         timeout: 5000,
       });
@@ -1808,6 +1835,7 @@ export class WorktreeManager {
     // before merge, so a merged branch fast-forwards into base. Nothing to do.
     try {
       await execFileAsync('git', ['merge-base', '--is-ancestor', 'HEAD', base], {
+        windowsHide: true,
         cwd: worktreePath,
         timeout: 10_000,
       });
@@ -1821,12 +1849,14 @@ export class WorktreeManager {
       if (isolationKind === 'apfs-cow-clone') {
         // Separate object store — copy the commits into the main repo's store.
         await execFileAsync('git', ['fetch', worktreePath, `+HEAD:${preservedRef}`], {
+          windowsHide: true,
           cwd: this.repoRoot,
           timeout: 30_000,
         });
       } else {
         // Shared object store — the commit is already present; just point a ref.
         await execFileAsync('git', ['update-ref', preservedRef, headSha], {
+          windowsHide: true,
           cwd: this.repoRoot,
           timeout: 5000,
         });
@@ -1842,6 +1872,7 @@ export class WorktreeManager {
   private async getCurrentBranch(): Promise<string> {
     try {
       const { stdout } = await execFileAsync('git', ['branch', '--show-current'], {
+        windowsHide: true,
         cwd: this.repoRoot,
         timeout: 5000,
       });
@@ -1853,6 +1884,7 @@ export class WorktreeManager {
 
   private async assertCreatedWorktreeBranch(worktreePath: string, expectedBranch: string): Promise<void> {
     const { stdout } = await execFileAsync('git', ['branch', '--show-current'], {
+      windowsHide: true,
       cwd: worktreePath,
       timeout: 5000,
     });
@@ -1867,6 +1899,7 @@ export class WorktreeManager {
   private async gitWorktreeList(): Promise<Array<{ path: string; branch?: string }>> {
     try {
       const { stdout } = await execFileAsync('git', ['worktree', 'list', '--porcelain'], {
+        windowsHide: true,
         cwd: this.repoRoot,
         timeout: 5000,
       });
@@ -1909,12 +1942,14 @@ export class WorktreeManager {
       const [uncommitted, staged, committed] = await Promise.all([
         // Uncommitted changes (working tree vs index)
         execFileAsync('git', ['diff', '--name-only'], {
+          windowsHide: true,
           cwd: worktreePath,
           timeout: 5000,
         }).then((r) => r.stdout),
 
         // Staged changes (index vs HEAD)
         execFileAsync('git', ['diff', '--name-only', '--cached'], {
+          windowsHide: true,
           cwd: worktreePath,
           timeout: 5000,
         }).then((r) => r.stdout),
@@ -1922,6 +1957,7 @@ export class WorktreeManager {
         // Committed changes since base (if base provided)
         baseBranch
           ? execFileAsync('git', ['diff', '--name-only', `${baseBranch}...HEAD`], {
+              windowsHide: true,
               cwd: worktreePath,
               timeout: 5000,
             })
@@ -1954,7 +1990,7 @@ export class WorktreeManager {
    */
   private async getDiskUsage(dirPath: string): Promise<number> {
     try {
-      const { stdout } = await execFileAsync('du', ['-sk', dirPath], { timeout: 5000 });
+      const { stdout } = await execFileAsync('du', ['-sk', dirPath], { windowsHide: true, timeout: 5000 });
       const kb = parseInt(stdout.split('\t')[0] ?? '0', 10);
       return kb * 1024;
     } catch {

@@ -74,7 +74,7 @@ async function listTouchedFiles(cwd: string, baseRef: string): Promise<string[] 
     const { stdout } = await execFileAsync(
       'git',
       ['diff', '--name-only', '--diff-filter=ACMR', baseRef],
-      { cwd, maxBuffer: COMMAND_MAX_BUFFER },
+      { windowsHide: true, cwd, maxBuffer: COMMAND_MAX_BUFFER },
     );
     for (const entry of stdout.split('\n')) {
       const trimmed = entry.trim();
@@ -88,7 +88,7 @@ async function listTouchedFiles(cwd: string, baseRef: string): Promise<string[] 
     const { stdout } = await execFileAsync(
       'git',
       ['ls-files', '--others', '--exclude-standard'],
-      { cwd, maxBuffer: COMMAND_MAX_BUFFER },
+      { windowsHide: true, cwd, maxBuffer: COMMAND_MAX_BUFFER },
     );
     for (const entry of stdout.split('\n')) {
       const trimmed = entry.trim();
@@ -121,7 +121,7 @@ async function getChangedLinesPerFile(
     const { stdout } = await execFileAsync(
       'git',
       ['diff', '-U0', '--no-color', baseRef, '--', ...paths],
-      { cwd, maxBuffer: COMMAND_MAX_BUFFER },
+      { windowsHide: true, cwd, maxBuffer: COMMAND_MAX_BUFFER },
     );
 
     let currentFile: string | null = null;
@@ -166,7 +166,7 @@ async function getOldLineCount(
     const { stdout } = await execFileAsync(
       'git',
       ['show', `${baseRef}:${relPath}`],
-      { cwd, maxBuffer: COMMAND_MAX_BUFFER },
+      { windowsHide: true, cwd, maxBuffer: COMMAND_MAX_BUFFER },
     );
     const newlines = (stdout.match(/\n/g) ?? []).length;
     return newlines + (stdout.length > 0 && !stdout.endsWith('\n') ? 1 : 0);

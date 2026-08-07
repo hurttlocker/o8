@@ -433,7 +433,7 @@ export function isOpencodeAcpAvailable(): boolean {
   if (!bin) return false;
   if (opencodeHealthCache !== null) return opencodeHealthCache;
   try {
-    const probe = spawnSync(bin, ['--version'], { timeout: 5_000, stdio: 'ignore' });
+    const probe = spawnSync(bin, ['--version'], { windowsHide: true, timeout: 5_000, stdio: 'ignore' });
     opencodeHealthCache = probe.status === 0;
   } catch {
     opencodeHealthCache = false;
@@ -467,7 +467,7 @@ export function isHermesAvailable(): boolean {
   // a hot path).
   if (hermesHealthCache !== null) return hermesHealthCache;
   try {
-    const probe = spawnSync(bin, ['--version'], { timeout: 5_000, stdio: 'ignore' });
+    const probe = spawnSync(bin, ['--version'], { windowsHide: true, timeout: 5_000, stdio: 'ignore' });
     hermesHealthCache = probe.status === 0;
   } catch {
     hermesHealthCache = false;

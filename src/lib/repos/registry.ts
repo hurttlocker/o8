@@ -70,6 +70,7 @@ async function ensureRegistryDir() {
 async function gitValue(repoRoot: string, args: string[]) {
   try {
     const { stdout } = await execFileAsync('git', ['-C', repoRoot, ...args], {
+      windowsHide: true,
       maxBuffer: 512 * 1024,
       timeout: 10_000,
     });
@@ -83,6 +84,7 @@ async function gitValue(repoRoot: string, args: string[]) {
 async function gitCommandSucceeds(repoRoot: string, args: string[]) {
   try {
     await execFileAsync('git', ['-C', repoRoot, ...args], {
+      windowsHide: true,
       maxBuffer: 256 * 1024,
       timeout: 10_000,
     });
@@ -247,6 +249,7 @@ async function resolveRepoRoot(inputPath: string) {
 
   try {
     const { stdout } = await execFileAsync('git', ['-C', resolved, 'rev-parse', '--show-toplevel'], {
+      windowsHide: true,
       maxBuffer: 256 * 1024,
       timeout: 10_000,
     });

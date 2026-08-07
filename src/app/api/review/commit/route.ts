@@ -36,6 +36,7 @@ export async function POST(request: Request) {
   try {
     // Check if there are changes to commit
     const status = execFileSync('git', ['status', '--porcelain'], {
+      windowsHide: true,
       encoding: 'utf-8',
       timeout: 5000,
       cwd: root,
@@ -46,11 +47,12 @@ export async function POST(request: Request) {
     }
 
     // Stage all changes
-    execFileSync('git', ['add', '-A'], { encoding: 'utf-8', timeout: 10000, cwd: root });
+    execFileSync('git', ['add', '-A'], { windowsHide: true, encoding: 'utf-8', timeout: 10000, cwd: root });
 
     // Commit with the provided message — argv form (no shell), so backticks/$()
     // in the message are passed literally, never interpreted by a shell.
     execFileSync('git', ['commit', '-m', message], {
+      windowsHide: true,
       encoding: 'utf-8',
       timeout: 15000,
       cwd: root,
@@ -58,6 +60,7 @@ export async function POST(request: Request) {
 
     // Get the commit hash
     const hash = execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
+      windowsHide: true,
       encoding: 'utf-8',
       timeout: 5000,
       cwd: root,

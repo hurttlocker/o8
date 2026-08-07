@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
       'api',
       `repos/${repo}/deployments`,
       '--jq', '.[0:5] | map({name: .description, environment: .environment, sha: .sha, createdAt: .created_at, state: (if .statuses_url then "pending" else "unknown" end)})',
-    ], { timeout: 15_000, env: { ...process.env, GH_NO_UPDATE_NOTIFIER: '1' } });
+    ], { windowsHide: true, timeout: 15_000, env: { ...process.env, GH_NO_UPDATE_NOTIFIER: '1' } });
 
     const deployments = JSON.parse(stdout || '[]');
 
@@ -36,13 +36,13 @@ export async function GET(request: NextRequest) {
             'api',
             `repos/${repo}/deployments?sha=${d.sha}&environment=${d.environment}`,
             '--jq', '.[0].statuses_url',
-          ], { timeout: 8_000, env: { ...process.env, GH_NO_UPDATE_NOTIFIER: '1' } });
+          ], { windowsHide: true, timeout: 8_000, env: { ...process.env, GH_NO_UPDATE_NOTIFIER: '1' } });
 
           if (statusOut.trim()) {
             const { stdout: stateOut } = await execFileAsync('gh', [
               'api', statusOut.trim(),
               '--jq', '.[0].state',
-            ], { timeout: 8_000, env: { ...process.env, GH_NO_UPDATE_NOTIFIER: '1' } });
+            ], { windowsHide: true, timeout: 8_000, env: { ...process.env, GH_NO_UPDATE_NOTIFIER: '1' } });
             return { ...d, state: stateOut.trim() || 'unknown' };
           }
         } catch {}
@@ -59,7 +59,7 @@ export async function GET(request: NextRequest) {
         '--repo', repo,
         '--limit', '5',
         '--json', 'name,status,conclusion,headSha,createdAt,event',
-      ], { timeout: 15_000, env: { ...process.env, GH_NO_UPDATE_NOTIFIER: '1' } });
+      ], { windowsHide: true, timeout: 15_000, env: { ...process.env, GH_NO_UPDATE_NOTIFIER: '1' } });
 
       const runs = JSON.parse(stdout || '[]');
       const deployments = runs.map((r: { name: string; status: string; conclusion: string; headSha: string; createdAt: string }) => ({

@@ -35,6 +35,7 @@ export async function shouldClassifyFetchAsOriginMissing(
   }
   try {
     const { stdout } = await execFileAsync('git', ['-C', worktreePath, 'remote', 'get-url', 'origin'], {
+      windowsHide: true,
       timeout: 5_000,
     });
     return !stdout.trim();

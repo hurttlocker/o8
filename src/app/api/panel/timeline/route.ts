@@ -39,6 +39,7 @@ interface TimelineMilestone {
 function execQuiet(cmd: string, opts?: { timeout?: number; maxBuffer?: number }): string {
   try {
     return execSync(cmd, {
+      windowsHide: true,
       encoding: 'utf-8',
       timeout: opts?.timeout ?? 8000,
       maxBuffer: opts?.maxBuffer ?? 2 * 1024 * 1024,

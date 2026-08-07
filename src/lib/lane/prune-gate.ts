@@ -67,6 +67,7 @@ export interface PruneGateDecision {
 async function gitStatusPorcelain(worktreePath: string): Promise<string | null> {
   try {
     const { stdout } = await execFileAsync('git', ['-C', worktreePath, 'status', '--porcelain'], {
+      windowsHide: true,
       timeout: GIT_TIMEOUT_MS,
       maxBuffer: GIT_MAX_BUFFER,
     });
@@ -79,6 +80,7 @@ async function gitStatusPorcelain(worktreePath: string): Promise<string | null> 
 async function gitTrackedTopLevel(worktreePath: string): Promise<string[]> {
   try {
     const { stdout } = await execFileAsync('git', ['-C', worktreePath, 'ls-tree', '--name-only', 'HEAD'], {
+      windowsHide: true,
       timeout: GIT_TIMEOUT_MS,
       maxBuffer: GIT_MAX_BUFFER,
     });

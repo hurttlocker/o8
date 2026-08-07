@@ -179,6 +179,7 @@ export function getBootRecoveryLaunchBlocker(input: {
 
 async function hasUncommittedWorktreeChanges(worktreePath: string): Promise<boolean> {
   const { stdout } = await execFileAsync('git', ['status', '--porcelain'], {
+    windowsHide: true,
     cwd: worktreePath,
     maxBuffer: 10 * 1024 * 1024,
   });
@@ -187,10 +188,12 @@ async function hasUncommittedWorktreeChanges(worktreePath: string): Promise<bool
 
 async function autoCommitRecoveryWorktree(worktreePath: string): Promise<void> {
   await execFileAsync('git', ['add', '-A'], {
+    windowsHide: true,
     cwd: worktreePath,
     maxBuffer: 10 * 1024 * 1024,
   });
   await execFileAsync('git', ['commit', '-m', SESSION_RECOVERY_COMMIT_MESSAGE], {
+    windowsHide: true,
     cwd: worktreePath,
     maxBuffer: 10 * 1024 * 1024,
   });

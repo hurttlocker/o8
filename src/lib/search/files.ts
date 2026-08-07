@@ -51,6 +51,7 @@ async function searchFilesInRoot(query: string, root: FileSearchRoot): Promise<S
         '-print',
       ],
       {
+        windowsHide: true,
         cwd: root.localPath,
         encoding: 'utf-8',
         timeout: 2_500,

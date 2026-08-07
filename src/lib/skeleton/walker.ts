@@ -79,7 +79,7 @@ export function walkRepo(options: ScanOptions): WalkedFile[] {
   try {
     const raw = execSync(
       'git ls-files --cached --others --exclude-standard',
-      { cwd: repoPath, encoding: 'utf-8', timeout: 5000, maxBuffer: 2 * 1024 * 1024 },
+      { windowsHide: true, cwd: repoPath, encoding: 'utf-8', timeout: 5000, maxBuffer: 2 * 1024 * 1024 },
     ).trim();
     fileList = raw ? raw.split('\n') : [];
   } catch {

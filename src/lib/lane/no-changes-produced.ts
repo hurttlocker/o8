@@ -18,7 +18,7 @@ export async function probeNoChangesProduced(
   const { stdout: countStdout } = await execFileAsync(
     'git',
     ['rev-list', '--count', `${baseRef}..HEAD`],
-    { cwd, maxBuffer: COMMAND_MAX_BUFFER },
+    { windowsHide: true, cwd, maxBuffer: COMMAND_MAX_BUFFER },
   );
   const commitsAhead = Number.parseInt(countStdout.trim(), 10);
   if (!Number.isFinite(commitsAhead)) {
@@ -26,6 +26,7 @@ export async function probeNoChangesProduced(
   }
 
   const { stdout: statusStdout } = await execFileAsync('git', ['status', '--porcelain'], {
+    windowsHide: true,
     cwd,
     maxBuffer: COMMAND_MAX_BUFFER,
   });

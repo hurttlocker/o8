@@ -25,6 +25,7 @@ export async function checkRepoOriginConfigured(repoPath: string): Promise<boole
   const key = repoKey(repoPath);
   try {
     const { stdout } = await execFileAsync('git', ['-C', key, 'remote', 'get-url', 'origin'], {
+      windowsHide: true,
       timeout: 5_000,
     });
     if (stdout.trim()) {

@@ -45,7 +45,7 @@ interface PrFile {
  *  from the per-file patches plus a path-level stat. */
 async function loadPrDiff(repoSlug: string, prNumber: number): Promise<{ diff: string; stat: string } | null> {
   try {
-    const { stdout } = await exec('gh', ['api', `repos/${repoSlug}/pulls/${prNumber}/files?per_page=100`], { maxBuffer: MAX_BUFFER });
+    const { stdout } = await exec('gh', ['api', `repos/${repoSlug}/pulls/${prNumber}/files?per_page=100`], { windowsHide: true, maxBuffer: MAX_BUFFER });
     const files = JSON.parse(stdout) as PrFile[];
     if (!Array.isArray(files) || !files.length) return null;
     const diff = files
@@ -66,7 +66,7 @@ async function loadPrDiff(repoSlug: string, prNumber: number): Promise<{ diff: s
 async function loadLocalDiff(repoPath: string): Promise<{ diff: string; stat: string }> {
   const run = async (args: string[]) => {
     try {
-      const { stdout } = await exec('git', ['-C', repoPath, ...args], { maxBuffer: MAX_BUFFER });
+      const { stdout } = await exec('git', ['-C', repoPath, ...args], { windowsHide: true, maxBuffer: MAX_BUFFER });
       return stdout;
     } catch {
       return '';

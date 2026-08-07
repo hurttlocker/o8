@@ -67,6 +67,7 @@ async function buildTree(dir: string, relPath: string, depth: number): Promise<F
 function getChangedFiles(root: string): Set<string> {
   try {
     const output = execSync('git status --porcelain', {
+      windowsHide: true,
       cwd: root,
       encoding: 'utf-8',
       timeout: 5000,

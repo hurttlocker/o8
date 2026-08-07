@@ -76,7 +76,7 @@ export async function discoverAllSessions(): Promise<RuntimeSession[]> {
       if (session.ownership === 'owned') return true;
       if (!session.cwd) return true;
       try {
-        const { stdout } = await execAsync('git branch --list', { cwd: session.cwd, timeout: 2000 });
+        const { stdout } = await execAsync('git branch --list', { windowsHide: true, cwd: session.cwd, timeout: 2000 });
         // `git branch --list` prefixes the current branch with `* ` and a
         // branch checked out in a linked worktree with `+ ` — strip both, or
         // live worktree sessions get wrongly auto-cleaned.

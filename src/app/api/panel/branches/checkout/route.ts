@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
     let dirty = false;
     let dirtyFiles: string[] = [];
     try {
-      const status = execFileSync('git', ['status', '--porcelain'], { cwd, timeout: 5000 }).toString().trim();
+      const status = execFileSync('git', ['status', '--porcelain'], { windowsHide: true, cwd, timeout: 5000 }).toString().trim();
       if (status) {
         dirty = true;
         dirtyFiles = status.split('\n').slice(0, 10); // First 10 files
@@ -51,6 +51,7 @@ export async function POST(req: NextRequest) {
     if (dirty && stash) {
       try {
         execFileSync('git', ['stash', 'push', '-m', `o8: auto-stash before switching to ${branch}`], {
+          windowsHide: true,
           cwd, timeout: 10000,
         });
       } catch (err) {
@@ -63,6 +64,7 @@ export async function POST(req: NextRequest) {
     // Checkout
     try {
       execFileSync('git', ['checkout', ...(force ? ['-f'] : []), branch], {
+        windowsHide: true,
         cwd, timeout: 10000,
       });
     } catch (err) {
@@ -75,7 +77,7 @@ export async function POST(req: NextRequest) {
     // Verify current branch
     let currentBranch = branch;
     try {
-      currentBranch = execFileSync('git', ['branch', '--show-current'], { cwd, timeout: 5000 }).toString().trim();
+      currentBranch = execFileSync('git', ['branch', '--show-current'], { windowsHide: true, cwd, timeout: 5000 }).toString().trim();
     } catch { /* use requested branch */ }
 
     return NextResponse.json({

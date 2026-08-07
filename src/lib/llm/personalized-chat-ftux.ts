@@ -93,6 +93,7 @@ function safeTrim(value?: string | null) {
 async function safeExec(command: string, args: string[], timeoutMs = 1_500) {
   try {
     const { stdout, stderr } = await execFileAsync(command, args, {
+      windowsHide: true,
       timeout: timeoutMs,
       maxBuffer: 256 * 1024,
       env: { ...process.env, GH_NO_UPDATE_NOTIFIER: '1' },

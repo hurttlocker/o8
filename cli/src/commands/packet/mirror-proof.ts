@@ -45,6 +45,7 @@ export function parseMirrorArgs(rest: string[]): MirrorArgs {
 function deriveRepoSlug(): string | null {
   try {
     return execFileSync('gh', ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], {
+      windowsHide: true,
       encoding: 'utf-8',
       timeout: 10_000,
     }).trim() || null;

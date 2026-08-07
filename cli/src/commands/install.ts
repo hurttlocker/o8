@@ -80,8 +80,8 @@ function findNode(): { ok: boolean; path: string | null } {
     // `where` is a real Windows executable (System32\where.exe), not a shell
     // builtin, so it runs the same way `sh -lc` does below: no shell needed.
     const out = process.platform === 'win32'
-      ? execFileSync('where', ['node'], { encoding: 'utf8' }).trim().split(/\r?\n/)[0]
-      : execFileSync('sh', ['-lc', 'command -v node'], { encoding: 'utf8' }).trim();
+      ? execFileSync('where', ['node'], { windowsHide: true, encoding: 'utf8' }).trim().split(/\r?\n/)[0]
+      : execFileSync('sh', ['-lc', 'command -v node'], { windowsHide: true, encoding: 'utf8' }).trim();
     return out ? { ok: true, path: out } : { ok: false, path: null };
   } catch {
     return { ok: false, path: null };

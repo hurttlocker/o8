@@ -33,6 +33,7 @@ export async function GET(request: NextRequest) {
     // only `"` was stripped, so $(), backticks, ; and | all survived.) `-z`
     // keeps paths with spaces/newlines intact.
     const out = execFileSync('git', ['ls-files', '-z'], {
+      windowsHide: true,
       cwd: repoRoot,
       encoding: 'utf-8',
       timeout: 3000,

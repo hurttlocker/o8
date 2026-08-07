@@ -26,7 +26,7 @@ import type { ServerEntry, ToolProfile, ToolRegistry } from './registry';
 /** Resolve repo slug from git remote. */
 function detectRepoSlug(repoPath: string): string {
   try {
-    const remote = execSync('git remote get-url origin', { cwd: repoPath, timeout: 3000, encoding: 'utf-8' }).trim();
+    const remote = execSync('git remote get-url origin', { windowsHide: true, cwd: repoPath, timeout: 3000, encoding: 'utf-8' }).trim();
     const match = remote.match(/[:/]([^/]+\/[^/.]+?)(?:\.git)?$/);
     return match?.[1] ?? '';
   } catch {

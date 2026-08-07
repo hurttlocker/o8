@@ -133,6 +133,7 @@ async function summarizeWithCodex(repoPath: string, prompt: string) {
         prompt,
       ],
       {
+        windowsHide: true,
         cwd: repoPath,
         stdio: ['ignore', 'pipe', 'pipe'],
         env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' },

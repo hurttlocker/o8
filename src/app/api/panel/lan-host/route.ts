@@ -41,7 +41,7 @@ async function scanDevPorts(): Promise<number[]> {
     const { execSync } = await import('node:child_process');
     const raw = execSync(
       'lsof -i -P -n -sTCP:LISTEN -F pn 2>/dev/null',
-      { encoding: 'utf-8', timeout: 3000 },
+      { windowsHide: true, encoding: 'utf-8', timeout: 3000 },
     ).trim();
 
     const ports = new Set<number>();

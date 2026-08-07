@@ -101,6 +101,7 @@ export function parseNameStatus(output: string): LaneFileChange[] {
 
 function readGitOutput(cwd: string, args: string[]): string {
   return execFileSync('git', args, {
+    windowsHide: true,
     cwd,
     timeout: 10_000,
     encoding: 'utf-8',
@@ -110,6 +111,7 @@ function readGitOutput(cwd: string, args: string[]): string {
 
 async function readGitOutputAsync(cwd: string, args: string[]): Promise<string> {
   const { stdout } = await execFileAsync('git', args, {
+    windowsHide: true,
     cwd,
     timeout: 10_000,
     encoding: 'utf-8',
@@ -143,18 +145,21 @@ async function readWorktreeTreeHash(cwd: string): Promise<string> {
   const env = { ...process.env, GIT_INDEX_FILE: indexPath };
   try {
     await execFileAsync('git', ['read-tree', 'HEAD'], {
+      windowsHide: true,
       cwd,
       env,
       timeout: 10_000,
       maxBuffer: COMMAND_MAX_BUFFER,
     });
     await execFileAsync('git', ['add', '-A', '--', '.'], {
+      windowsHide: true,
       cwd,
       env,
       timeout: 10_000,
       maxBuffer: COMMAND_MAX_BUFFER,
     });
     const { stdout } = await execFileAsync('git', ['write-tree'], {
+      windowsHide: true,
       cwd,
       env,
       timeout: 10_000,
