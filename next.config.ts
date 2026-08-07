@@ -4,7 +4,13 @@ const nextConfig: NextConfig = {
   output: 'standalone',
   outputFileTracingRoot: __dirname,
   outputFileTracingExcludes: {
-    '*': ['./.cortex-worktrees/**/*'],
+    // sharp is Next's image optimizer, pulled in transitively. `images.unoptimized`
+    // below is required for standalone output, so it is never invoked at runtime —
+    // but it ships ~100MB of vendored libvips into the bundle, and that is what
+    // breaks the Linux AppImage: linuxdeploy dependency-walks the bundled server's
+    // ELFs and dies on sharp's own libvips-cpp, whose soname no system libvips can
+    // match (#1747). Excluding dead weight beats teaching the bundler to carry it.
+    '*': ['./.cortex-worktrees/**/*', '**/node_modules/sharp/**/*', '**/node_modules/@img/**/*'],
   },
   serverExternalPackages: ['better-sqlite3'], // Native module — must be bundled explicitly
   reactStrictMode: true,
