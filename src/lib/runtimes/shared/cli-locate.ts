@@ -109,6 +109,33 @@ export function executableSuffixes(): string[] {
 }
 
 /**
+ * The name of the PATH-lookup program for this platform. `which` is POSIX-only;
+ * Windows ships `where`. Spelling this once keeps every probe agreeing about
+ * which one exists — a `which` that is simply absent reports every CLI as
+ * missing rather than as unresolvable, which reads as "nothing is installed".
+ */
+export function pathLookupProgram(): string {
+  return process.platform === 'win32' ? 'where' : 'which';
+}
+
+/**
+ * Pick the usable answer out of a `which`/`where` result.
+ *
+ * `where` prints one match PER LINE, and for an npm-installed CLI it lists the
+ * extensionless shell script BEFORE the `.cmd` shim — so taking the first line
+ * hands back the one file Windows cannot execute. Take the first line with a
+ * runnable extension instead, falling back to the first line when none match
+ * (a `.exe` on PATH with a narrowed PATHEXT, say).
+ */
+export function pickLookupResult(stdout: string): string | null {
+  const matches = stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (process.platform !== 'win32') return matches[0] ?? null;
+  const runnable = matches.find((match) => executableSuffixes()
+    .some((ext) => ext && match.toLowerCase().endsWith(ext)));
+  return runnable ?? matches[0] ?? null;
+}
+
+/**
  * Every directory a runtime CLI (claude / codex / gemini / opencode / gh) is
  * known to land in, ordered by how often each install method is the culprit
  * when PATH-based lookup misses. All entries are filtered to dirs that exist.

@@ -7,7 +7,8 @@ import {
   probeCodexVoiceCapability,
   type CodexVoiceCapability,
 } from '@/lib/codex/appserver-probe';
-import { scanAndLink } from '@/lib/runtimes/shared/cli-locate';
+import { pathLookupProgram, pickLookupResult, scanAndLink } from '@/lib/runtimes/shared/cli-locate';
+import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { getDataDir } from '@/lib/data-dir-migration';
 
 export const runtime = 'nodejs';
@@ -54,7 +55,11 @@ function safeExec(cmd: string, args: string[], timeoutMs = 2000, deadlineAt?: nu
   const timeout = boundedTimeout(timeoutMs, deadlineAt);
   if (timeout === 0) return '';
   try {
-    return execFileSync(cmd, args, {
+    // Callers pass a located binary, which on Windows is usually the `.cmd`
+    // shim npm writes — execFile cannot run one, so every `--version` probe
+    // came back empty and the wizard reported installed tools as missing.
+    const run = cliInvocation(cmd, args);
+    return execFileSync(run.command, run.args, {
       windowsHide: true,
       encoding: 'utf-8',
       timeout,
@@ -69,12 +74,15 @@ function safeWhich(bin: string, deadlineAt?: number): string {
   const timeout = boundedTimeout(1000, deadlineAt);
   if (timeout === 0) return '';
   try {
-    return execFileSync('which', [bin], {
+    // `which` does not exist on Windows; `where` does, and it prints every
+    // match on its own line (npm's extensionless script first).
+    const stdout = execFileSync(pathLookupProgram(), [bin], {
       windowsHide: true,
       encoding: 'utf-8',
       timeout,
       stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
+    });
+    return pickLookupResult(stdout) ?? '';
   } catch {
     return '';
   }

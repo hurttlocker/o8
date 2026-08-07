@@ -3,6 +3,7 @@ import 'server-only';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import path from 'node:path';
 
+import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import {
   resolveCodexRealtimeTransportAccess,
   type CodexRealtimeTransportAccess,
@@ -69,7 +70,8 @@ class CodexAppServerClient {
   constructor(options: AppServerClientOptions) {
     this.onNotification = options.onNotification;
     this.onExit = options.onExit;
-    this.child = spawn(options.binaryPath, ['app-server', '--stdio'], {
+    const launch = cliInvocation(options.binaryPath, ['app-server', '--stdio']);
+    this.child = spawn(launch.command, launch.args, {
       windowsHide: true,
       env: {
         ...process.env,

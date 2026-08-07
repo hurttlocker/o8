@@ -15,6 +15,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { isNpxFamily } from './npx-detection';
 
 export interface McpTestSuccess {
@@ -107,7 +108,11 @@ async function testStdio(input: StdioTestInput, timeoutMs: number, npxFamily: bo
     let child: ReturnType<typeof spawn> | null = null;
     const childEnv: NodeJS.ProcessEnv = { ...process.env, ...(input.env ?? {}) };
     try {
-      child = spawn(input.command, input.args ?? [], {
+      // Most stdio MCP servers are configured as `npx …`, which on Windows is
+      // `npx.cmd` — spawning it directly throws EINVAL and the user sees
+      // "spawn failed" for a server that is installed and fine.
+      const launch = cliInvocation(input.command, input.args ?? []);
+      child = spawn(launch.command, launch.args, {
         windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe'],
         env: childEnv,

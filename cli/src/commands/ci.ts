@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path';
 import { apiFetch, CliError, EXIT } from '../api.js';
 import { resolveConfig } from '../config.js';
 import { printHumanHeading, printJson, type OutputMode } from '../output.js';
+import { cliInvocation } from '../../../src/lib/runtimes/shared/cli-spawn.js';
 
 interface CiCheck {
   name: string;
@@ -101,7 +102,11 @@ function runCheck(check: CiCheck, cwd: string): CheckResult {
   const timeout = Number.isInteger(check.timeoutMs)
     ? Math.max(1_000, Math.min(60 * 60 * 1000, check.timeoutMs!))
     : 10 * 60 * 1000;
-  const result = spawnSync(check.command[0], check.command.slice(1), {
+  // Checks are configured as ["npm","test"]-shaped arrays, and on Windows `npm`
+  // is `npm.cmd` — spawnSync cannot run one, so every check would report a
+  // spawn error rather than a result.
+  const launch = cliInvocation(check.command[0], check.command.slice(1));
+  const result = spawnSync(launch.command, launch.args, {
     windowsHide: true,
     cwd,
     encoding: 'utf8',

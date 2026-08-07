@@ -20,6 +20,8 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 
+import { cliInvocation, spawnsViaInterpreter } from '@/lib/runtimes/shared/cli-spawn';
+
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 
 // ── ACP wire types (the subset o8 uses) ──
@@ -188,10 +190,17 @@ export class AcpClient {
   private buf = '';
   private readonly onEvent?: (event: OrchestratorEvent) => void;
   private closed = false;
+  private readonly viaInterpreter: boolean;
 
   constructor(opts: AcpClientOptions) {
     this.onEvent = opts.onEvent;
-    this.proc = spawn(opts.command, opts.args, {
+    // An ACP agent installed by npm is a `.cmd` on Windows, which spawn cannot
+    // run directly (EINVAL, before any process exists). Going through the
+    // interpreter makes the agent a GRANDchild, so kill() has to change too —
+    // see below.
+    const launch = cliInvocation(opts.command, opts.args);
+    this.viaInterpreter = spawnsViaInterpreter(opts.command);
+    this.proc = spawn(launch.command, launch.args, {
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, ...(opts.env ?? {}) },
@@ -340,6 +349,15 @@ export class AcpClient {
 
   kill(): void {
     this.closed = true;
+    // When the agent was launched through cmd.exe it is a grandchild, and
+    // kill() reaches only the interpreter — the agent keeps running with its
+    // stdio pipes broken. `taskkill /T` is the only way to take the tree.
+    if (this.viaInterpreter && this.proc.pid) {
+      const pid = this.proc.pid;
+      void import('@/lib/runtimes/shared/owned-session/helpers')
+        .then(({ forceKillTreeWindows }) => forceKillTreeWindows(pid))
+        .catch(() => { /* best effort — the SIGTERM below still fires */ });
+    }
     try {
       this.proc.kill('SIGTERM');
     } catch {

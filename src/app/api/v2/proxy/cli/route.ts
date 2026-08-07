@@ -5,6 +5,7 @@ import { NextResponse } from 'next/server';
 
 import { formatMissingCliError } from '@/lib/runtimes/shared/cli-unavailable';
 import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
+import { spawnsViaInterpreter } from '@/lib/runtimes/shared/cli-spawn';
 
 /**
  * POST /api/v2/proxy/cli
@@ -196,6 +197,14 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: `Unsupported runtime: ${runtime}` }, { status: 400 });
     }
 
+    // Every runtime above puts the user's prompt on argv. On Windows an
+    // npm-installed CLI can only be spawned through cmd.exe, which re-parses
+    // its command line — `%VAR%` expands even inside quotes and an embedded
+    // quote ends the argument — so routing free text that way is a command
+    // injection, not a compatibility fix. Refuse with a reason instead of
+    // wrapping it, and let a real `.exe` install through untouched.
+    const promptOnArgvIsUnsafe = (binary: string) => spawnsViaInterpreter(binary);
+
     try {
       cmd = (await resolveCli(cliSpec)).path;
     } catch (error) {
@@ -208,6 +217,16 @@ export async function POST(request: Request) {
         code: 'runtime_not_installed',
         runtime,
       }, { status: 503 });
+    }
+
+    if (promptOnArgvIsUnsafe(cmd)) {
+      return NextResponse.json({
+        error: `${cliSpec.humanLabel} is installed as a Windows shim (${cmd}), which o8 can only start through the command interpreter. `
+          + 'Prompts would have to pass through that interpreter, so this route refuses rather than risk mangling or misreading them. '
+          + 'Use the LLM proxy with an API key, or an install that provides a real .exe.',
+        code: 'runtime_unsupported_on_platform',
+        runtime,
+      }, { status: 501 });
     }
 
     // No repoPath at all is the "Current project" selection, not a licence to run in

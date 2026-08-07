@@ -6,6 +6,7 @@ import path from 'node:path';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { MODEL_IDS } from '@/lib/models';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { persistCanonicalChatHistoryRecord } from '@/lib/llm/chat-history-store';
 const HISTORY_DIR = path.join(getDataDir(), 'chat-history');
 const ARCHIVE_DIR = path.join(getDataDir(), 'orchestrator-archives');
@@ -115,34 +116,47 @@ async function summarizeWithCodex(repoPath: string, prompt: string) {
     extraEnvOverrides: ['CODEX_HOME'],
   })).path;
 
+  // The prompt is a conversation transcript — free text. On Windows the spawn
+  // has to go through cmd.exe (codex is `codex.cmd`), and cmd expands `%VAR%`
+  // inside quoted arguments, so a transcript on argv is both corruptible and an
+  // injection surface. Send it on stdin there instead — the same way the Brain's
+  // codex adapter has always fed `codex exec`. POSIX keeps argv unchanged.
+  const promptOnStdin = process.platform === 'win32';
   return await new Promise<string>((resolve, reject) => {
+    const launch = cliInvocation(codexBin, [
+      'exec',
+      '--json',
+      '--skip-git-repo-check',
+      '-s',
+      'read-only',
+      '-c',
+      `model=${MODEL_IDS.codexDefault}`,
+      '-c',
+      'model_reasoning_effort=medium',
+      '-C',
+      repoPath,
+      ...(promptOnStdin ? [] : [prompt]),
+    ]);
     const child = spawn(
-      codexBin,
-      [
-        'exec',
-        '--json',
-        '--skip-git-repo-check',
-        '-s',
-        'read-only',
-        '-c',
-        `model=${MODEL_IDS.codexDefault}`,
-        '-c',
-        'model_reasoning_effort=medium',
-        '-C',
-        repoPath,
-        prompt,
-      ],
+      launch.command,
+      launch.args,
       {
         windowsHide: true,
         cwd: repoPath,
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: [promptOnStdin ? 'pipe' : 'ignore', 'pipe', 'pipe'],
         env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' },
       },
     );
+    if (promptOnStdin) {
+      child.stdin?.write(prompt, 'utf-8');
+      child.stdin?.end();
+    }
     let buffer = '';
     let stderr = '';
     let result = '';
-    child.stdout.on('data', (chunk: Buffer) => {
+    // stdio[1]/stdio[2] are always 'pipe' above; only stdin varies by platform,
+    // which is enough to cost the tuple its literal type.
+    child.stdout!.on('data', (chunk: Buffer) => {
       buffer += chunk.toString('utf8');
       const lines = buffer.split('\n');
       buffer = lines.pop() ?? '';
@@ -168,7 +182,7 @@ async function summarizeWithCodex(repoPath: string, prompt: string) {
         }
       }
     });
-    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
+    child.stderr!.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
     child.once('error', reject);
     child.once('close', (code) => {
       const text = result.trim();

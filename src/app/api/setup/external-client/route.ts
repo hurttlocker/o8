@@ -25,13 +25,15 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { existsSync } from 'node:fs';
-import { execFile, execFileSync, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { toClaudeDesktopJson } from '@/lib/mcp/tool-spine/emit-claude-desktop';
 import { hermesAddArgs, openclawSetPayload } from '@/lib/mcp/external-client-args';
 import { resolveShell } from '@/lib/process/resolve-shell';
+import { pathLookupProgram, pickLookupResult, scanForBinary } from '@/lib/runtimes/shared/cli-locate';
+import { cliInvocation, spawnsViaInterpreter } from '@/lib/runtimes/shared/cli-spawn';
 
 const execFileAsync = promisify(execFile);
 
@@ -48,6 +50,26 @@ function normalizeTarget(value: unknown): Target | null {
 // ── CLI resolution via login shell ──
 
 function resolveCli(name: string): string | null {
+  // Both probes below are POSIX-only by construction — `command` is a shell
+  // builtin, not a program, and `-lc` needs a POSIX login shell. Windows gets
+  // `where` instead, which is the same question asked of the same PATH.
+  if (process.platform === 'win32') {
+    try {
+      const stdout = execFileSync(pathLookupProgram(), [name], {
+        windowsHide: true,
+        encoding: 'utf-8',
+        timeout: 3_000,
+      });
+      const found = pickLookupResult(stdout);
+      if (found && existsSync(found)) return found;
+    } catch {
+      // not on PATH — fall through to the well-known scan
+    }
+    // wellKnownCliDirs knows %APPDATA%\npm and friends; the hand-written list
+    // at the bottom of this function is entirely POSIX paths.
+    return scanForBinary(name);
+  }
+
   // Try the inherited PATH first — fast path that works in dev.
   try {
     const direct = execFileSync('command', ['-v', name], {
@@ -110,11 +132,34 @@ function buildServerConfig(): McpServerConfig {
   return { command: o8.command, args: o8.args, env: o8.env ?? {} };
 }
 
+/**
+ * Stop a timed-out install/remove. On Windows the CLI is a GRANDchild of
+ * cmd.exe, so `child.kill()` reaches the interpreter and leaves the real
+ * process running with its pipes broken — the tree has to be taken explicitly.
+ */
+function abandonChild(child: ChildProcess, cliPath: string): void {
+  if (spawnsViaInterpreter(cliPath) && child.pid) {
+    const pid = child.pid;
+    void import('@/lib/runtimes/shared/owned-session/helpers')
+      .then(({ forceKillTreeWindows }) => forceKillTreeWindows(pid))
+      .catch(() => { /* best effort — the SIGTERM below still fires */ });
+  }
+  try {
+    child.kill('SIGTERM');
+  } catch {
+    // already gone
+  }
+}
+
 // ── Hermes ──
 
 async function hermesStatus(cliPath: string): Promise<{ registered: boolean; raw: string }> {
   try {
-    const { stdout } = await execFileAsync(cliPath, ['mcp', 'ls'], {
+    // Every spawn in this file goes through cliInvocation: an npm-installed CLI
+    // is a `.cmd` on Windows and spawning it directly throws EINVAL, which this
+    // function would report as "installed but not registered".
+    const list = cliInvocation(cliPath, ['mcp', 'ls']);
+    const { stdout } = await execFileAsync(list.command, list.args, {
       windowsHide: true,
       encoding: 'utf-8',
       timeout: 5000,
@@ -130,7 +175,8 @@ async function hermesStatus(cliPath: string): Promise<{ registered: boolean; raw
 async function hermesInstall(cliPath: string, server: McpServerConfig): Promise<void> {
   // Wipe any prior entry first so re-install always lands the current shape.
   try {
-    await execFileAsync(cliPath, ['mcp', 'remove', 'o8'], { windowsHide: true, timeout: 5000 });
+    const wipe = cliInvocation(cliPath, ['mcp', 'remove', 'o8']);
+    await execFileAsync(wipe.command, wipe.args, { windowsHide: true, timeout: 5000 });
   } catch {
     // remove fails when it doesn't exist — that's fine
   }
@@ -141,11 +187,12 @@ async function hermesInstall(cliPath: string, server: McpServerConfig): Promise<
   const args = hermesAddArgs(server);
 
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(cliPath, args, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    const launch = cliInvocation(cliPath, args);
+    const child = spawn(launch.command, launch.args, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => {
-      child.kill('SIGTERM');
+      abandonChild(child, cliPath);
       reject(new Error('hermes mcp add timed out after 30s'));
     }, 30_000);
     child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf-8'); });
@@ -169,11 +216,12 @@ async function hermesRemove(cliPath: string): Promise<void> {
   // `hermes mcp remove` prompts `Remove server 'o8'? [Y/n]:` interactively.
   // Same stdin-Y trick as install.
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(cliPath, ['mcp', 'remove', 'o8'], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    const launch = cliInvocation(cliPath, ['mcp', 'remove', 'o8']);
+    const child = spawn(launch.command, launch.args, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => {
-      child.kill('SIGTERM');
+      abandonChild(child, cliPath);
       reject(new Error('hermes mcp remove timed out after 15s'));
     }, 15_000);
     child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf-8'); });
@@ -197,7 +245,8 @@ async function hermesRemove(cliPath: string): Promise<void> {
 
 async function openclawStatus(cliPath: string): Promise<{ registered: boolean; raw: string }> {
   try {
-    await execFileAsync(cliPath, ['mcp', 'show', 'o8'], {
+    const show = cliInvocation(cliPath, ['mcp', 'show', 'o8']);
+    await execFileAsync(show.command, show.args, {
       windowsHide: true,
       encoding: 'utf-8',
       timeout: 5000,
@@ -213,7 +262,11 @@ async function openclawStatus(cliPath: string): Promise<{ registered: boolean; r
 
 async function openclawInstall(cliPath: string, server: McpServerConfig): Promise<void> {
   const payload = openclawSetPayload(server);
-  await execFileAsync(cliPath, ['mcp', 'set', 'o8', payload], {
+  // NOTE: `payload` is a JSON blob on argv, and cmd.exe expands `%VAR%` even
+  // inside quotes. It is o8's own generated server config (paths + our env
+  // keys), never user free text — see the constraint noted in cli-spawn.
+  const set = cliInvocation(cliPath, ['mcp', 'set', 'o8', payload]);
+  await execFileAsync(set.command, set.args, {
     windowsHide: true,
     timeout: 30000,
     maxBuffer: 4 * 1024 * 1024,
@@ -221,7 +274,8 @@ async function openclawInstall(cliPath: string, server: McpServerConfig): Promis
 }
 
 async function openclawRemove(cliPath: string): Promise<void> {
-  await execFileAsync(cliPath, ['mcp', 'unset', 'o8'], {
+  const unset = cliInvocation(cliPath, ['mcp', 'unset', 'o8']);
+  await execFileAsync(unset.command, unset.args, {
     windowsHide: true,
     timeout: 30000,
     maxBuffer: 4 * 1024 * 1024,

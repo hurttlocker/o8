@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
+import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
+
 const execFileAsync = promisify(execFile);
 
 const TEST_TIMEOUT_MS = 300_000;
@@ -57,7 +59,12 @@ export async function runLaneRebaseTests(input: {
   }
 
   try {
-    await execFileAsync('npm', ['test', '--silent'], {
+    // `npm` is `npm.cmd` on Windows, which execFile cannot run — the spawn
+    // EINVALs before a test ever executes, and this function reads any failure
+    // as "the tests failed". Same shape as the rebase typecheck gate: a merge
+    // that should pass burns its layer-1 rerun and escalates instead.
+    const testRun = cliInvocation('npm', ['test', '--silent']);
+    await execFileAsync(testRun.command, testRun.args, {
       windowsHide: true,
       cwd: input.cwd,
       timeout: TEST_TIMEOUT_MS,

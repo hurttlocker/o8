@@ -19,7 +19,7 @@ import { execFile } from 'node:child_process';
 import { existsSync, stat } from 'node:fs';
 import path from 'node:path';
 
-import { executableSuffixes } from '@/lib/runtimes/shared/cli-locate';
+import { executableSuffixes, pathLookupProgram, pickLookupResult } from '@/lib/runtimes/shared/cli-locate';
 import { promisify } from 'node:util';
 
 import { ensureCliSymlink, wellKnownCliDirs } from './cli-locate';
@@ -276,16 +276,11 @@ async function resolveViaWhich(
       // `which` is POSIX-only; Windows ships `where`, which prints one match
       // per line (and lists the extensionless npm script BEFORE the .cmd shim,
       // so take the first line Windows can actually execute).
-      const lookup = process.platform === 'win32' ? 'where' : 'which';
-      const { stdout } = await execFileAsync(lookup, [name], {
+      const { stdout } = await execFileAsync(pathLookupProgram(), [name], {
         windowsHide: true,
         timeout: 3_000,
       });
-      const matches = stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-      const found = process.platform === 'win32'
-        ? (matches.find((m) => executableSuffixes().some((ext) => ext && m.toLowerCase().endsWith(ext)))
-          ?? matches[0])
-        : matches[0];
+      const found = pickLookupResult(stdout);
       if (!found) continue;
       console.log(`[cli-resolver] 'which ${name}' found: ${found}`);
       const version = await probeVersion(found, spec);

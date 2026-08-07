@@ -15,6 +15,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { isNpxFamily } from './npx-detection';
 
 const PREWARM_TIMEOUT_MS = 60_000;
@@ -57,7 +58,8 @@ export async function prewarmMcpServer(input: PrewarmInput): Promise<void> {
 
     try {
       const childEnv: NodeJS.ProcessEnv = { ...process.env, ...(input.env ?? {}) };
-      child = spawn(input.command, argv, {
+      const launch = cliInvocation(input.command, argv);
+      child = spawn(launch.command, launch.args, {
         windowsHide: true,
         stdio: ['ignore', 'ignore', 'ignore'],
         env: childEnv,

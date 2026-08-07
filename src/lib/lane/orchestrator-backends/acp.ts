@@ -28,6 +28,8 @@ import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import type { RealtimeMutationRecord } from '@/lib/realtime/types';
 import { resolveOpencodeOrchestratorModelSync } from '@/lib/operator/defaults';
+import { scanForBinary } from '@/lib/runtimes/shared/cli-locate';
+import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { governHermesProfile } from './hermes-profile';
 import type {
   OrchestratorBackend,
@@ -343,7 +345,11 @@ function resolveHermesBinary(): string | null {
   ]) {
     if (candidate && existsSync(candidate)) return candidate;
   }
-  return null;
+  // The list above is POSIX-shaped in both halves — HOME is normally unset on
+  // Windows, and none of those paths exist there. scanForBinary knows the
+  // Windows install dirs and the extensions (`.cmd`) an npm-installed CLI
+  // actually carries, so it is the only branch that can hit off macOS/Linux.
+  return scanForBinary('hermes');
 }
 
 /**
@@ -383,7 +389,7 @@ function resolveOpencodeBinary(): string | null {
   ]) {
     if (candidate && existsSync(candidate)) return candidate;
   }
-  return null;
+  return scanForBinary('opencode');
 }
 
 /**
@@ -433,7 +439,8 @@ export function isOpencodeAcpAvailable(): boolean {
   if (!bin) return false;
   if (opencodeHealthCache !== null) return opencodeHealthCache;
   try {
-    const probe = spawnSync(bin, ['--version'], { windowsHide: true, timeout: 5_000, stdio: 'ignore' });
+    const version = cliInvocation(bin, ['--version']);
+    const probe = spawnSync(version.command, version.args, { windowsHide: true, timeout: 5_000, stdio: 'ignore' });
     opencodeHealthCache = probe.status === 0;
   } catch {
     opencodeHealthCache = false;
@@ -467,7 +474,10 @@ export function isHermesAvailable(): boolean {
   // a hot path).
   if (hermesHealthCache !== null) return hermesHealthCache;
   try {
-    const probe = spawnSync(bin, ['--version'], { windowsHide: true, timeout: 5_000, stdio: 'ignore' });
+    // Through the interpreter on Windows — an unwrapped spawn of a `.cmd`
+    // throws EINVAL, which this cache would record as "installed but broken".
+    const version = cliInvocation(bin, ['--version']);
+    const probe = spawnSync(version.command, version.args, { windowsHide: true, timeout: 5_000, stdio: 'ignore' });
     hermesHealthCache = probe.status === 0;
   } catch {
     hermesHealthCache = false;
