@@ -14,6 +14,7 @@ import {
   type RuntimeAuthHouse,
 } from '@/lib/orchestrator/runtime-capabilities';
 import { scanAndLink } from './cli-locate';
+import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 
 const execFileAsync = promisify(execFile);
 const CACHE_TTL_MS = 60_000;
@@ -110,7 +111,8 @@ async function readJsonRecord(filePath: string): Promise<Record<string, unknown>
 
 async function probeCodexAuth(binaryPath: string): Promise<boolean> {
   try {
-    const { stdout, stderr } = await execFileAsync(binaryPath, ['login', 'status'], {
+    const probe = cliInvocation(binaryPath, ['login', 'status']);
+    const { stdout, stderr } = await execFileAsync(probe.command, probe.args, {
       windowsHide: true,
       timeout: PROBE_TIMEOUT_MS,
       env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },

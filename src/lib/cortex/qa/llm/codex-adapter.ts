@@ -33,6 +33,7 @@ import { promisify } from 'node:util';
 import { resolveDefaultDispatchModelSync } from '@/lib/operator/defaults';
 import { codexModelArgs, parseLocalModel } from '@/lib/codex/local-model';
 import { MODEL_IDS } from '@/lib/models';
+import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 
 const execFileAsync = promisify(execFile);
 
@@ -192,7 +193,8 @@ export async function callCodex(prompt: string, opts: CallCodexOptions = {}): Pr
 
   try {
     await new Promise<void>((resolve, reject) => {
-      const child = spawn(codexBin, cliArgs, {
+      const launch = cliInvocation(codexBin, cliArgs);
+      const child = spawn(launch.command, launch.args, {
         windowsHide: true,
         cwd,
         env,

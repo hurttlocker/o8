@@ -19,6 +19,7 @@ import 'server-only';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { resolveBrainUseClaudeCliSync } from '@/lib/operator/defaults';
+import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 
 const execFileAsync = promisify(execFile);
 
@@ -75,7 +76,8 @@ async function resolveBin(
 /** Verify the binary actually executes — `claude --version` / `codex --version`. */
 async function verifyBin(bin: string): Promise<boolean> {
   try {
-    await execFileAsync(bin, ['--version'], {
+    const probe = cliInvocation(bin, ['--version']);
+    await execFileAsync(probe.command, probe.args, {
       windowsHide: true,
       timeout: 5_000,
       env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },

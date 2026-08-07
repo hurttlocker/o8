@@ -6,6 +6,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 import { scanForBinary } from '../runtimes/shared/cli-locate';
+import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_TIMEOUT_MS = 2_500;
@@ -128,7 +129,8 @@ async function runCommand(
   timeoutMs: number,
 ): Promise<CommandResult> {
   try {
-    const { stdout, stderr } = await execFileAsync(binaryPath, args, {
+    const probe = cliInvocation(binaryPath, args);
+    const { stdout, stderr } = await execFileAsync(probe.command, probe.args, {
       windowsHide: true,
       env,
       timeout: timeoutMs,
@@ -266,7 +268,8 @@ async function probeStdioCapabilities(
   timeoutMs: number,
 ): Promise<StdioCapabilityProbe> {
   return new Promise((resolve) => {
-    const child = spawn(binaryPath, ['app-server', '--stdio'], {
+    const launch = cliInvocation(binaryPath, ['app-server', '--stdio']);
+    const child = spawn(launch.command, launch.args, {
       windowsHide: true,
       env,
       stdio: ['pipe', 'pipe', 'ignore'],

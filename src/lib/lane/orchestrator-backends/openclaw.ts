@@ -38,6 +38,7 @@ import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { toOpenclawJson } from '@/lib/mcp/tool-spine/emit-openclaw';
 import { resolveOpenclawSpawnBinary } from './openclaw-spawn-preflight';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 // ── Types ────────────────────────────────────────────────────────────────────
 
 interface OpenclawOrchestratorSession {
@@ -754,7 +755,8 @@ async function sendToOpenclawOrchestrator(
   console.log(`[openclaw-diag] spawn args: ${args.map((a, i) => (args[i - 1] === '--message' ? `<message ${fullMessage.length} chars>` : a)).join(' ')}`);
 
   return new Promise<void>((promiseResolve, promiseReject) => {
-    const proc = spawn(openclawBin, args, {
+    const launch = cliInvocation(openclawBin, args);
+    const proc = spawn(launch.command, launch.args, {
       windowsHide: true,
       cwd: session.repoPath,
       env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' },
