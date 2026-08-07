@@ -1191,7 +1191,18 @@ export class WorktreeManager {
     if (!(await this.nodeDependencyInputsMatch(worktreePath))) return false;
 
     try {
-      await symlink(sourcePath, targetPath);
+      // A plain symlink needs SeCreateSymbolicLinkPrivilege on Windows, so for
+      // an ordinary user this always threw — every worktree then fell through
+      // to a real `npm ci` under a 120s cap, which a large repo does not
+      // finish. The partial node_modules left behind is worse than none,
+      // because the early-return above treats ANY node_modules as good and it
+      // is never reinstalled: the typecheck gate then either skips (silent
+      // merge) or fails forever on missing modules.
+      //
+      // A JUNCTION is the Windows answer for directory links and needs no
+      // privilege. Node ignores the type argument off Windows, so this is one
+      // code path.
+      await symlink(sourcePath, targetPath, 'junction');
       return true;
     } catch (error) {
       console.warn(
