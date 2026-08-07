@@ -18,8 +18,9 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { resolvePacketDiffBase, type PacketDiffBaseResolution } from '@/lib/diff/base-resolution';
 import { isSafeGitRef } from '@/lib/git/refs';
@@ -108,10 +109,24 @@ const BRANCH_GATE_LANE_ENV = 'O8_BRANCH_MERGE_GATE_LANE';
 const BRANCH_GATE_SELF_REVIEW_ENV = 'O8_BRANCH_MERGE_GATE_SELF_REVIEW';
 const BRANCH_GATE_ORCHESTRATOR_APPROVED_ENV = 'O8_BRANCH_MERGE_GATE_ORCHESTRATOR_APPROVED';
 const BRANCH_GATE_JSON_MARKER = '__O8_BRANCH_MERGE_GATE_RESULT__';
-const BRANCH_GATE_SCRIPT = `
+/**
+ * The gate script, with the module it loads resolved ABSOLUTELY against the
+ * worktree.
+ *
+ * This used to be a module-level constant containing a RELATIVE specifier,
+ * which worked only because it was passed to `--eval` and therefore resolved
+ * against the process cwd. Moving it into a temp file (to dodge cmd.exe's
+ * quoting on Windows) would have silently re-pointed that specifier at the temp
+ * directory — and since the gate is fail-CLOSED, a failed import blocks every
+ * packet, on every platform. A file:// URL is also the only form Windows
+ * accepts: a bare C:\... path is not a valid ESM specifier.
+ */
+function branchGateScript(cwd: string): string {
+  const gateModule = pathToFileURL(path.join(cwd, 'src', 'lib', 'lane', 'merge-gate.ts')).href;
+  return `
 (async () => {
   console.log = (...args) => process.stderr.write(args.map(String).join(' ') + '\\n');
-  const loaded = await import('./src/lib/lane/merge-gate.ts');
+  const loaded = await import(${'${JSON.stringify(gateModule)}'});
   const api = loaded.runMergeGate ? loaded : (loaded.default ?? loaded['module.exports']);
   const lane = JSON.parse(process.env.${BRANCH_GATE_LANE_ENV} ?? '{}');
   const rawSelfReview = process.env.${BRANCH_GATE_SELF_REVIEW_ENV};
@@ -124,6 +139,7 @@ const BRANCH_GATE_SCRIPT = `
   process.exitCode = 1;
 });
 `;
+}
 
 // ── Helpers ──
 
@@ -334,17 +350,24 @@ function runBranchMergeGate(
     // cmd.exe on Windows is a quoting gamble on a fail-CLOSED path: if cmd's
     // line-oriented parser truncates it, every packet touching this file is
     // blocked. A temp file removes the gamble entirely and costs one write.
-    const scriptFile = path.join(mkdtempSync(path.join(tmpdir(), 'o8-merge-gate-')), 'gate.mts');
-    writeFileSync(scriptFile, BRANCH_GATE_SCRIPT, 'utf-8');
+    const scriptDir = mkdtempSync(path.join(tmpdir(), 'o8-merge-gate-'));
+    const scriptFile = path.join(scriptDir, 'gate.mts');
+    writeFileSync(scriptFile, branchGateScript(cwd), 'utf-8');
     const gate = cliInvocation('npx', ['--no-install', 'tsx', scriptFile]);
-    const output = execFileSync(gate.command, gate.args, {
-      windowsHide: true,
-      cwd,
-      env,
-      timeout: 30_000,
-      encoding: 'utf-8',
-      maxBuffer: 2 * 1024 * 1024,
-    });
+    let output: string;
+    try {
+      output = execFileSync(gate.command, gate.args, {
+        windowsHide: true,
+        cwd,
+        env,
+        timeout: 30_000,
+        encoding: 'utf-8',
+        maxBuffer: 2 * 1024 * 1024,
+      });
+    } finally {
+      // The gate runs on every merge; without this each one leaks a temp dir.
+      rmSync(scriptDir, { recursive: true, force: true });
+    }
 
     const markerIndex = output.lastIndexOf(BRANCH_GATE_JSON_MARKER);
     if (markerIndex === -1) {
