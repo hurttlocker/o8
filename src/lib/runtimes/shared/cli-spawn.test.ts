@@ -80,3 +80,23 @@ describe('bare command names on Windows', () => {
     expect(cliInvocation('npx', ['tsc'])).toEqual({ command: 'npx', args: ['tsc'] });
   });
 });
+
+describe('paths the review flagged as untested', () => {
+  it('wraps an extensionless absolute path rather than handing it to CreateProcess', () => {
+    setPlatform('win32');
+    process.env.ComSpec = 'C:\\WINDOWS\\system32\\cmd.exe';
+    // npm writes a POSIX shell script beside the .cmd; if a resolver ever hands
+    // one back, failing through the interpreter beats an opaque EINVAL.
+    expect(cliInvocation('C:\\Users\\u\\AppData\\Roaming\\npm\\opencode', [])).toEqual({
+      command: 'C:\\WINDOWS\\system32\\cmd.exe',
+      args: ['/d', '/c', 'C:\\Users\\u\\AppData\\Roaming\\npm\\opencode'],
+    });
+  });
+
+  it('treats a .ps1 as needing the interpreter, never as directly executable', () => {
+    setPlatform('win32');
+    // o8 deliberately stopped shipping a .ps1 (#1757) because the default
+    // execution policy refuses it. Nothing should ever spawn one directly.
+    expect(spawnsViaInterpreter('C:\\x\\o8.ps1')).toBe(true);
+  });
+});

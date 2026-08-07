@@ -54,6 +54,17 @@ async function defaultKill(target: InterruptEscalationTarget, signal: InterruptE
     return;
   }
   if (!target.pid) return;
+  if (process.platform === 'win32') {
+    // Windows has no negative-pid process groups, and the recorded pid is the
+    // INTERPRETER — the runtime CLI is its child. TerminateProcess on the
+    // interpreter alone leaves the agent running while isPidAlive(pid) goes
+    // false, which reported `confirmedDead: true` for a worker that was still
+    // editing files. A silent no-op is bad; a false confirmation of death on
+    // the operator's stop button is worse.
+    const { forceKillTreeWindows } = await import('@/lib/runtimes/shared/owned-session/helpers');
+    await forceKillTreeWindows(target.pid);
+    return;
+  }
   try {
     process.kill(-target.pid, signal);
   } catch {

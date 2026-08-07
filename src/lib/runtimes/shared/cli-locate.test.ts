@@ -169,3 +169,27 @@ describe('windows locator', () => {
     expect(readFileSync(mine, 'utf-8')).toContain('hand-written');
   });
 });
+
+describe('executable extension selection is narrower than PATHEXT', () => {
+  const realPlatform = process.platform;
+  const realPathext = process.env.PATHEXT;
+
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
+    if (realPathext === undefined) delete process.env.PATHEXT;
+    else process.env.PATHEXT = realPathext;
+  });
+
+  it('never selects a script extension stock Windows puts in PATHEXT', () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    process.env.PATHEXT = '.COM;.EXE;.BAT;.CMD;.VBS;.JS;.WSF;.MSC';
+    process.env.APPDATA = path.join(home, 'AppData', 'Roaming');
+    const dir = path.join(home, 'AppData', 'Roaming', 'npm');
+    mkdirSync(dir, { recursive: true });
+    // Handing foo.js to cmd runs it under wscript, not node.
+    writeFileSync(path.join(dir, 'tool.js'), 'console.log(1)\n');
+    expect(scanForBinary('tool', home)).toBeNull();
+    writeFileSync(path.join(dir, 'tool.cmd'), '@echo off\r\n');
+    expect(scanForBinary('tool', home)).toBe(path.join(dir, 'tool.cmd'));
+  });
+});

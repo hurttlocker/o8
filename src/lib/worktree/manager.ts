@@ -1026,14 +1026,16 @@ export class WorktreeManager {
     if (hasPackageLock) {
       if (await this.linkMatchingNodeModules(worktreePath)) return;
 
-      await execFileAsync('npm', ['ci', '--prefer-offline'], {
+      const npmCi = cliInvocation('npm', ['ci', '--prefer-offline']);
+      await execFileAsync(npmCi.command, npmCi.args, {
         windowsHide: true,
         cwd: worktreePath,
         timeout: 120_000,
         env: { ...process.env, NODE_ENV: 'development' },
       });
     } else if (hasPackageJson) {
-      await execFileAsync('npm', ['install'], {
+      const npmInstall = cliInvocation('npm', ['install']);
+      await execFileAsync(npmInstall.command, npmInstall.args, {
         windowsHide: true,
         cwd: worktreePath,
         timeout: 120_000,

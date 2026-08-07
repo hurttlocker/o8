@@ -94,11 +94,18 @@ function windowsCliDirs(home: string): string[] {
  */
 export function executableSuffixes(): string[] {
   if (process.platform !== 'win32') return [''];
+  // Deliberately NOT the whole of PATHEXT. Stock Windows includes .VBS/.JS/.WSF
+  // there, and handing `foo.js` to cmd runs it under wscript, not node; a .ps1
+  // would open by file association, which is Notepad by default — a hung GUI
+  // process instead of a CLI. Only the four extensions that mean "an executable
+  // program" are safe to select, intersected with the user's PATHEXT so a
+  // narrowed PATHEXT is still respected.
+  const RUNNABLE = ['.com', '.exe', '.bat', '.cmd'];
   const pathext = (process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD')
     .split(';')
     .map((ext) => ext.trim().toLowerCase())
-    .filter((ext) => ext.startsWith('.'));
-  return [...new Set([...pathext, ''])];
+    .filter((ext) => RUNNABLE.includes(ext));
+  return [...new Set([...(pathext.length ? pathext : RUNNABLE), ''])];
 }
 
 /**

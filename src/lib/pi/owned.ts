@@ -22,6 +22,7 @@ import type {
 } from '@/lib/fleet/types';
 import type { OwnedTailEntry, OwnedTailGroup } from '@/lib/runtimes/shared/owned-session/types';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 
 export {
   buildPiPermissionDefaultResponse,
@@ -287,7 +288,8 @@ async function spawnRpcProcess(session: PiSessionRecord, run: PiRunRecord, initi
   const args = ['--mode', 'rpc', '--name', session.title];
   if (session.model) args.push('--model', session.model);
   if (session.piSessionFile && run.mode === 'resume') args.push('--session', session.piSessionFile);
-  const child = spawn(binary, args, {
+  const launch = cliInvocation(binary, args);
+  const child = spawn(launch.command, launch.args, {
     windowsHide: true,
     cwd: session.repoPath,
     stdio: ['pipe', 'pipe', 'pipe'],

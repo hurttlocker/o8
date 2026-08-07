@@ -149,7 +149,11 @@ async function windowsCommandLine(pid: number): Promise<string | null> {
       ],
       { windowsHide: true, timeout: 10_000 },
     );
-    const line = stdout.trim();
+    // PowerShell's formatter wraps -Command output at the console buffer width,
+    // injecting newlines mid-string. A wrap landing inside the binary name would
+    // make the caller's identity check miss and skip the interrupt with a
+    // misleading "no longer matches" warning, so rejoin before returning.
+    const line = stdout.replace(/\r?\n/g, '').trim();
     return line || null;
   } catch {
     return null;

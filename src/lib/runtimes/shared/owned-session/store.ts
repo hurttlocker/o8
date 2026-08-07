@@ -250,7 +250,11 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
           // SIGINT delivery to another tree; the CLI is also a grandchild of
           // the interpreter, so a single-pid kill would leave it running.
           if (process.platform === 'win32') {
-            await forceKillTreeWindows(session.activeRun.pid);
+            // An access-denied taskkill must not be reported as a clean stop —
+            // the operator would believe a still-running agent had been halted.
+            if (!await forceKillTreeWindows(session.activeRun.pid)) {
+              throw new Error(`taskkill could not stop pid ${session.activeRun.pid}`);
+            }
           } else {
             process.kill(-session.activeRun.pid, 'SIGINT');
           }

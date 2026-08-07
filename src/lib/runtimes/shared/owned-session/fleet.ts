@@ -215,7 +215,9 @@ export function createFleetComputer({
           const cmd = await pidCommandLine(activeRun.pid);
           if (cmd && cmd.includes(adapter.binaryName)) {
             if (process.platform === 'win32') {
-              await forceKillTreeWindows(activeRun.pid);
+              if (!await forceKillTreeWindows(activeRun.pid)) {
+                throw new Error(`taskkill could not stop pid ${activeRun.pid}`);
+              }
             } else {
               process.kill(-activeRun.pid, 'SIGINT');
             }

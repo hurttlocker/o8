@@ -57,7 +57,10 @@ async function resolveClaudeBinForQa(): Promise<string | null> {
 
   // 2. which claude
   try {
-    const { stdout } = await execFileAsync('which', ['claude'], { windowsHide: true, timeout: 3_000 });
+    // `which` is POSIX-only; Windows ships `where`, which lists one match per
+    // line and puts the extensionless npm script before the .cmd shim.
+    const lookup = process.platform === 'win32' ? 'where' : 'which';
+    const { stdout } = await execFileAsync(lookup, ['claude'], { windowsHide: true, timeout: 3_000 });
     const found = stdout.trim();
     if (found) return found;
   } catch {

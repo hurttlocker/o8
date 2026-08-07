@@ -26,6 +26,7 @@ import { checkUntrackedImports } from './check-untracked-imports';
 import { getRelocatedDeletionCredits } from './diff-relocation';
 import { hasScopePartitionToken } from './review-risk';
 import type { Lane } from './types';
+import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 
 // ── Budget Constants (shared with dispatch.ts preservation envelope) ──
 
@@ -326,7 +327,8 @@ function runBranchMergeGate(
       delete env[BRANCH_GATE_SELF_REVIEW_ENV];
     }
 
-    const output = execFileSync('npx', ['--no-install', 'tsx', '--eval', BRANCH_GATE_SCRIPT], {
+    const gate = cliInvocation('npx', ['--no-install', 'tsx', '--eval', BRANCH_GATE_SCRIPT]);
+    const output = execFileSync(gate.command, gate.args, {
       windowsHide: true,
       cwd,
       env,
