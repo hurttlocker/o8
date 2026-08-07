@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { chmod, lstat, mkdir, mkdtemp, readlink, rm, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readlink, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -118,7 +118,7 @@ describe('prelaunch typecheck skip', () => {
  * it is inspecting.
  */
 describe('a symlinked node_modules is never treated as unhealthy', () => {
-  it('leaves the host repo intact when the health markers are absent', async () => {
+  it('returns early instead of installing when the link is already in place', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'o8-nm-link-'));
     roots.push(root);
     const origin = path.join(root, 'origin.git');
@@ -132,8 +132,8 @@ describe('a symlinked node_modules is never treated as unhealthy', () => {
     await git(repo, ['commit', '-m', 'fixture']);
     await git(repo, ['push', '-u', 'origin', 'main']);
 
-    // The trigger state: a host node_modules with NEITHER .package-lock.json
-    // NOR .bin, so every "is this install healthy" check says no.
+    // Host deps with NEITHER health marker — the state that made the guard
+    // report "unhealthy" and fall through to an install.
     const hostModules = path.join(repo, 'node_modules');
     await mkdir(path.join(hostModules, 'left-pad'), { recursive: true });
     const sentinel = path.join(hostModules, 'left-pad', 'index.js');
@@ -145,10 +145,18 @@ describe('a symlinked node_modules is never treated as unhealthy', () => {
       taskName: 'symlinked node_modules must survive',
     });
 
-    // The host's dependencies must still be there.
+    // Put the link in place FIRST, exactly as the APFS-CoW path does before
+    // runSetup — this is what the earlier version of this test never did, so it
+    // exercised the happy path and would have passed with the guard deleted.
+    const worktreeModules = path.join(worktree.path, 'node_modules');
+    await rm(worktreeModules, { recursive: true, force: true }).catch(() => {});
+    await symlink(hostModules, worktreeModules);
+
+    // An install here would readdir+rm THROUGH the link and empty the host.
+    // Drive the real entry point rather than the private helper.
+    await (manager as unknown as { runSetup(p: string): Promise<void> }).runSetup(worktree.path);
+
     expect(await lstat(sentinel).then(() => true).catch(() => false)).toBe(true);
-    // And the worktree's copy is a link, not a real tree.
-    const linkStat = await lstat(path.join(worktree.path, 'node_modules')).catch(() => null);
-    expect(linkStat?.isSymbolicLink()).toBe(true);
-  }, 60_000);
+    expect((await lstat(worktreeModules)).isSymbolicLink()).toBe(true);
+  }, 120_000);
 });

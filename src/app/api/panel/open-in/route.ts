@@ -18,8 +18,12 @@ const EDITORS: Record<string, { bin: string; args: string[] }> = {
   // for a shell. Without this the first two rows of the picker 500 on click.
   // explorer.exe exits 1 even when it succeeds, so it cannot be run through the
   // normal execFileSync path — `start` swallows the code.
-  'finder':       IS_WINDOWS ? { bin: 'cmd', args: ['/d', '/c', 'start', '', ''] } : { bin: 'open', args: [] },
-  'terminal':     IS_WINDOWS ? { bin: 'cmd', args: ['/c', 'start', 'cmd', '/k', 'cd', '/d'] } : { bin: 'open', args: ['-a', 'Terminal'] },
+  // `start` takes an optional QUOTED TITLE first, so exactly one empty string —
+  // two would make the second the command and the path merely its argument.
+  // cmd.exe (not bare `cmd`) so cliInvocation does not wrap an interpreter in
+  // another interpreter.
+  'finder':       IS_WINDOWS ? { bin: 'cmd.exe', args: ['/d', '/c', 'start', ''] } : { bin: 'open', args: [] },
+  'terminal':     IS_WINDOWS ? { bin: 'cmd.exe', args: ['/d', '/c', 'start', '', 'cmd', '/k', 'cd', '/d'] } : { bin: 'open', args: ['-a', 'Terminal'] },
   'vscode':       { bin: 'code', args: [] },
   'cursor':       { bin: 'cursor', args: [] },
   'zed':          { bin: 'zed', args: [] },

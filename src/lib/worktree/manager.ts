@@ -1023,9 +1023,17 @@ export class WorktreeManager {
     const hasPackageLock = await this.pathExists(path.join(worktreePath, 'package-lock.json'));
     const hasPackageJson = await this.pathExists(path.join(worktreePath, 'package.json'));
 
-    if (hasPackageLock) {
+    // The link check gates BOTH branches, not just the lockfile one. A repo with
+    // a package.json and no lockfile (pnpm/yarn/bun) previously fell straight to
+    // `npm install` against a node_modules that the APFS-CoW path had already
+    // symlinked at the host repo's — which reifies a full tree over the link at
+    // best, and differs from `npm ci` only by an arborist implementation detail
+    // that is not ours to rely on. A link is always "done" in either branch.
+    if (hasPackageLock || hasPackageJson) {
       if (await this.linkMatchingNodeModules(worktreePath)) return;
+    }
 
+    if (hasPackageLock) {
       const npmCi = cliInvocation('npm', ['ci', '--prefer-offline']);
       await execFileAsync(npmCi.command, npmCi.args, {
         windowsHide: true,
