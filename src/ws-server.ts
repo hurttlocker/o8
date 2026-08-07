@@ -42,12 +42,6 @@
  *   pong              — LOSSY: keepalive response, loss is harmless.
  */
 
-// Windows resolves a bare command name against the CURRENT DIRECTORY before
-// PATH. This process spawns tools with the cwd set to user repos and agent
-// worktrees, so without this a repo shipping its own `git.cmd`/`npx.cmd` would
-// be executed by us. Removes the cwd from EXECUTABLE lookup only.
-if (process.platform === 'win32') process.env.NoDefaultCurrentDirectoryInExePath = '1';
-
 import { watch, existsSync } from 'node:fs';
 import { readFile, stat, access } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
@@ -297,6 +291,14 @@ installProcessCrashCapture('ws-server');
 // Sentry (dormant unless PACKAGED + a DSN was baked). Fire-and-forget; the
 // local JSONL crash capture above is independent and always runs.
 void initSentryNode('ws');
+
+// Windows resolves a bare command name against the CURRENT DIRECTORY before
+// PATH. This process spawns tools with user repos and agent worktrees as cwd,
+// so without this a repo shipping its own `git.cmd` would be executed by us.
+// Placed after the imports deliberately: ESM hoists imports, so a statement
+// above them only LOOKS like it runs first. Module load performs no spawns, so
+// this still lands before any of them.
+if (process.platform === 'win32') process.env.NoDefaultCurrentDirectoryInExePath = '1';
 
 const execFileAsync = promisify(execFile);
 

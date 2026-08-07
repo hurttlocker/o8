@@ -18,6 +18,9 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { resolvePacketDiffBase, type PacketDiffBaseResolution } from '@/lib/diff/base-resolution';
 import { isSafeGitRef } from '@/lib/git/refs';
 import type { PacketSelfReview } from '@/lib/orchestrator/types';
@@ -327,7 +330,13 @@ function runBranchMergeGate(
       delete env[BRANCH_GATE_SELF_REVIEW_ENV];
     }
 
-    const gate = cliInvocation('npx', ['--no-install', 'tsx', '--eval', BRANCH_GATE_SCRIPT]);
+    // The gate script is 15 lines. Passing it as an --eval ARGUMENT through
+    // cmd.exe on Windows is a quoting gamble on a fail-CLOSED path: if cmd's
+    // line-oriented parser truncates it, every packet touching this file is
+    // blocked. A temp file removes the gamble entirely and costs one write.
+    const scriptFile = path.join(mkdtempSync(path.join(tmpdir(), 'o8-merge-gate-')), 'gate.mts');
+    writeFileSync(scriptFile, BRANCH_GATE_SCRIPT, 'utf-8');
+    const gate = cliInvocation('npx', ['--no-install', 'tsx', scriptFile]);
     const output = execFileSync(gate.command, gate.args, {
       windowsHide: true,
       cwd,

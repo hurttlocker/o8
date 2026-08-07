@@ -244,6 +244,13 @@ function groupUsage(group: string): string | null {
 }
 
 async function dispatch(args: ParsedArgs): Promise<number> {
+  // The o8 CLI runs INSIDE an agent's packet worktree by design, and spawns
+  // bare `git` / `gh`. Windows resolves a bare command name against the current
+  // directory before PATH, so without this a repo shipping its own `git.cmd`
+  // would be executed here — with whatever the CLI was invoked with. The server
+  // processes set the same guard; this is the surface that actually runs in
+  // untrusted trees.
+  if (process.platform === 'win32') process.env.NoDefaultCurrentDirectoryInExePath = '1';
   const [primary, secondary] = args.command;
   // `run` owns all flag parsing for its wrapped command (extractRunCommand reads
   // raw argv), so a `--help`/`-h` meant for the wrapped tool must NOT trigger o8's

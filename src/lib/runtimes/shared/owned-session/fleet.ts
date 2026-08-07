@@ -10,6 +10,7 @@ import {
   nowIso,
   pathExists,
   forceKillTreeWindows,
+  isPidAlive,
   pidCommandLine,
   relativeAge,
   shortHome,
@@ -215,8 +216,16 @@ export function createFleetComputer({
           const cmd = await pidCommandLine(activeRun.pid);
           if (cmd && cmd.includes(adapter.binaryName)) {
             if (process.platform === 'win32') {
-              if (!await forceKillTreeWindows(activeRun.pid)) {
-                throw new Error(`taskkill could not stop pid ${activeRun.pid}`);
+              // Keep the run TRACKED when the kill fails. Clearing activeRun
+              // below drops the only pid we hold, so a worker we could not stop
+              // would become permanently unstoppable AND be recorded as a clean
+              // interrupt. Leaving it marked orphaned-but-live means the next
+              // sweep tries again.
+              if (!await forceKillTreeWindows(activeRun.pid) && isPidAlive(activeRun.pid)) {
+                console.error(
+                  `[owned-store] Could not stop ${runtimeId} pid ${activeRun.pid}; leaving it tracked for the next sweep.`,
+                );
+                return false;
               }
             } else {
               process.kill(-activeRun.pid, 'SIGINT');

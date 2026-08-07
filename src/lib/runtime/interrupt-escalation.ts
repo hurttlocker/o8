@@ -62,7 +62,13 @@ async function defaultKill(target: InterruptEscalationTarget, signal: InterruptE
     // editing files. A silent no-op is bad; a false confirmation of death on
     // the operator's stop button is worse.
     const { forceKillTreeWindows } = await import('@/lib/runtimes/shared/owned-session/helpers');
-    await forceKillTreeWindows(target.pid);
+    // Windows has one mechanism here, so every rung of the ladder is the same
+    // hard tree-kill. Say so rather than letting the audit trail record a
+    // graceful SIGINT that was really a /F, and surface a failed kill instead
+    // of leaving the caller to infer success from a liveness check.
+    if (!await forceKillTreeWindows(target.pid)) {
+      throw new Error(`taskkill could not stop pid ${target.pid} (requested ${signal})`);
+    }
     return;
   }
   try {

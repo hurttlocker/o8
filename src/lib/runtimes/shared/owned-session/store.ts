@@ -252,7 +252,12 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
           if (process.platform === 'win32') {
             // An access-denied taskkill must not be reported as a clean stop —
             // the operator would believe a still-running agent had been halted.
-            if (!await forceKillTreeWindows(session.activeRun.pid)) {
+            // But taskkill also exits non-zero when the pid is ALREADY GONE,
+            // which is the benign race of a run finishing between the liveness
+            // check above and this call. Only a process that is still alive
+            // after a failed kill is a real failure.
+            if (!await forceKillTreeWindows(session.activeRun.pid)
+              && isPidAlive(session.activeRun.pid)) {
               throw new Error(`taskkill could not stop pid ${session.activeRun.pid}`);
             }
           } else {
