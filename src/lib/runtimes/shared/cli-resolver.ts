@@ -16,7 +16,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { stat } from 'node:fs';
+import { existsSync, stat } from 'node:fs';
 import path from 'node:path';
 
 import { executableSuffixes } from '@/lib/runtimes/shared/cli-locate';
@@ -400,7 +400,20 @@ export async function resolveCli(spec: CliResolverSpec): Promise<ResolvedCli> {
   // Single accept point: every successful strategy passes through the version
   // skew check before being cached, so the warning fires at most once per
   // cache fill (10-minute TTL).
-  const accept = (resolved: ResolvedCli): ResolvedCli => {
+  const accept = (resolved: ResolvedCli): ResolvedCli | null => {
+    // A path that does not exist on this filesystem must never be cached OR
+    // shimmed. Git-for-Windows answers `sh -lc 'command -v x'` with an MSYS
+    // path (/c/Users/...) that Node cannot spawn; accepting it wrote a
+    // forwarding shim into the o8 bin dir — the FIRST directory the scanner
+    // checks — so one bad answer outlived its own cache TTL and kept being
+    // rediscovered. Falling through to the next strategy is always better than
+    // persisting an unspawnable answer.
+    if (!existsSync(resolved.path)) {
+      console.warn(
+        `[cli-resolver] Ignoring ${spec.binaryName} at ${resolved.path} (source: ${resolved.source}) — path does not exist.`,
+      );
+      return null;
+    }
     warnOnVersionSkew(spec, resolved);
     // Found outside the process PATH (login shell rc files, deep scan) →
     // repair the PATH story: link into ~/.o8/bin so plain `which`, PTY
@@ -417,7 +430,8 @@ export async function resolveCli(spec: CliResolverSpec): Promise<ResolvedCli> {
   // --- Strategy 1: env overrides ---
   const fromEnv = await resolveViaEnv(spec);
   if (fromEnv) {
-    return accept(fromEnv);
+    const accepted = accept(fromEnv);
+    if (accepted) return accepted;
   }
   const envKeys = [spec.envOverride, ...(spec.extraEnvOverrides ?? [])].filter((k) => process.env[k]);
   if (envKeys.length === 0) {
@@ -428,7 +442,8 @@ export async function resolveCli(spec: CliResolverSpec): Promise<ResolvedCli> {
   // --- Strategy 2: which ---
   const fromWhich = await resolveViaWhich(spec);
   if (fromWhich) {
-    return accept(fromWhich);
+    const accepted = accept(fromWhich);
+    if (accepted) return accepted;
   }
   for (const name of binaryNames(spec)) {
     triedPaths.push(`which:${name}`);
@@ -437,7 +452,8 @@ export async function resolveCli(spec: CliResolverSpec): Promise<ResolvedCli> {
   // --- Strategy 3: login-shell ---
   const fromShell = await resolveViaLoginShell(spec);
   if (fromShell) {
-    return accept(fromShell);
+    const accepted = accept(fromShell);
+    if (accepted) return accepted;
   }
   for (const name of binaryNames(spec)) {
     triedPaths.push(`login-shell:${name}`);
@@ -446,7 +462,8 @@ export async function resolveCli(spec: CliResolverSpec): Promise<ResolvedCli> {
   // --- Strategy 4: static fallbacks ---
   const fromFallback = await resolveViaStaticFallbacks(spec);
   if (fromFallback) {
-    return accept(fromFallback);
+    const accepted = accept(fromFallback);
+    if (accepted) return accepted;
   }
   for (const { dir } of staticFallbackDirs()) {
     for (const name of binaryNames(spec)) {

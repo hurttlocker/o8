@@ -4,6 +4,7 @@ import { existsSync, statSync } from 'fs';
 import os from 'os';
 import { buildErrorPayload, sanitizeErrorMessage } from '@/lib/api/error-format';
 import { listRepos } from '@/lib/repos/registry';
+import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 
 export const dynamic = 'force-dynamic';
 
@@ -114,7 +115,10 @@ export async function POST(req: NextRequest) {
     }
 
     const { bin, args } = EDITORS[editor];
-    execFileSync(bin, [...args, localPath], { windowsHide: true, encoding: 'utf-8', timeout: 5000 });
+    // Editor CLIs on Windows are .cmd shims (VS Code ships `code.cmd`), so
+    // "open in editor" would fail without the interpreter.
+    const open = cliInvocation(bin, [...args, localPath]);
+    execFileSync(open.command, open.args, { windowsHide: true, encoding: 'utf-8', timeout: 5000 });
     return NextResponse.json({ ok: true, editor, path: localPath });
   } catch (err) {
     console.error('[panel/open-in] Failed to open repo', err);

@@ -5,6 +5,7 @@ import os from 'os';
 import { assertOrchestratorRepoPath } from '@/lib/lane/repo-preflight';
 import { formatMissingCliError } from '@/lib/runtimes/shared/cli-unavailable';
 import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
+import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -143,7 +144,8 @@ export async function POST(req: NextRequest) {
   let markClientGone: (() => void) | null = null;
   const stream = new ReadableStream({
     start(controller) {
-      const child = spawn(codexBin, args, {
+      const launch = cliInvocation(codexBin, args);
+      const child = spawn(launch.command, launch.args, {
         windowsHide: true,
         cwd: workingDir,
         env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },

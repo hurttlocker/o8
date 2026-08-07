@@ -30,6 +30,7 @@ import type { RuntimeId } from '@/lib/runtimes';
 import '@/lib/runtimes'; // Ensure runtimes are registered
 import { getRuntime } from '@/lib/runtimes/registry';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
+import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 const NO_STORE_HEADERS = { 'Cache-Control': 'no-store, max-age=0' };
@@ -619,7 +620,8 @@ async function handleMobileActionPost(request: NextRequest) {
           const path = await import('node:path');
           const codexBin = path.join(os.homedir(), '.npm-global', 'bin', 'codex');
           const args = ['exec', 'resume', threadId, message ?? '', '--json', '--dangerously-bypass-approvals-and-sandbox'];
-          const stdout = execFileSync(codexBin, args, {
+          const probe = cliInvocation(codexBin, args);
+          const stdout = execFileSync(probe.command, probe.args, {
             windowsHide: true,
             cwd: process.env.HOME || os.homedir(),
             timeout: 120_000,
