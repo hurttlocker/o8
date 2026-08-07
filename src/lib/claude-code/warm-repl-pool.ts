@@ -33,6 +33,7 @@ import os from 'node:os';
 import { join } from 'node:path';
 
 import { buildOneShotArgs } from './one-shot-repl';
+import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import {
   createClaudeCodeStreamJsonParser,
   type ClaudeCodeStreamJsonParserEvent,
@@ -93,7 +94,8 @@ function spawnWarmProc(binary: string, model: string, effort?: string): WarmProc
 
   let child: ChildProcessWithoutNullStreams;
   try {
-    child = spawn(binary, args, {
+    const launch = cliInvocation(binary, args);
+    child = spawn(launch.command, launch.args, {
       windowsHide: true,
       cwd: os.tmpdir(),
       env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' },

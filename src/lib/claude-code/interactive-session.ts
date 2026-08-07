@@ -10,6 +10,7 @@ import {
 } from './stream-json-parser';
 import { assertNoPrintFlag } from './assert-no-print-flag';
 import { resolveClaudeBinary } from '@/lib/runtimes/shared/cli-locate';
+import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { claudeEffortFlagValue, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type {
   ClaudeCodeStreamJsonParser,
@@ -378,7 +379,11 @@ function spawnSession(
       + 'Re-add the repo or fix its path, then start a new session.',
     );
   }
-  const proc = spawn(claudeCodeBin(), buildClaudeStreamJsonArgs(model, permissionMode, normalizedResumeSessionId), {
+  const launch = cliInvocation(
+    claudeCodeBin(),
+    buildClaudeStreamJsonArgs(model, permissionMode, normalizedResumeSessionId),
+  );
+  const proc = spawn(launch.command, launch.args, {
     windowsHide: true,
     cwd,
     env: {

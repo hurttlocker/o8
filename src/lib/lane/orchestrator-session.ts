@@ -83,6 +83,7 @@ import {
   type OrchestratorTurnRecord,
 } from './orchestrator-crash-survival';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 
 // ── Types ──
 
@@ -877,7 +878,8 @@ function spawnOrchestratorProc(session: OrchestratorSession, w: WarmState, confi
   // fails here with a human-actionable message instead of "spawn claude ENOENT"
   // (which names the healthy binary) or a confusing mid-turn tool error.
   assertOrchestratorRepoPath(session.repoPath);
-  const proc = spawn(resolveClaudeBin(), args, {
+  const launch = cliInvocation(resolveClaudeBin(), args);
+  const proc = spawn(launch.command, launch.args, {
     windowsHide: true,
     cwd: session.repoPath,
     // BYO-key injection is Fable-scoped ONLY — never ambient process.env — so the

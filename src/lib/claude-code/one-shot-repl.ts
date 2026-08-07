@@ -37,6 +37,7 @@ import {
 } from './stream-json-parser';
 import { assertNoPrintFlag } from './assert-no-print-flag';
 import { claudeEffortFlagValue } from '@/lib/orchestrator/thinking-effort';
+import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 
 export interface AskClaudeOneShotOptions {
   /** Explicit `claude` binary path. Caller resolves; we don't probe. */
@@ -90,7 +91,8 @@ export async function askClaudeOneShot(
   const env = { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' };
 
   return new Promise<string>((resolve, reject) => {
-    const child = spawn(opts.binary, buildOneShotArgs(opts.model, opts.effort), {
+    const launch = cliInvocation(opts.binary, buildOneShotArgs(opts.model, opts.effort));
+    const child = spawn(launch.command, launch.args, {
       windowsHide: true,
       cwd,
       env,
