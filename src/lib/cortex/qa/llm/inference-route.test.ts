@@ -185,6 +185,45 @@ describe('inference-route', () => {
       expect(await resolveOpenRouterRoute()).toBeNull();
     });
 
+    it('routes a keyless FREE install to PROXY on its anonymous allowance token', async () => {
+      // Free-without-sign-in ruling 2026-08-06: no keys, no local, no paid plan
+      // — the /issue-free token rides the relay (which enforces the free-chain
+      // model policy + daily cap server-side).
+      mockKey.mockResolvedValue(null);
+      setEnt({ plan: 'free', licenseKey: 'fff.eee.ttt' });
+      const route = await resolveOpenRouterRoute();
+      expect(route?.via).toBe('proxy');
+      expect(route?.url).toBe(`${DEFAULT_O8_API_BASE_URL}/v1/inference`);
+      expect(route?.headers.Authorization).toBe('Bearer fff.eee.ttt');
+    });
+
+    it('free allowance is the LAST resort — a live local endpoint still wins', async () => {
+      mockKey.mockResolvedValue(null);
+      setEnt({ plan: 'free', licenseKey: 'fff.eee.ttt' });
+      mockLocalBaseUrl.mockReturnValue('http://localhost:11434');
+      mockLocalChatModel.mockReturnValue('qwen2.5-coder:7b');
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, {
+        models: [{ name: 'qwen2.5-coder:7b' }],
+      })));
+
+      const route = await resolveOpenRouterRoute();
+      expect(route?.via).toBe('local');
+    });
+
+    it('free allowance is the LAST resort — a BYO OpenRouter key still wins', async () => {
+      mockKey.mockResolvedValue('sk-local-key');
+      setEnt({ plan: 'free', licenseKey: 'fff.eee.ttt' });
+      const route = await resolveOpenRouterRoute();
+      expect(route?.via).toBe('direct');
+      expect(route?.headers.Authorization).toBe('Bearer sk-local-key');
+    });
+
+    it('ignores a malformed free-allowance token', async () => {
+      mockKey.mockResolvedValue(null);
+      setEnt({ plan: 'free', licenseKey: 'not-a-jwt' });
+      expect(await resolveOpenRouterRoute()).toBeNull();
+    });
+
     it('routes plan-token founders to PROXY, not LOCAL, even when local is configured and alive', async () => {
       mockKey.mockResolvedValue(null);
       setEnt({ plan: 'founder', licenseKey: 'aaa.bbb.ccc' });

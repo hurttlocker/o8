@@ -9,6 +9,7 @@ import { clearFounderRecord } from './founder';
 import { readJwtIdentityClaims, shouldDropCachedLicenseForSubject } from './identity-guards';
 import { getEntitlementPath } from './store';
 import type { Plan } from './types';
+import { DEFAULT_O8_API_BASE_URL } from '@/lib/hosted-service';
 
 /**
  * Offline-first signed-license verifier (monetization M4).
@@ -32,13 +33,17 @@ const ALLOWED_ALGS = ['EdDSA', 'RS256'] as const;
 const DEFAULT_GRACE_DAYS = 30;
 
 /**
- * The hosted license service is optional in the open build. O8_PROXY_URL is
- * already the shared hosted-service configuration; an absent value means BYO
- * mode, not an instruction to contact a production default.
+ * The hosted license service base URL. O8_PROXY_URL is the shared
+ * hosted-service configuration; an ABSENT value now falls back to the public
+ * default — a fresh install must be able to mint its anonymous free-allowance
+ * token with zero setup (free-without-sign-in ruling 2026-08-06), the same way
+ * the sign-in sync path already defaults via proxyBaseUrl(). Pure-BYO installs
+ * opt out explicitly with O8_PROXY_URL=off (also: none|disabled|0|false).
  */
 export function configuredLicenseServerBaseUrl(): string | null {
   const configured = process.env.O8_PROXY_URL?.trim();
-  return configured ? configured.replace(/\/+$/, '') : null;
+  if (configured && /^(off|none|disabled|0|false)$/i.test(configured)) return null;
+  return (configured || DEFAULT_O8_API_BASE_URL).replace(/\/+$/, '');
 }
 
 /**

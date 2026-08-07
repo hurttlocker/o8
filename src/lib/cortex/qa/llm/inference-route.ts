@@ -63,6 +63,24 @@ function planToken(): string | null {
   return token && token.split('.').length === 3 ? token : null;
 }
 
+/**
+ * The free-allowance bearer (free-without-sign-in ruling 2026-08-06): the
+ * anonymous first-run token minted by /issue-free. The relay serves EVERY plan
+ * on /v1/inference — free accounts are force-routed onto the $0 model chain
+ * with a small daily spend cap server-side — so a fresh install reaches the o8
+ * model with no sign-in and no BYO key. Only consulted as the LAST route
+ * resort (after local + BYOK, so nobody's existing routing changes), and never
+ * while a view-as override is active: the cached token still carries the REAL
+ * plan, so using it would serve a "viewing as free" founder the paid path
+ * (#1517).
+ */
+function freeAllowanceToken(): string | null {
+  const resolved = getEntitlementSync();
+  if (resolved.plan !== 'free' || resolved.overrideActive) return null;
+  const token = readCachedEntitlement()?.licenseKey?.trim();
+  return token && token.split('.').length === 3 ? token : null;
+}
+
 function resolveGeminiKey(): string | undefined {
   return (
     process.env.GOOGLE_AI_API_KEY ??
@@ -180,6 +198,19 @@ export async function resolveOpenRouterRoute(): Promise<InferenceRoute | null> {
         'X-Title': 'o8 Cortex Q&A',
       },
       via: 'direct',
+    };
+  }
+
+  // Free taste-allowance: no keys, no local, no paid plan — ride the managed
+  // relay with the anonymous free token (relay enforces the free-chain model
+  // policy + daily cap). This is what makes a fresh install's o8 model answer
+  // out of the box.
+  const freeToken = freeAllowanceToken();
+  if (freeToken) {
+    return {
+      url: `${proxyBaseUrl()}/v1/inference`,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${freeToken}` },
+      via: 'proxy',
     };
   }
 

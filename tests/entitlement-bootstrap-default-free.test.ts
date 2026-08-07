@@ -33,11 +33,15 @@ describe('entitlement bootstrap default-free path', () => {
     else process.env.O8_PROXY_URL = originalProxyUrl;
   });
 
-  it('resolves the real bootstrap route to free without contacting a license server', async () => {
+  it('fresh install with no env contacts the DEFAULT hosted service for its free token, fail-soft', async () => {
+    // Free-without-sign-in ruling 2026-08-06: an unset O8_PROXY_URL now means
+    // "use the public default", so a zero-setup install can mint the anonymous
+    // free-allowance token. Network failure stays fail-soft → plan free.
     const fetchMock = vi.fn(async () => {
       throw new Error('network unavailable');
     });
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'debug').mockImplementation(() => {});
     vi.stubGlobal('fetch', fetchMock);
 
     const { POST } = await import('@/app/api/panel/entitlement/bootstrap/route');
@@ -56,6 +60,28 @@ describe('entitlement bootstrap default-free path', () => {
         'team.shared': false,
       },
     });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const firstCallUrl = (fetchMock.mock.calls as unknown[][])[0]?.[0];
+    expect(String(firstCallUrl)).toBe('https://api.o8.run/issue-free');
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('O8_PROXY_URL=off keeps the pure-BYO build fully offline', async () => {
+    process.env.O8_PROXY_URL = 'off';
+    vi.resetModules();
+    const fetchMock = vi.fn(async () => {
+      throw new Error('network unavailable');
+    });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'debug').mockImplementation(() => {});
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { POST } = await import('@/app/api/panel/entitlement/bootstrap/route');
+    const response = await POST();
+    const state = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(state.plan).toBe('free');
     expect(fetchMock).not.toHaveBeenCalled();
     expect(errorSpy).not.toHaveBeenCalled();
   });
