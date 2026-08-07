@@ -45,7 +45,7 @@ export async function GET() {
 
     for (const editor of editors) {
       try {
-        execFileSync('which', [editor.bin], { windowsHide: true, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+        execFileSync(process.platform === 'win32' ? 'where' : 'which', [editor.bin], { windowsHide: true, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
         available.push({ id: editor.id, name: editor.name, available: true });
       } catch {
         available.push({ id: editor.id, name: editor.name, available: false });

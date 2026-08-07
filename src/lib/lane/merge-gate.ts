@@ -121,12 +121,12 @@ const BRANCH_GATE_JSON_MARKER = '__O8_BRANCH_MERGE_GATE_RESULT__';
  * packet, on every platform. A file:// URL is also the only form Windows
  * accepts: a bare C:\... path is not a valid ESM specifier.
  */
-function branchGateScript(cwd: string): string {
+export function branchGateScript(cwd: string): string {
   const gateModule = pathToFileURL(path.join(cwd, 'src', 'lib', 'lane', 'merge-gate.ts')).href;
   return `
 (async () => {
   console.log = (...args) => process.stderr.write(args.map(String).join(' ') + '\\n');
-  const loaded = await import(${'${JSON.stringify(gateModule)}'});
+  const loaded = await import(${JSON.stringify(gateModule)});
   const api = loaded.runMergeGate ? loaded : (loaded.default ?? loaded['module.exports']);
   const lane = JSON.parse(process.env.${BRANCH_GATE_LANE_ENV} ?? '{}');
   const rawSelfReview = process.env.${BRANCH_GATE_SELF_REVIEW_ENV};

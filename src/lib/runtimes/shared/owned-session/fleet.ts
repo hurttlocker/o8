@@ -207,6 +207,7 @@ export function createFleetComputer({
     if (!activeRun) return false;
     const costLine = await runController.readCostLine(activeRun);
     const orphanedAt = nowIso();
+    let stopFailed = false;
     const inIsolatedTestContext = Boolean(process.env.O8_TEST_DATA_DIR_PINNED);
     if (!inIsolatedTestContext && await isOwnedRunAlive(activeRun)) {
       try {
@@ -216,16 +217,17 @@ export function createFleetComputer({
           const cmd = await pidCommandLine(activeRun.pid);
           if (cmd && cmd.includes(adapter.binaryName)) {
             if (process.platform === 'win32') {
-              // Keep the run TRACKED when the kill fails. Clearing activeRun
-              // below drops the only pid we hold, so a worker we could not stop
-              // would become permanently unstoppable AND be recorded as a clean
-              // interrupt. Leaving it marked orphaned-but-live means the next
-              // sweep tries again.
+              // A failed kill must NOT return early here: the orphan record and
+              // saveSession below are the only trace this session ever existed,
+              // and the caller archives the directory regardless of what we
+              // return. Bailing out produced an unkillable worker with no
+              // record at all — worse than the bug it replaced. Instead, flag
+              // it, keep the pid, and let the caller skip archiving.
               if (!await forceKillTreeWindows(activeRun.pid) && isPidAlive(activeRun.pid)) {
+                stopFailed = true;
                 console.error(
-                  `[owned-store] Could not stop ${runtimeId} pid ${activeRun.pid}; leaving it tracked for the next sweep.`,
+                  `[owned-store] Could not stop ${runtimeId} pid ${activeRun.pid}; keeping the session so a later sweep can retry.`,
                 );
-                return false;
               }
             } else {
               process.kill(-activeRun.pid, 'SIGINT');
@@ -236,19 +238,26 @@ export function createFleetComputer({
         console.warn(`[owned-store] Failed to interrupt orphaned ${runtimeId} session ${session.surfaceId}:`, error instanceof Error ? error.message : error);
       }
     }
+    const recordedReason = stopFailed
+      ? `${reason} The worker could not be stopped (pid ${activeRun.pid} still alive).`
+      : reason;
     session.orphanedAt = orphanedAt;
-    session.orphanedReason = reason;
+    session.orphanedReason = recordedReason;
     session.orphanedCostLine = costLine;
-    session.latestSummary = costLine ? `${reason} Cost: ${costLine}` : reason;
-    session.activeRun = undefined;
+    session.latestSummary = costLine ? `${recordedReason} Cost: ${costLine}` : recordedReason;
+    // Hold on to the pid when the stop failed — it is the only handle anything
+    // has on a process that is still running.
+    session.activeRun = stopFailed ? session.activeRun : undefined;
     session.recentRuns = session.recentRuns.map((run) =>
       run.id === activeRun.id
-        ? { ...run, outcome: 'interrupted', interruptRequestedAt: orphanedAt, finishedAt: run.finishedAt ?? orphanedAt }
+        ? stopFailed
+          ? { ...run, interruptRequestedAt: orphanedAt }
+          : { ...run, outcome: 'interrupted', interruptRequestedAt: orphanedAt, finishedAt: run.finishedAt ?? orphanedAt }
         : run,
     );
     await io.saveSession(session);
-    console.warn(`[owned-store] Orphaned ${runtimeId} session ${session.surfaceId}: ${reason}${costLine ? ` cost=${costLine}` : ''}`);
-    return true;
+    console.warn(`[owned-store] Orphaned ${runtimeId} session ${session.surfaceId}: ${recordedReason}${costLine ? ` cost=${costLine}` : ''}`);
+    return !stopFailed;
   }
 
   async function sweepOrphanedSessions(activeSurfaceIds: Set<string>, maxAgeMs: number): Promise<number> {
@@ -265,7 +274,11 @@ export function createFleetComputer({
           if (activeSurfaceIds.has(current.surfaceId)) return false;
           if (Date.now() - sessionLastActivityMs(current) < maxAgeMs) return false;
           if (current.activeRun) {
-            await markActiveRunOrphaned(current, `No lane referenced this owned ${runtimeId} session within ${Math.round(maxAgeMs / 1000)}s of launch.`);
+            const stopped = await markActiveRunOrphaned(current, `No lane referenced this owned ${runtimeId} session within ${Math.round(maxAgeMs / 1000)}s of launch.`);
+            // Archiving renames the directory out of the scanned root, so a
+            // session archived while its worker is still alive can never be
+            // seen — or retried — again. Leave it in place instead.
+            if (!stopped) return false;
           }
           const result = await archiveOwnedSessionDir(root, current);
           return result.archived;

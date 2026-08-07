@@ -284,7 +284,13 @@ export function isPidAlive(pid?: number) {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
+  } catch (error) {
+    // EPERM means the process EXISTS but we may not signal or query it — the
+    // exact shape of an elevated or other-user process. Reading that as "dead"
+    // is how a failed kill gets swallowed and a still-running worker is
+    // reported as stopped, so treat it as alive and let the caller surface the
+    // failure instead.
+    if ((error as NodeJS.ErrnoException)?.code === 'EPERM') return true;
     return false;
   }
 }
