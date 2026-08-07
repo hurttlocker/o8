@@ -20,7 +20,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { access, copyFile, mkdir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { access, copyFile, lstat, mkdir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type {
@@ -1186,6 +1186,15 @@ export class WorktreeManager {
   private async linkMatchingNodeModules(worktreePath: string): Promise<boolean> {
     const sourcePath = path.join(this.repoRoot, 'node_modules');
     const targetPath = path.join(worktreePath, 'node_modules');
+    // A LINK is always "done", regardless of what it points at. This check must
+    // come first and must never fall through: returning false here lets the
+    // caller run `npm ci` in a worktree whose node_modules is a symlink to the
+    // HOST repo's, and npm's removal step is readdir + rm per entry — through
+    // the link, that empties the host's tree. The health check below is about
+    // a REAL directory left behind by a killed install; applying it to a link
+    // would destroy the very thing it is inspecting.
+    const linked = await lstat(targetPath).catch(() => null);
+    if (linked?.isSymbolicLink()) return true;
     // Existence is not health. When the symlink fails (Windows without the
     // privilege) a real `npm ci` runs under a timeout, and an install killed
     // part-way leaves a node_modules that this check used to accept forever —

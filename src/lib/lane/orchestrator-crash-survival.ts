@@ -231,7 +231,11 @@ export function isPidAlive(pid?: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
+  } catch (error) {
+    // EPERM means the process EXISTS but cannot be signalled. Reading it as
+    // dead here declares a live orchestrator REPL crashed and respawns a second
+    // one on the same thread.
+    if ((error as NodeJS.ErrnoException)?.code === 'EPERM') return true;
     return false;
   }
 }

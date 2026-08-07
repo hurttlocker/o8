@@ -211,6 +211,7 @@ export function createFleetComputer({
     const costLine = await runController.readCostLine(activeRun);
     const orphanedAt = nowIso();
     let stopFailed = false;
+    let gaveUpOnLiveProcess = false;
     const inIsolatedTestContext = Boolean(process.env.O8_TEST_DATA_DIR_PINNED);
     if (!inIsolatedTestContext && await isOwnedRunAlive(activeRun)) {
       try {
@@ -240,6 +241,7 @@ export function createFleetComputer({
                     `[owned-store] Could not stop ${runtimeId} pid ${activeRun.pid} (attempt ${attempts}/${MAX_STOP_ATTEMPTS}); keeping the session to retry.`,
                   );
                 } else {
+                  gaveUpOnLiveProcess = true;
                   console.error(
                     `[owned-store] Giving up on ${runtimeId} pid ${activeRun.pid} after ${attempts} attempts; archiving with the failure recorded.`,
                   );
@@ -255,9 +257,11 @@ export function createFleetComputer({
       }
     }
     const stopAttempts = session.activeRun?.stopAttempts ?? 0;
-    const recordedReason = stopAttempts > 0
-      ? `${reason} The worker could not be stopped after ${stopAttempts} attempt(s) (pid ${activeRun.pid}).`
-      : reason;
+    const recordedReason = gaveUpOnLiveProcess
+      ? `${reason} ABANDONED: pid ${activeRun.pid} could not be stopped after ${stopAttempts} attempts and may still be running.`
+      : stopAttempts > 0
+        ? `${reason} The worker could not be stopped after ${stopAttempts} attempt(s) (pid ${activeRun.pid}).`
+        : reason;
     session.orphanedAt = orphanedAt;
     session.orphanedReason = recordedReason;
     session.orphanedCostLine = costLine;
@@ -267,7 +271,10 @@ export function createFleetComputer({
     session.activeRun = stopFailed ? session.activeRun : undefined;
     session.recentRuns = session.recentRuns.map((run) =>
       run.id === activeRun.id
-        ? stopFailed
+        ? stopFailed || gaveUpOnLiveProcess
+          // Never stamp a clean 'interrupted' + finishedAt on a process we know
+          // is still running — that is the false confirmation this whole thread
+          // has been removing, and archiving it here makes the claim permanent.
           ? { ...run, interruptRequestedAt: orphanedAt }
           : { ...run, outcome: 'interrupted', interruptRequestedAt: orphanedAt, finishedAt: run.finishedAt ?? orphanedAt }
         : run,

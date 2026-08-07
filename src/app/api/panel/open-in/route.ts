@@ -16,13 +16,16 @@ const IS_WINDOWS = process.platform === 'win32';
 const EDITORS: Record<string, { bin: string; args: string[] }> = {
   // `open` is macOS-only; Windows has explorer for the file manager and cmd
   // for a shell. Without this the first two rows of the picker 500 on click.
-  'finder':       IS_WINDOWS ? { bin: 'explorer', args: [] } : { bin: 'open', args: [] },
+  // explorer.exe exits 1 even when it succeeds, so it cannot be run through the
+  // normal execFileSync path — `start` swallows the code.
+  'finder':       IS_WINDOWS ? { bin: 'cmd', args: ['/d', '/c', 'start', '', ''] } : { bin: 'open', args: [] },
   'terminal':     IS_WINDOWS ? { bin: 'cmd', args: ['/c', 'start', 'cmd', '/k', 'cd', '/d'] } : { bin: 'open', args: ['-a', 'Terminal'] },
   'vscode':       { bin: 'code', args: [] },
   'cursor':       { bin: 'cursor', args: [] },
   'zed':          { bin: 'zed', args: [] },
   'sublime':      { bin: 'subl', args: [] },
-  'xcode':        { bin: 'open', args: ['-a', 'Xcode'] },
+  // macOS-only; a direct POST from a stale client would otherwise 500.
+  ...(IS_WINDOWS ? {} : { 'xcode': { bin: 'open', args: ['-a', 'Xcode'] } }),
   'jetbrains':    { bin: 'idea', args: [] },
   'windsurf':     { bin: 'windsurf', args: [] },
   'claude-code':  { bin: 'claude', args: [] },
