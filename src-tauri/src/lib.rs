@@ -1589,7 +1589,12 @@ fn resolve_node_via_login_shell() -> Option<String> {
         ("sh", &["-l", "-c", "command -v node"]),
     ];
     for (shell, args) in shells {
-        if let Ok(out) = Command::new(shell).args(args).output() {
+        // .no_window() matters here even though these are POSIX shell names: a
+        // Windows box with Git Bash DOES resolve `sh`, and this runs inside the
+        // node pre-flight that gates the whole boot. An unflagged spawn pops a
+        // console, and a console the user CLICKS suspends the process — the
+        // same splash-screen deadlock the flag was introduced to kill.
+        if let Ok(out) = Command::new(shell).args(args).no_window().output() {
             if out.status.success() {
                 let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
                 if !path.is_empty() && std::path::Path::new(&path).exists() {
@@ -1600,7 +1605,7 @@ fn resolve_node_via_login_shell() -> Option<String> {
     }
     // Last resort: raw PATH lookup (in case the user really has it in
     // /usr/local/bin and Finder's PATH is fine).
-    if let Ok(out) = Command::new("which").arg("node").output() {
+    if let Ok(out) = Command::new("which").arg("node").no_window().output() {
         if out.status.success() {
             let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
             if !path.is_empty() && std::path::Path::new(&path).exists() {
@@ -1681,9 +1686,12 @@ fn supports_native_node_major(major: u32) -> bool {
 
 /// Windows-native fallback: `where node`, then the common install roots
 /// (nvm-windows / Volta / fnm / official installer / winget / choco).
-/// `resolve_node_via_login_shell()` above only knows zsh/bash/sh and always
-/// returns `None` on Windows (no such shells to probe), so this is the
-/// actual Windows discovery path (#1740). A no-op on macOS/Linux — one more
+/// `resolve_node_via_login_shell()` above only knows zsh/bash/sh, which USUALLY
+/// answer nothing on Windows — but not always: a box with Git Bash resolves
+/// `sh`, and an MSYS login shell can return a PATH that still has no node on it
+/// (installer/nvm-windows touch the Windows PATH, not the MSYS one). So treat
+/// that fallback as "usually empty here", never as unreachable, and keep this
+/// the actual Windows discovery path (#1740). A no-op on macOS/Linux — one more
 /// `None` in an already-exhausted `.or_else` chain there, so behavior stays
 /// byte-identical.
 #[cfg(target_os = "windows")]
