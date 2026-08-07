@@ -9,6 +9,7 @@ import {
   metadataPath,
   nowIso,
   pathExists,
+  forceKillTreeWindows,
   pidCommandLine,
   relativeAge,
   shortHome,
@@ -213,7 +214,11 @@ export function createFleetComputer({
         } else {
           const cmd = await pidCommandLine(activeRun.pid);
           if (cmd && cmd.includes(adapter.binaryName)) {
-            process.kill(-activeRun.pid, 'SIGINT');
+            if (process.platform === 'win32') {
+              await forceKillTreeWindows(activeRun.pid);
+            } else {
+              process.kill(-activeRun.pid, 'SIGINT');
+            }
           }
         }
       } catch (error) {

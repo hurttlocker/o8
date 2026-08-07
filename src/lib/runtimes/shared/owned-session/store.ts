@@ -25,6 +25,7 @@ import {
   ensureDir,
   isPidAlive,
   nowIso,
+  forceKillTreeWindows,
   pidCommandLine,
   resolveRepoContext,
   validateWorkspace,
@@ -245,7 +246,14 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
       } else {
         const cmd = await pidCommandLine(session.activeRun.pid);
         if (cmd && cmd.includes(adapter.binaryName)) {
-          process.kill(-session.activeRun.pid, 'SIGINT');
+          // Windows has no process groups addressed by negative pid and no
+          // SIGINT delivery to another tree; the CLI is also a grandchild of
+          // the interpreter, so a single-pid kill would leave it running.
+          if (process.platform === 'win32') {
+            await forceKillTreeWindows(session.activeRun.pid);
+          } else {
+            process.kill(-session.activeRun.pid, 'SIGINT');
+          }
         } else {
           console.warn(
             `[owned-store] Skipping interrupt signal for ${surfaceId}: pid ${session.activeRun.pid} no longer matches an owned ${adapter.binaryName} run (${cmd ?? 'process gone'})`,

@@ -113,12 +113,73 @@ export function metadataPath(sessionDir: string) {
  * group leader SIGINTs an innocent process group.
  */
 export async function pidCommandLine(pid: number): Promise<string | null> {
+  if (process.platform === 'win32') return windowsCommandLine(pid);
   try {
     const { stdout } = await promisify(execFile)('ps', ['-o', 'command=', '-p', String(pid)], { windowsHide: true });
     const line = stdout.trim();
     return line || null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * The full command line of a Windows pid, or null.
+ *
+ * `ps` does not exist on Windows, so the POSIX path above returned null for
+ * every pid — and callers read null as "that process is gone", which silently
+ * turned interrupt into a no-op (#1758 follow-up). An agent that starts and
+ * cannot be stopped is worse than one that never starts.
+ *
+ * `tasklist` is not enough: it reports the IMAGE NAME only, and because o8
+ * spawns runtime CLIs through the interpreter on Windows, the image name is
+ * always `cmd.exe`. The full command line is the only thing that can still
+ * answer the question the caller is really asking — "is this pid still OUR
+ * run, or a recycled one?" — because it contains the CLI path we spawned.
+ */
+async function windowsCommandLine(pid: number): Promise<string | null> {
+  try {
+    const { stdout } = await promisify(execFile)(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `(Get-CimInstance Win32_Process -Filter "ProcessId=${Number(pid)}").CommandLine`,
+      ],
+      { windowsHide: true, timeout: 10_000 },
+    );
+    const line = stdout.trim();
+    return line || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Stop an owned run's whole process tree on Windows.
+ *
+ * POSIX callers use `process.kill(-pid, 'SIGINT')` — a negative pid meaning
+ * "the process group". Windows has neither process groups addressed that way
+ * nor SIGINT delivery to another tree, so that call cannot work there. Worse,
+ * the CLI is a GRANDCHILD of the interpreter, so even a correct single-pid kill
+ * would leave the real agent running.
+ *
+ * `taskkill /T` takes the tree. `/F` is required in practice: our children are
+ * spawned detached with no console, so there is no console-control path to ask
+ * them to stop politely. Interrupt is therefore a hard stop on Windows, which
+ * is a real behavioural difference from POSIX and is why it is named plainly.
+ */
+export async function forceKillTreeWindows(pid: number): Promise<boolean> {
+  try {
+    await promisify(execFile)('taskkill.exe', ['/PID', String(Number(pid)), '/T', '/F'], {
+      windowsHide: true,
+      timeout: 15_000,
+    });
+    return true;
+  } catch (error) {
+    console.warn(`[owned-session] taskkill failed for pid ${pid}:`, error);
+    return false;
   }
 }
 
