@@ -12,6 +12,7 @@ import { resolvePortInfo } from '@/lib/panel/api-port';
 import { spawnBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
 import { ensureDispatchBackendReady } from '@/lib/runtimes/shared/dispatch-readiness';
 import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
+import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { tmuxSessionName } from '@/lib/terminal/tmux';
 import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
 
@@ -587,8 +588,14 @@ export function createOwnedRunController({
       const stdoutFd = openSync(stdoutPath, 'a');
       const stderrFd = openSync(stderrPath, 'a');
       try {
+        // On Windows the resolved CLI is usually a `.cmd` shim (that is what npm
+        // installs), and Node refuses to execute one without an interpreter —
+        // it fails before a process exists, so the run dies in milliseconds with
+        // pid 0 and an empty stderr, which reads like the agent instantly gave
+        // up. cliInvocation is the identity for real executables. See #1758.
+        const winLaunch = cliInvocation(spawnBinary, spawnArgs);
         const child = process.platform === 'win32'
-          ? spawn(spawnBinary, spawnArgs, {
+          ? spawn(winLaunch.command, winLaunch.args, {
               windowsHide: true,
               cwd: session.repoPath,
               detached: true,
