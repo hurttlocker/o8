@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readlinkSync, lstatSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, readlinkSync, lstatSync, symlinkSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -106,5 +106,66 @@ describe('scanAndLink', () => {
     const found = scanAndLink('opencode', home);
     expect(found).toBe(bin);
     expect(readlinkSync(path.join(home, '.o8', 'bin', 'opencode'))).toBe(bin);
+  });
+});
+
+/**
+ * Windows locator behaviour (#1758). These run on any host: the module reads
+ * `process.platform` at call time, so the suite stubs it and restores after.
+ * Without these, a Windows box resolves NO runtime CLI at all — every runtime
+ * reports "not installed" and dispatch is impossible.
+ */
+describe('windows locator', () => {
+  const realPlatform = process.platform;
+  const realAppData = process.env.APPDATA;
+
+  function asWindows() {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    process.env.APPDATA = path.join(home, 'AppData', 'Roaming');
+  }
+
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
+    if (realAppData === undefined) delete process.env.APPDATA;
+    else process.env.APPDATA = realAppData;
+  });
+
+  it('scans the npm global bin, where `npm i -g` actually lands', () => {
+    asWindows();
+    const dir = path.join(home, 'AppData', 'Roaming', 'npm');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'claude.cmd'), '@echo off\r\n');
+    expect(wellKnownCliDirs(home)).toContain(dir);
+    expect(scanForBinary('claude', home)).toBe(path.join(dir, 'claude.cmd'));
+  });
+
+  it('prefers the executable extension over the extensionless shell script', () => {
+    asWindows();
+    const dir = path.join(home, 'AppData', 'Roaming', 'npm');
+    mkdirSync(dir, { recursive: true });
+    // npm drops BOTH: a POSIX shell script Windows cannot execute, and a .cmd.
+    writeFileSync(path.join(dir, 'claude'), '#!/bin/sh\n');
+    writeFileSync(path.join(dir, 'claude.cmd'), '@echo off\r\n');
+    expect(scanForBinary('claude', home)).toBe(path.join(dir, 'claude.cmd'));
+  });
+
+  it('repairs PATH with a forwarding .cmd instead of a privileged symlink', () => {
+    asWindows();
+    const target = path.join(home, 'AppData', 'Roaming', 'npm', 'claude.cmd');
+    mkdirSync(path.dirname(target), { recursive: true });
+    writeFileSync(target, '@echo off\r\n');
+    const shim = ensureCliSymlink('claude', target, home);
+    expect(shim).toBe(path.join(home, '.o8', 'bin', 'claude.cmd'));
+    expect(readFileSync(shim!, 'utf-8')).toContain(`"${target}" %*`);
+  });
+
+  it('never clobbers a real file a user put in the bin dir', () => {
+    asWindows();
+    const binDir = path.join(home, '.o8', 'bin');
+    mkdirSync(binDir, { recursive: true });
+    const mine = path.join(binDir, 'claude.cmd');
+    writeFileSync(mine, '@echo off\r\necho hand-written\r\n');
+    expect(ensureCliSymlink('claude', path.join(home, 'elsewhere', 'claude.cmd'), home)).toBeNull();
+    expect(readFileSync(mine, 'utf-8')).toContain('hand-written');
   });
 });

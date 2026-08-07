@@ -18,7 +18,7 @@
  * `which`/PTY terminals/worker spawns find it from then on.
  */
 
-import { existsSync, lstatSync, mkdirSync, readdirSync, readlinkSync, symlinkSync, unlinkSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { getDataDir } from '../../data-dir-migration';
@@ -55,6 +55,53 @@ function versionManagerBinDirs(root: string, binSubpath: string[]): string[] {
 }
 
 /**
+ * Windows install targets. None of the POSIX entries above exist on Windows,
+ * so before this list a Windows box could not resolve a single runtime CLI —
+ * `npm i -g` lands in %APPDATA%\npm, which was absent, and every runtime
+ * resolves through this same scan. The result was that mission creation
+ * refused every runtime as "not installed" and dispatch was impossible.
+ *
+ * Kept out of the main array (rather than inlined) because these read from
+ * environment variables that are empty off Windows, which would otherwise
+ * produce junk relative paths on macOS and Linux.
+ */
+function windowsCliDirs(home: string): string[] {
+  if (process.platform !== 'win32') return [];
+  const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+  const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+  const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
+  const programData = process.env.ProgramData || 'C:\\ProgramData';
+  return [
+    path.join(appData, 'npm'), // npm -g — by far the most common
+    path.join(localAppData, 'pnpm'),
+    path.join(localAppData, 'Volta', 'bin'),
+    path.join(localAppData, 'Microsoft', 'WindowsApps'), // winget shims
+    path.join(home, 'scoop', 'shims'),
+    path.join(programData, 'chocolatey', 'bin'),
+    path.join(programFiles, 'nodejs'),
+  ];
+}
+
+/**
+ * Executable suffixes to try for a given binary name, in resolution order.
+ *
+ * Windows only marks a file executable by EXTENSION, and npm drops TWO files
+ * per global bin: an extensionless shell script (for Git Bash) and a `.cmd`
+ * shim (for cmd/PowerShell). Probing the bare name first would find the shell
+ * script — which Windows cannot execute — and hand a spawn-time failure back
+ * as if the CLI were healthy. So real executable extensions win, and the bare
+ * name stays last as a fallback.
+ */
+function executableSuffixes(): string[] {
+  if (process.platform !== 'win32') return [''];
+  const pathext = (process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD')
+    .split(';')
+    .map((ext) => ext.trim().toLowerCase())
+    .filter((ext) => ext.startsWith('.'));
+  return [...new Set([...pathext, ''])];
+}
+
+/**
  * Every directory a runtime CLI (claude / codex / gemini / opencode / gh) is
  * known to land in, ordered by how often each install method is the culprit
  * when PATH-based lookup misses. All entries are filtered to dirs that exist.
@@ -77,6 +124,7 @@ export function wellKnownCliDirs(home: string = os.homedir()): string[] {
     '/opt/homebrew/bin',
     '/usr/local/bin',
     '/usr/bin',
+    ...windowsCliDirs(home),
   ];
   const nvmDirs = versionManagerBinDirs(path.join(home, '.nvm', 'versions', 'node'), ['bin']);
   const fnmDirs = versionManagerBinDirs(path.join(home, '.fnm', 'node-versions'), ['installation', 'bin']);
@@ -97,12 +145,15 @@ export function wellKnownCliDirs(home: string = os.homedir()): string[] {
  * this works identically under Finder-stripped PATH, dev servers, and tests.
  */
 export function scanForBinary(binaryName: string, home: string = os.homedir()): string | null {
+  const suffixes = executableSuffixes();
   for (const dir of wellKnownCliDirs(home)) {
-    const candidate = path.join(dir, binaryName);
-    try {
-      if (existsSync(candidate)) return candidate;
-    } catch {
-      // unreadable dir — keep scanning
+    for (const suffix of suffixes) {
+      const candidate = path.join(dir, `${binaryName}${suffix}`);
+      try {
+        if (existsSync(candidate)) return candidate;
+      } catch {
+        // unreadable dir — keep scanning
+      }
     }
   }
   return null;
@@ -123,6 +174,7 @@ export function ensureCliSymlink(
   targetPath: string,
   home: string = os.homedir(),
 ): string | null {
+  if (process.platform === 'win32') return ensureCliShimCmd(binaryName, targetPath, home);
   try {
     const binDir = path.join(dataDirForHome(home), 'bin');
     mkdirSync(binDir, { recursive: true });
@@ -142,6 +194,52 @@ export function ensureCliSymlink(
     return linkPath;
   } catch (err) {
     console.warn(`[cli-locate] Could not symlink ${binaryName} into ~/.o8/bin:`, err);
+    return null;
+  }
+}
+
+/**
+ * Windows equivalent of the symlink farm entry.
+ *
+ * `symlinkSync` needs Developer Mode or an elevated process on Windows, so for
+ * an ordinary user it throws EPERM and the farm never populates — the "make a
+ * match" repair was silently dead on Windows. A forwarding `.cmd` needs no
+ * privileges and is what PATH-based consumers (cmd, PowerShell, PTY terminals)
+ * actually resolve anyway.
+ *
+ * Same never-clobber guarantee as the symlink path: we only ever overwrite a
+ * file carrying our own marker line, so a real executable a user dropped in
+ * the farm is left alone.
+ */
+const SHIM_MARKER = '@rem o8-cli-shim';
+
+function ensureCliShimCmd(
+  binaryName: string,
+  targetPath: string,
+  home: string = os.homedir(),
+): string | null {
+  try {
+    const binDir = path.join(dataDirForHome(home), 'bin');
+    mkdirSync(binDir, { recursive: true });
+    const shimPath = path.join(binDir, `${binaryName}.cmd`);
+    // Never shim a farm entry to itself (scan can hand us the shim back).
+    if (path.resolve(targetPath) === path.resolve(shimPath)) return shimPath;
+    const body = `@echo off\r\n${SHIM_MARKER}\r\n"${targetPath}" %*\r\n`;
+    if (existsSync(shimPath)) {
+      let existing = '';
+      try {
+        existing = readFileSync(shimPath, 'utf-8');
+      } catch {
+        return null; // unreadable — assume it is someone else's and leave it
+      }
+      if (!existing.includes(SHIM_MARKER)) return null; // real file — hands off
+      if (existing === body) return shimPath; // already correct
+    }
+    writeFileSync(shimPath, body);
+    console.log(`[cli-locate] Shimmed ${binaryName} -> ${targetPath} in the o8 bin dir`);
+    return shimPath;
+  } catch (err) {
+    console.warn(`[cli-locate] Could not shim ${binaryName} into the o8 bin dir:`, err);
     return null;
   }
 }
