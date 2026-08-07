@@ -55,3 +55,28 @@ describe('cliInvocation', () => {
     expect(spawnsViaInterpreter('C:\\x\\claude.exe')).toBe(false);
   });
 });
+
+describe('bare command names on Windows', () => {
+  it('routes a bare name through the interpreter — execFile cannot apply PATHEXT', () => {
+    setPlatform('win32');
+    process.env.ComSpec = 'C:\\WINDOWS\\system32\\cmd.exe';
+    // `execFile('npx', …)` fails on Windows because it will not find npx.cmd.
+    expect(cliInvocation('npx', ['tsc', '--noEmit'])).toEqual({
+      command: 'C:\\WINDOWS\\system32\\cmd.exe',
+      args: ['/d', '/c', 'npx', 'tsc', '--noEmit'],
+    });
+  });
+
+  it('still hands a real .exe straight to CreateProcess', () => {
+    setPlatform('win32');
+    expect(cliInvocation('C:\\tools\\thing.exe', ['-v'])).toEqual({
+      command: 'C:\\tools\\thing.exe',
+      args: ['-v'],
+    });
+  });
+
+  it('leaves bare names alone off Windows', () => {
+    setPlatform('darwin');
+    expect(cliInvocation('npx', ['tsc'])).toEqual({ command: 'npx', args: ['tsc'] });
+  });
+});

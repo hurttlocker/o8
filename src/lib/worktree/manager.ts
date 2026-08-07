@@ -40,6 +40,7 @@ import { resetTrackedWorkspaceChanges } from './clean';
 import { allowWorktreeRemoval } from './live-process-guard';
 import { removeLockedDir } from './remove-locked-dir';
 import { resolveWorktreeRootLayout } from './root-layout';
+import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import {
   gitCommandErrorMessage,
   shouldClassifyFetchAsOriginMissing,
@@ -495,7 +496,8 @@ export class WorktreeManager {
     if (tscBin) {
       await this.linkMatchingNodeModules(worktreePath);
       try {
-        await execFileAsync(tscBin, ['--noEmit', '--incremental', 'false'], {
+        const tscRun = cliInvocation(tscBin, ['--noEmit', '--incremental', 'false']);
+        await execFileAsync(tscRun.command, tscRun.args, {
           windowsHide: true,
           cwd: worktreePath,
           timeout: 180_000,

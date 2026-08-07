@@ -23,6 +23,7 @@ import { executableSuffixes } from '@/lib/runtimes/shared/cli-locate';
 import { promisify } from 'node:util';
 
 import { ensureCliSymlink, wellKnownCliDirs } from './cli-locate';
+import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 
 const execFileAsync = promisify(execFile);
 const statAsync = promisify(stat);
@@ -206,7 +207,8 @@ async function probeVersion(
   const args = spec.versionArgs ?? ['--version'];
   const pattern = spec.versionPattern ?? /\b(\d+\.\d+\.\d+)\b/;
   try {
-    const { stdout, stderr } = await execFileAsync(binPath, args, {
+    const probe = cliInvocation(binPath, args);
+    const { stdout, stderr } = await execFileAsync(probe.command, probe.args, {
       windowsHide: true,
       timeout: 5_000,
       env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },

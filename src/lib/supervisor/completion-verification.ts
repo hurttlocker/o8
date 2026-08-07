@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import { detectTypecheckSkip, isMissingTscOutput } from '@/lib/lane/typecheck-availability';
 
 import { buildRuleCheckFailureMessage, runRuleCheck } from './rule-check';
+import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 
 const execFileAsync = promisify(execFile);
 const COMMAND_MAX_BUFFER = 10 * 1024 * 1024;
@@ -30,7 +31,8 @@ export async function runCompletionTypecheck(cwd: string): Promise<CompletionTyp
     return { ok: true, output: '' };
   }
   try {
-    const { stdout, stderr } = await execFileAsync('npx', ['tsc', '--noEmit'], {
+    const typecheck = cliInvocation('npx', ['tsc', '--noEmit']);
+    const { stdout, stderr } = await execFileAsync(typecheck.command, typecheck.args, {
       windowsHide: true,
       cwd,
       timeout: TYPECHECK_TIMEOUT_MS,

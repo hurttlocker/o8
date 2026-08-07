@@ -30,8 +30,16 @@ export interface CliInvocation {
   args: string[];
 }
 
-/** Extensions Windows cannot execute directly — they need a command interpreter. */
-const INTERPRETED_ON_WINDOWS = new Set(['.cmd', '.bat']);
+/**
+ * The ONLY things Windows can hand straight to CreateProcess. Everything else —
+ * `.cmd`, `.bat`, and a BARE COMMAND NAME like `npx` — needs the interpreter.
+ *
+ * Bare names matter as much as `.cmd` here: `execFile('npx', …)` does not apply
+ * PATHEXT, so it cannot find `npx.cmd` and fails on Windows even though `npx`
+ * works fine in a terminal. Allow-listing what is directly executable, rather
+ * than deny-listing what is not, is what makes that case fall on the safe side.
+ */
+const DIRECTLY_EXECUTABLE_ON_WINDOWS = new Set(['.exe', '.com']);
 
 /**
  * Translate a resolved CLI path plus its arguments into a spawnable pair.
@@ -41,7 +49,7 @@ const INTERPRETED_ON_WINDOWS = new Set(['.cmd', '.bat']);
  */
 export function cliInvocation(binaryPath: string, args: string[] = []): CliInvocation {
   if (process.platform !== 'win32') return { command: binaryPath, args };
-  if (!INTERPRETED_ON_WINDOWS.has(path.extname(binaryPath).toLowerCase())) {
+  if (DIRECTLY_EXECUTABLE_ON_WINDOWS.has(path.extname(binaryPath).toLowerCase())) {
     return { command: binaryPath, args };
   }
   // `/d` skips any AutoRun command a user has configured in the registry, which
@@ -61,5 +69,5 @@ export function cliInvocation(binaryPath: string, args: string[] = []): CliInvoc
  */
 export function spawnsViaInterpreter(binaryPath: string): boolean {
   return process.platform === 'win32'
-    && INTERPRETED_ON_WINDOWS.has(path.extname(binaryPath).toLowerCase());
+    && !DIRECTLY_EXECUTABLE_ON_WINDOWS.has(path.extname(binaryPath).toLowerCase());
 }

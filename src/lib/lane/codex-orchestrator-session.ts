@@ -44,6 +44,7 @@ import { handleCodexJsonLine } from './codex-orchestrator-events';
 import { codexOrchestrationModeFlags } from './orchestrator-backends/orchestration-mode';
 import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
 import { prepareSingleOrchestratorLaunch } from './single-orchestrator-policy';
+import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import {
   ensureRegisteredSession,
   getRegisteredSession,
@@ -604,7 +605,8 @@ export async function sendToCodexOrchestrator(
     let proc: ChildProcess;
     const singleProcessGroup = options.orchestrationMode === 'single';
     try {
-      proc = spawn(spawnBinary, spawnArgs, {
+      const launch = cliInvocation(spawnBinary, spawnArgs);
+      proc = spawn(launch.command, launch.args, {
         windowsHide: true,
         cwd: session.repoPath,
         env: spawnEnv,

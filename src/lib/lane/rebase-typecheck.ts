@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import { detectTypecheckSkip, isMissingTscOutput } from './typecheck-availability';
+import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 
 const execFileAsync = promisify(execFile);
 
@@ -35,7 +36,8 @@ export async function runLaneRebaseTypecheck(input: {
     return { ok: true };
   }
   try {
-    await execFileAsync('npx', ['tsc', '--noEmit'], {
+    const typecheck = cliInvocation('npx', ['tsc', '--noEmit']);
+    await execFileAsync(typecheck.command, typecheck.args, {
       windowsHide: true,
       cwd: input.cwd,
       timeout: TYPECHECK_TIMEOUT_MS,
