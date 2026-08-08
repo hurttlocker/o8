@@ -586,8 +586,7 @@ function runTerminalCommand(command: string, cwd?: string, repoRoot: string | nu
   const workDir = workingDirectory.path;
 
   try {
-    const output = execSync(command, {
-      windowsHide: true,
+    const output = execSync(command, { windowsHide: true,
       encoding: 'utf-8',
       timeout: COMMAND_TIMEOUT,
       cwd: workDir,
@@ -753,8 +752,7 @@ function searchCode(query: string, filePattern?: string, maxResults?: number, re
       : ['--include=*.ts', '--include=*.tsx', '--include=*.js', '--include=*.json', '--include=*.md'];
     let raw: string;
     try {
-      raw = execFileSync('grep', ['-rn', ...includes, '-e', query, '.'], {
-        windowsHide: true,
+      raw = execFileSync('grep', ['-rn', ...includes, '-e', query, '.'], { windowsHide: true,
         cwd: repoRoot,
         encoding: 'utf-8',
         timeout: 5000,

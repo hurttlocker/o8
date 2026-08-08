@@ -196,7 +196,6 @@ function ensureIdempotentColumnAdds(sqlite: Database.Database): void {
   ensureIdempotencyKeysTable(sqlite);
   migrateProjectsLedgerJsonIfNeeded(sqlite);
 }
-
 /**
  * Schema v32 (#1497) — persisted idempotency keys. See schema.ts
  * `idempotencyKeys` + `orchestrator/idempotency-store.ts` for the reserve →
@@ -244,10 +243,8 @@ function isPidAlive(pid: number | null | undefined): boolean {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    // EPERM means the process EXISTS but cannot be signalled. The old comment
-    // here said a same-user fleet never trips EPERM — Windows falsified that:
-    // an elevated worker denies the query to a non-elevated server. Treating
-    // that as dead reaps reservations belonging to a live process.
+    // An elevated Windows worker can deny this query to a non-elevated server;
+    // EPERM still means the process exists, so its reservation must survive.
     if ((error as NodeJS.ErrnoException)?.code === 'EPERM') return true;
     return false;
   }

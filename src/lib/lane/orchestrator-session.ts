@@ -85,9 +85,7 @@ import {
 } from './orchestrator-crash-survival';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
-
 // ── Types ──
-
 export interface OrchestratorSession {
   sessionName: string;
   repoPath: string;
@@ -874,14 +872,12 @@ function spawnOrchestratorProc(session: OrchestratorSession, w: WarmState, confi
     stdoutFd = openAppendFile(crashRecord.stdoutPath);
     stderrFd = openAppendFile(crashRecord.stderrPath);
   }
-
   // Preflight the cwd (#1551, shared helper): missing folder OR non-git folder
   // fails here with a human-actionable message instead of "spawn claude ENOENT"
   // (which names the healthy binary) or a confusing mid-turn tool error.
   assertOrchestratorRepoPath(session.repoPath);
   const launch = cliInvocation(resolveClaudeBin(), args);
-  const proc = spawn(launch.command, launch.args, {
-    windowsHide: true,
+  const proc = spawn(launch.command, launch.args, { windowsHide: true,
     cwd: session.repoPath,
     // BYO-key injection is Fable-scoped ONLY — never ambient process.env — so the
     // subscription-billed backends aren't re-billed against an API key.

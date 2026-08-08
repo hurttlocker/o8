@@ -1241,8 +1241,7 @@ export const claudeCodeRuntime: AgentRuntime = {
 
     // Use git diff to find changed files
     try {
-      const { stdout } = await execFileAsync('git', ['diff', '--numstat', 'HEAD'], {
-        windowsHide: true,
+      const { stdout } = await execFileAsync('git', ['diff', '--numstat', 'HEAD'], { windowsHide: true,
         cwd,
         timeout: 5000,
       });

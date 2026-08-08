@@ -5,6 +5,7 @@ import type { WorktreeInfo } from '@/lib/worktree/types';
 import type { ApproveAndMergeInput, MergePacketResult, PickComparisonWinnerInput } from './types';
 import { autoResolveMergedPacketVerificationIncidents } from '@/lib/supervisor/merged-incident-resolution';
 import { attachQualitySearchReceipt, ensureComparisonWinnerReview, resolveQualitySearchComparison } from './quality-search-selection';
+import { alreadyReleasedResultForPacket, buildAlreadyReleasedResult } from './release-truth';
 type LaneRegistryModule = typeof import('@/lib/lane/registry');
 type ActivePacketLane = NonNullable<ReturnType<LaneRegistryModule['findLatestLaneByPacket']>>;
 
@@ -118,86 +119,6 @@ export async function isTerminalReleaseLane(packetId: string) {
       event.verb === 'status_change' && event.payload.status === 'completed'
     );
   });
-}
-
-function buildAlreadyReleasedResult(mergeSha: string): MergePacketResult {
-  return {
-    merged: true,
-    note: 'Already released (via auto-merge)',
-    alreadyReleased: true,
-    mergeSha,
-    ancestryVerified: true,
-  };
-}
-
-function isAlreadyReleasedPacket(packet: OrchestratorPacket | null | undefined) {
-  return packet?.releaseState === 'released' || packet?.status === 'released';
-}
-
-function recordedMergeSha(packet: OrchestratorPacket | null | undefined) {
-  return packet?.releaseStatePayload?.mergeCommit?.trim() || null;
-}
-
-async function clearStaleReleaseClaim(packetId: string, reason: string) {
-  const { withLockedState } = await loadControlPlane();
-  await withLockedState((state) => {
-    const packet = state.packets.find((candidate) => candidate.id === packetId);
-    if (!packet || !isAlreadyReleasedPacket(packet)) return;
-    packet.releaseState = 'pending';
-    if (packet.status === 'released') packet.status = 'awaiting_review';
-    packet.releaseStatePayload = {
-      ...(packet.releaseStatePayload ?? {}),
-      source: reason,
-    };
-  });
-}
-
-async function alreadyReleasedResultForPacket(
-  packet: OrchestratorPacket | null | undefined,
-  lane: ActivePacketLane | null | undefined,
-) {
-  if (!isAlreadyReleasedPacket(packet)) {
-    return null;
-  }
-  const mergeSha = recordedMergeSha(packet);
-  if (mergeSha && lane?.repoPath) {
-    const { isAncestorCommit } = await loadMergeTruth();
-    if (await isAncestorCommit(lane.repoPath, mergeSha, 'HEAD')) {
-      // The recorded merge SHA being on main is NECESSARY BUT NOT SUFFICIENT
-      // (#1763). A packet reconciled while head == base — the "agent ran and
-      // changed nothing" shape, also reachable through retry and steer —
-      // records the BASE commit as its merge SHA. That commit is trivially on
-      // main's ancestry forever, so this check keeps passing even after the
-      // branch has advanced with real work. The result was approve-merge
-      // returning `merged: true` for a diff that never landed, which is the
-      // one failure a governance surface must never produce: nobody goes
-      // looking for work they were told was merged.
-      if (lane.branch && !(await isAncestorCommit(lane.repoPath, lane.branch, 'HEAD'))) {
-        console.error('[merge-truth] released packet branch advanced past its recorded merge', {
-          packetId: packet?.id,
-          branch: lane.branch,
-          mergeSha,
-          repoPath: lane.repoPath,
-        });
-        if (packet?.id) await clearStaleReleaseClaim(packet.id, 'stale_release_flag_branch_advanced');
-        return null;
-      }
-      return buildAlreadyReleasedResult(mergeSha);
-    }
-    console.error('[merge-truth] stale released packet flag; merge SHA is not on main ancestry', {
-      packetId: packet?.id,
-      mergeSha,
-      repoPath: lane.repoPath,
-    });
-    await clearStaleReleaseClaim(packet!.id, 'stale_release_flag_ancestry_failed');
-    return null;
-  }
-  console.error('[merge-truth] stale released packet flag; no merge SHA available for ancestry verification', {
-    packetId: packet?.id,
-    repoPath: lane?.repoPath ?? null,
-  });
-  if (packet?.id) await clearStaleReleaseClaim(packet.id, 'stale_release_flag_missing_merge_sha');
-  return null;
 }
 
 async function alreadyReleasedResultForPacketId(packetId: string, packets: OrchestratorPacket[]) {

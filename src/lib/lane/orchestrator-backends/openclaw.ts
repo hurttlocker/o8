@@ -40,7 +40,6 @@ import { resolveOpenclawSpawnBinary } from './openclaw-spawn-preflight';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 // ── Types ────────────────────────────────────────────────────────────────────
-
 interface OpenclawOrchestratorSession {
   sessionName: string;
   repoPath: string;
@@ -388,8 +387,7 @@ async function ensureOpenclawGateway(port: number, openclawBin: string): Promise
   const proc = spawn(
     openclawBin,
     ['--profile', OPENCLAW_PROFILE, 'gateway', 'run', '--port', String(port)],
-    {
-      windowsHide: true,
+    { windowsHide: true,
       env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
       stdio: ['ignore', 'pipe', 'pipe'],
     },
@@ -753,11 +751,9 @@ async function sendToOpenclawOrchestrator(
     }
   }
   console.log(`[openclaw-diag] spawn args: ${args.map((a, i) => (args[i - 1] === '--message' ? `<message ${fullMessage.length} chars>` : a)).join(' ')}`);
-
   return new Promise<void>((promiseResolve, promiseReject) => {
     const launch = cliInvocation(openclawBin, args);
-    const proc = spawn(launch.command, launch.args, {
-      windowsHide: true,
+    const proc = spawn(launch.command, launch.args, { windowsHide: true,
       cwd: session.repoPath,
       env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' },
       stdio: ['ignore', 'pipe', 'pipe'],

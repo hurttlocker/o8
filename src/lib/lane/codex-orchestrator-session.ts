@@ -73,7 +73,6 @@ import {
   type OrchestratorCrashSurvivalMeta,
   type OrchestratorTurnRecord,
 } from './orchestrator-crash-survival';
-
 // ── Types ────────────────────────────────────────────────────────────────────
 export interface CodexOrchestratorSession {
   sessionName: string;
@@ -88,7 +87,6 @@ export interface CodexOrchestratorSession {
 }
 // Mirror of OrchestratorPermissionMode from orchestrator-session.ts.
 export type CodexOrchestratorPermissionMode = 'full' | 'plan';
-
 export interface SendToCodexOrchestratorOptions {
   permissionMode?: CodexOrchestratorPermissionMode;
   orchestrationMode?: OrchestratorExecutionMode;
@@ -103,7 +101,6 @@ export interface SendToCodexOrchestratorOptions {
   signal?: AbortSignal;
   crashSurvival?: OrchestratorCrashSurvivalMeta;
 }
-
 // ── Constants ────────────────────────────────────────────────────────────────
 const DEFAULT_CODEX_MODEL = MODEL_IDS.codexDefault;
 const USER_CODEX_HOME = join(homedir(), '.codex');
@@ -607,8 +604,7 @@ export async function sendToCodexOrchestrator(
     const singleProcessGroup = options.orchestrationMode === 'single';
     try {
       const launch = cliInvocation(spawnBinary, spawnArgs);
-      proc = spawn(launch.command, launch.args, {
-        windowsHide: true,
+      proc = spawn(launch.command, launch.args, { windowsHide: true,
         cwd: session.repoPath,
         env: spawnEnv,
         detached: crashEnabled || singleProcessGroup,

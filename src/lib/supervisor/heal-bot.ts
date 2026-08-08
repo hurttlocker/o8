@@ -240,8 +240,7 @@ function parseGiveUpReason(stdout: string, stderr: string): string | null {
 
 async function readHeadSha(cwd: string): Promise<string | null> {
   try {
-    const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
-      windowsHide: true,
+    const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], { windowsHide: true,
       cwd,
       timeout: 15_000,
       maxBuffer: COMMAND_MAX_BUFFER,
@@ -255,8 +254,7 @@ async function readHeadSha(cwd: string): Promise<string | null> {
 
 async function readHeadSummary(cwd: string): Promise<{ sha: string | null; subject: string | null }> {
   try {
-    const { stdout } = await execFileAsync('git', ['log', '-1', '--format=%H%n%s'], {
-      windowsHide: true,
+    const { stdout } = await execFileAsync('git', ['log', '-1', '--format=%H%n%s'], { windowsHide: true,
       cwd,
       timeout: 15_000,
       maxBuffer: COMMAND_MAX_BUFFER,
@@ -273,8 +271,7 @@ async function readHeadSummary(cwd: string): Promise<{ sha: string | null; subje
 
 async function readGitStatus(cwd: string): Promise<string> {
   try {
-    const { stdout } = await execFileAsync('git', ['status', '--porcelain'], {
-      windowsHide: true,
+    const { stdout } = await execFileAsync('git', ['status', '--porcelain'], { windowsHide: true,
       cwd,
       timeout: 15_000,
       maxBuffer: COMMAND_MAX_BUFFER,
@@ -705,8 +702,7 @@ async function runFetchUnreachableSweep(): Promise<void> {
     fetchTestLastByRepo.set(item.repo_path, now);
 
     try {
-      await execFileAsync('git', ['fetch', 'origin', baseBranch, '--quiet'], {
-        windowsHide: true,
+      await execFileAsync('git', ['fetch', 'origin', baseBranch, '--quiet'], { windowsHide: true,
         cwd: item.repo_path,
         timeout: 60_000,
         maxBuffer: COMMAND_MAX_BUFFER,

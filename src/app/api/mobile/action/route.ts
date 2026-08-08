@@ -40,7 +40,6 @@ function previewMessage(message?: string) {
   if (!message) return '';
   return message.trim().replace(/\s+/g, ' ').slice(0, 160);
 }
-
 function invalidateMutationCaches() {
   invalidateCommandCenterSnapshotCaches();
   invalidateInboxCache();
@@ -611,7 +610,6 @@ async function handleMobileActionPost(request: NextRequest) {
           { status: 200, headers: NO_STORE_HEADERS },
         );
       }
-
       if (sessionKey.startsWith('codex:') || sessionKey.startsWith('codex-discovered:')) {
         const threadId = sessionKey.replace(/^codex:/, '').replace(/^codex-discovered:/, '');
         try {
@@ -621,8 +619,7 @@ async function handleMobileActionPost(request: NextRequest) {
           const codexBin = path.join(os.homedir(), '.npm-global', 'bin', 'codex');
           const args = ['exec', 'resume', threadId, message ?? '', '--json', '--dangerously-bypass-approvals-and-sandbox'];
           const probe = cliInvocation(codexBin, args);
-          const stdout = execFileSync(probe.command, probe.args, {
-            windowsHide: true,
+          const stdout = execFileSync(probe.command, probe.args, { windowsHide: true,
             cwd: process.env.HOME || os.homedir(),
             timeout: 120_000,
             maxBuffer: 10 * 1024 * 1024,
