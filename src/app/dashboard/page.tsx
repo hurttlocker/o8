@@ -31,6 +31,7 @@ import { LeftHeaderStrip } from '@/components/desktop/shell/LeftHeaderStrip';
 import { WorkspaceHeaderStrip } from '@/components/desktop/shell/WorkspaceHeaderStrip';
 import { PanelHeaderStrip } from '@/components/desktop/shell/PanelHeaderStrip';
 import { DesktopStatusBar } from '@/components/desktop/DesktopStatusBar';
+import { DesktopCloseCoordinator } from '@/components/desktop/DesktopCloseCoordinator';
 import { useProjects, type ProjectRecord } from '@/components/desktop/repo-registry/useProjects';
 import type { CommandPaletteActionItem } from '@/components/desktop/CommandPalette';
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
@@ -5620,6 +5621,7 @@ function DashboardInner() {
 
       {/* ── Branded confirm / prompt / toast host (replaces native window.confirm/prompt/alert) ── */}
       <ConfirmToastHost />
+      <DesktopCloseCoordinator />
 
       {/* ── Sidebar hover-preview trigger + drop overlay (collapsed only) ──
           When the AgentPanel column is hidden, we keep a thin invisible hot

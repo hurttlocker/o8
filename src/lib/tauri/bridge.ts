@@ -76,6 +76,8 @@ export interface SidecarResult {
   error: string | null;
 }
 
+export type DesktopClosePreference = 'ask' | 'background' | 'quit';
+
 // ── Commands (lazy-loaded to avoid import errors in browser) ──
 
 /**
@@ -455,6 +457,26 @@ export async function backgroundModeIsEnabled(): Promise<boolean> {
 export async function backgroundModeSet(enabled: boolean): Promise<boolean> {
   const result = await invoke<boolean>('background_mode_set', { enabled });
   return result ?? enabled;
+}
+
+/** Windows/Linux behavior when the main window closes while work is active. */
+export async function desktopClosePreferenceGet(): Promise<DesktopClosePreference> {
+  const result = await invoke<DesktopClosePreference>('desktop_close_preference_get');
+  return result === 'background' || result === 'quit' ? result : 'ask';
+}
+
+export async function desktopClosePreferenceSet(
+  preference: DesktopClosePreference,
+): Promise<DesktopClosePreference> {
+  const result = await invoke<DesktopClosePreference>('desktop_close_preference_set', { preference });
+  return result === 'background' || result === 'quit' ? result : 'ask';
+}
+
+export async function resolveDesktopClose(
+  action: Exclude<DesktopClosePreference, 'ask'>,
+  remember: boolean,
+): Promise<boolean> {
+  return (await invoke<boolean>('resolve_desktop_close', { action, remember })) ?? false;
 }
 
 /** Voice preferences (`~/.o8/dictation.json`, secrets stripped). Provider keys

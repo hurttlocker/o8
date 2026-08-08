@@ -19,13 +19,22 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   APP_FONT_STACK,
   RamsButton,
+  SettingsSelect,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
   type SettingsTab,
 } from './shared';
 import { SettingsGroup, SettingsRow, ValuePill } from './grouped';
 import { fetchOperatorDefaults } from './operator-defaults-client';
-import { autostartIsEnabled, autostartSet, isTauri } from '@/lib/tauri/bridge';
+import {
+  autostartIsEnabled,
+  autostartSet,
+  desktopClosePreferenceGet,
+  desktopClosePreferenceSet,
+  getDesktopInfo,
+  isTauri,
+  type DesktopClosePreference,
+} from '@/lib/tauri/bridge';
 import { useEntitlement } from '@/lib/entitlement/context';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 import {
@@ -95,12 +104,24 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
   // ── Launch at login (native autostart via the Tauri bridge) ──
   const [autostart, setAutostart] = useState(false);
   const [autostartBusy, setAutostartBusy] = useState(false);
+  const [desktopPlatform, setDesktopPlatform] = useState<string | null>(null);
+  const [closePreference, setClosePreference] = useState<DesktopClosePreference>('ask');
+  const [closePreferenceBusy, setClosePreferenceBusy] = useState(false);
 
   useEffect(() => {
     if (!tauri) return;
     let alive = true;
-    autostartIsEnabled()
-      .then((v) => { if (alive) setAutostart(v); })
+    Promise.all([
+      autostartIsEnabled(),
+      getDesktopInfo(),
+      desktopClosePreferenceGet(),
+    ])
+      .then(([enabled, desktop, preference]) => {
+        if (!alive) return;
+        setAutostart(enabled);
+        setDesktopPlatform(desktop?.platform ?? null);
+        setClosePreference(preference);
+      })
       .catch(() => { /* leave default off */ });
     return () => { alive = false; };
   }, [tauri]);
@@ -112,6 +133,17 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
       .then(setAutostart)
       .finally(() => setAutostartBusy(false));
   }, []);
+
+  const handleClosePreference = useCallback((next: string) => {
+    if (next !== 'ask' && next !== 'background' && next !== 'quit') return;
+    setClosePreference(next);
+    setClosePreferenceBusy(true);
+    void desktopClosePreferenceSet(next)
+      .then(setClosePreference)
+      .finally(() => setClosePreferenceBusy(false));
+  }, []);
+
+  const canConfigureClose = desktopPlatform === 'windows' || desktopPlatform === 'linux';
 
   // ── Operator defaults (crash-report privacy toggles) ──
   const [data, setData] = useState<OperatorDefaultsResponse | null>(null);
@@ -230,16 +262,39 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
         <section>
           <SettingsGroup
             header="Startup"
-            footnote="Launch o8 automatically when you log in, so the fleet, dictation, and the menu-bar tray are ready the moment you sit down."
+            footnote={canConfigureClose
+              ? 'Closing o8 quits when no agent is working. With active work, o8 can ask, stay available from the system tray, or stop the workers and quit.'
+              : 'Launch o8 automatically when you log in, so the fleet, dictation, and the menu-bar tray are ready the moment you sit down.'}
           >
             <SettingsRow
               icon={<PowerIcon />}
               label="Launch at login"
-              subtitle="Start o8 automatically when you sign in to your Mac"
+              subtitle="Start o8 automatically when you sign in to your computer"
               checked={autostart}
               disabled={autostartBusy}
               onToggle={handleAutostart}
+              divider={canConfigureClose}
             />
+            {canConfigureClose ? (
+              <SettingsRow
+                icon={<PowerIcon />}
+                label="When closing with active agents"
+                subtitle="No active work always quits fully"
+                accessory={(
+                  <SettingsSelect
+                    value={closePreference}
+                    onChange={handleClosePreference}
+                    disabled={closePreferenceBusy}
+                    width={170}
+                    options={[
+                      { value: 'ask', label: 'Ask every time' },
+                      { value: 'background', label: 'Keep working' },
+                      { value: 'quit', label: 'Stop and quit' },
+                    ]}
+                  />
+                )}
+              />
+            ) : null}
           </SettingsGroup>
         </section>
       ) : null}

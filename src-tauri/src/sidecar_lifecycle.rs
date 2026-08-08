@@ -3,6 +3,18 @@ use std::sync::{Mutex, OnceLock};
 
 #[cfg(windows)]
 use crate::no_window::NoWindow;
+#[cfg(windows)]
+use windows_sys::Win32::{
+    Foundation::{CloseHandle, GetLastError, HANDLE},
+    System::{
+        JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+            SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        },
+        Threading::{OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE},
+    },
+};
 
 const SIDECAR_ENV_MARKER: &str = "O8_SIDECAR_PID=";
 
@@ -18,6 +30,80 @@ fn child_pids() -> &'static Mutex<Vec<u32>> {
 pub(crate) fn register_child(pid: u32) {
     if let Ok(mut guard) = child_pids().lock() {
         guard.push(pid);
+    }
+    #[cfg(windows)]
+    assign_child_to_kill_on_close_job(pid);
+}
+
+/// Windows Job Object that owns every bundled child process. The handle stays
+/// open for the Tauri process lifetime; Windows terminates the full job tree if
+/// the app exits normally, crashes, or is killed before Rust can run cleanup.
+#[cfg(windows)]
+fn sidecar_job_handle() -> Option<HANDLE> {
+    static JOB_HANDLE: OnceLock<Mutex<Option<isize>>> = OnceLock::new();
+    let storage = JOB_HANDLE.get_or_init(|| Mutex::new(None));
+    let Ok(mut guard) = storage.lock() else {
+        return None;
+    };
+    if let Some(handle) = *guard {
+        return Some(handle as HANDLE);
+    }
+
+    unsafe {
+        let handle = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+        if handle.is_null() {
+            log::warn!(
+                "[sidecar-job] CreateJobObjectW failed with {}",
+                GetLastError()
+            );
+            return None;
+        }
+
+        let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let configured = SetInformationJobObject(
+            handle,
+            JobObjectExtendedLimitInformation,
+            &limits as *const _ as *const std::ffi::c_void,
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        );
+        if configured == 0 {
+            log::warn!(
+                "[sidecar-job] SetInformationJobObject failed with {}",
+                GetLastError()
+            );
+            let _ = CloseHandle(handle);
+            return None;
+        }
+
+        *guard = Some(handle as isize);
+        Some(handle)
+    }
+}
+
+#[cfg(windows)]
+fn assign_child_to_kill_on_close_job(pid: u32) {
+    let Some(job) = sidecar_job_handle() else {
+        return;
+    };
+    unsafe {
+        let process = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
+        if process.is_null() {
+            log::warn!(
+                "[sidecar-job] OpenProcess({pid}) failed with {}",
+                GetLastError()
+            );
+            return;
+        }
+        if AssignProcessToJobObject(job, process) == 0 {
+            log::warn!(
+                "[sidecar-job] AssignProcessToJobObject({pid}) failed with {}",
+                GetLastError()
+            );
+        } else {
+            log::info!("[sidecar-job] assigned PID {pid} to kill-on-close job");
+        }
+        let _ = CloseHandle(process);
     }
 }
 
@@ -74,13 +160,9 @@ fn kill_tracked_children_unix(pids: &[u32]) {
     }
 }
 
-/// Windows has no `kill(1)`/SIGTERM to escalate from, so there is no
-/// graceful-then-forceful step here — `taskkill /T /F` force-kills the PID
-/// and its entire child tree in one shot (#1739: the prior un-cfg'd shellout
-/// to Unix `kill` silently no-op'd on Windows and orphaned every bundled
-/// Node child on app exit/update-relaunch). A Job Object per spawned child
-/// would be the more thorough tree-ownership model; `taskkill` closes the
-/// orphan risk with a much smaller diff.
+/// Windows has no `kill(1)`/SIGTERM to escalate from, so `taskkill /T /F`
+/// force-kills the PID and its entire child tree during an orderly shutdown.
+/// The kill-on-close Job Object above covers crashes and forced parent exits.
 #[cfg(windows)]
 fn kill_tracked_children_windows(pids: &[u32]) {
     for pid in pids {
@@ -95,11 +177,7 @@ fn kill_tracked_children_windows(pids: &[u32]) {
                 pid,
                 status
             ),
-            Err(e) => log::warn!(
-                "[shutdown] failed to spawn taskkill for PID {}: {}",
-                pid,
-                e
-            ),
+            Err(e) => log::warn!("[shutdown] failed to spawn taskkill for PID {}: {}", pid, e),
         }
     }
 }
@@ -109,7 +187,12 @@ fn kill_tracked_children_windows(pids: &[u32]) {
 /// `taskkill` spawn only happens under `cfg(windows)`.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn taskkill_tree_args(pid: u32) -> [String; 4] {
-    ["/PID".to_string(), pid.to_string(), "/T".to_string(), "/F".to_string()]
+    [
+        "/PID".to_string(),
+        pid.to_string(),
+        "/T".to_string(),
+        "/F".to_string(),
+    ]
 }
 
 /// Install panic + Unix signal handlers before Tauri starts spawning children.
@@ -602,7 +685,12 @@ mod tests {
     fn taskkill_tree_args_force_kills_pid_and_tree() {
         assert_eq!(
             taskkill_tree_args(4242),
-            ["/PID".to_string(), "4242".to_string(), "/T".to_string(), "/F".to_string()]
+            [
+                "/PID".to_string(),
+                "4242".to_string(),
+                "/T".to_string(),
+                "/F".to_string()
+            ]
         );
     }
 }

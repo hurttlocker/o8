@@ -9,6 +9,7 @@ mod background;
 mod browser_view;
 mod cli_locate;
 mod dev_frontend;
+mod desktop_close;
 mod dictation_history;
 mod dock_window;
 #[cfg(target_os = "macos")]
@@ -59,9 +60,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::path::Path;
 use std::process::Command;
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use crate::no_window::NoWindow;
+use desktop_close::DesktopClosePreference;
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+use desktop_close::DesktopCloseRequest;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent},
@@ -2879,19 +2885,154 @@ fn http_get_local(path: &str) -> Option<String> {
     Some(raw[body_start..].to_string())
 }
 
-/// One awaiting-review lane projected for the tray dropdown. `id` is the
-/// lane id so the click handler can route back through `tray:focus-lane`.
+fn desktop_close_preference_path() -> String {
+    format!("{}/desktop-close-preference", o8_data_dir())
+}
+
+fn read_desktop_close_preference() -> DesktopClosePreference {
+    std::fs::read_to_string(desktop_close_preference_path())
+        .ok()
+        .and_then(|value| DesktopClosePreference::parse(&value))
+        .unwrap_or(DesktopClosePreference::Ask)
+}
+
+fn persist_desktop_close_preference(preference: DesktopClosePreference) -> Result<(), String> {
+    std::fs::create_dir_all(o8_data_dir()).map_err(|error| error.to_string())?;
+    std::fs::write(desktop_close_preference_path(), preference.as_str())
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+fn set_tray_visible(visible: bool) {
+    let Ok(guard) = tray_handle().lock() else {
+        return;
+    };
+    let Some(tray) = guard.as_ref() else { return };
+    if let Err(error) = tray.set_visible(visible) {
+        log::warn!("[desktop-close] tray visibility update failed: {error}");
+    }
+}
+
+fn show_desktop_window(app: &AppHandle) {
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    set_tray_visible(false);
+    background::set_background_mode(app, false, true);
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+fn background_desktop_app(app: &AppHandle) {
+    set_tray_visible(true);
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
+    let _ = app.emit("window-hidden", ());
+
+    let notice_marker = format!("{}/desktop-background-notice-seen", o8_data_dir());
+    if !Path::new(&notice_marker).exists() {
+        match app
+            .notification()
+            .builder()
+            .title("o8 is still working")
+            .body("Open o8 from the system tray when you are ready to return.")
+            .show()
+        {
+            Ok(()) => {
+                let _ = std::fs::write(notice_marker, "1");
+            }
+            Err(error) => log::warn!("[desktop-close] background notice failed: {error}"),
+        }
+    }
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+fn handle_desktop_close(app: AppHandle) {
+    let working_count = http_get_local("/api/lanes?active=true")
+        .as_deref()
+        .and_then(desktop_close::working_lane_count);
+    let preference = read_desktop_close_preference();
+
+    if working_count == Some(0) || preference == DesktopClosePreference::Quit {
+        app.exit(0);
+        return;
+    }
+
+    if preference == DesktopClosePreference::Background {
+        background_desktop_app(&app);
+        return;
+    }
+
+    let _ = app.emit(
+        "desktop-close-requested",
+        DesktopCloseRequest { working_count },
+    );
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+fn desktop_close_resolution_pending() -> &'static AtomicBool {
+    static PENDING: AtomicBool = AtomicBool::new(false);
+    &PENDING
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+fn request_desktop_close(app: AppHandle) {
+    if desktop_close_resolution_pending().swap(true, Ordering::AcqRel) {
+        return;
+    }
+    std::thread::spawn(move || {
+        handle_desktop_close(app);
+        desktop_close_resolution_pending().store(false, Ordering::Release);
+    });
+}
+
+#[tauri::command]
+fn desktop_close_preference_get() -> String {
+    read_desktop_close_preference().as_str().to_string()
+}
+
+#[tauri::command]
+fn desktop_close_preference_set(preference: String) -> Result<String, String> {
+    let preference = DesktopClosePreference::parse(&preference)
+        .ok_or_else(|| "Close preference must be ask, background, or quit".to_string())?;
+    persist_desktop_close_preference(preference)?;
+    Ok(preference.as_str().to_string())
+}
+
+#[tauri::command]
+fn resolve_desktop_close(app: AppHandle, action: String, remember: bool) -> Result<bool, String> {
+    let preference = DesktopClosePreference::parse(&action)
+        .filter(|preference| *preference != DesktopClosePreference::Ask)
+        .ok_or_else(|| "Close action must be background or quit".to_string())?;
+    if remember {
+        persist_desktop_close_preference(preference)?;
+    }
+
+    match preference {
+        DesktopClosePreference::Background => {
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            background_desktop_app(&app);
+        }
+        DesktopClosePreference::Quit => app.exit(0),
+        DesktopClosePreference::Ask => unreachable!(),
+    }
+    Ok(true)
+}
+
+/// One lane projected for the tray dropdown. Windows/Linux include live work
+/// while backgrounded; macOS keeps its existing awaiting-review menu.
 #[derive(Clone)]
-struct AwaitingLane {
+struct TrayLane {
     id: String,
     label: String,
     repo: String,
+    status: String,
 }
 
-/// Fetch lanes whose status is `reviewing`, projected for the tray dropdown.
-/// Falls back to an empty list on any parse / network error so the menu
-/// degrades to the static `Show / Quit` entries.
-fn fetch_awaiting_lanes() -> Vec<AwaitingLane> {
+fn fetch_tray_lanes() -> Vec<TrayLane> {
     let Some(body) = http_get_local("/api/lanes?active=true") else {
         return Vec::new();
     };
@@ -2905,7 +3046,21 @@ fn fetch_awaiting_lanes() -> Vec<AwaitingLane> {
         .iter()
         .filter_map(|lane| {
             let status = lane.get("status").and_then(|s| s.as_str())?;
-            if status != "reviewing" {
+            #[cfg(target_os = "macos")]
+            let visible = status == "reviewing";
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            let visible = matches!(
+                status,
+                "launching"
+                    | "running"
+                    | "awaiting_input"
+                    | "awaiting_orchestrator"
+                    | "awaiting_human"
+                    | "recovering"
+                    | "reviewing"
+                    | "merging"
+            );
+            if !visible {
                 return None;
             }
             let id = lane.get("id").and_then(|s| s.as_str())?.to_string();
@@ -2921,7 +3076,12 @@ fn fetch_awaiting_lanes() -> Vec<AwaitingLane> {
                 .next()
                 .unwrap_or("")
                 .to_string();
-            Some(AwaitingLane { id, label, repo })
+            Some(TrayLane {
+                id,
+                label,
+                repo,
+                status: status.to_string(),
+            })
         })
         .collect()
 }
@@ -2942,7 +3102,7 @@ fn truncate_label(label: &str) -> String {
 /// Layout: `<packet> · <repo>` rows, separator, `Show o8`, separator, `Quit`.
 /// When the set is empty the per-packet rows are skipped and the menu collapses
 /// to the static two.
-fn build_tray_menu(app: &AppHandle, lanes: &[AwaitingLane]) -> tauri::Result<Menu<tauri::Wry>> {
+fn build_tray_menu(app: &AppHandle, lanes: &[TrayLane]) -> tauri::Result<Menu<tauri::Wry>> {
     let show = MenuItem::with_id(app, "show", "Show o8", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, "quit", "Quit o8", true, None::<&str>)?;
@@ -2971,7 +3131,7 @@ fn build_tray_menu(app: &AppHandle, lanes: &[AwaitingLane]) -> tauri::Result<Men
 /// Swap the tray's menu to reflect the current awaiting-review set.
 /// Called from the poller when the set changes. Errors are logged + skipped
 /// so a transient menu-build hiccup never kills the poller thread.
-fn apply_tray_menu(app: &AppHandle, lanes: &[AwaitingLane]) {
+fn apply_tray_menu(app: &AppHandle, lanes: &[TrayLane]) {
     let Ok(guard) = tray_handle().lock() else {
         return;
     };
@@ -2994,8 +3154,11 @@ fn spawn_tray_badge_poller(app: AppHandle) {
     std::thread::spawn(move || {
         let mut last_signature: Option<String> = None;
         loop {
-            let lanes = fetch_awaiting_lanes();
-            let count = lanes.len() as u32;
+            let lanes = fetch_tray_lanes();
+            let count = lanes
+                .iter()
+                .filter(|lane| lane.status == "reviewing")
+                .count() as u32;
             // Signature = count + sorted lane id list. Rebuild menu only when
             // the set itself changes — avoids churn when nothing happened.
             let mut ids: Vec<&str> = lanes.iter().map(|l| l.id.as_str()).collect();
@@ -5584,8 +5747,7 @@ fn deliver_o8_auth_deep_links(app_handle: &AppHandle, links: Vec<String>) {
     }
     if let Some(window) = app_handle.get_webview_window("main") {
         let _ = window.emit("o8:auth-callback", &links);
-        let _ = window.show();
-        let _ = window.set_focus();
+        show_desktop_window(app_handle);
     } else {
         buffer_o8_auth_deep_links(links);
     }
@@ -5975,11 +6137,7 @@ pub fn run() {
                 // plugin before this callback ran, so the URL is in flight. All
                 // that is left is to surface the window the user just asked for
                 // (a plain `o8` re-launch with no URL lands here too).
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.unminimize();
-                    let _ = window.set_focus();
-                }
+                show_desktop_window(app);
             }))
             .plugin(tauri_plugin_deep_link::init());
     }
@@ -6095,6 +6253,9 @@ pub fn run() {
             read_approvals,
             read_workspaces,
             set_tray_badge,
+            desktop_close_preference_get,
+            desktop_close_preference_set,
+            resolve_desktop_close,
             set_canvas_material,
             set_canvas_backdrop_blur,
             take_pending_file_opens,
@@ -6327,33 +6488,34 @@ pub fn run() {
             let quit = MenuItem::with_id(app, "quit", "Quit o8", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &separator, &quit])?;
 
-            let tray = TrayIconBuilder::new()
-                // Menu-bar glyph: the o8 monogram as a TEMPLATE image (black +
-                // alpha; macOS renders it from the alpha channel so it adapts
-                // to light/dark menu bars). Without an explicit icon the item
-                // painted as a blank rounded box (live-hit 2026-07-29) — the
-                // old config-level aurora tile is a mostly-opaque squircle, so
-                // its alpha silhouette IS a box under template treatment.
-                .icon(tauri::image::Image::from_bytes(include_bytes!("../icons/tray-template.png"))?)
-                .icon_as_template(true)
+            let mut tray_builder = TrayIconBuilder::new()
                 .menu(&menu)
                 // Show menu on left-click (default is right-click only on
                 // macOS) so the count-aware list is one click away.
                 .show_menu_on_left_click(false)
-                .tooltip("o8")
+                .tooltip("o8");
+            // macOS wants a monochrome template glyph. Windows/Linux need the
+            // full application icon so the tray stays visible against either
+            // a light or dark taskbar/panel.
+            #[cfg(target_os = "macos")]
+            {
+                tray_builder = tray_builder
+                    .icon(tauri::image::Image::from_bytes(include_bytes!(
+                        "../icons/tray-template.png"
+                    ))?)
+                    .icon_as_template(true);
+            }
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            if let Some(icon) = app.default_window_icon() {
+                tray_builder = tray_builder.icon(icon.clone());
+            }
+
+            let tray = tray_builder
                 .on_menu_event(|app, event| {
                     let id = event.id.as_ref();
                     match id {
                         "show" => {
-                            // P4: the tray is the re-entry point. If background
-                            // mode hid the Dock icon (Accessory), restore Regular
-                            // so the user gets a window AND a Dock icon back —
-                            // never stranded windowless. Centralized in background.
-                            background::set_background_mode(app, false, true);
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            }
+                            show_desktop_window(app);
                         }
                         "quit" => {
                             app.exit(0);
@@ -6363,11 +6525,7 @@ pub fn run() {
                             // window so the operator sees the review queue,
                             // then emit a Tauri event the frontend can pick
                             // up to scroll the AgentPanel to the lane.
-                            background::set_background_mode(app, false, true);
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            }
+                            show_desktop_window(app);
                             let lane_id = &lane["lane:".len()..];
                             let _ = app.emit("tray:focus-lane", lane_id.to_string());
                         }
@@ -6382,16 +6540,12 @@ pub fn run() {
                     } = event
                     {
                         let app = tray.app_handle();
-                        // P4: tray left-click is also a deliberate "bring me
-                        // back" — restore Regular so the Dock icon returns.
-                        background::set_background_mode(app, false, true);
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
+                        show_desktop_window(app);
                     }
                 })
                 .build(app)?;
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            tray.set_visible(false)?;
             // Store the handle so background tasks (badge poller) and
             // frontend commands can mutate the tray's title / tooltip.
             store_tray(tray);
@@ -6905,12 +7059,22 @@ pub fn run() {
                 window.on_window_event(move |event| {
                     match event {
                         tauri::WindowEvent::CloseRequested { api, .. } => {
-                            // Hide instead of close — agents keep working
                             api.prevent_close();
-                            if let Some(w) = app_handle.get_webview_window("main") {
-                                let _ = w.hide();
+
+                            // A windowless app remains visible in the macOS
+                            // Dock, so closing the window keeps the established
+                            // macOS behavior. Windows/Linux treat X as quit when
+                            // no worker is live and ask before backgrounding
+                            // active work; the tray appears only after consent.
+                            #[cfg(target_os = "macos")]
+                            {
+                                if let Some(w) = app_handle.get_webview_window("main") {
+                                    let _ = w.hide();
+                                }
+                                let _ = app_handle.emit("window-hidden", ());
                             }
-                            let _ = app_handle.emit("window-hidden", ());
+                            #[cfg(any(target_os = "windows", target_os = "linux"))]
+                            request_desktop_close(app_handle.clone());
                         }
                         // #1136 — bridge OS-level drag-drop into the webview as
                         // window CustomEvents. With dragDropEnabled: true in

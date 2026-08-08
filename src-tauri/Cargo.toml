@@ -159,7 +159,7 @@ libc = "0.2"
 # already-running shells (e.g. Explorer) pick up the change without a reboot.
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
 
 # ── Windows/Linux `o8://` deep-link registration (#1742, part of #1673) ──
 # macOS registers the scheme through the bundle (Info.plist CFBundleURLTypes)
