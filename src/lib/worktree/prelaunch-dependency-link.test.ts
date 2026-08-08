@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { chmod, lstat, mkdir, mkdtemp, readlink, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -24,6 +24,68 @@ async function git(cwd: string, args: string[]) {
   });
 }
 
+async function createFixture(options: { lockfile: boolean; typescript?: boolean }) {
+  const root = await mkdtemp(path.join(tmpdir(), 'o8-local-deps-'));
+  roots.push(root);
+  const origin = path.join(root, 'origin.git');
+  const repo = path.join(root, 'repo');
+  await execFileAsync('git', ['init', '--bare', origin]);
+  await execFileAsync('git', ['clone', origin, repo]);
+  await git(repo, ['checkout', '-b', 'main']);
+
+  const dependencyName = options.typescript ? 'fixture-typescript' : 'local-dep';
+  const dependencyDir = path.join(repo, 'dep');
+  await mkdir(path.join(dependencyDir, 'bin'), { recursive: true });
+  await writeFile(
+    path.join(dependencyDir, 'package.json'),
+    JSON.stringify({
+      name: dependencyName,
+      version: '1.0.0',
+      ...(options.typescript ? { bin: { tsc: 'bin/tsc.js' } } : {}),
+    }),
+  );
+  if (options.typescript) {
+    const tsc = path.join(dependencyDir, 'bin', 'tsc.js');
+    await writeFile(tsc, [
+      '#!/usr/bin/env node',
+      "const fs = require('node:fs');",
+      "if (fs.lstatSync('node_modules').isSymbolicLink()) process.exit(41);",
+      '',
+    ].join('\n'));
+    await chmod(tsc, 0o755);
+    await writeFile(path.join(repo, 'tsconfig.json'), '{"compilerOptions":{"noEmit":true}}\n');
+  }
+  await writeFile(
+    path.join(repo, 'package.json'),
+    JSON.stringify({
+      name: 'fixture',
+      private: true,
+      dependencies: { [dependencyName]: 'file:./dep' },
+    }),
+  );
+  if (options.lockfile) {
+    await execFileAsync('npm', ['install', '--package-lock-only', '--ignore-scripts'], {
+      cwd: repo,
+      env: { ...process.env, NODE_ENV: 'development' },
+    });
+  }
+  await git(repo, ['add', '.']);
+  await git(repo, ['commit', '-m', 'fixture']);
+  await git(repo, ['push', '-u', 'origin', 'main']);
+  return { root, repo };
+}
+
+async function addHostSentinel(repo: string) {
+  const sentinel = path.join(repo, 'node_modules', 'host-only', 'sentinel.js');
+  await mkdir(path.dirname(sentinel), { recursive: true });
+  await writeFile(sentinel, 'module.exports = true;\n');
+  return sentinel;
+}
+
+async function linkDirectory(source: string, target: string) {
+  await symlink(source, target, process.platform === 'win32' ? 'junction' : 'dir');
+}
+
 afterEach(async () => {
   delete process.env.O8_WORKTREE_ROOT;
   while (roots.length > 0) {
@@ -31,53 +93,79 @@ afterEach(async () => {
   }
 });
 
-describe('prelaunch dependency resolution', () => {
-  it('links matching repo dependencies into an external managed worktree before typecheck', async () => {
-    const root = await mkdtemp(path.join(tmpdir(), 'o8-prelaunch-deps-'));
-    roots.push(root);
-    const origin = path.join(root, 'origin.git');
-    const repo = path.join(root, 'repo');
-    const externalRoot = path.join(root, 'managed-worktrees');
-    await execFileAsync('git', ['init', '--bare', origin]);
-    await execFileAsync('git', ['clone', origin, repo]);
-    await git(repo, ['checkout', '-b', 'main']);
-    await writeFile(path.join(repo, 'package.json'), '{"name":"fixture","private":true}\n');
-    await writeFile(path.join(repo, 'package-lock.json'), '{"name":"fixture","lockfileVersion":3}\n');
-    await writeFile(path.join(repo, 'tsconfig.json'), '{"compilerOptions":{"noEmit":true}}\n');
-    const binDir = path.join(repo, 'node_modules', '.bin');
-    await mkdir(binDir, { recursive: true });
-    const tscPath = path.join(binDir, 'tsc');
-    await writeFile(tscPath, '#!/bin/sh\ntest -L "$PWD/node_modules"\n');
-    await chmod(tscPath, 0o755);
-    await git(repo, ['add', 'package.json', 'package-lock.json', 'tsconfig.json']);
-    await git(repo, ['commit', '-m', 'fixture']);
-    await git(repo, ['push', '-u', 'origin', 'main']);
+describe('prelaunch dependency isolation', () => {
+  it('installs and typechecks with worktree-local dependencies', async () => {
+    const { root, repo } = await createFixture({ lockfile: true, typescript: true });
+    const hostSentinel = await addHostSentinel(repo);
+    process.env.O8_WORKTREE_ROOT = path.join(root, 'managed-worktrees');
 
-    process.env.O8_WORKTREE_ROOT = externalRoot;
     const manager = new WorktreeManager(repo);
     const worktree = await manager.create({
       agentType: 'codex',
-      taskName: 'external dependency resolution',
-      branchName: 'worktree/codex/external-dependency-resolution',
+      taskName: 'local dependency resolution',
+      branchName: 'worktree/codex/local-dependency-resolution',
       baseBranch: 'main',
-      skipSetup: true,
     });
 
-    const linkedPath = path.join(worktree.path, 'node_modules');
-    expect((await lstat(linkedPath)).isSymbolicLink()).toBe(true);
-    expect(await readlink(linkedPath)).toBe(path.join(repo, 'node_modules'));
+    const worktreeModules = path.join(worktree.path, 'node_modules');
+    expect((await lstat(worktreeModules)).isDirectory()).toBe(true);
+    expect((await lstat(worktreeModules)).isSymbolicLink()).toBe(false);
+    expect(await lstat(path.join(worktreeModules, 'fixture-typescript')).then(() => true)).toBe(true);
+    expect(await lstat(hostSentinel).then(() => true)).toBe(true);
     expect(path.dirname(worktree.path)).not.toBe(path.dirname(repo));
-  }, 30_000);
+
+    // This is the exact destructive path from #1764: a worker is free to run
+    // npm ci in its own directory, and the operator checkout must survive it.
+    await execFileAsync('npm', ['ci', '--prefer-offline'], {
+      cwd: worktree.path,
+      env: { ...process.env, NODE_ENV: 'development' },
+    });
+    expect(await lstat(hostSentinel).then(() => true)).toBe(true);
+  }, 120_000);
 });
 
-/**
- * The pre-launch typecheck gate (#1107) must SKIP quietly when there is nothing
- * to check, and must never mistake a missing tool for a broken base branch —
- * that misdiagnosis blocked every non-TypeScript repo and, on Windows, every
- * repo at all (#1762). The sibling test above covers the other half: when a
- * tsconfig and a repo-local tsc DO exist, the gate resolves and runs, with
- * node_modules linked first.
- */
+describe('legacy linked node_modules migration', () => {
+  it('unlinks before npm ci and preserves the host tree', async () => {
+    const { repo } = await createFixture({ lockfile: true });
+    const hostSentinel = await addHostSentinel(repo);
+    const manager = new WorktreeManager(repo);
+    const worktree = await manager.create({
+      agentType: 'codex',
+      taskName: 'legacy lockfile link',
+      skipSetup: true,
+    });
+    const worktreeModules = path.join(worktree.path, 'node_modules');
+    await linkDirectory(path.join(repo, 'node_modules'), worktreeModules);
+
+    await (manager as unknown as { runSetup(p: string): Promise<void> }).runSetup(worktree.path);
+
+    expect(await lstat(hostSentinel).then(() => true)).toBe(true);
+    expect((await lstat(worktreeModules)).isDirectory()).toBe(true);
+    expect((await lstat(worktreeModules)).isSymbolicLink()).toBe(false);
+    expect(await lstat(path.join(worktreeModules, 'local-dep')).then(() => true)).toBe(true);
+  }, 120_000);
+
+  it('unlinks before npm install and preserves the host tree without a lockfile', async () => {
+    const { repo } = await createFixture({ lockfile: false });
+    const hostSentinel = await addHostSentinel(repo);
+    const manager = new WorktreeManager(repo);
+    const worktree = await manager.create({
+      agentType: 'codex',
+      taskName: 'legacy no-lockfile link',
+      skipSetup: true,
+    });
+    const worktreeModules = path.join(worktree.path, 'node_modules');
+    await linkDirectory(path.join(repo, 'node_modules'), worktreeModules);
+
+    await (manager as unknown as { runSetup(p: string): Promise<void> }).runSetup(worktree.path);
+
+    expect(await lstat(hostSentinel).then(() => true)).toBe(true);
+    expect((await lstat(worktreeModules)).isDirectory()).toBe(true);
+    expect((await lstat(worktreeModules)).isSymbolicLink()).toBe(false);
+    expect(await lstat(path.join(worktreeModules, 'local-dep')).then(() => true)).toBe(true);
+  }, 120_000);
+});
+
 describe('prelaunch typecheck skip', () => {
   it('creates the worktree when the repo has no TypeScript at all', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'o8-prelaunch-skip-'));
@@ -87,8 +175,6 @@ describe('prelaunch typecheck skip', () => {
     await execFileAsync('git', ['init', '--bare', origin]);
     await execFileAsync('git', ['clone', origin, repo]);
     await git(repo, ['checkout', '-b', 'main']);
-    // No tsconfig.json and no node_modules/.bin/tsc — the shape that used to
-    // raise ENOENT and get reported as "main HEAD is in an inconsistent state".
     await writeFile(path.join(repo, 'README.md'), '# fixture\n');
     await git(repo, ['add', 'README.md']);
     await git(repo, ['commit', '-m', 'fixture']);
@@ -100,104 +186,6 @@ describe('prelaunch typecheck skip', () => {
       taskName: 'no typescript in this repo',
     });
 
-    expect(worktree.path).toBeTruthy();
-    const stat = await lstat(worktree.path);
-    expect(stat.isDirectory()).toBe(true);
+    expect((await lstat(worktree.path)).isDirectory()).toBe(true);
   }, 60_000);
-});
-
-/**
- * Regression guard for a host-data-destroying bug that appeared TWICE while
- * hardening this path for Windows.
- *
- * A worktree's node_modules is a SYMLINK to the host repo's. If anything
- * decides that link is "unhealthy" and falls through to an install, npm's
- * removal step (readdir + rm per entry) runs THROUGH the link and empties the
- * host's tree. The health check that triggered it exists for a real directory
- * left behind by a killed install — applying it to a link destroys the thing
- * it is inspecting.
- */
-describe('a symlinked node_modules is never treated as unhealthy', () => {
-  it('returns early instead of installing when the link is already in place', async () => {
-    const root = await mkdtemp(path.join(tmpdir(), 'o8-nm-link-'));
-    roots.push(root);
-    const origin = path.join(root, 'origin.git');
-    const repo = path.join(root, 'repo');
-    await execFileAsync('git', ['init', '--bare', origin]);
-    await execFileAsync('git', ['clone', origin, repo]);
-    await git(repo, ['checkout', '-b', 'main']);
-    await writeFile(path.join(repo, 'package.json'), '{"name":"fixture","private":true}\n');
-    await writeFile(path.join(repo, 'package-lock.json'), '{"name":"fixture","lockfileVersion":3}\n');
-    await git(repo, ['add', 'package.json', 'package-lock.json']);
-    await git(repo, ['commit', '-m', 'fixture']);
-    await git(repo, ['push', '-u', 'origin', 'main']);
-
-    // Host deps with NEITHER health marker — the state that made the guard
-    // report "unhealthy" and fall through to an install.
-    const hostModules = path.join(repo, 'node_modules');
-    await mkdir(path.join(hostModules, 'left-pad'), { recursive: true });
-    const sentinel = path.join(hostModules, 'left-pad', 'index.js');
-    await writeFile(sentinel, 'module.exports = 1;\n');
-
-    const manager = new WorktreeManager(repo);
-    const worktree = await manager.create({
-      agentType: 'codex',
-      taskName: 'symlinked node_modules must survive',
-    });
-
-    // Put the link in place FIRST, exactly as the APFS-CoW path does before
-    // runSetup — this is what the earlier version of this test never did, so it
-    // exercised the happy path and would have passed with the guard deleted.
-    const worktreeModules = path.join(worktree.path, 'node_modules');
-    await rm(worktreeModules, { recursive: true, force: true }).catch(() => {});
-    await symlink(hostModules, worktreeModules);
-
-    // An install here would readdir+rm THROUGH the link and empty the host.
-    // Drive the real entry point rather than the private helper.
-    await (manager as unknown as { runSetup(p: string): Promise<void> }).runSetup(worktree.path);
-
-    expect(await lstat(sentinel).then(() => true).catch(() => false)).toBe(true);
-    expect((await lstat(worktreeModules)).isSymbolicLink()).toBe(true);
-  }, 120_000);
-
-  it('also guards the NO-LOCKFILE branch, where npm install would run', async () => {
-    // The lockfile fixture above only exercises the `npm ci` branch, so the
-    // `|| hasPackageJson` half could be reverted and stay green. pnpm/yarn/bun
-    // repos take this path.
-    const root = await mkdtemp(path.join(tmpdir(), 'o8-nm-link-nolock-'));
-    roots.push(root);
-    const origin = path.join(root, 'origin.git');
-    const repo = path.join(root, 'repo');
-    await execFileAsync('git', ['init', '--bare', origin]);
-    await execFileAsync('git', ['clone', origin, repo]);
-    await git(repo, ['checkout', '-b', 'main']);
-    // A dependency npm can resolve OFFLINE, so `npm install` genuinely reifies
-    // node_modules. Without one npm never touches the directory and the test
-    // cannot tell a working guard from a missing one.
-    await mkdir(path.join(repo, 'dep'), { recursive: true });
-    await writeFile(path.join(repo, 'dep', 'package.json'), '{"name":"local-dep","version":"1.0.0"}\n');
-    await writeFile(
-      path.join(repo, 'package.json'),
-      '{"name":"fixture","private":true,"dependencies":{"local-dep":"file:./dep"}}\n',
-    );
-    await git(repo, ['add', 'package.json', 'dep/package.json']);
-    await git(repo, ['commit', '-m', 'fixture']);
-    await git(repo, ['push', '-u', 'origin', 'main']);
-
-    const hostModules = path.join(repo, 'node_modules');
-    await mkdir(path.join(hostModules, 'left-pad'), { recursive: true });
-    const sentinel = path.join(hostModules, 'left-pad', 'index.js');
-    await writeFile(sentinel, 'module.exports = 1;\n');
-
-    const manager = new WorktreeManager(repo);
-    const worktree = await manager.create({ agentType: 'codex', taskName: 'no lockfile' });
-    const worktreeModules = path.join(worktree.path, 'node_modules');
-    await rm(worktreeModules, { recursive: true, force: true }).catch(() => {});
-    await symlink(hostModules, worktreeModules);
-
-    await (manager as unknown as { runSetup(p: string): Promise<void> }).runSetup(worktree.path);
-
-    expect(await lstat(sentinel).then(() => true).catch(() => false)).toBe(true);
-    expect((await lstat(worktreeModules)).isSymbolicLink()).toBe(true);
-  }, 120_000);
 });

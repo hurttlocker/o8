@@ -53,9 +53,9 @@ const TRASH_DIR_NAME = '.o8-trash';
 const CLAUDE_WORKTREE_DIR = '.claude/worktrees';
 const STALE_THRESHOLD_MS = 24 * 60 * 60_000; // 24 hours
 const AUTO_PRUNE_COOLDOWN_MS = 6 * 60 * 60_000; // 6 hours
+const NODE_INSTALL_TIMEOUT_MS = 10 * 60_000;
 const APFS_COW_ENV_FLAG = 'O8_APFS_COW_WORKSPACES';
 const APFS_HYDRATION_CANDIDATES = [
-  'node_modules',
   '.next/cache',
   '.turbo',
   '.venv',
@@ -63,13 +63,6 @@ const APFS_HYDRATION_CANDIDATES = [
   'target',
   'Pods',
   'DerivedData',
-];
-const NODE_LOCK_FILES = [
-  'package-lock.json',
-  'pnpm-lock.yaml',
-  'yarn.lock',
-  'bun.lockb',
-  'bun.lock',
 ];
 let lastAutoPruneAt = 0;
 let autoPrunePromise: Promise<unknown> | null = null;
@@ -494,15 +487,13 @@ export class WorktreeManager {
     // and refuse to spawn the agent into a broken tree.
     //
     // Opt out with O8_SKIP_PRELAUNCH_TYPECHECK=1 if tsc is too slow / noisy for
-    // the dispatch loop. Managed worktrees normally live outside the repo, so
-    // link the repo's dependencies only when every dependency input matches.
-    // The repo-root tsc binary alone is insufficient because module resolution
-    // starts from the external worktree's source files.
+    // the dispatch loop. The binary and module tree must both belong to the
+    // worktree; sharing the host repo's node_modules lets a packet-side install
+    // mutate or erase the operator's main checkout.
     const tscBin = process.env.O8_SKIP_PRELAUNCH_TYPECHECK === '1'
       ? null
       : await this.resolveTscBinary(worktreePath);
     if (tscBin) {
-      await this.linkMatchingNodeModules(worktreePath);
       try {
         const tscRun = cliInvocation(tscBin, ['--noEmit', '--incremental', 'false']);
         await execFileAsync(tscRun.command, tscRun.args, {
@@ -1024,41 +1015,32 @@ export class WorktreeManager {
 
   /**
    * Auto-detect project type and run appropriate install command.
-   * Skips install if lock file matches the main repo (deps unchanged).
+   * Node dependencies always live inside the worktree. A legacy symlink is
+   * removed as a link before npm is allowed to touch the path.
    */
   async runSetup(worktreePath: string): Promise<void> {
-    // Node.js — check if deps changed before installing
+    // Node.js — install a real dependency tree inside the worktree.
     const hasPackageLock = await this.pathExists(path.join(worktreePath, 'package-lock.json'));
     const hasPackageJson = await this.pathExists(path.join(worktreePath, 'package.json'));
 
-    // The link check gates BOTH branches, not just the lockfile one. A repo with
-    // a package.json and no lockfile (pnpm/yarn/bun) previously fell straight to
-    // `npm install` against a node_modules that the APFS-CoW path had already
-    // symlinked at the host repo's — which reifies a full tree over the link at
-    // best, and differs from `npm ci` only by an arborist implementation detail
-    // that is not ours to rely on. A link is always "done" in either branch.
-    // Skip only the NODE install when the link is in place — `return` here also
-    // skipped the pip/go/cargo steps below, which have nothing to do with
-    // node_modules. That was pre-existing for lockfile repos and I widened it
-    // to package.json-only repos; both are wrong.
-    const nodeDepsLinked = (hasPackageLock || hasPackageJson)
-      ? await this.linkMatchingNodeModules(worktreePath)
+    const nodeDepsReady = (hasPackageLock || hasPackageJson)
+      ? await this.hasHealthyLocalNodeModules(worktreePath)
       : false;
 
-    if (!nodeDepsLinked && hasPackageLock) {
+    if (!nodeDepsReady && hasPackageLock) {
       const npmCi = cliInvocation('npm', ['ci', '--prefer-offline']);
       await execFileAsync(npmCi.command, npmCi.args, {
         windowsHide: true,
         cwd: worktreePath,
-        timeout: 120_000,
+        timeout: NODE_INSTALL_TIMEOUT_MS,
         env: { ...process.env, NODE_ENV: 'development' },
       });
-    } else if (!nodeDepsLinked && hasPackageJson) {
+    } else if (!nodeDepsReady && hasPackageJson) {
       const npmInstall = cliInvocation('npm', ['install']);
       await execFileAsync(npmInstall.command, npmInstall.args, {
         windowsHide: true,
         cwd: worktreePath,
-        timeout: 120_000,
+        timeout: NODE_INSTALL_TIMEOUT_MS,
         env: { ...process.env, NODE_ENV: 'development' },
       });
     }
@@ -1115,29 +1097,6 @@ export class WorktreeManager {
 
       if (!(await this.pathExists(sourcePath))) continue;
       if (await this.pathExists(targetPath)) continue;
-      if (relativePath === 'node_modules' && !(await this.nodeDependencyInputsMatch(worktreePath))) {
-        continue;
-      }
-
-      // F36 fast path (#1028): cp -cR of node_modules is O(file count) even
-      // under APFS clone-on-write — 50k+ files take 5-10 min. Dispatch packets
-      // edit source only and never mutate node_modules, so a symlink to the
-      // host's node_modules is functionally equivalent and ~5000x faster.
-      // Restricted to node_modules — other candidates (.next/cache, target/,
-      // etc.) may legitimately diverge and still want the CoW copy.
-      if (relativePath === 'node_modules') {
-        try {
-          await mkdir(path.dirname(targetPath), { recursive: true });
-          await symlink(sourcePath, targetPath);
-          hydrated.push(`${relativePath} (symlink)`);
-          continue;
-        } catch (err) {
-          console.warn(
-            `[worktree] node_modules symlink failed, falling back to cp -cR: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-      }
-
       try {
         await mkdir(path.dirname(targetPath), { recursive: true });
         await execFileAsync('cp', ['-cR', sourcePath, targetPath], {
@@ -1153,20 +1112,6 @@ export class WorktreeManager {
     }
 
     return hydrated;
-  }
-
-  private async nodeDependencyInputsMatch(worktreePath: string): Promise<boolean> {
-    const mainPackageJson = await this.safeReadFile(path.join(this.repoRoot, 'package.json'));
-    const wtPackageJson = await this.safeReadFile(path.join(worktreePath, 'package.json'));
-    if (!mainPackageJson || !wtPackageJson || mainPackageJson !== wtPackageJson) return false;
-
-    for (const lockFile of NODE_LOCK_FILES) {
-      const mainLock = await this.safeReadFile(path.join(this.repoRoot, lockFile));
-      const wtLock = await this.safeReadFile(path.join(worktreePath, lockFile));
-      if (mainLock !== wtLock) return false;
-    }
-
-    return true;
   }
 
   /**
@@ -1196,59 +1141,32 @@ export class WorktreeManager {
       return null;
     }
     for (const name of TSC_BIN_CANDIDATES) {
-      const candidate = path.join(this.repoRoot, 'node_modules', '.bin', name);
+      const candidate = path.join(worktreePath, 'node_modules', '.bin', name);
       if (await exists(candidate)) return candidate;
     }
-    console.log('[worktree] no repo-local tsc — skipping the pre-launch typecheck');
+    console.log('[worktree] no worktree-local tsc — skipping the pre-launch typecheck');
     return null;
   }
 
-  private async linkMatchingNodeModules(worktreePath: string): Promise<boolean> {
-    const sourcePath = path.join(this.repoRoot, 'node_modules');
+  private async hasHealthyLocalNodeModules(worktreePath: string): Promise<boolean> {
     const targetPath = path.join(worktreePath, 'node_modules');
-    // A LINK is always "done", regardless of what it points at. This check must
-    // come first and must never fall through: returning false here lets the
-    // caller run `npm ci` in a worktree whose node_modules is a symlink to the
-    // HOST repo's, and npm's removal step is readdir + rm per entry — through
-    // the link, that empties the host's tree. The health check below is about
-    // a REAL directory left behind by a killed install; applying it to a link
-    // would destroy the very thing it is inspecting.
     const linked = await lstat(targetPath).catch(() => null);
     if (linked?.isSymbolicLink()) {
-      // A link whose target is gone is not "done" — it strands the worktree
-      // with an unusable node_modules forever. Remove the link itself (never
-      // its contents) and fall through to relink or install.
-      if (await this.pathExists(targetPath)) return true;
-      await rm(targetPath, { force: true }).catch(() => {});
-    }
-    // Existence is not health. When the symlink fails (Windows without the
-    // privilege) a real `npm ci` runs under a timeout, and an install killed
-    // part-way leaves a node_modules that this check used to accept forever —
-    // after which the typecheck gate either skips (a silent merge) or fails on
-    // missing modules for good. Require the marker npm writes when an install
-    // COMPLETES, so a partial tree is retried instead of trusted.
-    if (await this.pathExists(path.join(targetPath, '.package-lock.json'))) return true;
-    if (await this.pathExists(targetPath) && await this.pathExists(path.join(targetPath, '.bin'))) return true;
-    if (!(await this.pathExists(sourcePath))) return false;
-    if (!(await this.nodeDependencyInputsMatch(worktreePath))) return false;
-
-    try {
-      // NOT a junction, deliberately. A junction would dodge Windows' symlink
-      // privilege requirement, but git-for-windows maps only
-      // IO_REPARSE_TAG_SYMLINK to a link — a junction stays a plain directory
-      // to it, so `git worktree remove --force` recurses INTO it and deletes
-      // the HOST repo's node_modules. Removal happens at three separate sites
-      // here, so guarding them is one forgotten call site away from destroying
-      // a user's dependencies on a platform we cannot test. A slow install is
-      // recoverable; deleting someone's files is not.
-      await symlink(sourcePath, targetPath);
-      return true;
-    } catch (error) {
-      console.warn(
-        `[worktree] node_modules link failed for ${worktreePath}: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      try {
+        await rm(targetPath, { force: true });
+      } catch (error) {
+        throw new Error(
+          `Refusing to install through linked node_modules at ${targetPath}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
       return false;
     }
+
+    // Existence is not health. An install killed part-way leaves a directory,
+    // so require a completion marker before skipping the local install.
+    if (await this.pathExists(path.join(targetPath, '.package-lock.json'))) return true;
+    if (await this.pathExists(targetPath) && await this.pathExists(path.join(targetPath, '.bin'))) return true;
+    return false;
   }
 
   private async bootstrapEnvFiles(worktreePath: string, opts: CreateWorktreeOptions): Promise<void> {
@@ -2167,14 +2085,6 @@ export class WorktreeManager {
       return await realpath(candidatePath);
     } catch {
       return path.resolve(candidatePath);
-    }
-  }
-
-  private async safeReadFile(p: string): Promise<string | null> {
-    try {
-      return await readFile(p, 'utf-8');
-    } catch {
-      return null;
     }
   }
 
