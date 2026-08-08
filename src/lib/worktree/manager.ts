@@ -53,7 +53,7 @@ const TRASH_DIR_NAME = '.o8-trash';
 const CLAUDE_WORKTREE_DIR = '.claude/worktrees';
 const STALE_THRESHOLD_MS = 24 * 60 * 60_000; // 24 hours
 const AUTO_PRUNE_COOLDOWN_MS = 6 * 60 * 60_000; // 6 hours
-const NODE_INSTALL_TIMEOUT_MS = 10 * 60_000;
+const NODE_INSTALL_TIMEOUT_MS = 45 * 60_000;
 const APFS_COW_ENV_FLAG = 'O8_APFS_COW_WORKSPACES';
 const APFS_HYDRATION_CANDIDATES = [
   '.next/cache',

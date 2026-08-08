@@ -20,6 +20,15 @@ function runStep(label, command, args) {
   }
 }
 
+function nativeModuleLoads(moduleName) {
+  const result = spawnSync(process.execPath, ['-e', `require(${JSON.stringify(moduleName)})`], {
+    cwd: root,
+    stdio: 'ignore',
+    env: process.env,
+  });
+  return result.status === 0;
+}
+
 function ensureMonacoCodiconFont() {
   const source = path.join(root, 'node_modules', '@vscode', 'codicons', 'dist', 'codicon.ttf');
   const target = path.join(
@@ -52,8 +61,16 @@ function ensureMonacoCodiconFont() {
   console.log('[postinstall] Repaired Monaco codicon.ttf');
 }
 
-runStep('better-sqlite3 rebuild', 'npm', ['rebuild', 'better-sqlite3']);
-runStep('node-pty rebuild', 'npx', ['node-gyp', 'rebuild', '--directory=node_modules/node-pty']);
+if (nativeModuleLoads('better-sqlite3')) {
+  console.log('[postinstall] better-sqlite3 native module ready');
+} else {
+  runStep('better-sqlite3 rebuild', 'npm', ['rebuild', 'better-sqlite3']);
+}
+if (nativeModuleLoads('node-pty')) {
+  console.log('[postinstall] node-pty native module ready');
+} else {
+  runStep('node-pty rebuild', 'npx', ['node-gyp', 'rebuild', '--directory=node_modules/node-pty']);
+}
 // Re-apply local patches against registry-published dependencies. The
 // tauri-plugin-mcp patch fixes React onClick compatibility for the webview
 // click tool — see patches/tauri-plugin-mcp+0.1.0.patch.

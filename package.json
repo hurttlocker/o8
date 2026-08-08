@@ -152,6 +152,7 @@
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.2.10",
     "jsdom": "^29.1.1",
+    "node-gyp": "13.0.1",
     "node-pty": "^1.2.0-beta.12",
     "patch-package": "^8.0.1",
     "tsx": "^4.21.0",

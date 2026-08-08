@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { WorktreeManager } from './manager';
 
 const execFileAsync = promisify(execFile);
@@ -21,6 +22,14 @@ async function git(cwd: string, args: string[]) {
       GIT_COMMITTER_NAME: 'o8 test',
       GIT_COMMITTER_EMAIL: 'test@o8.local',
     },
+  });
+}
+
+async function npm(cwd: string, args: string[]) {
+  const invocation = cliInvocation('npm', args);
+  await execFileAsync(invocation.command, invocation.args, {
+    cwd,
+    env: { ...process.env, NODE_ENV: 'development' },
   });
 }
 
@@ -64,10 +73,7 @@ async function createFixture(options: { lockfile: boolean; typescript?: boolean 
     }),
   );
   if (options.lockfile) {
-    await execFileAsync('npm', ['install', '--package-lock-only', '--ignore-scripts'], {
-      cwd: repo,
-      env: { ...process.env, NODE_ENV: 'development' },
-    });
+    await npm(repo, ['install', '--package-lock-only', '--ignore-scripts']);
   }
   await git(repo, ['add', '.']);
   await git(repo, ['commit', '-m', 'fixture']);
@@ -116,10 +122,7 @@ describe('prelaunch dependency isolation', () => {
 
     // This is the exact destructive path from #1764: a worker is free to run
     // npm ci in its own directory, and the operator checkout must survive it.
-    await execFileAsync('npm', ['ci', '--prefer-offline'], {
-      cwd: worktree.path,
-      env: { ...process.env, NODE_ENV: 'development' },
-    });
+    await npm(worktree.path, ['ci', '--prefer-offline']);
     expect(await lstat(hostSentinel).then(() => true)).toBe(true);
   }, 120_000);
 });
