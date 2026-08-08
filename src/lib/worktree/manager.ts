@@ -72,6 +72,7 @@ const NODE_LOCK_FILES = [
   'bun.lock',
 ];
 let lastAutoPruneAt = 0;
+let autoPrunePromise: Promise<unknown> | null = null;
 
 export type WorktreeRebaseStrategy = 'ours' | 'theirs';
 
@@ -272,11 +273,18 @@ export class WorktreeManager {
    *   at deploy time keep working until they drain.
    */
   async create(opts: CreateWorktreeOptions): Promise<WorktreeInfo> {
-    // Auto-prune stale worktrees (throttled to once per 6 hours)
-    if (Date.now() - lastAutoPruneAt > AUTO_PRUNE_COOLDOWN_MS) {
+    // Git worktree maintenance and creation mutate the same shared registry.
+    // Keep every create behind the throttled prune instead of letting a cold
+    // start race `git worktree prune` against `git worktree add`.
+    if (!autoPrunePromise && Date.now() - lastAutoPruneAt > AUTO_PRUNE_COOLDOWN_MS) {
       lastAutoPruneAt = Date.now();
-      this.prune().catch(() => {});
+      const prune = this.prune().catch(() => []);
+      autoPrunePromise = prune;
+      void prune.then(() => {
+        if (autoPrunePromise === prune) autoPrunePromise = null;
+      });
     }
+    if (autoPrunePromise) await autoPrunePromise;
 
     const baseTaskId = deriveWorktreeId(opts);
     let taskId = baseTaskId;
