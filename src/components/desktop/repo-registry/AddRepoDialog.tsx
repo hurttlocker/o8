@@ -373,7 +373,7 @@ export function AddRepoDialog({
               setValidationResult(null);
               setValidationError(null);
             }}
-            placeholder="/Users/you/project"
+            placeholder="Path to a project folder"
             disabled={adding}
             style={{
               ...fieldStyle(),

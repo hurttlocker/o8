@@ -114,7 +114,7 @@ Free tier uses on-device Apple transcription or your own Whisper key. An optiona
 
 ## Quickstart
 
-macOS today; Windows and Linux ports are mapped and in progress.
+macOS has signed releases today. Windows 11 is runtime-verified and produces MSI and NSIS installers. Linux produces deb, rpm, and AppImage packages; public signing, update channels, and Linux desktop verification remain open.
 
 **Easiest:** download the latest signed build from [Releases](https://github.com/hurttlocker/o8/releases) — auto-updates included.
 
