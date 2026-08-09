@@ -21,6 +21,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, statSync, rmSync, readFileSync, mkdirSync, symlinkSync, cpSync } from 'node:fs';
 import { join } from 'node:path';
+import { stapleAndValidate, submitForNotarization } from './lib/notarization.mjs';
 
 const REQUIRED = ['APPLE_SIGNING_IDENTITY', 'APPLE_ID', 'APPLE_PASSWORD', 'APPLE_TEAM_ID'];
 for (const key of REQUIRED) {
@@ -47,6 +48,11 @@ const ENTITLEMENTS = join(root, 'src-tauri/entitlements.plist');
 // the nested node_modules Mach-O binaries are.
 const SPEECH_ENTITLEMENTS = join(root, 'src-tauri/entitlements.speech.plist');
 const SIGNING_KEY = `${process.env.HOME}/.tauri/cortex-ide.key`;
+const notarizationCredentials = {
+  appleId: process.env.APPLE_ID,
+  teamId: process.env.APPLE_TEAM_ID,
+  password: process.env.APPLE_PASSWORD,
+};
 
 if (!existsSync(APP)) {
   console.error(`[sign-and-notarize] missing .app: ${APP}`);
@@ -169,16 +175,10 @@ console.log('[sign-and-notarize] zipping for notarization');
 execFileSync('ditto', ['-c', '-k', '--keepParent', APP, ZIP], { stdio: 'inherit' });
 
 console.log('[sign-and-notarize] submitting to Apple notary (5-15 min)');
-execFileSync('xcrun', [
-  'notarytool', 'submit', ZIP,
-  '--apple-id', process.env.APPLE_ID,
-  '--team-id', process.env.APPLE_TEAM_ID,
-  '--password', process.env.APPLE_PASSWORD,
-  '--wait',
-], { stdio: 'inherit' });
+submitForNotarization(ZIP, notarizationCredentials);
 
 console.log('[sign-and-notarize] stapling notarization ticket');
-execFileSync('xcrun', ['stapler', 'staple', APP], { stdio: 'inherit' });
+stapleAndValidate(APP);
 
 console.log('[sign-and-notarize] repackaging .app.tar.gz');
 if (existsSync(TAR)) rmSync(TAR);
@@ -232,4 +232,10 @@ execFileSync('codesign', [
   DMG,
 ], { stdio: 'inherit' });
 
-console.log('[sign-and-notarize] done. now run scripts/release.mjs to publish');
+console.log('[sign-and-notarize] submitting signed DMG to Apple notary (5-15 min)');
+submitForNotarization(DMG, notarizationCredentials);
+
+console.log('[sign-and-notarize] stapling and validating DMG notarization ticket');
+stapleAndValidate(DMG);
+
+console.log('[sign-and-notarize] done. app and DMG are notarized; now run scripts/release.mjs to publish');
