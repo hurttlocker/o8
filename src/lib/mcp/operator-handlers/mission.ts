@@ -130,6 +130,7 @@ export const MISSION_TOOLS: McpTool[] = [
           type: 'string',
           description: 'Session-rule inheritance (#1329) — your active orchestrator thread id (e.g. "thoughts-…"). When set, every worker prompt carries the thread\'s active "Operator session rules (binding)" block and dispatch records a rules_applied lane event. Omit when dispatching outside a rule-bearing thread.',
         },
+        caller: { type: 'string', description: 'Optional short label for the outside agent or terminal that started this work. The o8 app shows it on the worker pane.' },
       },
       required: ['repoPath'],
     },
@@ -813,9 +814,8 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
     const existingBranchPolicy = parseExistingBranchPolicy(args.existingBranchPolicy);
     const useBrain = typeof args.useBrain === 'boolean' ? args.useBrain : undefined;
     const huddle = typeof args.huddle === 'boolean' ? args.huddle : undefined;
-    // #1329 — session-rule inheritance. When the orchestrator passes its active
-    // thread id, workers inherit that thread's operator session rules.
     const orchestratorThreadId = optionalString(args, 'orchestratorThreadId') || undefined;
+    const caller = optionalString(args, 'caller') || undefined;
     const candidateMode = parseMissionCandidateMode(args, huddle);
     if (!candidateMode.ok) return textResult(candidateMode.error, true);
     const { comparisonModels, qualitySearch } = candidateMode;
@@ -846,7 +846,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
         huddle,
         comparisonModels,
         qualitySearch,
-        orchestratorThreadId,
+        orchestratorThreadId, caller,
       });
       if (shouldDispatch && createResult && !('error' in createResult)) {
         // Fire-and-forget: dispatch can take 30–60s on its own, and the
@@ -880,7 +880,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
       huddle,
       comparisonModels,
       qualitySearch,
-      orchestratorThreadId,
+      orchestratorThreadId, caller,
     });
     if (shouldDispatch && createResult && !('error' in createResult)) {
       void dispatchMission({ missionId: createResult.missionId }).catch((err) => {

@@ -3,7 +3,7 @@ import type { FleetSnapshot, WorkflowReviewSnapshot } from '@/lib/fleet/types';
 import type { LaneStatus } from '@/lib/lane/types';
 import type { MobileInboxSnapshot, MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { MobileInboxDelta } from '@/lib/mobile/inbox-delta';
-import type { OrchestratorPacketStatus } from '@/lib/orchestrator/types';
+import type { OrchestratorPacketStatus, WorkerLaunchContext } from '@/lib/orchestrator/types';
 
 export const REALTIME_PROTOCOL_VERSION = 1 as const;
 
@@ -49,6 +49,7 @@ export interface RealtimeMutationRecord {
   packetReferenceLabel?: string;
   repoPath?: string;
   branch?: string;
+  launchContext?: WorkerLaunchContext;
   laneStatus?: LaneStatus;
   previousStatus?: LaneStatus | null;
   timestamp?: string;

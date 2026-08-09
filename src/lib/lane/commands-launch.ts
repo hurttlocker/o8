@@ -151,6 +151,7 @@ export async function launchSession(
               repoPath: lane.repoPath,
               name: lane.label || lane.branch,
               prompt: command.prompt,
+              launchContext: command.launchContext,
             }),
             signal: AbortSignal.timeout(3000),
           });

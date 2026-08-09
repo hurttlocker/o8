@@ -321,6 +321,7 @@ async function dispatchPacket(
       ?? getRuntimeCapability(workerRouting.selectedRuntime).defaultModel
     ) ?? undefined,
     effort: workerRouting.selectedEffort ?? undefined,
+    launchContext: packet.launchContext ?? undefined,
     actor: 'orchestrator',
   });
 
@@ -718,6 +719,7 @@ export async function runDispatchTick(
                 packetReferenceLabel: candidate.referenceLabel,
                 repoPath: candidate.workspaceTargetPath ?? undefined,
                 branch: candidate.branchTarget,
+                launchContext: candidate.launchContext ?? undefined,
                 note: `Dispatched ${candidate.referenceLabel} to ${workerRouting.selectedRuntime}`,
                 createdAt: new Date().toISOString(),
                 settledAt: new Date().toISOString(),

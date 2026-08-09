@@ -43,6 +43,11 @@ interface CreateMissionResult {
   branchPreparation?: unknown[];
 }
 
+interface DispatchMissionResult {
+  initiated?: boolean;
+  dispatched?: number;
+}
+
 interface MissionStatusPacket {
   id: string;
   title?: string;
@@ -230,6 +235,13 @@ async function runMissionCreate(mode: OutputMode, rest: string[]): Promise<numbe
   const body: Record<string, unknown> = {
     repoPath,
     issues: [{ number, title: title.trim(), body: flag(rest, 'body')?.trim() || '', url: '' }],
+    dispatcher: { surface: 'operator', id: 'cli' },
+    launchContext: {
+      source: 'cli',
+      presentation: 'split',
+      repoContext: 'transient',
+      caller: flag(rest, 'caller')?.trim() || 'terminal',
+    },
   };
   const runtime = flag(rest, 'runtime');
   if (runtime) body.runtime = runtime;
@@ -251,12 +263,22 @@ async function runMissionCreate(mode: OutputMode, rest: string[]): Promise<numbe
   });
   const result = unwrap(res.data, 'Mission creation was rejected.');
 
-  const payload = { schema: 'o8/cli/mission.create/v1', mission: result };
+  let dispatch: DispatchMissionResult | null = null;
+  if (hasFlag(rest, 'dispatch')) {
+    const dispatchResponse = await apiFetch<OperatorResponse<DispatchMissionResult>>(cfg, '/api/orchestrator/dispatch', {
+      method: 'POST',
+      body: { missionId: result.missionId, wait: false },
+    });
+    dispatch = unwrap(dispatchResponse.data, 'Mission dispatch was rejected.');
+  }
+
+  const payload = { schema: 'o8/cli/mission.create/v1', mission: result, ...(dispatch ? { dispatch } : {}) };
   if (mode.human) {
     printHumanHeading('mission create');
     printHumanKv([
       ['mission', result.missionId],
       ['packets', String(result.packets.length)],
+      ...(dispatch ? [['dispatch', dispatch.initiated === false ? 'not initiated' : 'initiated']] as Array<[string, string]> : []),
       ...result.packets.map((p) => [`  · ${p.id}`, `${p.title} (wave ${p.wave})`] as [string, string]),
     ]);
   } else {

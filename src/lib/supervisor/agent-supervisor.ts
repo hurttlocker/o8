@@ -2,6 +2,23 @@ import { access, readdir, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { getSqlite } from '@/lib/db';
+import type { WorkerLaunchContext } from '@/lib/orchestrator/types';
+import type {
+  AgentStatusEntry,
+  SupervisorCallbacks,
+  SupervisorFleetStatusSummary,
+  TranscriptEntry,
+  WatchedAgent,
+} from './agent-supervisor-types';
+export type {
+  AgentCompletionDecision,
+  AgentStatusEntry,
+  AgentUpdateEvent,
+  SupervisorCallbacks,
+  SupervisorFleetStatusSummary,
+  TranscriptEntry,
+  WatchedAgent,
+} from './agent-supervisor-types';
 
 /**
  * Agent Supervisor — zero-cost rules engine that monitors launched Codex agents.
@@ -12,102 +29,6 @@ import { getSqlite } from '@/lib/db';
  *
  * The ws-server injects callbacks so this module has no HTTP/WS/LLM dependencies.
  */
-
-// ── Types ──
-
-export interface WatchedAgent {
-  surfaceId: string;
-  repoPath: string;
-  name: string;
-  prompt: string;
-  registeredAt: number;
-  lastStatus: string;
-  lastRuntimeStatus: string | null;
-  lastTranscriptLength: number;
-  lastTranscriptEntryId: string | null;
-  lastTranscriptSignature: string | null;
-  lastTranscriptMtimeMs: number | null;
-  lastActivityAt: number;
-  lastEventAt: number;
-  retryCount: number;
-  steerCount: number;
-  completionReported: boolean;
-  lastProgressEntryId: string | null;
-  /** Set when all-done escalation has been sent for this agent's batch */
-  batchReported: boolean;
-  /** Timestamp when a tentative 'finished' status was first observed (grace period) */
-  tentativeFinishedSince: number | null;
-  /** Transcript length snapshot taken when tentative finish started */
-  tentativeTranscriptLength: number;
-  tentativeTranscriptEntryId: string | null;
-  tentativeTranscriptSignature: string | null;
-  pollOrdinal: number;
-  nextPollAt: number;
-  lastPolledAt: number | null;
-}
-
-export interface AgentStatusEntry {
-  sessionKey: string;
-  status: string;
-  name?: string;
-  workspace?: string;
-  currentTask?: string;
-}
-
-export interface TranscriptEntry {
-  id: string;
-  role: string;
-  text: string;
-  timestamp?: number;
-  timestampLabel?: string;
-  toolName?: string;
-}
-
-export interface AgentUpdateEvent {
-  surfaceId: string;
-  name: string;
-  status: string;
-  detail?: string;
-  duration?: number;
-  repoPath?: string;
-}
-
-export interface AgentCompletionDecision {
-  block?: boolean;
-  resume?: boolean;
-  detail?: string;
-}
-
-export interface SupervisorCallbacks {
-  fetchFleetStatus(): Promise<AgentStatusEntry[]>;
-  fetchTranscript(sessionKey: string, limit: number): Promise<TranscriptEntry[]>;
-  steerAgent(surfaceId: string, message: string): Promise<void>;
-  interruptAgent(surfaceId: string): Promise<void>;
-  relaunchAgent(prompt: string, repoPath: string, taskName: string, retryOfSurfaceId?: string): Promise<string | null>;
-  broadcastAgentUpdate(update: AgentUpdateEvent): void;
-  queueOrchestratorEscalation(repoPath: string, message: string): void;
-  onAgentProgress?: (surfaceId: string, lastMessage: string) => void;
-  onAgentCompletion?: (
-    surfaceId: string,
-    outcome: 'completed' | 'failed',
-  ) => Promise<AgentCompletionDecision | void> | AgentCompletionDecision | void;
-  /** Called when a failed agent is retried — update lane session binding */
-  onAgentRetry?: (oldSurfaceId: string, newSurfaceId: string) => void;
-}
-
-export interface SupervisorFleetStatusSummary {
-  repoPath: string;
-  totalAgents: number;
-  activeAgents: number;
-  idleAgents: number;
-  completedAgents: number;
-  failedAgents: number;
-  pendingAgents: number;
-  allDone: boolean;
-  allSucceeded: boolean;
-  nextPollAt: number | null;
-  lastUpdatedAt: number;
-}
 
 type TranscriptBatchStatus = {
   signature: string | null;
@@ -276,6 +197,7 @@ export function registerWatchedAgent(
   repoPath: string,
   name: string,
   prompt: string,
+  launchContext?: WorkerLaunchContext,
 ): void {
   const now = Date.now();
   const pollOrdinal = registrationOrdinal++;
@@ -287,6 +209,7 @@ export function registerWatchedAgent(
     repoPath,
     name,
     prompt,
+    launchContext,
     registeredAt: now,
     lastStatus: 'running',
     lastRuntimeStatus: 'running',
@@ -319,6 +242,7 @@ export function registerWatchedAgent(
     status: 'launched',
     detail: `Agent "${name}" launched`,
     repoPath,
+    launchContext,
   });
 }
 
@@ -749,7 +673,7 @@ async function handleStatusChange(
           transcriptSourceCache.delete(watched.surfaceId);
           removePersistedAgent(watched.surfaceId);
 
-          registerWatchedAgent(newSurfaceId, watched.repoPath, watched.name, watched.prompt);
+          registerWatchedAgent(newSurfaceId, watched.repoPath, watched.name, watched.prompt, watched.launchContext);
           const newWatched = watchedAgents.get(newSurfaceId);
           if (newWatched) {
             newWatched.retryCount = watched.retryCount;

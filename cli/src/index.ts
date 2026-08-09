@@ -38,6 +38,7 @@ import { runInbox } from './commands/inbox.js';
 import { runLaneTouches } from './commands/lane.js';
 import { runMission } from './commands/mission.js';
 import { runMcp } from './commands/mcp.js';
+import { runProject, runRepo } from './commands/resources.js';
 import { runStatus } from './commands/status.js';
 import { runRun } from './commands/run.js';
 import { runVersion } from './commands/version.js';
@@ -189,13 +190,23 @@ commands:
   browser close        end this scope's engine (headless Chrome) session
   cortex observe       propose a worker observation for the orchestrator
   lane touches         active lanes touching a path or packet diff
-  mission create       create a mission from an inline task (--title --body [--existingBranchPolicy auto|reset|continue|error] [--compare m1,m2] [--quality-search-contract file])
+  worker spawn         create + dispatch one governed worker from any Git repo (--title --body [--repo path] [--runtime id] [--caller label])
+  mission create       create a mission from an inline task (--title --body [--dispatch] [--caller label] [--existingBranchPolicy auto|reset|continue|error] [--compare m1,m2] [--quality-search-contract file])
   mission dispatch     dispatch packets to workers (async; --wait blocks for launch; --watch blocks until review/terminal — the spawner's notification) [--mission <id>]
   mission status       mission + packet state [--mission <id>] [--cost]
   mission stop         interrupt and hold every packet in a mission [--mission <id>]
   mission wait         block until a packet hits a review/terminal state [--timeout <milliseconds|5m|90s> --poll]
   mission tail         stream packet status transitions until terminal [--timeout <milliseconds|5m|90s> --poll]
   mcp install          install/print the o8 MCP config (--claude-code | --cursor | --opencode | --print)
+  repo list            list repositories registered in the running o8 app
+  repo add <path>      register an existing local Git repository
+  repo remove <target> unregister by id, name, or path; the local folder is preserved
+  project list         list projects, active state, and registered repo membership
+  project create <name> [--repo <target>...]  create a project from registered repos
+  project use <target> switch the active project by id or name
+  project add-repo <project> <repo>     attach a registered repo to a project
+  project remove-repo <project> <repo>  detach it while preserving registration and disk
+  project delete <target>               remove a project and exclusive repo registrations; disk is preserved
   inbox list           pending governance approvals (--all includes resolved)
   inbox approve <id>   approve a card → runs the deferred action (e.g. a held merge)
   inbox reject <id>    reject a pending approval
@@ -316,8 +327,16 @@ async function dispatch(args: ParsedArgs): Promise<number> {
     }
     case 'mission':
       return runMission(args.mode, secondary, args.rest);
+    case 'worker': {
+      if (secondary === 'spawn') return runMission(args.mode, 'create', [...args.rest, '--dispatch']);
+      throw unknownSubcommandError('worker', secondary);
+    }
     case 'mcp':
       return runMcp(args.mode, secondary, args.rest);
+    case 'repo':
+      return runRepo(args.mode, secondary, args.rest);
+    case 'project':
+      return runProject(args.mode, secondary, args.rest);
     case 'inbox':
       return runInbox(args.mode, secondary, args.rest);
     case 'task': {

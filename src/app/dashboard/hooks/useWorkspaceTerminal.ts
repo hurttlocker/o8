@@ -33,6 +33,7 @@ import type {
   WorkspaceLaneState,
 } from '@/lib/orchestrator/types';
 import type { RealtimeEventEnvelope, RealtimeMutationRecord } from '@/lib/realtime/types';
+import { shouldOpenWorkerInDedicatedPane } from '@/lib/orchestrator/worker-launch-context';
 import { registerIntrospectionContributor } from '@/lib/feedback/workspace-introspect';
 import {
   collectLeafNodes,
@@ -57,6 +58,7 @@ import {
 } from '../utils';
 import { focusOrchestrationPacketLaneInWorkspace } from './focusOrchestrationPacketLane';
 import { useLaneArchivedView, isRetiredLaneStatus } from './useLaneArchivedSet';
+import { dispatchedLaneRepo, useDedicatedWorkerPane, type DispatchedWorkerLane } from './useDedicatedWorkerPane';
 
 interface UseWorkspaceTerminalArgs {
   activeTileId: string | null;
@@ -182,6 +184,9 @@ export function useWorkspaceTerminal({
   const [workspaceActiveTabKindByTileId, setWorkspaceActiveTabKindByTileId] = useState<Record<string, TerminalTab['kind'] | null>>({});
   const [workspaceTerminalResetNonceByTileId, setWorkspaceTerminalResetNonceByTileId] = useState<Record<string, number>>({});
   const [lifecycleEvents, setLifecycleEvents] = useState<Map<string, { state: string; exitCode?: number; ts: number }>>(new Map());
+  const dedicatedWorkerPane = useDedicatedWorkerPane({ activeTileId, pendingHandlesRef: pendingWorkspaceTerminalResolversRef, setActiveTileId, setTileLayout, tileLayout, workspaceHandlesRef: workspaceTerminalHandlesRef });
+  const findWorkspaceTerminalTargetForLane = dedicatedWorkerPane.findTargetForLane;
+  const waitForDedicatedWorkspaceTerminalTarget = dedicatedWorkerPane.waitForDedicatedTarget;
 
   const findInsertionTarget = useCallback((preferredKinds: TileContentKind[]): TileLeafNode => {
     const activeTile = activeTileId ? findTile(tileLayout.root, activeTileId) : null;
@@ -670,17 +675,7 @@ export function useWorkspaceTerminal({
   // owned-session transcript. Pre-v0.1.27 callers downcast gemini/opencode
   // to codex which caused "Connecting to Codex session" spinners on real
   // Gemini packets.
-  const openWorkspaceTabForLane = useCallback(async (lane: {
-    laneId?: string | null;
-    packetId?: string | null;
-    packetReferenceLabel?: string | null;
-    packetTitle?: string | null;
-    sessionKey: string;
-    runtime: import('@/lib/orchestrator/types').OrchestratorRuntime;
-    repoPath: string;
-    status?: string | null;
-    branch?: string | null;
-  }) => {
+  const openWorkspaceTabForLane = useCallback(async (lane: DispatchedWorkerLane) => {
     // #1293 — never resurrect a chat tab for a lane that already retired. The
     // WS dispatch-replay fires stale `packet-dispatch` mutations on boot; each
     // one would otherwise re-open a zombie tab for an archived packet (the
@@ -702,8 +697,10 @@ export function useWorkspaceTerminal({
       const targetScope = workspaceScopeEntries.find((entry) => entry.localPath === lane.repoPath)
         ?? workspaceScopeEntries.find((entry) => pathBelongsToRepoScope(lane.repoPath, entry.localPath))
         ?? null;
-      // Dispatched packet MONITORING tabs attach to the operator's active
-      // workspace — they must never mint a second WorkspaceTerminal leaf.
+      const launchContext = lane.launchContext ?? packet?.launchContext ?? null;
+      const dedicatedSplit = shouldOpenWorkerInDedicatedPane(launchContext);
+      // In-app packet monitoring attaches to the operator's active workspace.
+      // An explicit outside-launch split is the narrow exception below.
       // `fallbackToAnyExisting: false` was the April-2026 auto-split zombie
       // (Q live-hit 2026-07-16): with the orchestrator's host tile at
       // repoPath:null, the repo-scoped lookup missed, the reuse branch was
@@ -713,11 +710,16 @@ export function useWorkspaceTerminal({
       // (targetScope + orchestrationPacket), so the host tile's scope is
       // irrelevant; preferredTileId makes the ACTIVE workspace win before
       // any stale repo-scoped leaf. NOT the session-tiles drag-to-split —
-      // that system is separate and untouched.
-      const target = await waitForWorkspaceTerminalTarget({
-        repoPath: lane.repoPath,
-        preferredTileId: activeTileIdRef.current,
-      });
+      // that system is separate and untouched. Outside launches carry durable
+      // provenance, so they can safely request one dedicated pane per worker.
+      const restoredTarget = findWorkspaceTerminalTargetForLane(lane);
+      const target = restoredTarget
+        ?? (dedicatedSplit
+          ? await waitForDedicatedWorkspaceTerminalTarget(lane.repoPath, lane)
+          : await waitForWorkspaceTerminalTarget({
+              repoPath: lane.repoPath,
+              preferredTileId: activeTileIdRef.current,
+            }));
       const rawPacketTitle = packet?.title ?? lane.packetTitle ?? targetScope?.name ?? 'Dispatched Agent';
       const packetTitle = rawPacketTitle.trim().toLowerCase().startsWith('[automation]')
         ? cleanAutomationLaneTitle(rawPacketTitle)
@@ -726,18 +728,10 @@ export function useWorkspaceTerminal({
       const packetStatus = packet && packet.status !== 'queued' && packet.status !== 'draft'
         ? packet.status
         : packetStatusFromLaneStatus(lane.status);
+      const repo = dispatchedLaneRepo(targetScope, lane);
       target.handle.openCliChatSession({
         runtime: lane.runtime,
-        repo: targetScope ? {
-          name: targetScope.name,
-          localPath: targetScope.localPath,
-          branch: targetScope.branch ?? 'main',
-          readiness: targetScope.readiness ?? null,
-          remoteUrl: targetScope.remoteUrl ?? undefined,
-          registryRepoId: targetScope.registryRepoId,
-          isWorktree: targetScope.isWorktree ?? false,
-          worktreeStatus: targetScope.worktreeStatus ?? null,
-        } : undefined,
+        repo,
         targetSessionKey: lane.sessionKey,
         laneId: lane.laneId ?? null,
         label: packetTitle,
@@ -750,6 +744,7 @@ export function useWorkspaceTerminal({
               status: packetStatus,
               runtime: lane.runtime,
               branchTarget: lane.branch ?? packet?.branchTarget ?? null,
+              launchContext,
             }
           : null,
         autoArchiveOnIdle: false,
@@ -761,7 +756,7 @@ export function useWorkspaceTerminal({
       opened.delete(lane.sessionKey);
       console.error('[packet-dispatch-workspace] Failed to surface dispatched lane:', error);
     }
-  }, [setActiveTileId, setActiveWorkspace, thoughtsMissionPackets, waitForWorkspaceTerminalTarget, workspaceScopeEntries]);
+  }, [findWorkspaceTerminalTargetForLane, setActiveTileId, setActiveWorkspace, thoughtsMissionPackets, waitForDedicatedWorkspaceTerminalTarget, waitForWorkspaceTerminalTarget, workspaceScopeEntries]);
 
   const realtimeDispatchCallbacks = useMemo<DesktopWsCallbacks>(() => ({
     onRealtimeEvent: (event: RealtimeEventEnvelope) => {
@@ -788,6 +783,7 @@ export function useWorkspaceTerminal({
         repoPath: mutation.repoPath,
         status: 'launching',
         branch: mutation.branch ?? null,
+        launchContext: mutation.launchContext ?? null,
       });
       void refreshWorkspaceLifecycle();
       void loadOrchestratorMissionState();
@@ -835,6 +831,7 @@ export function useWorkspaceTerminal({
             repoPath: lane.repoPath,
             status: lane.status,
             branch: lane.branch ?? null,
+            launchContext: thoughtsMissionPackets.find((packet) => packet.id === lane.packetId)?.launchContext ?? null,
           });
         }
       } catch { /* best-effort */ }
@@ -850,7 +847,7 @@ export function useWorkspaceTerminal({
       clearTimeout(initTimer);
       stopDurableRefresh();
     };
-  }, [openWorkspaceTabForLane]);
+  }, [openWorkspaceTabForLane, thoughtsMissionPackets]);
 
   // #1293 — when a lane retires (archived/completed), close its orphaned chat
   // tab. The strip otherwise keeps a dead "ghost" tab after reset/merge — it

@@ -1,5 +1,6 @@
 import type { OrchestratorPacket, OrchestratorPacketType } from '@/lib/orchestrator/types';
 import { normalizePacketTaskContract } from '@/lib/orchestrator/packet-task-contract';
+import { normalizeWorkerLaunchContext } from '@/lib/orchestrator/worker-launch-context';
 
 /**
  * Narrow an arbitrary value to a known packet type tag. Only `decompose` is
@@ -17,6 +18,10 @@ export function normalizePacketDispatcher(value: unknown): OrchestratorPacket['d
   const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
   if ((surface !== 'orchestrator' && surface !== 'operator' && surface !== 'agent') || !id) return undefined;
   return { surface, id };
+}
+
+export function normalizePacketLaunchContext(value: unknown): OrchestratorPacket['launchContext'] {
+  return normalizeWorkerLaunchContext(value);
 }
 
 export function normalizePacketTaskContractFields(

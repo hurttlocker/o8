@@ -103,6 +103,18 @@ o8 connect [--status]                       # register this machine or list conn
 o8 disconnect                               # remove this machine from the connected-device registry
 o8 mcp install --claude-code|--cursor|--print
 
+# Repository + project registry — works from any cwd against the running app.
+# Removal changes o8 state only; local folders, Git history, and remotes stay intact.
+o8 repo list
+o8 repo add <path>
+o8 repo remove <id|name|path>
+o8 project list
+o8 project create <name> [--repo <id|name|path> ...]
+o8 project use <id|name>
+o8 project add-repo <project> <repo>
+o8 project remove-repo <project> <repo>
+o8 project delete <id|name>
+
 # Run a long process the operator can WATCH LIVE (servers, backtests, scripts)
 o8 run <cmd...>                            # stream in an o8-owned terminal visible to the operator
 o8 run --detach <cmd...>                   # register a server/daemon and return immediately
@@ -131,7 +143,8 @@ o8 packet review --approve [--expected-sha <sha>] [--commit-message "..."]   # r
 o8 packet approve-merge [--packet <id>] [--commit-message "..."]   # worker context raises an operator card; it does not self-merge
 
 # Mission orchestration — fan out sub-work to fellow agents and track it without leaving the CLI.
-o8 mission create --title "..." [--body "..."] [--repo <path>] [--compare m1,m2] [--runtime r]   # create a mission from an inline task (--compare seeds a best-of-N)
+o8 worker spawn --title "..." [--body "..."] [--repo <path>] [--runtime r] [--caller <label>]   # one-step outside dispatch; repo stays out of saved Projects and opens as a split pane
+o8 mission create --title "..." [--body "..."] [--repo <path>] [--dispatch] [--compare m1,m2] [--runtime r]   # create a transient-repo mission; --dispatch starts it now
 o8 mission dispatch [--mission <id>] [--wait] [--watch] [--timeout 2h] [--poll <ms>]   # launch; optionally notify on review/terminal
 o8 mission status [--mission <id>] [--cost]             # mission + packet state
 o8 mission stop --mission <id>                           # interrupt and hold every packet

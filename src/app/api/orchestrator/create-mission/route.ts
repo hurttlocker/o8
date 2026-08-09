@@ -16,6 +16,7 @@ import { assertRuntimeDispatchable, DispatchPreflightError } from '@/lib/runtime
 import { ControlPlaneLockTimeoutError } from '@/lib/orchestrator/control-plane';
 import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
 import type { PacketDispatcherAttribution } from '@/lib/orchestrator/types';
+import { normalizeWorkerLaunchContext } from '@/lib/orchestrator/worker-launch-context';
 import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
 
 export const runtime = 'nodejs';
@@ -109,6 +110,10 @@ export async function POST(request: NextRequest) {
   const repoPath = typeof record.repoPath === 'string' ? record.repoPath.trim() : '';
   if (!repoPath) {
     return operatorError('invalid_request', 'repoPath is required.', 400);
+  }
+  const launchContext = normalizeWorkerLaunchContext(record.launchContext);
+  if (record.launchContext !== undefined && !launchContext) {
+    return operatorError('invalid_request', 'launchContext must name a valid source, presentation, and repoContext.', 400);
   }
 
   const issues = normalizeIssues(record.issues);
@@ -230,6 +235,7 @@ export async function POST(request: NextRequest) {
         ? { orchestratorThreadId: record.orchestratorThreadId.trim() }
         : {}),
       dispatcher: resolveDispatcher(request, record),
+      ...(launchContext ? { launchContext } : {}),
       ...(normalizeComparisonModels(record.comparisonModels)
         ? { comparisonModels: normalizeComparisonModels(record.comparisonModels) }
         : {}),

@@ -44,6 +44,12 @@ describe('/api/mcp — real operator host reachability', () => {
     const toolNames = listBody.result.tools.map((tool) => tool.name);
     expect(toolNames).toEqual(expect.arrayContaining([
       'o8_status',
+      'o8_list_repos',
+      'o8_remove_repo',
+      'o8_list_projects',
+      'o8_set_active_project',
+      'o8_set_project_repos',
+      'o8_delete_project',
       'approve_and_merge',
       'o8_view_surface_state',
       'o8_spec_reply',
@@ -75,6 +81,54 @@ describe('/api/mcp — real operator host reachability', () => {
     expect(callBody.result.isError).not.toBe(true);
     expect(JSON.parse(callBody.result.content[0].text)).toMatchObject({
       data: { agents: [], approvalCount: 0 },
+    });
+  });
+
+  it('deletes a project through the public MCP tool and returns disk-preservation receipts', async () => {
+    let repos = [{
+      id: 'repo-site',
+      name: 'site',
+      localPath: '/tmp/site',
+      remoteUrl: null,
+      defaultBranch: 'main',
+      exists: true,
+    }];
+    const projects = [
+      { id: 'workspace', name: 'Workspace', repoPaths: [] },
+      { id: 'project-site', name: 'Site', repoPaths: ['/tmp/site'] },
+    ];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith('/api/panel/projects') && (!init?.method || init.method === 'GET')) {
+        return Response.json({ activeProjectId: 'project-site', projects });
+      }
+      if (url.endsWith('/api/panel/repos') && (!init?.method || init.method === 'GET')) {
+        return Response.json({ repos });
+      }
+      if (url.endsWith('/api/panel/projects/project-site') && init?.method === 'DELETE') {
+        repos = [];
+        return Response.json({ activeProjectId: 'workspace', projects: [projects[0]] });
+      }
+      throw new Error(`Unexpected fetch: ${init?.method ?? 'GET'} ${url}`);
+    });
+
+    const callResponse = await POST(mcpRequest({
+      jsonrpc: '2.0',
+      id: 3,
+      method: 'tools/call',
+      params: { name: 'o8_delete_project', arguments: { projectId: 'project-site' } },
+    }));
+    expect(callResponse.status).toBe(200);
+    const callBody = await callResponse.json() as {
+      result: { isError?: boolean; content: Array<{ type: string; text: string }> };
+    };
+    expect(callBody.result.isError).not.toBe(true);
+    expect(JSON.parse(callBody.result.content[0].text)).toMatchObject({
+      removedProject: { id: 'project-site', name: 'Site' },
+      removedExclusiveRepoCount: 1,
+      removedExclusiveRepos: [{ id: 'repo-site', repoPath: '/tmp/site' }],
+      localFoldersPreserved: true,
+      activeProjectId: 'workspace',
     });
   });
 });

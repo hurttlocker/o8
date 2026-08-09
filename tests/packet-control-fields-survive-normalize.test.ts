@@ -113,6 +113,12 @@ function fullPacketFixture() {
     dispatchRuntimePin: 'codex',
     orchestratorThreadId: 'thoughts-123',
     dispatcher: { surface: 'orchestrator', id: 'thoughts-123' },
+    launchContext: {
+      source: 'mcp',
+      presentation: 'split',
+      repoContext: 'transient',
+      caller: 'outside agent',
+    },
     prompt: 'Implement the thing',
     allowedFiles: ['src/a.ts'],
     learnedRules: ['Preserve fields'],

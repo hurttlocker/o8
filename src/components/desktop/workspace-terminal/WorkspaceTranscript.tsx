@@ -8,6 +8,7 @@ import { looksLikePacketPrompt } from '@/components/desktop/workspace-terminal/w
 import type { ClaudePermissionDecision } from '@/components/desktop/workspace-terminal/workspace-stream-events';
 import type { ClaudeCodeStreamJsonChatEvent } from '@/lib/claude-code/stream-json-parser';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import type { WorkerLaunchContext } from '@/lib/orchestrator/types';
 
 type PermissionRequest = Extract<ClaudeCodeStreamJsonChatEvent, { type: 'permission_request' }>;
 
@@ -17,6 +18,8 @@ export interface WorkspaceTranscriptHeader {
   branch?: string | null;
   runtime?: string | null;
   status?: string | null;
+  repo?: string | null;
+  launchContext?: WorkerLaunchContext | null;
 }
 
 interface WorkspaceTranscriptProps {
@@ -86,6 +89,8 @@ export const WorkspaceTranscript = memo(function WorkspaceTranscript({
           branch={packetHeader?.branch}
           runtime={packetHeader?.runtime}
           status={packetHeader?.status}
+          repo={packetHeader?.repo}
+          launchContext={packetHeader?.launchContext}
           prompt={item.prompt}
         />
       );

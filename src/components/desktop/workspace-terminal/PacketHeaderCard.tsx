@@ -1,6 +1,8 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import type { WorkerLaunchContext } from '@/lib/orchestrator/types';
+import { workerLaunchOriginLabel } from '@/lib/orchestrator/worker-launch-context';
 
 function PacketMetaChip({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
@@ -39,12 +41,16 @@ export function PacketHeaderCard({
   branch,
   runtime,
   status,
+  repo,
+  launchContext,
   prompt,
 }: {
   title: string;
   branch?: string | null;
   runtime?: string | null;
   status?: string | null;
+  repo?: string | null;
+  launchContext?: WorkerLaunchContext | null;
   prompt: string;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -55,6 +61,7 @@ export function PacketHeaderCard({
     return firstLine ? firstLine.trim() : '';
   }, [prompt]);
   const statusLabel = status ? status.replace(/_/g, ' ') : null;
+  const originLabel = workerLaunchOriginLabel(launchContext);
 
   return (
     <div
@@ -98,7 +105,7 @@ export function PacketHeaderCard({
               color: 'var(--t-text-faint)',
             }}
           >
-            Packet
+            {originLabel ? 'External worker' : 'Packet'}
           </span>
           <span
             style={{
@@ -149,6 +156,9 @@ export function PacketHeaderCard({
         ) : null}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 2 }}>
           {runtime ? <PacketMetaChip label="Runtime" value={runtime} /> : null}
+          {repo ? <PacketMetaChip label="Repo" value={repo} /> : null}
+          {originLabel ? <PacketMetaChip label="Started by" value={originLabel} /> : null}
+          {launchContext?.repoContext === 'transient' ? <PacketMetaChip label="Scope" value="Temporary repo" /> : null}
           {branch ? <PacketMetaChip label="Branch" value={branch} mono /> : null}
           {statusLabel ? <PacketMetaChip label="Status" value={statusLabel} /> : null}
         </div>

@@ -133,6 +133,7 @@ import { useLaneArchivedView } from './hooks/useLaneArchivedSet';
 import { useOrchestratorMission } from './hooks/useOrchestratorMission';
 import { useSessionState } from './hooks/useSessionState';
 import { useSettingsOverlayDismiss } from './hooks/useSettingsOverlayDismiss';
+import { shouldOpenWorkerInDedicatedPane } from '@/lib/orchestrator/worker-launch-context';
 import { useSetupWizard } from './hooks/useSetupWizard';
 import { useTileLayout } from './hooks/useTileLayout';
 import { useUIChrome } from './hooks/useUIChrome';
@@ -3461,6 +3462,7 @@ function DashboardInner() {
         name?: string;
         status?: string;
         repoPath?: string;
+        launchContext?: import('@/lib/orchestrator/types').WorkerLaunchContext;
       }>).detail;
       if (!detail?.surfaceId || !detail.status) return;
 
@@ -3473,6 +3475,8 @@ function DashboardInner() {
         return;
       }
       if (!detail.repoPath) return;
+      const packet = thoughtsMissionStateRef.current.packets.find((candidate) => candidate.lane?.sessionKey === detail.surfaceId);
+      if (shouldOpenWorkerInDedicatedPane(detail.launchContext ?? packet?.launchContext)) return;
 
       // Deduplicate — only open once per surfaceId
       if (openedSupervisorAgentsRef.current.has(detail.surfaceId)) return;
@@ -3495,6 +3499,7 @@ function DashboardInner() {
         // o8:request-spawn-tab / New session, which keep focus.
         background: true,
       }).catch((err) => {
+        openedLaneSessionsCache().delete(detail.surfaceId!);
         console.error('[dashboard] Failed to auto-open tab for orchestrator agent:', err);
       });
     };

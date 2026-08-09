@@ -143,6 +143,27 @@ describe('dispatch scheduling caps and waves', () => {
     expect(next.packets.filter((packet) => packet.status === 'queued')).toHaveLength(3 - Math.min(2, MAX_PARALLEL_DISPATCHES));
   }, 20_000);
 
+  it('carries outside launch provenance into the first supervisor announcement', async () => {
+    const repoPath = makeRepo();
+    const watchBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      watchBodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
+      return new Response('{}', { status: 200 });
+    }));
+    const launchContext = {
+      source: 'cli' as const,
+      presentation: 'split' as const,
+      repoContext: 'transient' as const,
+      caller: 'outside terminal',
+    };
+
+    await runDispatchTick(missionFixture(repoPath, [packetFixture(repoPath, 'outside-worker', { launchContext })]), {
+      launchBudget: { maxLaunches: 1 },
+    });
+
+    expect(watchBodies).toContainEqual(expect.objectContaining({ launchContext }));
+  }, 20_000);
+
   it('honors an explicit per-runtime launch budget for Gemini', async () => {
     const repoPath = makeRepo();
     const cap = 3;

@@ -203,6 +203,8 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
         label: tab.label,
         kind: tab.kind,
         sessionKey: tab.chatSessionKey,
+        laneId: tab.laneId ?? null,
+        packetId: tab.orchestrationPacket?.packetId ?? null,
         orchestratorThreadId: tab.orchestratorThreadId,
         repoPath: tab.repo?.localPath,
         lastActivity: tab.lastActivity,

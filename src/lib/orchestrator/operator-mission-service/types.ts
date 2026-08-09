@@ -5,6 +5,7 @@ import type {
   OrchestratorRuntime,
   PacketDispatcherAttribution,
   PacketTaskContract,
+  WorkerLaunchContext,
   WorkerIntent,
   WorkerProvider,
 } from '@/lib/orchestrator/types';
@@ -56,6 +57,8 @@ export interface CreateMissionInput {
   orchestratorThreadId?: string | null;
   /** Durable origin for routing review-worthy terminal work back to its caller. */
   dispatcher?: PacketDispatcherAttribution | null;
+  /** Outside-launch provenance; transient repos are not written to Projects. */
+  launchContext?: WorkerLaunchContext | null;
   /**
    * Huddle mode (#1282) — stamps every packet's `huddle`. When true, each
    * worker aligns with the orchestrator (posts plan + pushback, then STOPS)

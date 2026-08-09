@@ -135,7 +135,9 @@ function WorkspaceChatPaneBase({
     branch: tab.orchestrationPacket?.branchTarget ?? null,
     runtime: tab.orchestrationPacket?.runtime ?? tab.chatRuntime ?? null,
     status: liveStatus,
-  }), [liveStatus, tab.chatRuntime, tab.label, tab.orchestrationPacket]);
+    repo: tab.repo?.name ?? null,
+    launchContext: tab.orchestrationPacket?.launchContext ?? null,
+  }), [liveStatus, tab.chatRuntime, tab.label, tab.orchestrationPacket, tab.repo?.name]);
   const transcriptRepoPath = livePacket?.lane?.worktreePath
     ?? livePacket?.lane?.repoPath
     ?? tab.repo?.localPath;

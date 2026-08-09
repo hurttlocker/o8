@@ -13,6 +13,23 @@ export type WorkerIntent = 'light_worker' | 'heavy_worker' | 'reviewer' | 'diagn
 export type WorkerProvider = RuntimeWorkerProvider | 'minimax';
 export type WorkerRoutingConfidence = 'high' | 'medium' | 'low';
 
+export type WorkerLaunchSource = 'desktop' | 'cli' | 'mcp' | 'agent';
+export type WorkerLaunchPresentation = 'tab' | 'split';
+export type WorkerRepoContext = 'registered' | 'transient';
+
+/**
+ * Durable context for work launched outside the desktop UI. A transient repo
+ * is supervised for this mission without being added to the user's saved
+ * Projects list. The presentation hint only controls how the desktop reveals
+ * the worker; it does not change packet governance or persistence.
+ */
+export interface WorkerLaunchContext {
+  source: WorkerLaunchSource;
+  presentation: WorkerLaunchPresentation;
+  repoContext: WorkerRepoContext;
+  caller?: string | null;
+}
+
 export interface WorkerRouting {
   workerIntent: WorkerIntent;
   requestedProvider: WorkerProvider | null;
@@ -319,6 +336,8 @@ export interface OrchestratorPacket {
   orchestratorThreadId?: string | null;
   /** Surface that created this packet. Review-worthy work routes back here. */
   dispatcher?: PacketDispatcherAttribution | null;
+  /** Outside-launch provenance and desktop reveal behavior. */
+  launchContext?: WorkerLaunchContext | null;
   /** Rendered packet prompt body (surfaced in details popover). Optional. */
   prompt?: string;
   /** Files allowed to be touched by this packet. Alias of predictedFiles when present. */
@@ -532,6 +551,7 @@ export interface WorkspaceOrchestrationPacketBadge {
   status: OrchestratorPacketStatus;
   runtime: OrchestratorRuntime;
   branchTarget?: string | null;
+  launchContext?: WorkerLaunchContext | null;
 }
 
 export interface OrchestratorLaneSnapshot {

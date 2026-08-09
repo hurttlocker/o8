@@ -6,13 +6,24 @@ worktrees, CI runners, and scripts call `o8 <cmd>` instead of curling
 
 JSON to stdout is the default; pass `--human` for ANSI-formatted output.
 
-## Phase 1 commands
+## Commands
 
 | Command | Purpose |
 |---|---|
 | `o8 version` | CLI version + connected server version |
 | `o8 doctor` | Verify port + token resolution; ping `/api/panel/status` |
 | `o8 status` | Snapshot: running packets, active lanes, recent merges, pending approvals |
+| `o8 worker spawn --title "..." [--repo <path>]` | Create and dispatch one governed worker from any local repo without adding it to Projects; the running app opens a dedicated worker pane |
+| `o8 mission create --title "..." [--dispatch]` | Create a transient-repo mission; `--dispatch` starts it immediately |
+| `o8 repo list` | List every repository registered in the running app |
+| `o8 repo add <path>` | Register an existing local Git repository from any current directory |
+| `o8 repo remove <id\|name\|path>` | Remove the registration and project links while preserving the local folder and remote |
+| `o8 project list` | List projects, active state, and repo membership |
+| `o8 project create <name> [--repo <target>...]` | Create a project and optionally attach registered repos |
+| `o8 project use <target>` | Switch the active project by ID or exact name |
+| `o8 project add-repo <project> <repo>` | Attach a registered repo without changing its folder |
+| `o8 project remove-repo <project> <repo>` | Detach a repo while preserving its registration and folder |
+| `o8 project delete <target>` | Delete a project and its exclusive repo registrations while preserving every local folder and remote |
 | `o8 packet info` | Info about the packet bound to the current worktree (auto-discovered via cwd) |
 | `o8 packet stop <id>` | Interrupt the worker and hold the packet; resume with `packet reset` or `packet rerun`; `packet cancel` is an alias |
 | `o8 mission stop --mission <id>` | Interrupt and hold every packet in a mission, then print per-packet results |
@@ -22,6 +33,11 @@ JSON to stdout is the default; pass `--human` for ANSI-formatted output.
 ## Configuration
 
 The CLI auto-discovers the running o8 backend.
+
+Outside terminals and agents can dispatch from an unregistered repo. o8 keeps
+the repo context on the mission and audit history, but it does not add the repo
+to the user's saved Projects list. Pass `--caller <label>` when the app should
+show which outside agent or terminal started the worker.
 
 Resolution order:
 
@@ -42,6 +58,7 @@ Loopback callers don't need a token; cross-origin callers do.
 | 3 | unauthorized (bad token) |
 | 4 | not found |
 | 5 | conflict (state machine rejected the op) |
+| 6 | server timeout; the operation may have landed |
 
 ## Output schema
 

@@ -220,6 +220,7 @@ export async function createMission(input: CreateMissionInput) {
         ? { orchestratorThreadId: input.orchestratorThreadId.trim() }
         : {}),
       dispatcher,
+      ...(input.launchContext ? { launchContext: input.launchContext } : {}),
       // Best-of-N: stamp the seed packet so fanOutComparisonPackets (scheduling.ts)
       // splits it into N sibling candidates, one per model, each its own worktree.
       ...(input.comparisonModels && input.comparisonModels.length > 0

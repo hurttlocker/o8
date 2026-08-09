@@ -231,7 +231,11 @@ export function sameOrchestrationPacketBadge(left?: TerminalTab['orchestrationPa
     && left.title === right.title
     && left.status === right.status
     && left.runtime === right.runtime
-    && left.branchTarget === right.branchTarget;
+    && left.branchTarget === right.branchTarget
+    && left.launchContext?.source === right.launchContext?.source
+    && left.launchContext?.presentation === right.launchContext?.presentation
+    && left.launchContext?.repoContext === right.launchContext?.repoContext
+    && left.launchContext?.caller === right.launchContext?.caller;
 }
 
 // Problem C — exhaustive dispatch switch: each runtime has a unique session-key prefix scheme.

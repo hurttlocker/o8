@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { sanitizeErrorMessage } from '@/lib/api/error-format';
 import { DEFAULT_API_PORT } from '@/lib/panel/api-port';
@@ -116,6 +116,7 @@ interface CreateMissionInput {
   qualitySearch?: { taskContract: PacketTaskContract };
   /** #1329 — the orchestrator's active thread id, so workers inherit its session rules. */
   orchestratorThreadId?: string;
+  caller?: string;
 }
 
 interface InlineIssue {
@@ -142,6 +143,7 @@ interface CreateMissionInlineInput {
   qualitySearch?: { taskContract: PacketTaskContract };
   /** #1329 — the orchestrator's active thread id, so workers inherit its session rules. */
   orchestratorThreadId?: string;
+  caller?: string;
 }
 
 interface ApiSuccessResponse<T> {
@@ -168,46 +170,6 @@ function log(message: string, details?: unknown) {
   console.log(`${LOG_PREFIX} ${message}`, details);
 }
 
-interface RegisteredRepo {
-  localPath?: string;
-  path?: string;
-}
-
-let _cachedRegistry: { mtimeMs: number; paths: Set<string> } | null = null;
-
-function loadRegisteredRepoPaths(): Set<string> {
-  const registryPath = join(
-    getDataDir(),
-    'repos.json',
-  );
-
-  if (!existsSync(registryPath)) {
-    return new Set();
-  }
-
-  try {
-    const stat = statSync(registryPath);
-    if (_cachedRegistry && _cachedRegistry.mtimeMs === stat.mtimeMs) {
-      return _cachedRegistry.paths;
-    }
-
-    const raw = readFileSync(registryPath, 'utf-8');
-    const data = JSON.parse(raw) as { repos?: RegisteredRepo[] } | RegisteredRepo[];
-    const list: RegisteredRepo[] = Array.isArray(data) ? data : (data.repos ?? []);
-    const paths = new Set<string>();
-    for (const r of list) {
-      const p = r.localPath || r.path;
-      if (typeof p === 'string' && p.trim()) {
-        paths.add(resolve(p));
-      }
-    }
-    _cachedRegistry = { mtimeMs: stat.mtimeMs, paths };
-    return paths;
-  } catch {
-    return new Set();
-  }
-}
-
 function ensureRepoPath(repoPath: string) {
   const normalized = repoPath.trim();
   if (!normalized) {
@@ -217,23 +179,20 @@ function ensureRepoPath(repoPath: string) {
     throw new Error(`Repository path not found: ${normalized}`);
   }
 
-  // Security: reject paths not registered in ~/.o8/repos.json.
-  // An MCP client could otherwise point gh/Codex at any directory on disk.
-  // If the registry is empty (fresh install), fall through — the user has
-  // no registered repos yet and first-run flows need to work.
-  const registered = loadRegisteredRepoPaths();
-  if (registered.size > 0) {
-    const absolute = resolve(normalized);
-    if (!registered.has(absolute)) {
-      throw new Error(
-        `repoPath ${normalized} is not in the registered repository list. ` +
-        `Add it via the o8 desktop app (Workspaces → Add repository) or edit ` +
-        `~/.o8/repos.json before dispatching.`,
-      );
-    }
-  }
-
+  // The authenticated operator MCP is allowed to dispatch against an explicit
+  // local path without mutating Projects. The server still owns worktree,
+  // runtime, and governance validation for the resulting transient mission.
   return normalized;
+}
+
+function missionLaunchContext(input: { orchestratorThreadId?: string; caller?: string }) {
+  const inAppOrchestrator = Boolean(input.orchestratorThreadId?.trim());
+  return {
+    source: inAppOrchestrator ? 'desktop' as const : 'mcp' as const,
+    presentation: inAppOrchestrator ? 'tab' as const : 'split' as const,
+    repoContext: inAppOrchestrator ? 'registered' as const : 'transient' as const,
+    caller: input.caller?.trim() || (inAppOrchestrator ? 'orchestrator' : 'external agent'),
+  };
 }
 
 function normalizeIssueRef(value: string) {
@@ -400,6 +359,7 @@ export async function createMission(input: CreateMissionInput) {
           qualitySearch: input.qualitySearch,
           orchestratorThreadId: input.orchestratorThreadId,
           dispatcher: { surface: 'orchestrator', id: input.orchestratorThreadId ?? 'operator-mcp' },
+          launchContext: missionLaunchContext(input),
         } satisfies CreateMissionRequest),
       },
     );
@@ -446,6 +406,7 @@ export async function createMissionInline(input: CreateMissionInlineInput) {
           qualitySearch: input.qualitySearch,
           orchestratorThreadId: input.orchestratorThreadId,
           dispatcher: { surface: 'orchestrator', id: input.orchestratorThreadId ?? 'operator-mcp' },
+          launchContext: missionLaunchContext(input),
         } satisfies CreateMissionRequest),
       },
     );

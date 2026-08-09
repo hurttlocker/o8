@@ -1,5 +1,5 @@
 import type { LaneMergeMode } from '@/lib/lane/merge-mode';
-import { normalizeDecompositionMetadata, normalizePacketDispatcher, normalizePacketTaskContractFields, normalizePacketType } from '@/lib/orchestrator/normalize/decomposition';
+import { normalizeDecompositionMetadata, normalizePacketDispatcher, normalizePacketLaunchContext, normalizePacketTaskContractFields, normalizePacketType } from '@/lib/orchestrator/normalize/decomposition';
 import { normalizeRuntimeStatusToOrchestratorStatus } from '@/lib/orchestrator/runtime-status';
 import { runtimeTruthHasActiveWriter } from '@/lib/orchestrator/runtime-truth';
 import { normalizePacketRecovery } from '@/lib/lane/recovery-info';
@@ -429,7 +429,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     orchestratorThreadId: typeof packet.orchestratorThreadId === 'string' && packet.orchestratorThreadId.trim()
       ? packet.orchestratorThreadId.trim()
       : undefined,
-    dispatcher: normalizePacketDispatcher(packet.dispatcher),
+    dispatcher: normalizePacketDispatcher(packet.dispatcher), launchContext: normalizePacketLaunchContext(packet.launchContext),
     prompt: typeof packet.prompt === 'string' && packet.prompt.trim() ? packet.prompt : undefined,
     allowedFiles: Array.isArray(packet.allowedFiles)
       ? packet.allowedFiles.map((file) => String(file).trim()).filter(Boolean).slice(0, 64)

@@ -216,6 +216,8 @@ export interface TerminalTabHandle {
       label: string;
       kind: TerminalTab['kind'];
       sessionKey?: string;
+      laneId?: string | null;
+      packetId?: string | null;
       orchestratorThreadId?: string;
       repoPath?: string;
       lastActivity: number;

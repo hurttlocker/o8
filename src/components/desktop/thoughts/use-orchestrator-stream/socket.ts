@@ -180,6 +180,7 @@ export function createOrchestratorMessageHandler(
         duration?: number;
         repoPath?: string;
         prompt?: string;
+        launchContext?: import('@/lib/orchestrator/types').WorkerLaunchContext;
       } | undefined;
       if (!update?.surfaceId) return;
       if (typeof window !== 'undefined') {

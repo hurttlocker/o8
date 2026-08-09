@@ -16,7 +16,16 @@ import { join } from 'node:path';
 const ROOT = join(__dirname, '..');
 
 const CONTROL_PLANE_VERBS: Array<{ verb: string; cli: string; mcp: string; route: string }> = [
+  { verb: 'list repositories', cli: 'o8 repo list', mcp: 'o8_list_repos', route: 'src/app/api/panel/repos/route.ts' },
+  { verb: 'register repository', cli: 'o8 repo add', mcp: 'o8_register_repo', route: 'src/app/api/panel/repos/route.ts' },
+  { verb: 'remove repository', cli: 'o8 repo remove', mcp: 'o8_remove_repo', route: 'src/app/api/panel/repos/route.ts' },
+  { verb: 'list projects', cli: 'o8 project list', mcp: 'o8_list_projects', route: 'src/app/api/panel/projects/route.ts' },
+  { verb: 'create project', cli: 'o8 project create', mcp: 'o8_create_project', route: 'src/app/api/panel/projects/route.ts' },
+  { verb: 'switch active project', cli: 'o8 project use', mcp: 'o8_set_active_project', route: 'src/app/api/panel/projects/active/route.ts' },
+  { verb: 'set project repositories', cli: 'o8 project add-repo | remove-repo', mcp: 'o8_set_project_repos', route: 'src/app/api/panel/projects/[id]/route.ts' },
+  { verb: 'delete project', cli: 'o8 project delete', mcp: 'o8_delete_project', route: 'src/app/api/panel/projects/[id]/route.ts' },
   { verb: 'create mission', cli: 'o8 mission create', mcp: 'create_mission', route: 'src/app/api/orchestrator/create-mission/route.ts' },
+  { verb: 'spawn transient worker', cli: 'o8 worker spawn', mcp: 'create_mission', route: 'src/app/api/orchestrator/create-mission/route.ts' },
   { verb: 'dispatch mission', cli: 'o8 mission dispatch', mcp: 'dispatch_mission', route: 'src/app/api/orchestrator/dispatch/route.ts' },
   { verb: 'mission status', cli: 'o8 mission status', mcp: 'get_mission_status', route: 'src/app/api/orchestrator/status/route.ts' },
   { verb: 'submit review', cli: 'o8 packet review', mcp: 'submit_review', route: 'src/app/api/orchestrator/review/route.ts' },

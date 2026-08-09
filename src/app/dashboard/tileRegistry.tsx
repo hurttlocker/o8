@@ -262,7 +262,9 @@ export function createTileRegistry({
           ? workspaceScopeEntries.find((repo) => repo.localPath === content.repoPath)
               ?? { name: content.repoPath.split('/').pop() || content.repoPath, localPath: content.repoPath }
           : null;
-        const isFreshSplitTile = content.kind === 'terminal' && !content.repoPath && tileId !== 'tile-root';
+        const isFreshSplitTile = content.kind === 'terminal'
+          && tileId !== 'tile-root'
+          && (content.createdFromSplit === true || !content.repoPath);
         const isPrimaryUnscopedTerminal = content.kind === 'terminal'
           && !content.repoPath
           && !hasScopedTerminalLeaf

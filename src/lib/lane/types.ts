@@ -14,7 +14,7 @@
  */
 
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
-import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import type { OrchestratorRuntime, WorkerLaunchContext } from '@/lib/orchestrator/types';
 import { isWorkerTerminal } from '@/lib/lane/terminal-states';
 
 // ── Lane Status ──
@@ -149,6 +149,7 @@ export type LaneCommand =
       prompt: string;
       model?: string;
       effort?: ThinkingEffort;
+      launchContext?: WorkerLaunchContext;
       actor?: LaneEventActor;
     }
   | {

@@ -129,6 +129,7 @@ export function buildOrchestrationPacketBadge(packet: OrchestratorPacket): Works
     status: packet.status,
     runtime: packet.runtime,
     branchTarget: packet.branchTarget,
+    launchContext: packet.launchContext ?? null,
   };
 }
 

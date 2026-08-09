@@ -6704,6 +6704,7 @@ const httpServer = createServer((req, res) => {
           repoPath?: string;
           name?: string;
           prompt?: string;
+          launchContext?: import('@/lib/orchestrator/types').WorkerLaunchContext;
         };
         if (!body.surfaceId || !body.repoPath) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -6715,6 +6716,7 @@ const httpServer = createServer((req, res) => {
           body.repoPath,
           body.name ?? 'Unnamed agent',
           body.prompt ?? '',
+          body.launchContext,
         );
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, watching: body.surfaceId }));

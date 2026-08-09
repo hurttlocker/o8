@@ -133,6 +133,37 @@ describe('create_mission runtime reachability', () => {
     expect(properties?.runtime?.enum).toEqual(expect.arrayContaining(['opencode', 'pi', ...NEW_RUNTIMES]));
   });
 
+  it('persists transient outside-launch provenance on the packet', async () => {
+    const response = await createMissionRoute.POST(new NextRequest('http://localhost:3001/api/orchestrator/create-mission', {
+      method: 'POST',
+      headers: { host: 'localhost:3001' },
+      body: JSON.stringify({
+        repoPath,
+        requestedRuntime: 'codex',
+        issues: [{
+          number: 91_598_008,
+          title: 'outside launch context seam',
+          body: 'Keep this repo temporary and reveal the worker in its own pane.',
+          url: '',
+        }],
+        launchContext: {
+          source: 'cli',
+          presentation: 'split',
+          repoContext: 'transient',
+          caller: 'outside terminal',
+        },
+      }),
+    }));
+    expect(response.status).toBe(201);
+    const packet = readOrchestratorControlPlaneState().packets.find((entry) => entry.title === 'outside launch context seam');
+    expect(packet?.launchContext).toEqual({
+      source: 'cli',
+      presentation: 'split',
+      repoContext: 'transient',
+      caller: 'outside terminal',
+    });
+  });
+
   it('returns a clean missing-credential response when OpenCode auth.json is absent', async () => {
     authMock.unauthRuntime = 'opencode';
     const beforeMissionId = readOrchestratorControlPlaneState().missionId;
