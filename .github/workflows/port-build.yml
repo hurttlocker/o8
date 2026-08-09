@@ -112,7 +112,7 @@ jobs:
           {
             echo "GNUPGHOME=$signing_home"
             echo "SIGN=1"
-            echo "SIGN_KEY=$LINUX_GPG_KEY_ID"
+            echo "LDAI_SIGN_KEY=$LINUX_GPG_KEY_ID"
             echo "APPIMAGETOOL_FORCE_SIGN=1"
           } >> "$GITHUB_ENV"
       - name: Configure Windows release signing
