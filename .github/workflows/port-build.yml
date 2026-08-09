@@ -1,6 +1,6 @@
 name: Port Build
 
-# Full unsigned end-to-end builds for the non-Darwin port (#1673, #1672):
+# Full end-to-end builds for the non-Darwin port (#1673, #1672):
 # npm ci → Next build → tauri-export → cargo tauri build → installers as
 # downloadable artifacts. The compile gates in ci.yml catch the rustc class
 # cheaply on every PR; this workflow proves the REST of the pipeline (the
@@ -14,6 +14,16 @@ on:
         description: 'Optional existing public release tag to receive Windows/Linux preview installers (for example v0.1.662)'
         required: false
         type: string
+      replace_existing_assets:
+        description: 'Replace existing Windows/Linux assets for the selected release tag'
+        required: false
+        default: false
+        type: boolean
+      sign_windows:
+        description: 'Require Azure Artifact Signing for the Windows release build'
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: '23 10 * * 2'
 
@@ -69,8 +79,76 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm ci --prefer-offline
-      # Unsigned build. The config overlay disables updater artifacts — they
-      # require the signing key, which never leaves the ship machine.
+      # Public release AppImages are signed with o8's durable Linux release
+      # identity. Scheduled build artifacts remain unsigned diagnostics.
+      - name: Configure Linux release signing
+        if: runner.os == 'Linux' && inputs.release_tag != ''
+        shell: bash
+        env:
+          LINUX_GPG_PRIVATE_KEY: ${{ secrets.LINUX_GPG_PRIVATE_KEY }}
+          LINUX_GPG_KEY_ID: ${{ vars.LINUX_GPG_KEY_ID }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$LINUX_GPG_PRIVATE_KEY" || -z "$LINUX_GPG_KEY_ID" ]]; then
+            echo "Linux release signing credentials are not configured" >&2
+            exit 1
+          fi
+
+          signing_home="$RUNNER_TEMP/o8-release-gpg"
+          install -d -m 700 "$signing_home"
+          printf '%s' "$LINUX_GPG_PRIVATE_KEY" | gpg --homedir "$signing_home" --batch --import
+
+          imported_fingerprint="$(
+            gpg --homedir "$signing_home" --batch --with-colons \
+              --list-secret-keys "$LINUX_GPG_KEY_ID" \
+              | awk -F: '$1 == "fpr" { print $10; exit }'
+          )"
+          if [[ "$imported_fingerprint" != "$LINUX_GPG_KEY_ID" ]]; then
+            echo "Imported Linux signing key does not match LINUX_GPG_KEY_ID" >&2
+            exit 1
+          fi
+
+          {
+            echo "GNUPGHOME=$signing_home"
+            echo "SIGN=1"
+            echo "SIGN_KEY=$LINUX_GPG_KEY_ID"
+            echo "APPIMAGETOOL_FORCE_SIGN=1"
+          } >> "$GITHUB_ENV"
+      - name: Configure Windows release signing
+        if: runner.os == 'Windows' && inputs.release_tag != '' && inputs.sign_windows
+        shell: pwsh
+        env:
+          AZURE_ARTIFACT_SIGNING_ACCOUNT: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
+          AZURE_ARTIFACT_SIGNING_ENDPOINT: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          AZURE_ARTIFACT_SIGNING_PROFILE: ${{ vars.AZURE_ARTIFACT_SIGNING_PROFILE }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $required = @(
+            'AZURE_ARTIFACT_SIGNING_ACCOUNT',
+            'AZURE_ARTIFACT_SIGNING_ENDPOINT',
+            'AZURE_ARTIFACT_SIGNING_PROFILE',
+            'AZURE_CLIENT_ID',
+            'AZURE_CLIENT_SECRET',
+            'AZURE_TENANT_ID'
+          )
+          foreach ($name in $required) {
+            $value = [Environment]::GetEnvironmentVariable($name)
+            if ([string]::IsNullOrWhiteSpace($value)) {
+              throw "Windows release signing value $name is not configured"
+            }
+            Add-Content -LiteralPath $env:GITHUB_ENV -Value "$name=$value"
+          }
+
+          cargo install artifact-signing-cli --version 0.11.0 --locked
+      # The config overlay disables updater artifacts because the updater key
+      # never leaves the macOS ship machine. Tagged Linux builds add GPG
+      # signing; tagged Windows builds can add Authenticode through a second
+      # overlay once the verified publisher identity is available.
       - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           NEXT_TELEMETRY_DISABLED: 1
@@ -83,7 +161,51 @@ jobs:
           # without it the AppImage failure is a bare "failed to run
           # linuxdeploy" (rounds 5-7, with NO_STRIP and the gstreamer set
           # already ruled out as cures).
-          args: --verbose --config src-tauri/tauri.portci.conf.json
+          args: >-
+            --verbose --config
+            ${{ runner.os == 'Windows' && inputs.release_tag != '' && inputs.sign_windows && 'src-tauri/tauri.portci.windows-signed.conf.json' || 'src-tauri/tauri.portci.conf.json' }}
+      - name: Verify Linux AppImage signature is embedded
+        if: runner.os == 'Linux' && inputs.release_tag != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -d '' appimages < <(
+            find src-tauri/target/release/bundle -type f -name '*.AppImage' -print0
+          )
+          if [[ ${#appimages[@]} -ne 1 ]]; then
+            echo "expected exactly one AppImage, found ${#appimages[@]}" >&2
+            exit 1
+          fi
+
+          chmod +x "${appimages[0]}"
+          signature="$("${appimages[0]}" --appimage-signature)"
+          if [[ -z "$signature" ]]; then
+            echo "AppImage does not contain an embedded signature" >&2
+            exit 1
+          fi
+          echo "AppImage embedded signature is present"
+      - name: Verify Windows Authenticode signatures
+        if: runner.os == 'Windows' && inputs.release_tag != '' && inputs.sign_windows
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $installers = @(
+            Get-ChildItem -LiteralPath 'src-tauri/target/release/bundle' -Recurse -File |
+              Where-Object { $_.Extension -in @('.exe', '.msi') }
+          )
+          if ($installers.Count -lt 2) {
+            throw "Expected signed MSI and EXE installers, found $($installers.Count)"
+          }
+
+          foreach ($installer in $installers) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $installer.FullName
+            if ($signature.Status -ne 'Valid') {
+              throw "Invalid Authenticode signature on $($installer.Name): $($signature.Status)"
+            }
+            Write-Host "Valid Authenticode signature: $($installer.Name)"
+          }
       # Instrumentation: round 3 showed the bundler PRINTING built installer
       # paths while the upload step found the directory empty — list what
       # actually exists on disk between the two so the discrepancy is visible.
@@ -109,7 +231,9 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     permissions:
+      attestations: write
       contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -169,8 +293,22 @@ jobs:
             cd release-assets
             sha256sum o8_* > SHA256SUMS-windows-linux-preview.txt
           )
+      - name: Attest public preview assets
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: '${{ github.workspace }}/release-assets/*'
       - name: Upload public preview assets
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag }}
-        run: gh release upload "$RELEASE_TAG" release-assets/* --repo "$GITHUB_REPOSITORY"
+          REPLACE_EXISTING_ASSETS: ${{ inputs.replace_existing_assets }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          upload_args=()
+          if [[ "$REPLACE_EXISTING_ASSETS" == "true" ]]; then
+            upload_args+=(--clobber)
+          fi
+          gh release upload "$RELEASE_TAG" release-assets/* \
+            --repo "$GITHUB_REPOSITORY" "${upload_args[@]}"
