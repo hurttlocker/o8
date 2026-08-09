@@ -46,10 +46,10 @@ vi.mock('@/lib/runtimes/shared/auth-detect', () => ({
       authenticated: false,
       unavailableReason: needsAuth ? 'needs_auth' : 'not_installed',
       detail: needsAuth
-        ? 'opencode needs auth.json at /test-home/.local/share/opencode/auth.json.'
+        ? 'OpenCode 2 needs auth.json at /test-home/.local/share/opencode/auth.json.'
         : `${runtime} CLI is not installed.`,
       fix: needsAuth
-        ? 'Run `opencode auth login` to create auth.json.'
+        ? 'Run `opencode2 auth login` to create auth.json.'
         : `Install ${runtime} and configure credentials.`,
       checkedAt: Date.now(),
     });
@@ -144,8 +144,8 @@ describe('create_mission runtime reachability', () => {
       ok: false,
       error: { code: 'dispatch_cli_auth_unavailable' },
     });
-    expect(payload.error.message).toContain('opencode needs auth.json');
-    expect(payload.error.message).toContain('opencode auth login');
+    expect(payload.error.message).toContain('OpenCode 2 needs auth.json');
+    expect(payload.error.message).toContain('opencode2 auth login');
     expect(readOrchestratorControlPlaneState().missionId).toBe(beforeMissionId);
   });
 

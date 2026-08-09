@@ -42,9 +42,9 @@ export const RUNTIME_INSTALL_INFO: Record<string, RuntimeInstallInfo> = {
   },
   opencode: {
     id: 'opencode',
-    label: 'OpenCode CLI',
-    command: 'npm i -g opencode-ai',
-    hint: 'Install OpenCode to bring your own keys across 75+ providers.',
+    label: 'OpenCode 2 CLI',
+    command: 'npm i -g @opencode-ai/cli@next',
+    hint: 'Install OpenCode 2 to use its multi-provider worker and shared service.',
   },
   cursor: {
     id: 'cursor',

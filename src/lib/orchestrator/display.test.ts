@@ -10,7 +10,7 @@ describe('runtimeDisplayLabel', () => {
     expect(runtimeDisplayLabel('codex')).toBe('Codex');
     expect(runtimeDisplayLabel('claude-code')).toBe('Claude Code');
     expect(runtimeDisplayLabel('gemini')).toBe('Gemini');
-    expect(runtimeDisplayLabel('opencode')).toBe('opencode');
+    expect(runtimeDisplayLabel('opencode')).toBe('OpenCode 2');
   });
 
   it('falls back to the generic "Agent" for unknown/empty runtimes — never a raw value', () => {
@@ -38,7 +38,7 @@ describe('agentDisplayLabel', () => {
   it('falls back to the runtime human label derived from an owned sessionKey — NEVER the raw prefix', () => {
     expect(agentDisplayLabel({ sessionKey: 'codex-owned:codex-owned-1782-abc' })).toBe('Codex');
     expect(agentDisplayLabel({ sessionKey: 'gemini-owned:gemini-owned-9-z' })).toBe('Gemini');
-    expect(agentDisplayLabel({ sessionKey: 'opencode-owned:opencode-owned-3-y' })).toBe('opencode');
+    expect(agentDisplayLabel({ sessionKey: 'opencode-owned:opencode-owned-3-y' })).toBe('OpenCode 2');
     expect(agentDisplayLabel({ sessionKey: 'claude-code:claude-code-x' })).toBe('Claude Code');
   });
 

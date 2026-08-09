@@ -57,6 +57,16 @@ function toolNames(listResponse: Record<string, unknown> | undefined): string[] 
   return (result.tools ?? []).map((t) => t.name);
 }
 
+function toolSchema(
+  listResponse: Record<string, unknown> | undefined,
+  name: string,
+): Record<string, unknown> {
+  const result = (listResponse?.result ?? {}) as {
+    tools?: Array<{ name: string; inputSchema?: Record<string, unknown> }>;
+  };
+  return result.tools?.find((tool) => tool.name === name)?.inputSchema ?? {};
+}
+
 async function main(): Promise<void> {
   const reqs: Rpc[] = [
     { id: 1, method: 'initialize', params: {} },
@@ -76,6 +86,12 @@ async function main(): Promise<void> {
   // ── Control: full profile advertises the dispatch tool.
   const full = await driveServer(false, [{ id: 1, method: 'initialize', params: {} }, { id: 2, method: 'tools/list' }]);
   assert(toolNames(full.get(2)).includes('cortex_launch_agent'), 'full profile DOES advertise cortex_launch_agent (control)');
+  const launchSchema = toolSchema(full.get(2), 'cortex_launch_agent') as {
+    properties?: Record<string, unknown>;
+  };
+  assert(launchSchema.properties?.runtime, 'cortex_launch_agent advertises runtime override');
+  assert(launchSchema.properties?.model, 'cortex_launch_agent advertises model override');
+  assert(launchSchema.properties?.workerIntent, 'cortex_launch_agent advertises worker intent');
 
   console.log(`[cortex-readonly-profile-smoke] PASS — read-only advertises only ${roTools.length} reads, blocks cortex_launch_agent; full advertises it`);
 }

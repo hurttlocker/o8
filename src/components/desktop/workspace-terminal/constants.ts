@@ -10,7 +10,7 @@ export const CLI_AGENTS = [
   { id: 'shell', label: 'Terminal', color: '#64748b', command: null },
   { id: 'claude', label: 'Claude Code', color: '#e07a3a', command: 'claude' },
   { id: 'codex', label: 'Codex', color: '#6b7280', command: 'codex' },
-  { id: 'opencode', label: 'OpenCode', color: '#fb923c', command: 'opencode' },
+  { id: 'opencode', label: 'OpenCode 2', color: '#fb923c', command: 'opencode2' },
   { id: 'gemini', label: 'Gemini CLI', color: '#4285f4', command: 'gemini' },
 ] as const;
 

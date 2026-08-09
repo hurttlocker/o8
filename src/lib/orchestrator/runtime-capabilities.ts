@@ -124,27 +124,23 @@ export const ORCHESTRATOR_RUNTIMES = {
     description: 'Google Antigravity CLI discovery skeleton. Launch stays disabled until a resumable JSON/event contract is documented.',
   },
   opencode: {
-    label: 'opencode',
-    shortLabel: 'opencode',
-    // Promoted in runtime expansion P2: `opencode run --format json --session`
-    // gives us a real JSONL/event + resume contract, with auth gated by
-    // ~/.local/share/opencode/auth.json in dispatch preflight.
+    label: 'OpenCode 2',
+    shortLabel: 'OC2',
+    // OpenCode 2 keeps the governed JSONL + resume contract while adding a
+    // shared service/API architecture and explicit ordered permissions. Auth
+    // stays gated by ~/.local/share/opencode/auth.json in dispatch preflight.
     dispatchable: true,
     requiresModel: true,
-    // 2026-04-30: switched from 'opencode/gpt-5-nano' (OpenAI-routed; users
-    // without OPENAI_API_KEY silently fail launch) to 'google/gemini-2.5-flash'
-    // which routes through opencode's Google provider — the env var
-    // GOOGLE_GENERATIVE_AI_API_KEY is the same one the user already has set
-    // for direct gemini CLI usage. Operators with explicit OpenAI auth can
-    // override per-packet via the assignedModel field.
-    defaultModel: 'google/gemini-2.5-flash',
+    // OpenCode's free DeepSeek V4 Flash route gives fresh installs a working
+    // default; operators can still pin any discovered provider/model id.
+    defaultModel: 'opencode/deepseek-v4-flash-free',
     accentColor: '#a855f7', // purple — distinct from the other three
-    binaryName: 'opencode',
+    binaryName: 'opencode2',
     workerProvider: 'opencode',
     authHouse: 'opencode',
     reasoningEffort: false,
     tier: 'standard',
-    description: 'Multi-provider coding CLI via `opencode run --format json`; dispatch requires local opencode auth.',
+    description: 'Multi-provider OpenCode 2 worker via `opencode2 run --format json`; dispatch requires local provider auth.',
   },
   openhands: {
     label: 'OpenHands',

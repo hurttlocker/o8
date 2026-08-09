@@ -339,7 +339,7 @@ export async function computeRestoredTabs(
         effectiveModel = 'gemini-3.1-pro-preview';
       } else if (unwrappedSessionKey.startsWith('opencode-owned:') && effectiveRuntime !== 'opencode') {
         effectiveRuntime = 'opencode';
-        effectiveModel = 'opencode/gpt-5-nano';
+        effectiveModel = 'opencode/deepseek-v4-flash-free';
       } else if (unwrappedSessionKey.startsWith('cursor-owned:') && effectiveRuntime !== 'cursor') {
         effectiveRuntime = 'cursor';
         effectiveModel = 'cli:cursor:default';

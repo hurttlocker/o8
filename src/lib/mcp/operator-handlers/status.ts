@@ -204,11 +204,11 @@ export const STATUS_TOOLS: McpTool[] = [
         },
         opencodeOrchestratorModel: {
           type: 'string',
-          description: 'Pinned opencode orchestrator model id, e.g. "openrouter/deepseek/deepseek-v4-flash". Pass an empty string to clear the pin.',
+          description: 'Pinned OpenCode 2 orchestrator model id, e.g. "openrouter/deepseek/deepseek-v4-flash". Pass an empty string to clear the pin.',
         },
         opencodeWorkerModel: {
           type: 'string',
-          description: 'Pinned opencode worker model id. Pass an empty string to clear the pin.',
+          description: 'Pinned OpenCode 2 worker model id. Pass an empty string to clear the pin.',
         },
         workersUseBrain: {
           type: 'string',

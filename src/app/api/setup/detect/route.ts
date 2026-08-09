@@ -294,7 +294,7 @@ function detectAntigravity(deadlineAt?: number): DetectedTool {
 }
 
 function detectOpenCode(deadlineAt?: number): DetectedTool {
-  const path = locateBin('opencode', deadlineAt);
+  const path = locateBin('opencode2', deadlineAt);
   const detected = !!path;
   let version: string | undefined;
   let authedProviders: string[] = [];
@@ -320,10 +320,10 @@ function detectOpenCode(deadlineAt?: number): DetectedTool {
   const authPresent = authedProviders.length > 0;
   return {
     id: 'opencode',
-    name: 'OpenCode CLI',
+    name: 'OpenCode 2 CLI',
     detected,
     ready: detected ? authPresent : undefined,
-    authHint: detected && !authPresent ? 'run: opencode auth login' : undefined,
+    authHint: detected && !authPresent ? 'run: opencode2 auth login' : undefined,
     version,
     path,
     details: { authedProviders, authPresent },

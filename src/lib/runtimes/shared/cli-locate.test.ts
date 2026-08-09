@@ -102,10 +102,10 @@ describe('ensureCliSymlink', () => {
 
 describe('scanAndLink', () => {
   it('returns the original install path and repairs the farm link', () => {
-    const bin = fakeBinary(['.bun', 'bin'], 'opencode');
-    const found = scanAndLink('opencode', home);
+    const bin = fakeBinary(['.npm-global', 'bin'], 'opencode2');
+    const found = scanAndLink('opencode2', home);
     expect(found).toBe(bin);
-    expect(readlinkSync(path.join(home, '.o8', 'bin', 'opencode'))).toBe(bin);
+    expect(readlinkSync(path.join(home, '.o8', 'bin', 'opencode2'))).toBe(bin);
   });
 });
 

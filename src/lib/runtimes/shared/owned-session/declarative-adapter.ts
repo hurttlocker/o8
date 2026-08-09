@@ -118,6 +118,17 @@ function firstPathValue(source: unknown, paths: string[] | undefined): unknown {
   return undefined;
 }
 
+function normalizeTimestamp(value: unknown, fallback: string): string {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return new Date(value).toISOString();
+  }
+  if (typeof value === 'string' && /^\d{11,}$/.test(value.trim())) {
+    const epochMs = Number(value);
+    if (Number.isFinite(epochMs)) return new Date(epochMs).toISOString();
+  }
+  return stringifyValue(value) || fallback;
+}
+
 function regexTest(pattern: RegExp, value: string): boolean {
   pattern.lastIndex = 0;
   return pattern.test(value);
@@ -179,7 +190,10 @@ function parseDeclarativeRunLog(
       }
     }
     const eventType = stringifyValue(firstPathValue(parsed, config.eventTypePaths ?? ['type']));
-    const timestamp = stringifyValue(firstPathValue(parsed, config.timestampPaths ?? ['timestamp'])) || fallbackTimestamp;
+    const timestamp = normalizeTimestamp(
+      firstPathValue(parsed, config.timestampPaths ?? ['timestamp']),
+      fallbackTimestamp,
+    );
     let matched = false;
 
     for (const pattern of config.patterns) {

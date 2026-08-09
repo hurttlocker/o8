@@ -102,7 +102,7 @@ export function pickActivePacketForRepo(
 function runtimeLabel(runtime: OrchestratorRuntime | string | undefined) {
   if (!runtime) return 'Codex';
   if (runtime === 'claude-code') return 'Claude';
-  if (runtime === 'opencode') return 'OpenCode';
+  if (runtime === 'opencode') return 'OpenCode 2';
   return runtime.charAt(0).toUpperCase() + runtime.slice(1);
 }
 

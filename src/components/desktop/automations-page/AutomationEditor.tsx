@@ -301,7 +301,7 @@ export function AutomationEditor({
   const runtimeOptions = useMemo(() => {
     const options: PickerOption[] = [{ value: 'codex', label: 'Codex' }];
     if (geminiEnabled || form.runtime === 'gemini') options.push({ value: 'gemini', label: 'Gemini' });
-    if (opencodeEnabled || form.runtime === 'opencode') options.push({ value: 'opencode', label: 'OpenCode' });
+    if (opencodeEnabled || form.runtime === 'opencode') options.push({ value: 'opencode', label: 'OpenCode 2' });
     return options;
   }, [form.runtime, geminiEnabled, opencodeEnabled]);
 

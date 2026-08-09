@@ -515,7 +515,7 @@ export function OperatorDefaultsTab() {
                   // Shown when the binary is present, mirroring Hermes. Without
                   // this the composer could select opencode while Settings
                   // rendered no selected segment at all.
-                  ...(opencodeAvailable || values.orchestratorBackend === 'opencode' ? [{ value: 'opencode', label: 'opencode' }] : []),
+                  ...(opencodeAvailable || values.orchestratorBackend === 'opencode' ? [{ value: 'opencode', label: 'OpenCode 2' }] : []),
                   { value: 'collide', label: 'Collide' },
                 ]}
               />

@@ -137,7 +137,7 @@ export const SETTINGS_SEARCH_REGISTRY: SettingsSearchEntry[] = [
   { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Experimental", label: "Canvas mode", description: "The glass canvas \u2014 voice-first fleet surface. Sole gate.", founders: true },
   { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Experimental", label: "Gemini runtime", description: "Show Gemini in dispatch + CLI pickers", founders: true },
   { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Experimental", label: "Native browser-view", description: "Host-owned native window for the Browser pane (macOS)", founders: true },
-  { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Experimental", label: "opencode runtime", description: "Show opencode in dispatch pickers", founders: true },
+  { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Experimental", label: "OpenCode 2 runtime", description: "Show OpenCode 2 in dispatch pickers", founders: true },
   { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Fleet", label: "Agents in flight", description: "Up to N dispatched packets run at once" },
   { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Fleet", label: "Overlapping work", description: "When two packets predict changes to the same files" },
   { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Local models", label: "Chat model", description: "Local chat model for Brain compose/classify and dictation polish. Needs the e...", founders: true },

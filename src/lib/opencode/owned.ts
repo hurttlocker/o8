@@ -1,7 +1,7 @@
 /**
  * Declarative opencode owned-session adapter.
  *
- * Binary: `opencode` (npm `opencode-ai`). Sessions live under
+ * Binary: `opencode2` (npm `@opencode-ai/cli@next`). Sessions live under
  * ~/.o8/owned-opencode/ and resume through `--session <ses_xxx>`.
  */
 
@@ -27,10 +27,10 @@ const opencodeRegistration = registerDeclarativeOwnedRuntime({
   surfaceIdPrefix: 'opencode-owned:',
   rootEnvVar: 'O8_OWNED_OPENCODE_ROOT',
   rootDefault: OPENCODE_OWNED_ROOT,
-  binaryName: 'opencode',
+  binaryName: 'opencode2',
   binaryEnvOverride: 'O8_OPENCODE_BIN',
-  humanLabel: 'Owned opencode',
-  squadShortName: 'opencode',
+  humanLabel: 'Owned OpenCode 2',
+  squadShortName: 'OpenCode 2',
   sessionIdPrefix: 'opencode-owned-',
   defaultModel: MODEL_IDS.opencodeDefault,
   launchArgs: [
@@ -38,6 +38,7 @@ const opencodeRegistration = registerDeclarativeOwnedRuntime({
     '{{prompt}}',
     '--format', 'json',
     '--model', '{{model}}',
+    '--auto',
   ],
   resumeArgs: [
     'run',
@@ -45,12 +46,18 @@ const opencodeRegistration = registerDeclarativeOwnedRuntime({
     '--format', 'json',
     '--session', '{{threadId}}',
     { when: 'model', args: ['--model', '{{model}}'] },
+    '--auto',
   ],
   parseRunLog: {
     patterns: [
       {
         eventType: 'init',
         threadIdPaths: ['sessionId', 'session_id', 'id'],
+        threadIdPattern: /^ses_/,
+      },
+      {
+        eventType: 'step_start',
+        threadIdPaths: ['sessionID'],
         threadIdPattern: /^ses_/,
       },
       {
@@ -61,10 +68,16 @@ const opencodeRegistration = registerDeclarativeOwnedRuntime({
         textPaths: ['content'],
       },
       {
+        eventType: 'text',
+        kind: 'message',
+        label: 'OpenCode 2',
+        textPaths: ['part.text'],
+      },
+      {
         eventType: 'tool_use',
         kind: 'tool',
-        labelPaths: ['tool', 'name', 'tool_name'],
-        textPaths: ['input', 'args', 'arguments'],
+        labelPaths: ['part.tool', 'tool', 'name', 'tool_name'],
+        textPaths: ['part.state.input', 'input', 'args', 'arguments'],
       },
       {
         eventType: 'tool_result',
@@ -78,6 +91,12 @@ const opencodeRegistration = registerDeclarativeOwnedRuntime({
         label: 'Run complete',
         textPaths: ['usage', 'finishReason', 'finish_reason'],
         completedTurn: true,
+      },
+      {
+        eventType: 'step_finish',
+        kind: 'event',
+        label: 'Step complete',
+        textPaths: ['part.reason', 'part.tokens'],
       },
       {
         eventType: 'error',

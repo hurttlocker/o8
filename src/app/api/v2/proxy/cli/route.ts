@@ -179,18 +179,16 @@ export async function POST(request: Request) {
         break;
       }
       case 'opencode': {
-        // opencode's auto-selected default in non-TTY context is sometimes a stale model
-        // (e.g. google/gemini-3-pro-preview) that fails with 404 — pass an explicit -m so
-        // the spawn is deterministic. opencode/gpt-5-nano is one of opencode's own free
-        // hosted models and works without user auth. Issue #512 tracks per-provider rows.
-        cmd = 'opencode';
+        // OpenCode 2's auto-selected default is location-scoped, so pass a free
+        // explicit model to keep this proxy deterministic across projects.
+        cmd = 'opencode2';
         cliSpec = {
           runtimeId: 'opencode',
           binaryName: cmd,
-          humanLabel: 'OpenCode',
+          humanLabel: 'OpenCode 2',
           envOverride: 'O8_OPENCODE_BIN',
         };
-        args = ['run', '--format', 'json', '-m', 'opencode/gpt-5-nano', prompt];
+        args = ['run', '--format', 'json', '-m', 'opencode/deepseek-v4-flash-free', '--auto', prompt];
         break;
       }
       default:

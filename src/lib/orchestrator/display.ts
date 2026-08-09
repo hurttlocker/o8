@@ -65,7 +65,7 @@ const RUNTIME_SHORT_LABELS: Partial<Record<OrchestratorRuntime, string>> = {
   codex: 'CX',
   'claude-code': 'CC',
   gemini: 'GM',
-  opencode: 'OC',
+  opencode: 'OC2',
 };
 
 export function orchestratorRuntimeTone(runtime?: OrchestratorRuntime | string | null): OrchestratorDisplayTone {
@@ -213,7 +213,7 @@ export function laneDisplayTitle(
 
 /**
  * Canonical runtime → human label. The single source of truth for naming a
- * runtime in the UI ("Codex" / "Claude Code" / "Gemini" / "opencode"). Never
+ * runtime in the UI ("Codex" / "Claude Code" / "Gemini" / "OpenCode 2"). Never
  * returns a raw id; an unknown/empty runtime yields the generic 'Agent'.
  */
 export function runtimeDisplayLabel(runtime?: OrchestratorRuntime | string | null): string {

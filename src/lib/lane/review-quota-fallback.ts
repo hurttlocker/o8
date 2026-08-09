@@ -79,6 +79,13 @@ async function runAttempt(input: {
     if (isRuntimeQuotaLimitError(error)) quotaError = message(error);
     else errors.push(message(error));
   }
+  // Claude Code can emit a terminal subscription denial as ordinary assistant
+  // text and then exit successfully. Treat that observed frame as exhaustion so
+  // the review crosses houses once instead of re-queueing the same dead backend.
+  if (!quotaError && errors.length === 0 && isRuntimeQuotaLimitError(text)) {
+    quotaError = text;
+    text = '';
+  }
   const outcome = quotaError ? 'quota_discarded' : errors.length > 0 ? 'failed' : 'completed';
   try {
     finishReviewTurn({ laneId: input.laneId, reviewTurnId, outcome });

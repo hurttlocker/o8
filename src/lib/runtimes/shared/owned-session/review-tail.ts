@@ -53,6 +53,7 @@ export function createReviewTailController({
 
     return {
       threadId: session.threadId,
+      model: session.model,
       stdoutPaths: [...session.recentRuns]
         .sort((a, b) => a.startedAt.localeCompare(b.startedAt))
         .map((run) => run.stdoutPath),

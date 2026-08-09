@@ -282,8 +282,10 @@ async function detectMergedByAncestry(candidate: Candidate): Promise<MergeEviden
 
   const branchRef = await resolveBranchRef(repoPath, branch);
   const baseRef = await resolveBaseRef(repoPath, baseBranch);
-  const noChangesEligible = candidate.packet === null
-    || candidate.packet.status === 'awaiting_review';
+  const laneAlreadyMerged = candidate.lane?.outcome === 'merged';
+  const noChangesEligible = !laneAlreadyMerged && (
+    candidate.packet === null || candidate.packet.status === 'awaiting_review'
+  );
   if (!branchRef && baseRef && noChangesEligible) {
     // A settled lane whose branch resolves nowhere has no reviewable commit.
     // Preserve that terminal truth explicitly instead of archiving it as an

@@ -11,7 +11,7 @@ import {
 
 const declarativeRuntimeIds = listDeclarativeRuntimes();
 
-const authFixture = vi.hoisted(() => ({ home: '', installed: new Set(['opencode']) }));
+const authFixture = vi.hoisted(() => ({ home: '', installed: new Set(['opencode2']) }));
 const scanAndLinkMock = vi.hoisted(() => vi.fn((binaryName: string) => (
   authFixture.installed.has(binaryName) ? `/test-bin/${binaryName}` : null
 )));
@@ -42,7 +42,7 @@ const {
 
 afterEach(() => {
   vi.unstubAllEnvs();
-  authFixture.installed = new Set(['opencode']);
+  authFixture.installed = new Set(['opencode2']);
   invalidateRuntimeAuthCache();
 });
 
@@ -62,16 +62,16 @@ describe('OpenCode auth preflight', () => {
       runtime: 'opencode',
     });
     expect(status.detail).toBe(
-      `opencode needs auth.json at ${path.join(authFixture.home, '.local', 'share', 'opencode', 'auth.json')}.`,
+      `OpenCode 2 needs auth.json at ${path.join(authFixture.home, '.local', 'share', 'opencode', 'auth.json')}.`,
     );
-    expect(status.fix).toContain('opencode auth login');
+    expect(status.fix).toContain('opencode2 auth login');
   });
 });
 
 describe('dispatchable runtime readiness', () => {
   it('marks every declarative worker available when its PATH and credential probes pass', async () => {
     authFixture.installed = new Set([
-      'opencode',
+      'opencode2',
       ...declarativeRuntimeIds.map((runtime) => getRuntimeCapability(runtime).binaryName),
     ]);
     for (const runtime of declarativeRuntimeIds) {

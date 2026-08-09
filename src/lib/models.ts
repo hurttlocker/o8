@@ -19,7 +19,7 @@ export const RAW_MODEL_IDS = {
   openAiGpt54: 'gpt-5.4',
   openAiGpt53Codex: 'gpt-5.3-codex',
   openAiGpt4o: 'gpt-4o',
-  opencodeGpt5Nano: 'opencode/gpt-5-nano',
+  opencodeDeepseekV4FlashFree: 'opencode/deepseek-v4-flash-free',
   xaiGrok45: 'grok-4.5',
   gemini25Flash: 'gemini-2.5-flash',
   gemini3FlashPreview: 'gemini-3-flash-preview',
@@ -50,7 +50,7 @@ export const MODEL_IDS = {
   claudeReviewDefault: RAW_MODEL_IDS.anthropicClaudeSonnet5,
   claudeHaikuQaDefault: RAW_MODEL_IDS.anthropicClaudeHaiku45Dated,
   fableDefault: RAW_MODEL_IDS.anthropicClaudeFable5,
-  opencodeDefault: RAW_MODEL_IDS.opencodeGpt5Nano,
+  opencodeDefault: RAW_MODEL_IDS.opencodeDeepseekV4FlashFree,
   // Grok Build CLI worker default (Opus-class, cheaper for context) — sub-billed
   // via SuperGrok through the CLI adapter, not a metered API route.
   grokWorkerDefault: RAW_MODEL_IDS.xaiGrok45,

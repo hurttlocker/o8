@@ -267,7 +267,7 @@ const DEMO_OUTCOMES = [
     summary: 'Rewrote the orchestrator empty-state copy and quick-action card layout. Reviewer flagged the new copy as off-brand vs the locked design language.',
     durationMin: 8,
     costUsd: 0.04,
-    model: 'opencode/gpt-5-nano',
+    model: 'opencode/deepseek-v4-flash-free',
     daysAgo: 5,
     findings: 3,
   },

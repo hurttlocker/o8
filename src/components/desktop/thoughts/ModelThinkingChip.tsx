@@ -121,7 +121,7 @@ const COMPOSER_MODEL_GROUPS: ComposerModelGroup[] = [
   // — and keep working when the Claude and Codex subscriptions are exhausted.
   {
     key: 'opencode',
-    label: 'opencode',
+    label: 'OpenCode 2',
     options: [],
     searchable: true,
   },

@@ -28,7 +28,7 @@ describe('opencode backend — registry resolution (real path)', () => {
     const backend = getOrchestratorBackend('opencode');
     // The whole point: `?? DEFAULT_BACKEND` would hand back codex silently.
     expect(backend.id).toBe('opencode');
-    expect(backend.label).toBe('opencode');
+    expect(backend.label).toBe('OpenCode 2');
   });
 
   it('exposes the full OrchestratorBackend contract', () => {

@@ -68,8 +68,8 @@ export const MODE_ROUTING_SLASH_COMMANDS: OrchestratorSlashCommandDefinition[] =
   {
     command: '/opencode',
     name: 'orchestrate',
-    title: 'opencode',
-    description: 'Open a one-agent opencode tab for this repo.',
+    title: 'OpenCode 2',
+    description: 'Open a one-agent OpenCode 2 tab for this repo.',
     argHint: '<task>',
     requiresArgument: true,
     group: 'route',

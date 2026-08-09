@@ -65,6 +65,7 @@ describe('cross-house equivalence policy', () => {
     ['Codex workspace cap', { type: 'turn.failed', error: { code: 'workspace_member_usage_limit_reached' } }],
     ['Claude Code subscription cap', { type: 'result', subtype: 'error_during_execution', is_error: true, result: "You've hit your usage limit" }],
     ['Claude Code disabled allocation', { type: 'result', subtype: 'error_during_execution', is_error: true, result: 'Your usage allocation has been disabled by your admin' }],
+    ['Claude Code organization disabled subscription', 'Your organization has disabled Claude subscription access for Claude Code · Use an Anthropic API key instead'],
   ])('recognizes the observed exhaustion frame: %s', (_name, frame) => {
     expect(isRuntimeQuotaLimitError(frame)).toBe(true);
   });

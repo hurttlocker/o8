@@ -14,7 +14,7 @@ export interface ToolDetection {
   factCount?: number;
   models?: string[];
   hasEmbeddingModel?: boolean;
-  /** opencode-specific: list of providers the user has authed via `opencode auth login` */
+  /** OpenCode-specific: list of providers the user has authenticated for OpenCode 2. */
   authedProviders?: string[];
 }
 

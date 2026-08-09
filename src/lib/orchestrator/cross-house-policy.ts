@@ -177,6 +177,7 @@ const EXHAUSTION_MESSAGES = [
   /^\s*your org is out of usage\b/i,
   /^\s*your seat type doesn't include (?:extra )?usage credits\b/i,
   /^\s*your usage allocation has been disabled by your admin\b/i,
+  /^\s*your organization has disabled Claude subscription access for Claude Code\b/i,
   /^\s*your group's usage limit is set to \$0\b/i,
 ];
 

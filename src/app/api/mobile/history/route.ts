@@ -116,7 +116,7 @@ export async function GET(request: NextRequest) {
         : kind === 'gemini' ? ['Usage •', 'Owned Gemini session', 'Gemini run launched', 'Rate limited', 'Silent exit']
         : kind === 'cursor' ? ['Usage •', 'Owned Cursor session', 'Cursor run launched']
         : kind === 'grok' ? ['Usage •', 'Owned Grok Build session', 'Grok run launched']
-        : ['Usage •', 'Owned opencode session', 'opencode run launched'];
+        : ['Usage •', 'Owned OpenCode 2 session', 'opencode2 run launched'];
 
       for (const group of groups) {
         const pendingToolCalls: MobileTranscriptToolCall[] = [];

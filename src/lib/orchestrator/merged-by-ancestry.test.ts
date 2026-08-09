@@ -12,7 +12,7 @@ process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT = mkdtempSync(
   join(tmpdir(), 'o8-merged-by-ancestry-owned-claude-'),
 );
 
-const { createLane, deleteLane, getLane, setLaneStatus } = await import('@/lib/lane/registry');
+const { createLane, deleteLane, getLane, setLaneStatus, updateLane } = await import('@/lib/lane/registry');
 const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const { sweepPacketsMergedByAncestry } = await import('@/lib/orchestrator/merged-by-ancestry');
@@ -276,6 +276,22 @@ describe('merged-by-ancestry reconciliation', () => {
 
     await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({ merged: 1 });
     expect(getLane(lane.id)).toMatchObject({ status: 'archived', outcome: 'no_changes' });
+  }, 20_000);
+
+  it('does not overwrite an already merged lane when its branch was cleaned up', async () => {
+    const { clone } = makeRepo('o8-lane-only-merged-branch-gone');
+    const lane = seedLaneOnly(clone, 'agent/merged-and-cleaned-up');
+    updateLane(lane.id, {
+      outcome: 'merged',
+      outcomeNote: 'Merged through the governed side-merge path',
+    }, 'system');
+
+    await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({ merged: 0 });
+    expect(getLane(lane.id)).toMatchObject({
+      status: 'reviewing',
+      outcome: 'merged',
+      outcomeNote: 'Merged through the governed side-merge path',
+    });
   }, 20_000);
 
   it('finishes an orphaned branch at the base head as no changes instead of merged', async () => {

@@ -1,8 +1,10 @@
 /**
  * opencode cost parser + registration
  *
- * opencode embeds cost in the final `result` JSONL event:
+ * OpenCode 1 embeds cost in the final `result` JSONL event:
  *   {"type":"result","usage":{"inputTokens":N,"outputTokens":N,"totalCostUsd":X}}
+ * OpenCode 2 emits one `step_finish` event per provider step:
+ *   {"type":"step_finish","part":{"cost":X,"tokens":{"input":N,"output":N,"cache":{"read":N,"write":N}}}}
  *
  * When `totalCostUsd` is not present (e.g. offline models or older builds),
  * we fall back to a static per-model price table.  We prefer returning 0
@@ -10,7 +12,6 @@
  * pricing table impractical.
  *
  * TODO(pricing): Verify rates against openrouter.ai/models as models ship.
- * TODO(opencode-1.14): Re-inspect the result event shape post-1.14 upgrade.
  */
 
 import { createReadStream } from 'node:fs';
@@ -73,11 +74,26 @@ function toNumber(v: unknown): number {
 interface ParsedResultEvent {
   inputTokens: number;
   outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
   costUsd: number | null;   // null means not embedded in the event
   model: string | null;
 }
 
 function extractResultEvent(line: Record<string, unknown>): ParsedResultEvent | null {
+  if (line.type === 'step_finish') {
+    const part = isRecord(line.part) ? line.part : null;
+    const tokens = part && isRecord(part.tokens) ? part.tokens : null;
+    const cache = tokens && isRecord(tokens.cache) ? tokens.cache : null;
+    return {
+      inputTokens: toNumber(tokens?.input),
+      outputTokens: toNumber(tokens?.output),
+      cacheReadTokens: toNumber(cache?.read),
+      cacheWriteTokens: toNumber(cache?.write),
+      costUsd: part?.cost != null ? toNumber(part.cost) : null,
+      model: null,
+    };
+  }
   if (line.type !== 'result') return null;
 
   const usage = isRecord(line.usage) ? line.usage : null;
@@ -91,6 +107,8 @@ function extractResultEvent(line: Record<string, unknown>): ParsedResultEvent | 
   return {
     inputTokens,
     outputTokens,
+    cacheReadTokens: toNumber(usage?.cacheReadTokens ?? usage?.cache_read_tokens ?? 0),
+    cacheWriteTokens: toNumber(usage?.cacheWriteTokens ?? usage?.cache_write_tokens ?? 0),
     costUsd: embeddedCost,
     model,
   };
@@ -187,6 +205,8 @@ export async function parseOpencodeSessionCost(
     for (const r of results) {
       totals.inputTokens += r.inputTokens;
       totals.outputTokens += r.outputTokens;
+      totals.cacheReadTokens += r.cacheReadTokens;
+      totals.cacheWriteTokens += r.cacheWriteTokens;
 
       // Use embedded cost if available; otherwise compute from static table.
       if (r.costUsd !== null) {

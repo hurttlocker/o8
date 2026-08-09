@@ -123,6 +123,45 @@ describe('cross-house quota fallback real paths', () => {
     });
   });
 
+  it('falls back once when Claude reports disabled subscription access as ordinary text', async () => {
+    const lane = createLane({
+      repoPath: '/tmp/o8-review-disabled-subscription-seam',
+      branch: 'inline/review-disabled-subscription-seam',
+      runtime: 'claude-code',
+      packetId: `pkt-review-disabled-subscription-${Date.now()}`,
+    });
+    const claudeSendTurn = vi.fn(async (_repo, _prompt, onEvent) => {
+      onEvent({
+        type: 'text',
+        text: 'Your organization has disabled Claude subscription access for Claude Code.',
+      });
+      onEvent({ type: 'done', cost: null });
+    });
+    const codexSendTurn = vi.fn(async (_repo, _prompt, onEvent) => {
+      onEvent({ type: 'text', text: 'Codex completed the fallback review.' });
+      onEvent({ type: 'done', cost: null });
+    });
+
+    const result = await runReviewerTurnWithQuotaFallback({
+      laneId: lane.id,
+      repoPath: lane.repoPath,
+      threadId: `auto-review-${lane.id}`,
+      surface: 'auto-review',
+      prompt: 'Review the complete packet.',
+      initialBackend: fakeBackend('claude', claudeSendTurn),
+      backendResolver: () => fakeBackend('codex', codexSendTurn),
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      backend: 'codex',
+      text: 'Codex completed the fallback review.',
+    });
+    expect(claudeSendTurn).toHaveBeenCalledTimes(1);
+    expect(codexSendTurn).toHaveBeenCalledTimes(1);
+    expect(getLaneEvents(lane.id).filter((event) => event.verb === 'review_fallback')).toHaveLength(1);
+  });
+
   it('invalidates a durable approval written by a quota-failed review turn', async () => {
     const repoPath = mkdtempSync(join(os.tmpdir(), 'o8-review-turn-outcome-'));
     execFileSync('git', ['init', '-q'], { cwd: repoPath });

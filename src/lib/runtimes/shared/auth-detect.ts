@@ -210,13 +210,13 @@ async function detectGemini(): Promise<RuntimeAuthStatus> {
 }
 
 async function detectOpencode(): Promise<RuntimeAuthStatus> {
-  const binaryPath = scanAndLink('opencode') ?? undefined;
+  const binaryPath = scanAndLink('opencode2') ?? undefined;
   if (!binaryPath) {
     return nowStatus('opencode', 'opencode', {
       installed: false,
       authenticated: false,
-      detail: 'opencode CLI is not installed.',
-      fix: 'Install opencode, then run `opencode auth login`.',
+      detail: 'OpenCode 2 CLI is not installed.',
+      fix: 'Install `@opencode-ai/cli@next`, then run `opencode2 auth login`.',
     });
   }
 
@@ -226,9 +226,9 @@ async function detectOpencode(): Promise<RuntimeAuthStatus> {
     installed: true,
     authenticated,
     detail: authenticated
-      ? 'opencode CLI is installed and has local auth.json evidence.'
-      : `opencode needs auth.json at ${authFile}.`,
-    fix: 'Run `opencode auth login` to create auth.json.',
+      ? 'OpenCode 2 CLI is installed and has local auth.json evidence.'
+      : `OpenCode 2 needs auth.json at ${authFile}.`,
+    fix: 'Run `opencode2 auth login` to create auth.json.',
     binaryPath,
   });
 }

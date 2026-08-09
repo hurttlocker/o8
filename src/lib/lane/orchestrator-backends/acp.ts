@@ -377,28 +377,27 @@ export const hermesBackend: OrchestratorBackend = makeAcpBackend({
   },
 });
 
-/** Resolve the `opencode` binary (PATH-ish); null when not installed. */
+/** Resolve the OpenCode 2 preview binary (PATH-ish); null when not installed. */
 function resolveOpencodeBinary(): string | null {
   for (const candidate of [
     process.env.O8_OPENCODE_BIN,
-    `${process.env.HOME ?? ''}/.npm-global/bin/opencode`,
-    '/opt/homebrew/bin/opencode',
-    '/usr/local/bin/opencode',
-    `${process.env.HOME ?? ''}/.local/bin/opencode`,
-    `${process.env.HOME ?? ''}/.opencode/bin/opencode`,
+    `${process.env.HOME ?? ''}/.npm-global/bin/opencode2`,
+    '/opt/homebrew/bin/opencode2',
+    '/usr/local/bin/opencode2',
+    `${process.env.HOME ?? ''}/.local/bin/opencode2`,
   ]) {
     if (candidate && existsSync(candidate)) return candidate;
   }
-  return scanForBinary('opencode');
+  return scanForBinary('opencode2');
 }
 
 /**
- * opencode via `opencode acp` — the model-agnostic orchestrator.
+ * OpenCode 2 via `opencode2 acp` — the model-agnostic orchestrator.
  *
  * Unlike every other backend, this one is not bound to a provider house: the
  * session's own `configOptions.model` select is the catalogue, scoped to
  * whatever providers the local install is authenticated for. Verified against
- * opencode 1.4.3 on 2026-08-04:
+ * OpenCode 1.4.3 on 2026-08-04, with the ACP command retained by OpenCode 2:
  *   - NDJSON JSON-RPC on stdio, protocolVersion 1 — the shape AcpClient sends;
  *   - o8's operator MCP server loads over stdio (`toolCount=92`), so this
  *     backend can genuinely dispatch rather than only converse;
@@ -413,7 +412,7 @@ function resolveOpencodeBinary(): string | null {
  */
 export const opencodeBackend: OrchestratorBackend = makeAcpBackend({
   id: 'opencode',
-  label: 'opencode',
+  label: 'OpenCode 2',
   resolveLaunch: () => {
     const bin = resolveOpencodeBinary();
     if (!bin) return null;

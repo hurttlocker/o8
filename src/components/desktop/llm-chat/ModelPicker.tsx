@@ -8,7 +8,7 @@ const RUNTIME_META: Record<string, { label: string; logo?: string; color: string
   'claude-code': { label: 'Claude Code', logo: '/logos/claude.png', color: '#e07a3a' },
   codex: { label: 'Codex', logo: '/logos/codex.webp', color: '#10a37f' },
   gemini: { label: 'Gemini CLI', color: '#4285f4' },
-  opencode: { label: 'OpenCode', color: '#a855f7' },
+  opencode: { label: 'OpenCode 2', color: '#a855f7' },
 };
 
 const SECTION_HEADER = { paddingTop: 8, paddingRight: 12, paddingBottom: 4, paddingLeft: 12, fontSize: 10, fontWeight: 600, color: 'var(--t-text-faint)', textTransform: 'uppercase' as const, letterSpacing: '0.06em' };

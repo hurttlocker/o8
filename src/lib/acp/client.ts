@@ -45,9 +45,9 @@ export type AcpStopReason = 'end_turn' | 'max_tokens' | 'max_turn_requests' | 'r
 
 /**
  * One entry of `session/new`'s `configOptions` — the agent's own settings surface.
- * opencode 1.4.3 returns `model` (a select carrying its FULL model catalogue plus
- * the current value) and `mode`. This is why o8 never shells out to
- * `opencode models`: the live session hands us the list, already scoped to
+ * OpenCode ACP returns `model` (a select carrying its full model catalogue plus
+ * the current value) and `mode`. This is why o8 never shells out to a model-list
+ * command: the live session hands us the list, already scoped to
  * whatever providers that install is authenticated for.
  */
 export interface AcpConfigOption {
@@ -306,7 +306,7 @@ export class AcpClient {
 
   /**
    * Switch the session's model in place — `session/set_model` takes
-   * `{ sessionId, modelId }` (verified against opencode 1.4.3; `{model}` and
+   * `{ sessionId, modelId }` (verified against the OpenCode ACP contract; `{model}` and
    * `{model:{modelId}}` both fail param validation). Live on the running
    * session, so the composer can change models mid-thread without respawning
    * the agent or losing conversation context.

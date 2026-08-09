@@ -56,7 +56,7 @@ interface CodexSessionsPruneResult {
 const HIDDEN_DIAGNOSTIC_TOOL_IDS = new Set(['ollama']);
 
 function formatToolLabel(id: string): string {
-  if (id === 'opencode') return 'opencode';
+  if (id === 'opencode') return 'OpenCode 2';
   if (id === 'api-keys') return 'API keys';
   return id.split('-').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
 }

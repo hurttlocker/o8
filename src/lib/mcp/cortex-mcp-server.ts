@@ -305,27 +305,19 @@ const TOOLS: McpTool[] = [
   {
     name: 'cortex_launch_agent',
     description:
-      'Launch a new Codex agent session with a task prompt. The agent runs autonomously in its own workspace tab. ' +
-      'Returns a surfaceId you can use with cortex_steer_agent and cortex_read_transcript.',
+      'Launch a governed worker session with a task prompt. The agent runs autonomously in its own workspace tab. ' +
+      'When runtime/model are omitted, the operator\'s saved dispatch defaults are used. Returns the selected routing receipt ' +
+      'plus a surfaceId you can use with cortex_steer_agent and cortex_read_transcript.',
     inputSchema: {
       type: 'object',
       properties: {
-        prompt: {
-          type: 'string',
-          description: 'The task for the agent to complete. Be specific and actionable.',
-        },
-        repoPath: {
-          type: 'string',
-          description: 'Absolute path to the repo the agent should work in. Defaults to the current repo if omitted.',
-        },
-        taskName: {
-          type: 'string',
-          description: 'Short human-readable name for the task (shown in the UI).',
-        },
-        isolate: {
-          type: 'boolean',
-          description: 'Create an isolated git worktree branch for this task. Default false (works on current branch).',
-        },
+        prompt: { type: 'string', description: 'The task for the agent to complete. Be specific and actionable.' },
+        repoPath: { type: 'string', description: 'Absolute repo path. Defaults to the current repo.' },
+        taskName: { type: 'string', description: 'Short task name shown in the UI.' },
+        isolate: { type: 'boolean', description: 'Create an isolated worktree. Defaults to true.' },
+        runtime: { type: 'string', description: 'Optional worker runtime override.' },
+        model: { type: 'string', description: 'Optional runtime-specific model id.' },
+        workerIntent: { type: 'string', enum: ['light_worker', 'heavy_worker', 'reviewer', 'diagnostic', 'orchestrator'], description: 'Optional routing intent.' },
       },
       required: ['prompt'],
     },
@@ -888,6 +880,9 @@ async function handleLaunchAgent(args: Record<string, unknown>): Promise<McpTool
         repoPath,
         taskName: args.taskName || undefined,
         isolate: args.isolate !== false, // Default true for delegated work
+        runtime: args.runtime || undefined,
+        model: args.model || undefined,
+        workerIntent: args.workerIntent || undefined,
       }),
     }) as Record<string, unknown>;
 
@@ -932,6 +927,7 @@ async function handleLaunchAgent(args: Record<string, unknown>): Promise<McpTool
         surfaceId,
         branch: result.branch,
         worktreePath: result.worktreePath ?? null,
+        workerRouting: result.workerRouting ?? null,
         note: result.note,
       });
     }

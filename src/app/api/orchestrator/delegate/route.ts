@@ -14,6 +14,7 @@ import { isSingleSubCheapTierWorker, resolveSubscriptionProfileRouting } from '@
 import { buildProjectTaskBrief, getProjectContext } from '@/lib/projects/context';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { buildProjectBriefPromptV1 } from '@/lib/prompts/v1';
+import { MODEL_IDS } from '@/lib/models';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -86,11 +87,25 @@ export async function POST(request: NextRequest) {
     const packetId = `pkt-${randomUUID()}`;
     const now = new Date().toISOString();
     const defaults = getOperatorDefaultsSync().values;
+    const runtimeWasProvided = body.runtime !== undefined && body.runtime !== null && body.runtime !== '';
     const explicitRuntime = normalizeRequestedRuntime(body.runtime);
+    if (runtimeWasProvided && !explicitRuntime) {
+      return NextResponse.json({ ok: false, error: `Unsupported worker runtime: ${String(body.runtime)}` }, { status: 400 });
+    }
+    const defaultRuntime = defaults.subscriptionProfile === 'both'
+      ? defaults.defaultDispatchRuntime
+      : null;
+    const requestedRuntime = runtimeWasProvided ? explicitRuntime : defaultRuntime;
+    const explicitModel = typeof body.model === 'string' && body.model.trim()
+      ? body.model.trim()
+      : null;
+    const runtimePinnedModel = requestedRuntime === 'opencode'
+      ? defaults.opencodeWorkerModel ?? MODEL_IDS.opencodeDefault
+      : null;
     const profileRouting = resolveSubscriptionProfileRouting({
       profile: defaults.subscriptionProfile,
-      requestedRuntime: body.runtime === undefined || body.runtime === null || body.runtime === '' ? null : explicitRuntime,
-      requestedModel: typeof body.model === 'string' ? body.model : null,
+      requestedRuntime,
+      requestedModel: explicitModel ?? runtimePinnedModel,
       defaultDispatchModel: defaults.defaultDispatchModel,
     });
     if (!profileRouting.ok) {

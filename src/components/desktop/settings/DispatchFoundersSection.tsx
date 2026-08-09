@@ -141,8 +141,8 @@ export function DispatchFoundersSection({ values, sources, busyField, updateFiel
         >
           <SettingsRow
             icon={<FlaskIcon />}
-            label="opencode runtime"
-            subtitle={lockedSub('experimentalOpencode', 'Show opencode in dispatch pickers')}
+            label="OpenCode 2 runtime"
+            subtitle={lockedSub('experimentalOpencode', 'Show OpenCode 2 in dispatch pickers')}
             checked={values.experimentalOpencode}
             disabled={envLocked(sources, 'experimentalOpencode') || busyField === 'experimentalOpencode'}
             onToggle={(next) => {

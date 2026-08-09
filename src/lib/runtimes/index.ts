@@ -90,7 +90,7 @@ registerRuntime(geminiRuntime);
 // Antigravity replaces Gemini CLI at the Google runtime layer, but is
 // discovery-only until agy documents a resumable JSON/event contract.
 registerRuntime(antigravityRuntime);
-// Wave 2c: opencode CLI — multi-provider coding runtime via `opencode run
+// Wave 2c: OpenCode 2 CLI — multi-provider coding runtime via `opencode2 run
 // --format json --model provider/model`. Sessions 'opencode-owned:' with
 // 'ses_' prefixed threads. See src/lib/opencode/owned.ts.
 registerRuntime(opencodeRuntime);

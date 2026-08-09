@@ -1,5 +1,5 @@
 /**
- * OpenCode CLI Auto-Register
+ * OpenCode 2 CLI Auto-Register
  *
  * POST — merge o8's managed MCP servers (o8 operator + codebase-memory) into the
  *        user's OpenCode config under `mcp`, without touching any other server or
@@ -109,7 +109,7 @@ export async function POST(request: Request) {
       action: 'installed',
       path,
       installed: managedNames,
-      detail: 'Restart the OpenCode CLI (or start a new session) to load the o8 tools.',
+      detail: 'Restart the OpenCode 2 CLI (or start a new session) to load the o8 tools.',
     });
   } catch (error) {
     console.error('[setup/opencode] POST error:', error);

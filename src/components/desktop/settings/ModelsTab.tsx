@@ -98,7 +98,7 @@ const RUNTIME_BLURB: Record<string, string> = {
   codex: 'GPT-5.6 — Sol orchestrates, Terra works',
   'claude-code': 'Claude Code CLI worker, sub-billed stream-json',
   gemini: 'Retired CLI adapter — existing lanes stay readable',
-  opencode: 'Multi-provider CLI, routes through your provider keys',
+  opencode: 'OpenCode 2 multi-provider CLI, routes through your provider keys',
   cursor: 'Cursor CLI worker — subscription or CURSOR_API_KEY',
   grok: 'Grok 4.5, sub-billed via SuperGrok',
 };
@@ -258,7 +258,7 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
       <section>
         <SettingsGroup
           header="Runtimes"
-          footnote="Detection is live from your machine. Codex and Claude Code take a worker-effort default; Gemini and opencode ship wired but hidden until you turn them on. Effort here is the same fallback the Dispatch tab sets."
+          footnote="Detection is live from your machine. Codex and Claude Code take a worker-effort default; Gemini and OpenCode 2 ship wired but hidden until you turn them on. Effort here is the same fallback the Dispatch tab sets."
         >
           {/* Codex — worker effort */}
           <SettingsRow
@@ -363,13 +363,13 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
       {/* ── opencode (model-agnostic) ── */}
       <section style={{ marginTop: 28 }}>
         <SettingsGroup
-          header="opencode models"
-          footnote="opencode is not bound to one provider — these lists come from your own install, so they show exactly the models your provider keys can reach. Leave either unset to use whatever opencode itself defaults to. The composer can still override the orchestrator model for a single turn."
+          header="OpenCode 2 models"
+          footnote="OpenCode 2 is not bound to one provider. These lists come from your own install, so they show exactly the models your provider keys can reach. Leave either unset to use OpenCode 2's default. The composer can still override the orchestrator model for a single turn."
         >
           <SettingsRow
             icon={<CpuIcon />}
             label="Orchestrator model"
-            subtitle={lockedSub('opencodeOrchestratorModel', values.opencodeOrchestratorModel ?? 'Unset — opencode picks')}
+            subtitle={lockedSub('opencodeOrchestratorModel', values.opencodeOrchestratorModel ?? 'Unset — OpenCode 2 picks')}
             accessory={
               <AcpModelPickerPopover
                 label={values.opencodeOrchestratorModel ?? 'Choose'}

@@ -4,7 +4,7 @@
  * Wraps opencode/owned.ts behind the universal AgentRuntime contract.
  * Peer to codex.ts and claude-code.ts — no changes to those files.
  *
- * Binary: `opencode` (npm `opencode-ai`).
+ * Binary: `opencode2` (npm `@opencode-ai/cli@next`).
  * Sessions stored under: ~/.o8/owned-opencode/ (override: O8_OWNED_OPENCODE_ROOT).
  * surfaceIdPrefix: 'opencode-owned:'
  *
@@ -191,7 +191,7 @@ function applyTranscriptWindow<T extends { id: string }>(entries: T[], sinceId?:
 
 export const opencodeRuntime: AgentRuntime = {
   id: 'opencode',
-  displayName: 'opencode',   // lowercase per brand
+  displayName: 'OpenCode 2',
   capabilities,
 
   async discoverSessions(): Promise<RuntimeSession[]> {
@@ -324,7 +324,7 @@ export const opencodeRuntime: AgentRuntime = {
 
     const sessionCost = await parseOpencodeSessionCost(
       telemetrySources.stdoutPaths,
-      { fallbackModel: null },
+      { fallbackModel: telemetrySources.model ?? null },
     ).catch(() => null);
 
     if (!sessionCost) return undefined;
