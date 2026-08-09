@@ -195,7 +195,7 @@ commands:
   mission stop         interrupt and hold every packet in a mission [--mission <id>]
   mission wait         block until a packet hits a review/terminal state [--timeout <milliseconds|5m|90s> --poll]
   mission tail         stream packet status transitions until terminal [--timeout <milliseconds|5m|90s> --poll]
-  mcp install          install/print the o8 MCP config (--claude-code | --cursor | --print)
+  mcp install          install/print the o8 MCP config (--claude-code | --cursor | --opencode | --print)
   inbox list           pending governance approvals (--all includes resolved)
   inbox approve <id>   approve a card → runs the deferred action (e.g. a held merge)
   inbox reject <id>    reject a pending approval

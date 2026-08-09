@@ -5,7 +5,7 @@ import { apiFetch, CliError, EXIT } from '../api.js';
 import { resolveConfig } from '../config.js';
 import { printHumanHeading, printHumanKv, printJson, type OutputMode } from '../output.js';
 
-type McpTarget = 'print' | 'claude-code' | 'cursor';
+type McpTarget = 'print' | 'claude-code' | 'cursor' | 'opencode';
 
 function resolveProjectPath(): string {
   try {
@@ -35,6 +35,7 @@ function parseMcpArgs(sub: string | undefined, rest: string[]): { target: McpTar
     if (token === '--print') target = 'print';
     else if (token === '--claude-code') target = 'claude-code';
     else if (token === '--cursor') target = 'cursor';
+    else if (token === '--opencode') target = 'opencode';
     else {
       throw new CliError('invalid_args', `Unknown mcp install flag: ${token}`, EXIT.INVALID_ARGS);
     }
@@ -60,6 +61,28 @@ export async function runMcp(mode: OutputMode, sub: string | undefined, rest: st
       printHumanHeading('mcp install');
       printHumanKv([
         ['target', 'Claude Code'],
+        ['status', res.status < 400 ? 'installed' : 'failed'],
+      ]);
+    } else {
+      printJson(payload);
+    }
+    return res.status < 400 ? 0 : 1;
+  }
+
+  if (args.target === 'opencode') {
+    const res = await apiFetch<Record<string, unknown>>(cfg, '/api/setup/opencode', {
+      method: 'POST',
+      body: {},
+    });
+    const payload = {
+      schema: 'o8/cli/mcp-install/v1',
+      target: args.target,
+      result: res.data,
+    };
+    if (mode.human) {
+      printHumanHeading('mcp install');
+      printHumanKv([
+        ['target', 'OpenCode 2'],
         ['status', res.status < 400 ? 'installed' : 'failed'],
       ]);
     } else {
