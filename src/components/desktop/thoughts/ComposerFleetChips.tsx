@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { COMPOSER_MODES, type ComposerMode } from './composer-mode';
+import { AcpModelPicker } from './AcpModelPicker';
 import { ComposerPopover } from './chat-panel/ComposerPopover';
 import {
   getRuntimeCapability,
@@ -30,6 +31,8 @@ interface DispatchDefaults {
   defaultDispatchModel: string;
   opencodeWorkerModel: string | null;
 }
+
+type FleetPickerView = 'runtimes' | 'opencode-model';
 
 const FALLBACK_DEFAULTS: DispatchDefaults = {
   defaultDispatchRuntime: 'codex',
@@ -67,6 +70,14 @@ function CheckGlyph() {
   return (
     <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <path d="M20 6 9 17l-5-5" />
+    </svg>
+  );
+}
+
+function BackGlyph() {
+  return (
+    <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="m15 18-6-6 6-6" />
     </svg>
   );
 }
@@ -205,7 +216,9 @@ export function ComposerModeChip({
  */
 export function FleetWorkerChip({ compact = false }: { compact?: boolean }) {
   const [open, setOpen] = useState(false);
+  const [view, setView] = useState<FleetPickerView>('runtimes');
   const [defaults, setDefaults] = useState<DispatchDefaults>(FALLBACK_DEFAULTS);
+  const [workerModelLocked, setWorkerModelLocked] = useState(false);
   const [saving, setSaving] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
 
@@ -213,7 +226,10 @@ export function FleetWorkerChip({ compact = false }: { compact?: boolean }) {
     try {
       const res = await fetch('/api/panel/operator-defaults', { cache: 'no-store' });
       if (!res.ok) return;
-      const payload = await res.json() as { values?: Partial<DispatchDefaults> };
+      const payload = await res.json() as {
+        values?: Partial<DispatchDefaults>;
+        sources?: Partial<Record<keyof DispatchDefaults, string>>;
+      };
       const values = payload.values ?? {};
       setDefaults({
         defaultDispatchRuntime: (values.defaultDispatchRuntime as OrchestratorRuntime) || 'codex',
@@ -222,6 +238,7 @@ export function FleetWorkerChip({ compact = false }: { compact?: boolean }) {
           ? values.opencodeWorkerModel
           : null,
       });
+      setWorkerModelLocked(payload.sources?.opencodeWorkerModel === 'env');
     } catch { /* chip keeps last known values */ }
   }, []);
 
@@ -230,7 +247,8 @@ export function FleetWorkerChip({ compact = false }: { compact?: boolean }) {
 
   const selectRuntime = useCallback(async (runtime: OrchestratorRuntime) => {
     setDefaults((current) => ({ ...current, defaultDispatchRuntime: runtime }));
-    setOpen(false);
+    if (runtime === 'opencode') setView('opencode-model');
+    else setOpen(false);
     setSaving(true);
     try {
       await fetch('/api/panel/operator-defaults', {
@@ -243,6 +261,23 @@ export function FleetWorkerChip({ compact = false }: { compact?: boolean }) {
       void refetch();
     }
   }, [refetch]);
+
+  const selectWorkerModel = useCallback(async (modelId: string | null) => {
+    if (workerModelLocked) return;
+    setDefaults((current) => ({ ...current, opencodeWorkerModel: modelId }));
+    setOpen(false);
+    setSaving(true);
+    try {
+      await fetch('/api/panel/operator-defaults', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ opencodeWorkerModel: modelId }),
+      });
+    } catch { /* next refetch restores truth */ } finally {
+      setSaving(false);
+      void refetch();
+    }
+  }, [refetch, workerModelLocked]);
 
   const runtime = defaults.defaultDispatchRuntime;
   const runtimeLabel = getRuntimeCapability(runtime).label;
@@ -259,7 +294,10 @@ export function FleetWorkerChip({ compact = false }: { compact?: boolean }) {
         title={`Fleet worker: ${runtimeLabel}${model ? ` — ${model}` : ''}. Click to change the dispatch runtime.`}
         aria-label={`Fleet worker: ${runtimeLabel}`}
         aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => {
+          setView('runtimes');
+          setOpen((current) => !current);
+        }}
         style={{
           display: 'inline-flex',
           alignItems: 'center',
@@ -307,81 +345,147 @@ export function FleetWorkerChip({ compact = false }: { compact?: boolean }) {
             paddingLeft: 5,
           }}
         >
-          <div style={{
-            paddingLeft: 8,
-            paddingRight: 8,
-            paddingBottom: 4,
-            fontSize: 10,
-            letterSpacing: '0.3px',
-            textTransform: 'uppercase',
-            color: 'var(--t-text-faint)',
-            fontFamily: 'var(--font-sans-system)',
-          }}>
-            Fleet worker
-          </div>
-          {listDispatchableRuntimes().map((id) => {
-            const active = id === runtime;
-            const rowModel = workerModelForDisplay(id, defaults);
-            return (
-              <button
-                key={id}
-                type="button"
-                onClick={() => { void selectRuntime(id); }}
-                onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover)'; }}
-                onMouseLeave={(event) => { event.currentTarget.style.background = active ? 'var(--t-hover)' : 'transparent'; }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  width: '100%',
-                  minHeight: 26,
-                  paddingTop: 0,
-                  paddingRight: 8,
-                  paddingBottom: 0,
-                  paddingLeft: 8,
-                  borderRadius: 7,
-                  borderWidth: 0,
-                  background: active ? 'var(--t-hover)' : 'transparent',
-                  color: active ? 'var(--t-text)' : 'var(--t-text-secondary)',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  fontFamily: 'var(--font-sans-system)',
-                  fontSize: 12.5,
-                  fontWeight: active ? 500 : 400,
-                  letterSpacing: '-0.1px',
-                }}
-              >
-                <span style={{ flexShrink: 0 }}>{getRuntimeCapability(id).label}</span>
-                <span style={{
-                  flex: 1,
-                  minWidth: 0,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  fontSize: 10.5,
-                  color: 'var(--t-text-faint)',
-                  textAlign: 'right',
-                }}>
-                  {rowModel ? shortModelLabel(rowModel) : ''}
-                </span>
-                <span style={{ width: 13, flexShrink: 0, color: 'var(--t-accent)', visibility: active ? 'visible' : 'hidden' }}>
-                  <CheckGlyph />
-                </span>
-              </button>
-            );
-          })}
-          <div style={{
-            minHeight: 15,
-            paddingTop: 3,
-            paddingLeft: 8,
-            paddingRight: 8,
-            fontSize: 10,
-            lineHeight: 1.25,
-            color: 'var(--t-text-faint)',
-            fontFamily: 'var(--font-sans-system)',
-          }}>
-            Multitask packets dispatch to this runtime. Model pins live in Settings → Dispatch.
-          </div>
+          {view === 'runtimes' ? (
+            <>
+              <div style={{
+                paddingLeft: 8,
+                paddingRight: 8,
+                paddingBottom: 4,
+                fontSize: 10,
+                letterSpacing: '0.3px',
+                textTransform: 'uppercase',
+                color: 'var(--t-text-faint)',
+                fontFamily: 'var(--font-sans-system)',
+              }}>
+                Fleet worker
+              </div>
+              {listDispatchableRuntimes().map((id) => {
+                const active = id === runtime;
+                const rowModel = workerModelForDisplay(id, defaults);
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => { void selectRuntime(id); }}
+                    onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover)'; }}
+                    onMouseLeave={(event) => { event.currentTarget.style.background = active ? 'var(--t-hover)' : 'transparent'; }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      width: '100%',
+                      minHeight: 26,
+                      paddingTop: 0,
+                      paddingRight: 8,
+                      paddingBottom: 0,
+                      paddingLeft: 8,
+                      borderRadius: 7,
+                      borderWidth: 0,
+                      background: active ? 'var(--t-hover)' : 'transparent',
+                      color: active ? 'var(--t-text)' : 'var(--t-text-secondary)',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      fontFamily: 'var(--font-sans-system)',
+                      fontSize: 12.5,
+                      fontWeight: active ? 500 : 400,
+                      letterSpacing: '-0.1px',
+                    }}
+                  >
+                    <span style={{ flexShrink: 0 }}>{getRuntimeCapability(id).label}</span>
+                    <span style={{
+                      flex: 1,
+                      minWidth: 0,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      fontSize: 10.5,
+                      color: 'var(--t-text-faint)',
+                      textAlign: 'right',
+                    }}>
+                      {rowModel ? shortModelLabel(rowModel) : ''}
+                    </span>
+                    <span style={{ width: 13, flexShrink: 0, color: 'var(--t-accent)', visibility: active ? 'visible' : 'hidden' }}>
+                      <CheckGlyph />
+                    </span>
+                  </button>
+                );
+              })}
+              <div style={{
+                minHeight: 15,
+                paddingTop: 3,
+                paddingLeft: 8,
+                paddingRight: 8,
+                fontSize: 10,
+                lineHeight: 1.25,
+                color: 'var(--t-text-faint)',
+                fontFamily: 'var(--font-sans-system)',
+              }}>
+                Multitask packets dispatch to this runtime. Choose OpenCode 2 to set its worker model here.
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', minHeight: 28, paddingRight: 4, paddingLeft: 2 }}>
+                <button
+                  type="button"
+                  aria-label="Back to fleet runtimes"
+                  onClick={() => setView('runtimes')}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 26,
+                    height: 24,
+                    borderWidth: 0,
+                    borderRadius: 7,
+                    background: 'transparent',
+                    color: 'var(--t-text-secondary)',
+                    cursor: 'pointer',
+                  }}
+                  onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover)'; }}
+                  onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+                >
+                  <BackGlyph />
+                </button>
+                <div style={{ flex: 1, minWidth: 0, fontFamily: 'var(--font-sans-system)', fontSize: 11.5, color: 'var(--t-text)' }}>
+                  OpenCode 2 worker model
+                </div>
+                {defaults.opencodeWorkerModel ? (
+                  <button
+                    type="button"
+                    disabled={workerModelLocked || saving}
+                    onClick={() => { void selectWorkerModel(null); }}
+                    style={{
+                      borderWidth: 0,
+                      background: 'transparent',
+                      color: workerModelLocked ? 'var(--t-text-faint)' : 'var(--t-accent)',
+                      cursor: workerModelLocked ? 'default' : 'pointer',
+                      fontFamily: 'var(--font-sans-system)',
+                      fontSize: 10,
+                      paddingTop: 3,
+                      paddingRight: 5,
+                      paddingBottom: 3,
+                      paddingLeft: 5,
+                    }}
+                  >
+                    Clear pin
+                  </button>
+                ) : null}
+              </div>
+              {workerModelLocked ? (
+                <div style={{ paddingTop: 12, paddingRight: 12, paddingBottom: 14, paddingLeft: 12, color: 'var(--t-text-faint)', fontFamily: 'var(--font-sans-system)', fontSize: 11 }}>
+                  This worker model is set by the machine environment.
+                </div>
+              ) : (
+                <AcpModelPicker
+                  backend="opencode"
+                  value={defaults.opencodeWorkerModel}
+                  width={258}
+                  onSelect={(modelId) => { void selectWorkerModel(modelId); }}
+                />
+              )}
+            </>
+          )}
         </div>
       </ComposerPopover>
     </>

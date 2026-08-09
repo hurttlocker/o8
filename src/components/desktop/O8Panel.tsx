@@ -840,10 +840,10 @@ export function O8Panel({
         <O8SpecPane
           repoPath={repoPath}
           active={activeTab === 'spec'}
-          toolbarSlot={(
+          toolbarSlot={(specRepoPath) => (
             <O8ScratchChat
-              repoPath={repoPath}
-              selectedFile={selectedFile ?? null}
+              repoPath={specRepoPath}
+              selectedFile={specRepoPath === repoPath ? selectedFile ?? null : null}
               surface="diff"
               surfaceLabel="o8.md"
             />

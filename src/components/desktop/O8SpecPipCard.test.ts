@@ -17,15 +17,16 @@ vi.mock('next/dynamic', async () => {
 vi.mock('./HoverPipCard', async () => {
   const React = await import('react');
   return {
-    HoverPipCard: ({ children, onOpen }: {
+    HoverPipCard: ({ children, onOpen, available }: {
       children: (context: {
         shape: { width: number; frameHeight: number; viewport: number };
         close: () => void;
       }) => import('react').ReactNode;
       onOpen?: () => void;
+      available?: boolean;
     }) => React.createElement(
       'div',
-      null,
+      { 'data-available': available ? 'true' : 'false' },
       React.createElement('button', {
         type: 'button',
         'aria-label': 'Open o8.md panel',
@@ -76,5 +77,15 @@ describe('O8SpecPipCard editor interaction', () => {
 
     act(() => expandButtons[0]?.click());
     expect(onOpenSpec).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the picker surface available when no project repo is active', () => {
+    act(() => root.render(createElement(O8SpecPipCard, {
+      active: true,
+      repoPath: null,
+    })));
+
+    expect(container.querySelector('[data-available="true"]')).not.toBeNull();
+    expect(container.querySelector('.o8-notes-scroll')).not.toBeNull();
   });
 });

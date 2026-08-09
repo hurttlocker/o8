@@ -41,7 +41,7 @@ export function O8SpecPipCard({
   return (
     <HoverPipCard
       active={active}
-      available={Boolean(repoPath)}
+      available
       eventName={O8_SPEC_PIP_EVENT}
       storageKey={ORIENTATION_KEY}
       title="o8.md"

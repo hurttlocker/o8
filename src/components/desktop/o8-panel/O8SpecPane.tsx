@@ -5,6 +5,7 @@ import { DoubleCheck } from 'iconoir-react';
 import { useTheme } from '@/lib/theme/context';
 import { cleanupOrphanedRoughdraftAnnotations } from '@/lib/o8md/cleanup';
 import { O8SpecEditor } from './O8SpecEditor';
+import { O8SpecTargetPicker, useO8SpecTarget } from './O8SpecTargetPicker';
 import { TitleBarButton } from '../title-bar/TitleBarButton';
 
 interface O8SpecPaneProps {
@@ -24,7 +25,7 @@ interface O8SpecPaneProps {
   active?: boolean;
   /** Slot for the Ask-o8 chat trigger so it sits IN the toolbar next to
    *  Ask-to-review + Settings rather than floating below the header. */
-  toolbarSlot?: ReactNode;
+  toolbarSlot?: ReactNode | ((repoPath: string | null) => ReactNode);
   /** Canvas treatment: the GlassCardShell already IS the card frame + header,
    *  so drop the inner bordered editor box (border / radius / fill / maxWidth /
    *  frame padding) and let the editor fill the modal body directly — same as
@@ -81,7 +82,13 @@ function countChangedLines(base: string, next: string) {
   };
 }
 
-export function O8SpecPane({ repoPath, toolbarSlot, embedded, active = true }: O8SpecPaneProps) {
+export function O8SpecPane({ repoPath: defaultRepoPath, toolbarSlot, embedded, active = true }: O8SpecPaneProps) {
+  const {
+    repoPath,
+    overridePath,
+    selectTarget,
+    followActiveRepo,
+  } = useO8SpecTarget(defaultRepoPath);
   const [content, setContent] = useState('');
   const [loadedContent, setLoadedContent] = useState('');
   const [loading, setLoading] = useState(true);
@@ -447,7 +454,16 @@ export function O8SpecPane({ repoPath, toolbarSlot, embedded, active = true }: O
             </div>
           </div>
         )}
-        {toolbarSlot}
+        <O8SpecTargetPicker
+          repoPath={repoPath}
+          defaultRepoPath={defaultRepoPath}
+          overridePath={overridePath}
+          onSelect={selectTarget}
+          onFollowActiveRepo={followActiveRepo}
+          compact={embedded}
+          disabled={savePending}
+        />
+        {typeof toolbarSlot === 'function' ? toolbarSlot(repoPath) : toolbarSlot}
         <TitleBarButton
           label="Ask o8 to review"
           onClick={requestReview}
