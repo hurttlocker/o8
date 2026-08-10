@@ -84,11 +84,11 @@ auth houses, validation, and runtime membership come from the catalog.
 
 ## Current runtime set
 
-The catalog contains fifteen runtimes. Fourteen are dispatchable; `antigravity`
+The catalog contains sixteen runtimes. Fifteen are dispatchable; `antigravity`
 remains discovery-only.
 
 - Specialized: `codex`, `claude-code`, `gemini`, `opencode`, `pi`, `cursor`, `grok`, and `prime-agent`.
-- Declarative: `openhands`, `goose`, `qwen`, `qoder`, `kimi`, and `aider`.
+- Declarative: `openhands`, `goose`, `qwen`, `qoder`, `kimi`, `aider`, and `3code`.
 - Discovery-only: `antigravity`.
 
 ## Contract locations

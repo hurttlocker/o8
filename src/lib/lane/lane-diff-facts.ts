@@ -268,13 +268,14 @@ function readGitOutputWithFallback(cwd: string, primaryArgs: string[], fallbackA
 
 export function getLaneDiffFacts(
   lane: Pick<Lane, 'baseBranch' | 'worktreePath' | 'repoPath'>,
+  comparisonRef?: string,
 ): LaneDiffFacts {
   const cwd = lane.worktreePath || lane.repoPath;
   if (!cwd) {
     throw new Error('Lane has no repository path for diff facts.');
   }
 
-  const baseRange = `${lane.baseBranch}...HEAD`;
+  const baseRange = `${comparisonRef || lane.baseBranch}...HEAD`;
   const stat = readGitOutputWithFallback(
     cwd,
     ['diff', '--stat', baseRange],

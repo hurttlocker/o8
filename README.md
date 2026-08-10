@@ -136,7 +136,7 @@ npm run dev             # web loop — Next.js :47120 + WS :47125
 
 That loop needs no POSIX shell, so a Windows clone builds without Git Bash or any `script-shell` configuration. The only scripts that still want `bash` are the `measure:*` diagnostics and the release chain (`ship`, `tauri:build:signed`), which are macOS-only regardless.
 
-Bring at least one agent CLI you already use (`claude`, `codex`, `gemini`, `aider`, …) — the first-run picker finds them. No API keys required to start; [`.env.example`](./.env.example) documents every optional one.
+Bring at least one agent CLI you already use (`claude`, `codex`, `gemini`, `aider`, `3code`, …) — the first-run picker finds them. No API keys required to start; [`.env.example`](./.env.example) documents every optional one.
 
 ### Phone
 

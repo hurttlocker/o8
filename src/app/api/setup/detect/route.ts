@@ -127,7 +127,6 @@ async function safeFetch(url: string, timeoutMs = 2000, deadlineAt?: number): Pr
 // .env.local files. Lenient where a login can't be detected reliably (codex /
 // claude-code): only flag "auth missing" when we're confident none exists.
 function loadConfiguredKeyNames(): Set<string> {
-  const home = homedir();
   const repoRoot = process.env.CORTEX_IDE_REPO_ROOT || process.cwd();
   const names = new Set<string>();
   for (const envPath of [join(getDataDir(), '.env.local'), join(repoRoot, '.env.local')]) {
@@ -330,6 +329,23 @@ function detectOpenCode(deadlineAt?: number): DetectedTool {
   };
 }
 
+function detect3code(deadlineAt?: number): DetectedTool {
+  const path = locateBin('3code', deadlineAt);
+  const detected = Boolean(path);
+  const configPath = join(homedir(), '.config', '3code', 'config');
+  const authPresent = existsSync(configPath);
+
+  return {
+    id: '3code',
+    name: '3code CLI',
+    detected,
+    ready: detected ? authPresent : undefined,
+    authHint: detected && !authPresent ? 'run: 3code (then configure a model provider)' : undefined,
+    path,
+    details: { authPresent, configPath },
+  };
+}
+
 function detectCursor(deadlineAt?: number): DetectedTool {
   const path = locateBin('cursor-agent', deadlineAt);
   const detected = !!path;
@@ -424,7 +440,6 @@ async function detectOllama(deadlineAt?: number): Promise<DetectedTool> {
 }
 
 function detectApiKeys(): DetectedTool {
-  const home = homedir();
   // Prefer the explicit env var; otherwise use the current working directory
   // (the Next server's cwd) which is the repo root in both dev and packaged builds.
   const repoRoot = process.env.CORTEX_IDE_REPO_ROOT || process.cwd();
@@ -507,7 +522,7 @@ function buildDetectionResult(
   codexVoiceCapability?: CodexVoiceCapability,
 ): DetectionResult {
   const hasAgentSurface = false;
-  const hasCliAgent = tools.some(t => ['codex', 'claude-code', 'antigravity', 'opencode', 'cursor', 'grok', 'pi'].includes(t.id) && t.detected);
+  const hasCliAgent = tools.some(t => ['codex', 'claude-code', 'antigravity', 'opencode', '3code', 'cursor', 'grok', 'pi'].includes(t.id) && t.detected);
   const hasApiKey = tools.some(t => t.id === 'api-keys' && t.detected);
   const hasEmbeddings = tools.some(t => t.id === 'ollama' && t.detected);
   const hasAnything = hasAgentSurface || hasCliAgent || hasApiKey;
@@ -560,6 +575,7 @@ export async function GET() {
   if (!isPastDeadline(deadlineAt)) tools.push(detectGemini(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detectAntigravity(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detectOpenCode(deadlineAt));
+  if (!isPastDeadline(deadlineAt)) tools.push(detect3code(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detectCursor(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detectGrok(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detectPi(deadlineAt));

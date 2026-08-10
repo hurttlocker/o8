@@ -11,6 +11,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { getSqlite } from '@/lib/db';
 import { isSafeGitRef } from '@/lib/git/refs';
 import { capturePacketCompletionContext, readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
 import { readPacketDeviations, type PacketDeviations } from '@/lib/orchestrator/packet-deviations';
@@ -35,6 +36,7 @@ const REVIEW_DIFF_LINES = {
 
 /** Lanes currently being reviewed — prevents concurrent review of the same lane */
 const reviewingLanes = new Set<string>();
+const cancelledReviewLanes = new Set<string>();
 
 let drainTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -42,10 +44,22 @@ export function isLaneAutoReviewActive(laneId: string): boolean {
   return reviewingLanes.has(laneId);
 }
 
+export function cancelAutoReviewForLane(laneId: string, reason: string): void {
+  cancelledReviewLanes.add(laneId);
+  try {
+    getDb().prepare(
+      `UPDATE review_queue
+       SET status = 'completed', last_error = ?, updated_at = datetime('now')
+       WHERE lane_id = ? AND status IN ('pending', 'in_progress')`,
+    ).run(`Cancelled: ${reason}`, laneId);
+  } catch (error) {
+    console.warn(`[auto-review] Failed to persist cancellation for lane ${laneId}:`, error);
+  }
+}
+
 // ── Queue Operations (SQLite-backed) ──
 
 function getDb() {
-  const { getSqlite } = require('@/lib/db') as { getSqlite: () => import('better-sqlite3').Database };
   return getSqlite();
 }
 
@@ -186,6 +200,10 @@ async function drainReviewQueue(): Promise<void> {
       await performAutoReview(review);
       markReviewCompleted(review.id);
     } catch (err) {
+      if (cancelledReviewLanes.has(review.lane_id)) {
+        markReviewCompleted(review.id);
+        return;
+      }
       const errorMsg = err instanceof Error ? err.message : String(err);
       markReviewFailed(review.id, errorMsg, review.attempts + 1);
       console.error(`[auto-review] Review ${review.id} failed (attempt ${review.attempts + 1}): ${errorMsg}`);
@@ -248,12 +266,14 @@ interface ReviewDiffSummary {
   cwd: string;
 }
 
-function getDiffSummary(lane: Lane, depth: ReviewDepth): ReviewDiffSummary {
+function getDiffSummary(lane: Lane, depth: ReviewDepth, comparisonRef?: string): ReviewDiffSummary {
   const cwd = lane.worktreePath || lane.repoPath;
   const maxDiffLines = REVIEW_DIFF_LINES[depth];
   try {
-    const facts = getLaneDiffFacts(lane);
-    const safeBase = isSafeGitRef(lane.baseBranch) ? lane.baseBranch : null;
+    const facts = getLaneDiffFacts(lane, comparisonRef);
+    const safeBase = comparisonRef && isSafeGitRef(comparisonRef)
+      ? comparisonRef
+      : isSafeGitRef(lane.baseBranch) ? lane.baseBranch : null;
     let stat = '';
     try {
       stat = execFileSync('git', ['diff', '--stat', safeBase ? `${safeBase}...HEAD` : 'HEAD~1'], { windowsHide: true, cwd, timeout: 10_000, encoding: 'utf-8' }).trim();
@@ -315,9 +335,11 @@ const SECURITY_PATTERNS: Array<{ pattern: RegExp; label: string; severity: 'high
   { pattern: /\.innerHTML\s*=/, label: 'direct innerHTML assignment', severity: 'warning' },
 ];
 
-function runMechanicalChecks(lane: Lane): { findings: MechanicalFinding[]; summary: string } {
+function runMechanicalChecks(lane: Lane, comparisonRef?: string): { findings: MechanicalFinding[]; summary: string } {
   const cwd = lane.worktreePath || lane.repoPath;
-  const safeBase = isSafeGitRef(lane.baseBranch) ? lane.baseBranch : null;
+  const safeBase = comparisonRef && isSafeGitRef(comparisonRef)
+    ? comparisonRef
+    : isSafeGitRef(lane.baseBranch) ? lane.baseBranch : null;
   const findings: MechanicalFinding[] = [];
 
   // ── Diff stats check ──
@@ -452,6 +474,10 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
     console.log(`[auto-review] Lane ${lane.id} is no longer reviewing (${lane.status}) — skipping`);
     return;
   }
+  if (cancelledReviewLanes.has(lane.id)) {
+    console.log(`[auto-review] Lane ${lane.id} was released before review — skipping`);
+    return;
+  }
 
   let completionContext = null;
   if (lane.packetId && lane.sessionKey) {
@@ -488,9 +514,11 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
   }
 
   const depth = deriveReviewDepth(completionContext?.selfReview);
-  const mechanicalChecks = runMechanicalChecks(lane);
   const mergeGateResult = await runMergeGate(lane, completionContext?.selfReview);
-  const diffSummary = getDiffSummary(lane, depth);
+  const comparisonRef = mergeGateResult.diffBase?.mergeBase
+    ?? mergeGateResult.diffBase?.comparisonRef;
+  const mechanicalChecks = runMechanicalChecks(lane, comparisonRef);
+  const diffSummary = getDiffSummary(lane, depth, comparisonRef);
   const reviewRisk = classifyReviewRisk(diffSummary.changedFiles, diffSummary.addedLines);
   let reviewScreenshot: LaneReviewScreenshotReference | null = null;
   if (lane.runtime === 'codex') {
@@ -518,6 +546,11 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
     completionContext?.taskContract,
     taskContractRequired,
   );
+
+  if (cancelledReviewLanes.has(lane.id)) {
+    console.log(`[auto-review] Lane ${lane.id} was released while preparing review — skipping`);
+    return;
+  }
 
   // Dual-path routing (epic #1044): the `inAppOrchestratorEnabled` toggle is
   // now a runtime selector, not an on/off gate.
@@ -551,6 +584,10 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
       }
     },
   });
+  if (cancelledReviewLanes.has(lane.id)) {
+    console.log(`[auto-review] Lane ${lane.id} was released during review — discarding the result`);
+    return;
+  }
   if (!reviewTurn.ok) {
     throw new Error(`Review turn failed: ${reviewTurn.errors.join('; ').slice(0, 500)}`);
   }

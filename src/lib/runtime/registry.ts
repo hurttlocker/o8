@@ -12,13 +12,14 @@ const RUNTIME_BINARY_NAMES: Record<LaneRuntime, string[]> = {
   codex: ['codex'],
   gemini: ['gemini'],
   antigravity: ['agy', 'antigravity'],
-  opencode: ['opencode'],
+  opencode: ['opencode2', 'opencode'],
   openhands: ['openhands'],
   goose: ['goose'],
   qwen: ['qwen'],
   qoder: ['qodercli'],
   kimi: ['kimi'],
   aider: ['aider'],
+  '3code': ['3code'],
   cursor: ['cursor-agent'],
   grok: ['grok'],
   pi: ['pi'],
@@ -138,7 +139,7 @@ function runtimeForBinaryName(name: string): LaneRuntime | null {
   return null;
 }
 
-function runtimeForCommand(command: string, fallbackName?: string): LaneRuntime | null {
+export function runtimeForCommand(command: string, fallbackName?: string): LaneRuntime | null {
   const firstToken = firstCommandToken(command);
   const direct = runtimeForBinaryName(binaryName(firstToken || fallbackName || ''));
   if (direct) return direct;

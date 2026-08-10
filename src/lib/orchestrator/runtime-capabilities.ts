@@ -275,6 +275,28 @@ export const ORCHESTRATOR_RUNTIMES = {
       authFix: 'Install Aider, then configure a model provider API key.',
     },
   },
+  '3code': {
+    label: '3code',
+    shortLabel: '3code',
+    dispatchable: true,
+    requiresModel: false,
+    accentColor: '#74c8c1',
+    binaryName: '3code',
+    workerProvider: '3code',
+    authHouse: '3code',
+    reasoningEffort: false,
+    tier: 'standard',
+    description: 'Local-first 3code CLI worker via one-shot positional prompts and local session logs.',
+    declarative: {
+      launchArgs: ['{{prompt}}'],
+      resumeArgs: null,
+      parserProfile: 'text',
+      costFormat: 'text',
+      authEnvVars: [],
+      authPaths: ['.config/3code/config'],
+      authFix: 'Install 3code, then run `3code` once to configure a provider.',
+    },
+  },
   pi: {
     label: 'Pi',
     shortLabel: 'Pi',
@@ -391,5 +413,5 @@ export function getRuntimeCapability(runtime: OrchestratorRuntime): CatalogRunti
 /** Runtimes that ship in the dispatch picker. Mirrors the canonical capability set. */
 export const V1_DISPATCH_RUNTIMES: OrchestratorRuntime[] = listDispatchableRuntimes();
 
-// Fourteen seats at the table. The fifteenth is yours:
+// Fifteen seats at the table. The sixteenth is yours:
 // docs/internals/runtime-adapter-contract.md is the chair.

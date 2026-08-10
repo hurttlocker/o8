@@ -13,6 +13,8 @@ process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT = mkdtempSync(
 );
 
 const { createLane, deleteLane, getLane, setLaneStatus, updateLane } = await import('@/lib/lane/registry');
+const { triggerAutoReview } = await import('@/lib/lane/auto-review');
+const { getSqlite } = await import('@/lib/db');
 const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const { sweepPacketsMergedByAncestry } = await import('@/lib/orchestrator/merged-by-ancestry');
@@ -169,6 +171,7 @@ describe('merged-by-ancestry reconciliation', () => {
     git(seed, ['push', 'origin', 'main']);
 
     const lane = seedPacket(clone, 'pkt-ancestor');
+    triggerAutoReview(lane);
 
     await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({ merged: 1 });
 
@@ -177,6 +180,12 @@ describe('merged-by-ancestry reconciliation', () => {
     expect(packet?.releaseState).toBe('released');
     expect(packet?.releaseStatePayload?.source).toBe('merged_by_ancestry_reconcile');
     expect(getLane(lane.id)?.status).toBe('archived');
+    expect(getSqlite().prepare(
+      'SELECT status, last_error FROM review_queue WHERE lane_id = ?',
+    ).get(lane.id)).toEqual({
+      status: 'completed',
+      last_error: 'Cancelled: merged_by_ancestry_reconcile',
+    });
   }, 20_000);
 
   it('releases packet and archives lane when squash-equivalent content is on origin/main', async () => {

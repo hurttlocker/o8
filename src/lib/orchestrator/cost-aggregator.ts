@@ -172,6 +172,7 @@ export async function aggregateMissionCost(state: OrchestratorMissionState): Pro
     qoder: emptyRuntimeTokenSummary(),
     kimi: emptyRuntimeTokenSummary(),
     aider: emptyRuntimeTokenSummary(),
+    '3code': emptyRuntimeTokenSummary(),
     cursor: emptyRuntimeTokenSummary(),
     grok: emptyRuntimeTokenSummary(),
     pi: emptyRuntimeTokenSummary(),

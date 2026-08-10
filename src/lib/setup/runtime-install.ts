@@ -46,6 +46,12 @@ export const RUNTIME_INSTALL_INFO: Record<string, RuntimeInstallInfo> = {
     command: 'npm i -g @opencode-ai/cli@next',
     hint: 'Install OpenCode 2 to use its multi-provider worker and shared service.',
   },
+  '3code': {
+    id: '3code',
+    label: '3code CLI',
+    link: 'https://3code.capocasa.dev/',
+    hint: 'Install 3code, then run it once to configure a model provider.',
+  },
   cursor: {
     id: 'cursor',
     label: 'Cursor CLI',
