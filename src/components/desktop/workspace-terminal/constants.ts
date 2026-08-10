@@ -12,6 +12,12 @@ export const CLI_AGENTS = [
   { id: 'codex', label: 'Codex', color: '#6b7280', command: 'codex' },
   { id: 'opencode', label: 'OpenCode 2', color: '#fb923c', command: 'opencode2' },
   { id: 'gemini', label: 'Gemini CLI', color: '#4285f4', command: 'gemini' },
+  {
+    id: 'magnitude',
+    label: 'Magnitude',
+    color: '#0f9f8f',
+    command: "if command -v magnitude >/dev/null 2>&1; then magnitude; else printf '\\nMagnitude is not installed. Install it with:\\n  npm i -g @magnitudedev/cli\\n\\n'; fi",
+  },
 ] as const;
 
 // Order matters: the first entry is the default for new Gemini packets/tabs

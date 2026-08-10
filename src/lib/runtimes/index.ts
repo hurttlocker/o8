@@ -43,6 +43,7 @@ import { codexRuntime } from './codex';
 import { claudeCodeRuntime } from './claude-code';
 import { geminiRuntime } from './gemini';
 import { antigravityRuntime } from './antigravity';
+import { magnitudeRuntime } from './magnitude';
 import { cloudRuntime } from './cloud-adapter';
 import { opencodeRuntime } from './opencode';
 import { cursorRuntime } from './cursor';
@@ -90,6 +91,10 @@ registerRuntime(geminiRuntime);
 // Antigravity replaces Gemini CLI at the Google runtime layer, but is
 // discovery-only until agy documents a resumable JSON/event contract.
 registerRuntime(antigravityRuntime);
+// Magnitude is operator-launched in a visible terminal while its upstream
+// headless mode is unavailable. Registering the canonical read-only adapter
+// keeps discovery honest without advertising packet dispatch controls.
+registerRuntime(magnitudeRuntime);
 // Wave 2c: OpenCode 2 CLI — multi-provider coding runtime via `opencode2 run
 // --format json --model provider/model`. Sessions 'opencode-owned:' with
 // 'ses_' prefixed threads. See src/lib/opencode/owned.ts.

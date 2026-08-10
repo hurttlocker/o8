@@ -12,4 +12,9 @@ describe('runtime process command detection', () => {
     expect(runtimeForCommand('/usr/local/bin/3code fix the bug')).toBe('3code');
     expect(runtimeForCommand('node /usr/local/bin/3code fix the bug')).toBe('3code');
   });
+
+  it('recognizes a Magnitude terminal process', () => {
+    expect(runtimeForCommand('/usr/local/bin/magnitude')).toBe('magnitude');
+    expect(runtimeForCommand('node /usr/local/bin/magnitude')).toBe('magnitude');
+  });
 });

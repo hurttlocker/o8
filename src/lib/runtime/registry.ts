@@ -12,6 +12,7 @@ const RUNTIME_BINARY_NAMES: Record<LaneRuntime, string[]> = {
   codex: ['codex'],
   gemini: ['gemini'],
   antigravity: ['agy', 'antigravity'],
+  magnitude: ['magnitude'],
   opencode: ['opencode2', 'opencode'],
   openhands: ['openhands'],
   goose: ['goose'],

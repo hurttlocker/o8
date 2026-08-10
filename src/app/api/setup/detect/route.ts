@@ -346,6 +346,38 @@ function detect3code(deadlineAt?: number): DetectedTool {
   };
 }
 
+function detectMagnitude(deadlineAt?: number): DetectedTool {
+  if (process.platform === 'win32') {
+    return {
+      id: 'magnitude',
+      name: 'Magnitude CLI',
+      detected: false,
+      details: { supported: false, dispatchable: false },
+    };
+  }
+  const path = locateBin('magnitude', deadlineAt);
+  const detected = Boolean(path);
+  const version = detected ? safeExec(path, ['--version'], 2000, deadlineAt) : undefined;
+  const configPath = join(homedir(), '.magnitude', 'config.json');
+  const configured = existsSync(configPath);
+
+  return {
+    id: 'magnitude',
+    name: 'Magnitude CLI',
+    detected,
+    ready: detected ? true : undefined,
+    version,
+    path,
+    details: {
+      configured,
+      configPath,
+      supported: true,
+      dispatchable: false,
+      launchMode: 'visible-terminal',
+    },
+  };
+}
+
 function detectCursor(deadlineAt?: number): DetectedTool {
   const path = locateBin('cursor-agent', deadlineAt);
   const detected = !!path;
@@ -522,7 +554,7 @@ function buildDetectionResult(
   codexVoiceCapability?: CodexVoiceCapability,
 ): DetectionResult {
   const hasAgentSurface = false;
-  const hasCliAgent = tools.some(t => ['codex', 'claude-code', 'antigravity', 'opencode', '3code', 'cursor', 'grok', 'pi'].includes(t.id) && t.detected);
+  const hasCliAgent = tools.some(t => ['codex', 'claude-code', 'antigravity', 'opencode', '3code', 'magnitude', 'cursor', 'grok', 'pi'].includes(t.id) && t.detected);
   const hasApiKey = tools.some(t => t.id === 'api-keys' && t.detected);
   const hasEmbeddings = tools.some(t => t.id === 'ollama' && t.detected);
   const hasAnything = hasAgentSurface || hasCliAgent || hasApiKey;
@@ -576,6 +608,7 @@ export async function GET() {
   if (!isPastDeadline(deadlineAt)) tools.push(detectAntigravity(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detectOpenCode(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detect3code(deadlineAt));
+  if (!isPastDeadline(deadlineAt)) tools.push(detectMagnitude(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detectCursor(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detectGrok(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detectPi(deadlineAt));

@@ -11,4 +11,13 @@ describe('runtime install metadata', () => {
       hint: 'Install 3code, then run it once to configure a model provider.',
     });
   });
+
+  it('provides the official Magnitude npm install command', () => {
+    expect(getRuntimeInstallInfo('magnitude')).toEqual({
+      id: 'magnitude',
+      label: 'Magnitude CLI',
+      command: 'npm i -g @magnitudedev/cli',
+      hint: 'On macOS or Linux, install Magnitude, then launch it in a visible repository terminal to choose a local model or custom endpoint.',
+    });
+  });
 });

@@ -52,6 +52,12 @@ export const RUNTIME_INSTALL_INFO: Record<string, RuntimeInstallInfo> = {
     link: 'https://3code.capocasa.dev/',
     hint: 'Install 3code, then run it once to configure a model provider.',
   },
+  magnitude: {
+    id: 'magnitude',
+    label: 'Magnitude CLI',
+    command: 'npm i -g @magnitudedev/cli',
+    hint: 'On macOS or Linux, install Magnitude, then launch it in a visible repository terminal to choose a local model or custom endpoint.',
+  },
   cursor: {
     id: 'cursor',
     label: 'Cursor CLI',

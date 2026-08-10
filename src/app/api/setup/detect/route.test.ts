@@ -21,7 +21,7 @@ afterEach(() => {
 });
 
 describe('GET /api/setup/detect', () => {
-  it('reports 3code, Cursor, Grok, and Pi as gracefully absent when their CLIs are missing', async () => {
+  it('reports optional CLI runtimes as gracefully absent when their CLIs are missing', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 })));
     vi.stubEnv('CURSOR_API_KEY', '');
     vi.stubEnv('GROK_CODE_XAI_API_KEY', '');
@@ -41,11 +41,12 @@ describe('GET /api/setup/detect', () => {
     expect(response.status).toBe(200);
     expect(data.tools).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: '3code', name: '3code CLI', detected: false }),
+      expect.objectContaining({ id: 'magnitude', name: 'Magnitude CLI', detected: false }),
       expect.objectContaining({ id: 'cursor', name: 'Cursor CLI', detected: false }),
       expect.objectContaining({ id: 'grok', name: 'Grok Build', detected: false }),
       expect.objectContaining({ id: 'pi', name: 'Pi', detected: false }),
     ]));
-    for (const id of ['3code', 'cursor', 'grok', 'pi']) {
+    for (const id of ['3code', 'magnitude', 'cursor', 'grok', 'pi']) {
       const tool = data.tools.find((entry) => entry.id === id);
       expect(tool?.ready).toBeUndefined();
       expect(tool?.authHint).toBeUndefined();

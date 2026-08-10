@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
+import { memo, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
 import {
   MessageSquare,
   Terminal as TerminalIcon,
@@ -18,6 +18,12 @@ interface WorkspaceLaunchPickerProps {
   onNewLLMChatTab: (repo?: RegisteredRepo) => void;
 }
 
+const subscribePlatform = () => () => undefined;
+
+function browserSupportsMagnitude() {
+  return !navigator.userAgent.toLowerCase().includes('windows');
+}
+
 function WorkspaceLaunchPickerBase({
   launchRequestKey,
   scopedRepo,
@@ -25,6 +31,7 @@ function WorkspaceLaunchPickerBase({
   onNewLLMChatTab,
 }: WorkspaceLaunchPickerProps) {
   const [pickerOpen, setPickerOpen] = useState(false);
+  const magnitudeSupported = useSyncExternalStore(subscribePlatform, browserSupportsMagnitude, () => false);
   const pickerRef = useRef<HTMLDivElement>(null);
   const spawnHandlers = useWorkspaceSpawn();
   // Alpha: the casual "Chat" (llm-chat) option is hidden unless experimentalChat.
@@ -42,7 +49,9 @@ function WorkspaceLaunchPickerBase({
   }, [pickerOpen]);
 
   useEffect(() => {
-    if (launchRequestKey) setPickerOpen(true);
+    if (!launchRequestKey) return undefined;
+    const frame = requestAnimationFrame(() => setPickerOpen(true));
+    return () => cancelAnimationFrame(frame);
   }, [launchRequestKey]);
 
   const handleNewOrchestrator = () => {
@@ -57,6 +66,11 @@ function WorkspaceLaunchPickerBase({
 
   const handleNewTerminal = () => {
     onNewTab('shell', scopedRepo ?? undefined);
+    setPickerOpen(false);
+  };
+
+  const handleNewMagnitude = () => {
+    onNewTab('magnitude', scopedRepo ?? undefined);
     setPickerOpen(false);
   };
 
@@ -170,9 +184,36 @@ function WorkspaceLaunchPickerBase({
               <div style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>Plain shell · no chat</div>
             </div>
           </button>
+
+          {magnitudeSupported ? (
+            <button
+              type="button"
+              onClick={handleNewMagnitude}
+              style={menuButtonStyle}
+              onMouseEnter={highlightOn}
+              onMouseLeave={resetOn}
+            >
+              <span style={iconSlotStyle}>
+                <LocalAgentGlyph color="#0f9f8f" />
+              </span>
+              <div>
+                <div style={{ fontWeight: 500 }}>Magnitude</div>
+                <div style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>Local agent · visible repository terminal</div>
+              </div>
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>
+  );
+}
+
+function LocalAgentGlyph({ color }: { color: string }) {
+  return (
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="4" y="5" width="16" height="14" rx="3" />
+      <path d="M8 10h8M8 14h5" />
+    </svg>
   );
 }
 
