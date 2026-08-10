@@ -15,6 +15,8 @@ export {
   createMission,
   dispatchMission,
   getMissionStatus,
+  MissionNotFoundError,
+  resolveMissionDispatchTarget,
 } from './operator-mission-service/mission';
 
 export { submitPacketReview } from './operator-mission-service/review';

@@ -208,14 +208,17 @@ export function deriveSpawnedAgentRows({
   agents,
   rejectedPacketIds = new Set<string>(),
   archivedSessionKeys = new Set<string>(),
+  archivedRowKeys = new Set<string>(),
 }: {
   lanes: LaneSummary[];
   agents: AgentSummary[];
   rejectedPacketIds?: ReadonlySet<string>;
   archivedSessionKeys?: ReadonlySet<string>;
+  archivedRowKeys?: ReadonlySet<string>;
 }): ExtraAgentRow[] {
   const rows = buildRows(lanes, agents, rejectedPacketIds).filter((row) => (
-    !(row.sessionKey && archivedSessionKeys.has(row.sessionKey))
+    !archivedRowKeys.has(row.key)
+    && !(row.sessionKey && archivedSessionKeys.has(row.sessionKey))
   ));
   const live = rows.filter((row) => !isTerminalRow(row));
   const terminal = rows
@@ -234,7 +237,7 @@ function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession }: AgentP
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [rejectedPacketIds, setRejectedPacketIds] = useState<Set<string>>(() => new Set());
   const [actionMenu, setActionMenu] = useState<ExtraAgentActionMenuState | null>(null);
-  const [archivedSessionKeys, setArchivedSessionKeys] = useState<Set<string>>(() => new Set());
+  const [archivedRowKeys, setArchivedRowKeys] = useState<Set<string>>(() => new Set());
   const [hoverCard, setHoverCard] = useState<{ row: ExtraAgentRow; rect: DOMRect } | null>(null);
   const [busy, setBusy] = useState(false);
   const [readStateVersion, setReadStateVersion] = useState(0);
@@ -265,27 +268,29 @@ function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession }: AgentP
   }, [cancelHoverClose]);
 
   const handleArchive = useCallback(async (row: ExtraAgentRow) => {
-    if (!row.sessionKey) return;
-    const sessionKey = row.sessionKey;
-    setArchivedSessionKeys((prev) => {
-      if (prev.has(sessionKey)) return prev;
+    if (!row.sessionKey && !row.laneId) return;
+    setArchivedRowKeys((prev) => {
+      if (prev.has(row.key)) return prev;
       const next = new Set(prev);
-      next.add(sessionKey);
+      next.add(row.key);
       return next;
     });
     setBusy(true);
     try {
-      await fetch('/api/runtime/archive', {
+      const response = await fetch('/api/runtime/archive', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionKey }),
+        body: JSON.stringify(row.sessionKey
+          ? { sessionKey: row.sessionKey }
+          : { laneId: row.laneId }),
       });
+      if (!response.ok) throw new Error(`Archive failed with status ${response.status}`);
     } catch {
       // Roll back the optimistic hide so operator can retry.
-      setArchivedSessionKeys((prev) => {
-        if (!prev.has(sessionKey)) return prev;
+      setArchivedRowKeys((prev) => {
+        if (!prev.has(row.key)) return prev;
         const next = new Set(prev);
-        next.delete(sessionKey);
+        next.delete(row.key);
         return next;
       });
     } finally {
@@ -412,8 +417,8 @@ function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession }: AgentP
     lanes,
     agents,
     rejectedPacketIds,
-    archivedSessionKeys,
-  }), [lanes, agents, rejectedPacketIds, archivedSessionKeys]);
+    archivedRowKeys,
+  }), [lanes, agents, rejectedPacketIds, archivedRowKeys]);
   const showRepoSuffix = deriveShowRepoSuffix(rows);
   const rankedRows = useMemo(() => {
     void readStateVersion;

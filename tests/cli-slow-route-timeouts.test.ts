@@ -48,7 +48,10 @@ function installRouteFetch(): ReturnType<typeof vi.fn> {
       return jsonResponse({ ok: true, result: { merged: true, note: 'merged' } });
     }
     if (path === '/api/orchestrator/dispatch') {
-      return jsonResponse({ ok: true, result: { initiated: true, dispatched: 1 } });
+      return jsonResponse({
+        ok: true,
+        result: { initiated: true, dispatched: 1, missionId: 'mission-slow-route' },
+      });
     }
     if (path === '/api/orchestrator/steer-packet') {
       return jsonResponse({ ok: true, result: { laneId: 'lane-slow-route', note: 'steered' } });

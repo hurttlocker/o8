@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
-import { getMissionStatus } from '@/lib/orchestrator/operator-mission-service';
+import { getMissionStatus, MissionNotFoundError } from '@/lib/orchestrator/operator-mission-service';
 import { operatorError, operatorSuccess } from '../_utils';
 
 export const runtime = 'nodejs';
@@ -20,6 +20,9 @@ export async function GET(request: NextRequest) {
     });
     return operatorSuccess(result);
   } catch (error) {
+    if (error instanceof MissionNotFoundError) {
+      return operatorError('not_found', error.message, 404);
+    }
     const message = error instanceof Error ? error.message : 'Unable to read mission status.';
     return operatorError('status_failed', message, 500, error);
   }

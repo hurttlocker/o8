@@ -297,18 +297,25 @@ async function runMissionDispatch(mode: OutputMode, rest: string[]): Promise<num
   // / `o8 mission wait` track progress.
   const wait = hasFlag(rest, 'wait');
   const cfg = resolveConfig();
-  const res = await apiFetch<OperatorResponse<{ initiated?: boolean; dispatched?: number }>>(cfg, '/api/orchestrator/dispatch', {
+  const res = await apiFetch<OperatorResponse<{ initiated?: boolean; dispatched?: number; missionId?: string | null }>>(cfg, '/api/orchestrator/dispatch', {
     method: 'POST',
     timeoutMs: wait ? SLOW_MUTATION_TIMEOUT_MS : undefined,
     body: { ...(missionId ? { missionId } : {}), wait },
   });
   const result = unwrap(res.data, 'Mission dispatch was rejected.');
+  if (!wait && (result.initiated !== true || !result.missionId?.trim())) {
+    throw new CliError(
+      'dispatch_not_initiated',
+      'No mission was dispatched. Create or select a mission first.',
+      EXIT.NOT_FOUND,
+    );
+  }
 
   const payload = { schema: 'o8/cli/mission.dispatch/v1', dispatch: result };
   if (mode.human) {
     printHumanHeading('mission dispatch');
     printHumanKv([
-      ['mission', missionId ?? '(active)'],
+      ['mission', result.missionId ?? missionId ?? '(active)'],
       ['result', wait ? `dispatched ${result.dispatched ?? '?'} packet(s)` : 'initiated (track: o8 mission status)'],
     ]);
   } else {

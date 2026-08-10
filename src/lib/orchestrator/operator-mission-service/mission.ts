@@ -45,6 +45,36 @@ import type {
 const INLINE_BRANCH_MAX_LENGTH = 60;
 export const MISSION_CREATE_LOCK_WAIT_MS = 30_000;
 
+export class MissionNotFoundError extends Error {
+  constructor(missionId?: string) {
+    super(missionId
+      ? `Mission ${missionId} was not found.`
+      : 'No active mission was found. Create or select a mission first.');
+    this.name = 'MissionNotFoundError';
+  }
+}
+
+export function resolveMissionDispatchTarget(missionId?: string): string {
+  const requestedMissionId = missionId?.trim();
+  const current = currentMissionState();
+  const currentMissionId = current.missionId?.trim() ?? '';
+
+  if (!requestedMissionId) {
+    if (!currentMissionId) throw new MissionNotFoundError();
+    return currentMissionId;
+  }
+
+  if (requestedMissionId === currentMissionId) {
+    return requestedMissionId;
+  }
+
+  const registryEntry = readMissionRegistryEntry(requestedMissionId, { includeArchived: true });
+  if (!registryEntry) {
+    throw new MissionNotFoundError(requestedMissionId);
+  }
+  return requestedMissionId;
+}
+
 function branchTargetForIssue(issue: LoadedIssue) {
   if (!isInlineIssue(issue)) {
     return `${resolveBranchPrefixSync()}/${issue.number}-${slugify(issue.title)}`;
@@ -348,7 +378,7 @@ async function logDispatchRoutingRecommendations(
 
 export async function dispatchMission(input: DispatchMissionInput) {
   const before = currentMissionState();
-  const requestedMissionId = input.missionId?.trim();
+  const requestedMissionId = resolveMissionDispatchTarget(input.missionId);
   const currentMissionId = before.missionId?.trim() ?? '';
 
   if (requestedMissionId && requestedMissionId !== currentMissionId) {
@@ -578,6 +608,7 @@ export async function getMissionStatus(input: MissionStatusInput) {
   const currentState = currentMissionState();
   const requestedMissionId = input.missionId?.trim();
   const currentMissionId = (currentState.missionId ?? '').trim();
+  if (!requestedMissionId && !currentMissionId) throw new MissionNotFoundError();
   const isCurrent = !requestedMissionId || requestedMissionId === currentMissionId;
   let state = currentState;
 
@@ -588,7 +619,7 @@ export async function getMissionStatus(input: MissionStatusInput) {
     } else {
       const record = getMissionRecord(requestedMissionId);
       if (!record) {
-        throw new Error(`Mission ${requestedMissionId} not found.`);
+        throw new MissionNotFoundError(requestedMissionId);
       }
       return buildHistoricalMissionStatus(record);
     }

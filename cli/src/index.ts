@@ -102,6 +102,8 @@ interface ParsedArgs {
   mode: OutputMode;
   jsonExplicit: boolean;
   help: boolean;
+  version: boolean;
+  secondaryBeforeRest: boolean;
 }
 
 const SINGLE_LEVEL_BOOLEAN_FLAGS = new Set([
@@ -119,11 +121,21 @@ const SINGLE_LEVEL_BOOLEAN_FLAGS = new Set([
  * a one-level command whose first argument is a valued flag, that flag's value
  * lands in `secondary`; put it back after the flag before command-level parsing.
  */
-function singleLevelArgs(secondary: string | undefined, rest: string[]): string[] {
+function singleLevelArgs(
+  secondary: string | undefined,
+  rest: string[],
+  secondaryBeforeRest: boolean,
+): string[] {
   if (!secondary) return rest;
   const first = rest[0];
   if (first?.startsWith('--') && !first.includes('=') && !SINGLE_LEVEL_BOOLEAN_FLAGS.has(first)) {
-    return [first, secondary, ...rest.slice(1)];
+    // A valued flag before the positional argument puts its value in
+    // `secondary` (`o8 ask --repo /path "question"`). When the positional
+    // argument came first, the flag's real value is already next in `rest`
+    // (`o8 ask "question" --repo /path`) and must stay there.
+    return secondaryBeforeRest
+      ? [secondary, ...rest]
+      : [first, secondary, ...rest.slice(1)];
   }
   return [secondary, ...rest];
 }
@@ -135,6 +147,9 @@ function parseArgs(argv: string[]): ParsedArgs {
   let jsonExplicit = false;
   let verbose = false;
   let help = false;
+  let version = false;
+  let secondaryIndex: number | null = null;
+  let firstRestIndex: number | null = null;
   let i = 0;
   while (i < argv.length) {
     const tok = argv[i];
@@ -148,12 +163,29 @@ function parseArgs(argv: string[]): ParsedArgs {
     else if (tok === '--json') jsonExplicit = true;
     else if (tok === '--verbose' || tok === '-v') verbose = true;
     else if (tok === '--help' || tok === '-h') help = true;
-    else if (tok.startsWith('-')) rest.push(tok);
-    else if (command.length < 2 && !tok.startsWith('-')) command.push(tok);
-    else rest.push(tok);
+    else if (tok === '--version' && command.length === 0) version = true;
+    else if (tok.startsWith('-')) {
+      if (firstRestIndex === null) firstRestIndex = i;
+      rest.push(tok);
+    } else if (command.length < 2 && !tok.startsWith('-')) {
+      command.push(tok);
+      if (command.length === 2) secondaryIndex = i;
+    } else {
+      if (firstRestIndex === null) firstRestIndex = i;
+      rest.push(tok);
+    }
     i++;
   }
-  return { command, rest, mode: { human, verbose }, jsonExplicit, help };
+  return {
+    command,
+    rest,
+    mode: { human, verbose },
+    jsonExplicit,
+    help,
+    version,
+    secondaryBeforeRest: secondaryIndex !== null
+      && (firstRestIndex === null || secondaryIndex < firstRestIndex),
+  };
 }
 
 const USAGE = `o8 — agent-first CLI for the local o8 control plane.
@@ -263,6 +295,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
   // untrusted trees.
   if (process.platform === 'win32') process.env.NoDefaultCurrentDirectoryInExePath = '1';
   const [primary, secondary] = args.command;
+  if (args.version && !primary) return runVersion(args.mode);
   // `run` owns all flag parsing for its wrapped command (extractRunCommand reads
   // raw argv), so a `--help`/`-h` meant for the wrapped tool must NOT trigger o8's
   // global help here — otherwise `o8 run node --help` prints o8 USAGE + exit 0.
@@ -290,27 +323,27 @@ async function dispatch(args: ParsedArgs): Promise<number> {
     case 'ask':
       // The question lands in `secondary` (first positional) when quoted, or
       // spreads across secondary + rest when unquoted — hand both to the parser.
-      return runAsk(args.mode, singleLevelArgs(secondary, args.rest));
+      return runAsk(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
     case 'feature':
       return runFeature(args.mode, secondary, args.rest);
     case 'ground':
-      return runGround(args.mode, singleLevelArgs(secondary, args.rest));
+      return runGround(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
     case 'boot':
-      return runBoot(args.mode, singleLevelArgs(secondary, args.rest));
+      return runBoot(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
     case 'contract':
       return runContract(args.mode, secondary, args.rest);
     case 'sprint':
       return runSprint(args.mode, secondary, args.rest);
     case 'verify':
-      return runVerify(args.mode, singleLevelArgs(secondary, args.rest));
+      return runVerify(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
     case 'harness':
       return runHarness(args.mode, secondary, args.rest);
     case 'capabilities':
-      return runCapabilities(args.mode, singleLevelArgs(secondary, args.rest));
+      return runCapabilities(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
     case 'evaluate-diff':
-      return runEvaluateDiff(args.mode, singleLevelArgs(secondary, args.rest));
+      return runEvaluateDiff(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
     case 'ci':
-      return runCi(args.mode, singleLevelArgs(secondary, args.rest));
+      return runCi(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
     case 'app':
       return runApp(args.mode, secondary, args.rest);
     case 'update':

@@ -3,6 +3,7 @@ import {
   deriveSpawnedAgentRows,
   type LaneSummary,
 } from './AgentPanelExtraAgents';
+import { canArchiveExtraAgent, type ExtraAgentRow } from './AgentPanelExtraAgentRow';
 
 describe('Agents rail derivation', () => {
   it('keeps worker packets in one flat list across repositories', () => {
@@ -55,5 +56,40 @@ describe('Agents rail derivation', () => {
       agents: [],
       archivedSessionKeys: new Set(['codex-owned:lane-running']),
     })).toEqual([]);
+  });
+
+  it('hides an explicitly archived sessionless lane row', () => {
+    const lane: LaneSummary = {
+      id: 'lane-sessionless',
+      label: 'Failed worker',
+      repoPath: '/repos/project-repo',
+      branch: 'issue/failed-worker',
+      runtime: 'opencode',
+      sessionKey: null,
+      packetId: 'pkt-failed',
+      status: 'failed',
+      ownership: 'managed',
+      lastEventAt: '2026-07-19T00:01:00.000Z',
+      lastEventLabel: 'zero_diff_failed',
+    };
+
+    expect(deriveSpawnedAgentRows({
+      lanes: [lane],
+      agents: [],
+      archivedRowKeys: new Set([`lane:${lane.id}`]),
+    })).toEqual([]);
+  });
+
+  it('offers lane archiving only for sessionless terminal rows', () => {
+    const row = {
+      key: 'lane:lane-sessionless',
+      sessionKey: null,
+      laneId: 'lane-sessionless',
+      laneStatus: 'failed',
+    } as ExtraAgentRow;
+
+    expect(canArchiveExtraAgent(row)).toBe(true);
+    expect(canArchiveExtraAgent({ ...row, laneStatus: 'running' })).toBe(false);
+    expect(canArchiveExtraAgent({ ...row, laneId: null })).toBe(false);
   });
 });

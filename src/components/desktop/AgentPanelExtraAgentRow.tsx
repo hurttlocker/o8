@@ -117,6 +117,14 @@ function rowStatusLabel(row: ExtraAgentRow): string {
   return row.status === 'archived' ? 'archived' : 'idle';
 }
 
+export function canArchiveExtraAgent(row: ExtraAgentRow): boolean {
+  if (row.sessionKey) return true;
+  if (!row.laneId) return false;
+  return row.laneStatus === 'failed'
+    || row.laneStatus === 'completed'
+    || row.laneStatus === 'archived';
+}
+
 export function ExtraAgentRowView({
   row,
   active,
@@ -489,7 +497,7 @@ export function ExtraAgentActionMenu({
         </div>
         <div style={{ display: 'grid', gap: 2 }}>
           <ExtraAgentMenuRow label="Open" disabled={!canFocus || busy} onClick={onFocus} />
-          <ExtraAgentMenuRow label="Archive" disabled={busy || !state.row.sessionKey} onClick={onArchive} />
+          <ExtraAgentMenuRow label="Archive" disabled={busy || !canArchiveExtraAgent(state.row)} onClick={onArchive} />
         </div>
       </div>
     </>

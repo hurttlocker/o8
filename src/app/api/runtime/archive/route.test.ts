@@ -7,6 +7,8 @@ const stateMocks = vi.hoisted(() => ({
   gemini: vi.fn(),
   grok: vi.fn(),
   opencode: vi.fn(),
+  getLane: vi.fn(),
+  archiveLane: vi.fn(),
 }));
 
 vi.mock('@/lib/codex/owned', () => ({
@@ -23,9 +25,13 @@ vi.mock('@/lib/opencode/owned', () => ({
   archiveOwnedOpencodeSession: vi.fn(),
   ownedOpencodeSessionState: stateMocks.opencode,
 }));
+vi.mock('@/lib/lane/registry', () => ({
+  getLane: stateMocks.getLane,
+  archiveLane: stateMocks.archiveLane,
+}));
 vi.mock('@/lib/runtime/inventory', () => ({ invalidateRuntimeInventoryCache: vi.fn() }));
 
-import { GET } from './route';
+import { GET, POST } from './route';
 
 function request(sessionKeys: string[]) {
   return new NextRequest(`http://localhost/api/runtime/archive?sessionKeys=${encodeURIComponent(sessionKeys.join(','))}`);
@@ -38,6 +44,8 @@ beforeEach(() => {
   stateMocks.gemini.mockResolvedValue('archived');
   stateMocks.grok.mockResolvedValue('active');
   stateMocks.opencode.mockResolvedValue('missing');
+  stateMocks.getLane.mockReturnValue(null);
+  stateMocks.archiveLane.mockReturnValue(null);
 });
 
 describe('GET /api/runtime/archive', () => {
@@ -78,5 +86,46 @@ describe('GET /api/runtime/archive', () => {
 
     expect(Object.keys(body.states)).toHaveLength(100);
     expect(stateMocks.codex).toHaveBeenCalledTimes(100);
+  });
+});
+
+describe('POST /api/runtime/archive', () => {
+  it('archives a failed lane that never received a session key', async () => {
+    const lane = {
+      id: 'lane-sessionless',
+      sessionKey: null,
+      status: 'failed',
+    };
+    stateMocks.getLane.mockReturnValue(lane);
+    stateMocks.archiveLane.mockReturnValue({ ...lane, status: 'archived' });
+
+    const response = await POST(new NextRequest('http://localhost/api/runtime/archive', {
+      method: 'POST',
+      body: JSON.stringify({ laneId: lane.id }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      ok: true,
+      archived: true,
+      laneId: lane.id,
+    });
+    expect(stateMocks.archiveLane).toHaveBeenCalledWith(lane.id, 'user');
+  });
+
+  it('refuses to hide a live sessionless lane', async () => {
+    stateMocks.getLane.mockReturnValue({
+      id: 'lane-running',
+      sessionKey: null,
+      status: 'running',
+    });
+
+    const response = await POST(new NextRequest('http://localhost/api/runtime/archive', {
+      method: 'POST',
+      body: JSON.stringify({ laneId: 'lane-running' }),
+    }));
+
+    expect(response.status).toBe(409);
+    expect(stateMocks.archiveLane).not.toHaveBeenCalled();
   });
 });

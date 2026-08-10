@@ -4,6 +4,7 @@ import { ownedCursorSessionState } from '@/lib/cursor/owned';
 import { archiveOwnedGeminiSession, ownedGeminiSessionState } from '@/lib/gemini/owned';
 import { ownedGrokSessionState } from '@/lib/grok/owned';
 import { archiveOwnedOpencodeSession, ownedOpencodeSessionState } from '@/lib/opencode/owned';
+import { archiveLane, getLane } from '@/lib/lane/registry';
 import { invalidateRuntimeInventoryCache } from '@/lib/runtime/inventory';
 import type { OwnedSessionState } from '@/lib/runtimes/shared/owned-session';
 
@@ -39,23 +40,59 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const body = (await request.json().catch(() => null)) as { sessionKey?: string } | null;
+  const body = (await request.json().catch(() => null)) as { sessionKey?: string; laneId?: string } | null;
   const sessionKey = body?.sessionKey?.trim();
-  if (!sessionKey) {
-    return NextResponse.json({ error: 'sessionKey is required' }, { status: 400, headers: NO_STORE });
+  const laneId = body?.laneId?.trim();
+  if (!sessionKey && !laneId) {
+    return NextResponse.json({ error: 'sessionKey or laneId is required' }, { status: 400, headers: NO_STORE });
+  }
+  if (sessionKey && laneId) {
+    return NextResponse.json({ error: 'Pass sessionKey or laneId, not both' }, { status: 400, headers: NO_STORE });
+  }
+
+  if (laneId) {
+    const lane = getLane(laneId);
+    if (!lane) {
+      return NextResponse.json({ error: `Lane ${laneId} was not found` }, { status: 404, headers: NO_STORE });
+    }
+    if (lane.sessionKey) {
+      return NextResponse.json(
+        { error: 'This lane has an owned session; archive it with sessionKey so the runtime state is preserved.' },
+        { status: 409, headers: NO_STORE },
+      );
+    }
+    if (lane.status !== 'failed' && lane.status !== 'completed' && lane.status !== 'archived') {
+      return NextResponse.json(
+        { error: `Lane ${laneId} is ${lane.status}; only terminal sessionless lanes can be archived.` },
+        { status: 409, headers: NO_STORE },
+      );
+    }
+
+    const archived = archiveLane(laneId, 'user');
+    if (!archived) {
+      return NextResponse.json({ error: `Lane ${laneId} was not found` }, { status: 404, headers: NO_STORE });
+    }
+    invalidateRuntimeInventoryCache();
+    return NextResponse.json({
+      ok: true,
+      archived: true,
+      laneId,
+      note: 'Sessionless terminal lane archived.',
+    }, { headers: NO_STORE });
   }
 
   try {
+    const ownedSessionKey = sessionKey!;
     let result: { archived: boolean; note: string; archivePath?: string };
-    if (sessionKey.startsWith('codex-owned:')) {
-      result = await archiveOwnedCodexSession(sessionKey);
-    } else if (sessionKey.startsWith('gemini-owned:')) {
-      result = await archiveOwnedGeminiSession(sessionKey);
-    } else if (sessionKey.startsWith('opencode-owned:')) {
-      result = await archiveOwnedOpencodeSession(sessionKey);
+    if (ownedSessionKey.startsWith('codex-owned:')) {
+      result = await archiveOwnedCodexSession(ownedSessionKey);
+    } else if (ownedSessionKey.startsWith('gemini-owned:')) {
+      result = await archiveOwnedGeminiSession(ownedSessionKey);
+    } else if (ownedSessionKey.startsWith('opencode-owned:')) {
+      result = await archiveOwnedOpencodeSession(ownedSessionKey);
     } else {
       return NextResponse.json(
-        { error: `Archive is only supported for owned runtime sessions. Got prefix: ${sessionKey.split(':')[0]}` },
+        { error: `Archive is only supported for owned runtime sessions. Got prefix: ${ownedSessionKey.split(':')[0]}` },
         { status: 400, headers: NO_STORE },
       );
     }

@@ -1,6 +1,10 @@
 import { NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
-import { dispatchMission } from '@/lib/orchestrator/operator-mission-service';
+import {
+  dispatchMission,
+  MissionNotFoundError,
+  resolveMissionDispatchTarget,
+} from '@/lib/orchestrator/operator-mission-service';
 import { DispatchPreflightError } from '@/lib/runtimes/shared/auth-detect';
 import { deriveIdempotencyKey, withIdempotency } from '@/lib/orchestrator/idempotency-store';
 import { asRecord, operatorError, operatorSuccess, parseJsonBody, replayShape } from '../_utils';
@@ -21,6 +25,16 @@ export async function POST(request: NextRequest) {
   const missionId = typeof record.missionId === 'string' && record.missionId.trim()
     ? record.missionId.trim()
     : undefined;
+  let targetMissionId: string;
+  try {
+    targetMissionId = resolveMissionDispatchTarget(missionId);
+  } catch (error) {
+    if (error instanceof MissionNotFoundError) {
+      return operatorError('not_found', error.message, 404);
+    }
+    const message = error instanceof Error ? error.message : 'Unable to resolve the mission.';
+    return operatorError('dispatch_failed', message, 500, error);
+  }
 
   // dispatchMission awaits the full worker launch (Codex spawn + worktree
   // creation), which can take minutes — blocking the HTTP response that whole
@@ -37,7 +51,7 @@ export async function POST(request: NextRequest) {
     ? record.idempotencyKey.trim()
     : null;
   const idemKey = clientKey
-    ? deriveIdempotencyKey({ verb: 'dispatch_mission', scopeId: missionId ?? '', clientKey })
+    ? deriveIdempotencyKey({ verb: 'dispatch_mission', scopeId: targetMissionId, clientKey })
     : null;
 
   const wait = record.wait !== false;
@@ -46,31 +60,31 @@ export async function POST(request: NextRequest) {
     // finalize immediately since the launch itself is fire-and-forget.
     if (idemKey) {
       const outcome = await withIdempotency(
-        { key: idemKey, verb: 'dispatch_mission', scopeId: missionId ?? '' },
+        { key: idemKey, verb: 'dispatch_mission', scopeId: targetMissionId },
         async () => {
-          void dispatchMission({ missionId }).catch((error) => {
+          void dispatchMission({ missionId: targetMissionId }).catch((error) => {
             console.error('[orchestrator] async dispatch failed:', error instanceof Error ? error.message : error);
           });
-          return { initiated: true, async: true, missionId: missionId ?? null };
+          return { initiated: true, async: true, missionId: targetMissionId };
         },
       );
       return operatorSuccess(replayShape(outcome));
     }
-    void dispatchMission({ missionId }).catch((error) => {
+    void dispatchMission({ missionId: targetMissionId }).catch((error) => {
       console.error('[orchestrator] async dispatch failed:', error instanceof Error ? error.message : error);
     });
-    return operatorSuccess({ initiated: true, async: true, missionId: missionId ?? null });
+    return operatorSuccess({ initiated: true, async: true, missionId: targetMissionId });
   }
 
   try {
     if (idemKey) {
       const outcome = await withIdempotency(
-        { key: idemKey, verb: 'dispatch_mission', scopeId: missionId ?? '' },
-        () => dispatchMission({ missionId }),
+        { key: idemKey, verb: 'dispatch_mission', scopeId: targetMissionId },
+        () => dispatchMission({ missionId: targetMissionId }),
       );
       return operatorSuccess(replayShape(outcome));
     }
-    const result = await dispatchMission({ missionId });
+    const result = await dispatchMission({ missionId: targetMissionId });
     return operatorSuccess(result);
   } catch (error) {
     if (error instanceof DispatchPreflightError) {
@@ -81,6 +95,9 @@ export async function POST(request: NextRequest) {
         authenticated: error.status.authenticated,
         unavailableReason: error.status.unavailableReason,
       });
+    }
+    if (error instanceof MissionNotFoundError) {
+      return operatorError('not_found', error.message, 404);
     }
     const message = error instanceof Error ? error.message : 'Unable to dispatch mission.';
     return operatorError('dispatch_failed', message, 500, error);
