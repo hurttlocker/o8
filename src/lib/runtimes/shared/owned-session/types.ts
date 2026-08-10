@@ -226,7 +226,13 @@ export interface OwnedRuntimeAdapter {
   defaultModel?: string;
 
   /** Build argv for a fresh (launch) run. */
-  launchArgs(ctx: { cwd: string; prompt: string; model?: string; effort?: ThinkingEffort }): string[];
+  launchArgs(ctx: {
+    cwd: string;
+    sessionDir?: string;
+    prompt: string;
+    model?: string;
+    effort?: ThinkingEffort;
+  }): string[];
 
   /** Optional stdin payload for runtimes launched as interactive stream processors. */
   launchStdin?(ctx: { cwd: string; prompt: string; model?: string; effort?: ThinkingEffort }): string | null;
@@ -236,7 +242,12 @@ export interface OwnedRuntimeAdapter {
    * thread-resume via CLI — the store will raise a friendly "no resume
    * available" error so callers can route through the dispatcher.
    */
-  resumeArgs(ctx: { threadId: string; prompt: string; model?: string }): string[] | null;
+  resumeArgs(ctx: {
+    threadId: string;
+    sessionDir?: string;
+    prompt: string;
+    model?: string;
+  }): string[] | null;
 
   /** Parse a run's stdout into normalized entries + outcome + discovered thread id. */
   parseRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog;

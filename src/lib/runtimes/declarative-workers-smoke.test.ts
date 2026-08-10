@@ -112,10 +112,16 @@ describe('declarative worker real-process smoke matrix', () => {
       });
       expect(session.lifecycle).toMatchObject({ lastOutcome: 'finished', lastRunMode: 'launch' });
       expect(transcript.some((entry) => entry.text.includes(`${config.runtimeId} smoke complete`))).toBe(true);
-      await expect(runtime.resume(sessionKey, 'continue')).resolves.toMatchObject({
-        ok: false,
-        sessionKey,
-      });
+      if (config.resumeArgs === null) {
+        await expect(runtime.resume(sessionKey, 'continue')).resolves.toMatchObject({
+          ok: false,
+          sessionKey,
+        });
+      } else {
+        await expect(runtime.resume(sessionKey, 'continue')).resolves.toMatchObject({ ok: true, sessionKey });
+        await waitForCleanExit(process.env[config.rootEnvVar]!, sessionKey, 'resume');
+        await waitForFinishedSession(runtime, sessionKey, 'resume');
+      }
     },
     20_000,
   );

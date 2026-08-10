@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { compactText, formatClock } from './helpers';
 import { createOwnedSessionStore } from './store';
@@ -9,7 +11,7 @@ import type {
   ParsedRunLog,
 } from './types';
 
-type TemplateKey = 'cwd' | 'prompt' | 'model' | 'effort' | 'threadId';
+type TemplateKey = 'cwd' | 'prompt' | 'model' | 'effort' | 'threadId' | 'sessionPath';
 type TemplateContext = Partial<Record<TemplateKey, string>>;
 
 export interface DeclarativeArgGroup {
@@ -47,6 +49,7 @@ export type DeclarativeOwnedRuntimeConfig = Omit<
 > & {
   launchArgs: DeclarativeArgTemplate;
   resumeArgs: DeclarativeArgTemplate | null;
+  sessionFileName?: string;
   parseRunLog: DeclarativeRunLogPatterns;
   stderrNoise?: RegExp[];
 };
@@ -57,7 +60,7 @@ export interface DeclarativeOwnedRuntimeRegistration {
 }
 
 const registry = new Map<string, DeclarativeOwnedRuntimeRegistration>();
-const TEMPLATE_TOKEN = /\{\{(cwd|prompt|model|effort|threadId)\}\}/g;
+const TEMPLATE_TOKEN = /\{\{(cwd|prompt|model|effort|threadId|sessionPath)\}\}/g;
 
 function renderArg(value: string, context: TemplateContext): string {
   return value.replace(TEMPLATE_TOKEN, (_match, key: TemplateKey) => {
@@ -248,33 +251,53 @@ function parseDeclarativeRunLog(
 
 function launchContext(ctx: {
   cwd: string;
+  sessionDir?: string;
   prompt: string;
   model?: string;
   effort?: ThinkingEffort;
-}, defaultModel?: string): TemplateContext {
+}, defaultModel?: string, sessionFileName?: string): TemplateContext {
   return {
     cwd: ctx.cwd,
     prompt: ctx.prompt,
+    ...sessionPathContext(ctx.sessionDir, sessionFileName),
     ...(ctx.model || defaultModel ? { model: ctx.model || defaultModel } : {}),
     ...(ctx.effort ? { effort: ctx.effort } : {}),
   };
 }
 
+function sessionPathContext(sessionDir?: string, sessionFileName?: string): TemplateContext {
+  if (!sessionFileName) return {};
+  if (!sessionDir) {
+    throw new Error('A declarative CLI session file requires an owned session directory.');
+  }
+  return { sessionPath: path.join(sessionDir, sessionFileName) };
+}
+
 export function createDeclarativeOwnedRuntimeAdapter(
   config: DeclarativeOwnedRuntimeConfig,
 ): OwnedRuntimeAdapter {
-  const { launchArgs, resumeArgs, parseRunLog, stderrNoise, ...base } = config;
+  const { launchArgs, resumeArgs, sessionFileName, parseRunLog, stderrNoise, ...base } = config;
   return {
     ...base,
-    launchArgs: (ctx) => renderDeclarativeArgs(launchArgs, launchContext(ctx, base.defaultModel)),
+    launchArgs: (ctx) => renderDeclarativeArgs(
+      launchArgs,
+      launchContext(ctx, base.defaultModel, sessionFileName),
+    ),
     resumeArgs: resumeArgs === null
       ? () => null
       : (ctx) => renderDeclarativeArgs(resumeArgs, {
           prompt: ctx.prompt,
           threadId: ctx.threadId,
+          ...sessionPathContext(ctx.sessionDir, sessionFileName),
           ...(ctx.model || base.defaultModel ? { model: ctx.model || base.defaultModel } : {}),
         }),
-    parseRunLog: (raw, run) => parseDeclarativeRunLog(parseRunLog, raw, run),
+    parseRunLog: (raw, run) => {
+      const parsed = parseDeclarativeRunLog(parseRunLog, raw, run);
+      if (!parsed.threadId && sessionFileName) {
+        parsed.threadId = path.join(path.dirname(path.dirname(run.stdoutPath)), sessionFileName);
+      }
+      return parsed;
+    },
     stderrNoise,
   };
 }

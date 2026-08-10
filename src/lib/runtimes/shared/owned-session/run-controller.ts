@@ -449,10 +449,21 @@ export function createOwnedRunController({
     let args: string[];
     let stdinPayload: string | null = null;
     if (mode === 'launch') {
-      args = adapter.launchArgs({ cwd: session.repoPath, prompt, model: session.model, effort: session.effort });
+      args = adapter.launchArgs({
+        cwd: session.repoPath,
+        sessionDir: session.sessionDir,
+        prompt,
+        model: session.model,
+        effort: session.effort,
+      });
       stdinPayload = adapter.launchStdin?.({ cwd: session.repoPath, prompt, model: session.model, effort: session.effort }) ?? null;
     } else {
-      const built = adapter.resumeArgs({ threadId: session.threadId ?? '', prompt, model: session.model });
+      const built = adapter.resumeArgs({
+        threadId: session.threadId ?? '',
+        sessionDir: session.sessionDir,
+        prompt,
+        model: session.model,
+      });
       if (!built) {
         throw new Error(`Resume is not supported by the ${humanLabel} runtime adapter.`);
       }

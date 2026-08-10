@@ -202,6 +202,7 @@ describe('create_mission runtime reachability', () => {
       runtime,
       getDeclarativeOwnedRuntime(runtime)?.adapter.launchArgs({
         cwd: repoPath,
+        sessionDir: path.join(repoPath, '.owned-session'),
         prompt: 'fix the bug',
       }),
     ]));
@@ -213,7 +214,11 @@ describe('create_mission runtime reachability', () => {
       qoder: ['-p', 'fix the bug', '-m', 'Qwen3.8-Max-Preview', '--dangerously-skip-permissions', '--output-format', 'stream-json'],
       kimi: ['-p', 'fix the bug'],
       aider: ['--message', 'fix the bug', '--yes-always', '--auto-test'],
-      '3code': ['fix the bug'],
+      '3code': [
+        '--session',
+        path.join(repoPath, '.owned-session', 'session.3log'),
+        'fix the bug',
+      ],
     });
   });
 

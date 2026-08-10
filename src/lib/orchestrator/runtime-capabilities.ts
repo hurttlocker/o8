@@ -6,6 +6,8 @@ export type DeclarativeParserProfile = 'text' | 'openhands-ndjson' | 'qwen-strea
 export interface DeclarativeRuntimeManifest {
   launchArgs: string[];
   resumeArgs: string[] | null;
+  /** Stable runtime-owned file used when a CLI persists resumable sessions itself. */
+  sessionFileName?: string;
   parserProfile: DeclarativeParserProfile;
   costFormat: 'structured' | 'text';
   authEnvVars: string[];
@@ -286,10 +288,11 @@ export const ORCHESTRATOR_RUNTIMES = {
     authHouse: '3code',
     reasoningEffort: false,
     tier: 'standard',
-    description: 'Local-first 3code CLI worker via one-shot positional prompts and local session logs.',
+    description: 'Local-first 3code CLI worker with runtime-owned session logs and deterministic resume.',
     declarative: {
-      launchArgs: ['{{prompt}}'],
-      resumeArgs: null,
+      launchArgs: ['--session', '{{sessionPath}}', '{{prompt}}'],
+      resumeArgs: ['--resume={{sessionPath}}', '{{prompt}}'],
+      sessionFileName: 'session.3log',
       parserProfile: 'text',
       costFormat: 'text',
       authEnvVars: [],
