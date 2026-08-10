@@ -107,7 +107,7 @@ function normalizeBranchRef(value: string | null) {
   return trimmed.split('/').pop() ?? trimmed;
 }
 
-async function resolveDefaultBranch(repoRoot: string, isGitRepo = true) {
+export async function resolveDefaultBranch(repoRoot: string, isGitRepo = true) {
   if (!isGitRepo) return 'main';
 
   const remoteHead = normalizeBranchRef(

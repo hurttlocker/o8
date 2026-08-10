@@ -330,17 +330,21 @@ export async function buildPacketPrompt(
   // a rule set in the thread governs every Codex worker dispatched from it.
   // Null when the packet has no originating thread or that thread has no rules.
   const sessionRulesSection = buildSessionRulesBlock(packet.orchestratorThreadId);
+  const readOnlyPacket = packet.launchContext?.workMode === 'read-only';
+  const readOnlySection = readOnlyPacket
+    ? 'Read-only packet: inspect the repository and report the requested findings. Do not edit files, create commits, create branches, or run commands that mutate repository state. A clean zero-diff completion is the expected successful outcome.'
+    : null;
   // Alignment turn (#1282 Huddle + single-sub Advisor) — armed per-mission by
   // the orchestrator (huddle flag) OR auto-armed for cheap-tier workers (advisor
   // rule). When on, the worker posts its plan + pushback and STOPS before
   // editing. The unified resolver ORs both sources and picks EXACTLY ONE prompt
   // block — huddle wins; advisor only when huddle is off — so the two overlapping
   // "align before you edit" blocks can never stack (#1512 de-dup contract).
-  const alignmentSection = resolvePacketAlignment(packet).promptSection;
+  const alignmentSection = readOnlyPacket ? null : resolvePacketAlignment(packet).promptSection;
   // #1147 — visual proof. Only nudge UI-shaped packets, and only when they
   // legitimately run their own app (NOT o8's dev servers — the sandbox block
   // above forbids that). Pure-logic packets get nothing (no visual to show).
-  const captureProofSection = packetLooksUiShaped(packet)
+  const captureProofSection = !readOnlyPacket && packetLooksUiShaped(packet)
     ? 'Visual proof (UI changes): if you run this app\'s UI to verify a visual fix — only when the task legitimately serves its own app, e.g. you started it via `o8 run --detach`, and NEVER by spinning up o8\'s own dev servers per the sandbox note above — capture the broken state first then the fixed state: `o8 packet capture --url <localhost-url> --before --label "<what>" --wait-for "<selector>"`, make the fix, then the same command with `--after` and the SAME --label. FRAME THE CHANGE so the preview IS the change: pass `--clip "<sel>"` for a localized change (a footer/button/card — screenshots just that element, tight) — this is the preferred default; use `--full-page` only for whole-page/layout changes. Add `--hover "<sel>"` / `--click "<sel>"` if the change is an interaction state (:hover/:focus/open menu) a static shot can\'t show. They pair into a Bug/Fixed strip the operator sees on the packet, in review, and in chat. Skip entirely for pure-logic/backend changes.'
     : null;
   // #743 — Cortex context block. Pull directives + recent outcomes +
@@ -407,6 +411,7 @@ export async function buildPacketPrompt(
     `Packet: ${packet.title}`,
     packet.summary ? `Summary: ${packet.summary}` : null,
     livePacketSpec,
+    readOnlySection,
     alignmentSection,
     packet.branchTarget ? `Branch target: ${packet.branchTarget}` : null,
     packet.dependencyLabels.length > 0 ? `Dependencies: ${packet.dependencyLabels.join(', ')}` : null,
@@ -424,15 +429,15 @@ export async function buildPacketPrompt(
     // #1490 — standing deviations clause. Every worker keeps an
     // implementation-notes.md and logs forced departures from the plan under a
     // '## Deviations' heading; review reads it back and surfaces it.
-    DEVIATIONS_CLAUSE,
+    readOnlyPacket ? null : DEVIATIONS_CLAUSE,
     'Files in this repository follow an 800-line maximum. If your implementation would push a file past this threshold, extract code into focused modules first, then implement your changes. Files with explicit waivers are exempt from this rule.',
     'If a task step needs a long-running or long-output process — a test suite, build, backtest, data job, or a server the task itself requires — start it with `o8 run -- <cmd>` (e.g. `o8 run -- pytest -q`) rather than a bare shell exec, so the operator can watch its live output. This is about genuinely long jobs; still follow any sandbox UI-verification guidance above (do not start dev servers just to smoke-test).',
     captureProofSection,
     brainSection,
     learnedRuleSection,
-    'Verification discipline — SPEED MATTERS: the ONE blocking gate is `npx tsc --noEmit`. Lint is advisory: run it scoped to the files you changed (`npx eslint <your changed files>`), NEVER the repo-wide `npm run lint` — that walks the whole codebase and can stall the lane for 10+ minutes even on a one-file change. Do NOT keep the lane running while you wait on a slow or repo-wide check. o8 runs the authoritative typecheck + change-scoped rule-check at the merge gate, so finalize the moment typecheck passes and your changed-file checks are clean — a committed, typecheck-clean packet is done; report completion immediately instead of waiting on advisory output.',
-    ...buildPacketSelfReviewInstructions(baseBranch),
-    'CRITICAL: Before reporting completion, you MUST commit all changes: run `git add -A && git commit -m "<descriptive message>"`. Uncommitted changes will be lost when the worktree is cleaned up.',
+    readOnlyPacket ? null : 'Verification discipline — SPEED MATTERS: the ONE blocking gate is `npx tsc --noEmit`. Lint is advisory: run it scoped to the files you changed (`npx eslint <your changed files>`), NEVER the repo-wide `npm run lint` — that walks the whole codebase and can stall the lane for 10+ minutes even on a one-file change. Do NOT keep the lane running while you wait on a slow or repo-wide check. o8 runs the authoritative typecheck + change-scoped rule-check at the merge gate, so finalize the moment typecheck passes and your changed-file checks are clean — a committed, typecheck-clean packet is done; report completion immediately instead of waiting on advisory output.',
+    ...(readOnlyPacket ? [] : buildPacketSelfReviewInstructions(baseBranch)),
+    readOnlyPacket ? null : 'CRITICAL: Before reporting completion, you MUST commit all changes: run `git add -A && git commit -m "<descriptive message>"`. Uncommitted changes will be lost when the worktree is cleaned up.',
     'Stay within this packet scope. Surface blockers, review handoffs, and required operator decisions explicitly.',
   ].filter((value): value is string => Boolean(value)).join('\n');
 }

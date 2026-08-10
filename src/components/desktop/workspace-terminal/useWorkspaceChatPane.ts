@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { buildLinkedIssueContext } from '@/components/desktop/IssueLinkPicker';
 import type { TerminalTab } from '@/components/desktop/workspace-terminal/types';
-import { usePacketTranscriptPoll } from '@/components/desktop/workspace-terminal/use-packet-transcript-poll';
+import { shouldPollPacketTranscript, usePacketTranscriptPoll } from '@/components/desktop/workspace-terminal/use-packet-transcript-poll';
 import { useWorkspaceChatModelOptions } from '@/components/desktop/workspace-terminal/useWorkspaceChatModelOptions';
 import {
   ownedRuntimeCanAcceptInput,
@@ -144,7 +144,7 @@ export function useWorkspaceChatPane({
 
   // PacketId-keyed transcript poll for dispatched Codex lanes with an empty sessionKey slice.
   const packetEvents = usePacketTranscriptPoll({
-    enabled: isAgentTab && messages.length === 0,
+    enabled: isAgentTab && shouldPollPacketTranscript(messages),
     packetIdHint: tab.orchestrationPacket?.packetId ?? null,
     sessionKey: normalizedSessionKey,
     active,

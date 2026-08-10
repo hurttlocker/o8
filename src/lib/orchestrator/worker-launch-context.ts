@@ -1,8 +1,9 @@
-import type { WorkerLaunchContext } from '@/lib/orchestrator/types';
+import type { OrchestratorRuntime, WorkerLaunchContext } from '@/lib/orchestrator/types';
 
 const SOURCES = new Set<WorkerLaunchContext['source']>(['desktop', 'cli', 'mcp', 'agent']);
 const PRESENTATIONS = new Set<WorkerLaunchContext['presentation']>(['tab', 'split']);
 const REPO_CONTEXTS = new Set<WorkerLaunchContext['repoContext']>(['registered', 'transient']);
+const WORK_MODES = new Set<NonNullable<WorkerLaunchContext['workMode']>>(['edit', 'read-only']);
 const MAX_CALLER_LENGTH = 80;
 
 export function normalizeWorkerLaunchContext(value: unknown): WorkerLaunchContext | undefined {
@@ -11,9 +12,13 @@ export function normalizeWorkerLaunchContext(value: unknown): WorkerLaunchContex
   const source = candidate.source;
   const presentation = candidate.presentation;
   const repoContext = candidate.repoContext;
+  const workMode = candidate.workMode;
   if (!SOURCES.has(source as WorkerLaunchContext['source'])) return undefined;
   if (!PRESENTATIONS.has(presentation as WorkerLaunchContext['presentation'])) return undefined;
   if (!REPO_CONTEXTS.has(repoContext as WorkerLaunchContext['repoContext'])) return undefined;
+  if (workMode !== undefined && !WORK_MODES.has(workMode as NonNullable<WorkerLaunchContext['workMode']>)) {
+    return undefined;
+  }
   const caller = typeof candidate.caller === 'string'
     ? candidate.caller.trim().slice(0, MAX_CALLER_LENGTH)
     : '';
@@ -21,6 +26,7 @@ export function normalizeWorkerLaunchContext(value: unknown): WorkerLaunchContex
     source: source as WorkerLaunchContext['source'],
     presentation: presentation as WorkerLaunchContext['presentation'],
     repoContext: repoContext as WorkerLaunchContext['repoContext'],
+    ...(workMode ? { workMode: workMode as NonNullable<WorkerLaunchContext['workMode']> } : {}),
     ...(caller ? { caller } : {}),
   };
 }
@@ -40,6 +46,13 @@ export function workerLaunchOriginLabel(context: WorkerLaunchContext | null | un
     : sourceLabel;
 }
 
-export function shouldOpenWorkerInDedicatedPane(context: WorkerLaunchContext | null | undefined): boolean {
+export function shouldPresentWorkerInSplit(context: WorkerLaunchContext | null | undefined): boolean {
   return context?.presentation === 'split' && context.source !== 'desktop';
+}
+
+export function runtimeFromWorkerSessionKey(sessionKey: string): OrchestratorRuntime {
+  const runtimes: OrchestratorRuntime[] = ['claude-code', 'gemini', 'opencode', 'cursor', 'grok', 'codex'];
+  return runtimes.find((runtime) => sessionKey.startsWith(`${runtime}:`)
+    || sessionKey.startsWith(`${runtime}-owned:`)
+    || sessionKey.startsWith(`${runtime}-discovered:`)) ?? 'codex';
 }

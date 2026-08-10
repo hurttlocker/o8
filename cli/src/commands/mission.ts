@@ -10,6 +10,7 @@
  *   o8 mission create   --title "…" [--body "…"] [--repo <path>] [--runtime r]
  *                       [--model m] [--constraints "…"] [--sequential]
  *                       [--compare m1,m2] [--huddle] [--brain] [--number n]
+ *                       [--read-only]
  *                       [--existingBranchPolicy auto|reset|continue|error]
  *                       [--quality-search-contract <json-file>]
  *   o8 mission dispatch [--mission <id>]
@@ -240,6 +241,7 @@ async function runMissionCreate(mode: OutputMode, rest: string[]): Promise<numbe
       source: 'cli',
       presentation: 'split',
       repoContext: 'transient',
+      ...(hasFlag(rest, 'read-only') ? { workMode: 'read-only' } : {}),
       caller: flag(rest, 'caller')?.trim() || 'terminal',
     },
   };

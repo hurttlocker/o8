@@ -13,6 +13,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useLaneArchivedView } from '@/app/dashboard/hooks/useLaneArchivedSet';
 import { ComparisonPicker } from '@/components/desktop/ComparisonPicker';
 import { useComparisonGroups } from '@/components/desktop/comparison/useComparisonGroups';
 import { orchestratorRuntimeTone } from '@/lib/orchestrator/display';
@@ -22,7 +23,8 @@ import {
 } from '@/lib/orchestrator/preferences';
 import { loadOrchestratorMissionState } from '@/lib/orchestrator/store';
 import { stableOrchestratorThreadTitleForId } from '@/lib/orchestrator/thread-title';
-import type { OrchestrationMode, OrchestratorPacket, OrchestratorRuntime } from '@/lib/orchestrator/types';
+import { outsideWorkerSessionKeysForSettledPackets } from '@/lib/orchestrator/outside-worker-split';
+import type { OrchestrationMode, OrchestratorRuntime } from '@/lib/orchestrator/types';
 import type { ChatModelId } from '@/components/desktop/orchestrator/chat-models';
 import { ChatOpenRouterPicker } from '@/components/desktop/orchestrator/ChatOpenRouterPicker';
 import { useWorkspaceSpawn } from '@/components/desktop/workspace-terminal/spawn-context';
@@ -114,7 +116,6 @@ function swarmStorageKey(tabId: string): string {
 // Resets on a full reload (module re-eval), so the default tab still restores
 // your last conversation on boot.
 let globalLastThreadRestoreClaimed = false;
-
 // Tab ids that have already mounted once this app load. The persisted-thread
 // boot loader (restoringPersistedThread) must only cover the FIRST mount — a
 // mid-session remount (drag-to-split restructure, pane moves) would otherwise
@@ -667,20 +668,19 @@ function OrchestratorTabInner({
   }, [repoPath]);
 
   const agents = useMemo(() => data?.agents ?? [], [data?.agents]);
-  // Best-of-N comparison groups (item 3) — derived once in useComparisonGroups,
-  // the single source shared with the N-up compare matrix. `groups`/`readyGroups`
-  // keep the prior shape (groupId + packets) so the auto-tile + picker below are
-  // unchanged; `candidates` (enriched) is what the matrix consumes.
   const { groups: comparisonGroups, readyGroups: readyComparisonGroups } = useComparisonGroups(data?.missionState);
   const sessionTargets = useMemo(
     () => buildAgentTargets(agents, preferredRuntime),
     [agents, preferredRuntime],
   );
-  const liveSessionKeys = useMemo(
-    () => agents.map((agent) => agent.sessionKey).filter((key): key is string => Boolean(key)),
-    [agents],
-  );
-  const sessionTiles = useSessionTiles({ tabId, liveSessionKeys });
+  const laneRetiredSessionKeys = useLaneArchivedView().sessionKeys;
+  const retiredSessionKeys = useMemo(() => new Set([
+    ...laneRetiredSessionKeys, ...outsideWorkerSessionKeysForSettledPackets(data?.missionState?.packets ?? []),
+  ]), [data?.missionState?.packets, laneRetiredSessionKeys]);
+  const liveSessionKeys = useMemo(() => agents
+    .map((agent) => agent.sessionKey)
+    .filter((key): key is string => typeof key === 'string' && !retiredSessionKeys.has(key)), [agents, retiredSessionKeys]);
+  const sessionTiles = useSessionTiles({ tabId, liveSessionKeys, retiredSessionKeys, active });
 
   useEffect(() => {
     const activeGroupIds = comparisonGroups.map((group) => group.groupId);

@@ -554,6 +554,10 @@ export function createOwnedRunController({
       : getOrCreateLocalWorkerToken();
     const spawnEnv = {
       ...adapterEnv,
+      // Some coding CLIs trust the inherited PWD instead of asking the OS for
+      // the spawned process cwd. Keep both values aligned so a worker cannot
+      // silently operate in the o8 server's own checkout.
+      PWD: session.repoPath,
       PATH: pathWithNodeRuntime(),
       FORCE_COLOR: '0',
       NO_COLOR: '1',

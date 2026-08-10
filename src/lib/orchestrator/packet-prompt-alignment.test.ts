@@ -71,4 +71,27 @@ describe('buildPacketPrompt alignment de-dup', () => {
       expect(prompt).not.toContain(HUDDLE_PROMPT_SECTION);
     });
   });
+
+  it('read-only work gets an inspection contract without write, alignment, or commit instructions', async () => {
+    await withCheapTierProfile(async () => {
+      const prompt = await buildPacketPrompt(
+        minimalPacket({
+          huddle: true,
+          runtime: 'claude-code',
+          assignedModel: null,
+          launchContext: {
+            source: 'cli',
+            presentation: 'split',
+            repoContext: 'transient',
+            workMode: 'read-only',
+          },
+        }),
+        [],
+      );
+      expect(prompt).toContain('Read-only packet: inspect the repository');
+      expect(prompt).not.toContain(HUDDLE_PROMPT_SECTION);
+      expect(prompt).not.toContain(ADVISOR_PROMPT_SECTION);
+      expect(prompt).not.toContain('git add -A && git commit');
+    });
+  });
 });

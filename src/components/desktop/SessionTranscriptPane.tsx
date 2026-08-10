@@ -33,6 +33,10 @@ export function SessionTranscriptPane({
     () => (data?.agents ?? []).find((entry) => entry.sessionKey === sessionKey) ?? null,
     [data?.agents, sessionKey],
   );
+  const packet = useMemo(
+    () => data?.missionState?.packets.find((entry) => entry.lane?.sessionKey === sessionKey) ?? null,
+    [data?.missionState?.packets, sessionKey],
+  );
 
   const handleFocus = useCallback((key: string) => {
     onFocus?.(key);
@@ -46,6 +50,7 @@ export function SessionTranscriptPane({
     <AgentTilePane
       sessionKey={sessionKey}
       agent={agent}
+      packet={packet}
       focused={focused}
       onClose={handleClose}
       onFocus={handleFocus}

@@ -28,12 +28,11 @@ import {
   loadOrchestratorMissionState,
 } from '@/lib/orchestrator/store';
 import type {
-  OrchestratorLaneSnapshot,
-  OrchestratorPacket,
-  WorkspaceLaneState,
+  OrchestratorLaneSnapshot, OrchestratorPacket, WorkerLaunchContext, WorkspaceLaneState,
 } from '@/lib/orchestrator/types';
 import type { RealtimeEventEnvelope, RealtimeMutationRecord } from '@/lib/realtime/types';
-import { shouldOpenWorkerInDedicatedPane } from '@/lib/orchestrator/worker-launch-context';
+import { shouldPresentWorkerInSplit } from '@/lib/orchestrator/worker-launch-context';
+import { queueOutsideWorkerSplit } from '@/lib/orchestrator/outside-worker-split';
 import { registerIntrospectionContributor } from '@/lib/feedback/workspace-introspect';
 import {
   collectLeafNodes,
@@ -58,8 +57,8 @@ import {
 } from '../utils';
 import { focusOrchestrationPacketLaneInWorkspace } from './focusOrchestrationPacketLane';
 import { useLaneArchivedView, isRetiredLaneStatus } from './useLaneArchivedSet';
-import { dispatchedLaneRepo, useDedicatedWorkerPane, type DispatchedWorkerLane } from './useDedicatedWorkerPane';
-
+import { dispatchedLaneRepo, type DispatchedWorkerLane } from './dispatched-worker-lane';
+import { useOutsideWorkerLaunchBridge } from './useOutsideWorkerLaunchBridge';
 interface UseWorkspaceTerminalArgs {
   activeTileId: string | null;
   contextualPanelHandlesRef: MutableRefObject<Map<string, ContextualPanelHandle>>;
@@ -72,7 +71,6 @@ interface UseWorkspaceTerminalArgs {
   workspaceScopeEntries: WorkspaceScopeEntry[];
   workspaceTerminalPreferredRepo: WorkspaceScopeEntry | null;
 }
-
 interface WorkspaceTerminalTarget {
   tileId: string;
   handle: TerminalTabHandle;
@@ -184,10 +182,6 @@ export function useWorkspaceTerminal({
   const [workspaceActiveTabKindByTileId, setWorkspaceActiveTabKindByTileId] = useState<Record<string, TerminalTab['kind'] | null>>({});
   const [workspaceTerminalResetNonceByTileId, setWorkspaceTerminalResetNonceByTileId] = useState<Record<string, number>>({});
   const [lifecycleEvents, setLifecycleEvents] = useState<Map<string, { state: string; exitCode?: number; ts: number }>>(new Map());
-  const dedicatedWorkerPane = useDedicatedWorkerPane({ activeTileId, pendingHandlesRef: pendingWorkspaceTerminalResolversRef, setActiveTileId, setTileLayout, tileLayout, workspaceHandlesRef: workspaceTerminalHandlesRef });
-  const findWorkspaceTerminalTargetForLane = dedicatedWorkerPane.findTargetForLane;
-  const waitForDedicatedWorkspaceTerminalTarget = dedicatedWorkerPane.waitForDedicatedTarget;
-
   const findInsertionTarget = useCallback((preferredKinds: TileContentKind[]): TileLeafNode => {
     const activeTile = activeTileId ? findTile(tileLayout.root, activeTileId) : null;
     if (activeTile?.type === 'leaf' && preferredKinds.includes(activeTile.content.kind)) {
@@ -668,7 +662,6 @@ export function useWorkspaceTerminal({
 
     throw new Error('Unable to attach the packet to a workspace lane. The workspace surface did not become ready in time.');
   }, [ensureWorkspaceTerminalTile, getPreferredWorkspaceTerminalTarget, setActiveTileId, setTerminalTileRepoScope]);
-
   // openWorkspaceTabForLane supports owned worker runtimes natively — the
   // monitoring tab opens with the actual lane.runtime, so the chat pane
   // labels the agent correctly and /api/mobile/history serves the right
@@ -698,32 +691,31 @@ export function useWorkspaceTerminal({
         ?? workspaceScopeEntries.find((entry) => pathBelongsToRepoScope(lane.repoPath, entry.localPath))
         ?? null;
       const launchContext = lane.launchContext ?? packet?.launchContext ?? null;
-      const dedicatedSplit = shouldOpenWorkerInDedicatedPane(launchContext);
-      // In-app packet monitoring attaches to the operator's active workspace.
-      // An explicit outside-launch split is the narrow exception below.
-      // `fallbackToAnyExisting: false` was the April-2026 auto-split zombie
-      // (Q live-hit 2026-07-16): with the orchestrator's host tile at
-      // repoPath:null, the repo-scoped lookup missed, the reuse branch was
-      // opted out, and ensureWorkspaceTerminalTile split a whole second pane
-      // — which every later same-repo dispatch then deterministically
-      // reused. The tab carries its own repo/worktree context
-      // (targetScope + orchestrationPacket), so the host tile's scope is
-      // irrelevant; preferredTileId makes the ACTIVE workspace win before
-      // any stale repo-scoped leaf. NOT the session-tiles drag-to-split —
-      // that system is separate and untouched. Outside launches carry durable
-      // provenance, so they can safely request one dedicated pane per worker.
-      const restoredTarget = findWorkspaceTerminalTargetForLane(lane);
-      const target = restoredTarget
-        ?? (dedicatedSplit
-          ? await waitForDedicatedWorkspaceTerminalTarget(lane.repoPath, lane)
-          : await waitForWorkspaceTerminalTarget({
-              repoPath: lane.repoPath,
-              preferredTileId: activeTileIdRef.current,
-            }));
       const rawPacketTitle = packet?.title ?? lane.packetTitle ?? targetScope?.name ?? 'Dispatched Agent';
       const packetTitle = rawPacketTitle.trim().toLowerCase().startsWith('[automation]')
         ? cleanAutomationLaneTitle(rawPacketTitle)
         : rawPacketTitle;
+      if (shouldPresentWorkerInSplit(launchContext)) {
+        queueOutsideWorkerSplit({
+          sessionKey: lane.sessionKey,
+          runtime: lane.runtime,
+          repoPath: lane.repoPath,
+          packetId: lane.packetId,
+          laneId: lane.laneId,
+          title: packetTitle,
+          branch: lane.branch ?? packet?.branchTarget ?? null,
+          launchContext,
+        });
+        console.log(`[packet-dispatch-workspace] Queued ${lane.sessionKey} for the active chat split`);
+        return;
+      }
+      // Regular in-app packets still open as tabs in the active workspace.
+      // Outside-launched workers return above and use the inner chat splitter,
+      // which is the same animated surface as drag-to-split conversations.
+      const target = await waitForWorkspaceTerminalTarget({
+        repoPath: lane.repoPath,
+        preferredTileId: activeTileIdRef.current,
+      });
       const packetReferenceLabel = packet?.referenceLabel ?? lane.packetReferenceLabel ?? lane.laneId ?? 'Lane';
       const packetStatus = packet && packet.status !== 'queued' && packet.status !== 'draft'
         ? packet.status
@@ -747,7 +739,7 @@ export function useWorkspaceTerminal({
               launchContext,
             }
           : null,
-        autoArchiveOnIdle: false,
+        supervisorStatus: lane.status ?? 'running', autoArchiveOnIdle: false,
       });
       setActiveTileId(target.tileId);
       setActiveWorkspace(lane.repoPath);
@@ -756,7 +748,7 @@ export function useWorkspaceTerminal({
       opened.delete(lane.sessionKey);
       console.error('[packet-dispatch-workspace] Failed to surface dispatched lane:', error);
     }
-  }, [findWorkspaceTerminalTargetForLane, setActiveTileId, setActiveWorkspace, thoughtsMissionPackets, waitForDedicatedWorkspaceTerminalTarget, waitForWorkspaceTerminalTarget, workspaceScopeEntries]);
+  }, [setActiveTileId, setActiveWorkspace, thoughtsMissionPackets, waitForWorkspaceTerminalTarget, workspaceScopeEntries]);
 
   const realtimeDispatchCallbacks = useMemo<DesktopWsCallbacks>(() => ({
     onRealtimeEvent: (event: RealtimeEventEnvelope) => {
@@ -795,7 +787,7 @@ export function useWorkspaceTerminal({
   }), [openWorkspaceTabForLane, refreshWorkspaceLifecycle]);
 
   useSharedDesktopWs(undefined, realtimeDispatchCallbacks);
-
+  useOutsideWorkerLaunchBridge(openWorkspaceTabForLane);
   useEffect(() => {
     async function pollLanes() {
       try {
@@ -811,6 +803,7 @@ export function useWorkspaceTerminal({
           runtime: string;
           repoPath: string;
           branch?: string;
+          launchContext?: WorkerLaunchContext | null;
         }>) {
           if (!lane.sessionKey) continue;
           if (lane.status !== 'running' && lane.status !== 'launching') continue;
@@ -831,13 +824,15 @@ export function useWorkspaceTerminal({
             repoPath: lane.repoPath,
             status: lane.status,
             branch: lane.branch ?? null,
-            launchContext: thoughtsMissionPackets.find((packet) => packet.id === lane.packetId)?.launchContext ?? null,
+            launchContext: lane.launchContext ?? thoughtsMissionPackets.find((packet) => packet.id === lane.packetId)?.launchContext ?? null,
           });
         }
       } catch { /* best-effort */ }
     }
 
     const initTimer = setTimeout(pollLanes, 2_000);
+    const handleLaneLifecycle = () => { void pollLanes(); };
+    window.addEventListener('o8:lane-lifecycle', handleLaneLifecycle);
     const stopDurableRefresh = startDurableRefresh({
       refresh: pollLanes,
       intervalMs: REALTIME_FALLBACK_REFRESH_MS,
@@ -845,6 +840,7 @@ export function useWorkspaceTerminal({
     });
     return () => {
       clearTimeout(initTimer);
+      window.removeEventListener('o8:lane-lifecycle', handleLaneLifecycle);
       stopDurableRefresh();
     };
   }, [openWorkspaceTabForLane, thoughtsMissionPackets]);

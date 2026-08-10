@@ -295,6 +295,7 @@ describe('o8 repo and project CLI real path', () => {
       repoA,
       '--caller',
       'outside terminal',
+      '--read-only',
     ]);
     expect(spawnResult.exitCode, spawnResult.stderr).toBe(0);
     expect(JSON.parse(spawnResult.stdout)).toMatchObject({
@@ -309,6 +310,7 @@ describe('o8 repo and project CLI real path', () => {
         source: 'cli',
         presentation: 'split',
         repoContext: 'transient',
+        workMode: 'read-only',
         caller: 'outside terminal',
       },
     });

@@ -117,6 +117,7 @@ interface CreateMissionInput {
   /** #1329 — the orchestrator's active thread id, so workers inherit its session rules. */
   orchestratorThreadId?: string;
   caller?: string;
+  readOnly?: boolean;
 }
 
 interface InlineIssue {
@@ -144,6 +145,7 @@ interface CreateMissionInlineInput {
   /** #1329 — the orchestrator's active thread id, so workers inherit its session rules. */
   orchestratorThreadId?: string;
   caller?: string;
+  readOnly?: boolean;
 }
 
 interface ApiSuccessResponse<T> {
@@ -185,12 +187,13 @@ function ensureRepoPath(repoPath: string) {
   return normalized;
 }
 
-function missionLaunchContext(input: { orchestratorThreadId?: string; caller?: string }) {
+function missionLaunchContext(input: { orchestratorThreadId?: string; caller?: string; readOnly?: boolean }) {
   const inAppOrchestrator = Boolean(input.orchestratorThreadId?.trim());
   return {
     source: inAppOrchestrator ? 'desktop' as const : 'mcp' as const,
     presentation: inAppOrchestrator ? 'tab' as const : 'split' as const,
     repoContext: inAppOrchestrator ? 'registered' as const : 'transient' as const,
+    ...(input.readOnly ? { workMode: 'read-only' as const } : {}),
     caller: input.caller?.trim() || (inAppOrchestrator ? 'orchestrator' : 'external agent'),
   };
 }

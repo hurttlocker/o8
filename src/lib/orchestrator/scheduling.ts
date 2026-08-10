@@ -16,6 +16,7 @@ import { clearStaleLaneBinding, getDispatchableWave } from '@/lib/orchestrator/d
 import { normalizeOrchestratorMissionState, packetReleaseBlockedBy } from '@/lib/orchestrator/store';
 import { fanOutComparisonPackets } from '@/lib/orchestrator/comparison-fanout';
 import { getProjectContext } from '@/lib/projects/context';
+import { resolveDefaultBranch } from '@/lib/repos/registry';
 import { resolveWorkerRouting } from '@/lib/agents/routing';
 import {
   MCP_DISPATCH_TILE_SENTINEL,
@@ -286,6 +287,7 @@ async function dispatchPacket(
     source: 'scheduler-dispatch',
   });
   const projectContext = await getProjectContext({ repoPath: packet.workspaceTargetPath });
+  const baseBranch = await resolveDefaultBranch(packet.workspaceTargetPath!);
   await assertRuntimeDispatchable(workerRouting.selectedRuntime);
   const laneResult = await dispatchLaneCommand({
     verb: 'open_lane',
@@ -293,6 +295,7 @@ async function dispatchPacket(
     repoPath: packet.workspaceTargetPath!,
     projectId: projectContext.runtimeProjectId,
     branch: packet.branchTarget,
+    baseBranch,
     runtime: workerRouting.selectedRuntime,
     label: packet.title,
     actor: 'orchestrator',
@@ -308,7 +311,7 @@ async function dispatchPacket(
     prompt: await buildPacketPrompt(
       packet,
       allPackets,
-      laneResult.lane?.baseBranch ?? 'main',
+      laneResult.lane?.baseBranch ?? baseBranch,
       laneResult.lane?.worktreePath ?? null,
     ),
     // Fallback ladder: explicit packet model → operator's pinned worker model

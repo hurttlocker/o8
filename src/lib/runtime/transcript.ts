@@ -1,15 +1,12 @@
 import { getRuntime, type RuntimeTranscriptEntry } from '@/lib/runtimes';
 
 export function runtimeIdFromSessionKey(sessionKey: string): string | null {
-  if (sessionKey.startsWith('claude-code:')) return 'claude-code';
-  if (
-    sessionKey.startsWith('codex:')
-    || sessionKey.startsWith('codex-owned:')
-    || sessionKey.startsWith('codex-discovered:')
-  ) {
-    return 'codex';
-  }
-  return null;
+  const separatorIndex = sessionKey.indexOf(':');
+  if (separatorIndex <= 0) return null;
+  const prefix = sessionKey.slice(0, separatorIndex).trim();
+  if (!prefix) return null;
+  const runtimeId = prefix.replace(/-(?:owned|discovered)$/, '');
+  return getRuntime(runtimeId) ? runtimeId : null;
 }
 
 export async function readRuntimeTranscript(

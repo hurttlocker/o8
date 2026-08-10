@@ -9,6 +9,7 @@ import { dispatch } from '@/lib/lane/commands';
 import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
 import { reconcileOrphanedWorktrees } from '@/lib/lane/reconcile';
 import { serverTimingHeaders } from '@/lib/performance/server-timing';
+import { resolvePacketLaunchContexts } from '@/lib/orchestrator/packet-launch-context';
 import type { LaneCommand } from '@/lib/lane/types';
 
 export const runtime = 'nodejs';
@@ -62,8 +63,14 @@ export async function GET(req: NextRequest) {
   // resolves voice "[Name], [task]") so every lane consumer — the canvas, voice
   // status, mobile — sees the agent by the SAME name. Additive, deterministic.
   const mergePolicy = currentLaneMergePolicy();
+  const launchContexts = resolvePacketLaunchContexts(
+    resolvedLanes.flatMap((lane) => lane.packetId ? [lane.packetId] : []),
+  );
   const lanes = resolvedLanes.map((lane) => ({
     ...lane,
+    launchContext: lane.packetId
+      ? launchContexts.get(lane.packetId)?.launchContext ?? null
+      : null,
     codename: codename(lane.id),
     mergeMode: mergePolicy.mode,
     mergeModeNote: mergePolicy.note,

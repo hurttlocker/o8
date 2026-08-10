@@ -34,6 +34,13 @@ import {
   type SessionTileSplitDirection,
   type ThreadPanePayload,
 } from '@/lib/orchestrator/session-tiles';
+import {
+  claimOutsideWorkerSplits,
+  outsideWorkerSessionKeysForLane,
+  subscribeOutsideWorkerSplits,
+} from '@/lib/orchestrator/outside-worker-split';
+
+const EMPTY_RETIRED_SESSION_KEYS = new Set<string>();
 
 function sessionTileStorageKey(tabId: string): string {
   return `o8:orchestrator:session-tiles:tab:${tabId}`;
@@ -98,8 +105,11 @@ export function scrubOrphanSessionTileKeys(validTabIds: Set<string>): number {
 
 interface UseSessionTilesArgs {
   tabId: string;
+  active?: boolean;
   /** sessionKeys of every active fleet agent — used to prune stale leaves. */
   liveSessionKeys: string[];
+  /** Session keys whose governed lane has completed or archived. */
+  retiredSessionKeys?: ReadonlySet<string>;
 }
 
 export interface UseSessionTilesReturn {
@@ -132,7 +142,12 @@ export interface UseSessionTilesReturn {
   pruneThreadPane: (threadId: string) => void;
 }
 
-export function useSessionTiles({ tabId, liveSessionKeys }: UseSessionTilesArgs): UseSessionTilesReturn {
+export function useSessionTiles({
+  tabId,
+  liveSessionKeys,
+  retiredSessionKeys = EMPTY_RETIRED_SESSION_KEYS,
+  active = false,
+}: UseSessionTilesArgs): UseSessionTilesReturn {
   const [layout, setLayout] = useState<SessionTileLayout>(
     () => readStoredSessionTileLayout(tabId),
   );
@@ -140,6 +155,7 @@ export function useSessionTiles({ tabId, liveSessionKeys }: UseSessionTilesArgs)
   const [pillContextMenu, setPillContextMenu] = useState<{
     request: SessionPillContextMenuRequest;
   } | null>(null);
+  const [outsideWorkerSessionKeys, setOutsideWorkerSessionKeys] = useState<string[]>([]);
 
   const tiledSessions = useMemo(() => collectSessionKeys(layout.root), [layout.root]);
   const sessionLeaves = useMemo(() => collectSessionLeaves(layout.root), [layout.root]);
@@ -162,11 +178,81 @@ export function useSessionTiles({ tabId, liveSessionKeys }: UseSessionTilesArgs)
     persistSessionTileLayout(tabId, layout);
   }, [tabId, layout]);
 
+  // Outside-launched workers claim the active orchestrator tab and enter
+  // through this same session tree. That preserves the drag-to-split FLIP
+  // motion, divider, resize, and close behavior without a dashboard tile.
+  useEffect(() => {
+    if (!active) return undefined;
+    const claim = () => {
+      const requests = claimOutsideWorkerSplits(tabId);
+      if (requests.length === 0) return;
+      setOutsideWorkerSessionKeys((current) => {
+        const next = new Set(current);
+        for (const request of requests) next.add(request.sessionKey);
+        return next.size === current.length ? current : [...next];
+      });
+      setLayout((current) => {
+        let next = current;
+        for (const request of requests) {
+          if (collectSessionLeaves(next.root).some((leaf) => leaf.sessionKey === request.sessionKey)) continue;
+          const existingLeaves = collectSessionLeaves(next.root);
+          next = existingLeaves.length === 0
+            ? splitChatWithSession(next, request.sessionKey, 'vertical')
+            : splitSessionWithSession(next, existingLeaves[existingLeaves.length - 1]!.id, request.sessionKey, 'vertical');
+        }
+        return next;
+      });
+    };
+    claim();
+    return subscribeOutsideWorkerSplits(claim);
+  }, [active, tabId]);
+
+  // The launch bridge pins a session only across the inventory-arrival race.
+  // Once the normal fleet record exists, the existing stale-session pruner
+  // owns its lifecycle and removes the pane when that worker disappears.
+  useEffect(() => {
+    if (outsideWorkerSessionKeys.length === 0) return undefined;
+    const known = new Set(liveSessionKeys);
+    const handle = window.setTimeout(() => {
+      setOutsideWorkerSessionKeys((current) => current.filter((key) => (
+        !known.has(key) && !retiredSessionKeys.has(key)
+      )));
+    }, 0);
+    return () => window.clearTimeout(handle);
+  }, [liveSessionKeys, outsideWorkerSessionKeys.length, retiredSessionKeys]);
+
+  // Lane retirement is the immediate close path. It covers completed and
+  // archived workers even if the fleet inventory is slow to drop the row.
+  useEffect(() => {
+    const retire = (event: Event) => {
+      const detail = (event as CustomEvent<{ data?: { laneId?: string | null; sessionKey?: string | null; status?: string; laneStatus?: string } }>).detail;
+      const data = detail?.data;
+      const status = data?.laneStatus ?? data?.status;
+      if (status !== 'completed' && status !== 'archived') return;
+      const retiredKeys = new Set([
+        ...(data?.sessionKey ? [data.sessionKey] : []),
+        ...(data?.laneId ? outsideWorkerSessionKeysForLane(data.laneId) : []),
+      ]);
+      if (retiredKeys.size === 0) return;
+      setOutsideWorkerSessionKeys((current) => current.filter((key) => !retiredKeys.has(key)));
+      setLayout((current) => {
+        let next = current;
+        for (const leaf of collectSessionLeaves(current.root)) {
+          if (leaf.sessionKey && retiredKeys.has(leaf.sessionKey)) next = closeSessionLeaf(next, leaf.id);
+        }
+        return next;
+      });
+    };
+    window.addEventListener('o8:lane-lifecycle', retire as EventListener);
+    return () => window.removeEventListener('o8:lane-lifecycle', retire as EventListener);
+  }, []);
+
   // Drop session leaves whose underlying agent has gone away. Defer to a
   // microtask so the prune doesn't trip the synchronous-setState lint rule
   // and so React batches it with any other commit-time updates.
   useEffect(() => {
-    const liveSet = new Set(liveSessionKeys);
+    const liveSet = new Set([...liveSessionKeys, ...outsideWorkerSessionKeys]);
+    for (const sessionKey of retiredSessionKeys) liveSet.delete(sessionKey);
     const handle = window.setTimeout(() => {
       setLayout((current) => {
         const next = pruneStaleSessions(current, liveSet);
@@ -174,7 +260,7 @@ export function useSessionTiles({ tabId, liveSessionKeys }: UseSessionTilesArgs)
       });
     }, 0);
     return () => window.clearTimeout(handle);
-  }, [liveSessionKeys]);
+  }, [liveSessionKeys, outsideWorkerSessionKeys, retiredSessionKeys]);
 
   // Keep focused-session pointer valid as the tree changes.
   useEffect(() => {
