@@ -5,6 +5,8 @@ import {
   outsideWorkerSessionKeysForPacketIds,
   outsideWorkerSessionKeysForSettledPackets,
   queueOutsideWorkerSplit,
+  releaseOutsideWorkerSplits,
+  removeOutsideWorkerSplits,
   resetOutsideWorkerSplitsForTest,
   subscribeOutsideWorkerSplits,
 } from './outside-worker-split';
@@ -37,6 +39,34 @@ describe('outside worker split broker', () => {
     ]);
     expect(listener).toHaveBeenCalled();
     unsubscribe();
+  });
+
+  it('releases a tab claim so another active surface can adopt the worker', () => {
+    queueOutsideWorkerSplit({
+      sessionKey: '3code-owned:handoff',
+      runtime: '3code',
+      repoPath: '/tmp/outside',
+    });
+
+    expect(claimOutsideWorkerSplits('orchestrator-one')).toHaveLength(1);
+    releaseOutsideWorkerSplits('orchestrator-one');
+    expect(claimOutsideWorkerSplits('orchestrator-two')).toEqual([
+      expect.objectContaining({ sessionKey: '3code-owned:handoff' }),
+    ]);
+  });
+
+  it('removes settled or dismissed workers instead of offering them again', () => {
+    queueOutsideWorkerSplit({
+      sessionKey: 'opencode-owned:settled',
+      runtime: 'opencode',
+      repoPath: '/tmp/outside',
+    });
+    claimOutsideWorkerSplits('orchestrator-one');
+
+    removeOutsideWorkerSplits(['opencode-owned:settled']);
+    releaseOutsideWorkerSplits('orchestrator-one');
+
+    expect(claimOutsideWorkerSplits('orchestrator-two')).toEqual([]);
   });
 
   it('keeps the lane binding after claim so terminal events can retire the pane', () => {

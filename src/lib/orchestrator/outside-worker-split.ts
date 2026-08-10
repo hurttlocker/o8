@@ -45,6 +45,24 @@ export function claimOutsideWorkerSplits(tabId: string): OutsideWorkerSplitReque
   return claimed;
 }
 
+export function releaseOutsideWorkerSplits(tabId: string): void {
+  let changed = false;
+  for (const entry of queued.values()) {
+    if (entry.claimedBy !== tabId) continue;
+    entry.claimedBy = null;
+    changed = true;
+  }
+  if (changed) notify();
+}
+
+export function removeOutsideWorkerSplits(sessionKeys: Iterable<string>): void {
+  let changed = false;
+  for (const sessionKey of sessionKeys) {
+    changed = queued.delete(sessionKey) || changed;
+  }
+  if (changed) notify();
+}
+
 export function outsideWorkerSessionKeysForLane(laneId: string): string[] {
   return [...queued.values()]
     .filter((entry) => entry.request.laneId === laneId)

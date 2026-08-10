@@ -37,6 +37,8 @@ import {
 import {
   claimOutsideWorkerSplits,
   outsideWorkerSessionKeysForLane,
+  releaseOutsideWorkerSplits,
+  removeOutsideWorkerSplits,
   subscribeOutsideWorkerSplits,
 } from '@/lib/orchestrator/outside-worker-split';
 
@@ -204,7 +206,11 @@ export function useSessionTiles({
       });
     };
     claim();
-    return subscribeOutsideWorkerSplits(claim);
+    const unsubscribe = subscribeOutsideWorkerSplits(claim);
+    return () => {
+      unsubscribe();
+      releaseOutsideWorkerSplits(tabId);
+    };
   }, [active, tabId]);
 
   // The launch bridge pins a session only across the inventory-arrival race.
@@ -234,6 +240,7 @@ export function useSessionTiles({
         ...(data?.laneId ? outsideWorkerSessionKeysForLane(data.laneId) : []),
       ]);
       if (retiredKeys.size === 0) return;
+      removeOutsideWorkerSplits(retiredKeys);
       setOutsideWorkerSessionKeys((current) => current.filter((key) => !retiredKeys.has(key)));
       setLayout((current) => {
         let next = current;
@@ -273,10 +280,13 @@ export function useSessionTiles({
   }, [focusedSessionKey, tiledSessions]);
 
   const closeSessionLeafById = useCallback((leafId: string) => {
+    const sessionKey = sessionLeaves.find((leaf) => leaf.id === leafId)?.sessionKey;
+    if (sessionKey) removeOutsideWorkerSplits([sessionKey]);
     setLayout((current) => closeSessionLeaf(current, leafId));
-  }, []);
+  }, [sessionLeaves]);
 
   const toggleTileSession = useCallback((sessionKey: string) => {
+    if (tiledSessions.includes(sessionKey)) removeOutsideWorkerSplits([sessionKey]);
     setLayout((current) => {
       const existing = collectSessionLeaves(current.root)
         .find((leaf) => leaf.sessionKey === sessionKey);
@@ -288,11 +298,12 @@ export function useSessionTiles({
       // (vertical) for users who want a column. (#1285)
       return splitChatWithSession(current, sessionKey, 'horizontal');
     });
-  }, []);
+  }, [tiledSessions]);
 
   const clearAllTiles = useCallback(() => {
+    removeOutsideWorkerSplits(tiledSessions);
     setLayout((current) => clearSessionTiles(current));
-  }, []);
+  }, [tiledSessions]);
 
   const resizeSplit = useCallback((splitId: string, ratio: number) => {
     setLayout((current) => resizeSessionSplit(current, splitId, ratio));

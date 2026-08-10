@@ -1,3 +1,4 @@
+import { ORCHESTRATOR_RUNTIME_IDS } from '@/lib/orchestrator/runtime-capabilities';
 import type { OrchestratorRuntime, WorkerLaunchContext } from '@/lib/orchestrator/types';
 
 const SOURCES = new Set<WorkerLaunchContext['source']>(['desktop', 'cli', 'mcp', 'agent']);
@@ -51,8 +52,7 @@ export function shouldPresentWorkerInSplit(context: WorkerLaunchContext | null |
 }
 
 export function runtimeFromWorkerSessionKey(sessionKey: string): OrchestratorRuntime {
-  const runtimes: OrchestratorRuntime[] = ['claude-code', 'gemini', 'opencode', 'cursor', 'grok', 'codex'];
-  return runtimes.find((runtime) => sessionKey.startsWith(`${runtime}:`)
+  return ORCHESTRATOR_RUNTIME_IDS.find((runtime) => sessionKey.startsWith(`${runtime}:`)
     || sessionKey.startsWith(`${runtime}-owned:`)
     || sessionKey.startsWith(`${runtime}-discovered:`)) ?? 'codex';
 }
