@@ -85,6 +85,10 @@ describe('createOwnedSessionStore launch readiness gate', () => {
     await expect(launched).resolves.toMatchObject({ ok: true, runtime: 'test-runtime' });
     expect(ensureDispatchBackendReadyMock).toHaveBeenCalledWith('test-runtime', 'launch');
     expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({
+      cwd: repoPath,
+      env: { PWD: repoPath },
+    });
   });
 
   it('returns a failed launch with an install hint when the worker CLI is missing', async () => {

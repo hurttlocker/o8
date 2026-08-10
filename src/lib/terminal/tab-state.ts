@@ -93,6 +93,7 @@ export type PersistedRuntimeSessionKey =
   | `qwen-owned:${string}`
   | `kimi-owned:${string}`
   | `aider-owned:${string}`
+  | `3code-owned:${string}`
   | `cursor-owned:${string}`
   | `grok-owned:${string}`
   | `pi-owned:${string}`;

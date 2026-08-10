@@ -7,7 +7,7 @@ import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 
 const LOG_PREFIX = '[cost-persistence]';
 
-type UsageProvider = 'anthropic' | 'openai' | 'google';
+type UsageProvider = 'anthropic' | 'openai' | 'google' | 'openrouter' | 'opencode';
 
 export interface PersistSessionCostInput {
   sessionKey: string;
@@ -50,10 +50,12 @@ function providerForRuntime(runtime: string): UsageProvider | null {
   if (runtime === 'gemini') {
     return 'google';
   }
+  if (runtime === 'opencode') {
+    return 'opencode';
+  }
   if (runtime === 'cursor' || runtime === 'grok') {
     return null;
   }
-  // opencode routes to the user-selected provider; cost is attributed externally
   return null;
 }
 

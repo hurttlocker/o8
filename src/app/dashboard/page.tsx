@@ -133,7 +133,7 @@ import { useLaneArchivedView } from './hooks/useLaneArchivedSet';
 import { useOrchestratorMission } from './hooks/useOrchestratorMission';
 import { useSessionState } from './hooks/useSessionState';
 import { useSettingsOverlayDismiss } from './hooks/useSettingsOverlayDismiss';
-import { shouldOpenWorkerInDedicatedPane } from '@/lib/orchestrator/worker-launch-context';
+import { shouldPresentWorkerInSplit } from '@/lib/orchestrator/worker-launch-context';
 import { useSetupWizard } from './hooks/useSetupWizard';
 import { useTileLayout } from './hooks/useTileLayout';
 import { useUIChrome } from './hooks/useUIChrome';
@@ -3476,7 +3476,7 @@ function DashboardInner() {
       }
       if (!detail.repoPath) return;
       const packet = thoughtsMissionStateRef.current.packets.find((candidate) => candidate.lane?.sessionKey === detail.surfaceId);
-      if (shouldOpenWorkerInDedicatedPane(detail.launchContext ?? packet?.launchContext)) return;
+      if (shouldPresentWorkerInSplit(detail.launchContext ?? packet?.launchContext)) return;
 
       // Deduplicate — only open once per surfaceId
       if (openedSupervisorAgentsRef.current.has(detail.surfaceId)) return;

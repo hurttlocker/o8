@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   normalizeWorkerLaunchContext,
-  shouldOpenWorkerInDedicatedPane,
+  runtimeFromWorkerSessionKey,
+  shouldPresentWorkerInSplit,
   workerLaunchOriginLabel,
 } from './worker-launch-context';
 
@@ -11,15 +12,17 @@ describe('worker launch context', () => {
       source: 'cli',
       presentation: 'split',
       repoContext: 'transient',
+      workMode: 'read-only',
       caller: ' outside terminal ',
     });
     expect(context).toEqual({
       source: 'cli',
       presentation: 'split',
       repoContext: 'transient',
+      workMode: 'read-only',
       caller: 'outside terminal',
     });
-    expect(shouldOpenWorkerInDedicatedPane(context)).toBe(true);
+    expect(shouldPresentWorkerInSplit(context)).toBe(true);
     expect(workerLaunchOriginLabel(context)).toBe('outside terminal via o8 CLI');
   });
 
@@ -29,11 +32,21 @@ describe('worker launch context', () => {
       presentation: 'split',
       repoContext: 'registered',
     });
-    expect(shouldOpenWorkerInDedicatedPane(context)).toBe(false);
+    expect(shouldPresentWorkerInSplit(context)).toBe(false);
+  });
+
+  it.each([
+    ['opencode-owned:surface-1', 'opencode'],
+    ['gemini-discovered:surface-2', 'gemini'],
+    ['claude-code:surface-3', 'claude-code'],
+    ['unknown:surface-4', 'codex'],
+  ] as const)('derives %s as %s for supervisor launches', (sessionKey, runtime) => {
+    expect(runtimeFromWorkerSessionKey(sessionKey)).toBe(runtime);
   });
 
   it('rejects partial or unknown launch records', () => {
     expect(normalizeWorkerLaunchContext({ source: 'cli', presentation: 'split' })).toBeUndefined();
     expect(normalizeWorkerLaunchContext({ source: 'shell', presentation: 'split', repoContext: 'transient' })).toBeUndefined();
+    expect(normalizeWorkerLaunchContext({ source: 'cli', presentation: 'split', repoContext: 'transient', workMode: 'delete' })).toBeUndefined();
   });
 });

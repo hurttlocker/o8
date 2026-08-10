@@ -120,6 +120,7 @@ export const MISSION_TOOLS: McpTool[] = [
           type: 'boolean',
           description: 'Huddle mode — a bidirectional alignment turn. When true, each worker reads the repo then posts its plan + any pushback (`o8 packet report --event huddle`) and STOPS before editing; you review it (the packet flips to awaiting_orchestrator) and steer it (steer_packet) to align before it implements. Arm it ONLY on packets worth aligning on first — ambiguous scope, risky/cross-cutting, or novel work. Omit (default off) for clear, well-specced packets so they don\'t pay the extra round-trip.',
         },
+        readOnly: { type: 'boolean', description: 'When true, the worker inspects and reports without editing. A clean zero-diff exit is recorded as a successful read-only completion.' },
         comparisonModels: {
           type: 'array',
           items: { type: 'string' },
@@ -804,7 +805,6 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
     // #453 — Support inline issues (no GitHub dependency)
     const inlineIssues = Array.isArray(args.issues_inline) ? args.issues_inline : null;
     const ghIssues = Array.isArray(args.issues) && args.issues.length > 0 ? args.issues : null;
-
     if (!inlineIssues && !ghIssues) {
       return textResult('Provide either `issues` (GitHub refs) or `issues_inline` (inline objects).', true);
     }
@@ -816,10 +816,10 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
     const huddle = typeof args.huddle === 'boolean' ? args.huddle : undefined;
     const orchestratorThreadId = optionalString(args, 'orchestratorThreadId') || undefined;
     const caller = optionalString(args, 'caller') || undefined;
+    const readOnly = args.readOnly === true;
     const candidateMode = parseMissionCandidateMode(args, huddle);
     if (!candidateMode.ok) return textResult(candidateMode.error, true);
     const { comparisonModels, qualitySearch } = candidateMode;
-
     if (inlineIssues) {
       // #453 — Auto-assign synthetic numbers when not provided. Centralized so
       // every inline creator uses the same collision-resistant allocator.
@@ -846,7 +846,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
         huddle,
         comparisonModels,
         qualitySearch,
-        orchestratorThreadId, caller,
+        orchestratorThreadId, caller, readOnly,
       });
       if (shouldDispatch && createResult && !('error' in createResult)) {
         // Fire-and-forget: dispatch can take 30–60s on its own, and the
@@ -880,7 +880,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
       huddle,
       comparisonModels,
       qualitySearch,
-      orchestratorThreadId, caller,
+      orchestratorThreadId, caller, readOnly,
     });
     if (shouldDispatch && createResult && !('error' in createResult)) {
       void dispatchMission({ missionId: createResult.missionId }).catch((err) => {

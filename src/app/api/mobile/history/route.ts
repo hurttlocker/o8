@@ -10,17 +10,10 @@ import type { MobileHistoryResponse, MobileTranscriptEntry, MobileTranscriptTool
 import '@/lib/runtimes'; // Ensure runtimes are registered
 import { readSessionHuddleTranscriptEvents, readSessionSteerTranscriptEvents } from '@/lib/orchestrator/packet-transcript';
 import { getRuntime } from '@/lib/runtimes/registry';
+import { ownedRuntimeTailRole, runtimeTailRole } from './owned-runtime-tail-role';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-function runtimeTailRole(label: string): MobileTranscriptEntry['role'] {
-  const normalized = label.toLowerCase();
-  if (normalized.includes('assistant')) return 'assistant';
-  if (normalized.includes('user')) return 'user';
-  if (normalized.includes('tool')) return 'tool';
-  return 'system';
-}
 
 function parseToolArgs(raw: string): Record<string, unknown> | undefined {
   const trimmed = raw.trim();
@@ -136,7 +129,7 @@ export async function GET(request: NextRequest) {
           if (promptText && text === promptText) continue;
           if (noiseMarkers.some((marker) => text.startsWith(marker) || text.includes(marker))) continue;
 
-          const role = runtimeTailRole(entry.label);
+          const role = ownedRuntimeTailRole(entry.kind, entry.label);
           if (role === 'assistant') {
             chatTranscript.push({
               id: entry.id,

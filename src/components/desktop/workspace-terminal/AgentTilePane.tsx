@@ -13,6 +13,7 @@ import {
 } from 'react';
 import type { FleetAgent } from '@/components/desktop/thoughts/types';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { orchestratorRuntimeTone, agentDisplayLabel } from '@/lib/orchestrator/display';
 import {
   ORCHESTRATOR_RUNTIME_IDS,
@@ -23,10 +24,12 @@ import {
 import { bootstrapTranscripts } from '@/lib/transcripts/bootstrap';
 import { transcriptStore } from '@/lib/transcripts/store';
 import { useTranscript } from '@/lib/transcripts/useTranscript';
+import { PacketHeaderCard } from './PacketHeaderCard';
 
 interface AgentTilePaneProps {
   sessionKey: string;
   agent: FleetAgent | null;
+  packet?: OrchestratorPacket | null;
   focused: boolean;
   onClose: (sessionKey: string) => void;
   onFocus: (sessionKey: string) => void;
@@ -64,10 +67,10 @@ function inferRuntime(sessionKey: string, rawRuntime?: string): OrchestratorRunt
   return 'codex';
 }
 
-function displayName(agent: FleetAgent | null, sessionKey: string): string {
+function displayName(agent: FleetAgent | null, packet: OrchestratorPacket | null | undefined, sessionKey: string): string {
   // Canonical label — never an id slice. Falls back to the runtime's human
   // name ("Codex") rather than a raw `codex-owned:...` key.
-  return agentDisplayLabel({ name: agent?.name, sessionKey });
+  return agentDisplayLabel({ name: agent?.name ?? packet?.title, sessionKey });
 }
 
 function roleLabel(role: MobileTranscriptEntry['role']): string {
@@ -89,12 +92,17 @@ function entryContent(entry: MobileTranscriptEntry): string {
 // composer reveal animation when a lane flips to running/awaiting_input.
 const COMPOSER_SPRING = { type: 'spring', stiffness: 400, damping: 30 } as const;
 const TRANSCRIPT_STEER_LOADING_TIMEOUT_MS = 10_000;
+const LIVE_TRANSCRIPT_REFRESH_MS = 1_500;
 
 function canSteerAgent(agent: FleetAgent | null): boolean {
   return (agent?.status ?? '').toLowerCase() === 'running';
 }
 
-function AgentTilePaneBase({ sessionKey, agent, focused, onClose, onFocus }: AgentTilePaneProps) {
+export function shouldRefreshAgentTranscript(hasAgent: boolean, hasLane: boolean): boolean {
+  return hasAgent || hasLane;
+}
+
+function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocus }: AgentTilePaneProps) {
   const slice = useTranscript(sessionKey);
   const entries = slice.messages;
   const loading = slice.status === 'loading' || slice.status === 'idle';
@@ -107,11 +115,12 @@ function AgentTilePaneBase({ sessionKey, agent, focused, onClose, onFocus }: Age
   const sendingRef = useRef(false);
   const loadingFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
-  const name = useMemo(() => displayName(agent, sessionKey), [agent, sessionKey]);
+  const name = useMemo(() => displayName(agent, packet, sessionKey), [agent, packet, sessionKey]);
   const runtime = useMemo(() => inferRuntime(sessionKey, agent?.runtime), [agent?.runtime, sessionKey]);
   const runtimeTone = useMemo(() => orchestratorRuntimeTone(runtime), [runtime]);
-  const status = useMemo(() => classifyStatus(agent?.status), [agent?.status]);
+  const status = useMemo(() => classifyStatus(agent?.status ?? packet?.status), [agent?.status, packet?.status]);
   const canSteer = canSteerAgent(agent);
+  const shouldRefreshTranscript = shouldRefreshAgentTranscript(agent !== null, packet?.lane != null);
   const trimmedDraft = draft.trim();
   const canSend = canSteer && !sending && trimmedDraft.length > 0;
   const lastEntryKey = entries.length > 0 ? `${entries[entries.length - 1]?.id}:${entryContent(entries[entries.length - 1]!)}` : '';
@@ -208,12 +217,33 @@ function AgentTilePaneBase({ sessionKey, agent, focused, onClose, onFocus }: Age
     clearTranscriptLoadingFallback();
   }, [clearTranscriptLoadingFallback, sessionKey]);
 
-  // One-shot seed for agents not in the workspace bootstrap list. After this,
-  // WS pushes via transcriptStore keep the slice live — no per-agent polling.
+  // One-shot seed for agents not in the workspace bootstrap list. The
+  // live-lane refresh below keeps an unsubscribed tiled session current.
   useEffect(() => {
     if (slice.status !== 'idle') return;
     void bootstrapTranscripts([sessionKey]);
   }, [sessionKey, slice.status]);
+
+  // A tiled worker is not necessarily the websocket's active subscription,
+  // especially when several outside workers share one orchestrator chat.
+  // Refresh while the lane record still exists, even when its runtime status
+  // briefly leaves `running`. OpenCode can report awaiting-input or idle while
+  // its detached process is still producing the final turn; gating this poll
+  // on steering eligibility dropped that answer just before the pane retired.
+  useEffect(() => {
+    if (!shouldRefreshTranscript) return undefined;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const refresh = async () => {
+      await bootstrapTranscripts([sessionKey], { refetchFresh: true });
+      if (!cancelled) timer = setTimeout(refresh, LIVE_TRANSCRIPT_REFRESH_MS);
+    };
+    timer = setTimeout(refresh, LIVE_TRANSCRIPT_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [sessionKey, shouldRefreshTranscript]);
 
   useEffect(() => {
     requestAnimationFrame(() => {
@@ -326,6 +356,17 @@ function AgentTilePaneBase({ sessionKey, agent, focused, onClose, onFocus }: Age
           paddingTop: 14, paddingRight: 14, paddingBottom: 14, paddingLeft: 14, background: 'var(--t-panel)',
         }}
       >
+        {packet?.launchContext ? (
+          <PacketHeaderCard
+            title={packet.title}
+            branch={packet.branchTarget}
+            runtime={packet.runtime}
+            status={packet.status}
+            repo={packet.lane?.repoPath?.split('/').filter(Boolean).at(-1) ?? null}
+            launchContext={packet.launchContext}
+            prompt={packet.prompt ?? packet.summary}
+          />
+        ) : null}
         {entries.length === 0 ? (
           <div
             style={{

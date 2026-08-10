@@ -86,6 +86,13 @@ export function historyBelongsToRepo(item: ChatHistoryItem, repo: RepoFocusRepo)
   return Boolean(historyRemote && repoRemote && historyRemote === repoRemote);
 }
 
+export function historyIsVisibleForRepos(item: ChatHistoryItem, repos: RepoFocusRepo[]): boolean {
+  // With no registered/project repo scope, Chats is still the operator's
+  // conversation history. Returning false here made every home-scoped
+  // orchestrator vanish after the repo list was intentionally cleaned.
+  return repos.length === 0 || repos.some((repo) => historyBelongsToRepo(item, repo));
+}
+
 export function sessionBelongsToRepo(session: IdeWorkspaceSession, repo: RepoFocusRepo): boolean {
   if (repoOwnsCandidate(repo.localPath, session.workspace)) return true;
   if (repoOwnsCandidate(repo.localPath, session.runtimeSurface?.cwd)) return true;

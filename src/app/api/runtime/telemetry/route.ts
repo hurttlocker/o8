@@ -1,15 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import '@/lib/runtimes'; // Ensure runtimes are registered
 import { getRuntime } from '@/lib/runtimes/registry';
+import { runtimeIdFromSessionKey } from '@/lib/runtime/transcript';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-function runtimeIdFromSessionKey(sessionKey: string): string | null {
-  if (sessionKey.startsWith('claude-code:')) return 'claude-code';
-  if (sessionKey.startsWith('codex:') || sessionKey.startsWith('codex-owned:') || sessionKey.startsWith('codex-discovered:')) return 'codex';
-  return null;
-}
 
 export async function GET(request: NextRequest) {
   const sessionKey = request.nextUrl.searchParams.get('sessionKey')?.trim();

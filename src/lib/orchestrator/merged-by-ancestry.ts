@@ -456,6 +456,8 @@ async function releasePacket(candidate: Candidate, evidence: MergeEvidence): Pro
   }
 
   if (candidate.laneId) {
+    const { cancelAutoReviewForLane } = await import('@/lib/lane/auto-review');
+    cancelAutoReviewForLane(candidate.laneId, MERGED_BY_ANCESTRY_SOURCE);
     appendEvent(candidate.laneId, 'merged_by_ancestry_reconciled', 'system', {
       packetId: candidate.packet?.id ?? candidate.lane?.packetId ?? null,
       evidenceKind: evidence.kind,
@@ -499,6 +501,8 @@ async function finishWithoutChanges(candidate: Candidate, evidence: MergeEvidenc
   }
 
   if (candidate.laneId) {
+    const { cancelAutoReviewForLane } = await import('@/lib/lane/auto-review');
+    cancelAutoReviewForLane(candidate.laneId, 'finished_no_changes');
     updateLane(candidate.laneId, {
       outcome: 'no_changes',
       outcomeNote: note,

@@ -79,6 +79,17 @@ export function useWorkspaceChatLifecycle({
   }, [archivedLaneView, normalizedSessionKey, livePacket, tab.chatSessionKey, tab.orchestrationPacket?.packetId]);
 
   const retirement = useMemo<RetirementCopy>(() => {
+    if (archiveSummary?.outcome === 'no_changes') {
+      return {
+        merged: false,
+        tone: 'var(--t-text-muted)',
+        iconBg: 'var(--t-panel)',
+        heroTitle: 'Finished — no changes',
+        heroSub: archiveSummary.message,
+        bannerLabel: 'No changes · read-only',
+        bannerSub: `${archiveSummary.message} The transcript stays for review.`,
+      };
+    }
     const merged = liveStatus === 'released' || livePacket?.releaseState === 'released';
     if (merged) {
       return {
@@ -124,17 +135,6 @@ export function useWorkspaceChatLifecycle({
         heroTitle: 'Discarded',
         heroSub: archiveSummary.message,
         bannerLabel: 'Discarded · read-only',
-        bannerSub: `${archiveSummary.message} The transcript stays for review.`,
-      };
-    }
-    if (archiveSummary?.outcome === 'no_changes') {
-      return {
-        merged: false,
-        tone: 'var(--t-text-muted)',
-        iconBg: 'var(--t-panel)',
-        heroTitle: 'Finished — no changes',
-        heroSub: archiveSummary.message,
-        bannerLabel: 'No changes · read-only',
         bannerSub: `${archiveSummary.message} The transcript stays for review.`,
       };
     }

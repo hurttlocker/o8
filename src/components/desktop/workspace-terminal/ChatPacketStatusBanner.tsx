@@ -200,7 +200,7 @@ export function ChatPacketStatusBanner({
       }
     })();
     return () => { active = false; };
-  }, [packetId, sessionKey]);
+  }, [packetId, sessionKey, status]);
 
   const effectiveLaneId = laneId ?? resolvedLaneId;
   // The id our actions (merge / discard / review / rerun) operate on — the

@@ -29,7 +29,7 @@ vi.mock('@/lib/runtimes/shared/auth-detect', () => ({
   assertRuntimeDispatchable: vi.fn(async () => undefined),
 }));
 
-const { createLane, setLaneStatus } = await import('@/lib/lane/registry');
+const { createLane, findLaneByPacket, setLaneStatus } = await import('@/lib/lane/registry');
 const { createEmptyOrchestratorMissionState, normalizeOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const { readDispatchHaltState, setDispatchHaltState } = await import('@/lib/orchestrator/dispatch-halt');
 const { hasReviewableCompletionDiff } = await import('@/lib/supervisor/completion-verification');
@@ -44,10 +44,10 @@ const {
 } = await import('@/lib/orchestrator/scheduling');
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
 
-function makeRepo(): string {
+function makeRepo(initialBranch = 'main'): string {
   const dir = mkdtempSync(join(tmpdir(), 'o8-scheduling-repo-'));
   const git = (...args: string[]) => execFileSync('git', args, { cwd: dir, stdio: 'pipe' });
-  git('init', '--initial-branch=main');
+  git('init', `--initial-branch=${initialBranch}`);
   writeFileSync(join(dir, 'README.md'), 'scheduling test\n');
   git('add', 'README.md');
   git('-c', 'user.email=t@t.t', '-c', 'user.name=t', 'commit', '-m', 'init');
@@ -162,6 +162,17 @@ describe('dispatch scheduling caps and waves', () => {
     });
 
     expect(watchBodies).toContainEqual(expect.objectContaining({ launchContext }));
+  }, 20_000);
+
+  it('uses a transient repository\'s real default branch when main does not exist', async () => {
+    const repoPath = makeRepo('master');
+
+    await runDispatchTick(missionFixture(repoPath, [packetFixture(repoPath, 'master-default')]), {
+      launchBudget: { maxLaunches: 1 },
+    });
+
+    expect(findLaneByPacket('master-default')?.baseBranch).toBe('master');
+    expect(launchMock.calls.map((call) => call.packetId)).toEqual(['master-default']);
   }, 20_000);
 
   it('honors an explicit per-runtime launch budget for Gemini', async () => {

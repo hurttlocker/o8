@@ -18,10 +18,11 @@ export const dynamic = 'force-dynamic';
  * Returns comprehensive cost/usage analytics aggregated across:
  * - Codex CLI owned sessions
  * - Claude Code sessions
+ * - OpenCode 2 owned sessions
  * - IDE LLM chat usage logs
  */
 
-type SurfaceKey = 'Codex CLI' | 'Claude Code' | 'IDE LLM Chat' | 'Symon Voice';
+type SurfaceKey = 'Codex CLI' | 'Claude Code' | 'OpenCode 2' | 'IDE LLM Chat' | 'Symon Voice';
 
 interface HourBucket {
   hour: string;
@@ -68,7 +69,7 @@ interface SessionAccumulator {
   active: boolean;
 }
 
-const SURFACES: SurfaceKey[] = ['Codex CLI', 'Claude Code', 'IDE LLM Chat', 'Symon Voice'];
+const SURFACES: SurfaceKey[] = ['Codex CLI', 'Claude Code', 'OpenCode 2', 'IDE LLM Chat', 'Symon Voice'];
 const ACTIVE_WINDOW_MS = 5 * 60 * 1000;
 const ANTHROPIC_DEFAULT_PRICING = {
   inputPerToken: 3 / 1_000_000,

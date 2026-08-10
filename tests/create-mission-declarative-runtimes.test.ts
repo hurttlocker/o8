@@ -114,6 +114,7 @@ describe('create_mission runtime reachability', () => {
     ['kimi', 91_598_014],
     ['aider', 91_598_015],
     ['qoder', 91_598_016],
+    ['3code', 91_598_017],
   ] as const)('%s remains selected through the real route and persisted mission', async (runtime, issueNumber) => {
     const response = await createMissionRoute.POST(request(runtime, issueNumber));
     expect(response.status).toBe(201);
@@ -201,6 +202,7 @@ describe('create_mission runtime reachability', () => {
       runtime,
       getDeclarativeOwnedRuntime(runtime)?.adapter.launchArgs({
         cwd: repoPath,
+        sessionDir: path.join(repoPath, '.owned-session'),
         prompt: 'fix the bug',
       }),
     ]));
@@ -212,6 +214,11 @@ describe('create_mission runtime reachability', () => {
       qoder: ['-p', 'fix the bug', '-m', 'Qwen3.8-Max-Preview', '--dangerously-skip-permissions', '--output-format', 'stream-json'],
       kimi: ['-p', 'fix the bug'],
       aider: ['--message', 'fix the bug', '--yes-always', '--auto-test'],
+      '3code': [
+        '--session',
+        path.join(repoPath, '.owned-session', 'session.3log'),
+        'fix the bug',
+      ],
     });
   });
 

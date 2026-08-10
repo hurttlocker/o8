@@ -10,8 +10,10 @@ process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
 const lanesRoute = await import('@/app/api/lanes/route');
-const { createLane } = await import('@/lib/lane/registry');
+const { createLane, setLaneStatus } = await import('@/lib/lane/registry');
 const { DOGFOOD_PR_ONLY_NOTE } = await import('@/lib/lane/merge-mode');
+const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 
 function lanesReq() {
   return new NextRequest('http://localhost:3001/api/lanes?active=false', {
@@ -47,6 +49,58 @@ describe('review card PR-only mode reaches the lane-list route', () => {
     } finally {
       rmSync(sentinelPath, { force: true });
     }
+  });
+
+  it('returns durable outside-launch context for the dashboard split-pane fallback', async () => {
+    const packetId = 'pkt-lane-launch-context';
+    const lane = createLane({
+      repoPath: '/tmp/o8-lane-launch-context-repo',
+      branch: 'inline/lane-launch-context',
+      runtime: 'opencode',
+      label: 'Outside worker lane',
+      packetId,
+      sessionKey: 'opencode-owned:lane-launch-context',
+    });
+    setLaneStatus(lane.id, 'running', 'system', 'session_running');
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      packets: [{
+        id: packetId,
+        referenceLabel: 'OUTSIDE-1',
+        title: 'Outside worker',
+        summary: 'Outside worker',
+        status: 'running',
+        queueState: 'queued',
+        releaseState: 'pending',
+        runtime: 'opencode',
+        wave: 1,
+        dependencyPacketIds: [],
+        dependencyLabels: [],
+        blockedReason: null,
+        lane: null,
+        review: null,
+        workspaceTargetPath: '/tmp/o8-lane-launch-context-repo',
+        branchTarget: 'inline/lane-launch-context',
+        launchContext: {
+          source: 'cli',
+          presentation: 'split',
+          repoContext: 'transient',
+          caller: 'outside terminal',
+        },
+      } as never],
+    });
+
+    const response = await lanesRoute.GET(lanesReq());
+    const payload = await response.json() as {
+      lanes?: Array<{ id: string; launchContext?: Record<string, unknown> | null }>;
+    };
+
+    expect(payload.lanes?.find((candidate) => candidate.id === lane.id)?.launchContext).toEqual({
+      source: 'cli',
+      presentation: 'split',
+      repoContext: 'transient',
+      caller: 'outside terminal',
+    });
   });
 });
 

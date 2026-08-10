@@ -17,7 +17,7 @@ import { MissingRepoRailNotice } from './chats/MissingRepoRailNotice';
 import { HISTORY_ROW_TONES } from './chats/constants';
 import {
   CONVERSATIONS_GROUP_KEY,
-  historyBelongsToRepo,
+  historyIsVisibleForRepos,
   historyRepoContext,
   historySection,
   isAutomationSession,
@@ -302,13 +302,13 @@ export function ChatsTab({
   ), [packets, targetRepos]);
 
   const visibleHistory = useMemo(() => (
-    historyItems.filter((item) => targetRepos.some((repo) => historyBelongsToRepo(item, repo)))
+    historyItems.filter((item) => historyIsVisibleForRepos(item, targetRepos))
   ), [historyItems, targetRepos]);
   const historyPacketsByTabId = useMemo(() => new Map(
     visibleHistory.map((item) => [item.tabId, pickHistoryPacket(item, visiblePackets)]),
   ), [visibleHistory, visiblePackets]);
   const visibleArchivedHistory = useMemo(() => (
-    archivedHistoryItems.filter((item) => targetRepos.some((repo) => historyBelongsToRepo(item, repo)))
+    archivedHistoryItems.filter((item) => historyIsVisibleForRepos(item, targetRepos))
   ), [archivedHistoryItems, targetRepos]);
   const allowedSections = useMemo(() => new Set(sections), [sections]);
   const visibleFlatHistory = useMemo(() => (

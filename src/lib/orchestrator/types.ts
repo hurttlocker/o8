@@ -16,6 +16,7 @@ export type WorkerRoutingConfidence = 'high' | 'medium' | 'low';
 export type WorkerLaunchSource = 'desktop' | 'cli' | 'mcp' | 'agent';
 export type WorkerLaunchPresentation = 'tab' | 'split';
 export type WorkerRepoContext = 'registered' | 'transient';
+export type WorkerWorkMode = 'edit' | 'read-only';
 
 /**
  * Durable context for work launched outside the desktop UI. A transient repo
@@ -27,6 +28,7 @@ export interface WorkerLaunchContext {
   source: WorkerLaunchSource;
   presentation: WorkerLaunchPresentation;
   repoContext: WorkerRepoContext;
+  workMode?: WorkerWorkMode;
   caller?: string | null;
 }
 

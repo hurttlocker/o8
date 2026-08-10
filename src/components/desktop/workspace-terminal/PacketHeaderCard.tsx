@@ -159,6 +159,7 @@ export function PacketHeaderCard({
           {repo ? <PacketMetaChip label="Repo" value={repo} /> : null}
           {originLabel ? <PacketMetaChip label="Started by" value={originLabel} /> : null}
           {launchContext?.repoContext === 'transient' ? <PacketMetaChip label="Scope" value="Temporary repo" /> : null}
+          {launchContext?.workMode === 'read-only' ? <PacketMetaChip label="Mode" value="Read only" /> : null}
           {branch ? <PacketMetaChip label="Branch" value={branch} mono /> : null}
           {statusLabel ? <PacketMetaChip label="Status" value={statusLabel} /> : null}
         </div>

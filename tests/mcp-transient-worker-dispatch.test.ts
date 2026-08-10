@@ -37,6 +37,7 @@ describe('MCP transient worker dispatch', () => {
       issues_inline: [{ title: 'Inspect repo' }],
       dispatch: false,
       caller: 'outside session',
+      readOnly: true,
     });
 
     expect(result.isError).not.toBe(true);
@@ -47,6 +48,7 @@ describe('MCP transient worker dispatch', () => {
         source: 'mcp',
         presentation: 'split',
         repoContext: 'transient',
+        workMode: 'read-only',
         caller: 'outside session',
       },
     });

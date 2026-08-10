@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import { detectTypecheckSkip, isMissingTscOutput } from '@/lib/lane/typecheck-availability';
+import { resolvePacketDiffBase } from '@/lib/diff/base-resolution';
 
 import { buildRuleCheckFailureMessage, runRuleCheck } from './rule-check';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
@@ -92,7 +93,8 @@ export async function runCompletionVerification(
     };
   }
 
-  const ruleCheck = await runRuleCheck(cwd, baseRef);
+  const comparisonRef = await resolveCompletionComparisonRef(cwd, baseRef);
+  const ruleCheck = await runRuleCheck(cwd, comparisonRef);
   if (!ruleCheck.ok) {
     return {
       ok: false,
@@ -102,6 +104,21 @@ export async function runCompletionVerification(
   }
 
   return { ok: true, kind: 'typecheck', output: '' };
+}
+
+async function resolveCompletionComparisonRef(cwd: string, baseRef: string): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
+      windowsHide: true,
+      cwd,
+      maxBuffer: COMMAND_MAX_BUFFER,
+    });
+    const resolution = await resolvePacketDiffBase(cwd, baseRef, stdout.trim());
+    return resolution.mergeBase ?? resolution.comparisonRef;
+  } catch (error) {
+    console.warn(`[completion-verification] Could not refresh ${baseRef}; using the recorded base ref.`, error);
+    return baseRef;
+  }
 }
 
 export function buildVerificationFailureSteerMessage(result: CompletionVerificationResult): string {
@@ -168,8 +185,9 @@ export async function autoCommitCompletionWorktree(cwd: string, commitMessage?: 
 }
 
 export async function hasReviewableCompletionDiff(cwd: string, baseRef = 'main'): Promise<boolean> {
+  const comparisonRef = await resolveCompletionComparisonRef(cwd, baseRef);
   try {
-    await execFileAsync('git', ['diff', '--quiet', `${baseRef}...HEAD`], {
+    await execFileAsync('git', ['diff', '--quiet', `${comparisonRef}...HEAD`], {
       windowsHide: true,
       cwd,
       maxBuffer: COMMAND_MAX_BUFFER,

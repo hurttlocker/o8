@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TranscriptEvent } from '@/lib/orchestrator/transcript-normalizer';
-import { mapPacketTranscriptEntries } from './use-packet-transcript-poll';
+import { mapPacketTranscriptEntries, shouldPollPacketTranscript } from './use-packet-transcript-poll';
 
 function toolCallEvent(args: string, tool = 'exec'): TranscriptEvent {
   return { seq: 1, ts: '2026-07-07T12:00:00.000Z', type: 'tool_call', tool, args, summary: args.slice(0, 40) };
@@ -42,5 +42,19 @@ describe('mapPacketTranscriptEntries tool args recovery', () => {
     const tool = firstToolCall([toolCallEvent(clipped), assistantEvent()]);
     expect(tool?.args).toBeUndefined();
     expect(tool?.preview).toBeTruthy();
+  });
+});
+
+describe('shouldPollPacketTranscript', () => {
+  it('keeps polling when owned-session history only contains the launch prompt', () => {
+    expect(shouldPollPacketTranscript([
+      { id: 'prompt', role: 'user', text: 'Inspect the repository.' },
+    ])).toBe(true);
+  });
+
+  it('stops the fallback poll after a substantive assistant entry arrives', () => {
+    expect(shouldPollPacketTranscript([
+      { id: 'answer', role: 'assistant', text: 'The repository is clean.' },
+    ])).toBe(false);
   });
 });

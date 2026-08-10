@@ -1,7 +1,7 @@
 import { getDb } from '@/lib/db';
 import { usageLogs } from '@/lib/db/schema';
 
-export type AnalyticsSurfaceKey = 'Codex CLI' | 'Claude Code' | 'IDE LLM Chat' | 'Symon Voice';
+export type AnalyticsSurfaceKey = 'Codex CLI' | 'Claude Code' | 'OpenCode 2' | 'IDE LLM Chat' | 'Symon Voice';
 
 type RecordUsageArgs = {
   ts: number;
@@ -45,6 +45,9 @@ function runtimeSurfaceFromRow(row: typeof usageLogs.$inferSelect): AnalyticsSur
   }
   if (row.agentName === 'claude-code' || row.agentName === 'Claude Code' || row.sessionKey?.startsWith('claude-code:')) {
     return 'Claude Code';
+  }
+  if (row.agentName === 'opencode' || row.agentName === 'OpenCode 2' || row.sessionKey?.startsWith('opencode-owned:')) {
+    return 'OpenCode 2';
   }
   // Realtime voice spend (logged by /api/voice/realtime/usage). sessionKey is the
   // per-conversation `realtime-…` id, so all responses group into one session.

@@ -190,8 +190,8 @@ commands:
   browser close        end this scope's engine (headless Chrome) session
   cortex observe       propose a worker observation for the orchestrator
   lane touches         active lanes touching a path or packet diff
-  worker spawn         create + dispatch one governed worker from any Git repo (--title --body [--repo path] [--runtime id] [--caller label])
-  mission create       create a mission from an inline task (--title --body [--dispatch] [--caller label] [--existingBranchPolicy auto|reset|continue|error] [--compare m1,m2] [--quality-search-contract file])
+  worker spawn         create + dispatch one governed worker from any Git repo (--title --body [--repo path] [--runtime id] [--caller label] [--read-only])
+  mission create       create a mission from an inline task (--title --body [--dispatch] [--caller label] [--read-only] [--existingBranchPolicy auto|reset|continue|error] [--compare m1,m2] [--quality-search-contract file])
   mission dispatch     dispatch packets to workers (async; --wait blocks for launch; --watch blocks until review/terminal — the spawner's notification) [--mission <id>]
   mission status       mission + packet state [--mission <id>] [--cost]
   mission stop         interrupt and hold every packet in a mission [--mission <id>]

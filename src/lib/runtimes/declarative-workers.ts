@@ -153,6 +153,7 @@ function materializeDeclarativeWorkerConfig(runtimeId: OrchestratorRuntime): Dec
     sessionIdPrefix: `${runtimeId}-owned-`,
     launchArgs: manifest.launchArgs,
     resumeArgs: manifest.resumeArgs,
+    sessionFileName: manifest.sessionFileName,
     parseRunLog: parserForProfile(manifest.parserProfile, capability.label),
     ...(manifest.extraSpawnEnv
       ? { extraSpawnEnv: () => ({ ...manifest.extraSpawnEnv }) }

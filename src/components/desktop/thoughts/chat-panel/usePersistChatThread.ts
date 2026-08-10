@@ -8,6 +8,13 @@ function serializeMessages(msgs: MobileTranscriptEntry[]) {
   return serializeTranscriptForStorage(msgs);
 }
 
+export function publishPersistedChatHistory(threadId: string): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent('o8:chat-history-updated', {
+    detail: { threadId },
+  }));
+}
+
 export function usePersistChatThread(resolvedRepoPath: string | null, projectId: string | null) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const titlePokeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -42,7 +49,7 @@ export function usePersistChatThread(resolvedRepoPath: string | null, projectId:
     ) => {
       if (!tid) return;
       try {
-        await fetch('/api/v2/chat-history', {
+        const response = await fetch('/api/v2/chat-history', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -55,6 +62,11 @@ export function usePersistChatThread(resolvedRepoPath: string | null, projectId:
             title: options?.title ?? undefined,
           }),
         });
+        if (!response.ok) return;
+        // The thread-id effect fires before this first durable write and its
+        // eager sidebar refresh can race a 404. Publish again only after the
+        // POST lands so a newly spoken-to orchestrator appears in Chats.
+        publishPersistedChatHistory(tid);
         if (msgs.length >= 2) scheduleTitlePoke(tid);
       } catch {
         // silent

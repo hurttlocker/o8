@@ -8187,6 +8187,17 @@ async function bootstrapWsServer() {
               if (probe.noChangesProduced) {
                 const packetId = lane.packetId?.trim();
                 const now = new Date().toISOString();
+                const { completeReadOnlyZeroDiffLane } = await import('@/lib/orchestrator/read-only-completion');
+                const readOnlyCompletion = await completeReadOnlyZeroDiffLane(lane);
+                if (readOnlyCompletion.completed) {
+                  const label = packetId ? `Packet ${packetId}` : `Lane ${lane.id}`;
+                  const detail = `${label} completed its read-only inspection with no repository changes.`;
+                  console.log(`[supervisor] ${detail}`);
+                  return {
+                    block: true,
+                    detail,
+                  };
+                }
                 const { parkHuddleReadyZeroDiffLane } = await import('@/lib/orchestrator/huddle-zero-diff');
                 const huddlePark = await parkHuddleReadyZeroDiffLane(lane);
                 if (huddlePark.parked) {

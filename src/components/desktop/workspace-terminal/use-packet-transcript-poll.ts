@@ -46,6 +46,13 @@ export interface PacketTranscriptPollResult {
   activity: PacketTranscriptActivity | null;
 }
 
+export function shouldPollPacketTranscript(messages: MobileTranscriptEntry[]): boolean {
+  return !messages.some((entry) => (
+    entry.role === 'assistant'
+    && (entry.text.trim().length > 0 || (entry.toolCalls?.length ?? 0) > 0)
+  ));
+}
+
 /**
  * #1293 — Pure map from the normalized packet transcript (`TranscriptEvent[]`,
  * produced server-side by the SAME `normalizeCodexEvents` the AgentsTab uses)
