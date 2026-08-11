@@ -409,6 +409,53 @@ export function hasAnyAuxLeaf(layout: SessionTileLayout): boolean {
     || collectThreadLeaves(layout.root).length > 0;
 }
 
+const MAX_VISIBLE_SESSIONS = 8;
+
+/**
+ * Add a session to the layout following the outside-worker claim rules:
+ * - First session splits the chat leaf vertically.
+ * - Later sessions split the existing session leaf with the largest computed
+ *   area (stable reading-order tie-break: first leaf wins ties).
+ * - Direction is vertical when the viewport width >= height, horizontal otherwise.
+ * - Duplicate session keys and requests that would exceed MAX_VISIBLE_SESSIONS
+ *   are no-ops.
+ * - Preserves existing split ratios.
+ *
+ * viewport defaults to { width: 1, height: 1 } so callers without a DOM rect
+ * (e.g. the outside-worker claim loop) get sensible default area weights.
+ */
+export function addSessionToLayout(
+  layout: SessionTileLayout,
+  sessionKey: string,
+  viewport: SessionTileRect = { left: 0, top: 0, width: 1, height: 1 },
+): SessionTileLayout {
+  if (findSessionLeafByKey(layout.root, sessionKey)) return layout;
+  const existingLeaves = collectSessionLeaves(layout.root);
+  if (existingLeaves.length >= MAX_VISIBLE_SESSIONS) return layout;
+
+  if (existingLeaves.length === 0) {
+    return splitChatWithSession(layout, sessionKey, 'vertical');
+  }
+
+  const { leafRects } = computeSessionTileLayout(layout.root, viewport);
+  const direction: SessionTileSplitDirection = viewport.width >= viewport.height ? 'vertical' : 'horizontal';
+
+  let bestLeaf: SessionTileLeaf | null = null;
+  let bestArea = -1;
+  for (const leaf of existingLeaves) {
+    const rect = leafRects.get(leaf.id);
+    if (!rect) continue;
+    const area = rect.width * rect.height;
+    if (area > bestArea) {
+      bestArea = area;
+      bestLeaf = leaf;
+    }
+  }
+
+  const targetLeaf = bestLeaf ?? existingLeaves[0]!;
+  return splitSessionWithSession(layout, targetLeaf.id, sessionKey, direction);
+}
+
 // --- Persistence ---
 
 function isPlainSessionLeaf(value: unknown): value is SessionTileLeaf {

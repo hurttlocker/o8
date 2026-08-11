@@ -15,6 +15,7 @@ import type {
   SessionPillContextMenuRequest,
 } from '@/components/desktop/SessionVisualizer';
 import {
+  addSessionToLayout,
   clearSessionTiles,
   closeSessionLeaf,
   collectSessionKeys,
@@ -196,11 +197,7 @@ export function useSessionTiles({
       setLayout((current) => {
         let next = current;
         for (const request of requests) {
-          if (collectSessionLeaves(next.root).some((leaf) => leaf.sessionKey === request.sessionKey)) continue;
-          const existingLeaves = collectSessionLeaves(next.root);
-          next = existingLeaves.length === 0
-            ? splitChatWithSession(next, request.sessionKey, 'vertical')
-            : splitSessionWithSession(next, existingLeaves[existingLeaves.length - 1]!.id, request.sessionKey, 'vertical');
+          next = addSessionToLayout(next, request.sessionKey);
         }
         return next;
       });
