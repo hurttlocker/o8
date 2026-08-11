@@ -1,9 +1,10 @@
 import { aggregateMissionCost } from '@/lib/orchestrator/cost-aggregator';
+import type { LaneSessionInfo } from '@/lib/orchestrator/cost-aggregator';
 import { resolveWorkerRouting } from '@/lib/agents/routing';
 import { reconcileOrchestratorControlPlaneState, withLockedState, writeOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { buildDagMetadata, buildDependencyGraph } from '@/lib/orchestrator/dag';
 import { buildRemainingLaunchBudget, runDispatchTick } from '@/lib/orchestrator/dispatch';
-import { findLaneByPacket, getLaneEvents } from '@/lib/lane/registry';
+import { findLaneByPacket, findLatestLaneByPacket, getLaneEvents } from '@/lib/lane/registry';
 import { recoveryInfoFromLaneEvents } from '@/lib/lane/recovery-info';
 import { resolveBranchPrefixSync } from '@/lib/operator/defaults';
 import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
@@ -681,7 +682,14 @@ export async function getMissionStatus(input: MissionStatusInput) {
     })
     .filter((blocker) => blocker.blockedBy.length > 0 || blocker.reason);
 
-  const cost = input.includeCost ? await aggregateMissionCost(state) : undefined;
+  const cost = input.includeCost
+    ? await aggregateMissionCost(state, new Map(
+      state.packets.map((p) => {
+        const lane = findLatestLaneByPacket(p.id);
+        return lane ? [p.id, { sessionKey: lane.sessionKey, runtime: lane.runtime } satisfies LaneSessionInfo] as const : null;
+      }).filter(Boolean) as Array<readonly [string, LaneSessionInfo]>,
+    ))
+    : undefined;
 
   return {
     missionId: state.missionId || '',

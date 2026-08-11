@@ -25,6 +25,16 @@ export interface MissionCostSummary {
   tokensByRuntime: Record<OrchestratorRuntime, RuntimeTokenSummary>;
 }
 
+/**
+ * Minimal lane info needed for cost aggregation. Populated from the live
+ * lane registry so cost resolution is not blocked by a stale or null
+ * packet.lane binding from the orchestrator state snapshot.
+ */
+export interface LaneSessionInfo {
+  sessionKey: string | null;
+  runtime: OrchestratorRuntime;
+}
+
 type CachedTelemetrySummary = {
   inputTokens: number;
   outputTokens: number;
@@ -50,11 +60,16 @@ function emptyRuntimeTokenSummary(): RuntimeTokenSummary {
   };
 }
 
-function buildEmptyPacketCostSummary(packet: OrchestratorPacket): PacketCostSummary {
+function buildEmptyPacketCostSummary(
+  packet: OrchestratorPacket,
+  laneInfo?: LaneSessionInfo | null,
+): PacketCostSummary {
+  const sessionKey = laneInfo?.sessionKey?.trim() || packet.lane?.sessionKey?.trim() || null;
+  const runtime = laneInfo?.runtime ?? packet.lane?.runtime ?? packet.runtime;
   return {
     packetId: packet.id,
-    sessionKey: packet.lane?.sessionKey?.trim() || null,
-    runtime: packet.lane?.runtime ?? packet.runtime,
+    sessionKey,
+    runtime,
     model: null,
     inputTokens: 0,
     outputTokens: 0,
@@ -63,7 +78,7 @@ function buildEmptyPacketCostSummary(packet: OrchestratorPacket): PacketCostSumm
   };
 }
 
-function runtimeFromSessionKey(sessionKey: string | null | undefined): OrchestratorRuntime | null {
+export function runtimeFromSessionKey(sessionKey: string | null | undefined): OrchestratorRuntime | null {
   const normalized = sessionKey?.trim() ?? '';
   if (!normalized) {
     return null;
@@ -81,7 +96,10 @@ function runtimeFromSessionKey(sessionKey: string | null | undefined): Orchestra
   if (normalized.startsWith('gemini:')) {
     return 'gemini';
   }
-  if (normalized.startsWith('opencode:')) {
+  if (
+    normalized.startsWith('opencode:')
+    || normalized.startsWith('opencode-owned:')
+  ) {
     return 'opencode';
   }
   return null;
@@ -90,14 +108,15 @@ function runtimeFromSessionKey(sessionKey: string | null | undefined): Orchestra
 async function resolvePacketTelemetry(
   packet: OrchestratorPacket,
   cache: Map<string, CachedTelemetrySummary>,
+  laneInfo?: LaneSessionInfo | null,
 ): Promise<PacketCostSummary> {
-  const fallback = buildEmptyPacketCostSummary(packet);
+  const fallback = buildEmptyPacketCostSummary(packet, laneInfo);
   const sessionKey = fallback.sessionKey;
   if (!sessionKey) {
     return fallback;
   }
 
-  const runtime = runtimeFromSessionKey(sessionKey) ?? packet.lane?.runtime ?? packet.runtime;
+  const runtime = runtimeFromSessionKey(sessionKey) ?? laneInfo?.runtime ?? packet.lane?.runtime ?? packet.runtime;
   const cached = cache.get(sessionKey);
   if (cached) {
     return {
@@ -156,9 +175,17 @@ async function resolvePacketTelemetry(
   }
 }
 
-export async function aggregateMissionCost(state: OrchestratorMissionState): Promise<MissionCostSummary> {
+export async function aggregateMissionCost(
+  state: OrchestratorMissionState,
+  laneByPacketId?: Map<string, LaneSessionInfo> | null,
+): Promise<MissionCostSummary> {
   const cache = new Map<string, CachedTelemetrySummary>();
-  const packetCosts = await Promise.all(state.packets.map((packet) => resolvePacketTelemetry(packet, cache)));
+  const packetCosts = await Promise.all(
+    state.packets.map((packet) => {
+      const laneInfo = laneByPacketId?.get(packet.id) ?? null;
+      return resolvePacketTelemetry(packet, cache, laneInfo);
+    }),
+  );
 
   const tokensByRuntime: Record<OrchestratorRuntime, RuntimeTokenSummary> = {
     codex: emptyRuntimeTokenSummary(),
