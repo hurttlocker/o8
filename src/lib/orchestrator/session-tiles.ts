@@ -416,7 +416,8 @@ const MAX_VISIBLE_SESSIONS = 8;
  * - First session splits the chat leaf vertically.
  * - Later sessions split the existing session leaf with the largest computed
  *   area (stable reading-order tie-break: first leaf wins ties).
- * - Direction is vertical when the viewport width >= height, horizontal otherwise.
+ * - Direction follows the selected leaf: vertical when it is at least as wide
+ *   as it is tall, horizontal otherwise.
  * - Duplicate session keys and requests that would exceed MAX_VISIBLE_SESSIONS
  *   are no-ops.
  * - Preserves existing split ratios.
@@ -438,9 +439,9 @@ export function addSessionToLayout(
   }
 
   const { leafRects } = computeSessionTileLayout(layout.root, viewport);
-  const direction: SessionTileSplitDirection = viewport.width >= viewport.height ? 'vertical' : 'horizontal';
 
   let bestLeaf: SessionTileLeaf | null = null;
+  let bestRect: SessionTileRect | null = null;
   let bestArea = -1;
   for (const leaf of existingLeaves) {
     const rect = leafRects.get(leaf.id);
@@ -449,10 +450,14 @@ export function addSessionToLayout(
     if (area > bestArea) {
       bestArea = area;
       bestLeaf = leaf;
+      bestRect = rect;
     }
   }
 
   const targetLeaf = bestLeaf ?? existingLeaves[0]!;
+  const direction: SessionTileSplitDirection = bestRect && bestRect.width < bestRect.height
+    ? 'horizontal'
+    : 'vertical';
   return splitSessionWithSession(layout, targetLeaf.id, sessionKey, direction);
 }
 
