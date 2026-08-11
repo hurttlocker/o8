@@ -417,16 +417,12 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
 
     const geminiKey = process.env.GOOGLE_AI_API_KEY ?? null;
     const openRouterKey = process.env.OPENROUTER_API_KEY ?? null;
-    // Founder/paid managed-inference route (the zero-setup perk): the same
-    // `/v1/inference` proxy the Brain uses, verified to stream OpenRouter-format
-    // SSE for the free chain. Lets a signed-in founder run the o8 model with NO
-    // local keys — the packaged app has none, which is why the model was dead
-    // on every real install (report BCJBBJ). Only take the proxy route here;
-    // local/BYO-key routes are handled by the env-key paths below.
-    const inferenceRoute = await resolveOpenRouterRoute().catch(() => null);
-    const operatorProxy = inferenceRoute?.via === 'proxy'
-      ? { url: inferenceRoute.url, headers: inferenceRoute.headers }
-      : null;
+    // Resolve the same OpenAI-compatible route the Brain uses: managed proxy,
+    // local runtime, or an encrypted stored BYOK key. Credentials stay inside
+    // the resolver-provided headers, so this route never needs to unwrap them.
+    const inferenceRoute = await resolveOpenRouterRoute({ provisionInstallAllowance: true }).catch(() => null);
+    const operatorEndpoint = inferenceRoute ? { url: inferenceRoute.url, headers: inferenceRoute.headers } : null;
+    const localOperatorModel = inferenceRoute?.via === 'local' ? inferenceRoute.model?.trim() || null : null;
     const paidPlan = getEntitlementSync().plan !== 'free';
     // Absent tier = auto: founders default High (Gemini), free defaults Low.
     const wantsLow = requestedThinkingEffort === 'low';
@@ -470,16 +466,16 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
       geminiQuotaExhausted = true;
     }
 
-    // Free chain — runs when there's ANY way to reach it: a founder's managed
-    // proxy (zero keys), or a direct OpenRouter key (dev box / BYOK). The proxy
-    // wins when present; `endpoint` overrides the destination so `apiKey` is
-    // unused on that path.
-    if (operatorProxy || openRouterKey) {
+    // OpenAI-compatible chain — the resolved endpoint wins over the legacy env
+    // fallback. Local runtimes receive their configured model exactly once;
+    // OpenRouter and the managed proxy retain the two-model fallback chain.
+    if (operatorEndpoint || openRouterKey) {
       let lastFailure: Response | null = null;
-      for (const freeModel of OPERATOR_FREE_OPENROUTER_MODELS) {
+      const operatorModels = localOperatorModel ? [localOperatorModel] : OPERATOR_FREE_OPENROUTER_MODELS;
+      for (const freeModel of operatorModels) {
         const response = await streamOpenRouterFallback({
           apiKey: openRouterKey ?? '',
-          endpoint: operatorProxy,
+          endpoint: operatorEndpoint,
           messages,
           model: freeModel,
           auth,

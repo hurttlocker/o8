@@ -10,7 +10,11 @@ import { proxyBaseUrl } from '@/lib/cortex/qa/llm/inference-route';
 import { getOrCreateInstallId } from '@/lib/entitlement/bootstrap';
 import { clearFounderRecord, writeFounderRecord } from '@/lib/entitlement/founder';
 import { tokenIssuedAt } from '@/lib/entitlement/identity-guards';
-import { clearCachedEntitlement, verifyLicense, writeCachedEntitlement } from '@/lib/entitlement/license';
+import {
+  clearCachedAccountEntitlement,
+  verifyLicense,
+  writeCachedEntitlement,
+} from '@/lib/entitlement/license';
 import { getEntitlement } from '@/lib/entitlement/store';
 import {
   bumpSignInEpoch,
@@ -120,12 +124,12 @@ async function syncManagedGithubApp(sessionToken: string): Promise<void> {
 }
 
 async function clearSignedOutEntitlement(reason: string, status = 200) {
-  clearCachedEntitlement();
+  clearCachedAccountEntitlement();
   clearFounderRecord();
   clearManagedGithubState();
   clearActiveIdentity();
   const entitlement = await getEntitlement();
-  return NextResponse.json({ ok: false, reason, plan: entitlement.plan, source: 'none' }, { status });
+  return NextResponse.json({ ok: false, reason, plan: entitlement.plan, source: entitlement.source }, { status });
 }
 
 /**
@@ -236,10 +240,10 @@ export async function POST(request: Request) {
       // A fresh authenticated session for this account is confirmed — the
       // sign-out marker has served its purpose (#1483).
       clearAuthSignOutMarker();
-      clearCachedEntitlement();
+      clearCachedAccountEntitlement();
       clearFounderRecord();
       const entitlement = await getEntitlement();
-      return NextResponse.json({ ok: true, plan: entitlement.plan, source: 'none' });
+      return NextResponse.json({ ok: true, plan: entitlement.plan, source: entitlement.source });
     }
     if (!res.ok) {
       return NextResponse.json({ ok: false, reason: `license_server_${res.status}` });

@@ -13,14 +13,12 @@ import {
 import { getDataDir } from '@/lib/data-dir-migration';
 
 /**
- * Optional first-run hosted-account issuance (epic #1249, monetization plan
+ * On-demand hosted allowance issuance (epic #1249, monetization plan
  * §11).
  *
- * A fresh install requests a FREE token bound to a stable per-install id from
- * the hosted service (default https://api.o8.run since the free-without-sign-in
- * ruling 2026-08-06 — the token is what lets the o8 model answer with zero
- * setup). Pure-BYO installs opt out with O8_PROXY_URL=off, in which case the
- * canonical store simply resolves the plan to `free` without network activity.
+ * When the user invokes the o8 managed model, a keyless install requests a FREE
+ * token bound to a stable per-install id. Normal startup, local inference, and
+ * BYOK stay offline. Pure-BYO installs can also opt out with O8_PROXY_URL=off.
  *
  * Fail-soft by design: offline / server error → bounded no-op with a cooldown.
  * NEVER overwrites an existing token (especially a paid one) and NEVER blocks

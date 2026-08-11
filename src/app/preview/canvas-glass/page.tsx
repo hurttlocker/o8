@@ -4305,7 +4305,7 @@ export default function CanvasGlassPreviewPage() {
                 </>
               ) : (
                 <>
-                  {/* Signed-out / not-yet-configured — the sign-in door. */}
+                  {/* Signed-out is the complete local profile; account is optional. */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingLeft: 2, paddingRight: 2, paddingBottom: 12 }}>
                     <div aria-hidden style={{ width: 40, height: 40, borderRadius: 12, flexShrink: 0, background: 'var(--cnv-tint)', border: '1px solid var(--cnv-edge)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--cnv-ink-muted)' }}>
                       <svg style={{ width: 18, height: 18 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -4313,9 +4313,9 @@ export default function CanvasGlassPreviewPage() {
                       </svg>
                     </div>
                     <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      <span style={{ fontSize: 13.5, fontWeight: 500, letterSpacing: '-0.1px', color: 'var(--cnv-ink)' }}>Sign in</span>
+                      <span style={{ fontSize: 13.5, fontWeight: 500, letterSpacing: '-0.1px', color: 'var(--cnv-ink)' }}>Local profile</span>
                       <span style={{ fontSize: 11, fontWeight: 300, color: 'var(--cnv-ink-muted)', lineHeight: 1.45 }}>
-                        {auth.clerkEnabled ? 'Sync your identity across desktop and web.' : 'Activates once sign-in keys are set.'}
+                        Free · stored on this Mac
                       </span>
                     </div>
                   </div>
@@ -4328,9 +4328,9 @@ export default function CanvasGlassPreviewPage() {
                     onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
                   >
                     <span style={DOSSIER_TILE} aria-hidden>
-                      <svg style={{ width: 14, height: 14 }} viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.339-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.203 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.523 2 12 2Z" /></svg>
+                      <svg style={{ width: 14, height: 14 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
                     </span>
-                    Sign in with GitHub
+                    Sign in to o8
                   </button>
                 </>
               )}

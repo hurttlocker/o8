@@ -57,6 +57,7 @@ import { DiagnosticsTab } from './settings/DiagnosticsTab';
 import { AboutTab } from './settings/AboutTab';
 import { AnalyticsPage } from './AnalyticsPage';
 import { useO8Auth } from '@/components/auth/O8AuthProvider';
+import { requestO8Capability } from '@/lib/auth/capabilities';
 
 export type { SettingsTab } from './settings/shared';
 
@@ -124,7 +125,6 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
   const [deviceFlow, setDeviceFlow] = useState<GitHubDeviceFlowState | null>(null);
   const [actionBusy, setActionBusy] = useState<GitHubActionKind | null>(null);
   const [actionNote, setActionNote] = useState<string | null>(null);
-  const [connectAfterSignIn, setConnectAfterSignIn] = useState(false);
   const githubStatusLoadedRef = useRef(false);
 
   useEffect(() => {
@@ -297,24 +297,13 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
   }, [deviceFlow, pollDeviceFlow]);
 
   const connectGitHub = useCallback(() => {
-    if (auth.clerkEnabled && auth.isLoaded && !auth.signedIn) {
-      setConnectAfterSignIn(true);
-      auth.signIn();
-      return;
-    }
-    void startDeviceFlow();
+    requestO8Capability({
+      capability: 'github.local',
+      signedIn: auth.signedIn,
+      onAccountRequired: auth.signIn,
+      onReady: () => { void startDeviceFlow(); },
+    });
   }, [auth, startDeviceFlow]);
-
-  useEffect(() => {
-    if (!connectAfterSignIn || !auth.isLoaded || !auth.signedIn || loading) return;
-    setConnectAfterSignIn(false);
-    if (accounts.some((account) => account.active)) return;
-    if (!deviceFlowEnabled) {
-      setActionNote('GitHub identity connected. Use an access token to add repository and CLI access on this build.');
-      return;
-    }
-    void startDeviceFlow();
-  }, [accounts, auth.isLoaded, auth.signedIn, connectAfterSignIn, deviceFlowEnabled, loading, startDeviceFlow]);
 
   const githubConnection: GitHubConnectionProps = {
     auth,

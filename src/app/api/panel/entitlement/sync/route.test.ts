@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const authMock = vi.fn();
+const clearCachedAccountEntitlementMock = vi.fn();
 const clearCachedEntitlementMock = vi.fn();
 const clearFounderRecordMock = vi.fn();
 const getEntitlementMock = vi.fn(async () => ({ plan: 'free', flags: {}, source: 'default' }));
@@ -31,6 +32,7 @@ vi.mock('@/lib/entitlement/founder', () => ({
 }));
 
 vi.mock('@/lib/entitlement/license', () => ({
+  clearCachedAccountEntitlement: clearCachedAccountEntitlementMock,
   clearCachedEntitlement: clearCachedEntitlementMock,
   verifyLicense: verifyLicenseMock,
   writeCachedEntitlement: writeCachedEntitlementMock,
@@ -104,7 +106,8 @@ describe('entitlement sync route', () => {
     const data = await response.json();
 
     expect(data.reason).toBe('signed_out');
-    expect(clearCachedEntitlementMock).toHaveBeenCalledOnce();
+    expect(clearCachedAccountEntitlementMock).toHaveBeenCalledOnce();
+    expect(clearCachedEntitlementMock).not.toHaveBeenCalled();
     expect(clearFounderRecordMock).toHaveBeenCalledOnce();
     expect(writeCachedEntitlementMock).not.toHaveBeenCalled();
   });
@@ -132,7 +135,9 @@ describe('entitlement sync route', () => {
 
     expect(data.ok).toBe(true);
     expect(data.plan).toBe('free');
-    expect(clearCachedEntitlementMock).toHaveBeenCalledOnce();
+    expect(data.source).toBe('default');
+    expect(clearCachedAccountEntitlementMock).toHaveBeenCalledOnce();
+    expect(clearCachedEntitlementMock).not.toHaveBeenCalled();
     expect(clearFounderRecordMock).toHaveBeenCalledOnce();
     expect(writeCachedEntitlementMock).not.toHaveBeenCalled();
   });
@@ -143,7 +148,8 @@ describe('entitlement sync route', () => {
 
     expect(response.status).toBe(409);
     expect(data.reason).toBe('license_subject_mismatch');
-    expect(clearCachedEntitlementMock).toHaveBeenCalledOnce();
+    expect(clearCachedAccountEntitlementMock).toHaveBeenCalledOnce();
+    expect(clearCachedEntitlementMock).not.toHaveBeenCalled();
     expect(clearFounderRecordMock).toHaveBeenCalledOnce();
     expect(writeCachedEntitlementMock).not.toHaveBeenCalled();
     expect(writeFounderRecordMock).not.toHaveBeenCalled();

@@ -162,12 +162,6 @@ export function EntitlementProvider({ children }: { children: React.ReactNode })
       setActualPlan(coercePlan(data.actualPlan));
       setActualFounder(coerceFounder(data.actualFounder));
       setOverrideActive(data.overrideActive === true);
-      // First-run: no token yet (source 'default') → issue a free account token
-      // in the background so this install has a stable `sub` for usage
-      // attribution + can reach the managed proxy. Idempotent + fail-soft.
-      if (data.source === 'default') {
-        void fetch('/api/panel/entitlement/bootstrap', { method: 'POST' }).catch(() => {});
-      }
     } catch (error) {
       // Never crash the dashboard — fall back to free.
       console.error('[entitlement] client fetch failed, defaulting to free:', error);

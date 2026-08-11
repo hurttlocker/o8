@@ -6,7 +6,7 @@ import { getEntitlement } from '@/lib/entitlement/store';
 export const dynamic = 'force-dynamic';
 
 /**
- * POST /api/panel/entitlement/bootstrap — first-run free-account issuance.
+ * POST /api/panel/entitlement/bootstrap — on-demand free-allowance issuance.
  *
  * Idempotent: issues + caches a free token only when this install has none
  * (never overwrites a paid one). Returns the resolved { plan, flags, source }

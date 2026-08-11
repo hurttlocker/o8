@@ -4,7 +4,7 @@
  * Onboarding — Full-screen multi-step first-run experience.
  *
  * 6 steps, same glass theme throughout:
- *   1. Welcome + GitHub sign-in (feature carousel)
+ *   1. Welcome + optional o8 account sign-in (feature carousel)
  *   2. Repo picker (select which repos to manage)
  *   3. Runtime detection (auto-scan installed tools)
  *   4. Orchestrator and worker runtime selection
@@ -133,7 +133,7 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
   // onboarding because ReportIssueHost is mounted in the same dashboard tree.
   const [supportOpen, setSupportOpen] = useState(false);
 
-  // GitHub sign-in (used by the open step)
+  // Local GitHub device connection (used by the repository step)
   const [githubFlow, setGithubFlow] = useState<DeviceFlowState>({ stage: 'idle' });
   const [githubDeviceFlowEnabled, setGithubDeviceFlowEnabled] = useState(false);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);

@@ -18,6 +18,7 @@
 import 'server-only';
 
 import { resolveOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
+import { ensureFreeEntitlement } from '@/lib/entitlement/bootstrap';
 import { readCachedEntitlement } from '@/lib/entitlement/license';
 import { getEntitlementSync } from '@/lib/entitlement/store';
 import { DEFAULT_O8_API_BASE_URL } from '@/lib/hosted-service';
@@ -43,6 +44,14 @@ export interface InferenceRoute {
   via: 'direct' | 'proxy' | 'local';
   /** Optional model override for endpoints that need local model names. */
   model?: string;
+}
+
+export interface ResolveOpenRouterRouteOptions {
+  /**
+   * Mint an install-scoped free allowance only after the user invokes the o8
+   * managed model. Passive Brain/helpers leave this false and stay offline.
+   */
+  provisionInstallAllowance?: boolean;
 }
 
 /**
@@ -162,7 +171,9 @@ export async function probeLocalInference(baseUrl: string): Promise<LocalInferen
  * local, and only when the endpoint recently answered `/api/tags`; dead
  * endpoints are skipped so the caller can fall through to BYO-key/free tiers.
  */
-export async function resolveOpenRouterRoute(): Promise<InferenceRoute | null> {
+export async function resolveOpenRouterRoute(
+  options: ResolveOpenRouterRouteOptions = {},
+): Promise<InferenceRoute | null> {
   const token = planToken();
   if (token) {
     return {
@@ -203,9 +214,13 @@ export async function resolveOpenRouterRoute(): Promise<InferenceRoute | null> {
 
   // Free taste-allowance: no keys, no local, no paid plan — ride the managed
   // relay with the anonymous free token (relay enforces the free-chain model
-  // policy + daily cap). This is what makes a fresh install's o8 model answer
-  // out of the box.
-  const freeToken = freeAllowanceToken();
+  // policy + daily cap). Provisioning happens here only when the explicit o8
+  // model caller opts in through provisionInstallAllowance.
+  let freeToken = freeAllowanceToken();
+  if (!freeToken && options.provisionInstallAllowance) {
+    await ensureFreeEntitlement();
+    freeToken = freeAllowanceToken();
+  }
   if (freeToken) {
     return {
       url: `${proxyBaseUrl()}/v1/inference`,

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 import type { O8AuthState } from '@/components/auth/O8AuthProvider';
+import { requestO8Capability } from '@/lib/auth/capabilities';
 import {
   type GitHubAccount,
   type GitHubBrokerStatus,
@@ -73,18 +74,13 @@ export function GitHubConnectionSections({
 
   const activeAccount = accounts.find((a) => a.active) ?? null;
   const connected = !!activeAccount;
-  const identityConnected = auth.signedIn || (!auth.clerkEnabled && connected);
-  const identityName = auth.user?.name?.trim()
-    || auth.user?.email?.trim()
-    || activeAccount?.name
+  const identityName = activeAccount?.name
     || activeAccount?.login
     || 'GitHub';
-  const identityAvatar = auth.user?.avatarUrl || activeAccount?.avatarUrl || null;
-  const needsConnect = !connected || (auth.clerkEnabled && auth.isLoaded && !auth.signedIn);
+  const identityAvatar = activeAccount?.avatarUrl || null;
+  const needsConnect = !connected;
   const connectDisabled = actionBusy === 'login_device'
-    || (auth.clerkEnabled && !auth.isLoaded)
-    || (auth.signedIn && !connected && !deviceFlowEnabled)
-    || (!auth.clerkEnabled && !deviceFlowEnabled);
+    || !deviceFlowEnabled;
 
   const appConfigured = !!(broker && broker.configured);
   const appConnected = !!(broker
@@ -133,6 +129,15 @@ export function GitHubConnectionSections({
     ? `https://github.com/settings/installations/${broker.installationId}`
     : broker?.managedInstallUrl || 'https://github.com/settings/apps/new';
 
+  function useManagedApp() {
+    requestO8Capability({
+      capability: 'github.managed',
+      signedIn: auth.signedIn,
+      onAccountRequired: auth.signIn,
+      onReady: () => openExternalUrl(installUrl),
+    });
+  }
+
   return (
     <>
       {actionNote ? (
@@ -177,10 +182,10 @@ export function GitHubConnectionSections({
             <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 16, fontWeight: 500, letterSpacing: '-0.01em', color: 'var(--t-text)' }}>
-                  {identityConnected || connected ? identityName : 'Connect GitHub'}
+                  {connected ? identityName : 'Connect GitHub'}
                 </span>
-                <ValuePill tone={identityConnected && connected ? 'success' : 'default'}>
-                  {identityConnected && connected ? 'Connected' : 'Setup incomplete'}
+                <ValuePill tone={connected ? 'success' : 'default'}>
+                  {connected ? 'Connected' : 'Not connected'}
                 </ValuePill>
               </div>
               <span style={{ fontSize: 12.5, fontWeight: 300, color: 'var(--t-text-faint)' }}>
@@ -211,25 +216,15 @@ export function GitHubConnectionSections({
 
           <SettingsRow
             icon={<GitHubIcon size={16} />}
-            label="Identity"
-            subtitle={identityConnected
-              ? (auth.user?.email || `Signed in as ${identityName}`)
-              : auth.clerkEnabled
-                ? 'Sign in once to use the same identity across desktop and web'
-                : connected
-                  ? `Local identity from @${activeAccount!.login}`
-                  : 'Identity sign-in is unavailable in this build'}
+            label="GitHub identity"
+            subtitle={connected
+              ? `Connected locally as @${activeAccount!.login}`
+              : 'Connect only this machine; an o8 account is not required'}
             accessory={
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <ValuePill tone={identityConnected ? 'success' : 'default'}>
-                  {identityConnected ? 'Connected' : 'Not connected'}
+                <ValuePill tone={connected ? 'success' : 'default'}>
+                  {connected ? 'Connected' : 'Not connected'}
                 </ValuePill>
-                {auth.signedIn ? (
-                  <>
-                    <RamsButton variant="ghost" onClick={auth.openManageAccount}>Manage</RamsButton>
-                    <RamsButton variant="ghost" onClick={() => { void auth.signOut(); }}>Sign out</RamsButton>
-                  </>
-                ) : null}
               </div>
             }
             divider
@@ -380,9 +375,26 @@ export function GitHubConnectionSections({
                 <ValuePill tone={appConnected ? 'success' : 'default'}>
                   {appConnected ? 'Installed' : appConfigured ? 'Needs setup' : 'Not installed'}
                 </ValuePill>
-                <a href={installUrl} target="_blank" rel="noreferrer" style={primaryLinkStyle(false)}>
-                  {appConnected ? 'Manage' : managedInstall ? 'Install' : 'Set up'}
-                </a>
+                {appConnected ? (
+                  <a href={installUrl} target="_blank" rel="noreferrer" style={primaryLinkStyle(false)}>
+                    Manage
+                  </a>
+                ) : managedInstall ? (
+                  <RamsButton variant="ghost" onClick={useManagedApp}>Install</RamsButton>
+                ) : appConfigured ? (
+                  <a href={installUrl} target="_blank" rel="noreferrer" style={primaryLinkStyle(false)}>
+                    Set up
+                  </a>
+                ) : (
+                  <>
+                    {auth.clerkEnabled ? (
+                      <RamsButton variant="ghost" onClick={useManagedApp}>Use managed app</RamsButton>
+                    ) : null}
+                    <a href={installUrl} target="_blank" rel="noreferrer" style={primaryLinkStyle(false)}>
+                      Set up locally
+                    </a>
+                  </>
+                )}
               </div>
             }
             divider={appConfigured && !appConnected}
@@ -426,7 +438,7 @@ export function GitHubConnectionSections({
           ) : null}
         </SettingsGroup>
         <GroupFootnote>
-          Connect GitHub once, then use the status rows above to see exactly which capabilities are ready on this machine. The automation app is optional.
+          The local connection stays on this machine and does not require an o8 account. The automation app is optional.
         </GroupFootnote>
       </section>
     </>

@@ -34,7 +34,7 @@ async function readDeviceFlowEnabled(): Promise<boolean> {
 }
 
 describe('GET /api/panel/github-status — deviceFlowEnabled', () => {
-  it('is false when GITHUB_OAUTH_CLIENT_ID is unset (the packaged-build case)', async () => {
+  it('is false when a build does not provide a GitHub OAuth client id', async () => {
     delete process.env.GITHUB_OAUTH_CLIENT_ID;
     expect(await readDeviceFlowEnabled()).toBe(false);
   });

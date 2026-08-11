@@ -34,6 +34,8 @@ vi.mock('@/lib/auth/principal', () => ({ resolveRequestPrincipal: mocks.resolveR
 
 import { POST } from '@/app/api/panel/github-device/route';
 
+const ORIGINAL_GITHUB_CLIENT_ID = process.env.GITHUB_OAUTH_CLIENT_ID;
+
 function actionRequest(body: Record<string, unknown>) {
   return new Request('http://localhost/api/panel/github-device', {
     method: 'POST',
@@ -44,9 +46,35 @@ function actionRequest(body: Record<string, unknown>) {
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
+  if (ORIGINAL_GITHUB_CLIENT_ID === undefined) delete process.env.GITHUB_OAUTH_CLIENT_ID;
+  else process.env.GITHUB_OAUTH_CLIENT_ID = ORIGINAL_GITHUB_CLIENT_ID;
 });
 
 describe('POST /api/panel/github-device — consolidated GitHub credential actions', () => {
+  it('starts the local device flow directly without an o8 account session', async () => {
+    process.env.GITHUB_OAUTH_CLIENT_ID = 'Iv1.local-device-client';
+    const githubFetch = vi.fn(async () => Response.json({
+      device_code: 'device-secret',
+      user_code: 'ABCD-EFGH',
+      verification_uri: 'https://github.com/login/device',
+      expires_in: 900,
+      interval: 5,
+    }));
+    vi.stubGlobal('fetch', githubFetch);
+
+    const response = await POST(actionRequest({ action: 'start' }));
+    const body = await response.json() as { status?: string; userCode?: string };
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ status: 'pending', userCode: 'ABCD-EFGH' });
+    expect(githubFetch).toHaveBeenCalledWith(
+      'https://github.com/login/device/code',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(mocks.findOrCreateByGithub).not.toHaveBeenCalled();
+  });
+
   it('accepts a PAT through the device surface and creates the same local identity session', async () => {
     const response = await POST(actionRequest({ action: 'login_token', token: 'ghp_test' }));
     const body = await response.json() as { ok?: boolean; status?: string; user?: { githubUsername?: string } };

@@ -6,7 +6,11 @@ import path from 'node:path';
 import { importSPKI, jwtVerify, errors as joseErrors } from 'jose';
 
 import { clearFounderRecord } from './founder';
-import { readJwtIdentityClaims, shouldDropCachedLicenseForSubject } from './identity-guards';
+import {
+  isClerkUserSubject,
+  readJwtIdentityClaims,
+  shouldDropCachedLicenseForSubject,
+} from './identity-guards';
 import { getEntitlementPath } from './store';
 import type { Plan } from './types';
 import { DEFAULT_O8_API_BASE_URL } from '@/lib/hosted-service';
@@ -34,11 +38,10 @@ const DEFAULT_GRACE_DAYS = 30;
 
 /**
  * The hosted license service base URL. O8_PROXY_URL is the shared
- * hosted-service configuration; an ABSENT value now falls back to the public
- * default — a fresh install must be able to mint its anonymous free-allowance
- * token with zero setup (free-without-sign-in ruling 2026-08-06), the same way
- * the sign-in sync path already defaults via proxyBaseUrl(). Pure-BYO installs
- * opt out explicitly with O8_PROXY_URL=off (also: none|disabled|0|false).
+ * hosted-service configuration; an ABSENT value falls back to the public
+ * default so an explicit o8 managed-model request can mint its anonymous free
+ * allowance with zero setup. Pure-BYO installs opt out explicitly with
+ * O8_PROXY_URL=off (also: none|disabled|0|false).
  */
 export function configuredLicenseServerBaseUrl(): string | null {
   const configured = process.env.O8_PROXY_URL?.trim();
@@ -292,4 +295,19 @@ export function clearCachedEntitlement(): void {
   } catch (error) {
     console.error('[entitlement] Failed to clear entitlement cache:', error);
   }
+}
+
+/**
+ * Clear only an account-portable entitlement during o8 account sign-out.
+ * Install-scoped free allowance tokens and manually-applied machine licenses
+ * are local state, so signing out of Clerk must not discard them.
+ */
+export function clearCachedAccountEntitlement(): boolean {
+  const cached = readCachedEntitlement();
+  const token = cached?.licenseKey?.trim();
+  if (!token) return false;
+  const { subject } = readJwtIdentityClaims(token);
+  if (!isClerkUserSubject(subject)) return false;
+  clearCachedEntitlement();
+  return true;
 }

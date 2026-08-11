@@ -7,6 +7,9 @@ vi.mock('@/lib/cortex/qa/llm/byok-keys', () => ({
 vi.mock('@/lib/entitlement/license', () => ({
   readCachedEntitlement: vi.fn(),
 }));
+vi.mock('@/lib/entitlement/bootstrap', () => ({
+  ensureFreeEntitlement: vi.fn(async () => {}),
+}));
 // planToken() now gates the managed proxy on the RESOLVED entitlement (which
 // applies the #1517 view-as clamp), not the raw file plan — so drive
 // getEntitlementSync too. The `setEnt` helper keeps both mocks consistent.
@@ -20,6 +23,7 @@ vi.mock('@/lib/operator/defaults', () => ({
 
 import { resolveOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
 import { readCachedEntitlement } from '@/lib/entitlement/license';
+import { ensureFreeEntitlement } from '@/lib/entitlement/bootstrap';
 import { getEntitlementSync } from '@/lib/entitlement/store';
 import { resolveFlags } from '@/lib/entitlement/flags';
 import type { Plan } from '@/lib/entitlement/types';
@@ -36,6 +40,7 @@ import {
 
 const mockKey = vi.mocked(resolveOpenRouterKey);
 const mockEnt = vi.mocked(readCachedEntitlement);
+const mockEnsureFreeEntitlement = vi.mocked(ensureFreeEntitlement);
 const mockStore = vi.mocked(getEntitlementSync);
 const mockLocalBaseUrl = vi.mocked(resolveLocalInferenceBaseUrlSync);
 const mockLocalChatModel = vi.mocked(resolveLocalChatModelSync);
@@ -92,6 +97,7 @@ describe('inference-route', () => {
       expect(route?.via).toBe('direct');
       expect(route?.url).toContain('openrouter.ai');
       expect(route?.headers.Authorization).toBe('Bearer sk-local-key');
+      expect(mockEnsureFreeEntitlement).not.toHaveBeenCalled();
     });
 
     it('routes to PROXY when no local key but a plan token exists', async () => {
@@ -109,6 +115,21 @@ describe('inference-route', () => {
       mockKey.mockResolvedValue(null);
       setEnt(null);
       expect(await resolveOpenRouterRoute()).toBeNull();
+      expect(mockEnsureFreeEntitlement).not.toHaveBeenCalled();
+    });
+
+    it('provisions the install allowance only for an explicit managed request', async () => {
+      mockKey.mockResolvedValue(null);
+      setEnt(null);
+      mockEnsureFreeEntitlement.mockImplementationOnce(async () => {
+        setEnt({ plan: 'free', licenseKey: 'fresh.install.token' });
+      });
+
+      const route = await resolveOpenRouterRoute({ provisionInstallAllowance: true });
+
+      expect(mockEnsureFreeEntitlement).toHaveBeenCalledOnce();
+      expect(route?.via).toBe('proxy');
+      expect(route?.headers.Authorization).toBe('Bearer fresh.install.token');
     });
 
     it('routes plan-token users to PROXY before a local OpenRouter key', async () => {
@@ -161,6 +182,7 @@ describe('inference-route', () => {
         'http://localhost:11434/api/tags',
         expect.objectContaining({ method: 'GET' }),
       );
+      expect(mockEnsureFreeEntitlement).not.toHaveBeenCalled();
     });
 
     it('falls through to DIRECT when configured local is dead', async () => {

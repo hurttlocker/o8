@@ -13,7 +13,6 @@ import {
   Download,
   ExternalLink,
   Gauge,
-  Github,
   Globe,
   LogOut,
   MessageSquare,
@@ -52,9 +51,7 @@ const DISCORD_URL = 'https://discord.gg/gH3UbbTJ7k';
 const PANEL_BG = 'var(--t-panel-solid, var(--t-panel, rgba(255,255,255,0.92)))';
 const ROW_HOVER_BG = 'var(--t-panel-hover, rgba(15, 23, 42, 0.04))';
 const SUBTLE_BG = 'var(--t-bg-card, rgba(15, 23, 42, 0.04))';
-const SELECTED_BG = 'var(--t-input-bg, var(--t-bg-card))';
 const BORDER = 'var(--t-panel-border, rgba(15, 23, 42, 0.1))';
-const SELECTED_BORDER = 'var(--t-accent-border, var(--t-panel-border))';
 const TEXT = 'var(--t-text, #0f172a)';
 const MUTED = 'var(--t-text-muted, #64748b)';
 const FAINT = 'color-mix(in srgb, var(--t-text-muted, #64748b) 62%, transparent)';
@@ -368,10 +365,8 @@ function FoundingSerialChip({ operatorNumber }: { operatorNumber: number }) {
 }
 
 /**
- * Identity header for the quick drawer. Replaces the static "Local desktop
- * profile / o8" header once Clerk is configured: signed-out shows a GitHub
- * sign-in CTA, signed-in shows avatar + name/email + Manage account / Sign out.
- * Builds without a Clerk key keep the original local-profile header.
+ * Identity header for the quick drawer. Signed-out is a complete local profile;
+ * account sign-in stays available as an optional account action.
  */
 function AccountSection({ auth }: { auth: O8AuthState }) {
   const { founder } = useEntitlement();
@@ -387,7 +382,7 @@ function AccountSection({ auth }: { auth: O8AuthState }) {
     if (auth.signedIn && authError) clearDesktopAuthError();
   }, [auth.signedIn, authError]);
 
-  if (!auth.clerkEnabled) {
+  if (!auth.signedIn) {
     return (
       <>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 7px 1px', minWidth: 0 }}>
@@ -397,26 +392,17 @@ function AccountSection({ auth }: { auth: O8AuthState }) {
               Local desktop profile
             </div>
             <div style={{ color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              o8
+              Free
             </div>
           </div>
           {founder ? <FoundingSerialChip operatorNumber={founder.operatorNumber} /> : null}
         </div>
-        <div style={separatorStyle()} />
-      </>
-    );
-  }
-
-  if (!auth.signedIn) {
-    return (
-      <>
-        <RowButton onClick={auth.signIn}>
-          <IconFrame><Github size={13} /></IconFrame>
-          <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Sign in with GitHub</span>
-          {/* The founder entitlement is machine-local and survives sign-out, so
-              the serial shows here too — signing out is not un-founding (#1624). */}
-          {founder ? <FoundingSerialChip operatorNumber={founder.operatorNumber} /> : null}
-        </RowButton>
+        {auth.clerkEnabled ? (
+          <RowButton onClick={auth.signIn}>
+            <IconFrame><CircleUser size={13} /></IconFrame>
+            <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Sign in to o8</span>
+          </RowButton>
+        ) : null}
         {authError ? <SignInErrorCard key={authError.id} authError={authError} onRetry={auth.signIn} /> : null}
         <div style={separatorStyle()} />
       </>
