@@ -399,6 +399,16 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
               lane: huddlePark.lane ?? undefined,
             };
           }
+          const { shouldDeferCompletionForLiveRuntime } = await import('@/lib/supervisor/completion-liveness');
+          if (await shouldDeferCompletionForLiveRuntime(lane)) {
+            console.warn(`[lane] request_review: ${command.laneId} has no diff yet, but its owned runtime is still live. Keeping it running.`);
+            return {
+              ok: false,
+              laneId: command.laneId,
+              note: 'runtime_still_running',
+              lane,
+            };
+          }
           console.warn(`[lane] request_review: ${command.laneId} has 0 commits ahead of ${baseBranch} — runtime reported success but produced no diff. Marking failed.`);
           const failed = setLaneStatus(command.laneId, 'failed', 'system', 'zero_diff_failed');
           return {

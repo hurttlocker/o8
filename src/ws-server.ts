@@ -8154,6 +8154,20 @@ async function bootstrapWsServer() {
             return;
           }
 
+          if (outcome === 'completed') {
+            const { shouldDeferCompletionForLiveRuntime } = await import('@/lib/supervisor/completion-liveness');
+            if (await shouldDeferCompletionForLiveRuntime(lane)) {
+              const packetId = lane.packetId?.trim();
+              const label = packetId ? `Packet ${packetId}` : `Lane ${lane.id}`;
+              const detail = `${label} still has a live owned runtime process. Deferring completion.`;
+              console.warn(`[supervisor] ${detail}`);
+              return {
+                resume: true,
+                detail,
+              };
+            }
+          }
+
           const completionCwd = lane.worktreePath ?? lane.repoPath;
           try {
             const { persistRuntimeSessionCost } = await import('@/lib/orchestrator/cost-persistence');
