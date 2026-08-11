@@ -139,4 +139,35 @@ describe('#1635 swarm status reconciliation', () => {
     expect(markup).toContain('runtime_process_exit');
     expect(markup).not.toContain('Running');
   });
+
+  it('repairs a stale process-exit failure when the owned runtime completed cleanly', async () => {
+    const packetId = 'pkt-runtime-clean-exit';
+    const lane = createLane({
+      repoPath: dataDir,
+      branch: `packet/${packetId}`,
+      runtime: 'qoder',
+      packetId,
+      sessionKey: `qoder-owned:${packetId}`,
+    });
+    setLaneStatus(lane.id, 'reviewing', 'system', 'review_ready');
+    persistStaleMission({
+      ...packetFixture(packetId, lane.id),
+      status: 'failed',
+      blockedReason: 'runtime_process_exit',
+    });
+    recordLaneEvent(lane.id, 'runtime_process_exit', 'system', {
+      runtime: 'qoder',
+      exitCode: 0,
+      signal: null,
+      classification: 'clean-exit',
+      completedTurn: true,
+    });
+
+    const packet = await readMissionPacket(packetId);
+    const markup = renderCard(packet);
+
+    expect(packet.status).toBe('awaiting_review');
+    expect(packet.blockedReason).toBeNull();
+    expect(markup).not.toContain('Failed');
+  });
 });

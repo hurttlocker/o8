@@ -27,6 +27,17 @@ function collapseInternalTaskPayload(text: string) {
   return text;
 }
 
+function collapseInternalSelfReview(text: string) {
+  return text.replace(/\s*<self-review>\s*([\s\S]*?)\s*<\/self-review>\s*/gi, (_match, raw: string) => {
+    try {
+      const parsed = JSON.parse(raw) as { summary?: unknown };
+      return typeof parsed.summary === 'string' ? parsed.summary.trim() : '';
+    } catch {
+      return '';
+    }
+  });
+}
+
 function redactSensitiveTranscriptText(text: string) {
   let next = text;
   next = next.replace(/(\bAuthorization\s*:\s*)Bearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, '$1Bearer [redacted]');
@@ -38,5 +49,5 @@ function redactSensitiveTranscriptText(text: string) {
 }
 
 export function sanitizeTranscriptText(text: string) {
-  return redactSensitiveTranscriptText(stripInternalProtocolMarkup(collapseInternalTaskPayload(text)));
+  return redactSensitiveTranscriptText(stripInternalProtocolMarkup(collapseInternalSelfReview(collapseInternalTaskPayload(text))));
 }

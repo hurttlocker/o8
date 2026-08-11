@@ -1020,7 +1020,7 @@ export function reconcileOrchestratorMissionState(
       };
     }
 
-    if (packet.status === 'failed') {
+    if (packet.status === 'failed' && (!domainLane || domainLane.status === 'failed')) {
       next.status = 'failed';
       next.blockedReason = packet.blockedReason ?? null;
       return next;

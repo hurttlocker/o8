@@ -12,6 +12,8 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import type { FleetAgent } from '@/components/desktop/thoughts/types';
+import { DesktopAgentMessage } from '@/components/desktop/DesktopAgentMessage';
+import { mergeAdjacentToolOnlyEntries } from '@/components/desktop/thoughts/chat-panel/ToolCallChipCluster';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { orchestratorRuntimeTone, agentDisplayLabel } from '@/lib/orchestrator/display';
@@ -24,7 +26,6 @@ import {
 import { bootstrapTranscripts } from '@/lib/transcripts/bootstrap';
 import { transcriptStore } from '@/lib/transcripts/store';
 import { useTranscript } from '@/lib/transcripts/useTranscript';
-import { PacketHeaderCard } from './PacketHeaderCard';
 
 interface AgentTilePaneProps {
   sessionKey: string;
@@ -35,18 +36,20 @@ interface AgentTilePaneProps {
   onFocus: (sessionKey: string) => void;
 }
 
-type VisualStatus = 'running' | 'waiting' | 'idle' | 'error';
+type VisualStatus = 'running' | 'waiting' | 'review' | 'idle' | 'error';
 
 const STATUS_META: Record<VisualStatus, { color: string; label: string }> = {
   running: { color: '#22c55e', label: 'Running' },
   waiting: { color: '#f59e0b', label: 'Waiting' },
+  review: { color: '#FF5A1F', label: 'Review' },
   idle: { color: '#94a3b8', label: 'Idle' },
   error: { color: '#ef4444', label: 'Error' },
 };
 
-function classifyStatus(rawStatus?: string): VisualStatus {
+export function classifyAgentTileStatus(rawStatus: string | undefined): VisualStatus {
   const value = (rawStatus ?? '').toLowerCase();
   if (value.includes('error') || value.includes('fail')) return 'error';
+  if (value.includes('review') || value.includes('finished') || value.includes('complete')) return 'review';
   if (value.includes('wait') || value.includes('approval') || value.includes('pending')) return 'waiting';
   if (value.includes('running') || value.includes('active') || value.includes('working')) return 'running';
   return 'idle';
@@ -73,19 +76,40 @@ function displayName(agent: FleetAgent | null, packet: OrchestratorPacket | null
   return agentDisplayLabel({ name: agent?.name ?? packet?.title, sessionKey });
 }
 
-function roleLabel(role: MobileTranscriptEntry['role']): string {
-  if (role === 'assistant') return 'Assistant';
-  if (role === 'user') return 'User';
-  if (role === 'tool') return 'Tool';
-  return 'System';
-}
-
 function entryContent(entry: MobileTranscriptEntry): string {
   const text = entry.text.trim();
   if (text) return text;
   if (entry.compaction?.summary?.trim()) return entry.compaction.summary.trim();
   const toolCalls = entry.toolCalls ?? [];
   return toolCalls.length > 0 ? toolCalls.map((toolCall) => `tool: ${toolCall.name}`).join('\n') : '';
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function conciseWorkerPrompt(text: string, taskTitle?: string): string {
+  if (!/^## Project Brief(?:\s|$)/i.test(text)) return text;
+  const taskSection = text.match(/## Task\s+([\s\S]*)/i)?.[1];
+  if (!taskSection) return text;
+  const title = taskTitle?.trim();
+  const withoutScaffolding = title
+    ? taskSection.replace(
+      new RegExp(`^Packet:\\s*${escapeRegExp(title)}\\s+Summary:\\s*Task\\s+\\S+:\\s*${escapeRegExp(title)}\\s+`, 'i'),
+      '',
+    )
+    : taskSection.replace(/^Packet:\s*(.+?)\s+Summary:\s*Task\s+\S+:\s*\1\s+/i, '');
+  const branchIndex = withoutScaffolding.search(/\s+Branch target:/i);
+  const task = (branchIndex >= 0 ? withoutScaffolding.slice(0, branchIndex) : withoutScaffolding).trim();
+  return task || text;
+}
+
+export function normalizeAgentTileTranscript(entries: MobileTranscriptEntry[], taskTitle?: string): MobileTranscriptEntry[] {
+  return mergeAdjacentToolOnlyEntries(entries.map((entry) => {
+    if (entry.role !== 'user') return entry;
+    const text = conciseWorkerPrompt(entry.text, taskTitle);
+    return text === entry.text ? entry : { ...entry, text };
+  }));
 }
 
 // Spring curve matches Apple HIG (stiffness 400, damping 30) — used for the
@@ -116,14 +140,20 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
   const loadingFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const name = useMemo(() => displayName(agent, packet, sessionKey), [agent, packet, sessionKey]);
+  const displayEntries = useMemo(() => normalizeAgentTileTranscript(entries, name), [entries, name]);
   const runtime = useMemo(() => inferRuntime(sessionKey, agent?.runtime), [agent?.runtime, sessionKey]);
   const runtimeTone = useMemo(() => orchestratorRuntimeTone(runtime), [runtime]);
-  const status = useMemo(() => classifyStatus(agent?.status ?? packet?.status), [agent?.status, packet?.status]);
+  const status = useMemo(
+    () => classifyAgentTileStatus(agent?.status ?? packet?.status),
+    [agent?.status, packet?.status],
+  );
   const canSteer = canSteerAgent(agent);
   const shouldRefreshTranscript = shouldRefreshAgentTranscript(agent !== null, packet?.lane != null);
   const trimmedDraft = draft.trim();
   const canSend = canSteer && !sending && trimmedDraft.length > 0;
-  const lastEntryKey = entries.length > 0 ? `${entries[entries.length - 1]?.id}:${entryContent(entries[entries.length - 1]!)}` : '';
+  const lastEntryKey = displayEntries.length > 0
+    ? `${displayEntries[displayEntries.length - 1]?.id}:${entryContent(displayEntries[displayEntries.length - 1]!)}`
+    : '';
 
   // Fix #1: keep a ref in sync with latest agent so submitSteer re-derives
   // canSteer at call time, not at callback-creation time.
@@ -257,9 +287,9 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
       style={{
         flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column',
         borderRadius: 14, borderWidth: 1, borderStyle: 'solid',
-        borderColor: focused ? 'var(--t-accent-border)' : 'var(--t-border)',
-        background: 'var(--t-bg-card)',
-        boxShadow: focused ? '0 18px 38px rgba(37, 99, 235, 0.12)' : '0 12px 28px rgba(15, 23, 42, 0.06)',
+        borderColor: focused ? 'var(--t-border-hover, var(--t-border))' : 'var(--t-border)',
+        background: 'var(--t-chat-surface-bg, var(--t-panel))',
+        boxShadow: 'none',
         overflow: 'hidden',
       }}
     >
@@ -268,42 +298,28 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
           height: 36, minHeight: 36, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
           paddingTop: 0, paddingRight: 8, paddingBottom: 0, paddingLeft: 10,
           borderBottomWidth: 1, borderBottomStyle: 'solid',
-          borderBottomColor: focused ? 'var(--t-accent-border)' : 'var(--t-border)',
-          background: focused ? 'var(--t-panel)' : 'var(--t-bg-card)',
+          borderBottomColor: 'var(--t-divider-subtle, var(--t-border))',
+          background: 'transparent',
         }}
       >
         <div style={{ minWidth: 0, flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span
-            aria-hidden="true"
-            style={{
-              width: 18, height: 18, borderRadius: 9, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              background: runtimeTone.background, color: runtimeTone.color, flexShrink: 0,
-            }}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3.5" y="5.5" width="7" height="13" rx="2.25" />
-              <rect x="13.5" y="5.5" width="7" height="13" rx="2.25" />
-            </svg>
-          </span>
           <div style={{ minWidth: 0, flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
             <div
               title={name}
               style={{
                 minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                fontSize: 12, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.01em',
+                fontSize: 12.5, fontWeight: 500, color: 'var(--t-text)', letterSpacing: '-0.01em',
               }}
             >
               {name}
             </div>
             <span
               style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0,
-                paddingTop: 4, paddingRight: 8, paddingBottom: 4, paddingLeft: 8,
-                borderRadius: 12, borderWidth: 1, borderStyle: 'solid', borderColor: runtimeTone.border,
-                background: runtimeTone.background, color: runtimeTone.color, fontSize: 10, fontWeight: 700, lineHeight: 1,
+                display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0,
+                color: 'var(--t-text-secondary)', fontSize: 10.5, fontWeight: 400, lineHeight: 1,
               }}
             >
-              <span style={{ width: 6, height: 6, borderRadius: 999, background: runtimeTone.dot, flexShrink: 0 }} />
+              <span style={{ width: 4, height: 4, borderRadius: 999, background: runtimeTone.dot, flexShrink: 0 }} />
               {runtimeTone.label}
             </span>
           </div>
@@ -311,12 +327,11 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
           <span
             title={STATUS_META[status].label}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: STATUS_META[status].color, fontSize: 10, fontWeight: 700 }}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--t-text-secondary)', fontSize: 10.5, fontWeight: 400 }}
           >
             <span
               style={{
-                width: 8, height: 8, borderRadius: 999, background: STATUS_META[status].color,
-                boxShadow: status === 'running' ? `0 0 0 3px ${STATUS_META[status].color}22` : 'none', flexShrink: 0,
+                width: 5, height: 5, borderRadius: 999, background: STATUS_META[status].color, flexShrink: 0,
               }}
             />
             {STATUS_META[status].label}
@@ -352,22 +367,12 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
         ref={scrollRef}
         className="cortex-scroll-fade-y cortex-themed-scroll"
         style={{
-          flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12,
-          paddingTop: 14, paddingRight: 14, paddingBottom: 14, paddingLeft: 14, background: 'var(--t-panel)',
+          flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 18,
+          paddingTop: 18, paddingRight: 18, paddingBottom: 24, paddingLeft: 18,
+          background: 'var(--t-chat-surface-bg, var(--t-panel))',
         }}
       >
-        {packet?.launchContext ? (
-          <PacketHeaderCard
-            title={packet.title}
-            branch={packet.branchTarget}
-            runtime={packet.runtime}
-            status={packet.status}
-            repo={packet.lane?.repoPath?.split('/').filter(Boolean).at(-1) ?? null}
-            launchContext={packet.launchContext}
-            prompt={packet.prompt ?? packet.summary}
-          />
-        ) : null}
-        {entries.length === 0 ? (
+        {displayEntries.length === 0 ? (
           <div
             style={{
               flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center',
@@ -376,37 +381,17 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
           >
             {loading ? 'Loading transcript…' : error ?? 'No transcript yet.'}
           </div>
-        ) : entries.map((entry) => {
+        ) : displayEntries.map((entry, index) => {
           const content = entryContent(entry);
           if (!content) return null;
           return (
-            <div
+            <DesktopAgentMessage
               key={entry.id}
-              style={{
-                display: 'flex', flexDirection: 'column', gap: 6,
-                paddingTop: 12, paddingRight: 12, paddingBottom: 12, paddingLeft: 12,
-                borderRadius: 14, borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--t-border)', background: 'var(--t-bg-card)',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                <span
-                  style={{
-                    color: entry.role === 'assistant' ? runtimeTone.color : 'var(--t-text-secondary)',
-                    fontSize: 10, fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase',
-                  }}
-                >
-                  {roleLabel(entry.role)}
-                </span>
-                {entry.timestampLabel ? (
-                  <span style={{ color: 'var(--t-text-secondary)', fontSize: 10, fontWeight: 600, flexShrink: 0 }}>
-                    {entry.timestampLabel}
-                  </span>
-                ) : null}
-              </div>
-              <div style={{ color: 'var(--t-text)', fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                {content}
-              </div>
-            </div>
+              entry={entry}
+              isLast={index === displayEntries.length - 1 && status !== 'running'}
+              isStreaming={status === 'running' && index === displayEntries.length - 1 && entry.role === 'assistant'}
+              repoPath={packet?.lane?.worktreePath ?? packet?.lane?.repoPath ?? agent?.workspace ?? null}
+            />
           );
         })}
       </div>
