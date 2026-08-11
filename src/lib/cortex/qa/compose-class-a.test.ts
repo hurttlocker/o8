@@ -32,7 +32,11 @@ vi.mock('@/lib/entitlement/store', () => ({
 
 vi.mock('@/lib/operator/defaults', () => ({
   getOperatorDefaultsSync: vi.fn(),
+}));
+
+vi.mock('@/lib/operator/brain-routing', () => ({
   resolveBrainUseClaudeCliSync: vi.fn(),
+  resolveBrainUseCodexCliSync: vi.fn(),
 }));
 
 import { composeClassA } from '@/lib/cortex/qa/compose-class-a';
@@ -41,7 +45,8 @@ import { callHaiku } from '@/lib/cortex/qa/llm/haiku-adapter';
 import { callOpenRouter } from '@/lib/cortex/qa/llm/openrouter-adapter';
 import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
 import { getEntitlementSync } from '@/lib/entitlement/store';
-import { getOperatorDefaultsSync, resolveBrainUseClaudeCliSync } from '@/lib/operator/defaults';
+import { resolveBrainUseClaudeCliSync, resolveBrainUseCodexCliSync } from '@/lib/operator/brain-routing';
+import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 
 const directiveRow: TypedRow = {
   citation: {
@@ -77,6 +82,7 @@ describe('composeClassA provider order', () => {
       values: { classAComposer: 'auto' },
     } as ReturnType<typeof getOperatorDefaultsSync>);
     vi.mocked(resolveBrainUseClaudeCliSync).mockReturnValue(false);
+    vi.mocked(resolveBrainUseCodexCliSync).mockReturnValue(true);
     vi.mocked(getEntitlementSync).mockReturnValue({
       flags: {},
     } as ReturnType<typeof getEntitlementSync>);

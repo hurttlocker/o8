@@ -221,8 +221,12 @@ describe('MCP operator defaults and dispatch routing', () => {
     const properties = tool?.inputSchema.properties as Record<string, unknown> | undefined;
 
     expect(properties).toMatchObject({
+      subscriptionProfile: expect.any(Object),
       codexWorkerEffort: expect.any(Object),
       claudeWorkerEffort: expect.any(Object),
+      brainCodexModel: expect.any(Object),
+      brainCodexEffort: expect.any(Object),
+      brainUseClaudeCli: expect.any(Object),
       defaultDispatchModel: expect.any(Object),
       workersUseBrain: expect.any(Object),
       crossHouseWorkerFallback: expect.any(Object),
@@ -231,12 +235,27 @@ describe('MCP operator defaults and dispatch routing', () => {
       }),
     });
 
-    const result = await handleOperatorDefaults({ codexWorkerEffort: 'xhigh', requireApproval: 'always' });
+    const result = await handleOperatorDefaults({
+      subscriptionProfile: 'codex-only',
+      brainCodexModel: 'gpt-5.6-terra',
+      brainCodexEffort: 'xhigh',
+      codexWorkerEffort: 'xhigh',
+      requireApproval: 'always',
+    });
     expect(result.isError).not.toBe(true);
-    expect(resultJson(result).values).toMatchObject({ codexWorkerEffort: 'xhigh', requireApproval: 'always' });
+    expect(resultJson(result).values).toMatchObject({
+      subscriptionProfile: 'codex-only',
+      brainCodexModel: 'gpt-5.6-terra',
+      brainCodexEffort: 'xhigh',
+      codexWorkerEffort: 'xhigh',
+      requireApproval: 'always',
+    });
 
     const { getOperatorDefaults } = await import('@/lib/operator/defaults');
     expect((await getOperatorDefaults()).values).toMatchObject({
+      subscriptionProfile: 'codex-only',
+      brainCodexModel: 'gpt-5.6-terra',
+      brainCodexEffort: 'xhigh',
       codexWorkerEffort: 'xhigh',
       requireApproval: 'always',
     });

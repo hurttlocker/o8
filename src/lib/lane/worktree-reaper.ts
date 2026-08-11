@@ -426,17 +426,40 @@ export async function runWorktreeReaperTick(): Promise<void> {
   }
 }
 
+/** Run lane reconciliation plus the fleet-wide retry for terminal worktrees. */
+export async function runWorktreeMaintenanceTick(): Promise<void> {
+  await runWorktreeReaperTick();
+  try {
+    const [{ listRepos }, { sweepKnownTerminalCortexWorktrees }] = await Promise.all([
+      import('@/lib/repos/registry'),
+      import('@/lib/lane/terminal-worktree-sweep'),
+    ]);
+    const registeredRepoPaths = (await listRepos()).map((repo) => repo.localPath);
+    const result = await sweepKnownTerminalCortexWorktrees(process.cwd(), registeredRepoPaths);
+    if (result.removed > 0 || result.failed > 0) {
+      console.log(
+        `[worktree-reaper] terminal sweep repos=${result.reposScanned} scanned=${result.scanned} `
+        + `removed=${result.removed} skippedActive=${result.skippedActive} failed=${result.failed}`,
+      );
+    }
+  } catch (error) {
+    console.warn(
+      `[worktree-reaper] terminal sweep failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
 export function startWorktreeReaper(): void {
   if (reaperTimer) return;
 
   setTimeout(() => {
-    void runWorktreeReaperTick().catch((err) => {
+    void runWorktreeMaintenanceTick().catch((err) => {
       console.error('[worktree-reaper] initial tick failed:', err);
     });
   }, 30_000);
 
   reaperTimer = setInterval(() => {
-    void runWorktreeReaperTick().catch((err) => {
+    void runWorktreeMaintenanceTick().catch((err) => {
       console.error('[worktree-reaper] tick failed:', err);
     });
   }, REAPER_INTERVAL_MS);

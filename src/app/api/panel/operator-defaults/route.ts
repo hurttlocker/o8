@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server';
 
-import { isSupportedModelId, SUPPORTED_MODEL_IDS } from '@/lib/models';
+import {
+  CODEX_MODEL_IDS,
+  isCodexModelId,
+  isSupportedModelId,
+  SUPPORTED_MODEL_IDS,
+} from '@/lib/models';
 import {
   applyOperatorDefaultsToml,
   getOperatorDefaults,
@@ -164,6 +169,21 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
       throw new Error('claudeWorkerEffort must be a valid effort level.');
     }
     update.claudeWorkerEffort = body.claudeWorkerEffort;
+  }
+
+  if (body.brainCodexModel !== undefined) {
+    const model = typeof body.brainCodexModel === 'string' ? body.brainCodexModel.trim() : '';
+    if (!isCodexModelId(model)) {
+      throw new Error(`brainCodexModel ${JSON.stringify(model)} is unsupported; valid values are ${CODEX_MODEL_IDS.map((value) => JSON.stringify(value)).join(', ')}.`);
+    }
+    update.brainCodexModel = model;
+  }
+
+  if (body.brainCodexEffort !== undefined) {
+    if (!isThinkingEffort(body.brainCodexEffort)) {
+      throw new Error('brainCodexEffort must be a valid effort level.');
+    }
+    update.brainCodexEffort = body.brainCodexEffort;
   }
 
   if (body.defaultDispatchModel !== undefined) {

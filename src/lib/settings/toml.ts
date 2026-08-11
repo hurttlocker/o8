@@ -6,7 +6,12 @@ import { parse, stringify } from 'smol-toml';
 
 import { isPlausibleAcpModelId } from '@/lib/orchestrator/acp-model-id';
 
-import { isSupportedModelId, SUPPORTED_MODEL_IDS } from '@/lib/models';
+import {
+  CODEX_MODEL_IDS,
+  isCodexModelId,
+  isSupportedModelId,
+  SUPPORTED_MODEL_IDS,
+} from '@/lib/models';
 import type { OperatorDefaults } from '@/lib/operator/defaults';
 import {
   isClassAComposer,
@@ -69,6 +74,19 @@ function orchestratorModelField(section: string, key: string): TomlField<Operato
       return isSupportedModelId(trimmed)
         ? trimmed
         : invalid(tomlKey, `a supported model id; received ${JSON.stringify(trimmed)}; valid values are ${SUPPORTED_MODEL_IDS.map((model) => JSON.stringify(model)).join(', ')}`);
+    },
+  };
+}
+
+function codexModelField(section: string, key: string): TomlField<OperatorDefaults['brainCodexModel']> {
+  return {
+    path: [section, key],
+    parse: (value, tomlKey) => {
+      if (typeof value !== 'string') return invalid(tomlKey, 'a supported Codex model id string');
+      const trimmed = value.trim();
+      return isCodexModelId(trimmed)
+        ? trimmed
+        : invalid(tomlKey, `a supported Codex model id; received ${JSON.stringify(trimmed)}; valid values are ${CODEX_MODEL_IDS.map((model) => JSON.stringify(model)).join(', ')}`);
     },
   };
 }
@@ -192,6 +210,8 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   workerRuntimes: dispatchRuntimeListField('models', 'worker_runtimes'),
   codexWorkerEffort: enumField('models', 'codex_worker_effort', 'a valid thinking effort', isThinkingEffort),
   claudeWorkerEffort: enumField('models', 'claude_worker_effort', 'a valid thinking effort', isThinkingEffort),
+  brainCodexModel: codexModelField('brain', 'codex_model'),
+  brainCodexEffort: enumField('brain', 'codex_effort', 'a valid thinking effort', isThinkingEffort),
   defaultDispatchModel: stringField('models', 'default_dispatch_model'),
   localInferenceBaseUrl: credentialSafeUrlField('local_models', 'inference_base_url'),
   localEmbedModel: stringField('local_models', 'embed_model'),

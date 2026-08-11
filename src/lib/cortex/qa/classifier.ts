@@ -33,7 +33,7 @@ import 'server-only';
 
 import { createHash } from 'node:crypto';
 
-import { CODEX_DEFAULT_MODEL, callCodex } from '@/lib/cortex/qa/llm/codex-adapter';
+import { callCodex } from '@/lib/cortex/qa/llm/codex-adapter';
 import {
   assertUnderBrainDailyCap,
   recordBrainGeminiSpend,
@@ -138,10 +138,21 @@ export async function classifyQuestion(question: string): Promise<ClassifierResu
   // hit on the Class B path.
   const evalMode = process.env.O8_EVAL_MODE === '1' || process.env.O8_EVAL_MODE === 'true';
 
+  let brainCliOn = false;
+  let codexCliOn = true;
+  try {
+    const routing = await import('@/lib/operator/brain-routing');
+    brainCliOn = routing.resolveBrainUseClaudeCliSync();
+    codexCliOn = routing.resolveBrainUseCodexCliSync();
+  } catch {
+    brainCliOn = false;
+    codexCliOn = true;
+  }
+
   // Eval-mode tier 0: Sonnet 4.6 via the REPL adapter — matches the composer's
   // primary model so classifier + composer use the same reasoning quality.
   // BM25 variants from Sonnet are reliably better than grok-4.1-fast.
-  if (evalMode) {
+  if (evalMode && brainCliOn) {
     const sonnetResult = await trySonnetRepl(prompt, question);
     if (sonnetResult) {
       console.info('[qa][classifier] resolved via sonnet-repl (eval tier 0)');
@@ -154,6 +165,15 @@ export async function classifyQuestion(question: string): Promise<ClassifierResu
       console.info('[qa][classifier] resolved via haiku-repl (eval tier 0b)');
       setCachedClassification(question, haikuReplResult);
       return haikuReplResult;
+    }
+  }
+
+  if (evalMode && codexCliOn) {
+    const codexResult = await tryCodex(prompt, question);
+    if (codexResult) {
+      console.info('[qa][classifier] resolved via codex-cli (eval subscription tier)');
+      setCachedClassification(question, codexResult);
+      return codexResult;
     }
   }
 
@@ -188,16 +208,6 @@ export async function classifyQuestion(question: string): Promise<ClassifierResu
   // (epic #1044; decoupled from the orchestrator toggle 2026-06-22):
   //   - OFF → Codex is the only CLI tier (Haiku would throw — no Claude sub).
   //   - ON  → Haiku first, then Codex.
-  let brainCliOn = false;
-  if (!evalMode) {
-    try {
-      const { resolveBrainUseClaudeCliSync } = await import('@/lib/operator/defaults');
-      brainCliOn = resolveBrainUseClaudeCliSync();
-    } catch {
-      brainCliOn = false;
-    }
-  }
-
   // Tier 3 (only when brainUseClaudeCli ON): Haiku CLI — free for Claude sub users.
   if (!evalMode && brainCliOn) {
     const haikuResult = await tryHaiku(prompt, question);
@@ -210,12 +220,10 @@ export async function classifyQuestion(question: string): Promise<ClassifierResu
 
   // Tier 4: Codex CLI — free for ChatGPT Plus / Codex sub users. Always tried
   // when not eval-mode and the HTTP tiers failed.
-  if (!evalMode) {
+  if (!evalMode && codexCliOn) {
     const codexResult = await tryCodex(prompt, question);
     if (codexResult) {
-      console.info(
-        `[qa][classifier] resolved via codex-cli:${CODEX_DEFAULT_MODEL} (tier 4 fallback)`,
-      );
+      console.info('[qa][classifier] resolved via codex-cli (tier 4 fallback)');
       setCachedClassification(question, codexResult);
       return codexResult;
     }

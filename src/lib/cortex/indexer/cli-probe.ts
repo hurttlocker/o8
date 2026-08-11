@@ -18,7 +18,7 @@ import 'server-only';
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { resolveBrainUseClaudeCliSync } from '@/lib/operator/defaults';
+import { resolveBrainUseClaudeCliSync, resolveBrainUseCodexCliSync } from '@/lib/operator/brain-routing';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 
 const execFileAsync = promisify(execFile);
@@ -26,6 +26,7 @@ const execFileAsync = promisify(execFile);
 export type IndexerCli = 'claude' | 'codex';
 
 let cachedCli: IndexerCli | null | undefined;
+let cachedPermissionKey: string | null = null;
 
 /**
  * Resolve a CLI binary via the same chain used by the QA adapters:
@@ -99,29 +100,21 @@ async function verifyBin(bin: string): Promise<boolean> {
  * (decoupled from the orchestrator toggle 2026-06-22).
  */
 export async function probeIndexerCli(): Promise<IndexerCli | null> {
-  const brainCliEnabled = resolveBrainUseClaudeCliSync();
-  if (cachedCli !== undefined) {
-    if (brainCliEnabled || cachedCli !== 'claude') return cachedCli;
-    cachedCli = undefined;
-  }
+  const claudeAllowed = resolveBrainUseClaudeCliSync();
+  const codexAllowed = resolveBrainUseCodexCliSync();
+  const override = process.env.O8_INDEXER_CLI?.trim();
+  const permissionKey = `${claudeAllowed}:${codexAllowed}:${override ?? ''}`;
+  if (cachedCli !== undefined && cachedPermissionKey === permissionKey) return cachedCli;
+  cachedCli = undefined;
+  cachedPermissionKey = permissionKey;
 
-  if (!brainCliEnabled) {
-    const codexBin = await resolveBin('codex', ['O8_CODEX_BIN', 'CODEX_BIN']);
-    if (codexBin && await verifyBin(codexBin)) {
-      cachedCli = 'codex';
-      console.log(`[indexer] CLI: codex (${codexBin})`);
+  if (override === 'claude' || override === 'codex') {
+    const permitted = override === 'claude' ? claudeAllowed : codexAllowed;
+    if (!permitted) {
+      console.warn(`[indexer] CLI override O8_INDEXER_CLI=${override} is disabled by the subscription profile.`);
+      cachedCli = null;
       return cachedCli;
     }
-
-    console.warn(
-      '[indexer] disabled — brainUseClaudeCli is off and Codex CLI is unavailable.',
-    );
-    cachedCli = null;
-    return cachedCli;
-  }
-
-  const override = process.env.O8_INDEXER_CLI?.trim();
-  if (override === 'claude' || override === 'codex') {
     const bin = await resolveBin(override, override === 'claude'
       ? ['O8_CLAUDE_CODE_BIN', 'CLAUDE_BIN']
       : ['O8_CODEX_BIN', 'CODEX_BIN']);
@@ -138,24 +131,25 @@ export async function probeIndexerCli(): Promise<IndexerCli | null> {
     return cachedCli;
   }
 
-  // Default order: claude → codex.
-  const claudeBin = await resolveBin('claude', ['O8_CLAUDE_CODE_BIN', 'CLAUDE_BIN']);
-  if (claudeBin && await verifyBin(claudeBin)) {
-    cachedCli = 'claude';
-    console.log(`[indexer] CLI: claude (${claudeBin})`);
-    return cachedCli;
+  if (claudeAllowed) {
+    const claudeBin = await resolveBin('claude', ['O8_CLAUDE_CODE_BIN', 'CLAUDE_BIN']);
+    if (claudeBin && await verifyBin(claudeBin)) {
+      cachedCli = 'claude';
+      console.log(`[indexer] CLI: claude (${claudeBin})`);
+      return cachedCli;
+    }
   }
 
-  const codexBin = await resolveBin('codex', ['O8_CODEX_BIN', 'CODEX_BIN']);
-  if (codexBin && await verifyBin(codexBin)) {
-    cachedCli = 'codex';
-    console.log(`[indexer] CLI: codex (${codexBin})`);
-    return cachedCli;
+  if (codexAllowed) {
+    const codexBin = await resolveBin('codex', ['O8_CODEX_BIN', 'CODEX_BIN']);
+    if (codexBin && await verifyBin(codexBin)) {
+      cachedCli = 'codex';
+      console.log(`[indexer] CLI: codex (${codexBin})`);
+      return cachedCli;
+    }
   }
 
-  console.warn(
-    '[indexer] disabled — install Claude Max or ChatGPT Plus + Codex CLI to enable.',
-  );
+  console.warn('[indexer] disabled — no permitted authenticated CLI is available.');
   cachedCli = null;
   return cachedCli;
 }
@@ -163,4 +157,5 @@ export async function probeIndexerCli(): Promise<IndexerCli | null> {
 /** Force re-probe on next call (testing / DI). */
 export function resetIndexerCliCache(): void {
   cachedCli = undefined;
+  cachedPermissionKey = null;
 }

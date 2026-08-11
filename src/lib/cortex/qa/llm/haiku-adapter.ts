@@ -32,6 +32,7 @@ import { promisify } from 'node:util';
 
 import { askClaudeWarm, prewarmClaudeRepl } from '@/lib/claude-code/warm-repl-pool';
 import { MODEL_IDS } from '@/lib/models';
+import { isRuntimeQuotaLimitError } from '@/lib/orchestrator/cross-house-policy';
 
 const execFileAsync = promisify(execFile);
 
@@ -129,7 +130,7 @@ export async function callHaiku(prompt: string, opts: CallHaikuOptions = {}): Pr
   // Brain out of the Claude CLI tier (no Max sub, or Codex/OpenRouter only), so
   // we throw and let the cascade fall through. Dynamic import keeps the
   // server-only dependency graph one-way.
-  const { resolveBrainUseClaudeCliSync } = await import('@/lib/operator/defaults');
+  const { resolveBrainUseClaudeCliSync } = await import('@/lib/operator/brain-routing');
   if (!resolveBrainUseClaudeCliSync()) {
     throw new Error('[qa][haiku] disabled by operator setting (brainUseClaudeCli=false)');
   }
@@ -147,6 +148,9 @@ export async function callHaiku(prompt: string, opts: CallHaikuOptions = {}): Pr
   if (!text.trim()) {
     throw new Error('[qa][haiku] REPL returned empty result');
   }
+  if (isRuntimeQuotaLimitError(text)) {
+    throw new Error(`[qa][haiku] Claude subscription unavailable: ${text.trim()}`);
+  }
   return text;
 }
 
@@ -160,7 +164,7 @@ const HAIKU_MODEL = MODEL_IDS.claudeHaikuQaDefault;
  */
 export async function prewarmHaiku(): Promise<void> {
   try {
-    const { resolveBrainUseClaudeCliSync } = await import('@/lib/operator/defaults');
+    const { resolveBrainUseClaudeCliSync } = await import('@/lib/operator/brain-routing');
     if (!resolveBrainUseClaudeCliSync()) return;
     const claudeBin = await resolveClaudeBin();
     if (claudeBin) prewarmClaudeRepl(claudeBin, HAIKU_MODEL);

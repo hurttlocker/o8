@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { isSupportedModelId, MODEL_IDS, SUPPORTED_MODEL_IDS } from '@/lib/models';
+import { CODEX_MODEL_IDS, isCodexModelId, isSupportedModelId, MODEL_IDS, SUPPORTED_MODEL_IDS } from '@/lib/models';
 
 import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
@@ -15,6 +15,7 @@ import {
   type SubscriptionProfile,
 } from './subscription-profile';
 import { resolveWorkerEffortDefault } from './worker-effort-default';
+import { parseStoredJson } from './stored-json';
 import {
   coerceStoredTier,
   envTargetingTier,
@@ -123,12 +124,9 @@ export {
  */
 
 export type SettingSource = 'env' | 'file' | 'default';
-
 export type RequireApproval = 'high-risk' | 'surface' | 'always' | 'never';
 
-export function isRequireApproval(value: unknown): value is RequireApproval {
-  return value === 'high-risk' || value === 'surface' || value === 'always' || value === 'never';
-}
+export function isRequireApproval(value: unknown): value is RequireApproval { return value === 'high-risk' || value === 'surface' || value === 'always' || value === 'never'; }
 
 export interface OperatorDefaults {
   subscriptionProfile: SubscriptionProfile;
@@ -166,6 +164,10 @@ export interface OperatorDefaults {
   codexWorkerEffort: ThinkingEffort;
   /** Default Claude Code worker effort. 'adaptive' preserves runtime default behavior. */
   claudeWorkerEffort: ThinkingEffort;
+  /** Codex subscription model used by Engineering Brain classify and compose calls. */
+  brainCodexModel: string;
+  /** Codex subscription effort used by Engineering Brain classify and compose calls. */
+  brainCodexEffort: ThinkingEffort;
   /**
    * Default model for DISPATCHED workers. Empty = let the runtime pick its own
    * default (today: Codex's configured model). Set it to a LOCAL model with the
@@ -359,6 +361,8 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   workerRuntimes: ['codex'],
   codexWorkerEffort: 'adaptive',
   claudeWorkerEffort: 'adaptive',
+  brainCodexModel: MODEL_IDS.codexWorkerDefault,
+  brainCodexEffort: 'xhigh',
   defaultDispatchModel: '',
   localInferenceBaseUrl: '',
   localEmbedModel: '',
@@ -433,6 +437,8 @@ interface StoredOperatorDefaults {
   workerRuntimes?: OrchestratorRuntime[];
   codexWorkerEffort?: ThinkingEffort;
   claudeWorkerEffort?: ThinkingEffort;
+  brainCodexModel?: string;
+  brainCodexEffort?: ThinkingEffort;
   defaultDispatchModel?: string;
   localInferenceBaseUrl?: string;
   localEmbedModel?: string;
@@ -473,17 +479,7 @@ type FileOperatorDefaults = Partial<OperatorDefaults> & {
   defaultDispatchRuntimeExplicit?: boolean;
 };
 
-function parseStoredDefaults(raw: string): StoredOperatorDefaults {
-  try {
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed as StoredOperatorDefaults;
-    }
-  } catch {
-    // ignore malformed file
-  }
-  return {};
-}
+const parseStoredDefaults = (raw: string): StoredOperatorDefaults => parseStoredJson<StoredOperatorDefaults>(raw);
 
 function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   const result: FileOperatorDefaults = {};
@@ -539,6 +535,12 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   }
   if (stored.claudeWorkerEffort && isThinkingEffort(stored.claudeWorkerEffort)) {
     result.claudeWorkerEffort = stored.claudeWorkerEffort;
+  }
+  if (typeof stored.brainCodexModel === 'string' && isCodexModelId(stored.brainCodexModel.trim())) {
+    result.brainCodexModel = stored.brainCodexModel.trim();
+  }
+  if (stored.brainCodexEffort && isThinkingEffort(stored.brainCodexEffort)) {
+    result.brainCodexEffort = stored.brainCodexEffort;
   }
   if (typeof stored.defaultDispatchModel === 'string') {
     // Empty string is meaningful here ("unset → runtime default"), so accept it.
@@ -723,6 +725,8 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
       envCodexEffort ?? fileValues.codexWorkerEffort ?? OPERATOR_DEFAULTS_FALLBACK.codexWorkerEffort,
     claudeWorkerEffort:
       envClaudeEffort ?? fileValues.claudeWorkerEffort ?? OPERATOR_DEFAULTS_FALLBACK.claudeWorkerEffort,
+    brainCodexModel: fileValues.brainCodexModel ?? OPERATOR_DEFAULTS_FALLBACK.brainCodexModel,
+    brainCodexEffort: fileValues.brainCodexEffort ?? OPERATOR_DEFAULTS_FALLBACK.brainCodexEffort,
     defaultDispatchModel: envDispatchModel ?? fileValues.defaultDispatchModel ?? OPERATOR_DEFAULTS_FALLBACK.defaultDispatchModel,
     localInferenceBaseUrl: envLocalBaseUrl ?? fileValues.localInferenceBaseUrl ?? OPERATOR_DEFAULTS_FALLBACK.localInferenceBaseUrl,
     localEmbedModel: envLocalEmbed ?? fileValues.localEmbedModel ?? OPERATOR_DEFAULTS_FALLBACK.localEmbedModel,
@@ -785,6 +789,8 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
       envCodexEffort !== null ? 'env' : fileValues.codexWorkerEffort !== undefined ? 'file' : 'default',
     claudeWorkerEffort:
       envClaudeEffort !== null ? 'env' : fileValues.claudeWorkerEffort !== undefined ? 'file' : 'default',
+    brainCodexModel: fileValues.brainCodexModel !== undefined ? 'file' : 'default',
+    brainCodexEffort: fileValues.brainCodexEffort !== undefined ? 'file' : 'default',
     defaultDispatchModel: envDispatchModel !== null ? 'env' : fileValues.defaultDispatchModel !== undefined ? 'file' : 'default',
     localInferenceBaseUrl: envLocalBaseUrl !== null ? 'env' : fileValues.localInferenceBaseUrl !== undefined ? 'file' : 'default',
     localEmbedModel: envLocalEmbed !== null ? 'env' : fileValues.localEmbedModel !== undefined ? 'file' : 'default',
@@ -946,6 +952,19 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>): Pr
       throw new Error('claudeWorkerEffort must be a valid ThinkingEffort value.');
     }
     stored.claudeWorkerEffort = update.claudeWorkerEffort;
+  }
+  if (update.brainCodexModel !== undefined) {
+    const trimmed = update.brainCodexModel.trim();
+    if (!isCodexModelId(trimmed)) {
+      throw new Error(`brainCodexModel ${JSON.stringify(trimmed)} is unsupported; valid values are ${CODEX_MODEL_IDS.map((model) => JSON.stringify(model)).join(', ')}.`);
+    }
+    stored.brainCodexModel = trimmed;
+  }
+  if (update.brainCodexEffort !== undefined) {
+    if (!isThinkingEffort(update.brainCodexEffort)) {
+      throw new Error('brainCodexEffort must be a valid ThinkingEffort value.');
+    }
+    stored.brainCodexEffort = update.brainCodexEffort;
   }
   if (update.defaultDispatchModel !== undefined) {
     // Empty string clears it (back to the runtime default); any string is valid
@@ -1191,15 +1210,6 @@ export function resolveInAppOrchestratorEnabledSync(): boolean {
   return getOperatorDefaultsSync().values.inAppOrchestratorEnabled;
 }
 
-/**
- * Whether the Engineering Brain may use the Claude CLI warm pool (Haiku/Sonnet).
- * Decoupled from {@link resolveInAppOrchestratorEnabledSync} (2026-06-22) so a
- * Codex-orchestrator user still gets the fast sub-billed warm Brain.
- */
-export function resolveBrainUseClaudeCliSync(): boolean {
-  return getOperatorDefaultsSync().values.brainUseClaudeCli;
-}
-
 export function resolveWorkersUseBrainSync(): WorkersUseBrain {
   return getOperatorDefaultsSync().values.workersUseBrain;
 }
@@ -1276,26 +1286,16 @@ export function resolveCrashReportsEnabledSync(): boolean {
   return getOperatorDefaultsSync().values.crashReportsEnabled;
 }
 
-/** Prefix for issue-derived packet branches (`<prefix>/<n>-<slug>`, default 'issue'). */
-export function resolveBranchPrefixSync(): string {
-  return getOperatorDefaultsSync().values.branchPrefix;
-}
+/** Prefix for issue-derived packet branches. */
+export function resolveBranchPrefixSync(): string { return getOperatorDefaultsSync().values.branchPrefix; }
 
-/** Whether agent worktree commits get a Co-Authored-By trailer (default off). */
-export function resolveCommitAttributionEnabledSync(): boolean {
-  return getOperatorDefaultsSync().values.commitAttributionEnabled;
-}
+/** Whether agent commits get a Co-Authored-By trailer. */
+export function resolveCommitAttributionEnabledSync(): boolean { return getOperatorDefaultsSync().values.commitAttributionEnabled; }
 
-/** Where a PR row opens — embedded panel or OS browser (default 'in-app'). */
-export function resolvePrLinkDestinationSync(): PrLinkDestination {
-  return getOperatorDefaultsSync().values.prLinkDestination;
-}
+/** Where a PR row opens: the embedded panel or the OS browser. */
+export function resolvePrLinkDestinationSync(): PrLinkDestination { return getOperatorDefaultsSync().values.prLinkDestination; }
 
-/**
- * `.cortex-worktrees` retention ceilings (count + total GB) read by the
- * WorktreeManager prune seam. `0` on either axis = that axis is unbounded.
- * env > file > fallback (default 20 / 20).
- */
+/** Worktree retention ceilings; zero makes that axis unbounded. */
 export function resolveWorktreeRetentionSync(): { maxCount: number; maxTotalGb: number } {
   const values = getOperatorDefaultsSync().values;
   return { maxCount: values.worktreeMaxCount, maxTotalGb: values.worktreeMaxTotalGb };

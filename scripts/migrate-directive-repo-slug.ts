@@ -27,11 +27,24 @@
 
 import { readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import { getDataDir } from '../src/lib/data-dir-migration';
 import { getSqlite } from '../src/lib/db';
 import { refreshDirectiveFts } from '../src/lib/db/v14-fts5-migration';
 import { ingestRepoSpecs } from '../src/lib/cortex/spec-ingest';
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export function restampDirectiveRepoName(content: string, oldSlug: string, newSlug: string): string | null {
+  const repoNameRe = new RegExp(`^(repoName:\\s*)(["']?)${escapeRegExp(oldSlug)}\\2\\s*$`, 'm');
+  if (!repoNameRe.test(content)) return null;
+  return content.replace(repoNameRe, (_match, prefix: string, quote: string) => (
+    `${prefix}${quote}${newSlug}${quote}`
+  ));
+}
 
 async function main() {
   const oldSlug = process.argv[2];
@@ -53,9 +66,8 @@ async function main() {
     const content = readFileSync(path, 'utf-8');
 
     // 1. Restamp seeds (and any hand-authored directive) bound to the old slug.
-    const repoNameRe = new RegExp(`^(repoName:\\s*)${oldSlug}\\s*$`, 'm');
-    if (repoNameRe.test(content)) {
-      const next = content.replace(repoNameRe, `$1${newSlug}`);
+    const next = restampDirectiveRepoName(content, oldSlug, newSlug);
+    if (next) {
       writeFileSync(path, next, 'utf-8');
       refreshDirectiveFts(sqlite, name, next);
       restamped += 1;
@@ -77,4 +89,6 @@ async function main() {
   console.log(`restamped=${restamped} purged=${purged} reingested=${result.writtenDirectives} scanned=${result.scannedFiles}`);
 }
 
-main().then(() => process.exit(0)).catch((err) => { console.error(err); process.exit(1); });
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  main().then(() => process.exit(0)).catch((err) => { console.error(err); process.exit(1); });
+}

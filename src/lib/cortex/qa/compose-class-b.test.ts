@@ -1,0 +1,88 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import type { TypedRow } from '@/lib/cortex/qa/types';
+
+vi.mock('@/lib/cortex/qa/llm/codex-adapter', () => ({ callCodex: vi.fn() }));
+vi.mock('@/lib/cortex/qa/llm/sonnet-adapter', () => ({ callSonnet: vi.fn() }));
+vi.mock('@/lib/cortex/qa/compose-class-a', () => ({
+  composeClassA: vi.fn(),
+  limitCitationMarkers: (answer: string) => answer,
+}));
+vi.mock('@/lib/cortex/qa/contradictions', () => ({ detectContradictions: vi.fn(async () => []) }));
+vi.mock('@/lib/cortex/qa/brain-quota-alert', () => ({
+  flushBrainQuotaAlerts: vi.fn(),
+  noteBrainQuotaError: vi.fn(),
+}));
+vi.mock('@/lib/operator/brain-routing', () => ({
+  resolveBrainUseClaudeCliSync: vi.fn(),
+  resolveBrainUseCodexCliSync: vi.fn(),
+}));
+
+import { composeClassB } from '@/lib/cortex/qa/compose-class-b';
+import { callCodex } from '@/lib/cortex/qa/llm/codex-adapter';
+import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
+import { resolveBrainUseClaudeCliSync, resolveBrainUseCodexCliSync } from '@/lib/operator/brain-routing';
+
+const row: TypedRow = {
+  citation: {
+    kind: 'directive',
+    rowId: 'subscription-routing',
+    table: 'directives',
+    excerpt: 'Use the available subscription.',
+  },
+  fields: {
+    title: 'Subscription routing',
+    body: 'Use the available subscription.',
+  },
+};
+
+function collectEvents() {
+  const events: Array<{ name: string; payload: unknown }> = [];
+  return {
+    events,
+    emit: (name: string, payload: unknown) => events.push({ name, payload }),
+  };
+}
+
+async function* tokens(text: string) {
+  yield text;
+}
+
+describe('Class B Brain subscription routing', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(resolveBrainUseClaudeCliSync).mockReturnValue(false);
+    vi.mocked(resolveBrainUseCodexCliSync).mockReturnValue(true);
+    vi.mocked(callCodex).mockResolvedValue('Codex answer. [D-subscription-routing]');
+  });
+
+  it('uses Codex directly for a Codex-only subscription', async () => {
+    const { events, emit } = collectEvents();
+
+    await composeClassB('How is this routed?', '/repo/o8', [row], emit, { terse: true });
+
+    expect(callSonnet).not.toHaveBeenCalled();
+    expect(callCodex).toHaveBeenCalledOnce();
+    expect(callCodex).toHaveBeenCalledWith(expect.any(String), { timeoutMs: 300_000 });
+    expect(events.find((event) => event.name === 'token')?.payload).toEqual({
+      text: 'Codex answer. [CITATION:directive-subscription-routing]',
+    });
+  });
+
+  it('falls sideways to Codex when a stale both-profile returns a disabled Claude subscription message', async () => {
+    vi.mocked(resolveBrainUseClaudeCliSync).mockReturnValue(true);
+    vi.mocked(callSonnet).mockResolvedValue({
+      tier: 'cli',
+      tokens: tokens('Your organization has disabled Claude subscription access for Claude Code.'),
+    });
+    const { events, emit } = collectEvents();
+
+    await composeClassB('How is this routed?', '/repo/o8', [row], emit, { terse: true });
+
+    expect(callSonnet).toHaveBeenCalledOnce();
+    expect(callCodex).toHaveBeenCalledOnce();
+    const answer = events.find((event) => event.name === 'token')?.payload as { text: string };
+    expect(answer.text).toContain('Codex answer.');
+    expect(answer.text).not.toContain('disabled Claude subscription');
+  });
+});

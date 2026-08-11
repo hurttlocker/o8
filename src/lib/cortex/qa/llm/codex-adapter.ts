@@ -30,8 +30,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import { resolveDefaultDispatchModelSync } from '@/lib/operator/defaults';
-import { codexModelArgs, parseLocalModel } from '@/lib/codex/local-model';
+import { resolveBrainCodexRouteSync } from '@/lib/operator/brain-routing';
+import { codexModelArgs } from '@/lib/codex/local-model';
+import { resolveCodexReasoningEffort } from '@/lib/codex/reasoning-effort';
 import { MODEL_IDS } from '@/lib/models';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 
@@ -103,7 +104,7 @@ export function resetCodexProviderCache(): void {
 // ── Public API ───────────────────────────────────────────────────────────────
 
 export interface CallCodexOptions {
-  /** Model to pass to `codex exec -m`. Default: gpt-5.5 (post-SDK-pricing pivot, epic #1044). */
+  /** Model to pass to `codex exec -m`. Default: the operator's Brain route. */
   model?: string;
   /** Explicit resolved binary, used when the caller already ran auth detection. */
   binary?: string;
@@ -113,25 +114,33 @@ export interface CallCodexOptions {
   timeoutMs?: number;
 }
 
-/** Default Codex model. gpt-5.5 replaces gpt-5.4 as the orchestrator-class default (epic #1044). */
-export const CODEX_DEFAULT_MODEL = MODEL_IDS.codexDefault;
+/** Default Engineering Brain Codex model when operator settings are unavailable. */
+export const CODEX_DEFAULT_MODEL = MODEL_IDS.codexWorkerDefault;
 
 /**
- * Resolve the Codex model for a Q&A call. An explicit model wins. Otherwise, if
- * the operator's default dispatch model is LOCAL (`ollama:`/`lmstudio:`), the
- * Brain composes on that local model too — so a zero-cloud-key dev gets real
- * synthesized answers (not just retrieved sources) with no Codex subscription.
- * A cloud dispatch model does NOT change the default here (gpt-5.5 stays).
+ * Resolve the explicit call override against the operator's Brain-only Codex
+ * route. Brain model and effort are separate from worker/orchestrator defaults
+ * so a visible Settings choice always matches the CLI process that launches.
  */
-function resolveCodexQaModel(explicit?: string): string {
-  if (explicit) return explicit;
+function resolveCodexQaRoute(options: CallCodexOptions): {
+  model: string;
+  reasoningEffort?: CallCodexOptions['reasoningEffort'];
+} {
+  let configured: ReturnType<typeof resolveBrainCodexRouteSync> = {
+    model: MODEL_IDS.codexWorkerDefault,
+    reasoningEffort: 'xhigh',
+  };
   try {
-    const dispatch = resolveDefaultDispatchModelSync().trim();
-    if (dispatch && parseLocalModel(dispatch)) return dispatch;
+    configured = resolveBrainCodexRouteSync();
   } catch {
-    // operator defaults unavailable — fall through to the cloud default
+    // Operator defaults unavailable: keep the conservative Brain route.
   }
-  return CODEX_DEFAULT_MODEL;
+  const model = options.model ?? configured.model;
+  const requestedEffort = options.reasoningEffort ?? configured.reasoningEffort;
+  const reasoningEffort = requestedEffort
+    ? resolveCodexReasoningEffort(requestedEffort, model) as CallCodexOptions['reasoningEffort']
+    : undefined;
+  return { model, ...(reasoningEffort ? { reasoningEffort } : {}) };
 }
 
 export function buildCodexQaArgs(options: {
@@ -152,6 +161,23 @@ export function buildCodexQaArgs(options: {
   ];
 }
 
+/** Host Node flags belong to o8, not to the CLI process launched from /tmp. */
+export function buildCodexQaEnv(
+  source: Readonly<Record<string, string | undefined>> = process.env,
+): NodeJS.ProcessEnv {
+  const nodeEnv = source.NODE_ENV === 'development' || source.NODE_ENV === 'test'
+    ? source.NODE_ENV
+    : 'production';
+  const env: NodeJS.ProcessEnv = {
+    ...source,
+    NODE_ENV: nodeEnv,
+    FORCE_COLOR: '0',
+    NO_COLOR: '1',
+  };
+  delete env.NODE_OPTIONS;
+  return env;
+}
+
 /**
  * Call Codex via the CLI with `prompt` on stdin and read the final answer
  * from a tmpfile written by `--output-last-message`.
@@ -167,7 +193,7 @@ export function buildCodexQaArgs(options: {
  */
 export async function callCodex(prompt: string, opts: CallCodexOptions = {}): Promise<string> {
   const timeoutMs = opts.timeoutMs ?? 30_000;
-  const model = resolveCodexQaModel(opts.model);
+  const route = resolveCodexQaRoute(opts);
 
   const codexBin = opts.binary ?? await resolveCodexBin();
   if (!codexBin) {
@@ -182,14 +208,15 @@ export async function callCodex(prompt: string, opts: CallCodexOptions = {}): Pr
   );
 
   const cliArgs = buildCodexQaArgs({
-    model,
+    model: route.model,
     outputFile: tmpFile,
-    reasoningEffort: opts.reasoningEffort,
+    reasoningEffort: route.reasoningEffort,
   });
+  console.info(`[qa][codex] launching model=${route.model} effort=${route.reasoningEffort ?? 'runtime-default'}`);
 
   // tmpdir cwd so no project .codex/ config bleeds in.
   const cwd = os.tmpdir();
-  const env = { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' };
+  const env = buildCodexQaEnv();
 
   try {
     await new Promise<void>((resolve, reject) => {

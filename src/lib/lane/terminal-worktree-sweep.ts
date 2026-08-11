@@ -11,6 +11,7 @@ const CONTEXT_WORKTREE_DIR_NAME = 'context';
 const PACKET_WORKTREE_PREFIX = 'packet-';
 
 export interface TerminalWorktreeSweepResult {
+  reposScanned: number;
   scanned: number;
   removed: number;
   skippedActive: number;
@@ -45,11 +46,14 @@ function laneForWorktreeDir(
   return lanesByPath.get(normalizePath(dirPath)) ?? lanesByPacketDir.get(dirName) ?? null;
 }
 
-export async function sweepTerminalCortexWorktrees(repoPath: string): Promise<TerminalWorktreeSweepResult> {
+export async function sweepTerminalCortexWorktrees(
+  repoPath: string,
+  knownLanes: Lane[] = listLanes(),
+): Promise<TerminalWorktreeSweepResult> {
   const repoRoot = path.resolve(repoPath);
   const worktreeRoots = resolveWorktreeRootLayout(repoRoot).bases;
   const normalizedWorktreeRoots = worktreeRoots.map(normalizePath);
-  const lanes = listLanes().filter((lane) => (
+  const lanes = knownLanes.filter((lane) => (
     normalizePath(lane.repoPath) === repoRoot
     || (lane.worktreePath
       ? normalizedWorktreeRoots.some((root) => normalizePath(lane.worktreePath!).startsWith(`${root}/`))
@@ -69,6 +73,7 @@ export async function sweepTerminalCortexWorktrees(repoPath: string): Promise<Te
   }
 
   const result: TerminalWorktreeSweepResult = {
+    reposScanned: 1,
     scanned: 0,
     removed: 0,
     skippedActive: 0,
@@ -108,4 +113,42 @@ export async function sweepTerminalCortexWorktrees(repoPath: string): Promise<Te
   }
 
   return result;
+}
+
+/**
+ * Sweep every repo o8 can still name: the packaged server's primary repo,
+ * saved repos, and transient repos retained only by lane history. Terminal
+ * cleanup is normally immediate, but a live process or app shutdown can make
+ * that one attempt lose the race. This fleet pass is the bounded retry seam.
+ */
+export async function sweepKnownTerminalCortexWorktrees(
+  primaryRepoPath: string,
+  registeredRepoPaths: string[] = [],
+): Promise<TerminalWorktreeSweepResult> {
+  const knownLanes = listLanes();
+  const repoPaths = new Set<string>();
+  for (const candidate of [
+    primaryRepoPath,
+    ...registeredRepoPaths,
+    ...knownLanes.map((lane) => lane.repoPath),
+  ]) {
+    if (candidate?.trim()) repoPaths.add(normalizePath(candidate));
+  }
+
+  const aggregate: TerminalWorktreeSweepResult = {
+    reposScanned: 0,
+    scanned: 0,
+    removed: 0,
+    skippedActive: 0,
+    failed: 0,
+  };
+  for (const repoPath of repoPaths) {
+    const result = await sweepTerminalCortexWorktrees(repoPath, knownLanes);
+    aggregate.reposScanned += result.reposScanned;
+    aggregate.scanned += result.scanned;
+    aggregate.removed += result.removed;
+    aggregate.skippedActive += result.skippedActive;
+    aggregate.failed += result.failed;
+  }
+  return aggregate;
 }

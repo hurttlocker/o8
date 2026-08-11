@@ -74,6 +74,8 @@ export interface OperatorDefaults {
   workerRuntimes: DispatchRuntime[];
   codexWorkerEffort: ThinkingEffort;
   claudeWorkerEffort: ThinkingEffort;
+  brainCodexModel: string;
+  brainCodexEffort: ThinkingEffort;
   defaultDispatchModel: string;
   localInferenceBaseUrl: string;
   localEmbedModel: string;
@@ -176,6 +178,13 @@ export const CLAUDE_WORKER_EFFORT_OPTIONS: Array<{ value: ThinkingEffort; label:
   { value: 'medium', label: 'Medium', detail: 'Balanced cost and quality.' },
   { value: 'high', label: 'High', detail: 'Deeper worker reasoning.' },
   { value: 'max', label: 'Max', detail: 'Claude Code top effort.' },
+];
+
+export const BRAIN_CODEX_MODEL_OPTIONS: Array<{ value: string; label: string; detail: string }> = [
+  { value: MODEL_IDS.raw.openAiGpt56Terra, label: 'Terra', detail: 'Balanced Brain answers and repo reasoning.' },
+  { value: MODEL_IDS.raw.openAiGpt56Sol, label: 'Sol', detail: 'Frontier reasoning for the hardest questions.' },
+  { value: MODEL_IDS.raw.openAiGpt56Luna, label: 'Luna', detail: 'Fast, inexpensive factual lookup.' },
+  { value: MODEL_IDS.raw.openAiGpt55, label: 'GPT-5.5', detail: 'Previous-generation compatibility route.' },
 ];
 
 export const ORCHESTRATOR_MODEL_OPTIONS: Array<{ value: string; label: string }> = [

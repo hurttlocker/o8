@@ -30,6 +30,8 @@ const NON_DEFAULT_UPDATE = {
   workerRuntimes: ['claude-code', 'codex'] as Array<'claude-code' | 'codex'>,
   codexWorkerEffort: 'xhigh',
   claudeWorkerEffort: 'max',
+  brainCodexModel: 'gpt-5.6-sol',
+  brainCodexEffort: 'high',
   defaultDispatchModel: 'some-model',
   experimentalOpencode: true,
   experimentalGemini: true,

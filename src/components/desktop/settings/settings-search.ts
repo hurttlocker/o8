@@ -126,6 +126,8 @@ export const SETTINGS_SEARCH_REGISTRY: SettingsSearchEntry[] = [
   { tab: 'mcp', tabLabel: 'MCP', group: "External servers", label: "env json object", description: "textarea, stdio transport only (manual form)" },
   { tab: 'mcp', tabLabel: 'MCP', group: "External servers", label: "transport", description: "stdio / http toggle pills (manual form)" },
   { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Brain routing", label: "Brain uses Claude CLI", description: "Warm claude CLI answers (~2.7s Haiku), sub-billed", founders: true },
+  { tab: 'models', tabLabel: 'Models', group: "Engineering Brain", label: "Codex model", description: "Codex subscription model used for Brain classification and cited answers" },
+  { tab: 'models', tabLabel: 'Models', group: "Engineering Brain", label: "Codex effort", description: "Reasoning effort used only by Engineering Brain calls" },
   { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Brain routing", label: "Collide aggregator", description: "Who synthesizes when the Collide backend runs", founders: true },
   { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Brain routing", label: "Legacy orchestrator toggle", description: "What backend Auto follows: on = Claude REPL, off = Codex", founders: true },
   { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Brain routing", label: "Q&A composer", description: "Class A composer for Brain answers", founders: true },

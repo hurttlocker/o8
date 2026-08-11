@@ -25,6 +25,7 @@ import { promisify } from 'node:util';
 
 import { askClaudeWarm, prewarmClaudeRepl } from '@/lib/claude-code/warm-repl-pool';
 import { MODEL_IDS } from '@/lib/models';
+import { isRuntimeQuotaLimitError } from '@/lib/orchestrator/cross-house-policy';
 
 const execFileAsync = promisify(execFile);
 
@@ -101,7 +102,7 @@ async function detectTier(): Promise<TierResult> {
   // fall through to API key (their own pay-per-token, unaffected) or Flash.
   // Dynamic import keeps the dependency graph one-way at compile time. Re-read
   // on EVERY call (cheap sync file read).
-  const { resolveBrainUseClaudeCliSync } = await import('@/lib/operator/defaults');
+  const { resolveBrainUseClaudeCliSync } = await import('@/lib/operator/brain-routing');
   const cliAllowed = resolveBrainUseClaudeCliSync();
   if (cachedTier && cachedTierCliAllowed === cliAllowed) return cachedTier;
   cachedTierCliAllowed = cliAllowed;
@@ -219,6 +220,9 @@ async function callSonnetCli(
       model: SONNET_CLI_MODEL,
       timeoutMs,
     });
+    if (isRuntimeQuotaLimitError(text)) {
+      throw new Error(`[qa][sonnet] Claude subscription unavailable: ${text.trim()}`);
+    }
     return { text, tier: 'cli' };
   }
 
@@ -231,6 +235,14 @@ async function callSonnetCli(
   let finished = false;
   let failure: Error | null = null;
   let deltaLen = 0;
+  let heldDeltas = '';
+  let releasedDeltas = false;
+  const releaseHeldDeltas = () => {
+    if (!heldDeltas) return;
+    queue.push(heldDeltas);
+    heldDeltas = '';
+    releasedDeltas = true;
+  };
 
   const turn = askClaudeWarm(prompt, {
     binary: claudeBin,
@@ -238,13 +250,29 @@ async function callSonnetCli(
     timeoutMs,
     onDelta: (text) => {
       deltaLen += text.length;
-      queue.push(text);
+      if (releasedDeltas) queue.push(text);
+      else {
+        // Subscription errors normally arrive as one short result. Hold the
+        // first small slice so that message can trigger a clean Codex fallback
+        // without flashing the provider error into the Brain answer stream.
+        heldDeltas += text;
+        if (heldDeltas.length >= 256) releaseHeldDeltas();
+      }
       notify?.();
     },
   });
 
   turn
     .then((fullText) => {
+      if (isRuntimeQuotaLimitError(fullText)) {
+        queue.length = 0;
+        heldDeltas = '';
+        failure = new Error(`[qa][sonnet] Claude subscription unavailable: ${fullText.trim()}`);
+        finished = true;
+        notify?.();
+        return;
+      }
+      releaseHeldDeltas();
       // Some CLI builds only carry the full text on the final `result` frame.
       // Emit whatever the deltas didn't already cover.
       if (fullText.length > deltaLen) queue.push(fullText.slice(deltaLen));
@@ -279,6 +307,8 @@ async function callSonnetCli(
  */
 export async function prewarmSonnetCli(): Promise<void> {
   try {
+    const { resolveBrainUseClaudeCliSync } = await import('@/lib/operator/brain-routing');
+    if (!resolveBrainUseClaudeCliSync()) return;
     const tier = await detectTier();
     if (tier.tier === 'cli' && tier.claudeBin) {
       prewarmClaudeRepl(tier.claudeBin, SONNET_CLI_MODEL);

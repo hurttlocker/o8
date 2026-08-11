@@ -13,8 +13,11 @@ import {
   type ComposeOptions,
 } from '@/lib/prompts/v1';
 import { detectContradictions } from '@/lib/cortex/qa/contradictions';
+import { callCodex } from '@/lib/cortex/qa/llm/codex-adapter';
 import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
 import type { TypedRow } from '@/lib/cortex/qa/types';
+import { resolveBrainUseClaudeCliSync, resolveBrainUseCodexCliSync } from '@/lib/operator/brain-routing';
+import { isRuntimeQuotaLimitError } from '@/lib/orchestrator/cross-house-policy';
 import { flushBrainQuotaAlerts, noteBrainQuotaError } from './brain-quota-alert';
 
 export async function composeClassB(
@@ -30,9 +33,25 @@ export async function composeClassB(
   // Eval doesn't care about TTFT — only final answer correctness. Production
   // path (Sonnet CLI streaming) is unchanged.
   const evalMode = process.env.O8_EVAL_MODE === '1' || process.env.O8_EVAL_MODE === 'true';
+  const claudeCliAllowed = resolveBrainUseClaudeCliSync();
+  const codexCliAllowed = resolveBrainUseCodexCliSync();
+
+  if (!claudeCliAllowed) {
+    return codexCliAllowed
+      ? composeClassBViaCodex(question, repoPath, topRows, emit, lookup, options)
+      : composeClassA(question, repoPath, topRows, emit, options);
+  }
 
   if (evalMode) {
-    return composeClassBViaSonnetAdapter(question, repoPath, topRows, emit, lookup, options);
+    return composeClassBViaSonnetAdapter(
+      question,
+      repoPath,
+      topRows,
+      emit,
+      lookup,
+      codexCliAllowed,
+      options,
+    );
   }
 
   try {
@@ -52,6 +71,9 @@ export async function composeClassB(
       // actually delivers.
       timeoutMs: 300_000,
     });
+    if (result.tier === 'flash' && codexCliAllowed) {
+      return composeClassBViaCodex(question, repoPath, topRows, emit, lookup, options);
+    }
 
     // Consume the token stream, emitting each token and accumulating for
     // citation post-processing. Works for all three tiers (cli/api/flash).
@@ -60,6 +82,9 @@ export async function composeClassB(
       if (!token) continue;
       fullText += token;
       if (!options.terse) emit('token', { text: token });
+    }
+    if (isRuntimeQuotaLimitError(fullText)) {
+      throw new Error(`Claude subscription unavailable: ${fullText.trim()}`);
     }
 
     // Post-process: translate bracket citations → verified CITATION markers.
@@ -96,7 +121,56 @@ export async function composeClassB(
     flushBrainQuotaAlerts(emit);
     const message = err instanceof Error ? err.message : 'composer-B error';
     console.warn('[qa][composer-B] error:', message);
-    // Degrade to Flash on any failure.
+    if (codexCliAllowed) {
+      return composeClassBViaCodex(question, repoPath, topRows, emit, lookup, options);
+    }
+    return composeClassA(question, repoPath, topRows, emit, options);
+  }
+}
+
+async function composeClassBViaCodex(
+  question: string,
+  repoPath: string | undefined,
+  topRows: TypedRow[],
+  emit: SseEmit,
+  lookup: CitationLookup,
+  options: ComposeOptions,
+): Promise<void> {
+  try {
+    const system = buildSonnetComposeSystem(options);
+    const user = buildSonnetComposeUser(question, repoPath, topRows);
+    const fullText = await callCodex(`<system>\n${system}\n</system>\n\n${user}`, {
+      timeoutMs: 300_000,
+    });
+    if (isRuntimeQuotaLimitError(fullText)) {
+      throw new Error(`Codex subscription unavailable: ${fullText.trim()}`);
+    }
+    console.info('[qa][composer-B] resolved via codex-cli');
+
+    const { translatedAnswer: translated, verifiedRows } = translateCitations(fullText, lookup);
+    const citationRows = options.terse ? verifiedRows.slice(0, 2) : verifiedRows;
+    const finalAnswer = options.terse ? limitCitationMarkers(translated, citationRows) : translated;
+    emit('token', { text: finalAnswer || 'I don\'t have that information yet.' });
+    for (const row of citationRows) {
+      emit('citation', {
+        kind: row.citation.kind,
+        rowId: `${row.citation.kind}-${row.citation.rowId}`,
+        table: row.citation.table,
+        title: rowDisplayTitle(row),
+        excerpt: row.citation.excerpt,
+        url: row.citation.url,
+      });
+    }
+
+    if (finalAnswer.trim()) {
+      const contradictions = await detectContradictions({ rows: topRows, answer: finalAnswer });
+      for (const contradiction of contradictions) emit('contradiction', contradiction);
+    }
+    emit('done', {});
+  } catch (err) {
+    noteBrainQuotaError(err, 'openai');
+    flushBrainQuotaAlerts(emit);
+    console.warn('[qa][composer-B] Codex CLI failed:', err instanceof Error ? err.message : err);
     return composeClassA(question, repoPath, topRows, emit, options);
   }
 }
@@ -118,6 +192,7 @@ async function composeClassBViaSonnetAdapter(
   topRows: TypedRow[],
   emit: SseEmit,
   lookup: CitationLookup,
+  codexCliAllowed: boolean,
   options: ComposeOptions = {},
 ): Promise<void> {
   try {
@@ -135,11 +210,14 @@ async function composeClassBViaSonnetAdapter(
       timeoutMs: 300_000,
     });
     if (result.tier === 'flash') {
-      // Adapter degraded back to Flash — no Claude path was available, so
-      // fall back to Class A (which has its own chain).
-      return composeClassA(question, repoPath, topRows, emit, options);
+      return codexCliAllowed
+        ? composeClassBViaCodex(question, repoPath, topRows, emit, lookup, options)
+        : composeClassA(question, repoPath, topRows, emit, options);
     }
     const fullText = result.text;
+    if (isRuntimeQuotaLimitError(fullText)) {
+      throw new Error(`Claude subscription unavailable: ${fullText.trim()}`);
+    }
 
     let finalAnswer = '';
     if (fullText.trim()) {
@@ -178,6 +256,9 @@ async function composeClassBViaSonnetAdapter(
     flushBrainQuotaAlerts(emit);
     const message = err instanceof Error ? err.message : 'composer-B-eval error';
     console.warn('[qa][composer-B-eval] error:', message);
+    if (codexCliAllowed) {
+      return composeClassBViaCodex(question, repoPath, topRows, emit, lookup, options);
+    }
     return composeClassA(question, repoPath, topRows, emit, options);
   }
 }

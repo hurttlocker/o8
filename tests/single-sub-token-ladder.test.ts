@@ -13,6 +13,11 @@ process.env.CORTEX_IDE_DATA_DIR = dataDir;
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { rerunWithFeedback } = await import('@/lib/orchestrator/operator-mission-service');
+const {
+  resolveBrainCodexRouteSync,
+  resolveBrainUseClaudeCliSync,
+  resolveBrainUseCodexCliSync,
+} = await import('@/lib/operator/brain-routing');
 
 afterEach(() => {
   rmSync(join(dataDir, 'operator-defaults.json'), { force: true });
@@ -61,6 +66,47 @@ function packetFixture(overrides: Partial<OrchestratorPacket> = {}): Orchestrato
 }
 
 describe('single-subscription token ladder rerun escalation', () => {
+  it('routes Brain CLI work only to the configured subscription house', () => {
+    writeFileSync(
+      join(dataDir, 'operator-defaults.json'),
+      `${JSON.stringify({
+        subscriptionProfile: 'codex-only',
+        brainUseClaudeCli: true,
+        brainCodexModel: 'gpt-5.6-terra',
+        brainCodexEffort: 'xhigh',
+      }, null, 2)}\n`,
+      'utf-8',
+    );
+    expect(resolveBrainUseClaudeCliSync()).toBe(false);
+    expect(resolveBrainUseCodexCliSync()).toBe(true);
+    expect(resolveBrainCodexRouteSync()).toEqual({
+      model: 'gpt-5.6-terra',
+      reasoningEffort: 'xhigh',
+    });
+
+    writeFileSync(
+      join(dataDir, 'operator-defaults.json'),
+      `${JSON.stringify({
+        subscriptionProfile: 'codex-only',
+        brainCodexModel: 'gpt-5.6-terra',
+        brainCodexEffort: 'max',
+      }, null, 2)}\n`,
+      'utf-8',
+    );
+    expect(resolveBrainCodexRouteSync()).toEqual({
+      model: 'gpt-5.6-terra',
+      reasoningEffort: 'xhigh',
+    });
+
+    writeFileSync(
+      join(dataDir, 'operator-defaults.json'),
+      `${JSON.stringify({ subscriptionProfile: 'claude-only', brainUseClaudeCli: true }, null, 2)}\n`,
+      'utf-8',
+    );
+    expect(resolveBrainUseClaudeCliSync()).toBe(true);
+    expect(resolveBrainUseCodexCliSync()).toBe(false);
+  });
+
   it('suggests Opus after the second cheap-tier rerun and persists the marker', async () => {
     writeFileSync(
       join(dataDir, 'operator-defaults.json'),

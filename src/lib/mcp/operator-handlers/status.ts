@@ -159,6 +159,11 @@ export const STATUS_TOOLS: McpTool[] = [
           type: 'string',
           description: 'Orchestrator model id, e.g. "claude-opus-4-8" or "claude-sonnet-5". Non-empty string.',
         },
+        subscriptionProfile: {
+          type: 'string',
+          enum: ['both', 'claude-only', 'codex-only'],
+          description: 'Which authenticated subscription houses o8 may use for orchestration, workers, and Engineering Brain calls.',
+        },
         orchestratorBackend: {
           type: 'string',
           enum: ['auto', 'codex', 'claude', 'openclaw', 'hermes', 'collide', 'fable', 'opencode'],
@@ -178,6 +183,16 @@ export const STATUS_TOOLS: McpTool[] = [
           type: 'string',
           enum: ['adaptive', 'low', 'medium', 'high', 'max', 'xhigh'],
           description: 'Thinking-effort level for Codex packet workers.',
+        },
+        brainCodexModel: {
+          type: 'string',
+          enum: ['gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-5.6-luna', 'gpt-5.5'],
+          description: 'Codex subscription model used for Engineering Brain classification and cited answers.',
+        },
+        brainCodexEffort: {
+          type: 'string',
+          enum: ['adaptive', 'low', 'medium', 'high', 'max', 'xhigh'],
+          description: 'Codex reasoning effort used only by Engineering Brain calls.',
         },
         claudeWorkerEffort: {
           type: 'string',
@@ -215,6 +230,10 @@ export const STATUS_TOOLS: McpTool[] = [
           enum: ['off', 'auto', 'all'],
           description: 'Whether packet workers are taught to consult the Engineering Brain.',
         },
+        brainUseClaudeCli: {
+          type: 'boolean',
+          description: 'Allow Engineering Brain to use the Claude subscription when the subscription profile permits it.',
+        },
         crossHouseWorkerFallback: {
           type: 'boolean',
           description: 'Automatically redispatch quota-capped workers on the equal-tier runtime from the other subscription house.',
@@ -242,12 +261,15 @@ export const STATUS_TOOLS: McpTool[] = [
 ];
 
 const OPERATOR_DEFAULTS_KEYS = [
+  'subscriptionProfile',
   'orchestratorModel',
   'orchestratorBackend',
   'collideAggregator',
   'thinkingEffort',
   'codexWorkerEffort',
   'claudeWorkerEffort',
+  'brainCodexModel',
+  'brainCodexEffort',
   'overlapGate',
   'parallelCap',
   'defaultDispatchRuntime',
@@ -255,6 +277,7 @@ const OPERATOR_DEFAULTS_KEYS = [
   'opencodeOrchestratorModel',
   'opencodeWorkerModel',
   'workersUseBrain',
+  'brainUseClaudeCli',
   'crossHouseWorkerFallback',
   'healBotEnabled',
   'supervisorAutoEscalate',

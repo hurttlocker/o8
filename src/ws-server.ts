@@ -106,7 +106,7 @@ import {
 } from '@/lib/symon/machine-registry';
 import { chainOnKey } from '@/lib/util/keyed-promise-chain';
 import { getOrCreateWsToken, WS_TOKEN_PATH } from '@/lib/ws-auth';
-import { findRepoByLocalPath } from '@/lib/repos/registry';
+import { findRepoByLocalPath, listRepos } from '@/lib/repos/registry';
 import '@/lib/ws-runtime-env';
 import { resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -7882,11 +7882,13 @@ async function bootstrapWsServer() {
   }
 
   try {
-    const { sweepTerminalCortexWorktrees } = await import('@/lib/lane/terminal-worktree-sweep');
-    const result = await sweepTerminalCortexWorktrees(REPO_ROOT);
+    const { sweepKnownTerminalCortexWorktrees } = await import('@/lib/lane/terminal-worktree-sweep');
+    const registeredRepoPaths = (await listRepos()).map((repo) => repo.localPath);
+    const result = await sweepKnownTerminalCortexWorktrees(REPO_ROOT, registeredRepoPaths);
     if (result.removed > 0 || result.failed > 0) {
       console.log(
-        `[cleanup] Startup worktree sweep scanned=${result.scanned} removed=${result.removed} skippedActive=${result.skippedActive} failed=${result.failed}`,
+        `[cleanup] Startup worktree sweep repos=${result.reposScanned} scanned=${result.scanned} `
+        + `removed=${result.removed} skippedActive=${result.skippedActive} failed=${result.failed}`,
       );
     }
   } catch (error) {

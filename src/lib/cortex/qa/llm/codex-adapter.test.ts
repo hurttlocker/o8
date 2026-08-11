@@ -1,8 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildCodexQaArgs } from './codex-adapter';
+import { buildCodexQaArgs, buildCodexQaEnv } from './codex-adapter';
 
 describe('buildCodexQaArgs', () => {
+  it('does not leak o8 host NODE_OPTIONS into the temp-cwd Codex child', () => {
+    expect(buildCodexQaEnv({
+      NODE_OPTIONS: '--import=./scripts/register-server-only-stub.mjs',
+      NODE_ENV: 'test',
+      PATH: '/usr/bin',
+    })).toEqual({ NODE_ENV: 'test', PATH: '/usr/bin', FORCE_COLOR: '0', NO_COLOR: '1' });
+  });
+
   it('pins Terra and xhigh using Codex config flags', () => {
     const args = buildCodexQaArgs({
       model: 'gpt-5.6-terra',

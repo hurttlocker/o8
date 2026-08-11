@@ -121,7 +121,6 @@ export function directiveAppliesToRepo(
   const repoName = basename(repoPath).toLowerCase();
   const scope = directive.scope.toLowerCase();
   if (scope === 'global' || scope === '') return true;
-  if (!(projectScope instanceof Set) && !projectScope.repoInActiveProject) return false;
 
   if (scope === 'project') {
     if (projectScope instanceof Set) {

@@ -30,6 +30,7 @@ import { ApiKeysProviderList } from './APIKeysTab';
 import { LocalModelsSection } from './LocalModelsSection';
 import {
   PickerMenu,
+  BRAIN_CODEX_MODEL_OPTIONS,
   ORCHESTRATOR_MODEL_OPTIONS,
   CODEX_WORKER_EFFORT_OPTIONS,
   CLAUDE_WORKER_EFFORT_OPTIONS,
@@ -356,6 +357,45 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
                 />
               </TrailingCluster>
             }
+          />
+        </SettingsGroup>
+      </section>
+
+      <section style={{ marginTop: 28 }}>
+        <SettingsGroup
+          header="Engineering Brain"
+          footnote={`Your subscription profile decides which signed-in CLI o8 may use. When Codex is selected or Claude is unavailable, Brain answers run on this explicit route instead of silently inheriting a worker or orchestrator model. Current profile: ${values.subscriptionProfile}.`}
+        >
+          <SettingsRow
+            icon={<CpuIcon />}
+            label="Codex model"
+            subtitle={lockedSub('brainCodexModel', 'Model used for Brain classification and cited answers')}
+            accessory={
+              <PickerMenu<string>
+                value={values.brainCodexModel}
+                options={BRAIN_CODEX_MODEL_OPTIONS}
+                onChange={(next) => { updateField('brainCodexModel', next); }}
+                disabled={envLocked('brainCodexModel') || busyField === 'brainCodexModel'}
+                minWidth={140}
+              />
+            }
+            disabled={envLocked('brainCodexModel') || busyField === 'brainCodexModel'}
+            divider
+          />
+          <SettingsRow
+            icon={<CpuIcon />}
+            label="Codex effort"
+            subtitle={lockedSub('brainCodexEffort', 'Reasoning effort used only by Engineering Brain calls')}
+            accessory={
+              <PickerMenu<ThinkingEffort>
+                value={values.brainCodexEffort}
+                options={CODEX_WORKER_EFFORT_OPTIONS}
+                onChange={(next) => { updateField('brainCodexEffort', next); }}
+                disabled={envLocked('brainCodexEffort') || busyField === 'brainCodexEffort'}
+                minWidth={140}
+              />
+            }
+            disabled={envLocked('brainCodexEffort') || busyField === 'brainCodexEffort'}
           />
         </SettingsGroup>
       </section>

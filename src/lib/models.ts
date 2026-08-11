@@ -31,8 +31,22 @@ export const SUPPORTED_MODEL_IDS = Object.freeze(
   [...new Set(Object.values(RAW_MODEL_IDS))],
 );
 
+export const CODEX_MODEL_IDS = Object.freeze([
+  RAW_MODEL_IDS.openAiGpt56Sol,
+  RAW_MODEL_IDS.openAiGpt56Terra,
+  RAW_MODEL_IDS.openAiGpt56Luna,
+  RAW_MODEL_IDS.openAiGpt55,
+  RAW_MODEL_IDS.openAiGpt54,
+  RAW_MODEL_IDS.openAiGpt53Codex,
+  RAW_MODEL_IDS.openAiGpt4o,
+]);
+
 export function isSupportedModelId(value: unknown): value is ModelId {
   return typeof value === 'string' && (SUPPORTED_MODEL_IDS as readonly string[]).includes(value);
+}
+
+export function isCodexModelId(value: unknown): value is ModelId {
+  return typeof value === 'string' && (CODEX_MODEL_IDS as readonly string[]).includes(value);
 }
 
 export const MODEL_IDS = {

@@ -15,7 +15,7 @@ import {
   buildSonnetComposeUser,
   type ComposeOptions,
 } from '@/lib/prompts/v1';
-import { CODEX_DEFAULT_MODEL, callCodex } from '@/lib/cortex/qa/llm/codex-adapter';
+import { callCodex } from '@/lib/cortex/qa/llm/codex-adapter';
 import { callHaiku } from '@/lib/cortex/qa/llm/haiku-adapter';
 import { isByokRequired } from '@/lib/cortex/qa/llm/byok-keys';
 import { callOpenRouter, OPENROUTER_PRIMARY_MODEL } from '@/lib/cortex/qa/llm/openrouter-adapter';
@@ -85,6 +85,17 @@ export async function composeClassA(
   // routes through Haiku CLI tier 1 — free for Claude Max users.
   const evalMode = process.env.O8_EVAL_MODE === '1' || process.env.O8_EVAL_MODE === 'true';
 
+  let brainCliOn = false;
+  let codexCliOn = true;
+  try {
+    const routing = await import('@/lib/operator/brain-routing');
+    brainCliOn = routing.resolveBrainUseClaudeCliSync();
+    codexCliOn = routing.resolveBrainUseCodexCliSync();
+  } catch {
+    brainCliOn = false;
+    codexCliOn = true;
+  }
+
   // #971: in production, the user-selected `classAComposer` setting picks
   // which CLI tier leads. Eval mode is never affected (smoke gate is fixed).
   let classAMode: ClassAComposer = evalMode
@@ -100,7 +111,7 @@ export async function composeClassA(
   if (!evalMode && classAMode === 'auto' && managedInferenceEnabled()) {
     classAMode = 'fastest';
   }
-  const sonnetCliFirst = classAMode === 'sonnet-cli';
+  const sonnetCliFirst = classAMode === 'sonnet-cli' && brainCliOn;
   let triedSonnetCli = false;
 
   // Eval-mode tier 0: Sonnet 4.6 via the REPL adapter (subscription-billed,
@@ -108,7 +119,7 @@ export async function composeClassA(
   // question. Routed through `tryComposeSonnet` (the adapter) instead of
   // `tryComposeOpenRouter('anthropic/...')` so eval doesn't burn paid
   // OpenRouter credits on the Anthropic models.
-  if (evalMode) {
+  if (evalMode && brainCliOn) {
     const sonnetAnswer = await tryComposeSonnet(question, repoPath, topRows, options);
     flushBrainQuotaAlerts(emit);
     if (sonnetAnswer) {
@@ -122,6 +133,16 @@ export async function composeClassA(
     if (haikuAnswer) {
       console.info('[qa][composer-A] resolved via haiku-repl (eval tier 0b)');
       emitClassAAnswer(haikuAnswer, lookup, emit, options);
+      return;
+    }
+  }
+
+  if (evalMode && codexCliOn) {
+    const codexAnswer = await tryComposeCodex(composePrompt);
+    flushBrainQuotaAlerts(emit);
+    if (codexAnswer) {
+      console.info('[qa][composer-A] resolved via codex-cli (eval subscription tier)');
+      emitClassAAnswer(codexAnswer, lookup, emit, options);
       return;
     }
   }
@@ -166,16 +187,6 @@ export async function composeClassA(
   // Codex-orchestrator user still gets warm Haiku as tier 1):
   //   - OFF → Codex is effective tier 1, Haiku is skipped (adapter throws).
   //   - ON  → Haiku tier 1, Codex tier 2 (legacy order).
-  let brainCliOn = false;
-  if (!evalMode && !sonnetCliFirst) {
-    try {
-      const { resolveBrainUseClaudeCliSync } = await import('@/lib/operator/defaults');
-      brainCliOn = resolveBrainUseClaudeCliSync();
-    } catch {
-      brainCliOn = false;
-    }
-  }
-
   // Tier 1 (brainUseClaudeCli ON): Haiku CLI. Skipped in eval mode, sonnet-cli
   // mode, or when the setting is OFF.
   if (!evalMode && !sonnetCliFirst && brainCliOn) {
@@ -189,13 +200,11 @@ export async function composeClassA(
   }
 
   // Tier 1 (brainUseClaudeCli OFF) / Tier 2 (ON): Codex CLI.
-  if (!evalMode && !sonnetCliFirst) {
+  if (!evalMode && !sonnetCliFirst && codexCliOn) {
     const codexAnswer = await tryComposeCodex(composePrompt);
     flushBrainQuotaAlerts(emit);
     if (codexAnswer) {
-      console.info(
-        `[qa][composer-A] resolved via codex-cli:${CODEX_DEFAULT_MODEL} (${brainCliOn ? 'tier 2' : 'tier 1 default'})`,
-      );
+      console.info(`[qa][composer-A] resolved via codex-cli (${brainCliOn ? 'tier 2' : 'tier 1 default'})`);
       emitClassAAnswer(codexAnswer, lookup, emit, options);
       return;
     }
@@ -219,7 +228,7 @@ export async function composeClassA(
 
   // Tier 5: Sonnet CLI (callSonnet's CLI tier — slow but reliable). Skipped
   // in eval mode or when sonnet-cli mode already tried it above (#971).
-  if (!evalMode && !triedSonnetCli) {
+  if (!evalMode && brainCliOn && !triedSonnetCli) {
     const sonnetAnswer = await tryComposeSonnet(question, repoPath, topRows, options);
     flushBrainQuotaAlerts(emit);
     if (sonnetAnswer) {
