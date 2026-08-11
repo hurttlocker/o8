@@ -12,8 +12,8 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import type { FleetAgent } from '@/components/desktop/thoughts/types';
-import { DesktopAgentMessage } from '@/components/desktop/DesktopAgentMessage';
 import { mergeAdjacentToolOnlyEntries } from '@/components/desktop/thoughts/chat-panel/ToolCallChipCluster';
+import { WorkspaceTranscript } from '@/components/desktop/workspace-terminal/WorkspaceTranscript';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { orchestratorRuntimeTone, agentDisplayLabel } from '@/lib/orchestrator/display';
@@ -50,8 +50,30 @@ export function classifyAgentTileStatus(rawStatus: string | undefined): VisualSt
   const value = (rawStatus ?? '').toLowerCase();
   if (value.includes('error') || value.includes('fail')) return 'error';
   if (value.includes('review') || value.includes('finished') || value.includes('complete')) return 'review';
-  if (value.includes('wait') || value.includes('approval') || value.includes('pending')) return 'waiting';
+  if (value.includes('wait') || value.includes('approval') || value.includes('pending') || value.includes('blocked')) return 'waiting';
   if (value.includes('running') || value.includes('active') || value.includes('working')) return 'running';
+  return 'idle';
+}
+
+const FAILED_BLOCK_REASONS = new Set([
+  'dispatch_failed',
+  'interrupt_failed',
+  'kill_unconfirmed',
+  'runtime_process_exit',
+]);
+
+export function resolveAgentTileStatus(
+  agentStatus: string | undefined,
+  packetStatus: string | undefined,
+  blockedReason: string | null | undefined,
+): VisualStatus {
+  const normalizedReason = blockedReason?.trim().toLowerCase() ?? '';
+  if (FAILED_BLOCK_REASONS.has(normalizedReason)) return 'error';
+  const states = [packetStatus, agentStatus].map((value) => classifyAgentTileStatus(value));
+  if (states.includes('error')) return 'error';
+  if (states.includes('review')) return 'review';
+  if (states.includes('waiting')) return 'waiting';
+  if (states.includes('running')) return 'running';
   return 'idle';
 }
 
@@ -104,12 +126,26 @@ function conciseWorkerPrompt(text: string, taskTitle?: string): string {
   return task || text;
 }
 
-export function normalizeAgentTileTranscript(entries: MobileTranscriptEntry[], taskTitle?: string): MobileTranscriptEntry[] {
-  return mergeAdjacentToolOnlyEntries(entries.map((entry) => {
+export function normalizeAgentTileTranscript(
+  entries: MobileTranscriptEntry[],
+  taskTitle?: string,
+  taskPrompt?: { id: string; text: string } | null,
+): MobileTranscriptEntry[] {
+  const normalized = entries.map((entry) => {
     if (entry.role !== 'user') return entry;
     const text = conciseWorkerPrompt(entry.text, taskTitle);
     return text === entry.text ? entry : { ...entry, text };
-  }));
+  });
+  const prompt = taskPrompt?.text.trim();
+  const taskPromptId = taskPrompt?.id;
+  if (prompt && taskPromptId && normalized[0]?.role !== 'user') {
+    normalized.unshift({
+      id: `packet-task-${taskPromptId}`,
+      role: 'user',
+      text: prompt,
+    });
+  }
+  return mergeAdjacentToolOnlyEntries(normalized);
 }
 
 // Spring curve matches Apple HIG (stiffness 400, damping 30) — used for the
@@ -118,8 +154,16 @@ const COMPOSER_SPRING = { type: 'spring', stiffness: 400, damping: 30 } as const
 const TRANSCRIPT_STEER_LOADING_TIMEOUT_MS = 10_000;
 const LIVE_TRANSCRIPT_REFRESH_MS = 1_500;
 
-function canSteerAgent(agent: FleetAgent | null): boolean {
-  return (agent?.status ?? '').toLowerCase() === 'running';
+export function canSteerAgentState(
+  agent: Pick<FleetAgent, 'status'> | null,
+  packet: Pick<OrchestratorPacket, 'status' | 'blockedReason'> | null | undefined,
+): boolean {
+  const agentStatus = (agent?.status ?? '').toLowerCase();
+  const packetStatus = (packet?.status ?? '').toLowerCase();
+  const blockedReason = (packet?.blockedReason ?? '').toLowerCase();
+  if (agentStatus === 'running' || packetStatus === 'running') return true;
+  if (packetStatus.includes('awaiting_') || agentStatus.includes('awaiting_')) return true;
+  return packetStatus === 'blocked' && (blockedReason === 'huddle_ready' || blockedReason === 'worker_question');
 }
 
 export function shouldRefreshAgentTranscript(hasAgent: boolean, hasLane: boolean): boolean {
@@ -140,14 +184,18 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
   const loadingFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const name = useMemo(() => displayName(agent, packet, sessionKey), [agent, packet, sessionKey]);
-  const displayEntries = useMemo(() => normalizeAgentTileTranscript(entries, name), [entries, name]);
+  const displayEntries = useMemo(() => normalizeAgentTileTranscript(
+    entries,
+    name,
+    packet?.issue?.body ? { id: packet.id, text: packet.issue.body } : null,
+  ), [entries, name, packet?.id, packet?.issue?.body]);
   const runtime = useMemo(() => inferRuntime(sessionKey, agent?.runtime), [agent?.runtime, sessionKey]);
   const runtimeTone = useMemo(() => orchestratorRuntimeTone(runtime), [runtime]);
   const status = useMemo(
-    () => classifyAgentTileStatus(agent?.status ?? packet?.status),
-    [agent?.status, packet?.status],
+    () => resolveAgentTileStatus(agent?.status, packet?.status, packet?.blockedReason),
+    [agent?.status, packet?.blockedReason, packet?.status],
   );
-  const canSteer = canSteerAgent(agent);
+  const canSteer = canSteerAgentState(agent, packet);
   const shouldRefreshTranscript = shouldRefreshAgentTranscript(agent !== null, packet?.lane != null);
   const trimmedDraft = draft.trim();
   const canSend = canSteer && !sending && trimmedDraft.length > 0;
@@ -159,6 +207,8 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
   // canSteer at call time, not at callback-creation time.
   const agentRef = useRef(agent);
   useEffect(() => { agentRef.current = agent; }, [agent]);
+  const packetRef = useRef(packet);
+  useEffect(() => { packetRef.current = packet; }, [packet]);
 
   const clearTranscriptLoadingFallback = useCallback(() => {
     if (!loadingFallbackRef.current) return;
@@ -169,7 +219,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
   const submitSteer = useCallback(async () => {
     const message = trimmedDraft;
     // Fix #1: re-derive canSteer from the latest agent ref to avoid stale closure
-    const canSteerNow = canSteerAgent(agentRef.current);
+    const canSteerNow = canSteerAgentState(agentRef.current, packetRef.current);
     // Fix #4: check sendingRef synchronously before any setState to prevent held-Enter race
     if (!message || !canSteerNow || sendingRef.current) return;
     sendingRef.current = true;
@@ -308,18 +358,17 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
               title={name}
               style={{
                 minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                fontSize: 12.5, fontWeight: 500, color: 'var(--t-text)', letterSpacing: '-0.01em',
+                fontSize: 12, fontWeight: 300, color: 'var(--t-text)', letterSpacing: '-0.1px',
               }}
             >
               {name}
             </div>
             <span
               style={{
-                display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0,
-                color: 'var(--t-text-secondary)', fontSize: 10.5, fontWeight: 400, lineHeight: 1,
+                display: 'inline-flex', alignItems: 'center', flexShrink: 0,
+                color: 'var(--t-text-faint)', fontSize: 10, fontWeight: 300, lineHeight: 1,
               }}
             >
-              <span style={{ width: 4, height: 4, borderRadius: 999, background: runtimeTone.dot, flexShrink: 0 }} />
               {runtimeTone.label}
             </span>
           </div>
@@ -327,7 +376,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
           <span
             title={STATUS_META[status].label}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--t-text-secondary)', fontSize: 10.5, fontWeight: 400 }}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--t-text-secondary)', fontSize: 10, fontWeight: 300 }}
           >
             <span
               style={{
@@ -347,7 +396,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0,
             }}
             onMouseEnter={(event) => {
-              event.currentTarget.style.background = 'var(--t-panel)';
+              event.currentTarget.style.background = 'var(--t-hover)';
               event.currentTarget.style.color = 'var(--t-text)';
             }}
             onMouseLeave={(event) => {
@@ -367,9 +416,10 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
         ref={scrollRef}
         className="cortex-scroll-fade-y cortex-themed-scroll"
         style={{
-          flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 18,
-          paddingTop: 18, paddingRight: 18, paddingBottom: 24, paddingLeft: 18,
-          background: 'var(--t-chat-surface-bg, var(--t-panel))',
+          flex: 1, minHeight: 0, overflowY: 'auto',
+          overscrollBehaviorY: 'contain',
+          paddingTop: 14, paddingRight: 'var(--cortex-chat-gutter)', paddingBottom: 36, paddingLeft: 'var(--cortex-chat-gutter)',
+          background: 'transparent',
         }}
       >
         {displayEntries.length === 0 ? (
@@ -381,19 +431,21 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
           >
             {loading ? 'Loading transcript…' : error ?? 'No transcript yet.'}
           </div>
-        ) : displayEntries.map((entry, index) => {
-          const content = entryContent(entry);
-          if (!content) return null;
-          return (
-            <DesktopAgentMessage
-              key={entry.id}
-              entry={entry}
-              isLast={index === displayEntries.length - 1 && status !== 'running'}
-              isStreaming={status === 'running' && index === displayEntries.length - 1 && entry.role === 'assistant'}
+        ) : (
+          <div
+            style={{
+              width: '100%', maxWidth: 'var(--cortex-chat-column-max)', minHeight: '100%',
+              marginRight: 'auto', marginLeft: 'auto', display: 'flex', flexDirection: 'column', gap: 18,
+            }}
+          >
+            <WorkspaceTranscript
+              entries={displayEntries}
+              markLast={status !== 'running'}
+              isStreaming={status === 'running'}
               repoPath={packet?.lane?.worktreePath ?? packet?.lane?.repoPath ?? agent?.workspace ?? null}
             />
-          );
-        })}
+          </div>
+        )}
       </div>
 
       <AnimatePresence initial={false}>
@@ -441,7 +493,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
                 onKeyDown={handleTextareaKeyDown}
-                placeholder="Steer this agent…"
+                placeholder={status === 'waiting' ? 'Reply to continue…' : 'Steer this agent…'}
                 rows={1}
                 disabled={sending}
                 aria-label={`Steer ${name}`}
@@ -506,7 +558,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
                 role="alert"
                 style={{
                   fontSize: 11,
-                  fontWeight: 600,
+                  fontWeight: 400,
                   color: '#ef4444',
                   paddingTop: 0,
                   paddingRight: 4,
@@ -520,7 +572,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
               <div
                 style={{
                   fontSize: 10.5,
-                  fontWeight: 500,
+                  fontWeight: 300,
                   color: 'var(--t-text-secondary)',
                   paddingTop: 0,
                   paddingRight: 4,

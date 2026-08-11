@@ -124,6 +124,12 @@ function modelAllowedForProfile(profile: SubscriptionProfile, model: string): bo
   return profile === 'claude-only' ? house === 'claude' : house === 'codex';
 }
 
+function subscriptionRuntimeHouse(runtime: OrchestratorRuntime): 'claude' | 'codex' | null {
+  if (runtime === 'claude-code') return 'claude';
+  if (runtime === 'codex') return 'codex';
+  return null;
+}
+
 function effectiveProfileModel(input: ResolveSubscriptionProfileInput, fallbackModel: string | null): string | null {
   const requested = input.requestedModel?.trim();
   if (requested && modelAllowedForProfile(input.profile, requested)) return requested;
@@ -135,6 +141,23 @@ function effectiveProfileModel(input: ResolveSubscriptionProfileInput, fallbackM
 export function resolveSubscriptionProfileRouting(
   input: ResolveSubscriptionProfileInput,
 ): SubscriptionProfileRoutingResult | SubscriptionProfileRoutingError {
+  const requestedRuntimeHouse = input.requestedRuntime
+    ? subscriptionRuntimeHouse(input.requestedRuntime)
+    : null;
+  // Subscription profiles describe which account-backed CLI house o8 may
+  // spend against. Third-party and BYOK runtimes own their authentication and
+  // billing, so an explicit OpenCode, local, or provider runtime remains
+  // available under either single-subscription profile. Do not leak the
+  // account house's default model into that runtime; its adapter resolves its
+  // own saved/default model when the caller did not pin one.
+  if (input.requestedRuntime && !requestedRuntimeHouse) {
+    return {
+      ok: true,
+      requestedRuntime: input.requestedRuntime,
+      requestedModel: input.requestedModel?.trim() || null,
+    };
+  }
+
   const house = resolveSubscriptionProfileHouseDefaults(input.profile);
   if (!house) {
     return {

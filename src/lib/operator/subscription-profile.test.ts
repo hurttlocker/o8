@@ -112,6 +112,30 @@ describe('subscription profile resolver', () => {
     });
   });
 
+  it('keeps explicitly selected provider runtimes available under a single-subscription profile', () => {
+    expect(resolveSubscriptionProfileRouting({
+      profile: 'codex-only',
+      requestedRuntime: 'opencode',
+      requestedModel: 'openrouter/deepseek/deepseek-v4-flash',
+      defaultDispatchModel: MODEL_IDS.codexWorkerDefault,
+    })).toEqual({
+      ok: true,
+      requestedRuntime: 'opencode',
+      requestedModel: 'openrouter/deepseek/deepseek-v4-flash',
+    });
+
+    expect(resolveSubscriptionProfileRouting({
+      profile: 'claude-only',
+      requestedRuntime: 'opencode',
+      requestedModel: null,
+      defaultDispatchModel: MODEL_IDS.claudeWorkerDefault,
+    })).toEqual({
+      ok: true,
+      requestedRuntime: 'opencode',
+      requestedModel: null,
+    });
+  });
+
   it('keeps explicit in-house models and drops cross-house defaults', () => {
     expect(resolveSubscriptionProfileRouting({
       profile: 'claude-only',

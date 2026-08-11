@@ -8,12 +8,13 @@
  * huddle is off). Driven through the real prompt assembler, not the resolvers.
  */
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 import type { OrchestratorPacket } from './types';
 
-process.env.CORTEX_IDE_DATA_DIR = mkdtempSync(join(os.tmpdir(), 'o8-pkt-align-'));
+const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-pkt-align-'));
+process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
 const { buildPacketPrompt } = await import('./packet-prompt');
 const { HUDDLE_PROMPT_SECTION } = await import('./huddle-access');
@@ -40,9 +41,11 @@ function minimalPacket(overrides: Partial<OrchestratorPacket> = {}): Orchestrato
 async function withCheapTierProfile<T>(fn: () => Promise<T>): Promise<T> {
   const prev = process.env.O8_SUBSCRIPTION_PROFILE;
   process.env.O8_SUBSCRIPTION_PROFILE = 'claude-only';
+  writeFileSync(join(dataDir, 'operator-defaults.json'), JSON.stringify({ workerStartMode: 'adaptive' }));
   try {
     return await fn();
   } finally {
+    rmSync(join(dataDir, 'operator-defaults.json'), { force: true });
     if (prev === undefined) delete process.env.O8_SUBSCRIPTION_PROFILE;
     else process.env.O8_SUBSCRIPTION_PROFILE = prev;
   }
@@ -61,13 +64,24 @@ describe('buildPacketPrompt alignment de-dup', () => {
     });
   });
 
-  it('advisor-armed alone (huddle off) still gets the advisor block, not the huddle block', async () => {
+  it('adaptive mode arms an unclassified legacy packet without an explicit huddle choice', async () => {
+    await withCheapTierProfile(async () => {
+      const prompt = await buildPacketPrompt(
+        minimalPacket({ huddle: undefined, runtime: 'claude-code', assignedModel: null }),
+        [],
+      );
+      expect(prompt).toContain(ADVISOR_PROMPT_SECTION);
+      expect(prompt).not.toContain(HUDDLE_PROMPT_SECTION);
+    });
+  });
+
+  it('an explicit run-now choice stays autonomous even when adaptive mode is saved', async () => {
     await withCheapTierProfile(async () => {
       const prompt = await buildPacketPrompt(
         minimalPacket({ huddle: false, runtime: 'claude-code', assignedModel: null }),
         [],
       );
-      expect(prompt).toContain(ADVISOR_PROMPT_SECTION);
+      expect(prompt).not.toContain(ADVISOR_PROMPT_SECTION);
       expect(prompt).not.toContain(HUDDLE_PROMPT_SECTION);
     });
   });

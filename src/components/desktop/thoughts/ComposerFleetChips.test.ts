@@ -45,6 +45,7 @@ describe('FleetWorkerChip', () => {
           defaultDispatchRuntime: body?.defaultDispatchRuntime ?? 'codex',
           defaultDispatchModel: '',
           opencodeWorkerModel: body?.opencodeWorkerModel ?? null,
+          workerStartMode: body?.workerStartMode ?? 'autonomous',
         },
         sources: {},
       }), { status: 200 });
@@ -78,6 +79,22 @@ describe('FleetWorkerChip', () => {
     expect(requests).toContainEqual({
       method: 'POST',
       body: { opencodeWorkerModel: 'openrouter/deepseek/deepseek-v4-flash' },
+    });
+  });
+
+  it('lets the operator choose whether workers run or ask first', async () => {
+    await act(async () => { root.render(createElement(FleetWorkerChip)); });
+    const trigger = container.querySelector<HTMLButtonElement>('button[aria-label^="Fleet worker"]');
+    act(() => trigger?.click());
+
+    const askFirst = [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent === 'Ask first');
+    expect(askFirst).toBeDefined();
+    await act(async () => { askFirst?.click(); await Promise.resolve(); });
+
+    expect(requests).toContainEqual({
+      method: 'POST',
+      body: { workerStartMode: 'huddle' },
     });
   });
 });

@@ -436,7 +436,7 @@ describe('seam F — create-mission runtime policy reaches persisted packets', (
     expect(packet.workerRouting.selectedEffort).toBe('high');
   });
 
-  it('subscriptionProfile=claude-only creates Claude Code + Sonnet worker packets', async () => {
+  it('subscriptionProfile=claude-only starts its worker autonomously by default', async () => {
     writeFileSync(
       join(dataDir, 'operator-defaults.json'),
       `${JSON.stringify({ subscriptionProfile: 'claude-only' }, null, 2)}\n`,
@@ -461,16 +461,36 @@ describe('seam F — create-mission runtime policy reaches persisted packets', (
     expect(packet.workerRouting.selectedRuntime).toBe('claude-code');
     expect(packet.workerRouting.selectedModel).toBe('claude-sonnet-5');
     expect(packet.assignedModel).toBe('claude-sonnet-5');
-    expect(packet.huddle).toBe(true);
+    expect(packet.huddle).toBe(false);
 
     const prompt = await buildPacketPrompt(packet, state.mission.packets);
-    // This packet is BOTH huddle-armed (create-mission auto-arms cheap tier) and
-    // advisor-armed. The two sections overlap, so the assembler emits exactly one
-    // alignment block — the explicit huddle section wins, the advisor section is
-    // de-duped out.
-    expect(prompt).toContain('Huddle mode (this packet)');
+    expect(prompt).not.toContain('Huddle mode (this packet)');
     expect(prompt).not.toContain('Advisor discipline (single-sub cheap-tier worker)');
     expect(prompt).toContain('Engineering Brain available');
+  });
+
+  it('workerStartMode=adaptive keeps cheap-tier alignment available as an explicit preference', async () => {
+    writeFileSync(
+      join(dataDir, 'operator-defaults.json'),
+      `${JSON.stringify({ subscriptionProfile: 'claude-only', workerStartMode: 'adaptive' }, null, 2)}\n`,
+      'utf-8',
+    );
+
+    const res = await createMissionRoute.POST(operatorReq(url, {
+      repoPath: process.cwd(),
+      issues: [{
+        number: 90_000_130,
+        title: 'dispatch adaptive start seam',
+        body: 'The operator selected adaptive worker starts.',
+        url: '',
+      }],
+    }));
+    expect(res.status).toBe(201);
+    const json = await res.json();
+    const state = await (await stateRoute.GET(operatorGet('http://localhost:3001/api/orchestrator/state'))).json();
+    const packet = state.mission.packets.find((candidate: OrchestratorPacket) => candidate.id === json.result.packets[0].id);
+    expect(packet.huddle).toBe(true);
+    expect(await buildPacketPrompt(packet, state.mission.packets)).toContain('Huddle mode (this packet)');
   });
 
   it('subscriptionProfile=both does not replace the Codex fallback', async () => {
@@ -495,7 +515,7 @@ describe('seam F — create-mission runtime policy reaches persisted packets', (
     const packet = state.mission.packets.find((p: OrchestratorPacket) => p.id === json.result.packets[0].id);
     expect(packet.workerRouting.selectedRuntime).toBe('codex');
     expect(packet.workerRouting.selectedModel).toBeNull();
-    expect(packet.huddle).toBeUndefined();
+    expect(packet.huddle).toBe(false);
   });
 
   it('subscriptionProfile=claude-only honors explicit huddle:false', async () => {
@@ -520,7 +540,7 @@ describe('seam F — create-mission runtime policy reaches persisted packets', (
     const state = await (await stateRoute.GET(operatorGet('http://localhost:3001/api/orchestrator/state'))).json();
     const packet = state.mission.packets.find((p: OrchestratorPacket) => p.id === json.result.packets[0].id);
     expect(packet.workerRouting.selectedModel).toBe('claude-sonnet-5');
-    expect(packet.huddle).toBeUndefined();
+    expect(packet.huddle).toBe(false);
   });
 
   it('subscriptionProfile=claude-only rejects an explicit Codex request clearly', async () => {
@@ -569,6 +589,35 @@ describe('seam F — create-mission runtime policy reaches persisted packets', (
     expect(json.ok).toBe(false);
     expect(json.error.code).toBe('subscription_profile_runtime_unavailable');
     expect(json.error.message).toContain('subscriptionProfile "claude-only"');
+  });
+
+  it('subscriptionProfile=codex-only still dispatches an explicitly selected provider runtime', async () => {
+    writeFileSync(
+      join(dataDir, 'operator-defaults.json'),
+      `${JSON.stringify({ subscriptionProfile: 'codex-only' }, null, 2)}\n`,
+      'utf-8',
+    );
+
+    const res = await createMissionRoute.POST(operatorReq(url, {
+      repoPath: process.cwd(),
+      requestedRuntime: 'opencode',
+      requestedModel: 'openrouter/deepseek/deepseek-v4-flash',
+      issues: [{
+        number: 90_000_129,
+        title: 'dispatch provider runtime under codex profile',
+        body: 'The provider runtime owns its authentication and billing.',
+        url: '',
+      }],
+    }));
+    expect(res.status).toBe(201);
+    const json = await res.json();
+    expect(json.ok).toBe(true);
+    const state = await (await stateRoute.GET(operatorGet('http://localhost:3001/api/orchestrator/state'))).json();
+    const packet = state.mission.packets.find((candidate: OrchestratorPacket) => candidate.id === json.result.packets[0].id);
+    expect(packet.runtime).toBe('opencode');
+    expect(packet.workerRouting.selectedRuntime).toBe('opencode');
+    expect(packet.workerRouting.selectedModel).toBe('openrouter/deepseek/deepseek-v4-flash');
+    expect(packet.huddle).toBe(false);
   });
 
   it('codex unauthenticated fails preflight before creating a mission', async () => {

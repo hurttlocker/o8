@@ -11,8 +11,8 @@ import type { OrchestratorPacket } from '@/lib/orchestrator/types';
  * source is armed:
  *   - `huddle` — the explicit per-mission flag the orchestrator sets on packets
  *     it wants to align on (`resolvePacketHuddleEnabled`).
- *   - `advisor` — the single-sub cheap-tier auto-rule that arms the SAME turn
- *     for weaker workers (`resolvePacketAdvisorEnabled`).
+ *   - `advisor` — the optional Adaptive start policy for single-subscription
+ *     lower-cost workers (`resolvePacketAdvisorEnabled`).
  *
  * Both instruct "align before you edit", so exactly ONE prompt section is
  * emitted — the explicit huddle section wins; the advisor section only applies
@@ -32,7 +32,7 @@ export interface PacketAlignment {
 }
 
 export type PacketAlignmentInput = HuddleAccessInput
-  & Pick<OrchestratorPacket, 'runtime' | 'assignedModel' | 'workerRouting'>;
+  & Pick<OrchestratorPacket, 'runtime' | 'assignedModel' | 'workerRouting' | 'huddle'>;
 
 export function resolvePacketAlignment(packet: PacketAlignmentInput): PacketAlignment {
   if (resolvePacketHuddleEnabled(packet)) {

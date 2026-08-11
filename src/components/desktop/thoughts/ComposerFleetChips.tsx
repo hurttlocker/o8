@@ -25,11 +25,13 @@ import {
   listDispatchableRuntimes,
   type OrchestratorRuntime,
 } from '@/lib/orchestrator/runtime-capabilities';
+import type { WorkerStartMode } from '@/lib/operator/worker-start-mode';
 
 interface DispatchDefaults {
   defaultDispatchRuntime: OrchestratorRuntime;
   defaultDispatchModel: string;
   opencodeWorkerModel: string | null;
+  workerStartMode: WorkerStartMode;
 }
 
 type FleetPickerView = 'runtimes' | 'opencode-model';
@@ -38,7 +40,19 @@ const FALLBACK_DEFAULTS: DispatchDefaults = {
   defaultDispatchRuntime: 'codex',
   defaultDispatchModel: '',
   opencodeWorkerModel: null,
+  workerStartMode: 'autonomous',
 };
+
+const WORKER_START_OPTIONS: Array<{
+  value: WorkerStartMode;
+  label: string;
+  shortLabel: string;
+  detail: string;
+}> = [
+  { value: 'autonomous', label: 'Run now', shortLabel: 'Run', detail: 'The worker implements immediately inside its worktree.' },
+  { value: 'huddle', label: 'Ask first', shortLabel: 'Ask', detail: 'The worker reads the task, shares a plan, and waits before editing.' },
+  { value: 'adaptive', label: 'Adaptive', shortLabel: 'Adaptive', detail: 'Lower-cost subscription workers ask first; other workers run immediately.' },
+];
 
 /** Last path segment of a provider-qualified model id, for chip width. */
 function shortModelLabel(model: string): string {
@@ -237,6 +251,9 @@ export function FleetWorkerChip({ compact = false }: { compact?: boolean }) {
         opencodeWorkerModel: typeof values.opencodeWorkerModel === 'string' && values.opencodeWorkerModel
           ? values.opencodeWorkerModel
           : null,
+        workerStartMode: values.workerStartMode === 'huddle' || values.workerStartMode === 'adaptive'
+          ? values.workerStartMode
+          : 'autonomous',
       });
       setWorkerModelLocked(payload.sources?.opencodeWorkerModel === 'env');
     } catch { /* chip keeps last known values */ }
@@ -279,20 +296,37 @@ export function FleetWorkerChip({ compact = false }: { compact?: boolean }) {
     }
   }, [refetch, workerModelLocked]);
 
+  const selectWorkerStartMode = useCallback(async (workerStartMode: WorkerStartMode) => {
+    setDefaults((current) => ({ ...current, workerStartMode }));
+    setSaving(true);
+    try {
+      await fetch('/api/panel/operator-defaults', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workerStartMode }),
+      });
+    } catch { /* next refetch restores truth */ } finally {
+      setSaving(false);
+      void refetch();
+    }
+  }, [refetch]);
+
   const runtime = defaults.defaultDispatchRuntime;
   const runtimeLabel = getRuntimeCapability(runtime).label;
   const model = workerModelForDisplay(runtime, defaults);
+  const startOption = WORKER_START_OPTIONS.find((option) => option.value === defaults.workerStartMode)
+    ?? WORKER_START_OPTIONS[0];
   const chipText = compact
-    ? runtimeLabel
-    : model ? `${runtimeLabel} · ${shortModelLabel(model)}` : runtimeLabel;
+    ? `${runtimeLabel} · ${startOption.shortLabel}`
+    : `${model ? `${runtimeLabel} · ${shortModelLabel(model)}` : runtimeLabel} · ${startOption.shortLabel}`;
 
   return (
     <>
       <button
         ref={triggerRef}
         type="button"
-        title={`Fleet worker: ${runtimeLabel}${model ? ` — ${model}` : ''}. Click to change the dispatch runtime.`}
-        aria-label={`Fleet worker: ${runtimeLabel}`}
+        title={`Fleet worker: ${runtimeLabel}${model ? ` — ${model}` : ''}. Starts: ${startOption.label}.`}
+        aria-label={`Fleet worker: ${runtimeLabel}. Starts: ${startOption.label}`}
         aria-expanded={open}
         onClick={() => {
           setView('runtimes');
@@ -347,6 +381,63 @@ export function FleetWorkerChip({ compact = false }: { compact?: boolean }) {
         >
           {view === 'runtimes' ? (
             <>
+              <div style={{
+                paddingLeft: 8,
+                paddingRight: 8,
+                paddingBottom: 4,
+                fontSize: 10,
+                letterSpacing: '0.3px',
+                textTransform: 'uppercase',
+                color: 'var(--t-text-faint)',
+                fontFamily: 'var(--font-sans-system)',
+              }}>
+                Worker starts
+              </div>
+              <div style={{ display: 'flex', gap: 3, paddingLeft: 4, paddingRight: 4, paddingBottom: 3 }}>
+                {WORKER_START_OPTIONS.map((option) => {
+                  const active = option.value === defaults.workerStartMode;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      title={option.detail}
+                      aria-pressed={active}
+                      onClick={() => { void selectWorkerStartMode(option.value); }}
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        height: 25,
+                        paddingLeft: 5,
+                        paddingRight: 5,
+                        borderRadius: 7,
+                        borderWidth: 0,
+                        background: active ? 'var(--t-hover)' : 'transparent',
+                        color: active ? 'var(--t-text)' : 'var(--t-text-secondary)',
+                        cursor: 'pointer',
+                        fontFamily: 'var(--font-sans-system)',
+                        fontSize: 10.5,
+                        fontWeight: active ? 500 : 400,
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{
+                minHeight: 24,
+                paddingTop: 2,
+                paddingRight: 8,
+                paddingBottom: 6,
+                paddingLeft: 8,
+                fontSize: 10,
+                lineHeight: 1.35,
+                color: 'var(--t-text-faint)',
+                fontFamily: 'var(--font-sans-system)',
+              }}>
+                {startOption.detail}
+              </div>
               <div style={{
                 paddingLeft: 8,
                 paddingRight: 8,

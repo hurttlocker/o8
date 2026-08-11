@@ -15,6 +15,7 @@ import {
   type SubscriptionProfile,
 } from './subscription-profile';
 import { resolveWorkerEffortDefault } from './worker-effort-default';
+import { isWorkerStartMode, type WorkerStartMode } from './worker-start-mode';
 import { parseStoredJson } from './stored-json';
 import {
   coerceStoredTier,
@@ -159,6 +160,7 @@ export interface OperatorDefaults {
   /** Model for dispatched opencode workers. Null = the adapter default. */
   opencodeWorkerModel: string | null;
   defaultDispatchRuntime: OrchestratorRuntime;
+  workerStartMode: WorkerStartMode;
   workerRuntimes: OrchestratorRuntime[];
   /** Default Codex worker effort. 'adaptive' preserves runtime default behavior. */
   codexWorkerEffort: ThinkingEffort;
@@ -358,6 +360,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   opencodeOrchestratorModel: null,
   opencodeWorkerModel: null,
   defaultDispatchRuntime: 'codex',
+  workerStartMode: 'autonomous',
   workerRuntimes: ['codex'],
   codexWorkerEffort: 'adaptive',
   claudeWorkerEffort: 'adaptive',
@@ -434,6 +437,7 @@ interface StoredOperatorDefaults {
   opencodeWorkerModel?: string | null;
   defaultDispatchRuntime?: OrchestratorRuntime;
   defaultDispatchRuntimeExplicit?: boolean;
+  workerStartMode?: WorkerStartMode;
   workerRuntimes?: OrchestratorRuntime[];
   codexWorkerEffort?: ThinkingEffort;
   claudeWorkerEffort?: ThinkingEffort;
@@ -526,6 +530,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
     result.defaultDispatchRuntime = stored.defaultDispatchRuntime;
     result.defaultDispatchRuntimeExplicit = stored.defaultDispatchRuntimeExplicit !== false;
   }
+  if (isWorkerStartMode(stored.workerStartMode)) result.workerStartMode = stored.workerStartMode;
   if (Array.isArray(stored.workerRuntimes)) {
     const workerRuntimes = [...new Set(stored.workerRuntimes.filter(isDispatchRuntime))];
     if (workerRuntimes.length > 0) result.workerRuntimes = workerRuntimes;
@@ -720,6 +725,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
       fileValues.opencodeOrchestratorModel ?? OPERATOR_DEFAULTS_FALLBACK.opencodeOrchestratorModel,
     opencodeWorkerModel: fileValues.opencodeWorkerModel ?? OPERATOR_DEFAULTS_FALLBACK.opencodeWorkerModel,
     defaultDispatchRuntime,
+    workerStartMode: fileValues.workerStartMode ?? OPERATOR_DEFAULTS_FALLBACK.workerStartMode,
     workerRuntimes: fileValues.workerRuntimes ?? OPERATOR_DEFAULTS_FALLBACK.workerRuntimes,
     codexWorkerEffort:
       envCodexEffort ?? fileValues.codexWorkerEffort ?? OPERATOR_DEFAULTS_FALLBACK.codexWorkerEffort,
@@ -784,6 +790,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     opencodeOrchestratorModel: fileValues.opencodeOrchestratorModel !== undefined ? 'file' : 'default',
     opencodeWorkerModel: fileValues.opencodeWorkerModel !== undefined ? 'file' : 'default',
     defaultDispatchRuntime: envRuntime !== null ? 'env' : fileValues.defaultDispatchRuntimeExplicit ? 'file' : 'default',
+    workerStartMode: fileValues.workerStartMode !== undefined ? 'file' : 'default',
     workerRuntimes: fileValues.workerRuntimes !== undefined ? 'file' : 'default',
     codexWorkerEffort:
       envCodexEffort !== null ? 'env' : fileValues.codexWorkerEffort !== undefined ? 'file' : 'default',
@@ -934,6 +941,10 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>): Pr
     }
     stored.defaultDispatchRuntime = update.defaultDispatchRuntime;
     stored.defaultDispatchRuntimeExplicit = true;
+  }
+  if (update.workerStartMode !== undefined) {
+    if (!isWorkerStartMode(update.workerStartMode)) throw new Error('workerStartMode must be one of "autonomous", "huddle", or "adaptive".');
+    stored.workerStartMode = update.workerStartMode;
   }
   if (update.workerRuntimes !== undefined) {
     if (!Array.isArray(update.workerRuntimes) || update.workerRuntimes.length === 0 || !update.workerRuntimes.every(isDispatchRuntime)) {
@@ -1129,29 +1140,17 @@ export async function applyOperatorDefaultsToml(raw: string, expectedRevision: s
  * Synchronously resolve one common knob.
  * Used by scheduling.ts module-init code that must not do async work.
  */
-export function resolveParallelCapSync(): number {
-  return getOperatorDefaultsSync().values.parallelCap;
-}
+export function resolveParallelCapSync(): number { return getOperatorDefaultsSync().values.parallelCap; }
 
-export function resolveOverlapGateSync(): OverlapGateMode {
-  return getOperatorDefaultsSync().values.overlapGate;
-}
+export function resolveOverlapGateSync(): OverlapGateMode { return getOperatorDefaultsSync().values.overlapGate; }
 
-export function resolveSupervisorAutoEscalateSync(): boolean {
-  return getOperatorDefaultsSync().values.supervisorAutoEscalate;
-}
+export function resolveSupervisorAutoEscalateSync(): boolean { return getOperatorDefaultsSync().values.supervisorAutoEscalate; }
 
-export function resolveReviewContinuationSync(): boolean {
-  return getOperatorDefaultsSync().values.reviewContinuation;
-}
+export function resolveReviewContinuationSync(): boolean { return getOperatorDefaultsSync().values.reviewContinuation; }
 
-export function resolveHealBotEnabledSync(): boolean {
-  return getOperatorDefaultsSync().values.healBotEnabled;
-}
+export function resolveHealBotEnabledSync(): boolean { return getOperatorDefaultsSync().values.healBotEnabled; }
 
-export function resolvePromptCachingEnabledSync(): boolean {
-  return getOperatorDefaultsSync().values.promptCachingEnabled;
-}
+export function resolvePromptCachingEnabledSync(): boolean { return getOperatorDefaultsSync().values.promptCachingEnabled; }
 
 export function resolveMergeTestReplayEnabledSync(): boolean {
   return getOperatorDefaultsSync().values.mergeTestReplayEnabled;

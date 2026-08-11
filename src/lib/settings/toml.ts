@@ -25,6 +25,7 @@ import {
 } from '@/lib/operator/defaults-env';
 import { isSubscriptionProfile } from '@/lib/operator/subscription-profile';
 import { isTargetingTier } from '@/lib/operator/targeting-tier';
+import { isWorkerStartMode } from '@/lib/operator/worker-start-mode';
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { AUTHENTICATED_ENDPOINT_GUIDANCE, credentialBearingUrlPart } from './credential-safe-url';
 
@@ -207,6 +208,7 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   opencodeOrchestratorModel: acpModelIdField('models', 'opencode_orchestrator_model'),
   opencodeWorkerModel: acpModelIdField('models', 'opencode_worker_model'),
   defaultDispatchRuntime: enumField('models', 'default_dispatch_runtime', 'a dispatchable runtime name', isDispatchRuntime),
+  workerStartMode: enumField('operator', 'worker_start_mode', 'one of "autonomous", "huddle", or "adaptive"', isWorkerStartMode),
   workerRuntimes: dispatchRuntimeListField('models', 'worker_runtimes'),
   codexWorkerEffort: enumField('models', 'codex_worker_effort', 'a valid thinking effort', isThinkingEffort),
   claudeWorkerEffort: enumField('models', 'claude_worker_effort', 'a valid thinking effort', isThinkingEffort),

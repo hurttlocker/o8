@@ -7,7 +7,8 @@ import {
   dispatchMission,
 } from '@/lib/orchestrator/operator-mission-service';
 import { getOperatorDefaultsSync, resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
-import { isSingleSubCheapTierWorker, resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-profile';
+import { resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-profile';
+import { resolveWorkerHuddle } from '@/lib/operator/worker-start-mode';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import {
   formatDispatchableRuntimeChoices,
@@ -79,13 +80,13 @@ export async function POST(request: NextRequest) {
     requestedModel: profileRouting.requestedModel,
     source: 'spawn-prompt-api',
   });
-  const huddle = typeof record.huddle === 'boolean'
-    ? record.huddle
-    : isSingleSubCheapTierWorker({
-        profile: defaults.subscriptionProfile,
-        runtime: workerRouting.selectedRuntime,
-        model: workerRouting.selectedModel,
-      });
+  const huddle = resolveWorkerHuddle({
+    mode: defaults.workerStartMode,
+    explicitHuddle: typeof record.huddle === 'boolean' ? record.huddle : undefined,
+    profile: defaults.subscriptionProfile,
+    runtime: workerRouting.selectedRuntime,
+    model: workerRouting.selectedModel,
+  });
   try {
     await assertRuntimeDispatchable(workerRouting.selectedRuntime);
   } catch (error) {
@@ -121,7 +122,7 @@ export async function POST(request: NextRequest) {
       requestedModel: workerRouting.requestedModel,
       constraints: typeof record.constraints === 'string' ? record.constraints : '',
       ...(typeof record.useBrain === 'boolean' ? { useBrain: record.useBrain } : {}),
-      ...(huddle ? { huddle } : {}),
+      huddle,
     });
 
     const dispatch = await dispatchMission({ missionId: mission.missionId });

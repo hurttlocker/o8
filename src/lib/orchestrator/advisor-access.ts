@@ -4,9 +4,12 @@ import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 import { isSingleSubCheapTierWorker } from '@/lib/operator/subscription-profile';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
-export function resolvePacketAdvisorEnabled(packet: Pick<OrchestratorPacket, 'runtime' | 'assignedModel' | 'workerRouting'>): boolean {
+export function resolvePacketAdvisorEnabled(packet: Pick<OrchestratorPacket, 'runtime' | 'assignedModel' | 'workerRouting' | 'huddle'>): boolean {
+  if (packet.huddle === false) return false;
+  const defaults = getOperatorDefaultsSync().values;
+  if (defaults.workerStartMode !== 'adaptive') return false;
   return isSingleSubCheapTierWorker({
-    profile: getOperatorDefaultsSync().values.subscriptionProfile,
+    profile: defaults.subscriptionProfile,
     runtime: packet.workerRouting?.selectedRuntime ?? packet.runtime,
     model: packet.workerRouting?.selectedModel ?? packet.assignedModel ?? null,
   });

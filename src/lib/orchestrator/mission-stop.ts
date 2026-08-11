@@ -135,22 +135,46 @@ async function stopMissionState(state: OrchestratorMissionState): Promise<{ stat
   };
 }
 
+async function stopCurrentMission(state: OrchestratorMissionState): Promise<StopMissionResult> {
+  const missionId = state.missionId?.trim();
+  if (!missionId) throw new Error('missionId is required.');
+  const stoppedAt = new Date().toISOString();
+  const packets: StopMissionPacketResult[] = [];
+
+  // Runtime stop commands update packet state under the control-plane lock,
+  // so they must run before this function reacquires that lock to persist the
+  // aggregate mission result. Holding the lock across dispatchLaneCommand
+  // deadlocks on the command's own withLockedState call.
+  for (const packet of state.packets) {
+    packets.push(await stopPacketViaLaneCommand(packet));
+  }
+
+  return withControlPlaneLock(() => {
+    const fresh = readOrchestratorControlPlaneState();
+    writeOrchestratorControlPlaneState(applyStopResults(fresh, packets, stoppedAt));
+    return {
+      missionId,
+      event: {
+        type: 'mission_stop',
+        recordedAt: stoppedAt,
+      },
+      packets,
+    };
+  });
+}
+
 export async function stopMission(missionId: string): Promise<StopMissionResult> {
   const normalizedId = missionId.trim();
   if (!normalizedId) throw new Error('missionId is required.');
 
   // #1488 — read AND write under the cross-process lock: the old unlocked
   // read → async kill sequence → whole-state write could erase packets other
-  // processes created/updated mid-stop. Lock-only (no reconcile) so the stop's
-  // honest per-packet statuses persist exactly as computed.
+  // processes created/updated mid-stop. Runtime commands now run outside the
+  // lock, then the result applies to a fresh snapshot under one short lock so
+  // command-side packet updates and concurrent packets are preserved.
   const currentMissionId = (readOrchestratorControlPlaneState().missionId ?? '').trim();
   if (currentMissionId === normalizedId) {
-    return withControlPlaneLock(async () => {
-      const fresh = readOrchestratorControlPlaneState();
-      const { state, result } = await stopMissionState(fresh);
-      writeOrchestratorControlPlaneState(state);
-      return result;
-    });
+    return stopCurrentMission(readOrchestratorControlPlaneState());
   }
 
   const { result } = await withMissionRegistryState(normalizedId, stopMissionState);

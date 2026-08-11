@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { createLane, getLane, setLaneStatus } from '@/lib/lane/registry';
 import { writeOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
@@ -10,7 +12,7 @@ import { HUDDLE_READY_EVENT_LABEL, parkHuddleReadyZeroDiffLane } from './huddle-
 function huddlePacket(
   id: string,
   repoPath: string,
-  huddle: boolean,
+  huddle: boolean | undefined,
   runtime: OrchestratorPacket['runtime'] = 'codex',
 ): OrchestratorPacket {
   return {
@@ -30,11 +32,11 @@ function huddlePacket(
     review: null,
     workspaceTargetPath: repoPath,
     branchTarget: `inline/${id}`,
-    huddle,
+    ...(typeof huddle === 'boolean' ? { huddle } : {}),
   } as OrchestratorPacket;
 }
 
-function seedHuddleLane(packetId: string, huddle: boolean, runtime: OrchestratorPacket['runtime'] = 'codex') {
+function seedHuddleLane(packetId: string, huddle: boolean | undefined, runtime: OrchestratorPacket['runtime'] = 'codex') {
   const repoPath = '/tmp/o8-huddle-zero-diff-test-repo';
   const lane = createLane({
     repoPath,
@@ -82,20 +84,20 @@ describe('parkHuddleReadyZeroDiffLane (#1496)', () => {
     expect(getLane(lane.id)?.status).toBe('running');
   });
 
-  it('parks an ADVISOR-armed packet on zero-diff exit even with huddle:false (single-sub cheap tier)', async () => {
-    // Single-sub cheap-tier workers (claude-only profile + claude-code runtime +
-    // cheap default model) are auto-armed with the same alignment turn via the
-    // advisor prompt, so their zero-diff exit must get the same park safety net.
+  it('parks an adaptive legacy packet without an explicit huddle choice', async () => {
     const prev = process.env.O8_SUBSCRIPTION_PROFILE;
     process.env.O8_SUBSCRIPTION_PROFILE = 'claude-only';
+    const defaultsPath = join(process.env.CORTEX_IDE_DATA_DIR!, 'operator-defaults.json');
+    writeFileSync(defaultsPath, JSON.stringify({ workerStartMode: 'adaptive' }));
     try {
-      const lane = seedHuddleLane('pkt-advisor-nohuddle', false, 'claude-code');
+      const lane = seedHuddleLane('pkt-advisor-nohuddle', undefined, 'claude-code');
 
       const result = await parkHuddleReadyZeroDiffLane(lane);
 
       expect(result.parked).toBe(true);
       expect(getLane(lane.id)?.status).toBe('awaiting_orchestrator');
     } finally {
+      rmSync(defaultsPath, { force: true });
       if (prev === undefined) delete process.env.O8_SUBSCRIPTION_PROFILE;
       else process.env.O8_SUBSCRIPTION_PROFILE = prev;
     }

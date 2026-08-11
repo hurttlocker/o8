@@ -10,7 +10,8 @@ import { computePredictedFiles } from '@/lib/orchestrator/preservation-envelope'
 import { normalizeRequestedRuntime, resolveWorkerRouting } from '@/lib/agents/routing';
 import { codename } from '@/lib/agents/codename';
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
-import { isSingleSubCheapTierWorker, resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-profile';
+import { resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-profile';
+import { resolveWorkerHuddle } from '@/lib/operator/worker-start-mode';
 import { buildProjectTaskBrief, getProjectContext } from '@/lib/projects/context';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { buildProjectBriefPromptV1 } from '@/lib/prompts/v1';
@@ -118,13 +119,13 @@ export async function POST(request: NextRequest) {
       requestedModel: profileRouting.requestedModel,
       source: 'delegate-api',
     });
-    const huddle = typeof body.huddle === 'boolean'
-      ? body.huddle
-      : isSingleSubCheapTierWorker({
-          profile: defaults.subscriptionProfile,
-          runtime: workerRouting.selectedRuntime,
-          model: workerRouting.selectedModel,
-        });
+    const huddle = resolveWorkerHuddle({
+      mode: defaults.workerStartMode,
+      explicitHuddle: typeof body.huddle === 'boolean' ? body.huddle : undefined,
+      profile: defaults.subscriptionProfile,
+      runtime: workerRouting.selectedRuntime,
+      model: workerRouting.selectedModel,
+    });
 
     // #535 — Compute a read budget at dispatch time so weaker models don't
     // start writing before reading the adjacent surface. The helper returns
@@ -188,7 +189,7 @@ export async function POST(request: NextRequest) {
       edgeCaseSites,
       workerIntent: workerRouting.workerIntent,
       workerRouting,
-      ...(huddle ? { huddle } : {}),
+      huddle,
       prompt: launchPrompt,
     };
 

@@ -21,6 +21,7 @@ import {
   type OverlapGateMode,
 } from '@/lib/operator/defaults';
 import { isDispatchRuntime } from '@/lib/operator/defaults-env';
+import { isWorkerStartMode } from '@/lib/operator/worker-start-mode';
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { SettingsTomlConflictError } from '@/lib/settings/operator-defaults-store';
 import { validateCredentialSafeUrl } from '@/lib/settings/credential-safe-url';
@@ -151,6 +152,13 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
       throw new Error('defaultDispatchRuntime must name a dispatchable runtime.');
     }
     update.defaultDispatchRuntime = body.defaultDispatchRuntime;
+  }
+
+  if (body.workerStartMode !== undefined) {
+    if (!isWorkerStartMode(body.workerStartMode)) {
+      throw new Error('workerStartMode must be one of "autonomous", "huddle", or "adaptive".');
+    }
+    update.workerStartMode = body.workerStartMode;
   }
 
   if (isWorkerRuntimeList(body.workerRuntimes)) {
