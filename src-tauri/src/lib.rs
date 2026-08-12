@@ -5016,7 +5016,16 @@ fn voice_prefs_get() -> serde_json::Value {
 #[cfg(target_os = "macos")]
 #[tauri::command]
 fn voice_prefs_set(key: String, value: serde_json::Value) -> Result<(), String> {
-    crate::stt::keys::set_pref(&key, value)
+    let external_symon_left_control = if key == "external_symon_left_control" {
+        value.as_bool()
+    } else {
+        None
+    };
+    crate::stt::keys::set_pref(&key, value)?;
+    if let Some(enabled) = external_symon_left_control {
+        crate::fn_hotkey::set_external_symon_left_control(enabled);
+    }
+    Ok(())
 }
 
 /// Recent dictation history (newest first) for the settings History panel — the

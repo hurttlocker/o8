@@ -142,6 +142,7 @@ export function VoiceTab() {
   const [groqKeyInput, setGroqKeyInput] = useState('');
   const [groqKeySaving, setGroqKeySaving] = useState(false);
   const [partialsSurface, setPartialsSurface] = useState<'caret' | 'hud' | 'off'>('caret');
+  const [externalSymonKey, setExternalSymonKey] = useState<'right_option' | 'left_control'>('right_option');
   const dictationMode = useSyncExternalStore(
     typeof window !== 'undefined' ? subscribeDictationInputMode : noopSubscribe,
     typeof window !== 'undefined' ? readDictationInputMode : dictationModeFallback,
@@ -172,6 +173,11 @@ export function VoiceTab() {
     const savedSurface = prefs
       && (prefs as Record<string, unknown>).dictation_partials_surface;
     setPartialsSurface(savedSurface === 'hud' || savedSurface === 'off' ? savedSurface : 'caret');
+    setExternalSymonKey(
+      prefs && (prefs as Record<string, unknown>).external_symon_left_control === true
+        ? 'left_control'
+        : 'right_option',
+    );
     // Background mode was retired from the UI (operator, 2026-07-06) — self-heal
     // any stuck-on state so nobody is left with a hidden Dock icon and no way back.
     if (bg) void backgroundModeSet(false);
@@ -197,6 +203,11 @@ export function VoiceTab() {
   const handlePartialsSurface = useCallback((next: 'caret' | 'hud' | 'off') => {
     setPartialsSurface(next);
     void voicePrefsSet('dictation_partials_surface', next);
+  }, []);
+
+  const handleExternalSymonKey = useCallback((next: 'right_option' | 'left_control') => {
+    setExternalSymonKey(next);
+    void voicePrefsSet('external_symon_left_control', next === 'left_control');
   }, []);
 
   const handleGroqKeySave = useCallback(async () => {
@@ -446,8 +457,24 @@ export function VoiceTab() {
           <section style={{ marginTop: 28 }}>
             <SettingsGroup
               header="Voice brain"
-              footnote="Auto hands heavy, multi-step requests to a deeper background brain — it answers you instantly, keeps working while you talk, then reports back. Deep also hands off medium tasks. Uses your Claude subscription."
+              footnote="On Windows-layout keyboards, the printed Fn key is often firmware-only and invisible to macOS. Bottom-left Control occupies the Mac Fn position; ordinary Control shortcuts still pass through."
             >
+              <SettingsRow
+                icon={<MicIcon />}
+                label="Symon hold-to-talk key"
+                subtitle="Choose the physical key you hold to speak a command and hear Symon answer"
+                accessory={
+                  <SettingsSegmented
+                    value={externalSymonKey}
+                    onChange={(v) => handleExternalSymonKey(v as 'right_option' | 'left_control')}
+                    options={[
+                      { value: 'right_option', label: 'Right Option' },
+                      { value: 'left_control', label: 'Bottom-left Ctrl' },
+                    ]}
+                  />
+                }
+                divider
+              />
               <SettingsRow
                 icon={<BrainGlyph />}
                 label="Escalation"
@@ -491,7 +518,7 @@ export function VoiceTab() {
           letterSpacing: '0.04em',
         }}
       >
-        <span style={{ color: RAMS_ACCENT }}>FN</span> &nbsp; Dictate &nbsp;·&nbsp; <span style={{ color: RAMS_ACCENT }}>⌃ FN</span> &nbsp; Smart Compose
+        <span style={{ color: RAMS_ACCENT }}>{externalSymonKey === 'left_control' ? 'LEFT CTRL' : 'RIGHT OPTION'}</span> &nbsp; Talk to Symon &nbsp;·&nbsp; <span style={{ color: RAMS_ACCENT }}>FN</span> &nbsp; Dictate
       </p>
     </div>
   );

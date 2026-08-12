@@ -6,6 +6,8 @@
 //! - Double-tap Fn → long-form dictation (single Fn tap finishes, Esc cancels).
 //! - Hold Right Option → Symon voice AGENT (tool-calling loop; release
 //!   ≥120ms runs the command, a KeyDown mid-hold cancels so ⌥-chords stay safe).
+//! - Optionally, hold bottom-left Control → the same Symon agent gesture. This
+//!   substitutes for the firmware-only Fn key on many Windows-layout boards.
 //! - Double-tap Right Option → long-form AGENT question (single Option tap
 //!   finishes, Esc cancels).
 //!
@@ -169,6 +171,37 @@ const RIGHT_OPTION_DEVICE_FLAG: u64 = 0x40;
 /// cancels). LEFT Option does NOT trigger the agent.
 #[cfg(target_os = "macos")]
 const RIGHT_OPTION_KEYCODE: i64 = 61;
+
+/// Windows-layout keyboards put LEFT Control in the bottom-left position where
+/// Apple keyboards put Fn. Some boards keep their printed Fn key entirely in
+/// firmware, so macOS receives no key event o8 can bind. This observable key is
+/// the opt-in substitute; Control chords still pass through because the tap is
+/// ListenOnly and any KeyDown cancels the voice gesture.
+#[cfg(target_os = "macos")]
+const LEFT_CONTROL_KEYCODE: i64 = 59;
+#[cfg(target_os = "macos")]
+const LEFT_CONTROL_DEVICE_FLAG: u64 = 0x1;
+
+#[cfg(target_os = "macos")]
+const LEFT_CONTROL_CAPTURE_DELAY_MS: u64 = 80;
+
+#[cfg(target_os = "macos")]
+static EXTERNAL_SYMON_LEFT_CONTROL: AtomicBool = AtomicBool::new(false);
+#[cfg(target_os = "macos")]
+static LEFT_CONTROL_HELD: AtomicBool = AtomicBool::new(false);
+
+#[cfg(target_os = "macos")]
+pub fn set_external_symon_left_control(enabled: bool) {
+    EXTERNAL_SYMON_LEFT_CONTROL.store(enabled, Ordering::SeqCst);
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn set_external_symon_left_control(_enabled: bool) {}
+
+#[cfg(target_os = "macos")]
+fn is_left_control_agent_event(enabled: bool, keycode: i64, flags: u64) -> bool {
+    enabled && keycode == LEFT_CONTROL_KEYCODE && (flags & LEFT_CONTROL_DEVICE_FLAG) != 0
+}
 
 /// Virtual keycode for the LEFT Option key. LEFT Option does NOT trigger the
 /// agent. We still track its physical down/up so speak-selection can wait for a
@@ -1142,6 +1175,11 @@ pub fn start(app: tauri::AppHandle) {
         EventField,
     };
 
+    set_external_symon_left_control(crate::stt::keys::config_bool(
+        "external_symon_left_control",
+        false,
+    ));
+
     // Stash the app handle so the off-tap worker threads can drive the screen
     // dock pill window (show on Fn-down, hide on brush/error). Ignore a second
     // call — `start()` is invoked once from setup().
@@ -1205,6 +1243,7 @@ pub fn start(app: tauri::AppHandle) {
     let fn_press_time = Arc::new(Mutex::new(std::time::Instant::now()));
     // Right-Option-down instant, used to reject the sub-120ms agent brush.
     let agent_press_time = Arc::new(Mutex::new(std::time::Instant::now()));
+    let left_control_press_time = Arc::new(Mutex::new(std::time::Instant::now()));
 
     // ── Poll fallback for the dropped Fn-UP edge (Sequoia regression) ──
     // The tap delivers ONE FlagsChanged (Fn-down) then goes silent; the Fn-up
@@ -1248,6 +1287,7 @@ pub fn start(app: tauri::AppHandle) {
     let fn_held_cb = fn_held.clone();
     let fn_press_time_cb = fn_press_time.clone();
     let agent_press_time_cb = agent_press_time.clone();
+    let left_control_press_time_cb = left_control_press_time.clone();
     std::thread::spawn(move || {
         let tap = CGEventTap::new(
             CGEventTapLocation::HID,
@@ -1301,6 +1341,12 @@ pub fn start(app: tauri::AppHandle) {
                         // tap or Escape only. ListenOnly: the chord still reaches
                         // the frontmost app untouched.
                         if OPTION_HELD
+                            .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
+                            .is_ok()
+                        {
+                            std::thread::spawn(discard_agent_dictation);
+                        }
+                        if LEFT_CONTROL_HELD
                             .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
                             .is_ok()
                         {
@@ -1524,6 +1570,56 @@ pub fn start(app: tauri::AppHandle) {
                         }
                     }
 
+                    // ── Bottom-left Control → external-keyboard Fn substitute ──
+                    // The 80ms delayed start lets ordinary Control chords cancel
+                    // above before the microphone opens. A deliberate hold still
+                    // starts before the 120ms release threshold.
+                    {
+                        let keycode =
+                            event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
+                        if keycode == LEFT_CONTROL_KEYCODE
+                            && EXTERNAL_SYMON_LEFT_CONTROL.load(Ordering::SeqCst)
+                        {
+                            let control_down = is_left_control_agent_event(true, keycode, flags);
+                            let control_down_edge = control_down
+                                && !OPTION_HELD.load(Ordering::SeqCst)
+                                && !AGENT_LONG_FORM_ACTIVE.load(Ordering::SeqCst)
+                                && LEFT_CONTROL_HELD
+                                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                                    .is_ok();
+                            if control_down_edge {
+                                if let Ok(mut t) = left_control_press_time_cb.lock() {
+                                    *t = std::time::Instant::now();
+                                }
+                                std::thread::spawn(|| {
+                                    std::thread::sleep(std::time::Duration::from_millis(
+                                        LEFT_CONTROL_CAPTURE_DELAY_MS,
+                                    ));
+                                    if LEFT_CONTROL_HELD.load(Ordering::SeqCst) {
+                                        begin_agent_dictation();
+                                    }
+                                });
+                            }
+
+                            let control_up_edge = !control_down
+                                && LEFT_CONTROL_HELD
+                                    .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
+                                    .is_ok();
+                            if control_up_edge {
+                                let press = left_control_press_time_cb
+                                    .lock()
+                                    .map(|t| *t)
+                                    .unwrap_or_else(|_| std::time::Instant::now());
+                                let hold = std::time::Instant::now().duration_since(press);
+                                if hold < std::time::Duration::from_millis(ASK_BRUSH_MS) {
+                                    std::thread::spawn(discard_agent_dictation);
+                                } else {
+                                    std::thread::spawn(end_agent_dictation);
+                                }
+                            }
+                        }
+                    }
+
                     // ── Right Command (double-tap) → voice-to-voice toggle ──
                     // Right ⌘ is unused by o8's Fn/Option gestures, so a clean
                     // DOUBLE-TAP flips realtime voice mode on/off (the dashboard's
@@ -1635,7 +1731,10 @@ pub fn start(_app: tauri::AppHandle) {}
 
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
-    use super::resolve_system_dictation_session_id;
+    use super::{
+        is_left_control_agent_event, resolve_system_dictation_session_id,
+        LEFT_CONTROL_DEVICE_FLAG, LEFT_CONTROL_KEYCODE,
+    };
 
     #[test]
     fn system_finish_uses_recorded_session_when_it_matches_active() {
@@ -1652,5 +1751,29 @@ mod tests {
     fn system_finish_refuses_when_origin_or_active_session_is_missing() {
         assert_eq!(resolve_system_dictation_session_id(12, 12, false), 0);
         assert_eq!(resolve_system_dictation_session_id(12, 0, true), 0);
+    }
+
+    #[test]
+    fn external_symon_substitute_requires_enabled_left_control_down() {
+        assert!(is_left_control_agent_event(
+            true,
+            LEFT_CONTROL_KEYCODE,
+            LEFT_CONTROL_DEVICE_FLAG,
+        ));
+        assert!(!is_left_control_agent_event(
+            false,
+            LEFT_CONTROL_KEYCODE,
+            LEFT_CONTROL_DEVICE_FLAG,
+        ));
+        assert!(!is_left_control_agent_event(
+            true,
+            62,
+            LEFT_CONTROL_DEVICE_FLAG,
+        ));
+        assert!(!is_left_control_agent_event(
+            true,
+            LEFT_CONTROL_KEYCODE,
+            0,
+        ));
     }
 }
