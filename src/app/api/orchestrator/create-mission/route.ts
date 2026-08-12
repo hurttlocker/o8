@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveWorkerRouting } from '@/lib/agents/routing';
+import { findMissionByCreationMutationId } from '@/lib/orchestrator/create-mission-receipt';
 import { createMission, type ExistingBranchPolicy, type LoadedIssue } from '@/lib/orchestrator/operator-mission-service';
 import { getOperatorDefaultsSync, resolveDefaultDispatchRuntimeSync } from '@/lib/operator/defaults';
 import { resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-profile';
@@ -18,7 +19,12 @@ import { ControlPlaneLockTimeoutError } from '@/lib/orchestrator/control-plane';
 import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
 import type { PacketDispatcherAttribution } from '@/lib/orchestrator/types';
 import { normalizeWorkerLaunchContext } from '@/lib/orchestrator/worker-launch-context';
-import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
+import {
+  bindIdempotencyClientMutation,
+  deriveIdempotencyKey,
+  withIdempotency,
+} from '@/lib/orchestrator/idempotency-store';
+import { asRecord, operatorError, operatorSuccess, parseJsonBody, replayShape, unresolvedIdempotencyResponse } from '../_utils';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -107,6 +113,12 @@ export async function POST(request: NextRequest) {
   if (!record) {
     return operatorError('invalid_request', 'Invalid JSON body.', 400);
   }
+  const clientKey = typeof record.clientMutationId === 'string'
+    ? record.clientMutationId.trim()
+    : typeof record.idempotencyKey === 'string'
+      ? record.idempotencyKey.trim()
+      : '';
+  if (!clientKey) return operatorError('client_mutation_id_required', 'clientMutationId is required.', 400);
 
   const repoPath = typeof record.repoPath === 'string' ? record.repoPath.trim() : '';
   if (!repoPath) {
@@ -181,9 +193,18 @@ export async function POST(request: NextRequest) {
     model: workerRouting.selectedModel,
   });
   try {
-    await assertRuntimeDispatchable(workerRouting.selectedRuntime);
+    await assertRuntimeDispatchable(workerRouting.selectedRuntime, workerRouting.selectedModel, repoPath);
     for (const issue of issues) {
-      if (issue.runtime) await assertRuntimeDispatchable(issue.runtime);
+      if (!issue.runtime) continue;
+      const issueRouting = resolveWorkerRouting({
+        workerIntent: record.workerIntent,
+        requestedProvider: record.requestedProvider,
+        requestedRuntime: issue.runtime,
+        requestedModel: profileRouting.requestedModel,
+        requestedEffort,
+        source: 'create-mission-api-issue',
+      });
+      await assertRuntimeDispatchable(issueRouting.selectedRuntime, issueRouting.selectedModel, repoPath);
     }
   } catch (error) {
     if (error instanceof DispatchPreflightError) {
@@ -215,8 +236,7 @@ export async function POST(request: NextRequest) {
     return operatorError('invalid_request', 'qualitySearch already uses a sealed contract and cannot be combined with huddle mode.', 400);
   }
 
-  try {
-    const result = await createMission({
+  const createInput = {
       issues,
       repoPath,
       runtime: workerRouting.selectedRuntime,
@@ -241,8 +261,26 @@ export async function POST(request: NextRequest) {
         ? { comparisonModels: normalizeComparisonModels(record.comparisonModels) }
         : {}),
       ...(qualitySearch ? { qualitySearch } : {}),
-    });
-    return operatorSuccess(result, 201);
+  };
+  const canonicalBody = JSON.stringify(createInput);
+  const binding = bindIdempotencyClientMutation({ namespace: 'create_mission', clientKey, body: canonicalBody });
+  if (binding.status === 'conflict') {
+    return operatorError('idempotency_conflict', 'clientMutationId was used for another mission.', 409);
+  }
+  if (binding.status === 'unavailable') {
+    return operatorError('idempotency_unavailable', 'The mission creation receipt store is unavailable.', 503);
+  }
+  try {
+    const outcome = await withIdempotency({
+      key: deriveIdempotencyKey({ verb: 'create_mission', scopeId: repoPath, clientKey, body: canonicalBody }),
+      verb: 'create_mission',
+      scopeId: repoPath,
+      reconcileUnresolved: async () => {
+        return findMissionByCreationMutationId(clientKey)?.creationReceipt ?? null;
+      },
+    }, () => createMission({ ...createInput, clientMutationId: clientKey }));
+    if (outcome.inProgress) return unresolvedIdempotencyResponse(outcome, 'mission creation') ?? operatorSuccess(replayShape(outcome), 202);
+    return operatorSuccess(replayShape(outcome), 201);
   } catch (error) {
     if (error instanceof ControlPlaneLockTimeoutError) {
       return operatorError(

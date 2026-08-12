@@ -121,4 +121,36 @@ describe('best-of-N fan-out', () => {
     expect(out).toBe(state);
     expect(out.packets).toHaveLength(1);
   });
+
+  it('releases an expired lifecycle hold before comparison admission', () => {
+    const state = stateWithSeed({ comparisonModels: ['codex', 'codex'] });
+    state.lifecycleHold = {
+      source: 'mission_stop:expired',
+      reason: 'operator_stop',
+      startedAt: new Date(Date.now() - 120_000).toISOString(),
+      ownerPid: process.pid,
+      leaseExpiresAt: new Date(Date.now() - 60_000).toISOString(),
+    };
+
+    const out = fanOutComparisonPackets(state);
+
+    expect(out.lifecycleHold).toBeNull();
+    expect(out.packets).toHaveLength(2);
+  });
+
+  it('respects an unexpired hold owned by a sibling server process', () => {
+    const state = stateWithSeed({ comparisonModels: ['codex', 'codex'] });
+    state.lifecycleHold = {
+      source: 'mission_stop:sibling-process',
+      reason: 'operator_stop',
+      startedAt: new Date().toISOString(),
+      ownerPid: process.pid + 1,
+      leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+    };
+
+    const out = fanOutComparisonPackets(state);
+
+    expect(out).toBe(state);
+    expect(out.packets).toHaveLength(1);
+  });
 });

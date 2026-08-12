@@ -56,6 +56,8 @@ import {
 } from '@/lib/lane/spoken-review-snapshot';
 import { commitDirtyWorktree, readHeadSha } from '@/lib/lane/worktree-merge-git';
 import { withRepoActionLock } from '@/lib/lane/repo-action-lock';
+import { persistLanePacketHold } from '@/lib/lane/packet-stop-hold';
+import { killLaneSessionsConfirmed } from '@/lib/lane/reap-sessions';
 
 /**
  * #2 Stage 5b — worker-context merge governance. A dispatched worker that calls
@@ -210,19 +212,22 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
       //    interrupt can race a re-dispatch in. (2026-06-22)
       if (lane.packetId) {
         try {
-          const { withLockedState } = await import('@/lib/orchestrator/control-plane');
-          await withLockedState((state) => {
-            const packet = state.packets.find((candidate) => candidate.id === lane.packetId);
-            if (!packet) return;
-            packet.operatorStopped = true;
-            packet.queueState = 'held';
-            packet.status = 'blocked';
-            packet.blockedReason = 'operator_stopped';
-            packet.lastEventAt = new Date().toISOString();
-            packet.lastEventLabel = 'operator_stopped';
-          });
+          if (!await persistLanePacketHold(lane.packetId)) {
+            return {
+              ok: false,
+              laneId: command.laneId,
+              note: 'Stop refused because the packet hold could not be persisted.',
+              lane,
+            };
+          }
         } catch (err) {
           console.warn('[lane] stop: could not mark packet operator-stopped', err);
+          return {
+            ok: false,
+            laneId: command.laneId,
+            note: `Stop refused because the packet hold could not be persisted: ${err instanceof Error ? err.message : String(err)}`,
+            lane,
+          };
         }
       }
 
@@ -232,10 +237,9 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
       let stopNote = 'No active session was attached.';
       if (lane.sessionKey) {
         try {
-          const { performRuntimeAction } = await import('@/lib/runtime/actions');
-          const result = await performRuntimeAction({ action: 'stop', surfaceId: lane.sessionKey });
-          stopOk = result.ok || result.status === 'completed';
-          stopNote = result.note;
+          const [result] = await killLaneSessionsConfirmed([lane]);
+          stopOk = Boolean(result?.confirmed || result?.alreadyDead);
+          stopNote = result?.note ?? 'No confirmed process result was returned.';
         } catch (err) {
           stopOk = false;
           stopNote = err instanceof Error ? err.message : 'Interrupt failed.';

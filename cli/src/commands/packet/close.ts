@@ -1,4 +1,5 @@
-import { apiFetch, CliError, EXIT, SLOW_MUTATION_TIMEOUT_MS } from '../../api.js';
+import { randomUUID } from 'node:crypto';
+import { CliError, EXIT, SLOW_MUTATION_TIMEOUT_MS } from '../../api.js';
 import { resolveConfig } from '../../config.js';
 import {
   printHumanHeading,
@@ -11,6 +12,7 @@ import {
   requirePacketId,
   resolvePacketTarget,
 } from './target.js';
+import { fetchCorrelatedPacketMutation } from './correlated-mutation.js';
 
 const DISPOSITIONS = ['adopted_elsewhere', 'superseded', 'spec_changed', 'wontfix'] as const;
 type Disposition = typeof DISPOSITIONS[number];
@@ -21,6 +23,8 @@ interface CloseResponse {
     closed?: boolean;
     disposition?: Disposition;
     note?: string;
+    inProgress?: boolean;
+    status?: string;
     laneId?: string;
     worktreeRemoved?: boolean;
     preservedBranch?: string | null;
@@ -35,7 +39,7 @@ function errorMessage(response: CloseResponse | null | undefined): string {
 }
 
 export async function runPacketClose(mode: OutputMode, rest: string[]): Promise<number> {
-  const args = parsePacketArguments(rest, { command: 'close', valueFlags: ['reason', 'note'] });
+  const args = parsePacketArguments(rest, { command: 'close', valueFlags: ['reason', 'note', 'idempotency-key'] });
   const reason = args.values.reason?.trim();
   if (!reason || !(DISPOSITIONS as readonly string[]).includes(reason)) {
     throw new CliError(
@@ -48,15 +52,17 @@ export async function runPacketClose(mode: OutputMode, rest: string[]): Promise<
 
   const packetId = requirePacketId(await resolvePacketTarget(args.target), 'close');
   const cfg = resolveConfig();
-  const res = await apiFetch<CloseResponse>(cfg, '/api/orchestrator/discard-packet', {
-    method: 'POST',
-    timeoutMs: SLOW_MUTATION_TIMEOUT_MS,
-    body: {
+  const res = await fetchCorrelatedPacketMutation<CloseResponse>(
+    cfg,
+    '/api/orchestrator/discard-packet',
+    {
       packetId,
       disposition: reason,
       note: args.values.note?.trim() || undefined,
+      clientMutationId: args.values['idempotency-key']?.trim() || randomUUID(),
     },
-  });
+    { timeoutMs: SLOW_MUTATION_TIMEOUT_MS },
+  );
   if (!res.data?.ok || !res.data.result?.closed) {
     throw new CliError('close_failed', errorMessage(res.data), EXIT.CONFLICT);
   }

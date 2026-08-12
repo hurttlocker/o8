@@ -4,23 +4,48 @@ import type { LaneStatus } from '@/lib/lane/types';
 import type { MobileInboxSnapshot, MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { MobileInboxDelta } from '@/lib/mobile/inbox-delta';
 import type { OrchestratorPacketStatus, WorkerLaunchContext } from '@/lib/orchestrator/types';
+import type {
+  RealtimeBatchData,
+  RealtimeEventEnvelope as ProtocolRealtimeEventEnvelope,
+} from '@/lib/realtime/generated-contract';
 
-export const REALTIME_PROTOCOL_VERSION = 1 as const;
-
-export type RealtimeStreamKey = 'global' | `session:${string}`;
-
-export type RealtimeHealthState = 'live' | 'warming' | 'stale' | 'degraded';
-export type RealtimeDeliveryMode = 'live' | 'replay' | 'bootstrap';
-
-export interface RealtimeHealthDescriptor {
-  state: RealtimeHealthState;
-  reason?: string;
-}
-
-export interface RealtimeSubscription {
-  stream: RealtimeStreamKey;
-  since?: number;
-}
+export {
+  MOBILE_INBOX_DELTA_CAPABILITY,
+  REALTIME_CONTRACT_SHA256,
+  REALTIME_FEATURE_METADATA,
+  REALTIME_LEGACY_SUBSCRIPTION,
+  REALTIME_MINIMUM_PROTOCOL_VERSION,
+  REALTIME_OPTIONAL_FEATURES,
+  REALTIME_PROTOCOL_VERSION,
+} from '@/lib/realtime/generated-contract';
+export type {
+  RealtimeClientHello,
+  RealtimeClientKind,
+  RealtimeCursor,
+  RealtimeDeliveryMode,
+  RealtimeGapDescriptor,
+  RealtimeHealthDescriptor,
+  RealtimeHealthState,
+  RealtimeOptionalFeature,
+  RealtimeProtocolRange,
+  RealtimeProtocolVersion,
+  RealtimeRevision,
+  RealtimeServerIncompatibleData,
+  RealtimeServerIncompatibleMessage,
+  RealtimeServerProtocolMessage,
+  RealtimeServerWelcomeData,
+  RealtimeServerWelcomeMessage,
+  RealtimeSnapshotDescriptor,
+  RealtimeStreamKey,
+  RealtimeSubscribeMessage,
+  RealtimeSubscription,
+} from '@/lib/realtime/generated-contract';
+import type {
+  RealtimeHealthDescriptor,
+  RealtimeHealthState,
+  RealtimeOptionalFeature,
+  RealtimeStreamKey,
+} from '@/lib/realtime/generated-contract';
 
 export interface LaneLifecycleEventPayload {
   laneId: string;
@@ -122,33 +147,13 @@ export type RealtimeChannel =
   | 'history'
   | 'mutation';
 
-export interface RealtimeEventEnvelope<T extends RealtimeEventPayload = RealtimeEventPayload> {
-  protocol: typeof REALTIME_PROTOCOL_VERSION;
-  seq: number;
-  capturedSeq?: number;
-  stream: RealtimeStreamKey;
-  channel: RealtimeChannel;
-  event: RealtimeEventName;
-  ts: string;
-  snapshot?: boolean;
-  delivery?: RealtimeDeliveryMode;
-  entityId?: string;
-  health?: RealtimeHealthDescriptor;
-  /** Server-side replay audience for capability-gated additive events. */
-  audience?: 'mobile-inbox-delta-v1' | 'mobile-inbox-legacy';
-  data: T;
-}
-
-export interface RealtimeBatchMessage {
-  delivery: RealtimeDeliveryMode;
-  stream: RealtimeStreamKey;
-  events: RealtimeEventEnvelope[];
-  latestSeq: number;
-  gap?: {
-    requestedSince: number;
-    earliestAvailable: number;
+export type RealtimeEventEnvelope<T extends RealtimeEventPayload = RealtimeEventPayload> =
+  ProtocolRealtimeEventEnvelope<T, RealtimeEventName, RealtimeChannel> & {
+    /** Server-side replay audience for capability-gated additive events. */
+    audience?: RealtimeOptionalFeature | 'mobile-inbox-legacy';
   };
-}
+
+export type RealtimeBatchMessage = RealtimeBatchData<RealtimeEventEnvelope>;
 
 export type RealtimeRefreshTarget = 'global' | 'mobileInbox' | 'sessionHistory';
 

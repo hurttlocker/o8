@@ -13,6 +13,10 @@ import type {
   RegisteredRepo,
   TerminalTab,
 } from '@/components/desktop/workspace-terminal/types';
+import {
+  isOwnedOrchestratorSessionKey,
+  runtimeFromOwnedSessionKey,
+} from '@/lib/orchestrator/runtime-capabilities';
 import { nextTerminalLabel } from '@/components/desktop/workspace-terminal/terminal-tab-handlers';
 import {
   claimWorkspaceTabId,
@@ -34,20 +38,12 @@ export interface ApplyPersistedStateResult {
 
 export type RestoreValidationMode = 'optimistic' | 'validated';
 
-const OWNED_SESSION_PREFIXES = [
-  'codex-owned:',
-  'gemini-owned:',
-  'opencode-owned:',
-  'cursor-owned:',
-  'grok-owned:',
-] as const;
-
 function unwrapRuntimeSessionKey(rawSessionKey: string): string {
   for (const stalePrefix of ['codex:', 'claude-code:']) {
     if (!rawSessionKey.startsWith(stalePrefix)) continue;
     const inner = rawSessionKey.slice(stalePrefix.length);
     if (
-      OWNED_SESSION_PREFIXES.some((prefix) => inner.startsWith(prefix))
+      isOwnedOrchestratorSessionKey(inner)
       || inner.startsWith('codex-discovered:')
       || inner.startsWith('codex-live:')
     ) {
@@ -58,7 +54,7 @@ function unwrapRuntimeSessionKey(rawSessionKey: string): string {
 }
 
 function isOwnedSessionKey(sessionKey: string): boolean {
-  return OWNED_SESSION_PREFIXES.some((prefix) => sessionKey.startsWith(prefix));
+  return isOwnedOrchestratorSessionKey(sessionKey);
 }
 
 /**
@@ -275,6 +271,7 @@ export async function computeRestoredTabs(
         chatModelId: savedTab.chatModelId,
         chatOpenrouterModel: savedTab.chatOpenrouterModel,
         orchestratorThreadId: recoveredThreadId,
+        outsideWorkerHost: savedTab.outsideWorkerHost,
         createdAt: now,
         lastActivity: now,
       });
@@ -334,25 +331,25 @@ export async function computeRestoredTabs(
       let effectiveRuntime = savedTab.chatRuntime;
       let effectiveModel = savedTab.chatModel;
       const effectiveSessionKey = unwrappedSessionKey;
-      if (unwrappedSessionKey.startsWith('gemini-owned:') && effectiveRuntime !== 'gemini') {
-        effectiveRuntime = 'gemini';
+      const ownedRuntime = runtimeFromOwnedSessionKey(unwrappedSessionKey);
+      if (ownedRuntime && effectiveRuntime !== ownedRuntime) {
+        effectiveRuntime = ownedRuntime;
+      }
+      if (ownedRuntime === 'gemini') {
         effectiveModel = 'gemini-3.1-pro-preview';
-      } else if (unwrappedSessionKey.startsWith('opencode-owned:') && effectiveRuntime !== 'opencode') {
-        effectiveRuntime = 'opencode';
+      } else if (ownedRuntime === 'opencode') {
         effectiveModel = 'opencode/deepseek-v4-flash-free';
-      } else if (unwrappedSessionKey.startsWith('cursor-owned:') && effectiveRuntime !== 'cursor') {
-        effectiveRuntime = 'cursor';
+      } else if (ownedRuntime === 'cursor') {
         effectiveModel = 'cli:cursor:default';
-      } else if (unwrappedSessionKey.startsWith('grok-owned:') && effectiveRuntime !== 'grok') {
-        effectiveRuntime = 'grok';
+      } else if (ownedRuntime === 'grok') {
         effectiveModel = 'cli:grok:default';
-      } else if (
+      } else if (!ownedRuntime && (
         (unwrappedSessionKey.startsWith('codex-owned:')
           || unwrappedSessionKey.startsWith('codex:')
           || unwrappedSessionKey.startsWith('codex-discovered:')
           || unwrappedSessionKey.startsWith('codex-live:'))
         && effectiveRuntime !== 'codex'
-      ) {
+      )) {
         effectiveRuntime = 'codex';
       } else if (unwrappedSessionKey.startsWith('claude-code:') && effectiveRuntime !== 'claude-code') {
         effectiveRuntime = 'claude-code';
@@ -372,22 +369,15 @@ export async function computeRestoredTabs(
       }
       const liveSessionKey = prefixedSessionKey && liveRuntimeSessionKeys.has(prefixedSessionKey)
         ? stripPersistedRuntimeSessionKey(effectiveRuntime, savedChatSessionKey)
-        : (effectiveSessionKey.startsWith('gemini-owned:')
-          || effectiveSessionKey.startsWith('opencode-owned:')
-          || effectiveSessionKey.startsWith('cursor-owned:')
-          || effectiveSessionKey.startsWith('grok-owned:'))
+        : isOwnedOrchestratorSessionKey(effectiveSessionKey)
           ? effectiveSessionKey
           : undefined;
       const restoredClaudeSessionId = effectiveRuntime === 'claude-code'
         ? (rawClaudeSessionId || stripPersistedRuntimeSessionKey(effectiveRuntime, savedChatSessionKey))
         : undefined;
-      const shouldPreserveHistoricalSessionKey = effectiveSessionKey.startsWith('codex-owned:')
+      const shouldPreserveHistoricalSessionKey = isOwnedOrchestratorSessionKey(effectiveSessionKey)
         || effectiveSessionKey.startsWith('codex-discovered:')
-        || effectiveSessionKey.startsWith('codex-live:')
-        || effectiveSessionKey.startsWith('gemini-owned:')
-        || effectiveSessionKey.startsWith('opencode-owned:')
-        || effectiveSessionKey.startsWith('cursor-owned:')
-        || effectiveSessionKey.startsWith('grok-owned:');
+        || effectiveSessionKey.startsWith('codex-live:');
       const restoredChatSessionKey = liveSessionKey
         ?? (shouldPreserveHistoricalSessionKey ? effectiveSessionKey : undefined);
       const tabId = claimWorkspaceTabId('chat', seenTabIds, savedTab.id);

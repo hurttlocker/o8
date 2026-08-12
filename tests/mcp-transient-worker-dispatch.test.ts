@@ -71,6 +71,7 @@ describe('MCP transient worker dispatch', () => {
       issues_inline: [{ title: 'Inspect repo' }],
       dispatch: false,
       orchestratorThreadId: 'thoughts-in-app',
+      parentWorkspaceId: 'workspace-in-app',
     });
 
     expect(bodies[0]).toMatchObject({
@@ -78,6 +79,8 @@ describe('MCP transient worker dispatch', () => {
         source: 'desktop',
         presentation: 'tab',
         repoContext: 'registered',
+        parentWorkspaceId: 'workspace-in-app',
+        parentThreadId: 'thoughts-in-app',
       },
     });
   });

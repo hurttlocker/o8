@@ -101,6 +101,10 @@ export async function archiveOwnedClaudeCodeSession(surfaceId: string) {
   return claudeCodeOwnedStore.archiveSession(surfaceId);
 }
 
+export async function ownedClaudeCodeSessionState(surfaceId: string) {
+  return claudeCodeOwnedStore.sessionState(surfaceId);
+}
+
 export async function sweepOrphanedClaudeCodeSessions(activeSurfaceIds: Set<string>, maxAgeMs: number) {
   return claudeCodeOwnedStore.sweepOrphanedSessions(activeSurfaceIds, maxAgeMs);
 }
@@ -124,6 +128,6 @@ export async function getOwnedClaudeCodeFleetAdditions(options?: { fresh?: boole
   return claudeCodeOwnedStore.getFleetAdditions(options);
 }
 
-export async function getOwnedClaudeCodeRuntimeTail(surfaceId: string) {
-  return claudeCodeOwnedStore.getRuntimeTail(surfaceId);
+export async function getOwnedClaudeCodeRuntimeTail(surfaceId: string, limit?: number) {
+  return claudeCodeOwnedStore.getRuntimeTail(surfaceId, limit);
 }

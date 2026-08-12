@@ -3,11 +3,16 @@ import { requirePanelAuth } from '@/lib/panel/auth';
 import {
   dispatchMission,
   MissionNotFoundError,
+  prepareMissionDispatch,
   resolveMissionDispatchTarget,
 } from '@/lib/orchestrator/operator-mission-service';
 import { DispatchPreflightError } from '@/lib/runtimes/shared/auth-detect';
-import { deriveIdempotencyKey, withIdempotency } from '@/lib/orchestrator/idempotency-store';
-import { asRecord, operatorError, operatorSuccess, parseJsonBody, replayShape } from '../_utils';
+import {
+  bindIdempotencyClientMutation,
+  deriveIdempotencyKey,
+  withIdempotency,
+} from '@/lib/orchestrator/idempotency-store';
+import { asRecord, operatorError, operatorSuccess, parseJsonBody, replayShape, unresolvedIdempotencyResponse } from '../_utils';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -50,25 +55,58 @@ export async function POST(request: NextRequest) {
   const clientKey = typeof record.idempotencyKey === 'string' && record.idempotencyKey.trim()
     ? record.idempotencyKey.trim()
     : null;
-  const idemKey = clientKey
-    ? deriveIdempotencyKey({ verb: 'dispatch_mission', scopeId: targetMissionId, clientKey })
-    : null;
-
   const wait = record.wait !== false;
+  const canonicalBody = JSON.stringify({ missionId: targetMissionId, wait });
+  if (clientKey) {
+    const binding = bindIdempotencyClientMutation({
+      namespace: 'dispatch_mission',
+      clientKey,
+      body: canonicalBody,
+    });
+    if (binding.status === 'conflict') {
+      return operatorError('idempotency_conflict', 'idempotencyKey was used for another dispatch request.', 409);
+    }
+    if (binding.status === 'unavailable') {
+      return operatorError('idempotency_unavailable', 'The dispatch receipt store is unavailable.', 503);
+    }
+  }
+  const idemKey = clientKey
+    ? deriveIdempotencyKey({
+        verb: 'dispatch_mission',
+        scopeId: targetMissionId,
+        clientKey,
+        body: canonicalBody,
+      })
+    : null;
   if (!wait) {
-    // Reserve synchronously so a duplicate async dispatch doesn't fire twice;
-    // finalize immediately since the launch itself is fire-and-forget.
+    // Persist the dispatch admission before finalizing the accepted receipt.
+    // Runtime launch remains asynchronous, but an API-process exit can no
+    // longer lose the explicit held -> queued transition; the headless loop
+    // resumes it from durable mission state after restart.
     if (idemKey) {
       const outcome = await withIdempotency(
         { key: idemKey, verb: 'dispatch_mission', scopeId: targetMissionId },
         async () => {
+          const admitted = await prepareMissionDispatch({ missionId: targetMissionId });
+          if (admitted.blocked) {
+            return { initiated: false, async: true, missionId: targetMissionId, blocked: true };
+          }
           void dispatchMission({ missionId: targetMissionId }).catch((error) => {
             console.error('[orchestrator] async dispatch failed:', error instanceof Error ? error.message : error);
           });
           return { initiated: true, async: true, missionId: targetMissionId };
         },
       );
+      if (outcome.inProgress) return unresolvedIdempotencyResponse(outcome, 'mission dispatch') ?? operatorSuccess(replayShape(outcome), 202);
       return operatorSuccess(replayShape(outcome));
+    }
+    const admitted = await prepareMissionDispatch({ missionId: targetMissionId });
+    if (admitted.blocked) {
+      return operatorError(
+        'dispatch_blocked',
+        'The mission has an active lifecycle hold and was not dispatched.',
+        409,
+      );
     }
     void dispatchMission({ missionId: targetMissionId }).catch((error) => {
       console.error('[orchestrator] async dispatch failed:', error instanceof Error ? error.message : error);
@@ -79,9 +117,15 @@ export async function POST(request: NextRequest) {
   try {
     if (idemKey) {
       const outcome = await withIdempotency(
-        { key: idemKey, verb: 'dispatch_mission', scopeId: targetMissionId },
+        {
+          key: idemKey,
+          verb: 'dispatch_mission',
+          scopeId: targetMissionId,
+          reconcileUnresolved: () => dispatchMission({ missionId: targetMissionId }),
+        },
         () => dispatchMission({ missionId: targetMissionId }),
       );
+      if (outcome.inProgress) return unresolvedIdempotencyResponse(outcome, 'mission dispatch') ?? operatorSuccess(replayShape(outcome), 202);
       return operatorSuccess(replayShape(outcome));
     }
     const result = await dispatchMission({ missionId: targetMissionId });

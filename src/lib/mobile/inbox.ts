@@ -1,5 +1,10 @@
 import type { AgentSummary, EventSeverity } from '@/lib/fleet/types';
-import { approvalSeverity, listApprovals, toMobileApprovalCard } from '@/lib/approvals/store';
+import {
+  approvalSeverity,
+  listApprovals,
+  listUnsettledApprovalContinuations,
+  toMobileApprovalCard,
+} from '@/lib/approvals/store';
 import type { ApprovalRecord } from '@/lib/approvals/types';
 import { listIdeLlmChatSessions } from '@/lib/runtime/ide-llm-chat-registry';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
@@ -376,7 +381,10 @@ async function buildMobileInboxSnapshot(options: { fresh?: boolean } = {}): Prom
     sessions.push(session);
   }
 
-  const pendingApprovals = listApprovals({ status: 'pending' });
+  const pendingApprovals = [
+    ...listApprovals({ status: 'pending' }),
+    ...listUnsettledApprovalContinuations(),
+  ];
   const approvalsBySession = new Map<string, ApprovalRecord[]>();
   for (const approval of pendingApprovals) {
     const current = approvalsBySession.get(approval.sessionKey) ?? [];

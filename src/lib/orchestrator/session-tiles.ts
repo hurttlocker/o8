@@ -12,6 +12,10 @@
  *
  * Persisted per OrchestratorTab id under `o8:orchestrator:session-tiles:tab:<id>`.
  */
+import { isOrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
+import type { OrchestratorRuntime, WorkerLaunchContext } from '@/lib/orchestrator/types';
+import { normalizeWorkerLaunchContext } from '@/lib/orchestrator/worker-launch-context';
+
 export type SessionTileSplitDirection = 'horizontal' | 'vertical';
 
 export type SessionTileLeafKind = 'chat' | 'session' | 'thread';
@@ -22,10 +26,23 @@ export interface SessionTileLeaf {
   kind: SessionTileLeafKind;
   /** Required when kind === 'session'. Identifies the agent transcript. */
   sessionKey?: string;
+  /** Durable worker identity. Packet wins, then lane, then session. This stays
+   *  fixed while a reconnect rotates the current transcript sessionKey. */
+  participantId?: string;
+  packetId?: string;
+  laneId?: string;
+  runtime?: OrchestratorRuntime;
+  launchContext?: WorkerLaunchContext;
+  /** Automatic outside-worker adoption joins the live mesh. Explicit splits
+   *  stay independent panes and preserve their authored geometry. */
+  sessionSurface?: 'mesh' | 'split';
+  /** Monotonic insertion order for live-session mesh stability. Older
+   *  persisted layouts omit this and fall back to their tree reading order. */
+  arrivalOrder?: number;
   /** Required when kind === 'thread'. Chat-history tabId of the thread the
    *  pane hosts — a full independent chat (drag-to-split, #1571 parity). */
   threadId?: string;
-  /** Display title for a thread pane header. */
+  /** Display title for a thread pane header or worker task fallback. */
   title?: string;
   /** Chat mode for a thread pane: orchestrator thread vs casual chat. */
   mode?: 'orchestrator' | 'chat';
@@ -50,7 +67,16 @@ export interface SessionTileLayout {
   root: SessionTileNode;
 }
 
+export {
+  collectSessionKeysByArrival,
+  collectSessionLeavesByArrival,
+  reconcileSessionTileParticipants,
+  sessionTileParticipantMatchesLeaf,
+  type SessionTileParticipantTransport,
+} from './session-tile-participants';
+
 export const SESSION_TILE_LAYOUT_VERSION = 1;
+export const MAX_VISIBLE_SESSIONS = 64;
 const MIN_RATIO = 0.2;
 const MAX_RATIO = 0.8;
 
@@ -108,6 +134,13 @@ export function collectSessionKeys(node: SessionTileNode): string[] {
     .filter((key): key is string => Boolean(key));
 }
 
+function nextSessionArrivalOrder(node: SessionTileNode): number {
+  return collectSessionLeaves(node).reduce(
+    (next, leaf, treeIndex) => Math.max(next, (leaf.arrivalOrder ?? treeIndex) + 1),
+    0,
+  );
+}
+
 export function findChatLeaf(node: SessionTileNode): SessionTileLeaf | null {
   if (isSessionTileLeaf(node)) {
     return node.kind === 'chat' ? node : null;
@@ -124,10 +157,12 @@ export function splitChatWithSession(
   sessionKey: string,
   direction: SessionTileSplitDirection,
   ratio = 0.5,
+  sessionSurface: 'mesh' | 'split' = 'split',
 ): SessionTileLayout {
   if (findSessionLeafByKey(layout.root, sessionKey)) {
     return layout;
   }
+  if (collectSessionLeaves(layout.root).length >= MAX_VISIBLE_SESSIONS) return layout;
   const chatLeaf = findChatLeaf(layout.root);
   if (!chatLeaf) {
     // Shouldn't happen — chat is always present — but guard anyway.
@@ -142,6 +177,8 @@ export function splitChatWithSession(
         id: makeId('leaf'),
         kind: 'session',
         sessionKey,
+        sessionSurface,
+        arrivalOrder: nextSessionArrivalOrder(layout.root),
       };
       return {
         type: 'split',
@@ -172,10 +209,12 @@ export function splitSessionWithSession(
   newSessionKey: string,
   direction: SessionTileSplitDirection,
   ratio = 0.5,
+  sessionSurface: 'mesh' | 'split' = 'split',
 ): SessionTileLayout {
   if (findSessionLeafByKey(layout.root, newSessionKey)) {
     return layout;
   }
+  if (collectSessionLeaves(layout.root).length >= MAX_VISIBLE_SESSIONS) return layout;
 
   function walk(node: SessionTileNode): SessionTileNode {
     if (isSessionTileLeaf(node)) {
@@ -185,6 +224,8 @@ export function splitSessionWithSession(
         id: makeId('leaf'),
         kind: 'session',
         sessionKey: newSessionKey,
+        sessionSurface,
+        arrivalOrder: nextSessionArrivalOrder(layout.root),
       };
       return {
         type: 'split',
@@ -409,13 +450,13 @@ export function hasAnyAuxLeaf(layout: SessionTileLayout): boolean {
     || collectThreadLeaves(layout.root).length > 0;
 }
 
-const MAX_VISIBLE_SESSIONS = 8;
-
 /**
  * Add a session to the layout following the outside-worker claim rules:
  * - First session splits the chat leaf vertically.
- * - Later sessions split the existing session leaf with the largest computed
- *   area (stable reading-order tie-break: first leaf wins ties).
+ * - Later sessions split the existing automatic worker leaf with the largest
+ *   computed area (stable reading-order tie-break: first leaf wins ties).
+ * - Explicitly authored session panes remain boundaries; the first automatic
+ *   worker starts a separate subtree beside chat when only manual panes exist.
  * - Direction follows the selected leaf: vertical when it is at least as wide
  *   as it is tall, horizontal otherwise.
  * - Duplicate session keys and requests that would exceed MAX_VISIBLE_SESSIONS
@@ -433,9 +474,10 @@ export function addSessionToLayout(
   if (findSessionLeafByKey(layout.root, sessionKey)) return layout;
   const existingLeaves = collectSessionLeaves(layout.root);
   if (existingLeaves.length >= MAX_VISIBLE_SESSIONS) return layout;
+  const automaticLeaves = existingLeaves.filter((leaf) => leaf.sessionSurface === 'mesh');
 
-  if (existingLeaves.length === 0) {
-    return splitChatWithSession(layout, sessionKey, 'vertical');
+  if (automaticLeaves.length === 0) {
+    return splitChatWithSession(layout, sessionKey, 'vertical', 0.5, 'mesh');
   }
 
   const { leafRects } = computeSessionTileLayout(layout.root, viewport);
@@ -443,7 +485,7 @@ export function addSessionToLayout(
   let bestLeaf: SessionTileLeaf | null = null;
   let bestRect: SessionTileRect | null = null;
   let bestArea = -1;
-  for (const leaf of existingLeaves) {
+  for (const leaf of automaticLeaves) {
     const rect = leafRects.get(leaf.id);
     if (!rect) continue;
     const area = rect.width * rect.height;
@@ -454,11 +496,11 @@ export function addSessionToLayout(
     }
   }
 
-  const targetLeaf = bestLeaf ?? existingLeaves[0]!;
+  const targetLeaf = bestLeaf ?? automaticLeaves[0]!;
   const direction: SessionTileSplitDirection = bestRect && bestRect.width < bestRect.height
     ? 'horizontal'
     : 'vertical';
-  return splitSessionWithSession(layout, targetLeaf.id, sessionKey, direction);
+  return splitSessionWithSession(layout, targetLeaf.id, sessionKey, direction, 0.5, 'mesh');
 }
 
 // --- Persistence ---
@@ -470,6 +512,14 @@ function isPlainSessionLeaf(value: unknown): value is SessionTileLeaf {
     id?: unknown;
     kind?: unknown;
     sessionKey?: unknown;
+    participantId?: unknown;
+    packetId?: unknown;
+    laneId?: unknown;
+    arrivalOrder?: unknown;
+    sessionSurface?: unknown;
+    title?: unknown;
+    runtime?: unknown;
+    launchContext?: unknown;
     threadId?: unknown;
     mode?: unknown;
     repoPath?: unknown;
@@ -477,10 +527,25 @@ function isPlainSessionLeaf(value: unknown): value is SessionTileLeaf {
   if (v.type !== 'leaf' || typeof v.id !== 'string') return false;
   if (v.kind !== 'chat' && v.kind !== 'session' && v.kind !== 'thread') return false;
   if (v.kind === 'session' && typeof v.sessionKey !== 'string') return false;
+  if (
+    v.sessionSurface !== undefined
+    && v.sessionSurface !== 'mesh'
+    && v.sessionSurface !== 'split'
+  ) return false;
+  if (v.participantId !== undefined && typeof v.participantId !== 'string') return false;
+  if (v.packetId !== undefined && typeof v.packetId !== 'string') return false;
+  if (v.laneId !== undefined && typeof v.laneId !== 'string') return false;
+  if (v.title !== undefined && typeof v.title !== 'string') return false;
+  if (v.repoPath !== undefined && typeof v.repoPath !== 'string') return false;
+  if (v.runtime !== undefined && !isOrchestratorRuntime(v.runtime)) return false;
+  if (v.launchContext !== undefined && !normalizeWorkerLaunchContext(v.launchContext)) return false;
+  if (
+    v.arrivalOrder !== undefined
+    && (typeof v.arrivalOrder !== 'number' || !Number.isFinite(v.arrivalOrder))
+  ) return false;
   if (v.kind === 'thread') {
     if (typeof v.threadId !== 'string') return false;
     if (v.mode !== 'orchestrator' && v.mode !== 'chat') return false;
-    if (v.repoPath !== undefined && typeof v.repoPath !== 'string') return false;
   }
   return true;
 }

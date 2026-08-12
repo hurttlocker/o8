@@ -41,6 +41,8 @@ export interface OwnedRunRecord {
   startedAt: string;
   finishedAt?: string;
   pid: number;
+  /** Spawned executable basename, used to reject recycled PIDs before signaling. */
+  commandIdentity?: string;
   stdoutPath: string;
   stderrPath: string;
   outcome: OwnedRunOutcome;
@@ -61,6 +63,8 @@ export interface OwnedRunRecord {
 
 export interface OwnedSessionRecord {
   surfaceId: string;
+  /** Launch receipt correlation, persisted before the external process starts. */
+  launchMutationId?: string;
   /** Lane known at spawn time, so an immediate child exit can reach its audit stream. */
   laneId?: string;
   /** Packet that owns this worker credential and every packet-scoped API call. */
@@ -80,6 +84,12 @@ export interface OwnedSessionRecord {
   model?: string;
   /** Requested reasoning effort — applied per-runtime at launch (codex only today). */
   effort?: ThinkingEffort;
+  /** Server-only config-home binding captured once at launch. */
+  identity?: {
+    id: string;
+    label: string;
+    configHomeRef: string;
+  };
   reviewDisposition?: OwnedReviewDisposition;
   reviewDispositionUpdatedAt?: string;
   activeRun?: OwnedRunRecord;
@@ -148,6 +158,7 @@ export type OwnedCodexFleetAdditions = OwnedFleetAdditions;
 export interface OwnedLaunchRequest {
   cwd: string;
   prompt: string;
+  clientMutationId?: string;
   laneId?: string;
   packetId?: string;
   model?: string;
@@ -209,6 +220,12 @@ export interface OwnedRuntimeAdapter {
    * lazily at spawn time so env reads stay current.
    */
   extraSpawnEnv?: () => Record<string, string>;
+
+  /** Supported isolated config-home variable for session-pinned identities. */
+  isolatedConfigHomeEnv?: string;
+
+  /** Current local config home captured when a packet has no named identity. */
+  defaultConfigHome?: () => string;
 
   /**
    * Human-readable label used in fleet metadata. Codex: 'Owned Codex'.
@@ -304,7 +321,7 @@ export interface OwnedSessionStore {
   launch(request: OwnedLaunchRequest): Promise<OwnedLaunchResponse>;
   resume(surfaceId: string, prompt: string): Promise<{ ok: boolean; note: string }>;
   interrupt(surfaceId: string): Promise<{ interrupted: boolean; note: string }>;
-  getRuntimeTail(surfaceId: string): Promise<{
+  getRuntimeTail(surfaceId: string, limit?: number): Promise<{
     surface: RuntimeSurfaceSummary;
     entries: OwnedTailEntry[];
     groups: OwnedTailGroup[];
@@ -321,6 +338,7 @@ export interface OwnedSessionStore {
     model?: string;
     stdoutPaths: string[];
   } | null>;
+  getSessionIdentityId(surfaceId: string): Promise<string | null>;
   setReviewDisposition(
     surfaceId: string,
     disposition: OwnedReviewDisposition,

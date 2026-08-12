@@ -1,14 +1,13 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { appendFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { resolveCli } from '@/lib/runtimes/shared/cli-resolver';
 import { compactText, formatClock } from '@/lib/runtimes/shared/owned-session';
-import { resolveRepoContext, validateWorkspace } from '@/lib/runtimes/shared/owned-session/helpers';
+import { pidCommandLine, resolveRepoContext, validateWorkspace } from '@/lib/runtimes/shared/owned-session/helpers';
 import { getRuntimeRepoReview } from '@/lib/git/runtime-review';
 import {
-  buildPiPermissionDefaultResponse,
   buildPiPermissionDeniedResponse,
   handlePiPermissionRequest,
 } from '@/lib/pi/permission-bridge';
@@ -23,6 +22,7 @@ import type {
 import type { OwnedTailEntry, OwnedTailGroup } from '@/lib/runtimes/shared/owned-session/types';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
+import { escalateInterruptOwnedSurface } from '@/lib/runtime/interrupt-escalation';
 
 export {
   buildPiPermissionDefaultResponse,
@@ -47,6 +47,9 @@ interface PiRunRecord {
 
 interface PiSessionRecord {
   surfaceId: string;
+  launchMutationId?: string;
+  laneId?: string;
+  packetId?: string;
   sessionDir: string;
   cwd: string;
   repoPath: string;
@@ -64,6 +67,8 @@ interface PiSessionRecord {
   reviewDisposition?: 'watching' | 'resolved';
   reviewDispositionUpdatedAt?: string;
   activeRun?: PiRunRecord;
+  /** Persistent RPC child pid; it can outlive an individual activeRun. */
+  rpcPid?: number;
   recentRuns: PiRunRecord[];
 }
 
@@ -75,6 +80,7 @@ interface PiRpcClient {
 export type PiRpcFrame = Record<string, unknown>;
 
 const PI_ROOT = process.env.O8_OWNED_PI_ROOT ?? path.join(getDataDir(), 'owned-pi');
+const PI_ARCHIVE_ROOT = process.env.O8_OWNED_PI_ARCHIVE_ROOT ?? path.join(getDataDir(), 'owned-pi-archive');
 const RUNS_DIR = 'runs';
 const SURFACE_PREFIX = 'pi-owned:';
 const SESSION_PREFIX = 'pi-owned-';
@@ -249,8 +255,13 @@ async function listSessionDirs() {
   return entries.filter((entry) => entry.isDirectory()).map((entry) => path.join(root, entry.name));
 }
 
+async function listArchivedSessionDirs() {
+  const entries = await readdir(PI_ARCHIVE_ROOT, { withFileTypes: true }).catch(() => []);
+  return entries.filter((entry) => entry.isDirectory()).map((entry) => path.join(PI_ARCHIVE_ROOT, entry.name));
+}
+
 async function findSession(surfaceId: string) {
-  for (const dir of await listSessionDirs()) {
+  for (const dir of [...await listSessionDirs(), ...await listArchivedSessionDirs()]) {
     const session = await readJson<PiSessionRecord>(metadataPath(dir));
     if (session?.surfaceId === surfaceId) return session;
   }
@@ -306,6 +317,7 @@ async function spawnRpcProcess(session: PiSessionRecord, run: PiRunRecord, initi
     },
   };
   activeClients.set(session.surfaceId, client);
+  session.rpcPid = child.pid;
 
   child.stdout.on('data', (chunk: Buffer) => {
     const split = splitPiRpcJsonlFrames(chunk, carry);
@@ -361,12 +373,13 @@ async function spawnRpcProcess(session: PiSessionRecord, run: PiRunRecord, initi
   });
   child.on('exit', (code, signal) => {
     activeClients.delete(session.surfaceId);
+    session.rpcPid = undefined;
     if (run.outcome === 'running') {
       run.outcome = signal ? 'interrupted' : code === 0 ? 'finished' : 'failed';
       run.finishedAt = nowIso();
       session.activeRun = undefined;
-      void saveSession(session);
     }
+    void saveSession(session);
   });
 
   await saveSession(session);
@@ -463,7 +476,14 @@ async function tailForSession(session: PiSessionRecord) {
   return { surface: buildSurface(session), entries, groups };
 }
 
-export async function launchOwnedPiSession(request: { cwd: string; prompt: string; model?: string }) {
+export async function launchOwnedPiSession(request: {
+  cwd: string;
+  prompt: string;
+  clientMutationId?: string;
+  model?: string;
+  laneId?: string;
+  packetId?: string;
+}) {
   const prompt = request.prompt.trim();
   if (!prompt) throw new Error('prompt is required');
   const repoPath = await validateWorkspace(request.cwd);
@@ -473,6 +493,9 @@ export async function launchOwnedPiSession(request: { cwd: string; prompt: strin
   await mkdir(sessionDir, { recursive: true });
   const session: PiSessionRecord = {
     surfaceId: `${SURFACE_PREFIX}${id}`,
+    launchMutationId: request.clientMutationId?.trim() || undefined,
+    laneId: request.laneId?.trim() || undefined,
+    packetId: request.packetId?.trim() || undefined,
     sessionDir,
     cwd: repoPath,
     repoPath,
@@ -636,8 +659,75 @@ export function invalidateOwnedPiFleetCache(): void {
 }
 
 export async function archiveOwnedPiSession(surfaceId: string) {
+  const session = await findSession(surfaceId);
+  if (!session) return { archived: false, note: 'Owned Pi session was not found.' };
+  const clientPid = activeClients.get(surfaceId)?.child.pid;
+  const rpcPid = clientPid ?? session.rpcPid;
+  if (!clientPid && rpcPid) {
+    const commandLine = await pidCommandLine(rpcPid);
+    if (!commandLine || !commandLine.includes('--mode rpc')) {
+      session.rpcPid = undefined;
+      await saveSession(session);
+      // Never signal a stale or reused persisted pid. The owned-session
+      // authority below can still prove this session has no current run and
+      // allow its metadata to archive without touching an unrelated process.
+    }
+  }
+  const trustedRpcPid = clientPid ?? session.rpcPid;
+  const kill = trustedRpcPid
+    ? await import('@/lib/runtime/interrupt-escalation').then(({ escalateInterrupt }) => escalateInterrupt({ pid: trustedRpcPid }))
+    : await escalateInterruptOwnedSurface(surfaceId);
+  if (!kill || (!kill.confirmedDead && !kill.alreadyDead)) {
+    return {
+      archived: false,
+      note: kill?.note ?? 'Pi process death could not be confirmed before archive.',
+    };
+  }
   await interruptOwnedPiSession(surfaceId).catch(() => null);
-  return { archived: false, note: 'Pi archival is not implemented yet; session remains in the owned store.' };
+  session.rpcPid = undefined;
+  const activeDir = session.sessionDir;
+  if (path.dirname(activeDir) === PI_ARCHIVE_ROOT) {
+    return { archived: true, archivePath: activeDir, note: 'Session already archived.' };
+  }
+  const archiveDir = path.join(PI_ARCHIVE_ROOT, path.basename(activeDir));
+  await mkdir(PI_ARCHIVE_ROOT, { recursive: true });
+  try {
+    await rename(activeDir, archiveDir);
+  } catch (error) {
+    return {
+      archived: false,
+      note: `Pi session could not be archived: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+  const rebase = (value: string | undefined) => {
+    if (!value) return value;
+    const relative = path.relative(activeDir, value);
+    return relative && !relative.startsWith('..') && !path.isAbsolute(relative)
+      ? path.join(archiveDir, relative)
+      : value === activeDir ? archiveDir : value;
+  };
+  session.sessionDir = archiveDir;
+  session.piSessionFile = rebase(session.piSessionFile);
+  session.recentRuns = session.recentRuns.map((run) => ({
+    ...run,
+    stdoutPath: rebase(run.stdoutPath) ?? run.stdoutPath,
+    stderrPath: rebase(run.stderrPath) ?? run.stderrPath,
+  }));
+  if (session.activeRun) {
+    session.activeRun = {
+      ...session.activeRun,
+      stdoutPath: rebase(session.activeRun.stdoutPath) ?? session.activeRun.stdoutPath,
+      stderrPath: rebase(session.activeRun.stderrPath) ?? session.activeRun.stderrPath,
+    };
+  }
+  await saveSession(session);
+  return { archived: true, archivePath: archiveDir, note: `Session archived at ${archiveDir}.` };
+}
+
+export async function ownedPiSessionState(surfaceId: string) {
+  const session = await findSession(surfaceId);
+  if (!session) return 'missing' as const;
+  return path.dirname(session.sessionDir) === PI_ARCHIVE_ROOT ? 'archived' as const : 'active' as const;
 }
 
 export async function sweepOrphanedPiSessions() {

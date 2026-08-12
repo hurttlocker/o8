@@ -76,6 +76,9 @@ const EVENT_TONES: Record<ApprovalAuditEvent['type'], { color: string; backgroun
     backgroundColor: 'rgba(37, 99, 235, 0.12)',
     borderColor: 'rgba(37, 99, 235, 0.18)',
   },
+  continuation_completed: { color: '#15803d', backgroundColor: 'rgba(34, 197, 94, 0.12)', borderColor: 'rgba(34, 197, 94, 0.18)' },
+  continuation_failed: { color: '#b91c1c', backgroundColor: 'rgba(239, 68, 68, 0.12)', borderColor: 'rgba(239, 68, 68, 0.18)' },
+  continuation_outcome_unknown: { color: '#c2410c', backgroundColor: 'rgba(249, 115, 22, 0.12)', borderColor: 'rgba(249, 115, 22, 0.18)' },
 };
 
 const RISK_TONES: Record<ApprovalRisk, { color: string; backgroundColor: string; borderColor: string }> = {
@@ -1127,9 +1130,6 @@ export function AuditLogPanel() {
   );
 }
 
-/* ---------------------------------------------------------------------------
- * Inline meta field — compact label + value pair for the timeline entries
- * --------------------------------------------------------------------------- */
 function MetaInline({
   label,
   value,

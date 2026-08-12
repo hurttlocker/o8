@@ -7,7 +7,7 @@
  * pill context menu state, and the split/close/resize/clear callbacks so
  * OrchestratorTab.tsx stays under the 800-line ceiling.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   SessionPillContextMenuItem,
 } from '@/components/desktop/SessionPillContextMenu';
@@ -18,14 +18,14 @@ import {
   addSessionToLayout,
   clearSessionTiles,
   closeSessionLeaf,
-  collectSessionKeys,
+  collectSessionKeysByArrival,
   collectSessionLeaves,
   collectThreadLeaves,
   createDefaultSessionTileLayout,
   deserializeSessionTileLayout,
   hasAnyAuxLeaf,
-  pruneStaleSessions,
   replaceLeafWithThread,
+  reconcileSessionTileParticipants,
   resizeSessionSplit,
   serializeSessionTileLayout,
   splitChatWithSession,
@@ -35,6 +35,7 @@ import {
   type SessionTileSplitDirection,
   type ThreadPanePayload,
 } from '@/lib/orchestrator/session-tiles';
+import type { WorkerParticipant } from '@/lib/orchestrator/participant-projection';
 import {
   claimOutsideWorkerSplits,
   outsideWorkerSessionKeysForLane,
@@ -108,11 +109,15 @@ export function scrubOrphanSessionTileKeys(validTabIds: Set<string>): number {
 
 interface UseSessionTilesArgs {
   tabId: string;
+  repoPath: string;
+  workspaceId?: string;
+  threadId?: string | null;
   active?: boolean;
   /** sessionKeys of every active fleet agent — used to prune stale leaves. */
   liveSessionKeys: string[];
   /** Session keys whose governed lane has completed or archived. */
   retiredSessionKeys?: ReadonlySet<string>;
+  participants?: ReadonlyArray<WorkerParticipant>;
 }
 
 export interface UseSessionTilesReturn {
@@ -122,7 +127,7 @@ export interface UseSessionTilesReturn {
   isTiled: boolean;
   sessionLeaves: ReturnType<typeof collectSessionLeaves>;
   focusedSessionKey: string | null;
-  setFocusedSessionKey: React.Dispatch<React.SetStateAction<string | null>>;
+  setFocusedSessionKey: (sessionKey: string | null) => void;
   pillContextMenu: { request: SessionPillContextMenuRequest } | null;
   closeSessionLeafById: (leafId: string) => void;
   toggleTileSession: (sessionKey: string) => void;
@@ -145,27 +150,81 @@ export interface UseSessionTilesReturn {
   pruneThreadPane: (threadId: string) => void;
 }
 
+export function resolveFocusedSessionKey(
+  sessionLeaves: ReturnType<typeof collectSessionLeaves>,
+  focusedLeafIdentity: string | null,
+): string | null {
+  if (!focusedLeafIdentity) return null;
+  return sessionLeaves.find((leaf) => (
+    leaf.id === focusedLeafIdentity || leaf.sessionKey === focusedLeafIdentity
+  ))?.sessionKey ?? null;
+}
+
+export const OUTSIDE_WORKER_HOST_EMPTY_EVENT = 'o8:outside-worker-host-empty';
+
 export function useSessionTiles({
   tabId,
+  repoPath,
+  workspaceId,
+  threadId,
   liveSessionKeys,
   retiredSessionKeys = EMPTY_RETIRED_SESSION_KEYS,
+  participants = [],
   active = false,
 }: UseSessionTilesArgs): UseSessionTilesReturn {
   const [layout, setLayout] = useState<SessionTileLayout>(
     () => readStoredSessionTileLayout(tabId),
   );
-  const [focusedSessionKey, setFocusedSessionKey] = useState<string | null>(null);
+  const [focusedLeafIdentity, setFocusedLeafIdentity] = useState<string | null>(null);
   const [pillContextMenu, setPillContextMenu] = useState<{
     request: SessionPillContextMenuRequest;
   } | null>(null);
   const [outsideWorkerSessionKeys, setOutsideWorkerSessionKeys] = useState<string[]>([]);
 
-  const tiledSessions = useMemo(() => collectSessionKeys(layout.root), [layout.root]);
+  const participantTransports = useMemo(() => participants.flatMap((participant) => (
+    participant.sessionKey ? [{
+      participantId: participant.id,
+      packetId: participant.packetId,
+      laneId: participant.laneId,
+      sessionKey: participant.sessionKey,
+      repoPath: participant.repoPath,
+      runtime: participant.runtime,
+      taskSummary: participant.taskSummary,
+      launchContext: participant.launchContext,
+    }] : []
+  )), [participants]);
+
+  const tiledSessions = useMemo(() => collectSessionKeysByArrival(layout.root), [layout.root]);
   const sessionLeaves = useMemo(() => collectSessionLeaves(layout.root), [layout.root]);
+  const hadSessionLeafRef = useRef(sessionLeaves.length > 0);
+  const focusedLeaf = useMemo(() => sessionLeaves.find((leaf) => (
+    leaf.id === focusedLeafIdentity || leaf.sessionKey === focusedLeafIdentity
+  )) ?? null, [focusedLeafIdentity, sessionLeaves]);
+  const focusedSessionKey = resolveFocusedSessionKey(sessionLeaves, focusedLeafIdentity);
+  const setFocusedSessionKey = useCallback((sessionKey: string | null) => {
+    if (!sessionKey) {
+      setFocusedLeafIdentity(null);
+      return;
+    }
+    const leaf = sessionLeaves.find((candidate) => candidate.sessionKey === sessionKey);
+    setFocusedLeafIdentity(leaf?.id ?? sessionKey);
+  }, [sessionLeaves]);
   const threadLeaves = useMemo(() => collectThreadLeaves(layout.root), [layout.root]);
   // Tiled = anything beyond the bare chat: session transcripts OR thread
   // panes (drag-to-split). Both need the SessionTileSurface mounted.
   const isTiled = tiledSessions.length > 0 || threadLeaves.length > 0;
+
+  useEffect(() => {
+    if (sessionLeaves.length > 0) {
+      hadSessionLeafRef.current = true;
+      return;
+    }
+    if (!hadSessionLeafRef.current || threadLeaves.length > 0) return;
+    hadSessionLeafRef.current = false;
+    window.dispatchEvent(new CustomEvent(OUTSIDE_WORKER_HOST_EMPTY_EVENT, {
+      detail: { tabId },
+    }));
+  }, [sessionLeaves.length, tabId, threadLeaves.length]);
 
   // Persist whenever the layout changes — but NOT the default/empty layout.
   // Pre-fix (2026-06-22) every orchestrator tab wrote a `…:session-tiles:tab:*`
@@ -181,13 +240,26 @@ export function useSessionTiles({
     persistSessionTileLayout(tabId, layout);
   }, [tabId, layout]);
 
+  useEffect(() => {
+    if (participantTransports.length === 0) return;
+    const handle = window.setTimeout(() => {
+      setLayout((current) => reconcileSessionTileParticipants(current, participantTransports));
+    }, 0);
+    return () => window.clearTimeout(handle);
+  }, [layout.root, participantTransports]);
+
   // Outside-launched workers claim the active orchestrator tab and enter
   // through this same session tree. That preserves the drag-to-split FLIP
   // motion, divider, resize, and close behavior without a dashboard tile.
   useEffect(() => {
-    if (!active) return undefined;
+    if (!active || !workspaceId) return undefined;
     const claim = () => {
-      const requests = claimOutsideWorkerSplits(tabId);
+      const requests = claimOutsideWorkerSplits({
+        tabId,
+        repoPath,
+        workspaceId,
+        threadId,
+      });
       if (requests.length === 0) return;
       setOutsideWorkerSessionKeys((current) => {
         const next = new Set(current);
@@ -197,18 +269,34 @@ export function useSessionTiles({
       setLayout((current) => {
         let next = current;
         for (const request of requests) {
+          const transport = {
+            participantId: request.packetId?.trim() || request.laneId?.trim() || request.sessionKey,
+            packetId: request.packetId,
+            laneId: request.laneId,
+            sessionKey: request.sessionKey,
+            repoPath: request.repoPath,
+            runtime: request.runtime,
+            taskSummary: request.title,
+            launchContext: request.launchContext,
+          };
+          next = reconcileSessionTileParticipants(next, [transport]);
           next = addSessionToLayout(next, request.sessionKey);
+          next = reconcileSessionTileParticipants(next, [transport]);
         }
         return next;
       });
     };
     claim();
     const unsubscribe = subscribeOutsideWorkerSplits(claim);
-    return () => {
-      unsubscribe();
-      releaseOutsideWorkerSplits(tabId);
-    };
-  }, [active, tabId]);
+    return unsubscribe;
+  }, [active, repoPath, tabId, threadId, workspaceId]);
+
+  // A tab keeps ownership while it is merely in the background. Releasing on
+  // every active-tab switch makes the broker remount and refocus that tab,
+  // which prevents two outside workers in different repos from coexisting.
+  // The durable claim returns to the broker only when the tab actually leaves
+  // the workspace tree.
+  useEffect(() => () => releaseOutsideWorkerSplits(tabId), [tabId]);
 
   // The launch bridge pins a session only across the inventory-arrival race.
   // Once the normal fleet record exists, the existing stale-session pruner
@@ -232,9 +320,10 @@ export function useSessionTiles({
       const data = detail?.data;
       const status = data?.laneStatus ?? data?.status;
       if (status !== 'completed' && status !== 'archived') return;
+      const laneKeys = data?.laneId ? outsideWorkerSessionKeysForLane(data.laneId) : [];
       const retiredKeys = new Set([
         ...(data?.sessionKey ? [data.sessionKey] : []),
-        ...(data?.laneId ? outsideWorkerSessionKeysForLane(data.laneId) : []),
+        ...(!data?.sessionKey ? laneKeys : []),
       ]);
       if (retiredKeys.size === 0) return;
       removeOutsideWorkerSplits(retiredKeys);
@@ -251,30 +340,41 @@ export function useSessionTiles({
     return () => window.removeEventListener('o8:lane-lifecycle', retire as EventListener);
   }, []);
 
-  // Drop session leaves whose underlying agent has gone away. Defer to a
-  // microtask so the prune doesn't trip the synchronous-setState lint rule
-  // and so React batches it with any other commit-time updates.
+  // Inventory disappearance is not completion evidence. A runtime can rotate
+  // or briefly drop its fleet row while the durable lane is still live, so
+  // retire only keys confirmed by the completed/archived lane view. The
+  // transcript store is deliberately left intact for the archive surface.
   useEffect(() => {
-    const liveSet = new Set([...liveSessionKeys, ...outsideWorkerSessionKeys]);
-    for (const sessionKey of retiredSessionKeys) liveSet.delete(sessionKey);
+    if (retiredSessionKeys.size === 0) return undefined;
+    removeOutsideWorkerSplits(retiredSessionKeys);
     const handle = window.setTimeout(() => {
+      setOutsideWorkerSessionKeys((current) => current.filter((key) => !retiredSessionKeys.has(key)));
       setLayout((current) => {
-        const next = pruneStaleSessions(current, liveSet);
-        return next === current ? current : next;
+        let next = current;
+        for (const leaf of collectSessionLeaves(current.root)) {
+          if (leaf.sessionKey && retiredSessionKeys.has(leaf.sessionKey)) {
+            next = closeSessionLeaf(next, leaf.id);
+          }
+        }
+        return next;
       });
     }, 0);
     return () => window.clearTimeout(handle);
-  }, [liveSessionKeys, outsideWorkerSessionKeys, retiredSessionKeys]);
+  }, [retiredSessionKeys]);
 
-  // Keep focused-session pointer valid as the tree changes.
+  // Stabilize focus on the durable leaf id. A session transport can rotate
+  // underneath that leaf without moving focus to the first worker.
   useEffect(() => {
-    if (!focusedSessionKey) return;
-    if (tiledSessions.includes(focusedSessionKey)) return;
+    if (focusedLeaf && focusedLeafIdentity !== focusedLeaf.id) {
+      const handle = window.setTimeout(() => setFocusedLeafIdentity(focusedLeaf.id), 0);
+      return () => window.clearTimeout(handle);
+    }
+    if (!focusedLeafIdentity || focusedLeaf) return undefined;
     const handle = window.setTimeout(() => {
-      setFocusedSessionKey(tiledSessions[0] ?? null);
+      setFocusedLeafIdentity(sessionLeaves[0]?.id ?? null);
     }, 0);
     return () => window.clearTimeout(handle);
-  }, [focusedSessionKey, tiledSessions]);
+  }, [focusedLeaf, focusedLeafIdentity, sessionLeaves]);
 
   const closeSessionLeafById = useCallback((leafId: string) => {
     const sessionKey = sessionLeaves.find((leaf) => leaf.id === leafId)?.sessionKey;
@@ -331,7 +431,7 @@ export function useSessionTiles({
       return splitSessionWithSession(current, lastLeaf.id, sessionKey, direction);
     });
     setFocusedSessionKey(sessionKey);
-  }, []);
+  }, [setFocusedSessionKey]);
 
   const splitLeafWithThreadPane = useCallback((
     targetLeafId: string,

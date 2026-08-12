@@ -44,6 +44,7 @@ import {
 } from '../projects/suggest';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { packetStatusWriteRejection } from '@/lib/orchestrator/packet-patch-policy';
+import { pollCorrelatedMcpApiMutation } from '@/lib/mcp/correlated-mutation';
 
 /**
  * Resolve the backend base URL from env, port file, or legacy default.
@@ -873,9 +874,11 @@ async function handleLaunchAgent(args: Record<string, unknown>): Promise<McpTool
 
     // Route through the orchestrator delegation endpoint — this creates a lane
     // with governance coverage before launching the Codex session.
-    const result = await apiFetch('/api/orchestrator/delegate', {
-      method: 'POST',
-      body: JSON.stringify({
+    const result = await pollCorrelatedMcpApiMutation<Record<string, unknown>>({
+      url: `${API_BASE}/api/orchestrator/delegate`,
+      authorization: `Bearer ${WS_TOKEN}`,
+      correlationField: 'clientMutationId',
+      body: {
         prompt,
         repoPath,
         taskName: args.taskName || undefined,
@@ -883,8 +886,8 @@ async function handleLaunchAgent(args: Record<string, unknown>): Promise<McpTool
         runtime: args.runtime || undefined,
         model: args.model || undefined,
         workerIntent: args.workerIntent || undefined,
-      }),
-    }) as Record<string, unknown>;
+      },
+    });
 
     if (result.approvalId) {
       // Policy engine requires approval before this delegation can proceed
@@ -943,14 +946,12 @@ async function handleSteerAgent(args: Record<string, unknown>): Promise<McpToolR
     const message = args.message as string;
     if (!surfaceId || !message) return textResult('surfaceId and message are required', true);
 
-    const result = await apiFetch('/api/runtime/action', {
-      method: 'POST',
-      body: JSON.stringify({
-        action: 'steer',
-        surfaceId,
-        message,
-      }),
-    }) as Record<string, unknown>;
+    const result = await pollCorrelatedMcpApiMutation<Record<string, unknown>>({
+      url: `${API_BASE}/api/runtime/action`,
+      authorization: `Bearer ${WS_TOKEN}`,
+      body: { action: 'steer', surfaceId, message },
+      correlationField: 'clientMutationId',
+    });
 
     if (result.ok) {
       return jsonResult({
@@ -994,13 +995,12 @@ async function handleInterruptAgent(args: Record<string, unknown>): Promise<McpT
     const surfaceId = args.surfaceId as string;
     if (!surfaceId) return textResult('surfaceId is required', true);
 
-    const result = await apiFetch('/api/runtime/action', {
-      method: 'POST',
-      body: JSON.stringify({
-        action: 'interrupt',
-        surfaceId,
-      }),
-    }) as Record<string, unknown>;
+    const result = await pollCorrelatedMcpApiMutation<Record<string, unknown>>({
+      url: `${API_BASE}/api/runtime/action`,
+      authorization: `Bearer ${WS_TOKEN}`,
+      body: { action: 'interrupt', surfaceId },
+      correlationField: 'clientMutationId',
+    });
 
     if (result.ok) {
       return jsonResult({ ok: true, note: result.note });

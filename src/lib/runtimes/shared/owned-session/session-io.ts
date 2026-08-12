@@ -55,7 +55,7 @@ export function createOwnedSessionIo({
 
   async function saveSession(session: OwnedSessionRecord) {
     session.updatedAt = nowIso();
-    await writeJsonFile(metadataPath(session.sessionDir), session);
+    await writeJsonFile(metadataPath(session.sessionDir), session, { mode: 0o600 });
   }
 
   async function findSession(surfaceId: string) {

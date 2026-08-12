@@ -1,6 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 
-import { stripPersistedTabs } from './tab-state';
+import {
+  formatPersistedRuntimeSessionKey,
+  loadTabState,
+  stripPersistedRuntimeSessionKey,
+  stripPersistedTabs,
+} from './tab-state';
+
+afterEach(() => vi.unstubAllGlobals());
 
 /**
  * Single source of truth for "is this a valid persisted tab?". Covers both
@@ -48,5 +55,24 @@ describe('stripPersistedTabs', () => {
   it('drops non-object entries defensively', () => {
     const tabs = [null, undefined, { id: 'chat-ok', kind: 'chat' }] as Array<{ id?: string; kind?: string } | null | undefined>;
     expect(stripPersistedTabs(tabs as never).map((t) => t.id)).toEqual(['chat-ok']);
+  });
+});
+
+describe('loadTabState', () => {
+  it('treats a missing saved state as an expected empty result', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 204 })));
+
+    await expect(loadTabState('tile-root')).resolves.toBeNull();
+  });
+});
+
+describe('owned runtime session persistence', () => {
+  it.each([
+    ['pi', 'pi-owned:abc'],
+    ['prime-agent', 'prime-agent-owned:abc'],
+    ['qwen', 'qwen-owned:abc'],
+  ] as const)('preserves %s session identity', (runtime, sessionKey) => {
+    expect(formatPersistedRuntimeSessionKey(runtime, sessionKey)).toBe(sessionKey);
+    expect(stripPersistedRuntimeSessionKey(runtime, sessionKey)).toBe(sessionKey);
   });
 });

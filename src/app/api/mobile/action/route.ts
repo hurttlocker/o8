@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { buildErrorPayload, sanitizeErrorMessage } from '@/lib/api/error-format';
 import { invalidateCommandCenterSnapshotCaches } from '@/lib/command-center/snapshot';
 import { rejectLlmApproval, resumeLlmApproval } from '@/lib/approvals/llm';
-import { claimApprovalResolution } from '@/lib/approvals/resolution';
+import { claimApprovalResolution, finalizeApprovalContinuation } from '@/lib/approvals/resolution';
 import { getApproval, listApprovals } from '@/lib/approvals/store';
 import {
   buildLlmRequestMessages,
@@ -15,22 +15,23 @@ import type { MobileTranscriptSource, MobileTranscriptToolCall } from '@/lib/mob
 import { invalidateInboxCache } from '@/lib/mobile/inbox';
 import { selectMobileReviewApprovalId } from '@/lib/mobile/action-approval';
 import {
-  mobileActionInProgressPayload,
+  bindMobileActionIdempotency, mobileActionInProgressPayload,
+  MobileActionUncacheableResponseError,
   resolveMobileActionIdempotencyIdentity,
   restoreMobileActionResponse,
-  serializeMobileActionResponse,
+  serializeCacheableMobileActionResponse,
   type SerializedMobileActionResponse,
 } from '@/lib/mobile/action-idempotency';
 import type { MobileActionRequest, MobileActionResponse } from '@/lib/mobile/types';
 import { deriveIdempotencyKey, withIdempotency } from '@/lib/orchestrator/idempotency-store';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
-import { launchCodexFromMobile, launchRuntimeSurface, performRuntimeAction } from '@/lib/runtime/actions';
+import { performLegacyRuntimeActionViaAgentControl } from '@/lib/agent-control/service';
+import { launchCodexFromMobile, launchRuntimeSurface } from '@/lib/runtime/actions';
 import { writePersistedLlmChat, type PersistedLlmChatHistory, type PersistedLlmChatMessage } from '@/lib/llm/chat-history-store';
 import type { RuntimeId } from '@/lib/runtimes';
 import '@/lib/runtimes'; // Ensure runtimes are registered
 import { getRuntime } from '@/lib/runtimes/registry';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
-import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 const NO_STORE_HEADERS = { 'Cache-Control': 'no-store, max-age=0' };
@@ -55,6 +56,23 @@ function actionErrorResponse(error: string, status: number, detail?: unknown) {
   return NextResponse.json(buildErrorPayload(error, detail), {
     status,
     headers: NO_STORE_HEADERS,
+  });
+}
+
+function actionOutcomeUnknownResponse(
+  message: string,
+  clientMutationId: string,
+) {
+  return NextResponse.json({
+    ok: false,
+    error: 'outcome_unknown',
+    clientMutationId,
+    outcomeUnknown: true,
+    retryable: false,
+    message,
+  }, {
+    status: 500,
+    headers: { ...NO_STORE_HEADERS, 'x-o8-terminal-outcome': 'unknown' },
   });
 }
 
@@ -285,23 +303,27 @@ async function publishMobileMutation(
     note: string;
   },
 ) {
-  await publishRealtimeMutation({
-    mutation: {
-      mutationId,
-      source: 'mobile',
-      action: payload.action,
-      runtime: payload.runtime,
-      surfaceId: payload.sessionKey,
-      sessionKey: payload.sessionKey,
-      status: payload.status,
-      note: payload.note,
-      createdAt: new Date().toISOString(),
-      settledAt: payload.status === 'pending' ? undefined : new Date().toISOString(),
-    },
-    refreshTargets: ['global', 'mobileInbox', ...(payload.sessionKey ? ['sessionHistory' as const] : [])],
-    sessionKeys: payload.sessionKey ? [payload.sessionKey] : [],
-    fresh: payload.status !== 'failed',
-  });
+  try {
+    await publishRealtimeMutation({
+      mutation: {
+        mutationId,
+        source: 'mobile',
+        action: payload.action,
+        runtime: payload.runtime,
+        surfaceId: payload.sessionKey,
+        sessionKey: payload.sessionKey,
+        status: payload.status,
+        note: payload.note,
+        createdAt: new Date().toISOString(),
+        settledAt: payload.status === 'pending' ? undefined : new Date().toISOString(),
+      },
+      refreshTargets: ['global', 'mobileInbox', ...(payload.sessionKey ? ['sessionHistory' as const] : [])],
+      sessionKeys: payload.sessionKey ? [payload.sessionKey] : [],
+      fresh: payload.status !== 'failed',
+    });
+  } catch (error) {
+    console.error('[mobile-action] Realtime receipt publication failed:', error);
+  }
 }
 
 async function handleMobileActionPost(request: NextRequest) {
@@ -349,7 +371,15 @@ async function handleMobileActionPost(request: NextRequest) {
         return actionErrorResponse('cwd and message are required for launch', 400);
       }
 
-      const result = await launchCodexFromMobile(cwd, message);
+      let result;
+      try {
+        result = await launchCodexFromMobile(cwd, message, clientMutationId);
+      } catch (error) {
+        return actionOutcomeUnknownResponse(sanitizeErrorMessage(
+          error,
+          'Launch outcome is unknown; inspect the runtime before issuing another launch.',
+        ), clientMutationId);
+      }
       const response: MobileActionResponse = {
         ok: result.ok,
         action,
@@ -445,10 +475,17 @@ async function handleMobileActionPost(request: NextRequest) {
       );
       const approval = resolutionClaim.approval;
       if (!approval) return actionErrorResponse('Approval not found.', 404);
-      if (!resolutionClaim.claimed) return actionStructuredError('approval_resolved', 410);
+      if (!resolutionClaim.claimed) {
+        const unsettled = approval.resolution?.continuationStatus === 'pending'
+          || approval.resolution?.continuationStatus === 'outcome_unknown';
+        return unsettled
+          ? actionStructuredError('approval_continuation_unconfirmed', 409)
+          : actionStructuredError('approval_resolved', 410);
+      }
 
       let decisionNote = action === 'approve' ? 'Approved.' : action === 'request_changes' ? 'Changes requested.' : 'Denied.';
       const continuation = approval.continuation;
+      let continuationOutcome: 'completed' | 'failed' | 'outcome_unknown' = 'completed';
 
       if (continuation?.kind === 'llm-chat') {
         const decision = action === 'approve'
@@ -467,6 +504,7 @@ async function handleMobileActionPost(request: NextRequest) {
           } as Parameters<typeof dispatch>[0]);
           decisionNote = result.note;
         } catch (error) {
+          continuationOutcome = 'outcome_unknown';
           decisionNote = `Lane ${continuation.verb} failed: ${sanitizeErrorMessage(error, 'unknown')}`;
         }
       } else if (continuation?.kind === 'plan' && action === 'approve') {
@@ -475,6 +513,7 @@ async function handleMobileActionPost(request: NextRequest) {
           const result = await dispatchApprovedPlan(continuation);
           decisionNote = result.note;
         } catch (error) {
+          continuationOutcome = 'outcome_unknown';
           decisionNote = `Plan dispatch failed: ${sanitizeErrorMessage(error, 'unknown')}`;
         }
       } else if (continuation?.kind === 'runtime' && action === 'approve') {
@@ -488,17 +527,32 @@ async function handleMobileActionPost(request: NextRequest) {
               prompt: continuation.prompt,
               skipSetup: true,
             });
+            if (!result.ok) continuationOutcome = 'failed';
             decisionNote = result.note;
           } else if (continuation.action === 'resume' && continuation.message) {
             const rt = getRuntime(continuation.runtimeId);
             if (rt) {
               const result = await rt.resume(continuation.sessionKey, continuation.message);
+              if (!result.ok) continuationOutcome = 'failed';
               decisionNote = result.note;
+            } else {
+              continuationOutcome = 'failed';
+              decisionNote = `Runtime ${continuation.runtimeId} is unavailable.`;
             }
           }
         } catch (error) {
+          continuationOutcome = 'outcome_unknown';
           decisionNote = `Runtime action failed: ${sanitizeErrorMessage(error, 'unknown')}`;
         }
+      }
+
+      if (approval.resolution?.continuationStatus && resolutionClaim.claimId) {
+        finalizeApprovalContinuation(
+          approval.id,
+          resolutionClaim.claimId,
+          continuationOutcome,
+          decisionNote,
+        );
       }
 
       invalidateMutationCaches();
@@ -506,7 +560,7 @@ async function handleMobileActionPost(request: NextRequest) {
         action,
         sessionKey: approval.sessionKey,
         runtime: approval.runtime,
-        status: 'completed',
+        status: continuationOutcome === 'completed' ? 'completed' : 'failed',
         note: decisionNote,
       });
 
@@ -515,7 +569,7 @@ async function handleMobileActionPost(request: NextRequest) {
         action,
         sessionKey: approval.sessionKey,
         clientMutationId,
-        status: 'completed',
+        status: continuationOutcome === 'completed' ? 'completed' : 'unavailable',
         note: decisionNote,
       }, {
         status: 200,
@@ -525,158 +579,44 @@ async function handleMobileActionPost(request: NextRequest) {
 
     if (action === 'resume') {
       const message = (payload as unknown as Record<string, unknown>).message as string | undefined;
-
-      if (isOwnedCodex) {
-        const result = await performRuntimeAction({
+      let result;
+      try {
+        result = await performLegacyRuntimeActionViaAgentControl({
           action: 'send_input',
           surfaceId: sessionKey,
           clientMutationId,
           message,
           runId: payload.runId,
         });
-
-        const response: MobileActionResponse = {
-          ok: result.ok,
-          action,
-          sessionKey,
-          clientMutationId,
-          status: result.status,
-          note: result.note,
-          runId: result.runId,
-          aborted: result.aborted,
-        };
-        if (result.ok) {
-          invalidateMutationCaches();
-        }
-
-        console.info('[mobile/action] owned resume result', {
-          sessionKey,
-          clientMutationId,
-          ok: result.ok,
-          status: result.status,
-          runId: result.runId ?? null,
-        });
-
-        await publishMobileMutation(clientMutationId, {
-          action,
-          sessionKey,
-          runtime: 'codex',
-          status: result.ok ? (result.status === 'queued' ? 'queued' : 'completed') : 'failed',
-          note: result.note,
-        });
-
-        if (result.status === 'unavailable') {
-          return actionErrorResponse(result.note, 501);
-        }
-
-        return NextResponse.json(response, {
-          status: 200,
-          headers: NO_STORE_HEADERS,
-        });
+      } catch (error) {
+        return actionOutcomeUnknownResponse(sanitizeErrorMessage(
+          error,
+          'Resume outcome is unknown; inspect the session before retrying.',
+        ), clientMutationId);
       }
-
-      if (sessionKey.startsWith('claude-code:')) {
-        const ccRuntime = getRuntime('claude-code');
-        if (!ccRuntime?.resume) {
-          return actionErrorResponse('Claude Code runtime not available.', 501);
-        }
-
-        const result = await ccRuntime.resume(sessionKey, message ?? '');
-        if (result.ok) {
-          invalidateMutationCaches();
-        }
-
-        console.info('[mobile/action] claude-code resume result', {
-          sessionKey,
-          clientMutationId,
-          ok: result.ok,
-          note: result.note,
-        });
-
-        await publishMobileMutation(clientMutationId, {
-          action,
-          sessionKey,
-          runtime: 'claude-code',
-          status: result.ok ? 'queued' : 'failed',
-          note: result.note,
-        });
-
-        if (!result.ok) {
-          return actionErrorResponse(result.note, 500);
-        }
-
-        return NextResponse.json(
-          { ok: true, action, sessionKey, clientMutationId, status: 'sent', note: result.note },
-          { status: 200, headers: NO_STORE_HEADERS },
-        );
+      if (result.ok) {
+        invalidateMutationCaches();
       }
-      if (sessionKey.startsWith('codex:') || sessionKey.startsWith('codex-discovered:')) {
-        const threadId = sessionKey.replace(/^codex:/, '').replace(/^codex-discovered:/, '');
-        try {
-          const { execFileSync } = await import('node:child_process');
-          const os = await import('node:os');
-          const path = await import('node:path');
-          const codexBin = path.join(os.homedir(), '.npm-global', 'bin', 'codex');
-          const args = ['exec', 'resume', threadId, message ?? '', '--json', '--dangerously-bypass-approvals-and-sandbox'];
-          const probe = cliInvocation(codexBin, args);
-          const stdout = execFileSync(probe.command, probe.args, { windowsHide: true,
-            cwd: process.env.HOME || os.homedir(),
-            timeout: 120_000,
-            maxBuffer: 10 * 1024 * 1024,
-            env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
-            encoding: 'utf-8',
-          });
-
-          const lines = stdout.split('\n').filter(Boolean);
-          let responseText = '';
-          for (const line of lines) {
-            try {
-              const event = JSON.parse(line) as Record<string, unknown>;
-              if (event.type === 'item.completed') {
-                const item = event.item as { type?: string; text?: string } | undefined;
-                if (item?.type === 'agent_message' && item.text) {
-                  responseText += item.text;
-                }
-              }
-            } catch {
-              continue;
-            }
-          }
-
-          invalidateMutationCaches();
-          console.info('[mobile/action] discovered codex CLI resume', {
-            sessionKey,
-            threadId,
-            responseLength: responseText.length,
-          });
-
-          await publishMobileMutation(clientMutationId, {
-            action,
-            sessionKey,
-            runtime: 'codex',
-            status: 'completed',
-            note: responseText ? 'Codex responded.' : 'Sent to Codex.',
-          });
-
-          return NextResponse.json(
-            { ok: true, action, sessionKey, clientMutationId, status: 'completed', note: 'Sent to Codex.' },
-            { status: 200, headers: NO_STORE_HEADERS },
-          );
-        } catch (error) {
-          const message = sanitizeErrorMessage(error, 'Codex CLI error').slice(0, 200);
-          console.error('[mobile/action] discovered codex CLI resume failed:', message);
-          await publishMobileMutation(clientMutationId, {
-            action,
-            sessionKey,
-            runtime: 'codex',
-            status: 'failed',
-            note: `Codex CLI error: ${message}`,
-          });
-          return actionErrorResponse(message, 500);
-        }
+      await publishMobileMutation(clientMutationId, {
+        action,
+        sessionKey,
+        runtime: result.runtime,
+        status: result.ok ? (result.status === 'queued' ? 'queued' : 'completed') : 'failed',
+        note: result.note,
+      });
+      if (result.status === 'unavailable') {
+        return actionErrorResponse(result.note, 501);
       }
-
-      return actionErrorResponse(`Don't know how to resume session: ${sessionKey.split(':')[0]}`, 501);
+      return NextResponse.json({
+        ok: result.ok,
+        action,
+        sessionKey,
+        clientMutationId,
+        status: result.status,
+        note: result.note,
+        runId: result.runId,
+        aborted: result.aborted,
+      } satisfies MobileActionResponse, { status: 200, headers: NO_STORE_HEADERS });
     }
 
     if (action === 'watch' || action === 'resolve') {
@@ -687,11 +627,19 @@ async function handleMobileActionPost(request: NextRequest) {
         );
       }
 
-      const result = await performRuntimeAction({
-        action,
-        surfaceId: sessionKey,
-        clientMutationId,
-      });
+      let result;
+      try {
+        result = await performLegacyRuntimeActionViaAgentControl({
+          action,
+          surfaceId: sessionKey,
+          clientMutationId,
+        });
+      } catch (error) {
+        return actionOutcomeUnknownResponse(sanitizeErrorMessage(
+          error,
+          'Runtime action outcome is unknown; inspect the session before retrying.',
+        ), clientMutationId);
+      }
 
       const response: MobileActionResponse = {
         ok: result.ok,
@@ -730,14 +678,22 @@ async function handleMobileActionPost(request: NextRequest) {
       );
     }
 
-    const result = await performRuntimeAction({
-      action,
-      surfaceId: sessionKey,
-      clientMutationId,
-      message: payload.message,
-      attachments: payload.attachments,
-      runId: payload.runId,
-    });
+    let result;
+    try {
+      result = await performLegacyRuntimeActionViaAgentControl({
+        action,
+        surfaceId: sessionKey,
+        clientMutationId,
+        message: payload.message,
+        attachments: payload.attachments,
+        runId: payload.runId,
+      });
+    } catch (error) {
+      return actionOutcomeUnknownResponse(sanitizeErrorMessage(
+        error,
+        'Runtime action outcome is unknown; inspect the session before retrying.',
+      ), clientMutationId);
+    }
 
     const response: MobileActionResponse = {
       ok: result.ok,
@@ -804,34 +760,43 @@ async function handleMobileActionPost(request: NextRequest) {
   }
 }
 
-/**
- * Persisted retry guard for explicit native control actions. The clone is used
- * only to inspect correlation/scope; the untouched Request still flows through
- * the existing handler, keeping every legacy and validation path byte-for-byte.
- */
 export async function POST(request: NextRequest) {
   const probe = await request.clone().json().catch(() => null);
   const identity = resolveMobileActionIdempotencyIdentity(probe);
   if (!identity) return handleMobileActionPost(request);
-
-  const key = deriveIdempotencyKey({
-    verb: MOBILE_ACTION_IDEMPOTENCY_VERB,
-    scopeId: identity.scopeId,
-    clientKey: identity.clientMutationId,
-  });
-  const outcome = await withIdempotency<SerializedMobileActionResponse>({
-    key,
-    verb: MOBILE_ACTION_IDEMPOTENCY_VERB,
-    scopeId: identity.scopeId,
-    ttlMs: MOBILE_ACTION_IDEMPOTENCY_TTL_MS,
-  }, async () => serializeMobileActionResponse(await handleMobileActionPost(request)));
-
-  if (outcome.inProgress) {
-    return NextResponse.json(mobileActionInProgressPayload(identity), {
-      status: 202,
-      headers: NO_STORE_HEADERS,
+  try {
+    const refusal = bindMobileActionIdempotency(identity, MOBILE_ACTION_IDEMPOTENCY_TTL_MS);
+    if (refusal) return actionStructuredError(refusal.error, refusal.status, { message: refusal.message });
+    const key = deriveIdempotencyKey({
+      verb: MOBILE_ACTION_IDEMPOTENCY_VERB,
+      scopeId: identity.scopeId,
+      clientKey: identity.clientMutationId,
     });
+    const outcome = await withIdempotency<SerializedMobileActionResponse>({
+      key, verb: MOBILE_ACTION_IDEMPOTENCY_VERB, scopeId: identity.scopeId,
+      ttlMs: MOBILE_ACTION_IDEMPOTENCY_TTL_MS,
+    }, async () => serializeCacheableMobileActionResponse(await handleMobileActionPost(request)));
+    if (outcome.inProgress) {
+      if (outcome.unresolved) {
+        return actionStructuredError('outcome_unknown', 409, {
+          action: identity.action,
+          sessionKey: identity.sessionKey,
+          clientMutationId: identity.clientMutationId,
+          retryable: false,
+          outcomeUnknown: true,
+          message: 'The prior mobile action process ended before its receipt was persisted. The outcome is unknown, so the exact mutation remains quarantined and was not repeated. Inspect current state before taking another action.',
+        });
+      }
+      return NextResponse.json(mobileActionInProgressPayload(identity), {
+        status: 202,
+        headers: NO_STORE_HEADERS,
+      });
+    }
+    return restoreMobileActionResponse(outcome.result, { replayed: outcome.replayed });
+  } catch (error) {
+    if (error instanceof MobileActionUncacheableResponseError) return restoreMobileActionResponse(error.response);
+    const message = sanitizeErrorMessage(error, 'Unable to perform mobile action');
+    console.error('[mobile/action] idempotency failed', { scopeId: identity.scopeId, error: message });
+    return actionStructuredError('mobile_action_failed', 500, { message });
   }
-
-  return restoreMobileActionResponse(outcome.result, { replayed: outcome.replayed });
 }

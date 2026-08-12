@@ -6,6 +6,11 @@ import type { DesktopWsCallbacks } from '../hooks/useDesktopWebSocket';
 import { isTauri } from '@/lib/tauri/bridge';
 import { fetchOnce, getSWR, setSWR } from '@/lib/panel/fetch-cache';
 import { REQUEST_ADD_REPO_EVENT } from '@/lib/desktop/events';
+import {
+  correlatedActionIsUnsettled,
+  fetchCorrelatedActionReceipt,
+  type CorrelatedActionReceipt,
+} from '@/lib/orchestrator/action-receipt';
 import type { RepoReadiness } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import type { WorkflowStageBadge } from '@/lib/workflows/status';
@@ -35,6 +40,22 @@ type RepoRegistryState = {
   count: number;
   hasError: boolean;
 };
+
+interface RuntimeLaunchReceiptPayload {
+  ok?: boolean;
+  error?: string;
+  note?: string;
+  surfaceId?: string;
+  inProgress?: boolean;
+  status?: string;
+}
+
+interface PendingRuntimeLaunch {
+  requestBody: string;
+  promise: Promise<CorrelatedActionReceipt<RuntimeLaunchReceiptPayload>> | null;
+}
+
+const pendingRuntimeLaunches = new Map<string, PendingRuntimeLaunch>();
 
 export function useAgentPanelState({
   selectedRepo,
@@ -124,25 +145,45 @@ export function useAgentPanelState({
           'Start by reading the PR context and changed files, validate the change locally, identify risks or regressions, and leave the repo in a reviewable state.',
         ].join('\n\n');
 
-    const launchResponse = await fetch('/api/runtime/launch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        runtime: 'codex',
-        repoPath: repoEntry.localPath,
-        prompt,
-        taskName: request.kind === 'issue'
-          ? `issue-${request.number}-${request.title}`
-          : `pr-${request.number}-${request.title}`,
-        baseBranch: repoEntry.defaultBranch,
-        isolate: true,
-        skipSetup: !repoEntry.setup.installOnCreateWorkspace,
-      }),
-    });
+    const launchIntent = {
+      runtime: 'codex',
+      repoPath: repoEntry.localPath,
+      prompt,
+      taskName: request.kind === 'issue'
+        ? `issue-${request.number}-${request.title}`
+        : `pr-${request.number}-${request.title}`,
+      baseBranch: repoEntry.defaultBranch,
+      isolate: true,
+      skipSetup: !repoEntry.setup.installOnCreateWorkspace,
+    };
+    const launchKey = JSON.stringify(launchIntent);
+    const pending = pendingRuntimeLaunches.get(launchKey) ?? {
+      requestBody: JSON.stringify({ ...launchIntent, clientMutationId: crypto.randomUUID() }),
+      promise: null,
+    };
+    const launchRequest = pending.promise ?? fetchCorrelatedActionReceipt<RuntimeLaunchReceiptPayload>(
+      '/api/runtime/launch',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: pending.requestBody,
+      },
+    );
+    pending.promise = launchRequest;
+    pendingRuntimeLaunches.set(launchKey, pending);
+    let launchReceipt: CorrelatedActionReceipt<RuntimeLaunchReceiptPayload>;
+    try {
+      launchReceipt = await launchRequest;
+      pendingRuntimeLaunches.delete(launchKey);
+    } catch (error) {
+      if (correlatedActionIsUnsettled(error)) pending.promise = null;
+      else pendingRuntimeLaunches.delete(launchKey);
+      throw error;
+    }
+    const { response: launchResponse, payload: launchData } = launchReceipt;
 
-    const launchData = await launchResponse.json() as { error?: string; surfaceId?: string };
-    if (!launchResponse.ok || !launchData.surfaceId) {
-      throw new Error(launchData.error ?? 'Unable to launch agent task.');
+    if (!launchResponse.ok || !launchData?.surfaceId) {
+      throw new Error(launchData?.error ?? launchData?.note ?? 'Unable to launch agent task.');
     }
 
     void fetch('/api/panel/repos', {

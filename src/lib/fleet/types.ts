@@ -106,6 +106,8 @@ export interface AgentSummary {
   cost?: CostSnapshot;
   alerts: number;
   sessionId?: string;
+  /** Opaque, credential-free launch identity used for attribution. */
+  identityId?: string;
   sessionKind?: string;
   surfaceLabel?: string;
   isCurrentSession?: boolean;

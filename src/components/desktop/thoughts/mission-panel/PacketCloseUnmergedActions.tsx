@@ -6,6 +6,7 @@ import {
   closeUnmergedDispositionLabel,
   type CloseUnmergedDisposition,
 } from '@/lib/orchestrator/close-unmerged-shared';
+import { correlatedActionIsUnsettled, fetchCorrelatedActionReceipt } from '@/lib/orchestrator/action-receipt';
 
 interface PacketCloseUnmergedActionsProps {
   packetId: string;
@@ -41,22 +42,22 @@ export function PacketCloseUnmergedActions({ packetId, onClosed }: PacketCloseUn
       setBusyStage('Preserving work and archiving…');
     }, 3_000);
     try {
-      const response = await fetch('/api/orchestrator/discard-packet', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packetId, disposition }),
-      });
-      const payload = await response.json().catch(() => null) as {
+      const { response, payload } = await fetchCorrelatedActionReceipt<{
         ok?: boolean;
         error?: { message?: string };
-      } | null;
+        result?: { inProgress?: boolean; status?: string };
+      }>('/api/orchestrator/discard-packet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packetId, disposition, clientMutationId: crypto.randomUUID() }),
+      });
       if (!response.ok || !payload?.ok) {
         throw new Error(payload?.error?.message ?? 'Unable to close this packet.');
       }
       onClosed();
     } catch (closeError) {
       setError(closeError instanceof Error ? closeError.message : 'Unable to close this packet.');
-      setBusyStage(null);
+      if (!correlatedActionIsUnsettled(closeError)) setBusyStage(null);
     } finally {
       window.clearTimeout(stageTimer);
     }

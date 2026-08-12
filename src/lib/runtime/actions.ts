@@ -3,7 +3,9 @@ import { recordLaneEvent } from '@/lib/lane/events';
 import { listLanes } from '@/lib/lane/registry';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
-import { listDeclarativeRuntimes, ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
+import {
+  listDeclarativeRuntimes,
+} from '@/lib/orchestrator/runtime-capabilities';
 import { continueOwnedCodexSession, setOwnedCodexReviewDisposition } from '@/lib/codex/owned';
 import { markRepoOriginConfigured, markRepoOriginMissing } from '@/lib/repos/origin-readiness';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
@@ -11,21 +13,17 @@ import { getRuntime, type RuntimeId } from '@/lib/runtimes';
 import { escalateInterruptOwnedSurface } from '@/lib/runtime/interrupt-escalation';
 import { performOwnedActionWithoutInventory } from '@/lib/runtime/owned-actions';
 import { packetRequiresWorktree, packetWorktreeProvisionError } from '@/lib/runtime/packet-worktree-guard';
-import {
-  buildProjectTaskBrief,
-  getProjectContext,
-  type ProjectContext,
-} from '@/lib/projects/context';
-import { buildProjectBriefPromptV1 } from '@/lib/prompts/v1';
+import { buildLaunchPromptWithProjectBrief, summarizeTaskName } from '@/lib/runtime/project-launch-brief';
 import { selfHealActiveByKindAndRepo } from '@/lib/supervisor/inbox';
 import {
-  linkSessionToWorktree,
   prepareLaunchWorktree,
   WorktreeFetchUnreachableError,
   WorktreeOriginMissingError,
   WorktreeRebaseConflictError,
 } from '@/lib/worktree';
 import type { WorktreeInfo } from '@/lib/worktree/types';
+import { confirmDiscoveredInterrupt } from '@/lib/runtime/confirmed-interrupt';
+import { settleRuntimeLaunchGovernance } from '@/lib/runtime/launch-governance';
 
 export type RuntimeActionKind = 'steer' | 'stop' | 'send_input' | 'interrupt' | 'watch' | 'resolve' | 'launch';
 
@@ -59,6 +57,8 @@ export interface RuntimeActionResult {
   reason?: 'surface_not_ready';
   runId?: string;
   aborted?: boolean;
+  /** An idempotent duplicate found the original mutation still executing. */
+  inProgress?: boolean;
 }
 
 export interface RuntimeLaunchRequest {
@@ -100,6 +100,8 @@ export interface RuntimeLaunchRequest {
 
 export interface RuntimeLaunchResult {
   ok: boolean;
+  outcomeUnknown?: boolean;
+  retryable?: boolean;
   runtime: RuntimeId;
   clientMutationId?: string;
   surfaceId: string;
@@ -113,7 +115,6 @@ export interface RuntimeLaunchResult {
 const FETCH_UNREACHABLE_COOLDOWN_MS = 5 * 60_000;
 const fetchUnreachableFailures = new Map<string, number>();
 const loggedOriginMissingRepos = new Set<string>();
-const PROJECT_BRIEF_HEADING_PATTERN = /(?:^|\n)##\s+Project Brief\b/i;
 
 function fetchCooldownRetrySeconds(repoPath: string): number | null {
   const lastFailureMs = fetchUnreachableFailures.get(repoPath);
@@ -149,69 +150,6 @@ function auditRuntimeSteer(payload: RuntimeActionRequest, sessionKey: string): v
 
 function clearFetchUnreachable(repoPath: string): void {
   fetchUnreachableFailures.delete(repoPath);
-}
-
-function summarizeTaskName(prompt: string) {
-  // #533 — orchestrator prompts start with `## Task\n\n<actual content>`, so
-  // picking "the first non-empty line" every time collapsed every dispatch
-  // to the literal word "task" and left every worktree in the same directory
-  // and branch. Skip pure markdown headings and bullet markers, and fall
-  // back to the first content line. Strip any residual heading markers on
-  // whatever we picked so the slug reflects the task, not the scaffolding.
-  const lines = prompt.split('\n').map((line) => line.trim()).filter(Boolean);
-  const headingPattern = /^#{1,6}\s+\S/;
-  const listPattern = /^[-*]\s+\S|^\d+\.\s+\S/;
-  const firstContent =
-    lines.find((line) => !headingPattern.test(line) && !listPattern.test(line)) ??
-    lines.find(Boolean) ??
-    'agent-task';
-  const cleaned = firstContent
-    .replace(/^#{1,6}\s+/, '')
-    .replace(/^[-*]\s+/, '')
-    .replace(/^\d+\.\s+/, '');
-  return cleaned.replace(/\s+/g, ' ').slice(0, 80);
-}
-
-async function resolveProjectContextForLaunch(
-  payload: RuntimeLaunchRequest,
-  repoPath: string,
-): Promise<ProjectContext | null> {
-  const contextRepoPath = payload.projectRepoPath?.trim() || repoPath;
-  try {
-    return await getProjectContext({ repoPath: contextRepoPath });
-  } catch (error) {
-    console.warn(
-      '[runtime-actions] Project context unavailable for launch:',
-      error instanceof Error ? error.message : error,
-    );
-    return null;
-  }
-}
-
-async function buildLaunchPromptWithProjectBrief(
-  payload: RuntimeLaunchRequest,
-  prompt: string,
-  repoPath: string,
-): Promise<{ prompt: string; projectContext: ProjectContext | null }> {
-  const projectContext = await resolveProjectContextForLaunch(payload, repoPath);
-  if (PROJECT_BRIEF_HEADING_PATTERN.test(prompt)) {
-    return { prompt, projectContext };
-  }
-
-  if (!projectContext) {
-    return { prompt, projectContext: null };
-  }
-
-  const projectBrief = buildProjectTaskBrief(projectContext, {
-    repoPath: payload.projectRepoPath?.trim() || repoPath,
-    taskTitle: payload.taskName?.trim() || summarizeTaskName(prompt),
-    taskBody: prompt,
-  });
-
-  return {
-    projectContext,
-    prompt: buildProjectBriefPromptV1(projectBrief, prompt),
-  };
 }
 
 export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promise<RuntimeLaunchResult> {
@@ -432,6 +370,7 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
   const result = await runtime.launch({
     cwd,
     prompt: launchPrompt,
+    clientMutationId: payload.clientMutationId,
     model: payload.model,
     effort: payload.effort,
     worktreeFlag: launchWorktree?.claudeWorktreeFlag,
@@ -440,61 +379,17 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
     packetId: payload.packetId,
   });
 
-  if (!result.ok || !result.sessionKey) {
-    throw new Error(result.note || `Unable to launch ${runtimeId}.`);
-  }
-
-  if (launchWorktree?.worktree) {
-    await linkSessionToWorktree(repoPath, launchWorktree.worktree.id, result.sessionKey);
-  }
-
-  // Wrap every launch in a lane so the governance layer is universal and the
-  // session retires automatically when its work lands. Packet dispatch passes
-  // `existingLaneId` to opt out — it already created a lane upstream and will
-  // attach the session itself. We only auto-wrap launches that got a worktree;
-  // un-isolated scratch runs still fall through without a lane.
-  let laneId: string | null = payload.existingLaneId ?? null;
-  const laneRuntime: OrchestratorRuntime | null = ORCHESTRATOR_RUNTIMES[runtimeId as OrchestratorRuntime]
-    ? runtimeId as OrchestratorRuntime
-    : null;
-  if (!laneId && launchWorktree?.worktree && laneRuntime) {
-    try {
-      const { createLane, attachSession } = await import('@/lib/lane/registry');
-      const implicitLabel = payload.taskName?.trim() || summarizeTaskName(prompt);
-      const lane = createLane({
-        repoPath,
-        projectId: projectContext?.id ?? null,
-        branch: launchWorktree.worktree.branch,
-        baseBranch: payload.baseBranch?.trim() || 'main',
-        runtime: laneRuntime,
-        label: implicitLabel,
-        ownership: 'managed',
-        worktreePath: launchWorktree.worktree.path,
-        actor: 'user',
-      });
-      attachSession(lane.id, result.sessionKey, 'system');
-      laneId = lane.id;
-    } catch (err) {
-      // Lane wrap is best-effort — never block a successful launch if the
-      // governance layer has a hiccup. The reaper + manual archive paths can
-      // still reconcile later.
-      console.warn('[runtime-actions] Failed to wrap launch in lane:', err instanceof Error ? err.message : err);
-    }
-  }
-
-  return {
-    ok: true,
-    runtime: runtimeId,
-    clientMutationId: payload.clientMutationId,
-    surfaceId: result.sessionKey,
-    note: launchWorktree?.worktree
-      ? `${result.note} Worktree: ${launchWorktree.worktree.branch} at ${launchWorktree.worktree.path}.`
-      : result.note,
+  return settleRuntimeLaunchGovernance({
+    payload,
+    runtime,
+    runtimeId,
+    prompt,
+    result,
+    launchWorktree,
+    projectId: projectContext?.id ?? null,
     cwd,
     repoPath,
-    worktree: launchWorktree?.worktree ?? null,
-    laneId,
-  };
+  });
 }
 
 function findRuntimeAgent(snapshot: Awaited<ReturnType<typeof getRuntimeInventorySnapshot>>, surfaceId: string) {
@@ -630,16 +525,16 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
               'No live Codex process is attached to this discovered session, so there is nothing to interrupt.',
             );
           }
-          const result = await runtime.interrupt(agent.sessionKey);
+          const result = await confirmDiscoveredInterrupt(runtime, agent.sessionKey);
           return {
-            ok: result.ok,
+            ok: result.confirmed,
             action: payload.action,
             surfaceId: runtimeSurface.id,
             runtime: agent.runtime,
             clientMutationId: payload.clientMutationId,
-            status: result.ok ? 'completed' : 'unavailable',
+            status: result.confirmed ? 'completed' : 'unavailable',
             note: result.note,
-            aborted: result.ok,
+            aborted: result.confirmed,
           };
         }
 
@@ -749,7 +644,7 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
           sessionKey: result.sessionKey ?? agent.sessionKey,
           runtime: agent.runtime,
           clientMutationId: payload.clientMutationId,
-          status: 'queued',
+          status: result.ok ? 'queued' : 'unavailable',
           note: result.note,
         };
       }
@@ -757,19 +652,35 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
       if (payload.action === 'stop' || payload.action === 'interrupt') {
         const ownedResult = await performOwnedActionWithoutInventory(payload, runtimeSurface.id);
         if (ownedResult) return ownedResult;
+        if (runtimeSurface.ownership === 'owned') {
+          const result = await escalateInterruptOwnedSurface(runtimeSurface.id);
+          if (!result) {
+            return unavailable(agent, payload.action, 'Owned runtime process evidence is unavailable.');
+          }
+          return {
+            ok: result.confirmedDead,
+            action: payload.action,
+            surfaceId: runtimeSurface.id,
+            runtime: agent.runtime,
+            clientMutationId: payload.clientMutationId,
+            status: result.confirmedDead ? 'completed' : 'unavailable',
+            note: result.note,
+            aborted: result.confirmedDead,
+          };
+        }
         if (!runtime.capabilities.interrupt) {
           return unavailable(agent, payload.action, `${agent.runtime} does not support interrupt.`);
         }
-        const result = await runtime.interrupt(agent.sessionKey);
+        const result = await confirmDiscoveredInterrupt(runtime, agent.sessionKey);
         return {
-          ok: result.ok,
+          ok: result.confirmed,
           action: payload.action,
           surfaceId: runtimeSurface.id,
           runtime: agent.runtime,
           clientMutationId: payload.clientMutationId,
-          status: 'completed',
+          status: result.confirmed ? 'completed' : 'unavailable',
           note: result.note,
-          aborted: result.ok,
+          aborted: result.confirmed,
         };
       }
 
@@ -782,15 +693,19 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
  * Launch a new owned Codex session from mobile.
  * Doesn't require an existing surface — creates one from scratch.
  */
-export async function launchCodexFromMobile(cwd: string, prompt: string): Promise<RuntimeActionResult> {
-  const result = await launchRuntimeSurface({ runtime: 'codex', cwd, prompt });
+export async function launchCodexFromMobile(
+  cwd: string,
+  prompt: string,
+  clientMutationId?: string,
+): Promise<RuntimeActionResult> {
+  const result = await launchRuntimeSurface({ runtime: 'codex', cwd, prompt, clientMutationId });
   return {
     ok: result.ok,
     action: 'launch',
     surfaceId: result.surfaceId,
     runtime: 'codex',
     clientMutationId: result.clientMutationId,
-    status: 'queued',
+    status: result.ok ? 'queued' : 'unavailable',
     note: result.note,
   };
 }

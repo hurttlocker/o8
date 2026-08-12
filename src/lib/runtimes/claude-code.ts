@@ -27,9 +27,8 @@ import {
   jsonlUsageTotal,
   type JsonlEntry,
 } from '@/lib/runtimes/compaction-detector';
-// Side-effect import: registers the 'claude-code' cost parser in the registry.
-import '@/lib/runtimes/cost-parser';
-import { parseCost } from '@/lib/runtimes/shared/cost-parser-registry';
+import { readClaudeRuntimeTelemetry } from '@/lib/runtimes/claude-cost-attribution';
+import { ownedTailToRuntimeTranscript } from '@/lib/runtimes/shared/owned-transcript';
 import { getRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
 import {
   getOwnedClaudeCodeFleetAdditions,
@@ -37,6 +36,7 @@ import {
   launchOwnedClaudeCodeSession,
 } from '@/lib/claude-code/owned';
 import { resolveDefaultWorkerEffortSync } from '@/lib/operator/defaults';
+import { readClaudeRuntimeCapacity } from '@/lib/usage/cli-scrape';
 
 const execFileAsync = promisify(execFile);
 
@@ -62,6 +62,11 @@ const capabilities: RuntimeCapabilities = {
   reviewDiffs: true,
   costTelemetry: true,
   streaming: true,
+  capacity: {
+    observe: true,
+    identitySelection: false,
+    identitySelectionReason: 'This runtime does not expose a proven isolated config-home launch contract.',
+  },
 };
 
 // ── Path helpers ──
@@ -778,6 +783,7 @@ export const claudeCodeRuntime: AgentRuntime = {
   id: 'claude-code',
   displayName: 'Claude Code',
   capabilities,
+  getCapacity: () => readClaudeRuntimeCapacity(),
 
   async discoverSessions(): Promise<RuntimeSession[]> {
     let projectDirs: string[];
@@ -973,19 +979,8 @@ export const claudeCodeRuntime: AgentRuntime = {
 
   async readTranscript(sessionKey: string, sinceId?: string, limit = 50): Promise<RuntimeTranscriptEntry[]> {
     if (sessionKey.startsWith('claude-code-owned:')) {
-      const tail = await getOwnedClaudeCodeRuntimeTail(sessionKey);
-      const entries = tail.entries.map((entry) => ({
-        id: entry.id,
-        role: entry.kind === 'tool' ? 'tool' as const : entry.kind === 'tool-output' ? 'system' as const : 'assistant' as const,
-        text: entry.text,
-        timestamp: entry.timestamp ? new Date(entry.timestamp) : new Date(),
-        type: 'message' as const,
-        toolName: entry.kind === 'tool' ? entry.label : undefined,
-      }));
-      const filtered = sinceId
-        ? entries.slice(Math.max(0, entries.findIndex((entry) => entry.id === sinceId) + 1))
-        : entries;
-      return filtered.slice(-limit);
+      const tail = await getOwnedClaudeCodeRuntimeTail(sessionKey, sinceId ? 200 : limit);
+      return ownedTailToRuntimeTranscript(tail, sinceId, limit);
     }
 
     const sessionId = sessionKey.replace('claude-code:', '');
@@ -1184,13 +1179,13 @@ export const claudeCodeRuntime: AgentRuntime = {
         interrupted = true;
       } catch { /* process may have exited */ }
     }
-
     return {
       ok: interrupted,
       note: interrupted
         ? `SIGINT sent to Claude Code pid${targetPids.length === 1 ? '' : 's'} ${targetPids.join(', ')}.`
         : 'Could not interrupt the live Claude Code process for this session.',
       sessionKey,
+      pids: targetPids,
     };
   },
 
@@ -1209,25 +1204,7 @@ export const claudeCodeRuntime: AgentRuntime = {
       return undefined;
     }
 
-    const sessionCost = await parseCost('claude-code', [sessionProject.jsonlPath]);
-    if (!sessionCost) {
-      return undefined;
-    }
-
-    const totalTokens = sessionCost.inputTokens
-      + sessionCost.outputTokens
-      + sessionCost.cacheReadTokens
-      + sessionCost.cacheWriteTokens;
-
-    return {
-      totalTokens,
-      estimatedCostUsd: sessionCost.totalCostUsd,
-      inputTokens: sessionCost.inputTokens,
-      outputTokens: sessionCost.outputTokens,
-      cacheReadTokens: sessionCost.cacheReadTokens,
-      cacheWriteTokens: sessionCost.cacheWriteTokens,
-      model: sessionCost.model ?? undefined,
-    };
+    return readClaudeRuntimeTelemetry(sessionProject.jsonlPath);
   },
 
   async getChangedFiles(sessionKey: string): Promise<RuntimeChangedFile[]> {

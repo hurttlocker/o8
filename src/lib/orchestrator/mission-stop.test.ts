@@ -2,16 +2,20 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const stopMock = vi.hoisted(() => ({
   calls: [] as string[],
   failures: new Set<string>(),
+  throws: new Set<string>(),
+  gate: null as Promise<void> | null,
 }));
 
 vi.mock('@/lib/lane/commands', () => ({
   dispatch: vi.fn(async (command: { verb: string; laneId: string }) => {
     stopMock.calls.push(command.laneId);
+    if (stopMock.gate) await stopMock.gate;
+    if (stopMock.throws.has(command.laneId)) throw new Error('fixture stop command failure');
     if (stopMock.failures.has(command.laneId)) {
       return {
         ok: false,
@@ -75,9 +79,14 @@ function laneBinding(repoPath: string, laneId: string): OrchestratorLaneBinding 
 }
 
 describe('stopMission', () => {
+  beforeEach(() => {
+    stopMock.throws.clear();
+  });
+
   it('fans out stop across mixed packet states and reports every outcome', async () => {
     stopMock.calls.length = 0;
     stopMock.failures.clear();
+    stopMock.gate = null;
 
     const repoPath = mkdtempSync(join(tmpdir(), 'o8-stop-mission-'));
     const runningLane = createLane({
@@ -174,7 +183,7 @@ describe('stopMission', () => {
       },
       {
         id: 'already-terminal',
-        status: 'awaiting_review',
+        status: 'blocked',
         queueState: 'held',
         operatorStopped: undefined,
         lastEventLabel: null,
@@ -187,5 +196,111 @@ describe('stopMission', () => {
         lastEventLabel: null,
       },
     ]);
+  });
+
+  it('stops an awaiting-review packet when its lane still owns a live session', async () => {
+    stopMock.calls.length = 0;
+    stopMock.failures.clear();
+    const repoPath = mkdtempSync(join(tmpdir(), 'o8-stop-review-live-'));
+    const lane = createLane({
+      repoPath,
+      branch: 'inline/review-live',
+      runtime: 'codex',
+      packetId: 'review-live',
+      sessionKey: 'codex-owned:review-live',
+    });
+    setLaneStatus(lane.id, 'reviewing', 'system', 'test_reviewing');
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      missionId: 'mission-stop-review-live',
+      repoPath,
+      packets: [packetFixture(repoPath, 'review-live', {
+        status: 'awaiting_review',
+        queueState: 'held',
+        lane: laneBinding(repoPath, lane.id),
+      })],
+    });
+
+    const result = await stopMission('mission-stop-review-live');
+
+    expect(stopMock.calls).toEqual([lane.id]);
+    expect(result.packets).toEqual([expect.objectContaining({
+      packetId: 'review-live',
+      status: 'stopped',
+      laneId: lane.id,
+    })]);
+  });
+
+  it('rejects a queued second mission-stop intent for the same packet', async () => {
+    stopMock.calls.length = 0;
+    stopMock.failures.clear();
+    const repoPath = mkdtempSync(join(tmpdir(), 'o8-stop-mission-race-'));
+    const lane = createLane({
+      repoPath,
+      branch: 'inline/stop-race',
+      runtime: 'codex',
+      packetId: 'stop-race',
+    });
+    setLaneStatus(lane.id, 'running', 'system', 'test_running');
+    const missionState = {
+      ...createEmptyOrchestratorMissionState(),
+      missionId: 'mission-stop-race',
+      repoPath,
+      packets: [packetFixture(repoPath, 'stop-race', {
+        status: 'running',
+        queueState: 'queued',
+        lane: laneBinding(repoPath, lane.id),
+      })],
+    };
+    writeOrchestratorControlPlaneState(missionState);
+    let release!: () => void;
+    stopMock.gate = new Promise<void>((resolve) => { release = resolve; });
+
+    const first = stopMission('mission-stop-race');
+    await vi.waitFor(() => expect(stopMock.calls).toEqual([lane.id]));
+    const second = stopMission('mission-stop-race');
+    release();
+
+    await expect(first).resolves.toMatchObject({
+      packets: [expect.objectContaining({ status: 'stopped' })],
+    });
+    await expect(second).resolves.toMatchObject({
+      packets: [expect.objectContaining({
+        status: 'stop-failed',
+        note: expect.stringContaining('another lifecycle action'),
+      })],
+    });
+    expect(stopMock.calls).toEqual([lane.id]);
+  });
+
+  it('releases only its own mission admission hold when a packet stop throws', async () => {
+    stopMock.calls.length = 0;
+    stopMock.failures.clear();
+    stopMock.gate = null;
+    const repoPath = mkdtempSync(join(tmpdir(), 'o8-stop-mission-throw-'));
+    const lane = createLane({
+      repoPath,
+      branch: 'inline/stop-throw',
+      runtime: 'codex',
+      packetId: 'stop-throw',
+    });
+    setLaneStatus(lane.id, 'running', 'system', 'test_running');
+    stopMock.throws.add(lane.id);
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      missionId: 'mission-stop-throw',
+      repoPath,
+      packets: [packetFixture(repoPath, 'stop-throw', {
+        status: 'running',
+        lane: laneBinding(repoPath, lane.id),
+      })],
+    });
+
+    await expect(stopMission('mission-stop-throw')).rejects.toThrow('fixture stop command failure');
+    expect(readOrchestratorControlPlaneState()).toMatchObject({
+      missionId: 'mission-stop-throw',
+      lifecycleHold: null,
+      packets: [{ id: 'stop-throw', status: 'running' }],
+    });
   });
 });

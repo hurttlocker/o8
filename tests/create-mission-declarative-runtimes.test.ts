@@ -67,6 +67,7 @@ process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
 const createMissionRoute = await import('@/app/api/orchestrator/create-mission/route');
+const { getSqlite } = await import('@/lib/db');
 const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { MISSION_TOOLS } = await import('@/lib/mcp/operator-handlers/mission');
 await import('@/lib/runtimes/declarative-workers');
@@ -80,6 +81,7 @@ function request(runtime: OrchestratorRuntime, issueNumber: number): NextRequest
     method: 'POST',
     headers: { host: 'localhost:3001' },
     body: JSON.stringify({
+      clientMutationId: `create-runtime-${issueNumber}`,
       repoPath,
       requestedRuntime: runtime,
       issues: [{
@@ -101,6 +103,23 @@ afterAll(() => {
 });
 
 describe('create_mission runtime reachability', () => {
+  it('replays one body-bound mission creation without creating a second mission', async () => {
+    const first = await createMissionRoute.POST(request('codex', 91_598_101));
+    const firstPayload = await first.json() as { result: { missionId: string } };
+    getSqlite().prepare(`
+      UPDATE idempotency_keys
+         SET result_json = NULL, pid = ?, reservation_id = ?
+       WHERE verb = 'create_mission' AND packet_id = ?
+    `).run(2_147_483_647, 'dead-create-owner', repoPath);
+    const replay = await createMissionRoute.POST(request('codex', 91_598_101));
+    const replayPayload = await replay.json() as { result: { missionId: string; replayed?: boolean } };
+
+    expect(first.status).toBe(201);
+    expect(replay.status).toBe(201);
+    expect(replayPayload.result.missionId).toBe(firstPayload.result.missionId);
+    expect(replayPayload.result.replayed).toBe(true);
+  });
+
   it.each([
     ['claude-code', 91_598_001],
     ['gemini', 91_598_002],
@@ -139,6 +158,7 @@ describe('create_mission runtime reachability', () => {
       method: 'POST',
       headers: { host: 'localhost:3001' },
       body: JSON.stringify({
+        clientMutationId: 'create-runtime-outside-launch',
         repoPath,
         requestedRuntime: 'codex',
         issues: [{

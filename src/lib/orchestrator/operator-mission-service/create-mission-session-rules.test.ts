@@ -41,6 +41,12 @@ describe('createMission stamps orchestratorThreadId onto persisted packets', () 
       runtime: 'codex',
       constraints: '',
       orchestratorThreadId: 'thoughts-e2e',
+      launchContext: {
+        source: 'mcp',
+        presentation: 'split',
+        repoContext: 'transient',
+        caller: 'test orchestrator',
+      },
     });
     expect(result.missionId).toBeTruthy();
     expect(result.packets).toHaveLength(1);
@@ -51,6 +57,10 @@ describe('createMission stamps orchestratorThreadId onto persisted packets', () 
     expect(packet).toBeDefined();
     expect(packet!.orchestratorThreadId).toBe('thoughts-e2e');
     expect(packet!.dispatcher).toEqual({ surface: 'orchestrator', id: 'thoughts-e2e' });
+    expect(packet!.launchContext).toMatchObject({
+      caller: 'test orchestrator',
+      parentThreadId: 'thoughts-e2e',
+    });
     // Contract-first is opt-in. An ordinary packet must NOT be armed: the
     // coverage gate is mandatory once this is true, while contract capture is
     // best-effort, so arming it here would make any packet whose contract failed

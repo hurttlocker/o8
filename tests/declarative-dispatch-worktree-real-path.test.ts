@@ -9,8 +9,9 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join, sep } from 'node:path';
+import { NextRequest } from 'next/server';
 
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
 
@@ -112,9 +113,10 @@ function git(cwd: string, ...args: string[]): void {
 }
 
 function createRemoteBackedRepo(): string {
-  const origin = join(root, 'origin.git');
-  const seed = join(root, 'seed');
-  const repo = join(root, 'repo');
+  const suffix = Math.random().toString(36).slice(2, 8);
+  const origin = join(root, `origin-${suffix}.git`);
+  const seed = join(root, `seed-${suffix}`);
+  const repo = join(root, `repo-${suffix}`);
   execFileSync('git', ['init', '--bare', origin], { stdio: 'pipe' });
   execFileSync('git', ['clone', origin, seed], { stdio: 'pipe' });
   git(seed, 'checkout', '-b', 'main');
@@ -174,6 +176,10 @@ async function waitFor<T>(
 }
 
 describe('declarative packet dispatch worktree reachability', () => {
+  beforeEach(() => {
+    worktreeFailure.enabled = false;
+  });
+
   afterAll(async () => {
     const { closeDb } = await import('@/lib/db');
     closeDb();
@@ -252,5 +258,53 @@ describe('declarative packet dispatch worktree reachability', () => {
     ]));
     const captureAfterFailure = readFileSync(capturePath, 'utf8').trim().split('\n').filter(Boolean);
     expect(captureAfterFailure).toEqual(captureBeforeFailure);
+  }, 40_000);
+
+  it('rolls back a launched worker when the real route cannot persist its governance lane', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
+    const repoPath = createRemoteBackedRepo();
+    const laneRegistry = await import('@/lib/lane/registry');
+    const { getRuntime } = await import('@/lib/runtimes');
+    const runtime = getRuntime('qoder')!;
+    const sessionsBefore = new Set((await runtime.discoverSessions()).map((session) => session.sessionKey));
+    const createLane = vi.spyOn(laneRegistry, 'createLane').mockImplementationOnce(() => {
+      throw new Error('synthetic lane persistence failure');
+    });
+    try {
+      const { POST } = await import('@/app/api/runtime/launch/route');
+      const response = await POST(new NextRequest('http://localhost/api/runtime/launch', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runtime: 'qoder',
+          prompt: 'prove launch rollback',
+          repoPath,
+          isolate: true,
+          clientMutationId: 'runtime-launch-lane-failure',
+        }),
+      }));
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        ok: false,
+        surfaceId: expect.stringMatching(/^qoder-owned:/),
+        note: expect.stringContaining('governance lane could not be persisted'),
+      });
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        const extra = (await runtime.discoverSessions())
+          .filter((session) => !sessionsBefore.has(session.sessionKey));
+        if (extra.length === 0) break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      expect((await runtime.discoverSessions())
+        .filter((session) => !sessionsBefore.has(session.sessionKey))).toEqual([]);
+      const worktrees = execFileSync('git', ['worktree', 'list', '--porcelain'], {
+        cwd: repoPath,
+        encoding: 'utf8',
+      });
+      expect(worktrees.match(/^worktree /gm)).toHaveLength(1);
+    } finally {
+      createLane.mockRestore();
+    }
   }, 40_000);
 });

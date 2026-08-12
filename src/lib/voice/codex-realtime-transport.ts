@@ -1,9 +1,8 @@
 import 'server-only';
 
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import path from 'node:path';
 
-import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
+import { CodexAppServerClient } from '@/lib/codex/app-server-client';
 import {
   resolveCodexRealtimeTransportAccess,
   type CodexRealtimeTransportAccess,
@@ -16,30 +15,13 @@ import {
   type CodexRealtimeTransport,
 } from './realtime-session-config';
 
-const REQUEST_TIMEOUT_MS = 8_000;
 const START_EVENT_TIMEOUT_MS = 12_000;
 const SESSION_IDLE_TTL_MS = 10 * 60_000;
 const MAX_EVENTS = 1_024;
 
-type JsonRpcId = number | string;
-
-interface PendingRequest {
-  method: string;
-  resolve: (value: unknown) => void;
-  reject: (error: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
-}
-
 interface AppServerNotification {
   method: string;
   params: Record<string, unknown>;
-}
-
-interface AppServerClientOptions {
-  binaryPath: string;
-  codexHome: string;
-  onNotification: (notification: AppServerNotification) => void;
-  onExit: (detail: string) => void;
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -50,176 +32,6 @@ function record(value: unknown): Record<string, unknown> | null {
 
 function messageFor(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-/**
- * One isolated Codex app-server process per launch-scoped voice session. The
- * protocol remains experimental, so this client deliberately implements only
- * initialize + the exact thread/realtime and text-fallback calls we consume.
- */
-class CodexAppServerClient {
-  private readonly child: ChildProcessWithoutNullStreams;
-  private readonly pending = new Map<string, PendingRequest>();
-  private readonly onNotification: AppServerClientOptions['onNotification'];
-  private readonly onExit: AppServerClientOptions['onExit'];
-  private nextId = 1;
-  private stdout = '';
-  private closed = false;
-  private stderrTail: string[] = [];
-
-  constructor(options: AppServerClientOptions) {
-    this.onNotification = options.onNotification;
-    this.onExit = options.onExit;
-    const launch = cliInvocation(options.binaryPath, ['app-server', '--stdio']);
-    this.child = spawn(launch.command, launch.args, {
-      windowsHide: true,
-      env: {
-        ...process.env,
-        CODEX_HOME: options.codexHome,
-        FORCE_COLOR: '0',
-        NO_COLOR: '1',
-      },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    this.child.stdout.setEncoding('utf-8');
-    this.child.stderr.setEncoding('utf-8');
-    this.child.stdout.on('data', (chunk: string) => this.onStdout(chunk));
-    this.child.stderr.on('data', (chunk: string) => {
-      this.stderrTail.push(...chunk.split(/\r?\n/).filter(Boolean));
-      this.stderrTail = this.stderrTail.slice(-20);
-    });
-    this.child.once('error', (error) => this.failAll(error));
-    this.child.once('exit', (code, signal) => {
-      const detail = `Codex app-server exited (code=${code ?? 'null'}, signal=${signal ?? 'null'})`;
-      this.closed = true;
-      this.failAll(new Error(detail));
-      this.onExit(detail);
-    });
-  }
-
-  private onStdout(chunk: string): void {
-    this.stdout += chunk;
-    const lines = this.stdout.split(/\r?\n/);
-    this.stdout = lines.pop() ?? '';
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      let message: Record<string, unknown> | null = null;
-      try {
-        message = record(JSON.parse(line));
-      } catch {
-        continue;
-      }
-      if (!message) continue;
-
-      if (message.id !== undefined && ('result' in message || 'error' in message)) {
-        const key = String(message.id);
-        const pending = this.pending.get(key);
-        if (!pending) continue;
-        this.pending.delete(key);
-        clearTimeout(pending.timer);
-        if (message.error) {
-          pending.reject(new Error(
-            `Codex app-server ${pending.method}: ${JSON.stringify(message.error)}`,
-          ));
-        } else {
-          pending.resolve(message.result);
-        }
-        continue;
-      }
-
-      if (message.id !== undefined && typeof message.method === 'string') {
-        // This launch slice does not surface app-server approval/elicitation
-        // requests. Reject unknown server requests promptly instead of leaving
-        // the Codex turn hung; the thread itself runs read-only + never-approve.
-        this.write({
-          id: message.id as JsonRpcId,
-          error: { code: -32601, message: `Unsupported server request: ${message.method}` },
-        });
-        continue;
-      }
-
-      if (typeof message.method === 'string') {
-        this.onNotification({
-          method: message.method,
-          params: record(message.params) ?? {},
-        });
-      }
-    }
-  }
-
-  private write(message: Record<string, unknown>): void {
-    if (this.closed || !this.child.stdin.writable) {
-      throw new Error('Codex app-server stdin is not writable');
-    }
-    this.child.stdin.write(`${JSON.stringify(message)}\n`);
-  }
-
-  request(
-    method: string,
-    params: Record<string, unknown> = {},
-    timeoutMs = REQUEST_TIMEOUT_MS,
-  ): Promise<unknown> {
-    const id = this.nextId++;
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(String(id));
-        const stderr = this.stderrTail.length > 0 ? `: ${this.stderrTail.join(' | ')}` : '';
-        reject(new Error(`${method} timed out after ${timeoutMs}ms${stderr}`));
-      }, timeoutMs);
-      this.pending.set(String(id), { method, resolve, reject, timer });
-      try {
-        this.write({ id, method, params });
-      } catch (error) {
-        clearTimeout(timer);
-        this.pending.delete(String(id));
-        reject(error instanceof Error ? error : new Error(String(error)));
-      }
-    });
-  }
-
-  notify(method: string): void {
-    this.write({ method });
-  }
-
-  async initialize(): Promise<void> {
-    await this.request('initialize', {
-      clientInfo: { name: 'o8-connected-voice', version: '1' },
-      capabilities: { experimentalApi: true },
-    });
-    this.notify('initialized');
-  }
-
-  private failAll(error: Error): void {
-    for (const pending of this.pending.values()) {
-      clearTimeout(pending.timer);
-      pending.reject(error);
-    }
-    this.pending.clear();
-  }
-
-  async close(): Promise<void> {
-    if (this.closed) return;
-    this.closed = true;
-    this.failAll(new Error('Codex app-server session closed'));
-    this.child.stdin.end();
-    if (this.child.exitCode === null && this.child.signalCode === null) {
-      this.child.kill('SIGTERM');
-    }
-    await new Promise<void>((resolve) => {
-      if (this.child.exitCode !== null || this.child.signalCode !== null) {
-        resolve();
-        return;
-      }
-      const timer = setTimeout(() => {
-        this.child.kill('SIGKILL');
-        resolve();
-      }, 1_000);
-      this.child.once('exit', () => {
-        clearTimeout(timer);
-        resolve();
-      });
-    });
-  }
 }
 
 export type CodexRealtimeSessionMode = 'codex-oauth' | 'text';

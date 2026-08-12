@@ -1,15 +1,40 @@
 import { NextRequest } from 'next/server';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { steerPacket } from '@/lib/orchestrator/operator-mission-service';
-import { SteerPacketUnavailableError } from '@/lib/orchestrator/operator-mission-service/steer';
-import { deriveIdempotencyKey, withIdempotency } from '@/lib/orchestrator/idempotency-store';
-import { asRecord, operatorError, operatorSuccess, parseJsonBody, replayShape } from '../_utils';
+import {
+  isPostEffectSteerFailure,
+  SteerPacketUnavailableError,
+} from '@/lib/orchestrator/operator-mission-service/steer';
+import {
+  bindIdempotencyClientMutation,
+  deriveIdempotencyKey,
+  withIdempotency,
+} from '@/lib/orchestrator/idempotency-store';
+import { asRecord, operatorError, operatorSuccess, parseJsonBody, replayShape, unresolvedIdempotencyResponse } from '../_utils';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+interface SteerFailureReceipt {
+  ok: false;
+  code: 'steer_unavailable' | 'steer_outcome_unknown';
+  message: string;
+  outcomeUnknown: boolean;
+}
+
+type SteerReceipt =
+  | { ok: true; result: Awaited<ReturnType<typeof steerPacket>> }
+  | SteerFailureReceipt;
+
+function steerFailureResponse(receipt: SteerFailureReceipt, replayed: boolean) {
+  const response = operatorError(receipt.code, receipt.message, 409);
+  response.headers.set('x-o8-steer-outcome', receipt.outcomeUnknown ? 'unknown' : 'terminal');
+  if (replayed) response.headers.set('x-o8-idempotency-replayed', '1');
+  return response;
+}
+
 /**
- * POST /api/orchestrator/steer-packet  { packetId, message }
+ * POST /api/orchestrator/steer-packet  { packetId, message, idempotencyKey }
  *
  * Layer-3 escalation: nudge a packet's warm session with a follow-up message.
  * Extracted from the in-process MCP `steer_packet` handler (#2 Stage 4) so the
@@ -57,14 +82,61 @@ export async function POST(request: NextRequest) {
   const clientKey = typeof record.idempotencyKey === 'string' && record.idempotencyKey.trim()
     ? record.idempotencyKey.trim()
     : null;
-  const key = deriveIdempotencyKey({ verb: 'steer_packet', scopeId: packetId, clientKey, body: message });
+  if (!clientKey) {
+    return operatorError(
+      'idempotency_key_required',
+      'idempotencyKey is required to steer a packet.',
+      400,
+    );
+  }
+  const canonicalBody = JSON.stringify({ packetId, message, source });
+  const key = deriveIdempotencyKey({ verb: 'steer_packet', scopeId: packetId, clientKey, body: canonicalBody });
 
   try {
-    const outcome = await withIdempotency(
+    const binding = bindIdempotencyClientMutation({
+      namespace: 'steer_packet',
+      clientKey,
+      body: canonicalBody,
+    });
+    if (binding.status === 'conflict') {
+      return operatorError(
+        'idempotency_key_conflict',
+        'idempotencyKey was already used for a different packet steer.',
+        409,
+      );
+    }
+    if (binding.status === 'unavailable') {
+      return operatorError(
+        'idempotency_store_unavailable',
+        'The persisted idempotency store is unavailable; the packet was not steered.',
+        503,
+      );
+    }
+    const outcome = await withIdempotency<SteerReceipt>(
       { key, verb: 'steer_packet', scopeId: packetId },
-      () => steerPacket({ packetId, message, source }),
+      async () => {
+        try {
+          return {
+            ok: true,
+            result: await steerPacket({ packetId, message, source, clientMutationId: clientKey }),
+          };
+        } catch (error) {
+          // Before the service records its first event, failure is provably
+          // side-effect free and remains retryable. Once that boundary is
+          // crossed, finalize the terminal truth before responding.
+          if (!isPostEffectSteerFailure(error)) throw error;
+          return {
+            ok: false,
+            code: error.code,
+            message: error.message,
+            outcomeUnknown: error.phase === 'outcome_unknown',
+          };
+        }
+      },
     );
-    return operatorSuccess(replayShape(outcome));
+    if (outcome.inProgress) return unresolvedIdempotencyResponse(outcome, 'packet steer') ?? operatorSuccess(replayShape(outcome), 202);
+    if (!outcome.result.ok) return steerFailureResponse(outcome.result, outcome.replayed);
+    return operatorSuccess(replayShape({ ...outcome, result: outcome.result.result }));
   } catch (error) {
     const messageText = error instanceof Error ? error.message : 'Unable to steer packet.';
     if (error instanceof SteerPacketUnavailableError) {

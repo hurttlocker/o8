@@ -1,6 +1,7 @@
 import { isBridgeSessionAlive, signalBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
-import { lookupOwnedActiveRun } from '@/lib/runtimes/shared/owned-session-index';
+import { lookupOwnedActiveRunFresh } from '@/lib/runtimes/shared/owned-session-index';
 import { isPidAlive, pidCommandLine } from '@/lib/runtimes/shared/owned-session/helpers';
+import { getOwnedSessionLifecycle } from '@/lib/runtimes/shared/owned-session-lifecycle';
 
 export type InterruptEscalationSignal = 'SIGINT' | 'SIGTERM' | 'SIGKILL';
 
@@ -194,16 +195,28 @@ function describeAttempts(steps: InterruptEscalationStep[]): string {
 }
 
 function ownedRuntimeCommandLabel(surfaceId: string): string | null {
+  const registered = getOwnedSessionLifecycle(surfaceId);
+  if (registered) return registered.commandLabel;
   if (surfaceId.startsWith('codex-owned:')) return 'codex';
   if (surfaceId.startsWith('claude-code-owned:')) return 'claude';
+  if (surfaceId.startsWith('gemini-owned:')) return 'gemini';
+  if (surfaceId.startsWith('opencode-owned:')) return 'opencode2';
+  if (surfaceId.startsWith('cursor-owned:')) return 'cursor-agent';
+  if (surfaceId.startsWith('grok-owned:')) return 'grok';
+  if (surfaceId.startsWith('prime-agent-owned:')) return 'prime-agent';
+  if (surfaceId.startsWith('pi-owned:')) return 'pi';
   return null;
 }
 
 export async function escalateInterruptOwnedSurface(surfaceId: string): Promise<InterruptEscalationResult | null> {
+  // Declarative owned runtimes register lazily with the runtime catalogue. A
+  // persisted lane can reach this path before any discovery call, so load the
+  // catalogue before resolving its lifecycle authority.
+  await import('@/lib/runtimes');
   const commandLabel = ownedRuntimeCommandLabel(surfaceId);
   if (!commandLabel) return null;
 
-  const activeRun = await lookupOwnedActiveRun(surfaceId);
+  const activeRun = await lookupOwnedActiveRunFresh(surfaceId);
   if (!activeRun) {
     return {
       attempted: false,
@@ -214,9 +227,16 @@ export async function escalateInterruptOwnedSurface(surfaceId: string): Promise<
     };
   }
 
-  if (activeRun.pid) {
+  // The bridge is the durable owner when present. Wrapper pids can go stale or
+  // be replaced after exec while the tmux session remains alive, so a reused
+  // pid must never override positive bridge liveness.
+  const bridgeAlive = activeRun.tmuxSession
+    ? await isBridgeSessionAlive(activeRun.tmuxSession)
+    : false;
+  if (activeRun.pid && !bridgeAlive) {
+    const expectedCommand = activeRun.commandIdentity ?? commandLabel;
     const commandLine = await pidCommandLine(activeRun.pid);
-    if (!commandLine || !commandLine.includes(commandLabel)) {
+    if (!commandLine || !commandLine.includes(expectedCommand)) {
       return {
         attempted: false,
         confirmedDead: true,
@@ -224,7 +244,7 @@ export async function escalateInterruptOwnedSurface(surfaceId: string): Promise<
         steps: [],
         pid: activeRun.pid,
         tmuxSession: activeRun.tmuxSession,
-        note: `Stored pid ${activeRun.pid} no longer matches an owned ${commandLabel} run.`,
+        note: `Stored pid ${activeRun.pid} no longer matches the owned ${expectedCommand} run.`,
       };
     }
   }

@@ -173,7 +173,24 @@ function buildParsedUsageEntry(
   };
 }
 
-async function resolveSessionFiles(sessionDir: string): Promise<string[]> {
+async function jsonlFilesInDirectory(directory: string): Promise<string[]> {
+  const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+  return entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.jsonl'))
+    .map((entry) => path.join(directory, entry.name));
+}
+
+/**
+ * Claude stores native child-agent transcripts beside the parent JSONL at
+ * `<session-id>/subagents/*.jsonl`. They are separate billable sessions, but
+ * carry the same parent session id. Include them in cost parsing and rely on
+ * request-id dedupe below so a provider replay cannot charge the same request
+ * twice.
+ */
+async function resolveSessionFiles(
+  sessionDir: string,
+  includeChildSessions: boolean,
+): Promise<string[]> {
   const sessionPath = path.resolve(sessionDir);
   const stats = await stat(sessionPath).catch(() => null);
   if (!stats) {
@@ -181,22 +198,36 @@ async function resolveSessionFiles(sessionDir: string): Promise<string[]> {
   }
 
   if (stats.isFile()) {
-    return path.extname(sessionPath) === '.jsonl' ? [sessionPath] : [];
+    if (path.extname(sessionPath) !== '.jsonl') {
+      return [];
+    }
+    if (!includeChildSessions) {
+      return [sessionPath];
+    }
+    const childDirectory = path.join(
+      path.dirname(sessionPath),
+      path.basename(sessionPath, '.jsonl'),
+      'subagents',
+    );
+    return [sessionPath, ...await jsonlFilesInDirectory(childDirectory)].sort();
   }
 
   if (!stats.isDirectory()) {
     return [];
   }
 
-  const entries = await readdir(sessionPath, { withFileTypes: true }).catch(() => []);
-  return entries
-    .filter((entry) => entry.isFile() && entry.name.endsWith('.jsonl'))
-    .map((entry) => path.join(sessionPath, entry.name))
-    .sort();
+  const directFiles = await jsonlFilesInDirectory(sessionPath);
+  const childFiles = includeChildSessions
+    ? await jsonlFilesInDirectory(path.join(sessionPath, 'subagents'))
+    : [];
+  return [...directFiles, ...childFiles].sort();
 }
 
-export async function parseSessionCost(sessionDir: string): Promise<SessionCostData> {
-  const sessionFiles = await resolveSessionFiles(sessionDir);
+export async function parseSessionCost(
+  sessionDir: string,
+  options?: { includeChildSessions?: boolean },
+): Promise<SessionCostData> {
+  const sessionFiles = await resolveSessionFiles(sessionDir, options?.includeChildSessions !== false);
   const dedupedUsage = new Map<string, ParsedUsageEntry>();
   let fallbackModel: string | null = null;
 
@@ -298,7 +329,7 @@ const EMPTY_COST: SessionCostData = {
 // Runs on import so the registry is populated before any caller invokes parseCost.
 registerCostParser({
   runtimeId: 'claude-code',
-  async parseFiles(paths, _opts) {
+  async parseFiles(paths) {
     // parseSessionCost accepts a single path (file or directory).
     // The Claude parser derives the model from the JSONL itself — no fallback needed.
     // Use the first path; multi-path support can be added per-adapter later.

@@ -57,7 +57,11 @@ import {
 } from '../utils';
 import { focusOrchestrationPacketLaneInWorkspace } from './focusOrchestrationPacketLane';
 import { useLaneArchivedView, isRetiredLaneStatus } from './useLaneArchivedSet';
-import { dispatchedLaneRepo, type DispatchedWorkerLane } from './dispatched-worker-lane';
+import {
+  dispatchedLaneRepo,
+  dispatchedWorkerRuntime,
+  type DispatchedWorkerLane,
+} from './dispatched-worker-lane';
 import { useOutsideWorkerLaunchBridge } from './useOutsideWorkerLaunchBridge';
 interface UseWorkspaceTerminalArgs {
   activeTileId: string | null;
@@ -758,13 +762,7 @@ export function useWorkspaceTerminal({
       if (!mutation || mutation.action !== 'packet-dispatch' || mutation.status === 'failed') return;
       if (!mutation.sessionKey || !mutation.repoPath) return;
 
-      const mutationRuntime = (mutation.runtime === 'claude-code'
-        || mutation.runtime === 'gemini'
-        || mutation.runtime === 'opencode'
-        || mutation.runtime === 'cursor'
-        || mutation.runtime === 'grok')
-        ? mutation.runtime
-        : 'codex';
+      const mutationRuntime = dispatchedWorkerRuntime(mutation.runtime);
       void openWorkspaceTabForLane({
         laneId: mutation.laneId ?? null,
         packetId: mutation.packetId ?? null,
@@ -807,13 +805,7 @@ export function useWorkspaceTerminal({
         }>) {
           if (!lane.sessionKey) continue;
           if (lane.status !== 'running' && lane.status !== 'launching') continue;
-          const laneRuntime = (lane.runtime === 'claude-code'
-            || lane.runtime === 'gemini'
-            || lane.runtime === 'opencode'
-            || lane.runtime === 'cursor'
-            || lane.runtime === 'grok')
-            ? lane.runtime
-            : 'codex';
+          const laneRuntime = dispatchedWorkerRuntime(lane.runtime);
           void openWorkspaceTabForLane({
             laneId: lane.id,
             packetId: lane.packetId,

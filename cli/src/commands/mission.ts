@@ -20,10 +20,12 @@
  *   o8 mission tail     [--mission <id>] [--timeout <ms|5m|90s>] [--poll ms]
  */
 
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { apiFetch, CliError, EXIT, SLOW_MUTATION_TIMEOUT_MS } from '../api.js';
+import { fetchCorrelatedPacketMutation } from './packet/correlated-mutation.js';
 import { resolveConfig } from '../config.js';
 import {
   printHumanHeading,
@@ -47,6 +49,10 @@ interface CreateMissionResult {
 interface DispatchMissionResult {
   initiated?: boolean;
   dispatched?: number;
+  missionId?: string | null;
+  inProgress?: boolean;
+  status?: string;
+  note?: string;
 }
 
 interface MissionStatusPacket {
@@ -59,11 +65,24 @@ interface MissionStatusPacket {
 interface MissionStatusResult {
   missionId: string;
   packets?: MissionStatusPacket[];
+  funnel?: {
+    totalDurationMs?: number | null;
+    terminalPacketCount?: number;
+    attemptCount?: number;
+    retryCount?: number;
+    interventionCount?: number;
+    recoveryEventCount?: number;
+    strictAutonomousCloseCount?: number;
+    governedAutonomousCloseCount?: number;
+  } | null;
   [key: string]: unknown;
 }
 
 interface MissionStopResult {
   missionId: string;
+  inProgress?: boolean;
+  status?: string;
+  note?: string;
   event?: {
     type?: string;
     recordedAt?: string;
@@ -133,8 +152,9 @@ export function parseExistingBranchPolicy(value: unknown): ExistingBranchPolicy 
   throw new CliError('invalid_args', EXISTING_BRANCH_POLICY_ERROR, EXIT.INVALID_ARGS);
 }
 
-export function parseMissionStopArgs(rest: string[]): { missionId: string } {
+export function parseMissionStopArgs(rest: string[]): { missionId: string; idempotencyKey?: string } {
   let missionId: string | null = null;
+  let idempotencyKey: string | undefined;
   for (let i = 0; i < rest.length; i += 1) {
     const tok = rest[i];
     if (tok === '--mission') {
@@ -146,12 +166,21 @@ export function parseMissionStopArgs(rest: string[]): { missionId: string } {
       i += 1;
     } else if (tok.startsWith('--mission=')) {
       missionId = tok.slice('--mission='.length);
+    } else if (tok === '--idempotency-key') {
+      const value = rest[i + 1];
+      if (!value || value.startsWith('--')) {
+        throw new CliError('invalid_args', '--idempotency-key requires a value.', EXIT.INVALID_ARGS);
+      }
+      idempotencyKey = value.trim();
+      i += 1;
+    } else if (tok.startsWith('--idempotency-key=')) {
+      idempotencyKey = tok.slice('--idempotency-key='.length).trim();
     } else {
       throw new CliError(
         'invalid_args',
         `Unexpected mission stop argument: ${tok}`,
         EXIT.INVALID_ARGS,
-        'usage: o8 mission stop --mission <missionId>',
+        'usage: o8 mission stop --mission <missionId> [--idempotency-key <key>]',
       );
     }
   }
@@ -163,7 +192,10 @@ export function parseMissionStopArgs(rest: string[]): { missionId: string } {
       'Example: o8 mission stop --mission mission-abc123',
     );
   }
-  return { missionId: missionId.trim() };
+  return {
+    missionId: missionId.trim(),
+    ...(idempotencyKey ? { idempotencyKey } : {}),
+  };
 }
 
 function responseError(payload: OperatorResponse<unknown> | null | undefined, fallback: string): string {
@@ -257,20 +289,23 @@ async function runMissionCreate(mode: OutputMode, rest: string[]): Promise<numbe
   if (comparisonModels && comparisonModels.length > 0) body.comparisonModels = comparisonModels;
   if (existingBranchPolicy) body.existingBranchPolicy = existingBranchPolicy;
   if (qualitySearch) body.qualitySearch = qualitySearch;
+  body.clientMutationId = flag(rest, 'idempotency-key')?.trim() || randomUUID();
 
   const cfg = resolveConfig();
-  const res = await apiFetch<OperatorResponse<CreateMissionResult>>(cfg, '/api/orchestrator/create-mission', {
-    method: 'POST',
-    body,
-  });
+  const res = await fetchCorrelatedPacketMutation<OperatorResponse<CreateMissionResult & {
+    inProgress?: boolean;
+    status?: string;
+    note?: string;
+  }>>(cfg, '/api/orchestrator/create-mission', body, { timeoutMs: SLOW_MUTATION_TIMEOUT_MS });
   const result = unwrap(res.data, 'Mission creation was rejected.');
 
   let dispatch: DispatchMissionResult | null = null;
   if (hasFlag(rest, 'dispatch')) {
-    const dispatchResponse = await apiFetch<OperatorResponse<DispatchMissionResult>>(cfg, '/api/orchestrator/dispatch', {
-      method: 'POST',
-      body: { missionId: result.missionId, wait: false },
-    });
+    const dispatchResponse = await fetchCorrelatedPacketMutation<OperatorResponse<DispatchMissionResult>>(
+      cfg,
+      '/api/orchestrator/dispatch',
+      { missionId: result.missionId, wait: false, idempotencyKey: randomUUID() },
+    );
     dispatch = unwrap(dispatchResponse.data, 'Mission dispatch was rejected.');
   }
 
@@ -297,13 +332,15 @@ async function runMissionDispatch(mode: OutputMode, rest: string[]): Promise<num
   // / `o8 mission wait` track progress.
   const wait = hasFlag(rest, 'wait');
   const cfg = resolveConfig();
-  const res = await apiFetch<OperatorResponse<{ initiated?: boolean; dispatched?: number; missionId?: string | null }>>(cfg, '/api/orchestrator/dispatch', {
-    method: 'POST',
-    timeoutMs: wait ? SLOW_MUTATION_TIMEOUT_MS : undefined,
-    body: { ...(missionId ? { missionId } : {}), wait },
-  });
+  const res = await fetchCorrelatedPacketMutation<OperatorResponse<DispatchMissionResult>>(
+    cfg,
+    '/api/orchestrator/dispatch',
+    { ...(missionId ? { missionId } : {}), wait, idempotencyKey: randomUUID() },
+    { timeoutMs: wait ? SLOW_MUTATION_TIMEOUT_MS : undefined },
+  );
   const result = unwrap(res.data, 'Mission dispatch was rejected.');
-  if (!wait && (result.initiated !== true || !result.missionId?.trim())) {
+  const inProgress = res.status === 202 || result.inProgress === true || result.status === 'in_progress';
+  if (!wait && !inProgress && (result.initiated !== true || !result.missionId?.trim())) {
     throw new CliError(
       'dispatch_not_initiated',
       'No mission was dispatched. Create or select a mission first.',
@@ -311,12 +348,19 @@ async function runMissionDispatch(mode: OutputMode, rest: string[]): Promise<num
     );
   }
 
-  const payload = { schema: 'o8/cli/mission.dispatch/v1', dispatch: result };
+  const payload = { schema: 'o8/cli/mission.dispatch/v1', inProgress, dispatch: result };
   if (mode.human) {
     printHumanHeading('mission dispatch');
     printHumanKv([
       ['mission', result.missionId ?? missionId ?? '(active)'],
-      ['result', wait ? `dispatched ${result.dispatched ?? '?'} packet(s)` : 'initiated (track: o8 mission status)'],
+      [
+        'result',
+        inProgress
+          ? 'already in progress (not dispatched twice)'
+          : wait
+            ? `dispatched ${result.dispatched ?? '?'} packet(s)`
+            : 'initiated (track: o8 mission status)',
+      ],
     ]);
   } else {
     printJson(payload);
@@ -358,23 +402,46 @@ async function runMissionDispatch(mode: OutputMode, rest: string[]): Promise<num
   return 0;
 }
 
-async function fetchStatus(missionId: string | undefined, includeCost: boolean): Promise<MissionStatusResult> {
+async function fetchStatus(
+  missionId: string | undefined,
+  includeCost: boolean,
+  includeTiming = false,
+): Promise<MissionStatusResult> {
   const cfg = resolveConfig();
   const res = await apiFetch<OperatorResponse<MissionStatusResult>>(cfg, '/api/orchestrator/status', {
-    query: { ...(missionId ? { missionId } : {}), ...(includeCost ? { includeCost: 'true' } : {}) },
+    query: {
+      ...(missionId ? { missionId } : {}),
+      ...(includeCost ? { includeCost: 'true' } : {}),
+      ...(includeTiming ? { includeTiming: 'true' } : {}),
+    },
   });
   return unwrap(res.data, 'Unable to read mission status.');
 }
 
+function formatReceiptDuration(ms: number | null | undefined): string {
+  if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return 'in progress';
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return remainder > 0 ? `${minutes}m ${remainder}s` : `${minutes}m`;
+}
+
 async function runMissionStatus(mode: OutputMode, rest: string[]): Promise<number> {
   const missionId = flag(rest, 'mission')?.trim() || undefined;
-  const result = await fetchStatus(missionId, hasFlag(rest, 'cost'));
+  const result = await fetchStatus(missionId, hasFlag(rest, 'cost'), true);
 
   const payload = { schema: 'o8/cli/mission.status/v1', status: result };
   if (mode.human) {
     printHumanHeading('mission status');
     printHumanKv([
       ['mission', result.missionId || '(none)'],
+      ...(result.funnel ? [
+        ['receipt', `${formatReceiptDuration(result.funnel.totalDurationMs)} · ${result.funnel.terminalPacketCount ?? 0}/${result.packets?.length ?? 0} terminal`],
+        ['attempts', `${result.funnel.attemptCount ?? 0} total · ${result.funnel.retryCount ?? 0} ${(result.funnel.retryCount ?? 0) === 1 ? 'retry' : 'retries'}`],
+        ['control', `${result.funnel.interventionCount ?? 0} interventions · ${result.funnel.recoveryEventCount ?? 0} recoveries`],
+        ['autonomy', `${result.funnel.strictAutonomousCloseCount ?? 0} strict · ${result.funnel.governedAutonomousCloseCount ?? 0} approval-only`],
+      ] as Array<[string, string]> : []),
       ...(result.packets ?? []).map((p) => [`  · ${p.id}`, `${p.status ?? '?'} — ${p.title ?? ''}`] as [string, string]),
     ]);
   } else {
@@ -384,12 +451,24 @@ async function runMissionStatus(mode: OutputMode, rest: string[]): Promise<numbe
 }
 
 async function runMissionStop(mode: OutputMode, rest: string[]): Promise<number> {
-  const { missionId } = parseMissionStopArgs(rest);
+  const { missionId, idempotencyKey } = parseMissionStopArgs(rest);
   const cfg = resolveConfig();
-  const res = await apiFetch<OperatorResponse<MissionStopResult>>(cfg, '/api/orchestrator/stop-mission', {
-    method: 'POST',
-    body: { missionId },
-  });
+  const res = await fetchCorrelatedPacketMutation<OperatorResponse<MissionStopResult>>(
+    cfg,
+    '/api/orchestrator/stop-mission',
+    { missionId, idempotencyKey: idempotencyKey ?? randomUUID() },
+    {
+      timeoutMs: SLOW_MUTATION_TIMEOUT_MS,
+      allowConflict: true,
+    },
+  );
+  if (res.status === 409 && res.data?.ok === false) {
+    throw new CliError(
+      'conflict',
+      responseError(res.data, 'Mission stop was incomplete.'),
+      EXIT.CONFLICT,
+    );
+  }
   const result = unwrap(res.data, 'Mission stop was rejected.');
 
   const payload = { schema: 'o8/cli/mission.stop/v1', mission: result };

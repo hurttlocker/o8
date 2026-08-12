@@ -6,6 +6,11 @@ import {
   isDispatchableRuntime,
 } from '@/lib/orchestrator/runtime-capabilities';
 import { getDataDir } from '@/lib/data-dir-migration';
+import {
+  pollCorrelatedMcpMutation,
+  type McpMutationCorrelationField,
+} from '@/lib/mcp/correlated-mutation';
+import type { CorrelatedActionPayload } from '@/lib/orchestrator/action-receipt';
 
 // ── Types ──
 
@@ -55,7 +60,6 @@ function readPanelToken(): string | null {
   try {
     const { readFileSync, existsSync } = require('node:fs') as typeof import('node:fs');
     const { join } = require('node:path') as typeof import('node:path');
-    const { homedir } = require('node:os') as typeof import('node:os');
     // Match middleware's lookup order: CORTEX_IDE_DATA_DIR override, else ~/.o8.
     const dataDir = getDataDir();
     const tokenPath = join(dataDir, 'ws-token');
@@ -88,7 +92,6 @@ function resolveApiBaseLive(): string {
   try {
     const { readFileSync, existsSync } = require('node:fs') as typeof import('node:fs');
     const { join } = require('node:path') as typeof import('node:path');
-    const { homedir } = require('node:os') as typeof import('node:os');
     const dataDir = getDataDir();
     const portFile = join(dataDir, 'api-port');
     if (existsSync(portFile)) {
@@ -140,7 +143,11 @@ export interface ApiFetchOptions extends RequestInit {
   acceptedErrorStatuses?: number[];
 }
 
-export async function apiFetch(path: string, init?: ApiFetchOptions): Promise<unknown> {
+async function apiFetchResponse(
+  path: string,
+  init?: ApiFetchOptions,
+  returnHttpErrors = false,
+): Promise<Response> {
   let lastError: Error | undefined;
   const timeoutMs = init?.timeoutMs ?? FETCH_TIMEOUT_MS;
   // Strip timeoutMs from the RequestInit so fetch doesn't see it.
@@ -163,35 +170,27 @@ export async function apiFetch(path: string, init?: ApiFetchOptions): Promise<un
       if (panelToken) {
         baseHeaders.Authorization = `Bearer ${panelToken}`;
       }
-      const res = await fetch(`${baseUrl}${path}`, {
-        ...fetchInit,
-        signal: controller.signal,
-        headers: { ...baseHeaders, ...fetchInit.headers },
-      });
-      clearTimeout(timer);
-      if (!res.ok) {
-        // Surface HTTP errors instead of returning the error body as if it
-        // were a successful payload (a 403/500 body has no `ok` field and
-        // used to masquerade as success-shaped data downstream).
+      let res: Response;
+      try {
+        res = await fetch(`${baseUrl}${path}`, {
+          ...fetchInit,
+          signal: controller.signal,
+          headers: { ...baseHeaders, ...fetchInit.headers },
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+      if (!res.ok && !returnHttpErrors && !acceptedErrorStatuses.includes(res.status)) {
         const bodyText = await res.text().catch(() => '');
-        if (acceptedErrorStatuses.includes(res.status)) {
-          try {
-            return JSON.parse(bodyText) as unknown;
-          } catch {
-            // Fall through to the normal HTTP error when the accepted status
-            // did not carry the structured JSON contract the caller expects.
-          }
-        }
         const snippet = bodyText.slice(0, 300).replace(/\s+/g, ' ').trim();
         const httpError = new Error(
           `o8 API ${res.status} for ${path}${snippet ? `: ${snippet}` : ''}`,
         ) as Error & { noRetry?: boolean };
-        // 4xx (auth, validation) won't fix itself — fail fast, no retry storm.
         if (res.status < 500) httpError.noRetry = true;
         throw httpError;
       }
       _apiHealthy = true;
-      return res.json();
+      return res;
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
       if ((lastError as Error & { noRetry?: boolean }).noRetry) {
@@ -210,6 +209,44 @@ export async function apiFetch(path: string, init?: ApiFetchOptions): Promise<un
     `Expected the o8 backend at ${resolveApiBaseLive()}. ` +
     `Open the o8 desktop app (it launches the backend automatically) or run \`npm run desktop:dev\` from the o8 repo.`,
   );
+}
+
+export async function apiFetch(path: string, init?: ApiFetchOptions): Promise<unknown> {
+  const acceptedErrorStatuses = init?.acceptedErrorStatuses ?? [];
+  const res = await apiFetchResponse(path, init);
+  if (!res.ok) {
+    // Surface HTTP errors instead of returning the error body as if it were a
+    // successful payload. Accepted read statuses retain their structured body.
+    const bodyText = await res.text().catch(() => '');
+    if (acceptedErrorStatuses.includes(res.status)) {
+      try {
+        return JSON.parse(bodyText) as unknown;
+      } catch {
+        // Fall through when the accepted status did not carry JSON.
+      }
+    }
+    const snippet = bodyText.slice(0, 300).replace(/\s+/g, ' ').trim();
+    throw new Error(`o8 API ${res.status} for ${path}${snippet ? `: ${snippet}` : ''}`);
+  }
+  return res.json();
+}
+
+/** MCP mutation transport with one body-bound correlation id through 202s and retries. */
+export function apiFetchCorrelatedMutation<
+  TPayload extends CorrelatedActionPayload = CorrelatedActionPayload,
+>(
+  path: string,
+  body: Record<string, unknown>,
+  correlationField: McpMutationCorrelationField,
+): Promise<TPayload> {
+  return pollCorrelatedMcpMutation<TPayload>({
+    body,
+    correlationField,
+    send: (requestBody) => apiFetchResponse(path, {
+      method: 'POST',
+      body: requestBody,
+    }, true),
+  });
 }
 
 export function textResult(text: string, isError = false): McpToolResult {

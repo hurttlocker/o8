@@ -215,6 +215,7 @@ export async function handleWorkerQuotaExhaustion(input: {
       branchName: lane.branch,
       baseBranch: lane.baseBranch,
       model: decision.toModel,
+      clientMutationId: attemptId,
       isolate: false,
       skipSetup: true,
       existingLaneId: lane.id,

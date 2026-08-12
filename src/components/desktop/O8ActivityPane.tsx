@@ -45,6 +45,7 @@ import {
   markProposalsSeen,
   PROPOSALS_OPEN_KEY,
 } from './o8-panel/O8DirectiveProposalDrawer';
+import { O8ActivityMissionControls } from './o8-panel/O8ActivityMissionControls';
 import { O8ActivityPacketRow } from './o8-panel/O8ActivityPacketRow';
 import { O8RepoSelector } from './o8-panel/O8RepoSelector';
 import { O8ScratchChat } from './o8-panel/workspace-rail/O8ScratchChat';
@@ -106,8 +107,6 @@ export const O8ActivityPane = memo(function O8ActivityPane({
   const [fallbackRepoOptions, setFallbackRepoOptions] = useState<string[]>([]);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [proposalsOpen, setProposalsOpen] = useState(false);
-  const [dispatchHalted, setDispatchHalted] = useState(false);
-  const [haltBusy, setHaltBusy] = useState(false);
   // Frozen-per-mount set of proposal ids the operator had already seen.
   // Empty on the server / first paint (hydration-safe), filled in an effect.
   const [seenProposalSnapshot, setSeenProposalSnapshot] = useState<Set<string>>(() => new Set());
@@ -135,63 +134,12 @@ export const O8ActivityPane = memo(function O8ActivityPane({
       return next;
     });
   }, []);
-  const refreshDispatchHaltState = useCallback(async () => {
-    try {
-      const response = await fetch('/api/orchestrator/dispatch-halt', { cache: 'no-store' });
-      const payload = await response.json().catch(() => null) as { ok?: boolean; result?: { halted?: boolean } } | null;
-      if (response.ok && payload?.ok) setDispatchHalted(payload.result?.halted === true);
-    } catch {
-      // ignore
-    }
-  }, []);
-  useEffect(() => {
-    if (!active) return;
-    void refreshDispatchHaltState();
-  }, [active, refreshDispatchHaltState]);
-  const handleDispatchHaltToggle = useCallback(async () => {
-    setHaltBusy(true);
-    try {
-      const response = await fetch('/api/orchestrator/dispatch-halt', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(dispatchHalted
-          ? { verb: 'resume' }
-          : { verb: 'halt', stopRunning: true, reason: 'Stopped from Activity header' }),
-      });
-      const payload = await response.json().catch(() => null) as { ok?: boolean; result?: { halt?: { halted?: boolean } } } | null;
-      if (!response.ok || !payload?.ok) throw new Error('Dispatch halt update failed.');
-      setDispatchHalted(payload.result?.halt?.halted === true);
-      window.dispatchEvent(new Event('o8:lane-lifecycle'));
-    } catch (error) {
-      console.error('[o8-activity] dispatch halt failed:', error);
-    } finally {
-      setHaltBusy(false);
-    }
-  }, [dispatchHalted]);
   const { prDetails, ciDetails, fetchForItem } = useExpandDetails();
   const mountedRef = useRef(true);
   const activityHydratedRef = useRef(false);
   const orchestratorData = useOrchestratorData();
   const missionPackets = orchestratorData?.missionState?.packets;
-  const handleStopMission = useCallback(async () => {
-    const missionId = orchestratorData?.missionState?.missionId?.trim();
-    if (!missionId) return;
-    setHaltBusy(true);
-    try {
-      const response = await fetch('/api/orchestrator/stop-mission', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ missionId }),
-      });
-      const payload = await response.json().catch(() => null) as { ok?: boolean } | null;
-      if (!response.ok || !payload?.ok) throw new Error('Mission stop failed.');
-      window.dispatchEvent(new Event('o8:lane-lifecycle'));
-    } catch (error) {
-      console.error('[o8-activity] stop mission failed:', error);
-    } finally {
-      setHaltBusy(false);
-    }
-  }, [orchestratorData?.missionState?.missionId]);
+  const activeMissionId = orchestratorData?.missionState?.missionId?.trim() ?? '';
 
   // #746 — directive proposals are surfaced above the timeline as
   // recommendations. Accept routes through OrchestratorDataContext so the
@@ -516,6 +464,9 @@ export const O8ActivityPane = memo(function O8ActivityPane({
             selectedFile={null}
             surface="diff"
             placement="review-toolbar"
+          />
+          <O8ActivityMissionControls
+            missionId={activeMissionId}
           />
         </div>
 

@@ -10,6 +10,7 @@ import type {
 } from './types';
 import { parsePrimeAgentSessionCost } from '@/lib/runtimes/prime-agent-cost-parser';
 import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
+import { ownedTailToRuntimeTranscript } from '@/lib/runtimes/shared/owned-transcript';
 import {
   continueOwnedPrimeAgentSession,
   getOwnedPrimeAgentFleetAdditions,
@@ -89,26 +90,6 @@ function mapAgentToSession(agent: OwnedAgentLike): RuntimeSession {
   };
 }
 
-function parseTranscriptTimestamp(value?: string, fallbackLabel?: string) {
-  const direct = value ? new Date(value) : null;
-  if (direct && !Number.isNaN(direct.getTime())) return direct;
-  const fromLabel = fallbackLabel ? new Date(fallbackLabel) : null;
-  if (fromLabel && !Number.isNaN(fromLabel.getTime())) return fromLabel;
-  return new Date();
-}
-
-function applyTranscriptWindow<T extends { id: string }>(entries: T[], sinceId?: string, limit?: number) {
-  let next = entries;
-  if (sinceId) {
-    const sinceIndex = next.findIndex((entry) => entry.id === sinceId);
-    if (sinceIndex >= 0) next = next.slice(sinceIndex + 1);
-  }
-  if (typeof limit === 'number' && Number.isFinite(limit) && limit > 0 && next.length > limit) {
-    next = next.slice(-limit);
-  }
-  return next;
-}
-
 export const primeAgentRuntime: AgentRuntime = {
   id: 'prime-agent',
   displayName: 'Prime Agent',
@@ -125,22 +106,15 @@ export const primeAgentRuntime: AgentRuntime = {
 
   async readTranscript(sessionKey: string, sinceId?: string, limit?: number): Promise<RuntimeTranscriptEntry[]> {
     if (!sessionKey.startsWith('prime-agent-owned:')) return [];
-    const tail = await getOwnedPrimeAgentRuntimeTail(sessionKey);
-    return applyTranscriptWindow(tail.entries, sinceId, limit).map((entry) => ({
-      id: entry.id,
-      role: entry.kind === 'message' ? 'assistant' as const
-        : entry.kind === 'tool' ? 'tool' as const
-        : 'system' as const,
-      text: entry.text,
-      timestamp: parseTranscriptTimestamp(entry.timestamp, entry.timestampLabel),
-      toolName: entry.kind === 'tool' ? entry.label : undefined,
-    }));
+    const tail = await getOwnedPrimeAgentRuntimeTail(sessionKey, sinceId ? 200 : limit);
+    return ownedTailToRuntimeTranscript(tail, sinceId, limit);
   },
 
   async launch(opts: LaunchOptions): Promise<RuntimeActionResult> {
     const result = await launchOwnedPrimeAgentSession({
       cwd: opts.cwd,
       prompt: opts.prompt,
+      clientMutationId: opts.clientMutationId,
       laneId: opts.laneId,
       packetId: opts.packetId,
     });

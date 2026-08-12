@@ -24,6 +24,7 @@ import type {
   RuntimeTelemetry,
 } from './types';
 import { parseOpencodeSessionCost } from '@/lib/runtimes/opencode-cost-parser';
+import { ownedTailToRuntimeTranscript } from '@/lib/runtimes/shared/owned-transcript';
 import { monitorUsageDispatch, usageSnapshotFromTelemetry } from '@/lib/usage-log';
 
 import {
@@ -167,26 +168,6 @@ function mapAgentToSession(
   };
 }
 
-function parseTranscriptTimestamp(value?: string, fallbackLabel?: string) {
-  const direct = value ? new Date(value) : null;
-  if (direct && !Number.isNaN(direct.getTime())) return direct;
-  const fromLabel = fallbackLabel ? new Date(fallbackLabel) : null;
-  if (fromLabel && !Number.isNaN(fromLabel.getTime())) return fromLabel;
-  return new Date();
-}
-
-function applyTranscriptWindow<T extends { id: string }>(entries: T[], sinceId?: string, limit?: number) {
-  let next = entries;
-  if (sinceId) {
-    const sinceIndex = next.findIndex((entry) => entry.id === sinceId);
-    if (sinceIndex >= 0) next = next.slice(sinceIndex + 1);
-  }
-  if (typeof limit === 'number' && Number.isFinite(limit) && limit > 0 && next.length > limit) {
-    next = next.slice(-limit);
-  }
-  return next;
-}
-
 // ── The runtime object ────────────────────────────────────────────────────────
 
 export const opencodeRuntime: AgentRuntime = {
@@ -218,18 +199,8 @@ export const opencodeRuntime: AgentRuntime = {
       return [];
     }
 
-    const tail = await getOwnedOpencodeRuntimeTail(sessionKey);
-    const entries = applyTranscriptWindow(tail.entries, sinceId, limit);
-
-    return entries.map((entry) => ({
-      id: entry.id,
-      role: entry.kind === 'message' ? 'assistant' as const
-        : entry.kind === 'tool' ? 'tool' as const
-        : 'system' as const,
-      text: entry.text,
-      timestamp: parseTranscriptTimestamp(entry.timestamp, entry.timestampLabel),
-      toolName: entry.kind === 'tool' ? entry.label : undefined,
-    }));
+    const tail = await getOwnedOpencodeRuntimeTail(sessionKey, sinceId ? 200 : limit);
+    return ownedTailToRuntimeTranscript(tail, sinceId, limit);
   },
 
   async launch(opts: LaunchOptions): Promise<RuntimeActionResult> {
@@ -237,6 +208,7 @@ export const opencodeRuntime: AgentRuntime = {
     const result = await launchOwnedOpencodeSession({
       cwd: opts.cwd,
       prompt: opts.prompt,
+      clientMutationId: opts.clientMutationId,
       model: opts.model,
       laneId: opts.laneId,
       packetId: opts.packetId,

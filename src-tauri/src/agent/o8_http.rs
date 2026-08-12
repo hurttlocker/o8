@@ -12,7 +12,7 @@
 //! passes `src/middleware.ts` even if loopback-origin detection doesn't fire.
 
 use serde_json::Value;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const TIMEOUT_SECS: u64 = 20;
 
@@ -85,6 +85,59 @@ pub async fn post_json(path: &str, body: Value) -> Result<Value, String> {
     post_json_timeout(path, body, TIMEOUT_SECS).await
 }
 
+fn receipt_in_progress(status: reqwest::StatusCode, payload: &Value) -> bool {
+    let receipt = payload.get("result").unwrap_or(payload);
+    status == reqwest::StatusCode::ACCEPTED
+        || receipt.get("inProgress").and_then(Value::as_bool) == Some(true)
+        || receipt.get("status").and_then(Value::as_str) == Some("in_progress")
+}
+
+/// Replay one exact body-bound mutation until o8 returns its terminal receipt.
+/// Transport loss and HTTP 202 never mint a second mutation id.
+pub async fn post_correlated_json(path: &str, body: Value) -> Result<Value, String> {
+    let deadline = Instant::now() + Duration::from_secs(5 * 60);
+    let mut last_transport_error: Option<String>;
+    loop {
+        let url = format!("{}{}", base(), path);
+        match with_auth(client()?.post(&url).json(&body)).send().await {
+            Ok(resp) => {
+                let status = resp.status();
+                match resp.text().await {
+                    Err(error) => {
+                        last_transport_error = Some(format!("o8 {path} read failed: {error}"));
+                    }
+                    Ok(text) => match serde_json::from_str::<Value>(&text) {
+                        Err(error) => {
+                            last_transport_error = Some(format!(
+                                "o8 {path} returned an incomplete JSON receipt: {error}"
+                            ));
+                        }
+                        Ok(payload) => {
+                            if !status.is_success() {
+                                let snippet = crate::utf8_head(&text, 300);
+                                return Err(format!("o8 {path} error ({status}): {snippet}"));
+                            }
+                            if !receipt_in_progress(status, &payload) {
+                                return Ok(payload);
+                            }
+                            last_transport_error = None;
+                        }
+                    },
+                }
+            }
+            Err(error) => {
+                last_transport_error = Some(transport_error("POST", path, TIMEOUT_SECS, &error));
+            }
+        }
+        if Instant::now() >= deadline {
+            return Err(last_transport_error.unwrap_or_else(|| {
+                format!("o8 {path} is still running after 300s; reuse the same mutation id")
+            }));
+        }
+        tokio::time::sleep(Duration::from_millis(750)).await;
+    }
+}
+
 /// POST with a custom timeout for slow endpoints — the Brain's
 /// `/api/cortex/ask/answer` synthesizes with an LLM and regularly exceeds the
 /// default 20s (measured 24s on a trivial question; the MCP `cortex_ask`
@@ -139,7 +192,8 @@ async fn read_json(path: &str, resp: reqwest::Response) -> Result<Value, String>
 
 #[cfg(test)]
 mod tests {
-    use super::is_timeout_error;
+    use super::{is_timeout_error, receipt_in_progress};
+    use serde_json::json;
 
     #[test]
     fn timeout_classifier_only_accepts_the_transport_timeout_marker() {
@@ -148,6 +202,22 @@ mod tests {
         ));
         assert!(!is_timeout_error(
             "o8 POST /api/canvas/intent failed: connection refused"
+        ));
+    }
+
+    #[test]
+    fn correlated_receipt_classifier_requires_unfinished_truth() {
+        assert!(receipt_in_progress(
+            reqwest::StatusCode::ACCEPTED,
+            &json!({ "ok": true })
+        ));
+        assert!(receipt_in_progress(
+            reqwest::StatusCode::OK,
+            &json!({ "result": { "inProgress": true } })
+        ));
+        assert!(!receipt_in_progress(
+            reqwest::StatusCode::OK,
+            &json!({ "ok": true, "status": "queued" })
         ));
     }
 }

@@ -24,6 +24,7 @@ import {
   updateOwnedReviewDisposition,
 } from '../controller';
 import { compactLine } from '../utils';
+import { correlatedActionIsUnsettled } from '@/lib/orchestrator/action-receipt';
 
 interface ActionDeps {
   wsConnected: boolean;
@@ -119,6 +120,9 @@ export function useMobileActions(state: MobileState, deps: ActionDeps) {
         loadOwnedReviewPacket,
       });
     } catch (error) {
+      if (correlatedActionIsUnsettled(error)) {
+        throw error;
+      }
       if (payload.sessionKey) {
         if (pendingMutationIdBySessionRef.current[payload.sessionKey] === clientMutationId) {
           const nextPending = { ...pendingMutationIdBySessionRef.current };

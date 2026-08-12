@@ -26,6 +26,7 @@ export interface SteerPacketInput {
   packetId: string;
   message: string;
   source?: string;
+  clientMutationId?: string;
 }
 
 export interface SteerPacketResult {
@@ -37,8 +38,29 @@ export interface SteerPacketResult {
 const NO_STEERABLE_SESSION = 'Packet has no steerable session — use rerun_with_feedback instead.';
 const STARTUP_FAILURE_PROBE_MS = 2_000;
 
+export type SteerPacketFailurePhase = 'pre_effect' | 'terminal' | 'outcome_unknown';
+
 export class SteerPacketUnavailableError extends Error {
-  readonly code = 'steer_unavailable';
+  constructor(message: string, readonly phase: SteerPacketFailurePhase = 'pre_effect') {
+    super(message);
+    this.name = 'SteerPacketUnavailableError';
+  }
+
+  get code(): 'steer_unavailable' | 'steer_outcome_unknown' {
+    return this.phase === 'outcome_unknown' ? 'steer_outcome_unknown' : 'steer_unavailable';
+  }
+}
+
+export function isPostEffectSteerFailure(error: unknown): error is SteerPacketUnavailableError {
+  return error instanceof SteerPacketUnavailableError && error.phase !== 'pre_effect';
+}
+
+function outcomeUnknownSteerError(error: unknown): SteerPacketUnavailableError {
+  const detail = error instanceof Error ? error.message : String(error);
+  return new SteerPacketUnavailableError(
+    `${detail} The steer may already have been accepted; inspect the session before sending it again.`,
+    'outcome_unknown',
+  );
 }
 
 function normalizeSource(source: string | undefined): string {
@@ -94,7 +116,12 @@ async function resumeExitedOwnedCodexSession(surfaceId: string, message: string)
   }
 }
 
-export async function steerPacket({ packetId, message, source }: SteerPacketInput): Promise<SteerPacketResult> {
+export async function steerPacket({
+  packetId,
+  message,
+  source,
+  clientMutationId,
+}: SteerPacketInput): Promise<SteerPacketResult> {
   const lane = findLaneByPacket(packetId);
   if (!lane?.sessionKey) {
     const current = currentMissionState();
@@ -111,62 +138,82 @@ export async function steerPacket({ packetId, message, source }: SteerPacketInpu
 
   const steerSource = normalizeSource(source);
   const steerStartedMs = Date.now();
-  recordLaneEvent(lane.id, 'steered_packet', 'orchestrator', {
-    packetId,
-    source: steerSource,
-    message,
-  });
+  // From the first durable event onward, a thrown call can no longer prove
+  // that no visible or provider-side effect landed. All failures below this
+  // boundary are typed so routes can finalize a receipt before responding.
+  try {
+    recordLaneEvent(lane.id, 'steered_packet', 'orchestrator', {
+      packetId,
+      source: steerSource,
+      message,
+      clientMutationId,
+    });
 
-  const result = await performRuntimeAction({ action: 'steer', surfaceId: lane.sessionKey, message, auditSteer: false });
-  let steeredNote = 'Steered packet via warm session.';
-  if (!result.ok || result.status === 'unavailable') {
-    const canTryOwnedResumeFallback = lane.sessionKey.startsWith('codex-owned:')
-      && /cannot accept|not found|surface/i.test(result.note);
-    // Adversarial F14 — re-check the lane right before spawning the fallback
-    // process: the operator may have archived it during the (multi-second)
-    // steer attempt, and only the lane STATUS write was protected — not the
-    // process spawn. A lane that went terminal mid-steer must not get a
-    // fresh runtime editing its worktree.
-    const freshLane = canTryOwnedResumeFallback ? findLaneByPacket(packetId) : null;
-    const laneStillLive = freshLane?.id === lane.id && freshLane.sessionKey === lane.sessionKey;
-    const resumed = canTryOwnedResumeFallback && laneStillLive
-      ? await resumeExitedOwnedCodexSession(lane.sessionKey, message)
-      : canTryOwnedResumeFallback
-        ? { ok: false, note: 'Lane went terminal while the steer was in flight — not resuming a dead lane\'s session.' }
-        : null;
-    if (!resumed?.ok) {
+    const result = await performRuntimeAction({
+      action: 'steer',
+      surfaceId: lane.sessionKey,
+      clientMutationId,
+      message,
+      auditSteer: false,
+    });
+    let steeredNote = 'Steered packet via warm session.';
+    if (!result.ok || result.status === 'unavailable') {
+      const canTryOwnedResumeFallback = lane.sessionKey.startsWith('codex-owned:')
+        && /cannot accept|not found|surface/i.test(result.note);
+      // Adversarial F14 — re-check the lane right before spawning the fallback
+      // process: the operator may have archived it during the (multi-second)
+      // steer attempt, and only the lane STATUS write was protected — not the
+      // process spawn. A lane that went terminal mid-steer must not get a
+      // fresh runtime editing its worktree.
+      const freshLane = canTryOwnedResumeFallback ? findLaneByPacket(packetId) : null;
+      const laneStillLive = freshLane?.id === lane.id && freshLane.sessionKey === lane.sessionKey;
+      const resumed = canTryOwnedResumeFallback && laneStillLive
+        ? await resumeExitedOwnedCodexSession(lane.sessionKey, message)
+        : canTryOwnedResumeFallback
+          ? { ok: false, note: 'Lane went terminal while the steer was in flight — not resuming a dead lane\'s session.' }
+          : null;
+      if (!resumed?.ok) {
+        recordLaneEvent(lane.id, 'steer_failed', 'orchestrator', {
+          packetId,
+          source: steerSource,
+          message,
+          clientMutationId,
+          note: resumed?.note || result.note || NO_STEERABLE_SESSION,
+        });
+        throw new SteerPacketUnavailableError(
+          resumed?.note || result.note || NO_STEERABLE_SESSION,
+          'terminal',
+        );
+      }
+      // #1524 — the store's note distinguishes warm resume from cold
+      // (restored-from-archive) resume; pass it through so cost expectations
+      // stay honest for the orchestrator that chose layer 3 over layer 4.
+      steeredNote = resumed.note || 'Steered packet via session resume.';
+    } else {
+      rebindLaneSessionIfChanged(lane.id, lane.sessionKey, result.sessionKey, 'orchestrator');
+    }
+
+    const startupFailure = await readStartupFailureHead(lane.sessionKey, steerStartedMs);
+    if (startupFailure) {
       recordLaneEvent(lane.id, 'steer_failed', 'orchestrator', {
         packetId,
         source: steerSource,
         message,
-        note: resumed?.note || result.note || NO_STEERABLE_SESSION,
+        clientMutationId,
+        note: 'Steer failed to start',
+        stderrHead: startupFailure,
       });
-      throw new SteerPacketUnavailableError(resumed?.note || result.note || NO_STEERABLE_SESSION);
+      throw new SteerPacketUnavailableError(`Steer failed to start: ${startupFailure}`, 'terminal');
     }
-    // #1524 — the store's note distinguishes warm resume from cold
-    // (restored-from-archive) resume; pass it through so cost expectations
-    // stay honest for the orchestrator that chose layer 3 over layer 4.
-    steeredNote = resumed.note || 'Steered packet via session resume.';
-  } else {
-    rebindLaneSessionIfChanged(lane.id, lane.sessionKey, result.sessionKey, 'orchestrator');
-  }
 
-  const startupFailure = await readStartupFailureHead(lane.sessionKey, steerStartedMs);
-  if (startupFailure) {
-    recordLaneEvent(lane.id, 'steer_failed', 'orchestrator', {
-      packetId,
-      source: steerSource,
-      message,
-      note: 'Steer failed to start',
-      stderrHead: startupFailure,
-    });
-    throw new Error(`Steer failed to start: ${startupFailure}`);
-  }
+    const updated = setLaneStatus(lane.id, 'running', 'orchestrator', 'steered_packet');
+    if (!updated || updated.status !== 'running') {
+      throw new SteerPacketUnavailableError(NO_STEERABLE_SESSION, 'terminal');
+    }
 
-  const updated = setLaneStatus(lane.id, 'running', 'orchestrator', 'steered_packet');
-  if (!updated || updated.status !== 'running') {
-    throw new SteerPacketUnavailableError(NO_STEERABLE_SESSION);
+    return { packetId, laneId: lane.id, note: steeredNote };
+  } catch (error) {
+    if (error instanceof SteerPacketUnavailableError) throw error;
+    throw outcomeUnknownSteerError(error);
   }
-
-  return { packetId, laneId: lane.id, note: steeredNote };
 }

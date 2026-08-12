@@ -22,6 +22,7 @@
  *   never yanks a lane whose only death-evidence was a stale pid with no tmux.
  */
 import { isBridgeSessionAlive } from '@/lib/runtime/pty-bridge';
+import { isOwnedOrchestratorSessionKey } from '@/lib/orchestrator/runtime-capabilities';
 import { findLiveCodexProcessByCwd } from '@/lib/runtimes/shared/codex-process-cwd';
 import { lookupOwnedActiveRun } from '@/lib/runtimes/shared/owned-session-index';
 import type { Lane } from './types';
@@ -40,16 +41,8 @@ export interface OwnedSessionProbe {
   note?: string;
 }
 
-/** Owned-worker session-key prefixes, one per runtime that spawns IDE-owned sessions. */
-export const OWNED_SESSION_PREFIXES = [
-  'codex-owned:',
-  'claude-code-owned:',
-  'gemini-owned:',
-  'opencode-owned:',
-] as const;
-
 export function isOwnedSessionKey(sessionKey: string): boolean {
-  return OWNED_SESSION_PREFIXES.some((prefix) => sessionKey.startsWith(prefix));
+  return isOwnedOrchestratorSessionKey(sessionKey);
 }
 
 export function isPidAlive(pid: number | undefined): boolean {
@@ -101,6 +94,10 @@ export async function probeOwnedSessionLiveness(
   sessionKey: string,
   worktreePath: string | null | undefined,
 ): Promise<OwnedSessionProbe> {
+  // Declarative owned runtimes register their roots when the runtime catalogue
+  // loads. The reaper starts independently of dispatch, so establish that
+  // authority before looking up any owned session.
+  await import('@/lib/runtimes');
   const run = await lookupOwnedActiveRun(sessionKey);
   if (!run) {
     return (await probeCodexWorktreeContinuity(sessionKey, worktreePath))

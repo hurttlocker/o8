@@ -18,6 +18,7 @@ import { useCallback, useState } from 'react';
 import { ArtifactStrip } from '../../artifacts/ArtifactStrip';
 import type { ArtifactRef } from '../../artifacts/types';
 import type { ReviewChangedFile } from '@/lib/fleet/types';
+import { actionReceiptIsInProgress, correlatedActionIsUnsettled, fetchCorrelatedActionReceipt } from '@/lib/orchestrator/action-receipt';
 import { UI_FONT } from './constants';
 
 const MONO_FONT = 'var(--font-mono-system)';
@@ -32,7 +33,7 @@ type MergePhase =
 
 interface MergeResponse {
   ok?: boolean;
-  result?: { merged?: boolean; status?: string; note?: string; approvalId?: string | null } | null;
+  result?: { merged?: boolean; status?: string; note?: string; approvalId?: string | null; inProgress?: boolean } | null;
   error?: { message?: string } | null;
 }
 
@@ -74,17 +75,18 @@ export function LaneReviewSummaryHeader({
     if (!packetId) return;
     setMerge({ step: 'merging' });
     try {
-      const res = await fetch('/api/orchestrator/merge', {
+      const { response: res, payload } = await fetchCorrelatedActionReceipt<MergeResponse>('/api/orchestrator/merge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packetId }),
+        body: JSON.stringify({ packetId, idempotencyKey: crypto.randomUUID() }),
       });
-      const payload = await res.json().catch(() => null) as MergeResponse | null;
       if (!res.ok || !payload?.ok) {
         throw new Error(payload?.error?.message ?? 'Unable to merge.');
       }
       const result = payload.result ?? null;
-      if (result?.merged) {
+      if (actionReceiptIsInProgress(res.status, result)) {
+        setMerge({ step: 'merging' });
+      } else if (result?.merged) {
         setMerge({ step: 'merged' });
         onMerged?.();
       } else if (result?.approvalId) {
@@ -96,6 +98,10 @@ export function LaneReviewSummaryHeader({
         throw new Error(result?.note ?? 'Merge was blocked.');
       }
     } catch (error) {
+      if (correlatedActionIsUnsettled(error)) {
+        setMerge({ step: 'merging' });
+        return;
+      }
       setMerge({ step: 'error', note: error instanceof Error ? error.message : 'Merge failed.' });
     }
   }, [onMerged, packetId]);

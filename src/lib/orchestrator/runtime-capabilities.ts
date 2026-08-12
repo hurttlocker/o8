@@ -42,6 +42,13 @@ export interface OrchestratorRuntimeCapability<
   authHouse: AuthHouse | null;
   /** Whether launch accepts a reasoning-effort selection. */
   reasoningEffort: boolean;
+  /** Provider-native durable session transforms. Missing means unsupported. */
+  sessionTransforms?: {
+    import: boolean;
+    checkpoint: boolean;
+    fork: boolean;
+    rewind: boolean;
+  };
   /** One-entry adapter + auth definition for straightforward owned CLIs. */
   declarative?: DeclarativeRuntimeManifest;
   /**
@@ -72,6 +79,12 @@ export const ORCHESTRATOR_RUNTIMES = {
     workerProvider: 'codex',
     authHouse: 'codex',
     reasoningEffort: true,
+    sessionTransforms: {
+      import: true,
+      checkpoint: true,
+      fork: true,
+      rewind: true,
+    },
     tier: 'frontier',
     description: 'GPT-5.6 coding agent via `codex exec --json` (Sol orchestration · Terra workers). Full-access sandbox, thread resume.',
   },
@@ -142,8 +155,9 @@ export const ORCHESTRATOR_RUNTIMES = {
     label: 'OpenCode 2',
     shortLabel: 'OC2',
     // OpenCode 2 keeps the governed JSONL + resume contract while adding a
-    // shared service/API architecture and explicit ordered permissions. Auth
-    // stays gated by ~/.local/share/opencode/auth.json in dispatch preflight.
+    // shared service/API architecture and explicit ordered permissions. Its
+    // dispatch preflight accepts provider credentials or a selected keyless
+    // provider configured on the local network.
     dispatchable: true,
     requiresModel: true,
     // OpenCode's free DeepSeek V4 Flash route gives fresh installs a working
@@ -155,7 +169,7 @@ export const ORCHESTRATOR_RUNTIMES = {
     authHouse: 'opencode',
     reasoningEffort: false,
     tier: 'standard',
-    description: 'Multi-provider OpenCode 2 worker via `opencode2 run --format json`; dispatch requires local provider auth.',
+    description: 'Multi-provider OpenCode 2 worker via `opencode2 run --format json`; dispatch requires provider credentials or a configured local provider.',
   },
   openhands: {
     label: 'OpenHands',
@@ -389,6 +403,16 @@ export const ORCHESTRATOR_RUNTIME_IDS = Object.freeze(
 
 export function isOrchestratorRuntime(value: unknown): value is OrchestratorRuntime {
   return typeof value === 'string' && Object.prototype.hasOwnProperty.call(ORCHESTRATOR_RUNTIMES, value);
+}
+
+export function runtimeFromOwnedSessionKey(value: unknown): OrchestratorRuntime | null {
+  if (typeof value !== 'string') return null;
+  const sessionKey = value.trim();
+  return ORCHESTRATOR_RUNTIME_IDS.find((runtime) => sessionKey.startsWith(`${runtime}-owned:`)) ?? null;
+}
+
+export function isOwnedOrchestratorSessionKey(value: unknown): boolean {
+  return runtimeFromOwnedSessionKey(value) !== null;
 }
 
 export function listDispatchableRuntimes(options?: {

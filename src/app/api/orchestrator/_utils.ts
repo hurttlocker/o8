@@ -58,3 +58,12 @@ export function replayShape<T>(outcome: { replayed: boolean; inProgress: boolean
   if (outcome.inProgress) base.inProgress = true;
   return base;
 }
+
+export function unresolvedIdempotencyResponse(outcome: { unresolved?: boolean }, action: string) {
+  if (!outcome.unresolved) return null;
+  return operatorError(
+    'outcome_unknown',
+    `The prior ${action} process ended before its receipt was persisted. Its outcome is unknown, so the exact mutation remains quarantined and was not repeated. Inspect current state before taking another action.`,
+    409,
+  );
+}

@@ -125,6 +125,9 @@ export function claimApprovalResolution(
     actor,
     note: note?.trim() || undefined,
     claimId,
+    continuationStatus: action === 'approve' && (existing.continuation || existing.toolName === 'edit_file')
+      ? 'pending'
+      : undefined,
   };
   const next: ApprovalRecord = {
     ...existing,
@@ -158,6 +161,44 @@ export function claimApprovalResolution(
     return { approval: readApproval(id), claimed: false };
   }
   return { approval: next, claimed: true, claimId };
+}
+
+export function finalizeApprovalContinuation(
+  id: string,
+  claimId: string,
+  status: 'completed' | 'failed' | 'outcome_unknown',
+  note?: string,
+) {
+  const existing = readApproval(id);
+  if (!existing || existing.resolution?.claimId !== claimId) return existing;
+  const db = getDb();
+  if (!db) throw new Error('[approval-resolution] SQLite database is unavailable');
+  const event = approvalEvent(
+    status === 'completed'
+      ? 'continuation_completed'
+      : status === 'failed'
+        ? 'continuation_failed'
+        : 'continuation_outcome_unknown',
+    'system',
+    note,
+  );
+  const resolution = { ...existing.resolution, continuationStatus: status };
+  const audit = [...existing.audit, event];
+  const updatedAt = Date.now();
+  const updated = db.transaction((tx) => {
+    const result = tx.update(approvalsTable).set({
+      updatedAt,
+      resolutionJson: JSON.stringify(resolution),
+      auditJson: JSON.stringify(audit),
+    }).where(and(
+      eq(approvalsTable.id, id),
+      eq(approvalsTable.resolutionJson, JSON.stringify(existing.resolution)),
+    )).run();
+    if ((result.changes ?? 0) !== 1) return false;
+    insertResolutionEvent(tx, id, event);
+    return true;
+  });
+  return updated ? { ...existing, updatedAt, resolution, audit } : readApproval(id);
 }
 
 export function resolveApproval(

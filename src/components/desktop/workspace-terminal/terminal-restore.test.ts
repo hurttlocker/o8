@@ -86,4 +86,35 @@ describe('computeRestoredTabs — optimistic crash recovery', () => {
     expect(result?.tabs).toMatchObject([{ id: 'thoughts-saved', kind: 'orchestrator', orchestratorThreadId: 'thoughts-saved' }]);
     expect(result?.activeTabId).toBe('thoughts-saved');
   });
+
+  it.each([
+    ['pi', 'pi-owned:restore-pi'],
+    ['qwen', 'qwen-owned:restore-qwen'],
+  ] as const)('restores %s owned chat identity without wrapping it as Codex', async (runtime, sessionKey) => {
+    const result = await computeRestoredTabs({
+      version: 1,
+      activeTabId: `chat-${runtime}`,
+      savedAt: new Date().toISOString(),
+      tabs: [{
+        id: `chat-${runtime}`,
+        label: `${runtime} worker`,
+        kind: 'chat',
+        cliAgent: runtime,
+        chatRuntime: 'codex',
+        chatSessionKey: `codex:${sessionKey}`,
+      }],
+    }, {
+      preferredRepo: null,
+      defaultTab: 'terminal',
+      createDefaultChatTab: () => tab({ kind: 'llm-chat' }),
+    }, undefined, 'optimistic');
+
+    expect(result?.tabs).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'chat',
+        chatRuntime: runtime,
+        chatSessionKey: sessionKey,
+      }),
+    ]));
+  });
 });

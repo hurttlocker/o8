@@ -228,7 +228,7 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
   // when no open PR points at the branch.
   const prRepoIdent = activeTarget?.repoName
     ?? (resolvedRepoPath ? resolvedRepoPath.split('/').filter(Boolean).pop() ?? null : null);
-  const branchPr = useBranchPr(prRepoIdent, branch);
+  const branchPr = useBranchPr(prRepoIdent, branch, resolvedRepoPath);
   const { detail: prDetail } = usePrDetail(branchPr?.number ?? null, branchPr?.repoSlug ?? null);
 
   // Coexists with the wide O8 panel now (Q ruling 2026-07-11) — no longer

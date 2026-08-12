@@ -22,9 +22,15 @@ import {
   type ReactNode,
 } from 'react';
 import type { DesktopWsCallbacks } from './useDesktopWebSocket';
-import type { RealtimeEventEnvelope, RealtimeSubscription } from '@/lib/realtime/types';
+import type {
+  RealtimeEventEnvelope,
+  RealtimeStreamKey,
+  RealtimeSubscription,
+  SessionHistoryRealtimePayload,
+} from '@/lib/realtime/types';
 import { getBrowserWsPort } from '@/lib/panel/ws-port-client';
 import { openSurfaceWebSocket } from '@/lib/connect/open-surface-websocket';
+import { TranscriptSessionSubscriptionProvider } from '@/lib/transcripts/useTranscript';
 
 export type WsConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
@@ -67,8 +73,10 @@ type ListenerId = number;
 interface SharedWsContextValue extends SharedWsState, SharedWsCommands {
   /** Register a set of callbacks. Returns an unregister function. */
   addListener: (callbacks: DesktopWsCallbacks) => () => void;
-  /** Subscribe to a session key for chat/history. Returns an unsubscribe function. */
-  addSessionSubscription: (sessionKey: string) => () => void;
+  /** Subscribe the legacy chat/history channel to a focused session. */
+  addLegacySessionSubscription: (sessionKey: string) => () => void;
+  /** Add a session to the accumulated realtime transcript streams. */
+  addRealtimeSessionSubscription: (sessionKey: string) => () => void;
 }
 
 // ── WS lifecycle → window event bridge ──
@@ -121,24 +129,57 @@ export function useWsConnectionState(): WsConnectionState {
 
 export function DesktopWebSocketProvider({ children }: { children: ReactNode }) {
   const [connectionState, setConnectionState] = useState<WsConnectionState>('disconnected');
-  const connectionStateRef = useRef<WsConnectionState>(connectionState);
-  connectionStateRef.current = connectionState;
   const wsRef = useRef<WebSocket | null>(null);
   const backoffRef = useRef(INITIAL_BACKOFF);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const realtimeSubscriptionSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const disposedRef = useRef(false);
+  const hasOpenedRef = useRef(false);
+  const realtimeBootIdRef = useRef<string | null>(null);
   const realtimeSeqByStreamRef = useRef<Record<string, number>>({});
 
   // Callback registry — multiple components register their handlers
   const nextIdRef = useRef<ListenerId>(0);
   const listenersRef = useRef<Map<ListenerId, DesktopWsCallbacks>>(new Map());
 
-  // Session subscriptions — multiple components can subscribe to session keys.
-  // When the set of active session keys changes, we send a switch-session for
-  // the most recently subscribed key.
-  const sessionSubsRef = useRef<Map<ListenerId, string>>(new Map());
+  // Session subscriptions are reference-counted so multiple panes can observe
+  // the same transcript without duplicating realtime streams. The server's
+  // legacy history channel remains single-session, while realtime carries all
+  // mounted/visible transcript sessions on the one shared socket.
+  const sessionSubscriptionCountsRef = useRef<Map<string, number>>(new Map());
+  const legacySessionSubscriptionsRef = useRef<Map<ListenerId, string>>(new Map());
+  const realtimeSubscribedStreamsRef = useRef<Set<RealtimeStreamKey>>(new Set());
   const activeSessionKeyRef = useRef<string | undefined>(undefined);
+
+  const syncRealtimeSubscriptions = useCallback((
+    socket: WebSocket | null = wsRef.current,
+    forceBootstrap = false,
+  ) => {
+    if (socket?.readyState !== WebSocket.OPEN) return;
+    const buildSubscription = (stream: RealtimeStreamKey): RealtimeSubscription => {
+      const wasSubscribed = realtimeSubscribedStreamsRef.current.has(stream);
+      const since = forceBootstrap
+        ? undefined
+        : (realtimeSeqByStreamRef.current[stream] ?? (wasSubscribed ? 0 : undefined));
+      return since === undefined ? { stream } : { stream, since };
+    };
+    const subscriptions: RealtimeSubscription[] = [buildSubscription('global')];
+    for (const sessionKey of sessionSubscriptionCountsRef.current.keys()) {
+      subscriptions.push(buildSubscription(`session:${sessionKey}`));
+    }
+    socket.send(JSON.stringify({ type: 'realtime-subscribe', subscriptions }));
+    realtimeSubscribedStreamsRef.current = new Set(subscriptions.map((subscription) => subscription.stream));
+  }, []);
+
+  const scheduleRealtimeSubscriptionSync = useCallback(() => {
+    if (wsRef.current?.readyState !== WebSocket.OPEN) return;
+    if (realtimeSubscriptionSyncTimerRef.current) return;
+    realtimeSubscriptionSyncTimerRef.current = setTimeout(() => {
+      realtimeSubscriptionSyncTimerRef.current = null;
+      syncRealtimeSubscriptions();
+    }, 0);
+  }, [syncRealtimeSubscriptions]);
 
   const addListener = useCallback((callbacks: DesktopWsCallbacks) => {
     const id = nextIdRef.current++;
@@ -146,43 +187,48 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
     return () => { listenersRef.current.delete(id); };
   }, []);
 
-  const addSessionSubscription = useCallback((sessionKey: string) => {
+  const addRealtimeSessionSubscription = useCallback((sessionKey: string) => {
+    const currentCount = sessionSubscriptionCountsRef.current.get(sessionKey) ?? 0;
+    sessionSubscriptionCountsRef.current.set(sessionKey, currentCount + 1);
+    if (currentCount === 0) {
+      scheduleRealtimeSubscriptionSync();
+    }
+
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const count = sessionSubscriptionCountsRef.current.get(sessionKey) ?? 0;
+      if (count > 1) {
+        sessionSubscriptionCountsRef.current.set(sessionKey, count - 1);
+        return;
+      }
+      sessionSubscriptionCountsRef.current.delete(sessionKey);
+      scheduleRealtimeSubscriptionSync();
+    };
+  }, [scheduleRealtimeSubscriptionSync]);
+
+  const addLegacySessionSubscription = useCallback((sessionKey: string) => {
     const id = nextIdRef.current++;
-    sessionSubsRef.current.set(id, sessionKey);
-    // Switch to the new session
+    legacySessionSubscriptionsRef.current.set(id, sessionKey);
     activeSessionKeyRef.current = sessionKey;
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'switch-session', sessionKey }));
-      const subscriptions: RealtimeSubscription[] = [
-        { stream: 'global', since: realtimeSeqByStreamRef.current.global },
-        { stream: `session:${sessionKey}`, since: realtimeSeqByStreamRef.current[`session:${sessionKey}`] },
-      ];
-      wsRef.current.send(JSON.stringify({ type: 'realtime-subscribe', subscriptions }));
     }
+    const releaseRealtime = addRealtimeSessionSubscription(sessionKey);
+
     return () => {
-      sessionSubsRef.current.delete(id);
-      // If this was the active session, switch to the most recent remaining one
-      const remaining = [...sessionSubsRef.current.values()];
+      legacySessionSubscriptionsRef.current.delete(id);
+      releaseRealtime();
+      if (activeSessionKeyRef.current !== sessionKey) return;
+      const remaining = [...legacySessionSubscriptionsRef.current.values()];
       const nextKey = remaining[remaining.length - 1];
+      activeSessionKeyRef.current = nextKey;
       if (wsRef.current?.readyState === WebSocket.OPEN) {
-        if (nextKey && nextKey !== activeSessionKeyRef.current) {
-          activeSessionKeyRef.current = nextKey;
-          wsRef.current.send(JSON.stringify({ type: 'switch-session', sessionKey: nextKey }));
-          const subscriptions: RealtimeSubscription[] = [
-            { stream: 'global', since: realtimeSeqByStreamRef.current.global },
-            { stream: `session:${nextKey}`, since: realtimeSeqByStreamRef.current[`session:${nextKey}`] },
-          ];
-          wsRef.current.send(JSON.stringify({ type: 'realtime-subscribe', subscriptions }));
-        } else if (!nextKey) {
-          activeSessionKeyRef.current = undefined;
-          wsRef.current.send(JSON.stringify({
-            type: 'realtime-subscribe',
-            subscriptions: [{ stream: 'global', since: realtimeSeqByStreamRef.current.global }],
-          }));
-        }
+        wsRef.current.send(JSON.stringify({ type: 'switch-session', sessionKey: nextKey ?? null }));
       }
     };
-  }, []);
+  }, [addRealtimeSessionSubscription]);
 
   // ── Imperative commands ──
 
@@ -225,6 +271,7 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
 
   useEffect(() => {
     disposedRef.current = false;
+    hasOpenedRef.current = false;
     const url = getWsUrl();
     if (!url) return;
 
@@ -256,6 +303,11 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
       switch (channel) {
         case 'system':
           if (eventType === 'connected') {
+            const bootId = typeof data?.bootId === 'string' ? data.bootId : null;
+            if (bootId && realtimeBootIdRef.current && realtimeBootIdRef.current !== bootId) {
+              realtimeSeqByStreamRef.current = {};
+            }
+            if (bootId) realtimeBootIdRef.current = bootId;
             setConnectionState('connected');
             backoffRef.current = INITIAL_BACKOFF;
           }
@@ -264,11 +316,35 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
           if (eventType === 'batch' && Array.isArray(data?.events)) {
             const events = data.events as RealtimeEventEnvelope[];
             for (const realtimeEvent of events) {
+              const previousStreamSeq = realtimeSeqByStreamRef.current[realtimeEvent.stream] ?? 0;
+              const isNewerEvent = realtimeEvent.seq > previousStreamSeq;
+              const capturedBeforeCurrentState = realtimeEvent.capturedSeq != null
+                && previousStreamSeq > realtimeEvent.capturedSeq;
               realtimeSeqByStreamRef.current[realtimeEvent.stream] = Math.max(
-                realtimeSeqByStreamRef.current[realtimeEvent.stream] ?? 0,
+                previousStreamSeq,
                 realtimeEvent.seq,
               );
               dispatch('onRealtimeEvent', realtimeEvent);
+              if (
+                realtimeEvent.event === 'history.snapshot'
+                && isNewerEvent
+                && !capturedBeforeCurrentState
+              ) {
+                const payload = realtimeEvent.data as SessionHistoryRealtimePayload;
+                const replace = Boolean(payload.replace);
+                if (
+                  payload.sessionKey
+                  && Array.isArray(payload.entries)
+                  && (payload.entries.length > 0 || replace)
+                ) {
+                  dispatch(
+                    'onHistoryUpdate',
+                    payload.sessionKey,
+                    payload.entries as unknown as Array<Record<string, unknown>>,
+                    replace,
+                  );
+                }
+              }
             }
           }
           break;
@@ -279,7 +355,10 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
           if (eventType === 'update' && data) {
             const sk = data.sessionKey as string;
             const entries = data.entries as Array<Record<string, unknown>>;
-            if (sk && entries?.length > 0) dispatch('onHistoryUpdate', sk, entries, Boolean(data.replace));
+            const replace = Boolean(data.replace);
+            if (sk && Array.isArray(entries) && (entries.length > 0 || replace)) {
+              dispatch('onHistoryUpdate', sk, entries, replace);
+            }
           }
           break;
         case 'chat':
@@ -334,22 +413,19 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
 
       ws.onopen = () => {
         if (disposedRef.current) { ws.close(); return; }
-        const isReconnect = wsRef.current === null && connectionStateRef.current === 'reconnecting';
+        const isReconnect = hasOpenedRef.current;
+        hasOpenedRef.current = true;
         wsRef.current = ws;
-        // Re-subscribe to current session
+        // The legacy history channel can follow one session. Realtime carries
+        // every ref-counted session through the accumulated subscription set.
         const key = activeSessionKeyRef.current;
         if (key) {
           ws.send(JSON.stringify({ type: 'subscribe', sessionKey: key }));
         }
-        // On reconnect, reset seq counters to force fresh bootstrap snapshot
-        // so the client gets current agent statuses instead of stale cache
-        const globalSince = isReconnect ? 0 : (realtimeSeqByStreamRef.current.global ?? 0);
-        const subscriptions: RealtimeSubscription[] = [{ stream: 'global', since: globalSince }];
-        if (key) {
-          const sessionSince = isReconnect ? 0 : (realtimeSeqByStreamRef.current[`session:${key}`] ?? 0);
-          subscriptions.push({ stream: `session:${key}`, since: sessionSince });
-        }
-        ws.send(JSON.stringify({ type: 'realtime-subscribe', subscriptions }));
+        // Omitting `since` after reconnect requests one fresh bootstrap for
+        // every active stream. Normal subscription changes retain sequence
+        // cursors and only replay missed events.
+        syncRealtimeSubscriptions(ws, isReconnect);
         pingTimerRef.current = setInterval(() => {
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'ping' }));
@@ -381,16 +457,18 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
       disposedRef.current = true;
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
       if (pingTimerRef.current) clearInterval(pingTimerRef.current);
+      if (realtimeSubscriptionSyncTimerRef.current) clearTimeout(realtimeSubscriptionSyncTimerRef.current);
       if (wsRef.current) wsRef.current.close();
       setConnectionState('disconnected');
     };
-  }, []);
+  }, [syncRealtimeSubscriptions]);
 
   const value = useMemo<SharedWsContextValue>(() => ({
     connectionState,
     isConnected: connectionState === 'connected',
     addListener,
-    addSessionSubscription,
+    addLegacySessionSubscription,
+    addRealtimeSessionSubscription,
     switchSession,
     sendTerminalCreate,
     sendTerminalAttach,
@@ -399,7 +477,7 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
     sendTerminalDetach,
     sendAgentKill,
   }), [
-    connectionState, addListener, addSessionSubscription,
+    connectionState, addListener, addLegacySessionSubscription, addRealtimeSessionSubscription,
     switchSession, sendTerminalCreate, sendTerminalAttach,
     sendTerminalInput, sendTerminalResize, sendTerminalDetach,
     sendAgentKill,
@@ -407,7 +485,9 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
 
   return (
     <SharedWsContext.Provider value={value}>
-      {children}
+      <TranscriptSessionSubscriptionProvider subscribe={addRealtimeSessionSubscription}>
+        {children}
+      </TranscriptSessionSubscriptionProvider>
     </SharedWsContext.Provider>
   );
 }
@@ -440,6 +520,7 @@ export function useSharedDesktopWs(
 ): UseSharedDesktopWsResult {
   const ctx = useContext(SharedWsContext);
   if (!ctx) throw new Error('useSharedDesktopWs must be used within DesktopWebSocketProvider');
+  const { addListener, addLegacySessionSubscription } = ctx;
 
   // Register callbacks (synced via effect to avoid render-time ref mutation)
   const cbRef = useRef(callbacks);
@@ -464,13 +545,13 @@ export function useSharedDesktopWs(
     onLaneLifecycle: (...args: Parameters<NonNullable<DesktopWsCallbacks['onLaneLifecycle']>>) => cbRef.current.onLaneLifecycle?.(...args),
   }), []);
 
-  useEffect(() => ctx.addListener(stableCallbacks), [ctx, stableCallbacks]);
+  useEffect(() => addListener(stableCallbacks), [addListener, stableCallbacks]);
 
   // Subscribe to session for chat/history
   useEffect(() => {
     if (!sessionKey) return;
-    return ctx.addSessionSubscription(sessionKey);
-  }, [ctx, sessionKey]);
+    return addLegacySessionSubscription(sessionKey);
+  }, [addLegacySessionSubscription, sessionKey]);
 
   return {
     connectionState: ctx.connectionState,

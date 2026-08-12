@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
-import { listApprovals } from '@/lib/approvals/store';
+import { listApprovals, listUnsettledApprovalContinuations } from '@/lib/approvals/store';
 import { listLanes } from '@/lib/lane/registry';
 import { buildOperatorStatusAgents, summarizeOperatorStatus } from '@/lib/orchestrator/operator-status-model';
 
@@ -13,7 +13,10 @@ export async function GET(request: NextRequest) {
 
     const [snapshot, pendingAll] = await Promise.all([
       getRuntimeInventorySnapshot({ fresh: true }),
-      listApprovals({ status: 'pending' }),
+      [
+        ...listApprovals({ status: 'pending' }),
+        ...listUnsettledApprovalContinuations(),
+      ],
     ]);
 
     // ── Agents ──

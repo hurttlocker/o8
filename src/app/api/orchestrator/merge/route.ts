@@ -2,9 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { loadMergeModule } from '@/lib/orchestrator/operator-mission-service/merge-warmup';
-import { deriveIdempotencyKey, withIdempotency } from '@/lib/orchestrator/idempotency-store';
+import {
+  bindIdempotencyClientMutation,
+  deriveIdempotencyKey,
+  withIdempotency,
+} from '@/lib/orchestrator/idempotency-store';
 import { withSynchronousWorktreeCleanup } from '@/lib/orchestrator/worktree-cleanup';
-import { asRecord, operatorError, operatorSuccess, parseJsonBody, replayShape } from '../_utils';
+import { asRecord, operatorError, operatorSuccess, parseJsonBody, replayShape, unresolvedIdempotencyResponse } from '../_utils';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -82,26 +86,50 @@ export async function POST(request: NextRequest) {
   }
 
   // #1513 — persisted idempotency. A client timeout+retry of approve_and_merge
-  // (a merge outlasts the 15s client budget) must not merge twice. Always derive
-  // a key: an explicit client key wins, else hash(verb + packetId + commit body)
-  // so the SAME logical merge collides within the TTL window.
+  // (a merge outlasts the 15s client budget) must not merge twice. The caller
+  // mints one key per deliberate invocation and reuses the serialized body on
+  // transport retries; a later deliberate merge gets a fresh key and reruns
+  // gates instead of replaying an earlier refusal.
   const clientKey = typeof record.idempotencyKey === 'string' && record.idempotencyKey.trim()
     ? record.idempotencyKey.trim()
     : null;
+  if (!clientKey) {
+    return operatorError('idempotency_key_required', 'idempotencyKey is required to merge a packet.', 400);
+  }
   const commitMessage = typeof record.commitMessage === 'string' && record.commitMessage.trim()
     ? record.commitMessage.trim()
     : undefined;
   const expectedHeadSha = typeof record.expectedHeadSha === 'string' && record.expectedHeadSha.trim()
     ? record.expectedHeadSha.trim()
     : undefined;
+  const canonicalBody = JSON.stringify({ packetId, commitMessage, expectedHeadSha });
   const key = deriveIdempotencyKey({
     verb: 'approve_and_merge',
     scopeId: packetId,
     clientKey,
-    body: `${commitMessage ?? ''} ${expectedHeadSha ?? ''}`,
+    body: canonicalBody,
   });
 
   try {
+    const binding = bindIdempotencyClientMutation({
+      namespace: 'approve_and_merge',
+      clientKey,
+      body: canonicalBody,
+    });
+    if (binding.status === 'conflict') {
+      return operatorError(
+        'idempotency_key_conflict',
+        'idempotencyKey was already used for a different packet merge.',
+        409,
+      );
+    }
+    if (binding.status === 'unavailable') {
+      return operatorError(
+        'idempotency_store_unavailable',
+        'The persisted idempotency store is unavailable; the packet was not merged.',
+        503,
+      );
+    }
     const { approveAndMergePacket } = await loadMergeModule();
     const outcome = await withIdempotency(
       { key, verb: 'approve_and_merge', scopeId: packetId },
@@ -116,6 +144,7 @@ export async function POST(request: NextRequest) {
         actor: 'user',
       })),
     );
+    if (outcome.inProgress) return unresolvedIdempotencyResponse(outcome, 'packet merge') ?? operatorSuccess(replayShape(outcome), 202);
     return operatorSuccess(replayShape(outcome));
   } catch (error) {
     const { isHeadShaMismatchError } = await loadMergeModule();

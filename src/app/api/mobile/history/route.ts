@@ -6,9 +6,13 @@ import { getOwnedOpencodeRuntimeTail } from '@/lib/opencode/owned';
 import { getOwnedCursorRuntimeTail } from '@/lib/cursor/owned';
 import { getOwnedGrokRuntimeTail } from '@/lib/grok/owned';
 import { loadMobileLlmChatHistory } from '@/lib/llm/mobile-llm-chat';
+import {
+  mergeDurableMobileTranscriptEntries,
+  parseMobileTranscriptTimestamp,
+  readRegisteredMobileRuntimeTranscript,
+} from '@/lib/mobile/history';
 import type { MobileHistoryResponse, MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import '@/lib/runtimes'; // Ensure runtimes are registered
-import { readSessionHuddleTranscriptEvents, readSessionSteerTranscriptEvents } from '@/lib/orchestrator/packet-transcript';
 import { getRuntime } from '@/lib/runtimes/registry';
 import { ownedRuntimeTailRole, runtimeTailRole } from './owned-runtime-tail-role';
 
@@ -37,37 +41,6 @@ function toolCallFromEntry(name: string, text: string): MobileTranscriptToolCall
   };
 }
 
-function appendSteerEntries(sessionKey: string, transcript: MobileTranscriptEntry[]): MobileTranscriptEntry[] {
-  const steerEvents = readSessionSteerTranscriptEvents(sessionKey);
-  const huddleEvents = readSessionHuddleTranscriptEvents(sessionKey);
-  if (steerEvents.length === 0 && huddleEvents.length === 0) return transcript;
-  const huddleEntries = huddleEvents.map((event) => {
-    const timestamp = new Date(event.ts);
-    const timestampMs = Number.isFinite(timestamp.getTime()) ? timestamp.getTime() : Date.now();
-    const timestampLabel = new Date(timestampMs).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-    return {
-      id: `huddle-${event.seq}`,
-      role: 'assistant' as const,
-      text: `Huddling — plan posted\n\n${event.text}`,
-      timestamp: timestampMs,
-      timestampLabel,
-    };
-  });
-  const steerEntries = steerEvents.map((event) => {
-    const timestamp = new Date(event.ts);
-    const timestampMs = Number.isFinite(timestamp.getTime()) ? timestamp.getTime() : Date.now();
-    const timestampLabel = new Date(timestampMs).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-    return {
-      id: `steer-${event.seq}`,
-      role: 'user' as const,
-      text: `${event.failed ? 'Steer failed to start' : event.source} · ${timestampLabel}\n\n${event.text}${event.note && event.note !== event.text ? `\n\n${event.note}` : ''}`,
-      timestamp: timestampMs,
-      timestampLabel,
-    };
-  });
-  return [...transcript, ...huddleEntries, ...steerEntries].sort((left, right) => (left.timestamp ?? 0) - (right.timestamp ?? 0));
-}
-
 export async function GET(request: NextRequest) {
   const sessionKey = request.nextUrl.searchParams.get('sessionKey')?.trim();
   const rawLimit = request.nextUrl.searchParams.get('limit');
@@ -80,7 +53,11 @@ export async function GET(request: NextRequest) {
 
   try {
     if (sessionKey.startsWith('llm-chat:')) {
-      return NextResponse.json(loadMobileLlmChatHistory(sessionKey, limit), {
+      const payload = loadMobileLlmChatHistory(sessionKey, limit);
+      return NextResponse.json({
+        ...payload,
+        transcript: mergeDurableMobileTranscriptEntries(sessionKey, payload.transcript),
+      }, {
         headers: {
           'Cache-Control': 'no-store, max-age=0',
         },
@@ -119,6 +96,7 @@ export async function GET(request: NextRequest) {
             id: `${group.id}-prompt`,
             role: 'user',
             text: promptText,
+            timestamp: parseMobileTranscriptTimestamp(group.startedAt),
             timestampLabel: group.startedAtLabel,
           });
         }
@@ -136,6 +114,7 @@ export async function GET(request: NextRequest) {
               role: 'assistant',
               text,
               toolCalls: pendingToolCalls.length > 0 ? [...pendingToolCalls] : undefined,
+              timestamp: parseMobileTranscriptTimestamp(entry.timestamp),
               timestampLabel: entry.timestampLabel,
             });
             pendingToolCalls.length = 0;
@@ -150,22 +129,32 @@ export async function GET(request: NextRequest) {
             role: 'assistant',
             text: '',
             toolCalls: [...pendingToolCalls],
+            timestamp: parseMobileTranscriptTimestamp(group.finishedAt ?? group.startedAt),
             timestampLabel: group.finishedAtLabel ?? group.startedAtLabel,
           });
         }
       }
 
-      const payload: MobileHistoryResponse = { sessionKey, transcript: appendSteerEntries(sessionKey, chatTranscript) };
+      const payload: MobileHistoryResponse = {
+        sessionKey,
+        transcript: mergeDurableMobileTranscriptEntries(sessionKey, chatTranscript),
+      };
       return NextResponse.json(payload, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
     }
 
     // Discovered Codex sessions — read JSONL tail from ~/.codex/sessions/
     if (sessionKey.startsWith('codex:')) {
-      const tail = await getCodexRuntimeTail(sessionKey);
+      const tail = await getCodexRuntimeTail(sessionKey, limit);
       const transcript: MobileTranscriptEntry[] = [];
       for (const entry of tail.entries ?? []) {
         if (entry.kind === 'event' && entry.label === 'Agent update') {
-          transcript.push({ id: entry.id, role: 'assistant', text: entry.text, timestampLabel: entry.timestampLabel });
+          transcript.push({
+            id: entry.id,
+            role: 'assistant',
+            text: entry.text,
+            timestamp: parseMobileTranscriptTimestamp(entry.timestamp),
+            timestampLabel: entry.timestampLabel,
+          });
           continue;
         }
         if (entry.kind === 'tool') {
@@ -174,6 +163,7 @@ export async function GET(request: NextRequest) {
             role: 'assistant',
             text: '',
             toolCalls: [toolCallFromEntry(entry.label || 'tool', entry.text)],
+            timestamp: parseMobileTranscriptTimestamp(entry.timestamp),
             timestampLabel: entry.timestampLabel,
           });
           continue;
@@ -184,7 +174,13 @@ export async function GET(request: NextRequest) {
             const lowerText = entry.text.toLowerCase();
             if (lowerText.includes('<permissions') || lowerText.includes('collaboration_mode') || lowerText.includes('# agents.md') || lowerText.includes('sandbox_mode')) continue;
           }
-          transcript.push({ id: entry.id, role, text: entry.text, timestampLabel: entry.timestampLabel });
+          transcript.push({
+            id: entry.id,
+            role,
+            text: entry.text,
+            timestamp: parseMobileTranscriptTimestamp(entry.timestamp),
+            timestampLabel: entry.timestampLabel,
+          });
           continue;
         }
         // Tool output: skip — the assistant summary covers what happened
@@ -204,7 +200,10 @@ export async function GET(request: NextRequest) {
         seen.add(key);
         deduped.push(entry);
       }
-      const payload: MobileHistoryResponse = { sessionKey, transcript: appendSteerEntries(sessionKey, deduped) };
+      const payload: MobileHistoryResponse = {
+        sessionKey,
+        transcript: mergeDurableMobileTranscriptEntries(sessionKey, deduped),
+      };
       return NextResponse.json(payload, {
         headers: { 'Cache-Control': 'no-store, max-age=0' },
       });
@@ -243,11 +242,23 @@ export async function GET(request: NextRequest) {
           } : undefined,
         }));
         return NextResponse.json(
-          { sessionKey, transcript: appendSteerEntries(sessionKey, transcript) } satisfies MobileHistoryResponse,
+          { sessionKey, transcript: mergeDurableMobileTranscriptEntries(sessionKey, transcript) } satisfies MobileHistoryResponse,
           { headers: { 'Cache-Control': 'no-store, max-age=0' } },
         );
       }
     }
+
+    const runtimeTranscript = await readRegisteredMobileRuntimeTranscript(sessionKey, limit);
+    if (runtimeTranscript) {
+      return NextResponse.json(
+        {
+          sessionKey,
+          transcript: mergeDurableMobileTranscriptEntries(sessionKey, runtimeTranscript),
+        } satisfies MobileHistoryResponse,
+        { headers: { 'Cache-Control': 'no-store, max-age=0' } },
+      );
+    }
+
     return NextResponse.json(
       {
         error: `Unsupported mobile session: ${sessionKey}`,

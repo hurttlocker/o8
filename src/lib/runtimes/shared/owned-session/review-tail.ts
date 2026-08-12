@@ -60,7 +60,11 @@ export function createReviewTailController({
     };
   }
 
-  async function collectTailEntries(session: OwnedSessionRecord) {
+  async function collectTailEntries(session: OwnedSessionRecord, limit?: number) {
+    const retainedEntryLimit = Math.min(Math.max(Math.floor(limit ?? 24), 1), 200);
+    const retainedGroupLimit = limit === undefined
+      ? 8
+      : Math.min(Math.max(Math.floor(limit), 8), 200);
     const runs = [...session.recentRuns].sort((a, b) => a.startedAt.localeCompare(b.startedAt));
     const entries: OwnedTailEntry[] = [];
     const groups: OwnedTailGroup[] = [];
@@ -95,13 +99,13 @@ export function createReviewTailController({
     }
 
     return {
-      entries: entries.slice(-24),
-      groups: groups.slice(-8),
+      entries: entries.slice(-retainedEntryLimit),
+      groups: groups.slice(-retainedGroupLimit),
       threadId: discoveredThreadId,
     };
   }
 
-  async function getRuntimeTail(surfaceId: string) {
+  async function getRuntimeTail(surfaceId: string, limit?: number) {
     const activeSession = await io.findSession(surfaceId);
     const session = activeSession ?? await io.findArchivedSession(surfaceId);
     if (!session) {
@@ -110,7 +114,7 @@ export function createReviewTailController({
 
     if (activeSession) {
       await runController.refreshSession(session);
-      const tail = await collectTailEntries(session);
+      const tail = await collectTailEntries(session, limit);
       if (!session.threadId && tail.threadId) {
         session.threadId = tail.threadId;
         await io.saveSession(session);
@@ -122,7 +126,7 @@ export function createReviewTailController({
       };
     }
 
-    const tail = await collectTailEntries(session);
+    const tail = await collectTailEntries(session, limit);
     return {
       surface: buildRuntimeSurface(lifecycleContext, session, false),
       entries: tail.entries,

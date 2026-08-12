@@ -11,6 +11,10 @@ import { randomUUID } from 'node:crypto';
 
 import { signalBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
 import { chainOnKey } from '@/lib/util/keyed-promise-chain';
+import {
+  getOrPinPacketRuntimeIdentity,
+  getSelectedRuntimeIdentity,
+} from '@/lib/runtime/identity-catalog';
 
 import {
   archiveOwnedSessionDir,
@@ -39,6 +43,7 @@ import type {
   OwnedLaunchResponse,
   OwnedReviewDisposition,
   OwnedRuntimeAdapter,
+  OwnedSessionRecord,
   OwnedSessionStore,
 } from './types';
 
@@ -122,9 +127,40 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     const id = `${sessionIdPrefix}${Date.now()}-${randomUUID().slice(0, 8)}`;
     const sessionDir = path.join(await io.ensureRoot(), id);
     await ensureDir(sessionDir);
+    let selectedIdentity: Awaited<ReturnType<typeof getSelectedRuntimeIdentity>> = null;
+    if (adapter.isolatedConfigHomeEnv && adapter.defaultConfigHome && request.packetId) {
+      const defaultConfigHome = adapter.defaultConfigHome();
+      let latestPacketSession: OwnedSessionRecord | null = null;
+      for (const sessionDir of await io.listSessionDirs()) {
+        try {
+          const candidate = await io.loadSession(sessionDir);
+          if (candidate.packetId === request.packetId
+            && candidate.identity
+            && (!latestPacketSession || candidate.updatedAt > latestPacketSession.updatedAt)) {
+            latestPacketSession = candidate;
+          }
+        } catch {
+          // One corrupt legacy session must not block a new, otherwise valid launch.
+        }
+      }
+      const existingPacketIdentity = latestPacketSession?.identity;
+      selectedIdentity = await getOrPinPacketRuntimeIdentity({
+        runtime: runtimeId,
+        packetId: request.packetId,
+        preferred: existingPacketIdentity,
+        fallback: {
+          id: `${runtimeId}-local-default`,
+          label: 'Current local sign-in',
+          configHomeRef: defaultConfigHome,
+        },
+      });
+    } else if (adapter.isolatedConfigHomeEnv) {
+      selectedIdentity = await getSelectedRuntimeIdentity(runtimeId);
+    }
 
     const session = {
       surfaceId: `${surfacePrefix}${id}`,
+      launchMutationId: request.clientMutationId?.trim() || undefined,
       laneId: request.laneId?.trim() || undefined,
       packetId: request.packetId?.trim() || undefined,
       sessionDir,
@@ -140,6 +176,11 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
       latestSummary: compactText(prompt, 140) || `Owned ${adapter.squadShortName} session launched from o8.`,
       model: request.model?.trim() || adapter.defaultModel || undefined,
       effort: request.effort,
+      identity: selectedIdentity ? {
+        id: selectedIdentity.id,
+        label: selectedIdentity.label,
+        configHomeRef: selectedIdentity.configHomeRef,
+      } : undefined,
       reviewDisposition: 'watching' as const,
       reviewDispositionUpdatedAt: nowIso(),
       recentRuns: [],
@@ -341,6 +382,11 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     });
   }
 
+  async function getSessionIdentityId(surfaceId: string): Promise<string | null> {
+    const session = await io.findSession(surfaceId) ?? await io.findArchivedSession(surfaceId);
+    return session?.identity?.id?.trim() || null;
+  }
+
   const TIMER_KEY = Symbol.for(`o8.ownedSession.refreshTimer.${runtimeId}`);
   const globalStore = globalThis as unknown as Record<symbol, NodeJS.Timeout | undefined>;
   if (!globalStore[TIMER_KEY]) {
@@ -378,6 +424,7 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     archiveSession: io.archiveSession,
     sweepOrphanedSessions: fleetComputer.sweepOrphanedSessions,
     getTelemetrySources: reviewTailController.getTelemetrySources,
+    getSessionIdentityId,
     setReviewDisposition,
     invalidateFleetCache,
   };

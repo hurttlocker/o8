@@ -24,7 +24,7 @@ function handleHistoryUpdate(
   merge: TranscriptMerger | undefined,
 ): void {
   if (!sessionKey) return;
-  if (!Array.isArray(entries) || entries.length === 0) return;
+  if (!Array.isArray(entries) || (entries.length === 0 && !replace)) return;
   const typed = entries as unknown as MobileTranscriptEntry[];
   if (replace) {
     transcriptStore.setSlice(sessionKey, {

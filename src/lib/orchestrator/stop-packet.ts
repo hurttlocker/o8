@@ -7,7 +7,16 @@
  * stop must INTERRUPT the live session first (kills the process via the runtime
  * adapter), THEN archive — and must NOT relaunch. "Stop" means stop.
  */
-import { interruptLaneSessions, killLaneSessionsConfirmed } from '@/lib/lane/reap-sessions';
+import { archiveLaneSessions, killLaneSessionsConfirmed } from '@/lib/lane/reap-sessions';
+import { withPacketLifecycleMutationLock } from '@/lib/orchestrator/lifecycle-mutation-lock';
+import {
+  holdPacketLifecycleMutation,
+  markPacketLifecycleFailure,
+  mutatePacketLifecycleGuard,
+  type PacketLifecycleGuard,
+} from '@/lib/orchestrator/packet-lifecycle-guard';
+import { collectPacketLifecycleLanes } from '@/lib/orchestrator/packet-lifecycle-targets';
+import { unregisterWatchedAgent } from '@/lib/supervisor/agent-supervisor';
 
 export interface StopPacketResult {
   ok: boolean;
@@ -25,8 +34,10 @@ export interface StopPacketResult {
 export interface StopAllResult {
   ok: boolean;
   stoppedPackets: number;
+  failedPackets: number;
   interruptedSessions: number;
   archivedLanes: number;
+  failedLanes: number;
   note: string;
 }
 
@@ -38,29 +49,36 @@ export interface StopAllResult {
 // #1528 review F10 — one stop per packet at a time. Two concurrent stops
 // would double the backgrounded cleanup (duplicate archive/prune races) and
 // each would clear the other's operatorStopped provenance via the reset hold.
-const stopsInFlight = new Set<string>();
+const stopsInFlight = new Map<string, Promise<StopPacketResult>>();
+const stopCleanups = new Map<string, Promise<boolean>>();
 
-export async function stopPacket(packetId: string): Promise<StopPacketResult> {
-  const { listLanes } = await import('@/lib/lane/registry');
-  const { resetPacket } = await import('@/lib/orchestrator/operator-mission-service');
-
-  if (stopsInFlight.has(packetId)) {
-    return {
-      ok: true,
-      packetId,
-      interruptedSessions: 0,
-      archivedLanes: 0,
-      worktreePruned: false,
-      killConfirmed: true,
-      note: `A stop for ${packetId} is already in progress — not starting a second.`,
-    };
-  }
-  stopsInFlight.add(packetId);
-  try {
-    return await stopPacketInner(packetId, resetPacket, listLanes);
-  } finally {
-    stopsInFlight.delete(packetId);
-  }
+export function stopPacket(packetId: string): Promise<StopPacketResult> {
+  const existing = stopsInFlight.get(packetId);
+  if (existing) return existing;
+  // A prior stop's settled cleanup receipt stays readable for stop-all until a
+  // genuinely new stop attempt begins.
+  stopCleanups.delete(packetId);
+  const operation = withPacketLifecycleMutationLock(packetId, async () => {
+    const { listLanes } = await import('@/lib/lane/registry');
+    const { resetPacket } = await import('@/lib/orchestrator/operator-mission-service');
+    return stopPacketInner(packetId, resetPacket, listLanes);
+  });
+  const tracked = operation.then((result) => {
+    const cleanup = stopCleanups.get(packetId);
+    if (cleanup) {
+      void cleanup.finally(() => {
+        if (stopsInFlight.get(packetId) === tracked) stopsInFlight.delete(packetId);
+      });
+    } else if (stopsInFlight.get(packetId) === tracked) {
+      stopsInFlight.delete(packetId);
+    }
+    return result;
+  }, (error) => {
+    if (stopsInFlight.get(packetId) === tracked) stopsInFlight.delete(packetId);
+    throw error;
+  });
+  stopsInFlight.set(packetId, tracked);
+  return tracked;
 }
 
 async function stopPacketInner(
@@ -68,12 +86,28 @@ async function stopPacketInner(
   resetPacket: typeof import('@/lib/orchestrator/operator-mission-service').resetPacket,
   listLanes: typeof import('@/lib/lane/registry').listLanes,
 ): Promise<StopPacketResult> {
-  const lanes = listLanes().filter((lane) => lane.packetId === packetId);
+  const stopGuard = await holdPacketLifecycleMutation({ packetId, kind: 'stop' });
+  const packetKnown = Boolean(stopGuard);
+
+  // Install the dispatch blocker before the kill ladder yields. A stop can
+  // spend seconds waiting through SIGINT -> SIGTERM -> SIGKILL; leaving the
+  // packet queued during that window lets an explicit or headless dispatch
+  // bind a fresh lane that the stop's scoped reset never owned. The generation
+  // ties every later transition and cleanup to this exact stop attempt, while
+  // the packet's live lane/session/worktree binding remains untouched until
+  // death is confirmed.
+  // Read lanes after the durable hold. If a dispatch already owned the mission
+  // lock when Stop arrived, the hold waits for it and this read captures the
+  // lane it finished binding instead of using a stale pre-lock snapshot.
+  const persistedLanes = listLanes().filter((lane) => lane.packetId === packetId);
+  const lanes = stopGuard
+    ? collectPacketLifecycleLanes(stopGuard.previousPacket, stopGuard.repoPath, persistedLanes)
+    : persistedLanes;
 
   // #1528 — idempotent no-op: nothing bound anywhere means nothing to stop.
   // Stopping an already-gone packet must return success in milliseconds, never
   // fall through to resetPacket's "not found" throw.
-  if (lanes.length === 0 && !(await packetKnownToMissionState(packetId))) {
+  if (lanes.length === 0 && !packetKnown) {
     return {
       ok: true,
       packetId,
@@ -95,11 +129,13 @@ async function stopPacketInner(
   const survivors = kills.filter((kill) => !kill.confirmed && !kill.alreadyDead);
 
   if (survivors.length > 0) {
-    await markPacketKillUnconfirmed(packetId, survivors.map((survivor) => ({
-      laneId: survivor.laneId,
-      sessionKey: survivor.sessionKey,
-      pid: survivor.pid,
-    })));
+    if (stopGuard) {
+      await markPacketKillUnconfirmed(stopGuard, survivors.map((survivor) => ({
+        laneId: survivor.laneId,
+        sessionKey: survivor.sessionKey,
+        pid: survivor.pid,
+      })));
+    }
     return {
       ok: false,
       packetId,
@@ -117,8 +153,10 @@ async function stopPacketInner(
   // archive + worktree prune: rm -rf of a node_modules-cloned worktree runs for
   // minutes and used to hold this response open until undici's client timeout
   // fired and the CLI misreported connection_refused while the server listened.
-  await markPacketStoppedHeld(packetId);
-  void resetPacket({
+  if (stopGuard) {
+    await markPacketStoppedHeld(stopGuard);
+  }
+  const cleanup = resetPacket({
     packetId,
     clearWorktree: true,
     reason: 'stopped by operator (#1286)',
@@ -128,61 +166,43 @@ async function stopPacketInner(
     scope: {
       laneIds: lanes.map((lane) => lane.id),
       skipHoldIfStateMoved: true,
+      expectedReleaseSource: stopGuard?.source,
     },
   }).then((reset) => {
     const pruned = (reset as { worktreePruned?: boolean }).worktreePruned === true;
     console.log(`[stop-packet] background cleanup finished for ${packetId}${pruned ? ' (worktree pruned)' : ''}`);
+    return reset.reset !== false || reset.salvaged === true;
   }).catch((error) => {
     console.warn(`[stop-packet] background cleanup failed for ${packetId} — packet stays held:`, error);
+    return false;
   });
+  stopCleanups.set(packetId, cleanup);
+  void cleanup;
 
   return {
     ok: true,
     packetId,
     interruptedSessions: reaped,
-    archivedLanes: lanes.length,
+    archivedLanes: 0,
     worktreePruned: false,
     killConfirmed: true,
     note: `Stopped packet ${packetId}: confirmed-killed ${reaped} live session${reaped === 1 ? '' : 's'}; held against relaunch. Archiving ${lanes.length} lane${lanes.length === 1 ? '' : 's'} + pruning the worktree in the background (audit via lane events). Not relaunched.`,
   };
 }
 
-/** #1528 — cheap existence probe so stop can no-op honestly. */
-async function packetKnownToMissionState(packetId: string): Promise<boolean> {
-  try {
-    const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
-    if (readOrchestratorControlPlaneState().packets.some((packet) => packet.id === packetId)) return true;
-  } catch { /* fall through to registry probe */ }
-  try {
-    const { findMissionRegistryEntryByPacketId } = await import('@/lib/orchestrator/mission-registry');
-    return Boolean(findMissionRegistryEntryByPacketId(packetId, { includeArchived: false }));
-  } catch {
-    return false;
-  }
-}
-
-/**
- * #1528 — the anti-relaunch guard that must be DURABLE before the response
- * returns: operatorStopped + held under the control-plane lock, so the
- * backgrounded cleanup can take minutes without a dispatch tick relaunching
- * the packet in the window. Best-effort — a failed write is logged, and the
- * backgrounded resetPacket applies the same hold again when it lands.
- */
-async function markPacketStoppedHeld(packetId: string): Promise<void> {
-  try {
-    const { withLockedState } = await import('@/lib/orchestrator/control-plane');
-    await withLockedState((state) => {
-      const packet = state.packets.find((candidate) => candidate.id === packetId);
-      if (!packet) return;
-      packet.operatorStopped = true;
-      packet.queueState = 'held';
-      packet.status = 'blocked';
-      packet.blockedReason = 'operator_stopped';
-      packet.lastEventAt = new Date().toISOString();
-      packet.lastEventLabel = 'operator_stopped';
-    });
-  } catch (error) {
-    console.warn(`[stop-packet] failed to mark packet ${packetId} operator-stopped before background cleanup:`, error);
+async function markPacketStoppedHeld(guard: PacketLifecycleGuard): Promise<void> {
+  const held = await mutatePacketLifecycleGuard(guard, (packet) => {
+    packet.operatorStopped = true;
+    packet.queueState = 'held';
+    packet.status = 'blocked';
+    packet.blockedReason = 'operator_stopped';
+    packet.releaseState = 'pending';
+    packet.lastEventAt = new Date().toISOString();
+    packet.lastEventLabel = 'operator_stopped';
+    return true;
+  });
+  if (!held.matched || held.result !== true) {
+    throw new Error(`Packet ${guard.packetId} moved to a newer generation before its confirmed stop could be finalized.`);
   }
 }
 
@@ -192,26 +212,16 @@ async function markPacketStoppedHeld(packetId: string): Promise<void> {
  * it. Best-effort — a failed write is logged, never thrown.
  */
 async function markPacketKillUnconfirmed(
-  packetId: string,
+  guard: PacketLifecycleGuard,
   survivors: Array<{ laneId: string; sessionKey: string; pid?: number }>,
 ): Promise<void> {
   try {
-    const { withLockedState } = await import('@/lib/orchestrator/control-plane');
-    await withLockedState((state) => {
-      const packet = state.packets.find((candidate) => candidate.id === packetId);
-      if (!packet) return;
-      packet.operatorStopped = true;
-      packet.queueState = 'held';
-      packet.status = 'blocked';
-      packet.blockedReason = 'kill_unconfirmed';
-      packet.lastEventAt = new Date().toISOString();
-      packet.lastEventLabel = 'kill_unconfirmed';
-    });
+    await markPacketLifecycleFailure(guard, 'kill_unconfirmed');
   } catch (error) {
-    console.warn(`[kill] failed to mark packet ${packetId} kill_unconfirmed:`, error);
+    console.warn(`[kill] failed to mark packet ${guard.packetId} kill_unconfirmed:`, error);
   }
   console.warn(
-    `[kill] packet ${packetId}: ${survivors.length} worker(s) unconfirmed after SIGKILL — ${survivors
+    `[kill] packet ${guard.packetId}: ${survivors.length} worker(s) unconfirmed after SIGKILL — ${survivors
       .map((survivor) => `${survivor.sessionKey}${survivor.pid ? ` pid ${survivor.pid}` : ''}`)
       .join(', ')}`,
   );
@@ -234,35 +244,79 @@ export async function stopAllLanes(opts: { repoPath?: string } = {}): Promise<St
 
   let interrupted = 0;
   let archived = 0;
+  let stoppedPackets = 0;
+  let failedPackets = 0;
+  let failedLanes = 0;
 
   // Packets with bound lanes go through the full stop (interrupt + archive + prune).
   for (const packetId of packetIds) {
     try {
       const result = await stopPacket(packetId);
       interrupted += result.interruptedSessions;
-      archived += result.archivedLanes;
+      if (result.ok && result.killConfirmed) {
+        const cleanupReceipt = stopCleanups.get(packetId);
+        const cleanupOk = await (cleanupReceipt ?? Promise.resolve(true));
+        if (cleanupReceipt && stopCleanups.get(packetId) === cleanupReceipt) {
+          stopCleanups.delete(packetId);
+        }
+        if (cleanupOk) {
+          stoppedPackets += 1;
+          archived += active.filter((lane) => lane.packetId === packetId).length;
+        } else {
+          failedPackets += 1;
+          failedLanes += Math.max(1, active.filter((lane) => lane.packetId === packetId).length);
+        }
+      } else {
+        failedPackets += 1;
+        failedLanes += Math.max(1, active.filter((lane) => lane.packetId === packetId).length);
+      }
     } catch (error) {
       console.warn(`[stop-packet] stopAll: failed to stop packet ${packetId}:`, error);
+      failedPackets += 1;
+      failedLanes += Math.max(1, active.filter((lane) => lane.packetId === packetId).length);
     }
   }
 
-  // Orphan lanes (no packetId — e.g. zombie remnants) get interrupted + archived directly.
+  // Orphan lanes have no packet state to park, so they still require the same
+  // confirmed kill truth. A surviving orphan stays visible and bound for
+  // manual recovery instead of being archived while it keeps running.
   const orphans = active.filter((lane) => !lane.packetId);
-  interrupted += await interruptLaneSessions(orphans);
+  const orphanKills = await killLaneSessionsConfirmed(orphans);
+  const confirmedOrphanIds = new Set(orphanKills
+    .filter((outcome) => outcome.confirmed || outcome.alreadyDead)
+    .map((outcome) => outcome.laneId));
   for (const lane of orphans) {
+    if (!lane.sessionKey?.trim()) confirmedOrphanIds.add(lane.id);
+  }
+  interrupted += confirmedOrphanIds.size;
+  const stoppedOrphans = orphans.filter((candidate) => confirmedOrphanIds.has(candidate.id));
+  const sessionArchive = await archiveLaneSessions(stoppedOrphans);
+  const unarchivedSessionLaneIds = new Set(sessionArchive.failures.map((failure) => failure.laneId));
+  for (const lane of stoppedOrphans.filter((candidate) => !unarchivedSessionLaneIds.has(candidate.id))) {
     try {
-      archiveLane(lane.id, 'user');
+      if (lane.sessionKey?.trim()) unregisterWatchedAgent(lane.sessionKey.trim());
+      const archivedLane = archiveLane(lane.id, 'user');
+      if (!archivedLane) throw new Error('lane disappeared during orphan archive');
       archived += 1;
     } catch (error) {
       console.warn(`[stop-packet] stopAll: failed to archive orphan lane ${lane.id}:`, error);
+      failedLanes += 1;
     }
   }
+  failedLanes += unarchivedSessionLaneIds.size;
+  failedLanes += orphans.length - confirmedOrphanIds.size;
+
+  const ok = failedPackets === 0 && failedLanes === 0;
 
   return {
-    ok: true,
-    stoppedPackets: packetIds.size,
+    ok,
+    stoppedPackets,
+    failedPackets,
     interruptedSessions: interrupted,
     archivedLanes: archived,
-    note: `Stopped everything${opts.repoPath ? ' in this repo' : ''}: reaped ${interrupted} live session${interrupted === 1 ? '' : 's'}, archived ${archived} lane${archived === 1 ? '' : 's'} across ${packetIds.size} packet${packetIds.size === 1 ? '' : 's'}. Nothing relaunched.`,
+    failedLanes,
+    note: ok
+      ? `Stopped everything${opts.repoPath ? ' in this repo' : ''}: reaped ${interrupted} live session${interrupted === 1 ? '' : 's'}, archived ${archived} lane${archived === 1 ? '' : 's'} across ${stoppedPackets} packet${stoppedPackets === 1 ? '' : 's'}. Nothing relaunched.`
+      : `Stop-all was incomplete: ${failedPackets} packet${failedPackets === 1 ? '' : 's'} and ${failedLanes} lane${failedLanes === 1 ? '' : 's'} could not be confirmed stopped. Their live bindings were preserved.`,
   };
 }

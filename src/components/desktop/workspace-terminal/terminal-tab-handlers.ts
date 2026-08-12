@@ -376,6 +376,7 @@ export function serializeTabsForPersistence(currentTabs: TerminalTab[]) {
       chatModelId: tab.chatModelId,
       chatOpenrouterModel: tab.chatOpenrouterModel,
       orchestratorThreadId: tab.orchestratorThreadId,
+      outsideWorkerHost: tab.outsideWorkerHost,
       canvasTab: tab.canvasTab ? {
         id: tab.canvasTab.id,
         kind: tab.canvasTab.kind,

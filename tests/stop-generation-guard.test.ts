@@ -23,10 +23,14 @@ const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-stop-generation-'));
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
-vi.mock('@/lib/lane/reap-sessions', () => ({
-  killLaneSessionsConfirmed: vi.fn(async () => []),
-  archiveLaneSessions: vi.fn(async () => 0),
-}));
+vi.mock('@/lib/lane/reap-sessions', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/lane/reap-sessions')>();
+  return {
+    ...actual,
+    killLaneSessionsConfirmed: vi.fn(async () => []),
+    archiveLaneSessions: vi.fn(async () => ({ targeted: 0, archived: 0, outcomes: [], failures: [] })),
+  };
+});
 
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const {
@@ -107,7 +111,7 @@ describe('stop background cleanup generation guard (F1/F2)', () => {
       reason: 'stopped by operator (#1286)',
       scope: { laneIds: [oldLane.id], skipHoldIfStateMoved: true },
     });
-    expect(result.reset).toBe(true);
+    expect(result.reset).toBe(false);
 
     // F2 — the live re-dispatch worktree survives.
     expect(existsSync(join(liveWorktree, 'in-progress.ts'))).toBe(true);

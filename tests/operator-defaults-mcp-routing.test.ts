@@ -119,6 +119,7 @@ async function createMissionThroughRoute(input: {
     method: 'POST',
     headers: { host: 'localhost:47120', 'Content-Type': 'application/json' },
     body: JSON.stringify({
+      clientMutationId: `create-route-${input.issueNumber}`,
       repoPath: input.repoPath,
       requestedRuntime: input.requestedRuntime,
       ...(input.requestedModel ? { requestedModel: input.requestedModel } : {}),
@@ -301,6 +302,7 @@ describe('MCP operator defaults and dispatch routing', () => {
       method: 'POST',
       headers: { host: 'localhost:47120', 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        clientMutationId: 'create-route-default-model',
         repoPath,
         requestedRuntime: 'codex',
         issues: [{ number: 1, title: 'Honor the configured worker model', body: '', url: '' }],

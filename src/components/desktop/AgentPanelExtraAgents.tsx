@@ -40,6 +40,7 @@ import {
 import { SpawnedAgentHoverCard } from './SpawnedAgentHoverCard';
 import { callRetryPacket } from '@/lib/orchestrator/packet-actions';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import { archiveRuntimeTarget } from '@/lib/runtime/archive-client';
 import { SectionLabel } from './repo-focus/tabs/chats/shared';
 import {
   attentionBand,
@@ -269,6 +270,7 @@ function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession }: AgentP
 
   const handleArchive = useCallback(async (row: ExtraAgentRow) => {
     if (!row.sessionKey && !row.laneId) return;
+    const clientMutationId = crypto.randomUUID();
     setArchivedRowKeys((prev) => {
       if (prev.has(row.key)) return prev;
       const next = new Set(prev);
@@ -277,14 +279,10 @@ function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession }: AgentP
     });
     setBusy(true);
     try {
-      const response = await fetch('/api/runtime/archive', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(row.sessionKey
-          ? { sessionKey: row.sessionKey }
-          : { laneId: row.laneId }),
-      });
-      if (!response.ok) throw new Error(`Archive failed with status ${response.status}`);
+      await archiveRuntimeTarget(
+        row.sessionKey ? { sessionKey: row.sessionKey } : { laneId: row.laneId! },
+        clientMutationId,
+      );
     } catch {
       // Roll back the optimistic hide so operator can retry.
       setArchivedRowKeys((prev) => {
@@ -373,15 +371,17 @@ function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession }: AgentP
   const handleRetry = useCallback(async (row: ExtraAgentRow) => {
     if (!row.packetId) return;
     setBusy(true);
+    let receiptUnsettled = false;
     try {
       const result = await callRetryPacket(row.packetId, 'spawned agent row retry');
+      receiptUnsettled = result.unsettled === true;
       if (result.ok) {
         void fetchData();
       } else {
         console.warn('[spawned-agents] retry failed:', result.note ?? 'Retry failed');
       }
     } finally {
-      setBusy(false);
+      if (!receiptUnsettled) setBusy(false);
     }
   }, [fetchData]);
 

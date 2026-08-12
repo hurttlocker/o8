@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
 import { QUALITY_SEARCH_ROLES } from '@/lib/orchestrator/quality-search';
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
+import { releaseAbandonedMissionLifecycleHold } from '@/lib/orchestrator/mission-lifecycle-hold';
 
 /**
  * Best-of-N fan-out.
@@ -27,6 +28,8 @@ function buildComparisonGroupId(qualitySearch: boolean) {
  * reference when nothing fans out (no churn).
  */
 export function fanOutComparisonPackets(state: OrchestratorMissionState): OrchestratorMissionState {
+  state = releaseAbandonedMissionLifecycleHold(state);
+  if (state.lifecycleHold) return state;
   const activeComparisonGroups = new Set(state.activeComparisonGroups ?? []);
   const nextPackets: OrchestratorPacket[] = [];
   let changed = false;

@@ -11,6 +11,7 @@ import { invalidateCommandCenterSnapshotCaches } from '@/lib/command-center/snap
 import { rejectLlmApproval, resumeLlmApproval } from '@/lib/approvals/llm';
 import {
   claimApprovalResolution,
+  finalizeApprovalContinuation,
   reopenApprovalAfterEvidenceDrift,
 } from '@/lib/approvals/resolution';
 import {
@@ -19,6 +20,7 @@ import {
   getApproval,
   listApprovals,
   listApprovalsForContext,
+  listUnsettledApprovalContinuations,
 } from '@/lib/approvals/store';
 import type { CreateApprovalInput } from '@/lib/approvals/types';
 import { launchRuntimeSurface } from '@/lib/runtime/actions';
@@ -77,7 +79,12 @@ export async function GET(request: NextRequest) {
   const approvals = isContextQuery
     ? listApprovalsForContext({ packetId, laneId, sessionKey })
       .filter((approval) => status === 'all' || approval.status === status)
-    : listApprovals({ status, sessionKey });
+    : status === 'pending'
+      ? [
+          ...listApprovals({ status, sessionKey }),
+          ...listUnsettledApprovalContinuations({ sessionKey }),
+        ]
+      : listApprovals({ status, sessionKey });
 
   return NextResponse.json({
     approvals: (isContextQuery || includeDiff) ? approvals : stripDiffPreviews(approvals),
@@ -273,12 +280,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Approval not found' }, { status: 404 });
     }
     if (!resolutionClaim.claimed) {
-      const status = approval.status === 'pending' ? 409 : 200;
+      const continuationPending = approval.resolution?.continuationStatus === 'pending'
+        || approval.resolution?.continuationStatus === 'outcome_unknown';
+      const status = approval.status === 'pending' || continuationPending ? 409 : 200;
       return NextResponse.json({
-        ok: approval.status !== 'pending',
+        ok: approval.status !== 'pending' && !continuationPending,
         approval,
         resolved: action,
-        note: approval.status === 'pending'
+        note: continuationPending
+          ? 'The approval decision was recorded, but its continuation is not confirmed. Inspect the target before retrying.'
+          : approval.status === 'pending'
           ? 'Approval changed while it was being resolved. Review it again.'
           : 'Approval was already resolved.',
       }, {
@@ -293,13 +304,21 @@ export async function POST(request: NextRequest) {
     if (action === 'approve' && current.toolName === 'edit_file' && approval.status === 'approved' && approval.resolvedAt === approval.updatedAt) {
       const applyResult = await applyApprovedFileEdit(current);
       if (!applyResult.ok) {
+        const uncertain = applyResult.code === 'write_failed';
+        const failedApproval = uncertain && resolutionClaim.claimId
+          ? finalizeApprovalContinuation(id, resolutionClaim.claimId, 'outcome_unknown', applyResult.error)
+          : resolutionClaim.claimId
+            ? reopenApprovalAfterEvidenceDrift(id, resolutionClaim.claimId, applyResult.error)
+            : approval;
+        invalidateApprovalCaches();
         return NextResponse.json({
           ok: false,
           error: applyResult.error,
           code: applyResult.code,
-          approval,
+          approval: failedApproval,
+          outcomeUnknown: uncertain || undefined,
         }, {
-          status: applyResult.status,
+          status: uncertain ? 409 : applyResult.status,
           headers: { 'Cache-Control': 'no-store, max-age=0' },
         });
       }
@@ -323,13 +342,18 @@ export async function POST(request: NextRequest) {
     ) {
       const applyResult = await applyApprovedSpecUpdate(approval);
       if (!applyResult.ok) {
+        const failedApproval = resolutionClaim.claimId
+          ? finalizeApprovalContinuation(id, resolutionClaim.claimId, 'outcome_unknown', applyResult.message)
+          : approval;
+        invalidateApprovalCaches();
         return NextResponse.json({
           ok: false,
           error: applyResult.message,
           code: applyResult.error,
-          approval,
+          approval: failedApproval,
+          outcomeUnknown: true,
         }, {
-          status: 500,
+          status: 409,
           headers: { 'Cache-Control': 'no-store, max-age=0' },
         });
       }
@@ -346,6 +370,7 @@ export async function POST(request: NextRequest) {
       ?? (action === 'approve' ? 'Approved.' : 'Denied.');
     let assistantMessage: unknown = undefined;
     let nextApproval: unknown = undefined;
+    let continuationOutcome: 'completed' | 'failed' | 'outcome_unknown' = 'completed';
 
     const continuation = approval.continuation;
 
@@ -412,6 +437,7 @@ export async function POST(request: NextRequest) {
           headers: { 'Cache-Control': 'no-store, max-age=0' },
         });
       }
+      if (!result.ok) continuationOutcome = 'failed';
       decisionNote = mergeDecisionNotes(appliedEdit?.message, result.note);
     } else if (continuation?.kind === 'plan' && action === 'approve') {
       // Plan continuation — create mission from approved plan
@@ -420,6 +446,7 @@ export async function POST(request: NextRequest) {
         const result = await dispatchApprovedPlan(continuation);
         decisionNote = mergeDecisionNotes(appliedEdit?.message, result.note);
       } catch (error) {
+        continuationOutcome = 'outcome_unknown';
         decisionNote = `Plan dispatch failed: ${error instanceof Error ? error.message : 'unknown'}`;
       }
     } else if (continuation?.kind === 'runtime' && action === 'approve') {
@@ -433,15 +460,27 @@ export async function POST(request: NextRequest) {
           prompt: continuation.prompt,
           skipSetup: true,
         });
+        if (!result.ok) continuationOutcome = 'failed';
         decisionNote = mergeDecisionNotes(appliedEdit?.message, result.note);
       } else if (continuation.action === 'resume' && continuation.message) {
         const rt = getRuntime(continuation.runtimeId);
         if (rt) {
           const result = await rt.resume(continuation.sessionKey, continuation.message);
+          if (!result.ok) continuationOutcome = 'failed';
           decisionNote = mergeDecisionNotes(appliedEdit?.message, result.note);
+        } else {
+          continuationOutcome = 'failed';
+          decisionNote = mergeDecisionNotes(
+            appliedEdit?.message,
+            `Runtime ${continuation.runtimeId} is unavailable.`,
+          );
         }
       }
     }
+
+    const settledApproval = approval.resolution?.continuationStatus && resolutionClaim.claimId
+      ? finalizeApprovalContinuation(approval.id, resolutionClaim.claimId, continuationOutcome, decisionNote)
+      : approval;
 
     invalidateApprovalCaches();
     await publishRealtimeMutation({
@@ -451,19 +490,19 @@ export async function POST(request: NextRequest) {
         action,
         sessionKey: approval.sessionKey,
         surfaceId: approval.sessionKey,
-        status: 'completed',
+        status: continuationOutcome === 'completed' ? 'completed' : 'failed',
         note: decisionNote,
         createdAt: new Date().toISOString(),
         settledAt: new Date().toISOString(),
       },
       refreshTargets: ['global', 'mobileInbox', 'sessionHistory'],
       sessionKeys: [approval.sessionKey],
-      fresh: true,
+      fresh: continuationOutcome === 'completed',
     });
 
     return NextResponse.json({
       ok: true,
-      approval,
+      approval: settledApproval,
       resolved: action,
       note: decisionNote,
       assistantMessage,

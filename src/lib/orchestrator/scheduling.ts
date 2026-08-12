@@ -15,6 +15,7 @@ import { resolveOverlapGateSync, resolveParallelCapSync } from '@/lib/operator/d
 import { clearStaleLaneBinding, getDispatchableWave } from '@/lib/orchestrator/dag';
 import { normalizeOrchestratorMissionState, packetReleaseBlockedBy } from '@/lib/orchestrator/store';
 import { fanOutComparisonPackets } from '@/lib/orchestrator/comparison-fanout';
+import { releaseAbandonedMissionLifecycleHold } from '@/lib/orchestrator/mission-lifecycle-hold';
 import { getProjectContext } from '@/lib/projects/context';
 import { resolveDefaultBranch } from '@/lib/repos/registry';
 import { resolveWorkerRouting } from '@/lib/agents/routing';
@@ -28,6 +29,7 @@ import {
 } from '@/lib/orchestrator/types';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { assertRuntimeDispatchable } from '@/lib/runtimes/shared/auth-detect';
+import { bindWorkerLaunchParent } from '@/lib/orchestrator/worker-launch-context';
 import { isDispatchHalted } from './dispatch-halt';
 
 import { buildPacketPrompt } from './packet-prompt';
@@ -120,6 +122,12 @@ function createLaneBinding(
     lastEventAt: new Date().toISOString(),
     lastEventLabel: 'dispatch_started',
   };
+}
+
+function packetLaunchContext(packet: OrchestratorPacket) {
+  return bindWorkerLaunchParent(packet.launchContext, {
+    threadId: packet.orchestratorThreadId,
+  });
 }
 
 interface AwaitingReviewDispatchResult {
@@ -286,9 +294,14 @@ async function dispatchPacket(
     requestedModel: packet.workerRouting?.requestedModel ?? packet.assignedModel,
     source: 'scheduler-dispatch',
   });
+  const launchContext = packetLaunchContext(packet);
   const projectContext = await getProjectContext({ repoPath: packet.workspaceTargetPath });
   const baseBranch = await resolveDefaultBranch(packet.workspaceTargetPath!);
-  await assertRuntimeDispatchable(workerRouting.selectedRuntime);
+  await assertRuntimeDispatchable(
+    workerRouting.selectedRuntime,
+    workerRouting.selectedModel,
+    packet.workspaceTargetPath,
+  );
   const laneResult = await dispatchLaneCommand({
     verb: 'open_lane',
     packetId: packet.id,
@@ -324,7 +337,8 @@ async function dispatchPacket(
       ?? getRuntimeCapability(workerRouting.selectedRuntime).defaultModel
     ) ?? undefined,
     effort: workerRouting.selectedEffort ?? undefined,
-    launchContext: packet.launchContext ?? undefined,
+    clientMutationId: `packet-launch:${packet.id}:${(packet.launchAttempts ?? 0) + 1}`,
+    launchContext,
     actor: 'orchestrator',
   });
 
@@ -463,7 +477,8 @@ export async function runDispatchTick(
   state: OrchestratorMissionState,
   options: { launchBudget?: DispatchLaunchBudget; enforceBootRecoveryGuard?: boolean; missionArchived?: boolean } = {},
 ): Promise<OrchestratorMissionState> {
-  let nextState = normalizeOrchestratorMissionState(state);
+  let nextState = releaseAbandonedMissionLifecycleHold(normalizeOrchestratorMissionState(state));
+  if (nextState.lifecycleHold) return nextState;
   if (isDispatchHalted()) {
     return nextState;
   }
@@ -722,7 +737,7 @@ export async function runDispatchTick(
                 packetReferenceLabel: candidate.referenceLabel,
                 repoPath: candidate.workspaceTargetPath ?? undefined,
                 branch: candidate.branchTarget,
-                launchContext: candidate.launchContext ?? undefined,
+                launchContext: packetLaunchContext(candidate),
                 note: `Dispatched ${candidate.referenceLabel} to ${workerRouting.selectedRuntime}`,
                 createdAt: new Date().toISOString(),
                 settledAt: new Date().toISOString(),
@@ -741,6 +756,7 @@ export async function runDispatchTick(
               runtime: workerRouting.selectedRuntime,
               workerIntent: workerRouting.workerIntent,
               workerRouting,
+              launchContext: packetLaunchContext(candidate),
               status: 'launching',
               blockedReason: null,
               lane: createLaneBinding(candidate, result.value.laneId, result.value.sessionKey, workerRouting),

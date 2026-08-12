@@ -38,7 +38,66 @@ export interface RuntimeCapabilities {
   costTelemetry: boolean;
   /** Supports real-time streaming of output */
   streaming: boolean;
+  /** Provider-native transforms available for durable sessions. */
+  sessionTransforms?: RuntimeSessionTransformCapabilities;
+  /** Capacity observation and safe local identity selection support. */
+  capacity?: RuntimeCapacityCapabilities;
 }
+
+export interface RuntimeCapacityCapabilities {
+  observe: boolean;
+  identitySelection: boolean;
+  /** Why identity switching is unavailable even when capacity can be observed. */
+  identitySelectionReason?: string;
+}
+
+export type RuntimeCapacitySource = 'structured-cli' | 'local-state' | 'error-inference';
+export type RuntimeCapacityConfidence = 'exact' | 'estimated' | 'exhausted-only';
+export type RuntimeCapacityStatus = 'available' | 'stale' | 'unavailable' | 'malformed';
+export type RuntimeCapacityUnit = 'tokens' | 'requests' | 'credits';
+
+export interface RuntimeCapacityBucket {
+  id: string;
+  label: string;
+  usedRatio: number | null;
+  used: number | null;
+  unit: RuntimeCapacityUnit | null;
+  remaining: number | null;
+  resetsAt: string | null;
+  expiresAt: string | null;
+}
+
+export interface RuntimeCapacitySnapshot {
+  runtime: string;
+  identityId: string | null;
+  status: RuntimeCapacityStatus;
+  reason: string | null;
+  observedAt: string | null;
+  source: RuntimeCapacitySource | null;
+  confidence: RuntimeCapacityConfidence | null;
+  buckets: RuntimeCapacityBucket[];
+}
+
+export interface RuntimeIdentityConfigValidation {
+  ok: boolean;
+  /** Canonical server-only config-home reference. Never project this to clients. */
+  configHomeRef?: string;
+  reason?: string;
+}
+
+export type RuntimeSessionTransformAction = 'import' | 'checkpoint' | 'fork' | 'rewind';
+
+export type RuntimeSessionTransformCapabilities = Record<RuntimeSessionTransformAction, boolean>;
+
+export interface RuntimeSessionTransformCapabilityDetail {
+  supported: boolean;
+  reason?: string;
+}
+
+export type RuntimeSessionTransformCapabilityDetails = Record<
+  RuntimeSessionTransformAction,
+  RuntimeSessionTransformCapabilityDetail
+>;
 
 // ── Session ──
 
@@ -96,6 +155,8 @@ export interface RuntimeSession {
   tmuxSession?: string;
   /** Attached or mirrored browser lane, if the runtime exposes one */
   browserSurface?: BrowserSurfaceSummary;
+  /** Server-safe identity reference pinned when o8 launched this session. */
+  identityId?: string;
 }
 
 // ── Transcript ──
@@ -153,6 +214,45 @@ export interface RuntimeActionResult {
   ok: boolean;
   note: string;
   sessionKey?: string;
+  /** Live process ids affected by the action, when the adapter can prove them. */
+  pids?: number[];
+}
+
+export interface RuntimeSessionTransformInput {
+  action: RuntimeSessionTransformAction;
+  sessionKey: string;
+  /** Opaque server-safe identity that owns the provider session. */
+  identityId?: string;
+  /** Adapter-private checkpoint reference resolved by the control service. */
+  providerCheckpointRef?: string;
+  /** o8-generated idempotency/reconciliation marker, never a provider id. */
+  operationId?: string;
+}
+
+export interface RuntimeSessionTransformRecoveryInput {
+  action: 'fork' | 'rewind';
+  sessionKey: string;
+  /** Opaque server-safe identity that owns the provider session. */
+  identityId?: string;
+  providerCheckpointRef: string;
+  operationId: string;
+  startedAt: string;
+  /** Present when the provider replied before catalog persistence failed. */
+  resultingSessionKey?: string;
+}
+
+export interface RuntimeSessionTransformProviderResult {
+  ok: boolean;
+  note: string;
+  reason?: 'unsupported' | 'session_not_found' | 'stale_checkpoint' | 'provider_error';
+  retryable?: boolean;
+  /** Required on failures after a mutating provider request may have started. */
+  sideEffect?: 'none' | 'unknown';
+  originalSession: RuntimeSession;
+  resultingSession?: RuntimeSession;
+  /** Opaque outside the adapter and durable control catalog. */
+  providerCheckpointRef?: string;
+  providerSessionCreated?: boolean;
 }
 
 /**
@@ -161,6 +261,8 @@ export interface RuntimeActionResult {
 export interface LaunchOptions {
   cwd: string;
   prompt: string;
+  /** Stable caller correlation persisted before an owned process is spawned. */
+  clientMutationId?: string;
   model?: string;
   /** Requested reasoning effort — applied per-runtime (codex today); a no-op elsewhere. */
   effort?: ThinkingEffort;
@@ -173,7 +275,10 @@ export interface LaunchOptions {
 // ── Telemetry ──
 
 export interface RuntimeTelemetry {
+  /** Billable usage across this session and any child work attributed to it. */
   totalTokens?: number;
+  /** Tokens that entered this session's own context window; excludes child internals. */
+  contextTokens?: number;
   remainingTokens?: number;
   estimatedCostUsd?: number;
   inputTokens?: number;
@@ -259,4 +364,28 @@ export interface AgentRuntime {
    * Get cost/usage data for a session. Optional — return undefined if not supported.
    */
   getTelemetry?(sessionKey: string): Promise<RuntimeTelemetry | undefined>;
+
+  /** Read one normalized, credential-free capacity snapshot. */
+  getCapacity?(identityId?: string | null): Promise<RuntimeCapacitySnapshot> | RuntimeCapacitySnapshot;
+
+  /** Read only the opaque launch identity ID for a session. */
+  getSessionIdentityId?(sessionKey: string): Promise<string | null> | string | null;
+
+  /** Validate and canonicalize this runtime's supported isolated config home. */
+  validateIdentityConfigHome?(configHomeRef: string): Promise<RuntimeIdentityConfigValidation>;
+
+  /** Session-scoped transform truth, which may narrow runtime-wide support. */
+  getSessionTransformCapabilities?(
+    sessionKey: string,
+  ): Promise<RuntimeSessionTransformCapabilityDetails> | RuntimeSessionTransformCapabilityDetails;
+
+  /** Provider-native import/checkpoint/fork/rewind implementation. */
+  transformSession?(
+    input: RuntimeSessionTransformInput,
+  ): Promise<RuntimeSessionTransformProviderResult>;
+
+  /** Recover a provider fork whose durable o8 catalog commit was interrupted. */
+  recoverSessionTransform?(
+    input: RuntimeSessionTransformRecoveryInput,
+  ): Promise<RuntimeSessionTransformProviderResult | null>;
 }

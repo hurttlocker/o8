@@ -5,6 +5,9 @@ const mocks = vi.hoisted(() => ({
   getRuntimeInventorySnapshot: vi.fn(),
   listLanes: vi.fn(),
   recordLaneEvent: vi.fn(),
+  getRuntime: vi.fn(),
+  escalateInterrupt: vi.fn(),
+  escalateInterruptOwnedSurface: vi.fn(),
 }));
 
 vi.mock('@/lib/runtime/inventory', () => ({
@@ -26,7 +29,13 @@ vi.mock('@/lib/codex/owned', () => ({
 }));
 
 vi.mock('@/lib/runtime/interrupt-escalation', () => ({
-  escalateInterruptOwnedSurface: vi.fn(async () => null),
+  escalateInterrupt: mocks.escalateInterrupt,
+  escalateInterruptOwnedSurface: mocks.escalateInterruptOwnedSurface,
+}));
+
+vi.mock('@/lib/runtimes', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/runtimes')>(),
+  getRuntime: mocks.getRuntime,
 }));
 
 describe('performRuntimeAction owned surface resolution', () => {
@@ -37,6 +46,10 @@ describe('performRuntimeAction owned surface resolution', () => {
     mocks.listLanes.mockReset();
     mocks.listLanes.mockReturnValue([]);
     mocks.recordLaneEvent.mockReset();
+    mocks.getRuntime.mockReset();
+    mocks.escalateInterrupt.mockReset();
+    mocks.escalateInterruptOwnedSurface.mockReset();
+    mocks.escalateInterruptOwnedSurface.mockResolvedValue(null);
   });
 
   it('steers a codex-owned surface even when inventory lookup misses', { timeout: 20_000 }, async () => {
@@ -151,5 +164,60 @@ describe('performRuntimeAction owned surface resolution', () => {
       reason: 'surface_not_ready',
     });
     expect(mocks.recordLaneEvent).not.toHaveBeenCalled();
+  });
+
+  it('does not report a discovered interrupt complete without pid evidence', async () => {
+    mocks.getRuntimeInventorySnapshot.mockResolvedValue({
+      agents: [{
+        id: 'codex:discovered-no-pid',
+        sessionKey: 'codex:discovered-no-pid',
+        runtime: 'codex',
+        runtimeSurface: {
+          id: 'codex:discovered-no-pid',
+          ownership: 'discovered',
+          capabilities: { interrupt: true },
+        },
+      }],
+    });
+    mocks.getRuntime.mockReturnValue({
+      interrupt: vi.fn(async () => ({ ok: true, note: 'SIGINT sent.' })),
+    });
+    const { performRuntimeAction } = await import('./actions');
+
+    const result = await performRuntimeAction({
+      action: 'interrupt',
+      surfaceId: 'codex:discovered-no-pid',
+    });
+
+    expect(result).toMatchObject({ ok: false, status: 'unavailable', aborted: false });
+    expect(result.note).toContain('no pid evidence');
+  });
+
+  it('reports a discovered interrupt complete only after pid exit is confirmed', async () => {
+    mocks.getRuntimeInventorySnapshot.mockResolvedValue({
+      agents: [{
+        id: 'codex:discovered-confirmed',
+        sessionKey: 'codex:discovered-confirmed',
+        runtime: 'codex',
+        runtimeSurface: {
+          id: 'codex:discovered-confirmed',
+          ownership: 'discovered',
+          capabilities: { interrupt: true },
+        },
+      }],
+    });
+    mocks.getRuntime.mockReturnValue({
+      interrupt: vi.fn(async () => ({ ok: true, note: 'SIGINT sent.', pids: [321] })),
+    });
+    mocks.escalateInterrupt.mockResolvedValue({ confirmedDead: true, note: 'Worker stopped after SIGTERM.' });
+    const { performRuntimeAction } = await import('./actions');
+
+    const result = await performRuntimeAction({
+      action: 'interrupt',
+      surfaceId: 'codex:discovered-confirmed',
+    });
+
+    expect(result).toMatchObject({ ok: true, status: 'completed', aborted: true });
+    expect(mocks.escalateInterrupt).toHaveBeenCalledWith({ pid: 321 });
   });
 });

@@ -23,9 +23,14 @@ import {
   isOrchestratorRuntime,
   type OrchestratorRuntime,
 } from '@/lib/orchestrator/runtime-capabilities';
+import {
+  correlatedActionIsUnsettled,
+  fetchCorrelatedActionReceipt,
+} from '@/lib/orchestrator/action-receipt';
 import { bootstrapTranscripts } from '@/lib/transcripts/bootstrap';
 import { transcriptStore } from '@/lib/transcripts/store';
 import { useTranscript } from '@/lib/transcripts/useTranscript';
+import { SessionTransformMenu } from './SessionTransformMenu';
 
 interface AgentTilePaneProps {
   sessionKey: string;
@@ -152,7 +157,6 @@ export function normalizeAgentTileTranscript(
 // composer reveal animation when a lane flips to running/awaiting_input.
 const COMPOSER_SPRING = { type: 'spring', stiffness: 400, damping: 30 } as const;
 const TRANSCRIPT_STEER_LOADING_TIMEOUT_MS = 10_000;
-const LIVE_TRANSCRIPT_REFRESH_MS = 1_500;
 
 export function canSteerAgentState(
   agent: Pick<FleetAgent, 'status'> | null,
@@ -164,10 +168,6 @@ export function canSteerAgentState(
   if (agentStatus === 'running' || packetStatus === 'running') return true;
   if (packetStatus.includes('awaiting_') || agentStatus.includes('awaiting_')) return true;
   return packetStatus === 'blocked' && (blockedReason === 'huddle_ready' || blockedReason === 'worker_question');
-}
-
-export function shouldRefreshAgentTranscript(hasAgent: boolean, hasLane: boolean): boolean {
-  return hasAgent || hasLane;
 }
 
 function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocus }: AgentTilePaneProps) {
@@ -196,7 +196,6 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
     [agent?.status, packet?.blockedReason, packet?.status],
   );
   const canSteer = canSteerAgentState(agent, packet);
-  const shouldRefreshTranscript = shouldRefreshAgentTranscript(agent !== null, packet?.lane != null);
   const trimmedDraft = draft.trim();
   const canSend = canSteer && !sending && trimmedDraft.length > 0;
   const lastEntryKey = displayEntries.length > 0
@@ -226,19 +225,25 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
     setSending(true);
     setSendError(null);
     setDraft('');
+    let receiptUnsettled = false;
     try {
-      const response = await fetch('/api/runtime/action', {
+      const requestBody = JSON.stringify({
+        action: 'steer',
+        surfaceId: sessionKey,
+        clientMutationId: crypto.randomUUID(),
+        message,
+      });
+      const { response, payload } = await fetchCorrelatedActionReceipt<{
+        ok?: boolean;
+        note?: string;
+        error?: string;
+        inProgress?: boolean;
+        status?: string;
+      }>('/api/runtime/action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'steer',
-          surfaceId: sessionKey,
-          message,
-        }),
+        body: requestBody,
       });
-      const payload = await response
-        .json()
-        .catch(() => null) as { ok?: boolean; note?: string; error?: string } | null;
       if (!response.ok || payload?.ok === false) {
         const note = payload?.error ?? payload?.note ?? response.statusText ?? 'Unable to send steer.';
         setSendError(note);
@@ -253,12 +258,19 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
         transcriptStore.setStatus(sessionKey, 'idle');
       }, TRANSCRIPT_STEER_LOADING_TIMEOUT_MS);
     } catch (err) {
-      // Draft already cleared above; just surface the error
-      setSendError(err instanceof Error ? err.message : 'Unable to send steer.');
+      if (correlatedActionIsUnsettled(err)) {
+        receiptUnsettled = true;
+        setSendError(err.message);
+      } else {
+        // Draft already cleared above; just surface the error
+        setSendError(err instanceof Error ? err.message : 'Unable to send steer.');
+      }
     } finally {
-      sendingRef.current = false;
-      setSending(false);
-      requestAnimationFrame(() => textareaRef.current?.focus());
+      if (!receiptUnsettled) {
+        sendingRef.current = false;
+        setSending(false);
+        requestAnimationFrame(() => textareaRef.current?.focus());
+      }
     }
   }, [clearTranscriptLoadingFallback, sessionKey, trimmedDraft]);
 
@@ -297,33 +309,12 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
     clearTranscriptLoadingFallback();
   }, [clearTranscriptLoadingFallback, sessionKey]);
 
-  // One-shot seed for agents not in the workspace bootstrap list. The
-  // live-lane refresh below keeps an unsubscribed tiled session current.
+  // One-shot seed for agents not in the workspace bootstrap list. Mounted
+  // transcript consumers subscribe to the shared realtime stream afterward.
   useEffect(() => {
     if (slice.status !== 'idle') return;
     void bootstrapTranscripts([sessionKey]);
   }, [sessionKey, slice.status]);
-
-  // A tiled worker is not necessarily the websocket's active subscription,
-  // especially when several outside workers share one orchestrator chat.
-  // Refresh while the lane record still exists, even when its runtime status
-  // briefly leaves `running`. OpenCode can report awaiting-input or idle while
-  // its detached process is still producing the final turn; gating this poll
-  // on steering eligibility dropped that answer just before the pane retired.
-  useEffect(() => {
-    if (!shouldRefreshTranscript) return undefined;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const refresh = async () => {
-      await bootstrapTranscripts([sessionKey], { refetchFresh: true });
-      if (!cancelled) timer = setTimeout(refresh, LIVE_TRANSCRIPT_REFRESH_MS);
-    };
-    timer = setTimeout(refresh, LIVE_TRANSCRIPT_REFRESH_MS);
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [sessionKey, shouldRefreshTranscript]);
 
   useEffect(() => {
     requestAnimationFrame(() => {
@@ -385,6 +376,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
             />
             {STATUS_META[status].label}
           </span>
+          <SessionTransformMenu runtimeId={runtime} sessionKey={sessionKey} />
           <button
             type="button"
             aria-label={`Close ${name} tile`}

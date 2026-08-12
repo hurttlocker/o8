@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { fetchCorrelatedActionReceipt } from '@/lib/orchestrator/action-receipt';
 
 /**
  * Targeting Machine — the "where to point your agents" surface (v1, milestone 3).
@@ -83,17 +84,22 @@ export function TargetsPanel({ repoPath, active }: { repoPath?: string | null; a
     if (!repoPath) return;
     setDispatched((prev) => ({ ...prev, [path]: { status: 'busy' } }));
     try {
-      const res = await fetch('/api/panel/targets/dispatch', {
+      const { payload: json } = await fetchCorrelatedActionReceipt<{
+        ok?: boolean;
+        result?: { inProgress?: boolean; status?: string };
+        runtime?: string;
+        tier?: string;
+        error?: string;
+      }>('/api/panel/targets/dispatch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repoPath, path }),
+        body: JSON.stringify({ repoPath, path, clientMutationId: crypto.randomUUID() }),
       });
-      const json = await res.json();
       setDispatched((prev) => ({
         ...prev,
-        [path]: json.ok
-          ? { status: 'done', runtime: json.runtime ?? 'agent', tier: json.tier ?? '' }
-          : { status: 'error', error: json.error ?? 'dispatch failed' },
+        [path]: json?.ok
+          ? { status: 'done', runtime: json?.runtime ?? 'agent', tier: json?.tier ?? '' }
+          : { status: 'error', error: json?.error ?? 'dispatch failed' },
       }));
     } catch (err) {
       setDispatched((prev) => ({ ...prev, [path]: { status: 'error', error: err instanceof Error ? err.message : 'failed' } }));

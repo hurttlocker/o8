@@ -2,14 +2,23 @@ import { describe, expect, it } from 'vitest';
 import {
   addSessionToLayout,
   collectSessionKeys,
+  collectSessionKeysByArrival,
   collectSessionLeaves,
+  closeSessionLeaf,
   computeSessionTileLayout,
   createDefaultSessionTileLayout,
+  deserializeSessionTileLayout,
+  findSessionLeafByKey,
   resizeSessionSplit,
+  reconcileSessionTileParticipants,
+  serializeSessionTileLayout,
+  splitChatWithSession,
+  splitLeafWithThread,
   type SessionTileLayout,
   type SessionTileNode,
   type SessionTileSplit,
 } from './session-tiles';
+import { collectSessionTileMeshGroups } from './session-tile-mesh';
 
 function addSessions(keys: string[]): SessionTileLayout {
   let layout = createDefaultSessionTileLayout();
@@ -88,26 +97,52 @@ describe('addSessionToLayout', () => {
     expect(countChatLeaves(layout.root)).toBe(1);
   });
 
-  it('balances eight workers and keeps exactly one chat', () => {
+  it('keeps one through four workers as full transcript splits', () => {
+    for (let count = 1; count <= 4; count += 1) {
+      const keys = Array.from({ length: count }, (_, index) => `full:${index + 1}`);
+      const layout = addSessions(keys);
+
+      expect(collectSessionTileMeshGroups(layout.root)).toEqual([]);
+      expect(collectSessionKeysByArrival(layout.root)).toEqual(keys);
+    }
+  });
+
+  it('switches to one compact mesh when a fifth worker arrives', () => {
+    const keys = Array.from({ length: 5 }, (_, index) => `mesh:${index + 1}`);
+    const groups = collectSessionTileMeshGroups(addSessions(keys).root);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.leaves).toHaveLength(5);
+  });
+
+  it('keeps eight workers in one contiguous mesh beside chat', () => {
     const keys = Array.from({ length: 8 }, (_, index) => `s:${index + 1}`);
     const layout = addSessions(keys);
-    const { leafRects } = computeSessionTileLayout(layout.root);
-    const areas = collectSessionLeaves(layout.root).map((leaf) => {
-      const rect = leafRects.get(leaf.id);
-      return rect ? rect.width * rect.height : 0;
-    });
+    const groups = collectSessionTileMeshGroups(layout.root);
 
     expect(new Set(collectSessionKeys(layout.root))).toEqual(new Set(keys));
-    for (const area of areas) expect(area).toBeCloseTo(0.0625);
+    expect(collectSessionKeysByArrival(layout.root)).toEqual(keys);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.leaves).toHaveLength(8);
+    expect(groups[0]?.internalSplitIds).toHaveLength(7);
     expect(countChatLeaves(layout.root)).toBe(1);
   });
 
-  it('returns the same layout for a duplicate or ninth worker', () => {
+  it('retains workers beyond eight in the automatic mesh tree', () => {
+    const keys = Array.from({ length: 12 }, (_, index) => `s:${index + 1}`);
+    const layout = keys.reduce((current, key) => addSessionToLayout(current, key), createDefaultSessionTileLayout());
+    const groups = collectSessionTileMeshGroups(layout.root);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.leaves).toHaveLength(12);
+  });
+
+  it('returns the same layout for a duplicate and keeps the ninth worker', () => {
     const keys = Array.from({ length: 8 }, (_, index) => `s:${index + 1}`);
     const layout = addSessions(keys);
 
     expect(addSessionToLayout(layout, 's:1')).toBe(layout);
-    expect(addSessionToLayout(layout, 's:9')).toBe(layout);
+    expect(collectSessionKeys(addSessionToLayout(layout, 's:9').root)).toContain('s:9');
   });
 
   it('uses a resized split to choose the largest leaf and its direction', () => {
@@ -142,5 +177,95 @@ describe('addSessionToLayout', () => {
     const after = ratiosById(addSessionToLayout(layout, 's:3').root);
 
     for (const [splitId, ratio] of before) expect(after.get(splitId)).toBe(ratio);
+  });
+
+  it('assigns stable arrival order when the tree reading order rotates', () => {
+    let layout = addSessions(['s:1', 's:2', 's:3']);
+    const firstLeaf = collectSessionLeaves(layout.root)
+      .find((leaf) => leaf.sessionKey === 's:1');
+    expect(firstLeaf).toBeTruthy();
+    if (!firstLeaf) return;
+
+    layout = closeSessionLeaf(layout, firstLeaf.id);
+    layout = addSessionToLayout(layout, 's:4');
+
+    expect(collectSessionKeysByArrival(layout.root)).toEqual(['s:2', 's:3', 's:4']);
+  });
+
+  it('keeps manually split thread panes outside worker mesh groups', () => {
+    let layout = addSessions(['s:1', 's:2']);
+    const target = collectSessionLeaves(layout.root)[0];
+    expect(target).toBeTruthy();
+    if (!target) return;
+    layout = splitLeafWithThread(layout, target.id, {
+      threadId: 'thread:manual',
+      title: 'Manual thread',
+      mode: 'chat',
+    }, 'vertical');
+
+    expect(collectSessionTileMeshGroups(layout.root)).toEqual([]);
+  });
+
+  it('keeps an authored session pane outside a later seven-worker mesh', () => {
+    let layout = splitChatWithSession(
+      createDefaultSessionTileLayout(),
+      'manual:one',
+      'vertical',
+      0.65,
+    );
+    for (let index = 1; index <= 7; index += 1) {
+      layout = addSessionToLayout(layout, `automatic:${index}`);
+    }
+
+    const manual = findSessionLeafByKey(layout.root, 'manual:one');
+    const groups = collectSessionTileMeshGroups(layout.root);
+    expect(manual?.sessionSurface).toBe('split');
+    expect(groups).toHaveLength(1);
+    expect(new Set(groups[0]?.leaves.map((leaf) => leaf.sessionKey))).toEqual(
+      new Set(Array.from({ length: 7 }, (_, index) => `automatic:${index + 1}`)),
+    );
+    expect(groups[0]?.leaves).not.toContain(manual);
+  });
+
+  it('retargets a rotated session without changing participant, leaf, arrival, or focus identity', () => {
+    const initial = addSessionToLayout(createDefaultSessionTileLayout(), 'session:old');
+    const stamped = reconcileSessionTileParticipants(initial, [{
+      participantId: 'packet:stable',
+      packetId: 'packet:stable',
+      laneId: 'lane:one',
+      sessionKey: 'session:old',
+      repoPath: '/repo/external',
+      runtime: 'codex',
+      taskSummary: 'Inspect external repo',
+      launchContext: {
+        source: 'cli',
+        presentation: 'split',
+        repoContext: 'transient',
+      },
+    }]);
+    const before = collectSessionLeaves(stamped.root)[0];
+    const persisted = deserializeSessionTileLayout(serializeSessionTileLayout(stamped));
+    expect(persisted).not.toBeNull();
+    const rotated = reconcileSessionTileParticipants(persisted!, [{
+      participantId: 'packet:stable',
+      packetId: 'packet:stable',
+      laneId: 'lane:one',
+      sessionKey: 'session:new',
+    }]);
+    const after = collectSessionLeaves(rotated.root)[0];
+
+    expect(after).toMatchObject({
+      id: before?.id,
+      participantId: 'packet:stable',
+      packetId: 'packet:stable',
+      laneId: 'lane:one',
+      sessionKey: 'session:new',
+      arrivalOrder: before?.arrivalOrder,
+      repoPath: '/repo/external',
+      runtime: 'codex',
+      title: 'Inspect external repo',
+      launchContext: { source: 'cli' },
+    });
+    expect(collectSessionKeysByArrival(rotated.root)).toEqual(['session:new']);
   });
 });

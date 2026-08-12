@@ -24,6 +24,10 @@ import { runtimeColor } from '@/lib/agents/codename';
 import { PhaseRing, phaseFor, type DispatchLane, type Phase } from './dispatch-dock';
 import { useAgentTranscript } from './use-agent-transcript';
 import {
+  correlatedActionIsUnsettled,
+  fetchCorrelatedActionReceipt,
+} from '@/lib/orchestrator/action-receipt';
+import {
   AgentThinkingRow,
   AgentTranscriptBlocks,
   buildAgentTranscriptBlocks,
@@ -300,17 +304,24 @@ export function AgentGlassCard({
     const patch = (state: SentState) => setSent((prev) => prev.map((m) => (m.id === id ? { ...m, state } : m)));
     setSent((prev) => [...prev, { id, text, state: 'sending' }]);
     if (!packetId) { patch('unsteerable'); return; }
-    fetch('/api/orchestrator/steer-packet', {
+    const requestBody = JSON.stringify({
+      packetId,
+      message: text,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    void fetchCorrelatedActionReceipt('/api/orchestrator/steer-packet', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ packetId, message: text }),
+      body: requestBody,
     })
-      .then((response) => {
+      .then(({ response }) => {
         if (response.ok) patch('sent');
         else if (response.status === 409) patch('unsteerable');
         else patch('failed');
       })
-      .catch(() => patch('failed'));
+      .catch((error) => {
+        if (!correlatedActionIsUnsettled(error)) patch('failed');
+      });
   };
 
   const expandAction = (

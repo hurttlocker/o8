@@ -7,7 +7,7 @@ import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 
 const LOG_PREFIX = '[cost-persistence]';
 
-type UsageProvider = 'anthropic' | 'openai' | 'google' | 'openrouter' | 'opencode';
+type UsageProvider = 'anthropic' | 'openai' | 'google' | 'openrouter' | 'opencode' | 'runtime';
 
 export interface PersistSessionCostInput {
   sessionKey: string;
@@ -19,6 +19,13 @@ export interface PersistSessionCostInput {
   repoPath: string;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+}
+
+export interface PersistedSessionCost {
+  inputTokens: number;
+  outputTokens: number;
+  totalCostUsd: number;
+  model: string | null;
 }
 
 function billingPeriodFor(date = new Date()) {
@@ -37,10 +44,35 @@ function normalizeUsd(value: number) {
   return Number(finiteNumber(value).toFixed(6));
 }
 
+export function readPersistedSessionCost(sessionKey: string): PersistedSessionCost | null {
+  const normalized = sessionKey.trim();
+  const db = getDb();
+  if (!normalized || !db) return null;
+
+  const row = db
+    .select({
+      inputTokens: usageLogs.inputTokens,
+      outputTokens: usageLogs.outputTokens,
+      costUsd: usageLogs.costUsd,
+      model: usageLogs.model,
+    })
+    .from(usageLogs)
+    .where(eq(usageLogs.sessionKey, normalized))
+    .get();
+
+  if (!row) return null;
+  return {
+    inputTokens: normalizeTokenCount(row.inputTokens),
+    outputTokens: normalizeTokenCount(row.outputTokens),
+    totalCostUsd: normalizeUsd(row.costUsd),
+    model: row.model?.trim() || null,
+  };
+}
+
 // Problem C — exhaustive dispatch switch: maps runtime → billing provider.
 // Each runtime routes to a different payment provider (anthropic/openai/google).
 // Add a new runtime case here when adding a new adapter. Never collapse to a label lookup.
-function providerForRuntime(runtime: string): UsageProvider | null {
+function providerForRuntime(runtime: string): UsageProvider {
   if (runtime === 'claude-code') {
     return 'anthropic';
   }
@@ -53,10 +85,7 @@ function providerForRuntime(runtime: string): UsageProvider | null {
   if (runtime === 'opencode') {
     return 'opencode';
   }
-  if (runtime === 'cursor' || runtime === 'grok') {
-    return null;
-  }
-  return null;
+  return 'runtime';
 }
 
 function agentNameForRuntime(runtime: string) {
@@ -78,19 +107,33 @@ export async function persistSessionCost(input: PersistSessionCostInput): Promis
   }
 
   const provider = providerForRuntime(input.runtime);
-  if (!provider) {
-    console.warn(`${LOG_PREFIX} Unsupported runtime "${input.runtime}" for ${sessionKey}.`);
-    return false;
-  }
-
   const existing = db
-    .select({ id: usageLogs.id })
+    .select({
+      id: usageLogs.id,
+      inputTokens: usageLogs.inputTokens,
+      outputTokens: usageLogs.outputTokens,
+      cacheReadTokens: usageLogs.cacheReadTokens,
+      cacheWriteTokens: usageLogs.cacheWriteTokens,
+      costUsd: usageLogs.costUsd,
+    })
     .from(usageLogs)
     .where(eq(usageLogs.sessionKey, sessionKey))
     .get();
 
   if (existing) {
-    return false;
+    db.update(usageLogs).set({
+      model: input.model?.trim() || input.runtime,
+      provider,
+      inputTokens: Math.max(normalizeTokenCount(existing.inputTokens), normalizeTokenCount(input.inputTokens)),
+      outputTokens: Math.max(normalizeTokenCount(existing.outputTokens), normalizeTokenCount(input.outputTokens)),
+      cacheReadTokens: Math.max(normalizeTokenCount(existing.cacheReadTokens), normalizeTokenCount(input.cacheReadTokens)),
+      cacheWriteTokens: Math.max(normalizeTokenCount(existing.cacheWriteTokens), normalizeTokenCount(input.cacheWriteTokens)),
+      costUsd: Math.max(normalizeUsd(existing.costUsd), normalizeUsd(input.costUsd)),
+      repoPath: resolve(input.repoPath),
+      agentName: agentNameForRuntime(input.runtime),
+      billingPeriod: billingPeriodFor(),
+    }).where(eq(usageLogs.id, existing.id)).run();
+    return true;
   }
 
   db.insert(usageLogs).values({

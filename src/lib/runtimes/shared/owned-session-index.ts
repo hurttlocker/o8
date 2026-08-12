@@ -20,20 +20,31 @@
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { listOwnedSessionLifecycles } from './owned-session-lifecycle';
 
 export interface OwnedActiveRun {
   pid?: number;
   tmuxSession?: string;
+  commandIdentity?: string;
 }
 
 export interface IndexedOwnedActiveRun extends OwnedActiveRun {
   surfaceId: string;
 }
 
+export interface OwnedLaunchMutationMatch {
+  surfaceId: string;
+  cwd: string;
+  repoPath: string;
+  laneId?: string;
+  packetId?: string;
+  outcome: 'running' | 'finished' | 'interrupted' | 'failed';
+}
+
 /** Resolve the owned roots FRESH per call — env may be set after import (tests),
  *  and the resolution is cheap. */
 export function ownedRoots(): ReadonlyArray<{ marker: string; root: string }> {
-  return [
+  const roots = [
     {
       marker: 'codex-owned:',
       root: process.env.CORTEX_IDE_OWNED_CODEX_ROOT || path.join(getDataDir(), 'owned-codex'),
@@ -50,7 +61,30 @@ export function ownedRoots(): ReadonlyArray<{ marker: string; root: string }> {
       marker: 'opencode-owned:',
       root: process.env.O8_OWNED_OPENCODE_ROOT || path.join(getDataDir(), 'owned-opencode'),
     },
+    {
+      marker: 'cursor-owned:',
+      root: process.env.O8_OWNED_CURSOR_ROOT || path.join(getDataDir(), 'owned-cursor'),
+    },
+    {
+      marker: 'grok-owned:',
+      root: process.env.O8_OWNED_GROK_ROOT || path.join(getDataDir(), 'owned-grok'),
+    },
+    {
+      marker: 'prime-agent-owned:',
+      root: process.env.O8_OWNED_PRIME_AGENT_ROOT || path.join(getDataDir(), 'owned-prime-agent'),
+    },
+    {
+      marker: 'pi-owned:',
+      root: process.env.O8_OWNED_PI_ROOT || path.join(getDataDir(), 'owned-pi'),
+    },
   ];
+  const seen = new Set(roots.map((entry) => entry.marker));
+  for (const lifecycle of listOwnedSessionLifecycles()) {
+    if (seen.has(lifecycle.surfaceIdPrefix)) continue;
+    roots.push({ marker: lifecycle.surfaceIdPrefix, root: lifecycle.resolveRoot() });
+    seen.add(lifecycle.surfaceIdPrefix);
+  }
+  return roots;
 }
 
 const INDEX_TTL_MS = 2_000;
@@ -87,6 +121,9 @@ async function buildRootIndex(root: string): Promise<RootIndex> {
       ? {
           pid: typeof parsed.activeRun.pid === 'number' ? parsed.activeRun.pid : undefined,
           tmuxSession: typeof parsed.activeRun.tmuxSession === 'string' ? parsed.activeRun.tmuxSession : undefined,
+          commandIdentity: typeof parsed.activeRun.commandIdentity === 'string'
+            ? parsed.activeRun.commandIdentity
+            : undefined,
         }
       : {});
   }));
@@ -113,6 +150,15 @@ export async function lookupOwnedActiveRun(surfaceId: string, now: number = Date
   return index.get(surfaceId) ?? null;
 }
 
+/** Safety-critical lookup that bypasses the short fleet cache before a kill. */
+export async function lookupOwnedActiveRunFresh(surfaceId: string): Promise<OwnedActiveRun | null> {
+  const match = ownedRoots().find((root) => surfaceId.startsWith(root.marker));
+  if (!match) return null;
+  const index = await buildRootIndex(match.root);
+  rootCache.set(match.root, { builtAt: Date.now(), index });
+  return index.get(surfaceId) ?? null;
+}
+
 /** List every owned session whose persisted metadata still carries an active run. */
 export async function listOwnedActiveRuns(now: number = Date.now()): Promise<IndexedOwnedActiveRun[]> {
   const indexes = await Promise.all(ownedRoots().map(({ root }) => getRootIndex(root, now)));
@@ -123,6 +169,54 @@ export async function listOwnedActiveRuns(now: number = Date.now()): Promise<Ind
     }
   }
   return [...active.values()];
+}
+
+/**
+ * Recover an o8-owned launch after the server died before receipt finalization.
+ * The marker is written into session.json before spawn, so a match proves that
+ * this exact mutation crossed the owned launch boundary.
+ */
+export async function findOwnedLaunchByMutationId(
+  clientMutationId: string,
+): Promise<OwnedLaunchMutationMatch | null> {
+  for (const { root } of ownedRoots()) {
+    let entries: Awaited<ReturnType<typeof readdir>>;
+    try {
+      entries = await readdir(root, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      try {
+        const parsed = JSON.parse(
+          await readFile(path.join(root, entry.name, 'session.json'), 'utf-8'),
+        ) as Partial<OwnedLaunchMutationMatch> & {
+          launchMutationId?: unknown;
+          activeRun?: { outcome?: unknown };
+          recentRuns?: Array<{ outcome?: unknown }>;
+        };
+        if (parsed.launchMutationId !== clientMutationId
+          || typeof parsed.surfaceId !== 'string'
+          || typeof parsed.cwd !== 'string'
+          || typeof parsed.repoPath !== 'string') continue;
+        const rawOutcome = parsed.activeRun?.outcome ?? parsed.recentRuns?.[0]?.outcome;
+        if (rawOutcome !== 'running' && rawOutcome !== 'finished'
+          && rawOutcome !== 'interrupted' && rawOutcome !== 'failed') continue;
+        return {
+          surfaceId: parsed.surfaceId,
+          cwd: parsed.cwd,
+          repoPath: parsed.repoPath,
+          laneId: typeof parsed.laneId === 'string' ? parsed.laneId : undefined,
+          packetId: typeof parsed.packetId === 'string' ? parsed.packetId : undefined,
+          outcome: rawOutcome,
+        };
+      } catch {
+        // One corrupt session must not hide a valid correlated session.
+      }
+    }
+  }
+  return null;
 }
 
 /** Test-only: drop the memo so a test's fs writes are read fresh. */

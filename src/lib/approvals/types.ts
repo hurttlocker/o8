@@ -71,7 +71,8 @@ export interface OrchestratorReviewFinding {
 }
 
 export interface ApprovalAuditEvent {
-  type: 'created' | 'updated' | 'approved' | 'rejected' | 'resumed' | 'resume_failed' | 'orchestrator_review';
+  type: 'created' | 'updated' | 'approved' | 'rejected' | 'resumed' | 'resume_failed'
+    | 'orchestrator_review' | 'continuation_completed' | 'continuation_failed' | 'continuation_outcome_unknown';
   actor: ApprovalActor;
   timestamp: number;
   note?: string;
@@ -187,6 +188,8 @@ export interface ApprovalRecord {
     note?: string;
     /** Unique compare-and-swap owner for post-resolution continuation work. */
     claimId?: string;
+    /** The approval decision and its follow-on side effect settle separately. */
+    continuationStatus?: 'pending' | 'completed' | 'failed' | 'outcome_unknown';
   };
   audit: ApprovalAuditEvent[];
   fingerprint: string;

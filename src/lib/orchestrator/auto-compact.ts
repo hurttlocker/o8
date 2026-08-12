@@ -241,6 +241,7 @@ export async function digest(text: string, repoPath: string): Promise<DigestResu
 export async function autoCompactOrchestratorThread(input: {
   repoPath: string;
   liveMessages?: MobileTranscriptEntry[];
+  /** Parent-session context tokens only. Child usage belongs to cost receipts. */
   runningTotal?: number;
   keepTailCount?: number;
   trigger?: 'auto' | 'manual' | 'handoff';

@@ -21,28 +21,34 @@ export interface BranchPrRef {
   repoSlug: string | null;
 }
 
-export function useBranchPr(repo: string | null, branch: string | null): BranchPrRef | null {
-  const [pr, setPr] = useState<BranchPrRef | null>(null);
+export function useBranchPr(
+  repo: string | null,
+  branch: string | null,
+  repoPath: string | null = null,
+): BranchPrRef | null {
+  const requestKey = !repo || !branch || branch === 'main' || branch === 'master'
+    ? null
+    : `${repo}\u0000${branch}\u0000${repoPath ?? ''}`;
+  const [resolved, setResolved] = useState<{ requestKey: string; pr: BranchPrRef | null } | null>(null);
   useEffect(() => {
-    if (!repo || !branch || branch === 'main' || branch === 'master') {
-      setPr(null);
-      return;
-    }
+    if (!requestKey || !repo || !branch) return;
     let active = true;
     void (async () => {
       try {
-        const res = await fetch(`/api/panel/prs?repo=${encodeURIComponent(repo)}`);
-        if (!res.ok) { if (active) setPr(null); return; }
+        const params = new URLSearchParams({ repo });
+        if (repoPath) params.set('repoPath', repoPath);
+        const res = await fetch(`/api/panel/prs?${params.toString()}`);
+        if (!res.ok) { if (active) setResolved({ requestKey, pr: null }); return; }
         const data = await res.json() as { prs?: PrListItem[]; repo?: string };
         const match = (data.prs ?? []).find(
           (p) => p.headRefName === branch && (p.state ?? '').toLowerCase() === 'open',
         );
-        if (active) setPr(match ? { number: match.number, repoSlug: data.repo ?? null } : null);
+        if (active) setResolved({ requestKey, pr: match ? { number: match.number, repoSlug: data.repo ?? null } : null });
       } catch {
-        if (active) setPr(null);
+        if (active) setResolved({ requestKey, pr: null });
       }
     })();
     return () => { active = false; };
-  }, [repo, branch]);
-  return pr;
+  }, [branch, repo, repoPath, requestKey]);
+  return resolved?.requestKey === requestKey ? resolved.pr : null;
 }

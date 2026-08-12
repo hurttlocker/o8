@@ -44,6 +44,7 @@ import {
 import { AgentStatusHover } from './AgentStatusHover';
 import { AgentStatusDot, agentStatusToDotState } from '../AgentStatusDot';
 import { threeWordTaskSummary } from './task-label';
+import { archiveRuntimeTarget } from '@/lib/runtime/archive-client';
 
 interface RepoBranchRowProps {
   repo: RepoRegistryEntry;
@@ -174,6 +175,7 @@ function RepoBranchRowBase({
   const agentHoverCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleDismissAgent = useCallback(async (sessionKey: string) => {
+    const clientMutationId = crypto.randomUUID();
     setDismissedSessionKeys((prev) => {
       if (prev.has(sessionKey)) return prev;
       const next = new Set(prev);
@@ -181,14 +183,9 @@ function RepoBranchRowBase({
       return next;
     });
     try {
-      await fetch('/api/runtime/archive', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionKey }),
-      });
+      await archiveRuntimeTarget({ sessionKey }, clientMutationId);
     } catch {
-      // Server archive failed — drop our optimistic hide so the row comes
-      // back on the next snapshot and the operator can retry.
+      // Drop the optimistic hide so the row returns and the operator can retry.
       setDismissedSessionKeys((prev) => {
         if (!prev.has(sessionKey)) return prev;
         const next = new Set(prev);

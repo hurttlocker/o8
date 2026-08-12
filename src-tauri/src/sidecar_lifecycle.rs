@@ -19,20 +19,128 @@ use windows_sys::Win32::{
 const SIDECAR_ENV_MARKER: &str = "O8_SIDECAR_PID=";
 
 // The Tauri parent spawns Node children (Next.js + ws-server) but must own
-// their lifecycle explicitly. Dropping std::process::Child does not kill the
-// process, so every spawn registers its PID here and every exit path drains it.
-fn child_pids() -> &'static Mutex<Vec<u32>> {
-    static CHILD_PIDS: OnceLock<Mutex<Vec<u32>>> = OnceLock::new();
-    CHILD_PIDS.get_or_init(|| Mutex::new(Vec::new()))
+// their lifecycle explicitly. Registry mutation and the shutdown flag share
+// one lock so no supervisor can register a respawn after shutdown drained it.
+#[derive(Default)]
+struct ChildRegistry {
+    pids: Vec<u32>,
+    shutting_down: bool,
 }
 
-/// Track a freshly spawned child so we can kill it on quit.
-pub(crate) fn register_child(pid: u32) {
-    if let Ok(mut guard) = child_pids().lock() {
-        guard.push(pid);
+fn child_registry() -> &'static Mutex<ChildRegistry> {
+    static CHILDREN: OnceLock<Mutex<ChildRegistry>> = OnceLock::new();
+    CHILDREN.get_or_init(|| Mutex::new(ChildRegistry::default()))
+}
+
+#[cfg(test)]
+pub(crate) struct ChildRegistryTestGuard {
+    _serial: std::sync::MutexGuard<'static, ()>,
+}
+
+#[cfg(test)]
+impl Drop for ChildRegistryTestGuard {
+    fn drop(&mut self) {
+        let pids = child_registry()
+            .lock()
+            .map(|mut registry| {
+                registry.shutting_down = true;
+                std::mem::take(&mut registry.pids)
+            })
+            .unwrap_or_default();
+        if !pids.is_empty() {
+            #[cfg(unix)]
+            kill_tracked_children_unix(&pids);
+            #[cfg(windows)]
+            kill_tracked_children_windows(&pids);
+        }
+        if let Ok(mut registry) = child_registry().lock() {
+            registry.pids.clear();
+            registry.shutting_down = false;
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn lock_child_registry_for_test() -> ChildRegistryTestGuard {
+    static TEST_SERIAL: OnceLock<Mutex<()>> = OnceLock::new();
+    let serial = TEST_SERIAL
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .expect("lock child registry test state");
+    if let Ok(mut registry) = child_registry().lock() {
+        assert!(
+            registry.pids.is_empty(),
+            "tracked children leaked into test"
+        );
+        registry.shutting_down = false;
+    }
+    ChildRegistryTestGuard { _serial: serial }
+}
+
+#[cfg(test)]
+pub(crate) fn tracked_children_for_test() -> Vec<u32> {
+    child_registry()
+        .lock()
+        .map(|registry| registry.pids.clone())
+        .unwrap_or_default()
+}
+
+/// Track a freshly spawned child so we can kill it on quit. Returns false and
+/// terminates the child when shutdown won the race with a supervisor respawn.
+pub(crate) fn register_child(pid: u32) -> bool {
+    let registered = if let Ok(mut registry) = child_registry().lock() {
+        if registry.shutting_down {
+            false
+        } else {
+            if !registry.pids.contains(&pid) {
+                registry.pids.push(pid);
+            }
+            true
+        }
+    } else {
+        false
+    };
+    if !registered {
+        log::info!("[shutdown] refusing late sidecar PID {pid}");
+        #[cfg(unix)]
+        kill_tracked_children_unix(&[pid]);
+        #[cfg(windows)]
+        kill_tracked_children_windows(&[pid]);
+        return false;
     }
     #[cfg(windows)]
     assign_child_to_kill_on_close_job(pid);
+    true
+}
+
+/// Remove an exited child so shutdown cannot later signal a recycled PID.
+pub(crate) fn unregister_child(pid: u32) {
+    if let Ok(mut registry) = child_registry().lock() {
+        registry.pids.retain(|candidate| *candidate != pid);
+    }
+}
+
+pub(crate) fn is_shutting_down() -> bool {
+    child_registry()
+        .lock()
+        .map(|registry| registry.shutting_down)
+        .unwrap_or(true)
+}
+
+/// Atomically claim the transition into a fatal shutdown. Returns false when
+/// an ordinary quit or relaunch already began, so supervisors stay silent.
+pub(crate) fn begin_shutdown() -> bool {
+    child_registry()
+        .lock()
+        .map(|mut registry| {
+            if registry.shutting_down {
+                false
+            } else {
+                registry.shutting_down = true;
+                true
+            }
+        })
+        .unwrap_or(false)
 }
 
 /// Windows Job Object that owns every bundled child process. The handle stays
@@ -113,8 +221,11 @@ fn assign_child_to_kill_on_close_job(pid: u32) {
 /// Idempotent: the registry is drained on first call, so repeated exit events
 /// or a panic during shutdown cannot send another cleanup pass.
 pub(crate) fn kill_tracked_children() {
-    let pids = match child_pids().lock() {
-        Ok(mut guard) => std::mem::take(&mut *guard),
+    let pids = match child_registry().lock() {
+        Ok(mut registry) => {
+            registry.shutting_down = true;
+            std::mem::take(&mut registry.pids)
+        }
         Err(_) => return,
     };
     if pids.is_empty() {

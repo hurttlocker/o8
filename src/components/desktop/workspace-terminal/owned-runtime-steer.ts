@@ -1,7 +1,13 @@
+import { fetchCorrelatedActionReceipt } from '@/lib/orchestrator/action-receipt';
+
 interface OwnedRuntimeActionPayload {
   ok?: boolean;
   retryable?: boolean;
   reason?: string;
+  note?: string;
+  error?: string;
+  inProgress?: boolean;
+  status?: string;
 }
 
 interface OwnedRuntimeInventoryAgent {
@@ -35,4 +41,18 @@ export function shouldHoldOwnedRuntimeSteer(
     && payload?.ok === false
     && payload.retryable === true
     && payload.reason === 'surface_not_ready';
+}
+
+export function fetchOwnedRuntimeSteerReceipt(surfaceId: string, message: string) {
+  const requestBody = JSON.stringify({
+    action: 'steer',
+    surfaceId,
+    clientMutationId: crypto.randomUUID(),
+    message,
+  });
+  return fetchCorrelatedActionReceipt<OwnedRuntimeActionPayload>('/api/runtime/action', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: requestBody,
+  });
 }

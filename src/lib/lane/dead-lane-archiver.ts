@@ -22,6 +22,7 @@
  * the reaper ever archived it).
  */
 import { archiveLane, getLane, listActiveLanes } from './registry';
+import { archiveLaneSessionsConfirmed } from './reap-sessions';
 import { probeLaneSessionAlive } from './owned-session-liveness';
 import { enforceWedgeTimeouts } from './wedge-timeouts';
 import type { Lane } from './types';
@@ -120,18 +121,6 @@ export function matchDeadLaneArchiveRule(lane: Lane, now: number): DeadLaneArchi
   return null;
 }
 
-async function cleanupOwnedSessionDir(sessionKey: string | null | undefined): Promise<void> {
-  const key = sessionKey?.trim();
-  if (!key) return;
-  if (key.startsWith('codex-owned:')) {
-    const { archiveOwnedCodexSession } = await import('@/lib/codex/owned');
-    await archiveOwnedCodexSession(key).catch(() => {});
-  } else if (key.startsWith('claude-code-owned:')) {
-    const { archiveOwnedClaudeCodeSession } = await import('@/lib/claude-code/owned');
-    await archiveOwnedClaudeCodeSession(key).catch(() => {});
-  }
-}
-
 /**
  * Archive every active lane a policy rule declares dead + past-threshold. Replaces
  * `archiveStaleDeadLanes` (reaper) and `archiveTerminallyDeadLanes` (silent-exit).
@@ -147,15 +136,19 @@ export async function archiveDeadLanes(now: number = Date.now()): Promise<number
       // Re-confirm the session is really dead so we never archive a revived one,
       // and re-read the lane in case another actor advanced it while we probed.
       const alive = await probeLaneSessionAlive(lane);
-      if (alive === true) continue;
+      if (lane.sessionKey && alive !== false) continue;
       const refreshed = getLane(lane.id);
       if (!refreshed || !rule.statuses.has(refreshed.status)) continue;
     }
 
     try {
+      if (rule.cleanupOwnedSessionDir && lane.sessionKey) {
+        const refreshed = getLane(lane.id);
+        if (!refreshed || refreshed.sessionKey !== lane.sessionKey || !rule.statuses.has(refreshed.status)) continue;
+        await archiveLaneSessionsConfirmed([refreshed]);
+      }
       if (!archiveLane(lane.id, 'system')) continue;
       archived += 1;
-      if (rule.cleanupOwnedSessionDir) await cleanupOwnedSessionDir(lane.sessionKey);
       console.log(
         `[lane-lifecycle] archived dead lane ${lane.id} (rule ${rule.id}, ${lane.status}, label=${lane.lastEventLabel ?? 'none'})`,
       );

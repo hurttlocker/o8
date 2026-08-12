@@ -27,6 +27,7 @@
  */
 
 import path from 'node:path';
+import os from 'node:os';
 import type { RuntimeReviewCommandEvidence } from '@/lib/fleet/types';
 import {
   compactText,
@@ -52,6 +53,7 @@ export type { OwnedCodexFleetAdditions } from '@/lib/runtimes/shared/owned-sessi
 export type OwnedCodexLaunchRequest = {
   cwd: string;
   prompt: string;
+  clientMutationId?: string;
   model?: string;
   effort?: ThinkingEffort;
   laneId?: string;
@@ -644,7 +646,8 @@ const codexAdapter: OwnedRuntimeAdapter = {
   rootDefault: path.join(getDataDir(), 'owned-codex'),
   binaryName: 'codex',
   binaryEnvOverride: 'O8_CODEX_BIN',
-  binaryExtraEnvOverrides: ['CODEX_HOME'],
+  isolatedConfigHomeEnv: 'CODEX_HOME',
+  defaultConfigHome: () => process.env.CODEX_HOME?.trim() || path.join(os.homedir(), '.codex'),
   humanLabel: 'Owned Codex',
   squadShortName: 'Codex',
   sessionIdPrefix: 'codex-owned-',
@@ -709,8 +712,12 @@ export async function getOwnedCodexTelemetrySources(surfaceId: string) {
   return codexStore.getTelemetrySources(surfaceId);
 }
 
-export async function getOwnedCodexRuntimeTail(surfaceId: string) {
-  return codexStore.getRuntimeTail(surfaceId);
+export async function getOwnedCodexSessionIdentityId(surfaceId: string) {
+  return codexStore.getSessionIdentityId(surfaceId);
+}
+
+export async function getOwnedCodexRuntimeTail(surfaceId: string, limit?: number) {
+  return codexStore.getRuntimeTail(surfaceId, limit);
 }
 
 export async function getOwnedCodexReviewPacket(surfaceId: string) {

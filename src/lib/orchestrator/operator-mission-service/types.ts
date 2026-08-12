@@ -39,6 +39,8 @@ export interface CreateMissionInput {
    *  today's behavior (runtime default). */
   requestedEffort?: ThinkingEffort | null;
   constraints: string;
+  /** Persisted only for exact post-crash receipt reconciliation. */
+  clientMutationId?: string | null;
   /** When true, packets are chained sequentially (P2 after P1, etc.). Default: false (parallel). */
   sequential?: boolean;
   /** How create_mission handles an existing issue/inline dispatch branch. Default: auto. */
@@ -88,6 +90,7 @@ export interface DispatchMissionInput {
 export interface MissionStatusInput {
   missionId?: string;
   includeCost: boolean;
+  includeTiming?: boolean;
 }
 
 export interface SubmitReviewInput {
@@ -142,6 +145,7 @@ export interface ResetPacketInput {
   scope?: {
     laneIds: string[];
     skipHoldIfStateMoved?: boolean;
+    expectedReleaseSource?: string;
   };
 }
 

@@ -38,6 +38,7 @@ import { getDataDir } from '@/lib/data-dir-migration';
 export type OwnedGeminiLaunchRequest = {
   cwd: string;
   prompt: string;
+  clientMutationId?: string;
   model?: string;
   laneId?: string;
   packetId?: string;
@@ -676,8 +677,8 @@ export async function getOwnedGeminiTelemetrySources(surfaceId: string) {
   return geminiStore.getTelemetrySources(surfaceId);
 }
 
-export async function getOwnedGeminiRuntimeTail(surfaceId: string) {
-  return geminiStore.getRuntimeTail(surfaceId);
+export async function getOwnedGeminiRuntimeTail(surfaceId: string, limit?: number) {
+  return geminiStore.getRuntimeTail(surfaceId, limit);
 }
 
 export async function getOwnedGeminiReviewPacket(surfaceId: string) {

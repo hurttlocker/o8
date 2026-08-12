@@ -8,10 +8,12 @@
  * --packet or the current packet worktree.
  *
  *   o8 packet reset   [--packet <id>] [--reason "…"]   # wipe worktree, then `o8 mission dispatch`
- *   o8 packet retry   [--packet <id>] [--reason "…"]   # KEEP worktree, then `o8 mission dispatch`
- *   o8 packet rerun   --feedback "…" [--packet <id>]   # fresh worker w/ feedback (relaunches)
+ *   o8 packet retry   [--packet <id>] [--reason "…"]   # KEEP worktree; committed work returns to review
+ *   o8 packet rerun   --feedback "…" [--packet <id>] [--idempotency-key <id>]
  *   o8 packet merge-preview [--packet <id>]            # dry-run the 5-layer merge gate
  */
+
+import { randomUUID } from 'node:crypto';
 
 import { apiFetch, CliError, EXIT, SLOW_MUTATION_TIMEOUT_MS } from '../../api.js';
 import { resolveConfig } from '../../config.js';
@@ -28,6 +30,7 @@ import {
   resolvePacketTarget,
   type ParsedPacketArguments,
 } from './target.js';
+import { fetchCorrelatedPacketMutation } from './correlated-mutation.js';
 
 interface OperatorResponse<T> {
   ok: boolean;
@@ -44,17 +47,31 @@ interface MergePreviewResult {
   error?: string;
 }
 
+interface PacketResetResult {
+  reset?: boolean;
+  salvaged?: boolean;
+  partial?: boolean;
+  worktreePruned?: boolean;
+  note?: string;
+}
+
+interface InProgressReceipt {
+  inProgress?: boolean;
+  status?: string;
+  note?: string;
+}
+
 type RecoveryVerb = 'reset' | 'retry' | 'rerun' | 'steer' | 'approve-merge' | 'merge-preview';
 
 export function parsePacketRecoveryArgs(verb: RecoveryVerb, rest: string[]): ParsedPacketArguments {
   if (verb === 'reset' || verb === 'retry') {
-    return parsePacketArguments(rest, { command: verb, valueFlags: ['reason'] });
+    return parsePacketArguments(rest, { command: verb, valueFlags: ['reason', 'idempotency-key'] });
   }
   if (verb === 'rerun') {
-    return parsePacketArguments(rest, { command: verb, valueFlags: ['feedback'] });
+    return parsePacketArguments(rest, { command: verb, valueFlags: ['feedback', 'idempotency-key'] });
   }
   if (verb === 'steer') {
-    return parsePacketArguments(rest, { command: verb, valueFlags: ['message'] });
+    return parsePacketArguments(rest, { command: verb, valueFlags: ['message', 'idempotency-key'] });
   }
   if (verb === 'approve-merge') {
     return parsePacketArguments(rest, {
@@ -79,25 +96,44 @@ async function doReset(mode: OutputMode, rest: string[], clearWorktree: boolean,
   const args = parsePacketRecoveryArgs(verb, rest);
   const packetId = requirePacketId(await resolvePacketTarget(args.target), verb);
   const cfg = resolveConfig();
-  const res = await apiFetch<OperatorResponse<unknown>>(cfg, '/api/orchestrator/reset-packet', {
-    method: 'POST',
-    timeoutMs: SLOW_MUTATION_TIMEOUT_MS,
-    body: { packetId, clearWorktree, reason: args.values.reason?.trim() || undefined },
-  });
+  const body = {
+    packetId,
+    clearWorktree,
+    reason: args.values.reason?.trim() || undefined,
+    idempotencyKey: args.values['idempotency-key']?.trim() || randomUUID(),
+  };
+  const res = await fetchCorrelatedPacketMutation<OperatorResponse<PacketResetResult>>(
+    cfg,
+    '/api/orchestrator/reset-packet',
+    body,
+    { timeoutMs: SLOW_MUTATION_TIMEOUT_MS },
+  );
   if (!res.data?.ok) {
     throw new CliError(`${verb}_failed`, responseError(res.data, `Packet ${verb} was rejected.`), EXIT.CONFLICT);
   }
+  if (res.data.result?.reset === false && res.data.result.salvaged !== true) {
+    throw new CliError(`${verb}_failed`, res.data.result.note || `Packet ${verb} was not applied.`, EXIT.CONFLICT);
+  }
+  const salvaged = verb === 'retry' && res.data.result?.salvaged === true;
+  const next = salvaged
+    ? 'The preserved committed work is awaiting review; do not redispatch it.'
+    : 'Run `o8 mission dispatch` to relaunch the packet.';
   const payload = {
     schema: `o8/cli/packet.${verb}/v1`,
     packet: { id: packetId, clearWorktree, result: res.data.result },
-    next: 'Run `o8 mission dispatch` to relaunch the packet.',
+    next,
   };
   if (mode.human) {
+    const worktreeState = !clearWorktree
+      ? 'preserved'
+      : res.data.result?.worktreePruned
+        ? 'wiped'
+        : 'already clear';
     printHumanHeading(`packet ${verb}`);
     printHumanKv([
       ['packet', packetId],
-      ['worktree', clearWorktree ? 'wiped' : 'preserved'],
-      ['next', 'o8 mission dispatch'],
+      ['worktree', worktreeState],
+      ['next', salvaged ? 'review packet' : 'o8 mission dispatch'],
     ]);
   } else {
     printJson(payload);
@@ -118,18 +154,34 @@ async function runPacketRerun(mode: OutputMode, rest: string[]): Promise<number>
   }
   const packetId = requirePacketId(await resolvePacketTarget(args.target), 'rerun');
   const cfg = resolveConfig();
-  const res = await apiFetch<OperatorResponse<unknown>>(cfg, '/api/orchestrator/rerun-with-feedback', {
-    method: 'POST',
-    timeoutMs: SLOW_MUTATION_TIMEOUT_MS,
-    body: { packetId, feedback },
-  });
+  const requestBody = {
+    packetId,
+    feedback,
+    idempotencyKey: args.values['idempotency-key']?.trim() || randomUUID(),
+  };
+  const res = await fetchCorrelatedPacketMutation<OperatorResponse<InProgressReceipt>>(
+    cfg,
+    '/api/orchestrator/rerun-with-feedback',
+    requestBody,
+  );
   if (!res.data?.ok) {
     throw new CliError('rerun_failed', responseError(res.data, 'Packet rerun was rejected.'), EXIT.CONFLICT);
   }
-  const payload = { schema: 'o8/cli/packet.rerun/v1', packet: { id: packetId, result: res.data.result } };
+  const inProgress = res.status === 202
+    || res.data.result?.inProgress === true
+    || res.data.result?.status === 'in_progress';
+  const payload = {
+    schema: 'o8/cli/packet.rerun/v1',
+    inProgress,
+    packet: { id: packetId, result: res.data.result },
+  };
   if (mode.human) {
     printHumanHeading('packet rerun');
-    printHumanKv([['packet', packetId], ['feedback', feedback.slice(0, 60) + (feedback.length > 60 ? '…' : '')], ['relaunched', 'yes']]);
+    printHumanKv([
+      ['packet', packetId],
+      ['feedback', feedback.slice(0, 60) + (feedback.length > 60 ? '…' : '')],
+      ['status', inProgress ? 'already in progress (not relaunched twice)' : 'relaunched'],
+    ]);
   } else {
     printJson(payload);
   }
@@ -177,18 +229,35 @@ async function runPacketSteer(mode: OutputMode, rest: string[]): Promise<number>
   }
   const packetId = requirePacketId(await resolvePacketTarget(args.target), 'steer');
   const cfg = resolveConfig();
-  const res = await apiFetch<OperatorResponse<{ laneId?: string; note?: string }>>(cfg, '/api/orchestrator/steer-packet', {
-    method: 'POST',
-    timeoutMs: SLOW_MUTATION_TIMEOUT_MS,
-    body: { packetId, message },
-  });
+  const requestBody = {
+    packetId,
+    message,
+    idempotencyKey: args.values['idempotency-key']?.trim() || randomUUID(),
+  };
+  const res = await fetchCorrelatedPacketMutation<OperatorResponse<InProgressReceipt & { laneId?: string }>>(
+    cfg,
+    '/api/orchestrator/steer-packet',
+    requestBody,
+  );
   if (!res.data?.ok) {
     throw new CliError('steer_failed', responseError(res.data, 'Packet steer was rejected.'), EXIT.CONFLICT);
   }
-  const payload = { schema: 'o8/cli/packet.steer/v1', packet: { id: packetId, result: res.data.result } };
+  const inProgress = res.status === 202
+    || res.data.result?.inProgress === true
+    || res.data.result?.status === 'in_progress';
+  const payload = {
+    schema: 'o8/cli/packet.steer/v1',
+    inProgress,
+    packet: { id: packetId, result: res.data.result },
+  };
   if (mode.human) {
     printHumanHeading('packet steer');
-    printHumanKv([['packet', packetId], ['lane', res.data.result?.laneId ?? '?'], ['note', res.data.result?.note ?? 'steered']]);
+    printHumanKv([
+      ['packet', packetId],
+      ['lane', res.data.result?.laneId ?? '?'],
+      ['status', inProgress ? 'already in progress (not steered twice)' : 'steered'],
+      ['note', res.data.result?.note ?? ''],
+    ]);
   } else {
     printJson(payload);
   }
@@ -210,27 +279,30 @@ async function runPacketApproveMerge(mode: OutputMode, rest: string[]): Promise<
   const packetId = requirePacketId(await resolvePacketTarget(args.target), 'approve-merge');
   const worker = isWorkerContext(args.booleans.has('as-operator') ? ['--as-operator'] : []);
   const cfg = resolveConfig();
-  const res = await apiFetch<OperatorResponse<{ merged?: boolean; status?: string; approvalId?: string; note?: string }>>(cfg, '/api/orchestrator/merge', {
-    method: 'POST',
-    timeoutMs: SLOW_MUTATION_TIMEOUT_MS,
-    body: {
-      packetId,
-      commitMessage: args.values['commit-message']?.trim() || undefined,
-      expectedHeadSha: args.values['expected-sha']?.trim() || undefined,
-      idempotencyKey: args.values['idempotency-key']?.trim() || undefined,
-      ...(worker ? { requestedByWorker: true } : {}),
-    },
-  });
+  const requestBody = {
+    packetId,
+    commitMessage: args.values['commit-message']?.trim() || undefined,
+    expectedHeadSha: args.values['expected-sha']?.trim() || undefined,
+    idempotencyKey: args.values['idempotency-key']?.trim() || randomUUID(),
+    ...(worker ? { requestedByWorker: true } : {}),
+  };
+  const res = await fetchCorrelatedPacketMutation<OperatorResponse<InProgressReceipt & { merged?: boolean; approvalId?: string }>>(
+    cfg,
+    '/api/orchestrator/merge',
+    requestBody,
+  );
   if (!res.data?.ok) {
     throw new CliError('merge_failed', responseError(res.data, 'Merge was rejected.'), EXIT.CONFLICT);
   }
   const result = res.data.result;
   const pending = result?.status === 'pending_operator_approval';
+  const inProgress = res.status === 202 || result?.inProgress === true || result?.status === 'in_progress';
   const payload = {
     schema: 'o8/cli/packet.approve-merge/v1',
     packet: { id: packetId },
     context: worker ? 'worker' : 'operator',
     pending,
+    inProgress,
     result,
   };
   if (mode.human) {
@@ -242,6 +314,12 @@ async function runPacketApproveMerge(mode: OutputMode, rest: string[]): Promise<
         ['status', 'pending operator approval'],
         ['approval', result?.approvalId ?? '?'],
         ['next', 'operator: o8 inbox approve ' + (result?.approvalId ?? '<id>')],
+      ]);
+    } else if (inProgress) {
+      printHumanKv([
+        ['packet', packetId],
+        ['status', 'already in progress (not merged twice)'],
+        ['note', result?.note ?? ''],
       ]);
     } else {
       printHumanKv([['packet', packetId], ['merged', result?.merged ? 'yes' : 'no'], ['note', result?.note ?? '']]);

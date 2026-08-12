@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { cleanupLaneWorktree } from '@/lib/lane/worktree-cleanup';
 
@@ -68,11 +69,15 @@ export async function cleanupResetPacketTargets(
       // reset is an explicit operator/recovery action — force past the prune
       // gate (records prune_forced) so a non-terminal lane's worktree can be
       // torn down for the restart. The head is banked first (force path).
-      worktreePruned = await cleanupLaneWorktree(target, {
+      const removed = await cleanupLaneWorktree(target, {
         deleteBranch: false,
         force: true,
         overrideLiveGuard: target.overrideLiveGuard,
-      }) || worktreePruned;
+      });
+      if (!removed && existsSync(target.worktreePath)) {
+        throw new Error(`Worktree cleanup was not confirmed for lane ${target.id} at ${target.worktreePath}.`);
+      }
+      worktreePruned = removed || worktreePruned;
     }
     const key = `${normalizeRepoPath(target.repoPath)}\0${target.branch}`;
     groups.set(key, [...(groups.get(key) ?? []), target]);

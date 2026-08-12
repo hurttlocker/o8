@@ -143,7 +143,9 @@ function ApprovalRequestCard({
 }) {
   const tone = riskTone(approval.risk);
   const busyAction = busyApproval?.id === approval.id ? busyApproval.action : null;
-  const disabled = busyAction !== null;
+  const continuationUnsettled = approval.resolution?.continuationStatus === 'pending'
+    || approval.resolution?.continuationStatus === 'outcome_unknown';
+  const disabled = busyAction !== null || continuationUnsettled;
   const tool = toolLabel(approval);
   const copy = composeApprovalCardCopy(approval);
 
@@ -257,7 +259,9 @@ function ApprovalRequestCard({
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
         <div style={{ flex: 1, minWidth: 0, fontSize: 10, fontWeight: 300, letterSpacing: '-0.1px', color: note?.toLowerCase().includes('unable') ? 'var(--t-danger)' : 'var(--t-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {note}
+          {continuationUnsettled
+            ? 'Approval recorded; continuation unconfirmed. Inspect the target before another action.'
+            : note}
         </div>
         <ApprovalActionButton
           action="reject"

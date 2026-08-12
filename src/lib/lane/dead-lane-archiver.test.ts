@@ -11,7 +11,7 @@
  *     runDeadLaneSweep (a packet-bound recovering lane escalates to the
  *     orchestrator instead of being archived out from under its packet).
  */
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -22,6 +22,7 @@ import type { Lane, LaneStatus } from './types';
 process.env.O8_DATA_DIR = mkdtempSync(join(tmpdir(), 'o8-dead-lane-archiver-'));
 // Empty owned root so any owned-session re-probe resolves "dead".
 process.env.CORTEX_IDE_OWNED_CODEX_ROOT = mkdtempSync(join(tmpdir(), 'o8-dead-lane-owned-'));
+process.env.O8_OWNED_QWEN_ROOT = mkdtempSync(join(tmpdir(), 'o8-dead-lane-qwen-'));
 
 const {
   DEAD_LANE_ARCHIVE_POLICY,
@@ -72,6 +73,8 @@ afterEach(() => {
 afterAll(() => {
   if (process.env.O8_DATA_DIR) rmSync(process.env.O8_DATA_DIR, { recursive: true, force: true });
   if (process.env.CORTEX_IDE_OWNED_CODEX_ROOT) rmSync(process.env.CORTEX_IDE_OWNED_CODEX_ROOT, { recursive: true, force: true });
+  if (process.env.O8_OWNED_QWEN_ROOT) rmSync(process.env.O8_OWNED_QWEN_ROOT, { recursive: true, force: true });
+  if (process.env.O8_OWNED_QWEN_ROOT) rmSync(`${process.env.O8_OWNED_QWEN_ROOT}-archive`, { recursive: true, force: true });
 });
 
 describe('matchDeadLaneArchiveRule (policy table — pure decision)', () => {
@@ -105,12 +108,17 @@ describe('matchDeadLaneArchiveRule (policy table — pure decision)', () => {
   });
 });
 
-function persistLane(status: LaneStatus, ageMs: number, opts: { packetId?: string; sessionKey?: string | null; label?: string } = {}) {
+function persistLane(status: LaneStatus, ageMs: number, opts: {
+  packetId?: string;
+  sessionKey?: string | null;
+  label?: string;
+  runtime?: Lane['runtime'];
+} = {}) {
   const lane = createLane({
     repoPath: '/tmp/o8-archiver-real',
     branch: `inline/archiver-${Math.random().toString(36).slice(2, 8)}`,
     baseBranch: 'main',
-    runtime: 'codex',
+    runtime: opts.runtime ?? 'codex',
     packetId: opts.packetId,
   });
   createdLaneIds.push(lane.id);
@@ -149,6 +157,69 @@ describe('archiveDeadLanes (real path through the registry)', () => {
     const lane = persistLane('reviewing', 180 * MIN, { label: 'silent_exit_work_present' });
     await archiveDeadLanes(Date.now());
     expect(getLane(lane.id)?.status).toBe('reviewing');
+  });
+
+  it('archives a dead declarative session before retiring its lane', async () => {
+    const sessionKey = `qwen-owned:dead-sweep-${Date.now()}`;
+    const sessionId = sessionKey.slice(sessionKey.indexOf(':') + 1);
+    const sessionDir = join(process.env.O8_OWNED_QWEN_ROOT!, sessionId);
+    mkdirSync(join(sessionDir, 'runs'), { recursive: true });
+    const timestamp = new Date(Date.now() - 35 * MIN).toISOString();
+    writeFileSync(join(sessionDir, 'session.json'), JSON.stringify({
+      surfaceId: sessionKey,
+      sessionDir,
+      cwd: process.cwd(),
+      repoPath: process.cwd(),
+      title: 'Dead sweep fixture',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      latestPrompt: 'dead sweep',
+      latestSummary: 'dead sweep',
+      recentRuns: [],
+    }));
+    const lane = persistLane('reviewing', 35 * MIN, {
+      label: 'zombie_reap',
+      runtime: 'qwen',
+      sessionKey,
+    });
+
+    await archiveDeadLanes(Date.now());
+
+    expect(getLane(lane.id)?.status).toBe('archived');
+    expect(existsSync(sessionDir)).toBe(false);
+    expect(existsSync(join(`${process.env.O8_OWNED_QWEN_ROOT!}-archive`, sessionId))).toBe(true);
+  });
+
+  it('keeps the lane visible when its owned session archive is unconfirmed', async () => {
+    const sessionKey = `qwen-owned:dead-sweep-conflict-${Date.now()}`;
+    const sessionId = sessionKey.slice(sessionKey.indexOf(':') + 1);
+    const sessionDir = join(process.env.O8_OWNED_QWEN_ROOT!, sessionId);
+    const archiveDir = join(`${process.env.O8_OWNED_QWEN_ROOT!}-archive`, sessionId);
+    mkdirSync(join(sessionDir, 'runs'), { recursive: true });
+    mkdirSync(archiveDir, { recursive: true });
+    const timestamp = new Date(Date.now() - 35 * MIN).toISOString();
+    writeFileSync(join(sessionDir, 'session.json'), JSON.stringify({
+      surfaceId: sessionKey,
+      sessionDir,
+      cwd: process.cwd(),
+      repoPath: process.cwd(),
+      title: 'Dead sweep conflict fixture',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      latestPrompt: 'dead sweep conflict',
+      latestSummary: 'dead sweep conflict',
+      recentRuns: [],
+    }));
+    const lane = persistLane('reviewing', 35 * MIN, {
+      label: 'zombie_reap',
+      runtime: 'qwen',
+      sessionKey,
+    });
+
+    await archiveDeadLanes(Date.now());
+
+    expect(getLane(lane.id)?.status).toBe('reviewing');
+    expect(existsSync(sessionDir)).toBe(true);
   });
 });
 

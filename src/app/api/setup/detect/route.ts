@@ -9,6 +9,8 @@ import {
 } from '@/lib/codex/appserver-probe';
 import { pathLookupProgram, pickLookupResult, scanAndLink } from '@/lib/runtimes/shared/cli-locate';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
+import { detectRuntimeAuthStatus } from '@/lib/runtimes/shared/auth-detect';
+import { opencodeCredentialProviders } from '@/lib/runtimes/shared/opencode-readiness';
 import { getDataDir } from '@/lib/data-dir-migration';
 
 export const runtime = 'nodejs';
@@ -292,7 +294,7 @@ function detectAntigravity(deadlineAt?: number): DetectedTool {
   };
 }
 
-function detectOpenCode(deadlineAt?: number): DetectedTool {
+async function detectOpenCode(deadlineAt?: number): Promise<DetectedTool> {
   const path = locateBin('opencode2', deadlineAt);
   const detected = !!path;
   let version: string | undefined;
@@ -302,30 +304,21 @@ function detectOpenCode(deadlineAt?: number): DetectedTool {
     version = safeExec(path, ['--version'], 2000, deadlineAt);
   }
 
-  // Best-effort: peek at the auth manifest to see which providers the user has authed.
-  // Used by the picker to show e.g. "OpenCode · 4 providers" — full sub-row expansion is
-  // tracked in issue #512.
-  const authPath = join(homedir(), '.local', 'share', 'opencode', 'auth.json');
-  if (detected && existsSync(authPath)) {
-    try {
-      const raw = readFileSync(authPath, 'utf-8');
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
-      authedProviders = Object.keys(parsed).sort();
-    } catch {
-      // ignore parse errors
-    }
+  const readiness = detected ? await detectRuntimeAuthStatus('opencode') : null;
+  if (detected) {
+    authedProviders = [...await opencodeCredentialProviders(homedir())].sort();
   }
-
-  const authPresent = authedProviders.length > 0;
+  const authPresent = readiness?.authenticated === true;
+  const ready = readiness?.ready === true;
   return {
     id: 'opencode',
     name: 'OpenCode 2 CLI',
     detected,
-    ready: detected ? authPresent : undefined,
-    authHint: detected && !authPresent ? 'run: opencode2 auth login' : undefined,
+    ready: detected ? ready : undefined,
+    authHint: detected && !ready ? readiness?.fix ?? 'run: opencode2 auth login' : undefined,
     version,
     path,
-    details: { authedProviders, authPresent },
+    details: { authedProviders, authPresent, readiness: readiness?.detail },
   };
 }
 
@@ -606,7 +599,7 @@ export async function GET() {
   if (!isPastDeadline(deadlineAt)) tools.push(detectClaudeCode(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detectGemini(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detectAntigravity(deadlineAt));
-  if (!isPastDeadline(deadlineAt)) tools.push(detectOpenCode(deadlineAt));
+  if (!isPastDeadline(deadlineAt)) tools.push(await detectOpenCode(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detect3code(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detectMagnitude(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detectCursor(deadlineAt));

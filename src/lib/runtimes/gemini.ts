@@ -23,6 +23,7 @@ import type {
 // Side-effect import: registers the 'gemini' cost parser on module load.
 import '@/lib/runtimes/gemini-cost-parser';
 import { parseCost } from '@/lib/runtimes/shared/cost-parser-registry';
+import { ownedTailToRuntimeTranscript } from '@/lib/runtimes/shared/owned-transcript';
 import type { DispatchCapability } from '@/lib/runtimes/shared/turn-dispatcher';
 import { monitorUsageDispatch, usageSnapshotFromTelemetry, type UsageSnapshot } from '@/lib/usage-log';
 
@@ -123,26 +124,6 @@ function mapAgentToSession(agent: OwnedAgentLike): RuntimeSession {
   };
 }
 
-function parseTranscriptTimestamp(value?: string, fallbackLabel?: string) {
-  const direct = value ? new Date(value) : null;
-  if (direct && !Number.isNaN(direct.getTime())) return direct;
-  const fromLabel = fallbackLabel ? new Date(fallbackLabel) : null;
-  if (fromLabel && !Number.isNaN(fromLabel.getTime())) return fromLabel;
-  return new Date();
-}
-
-function applyTranscriptWindow<T extends { id: string }>(entries: T[], sinceId?: string, limit?: number) {
-  let next = entries;
-  if (sinceId) {
-    const sinceIndex = next.findIndex((entry) => entry.id === sinceId);
-    if (sinceIndex >= 0) next = next.slice(sinceIndex + 1);
-  }
-  if (typeof limit === 'number' && Number.isFinite(limit) && limit > 0 && next.length > limit) {
-    next = next.slice(-limit);
-  }
-  return next;
-}
-
 // ── Usage-dispatch bookkeeping ────────────────────────────────────────────────
 
 async function waitForOwnedRunToFinish(sessionKey: string, startedAtMs: number) {
@@ -236,19 +217,8 @@ export const geminiRuntime: AgentRuntime = {
     if (!sessionKey.startsWith('gemini-owned:')) {
       return [];
     }
-    const tail = await getOwnedGeminiRuntimeTail(sessionKey);
-    const entries = applyTranscriptWindow(tail.entries, sinceId, limit);
-
-    return entries.map((entry) => ({
-      id: entry.id,
-      role: entry.kind === 'message' ? 'assistant' as const
-        : entry.kind === 'tool' ? 'tool' as const
-        : entry.kind === 'tool-output' ? 'system' as const
-        : 'system' as const,
-      text: entry.text,
-      timestamp: parseTranscriptTimestamp(entry.timestamp, entry.timestampLabel),
-      toolName: entry.kind === 'tool' ? entry.label : undefined,
-    }));
+    const tail = await getOwnedGeminiRuntimeTail(sessionKey, sinceId ? 200 : limit);
+    return ownedTailToRuntimeTranscript(tail, sinceId, limit);
   },
 
   async launch(opts: LaunchOptions): Promise<RuntimeActionResult> {
@@ -256,6 +226,7 @@ export const geminiRuntime: AgentRuntime = {
     const result = await launchOwnedGeminiSession({
       cwd: opts.cwd,
       prompt: opts.prompt,
+      clientMutationId: opts.clientMutationId,
       model: opts.model,
       laneId: opts.laneId,
       packetId: opts.packetId,

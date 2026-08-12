@@ -5,6 +5,8 @@ import { CollapsiblePlanCard } from '@/components/desktop/CollapsiblePlanCard';
 import { composeComposerTurnMessage, resolveComposerExecutionMode, type ComposerMode } from './composer-mode';
 import { formatModelLabel } from '@/lib/format';
 import { orchestratorBackendDisplayLabel, orchestratorRuntimeTone } from '@/lib/orchestrator/display';
+import { correlatedActionIsUnsettled } from '@/lib/orchestrator/action-receipt';
+import { fetchRuntimeLaunchReceipt, fetchRuntimeSteerReceipt } from '@/lib/orchestrator/runtime-mutation-receipt';
 import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
 import type { ManualThinkingEffort, ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import {
@@ -54,7 +56,6 @@ import { ProfiledChatMessageList as ChatMessageList } from './chat-panel/Profile
 import { SwarmStatusCard, type SwarmScoutView } from './chat-panel/SwarmStatusCard';
 import { ipcFetch } from '@/lib/tauri/ipc-fetch';
 import { track } from '@/lib/analytics/track';
-import type { TurnSummary } from './chat-panel/TurnSummaryCard';
 import { ChatToastStack } from './chat-panel/ChatToastStack';
 import { ComposerArea } from './chat-panel/ComposerArea';
 import { ComposerSendBufferStatus } from './chat-panel/ComposerSendBufferStatus';
@@ -81,7 +82,7 @@ import { ThreadExportButton } from './chat-panel/ThreadExportButton';
 import { useClearCommand } from './chat-panel/useClearCommand';
 import { useOrchestratorReloadNotice } from './chat-panel/useOrchestratorReloadNotice';
 import { usePersistChatThread } from './chat-panel/usePersistChatThread';
-import { isFileEditCall } from './chat-panel/file-edits';
+import { useTurnSummaryReceipt } from './chat-panel/useTurnSummaryReceipt';
 import { useSuggestedReplies } from './chat-panel/useSuggestedReplies';
 import { useThoughtsComposerAttachments } from './chat-panel/useThoughtsComposerAttachments';
 import { useThreadHistoryBackfill } from './chat-panel/useThreadHistoryBackfill';
@@ -232,7 +233,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   // via the imperative handle. The mount-time auto-restore pass must never
   // run for them — it could adopt an unrelated recently-touched thread in
   // the race window before loadThread lands.
-  suppressAutoRestore?: boolean;
+  suppressAutoRestore?: boolean; suppressRuntimePrewarm?: boolean;
   /** True when the host tab is bound to a persisted thread whose history
    *  (incl. its backend) hasn't loaded yet. Until the load lands, the
    *  composer chip shows '…' instead of confidently claiming the DEFAULT
@@ -279,7 +280,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   onLaunchPacket,
   onChromeChange,
   onChatSummary,
-  suppressAutoRestore = false,
+  suppressAutoRestore = false, suppressRuntimePrewarm = false,
   expectsThreadLoad = false,
 }, ref) {
   const [input, setInput] = useState('');
@@ -669,26 +670,22 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       if (!repoPath) return null;
       const runtimeLabel = orchestratorRuntimeTone(singleRuntime).label;
       const prompt = initialMessage?.trim() || `You are ${runtimeLabel} running as a single-runtime o8 workspace chat. Acknowledge ready.`;
+      let receiptUnsettled = false;
       try {
         setSingleRuntimeSpawning(true);
-        const launchRes = await fetch('/api/runtime/launch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            runtime: singleRuntime,
-            prompt,
-            repoPath,
-            cwd: repoPath,
-            taskName: initialMessage?.trim() || undefined,
-            skipSetup: true,
-          }),
+        const { response: launchRes, payload: data } = await fetchRuntimeLaunchReceipt({
+          runtime: singleRuntime,
+          prompt,
+          repoPath,
+          cwd: repoPath,
+          taskName: initialMessage?.trim() || undefined,
+          skipSetup: true,
         });
-        const data = await launchRes.json() as { ok?: boolean; surfaceId?: string; error?: string; note?: string };
-        if (!data.ok || !data.surfaceId) {
+        if (!launchRes.ok || !data?.ok || !data.surfaceId) {
           // A dead launch must SAY SO — on a plain non-git folder every spawn
           // failed and the chat just sat silent (#1551). Surface the server's
           // actual reason as a system line so the operator is never guessing.
-          const reason = (data.error || data.note || '').trim();
+          const reason = (data?.error || data?.note || '').trim();
           setChatMessages((prev) => [
             ...prev,
             {
@@ -706,6 +703,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         singleRuntimeSessionRef.current = data.surfaceId;
         return data.surfaceId;
       } catch (err) {
+        if (correlatedActionIsUnsettled(err)) {
+          receiptUnsettled = true;
+          throw err;
+        }
         setChatMessages((prev) => [
           ...prev,
           {
@@ -718,7 +719,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         ]);
         return null;
       } finally {
-        setSingleRuntimeSpawning(false);
+        if (!receiptUnsettled) setSingleRuntimeSpawning(false);
         singleRuntimeLaunchPromiseRef.current = null;
       }
     })();
@@ -730,7 +731,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
 
   // ── Pre-warm orchestrator session on mount ──
   useEffect(() => {
-    if (!isOrchestratorMode || !orchestrationSettingsLoaded || isChatMode || orchestratorSessionRef.current || orchestratorSpawning) return;
+    if (suppressRuntimePrewarm || !isOrchestratorMode || !orchestrationSettingsLoaded || isChatMode || orchestratorSessionRef.current || orchestratorSpawning) return;
 
     let cancelled = false;
     (async () => {
@@ -761,29 +762,27 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       } catch { /* silent */ }
 
       if (cancelled) return;
+      let receiptUnsettled = false;
       try {
         setOrchestratorSpawning(true);
-        const launchRes = await fetch('/api/runtime/launch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            runtime: 'claude-code',
-            prompt: 'You are the orchestrator for o8. Acknowledge ready.',
-            repoPath,
-            cwd: repoPath,
-            skipSetup: true,
-          }),
+        const { payload: data } = await fetchRuntimeLaunchReceipt({
+          runtime: 'claude-code',
+          prompt: 'You are the orchestrator for o8. Acknowledge ready.',
+          repoPath,
+          cwd: repoPath,
+          skipSetup: true,
         });
-        const data = await launchRes.json() as { ok?: boolean; surfaceId?: string };
-        if (data.ok && data.surfaceId && !cancelled) {
+        if (data?.ok && data.surfaceId && !cancelled) {
           orchestratorSessionRef.current = data.surfaceId;
         }
-      } catch { /* silent */ } finally {
-        if (!cancelled) setOrchestratorSpawning(false);
+      } catch (error) {
+        receiptUnsettled = correlatedActionIsUnsettled(error);
+      } finally {
+        if (!cancelled && !receiptUnsettled) setOrchestratorSpawning(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [isChatMode, isOrchestratorMode, orchestrationSettingsLoaded, orchestratorSpawning, resolvedRepoPath]);
+  }, [isChatMode, isOrchestratorMode, orchestrationSettingsLoaded, orchestratorSpawning, resolvedRepoPath, suppressRuntimePrewarm]);
 
   useEffect(() => {
     openRef.current = open;
@@ -1545,123 +1544,15 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     onChatSummary(text);
   }, [chatMessages, displayMessages, isChatMode, isOrchestratorMode, onChatSummary]);
 
-  // #1095 / #1096 — turn-end summary card. Tracks the turn lifecycle so the
-  // ChatMessageList can render the rolled-up TurnSummaryCard (with the inner
-  // ChatActionCard for "Edited N files" + Review/Undo) right after the last
-  // assistant message of the turn.
-  const [turnSummary, setTurnSummary] = useState<TurnSummary | null>(null);
-  const turnStartRef = useRef<
-    | { startedAt: number; messageCountAtStart: number; runningTotalAtStart: number }
-    | null
-  >(null);
-  const prevOrchStatusRef = useRef<typeof orchStream.status>(orchStream.status);
-  useEffect(() => {
-    if (!isOrchestratorMode || isChatMode) {
-      prevOrchStatusRef.current = orchStream.status;
-      return;
-    }
-    const prev = prevOrchStatusRef.current;
-    const next = orchStream.status;
-    prevOrchStatusRef.current = next;
-
-    if (prev !== 'busy' && next === 'busy') {
-      // New turn started — clear stale summary and snapshot the baseline.
-      setTurnSummary(null);
-      turnStartRef.current = {
-        startedAt: Date.now(),
-        messageCountAtStart: displayMessages.length,
-        runningTotalAtStart: orchStream.runningTotal,
-      };
-      return;
-    }
-
-    if (prev === 'busy' && next === 'ready') {
-      const start = turnStartRef.current;
-      if (!start) return;
-      const newEntries = displayMessages.slice(start.messageCountAtStart);
-      if (newEntries.length === 0) return;
-
-      const toolNamesAll: string[] = [];
-      let toolCount = 0;
-      let firstAssistantId: string | null = null;
-      let lastAssistantId: string | null = null;
-      let turnHadEdits = false;
-      for (const entry of newEntries) {
-        if (entry.role === 'assistant') {
-          if (!firstAssistantId) firstAssistantId = entry.id;
-          lastAssistantId = entry.id;
-        }
-        if (entry.toolCalls?.length) {
-          for (const call of entry.toolCalls) {
-            toolCount += 1;
-            const name = call.name?.trim();
-            if (name) toolNamesAll.push(name);
-            if (isFileEditCall(call)) turnHadEdits = true;
-          }
-        }
-      }
-      if (!lastAssistantId) return;
-
-      const distinctNames: string[] = [];
-      const seen = new Set<string>();
-      for (const name of toolNamesAll) {
-        if (!seen.has(name)) {
-          seen.add(name);
-          distinctNames.push(name);
-        }
-      }
-
-      const elapsedMs = Math.max(0, Date.now() - start.startedAt);
-      const tokensUsed = Math.max(0, orchStream.runningTotal - start.runningTotalAtStart);
-      const baseSummary: TurnSummary = {
-        assistantMessageId: lastAssistantId,
-        firstAssistantMessageId: firstAssistantId,
-        elapsedMs,
-        toolCount,
-        toolNames: distinctNames.slice(0, 3),
-        toolNameTotal: distinctNames.length,
-        filesEditedCount: 0,
-        filePaths: [],
-        tokensUsed,
-        repoPath: resolvedRepoPath ?? null,
-      };
-      setTurnSummary(baseSummary);
-      turnStartRef.current = null;
-
-      // False-attribution guard (2026-07-13): the workspace snapshot counts
-      // EVERY working-tree change, including edits this turn never made
-      // (other agents, pre-existing dirt). Only stamp "Edited N files" when
-      // the turn actually ran a file-edit tool.
-      if (resolvedRepoPath && turnHadEdits) {
-        const repoForFetch = resolvedRepoPath;
-        const targetAssistantId = lastAssistantId;
-        void (async () => {
-          try {
-            const response = await fetch(`/api/review/workspace?workspace=${encodeURIComponent(repoForFetch)}&strictBranch=1`);
-            if (!response.ok) return;
-            const snapshot = await response.json() as { changedFiles?: Array<{ path?: string }> };
-            const paths = (snapshot.changedFiles ?? [])
-              .map((file) => file?.path)
-              .filter((p): p is string => typeof p === 'string' && p.length > 0);
-            setTurnSummary((prevSummary) => (
-              prevSummary && prevSummary.assistantMessageId === targetAssistantId
-                ? { ...prevSummary, filesEditedCount: paths.length, filePaths: paths }
-                : prevSummary
-            ));
-          } catch {
-            // Swallow — card still shows the elapsed/tools/tokens summary.
-          }
-        })();
-      }
-    }
-  }, [displayMessages, isChatMode, isOrchestratorMode, orchStream.runningTotal, orchStream.status, resolvedRepoPath]);
-
-  // Clear the summary when the thread changes — stale cards from a prior
-  // thread should not bleed into the new one.
-  useEffect(() => {
-    setTurnSummary(null);
-    turnStartRef.current = null;
-  }, [threadId, resolvedRepoPath, isOrchestratorMode, isChatMode]);
+  const turnSummary = useTurnSummaryReceipt({
+    displayMessages,
+    isChatMode,
+    isOrchestratorMode,
+    missionState,
+    repoPath: resolvedRepoPath,
+    stream: orchStream,
+    threadId: threadIdRef.current ?? threadId,
+  });
 
   // #587 — publish live transcript + running token total into the context
   // residency provider so the ContextInspector side panel (mounted at the
@@ -1918,21 +1809,17 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         const { sessionKey } = launch;
         await captureServerSnapshot(sessionKey);
         if (!launch.launched) {
-          const response = await fetch('/api/runtime/action', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'steer', surfaceId: sessionKey, message: wireMessage }),
-          });
+          const { response, payload } = await fetchRuntimeSteerReceipt(sessionKey, wireMessage);
 
-          if (!response.ok) {
-            const body = await response.json().catch(() => null) as { note?: string; error?: string } | null;
-            const reason = body?.note?.trim() || body?.error?.trim();
+          if (!response.ok || payload?.ok === false) {
+            const reason = payload?.note?.trim() || payload?.error?.trim();
             throw new Error(reason || 'Send failed');
           }
         }
 
         startPollingForSession(sessionKey);
       } catch (err) {
+        const receiptUnsettled = correlatedActionIsUnsettled(err);
         const runtimeLabel = orchestratorRuntimeTone(singleRuntime).label;
         const rawMessage = err instanceof Error ? err.message.trim() : '';
         const fallback = `Unable to reach the selected ${runtimeLabel} lane. Make sure the runtime is available.`;
@@ -1946,7 +1833,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
             timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           },
         ]);
-        setWaitingForReply(false);
+        if (!receiptUnsettled) setWaitingForReply(false);
       }
       return;
     }
@@ -2004,20 +1891,24 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       await captureServerSnapshot(sessionKey);
 
       const isRuntimeSession = isRuntimeSessionKey(sessionKey);
-      const response = await fetch(isRuntimeSession ? '/api/runtime/action' : '/api/mobile/action', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: isRuntimeSession
-          ? JSON.stringify({ action: 'steer', surfaceId: sessionKey, message: wireMessage })
-          : JSON.stringify({ action: 'resume', sessionKey, message: wireMessage }),
-      });
+      const { response, payload } = isRuntimeSession
+        ? await fetchRuntimeSteerReceipt(sessionKey, wireMessage)
+        : {
+            response: await fetch('/api/mobile/action', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'resume', sessionKey, message: wireMessage }),
+            }),
+            payload: null,
+          };
 
-      if (!response.ok) {
-        throw new Error('Send failed');
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.note || payload?.error || 'Send failed');
       }
 
       startPolling();
-    } catch {
+    } catch (error) {
+      const receiptUnsettled = correlatedActionIsUnsettled(error);
       const laneRuntimeLabel = targetAgent ? getRuntimeCapability(targetAgent.runtime).label : 'CLI';
       setChatMessages((prev) => [
         ...prev,
@@ -2029,7 +1920,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
-      setWaitingForReply(false);
+      if (!receiptUnsettled) setWaitingForReply(false);
     }
   }, [attachedImages, captureServerSnapshot, chatMessages, chatOpenrouterModel, chatStreamRequest, clearAttachments, ensureSingleRuntimeSession, input, isChatMode, isOrchestratorMode, isSingleMode, lockedMode, onSpawnChatTab, onSpawnSingleTab, orchStream, orchestratorBackend, orchestratorModel, permissionMode, resolvedRepoPath, runLocalOrchestratorSlash, selectedChatModel, singleRuntime, startPolling, startPollingForSession, targetAgent, targetSessionKey, thinkingEffort, swarmEnabled, soloOrchestrator, collideEnabled, waitingForReply]);
 

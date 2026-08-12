@@ -10,6 +10,7 @@ import { XtermPanel, type XtermPanelHandle } from '@/components/desktop/workspac
 import { WorkspaceBootLoaderClaim } from '@/components/desktop/workspace-terminal/workspace-boot-loader-claim';
 import { updateResidentTabIds } from '@/components/desktop/workspace-terminal/resident-tabs';
 import { retryingLazy } from '@/lib/react/retrying-lazy';
+import { OUTSIDE_WORKER_HOST_EMPTY_EVENT } from './use-session-tiles';
 
 // LazyLLMChat used to render the Assistant tab (kind='llm-chat'). The
 // chooser-spawn rewrite routes both orchestrator and llm-chat tabs
@@ -20,6 +21,7 @@ const LazyOrchestratorTab = retryingLazy(() => import('@/components/desktop/work
 const LazyFleetCanvasTab = retryingLazy(() => import('@/components/desktop/workspace-terminal/FleetCanvasTab').then((module) => ({ default: module.FleetCanvasTab })), { label: 'Fleet canvas' });
 
 interface WorkspaceTerminalPanelsProps {
+  workspaceId: string;
   visibleTabs: TerminalTab[];
   /** True once the tab restore for the CURRENT restore key has landed. While
    *  false, a zero-tab workspace is "not restored yet", never "empty" — the
@@ -51,6 +53,7 @@ interface WorkspaceTerminalPanelsProps {
 }
 
 function WorkspaceTerminalPanelsBase({
+  workspaceId,
   visibleTabs,
   effectiveActiveTabId,
   termWsConnected,
@@ -85,6 +88,15 @@ function WorkspaceTerminalPanelsBase({
   useEffect(() => {
     if (visibleTabs.length > 0) hasEverHadTabsRef.current = true;
   }, [visibleTabs.length]);
+  useEffect(() => {
+    const closeEmptyOutsideWorkerHost = (event: Event) => {
+      const tabId = (event as CustomEvent<{ tabId?: string }>).detail?.tabId;
+      const tab = visibleTabs.find((candidate) => candidate.id === tabId);
+      if (tab?.outsideWorkerHost && !tab.orchestratorThreadId) onCloseTab(tab.id);
+    };
+    window.addEventListener(OUTSIDE_WORKER_HOST_EMPTY_EVENT, closeEmptyOutsideWorkerHost);
+    return () => window.removeEventListener(OUTSIDE_WORKER_HOST_EMPTY_EVENT, closeEmptyOutsideWorkerHost);
+  }, [onCloseTab, visibleTabs]);
   const visibleTabIdsKey = visibleTabs.map((tab) => tab.id).join('|');
   const [residentTabIds, setResidentTabIds] = useState<string[]>(() => (
     updateResidentTabIds([], visibleTabs.map((tab) => tab.id), effectiveActiveTabId)
@@ -125,6 +137,7 @@ function WorkspaceTerminalPanelsBase({
           <OrchestratorResidentPanel
             key={tab.id}
             tab={tab}
+            workspaceId={workspaceId}
             active={tab.id === effectiveActiveTabId}
             projectContextRailVisible={projectContextRailVisible}
             onUpdateLlmSummary={onUpdateLlmSummary}
@@ -133,6 +146,7 @@ function WorkspaceTerminalPanelsBase({
           <OrchestratorResidentPanel
             key={tab.id}
             tab={tab}
+            workspaceId={workspaceId}
             active={tab.id === effectiveActiveTabId}
             projectContextRailVisible={projectContextRailVisible}
             onUpdateLlmSummary={onUpdateLlmSummary}
@@ -312,11 +326,13 @@ export const WorkspaceTerminalPanels = memo(WorkspaceTerminalPanelsBase);
 
 const OrchestratorResidentPanel = memo(function OrchestratorResidentPanel({
   tab,
+  workspaceId,
   active,
   projectContextRailVisible,
   onUpdateLlmSummary,
 }: {
   tab: TerminalTab;
+  workspaceId: string;
   active: boolean;
   projectContextRailVisible: boolean;
   onUpdateLlmSummary: (tabId: string, summary: string | null) => void;
@@ -326,6 +342,7 @@ const OrchestratorResidentPanel = memo(function OrchestratorResidentPanel({
       <Suspense fallback={null}>
         <LazyOrchestratorTab
           tabId={tab.id}
+          workspaceId={workspaceId}
           active={active}
           repoPath={tab.repo?.localPath ?? null}
           repoLabel={tab.repo?.name ?? null}
@@ -344,6 +361,7 @@ const OrchestratorResidentPanel = memo(function OrchestratorResidentPanel({
     <Suspense fallback={active ? <WorkspaceBootLoaderClaim /> : null}>
       <LazyOrchestratorTab
         tabId={tab.id}
+        workspaceId={workspaceId}
         active={active}
         repoPath={tab.repo?.localPath ?? null}
         repoLabel={tab.repo?.name ?? null}
@@ -355,6 +373,7 @@ const OrchestratorResidentPanel = memo(function OrchestratorResidentPanel({
         projectContextRailVisible={projectContextRailVisible}
         onChatSummary={(text) => onUpdateLlmSummary(tab.id, text)}
         restoreLastThread={!tab.freshSpawn}
+        suppressRuntimePrewarm={tab.outsideWorkerHost === true}
         turnInjection={tab.orchestratorTurnInjection}
       />
     </Suspense>

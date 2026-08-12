@@ -151,9 +151,12 @@ function PacketActionStripBase({ packetId, issueUrl, prompt, runtime }: PacketAc
     if (busy) return;
     setBusy('retry');
     const result = await callRetryPacket(packetId);
-    setBusy(null);
+    if (!result.unsettled) setBusy(null);
     if (result.ok) {
-      showToast(`Packet retried · waiting for ${runtimeLabel}`, 'retry');
+      showToast(
+        result.note ?? `Packet retried · waiting for ${runtimeLabel}`,
+        result.salvaged ? 'neutral' : 'retry',
+      );
     } else {
       showToast(result.note ?? 'Retry failed', 'error');
     }
@@ -163,7 +166,7 @@ function PacketActionStripBase({ packetId, issueUrl, prompt, runtime }: PacketAc
     if (busy) return;
     setBusy('reset');
     const result = await callResetPacket(packetId);
-    setBusy(null);
+    if (!result.unsettled) setBusy(null);
     if (result.ok) {
       showToast('Packet reset · lane archived', 'neutral');
     } else {

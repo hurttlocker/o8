@@ -78,6 +78,7 @@ import { FileGlassCard, type FileCard } from './file-card';
 import { ImageGlassCard, type ImageCard } from './image-card';
 import { VideoGlassCard, type VideoCard } from './video-card';
 import { putMedia, getMedia, deleteMedia } from './canvas-media-store';
+import { spawnCanvasAgents } from './spawn-prompt-client';
 import { useO8Auth } from '@/components/auth/O8AuthProvider';
 import { TerminalGlassCard, type TermCard } from './terminal-card';
 import { TunerPanel } from './tuner';
@@ -2093,22 +2094,11 @@ export default function CanvasGlassPreviewPage() {
         expiresAt,
       })));
     }
-    fetch('/api/orchestrator/spawn-prompt', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ repoPath, task: task.trim(), count: n, ...(origin === 'symon' ? { origin } : {}) }),
-    })
-      .then((response) => response.json().catch(() => null))
-      .then((data: { result?: { packetIds?: unknown; packets?: Array<{ id?: unknown }> }; packetIds?: unknown; packets?: Array<{ id?: unknown }> } | null) => {
+    spawnCanvasAgents({ repoPath, task: task.trim(), count: n, origin })
+      .then((ids) => {
         if (origin === 'symon') {
-          const result = data?.result ?? data ?? null;
-          const ids = Array.isArray(result?.packetIds)
-            ? result.packetIds
-            : Array.isArray(result?.packets)
-              ? result.packets.map((packet) => packet.id)
-              : [];
           for (const id of ids) {
-            if (typeof id === 'string' && id) symonSpawnPacketIdsRef.current.add(id);
+            symonSpawnPacketIdsRef.current.add(id);
           }
         }
         // The lane-lifecycle push usually beats these, but a couple of nudges

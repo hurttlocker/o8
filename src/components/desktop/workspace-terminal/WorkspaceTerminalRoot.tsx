@@ -9,6 +9,7 @@ import { PreviewPane } from '@/components/desktop/workspace-terminal/PreviewPane
 import { THEME_ACCENT, THEME_ACCENT_SOFT_STRONG } from '@/components/desktop/workspace-terminal/constants';
 import { useWorkspaceTerminalController } from '@/components/desktop/workspace-terminal/useWorkspaceTerminalController';
 import { WorkspaceTerminalPanels } from '@/components/desktop/workspace-terminal/WorkspaceTerminalPanels';
+import { useOutsideWorkerSplitMount } from '@/components/desktop/workspace-terminal/use-outside-worker-split-mount';
 import { WorkspaceSpawnProvider, type WorkspaceSpawnHandlers } from '@/components/desktop/workspace-terminal/spawn-context';
 import { workspaceConversationHeaderLabel } from '@/components/desktop/workspace-terminal/utils';
 import type { TerminalTab, TerminalTabHandle, WorkspaceTerminalProps } from '@/components/desktop/workspace-terminal/types';
@@ -52,6 +53,14 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
     // Stable workspace instance id — declared early so the spawn /
     // close event listeners below can use it.
     const workspaceInstanceId = useId();
+    useOutsideWorkerSplitMount({
+      active: props.activeWorkspaceSurface === true,
+      activeTabId: controller.activeTab?.id ?? null,
+      workspaceId: workspaceInstanceId,
+      tabs: controller.tabs,
+      selectTab: controller.handleSelectTab,
+      spawnOrchestratorTab: controller.spawnOrchestratorTab,
+    });
 
     // Listen for header spawn / close-workspace requests. Events
     // include an optional workspaceId — when set, only the matching
@@ -325,6 +334,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
             action still exists on each chat tab's header strip. */}
 
         <WorkspaceTerminalPanels
+          workspaceId={workspaceInstanceId}
           visibleTabs={controller.visibleTabs}
           restoreSettled={controller.primaryRestoreSettled}
           effectiveActiveTabId={controller.effectiveActiveTabId}

@@ -5,6 +5,10 @@
  * universal AgentRuntime contract. No rewrite — delegates to existing code.
  */
 
+import { realpath, stat } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+
 import type {
   AgentRuntime,
   RuntimeCapabilities,
@@ -18,7 +22,14 @@ import type {
 // Side-effect import: registers the 'codex' cost parser in the registry.
 import '@/lib/runtimes/codex-cost-parser';
 import { parseCost } from '@/lib/runtimes/shared/cost-parser-registry';
-import { getCodexDiscoveredFleetAdditions, getCodexRolloutPath, getCodexRuntimeTail, queryCodexThreadById } from '@/lib/codex/sessions';
+import { ownedTailToRuntimeTranscript } from '@/lib/runtimes/shared/owned-transcript';
+import {
+  getCodexDiscoveredFleetAdditions,
+  getCodexRolloutPath,
+  getCodexRuntimeTail,
+  queryCodexThreadById,
+  resolveCodexDiscoveredSessionHome,
+} from '@/lib/codex/sessions';
 import { getRuntimeRepoReview } from '@/lib/git/runtime-review';
 import { monitorUsageDispatch, usageSnapshotFromTelemetry, type UsageSnapshot } from '@/lib/usage-log';
 
@@ -30,8 +41,23 @@ import {
   getOwnedCodexRuntimeTail,
   getOwnedCodexReviewPacket,
   getOwnedCodexTelemetrySources,
+  getOwnedCodexSessionIdentityId,
 } from '@/lib/codex/owned';
 import { resolveDefaultDispatchModelSync, resolveDefaultWorkerEffortSync } from '@/lib/operator/defaults';
+import {
+  getCodexSessionTransformCapabilities,
+  recoverCodexSessionTransform,
+  transformCodexSession,
+} from '@/lib/codex/session-transforms';
+import { getRuntimeIdentityForServer, listRuntimeIdentitiesForServer } from '@/lib/runtime/identity-catalog';
+import { readSessionTransformCatalog } from '@/lib/runtime/session-transform-catalog';
+import { readCodexRuntimeCapacity } from '@/lib/usage/cli-scrape';
+import { getDataDir } from '@/lib/data-dir-migration';
+
+function containsPath(parent: string, child: string): boolean {
+  const relative = path.relative(parent, child);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
 
 const capabilities: RuntimeCapabilities = {
   discover: true,
@@ -42,6 +68,16 @@ const capabilities: RuntimeCapabilities = {
   reviewDiffs: true,
   costTelemetry: true,
   streaming: true,
+  sessionTransforms: {
+    import: true,
+    checkpoint: true,
+    fork: true,
+    rewind: true,
+  },
+  capacity: {
+    observe: true,
+    identitySelection: true,
+  },
 };
 
 async function waitForOwnedRunToFinish(sessionKey: string, startedAtMs: number) {
@@ -83,7 +119,7 @@ function scheduleCodexUsageDispatch(
  * Map internal fleet AgentSummary to the universal RuntimeSession shape.
  */
 function mapAgentToSession(
-  agent: { id: string; name: string; sessionKey: string; status: string; currentTask: string; workspace: string; branch: string; model: string; lastEventAt: string; tmuxSession?: string; runtimeSurface?: { ownership?: string; capabilities?: { sendInput?: boolean; interrupt?: boolean; diffContext?: boolean }; lifecycle?: { availability?: string; lastOutcome?: string; lastRunMode?: string; lastRunStartedAt?: string; lastRunFinishedAt?: string; summary?: string }; reviewContext?: { repoSlug?: string; branch?: string; head?: string }; cwd?: string } },
+  agent: { id: string; name: string; sessionKey: string; status: string; currentTask: string; workspace: string; branch: string; model: string; lastEventAt: string; identityId?: string; tmuxSession?: string; runtimeSurface?: { ownership?: string; capabilities?: { sendInput?: boolean; interrupt?: boolean; diffContext?: boolean }; lifecycle?: { availability?: string; lastOutcome?: string; lastRunMode?: string; lastRunStartedAt?: string; lastRunFinishedAt?: string; summary?: string }; reviewContext?: { repoSlug?: string; branch?: string; head?: string }; cwd?: string } },
 ): RuntimeSession {
   const surface = agent.runtimeSurface;
   const ownership = (surface?.ownership ?? 'discovered') as RuntimeSession['ownership'];
@@ -118,6 +154,7 @@ function mapAgentToSession(
     lastActivityAt,
     initialTask: agent.currentTask,
     model: agent.model,
+    identityId: agent.identityId,
     lifecycle: surface?.lifecycle ? {
       availability: (surface.lifecycle.availability ?? 'running') as 'awaiting-thread' | 'running' | 'ready-for-resume',
       lastOutcome: surface.lifecycle.lastOutcome as 'finished' | 'interrupted' | 'failed' | undefined,
@@ -165,6 +202,63 @@ export const codexRuntime: AgentRuntime = {
   id: 'codex',
   displayName: 'Codex',
   capabilities,
+  getSessionTransformCapabilities: getCodexSessionTransformCapabilities,
+  transformSession: transformCodexSession,
+  recoverSessionTransform: recoverCodexSessionTransform,
+  async getCapacity(identityId) {
+    const defaultConfigHome = process.env.CODEX_HOME?.trim() || path.join(os.homedir(), '.codex');
+    const identity = identityId
+      ? await getRuntimeIdentityForServer('codex', identityId)
+      : (await listRuntimeIdentitiesForServer('codex')).find((candidate) => (
+          path.resolve(candidate.configHomeRef) === path.resolve(defaultConfigHome)
+        )) ?? null;
+    return readCodexRuntimeCapacity({
+      configHome: identityId ? identity?.configHomeRef : defaultConfigHome,
+      identityId: identity?.id ?? null,
+    });
+  },
+  async validateIdentityConfigHome(configHomeRef) {
+    if (!path.isAbsolute(configHomeRef)) {
+      return { ok: false, reason: 'Codex identity homes must be absolute directories.' };
+    }
+    try {
+      const resolved = await realpath(configHomeRef);
+      if (!(await stat(resolved)).isDirectory()) {
+        return { ok: false, reason: 'The Codex identity home is not a directory.' };
+      }
+      const userHome = await realpath(os.homedir()).catch(() => path.resolve(os.homedir()));
+      const dataHome = await realpath(getDataDir()).catch(() => path.resolve(getDataDir()));
+      if (resolved === path.parse(resolved).root
+        || resolved === userHome
+        || containsPath(resolved, dataHome)
+        || containsPath(dataHome, resolved)) {
+        return { ok: false, reason: 'The Codex identity home is too broad or contains protected o8 state.' };
+      }
+      const authPath = path.join(resolved, 'auth.json');
+      const resolvedAuth = await realpath(authPath);
+      if (!containsPath(resolved, resolvedAuth) || !(await stat(resolvedAuth)).isFile()) {
+        return { ok: false, reason: 'The Codex identity home auth.json is not a file.' };
+      }
+      return { ok: true, configHomeRef: resolved };
+    } catch {
+      return {
+        ok: false,
+        reason: 'The Codex identity home must exist and contain a local auth.json file.',
+      };
+    }
+  },
+  async getSessionIdentityId(sessionKey) {
+    if (sessionKey.startsWith('codex-owned:')) {
+      return getOwnedCodexSessionIdentityId(sessionKey);
+    }
+    const discovered = await getCodexDiscoveredFleetAdditions({ fresh: false }).catch(() => null);
+    const discoveredIdentity = discovered?.agents.find((agent) => agent.sessionKey === sessionKey)?.identityId;
+    if (discoveredIdentity) return discoveredIdentity;
+    const catalog = await readSessionTransformCatalog().catch(() => null);
+    return catalog?.sessions.find((session) => (
+      session.runtimeId === 'codex' && session.sessionKey === sessionKey
+    ))?.identityId ?? null;
+  },
 
   async discoverSessions(): Promise<RuntimeSession[]> {
     // Discover both user-launched (terminal) and IDE-owned sessions
@@ -207,9 +301,12 @@ export const codexRuntime: AgentRuntime = {
   async readTranscript(sessionKey: string, sinceId?: string, limit?: number): Promise<RuntimeTranscriptEntry[]> {
     // Route to the correct tail reader based on ownership
     const isOwned = sessionKey.startsWith('codex-owned:');
-    const tail = isOwned
-      ? await getOwnedCodexRuntimeTail(sessionKey)
-      : await getCodexRuntimeTail(sessionKey);
+    if (isOwned) {
+      const ownedTail = await getOwnedCodexRuntimeTail(sessionKey, sinceId ? 200 : limit);
+      return ownedTailToRuntimeTranscript(ownedTail, sinceId, limit);
+    }
+    const identityId = await codexRuntime.getSessionIdentityId?.(sessionKey);
+    const tail = await getCodexRuntimeTail(sessionKey, limit, identityId ?? undefined);
 
     const entries = applyTranscriptWindow(tail.entries, sinceId, limit);
 
@@ -236,6 +333,7 @@ export const codexRuntime: AgentRuntime = {
     const result = await launchOwnedCodexSession({
       cwd: opts.cwd,
       prompt: opts.prompt,
+      clientMutationId: opts.clientMutationId,
       model,
       effort,
       laneId: opts.laneId,
@@ -281,6 +379,14 @@ export const codexRuntime: AgentRuntime = {
     // Discovered Codex sessions: resume directly via CLI
     const threadId = sessionKey.replace(/^codex:/, '').replace(/^codex-discovered:/, '');
     try {
+      const identityId = await codexRuntime.getSessionIdentityId?.(sessionKey);
+      const providerSession = await resolveCodexDiscoveredSessionHome(sessionKey, identityId ?? undefined);
+      if (!providerSession || providerSession.threadId !== threadId) {
+        return {
+          ok: false,
+          note: 'The Codex session is missing or ambiguous across registered identities, so it was not resumed.',
+        };
+      }
       const { execFile } = await import('node:child_process');
       const { promisify } = await import('node:util');
       const os = await import('node:os');
@@ -310,7 +416,12 @@ export const codexRuntime: AgentRuntime = {
         cwd: process.env.HOME || os.homedir(),
         timeout: 120_000,
         maxBuffer: 10 * 1024 * 1024,
-        env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+        env: {
+          ...process.env,
+          CODEX_HOME: providerSession.configHomeRef,
+          FORCE_COLOR: '0',
+          NO_COLOR: '1',
+        },
         encoding: 'utf-8',
       });
       scheduleCodexUsageDispatch(sessionKey, startedAtMs, baseline);
@@ -350,12 +461,14 @@ export const codexRuntime: AgentRuntime = {
         ok: true,
         note: `Interrupt sent to local Codex pid ${pid}.`,
         sessionKey,
+        pids: [pid],
       };
     } catch (err) {
       return {
         ok: false,
         note: err instanceof Error ? err.message : `Unable to interrupt pid ${pid}.`,
         sessionKey,
+        pids: [pid],
       };
     }
   },
@@ -442,7 +555,8 @@ export const codexRuntime: AgentRuntime = {
     // user-terminal session despite advertising reviewDiffs.
     try {
       const threadId = sessionKey.replace(/^codex:/, '').replace(/^codex-discovered:/, '');
-      const thread = await queryCodexThreadById(threadId);
+      const identityId = await codexRuntime.getSessionIdentityId?.(sessionKey);
+      const thread = await queryCodexThreadById(threadId, identityId ?? undefined);
       if (!thread?.cwd) return [];
       const review = await getRuntimeRepoReview(thread.cwd);
       return (review.changedFiles ?? []).map((f) => ({

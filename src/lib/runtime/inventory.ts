@@ -8,6 +8,7 @@ import { getAllRuntimes } from '@/lib/runtimes';
 import { listCurrentIdeRepoPaths } from '@/lib/runtime/ide-terminal-state';
 import { listIdeRuntimeSessions, listIdeRuntimeTabs, type IdeRuntimeSessionDescriptor } from '@/lib/runtime/ide-session-registry';
 import { getRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
+import { readSessionTransformCatalog } from '@/lib/runtime/session-transform-catalog';
 import {
   isDispatchableRuntime,
   ORCHESTRATOR_RUNTIMES,
@@ -243,6 +244,7 @@ function mapRuntimeSessionToAgent(
     },
     alerts,
     sessionId: session.sessionKey.replace(/^[^:]+:/, ''),
+    identityId: session.identityId,
     sessionKind: session.ownership,
     surfaceLabel: runtime.displayName,
     tokenUsage: undefined,
@@ -383,11 +385,15 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
   const ideSessions = listIdeRuntimeSessions();
   const ideTabs = listIdeRuntimeTabs();
   const ideSessionByKey = new Map(ideSessions.map((session) => [session.liveSessionKey ?? session.sessionKey, session]));
-  const results = await Promise.allSettled(
-    runtimes.map(async (runtime) => ({
+  const [results, transformCatalog] = await Promise.all([
+    Promise.allSettled(runtimes.map(async (runtime) => ({
       runtime,
       sessions: await runtime.discoverSessions(),
-    })),
+    }))),
+    readSessionTransformCatalog().catch(() => null),
+  ]);
+  const catalogedSessionKeys = new Set(
+    (transformCatalog?.sessions ?? []).map((session) => `${session.runtimeId}:${session.sessionKey}`),
   );
 
   const discoveredAll = results
@@ -413,6 +419,37 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
       }
     });
 
+  const discoveredKeys = new Set(
+    discoveredAll.map(({ runtime, session }) => `${runtime.id}:${session.sessionKey}`),
+  );
+  for (const catalogSession of transformCatalog?.sessions ?? []) {
+    const runtime = runtimes.find((candidate) => candidate.id === catalogSession.runtimeId);
+    const key = `${catalogSession.runtimeId}:${catalogSession.sessionKey}`;
+    if (!runtime || discoveredKeys.has(key)) continue;
+    const cwd = catalogSession.cwd.trim();
+    if (path.isAbsolute(cwd) && !existsSync(cwd)) continue;
+    discoveredAll.push({
+      runtime,
+      session: {
+        sessionKey: catalogSession.sessionKey,
+        runtimeId: runtime.id,
+        displayName: catalogSession.displayName?.trim() || runtime.displayName,
+        cwd: catalogSession.cwd,
+        branch: catalogSession.branch ?? undefined,
+        status: 'idle',
+        ownership: catalogSession.ownership,
+        sessionCapabilities: {
+          canSendInput: runtime.capabilities.resume,
+          canInterrupt: false,
+          canReviewDiffs: runtime.capabilities.reviewDiffs,
+        },
+        lastActivityAt: new Date(catalogSession.importedAt),
+        identityId: catalogSession.identityId ?? undefined,
+      },
+    });
+    discoveredKeys.add(key);
+  }
+
   discoveredAll.sort((left, right) => {
     const statusWeight = (status: RuntimeSession['status']) => (
       status === 'running' ? 5
@@ -426,10 +463,11 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
     return right.session.lastActivityAt.getTime() - left.session.lastActivityAt.getTime();
   });
 
-  const discovered = discoveredAll.filter(({ session }) => (
+  const discovered = discoveredAll.filter(({ runtime, session }) => (
     session.sessionKey?.startsWith('codex-owned:')
     || ideSessionByKey.has(session.sessionKey)
     || isRegistryBackedRuntimeSession(session.sessionKey)
+    || catalogedSessionKeys.has(`${runtime.id}:${session.sessionKey}`)
     // #658 — Orchestrator-spawned lanes mark themselves with ownership='owned'
     // when their cwd lives inside `.cortex-worktrees/packet-*`. Surface them
     // so the desktop SessionVisualizer + AgentPanel can show their pills and

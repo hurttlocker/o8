@@ -38,6 +38,25 @@ export type TurnSummary = {
   filePaths: string[];
   /** Token running-total delta during the turn. */
   tokensUsed: number;
+  /** Billable parent + child work attributed to this turn. */
+  costUsd?: number | null;
+  /** Internal receipt pieces used while an attached mission is still settling. */
+  orchestratorCostUsd?: number | null;
+  childCostUsd?: number | null;
+  childCostAtStartUsd?: number | null;
+  missionId?: string | null;
+  missionIdAtStart?: string | null;
+  missionFunnel?: {
+    totalDurationMs: number | null;
+    terminalPacketCount: number;
+    packetCount: number;
+    attemptCount: number;
+    retryCount: number;
+    interventionCount: number;
+    recoveryEventCount: number;
+    strictAutonomousCloseCount: number;
+    governedAutonomousCloseCount: number;
+  } | null;
   /** Repo root for the inner ChatActionCard. */
   repoPath: string | null;
 };
@@ -65,17 +84,40 @@ function formatTokens(value: number): string {
   return `${(value / 1_000_000).toFixed(1)}M`;
 }
 
+function formatCost(value: number): string {
+  if (value <= 0) return '$0.00';
+  return value < 0.01 ? `$${value.toFixed(4)}` : `$${value.toFixed(2)}`;
+}
+
+export function buildTurnSummaryStats(summary: TurnSummary): { key: string; value: string }[] {
+  return [
+    { key: 'tools', value: summary.toolCount === 0 ? '0 tools' : `${summary.toolCount} ${summary.toolCount === 1 ? 'tool' : 'tools'}` },
+    { key: 'files', value: summary.filesEditedCount === 0 ? '0 files' : `${summary.filesEditedCount} ${summary.filesEditedCount === 1 ? 'file' : 'files'}` },
+    { key: 'tokens', value: `${formatTokens(summary.tokensUsed)} tokens` },
+    ...(typeof summary.costUsd === 'number'
+      ? [{ key: 'cost', value: `${formatCost(summary.costUsd)} cost` }]
+      : []),
+    ...(summary.missionFunnel ? [
+      {
+        key: 'mission',
+        value: summary.missionFunnel.totalDurationMs == null
+          ? 'mission in progress'
+          : `${formatElapsed(summary.missionFunnel.totalDurationMs)} mission`,
+      },
+      { key: 'attempts', value: `${summary.missionFunnel.attemptCount} attempts · ${summary.missionFunnel.retryCount} ${summary.missionFunnel.retryCount === 1 ? 'retry' : 'retries'}` },
+      { key: 'control', value: `${summary.missionFunnel.interventionCount} interventions · ${summary.missionFunnel.recoveryEventCount} recoveries` },
+      { key: 'terminal', value: `${summary.missionFunnel.terminalPacketCount}/${summary.missionFunnel.packetCount} terminal` },
+      { key: 'autonomy', value: `${summary.missionFunnel.strictAutonomousCloseCount} strict · ${summary.missionFunnel.governedAutonomousCloseCount} approval-only` },
+    ] : []),
+  ];
+}
+
 export function TurnSummaryCard({ summary }: Props) {
   const [expanded, setExpanded] = useState(false);
   const elapsed = formatElapsed(summary.elapsedMs);
   const toolPreview = summary.toolNames.slice(0, 3).join(', ');
   const toolOverflow = Math.max(0, summary.toolNameTotal - summary.toolNames.slice(0, 3).length);
-
-  const stats: { key: string; value: string }[] = [
-    { key: 'tools', value: summary.toolCount === 0 ? '0 tools' : `${summary.toolCount} ${summary.toolCount === 1 ? 'tool' : 'tools'}` },
-    { key: 'files', value: summary.filesEditedCount === 0 ? '0 files' : `${summary.filesEditedCount} ${summary.filesEditedCount === 1 ? 'file' : 'files'}` },
-    { key: 'tokens', value: `${formatTokens(summary.tokensUsed)} tokens` },
-  ];
+  const stats = buildTurnSummaryStats(summary);
 
   return (
     <div
@@ -119,6 +161,7 @@ export function TurnSummaryCard({ summary }: Props) {
           }}
         >
           Worked for {elapsed}
+          {typeof summary.costUsd === 'number' ? ` · ${formatCost(summary.costUsd)}` : ''}
         </span>
         <Chevron open={expanded} />
       </button>

@@ -1,10 +1,15 @@
-import { describe, expect, it } from 'vitest';
-import { CliError } from '../cli/src/api';
-import { parseMissionStopArgs } from '../cli/src/commands/mission';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { CliError, EXIT } from '../cli/src/api';
+import { parseMissionStopArgs, runMission } from '../cli/src/commands/mission';
 import { parsePacketStopArgs } from '../cli/src/commands/packet/stop';
 import { parseRunStopArgs } from '../cli/src/commands/run';
 
 describe('CLI stop command parsing', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
   it('packet stop treats positional and --packet ids identically', () => {
     expect(parsePacketStopArgs(['pkt-target'])).toEqual({ packetId: 'pkt-target' });
     expect(parsePacketStopArgs(['--packet', 'pkt-target'])).toEqual({ packetId: 'pkt-target' });
@@ -18,7 +23,76 @@ describe('CLI stop command parsing', () => {
     expect(parseMissionStopArgs(['--mission', 'mission-1'])).toEqual({
       missionId: 'mission-1',
     });
+    expect(parseMissionStopArgs([
+      '--mission',
+      'mission-1',
+      '--idempotency-key',
+      'mission-stop-key',
+    ])).toEqual({
+      missionId: 'mission-1',
+      idempotencyKey: 'mission-stop-key',
+    });
     expect(() => parseMissionStopArgs([])).toThrow(CliError);
+  });
+
+  it('mission stop polls the exact body through an accepted receipt', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ok: true,
+        result: { inProgress: true, status: 'in_progress' },
+      }), {
+        status: 202,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ok: true,
+        result: { missionId: 'mission-1', packets: [] },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const request = runMission(
+      { human: false, verbose: false },
+      'stop',
+      ['--mission', 'mission-1', '--idempotency-key', 'mission-stop-key'],
+    );
+    await vi.runAllTimersAsync();
+    await expect(request).resolves.toBe(0);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const requestBodies = fetchMock.mock.calls.map(([, init]) => String((init as RequestInit).body));
+    expect(requestBodies[1]).toBe(requestBodies[0]);
+    expect(JSON.parse(requestBodies[0])).toEqual({
+      missionId: 'mission-1',
+      idempotencyKey: 'mission-stop-key',
+    });
+    vi.useRealTimers();
+  });
+
+  it('mission stop exits with a conflict when any packet was not stopped', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      ok: false,
+      error: {
+        code: 'mission_stop_incomplete',
+        message: 'Mission stop was incomplete: 1 packet could not be stopped.',
+      },
+    }), {
+      status: 409,
+      headers: { 'Content-Type': 'application/json' },
+    })));
+
+    await expect(runMission(
+      { human: false, verbose: false },
+      'stop',
+      ['--mission', 'mission-partial-stop'],
+    )).rejects.toMatchObject({
+      constructor: CliError,
+      exit: EXIT.CONFLICT,
+      message: expect.stringContaining('Mission stop was incomplete'),
+    });
   });
 
   it('run stop requires exactly one run id', () => {

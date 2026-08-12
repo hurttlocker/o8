@@ -29,6 +29,7 @@ import { extractRoughdraftReviewIndex } from '@/lib/o8md/rfm';
 import { handleImagePathsViaTauri, specImageDropPaste } from './spec-image-upload';
 import { specImageRender, specRepoPathCompartment, specRepoPathFacet } from './spec-image-widget';
 import { useTauriFileDrop } from '@/lib/hooks/use-tauri-file-drop';
+import { fetchCorrelatedActionReceipt } from '@/lib/orchestrator/action-receipt';
 
 const HAND = "'Caveat', ui-rounded, cursive";
 const PROSE = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, system-ui, sans-serif";
@@ -477,17 +478,17 @@ export function O8SpecEditor({ value, onChange, onServerMutation, repoPath }: O8
       '',
       'Use the repository state to decide the concrete action. If the note recommends tracking work, file the appropriate ticket. If it recommends a code or documentation change, implement and verify that change. Keep the work limited to this annotation.',
     ].join('\n');
-    const response = await fetch('/api/orchestrator/delegate', {
+    const { response, payload: data } = await fetchCorrelatedActionReceipt<Record<string, unknown>>('/api/orchestrator/delegate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        clientMutationId: crypto.randomUUID(),
         repoPath,
         prompt,
         taskName: `Act on o8.md note ${note.id}`,
       }),
     });
-    const data = await response.json().catch(() => null) as Record<string, unknown> | null;
-    const awaitingApproval = response.status === 202 && typeof data?.approvalId === 'string';
+    const awaitingApproval = data?.status === 'pending_approval' && typeof data.approvalId === 'string';
     if ((!response.ok || data?.ok !== true) && !awaitingApproval) {
       throw new Error(
         typeof data?.error === 'string'

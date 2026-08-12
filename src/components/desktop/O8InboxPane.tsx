@@ -4,8 +4,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ApprovalRecord } from '@/lib/approvals/types';
 import type { SupervisorInboxItem } from '@/lib/supervisor/inbox';
 import { composeSupervisorInboxCardCopy } from '@/lib/inbox/card-copy';
+import { actionReceiptIsInProgress, correlatedActionIsUnsettled, fetchCorrelatedActionReceipt } from '@/lib/orchestrator/action-receipt';
+import { useCorrelatedActionLatch } from '@/components/desktop/use-correlated-action-latch';
 import { fireInvalidation } from '@/lib/query/use-reactive-query';
 import { O8ApprovalCards } from './o8-panel/O8ApprovalCards';
+import { ArchiveGlyph, ChatGlyph, FileTextGlyph, FolderGlyph, RetryGlyph, StopGlyph } from './o8-inbox-glyphs';
 
 const KIND_LABELS: Record<SupervisorInboxItem['kind'], string> = {
   verification_failed: 'Verification Failed',
@@ -62,63 +65,6 @@ function shortPath(pathValue: string | null) {
   return parts.length > 3 ? `…/${parts.slice(-3).join('/')}` : pathValue;
 }
 
-function FileTextGlyph() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--o8-inbox-action-icon, #64748b)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ display: 'block', flexShrink: 0 }}>
-      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
-      <path d="M14 3v5h5" />
-      <path d="M8.5 13h7" />
-      <path d="M8.5 16h5" />
-    </svg>
-  );
-}
-
-function FolderGlyph() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--o8-inbox-action-icon, #64748b)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ display: 'block', flexShrink: 0 }}>
-      <path d="M3.5 7.5A2.5 2.5 0 0 1 6 5h3.2l2 2.5H18a2.5 2.5 0 0 1 2.5 2.5v7A2.5 2.5 0 0 1 18 19.5H6A2.5 2.5 0 0 1 3.5 17z" />
-      <path d="M4 10h16" />
-    </svg>
-  );
-}
-
-function ChatGlyph() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--o8-inbox-action-icon, #64748b)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ display: 'block', flexShrink: 0 }}>
-      <path d="M5 5.5h14a2 2 0 0 1 2 2v8.2a2 2 0 0 1-2 2H11l-4.4 3v-3H5a2 2 0 0 1-2-2V7.5a2 2 0 0 1 2-2z" />
-      <path d="M8 10h8" />
-      <path d="M8 13.5h5.5" />
-    </svg>
-  );
-}
-
-function RetryGlyph() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--o8-inbox-action-icon, #64748b)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ display: 'block', flexShrink: 0 }}>
-      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-      <path d="M3 3v5h5" />
-    </svg>
-  );
-}
-
-function StopGlyph() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--o8-inbox-action-icon, #64748b)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ display: 'block', flexShrink: 0 }}>
-      <rect x="7" y="7" width="10" height="10" rx="1.5" />
-    </svg>
-  );
-}
-
-function ArchiveGlyph() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--o8-inbox-action-icon, #64748b)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ display: 'block', flexShrink: 0 }}>
-      <path d="M4 5.5h16v4H4z" />
-      <path d="M6 9.5V19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V9.5" />
-      <path d="M9.5 14h5" />
-    </svg>
-  );
-}
-
 export function O8InboxPane({ active = true }: { active?: boolean }) {
   const [items, setItems] = useState<SupervisorInboxItem[]>([]);
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
@@ -129,9 +75,7 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
   const [actionNoteById, setActionNoteById] = useState<Record<string, string>>({});
   const [approvalNoteById, setApprovalNoteById] = useState<Record<string, string>>({});
   const [busyApproval, setBusyApproval] = useState<{ id: string; action: 'approve' | 'reject' } | null>(null);
-  // #1569: latch while a retry/stop verb runs — a double-click on Retry would
-  // otherwise relaunch two fresh workers.
-  const [busyIncidentId, setBusyIncidentId] = useState<string | null>(null);
+  const { busy: busyIncidentId, begin: beginIncidentAction, settle: settleIncidentAction } = useCorrelatedActionLatch<string>();
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   const refreshTrailingRef = useRef(false);
 
@@ -334,27 +278,33 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
     setActionNote(item.id, 'Escalated to orchestrator.');
   }, [setActionNote, refresh]);
 
-  // #1569: the retry-exhausted copy tells the operator to "retry manually or
-  // stop the packet" — these are those verbs. Retry = layer-4 fresh redispatch
-  // carrying the incident's error as feedback (the warm session is dead by the
-  // time bounded retries exhaust, so steer isn't an option); the incident flips
-  // to escalated so it reads "in flight" and heal-bot auto-resolves it on merge.
-  // Stop = interrupt + hold, then the incident is dismissed as operator-decided.
+  // Retry launches fresh after bounded failure; Stop interrupts, holds, and dismisses.
   const retryPacket = useCallback(async (item: SupervisorInboxItem) => {
-    if (!item.packetId || busyIncidentId) return;
-    setBusyIncidentId(item.id);
+    if (!item.packetId || !beginIncidentAction(item.id)) return;
     setActionNote(item.id, 'Relaunching a fresh worker...');
+    let inProgress = false;
     try {
-      const response = await fetch('/api/orchestrator/rerun-with-feedback', {
+      const requestBody = JSON.stringify({
+        packetId: item.packetId,
+        feedback: `Operator retried manually from the Incident Queue after bounded retries were exhausted. Original failure: ${item.errorExcerpt || 'see lane events.'}`,
+        idempotencyKey: crypto.randomUUID(),
+      });
+      const { response, payload } = await fetchCorrelatedActionReceipt<{
+        ok?: boolean;
+        result?: { note?: string; inProgress?: boolean; status?: string };
+        error?: { message?: string } | string;
+      }>('/api/orchestrator/rerun-with-feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          packetId: item.packetId,
-          feedback: `Operator retried manually from the Incident Queue after bounded retries were exhausted. Original failure: ${item.errorExcerpt || 'see lane events.'}`,
-        }),
+        body: requestBody,
       });
-      const payload = await response.json().catch(() => null) as { ok?: boolean; error?: string } | null;
-      if (!response.ok || payload?.ok === false) throw new Error(payload?.error ?? 'Retry was rejected.');
+      const errorMessage = typeof payload?.error === 'string' ? payload.error : payload?.error?.message;
+      if (!response.ok || !payload?.ok) throw new Error(errorMessage ?? 'Retry was rejected.');
+      if (actionReceiptIsInProgress(response.status, payload?.result)) {
+        inProgress = true;
+        setActionNote(item.id, payload?.result?.note ?? 'This retry is already in progress.');
+        return;
+      }
       await fetch('/api/panel/supervisor-inbox', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -364,24 +314,38 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
       window.dispatchEvent(new CustomEvent('o8:supervisor-inbox'));
       await refresh();
     } catch (error) {
-      setActionNote(item.id, error instanceof Error ? error.message : 'Retry failed.');
+      if (correlatedActionIsUnsettled(error)) {
+        inProgress = true;
+        setActionNote(item.id, error.message);
+      } else {
+        setActionNote(item.id, error instanceof Error ? error.message : 'Retry failed.');
+      }
     } finally {
-      setBusyIncidentId(null);
+      settleIncidentAction(inProgress);
     }
-  }, [busyIncidentId, refresh, setActionNote]);
+  }, [beginIncidentAction, refresh, setActionNote, settleIncidentAction]);
 
   const stopPacket = useCallback(async (item: SupervisorInboxItem) => {
-    if (!item.packetId || busyIncidentId) return;
-    setBusyIncidentId(item.id);
+    if (!item.packetId || !beginIncidentAction(item.id)) return;
     setActionNote(item.id, 'Stopping the packet...');
+    let inProgress = false;
     try {
-      const response = await fetch('/api/orchestrator/stop-packet', {
+      const { response, payload } = await fetchCorrelatedActionReceipt<{
+        ok?: boolean;
+        error?: string;
+        result?: { ok?: boolean; note?: string; inProgress?: boolean; status?: string };
+      }>('/api/agent-control/action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packetId: item.packetId }),
+        body: JSON.stringify({
+          ref: { kind: 'packet', id: item.packetId },
+          action: { kind: 'terminate' },
+          clientMutationId: crypto.randomUUID(),
+        }),
       });
-      const payload = await response.json().catch(() => null) as { ok?: boolean; error?: string } | null;
-      if (!response.ok || payload?.ok === false) throw new Error(payload?.error ?? 'Stop was rejected.');
+      if (!response.ok || payload?.ok === false || payload?.result?.ok === false) {
+        throw new Error(payload?.result?.note ?? payload?.error ?? 'Stop was rejected.');
+      }
       await fetch('/api/panel/supervisor-inbox', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -391,11 +355,16 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
       window.dispatchEvent(new CustomEvent('o8:supervisor-inbox'));
       await refresh();
     } catch (error) {
-      setActionNote(item.id, error instanceof Error ? error.message : 'Stop failed.');
+      if (correlatedActionIsUnsettled(error)) {
+        inProgress = true;
+        setActionNote(item.id, error.message);
+      } else {
+        setActionNote(item.id, error instanceof Error ? error.message : 'Stop failed.');
+      }
     } finally {
-      setBusyIncidentId(null);
+      settleIncidentAction(inProgress);
     }
-  }, [busyIncidentId, refresh, setActionNote]);
+  }, [beginIncidentAction, refresh, setActionNote, settleIncidentAction]);
 
   const humanRequired = items.filter((item) => item.status === 'human_required');
   const escalated = items.filter((item) => item.status === 'escalated');

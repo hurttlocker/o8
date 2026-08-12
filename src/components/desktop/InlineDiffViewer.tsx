@@ -29,6 +29,7 @@ import {
   hunkKey,
   type ParsedDiffFile,
 } from '@/lib/diff/parse';
+import { actionReceiptIsInProgress, correlatedActionIsUnsettled, fetchCorrelatedActionReceipt } from '@/lib/orchestrator/action-receipt';
 import { Check, Copy, GitMerge, RefreshCw } from './lucide-shims';
 import { FileSection, fileAnchorId, statusTone } from './inline-diff/FileSection';
 
@@ -227,19 +228,27 @@ export const InlineDiffViewer = memo(function InlineDiffViewer({
     if (!packetId) return;
     setMerge({ status: 'pending', message: null });
     try {
-      const response = await fetch('/api/orchestrator/merge', {
+      const { response, payload: data } = await fetchCorrelatedActionReceipt<{
+        ok?: boolean;
+        result?: { merged?: boolean; status?: string; inProgress?: boolean; note?: string };
+        error?: { message?: string } | string;
+      }>('/api/orchestrator/merge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packetId }),
+        body: JSON.stringify({ packetId, idempotencyKey: crypto.randomUUID() }),
       });
-      const data = (await response.json().catch(() => null)) as {
-        ok?: boolean;
-        result?: { merged?: boolean; status?: string };
-        error?: string;
-      } | null;
       if (!response.ok || !data?.ok) {
-        const reason = data?.error ?? `Merge failed (HTTP ${response.status})`;
+        const reason = typeof data?.error === 'string'
+          ? data.error
+          : data?.error?.message ?? `Merge failed (HTTP ${response.status})`;
         setMerge({ status: 'error', message: reason });
+        return;
+      }
+      if (actionReceiptIsInProgress(response.status, data.result)) {
+        setMerge({
+          status: 'pending',
+          message: data.result?.note ?? 'This merge is already in progress.',
+        });
         return;
       }
       const merged = Boolean(data.result?.merged);
@@ -252,6 +261,10 @@ export const InlineDiffViewer = memo(function InlineDiffViewer({
           : 'Merge accepted.',
       });
     } catch (error) {
+      if (correlatedActionIsUnsettled(error)) {
+        setMerge({ status: 'pending', message: error.message });
+        return;
+      }
       setMerge({
         status: 'error',
         message: error instanceof Error ? error.message : 'Merge failed.',

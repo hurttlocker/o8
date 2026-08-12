@@ -4,7 +4,12 @@ import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/
 import { submitPacketReview } from '@/lib/orchestrator/operator-mission-service';
 import { parseReviewFindings } from '@/lib/orchestrator/review-finding-input';
 import { readCoverageEvidence } from '@/lib/orchestrator/task-contract-coverage';
-import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
+import {
+  bindIdempotencyClientMutation,
+  deriveIdempotencyKey,
+  withIdempotency,
+} from '@/lib/orchestrator/idempotency-store';
+import { asRecord, operatorError, operatorSuccess, parseJsonBody, replayShape, unresolvedIdempotencyResponse } from '../_utils';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -31,6 +36,12 @@ export async function POST(request: NextRequest) {
   if (typeof record.approved !== 'boolean') {
     return operatorError('invalid_request', 'approved is required.', 400);
   }
+  const clientKey = typeof record.clientMutationId === 'string'
+    ? record.clientMutationId.trim()
+    : typeof record.idempotencyKey === 'string'
+      ? record.idempotencyKey.trim()
+      : '';
+  if (!clientKey) return operatorError('client_mutation_id_required', 'clientMutationId is required.', 400);
   const contractCoverageEvidence = record.contractCoverageEvidence === undefined
     ? undefined
     : readCoverageEvidence({ contractCoverageEvidence: record.contractCoverageEvidence });
@@ -42,8 +53,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  try {
-    const result = await submitPacketReview({
+  const reviewInput = {
       packetId,
       findings: parseReviewFindings(record.findings),
       approved: record.approved,
@@ -51,8 +61,41 @@ export async function POST(request: NextRequest) {
         ? record.reviewedHeadSha.trim()
         : undefined,
       contractCoverageEvidence: contractCoverageEvidence ?? undefined,
+  };
+  const canonicalBody = JSON.stringify(reviewInput);
+  try {
+    const binding = bindIdempotencyClientMutation({
+      namespace: 'packet_review',
+      clientKey,
+      body: canonicalBody,
     });
-    return operatorSuccess(result);
+    if (binding.status === 'conflict') {
+      return operatorError('idempotency_conflict', 'clientMutationId was used for another review.', 409);
+    }
+    if (binding.status === 'unavailable') {
+      return operatorError('idempotency_unavailable', 'The review receipt store is unavailable.', 503);
+    }
+    const outcome = await withIdempotency({
+      key: deriveIdempotencyKey({ verb: 'packet_review', scopeId: packetId, clientKey, body: canonicalBody }),
+      verb: 'packet_review',
+      scopeId: packetId,
+    }, async () => {
+      try {
+        return { ok: true as const, result: await submitPacketReview(reviewInput) };
+      } catch (error) {
+        return {
+          ok: false as const,
+          message: error instanceof Error ? error.message : 'Unable to submit review.',
+        };
+      }
+    });
+    if (outcome.inProgress) return unresolvedIdempotencyResponse(outcome, 'packet review') ?? operatorSuccess(replayShape(outcome), 202);
+    if (!outcome.result.ok) {
+      const response = operatorError('review_failed', outcome.result.message, 500);
+      if (outcome.replayed) response.headers.set('x-o8-idempotency-replayed', '1');
+      return response;
+    }
+    return operatorSuccess(replayShape({ ...outcome, result: outcome.result.result }));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to submit review.';
     return operatorError('review_failed', message, 500, error);

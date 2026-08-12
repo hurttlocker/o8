@@ -52,7 +52,7 @@ import { ORCHESTRATOR_TOKEN_EVENT, type OrchestratorTokenUsageDetail } from '@/c
 import { ORCHESTRATOR_HOME_REPO_SENTINEL, resolveOrchestratorClientRepoPath } from '@/components/desktop/thoughts/orchestrator-home-mode';
 import { buildAgentTargets } from '@/components/desktop/thoughts/utils';
 import { SessionPillContextMenu } from '@/components/desktop/SessionPillContextMenu';
-import { SessionTileSurface } from './SessionTileSurface';
+import { SessionTileSurface, projectLiveSessionMeshParticipants } from './SessionTileSurface';
 import { ThreadDropLayer, type ThreadDropAction } from './ThreadDropLayer';
 import { useSessionTiles, buildPillContextMenuItems } from './use-session-tiles';
 import { publishWorkspaceThreadBinding, WORKSPACE_THREAD_ID_EVENT } from './utils';
@@ -63,6 +63,7 @@ import { useOrchestratorTurnInjection } from './use-orchestrator-turn-injection'
 
 interface OrchestratorTabProps {
   tabId: string;
+  workspaceId?: string;
   active: boolean;
   repoPath?: string | null;
   repoLabel?: string | null;
@@ -95,7 +96,7 @@ interface OrchestratorTabProps {
   /** Disable broadcasting workspace-thread id changes from isolated mounts. */
   publishWorkspaceThread?: boolean;
   /** Disable updating the global last-active orchestrator thread. */
-  persistLastThread?: boolean;
+  persistLastThread?: boolean; suppressRuntimePrewarm?: boolean;
   turnInjection?: OrchestratorTurnInjection;
 }
 function swarmStorageKey(tabId: string): string {
@@ -264,9 +265,9 @@ export function OrchestratorTab(props: OrchestratorTabProps) {
     </OrchestratorContextResidencyProvider>
   );
 }
-
 function OrchestratorTabInner({
   tabId,
+  workspaceId,
   active,
   repoPath,
   repoLabel,
@@ -282,7 +283,7 @@ function OrchestratorTabInner({
   restoreLastThread = true,
   restoringPersistedThread = false,
   publishWorkspaceThread = true,
-  persistLastThread = true,
+  persistLastThread = true, suppressRuntimePrewarm = false,
   turnInjection,
 }: OrchestratorTabProps) {
   const data = useOrchestratorData();
@@ -299,7 +300,6 @@ function OrchestratorTabInner({
   const handlePickChatOpenRouterModel = useCallback((slug: string | null) => {
     spawnHandlers?.updateTabMode(tabId, { chatOpenrouterModel: slug });
   }, [spawnHandlers, tabId]);
-
   // Branch-details rail reveal (Q 2026-07-14): the rail is always the collapsed
   // icon capsule in layout; the full card stack floats as a hover overlay. In
   // the new model `collapsed` is the PIN state — `true` = hover-only reveal
@@ -680,8 +680,8 @@ function OrchestratorTabInner({
   const liveSessionKeys = useMemo(() => agents
     .map((agent) => agent.sessionKey)
     .filter((key): key is string => typeof key === 'string' && !retiredSessionKeys.has(key)), [agents, retiredSessionKeys]);
-  const sessionTiles = useSessionTiles({ tabId, liveSessionKeys, retiredSessionKeys, active });
-
+  const meshParticipants = useMemo(() => projectLiveSessionMeshParticipants(agents, data?.missionState?.packets ?? []), [agents, data?.missionState?.packets]);
+  const sessionTiles = useSessionTiles({ tabId, repoPath: homeAwareRepoPath, workspaceId, threadId: chatChromeState.threadId, liveSessionKeys, retiredSessionKeys, participants: meshParticipants, active });
   useEffect(() => {
     const activeGroupIds = comparisonGroups.map((group) => group.groupId);
     if (
@@ -1232,7 +1232,7 @@ function OrchestratorTabInner({
       // duplicate, which read as "New session does nothing" (GQXEZD saga;
       // live-caught 2026-07-16: fresh tab emitted the old thread id ~450ms
       // after mount, then vanished).
-      suppressAutoRestore={!restoreLastThread || Boolean(initialThreadId)}
+      suppressAutoRestore={!restoreLastThread || Boolean(initialThreadId)} suppressRuntimePrewarm={suppressRuntimePrewarm || meshParticipants.some((participant) => participant.launchContext?.presentation === 'split' && participant.launchContext.source !== 'desktop')}
       // Until a thread-bound tab's history lands, show '…', never the default backend.
       expectsThreadLoad={Boolean(initialThreadId)}
       draftInjection={effectiveDraftInjection}

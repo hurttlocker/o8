@@ -1419,6 +1419,7 @@ fn prewarm_bundled_next_server(app: AppHandle, api_port: u16) {
 }
 
 fn spawn_bundled_ws_server(
+    app: &AppHandle,
     node_bin: &str,
     server_dir: &std::path::Path,
     ws_port: u16,
@@ -1435,75 +1436,29 @@ fn spawn_bundled_ws_server(
             ws_server_js,
             ws_port
         );
-        let mut ws_cmd = Command::new(node_bin);
-        ws_cmd
-            .arg(&ws_server_js)
-            .current_dir(server_dir)
-            // No console window on Windows: this is a long-running background
-            // server whose output already goes to a log file, and a visible
-            // console is one the user can click into and suspend.
-            .no_window()
-            .env("O8_NODE_BIN", node_bin)
-            .env("WS_PORT", ws_port.to_string())
-            .env("NEXT_ORIGIN", next_origin)
-            // Packaged marker (parity with the next-server child, which gets it
-            // from the generated server.js wrapper). The Sentry telemetry layer
-            // gates on it — without this the ws-server surface stays dormant
-            // even in a packaged build with a baked DSN.
-            .env("O8_PACKAGED_APP", "1")
-            // App version for the telemetry release tag (the next-server child
-            // gets it baked into the server.js wrapper; ws-server has no wrapper).
-            .env("O8_APP_VERSION", env!("CARGO_PKG_VERSION"))
-            .env("O8_BOOT_ID", &identity.boot_id)
-            .env("O8_INSTANCE_ID", &identity.instance_id)
-            // Issue #776: same sidecar marker as the next-server child.
-            .env("O8_SIDECAR_PID", std::process::id().to_string())
-            // V8 bytecode cache — see compile_cache_dir(). ws-server has no
-            // generated wrapper to call enableCompileCache() from, so it gets the
-            // cache the only way it can: through the environment.
-            .env("NODE_COMPILE_CACHE", compile_cache_dir());
-        // Issue #935: same AI key forward for ws-server children.
-        for (k, v) in ai_keys {
-            ws_cmd.env(k, v);
-        }
-        // The ws-server hosts the in-app orchestrator sessions, and a turn
-        // GENERATES the orchestrator's Claude MCP config
-        // (orchestrator-session.ts → buildToolRegistry → resolve*McpServerPath).
-        // That resolver prefers the bundled .mjs only when O8_BUNDLED_MCP_PATH is
-        // set — otherwise it falls back to a dev `tsx …/*.ts` path that does NOT
-        // exist in the packaged bundle, so the orchestrator launches with ZERO
-        // o8/cortex tools ("MCP tool bridge is not live" + FALSE-DISPATCH). The
-        // next-server child gets these vars (~line 4975); the ws-server child
-        // needs the same parity or the in-app orchestrator is toothless.
         let bundled_operator_mcp = server_dir.join("operator-mcp-server.mjs");
-        if bundled_operator_mcp.exists() {
-            ws_cmd.env("O8_BUNDLED_MCP_DIR", server_dir);
-            ws_cmd.env("O8_BUNDLED_MCP_PATH", &bundled_operator_mcp);
-        }
-        match ws_cmd
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-        {
-            Ok(mut child) => {
-                let pid = child.id();
-                capture_ws_server_stream(
-                    child.stdout.take(),
-                    ws_log.and_then(|file| file.try_clone().ok()),
-                    "stdout",
-                    log::Level::Info,
-                );
-                capture_ws_server_stream(
-                    child.stderr.take(),
-                    ws_log.and_then(|file| file.try_clone().ok()),
-                    "stderr",
-                    log::Level::Warn,
-                );
-                log::info!("WS server started (pid: {})", pid);
-                sidecar_lifecycle::register_child(pid);
-            }
+        let spawn = BundledWsSpawn {
+            node_bin: node_bin.to_string(),
+            server_dir: server_dir.to_path_buf(),
+            server_js: ws_server_js,
+            ws_port,
+            next_origin: next_origin.to_string(),
+            boot_identity: identity.clone(),
+            bundled_operator_mcp: bundled_operator_mcp
+                .exists()
+                .then_some(bundled_operator_mcp),
+            ai_keys: ai_keys.to_vec(),
+        };
+        let fatal_app = app.clone();
+        match spawn_and_supervise_bundled_ws(
+            spawn,
+            ws_log.and_then(|file| file.try_clone().ok()),
+            move |reason| show_ws_backend_failure_and_exit(&fatal_app, &reason),
+        ) {
+            Ok((pid, _supervisor)) => log::info!("WS server started (pid: {})", pid),
             Err(e) => {
                 log::error!("Failed to start WS server: {}", e);
+                show_ws_backend_failure_and_exit(app, &e.to_string());
             }
         }
     } else {
@@ -5765,6 +5720,900 @@ fn buffer_o8_auth_deep_links(links: Vec<String>) {
     }
 }
 
+#[derive(Clone, Copy)]
+struct RestartPolicy {
+    max_restarts: usize,
+    window: std::time::Duration,
+    delay: std::time::Duration,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum RestartDecision {
+    Restart {
+        attempt: usize,
+        delay: std::time::Duration,
+    },
+    Exhausted {
+        attempts: usize,
+    },
+}
+
+struct RestartTracker {
+    policy: RestartPolicy,
+    restarts: VecDeque<std::time::Instant>,
+}
+
+impl RestartTracker {
+    fn new(policy: RestartPolicy) -> Self {
+        Self {
+            policy,
+            restarts: VecDeque::new(),
+        }
+    }
+
+    fn record_failure(&mut self, now: std::time::Instant) -> RestartDecision {
+        while self
+            .restarts
+            .front()
+            .is_some_and(|started| now.saturating_duration_since(*started) >= self.policy.window)
+        {
+            self.restarts.pop_front();
+        }
+        if self.restarts.len() >= self.policy.max_restarts {
+            return RestartDecision::Exhausted {
+                attempts: self.restarts.len(),
+            };
+        }
+        self.restarts.push_back(now);
+        RestartDecision::Restart {
+            attempt: self.restarts.len(),
+            delay: self.policy.delay,
+        }
+    }
+}
+
+const NEXT_RESTART_POLICY: RestartPolicy = RestartPolicy {
+    max_restarts: 3,
+    window: std::time::Duration::from_secs(5 * 60),
+    delay: std::time::Duration::from_millis(750),
+};
+
+fn child_exit_reason(status: &std::process::ExitStatus) -> String {
+    #[cfg(unix)]
+    let signal = {
+        use std::os::unix::process::ExitStatusExt;
+        status.signal()
+    };
+    #[cfg(not(unix))]
+    let signal: Option<i32> = None;
+    format!("code={:?} signal={:?}", status.code(), signal)
+}
+
+fn wait_for_child_exit(child: &mut std::process::Child) -> std::io::Result<String> {
+    child.wait().map(|status| child_exit_reason(&status))
+}
+
+fn append_supervisor_log(file: &mut Option<std::fs::File>, message: &str) {
+    use std::io::Write;
+    if let Some(file) = file.as_mut() {
+        let _ = writeln!(file, "[o8-sidecar-supervisor] {message}");
+        let _ = file.flush();
+        let _ = file.sync_data();
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum SupervisorOutcome {
+    Shutdown,
+    Fatal(String),
+    RegistrationRejected,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_next_sidecar_supervisor_loop<F, G, I, R, U, B, S>(
+    mut child: std::process::Child,
+    mut child_log: Option<std::fs::File>,
+    policy: RestartPolicy,
+    mut restart: F,
+    mut on_fatal: G,
+    mut is_shutting_down: I,
+    mut register_child: R,
+    mut unregister_child: U,
+    mut begin_shutdown: B,
+    mut sleep: S,
+) -> SupervisorOutcome
+where
+    F: FnMut() -> std::io::Result<std::process::Child>,
+    G: FnMut(String),
+    I: FnMut() -> bool,
+    R: FnMut(u32) -> bool,
+    U: FnMut(u32),
+    B: FnMut() -> bool,
+    S: FnMut(std::time::Duration),
+{
+    let mut tracker = RestartTracker::new(policy);
+    'watch: loop {
+        let pid = child.id();
+        let exit_reason = match wait_for_child_exit(&mut child) {
+            Ok(reason) => reason,
+            Err(error) => {
+                let reason = format!("wait failed for pid={pid}: {error}");
+                append_supervisor_log(&mut child_log, &reason);
+                log::error!("[next-supervisor] {reason}");
+                if begin_shutdown() {
+                    on_fatal(reason.clone());
+                    return SupervisorOutcome::Fatal(reason);
+                }
+                return SupervisorOutcome::Shutdown;
+            }
+        };
+        unregister_child(pid);
+        let mut failure = format!("pid={pid} exited {exit_reason}");
+        append_supervisor_log(&mut child_log, &failure);
+        if is_shutting_down() {
+            log::info!("[next-supervisor] {failure} during app shutdown");
+            return SupervisorOutcome::Shutdown;
+        }
+        log::error!("[next-supervisor] {failure}");
+
+        loop {
+            let (attempt, delay) = match tracker.record_failure(std::time::Instant::now()) {
+                RestartDecision::Restart { attempt, delay } => (attempt, delay),
+                RestartDecision::Exhausted { attempts } => {
+                    let reason = format!(
+                        "{failure}; restart budget exhausted ({attempts} restarts in {}s)",
+                        policy.window.as_secs()
+                    );
+                    append_supervisor_log(&mut child_log, &reason);
+                    log::error!("[next-supervisor] {reason}");
+                    if begin_shutdown() {
+                        on_fatal(reason.clone());
+                        return SupervisorOutcome::Fatal(reason);
+                    }
+                    return SupervisorOutcome::Shutdown;
+                }
+            };
+            append_supervisor_log(
+                &mut child_log,
+                &format!("restart attempt {attempt} after {}ms", delay.as_millis()),
+            );
+            sleep(delay);
+            if is_shutting_down() {
+                log::info!("[next-supervisor] restart cancelled by app shutdown");
+                return SupervisorOutcome::Shutdown;
+            }
+            match restart() {
+                Ok(mut next) => {
+                    let next_pid = next.id();
+                    if !register_child(next_pid) {
+                        let _ = next.wait();
+                        return SupervisorOutcome::RegistrationRejected;
+                    }
+                    append_supervisor_log(
+                        &mut child_log,
+                        &format!("restart attempt {attempt} started pid={next_pid}"),
+                    );
+                    log::info!(
+                        "[next-supervisor] restart attempt {attempt} started pid={next_pid}"
+                    );
+                    child = next;
+                    continue 'watch;
+                }
+                Err(error) => {
+                    failure = format!("restart attempt {attempt} failed to spawn: {error}");
+                    append_supervisor_log(&mut child_log, &failure);
+                    log::error!("[next-supervisor] {failure}");
+                }
+            }
+        }
+    }
+}
+
+fn supervise_next_sidecar<F, G>(
+    mut child: std::process::Child,
+    child_log: Option<std::fs::File>,
+    restart: F,
+    on_fatal: G,
+) -> Option<std::thread::JoinHandle<SupervisorOutcome>>
+where
+    F: FnMut() -> std::io::Result<std::process::Child> + Send + 'static,
+    G: FnMut(String) + Send + 'static,
+{
+    let pid = child.id();
+    if !sidecar_lifecycle::register_child(pid) {
+        let _ = child.wait();
+        return None;
+    }
+    Some(
+        std::thread::Builder::new()
+            .name("next-sidecar-supervisor".to_string())
+            .spawn(move || {
+                run_next_sidecar_supervisor_loop(
+                    child,
+                    child_log,
+                    NEXT_RESTART_POLICY,
+                    restart,
+                    on_fatal,
+                    sidecar_lifecycle::is_shutting_down,
+                    sidecar_lifecycle::register_child,
+                    sidecar_lifecycle::unregister_child,
+                    sidecar_lifecycle::begin_shutdown,
+                    std::thread::sleep,
+                )
+            })
+            .expect("spawn next sidecar supervisor"),
+    )
+}
+
+#[derive(Clone)]
+struct BundledNextSpawn {
+    node_bin: String,
+    server_dir: std::path::PathBuf,
+    server_js: std::path::PathBuf,
+    api_port: u16,
+    ws_port: u16,
+    boot_identity: BootIdentity,
+    bundled_operator_mcp: Option<std::path::PathBuf>,
+    codebase_memory_bin: Option<String>,
+    ai_keys: Vec<(String, String)>,
+}
+
+impl BundledNextSpawn {
+    fn spawn(&self, log_file: Option<&std::fs::File>) -> std::io::Result<std::process::Child> {
+        let mut command = Command::new(&self.node_bin);
+        command
+            .arg(&self.server_js)
+            .current_dir(&self.server_dir)
+            .no_window()
+            .env("PORT", self.api_port.to_string())
+            .env("HOSTNAME", "0.0.0.0")
+            .env("NODE_ENV", "production")
+            .env("O8_PACKAGED_APP", "1")
+            .env("O8_NODE_BIN", &self.node_bin)
+            .env("O8_API_PORT", self.api_port.to_string())
+            .env("O8_WS_PORT", self.ws_port.to_string())
+            .env("O8_BOOT_ID", &self.boot_identity.boot_id)
+            .env("O8_INSTANCE_ID", &self.boot_identity.instance_id)
+            .env("WS_PORT", self.ws_port.to_string())
+            .env("O8_SIDECAR_PID", std::process::id().to_string())
+            .env("NODE_COMPILE_CACHE", compile_cache_dir());
+        if let Some(path) = self.bundled_operator_mcp.as_ref() {
+            command.env("O8_BUNDLED_MCP_DIR", &self.server_dir);
+            command.env("O8_BUNDLED_MCP_PATH", path);
+        }
+        if let Some(path) = self.codebase_memory_bin.as_ref() {
+            command.env("O8_CODEBASE_MEMORY_BIN", path);
+        }
+        for (key, value) in &self.ai_keys {
+            command.env(key, value);
+        }
+        command
+            .stdout(child_stdio(log_file))
+            .stderr(child_stdio(log_file))
+            .spawn()
+    }
+}
+
+fn spawn_and_supervise_bundled_next<G>(
+    spawn: BundledNextSpawn,
+    child_log: Option<std::fs::File>,
+    on_fatal: G,
+) -> std::io::Result<(u32, Option<std::thread::JoinHandle<SupervisorOutcome>>)>
+where
+    G: FnMut(String) + Send + 'static,
+{
+    let supervisor_log = child_log.as_ref().and_then(|file| file.try_clone().ok());
+    let child = spawn.spawn(child_log.as_ref())?;
+    let pid = child.id();
+    let restart_spawn = spawn;
+    let restart = move || restart_spawn.spawn(child_log.as_ref());
+    let supervisor = supervise_next_sidecar(child, supervisor_log, restart, on_fatal);
+    Ok((pid, supervisor))
+}
+
+#[derive(Clone)]
+struct BundledWsSpawn {
+    node_bin: String,
+    server_dir: std::path::PathBuf,
+    server_js: std::path::PathBuf,
+    ws_port: u16,
+    next_origin: String,
+    boot_identity: BootIdentity,
+    bundled_operator_mcp: Option<std::path::PathBuf>,
+    ai_keys: Vec<(String, String)>,
+}
+
+impl BundledWsSpawn {
+    fn spawn(&self, log_file: Option<&std::fs::File>) -> std::io::Result<std::process::Child> {
+        let mut command = Command::new(&self.node_bin);
+        command
+            .arg(&self.server_js)
+            .current_dir(&self.server_dir)
+            .no_window()
+            .env("O8_NODE_BIN", &self.node_bin)
+            .env("WS_PORT", self.ws_port.to_string())
+            .env("NEXT_ORIGIN", &self.next_origin)
+            .env("O8_PACKAGED_APP", "1")
+            .env("O8_APP_VERSION", env!("CARGO_PKG_VERSION"))
+            .env("O8_BOOT_ID", &self.boot_identity.boot_id)
+            .env("O8_INSTANCE_ID", &self.boot_identity.instance_id)
+            .env("O8_SIDECAR_PID", std::process::id().to_string())
+            .env("NODE_COMPILE_CACHE", compile_cache_dir());
+        if let Some(path) = self.bundled_operator_mcp.as_ref() {
+            command.env("O8_BUNDLED_MCP_DIR", &self.server_dir);
+            command.env("O8_BUNDLED_MCP_PATH", path);
+        }
+        for (key, value) in &self.ai_keys {
+            command.env(key, value);
+        }
+        let mut child = command
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()?;
+        capture_ws_server_stream(
+            child.stdout.take(),
+            log_file.and_then(|file| file.try_clone().ok()),
+            "stdout",
+            log::Level::Info,
+        );
+        capture_ws_server_stream(
+            child.stderr.take(),
+            log_file.and_then(|file| file.try_clone().ok()),
+            "stderr",
+            log::Level::Warn,
+        );
+        Ok(child)
+    }
+}
+
+fn spawn_and_supervise_bundled_ws<G>(
+    spawn: BundledWsSpawn,
+    child_log: Option<std::fs::File>,
+    on_fatal: G,
+) -> std::io::Result<(u32, Option<std::thread::JoinHandle<SupervisorOutcome>>)>
+where
+    G: FnMut(String) + Send + 'static,
+{
+    let supervisor_log = child_log.as_ref().and_then(|file| file.try_clone().ok());
+    let child = spawn.spawn(child_log.as_ref())?;
+    let pid = child.id();
+    let restart_spawn = spawn;
+    let restart = move || restart_spawn.spawn(child_log.as_ref());
+    let supervisor = supervise_next_sidecar(child, supervisor_log, restart, on_fatal);
+    Ok((pid, supervisor))
+}
+
+fn show_backend_failure_and_exit(app: &AppHandle, reason: &str) {
+    let title = "o8 backend stopped";
+    let body = format!(
+        "The local API server exited repeatedly, so o8 will quit instead of leaving dead panels.\n\nReopen o8 to try again. Exit details were written to ~/.o8/logs/next-server.log.\n\n{reason}"
+    );
+    log::error!("{title}: {body}");
+    sidecar_lifecycle::kill_tracked_children();
+
+    #[cfg(target_os = "macos")]
+    {
+        let escape = |value: &str| value.replace('\\', "\\\\").replace('"', "\\\"");
+        let script = format!(
+            r#"display dialog "{}" with title "{}" buttons {{"Quit"}} default button "Quit" with icon stop"#,
+            escape(&body),
+            escape(title)
+        );
+        let _ = Command::new("osascript").args(["-e", &script]).status();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let message = format!("{title}: {body}")
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\r', "")
+            .replace('\n', "\\n");
+        let script = format!(r#"javascript:alert("{}");window.close();"#, message);
+        let _ = Command::new("mshta").arg(script).no_window().spawn();
+    }
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    {
+        let full = format!("{title}\n\n{body}");
+        let _ = Command::new("zenity")
+            .args(["--error", "--title", title, "--text", &full])
+            .status()
+            .or_else(|_| Command::new("kdialog").args(["--error", &full]).status());
+        eprintln!("{full}");
+    }
+    app.exit(1);
+}
+
+fn show_ws_backend_failure_and_exit(app: &AppHandle, reason: &str) {
+    let title = "o8 realtime server stopped";
+    let body = format!(
+        "The local realtime server exited repeatedly, so o8 will quit instead of showing stale agents and controls.\n\nReopen o8 to try again. Exit details were written to ~/.o8/logs/ws-server.log.\n\n{reason}"
+    );
+    log::error!("{title}: {body}");
+    sidecar_lifecycle::kill_tracked_children();
+
+    #[cfg(target_os = "macos")]
+    {
+        let escape = |value: &str| value.replace('\\', "\\\\").replace('"', "\\\"");
+        let script = format!(
+            r#"display dialog "{}" with title "{}" buttons {{"Quit"}} default button "Quit" with icon stop"#,
+            escape(&body),
+            escape(title)
+        );
+        let _ = Command::new("osascript").args(["-e", &script]).status();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let message = format!("{title}: {body}")
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\r', "")
+            .replace('\n', "\\n");
+        let script = format!(r#"javascript:alert("{}");window.close();"#, message);
+        let _ = Command::new("mshta").arg(script).no_window().spawn();
+    }
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    {
+        let full = format!("{title}\n\n{body}");
+        let _ = Command::new("zenity")
+            .args(["--error", "--title", title, "--text", &full])
+            .status()
+            .or_else(|_| Command::new("kdialog").args(["--error", &full]).status());
+    }
+
+    app.exit(1);
+}
+
+#[cfg(test)]
+mod next_sidecar_supervisor_tests {
+    use super::{
+        run_next_sidecar_supervisor_loop, spawn_and_supervise_bundled_next,
+        spawn_and_supervise_bundled_ws, wait_for_child_exit, BootIdentity, BundledNextSpawn,
+        BundledWsSpawn, RestartDecision, RestartPolicy, RestartTracker, SupervisorOutcome,
+    };
+    #[cfg(windows)]
+    use crate::no_window::NoWindow;
+    use std::cell::{Cell, RefCell};
+    use std::process::{Child, Command};
+    use std::rc::Rc;
+    use std::time::{Duration, Instant};
+
+    fn wait_until(timeout: Duration, mut predicate: impl FnMut() -> bool) {
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            if predicate() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            predicate(),
+            "condition did not become true within {timeout:?}"
+        );
+    }
+
+    fn real_exit_child(code: i32) -> std::io::Result<Child> {
+        #[cfg(unix)]
+        {
+            Command::new("sh")
+                .arg("-c")
+                .arg(format!("exit {code}"))
+                .spawn()
+        }
+        #[cfg(windows)]
+        {
+            let mut command = Command::new("cmd");
+            command.arg("/C").arg(format!("exit {code}")).no_window();
+            command.spawn()
+        }
+    }
+
+    fn test_policy(max_restarts: usize) -> RestartPolicy {
+        RestartPolicy {
+            max_restarts,
+            window: Duration::from_secs(10),
+            delay: Duration::ZERO,
+        }
+    }
+
+    #[test]
+    fn restart_budget_is_bounded_and_recovers_after_window() {
+        let policy = RestartPolicy {
+            max_restarts: 2,
+            window: Duration::from_secs(10),
+            delay: Duration::from_millis(25),
+        };
+        let mut tracker = RestartTracker::new(policy);
+        let start = Instant::now();
+        assert_eq!(
+            tracker.record_failure(start),
+            RestartDecision::Restart {
+                attempt: 1,
+                delay: policy.delay,
+            }
+        );
+        assert_eq!(
+            tracker.record_failure(start + Duration::from_secs(1)),
+            RestartDecision::Restart {
+                attempt: 2,
+                delay: policy.delay,
+            }
+        );
+        assert_eq!(
+            tracker.record_failure(start + Duration::from_secs(2)),
+            RestartDecision::Exhausted { attempts: 2 }
+        );
+        assert_eq!(
+            tracker.record_failure(start + Duration::from_secs(12)),
+            RestartDecision::Restart {
+                attempt: 1,
+                delay: policy.delay,
+            }
+        );
+    }
+
+    #[test]
+    fn real_child_wait_captures_exit_code() {
+        let mut child = real_exit_child(23).expect("spawn exit fixture");
+
+        let reason = wait_for_child_exit(&mut child).expect("wait for exit fixture");
+        assert!(reason.contains("code=Some(23)"), "{reason}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn real_child_wait_captures_signal() {
+        let mut child = Command::new("sh")
+            .args(["-c", "kill -TERM $$"])
+            .spawn()
+            .expect("spawn signal fixture");
+
+        let reason = wait_for_child_exit(&mut child).expect("wait for signal fixture");
+        assert!(reason.contains("code=None"), "{reason}");
+        assert!(reason.contains("signal=Some(15)"), "{reason}");
+    }
+
+    #[test]
+    fn real_supervisor_loop_respawns_once_then_observes_shutdown() {
+        let initial = real_exit_child(31).expect("spawn initial exit fixture");
+        let registered = Rc::new(RefCell::new(vec![initial.id()]));
+        let shutdown = Rc::new(Cell::new(false));
+        let exits = Rc::new(Cell::new(0usize));
+        let respawns = Rc::new(Cell::new(0usize));
+        let fatals = Rc::new(RefCell::new(Vec::<String>::new()));
+
+        let restart_count = Rc::clone(&respawns);
+        let fatal_reasons = Rc::clone(&fatals);
+        let shutdown_check = Rc::clone(&shutdown);
+        let register_state = Rc::clone(&registered);
+        let unregister_state = Rc::clone(&registered);
+        let exit_count = Rc::clone(&exits);
+        let shutdown_after_second_exit = Rc::clone(&shutdown);
+        let shutdown_claim = Rc::clone(&shutdown);
+        let outcome = run_next_sidecar_supervisor_loop(
+            initial,
+            None,
+            test_policy(3),
+            move || {
+                restart_count.set(restart_count.get() + 1);
+                real_exit_child(32)
+            },
+            move |reason| fatal_reasons.borrow_mut().push(reason),
+            move || shutdown_check.get(),
+            move |pid| {
+                register_state.borrow_mut().push(pid);
+                true
+            },
+            move |pid| {
+                unregister_state
+                    .borrow_mut()
+                    .retain(|candidate| *candidate != pid);
+                let count = exit_count.get() + 1;
+                exit_count.set(count);
+                if count == 2 {
+                    shutdown_after_second_exit.set(true);
+                }
+            },
+            move || {
+                if shutdown_claim.get() {
+                    false
+                } else {
+                    shutdown_claim.set(true);
+                    true
+                }
+            },
+            |_| {},
+        );
+
+        assert_eq!(outcome, SupervisorOutcome::Shutdown);
+        assert_eq!(respawns.get(), 1);
+        assert!(fatals.borrow().is_empty());
+        assert!(registered.borrow().is_empty());
+    }
+
+    #[test]
+    fn real_supervisor_loop_exhausts_budget_and_invokes_fatal() {
+        let initial = real_exit_child(41).expect("spawn initial exit fixture");
+        let registered = Rc::new(RefCell::new(vec![initial.id()]));
+        let shutdown = Rc::new(Cell::new(false));
+        let respawns = Rc::new(Cell::new(0usize));
+        let fatals = Rc::new(RefCell::new(Vec::<String>::new()));
+
+        let restart_count = Rc::clone(&respawns);
+        let fatal_reasons = Rc::clone(&fatals);
+        let shutdown_check = Rc::clone(&shutdown);
+        let register_state = Rc::clone(&registered);
+        let unregister_state = Rc::clone(&registered);
+        let shutdown_claim = Rc::clone(&shutdown);
+        let outcome = run_next_sidecar_supervisor_loop(
+            initial,
+            None,
+            test_policy(1),
+            move || {
+                restart_count.set(restart_count.get() + 1);
+                real_exit_child(42)
+            },
+            move |reason| fatal_reasons.borrow_mut().push(reason),
+            move || shutdown_check.get(),
+            move |pid| {
+                register_state.borrow_mut().push(pid);
+                true
+            },
+            move |pid| {
+                unregister_state
+                    .borrow_mut()
+                    .retain(|candidate| *candidate != pid);
+            },
+            move || {
+                if shutdown_claim.get() {
+                    false
+                } else {
+                    shutdown_claim.set(true);
+                    true
+                }
+            },
+            |_| {},
+        );
+
+        let SupervisorOutcome::Fatal(reason) = outcome else {
+            panic!("expected fatal supervisor outcome");
+        };
+        assert!(reason.contains("restart budget exhausted"), "{reason}");
+        assert_eq!(respawns.get(), 1);
+        assert_eq!(fatals.borrow().as_slice(), [reason]);
+        assert!(shutdown.get());
+        assert!(registered.borrow().is_empty());
+    }
+
+    #[test]
+    fn real_supervisor_loop_shutdown_race_rejects_late_respawn() {
+        let initial = real_exit_child(51).expect("spawn initial exit fixture");
+        let registered = Rc::new(RefCell::new(vec![initial.id()]));
+        let shutdown = Rc::new(Cell::new(false));
+        let respawns = Rc::new(Cell::new(0usize));
+        let fatals = Rc::new(RefCell::new(Vec::<String>::new()));
+
+        let restart_count = Rc::clone(&respawns);
+        let shutdown_during_restart = Rc::clone(&shutdown);
+        let fatal_reasons = Rc::clone(&fatals);
+        let shutdown_check = Rc::clone(&shutdown);
+        let register_state = Rc::clone(&registered);
+        let register_shutdown = Rc::clone(&shutdown);
+        let unregister_state = Rc::clone(&registered);
+        let shutdown_claim = Rc::clone(&shutdown);
+        let outcome = run_next_sidecar_supervisor_loop(
+            initial,
+            None,
+            test_policy(3),
+            move || {
+                restart_count.set(restart_count.get() + 1);
+                shutdown_during_restart.set(true);
+                real_exit_child(52)
+            },
+            move |reason| fatal_reasons.borrow_mut().push(reason),
+            move || shutdown_check.get(),
+            move |pid| {
+                if register_shutdown.get() {
+                    return false;
+                }
+                register_state.borrow_mut().push(pid);
+                true
+            },
+            move |pid| {
+                unregister_state
+                    .borrow_mut()
+                    .retain(|candidate| *candidate != pid);
+            },
+            move || {
+                if shutdown_claim.get() {
+                    false
+                } else {
+                    shutdown_claim.set(true);
+                    true
+                }
+            },
+            |_| {},
+        );
+
+        assert_eq!(outcome, SupervisorOutcome::RegistrationRejected);
+        assert_eq!(respawns.get(), 1);
+        assert!(shutdown.get());
+        assert!(fatals.borrow().is_empty());
+        assert!(registered.borrow().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn production_bundled_spawn_wires_supervisor_and_global_registry() {
+        let _registry = crate::sidecar_lifecycle::lock_child_registry_for_test();
+        let root = std::env::temp_dir().join(format!(
+            "o8-next-supervisor-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).expect("create spawn fixture");
+        let script = root.join("server.sh");
+        let counter = root.join("spawn-count");
+        let capture = root.join("spawn-env");
+        std::fs::write(
+            &script,
+            r#"#!/bin/sh
+count=0
+if [ -f "$O8_WATCHDOG_COUNTER" ]; then count=$(cat "$O8_WATCHDOG_COUNTER"); fi
+count=$((count + 1))
+printf '%s' "$count" > "$O8_WATCHDOG_COUNTER"
+printf '%s\n' "$PORT|$O8_API_PORT|$O8_WS_PORT|$O8_BOOT_ID|$O8_INSTANCE_ID|$O8_PACKAGED_APP|$PWD|$0" > "$O8_WATCHDOG_CAPTURE"
+if [ "$count" -eq 1 ]; then sleep 0.2; exit 17; fi
+sleep 30
+"#,
+        )
+        .expect("write spawn fixture");
+
+        let spawn = BundledNextSpawn {
+            node_bin: "sh".to_string(),
+            server_dir: root.clone(),
+            server_js: script.clone(),
+            api_port: 47_120,
+            ws_port: 47_125,
+            boot_identity: BootIdentity {
+                boot_id: "test-boot".to_string(),
+                instance_id: "test-instance".to_string(),
+            },
+            bundled_operator_mcp: None,
+            codebase_memory_bin: None,
+            ai_keys: vec![
+                (
+                    "O8_WATCHDOG_COUNTER".to_string(),
+                    counter.to_string_lossy().into_owned(),
+                ),
+                (
+                    "O8_WATCHDOG_CAPTURE".to_string(),
+                    capture.to_string_lossy().into_owned(),
+                ),
+            ],
+        };
+        let (initial_pid, supervisor) =
+            spawn_and_supervise_bundled_next(spawn, None, |_| panic!("unexpected fatal"))
+                .expect("spawn production Next fixture");
+        assert_eq!(
+            crate::sidecar_lifecycle::tracked_children_for_test(),
+            [initial_pid]
+        );
+
+        wait_until(Duration::from_secs(3), || {
+            std::fs::read_to_string(&counter).ok().as_deref() == Some("2")
+        });
+        let respawned = crate::sidecar_lifecycle::tracked_children_for_test();
+        assert_eq!(respawned.len(), 1);
+        assert_ne!(respawned[0], initial_pid);
+        let environment = std::fs::read_to_string(&capture).expect("read spawn environment");
+        assert!(environment.contains("47120|47120|47125|test-boot|test-instance|1"));
+        assert!(environment.contains(root.to_string_lossy().as_ref()));
+        assert!(environment.contains(script.to_string_lossy().as_ref()));
+
+        crate::sidecar_lifecycle::kill_tracked_children();
+        let outcome = supervisor
+            .expect("supervisor thread registered")
+            .join()
+            .expect("join supervisor thread");
+        assert_eq!(outcome, SupervisorOutcome::Shutdown);
+        assert!(crate::sidecar_lifecycle::tracked_children_for_test().is_empty());
+        assert_eq!(
+            std::fs::read_to_string(&counter).expect("read final spawn count"),
+            "2"
+        );
+        std::fs::remove_dir_all(root).expect("remove spawn fixture");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn production_bundled_ws_spawn_restarts_and_stays_globally_owned() {
+        let _registry = crate::sidecar_lifecycle::lock_child_registry_for_test();
+        let root = std::env::temp_dir().join(format!(
+            "o8-ws-supervisor-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).expect("create WS spawn fixture");
+        let script = root.join("ws-server.sh");
+        let counter = root.join("spawn-count");
+        let capture = root.join("spawn-env");
+        std::fs::write(
+            &script,
+            r#"#!/bin/sh
+count=0
+if [ -f "$O8_WATCHDOG_COUNTER" ]; then count=$(cat "$O8_WATCHDOG_COUNTER"); fi
+count=$((count + 1))
+printf '%s' "$count" > "$O8_WATCHDOG_COUNTER"
+printf '%s\n' "$WS_PORT|$NEXT_ORIGIN|$O8_BOOT_ID|$O8_INSTANCE_ID|$O8_PACKAGED_APP|$PWD|$0" > "$O8_WATCHDOG_CAPTURE"
+if [ "$count" -eq 1 ]; then sleep 0.2; exit 23; fi
+sleep 30
+"#,
+        )
+        .expect("write WS spawn fixture");
+        let spawn = BundledWsSpawn {
+            node_bin: "sh".to_string(),
+            server_dir: root.clone(),
+            server_js: script.clone(),
+            ws_port: 47_125,
+            next_origin: "http://127.0.0.1:47120".to_string(),
+            boot_identity: BootIdentity {
+                boot_id: "test-ws-boot".to_string(),
+                instance_id: "test-ws-instance".to_string(),
+            },
+            bundled_operator_mcp: None,
+            ai_keys: vec![
+                (
+                    "O8_WATCHDOG_COUNTER".to_string(),
+                    counter.to_string_lossy().into_owned(),
+                ),
+                (
+                    "O8_WATCHDOG_CAPTURE".to_string(),
+                    capture.to_string_lossy().into_owned(),
+                ),
+            ],
+        };
+        let (initial_pid, supervisor) =
+            spawn_and_supervise_bundled_ws(spawn, None, |_| panic!("unexpected fatal"))
+                .expect("spawn production WS fixture");
+        assert_eq!(
+            crate::sidecar_lifecycle::tracked_children_for_test(),
+            [initial_pid]
+        );
+
+        wait_until(Duration::from_secs(3), || {
+            std::fs::read_to_string(&counter).ok().as_deref() == Some("2")
+        });
+        let respawned = crate::sidecar_lifecycle::tracked_children_for_test();
+        assert_eq!(respawned.len(), 1);
+        assert_ne!(respawned[0], initial_pid);
+        let environment = std::fs::read_to_string(&capture).expect("read WS spawn environment");
+        assert!(
+            environment.contains("47125|http://127.0.0.1:47120|test-ws-boot|test-ws-instance|1")
+        );
+        assert!(environment.contains(root.to_string_lossy().as_ref()));
+        assert!(environment.contains(script.to_string_lossy().as_ref()));
+
+        crate::sidecar_lifecycle::kill_tracked_children();
+        let outcome = supervisor
+            .expect("WS supervisor thread registered")
+            .join()
+            .expect("join WS supervisor thread");
+        assert_eq!(outcome, SupervisorOutcome::Shutdown);
+        assert!(crate::sidecar_lifecycle::tracked_children_for_test().is_empty());
+        assert_eq!(
+            std::fs::read_to_string(&counter).expect("read final WS spawn count"),
+            "2"
+        );
+        std::fs::remove_dir_all(root).expect("remove WS spawn fixture");
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// The tail of the bundled-server boot: everything that mutates this process's
 /// environment (PATH, `O8_NODE_BIN`, the AI keys) and spawns the sidecar
@@ -5831,66 +6680,44 @@ fn finish_bundled_bootstrap(
         server_js,
         api_port
     );
-    let mut server_cmd = Command::new(&node_bin);
-    server_cmd
-        .arg(&server_js)
-        .current_dir(&server_dir)
-        // No console window on Windows — see the ws-server spawn above.
-        .no_window()
-        .env("PORT", api_port.to_string())
-        .env("HOSTNAME", "0.0.0.0")
-        .env("NODE_ENV", "production")
-        .env("O8_PACKAGED_APP", "1")
-        .env("O8_NODE_BIN", &node_bin)
-        .env("O8_API_PORT", api_port.to_string())
-        .env("O8_WS_PORT", ws_port.to_string())
-        .env("O8_BOOT_ID", &boot_identity.boot_id)
-        .env("O8_INSTANCE_ID", &boot_identity.instance_id)
-        .env("WS_PORT", ws_port.to_string())
-        // Issue #776: marker so future sidecar boots can identify this child as
-        // an o8 sibling. macOS doesn't let us read env vars of other processes
-        // without root, so this is best-effort forward-compat for Linux/Windows
-        // /proc and human-readable in `ps -E` from the same user.
-        .env("O8_SIDECAR_PID", std::process::id().to_string())
-        // V8 bytecode cache — see compile_cache_dir(). Every Node child inherits it.
-        .env("NODE_COMPILE_CACHE", compile_cache_dir());
-    if has_bundled_mcp {
-        server_cmd.env("O8_BUNDLED_MCP_DIR", &server_dir);
-        server_cmd.env("O8_BUNDLED_MCP_PATH", &bundled_operator_mcp);
-    }
-    // Issue #755: forward the codebase-memory-mcp path when it's already cached.
-    if let Ok(cmm_bin) = std::env::var("O8_CODEBASE_MEMORY_BIN") {
-        if !cmm_bin.is_empty() {
-            server_cmd.env("O8_CODEBASE_MEMORY_BIN", cmm_bin);
-        }
-    }
     // Issue #935: forward AI provider keys from the user's login shell so
     // Finder-launched builds aren't dead for Gemini / Anthropic / etc. features
     // the user has keys for. These came from the single probe — no second shell.
     let ai_keys = shell.keys;
-    for (k, v) in &ai_keys {
-        server_cmd.env(k, v);
-    }
     if !ai_keys.is_empty() {
         log::info!(
             "Forwarded {} AI provider key(s) from login shell to next-server",
             ai_keys.len()
         );
     }
-    match server_cmd
-        .stdout(child_stdio(next_log.as_ref()))
-        .stderr(child_stdio(next_log.as_ref()))
-        .spawn()
-    {
-        Ok(child) => {
-            let pid = child.id();
+
+    let next_spawn = BundledNextSpawn {
+        node_bin: node_bin.clone(),
+        server_dir: server_dir.clone(),
+        server_js,
+        api_port,
+        ws_port,
+        boot_identity: boot_identity.clone(),
+        bundled_operator_mcp: has_bundled_mcp.then_some(bundled_operator_mcp),
+        codebase_memory_bin: std::env::var("O8_CODEBASE_MEMORY_BIN")
+            .ok()
+            .filter(|path| !path.is_empty()),
+        ai_keys: ai_keys.clone(),
+    };
+    let fatal_app = app.clone();
+    match spawn_and_supervise_bundled_next(next_spawn, next_log, move |reason| {
+        show_backend_failure_and_exit(&fatal_app, &reason);
+    }) {
+        Ok((pid, _supervisor)) => {
             log::info!("Next.js server started (pid: {})", pid);
             // THE comparison line. Before the boot reorder the main window was
             // built here, at the END of the bootstrap — so this stamp is, to a
             // very close approximation, what cold-launch-to-first-window used to
             // cost. Diff it against `[boot] main window created`.
-            log::info!("[boot] next-server spawned at {}ms — the OLD code created the window here", boot_ms());
-            sidecar_lifecycle::register_child(pid);
+            log::info!(
+                "[boot] next-server spawned at {}ms — the OLD code created the window here",
+                boot_ms()
+            );
             prewarm_bundled_next_server(app.clone(), api_port);
         }
         Err(e) => {
@@ -5907,6 +6734,7 @@ fn finish_bundled_bootstrap(
     // startup error so the user sees the failure instead of a hung dashboard.
     let next_origin = format!("http://127.0.0.1:{}", api_port);
     spawn_bundled_ws_server(
+        &app,
         &node_bin,
         &server_dir,
         ws_port,
@@ -7198,6 +8026,7 @@ pub fn run() {
                             Err(err) => show_node_error_and_exit(err),
                         };
                         let main_handle = app_handle.clone();
+                        let ws_app = app_handle.clone();
                         if let Err(e) = app_handle.run_on_main_thread(move || {
                             // Same ordering contract as the bundled path: never spawn a
                             // sidecar before the orphan reap has finished (#1539).
@@ -7223,6 +8052,7 @@ pub fn run() {
                                 );
                             }
                             spawn_bundled_ws_server(
+                                &ws_app,
                                 &node_bin,
                                 &server_dir,
                                 ws_port,

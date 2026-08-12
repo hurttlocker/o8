@@ -9,7 +9,11 @@ import type {
   WorkspaceLaneState,
   WorkspaceOrchestrationPacketBadge,
 } from '@/lib/orchestrator/types';
-import { isDispatchableRuntime } from '@/lib/orchestrator/runtime-capabilities';
+import {
+  isDispatchableRuntime,
+  isOwnedOrchestratorSessionKey,
+  isOrchestratorRuntime,
+} from '@/lib/orchestrator/runtime-capabilities';
 import type {
   MobileTranscriptEntry,
   MobileTranscriptThinkingStep,
@@ -238,9 +242,6 @@ export function sameOrchestrationPacketBadge(left?: TerminalTab['orchestrationPa
     && left.launchContext?.caller === right.launchContext?.caller;
 }
 
-// Problem C — exhaustive dispatch switch: each runtime has a unique session-key prefix scheme.
-// codex supports multiple prefixes (codex:, codex-owned:, codex-discovered:, codex-live:).
-// Add a new runtime prefix case here when adding a new adapter.
 export function normalizeWorkspaceChatSessionKey(
   runtime?: WorkspaceChatRuntime,
   sessionKey?: string | null,
@@ -257,13 +258,9 @@ export function normalizeWorkspaceChatSessionKey(
     trimmed.startsWith('llm-chat:')
     || trimmed.startsWith('claude-code:')
     || trimmed.startsWith('codex:')
-    || trimmed.startsWith('codex-owned:')
+    || isOwnedOrchestratorSessionKey(trimmed)
     || trimmed.startsWith('codex-discovered:')
     || trimmed.startsWith('codex-live:')
-    || trimmed.startsWith('gemini-owned:')
-    || trimmed.startsWith('opencode-owned:')
-    || trimmed.startsWith('cursor-owned:')
-    || trimmed.startsWith('grok-owned:')
   ) {
     return trimmed;
   }
@@ -273,7 +270,8 @@ export function normalizeWorkspaceChatSessionKey(
   if (runtime === 'gemini') return `gemini-owned:${trimmed}`;
   if (runtime === 'opencode') return `opencode-owned:${trimmed}`;
   if (runtime === 'cursor') return `cursor-owned:${trimmed}`;
-  if (runtime === 'grok' || runtime === 'pi') return `grok-owned:${trimmed}`;
+  if (runtime === 'grok') return `grok-owned:${trimmed}`;
+  if (isOrchestratorRuntime(runtime)) return `${runtime}-owned:${trimmed}`;
   return trimmed;
 }
 
@@ -323,13 +321,7 @@ export function isOwnedCodexRuntimeSession(sessionKey?: string | null) {
  */
 export function isOwnedCliRuntimeSession(sessionKey?: string | null) {
   const key = sessionKey?.trim();
-  if (!key) return false;
-  return key.startsWith('codex-owned:')
-    || key.startsWith('claude-code-owned:')
-    || key.startsWith('gemini-owned:')
-    || key.startsWith('opencode-owned:')
-    || key.startsWith('cursor-owned:')
-    || key.startsWith('grok-owned:');
+  return Boolean(key && isOwnedOrchestratorSessionKey(key));
 }
 
 export function resolveWorkspaceChatLaneStatus(tab: TerminalTab) {

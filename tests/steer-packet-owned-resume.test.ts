@@ -120,6 +120,7 @@ describe('steerPacket owned Codex resume fallback', () => {
     expect(performRuntimeActionMock).toHaveBeenCalledWith({
       action: 'steer',
       surfaceId,
+      clientMutationId: undefined,
       message: 'continue from huddle approval',
       auditSteer: false,
     });

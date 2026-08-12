@@ -33,4 +33,44 @@ describe('runtime cost persistence', () => {
       outputTokens: 30,
     }));
   });
+
+  it('persists telemetry-capable runtimes through the provider-neutral receipt path', async () => {
+    await expect(persistSessionCost({
+      sessionKey: 'pi-owned:cost-test',
+      runtime: 'pi',
+      model: 'provider/model',
+      inputTokens: 42,
+      outputTokens: 9,
+      costUsd: 0.12,
+      repoPath: '/tmp/o8-cost-test-repo',
+    })).resolves.toBe(true);
+
+    expect(getDb()?.select().from(usageLogs).all()).toContainEqual(expect.objectContaining({
+      sessionKey: 'pi-owned:cost-test',
+      provider: 'runtime',
+      inputTokens: 42,
+      outputTokens: 9,
+    }));
+  });
+
+  it('updates one session receipt monotonically after a resumed turn', async () => {
+    const base = {
+      sessionKey: 'cursor-owned:resumed-cost',
+      runtime: 'cursor',
+      model: 'provider/model',
+      repoPath: '/tmp/o8-cost-test-repo',
+    };
+    await persistSessionCost({ ...base, inputTokens: 100, outputTokens: 20, costUsd: 0.1 });
+    await persistSessionCost({ ...base, inputTokens: 250, outputTokens: 70, costUsd: 0.3 });
+    await persistSessionCost({ ...base, inputTokens: 200, outputTokens: 60, costUsd: 0.2 });
+
+    const rows = getDb()?.select().from(usageLogs).all()
+      .filter((row) => row.sessionKey === base.sessionKey);
+    expect(rows).toEqual([expect.objectContaining({
+      provider: 'runtime',
+      inputTokens: 250,
+      outputTokens: 70,
+      costUsd: 0.3,
+    })]);
+  });
 });

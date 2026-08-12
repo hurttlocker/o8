@@ -243,7 +243,9 @@ function operatorReq(url: string, body: unknown): NextRequest {
   return new NextRequest(url, {
     method: 'POST',
     headers: { host: 'localhost:3001' },
-    body: JSON.stringify(body),
+    body: JSON.stringify(body && typeof body === 'object'
+      ? { clientMutationId: `real-path-${crypto.randomUUID()}`, ...body }
+      : body),
   });
 }
 function operatorGet(url: string): NextRequest {

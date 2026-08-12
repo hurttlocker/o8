@@ -1,66 +1,226 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { invalidateCommandCenterSnapshotCaches } from '@/lib/command-center/snapshot';
 import { invalidateInboxCache } from '@/lib/mobile/inbox';
+import {
+  bindIdempotencyClientMutation,
+  deriveIdempotencyKey,
+  withIdempotency,
+} from '@/lib/orchestrator/idempotency-store';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
-import { launchRuntimeSurface, type RuntimeLaunchRequest } from '@/lib/runtime/actions';
+import {
+  launchRuntimeSurface,
+  type RuntimeLaunchRequest,
+  type RuntimeLaunchResult,
+} from '@/lib/runtime/actions';
+import { RuntimeLaunchPostEffectError } from '@/lib/runtime/launch-governance';
+import { listLanes } from '@/lib/lane/registry';
+import { findOwnedLaunchByMutationId } from '@/lib/runtimes/shared/owned-session-index';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+function trimmed(value: string | undefined): string | undefined {
+  const normalized = value?.trim();
+  return normalized || undefined;
+}
+
+function canonicalLaunchRequest(
+  payload: RuntimeLaunchRequest,
+  runtimeName: string,
+  clientMutationId: string,
+): RuntimeLaunchRequest {
+  return {
+    runtime: runtimeName as RuntimeLaunchRequest['runtime'],
+    prompt: payload.prompt?.trim() ?? '',
+    model: trimmed(payload.model),
+    effort: payload.effort,
+    clientMutationId,
+    cwd: payload.cwd?.trim() ?? '',
+    repoPath: trimmed(payload.repoPath),
+    projectRepoPath: trimmed(payload.projectRepoPath),
+    taskName: trimmed(payload.taskName),
+    branchName: trimmed(payload.branchName),
+    baseBranch: trimmed(payload.baseBranch),
+    isolate: payload.isolate
+      ?? (payload.isolation === 'branch' ? true : payload.isolation === 'main' ? false : undefined),
+    skipSetup: payload.skipSetup,
+    existingLaneId: trimmed(payload.existingLaneId),
+    packetId: trimmed(payload.packetId),
+  };
+}
+
 export async function POST(request: NextRequest) {
   const payload = (await request.json().catch(() => null)) as RuntimeLaunchRequest | null;
   const runtimeName = payload?.runtime?.trim();
+  const clientMutationId = payload?.clientMutationId?.trim();
 
   if (!runtimeName) {
     return NextResponse.json({ error: 'runtime is required for this launch route' }, { status: 400 });
   }
+  if (!payload || !clientMutationId) {
+    return NextResponse.json({ error: 'clientMutationId is required for this launch route' }, { status: 400 });
+  }
+
+  const launchRequest = canonicalLaunchRequest(payload, runtimeName, clientMutationId);
+  const canonicalBody = JSON.stringify(launchRequest);
 
   try {
-    const clientMutationId = payload?.clientMutationId?.trim() || `mutation-${Date.now()}`;
-    const result = await launchRuntimeSurface({
-      runtime: runtimeName,
-      clientMutationId,
-      cwd: payload?.cwd ?? '',
-      repoPath: payload?.repoPath,
-      prompt: payload?.prompt ?? '',
-      taskName: payload?.taskName,
-      baseBranch: payload?.baseBranch,
-      isolate: payload?.isolate ?? (payload?.isolation === 'branch' ? true : payload?.isolation === 'main' ? false : undefined),
-      skipSetup: payload?.skipSetup,
-      existingLaneId: payload?.existingLaneId,
-      packetId: payload?.packetId,
+    const binding = bindIdempotencyClientMutation({
+      namespace: 'runtime_launch',
+      clientKey: clientMutationId,
+      body: canonicalBody,
     });
+    if (binding.status === 'conflict') {
+      return NextResponse.json(
+        { error: 'clientMutationId was already used for a different runtime launch.' },
+        { status: 409 },
+      );
+    }
+    if (binding.status === 'unavailable') {
+      return NextResponse.json(
+        { error: 'The persisted idempotency store is unavailable; the runtime was not launched.' },
+        { status: 503 },
+      );
+    }
 
-    if (result.ok) {
+    const scopeId = launchRequest.existingLaneId
+      ?? launchRequest.packetId
+      ?? launchRequest.repoPath
+      ?? launchRequest.cwd
+      ?? runtimeName;
+    const outcome = await withIdempotency<RuntimeLaunchResult>(
+      {
+        key: deriveIdempotencyKey({
+          verb: 'runtime_launch',
+          scopeId,
+          clientKey: clientMutationId,
+          body: canonicalBody,
+        }),
+        verb: 'runtime_launch',
+        scopeId,
+        reconcileUnresolved: async () => {
+          const owned = await findOwnedLaunchByMutationId(clientMutationId);
+          if (!owned) return null;
+          const lane = listLanes().find((candidate) => candidate.sessionKey === owned.surfaceId);
+          const expectedGovernance = Boolean(
+            launchRequest.existingLaneId
+            || launchRequest.isolate
+            || (
+              launchRequest.repoPath
+              && owned.repoPath
+              && launchRequest.repoPath !== owned.repoPath
+            )
+          );
+          if (expectedGovernance && !lane) {
+            // The provider effect is durable, but the isolated checkout/session was
+            // never brought under lane control. Keep the exact mutation unresolved
+            // rather than reporting a launch that the control plane cannot govern.
+            return null;
+          }
+          const ok = owned.outcome !== 'failed';
+          return {
+            ok,
+            runtime: launchRequest.runtime,
+            clientMutationId,
+            surfaceId: owned.surfaceId,
+            note: ok
+              ? 'Recovered the owned runtime launch from its durable session record.'
+              : 'The owned runtime launch failed after its durable session record was created.',
+            cwd: owned.cwd,
+            repoPath: launchRequest.repoPath ?? owned.repoPath,
+            worktree: null,
+            laneId: lane?.id ?? owned.laneId ?? launchRequest.existingLaneId ?? null,
+          };
+        },
+      },
+      async () => {
+        try {
+          return await launchRuntimeSurface(launchRequest);
+        } catch (error) {
+          if (error instanceof RuntimeLaunchPostEffectError) {
+            return {
+              ...error.result,
+              outcomeUnknown: true,
+              retryable: false,
+            };
+          }
+          throw error;
+        }
+      },
+    );
+
+    if (outcome.inProgress) {
+      const outcomeUnknown = outcome.unresolved === true;
+      return NextResponse.json({
+        ok: !outcomeUnknown,
+        runtime: launchRequest.runtime,
+        clientMutationId,
+        surfaceId: '',
+        note: outcomeUnknown
+          ? 'The prior runtime launch crossed an external side-effect boundary, but its governed result cannot be reconstructed. It was not executed twice.'
+          : 'An identical runtime launch is already in progress; it was not executed twice.',
+        cwd: launchRequest.cwd ?? '',
+        repoPath: launchRequest.repoPath ?? launchRequest.cwd ?? '',
+        worktree: null,
+        laneId: launchRequest.existingLaneId ?? null,
+        deduped: true,
+        replayed: true,
+        inProgress: true,
+        outcomeUnknown: outcomeUnknown || undefined,
+      }, {
+        status: outcomeUnknown ? 409 : 202,
+        headers: {
+          'Cache-Control': 'no-store, max-age=0',
+          'x-o8-idempotency-replayed': '1',
+        },
+      });
+    }
+
+    const result = outcome.result;
+
+    if (outcome.persistenceDegraded) {
+      console.error(
+        `[runtime-launch] ${clientMutationId} completed, but its persisted replay receipt could not be finalized`,
+      );
+    }
+
+    if (!outcome.replayed && result.ok) {
       invalidateCommandCenterSnapshotCaches();
       invalidateInboxCache();
     }
-    await publishRealtimeMutation({
-      mutation: {
-        mutationId: clientMutationId,
-        source: 'desktop',
-        action: 'launch',
-        runtime: result.runtime,
-        surfaceId: result.surfaceId,
-        sessionKey: result.surfaceId,
-        status: result.ok ? 'queued' : 'failed',
-        note: result.note,
-        createdAt: new Date().toISOString(),
-        settledAt: new Date().toISOString(),
-      },
-      refreshTargets: ['global', 'mobileInbox', 'sessionHistory'],
-      sessionKeys: result.surfaceId ? [result.surfaceId] : [],
-      fresh: true,
-    });
+    if (!outcome.replayed) {
+      await publishRealtimeMutation({
+        mutation: {
+          mutationId: clientMutationId,
+          source: 'desktop',
+          action: 'launch',
+          runtime: result.runtime,
+          surfaceId: result.surfaceId,
+          sessionKey: result.surfaceId,
+          status: result.ok ? 'queued' : 'failed',
+          note: result.note,
+          createdAt: new Date().toISOString(),
+          settledAt: new Date().toISOString(),
+        },
+        refreshTargets: ['global', 'mobileInbox', 'sessionHistory'],
+        sessionKeys: result.surfaceId ? [result.surfaceId] : [],
+        fresh: true,
+      }).catch((error) => console.error('[runtime-launch] receipt publish failed', error));
+    }
 
-    return NextResponse.json(result, {
+    return NextResponse.json({
+      ...result,
+      replayed: outcome.replayed || undefined,
+      persistenceDegraded: outcome.persistenceDegraded || undefined,
+    }, {
+      status: result.ok ? 200 : result.outcomeUnknown ? 409 : 400,
       headers: {
         'Cache-Control': 'no-store, max-age=0',
+        ...(outcome.replayed ? { 'x-o8-idempotency-replayed': '1' } : {}),
       },
     });
   } catch (error) {
     console.error('[runtime-launch]', runtimeName, error instanceof Error ? error.message : error);
-    const clientMutationId = payload?.clientMutationId?.trim() || `mutation-${Date.now()}`;
     invalidateCommandCenterSnapshotCaches();
     invalidateInboxCache();
     await publishRealtimeMutation({
@@ -78,7 +238,7 @@ export async function POST(request: NextRequest) {
       },
       refreshTargets: ['global', 'mobileInbox'],
       fresh: true,
-    });
+    }).catch((publishError) => console.error('[runtime-launch] failure publish failed', publishError));
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : 'Unable to launch runtime session',

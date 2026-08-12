@@ -12,11 +12,13 @@ export async function GET(request: NextRequest) {
 
   const missionId = request.nextUrl.searchParams.get('missionId')?.trim() || undefined;
   const includeCost = request.nextUrl.searchParams.get('includeCost') === 'true';
+  const includeTiming = request.nextUrl.searchParams.get('includeTiming') === 'true';
 
   try {
     const result = await getMissionStatus({
       missionId,
       includeCost,
+      includeTiming,
     });
     return operatorSuccess(result);
   } catch (error) {

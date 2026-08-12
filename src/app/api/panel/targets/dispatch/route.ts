@@ -7,7 +7,14 @@ import { getScores } from '@/lib/targeting/store';
 import { resolveTargetingRouting } from '@/lib/targeting/routing';
 import { logDispatchChoice } from '@/lib/targeting/observability';
 import { createMission, dispatchMission } from '@/lib/orchestrator/operator-mission-service';
+import type { CreateMissionInput } from '@/lib/orchestrator/operator-mission-service';
 import { nextInlineIssueNumbers } from '@/lib/orchestrator/operator-mission-service/shared';
+import { findMissionByCreationMutationId } from '@/lib/orchestrator/create-mission-receipt';
+import {
+  bindIdempotencyClientMutation,
+  deriveIdempotencyKey,
+  withIdempotency,
+} from '@/lib/orchestrator/idempotency-store';
 
 /**
  * Point an agent at a targeted file. Resolves the file's dispatch routing (cheap
@@ -17,7 +24,7 @@ import { nextInlineIssueNumbers } from '@/lib/orchestrator/operator-mission-serv
  * No throw — structured errors.
  */
 export async function POST(request: Request) {
-  let body: { repoPath?: string; path?: string };
+  let body: { repoPath?: string; path?: string; clientMutationId?: string };
   try {
     body = await request.json();
   } catch {
@@ -27,7 +34,9 @@ export async function POST(request: Request) {
   const rawRepo = (body.repoPath || process.cwd()).trim();
   const repoPath = rawRepo.startsWith('~') ? rawRepo.replace('~', homedir()) : rawRepo;
   const filePath = (body.path || '').trim();
+  const clientMutationId = body.clientMutationId?.trim();
   if (!filePath) return NextResponse.json({ ok: false, error: 'path is required' }, { status: 400 });
+  if (!clientMutationId) return NextResponse.json({ ok: false, error: 'clientMutationId is required' }, { status: 400 });
 
   // Server-authoritative signals: read the cached score row (the triage GET just
   // wrote it). Avoids trusting client-supplied signals for the routing decision.
@@ -50,7 +59,7 @@ export async function POST(request: Request) {
       `Review and improve \`${filePath}\`. Keep the change surgical and well-scoped; open a reviewable diff.`,
     ].join('\n');
 
-    const mission = await createMission({
+    const createInput: CreateMissionInput = {
       issues: [{ number: issueNumber!, title: `Targeting: ${filePath}`, body: brief, url: '' }],
       repoPath,
       runtime: routing.runtime,
@@ -61,21 +70,53 @@ export async function POST(request: Request) {
       requestedEffort: routing.effort,
       constraints: '',
       workerIntent: routing.tier === 'triage' ? 'light_worker' : 'heavy_worker',
+    };
+    const canonicalBody = JSON.stringify({ repoPath, filePath, score: score.score, createInput });
+    const binding = bindIdempotencyClientMutation({
+      namespace: 'target_dispatch',
+      clientKey: clientMutationId,
+      body: canonicalBody,
     });
-
-    await dispatchMission({ missionId: mission.missionId });
+    if (binding.status === 'conflict') {
+      return NextResponse.json({ ok: false, error: 'clientMutationId was used for another target dispatch' }, { status: 409 });
+    }
+    if (binding.status === 'unavailable') {
+      return NextResponse.json({ ok: false, error: 'The target dispatch receipt store is unavailable' }, { status: 503 });
+    }
+    const creationMutationId = `${clientMutationId}:mission`;
+    const finish = async (mission: Awaited<ReturnType<typeof createMission>>) => {
+      const dispatch = await dispatchMission({ missionId: mission.missionId });
+      return { ok: true as const, missionId: mission.missionId, dispatch };
+    };
+    const outcome = await withIdempotency({
+      key: deriveIdempotencyKey({ verb: 'target_dispatch', scopeId: filePath, clientKey: clientMutationId, body: canonicalBody }),
+      verb: 'target_dispatch',
+      scopeId: filePath,
+      reconcileUnresolved: async () => {
+        const state = findMissionByCreationMutationId(creationMutationId);
+        return state?.creationReceipt ? finish(state.creationReceipt) : null;
+      },
+    }, async () => finish(await createMission({ ...createInput, clientMutationId: creationMutationId })));
+    if (outcome.inProgress) {
+      if (outcome.unresolved) {
+        return NextResponse.json({ ok: false, outcomeUnknown: true, error: 'The prior target dispatch outcome cannot be reconstructed. Inspect missions and lanes before taking another action.' }, { status: 409 });
+      }
+      return NextResponse.json({ ok: true, inProgress: true, status: 'in_progress' }, { status: 202 });
+    }
+    const missionId = outcome.result.missionId;
 
     // Observability seed for the future recalibration loop — the operator's
     // ground-truth choice (which file, at what score/tier).
     logDispatchChoice({
-      repoPath, path: filePath, missionId: mission.missionId,
+      repoPath, path: filePath, missionId,
       tier: routing.tier, runtime: routing.runtime, model: routing.model || null, effort: routing.effort,
       impact: score.impact, opportunity: score.opportunity, score: score.score,
     });
 
     return NextResponse.json({
       ok: true,
-      missionId: mission.missionId,
+      missionId,
+      replayed: outcome.replayed || undefined,
       path: filePath,
       tier: routing.tier,
       runtime: routing.runtime,

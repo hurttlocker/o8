@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   claimApprovalResolution,
+  finalizeApprovalContinuation,
   reopenApprovalAfterEvidenceDrift,
 } from './resolution';
-import { createApproval, getApproval } from './store';
+import { createApproval, getApproval, listUnsettledApprovalContinuations } from './store';
 import { getSqlite } from '@/lib/db';
 
 function makeApproval(suffix: string) {
@@ -37,6 +38,26 @@ function rejectNextResolutionEvent(approvalId: string) {
 }
 
 describe('approval evidence-drift recovery', () => {
+  it('keeps the approval decision separate from its continuation receipt', () => {
+    const approval = makeApproval(`continuation-${Date.now()}-${Math.random()}`);
+    const claim = claimApprovalResolution(approval.id, 'approve', 'desktop');
+
+    expect(claim.approval?.resolution?.continuationStatus).toBe('pending');
+    expect(finalizeApprovalContinuation(
+      approval.id,
+      claim.claimId!,
+      'outcome_unknown',
+      'The continuation receipt was lost.',
+    )?.resolution?.continuationStatus).toBe('outcome_unknown');
+    expect(getApproval(approval.id)?.audit.at(-1)).toMatchObject({
+      type: 'continuation_outcome_unknown',
+      actor: 'system',
+    });
+    expect(listUnsettledApprovalContinuations({ projectId: null })).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: approval.id })]),
+    );
+  });
+
   it('returns an approved-but-unexecuted continuation to pending for a fresh review', () => {
     const suffix = `${Date.now()}-${Math.random()}`;
     const approval = makeApproval(suffix);

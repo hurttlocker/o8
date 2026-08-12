@@ -43,6 +43,7 @@ export type CloseUnmergedResult =
       packetId: string;
       worktreeRemoved: boolean;
       preservedBranch: string | null;
+      preservedBranches: string[];
       preservationFailure: BranchPreservationFailure | null;
       note: string;
     };
@@ -75,11 +76,14 @@ export function closeUnmergedOutcomeNote(input: {
   disposition: CloseUnmergedDisposition;
   note?: string | null;
   preservedBranch?: string | null;
+  preservedBranches?: string[];
   preservationFailure?: BranchPreservationFailure | null;
 }): string {
   const details = input.note?.trim();
-  const preserved = input.preservedBranch
-    ? ` Work preserved on branch ${input.preservedBranch}.`
+  const preservedBranches = input.preservedBranches?.filter(Boolean)
+    ?? (input.preservedBranch ? [input.preservedBranch] : []);
+  const preserved = preservedBranches.length > 0
+    ? ` Work preserved on ${preservedBranches.length === 1 ? 'branch' : 'branches'} ${preservedBranches.join(', ')}.`
     : '';
   const preservationFailed = input.preservationFailure
     ? ` Preservation FAILED (${input.preservationFailure.reason}): commits may only remain as dangling Git objects and are at risk of garbage collection.`

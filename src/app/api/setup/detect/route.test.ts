@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const h = vi.hoisted(() => ({ scanAndLink: vi.fn<(_: string) => string | null>(() => null) }));
 
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
@@ -11,8 +13,13 @@ vi.mock('node:child_process', async (importOriginal) => {
 });
 
 vi.mock('@/lib/runtimes/shared/cli-locate', () => ({
-  scanAndLink: () => null,
+  scanAndLink: h.scanAndLink,
 }));
+
+beforeEach(() => {
+  h.scanAndLink.mockReset();
+  h.scanAndLink.mockReturnValue(null);
+});
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -55,5 +62,24 @@ describe('GET /api/setup/detect', () => {
       capable: false,
       installation: { installed: false },
     });
+  });
+
+  it('reports the installed keyless OpenCode default as composer-ready', async () => {
+    h.scanAndLink.mockImplementation((binary) => (
+      binary === 'opencode2' ? '/test/bin/opencode2' : null
+    ));
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 })));
+
+    const { GET } = await import('./route');
+    const response = await GET();
+    const data = await response.json() as {
+      tools: Array<{ id: string; detected: boolean; ready?: boolean; authHint?: string }>;
+    };
+
+    expect(data.tools.find((tool) => tool.id === 'opencode')).toMatchObject({
+      detected: true,
+      ready: true,
+    });
+    expect(data.tools.find((tool) => tool.id === 'opencode')?.authHint).toBeUndefined();
   });
 });

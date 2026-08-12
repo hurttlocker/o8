@@ -17,6 +17,7 @@ import type {
   ActionState,
   CompactLine,
 } from './types';
+import { fetchCorrelatedActionReceipt } from '@/lib/orchestrator/action-receipt';
 import { readJson } from './utils';
 
 // ── Run action ──
@@ -49,15 +50,23 @@ export async function runMobileAction({
 
   setActionStateBySession((current) => ({ ...current, [sessionKey]: nextState }));
 
+  let receiptSettled = false;
   try {
-    const response = await fetch('/api/mobile/action', {
+    const receipt = await fetchCorrelatedActionReceipt<MobileActionResponse>('/api/mobile/action', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    const result = await readJson<MobileActionResponse>(response);
+    receiptSettled = true;
+    if (!receipt.response.ok || !receipt.payload) {
+      return await readJson<MobileActionResponse>(new Response(
+        receipt.payload ? JSON.stringify(receipt.payload) : null,
+        { status: receipt.response.status },
+      ));
+    }
+    const result = receipt.payload;
     setActionNoteBySession((current) => ({ ...current, [sessionKey]: result.note }));
-    window.setTimeout(() => {
+    globalThis.setTimeout(() => {
       setActionNoteBySession((current) => (current[sessionKey] === result.note ? { ...current, [sessionKey]: null } : current));
     }, 3000);
     if (!realtimeEnabled) {
@@ -69,7 +78,9 @@ export async function runMobileAction({
     }
     return result;
   } finally {
-    setActionStateBySession((current) => ({ ...current, [sessionKey]: 'idle' }));
+    if (receiptSettled) {
+      setActionStateBySession((current) => ({ ...current, [sessionKey]: 'idle' }));
+    }
   }
 }
 

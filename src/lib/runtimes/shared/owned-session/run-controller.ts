@@ -515,6 +515,20 @@ export function createOwnedRunController({
           repoPath: session.repoPath,
           binary,
           args,
+          finalAllowReadWritePaths: session.identity?.configHomeRef
+            ? [session.identity.configHomeRef]
+            : undefined,
+          finalImmutableWritePaths: session.identity?.configHomeRef
+            ? [
+                path.join(session.identity.configHomeRef, 'auth.json'),
+                path.join(session.identity.configHomeRef, 'config.toml'),
+                path.join(session.identity.configHomeRef, 'AGENTS.md'),
+                path.join(session.identity.configHomeRef, 'agents'),
+                path.join(session.identity.configHomeRef, 'plugins'),
+                path.join(session.identity.configHomeRef, 'rules'),
+                path.join(session.identity.configHomeRef, 'skills'),
+              ]
+            : undefined,
         });
         spawnBinary = prepared.binary;
         spawnArgs = prepared.args;
@@ -559,7 +573,10 @@ export function createOwnedRunController({
     const bridgeSessionName = tmuxSessionName(runtimeId, runId);
     const cliCmd = [spawnBinary, ...spawnArgs].map(quoteShellArg).join(' ');
     const shellCmd = `${stdinPayload ? `printf %s ${quoteShellArg(stdinPayload)} | ` : ''}${cliCmd} | tee '${stdoutPath}' 2>'${stderrPath}'`;
-    const adapterEnv = adapter.extraSpawnEnv ? adapter.extraSpawnEnv() : {};
+    const adapterEnv: Record<string, string> = adapter.extraSpawnEnv ? adapter.extraSpawnEnv() : {};
+    if (adapter.isolatedConfigHomeEnv && session.identity?.configHomeRef) {
+      adapterEnv[adapter.isolatedConfigHomeEnv] = session.identity.configHomeRef;
+    }
     const workerToken = session.packetId
       ? mintPacketWorkerToken(session.packetId)
       : getOrCreateLocalWorkerToken();
@@ -652,6 +669,7 @@ export function createOwnedRunController({
       prompt,
       startedAt: nowIso(),
       pid,
+      commandIdentity: path.basename(spawnBinary),
       stdoutPath,
       stderrPath,
       outcome: 'running',

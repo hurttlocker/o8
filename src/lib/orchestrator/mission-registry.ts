@@ -9,6 +9,7 @@ interface MissionStateRow {
   id: string;
   mission_state_json: string | null;
   created_at: number;
+  updated_at: number;
   archived_at: number | null;
 }
 
@@ -16,10 +17,17 @@ export interface MissionRegistryEntry {
   id: string;
   mission: OrchestratorMissionState;
   createdAt: number;
+  updatedAt: number;
   archivedAt: number | null;
 }
 
 const registryMutationLocks = new Map<string, Promise<void>>();
+
+function nextRegistryVersion(missionId: string): number {
+  const row = getSqlite().prepare('SELECT updated_at FROM missions WHERE id = ?')
+    .get(missionId) as Pick<MissionStateRow, 'updated_at'> | undefined;
+  return Math.max(Date.now(), (row?.updated_at ?? 0) + 1);
+}
 
 function parseMissionState(json: string | null): OrchestratorMissionState | null {
   if (!json) return null;
@@ -31,11 +39,12 @@ function parseMissionState(json: string | null): OrchestratorMissionState | null
 }
 
 function archiveRegistryRowUnlocked(id: string) {
-  const now = Date.now();
+  const archivedAt = Date.now();
+  const version = nextRegistryVersion(id);
   getSqlite().prepare(`
     UPDATE missions SET archived_at = ?, updated_at = ?
      WHERE id = ? AND archived_at IS NULL
-  `).run(now, now, id);
+  `).run(archivedAt, version, id);
 }
 
 function queueArchiveRegistryRow(id: string) {
@@ -75,7 +84,13 @@ export function missionIsTerminal(state: OrchestratorMissionState) {
 
 function missionRegistryEntryFromRow(row: MissionStateRow): MissionRegistryEntry | null {
   const mission = parseMissionState(row.mission_state_json);
-  return mission ? { id: row.id, mission, createdAt: row.created_at, archivedAt: row.archived_at } : null;
+  return mission ? {
+    id: row.id,
+    mission,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    archivedAt: row.archived_at,
+  } : null;
 }
 
 export function readMissionRegistryEntry(
@@ -85,7 +100,7 @@ export function readMissionRegistryEntry(
   const normalizedId = missionId.trim();
   if (!normalizedId) return null;
   const row = getSqlite().prepare(`
-    SELECT id, mission_state_json, created_at, archived_at
+    SELECT id, mission_state_json, created_at, updated_at, archived_at
       FROM missions
      WHERE id = ?
        ${options.includeArchived ? '' : 'AND archived_at IS NULL'}
@@ -97,7 +112,7 @@ export function listMissionRegistryEntries(
   options: { includeArchived?: boolean; excludeMissionId?: string | null } = {},
 ): MissionRegistryEntry[] {
   const rows = getSqlite().prepare(`
-    SELECT id, mission_state_json, created_at, archived_at
+    SELECT id, mission_state_json, created_at, updated_at, archived_at
       FROM missions
      WHERE ${options.includeArchived ? '1 = 1' : 'archived_at IS NULL'}
      ORDER BY created_at ASC
@@ -116,7 +131,7 @@ export function listMissionRegistryEntries(
 
 export function listActiveMissionRegistryEntries(currentMissionId?: string | null): MissionRegistryEntry[] {
   const rows = getSqlite().prepare(`
-    SELECT id, mission_state_json, created_at, archived_at
+    SELECT id, mission_state_json, created_at, updated_at, archived_at
       FROM missions
      WHERE archived_at IS NULL
      ORDER BY created_at ASC
@@ -157,7 +172,7 @@ function writeMissionRegistryStateUnlocked(state: OrchestratorMissionState): Orc
   const normalized = normalizeOrchestratorMissionState(state);
   const waves = buildDependencyGraph(normalized.packets).map((node) => node.wave);
   const archivedAt = missionIsTerminal(normalized) ? Date.now() : null;
-  const now = Date.now();
+  const version = nextRegistryVersion(missionId);
   const write = getSqlite().transaction(() => {
     getSqlite().prepare(`
       UPDATE missions
@@ -175,7 +190,7 @@ function writeMissionRegistryStateUnlocked(state: OrchestratorMissionState): Orc
       }))),
       JSON.stringify(normalized),
       Math.max(1, ...waves),
-      now,
+      version,
       archivedAt,
       missionId,
     );
@@ -234,4 +249,18 @@ export async function persistMissionRegistryState(state: OrchestratorMissionStat
   const missionId = state.missionId?.trim();
   if (!missionId) return null;
   return withRegistryMutationLock(missionId, async () => writeMissionRegistryStateUnlocked(state));
+}
+
+/** Persist an outgoing current mission only when its registry mirror has not advanced. */
+export async function persistMissionRegistryStateIfVersion(
+  state: OrchestratorMissionState,
+  expectedUpdatedAt: number,
+): Promise<boolean> {
+  const missionId = state.missionId?.trim();
+  if (!missionId) return false;
+  return withRegistryMutationLock(missionId, async () => {
+    const current = readMissionRegistryEntry(missionId, { includeArchived: true });
+    if (!current || current.updatedAt !== expectedUpdatedAt) return false;
+    return writeMissionRegistryStateUnlocked(state) !== null;
+  });
 }

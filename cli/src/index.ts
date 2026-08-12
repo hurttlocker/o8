@@ -40,6 +40,7 @@ import { runMission } from './commands/mission.js';
 import { runMcp } from './commands/mcp.js';
 import { runProject, runRepo } from './commands/resources.js';
 import { runStatus } from './commands/status.js';
+import { runSession } from './commands/session.js';
 import { runRun } from './commands/run.js';
 import { runVersion } from './commands/version.js';
 import { runPacketInfo } from './commands/packet/info.js';
@@ -242,6 +243,13 @@ commands:
   inbox list           pending governance approvals (--all includes resolved)
   inbox approve <id>   approve a card → runs the deferred action (e.g. a held merge)
   inbox reject <id>    reject a pending approval
+  session show <key>   provider-native transform capabilities, lineage, and checkpoints
+  session import <key> add a discovered provider session without claiming packet ownership
+  session checkpoint <key> save a durable provider position for later forks
+  session fork <key>   create a new provider session from a checkpoint
+  session rewind <key> create a new continuation while preserving the original
+  session resume <key> --message <text>  continue a durable provider session
+  session dismiss-pending <key> --confirm-no-continuation  clear an unresolved attempt after provider inspection
   task list            current task pool grouped by ready/running/review/etc.
   task create          add a project-backed task to the ready pool
   task brief <id>      project-backed task brief for a packet or lane
@@ -372,6 +380,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runProject(args.mode, secondary, args.rest);
     case 'inbox':
       return runInbox(args.mode, secondary, args.rest);
+    case 'session':
+      return runSession(args.mode, secondary, args.rest);
     case 'task': {
       if (secondary === 'list') return runTaskList(args.mode, args.rest);
       if (secondary === 'create') return runTaskCreate(args.mode, args.rest);

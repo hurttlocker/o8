@@ -25,6 +25,27 @@ export interface InterruptTarget {
   sessionKey: string;
 }
 
+export interface LaneSessionArchiveOutcome extends InterruptTarget {
+  archived: boolean;
+  note: string;
+}
+
+export interface LaneSessionArchiveResult {
+  targeted: number;
+  archived: number;
+  outcomes: LaneSessionArchiveOutcome[];
+  failures: LaneSessionArchiveOutcome[];
+}
+
+export class LaneSessionArchiveUnconfirmedError extends Error {
+  constructor(public readonly result: LaneSessionArchiveResult) {
+    super(
+      `Could not confirm archival for ${result.failures.length} owned worker session${result.failures.length === 1 ? '' : 's'}; lane and worktree retirement must remain held.`,
+    );
+    this.name = 'LaneSessionArchiveUnconfirmedError';
+  }
+}
+
 /**
  * Pure: the lanes that have a live session to interrupt, as (laneId, runtime,
  * sessionKey) triples. Lanes with no/blank sessionKey are skipped (nothing to
@@ -76,9 +97,9 @@ export async function interruptLaneSessions(lanes: Lane[]): Promise<number> {
  * When even the last rung can't be confirmed, `confirmed:false` bubbles up so
  * the caller marks the lane `kill_unconfirmed` instead of pretending it stopped.
  *
- * Owned dispatch workers (`codex-owned:` / `claude-code-owned:`) get the full
- * ladder. Discovered / gemini / opencode sessions fall back to the single-signal
- * interrupt (no live pid to probe) — best-effort, `verified:false` in the event.
+ * Every registry-backed owned worker gets the full ladder. Discovered sessions
+ * without an o8-owned pid fall back to the single-signal interrupt, which stays
+ * explicitly unverified in the event.
  */
 export interface ConfirmedKillStage {
   /**
@@ -103,10 +124,6 @@ export interface ConfirmedKillOutcome {
   note: string;
 }
 
-function hasEscalationLadder(sessionKey: string): boolean {
-  return sessionKey.startsWith('codex-owned:') || sessionKey.startsWith('claude-code-owned:');
-}
-
 async function killTargetConfirmed(target: InterruptTarget): Promise<ConfirmedKillOutcome> {
   const emit = (stage: ConfirmedKillStage, extra: Record<string, unknown> = {}) => {
     try {
@@ -122,46 +139,78 @@ async function killTargetConfirmed(target: InterruptTarget): Promise<ConfirmedKi
     }
   };
 
-  if (hasEscalationLadder(target.sessionKey)) {
-    const { escalateInterruptOwnedSurface } = await import('@/lib/runtime/interrupt-escalation');
-    const result = await escalateInterruptOwnedSurface(target.sessionKey);
-    if (result) {
-      const stages: ConfirmedKillStage[] = result.steps.map((step) => ({
-        stage: step.mechanism,
-        confirmed: !step.aliveAfter,
-        pid: result.pid,
-      }));
-      for (const stage of stages) emit(stage);
+  const { escalateInterruptOwnedSurface } = await import('@/lib/runtime/interrupt-escalation');
+  const result = await escalateInterruptOwnedSurface(target.sessionKey);
+  if (result) {
+    const stages: ConfirmedKillStage[] = result.steps.map((step) => ({
+      stage: step.mechanism,
+      confirmed: !step.aliveAfter,
+      pid: result.pid,
+    }));
+    for (const stage of stages) emit(stage);
+    return {
+      laneId: target.laneId,
+      sessionKey: target.sessionKey,
+      runtime: target.runtime,
+      confirmed: result.confirmedDead,
+      alreadyDead: result.alreadyDead,
+      pid: result.pid,
+      stages,
+      note: result.note,
+    };
+  }
+
+  // Discovered sessions first route through their adapter so it can resolve the
+  // process that actually owns the session. A successful signal enqueue is not
+  // proof of death: only a returned pid can enter the same probe/escalation
+  // ladder used for o8-owned workers. Adapters without pid evidence fail closed
+  // and keep the lane/worktree bound.
+  try {
+    const { routeAction } = await import('@/lib/runtimes/registry');
+    const res = await routeAction(target.runtime, 'interrupt', target.sessionKey);
+    const pids = [...new Set((res.pids ?? []).filter((pid) => Number.isInteger(pid) && pid > 0))];
+    if (pids.length === 0) {
+      const stage: ConfirmedKillStage = { stage: 'interrupt', confirmed: false };
+      emit(stage, { verified: false });
       return {
         laneId: target.laneId,
         sessionKey: target.sessionKey,
         runtime: target.runtime,
-        confirmed: result.confirmedDead,
-        alreadyDead: result.alreadyDead,
-        pid: result.pid,
-        stages,
-        note: result.note,
+        confirmed: false,
+        alreadyDead: false,
+        stages: [stage],
+        note: res.note || 'Interrupt was requested, but no live pid was available to confirm process exit.',
       };
     }
-    // null → surface outside the live inventory; fall through to best-effort.
-  }
 
-  // Fallback: single-signal interrupt through the runtime router. No live pid to
-  // probe, so `confirmed` reflects the runtime's own ok, flagged unverified.
-  try {
-    const { routeAction } = await import('@/lib/runtimes/registry');
-    const res = await routeAction(target.runtime, 'interrupt', target.sessionKey) as { ok?: boolean; note?: string };
-    const confirmed = res?.ok === true;
-    const stage: ConfirmedKillStage = { stage: 'interrupt', confirmed };
-    emit(stage, { verified: false });
+    const { escalateInterrupt } = await import('@/lib/runtime/interrupt-escalation');
+    const results = [];
+    const stages: ConfirmedKillStage[] = [];
+    for (const pid of pids) {
+      const escalation = await escalateInterrupt({ pid });
+      results.push(escalation);
+      for (const step of escalation.steps) {
+        const stage: ConfirmedKillStage = {
+          stage: step.mechanism,
+          confirmed: !step.aliveAfter,
+          pid,
+        };
+        stages.push(stage);
+        emit(stage, { verified: true });
+      }
+    }
+    const confirmed = results.every((entry) => entry.confirmedDead);
     return {
       laneId: target.laneId,
       sessionKey: target.sessionKey,
       runtime: target.runtime,
       confirmed,
-      alreadyDead: false,
-      stages: [stage],
-      note: res?.note ?? 'Best-effort interrupt (no live pid to confirm).',
+      alreadyDead: results.every((entry) => entry.alreadyDead),
+      pid: pids[0],
+      stages,
+      note: confirmed
+        ? results.map((entry) => entry.note).join(' ')
+        : `Process exit could not be confirmed. ${results.map((entry) => entry.note).join(' ')}`,
     };
   } catch (error) {
     const note = error instanceof Error ? error.message : String(error);
@@ -204,31 +253,81 @@ export async function killLaneSessionsConfirmed(lanes: Lane[]): Promise<Confirme
  * from discovery; the transcript stays reviewable (archive-aware tail). Best-
  * effort per lane. Returns the number archived.
  */
-export async function archiveLaneSessions(lanes: Lane[]): Promise<number> {
-  const targets = interruptableSessions(lanes);
-  if (targets.length === 0) return 0;
-  let archived = 0;
+export async function archiveLaneSessions(lanes: Lane[]): Promise<LaneSessionArchiveResult> {
+  await import('@/lib/runtimes');
+  const { getOwnedSessionLifecycle } = await import('@/lib/runtimes/shared/owned-session-lifecycle');
+  const targets = interruptableSessions(lanes).filter((target) => target.sessionKey.includes('-owned:'));
+  const outcomes: LaneSessionArchiveOutcome[] = [];
   for (const target of targets) {
     try {
-      if (target.sessionKey.startsWith('codex-owned:')) {
+      const { persistRuntimeSessionCost } = await import('@/lib/orchestrator/cost-persistence');
+      await persistRuntimeSessionCost({
+        sessionKey: target.sessionKey,
+        runtime: target.runtime,
+        repoPath: lanes.find((lane) => lane.id === target.laneId)?.worktreePath
+          ?? lanes.find((lane) => lane.id === target.laneId)?.repoPath
+          ?? process.cwd(),
+      });
+      let result: { archived?: boolean } | null = null;
+      const registeredLifecycle = getOwnedSessionLifecycle(target.sessionKey);
+      if (registeredLifecycle) {
+        result = await registeredLifecycle.archiveSession(target.sessionKey);
+      } else if (target.sessionKey.startsWith('codex-owned:')) {
         const { archiveOwnedCodexSession } = await import('@/lib/codex/owned');
-        await archiveOwnedCodexSession(target.sessionKey);
+        result = await archiveOwnedCodexSession(target.sessionKey);
       } else if (target.sessionKey.startsWith('claude-code-owned:')) {
         const { archiveOwnedClaudeCodeSession } = await import('@/lib/claude-code/owned');
-        await archiveOwnedClaudeCodeSession(target.sessionKey);
+        result = await archiveOwnedClaudeCodeSession(target.sessionKey);
       } else if (target.sessionKey.startsWith('gemini-owned:')) {
         const { archiveOwnedGeminiSession } = await import('@/lib/gemini/owned');
-        await archiveOwnedGeminiSession(target.sessionKey);
+        result = await archiveOwnedGeminiSession(target.sessionKey);
       } else if (target.sessionKey.startsWith('opencode-owned:')) {
         const { archiveOwnedOpencodeSession } = await import('@/lib/opencode/owned');
-        await archiveOwnedOpencodeSession(target.sessionKey);
-      } else {
-        continue; // discovered / claude-code sessions own no dir under ~/.o8 to archive
+        result = await archiveOwnedOpencodeSession(target.sessionKey);
+      } else if (target.sessionKey.startsWith('cursor-owned:')) {
+        const { archiveOwnedCursorSession } = await import('@/lib/cursor/owned');
+        result = await archiveOwnedCursorSession(target.sessionKey);
+      } else if (target.sessionKey.startsWith('grok-owned:')) {
+        const { archiveOwnedGrokSession } = await import('@/lib/grok/owned');
+        result = await archiveOwnedGrokSession(target.sessionKey);
+      } else if (target.sessionKey.startsWith('prime-agent-owned:')) {
+        const { archiveOwnedPrimeAgentSession } = await import('@/lib/prime-agent/owned');
+        result = await archiveOwnedPrimeAgentSession(target.sessionKey);
+      } else if (target.sessionKey.startsWith('pi-owned:')) {
+        const { archiveOwnedPiSession } = await import('@/lib/pi/owned');
+        result = await archiveOwnedPiSession(target.sessionKey);
       }
-      archived += 1;
+      const archived = result?.archived === true;
+      const note = archived
+        ? 'Owned session directory archived.'
+        : 'Owned session directory archive was not confirmed.';
+      outcomes.push({ ...target, archived, note });
+      if (!archived) {
+        console.warn(`[reap-sessions] session-dir archive was not confirmed for lane ${target.laneId} (${target.runtime}).`);
+      }
     } catch (error) {
+      const note = error instanceof Error ? error.message : String(error);
+      outcomes.push({ ...target, archived: false, note });
       console.warn(`[reap-sessions] session-dir archive failed for lane ${target.laneId} (${target.runtime}):`, error);
     }
   }
-  return archived;
+  const failures = outcomes.filter((outcome) => !outcome.archived);
+  return {
+    targeted: targets.length,
+    archived: outcomes.length - failures.length,
+    outcomes,
+    failures,
+  };
+}
+
+export async function archiveLaneSessionsConfirmed(lanes: Lane[]): Promise<LaneSessionArchiveResult> {
+  const result = await archiveLaneSessions(lanes);
+  assertLaneSessionsArchived(result);
+  return result;
+}
+
+export function assertLaneSessionsArchived(result: LaneSessionArchiveResult): void {
+  if (result.failures.length > 0) {
+    throw new LaneSessionArchiveUnconfirmedError(result);
+  }
 }

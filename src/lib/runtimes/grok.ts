@@ -10,6 +10,7 @@ import type {
 } from './types';
 import { parseGrokSessionCost } from '@/lib/runtimes/grok-cost-parser';
 import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
+import { ownedTailToRuntimeTranscript } from '@/lib/runtimes/shared/owned-transcript';
 import { monitorUsageDispatch, usageSnapshotFromTelemetry } from '@/lib/usage-log';
 import {
   continueOwnedGrokSession,
@@ -117,26 +118,6 @@ function mapAgentToSession(agent: OwnedAgentLike): RuntimeSession {
   };
 }
 
-function parseTranscriptTimestamp(value?: string, fallbackLabel?: string) {
-  const direct = value ? new Date(value) : null;
-  if (direct && !Number.isNaN(direct.getTime())) return direct;
-  const fromLabel = fallbackLabel ? new Date(fallbackLabel) : null;
-  if (fromLabel && !Number.isNaN(fromLabel.getTime())) return fromLabel;
-  return new Date();
-}
-
-function applyTranscriptWindow<T extends { id: string }>(entries: T[], sinceId?: string, limit?: number) {
-  let next = entries;
-  if (sinceId) {
-    const sinceIndex = next.findIndex((entry) => entry.id === sinceId);
-    if (sinceIndex >= 0) next = next.slice(sinceIndex + 1);
-  }
-  if (typeof limit === 'number' && Number.isFinite(limit) && limit > 0 && next.length > limit) {
-    next = next.slice(-limit);
-  }
-  return next;
-}
-
 async function waitForGrokRunToFinish(sessionKey: string, startedAtMs: number): Promise<number> {
   for (let attempt = 0; attempt < 7200; attempt += 1) {
     const lifecycle = (await getOwnedGrokFleetAdditions({ fresh: true }).catch(() => null))
@@ -188,16 +169,8 @@ export const grokRuntime: AgentRuntime = {
 
   async readTranscript(sessionKey: string, sinceId?: string, limit?: number): Promise<RuntimeTranscriptEntry[]> {
     if (!sessionKey.startsWith('grok-owned:')) return [];
-    const tail = await getOwnedGrokRuntimeTail(sessionKey);
-    return applyTranscriptWindow(tail.entries, sinceId, limit).map((entry) => ({
-      id: entry.id,
-      role: entry.kind === 'message' ? 'assistant' as const
-        : entry.kind === 'tool' ? 'tool' as const
-        : 'system' as const,
-      text: entry.text,
-      timestamp: parseTranscriptTimestamp(entry.timestamp, entry.timestampLabel),
-      toolName: entry.kind === 'tool' ? entry.label : undefined,
-    }));
+    const tail = await getOwnedGrokRuntimeTail(sessionKey, sinceId ? 200 : limit);
+    return ownedTailToRuntimeTranscript(tail, sinceId, limit);
   },
 
   async launch(opts: LaunchOptions): Promise<RuntimeActionResult> {
@@ -205,6 +178,7 @@ export const grokRuntime: AgentRuntime = {
     const result = await launchOwnedGrokSession({
       cwd: opts.cwd,
       prompt: opts.prompt,
+      clientMutationId: opts.clientMutationId,
       model: opts.model,
       laneId: opts.laneId,
       packetId: opts.packetId,

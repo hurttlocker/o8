@@ -8,6 +8,7 @@ import { resolvePortInfo } from '@/lib/panel/api-port';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 import type { LaneCommand, LaneCommandResult, LaneEventActor } from '@/lib/lane/types';
+import { findOwnedLaunchByMutationId } from '@/lib/runtimes/shared/owned-session-index';
 
 const LAUNCH_ATTEMPT_CAP = 5;
 
@@ -58,6 +59,28 @@ export async function launchSession(
       laneId: command.laneId,
       note: `Working directory no longer exists: ${launchCwd}. Reset the packet to re-provision.`,
     };
+  }
+
+  if (command.clientMutationId) {
+    const recovered = await findOwnedLaunchByMutationId(command.clientMutationId);
+    if (recovered) {
+      if (recovered.outcome === 'failed') {
+        setLaneStatus(command.laneId, 'idle', 'system', 'launch_failed');
+        return {
+          ok: false,
+          laneId: command.laneId,
+          note: 'Recovered a failed owned launch from its durable session record.',
+        };
+      }
+      attachSession(command.laneId, recovered.surfaceId, actor);
+      setLaneStatus(command.laneId, 'running', actor, 'session_launch_recovered');
+      return {
+        ok: true,
+        laneId: command.laneId,
+        note: 'Recovered the owned launch after an interrupted dispatch response.',
+        lane: getLane(command.laneId) ?? undefined,
+      };
+    }
   }
 
   setLaneStatus(command.laneId, 'launching', actor, 'launching_session');
@@ -120,6 +143,7 @@ export async function launchSession(
       baseBranch: lane.baseBranch,
       model: command.model,
       effort: command.effort,
+      clientMutationId: command.clientMutationId,
       isolate: !lane.worktreePath,
       skipSetup: true,
       existingLaneId: command.laneId,

@@ -9,7 +9,12 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { listOwnedActiveRuns, lookupOwnedActiveRun, resetOwnedSessionIndex } from './owned-session-index';
+import {
+  listOwnedActiveRuns,
+  lookupOwnedActiveRun,
+  lookupOwnedActiveRunFresh,
+  resetOwnedSessionIndex,
+} from './owned-session-index';
 
 let root = '';
 function writeSession(dir: string, surfaceId: string, activeRun: unknown) {
@@ -24,6 +29,10 @@ beforeEach(() => {
   process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT = root;
   process.env.O8_OWNED_GEMINI_ROOT = root;
   process.env.O8_OWNED_OPENCODE_ROOT = root;
+  process.env.O8_OWNED_CURSOR_ROOT = root;
+  process.env.O8_OWNED_GROK_ROOT = root;
+  process.env.O8_OWNED_PRIME_AGENT_ROOT = root;
+  process.env.O8_OWNED_PI_ROOT = root;
   resetOwnedSessionIndex();
 });
 afterEach(() => {
@@ -32,6 +41,10 @@ afterEach(() => {
   delete process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT;
   delete process.env.O8_OWNED_GEMINI_ROOT;
   delete process.env.O8_OWNED_OPENCODE_ROOT;
+  delete process.env.O8_OWNED_CURSOR_ROOT;
+  delete process.env.O8_OWNED_GROK_ROOT;
+  delete process.env.O8_OWNED_PRIME_AGENT_ROOT;
+  delete process.env.O8_OWNED_PI_ROOT;
   resetOwnedSessionIndex();
 });
 
@@ -67,6 +80,23 @@ describe('lookupOwnedActiveRun', () => {
     expect(await lookupOwnedActiveRun('claude-code-owned:live', 1000)).toEqual({ pid: 31337, tmuxSession: undefined });
   });
 
+  it('indexes every registry-backed owned worker prefix', async () => {
+    const surfaces = [
+      'gemini-owned:live',
+      'opencode-owned:live',
+      'cursor-owned:live',
+      'grok-owned:live',
+      'prime-agent-owned:live',
+      'pi-owned:live',
+    ];
+    surfaces.forEach((surfaceId, index) => writeSession(`owned-${index}`, surfaceId, { pid: 5000 + index }));
+    resetOwnedSessionIndex();
+
+    for (const [index, surfaceId] of surfaces.entries()) {
+      expect(await lookupOwnedActiveRun(surfaceId, 1000)).toEqual({ pid: 5000 + index, tmuxSession: undefined });
+    }
+  });
+
   it('null for a surfaceId that matches no known root marker', async () => {
     expect(await lookupOwnedActiveRun('claude-code:live-1', 1000)).toBeNull();
   });
@@ -79,5 +109,13 @@ describe('lookupOwnedActiveRun', () => {
     expect(await lookupOwnedActiveRun('codex-owned:new', t0 + 1_000)).toBeNull();
     // Past the 2s TTL: fresh scan sees it.
     expect(await lookupOwnedActiveRun('codex-owned:new', t0 + 2_100)).toEqual({ pid: 7 });
+  });
+
+  it('bypasses a stale miss for safety-critical kill decisions', async () => {
+    const t0 = 1_700_000_000_000;
+    expect(await lookupOwnedActiveRun('pi-owned:new', t0)).toBeNull();
+    writeSession('pi-new', 'pi-owned:new', { pid: 8 });
+
+    expect(await lookupOwnedActiveRunFresh('pi-owned:new')).toEqual({ pid: 8, tmuxSession: undefined });
   });
 });

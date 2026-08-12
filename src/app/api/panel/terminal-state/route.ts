@@ -22,6 +22,10 @@ function getStateFile(scope: string) {
   return path.join(STATE_SCOPE_DIR, `${scope}.json`);
 }
 
+function noSavedState(): Response {
+  return new Response(null, { status: 204 });
+}
+
 function normalizeScopePath(value?: string | null) {
   const trimmed = value?.trim();
   if (!trimmed) return null;
@@ -225,14 +229,14 @@ export async function GET(request: Request) {
     const repoPath = url.searchParams.get('repoPath');
     const repoRoots = new Set((await listRepos()).map((repo) => normalizeScopePath(repo.localPath)).filter((value): value is string => Boolean(value)));
     if (repoRoots.size === 0) {
-      return NextResponse.json(null, { status: 404 });
+      return noSavedState();
     }
     const stateFile = getStateFile(scope);
 
     if (existsSync(stateFile)) {
       const data = stripChatTabsWithMissingLane(stripOrchestratorZombies(filterStateToRegisteredRepos(JSON.parse(readFileSync(stateFile, 'utf-8')), repoRoots)));
       if (!data) {
-        return NextResponse.json(null, { status: 404 });
+        return noSavedState();
       }
       if (scope === 'tile-root') {
         if (Array.isArray((data as { tabs?: unknown[] })?.tabs) && ((data as { tabs?: unknown[] }).tabs?.length ?? 0) === 0) {
@@ -272,7 +276,7 @@ export async function GET(request: Request) {
     if (scope === 'tile-root' && existsSync(LEGACY_STATE_FILE)) {
       const data = filterStateToRegisteredRepos(JSON.parse(readFileSync(LEGACY_STATE_FILE, 'utf-8')), repoRoots);
       if (!data) {
-        return NextResponse.json(null, { status: 404 });
+        return noSavedState();
       }
       return NextResponse.json(data);
     }
@@ -291,9 +295,9 @@ export async function GET(request: Request) {
       }
     }
 
-    return NextResponse.json(null, { status: 404 });
+    return noSavedState();
   } catch {
-    return NextResponse.json(null, { status: 404 });
+    return noSavedState();
   }
 }
 

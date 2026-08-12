@@ -18,6 +18,14 @@ export type {
   RuntimeActionResult,
   LaunchOptions,
   RuntimeTelemetry,
+  RuntimeCapacityCapabilities,
+  RuntimeCapacitySource,
+  RuntimeCapacityConfidence,
+  RuntimeCapacityStatus,
+  RuntimeCapacityUnit,
+  RuntimeCapacityBucket,
+  RuntimeCapacitySnapshot,
+  RuntimeIdentityConfigValidation,
   AgentRuntime,
 } from './types';
 

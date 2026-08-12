@@ -22,6 +22,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const REVIEW_RECEIPT_TTL_MS: u64 = 5 * 60 * 1_000;
 const SPOKEN_REVIEW_SUMMARY_LIMIT: usize = 1_200;
 static REVIEW_RECEIPT_COUNTER: AtomicU64 = AtomicU64::new(1);
+static PACKET_MUTATION_COUNTER: AtomicU64 = AtomicU64::new(1);
 static REVIEW_RECEIPTS: OnceLock<Mutex<HashMap<String, ApprovalReviewReceipt>>> = OnceLock::new();
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -64,6 +65,32 @@ fn epoch_millis() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0)
+}
+
+fn new_packet_mutation_id(verb: &str) -> String {
+    let nonce = PACKET_MUTATION_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!(
+        "symon-{verb}-{}-{}-{nonce}",
+        std::process::id(),
+        epoch_millis()
+    )
+}
+
+fn packet_steer_body(packet_id: &str, message: &str, source: &str) -> Value {
+    json!({
+        "packetId": packet_id,
+        "message": message,
+        "source": source,
+        "idempotencyKey": new_packet_mutation_id("steer"),
+    })
+}
+
+fn packet_rerun_body(packet_id: &str, feedback: &str) -> Value {
+    json!({
+        "packetId": packet_id,
+        "feedback": feedback,
+        "idempotencyKey": new_packet_mutation_id("rerun"),
+    })
 }
 
 fn review_receipts() -> &'static Mutex<HashMap<String, ApprovalReviewReceipt>> {
@@ -1012,6 +1039,23 @@ pub async fn ask(args: Value) -> Result<Value, String> {
 /// governance gap where `/api/orchestrator/delegate` would otherwise launch a
 /// worker pre-approval. A misheard / unknown repo is a safe no-op error: nothing
 /// is dispatched until the repo resolves to a registered path.
+fn orchestrator_dispatch_body(repo: &RepoIdentity, task: &str, args: &Value, mutation_id: &str) -> Value {
+    let mut body = json!({
+        "prompt": task,
+        "repoPath": repo.path,
+        "taskName": task.chars().take(60).collect::<String>(),
+        "clientMutationId": mutation_id,
+    });
+    if let Some(base) = args
+        .get("base_branch")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+    {
+        body["baseBranch"] = json!(base);
+    }
+    body
+}
+
 pub async fn dispatch(args: Value) -> Result<Value, String> {
     let task = args.get("task").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
     if task.is_empty() {
@@ -1019,20 +1063,15 @@ pub async fn dispatch(args: Value) -> Result<Value, String> {
     }
     let repo = canonical_repo_identity(&args).await?;
 
-    let mut body = json!({
-        "prompt": task,
-        "repoPath": repo.path,
-        "taskName": task.chars().take(60).collect::<String>(),
-    });
-    if let Some(base) = args
-        .get("base_branch")
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())
-    {
-        body["baseBranch"] = json!(base);
-    }
+    let mutation_id = format!(
+        "symon-dispatch-{}-{}-{}",
+        std::process::id(),
+        epoch_millis(),
+        PACKET_MUTATION_COUNTER.fetch_add(1, Ordering::Relaxed)
+    );
+    let body = orchestrator_dispatch_body(&repo, &task, &args, &mutation_id);
 
-    let resp = o8_http::post_json("/api/orchestrator/delegate", body).await?;
+    let resp = o8_http::post_correlated_json("/api/orchestrator/delegate", body).await?;
     let ok = resp.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
     let packet_id = resp.get("packetId").and_then(|v| v.as_str()).unwrap_or("");
     let lane_id = resp.get("laneId").and_then(|v| v.as_str()).unwrap_or("");
@@ -1308,11 +1347,8 @@ pub async fn packet_steer(args: Value) -> Result<Value, String> {
         return Err("o8_packet_steer needs a 'message'".into());
     }
     let target = exact_lane_target(&args, "packetId").await?;
-    let resp = o8_http::post_json(
-        "/api/orchestrator/steer-packet",
-        json!({ "packetId": target.packet_id, "message": message, "source": "symon" }),
-    )
-    .await?;
+    let body = packet_steer_body(&target.packet_id, message, "symon");
+    let resp = o8_http::post_correlated_json("/api/orchestrator/steer-packet", body).await?;
     if resp.get("ok").and_then(|v| v.as_bool()) == Some(false) {
         let err = resp.get("error").and_then(|v| v.as_str()).unwrap_or("o8 returned an error");
         return Err(format!("Couldn't reach packet '{}': {err}", target.packet_id));
@@ -1344,19 +1380,25 @@ pub async fn agent_task(args: Value) -> Result<Value, String> {
     }
     let (target, resp) = if has_lane {
         let target = exact_lane_target(&args, "laneId").await?;
-        let resp = o8_http::post_json(
-            "/api/lanes",
-            json!({ "verb": "send_turn", "laneId": target.lane_id, "message": task }),
+        let mutation_nonce = PACKET_MUTATION_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let resp = o8_http::post_correlated_json(
+            "/api/agent-control/action",
+            json!({
+                "ref": { "kind": "lane", "id": target.lane_id },
+                "action": { "kind": "send_turn", "message": task },
+                "clientMutationId": format!(
+                    "symon-lane-send-{}-{}-{mutation_nonce}",
+                    std::process::id(),
+                    epoch_millis()
+                ),
+            }),
         )
         .await?;
         (target, resp)
     } else {
         let target = exact_lane_target(&args, "packetId").await?;
-        let resp = o8_http::post_json(
-            "/api/orchestrator/steer-packet",
-            json!({ "packetId": target.packet_id, "message": task, "source": "symon-agent-task" }),
-        )
-        .await?;
+        let body = packet_steer_body(&target.packet_id, task, "symon-agent-task");
+        let resp = o8_http::post_correlated_json("/api/orchestrator/steer-packet", body).await?;
         (target, resp)
     };
     if resp.get("ok").and_then(|v| v.as_bool()) == Some(false) {
@@ -1387,11 +1429,8 @@ pub async fn packet_rerun(args: Value) -> Result<Value, String> {
         .unwrap_or("Retry: the previous attempt did not land. Re-read the task and try again carefully.");
     let target = exact_lane_target(&args, "packetId").await?;
 
-    let resp = o8_http::post_json(
-        "/api/orchestrator/rerun-with-feedback",
-        json!({ "packetId": target.packet_id, "feedback": feedback }),
-    )
-    .await?;
+    let body = packet_rerun_body(&target.packet_id, feedback);
+    let resp = o8_http::post_correlated_json("/api/orchestrator/rerun-with-feedback", body).await?;
     if resp.get("ok").and_then(|v| v.as_bool()) == Some(false) {
         let err = resp.get("error").and_then(|v| v.as_str()).unwrap_or("o8 returned an error");
         return Err(format!("Couldn't restart packet '{}': {err}", target.packet_id));
@@ -1411,13 +1450,27 @@ pub async fn packet_reset(args: Value) -> Result<Value, String> {
         .unwrap_or(false);
     let target = exact_lane_target(&args, "packetId").await?;
 
-    let mut body = json!({ "packetId": target.packet_id, "clearWorktree": !keep_worktree });
-    if let Some(r) = args.get("reason").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()) {
+    let mutation_nonce = PACKET_MUTATION_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let mut body = json!({
+        "packetId": target.packet_id,
+        "clearWorktree": !keep_worktree,
+        "idempotencyKey": format!(
+            "symon-reset-{}-{}-{mutation_nonce}",
+            std::process::id(),
+            epoch_millis()
+        ),
+    });
+    if let Some(r) = args
+        .get("reason")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         body["reason"] = json!(r);
     }
     // o8_http returns Err on a non-2xx, so a clean return means the lane was
     // archived (+ worktree wiped unless kept).
-    o8_http::post_json("/api/orchestrator/reset-packet", body)
+    o8_http::post_correlated_json("/api/orchestrator/reset-packet", body)
         .await
         .map_err(|e| format!("Couldn't reset packet '{}': {e}", target.packet_id))?;
     crate::agent::worker_pulse::nudge();
@@ -1439,9 +1492,18 @@ pub async fn packet_reset(args: Value) -> Result<Value, String> {
 /// resolves its packet id only for the existing packet-oriented backend endpoint.
 pub async fn stop_agent(args: Value) -> Result<Value, String> {
     let target = exact_lane_target(&args, "laneId").await?;
-    let resp = o8_http::post_json(
-        "/api/orchestrator/stop-packet",
-        json!({ "packetId": target.packet_id }),
+    let mutation_nonce = PACKET_MUTATION_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let resp = o8_http::post_correlated_json(
+        "/api/agent-control/action",
+        json!({
+            "ref": { "kind": "packet", "id": target.packet_id },
+            "action": { "kind": "terminate" },
+            "clientMutationId": format!(
+                "symon-stop-{}-{}-{mutation_nonce}",
+                std::process::id(),
+                epoch_millis()
+            ),
+        }),
     )
     .await
     .map_err(|e| format!("Couldn't stop packet '{}': {e}", target.packet_id))?;
@@ -1781,47 +1843,48 @@ pub async fn canvas_intent(verb: &str, args: Value) -> Result<Value, String> {
             CANVAS_VERBS.join(", ")
         ));
     }
+    if verb == "spawn-agents" {
+        let task = args.get("task").and_then(Value::as_str).unwrap_or("").trim();
+        let repo_path = args.get("repo").and_then(Value::as_str).unwrap_or("").trim();
+        if task.is_empty() || repo_path.is_empty() {
+            return Err("o8_canvas spawn-agents requires both task and repo".into());
+        }
+        let mutation_nonce = PACKET_MUTATION_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let response = o8_http::post_correlated_json(
+            "/api/orchestrator/spawn-prompt",
+            json!({
+                "repoPath": repo_path,
+                "task": task,
+                "count": args.get("count").and_then(Value::as_u64).unwrap_or(1),
+                "origin": "symon",
+                "clientMutationId": format!(
+                    "symon-canvas-spawn-{}-{}-{mutation_nonce}",
+                    std::process::id(),
+                    epoch_millis()
+                ),
+            }),
+        )
+        .await?;
+        if response.get("ok").and_then(Value::as_bool) != Some(true) {
+            let why = response
+                .get("error")
+                .and_then(|value| value.get("message").or(Some(value)))
+                .and_then(Value::as_str)
+                .or_else(|| response.get("note").and_then(Value::as_str))
+                .unwrap_or("the governed spawn did not settle");
+            return Err(format!("Couldn't run the canvas spawn-agents: {why}"));
+        }
+        return Ok(json!({
+            "ok": true,
+            "verb": verb,
+            "data": response,
+            "note": "spawned through the governed exact-receipt route"
+        }));
+    }
     let body = canvas_intent_body(verb, &args);
-    let spawn_probe = if verb == "spawn-agents" {
-        o8_http::get_json_timeout("/api/lanes?active=true", 2)
-            .await
-            .ok()
-            .map(|response| super::canvas_spawn_recovery::LaneSnapshot::from_response(&response))
-    } else {
-        None
-    };
     // The route SPA-navigates to the canvas and waits (≤10s) for the intent
     // listener to mount before dispatching — give it headroom past that.
-    let resp = match o8_http::post_json_timeout("/api/canvas/intent", body, 15).await {
-        Ok(response) => response,
-        Err(error) if verb == "spawn-agents" && o8_http::is_timeout_error(&error) => {
-            let task = args.get("task").and_then(Value::as_str).unwrap_or("");
-            let repo = args.get("repo").and_then(Value::as_str);
-            if let Some(before) = spawn_probe {
-                for attempt in 0..5 {
-                    if let Ok(current) = o8_http::get_json_timeout("/api/lanes?active=true", 3).await {
-                        let lane_ids = before.confirmed_spawned_lane_ids(&current, repo, task);
-                        if !lane_ids.is_empty() {
-                            return Ok(json!({
-                                "ok": true,
-                                "verb": verb,
-                                "verifiedAfterTimeout": true,
-                                "laneIds": lane_ids,
-                                "note": "spawn request timed out, but new matching lanes confirm it landed"
-                            }));
-                        }
-                    }
-                    if attempt < 4 {
-                        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
-                    }
-                }
-            }
-            return Err(format!(
-                "{error}; no new matching lane appeared, so the non-idempotent spawn was not retried"
-            ));
-        }
-        Err(error) => return Err(error),
-    };
+    let resp = o8_http::post_json_timeout("/api/canvas/intent", body, 15).await?;
 
     if resp.get("ok").and_then(|v| v.as_bool()) != Some(true) {
         // Soft page-side failure (`note`) or hard miss (`error`, e.g. the canvas
@@ -2278,6 +2341,25 @@ mod canvas_tests {
     static RECEIPT_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
     #[test]
+    fn packet_mutation_bodies_carry_fresh_correlation_ids() {
+        let steer_a = packet_steer_body("packet-a", "continue", "symon");
+        let steer_b = packet_steer_body("packet-a", "continue", "symon");
+        let rerun_a = packet_rerun_body("packet-a", "try again");
+        let rerun_b = packet_rerun_body("packet-a", "try again");
+
+        assert_eq!(steer_a["packetId"], "packet-a");
+        assert_eq!(steer_a["message"], "continue");
+        assert_eq!(steer_a["source"], "symon");
+        assert!(steer_a["idempotencyKey"].as_str().is_some());
+        assert_ne!(steer_a["idempotencyKey"], steer_b["idempotencyKey"]);
+
+        assert_eq!(rerun_a["packetId"], "packet-a");
+        assert_eq!(rerun_a["feedback"], "try again");
+        assert!(rerun_a["idempotencyKey"].as_str().is_some());
+        assert_ne!(rerun_a["idempotencyKey"], rerun_b["idempotencyKey"]);
+    }
+
+    #[test]
     fn packet_review_receipts_are_bound_short_lived_and_single_use() {
         let _guard = RECEIPT_TEST_LOCK
             .get_or_init(|| Mutex::new(()))
@@ -2582,6 +2664,27 @@ mod canvas_tests {
             "source": "symon-code",
             "sessionId": "sym-1",
             "callId": "call-1",
+        }));
+    }
+
+    #[test]
+    fn orchestrator_dispatch_body_carries_exact_scope_and_mutation() {
+        let repo = RepoIdentity {
+            id: "repo-123".into(),
+            name: "o8".into(),
+            path: "/Users/operator/o8".into(),
+        };
+        assert_eq!(orchestrator_dispatch_body(
+            &repo,
+            "Fix auth",
+            &json!({ "base_branch": "release" }),
+            "symon-dispatch-test",
+        ), json!({
+            "prompt": "Fix auth",
+            "repoPath": "/Users/operator/o8",
+            "taskName": "Fix auth",
+            "clientMutationId": "symon-dispatch-test",
+            "baseBranch": "release",
         }));
     }
 }

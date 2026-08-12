@@ -21,6 +21,8 @@
  */
 
 import { memo, useEffect, useState } from 'react';
+import { actionReceiptIsInProgress, correlatedActionIsUnsettled, fetchCorrelatedActionReceipt } from '@/lib/orchestrator/action-receipt';
+import { useCorrelatedActionLatch } from '@/components/desktop/use-correlated-action-latch';
 import type { ParkedLane } from './derive';
 
 function MergeGlyph({ size = 12, color = 'currentColor' }: { size?: number; color?: string }) {
@@ -56,7 +58,6 @@ function MergeBeaconBase({
    *  (the route already fires a realtime refresh; this is an extra hook). */
   onMerged?: (lane: ParkedLane, ok: boolean) => void;
 }) {
-  const [merging, setMerging] = useState(false);
   const [toast, setToast] = useState<{ tone: 'success' | 'fail'; message: string } | null>(null);
 
   useEffect(() => {
@@ -69,6 +70,8 @@ function MergeBeaconBase({
   const rejected = parked.filter((lane) => lane.reviewState === 'rejected');
   const needsReview = parked.filter((lane) => lane.reviewState === 'needs-review');
   const awaitingMerge = parked.filter((lane) => lane.reviewState === 'awaiting-merge');
+  const { busy, begin: beginMerge, settle: settleMerge } = useCorrelatedActionLatch<'merge'>();
+  const merging = busy === 'merge';
   if (compact || parked.length === 0) return null;
 
   const escalatedCount = escalated.length;
@@ -116,19 +119,18 @@ function MergeBeaconBase({
 
   const runMerge = async () => {
     const lane = awaitingMerge[0];
-    if (!lane || merging) return;
-    setMerging(true);
+    if (!lane || !beginMerge('merge')) return;
+    let inProgress = false;
     try {
-      const res = await fetch('/api/orchestrator/merge', {
+      const { response: res, payload: body } = await fetchCorrelatedActionReceipt<{
+        ok?: boolean;
+        result?: { merged?: boolean; status?: string; note?: string; inProgress?: boolean } | null;
+        error?: { message?: string } | null;
+      }>('/api/orchestrator/merge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packetId: lane.packetId }),
+        body: JSON.stringify({ packetId: lane.packetId, idempotencyKey: crypto.randomUUID() }),
       });
-      const body = await res.json().catch(() => null) as {
-        ok?: boolean;
-        result?: { merged?: boolean; status?: string; note?: string } | null;
-        error?: { message?: string } | null;
-      } | null;
 
       if (!res.ok || !body?.ok) {
         setToast({ tone: 'fail', message: body?.error?.message || 'Merge failed' });
@@ -136,6 +138,11 @@ function MergeBeaconBase({
         return;
       }
       const result = body.result ?? null;
+      if (actionReceiptIsInProgress(res.status, result)) {
+        inProgress = true;
+        setToast({ tone: 'success', message: result?.note || 'Merge is already in progress' });
+        return;
+      }
       if (result?.status === 'pending_operator_approval') {
         setToast({ tone: 'success', message: 'Approval raised' });
         onMerged?.(lane, true);
@@ -149,10 +156,15 @@ function MergeBeaconBase({
       setToast({ tone: 'fail', message: result?.note || 'Merge blocked' });
       onMerged?.(lane, false);
     } catch (error) {
-      setToast({ tone: 'fail', message: error instanceof Error ? error.message : 'Merge failed' });
-      onMerged?.(awaitingMerge[0], false);
+      if (correlatedActionIsUnsettled(error)) {
+        inProgress = true;
+        setToast({ tone: 'success', message: error.message });
+      } else {
+        setToast({ tone: 'fail', message: error instanceof Error ? error.message : 'Merge failed' });
+        onMerged?.(awaitingMerge[0], false);
+      }
     } finally {
-      setMerging(false);
+      settleMerge(inProgress);
     }
   };
 

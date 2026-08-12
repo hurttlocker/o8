@@ -2,6 +2,7 @@ import {
   type McpTool,
   type McpToolResult,
   apiFetch,
+  apiFetchCorrelatedMutation,
   jsonResult,
   requiredString,
   textResult,
@@ -11,10 +12,11 @@ import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilitie
 const LANE_EVENTS_MAX_LONG_POLL_MS = 12_000;
 const LANE_EVENTS_FETCH_MARGIN_MS = 2_500;
 async function steerSession(sessionKey: string, message: string): Promise<Record<string, unknown>> {
-  const result = await apiFetch('/api/runtime/action', {
-    method: 'POST',
-    body: JSON.stringify({ action: 'steer', surfaceId: sessionKey, message }),
-  }) as Record<string, unknown>;
+  const result = await apiFetchCorrelatedMutation<Record<string, unknown>>(
+    '/api/runtime/action',
+    { action: 'steer', surfaceId: sessionKey, message },
+    'clientMutationId',
+  );
   return result;
 }
 
@@ -342,14 +344,15 @@ export async function handleSend(args: Record<string, unknown>): Promise<McpTool
       result = await steerSession(sessionKey, message);
     } else {
       // Launch new task via orchestrator
-      result = await apiFetch('/api/orchestrator/delegate', {
-        method: 'POST',
-        body: JSON.stringify({
+      result = await apiFetchCorrelatedMutation<Record<string, unknown>>(
+        '/api/orchestrator/delegate',
+        {
           prompt: message,
           repoPath: args.repoPath || undefined,
           taskName: args.taskName || undefined,
-        }),
-      }) as Record<string, unknown>;
+        },
+        'clientMutationId',
+      );
     }
 
     if (result.ok === false) {
@@ -392,10 +395,14 @@ export async function handleSteerPacket(args: Record<string, unknown>): Promise<
     // #2 Stage 4: route through /api/orchestrator/steer-packet so the lane
     // resolution + status flip run in the Next process (the live registry +
     // warm-session pool), not this MCP process's stale registry instance.
-    const res = await apiFetch('/api/orchestrator/steer-packet', {
-      method: 'POST',
-      body: JSON.stringify({ packetId, message, source: 'orchestrator' }),
-    }) as { ok?: boolean; result?: Record<string, unknown> };
+    const res = await apiFetchCorrelatedMutation<{
+      ok?: boolean;
+      result?: Record<string, unknown>;
+    }>(
+      '/api/orchestrator/steer-packet',
+      { packetId, message, source: 'orchestrator' },
+      'idempotencyKey',
+    );
     return jsonResult({ ok: true, ...(res.result ?? {}) });
   } catch (err) {
     console.error(`[o8-operator] steer_packet failed: ${err}`);

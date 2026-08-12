@@ -6,6 +6,7 @@ import type { TerminalTab } from '@/components/desktop/workspace-terminal/types'
 import { shouldPollPacketTranscript, usePacketTranscriptPoll } from '@/components/desktop/workspace-terminal/use-packet-transcript-poll';
 import { useWorkspaceChatModelOptions } from '@/components/desktop/workspace-terminal/useWorkspaceChatModelOptions';
 import {
+  fetchOwnedRuntimeSteerReceipt,
   ownedRuntimeCanAcceptInput,
   shouldHoldOwnedRuntimeSteer,
 } from '@/components/desktop/workspace-terminal/owned-runtime-steer';
@@ -17,6 +18,9 @@ import {
   type WorkspaceStreamEvent,
 } from '@/components/desktop/workspace-terminal/workspace-stream-events';
 import { getRuntimeCapability, type OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
+import {
+  correlatedActionIsUnsettled,
+} from '@/lib/orchestrator/action-receipt';
 import {
   buildQueuedContextCard,
   buildWorkspaceThinkingStep,
@@ -133,7 +137,7 @@ export function useWorkspaceChatPane({
   const disableClaudeBypassPermissions = useCallback(() => setClaudeBypassPermissions(false), []);
 
   // Reads go through the transcript store; writes mirror back via `commitMessages`.
-  const transcriptSlice = useTranscript(normalizedSessionKey);
+  const transcriptSlice = useTranscript(normalizedSessionKey, { live: active });
   const fallbackMessages = useMemo(() => tab.chatMessages ?? [], [tab.chatMessages]);
   const messages = useMemo(() => {
     if (normalizedSessionKey && transcriptSlice.status !== 'idle') {
@@ -244,26 +248,19 @@ export function useWorkspaceChatPane({
     };
   }, [active, isOwnedRuntimeBound, normalizedSessionKey, pendingSteers.length, refreshOwnedSessionReady]);
 
-  // Load on mount, re-load on activation, and poll only while this tab is active
-  // and the supervisor is running. Hidden tabs must not hold transcript polls.
+  // Seed once on session bind. Visible panes stay current through the shared
+  // realtime subscription; reconnect requests a fresh server bootstrap.
   useEffect(() => {
     if (!normalizedSessionKey) return undefined;
     const controller = new AbortController();
-    const run = (refetchFresh = false) => bootstrapTranscripts([normalizedSessionKey], {
+    void bootstrapTranscripts([normalizedSessionKey], {
       merge: mergeTranscriptEntries,
       signal: controller.signal,
-      refetchFresh,
     });
-    void run();
-    let interval: number | undefined;
-    if (active && supervisorActive) {
-      interval = window.setInterval(() => { void run(true); }, 3000);
-    }
     return () => {
       controller.abort();
-      if (interval !== undefined) window.clearInterval(interval);
     };
-  }, [normalizedSessionKey, active, supervisorActive]);
+  }, [normalizedSessionKey]);
 
   const sendText = useCallback(async (inputText: string, options?: {
     baseMessages?: MobileTranscriptEntry[];
@@ -308,6 +305,7 @@ export function useWorkspaceChatPane({
     let streamController: AbortController | null = null;
     let pendingAssistantId: string | null = null;
     let ownedDeliveryAccepted = false;
+    let ownedDeliveryUnsettled = false;
 
     try {
       const composedMessage = [buildLinkedIssueContext(linkedIssue), text].filter(Boolean).join('\n\n');
@@ -333,23 +331,11 @@ export function useWorkspaceChatPane({
         // the generic /api/runtime/action verb — the owned-session-store
         // injects the message into the live CLI process. Same pattern for
         // codex, gemini, and opencode since they share the primitive.
-        if (isOwnedCliRuntimeSession(normalizedSessionKey)) {
-          const res = await fetch('/api/runtime/action', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              action: 'steer',
-              surfaceId: normalizedSessionKey,
-              message: composedMessage,
-            }),
-          });
-          const payload = await res.json().catch(() => null) as {
-            ok?: boolean;
-            note?: string;
-            error?: string;
-            retryable?: boolean;
-            reason?: string;
-          } | null;
+        if (normalizedSessionKey && isOwnedCliRuntimeSession(normalizedSessionKey)) {
+          const { response: res, payload } = await fetchOwnedRuntimeSteerReceipt(
+            normalizedSessionKey,
+            composedMessage,
+          );
           if (shouldHoldOwnedRuntimeSteer(res.ok, payload)) {
             setOwnedSessionReady(false);
             queuePendingSteer(text);
@@ -686,6 +672,20 @@ export function useWorkspaceChatPane({
         }
         return;
       }
+      if (ownedRuntimeAction && correlatedActionIsUnsettled(err)) {
+        ownedDeliveryUnsettled = true;
+        commitMessages([
+          ...baseMessages,
+          {
+            id: `msg-${Date.now()}-pending`,
+            role: 'assistant',
+            text: err.message,
+            timestamp: Date.now(),
+            timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          },
+        ]);
+        return;
+      }
       if (ownedRuntimeAction) {
         setDraft((current) => current.trim() ? current : text);
         commitMessages([
@@ -712,7 +712,7 @@ export function useWorkspaceChatPane({
       ]);
     } finally {
       if (streamController) streamRequest.finish(streamController);
-      setSending(false);
+      if (!ownedDeliveryUnsettled) setSending(false);
       setAgentRunning(false);
       setLiveAssistantId(null);
       setStreamingText('');

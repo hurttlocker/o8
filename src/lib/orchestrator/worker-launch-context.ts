@@ -6,6 +6,13 @@ const PRESENTATIONS = new Set<WorkerLaunchContext['presentation']>(['tab', 'spli
 const REPO_CONTEXTS = new Set<WorkerLaunchContext['repoContext']>(['registered', 'transient']);
 const WORK_MODES = new Set<NonNullable<WorkerLaunchContext['workMode']>>(['edit', 'read-only']);
 const MAX_CALLER_LENGTH = 80;
+const MAX_PLACEMENT_ID_LENGTH = 200;
+
+function normalizePlacementId(value: unknown): string {
+  return typeof value === 'string'
+    ? value.trim().slice(0, MAX_PLACEMENT_ID_LENGTH)
+    : '';
+}
 
 export function normalizeWorkerLaunchContext(value: unknown): WorkerLaunchContext | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
@@ -23,12 +30,37 @@ export function normalizeWorkerLaunchContext(value: unknown): WorkerLaunchContex
   const caller = typeof candidate.caller === 'string'
     ? candidate.caller.trim().slice(0, MAX_CALLER_LENGTH)
     : '';
+  const parentWorkspaceId = normalizePlacementId(candidate.parentWorkspaceId);
+  const parentThreadId = normalizePlacementId(candidate.parentThreadId);
   return {
     source: source as WorkerLaunchContext['source'],
     presentation: presentation as WorkerLaunchContext['presentation'],
     repoContext: repoContext as WorkerLaunchContext['repoContext'],
     ...(workMode ? { workMode: workMode as NonNullable<WorkerLaunchContext['workMode']> } : {}),
     ...(caller ? { caller } : {}),
+    ...(parentWorkspaceId ? { parentWorkspaceId } : {}),
+    ...(parentThreadId ? { parentThreadId } : {}),
+  };
+}
+
+/**
+ * Bind a launch to its durable parent thread without overwriting an explicit
+ * placement supplied by the caller. This is used at mission persistence and
+ * again at dispatch so older stored packets gain the same reconnect behavior.
+ */
+export function bindWorkerLaunchParent(
+  context: WorkerLaunchContext | null | undefined,
+  parent: { workspaceId?: string | null; threadId?: string | null },
+): WorkerLaunchContext | undefined {
+  if (!context) return undefined;
+  const parentWorkspaceId = context.parentWorkspaceId?.trim()
+    || normalizePlacementId(parent.workspaceId);
+  const parentThreadId = context.parentThreadId?.trim()
+    || normalizePlacementId(parent.threadId);
+  return {
+    ...context,
+    ...(parentWorkspaceId ? { parentWorkspaceId } : {}),
+    ...(parentThreadId ? { parentThreadId } : {}),
   };
 }
 

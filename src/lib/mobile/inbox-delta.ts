@@ -1,6 +1,6 @@
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
-
-export const MOBILE_INBOX_DELTA_CAPABILITY = 'mobile-inbox-delta-v1' as const;
+import type { RealtimeRevision } from '@/lib/realtime/generated-contract';
+export { MOBILE_INBOX_DELTA_CAPABILITY } from '@/lib/realtime/generated-contract';
 
 type InboxCollectionKey =
   | 'sessions'
@@ -18,7 +18,7 @@ export interface MobileInboxEntityDelta<T extends InboxEntity> {
   order: string[];
 }
 
-export interface MobileInboxDelta {
+export interface MobileInboxDelta extends RealtimeRevision {
   protocol: 1;
   baseRevision: number;
   revision: number;

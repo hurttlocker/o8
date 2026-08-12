@@ -15,7 +15,13 @@ import {
   isDispatchableRuntime,
 } from '@/lib/orchestrator/runtime-capabilities';
 import { assertRuntimeDispatchable, DispatchPreflightError } from '@/lib/runtimes/shared/auth-detect';
-import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
+import { findMissionByCreationMutationId } from '@/lib/orchestrator/create-mission-receipt';
+import {
+  bindIdempotencyClientMutation,
+  deriveIdempotencyKey,
+  withIdempotency,
+} from '@/lib/orchestrator/idempotency-store';
+import { asRecord, operatorError, operatorSuccess, parseJsonBody, unresolvedIdempotencyResponse } from '../_utils';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -51,6 +57,12 @@ export async function POST(request: NextRequest) {
   const task = typeof record.task === 'string' ? record.task.trim() : '';
   if (!task) {
     return operatorError('invalid_request', 'task is required.', 400);
+  }
+  const clientMutationId = typeof record.clientMutationId === 'string'
+    ? record.clientMutationId.trim()
+    : '';
+  if (!clientMutationId) {
+    return operatorError('client_mutation_id_required', 'clientMutationId is required.', 400);
   }
 
   const requestedRuntimeRaw = record.requestedRuntime ?? record.runtime;
@@ -88,7 +100,7 @@ export async function POST(request: NextRequest) {
     model: workerRouting.selectedModel,
   });
   try {
-    await assertRuntimeDispatchable(workerRouting.selectedRuntime);
+    await assertRuntimeDispatchable(workerRouting.selectedRuntime, workerRouting.selectedModel, repoPath);
   } catch (error) {
     if (error instanceof DispatchPreflightError) {
       return operatorError(error.code, `${error.status.detail} ${error.status.fix}`, 400, {
@@ -111,8 +123,7 @@ export async function POST(request: NextRequest) {
     return operatorError('invalid_request', message, 400);
   }
 
-  try {
-    const mission = await createMission({
+  const createInput = {
       issues,
       repoPath,
       runtime: workerRouting.selectedRuntime,
@@ -123,17 +134,74 @@ export async function POST(request: NextRequest) {
       constraints: typeof record.constraints === 'string' ? record.constraints : '',
       ...(typeof record.useBrain === 'boolean' ? { useBrain: record.useBrain } : {}),
       huddle,
-    });
-
+  };
+  const canonicalBody = JSON.stringify({ ...createInput, origin: record.origin === 'symon' ? 'symon' : null });
+  const binding = bindIdempotencyClientMutation({
+    namespace: 'spawn_prompt',
+    clientKey: clientMutationId,
+    body: canonicalBody,
+  });
+  if (binding.status === 'conflict') {
+    return operatorError('idempotency_conflict', 'clientMutationId was used for another spawn.', 409);
+  }
+  if (binding.status === 'unavailable') {
+    return operatorError('idempotency_unavailable', 'The spawn receipt store is unavailable.', 503);
+  }
+  const creationMutationId = `${clientMutationId}:mission`;
+  const finishSpawn = async (mission: Awaited<ReturnType<typeof createMission>>) => {
     const dispatch = await dispatchMission({ missionId: mission.missionId });
-
-    const packetIds = mission.packets.map((packet) => packet.id);
-    return operatorSuccess({
+    return {
       ...mission,
       ...dispatch,
-      packetIds,
+      packetIds: mission.packets.map((packet) => packet.id),
       ...(record.origin === 'symon' ? { origin: 'symon' } : {}),
-    }, 201);
+    };
+  };
+  try {
+    const outcome = await withIdempotency({
+      key: deriveIdempotencyKey({
+        verb: 'spawn_prompt',
+        scopeId: repoPath,
+        clientKey: clientMutationId,
+        body: canonicalBody,
+      }),
+      verb: 'spawn_prompt',
+      scopeId: repoPath,
+      reconcileUnresolved: async () => {
+        const missionState = findMissionByCreationMutationId(creationMutationId);
+        if (!missionState?.creationReceipt) return null;
+        return finishSpawn(missionState.creationReceipt);
+      },
+    }, async () => {
+      const mission = await createMission({ ...createInput, clientMutationId: creationMutationId });
+      try {
+        return await finishSpawn(mission);
+      } catch (error) {
+        return {
+          ...mission,
+          packetIds: mission.packets.map((packet) => packet.id),
+          ok: false,
+          outcomeUnknown: true,
+          note: error instanceof Error ? error.message : 'Spawn dispatch outcome is unknown.',
+        };
+      }
+    });
+    if (outcome.inProgress) {
+      const unresolved = unresolvedIdempotencyResponse(outcome, 'agent spawn');
+      if (unresolved) return unresolved;
+    }
+    if ('outcomeUnknown' in outcome.result && outcome.result.outcomeUnknown === true) {
+      return operatorError(
+        'spawn_outcome_unknown',
+        outcome.result.note,
+        409,
+      );
+    }
+    return operatorSuccess({
+      ...outcome.result,
+      replayed: outcome.replayed || undefined,
+      inProgress: outcome.inProgress || undefined,
+    }, outcome.inProgress ? 202 : 201);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to spawn agents.';
     return operatorError('spawn_prompt_failed', message, 500, error);

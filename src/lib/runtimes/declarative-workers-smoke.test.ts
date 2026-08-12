@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
+  existsSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -11,6 +12,7 @@ import path from 'node:path';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
 import type { DispatchBackendWaitResult } from '@/lib/runtimes/shared/dispatch-readiness';
+import { archiveRootForOwnedSessionRoot } from '@/lib/runtimes/shared/owned-session/archive';
 import type { OwnedSessionRecord } from '@/lib/runtimes/shared/owned-session';
 import {
   getRuntimeCapability,
@@ -36,6 +38,12 @@ writeFileSync(fixtureBinary, `#!/usr/bin/env node
 const runtime = process.env.O8_SMOKE_RUNTIME || 'fixture-cli';
 const profile = process.env.O8_SMOKE_PARSER_PROFILE || 'fixture';
 const args = process.argv.slice(2).join(' ');
+if (process.env.O8_SMOKE_HANG === '1') {
+  process.stdout.write(JSON.stringify({ type: 'init', session_id: 'thread-' + runtime }) + '\\n');
+  process.stdout.write(JSON.stringify({ type: 'message', content: runtime + ' running' }) + '\\n');
+  process.on('SIGINT', () => {});
+  setInterval(() => {}, 1000);
+} else
 if (profile === 'openhands-ndjson') {
   process.stdout.write(JSON.stringify({ type: 'conversation_started', conversation_id: 'thread-' + runtime }) + '\\n');
   process.stdout.write(JSON.stringify({ type: 'assistant_message', content: runtime + ' smoke complete' }) + '\\n');
@@ -174,6 +182,68 @@ describe('declarative worker real-process smoke matrix', () => {
     expect(transcript.map((entry) => entry.text).join('\n')).toContain('launch first turn');
     expect(transcript.map((entry) => entry.text).join('\n')).toContain('resume thread-fixture second turn');
   }, 20_000);
+
+  it('confirms and archives a live declarative worker through the shared lane lifecycle', async () => {
+    process.env.O8_SMOKE_RUNTIME = 'qwen';
+    process.env.O8_SMOKE_PARSER_PROFILE = 'qwen-stream-json';
+    process.env.O8_SMOKE_HANG = '1';
+    try {
+      const runtime = runtimeById('qwen');
+      const launch = await runtime.launch({ cwd: repoPath, prompt: 'live lifecycle proof' });
+      const sessionKey = launch.sessionKey!;
+      const root = process.env.O8_OWNED_QWEN_ROOT!;
+      const record = await waitForActiveRun(root, sessionKey);
+      expect(record.activeRun).toMatchObject({
+        pid: expect.any(Number),
+        commandIdentity: path.basename(fixtureBinary),
+      });
+      await waitForTranscriptText(runtime, sessionKey, 'qwen running');
+
+      const { createLane } = await import('@/lib/lane/registry');
+      const { archiveLaneSessionsConfirmed, killLaneSessionsConfirmed } = await import('@/lib/lane/reap-sessions');
+      const lane = createLane({
+        repoPath,
+        branch: 'test/declarative-lifecycle',
+        runtime: 'qwen',
+        sessionKey,
+      });
+      const killed = await killLaneSessionsConfirmed([lane]);
+      expect(killed).toEqual([
+        expect.objectContaining({ sessionKey, confirmed: true, alreadyDead: false }),
+      ]);
+
+      const archived = await archiveLaneSessionsConfirmed([lane]);
+      expect(archived).toMatchObject({ targeted: 1, archived: 1, failures: [] });
+      expect(await runtime.readTranscript(sessionKey)).toEqual(expect.arrayContaining([
+        expect.objectContaining({ text: 'qwen running' }),
+      ]));
+
+      delete process.env.O8_SMOKE_HANG;
+      const mergedLaunch = await runtime.launch({ cwd: repoPath, prompt: 'merged lifecycle proof' });
+      const mergedSessionKey = mergedLaunch.sessionKey!;
+      await waitForCleanExit(root, mergedSessionKey, 'launch');
+      await waitForFinishedSession(runtime, mergedSessionKey, 'launch');
+      const mergedLane = createLane({
+        repoPath,
+        branch: 'test/declarative-post-merge',
+        runtime: 'qwen',
+        sessionKey: mergedSessionKey,
+      });
+      const { archiveLane } = await import('@/lib/lane/registry');
+      const { postMergeCleanup } = await import('@/lib/orchestrator/operator-mission-service/post-merge-cleanup');
+      archiveLane(mergedLane.id);
+
+      await postMergeCleanup({ ...mergedLane, actualBranch: null });
+
+      const mergedSessionId = mergedSessionKey.slice(mergedSessionKey.indexOf(':') + 1);
+      const { readPersistedSessionCost } = await import('@/lib/orchestrator/cost-persistence');
+      expect(readPersistedSessionCost(mergedSessionKey)).not.toBeNull();
+      expect(existsSync(path.join(root, mergedSessionId))).toBe(false);
+      expect(existsSync(path.join(archiveRootForOwnedSessionRoot(root), mergedSessionId))).toBe(true);
+    } finally {
+      delete process.env.O8_SMOKE_HANG;
+    }
+  }, 20_000);
 });
 
 function runtimeById(runtimeId: string): AgentRuntime {
@@ -200,6 +270,34 @@ async function waitForCleanExit(
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error(`timed out waiting for ${mode} child exit on ${sessionKey}`);
+}
+
+async function waitForActiveRun(root: string, sessionKey: string): Promise<OwnedSessionRecord> {
+  const sessionId = sessionKey.slice(sessionKey.indexOf(':') + 1);
+  const sessionPath = path.join(root, sessionId, 'session.json');
+  for (let attempt = 0; attempt < 500; attempt += 1) {
+    try {
+      const session = JSON.parse(readFileSync(sessionPath, 'utf8')) as OwnedSessionRecord;
+      if (session.activeRun?.pid) return session;
+    } catch {
+      // The detached runner writes the session record asynchronously.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`timed out waiting for active run on ${sessionKey}`);
+}
+
+async function waitForTranscriptText(
+  runtime: AgentRuntime,
+  sessionKey: string,
+  text: string,
+): Promise<void> {
+  for (let attempt = 0; attempt < 500; attempt += 1) {
+    const transcript = await runtime.readTranscript(sessionKey);
+    if (transcript.some((entry) => entry.text.includes(text))) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`timed out waiting for transcript output on ${sessionKey}`);
 }
 
 async function waitForFinishedSession(

@@ -5,11 +5,11 @@
  * reserve→finalize store. The in-memory cache deliberately forgot in-flight
  * merges on restart so the operator could retry immediately; the persisted store
  * must NOT regress that. It stamps the owning pid on each reservation and, on DB
- * init, reaps reservations whose owner is dead — so:
+ * init, quarantines reservations whose owner is dead — so:
  *
  *   1. a LIVE in-flight duplicate is still deduped (no double merge), but
- *   2. a restart-interrupted merge (reserving process died) becomes immediately
- *      retryable rather than being stuck behind a phantom reservation forever.
+ *   2. a restart-interrupted merge (reserving process died) remains guarded and
+ *      reports an unknown outcome instead of risking a second merge.
  *
  * We do NOT unit-test the store in isolation — we POST the real route, hold a
  * call "in flight" via a deferred, and simulate a restart by tampering the row's
@@ -95,14 +95,47 @@ async function json(res: Response): Promise<Record<string, unknown>> {
 describe('merge idempotency + reservation-reaper — through the real merge route', () => {
   beforeEach(() => h.state.reset());
 
+  it('requires per-invocation correlation before entering the merge gate', async () => {
+    const response = await merge.POST(post({ packetId: 'pkt-merge-no-key' }));
+    expect(response.status).toBe(400);
+    expect(await json(response)).toMatchObject({
+      ok: false,
+      error: { code: 'idempotency_key_required' },
+    });
+    expect(h.state.calls).toBe(0);
+  });
+
+  it('refuses reuse of a correlation key with changed merge intent', async () => {
+    const first = await merge.POST(post({
+      packetId: 'pkt-merge-bound',
+      commitMessage: 'first message',
+      idempotencyKey: 'merge-bound-key',
+    }));
+    expect(first.status).toBe(200);
+
+    const conflict = await merge.POST(post({
+      packetId: 'pkt-merge-bound',
+      commitMessage: 'different message',
+      idempotencyKey: 'merge-bound-key',
+    }));
+    expect(conflict.status).toBe(409);
+    expect(await json(conflict)).toMatchObject({
+      ok: false,
+      error: { code: 'idempotency_key_conflict' },
+    });
+    expect(h.state.calls).toBe(1);
+  });
+
   it('a LIVE in-flight duplicate is deduped (no second merge)', async () => {
-    const body = { packetId: 'pkt-merge-live', commitMessage: 'ship it' };
+    const body = { packetId: 'pkt-merge-live', commitMessage: 'ship it', idempotencyKey: 'merge-live' };
     h.state.arm();
 
     const firstPromise = merge.POST(post(body)); // reserves (pid=this proc), blocks
     await new Promise((r) => setTimeout(r, 25));
 
-    const dup = await json(await merge.POST(post(body)));
+    const duplicateResponse = await merge.POST(post(body));
+    expect(duplicateResponse.status).toBe(202);
+    const dup = await json(duplicateResponse);
     expect((dup.result as Record<string, unknown>).replayed).toBe(true);
     expect((dup.result as Record<string, unknown>).inProgress).toBe(true);
     expect((dup.result as Record<string, unknown>).status).toBe('in_progress');
@@ -114,8 +147,8 @@ describe('merge idempotency + reservation-reaper — through the real merge rout
     expect(h.state.calls).toBe(1);
   });
 
-  it('a restart-interrupted merge (dead owner pid) is immediately retryable', async () => {
-    const body = { packetId: 'pkt-merge-restart', commitMessage: 'address review' };
+  it('holds a restart-interrupted merge with an unknown outcome', async () => {
+    const body = { packetId: 'pkt-merge-restart', commitMessage: 'address review', idempotencyKey: 'merge-restart' };
     h.state.arm();
 
     const firstPromise = merge.POST(post(body)); // reserves (pid=this proc), blocks
@@ -123,29 +156,34 @@ describe('merge idempotency + reservation-reaper — through the real merge rout
 
     // Simulate the owning process crashing mid-merge: point the reservation at a
     // guaranteed-dead pid, then drop the DB singleton (== process restart). The
-    // next route call re-opens the SAME file and the init-time reaper should
-    // release the orphaned reservation.
+    // next route call re-opens the SAME file and init-time recovery should
+    // quarantine, rather than delete, the orphaned reservation.
     const deadPid = 2_147_483_600; // absurdly high — never a live pid
     getSqlite()
       .prepare('UPDATE idempotency_keys SET pid = ? WHERE result_json IS NULL')
       .run(deadPid);
     closeDb();
 
-    const afterRestart = await json(await merge.POST(post(body)));
-    // Executed fresh — NOT told "in progress", NOT a phantom-reservation stall.
-    expect((afterRestart.result as Record<string, unknown>).inProgress).toBeUndefined();
-    expect((afterRestart.result as Record<string, unknown>).status).not.toBe('in_progress');
-    expect((afterRestart.result as Record<string, unknown>).merged).toBe(true);
-    expect(h.state.calls).toBe(2); // the retry actually merged
+    const afterRestartResponse = await merge.POST(post(body));
+    const afterRestart = await json(afterRestartResponse);
+    expect(afterRestartResponse.status).toBe(409);
+    expect(afterRestart).toMatchObject({
+      ok: false,
+      error: {
+        code: 'outcome_unknown',
+        message: expect.stringContaining('remains quarantined'),
+      },
+    });
+    expect(h.state.calls).toBe(1);
 
     // Drain the original (now-orphaned) call so no promise dangles.
     h.state.resolveNext(undefined);
     await firstPromise.catch(() => undefined);
   });
 
-  it('archiving the packet clears its live reservation without letting the stale call overwrite the retry', async () => {
+  it('archiving the packet preserves its live reservation until the owner finalizes', async () => {
     const packetId = 'pkt-merge-archived-terminal';
-    const body = { packetId, commitMessage: 'retry after terminal cleanup' };
+    const body = { packetId, commitMessage: 'retry after terminal cleanup', idempotencyKey: 'merge-terminal' };
     const lane = createLane({
       repoPath: dataDir,
       branch: 'inline/idempotency-terminal',
@@ -160,14 +198,14 @@ describe('merge idempotency + reservation-reaper — through the real merge rout
     await new Promise((resolve) => setTimeout(resolve, 25));
     expect(archiveLane(lane.id, 'system')?.status).toBe('archived');
 
-    const retry = await json(await merge.POST(post(body)));
-    expect((retry.result as Record<string, unknown>).inProgress).toBeUndefined();
-    expect((retry.result as Record<string, unknown>).run).toBe(2);
+    const duplicate = await json(await merge.POST(post(body)));
+    expect((duplicate.result as Record<string, unknown>).inProgress).toBe(true);
+    expect(h.state.calls).toBe(1);
 
     h.state.resolveNext(undefined);
     await firstPromise;
     const replay = await json(await merge.POST(post(body)));
-    expect((replay.result as Record<string, unknown>).run).toBe(2);
+    expect((replay.result as Record<string, unknown>).run).toBe(1);
     expect((replay.result as Record<string, unknown>).replayed).toBe(true);
   });
 });

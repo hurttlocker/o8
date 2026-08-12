@@ -30,6 +30,7 @@ import { ensureV19DocDistillStateSchema } from '@/lib/db/v19-doc-distill-state-m
 import { ensureV20FactsEmbeddingSchema } from '@/lib/db/v20-facts-embedding-migration';
 import { ensureV35UnifiedSearchSchema } from '@/lib/db/v35-unified-search-migration';
 import { ensureV36HarnessSchema } from '@/lib/db/v36-harness-migration';
+import { quarantineDeadIdempotencyReservations } from '@/lib/db/idempotency-reservation-recovery';
 import { DEFAULT_PROJECT_ID } from '@/lib/repos/projects';
 // ── Data directory ──
 migrateDataDirOnce();
@@ -233,46 +234,7 @@ function ensureIdempotencyKeysTable(sqlite: Database.Database): void {
   if (!tableColumnExists(sqlite, 'idempotency_keys', 'reservation_id')) {
     addColumnTolerant(sqlite, 'ALTER TABLE idempotency_keys ADD COLUMN reservation_id TEXT');
   }
-  reapDeadIdempotencyReservations(sqlite);
-}
-
-/** True when the OS process `pid` is still alive (kill(pid,0) doesn't ESRCH). */
-function isPidAlive(pid: number | null | undefined): boolean {
-  if (!pid || !Number.isFinite(pid)) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    // An elevated Windows worker can deny this query to a non-elevated server;
-    // EPERM still means the process exists, so its reservation must survive.
-    if ((error as NodeJS.ErrnoException)?.code === 'EPERM') return true;
-    return false;
-  }
-}
-
-/**
- * Release in-flight reservations (result_json NULL) whose owning process is
- * dead. Finalized rows (result_json set) are legitimate replay caches and MUST
- * survive to their TTL so a post-restart duplicate still replays the SUCCESS —
- * only orphaned reservations are reaped. Runs on every connection open, so a
- * process restart makes a restart-interrupted merge immediately retryable.
- */
-function reapDeadIdempotencyReservations(sqlite: Database.Database): void {
-  try {
-    const orphans = sqlite
-      .prepare('SELECT key, pid FROM idempotency_keys WHERE result_json IS NULL AND pid IS NOT NULL')
-      .all() as Array<{ key: string; pid: number }>;
-    const dead = orphans.filter((row) => !isPidAlive(row.pid)).map((row) => row.key);
-    if (dead.length === 0) return;
-    const del = sqlite.prepare('DELETE FROM idempotency_keys WHERE key = ?');
-    const tx = sqlite.transaction((keys: string[]) => {
-      for (const key of keys) del.run(key);
-    });
-    tx(dead);
-    console.log(`[db] Reaped ${dead.length} idempotency reservation(s) from dead process(es)`);
-  } catch (error) {
-    console.warn('[db] idempotency reservation reap failed:', error instanceof Error ? error.message : error);
-  }
+  quarantineDeadIdempotencyReservations(sqlite);
 }
 
 /**

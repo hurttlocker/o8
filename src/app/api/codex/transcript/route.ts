@@ -180,7 +180,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const tail = await getCodexRuntimeTail(runtimeKey);
+    const tail = await getCodexRuntimeTail(runtimeKey, limit);
     const transcript = buildTranscript(tail.entries ?? []).slice(-Math.max(Number.isFinite(limit) ? limit : 50, 1));
 
     return NextResponse.json(

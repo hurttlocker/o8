@@ -34,6 +34,7 @@ interface RuntimeInventoryResponse {
 interface RuntimeTelemetryResponse {
   telemetry?: {
     totalTokens?: number | null;
+    contextTokens?: number | null;
     estimatedCostUsd?: number | null;
     model?: string | null;
   };
@@ -84,8 +85,14 @@ export async function refreshOrchestratorTokenTelemetry(
     }
 
     const payload = await response.json() as RuntimeTelemetryResponse;
-    const totalTokens = typeof payload.telemetry?.totalTokens === 'number'
-      ? Math.max(0, Math.min(ORCHESTRATOR_CONTEXT_LIMIT, payload.telemetry.totalTokens))
+    // Runtime totalTokens is the billable rollup and may include native child
+    // work. Auto-compact and the context meter use only the tokens that entered
+    // this parent session's own window.
+    const rawContextTokens = typeof payload.telemetry?.contextTokens === 'number'
+      ? payload.telemetry.contextTokens
+      : payload.telemetry?.totalTokens;
+    const totalTokens = typeof rawContextTokens === 'number'
+      ? Math.max(0, Math.min(ORCHESTRATOR_CONTEXT_LIMIT, rawContextTokens))
       : null;
     const estimatedCostUsd = typeof payload.telemetry?.estimatedCostUsd === 'number'
       ? payload.telemetry.estimatedCostUsd

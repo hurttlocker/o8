@@ -400,7 +400,7 @@ export function useWorkspaceTerminalController(
         if (idx < 0) return previous;
         if (previous[idx]!.orchestratorThreadId === threadId) return previous;
         const next = [...previous];
-        next[idx] = { ...next[idx]!, orchestratorThreadId: threadId };
+        next[idx] = { ...next[idx]!, orchestratorThreadId: threadId, outsideWorkerHost: undefined };
         tabsRef.current = next;
         return next;
       });
@@ -540,13 +540,12 @@ export function useWorkspaceTerminalController(
     setActiveTabIdFromUser(newTab.id);
     return newTab.id;
   }, [createDefaultChatTab, setActiveTabIdFromUser]);
-
-  const spawnOrchestratorTab = useCallback((repoOverride?: RegisteredRepo | null): string => {
+  const spawnOrchestratorTab = useCallback((repoOverride?: RegisteredRepo | null, forceFresh = false, outsideWorkerHost = false): string => {
     // "+ New session → Orchestrator" — before minting yet another empty
     // Orchestrator tab, look for one the operator already has open with
     // no attached thread, no packet, and no draft. Focus it instead.
     // Mirrors the chat-side `isEmptyLlmChatTab` reuse in computeLlmChatSession.
-    const emptyExisting = tabsRef.current.find(isReusableBlankOrchestratorTab);
+    const emptyExisting = forceFresh ? undefined : tabsRef.current.find(isReusableBlankOrchestratorTab);
     if (emptyExisting) {
       // Reused blank tabs resolve the same repo as a fresh spawn, so they
       // cannot retain a stale project after the sidebar selection changes.
@@ -572,13 +571,14 @@ export function useWorkspaceTerminalController(
       fresh: true,
       repoOverride: repoOverride ?? deriveNewOrchestratorRepo(tabsRef.current, effectiveActiveTabIdRef.current, selectedRepoRef.current, preferredRepoRef.current),
     });
+    if (outsideWorkerHost) newTab.outsideWorkerHost = true;
     const nextTabs = [...tabsRef.current, newTab];
     tabsRef.current = nextTabs;
     setTabs(nextTabs);
     setActiveTabIdFromUser(newTab.id);
     recordSpawnEvent(`orchestrator:fresh tab=${newTab.id} scope=${stateScope} tabs=${nextTabs.length}`);
     return newTab.id;
-  }, [createDefaultOrchestratorTab, setActiveTabIdFromUser]);
+  }, [createDefaultOrchestratorTab, setActiveTabIdFromUser, stateScope]);
 
   const spawnFleetCanvasTab = useCallback((): string => {
     // One fleet canvas per workspace is enough — focus the existing tab

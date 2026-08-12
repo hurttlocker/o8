@@ -1,0 +1,260 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "contract": "o8-realtime",
+  "schemaVersion": 1,
+  "protocol": {
+    "current": 1,
+    "minimumSupported": 1,
+    "versions": [
+      {
+        "version": 1,
+        "introduced": "2026-08-12",
+        "compatibility": "Messages are append-only. Unknown optional events and fields must be ignored."
+      }
+    ]
+  },
+  "clientKinds": ["desktop", "mobile", "web", "test"],
+  "streams": ["global", "session:${string}"],
+  "deliveryModes": ["live", "replay", "bootstrap"],
+  "healthStates": ["live", "warming", "stale", "degraded"],
+  "sharedShapes": {
+    "cursor": {
+      "typeDeclaration": "RealtimeCursor",
+      "compatibility": "Sequence cursors are monotonic only within their opaque server epoch."
+    },
+    "gap": {
+      "typeDeclaration": "RealtimeGapDescriptor",
+      "compatibility": "A gap requires a checkpoint snapshot before later deltas are applied."
+    },
+    "snapshot": {
+      "typeDeclaration": "RealtimeSnapshotDescriptor",
+      "compatibility": "capturedSeq prevents an asynchronously assembled snapshot from overwriting newer events."
+    },
+    "revision": {
+      "typeDeclaration": "RealtimeRevision",
+      "compatibility": "A delta applies only when baseRevision equals the client's last accepted revision."
+    },
+    "health": {
+      "typeDeclaration": "RealtimeHealthDescriptor",
+      "compatibility": "Unknown future health states must degrade to stale rather than crash."
+    }
+  },
+  "typeDeclarations": [
+    {
+      "kind": "interface",
+      "name": "RealtimeProtocolRange",
+      "fields": [
+        { "name": "min", "type": "number" },
+        { "name": "max", "type": "number" }
+      ]
+    },
+    {
+      "kind": "interface",
+      "name": "RealtimeClientHello",
+      "fields": [
+        { "name": "type", "type": "'realtime-negotiate'" },
+        { "name": "protocol", "type": "RealtimeProtocolRange" },
+        { "name": "appVersion", "type": "string" },
+        { "name": "clientKind", "type": "RealtimeClientKind" },
+        { "name": "capabilities", "type": "RealtimeOptionalFeature[]" },
+        { "name": "requiredCapabilities", "type": "RealtimeOptionalFeature[]", "optional": true }
+      ]
+    },
+    {
+      "kind": "interface",
+      "name": "RealtimeServerWelcomeData",
+      "fields": [
+        { "name": "protocol", "type": "RealtimeProtocolVersion" },
+        { "name": "serverVersion", "type": "string" },
+        { "name": "epoch", "type": "string", "optional": true, "comment": "Opaque lifetime of the server-side sequence stream." },
+        { "name": "features", "type": "RealtimeOptionalFeature[]" },
+        { "name": "legacyFallback", "type": "typeof REALTIME_LEGACY_SUBSCRIPTION" }
+      ]
+    },
+    {
+      "kind": "interface",
+      "name": "RealtimeServerWelcomeMessage",
+      "fields": [
+        { "name": "channel", "type": "'realtime'" },
+        { "name": "event", "type": "'welcome'" },
+        { "name": "data", "type": "RealtimeServerWelcomeData" }
+      ]
+    },
+    {
+      "kind": "interface",
+      "name": "RealtimeServerIncompatibleData",
+      "fields": [
+        { "name": "reason", "type": "string" },
+        { "name": "updateRequired", "type": "true" },
+        { "name": "supportedProtocol", "type": "RealtimeProtocolRange" },
+        { "name": "serverVersion", "type": "string" }
+      ]
+    },
+    {
+      "kind": "interface",
+      "name": "RealtimeServerIncompatibleMessage",
+      "fields": [
+        { "name": "channel", "type": "'realtime'" },
+        { "name": "event", "type": "'incompatible'" },
+        { "name": "data", "type": "RealtimeServerIncompatibleData" }
+      ]
+    },
+    {
+      "kind": "interface",
+      "name": "RealtimeSubscription",
+      "fields": [
+        { "name": "stream", "type": "RealtimeStreamKey" },
+        { "name": "epoch", "type": "string", "optional": true, "comment": "Epoch that issued `since`; omitted when requesting a fresh checkpoint." },
+        { "name": "since", "type": "number", "optional": true }
+      ]
+    },
+    {
+      "kind": "interface",
+      "name": "RealtimeCursor",
+      "fields": [
+        { "name": "epoch", "type": "string", "optional": true, "comment": "Opaque lifetime of `latestSeq`; optional for protocol-1 legacy compatibility." },
+        { "name": "since", "type": "number", "optional": true },
+        { "name": "latestSeq", "type": "number" }
+      ]
+    },
+    {
+      "kind": "interface",
+      "name": "RealtimeSubscribeMessage",
+      "fields": [
+        { "name": "type", "type": "'realtime-subscribe'" },
+        { "name": "subscriptions", "type": "RealtimeSubscription[]" },
+        { "name": "capabilities", "type": "RealtimeOptionalFeature[]", "optional": true, "comment": "Legacy pre-negotiation capability request." }
+      ]
+    },
+    {
+      "kind": "interface",
+      "name": "RealtimeHealthDescriptor",
+      "fields": [
+        { "name": "state", "type": "RealtimeHealthState" },
+        { "name": "reason", "type": "string", "optional": true }
+      ]
+    },
+    {
+      "kind": "interface",
+      "name": "RealtimeGapDescriptor",
+      "fields": [
+        { "name": "requestedSince", "type": "number" },
+        { "name": "earliestAvailable", "type": "number" }
+      ]
+    },
+    {
+      "kind": "interface",
+      "name": "RealtimeSnapshotDescriptor",
+      "fields": [
+        { "name": "snapshot", "type": "boolean", "optional": true },
+        { "name": "capturedSeq", "type": "number", "optional": true }
+      ]
+    },
+    {
+      "kind": "interface",
+      "name": "RealtimeRevision",
+      "fields": [
+        { "name": "baseRevision", "type": "number" },
+        { "name": "revision", "type": "number" }
+      ]
+    },
+    {
+      "kind": "interface",
+      "name": "RealtimeEventEnvelope",
+      "typeParameters": ["TData = unknown", "TEvent extends string = string", "TChannel extends string = string"],
+      "extends": ["RealtimeSnapshotDescriptor"],
+      "fields": [
+        { "name": "protocol", "type": "RealtimeProtocolVersion" },
+        { "name": "seq", "type": "number" },
+        { "name": "stream", "type": "RealtimeStreamKey" },
+        { "name": "channel", "type": "TChannel" },
+        { "name": "event", "type": "TEvent" },
+        { "name": "ts", "type": "string" },
+        { "name": "delivery", "type": "RealtimeDeliveryMode", "optional": true },
+        { "name": "entityId", "type": "string", "optional": true },
+        { "name": "health", "type": "RealtimeHealthDescriptor", "optional": true },
+        { "name": "audience", "type": "RealtimeOptionalFeature | 'mobile-inbox-legacy'", "optional": true },
+        { "name": "data", "type": "TData" }
+      ]
+    },
+    {
+      "kind": "interface",
+      "name": "RealtimeBatchData",
+      "typeParameters": ["TEvent extends RealtimeEventEnvelope = RealtimeEventEnvelope"],
+      "extends": ["RealtimeCursor"],
+      "fields": [
+        { "name": "delivery", "type": "RealtimeDeliveryMode" },
+        { "name": "stream", "type": "RealtimeStreamKey" },
+        { "name": "events", "type": "TEvent[]" },
+        { "name": "gap", "type": "RealtimeGapDescriptor", "optional": true }
+      ]
+    },
+    {
+      "kind": "interface",
+      "name": "RealtimeBatchMessage",
+      "typeParameters": ["TEvent extends RealtimeEventEnvelope = RealtimeEventEnvelope"],
+      "fields": [
+        { "name": "channel", "type": "'realtime'" },
+        { "name": "event", "type": "'batch'" },
+        { "name": "data", "type": "RealtimeBatchData<TEvent>" }
+      ]
+    },
+    {
+      "kind": "union",
+      "name": "RealtimeServerProtocolMessage",
+      "members": ["RealtimeServerWelcomeMessage", "RealtimeServerIncompatibleMessage", "RealtimeBatchMessage"]
+    }
+  ],
+  "optionalFeatures": [
+    {
+      "id": "mobile-inbox-delta-v1",
+      "introducedIn": 1,
+      "events": ["mobile.inbox.delta"],
+      "compatibility": "Clients without this feature receive mobile.inbox.snapshot instead.",
+      "removalDate": null
+    }
+  ],
+  "compatibility": {
+    "legacySubscribeWithoutHello": {
+      "supported": true,
+      "protocol": 1,
+      "compatibility": "An authenticated legacy client may subscribe without negotiation and receives only explicitly requested optional features.",
+      "removalDate": "2027-08-12",
+      "removalProtocol": 2
+    }
+  },
+  "messages": {
+    "clientHello": {
+      "typeDeclaration": "RealtimeClientHello",
+      "type": "realtime-negotiate",
+      "compatibility": "New fields are optional. The server rejects a required version or capability it cannot satisfy."
+    },
+    "serverWelcome": {
+      "typeDeclaration": "RealtimeServerWelcomeMessage",
+      "channel": "realtime",
+      "event": "welcome",
+      "compatibility": "Features contains only capabilities selected for this connection."
+    },
+    "serverIncompatible": {
+      "typeDeclaration": "RealtimeServerIncompatibleMessage",
+      "channel": "realtime",
+      "event": "incompatible",
+      "compatibility": "Sent before any realtime subscription is accepted."
+    },
+    "subscription": {
+      "typeDeclaration": "RealtimeSubscribeMessage",
+      "type": "realtime-subscribe",
+      "compatibility": "capabilities is a legacy field and is ignored after successful negotiation."
+    },
+    "envelope": {
+      "typeDeclaration": "RealtimeEventEnvelope",
+      "compatibility": "Envelope fields are append-only and unknown events are optional unless their feature was required by the client."
+    },
+    "batch": {
+      "typeDeclaration": "RealtimeBatchMessage",
+      "channel": "realtime",
+      "event": "batch",
+      "compatibility": "gap forces checkpoint recovery; cursor values are opaque monotonic sequence numbers within one epoch."
+    }
+  }
+}

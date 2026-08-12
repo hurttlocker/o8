@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   normalizeWorkerLaunchContext,
+  bindWorkerLaunchParent,
   runtimeFromWorkerSessionKey,
   shouldPresentWorkerInSplit,
   workerLaunchOriginLabel,
@@ -14,6 +15,8 @@ describe('worker launch context', () => {
       repoContext: 'transient',
       workMode: 'read-only',
       caller: ' outside terminal ',
+      parentWorkspaceId: ' workspace-one ',
+      parentThreadId: ' thoughts-one ',
     });
     expect(context).toEqual({
       source: 'cli',
@@ -21,9 +24,28 @@ describe('worker launch context', () => {
       repoContext: 'transient',
       workMode: 'read-only',
       caller: 'outside terminal',
+      parentWorkspaceId: 'workspace-one',
+      parentThreadId: 'thoughts-one',
     });
     expect(shouldPresentWorkerInSplit(context)).toBe(true);
     expect(workerLaunchOriginLabel(context)).toBe('outside terminal via o8 CLI');
+  });
+
+  it('fills durable parent placement without replacing explicit caller truth', () => {
+    const context = bindWorkerLaunchParent({
+      source: 'mcp',
+      presentation: 'split',
+      repoContext: 'transient',
+      parentWorkspaceId: 'explicit-workspace',
+    }, {
+      workspaceId: 'fallback-workspace',
+      threadId: 'thoughts-parent',
+    });
+
+    expect(context).toMatchObject({
+      parentWorkspaceId: 'explicit-workspace',
+      parentThreadId: 'thoughts-parent',
+    });
   });
 
   it('keeps desktop launches in their existing tab presentation', () => {

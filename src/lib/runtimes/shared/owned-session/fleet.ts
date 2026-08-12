@@ -136,6 +136,7 @@ export function createFleetComputer({
           },
           alerts: lifecycle?.lastOutcome === 'failed' ? 1 : 0,
           sessionId: session.threadId ?? session.surfaceId,
+          identityId: session.identity?.id,
           sessionKind: 'owned-runtime',
           surfaceLabel: `${adapter.squadShortName} terminal • ${lifecycleLabel}`,
           runtimeSurface,

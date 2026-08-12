@@ -61,6 +61,7 @@ function runtime(id: 'gemini' | 'aider'): AgentRuntime {
     branch: 'main',
     status: 'running',
     ownership: 'owned',
+    identityId: `${id}-identity`,
     sessionCapabilities: {
       canSendInput: false,
       canInterrupt: false,
@@ -103,6 +104,7 @@ describe('canonical runtime inventory discovery', () => {
     const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
 
     expect(snapshot.agents.map((agent) => agent.runtime)).toEqual(['gemini', 'aider']);
+    expect(snapshot.agents.map((agent) => agent.identityId)).toEqual(['gemini-identity', 'aider-identity']);
     expect(snapshot.meta.note).toBe('Showing every discovered dispatchable runtime surface.');
   });
 });

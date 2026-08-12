@@ -131,6 +131,7 @@ export const MISSION_TOOLS: McpTool[] = [
           type: 'string',
           description: 'Session-rule inheritance (#1329) — your active orchestrator thread id (e.g. "thoughts-…"). When set, every worker prompt carries the thread\'s active "Operator session rules (binding)" block and dispatch records a rules_applied lane event. Omit when dispatching outside a rule-bearing thread.',
         },
+        parentWorkspaceId: { type: 'string', description: 'Optional durable workspace placement for the worker split.' },
         caller: { type: 'string', description: 'Optional short label for the outside agent or terminal that started this work. The o8 app shows it on the worker pane.' },
       },
       required: ['repoPath'],
@@ -153,7 +154,7 @@ export const MISSION_TOOLS: McpTool[] = [
   {
     name: 'get_mission_status',
     description:
-      'USE THIS WHEN the user asks "how\'s the mission going", "what\'s the status of my dispatch", or right before each tick of an automated review loop to see which packets are awaiting_review / running / blocked. Returns waves, packet state, active agents, blockers, optional cost. Example: get_mission_status() returns current mission. get_mission_status({includeCost: true}) adds cost breakdown.',
+      'USE THIS WHEN the user asks "how\'s the mission going", "what\'s the status of my dispatch", or right before each tick of an automated review loop to see which packets are awaiting_review / running / blocked. Returns waves, packet state, active agents, blockers, optional cost and timing receipts.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -165,6 +166,7 @@ export const MISSION_TOOLS: McpTool[] = [
           type: 'boolean',
           description: 'Include aggregated runtime cost for the mission.',
         },
+        includeTiming: { type: 'boolean', description: 'Include the persisted mission funnel timing and autonomy receipt.' },
       },
     },
   },
@@ -669,7 +671,7 @@ export const MISSION_TOOLS: McpTool[] = [
   {
     name: 'retry_packet',
     description:
-      'USE THIS WHEN a packet is in session_lost / failed / recovering and you want to RESUME the existing worktree. Archives the old lane + session, KEEPS the worktree dir, then needs dispatch_mission() to relaunch. Pass clearWorktree:true to wipe (or use reset_packet instead). Example: retry_packet({packetId: "pkt-abc", reason: "session_lost"})',
+      'USE THIS WHEN a packet is in session_lost / failed / recovering and you want to preserve its existing worktree. If that worktree already has a clean committed result, retry_packet returns salvaged:true and moves it directly to review; do not redispatch it. Otherwise it archives the old lane + session and needs dispatch_mission() to relaunch. Pass clearWorktree:true to wipe (or use reset_packet instead). Example: retry_packet({packetId: "pkt-abc", reason: "session_lost"})',
     inputSchema: {
       type: 'object',
       properties: {
@@ -801,20 +803,18 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
     const workerIntent = parseWorkerIntent(args.workerIntent);
     const requestedProvider = parseWorkerProvider(args.requestedProvider);
     const constraints = optionalString(args, 'constraints');
-
-    // #453 — Support inline issues (no GitHub dependency)
     const inlineIssues = Array.isArray(args.issues_inline) ? args.issues_inline : null;
     const ghIssues = Array.isArray(args.issues) && args.issues.length > 0 ? args.issues : null;
     if (!inlineIssues && !ghIssues) {
       return textResult('Provide either `issues` (GitHub refs) or `issues_inline` (inline objects).', true);
     }
-
     const shouldDispatch = args.dispatch !== false;
     const sequential = args.sequential === true;
     const existingBranchPolicy = parseExistingBranchPolicy(args.existingBranchPolicy);
     const useBrain = typeof args.useBrain === 'boolean' ? args.useBrain : undefined;
     const huddle = typeof args.huddle === 'boolean' ? args.huddle : undefined;
     const orchestratorThreadId = optionalString(args, 'orchestratorThreadId') || undefined;
+    const parentWorkspaceId = optionalString(args, 'parentWorkspaceId') || undefined;
     const caller = optionalString(args, 'caller') || undefined;
     const readOnly = args.readOnly === true;
     const candidateMode = parseMissionCandidateMode(args, huddle);
@@ -846,7 +846,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
         huddle,
         comparisonModels,
         qualitySearch,
-        orchestratorThreadId, caller, readOnly,
+        orchestratorThreadId, parentWorkspaceId, caller, readOnly,
       });
       if (shouldDispatch && createResult && !('error' in createResult)) {
         // Fire-and-forget: dispatch can take 30–60s on its own, and the
@@ -880,7 +880,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
       huddle,
       comparisonModels,
       qualitySearch,
-      orchestratorThreadId, caller, readOnly,
+      orchestratorThreadId, parentWorkspaceId, caller, readOnly,
     });
     if (shouldDispatch && createResult && !('error' in createResult)) {
       void dispatchMission({ missionId: createResult.missionId }).catch((err) => {
@@ -913,10 +913,8 @@ export async function handleDispatchMission(args: Record<string, unknown>): Prom
 export async function handleGetMissionStatus(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
     const includeCost = typeof args.includeCost === 'boolean' ? args.includeCost : false;
-    const result = await getMissionStatus({
-      missionId: optionalString(args, 'missionId') || undefined,
-      includeCost,
-    });
+    const includeTiming = typeof args.includeTiming === 'boolean' ? args.includeTiming : false;
+    const result = await getMissionStatus({ missionId: optionalString(args, 'missionId') || undefined, includeCost, includeTiming });
     return jsonResult(result);
   } catch (error) {
     console.error(`${'[mcp-operator]'} get_mission_status failed: ${errorText(error)}`);

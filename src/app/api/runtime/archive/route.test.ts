@@ -3,10 +3,19 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const stateMocks = vi.hoisted(() => ({
   codex: vi.fn(),
+  claude: vi.fn(),
   cursor: vi.fn(),
   gemini: vi.fn(),
   grok: vi.fn(),
   opencode: vi.fn(),
+  pi: vi.fn(),
+  prime: vi.fn(),
+  archiveClaude: vi.fn(),
+  archiveCursor: vi.fn(),
+  archiveGrok: vi.fn(),
+  archivePi: vi.fn(),
+  archivePrime: vi.fn(),
+  archiveOwned: vi.fn(),
   getLane: vi.fn(),
   archiveLane: vi.fn(),
 }));
@@ -15,37 +24,75 @@ vi.mock('@/lib/codex/owned', () => ({
   archiveOwnedCodexSession: vi.fn(),
   ownedCodexSessionState: stateMocks.codex,
 }));
-vi.mock('@/lib/cursor/owned', () => ({ ownedCursorSessionState: stateMocks.cursor }));
+vi.mock('@/lib/claude-code/owned', () => ({
+  archiveOwnedClaudeCodeSession: stateMocks.archiveClaude,
+  ownedClaudeCodeSessionState: stateMocks.claude,
+}));
+vi.mock('@/lib/cursor/owned', () => ({
+  archiveOwnedCursorSession: stateMocks.archiveCursor,
+  ownedCursorSessionState: stateMocks.cursor,
+}));
 vi.mock('@/lib/gemini/owned', () => ({
   archiveOwnedGeminiSession: vi.fn(),
   ownedGeminiSessionState: stateMocks.gemini,
 }));
-vi.mock('@/lib/grok/owned', () => ({ ownedGrokSessionState: stateMocks.grok }));
+vi.mock('@/lib/grok/owned', () => ({
+  archiveOwnedGrokSession: stateMocks.archiveGrok,
+  ownedGrokSessionState: stateMocks.grok,
+}));
 vi.mock('@/lib/opencode/owned', () => ({
   archiveOwnedOpencodeSession: vi.fn(),
   ownedOpencodeSessionState: stateMocks.opencode,
+}));
+vi.mock('@/lib/pi/owned', () => ({
+  archiveOwnedPiSession: stateMocks.archivePi,
+  ownedPiSessionState: stateMocks.pi,
+}));
+vi.mock('@/lib/prime-agent/owned', () => ({
+  archiveOwnedPrimeAgentSession: stateMocks.archivePrime,
+  ownedPrimeAgentSessionState: stateMocks.prime,
 }));
 vi.mock('@/lib/lane/registry', () => ({
   getLane: stateMocks.getLane,
   archiveLane: stateMocks.archiveLane,
 }));
 vi.mock('@/lib/runtime/inventory', () => ({ invalidateRuntimeInventoryCache: vi.fn() }));
+vi.mock('@/lib/runtime/owned-session-archive', () => ({
+  archiveOwnedRuntimeSession: stateMocks.archiveOwned,
+}));
+vi.mock('@/lib/runtimes', () => ({}));
+vi.mock('@/lib/runtimes/shared/owned-session-lifecycle', () => ({
+  getOwnedSessionLifecycle: vi.fn(() => undefined),
+}));
 
 import { GET, POST } from './route';
+import { __resetIdempotencyStoreForTests } from '@/lib/orchestrator/idempotency-store';
 
 function request(sessionKeys: string[]) {
   return new NextRequest(`http://localhost/api/runtime/archive?sessionKeys=${encodeURIComponent(sessionKeys.join(','))}`);
 }
 
+function post(body: unknown) {
+  return new NextRequest('http://localhost/api/runtime/archive', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   stateMocks.codex.mockResolvedValue('active');
+  stateMocks.claude.mockResolvedValue('missing');
   stateMocks.cursor.mockResolvedValue('missing');
   stateMocks.gemini.mockResolvedValue('archived');
   stateMocks.grok.mockResolvedValue('active');
   stateMocks.opencode.mockResolvedValue('missing');
+  stateMocks.pi.mockResolvedValue('active');
+  stateMocks.prime.mockResolvedValue('archived');
   stateMocks.getLane.mockReturnValue(null);
   stateMocks.archiveLane.mockReturnValue(null);
+  stateMocks.archiveOwned.mockResolvedValue(null);
+  __resetIdempotencyStoreForTests();
 });
 
 describe('GET /api/runtime/archive', () => {
@@ -99,9 +146,9 @@ describe('POST /api/runtime/archive', () => {
     stateMocks.getLane.mockReturnValue(lane);
     stateMocks.archiveLane.mockReturnValue({ ...lane, status: 'archived' });
 
-    const response = await POST(new NextRequest('http://localhost/api/runtime/archive', {
-      method: 'POST',
-      body: JSON.stringify({ laneId: lane.id }),
+    const response = await POST(post({
+      laneId: lane.id,
+      clientMutationId: 'archive-sessionless-lane',
     }));
 
     expect(response.status).toBe(200);
@@ -120,12 +167,73 @@ describe('POST /api/runtime/archive', () => {
       status: 'running',
     });
 
-    const response = await POST(new NextRequest('http://localhost/api/runtime/archive', {
-      method: 'POST',
-      body: JSON.stringify({ laneId: 'lane-running' }),
+    const response = await POST(post({
+      laneId: 'lane-running',
+      clientMutationId: 'archive-running-lane',
     }));
 
     expect(response.status).toBe(409);
     expect(stateMocks.archiveLane).not.toHaveBeenCalled();
+  });
+
+  it('requires caller correlation before changing archive state', async () => {
+    const response = await POST(post({ laneId: 'lane-without-correlation' }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.stringContaining('clientMutationId'),
+    });
+    expect(stateMocks.getLane).not.toHaveBeenCalled();
+    expect(stateMocks.archiveOwned).not.toHaveBeenCalled();
+  });
+
+  it('returns a truthful 202 while an identical archive is still running', async () => {
+    let complete: ((value: { archived: true; note: string }) => void) | undefined;
+    stateMocks.archiveOwned.mockImplementationOnce(() => new Promise((resolve) => {
+      complete = resolve;
+    }));
+    const body = {
+      sessionKey: 'codex-owned:archive-in-progress',
+      clientMutationId: 'archive-in-progress-1',
+    };
+
+    const firstPromise = POST(post(body));
+    await vi.waitFor(() => expect(stateMocks.archiveOwned).toHaveBeenCalledTimes(1));
+    const duplicate = await POST(post(body));
+
+    expect(duplicate.status).toBe(202);
+    await expect(duplicate.json()).resolves.toMatchObject({
+      ok: true,
+      archived: false,
+      sessionKey: body.sessionKey,
+      clientMutationId: body.clientMutationId,
+      status: 'in_progress',
+      inProgress: true,
+      replayed: true,
+    });
+    expect(stateMocks.archiveOwned).toHaveBeenCalledTimes(1);
+
+    complete?.({ archived: true, note: 'Archived once.' });
+    expect((await firstPromise).status).toBe(200);
+  });
+
+  it('rejects one mutation id reused for a changed archive target', async () => {
+    const firstLane = {
+      id: 'lane-first-target',
+      sessionKey: null,
+      status: 'failed',
+    };
+    stateMocks.getLane.mockReturnValue(firstLane);
+    stateMocks.archiveLane.mockReturnValue({ ...firstLane, status: 'archived' });
+    const clientMutationId = 'archive-body-conflict';
+
+    expect((await POST(post({ laneId: firstLane.id, clientMutationId }))).status).toBe(200);
+    const conflict = await POST(post({ laneId: 'lane-changed-target', clientMutationId }));
+
+    expect(conflict.status).toBe(409);
+    await expect(conflict.json()).resolves.toMatchObject({
+      error: expect.stringContaining('different runtime archive'),
+    });
+    expect(stateMocks.archiveLane).toHaveBeenCalledTimes(1);
   });
 });

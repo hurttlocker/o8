@@ -109,13 +109,13 @@ plaintext = nacl.secretbox.open(decodeBase64(c), decodeBase64(n), sessionKey)
 - The handshake messages (`e2ee-hello`/`e2ee-init`) are the **only** plaintext frames after `connected`; they are authenticated by signatures, not encrypted.
 - `{type:'ping'}` / `{channel:'pong'}` keepalive is encrypted too once the channel is up.
 
-## Rollout & gating (flag `O8_MOBILE_E2EE`, default OFF → flip after dogfood)
+## Rollout and compatibility
 
 Mirrors the #4/#6 playbook. Non-breaking by construction:
 
 - **Per-device tokens ship independently of E2EE.** The token validator accepts the shared token AND per-device tokens always — so an old phone (shared token) and the desktop keep working while new pairings mint per-device tokens.
-- **E2EE is negotiated, not forced (phase 1).** With the flag ON the server *offers* `e2ee-hello` to remote clients. A client that completes the handshake → encrypted channel. A client that doesn't (old mobile build) within ~2s → server falls back to raw frames (still token-authed) and logs it. A later `O8_MOBILE_E2EE_REQUIRED` phase closes the downgrade once every client speaks it.
-- **Flag OFF** = today's behavior exactly: pairing returns the shared token, no enroll, no handshake.
+- **Enrolled-device tokens require key proof.** The server sends `e2ee-hello` to a remote enrolled client and withholds application state until the registered device key completes the handshake. Timeout or initialization failure closes the connection; there is no plaintext downgrade.
+- **Legacy shared-token clients are a separate compatibility path.** They keep the established plaintext transport and never enter the enrolled-device handshake state.
 
 ## Stages (each tsc-clean + committable + gated)
 

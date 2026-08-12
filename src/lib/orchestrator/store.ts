@@ -780,16 +780,18 @@ export function normalizeOrchestratorMissionState(raw: unknown): OrchestratorMis
     repoPath: typeof value.repoPath === 'string' ? value.repoPath : null,
     runtime: normalizeRuntime(value.runtime),
     constraints: typeof value.constraints === 'string' ? value.constraints : '',
+    creationMutationId: typeof value.creationMutationId === 'string' ? value.creationMutationId : null,
+    creationReceipt: value.creationReceipt && typeof value.creationReceipt === 'object' ? value.creationReceipt : null,
     packets: resolvePacketDependencies(normalizedPackets),
     activeComparisonGroups: Array.isArray(value.activeComparisonGroups)
       ? value.activeComparisonGroups
         .map((groupId) => (typeof groupId === 'string' ? groupId.trim() : ''))
         .filter((groupId, index, current) => Boolean(groupId) && current.indexOf(groupId) === index)
       : [],
+    lifecycleHold: value.lifecycleHold?.reason === 'operator_stop' && typeof value.lifecycleHold.source === 'string' && typeof value.lifecycleHold.startedAt === 'string' && Number.isSafeInteger(value.lifecycleHold.ownerPid) && typeof value.lifecycleHold.leaseExpiresAt === 'string' ? { source: value.lifecycleHold.source, reason: 'operator_stop', startedAt: value.lifecycleHold.startedAt, ownerPid: value.lifecycleHold.ownerPid!, leaseExpiresAt: value.lifecycleHold.leaseExpiresAt } : null,
     updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : nowIso(),
   };
 }
-
 export function readOrchestratorMissionState(): OrchestratorMissionState {
   return orchestratorMissionCache;
 }
@@ -1028,7 +1030,7 @@ export function reconcileOrchestratorMissionState(
 
     if (packet.queueState === 'held') {
       next.status = 'blocked';
-      next.blockedReason = 'Held by operator';
+      next.blockedReason = packet.blockedReason ?? 'Held by operator';
       return next;
     }
 
@@ -1213,7 +1215,5 @@ export function reconcileOrchestratorMissionState(
     packets: stripVolatile(nextState.packets),
   });
 
-  return changed
-    ? { ...nextState, updatedAt: nowIso() }
-    : normalized;
+  return changed ? { ...nextState, updatedAt: nowIso() } : normalized;
 }

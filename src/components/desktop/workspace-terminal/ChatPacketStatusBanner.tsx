@@ -24,6 +24,8 @@
 
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import type { LaneMergeMode } from '@/lib/lane/merge-mode';
+import { actionReceiptIsInProgress, correlatedActionIsUnsettled, fetchCorrelatedActionReceipt } from '@/lib/orchestrator/action-receipt';
+import { useCorrelatedActionLatch } from '@/components/desktop/use-correlated-action-latch';
 import type { OrchestratorPacketStatus } from '@/lib/orchestrator/types';
 import type { PacketReviewState } from '@/lib/orchestrator/derive-review-state';
 
@@ -137,7 +139,6 @@ export function ChatPacketStatusBanner({
 }: ChatPacketStatusBannerProps) {
   const prOnlyMode = mergeMode === 'pr_only';
   const prOnlyCaption = mergeModeNote ?? 'PR-only mode is active. Create a PR for human merge.';
-  const [pending, setPending] = useState<'merge' | 'create_pr' | 'reject' | 'discard' | null>(null);
   const [actionNote, setActionNote] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -216,41 +217,54 @@ export function ChatPacketStatusBanner({
     : reviewState === 'ready-to-merge' ? READY
     : reviewState === 'merged' ? PRESENTATION_BY_STATUS.released
     : (status ? PRESENTATION_BY_STATUS[status] : undefined);
+  const { busy: pending, begin: beginAction, settle: settleAction } = useCorrelatedActionLatch<
+    'merge' | 'create_pr' | 'reject' | 'discard'
+  >();
 
   const runMerge = useCallback(async (override: boolean) => {
-    if (!actionPacketId) return;
-    setPending('merge');
+    if (!actionPacketId || !beginAction('merge')) return;
     setActionError(null);
     setActionNote(null);
+    let inProgress = false;
     try {
       // Override path: a declined review blocks merge, so record an approving
       // operator review first, then merge through the governed packet route.
       if (override) {
-        const reviewRes = await fetch('/api/orchestrator/review', {
+        const { response: reviewRes, payload: reviewPayload } = await fetchCorrelatedActionReceipt<{
+          ok?: boolean;
+          result?: { inProgress?: boolean; status?: string };
+          error?: { message?: string };
+        }>('/api/orchestrator/review', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ packetId: actionPacketId, approved: true, findings: [] }),
+          body: JSON.stringify({
+            packetId: actionPacketId,
+            approved: true,
+            findings: [],
+            clientMutationId: crypto.randomUUID(),
+          }),
         });
         if (!reviewRes.ok) {
-          const rb = await reviewRes.json().catch(() => null) as { error?: { message?: string } } | null;
-          throw new Error(rb?.error?.message ?? 'Unable to override the review.');
+          throw new Error(reviewPayload?.error?.message ?? 'Unable to override the review.');
         }
       }
-      const res = await fetch('/api/orchestrator/merge', {
+      const { response: res, payload } = await fetchCorrelatedActionReceipt<{
+        ok?: boolean;
+        result?: { merged?: boolean; status?: string; note?: string; inProgress?: boolean } | null;
+        error?: { message?: string } | null;
+      }>('/api/orchestrator/merge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packetId: actionPacketId }),
+        body: JSON.stringify({ packetId: actionPacketId, idempotencyKey: crypto.randomUUID() }),
       });
-      const payload = await res.json().catch(() => null) as {
-        ok?: boolean;
-        result?: { merged?: boolean; status?: string; note?: string } | null;
-        error?: { message?: string } | null;
-      } | null;
       if (!res.ok || !payload?.ok) {
         throw new Error(payload?.error?.message ?? 'Unable to merge.');
       }
       const result = payload.result ?? null;
-      if (result?.status === 'pending_operator_approval') {
+      if (actionReceiptIsInProgress(res.status, result)) {
+        inProgress = true;
+        setActionNote(result?.note ?? 'Merge is already in progress.');
+      } else if (result?.status === 'pending_operator_approval') {
         setActionNote('Approval raised — clear it from the inbox to merge.');
       } else if (result?.merged) {
         setActionNote('Merged into main.');
@@ -258,15 +272,19 @@ export function ChatPacketStatusBanner({
         throw new Error(result?.note ?? 'Merge was blocked.');
       }
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'Merge failed.');
+      if (correlatedActionIsUnsettled(error)) {
+        inProgress = true;
+        setActionNote(error.message);
+      } else {
+        setActionError(error instanceof Error ? error.message : 'Merge failed.');
+      }
     } finally {
-      setPending(null);
+      settleAction(inProgress);
     }
-  }, [actionPacketId]);
+  }, [actionPacketId, beginAction, settleAction]);
 
   const createPr = useCallback(async () => {
-    if (!effectiveLaneId) return;
-    setPending('create_pr');
+    if (!effectiveLaneId || !beginAction('create_pr')) return;
     setActionError(null);
     setActionNote(null);
     try {
@@ -283,37 +301,40 @@ export function ChatPacketStatusBanner({
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Unable to create PR.');
     } finally {
-      setPending(null);
+      settleAction(false);
     }
-  }, [effectiveLaneId]);
+  }, [beginAction, effectiveLaneId, settleAction]);
 
   const discard = useCallback(async () => {
-    if (!actionPacketId) return;
-    setPending('discard');
+    if (!actionPacketId || !beginAction('discard')) return;
     setActionError(null);
     setActionNote(null);
+    let inProgress = false;
     try {
-      const response = await fetch('/api/orchestrator/discard-packet', {
+      const { response, payload } = await fetchCorrelatedActionReceipt<{
+        ok?: boolean;
+        result?: { note?: string; inProgress?: boolean; status?: string } | null;
+        error?: { message?: string } | null;
+      }>('/api/orchestrator/discard-packet', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packetId: actionPacketId }),
+        body: JSON.stringify({
+          packetId: actionPacketId,
+          clientMutationId: crypto.randomUUID(),
+        }),
       });
-      const payload = await response.json().catch(() => null) as {
-        ok?: boolean;
-        result?: { note?: string } | null;
-        error?: { message?: string } | null;
-      } | null;
       if (!response.ok || !payload?.ok) {
         throw new Error(payload?.error?.message ?? 'Unable to discard.');
       }
       setActionNote(payload.result?.note ?? 'Discarded.');
       onDiscarded?.();
     } catch (error) {
+      if (correlatedActionIsUnsettled(error)) inProgress = true;
       setActionError(error instanceof Error ? error.message : 'Unable to discard.');
     } finally {
-      setPending(null);
+      settleAction(inProgress);
     }
-  }, [actionPacketId, onDiscarded]);
+  }, [actionPacketId, beginAction, onDiscarded, settleAction]);
 
   // Request changes HANDS THE PACKET TO THE ORCHESTRATOR (Q ruling 2026-07-11) —
   // a declined packet's recovery is a decision (rebase / re-dispatch / fix / drop),

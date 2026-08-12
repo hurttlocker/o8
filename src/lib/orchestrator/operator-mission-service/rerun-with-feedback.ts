@@ -1,18 +1,31 @@
-import { withLockedState } from '@/lib/orchestrator/control-plane';
 import { runDispatchTick } from '@/lib/orchestrator/dispatch';
 import { archiveLane, listLanes, updateLane } from '@/lib/lane/registry';
-import { getWorktreeManager } from '@/lib/worktree/launch';
+import {
+  archiveLaneSessionsConfirmed,
+  killLaneSessionsConfirmed,
+  LaneSessionArchiveUnconfirmedError,
+} from '@/lib/lane/reap-sessions';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
-import { findMissionRegistryEntryByPacketId, withMissionRegistryState } from '@/lib/orchestrator/mission-registry';
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 import { frontierEscalationModelForCheapTier } from '@/lib/operator/subscription-profile';
 import { supersedeDurableApprovedReviews } from '@/lib/lane/durable-review-approval';
-import { currentMissionState, log } from './shared';
+import { log } from './shared';
+import { withPacketLifecycleMutationLock } from '@/lib/orchestrator/lifecycle-mutation-lock';
+import {
+  holdPacketLifecycleMutation,
+  markPacketLifecycleFailure,
+  mutatePacketLifecycleGuard,
+  type PacketLifecycleGuard,
+} from '@/lib/orchestrator/packet-lifecycle-guard';
+import { collectPacketLifecycleLanes } from '@/lib/orchestrator/packet-lifecycle-targets';
+import { cleanupResetPacketTargets, type ResetCleanupTarget } from './reset-cleanup';
+import { unregisterWatchedAgent } from '@/lib/supervisor/agent-supervisor';
 
 /**
  * #662 — One-click rerun-with-feedback.
  *
- * Used after the operator rejects a diff. Within a single locked write:
+ * Used after the operator rejects a diff. The packet is generation-held while
+ * its prior worker is retired, then reset and dispatched in one locked write:
  *   1. Archives the rejected lane (preserves its diff in lane history),
  *      prunes the worktree.
  *   2. Resets the packet to dispatchable state.
@@ -21,9 +34,8 @@ import { currentMissionState, log } from './shared';
  *      (surfaced in the details popover).
  *   4. Runs a dispatch tick so the packet relaunches in a fresh worktree.
  *
- * Doing the reset + dispatch inside one `withLockedState` block keeps
- * the operation atomic — no headless-tick can race in between and read
- * a partially-mutated mission.
+ * The lifecycle hold prevents a headless or explicit dispatch from binding a
+ * replacement while the prior worker, session, and worktree still exist.
  */
 export interface RerunWithFeedbackInput {
   packetId: string;
@@ -45,6 +57,12 @@ export interface RerunWithFeedbackResult {
   escalationSuggestion?: RerunEscalationSuggestion;
   note: string;
 }
+
+export class RerunKillUnconfirmedError extends Error {}
+export class RerunSessionArchiveUnconfirmedError extends Error {}
+export class RerunCleanupFailedError extends Error {}
+export class RerunPostRetirementFailedError extends Error {}
+export class RerunStateChangedError extends Error {}
 
 const FEEDBACK_HEADING = '## Operator feedback';
 // Match an existing feedback section (preceded by 1+ blank lines) and
@@ -127,22 +145,6 @@ export function archiveLanesForPacket(packetId: string, referenceLabel: string):
   return worktreePath;
 }
 
-async function pruneWorktree(repoPath: string | null | undefined, worktreePath: string): Promise<boolean> {
-  if (!repoPath) return false;
-  try {
-    const manager = await getWorktreeManager(repoPath);
-    const worktrees = await manager.list();
-    const match = worktrees.find((wt) => worktreePath.includes(wt.id));
-    if (!match) return false;
-    await manager.cleanup(match.id, { force: true, deleteBranch: true });
-    log(`[rerun-with-feedback] Pruned worktree ${match.id}`);
-    return true;
-  } catch {
-    log(`[rerun-with-feedback] Could not prune worktree at ${worktreePath} — may already be gone`);
-    return false;
-  }
-}
-
 /** Exported for the retry-budget vitest suite — not part of the public API. */
 export function resetPacketFields(packet: OrchestratorPacket) {
   // Mirrors resetPacket's mission-state mutations. Intentional duplication
@@ -159,6 +161,7 @@ export function resetPacketFields(packet: OrchestratorPacket) {
   packet.review = null;
   packet.lastEventAt = null;
   packet.lastEventLabel = null;
+  packet.operatorStopped = false;
   packet.recoveryCount = 0;
   packet.lastRecoveryAt = null;
   // A fresh dispatch earns a fresh launch budget; the intra-cycle cap still
@@ -170,62 +173,153 @@ export function resetPacketFields(packet: OrchestratorPacket) {
   // operator reset_packet refreshes it.
 }
 
-async function rerunRegistryPacketWithFeedback(
-  missionId: string,
-  packetId: string,
-  feedback: string,
-): Promise<RerunWithFeedbackResult> {
+async function retireRerunGeneration(guard: PacketLifecycleGuard): Promise<boolean> {
+  const persisted = listLanes().filter((lane) => lane.packetId === guard.packetId);
+  const targets = collectPacketLifecycleLanes(guard.previousPacket, guard.repoPath, persisted);
+  const kills = await killLaneSessionsConfirmed(targets);
+  const survivors = kills.filter((outcome) => !outcome.confirmed && !outcome.alreadyDead);
+  if (survivors.length > 0) {
+    await markPacketLifecycleFailure(guard, 'kill_unconfirmed');
+    throw new RerunKillUnconfirmedError(
+      `Rerun refused because ${survivors.length} worker process${survivors.length === 1 ? '' : 'es'} could not be confirmed stopped. The packet remains held and its bindings were preserved.`,
+    );
+  }
+  try {
+    await archiveLaneSessionsConfirmed(targets);
+  } catch (error) {
+    if (!(error instanceof LaneSessionArchiveUnconfirmedError)) throw error;
+    await markPacketLifecycleFailure(guard, 'session_archive_unconfirmed');
+    throw new RerunSessionArchiveUnconfirmedError(error.message);
+  }
+
+  for (const target of targets) {
+    if (target.sessionKey?.trim()) unregisterWatchedAgent(target.sessionKey.trim());
+  }
+  const confirmedKills = new Set(kills
+    .filter((outcome) => outcome.confirmed || outcome.alreadyDead)
+    .map((outcome) => `${outcome.laneId}\0${outcome.sessionKey}`));
+  const cleanupTargets: ResetCleanupTarget[] = targets
+    .filter((target) => target.status !== 'archived' && target.status !== 'completed')
+    .map((target) => ({
+      id: target.id,
+      repoPath: target.repoPath,
+      branch: target.branch,
+      worktreePath: target.worktreePath,
+      overrideLiveGuard: target.sessionKey?.trim()
+        && confirmedKills.has(`${target.id}\0${target.sessionKey}`)
+        ? true
+        : undefined,
+    }));
   let worktreePruned = false;
-  let referenceLabel = packetId;
-  let escalationSuggestion: RerunEscalationSuggestion | null = null;
+  try {
+    const cleanup = await cleanupResetPacketTargets(cleanupTargets, guard.packetId);
+    worktreePruned = cleanup.worktreePruned;
+  } catch (error) {
+    await markPacketLifecycleFailure(guard, 'worktree_cleanup_failed');
+    throw new RerunCleanupFailedError(
+      `Rerun stopped the prior worker, but worktree cleanup was not confirmed. The packet remains held and was not relaunched: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 
-  const { state: finalState } = await withMissionRegistryState(missionId, async (current) => {
-    const packet = current.packets.find((candidate) => candidate.id === packetId);
-    if (!packet) {
-      throw new Error(`Packet ${packetId} not found.`);
+  for (const lane of persisted) {
+    const terminal = lane.status === 'archived' || lane.status === 'completed';
+    try {
+      const updated = updateLane(lane.id, {
+        packetId: '',
+        worktreePath: null,
+        ...(!terminal ? {
+          outcome: 'discarded' as const,
+          outcomeNote: 'Superseded by rerun',
+        } : {}),
+      });
+      if (!updated) throw new Error('lane disappeared during rerun update');
+      if (!terminal) {
+        const archived = archiveLane(lane.id, 'user');
+        if (!archived) throw new Error('lane disappeared during rerun archive');
+      }
+    } catch (error) {
+      await markPacketLifecycleFailure(guard, 'worktree_cleanup_failed');
+      throw new RerunCleanupFailedError(
+        `Rerun could not retire lane ${lane.id}; the packet remains held and was not relaunched: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
-    await supersedeDurableApprovedReviews(packetId, 'Superseded by rerun_with_feedback.');
-    referenceLabel = packet.referenceLabel;
-
-    const originalSummary = packet.summary;
-    const originalPrompt = packet.prompt?.trim()
-      || [packet.title, originalSummary].map((part) => part.trim()).filter(Boolean).join('\n\n');
-
-    const worktreePath = archiveLanesForPacket(packetId, packet.referenceLabel);
-    if (worktreePath) {
-      worktreePruned = await pruneWorktree(current.repoPath, worktreePath);
-    }
-
-    resetPacketFields(packet);
-    const nextAttemptCount = (packet.attemptCount ?? 0) + 1;
-    escalationSuggestion = buildEscalationSuggestion(packet, nextAttemptCount);
-    packet.attemptCount = nextAttemptCount;
-    if (escalationSuggestion) packet.tierEscalated = true;
-    packet.summary = appendFeedback(originalSummary, feedback);
-    packet.prompt = appendFeedback(originalPrompt, feedback);
-
-    const afterDispatch = await runDispatchTick(current);
-    return { state: afterDispatch, result: null };
-  });
-
-  const dispatchedPacket = finalState.packets.find((candidate) => candidate.id === packetId) ?? null;
-  const dispatched = Boolean(dispatchedPacket?.lane?.laneId || dispatchedPacket?.lane?.sessionKey);
-
-  log(`Rerun-with-feedback for registry packet ${referenceLabel} (${packetId}). dispatched=${dispatched}`);
-
-  return {
-    packetId,
-    referenceLabel,
-    dispatched,
-    worktreePruned,
-    escalationSuggestion: escalationSuggestion ?? undefined,
-    note: dispatched
-      ? `Packet ${referenceLabel} relaunched with operator feedback.`
-      : `Packet ${referenceLabel} reset and queued. Awaiting next dispatch tick.`,
-  };
+  }
+  return worktreePruned;
 }
 
-export async function rerunWithFeedback(input: RerunWithFeedbackInput): Promise<RerunWithFeedbackResult> {
+async function retireFailedRerunReplacement(guard: PacketLifecycleGuard): Promise<{
+  confirmed: boolean;
+  lane: ReturnType<typeof listLanes>[number] | null;
+}> {
+  const replacements = listLanes().filter((lane) => lane.packetId === guard.packetId);
+  const latest = replacements.at(-1) ?? null;
+  if (replacements.length === 0) return { confirmed: true, lane: null };
+  try {
+    const kills = await killLaneSessionsConfirmed(replacements);
+    if (kills.some((outcome) => !outcome.confirmed && !outcome.alreadyDead)) {
+      return { confirmed: false, lane: latest };
+    }
+    await archiveLaneSessionsConfirmed(replacements);
+    for (const lane of replacements) {
+      if (lane.sessionKey?.trim()) unregisterWatchedAgent(lane.sessionKey.trim());
+    }
+    const confirmed = new Set(kills
+      .filter((outcome) => outcome.confirmed || outcome.alreadyDead)
+      .map((outcome) => `${outcome.laneId}\0${outcome.sessionKey}`));
+    await cleanupResetPacketTargets(replacements.map((lane) => ({
+      id: lane.id,
+      repoPath: lane.repoPath,
+      branch: lane.branch,
+      worktreePath: lane.worktreePath,
+      overrideLiveGuard: lane.sessionKey?.trim()
+        && confirmed.has(`${lane.id}\0${lane.sessionKey}`)
+        ? true
+        : undefined,
+    })), guard.packetId);
+    for (const lane of replacements) {
+      const updated = updateLane(lane.id, {
+        packetId: '',
+        worktreePath: null,
+        outcome: 'discarded',
+        outcomeNote: 'Failed rerun replacement retired',
+      });
+      if (!updated) return { confirmed: false, lane };
+      const archived = archiveLane(lane.id, 'user');
+      if (!archived) return { confirmed: false, lane };
+    }
+    return { confirmed: true, lane: null };
+  } catch {
+    return { confirmed: false, lane: latest };
+  }
+}
+
+async function markFailedRerunReplacement(
+  guard: PacketLifecycleGuard,
+  lane: ReturnType<typeof listLanes>[number],
+): Promise<void> {
+  await mutatePacketLifecycleGuard(guard, (packet) => {
+    packet.status = 'blocked';
+    packet.queueState = 'held';
+    packet.operatorStopped = true;
+    packet.blockedReason = 'rerun_replacement_retirement_failed';
+    packet.lastEventAt = new Date().toISOString();
+    packet.lastEventLabel = 'rerun_replacement_retirement_failed';
+    packet.lane = {
+      tileId: packet.lane?.tileId ?? 'mcp-dispatch',
+      tabId: packet.lane?.tabId ?? 'mcp-dispatch',
+      repoPath: lane.repoPath,
+      worktreePath: lane.worktreePath,
+      runtime: lane.runtime,
+      laneId: lane.id,
+      sessionKey: lane.sessionKey,
+      lastHeartbeatAt: lane.lastHeartbeatAt ? new Date(lane.lastHeartbeatAt).toISOString() : null,
+      lastEventAt: lane.lastEventAt,
+      lastEventLabel: lane.lastEventLabel,
+    };
+  });
+}
+
+async function rerunWithFeedbackUnlocked(input: RerunWithFeedbackInput): Promise<RerunWithFeedbackResult> {
   const packetId = input.packetId.trim();
   if (!packetId) {
     throw new Error('packetId is required.');
@@ -235,64 +329,49 @@ export async function rerunWithFeedback(input: RerunWithFeedbackInput): Promise<
     throw new Error('feedback is required.');
   }
 
-  const current = currentMissionState();
-  if (!current.packets.some((candidate) => candidate.id === packetId)) {
-    const registryEntry = findMissionRegistryEntryByPacketId(packetId, {
-      includeArchived: true,
-      excludeMissionId: current.missionId,
-    });
-    if (!registryEntry) {
-      throw new Error(`Packet ${packetId} not found.`);
-    }
-    return rerunRegistryPacketWithFeedback(registryEntry.id, packetId, feedback);
-  }
-
-  let worktreePruned = false;
-  let referenceLabel = packetId;
+  const guard = await holdPacketLifecycleMutation({ packetId, kind: 'rerun' });
+  if (!guard) throw new Error(`Packet ${packetId} not found.`);
+  const worktreePruned = await retireRerunGeneration(guard);
+  const originalSummary = guard.previousPacket.summary;
+  const originalPrompt = guard.previousPacket.prompt?.trim()
+    || [guard.previousPacket.title, originalSummary].map((part) => part.trim()).filter(Boolean).join('\n\n');
   let escalationSuggestion: RerunEscalationSuggestion | null = null;
-
-  const { state: finalState } = await withLockedState(async (current) => {
-    const packet = current.packets.find((candidate) => candidate.id === packetId);
-    if (!packet) {
-      throw new Error(`Packet ${packetId} not found.`);
-    }
+  let relaunched: Awaited<ReturnType<typeof mutatePacketLifecycleGuard<boolean>>>;
+  try {
     await supersedeDurableApprovedReviews(packetId, 'Superseded by rerun_with_feedback.');
-    referenceLabel = packet.referenceLabel;
-
-    // Snapshot originals BEFORE reset clears them.
-    const originalSummary = packet.summary;
-    const originalPrompt = packet.prompt?.trim()
-      || [packet.title, originalSummary].map((part) => part.trim()).filter(Boolean).join('\n\n');
-
-    // Step 1 — archive the rejected lane (preserves its diff in lane
-    // history) and prune the worktree so the redispatch starts clean.
-    const worktreePath = archiveLanesForPacket(packetId, packet.referenceLabel);
-    if (worktreePath) {
-      worktreePruned = await pruneWorktree(current.repoPath, worktreePath);
+    relaunched = await mutatePacketLifecycleGuard(guard, async (packet, current) => {
+      resetPacketFields(packet);
+      const nextAttemptCount = (packet.attemptCount ?? 0) + 1;
+      escalationSuggestion = buildEscalationSuggestion(packet, nextAttemptCount);
+      packet.attemptCount = nextAttemptCount;
+      if (escalationSuggestion) packet.tierEscalated = true;
+      packet.summary = appendFeedback(originalSummary, feedback);
+      packet.prompt = appendFeedback(originalPrompt, feedback);
+      const afterDispatch = await runDispatchTick(current);
+      Object.assign(current, afterDispatch);
+      const dispatchedPacket = current.packets.find((candidate) => candidate.id === packetId) ?? null;
+      return Boolean(dispatchedPacket?.lane?.laneId || dispatchedPacket?.lane?.sessionKey);
+    });
+  } catch (error) {
+    const replacement = await retireFailedRerunReplacement(guard);
+    if (replacement.confirmed) {
+      await markPacketLifecycleFailure(guard, 'rerun_failed');
+    } else if (replacement.lane) {
+      await markFailedRerunReplacement(guard, replacement.lane);
     }
-
-    // Step 2 — reset packet fields so the dispatch tick treats it as queued.
-    resetPacketFields(packet);
-    const nextAttemptCount = (packet.attemptCount ?? 0) + 1;
-    escalationSuggestion = buildEscalationSuggestion(packet, nextAttemptCount);
-    packet.attemptCount = nextAttemptCount;
-    if (escalationSuggestion) packet.tierEscalated = true;
-
-    // Step 3 — apply feedback to summary (consumed by buildPacketPrompt)
-    // and prompt (surfaced in the details popover).
-    packet.summary = appendFeedback(originalSummary, feedback);
-    packet.prompt = appendFeedback(originalPrompt, feedback);
-
-    // Step 4 — run a dispatch tick so the packet relaunches with the
-    // updated prompt. Copy the post-dispatch snapshot back onto the locked
-    // `current` object so withLockedState reconciles and writes the launch
-    // result instead of the pre-dispatch snapshot.
-    const afterDispatch = await runDispatchTick(current);
-    Object.assign(current, afterDispatch);
-  });
-
-  const dispatchedPacket = finalState.packets.find((candidate) => candidate.id === packetId) ?? null;
-  const dispatched = Boolean(dispatchedPacket?.lane?.laneId || dispatchedPacket?.lane?.sessionKey);
+    throw new RerunPostRetirementFailedError(
+      replacement.confirmed
+        ? `The prior rerun generation was retired, but its replacement could not be prepared. The packet remains held with no replacement worker: ${error instanceof Error ? error.message : String(error)}`
+        : `The rerun replacement failed after launch and could not be confirmed retired. Its lane remains bound and the packet is held for manual recovery: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (!relaunched.matched) {
+    throw new RerunStateChangedError(
+      `Packet ${packetId} changed before rerun could relaunch it. The retired generation was not replaced by another worker.`,
+    );
+  }
+  const dispatched = relaunched.result === true;
+  const referenceLabel = guard.previousPacket.referenceLabel;
 
   log(`Rerun-with-feedback for packet ${referenceLabel} (${packetId}). dispatched=${dispatched}`);
 
@@ -306,4 +385,15 @@ export async function rerunWithFeedback(input: RerunWithFeedbackInput): Promise<
       ? `Packet ${referenceLabel} relaunched with operator feedback.`
       : `Packet ${referenceLabel} reset and queued. Awaiting next dispatch tick.`,
   };
+}
+
+export function rerunWithFeedback(input: RerunWithFeedbackInput): Promise<RerunWithFeedbackResult> {
+  return withPacketLifecycleMutationLock(input.packetId, async ({ contended }) => {
+    if (contended) {
+      throw new RerunStateChangedError(
+        `Packet ${input.packetId} changed while another lifecycle action was in progress; rerun was not applied.`,
+      );
+    }
+    return rerunWithFeedbackUnlocked(input);
+  });
 }

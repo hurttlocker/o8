@@ -122,6 +122,10 @@ export interface TerminalTab {
   // with the spawn-default label so two clicks on "+ New session" don't
   // produce two tabs named after the operator's previous thread.
   freshSpawn?: boolean;
+  // Outside CLI/MCP workers need an orchestrator-shaped host so their live
+  // transcript can split beside the workspace. The host is not itself an
+  // orchestrator request, so mounting it must not pre-warm another runtime.
+  outsideWorkerHost?: boolean;
   // Empty-state Worktree chip choice — persisted on the tab so the
   // operator's pick survives reloads while the chat is still empty.
   // 'local' = work directly against the repo's main checkout; 'new-
@@ -248,6 +252,7 @@ export interface TerminalTabHandle {
 
 export interface WorkspaceTerminalProps {
   stateScope: string;
+  activeWorkspaceSurface?: boolean;
   defaultTab: 'llm-chat' | 'terminal';
   autoCreateDefaultTab?: boolean;
   preferredRepo?: RegisteredRepo | null;

@@ -10,6 +10,15 @@ process.env.O8_DATA_DIR = process.env.CORTEX_IDE_DATA_DIR;
 const launchMock = vi.hoisted(() => ({
   calls: [] as Array<{ packetId?: string; repoPath: string }>,
 }));
+const retrySalvageProbeGate = vi.hoisted(() => ({
+  entered: null as (() => void) | null,
+  wait: null as Promise<void> | null,
+}));
+const retrySalvageKillSeam = vi.hoisted(() => ({
+  afterConfirmed: null as (() => void | Promise<void>) | null,
+  calls: 0,
+  forceConfirmed: false,
+}));
 const tempDirs: string[] = [];
 
 vi.mock('@/lib/runtime/actions', () => ({
@@ -28,6 +37,69 @@ vi.mock('@/lib/runtimes/shared/auth-detect', () => ({
   assertRuntimeDispatchable: vi.fn(async () => undefined),
 }));
 
+vi.mock('@/lib/lane/no-changes-produced', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/lane/no-changes-produced')>();
+  return {
+    ...actual,
+    probeNoChangesProduced: vi.fn(async (...args: Parameters<typeof actual.probeNoChangesProduced>) => {
+      if (retrySalvageProbeGate.wait) {
+        retrySalvageProbeGate.entered?.();
+        await retrySalvageProbeGate.wait;
+      }
+      return actual.probeNoChangesProduced(...args);
+    }),
+  };
+});
+
+vi.mock('@/lib/lane/reap-sessions', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/lane/reap-sessions')>();
+  return {
+    ...actual,
+    archiveLaneSessions: vi.fn(async (lanes: Parameters<typeof actual.archiveLaneSessions>[0]) => {
+      const outcomes = lanes.flatMap((lane) => lane.sessionKey?.includes('-owned:') ? [{
+        laneId: lane.id,
+        sessionKey: lane.sessionKey,
+        runtime: lane.runtime,
+        archived: true,
+        note: 'archived by test fixture',
+      }] : []);
+      return {
+        targeted: outcomes.length,
+        archived: outcomes.length,
+        outcomes,
+        failures: [],
+      };
+    }),
+    killLaneSessionsConfirmed: vi.fn(async (...args: Parameters<typeof actual.killLaneSessionsConfirmed>) => {
+      retrySalvageKillSeam.calls += 1;
+      const lanes = args[0];
+      const outcomes = retrySalvageKillSeam.forceConfirmed
+        ? lanes.flatMap((lane) => lane.sessionKey ? [{
+            laneId: lane.id,
+            sessionKey: lane.sessionKey,
+            runtime: lane.runtime,
+            confirmed: true,
+            alreadyDead: false,
+            stages: [{ stage: 'interrupt' as const, confirmed: true }],
+            note: 'confirmed by test kill seam',
+          }] : [])
+        : await actual.killLaneSessionsConfirmed(...args);
+      await retrySalvageKillSeam.afterConfirmed?.();
+      return outcomes;
+    }),
+  };
+});
+
+vi.mock('@/lib/lane/owned-session-liveness', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/lane/owned-session-liveness')>();
+  return {
+    ...actual,
+    probeLaneSessionAlive: vi.fn(async (...args: Parameters<typeof actual.probeLaneSessionAlive>) => (
+      retrySalvageKillSeam.forceConfirmed ? false : actual.probeLaneSessionAlive(...args)
+    )),
+  };
+});
+
 function createTempRepo() {
   const repoPath = mkdtempSync(join(os.tmpdir(), 'o8-mission-registry-repo-'));
   tempDirs.push(repoPath);
@@ -37,6 +109,17 @@ function createTempRepo() {
   git('add', 'README.md');
   git('-c', 'user.email=test@o8.test', '-c', 'user.name=o8-test', 'commit', '-m', 'init');
   return repoPath;
+}
+
+function commitWorkerResult(repoPath: string, branch: string, filename = 'WORK.md') {
+  execFileSync('git', ['checkout', '-b', branch], { cwd: repoPath, stdio: 'pipe' });
+  writeFileSync(join(repoPath, filename), 'committed worker result\n');
+  execFileSync('git', ['add', filename], { cwd: repoPath, stdio: 'pipe' });
+  execFileSync('git', [
+    '-c', 'user.email=test@o8.test',
+    '-c', 'user.name=o8-test',
+    'commit', '-m', 'worker result',
+  ], { cwd: repoPath, stdio: 'pipe' });
 }
 
 function textContent(result: { content: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }> }) {
@@ -126,6 +209,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   launchMock.calls = [];
+  retrySalvageProbeGate.entered = null;
+  retrySalvageProbeGate.wait = null;
+  retrySalvageKillSeam.afterConfirmed = null;
+  retrySalvageKillSeam.calls = 0;
+  retrySalvageKillSeam.forceConfirmed = false;
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -152,6 +240,24 @@ describe('headless mission registry dispatch', () => {
     expect(readOrchestratorControlPlaneState().missionId).toBe(second.missionId);
     expect(launchMock.calls.some((call) => call.packetId === firstPacketId)).toBe(true);
   }, 20_000);
+
+  it('inserts the outgoing current snapshot when its registry row is missing', async () => {
+    const repoPath = createTempRepo();
+    stubMissionApiFetch();
+    const first = await createInlineMission('missing outgoing registry row', repoPath);
+    const { getSqlite } = await import('@/lib/db');
+    getSqlite().prepare('DELETE FROM missions WHERE id = ?').run(first.missionId);
+
+    const second = await createInlineMission('replacement current mission', repoPath);
+
+    const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
+    const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+    expect(readOrchestratorControlPlaneState().missionId).toBe(second.missionId);
+    expect(readMissionRegistryEntry(first.missionId, { includeArchived: true })?.mission).toMatchObject({
+      missionId: first.missionId,
+      packets: [expect.objectContaining({ id: first.packets[0]!.id })],
+    });
+  });
 
   it('dispatch_mission addresses a non-current missionId through the real MCP handler', async () => {
     const repoPath = createTempRepo();
@@ -266,6 +372,399 @@ describe('headless mission registry dispatch', () => {
     expect(relaunched?.queueState).toBe('queued');
     expect(relaunched?.lane?.laneId).toMatch(/^lane-/);
     expect(readOrchestratorControlPlaneState().missionId).toBe(second.missionId);
+  }, 20_000);
+
+  it('retry_packet salvages a clean committed result into review without relaunching', async () => {
+    const repoPath = createTempRepo();
+    stubMissionApiFetch();
+    const first = await createInlineMission('registry committed retry A', repoPath);
+    await createInlineMission('registry committed retry B', repoPath);
+    const packetId = first.packets[0]?.id;
+    expect(packetId).toBeTruthy();
+
+    const { handleDispatchMission, handleRetryPacket } = await import('@/lib/mcp/operator-handlers/mission');
+    const initialDispatch = parseJsonResult<{ dispatched?: number }>(await handleDispatchMission({ missionId: first.missionId }));
+    expect(initialDispatch.dispatched).toBe(1);
+
+    const { findLaneByPacket, getLane, setLaneStatus, updateLane } = await import('@/lib/lane/registry');
+    const oldLane = findLaneByPacket(packetId!);
+    expect(oldLane?.worktreePath).toBe(repoPath);
+    commitWorkerResult(repoPath, oldLane!.branch);
+    updateLane(oldLane!.id, { sessionKey: null });
+    setLaneStatus(oldLane!.id, 'failed', 'system', 'zero_diff_failed');
+    const { probeNoChangesProduced } = await import('@/lib/lane/no-changes-produced');
+    await expect(probeNoChangesProduced(repoPath, oldLane!.baseBranch)).resolves.toMatchObject({
+      commitsAhead: 1,
+      statusPorcelain: '',
+    });
+
+    const launchCountBeforeRetry = launchMock.calls.length;
+    const retryResult = parseJsonResult<{
+      reset?: boolean;
+      salvaged?: boolean;
+      laneId?: string;
+    }>(await handleRetryPacket({
+      packetId: packetId!,
+      reason: 'recover committed timing-drift result',
+    }));
+
+    const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
+    const packet = readMissionRegistryEntry(first.missionId, { includeArchived: true })?.mission.packets
+      .find((candidate) => candidate.id === packetId);
+    const reviewLane = retryResult.laneId ? getLane(retryResult.laneId) : null;
+
+    expect(retryResult).toMatchObject({ reset: false, salvaged: true });
+    expect(reviewLane).toMatchObject({
+      status: 'reviewing',
+      worktreePath: repoPath,
+      lastEventLabel: 'retry_salvaged_work',
+    });
+    expect(getLane(oldLane!.id)).toMatchObject({
+      status: 'archived',
+      packetId: '',
+      worktreePath: null,
+    });
+    expect(packet).toMatchObject({
+      status: 'awaiting_review',
+      lastEventLabel: 'retry_salvaged_work',
+      lane: {
+        laneId: retryResult.laneId,
+        worktreePath: repoPath,
+        sessionKey: null,
+      },
+    });
+
+    const redispatch = parseJsonResult<{ dispatched?: number }>(await handleDispatchMission({ missionId: first.missionId }));
+    expect(redispatch.dispatched).toBe(0);
+    expect(launchMock.calls).toHaveLength(launchCountBeforeRetry);
+  }, 20_000);
+
+  it('salvages committed work for the active mission through the current control-plane lock', async () => {
+    const repoPath = createTempRepo();
+    stubMissionApiFetch();
+    const mission = await createInlineMission('current committed retry', repoPath);
+    const packetId = mission.packets[0]!.id;
+    const { handleDispatchMission, handleRetryPacket } = await import('@/lib/mcp/operator-handlers/mission');
+    const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+    expect(readOrchestratorControlPlaneState().missionId).toBe(mission.missionId);
+    expect(parseJsonResult<{ dispatched?: number }>(await handleDispatchMission({ missionId: mission.missionId })).dispatched).toBe(1);
+
+    const { findLaneByPacket, getLane, setLaneStatus } = await import('@/lib/lane/registry');
+    const oldLane = findLaneByPacket(packetId)!;
+    const oldSessionKey = oldLane.sessionKey;
+    commitWorkerResult(repoPath, oldLane.branch);
+    retrySalvageKillSeam.forceConfirmed = true;
+    setLaneStatus(oldLane.id, 'failed', 'system', 'zero_diff_failed');
+    const launchCountBeforeRetry = launchMock.calls.length;
+    const retry = parseJsonResult<{ reset?: boolean; salvaged?: boolean; laneId?: string }>(await handleRetryPacket({ packetId }));
+
+    const current = readOrchestratorControlPlaneState();
+    const packet = current.packets.find((candidate) => candidate.id === packetId);
+    expect(retry).toMatchObject({ reset: false, salvaged: true });
+    expect(packet).toMatchObject({
+      status: 'awaiting_review',
+      lane: { laneId: retry.laneId, worktreePath: repoPath },
+    });
+    expect(getLane(retry.laneId!)).toMatchObject({
+      id: retry.laneId,
+      packetId,
+      status: 'reviewing',
+      worktreePath: repoPath,
+    });
+    expect(getLane(oldLane.id)).toMatchObject({
+      status: 'archived',
+      packetId: '',
+      sessionKey: oldSessionKey,
+      worktreePath: null,
+    });
+    expect(parseJsonResult<{ dispatched?: number }>(await handleDispatchMission({ missionId: mission.missionId })).dispatched).toBe(0);
+    expect(launchMock.calls).toHaveLength(launchCountBeforeRetry);
+  }, 20_000);
+
+  it('does not salvage an older committed lane when the guarded live lane has no result', async () => {
+    const repoPath = createTempRepo();
+    const staleWorktree = createTempRepo();
+    stubMissionApiFetch();
+    const first = await createInlineMission('registry exact lane retry A', repoPath);
+    await createInlineMission('registry exact lane retry B', repoPath);
+    const packetId = first.packets[0]!.id;
+    const { handleDispatchMission, handleRetryPacket } = await import('@/lib/mcp/operator-handlers/mission');
+    expect(parseJsonResult<{ dispatched?: number }>(await handleDispatchMission({ missionId: first.missionId })).dispatched).toBe(1);
+
+    const { createLane, findLaneByPacket, getLane, listLanes, setLaneStatus } = await import('@/lib/lane/registry');
+    const currentLane = findLaneByPacket(packetId)!;
+    const staleBranch = `${currentLane.branch}-stale`;
+    commitWorkerResult(staleWorktree, staleBranch);
+    const staleLane = createLane({
+      repoPath,
+      projectId: currentLane.projectId,
+      branch: staleBranch,
+      baseBranch: currentLane.baseBranch,
+      runtime: currentLane.runtime,
+      label: `${currentLane.label} stale`,
+      packetId,
+      ownership: currentLane.ownership,
+      worktreePath: staleWorktree,
+      actor: 'system',
+    });
+    setLaneStatus(staleLane.id, 'failed', 'system', 'older_committed_result');
+    setLaneStatus(currentLane.id, 'running', 'system', 'current_live_generation');
+
+    const retry = parseJsonResult<{ reset?: boolean; salvaged?: boolean }>(await handleRetryPacket({ packetId }));
+    expect(retry.reset).toBe(true);
+    expect(retry.salvaged).not.toBe(true);
+    expect(listLanes().some((lane) => lane.packetId === packetId && lane.status === 'reviewing')).toBe(false);
+    expect(getLane(staleLane.id)).toMatchObject({ status: 'archived', packetId: '', worktreePath: null });
+    expect(execFileSync('git', ['rev-list', '--count', 'main..HEAD'], { cwd: staleWorktree, encoding: 'utf8' }).trim()).toBe('1');
+  }, 20_000);
+
+  it('does not promote a worktree dirtied during the confirmed kill seam', async () => {
+    const repoPath = createTempRepo();
+    stubMissionApiFetch();
+    const first = await createInlineMission('registry post-kill retry A', repoPath);
+    await createInlineMission('registry post-kill retry B', repoPath);
+    const packetId = first.packets[0]!.id;
+    const { handleDispatchMission, handleRetryPacket } = await import('@/lib/mcp/operator-handlers/mission');
+    expect(parseJsonResult<{ dispatched?: number }>(await handleDispatchMission({ missionId: first.missionId })).dispatched).toBe(1);
+
+    const { findLaneByPacket, listLanes, setLaneStatus, updateLane } = await import('@/lib/lane/registry');
+    const lane = findLaneByPacket(packetId)!;
+    commitWorkerResult(repoPath, lane.branch);
+    const sessionKey = 'opencode:test-kill-seam';
+    updateLane(lane.id, { sessionKey });
+    setLaneStatus(lane.id, 'failed', 'system', 'zero_diff_failed');
+    const { withMissionRegistryState, readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
+    await withMissionRegistryState(first.missionId, (state) => {
+      const packet = state.packets.find((candidate) => candidate.id === packetId)!;
+      packet.lane = { ...packet.lane!, sessionKey };
+      return { state, result: null };
+    });
+    retrySalvageKillSeam.forceConfirmed = true;
+    retrySalvageKillSeam.afterConfirmed = () => writeFileSync(join(repoPath, 'DIRTY.md'), 'late worker write\n');
+
+    const retry = parseJsonResult<{ reset?: boolean; salvaged?: boolean }>(await handleRetryPacket({ packetId }));
+    const packet = readMissionRegistryEntry(first.missionId, { includeArchived: true })?.mission.packets
+      .find((candidate) => candidate.id === packetId);
+    expect(retry.reset).toBe(true);
+    expect(retry.salvaged).not.toBe(true);
+    expect(retrySalvageKillSeam.calls).toBeGreaterThan(0);
+    expect(packet).toMatchObject({ status: 'draft', queueState: 'held', lane: null });
+    expect(listLanes().some((candidate) => candidate.packetId === packetId && candidate.status === 'reviewing')).toBe(false);
+    expect(execFileSync('git', ['status', '--porcelain'], { cwd: repoPath, encoding: 'utf8' })).toContain('DIRTY.md');
+  }, 20_000);
+
+  it('holds persisted retry salvage against dispatch and refuses to overwrite a newer generation', async () => {
+    const repoPath = createTempRepo();
+    stubMissionApiFetch();
+    const first = await createInlineMission('registry concurrent retry A', repoPath);
+    await createInlineMission('registry concurrent retry B', repoPath);
+    const packetId = first.packets[0]?.id;
+    expect(packetId).toBeTruthy();
+
+    const { handleDispatchMission, handleRetryPacket } = await import('@/lib/mcp/operator-handlers/mission');
+    const initialDispatch = parseJsonResult<{ dispatched?: number }>(await handleDispatchMission({ missionId: first.missionId }));
+    expect(initialDispatch.dispatched).toBe(1);
+
+    const {
+      archiveLane,
+      createLane,
+      findLaneByPacket,
+      getLane,
+      setLaneStatus,
+      updateLane,
+    } = await import('@/lib/lane/registry');
+    const oldLane = findLaneByPacket(packetId!);
+    expect(oldLane?.worktreePath).toBe(repoPath);
+    commitWorkerResult(repoPath, oldLane!.branch);
+    updateLane(oldLane!.id, { sessionKey: null });
+    setLaneStatus(oldLane!.id, 'failed', 'system', 'zero_diff_failed');
+
+    let releaseProbe!: () => void;
+    let markProbeEntered!: () => void;
+    const probeEntered = new Promise<void>((resolve) => {
+      markProbeEntered = resolve;
+    });
+    retrySalvageProbeGate.entered = markProbeEntered;
+    retrySalvageProbeGate.wait = new Promise<void>((resolve) => {
+      releaseProbe = resolve;
+    });
+
+    const launchCountBeforeRetry = launchMock.calls.length;
+    const retryPromise = handleRetryPacket({
+      packetId: packetId!,
+      reason: 'recover committed timing-drift result',
+    });
+    await probeEntered;
+
+    const { readMissionRegistryEntry, withMissionRegistryState } = await import('@/lib/orchestrator/mission-registry');
+    const held = readMissionRegistryEntry(first.missionId, { includeArchived: true })?.mission.packets
+      .find((candidate) => candidate.id === packetId);
+    expect(held).toMatchObject({
+      queueState: 'held',
+      operatorStopped: true,
+      releaseStatePayload: { source: expect.stringMatching(/^retry_salvage:/) },
+    });
+
+    const concurrentDispatch = parseJsonResult<{ dispatched?: number }>(await handleDispatchMission({
+      missionId: first.missionId,
+    }));
+    expect(concurrentDispatch.dispatched).toBe(0);
+    expect(launchMock.calls).toHaveLength(launchCountBeforeRetry);
+
+    const nextLane = createLane({
+      repoPath: oldLane!.repoPath,
+      projectId: oldLane!.projectId,
+      branch: `${oldLane!.branch}-next`,
+      baseBranch: oldLane!.baseBranch,
+      runtime: oldLane!.runtime,
+      label: `${oldLane!.label} next`,
+      packetId: packetId!,
+      ownership: oldLane!.ownership,
+      worktreePath: repoPath,
+      actor: 'system',
+    });
+    setLaneStatus(nextLane.id, 'running', 'system', 'concurrent_generation');
+    await withMissionRegistryState(first.missionId, (current) => {
+      const packet = current.packets.find((candidate) => candidate.id === packetId);
+      expect(packet?.lane).toBeTruthy();
+      packet!.status = 'running';
+      packet!.queueState = 'queued';
+      packet!.operatorStopped = false;
+      packet!.blockedReason = null;
+      packet!.releaseStatePayload = null;
+      packet!.lastEventLabel = 'concurrent_generation';
+      packet!.lane = {
+        ...packet!.lane!,
+        laneId: nextLane.id,
+        sessionKey: null,
+        worktreePath: repoPath,
+        lastEventLabel: 'concurrent_generation',
+      };
+      return { state: current, result: null };
+    });
+
+    retrySalvageProbeGate.wait = null;
+    releaseProbe();
+    const retryResult = parseJsonResult<{ reset?: boolean; salvaged?: boolean; note?: string }>(await retryPromise);
+    expect(retryResult).toMatchObject({
+      reset: false,
+      salvaged: false,
+      note: expect.stringContaining('changed while retry salvage was probing'),
+    });
+
+    const preserved = readMissionRegistryEntry(first.missionId, { includeArchived: true })?.mission.packets
+      .find((candidate) => candidate.id === packetId);
+    expect(preserved).toMatchObject({
+      status: 'running',
+      queueState: 'queued',
+      lastEventLabel: 'concurrent_generation',
+      lane: { laneId: nextLane.id },
+    });
+    expect(preserved?.operatorStopped).not.toBe(true);
+    expect(getLane(oldLane!.id)).toMatchObject({
+      packetId,
+      status: 'failed',
+      worktreePath: repoPath,
+    });
+    expect(getLane(nextLane.id)).toMatchObject({
+      packetId,
+      status: 'running',
+      worktreePath: repoPath,
+    });
+    expect(launchMock.calls).toHaveLength(launchCountBeforeRetry);
+    archiveLane(oldLane!.id, 'system');
+    archiveLane(nextLane.id, 'system');
+  }, 20_000);
+
+  it('preserves a newer generation when retry salvage finds no committed candidate', async () => {
+    const repoPath = createTempRepo();
+    stubMissionApiFetch();
+    const first = await createInlineMission('registry empty retry A', repoPath);
+    await createInlineMission('registry empty retry B', repoPath);
+    const packetId = first.packets[0]?.id;
+    expect(packetId).toBeTruthy();
+
+    const { handleDispatchMission, handleRetryPacket } = await import('@/lib/mcp/operator-handlers/mission');
+    expect(parseJsonResult<{ dispatched?: number }>(await handleDispatchMission({
+      missionId: first.missionId,
+    })).dispatched).toBe(1);
+
+    const {
+      archiveLane,
+      createLane,
+      findLaneByPacket,
+      getLane,
+      setLaneStatus,
+    } = await import('@/lib/lane/registry');
+    const oldLane = findLaneByPacket(packetId!);
+    expect(oldLane?.worktreePath).toBe(repoPath);
+
+    let releaseProbe!: () => void;
+    let markProbeEntered!: () => void;
+    const probeEntered = new Promise<void>((resolve) => {
+      markProbeEntered = resolve;
+    });
+    retrySalvageProbeGate.entered = markProbeEntered;
+    retrySalvageProbeGate.wait = new Promise<void>((resolve) => {
+      releaseProbe = resolve;
+    });
+
+    const retryPromise = handleRetryPacket({
+      packetId: packetId!,
+      reason: 'retry clean zero-change result',
+    });
+    await probeEntered;
+
+    const nextLane = createLane({
+      repoPath: oldLane!.repoPath,
+      projectId: oldLane!.projectId,
+      branch: `${oldLane!.branch}-next-empty`,
+      baseBranch: oldLane!.baseBranch,
+      runtime: oldLane!.runtime,
+      label: `${oldLane!.label} next empty`,
+      packetId: packetId!,
+      ownership: oldLane!.ownership,
+      worktreePath: repoPath,
+      actor: 'system',
+    });
+    setLaneStatus(nextLane.id, 'running', 'system', 'concurrent_empty_generation');
+    const { readMissionRegistryEntry, withMissionRegistryState } = await import('@/lib/orchestrator/mission-registry');
+    await withMissionRegistryState(first.missionId, (current) => {
+      const packet = current.packets.find((candidate) => candidate.id === packetId)!;
+      packet.status = 'running';
+      packet.queueState = 'queued';
+      packet.operatorStopped = false;
+      packet.blockedReason = null;
+      packet.releaseStatePayload = null;
+      packet.lastEventLabel = 'concurrent_empty_generation';
+      packet.lane = {
+        ...packet.lane!,
+        laneId: nextLane.id,
+        sessionKey: null,
+        worktreePath: repoPath,
+        lastEventLabel: 'concurrent_empty_generation',
+      };
+      return { state: current, result: null };
+    });
+
+    retrySalvageProbeGate.wait = null;
+    releaseProbe();
+    const retry = parseJsonResult<{ reset?: boolean; salvaged?: boolean; note?: string }>(await retryPromise);
+    expect(retry).toMatchObject({
+      reset: false,
+      salvaged: false,
+      note: expect.stringContaining('newer generation was left untouched'),
+    });
+    expect(readMissionRegistryEntry(first.missionId, { includeArchived: true })?.mission.packets
+      .find((candidate) => candidate.id === packetId)).toMatchObject({
+      status: 'running',
+      queueState: 'queued',
+      lane: { laneId: nextLane.id },
+    });
+    expect(getLane(oldLane!.id)).toMatchObject({ packetId, status: oldLane!.status });
+    expect(getLane(nextLane.id)).toMatchObject({ packetId, status: 'running' });
+    archiveLane(oldLane!.id, 'system');
+    archiveLane(nextLane.id, 'system');
   }, 20_000);
 
   it('dispatch_mission reports an archived terminal-lane skip with a retry action', async () => {
@@ -418,5 +917,34 @@ describe('headless mission registry dispatch', () => {
     const persisted = readMissionRegistryEntry(mission.missionId, { includeArchived: true })?.mission;
     expect(observed).toEqual(['first:', 'second:first-write']);
     expect(persisted?.summary).toBe('second saw first-write');
+  });
+
+  it('keeps registry versions monotonic when multiple mutations share one clock tick', async () => {
+    const repoPath = createTempRepo();
+    stubMissionApiFetch();
+    const mission = await createInlineMission('registry monotonic version', repoPath);
+    const {
+      persistMissionRegistryStateIfVersion,
+      readMissionRegistryEntry,
+      withMissionRegistryState,
+    } = await import('@/lib/orchestrator/mission-registry');
+    const before = readMissionRegistryEntry(mission.missionId, { includeArchived: true })!;
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(before.updatedAt);
+    try {
+      await withMissionRegistryState(mission.missionId, (state) => ({
+        state: { ...state, constraints: 'newer-registry-truth' },
+        result: null,
+      }));
+      const after = readMissionRegistryEntry(mission.missionId, { includeArchived: true })!;
+      expect(after.updatedAt).toBeGreaterThan(before.updatedAt);
+      await expect(persistMissionRegistryStateIfVersion(
+        { ...before.mission, summary: 'stale outgoing snapshot' },
+        before.updatedAt,
+      )).resolves.toBe(false);
+      expect(readMissionRegistryEntry(mission.missionId, { includeArchived: true })?.mission)
+        .toMatchObject({ constraints: 'newer-registry-truth' });
+    } finally {
+      clock.mockRestore();
+    }
   });
 });

@@ -28,6 +28,7 @@ interface IntentBody {
   args?: unknown;
   ensure?: unknown;
   origin?: unknown;
+  clientMutationId?: unknown;
 }
 
 interface DispatchProbe {
@@ -110,6 +111,9 @@ export async function POST(request: NextRequest) {
         const repoPath = typeof args.repo === 'string' ? args.repo.trim() : '';
         const task = typeof args.task === 'string' ? args.task.trim() : '';
         if (repoPath && task) {
+          const clientMutationId = typeof body?.clientMutationId === 'string' && body.clientMutationId.trim()
+            ? body.clientMutationId.trim()
+            : crypto.randomUUID();
           const { POST: spawnPrompt } = await import('@/app/api/orchestrator/spawn-prompt/route');
           const forwarded = new NextRequest(new Request(new URL('/api/orchestrator/spawn-prompt', getApiBase()), {
             method: 'POST',
@@ -118,6 +122,7 @@ export async function POST(request: NextRequest) {
               repoPath,
               task,
               count: typeof args.count === 'number' ? args.count : 1,
+              clientMutationId,
               ...(origin === 'symon' ? { origin } : {}),
             }),
           }));

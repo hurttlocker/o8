@@ -28,13 +28,17 @@ process.env.CORTEX_IDE_DATA_DIR = dataDir;
 // Hold the reset's cleanup phase open so the test controls the race window.
 let releaseCleanupGate: () => void = () => {};
 const cleanupGate = new Promise<void>((resolve) => { releaseCleanupGate = resolve; });
-vi.mock('@/lib/lane/reap-sessions', () => ({
-  killLaneSessionsConfirmed: vi.fn(async () => {
-    await cleanupGate;
-    return [];
-  }),
-  archiveLaneSessions: vi.fn(async () => {}),
-}));
+vi.mock('@/lib/lane/reap-sessions', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/lane/reap-sessions')>();
+  return {
+    ...actual,
+    killLaneSessionsConfirmed: vi.fn(async () => {
+      await cleanupGate;
+      return [];
+    }),
+    archiveLaneSessions: vi.fn(async () => ({ targeted: 0, archived: 0, outcomes: [], failures: [] })),
+  };
+});
 
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const {
@@ -42,6 +46,7 @@ const {
   withLockedState,
   writeOrchestratorControlPlaneState,
 } = await import('@/lib/orchestrator/control-plane');
+const { createLane, getLane, setLaneStatus } = await import('@/lib/lane/registry');
 const { resetPacket } = await import('@/lib/orchestrator/operator-mission-service/reset');
 const { getDispatchBlocker } = await import('@/lib/orchestrator/scheduling');
 
@@ -72,12 +77,34 @@ function packetFixture(overrides: Partial<OrchestratorPacket> = {}): Orchestrato
 
 describe('#1527 — reset hold cannot be reverted by writes racing the cleanup window', () => {
   it('a hold landed mid-cleanup survives the reset write, and the reset hold lands on fresh state', async () => {
+    const repoPath = join(dataDir, 'repo');
+    const sessionKey = 'codex-owned:hold-race-a';
+    const lane = createLane({
+      repoPath,
+      branch: 'issue/audit-a',
+      runtime: 'codex',
+      packetId: 'pkt-hold-race-a',
+      sessionKey,
+    });
+    setLaneStatus(lane.id, 'running', 'system', 'hold_race_fixture');
     writeOrchestratorControlPlaneState({
       ...createEmptyOrchestratorMissionState(),
       missionId: 'mission-hold-race',
-      repoPath: join(dataDir, 'repo'),
+      repoPath,
       packets: [
-        packetFixture(),
+        packetFixture({
+          lane: {
+            tileId: 'tile-a',
+            tabId: 'tab-a',
+            repoPath,
+            runtime: 'codex',
+            laneId: lane.id,
+            sessionKey,
+            lastHeartbeatAt: null,
+            lastEventAt: null,
+            lastEventLabel: null,
+          },
+        }),
         packetFixture({ id: 'pkt-hold-race-b', referenceLabel: 'PKT-B', title: 'audit packet B', branchTarget: 'issue/audit-b' }),
       ],
     });
@@ -90,7 +117,7 @@ describe('#1527 — reset hold cannot be reverted by writes racing the cleanup w
     const duringCleanup = readOrchestratorControlPlaneState();
     const heldDuringCleanup = duringCleanup.packets.find((candidate) => candidate.id === 'pkt-hold-race-a');
     expect(heldDuringCleanup).toMatchObject({ queueState: 'held' });
-    expect(getDispatchBlocker(heldDuringCleanup!, duringCleanup.packets)).toBe('Not queued');
+    expect(getDispatchBlocker(heldDuringCleanup!, duringCleanup.packets)).toBe('Operator stopped');
 
     // The overlapping second reset: packet B's hold lands through the locked
     // seam while packet A's reset is still mid-cleanup.
@@ -113,6 +140,11 @@ describe('#1527 — reset hold cannot be reverted by writes racing the cleanup w
 
     // The reset's own hold landed…
     expect(packetA?.queueState).toBe('held');
+    expect(getLane(lane.id)).toMatchObject({
+      status: 'archived',
+      packetId: '',
+      sessionKey,
+    });
     // …and the hold written during the race window was NOT reverted to
     // 'queued' — the exact revert that let the dispatch tick relaunch an
     // archived packet in the incident.

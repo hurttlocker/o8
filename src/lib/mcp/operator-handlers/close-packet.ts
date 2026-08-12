@@ -1,7 +1,7 @@
 import {
   type McpTool,
   type McpToolResult,
-  apiFetch,
+  apiFetchCorrelatedMutation,
   errorText,
   jsonResult,
   optionalString,
@@ -43,14 +43,15 @@ export async function handleClosePacketUnmerged(args: Record<string, unknown>): 
     if (!(CLOSE_UNMERGED_DISPOSITIONS as readonly string[]).includes(disposition)) {
       throw new Error(`disposition must be one of: ${CLOSE_UNMERGED_DISPOSITIONS.join(', ')}.`);
     }
-    const result = await apiFetch('/api/orchestrator/discard-packet', {
-      method: 'POST',
-      body: JSON.stringify({
+    const result = await apiFetchCorrelatedMutation(
+      '/api/orchestrator/discard-packet',
+      {
         packetId: requiredString(args, 'packetId'),
         disposition,
         note: optionalString(args, 'note') || undefined,
-      }),
-    });
+      },
+      'clientMutationId',
+    );
     return jsonResult(result);
   } catch (error) {
     console.error(`${'[mcp-operator]'} close_packet_unmerged failed: ${errorText(error)}`);

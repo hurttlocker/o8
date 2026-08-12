@@ -12,6 +12,7 @@ vi.mock('@/lib/runtime/inventory', () => ({
 vi.mock('@/lib/approvals/store', () => ({
   approvalSeverity: () => 'info',
   listApprovals: () => [],
+  listUnsettledApprovalContinuations: () => [],
   toMobileApprovalCard: (value: unknown) => value,
 }));
 

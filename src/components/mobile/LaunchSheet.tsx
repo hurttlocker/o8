@@ -1,6 +1,8 @@
 'use client';
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { correlatedActionIsUnsettled } from '@/lib/orchestrator/action-receipt';
+import { fetchRuntimeLaunchReceipt } from '@/lib/orchestrator/runtime-mutation-receipt';
 import { useTheme } from './ThemeContext';
 
 type ThemeColors = ReturnType<typeof useTheme>['colors'];
@@ -120,16 +122,10 @@ export const LaunchSheet = memo(function LaunchSheet({
         body.skipSetup = true;
       }
 
-      const response = await fetch('/api/runtime/launch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
+      const { response, payload: result } = await fetchRuntimeLaunchReceipt(body);
 
-      const result = await response.json();
-
-      if (!response.ok || !result.ok) {
-        setError(result.error || 'Launch failed');
+      if (!response.ok || !result?.ok || !result.surfaceId) {
+        setError(result?.error || result?.note || 'Launch failed.');
         setLaunching(false);
         return;
       }
@@ -142,7 +138,7 @@ export const LaunchSheet = memo(function LaunchSheet({
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Launch failed');
-      setLaunching(false);
+      if (!correlatedActionIsUnsettled(err)) setLaunching(false);
     }
   }, [task, selectedRepo, selectedRuntime, branchMode, branchValue, onLaunched, onClose]);
 

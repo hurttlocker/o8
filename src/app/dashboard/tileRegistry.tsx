@@ -299,6 +299,7 @@ export function createTileRegistry({
             key={`workspace-terminal:${tileId}:${workspaceTerminalResetNonceByTileId[tileId] ?? 0}`}
             ref={(handle) => registerWorkspaceTerminalHandle(tileId, handle)}
             stateScope={tileId}
+            activeWorkspaceSurface={activeTileId === tileId}
             defaultTab={isPrimaryWorkspaceTile ? 'llm-chat' : 'terminal'}
             autoCreateDefaultTab={isPrimaryWorkspaceTile || workspaceScopeEntries.length > 0}
             conversationNavigation={isPrimaryWorkspaceTile ? 'sidebar' : 'tabs'}

@@ -2,6 +2,7 @@ import {
   type McpTool,
   type McpToolResult,
   apiFetch,
+  apiFetchCorrelatedMutation,
   errorText,
   jsonResult,
   optionalString,
@@ -47,7 +48,7 @@ export const APPROVE_TOOLS: McpTool[] = [
   {
     name: 'approve_and_merge',
     description:
-      'USE THIS WHEN a packet is awaiting_review (per get_mission_status) and you\'ve already reviewed the code via o8_packet_diff and the gates via o8_merge_preview. This is the final step of the dispatch loop — runs the governance policy engine + merges to main. On failure returns {merged:false, checks[], blockers[]} so you know which gate rejected it (file-size? security pattern?). Pass an optional idempotencyKey to safely retry. Example: approve_and_merge({packetId: "pkt-abc"}) or approve_and_merge({packetId: "pkt-abc", commitMessage: "feat: add login flow (#100)", idempotencyKey: "merge-pkt-abc-2026-04-18"})',
+      'USE THIS WHEN a packet is awaiting_review (per get_mission_status) and you\'ve already reviewed the code via o8_packet_diff and the gates via o8_merge_preview. This is the final step of the dispatch loop — runs the governance policy engine + merges to main. On failure returns {merged:false, checks[], blockers[]} so you know which gate rejected it (file-size? security pattern?). Example: approve_and_merge({packetId: "pkt-abc"}) or approve_and_merge({packetId: "pkt-abc", commitMessage: "feat: add login flow (#100)"})',
     inputSchema: {
       type: 'object',
       properties: {
@@ -61,7 +62,7 @@ export const APPROVE_TOOLS: McpTool[] = [
         },
         idempotencyKey: {
           type: 'string',
-          description: 'Optional client-supplied key. Repeat calls with the same key inside a 5-minute window return the cached result without re-running the merge.',
+          description: 'Optional caller correlation key. o8 generates one when omitted; transport retries reuse the same request body.',
         },
         expectedHeadSha: {
           type: 'string',
@@ -145,15 +146,20 @@ export async function handleApproveAndMerge(args: Record<string, unknown>): Prom
     // #2 Stage 5: route through /api/orchestrator/merge — idempotency + the
     // synchronous worktree-cleanup now live server-side in that route, so every
     // client inherits them instead of this MCP process owning a private copy.
-    const res = await apiFetch('/api/orchestrator/merge', {
-      method: 'POST',
-      body: JSON.stringify({
+    const suppliedIdempotencyKey = optionalString(args, 'idempotencyKey');
+    const res = await apiFetchCorrelatedMutation<{
+      ok?: boolean;
+      result?: Record<string, unknown>;
+    }>(
+      '/api/orchestrator/merge',
+      {
         packetId,
         commitMessage: optionalString(args, 'commitMessage') || undefined,
         expectedHeadSha: optionalString(args, 'expectedHeadSha') || undefined,
-        idempotencyKey: optionalString(args, 'idempotencyKey') || undefined,
-      }),
-    }) as { ok?: boolean; result?: Record<string, unknown> };
+        ...(suppliedIdempotencyKey ? { idempotencyKey: suppliedIdempotencyKey } : {}),
+      },
+      'idempotencyKey',
+    );
     return jsonResult(res.result ?? res);
   } catch (error) {
     console.error(`${'[mcp-operator]'} approve_and_merge failed: ${errorText(error)}`);

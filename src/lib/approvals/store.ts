@@ -374,6 +374,7 @@ export function listApprovals(options: { status?: ApprovalRecord['status'] | 'al
     .filter((approval) => approval.args?.approvalRoute !== 'dispatcher');
 }
 
+export function listUnsettledApprovalContinuations(options: { sessionKey?: string; projectId?: string | null } = {}) { return listApprovals({ status: 'all', ...options }).filter((approval) => approval.resolution?.continuationStatus === 'pending' || approval.resolution?.continuationStatus === 'outcome_unknown'); }
 export function getApproval(id: string) {
   const row = getApprovalDb()
     .select()
@@ -546,7 +547,6 @@ export function recordApprovalAudit(
 
   const event = auditEvent(type, actor, note, details);
 
-  // Write to normalized events table (primary)
   insertApprovalEvent(id, event);
 
   // Also append to audit_json for backward compat reads

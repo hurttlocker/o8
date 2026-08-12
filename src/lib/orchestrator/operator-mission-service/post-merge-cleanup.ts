@@ -170,20 +170,8 @@ async function archiveSession(target: PostMergeCleanupTarget) {
   }
 
   try {
-    if (target.runtime === 'codex') {
-      return (await import('@/lib/codex/owned')).archiveOwnedCodexSession(sessionKey).then((result) => result.archived);
-    }
-    if (target.runtime === 'claude-code') {
-      return (await import('@/lib/claude-code/owned')).archiveOwnedClaudeCodeSession(sessionKey).then((result) => result.archived);
-    }
-    if (target.runtime === 'gemini') {
-      return (await import('@/lib/gemini/owned')).archiveOwnedGeminiSession(sessionKey).then((result) => result.archived);
-    }
-    if (target.runtime === 'opencode') {
-      return (await import('@/lib/opencode/owned')).archiveOwnedOpencodeSession(sessionKey).then((result) => result.archived);
-    }
-    console.warn(`[merge-cleanup] Runtime ${target.runtime} does not use an owned-session archive.`);
-    return false;
+    const { archiveOwnedRuntimeSession } = await import('@/lib/runtime/owned-session-archive');
+    return (await archiveOwnedRuntimeSession(sessionKey))?.archived === true;
   } catch (error) {
     console.warn(`[merge-cleanup] Failed to archive session ${sessionKey}: ${formatError(error)}`);
     return false;

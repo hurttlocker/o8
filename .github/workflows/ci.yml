@@ -39,6 +39,7 @@ jobs:
       # broke every PR + main). One npm version everywhere.
       - run: npm install -g npm@11
       - run: npm ci --prefer-offline
+      - run: npm run protocol:check
       - run: npm run typecheck
 
   # Lint restored to the PR lane 2026-07-18 (#1547): the error debt is burned

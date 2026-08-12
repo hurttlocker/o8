@@ -8,6 +8,8 @@ import {
   quizPassed,
   type QuizAnswers,
 } from '@/lib/orchestrator/quiz-gate';
+import { actionReceiptIsInProgress, correlatedActionIsUnsettled, fetchCorrelatedActionReceipt } from '@/lib/orchestrator/action-receipt';
+import { useCorrelatedActionLatch } from '@/components/desktop/use-correlated-action-latch';
 import {
   buildConcerns,
   Concern,
@@ -70,7 +72,9 @@ export function ReviewPane({ packet, onActionComplete }: {
   const prOnlyMode = packet.lane?.mergeMode === 'pr_only';
   const prOnlyCaption = packet.lane?.mergeModeNote ?? 'PR-only mode is active. Create a PR for human merge.';
 
-  const [busy, setBusy] = useState<'merge' | 'create_pr' | 'respec' | 'kill' | null>(null);
+  const { busy, begin: beginAction, settle: settleAction } = useCorrelatedActionLatch<
+    'merge' | 'create_pr' | 'respec' | 'kill'
+  >();
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedback, setFeedback] = useState('');
   const [actionError, setActionError] = useState<string | null>(null);
@@ -114,34 +118,52 @@ export function ReviewPane({ packet, onActionComplete }: {
     body: Record<string, unknown>,
     endpoint: string,
   ) => {
-    setBusy(kind);
+    if (!beginAction(kind)) return false;
     setActionError(null);
     setActionNote(null);
+    let inProgress = false;
     try {
-      const response = await fetch(endpoint, {
+      const correlatedBody = endpoint === '/api/orchestrator/reset-packet'
+        || endpoint === '/api/orchestrator/rerun-with-feedback'
+        || endpoint === '/api/orchestrator/merge'
+        ? { ...body, idempotencyKey: crypto.randomUUID() }
+        : body;
+      const requestBody = JSON.stringify(correlatedBody);
+      const { response, payload } = await fetchCorrelatedActionReceipt<{
+        ok?: boolean;
+        result?: { note?: string; merged?: boolean; inProgress?: boolean; status?: string };
+        error?: { message?: string };
+      }>(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: requestBody,
       });
-      const payload = await response.json().catch(() => null) as {
-        ok?: boolean;
-        result?: { note?: string; merged?: boolean };
-        error?: { message?: string };
-      } | null;
       if (!response.ok || !payload?.ok) {
         throw new Error(payload?.error?.message ?? `Unable to ${kind} packet.`);
+      }
+      if (actionReceiptIsInProgress(response.status, payload.result)) {
+        inProgress = true;
+        setActionNote(payload.result?.note ?? `${kind === 'merge' ? 'Merge' : 'Packet action'} is already in progress.`);
+        return false;
       }
       if (kind === 'merge' && payload.result?.merged === false) {
         throw new Error(payload.result.note ?? 'Merge was refused.');
       }
       setActionNote(payload.result?.note ?? null);
       onActionComplete?.();
+      return true;
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : `Unable to ${kind} packet.`);
+      if (correlatedActionIsUnsettled(error)) {
+        inProgress = true;
+        setActionNote(error.message);
+      } else {
+        setActionError(error instanceof Error ? error.message : `Unable to ${kind} packet.`);
+      }
+      return false;
     } finally {
-      setBusy(null);
+      settleAction(inProgress);
     }
-  }, [onActionComplete]);
+  }, [beginAction, onActionComplete, settleAction]);
 
   const onMerge = useCallback(() => {
     void callAction('merge', { packetId: packet.id }, '/api/orchestrator/merge');
@@ -152,7 +174,7 @@ export function ReviewPane({ packet, onActionComplete }: {
       setActionError('No lane is bound to this packet yet.');
       return;
     }
-    setBusy('create_pr');
+    if (!beginAction('create_pr')) return;
     setActionError(null);
     setActionNote(null);
     try {
@@ -175,9 +197,9 @@ export function ReviewPane({ packet, onActionComplete }: {
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Unable to create PR.');
     } finally {
-      setBusy(null);
+      settleAction(false);
     }
-  }, [laneId, onActionComplete]);
+  }, [beginAction, laneId, onActionComplete, settleAction]);
 
   const onKill = useCallback(() => {
     void callAction('kill', { packetId: packet.id, clearWorktree: true, reason: 'Killed via review card.' }, '/api/orchestrator/reset-packet');
@@ -187,7 +209,8 @@ export function ReviewPane({ packet, onActionComplete }: {
     const trimmed = feedback.trim();
     if (!trimmed) return;
     void callAction('respec', { packetId: packet.id, feedback: trimmed }, '/api/orchestrator/rerun-with-feedback')
-      .then(() => {
+      .then((completed) => {
+        if (!completed) return;
         setFeedback('');
         setFeedbackOpen(false);
       });

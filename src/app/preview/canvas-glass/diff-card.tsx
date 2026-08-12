@@ -9,6 +9,7 @@
  */
 
 import { useRef, useState } from 'react';
+import { actionReceiptIsInProgress, correlatedActionIsUnsettled, fetchCorrelatedActionReceipt } from '@/lib/orchestrator/action-receipt';
 import { CHROME, FONT, scrollFadeY } from './ui';
 import { GlassCardShell } from './card-shell';
 import { useScrollBlurFade } from './use-scroll-blur-fade';
@@ -78,21 +79,42 @@ export function DiffGlassCard({
     }
     setMerge({ kind: 'merging' });
     try {
-      const response = await fetch('/api/orchestrator/merge', {
+      const { response, payload: data } = await fetchCorrelatedActionReceipt<{
+        ok?: boolean;
+        result?: {
+          merged?: boolean;
+          status?: string;
+          inProgress?: boolean;
+          note?: string;
+          blockers?: Array<{ note?: string; reason?: string } | string>;
+        };
+        error?: { message?: string } | string;
+      }>('/api/orchestrator/merge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packetId: card.packetId }),
+        body: JSON.stringify({ packetId: card.packetId, idempotencyKey: crypto.randomUUID() }),
       });
-      const data = await response.json().catch(() => null) as { merged?: boolean; blockers?: Array<{ note?: string; reason?: string } | string>; error?: string; note?: string } | null;
-      if (response.ok && data?.merged) {
+      if (response.ok && data?.ok && actionReceiptIsInProgress(response.status, data.result)) {
+        setMerge({ kind: 'merging' });
+        return;
+      }
+      if (response.ok && data?.ok && data.result?.merged) {
         setMerge({ kind: 'merged' });
         return;
       }
-      const blockers = Array.isArray(data?.blockers)
-        ? data.blockers.map((blocker) => typeof blocker === 'string' ? blocker : blocker?.note ?? blocker?.reason ?? '').filter(Boolean).join(' · ')
+      const blockers = Array.isArray(data?.result?.blockers)
+        ? data.result.blockers.map((blocker) => typeof blocker === 'string' ? blocker : blocker?.note ?? blocker?.reason ?? '').filter(Boolean).join(' · ')
         : '';
-      setMerge({ kind: 'blocked', note: blockers || data?.error || data?.note || `Merge gate said no (${response.status}).` });
-    } catch {
+      const errorMessage = typeof data?.error === 'string' ? data.error : data?.error?.message;
+      setMerge({
+        kind: 'blocked',
+        note: blockers || errorMessage || data?.result?.note || `Merge gate said no (${response.status}).`,
+      });
+    } catch (error) {
+      if (correlatedActionIsUnsettled(error)) {
+        setMerge({ kind: 'merging' });
+        return;
+      }
       setMerge({ kind: 'blocked', note: 'Merge request failed — is the lane still alive?' });
     }
   };

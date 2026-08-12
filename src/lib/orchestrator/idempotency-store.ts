@@ -19,10 +19,9 @@
  *   3. FINALIZE — write the JSON result onto the reserved row.
  *
  * A caller that loses the reserve (row already present) replays the finalized
- * result, or — if the owner is still running (result_json NULL) — returns an
- * `inProgress` marker WITHOUT re-executing. On a thrown run() the reservation
- * is deleted so a legitimate retry of a genuinely-failed op can proceed
- * (idempotency replays SUCCESSES, never caches failures).
+ * result, or — if no terminal receipt exists yet (result_json NULL) — returns
+ * an `inProgress` marker WITHOUT re-executing. On a thrown run() in the owning
+ * process the reservation is deleted so a confirmed failure can be retried.
  *
  * Merge verbs (approve_and_merge) now share this store too (#1513). The old
  * in-memory `idempotency-cache.ts` — deleted — intentionally forgot in-flight
@@ -30,7 +29,8 @@
  * preserved by stamping the owning `pid` on each reservation and reaping
  * reservations from dead processes on DB init (see `reapDeadIdempotencyReservations`
  * in `db/index.ts`). A LIVE in-flight merge is still deduped; a restart-orphaned
- * one becomes immediately retryable.
+ * one remains quarantined with an outcome-unknown receipt until a verb-specific
+ * reconciler can prove whether the side effect happened.
  */
 
 import { createHash, randomUUID } from 'node:crypto';
@@ -43,6 +43,10 @@ export interface IdempotencyOutcome<T> {
   replayed: boolean;
   /** true when a duplicate arrived while the original was still running. */
   inProgress: boolean;
+  /** The side effect completed, but its replay receipt only exists in-process. */
+  persistenceDegraded?: boolean;
+  /** The original process ended before a terminal receipt was persisted. */
+  unresolved?: boolean;
   result: T;
 }
 
@@ -52,10 +56,61 @@ export interface InProgressMarker {
   status: 'in_progress';
   verb: string;
   note: string;
+  outcomeUnknown?: boolean;
 }
+
+export type ClientMutationBindingResult =
+  | { status: 'bound' | 'matched'; digest: string }
+  | { status: 'conflict'; digest: string; existingDigest: string | null }
+  | { status: 'unavailable'; digest: string };
 
 function normalizeBody(body: string | undefined): string {
   return (body ?? '').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Persistently bind one caller-supplied mutation id to one canonical body.
+ *
+ * The ordinary idempotency key deliberately lets an explicit client key win,
+ * so it cannot detect a client accidentally reusing that key with new input.
+ * This completed-row binding uses the existing SQLite table and one atomic
+ * INSERT OR IGNORE, making the comparison race-safe and restart-safe without a
+ * schema migration. Callers still use withIdempotency for execution/replay.
+ */
+export function bindIdempotencyClientMutation(input: {
+  namespace: string;
+  clientKey: string;
+  body: string;
+  ttlMs?: number;
+  now?: number;
+}): ClientMutationBindingResult {
+  const digest = createHash('sha256').update(input.body).digest('hex');
+  if (!getDb()) return { status: 'unavailable', digest };
+
+  const now = input.now ?? Date.now();
+  const expiresAt = now + (input.ttlMs ?? DEFAULT_TTL_MS);
+  pruneExpired(now);
+  const clientKeyDigest = createHash('sha256').update(input.clientKey.trim()).digest('hex');
+  const key = `${input.namespace}:client-mutation:${clientKeyDigest}`;
+  const resultJson = JSON.stringify({ digest });
+  const inserted = getSqlite().prepare(
+    `INSERT OR IGNORE INTO idempotency_keys
+      (key, verb, packet_id, result_json, pid, reservation_id, created_at, expires_at)
+     VALUES (?, ?, ?, ?, NULL, NULL, ?, ?)`,
+  ).run(key, `${input.namespace}.client_mutation`, input.namespace, resultJson, now, expiresAt);
+  if (inserted.changes > 0) return { status: 'bound', digest };
+
+  const existing = selectFresh(key, now);
+  if (!existing?.result_json) return { status: 'conflict', digest, existingDigest: null };
+  try {
+    const parsed = JSON.parse(existing.result_json) as { digest?: unknown };
+    const existingDigest = typeof parsed.digest === 'string' ? parsed.digest : null;
+    return existingDigest === digest
+      ? { status: 'matched', digest }
+      : { status: 'conflict', digest, existingDigest };
+  } catch {
+    return { status: 'conflict', digest, existingDigest: null };
+  }
 }
 
 /**
@@ -81,11 +136,53 @@ export function deriveIdempotencyKey(input: {
 interface KeyRow {
   result_json: string | null;
   expires_at: number;
+  pid: number | null;
+  reservation_id: string | null;
+}
+
+interface CompletedFallback {
+  result: unknown;
+  expiresAt: number;
+}
+
+class ReservationOwnershipLostError extends Error {}
+
+// A finalization write happens after the external side effect. If SQLite fails
+// at that exact point, keep the successful receipt in-process so the route can
+// return success and same-process transport retries can still replay it. The
+// reservation remains in SQLite, preventing another execution by the same key.
+const completedFallbacks = new Map<string, CompletedFallback>();
+
+function selectCompletedFallback(key: string, now: number): CompletedFallback | undefined {
+  const fallback = completedFallbacks.get(key);
+  if (!fallback) return undefined;
+  if (fallback.expiresAt <= now) {
+    completedFallbacks.delete(key);
+    return undefined;
+  }
+  return fallback;
+}
+
+function isPidAlive(pid: number | null): boolean {
+  if (pid === null || !Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
 }
 
 function pruneExpired(now: number): void {
   try {
-    getSqlite().prepare('DELETE FROM idempotency_keys WHERE expires_at <= ?').run(now);
+    const sqlite = getSqlite();
+    // Completed receipts are ordinary TTL cache entries. In-progress rows are
+    // execution locks: elapsed wall time or process death cannot prove that an
+    // external side effect did not land, so preserve them until reconciliation.
+    sqlite.prepare(
+      'DELETE FROM idempotency_keys WHERE result_json IS NOT NULL AND expires_at <= ?',
+    ).run(now);
+
   } catch (error) {
     console.warn('[idempotency] prune failed:', error instanceof Error ? error.message : error);
   }
@@ -93,10 +190,10 @@ function pruneExpired(now: number): void {
 
 function selectFresh(key: string, now: number): KeyRow | undefined {
   const row = getSqlite()
-    .prepare('SELECT result_json, expires_at FROM idempotency_keys WHERE key = ?')
+    .prepare('SELECT result_json, expires_at, pid, reservation_id FROM idempotency_keys WHERE key = ?')
     .get(key) as KeyRow | undefined;
   if (!row) return undefined;
-  if (row.expires_at <= now) return undefined;
+  if (row.result_json !== null && row.expires_at <= now) return undefined;
   return row;
 }
 
@@ -121,9 +218,33 @@ function reserve(
 function finalize(key: string, reservationId: string, resultJson: string, expiresAt: number): void {
   // Clear pid on finalize — a finalized row is a replay cache with no live
   // owner, so it must never look like a reapable in-flight reservation.
-  getSqlite()
-    .prepare('UPDATE idempotency_keys SET result_json = ?, pid = NULL, expires_at = ? WHERE key = ? AND reservation_id = ? AND result_json IS NULL')
-    .run(resultJson, expiresAt, key, reservationId);
+  const updated = getSqlite()
+    .prepare(
+      `UPDATE idempotency_keys SET result_json = ?, pid = NULL, expires_at = ?
+       WHERE key = ? AND reservation_id = ? AND pid = ? AND result_json IS NULL`,
+    )
+    .run(resultJson, expiresAt, key, reservationId, process.pid);
+  if (updated.changes !== 1) {
+    throw new ReservationOwnershipLostError(
+      `Idempotency reservation ownership was lost before ${key} could be finalized.`,
+    );
+  }
+}
+
+function finalizeUnresolved(
+  key: string,
+  reservationId: string,
+  priorPid: number | null,
+  resultJson: string,
+  expiresAt: number,
+): boolean {
+  const updated = getSqlite()
+    .prepare(
+      `UPDATE idempotency_keys SET result_json = ?, pid = NULL, expires_at = ?
+       WHERE key = ? AND reservation_id = ? AND pid IS ? AND result_json IS NULL`,
+    )
+    .run(resultJson, expiresAt, key, reservationId, priorPid);
+  return updated.changes === 1;
 }
 
 function release(key: string, reservationId: string): void {
@@ -135,28 +256,15 @@ function release(key: string, reservationId: string): void {
   }
 }
 
-/** Clear live reservations when a packet operation is terminated externally. */
-export function releaseInProgressIdempotencyForScope(scopeId: string): number {
-  try {
-    const result = getSqlite()
-      .prepare('DELETE FROM idempotency_keys WHERE packet_id = ? AND result_json IS NULL')
-      .run(scopeId);
-    if (result.changes > 0) {
-      console.warn(`[idempotency] Released ${result.changes} terminated in-progress operation(s) for ${scopeId}.`);
-    }
-    return result.changes;
-  } catch (error) {
-    console.warn('[idempotency] scope release failed:', error instanceof Error ? error.message : error);
-    return 0;
-  }
-}
-
-function inProgressMarker<T>(verb: string): T {
+function inProgressMarker<T>(verb: string, outcomeUnknown = false): T {
   return {
     deduped: true,
     status: 'in_progress',
     verb,
-    note: `An identical ${verb} is already in progress; not re-executed.`,
+    note: outcomeUnknown
+      ? `The prior ${verb} process ended before persisting its receipt. Its outcome is unknown, so it was not re-executed.`
+      : `An identical ${verb} is already in progress; not re-executed.`,
+    ...(outcomeUnknown ? { outcomeUnknown: true } : {}),
   } as InProgressMarker as unknown as T;
 }
 
@@ -178,6 +286,8 @@ export async function withIdempotency<T>(
     scopeId: string;
     ttlMs?: number;
     now?: number;
+    /** Rebuild a terminal receipt from durable verb-specific side-effect truth. */
+    reconcileUnresolved?: () => Promise<T | null>;
   },
   run: () => Promise<T>,
 ): Promise<IdempotencyOutcome<T>> {
@@ -191,12 +301,44 @@ export async function withIdempotency<T>(
 
   pruneExpired(now);
 
+  const completedFallback = selectCompletedFallback(key, now);
+  if (completedFallback) {
+    return {
+      replayed: true,
+      inProgress: false,
+      persistenceDegraded: true,
+      result: completedFallback.result as T,
+    };
+  }
+
   const existing = selectFresh(key, now);
   if (existing) {
     if (existing.result_json !== null) {
       return { replayed: true, inProgress: false, result: JSON.parse(existing.result_json) as T };
     }
-    return { replayed: true, inProgress: true, result: inProgressMarker<T>(verb) };
+    const unresolved = !isPidAlive(existing.pid);
+    if (unresolved && existing.reservation_id && params.reconcileUnresolved) {
+      try {
+        const reconciled = await params.reconcileUnresolved();
+        if (reconciled !== null && finalizeUnresolved(
+          key,
+          existing.reservation_id,
+          existing.pid,
+          JSON.stringify(reconciled),
+          expiresAt,
+        )) {
+          return { replayed: true, inProgress: false, result: reconciled };
+        }
+      } catch (error) {
+        console.warn('[idempotency] unresolved receipt reconciliation failed:', error instanceof Error ? error.message : error);
+      }
+    }
+    return {
+      replayed: true,
+      inProgress: true,
+      ...(unresolved ? { unresolved: true } : {}),
+      result: inProgressMarker<T>(verb, unresolved),
+    };
   }
 
   const reservationId = randomUUID();
@@ -207,22 +349,56 @@ export async function withIdempotency<T>(
     if (raced?.result_json != null) {
       return { replayed: true, inProgress: false, result: JSON.parse(raced.result_json) as T };
     }
-    return { replayed: true, inProgress: true, result: inProgressMarker<T>(verb) };
+    const unresolved = Boolean(raced && !isPidAlive(raced.pid));
+    return {
+      replayed: true,
+      inProgress: true,
+      ...(unresolved ? { unresolved: true } : {}),
+      result: inProgressMarker<T>(verb, unresolved),
+    };
   }
 
+  let result: T;
   try {
-    const result = await run();
-    finalize(key, reservationId, JSON.stringify(result ?? null), expiresAt);
-    return { replayed: false, inProgress: false, result };
+    result = await run();
   } catch (error) {
     // Failures are retryable — drop the reservation so a real retry can run.
     release(key, reservationId);
     throw error;
   }
+
+  // Finalization happens after the side effect. Returning an error here would
+  // make official callers mint a fresh key on their next deliberate retry and
+  // execute the already-completed mutation again. Keep the successful receipt
+  // in-process and return it instead; the live SQLite reservation still blocks
+  // re-execution by this key.
+  const finalizedExpiresAt = (params.now ?? Date.now()) + ttlMs;
+  try {
+    finalize(key, reservationId, JSON.stringify(result ?? null), finalizedExpiresAt);
+  } catch (error) {
+    // A storage error leaves our reservation in place, so an in-process
+    // fallback can truthfully replay the completed result. If ownership was
+    // lost, another execution owns the key and this result must not shadow it.
+    if (!(error instanceof ReservationOwnershipLostError)) {
+      completedFallbacks.set(key, { result, expiresAt: finalizedExpiresAt });
+    }
+    console.error(
+      '[idempotency] finalization failed after successful execution:',
+      error instanceof Error ? error.message : error,
+    );
+    return {
+      replayed: false,
+      inProgress: false,
+      persistenceDegraded: true,
+      result,
+    };
+  }
+  return { replayed: false, inProgress: false, result };
 }
 
 /** Test-only: wipe the table. */
 export function __resetIdempotencyStoreForTests(): void {
+  completedFallbacks.clear();
   try {
     getSqlite().prepare('DELETE FROM idempotency_keys').run();
   } catch {

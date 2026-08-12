@@ -106,6 +106,7 @@ import {
 } from '@/lib/symon/machine-registry';
 import { chainOnKey } from '@/lib/util/keyed-promise-chain';
 import { getOrCreateWsToken, WS_TOKEN_PATH } from '@/lib/ws-auth';
+import { resolveAppVersion } from '@/lib/telemetry/crash-store';
 import { findRepoByLocalPath, listRepos } from '@/lib/repos/registry';
 import '@/lib/ws-runtime-env';
 import { resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
@@ -188,6 +189,7 @@ import {
   resetSelfReviewStallGuard,
   type SelfReviewStallDecision,
 } from './lib/supervisor/self-review-stall-guard';
+import { recordSelfReviewInterruptFailure } from './lib/ws-server/self-review-transition';
 import { invalidateReviewingLaneForWorkerActivity } from './lib/supervisor/review-invalidation';
 import {
   enqueueSupervisorInboxItem,
@@ -221,7 +223,6 @@ import { startServerHandshake, completeServerHandshake, type ServerHandshake } f
 import { encryptFrame, decryptFrame, isEncryptedFrame } from './lib/mobile/e2ee-crypto';
 import {
   buildMobileInboxDelta,
-  MOBILE_INBOX_DELTA_CAPABILITY,
 } from './lib/mobile/inbox-delta';
 import { isLoopbackAddress } from './lib/auth/loopback-request';
 import { bootCompactorScheduler } from './lib/cortex/compactor-scheduler';
@@ -237,12 +238,28 @@ import type {
   RealtimeSubscription,
 } from './lib/realtime/types';
 import {
+  MOBILE_INBOX_DELTA_CAPABILITY,
+  REALTIME_FEATURE_METADATA,
+  REALTIME_LEGACY_SUBSCRIPTION,
+  REALTIME_MINIMUM_PROTOCOL_VERSION,
+  REALTIME_OPTIONAL_FEATURES,
+  REALTIME_PROTOCOL_VERSION,
+  type RealtimeClientHello,
+  type RealtimeOptionalFeature,
+  type RealtimeProtocolVersion,
+} from './lib/realtime/generated-contract';
+import {
   canAttemptRealtimeBridge,
   createRealtimeBridgeBackoffState,
   getRealtimeBridgeRetryDelay,
   recordRealtimeBridgeFailure,
   recordRealtimeBridgeSuccess,
 } from './lib/realtime/bridge-backoff';
+import {
+  negotiateRealtimeHello,
+  optionalRealtimeAudienceMatches,
+} from './lib/realtime/negotiation';
+import { deviceE2eeFailureAction } from './lib/ws-server/device-e2ee-policy';
 import { isWorktreeNoise, shouldRunConflictScan } from './lib/ws-server/conflict-gate';
 import { WsWatchdog } from './lib/ws-server/health-watchdog';
 import {
@@ -264,6 +281,8 @@ import {
   buildNextUrl,
   fetchWithRetry,
   fetchNextJson,
+  fetchRuntimeAction,
+  fetchRuntimeLaunch,
 } from './lib/ws-server/next-fetch';
 import {
   decideStalePortRecovery,
@@ -768,14 +787,29 @@ async function forceCodexSelfReviewToReview(
   }
 
   try {
-    await fetchWithRetry(buildNextUrl('/api/runtime/action'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'interrupt', surfaceId }),
-      signal: AbortSignal.timeout(8000),
+    await fetchRuntimeAction({
+      action: 'interrupt',
+      surfaceId,
+      clientMutationId: randomUUID(),
     });
   } catch (error) {
-    console.warn(`[supervisor] Failed to interrupt self-review stalled agent ${surfaceId}:`, error);
+    const reason = recordSelfReviewInterruptFailure({ laneId: lane.id, surfaceId, error });
+    resetSelfReviewStallGuard(surfaceId);
+    const detail = `Self-review work was preserved, but the runtime is still active because interrupt failed: ${reason}`;
+    console.warn(`[supervisor] ${detail}`);
+    broadcast({
+      channel: 'supervisor',
+      event: 'agent-update',
+      data: { surfaceId, name: lane.label, status: 'stuck', detail, repoPath: lane.repoPath } satisfies AgentUpdateEvent,
+    });
+    queueOrchestratorEscalation(lane.repoPath, [
+      `[SUPERVISOR] Agent "${lane.label}" (${surfaceId}) could not be stopped after its work was preserved.`,
+      `Lane: ${lane.id}`,
+      `Reason: ${reason}`,
+      '',
+      'The runtime remains bound and the lane remains active. Confirm the stop before moving this work to review.',
+    ].join('\n'));
+    return;
   }
 
   unregisterWatchedAgent(surfaceId);
@@ -889,7 +923,9 @@ interface ClientState {
   alive: boolean;
   terminalSessions: Set<string>;
   realtimeSubscriptions: RealtimeSubscription[];
-  realtimeCapabilities: Set<string>;
+  realtimeCapabilities: Set<RealtimeOptionalFeature>;
+  realtimeNegotiation: 'pending' | 'legacy' | 'negotiated' | 'incompatible';
+  realtimeClient?: Omit<RealtimeClientHello, 'type'>;
   packetTailSubscriptions: Set<string>;
   /** Queued durable messages waiting for backpressure to clear */
   backpressureQueue: string[];
@@ -905,14 +941,14 @@ interface ClientState {
 
 /**
  * #5 mobile E2EE per-connection state. `awaiting-init` — hello sent, waiting for
- * the client's e2ee-init (or the fallback timer → plaintext). `encrypted` — key
+ * the client's e2ee-init. A timeout closes the enrolled-device socket. `encrypted` — key
  * agreed, every frame is wrapped. Absent entirely = plaintext (loopback/legacy).
  */
 interface E2eeConnectionState {
   state: 'awaiting-init' | 'encrypted';
   handshake?: ServerHandshake;
   sessionKey?: Uint8Array;
-  /** Falls back to plaintext if the client never completes the handshake. */
+  /** Enrolled device connections close if the client never proves its key. */
   helloTimer?: ReturnType<typeof setTimeout>;
 }
 
@@ -922,11 +958,35 @@ async function getMobileInboxSnapshot(options: { fresh?: boolean } = {}) {
   return fetchNextJson<MobileInboxSnapshot>('/api/mobile/inbox', { searchParams });
 }
 
-async function getSessionTranscript(_sessionKey: string, _limit: number, _fresh: boolean) {
-  void _sessionKey;
-  void _limit;
-  void _fresh;
-  return [] as MobileTranscriptEntry[];
+interface SessionTranscriptRead {
+  entries: MobileTranscriptEntry[];
+  replace: boolean;
+}
+
+async function getSessionTranscript(
+  sessionKey: string,
+  limit: number,
+  sinceId?: string,
+): Promise<SessionTranscriptRead> {
+  const data = await fetchSync({
+    history: {
+      sessionKey,
+      limit: Math.min(Math.max(Math.floor(limit), 1), 200),
+      sinceId,
+    },
+  });
+  const history = data?.history as {
+    sessionKey?: unknown;
+    entries?: unknown;
+    replace?: unknown;
+  } | undefined;
+  if (history?.sessionKey !== sessionKey || !Array.isArray(history.entries)) {
+    throw new Error(`Transcript sync unavailable for ${sessionKey}`);
+  }
+  return {
+    entries: history.entries as MobileTranscriptEntry[],
+    replace: history.replace === true,
+  };
 }
 
 // ── Terminal attachment state ──
@@ -1873,14 +1933,11 @@ async function shouldOverrideBridgeDown(channel: string): Promise<boolean> {
 
 async function fetchSync(body: Record<string, unknown>): Promise<Record<string, unknown> | null> {
   try {
-    const res = await fetchWithRetry(buildNextUrl('/api/mobile/sync'), {
+    return await fetchNextJson<Record<string, unknown>>('/api/mobile/sync', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      body,
+      timeoutMs: FETCH_TIMEOUT_MS,
     });
-    if (!res.ok) return null;
-    return await res.json() as Record<string, unknown>;
   } catch {
     return null;
   }
@@ -1930,7 +1987,7 @@ function stopFlushTimer(client: ClientState) {
 // legacy clients have no `e2ee` state, so wireForClient is a pass-through and
 // the path is byte-identical to before.
 
-const E2EE_HANDSHAKE_TIMEOUT_MS = 2500; // no e2ee-init by now → plaintext fallback
+const E2EE_HANDSHAKE_TIMEOUT_MS = 2500;
 
 /** Encrypt a plaintext frame for an ENCRYPTED client; pass-through otherwise. */
 function wireForClient(client: ClientState, plaintext: string): string {
@@ -1947,8 +2004,8 @@ function sendInitialClientState(client: ClientState): void {
   sendOrchestratorThreadSnapshot(client);
 }
 
-/** Offer E2EE to a remote per-device-token client: send a signed hello, arm the
- *  plaintext-fallback timer. Initial state is withheld until the channel is up. */
+/** Require E2EE for a remote per-device-token client. Initial state stays
+ * withheld until the registered device key completes the handshake. */
 function initiateE2eeHandshake(client: ClientState, device: MobileDevice): void {
   try {
     const { handshake, hello } = startServerHandshake(getServerIdentity(), device.identityPublicKey);
@@ -1958,17 +2015,16 @@ function initiateE2eeHandshake(client: ClientState, device: MobileDevice): void 
     send(client, { channel: 'system', event: 'e2ee-hello', data: hello });
     client.e2ee = { state: 'awaiting-init', handshake };
     client.e2ee.helloTimer = setTimeout(() => {
-      // Old/no-RNG client never answered — fall back to plaintext (negotiated).
       if (client.e2ee?.state === 'awaiting-init') {
-        console.log(`[mobile-e2ee] ${client.id} did not complete handshake — plaintext fallback`);
-        client.e2ee = undefined;
-        sendInitialClientState(client);
+        const action = deviceE2eeFailureAction('handshake_timeout');
+        console.warn(`[mobile-e2ee] ${client.id} did not complete the required device-key handshake`);
+        try { client.ws.close(action.closeCode, action.closeReason); } catch { /* already gone */ }
       }
     }, E2EE_HANDSHAKE_TIMEOUT_MS);
   } catch (error) {
     console.warn(`[mobile-e2ee] handshake init failed for ${client.id}: ${error instanceof Error ? error.message : String(error)}`);
-    client.e2ee = undefined;
-    sendInitialClientState(client);
+    const action = deviceE2eeFailureAction('handshake_init_failed');
+    try { client.ws.close(action.closeCode, action.closeReason); } catch { /* already gone */ }
   }
 }
 
@@ -2203,9 +2259,14 @@ async function sendPacketTailHistory(client: ClientState, packetId: string, sinc
 
 // ── Realtime envelope log / replay ──
 
-const REALTIME_LOG_LIMIT = 400;
+const REALTIME_LOG_LIMIT = Math.max(
+  4,
+  Number.parseInt(process.env.O8_REALTIME_LOG_LIMIT ?? '400', 10) || 400,
+);
 const BROWSER_DISCOVERY_INTERVAL_MS = 15_000;
 const ATTACHED_BROWSER_REFRESH_MS = 2_000;
+const WS_SERVER_VERSION = resolveAppVersion();
+const REALTIME_EPOCH = randomUUID();
 
 let realtimeSeq = 0;
 const realtimeLog: RealtimeEventEnvelope[] = [];
@@ -2216,6 +2277,7 @@ let mobileRefreshFreshRequested = false;
 const mobileInboxBridgeBackoff = createRealtimeBridgeBackoffState();
 const globalSnapshotBridgeBackoff = createRealtimeBridgeBackoffState();
 const headlessTickBridgeBackoff = createRealtimeBridgeBackoffState();
+const sessionHistoryBridgeBackoffs = new Map<string, ReturnType<typeof createRealtimeBridgeBackoffState>>();
 let headlessTickBridgeInFlight = false;
 // Single-flight guards. The snapshot/inbox fetches take 3-5s in dev; the debounce
 // schedulers null their timer the instant they fire (BEFORE the fetch resolves),
@@ -2227,6 +2289,13 @@ let globalSnapshotRerequest: { fresh: boolean; reason?: string } | null = null;
 let mobileSnapshotInFlight = false;
 let mobileSnapshotRerequest: { fresh: boolean } | null = null;
 const sessionHistoryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+let realtimeSessionHistoryPollTimer: ReturnType<typeof setInterval> | null = null;
+let realtimeSessionHistoryPollInFlight = false;
+const sessionHistoryReadsInFlight = new Map<string, {
+  requestKey: string;
+  promise: Promise<SessionTranscriptRead>;
+}>();
+const lastRealtimeHistoryId = new Map<string, string>();
 let browserDiscoveryTimer: ReturnType<typeof setInterval> | null = null;
 let attachedBrowserRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let stopHeadlessLoop: (() => void) | null = null;
@@ -2241,6 +2310,27 @@ const lastRealtimeFingerprint = {
   mobileInbox: '',
   history: new Map<string, string>(),
 };
+
+async function getSessionTranscriptSingleFlight(
+  sessionKey: string,
+  limit: number,
+  sinceId?: string,
+): Promise<SessionTranscriptRead> {
+  const requestKey = `${limit}\x00${sinceId ?? ''}`;
+  const existing = sessionHistoryReadsInFlight.get(sessionKey);
+  if (existing) {
+    if (existing.requestKey === requestKey) return existing.promise;
+    await existing.promise.catch(() => undefined);
+    return getSessionTranscriptSingleFlight(sessionKey, limit, sinceId);
+  }
+  const request = getSessionTranscript(sessionKey, limit, sinceId).finally(() => {
+    if (sessionHistoryReadsInFlight.get(sessionKey)?.promise === request) {
+      sessionHistoryReadsInFlight.delete(sessionKey);
+    }
+  });
+  sessionHistoryReadsInFlight.set(sessionKey, { requestKey, promise: request });
+  return request;
+}
 // #1650: review/browser snapshots on the global stream coalesce to ≤1Hz.
 // Genuine churn (per-action browser lastActionAt, mid-rebase review states)
 // emits latest-wins via a trailing refresh instead of at event rate — every
@@ -2337,19 +2427,134 @@ function normalizeRealtimeStreamKey(raw: string | undefined, sessionKey?: string
   return null;
 }
 
+function parseRealtimeClientHello(msg: Record<string, unknown>): RealtimeClientHello | null {
+  const protocol = msg.protocol && typeof msg.protocol === 'object'
+    ? msg.protocol as Record<string, unknown>
+    : null;
+  const capabilities = Array.isArray(msg.capabilities)
+    ? msg.capabilities.filter((value): value is RealtimeOptionalFeature => (
+      typeof value === 'string' && (REALTIME_OPTIONAL_FEATURES as readonly string[]).includes(value)
+    ))
+    : [];
+  const rawRequiredCapabilities = msg.requiredCapabilities;
+  if (rawRequiredCapabilities !== undefined && (
+    !Array.isArray(rawRequiredCapabilities)
+    || !rawRequiredCapabilities.every((value) => (
+      typeof value === 'string' && (REALTIME_OPTIONAL_FEATURES as readonly string[]).includes(value)
+    ))
+  )) return null;
+  const requiredCapabilities = rawRequiredCapabilities as RealtimeOptionalFeature[] | undefined;
+  const min = protocol?.min;
+  const max = protocol?.max;
+  const appVersion = typeof msg.appVersion === 'string' ? msg.appVersion.trim() : '';
+  const clientKind = msg.clientKind;
+  if (
+    typeof min !== 'number' || !Number.isInteger(min) ||
+    typeof max !== 'number' || !Number.isInteger(max) ||
+    min > max || !appVersion ||
+    (clientKind !== 'desktop' && clientKind !== 'mobile' && clientKind !== 'web' && clientKind !== 'test')
+  ) return null;
+  return {
+    type: 'realtime-negotiate',
+    protocol: { min, max },
+    appVersion,
+    clientKind,
+    capabilities,
+    ...(requiredCapabilities ? { requiredCapabilities } : {}),
+  };
+}
+
+function negotiateRealtimeProtocol(client: ClientState, msg: Record<string, unknown>) {
+  if (client.realtimeNegotiation === 'incompatible') return;
+  const hello = parseRealtimeClientHello(msg);
+  if (!hello) {
+    client.realtimeNegotiation = 'incompatible';
+    send(client, {
+      channel: 'realtime',
+      event: 'incompatible',
+      data: {
+        reason: 'This client sent an invalid realtime protocol hello. Update o8 mobile and reconnect.',
+        updateRequired: true,
+        supportedProtocol: {
+          min: REALTIME_MINIMUM_PROTOCOL_VERSION,
+          max: REALTIME_PROTOCOL_VERSION,
+        },
+        serverVersion: WS_SERVER_VERSION,
+      },
+    });
+    return;
+  }
+  const negotiation = negotiateRealtimeHello({
+    clientMin: hello.protocol.min,
+    clientMax: hello.protocol.max,
+    requestedFeatures: hello.capabilities,
+    requiredFeatures: hello.requiredCapabilities ?? [],
+    serverMin: REALTIME_MINIMUM_PROTOCOL_VERSION,
+    serverCurrent: REALTIME_PROTOCOL_VERSION,
+    serverFeatures: REALTIME_OPTIONAL_FEATURES.map((feature) => ({
+      id: feature,
+      introducedIn: REALTIME_FEATURE_METADATA[feature].introducedIn,
+    })),
+  });
+  if (!negotiation.ok) {
+    client.realtimeNegotiation = 'incompatible';
+    const reason = negotiation.reason === 'protocol_mismatch'
+      ? `Realtime protocol ${hello.protocol.min}-${hello.protocol.max} is unsupported. Update o8 mobile to continue.`
+      : `Required realtime feature ${negotiation.unsupportedRequired ?? 'unknown'} is unavailable. Update o8 desktop or mobile.`;
+    send(client, {
+      channel: 'realtime',
+      event: 'incompatible',
+      data: {
+        reason,
+        updateRequired: true,
+        supportedProtocol: {
+          min: REALTIME_MINIMUM_PROTOCOL_VERSION,
+          max: REALTIME_PROTOCOL_VERSION,
+        },
+        serverVersion: WS_SERVER_VERSION,
+      },
+    });
+    return;
+  }
+
+  const selectedProtocol = negotiation.selectedProtocol as RealtimeProtocolVersion;
+
+  client.realtimeClient = {
+    protocol: hello.protocol,
+    appVersion: hello.appVersion,
+    clientKind: hello.clientKind,
+    capabilities: hello.capabilities,
+    requiredCapabilities: hello.requiredCapabilities,
+  };
+  client.realtimeCapabilities = new Set(negotiation.selectedFeatures as RealtimeOptionalFeature[]);
+  client.realtimeNegotiation = 'negotiated';
+  send(client, {
+    channel: 'realtime',
+    event: 'welcome',
+    data: {
+      protocol: selectedProtocol,
+      serverVersion: WS_SERVER_VERSION,
+      epoch: REALTIME_EPOCH,
+      features: [...client.realtimeCapabilities],
+      legacyFallback: REALTIME_LEGACY_SUBSCRIPTION,
+    },
+  });
+}
+
 function eventMatchesRealtimeSubscription(
   envelope: RealtimeEventEnvelope,
   subscription: RealtimeSubscription,
   client: ClientState,
 ) {
   if (envelope.stream !== subscription.stream) return false;
-  if (envelope.audience === MOBILE_INBOX_DELTA_CAPABILITY) {
-    return client.realtimeCapabilities.has(MOBILE_INBOX_DELTA_CAPABILITY);
-  }
   if (envelope.audience === 'mobile-inbox-legacy') {
     return !client.realtimeCapabilities.has(MOBILE_INBOX_DELTA_CAPABILITY);
   }
-  return true;
+  return optionalRealtimeAudienceMatches(
+    envelope.audience,
+    client.realtimeCapabilities,
+    REALTIME_OPTIONAL_FEATURES,
+  );
 }
 
 function sendRealtimeBatch(
@@ -2359,7 +2564,7 @@ function sendRealtimeBatch(
   events: RealtimeEventEnvelope[],
   gap?: RealtimeBatchMessage['gap'],
 ) {
-  if (!events.length) return;
+  if (!events.length && !gap) return;
   send(client, {
     channel: 'realtime',
     event: 'batch',
@@ -2367,6 +2572,7 @@ function sendRealtimeBatch(
       delivery,
       stream,
       events,
+      epoch: REALTIME_EPOCH,
       latestSeq: events[events.length - 1]?.seq ?? realtimeSeq,
       gap,
     } satisfies RealtimeBatchMessage,
@@ -2452,7 +2658,17 @@ function replayRealtimeSubscriptions(client: ClientState, subscriptions: Realtim
     const stream = subscription.stream;
     const since = subscription.since ?? 0;
     const earliestAvailable = earliestRetainedSeq(stream);
-    if (since > 0 && (earliestAvailable == null || since < (earliestAvailable - 1))) {
+    // A bare numeric cursor cannot prove which process lifetime issued it. It
+    // remains accepted on the wire for protocol-1 compatibility, but resumes
+    // only from a checkpoint rather than risking cross-epoch partial replay.
+    const cursorEpochMismatch = subscription.since != null && subscription.epoch !== REALTIME_EPOCH;
+    const cursorAheadOfStream = since > realtimeSeq;
+    const cursorFellBehind = since > 0 && (
+      earliestAvailable == null || since < (earliestAvailable - 1)
+    );
+    if (subscription.since != null && (
+      cursorEpochMismatch || cursorAheadOfStream || cursorFellBehind
+    )) {
       void buildResyncEvents(stream).then((events) => {
         sendRealtimeBatch(client, stream, 'bootstrap', events, {
           requestedSince: since,
@@ -2471,8 +2687,8 @@ function replayRealtimeSubscriptions(client: ClientState, subscriptions: Realtim
 }
 
 async function buildResyncEvents(stream: RealtimeStreamKey) {
-  const capturedSeq = realtimeSeq;
   if (stream === 'global') {
+    const capturedSeq = realtimeSeq;
     try {
       const snapshot = await fetchCommandCenterSnapshot(true);
       const degradedHealth: RealtimeHealthDescriptor = {
@@ -2529,11 +2745,11 @@ async function buildResyncEvents(stream: RealtimeStreamKey) {
   if (!sessionKey) return [] as RealtimeEventEnvelope[];
 
   try {
-    const entries = await getSessionTranscript(sessionKey, 24, true);
-    // An empty snapshot with replace:true would wipe transcript entries the
-    // client accumulated via deltas — getSessionTranscript is currently a
-    // stub, so never broadcast a destructive empty replace.
-    if (entries.length === 0) return [] as RealtimeEventEnvelope[];
+    const transcript = await getSessionTranscriptSingleFlight(sessionKey, 200);
+    const capturedSeq = realtimeSeq;
+    const entries = transcript.entries;
+    const latestId = entries.at(-1)?.id;
+    if (latestId) lastRealtimeHistoryId.set(sessionKey, latestId);
     return [
       buildRealtimeEnvelope(
         stream,
@@ -2557,8 +2773,8 @@ async function buildResyncEvents(stream: RealtimeStreamKey) {
 }
 
 async function buildBootstrapEvents(stream: RealtimeStreamKey) {
-  const capturedSeq = realtimeSeq;
   if (stream === 'global') {
+    const capturedSeq = realtimeSeq;
     try {
       const snapshot = await fetchCommandCenterSnapshot(false);
       const runtimeHealth = deriveRuntimeHealth(snapshot.fleet);
@@ -2632,9 +2848,12 @@ async function buildBootstrapEvents(stream: RealtimeStreamKey) {
   if (!sessionKey) return [] as RealtimeEventEnvelope[];
 
   try {
-    const entries = await getSessionTranscript(sessionKey, 24, false);
-    // Same guard as the replay-gap path — never replace client history with nothing.
-    if (entries.length === 0) return [] as RealtimeEventEnvelope[];
+    const transcript = await getSessionTranscriptSingleFlight(sessionKey, 200);
+    const capturedSeq = realtimeSeq;
+    const entries = transcript.entries;
+    const latestId = entries.at(-1)?.id;
+    if (latestId) lastRealtimeHistoryId.set(sessionKey, latestId);
+    lastRealtimeFingerprint.history.set(sessionKey, fingerprintHistory(sessionKey, entries));
     return [
       buildRealtimeEnvelope(
         stream,
@@ -2697,7 +2916,7 @@ function fingerprintInboxSnapshot(inbox: Awaited<ReturnType<typeof getMobileInbo
   return createHash('sha256').update(JSON.stringify(semanticSnapshot)).digest('base64url');
 }
 
-function fingerprintHistory(sessionKey: string, entries: Awaited<ReturnType<typeof getSessionTranscript>>) {
+function fingerprintHistory(sessionKey: string, entries: MobileTranscriptEntry[]) {
   let fp = sessionKey;
   for (const e of entries) fp += `\x02${e.id}\x01${e.timestamp ?? 0}\x01${e.role}\x01${e.text.slice(0, 80)}`;
   return fp;
@@ -2850,6 +3069,7 @@ async function publishMobileInboxRealtimeSnapshot(fresh = false) {
     return;
   }
   mobileSnapshotInFlight = true;
+  const capturedSeq = realtimeSeq;
   try {
     const inbox = await getMobileInboxSnapshot({ fresh });
     recordBridgeChannelSuccess('mobile-inbox');
@@ -2882,7 +3102,7 @@ async function publishMobileInboxRealtimeSnapshot(fresh = false) {
           'mobile',
           'mobile.inbox.snapshot',
           { inbox, revision: mobileInboxRevision },
-          { snapshot: true, entityId: 'mobile-inbox', health },
+          { snapshot: true, entityId: 'mobile-inbox', health, capturedSeq },
         ),
       ]);
       return;
@@ -2908,7 +3128,7 @@ async function publishMobileInboxRealtimeSnapshot(fresh = false) {
           'mobile',
           'mobile.inbox.snapshot',
           { inbox, revision: mobileInboxRevision },
-          { snapshot: true, entityId: 'mobile-inbox', health },
+          { snapshot: true, entityId: 'mobile-inbox', health, capturedSeq },
         ),
       ]);
       return;
@@ -2925,6 +3145,7 @@ async function publishMobileInboxRealtimeSnapshot(fresh = false) {
         { inbox, revision: mobileInboxRevision },
         {
           snapshot: true,
+          capturedSeq,
           entityId: 'mobile-inbox',
           health,
           audience: 'mobile-inbox-legacy',
@@ -2965,22 +3186,34 @@ async function publishMobileInboxRealtimeSnapshot(fresh = false) {
 }
 
 async function publishSessionHistoryRealtimeSnapshot(sessionKey: string, fresh = false) {
-  if (!sessionKey) return;
+  if (!sessionKey || !hasRealtimeSessionSubscriber(sessionKey)) return;
+  const backoff = sessionHistoryBridgeBackoffs.get(sessionKey) ?? createRealtimeBridgeBackoffState();
+  sessionHistoryBridgeBackoffs.set(sessionKey, backoff);
+  if (!canAttemptRealtimeBridge(backoff) || sessionHistoryReadsInFlight.has(sessionKey)) return;
   try {
-    const entries = await getSessionTranscript(sessionKey, 24, fresh);
-    // Stub returns [] — broadcasting an empty snapshot tells clients their
-    // transcript is now empty. Skip until a real transcript source exists.
-    if (entries.length === 0) return;
-    const fingerprint = fingerprintHistory(sessionKey, entries);
-    if (!fresh && lastRealtimeFingerprint.history.get(sessionKey) === fingerprint) return;
-    lastRealtimeFingerprint.history.set(sessionKey, fingerprint);
+    const sinceId = fresh ? undefined : lastRealtimeHistoryId.get(sessionKey);
+    const transcript = await getSessionTranscriptSingleFlight(sessionKey, 200, sinceId);
+    const entries = transcript.entries;
+    const replace = transcript.replace || !sinceId;
+    const success = recordRealtimeBridgeSuccess(backoff);
+    if (success.transition === 'up') {
+      console.log(`[ws-server] realtime session history recovered: ${sessionKey}`);
+    }
+    if (!replace && entries.length === 0) return;
+    if (replace) {
+      const fingerprint = fingerprintHistory(sessionKey, entries);
+      if (!fresh && lastRealtimeFingerprint.history.get(sessionKey) === fingerprint) return;
+      lastRealtimeFingerprint.history.set(sessionKey, fingerprint);
+    }
+    const latestId = entries.at(-1)?.id;
+    if (latestId) lastRealtimeHistoryId.set(sessionKey, latestId);
 
     broadcastRealtimeEvents([
       buildRealtimeEnvelope(
         `session:${sessionKey}`,
         'history',
         'history.snapshot',
-        { sessionKey, entries },
+        { sessionKey, entries, replace },
         {
           snapshot: true,
           entityId: sessionKey,
@@ -2989,7 +3222,17 @@ async function publishSessionHistoryRealtimeSnapshot(sessionKey: string, fresh =
       ),
     ]);
   } catch (error) {
-    console.error('[ws-server] realtime session history failed:', error instanceof Error ? error.message : 'unknown');
+    const failure = recordRealtimeBridgeFailure(backoff, Date.now(), {
+      threshold: 1,
+      initialDelayMs: REALTIME_SESSION_HISTORY_POLL_MS,
+      maxDelayMs: 30_000,
+    });
+    if (failure.transition === 'down') {
+      console.error(
+        `[ws-server] realtime session history unavailable: ${sessionKey}`,
+        error instanceof Error ? error.message : 'unknown',
+      );
+    }
   }
 }
 
@@ -3166,11 +3409,21 @@ function handleClientMessage(client: ClientState, raw: string) {
   let msg: Record<string, unknown>;
   try { msg = JSON.parse(raw); } catch { return; }
 
+  const encryptedFrame = isEncryptedFrame(msg) ? msg : null;
+  if (client.e2ee?.state === 'awaiting-init' && !encryptedFrame && msg.type !== 'e2ee-init') {
+    try { client.ws.close(4403, 'e2ee handshake required'); } catch { /* already gone */ }
+    return;
+  }
+  if (client.e2ee?.state === 'encrypted' && !encryptedFrame) {
+    try { client.ws.close(4403, 'encrypted frames required'); } catch { /* already gone */ }
+    return;
+  }
+
   // #5 E2EE — once the channel is encrypted, every inbound frame is an
   // {e2ee,n,c} envelope; decrypt it back to the real message before routing.
-  if (isEncryptedFrame(msg)) {
+  if (encryptedFrame) {
     if (client.e2ee?.state !== 'encrypted' || !client.e2ee.sessionKey) return; // can't decrypt — drop
-    const plaintext = decryptFrame(msg, client.e2ee.sessionKey);
+    const plaintext = decryptFrame(encryptedFrame, client.e2ee.sessionKey);
     if (!plaintext) return; // bad/forged frame — drop
     try { msg = JSON.parse(plaintext); } catch { return; }
   }
@@ -3193,13 +3446,36 @@ function handleClientMessage(client: ClientState, raw: string) {
       }
       break;
     }
+    case 'realtime-negotiate': {
+      negotiateRealtimeProtocol(client, msg);
+      break;
+    }
     case 'realtime-subscribe': {
+      if (client.realtimeNegotiation === 'incompatible') {
+        send(client, {
+          channel: 'realtime',
+          event: 'incompatible',
+          data: {
+            reason: 'Realtime subscription was rejected because this client is incompatible. Update o8 mobile and reconnect.',
+            updateRequired: true,
+            supportedProtocol: {
+              min: REALTIME_MINIMUM_PROTOCOL_VERSION,
+              max: REALTIME_PROTOCOL_VERSION,
+            },
+            serverVersion: WS_SERVER_VERSION,
+          },
+        });
+        break;
+      }
       const requestedCapabilities = Array.isArray(msg.capabilities)
-        ? msg.capabilities.filter((value): value is string => typeof value === 'string')
+        ? msg.capabilities.filter((value): value is RealtimeOptionalFeature => (
+          typeof value === 'string' && (REALTIME_OPTIONAL_FEATURES as readonly string[]).includes(value)
+        ))
         : [];
-      client.realtimeCapabilities = new Set(
-        requestedCapabilities.filter((value) => value === MOBILE_INBOX_DELTA_CAPABILITY),
-      );
+      if (client.realtimeNegotiation === 'pending') {
+        client.realtimeNegotiation = 'legacy';
+        client.realtimeCapabilities = new Set(requestedCapabilities);
+      }
       const rawSubscriptions = Array.isArray(msg.subscriptions) ? msg.subscriptions as Array<Record<string, unknown>> : [];
       const subscriptions: RealtimeSubscription[] = [];
       for (const item of rawSubscriptions) {
@@ -3207,7 +3483,8 @@ function handleClientMessage(client: ClientState, raw: string) {
         const stream = normalizeRealtimeStreamKey(typeof item.stream === 'string' ? item.stream : undefined, sessionKey);
         if (!stream) continue;
         const since = typeof item.since === 'number' && Number.isFinite(item.since) ? item.since : undefined;
-        subscriptions.push({ stream, since });
+        const epoch = typeof item.epoch === 'string' && item.epoch.trim() ? item.epoch.trim() : undefined;
+        subscriptions.push({ stream, epoch, since });
       }
 
       replayRealtimeSubscriptions(client, subscriptions);
@@ -5544,6 +5821,8 @@ let inboxPushTimer: ReturnType<typeof setTimeout> | null = null;
 const INBOX_PUSH_DEBOUNCE_MS = 300;
 const SAFETY_NET_INBOX_MS = 10_000; // 10s safety net (was 3s active poll)
 const SAFETY_NET_HISTORY_MS = 8_000; // 8s safety net (was 2s active poll)
+const REALTIME_SESSION_HISTORY_POLL_MS = 1_000;
+const REALTIME_SESSION_HISTORY_CONCURRENCY = 4;
 
 function scheduleEventDrivenInboxPush() {
   if (inboxPushTimer) clearTimeout(inboxPushTimer);
@@ -5561,6 +5840,66 @@ function pushHistoryForSession(sessionKey: string) {
   );
   if (matchingClients.length === 0) return;
   void Promise.allSettled(matchingClients.map((c) => syncClientHistory(c)));
+}
+
+function hasRealtimeSessionSubscriber(sessionKey: string): boolean {
+  const stream = `session:${sessionKey}`;
+  for (const client of clients.values()) {
+    if (client.ws.readyState !== WebSocket.OPEN) continue;
+    if (client.realtimeSubscriptions.some((subscription) => subscription.stream === stream)) return true;
+  }
+  return false;
+}
+
+function subscribedRealtimeSessionKeys(): string[] {
+  const sessionKeys = new Set<string>();
+  for (const client of clients.values()) {
+    if (client.ws.readyState !== WebSocket.OPEN) continue;
+    for (const subscription of client.realtimeSubscriptions) {
+      if (!subscription.stream.startsWith('session:')) continue;
+      const sessionKey = subscription.stream.slice('session:'.length);
+      if (sessionKey) sessionKeys.add(sessionKey);
+    }
+  }
+
+  const retainedSessionKeys = new Set([
+    ...sessionKeys,
+    ...sessionHistoryTimers.keys(),
+    ...sessionHistoryReadsInFlight.keys(),
+  ]);
+  for (const sessionKey of sessionHistoryBridgeBackoffs.keys()) {
+    if (!retainedSessionKeys.has(sessionKey)) sessionHistoryBridgeBackoffs.delete(sessionKey);
+  }
+  for (const sessionKey of lastRealtimeFingerprint.history.keys()) {
+    if (!retainedSessionKeys.has(sessionKey)) lastRealtimeFingerprint.history.delete(sessionKey);
+  }
+  for (const sessionKey of lastRealtimeHistoryId.keys()) {
+    if (!retainedSessionKeys.has(sessionKey)) lastRealtimeHistoryId.delete(sessionKey);
+  }
+  return [...sessionKeys];
+}
+
+async function refreshSubscribedRealtimeSessionHistories() {
+  if (realtimeSessionHistoryPollInFlight) return;
+  const sessionKeys = subscribedRealtimeSessionKeys();
+  if (sessionKeys.length === 0) return;
+
+  realtimeSessionHistoryPollInFlight = true;
+  let nextIndex = 0;
+  const refreshNext = async () => {
+    while (nextIndex < sessionKeys.length) {
+      const sessionKey = sessionKeys[nextIndex];
+      nextIndex += 1;
+      await publishSessionHistoryRealtimeSnapshot(sessionKey);
+    }
+  };
+
+  try {
+    const workerCount = Math.min(REALTIME_SESSION_HISTORY_CONCURRENCY, sessionKeys.length);
+    await Promise.allSettled(Array.from({ length: workerCount }, () => refreshNext()));
+  } finally {
+    realtimeSessionHistoryPollInFlight = false;
+  }
 }
 
 const CONFLICT_SCAN_MS = 5_000; // 5s conflict scan interval
@@ -5619,6 +5958,14 @@ function startPollingLoops() {
     if (activeClients.length === 0) return;
     void Promise.allSettled(activeClients.map((c) => syncClientHistory(c)));
   }, SAFETY_NET_HISTORY_MS);
+
+  // Some runtime adapters persist transcript output without emitting ChatDelta.
+  // Refresh only the unique session streams visible to realtime subscribers,
+  // with one shared bounded poll instead of a timer per mounted pane.
+  realtimeSessionHistoryPollTimer = setInterval(() => {
+    void refreshSubscribedRealtimeSessionHistories();
+  }, REALTIME_SESSION_HISTORY_POLL_MS);
+  realtimeSessionHistoryPollTimer.unref?.();
 
   // Built-in o8/Claude orchestrator thread sync. The Next API process owns
   // chat-history writes; this WS bridge watches the durable records and pushes
@@ -7258,6 +7605,7 @@ wss.on('connection', (ws, req) => {
     terminalSessions: new Set(),
     realtimeSubscriptions: [],
     realtimeCapabilities: new Set(),
+    realtimeNegotiation: 'pending',
     packetTailSubscriptions: new Set(),
     backpressureQueue: [],
     flushTimer: null,
@@ -7282,8 +7630,8 @@ wss.on('connection', (ws, req) => {
   });
 
   // #5 — a REMOTE per-device-token client gets the E2EE handshake offered; its
-  // initial state is withheld until the channel is encrypted (or falls back to
-  // plaintext). Loopback + legacy (shared-token) clients get it now, unchanged.
+  // initial state is withheld until the channel is encrypted. Loopback +
+  // legacy shared-token clients are a separate explicit plaintext auth path.
   if (remote && device) {
     initiateE2eeHandshake(client, device);
   } else {
@@ -8051,23 +8399,18 @@ async function bootstrapWsServer() {
         }));
       },
       async steerAgent(surfaceId, message) {
-        const res = await fetchWithRetry(buildNextUrl('/api/runtime/action'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'steer', surfaceId, message }),
-          signal: AbortSignal.timeout(8000),
+        await fetchRuntimeAction({
+          action: 'steer',
+          surfaceId,
+          message,
+          clientMutationId: randomUUID(),
         });
-        const data = await res.json().catch(() => null) as { ok?: boolean; error?: string; note?: string } | null;
-        if (!res.ok || data?.ok === false) {
-          throw new Error(data?.error ?? data?.note ?? `Steer failed (${res.status})`);
-        }
       },
       async interruptAgent(surfaceId) {
-        await fetchWithRetry(buildNextUrl('/api/runtime/action'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'interrupt', surfaceId }),
-          signal: AbortSignal.timeout(8000),
+        await fetchRuntimeAction({
+          action: 'interrupt',
+          surfaceId,
+          clientMutationId: randomUUID(),
         });
       },
       async relaunchAgent(prompt, repoPath, taskName, retryOfSurfaceId) {
@@ -8104,17 +8447,12 @@ async function bootstrapWsServer() {
         // lane connected, so the next salvage finalizes it to review. Only
         // isolate a fresh tree when the original is gone (the archived-worktree
         // case the original comment guarded against booting at the main repo).
+        const clientMutationId = randomUUID();
         const launchBody = (existingWorktree && existsSync(existingWorktree))
-          ? { runtime: 'codex', prompt, repoPath: existingWorktree, cwd: existingWorktree, taskName, isolate: false, skipSetup: true, existingLaneId }
-          : { runtime: 'codex', prompt, repoPath, cwd: repoPath, taskName, isolate: true, existingLaneId };
-        const res = await fetchWithRetry(buildNextUrl('/api/runtime/launch'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(launchBody),
-          signal: AbortSignal.timeout(15000),
-        });
-        const data = await res.json() as { ok?: boolean; surfaceId?: string };
-        return data.ok ? (data.surfaceId as string) : null;
+          ? { runtime: 'codex', prompt, repoPath: existingWorktree, cwd: existingWorktree, taskName, isolate: false, skipSetup: true, existingLaneId, clientMutationId }
+          : { runtime: 'codex', prompt, repoPath, cwd: repoPath, taskName, isolate: true, existingLaneId, clientMutationId };
+        const data = await fetchRuntimeLaunch(launchBody);
+        return data.surfaceId || null;
       },
       broadcastAgentUpdate(update: AgentUpdateEvent) {
         // #529 — Supervisor/agent lifecycle events go on a dedicated channel,
@@ -8553,6 +8891,8 @@ function shutdown(signal: string) {
     clearTimeout(timer);
   }
   sessionHistoryTimers.clear();
+  if (realtimeSessionHistoryPollTimer) clearInterval(realtimeSessionHistoryPollTimer);
+  realtimeSessionHistoryPollTimer = null;
   if (browserDiscoveryTimer) clearInterval(browserDiscoveryTimer);
   if (attachedBrowserRefreshTimer) clearInterval(attachedBrowserRefreshTimer);
 

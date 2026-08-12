@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import type { CliUsageSnapshot, CliWindow } from '@/lib/usage/cli-scrape';
-import { ClaudeIcon, CodexIcon } from './repo-registry/shared';
+import type { RuntimeCapacityControlSnapshot } from '@/lib/runtime/capacity-service';
 import {
   BookOpen,
   ChevronDown,
@@ -16,7 +15,6 @@ import {
   Globe,
   LogOut,
   MessageSquare,
-  RefreshCw,
   Settings2,
   Sparkles,
 } from './lucide-shims';
@@ -32,6 +30,7 @@ import { useEntitlement } from '@/lib/entitlement/context';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 import { SignInErrorCard } from '@/components/desktop/SignInErrorCard';
 import { ThemeContrastGlyph, AppearanceControl } from './settings-quick-drawer/theme-rows';
+import { CapacityRows, capacitySummary } from './settings-quick-drawer/capacity-rows';
 
 const FONT = 'var(--font-sans-system)';
 const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
@@ -68,55 +67,9 @@ interface SettingsQuickDrawerProps {
 
 type UsageState =
   | { status: 'idle'; snapshot: null; error: null }
-  | { status: 'loading'; snapshot: CliUsageSnapshot | null; error: null }
-  | { status: 'ready'; snapshot: CliUsageSnapshot; error: null }
-  | { status: 'error'; snapshot: CliUsageSnapshot | null; error: string };
-
-function formatTokens(value: number | null | undefined): string {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return 'No data';
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
-  return String(value);
-}
-
-function formatWindow(minutes: number | null | undefined): string {
-  if (minutes === 300) return '5h';
-  if (minutes === 10080) return 'Weekly';
-  if (typeof minutes !== 'number' || !Number.isFinite(minutes) || minutes <= 0) return 'Window';
-  if (minutes < 60) return `${minutes}m`;
-  if (minutes % 1440 === 0) return `${minutes / 1440}d`;
-  if (minutes % 60 === 0) return `${minutes / 60}h`;
-  return `${minutes}m`;
-}
-
-function formatResetTime(epochSeconds: number | null | undefined): string {
-  if (typeof epochSeconds !== 'number' || !Number.isFinite(epochSeconds)) return 'Rolling';
-  const resetDate = new Date(epochSeconds * 1000);
-  const deltaMs = resetDate.getTime() - Date.now();
-  if (deltaMs <= 0) return 'Now';
-  if (deltaMs < 24 * 60 * 60 * 1000) {
-    return resetDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  }
-  return resetDate.toLocaleDateString([], { month: 'short', day: 'numeric' });
-}
-
-function formatGeneratedAt(epochMs: number | null | undefined): string {
-  if (typeof epochMs !== 'number' || !Number.isFinite(epochMs)) return 'Not synced';
-  return new Date(epochMs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-}
-
-function usageValue(window: CliWindow | null, mode: 'percent-or-tokens' | 'tokens'): string {
-  if (!window) return 'No data';
-  if (mode === 'percent-or-tokens' && typeof window.usedPercent === 'number') {
-    return `${Math.round(window.usedPercent)}%`;
-  }
-  return formatTokens(window.tokens);
-}
-
-function usagePercent(window: CliWindow | null): number | null {
-  if (!window || typeof window.usedPercent !== 'number' || !Number.isFinite(window.usedPercent)) return null;
-  return Math.max(0, Math.min(100, window.usedPercent));
-}
+  | { status: 'loading'; snapshot: RuntimeCapacityControlSnapshot | null; error: null }
+  | { status: 'ready'; snapshot: RuntimeCapacityControlSnapshot; error: null }
+  | { status: 'error'; snapshot: RuntimeCapacityControlSnapshot | null; error: string };
 
 function IconFrame({ children }: { children: ReactNode }) {
   return (
@@ -186,132 +139,6 @@ function RowButton({
     >
       {children}
     </button>
-  );
-}
-
-function MiniBar({ percent, tone }: { percent: number | null; tone: 'codex' | 'claude' }) {
-  return (
-    <div
-      aria-hidden="true"
-      style={{
-        gridColumn: '1 / -1',
-        height: 2,
-        borderRadius: 999,
-        overflow: 'hidden',
-        background: 'color-mix(in srgb, var(--t-panel-border, rgba(15,23,42,0.1)) 70%, transparent)',
-      }}
-    >
-      <div
-        style={{
-          height: '100%',
-          width: `${percent ?? 100}%`,
-          opacity: percent === null ? 0.24 : 0.92,
-          borderRadius: 999,
-          background: tone === 'codex'
-            ? 'var(--t-accent, #2563eb)'
-            : 'var(--t-brand-orange, #f97316)',
-          transition: 'width 180ms ease-out',
-        }}
-      />
-    </div>
-  );
-}
-
-function UsageLine({
-  icon,
-  label,
-  reset,
-  value,
-  percent,
-  tone,
-}: {
-  icon?: ReactNode;
-  label: string;
-  reset: string;
-  value: string;
-  percent: number | null;
-  tone: 'codex' | 'claude';
-}) {
-  return (
-    <div
-      style={{
-        minHeight: 24,
-        display: 'grid',
-        gridTemplateColumns: 'minmax(82px, 1fr) auto auto',
-        alignItems: 'center',
-        columnGap: 6,
-        rowGap: 2,
-        minWidth: 0,
-      }}
-    >
-      <span
-        style={{
-          color: TEXT,
-          fontSize: 12,
-          fontWeight: 300,
-          letterSpacing: '-0.1px',
-          whiteSpace: 'nowrap',
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 6,
-          minWidth: 0,
-        }}
-      >
-        <span style={{ width: 13, height: 13, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          {icon}
-        </span>
-        {label}
-      </span>
-      <span style={{ color: 'var(--t-text-faint)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', whiteSpace: 'nowrap' }}>
-        {value}
-      </span>
-      <span style={{ color: FAINT, fontFamily: MONO, fontSize: 9, fontWeight: 260, letterSpacing: '-0.2px', whiteSpace: 'nowrap' }}>
-        {reset}
-      </span>
-      <MiniBar percent={percent} tone={tone} />
-    </div>
-  );
-}
-
-function RuntimeUsageCard({
-  icon,
-  title,
-  primary,
-  secondary,
-  valueMode,
-  tone,
-}: {
-  icon: ReactNode;
-  title: string;
-  primary: CliWindow | null;
-  secondary: CliWindow | null;
-  valueMode: 'percent-or-tokens' | 'tokens';
-  tone: 'codex' | 'claude';
-}) {
-  return (
-    <section
-      style={{
-        display: 'grid',
-        gap: 3,
-        padding: '0 4px',
-      }}
-    >
-      <UsageLine
-        icon={icon}
-        label={`${title} ${primary ? formatWindow(primary.windowMinutes) : '5h'}`}
-        value={usageValue(primary, valueMode)}
-        reset={formatResetTime(primary?.resetsAt)}
-        percent={usagePercent(primary)}
-        tone={tone}
-      />
-      <UsageLine
-        label={`${title} ${secondary ? formatWindow(secondary.windowMinutes) : 'Weekly'}`}
-        value={usageValue(secondary, valueMode)}
-        reset={formatResetTime(secondary?.resetsAt)}
-        percent={usagePercent(secondary)}
-        tone={tone}
-      />
-    </section>
   );
 }
 
@@ -522,19 +349,19 @@ export function SettingsQuickDrawer({
     }
   }, [onClose]);
 
-  const loadUsage = useCallback(async (preserveSnapshot = true) => {
+  const loadUsage = useCallback(async (preserveSnapshot = true, fresh = false) => {
     setUsageState((current) => ({
       status: 'loading',
       snapshot: preserveSnapshot ? current.snapshot : null,
       error: null,
     }));
     try {
-      const res = await fetch('/api/panel/cli-usage', { cache: 'no-store' });
+      const res = await fetch(`/api/runtime/capacity${fresh ? '?fresh=1' : ''}`, { cache: 'no-store' });
       const data = await res.json();
-      if (!res.ok || !data?.codex || !data?.claude) {
-        throw new Error(data?.error || 'Usage data unavailable');
+      if (!res.ok || data?.schema !== 'o8/runtime-capacity-control/v1') {
+        throw new Error(data?.error || 'Capacity data unavailable');
       }
-      setUsageState({ status: 'ready', snapshot: data as CliUsageSnapshot, error: null });
+      setUsageState({ status: 'ready', snapshot: data as RuntimeCapacityControlSnapshot, error: null });
     } catch (err) {
       setUsageState((current) => ({
         status: 'error',
@@ -595,10 +422,10 @@ export function SettingsQuickDrawer({
   // OWN local CLI telemetry (~/.codex + Claude session files) — an account
   // adds nothing to reading your own disk.
   const usageSummary = snapshot
-    ? formatGeneratedAt(snapshot.generatedAt)
+    ? capacitySummary(snapshot)
     : usageState.status === 'loading'
       ? 'Syncing'
-      : 'Codex + Claude';
+      : 'Local runtimes';
 
   if (!mounted || !open) return null;
 
@@ -647,7 +474,7 @@ export function SettingsQuickDrawer({
             }}
           >
             <IconFrame><Gauge size={13} /></IconFrame>
-            <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Usage remaining</span>
+            <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Runtime capacity</span>
             <span
               style={{
                 color: MUTED,
@@ -662,57 +489,12 @@ export function SettingsQuickDrawer({
           </RowButton>
 
           {usageOpen ? (
-            <div style={{ display: 'grid', gap: 4, padding: '0 4px 3px 28px' }}>
-              <RuntimeUsageCard
-                icon={<CodexIcon size={13} />}
-                title="Codex"
-                primary={snapshot?.codex.primary ?? null}
-                secondary={snapshot?.codex.secondary ?? null}
-                valueMode="percent-or-tokens"
-                tone="codex"
-              />
-              <RuntimeUsageCard
-                icon={<ClaudeIcon size={13} />}
-                title="Claude"
-                primary={snapshot?.claude.primary ?? null}
-                secondary={snapshot?.claude.secondary ?? null}
-                valueMode="tokens"
-                tone="claude"
-              />
-              <div style={{ display: 'flex', alignItems: 'center' }}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void loadUsage(false);
-                  }}
-                  style={{
-                    flex: 1,
-                    height: 24,
-                    border: 0,
-                    borderRadius: 8,
-                    background: SUBTLE_BG,
-                    color: TEXT,
-                    fontFamily: FONT,
-                    fontSize: 11,
-                    fontWeight: 300,
-                    letterSpacing: '-0.1px',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 8,
-                    cursor: 'pointer',
-                  }}
-                >
-                  <RefreshCw size={10} />
-                  Refresh usage
-                </button>
-              </div>
-              {usageState.status === 'error' ? (
-                <div style={{ color: MUTED, fontSize: 11, lineHeight: 1.35 }}>
-                  {usageState.error}
-                </div>
-              ) : null}
-            </div>
+            <CapacityRows
+              snapshot={snapshot}
+              loading={usageState.status === 'loading'}
+              error={usageState.error}
+              onRefresh={(fresh) => { void loadUsage(true, fresh); }}
+            />
           ) : null}
 
           <div style={separatorStyle()} />

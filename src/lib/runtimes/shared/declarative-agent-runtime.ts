@@ -8,6 +8,7 @@ import type {
   RuntimeTelemetry,
   RuntimeTranscriptEntry,
 } from '../types';
+import { ownedTailToRuntimeTranscript } from './owned-transcript';
 
 export interface DeclarativeAgentRuntimeOptions {
   runtimeId: string;
@@ -62,29 +63,6 @@ function mapAgentToSession(
   };
 }
 
-function transcriptTimestamp(value?: string, fallbackLabel?: string): Date {
-  const direct = value ? new Date(value) : null;
-  if (direct && !Number.isNaN(direct.getTime())) return direct;
-  const fallback = fallbackLabel ? new Date(fallbackLabel) : null;
-  return fallback && !Number.isNaN(fallback.getTime()) ? fallback : new Date();
-}
-
-function transcriptWindow(
-  entries: RuntimeTranscriptEntry[],
-  sinceId?: string,
-  limit?: number,
-): RuntimeTranscriptEntry[] {
-  let next = entries;
-  if (sinceId) {
-    const sinceIndex = next.findIndex((entry) => entry.id === sinceId);
-    if (sinceIndex >= 0) next = next.slice(sinceIndex + 1);
-  }
-  if (typeof limit === 'number' && Number.isFinite(limit) && limit > 0 && next.length > limit) {
-    next = next.slice(-limit);
-  }
-  return next;
-}
-
 export function createDeclarativeAgentRuntime(
   options: DeclarativeAgentRuntimeOptions,
   store: OwnedSessionStore,
@@ -110,20 +88,15 @@ export function createDeclarativeAgentRuntime(
 
     async readTranscript(sessionKey, sinceId, limit): Promise<RuntimeTranscriptEntry[]> {
       if (!sessionKey.startsWith(options.surfaceIdPrefix)) return [];
-      const tail = await store.getRuntimeTail(sessionKey);
-      return transcriptWindow(tail.entries.map((entry) => ({
-        id: entry.id,
-        role: entry.kind === 'message' ? 'assistant' : entry.kind === 'tool' ? 'tool' : 'system',
-        text: entry.text,
-        timestamp: transcriptTimestamp(entry.timestamp, entry.timestampLabel),
-        toolName: entry.kind === 'tool' ? entry.label : undefined,
-      })), sinceId, limit);
+      const tail = await store.getRuntimeTail(sessionKey, sinceId ? 200 : limit);
+      return ownedTailToRuntimeTranscript(tail, sinceId, limit);
     },
 
     async launch(opts): Promise<RuntimeActionResult> {
       const result = await store.launch({
         cwd: opts.cwd,
         prompt: opts.prompt,
+        clientMutationId: opts.clientMutationId,
         laneId: opts.laneId,
         packetId: opts.packetId,
         model: opts.model,

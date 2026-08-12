@@ -11,6 +11,9 @@ import { describe, expect, it } from 'vitest';
 import { NextRequest } from 'next/server';
 
 const { createApproval } = await import('@/lib/approvals/store');
+const { getApproval } = await import('@/lib/approvals/store');
+const { claimApprovalResolution } = await import('@/lib/approvals/resolution');
+const { getOrCreateWsToken } = await import('@/lib/ws-auth');
 const approvalsRoute = await import('./route');
 
 function seedApproval(overrides: { sessionKey: string; laneId?: string }) {
@@ -40,6 +43,37 @@ async function listVia(query: string) {
 }
 
 describe('GET /api/panel/approvals — list payload weight', () => {
+  it('keeps an approved decision visible while its continuation is unconfirmed', async () => {
+    const approval = createApproval({
+      source: 'runtime',
+      runtime: 'codex',
+      agent: 'worker',
+      sessionKey: 'codex:unconfirmed-continuation',
+      title: 'Resume worker',
+      description: 'Resume after approval',
+      summary: 'Resume after approval',
+      risk: 'medium',
+      continuation: {
+        kind: 'runtime',
+        runtimeId: 'codex',
+        sessionKey: 'codex:unconfirmed-continuation',
+        action: 'resume',
+        message: 'continue',
+      },
+    });
+    claimApprovalResolution(approval.id, 'approve', 'desktop');
+
+    const approvals = await listVia('?status=pending');
+
+    expect(approvals).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: approval.id,
+        status: 'approved',
+        resolution: expect.objectContaining({ continuationStatus: 'pending' }),
+      }),
+    ]));
+  });
+
   it('omits stored diff previews from a broad list while keeping the rest of the row', async () => {
     seedApproval({ sessionKey: 'codex:list-weight-1' });
 
@@ -69,5 +103,42 @@ describe('GET /api/panel/approvals — list payload weight', () => {
 
     expect(approvals.length).toBeGreaterThan(0);
     expect(approvals.every((approval) => approval.diff !== undefined)).toBe(true);
+  });
+});
+
+describe('POST /api/panel/approvals — side-effect claim recovery', () => {
+  it('reopens a file-edit approval when validation fails before the write', async () => {
+    const approval = createApproval({
+      source: 'runtime',
+      runtime: 'codex',
+      agent: 'worker',
+      sessionKey: 'codex:file-edit-preflight-failure',
+      title: 'Edit file',
+      description: 'Apply a file edit with missing metadata',
+      summary: 'Missing edit metadata',
+      risk: 'medium',
+      toolName: 'edit_file',
+      args: {},
+    });
+    const request = () => new NextRequest('http://127.0.0.1/api/panel/approvals', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${getOrCreateWsToken()}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ id: approval.id, action: 'approve' }),
+    });
+
+    const first = await approvalsRoute.POST(request());
+    const retry = await approvalsRoute.POST(request());
+
+    expect(first.status).toBe(400);
+    expect(retry.status).toBe(400);
+    await expect(retry.json()).resolves.toMatchObject({
+      ok: false,
+      code: 'missing_edit_metadata',
+      approval: { status: 'pending' },
+    });
+    expect(getApproval(approval.id)).toMatchObject({ status: 'pending', resolution: undefined });
   });
 });

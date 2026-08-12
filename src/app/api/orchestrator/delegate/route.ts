@@ -3,7 +3,7 @@ import { dispatch } from '@/lib/lane/commands';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { invalidateCommandCenterSnapshotCaches } from '@/lib/command-center/snapshot';
 import { invalidateInboxCache } from '@/lib/mobile/inbox';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { surfaceEdgeCases } from '@/lib/dispatch/edge-case-surfacer';
 import { computeReadBudget, resolveModelTier } from '@/lib/dispatch/read-budget';
 import { computePredictedFiles } from '@/lib/orchestrator/preservation-envelope';
@@ -16,6 +16,13 @@ import { buildProjectTaskBrief, getProjectContext } from '@/lib/projects/context
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { buildProjectBriefPromptV1 } from '@/lib/prompts/v1';
 import { MODEL_IDS } from '@/lib/models';
+import {
+  bindIdempotencyClientMutation,
+  deriveIdempotencyKey,
+  withIdempotency,
+} from '@/lib/orchestrator/idempotency-store';
+import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
+import { listLanes } from '@/lib/lane/registry';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -40,7 +47,7 @@ export const dynamic = 'force-dynamic';
  * deferred — track them in a follow-up issue. Option A ships here as
  * the quickest unlock for medium (5–50-edit) fix dispatches.
  */
-export async function POST(request: NextRequest) {
+async function performDelegate(request: NextRequest, clientMutationId: string) {
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
   if (!body) {
     return NextResponse.json({ ok: false, error: 'Invalid request body' }, { status: 400 });
@@ -70,7 +77,7 @@ export async function POST(request: NextRequest) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '')
     .slice(0, 40);
-  const hash = createHash('sha256').update(`${prompt}-${Date.now()}`).digest('hex').slice(0, 6);
+  const hash = createHash('sha256').update(`${prompt}-${clientMutationId}`).digest('hex').slice(0, 6);
   // When not isolating we just write directly onto the caller's baseBranch
   // (typically 'main'). When isolating we fork a fresh agent/* branch from
   // baseBranch — the lane command carries baseBranch through to the
@@ -85,7 +92,7 @@ export async function POST(request: NextRequest) {
     // Without this, delegate-dispatched lanes are second-class citizens and
     // force the orchestrator to fall back to raw Bash/git, which is slow
     // and hides state from the UI.
-    const packetId = `pkt-${randomUUID()}`;
+    const packetId = `pkt-delegate-${createHash('sha256').update(clientMutationId).digest('hex').slice(0, 16)}`;
     const now = new Date().toISOString();
     const defaults = getOperatorDefaultsSync().values;
     const runtimeWasProvided = body.runtime !== undefined && body.runtime !== null && body.runtime !== '';
@@ -201,7 +208,7 @@ export async function POST(request: NextRequest) {
     // reconcile re-reads the mutated fields from the same object.
     const { withLockedState } = await import('@/lib/orchestrator/control-plane');
     await withLockedState((current) => {
-      current.packets.push(packet);
+      if (!current.packets.some((candidate) => candidate.id === packet.id)) current.packets.push(packet);
       if (!current.missionId) current.missionId = `delegate-${Date.now().toString(36)}`;
       if (!current.prompt) current.prompt = `Delegated work: ${taskName}`;
       if (!current.summary) current.summary = `Delegate dispatches routed through /api/orchestrator/delegate.`;
@@ -241,19 +248,21 @@ export async function POST(request: NextRequest) {
       laneId,
       prompt: launchPrompt,
       model: workerRouting.selectedModel ?? undefined,
+      clientMutationId,
       actor: 'orchestrator',
     });
 
     // If launch requires approval (policy gate), return the approval info
     if (launchResult.approvalId) {
       return NextResponse.json({
-        ok: false,
+        ok: true,
+        status: 'pending_approval',
         laneId,
         packetId,
         codename: codename(laneId),
         approvalId: launchResult.approvalId,
         note: launchResult.note,
-      }, { status: 202 });
+      }, { status: 200 });
     }
 
     if (!launchResult.ok) {
@@ -308,4 +317,86 @@ export async function POST(request: NextRequest) {
       error: err instanceof Error ? err.message : 'Delegation failed',
     }, { status: 500 });
   }
+}
+
+export async function POST(request: NextRequest) {
+  const body = await request.clone().json().catch(() => null) as Record<string, unknown> | null;
+  const clientMutationId = typeof body?.clientMutationId === 'string'
+    ? body.clientMutationId.trim()
+    : '';
+  if (!clientMutationId) {
+    return NextResponse.json({ ok: false, error: 'clientMutationId is required' }, { status: 400 });
+  }
+  const canonicalBody = JSON.stringify({
+    prompt: typeof body?.prompt === 'string' ? body.prompt.trim() : '',
+    repoPath: typeof body?.repoPath === 'string' ? body.repoPath.trim() : '',
+    taskName: typeof body?.taskName === 'string' ? body.taskName.trim() : '',
+    isolate: body?.isolate !== false,
+    baseBranch: typeof body?.baseBranch === 'string' ? body.baseBranch.trim() : '',
+    runtime: body?.runtime ?? null,
+    model: body?.model ?? null,
+    workerIntent: body?.workerIntent ?? null,
+    requestedProvider: body?.requestedProvider ?? null,
+    huddle: body?.huddle ?? null,
+  });
+  const binding = bindIdempotencyClientMutation({
+    namespace: 'orchestrator_delegate',
+    clientKey: clientMutationId,
+    body: canonicalBody,
+  });
+  if (binding.status === 'conflict') {
+    return NextResponse.json({ ok: false, error: 'clientMutationId was used for another delegation' }, { status: 409 });
+  }
+  if (binding.status === 'unavailable') {
+    return NextResponse.json({ ok: false, error: 'The delegation receipt store is unavailable' }, { status: 503 });
+  }
+  const packetId = `pkt-delegate-${createHash('sha256').update(clientMutationId).digest('hex').slice(0, 16)}`;
+  const responseReceipt = async () => {
+    const response = await performDelegate(new NextRequest(request.clone()), clientMutationId);
+    return { status: response.status, payload: await response.json() as Record<string, unknown> };
+  };
+  const outcome = await withIdempotency({
+    key: deriveIdempotencyKey({
+      verb: 'orchestrator_delegate',
+      scopeId: String(body?.repoPath ?? ''),
+      clientKey: clientMutationId,
+      body: canonicalBody,
+    }),
+    verb: 'orchestrator_delegate',
+    scopeId: String(body?.repoPath ?? ''),
+    reconcileUnresolved: async () => {
+      const packet = readOrchestratorControlPlaneState().packets.find((candidate) => candidate.id === packetId);
+      const lane = listLanes().find((candidate) => candidate.packetId === packetId && candidate.sessionKey);
+      if (!packet || !lane?.sessionKey) return null;
+      return {
+        status: 200,
+        payload: {
+          ok: true,
+          laneId: lane.id,
+          packetId,
+          codename: codename(lane.id),
+          surfaceId: lane.sessionKey,
+          worktreePath: lane.worktreePath,
+          branch: lane.branch,
+          baseBranch: lane.baseBranch,
+          note: 'Recovered the delegated worker from its durable packet and lane binding.',
+        },
+      };
+    },
+  }, responseReceipt);
+  if (outcome.inProgress) {
+    if (outcome.unresolved) {
+      return NextResponse.json({
+        ok: false,
+        error: 'outcome_unknown',
+        outcomeUnknown: true,
+        note: 'The prior delegated launch process ended before its receipt was persisted. The outcome is unknown, so the exact mutation remains quarantined and was not repeated. Inspect the packet and lane before taking another action.',
+      }, { status: 409 });
+    }
+    return NextResponse.json({ ok: true, inProgress: true, status: 'in_progress' }, { status: 202 });
+  }
+  return NextResponse.json({
+    ...outcome.result.payload,
+    replayed: outcome.replayed || undefined,
+  }, { status: outcome.result.status });
 }

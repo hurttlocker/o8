@@ -10,12 +10,20 @@
  */
 
 import { getApiBase } from '@/lib/panel/api-port';
+import type {
+  RuntimeActionRequest,
+  RuntimeActionResult,
+  RuntimeLaunchRequest,
+  RuntimeLaunchResult,
+} from '@/lib/runtime/actions';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 
 /** Default per-request timeout (ms). Also used by the entry's fetchSync probe. */
 export const FETCH_TIMEOUT_MS = 8_000;
 const NEXT_FETCH_MAX_ATTEMPTS = 5;
 const NEXT_FETCH_INITIAL_BACKOFF_MS = 100;
+const RUNTIME_MUTATION_SETTLE_TIMEOUT_MS = 5 * 60_000;
+const RUNTIME_MUTATION_REPLAY_DELAY_MS = 500;
 
 const RETRYABLE_NEXT_FETCH_CODES = new Set([
   'ECONNREFUSED',
@@ -103,11 +111,108 @@ export async function fetchNextJson<T>(
 
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
-    const error = payload && typeof payload === 'object' && 'error' in payload
-      ? String((payload as { error?: string }).error ?? '')
-      : '';
+    const record = payload && typeof payload === 'object'
+      ? payload as { error?: unknown; note?: unknown }
+      : null;
+    const structuredError = record?.error && typeof record.error === 'object'
+      ? (record.error as { message?: unknown }).message
+      : record?.error;
+    const error = typeof structuredError === 'string'
+      ? structuredError
+      : typeof record?.note === 'string'
+        ? record.note
+        : '';
     throw new Error(error || `${pathname} failed (${response.status})`);
   }
 
   return payload as T;
+}
+
+function requireMutationReceipt<T>(pathname: string, payload: T): T {
+  if (!payload || typeof payload !== 'object' || typeof (payload as { ok?: unknown }).ok !== 'boolean') {
+    const error = new Error(`${pathname} returned an incomplete success receipt`);
+    error.name = 'AmbiguousReceiptError';
+    throw error;
+  }
+  return payload;
+}
+
+export async function fetchRuntimeAction(
+  body: RuntimeActionRequest & { clientMutationId: string },
+): Promise<RuntimeActionResult> {
+  const startedAt = Date.now();
+  while (true) {
+    let result: RuntimeActionResult;
+    try {
+      result = requireMutationReceipt('/api/runtime/action', await fetchNextJson<RuntimeActionResult>('/api/runtime/action', {
+        method: 'POST',
+        body,
+        timeoutMs: 8_000,
+      }));
+    } catch (error) {
+      const ambiguousTransportFailure = error instanceof Error
+        && (error.name === 'TimeoutError'
+          || error.name === 'AmbiguousReceiptError'
+          || isRetryableNextFetchError(error));
+      if (!ambiguousTransportFailure || Date.now() - startedAt >= RUNTIME_MUTATION_SETTLE_TIMEOUT_MS) {
+        throw error;
+      }
+      await delayNextFetchRetry(RUNTIME_MUTATION_REPLAY_DELAY_MS);
+      continue;
+    }
+    if (!result.ok) {
+      throw new Error(result.note || `Runtime ${body.action} failed`);
+    }
+    if (!result.inProgress) return result;
+    if (Date.now() - startedAt >= RUNTIME_MUTATION_SETTLE_TIMEOUT_MS) {
+      throw new Error(
+        result.note || `Runtime ${body.action} is still in progress after five minutes`,
+      );
+    }
+    await delayNextFetchRetry(RUNTIME_MUTATION_REPLAY_DELAY_MS);
+  }
+}
+
+export async function fetchRuntimeLaunch(
+  body: RuntimeLaunchRequest & { clientMutationId: string },
+): Promise<RuntimeLaunchResult & { replayed?: boolean }> {
+  const startedAt = Date.now();
+  while (true) {
+    let result: RuntimeLaunchResult & { inProgress?: boolean; replayed?: boolean };
+    try {
+      result = requireMutationReceipt('/api/runtime/launch', await fetchNextJson<RuntimeLaunchResult & { inProgress?: boolean; replayed?: boolean }>('/api/runtime/launch', {
+        method: 'POST',
+        body,
+        timeoutMs: 15_000,
+      }));
+    } catch (error) {
+      const ambiguousTransportFailure = error instanceof Error
+        && (error.name === 'TimeoutError'
+          || error.name === 'AmbiguousReceiptError'
+          || isRetryableNextFetchError(error));
+      if (!ambiguousTransportFailure || Date.now() - startedAt >= RUNTIME_MUTATION_SETTLE_TIMEOUT_MS) {
+        throw error;
+      }
+      // The server may still be completing a launch after our owning request
+      // times out. Replay the exact same mutation instead of returning control
+      // to the supervisor, which would mint a fresh id for its next retry.
+      await delayNextFetchRetry(RUNTIME_MUTATION_REPLAY_DELAY_MS);
+      continue;
+    }
+    if (!result.ok) {
+      throw new Error(result.note || `Runtime ${body.runtime} launch failed`);
+    }
+    if (!result.inProgress) {
+      if (!result.surfaceId) {
+        throw new Error(result.note || `Runtime ${body.runtime} launch returned no surface`);
+      }
+      return result;
+    }
+    if (Date.now() - startedAt >= RUNTIME_MUTATION_SETTLE_TIMEOUT_MS) {
+      throw new Error(
+        result.note || `Runtime ${body.runtime} launch is still in progress after five minutes`,
+      );
+    }
+    await delayNextFetchRetry(RUNTIME_MUTATION_REPLAY_DELAY_MS);
+  }
 }

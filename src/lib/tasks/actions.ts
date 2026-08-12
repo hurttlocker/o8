@@ -438,7 +438,7 @@ export async function dispatchTask(taskId: string, input: TaskDispatchInput = {}
     source: 'task-dispatch',
   });
   try {
-    await assertRuntimeDispatchable(workerRouting.selectedRuntime);
+    await assertRuntimeDispatchable(workerRouting.selectedRuntime, workerRouting.selectedModel, task.repoPath);
   } catch (error) {
     if (error instanceof DispatchPreflightError) {
       throw new TaskMutationError(409, `${error.status.detail} ${error.status.fix}`);

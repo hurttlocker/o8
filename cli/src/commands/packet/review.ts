@@ -1,4 +1,5 @@
-import { apiFetch, CliError, EXIT, SLOW_MUTATION_TIMEOUT_MS } from '../../api.js';
+import { randomUUID } from 'node:crypto';
+import { CliError, EXIT } from '../../api.js';
 import { resolveConfig } from '../../config.js';
 import {
   printHumanHeading,
@@ -11,12 +12,14 @@ import {
   requirePacketId,
   resolvePacketTarget,
 } from './target.js';
+import { fetchCorrelatedPacketMutation } from './correlated-mutation.js';
 
 interface ReviewArgs {
   packetId: string | null;
   approve: boolean;
   expectedHeadSha: string | null;
   commitMessage: string | null;
+  idempotencyKey: string | null;
 }
 
 interface OperatorResponse<T> {
@@ -28,7 +31,7 @@ interface OperatorResponse<T> {
 function parseReviewArgs(rest: string[]): ReviewArgs {
   const args = parsePacketArguments(rest, {
     command: 'review',
-    valueFlags: ['expected-sha', 'commit-message'],
+    valueFlags: ['expected-sha', 'commit-message', 'idempotency-key'],
     booleanFlags: ['approve'],
   });
 
@@ -37,6 +40,7 @@ function parseReviewArgs(rest: string[]): ReviewArgs {
     approve: args.booleans.has('approve'),
     expectedHeadSha: args.values['expected-sha']?.trim() || null,
     commitMessage: args.values['commit-message']?.trim() || null,
+    idempotencyKey: args.values['idempotency-key']?.trim() || null,
   };
 }
 
@@ -62,17 +66,19 @@ export async function runPacketReview(mode: OutputMode, rest: string[]): Promise
 
   const packetId = requirePacketId(await resolvePacketTarget(args.packetId), 'review');
   const cfg = resolveConfig();
-  const reviewRes = await apiFetch<OperatorResponse<{
+  const receiptKey = args.idempotencyKey ?? randomUUID();
+  const reviewRes = await fetchCorrelatedPacketMutation<OperatorResponse<{
     recorded: boolean;
     reviewedHeadSha?: string | null;
+    inProgress?: boolean;
+    status?: string;
+    note?: string;
   }>>(cfg, '/api/orchestrator/review', {
-    method: 'POST',
-    body: {
-      packetId,
-      approved: true,
-      findings: [],
-      reviewedHeadSha: args.expectedHeadSha ?? undefined,
-    },
+    packetId,
+    approved: true,
+    findings: [],
+    reviewedHeadSha: args.expectedHeadSha ?? undefined,
+    clientMutationId: receiptKey,
   });
   if (!reviewRes.data?.ok) {
     throw new CliError('review_failed', responseError(reviewRes.data, 'Packet review was rejected.'), EXIT.CONFLICT);
@@ -82,23 +88,26 @@ export async function runPacketReview(mode: OutputMode, rest: string[]): Promise
     throw new CliError('review_failed', 'Packet review returned no result.', EXIT.CONFLICT);
   }
 
-  const mergeRes = await apiFetch<OperatorResponse<{
-    merged: boolean;
-    note: string;
+  const mergeBody = {
+    packetId,
+    commitMessage: args.commitMessage ?? undefined,
+    expectedHeadSha: args.expectedHeadSha ?? undefined,
+    idempotencyKey: receiptKey,
+  };
+  const mergeRes = await fetchCorrelatedPacketMutation<OperatorResponse<{
+    merged?: boolean;
+    note?: string;
+    inProgress?: boolean;
+    status?: string;
     currentHeadSha?: string;
     expectedHeadSha?: string;
-  }>>(cfg, '/api/orchestrator/merge', {
-    method: 'POST',
-    timeoutMs: SLOW_MUTATION_TIMEOUT_MS,
-    body: {
-      packetId,
-      commitMessage: args.commitMessage ?? undefined,
-      expectedHeadSha: args.expectedHeadSha ?? undefined,
-    },
-  });
+  }>>(cfg, '/api/orchestrator/merge', mergeBody);
   if (!mergeRes.data?.ok || !mergeRes.data.result) {
     throw new CliError('merge_failed', responseError(mergeRes.data, 'Packet merge was rejected.'), EXIT.CONFLICT);
   }
+  const mergeInProgress = mergeRes.status === 202
+    || mergeRes.data.result.inProgress === true
+    || mergeRes.data.result.status === 'in_progress';
 
   const payload = {
     schema: 'o8/cli/packet.review/v1',
@@ -106,6 +115,7 @@ export async function runPacketReview(mode: OutputMode, rest: string[]): Promise
       id: packetId,
       approved: true,
       reviewedHeadSha: reviewResult.reviewedHeadSha ?? args.expectedHeadSha,
+      mergeInProgress,
       merge: mergeRes.data.result,
     },
   };
@@ -116,8 +126,8 @@ export async function runPacketReview(mode: OutputMode, rest: string[]): Promise
       ['packet', packetId],
       ['approved', 'yes'],
       ['reviewed HEAD', payload.packet.reviewedHeadSha ?? '(captured by server)'],
-      ['merged', mergeRes.data.result.merged ? 'yes' : 'no'],
-      ['note', mergeRes.data.result.note],
+      ['merged', mergeInProgress ? 'already in progress (not merged twice)' : mergeRes.data.result.merged ? 'yes' : 'no'],
+      ['note', mergeRes.data.result.note ?? ''],
     ]);
   } else {
     printJson(payload);

@@ -60,12 +60,25 @@ function request(body: Record<string, unknown>): NextRequest {
       prompt: 'Make a one-word README edit.',
       repoPath: '/tmp/o8-opencode2-test',
       taskName: 'OpenCode 2 routing proof',
+      clientMutationId: `delegate-test-${crypto.randomUUID()}`,
       ...body,
     }),
   });
 }
 
 describe('orchestrator delegate worker routing', () => {
+  it('replays one delegated launch for the same body-bound mutation id', async () => {
+    mocks.dispatch.mockClear();
+    const clientMutationId = `delegate-replay-${crypto.randomUUID()}`;
+    const first = await delegateRoute.POST(request({ clientMutationId }));
+    const replay = await delegateRoute.POST(request({ clientMutationId }));
+
+    expect(first.status).toBe(200);
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toMatchObject({ ok: true, replayed: true });
+    expect(mocks.dispatch).toHaveBeenCalledTimes(2);
+  });
+
   it('uses the saved OpenCode runtime and DeepSeek model when the caller omits both', async () => {
     mocks.dispatch.mockClear();
     const response = await delegateRoute.POST(request({}));

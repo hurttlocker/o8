@@ -24,6 +24,7 @@ export async function POST(request: NextRequest) {
     if (record.all === true) {
       const repoPath = typeof record.repoPath === 'string' ? record.repoPath.trim() : undefined;
       const result = await stopAllLanes({ repoPath: repoPath || undefined });
+      if (!result.ok) return operatorError('kill_unconfirmed', result.note, 409);
       return operatorSuccess(result);
     }
 
@@ -36,6 +37,7 @@ export async function POST(request: NextRequest) {
       return operatorError(ownershipRefusal.code, ownershipRefusal.message, 403);
     }
     const result = await stopPacket(packetId);
+    if (!result.ok) return operatorError(result.blockedReason ?? 'stop_failed', result.note, 409);
     return operatorSuccess(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to stop agent.';

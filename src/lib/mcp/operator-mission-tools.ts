@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { sanitizeErrorMessage } from '@/lib/api/error-format';
 import { DEFAULT_API_PORT } from '@/lib/panel/api-port';
+import { pollCorrelatedMcpMutation } from '@/lib/mcp/correlated-mutation';
+import type { CorrelatedActionPayload } from '@/lib/orchestrator/action-receipt';
 
 /**
  * Resolve the backend base URL from env, port file, or legacy default.
@@ -116,6 +118,7 @@ interface CreateMissionInput {
   qualitySearch?: { taskContract: PacketTaskContract };
   /** #1329 — the orchestrator's active thread id, so workers inherit its session rules. */
   orchestratorThreadId?: string;
+  parentWorkspaceId?: string;
   caller?: string;
   readOnly?: boolean;
 }
@@ -144,6 +147,7 @@ interface CreateMissionInlineInput {
   qualitySearch?: { taskContract: PacketTaskContract };
   /** #1329 — the orchestrator's active thread id, so workers inherit its session rules. */
   orchestratorThreadId?: string;
+  parentWorkspaceId?: string;
   caller?: string;
   readOnly?: boolean;
 }
@@ -187,7 +191,12 @@ function ensureRepoPath(repoPath: string) {
   return normalized;
 }
 
-function missionLaunchContext(input: { orchestratorThreadId?: string; caller?: string; readOnly?: boolean }) {
+function missionLaunchContext(input: {
+  orchestratorThreadId?: string;
+  parentWorkspaceId?: string;
+  caller?: string;
+  readOnly?: boolean;
+}) {
   const inAppOrchestrator = Boolean(input.orchestratorThreadId?.trim());
   return {
     source: inAppOrchestrator ? 'desktop' as const : 'mcp' as const,
@@ -195,6 +204,8 @@ function missionLaunchContext(input: { orchestratorThreadId?: string; caller?: s
     repoContext: inAppOrchestrator ? 'registered' as const : 'transient' as const,
     ...(input.readOnly ? { workMode: 'read-only' as const } : {}),
     caller: input.caller?.trim() || (inAppOrchestrator ? 'orchestrator' : 'external agent'),
+    ...(input.parentWorkspaceId?.trim() ? { parentWorkspaceId: input.parentWorkspaceId.trim() } : {}),
+    ...(input.orchestratorThreadId?.trim() ? { parentThreadId: input.orchestratorThreadId.trim() } : {}),
   };
 }
 
@@ -329,6 +340,38 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   throw new Error(`Invalid response from ${path}.`);
 }
 
+async function correlatedApiRequest<T>(
+  path: string,
+  body: Record<string, unknown>,
+): Promise<T> {
+  const payload = await pollCorrelatedMcpMutation<ApiResponse<T> & CorrelatedActionPayload>({
+    body,
+    correlationField: 'idempotencyKey',
+    send: async (requestBody) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+      const panelToken = readPanelToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (panelToken) headers.Authorization = `Bearer ${panelToken}`;
+      try {
+        return await fetch(`${getApiBaseLive()}${path}`, {
+          method: 'POST',
+          headers,
+          body: requestBody,
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+    parseError: (response, responsePayload) => new Error(
+      extractApiErrorMessage(path, response.status, responsePayload),
+    ),
+  });
+  if (payload.ok === true && 'result' in payload) return payload.result as T;
+  throw new Error(extractApiErrorMessage(path, 200, payload));
+}
+
 function missionToolError(action: string, error: unknown, fallback: string): MissionToolError {
   console.error(`${LOG_PREFIX} ${action} failed`, error);
   return { error: sanitizeErrorMessage(error, fallback) };
@@ -341,11 +384,9 @@ export async function createMission(input: CreateMissionInput) {
 
     log(`Loaded ${loadedIssues.length} issue${loadedIssues.length === 1 ? '' : 's'} locally; delegating mission creation to Next.js API.`);
 
-    return await apiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').createMission>>>(
+    return await correlatedApiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').createMission>>>(
       '/api/orchestrator/create-mission',
       {
-        method: 'POST',
-        body: JSON.stringify({
           issues: loadedIssues,
           repoPath,
           runtime: input.runtime,
@@ -363,8 +404,7 @@ export async function createMission(input: CreateMissionInput) {
           orchestratorThreadId: input.orchestratorThreadId,
           dispatcher: { surface: 'orchestrator', id: input.orchestratorThreadId ?? 'operator-mcp' },
           launchContext: missionLaunchContext(input),
-        } satisfies CreateMissionRequest),
-      },
+        } satisfies CreateMissionRequest,
     );
   } catch (error) {
     return missionToolError('createMission', error, 'Failed to create mission.');
@@ -388,11 +428,9 @@ export async function createMissionInline(input: CreateMissionInlineInput) {
 
     log(`Creating mission from ${loadedIssues.length} inline issue${loadedIssues.length === 1 ? '' : 's'} (no GitHub fetch).`);
 
-    return await apiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').createMission>>>(
+    return await correlatedApiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').createMission>>>(
       '/api/orchestrator/create-mission',
       {
-        method: 'POST',
-        body: JSON.stringify({
           issues: loadedIssues,
           repoPath,
           runtime: input.runtime,
@@ -410,8 +448,7 @@ export async function createMissionInline(input: CreateMissionInlineInput) {
           orchestratorThreadId: input.orchestratorThreadId,
           dispatcher: { surface: 'orchestrator', id: input.orchestratorThreadId ?? 'operator-mcp' },
           launchContext: missionLaunchContext(input),
-        } satisfies CreateMissionRequest),
-      },
+        } satisfies CreateMissionRequest,
     );
   } catch (error) {
     return missionToolError('createMissionInline', error, 'Failed to create mission.');
@@ -420,14 +457,9 @@ export async function createMissionInline(input: CreateMissionInlineInput) {
 
 export async function dispatchMission(input: DispatchMissionInput) {
   try {
-    return await apiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').dispatchMission>>>(
+    return await correlatedApiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').dispatchMission>>>(
       '/api/orchestrator/dispatch',
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          missionId: input.missionId,
-        } satisfies DispatchMissionInput),
-      },
+      { missionId: input.missionId },
     );
   } catch (error) {
     return missionToolError('dispatchMission', error, 'Failed to dispatch mission.');
@@ -443,6 +475,9 @@ export async function getMissionStatus(input: MissionStatusInput) {
     if (input.includeCost) {
       params.set('includeCost', 'true');
     }
+    if (input.includeTiming) {
+      params.set('includeTiming', 'true');
+    }
 
     const suffix = params.toString() ? `?${params.toString()}` : '';
     return await apiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').getMissionStatus>>>(
@@ -455,17 +490,14 @@ export async function getMissionStatus(input: MissionStatusInput) {
 
 export async function submitPacketReview(input: SubmitReviewInput) {
   try {
-    return await apiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').submitPacketReview>>>(
+    return await correlatedApiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').submitPacketReview>>>(
       '/api/orchestrator/review',
       {
-        method: 'POST',
-        body: JSON.stringify({
-          packetId: input.packetId,
-          findings: input.findings,
-          approved: input.approved,
-          reviewedHeadSha: input.reviewedHeadSha,
-          contractCoverageEvidence: input.contractCoverageEvidence,
-        } satisfies SubmitReviewInput),
+        packetId: input.packetId,
+        findings: input.findings,
+        approved: input.approved,
+        reviewedHeadSha: input.reviewedHeadSha,
+        contractCoverageEvidence: input.contractCoverageEvidence,
       },
     );
   } catch (error) {
@@ -475,15 +507,12 @@ export async function submitPacketReview(input: SubmitReviewInput) {
 
 export async function approveAndMergePacket(input: ApproveAndMergeRequest) {
   try {
-    return await apiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').approveAndMergePacket>>>(
+    return await correlatedApiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').approveAndMergePacket>>>(
       '/api/orchestrator/merge',
       {
-        method: 'POST',
-        body: JSON.stringify({
-          packetId: input.packetId,
-          commitMessage: input.commitMessage,
-          expectedHeadSha: input.expectedHeadSha,
-        } satisfies ApproveAndMergeRequest),
+        packetId: input.packetId,
+        commitMessage: input.commitMessage,
+        expectedHeadSha: input.expectedHeadSha,
       },
     );
   } catch (error) {
@@ -493,15 +522,12 @@ export async function approveAndMergePacket(input: ApproveAndMergeRequest) {
 
 export async function resetPacket(input: ResetPacketInput) {
   try {
-    return await apiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').resetPacket>>>(
+    return await correlatedApiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').resetPacket>>>(
       '/api/orchestrator/reset-packet',
       {
-        method: 'POST',
-        body: JSON.stringify({
-          packetId: input.packetId,
-          reason: input.reason,
-          clearWorktree: input.clearWorktree,
-        } satisfies ResetPacketInput),
+        packetId: input.packetId,
+        reason: input.reason,
+        clearWorktree: input.clearWorktree,
       },
     );
   } catch (error) {
@@ -511,14 +537,11 @@ export async function resetPacket(input: ResetPacketInput) {
 
 export async function rerunWithFeedback(input: RerunWithFeedbackInput) {
   try {
-    return await apiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').rerunWithFeedback>>>(
+    return await correlatedApiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').rerunWithFeedback>>>(
       '/api/orchestrator/rerun-with-feedback',
       {
-        method: 'POST',
-        body: JSON.stringify({
-          packetId: input.packetId,
-          feedback: input.feedback,
-        } satisfies RerunWithFeedbackInput),
+        packetId: input.packetId,
+        feedback: input.feedback,
       },
     );
   } catch (error) {

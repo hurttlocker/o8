@@ -30,6 +30,10 @@ export interface WorkerLaunchContext {
   repoContext: WorkerRepoContext;
   workMode?: WorkerWorkMode;
   caller?: string | null;
+  /** Durable desktop placement for reconnects. Omit for parentless launches. */
+  parentWorkspaceId?: string | null;
+  /** Durable orchestrator thread that launched the worker. */
+  parentThreadId?: string | null;
 }
 
 export interface WorkerRouting {
@@ -471,9 +475,26 @@ export interface OrchestratorMissionState {
   repoPath?: string | null;
   runtime?: OrchestratorRuntime;
   constraints?: string;
+  /** Exact caller mutation that created this mission, used for crash receipt reconciliation. */
+  creationMutationId?: string | null;
+  creationReceipt?: {
+    missionId: string;
+    packets: Array<{ id: string; title: string; wave: number }>;
+    branchPreparation: unknown[];
+  } | null;
   packets: OrchestratorPacket[];
   /** Active comparison group IDs for rendering the picker UI. */
   activeComparisonGroups?: string[];
+  /** Temporary admission barrier installed while a mission-wide lifecycle
+   * action stabilizes every packet. Dispatch and comparison fan-out must not
+   * create new work until the matching generation releases it. */
+  lifecycleHold?: {
+    source: string;
+    reason: 'operator_stop';
+    startedAt: string;
+    ownerPid: number;
+    leaseExpiresAt: string;
+  } | null;
   updatedAt: string;
 }
 

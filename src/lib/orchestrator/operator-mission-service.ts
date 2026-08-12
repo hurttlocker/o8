@@ -19,6 +19,8 @@ export {
   resolveMissionDispatchTarget,
 } from './operator-mission-service/mission';
 
+export { prepareMissionDispatch } from './operator-mission-service/dispatch-admission';
+
 export { submitPacketReview } from './operator-mission-service/review';
 
 export {

@@ -97,12 +97,21 @@ async function stopRepoBoundRuntimeSessions(repo: { localPath: string; remoteUrl
       setTimeout(() => reject(new Error('Runtime inventory timed out.')), RUNTIME_CLEANUP_TIMEOUT_MS);
     }),
   ]).catch(() => null);
+  if (!snapshot) {
+    return {
+      ok: false,
+      targetedSessionCount: 0,
+      stoppedSessionCount: 0,
+      removedTerminalBindings: 0,
+      note: 'Runtime inventory was unavailable; repository removal was not started.',
+    };
+  }
   const targetAgents = snapshot?.agents.filter((agent) => agentBelongsToRepoScope(agent, repo)) ?? [];
   const stoppedSessionKeys = new Set<string>();
 
-  await Promise.allSettled(targetAgents.map(async (agent) => {
+  await Promise.all(targetAgents.map(async (agent) => {
     try {
-      await Promise.race([
+      const result = await Promise.race([
         performRuntimeAction({
           action: 'stop',
           surfaceId: agent.runtimeSurface?.id ?? agent.sessionKey,
@@ -111,9 +120,9 @@ async function stopRepoBoundRuntimeSessions(repo: { localPath: string; remoteUrl
           setTimeout(() => resolve(null), RUNTIME_CLEANUP_TIMEOUT_MS);
         }),
       ]);
-      stoppedSessionKeys.add(agent.sessionKey);
+      if (result?.ok) stoppedSessionKeys.add(agent.sessionKey);
     } catch {
-      // Best effort: repo removal should still proceed.
+      return;
     }
 
     const terminalBinding = getRuntimeTerminalSession(agent.sessionKey);
@@ -127,9 +136,20 @@ async function stopRepoBoundRuntimeSessions(repo: { localPath: string; remoteUrl
     }
   }));
 
+  if (stoppedSessionKeys.size !== targetAgents.length) {
+    return {
+      ok: false,
+      targetedSessionCount: targetAgents.length,
+      stoppedSessionCount: stoppedSessionKeys.size,
+      removedTerminalBindings: 0,
+      note: 'One or more repo-bound runtime sessions could not be confirmed stopped.',
+    };
+  }
+
   const removedTerminalBindings = removeRuntimeTerminalSessionsForRepoPath(repo.localPath);
 
   return {
+    ok: true,
     targetedSessionCount: targetAgents.length,
     stoppedSessionCount: stoppedSessionKeys.size,
     removedTerminalBindings: removedTerminalBindings.length,
@@ -313,6 +333,24 @@ export async function DELETE(request: Request) {
     const repos = await listRepos();
     const toRemove = repos.find(r => r.id === body.id);
 
+    const cleanup = toRemove
+      ? await stopRepoBoundRuntimeSessions(toRemove)
+      : {
+          ok: true,
+          targetedSessionCount: 0,
+          stoppedSessionCount: 0,
+          removedTerminalBindings: 0,
+          note: 'No registered repository was found.',
+        };
+    if (!cleanup.ok) {
+      return NextResponse.json({
+        ok: false,
+        error: 'repo_runtime_stop_unconfirmed',
+        note: cleanup.note,
+        stoppedSessions: cleanup,
+      }, { status: 409 });
+    }
+
     // Registry + SQLite links + lifecycle + terminal state + skeleton cache +
     // polling all go through the shared removal flow (also used by project
     // deletion). Ledger cleanup stays here.
@@ -333,7 +371,7 @@ export async function DELETE(request: Request) {
         sessionKey: toRemove?.localPath,
         status: 'completed',
         note: toRemove
-          ? `Removed ${toRemove.name} from Cortex and queued background cleanup for repo-bound runtime sessions.`
+          ? `Stopped ${cleanup.stoppedSessionCount} repo-bound runtime session(s) and removed ${toRemove.name} from Cortex.`
           : 'Repository removed from Cortex.',
         createdAt: new Date().toISOString(),
         settledAt: new Date().toISOString(),
@@ -342,18 +380,14 @@ export async function DELETE(request: Request) {
       fresh: true,
     });
 
-    if (toRemove) {
-      void stopRepoBoundRuntimeSessions(toRemove).catch(() => undefined);
-    }
-
     return NextResponse.json({
       ok: true,
       removedId: body.id,
       stoppedSessions: {
-        targetedSessionCount: 0,
-        stoppedSessionCount: 0,
-        removedTerminalBindings: removed.removedTerminalBindings,
-        cleanupPending: Boolean(toRemove),
+        targetedSessionCount: cleanup.targetedSessionCount,
+        stoppedSessionCount: cleanup.stoppedSessionCount,
+        removedTerminalBindings: removed.removedTerminalBindings + cleanup.removedTerminalBindings,
+        cleanupPending: false,
       },
     });
   } catch (error) {

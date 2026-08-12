@@ -18,15 +18,21 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync, utimesSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { resetCodexProcessCwdIndexForTesting, setCodexProcessReaderForTesting } from '@/lib/runtimes/shared/codex-process-cwd';
 import { resetOwnedSessionIndex } from '@/lib/runtimes/shared/owned-session-index';
 import * as liveProcessGuard from '@/lib/worktree/live-process-guard';
 
 // Point the SQLite store + owned root at temp dirs BEFORE importing the registry.
-process.env.O8_DATA_DIR = mkdtempSync(join(tmpdir(), 'o8-reaper-liveness-'));
-process.env.CORTEX_IDE_OWNED_CODEX_ROOT = mkdtempSync(join(tmpdir(), 'o8-owned-codex-liveness-'));
+const testDataDir = mkdtempSync(join(tmpdir(), 'o8-reaper-liveness-'));
+const ownedCodexRoot = mkdtempSync(join(tmpdir(), 'o8-owned-codex-liveness-'));
+const ownedPiRoot = mkdtempSync(join(tmpdir(), 'o8-owned-pi-liveness-'));
+const ownedQwenRoot = mkdtempSync(join(tmpdir(), 'o8-owned-qwen-liveness-'));
+process.env.O8_DATA_DIR = testDataDir;
+process.env.CORTEX_IDE_OWNED_CODEX_ROOT = ownedCodexRoot;
+process.env.O8_OWNED_PI_ROOT = ownedPiRoot;
+process.env.O8_OWNED_QWEN_ROOT = ownedQwenRoot;
 
 const { createLane, getLane, setLaneStatus, updateLane } = await import('@/lib/lane/registry');
 const { LANE_HEARTBEAT_STALE_MS, listZombieLaneCandidates } = await import('@/lib/lane/reaper');
@@ -54,6 +60,12 @@ afterEach(() => {
   setCodexProcessReaderForTesting(async () => []);
 });
 
+afterAll(() => {
+  for (const dir of [testDataDir, ownedCodexRoot, ownedPiRoot, ownedQwenRoot]) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 function git(cwd: string, args: string[]): void {
   execFileSync('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
 }
@@ -79,10 +91,10 @@ function makeWorktree(): string {
  */
 function writeOwnedSession(
   surfaceId: string,
-  opts: { transcriptAgeMs?: number | null } = {},
+  opts: { transcriptAgeMs?: number | null; root?: string } = {},
 ): void {
-  const id = surfaceId.replace(/^codex-owned:/, '');
-  const dir = join(process.env.CORTEX_IDE_OWNED_CODEX_ROOT!, id);
+  const id = surfaceId.replace(/^[^:]+:/, '');
+  const dir = join(opts.root ?? process.env.CORTEX_IDE_OWNED_CODEX_ROOT!, id);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'session.json'), JSON.stringify({ surfaceId, activeRun: {} }));
   if (opts.transcriptAgeMs != null) {
@@ -96,11 +108,16 @@ function writeOwnedSession(
   resetOwnedSessionIndex();
 }
 
-function makeRunningLane(wt: string, sessionKey: string, now: number) {
+function makeRunningLane(
+  wt: string,
+  sessionKey: string,
+  now: number,
+  runtime: Parameters<typeof createLane>[0]['runtime'] = 'codex',
+) {
   const lane = createLane({
     repoPath: wt,
     branch: `pkt/${sessionKey.replace(/[^a-z0-9]/gi, '-')}`,
-    runtime: 'codex',
+    runtime,
     worktreePath: wt,
     baseBranch: 'main',
     sessionKey,
@@ -188,4 +205,26 @@ describe('zombie reaper secondary liveness gates (#1585)', () => {
     expect(decision.source).toBe('live-process-guard');
     expect(decision.note).toContain('fail-closed');
   });
+
+  it.each([
+    ['pi', 'pi-owned:reaper-dead-pi', process.env.O8_OWNED_PI_ROOT!],
+    ['qwen', 'qwen-owned:reaper-dead-qwen', process.env.O8_OWNED_QWEN_ROOT!],
+  ] as const)('reaps a dead %s owned lane through the real fleet entry', async (runtime, sessionKey, root) => {
+    const wt = makeWorktree();
+    writeOwnedSession(sessionKey, {
+      root,
+      transcriptAgeMs: LANE_HEARTBEAT_STALE_MS * 10,
+    });
+    const now = Date.now();
+    const lane = makeRunningLane(wt, sessionKey, now, runtime);
+    const liveProbe = vi.spyOn(liveProcessGuard, 'hasLiveProcessInside').mockResolvedValue(false);
+
+    const candidates = await listZombieLaneCandidates(now);
+    liveProbe.mockRestore();
+
+    expect(candidates.find((candidate) => candidate.lane.id === lane.id)?.probe).toMatchObject({
+      alive: false,
+      source: 'owned-session-registry',
+    });
+  }, 20_000);
 });

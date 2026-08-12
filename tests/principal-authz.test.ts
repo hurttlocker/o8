@@ -181,9 +181,9 @@ describe('principal-authz — approvals resolve (CRIT-1: a worker cannot self-ap
 // which proves the principal gate distinguishes without needing a live packet.
 describe('principal-authz — packet control verbs reject worker principals (HIGH-4)', () => {
   const cases: Array<{ name: string; url: string; POST: (r: NextRequest) => Promise<Response>; body: unknown }> = [
-    { name: 'steer-packet', url: 'http://localhost:3001/api/orchestrator/steer-packet', POST: steer.POST, body: { packetId: 'pkt-x', message: 'go' } },
+    { name: 'steer-packet', url: 'http://localhost:3001/api/orchestrator/steer-packet', POST: steer.POST, body: { packetId: 'pkt-x', message: 'go', idempotencyKey: 'authz-steer-1' } },
     { name: 'reset-packet', url: 'http://localhost:3001/api/orchestrator/reset-packet', POST: reset.POST, body: { packetId: 'pkt-x' } },
-    { name: 'rerun-with-feedback', url: 'http://localhost:3001/api/orchestrator/rerun-with-feedback', POST: rerun.POST, body: { packetId: 'pkt-x', feedback: 'redo' } },
+    { name: 'rerun-with-feedback', url: 'http://localhost:3001/api/orchestrator/rerun-with-feedback', POST: rerun.POST, body: { packetId: 'pkt-x', feedback: 'redo', idempotencyKey: 'authz-rerun-1' } },
   ];
 
   for (const c of cases) {
@@ -279,7 +279,11 @@ describe('principal-authz — steer-packet accepts an enrolled mobile device (ma
   }
 
   it('DEVICE token → NOT 403 and NOT 401 (passes the principal gate, reaches real logic)', async () => {
-    const res = await steer.POST(deviceReq({ packetId: 'pkt-does-not-exist', message: 'go' }));
+    const res = await steer.POST(deviceReq({
+      packetId: 'pkt-does-not-exist',
+      message: 'go',
+      idempotencyKey: 'device-authz-steer-1',
+    }));
     expect(res.status).not.toBe(403);
     expect(res.status).not.toBe(401);
   });

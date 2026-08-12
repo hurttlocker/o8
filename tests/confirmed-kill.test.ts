@@ -23,10 +23,16 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 const escalationMock = vi.hoisted(() => ({ escalateInterruptOwnedSurface: vi.fn() }));
+const runtimeActionMock = vi.hoisted(() => ({ routeAction: vi.fn() }));
 
 vi.mock('@/lib/runtime/interrupt-escalation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/runtime/interrupt-escalation')>();
   return { ...actual, escalateInterruptOwnedSurface: escalationMock.escalateInterruptOwnedSurface };
+});
+
+vi.mock('@/lib/runtimes/registry', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/runtimes/registry')>();
+  return { ...actual, routeAction: runtimeActionMock.routeAction };
 });
 
 const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-confirmed-kill-'));
@@ -155,6 +161,67 @@ describe('B. killLaneSessionsConfirmed wiring — events + confirmed signal', ()
     expect(outcome.alreadyDead).toBe(false);
     expect(getLaneEvents(lane.id, 50).filter((event) => (event.verb as string) === 'kill_escalated')).toHaveLength(3);
   });
+
+  it('routes every owned runtime through confirmed escalation instead of best-effort interrupt', async () => {
+    for (const [index, sessionKey] of [
+      'gemini-owned:kill-target',
+      'opencode-owned:kill-target',
+      'cursor-owned:kill-target',
+      'grok-owned:kill-target',
+      'prime-agent-owned:kill-target',
+      'pi-owned:kill-target',
+    ].entries()) {
+      const lane = makeLane(sessionKey);
+      escalationMock.escalateInterruptOwnedSurface.mockResolvedValueOnce({
+        attempted: true,
+        confirmedDead: false,
+        alreadyDead: false,
+        steps: [{ signal: 'SIGKILL', mechanism: 'SIGKILL', sent: true, aliveAfter: true }],
+        pid: 6000 + index,
+        note: 'Worker remained live after SIGKILL.',
+      } satisfies InterruptEscalationResult);
+
+      const [outcome] = await killLaneSessionsConfirmed([lane]);
+      expect(outcome).toMatchObject({ sessionKey, confirmed: false, pid: 6000 + index });
+    }
+  });
+
+  it('keeps a discovered session live when the adapter cannot provide pid evidence', async () => {
+    const lane = makeLane('codex:discovered-no-pid');
+    runtimeActionMock.routeAction.mockResolvedValueOnce({
+      ok: true,
+      note: 'Interrupt accepted.',
+      sessionKey: lane.sessionKey ?? undefined,
+    });
+
+    const [outcome] = await killLaneSessionsConfirmed([lane]);
+
+    expect(outcome).toMatchObject({ confirmed: false, alreadyDead: false });
+    expect(outcome.stages).toEqual([{ stage: 'interrupt', confirmed: false }]);
+    expect(runtimeActionMock.routeAction).toHaveBeenCalledWith('codex', 'interrupt', lane.sessionKey);
+  });
+
+  it('confirms a discovered session only after probing its returned pid to death', async () => {
+    const { pid, done } = await spawnTrapChild(['SIGINT', 'SIGTERM']);
+    const lane = makeLane('codex:discovered-live-pid');
+    runtimeActionMock.routeAction.mockImplementationOnce(async () => {
+      process.kill(pid, 'SIGINT');
+      return {
+        ok: true,
+        note: `Interrupt sent to pid ${pid}.`,
+        sessionKey: lane.sessionKey ?? undefined,
+        pids: [pid],
+      };
+    });
+
+    const [outcome] = await killLaneSessionsConfirmed([lane]);
+
+    expect(outcome.confirmed).toBe(true);
+    expect(outcome.pid).toBe(pid);
+    expect(outcome.stages.at(-1)?.confirmed).toBe(true);
+    await done;
+    expect(isPidAlive(pid)).toBe(false);
+  }, 15_000);
 
   it('skips lanes with no sessionKey (nothing to reap)', async () => {
     const outcomes = await killLaneSessionsConfirmed([makeLane(null)]);

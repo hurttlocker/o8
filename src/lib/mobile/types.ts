@@ -416,6 +416,7 @@ export interface MobileActionResponse {
   note: string;
   runId?: string;
   aborted?: boolean;
+  inProgress?: boolean;
 }
 
 // ── Mobile orchestrator surface ──

@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { access, open, readFile, readdir, realpath } from 'node:fs/promises';
+import { open, readFile, readdir, realpath } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -12,35 +12,23 @@ import type {
 } from '@/lib/fleet/types';
 import { MODEL_IDS } from '@/lib/models';
 import { truncateText } from '@/lib/util/text';
+import {
+  codexSessionsRoot,
+  codexShellSnapshotsRoot,
+  defaultCodexHome,
+  listCodexDiscoveryHomes,
+  queryCodexProcessBindings,
+  queryCodexThreadByIdFromHome,
+  queryCodexThreadsFromHome,
+  type CodexProcessBinding,
+  type CodexThreadRow,
+} from './discovery-store';
 
 const execFileAsync = promisify(execFile);
-const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
-const CODEX_STATE_DB = path.join(CODEX_HOME, 'state_5.sqlite');
-const CODEX_SESSIONS_ROOT = path.join(CODEX_HOME, 'sessions');
-const CODEX_SHELL_SNAPSHOTS_ROOT = path.join(CODEX_HOME, 'shell_snapshots');
 const CODEX_SOURCE_LABEL = 'Local Codex discovery';
 const RECENT_WINDOW_MS = 6 * 60 * 60_000;
 const DISCOVERED_STALE_WINDOW_MS = 24 * 60 * 60_000;
 const CODEX_DISCOVERED_FLEET_TTL_MS = 15_000;
-
-type CodexThreadRow = {
-  id: string;
-  title: string;
-  cwd: string;
-  updated_at: number;
-  rollout_path: string;
-  git_branch?: string | null;
-  git_sha?: string | null;
-  git_origin_url?: string | null;
-  first_user_message?: string | null;
-  model?: string | null;
-};
-
-type CodexProcessBinding = {
-  thread_id: string;
-  process_uuid: string;
-  last_ts: number;
-};
 
 type LiveCodexProcess = {
   pid: number;
@@ -177,98 +165,42 @@ function parsePidFromProcessUuid(processUuid?: string | null) {
   return Number.isFinite(pid) ? pid : undefined;
 }
 
-async function codexStateExists() {
-  try {
-    await access(CODEX_STATE_DB);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export async function queryCodexThreads(limit = 6) {
-  if (!(await codexStateExists())) {
-    return [] as CodexThreadRow[];
-  }
-
-  const query = [
-    'select',
-    'id,',
-    'title,',
-    'cwd,',
-    'updated_at,',
-    'rollout_path,',
-    "coalesce(git_branch, '') as git_branch,",
-    "coalesce(git_sha, '') as git_sha,",
-    "coalesce(git_origin_url, '') as git_origin_url,",
-    "coalesce(first_user_message, '') as first_user_message,",
-    "coalesce(model, '') as model",
-    'from threads',
-    'where archived = 0',
-    'order by updated_at desc',
-    `limit ${limit};`,
-  ].join(' ');
-
-  const { stdout } = await execFileAsync('sqlite3', ['-json', CODEX_STATE_DB, query], { windowsHide: true,
-    maxBuffer: 2 * 1024 * 1024,
-  });
-
-  const parsed = JSON.parse(stdout || '[]') as CodexThreadRow[];
-  return parsed.filter((row) => row.id && row.rollout_path && row.cwd);
+  return queryCodexThreadsFromHome(defaultCodexHome(), limit);
 }
 
-export async function queryCodexThreadById(threadId: string) {
-  if (!(await codexStateExists()) || !threadId) {
-    return null;
+async function findCodexThreadAcrossHomes(threadId: string, identityId?: string) {
+  const homes = await listCodexDiscoveryHomes();
+  const candidates = identityId
+    ? homes.filter((home) => home.identityId === identityId)
+    : homes;
+  const matches: Array<{
+    thread: CodexThreadRow;
+    home: (typeof homes)[number];
+  }> = [];
+  for (const home of candidates) {
+    const thread = await queryCodexThreadByIdFromHome(home.configHomeRef, threadId).catch(() => null);
+    if (thread) matches.push({ thread, home });
   }
-
-  const escapedThreadId = threadId.replace(/'/g, "''");
-  const query = [
-    'select',
-    'id,',
-    'title,',
-    'cwd,',
-    'updated_at,',
-    'rollout_path,',
-    "coalesce(git_branch, '') as git_branch,",
-    "coalesce(git_sha, '') as git_sha,",
-    "coalesce(git_origin_url, '') as git_origin_url,",
-    "coalesce(first_user_message, '') as first_user_message,",
-    "coalesce(model, '') as model",
-    'from threads',
-    `where archived = 0 and id = '${escapedThreadId}'`,
-    'limit 1;',
-  ].join(' ');
-
-  const { stdout } = await execFileAsync('sqlite3', ['-json', CODEX_STATE_DB, query], { windowsHide: true,
-    maxBuffer: 512 * 1024,
-  });
-
-  const [thread] = JSON.parse(stdout || '[]') as CodexThreadRow[];
-  return thread?.id && thread.rollout_path && thread.cwd ? thread : null;
+  return matches.length === 1 ? matches[0] : null;
 }
 
-async function queryProcessBindings() {
-  if (!(await codexStateExists())) {
-    return [] as CodexProcessBinding[];
-  }
+export async function resolveCodexDiscoveredSessionHome(
+  surfaceId: string,
+  identityId?: string,
+): Promise<{ threadId: string; identityId?: string; configHomeRef: string } | null> {
+  const threadId = surfaceId.replace(/^codex(?:-discovered)?:/, '').trim();
+  if (!threadId || threadId === surfaceId) return null;
+  const found = await findCodexThreadAcrossHomes(threadId, identityId);
+  return found ? {
+    threadId,
+    identityId: found.home.identityId,
+    configHomeRef: found.home.configHomeRef,
+  } : null;
+}
 
-  const query = [
-    'select',
-    'thread_id,',
-    'process_uuid,',
-    'max(ts) as last_ts',
-    'from logs',
-    'where thread_id is not null and process_uuid is not null',
-    'group by thread_id, process_uuid',
-    'order by last_ts desc;',
-  ].join(' ');
-
-  const { stdout } = await execFileAsync('sqlite3', ['-json', CODEX_STATE_DB, query], { windowsHide: true,
-    maxBuffer: 2 * 1024 * 1024,
-  });
-
-  return JSON.parse(stdout || '[]') as CodexProcessBinding[];
+export async function queryCodexThreadById(threadId: string, identityId?: string) {
+  return (await findCodexThreadAcrossHomes(threadId, identityId))?.thread ?? null;
 }
 
 async function readProcessCwd(pid: number) {
@@ -348,14 +280,14 @@ async function queryLiveCodexProcesses(pids: number[]) {
   }
 }
 
-async function buildShellSnapshotSessionMap(threadIds: string[]) {
+async function buildShellSnapshotSessionMap(threadIds: string[], codexHome: string) {
   if (!threadIds.length) {
     return new Map<string, string>();
   }
 
   let snapshotFiles: string[];
   try {
-    snapshotFiles = await readdir(CODEX_SHELL_SNAPSHOTS_ROOT);
+    snapshotFiles = await readdir(codexShellSnapshotsRoot(codexHome));
   } catch {
     return new Map<string, string>();
   }
@@ -366,7 +298,7 @@ async function buildShellSnapshotSessionMap(threadIds: string[]) {
   for (const fileName of snapshotFiles) {
     const [threadId] = fileName.split('.');
     if (!threadId || !wanted.has(threadId) || mapping.has(threadId)) continue;
-    const filePath = path.join(CODEX_SHELL_SNAPSHOTS_ROOT, fileName);
+    const filePath = path.join(codexShellSnapshotsRoot(codexHome), fileName);
     try {
       const raw = await readFile(filePath, 'utf8');
       const match = raw.match(/^export TERM_SESSION_ID=(.+)$/m);
@@ -499,13 +431,20 @@ function buildCurrentTask(thread: CodexThreadRow, activity?: CodexThreadActivity
   return `Historical Codex session recovered from local runtime history. ${summary}`;
 }
 
-async function buildActivityMap(threads: CodexThreadRow[]) {
+async function buildActivityMap(
+  threads: CodexThreadRow[],
+  codexHome: string,
+  knownLiveProcesses?: Map<number, LiveCodexProcess>,
+) {
   const byThreadId = new Map<string, CodexThreadActivity>();
   const threadIds = new Set(threads.map((thread) => thread.id));
   const threadById = new Map(threads.map((thread) => [thread.id, thread]));
-  const bindings = await queryProcessBindings();
-  const threadSessionIds = await buildShellSnapshotSessionMap(threads.map((thread) => thread.id));
-  const allLiveProcesses = await queryAllLiveCodexProcesses();
+  const bindings = await queryCodexProcessBindings(codexHome);
+  const threadSessionIds = await buildShellSnapshotSessionMap(
+    threads.map((thread) => thread.id),
+    codexHome,
+  );
+  const allLiveProcesses = knownLiveProcesses ?? await queryAllLiveCodexProcesses();
 
   const latestBindingByProcess = new Map<string, CodexProcessBinding>();
   for (const binding of bindings) {
@@ -630,8 +569,67 @@ export async function getCodexDiscoveredFleetAdditions(
 
   const promise = (async () => {
   try {
-    const threads = await queryCodexThreads(64);
-    if (!threads.length) {
+    const homes = await listCodexDiscoveryHomes();
+    const liveProcesses = await queryAllLiveCodexProcesses();
+    const agentsBySession = new Map<string, AgentSummary>();
+    const ambiguousSessionKeys = new Set<string>();
+    const matchedLivePids = new Set<number>();
+    let discoveredThreadCount = 0;
+
+    for (const home of homes) {
+      const threads = await queryCodexThreadsFromHome(home.configHomeRef, 64).catch(() => []);
+      discoveredThreadCount += threads.length;
+      if (!threads.length) continue;
+      const activityMap = await buildActivityMap(threads, home.configHomeRef, liveProcesses).catch(
+        () => new Map<string, CodexThreadActivity>(),
+      );
+      const visibleThreads = threads.filter((thread) => (
+        shouldExposeDiscoveredThread(thread, activityMap.get(thread.id))
+      ));
+      for (const thread of visibleThreads) {
+        const sessionKey = `codex:${thread.id}`;
+        if (ambiguousSessionKeys.has(sessionKey)) continue;
+        if (agentsBySession.has(sessionKey)) {
+          agentsBySession.delete(sessionKey);
+          ambiguousSessionKeys.add(sessionKey);
+          continue;
+        }
+        const activity = activityMap.get(thread.id);
+        const surface = buildRuntimeSurface(thread, activity);
+        const status = deriveStatus(thread, activity);
+        const branch = thread.git_branch || 'detached';
+        const workspace = shortenPath(thread.cwd);
+        const activityState = classifyActivity(thread, activity);
+        if (activity?.pid) matchedLivePids.add(activity.pid);
+
+        agentsBySession.set(sessionKey, {
+          id: sessionKey,
+          name: surface.title,
+          squadId: 'squad-codex-local',
+          runtime: 'codex',
+          model: thread.model || MODEL_IDS.codexDefault,
+          status,
+          currentTask: buildCurrentTask(thread, activity),
+          workspace,
+          branch,
+          sessionKey,
+          approvalStatus: 'none',
+          lastEventAt: relativeAgeFromSeconds(activity?.lastLogTs ?? thread.updated_at),
+          context: {
+            usedPercent: 0,
+            trend: activityState === 'stale' ? 'falling' : 'stable',
+          },
+          alerts: 0,
+          sessionId: thread.id,
+          identityId: home.identityId,
+          sessionKind: 'terminal',
+          surfaceLabel: activityState === 'active' ? 'Codex terminal • active' : 'Codex terminal • recent',
+          runtimeSurface: surface,
+        } satisfies AgentSummary);
+      }
+    }
+
+    if (!discoveredThreadCount) {
       return {
         agents: [],
         squads: [],
@@ -640,9 +638,7 @@ export async function getCodexDiscoveredFleetAdditions(
       };
     }
 
-    const activityMap = await buildActivityMap(threads);
-    const visibleThreads = threads.filter((thread) => shouldExposeDiscoveredThread(thread, activityMap.get(thread.id)));
-    if (!visibleThreads.length) {
+    if (!agentsBySession.size) {
       return {
         agents: [],
         squads: [],
@@ -652,46 +648,7 @@ export async function getCodexDiscoveredFleetAdditions(
         note: 'Codex discovery skipped stale local thread history with no live pid binding.',
       };
     }
-    const liveProcesses = await queryAllLiveCodexProcesses();
-
-    const agents: AgentSummary[] = visibleThreads.map((thread) => {
-      const activity = activityMap.get(thread.id);
-      const surface = buildRuntimeSurface(thread, activity);
-      const status = deriveStatus(thread, activity);
-      const branch = thread.git_branch || 'detached';
-      const workspace = shortenPath(thread.cwd);
-      const activityState = classifyActivity(thread, activity);
-
-      return {
-        id: `codex:${thread.id}`,
-        name: surface.title,
-        squadId: 'squad-codex-local',
-        runtime: 'codex',
-        model: thread.model || MODEL_IDS.codexDefault,
-        status,
-        currentTask: buildCurrentTask(thread, activity),
-        workspace,
-        branch,
-        sessionKey: surface.id,
-        approvalStatus: 'none',
-        lastEventAt: relativeAgeFromSeconds(activity?.lastLogTs ?? thread.updated_at),
-        context: {
-          usedPercent: 0,
-          trend: activityState === 'stale' ? 'falling' : 'stable',
-        },
-        alerts: 0,
-        sessionId: thread.id,
-        sessionKind: 'terminal',
-        surfaceLabel: activityState === 'active' ? 'Codex terminal • active' : 'Codex terminal • recent',
-        runtimeSurface: surface,
-      } satisfies AgentSummary;
-    });
-
-    const matchedLivePids = new Set(
-      [...activityMap.values()]
-        .map((activity) => activity.pid)
-        .filter((pid): pid is number => Number.isFinite(pid)),
-    );
+    const agents = [...agentsBySession.values()];
     for (const [pid, proc] of liveProcesses) {
       if (matchedLivePids.has(pid)) continue;
       const surface = buildSyntheticLiveProcessSurface(pid, proc);
@@ -833,9 +790,10 @@ function extractReasoningSummary(summary: unknown) {
     .trim();
 }
 
-function summarizeTailFromJsonl(raw: string) {
+function summarizeTailFromJsonl(raw: string, limit = 50) {
+  const retainedLimit = Math.min(Math.max(Math.floor(limit), 1), 200);
   const entries: RuntimeTailEntry[] = [];
-  const lines = raw.split('\n').slice(-180);
+  const lines = raw.split('\n').slice(-Math.max(180, retainedLimit * 4));
   let pendingThinking = '';
 
   for (const line of lines) {
@@ -947,22 +905,23 @@ function summarizeTailFromJsonl(raw: string) {
     }
   }
 
-  return entries.slice(-50);
+  return entries.slice(-retainedLimit);
 }
 
-async function findCodexThreadBySurfaceId(surfaceId: string) {
+async function findCodexThreadBySurfaceId(surfaceId: string, identityId?: string) {
   const threadId = surfaceId.replace(/^codex(?:-discovered|-live|-owned)?:/, '');
-  return queryCodexThreadById(threadId);
+  return findCodexThreadAcrossHomes(threadId, identityId);
 }
 
-export async function getCodexRolloutPath(surfaceId: string): Promise<string | null> {
-  const thread = await findCodexThreadBySurfaceId(surfaceId);
-  if (!thread) {
+export async function getCodexRolloutPath(surfaceId: string, identityId?: string): Promise<string | null> {
+  const found = await findCodexThreadBySurfaceId(surfaceId, identityId);
+  if (!found) {
     return null;
   }
 
+  const { thread, home } = found;
   const resolvedRollout = await realpath(thread.rollout_path).catch(() => null);
-  const resolvedRoot = await realpath(CODEX_SESSIONS_ROOT).catch(() => null);
+  const resolvedRoot = await realpath(codexSessionsRoot(home.configHomeRef)).catch(() => null);
   if (!resolvedRollout || !resolvedRoot) {
     return null;
   }
@@ -972,7 +931,7 @@ export async function getCodexRolloutPath(surfaceId: string): Promise<string | n
     : null;
 }
 
-export async function getCodexRuntimeTail(surfaceId: string): Promise<{
+export async function getCodexRuntimeTail(surfaceId: string, limit = 50, identityId?: string): Promise<{
   surface: RuntimeSurfaceSummary;
   entries: RuntimeTailEntry[];
 }> {
@@ -984,9 +943,7 @@ export async function getCodexRuntimeTail(surfaceId: string): Promise<{
     if (!proc) {
       throw new Error('Live Codex process was not found.');
     }
-
     const surface = buildSyntheticLiveProcessSurface(pid, proc);
-
     return {
       surface,
       entries: [{
@@ -998,21 +955,23 @@ export async function getCodexRuntimeTail(surfaceId: string): Promise<{
     };
   }
 
-  const thread = await findCodexThreadBySurfaceId(surfaceId);
-  if (!thread) {
+  const found = await findCodexThreadBySurfaceId(surfaceId, identityId);
+  if (!found) {
     throw new Error('Codex runtime surface was not found.');
   }
 
-  const activityMap = await buildActivityMap([thread]);
+  const { thread, home } = found;
+  const activityMap = await buildActivityMap([thread], home.configHomeRef);
   const resolvedRollout = await realpath(thread.rollout_path);
-  const resolvedRoot = await realpath(CODEX_SESSIONS_ROOT);
+  const resolvedRoot = await realpath(codexSessionsRoot(home.configHomeRef));
   if (!resolvedRollout.startsWith(`${resolvedRoot}${path.sep}`) && resolvedRollout !== resolvedRoot) {
     throw new Error('Codex rollout path escaped the expected sessions root.');
   }
 
-  const raw = await readTailChunk(resolvedRollout);
+  const retainedLimit = Math.min(Math.max(Math.floor(limit), 1), 200);
+  const raw = await readTailChunk(resolvedRollout, Math.max(220_000, retainedLimit * 4_400));
   return {
     surface: buildRuntimeSurface(thread, activityMap.get(thread.id)),
-    entries: summarizeTailFromJsonl(raw),
+    entries: summarizeTailFromJsonl(raw, retainedLimit),
   };
 }

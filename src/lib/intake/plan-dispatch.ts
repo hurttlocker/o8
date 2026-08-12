@@ -63,7 +63,7 @@ export async function dispatchApprovedPlan(
   // Read-modify-write under the control-plane lock (#460) — a raw write here
   // races the headless loop and concurrent approvals (last writer wins,
   // silently dropping packets).
-  await withLockedState((current) => {
+  const { state } = await withLockedState((current) => {
     // If there's an active mission with running packets, append. Otherwise fresh.
     const hasActivePackets = current.packets.some((p) =>
       p.status === 'running' || p.status === 'launching' || p.status === 'queued',
@@ -88,6 +88,7 @@ export async function dispatchApprovedPlan(
       updatedAt: new Date().toISOString(),
     };
   });
+  const committedMissionId = state.missionId || missionId;
 
   // Trigger the headless loop to pick up the new packets
   void runHeadlessSprintTick().catch((error) => {
@@ -96,5 +97,5 @@ export async function dispatchApprovedPlan(
 
   const note = `Dispatched ${packets.length} packet${packets.length === 1 ? '' : 's'} for issue #${plan.issueNumber}.`;
   console.log(`${LOG_PREFIX} ${note}`);
-  return { ok: true, missionId, packetCount: packets.length, note };
+  return { ok: true, missionId: committedMissionId, packetCount: packets.length, note };
 }

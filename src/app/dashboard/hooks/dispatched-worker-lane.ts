@@ -1,5 +1,6 @@
 import type { RegisteredRepo } from '@/components/desktop/workspace-terminal/types';
 import type { OrchestratorRuntime, WorkerLaunchContext } from '@/lib/orchestrator/types';
+import { isOrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import type { WorkspaceScopeEntry } from '../types';
 
 export interface DispatchedWorkerLane {
@@ -13,6 +14,10 @@ export interface DispatchedWorkerLane {
   status?: string | null;
   branch?: string | null;
   launchContext?: WorkerLaunchContext | null;
+}
+
+export function dispatchedWorkerRuntime(value: unknown): OrchestratorRuntime {
+  return isOrchestratorRuntime(value) ? value : 'codex';
 }
 
 export function dispatchedLaneRepo(

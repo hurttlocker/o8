@@ -6,8 +6,10 @@ import { loadMobileLlmChatHistory } from '@/lib/llm/mobile-llm-chat';
 import type { MobileInboxSnapshot, MobileTranscriptEntry } from '@/lib/mobile/types';
 import { mobileInboxSignature } from '@/lib/mobile/inbox-signature';
 import { getMobileInboxSnapshot } from '@/lib/mobile/inbox';
+import { mergeDurableMobileTranscriptEntries, parseMobileTranscriptTimestamp } from '@/lib/mobile/history';
 import '@/lib/runtimes'; // Ensure runtimes are registered
 import { getRuntime } from '@/lib/runtimes/registry';
+import { runtimeIdFromSessionKey } from '@/lib/runtime/transcript';
 import { getReviewFileDetail } from '@/lib/review/workspace';
 
 export const runtime = 'nodejs';
@@ -65,21 +67,26 @@ async function resolveHistory(
   req: NonNullable<SyncRequest['history']>,
 ): Promise<{ sessionKey: string; entries: MobileTranscriptEntry[]; replace?: boolean }> {
   const { sessionKey, limit: rawLimit } = req;
-  const limit = Math.min(Math.max(rawLimit ?? 18, 1), 40);
+  const limit = Math.min(Math.max(rawLimit ?? 18, 1), 200);
 
   if (sessionKey.startsWith('llm-chat:')) {
     const transcript = loadMobileLlmChatHistory(sessionKey, limit).transcript;
-    const delta = applyDelta(transcript, req.sinceId);
-    return { sessionKey, ...delta };
+    return resolveHistoryDelta(sessionKey, transcript, req.sinceId);
   }
 
   if (sessionKey.startsWith('codex-owned:')) {
-    const tail = await getOwnedCodexRuntimeTail(sessionKey);
+    const tail = await getOwnedCodexRuntimeTail(sessionKey, limit);
     const entries: MobileTranscriptEntry[] = [];
     for (const group of tail.groups ?? []) {
       const promptText = group.prompt?.trim();
       if (promptText) {
-        entries.push({ id: `${group.id}-prompt`, role: 'user', text: promptText, timestampLabel: group.startedAtLabel });
+        entries.push({
+          id: `${group.id}-prompt`,
+          role: 'user',
+          text: promptText,
+          timestamp: parseMobileTranscriptTimestamp(group.startedAt),
+          timestampLabel: group.startedAtLabel,
+        });
       }
       for (const entry of group.entries) {
         const text = entry.text.trim();
@@ -88,22 +95,35 @@ async function resolveHistory(
         if (text.startsWith('Usage •') || text.includes('Owned Codex session') || text.includes('Codex run launched')) continue;
         const role = runtimeTailRole(entry.label);
         if (role === 'assistant') {
-          entries.push({ id: entry.id, role: 'assistant', text, timestampLabel: entry.timestampLabel });
+          entries.push({
+            id: entry.id,
+            role: 'assistant',
+            text,
+            timestamp: parseMobileTranscriptTimestamp(entry.timestamp),
+            timestampLabel: entry.timestampLabel,
+          });
         } else if (entry.kind === 'tool') {
-          entries.push({ id: entry.id, role: 'system', text: `🔧 ${entry.label || 'Tool'}`, timestampLabel: entry.timestampLabel });
+          entries.push({ id: entry.id, role: 'system', text: `Tool: ${entry.label || 'Command'}`, timestampLabel: entry.timestampLabel });
+          const timestamp = parseMobileTranscriptTimestamp(entry.timestamp);
+          if (timestamp !== undefined) entries[entries.length - 1]!.timestamp = timestamp;
         }
       }
     }
-    const delta = applyDelta(entries, req.sinceId);
-    return { sessionKey, ...delta };
+    return resolveHistoryDelta(sessionKey, entries.slice(-limit), req.sinceId);
   }
 
   if (sessionKey.startsWith('codex:')) {
-    const tail = await getCodexRuntimeTail(sessionKey);
+    const tail = await getCodexRuntimeTail(sessionKey, limit);
     const raw: MobileTranscriptEntry[] = [];
     for (const entry of tail.entries ?? []) {
       if (entry.kind === 'event' && entry.label === 'Agent update') {
-        raw.push({ id: entry.id, role: 'assistant', text: entry.text, timestampLabel: entry.timestampLabel });
+        raw.push({
+          id: entry.id,
+          role: 'assistant',
+          text: entry.text,
+          timestamp: parseMobileTranscriptTimestamp(entry.timestamp),
+          timestampLabel: entry.timestampLabel,
+        });
         continue;
       }
       if (entry.kind === 'message') {
@@ -113,7 +133,13 @@ async function resolveHistory(
           const lt = entry.text.toLowerCase();
           if (lt.includes('<permissions') || lt.includes('collaboration_mode') || lt.includes('# agents.md') || lt.includes('sandbox_mode')) continue;
         }
-        raw.push({ id: entry.id, role, text: entry.text, timestampLabel: entry.timestampLabel });
+        raw.push({
+          id: entry.id,
+          role,
+          text: entry.text,
+          timestamp: parseMobileTranscriptTimestamp(entry.timestamp),
+          timestampLabel: entry.timestampLabel,
+        });
         continue;
       }
       // Collapse tool calls — skip individual tool entries and tool output.
@@ -132,8 +158,7 @@ async function resolveHistory(
       seen.add(key);
       deduped.push(entry);
     }
-    const delta = applyDelta(deduped, req.sinceId);
-    return { sessionKey, ...delta };
+    return resolveHistoryDelta(sessionKey, deduped, req.sinceId);
   }
 
   // Claude Code sessions — read from JSONL via runtime adapter
@@ -168,11 +193,47 @@ async function resolveHistory(
           summary: entry.compaction.summary,
         } : undefined,
       }));
-      const delta = applyDelta(transcript, req.sinceId);
-      return { sessionKey, ...delta };
+      return resolveHistoryDelta(sessionKey, transcript, req.sinceId);
     }
   }
-  return { sessionKey, entries: [], replace: true };
+
+  // Every registered runtime with transcript support is authoritative for its
+  // own session keys. Keep the bespoke mobile renderers above where they add
+  // useful filtering, then fall through to the universal adapter contract so a
+  // newly registered runtime never becomes an empty destructive snapshot here.
+  const runtimeId = runtimeIdFromSessionKey(sessionKey);
+  const registeredRuntime = runtimeId ? getRuntime(runtimeId) : undefined;
+  if (registeredRuntime?.capabilities.readTranscript) {
+    const runtimeEntries = await registeredRuntime.readTranscript(sessionKey, undefined, limit);
+    const transcript: MobileTranscriptEntry[] = runtimeEntries.map((entry) => ({
+      id: entry.id,
+      role: entry.role === 'user'
+        ? 'user'
+        : entry.role === 'assistant'
+          ? 'assistant'
+          : entry.role === 'tool'
+            ? 'tool'
+            : 'system',
+      text: entry.text,
+      type: entry.type ?? 'message',
+      timestamp: entry.timestamp.getTime(),
+      timestampLabel: entry.timestamp.toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+      }),
+      toolCalls: entry.toolCalls,
+      compaction: entry.compaction ? {
+        timestamp: entry.compaction.timestamp.getTime(),
+        tokensBefore: entry.compaction.tokensBefore,
+        tokensAfter: entry.compaction.tokensAfter,
+        trigger: entry.compaction.trigger,
+        source: entry.compaction.source,
+        summary: entry.compaction.summary,
+      } : undefined,
+    }));
+    return resolveHistoryDelta(sessionKey, transcript, req.sinceId);
+  }
+  throw new Error(`Transcript sync is unsupported for ${sessionKey}`);
 }
 
 function applyDelta(entries: MobileTranscriptEntry[], sinceId?: string): {
@@ -188,6 +249,17 @@ function applyDelta(entries: MobileTranscriptEntry[], sinceId?: string): {
     };
   }
   return { entries: entries.slice(idx + 1) };
+}
+
+function resolveHistoryDelta(
+  sessionKey: string,
+  entries: MobileTranscriptEntry[],
+  sinceId?: string,
+): { sessionKey: string; entries: MobileTranscriptEntry[]; replace?: boolean } {
+  return {
+    sessionKey,
+    ...applyDelta(mergeDurableMobileTranscriptEntries(sessionKey, entries), sinceId),
+  };
 }
 
 // ── Review file resolver ──

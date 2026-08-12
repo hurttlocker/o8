@@ -1,25 +1,33 @@
-import { aggregateMissionCost } from '@/lib/orchestrator/cost-aggregator';
-import type { LaneSessionInfo } from '@/lib/orchestrator/cost-aggregator';
+import { aggregateMissionCost, laneSessionHistoryForMission } from '@/lib/orchestrator/cost-aggregator';
+import { projectMissionFunnel } from '@/lib/orchestrator/mission-funnel';
 import { resolveWorkerRouting } from '@/lib/agents/routing';
 import { reconcileOrchestratorControlPlaneState, withLockedState, writeOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { buildDagMetadata, buildDependencyGraph } from '@/lib/orchestrator/dag';
 import { buildRemainingLaunchBudget, runDispatchTick } from '@/lib/orchestrator/dispatch';
-import { findLaneByPacket, findLatestLaneByPacket, getLaneEvents } from '@/lib/lane/registry';
+import { findLaneByPacket, getLaneEvents, listLanes } from '@/lib/lane/registry';
 import { recoveryInfoFromLaneEvents } from '@/lib/lane/recovery-info';
 import { resolveBranchPrefixSync } from '@/lib/operator/defaults';
 import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
 import { listArtifacts, toArtifactRef } from '@/lib/artifacts/store';
 import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
 import { archiveMissionsExcept, getMissionRecord, recordMission } from '@/lib/db/missions-store';
-import { readMissionRegistryEntry, withMissionRegistryState } from '@/lib/orchestrator/mission-registry';
+import {
+  persistMissionRegistryStateIfVersion,
+  readMissionRegistryEntry,
+  withMissionRegistryState,
+} from '@/lib/orchestrator/mission-registry';
 import {
   latestTranscriptEventAt,
   readSessionTranscriptEvents,
 } from '@/lib/orchestrator/packet-transcript';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { bindWorkerLaunchParent } from '@/lib/orchestrator/worker-launch-context';
+import { withMissionHandoffBarrier } from '@/lib/orchestrator/lifecycle-mutation-lock';
+import { releaseAbandonedMissionLifecycleHold } from '@/lib/orchestrator/mission-lifecycle-hold';
 import { getTopRulesForPacket, readRepoScopedRules } from '@/lib/dispatch/rules-store';
-import { recommendRuntime } from '@/lib/dispatch/routing';
 import { prepareMissionBranches, type MissionBranchDecision } from './branch-cleanup';
+import { recordOutgoingMissionSnapshot } from './mission-handoff';
+import { logDispatchRoutingRecommendations } from './mission-routing-log';
 import { rearmHeldPacketsForExplicitDispatch, summarizeDispatchMission } from './dispatch-result';
 import {
   buildMissionId,
@@ -151,6 +159,9 @@ export async function createMission(input: CreateMissionInput) {
     ?? (typeof input.orchestratorThreadId === 'string' && input.orchestratorThreadId.trim()
       ? { surface: 'orchestrator' as const, id: input.orchestratorThreadId.trim() }
       : { surface: 'operator' as const, id: 'desktop' });
+  const launchContext = bindWorkerLaunchParent(input.launchContext, {
+    threadId: input.orchestratorThreadId,
+  });
   const packets = loadedIssues.map((issue, index) => {
     const dependencyNumbers = explicitDependencies[index].length > 0
       ? explicitDependencies[index]
@@ -251,7 +262,7 @@ export async function createMission(input: CreateMissionInput) {
         ? { orchestratorThreadId: input.orchestratorThreadId.trim() }
         : {}),
       dispatcher,
-      ...(input.launchContext ? { launchContext: input.launchContext } : {}),
+      ...(launchContext ? { launchContext } : {}),
       // Best-of-N: stamp the seed packet so fanOutComparisonPackets (scheduling.ts)
       // splits it into N sibling candidates, one per model, each its own worktree.
       ...(input.comparisonModels && input.comparisonModels.length > 0
@@ -260,7 +271,7 @@ export async function createMission(input: CreateMissionInput) {
     } satisfies OrchestratorPacket;
   });
 
-  const mission = normalizeOrchestratorMissionState({
+  const missionBase = normalizeOrchestratorMissionState({
     version: 2,
     missionId,
     prompt: buildMissionPrompt(loadedIssues, repoPath, input.constraints),
@@ -268,20 +279,55 @@ export async function createMission(input: CreateMissionInput) {
     repoPath,
     runtime: workerRouting.selectedRuntime,
     constraints: input.constraints,
+    creationMutationId: input.clientMutationId?.trim() || null,
     packets,
     updatedAt: new Date().toISOString(),
   });
+  const waves = new Map(buildDependencyGraph(missionBase.packets).map((node) => [node.packetId, node.wave] as const));
+  const creationReceipt = {
+    missionId,
+    packets: missionBase.packets.map((packet) => ({ id: packet.id, title: packet.title, wave: waves.get(packet.id) ?? 1 })),
+    branchPreparation: branchPreparation.filter((decision) => decision.action !== 'none'),
+  };
+  const mission = normalizeOrchestratorMissionState({ ...missionBase, creationReceipt });
 
-  const { state: persisted } = await withLockedState(
-    (current) => {
-      // Replace the mission under the control-plane lock so a concurrent
-      // headless tick cannot restore a stale mission after createMission returns.
-      Object.assign(current, mission);
-    },
-    { waitTimeoutMs: MISSION_CREATE_LOCK_WAIT_MS },
-  );
-  const waves = new Map(buildDependencyGraph(persisted.packets).map((node) => [node.packetId, node.wave] as const));
-
+  const persisted = await withMissionHandoffBarrier(async () => {
+    const { state, result: outgoing } = await withLockedState(
+      (current) => {
+        // Replace the mission under the control-plane lock so a concurrent
+        // headless tick cannot restore a stale mission after createMission returns.
+        if (current.missionId && current.missionId !== missionId) {
+          const registryEntry = readMissionRegistryEntry(current.missionId, { includeArchived: true });
+          const snapshot = structuredClone(current);
+          if (!registryEntry) {
+            // The outgoing current file is authoritative even when an earlier
+            // best-effort mission insert failed. Insert its exact snapshot
+            // before swapping the file so its live packets remain addressable.
+            // Any insert failure aborts the switch while the old current file
+            // is still intact.
+            recordOutgoingMissionSnapshot(snapshot);
+          }
+          Object.assign(current, mission);
+          return registryEntry
+            ? { mission: snapshot, registryVersion: registryEntry.updatedAt }
+            : null;
+        }
+        Object.assign(current, mission);
+        return null;
+      },
+      { waitTimeoutMs: MISSION_CREATE_LOCK_WAIT_MS },
+    );
+    if (outgoing) {
+      const persistedOutgoing = await persistMissionRegistryStateIfVersion(
+        outgoing.mission,
+        outgoing.registryVersion,
+      );
+      if (!persistedOutgoing) {
+        log(`Outgoing mission ${outgoing.mission.missionId} advanced during mission switch; its newer registry state was preserved.`);
+      }
+    }
+    return state;
+  });
   log(`Created mission ${missionId} with ${persisted.packets.length} packets.`);
   logBranchPreparation(branchPreparation, missionId);
 
@@ -322,15 +368,7 @@ export async function createMission(input: CreateMissionInput) {
     );
   });
 
-  return {
-    missionId,
-    packets: persisted.packets.map((packet) => ({
-      id: packet.id,
-      title: packet.title,
-      wave: waves.get(packet.id) ?? 1,
-    })),
-    branchPreparation: branchPreparation.filter((decision) => decision.action !== 'none'),
-  };
+  return persisted.creationReceipt ?? creationReceipt;
 }
 
 function logBranchPreparation(decisions: MissionBranchDecision[], missionId: string) {
@@ -349,34 +387,6 @@ function logBranchPreparation(decisions: MissionBranchDecision[], missionId: str
   });
 }
 
-async function logDispatchRoutingRecommendations(
-  packets: OrchestratorPacket[],
-  missionId: string,
-): Promise<void> {
-  // Group by repo so we only score each repo once per mission.
-  const byRepo = new Map<string, OrchestratorPacket[]>();
-  for (const packet of packets) {
-    const repo = packet.workspaceTargetPath?.trim();
-    if (!repo) continue;
-    const prior = byRepo.get(repo) ?? [];
-    prior.push(packet);
-    byRepo.set(repo, prior);
-  }
-
-  for (const [repoPath, repoPackets] of byRepo) {
-    const recommendation = await recommendRuntime(repoPath);
-    for (const packet of repoPackets) {
-      const matched = recommendation.runtime !== null && packet.runtime === recommendation.runtime;
-      const evidenceSummary = Object.values(recommendation.evidence)
-        .map((row) => `${row.runtime}=${row.mergedClean}/${row.total}`)
-        .join(' ') || 'no-history';
-      console.log(
-        `[dispatch-routing] mission=${missionId} packet=${packet.referenceLabel} repo=${repoPath} chose=${packet.runtime} recommended=${recommendation.runtime ?? 'none'} score=${recommendation.score.toFixed(2)} matched=${matched} evidence=${evidenceSummary}`,
-      );
-    }
-  }
-}
-
 export async function dispatchMission(input: DispatchMissionInput) {
   const before = currentMissionState();
   const requestedMissionId = resolveMissionDispatchTarget(input.missionId);
@@ -384,8 +394,11 @@ export async function dispatchMission(input: DispatchMissionInput) {
 
   if (requestedMissionId && requestedMissionId !== currentMissionId) {
     const { result, state: finalState } = await withMissionRegistryState(requestedMissionId, async (stored) => {
-      const registryBefore = reconcileOrchestratorControlPlaneState(stored);
-      rearmHeldPacketsForExplicitDispatch(registryBefore);
+      const registryBefore = releaseAbandonedMissionLifecycleHold(
+        reconcileOrchestratorControlPlaneState(stored),
+        { allowOwnerTakeover: true },
+      );
+      if (!registryBefore.lifecycleHold) rearmHeldPacketsForExplicitDispatch(registryBefore);
       const afterDispatch = await runDispatchTick(registryBefore, { launchBudget: buildRemainingLaunchBudget() });
       return { state: afterDispatch, result: summarizeDispatchMission(registryBefore, afterDispatch) };
     });
@@ -407,7 +420,8 @@ export async function dispatchMission(input: DispatchMissionInput) {
     // 'held'. Held packets are skipped by the supervisor's automatic dispatch tick
     // (so reset doesn't boomerang); an explicit dispatch_mission is the operator
     // opting back in, so promote held -> queued here before dispatching.
-    rearmHeldPacketsForExplicitDispatch(current);
+    Object.assign(current, releaseAbandonedMissionLifecycleHold(current, { allowOwnerTakeover: true }));
+    if (!current.lifecycleHold) rearmHeldPacketsForExplicitDispatch(current);
     const afterDispatch = await runDispatchTick(current, { launchBudget: buildRemainingLaunchBudget() });
     // #1293 — make withLockedState's end-of-lock reconcile+write use the
     // post-dispatch state, not the unmutated pre-callback `current`. Without this
@@ -622,7 +636,11 @@ export async function getMissionStatus(input: MissionStatusInput) {
       if (!record) {
         throw new MissionNotFoundError(requestedMissionId);
       }
-      return buildHistoricalMissionStatus(record);
+      const historical = buildHistoricalMissionStatus(record);
+      const funnel = input.includeTiming && record.missionState
+        ? await projectMissionFunnel(record.missionState)
+        : undefined;
+      return { ...historical, ...(input.includeTiming ? { funnel: funnel ?? null } : {}) };
     }
   }
 
@@ -683,13 +701,25 @@ export async function getMissionStatus(input: MissionStatusInput) {
     .filter((blocker) => blocker.blockedBy.length > 0 || blocker.reason);
 
   const cost = input.includeCost
-    ? await aggregateMissionCost(state, new Map(
-      state.packets.map((p) => {
-        const lane = findLatestLaneByPacket(p.id);
-        return lane ? [p.id, { sessionKey: lane.sessionKey, runtime: lane.runtime } satisfies LaneSessionInfo] as const : null;
-      }).filter(Boolean) as Array<readonly [string, LaneSessionInfo]>,
-    ))
+    ? await aggregateMissionCost(state, laneSessionHistoryForMission(state, listLanes().map((lane) => ({
+        ...lane,
+        historicalPacketId: (() => {
+          const opened = getLaneEvents(lane.id, 5_000).find((event) => event.verb === 'open_lane');
+          return typeof opened?.payload.packetId === 'string' ? opened.payload.packetId : null;
+        })(),
+        sessionHistory: getLaneEvents(lane.id, 5_000)
+          .filter((event) => (
+            (event.verb === 'open_lane' || event.verb === 'attach_session')
+            && typeof event.payload.sessionKey === 'string'
+          ))
+          .map((event) => ({
+            sessionKey: String(event.payload.sessionKey),
+            runtime: lane.runtime,
+            createdAt: event.timestamp,
+          })),
+      }))))
     : undefined;
+  const funnel = input.includeTiming ? await projectMissionFunnel(state) : undefined;
 
   return {
     missionId: state.missionId || '',
@@ -764,6 +794,7 @@ export async function getMissionStatus(input: MissionStatusInput) {
     }),
     agents,
     blockers,
+    ...(funnel ? { funnel } : {}),
     ...(cost ? { cost } : {}),
   };
 }

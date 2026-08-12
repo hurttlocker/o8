@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
@@ -247,7 +248,7 @@ function mergeRequest(token: string, packetId: string): NextRequest {
       authorization: `Bearer ${token}`,
       'content-type': 'application/json',
     },
-    body: JSON.stringify({ packetId }),
+    body: JSON.stringify({ packetId, idempotencyKey: randomUUID() }),
   });
 }
 
@@ -275,6 +276,7 @@ function reviewRequest(
     },
     body: JSON.stringify({
       packetId,
+      clientMutationId: randomUUID(),
       approved: true,
       reviewedHeadSha,
       contractCoverageEvidence,

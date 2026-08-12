@@ -89,7 +89,7 @@ export async function restoreArchivedOwnedSessionDir(
       ...record,
       sessionDir: activePath,
       updatedAt: nowIso(),
-    });
+    }, { mode: 0o600 });
   } catch (error) {
     console.warn(
       `[owned-store] Restored ${surfaceId} from archive but failed to update metadata:`,
@@ -132,7 +132,7 @@ export async function archiveOwnedSessionDir(
       ...archivedSession,
       sessionDir: archivePath,
       updatedAt: nowIso(),
-    });
+    }, { mode: 0o600 });
   } catch (error) {
     console.warn(
       `[owned-store] Archived ${session.surfaceId} but failed to update archived metadata:`,

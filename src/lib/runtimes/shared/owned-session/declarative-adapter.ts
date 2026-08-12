@@ -2,6 +2,7 @@ import path from 'node:path';
 
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { compactText, formatClock } from './helpers';
+import { registerOwnedSessionLifecycle } from '../owned-session-lifecycle';
 import { createOwnedSessionStore } from './store';
 import type {
   OwnedRunRecord,
@@ -309,7 +310,16 @@ export function registerDeclarativeOwnedRuntime(
     throw new Error(`Declarative owned runtime already registered: ${config.runtimeId}`);
   }
   const adapter = createDeclarativeOwnedRuntimeAdapter(config);
-  const registration = { adapter, store: createOwnedSessionStore(adapter) };
+  const store = createOwnedSessionStore(adapter);
+  const registration = { adapter, store };
+  registerOwnedSessionLifecycle({
+    runtimeId: config.runtimeId,
+    surfaceIdPrefix: config.surfaceIdPrefix,
+    commandLabel: config.binaryName,
+    rootEnvVar: config.rootEnvVar,
+    rootDefault: config.rootDefault,
+    store,
+  });
   registry.set(config.runtimeId, registration);
   return registration;
 }

@@ -15,10 +15,20 @@ import {
 } from '@/lib/orchestrator/runtime-capabilities';
 import { scanAndLink } from './cli-locate';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
+import {
+  localProviderIds,
+  opencodeCredentialProviders,
+  providerHasConfiguredCredential,
+  providerIdForModel,
+  readOpencodeConfig,
+} from './opencode-readiness';
 
 const execFileAsync = promisify(execFile);
 const CACHE_TTL_MS = 60_000;
 const PROBE_TIMEOUT_MS = 1_500;
+const TRUSTED_KEYLESS_OPENCODE_MODELS = new Set([
+  'opencode/deepseek-v4-flash-free',
+]);
 
 export type RuntimeHouse = RuntimeAuthHouse;
 export type RuntimeUnavailableReason = 'not_installed' | 'needs_auth' | 'adapter_unavailable';
@@ -27,6 +37,9 @@ export interface RuntimeAuthStatus {
   house: RuntimeHouse | null;
   runtime: OrchestratorRuntime;
   installed: boolean;
+  /** True when the runtime can dispatch without a model-specific readiness check. */
+  ready: boolean;
+  /** Credential evidence only; a keyless local runtime can be ready while this is false. */
   authenticated: boolean;
   unavailableReason: RuntimeUnavailableReason | null;
   detail: string;
@@ -72,19 +85,22 @@ let cache: { snapshot: RuntimeAuthSnapshot; cachedAt: number } | null = null;
 function nowStatus(
   house: RuntimeHouse,
   runtime: OrchestratorRuntime,
-  update: Omit<RuntimeAuthStatus, 'house' | 'runtime' | 'checkedAt' | 'fix' | 'unavailableReason'> & {
+  update: Omit<RuntimeAuthStatus, 'house' | 'runtime' | 'checkedAt' | 'ready' | 'fix' | 'unavailableReason'> & {
+    ready?: boolean;
     fix?: string;
     unavailableReason?: RuntimeUnavailableReason | null;
   },
 ): RuntimeAuthStatus {
+  const ready = update.ready ?? update.authenticated;
   return {
     house,
     runtime,
     checkedAt: Date.now(),
+    ...update,
+    ready,
     fix: update.fix ?? (house === 'codex' ? 'Run `codex login`.' : 'Run `claude` once to sign in.'),
     unavailableReason: update.unavailableReason
-      ?? (!update.installed ? 'not_installed' : !update.authenticated ? 'needs_auth' : null),
-    ...update,
+      ?? (!update.installed ? 'not_installed' : !ready ? 'needs_auth' : null),
   };
 }
 
@@ -107,6 +123,51 @@ async function readJsonRecord(filePath: string): Promise<Record<string, unknown>
   } catch {
     return null;
   }
+}
+
+async function opencodeModelStatus(
+  status: RuntimeAuthStatus,
+  model: string,
+  cwd?: string | null,
+): Promise<RuntimeAuthStatus> {
+  const providerId = providerIdForModel(model);
+  if (!providerId) {
+    return {
+      ...status,
+      authenticated: false,
+      ready: false,
+      unavailableReason: 'needs_auth',
+      detail: 'The selected OpenCode 2 model does not identify its provider.',
+      fix: 'Select an OpenCode 2 model using its provider/model identifier.',
+    };
+  }
+
+  const [credentialProviders, config] = await Promise.all([
+    opencodeCredentialProviders(os.homedir()),
+    readOpencodeConfig(os.homedir(), cwd),
+  ]);
+  const localProviders = localProviderIds(config);
+  const authenticated = credentialProviders.has(providerId)
+    || providerHasConfiguredCredential(config, providerId);
+  const local = localProviders.has(providerId);
+  const keyless = TRUSTED_KEYLESS_OPENCODE_MODELS.has(model.trim());
+  const ready = authenticated || local || keyless;
+  return {
+    ...status,
+    authenticated,
+    ready,
+    unavailableReason: ready ? null : 'needs_auth',
+    detail: keyless
+      ? `OpenCode 2 model "${model.trim()}" supports keyless dispatch.`
+      : local
+      ? `OpenCode 2 provider "${providerId}" is configured for local dispatch.`
+      : authenticated
+        ? `OpenCode 2 provider "${providerId}" has credential evidence.`
+        : `OpenCode 2 provider "${providerId}" has no credential evidence and is not configured for local dispatch.`,
+    fix: ready
+      ? 'No action needed.'
+      : `Sign in to the OpenCode 2 provider "${providerId}" or configure that provider with a local baseURL.`,
+  };
 }
 
 async function probeCodexAuth(binaryPath: string): Promise<boolean> {
@@ -216,19 +277,36 @@ async function detectOpencode(): Promise<RuntimeAuthStatus> {
       installed: false,
       authenticated: false,
       detail: 'OpenCode 2 CLI is not installed.',
-      fix: 'Install `@opencode-ai/cli@next`, then run `opencode2 auth login`.',
+      fix: 'Install `@opencode-ai/cli@next`, then sign in or configure a local provider.',
     });
   }
 
-  const authFile = path.join(os.homedir(), '.local', 'share', 'opencode', 'auth.json');
-  const authenticated = await fileExists(authFile);
+  const [credentialProviders, config] = await Promise.all([
+    opencodeCredentialProviders(os.homedir()),
+    readOpencodeConfig(os.homedir()),
+  ]);
+  const authenticated = credentialProviders.size > 0;
+  const localProviderConfigured = localProviderIds(config).size > 0;
+  const defaultModel = getRuntimeCapability('opencode').defaultModel;
+  const defaultModelReady = Boolean(
+    defaultModel && TRUSTED_KEYLESS_OPENCODE_MODELS.has(defaultModel),
+  );
   return nowStatus('opencode', 'opencode', {
     installed: true,
     authenticated,
+    ready: authenticated || defaultModelReady,
     detail: authenticated
-      ? 'OpenCode 2 CLI is installed and has local auth.json evidence.'
-      : `OpenCode 2 needs auth.json at ${authFile}.`,
-    fix: 'Run `opencode2 auth login` to create auth.json.',
+      ? 'OpenCode 2 CLI is installed and has provider credential evidence.'
+      : defaultModelReady
+        ? `OpenCode 2 CLI is installed and its default model "${defaultModel}" supports keyless dispatch.`
+      : localProviderConfigured
+        ? 'OpenCode 2 CLI is installed and has a configured local provider; select one of that provider\'s models to dispatch.'
+        : 'OpenCode 2 CLI is installed but has no credential evidence or configured local provider.',
+    fix: authenticated || defaultModelReady
+      ? 'No action needed.'
+      : localProviderConfigured
+        ? 'Select a model from the configured local provider, or run `opencode2 auth login`.'
+        : 'Run `opencode2 auth login` or configure a provider with a local baseURL.',
     binaryPath,
   });
 }
@@ -368,7 +446,7 @@ async function detectDeclarativeRuntime(runtime: OrchestratorRuntime): Promise<R
   });
 }
 
-function detectRuntime(runtime: OrchestratorRuntime): Promise<RuntimeAuthStatus> {
+export function detectRuntimeAuthStatus(runtime: OrchestratorRuntime): Promise<RuntimeAuthStatus> {
   switch (runtime) {
     case 'codex': return detectCodex();
     case 'claude-code': return detectClaude();
@@ -403,7 +481,7 @@ export async function getRuntimeAuthSnapshot(): Promise<RuntimeAuthSnapshot> {
   const entries = await Promise.all(listDispatchableRuntimes().map(async (runtime) => {
     const house = getRuntimeCapability(runtime).authHouse;
     if (!house) throw new Error(`Dispatchable runtime ${runtime} has no auth house.`);
-    return [house, await detectRuntime(runtime)] as const;
+    return [house, await detectRuntimeAuthStatus(runtime)] as const;
   }));
   const statuses = Object.fromEntries(entries) as Record<RuntimeHouse, RuntimeAuthStatus>;
   const snapshot = {
@@ -441,7 +519,7 @@ export async function getDispatchableRuntimeAvailability(
 
     const house = houseForRuntime(id);
     const status = house ? snapshot.statuses[house] : null;
-    const available = Boolean(status?.installed && status.authenticated);
+    const available = Boolean(status?.installed && (status.ready ?? status.authenticated));
     return {
       id,
       label: ORCHESTRATOR_RUNTIMES[id].label,
@@ -453,17 +531,32 @@ export async function getDispatchableRuntimeAvailability(
   });
 }
 
-export async function assertRuntimeDispatchable(runtime: OrchestratorRuntime): Promise<void> {
+export async function assertRuntimeDispatchable(
+  runtime: OrchestratorRuntime,
+  model?: string | null,
+  cwd?: string | null,
+): Promise<void> {
   const availability = (await getDispatchableRuntimeAvailability()).find((entry) => entry.id === runtime);
-  if (availability?.available) return;
-
   const house = houseForRuntime(runtime);
   const snapshot = await getRuntimeAuthSnapshot();
   const status = house ? snapshot.statuses[house] : null;
+  if (
+    runtime === 'opencode'
+    && model?.trim()
+    && status?.installed
+    && availability?.unavailableReason !== 'adapter_unavailable'
+  ) {
+    const modelStatus = await opencodeModelStatus(status, model, cwd);
+    if (modelStatus.ready) return;
+    throw new DispatchPreflightError(modelStatus);
+  }
+  if (availability?.available) return;
+
   throw new DispatchPreflightError(status ?? {
     house,
     runtime,
     installed: false,
+    ready: false,
     authenticated: false,
     unavailableReason: availability?.unavailableReason ?? 'adapter_unavailable',
     detail: availability?.detail ?? `Runtime "${runtime}" is not dispatchable.`,

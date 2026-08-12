@@ -6,6 +6,11 @@
 import { fetchOnce } from '@/lib/panel/fetch-cache';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { OrchestrationMode, OrchestratorRuntime, WorkspaceOrchestrationPacketBadge } from '@/lib/orchestrator/types';
+import {
+  isOwnedOrchestratorSessionKey,
+  isOrchestratorRuntime,
+  runtimeFromOwnedSessionKey,
+} from '@/lib/orchestrator/runtime-capabilities';
 import type { ChatModelId } from '@/components/desktop/orchestrator/chat-models';
 
 export interface PersistedChatCheckpoint {
@@ -54,6 +59,8 @@ export interface PersistedTab {
    * collapsing every orchestrator tab onto the global last-active thread.
    */
   orchestratorThreadId?: string;
+  /** Transient host for externally-dispatched worker transcripts. */
+  outsideWorkerHost?: boolean;
   linkedIssue?: {
     repo: string;
     number: number;
@@ -96,6 +103,7 @@ export type PersistedRuntimeSessionKey =
   | `3code-owned:${string}`
   | `cursor-owned:${string}`
   | `grok-owned:${string}`
+  | `prime-agent-owned:${string}`
   | `pi-owned:${string}`;
 
 const API_PATH = '/api/panel/terminal-state';
@@ -289,6 +297,7 @@ export function formatPersistedRuntimeSessionKey(
 ): PersistedRuntimeSessionKey | null {
   const trimmed = sessionKey?.trim();
   if (!trimmed || !runtime) return null;
+  if (isOwnedOrchestratorSessionKey(trimmed)) return trimmed as PersistedRuntimeSessionKey;
   if (runtime === 'codex' && (
     trimmed.startsWith('codex:')
     || trimmed.startsWith('codex-owned:')
@@ -297,26 +306,14 @@ export function formatPersistedRuntimeSessionKey(
   )) {
     return trimmed as PersistedRuntimeSessionKey;
   }
-  if (runtime === 'gemini' && trimmed.startsWith('gemini-owned:')) {
-    return trimmed as PersistedRuntimeSessionKey;
-  }
-  if (runtime === 'opencode' && trimmed.startsWith('opencode-owned:')) {
-    return trimmed as PersistedRuntimeSessionKey;
-  }
-  if (runtime === 'cursor' && trimmed.startsWith('cursor-owned:')) {
-    return trimmed as PersistedRuntimeSessionKey;
-  }
-  if (runtime === 'grok' && trimmed.startsWith('grok-owned:')) {
-    return trimmed as PersistedRuntimeSessionKey;
-  }
   if (runtime === 'codex' || runtime === 'claude-code') {
     return trimmed.startsWith(`${runtime}:`)
       ? trimmed as PersistedRuntimeSessionKey
       : `${runtime}:${trimmed}`;
   }
-  // Gemini/opencode/Cursor/Grok only use owned prefixes — any sessionKey without that
-  // prefix isn't trackable as a persisted live runtime session for now.
-  return null;
+  return isOrchestratorRuntime(runtime)
+    ? `${runtime}-owned:${trimmed}` as PersistedRuntimeSessionKey
+    : null;
 }
 
 export function stripPersistedRuntimeSessionKey(
@@ -326,26 +323,12 @@ export function stripPersistedRuntimeSessionKey(
   const trimmed = sessionKey?.trim();
   if (!trimmed) return undefined;
   if (!runtime) return trimmed;
+  if (isOwnedOrchestratorSessionKey(trimmed)) return trimmed;
   if (runtime === 'codex' && (
     trimmed.startsWith('codex-owned:')
     || trimmed.startsWith('codex-discovered:')
     || trimmed.startsWith('codex-live:')
   )) {
-    return trimmed;
-  }
-  // Owned CLI sessions for gemini/opencode keep their full prefixed key —
-  // downstream dispatch paths (`/api/runtime/action`, owned-session-store,
-  // `/api/mobile/history`) route on the prefix, so stripping would break them.
-  if (runtime === 'gemini' && trimmed.startsWith('gemini-owned:')) {
-    return trimmed;
-  }
-  if (runtime === 'opencode' && trimmed.startsWith('opencode-owned:')) {
-    return trimmed;
-  }
-  if (runtime === 'cursor' && trimmed.startsWith('cursor-owned:')) {
-    return trimmed;
-  }
-  if (runtime === 'grok' && trimmed.startsWith('grok-owned:')) {
     return trimmed;
   }
   return trimmed.startsWith(`${runtime}:`) ? trimmed.slice(`${runtime}:`.length) : trimmed;
@@ -367,7 +350,8 @@ export async function loadLiveRuntimeSessionKeys(): Promise<Set<PersistedRuntime
           || value.startsWith('codex-owned:')
           || value.startsWith('codex-discovered:')
           || value.startsWith('codex-live:')
-          || value.startsWith('claude-code:');
+          || value.startsWith('claude-code:')
+          || runtimeFromOwnedSessionKey(value) !== null;
       });
     return new Set(keys);
   } catch {
@@ -546,6 +530,7 @@ export async function loadTabState(scope = 'tile-root', repoPath?: string | null
       cache: 'no-store',
       headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
     });
+    if (res.status === 204) return null;
     if (!res.ok) return null;
     const data = await res.json();
     if (data.version !== 1) return null;

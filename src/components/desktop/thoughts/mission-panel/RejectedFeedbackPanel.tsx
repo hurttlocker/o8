@@ -2,6 +2,8 @@
 
 import { useCallback, useState } from 'react';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { actionReceiptIsInProgress, correlatedActionIsUnsettled, fetchCorrelatedActionReceipt } from '@/lib/orchestrator/action-receipt';
+import { useCorrelatedActionLatch } from '@/components/desktop/use-correlated-action-latch';
 
 interface RejectedFeedbackPanelProps {
   packet: OrchestratorPacket;
@@ -20,40 +22,55 @@ const SPINNER_ANIMATION = 'spin 0.9s linear infinite';
  */
 export function RejectedFeedbackPanel({ packet }: RejectedFeedbackPanelProps) {
   const [feedback, setFeedback] = useState('');
-  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const { busy, begin: beginAction, settle: settleAction } = useCorrelatedActionLatch<'rerun'>();
+  const submitting = busy === 'rerun';
 
   const trimmed = feedback.trim();
   const canSubmit = trimmed.length > 0 && trimmed.length <= MAX_FEEDBACK_LENGTH && !submitting;
 
   const handleSubmit = useCallback(async () => {
-    if (!canSubmit) return;
-    setSubmitting(true);
+    if (!canSubmit || !beginAction('rerun')) return;
     setError(null);
     setNote(null);
+    let inProgress = false;
     try {
-      const response = await fetch('/api/orchestrator/rerun-with-feedback', {
+      const requestBody = JSON.stringify({
+        packetId: packet.id,
+        feedback: trimmed,
+        idempotencyKey: crypto.randomUUID(),
+      });
+      const { response, payload } = await fetchCorrelatedActionReceipt<{
+        ok?: boolean;
+        result?: { note?: string; inProgress?: boolean; status?: string };
+        error?: { message?: string };
+      }>('/api/orchestrator/rerun-with-feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packetId: packet.id, feedback: trimmed }),
+        body: requestBody,
       });
-      const payload = await response.json().catch(() => null) as {
-        ok?: boolean;
-        result?: { note?: string };
-        error?: { message?: string };
-      } | null;
       if (!response.ok || !payload?.ok) {
         throw new Error(payload?.error?.message ?? 'Unable to rerun this packet.');
+      }
+      if (actionReceiptIsInProgress(response.status, payload.result)) {
+        inProgress = true;
+        setNote(payload.result?.note ?? 'This rerun is already in progress.');
+        return;
       }
       setNote(payload.result?.note ?? `Packet ${packet.referenceLabel} relaunched with feedback.`);
       setFeedback('');
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to rerun this packet.');
+      if (correlatedActionIsUnsettled(caught)) {
+        inProgress = true;
+        setNote(caught.message);
+      } else {
+        setError(caught instanceof Error ? caught.message : 'Unable to rerun this packet.');
+      }
     } finally {
-      setSubmitting(false);
+      settleAction(inProgress);
     }
-  }, [canSubmit, packet.id, packet.referenceLabel, trimmed]);
+  }, [beginAction, canSubmit, packet.id, packet.referenceLabel, settleAction, trimmed]);
 
   const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
