@@ -51,6 +51,9 @@ process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
 // Dynamic imports — must resolve the data dir set above.
 const approvals = await import('@/app/api/panel/approvals/route');
+const supervisorInbox = await import('@/lib/supervisor/inbox');
+supervisorInbox.listInboxItems({ includeAllProjects: true, includeDismissed: true });
+const problemDossiers = await import('@/app/api/panel/problem-dossiers/route');
 const steer = await import('@/app/api/orchestrator/steer-packet/route');
 const reset = await import('@/app/api/orchestrator/reset-packet/route');
 const rerun = await import('@/app/api/orchestrator/rerun-with-feedback/route');
@@ -172,6 +175,35 @@ describe('principal-authz — approvals resolve (CRIT-1: a worker cannot self-ap
   it('unauthenticated REMOTE → denied at the middleware entry point (401)', () => {
     // /api/panel/approvals has no in-handler auth; the middleware IS its gate.
     expect(panelGateMiddleware(lanReq(url)).status).toBe(401);
+  });
+});
+
+describe('principal-authz — recurring problem dossiers are worker-readable only', () => {
+  const url = 'http://localhost:3001/api/panel/problem-dossiers?includeSuppressed=true';
+
+  it('WORKER GET passes the capability gate and reaches the production route', async () => {
+    const request = req(url, { principal: 'worker', method: 'GET' });
+    expect(panelGateMiddleware(request).status).toBe(200);
+
+    const response = await problemDossiers.GET(request);
+    const payload = await response.json() as { schema?: string; error?: string };
+    expect(payload.error).toBeUndefined();
+    expect({ status: response.status, ...payload }).toMatchObject({
+      status: 200,
+      schema: 'o8/problem-dossiers/v1',
+    });
+  });
+
+  it('WORKER POST stays denied at both authorization layers', async () => {
+    const request = req(url, { principal: 'worker', body: {} });
+    expect(panelGateMiddleware(request).status).toBe(403);
+    expect((await problemDossiers.POST(request)).status).toBe(403);
+  });
+
+  it('unauthenticated REMOTE GET stays denied at both authorization layers', async () => {
+    const request = lanReq(url, 'GET');
+    expect(panelGateMiddleware(request).status).toBe(401);
+    expect((await problemDossiers.GET(request)).status).toBe(401);
   });
 });
 

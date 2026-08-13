@@ -146,7 +146,7 @@ const DEVICE_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }>
 ];
 
 const WORKER_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }> = [
-  { methods: new Set(['GET']), path: /^\/api\/panel\/(?:status|approvals)\/?$/ },
+  { methods: new Set(['GET']), path: /^\/api\/panel\/(?:approvals|problem-dossiers|status)\/?$/ },
   { methods: new Set(['GET', 'POST', 'DELETE']), path: /^\/api\/panel\/managed-runs\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/panel\/artifacts(?:\/mirror)?\/?$/ },
   { methods: new Set(['GET']), path: /^\/api\/lanes(?:\/[^/]+(?:\/(?:scope|diff))?)?\/?$/ },
