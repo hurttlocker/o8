@@ -296,7 +296,7 @@ export function codexResumeArgs(ctx: { threadId: string; prompt: string; model?:
 
 // ── Codex JSONL stdout parser ────────────────────────────────────────────────
 
-function codexParseRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog {
+export function codexParseRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog {
   const entries: OwnedTailEntry[] = [
     {
       id: `${run.id}:prompt`,
@@ -437,7 +437,11 @@ function codexParseRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog {
             readStringField(item, 'text')
               ?? extractStructuredText(item.content)
               ?? extractStructuredText(item.message),
-            500,
+            // Completion receipts live at the end of the final assistant
+            // message. A presentation-sized preview here permanently removed
+            // the closing self-review block before lifecycle code could parse
+            // it, even though the durable JSONL contained the full receipt.
+            20_000,
           );
           if (text) {
             entries.push({
