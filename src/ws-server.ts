@@ -8542,6 +8542,7 @@ async function bootstrapWsServer() {
                 const packetId = lane.packetId?.trim();
                 const now = new Date().toISOString();
                 const {
+                  captureSettledReadOnlyCompletionContext,
                   completeReadOnlyZeroDiffLane,
                   isReadOnlyPacketLane,
                 } = await import('@/lib/orchestrator/read-only-completion');
@@ -8549,7 +8550,9 @@ async function bootstrapWsServer() {
                 if (isReadOnlyPacketLane(lane) && packetId && lane.sessionKey) {
                   try {
                     const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');
-                    readOnlyContext = await capturePacketCompletionContext(packetId, lane.sessionKey);
+                    readOnlyContext = await captureSettledReadOnlyCompletionContext(
+                      () => capturePacketCompletionContext(packetId, lane.sessionKey!),
+                    );
                   } catch (error) {
                     console.error(`[context-relay] Failed to capture read-only completion context for packet ${packetId}:`, error);
                   }

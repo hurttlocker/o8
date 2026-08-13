@@ -13,6 +13,7 @@ const {
 } = await import('@/lib/orchestrator/control-plane');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const {
+  captureSettledReadOnlyCompletionContext,
   completeReadOnlyZeroDiffLane,
   READ_ONLY_COMPLETED_EVENT_LABEL,
 } = await import('./read-only-completion');
@@ -84,6 +85,22 @@ function completionContext(packetId: string): PacketContext {
 }
 
 describe('read-only zero-diff completion', () => {
+  it('waits for the final self-review when the runtime completion beats transcript persistence', async () => {
+    let captures = 0;
+    const context = await captureSettledReadOnlyCompletionContext(async () => {
+      captures += 1;
+      return captures === 1
+        ? { ...completionContext('pkt-read-only-race'), selfReview: undefined }
+        : completionContext('pkt-read-only-race');
+    }, { attempts: 2, settleMs: 0 });
+
+    expect(captures).toBe(2);
+    expect(context.selfReview).toMatchObject({
+      passed: true,
+      decision: 'finding_ready',
+    });
+  });
+
   it('releases an explicitly read-only packet instead of failing it', async () => {
     const lane = seed('pkt-read-only', true);
 

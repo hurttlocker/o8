@@ -47,13 +47,29 @@ function markPacketEvidenceMissing(packet: OrchestratorPacket, failedAt: string,
   }
 }
 
-function hasCompleteReadOnlyReceipt(context: PacketContext | null | undefined): boolean {
+export function hasCompleteReadOnlyReceipt(context: PacketContext | null | undefined): boolean {
   const review = context?.selfReview;
   return review?.passed === true
     && review.decision === 'finding_ready'
     && Boolean(review.outcome?.trim())
     && Boolean(review.evidence?.some((entry) => entry.trim()))
     && Boolean(review.residual?.trim());
+}
+
+export async function captureSettledReadOnlyCompletionContext(
+  capture: () => Promise<PacketContext>,
+  options: { attempts?: number; settleMs?: number } = {},
+): Promise<PacketContext> {
+  const attempts = Math.max(1, Math.floor(options.attempts ?? 4));
+  const settleMs = Math.max(0, Math.floor(options.settleMs ?? 750));
+  let context = await capture();
+
+  for (let attempt = 1; attempt < attempts && !hasCompleteReadOnlyReceipt(context); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, settleMs));
+    context = await capture();
+  }
+
+  return context;
 }
 
 export interface ReadOnlyCompletionResult {
