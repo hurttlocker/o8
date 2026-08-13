@@ -21,6 +21,14 @@ import type { OrchestratorPacket, OrchestratorPacketStatus, OrchestratorRuntime 
 
 const SWARM_ACCENT = '#FF5A1F';
 const FOCUS_LANE_EVENT = 'o8:focus-spawned-agent-lane';
+export const SWARM_CREW_SCROLL_STYLE = {
+  display: 'flex',
+  flexDirection: 'column',
+  maxHeight: 'min(360px, 44vh)',
+  overflowY: 'auto',
+  overflowX: 'hidden',
+  overscrollBehavior: 'contain',
+} as const;
 
 /** A native Claude sub-agent (Task-tool scout) surfaced in the live crew. */
 export interface SwarmScoutView {
@@ -282,7 +290,7 @@ export function SwarmStatusCard({ packets, scouts = [], onFocusPacket }: SwarmSt
       </div>
 
       {/* Crew rows — native scouts first (research fan-out), then Codex workers. */}
-      <div style={{ display: 'flex', flexDirection: 'column' }}>
+      <div data-swarm-crew="scrollable" style={SWARM_CREW_SCROLL_STYLE}>
         {scouts.map((scout, index) => (
           <CrewRow
             key={scout.id}

@@ -19,19 +19,16 @@
 
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { chmodSync, closeSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { closeSync, readFileSync } from 'node:fs';
 import type { OrchestratorEvent } from './orchestrator-stream-events';
-import type { OrchestratorMcpServersConfig } from './orchestrator-mcp-config';
-import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
-import { serializeCodexMcpServers, toCodexServersMap } from '@/lib/mcp/tool-spine/emit-codex';
 import type { ToolProfile } from '@/lib/mcp/tool-spine/registry';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import {
   readOrchestratorBackendSessionId,
   writeOrchestratorBackendSessionId,
 } from '@/lib/mobile/orchestrator-thread-history';
+import { ensureCodexHome } from './codex-orchestrator-config';
+export { ensureCodexHome, mergeCodexMcpConfig, stripPluginSections } from './codex-orchestrator-config';
 import { parseLocalModel } from '@/lib/codex/local-model';
 import { codexCliSupportsUltraEfforts, resolveCodexReasoningEffort } from '@/lib/codex/reasoning-effort';
 import { resolveDefaultDispatchModelSync } from '@/lib/operator/defaults';
@@ -50,10 +47,8 @@ import {
   getRegisteredSession,
   normalizeRepoPath,
   normalizeThoughtsThreadId,
-  orchestratorDataDir,
   PREEMPT_SETTLE_MS,
   PROCESS_TIMEOUT_MS,
-  repoHash,
   requestRegisteredSessionReset,
   sessionNameForRepo,
   waitForSessionIdle,
@@ -103,144 +98,9 @@ export interface SendToCodexOrchestratorOptions {
 }
 // ── Constants ────────────────────────────────────────────────────────────────
 const DEFAULT_CODEX_MODEL = MODEL_IDS.codexDefault;
-const USER_CODEX_HOME = join(homedir(), '.codex');
-const USER_CODEX_CONFIG_PATH = join(USER_CODEX_HOME, 'config.toml');
-const CODEX_ORCHESTRATOR_HOME_DIR = orchestratorDataDir('codex-orchestrator');
 export const CODEX_FIRST_EVENT_TIMEOUT_MS = 45_000;
 // ── Registry ─────────────────────────────────────────────────────────────────
 const sessions = new Map<string, CodexOrchestratorSession>();
-
-// tomlKey is retained here because the managed-section STRIP logic
-// (isManagedMcpSection/stripManagedMcpSections) below quotes server names the
-// same way the serializer does. The serializer + its other TOML helpers moved
-// to @/lib/mcp/tool-spine/emit-codex (Step C).
-function tomlKey(key: string): string {
-  return /^[A-Za-z0-9_-]+$/.test(key) ? key : JSON.stringify(key);
-}
-// TODO(tool-spine-convergence): orphaned-managed-section leak. This only strips
-// sections whose name is in the CURRENT server set. A section o8 wrote on a
-// previous run for a server since removed/disabled (e.g. a deleted external)
-// is NOT recognized as managed, so it lingers as if it were user config. Fix in
-// the convergence phase (after A-F parity) — not here; the parity steps are
-// behavior-preserving by contract.
-function isManagedMcpSection(sectionName: string, serverNames: string[]): boolean {
-  return serverNames.some((name) => {
-    const bare = `mcp_servers.${name}`;
-    const quoted = `mcp_servers.${tomlKey(name)}`;
-    return sectionName === bare
-      || sectionName.startsWith(`${bare}.`)
-      || sectionName === quoted
-      || sectionName.startsWith(`${quoted}.`);
-  });
-}
-
-function stripManagedMcpSections(configToml: string, serverNames: string[]): string {
-  if (!configToml.trim()) {
-    return '';
-  }
-
-  const lines = configToml.replace(/\r\n/g, '\n').split('\n');
-  const nextLines: string[] = [];
-  let skippingManagedSection = false;
-
-  for (const line of lines) {
-    const sectionMatch = line.match(/^\s*\[([^\]]+)]\s*(?:#.*)?$/);
-    if (sectionMatch) {
-      skippingManagedSection = isManagedMcpSection(sectionMatch[1].trim(), serverNames);
-    }
-    if (!skippingManagedSection) {
-      nextLines.push(line);
-    }
-  }
-
-  return nextLines.join('\n').trimEnd();
-}
-
-/**
- * Strip the operator's `[marketplaces.*]` and `[plugins.*]` sections from the
- * worker's sandbox config. The worker inherits the operator's `~/.codex/config.toml`,
- * but it does NOT need the operator's codex plugins — and on a heavy plugin config
- * (remote git-cloned marketplaces, hundreds of MB of cache) codex's `startup_sync`
- * re-clones + refreshes them on EVERY launch. That stall starves the worker before
- * it can attach: the lane cycles launching → idle → `launch_attempts_exhausted`.
- * Keeping the worker's config plugin-free lets it boot straight into the turn.
- * (env fix 2026-07-02 — diagnosed a full dispatch outage down to this + a codex
- * code-signing crash under macOS 26.)
- */
-export function stripPluginSections(configToml: string): string {
-  if (!configToml.trim()) {
-    return '';
-  }
-
-  const lines = configToml.replace(/\r\n/g, '\n').split('\n');
-  const nextLines: string[] = [];
-  let skippingPluginSection = false;
-
-  for (const line of lines) {
-    const sectionMatch = line.match(/^\s*\[([^\]]+)]\s*(?:#.*)?$/);
-    if (sectionMatch) {
-      const name = sectionMatch[1].trim();
-      skippingPluginSection = name === 'marketplaces'
-        || name.startsWith('marketplaces.')
-        || name === 'plugins'
-        || name.startsWith('plugins.');
-    }
-    if (!skippingPluginSection) {
-      nextLines.push(line);
-    }
-  }
-
-  return nextLines.join('\n').trimEnd();
-}
-
-// Exported for the Step-C parity smoke — the parity unit is the full merged
-// config.toml (strip + join + trailing newline), not just the serialized blocks.
-export function mergeCodexMcpConfig(baseConfigToml: string, servers: OrchestratorMcpServersConfig): string {
-  const serverNames = Object.keys(servers);
-  const retainedConfig = stripManagedMcpSections(baseConfigToml, serverNames);
-  const mcpConfig = serializeCodexMcpServers(servers);
-  return `${[retainedConfig, mcpConfig].filter(Boolean).join('\n\n')}\n`;
-}
-
-function syncCodexAuthFiles(codexHome: string): void {
-  for (const fileName of ['auth.json', 'installation_id', 'version.json']) {
-    const sourcePath = join(USER_CODEX_HOME, fileName);
-    if (!existsSync(sourcePath)) {
-      continue;
-    }
-
-    const destPath = join(codexHome, fileName);
-    copyFileSync(sourcePath, destPath);
-    if (fileName === 'auth.json') {
-      chmodSync(destPath, 0o600);
-    }
-  }
-}
-
-export function ensureCodexHome(repoPath: string, profile: ToolProfile = 'full'): string {
-  const normalizedRepoPath = normalizeRepoPath(repoPath);
-  // Restricted profiles get their OWN CODEX_HOME so an operator-stripped
-  // config.toml cannot race a concurrent full-profile turn for the same repo.
-  // 'full' keeps the original dir — byte-identical content + path.
-  const suffix = profile === 'full' ? '' : `-${profile}`;
-  const codexHome = join(CODEX_ORCHESTRATOR_HOME_DIR, `${repoHash(normalizedRepoPath)}${suffix}`);
-  mkdirSync(codexHome, { recursive: true });
-
-  // Strip the operator's plugins/marketplaces so the worker doesn't hang on
-  // codex's per-launch plugin startup_sync (see stripPluginSections above).
-  const userConfigToml = existsSync(USER_CODEX_CONFIG_PATH)
-    ? stripPluginSections(readFileSync(USER_CODEX_CONFIG_PATH, 'utf8'))
-    : '';
-  const mergedConfig = mergeCodexMcpConfig(
-    userConfigToml,
-    toCodexServersMap(buildToolRegistry(normalizedRepoPath, { profile })),
-  );
-  const configPath = join(codexHome, 'config.toml');
-  writeFileSync(configPath, mergedConfig, { encoding: 'utf8', mode: 0o600 });
-  chmodSync(configPath, 0o600);
-  syncCodexAuthFiles(codexHome);
-  return codexHome;
-}
 
 export function codexOrchestratorSessionName(repoPath: string, threadId?: string | null): string {
   return sessionNameForRepo('cortex-codex-orchestrator', repoPath, threadId);
@@ -414,6 +274,42 @@ export function buildCodexOrchestratorPrompt(repoPath: string, message: string):
 // ── Send message ─────────────────────────────────────────────────────────────
 
 export async function sendToCodexOrchestrator(
+  session: CodexOrchestratorSession,
+  message: string,
+  onEvent: (event: OrchestratorEvent) => void,
+  options: SendToCodexOrchestratorOptions = {},
+): Promise<void> {
+  if (!session.threadId) {
+    return sendToCodexOrchestratorAttempt(session, message, onEvent, options);
+  }
+
+  const deferredTerminalEvents: OrchestratorEvent[] = [];
+  let streamed = false;
+  await sendToCodexOrchestratorAttempt(session, message, (event) => {
+    if (event.type === 'error' || event.type === 'done') deferredTerminalEvents.push(event);
+    else {
+      streamed = true;
+      onEvent(event);
+    }
+  }, options);
+
+  const terminalError = deferredTerminalEvents.find((event) => event.type === 'error');
+  const missingRollout = terminalError?.type === 'error'
+    && terminalError.error.includes('thread/resume')
+    && terminalError.error.includes('failed to resolve rollout path')
+    && terminalError.error.includes('file does not exist');
+  if (!streamed && missingRollout && !options.signal?.aborted) {
+    console.warn(`[codex-orchestrator-session] Saved Codex thread is gone; retrying ${session.sessionName} fresh`);
+    session.threadId = null;
+    session.status = 'ready';
+    writeOrchestratorBackendSessionId(session.historyThreadId, 'codex', null);
+    return sendToCodexOrchestratorAttempt(session, message, onEvent, options);
+  }
+
+  for (const event of deferredTerminalEvents) onEvent(event);
+}
+
+async function sendToCodexOrchestratorAttempt(
   session: CodexOrchestratorSession,
   message: string,
   onEvent: (event: OrchestratorEvent) => void,

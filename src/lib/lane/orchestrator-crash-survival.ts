@@ -267,10 +267,15 @@ export function isRehydratedTurnAlive(
 
 export function readJsonlLines(filePath: string, fromOffset = 0): { lines: string[]; offset: number } {
   if (!existsSync(filePath)) return { lines: [], offset: fromOffset };
-  const raw = readFileSync(filePath, 'utf8');
-  const slice = raw.slice(Math.max(0, fromOffset));
-  const lines = slice.split('\n').filter((line) => line.trim());
-  return { lines, offset: Buffer.byteLength(raw, 'utf8') };
+  const raw = readFileSync(filePath);
+  const start = Math.min(Math.max(0, fromOffset), raw.byteLength);
+  const tail = raw.subarray(start).toString('utf8');
+  const lastNewline = tail.lastIndexOf('\n');
+  if (lastNewline < 0) return { lines: [], offset: start };
+  const complete = tail.slice(0, lastNewline);
+  const lines = complete.split('\n').filter((line) => line.trim());
+  const consumedBytes = Buffer.byteLength(tail.slice(0, lastNewline + 1), 'utf8');
+  return { lines, offset: start + consumedBytes };
 }
 
 export function openAppendFile(filePath: string): number {

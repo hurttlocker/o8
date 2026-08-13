@@ -19,9 +19,13 @@ export function codexOrchestrationModeFlags(mode: OrchestratorExecutionMode | un
   if (mode !== 'single') return [];
   return [
     '--ignore-user-config',
-    '-c', 'sandbox_mode="workspace-write"',
+    // Single mode already runs the entire Codex process inside o8's generated
+    // deny-by-default Seatbelt profile. Asking Codex to add its own macOS
+    // sandbox nests sandbox-exec and makes every exec_command fail with exit
+    // 71 in the packaged app. Keep the inner runner unsandboxed; the outer
+    // profile still owns repo, credential, network, and recursive-launch bounds.
+    '-c', 'sandbox_mode="danger-full-access"',
     '-c', 'approval_policy="never"',
-    '-c', 'sandbox_workspace_write.network_access=false',
     '-c', 'mcp_servers={}',
     '-c', 'features.multi_agent=false',
     '-c', 'features.enable_fanout=false',

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
-import { focusSwarmPacket } from './SwarmStatusCard';
+import { focusSwarmPacket, SWARM_CREW_SCROLL_STYLE } from './SwarmStatusCard';
 
 function packet(): OrchestratorPacket {
   return {
@@ -71,5 +71,14 @@ describe('focusSwarmPacket', () => {
     focusSwarmPacket(targetPacket, onFocusPacket);
 
     expect(onFocusPacket).toHaveBeenCalledWith(targetPacket);
+  });
+
+  it('keeps a large crew scrollable inside the Swarm card on short windows', () => {
+    expect(SWARM_CREW_SCROLL_STYLE).toMatchObject({
+      maxHeight: 'min(360px, 44vh)',
+      overflowY: 'auto',
+      overflowX: 'hidden',
+      overscrollBehavior: 'contain',
+    });
   });
 });

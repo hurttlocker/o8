@@ -23,9 +23,8 @@ describe('orchestrator execution mode', () => {
   it('ignores user MCP config and disables native fan-out for Single', () => {
     expect(codexOrchestrationModeFlags('single')).toEqual([
       '--ignore-user-config',
-      '-c', 'sandbox_mode="workspace-write"',
+      '-c', 'sandbox_mode="danger-full-access"',
       '-c', 'approval_policy="never"',
-      '-c', 'sandbox_workspace_write.network_access=false',
       '-c', 'mcp_servers={}',
       '-c', 'features.multi_agent=false',
       '-c', 'features.enable_fanout=false',

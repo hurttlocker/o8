@@ -111,6 +111,21 @@ describe('orchestrator crash survival helpers', () => {
     expect(second.lines).toEqual(['{"type":"b"}']);
   });
 
+  it('keeps byte offsets exact across Unicode output and waits for complete lines', () => {
+    const outputPath = join(root, 'unicode.jsonl');
+    const firstLine = `${JSON.stringify({ type: 'text', value: 'I’ll verify o8' })}\n`;
+    const partialSecond = JSON.stringify({ type: 'text', value: 'final answer' });
+    writeFileSync(outputPath, firstLine + partialSecond, 'utf8');
+
+    const first = readJsonlLines(outputPath);
+    expect(first.lines).toEqual([firstLine.trim()]);
+    expect(first.offset).toBe(Buffer.byteLength(firstLine, 'utf8'));
+    expect(readJsonlLines(outputPath, first.offset)).toEqual({ lines: [], offset: first.offset });
+
+    writeFileSync(outputPath, `${firstLine}${partialSecond}\n`, 'utf8');
+    expect(readJsonlLines(outputPath, first.offset).lines).toEqual([partialSecond]);
+  });
+
   it('checks pid liveness without throwing', () => {
     expect(isPidAlive(process.pid)).toBe(true);
     expect(isPidAlive(0)).toBe(false);

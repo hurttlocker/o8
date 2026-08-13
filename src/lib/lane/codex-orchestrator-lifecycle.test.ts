@@ -141,9 +141,8 @@ describe('Codex orchestrator process lifecycle', () => {
     const preparedInput = prepareSingleMock.mock.calls[0][0] as { args: string[] };
     expect(preparedInput.args).toEqual(expect.arrayContaining([
       '--ignore-user-config',
-      'sandbox_mode="workspace-write"',
+      'sandbox_mode="danger-full-access"',
       'approval_policy="never"',
-      'sandbox_workspace_write.network_access=false',
       'mcp_servers={}',
       'features.multi_agent=false',
       'features.enable_fanout=false',
@@ -176,9 +175,8 @@ describe('Codex orchestrator process lifecycle', () => {
       'exec', 'resume', '00000000-0000-0000-0000-000000000001', '--json',
     ]);
     expect(preparedInput.args).toEqual(expect.arrayContaining([
-      'sandbox_mode="workspace-write"',
+      'sandbox_mode="danger-full-access"',
       'approval_policy="never"',
-      'sandbox_workspace_write.network_access=false',
     ]));
     expect(preparedInput.args).not.toContain('--sandbox');
     expect(preparedInput.args).not.toContain('--dangerously-bypass-approvals-and-sandbox');
@@ -186,6 +184,44 @@ describe('Codex orchestrator process lifecycle', () => {
     proc.exitCode = 0;
     proc.emit('close', 0);
     await turn;
+  });
+
+  it('retries a missing persisted Codex rollout once as a fresh thread', async () => {
+    const historyThreadId = `thoughts-stale-resume-${Date.now()}`;
+    writeOrchestratorBackendSessionId(historyThreadId, 'codex', 'stale-codex-thread');
+    const session = ensureCodexOrchestratorSession(process.cwd(), historyThreadId);
+    const staleProc = new FakeCodexProc();
+    const freshProc = new FakeCodexProc();
+    spawnMock
+      .mockReturnValueOnce(staleProc as unknown as ChildProcess)
+      .mockReturnValueOnce(freshProc as unknown as ChildProcess);
+    const events: OrchestratorEvent[] = [];
+
+    const turn = sendToCodexOrchestrator(session, 'recover me', (event) => events.push(event));
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(1));
+    expect(spawnMock.mock.calls[0][1]).toEqual(expect.arrayContaining([
+      'exec', 'resume', 'stale-codex-thread', '--json',
+    ]));
+    staleProc.stderr.emit('data', Buffer.from(
+      'Error: thread/resume failed: failed to resolve rollout path `/missing.jsonl`: file does not exist',
+    ));
+    staleProc.exitCode = 1;
+    staleProc.emit('close', 1);
+
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(2));
+    expect(spawnMock.mock.calls[1][1]).toEqual(expect.arrayContaining(['exec', '--json']));
+    expect(spawnMock.mock.calls[1][1]).not.toContain('resume');
+    expect(backendSessions.has(`${historyThreadId}:codex`)).toBe(false);
+
+    freshProc.stdout.emit('data', Buffer.from('{"type":"thread.started","thread_id":"fresh-codex-thread"}\n'));
+    freshProc.exitCode = 0;
+    freshProc.emit('close', 0);
+    await turn;
+
+    expect(events.some((event) => event.type === 'error')).toBe(false);
+    expect(events.at(-1)).toMatchObject({ type: 'done', sessionId: 'fresh-codex-thread' });
+    expect(session.threadId).toBe('fresh-codex-thread');
+    expect(session.status).toBe('ready');
   });
 
   it('fails a Single turn closed when the process boundary cannot be prepared', async () => {
