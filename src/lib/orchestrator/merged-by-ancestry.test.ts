@@ -20,6 +20,7 @@ const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator
 const { sweepPacketsMergedByAncestry } = await import('@/lib/orchestrator/merged-by-ancestry');
 const { resetOwnedSessionIndex } = await import('@/lib/runtimes/shared/owned-session-index');
 const { prepareMissionBranches } = await import('@/lib/orchestrator/operator-mission-service/branch-cleanup');
+const { listInboxItems } = await import('@/lib/supervisor/inbox');
 
 const tempDirs: string[] = [];
 const laneIds: string[] = [];
@@ -179,7 +180,14 @@ describe('merged-by-ancestry reconciliation', () => {
     expect(packet?.status).toBe('released');
     expect(packet?.releaseState).toBe('released');
     expect(packet?.releaseStatePayload?.source).toBe('merged_by_ancestry_reconcile');
-    expect(getLane(lane.id)?.status).toBe('archived');
+    expect(getLane(lane.id)).toMatchObject({
+      status: 'archived',
+      outcome: 'merged',
+      outcomeNote: expect.stringContaining('ancestry'),
+    });
+    expect(listInboxItems({ includeAllProjects: true, includeDismissed: true }).filter((item) => (
+      item.packetId === 'pkt-ancestor' && item.kind === 'packet_no_changes'
+    ))).toEqual([]);
     expect(getSqlite().prepare(
       'SELECT status, last_error FROM review_queue WHERE lane_id = ?',
     ).get(lane.id)).toEqual({
@@ -207,7 +215,14 @@ describe('merged-by-ancestry reconciliation', () => {
     const packet = persistedPacket('pkt-squash');
     expect(packet?.status).toBe('released');
     expect(packet?.lastEventLabel).toBe('merged_by_patch_id');
-    expect(getLane(lane.id)?.status).toBe('archived');
+    expect(getLane(lane.id)).toMatchObject({
+      status: 'archived',
+      outcome: 'merged',
+      outcomeNote: expect.stringContaining('patch identity'),
+    });
+    expect(listInboxItems({ includeAllProjects: true, includeDismissed: true }).filter((item) => (
+      item.packetId === 'pkt-squash' && item.kind === 'packet_no_changes'
+    ))).toEqual([]);
   }, 20_000);
 
   it('leaves unmerged branch content untouched', async () => {
@@ -274,7 +289,11 @@ describe('merged-by-ancestry reconciliation', () => {
     const lane = seedLaneOnly(clone);
 
     await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({ merged: 1 });
-    expect(getLane(lane.id)?.status).toBe('archived');
+    expect(getLane(lane.id)).toMatchObject({
+      status: 'archived',
+      outcome: 'merged',
+      outcomeNote: expect.stringContaining('patch identity'),
+    });
   }, 20_000);
 
   it('archives an orphaned lane whose branch no longer exists anywhere', async () => {

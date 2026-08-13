@@ -248,6 +248,8 @@ export type LaneCommand =
   | {
       verb: 'archive';
       laneId: string;
+      outcome?: LaneOutcome;
+      outcomeNote?: string | null;
       actor?: LaneEventActor;
     };
 

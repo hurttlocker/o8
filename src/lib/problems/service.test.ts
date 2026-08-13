@@ -74,6 +74,16 @@ function enqueueFailure(packetId: string, error: string): void {
   });
 }
 
+function enqueueMissingEnding(packetId: string): void {
+  enqueueInboxItem({
+    repoPath,
+    packetId,
+    kind: 'packet_no_changes',
+    status: 'human_required',
+    payload: { note: 'Archived without a recorded ending' },
+  });
+}
+
 function createDossier(error: string, prefix: string) {
   for (const suffix of ['a', 'b', 'c']) enqueueFailure(`${prefix}-${suffix}`, error);
   const dossier = listProblemDossiers({ includeSuppressed: true })
@@ -105,6 +115,35 @@ function insertCompletedExposure(input: {
     repoPath,
     `agent/${input.packetId}`,
     input.packetId,
+    input.observedAt,
+    input.observedAt,
+    input.observedAt,
+  );
+}
+
+function insertArchivedExposure(input: {
+  packetId: string;
+  projectId: string;
+  observedAt: string;
+  outcome: 'merged' | 'no_changes';
+  outcomeNote: string;
+}): void {
+  getSqlite().prepare(`
+    INSERT INTO lanes (
+      id, project_id, label, repo_path, branch, base_branch, runtime,
+      packet_id, status, outcome, outcome_note, ownership, created_at, updated_at,
+      last_event_at, last_event_label
+    ) VALUES (?, ?, ?, ?, ?, 'main', 'codex', ?, 'archived', ?, ?,
+      'managed', ?, ?, ?, 'archived')
+  `).run(
+    `lane-${input.packetId}`,
+    input.projectId,
+    input.packetId,
+    repoPath,
+    `agent/${input.packetId}`,
+    input.packetId,
+    input.outcome,
+    input.outcomeNote,
     input.observedAt,
     input.observedAt,
     input.observedAt,
@@ -346,6 +385,45 @@ describe('problem dossier remedy lifecycle', () => {
     });
     expect(nextRemedy.dossier.linkedTaskId).not.toBe(first.dossier.linkedTaskId);
     expect(listProblemRemedies(dossier.id)).toHaveLength(2);
+  });
+
+  it('counts only archived lanes with recorded endings for a missing-ending dossier', async () => {
+    await resetFixture();
+    for (const packetId of ['pkt-ending-a', 'pkt-ending-b', 'pkt-ending-c']) {
+      enqueueMissingEnding(packetId);
+    }
+    const dossier = listProblemDossiers({ includeSuppressed: true })[0];
+    if (!dossier) throw new Error('Missing-ending fixture did not create a dossier.');
+    const provisionalMs = Date.now() + 1_000;
+    const provisionalAt = new Date(provisionalMs).toISOString();
+    getSqlite().prepare(`
+      UPDATE problem_dossiers
+      SET status = 'provisionally_resolved', provisional_resolved_at = ?, updated_at = ?
+      WHERE id = ?
+    `).run(provisionalAt, provisionalAt, dossier.id);
+
+    insertArchivedExposure({
+      packetId: 'pkt-ending-still-broken',
+      projectId: dossier.projectId,
+      observedAt: new Date(provisionalMs + 1_000).toISOString(),
+      outcome: 'no_changes',
+      outcomeNote: 'Archived without a recorded ending',
+    });
+    for (const [index, outcome] of ['merged', 'no_changes', 'merged'].entries()) {
+      insertArchivedExposure({
+        packetId: `pkt-ending-clean-${index}`,
+        projectId: dossier.projectId,
+        observedAt: new Date(provisionalMs + (index + 2) * 1_000).toISOString(),
+        outcome: outcome as 'merged' | 'no_changes',
+        outcomeNote: outcome === 'no_changes' ? 'Agent finished without making changes' : 'Merged cleanly',
+      });
+    }
+
+    await reconcileProblemDossiers({ now: new Date(provisionalMs + 10_000) });
+    expect(getProblemDossier(dossier.id)).toMatchObject({
+      status: 'verified_closed',
+      comparableExposureCount: 3,
+    });
   });
 
   it('starts a fresh remedy cycle when evidence arrives after release but before closure reconciliation', async () => {

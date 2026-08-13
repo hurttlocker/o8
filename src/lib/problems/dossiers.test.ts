@@ -74,6 +74,47 @@ describe('recurring problem dossiers', () => {
       'pkt-beta',
       'pkt-gamma',
     ]);
+    expect(listInboxItems({ includeAllProjects: true, includeDismissed: true })
+      .filter((item) => sourceIds.includes(item.id))
+      .map((item) => item.problemDossierId)).toEqual([
+      dossiers[0]?.id,
+      dossiers[0]?.id,
+      dossiers[0]?.id,
+    ]);
+  });
+
+  it('promotes only the missing-ending form of packet_no_changes', () => {
+    resetFixture();
+    for (const packetId of ['pkt-ending-a', 'pkt-ending-b', 'pkt-ending-c']) {
+      enqueueInboxItem({
+        repoPath: '/tmp/o8-problem-dossier-repo',
+        packetId,
+        kind: 'packet_no_changes',
+        status: packetId.endsWith('-c') ? 'dismissed' : 'human_required',
+        payload: { note: 'Archived without a recorded ending' },
+      });
+    }
+    for (const packetId of ['pkt-clean-a', 'pkt-clean-b', 'pkt-clean-c']) {
+      enqueueInboxItem({
+        repoPath: '/tmp/o8-problem-dossier-repo',
+        packetId,
+        kind: 'packet_no_changes',
+        status: 'pending',
+        payload: { note: 'Agent finished without making changes' },
+      });
+    }
+
+    expect(listProblemDossiers({ includeSuppressed: true })).toEqual([
+      expect.objectContaining({
+        status: 'candidate',
+        occurrenceCount: 3,
+        impactBand: 'high',
+        closureContract: expect.objectContaining({
+          sourceKind: 'packet_no_changes',
+          exposureDenominator: 'distinct_archived_lanes_with_recorded_endings',
+        }),
+      }),
+    ]);
   });
 
   it('does not promote repeats from one packet or groups below the distinct-packet threshold', () => {

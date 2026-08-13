@@ -840,7 +840,7 @@ export async function pickComparisonWinner(input: PickComparisonWinnerInput) {
       }
 
       if (packet.lane?.laneId) {
-        archiveLane(packet.lane.laneId, 'user');
+        archiveLane(packet.lane.laneId, 'user', { outcome: 'discarded', outcomeNote: 'Comparison alternative was not selected.' });
       }
     }
   });

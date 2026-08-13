@@ -804,7 +804,10 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
     }
 
     case 'archive': {
-      const updated = archiveLane(command.laneId, actor);
+      const updated = archiveLane(command.laneId, actor, command.outcome ? {
+        outcome: command.outcome,
+        outcomeNote: command.outcomeNote,
+      } : undefined);
       if (!updated) return { ok: false, laneId: command.laneId, note: 'Lane not found.' };
       return { ok: true, laneId: command.laneId, note: 'Lane archived.', lane: updated };
     }

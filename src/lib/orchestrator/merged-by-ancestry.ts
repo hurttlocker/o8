@@ -468,7 +468,10 @@ async function releasePacket(candidate: Candidate, evidence: MergeEvidence): Pro
       mergeBaseSha: evidence.mergeBaseSha ?? null,
       patchId: evidence.patchId ?? null,
     });
-    archiveLane(candidate.laneId, 'system');
+    archiveLane(candidate.laneId, 'system', {
+      outcome: 'merged',
+      outcomeNote: `Merged by ${evidence.kind === 'ancestor' ? 'ancestry' : 'patch identity'} into ${evidence.baseRef}.`,
+    });
   }
 
   const incidentPacketId = candidate.packet?.id ?? candidate.lane?.packetId ?? null;

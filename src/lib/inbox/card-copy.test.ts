@@ -25,6 +25,7 @@ function item(overrides: Partial<SupervisorInboxItem> = {}): SupervisorInboxItem
     transcriptLink: null,
     worktreeLink: null,
     errorExcerpt: 'Command failed: npx tsc --noEmit',
+    problemDossierId: null,
     ...overrides,
   };
 }

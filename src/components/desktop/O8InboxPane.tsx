@@ -366,17 +366,21 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
     }
   }, [beginIncidentAction, refresh, setActionNote, settleIncidentAction]);
 
-  const humanRequired = items.filter((item) => item.status === 'human_required');
-  const escalated = items.filter((item) => item.status === 'escalated');
-  const selfHealed = items.filter((item) => item.status === 'self_healed');
-  const pending = items.filter((item) => item.status === 'pending');
-  const healing = items.filter((item) => item.status === 'healing');
+  // Once multiple incidents become one dossier, Activity owns the operator
+  // decision. Keep the immutable source rows available through the API and
+  // dossier history without presenting conflicting active cards here.
+  const incidentItems = items.filter((item) => !item.problemDossierId);
+  const humanRequired = incidentItems.filter((item) => item.status === 'human_required');
+  const escalated = incidentItems.filter((item) => item.status === 'escalated');
+  const selfHealed = incidentItems.filter((item) => item.status === 'self_healed');
+  const pending = incidentItems.filter((item) => item.status === 'pending');
+  const healing = incidentItems.filter((item) => item.status === 'healing');
 
   const visibleItems = filter === 'active'
     ? [...humanRequired, ...escalated, ...pending]
     : filter === 'self_healed'
       ? selfHealed
-      : items;
+      : incidentItems;
 
   return (
     <div
@@ -451,7 +455,7 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
           noteById={approvalNoteById}
           onResolve={resolveApproval}
         />
-        {loading && items.length === 0 && approvals.length === 0 ? (
+        {loading && incidentItems.length === 0 && approvals.length === 0 ? (
           <div style={{ padding: 16, color: 'var(--t-text-secondary)', fontSize: 12 }}>Loading…</div>
         ) : visibleItems.length === 0 && approvals.length === 0 ? (
           <div style={{ padding: 16, color: 'var(--t-text-secondary)', fontSize: 12, lineHeight: 1.5, overflowWrap: 'break-word' }}>

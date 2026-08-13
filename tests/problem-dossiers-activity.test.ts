@@ -6,6 +6,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { O8ProblemDossiers } from '@/components/desktop/o8-panel/O8ProblemDossiers';
+import { O8InboxPane } from '@/components/desktop/O8InboxPane';
+import type { SupervisorInboxItem } from '@/lib/supervisor/inbox';
 
 const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
   url: 'http://localhost/dashboard',
@@ -91,6 +93,32 @@ function dossier(status: 'candidate' | 'accepted') {
   };
 }
 
+function supervisorItem(id: string, problemDossierId: string | null): SupervisorInboxItem {
+  return {
+    id,
+    projectId: 'project-ui',
+    repoPath: '/tmp/repo-ui',
+    packetId: `pkt-${id}`,
+    kind: 'packet_no_changes',
+    incidentKey: `incident-${id}`,
+    payload: { note: 'Archived without a recorded ending' },
+    createdAt: '2026-08-13T12:00:00.000Z',
+    lastSeenAt: '2026-08-13T12:00:00.000Z',
+    repeatCount: 1,
+    status: 'human_required',
+    resolvedAt: null,
+    resolutionLaneId: null,
+    packetTitle: `${id} incident`,
+    packetReferenceLabel: null,
+    sessionKey: null,
+    worktreePath: '/tmp/repo-ui',
+    transcriptLink: null,
+    worktreeLink: 'file:///tmp/repo-ui',
+    errorExcerpt: 'Archived without a recorded ending',
+    problemDossierId,
+  };
+}
+
 let root: Root | null = null;
 
 afterEach(async () => {
@@ -154,5 +182,33 @@ describe('Activity recurring-problem surface', () => {
       .map(([, init]) => String((init as RequestInit).body));
     expect(postBodies).toHaveLength(2);
     expect(new Set(postBodies).size).toBe(1);
+  });
+
+  it('keeps correlated source incidents out of the competing Incident Queue', async () => {
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/panel/approvals')) {
+        return Promise.resolve(new Response(JSON.stringify({ approvals: [] }), { status: 200 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({
+        items: [
+          supervisorItem('dossier-source', 'problem-ui'),
+          supervisorItem('unlinked-source', null),
+        ],
+      }), { status: 200 }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const container = document.getElementById('root');
+    if (!container) throw new Error('Missing test root.');
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(createElement(O8InboxPane, { active: true }));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    expect(container.textContent).toContain('unlinked-source incident');
+    expect(container.textContent).not.toContain('dossier-source incident');
+    expect(container.textContent).toContain('Active · 1');
   });
 });

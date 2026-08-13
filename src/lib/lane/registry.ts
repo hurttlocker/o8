@@ -8,7 +8,7 @@ import { recordDispatchRule } from '@/lib/dispatch/rules-store';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
 import { extractReviewFindings, extractReviewPatterns } from '@/lib/orchestrator/review-lessons';
 import { getActiveProjectScopeForRepoSync } from '@/lib/repos/projects';
-import { reportMissingArchiveEnding, resolveArchiveEnding } from './archive-ending';
+import { reportMissingArchiveEnding, resolveArchiveEnding, type ArchiveEndingOverride } from './archive-ending';
 import { publishPacketTailEvent } from './packet-tail';
 import { publishLaneLifecycleEvent } from './lifecycle';
 import { extractLaneReviewScreenshot } from './review-screenshot';
@@ -896,12 +896,12 @@ export function reconcileLanesWithSessions(
   return pendingReviewCommits;
 }
 
-export function archiveLane(laneId: string, actor: LaneEventActor = 'user'): Lane | null {
+export function archiveLane(laneId: string, actor: LaneEventActor = 'user', endingOverride?: ArchiveEndingOverride): Lane | null {
   const lane = getLane(laneId);
   if (!lane) {
     return null;
   }
-  const ending = resolveArchiveEnding(lane, getLaneEvents(lane.id, 100));
+  const ending = resolveArchiveEnding(lane, getLaneEvents(lane.id, 100), endingOverride);
   if (ending.contractViolation) reportMissingArchiveEnding(lane);
   // Keep sessionKey for archived-session correlation; clear worktreePath so cleanup cannot re-enter.
   const updated = updateLane(laneId, {

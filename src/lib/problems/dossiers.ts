@@ -4,6 +4,12 @@ import { createHash } from 'node:crypto';
 
 import { getSqlite } from '@/lib/db';
 import type { SupervisorInboxKind } from '@/lib/supervisor/inbox';
+import {
+  isEligibleProblemSignal,
+  problemExposureDenominator,
+  problemImpactBand,
+  type ProblemExposureDenominator,
+} from './source-policy';
 
 export const PROBLEM_DOSSIER_SCHEMA = 'o8/problem-dossier/v1' as const;
 export const DEFAULT_RECURRENCE_THRESHOLD = 3;
@@ -29,7 +35,7 @@ export interface ProblemClosureContract {
     distinctAttempts: number;
     recordedAt: string;
   };
-  exposureDenominator: 'distinct_reviewed_releases';
+  exposureDenominator: ProblemExposureDenominator;
   requiredComparableExposures: number;
 }
 
@@ -192,11 +198,6 @@ interface SupervisorProblemSignal {
   errorExcerpt: string;
 }
 
-const SENSOR_KINDS = new Set<SupervisorInboxKind>([
-  'verification_failed',
-  'bounded_retry_exhausted',
-]);
-
 const initializedDatabases = new WeakSet<object>();
 
 function ensureProblemDossierSchema(): void {
@@ -350,10 +351,6 @@ function painStatementFor(item: SupervisorProblemSignal): string {
   return `${label}: ${detail}`.slice(0, 280);
 }
 
-function impactBandFor(kind: SupervisorInboxKind): ProblemImpactBand {
-  return kind === 'bounded_retry_exhausted' ? 'high' : 'moderate';
-}
-
 function closureContractFor(input: {
   kind: SupervisorInboxKind;
   occurrenceCount: number;
@@ -368,7 +365,7 @@ function closureContractFor(input: {
       distinctAttempts: input.distinctAttempts,
       recordedAt: input.recordedAt,
     },
-    exposureDenominator: 'distinct_reviewed_releases',
+    exposureDenominator: problemExposureDenominator(input.kind),
     requiredComparableExposures: 3,
   };
 }
@@ -383,7 +380,8 @@ function parseClosureContract(raw: string, row: ProblemDossierRow): ProblemClosu
       distinctAttempts: row.occurrence_count,
       recordedAt: row.created_at,
     },
-    exposureDenominator: 'distinct_reviewed_releases',
+    exposureDenominator: parsed.exposureDenominator
+      ?? problemExposureDenominator(parsed.sourceKind ?? 'verification_failed'),
     requiredComparableExposures: parsed.requiredComparableExposures ?? 3,
   };
 }
@@ -562,6 +560,17 @@ export function listProblemRemedies(dossierId: string): ProblemRemedy[] {
   `).all(dossierId) as ProblemRemedyRow[]).map(mapRemedy);
 }
 
+export function problemDossierIdsForSupervisorSources(sourceIds: string[]): Map<string, string> {
+  ensureProblemDossierSchema();
+  if (sourceIds.length === 0) return new Map();
+  const placeholders = sourceIds.map(() => '?').join(', ');
+  const rows = getSqlite().prepare(`
+    SELECT source_id, dossier_id FROM problem_evidence
+    WHERE source_type = 'supervisor_inbox' AND source_id IN (${placeholders})
+  `).all(...sourceIds) as Array<{ source_id: string; dossier_id: string }>;
+  return new Map(rows.map((row) => [row.source_id, row.dossier_id]));
+}
+
 export interface ProblemSensorResult {
   observedSignals: number;
   qualifyingGroups: number;
@@ -622,10 +631,10 @@ export function syncRecurringSupervisorProblems(options: {
     SELECT id, project_id, repo_path, packet_id, kind, payload, created_at, last_seen_at
     FROM supervisor_inbox
     WHERE packet_id IS NOT NULL AND packet_id != ''
-      AND kind IN ('verification_failed', 'bounded_retry_exhausted')
+      AND kind IN ('verification_failed', 'bounded_retry_exhausted', 'packet_no_changes')
   `).all() as SupervisorInboxEvidenceRow[])
     .map(signalFromRow)
-    .filter((item) => SENSOR_KINDS.has(item.kind));
+    .filter(isEligibleProblemSignal);
   const groups = new Map<string, SupervisorProblemSignal[]>();
 
   for (const item of items) {
@@ -648,35 +657,27 @@ export function syncRecurringSupervisorProblems(options: {
       item.lastSeenAt > latest.lastSeenAt ? item : latest
     ));
     const dossierId = `problem-${stableHash(fingerprint, 20)}`;
-    const existing = sqlite.prepare('SELECT id FROM problem_dossiers WHERE fingerprint = ?')
-      .get(fingerprint) as { id: string } | undefined;
+    const inserted = sqlite.prepare(`
+      INSERT INTO problem_dossiers (
+        id, fingerprint, project_id, repo_path, pain_statement,
+        first_observed_at, last_observed_at, occurrence_count,
+        comparable_exposure_count, impact_band, evidence_confidence,
+        status, closure_contract_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, 'high', 'candidate', ?, ?, ?)
+      ON CONFLICT(fingerprint) DO NOTHING
+    `).run(
+      dossierId, fingerprint, first.projectId, first.repoPath, painStatementFor(first),
+      first.createdAt, last.lastSeenAt, problemImpactBand(first.kind),
+      JSON.stringify(closureContractFor({
+        kind: first.kind,
+        occurrenceCount: sorted.length,
+        distinctAttempts: distinctPackets.size,
+        recordedAt: now,
+      })),
+      now, now,
+    );
 
-    if (!existing) {
-      sqlite.prepare(`
-        INSERT INTO problem_dossiers (
-          id, fingerprint, project_id, repo_path, pain_statement,
-          first_observed_at, last_observed_at, occurrence_count,
-          comparable_exposure_count, impact_band, evidence_confidence,
-          status, closure_contract_json, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, 'high', 'candidate', ?, ?, ?)
-      `).run(
-        dossierId,
-        fingerprint,
-        first.projectId,
-        first.repoPath,
-        painStatementFor(first),
-        first.createdAt,
-        last.lastSeenAt,
-        impactBandFor(first.kind),
-        JSON.stringify(closureContractFor({
-          kind: first.kind,
-          occurrenceCount: sorted.length,
-          distinctAttempts: distinctPackets.size,
-          recordedAt: now,
-        })),
-        now,
-        now,
-      );
+    if (inserted.changes === 1) {
       createdDossierIds.push(dossierId);
       appendProblemDossierEvent({
         dossierId,
@@ -688,10 +689,10 @@ export function syncRecurringSupervisorProblems(options: {
         at: now,
       });
     } else {
-      updatedDossierIds.push(existing.id);
+      updatedDossierIds.push(dossierId);
     }
 
-    const resolvedDossierId = existing?.id ?? dossierId;
+    const resolvedDossierId = dossierId;
     const insertEvidence = sqlite.prepare(`
       INSERT OR IGNORE INTO problem_evidence (
         id, dossier_id, source_type, source_id, source_kind, packet_id, observed_at

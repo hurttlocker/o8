@@ -24,6 +24,7 @@ const { recordMission } = await import('@/lib/db/missions-store');
 const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
 const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+const { listInboxItems } = await import('@/lib/supervisor/inbox');
 
 afterAll(() => {
   closeDb();
@@ -133,6 +134,9 @@ describe('close_packet_unmerged real path (#1570)', () => {
       summary: expect.stringContaining('Implemented in o8-mobile.'),
       mergedClean: false,
     });
+    expect(listInboxItems({ includeAllProjects: true, includeDismissed: true }).filter((item) => (
+      item.packetId === packetId && item.kind === 'packet_no_changes'
+    ))).toEqual([]);
   });
 
   it('persists closure in the non-current mission registry row that owns the packet', async () => {

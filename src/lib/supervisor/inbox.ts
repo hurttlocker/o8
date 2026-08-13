@@ -3,7 +3,11 @@ import { existsSync } from 'node:fs';
 import { getSqlite } from '@/lib/db';
 import { listLanes } from '@/lib/lane/registry';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
-import { syncRecurringSupervisorProblems } from '@/lib/problems/dossiers';
+import {
+  problemDossierIdsForSupervisorSources,
+  syncRecurringSupervisorProblems,
+} from '@/lib/problems/dossiers';
+import { isProblemSensorKind } from '@/lib/problems/source-policy';
 import {
   DEFAULT_PROJECT_ID,
   getActiveProjectScopeForRepoSync,
@@ -94,6 +98,7 @@ export interface SupervisorInboxItem {
   transcriptLink: string | null;
   worktreeLink: string | null;
   errorExcerpt: string;
+  problemDossierId: string | null;
 }
 
 export interface SupervisorInboxResolutionNote {
@@ -193,7 +198,7 @@ function ensureSupervisorInboxTable() {
 }
 
 function syncProblemDossiersAfterInboxWrite(kind: SupervisorInboxKind): void {
-  if (kind !== 'verification_failed' && kind !== 'bounded_retry_exhausted') return;
+  if (!isProblemSensorKind(kind)) return;
   try {
     syncRecurringSupervisorProblems();
   } catch (error) {
@@ -633,6 +638,7 @@ export function listInboxItems(options: {
         ${options.includeDismissed ? '' : `AND status != 'dismissed'`}
       ORDER BY datetime(last_seen_at) DESC, datetime(created_at) DESC
     `).all(projectId) as SupervisorInboxRow[];
+  const dossierBySourceId = problemDossierIdsForSupervisorSources(rows.map((row) => row.id));
 
   const lanes = listLanes();
   const laneByPacketId = new Map(lanes.flatMap((lane) => (
@@ -705,6 +711,7 @@ export function listInboxItems(options: {
           : null,
         worktreeLink: worktreePath ? `file://${encodeURI(worktreePath)}` : null,
         errorExcerpt,
+        problemDossierId: dossierBySourceId.get(row.id) ?? null,
       } satisfies SupervisorInboxItem;
     })
     .sort((left, right) => {

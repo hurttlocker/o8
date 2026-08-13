@@ -7,6 +7,11 @@ export interface ArchiveEnding {
   contractViolation: boolean;
 }
 
+export interface ArchiveEndingOverride {
+  outcome: LaneOutcome;
+  outcomeNote?: string | null;
+}
+
 function recordedQuestion(events: LaneEvent[]): string | null {
   return events
     .map((event) => event.payload.question ?? event.payload.reason)
@@ -14,7 +19,20 @@ function recordedQuestion(events: LaneEvent[]): string | null {
     ?.trim() ?? null;
 }
 
-export function resolveArchiveEnding(lane: Lane, events: LaneEvent[]): ArchiveEnding {
+export function resolveArchiveEnding(
+  lane: Lane,
+  events: LaneEvent[],
+  endingOverride?: ArchiveEndingOverride,
+): ArchiveEnding {
+  if (endingOverride) {
+    return {
+      updates: {
+        outcome: endingOverride.outcome,
+        outcomeNote: endingOverride.outcomeNote ?? null,
+      },
+      contractViolation: false,
+    };
+  }
   if (lane.outcome && lane.outcome !== 'no_changes') {
     return {
       updates: { outcome: lane.outcome, outcomeNote: lane.outcomeNote ?? null },

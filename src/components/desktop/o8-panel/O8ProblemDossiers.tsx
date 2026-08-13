@@ -88,6 +88,19 @@ export function O8ProblemDossiers({ active, repoPath, refreshKey }: O8ProblemDos
     void load();
   }, [load, refreshKey]);
 
+  useEffect(() => {
+    if (!active) return;
+    const refresh = () => { void load(); };
+    window.addEventListener('o8:supervisor-inbox', refresh);
+    window.addEventListener('o8:lifecycle-reconcile', refresh);
+    window.addEventListener('o8:invalidate', refresh);
+    return () => {
+      window.removeEventListener('o8:supervisor-inbox', refresh);
+      window.removeEventListener('o8:lifecycle-reconcile', refresh);
+      window.removeEventListener('o8:invalidate', refresh);
+    };
+  }, [active, load]);
+
   const visible = useMemo(() => dossiers.filter((dossier) => (
     !repoPath || dossier.repoPath === repoPath
   )), [dossiers, repoPath]);
@@ -179,7 +192,7 @@ export function O8ProblemDossiers({ active, repoPath, refreshKey }: O8ProblemDos
           Recurring problems
         </span>
         <span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>
-          {actionable > 0 ? `${actionable} active` : `${visible.length} verified`}
+          {actionable > 0 ? `${actionable} active` : `${visible.length} in history`}
         </span>
         <span aria-hidden style={{ fontSize: 11, color: 'var(--t-text-faint)', transform: open ? 'rotate(90deg)' : 'none' }}>
           ›

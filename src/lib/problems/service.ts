@@ -20,6 +20,7 @@ import {
   type ProblemDossierStatus,
   type ProblemRemedy,
 } from './dossiers';
+import { isRecordedArchiveEnding } from './source-policy';
 
 export interface ProblemDossierActionResult {
   ok: boolean;
@@ -288,6 +289,26 @@ export function resumeProblemDossier(
 
 function comparableExposureCount(dossier: ProblemDossier): number {
   if (!dossier.provisionalResolvedAt) return 0;
+  if (dossier.closureContract.exposureDenominator === 'distinct_archived_lanes_with_recorded_endings') {
+    const rows = getSqlite().prepare(`
+      SELECT packet_id, outcome, outcome_note
+      FROM lanes
+      WHERE repo_path = ?
+        AND COALESCE(project_id, '') = COALESCE(?, '')
+        AND packet_id IS NOT NULL
+        AND packet_id != ?
+        AND status = 'archived'
+        AND datetime(COALESCE(last_event_at, updated_at)) > datetime(?)
+    `).all(
+      dossier.repoPath,
+      dossier.projectId,
+      dossier.linkedTaskId ?? '',
+      dossier.provisionalResolvedAt,
+    ) as Array<{ packet_id: string; outcome: string | null; outcome_note: string | null }>;
+    return new Set(rows
+      .filter((row) => isRecordedArchiveEnding(row.outcome, row.outcome_note))
+      .map((row) => row.packet_id)).size;
+  }
   const row = getSqlite().prepare(`
     SELECT COUNT(DISTINCT packet_id) AS count
     FROM lanes

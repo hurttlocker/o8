@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { dispatch } from '@/lib/lane/commands';
 import { recordLaneEvent } from '@/lib/lane/events';
-import { findLatestLaneByPacket, listLanes, updateLane } from '@/lib/lane/registry';
+import { findLatestLaneByPacket, listLanes } from '@/lib/lane/registry';
 import {
   archiveLaneSessionsConfirmed,
   killLaneSessionsConfirmed,
@@ -307,7 +307,13 @@ async function closePacketUnmergedUnlocked(input: {
     }
     const persistedIds = new Set(persistedLanes.map((candidate) => candidate.id));
     for (const candidate of lanesToClose.filter((target) => persistedIds.has(target.id))) {
-      const archived = await dispatch({ verb: 'archive', laneId: candidate.id, actor: 'user' });
+      const archived = await dispatch({
+        verb: 'archive',
+        laneId: candidate.id,
+        outcome: 'closed_unmerged',
+        outcomeNote,
+        actor: 'user',
+      });
       if (!archived.ok) {
         await markPacketLifecycleFailure(guard, 'lane_archive_failed');
         return {
@@ -317,11 +323,6 @@ async function closePacketUnmergedUnlocked(input: {
           status: 422,
         };
       }
-      const updated = updateLane(candidate.id, {
-        outcome: 'closed_unmerged',
-        outcomeNote,
-      }, 'user');
-      if (!updated) throw new Error(`Lane ${candidate.id} disappeared while recording its close outcome.`);
     }
 
     const closedAt = new Date().toISOString();

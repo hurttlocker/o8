@@ -129,10 +129,16 @@ describe('terminal lane status guard - real callers', () => {
     const result = await dispatch({
       verb: 'archive',
       laneId: lane.id,
+      outcome: 'merged',
+      outcomeNote: 'Recorded before archival.',
       actor: 'user',
     });
 
     expect(result.ok).toBe(true);
-    expect(getLane(lane.id)?.status).toBe('archived');
+    expect(getLane(lane.id)).toMatchObject({
+      status: 'archived',
+      outcome: 'merged',
+      outcomeNote: 'Recorded before archival.',
+    });
   }, 20_000);
 });
