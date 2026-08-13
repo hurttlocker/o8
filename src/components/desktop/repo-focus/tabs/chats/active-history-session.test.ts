@@ -15,6 +15,21 @@ describe('resolveRailActiveSessionKey', () => {
     })).toBe('llm-chat:thoughts-new');
   });
 
+  it('keeps the clicked history row selected while its workspace tab is binding', () => {
+    expect(resolveRailActiveSessionKey('llm-chat:thoughts-new', {
+      id: 'thoughts-old',
+      kind: 'orchestrator',
+      orchestratorThreadId: 'thoughts-old',
+    }, 'llm-chat:thoughts-new')).toBe('llm-chat:thoughts-new');
+  });
+
+  it('recognizes an opened history tab before its internal thread binding settles', () => {
+    expect(resolveRailActiveSessionKey('llm-chat:thoughts-new', {
+      id: 'thoughts-new',
+      kind: 'orchestrator',
+    })).toBe('llm-chat:thoughts-new');
+  });
+
   it('moves selection when switching between existing orchestrator tabs', () => {
     expect(resolveRailActiveSessionKey('llm-chat:thoughts-old', {
       kind: 'orchestrator',

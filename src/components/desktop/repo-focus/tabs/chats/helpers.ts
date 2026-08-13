@@ -14,10 +14,14 @@ import type { ChatHistoryItem, HistoryRowTone } from './types';
 
 export function resolveRailActiveSessionKey(
   activeSessionKey: string | null | undefined,
-  focusedTab?: { kind: string; orchestratorThreadId?: string | null } | null,
+  focusedTab?: { id?: string | null; kind: string; orchestratorThreadId?: string | null } | null,
+  pendingHistorySessionKey?: string | null,
 ): string | null {
+  if (pendingHistorySessionKey) return pendingHistorySessionKey;
   if (focusedTab?.kind !== 'orchestrator') return activeSessionKey ?? null;
-  const threadId = focusedTab.orchestratorThreadId?.trim();
+  const boundThreadId = focusedTab.orchestratorThreadId?.trim();
+  const historyTabId = focusedTab.id?.startsWith('thoughts-') ? focusedTab.id : null;
+  const threadId = boundThreadId || historyTabId;
   return threadId ? `llm-chat:${threadId}` : null;
 }
 

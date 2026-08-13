@@ -804,6 +804,8 @@ function DashboardInner() {
     contextRailVisible: boolean;
   };
   const [workspaceActiveMap, setWorkspaceActiveMap] = useState<Map<string, WorkspaceActivePayload>>(() => new Map());
+  const [pendingHistoryRailSessionKey, setPendingHistoryRailSessionKey] = useState<string | null>(null);
+  const historyOpenRequestRef = useRef(0);
   useEffect(() => {
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<{
@@ -1654,7 +1656,11 @@ function DashboardInner() {
     title: string,
     repo?: SavedChatRepoContext | null,
   ) => {
-    setActiveSessionKey(`llm-chat:${historyTabId}`);
+    const requestedSessionKey = `llm-chat:${historyTabId}`;
+    const requestId = historyOpenRequestRef.current + 1;
+    historyOpenRequestRef.current = requestId;
+    setPendingHistoryRailSessionKey(requestedSessionKey);
+    setActiveSessionKey(requestedSessionKey);
     void (async () => {
       try {
         const target = await waitForWorkspaceTerminalTarget({
@@ -1662,6 +1668,7 @@ function DashboardInner() {
           preferredTileId: activeTileId,
           fallbackToAnyExisting: true,
         });
+        if (requestId !== historyOpenRequestRef.current) return;
         const snapshot = target.handle.getTabsSnapshot();
         // Reuse a tab that MATCHES the thread's kind — orchestrator threads
         // (thoughts-*) reuse only an orchestrator tab (Claude); never load them
@@ -1698,6 +1705,9 @@ function DashboardInner() {
         }
       } catch {
         // Best-effort sidebar navigation; the workspace terminal may still be mounting.
+        setPendingHistoryRailSessionKey((current) => (
+          current === requestedSessionKey ? null : current
+        ));
       }
     })();
   }, [activeTileId, setActiveSessionKey, waitForWorkspaceTerminalTarget]);
@@ -4721,7 +4731,19 @@ function DashboardInner() {
   const focusedWorkspaceTab = focusedWorkspaceSnapshot?.tabs.find(
     (tab) => tab.id === focusedWorkspaceSnapshot.activeTabId,
   );
-  const railActiveSessionKey = resolveRailActiveSessionKey(activeSessionKey, focusedWorkspaceTab);
+  useEffect(() => {
+    if (!pendingHistoryRailSessionKey) return;
+    const pendingThreadId = pendingHistoryRailSessionKey.replace(/^llm-chat:/, '');
+    const focusedThreadId = focusedWorkspaceTab?.orchestratorThreadId?.trim() || focusedWorkspaceTab?.id;
+    const chatSettled = activeWorkspaceChatSessionKey === pendingHistoryRailSessionKey;
+    if (focusedThreadId !== pendingThreadId && !chatSettled) return;
+    setPendingHistoryRailSessionKey(null);
+  }, [activeWorkspaceChatSessionKey, focusedWorkspaceTab?.id, focusedWorkspaceTab?.orchestratorThreadId, pendingHistoryRailSessionKey]);
+  const railActiveSessionKey = resolveRailActiveSessionKey(
+    activeSessionKey,
+    focusedWorkspaceTab,
+    pendingHistoryRailSessionKey,
+  );
 
   // Same AgentPanel element drives both the in-column mount AND the hover-
   // preview overlay. Only one of the two ever renders at a time (in-column
