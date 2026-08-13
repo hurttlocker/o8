@@ -6,6 +6,7 @@ import type { SupervisorInboxItem } from '@/lib/supervisor/inbox';
 function item(overrides: Partial<SupervisorInboxItem> = {}): SupervisorInboxItem {
   return {
     id: 'inbox-1',
+    projectId: 'default',
     repoPath: '/Users/op/o8',
     packetId: 'pkt-abc',
     kind: 'silent_exit_verification_failed',

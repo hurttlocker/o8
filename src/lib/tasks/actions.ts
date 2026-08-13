@@ -68,6 +68,8 @@ export interface TaskCreateInput extends TaskMutationInput {
     body?: string | null;
     url?: string | null;
   } | null;
+  problemDossierId?: string | null;
+  problemRemedyId?: string | null;
 }
 
 export interface TaskClaimInput extends TaskMutationInput {
@@ -344,7 +346,15 @@ export async function createTask(input: TaskCreateInput): Promise<TaskMutationRe
     ? `issue/${sourceIssueNumber}-${slugifyTask(title)}-${randomUUID().replace(/-/g, '').slice(0, 6)}`
     : `agent/${slugifyTask(title)}-${randomUUID().replace(/-/g, '').slice(0, 6)}`;
 
+  let resolvedPacketId = packetId;
   await withLockedState((current) => {
+    const existingProblemTask = input.problemRemedyId
+      ? current.packets.find((candidate) => candidate.problemRemedyId === input.problemRemedyId)
+      : null;
+    if (existingProblemTask) {
+      resolvedPacketId = existingProblemTask.id;
+      return;
+    }
     const packet: OrchestratorPacket = {
       id: packetId,
       referenceLabel: nextPacketReferenceLabel(current.packets),
@@ -374,6 +384,8 @@ export async function createTask(input: TaskCreateInput): Promise<TaskMutationRe
         url: input.sourceIssue.url ?? undefined,
       } : null,
       taskContractRequired: true,
+      problemDossierId: input.problemDossierId ?? null,
+      problemRemedyId: input.problemRemedyId ?? null,
       prompt: buildProjectBriefPromptV1(taskBrief, summary),
       ...(allowedFiles.length > 0 ? { allowedFiles, predictedFiles: allowedFiles } : {}),
     };
@@ -387,7 +399,7 @@ export async function createTask(input: TaskCreateInput): Promise<TaskMutationRe
     current.updatedAt = now;
   });
 
-  const freshTask = await getTaskPoolTask(packetId, {
+  const freshTask = await getTaskPoolTask(resolvedPacketId, {
     projectId: context.id,
     repoPath,
   });
@@ -396,8 +408,8 @@ export async function createTask(input: TaskCreateInput): Promise<TaskMutationRe
     schema: 'o8/task.mutation/v1',
     ok: true,
     action: 'create',
-    taskId: packetId,
-    packetId,
+    taskId: resolvedPacketId,
+    packetId: resolvedPacketId,
     laneId: null,
     note: `Task added to ${context.name}.`,
     workerRouting,

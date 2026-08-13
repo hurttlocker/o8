@@ -411,6 +411,10 @@ export interface OrchestratorPacket {
    * fail work dispatched before the worker received contract instructions.
    */
   taskContractRequired?: boolean;
+  /** Recurring-problem provenance. Execution still belongs to the normal task packet. */
+  problemDossierId?: string | null;
+  /** One dossier can reopen; each accepted remedy attempt gets a stable id. */
+  problemRemedyId?: string | null;
   /**
    * HTML packet explainer + quiz (#1491). Generated fire-and-forget when the
    * packet reaches review — a self-contained explainer artifact plus a

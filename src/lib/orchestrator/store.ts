@@ -438,6 +438,8 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
       ? packet.learnedRules.map((rule) => String(rule).trim()).filter(Boolean).slice(0, 12)
       : undefined,
     issue: normalizePacketIssue(packet.issue),
+    problemDossierId: typeof packet.problemDossierId === 'string' && packet.problemDossierId.trim() ? packet.problemDossierId.trim() : null,
+    problemRemedyId: typeof packet.problemRemedyId === 'string' && packet.problemRemedyId.trim() ? packet.problemRemedyId.trim() : null,
     // #535 — readBudget + #536 — edgeCaseSites: preserved verbatim when valid,
     // stripped silently when malformed so existing callers never break.
     readBudget: normalizePacketReadBudget(packet.readBudget),
@@ -1187,10 +1189,8 @@ export function reconcileOrchestratorMissionState(
   // on every agent inventory tick — including within a single render commit — so
   // including them here made `changed` perpetually true, which minted a fresh
   // `updatedAt` (nowIso) on every reconcile and drove the dashboard reconcile
-  // effect into a `Maximum update depth exceeded` storm on every heartbeat
-  // (~2.5s). These are display-only metadata and must never drive a state write.
-  // `lastEventLabel` (what the agent is DOING) is kept — it's a real signal and
-  // changes only on actual progress, so it updates the UI without looping.
+  // effect into a `Maximum update depth exceeded` storm; display metadata must not drive writes.
+  // `lastEventLabel` stays because it changes only when the agent makes real progress.
   const stripVolatile = (packets: OrchestratorMissionState['packets']) =>
     packets.map((p) => ({
       ...p,

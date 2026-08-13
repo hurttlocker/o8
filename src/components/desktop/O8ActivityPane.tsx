@@ -47,6 +47,7 @@ import {
 } from './o8-panel/O8DirectiveProposalDrawer';
 import { O8ActivityMissionControls } from './o8-panel/O8ActivityMissionControls';
 import { O8ActivityPacketRow } from './o8-panel/O8ActivityPacketRow';
+import { O8ProblemDossiers } from './o8-panel/O8ProblemDossiers';
 import { O8RepoSelector } from './o8-panel/O8RepoSelector';
 import { O8ScratchChat } from './o8-panel/workspace-rail/O8ScratchChat';
 import { PrPanel } from './pr-panel/PrPanel';
@@ -543,6 +544,11 @@ export const O8ActivityPane = memo(function O8ActivityPane({
         overflowY: 'auto',
         overflowX: 'hidden',
       }}>
+        <O8ProblemDossiers
+          active={active}
+          repoPath={repoPath ?? null}
+          refreshKey={orchestratorData?.missionState?.updatedAt ?? null}
+        />
         <O8DirectiveProposalDrawer
           proposals={proposals}
           proposalsOpen={proposalsOpen}

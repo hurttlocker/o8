@@ -717,13 +717,13 @@ async function runFetchUnreachableSweep(): Promise<void> {
     }
   }
 }
-
 async function runHealBotMaintenance(): Promise<void> {
   const { runLivenessProbeSweep } = await import('@/lib/supervisor/liveness-probes');
   const dismissed = runRetentionSweep();
   if (dismissed > 0) {
     console.log(`[heal-bot] Retention sweep dismissed ${dismissed} stale inbox item(s)`);
   }
+  await import('@/lib/problems/service').then(({ reconcileProblemDossiers }) => reconcileProblemDossiers()).catch((error) => console.warn('[heal-bot] Problem dossier reconciliation failed:', error));
   await runFetchUnreachableSweep();
   await runAwaitingReviewAutoReleaseSweep();
   const resolved = await runLivenessProbeSweep();

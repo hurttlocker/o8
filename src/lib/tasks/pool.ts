@@ -70,6 +70,8 @@ export interface TaskPoolTask {
   lastEventLabel: string | null;
   allowedFiles: string[];
   sourceIssue: OrchestratorPacket['issue'] | null;
+  problemDossierId: string | null;
+  problemRemedyId: string | null;
   project: TaskPoolProjectSummary | null;
   lane: TaskPoolLaneSummary | null;
   taskBrief?: string;
@@ -256,6 +258,8 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
       lastEventLabel: lane?.lastEventLabel ?? packet.lastEventLabel ?? null,
       allowedFiles: packetAllowedFiles(packet),
       sourceIssue: packet.issue ?? null,
+      problemDossierId: packet.problemDossierId ?? null,
+      problemRemedyId: packet.problemRemedyId ?? null,
       project: context ? toProjectSummary(context) : null,
       lane: toLaneSummary(lane),
       taskBrief: options.includeBrief && context
@@ -300,6 +304,8 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
       lastEventLabel: lane.lastEventLabel,
       allowedFiles: [],
       sourceIssue: null,
+      problemDossierId: null,
+      problemRemedyId: null,
       project: context ? toProjectSummary(context) : null,
       lane: toLaneSummary(lane),
       taskBrief: options.includeBrief && context

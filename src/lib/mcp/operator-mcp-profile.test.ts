@@ -43,7 +43,10 @@ describe('operator MCP process profiles', () => {
   });
 
   it('fails closed for an unknown explicit profile while preserving the normal default', () => {
-    expect(operatorToolsForProfile('full').map((tool) => tool.name)).toContain('o8_update_apply');
+    const fullNames = operatorToolsForProfile('full').map((tool) => tool.name);
+    expect(fullNames).toContain('o8_update_apply');
+    expect(fullNames).toContain('o8_problem_list');
+    expect(fullNames).toContain('o8_problem_get');
     expect(operatorToolsForProfile('misspelled-dogfood')).toEqual([]);
   });
 

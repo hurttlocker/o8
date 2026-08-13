@@ -159,6 +159,8 @@ function fullPacketFixture() {
       exclusions: ['No UI changes'],
     },
     taskContractRequired: true,
+    problemDossierId: null,
+    problemRemedyId: null,
     explainer: {
       status: 'ready',
       artifactId: 'art-explainer-1',

@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { getSqlite } from '@/lib/db';
 import { listLanes } from '@/lib/lane/registry';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
+import { syncRecurringSupervisorProblems } from '@/lib/problems/dossiers';
 import {
   DEFAULT_PROJECT_ID,
   getActiveProjectScopeForRepoSync,
@@ -74,6 +75,7 @@ interface SupervisorInboxRow {
 
 export interface SupervisorInboxItem {
   id: string;
+  projectId: string;
   repoPath: string;
   packetId: string | null;
   kind: SupervisorInboxKind;
@@ -188,6 +190,17 @@ function ensureSupervisorInboxTable() {
   `);
 
   supervisorInboxReady = true;
+}
+
+function syncProblemDossiersAfterInboxWrite(kind: SupervisorInboxKind): void {
+  if (kind !== 'verification_failed' && kind !== 'bounded_retry_exhausted') return;
+  try {
+    syncRecurringSupervisorProblems();
+  } catch (error) {
+    console.warn(
+      `[problem-dossiers] Recurrence projection failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 function parsePayload(raw: string): SupervisorInboxPayload {
@@ -327,8 +340,11 @@ export function enqueueInboxItem(input: EnqueueInboxItemInput) {
       WHERE id = ?
     `).run(JSON.stringify(input.payload), createdAt, incidentKey, existing.id);
 
+    syncProblemDossiersAfterInboxWrite(input.kind);
+
     return {
       id: existing.id,
+      projectId: existing.project_id?.trim() || DEFAULT_PROJECT_ID,
       repoPath: existing.repo_path,
       packetId: existing.packet_id,
       kind: existing.kind,
@@ -371,8 +387,11 @@ export function enqueueInboxItem(input: EnqueueInboxItemInput) {
     status,
   );
 
+  syncProblemDossiersAfterInboxWrite(input.kind);
+
   return {
     id,
+    projectId,
     repoPath: input.repoPath,
     packetId,
     kind: input.kind,
@@ -665,6 +684,7 @@ export function listInboxItems(options: {
 
       return {
         id: row.id,
+        projectId: row.project_id?.trim() || DEFAULT_PROJECT_ID,
         repoPath: row.repo_path,
         packetId: row.packet_id,
         kind: row.kind,

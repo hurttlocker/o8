@@ -39,6 +39,7 @@ import { runLaneTouches } from './commands/lane.js';
 import { runMission } from './commands/mission.js';
 import { runMcp } from './commands/mcp.js';
 import { runProject, runRepo } from './commands/resources.js';
+import { runProblem } from './commands/problem.js';
 import { runStatus } from './commands/status.js';
 import { runSession } from './commands/session.js';
 import { runRun } from './commands/run.js';
@@ -240,6 +241,8 @@ commands:
   project add-repo <project> <repo>     attach a registered repo to a project
   project remove-repo <project> <repo>  detach it while preserving registration and disk
   project delete <target>               remove a project and exclusive repo registrations; disk is preserved
+  problem list         recurring problems detected across independent work (--all includes suppressed)
+  problem show <id>    full evidence, remedy, and closure state for one problem dossier
   inbox list           pending governance approvals (--all includes resolved)
   inbox approve <id>   approve a card → runs the deferred action (e.g. a held merge)
   inbox reject <id>    reject a pending approval
@@ -378,6 +381,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runRepo(args.mode, secondary, args.rest);
     case 'project':
       return runProject(args.mode, secondary, args.rest);
+    case 'problem':
+      return runProblem(args.mode, secondary, args.rest);
     case 'inbox':
       return runInbox(args.mode, secondary, args.rest);
     case 'session':

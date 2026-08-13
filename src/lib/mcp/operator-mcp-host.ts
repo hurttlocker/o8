@@ -8,6 +8,7 @@ import { CANVAS_TOOLS, handleCanvas, handleRender } from '@/lib/mcp/operator-han
 import { CLOSE_PACKET_TOOLS, handleClosePacketUnmerged } from '@/lib/mcp/operator-handlers/close-packet';
 import { CORTEX_TOOLS, handleAsk, handleProposeObservation } from '@/lib/mcp/operator-handlers/cortex';
 import { DIGEST_TOOLS, handleDigest, handleFetchRaw } from '@/lib/mcp/operator-handlers/digest';
+import { PROBLEM_TOOLS, handleProblemGet, handleProblemList } from '@/lib/mcp/operator-handlers/problems';
 import {
   HARNESS_TOOLS,
   handleCapabilities,
@@ -283,6 +284,7 @@ const TOOLS: McpTool[] = [
   ...MISSION_TOOLS.filter((tool) => tool.name === 'o8_task_report'),
   ...MISSION_TOOLS.filter((tool) => tool.name === 'o8_task_archive'),
   ...MISSION_TOOLS.filter((tool) => tool.name === 'o8_task_prune'),
+  ...PROBLEM_TOOLS,
   ...MISSION_TOOLS.filter((tool) => tool.name === 'wait_for_mission_ready'),
   ...MISSION_TOOLS.filter((tool) => tool.name === 'submit_review'),
   ...CLOSE_PACKET_TOOLS,
@@ -386,6 +388,8 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   o8_task_report: handleTaskReport,
   o8_task_archive: handleTaskArchive,
   o8_task_prune: handleTaskPrune,
+  o8_problem_list: handleProblemList,
+  o8_problem_get: handleProblemGet,
   wait_for_mission_ready: handleWaitForMissionReady,
   submit_review: handleSubmitReview,
   close_packet_unmerged: handleClosePacketUnmerged,
