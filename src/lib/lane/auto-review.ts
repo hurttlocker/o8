@@ -513,7 +513,7 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
       taskContractRequired = readOrchestratorControlPlaneState().packets
         .find((packet) => packet.id === lane.packetId)?.taskContractRequired === true;
       const { patchMissionPacket } = await import('@/lib/orchestrator/operator-mission-service/packet-patch');
-      patchMissionPacket(lane.packetId, {
+      await patchMissionPacket(lane.packetId, {
         deviations: deviations ?? null,
         taskContract: completionContext?.taskContract ?? null,
       });

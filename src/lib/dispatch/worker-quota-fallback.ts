@@ -236,7 +236,7 @@ export async function handleWorkerQuotaExhaustion(input: {
     });
     if (lane.packetId) {
       const { patchMissionPacket } = await import('@/lib/orchestrator/operator-mission-service/packet-patch');
-      patchMissionPacket(lane.packetId, {
+      await patchMissionPacket(lane.packetId, {
         runtime: decision.toRuntime,
         assignedModel: decision.toModel,
         dispatchRuntimePin: decision.toRuntime,

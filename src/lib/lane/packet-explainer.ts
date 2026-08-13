@@ -130,15 +130,15 @@ function buildExplainerPrompt(params: GenerateExplainerParams): string {
  */
 export async function generatePacketExplainer(params: GenerateExplainerParams): Promise<void> {
   const { patchMissionPacket } = await import('@/lib/orchestrator/operator-mission-service/packet-patch');
-  const stamp = (explainer: NonNullable<import('@/lib/orchestrator/types').OrchestratorPacket['explainer']>) => {
+  const stamp = async (explainer: NonNullable<import('@/lib/orchestrator/types').OrchestratorPacket['explainer']>) => {
     try {
-      patchMissionPacket(params.packetId, { explainer });
+      await patchMissionPacket(params.packetId, { explainer });
     } catch (error) {
       console.warn(`[explainer] Failed to stamp explainer status for packet ${params.packetId}:`, error);
     }
   };
 
-  stamp({ status: 'generating', changedFileCount: params.changedFileCount, generatedAt: null });
+  await stamp({ status: 'generating', changedFileCount: params.changedFileCount, generatedAt: null });
 
   try {
     const threadId = `explainer-${params.lane.id}`;
@@ -191,7 +191,7 @@ export async function generatePacketExplainer(params: GenerateExplainerParams): 
       console.warn(`[explainer] Failed to remove scratch HTML for packet ${params.packetId}:`, error);
     });
 
-    stamp({
+    await stamp({
       status: 'ready',
       artifactId: record?.id ?? id,
       quiz: quiz ?? null,
@@ -201,7 +201,7 @@ export async function generatePacketExplainer(params: GenerateExplainerParams): 
     console.log(`[explainer] Ready for packet ${params.packetId} (${quiz?.questions.length ?? 0} quiz questions)`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    stamp({
+    await stamp({
       status: 'failed',
       changedFileCount: params.changedFileCount,
       generatedAt: new Date().toISOString(),

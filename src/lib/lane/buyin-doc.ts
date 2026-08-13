@@ -127,15 +127,15 @@ export function buildBuyinDocPrompt(params: GenerateBuyinDocParams): string {
  */
 export async function generateBuyinDoc(params: GenerateBuyinDocParams): Promise<void> {
   const { patchMissionPacket } = await import('@/lib/orchestrator/operator-mission-service/packet-patch');
-  const stamp = (buyinDoc: NonNullable<OrchestratorPacket['buyinDoc']>) => {
+  const stamp = async (buyinDoc: NonNullable<OrchestratorPacket['buyinDoc']>) => {
     try {
-      patchMissionPacket(params.packetId, { buyinDoc });
+      await patchMissionPacket(params.packetId, { buyinDoc });
     } catch (error) {
       console.warn(`[buyin-doc] Failed to stamp status for packet ${params.packetId}:`, error);
     }
   };
 
-  stamp({ status: 'generating', generatedAt: null });
+  await stamp({ status: 'generating', generatedAt: null });
 
   const docPath = join(params.repoPath, buyinDocFilename(params.packetId));
   const threadId = `buyin-${params.laneId}`;
@@ -178,7 +178,7 @@ export async function generateBuyinDoc(params: GenerateBuyinDocParams): Promise<
       bytes: Buffer.byteLength(html),
     });
 
-    stamp({
+    await stamp({
       status: 'ready',
       artifactId: record?.id ?? id,
       generatedAt: new Date().toISOString(),
@@ -186,7 +186,7 @@ export async function generateBuyinDoc(params: GenerateBuyinDocParams): Promise<
     console.log(`[buyin-doc] Ready for packet ${params.packetId} (artifact ${record?.id ?? id})`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    stamp({
+    await stamp({
       status: 'failed',
       generatedAt: new Date().toISOString(),
       error: message.slice(0, 300),
