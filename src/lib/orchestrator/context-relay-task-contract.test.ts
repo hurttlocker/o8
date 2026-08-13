@@ -90,6 +90,20 @@ describe('completion context task contract relay', () => {
     };
     const { registerRuntime } = await import('@/lib/runtimes/registry');
     registerRuntime(runtime);
+    registerRuntime({
+      ...runtime,
+      id: 'opencode',
+      displayName: 'OpenCode test runtime',
+      readTranscript: async () => [entry('4', `<self-review>${JSON.stringify({
+        passed: true,
+        confidence: 'high',
+        summary: 'The read-only finding is supported.',
+        outcome: 'The configuration lacks the required guard.',
+        evidence: ['Observed the missing guard in the production configuration.'],
+        residual: 'Implementation remains intentionally out of scope.',
+        decision: 'finding_ready',
+      })}</self-review>`) ],
+    });
   });
 
   it('persists the first valid contract and strips contract blocks from the summary', async () => {
@@ -99,4 +113,48 @@ describe('completion context task contract relay', () => {
     expect(context.taskContract).toEqual(firstContract);
     expect(context.summary).toBe('Final summary.');
   }, 15_000);
+
+  it('does not promote a failed self-review receipt to a successful outcome', async () => {
+    const { outcomeFromPacketSelfReview } = await import('./context-relay-outcome');
+
+    expect(outcomeFromPacketSelfReview(undefined)).toBe('partial');
+    expect(outcomeFromPacketSelfReview({
+      passed: false,
+      confidence: 'low',
+      issuesFound: ['Unable to verify the production path.'],
+      residual: 'The reported failure remains.',
+      decision: 'blocked',
+      summary: 'Investigation is blocked.',
+    })).toBe('failed');
+    expect(outcomeFromPacketSelfReview({
+      passed: true,
+      confidence: 'high',
+      issuesFound: [],
+      residual: 'No known residual.',
+      decision: 'implementation_ready',
+      summary: 'The implementation is verified.',
+    })).toBe('succeeded');
+    expect(outcomeFromPacketSelfReview({
+      passed: true,
+      confidence: 'high',
+      issuesFound: [],
+      residual: 'Implementation remains intentionally out of scope.',
+      decision: 'finding_ready',
+      summary: 'Evidence was omitted.',
+    })).toBe('partial');
+  });
+
+  it('captures owned-session transcripts through the generic runtime registry', async () => {
+    const { capturePacketCompletionContext } = await import('./context-relay');
+    const context = await capturePacketCompletionContext(
+      'pkt-opencode-read-only',
+      'opencode-owned:test-read-only',
+    );
+
+    expect(context.selfReview).toMatchObject({
+      passed: true,
+      decision: 'finding_ready',
+      outcome: 'The configuration lacks the required guard.',
+    });
+  });
 });

@@ -9,7 +9,10 @@ import {
   buildWorkerOutcomeOwnershipPromptV1,
   OUTCOME_OWNERSHIP_HEADING_V1,
 } from '@/lib/prompts/v1';
-import { OPENCLAW_ORCHESTRATOR_PROMPT } from '@/lib/lane/orchestrator-backends/openclaw';
+import {
+  OPENCLAW_ORCHESTRATOR_PROMPT,
+} from '@/lib/lane/orchestrator-backends/openclaw';
+import { resolveOpenclawPromptSeeded } from '@/lib/lane/orchestrator-backends/openclaw-turn-state';
 
 process.env.CORTEX_IDE_DATA_DIR = mkdtempSync(join(os.tmpdir(), 'o8-outcome-ownership-'));
 
@@ -55,6 +58,7 @@ describe('outcome ownership prompt reachability', () => {
     expect(prompt).toContain('This packet is read-only');
     expect(prompt).toContain('evidence-backed diagnosis, decision, or handoff');
     expect(prompt).toContain('recommend the smallest executable protection precisely; do not install it');
+    expect(prompt).toContain('"decision":"finding_ready|partial|blocked"');
     expect(prompt).not.toContain('Add proportionate recurrence protection');
     expect(prompt).not.toContain('A committed, typecheck-clean patch is implementation-ready');
     expect(prompt).not.toContain('git add -A && git commit');
@@ -69,5 +73,12 @@ describe('outcome ownership prompt reachability', () => {
     expect(OPENCLAW_ORCHESTRATOR_PROMPT).toContain('## Outcome ownership');
     expect(OPENCLAW_ORCHESTRATOR_PROMPT).toContain('Dispatch is a recorded handoff');
     expect(OPENCLAW_ORCHESTRATOR_PROMPT).toContain('Read-only and diagnostic work remains non-mutating');
+  });
+
+  it('retries OpenClaw framing until a turn returns assistant text successfully', () => {
+    expect(resolveOpenclawPromptSeeded(false, 1, '')).toBe(false);
+    expect(resolveOpenclawPromptSeeded(false, 0, '')).toBe(false);
+    expect(resolveOpenclawPromptSeeded(false, 0, 'accepted framing')).toBe(true);
+    expect(resolveOpenclawPromptSeeded(true, 1, '')).toBe(true);
   });
 });

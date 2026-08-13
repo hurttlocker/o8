@@ -13,7 +13,10 @@ import {
 } from '@/lib/orchestrator/packet-task-contract';
 import { buildQualitySearchRolePrompt } from '@/lib/orchestrator/quality-search';
 import { buildSessionRulesBlock } from '@/lib/orchestrator/session-rules-prompt';
-import { buildPacketSelfReviewInstructions } from '@/lib/orchestrator/self-review';
+import {
+  buildPacketSelfReviewInstructions,
+  buildReadOnlyPacketSelfReviewInstructions,
+} from '@/lib/orchestrator/self-review';
 import { buildWorkerOutcomeOwnershipPromptV1 } from '@/lib/prompts/v1';
 import { DEVIATIONS_CLAUSE } from '@/lib/orchestrator/packet-deviations';
 import type { OrchestratorPacket, PacketContext } from '@/lib/orchestrator/types';
@@ -439,7 +442,9 @@ export async function buildPacketPrompt(
     brainSection,
     learnedRuleSection,
     readOnlyPacket ? null : 'Verification discipline — SPEED MATTERS: the ONE blocking gate is `npx tsc --noEmit`. Lint is advisory: run it scoped to the files you changed (`npx eslint <your changed files>`), NEVER the repo-wide `npm run lint` — that walks the whole codebase and can stall the lane for 10+ minutes even on a one-file change. Do NOT keep the lane running while you wait on a slow or repo-wide check. o8 runs the authoritative typecheck + change-scoped rule-check at the merge gate, so finalize when typecheck passes and your changed-file checks are clean. A committed, typecheck-clean packet is implementation-ready for independent review; report that handoff immediately instead of claiming the user-facing outcome is closed or waiting on advisory output.',
-    ...(readOnlyPacket ? [] : buildPacketSelfReviewInstructions(baseBranch)),
+    ...(readOnlyPacket
+      ? buildReadOnlyPacketSelfReviewInstructions()
+      : buildPacketSelfReviewInstructions(baseBranch)),
     readOnlyPacket ? null : 'CRITICAL: Before reporting completion, you MUST commit all changes: run `git add -A && git commit -m "<descriptive message>"`. Uncommitted changes will be lost when the worktree is cleaned up.',
     'Stay within this packet scope. Surface blockers, review handoffs, and required operator decisions explicitly.',
   ].filter((value): value is string => Boolean(value)).join('\n');

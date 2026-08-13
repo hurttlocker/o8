@@ -37,6 +37,7 @@ import type {
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { toOpenclawJson } from '@/lib/mcp/tool-spine/emit-openclaw';
 import { resolveOpenclawSpawnBinary } from './openclaw-spawn-preflight';
+import { type OpenclawAgentResult, resolveOpenclawPromptSeeded } from './openclaw-turn-state';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { ORCHESTRATOR_OUTCOME_OWNERSHIP_FALLBACK_V1 } from '@/lib/prompts/v1';
@@ -59,15 +60,6 @@ interface OpenclawOrchestratorSession {
  * wraps it — `{ status, summary, result: { payloads, meta } }`; the embedded
  * path was flat (`{ payloads, meta }`). Both shapes are unwrapped where parsed.
  */
-interface OpenclawPayloadBlock {
-  payloads?: Array<{ text?: string }>;
-  meta?: Record<string, unknown> & { finalAssistantVisibleText?: string };
-}
-interface OpenclawAgentResult extends OpenclawPayloadBlock {
-  status?: string;
-  result?: OpenclawPayloadBlock;
-}
-
 let openclawRealtimeMutationSeq = 0;
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -723,8 +715,8 @@ async function sendToOpenclawOrchestrator(
   // First turn of a session carries the orchestrator framing that used to
   // live in the (now-removed) systemPromptOverride config key — the session
   // retains it as conversation context for every later turn.
-  const framing = session.promptSeeded ? '' : `${OPENCLAW_ORCHESTRATOR_PROMPT}\n\n---\n\n`;
-  session.promptSeeded = true;
+  const includesFraming = !session.promptSeeded;
+  const framing = includesFraming ? `${OPENCLAW_ORCHESTRATOR_PROMPT}\n\n---\n\n` : '';
   const fullMessage = framing + buildRepoContextPreamble(session.repoPath) + message;
 
   const args = [
@@ -833,20 +825,22 @@ async function sendToOpenclawOrchestrator(
       console.log(`[openclaw-diag] stdout head: ${JSON.stringify(stdout.slice(0, 600))}`);
       if (stderr.trim()) console.log(`[openclaw-diag] stderr head: ${JSON.stringify(stderr.slice(0, 600))}`);
 
+      let assistantText = '';
       if (parsed) {
         // Gateway mode wraps the result — `{ status, result: { payloads, meta } }`;
         // the embedded path was flat. Unwrap `result` when present.
         const resultBlock = parsed.result ?? parsed;
-        let text = (resultBlock.payloads ?? [])
+        const text = (resultBlock.payloads ?? [])
           .map((p) => (typeof p.text === 'string' ? p.text : ''))
           .filter(Boolean)
           .join('\n\n');
-        if (!text && typeof resultBlock.meta?.finalAssistantVisibleText === 'string') {
-          text = resultBlock.meta.finalAssistantVisibleText;
+        assistantText = text;
+        if (!assistantText && typeof resultBlock.meta?.finalAssistantVisibleText === 'string') {
+          assistantText = resultBlock.meta.finalAssistantVisibleText;
         }
-        console.log(`[openclaw-diag] resultBlock keys=[${Object.keys(resultBlock).join(',')}] payloads=${(resultBlock.payloads ?? []).length} textLen=${text.length}`);
-        if (text) {
-          emitEvent({ type: 'text', text });
+        console.log(`[openclaw-diag] resultBlock keys=[${Object.keys(resultBlock).join(',')}] payloads=${(resultBlock.payloads ?? []).length} textLen=${assistantText.length}`);
+        if (assistantText) {
+          emitEvent({ type: 'text', text: assistantText });
         } else if (code === 0) {
           emitEvent({ type: 'error', error: `openclaw returned no assistant text: ${trimmed.slice(0, 500)}` });
         }
@@ -871,6 +865,12 @@ async function sendToOpenclawOrchestrator(
             : rawError,
         });
       }
+
+      session.promptSeeded = resolveOpenclawPromptSeeded(
+        session.promptSeeded === true,
+        code,
+        assistantText,
+      );
 
       emitEvent({ type: 'done', sessionId: session.sessionName, cost: null });
       promiseResolve();

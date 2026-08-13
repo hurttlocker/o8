@@ -30,7 +30,10 @@ function isConfidence(value: unknown): value is PacketSelfReviewConfidence {
 }
 
 function isDecision(value: unknown): value is PacketSelfReviewDecision {
-  return value === 'implementation_ready' || value === 'partial' || value === 'blocked';
+  return value === 'implementation_ready'
+    || value === 'finding_ready'
+    || value === 'partial'
+    || value === 'blocked';
 }
 
 function decisionMatchesPassed(
@@ -38,7 +41,7 @@ function decisionMatchesPassed(
   passed: boolean,
 ): boolean {
   if (!decision) return true;
-  return decision === 'implementation_ready' ? passed : !passed;
+  return decision === 'implementation_ready' || decision === 'finding_ready' ? passed : !passed;
 }
 
 function normalizeDetail(value: unknown): string | undefined {
@@ -144,5 +147,15 @@ export function buildPacketSelfReviewInstructions(baseBranch = 'main'): string[]
     '5. Use `decision: "implementation_ready"` and `passed: true` only when the scoped implementation and its verification are ready for independent review. This does not declare the user-facing outcome closed. Use `decision: "partial"` or `"blocked"` with `passed: false` whenever notable work or authority remains.',
     '6. Use `confidence: "high"` only when the diff cleanly matches the task and your verification passed; use `medium` for moderate residual risk OR an unfixable lint warning OR an exhausted retry; use `low` when notable uncertainty remains.',
     '7. Do not report completion without the self-review block.',
+  ];
+}
+
+export function buildReadOnlyPacketSelfReviewInstructions(): string[] {
+  return [
+    'Read-only evidence gate before completion:',
+    '1. Re-check the requested question against the sources and commands you actually inspected. Do not make repository changes.',
+    `2. End your final response with a machine-readable block in this exact format: ${PACKET_SELF_REVIEW_TAG_START} {"passed":true,"confidence":"high|medium|low","summary":"one sentence","issuesFound":[],"outcome":"observable finding or decision","evidence":["specific source, command, or observation"],"residual":"remaining uncertainty or none","decision":"finding_ready|partial|blocked","recurrenceProtection":"precise recommendation or none"} ${PACKET_SELF_REVIEW_TAG_END}`,
+    '3. Use `decision: "finding_ready"` with `passed: true` only when the outcome, at least one concrete evidence item, and the residual uncertainty are stated. Use `partial` or `blocked` with `passed: false` otherwise.',
+    '4. This receipt records a reviewable finding. It does not permit edits, commits, mutations, or unsupported claims.',
   ];
 }

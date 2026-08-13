@@ -254,18 +254,22 @@ function buildSelfReviewSummary(selfReview?: PacketSelfReview): string | undefin
     ? `Issues: ${selfReview.issuesFound.map((issue) => issue.trim()).filter(Boolean).join('; ')}`
     : '';
   const evidence = Array.isArray(selfReview.evidence) && selfReview.evidence.length > 0
-    ? `Evidence: ${selfReview.evidence.map((entry) => entry.trim()).filter(Boolean).join('; ')}`
+    ? `Evidence: ${truncateText(selfReview.evidence.map((entry) => entry.trim()).filter(Boolean).join('; '), 80, { normalizeWhitespace: true })}`
     : '';
   const summary = truncateText(
     [
-      selfReview.summary,
-      selfReview.outcome ? `Outcome: ${selfReview.outcome}` : '',
-      evidence,
-      selfReview.residual ? `Residual: ${selfReview.residual}` : '',
       selfReview.decision ? `Decision: ${selfReview.decision}` : '',
-      selfReview.recurrenceProtection
-        ? `Recurrence protection: ${selfReview.recurrenceProtection}`
+      selfReview.residual
+        ? `Residual: ${truncateText(selfReview.residual, 100, { normalizeWhitespace: true })}`
         : '',
+      selfReview.recurrenceProtection
+        ? `Recurrence protection: ${truncateText(selfReview.recurrenceProtection, 90, { normalizeWhitespace: true })}`
+        : '',
+      selfReview.outcome
+        ? `Outcome: ${truncateText(selfReview.outcome, 100, { normalizeWhitespace: true })}`
+        : '',
+      evidence,
+      `Summary: ${truncateText(selfReview.summary, 80, { normalizeWhitespace: true })}`,
       issues,
     ].filter(Boolean).join(' | '),
     MAX_SUMMARY_CHARS,
@@ -289,8 +293,8 @@ export function buildAttemptLearningFromFailure(
   ].filter(Boolean).join('\n'));
   const summary = truncateText(
     [
-      selfReviewSummary ? `Self-review: ${selfReviewSummary}` : '',
       keyErrors.length > 0 ? `Key errors: ${keyErrors.join(' | ')}` : '',
+      selfReviewSummary ? `Self-review: ${selfReviewSummary}` : '',
     ].filter(Boolean).join(' | ') || 'Retry required after a failed attempt with limited diagnostics.',
     MAX_SUMMARY_CHARS,
     { normalizeWhitespace: true },

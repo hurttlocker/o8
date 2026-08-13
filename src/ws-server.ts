@@ -8541,15 +8541,33 @@ async function bootstrapWsServer() {
               if (probe.noChangesProduced) {
                 const packetId = lane.packetId?.trim();
                 const now = new Date().toISOString();
-                const { completeReadOnlyZeroDiffLane } = await import('@/lib/orchestrator/read-only-completion');
-                const readOnlyCompletion = await completeReadOnlyZeroDiffLane(lane);
+                const {
+                  completeReadOnlyZeroDiffLane,
+                  isReadOnlyPacketLane,
+                } = await import('@/lib/orchestrator/read-only-completion');
+                let readOnlyContext = null;
+                if (isReadOnlyPacketLane(lane) && packetId && lane.sessionKey) {
+                  try {
+                    const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');
+                    readOnlyContext = await capturePacketCompletionContext(packetId, lane.sessionKey);
+                  } catch (error) {
+                    console.error(`[context-relay] Failed to capture read-only completion context for packet ${packetId}:`, error);
+                  }
+                }
+                const readOnlyCompletion = await completeReadOnlyZeroDiffLane(lane, readOnlyContext);
                 if (readOnlyCompletion.completed) {
                   const label = packetId ? `Packet ${packetId}` : `Lane ${lane.id}`;
                   const detail = `${label} completed its read-only inspection with no repository changes.`;
                   console.log(`[supervisor] ${detail}`);
                   return {
-                    block: true,
                     detail,
+                  };
+                }
+                if (readOnlyCompletion.blocked) {
+                  console.warn(`[supervisor] ${readOnlyCompletion.detail}`);
+                  return {
+                    block: true,
+                    detail: readOnlyCompletion.detail,
                   };
                 }
                 const { parkHuddleReadyZeroDiffLane } = await import('@/lib/orchestrator/huddle-zero-diff');

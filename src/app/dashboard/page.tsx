@@ -10,14 +10,18 @@ import { WORKSPACE_RAIL_CORNER_RADIUS, WORKSPACE_RAIL_CORNER_SMOOTHING } from '@
 import { DesktopWebSocketProvider, useSharedDesktopWs, useWsConnectionState } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import { bootstrapTranscripts } from '@/lib/transcripts/bootstrap';
 import { buildTranscriptWsCallbacks } from '@/lib/transcripts/wireWsBridge';
-import { mergeTranscriptEntries, WORKSPACE_THREAD_ID_EVENT } from '@/components/desktop/workspace-terminal/utils';
+import { HISTORY_NAVIGATION_SUPERSEDED_EVENT, mergeTranscriptEntries, WORKSPACE_THREAD_ID_EVENT } from '@/components/desktop/workspace-terminal/utils';
 import { readAnyXtermSelection } from '@/components/desktop/workspace-terminal/xterm-selection-registry';
 import { ReactiveQueryProvider } from '@/lib/query/provider';
 import { useReactiveQuery } from '@/lib/query/use-reactive-query';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
 // AgentPanelChat retired — orchestrator/chat tabs handle chat surfaces now.
 import { useLeftPanelProjectFocus } from '@/components/desktop/repo-focus/useLeftPanelProjectFocus';
-import { resolveRailActiveSessionKey } from '@/components/desktop/repo-focus/tabs/chats/helpers';
+import {
+  isLatestHistoryOpenRequest,
+  resolveRailActiveSessionKey,
+  supersedeHistoryOpenRequest,
+} from '@/components/desktop/repo-focus/tabs/chats/helpers';
 import type { CanvasTab } from '@/components/desktop/Canvas';
 import type { SettingsTab } from '@/components/desktop/SettingsPage';
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
@@ -1668,7 +1672,7 @@ function DashboardInner() {
           preferredTileId: activeTileId,
           fallbackToAnyExisting: true,
         });
-        if (requestId !== historyOpenRequestRef.current) return;
+        if (!isLatestHistoryOpenRequest(requestId, historyOpenRequestRef.current)) return;
         const snapshot = target.handle.getTabsSnapshot();
         // Reuse a tab that MATCHES the thread's kind — orchestrator threads
         // (thoughts-*) reuse only an orchestrator tab (Claude); never load them
@@ -1684,6 +1688,7 @@ function DashboardInner() {
         if (tabId) {
           window.dispatchEvent(new CustomEvent('o8:tab-focus-flash', { detail: { tabId } }));
           const loadThread = () => {
+            if (!isLatestHistoryOpenRequest(requestId, historyOpenRequestRef.current)) return;
             window.dispatchEvent(new CustomEvent('o8:load-history-thread', {
               detail: { tabId, historyTabId },
             }));
@@ -1711,6 +1716,18 @@ function DashboardInner() {
       }
     })();
   }, [activeTileId, setActiveSessionKey, waitForWorkspaceTerminalTarget]);
+
+  useEffect(() => {
+    const supersedePendingHistoryOpen = () => {
+      historyOpenRequestRef.current = supersedeHistoryOpenRequest(historyOpenRequestRef.current);
+      setPendingHistoryRailSessionKey(null);
+    };
+    window.addEventListener(HISTORY_NAVIGATION_SUPERSEDED_EVENT, supersedePendingHistoryOpen);
+    return () => window.removeEventListener(
+      HISTORY_NAVIGATION_SUPERSEDED_EVENT,
+      supersedePendingHistoryOpen,
+    );
+  }, []);
 
   const wsConnectionState = useWsConnectionState();
   const wsConnectedRef = useRef<typeof wsConnectionState>('disconnected');

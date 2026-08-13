@@ -12,6 +12,14 @@ import {
 import { HISTORY_ROW_TONES } from './constants';
 import type { ChatHistoryItem, HistoryRowTone } from './types';
 
+export function isLatestHistoryOpenRequest(requestId: number, latestRequestId: number): boolean {
+  return requestId === latestRequestId;
+}
+
+export function supersedeHistoryOpenRequest(latestRequestId: number): number {
+  return latestRequestId + 1;
+}
+
 export function resolveRailActiveSessionKey(
   activeSessionKey: string | null | undefined,
   focusedTab?: { id?: string | null; kind: string; orchestratorThreadId?: string | null } | null,

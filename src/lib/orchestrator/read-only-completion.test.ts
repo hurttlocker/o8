@@ -16,7 +16,7 @@ const {
   completeReadOnlyZeroDiffLane,
   READ_ONLY_COMPLETED_EVENT_LABEL,
 } = await import('./read-only-completion');
-import type { OrchestratorPacket } from './types';
+import type { OrchestratorPacket, PacketContext } from './types';
 
 function packet(packetId: string, readOnly: boolean): OrchestratorPacket {
   return {
@@ -62,11 +62,32 @@ function seed(packetId: string, readOnly: boolean) {
   return getLane(lane.id)!;
 }
 
+function completionContext(packetId: string): PacketContext {
+  return {
+    packetId,
+    sessionKey: `opencode-owned:${packetId}`,
+    summary: 'The requested behavior is documented by the route and its test.',
+    changedFiles: [],
+    selfReview: {
+      passed: true,
+      confidence: 'high',
+      summary: 'The read-only investigation is ready for handoff.',
+      outcome: 'The production route requires a registered repository.',
+      evidence: ['src/app/api/example/route.ts and its real-path test agree.'],
+      residual: 'none',
+      decision: 'finding_ready',
+      recurrenceProtection: 'none',
+    },
+    completedAt: new Date().toISOString(),
+    model: 'opencode',
+  };
+}
+
 describe('read-only zero-diff completion', () => {
   it('releases an explicitly read-only packet instead of failing it', async () => {
     const lane = seed('pkt-read-only', true);
 
-    const result = await completeReadOnlyZeroDiffLane(lane);
+    const result = await completeReadOnlyZeroDiffLane(lane, completionContext('pkt-read-only'));
 
     expect(result.completed).toBe(true);
     expect(getLane(lane.id)).toMatchObject({
@@ -83,10 +104,31 @@ describe('read-only zero-diff completion', () => {
     });
   });
 
+  it('fails closed when the read-only transcript has no complete evidence receipt', async () => {
+    const lane = seed('pkt-read-only-empty', true);
+
+    const result = await completeReadOnlyZeroDiffLane(lane, {
+      ...completionContext('pkt-read-only-empty'),
+      selfReview: undefined,
+    });
+
+    expect(result).toMatchObject({ completed: false, blocked: true });
+    expect(getLane(lane.id)).toMatchObject({
+      status: 'awaiting_input',
+      lastEventLabel: 'read_only_evidence_missing',
+    });
+    expect(readOrchestratorControlPlaneState().packets[0]).toMatchObject({
+      status: 'blocked',
+      queueState: 'held',
+      blockedReason: 'read_only_evidence_missing',
+      lastEventLabel: 'read_only_evidence_missing',
+    });
+  });
+
   it('leaves ordinary edit packets on the existing zero-diff path', async () => {
     const lane = seed('pkt-edit', false);
 
-    expect(await completeReadOnlyZeroDiffLane(lane)).toEqual({ completed: false });
+    expect(await completeReadOnlyZeroDiffLane(lane, completionContext('pkt-edit'))).toEqual({ completed: false });
     expect(getLane(lane.id)?.status).toBe('running');
   });
 });

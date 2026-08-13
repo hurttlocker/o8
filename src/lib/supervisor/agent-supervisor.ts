@@ -635,7 +635,7 @@ async function handleStatusChange(
       name: watched.name,
       status: 'completed',
       duration,
-      detail: `Agent "${watched.name}" completed (${formatDuration(duration)})`,
+      detail: completionDecision?.detail ?? `Agent "${watched.name}" completed (${formatDuration(duration)})`,
     });
 
     setTimeout(() => unregisterWatchedAgent(watched.surfaceId), COMPLETION_CLEANUP_MS);

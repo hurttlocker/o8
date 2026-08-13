@@ -195,7 +195,171 @@ const LEFT_CONTROL_IDLE: u8 = 0;
 #[cfg(target_os = "macos")]
 const LEFT_CONTROL_PENDING: u8 = 1;
 #[cfg(target_os = "macos")]
-const LEFT_CONTROL_CAPTURING: u8 = 2;
+const LEFT_CONTROL_STARTING: u8 = 2;
+#[cfg(target_os = "macos")]
+const LEFT_CONTROL_CAPTURING: u8 = 3;
+#[cfg(target_os = "macos")]
+const LEFT_CONTROL_CANCEL_AFTER_START: u8 = 4;
+#[cfg(target_os = "macos")]
+const LEFT_CONTROL_FINISH_AFTER_START: u8 = 5;
+#[cfg(target_os = "macos")]
+const LEFT_CONTROL_FINISH_LONG_FORM: u8 = 6;
+#[cfg(target_os = "macos")]
+const LEFT_CONTROL_BEGIN_LONG_FORM: u8 = 7;
+
+#[cfg(target_os = "macos")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LeftControlCompletionAction {
+    None,
+    Discard,
+    End,
+    FinishLongForm,
+    BeginLongForm,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct LeftControlTransition {
+    next: u8,
+    stamp_brush: bool,
+    completion: LeftControlCompletionAction,
+}
+
+#[cfg(target_os = "macos")]
+fn cancel_left_control_transition(state: u8) -> LeftControlTransition {
+    match state {
+        LEFT_CONTROL_PENDING | LEFT_CONTROL_FINISH_LONG_FORM | LEFT_CONTROL_BEGIN_LONG_FORM => {
+            LeftControlTransition {
+                next: LEFT_CONTROL_IDLE,
+                stamp_brush: false,
+                completion: LeftControlCompletionAction::None,
+            }
+        }
+        LEFT_CONTROL_STARTING => LeftControlTransition {
+            next: LEFT_CONTROL_CANCEL_AFTER_START,
+            stamp_brush: false,
+            completion: LeftControlCompletionAction::None,
+        },
+        LEFT_CONTROL_CAPTURING => LeftControlTransition {
+            next: LEFT_CONTROL_IDLE,
+            stamp_brush: false,
+            completion: LeftControlCompletionAction::Discard,
+        },
+        _ => LeftControlTransition {
+            next: state,
+            stamp_brush: false,
+            completion: LeftControlCompletionAction::None,
+        },
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn release_left_control_transition(state: u8, short: bool) -> LeftControlTransition {
+    match state {
+        LEFT_CONTROL_PENDING => LeftControlTransition {
+            next: LEFT_CONTROL_IDLE,
+            stamp_brush: short,
+            completion: LeftControlCompletionAction::None,
+        },
+        LEFT_CONTROL_STARTING => LeftControlTransition {
+            next: if short {
+                LEFT_CONTROL_CANCEL_AFTER_START
+            } else {
+                LEFT_CONTROL_FINISH_AFTER_START
+            },
+            stamp_brush: short,
+            completion: LeftControlCompletionAction::None,
+        },
+        LEFT_CONTROL_CAPTURING => LeftControlTransition {
+            next: LEFT_CONTROL_IDLE,
+            stamp_brush: short,
+            completion: if short {
+                LeftControlCompletionAction::Discard
+            } else {
+                LeftControlCompletionAction::End
+            },
+        },
+        LEFT_CONTROL_FINISH_LONG_FORM => LeftControlTransition {
+            next: LEFT_CONTROL_IDLE,
+            stamp_brush: false,
+            completion: LeftControlCompletionAction::FinishLongForm,
+        },
+        LEFT_CONTROL_BEGIN_LONG_FORM => LeftControlTransition {
+            next: LEFT_CONTROL_IDLE,
+            stamp_brush: false,
+            completion: LeftControlCompletionAction::BeginLongForm,
+        },
+        _ => LeftControlTransition {
+            next: state,
+            stamp_brush: false,
+            completion: LeftControlCompletionAction::None,
+        },
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn started_left_control_transition(state: u8) -> LeftControlTransition {
+    match state {
+        LEFT_CONTROL_STARTING => LeftControlTransition {
+            next: LEFT_CONTROL_CAPTURING,
+            stamp_brush: false,
+            completion: LeftControlCompletionAction::None,
+        },
+        LEFT_CONTROL_CANCEL_AFTER_START => LeftControlTransition {
+            next: LEFT_CONTROL_IDLE,
+            stamp_brush: false,
+            completion: LeftControlCompletionAction::Discard,
+        },
+        LEFT_CONTROL_FINISH_AFTER_START => LeftControlTransition {
+            next: LEFT_CONTROL_IDLE,
+            stamp_brush: false,
+            completion: LeftControlCompletionAction::End,
+        },
+        _ => LeftControlTransition {
+            next: state,
+            stamp_brush: false,
+            completion: LeftControlCompletionAction::None,
+        },
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn apply_left_control_transition(
+    classify: impl Fn(u8) -> LeftControlTransition,
+) -> LeftControlTransition {
+    loop {
+        let current = LEFT_CONTROL_STATE.load(Ordering::SeqCst);
+        let transition = classify(current);
+        if transition.next == current
+            || LEFT_CONTROL_STATE
+                .compare_exchange(current, transition.next, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+        {
+            return transition;
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn run_left_control_completion(action: LeftControlCompletionAction) {
+    match action {
+        LeftControlCompletionAction::None => {}
+        LeftControlCompletionAction::Discard => {
+            std::thread::spawn(discard_brush);
+        }
+        LeftControlCompletionAction::End => {
+            std::thread::spawn(end_system_dictation);
+        }
+        LeftControlCompletionAction::FinishLongForm => {
+            LONG_FORM_ACTIVE.store(false, Ordering::SeqCst);
+            std::thread::spawn(finish_long_form_dictation);
+        }
+        LeftControlCompletionAction::BeginLongForm => {
+            LONG_FORM_ACTIVE.store(true, Ordering::SeqCst);
+            std::thread::spawn(begin_long_form_dictation);
+        }
+    }
+}
 
 #[cfg(target_os = "macos")]
 pub fn set_external_left_control_fn(enabled: bool) {
@@ -1380,11 +1544,9 @@ pub fn start(app: tauri::AppHandle) {
                         {
                             std::thread::spawn(discard_agent_dictation);
                         }
-                        let control_state =
-                            LEFT_CONTROL_STATE.swap(LEFT_CONTROL_IDLE, Ordering::SeqCst);
-                        if control_state == LEFT_CONTROL_CAPTURING {
-                            std::thread::spawn(discard_brush);
-                        }
+                        let control_transition =
+                            apply_left_control_transition(cancel_left_control_transition);
+                        run_left_control_completion(control_transition.completion);
 
                         // Escape cancels an active long-form dictation (Fn or
                         // agent) AND stops active TTS playback. The atomic loads
@@ -1658,16 +1820,12 @@ pub fn start(app: tauri::AppHandle) {
                                     double_tap,
                                 ) {
                                     SystemDictationPressAction::FinishLongForm => {
-                                        LONG_FORM_ACTIVE.store(false, Ordering::SeqCst);
                                         LEFT_CONTROL_STATE
-                                            .store(LEFT_CONTROL_IDLE, Ordering::SeqCst);
-                                        std::thread::spawn(finish_long_form_dictation);
+                                            .store(LEFT_CONTROL_FINISH_LONG_FORM, Ordering::SeqCst);
                                     }
                                     SystemDictationPressAction::BeginLongForm => {
-                                        LONG_FORM_ACTIVE.store(true, Ordering::SeqCst);
                                         LEFT_CONTROL_STATE
-                                            .store(LEFT_CONTROL_IDLE, Ordering::SeqCst);
-                                        std::thread::spawn(begin_long_form_dictation);
+                                            .store(LEFT_CONTROL_BEGIN_LONG_FORM, Ordering::SeqCst);
                                     }
                                     SystemDictationPressAction::BeginPushToTalk => {
                                         std::thread::spawn(|| {
@@ -1677,13 +1835,17 @@ pub fn start(app: tauri::AppHandle) {
                                             if LEFT_CONTROL_STATE
                                                 .compare_exchange(
                                                     LEFT_CONTROL_PENDING,
-                                                    LEFT_CONTROL_CAPTURING,
+                                                    LEFT_CONTROL_STARTING,
                                                     Ordering::SeqCst,
                                                     Ordering::SeqCst,
                                                 )
                                                 .is_ok()
                                             {
                                                 begin_system_dictation(false);
+                                                let transition = apply_left_control_transition(
+                                                    started_left_control_transition,
+                                                );
+                                                run_left_control_completion(transition.completion);
                                             }
                                         });
                                     }
@@ -1691,27 +1853,23 @@ pub fn start(app: tauri::AppHandle) {
                                 }
                             }
 
-                            let control_state = if control_down {
-                                LEFT_CONTROL_IDLE
-                            } else {
-                                LEFT_CONTROL_STATE.swap(LEFT_CONTROL_IDLE, Ordering::SeqCst)
-                            };
-                            if control_state != LEFT_CONTROL_IDLE {
+                            if !control_down {
                                 let press = left_control_press_time_cb
                                     .lock()
                                     .map(|t| *t)
                                     .unwrap_or_else(|_| std::time::Instant::now());
                                 let hold = std::time::Instant::now().duration_since(press);
-                                if hold < std::time::Duration::from_millis(FN_TAP_PRIMER_MAX_MS) {
+                                let short =
+                                    hold < std::time::Duration::from_millis(FN_TAP_PRIMER_MAX_MS);
+                                let transition = apply_left_control_transition(|state| {
+                                    release_left_control_transition(state, short)
+                                });
+                                if transition.stamp_brush {
                                     if let Ok(mut g) = LAST_FN_BRUSH.lock() {
                                         *g = Some(std::time::Instant::now());
                                     }
-                                    if control_state == LEFT_CONTROL_CAPTURING {
-                                        std::thread::spawn(discard_brush);
-                                    }
-                                } else if control_state == LEFT_CONTROL_CAPTURING {
-                                    std::thread::spawn(end_system_dictation);
                                 }
+                                run_left_control_completion(transition.completion);
                             }
                         }
                     }
@@ -1828,9 +1986,12 @@ pub fn start(_app: tauri::AppHandle) {}
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::{
-        classify_system_dictation_press, is_left_control_fn_event,
-        resolve_system_dictation_session_id, SystemDictationPressAction, LEFT_CONTROL_DEVICE_FLAG,
-        LEFT_CONTROL_KEYCODE,
+        cancel_left_control_transition, classify_system_dictation_press, is_left_control_fn_event,
+        release_left_control_transition, resolve_system_dictation_session_id,
+        started_left_control_transition, LeftControlCompletionAction, SystemDictationPressAction,
+        LEFT_CONTROL_BEGIN_LONG_FORM, LEFT_CONTROL_CANCEL_AFTER_START, LEFT_CONTROL_CAPTURING,
+        LEFT_CONTROL_DEVICE_FLAG, LEFT_CONTROL_FINISH_AFTER_START, LEFT_CONTROL_FINISH_LONG_FORM,
+        LEFT_CONTROL_IDLE, LEFT_CONTROL_KEYCODE, LEFT_CONTROL_PENDING, LEFT_CONTROL_STARTING,
     };
 
     #[test]
@@ -1884,5 +2045,52 @@ mod tests {
             classify_system_dictation_press(true, 42, false, false),
             SystemDictationPressAction::FinishLongForm,
         );
+    }
+
+    #[test]
+    fn external_fn_chord_cancels_a_pending_long_form_finish() {
+        let transition = cancel_left_control_transition(LEFT_CONTROL_FINISH_LONG_FORM);
+        assert_eq!(transition.next, LEFT_CONTROL_IDLE);
+        assert_eq!(transition.completion, LeftControlCompletionAction::None);
+
+        let pending = cancel_left_control_transition(LEFT_CONTROL_PENDING);
+        assert_eq!(pending.next, LEFT_CONTROL_IDLE);
+        assert_eq!(pending.completion, LeftControlCompletionAction::None);
+
+        let pending_start = cancel_left_control_transition(LEFT_CONTROL_BEGIN_LONG_FORM);
+        assert_eq!(pending_start.next, LEFT_CONTROL_IDLE);
+        assert_eq!(pending_start.completion, LeftControlCompletionAction::None);
+    }
+
+    #[test]
+    fn external_fn_double_tap_starts_long_form_only_after_clean_release() {
+        let release = release_left_control_transition(LEFT_CONTROL_BEGIN_LONG_FORM, true);
+        assert_eq!(release.next, LEFT_CONTROL_IDLE);
+        assert_eq!(release.completion, LeftControlCompletionAction::BeginLongForm);
+    }
+
+    #[test]
+    fn external_fn_short_release_waits_for_start_then_discards_that_session() {
+        let release = release_left_control_transition(LEFT_CONTROL_STARTING, true);
+        assert_eq!(release.next, LEFT_CONTROL_CANCEL_AFTER_START);
+        assert!(release.stamp_brush);
+
+        let started = started_left_control_transition(release.next);
+        assert_eq!(started.next, LEFT_CONTROL_IDLE);
+        assert_eq!(started.completion, LeftControlCompletionAction::Discard);
+    }
+
+    #[test]
+    fn external_fn_long_release_waits_for_start_then_finishes_that_session() {
+        let release = release_left_control_transition(LEFT_CONTROL_STARTING, false);
+        assert_eq!(release.next, LEFT_CONTROL_FINISH_AFTER_START);
+
+        let started = started_left_control_transition(release.next);
+        assert_eq!(started.next, LEFT_CONTROL_IDLE);
+        assert_eq!(started.completion, LeftControlCompletionAction::End);
+
+        let active = release_left_control_transition(LEFT_CONTROL_CAPTURING, false);
+        assert_eq!(active.next, LEFT_CONTROL_IDLE);
+        assert_eq!(active.completion, LeftControlCompletionAction::End);
     }
 }

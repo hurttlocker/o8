@@ -499,7 +499,7 @@ export interface OrchestratorMissionState {
 }
 
 export type PacketSelfReviewConfidence = 'high' | 'medium' | 'low';
-export type PacketSelfReviewDecision = 'implementation_ready' | 'partial' | 'blocked';
+export type PacketSelfReviewDecision = 'implementation_ready' | 'finding_ready' | 'partial' | 'blocked';
 
 export interface PacketSelfReview {
   passed: boolean;

@@ -213,4 +213,41 @@ describe('#1523 — clean child exit pushes completion to the supervisor', () =>
       stopSupervisorLoop();
     }
   });
+
+  it('broadcasts a successful completion decision with its specific detail', async () => {
+    const {
+      ingestAgentCompletionSignal,
+      registerWatchedAgent,
+      startSupervisorLoop,
+      stopSupervisorLoop,
+      unregisterWatchedAgent,
+    } = await import('@/lib/supervisor/agent-supervisor');
+    const broadcastAgentUpdate = vi.fn();
+    startSupervisorLoop({
+      fetchFleetStatus: vi.fn(async () => []),
+      fetchTranscript: vi.fn(async () => []),
+      steerAgent: vi.fn(async () => undefined),
+      interruptAgent: vi.fn(async () => undefined),
+      relaunchAgent: vi.fn(async () => null),
+      broadcastAgentUpdate,
+      queueOrchestratorEscalation: vi.fn(),
+      onAgentCompletion: vi.fn(async () => ({
+        detail: 'Read-only inspection completed with evidence.',
+      })),
+    });
+
+    try {
+      registerWatchedAgent('test-owned:read-only', repoPath, 'read-only test', 'prompt');
+      broadcastAgentUpdate.mockClear();
+      expect(await ingestAgentCompletionSignal('test-owned:read-only')).toBe(true);
+      expect(broadcastAgentUpdate).toHaveBeenCalledWith(expect.objectContaining({
+        surfaceId: 'test-owned:read-only',
+        status: 'completed',
+        detail: 'Read-only inspection completed with evidence.',
+      }));
+    } finally {
+      unregisterWatchedAgent('test-owned:read-only');
+      stopSupervisorLoop();
+    }
+  });
 });

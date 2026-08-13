@@ -55,7 +55,7 @@ import { SessionPillContextMenu } from '@/components/desktop/SessionPillContextM
 import { SessionTileSurface, projectLiveSessionMeshParticipants } from './SessionTileSurface';
 import { ThreadDropLayer, type ThreadDropAction } from './ThreadDropLayer';
 import { useSessionTiles, buildPillContextMenuItems } from './use-session-tiles';
-import { publishWorkspaceThreadBinding, WORKSPACE_THREAD_ID_EVENT } from './utils';
+import { HISTORY_NAVIGATION_SUPERSEDED_EVENT, publishWorkspaceThreadBinding, WORKSPACE_THREAD_ID_EVENT } from './utils';
 import type { OrchestratorTurnInjection } from './types';
 import { useOrchestratorTurnInjection } from './use-orchestrator-turn-injection';
 // Issue #663: SessionTileSurface replaces the legacy flat AgentTileLayout
@@ -728,7 +728,6 @@ function OrchestratorTabInner({
     sessionTiles.pruneThreadPane(tid);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatChromeState.threadId, sessionTiles.pruneThreadPane]);
-
   // Drag-to-split drop actions (Claude Code split-screen parity). Split and
   // replace land in the session tile tree as 'thread' panes; a drop on the
   // main chat's header loads the thread in place instead — the chat leaf
@@ -736,6 +735,7 @@ function OrchestratorTabInner({
   const handleThreadDrop = useCallback((action: ThreadDropAction) => {
     if (action.kind === 'replace-chat') {
       if (chatChromeState.threadId === action.thread.threadId) return;
+      window.dispatchEvent(new Event(HISTORY_NAVIGATION_SUPERSEDED_EVENT));
       if (publishWorkspaceThread) {
         publishWorkspaceThreadBinding(tabId, action.thread.threadId);
       }

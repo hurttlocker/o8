@@ -61,6 +61,11 @@ describe('buildSpokenReviewBrief', () => {
           passed: false,
           confidence: 'low',
           summary: 'Vitest failed in the route suite.',
+          outcome: 'The route still rejects authorized requests.',
+          evidence: ['The production route fixture returned 403.'],
+          residual: 'Authorization remains unresolved.',
+          decision: 'partial',
+          recurrenceProtection: 'Keep the production route fixture.',
         },
       },
     });
@@ -72,6 +77,12 @@ describe('buildSpokenReviewBrief', () => {
     expect(brief.tests.status).toBe('worker-reported-failed');
     expect(brief.riskFlags).toContain('path-glob: database code or schema state');
     expect(brief.spokenSummary).toContain('The AI review rejected with 1 finding');
+    expect(brief.spokenSummary).toContain('Review summary: Changes requested.');
+    expect(brief.spokenSummary).toContain('Worker outcome: The route still rejects authorized requests.');
+    expect(brief.spokenSummary).toContain('Worker evidence: The production route fixture returned 403.');
+    expect(brief.spokenSummary).toContain('Residual: Authorization remains unresolved.');
+    expect(brief.spokenSummary).toContain('Worker decision: partial.');
+    expect(brief.spokenSummary).toContain('Recurrence protection: Keep the production route fixture.');
     expect(brief.spokenSummary).not.toContain('@@');
   });
 

@@ -107,7 +107,7 @@ describe('#1500 — verification-failure learnings reach the respawn prompt', ()
   });
 
   it('carries closure claims and residual risk into the next attempt learning', () => {
-    const learning = buildAttemptLearningFromFailure(undefined, {
+    const learning = buildAttemptLearningFromFailure(RULE_VIOLATION, {
       passed: false,
       confidence: 'medium',
       summary: 'The route fix is incomplete.',
@@ -122,6 +122,25 @@ describe('#1500 — verification-failure learnings reach the respawn prompt', ()
     expect(learning.selfReviewSummary).toContain('Evidence: The route fixture passed.');
     expect(learning.selfReviewSummary).toContain('Residual: The provider response is still ambiguous.');
     expect(learning.selfReviewSummary).toContain('Decision: partial');
+  });
+
+  it('preserves decision, residual, and recurrence when every receipt field is long', () => {
+    const long = 'x'.repeat(320);
+    const learning = buildAttemptLearningFromFailure(RULE_VIOLATION, {
+      passed: false,
+      confidence: 'low',
+      summary: long,
+      outcome: long,
+      evidence: [long, long],
+      residual: `operator decision required ${long}`,
+      decision: 'blocked',
+      recurrenceProtection: `persist a guarded receipt ${long}`,
+    });
+
+    expect(learning.selfReviewSummary).toContain('Decision: blocked');
+    expect(learning.selfReviewSummary).toContain('Residual: operator decision required');
+    expect(learning.selfReviewSummary).toContain('Recurrence protection: persist a guarded receipt');
+    expect(learning.summary).toContain('800-line ceiling');
   });
 
   it('a fresh-worktree respawn prompt at attemptCount 0 still carries the prior violation', async () => {

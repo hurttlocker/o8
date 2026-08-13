@@ -8,6 +8,7 @@ import type { Lane } from '@/lib/lane/types';
 import type { CloseUnmergedDisposition } from '@/lib/orchestrator/close-unmerged';
 import type { AgentSummary } from '@/lib/fleet/types';
 import { extractReviewFindings, extractReviewPatterns } from '@/lib/orchestrator/review-lessons';
+import { outcomeFromPacketSelfReview } from '@/lib/orchestrator/context-relay-outcome';
 import {
   buildMissingPacketSelfReview,
   parsePacketSelfReview,
@@ -18,7 +19,11 @@ import {
   stripPacketTaskContract,
 } from '@/lib/orchestrator/packet-task-contract';
 import type { OrchestratorRuntime, PacketContext } from '@/lib/orchestrator/types';
-import { isDispatchableRuntime } from '@/lib/orchestrator/runtime-capabilities';
+import {
+  isDispatchableRuntime,
+  isOrchestratorRuntime,
+  runtimeFromOwnedSessionKey,
+} from '@/lib/orchestrator/runtime-capabilities';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { getRuntime } from '@/lib/runtimes/registry';
 import type { RuntimeId, RuntimeTranscriptEntry } from '@/lib/runtimes/types';
@@ -34,13 +39,11 @@ type PacketReviewContext = NonNullable<PacketContext['review']>;
 const packetCompletionContextStore = new Map<string, PacketContext>();
 
 function inferRuntimeId(sessionKey: string): RuntimeId | null {
-  if (sessionKey.startsWith('claude-code:')) {
-    return 'claude-code';
-  }
-  if (sessionKey.startsWith('codex')) {
-    return 'codex';
-  }
-  return null;
+  const ownedRuntime = runtimeFromOwnedSessionKey(sessionKey);
+  if (ownedRuntime) return ownedRuntime;
+  const separatorIndex = sessionKey.indexOf(':');
+  const prefix = separatorIndex > 0 ? sessionKey.slice(0, separatorIndex).trim() : '';
+  return isOrchestratorRuntime(prefix) ? prefix : null;
 }
 
 function normalizeSummaryText(text: string, max: number): string {
@@ -641,12 +644,9 @@ async function persistSessionOutcome(
     `[context-relay] ${start.source} packet=${context.packetId} lane=${lane.id} startedAt=${start.startedAt} completedAt=${completedAt} durationMs=${start.durationMs ?? 'null'} detail=${start.detail}`,
   );
 
-  // Outcome derivation — coarse signal at capture time; merge will overwrite
-  // mergedClean once it actually fires. selfReview presence is the cheapest
-  // available "agent intended to be done" signal.
-  const outcome: 'succeeded' | 'failed' | 'partial' | 'interrupted' = context.selfReview
-    ? 'succeeded'
-    : 'partial';
+  // Outcome derivation remains coarse at capture time, but a present failed
+  // receipt must not be promoted to success. Merge later stamps mergedClean.
+  const outcome = outcomeFromPacketSelfReview(context.selfReview);
 
   try {
     await db.insert(sessionOutcomes).values({

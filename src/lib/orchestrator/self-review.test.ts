@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildPacketSelfReviewInstructions,
+  buildReadOnlyPacketSelfReviewInstructions,
   parsePacketSelfReview,
 } from './self-review';
 
@@ -60,5 +61,12 @@ describe('packet self-review outcome receipt', () => {
     expect(instructions).toContain('"decision"');
     expect(instructions).toContain('"recurrenceProtection"');
     expect(instructions).toContain('does not declare the user-facing outcome closed');
+  });
+
+  it('gives read-only packets a non-mutating finding receipt', () => {
+    const instructions = buildReadOnlyPacketSelfReviewInstructions().join('\n');
+    expect(instructions).toContain('"finding_ready|partial|blocked"');
+    expect(instructions).toContain('at least one concrete evidence item');
+    expect(instructions).toContain('does not permit edits, commits, mutations');
   });
 });

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { resolveRailActiveSessionKey } from './helpers';
+import {
+  isLatestHistoryOpenRequest,
+  resolveRailActiveSessionKey,
+  supersedeHistoryOpenRequest,
+} from './helpers';
 
 describe('resolveRailActiveSessionKey', () => {
   it('clears the previous history row for a fresh orchestrator tab', () => {
@@ -41,5 +45,19 @@ describe('resolveRailActiveSessionKey', () => {
     expect(resolveRailActiveSessionKey('codex:session-one', {
       kind: 'chat',
     })).toBe('codex:session-one');
+  });
+});
+
+describe('isLatestHistoryOpenRequest', () => {
+  it('rejects delayed retries from an older history click', () => {
+    expect(isLatestHistoryOpenRequest(7, 8)).toBe(false);
+    expect(isLatestHistoryOpenRequest(8, 8)).toBe(true);
+  });
+
+  it('rejects a delayed rail retry after an in-tab navigation wins', () => {
+    const railRequestId = 8;
+    const latestRequestId = supersedeHistoryOpenRequest(railRequestId);
+
+    expect(isLatestHistoryOpenRequest(railRequestId, latestRequestId)).toBe(false);
   });
 });

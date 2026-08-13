@@ -96,6 +96,7 @@ export function isReusableBlankOrchestratorTab(tab: TerminalTab): boolean {
  * which is what the reuse gate above and per-tab thread persistence key on.
  */
 export const WORKSPACE_THREAD_ID_EVENT = 'o8:workspace-thread-id';
+export const HISTORY_NAVIGATION_SUPERSEDED_EVENT = 'o8:history-navigation-superseded';
 
 /**
  * Publish a tab⇄thread binding. Called from TWO places in OrchestratorTab:

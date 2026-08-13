@@ -2,6 +2,7 @@ import type { ApprovalRisk } from '@/lib/approvals/types';
 import type { LaneFileChange } from '@/lib/lane/lane-diff-facts';
 import type { MergeCheckResult } from '@/lib/lane/preview-merge';
 import type { PacketSelfReview } from '@/lib/orchestrator/types';
+import { truncateText } from '@/lib/util/text';
 
 const SPOKEN_FILE_LIMIT = 4;
 const FINDING_LIMIT = 5;
@@ -74,6 +75,11 @@ export interface SpokenReviewBrief {
     status: SpokenTestStatus;
     confidence?: PacketSelfReview['confidence'];
     summary?: string;
+    outcome?: string;
+    evidence?: string[];
+    residual?: string;
+    decision?: PacketSelfReview['decision'];
+    recurrenceProtection?: string;
   };
   riskFlags: string[];
   spokenSummary: string;
@@ -106,15 +112,22 @@ function deriveTestStatus(testEvidence?: SpokenReviewInput['testEvidence']): Spo
     return { status: 'stale' };
   }
   const selfReview = testEvidence?.selfReview;
+  const closure = selfReview && testEvidence?.current !== false ? {
+    outcome: selfReview.outcome,
+    evidence: selfReview.evidence?.slice(0, 2),
+    residual: selfReview.residual,
+    decision: selfReview.decision,
+    recurrenceProtection: selfReview.recurrenceProtection,
+  } : {};
   const summary = selfReview?.summary.trim();
   const mentionsTests = summary
     ? /\b(?:tests?|vitest|jest|pytest|cargo test|typecheck|tsc)\b/i.test(summary)
     : false;
   if (!selfReview || !summary || !mentionsTests) {
-    return { status: 'not-reported' };
+    return { status: 'not-reported', ...closure };
   }
   if (/\b(?:tests?|vitest|jest|pytest|cargo test|typecheck|tsc)\b.{0,40}\b(?:not run|not executed|skipped|unknown)\b/i.test(summary)) {
-    return { status: 'not-reported', summary };
+    return { status: 'not-reported', summary, ...closure };
   }
   const explicitlyFailed = /(?:\b(?:no|zero)\s+(?:tests?|vitest|jest|pytest|cargo test|typecheck|tsc)\b.{0,30}\b(?:passed|passing|succeeded|green)\b|\b(?:tests?|vitest|jest|pytest|cargo test|typecheck|tsc)\b.{0,40}\b(?:did not pass|do not pass|does not pass|not passing|failed|failing|failure|red)\b)/i.test(summary);
   if (explicitlyFailed) {
@@ -122,11 +135,21 @@ function deriveTestStatus(testEvidence?: SpokenReviewInput['testEvidence']): Spo
       status: 'worker-reported-failed',
       confidence: selfReview.confidence,
       summary,
+      ...closure,
     };
   }
   const explicitlyPassed = /(?:\b(?:tests?|vitest|jest|pytest|cargo test|typecheck|tsc)\b.{0,60}\b(?:passed|passing|green|succeeded)\b|\b(?:passed|passing)\b.{0,30}\b(?:tests?|vitest|jest|pytest|cargo test|typecheck|tsc)\b)/i.test(summary);
-  if (!explicitlyPassed) return { status: 'not-reported', summary };
-  return { status: 'worker-reported-passed', confidence: selfReview.confidence, summary };
+  if (!explicitlyPassed) return { status: 'not-reported', summary, ...closure };
+  return {
+    status: 'worker-reported-passed',
+    confidence: selfReview.confidence,
+    summary,
+    ...closure,
+  };
+}
+
+function spokenDetail(value: string): string {
+  return truncateText(value, 240, { normalizeWhitespace: true }).replace(/[.!?]+$/, '');
 }
 
 function buildSpokenSummary(input: {
@@ -169,6 +192,9 @@ function buildSpokenSummary(input: {
     parts.push(`The AI review ${review.verdict}${findingCount === 0
       ? ' with no findings'
       : ` with ${findingCount} finding${findingCount === 1 ? '' : 's'}`} and the merge gate is ${mergeGate.verdict}.`);
+    if (review.summary.trim()) {
+      parts.push(`Review summary: ${spokenDetail(review.summary)}.`);
+    }
   }
 
   if (secondPass.status !== 'not-required') {
@@ -182,6 +208,21 @@ function buildSpokenSummary(input: {
     parts.push(tests.status === 'stale'
       ? 'The available worker test evidence belongs to an earlier attempt or HEAD.'
       : 'No test result was recorded in the worker self-review.');
+  }
+  if (tests.outcome) {
+    parts.push(`Worker outcome: ${spokenDetail(tests.outcome)}.`);
+  }
+  if (tests.evidence && tests.evidence.length > 0) {
+    parts.push(`Worker evidence: ${spokenDetail(tests.evidence.join('; '))}.`);
+  }
+  if (tests.residual) {
+    parts.push(`Residual: ${spokenDetail(tests.residual)}.`);
+  }
+  if (tests.decision) {
+    parts.push(`Worker decision: ${tests.decision.replaceAll('_', ' ')}.`);
+  }
+  if (tests.recurrenceProtection) {
+    parts.push(`Recurrence protection: ${spokenDetail(tests.recurrenceProtection)}.`);
   }
   if (riskFlags.length > 0) {
     parts.push(`The main risk flag is: ${riskFlags[0]}.`);
