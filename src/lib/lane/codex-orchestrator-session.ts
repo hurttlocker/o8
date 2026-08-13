@@ -273,6 +273,13 @@ export function buildCodexOrchestratorPrompt(repoPath: string, message: string):
 
 // ── Send message ─────────────────────────────────────────────────────────────
 
+function isMissingCodexRolloutResumeError(error: string): boolean {
+  const normalized = error.toLowerCase();
+  if (!normalized.includes('thread/resume')) return false;
+  return normalized.includes('no rollout found for thread id')
+    || (normalized.includes('failed to resolve rollout path') && normalized.includes('file does not exist'));
+}
+
 export async function sendToCodexOrchestrator(
   session: CodexOrchestratorSession,
   message: string,
@@ -295,9 +302,7 @@ export async function sendToCodexOrchestrator(
 
   const terminalError = deferredTerminalEvents.find((event) => event.type === 'error');
   const missingRollout = terminalError?.type === 'error'
-    && terminalError.error.includes('thread/resume')
-    && terminalError.error.includes('failed to resolve rollout path')
-    && terminalError.error.includes('file does not exist');
+    && isMissingCodexRolloutResumeError(terminalError.error);
   if (!streamed && missingRollout && !options.signal?.aborted) {
     console.warn(`[codex-orchestrator-session] Saved Codex thread is gone; retrying ${session.sessionName} fresh`);
     session.threadId = null;

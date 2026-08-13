@@ -224,6 +224,36 @@ describe('Codex orchestrator process lifecycle', () => {
     expect(session.status).toBe('ready');
   });
 
+  it('retries the app-server no-rollout resume response as a fresh thread', async () => {
+    const historyThreadId = `thoughts-no-rollout-resume-${Date.now()}`;
+    writeOrchestratorBackendSessionId(historyThreadId, 'codex', '019ffcb1-3d86-7ba3-af64-0ca2a66660e9');
+    const session = ensureCodexOrchestratorSession(process.cwd(), historyThreadId);
+    const staleProc = new FakeCodexProc();
+    const freshProc = new FakeCodexProc();
+    spawnMock
+      .mockReturnValueOnce(staleProc as unknown as ChildProcess)
+      .mockReturnValueOnce(freshProc as unknown as ChildProcess);
+    const events: OrchestratorEvent[] = [];
+
+    const turn = sendToCodexOrchestrator(session, 'recover the production error', (event) => events.push(event));
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(1));
+    staleProc.stderr.emit('data', Buffer.from(
+      'Error thread/resume: thread/resume failed: no rollout found for thread id 019ffcb1-3d86-7ba3-af64-0ca2a66660e9 (code -32600)',
+    ));
+    staleProc.exitCode = 1;
+    staleProc.emit('close', 1);
+
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(2));
+    expect(spawnMock.mock.calls[1][1]).not.toContain('resume');
+    freshProc.stdout.emit('data', Buffer.from('{"type":"thread.started","thread_id":"replacement-thread"}\n'));
+    freshProc.exitCode = 0;
+    freshProc.emit('close', 0);
+    await turn;
+
+    expect(events.some((event) => event.type === 'error')).toBe(false);
+    expect(session.threadId).toBe('replacement-thread');
+  });
+
   it('fails a Single turn closed when the process boundary cannot be prepared', async () => {
     prepareSingleMock.mockRejectedValueOnce(new Error('sandbox missing'));
     const session = ensureCodexOrchestratorSession(process.cwd(), `thoughts-single-fail-${Date.now()}`);
