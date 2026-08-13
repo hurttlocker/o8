@@ -51,6 +51,8 @@ describe('programmatic prompt catalog v1', () => {
     });
     expect(blind).toContain('blind, independent second-pass reviewer');
     expect(blind).toContain('Packet: pkt-1');
+    expect(blind).toContain('## Outcome closure review');
+    expect(blind).toContain('Try to disprove that the original desired outcome became true');
 
     const review = buildAutoReviewPromptV1({
       lane: { id: 'lane-1', label: 'Prompt work', branch: 'issue/prompts' },
@@ -61,6 +63,8 @@ describe('programmatic prompt catalog v1', () => {
       deviationsEntries: [],
     });
     expect(review).toContain('An agent has completed work on lane "Prompt work"');
+    expect(review).toContain('## Outcome closure review');
+    expect(review).toContain('Treat the worker self-review as a claim');
     expect(review).toContain('lane_command with verb "merge"');
     expect(review).not.toContain('## Pre-edit task contract');
     expect(review).not.toContain('MINIMALITY:');
@@ -134,6 +138,24 @@ describe('programmatic prompt catalog v1', () => {
       'utf8',
     );
     expect(template).toContain('You are Symon, a fast, helpful macOS voice assistant for o8.');
+    expect(template).toContain('outcome the user can observe');
+    expect(template).toContain('this rule never gives you coding authority');
     expect(template.match(/\{CURRENT_LOCAL_TIME\}/g)).toHaveLength(1);
+  });
+
+  it('keeps each repository role surface aligned to outcome ownership', () => {
+    const surfaces = [
+      'AGENTS.md',
+      'CLAUDE.md',
+      'GEMINI.md',
+      'src/lib/lane/orchestrator.md',
+      '.claude/agents/reviewer.md',
+    ];
+
+    for (const surface of surfaces) {
+      const text = readFileSync(new URL(`../../../../${surface}`, import.meta.url), 'utf8');
+      expect(text, surface).toMatch(/outcome ownership/i);
+      expect(text, surface).toContain('Outcome, Evidence, Residual, and Decision');
+    }
   });
 });

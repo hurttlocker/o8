@@ -253,8 +253,21 @@ function buildSelfReviewSummary(selfReview?: PacketSelfReview): string | undefin
   const issues = Array.isArray(selfReview.issuesFound) && selfReview.issuesFound.length > 0
     ? `Issues: ${selfReview.issuesFound.map((issue) => issue.trim()).filter(Boolean).join('; ')}`
     : '';
+  const evidence = Array.isArray(selfReview.evidence) && selfReview.evidence.length > 0
+    ? `Evidence: ${selfReview.evidence.map((entry) => entry.trim()).filter(Boolean).join('; ')}`
+    : '';
   const summary = truncateText(
-    [selfReview.summary, issues].filter(Boolean).join(' | '),
+    [
+      selfReview.summary,
+      selfReview.outcome ? `Outcome: ${selfReview.outcome}` : '',
+      evidence,
+      selfReview.residual ? `Residual: ${selfReview.residual}` : '',
+      selfReview.decision ? `Decision: ${selfReview.decision}` : '',
+      selfReview.recurrenceProtection
+        ? `Recurrence protection: ${selfReview.recurrenceProtection}`
+        : '',
+      issues,
+    ].filter(Boolean).join(' | '),
     MAX_SUMMARY_CHARS,
     { normalizeWhitespace: true },
   );

@@ -8,6 +8,12 @@ Project memory for Gemini CLI when dispatched by the o8 orchestrator against thi
 
 You are running as a **worker** in that pipeline. A Claude orchestrator designed the packet you're executing and will review your diff before it merges to `main`. Stay in your scoped packet; don't refactor outside the stated files.
 
+## Outcome ownership
+
+Translate the packet into an observable desired outcome, separate the reported symptom from established facts and the likely cause, and implement the smallest complete remedy inside the packet boundary. Verify the behavior through its real entry point when available. A clean commit and typecheck mean the work is ready for independent review; they do not by themselves prove the user's outcome is closed.
+
+Address or escalate an adjacent finding only when it blocks the packet or makes it unsafe. Record recurrence-relevant findings proportionately and leave unrelated work alone. End with the packet prompt's Outcome, Evidence, Residual, and Decision fields, without using this doctrine to expand scope or authority.
+
 ## Non-negotiables
 
 - **800-line file ceiling.** If your edits would push a file past 800 lines, extract into focused modules first, then edit. Layout orchestrators (`page.tsx`) and multiplexers (`ws-server.ts`) are explicitly waived.

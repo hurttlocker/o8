@@ -499,12 +499,23 @@ export interface OrchestratorMissionState {
 }
 
 export type PacketSelfReviewConfidence = 'high' | 'medium' | 'low';
+export type PacketSelfReviewDecision = 'implementation_ready' | 'partial' | 'blocked';
 
 export interface PacketSelfReview {
   passed: boolean;
   confidence: PacketSelfReviewConfidence;
   summary: string;
   issuesFound?: string[];
+  /** Observable task result the worker believes its implementation supports. */
+  outcome?: string;
+  /** Concrete commands, artifacts, or real-path observations supporting outcome. */
+  evidence?: string[];
+  /** Remaining uncertainty or follow-up; `none` when the worker found no residual. */
+  residual?: string;
+  /** Worker handoff state. Independent review remains the closure authority. */
+  decision?: PacketSelfReviewDecision;
+  /** Test, invariant, validation, automation, or durable learning added against recurrence. */
+  recurrenceProtection?: string;
 }
 
 export interface PacketContext {

@@ -1,5 +1,6 @@
 import { formatPacketTaskContractForReview } from '@/lib/orchestrator/packet-task-contract';
 import type { PacketTaskContract } from '@/lib/orchestrator/types';
+import { REVIEWER_OUTCOME_OWNERSHIP_PROMPT_V1 } from './outcome-ownership';
 
 export interface BlindSecondPassPromptInputV1 {
   laneLabel: string;
@@ -28,6 +29,8 @@ export function buildBlindSecondPassPromptV1(input: BlindSecondPassPromptInputV1
     '',
     contractArmed ? formatPacketTaskContractForReview(input.taskContract) : null,
     contractArmed ? '' : null,
+    REVIEWER_OUTCOME_OWNERSHIP_PROMPT_V1,
+    '',
     '## Required verification protocol',
     `Worktree: ${input.cwd}`,
     input.packetId ? `Packet: ${input.packetId}` : null,
@@ -159,6 +162,8 @@ export function buildAutoReviewPromptV1(input: AutoReviewPromptInputV1): string 
     input.mechanicalChecksSummary || null,
     input.mechanicalChecksSummary ? '' : null,
     input.selfReviewSection,
+    '',
+    REVIEWER_OUTCOME_OWNERSHIP_PROMPT_V1,
     '',
     deviationsSection,
     '',

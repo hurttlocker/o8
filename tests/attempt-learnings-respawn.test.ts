@@ -106,6 +106,24 @@ describe('#1500 — verification-failure learnings reach the respawn prompt', ()
     expect(learning.summary).toContain('800-line ceiling');
   });
 
+  it('carries closure claims and residual risk into the next attempt learning', () => {
+    const learning = buildAttemptLearningFromFailure(undefined, {
+      passed: false,
+      confidence: 'medium',
+      summary: 'The route fix is incomplete.',
+      outcome: 'The request reaches the service.',
+      evidence: ['The route fixture passed.'],
+      residual: 'The provider response is still ambiguous.',
+      decision: 'partial',
+      recurrenceProtection: 'A route regression test covers the verified branch.',
+    });
+
+    expect(learning.selfReviewSummary).toContain('Outcome: The request reaches the service.');
+    expect(learning.selfReviewSummary).toContain('Evidence: The route fixture passed.');
+    expect(learning.selfReviewSummary).toContain('Residual: The provider response is still ambiguous.');
+    expect(learning.selfReviewSummary).toContain('Decision: partial');
+  });
+
   it('a fresh-worktree respawn prompt at attemptCount 0 still carries the prior violation', async () => {
     const oldWorktree = tempDir('o8-wt-old-');
     const freshWorktree = tempDir('o8-wt-fresh-');

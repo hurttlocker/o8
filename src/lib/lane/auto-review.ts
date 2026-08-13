@@ -246,6 +246,9 @@ function formatSelfReview(selfReview: PacketSelfReview | undefined, depth: Revie
   const issues = selfReview.issuesFound && selfReview.issuesFound.length > 0
     ? selfReview.issuesFound.map((issue) => `- ${issue}`).join('\n')
     : '- none recorded';
+  const evidence = selfReview.evidence && selfReview.evidence.length > 0
+    ? selfReview.evidence.map((entry) => `- ${entry}`).join('\n')
+    : '- none recorded';
 
   return [
     '## Agent self-review',
@@ -254,6 +257,12 @@ function formatSelfReview(selfReview: PacketSelfReview | undefined, depth: Revie
     `Confidence: ${selfReview.confidence}`,
     `Review depth: ${depth}`,
     `Summary: ${selfReview.summary}`,
+    `Outcome: ${selfReview.outcome ?? 'not stated'}`,
+    `Decision: ${selfReview.decision ?? 'legacy self-review; infer independently'}`,
+    `Residual: ${selfReview.residual ?? 'not stated'}`,
+    `Recurrence protection: ${selfReview.recurrenceProtection ?? 'not stated'}`,
+    'Claimed evidence:',
+    evidence,
     'Issues found and fixed during self-review:',
     issues,
   ].join('\n');

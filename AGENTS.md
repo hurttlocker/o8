@@ -15,6 +15,15 @@ Keep two extension systems distinct:
 
 Do not assume that the active orchestrator backend and a dispatched worker runtime are the same. The `auto` backend currently resolves through `active-backend.ts`; inspect that resolver and the registries before changing routing behavior.
 
+## Outcome Ownership
+
+- Translate the request into an observable desired outcome before acting. Treat the reported problem as a signal, then separate symptoms, established facts, hypotheses, and root cause.
+- Choose the smallest complete remedy allowed by the task scope, work mode, and your authority. Read-only and diagnostic requests remain non-mutating; their complete outcome is an evidence-backed finding, decision, or handoff.
+- Classify adjacent findings instead of ignoring or absorbing them: address or escalate anything that blocks the outcome or makes it unsafe, fix or record recurrence-relevant pain proportionately, and leave unrelated work alone.
+- Verify through the real entry point at a level proportionate to risk. A plan, issue, commit, test, or merge is evidence, not automatically closure.
+- When blocked, preserve state and report the exact blocker, evidence, and shortest safe unblock. Add proportionate recurrence protection when useful, preferring a test, invariant, validation, automation, or Cortex observation over a warning future agents can miss.
+- Report Outcome, Evidence, Residual, and Decision. Never represent partial or uncertain work as complete, and never treat these rules as permission to exceed approval, safety, public-action, production, or packet boundaries.
+
 ## Repository Map
 
 - `src/app`: Next.js App Router pages and API routes.

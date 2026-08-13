@@ -5,6 +5,7 @@ import Database from 'better-sqlite3';
 
 import { buildFirstRunClarifyNote } from './clarify-first';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { ORCHESTRATOR_OUTCOME_OWNERSHIP_FALLBACK_V1 } from '@/lib/prompts/v1';
 
 /**
  * Shared o8 orchestrator system prompt assembly.
@@ -17,6 +18,7 @@ const PROMPT_FILE_NAME = 'orchestrator.md';
 const FALLBACK_PROMPT = [
   'You are the orchestrator for o8. The markdown prompt file could not be loaded.',
   'Primary repo: "{{REPO_NAME}}" at {{REPO_PATH}}.',
+  ORCHESTRATOR_OUTCOME_OWNERSHIP_FALLBACK_V1,
   'Work carefully, use cortex_* MCP tools for fleet awareness, and always end your',
   'review turns with a VERDICT block so the user has an actionable summary.',
 ].join('\n');

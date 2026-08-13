@@ -46,4 +46,10 @@ describe('buildOrchestratorSystemPrompt — clarify-first doctrine (#1489, silen
     expect(prompt).toContain('Never combine Bash `run_in_background` with a shell `exec`');
     expect(prompt).toMatch(/false failure notification.*replacement process remains healthy/i);
   });
+
+  it('preserves desired-outcome closure across durable mission turns', () => {
+    expect(prompt).toContain('### Outcome ownership');
+    expect(prompt).toContain('A successful dispatch is a recorded handoff');
+    expect(prompt).toContain('Outcome, Evidence, Residual, and Decision');
+  });
 });

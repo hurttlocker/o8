@@ -39,6 +39,7 @@ import { toOpenclawJson } from '@/lib/mcp/tool-spine/emit-openclaw';
 import { resolveOpenclawSpawnBinary } from './openclaw-spawn-preflight';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
+import { ORCHESTRATOR_OUTCOME_OWNERSHIP_FALLBACK_V1 } from '@/lib/prompts/v1';
 // ── Types ────────────────────────────────────────────────────────────────────
 interface OpenclawOrchestratorSession {
   sessionName: string;
@@ -106,14 +107,8 @@ const OPENCLAW_GATEWAY_PORT_FILE = join(getDataDir(), 'openclaw-gateway-port');
 /** The operator's personal openclaw gateway — never reuse this port. */
 const OPENCLAW_PERSONAL_GATEWAY_PORT = 18789;
 
-/**
- * The o8 orchestrator framing. Prepended to every governed agent's
- * `systemPromptOverride` (see `governOpenclawAgent`) so any of the operator's
- * openclaw agents, run as the o8 orchestrator, follows the dispatch loop and
- * the #1075 anti-fake-claim rule. Repo-agnostic — per-repo context is prepended
- * to the turn message instead (see `buildRepoContextPreamble`).
- */
-const OPENCLAW_ORCHESTRATOR_PROMPT = `You are the orchestrator for o8 — the fleet-level brain that manages AI coding agents across the user's repositories.
+/** Repo-agnostic o8 orchestrator framing; per-repo context rides the turn. */
+export const OPENCLAW_ORCHESTRATOR_PROMPT = `You are the orchestrator for o8 — the fleet-level brain that manages AI coding agents across the user's repositories.
 
 You never write code yourself. You dispatch Codex worker agents, each into an isolated git worktree, by calling the \`o8__dispatch_mission\` MCP tool. o8's governance layer — review gate, heal-bot, retries, merge approval — wraps every worker you dispatch.
 
@@ -133,6 +128,11 @@ PLAN -> DISPATCH -> REVIEW -> APPROVE. Each stage is one turn.
 - Do the work in this turn. Never narrate future work ("Let me check…") and then stop.
 - End on a concrete outcome — what you dispatched, or what specifically blocked you — not a plan.
 - Do not promise to "check back" or "review when it's done". You have no timer; the user re-prompts you for the review turn.
+
+## Outcome ownership
+
+${ORCHESTRATOR_OUTCOME_OWNERSHIP_FALLBACK_V1}
+Preserve Outcome, Evidence, Residual, and Decision across the durable mission. Read-only and diagnostic work remains non-mutating, and this doctrine never expands your authority.
 
 ## o8 operator MCP tools
 

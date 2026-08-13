@@ -14,6 +14,7 @@ import {
 import { buildQualitySearchRolePrompt } from '@/lib/orchestrator/quality-search';
 import { buildSessionRulesBlock } from '@/lib/orchestrator/session-rules-prompt';
 import { buildPacketSelfReviewInstructions } from '@/lib/orchestrator/self-review';
+import { buildWorkerOutcomeOwnershipPromptV1 } from '@/lib/prompts/v1';
 import { DEVIATIONS_CLAUSE } from '@/lib/orchestrator/packet-deviations';
 import type { OrchestratorPacket, PacketContext } from '@/lib/orchestrator/types';
 import { truncateText } from '@/lib/util/text';
@@ -334,6 +335,7 @@ export async function buildPacketPrompt(
   const readOnlySection = readOnlyPacket
     ? 'Read-only packet: inspect the repository and report the requested findings. Do not edit files, create commits, create branches, or run commands that mutate repository state. A clean zero-diff completion is the expected successful outcome.'
     : null;
+  const outcomeOwnershipSection = buildWorkerOutcomeOwnershipPromptV1(readOnlyPacket);
   // Alignment turn (#1282 Huddle + single-sub Advisor) — armed per-mission by
   // the orchestrator (huddle flag) OR auto-armed for cheap-tier workers (advisor
   // rule). When on, the worker posts its plan + pushback and STOPS before
@@ -412,6 +414,7 @@ export async function buildPacketPrompt(
     packet.summary ? `Summary: ${packet.summary}` : null,
     livePacketSpec,
     readOnlySection,
+    outcomeOwnershipSection,
     alignmentSection,
     packet.branchTarget ? `Branch target: ${packet.branchTarget}` : null,
     packet.dependencyLabels.length > 0 ? `Dependencies: ${packet.dependencyLabels.join(', ')}` : null,
@@ -435,7 +438,7 @@ export async function buildPacketPrompt(
     captureProofSection,
     brainSection,
     learnedRuleSection,
-    readOnlyPacket ? null : 'Verification discipline — SPEED MATTERS: the ONE blocking gate is `npx tsc --noEmit`. Lint is advisory: run it scoped to the files you changed (`npx eslint <your changed files>`), NEVER the repo-wide `npm run lint` — that walks the whole codebase and can stall the lane for 10+ minutes even on a one-file change. Do NOT keep the lane running while you wait on a slow or repo-wide check. o8 runs the authoritative typecheck + change-scoped rule-check at the merge gate, so finalize the moment typecheck passes and your changed-file checks are clean — a committed, typecheck-clean packet is done; report completion immediately instead of waiting on advisory output.',
+    readOnlyPacket ? null : 'Verification discipline — SPEED MATTERS: the ONE blocking gate is `npx tsc --noEmit`. Lint is advisory: run it scoped to the files you changed (`npx eslint <your changed files>`), NEVER the repo-wide `npm run lint` — that walks the whole codebase and can stall the lane for 10+ minutes even on a one-file change. Do NOT keep the lane running while you wait on a slow or repo-wide check. o8 runs the authoritative typecheck + change-scoped rule-check at the merge gate, so finalize when typecheck passes and your changed-file checks are clean. A committed, typecheck-clean packet is implementation-ready for independent review; report that handoff immediately instead of claiming the user-facing outcome is closed or waiting on advisory output.',
     ...(readOnlyPacket ? [] : buildPacketSelfReviewInstructions(baseBranch)),
     readOnlyPacket ? null : 'CRITICAL: Before reporting completion, you MUST commit all changes: run `git add -A && git commit -m "<descriptive message>"`. Uncommitted changes will be lost when the worktree is cleaned up.',
     'Stay within this packet scope. Surface blockers, review handoffs, and required operator decisions explicitly.',

@@ -10,6 +10,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 See `docs/user/o8-product-brief.md` for the public product overview.
 
+## Outcome ownership
+
+Translate every request into an observable desired outcome, distinguish symptoms from established facts and root-cause hypotheses, then choose the smallest complete remedy allowed by the task's scope and authority. Read-only and diagnostic work remains non-mutating. Verify through the real entry point because plans, commits, tests, and merges are evidence rather than automatic closure.
+
+The director preserves outcome and closure criteria across durable mission state while individual model turns end normally. Dispatch is a recorded handoff, not proof of completion. Workers report Outcome, Evidence, Residual, and Decision; reviewers independently try to disprove closure and reject symptom-only or unreachable fixes. Critical adjacent findings block or escalate, recurrence-relevant findings receive a bounded fix or follow-up, and unrelated findings do not expand the task.
+
 ## Commands
 
 ```bash
