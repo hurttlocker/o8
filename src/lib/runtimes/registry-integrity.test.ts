@@ -25,7 +25,7 @@ describe('dispatchable runtime registry integrity', () => {
   it('keeps every advertised runtime fully registered and dispatchable consistently', () => {
     const advertised = listDispatchableRuntimes();
 
-    expect(advertised).toHaveLength(15);
+    expect(advertised).toHaveLength(16);
     expect(new Set(advertised).size).toBe(advertised.length);
 
     for (const runtimeId of advertised) {

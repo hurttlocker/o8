@@ -31,7 +31,7 @@ export async function settleRuntimeLaunchGovernance(input: {
   const { payload, runtime, runtimeId, prompt, result, launchWorktree, projectId, cwd, repoPath } = input;
   if (!result.sessionKey) throw new Error(result.note || `Unable to launch ${runtimeId}.`);
   if (!result.ok) {
-    return {
+    const failedResult: RuntimeLaunchResult = {
       ok: false,
       runtime: runtimeId,
       clientMutationId: payload.clientMutationId,
@@ -42,6 +42,10 @@ export async function settleRuntimeLaunchGovernance(input: {
       worktree: launchWorktree?.worktree ?? null,
       laneId: payload.existingLaneId ?? null,
     };
+    if (result.sideEffect === 'unknown') {
+      throw new RuntimeLaunchPostEffectError(failedResult);
+    }
+    return failedResult;
   }
 
   try {

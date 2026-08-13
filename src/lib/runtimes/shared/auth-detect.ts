@@ -22,6 +22,10 @@ import {
   providerIdForModel,
   readOpencodeConfig,
 } from './opencode-readiness';
+import {
+  deepSeekHarnessInstallGuidance,
+  resolveDeepSeekHarnessLaunch,
+} from '@/lib/deepseek-harness/runtime-resolution';
 
 const execFileAsync = promisify(execFile);
 const CACHE_TTL_MS = 60_000;
@@ -413,6 +417,28 @@ async function detectPrimeAgent(): Promise<RuntimeAuthStatus> {
   });
 }
 
+async function detectDeepSeekHarness(): Promise<RuntimeAuthStatus> {
+  const launch = await resolveDeepSeekHarnessLaunch().catch(() => null);
+  if (!launch) {
+    return nowStatus('deepseek-harness', 'deepseek-harness', {
+      installed: false,
+      authenticated: false,
+      detail: deepSeekHarnessInstallGuidance(),
+      fix: deepSeekHarnessInstallGuidance(),
+    });
+  }
+  const authenticated = Boolean(process.env.DEEPSEEK_API_KEY?.trim());
+  return nowStatus('deepseek-harness', 'deepseek-harness', {
+    installed: true,
+    authenticated,
+    detail: authenticated
+      ? `DeepSeek Harness JSON-RPC runtime is available from ${launch.source}${launch.version ? ` (${launch.version})` : ''} and DEEPSEEK_API_KEY is set.`
+      : `DeepSeek Harness JSON-RPC runtime is available from ${launch.source}, but DEEPSEEK_API_KEY is not set.`,
+    fix: authenticated ? 'No action needed.' : 'Set DEEPSEEK_API_KEY before dispatching DeepSeek Harness.',
+    binaryPath: launch.command,
+  });
+}
+
 async function detectDeclarativeRuntime(runtime: OrchestratorRuntime): Promise<RuntimeAuthStatus> {
   const capability = getRuntimeCapability(runtime);
   const manifest = capability.declarative;
@@ -456,6 +482,7 @@ export function detectRuntimeAuthStatus(runtime: OrchestratorRuntime): Promise<R
     case 'grok': return detectGrok();
     case 'pi': return detectPi();
     case 'prime-agent': return detectPrimeAgent();
+    case 'deepseek-harness': return detectDeepSeekHarness();
     default: return detectDeclarativeRuntime(runtime);
   }
 }

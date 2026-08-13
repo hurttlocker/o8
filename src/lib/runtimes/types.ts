@@ -214,6 +214,8 @@ export interface RuntimeActionResult {
   ok: boolean;
   note: string;
   sessionKey?: string;
+  /** Whether a failed launch is proven pre-effect or may have reached the provider. */
+  sideEffect?: 'none' | 'unknown';
   /** Live process ids affected by the action, when the adapter can prove them. */
   pids?: number[];
 }

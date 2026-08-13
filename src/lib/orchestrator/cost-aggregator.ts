@@ -352,6 +352,7 @@ export async function aggregateMissionCost(
     grok: emptyRuntimeTokenSummary(),
     pi: emptyRuntimeTokenSummary(),
     'prime-agent': emptyRuntimeTokenSummary(),
+    'deepseek-harness': emptyRuntimeTokenSummary(),
   };
 
   let totalCostUsd = 0;

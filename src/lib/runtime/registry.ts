@@ -25,6 +25,7 @@ const RUNTIME_BINARY_NAMES: Record<LaneRuntime, string[]> = {
   grok: ['grok'],
   pi: ['pi'],
   'prime-agent': ['prime-agent'],
+  'deepseek-harness': ['dsh-jsonrpc-agent'],
   'claude-code': ['claude', 'claude-code'],
 };
 

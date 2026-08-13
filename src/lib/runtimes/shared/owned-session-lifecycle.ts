@@ -12,6 +12,13 @@ export interface OwnedSessionLifecycleRegistration {
 
 const registrations = new Map<string, OwnedSessionLifecycleRegistration>();
 
+export function registerOwnedSessionLifecycleHandler(
+  registration: OwnedSessionLifecycleRegistration,
+): OwnedSessionLifecycleRegistration {
+  registrations.set(registration.surfaceIdPrefix, registration);
+  return registration;
+}
+
 export function registerOwnedSessionLifecycle(options: {
   runtimeId: string;
   surfaceIdPrefix: string;
@@ -28,8 +35,7 @@ export function registerOwnedSessionLifecycle(options: {
     sessionState: (surfaceId) => options.store.sessionState(surfaceId),
     archiveSession: (surfaceId) => options.store.archiveSession(surfaceId),
   };
-  registrations.set(options.surfaceIdPrefix, registration);
-  return registration;
+  return registerOwnedSessionLifecycleHandler(registration);
 }
 
 export function getOwnedSessionLifecycle(

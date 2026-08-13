@@ -387,6 +387,20 @@ export const ORCHESTRATOR_RUNTIMES = {
     tier: 'standard',
     description: "Open-source RLM coding harness CLI (json-mode JSONL output); runs on the operator's own provider keys.",
   },
+  'deepseek-harness': {
+    label: 'DeepSeek Harness',
+    shortLabel: 'DSH',
+    dispatchable: true,
+    requiresModel: false,
+    defaultModel: 'deepseek-v4-flash',
+    accentColor: '#4d6bfe',
+    binaryName: 'dsh-jsonrpc-agent',
+    workerProvider: 'deepseek-harness',
+    authHouse: 'deepseek-harness',
+    reasoningEffort: false,
+    tier: 'standard',
+    description: 'DeepSeek Harness developer preview through its persistent stdio JSON-RPC SDK runtime, with provider selection kept separate from the harness.',
+  },
 } satisfies Record<string, OrchestratorRuntimeCapability>;
 
 export type OrchestratorRuntime = keyof typeof ORCHESTRATOR_RUNTIMES;
@@ -453,5 +467,5 @@ export function getRuntimeCapability(runtime: OrchestratorRuntime): CatalogRunti
 /** Runtimes that ship in the dispatch picker. Mirrors the canonical capability set. */
 export const V1_DISPATCH_RUNTIMES: OrchestratorRuntime[] = listDispatchableRuntimes();
 
-// Fifteen seats at the table. The sixteenth is yours:
+// Sixteen dispatchable seats at the table. The seventeenth is yours:
 // docs/internals/runtime-adapter-contract.md is the chair.

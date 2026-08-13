@@ -58,6 +58,7 @@ import { cursorRuntime } from './cursor';
 import { grokRuntime } from './grok';
 import { piRuntime } from './pi';
 import { primeAgentRuntime } from './prime-agent';
+import { deepSeekHarnessRuntime } from './deepseek-harness';
 import { declarativeWorkerRuntimes, invalidateDeclarativeWorkerFleets } from './declarative-workers';
 import { invalidateOwnedCodexFleetCache } from '@/lib/codex/owned';
 import { invalidateOwnedClaudeCodeFleetCache } from '@/lib/claude-code/owned';
@@ -67,11 +68,13 @@ import { invalidateOwnedCursorFleetCache } from '@/lib/cursor/owned';
 import { invalidateOwnedGrokFleetCache } from '@/lib/grok/owned';
 import { invalidateOwnedPiFleetCache } from '@/lib/pi/owned';
 import { invalidateOwnedPrimeAgentFleetCache } from '@/lib/prime-agent/owned';
+import { invalidateOwnedDeepSeekHarnessFleetCache } from '@/lib/deepseek-harness/owned';
 import './opencode-cost-parser';
 import './cursor-cost-parser';
 import './grok-cost-parser';
 import './pi-cost-parser';
 import './prime-agent-cost-parser';
+import './deepseek-harness-cost-parser';
 
 /**
  * Flush the fleet cache across all owned-session stores. Callers (e.g. the
@@ -87,6 +90,7 @@ export function invalidateAllOwnedFleets(): void {
   invalidateOwnedGrokFleetCache();
   invalidateOwnedPiFleetCache();
   invalidateOwnedPrimeAgentFleetCache();
+  invalidateOwnedDeepSeekHarnessFleetCache();
   invalidateDeclarativeWorkerFleets();
 }
 
@@ -118,6 +122,11 @@ registerRuntime(piRuntime);
 // path once needed. Sessions 'prime-agent-owned:'. See
 // src/lib/prime-agent/owned.ts.
 registerRuntime(primeAgentRuntime);
+// DeepSeek Harness owns one long-lived stdio JSON-RPC process per o8 session.
+// Provider/model routing remains a Harness concern rather than a new o8
+// provider branch, so future stateful JSON-RPC harnesses can reuse the same
+// process owner without copying lifecycle and framing code.
+registerRuntime(deepSeekHarnessRuntime);
 for (const runtime of declarativeWorkerRuntimes) registerRuntime(runtime);
 // #514 — Cloud runtime adapter (self-hosted worker pool).
 // Always registered so dispatch UI can target it; actual execution requires

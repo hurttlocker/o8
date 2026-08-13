@@ -176,7 +176,7 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
   }
 
   const { prompt: launchPrompt, projectContext } = await buildLaunchPromptWithProjectBrief(payload, prompt, repoPath);
-  const supportsWorktrees = ['codex', 'claude-code', 'gemini', 'opencode', 'pi'].includes(runtimeId)
+  const supportsWorktrees = ['codex', 'claude-code', 'gemini', 'opencode', 'pi', 'deepseek-harness'].includes(runtimeId)
     || listDeclarativeRuntimes().includes(runtimeId as OrchestratorRuntime);
   const packetNeedsWorktree = packetRequiresWorktree(payload);
 

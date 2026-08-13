@@ -84,10 +84,10 @@ auth houses, validation, and runtime membership come from the catalog.
 
 ## Current runtime set
 
-The catalog contains sixteen runtimes. Fifteen are dispatchable; `antigravity`
+The catalog contains seventeen runtimes. Sixteen are dispatchable; `antigravity`
 remains discovery-only.
 
-- Specialized: `codex`, `claude-code`, `gemini`, `opencode`, `pi`, `cursor`, `grok`, and `prime-agent`.
+- Specialized: `codex`, `claude-code`, `gemini`, `opencode`, `pi`, `cursor`, `grok`, `prime-agent`, and `deepseek-harness`.
 - Declarative: `openhands`, `goose`, `qwen`, `qoder`, `kimi`, `aider`, and `3code`.
 - Discovery-only: `antigravity`.
 
@@ -107,3 +107,4 @@ remains discovery-only.
 3. Cost and lifecycle telemetry survive normalization.
 4. Missing resume support is reported honestly instead of simulated.
 5. A new straightforward CLI must not require scattered runtime-ID edits.
+6. A stateful newline JSON-RPC harness reuses `StdioJsonRpcPeer`; its adapter owns only protocol meaning and durable domain truth.
