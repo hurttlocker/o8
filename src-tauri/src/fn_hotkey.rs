@@ -6,8 +6,8 @@
 //! - Double-tap Fn → long-form dictation (single Fn tap finishes, Esc cancels).
 //! - Hold Right Option → Symon voice AGENT (tool-calling loop; release
 //!   ≥120ms runs the command, a KeyDown mid-hold cancels so ⌥-chords stay safe).
-//! - Optionally, hold bottom-left Control → the same Symon agent gesture. This
-//!   substitutes for the firmware-only Fn key on many Windows-layout boards.
+//! - Optionally, bottom-left Control mirrors Fn on Windows-layout boards whose
+//!   printed Fn key is firmware-only: hold to dictate, double-tap for long-form.
 //! - Double-tap Right Option → long-form AGENT question (single Option tap
 //!   finishes, Esc cancels).
 //!
@@ -36,7 +36,7 @@
 //! `stt_engine::spawn` (called once from `setup()`).
 
 #[cfg(target_os = "macos")]
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 #[cfg(target_os = "macos")]
 use std::sync::{Arc, Mutex, OnceLock};
 #[cfg(target_os = "macos")]
@@ -186,21 +186,55 @@ const LEFT_CONTROL_DEVICE_FLAG: u64 = 0x1;
 const LEFT_CONTROL_CAPTURE_DELAY_MS: u64 = 80;
 
 #[cfg(target_os = "macos")]
-static EXTERNAL_SYMON_LEFT_CONTROL: AtomicBool = AtomicBool::new(false);
+static EXTERNAL_LEFT_CONTROL_FN: AtomicBool = AtomicBool::new(false);
 #[cfg(target_os = "macos")]
-static LEFT_CONTROL_HELD: AtomicBool = AtomicBool::new(false);
+static LEFT_CONTROL_STATE: AtomicU8 = AtomicU8::new(0);
 
 #[cfg(target_os = "macos")]
-pub fn set_external_symon_left_control(enabled: bool) {
-    EXTERNAL_SYMON_LEFT_CONTROL.store(enabled, Ordering::SeqCst);
+const LEFT_CONTROL_IDLE: u8 = 0;
+#[cfg(target_os = "macos")]
+const LEFT_CONTROL_PENDING: u8 = 1;
+#[cfg(target_os = "macos")]
+const LEFT_CONTROL_CAPTURING: u8 = 2;
+
+#[cfg(target_os = "macos")]
+pub fn set_external_left_control_fn(enabled: bool) {
+    EXTERNAL_LEFT_CONTROL_FN.store(enabled, Ordering::SeqCst);
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn set_external_symon_left_control(_enabled: bool) {}
+pub fn set_external_left_control_fn(_enabled: bool) {}
 
 #[cfg(target_os = "macos")]
-fn is_left_control_agent_event(enabled: bool, keycode: i64, flags: u64) -> bool {
+fn is_left_control_fn_event(enabled: bool, keycode: i64, flags: u64) -> bool {
     enabled && keycode == LEFT_CONTROL_KEYCODE && (flags & LEFT_CONTROL_DEVICE_FLAG) != 0
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug, Eq, PartialEq)]
+enum SystemDictationPressAction {
+    FinishLongForm,
+    BeginSmartCompose,
+    BeginLongForm,
+    BeginPushToTalk,
+}
+
+#[cfg(target_os = "macos")]
+fn classify_system_dictation_press(
+    long_form_active: bool,
+    long_form_session_id: u64,
+    smart_compose: bool,
+    double_tap: bool,
+) -> SystemDictationPressAction {
+    if long_form_active && long_form_session_id != 0 {
+        SystemDictationPressAction::FinishLongForm
+    } else if smart_compose {
+        SystemDictationPressAction::BeginSmartCompose
+    } else if double_tap {
+        SystemDictationPressAction::BeginLongForm
+    } else {
+        SystemDictationPressAction::BeginPushToTalk
+    }
 }
 
 /// Virtual keycode for the LEFT Option key. LEFT Option does NOT trigger the
@@ -1175,7 +1209,7 @@ pub fn start(app: tauri::AppHandle) {
         EventField,
     };
 
-    set_external_symon_left_control(crate::stt::keys::config_bool(
+    set_external_left_control_fn(crate::stt::keys::config_bool(
         "external_symon_left_control",
         false,
     ));
@@ -1346,11 +1380,10 @@ pub fn start(app: tauri::AppHandle) {
                         {
                             std::thread::spawn(discard_agent_dictation);
                         }
-                        if LEFT_CONTROL_HELD
-                            .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
-                            .is_ok()
-                        {
-                            std::thread::spawn(discard_agent_dictation);
+                        let control_state =
+                            LEFT_CONTROL_STATE.swap(LEFT_CONTROL_IDLE, Ordering::SeqCst);
+                        if control_state == LEFT_CONTROL_CAPTURING {
+                            std::thread::spawn(discard_brush);
                         }
 
                         // Escape cancels an active long-form dictation (Fn or
@@ -1426,29 +1459,47 @@ pub fn start(app: tauri::AppHandle) {
                         //   (a) a single tap while long-form is active FINISHES it,
                         //   (b) two quick taps START long-form (double-tap),
                         //   (c) otherwise a normal push-to-talk hold.
-                        if LONG_FORM_ACTIVE.load(Ordering::SeqCst)
-                            && LONG_FORM_SESSION_ID.load(Ordering::SeqCst) != 0
-                        {
-                            // Clear toggle + edge latch synchronously so this tap's
-                            // impending Fn-up CAS fails (no brush/end) and the poll
-                            // skips. The recognizer stop + paste run off-tap.
-                            log::info!("[fn-edge] down → finish long-form");
-                            LONG_FORM_ACTIVE.store(false, Ordering::SeqCst);
-                            fn_held_cb.store(false, Ordering::SeqCst);
-                            std::thread::spawn(finish_long_form_dictation);
-                        } else if smart_compose {
-                            log::info!("[fn-edge] down → begin Smart Compose dictation (Control+Fn)");
-                            std::thread::spawn(|| begin_system_dictation(true));
-                        } else if consume_double_tap_brush() {
-                            // Promote to long-form. Set the toggle + clear the edge
-                            // latch synchronously so THIS tap's Fn-up no-ops.
-                            log::info!("[fn-edge] down → double-tap promote to long-form");
-                            LONG_FORM_ACTIVE.store(true, Ordering::SeqCst);
-                            fn_held_cb.store(false, Ordering::SeqCst);
-                            std::thread::spawn(begin_long_form_dictation);
-                        } else {
-                            log::info!("[fn-edge] down → begin system dictation (push-to-talk)");
-                            std::thread::spawn(|| begin_system_dictation(false));
+                        let long_form_active = LONG_FORM_ACTIVE.load(Ordering::SeqCst);
+                        let long_form_session_id = LONG_FORM_SESSION_ID.load(Ordering::SeqCst);
+                        let finishing_long_form = long_form_active && long_form_session_id != 0;
+                        let double_tap = !finishing_long_form
+                            && !smart_compose
+                            && consume_double_tap_brush();
+                        match classify_system_dictation_press(
+                            long_form_active,
+                            long_form_session_id,
+                            smart_compose,
+                            double_tap,
+                        ) {
+                            SystemDictationPressAction::FinishLongForm => {
+                                // Clear toggle + edge latch synchronously so this tap's
+                                // impending Fn-up CAS fails (no brush/end) and the poll
+                                // skips. The recognizer stop + paste run off-tap.
+                                log::info!("[fn-edge] down → finish long-form");
+                                LONG_FORM_ACTIVE.store(false, Ordering::SeqCst);
+                                fn_held_cb.store(false, Ordering::SeqCst);
+                                std::thread::spawn(finish_long_form_dictation);
+                            }
+                            SystemDictationPressAction::BeginSmartCompose => {
+                                log::info!(
+                                    "[fn-edge] down → begin Smart Compose dictation (Control+Fn)"
+                                );
+                                std::thread::spawn(|| begin_system_dictation(true));
+                            }
+                            SystemDictationPressAction::BeginLongForm => {
+                                // Promote to long-form. Set the toggle + clear the edge
+                                // latch synchronously so THIS tap's Fn-up no-ops.
+                                log::info!("[fn-edge] down → double-tap promote to long-form");
+                                LONG_FORM_ACTIVE.store(true, Ordering::SeqCst);
+                                fn_held_cb.store(false, Ordering::SeqCst);
+                                std::thread::spawn(begin_long_form_dictation);
+                            }
+                            SystemDictationPressAction::BeginPushToTalk => {
+                                log::info!(
+                                    "[fn-edge] down → begin system dictation (push-to-talk)"
+                                );
+                                std::thread::spawn(|| begin_system_dictation(false));
+                            }
                         }
                     } else if up_edge {
                         // Fn release during long-form is a NO-OP — long-form ends
@@ -1571,50 +1622,95 @@ pub fn start(app: tauri::AppHandle) {
                     }
 
                     // ── Bottom-left Control → external-keyboard Fn substitute ──
-                    // The 80ms delayed start lets ordinary Control chords cancel
-                    // above before the microphone opens. A deliberate hold still
-                    // starts before the 120ms release threshold.
+                    // Mirrors Fn: hold dictates polished text; double-tap starts
+                    // long-form dictation; a tap finishes long-form. The 80ms
+                    // pending state lets ordinary Control chords cancel before the
+                    // microphone opens, while the tap remains ListenOnly.
                     {
                         let keycode =
                             event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
                         if keycode == LEFT_CONTROL_KEYCODE
-                            && EXTERNAL_SYMON_LEFT_CONTROL.load(Ordering::SeqCst)
+                            && EXTERNAL_LEFT_CONTROL_FN.load(Ordering::SeqCst)
                         {
-                            let control_down = is_left_control_agent_event(true, keycode, flags);
+                            let control_down = is_left_control_fn_event(true, keycode, flags);
                             let control_down_edge = control_down
-                                && !OPTION_HELD.load(Ordering::SeqCst)
-                                && !AGENT_LONG_FORM_ACTIVE.load(Ordering::SeqCst)
-                                && LEFT_CONTROL_HELD
-                                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                                && LEFT_CONTROL_STATE
+                                    .compare_exchange(
+                                        LEFT_CONTROL_IDLE,
+                                        LEFT_CONTROL_PENDING,
+                                        Ordering::SeqCst,
+                                        Ordering::SeqCst,
+                                    )
                                     .is_ok();
                             if control_down_edge {
                                 if let Ok(mut t) = left_control_press_time_cb.lock() {
                                     *t = std::time::Instant::now();
                                 }
-                                std::thread::spawn(|| {
-                                    std::thread::sleep(std::time::Duration::from_millis(
-                                        LEFT_CONTROL_CAPTURE_DELAY_MS,
-                                    ));
-                                    if LEFT_CONTROL_HELD.load(Ordering::SeqCst) {
-                                        begin_agent_dictation();
+                                let long_form_active = LONG_FORM_ACTIVE.load(Ordering::SeqCst);
+                                let long_form_session_id =
+                                    LONG_FORM_SESSION_ID.load(Ordering::SeqCst);
+                                let double_tap = !(long_form_active && long_form_session_id != 0)
+                                    && consume_double_tap_brush();
+                                match classify_system_dictation_press(
+                                    long_form_active,
+                                    long_form_session_id,
+                                    false,
+                                    double_tap,
+                                ) {
+                                    SystemDictationPressAction::FinishLongForm => {
+                                        LONG_FORM_ACTIVE.store(false, Ordering::SeqCst);
+                                        LEFT_CONTROL_STATE
+                                            .store(LEFT_CONTROL_IDLE, Ordering::SeqCst);
+                                        std::thread::spawn(finish_long_form_dictation);
                                     }
-                                });
+                                    SystemDictationPressAction::BeginLongForm => {
+                                        LONG_FORM_ACTIVE.store(true, Ordering::SeqCst);
+                                        LEFT_CONTROL_STATE
+                                            .store(LEFT_CONTROL_IDLE, Ordering::SeqCst);
+                                        std::thread::spawn(begin_long_form_dictation);
+                                    }
+                                    SystemDictationPressAction::BeginPushToTalk => {
+                                        std::thread::spawn(|| {
+                                            std::thread::sleep(std::time::Duration::from_millis(
+                                                LEFT_CONTROL_CAPTURE_DELAY_MS,
+                                            ));
+                                            if LEFT_CONTROL_STATE
+                                                .compare_exchange(
+                                                    LEFT_CONTROL_PENDING,
+                                                    LEFT_CONTROL_CAPTURING,
+                                                    Ordering::SeqCst,
+                                                    Ordering::SeqCst,
+                                                )
+                                                .is_ok()
+                                            {
+                                                begin_system_dictation(false);
+                                            }
+                                        });
+                                    }
+                                    SystemDictationPressAction::BeginSmartCompose => {}
+                                }
                             }
 
-                            let control_up_edge = !control_down
-                                && LEFT_CONTROL_HELD
-                                    .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
-                                    .is_ok();
-                            if control_up_edge {
+                            let control_state = if control_down {
+                                LEFT_CONTROL_IDLE
+                            } else {
+                                LEFT_CONTROL_STATE.swap(LEFT_CONTROL_IDLE, Ordering::SeqCst)
+                            };
+                            if control_state != LEFT_CONTROL_IDLE {
                                 let press = left_control_press_time_cb
                                     .lock()
                                     .map(|t| *t)
                                     .unwrap_or_else(|_| std::time::Instant::now());
                                 let hold = std::time::Instant::now().duration_since(press);
-                                if hold < std::time::Duration::from_millis(ASK_BRUSH_MS) {
-                                    std::thread::spawn(discard_agent_dictation);
-                                } else {
-                                    std::thread::spawn(end_agent_dictation);
+                                if hold < std::time::Duration::from_millis(FN_TAP_PRIMER_MAX_MS) {
+                                    if let Ok(mut g) = LAST_FN_BRUSH.lock() {
+                                        *g = Some(std::time::Instant::now());
+                                    }
+                                    if control_state == LEFT_CONTROL_CAPTURING {
+                                        std::thread::spawn(discard_brush);
+                                    }
+                                } else if control_state == LEFT_CONTROL_CAPTURING {
+                                    std::thread::spawn(end_system_dictation);
                                 }
                             }
                         }
@@ -1732,8 +1828,9 @@ pub fn start(_app: tauri::AppHandle) {}
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::{
-        is_left_control_agent_event, resolve_system_dictation_session_id,
-        LEFT_CONTROL_DEVICE_FLAG, LEFT_CONTROL_KEYCODE,
+        classify_system_dictation_press, is_left_control_fn_event,
+        resolve_system_dictation_session_id, SystemDictationPressAction, LEFT_CONTROL_DEVICE_FLAG,
+        LEFT_CONTROL_KEYCODE,
     };
 
     #[test]
@@ -1754,26 +1851,38 @@ mod tests {
     }
 
     #[test]
-    fn external_symon_substitute_requires_enabled_left_control_down() {
-        assert!(is_left_control_agent_event(
+    fn external_fn_substitute_requires_enabled_left_control_down() {
+        assert!(is_left_control_fn_event(
             true,
             LEFT_CONTROL_KEYCODE,
             LEFT_CONTROL_DEVICE_FLAG,
         ));
-        assert!(!is_left_control_agent_event(
+        assert!(!is_left_control_fn_event(
             false,
             LEFT_CONTROL_KEYCODE,
             LEFT_CONTROL_DEVICE_FLAG,
         ));
-        assert!(!is_left_control_agent_event(
+        assert!(!is_left_control_fn_event(
             true,
             62,
             LEFT_CONTROL_DEVICE_FLAG,
         ));
-        assert!(!is_left_control_agent_event(
-            true,
-            LEFT_CONTROL_KEYCODE,
-            0,
-        ));
+        assert!(!is_left_control_fn_event(true, LEFT_CONTROL_KEYCODE, 0));
+    }
+
+    #[test]
+    fn external_fn_substitute_uses_the_system_dictation_gesture_map() {
+        assert_eq!(
+            classify_system_dictation_press(false, 0, false, false),
+            SystemDictationPressAction::BeginPushToTalk,
+        );
+        assert_eq!(
+            classify_system_dictation_press(false, 0, false, true),
+            SystemDictationPressAction::BeginLongForm,
+        );
+        assert_eq!(
+            classify_system_dictation_press(true, 42, false, false),
+            SystemDictationPressAction::FinishLongForm,
+        );
     }
 }

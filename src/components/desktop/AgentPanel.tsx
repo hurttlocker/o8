@@ -1,6 +1,5 @@
 'use client';
 /* eslint-disable @typescript-eslint/no-unused-vars -- AgentPanel keeps a stable prop surface during the refactor */
-
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { motion } from 'framer-motion';
 import { AgentPanelExtraAgents } from './AgentPanelExtraAgents';
@@ -16,7 +15,7 @@ import { toRepoFocusRepo, type RepoFocusRepo } from './repo-focus/types';
 import { AddRepoDialog } from './repo-registry/AddRepoDialog';
 import { RepoStatusHover } from './repo-registry/RepoStatusHover';
 import type { RepoRegistryEntry } from './repo-registry/shared';
-import { useProjects, type ProjectRecord } from './repo-registry/useProjects';
+import { refreshProjectsFromExternalMutation, useProjects, type ProjectRecord } from './repo-registry/useProjects';
 import { Menu, MessageSquare, Play, Plus, Sparkles, Terminal, type LucideIcon } from './lucide-shims';
 import { MenuScale } from 'iconoir-react';
 import { AutoFlash, ControlSlider, Delivery, InputSearch } from 'iconoir-react';
@@ -618,6 +617,7 @@ function MiniAgentPanelHeader({
           disclosure="filter"
           onClick={() => {
             setSessionMenuOpen(false);
+            if (!projectsOpen) refreshProjectsFromExternalMutation();
             onProjectsOpenChange(!projectsOpen);
           }}
           // Add-repo lives here now (moved out of the status-bar footer,

@@ -17,6 +17,13 @@ export function broadcastProjectsUpdated() {
   window.dispatchEvent(new CustomEvent(PROJECTS_UPDATED_EVENT));
 }
 
+/** Reload browser state after CLI or MCP mutations that cannot broadcast here. */
+export function refreshProjectsFromExternalMutation() {
+  if (typeof window === 'undefined') return;
+  broadcastProjectsUpdated();
+  window.dispatchEvent(new CustomEvent('o8:repos-changed'));
+}
+
 export const PROJECT_COLOR_PALETTE = [
   '#5b8db8',
   '#7fa68f',

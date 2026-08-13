@@ -142,7 +142,7 @@ export function VoiceTab() {
   const [groqKeyInput, setGroqKeyInput] = useState('');
   const [groqKeySaving, setGroqKeySaving] = useState(false);
   const [partialsSurface, setPartialsSurface] = useState<'caret' | 'hud' | 'off'>('caret');
-  const [externalSymonKey, setExternalSymonKey] = useState<'right_option' | 'left_control'>('right_option');
+  const [leftControlAsFn, setLeftControlAsFn] = useState(false);
   const dictationMode = useSyncExternalStore(
     typeof window !== 'undefined' ? subscribeDictationInputMode : noopSubscribe,
     typeof window !== 'undefined' ? readDictationInputMode : dictationModeFallback,
@@ -173,10 +173,8 @@ export function VoiceTab() {
     const savedSurface = prefs
       && (prefs as Record<string, unknown>).dictation_partials_surface;
     setPartialsSurface(savedSurface === 'hud' || savedSurface === 'off' ? savedSurface : 'caret');
-    setExternalSymonKey(
-      prefs && (prefs as Record<string, unknown>).external_symon_left_control === true
-        ? 'left_control'
-        : 'right_option',
+    setLeftControlAsFn(
+      Boolean(prefs && (prefs as Record<string, unknown>).external_symon_left_control === true),
     );
     // Background mode was retired from the UI (operator, 2026-07-06) — self-heal
     // any stuck-on state so nobody is left with a hidden Dock icon and no way back.
@@ -205,9 +203,10 @@ export function VoiceTab() {
     void voicePrefsSet('dictation_partials_surface', next);
   }, []);
 
-  const handleExternalSymonKey = useCallback((next: 'right_option' | 'left_control') => {
-    setExternalSymonKey(next);
-    void voicePrefsSet('external_symon_left_control', next === 'left_control');
+  const handleLeftControlAsFn = useCallback((next: 'off' | 'left_control') => {
+    const enabled = next === 'left_control';
+    setLeftControlAsFn(enabled);
+    void voicePrefsSet('external_symon_left_control', enabled);
   }, []);
 
   const handleGroqKeySave = useCallback(async () => {
@@ -258,7 +257,7 @@ export function VoiceTab() {
     >
       <TabHeading
         title="voice"
-        subtitle="Hold Fn in any app for live dictation. Hold Control+Fn to turn a spoken instruction and the visible screen into a polished reply, command, or prompt with Sonnet."
+        subtitle="Hold Fn, or its external-keyboard substitute, for polished dictation. Double-tap for hands-free dictation. Hold Right Option to talk to Symon."
       />
 
       {!tauri ? (
@@ -364,6 +363,22 @@ export function VoiceTab() {
                     ]}
                   />
                 }
+                divider
+              />
+              <SettingsRow
+                icon={<MicIcon />}
+                label="External keyboard Fn"
+                subtitle="Use bottom-left Control for the same hold-to-dictate and double-tap hands-free gestures as Fn"
+                accessory={
+                  <SettingsSegmented
+                    value={leftControlAsFn ? 'left_control' : 'off'}
+                    onChange={(v) => handleLeftControlAsFn(v as 'off' | 'left_control')}
+                    options={[
+                      { value: 'off', label: 'Fn only' },
+                      { value: 'left_control', label: 'Bottom-left Ctrl' },
+                    ]}
+                  />
+                }
               />
             </SettingsGroup>
           </section>
@@ -455,26 +470,7 @@ export function VoiceTab() {
           </section>
 
           <section style={{ marginTop: 28 }}>
-            <SettingsGroup
-              header="Voice brain"
-              footnote="On Windows-layout keyboards, the printed Fn key is often firmware-only and invisible to macOS. Bottom-left Control occupies the Mac Fn position; ordinary Control shortcuts still pass through."
-            >
-              <SettingsRow
-                icon={<MicIcon />}
-                label="Symon hold-to-talk key"
-                subtitle="Choose the physical key you hold to speak a command and hear Symon answer"
-                accessory={
-                  <SettingsSegmented
-                    value={externalSymonKey}
-                    onChange={(v) => handleExternalSymonKey(v as 'right_option' | 'left_control')}
-                    options={[
-                      { value: 'right_option', label: 'Right Option' },
-                      { value: 'left_control', label: 'Bottom-left Ctrl' },
-                    ]}
-                  />
-                }
-                divider
-              />
+            <SettingsGroup header="Voice brain">
               <SettingsRow
                 icon={<BrainGlyph />}
                 label="Escalation"
@@ -518,7 +514,7 @@ export function VoiceTab() {
           letterSpacing: '0.04em',
         }}
       >
-        <span style={{ color: RAMS_ACCENT }}>{externalSymonKey === 'left_control' ? 'LEFT CTRL' : 'RIGHT OPTION'}</span> &nbsp; Talk to Symon &nbsp;·&nbsp; <span style={{ color: RAMS_ACCENT }}>FN</span> &nbsp; Dictate
+        <span style={{ color: RAMS_ACCENT }}>{leftControlAsFn ? 'LEFT CTRL / FN' : 'FN'}</span> &nbsp; Dictate &nbsp;·&nbsp; <span style={{ color: RAMS_ACCENT }}>RIGHT OPTION</span> &nbsp; Talk to Symon
       </p>
     </div>
   );
