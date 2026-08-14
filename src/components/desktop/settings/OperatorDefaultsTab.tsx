@@ -570,8 +570,8 @@ export function OperatorDefaultsTab() {
           />
           <SettingsRow
             icon={<CpuIcon />}
-            label="Claude model"
-            subtitle={lockedSub('orchestratorModel', 'Powers the Orchestrator tab — applies to new turns')}
+            label="Native Claude model"
+            subtitle={lockedSub('orchestratorModel', 'Used only when the Claude Code harness source is Native account')}
             accessory={
               <PickerMenu<string>
                 value={values.orchestratorModel}

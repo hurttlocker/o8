@@ -47,6 +47,9 @@ import { usePressToDictate } from '@/lib/mobile/use-press-to-dictate';
 import { PullToRefresh } from './PullToRefresh';
 import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
 import { createMobileOrchestratorThreadFromRepo } from '@/lib/mobile/orchestrator-thread-create';
+import { formatModelLabel } from '@/lib/format';
+import { resolveEffectiveOrchestratorModel } from '@/lib/orchestrator/effective-model';
+import type { OrchestratorBackendSetting } from '@/lib/operator/backend-setting';
 import type {
   MobilePalette,
 } from '@/app/mobile/mobile-approvals-shared';
@@ -71,16 +74,7 @@ function connectionLabel(state: MobileOrchestratorConnectionState): string {
 }
 
 function compactModelLabel(model: string): string {
-  // claude-opus-4-7 → Opus 4.7, claude-sonnet-5 → Sonnet 5,
-  // claude-fable-5 → Fable 5 (single-part versions have no minor)
-  const stripped = model.replace(/^claude-/, '');
-  const match = stripped.match(/^(opus|sonnet|haiku|fable)-(\d+)(?:-(\d+))?/i);
-  if (match) {
-    const [, family, major, minor] = match;
-    const version = minor !== undefined ? `${major}.${minor}` : major;
-    return `${family.charAt(0).toUpperCase() + family.slice(1)} ${version}`;
-  }
-  return model;
+  return formatModelLabel(model);
 }
 
 function connectionDot(state: MobileOrchestratorConnectionState): string {
@@ -240,16 +234,35 @@ export function OrchestratorView({
     const wsToken = getMobileWsToken();
     const headers: Record<string, string> = {};
     if (wsToken) headers.Authorization = `Bearer ${wsToken}`;
-    fetch('/api/panel/operator-defaults', { headers, cache: 'no-store' })
-      .then(async (response) => {
-        if (!response.ok) return;
-        const data = await response.json() as {
-          values?: { orchestratorModel?: string; defaultDispatchRuntime?: string };
+    Promise.all([
+      fetch('/api/panel/operator-defaults', { headers, cache: 'no-store' }),
+      fetch('/api/runtime/claude-code-profile', { headers, cache: 'no-store' }),
+    ]).then(async ([defaultsResponse, profileResponse]) => {
+      if (!defaultsResponse.ok) return;
+      const data = await defaultsResponse.json() as {
+        values?: {
+          orchestratorBackend?: OrchestratorBackendSetting;
+          orchestratorModel?: string;
+          inAppOrchestratorEnabled?: boolean;
+          defaultDispatchRuntime?: string;
         };
-        if (cancelled) return;
-        setOrchestratorModel(data.values?.orchestratorModel ?? null);
-        setDefaultDispatchRuntime(data.values?.defaultDispatchRuntime ?? null);
-      })
+      };
+      const profile = profileResponse.ok
+        ? await profileResponse.json() as {
+            profile?: { source?: 'native' | 'openrouter' | 'codex-subscription' };
+            effectiveModel?: string | null;
+          }
+        : null;
+      if (cancelled) return;
+      setOrchestratorModel(resolveEffectiveOrchestratorModel({
+        backend: data.values?.orchestratorBackend,
+        configuredModel: data.values?.orchestratorModel,
+        inAppOrchestratorEnabled: data.values?.inAppOrchestratorEnabled,
+        harnessSource: profile?.profile?.source,
+        harnessModel: profile?.effectiveModel,
+      }));
+      setDefaultDispatchRuntime(data.values?.defaultDispatchRuntime ?? null);
+    })
       .catch((error) => console.log('[mobile-orchestrator] operator-defaults fetch failed', error));
     return () => { cancelled = true; };
   }, [refreshSignal]);

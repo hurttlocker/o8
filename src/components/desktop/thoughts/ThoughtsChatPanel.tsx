@@ -53,7 +53,7 @@ import { getPendingMissionCards } from './mission-complete-detector';
 import { useOrchestratorContextResidency } from '@/components/desktop/orchestrator/context-residency';
 import { useDictationHostOptional } from '@/components/desktop/dictation/DictationHost';
 import { ProfiledChatMessageList as ChatMessageList } from './chat-panel/ProfiledChatMessageList';
-import { SwarmStatusCard, type SwarmScoutView } from './chat-panel/SwarmStatusCard';
+import { packetsForOrchestratorThread, SwarmStatusCard, type SwarmScoutView } from './chat-panel/SwarmStatusCard';
 import { ipcFetch } from '@/lib/tauri/ipc-fetch';
 import { track } from '@/lib/analytics/track';
 import { ChatToastStack } from './chat-panel/ChatToastStack';
@@ -2177,7 +2177,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       return { id: tool.id ?? `scout-${index}`, label, status };
     });
   })();
-
   return (
     <div
       style={{
@@ -2243,7 +2242,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
             topContent={transcriptTopContent}
             bottomContent={isOrchestratorMode && displayMessages.length > 0 ? (
               <SwarmStatusCard
-                packets={missionState?.packets ?? []}
+                packets={packetsForOrchestratorThread(missionState?.packets ?? [], threadId)}
                 scouts={orchestratorScouts}
                 onFocusPacket={onLaunchPacket ? (packet) => { void onLaunchPacket(packet); } : undefined}
               />

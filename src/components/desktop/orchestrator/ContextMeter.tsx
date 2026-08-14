@@ -11,22 +11,48 @@ const CONTEXT_LIMIT = 1_000_000;
 const MONO_STACK = "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace";
 const JAKARTA_STACK = 'var(--font-sans-system)';
 
-// Static baselines for o8's orchestrator surface. We don't have a live
-// token-meter for system prompt + tool definitions, so we approximate
-// from production telemetry. The "Other" row absorbs any drift vs the
-// backend running total so the bar always sums truthfully.
+// Static baselines for o8's orchestrator surface. These are estimates, never
+// presented as provider-reported category counts.
 const SYSTEM_PROMPT_TOKENS = 5_200;
 const TOOLS_TOKENS = 6_400;
 
 const meterLabel = (value: number) => formatTokens(value).replace(/K$/u, 'k');
 
-type CategoryKey = 'system' | 'tools' | 'conversation' | 'other';
-
 interface CategoryRow {
-  key: CategoryKey;
+  key: 'system' | 'tools' | 'conversation' | 'other';
   label: string;
-  color: string;
   tokens: number;
+  approximate: boolean;
+}
+
+export interface ContextMeterProjection {
+  source: 'runtime' | 'estimate';
+  activeTokens: number;
+  estimatedConversationTokens: number;
+  estimatedBaselineTokens: number;
+  unclassifiedRuntimeTokens: number;
+}
+
+export function projectContextMeter(
+  runningTotal: number,
+  estimatedConversationTokens: number,
+): ContextMeterProjection {
+  const reported = Number.isFinite(runningTotal) ? Math.max(0, Math.floor(runningTotal)) : 0;
+  const conversation = Number.isFinite(estimatedConversationTokens)
+    ? Math.max(0, Math.floor(estimatedConversationTokens))
+    : 0;
+  const estimatedBaselineTokens = SYSTEM_PROMPT_TOKENS + TOOLS_TOKENS;
+  const estimatedTotal = estimatedBaselineTokens + conversation;
+  const source = reported > 0 ? 'runtime' : 'estimate';
+  return {
+    source,
+    activeTokens: source === 'runtime' ? reported : estimatedTotal,
+    estimatedConversationTokens: conversation,
+    estimatedBaselineTokens,
+    unclassifiedRuntimeTokens: source === 'runtime'
+      ? Math.max(0, reported - estimatedTotal)
+      : 0,
+  };
 }
 
 function approxPayloadTokens(value: unknown): number {
@@ -43,9 +69,9 @@ function tokensFor(entry: MobileTranscriptEntry): number {
   if (typeof entry.compaction?.tokensAfter === 'number') {
     return entry.compaction.tokensAfter;
   }
-  if (entry.tokens) {
-    return Math.max(1, (entry.tokens.input ?? 0) + (entry.tokens.output ?? 0));
-  }
+  // Provider input usage is the full prompt window for that turn. Summing it
+  // across transcript rows double-counts earlier messages, so visible-residency
+  // estimation stays content-based even when per-turn billing usage is present.
   const textTokens = approxTokens(entry.text ?? '');
   const thinkingTokens = entry.thinking ? approxTokens(entry.thinking) : 0;
   const toolTokens = (entry.toolCalls ?? []).reduce((sum, call) => {
@@ -68,9 +94,10 @@ export function ContextMeter({ tokenCount, runningTotal, onClick }: { tokenCount
     const messages = residency?.messages ?? [];
     return messages.reduce((sum, entry) => sum + tokensFor(entry), 0);
   }, [residency?.messages]);
-  const estimatedTotal = SYSTEM_PROMPT_TOKENS + TOOLS_TOKENS + estimatedConversationTokens;
-  const effectiveRunningTotal = Math.max(runningTotal, estimatedTotal);
-  const usingEstimate = runningTotal <= 0 && effectiveRunningTotal > 0;
+  const projection = useMemo(
+    () => projectContextMeter(runningTotal, estimatedConversationTokens),
+    [estimatedConversationTokens, runningTotal],
+  );
 
   const handleToggle = useCallback(() => {
     onClick?.();
@@ -109,13 +136,13 @@ export function ContextMeter({ tokenCount, runningTotal, onClick }: { tokenCount
     };
   }, [open]);
 
-  const percent = Math.round((Math.max(0, Math.min(CONTEXT_LIMIT, effectiveRunningTotal)) / CONTEXT_LIMIT) * 100);
+  const percent = Math.round((Math.max(0, Math.min(CONTEXT_LIMIT, projection.activeTokens)) / CONTEXT_LIMIT) * 100);
   const tone = percent >= 85 ? 'critical' : percent >= 60 ? 'warning' : 'idle';
-  const label = `${meterLabel(effectiveRunningTotal)} / 1M · ${percent}%`;
+  const label = `${projection.source === 'estimate' ? '~' : ''}${meterLabel(projection.activeTokens)} / 1M · ${percent}%`;
   const ringColor = tone === 'critical' ? '#FF5A1F' : tone === 'warning' ? 'var(--t-text-muted)' : 'var(--t-text-faint)';
   const circumference = 43.98;
   const dashOffset = circumference - ((Math.max(0, Math.min(100, percent)) / 100) * circumference);
-  const titlePrefix = usingEstimate ? 'Estimated context usage' : 'Context usage';
+  const titlePrefix = projection.source === 'estimate' ? 'Estimated active context' : 'Runtime-reported active context';
 
   return (
     <>
@@ -123,9 +150,9 @@ export function ContextMeter({ tokenCount, runningTotal, onClick }: { tokenCount
         ref={buttonRef}
         type="button"
         onClick={handleToggle}
-        aria-label={tokenCount > 0 ? `${titlePrefix} ${label}. ${meterLabel(tokenCount)} tokens added last turn.` : `${titlePrefix} ${label}.`}
+        aria-label={tokenCount > 0 ? `${titlePrefix} ${label}. Context grew by ${meterLabel(tokenCount)} tokens since the previous runtime report.` : `${titlePrefix} ${label}.`}
         data-context-meter
-        title={tokenCount > 0 ? `${titlePrefix} ${label} · +${meterLabel(tokenCount)} last turn` : `${titlePrefix} ${label}`}
+        title={tokenCount > 0 ? `${titlePrefix} ${label} · +${meterLabel(tokenCount)} since previous report` : `${titlePrefix} ${label}`}
         style={{
           width: 24,
           height: 24,
@@ -180,7 +207,7 @@ export function ContextMeter({ tokenCount, runningTotal, onClick }: { tokenCount
             ref={popoverRef}
             anchorLeft={anchor.left}
             anchorBottom={anchor.bottom}
-            runningTotal={effectiveRunningTotal}
+            projection={projection}
             onClose={() => setOpen(false)}
           />,
           document.body,
@@ -193,39 +220,28 @@ export function ContextMeter({ tokenCount, runningTotal, onClick }: { tokenCount
 interface ContextPopoverProps {
   anchorLeft: number;
   anchorBottom: number;
-  runningTotal: number;
+  projection: ContextMeterProjection;
   onClose: () => void;
 }
 
 const ContextPopover = forwardRef<HTMLDivElement, ContextPopoverProps>(function ContextPopover(
-  { anchorLeft, anchorBottom, runningTotal, onClose },
+  { anchorLeft, anchorBottom, projection, onClose },
   ref,
 ) {
-  const residency = useOrchestratorContextResidency();
-  const [hoveredKey, setHoveredKey] = useState<CategoryKey | null>(null);
-  const conversationTokens = useMemo(() => {
-    const messages = residency?.messages ?? [];
-    return messages.reduce((sum, entry) => sum + tokensFor(entry), 0);
-  }, [residency?.messages]);
-
   const rows: CategoryRow[] = useMemo(() => {
-    const knownBaseline = SYSTEM_PROMPT_TOKENS + TOOLS_TOKENS;
-    const baseTotal = Math.max(runningTotal, knownBaseline + conversationTokens);
-    const otherTokens = Math.max(0, baseTotal - knownBaseline - conversationTokens);
     return [
-      { key: 'system', label: 'System prompt', color: '#9ca3af', tokens: SYSTEM_PROMPT_TOKENS },
-      { key: 'tools', label: 'Tools & MCP', color: '#a78bfa', tokens: TOOLS_TOKENS },
-      { key: 'conversation', label: 'Conversation', color: '#f97316', tokens: conversationTokens },
-      { key: 'other', label: 'Other', color: '#cbd5e1', tokens: otherTokens },
+      { key: 'system' as const, label: 'System prompt estimate', tokens: SYSTEM_PROMPT_TOKENS, approximate: true },
+      { key: 'tools' as const, label: 'Tools & MCP estimate', tokens: TOOLS_TOKENS, approximate: true },
+      { key: 'conversation' as const, label: 'Visible transcript estimate', tokens: projection.estimatedConversationTokens, approximate: true },
+      ...(projection.unclassifiedRuntimeTokens > 0
+        ? [{ key: 'other' as const, label: 'Runtime context not classified', tokens: projection.unclassifiedRuntimeTokens, approximate: false }]
+        : []),
     ];
-  }, [conversationTokens, runningTotal]);
+  }, [projection.estimatedConversationTokens, projection.unclassifiedRuntimeTokens]);
 
-  const totalTokens = rows.reduce((sum, row) => sum + row.tokens, 0);
-  const realTotal = Math.max(totalTokens, runningTotal);
-  const percent = realTotal > 0 ? Math.min(100, Math.round((realTotal / CONTEXT_LIMIT) * 100)) : 0;
-
-  const visibleRows = rows.filter((row) => row.tokens > 0);
-  const totalForBar = visibleRows.reduce((sum, row) => sum + row.tokens, 0) || 1;
+  const percent = projection.activeTokens > 0
+    ? Math.min(100, Math.round((projection.activeTokens / CONTEXT_LIMIT) * 100))
+    : 0;
 
   const popoverWidth = 340;
 
@@ -265,7 +281,7 @@ const ContextPopover = forwardRef<HTMLDivElement, ContextPopoverProps>(function 
         }}
       >
         <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text)' }}>
-          Context
+          Active context
         </span>
         <button
           type="button"
@@ -312,14 +328,12 @@ const ContextPopover = forwardRef<HTMLDivElement, ContextPopoverProps>(function 
           fontVariantNumeric: 'tabular-nums',
         }}
       >
-        <span>{percent}% Full</span>
-        <span>{`~${meterLabel(realTotal)} / 1M Tokens`}</span>
+        <span>{projection.source === 'runtime' ? 'Runtime reported' : 'Estimated locally'}</span>
+        <span>{`${projection.source === 'estimate' ? '~' : ''}${meterLabel(projection.activeTokens)} / 1M tokens · ${percent}%`}</span>
       </div>
 
-      {/* Track + colored fill. The track is the full popover-width row at 8px
-        * tall. The fill is positioned absolutely on top, sized to `percent` of
-        * the track, and split into per-category segments. Mirrors Cursor's
-        * left-anchored fill aesthetic. */}
+      {/* The bar carries only the active total. Category rows below are labeled
+        * estimates and do not pretend to be provider-reported segments. */}
       <div style={{ paddingLeft: 14, paddingRight: 14, paddingBottom: 12 }}>
         <div
           style={{
@@ -338,30 +352,10 @@ const ContextPopover = forwardRef<HTMLDivElement, ContextPopoverProps>(function 
               left: 0,
               bottom: 0,
               width: `${percent}%`,
-              display: 'flex',
-              alignItems: 'stretch',
-              gap: 1,
+              background: 'var(--t-brand-orange, #FF5A1F)',
               transition: 'width 220ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}
-          >
-            {visibleRows.map((row) => {
-              const dim = hoveredKey !== null && hoveredKey !== row.key;
-              return (
-                <span
-                  key={row.key}
-                  onMouseEnter={() => setHoveredKey(row.key)}
-                  onMouseLeave={() => setHoveredKey(null)}
-                  style={{
-                    flex: row.tokens / totalForBar,
-                    background: row.color,
-                    opacity: dim ? 0.22 : 1,
-                    transition: 'opacity 140ms cubic-bezier(0.22, 1, 0.36, 1)',
-                    cursor: 'default',
-                  }}
-                />
-              );
-            })}
-          </div>
+          />
         </div>
       </div>
 
@@ -376,13 +370,10 @@ const ContextPopover = forwardRef<HTMLDivElement, ContextPopoverProps>(function 
         }}
       >
         {rows.map((row) => {
-          const dim = hoveredKey !== null && hoveredKey !== row.key;
           const empty = row.tokens === 0;
           return (
             <div
               key={row.key}
-              onMouseEnter={() => { if (!empty) setHoveredKey(row.key); }}
-              onMouseLeave={() => setHoveredKey(null)}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -396,8 +387,6 @@ const ContextPopover = forwardRef<HTMLDivElement, ContextPopoverProps>(function 
                 letterSpacing: '-0.1px',
                 lineHeight: 1.25,
                 color: empty ? 'var(--t-text-faint)' : 'var(--t-text)',
-                opacity: dim ? 0.45 : 1,
-                transition: 'opacity 140ms cubic-bezier(0.22, 1, 0.36, 1)',
               }}
             >
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
@@ -407,7 +396,7 @@ const ContextPopover = forwardRef<HTMLDivElement, ContextPopoverProps>(function 
                     width: 10,
                     height: 10,
                     borderRadius: 3,
-                    background: row.color,
+                    background: row.approximate ? 'var(--t-text-faint)' : 'var(--t-brand-orange, #FF5A1F)',
                     opacity: empty ? 0.5 : 1,
                     flexShrink: 0,
                   }}
@@ -424,11 +413,31 @@ const ContextPopover = forwardRef<HTMLDivElement, ContextPopoverProps>(function 
                   color: empty ? 'var(--t-text-faint)' : 'var(--t-text-faint)',
                 }}
               >
-                {meterLabel(row.tokens)}
+                {`${row.approximate ? '~' : ''}${meterLabel(row.tokens)}`}
               </span>
             </div>
           );
         })}
+      </div>
+      <div
+        style={{
+          paddingTop: 8,
+          paddingRight: 14,
+          paddingBottom: 11,
+          paddingLeft: 14,
+          borderTopWidth: 1,
+          borderTopStyle: 'solid',
+          borderTopColor: 'var(--t-divider-subtle)',
+          color: 'var(--t-text-faint)',
+          fontSize: 9.5,
+          fontWeight: 260,
+          letterSpacing: '-0.4px',
+          lineHeight: 1.4,
+        }}
+      >
+        {projection.source === 'runtime'
+          ? 'The total is the runtime\u2019s parent-session context report. Child-worker usage is excluded; category rows are estimates.'
+          : 'The runtime has not reported context yet. The total is estimated from the visible transcript plus the current prompt and tool baseline.'}
       </div>
     </div>
   );

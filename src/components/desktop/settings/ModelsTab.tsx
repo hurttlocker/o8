@@ -442,8 +442,8 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
         >
           <SettingsRow
             icon={<CpuIcon />}
-            label="Orchestrator model"
-            subtitle={lockedSub('orchestratorModel', 'Claude model powering the Orchestrator tab — applies to new turns')}
+            label="Native Claude model"
+            subtitle={lockedSub('orchestratorModel', 'Used when the Claude Code harness source is Native account; other sources use the harness model above')}
             accessory={
               <PickerMenu<string>
                 value={values.orchestratorModel}

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
-import { focusSwarmPacket, SWARM_CREW_SCROLL_STYLE } from './SwarmStatusCard';
+import { focusSwarmPacket, packetsForOrchestratorThread, SWARM_CREW_SCROLL_STYLE } from './SwarmStatusCard';
 
 function packet(): OrchestratorPacket {
   return {
@@ -80,5 +80,19 @@ describe('focusSwarmPacket', () => {
       overflowX: 'hidden',
       overscrollBehavior: 'contain',
     });
+  });
+
+  it('keeps the Swarm crew scoped to its originating orchestrator chat', () => {
+    const direct = { ...packet(), id: 'pkt-direct', orchestratorThreadId: 'thoughts-current' };
+    const attributed = {
+      ...packet(),
+      id: 'pkt-attributed',
+      dispatcher: { surface: 'orchestrator' as const, id: 'thoughts-current' },
+    };
+    const stale = { ...packet(), id: 'pkt-stale', orchestratorThreadId: 'thoughts-previous' };
+
+    expect(packetsForOrchestratorThread([direct, attributed, stale], 'thoughts-current'))
+      .toEqual([direct, attributed]);
+    expect(packetsForOrchestratorThread([direct], null)).toEqual([]);
   });
 });

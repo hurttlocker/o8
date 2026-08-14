@@ -192,6 +192,25 @@ interface SwarmStatusCardProps {
   onFocusPacket?: (packet: OrchestratorPacket) => void;
 }
 
+/**
+ * The mission store is global, but a Swarm card belongs to one persisted
+ * orchestrator chat. Only packets stamped by that chat may appear in its live
+ * edge; otherwise a fresh chat inherits the previous mission's crew.
+ */
+export function packetsForOrchestratorThread(
+  packets: OrchestratorPacket[],
+  threadId: string | null | undefined,
+): OrchestratorPacket[] {
+  const normalizedThreadId = threadId?.trim();
+  if (!normalizedThreadId) return [];
+  return packets.filter((packet) => {
+    const stampedThreadId = packet.orchestratorThreadId?.trim();
+    if (stampedThreadId) return stampedThreadId === normalizedThreadId;
+    return packet.dispatcher?.surface === 'orchestrator'
+      && packet.dispatcher.id.trim() === normalizedThreadId;
+  });
+}
+
 export function focusSwarmPacket(packet: OrchestratorPacket, onFocusPacket?: (packet: OrchestratorPacket) => void) {
   if (onFocusPacket) {
     onFocusPacket(packet);
