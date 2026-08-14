@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fetchMissionReceipt } from './useTurnSummaryReceipt';
+import { fetchMissionReceipt, sumTurnUsageTokens } from './useTurnSummaryReceipt';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -44,5 +44,18 @@ describe('fetchMissionReceipt', () => {
       '/api/orchestrator/status?missionId=mission%20one&includeCost=true&includeTiming=true',
       { cache: 'no-store' },
     );
+  });
+});
+
+describe('sumTurnUsageTokens', () => {
+  it('counts fresh, cached, written, and output tokens from the completed turn receipt', () => {
+    expect(sumTurnUsageTokens([{
+      tokens: {
+        input: 15_993,
+        output: 13,
+        cacheRead: 11_008,
+        cacheWrite: 0,
+      },
+    }])).toBe(27_014);
   });
 });

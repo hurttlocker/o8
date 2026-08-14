@@ -74,6 +74,16 @@ function turnCostTotal(orchestratorCostUsd: number | null, childCostUsd: number 
   return Number(((orchestratorCostUsd ?? 0) + (childCostUsd ?? 0)).toFixed(6));
 }
 
+export function sumTurnUsageTokens(
+  entries: Array<Pick<MobileTranscriptEntry, 'tokens'>>,
+): number {
+  return entries.reduce((sum, entry) => sum
+    + (entry.tokens?.input ?? 0)
+    + (entry.tokens?.output ?? 0)
+    + (entry.tokens?.cacheRead ?? 0)
+    + (entry.tokens?.cacheWrite ?? 0), 0);
+}
+
 export function useTurnSummaryReceipt(input: {
   displayMessages: MobileTranscriptEntry[];
   isChatMode: boolean;
@@ -156,6 +166,8 @@ export function useTurnSummaryReceipt(input: {
     const freshInputTokens = usageEntries.reduce((sum, entry) => sum + (entry.tokens?.input ?? 0), 0);
     const cacheReadTokens = usageEntries.reduce((sum, entry) => sum + (entry.tokens?.cacheRead ?? 0), 0);
     const cacheWriteTokens = usageEntries.reduce((sum, entry) => sum + (entry.tokens?.cacheWrite ?? 0), 0);
+    const reportedTurnTokens = sumTurnUsageTokens(usageEntries);
+    const runningTotalDelta = Math.max(0, input.stream.runningTotal - start.runningTotalAtStart);
     const currentMission = missionStateRef.current;
     const currentMissionId = currentMission.missionId?.trim() || null;
     const attributedMissionId = currentMissionId
@@ -174,7 +186,7 @@ export function useTurnSummaryReceipt(input: {
       toolNameTotal: distinctNames.length,
       filesEditedCount: 0,
       filePaths: [],
-      tokensUsed: Math.max(0, input.stream.runningTotal - start.runningTotalAtStart),
+      tokensUsed: reportedTurnTokens > 0 ? reportedTurnTokens : runningTotalDelta,
       ...(cacheObserved ? { freshInputTokens, cacheReadTokens, cacheWriteTokens } : {}),
       costUsd: null,
       orchestratorCostUsd: null,
