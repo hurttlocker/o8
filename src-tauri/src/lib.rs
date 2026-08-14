@@ -18,6 +18,8 @@ mod fn_hotkey;
 mod launch_updater;
 #[cfg(target_os = "macos")]
 mod live_dictation;
+#[cfg(target_os = "macos")]
+mod macos_webview_scale;
 mod mac_perms;
 mod models;
 // Child processes must not open console windows on Windows — a console the
@@ -7950,9 +7952,7 @@ pub fn run() {
                             }
                             _ => {}
                         },
-                        tauri::WindowEvent::Resized(_)
-                        | tauri::WindowEvent::Moved(_)
-                        | tauri::WindowEvent::ScaleFactorChanged { .. } => {
+                        tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Moved(_) => {
                             window_restore::schedule_event_clamp(&app_handle);
                             // Re-hide the native traffic lights — macOS
                             // re-shows standard buttons across fullscreen
@@ -7962,6 +7962,32 @@ pub fn run() {
                             if let Some(w) = app_handle.get_webview_window("main") {
                                 hide_native_traffic_lights(&w);
                             }
+                            // A monitor crossing does not always deliver the scale event before
+                            // AppKit settles the window. Refit after move/resize as a cheap fallback.
+                            #[cfg(target_os = "macos")]
+                            macos_webview_scale::schedule_main_webview_frame_repair(&app_handle);
+                        }
+                        #[cfg(target_os = "macos")]
+                        tauri::WindowEvent::ScaleFactorChanged {
+                            scale_factor,
+                            new_inner_size,
+                            ..
+                        } => {
+                            window_restore::schedule_event_clamp(&app_handle);
+                            if let Some(w) = app_handle.get_webview_window("main") {
+                                log::info!(
+                                    "[display-scale] main window changed to {scale_factor:.2}x at {}x{} physical pixels",
+                                    new_inner_size.width,
+                                    new_inner_size.height
+                                );
+                                hide_native_traffic_lights(&w);
+                                macos_webview_scale::repair_main_webview_frame(&w);
+                                macos_webview_scale::schedule_main_webview_frame_repair(&app_handle);
+                            }
+                        }
+                        #[cfg(not(target_os = "macos"))]
+                        tauri::WindowEvent::ScaleFactorChanged { .. } => {
+                            window_restore::schedule_event_clamp(&app_handle);
                         }
                         #[cfg(target_os = "macos")]
                         tauri::WindowEvent::Focused(_) => {
