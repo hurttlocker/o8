@@ -172,6 +172,8 @@ export function mapStopReason(stopReason: AcpStopReason, sessionId: string | nul
 export interface AcpClientOptions {
   command: string;
   args: string[];
+  /** Working directory used to boot the ACP agent and its private service. */
+  cwd?: string;
   env?: Record<string, string>;
   /** Called for every session/update notification's OrchestratorEvent (mapped). */
   onEvent?: (event: OrchestratorEvent) => void;
@@ -203,7 +205,8 @@ export class AcpClient {
     this.proc = spawn(launch.command, launch.args, {
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, ...(opts.env ?? {}) },
+      cwd: opts.cwd,
+      env: { ...process.env, ...(opts.cwd ? { PWD: opts.cwd } : {}), ...(opts.env ?? {}) },
     });
     this.proc.stdout?.setEncoding('utf8');
     this.proc.stdout?.on('data', (chunk: string) => this.onStdout(chunk));
@@ -305,17 +308,26 @@ export class AcpClient {
   }
 
   /**
-   * Switch the session's model in place — `session/set_model` takes
-   * `{ sessionId, modelId }` (verified against the OpenCode ACP contract; `{model}` and
-   * `{model:{modelId}}` both fail param validation). Live on the running
-   * session, so the composer can change models mid-thread without respawning
-   * the agent or losing conversation context.
+   * Switch the session's model in place. Current ACP agents expose model as a
+   * standard config option; older OpenCode builds used `session/set_model`.
+   * Keep the narrow legacy fallback so an installed stable CLI can coexist
+   * with the OpenCode 2 preview during migration.
    *
    * Agents that don't implement the method reject with "Method not found";
    * callers treat that as "this agent has no model axis" rather than fatal.
    */
   async setModel(sessionId: string, modelId: string): Promise<void> {
-    await this.request('session/set_model', { sessionId, modelId });
+    try {
+      await this.request('session/set_config_option', {
+        sessionId,
+        configId: 'model',
+        value: modelId,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!message.includes('ACP error -32601') && !message.includes('Method not found')) throw err;
+      await this.request('session/set_model', { sessionId, modelId });
+    }
   }
 
   /** Run one prompt turn. Resolves with the stopReason when the agent finishes;

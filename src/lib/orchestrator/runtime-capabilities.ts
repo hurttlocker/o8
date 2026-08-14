@@ -359,17 +359,13 @@ export const ORCHESTRATOR_RUNTIMES = {
     shortLabel: 'Grok',
     dispatchable: true,
     requiresModel: false,
-    // 2026-07-09: headline model is grok-4.5 (Opus-class, cheaper for context),
-    // passed to the `grok` CLI via `--model grok-4.5` — sub-billed through
-    // SuperGrok, not a metered API path. Frontier tier (Opus-class treatment).
-    defaultModel: MODEL_IDS.grokWorkerDefault,
     accentColor: '#16a34a',
     binaryName: 'grok',
     workerProvider: 'grok',
     authHouse: 'grok',
     reasoningEffort: false,
     tier: 'frontier',
-    description: 'xAI Grok Build coding CLI (grok-4.5) with headless JSON-schema output — sub-billed via SuperGrok.',
+    description: 'Grok Build coding CLI with provider-selected current defaults, structured headless output, and durable resume.',
   },
   'prime-agent': {
     label: 'Prime Agent',

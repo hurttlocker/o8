@@ -1,9 +1,9 @@
 /**
  * Grok Build owned-session adapter.
  *
- * Headless mode uses `grok -p <prompt> --json-schema <schema>`. The schema is
- * intentionally permissive: it asks Grok for structured final output while the
- * parser remains defensive around streamed tool and status events.
+ * Headless mode uses `grok -p <prompt> --json-schema <schema>`. Current Grok
+ * Build writes one JSON document; older releases wrote JSONL, so the parser
+ * intentionally accepts both contracts.
  */
 
 import path from 'node:path';
@@ -61,10 +61,22 @@ function extractText(value: unknown): string {
   return '';
 }
 
+function parseEmbeddedJson(value: unknown): Record<string, unknown> | null {
+  if (isRecord(value)) return value;
+  if (typeof value !== 'string' || !value.trim().startsWith('{')) return null;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export function grokLaunchArgs(ctx: { prompt: string; model?: string }): string[] {
   return [
     '-p', ctx.prompt,
     '--json-schema', GROK_RESULT_SCHEMA,
+    '--always-approve',
     ...(ctx.model ? ['--model', ctx.model] : []),
   ];
 }
@@ -72,8 +84,9 @@ export function grokLaunchArgs(ctx: { prompt: string; model?: string }): string[
 export function grokResumeArgs(ctx: { threadId: string; prompt: string; model?: string }): string[] {
   return [
     '-p', ctx.prompt,
-    '--session', ctx.threadId,
+    '--resume', ctx.threadId,
     '--json-schema', GROK_RESULT_SCHEMA,
+    '--always-approve',
     ...(ctx.model ? ['--model', ctx.model] : []),
   ];
 }
@@ -92,31 +105,79 @@ export function grokParseRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog 
   let completedTurn = false;
   let noiseIndex = 0;
 
-  for (const [lineIndex, rawLine] of raw.split('\n').entries()) {
-    const trimmed = rawLine.trim();
-    if (!trimmed) continue;
-    if (!trimmed.startsWith('{')) {
-      entries.push({
-        id: `${run.id}:noise:${noiseIndex += 1}`,
-        kind: 'event',
-        label: 'Runtime',
-        text: compactText(trimmed, 400),
-        timestamp: fallbackTs,
-        timestampLabel: formatClock(fallbackTs),
-      });
-      continue;
-    }
-
-    let parsed: Record<string, unknown>;
+  const wholeDocument = (() => {
     try {
-      parsed = JSON.parse(trimmed) as Record<string, unknown>;
+      const parsed = JSON.parse(raw) as unknown;
+      return isRecord(parsed) ? parsed : null;
     } catch {
-      continue;
+      return null;
     }
+  })();
+  const records = wholeDocument
+    ? [{ lineIndex: 0, parsed: wholeDocument }]
+    : raw.split('\n').flatMap((rawLine, lineIndex) => {
+      const trimmed = rawLine.trim();
+      if (!trimmed) return [];
+      if (!trimmed.startsWith('{')) {
+        entries.push({
+          id: `${run.id}:noise:${noiseIndex += 1}`,
+          kind: 'event',
+          label: 'Runtime',
+          text: compactText(trimmed, 400),
+          timestamp: fallbackTs,
+          timestampLabel: formatClock(fallbackTs),
+        });
+        return [];
+      }
+      try {
+        const parsed = JSON.parse(trimmed) as unknown;
+        return isRecord(parsed) ? [{ lineIndex, parsed }] : [];
+      } catch {
+        return [];
+      }
+    });
 
+  for (const { lineIndex, parsed } of records) {
     const type = String(parsed.type ?? parsed.event ?? '').toLowerCase();
     const ts = readString(parsed, 'timestamp', 'created_at') ?? fallbackTs;
     const tsLabel = formatClock(ts) ?? formatClock(fallbackTs);
+
+    const rootSessionId = readString(parsed, 'session_id', 'sessionId', 'thread_id', 'threadId');
+    if (rootSessionId) threadId = rootSessionId;
+    const structuredOutput = parseEmbeddedJson(parsed.structuredOutput) ?? parseEmbeddedJson(parsed.text);
+    const rootSummary = readString(structuredOutput, 'summary', 'text', 'message', 'response');
+    const stopReason = readString(parsed, 'stopReason', 'stop_reason');
+    if (!type && (structuredOutput || stopReason)) {
+      completedTurn = Boolean(structuredOutput || stopReason === 'end_turn');
+      if (rootSummary) {
+        entries.push({
+          id: `${run.id}:result-text:${lineIndex}`,
+          kind: 'message',
+          label: 'Grok',
+          text: compactText(rootSummary, 500),
+          timestamp: ts,
+          timestampLabel: tsLabel,
+        });
+      }
+      const usage = isRecord(parsed.usage) ? parsed.usage : null;
+      const input = usage?.input_tokens ?? usage?.inputTokens;
+      const output = usage?.output_tokens ?? usage?.outputTokens;
+      const cost = parsed.total_cost_usd ?? parsed.totalCostUsd;
+      const bits = [
+        typeof input === 'number' ? `${input} in` : null,
+        typeof output === 'number' ? `${output} out` : null,
+        typeof cost === 'number' ? `$${cost.toFixed(6)}` : null,
+      ].filter(Boolean);
+      entries.push({
+        id: `${run.id}:result:${lineIndex}`,
+        kind: 'event',
+        label: 'Turn completed',
+        text: bits.length ? `Usage • ${bits.join(' • ')}` : 'Run completed.',
+        timestamp: ts,
+        timestampLabel: tsLabel,
+      });
+      continue;
+    }
 
     if (type === 'init' || type === 'session' || type === 'start') {
       const id = readString(parsed, 'session_id', 'sessionId', 'thread_id', 'threadId', 'id');

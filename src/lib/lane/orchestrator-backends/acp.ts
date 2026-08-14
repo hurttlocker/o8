@@ -190,6 +190,7 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
       client: new AcpClient({
         command: launch.command,
         args: launch.args,
+        cwd: repoPath,
         env: launch.env,
         onEvent: (event) => session.onEvent?.(event),
       }),
@@ -397,18 +398,21 @@ function resolveOpencodeBinary(): string | null {
  * Unlike every other backend, this one is not bound to a provider house: the
  * session's own `configOptions.model` select is the catalogue, scoped to
  * whatever providers the local install is authenticated for. Verified against
- * OpenCode 1.4.3 on 2026-08-04, with the ACP command retained by OpenCode 2:
+ * OpenCode 2 next-17430 on 2026-08-14:
  *   - NDJSON JSON-RPC on stdio, protocolVersion 1 — the shape AcpClient sends;
  *   - o8's operator MCP server loads over stdio (`toolCount=92`), so this
  *     backend can genuinely dispatch rather than only converse;
- *   - `session/new` returns 864 model options including `/low` + `/high`
- *     reasoning variants, so thinking level rides the model id;
- *   - `session/set_model {sessionId, modelId}` switches models on the live
- *     session, no respawn.
+ *   - `session/new` returns the authenticated provider/model catalogue;
+ *   - `session/set_config_option {configId:'model'}` switches models on the
+ *     live session, no respawn.
  *
  * `mcpCapabilities` advertises only `{http, sse}`, which reads like stdio is
  * unsupported. It is not — stdio is the ACP baseline and those flags mark the
  * extra transports. Don't "fix" the injection path on the strength of that.
+ *
+ * The process must boot in the target repository. OpenCode 2 starts a private
+ * stdio service before `session/new`; booting from the packaged app resources
+ * directory makes that service fail even when `session/new.cwd` is correct.
  */
 export const opencodeBackend: OrchestratorBackend = makeAcpBackend({
   id: 'opencode',

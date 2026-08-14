@@ -101,7 +101,7 @@ const RUNTIME_BLURB: Record<string, string> = {
   gemini: 'Retired CLI adapter — existing lanes stay readable',
   opencode: 'OpenCode 2 multi-provider CLI, routes through your provider keys',
   cursor: 'Cursor CLI worker — subscription or CURSOR_API_KEY',
-  grok: 'Grok 4.5, sub-billed via SuperGrok',
+  grok: 'Grok Build, using the current model selected by its CLI',
 };
 
 function DetectionPill({ tool, state }: { tool: DetectedTool | undefined; state: DetectState }) {
