@@ -18,6 +18,16 @@ import type {
   ParsedRunLog,
 } from '@/lib/runtimes/shared/owned-session/types';
 import { getDataDir } from '@/lib/data-dir-migration';
+import {
+  buildClaudeCodeWorkerSpawnEnv,
+  readClaudeCodeWorkerProfileSync,
+  resolveClaudeCodeWorkerGatewayKey,
+  selectedClaudeCodeWorkerModelSync,
+} from '@/lib/claude-code/worker-profile';
+import {
+  ensureCodexSubscriptionClaudeConfigDir,
+  ensureCodexSubscriptionProxyReady,
+} from '@/lib/claude-code/codex-subscription-proxy';
 
 function eventText(event: ClaudeCodeStreamJsonParserEvent): string {
   switch (event.type) {
@@ -32,7 +42,7 @@ function eventText(event: ClaudeCodeStreamJsonParserEvent): string {
     case 'permission_request':
       return event.text;
     case 'usage':
-      return `Usage: ${event.inputTokens} input, ${event.outputTokens} output`;
+      return `Usage: ${event.inputTokens} input, ${event.outputTokens} output${event.cacheReadTokens ? `, ${event.cacheReadTokens} cache read` : ''}${event.cacheWriteTokens ? `, ${event.cacheWriteTokens} cache write` : ''}`;
     case 'done':
       return event.text;
   }
@@ -80,6 +90,29 @@ const claudeCodeOwnedAdapter: OwnedRuntimeAdapter = {
   binaryName: 'claude',
   binaryEnvOverride: 'O8_CLAUDE_CODE_BIN',
   binaryExtraEnvOverrides: ['CLAUDE_BIN'],
+  extraSpawnEnv: async (session) => {
+    const configuredSource = session.runtimeConfig?.modelSource;
+    const source = configuredSource === 'openrouter' || configuredSource === 'codex-subscription'
+      ? configuredSource
+      : 'native';
+    const key = source === 'openrouter' ? await resolveClaudeCodeWorkerGatewayKey() : null;
+    if (source === 'openrouter' && !key) {
+      throw new Error('This Claude Code worker is pinned to OpenRouter, but its API key is no longer configured. Add the key in Settings > Models > API keys before resuming it.');
+    }
+    if (source === 'codex-subscription') {
+      const connection = await ensureCodexSubscriptionProxyReady();
+      return {
+        ...buildClaudeCodeWorkerSpawnEnv(
+          source,
+          session.model,
+          connection.clientToken,
+          connection.baseUrl,
+        ),
+        CLAUDE_CONFIG_DIR: await ensureCodexSubscriptionClaudeConfigDir(session.sessionDir),
+      };
+    }
+    return buildClaudeCodeWorkerSpawnEnv(source, session.model, key);
+  },
   humanLabel: 'Owned Claude Code',
   squadShortName: 'Claude',
   sessionIdPrefix: 'claude-code-owned-',
@@ -116,12 +149,43 @@ export async function getOwnedClaudeCodeTelemetrySources(surfaceId: string) {
 export async function launchOwnedClaudeCodeSession(request: {
   cwd: string;
   prompt: string;
+  clientMutationId?: string;
   model?: string;
   effort?: ThinkingEffort;
   laneId?: string;
   packetId?: string;
 }) {
-  return claudeCodeOwnedStore.launch(request);
+  const profile = readClaudeCodeWorkerProfileSync();
+  const selectedModel = profile.source === 'openrouter' || profile.source === 'codex-subscription'
+    ? selectedClaudeCodeWorkerModelSync()
+    : request.model;
+  if (profile.source === 'openrouter' && !await resolveClaudeCodeWorkerGatewayKey()) {
+    return {
+      ok: false,
+      runtime: 'claude-code',
+      surfaceId: '',
+      sideEffect: 'none' as const,
+      note: 'Claude Code gateway workers require an OpenRouter API key in Settings > Models > API keys. No worker was started.',
+    };
+  }
+  if (profile.source === 'codex-subscription') {
+    try {
+      await ensureCodexSubscriptionProxyReady();
+    } catch (error) {
+      return {
+        ok: false,
+        runtime: 'claude-code',
+        surfaceId: '',
+        sideEffect: 'none' as const,
+        note: error instanceof Error ? error.message : 'The Codex subscription carrier is unavailable. No worker was started.',
+      };
+    }
+  }
+  return claudeCodeOwnedStore.launch({
+    ...request,
+    model: selectedModel ?? undefined,
+    runtimeConfig: { modelSource: profile.source },
+  });
 }
 
 export async function getOwnedClaudeCodeFleetAdditions(options?: { fresh?: boolean }) {

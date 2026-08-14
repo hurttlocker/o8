@@ -151,6 +151,11 @@ export function useTurnSummaryReceipt(input: {
     if (!lastAssistantId) return;
 
     const distinctNames = [...new Set(toolNamesAll)];
+    const usageEntries = newEntries.filter((entry) => entry.role === 'assistant' && entry.tokens);
+    const cacheObserved = usageEntries.some((entry) => Object.prototype.hasOwnProperty.call(entry.tokens ?? {}, 'cacheRead'));
+    const freshInputTokens = usageEntries.reduce((sum, entry) => sum + (entry.tokens?.input ?? 0), 0);
+    const cacheReadTokens = usageEntries.reduce((sum, entry) => sum + (entry.tokens?.cacheRead ?? 0), 0);
+    const cacheWriteTokens = usageEntries.reduce((sum, entry) => sum + (entry.tokens?.cacheWrite ?? 0), 0);
     const currentMission = missionStateRef.current;
     const currentMissionId = currentMission.missionId?.trim() || null;
     const attributedMissionId = currentMissionId
@@ -170,6 +175,7 @@ export function useTurnSummaryReceipt(input: {
       filesEditedCount: 0,
       filePaths: [],
       tokensUsed: Math.max(0, input.stream.runningTotal - start.runningTotalAtStart),
+      ...(cacheObserved ? { freshInputTokens, cacheReadTokens, cacheWriteTokens } : {}),
       costUsd: null,
       orchestratorCostUsd: null,
       childCostUsd: null,

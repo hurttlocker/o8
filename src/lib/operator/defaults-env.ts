@@ -40,8 +40,8 @@ export function isClassAComposer(value: unknown): value is ClassAComposer {
  * Engineering Brain access (`o8 ask`) injected into their packet prompt.
  *   - `off`  — workers never told about the Brain.
  *   - `auto` — Brain on for NON-frontier runtimes only (tier !== 'frontier'
- *     in runtime-capabilities). Codex GPT-5.5 stays lean; weaker + future
- *     local models get repo knowledge without burning context on searches.
+ *     in runtime-capabilities). Frontier workers stay lean; weaker and local
+ *     models get repo knowledge without burning context on searches.
  *   - `all`  — every worker gets it (the dogfood / A-B setting).
  * Per-packet `useBrain` overrides this either way.
  */

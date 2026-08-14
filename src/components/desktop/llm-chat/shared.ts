@@ -29,7 +29,7 @@ export interface LLMMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   model?: string;
-  tokens?: { input: number; output: number };
+  tokens?: { input: number; output: number; cacheRead?: number; cacheWrite?: number };
   costUsd?: number;
   timestamp: number;
   images?: string[];

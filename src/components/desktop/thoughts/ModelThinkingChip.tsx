@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ComposerPopover } from './chat-panel/ComposerPopover';
 import { type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorBackendSetting } from './operator-defaults';
@@ -6,6 +6,8 @@ import { MODEL_IDS } from '@/lib/models';
 import { useEntitlement } from '@/lib/entitlement/context';
 import { AcpModelPicker } from './AcpModelPicker';
 import { shortModelLabel as acpShortModelLabel } from '@/lib/orchestrator/acp-model-catalogue';
+import { CLAUDE_CODE_PROFILE_CHANGED_EVENT } from '@/lib/claude-code/worker-profile-types';
+import { formatModelLabel } from '@/lib/format';
 
 const EFFORT_LABELS: Record<ThinkingEffort, string> = {
   adaptive: 'adaptive',
@@ -327,8 +329,52 @@ export function ModelThinkingChip({
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
+  const [harnessCarrier, setHarnessCarrier] = useState<{
+    source: 'native' | 'openrouter' | 'codex-subscription';
+    model: string | null;
+  } | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const splitRef = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      void fetch('/api/runtime/claude-code-profile', { cache: 'no-store' })
+        .then(async (response) => response.ok ? response.json() : null)
+        .then((payload: { profile?: { source?: unknown }; effectiveModel?: unknown } | null) => {
+          const source = payload?.profile?.source;
+          const model = payload?.effectiveModel;
+          if (!cancelled && (source === 'native' || source === 'openrouter' || source === 'codex-subscription')) {
+            setHarnessCarrier({ source, model: typeof model === 'string' ? model : null });
+          }
+        })
+        .catch(() => {});
+    };
+    load();
+    window.addEventListener(CLAUDE_CODE_PROFILE_CHANGED_EVENT, load);
+    return () => { cancelled = true; window.removeEventListener(CLAUDE_CODE_PROFILE_CHANGED_EVENT, load); };
+  }, []);
+  const carrierModel = harnessCarrier?.model ?? null;
+  const carrierSource = harnessCarrier?.source;
+  const composerModelGroups = carrierSource && carrierSource !== 'native' && carrierModel
+    ? COMPOSER_MODEL_GROUPS.map((group): ComposerModelGroup => group.key === 'claude'
+      ? {
+          ...group,
+          options: [
+            ...group.options.filter((option) => option.backend === 'fable'),
+            {
+              value: `claude-harness:${carrierModel}`,
+              label: `${formatModelLabel(carrierModel)} in Claude Code`,
+              triggerLabel: formatModelLabel(carrierModel),
+              backend: 'claude',
+              model: carrierModel,
+              sub: carrierSource === 'codex-subscription'
+                ? 'Codex subscription · full harness'
+                : 'OpenRouter · full harness',
+            },
+          ],
+        }
+      : group)
+    : COMPOSER_MODEL_GROUPS;
   const baseEffortOptions = adaptiveEnabled ? EFFORT_OPTIONS : EFFORT_OPTIONS.filter((option) => option !== 'adaptive');
   // 'ultra' (codex gpt-5.6-sol's internal-fan-out tier) is only selectable on the
   // codex backend, whose composer model is always Sol. Every other backend caps
@@ -344,25 +390,24 @@ export function ModelThinkingChip({
   const effortSectionLabel = isCodexBackend ? 'Reasoning' : 'Thinking';
   const effortTitle = isCodexBackend ? 'reasoning' : 'thinking';
   const normalizedModelId = modelId?.replace(/\[[^\]]*\]$/, '');
+  const effectiveModelId = activeBackend === 'claude' && harnessCarrier?.source !== 'native'
+    ? harnessCarrier?.model ?? normalizedModelId
+    : normalizedModelId;
   // The composer trigger should name the actual MODEL, not the provider
   // (Q ruling 2026-07-11 — "you might need to know what model you're on").
   // Resolve it from the picked (backend, modelId); fall back to the provider
   // label only when nothing matches (e.g. a fresh 'auto' session before a pick).
-  const activeModelOption = COMPOSER_MODEL_GROUPS
+  const activeModelOption = composerModelGroups
     .flatMap((g) => g.options)
-    .find((o) => activeBackend === o.backend && (!o.model || normalizedModelId === o.model));
+    .find((o) => activeBackend === o.backend && (!o.model || effectiveModelId === o.model));
   // A searchable house has no static options, so activeModelOption never
   // matches and the chip would fall back to the PROVIDER name — the exact
   // thing the Q ruling below says it must not do. Derive the model's own short
   // name from its id instead.
-  const searchableHouseLabel = COMPOSER_MODEL_GROUPS.some((g) => g.searchable && g.key === activeBackend)
+  const searchableHouseLabel = composerModelGroups.some((g) => g.searchable && g.key === activeBackend)
     ? acpShortModelLabel(normalizedModelId)
     : null;
   const triggerModelLabel = activeModelOption?.triggerLabel ?? activeModelOption?.label ?? searchableHouseLabel ?? modelLabel;
-  // Collide's aggregator is now the model you actually picked (Q ruling
-  // 2026-07-11) — the label follows it, not a hardcoded house.
-  const shortModelLabel = (activeModelOption?.triggerLabel ?? searchableHouseLabel ?? modelLabel).replace(/^Codex\s+/i, '').replace(/^GPT-5\.6\s+/i, '');
-  const decideLabel = `${shortModelLabel} decides`;
   const modeLabel = collideActive ? 'Mixture of Agents' : ultraActive ? 'Fusion' : 'Solo';
   // Which house drawer is open in the model picker. Defaults to the active
   // backend's house so the current model is visible on open.
@@ -374,7 +419,7 @@ export function ModelThinkingChip({
   // The ACP house needs a wider menu than the fixed drawers (see the width
   // constants) — derived from the open house, not the active backend, so the
   // menu resizes the moment the operator expands opencode.
-  const searchableHouseOpen = COMPOSER_MODEL_GROUPS.some((group) => group.searchable && group.key === openHouse);
+  const searchableHouseOpen = composerModelGroups.some((group) => group.searchable && group.key === openHouse);
   // Thinking levels are only KNOWN for the Claude-family and Codex backends
   // ('auto' resolves to one of them). Every other runtime uses its default
   // effort and the thinking trigger stays hidden — no bespoke picker for
@@ -466,7 +511,7 @@ export function ModelThinkingChip({
             type="button"
             onClick={() => { if (canOpen) setOpen((current) => !current); }}
             disabled={!canOpen}
-            title={`${modelLabel} · ${modeLabel}`}
+            title={`${triggerModelLabel} · ${modeLabel}`}
             aria-haspopup="menu"
             aria-expanded={open}
             style={quietTriggerStyle(open)}
@@ -507,7 +552,7 @@ export function ModelThinkingChip({
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         disabled={!canOpen}
-        title={`${modelLabel} · ${modeLabel} · ${effortTitle} ${selectedLabel}`}
+        title={`${triggerModelLabel} · ${modeLabel} · ${effortTitle} ${selectedLabel}`}
         aria-haspopup="menu"
         aria-expanded={open}
         style={{
@@ -535,7 +580,7 @@ export function ModelThinkingChip({
       >
         {compact ? null : (
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 10.5, fontWeight: 300, letterSpacing: '0' }}>
-            {modelLabel}
+            {triggerModelLabel}
           </span>
         )}
         {ultraActive || collideActive ? <SwarmGlyph size={11} /> : null}
@@ -575,9 +620,9 @@ export function ModelThinkingChip({
                 <div style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '0', color: 'var(--t-text-faint)', lineHeight: 1.25 }}>Model</div>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                {COMPOSER_MODEL_GROUPS.map((group) => {
+                {composerModelGroups.map((group) => {
                   const houseOpen = openHouse === group.key;
-                  const houseHasActive = group.options.some((o) => activeBackend === o.backend && (!o.model || normalizedModelId === o.model));
+                  const houseHasActive = group.options.some((o) => activeBackend === o.backend && (!o.model || effectiveModelId === o.model));
                   return (
                     <div key={group.key} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                       {/* Drawer header — click to expand this house. */}
@@ -636,7 +681,7 @@ export function ModelThinkingChip({
                       ) : null}
                       {/* Models nested under the open house. */}
                       {houseOpen && !group.searchable ? group.options.map((option) => {
-                        const active = activeBackend === option.backend && (!option.model || normalizedModelId === option.model);
+                        const active = activeBackend === option.backend && (!option.model || effectiveModelId === option.model);
                         return (
                           <button
                             key={option.value}
@@ -707,7 +752,7 @@ export function ModelThinkingChip({
             </>
           ) : (
             <div style={{ paddingLeft: 7, paddingRight: 7, paddingTop: 2, paddingBottom: 6, borderBottom: '1px solid var(--t-divider-subtle)' }}>
-              <div style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '0', color: 'var(--t-text)', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{modelLabel}</div>
+              <div style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '0', color: 'var(--t-text)', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{triggerModelLabel}</div>
               <div style={{ marginTop: 2, fontSize: 9.5, fontWeight: 260, letterSpacing: '0', color: 'var(--t-text-faint)', lineHeight: 1.25 }}>{effortSectionLabel}</div>
             </div>
           )}

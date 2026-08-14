@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { AcpClient, mapAcpUpdate, mapStopReason } from './client';
+import { AcpClient, AcpRequestError, mapAcpUpdate, mapStopReason, type AcpRawNotification } from './client';
 
 const children: AcpClient[] = [];
 const tempDirs: string[] = [];
@@ -102,5 +102,160 @@ describe('AcpClient', () => {
     await expect(client.setModel(session.sessionId, 'provider/current-model')).resolves.toBeUndefined();
 
     expect(session.configOptions[0]?.currentValue).toBe(realpathSync(cwd));
+  });
+
+  it('answers agent permission requests and exposes raw notifications', async () => {
+    const notifications: AcpRawNotification[] = [];
+    const peer = String.raw`
+      process.stdin.setEncoding('utf8');
+      let buffer = '';
+      let promptRequest = null;
+      process.stdin.on('data', (chunk) => {
+        buffer += chunk;
+        let newline;
+        while ((newline = buffer.indexOf('\n')) >= 0) {
+          const line = buffer.slice(0, newline).trim();
+          buffer = buffer.slice(newline + 1);
+          if (!line) continue;
+          const message = JSON.parse(line);
+          if (message.method === 'initialize') {
+            process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: 1 } }) + '\n');
+          } else if (message.method === 'session/new') {
+            process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { sessionId: 'session-permission' } }) + '\n');
+          } else if (message.method === 'session/prompt') {
+            promptRequest = message;
+            process.stdout.write(JSON.stringify({
+              jsonrpc: '2.0',
+              id: 'permission-1',
+              method: 'session/request_permission',
+              params: { sessionId: 'session-permission', options: [{ optionId: 'allow-once' }] },
+            }) + '\n');
+          } else if (message.id === 'permission-1' && message.result?.outcome?.optionId === 'allow-once') {
+            process.stdout.write(JSON.stringify({
+              jsonrpc: '2.0',
+              method: 'session/update',
+              params: { sessionId: 'session-permission', update: { sessionUpdate: 'usage_update', used: 10 } },
+            }) + '\n');
+            process.stdout.write(JSON.stringify({
+              jsonrpc: '2.0',
+              id: promptRequest.id,
+              result: { stopReason: 'end_turn' },
+            }) + '\n');
+          }
+        }
+      });
+    `;
+    const client = new AcpClient({
+      command: process.execPath,
+      args: ['-e', peer],
+      onNotification: (notification) => notifications.push(notification),
+      onRequest: (request) => {
+        expect(request.method).toBe('session/request_permission');
+        return { outcome: { outcome: 'selected', optionId: 'allow-once' } };
+      },
+    });
+    children.push(client);
+
+    await client.initialize();
+    const session = await client.newSession(process.cwd());
+    await expect(client.prompt(session.sessionId, 'Use a tool')).resolves.toBe('end_turn');
+
+    expect(notifications).toEqual([{
+      method: 'session/update',
+      params: {
+        sessionId: 'session-permission',
+        update: { sessionUpdate: 'usage_update', used: 10 },
+      },
+    }]);
+  });
+
+  it('resumes and closes a durable session through the stabilized lifecycle methods', async () => {
+    const peer = String.raw`
+      process.stdin.setEncoding('utf8');
+      let buffer = '';
+      process.stdin.on('data', (chunk) => {
+        buffer += chunk;
+        let newline;
+        while ((newline = buffer.indexOf('\n')) >= 0) {
+          const line = buffer.slice(0, newline).trim();
+          buffer = buffer.slice(newline + 1);
+          if (!line) continue;
+          const request = JSON.parse(line);
+          const result = request.method === 'initialize'
+            ? { protocolVersion: 1, agentCapabilities: { sessionCapabilities: { resume: {}, close: {} } } }
+            : request.method === 'session/resume'
+              ? { configOptions: [{ id: 'mode', currentValue: 'build' }] }
+              : request.method === 'session/close'
+                ? {}
+                : null;
+          const response = result === null
+            ? { jsonrpc: '2.0', id: request.id, error: { code: -32601, message: 'Method not found' } }
+            : { jsonrpc: '2.0', id: request.id, result };
+          process.stdout.write(JSON.stringify(response) + '\n');
+        }
+      });
+    `;
+    const client = new AcpClient({ command: process.execPath, args: ['-e', peer] });
+    children.push(client);
+
+    await client.initialize();
+    await expect(client.resumeSession('durable-session', process.cwd())).resolves.toEqual({
+      sessionId: 'durable-session',
+      configOptions: [{
+        id: 'mode',
+        name: undefined,
+        category: undefined,
+        type: undefined,
+        currentValue: 'build',
+        options: [],
+      }],
+    });
+    await expect(client.closeSession('durable-session')).resolves.toBeUndefined();
+  });
+
+  it('bounds requests when an ACP process stops responding', async () => {
+    const peer = String.raw`
+      process.stdin.resume();
+    `;
+    const client = new AcpClient({
+      command: process.execPath,
+      args: ['-e', peer],
+      requestTimeoutMs: 25,
+    });
+    children.push(client);
+
+    await expect(client.initialize()).rejects.toThrow('ACP initialize timed out after 25ms');
+  });
+
+  it('returns typed errors when a reverse request is rejected synchronously', async () => {
+    const peer = String.raw`
+      process.stdin.setEncoding('utf8');
+      let buffer = '';
+      process.stdin.on('data', (chunk) => {
+        buffer += chunk;
+        let newline;
+        while ((newline = buffer.indexOf('\n')) >= 0) {
+          const line = buffer.slice(0, newline).trim();
+          buffer = buffer.slice(newline + 1);
+          if (!line) continue;
+          const message = JSON.parse(line);
+          if (message.method === 'initialize') {
+            process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: 'unsupported-1', method: 'extension/unknown' }) + '\n');
+          } else if (message.id === 'unsupported-1' && message.error?.code === -32601) {
+            process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { protocolVersion: 1 } }) + '\n');
+          }
+        }
+      });
+    `;
+    const client = new AcpClient({
+      command: process.execPath,
+      args: ['-e', peer],
+      onRequest: (request) => {
+        throw new AcpRequestError(-32601, `Unsupported: ${request.method}`);
+      },
+    });
+    children.push(client);
+
+    await expect(client.initialize()).resolves.toMatchObject({ protocolVersion: 1 });
   });
 });

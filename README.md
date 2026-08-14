@@ -50,6 +50,8 @@ Nothing is reported back to us unless you switch it on. Product telemetry, crash
 
 A first-run picker discovers what's installed and lets you choose your orchestrator + workers. No vendor pin — Codex is a default, not a requirement. Adding a runtime is a small, documented patch ([`docs/internals/runtime-adapter-contract.md`](./docs/internals/runtime-adapter-contract.md)) — community adapters welcome.
 
+Claude Code can also stay in charge of tools and session behavior while another model supplies inference. In **Settings → Models → Claude Code harness**, choose the native account, an API-billed OpenRouter model, or the experimental local Codex subscription carrier. Each orchestrator chat gets an isolated resident session, and completed turns show prompt-cache truth when the runtime reports it. The [model-carrier guide](./docs/user/claude-code-model-carriers.md) explains setup, billing, caching, recovery, and the opt-in live verification.
+
 ### Latest runtime dogfood receipt
 
 This is one bounded operational run, not a benchmark. On August 10, 2026, o8 `0.1.666` dispatched OpenCode 2 with OpenRouter's DeepSeek V4 Flash to build automatic worker-pane placement inside o8 itself.

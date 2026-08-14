@@ -14,7 +14,9 @@ import {
   buildClaudePermissionDecisionMessage,
   coerceClaudeCodeChatEvent,
   mergeClaudeCodeChatEvent,
+  workspaceUsageTokens,
   type ClaudePermissionDecision,
+  type WorkspaceUsageTokens,
   type WorkspaceStreamEvent,
 } from '@/components/desktop/workspace-terminal/workspace-stream-events';
 import { getRuntimeCapability, type OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
@@ -75,7 +77,7 @@ export function useWorkspaceChatPane({
   const [activeClaudeCodeEvents, setActiveClaudeCodeEvents] = useState<ClaudeCodeStreamJsonChatEvent[]>([]);
   const [activeThinking, setActiveThinking] = useState<{ steps: MobileTranscriptThinkingStep[]; thinking: string } | null>(null);
   const [streamMeta, setStreamMeta] = useState<{
-    tokens?: { input: number; output: number };
+    tokens?: WorkspaceUsageTokens;
     costUsd?: number;
     sources?: MobileTranscriptSource[];
     recalledFacts?: number;
@@ -411,7 +413,7 @@ export function useWorkspaceChatPane({
       ];
       const thinkingStartTime = Date.now();
       let isThinking = true;
-      let tokens: { input: number; output: number } | undefined;
+      let tokens: WorkspaceUsageTokens | undefined;
       let costUsd: number | undefined;
       let recalledFacts = 0;
       const sources: MobileTranscriptSource[] = [];
@@ -584,9 +586,7 @@ export function useWorkspaceChatPane({
             }
 
             if (event.type === 'usage') {
-              tokens = typeof event.inputTokens === 'number' || typeof event.outputTokens === 'number'
-                ? { input: event.inputTokens ?? 0, output: event.outputTokens ?? 0 }
-                : tokens;
+              tokens = workspaceUsageTokens(event, tokens);
               if (typeof event.costUsd === 'number') {
                 costUsd = event.costUsd;
               }
@@ -620,10 +620,7 @@ export function useWorkspaceChatPane({
 
             if (event.type === 'done' || event.type === 'close') {
               if (typeof event.inputTokens === 'number' || typeof event.outputTokens === 'number') {
-                tokens = {
-                  input: event.inputTokens ?? tokens?.input ?? 0,
-                  output: event.outputTokens ?? tokens?.output ?? 0,
-                };
+                tokens = workspaceUsageTokens(event, tokens);
               }
               if (typeof event.costUsd === 'number') {
                 costUsd = event.costUsd;

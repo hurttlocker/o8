@@ -14,7 +14,7 @@ import type { MoaConfig, MoaParticipant } from './moa';
 import { resolveCollideAggregatorSync, type CollideAggregator } from '@/lib/operator/defaults';
 import { MODEL_IDS } from '@/lib/models';
 
-/** Default brain — Claude (opus, max) + Codex (gpt-5.5, xhigh) → Claude (opus, max). */
+/** Default brain: Claude (Opus, max) + the configured Codex flagship (xhigh), synthesized by Claude. */
 export const DEFAULT_COLLIDE_CONFIG: MoaConfig = {
   id: 'collide',
   label: 'Collide',

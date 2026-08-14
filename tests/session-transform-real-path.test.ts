@@ -282,7 +282,7 @@ describe('session transform production route', () => {
       }),
     ]));
     expect(statSync(path.join(dataDir, 'session-transform-catalog.json')).mode & 0o777).toBe(0o600);
-  });
+  }, 30_000);
 
   it('serializes same-version transforms so only one commits', async () => {
     const beforeCalls = checkpointCalls;

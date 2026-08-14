@@ -2,11 +2,10 @@
  * Agent Client Protocol (ACP) stdio client.
  *
  * ACP is the protocol Zed / VS Code / JetBrains use to drive AI coding agents
- * (agentclientprotocol.com — NOT MCP). o8 uses it as the generic orchestrator-
- * backend transport: one client → any ACP agent (Hermes now; openclaw acpx / Zed
- * later). This module owns the wire (spawn + JSON-RPC 2.0 over newline-delimited
- * JSON) and the `session/update` → `OrchestratorEvent` mapping. The backend
- * (`orchestrator-backends/acp.ts`) owns sessions / lifecycle on top of it.
+ * (agentclientprotocol.com — NOT MCP). o8 uses one client for orchestrators and
+ * worker runtimes so provider-specific adapters only own durable session truth.
+ * This module owns the wire (spawn + JSON-RPC 2.0 over newline-delimited JSON),
+ * bounded process lifecycle, reverse requests, and optional event mapping.
  *
  * Wire facts verified against the published spec AND live `hermes acp` v0.17.0:
  *   - framing is NDJSON (one JSON-RPC object per line) — NOT Content-Length;
@@ -62,6 +61,26 @@ export interface AcpConfigOption {
 export interface AcpNewSessionResult {
   sessionId: string;
   configOptions: AcpConfigOption[];
+}
+
+export interface AcpRawNotification {
+  method: string;
+  params: Record<string, unknown>;
+}
+
+export interface AcpInboundRequest extends AcpRawNotification {
+  id: string | number;
+}
+
+export class AcpRequestError extends Error {
+  constructor(
+    readonly code: number,
+    message: string,
+    readonly data?: unknown,
+  ) {
+    super(message);
+    this.name = 'AcpRequestError';
+  }
 }
 
 interface JsonRpcResponse {
@@ -179,6 +198,14 @@ export interface AcpClientOptions {
   onEvent?: (event: OrchestratorEvent) => void;
   /** Raw stderr lines from the agent (logs) — optional, for diagnostics. */
   onStderr?: (chunk: string) => void;
+  /** Every raw ACP notification, before any optional OrchestratorEvent mapping. */
+  onNotification?: (notification: AcpRawNotification) => void;
+  /** Resolve agent-to-client JSON-RPC requests such as one-shot tool approval. */
+  onRequest?: (request: AcpInboundRequest) => unknown | Promise<unknown>;
+  /** Called after the owned ACP process exits. */
+  onExit?: (result: { code: number | null; signal: NodeJS.Signals | null }) => void;
+  /** Default bound for initialize/session/config requests. */
+  requestTimeoutMs?: number;
 }
 
 /**
@@ -188,14 +215,24 @@ export interface AcpClientOptions {
 export class AcpClient {
   private proc: ChildProcess;
   private nextId = 1;
-  private readonly pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+  private readonly pending = new Map<number, {
+    resolve: (v: unknown) => void;
+    reject: (e: Error) => void;
+    timeout: ReturnType<typeof setTimeout>;
+  }>();
   private buf = '';
   private readonly onEvent?: (event: OrchestratorEvent) => void;
+  private readonly onNotification?: (notification: AcpRawNotification) => void;
+  private readonly onRequest?: (request: AcpInboundRequest) => unknown | Promise<unknown>;
+  private readonly requestTimeoutMs: number;
   private closed = false;
   private readonly viaInterpreter: boolean;
 
   constructor(opts: AcpClientOptions) {
     this.onEvent = opts.onEvent;
+    this.onNotification = opts.onNotification;
+    this.onRequest = opts.onRequest;
+    this.requestTimeoutMs = opts.requestTimeoutMs ?? 30_000;
     // An ACP agent installed by npm is a `.cmd` on Windows, which spawn cannot
     // run directly (EINVAL, before any process exists). Going through the
     // interpreter makes the agent a GRANDchild, so kill() has to change too —
@@ -211,7 +248,10 @@ export class AcpClient {
     this.proc.stdout?.setEncoding('utf8');
     this.proc.stdout?.on('data', (chunk: string) => this.onStdout(chunk));
     if (opts.onStderr) this.proc.stderr?.on('data', (c: Buffer) => opts.onStderr!(c.toString('utf8')));
-    this.proc.on('close', () => this.onClose());
+    this.proc.on('close', (code, signal) => {
+      this.onClose();
+      opts.onExit?.({ code, signal });
+    });
     this.proc.on('error', (err) => this.failAll(err instanceof Error ? err : new Error(String(err))));
   }
 
@@ -239,19 +279,52 @@ export class AcpClient {
       const entry = this.pending.get(msg.id);
       if (!entry) return;
       this.pending.delete(msg.id);
+      clearTimeout(entry.timeout);
       const res = msg as unknown as JsonRpcResponse;
       if (res.error) entry.reject(new Error(`ACP error ${res.error.code}: ${res.error.message}`));
       else entry.resolve(res.result);
       return;
     }
-    // session/update notification → mapped OrchestratorEvent.
-    if (msg.method === 'session/update') {
-      const params = asRecord(msg.params);
+    if ((typeof msg.id === 'number' || typeof msg.id === 'string') && typeof msg.method === 'string') {
+      const request: AcpInboundRequest = {
+        id: msg.id,
+        method: msg.method,
+        params: asRecord(msg.params) ?? {},
+      };
+      if (!this.onRequest) {
+        this.write({
+          jsonrpc: '2.0',
+          id: request.id,
+          error: { code: -32601, message: `Unsupported ACP request: ${request.method}` },
+        });
+        return;
+      }
+      void Promise.resolve().then(() => this.onRequest!(request)).then(
+        (result) => this.write({ jsonrpc: '2.0', id: request.id, result: result ?? null }),
+        (error) => {
+          const requestError = error instanceof AcpRequestError
+            ? error
+            : new AcpRequestError(-32000, error instanceof Error ? error.message : String(error));
+          this.write({
+            jsonrpc: '2.0',
+            id: request.id,
+            error: {
+              code: requestError.code,
+              message: requestError.message,
+              ...(requestError.data === undefined ? {} : { data: requestError.data }),
+            },
+          });
+        },
+      ).catch(() => { /* the process exited before the response could be written */ });
+      return;
+    }
+    if (typeof msg.method === 'string') {
+      const params = asRecord(msg.params) ?? {};
+      this.onNotification?.({ method: msg.method, params });
+      if (msg.method !== 'session/update') return;
       const event = params ? mapAcpUpdate(params.update) : null;
       if (event && this.onEvent) this.onEvent(event);
     }
-    // Agent→client requests (fs/read, permission prompts, …) are not handled in
-    // v1 — Hermes runs with --accept-hooks so it doesn't block on them.
   }
 
   private onClose(): void {
@@ -260,7 +333,10 @@ export class AcpClient {
   }
 
   private failAll(err: Error): void {
-    for (const { reject } of this.pending.values()) reject(err);
+    for (const { reject, timeout } of this.pending.values()) {
+      clearTimeout(timeout);
+      reject(err);
+    }
     this.pending.clear();
   }
 
@@ -269,13 +345,18 @@ export class AcpClient {
     this.proc.stdin?.write(JSON.stringify(obj) + '\n');
   }
 
-  private request(method: string, params: unknown): Promise<unknown> {
+  private request(method: string, params: unknown, timeoutMs = this.requestTimeoutMs): Promise<unknown> {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      const timeout = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`ACP ${method} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      this.pending.set(id, { resolve, reject, timeout });
       try {
         this.write({ jsonrpc: '2.0', id, method, params });
       } catch (err) {
+        clearTimeout(timeout);
         this.pending.delete(id);
         reject(err instanceof Error ? err : new Error(String(err)));
       }
@@ -307,6 +388,21 @@ export class AcpClient {
     return { sessionId, configOptions: parseConfigOptions(result?.configOptions) };
   }
 
+  /** Reconnect this client process to a durable ACP session without replaying history. */
+  async resumeSession(
+    sessionId: string,
+    cwd: string,
+    mcpServers: AcpMcpServer[] = [],
+  ): Promise<AcpNewSessionResult> {
+    const result = asRecord(await this.request('session/resume', { sessionId, cwd, mcpServers })) ?? {};
+    return { sessionId, configOptions: parseConfigOptions(result.configOptions) };
+  }
+
+  /** Release one active session while keeping the shared ACP process available. */
+  async closeSession(sessionId: string): Promise<void> {
+    await this.request('session/close', { sessionId });
+  }
+
   /**
    * Switch the session's model in place. Current ACP agents expose model as a
    * standard config option; older OpenCode builds used `session/set_model`.
@@ -332,12 +428,14 @@ export class AcpClient {
 
   /** Run one prompt turn. Resolves with the stopReason when the agent finishes;
    *  streaming arrives via onEvent in between. */
-  async prompt(sessionId: string, text: string): Promise<AcpStopReason> {
+  async prompt(sessionId: string, text: string, timeoutMs?: number): Promise<AcpStopReason> {
     const result = asRecord(await this.request('session/prompt', {
       sessionId,
       prompt: [{ type: 'text', text }],
-    }));
-    return (result && str(result.stopReason)) || 'end_turn';
+    }, timeoutMs));
+    const stopReason = result && str(result.stopReason);
+    if (!stopReason) throw new Error('ACP session/prompt returned no stopReason');
+    return stopReason;
   }
 
   /** Abort the in-flight turn (notification — the agent ends it with stopReason 'cancelled'). */
@@ -361,6 +459,7 @@ export class AcpClient {
 
   kill(): void {
     this.closed = true;
+    this.failAll(new Error('ACP client was stopped'));
     // When the agent was launched through cmd.exe it is a grandchild, and
     // kill() reaches only the interpreter — the agent keeps running with its
     // stdio pipes broken. `taskkill /T` is the only way to take the tree.
@@ -375,5 +474,32 @@ export class AcpClient {
     } catch {
       /* already dead */
     }
+  }
+
+  async close(timeoutMs = 1_500): Promise<void> {
+    if (this.proc.exitCode !== null || this.proc.signalCode !== null) return;
+    this.kill();
+    if (await this.waitForExit(timeoutMs)) return;
+    try {
+      this.proc.kill('SIGKILL');
+    } catch {
+      /* already dead */
+    }
+    await this.waitForExit(750);
+  }
+
+  private waitForExit(timeoutMs: number): Promise<boolean> {
+    if (this.proc.exitCode !== null || this.proc.signalCode !== null) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        this.proc.removeListener('close', exited);
+        resolve(false);
+      }, timeoutMs);
+      const exited = () => {
+        clearTimeout(timeout);
+        resolve(true);
+      };
+      this.proc.once('close', exited);
+    });
   }
 }

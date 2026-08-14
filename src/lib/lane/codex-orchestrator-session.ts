@@ -222,8 +222,8 @@ function reasoningEffortFromThinkingEffort(effort: ThinkingEffort | undefined, m
  * (`ollama:` / `lmstudio:`), the orchestrator runs on it too — so a zero-cloud-
  * key dev's chat surface works end-to-end on their own machine. A *cloud*
  * dispatch model does NOT change the orchestrator default (workers and the
- * orchestrator are separate concerns on the cloud path), so the gpt-5.5 default
- * is preserved exactly.
+ * orchestrator are separate concerns on the cloud path), so the configured
+ * Codex flagship default is preserved exactly.
  */
 export function resolveOrchestratorModelSync(explicit?: string): string {
   const trimmed = explicit?.trim();

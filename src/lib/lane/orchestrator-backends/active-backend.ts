@@ -15,7 +15,7 @@ import type { OrchestratorBackendId } from './types';
  * The `orchestratorBackend` operator setting picks the backend:
  *   - **'auto' (default)** → defer to the legacy `inAppOrchestratorEnabled`
  *     boolean, BYTE-IDENTICAL to the pre-setting behavior:
- *       · toggle OFF (default) → Codex GPT-5.5 xhigh
+ *       · toggle OFF (default) → Codex GPT-5.6 Sol xhigh
  *       · toggle ON            → Claude
  *   - a specific id ('codex' | 'claude' | 'openclaw' | …) → forces that backend.
  * A per-request `msg.backend` still overrides this (see ws-server's

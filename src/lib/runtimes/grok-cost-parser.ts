@@ -17,21 +17,33 @@ function readUsage(parsed: Record<string, unknown>): Record<string, unknown> | n
 }
 
 function extractUsage(parsed: Record<string, unknown>): SessionCostData | null {
-  const type = String(parsed.type ?? parsed.event ?? '').toLowerCase();
-  const usage = readUsage(parsed);
+  const params = isRecord(parsed.params) ? parsed.params : null;
+  const acpUpdate = parsed.method === '_x.ai/session_notification' && isRecord(params?.update)
+    ? params.update
+    : null;
+  const sourceFrame = acpUpdate ?? parsed;
+  const type = String(sourceFrame.type ?? sourceFrame.event ?? sourceFrame.sessionUpdate ?? '').toLowerCase();
+  const usage = readUsage(sourceFrame);
   if (!usage && type !== 'usage' && type !== 'cost') return null;
-  const source = usage ?? parsed;
+  const source = usage ?? sourceFrame;
   const inputTokens = toNumber(source.input_tokens ?? source.inputTokens ?? source.prompt_tokens ?? source.promptTokens);
   const outputTokens = toNumber(source.output_tokens ?? source.outputTokens ?? source.completion_tokens ?? source.completionTokens);
-  const cacheReadTokens = toNumber(source.cache_read_input_tokens ?? source.cache_read_tokens ?? source.cacheReadTokens ?? source.cached_input_tokens ?? source.cachedInputTokens);
-  const cacheWriteTokens = toNumber(source.cache_creation_input_tokens ?? source.cache_write_tokens ?? source.cacheWriteTokens);
+  const cacheReadTokens = toNumber(source.cache_read_input_tokens ?? source.cache_read_tokens
+    ?? source.cacheReadTokens ?? source.cachedReadTokens ?? source.cached_input_tokens ?? source.cachedInputTokens);
+  const cacheWriteTokens = toNumber(source.cache_creation_input_tokens ?? source.cache_write_tokens
+    ?? source.cacheWriteTokens ?? source.cacheCreationTokens);
   if (inputTokens === 0 && outputTokens === 0 && cacheReadTokens === 0 && cacheWriteTokens === 0) return null;
-  const embeddedCost = toNumber(parsed.total_cost_usd ?? parsed.totalCostUsd
-    ?? source.total_cost_usd ?? source.totalCostUsd ?? source.cost_usd ?? source.costUsd);
-  const modelUsage = isRecord(parsed.modelUsage) ? parsed.modelUsage : null;
+  const costUsdTicks = toNumber(source.costUsdTicks ?? source.cost_usd_ticks);
+  const embeddedCost = costUsdTicks > 0
+    ? costUsdTicks / 10_000_000_000
+    : toNumber(sourceFrame.total_cost_usd ?? sourceFrame.totalCostUsd
+      ?? source.total_cost_usd ?? source.totalCostUsd ?? source.cost_usd ?? source.costUsd);
+  const modelUsage = isRecord(source.modelUsage)
+    ? source.modelUsage
+    : isRecord(sourceFrame.modelUsage) ? sourceFrame.modelUsage : null;
   const modelUsageIds = modelUsage ? Object.keys(modelUsage) : [];
-  const model = typeof parsed.model === 'string' && parsed.model.trim()
-    ? parsed.model.trim()
+  const model = typeof sourceFrame.model === 'string' && sourceFrame.model.trim()
+    ? sourceFrame.model.trim()
     : typeof source.model === 'string' && source.model.trim()
       ? source.model.trim()
       : modelUsageIds.length === 1 ? modelUsageIds[0] : null;

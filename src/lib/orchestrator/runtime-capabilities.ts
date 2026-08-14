@@ -103,7 +103,7 @@ export const ORCHESTRATOR_RUNTIMES = {
     authHouse: 'claude',
     reasoningEffort: true,
     tier: 'frontier',
-    description: 'Anthropic Claude Code CLI worker via interactive stream-json. Full-access permission mode, sub-billed; never --print.',
+    description: 'Claude Code CLI worker via interactive stream-json. Uses the existing Claude account by default or an explicitly selected API gateway model; never --print.',
   },
   gemini: {
     label: 'Gemini',

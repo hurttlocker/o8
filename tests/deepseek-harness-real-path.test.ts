@@ -72,6 +72,13 @@ describe('DeepSeek Harness production runtime seam', () => {
 
     await waitForAssistant(() => deepSeekHarnessRuntime.readTranscript(sessionKey), 1);
     await expect(deepSeekHarnessRuntime.resume(sessionKey, 'second turn')).resolves.toMatchObject({ ok: true });
+    await waitForOutcome(
+      async () => {
+        const { getOwnedDeepSeekHarnessReviewPacket } = await import('@/lib/deepseek-harness/owned');
+        return getOwnedDeepSeekHarnessReviewPacket(sessionKey);
+      },
+      'finished',
+    );
     const transcript = await waitForAssistant(() => deepSeekHarnessRuntime.readTranscript(sessionKey), 2);
     expect(transcript.filter((entry) => entry.role === 'user').map((entry) => entry.text)).toEqual([
       'first turn',

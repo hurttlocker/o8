@@ -39,17 +39,76 @@ afterEach(async () => {
 describe('grok runtime parser fixtures', () => {
   it('uses the current autonomous launch and resume contract', () => {
     expect(grokLaunchArgs({ prompt: 'first', model: 'grok-4.6' })).toEqual([
-      '-p', 'first',
-      '--json-schema', expect.any(String),
+      'agent',
       '--always-approve',
+      '--no-leader',
       '--model', 'grok-4.6',
+      'stdio',
     ]);
     expect(grokResumeArgs({ threadId: 'session-123', prompt: 'again' })).toEqual([
-      '-p', 'again',
-      '--resume', 'session-123',
-      '--json-schema', expect.any(String),
+      'agent',
       '--always-approve',
+      '--no-leader',
+      'stdio',
     ]);
+  });
+
+  it('parses official ACP transcript and exact usage receipts', async () => {
+    const raw = [
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'session/update',
+        params: {
+          sessionId: 'grok-acp-123',
+          update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'ACP_GROK' } },
+        },
+      }),
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'session/update',
+        params: {
+          sessionId: 'grok-acp-123',
+          update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '_OK' } },
+        },
+      }),
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: '_x.ai/session_notification',
+        params: {
+          sessionId: 'grok-acp-123',
+          update: {
+            sessionUpdate: 'turn_completed',
+            usage: {
+              inputTokens: 41_985,
+              outputTokens: 7,
+              cachedReadTokens: 128,
+              cacheCreationTokens: 4,
+              costUsdTicks: 523_643_500,
+              modelUsage: { 'grok-4.6': { inputTokens: 41_985, outputTokens: 7 } },
+            },
+          },
+        },
+      }),
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'o8/session.prompt.settled',
+        params: { outcome: 'finished', stopReason: 'end_turn' },
+      }),
+    ].join('\n');
+    const parsed = grokParseRunLog(raw, runRecord());
+    expect(parsed).toMatchObject({ threadId: 'grok-acp-123', completedTurn: true, outcome: 'finished' });
+    expect(parsed.entries.some((entry) => entry.text === 'ACP_GROK_OK')).toBe(true);
+    expect(parsed.entries.some((entry) => entry.text.includes('$0.052364'))).toBe(true);
+
+    const filePath = await fixtureFile('grok-acp.jsonl', raw);
+    await expect(parseGrokSessionCost([filePath])).resolves.toEqual({
+      inputTokens: 41_985,
+      outputTokens: 7,
+      cacheReadTokens: 128,
+      cacheWriteTokens: 4,
+      totalCostUsd: 0.052364,
+      model: 'grok-4.6',
+    });
   });
 
   it('parses the current whole-document result contract', () => {

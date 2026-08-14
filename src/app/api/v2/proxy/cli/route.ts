@@ -386,6 +386,8 @@ function normalizeClaude(raw: any): SseEvent[] {
         type: 'usage',
         inputTokens: raw.message.usage.input_tokens ?? 0,
         outputTokens: raw.message.usage.output_tokens ?? 0,
+        cacheReadTokens: raw.message.usage.cache_read_input_tokens ?? 0,
+        cacheWriteTokens: raw.message.usage.cache_creation_input_tokens ?? 0,
       });
     }
   }
@@ -396,6 +398,8 @@ function normalizeClaude(raw: any): SseEvent[] {
         type: 'usage',
         inputTokens: raw.usage.input_tokens ?? 0,
         outputTokens: raw.usage.output_tokens ?? 0,
+        cacheReadTokens: raw.usage.cache_read_input_tokens ?? 0,
+        cacheWriteTokens: raw.usage.cache_creation_input_tokens ?? 0,
       });
     }
   }

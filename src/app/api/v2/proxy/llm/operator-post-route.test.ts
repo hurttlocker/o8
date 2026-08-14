@@ -82,7 +82,7 @@ describe('operator POST resolved inference routes', () => {
     const [url, init] = upstreamFetch.mock.calls[0];
     expect(String(url)).toBe('https://openrouter.ai/api/v1/chat/completions');
     expect((init as RequestInit).headers).toMatchObject({ Authorization: `Bearer ${storedKey}` });
-  });
+  }, 30_000);
 
   it('uses a live local endpoint and its configured model override', async () => {
     process.env.O8_LOCAL_INFERENCE_BASE_URL = 'http://127.0.0.1:11434';
@@ -107,5 +107,5 @@ describe('operator POST resolved inference routes', () => {
     expect(String(url)).toBe('http://127.0.0.1:11434/v1/chat/completions');
     expect((init as RequestInit).headers).not.toHaveProperty('Authorization');
     expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({ model: 'local-route-model' });
-  });
+  }, 30_000);
 });

@@ -15,9 +15,26 @@ export interface WorkspaceStreamEvent {
   threadId?: string;
   inputTokens?: number;
   outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
   costUsd?: number;
   factCount?: number;
   sources?: Array<{ title: string; url?: string; path?: string; index?: number }>;
+}
+
+export type WorkspaceUsageTokens = { input: number; output: number; cacheRead?: number; cacheWrite?: number };
+
+export function workspaceUsageTokens(
+  event: WorkspaceStreamEvent,
+  fallback?: WorkspaceUsageTokens,
+): WorkspaceUsageTokens | undefined {
+  if (![event.inputTokens, event.outputTokens, event.cacheReadTokens, event.cacheWriteTokens].some((value) => typeof value === 'number')) return fallback;
+  return {
+    input: event.inputTokens ?? fallback?.input ?? 0,
+    output: event.outputTokens ?? fallback?.output ?? 0,
+    ...(typeof event.cacheReadTokens === 'number' ? { cacheRead: event.cacheReadTokens } : {}),
+    ...(typeof event.cacheWriteTokens === 'number' ? { cacheWrite: event.cacheWriteTokens } : {}),
+  };
 }
 
 function normalizeStatus(status: WorkspaceStreamEvent['status']) {
@@ -49,6 +66,17 @@ export function mergeClaudeCodeChatEvent(
 }
 
 export function coerceClaudeCodeChatEvent(event: WorkspaceStreamEvent): ClaudeCodeStreamJsonChatEvent | null {
+  if (event.type === 'usage') {
+    return {
+      type: 'usage',
+      inputTokens: event.inputTokens ?? 0,
+      outputTokens: event.outputTokens ?? 0,
+      ...(typeof event.cacheReadTokens === 'number' ? { cacheReadTokens: event.cacheReadTokens } : {}),
+      ...(typeof event.cacheWriteTokens === 'number' ? { cacheWriteTokens: event.cacheWriteTokens } : {}),
+      ...(typeof event.costUsd === 'number' ? { costUsd: event.costUsd } : {}),
+    };
+  }
+
   if (event.type === 'tool_call' && event.name) {
     return {
       type: 'tool_call',

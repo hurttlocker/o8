@@ -137,7 +137,7 @@ export async function streamAssistantResponse({
 
   const decoder = new TextDecoder();
   let fullContent = '';
-  let tokens: { input: number; output: number } | undefined;
+  let tokens: { input: number; output: number; cacheRead?: number; cacheWrite?: number } | undefined;
   let costUsd: number | undefined;
   const toolCalls: ToolCallInfo[] = [];
   const sources: SourceInfo[] = [];
@@ -187,7 +187,12 @@ export async function streamAssistantResponse({
           continue;
         }
         if (parsed.type === 'usage') {
-          tokens = { input: parsed.inputTokens, output: parsed.outputTokens };
+          tokens = {
+            input: parsed.inputTokens,
+            output: parsed.outputTokens,
+            ...(typeof parsed.cacheReadTokens === 'number' ? { cacheRead: parsed.cacheReadTokens } : {}),
+            ...(typeof parsed.cacheWriteTokens === 'number' ? { cacheWrite: parsed.cacheWriteTokens } : {}),
+          };
           costUsd = parsed.costUsd;
           continue;
         }

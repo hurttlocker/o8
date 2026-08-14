@@ -19,6 +19,7 @@ import {
   repoNameFromPath,
   trimTitle,
   type ChatHistoryMessage,
+  type OrchestratorAssistantUpsertInput,
   type OrchestratorHistoryRecord,
 } from './orchestrator-thread-projection';
 
@@ -591,17 +592,7 @@ export function truncateMobileOrchestratorThreadFromMessage(input: {
   return readProjectedThread(tabId);
 }
 
-export function upsertMobileOrchestratorAssistantMessage(input: {
-  tabId: string | null | undefined;
-  repoPath: string;
-  messageId: string;
-  content: string;
-  backend?: MobileOrchestratorBackend | null;
-  agent?: string | null;
-  sessionId?: string | null;
-  model?: string | null;
-  timestampMs?: number;
-}): MobileOrchestratorThread | null {
+export function upsertMobileOrchestratorAssistantMessage(input: OrchestratorAssistantUpsertInput): MobileOrchestratorThread | null {
   const tabId = input.tabId;
   if (!tabId?.startsWith('thoughts-')) return null;
 
@@ -647,6 +638,7 @@ export function upsertMobileOrchestratorAssistantMessage(input: {
       // stamped first rather than letting a later call with no backend blank it.
       backend: nextMessages[existingIndex]?.backend ?? turnBackend,
       model: nextMessages[existingIndex]?.model ?? turnModel,
+      ...(input.tokens ? { tokens: input.tokens } : {}),
     };
   } else {
     // Defensive: if the most recent assistant message has identical content,
@@ -666,6 +658,7 @@ export function upsertMobileOrchestratorAssistantMessage(input: {
           persistedVersion: 1,
           backend: turnBackend,
           model: turnModel,
+          ...(input.tokens ? { tokens: input.tokens } : {}),
         },
       ];
     }

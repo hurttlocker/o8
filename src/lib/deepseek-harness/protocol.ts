@@ -143,6 +143,22 @@ export function parseDeepSeekHarnessRunLog(
   }];
   let completedTurn = false;
   let finishReason: string | undefined;
+  let acpMessage: { index: number; text: string; timestamp: string } | null = null;
+  const flushAcpMessage = () => {
+    if (!acpMessage?.text.trim()) {
+      acpMessage = null;
+      return;
+    }
+    entries.push({
+      id: `${run.id}:assistant:${acpMessage.index}`,
+      kind: 'message',
+      label: 'DeepSeek Harness',
+      text: compactText(acpMessage.text, 2_000),
+      timestamp: acpMessage.timestamp,
+      timestampLabel: formatClock(acpMessage.timestamp),
+    });
+    acpMessage = null;
+  };
 
   for (const [index, line] of raw.split('\n').entries()) {
     if (!line.trim().startsWith('{')) continue;
@@ -158,17 +174,14 @@ export function parseDeepSeekHarnessRunLog(
       const timestamp = run.finishedAt ?? run.startedAt;
       if (update?.sessionUpdate === 'agent_message_chunk') {
         const text = record(update.content)?.text;
-        if (typeof text === 'string' && text.trim()) {
-          entries.push({
-            id: `${run.id}:assistant:${index}`,
-            kind: 'message',
-            label: 'DeepSeek Harness',
-            text: compactText(text.trim(), 2_000),
-            timestamp,
-            timestampLabel: formatClock(timestamp),
-          });
+        if (typeof text === 'string' && text) {
+          acpMessage ??= { index, text: '', timestamp };
+          acpMessage.text += text;
         }
-      } else if (update?.sessionUpdate === 'tool_call') {
+        continue;
+      }
+      if (update?.sessionUpdate === 'tool_call') {
+        flushAcpMessage();
         entries.push({
           id: `${run.id}:tool:${update.toolCallId ?? index}`,
           kind: 'tool',
@@ -178,6 +191,7 @@ export function parseDeepSeekHarnessRunLog(
           timestampLabel: formatClock(timestamp),
         });
       } else if (update?.sessionUpdate === 'tool_call_update' && update.status === 'completed') {
+        flushAcpMessage();
         entries.push({
           id: `${run.id}:tool-result:${update.toolCallId ?? index}`,
           kind: 'tool-output',
@@ -190,12 +204,14 @@ export function parseDeepSeekHarnessRunLog(
       continue;
     }
     if (frame.method === 'o8/session.prompt.settled') {
+      flushAcpMessage();
       const params = record(frame.params);
       completedTurn = params?.outcome === 'finished';
       finishReason = typeof params?.stopReason === 'string' ? params.stopReason : undefined;
       continue;
     }
     if (frame.method !== 'session.event') continue;
+    flushAcpMessage();
     const params = record(frame.params);
     const event = record(params?.event);
     if (!event) continue;
@@ -260,6 +276,8 @@ export function parseDeepSeekHarnessRunLog(
       });
     }
   }
+
+  flushAcpMessage();
 
   return { entries, completedTurn, finishReason };
 }

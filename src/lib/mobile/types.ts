@@ -320,7 +320,7 @@ export interface MobileTranscriptEntry {
   timestamp?: number;
   timestampLabel?: string;
   model?: string;
-  tokens?: { input: number; output: number };
+  tokens?: { input: number; output: number; cacheRead?: number; cacheWrite?: number };
   costUsd?: number;
   sources?: MobileTranscriptSource[];
   thinking?: string;

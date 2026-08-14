@@ -51,7 +51,7 @@ export interface RuntimeCapacityCapabilities {
   identitySelectionReason?: string;
 }
 
-export type RuntimeCapacitySource = 'structured-cli' | 'local-state' | 'error-inference';
+export type RuntimeCapacitySource = 'app-server' | 'structured-cli' | 'local-state' | 'error-inference';
 export type RuntimeCapacityConfidence = 'exact' | 'estimated' | 'exhausted-only';
 export type RuntimeCapacityStatus = 'available' | 'stale' | 'unavailable' | 'malformed';
 export type RuntimeCapacityUnit = 'tokens' | 'requests' | 'credits';

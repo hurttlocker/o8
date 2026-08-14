@@ -176,6 +176,7 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
       latestSummary: compactText(prompt, 140) || `Owned ${adapter.squadShortName} session launched from o8.`,
       model: request.model?.trim() || adapter.defaultModel || undefined,
       effort: request.effort,
+      runtimeConfig: request.runtimeConfig ? { ...request.runtimeConfig } : undefined,
       identity: selectedIdentity ? {
         id: selectedIdentity.id,
         label: selectedIdentity.label,

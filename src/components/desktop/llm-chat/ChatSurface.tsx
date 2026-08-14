@@ -132,11 +132,13 @@ function ChatSurfaceBase({
             <span>{messages.length} msg{messages.length !== 1 ? 's' : ''}</span>
             {(() => {
               const totalTokens = messages.reduce((sum, message) => sum + (message.tokens?.input ?? 0) + (message.tokens?.output ?? 0), 0);
+              const cachedTokens = messages.reduce((sum, message) => sum + (message.tokens?.cacheRead ?? 0), 0);
               const totalCost = messages.reduce((sum, message) => sum + (message.costUsd ?? 0), 0);
               return totalTokens > 0 ? (
                 <>
                   <span style={{ color: 'var(--t-text-faint)' }}>|</span>
                   <span>{totalTokens > 1000 ? `${(totalTokens / 1000).toFixed(1)}K` : totalTokens} tokens</span>
+                  {cachedTokens > 0 ? <><span style={{ color: 'var(--t-text-faint)' }}>|</span><span>{cachedTokens > 1000 ? `${(cachedTokens / 1000).toFixed(1)}K` : cachedTokens} cached</span></> : null}
                   {totalCost > 0 ? <><span style={{ color: 'var(--t-text-faint)' }}>|</span><span>${totalCost.toFixed(4)}</span></> : null}
                 </>
               ) : null;

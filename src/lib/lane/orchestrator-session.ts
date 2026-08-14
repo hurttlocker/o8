@@ -1,26 +1,9 @@
 /**
- * Orchestrator session — runs Claude Code via the interactive stream-json
- * REPL path so turns bill the user's **Claude Code MAX subscription pool**
- * (the same pool `claude` in Terminal eats from), NOT the Agent SDK pool
- * that's gated by Anthropic's June-15 cap. Spawn pattern:
- *
- *   claude --input-format stream-json --output-format stream-json \
- *          --verbose --include-partial-messages \
- *          [--permission-mode plan | --dangerously-skip-permissions] \
- *          --mcp-config <path> --model <name> [--resume <id>]
- *
- * The `claude` process is kept RESIDENT across turns (warm-pool — see the
- * "Warm resident-process pool" section below). Each turn writes a single JSON
- * message to the still-open stdin and settles on the stream `result` event; the
- * process lives on for the next turn instead of exiting. First turn cold
- * (~6-9s bootstrap + MCP fork), every turn after warm. The proc bakes its config
- * (model / permission mode / tool profile / effort / MCP config) at spawn, so a
- * change recycles it; conversation context persists in the live process (and via
- * `--resume SESSION_ID` on a recycle).
- *
- * Subscription-billed. NO `-p` flag — that's the Agent SDK path which is
- * capped. See [[claude_code_interactive_repl_pivot]] +
- * [[session_may14_sdk_pricing_pivot]] memories for the why.
+ * Resident Claude Code stream-json orchestrator. Each o8 chat owns one process,
+ * Claude session, and carrier config directory; only stateless transport/auth is
+ * shared. The process is warm across turns and resumes its Claude session after
+ * config-driven recycling. Native, OpenRouter, and Codex-subscription carriers
+ * all use this full interactive harness path; `-p` remains forbidden.
  */
 
 import { spawn } from 'node:child_process';
@@ -34,9 +17,9 @@ import {
   writeOrchestratorBackendSessionId,
 } from '@/lib/mobile/orchestrator-thread-history';
 import {
-  createToolCallTracker,
+  createToolCallTracker, parseOrchestratorTurnUsage,
   processStreamEvent,
-  type OrchestratorEvent,
+  type OrchestratorEvent, type OrchestratorTurnUsage,
 } from '@/lib/lane/orchestrator-stream-events';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { getRuntime, type RuntimeSession } from '@/lib/runtimes';
@@ -85,6 +68,11 @@ import {
 } from './orchestrator-crash-survival';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
+import {
+  nativeClaudeHarnessCarrier,
+  resolveClaudeHarnessCarrier,
+  type ClaudeHarnessCarrier,
+} from './claude-harness-carrier';
 // ── Types ──
 export interface OrchestratorSession {
   sessionName: string;
@@ -151,7 +139,6 @@ const LOG_PREFIX = '[orchestrator-rehydrate]';
  */
 let startupRehydrationPromise: Promise<void> | null = null;
 let startupRehydrationComplete = false;
-
 function writeOrchestratorResetSignal(repoPath: string, threadId?: string | null): void {
   writeResetSignal(ORCHESTRATOR_STATE_DIR, repoPath, threadId);
 }
@@ -538,30 +525,21 @@ function attachmentToImageBlock(att: { dataUri: string }): { type: 'image'; sour
   return { type: 'image', source: { type: 'base64', media_type: match[1], data: match[2] } };
 }
 
-// ── Warm resident-process pool ──────────────────────────────────────────────
+// ── Warm resident-process pool ──
+// Each orchestrator chat keeps one resident process. Its baked cwd, model,
+// permissions, tools, effort, MCP config, and carrier fingerprint determine
+// whether the process can stay warm or must recycle and resume its session.
 //
-// Each orchestrator session keeps its `claude` process RESIDENT across turns
-// (ported from claude-code/interactive-session.ts — same CLI, same
-// assertNoPrintFlag billing guard). First turn cold (~6-9s bootstrap + MCP
-// fork); every turn after warm. The proc bakes {cwd, model, permissionMode,
-// toolProfile, effort, mcpConfigHash} at spawn, so a change to any of those
-// RECYCLES it. Turns settle on the stream `result` event (not proc close) so
-// the process lives on. Both the Claude proposer AND the aggregator route
-// through here, so this warms 2 of Collide's 3 turns + plain-Claude/auto-review/
-// intake for free.
-//
-// LOCKOUT (safety-critical): a resident proc keeps stdin OPEN, which removes the
+// LOCKOUT: a resident proc keeps stdin OPEN, which removes the
 // "stdin closes ⇒ an approval can never be answered" layer of the proposer
 // read-only guarantee. So a PLAN-mode proc that emits ANY permission request
 // (can_use_tool / ExitPlanMode) is KILLED on the spot — the strongest possible
 // auto-deny, and one that needs no knowledge of the (UNDOCUMENTED) stream-json
-// permission-response envelope. The write can't land: can_use_tool is emitted
-// BEFORE execution and the proc is dead before it could proceed. assertNoPrint-
-// Flag stays on the warm spawn; assertProposerEventAllowed remains the backstop.
+// permission-response envelope. The proc dies before the tool can execute;
+// assertNoPrintFlag and assertProposerEventAllowed remain the backstops.
 
 const IDLE_REAP_MS = 30 * 60_000;
-const MAX_LIVE_PROCS = 4; // mirror the Brain's warm-repl-pool cap
-
+const MAX_LIVE_PROCS = 4; // mirror the Brain warm-pool cap
 interface OrchestratorProcConfig {
   cwd: string;
   model: string;
@@ -571,8 +549,9 @@ interface OrchestratorProcConfig {
   mcpConfigPath: string;
   mcpConfigHash: string;
   mcpConfigMaterial: string;
+  modelSource: string;
+  carrierFingerprint: string;
 }
-
 interface OrchestratorActiveTurn {
   onEvent: (e: OrchestratorEvent) => void;
   captureEvent: (e: OrchestratorEvent) => void;
@@ -585,13 +564,13 @@ interface OrchestratorActiveTurn {
   toolTracker: ReturnType<typeof createToolCallTracker>;
   turnSessionId: string | null;
   cost: number | null;
+  usage?: OrchestratorTurnUsage | null;
   lastAssistantText: string;
   sawToolUseAfterText: boolean;
   launchAgentCallCount: number;
   crashRecord: OrchestratorTurnRecord | null;
   stopCrashTail: (() => void) | null;
 }
-
 interface WarmState {
   procConfig: OrchestratorProcConfig | null;
   activeTurn: OrchestratorActiveTurn | null;
@@ -602,7 +581,6 @@ interface WarmState {
   crashStdoutPath: string | null;
   crashStderrPath: string | null;
 }
-
 const warmStates = new Map<string, WarmState>();
 
 export function getWarmState(sessionName: string): WarmState {
@@ -616,12 +594,13 @@ export function getWarmState(sessionName: string): WarmState {
 
 function procConfigMatches(a: OrchestratorProcConfig | null, b: OrchestratorProcConfig): boolean {
   return !!a && a.cwd === b.cwd && a.model === b.model && a.permissionMode === b.permissionMode
-    && a.toolProfile === b.toolProfile && a.effort === b.effort && a.mcpConfigHash === b.mcpConfigHash;
+    && a.toolProfile === b.toolProfile && a.effort === b.effort && a.mcpConfigHash === b.mcpConfigHash
+    && a.modelSource === b.modelSource && a.carrierFingerprint === b.carrierFingerprint;
 }
 
 function firstProcConfigDivergence(a: OrchestratorProcConfig | null, b: OrchestratorProcConfig): string {
   if (!a) return 'procConfig';
-  for (const key of ['cwd', 'model', 'permissionMode', 'toolProfile', 'effort'] as const) {
+  for (const key of ['cwd', 'model', 'permissionMode', 'toolProfile', 'effort', 'modelSource', 'carrierFingerprint'] as const) {
     if (a[key] !== b[key]) return key;
   }
   if (a.mcpConfigHash !== b.mcpConfigHash) {
@@ -736,7 +715,7 @@ function settleOrchestratorTurn(session: OrchestratorSession, w: WarmState, erro
     }
   }
 
-  turn.onEvent({ type: 'done', sessionId: turn.turnSessionId, cost: turn.cost });
+  turn.onEvent({ type: 'done', sessionId: turn.turnSessionId, cost: turn.cost, ...(turn.usage ? { usage: turn.usage } : {}) });
   if (error) turn.onEvent({ type: 'error', error: error.message });
 
   if ((session.proc || hadCrashRecord) && session.status !== 'dead') {
@@ -763,6 +742,7 @@ function handleClaudeJsonLine(session: OrchestratorSession, w: WarmState, line: 
   if (!turn) return true; // stray output between turns
   processStreamEvent(raw, turn.captureEvent, (id) => { turn.turnSessionId = id; }, (c) => { turn.cost = c; }, turn.toolTracker);
   if (raw.type === 'result') {
+    turn.usage = parseOrchestratorTurnUsage(raw);
     settleOrchestratorTurn(session, w, null);
     return false;
   }
@@ -826,6 +806,7 @@ export function attachOrchestratorProcHandlers(session: OrchestratorSession, w: 
           const raw = JSON.parse(w.stdoutLineBuffer) as Record<string, unknown>;
           const turn = w.activeTurn;
           processStreamEvent(raw, turn.captureEvent, (id) => { turn.turnSessionId = id; }, (c) => { turn.cost = c; }, turn.toolTracker);
+          if (raw.type === 'result') turn.usage = parseOrchestratorTurnUsage(raw);
         } catch { /* ignore */ }
       }
       w.stdoutLineBuffer = '';
@@ -837,7 +818,7 @@ export function attachOrchestratorProcHandlers(session: OrchestratorSession, w: 
 }
 
 /** Spawn a fresh resident proc with the baked config. First-turn cold. */
-function spawnOrchestratorProc(session: OrchestratorSession, w: WarmState, config: OrchestratorProcConfig): void {
+function spawnOrchestratorProc(session: OrchestratorSession, w: WarmState, config: OrchestratorProcConfig, carrierEnv: Record<string, string>): void {
   // Layer B — a Fable turn keeps `--dangerously-skip-permissions` (kept MCP tools
   // run autonomously) AND adds `--disallowedTools <native>` to strip Claude's
   // native read/write tools (the token lever). isFable takes precedence over the
@@ -854,7 +835,7 @@ function spawnOrchestratorProc(session: OrchestratorSession, w: WarmState, confi
     systemPrompt: buildOrchestratorSystemPrompt(session.repoPath),
   });
 
-  // #1066 billing guard — the orchestrator REPL must stay subscription-billed.
+  // The orchestrator must stay on the interactive REPL path for every carrier.
   assertNoPrintFlag(args, 'Orchestrator REPL session');
 
   let crashRecord: OrchestratorTurnRecord | null = null;
@@ -879,8 +860,8 @@ function spawnOrchestratorProc(session: OrchestratorSession, w: WarmState, confi
   const launch = cliInvocation(resolveClaudeBin(), args);
   const proc = spawn(launch.command, launch.args, { windowsHide: true,
     cwd: session.repoPath,
-    // BYO-key injection is Fable-scoped ONLY — never ambient process.env — so the
-    // subscription-billed backends aren't re-billed against an API key.
+    // Fable key injection stays scoped; the selected harness carrier contributes
+    // only its explicit environment through carrierEnv.
     env: {
       ...process.env,
       // claude is a node shim on some installs — server's runtime on PATH (#1551).
@@ -888,6 +869,7 @@ function spawnOrchestratorProc(session: OrchestratorSession, w: WarmState, confi
       FORCE_COLOR: '0',
       NO_COLOR: '1',
       O8_MANAGED_SESSION: '1',
+      ...carrierEnv,
       ...(isFable ? fableEnvOverride() : {}),
     },
     detached: crashEnabled,
@@ -928,7 +910,7 @@ export async function sendToOrchestrator(
 ): Promise<void> {
   const permissionMode: OrchestratorPermissionMode = options.permissionMode ?? 'full';
   const thinkingEffort: ThinkingEffort = options.thinkingEffort ?? 'adaptive';
-  const model = options.model?.trim() || DEFAULT_ORCHESTRATOR_MODEL;
+  const requestedModel = options.model?.trim() || DEFAULT_ORCHESTRATOR_MODEL;
   const toolProfile: ToolProfile = options.toolProfile ?? 'full';
   const w = getWarmState(session.sessionName);
 
@@ -962,6 +944,22 @@ export async function sendToOrchestrator(
   // human-actionable message instead of "spawn claude ENOENT".
   assertOrchestratorRepoPath(session.repoPath);
 
+  const isFableProfile = toolProfile === 'fable' || toolProfile === 'fable-solo';
+  let carrier: ClaudeHarnessCarrier;
+  try {
+    carrier = isFableProfile
+      ? nativeClaudeHarnessCarrier(requestedModel)
+      : await resolveClaudeHarnessCarrier({
+          requestedModel,
+          sessionDir: join(ORCHESTRATOR_STATE_DIR, 'carrier', session.sessionName),
+        });
+  } catch (error) {
+    const failure = error instanceof Error ? error : new Error(String(error));
+    onEvent({ type: 'error', error: failure.message });
+    throw failure;
+  }
+  const model = carrier.model;
+
   if (consumeOrchestratorResetSignal(session.repoPath, session.threadId)) {
     session.claudeSessionId = null;
     // A reset means a fresh conversation — recycle the warm proc (it holds the old one).
@@ -983,6 +981,8 @@ export async function sendToOrchestrator(
     mcpConfigPath,
     mcpConfigHash: mcpFingerprint.hash,
     mcpConfigMaterial: mcpFingerprint.material,
+    modelSource: carrier.source,
+    carrierFingerprint: carrier.fingerprint,
   };
 
   // Recycle the resident proc when its baked config no longer matches (model /
@@ -997,7 +997,7 @@ export async function sendToOrchestrator(
   if (!session.proc) {
     reapIdleForCapacity(session.sessionName);
     try {
-      spawnOrchestratorProc(session, w, desiredConfig);
+      spawnOrchestratorProc(session, w, desiredConfig, carrier.spawnEnv);
     } catch (error) {
       session.status = 'dead';
       const e = error instanceof Error ? error : new Error(String(error));

@@ -31,7 +31,26 @@ export type ChatHistoryMessage = {
    */
   backend?: string;
   model?: string;
+  tokens?: {
+    input: number;
+    output: number;
+    cacheRead?: number;
+    cacheWrite?: number;
+  };
 };
+
+export interface OrchestratorAssistantUpsertInput {
+  tabId: string | null | undefined;
+  repoPath: string;
+  messageId: string;
+  content: string;
+  backend?: MobileOrchestratorBackend | null;
+  agent?: string | null;
+  sessionId?: string | null;
+  model?: string | null;
+  tokens?: ChatHistoryMessage['tokens'];
+  timestampMs?: number;
+}
 
 export type OrchestratorHistoryRecord = {
   messages?: ChatHistoryMessage[];

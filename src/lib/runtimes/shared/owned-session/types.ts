@@ -84,6 +84,8 @@ export interface OwnedSessionRecord {
   model?: string;
   /** Requested reasoning effort — applied per-runtime at launch (codex only today). */
   effort?: ThinkingEffort;
+  /** Credential-free adapter configuration pinned when this session was created. */
+  runtimeConfig?: Record<string, string>;
   /** Server-only config-home binding captured once at launch. */
   identity?: {
     id: string;
@@ -164,6 +166,8 @@ export interface OwnedLaunchRequest {
   model?: string;
   /** Requested reasoning effort — a per-runtime no-op unless the adapter uses it. */
   effort?: ThinkingEffort;
+  /** Credential-free adapter configuration to pin for launch and retry. */
+  runtimeConfig?: Record<string, string>;
 }
 
 export interface OwnedLaunchResponse {
@@ -171,6 +175,7 @@ export interface OwnedLaunchResponse {
   runtime: string;
   surfaceId: string;
   note: string;
+  sideEffect?: 'none' | 'unknown';
 }
 
 export interface OwnedArchiveResponse {
@@ -219,7 +224,7 @@ export interface OwnedRuntimeAdapter {
    * may only have GOOGLE_GENERATIVE_AI_API_KEY set in their shell). Called
    * lazily at spawn time so env reads stay current.
    */
-  extraSpawnEnv?: () => Record<string, string>;
+  extraSpawnEnv?: (session: OwnedSessionRecord) => Record<string, string> | Promise<Record<string, string>>;
 
   /** Supported isolated config-home variable for session-pinned identities. */
   isolatedConfigHomeEnv?: string;
@@ -319,7 +324,11 @@ export interface OwnedSessionStore {
   readonly surfaceIdPrefix: string;
 
   launch(request: OwnedLaunchRequest): Promise<OwnedLaunchResponse>;
-  resume(surfaceId: string, prompt: string): Promise<{ ok: boolean; note: string }>;
+  resume(surfaceId: string, prompt: string): Promise<{
+    ok: boolean;
+    note: string;
+    sideEffect?: 'none' | 'unknown';
+  }>;
   interrupt(surfaceId: string): Promise<{ interrupted: boolean; note: string }>;
   getRuntimeTail(surfaceId: string, limit?: number): Promise<{
     surface: RuntimeSurfaceSummary;

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -12,6 +12,12 @@ const ensureDispatchBackendReadyMock = vi.hoisted(() => vi.fn(async () => ({
   waitedMs: 0,
   attempts: 1,
 })));
+const ensureCodexSubscriptionProxyReadyMock = vi.hoisted(() => vi.fn(async () => ({
+  baseUrl: 'http://127.0.0.1:8317',
+  clientToken: 'local-codex-test-token',
+  models: ['gpt-5.6-sol'],
+})));
+const ensureCodexSubscriptionClaudeConfigDirMock = vi.hoisted(() => vi.fn());
 
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
@@ -37,11 +43,17 @@ vi.mock('@/lib/operator/defaults', async (importOriginal) => {
   };
 });
 
+vi.mock('@/lib/claude-code/codex-subscription-proxy', () => ({
+  ensureCodexSubscriptionProxyReady: ensureCodexSubscriptionProxyReadyMock,
+  ensureCodexSubscriptionClaudeConfigDir: ensureCodexSubscriptionClaudeConfigDirMock,
+}));
+
 describe('Claude Code dispatch spawn', () => {
   let tempRoot: string;
   let repoPath: string;
   let priorOwnedRoot: string | undefined;
   let priorClaudeBin: string | undefined;
+  let priorOpenRouterKey: string | undefined;
 
   beforeEach(() => {
     vi.resetModules();
@@ -50,8 +62,10 @@ describe('Claude Code dispatch spawn', () => {
     execFileSync('git', ['init', '-q', repoPath]);
     priorOwnedRoot = process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT;
     priorClaudeBin = process.env.O8_CLAUDE_CODE_BIN;
+    priorOpenRouterKey = process.env.OPENROUTER_API_KEY;
     process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT = path.join(tempRoot, 'owned');
     process.env.O8_CLAUDE_CODE_BIN = process.execPath;
+    delete process.env.OPENROUTER_API_KEY;
     spawnMock.mockReturnValue({
       pid: 42,
       stdin: { end: vi.fn() },
@@ -59,6 +73,9 @@ describe('Claude Code dispatch spawn', () => {
       once: vi.fn(),
     });
     ensureDispatchBackendReadyMock.mockClear();
+    ensureCodexSubscriptionProxyReadyMock.mockClear();
+    ensureCodexSubscriptionClaudeConfigDirMock.mockImplementation(async (sessionDir: string) =>
+      path.join(sessionDir, 'claude-code-codex-config'));
     resolveDefaultWorkerEffortSyncMock.mockImplementation((runtime, explicitEffort) => explicitEffort ?? undefined);
   });
 
@@ -69,6 +86,9 @@ describe('Claude Code dispatch spawn', () => {
     else process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT = priorOwnedRoot;
     if (priorClaudeBin === undefined) delete process.env.O8_CLAUDE_CODE_BIN;
     else process.env.O8_CLAUDE_CODE_BIN = priorClaudeBin;
+    if (priorOpenRouterKey === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = priorOpenRouterKey;
+    try { unlinkSync(path.join(process.env.CORTEX_IDE_DATA_DIR!, 'claude-code-worker.json')); } catch {}
     rmSync(tempRoot, { recursive: true, force: true });
   });
 
@@ -184,5 +204,99 @@ describe('Claude Code dispatch spawn', () => {
     expect(argv).not.toContain('--effort');
     expect(argv).not.toContain('-p');
     expect(argv).not.toContain('--print');
+  }, 20_000);
+
+  it('pins an OpenRouter model and gateway environment to the owned worker child', async () => {
+    process.env.OPENROUTER_API_KEY = 'sk-or-test-worker';
+    const profile = await import('@/lib/claude-code/worker-profile');
+    await profile.writeClaudeCodeWorkerProfile({
+      source: 'openrouter',
+      model: 'deepseek/deepseek-v4-pro-0813',
+      codexModel: null,
+    });
+    const { claudeCodeRuntime } = await import('@/lib/runtimes/claude-code');
+    const result = await claudeCodeRuntime.launch({
+      cwd: repoPath,
+      prompt: 'implement through the Claude Code harness',
+      model: 'claude-sonnet-4-5',
+      laneId: 'lane-gateway',
+    });
+
+    expect(result.ok).toBe(true);
+    const [, args, options] = spawnMock.mock.calls[0]!;
+    const argv = process.platform === 'win32' ? args : args.slice(2);
+    expect(argv).toContain('deepseek/deepseek-v4-pro-0813');
+    expect(options.env).toMatchObject({
+      ANTHROPIC_BASE_URL: 'https://openrouter.ai/api',
+      ANTHROPIC_AUTH_TOKEN: 'sk-or-test-worker',
+      ANTHROPIC_API_KEY: '',
+      CLAUDE_CODE_SUBAGENT_MODEL: 'deepseek/deepseek-v4-pro-0813',
+    });
+    const sessionRoot = path.join(tempRoot, 'owned', result.sessionKey!.replace('claude-code-owned:', ''));
+    const metadata = JSON.parse(readFileSync(path.join(sessionRoot, 'session.json'), 'utf8')) as {
+      model?: string;
+      runtimeConfig?: { modelSource?: string };
+    };
+    expect(metadata).toMatchObject({
+      model: 'deepseek/deepseek-v4-pro-0813',
+      runtimeConfig: { modelSource: 'openrouter' },
+    });
+  }, 20_000);
+
+  it('fails before spawning when the selected gateway has no key', async () => {
+    const profile = await import('@/lib/claude-code/worker-profile');
+    await profile.writeClaudeCodeWorkerProfile({ source: 'openrouter', model: 'x-ai/grok-4.6', codexModel: null });
+    const { claudeCodeRuntime } = await import('@/lib/runtimes/claude-code');
+    const result = await claudeCodeRuntime.launch({
+      cwd: repoPath,
+      prompt: 'do not start without credentials',
+      laneId: 'lane-no-key',
+    });
+
+    expect(result).toMatchObject({ ok: false, sideEffect: 'none' });
+    expect(result.note).toContain('OpenRouter API key');
+    expect(spawnMock).not.toHaveBeenCalled();
+  }, 20_000);
+
+  it('pins the selected Codex subscription model and isolated localhost carrier to the worker', async () => {
+    const profile = await import('@/lib/claude-code/worker-profile');
+    await profile.writeClaudeCodeWorkerProfile({
+      source: 'codex-subscription',
+      model: null,
+      codexModel: 'gpt-5.6-sol',
+    });
+    const { claudeCodeRuntime } = await import('@/lib/runtimes/claude-code');
+    const result = await claudeCodeRuntime.launch({
+      cwd: repoPath,
+      prompt: 'use the Codex subscription through the Claude Code harness',
+      model: 'claude-opus-4-8',
+      laneId: 'lane-codex-carrier',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(ensureCodexSubscriptionProxyReadyMock).toHaveBeenCalled();
+    const [, args, options] = spawnMock.mock.calls[0]!;
+    const argv = process.platform === 'win32' ? args : args.slice(2);
+    expect(argv).toContain('gpt-5.6-sol');
+    expect(argv).not.toContain('claude-opus-4-8');
+    expect(options.env).toMatchObject({
+      ANTHROPIC_BASE_URL: 'http://127.0.0.1:8317',
+      ANTHROPIC_AUTH_TOKEN: 'local-codex-test-token',
+      ANTHROPIC_API_KEY: '',
+      CLAUDE_CODE_OAUTH_TOKEN: '',
+      CLAUDE_CODE_SUBAGENT_MODEL: 'gpt-5.6-sol',
+      CLAUDE_CODE_ALWAYS_ENABLE_EFFORT: '1',
+      ENABLE_TOOL_SEARCH: 'false',
+      CLAUDE_CONFIG_DIR: expect.stringContaining('claude-code-codex-config'),
+    });
+    const sessionRoot = path.join(tempRoot, 'owned', result.sessionKey!.replace('claude-code-owned:', ''));
+    const metadata = JSON.parse(readFileSync(path.join(sessionRoot, 'session.json'), 'utf8')) as {
+      model?: string;
+      runtimeConfig?: { modelSource?: string };
+    };
+    expect(metadata).toMatchObject({
+      model: 'gpt-5.6-sol',
+      runtimeConfig: { modelSource: 'codex-subscription' },
+    });
   }, 20_000);
 });

@@ -223,12 +223,11 @@ export interface OperatorDefaults {
   /**
    * In-app orchestrator chat — the assistant panel that drives the
    * orchestrator session. **On by default as of v0.1.152.** Spawns
-   * `claude --input-format stream-json` (no `-p`) so every turn bills
-   * against the user's Claude Code MAX subscription pool — the same line
-   * `claude` in Terminal uses, NOT the gated Agent SDK pool. Requires the
-   * `claude` CLI to be installed and signed in; the spawn will error if
-   * it's missing. Flip off to fall back to Codex GPT-5.5 xhigh as the
-   * orchestrator brain (free for ChatGPT Plus / Codex subscribers).
+   * `claude --input-format stream-json` (no `-p`) with the model source
+   * selected in Settings > Models. The source can be the native Claude Code
+   * account, an API gateway, or the experimental local Codex subscription
+   * carrier. Requires the `claude` CLI; the spawn errors if it is missing.
+   * Flip off to use Codex GPT-5.6 Sol through the connected Codex subscription.
    */
   inAppOrchestratorEnabled: boolean;
   /**

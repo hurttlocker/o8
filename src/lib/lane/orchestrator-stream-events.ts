@@ -9,7 +9,7 @@ export type OrchestratorEvent =
   // Claude TodoWrite/update_plan tool calls. ws-server maps it to the mobile
   // `plan-update` orchestrator event. Step ids are stable within a turn.
   | { type: 'plan'; explanation: string | null; steps: OrchestratorPlanStep[] }
-  | { type: 'done'; sessionId: string | null; cost: number | null }
+  | { type: 'done'; sessionId: string | null; cost: number | null; usage?: OrchestratorTurnUsage }
   | { type: 'error'; error: string; code?: string; status?: number }
   // ── Collide (MoA) — emitted ONLY by the collide backend (moa.ts). Proposer
   //    text is buffered, not streamed, so it never pollutes the visible answer
@@ -34,6 +34,13 @@ export type OrchestratorEvent =
     to: { backend: string; model: string };
     lossless: boolean;
   };
+
+export interface OrchestratorTurnUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+}
 
 type ContentBlock = {
   type?: string;
@@ -69,6 +76,26 @@ interface ToolCallTracker {
    * already in claude-code/stream-json-parser.ts (a9d94b51).
    */
   hasAnyStreamedText: () => boolean;
+}
+
+function tokenCount(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : 0;
+}
+
+export function parseOrchestratorTurnUsage(event: Record<string, unknown>): OrchestratorTurnUsage | null {
+  const usage = event.usage && typeof event.usage === 'object' && !Array.isArray(event.usage)
+    ? event.usage as Record<string, unknown>
+    : null;
+  if (!usage) return null;
+  const parsed = {
+    inputTokens: tokenCount(usage.input_tokens ?? usage.inputTokens),
+    outputTokens: tokenCount(usage.output_tokens ?? usage.outputTokens),
+    cacheReadTokens: tokenCount(usage.cache_read_input_tokens ?? usage.cacheReadTokens),
+    cacheWriteTokens: tokenCount(usage.cache_creation_input_tokens ?? usage.cacheWriteTokens),
+  };
+  return Object.values(parsed).some((value) => value > 0) ? parsed : null;
 }
 
 export function createToolCallTracker(): ToolCallTracker {

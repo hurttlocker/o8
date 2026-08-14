@@ -1,34 +1,26 @@
 /**
  * Grok Build owned-session adapter.
  *
- * Headless mode uses `grok -p <prompt> --json-schema <schema>`. Current Grok
- * Build writes one JSON document; older releases wrote JSONL, so the parser
- * intentionally accepts both contracts.
+ * Current releases expose an official ACP process with durable session resume.
+ * The parser retains the older one-shot JSON contracts so existing archived
+ * sessions remain readable after the transport migration.
  */
 
 import path from 'node:path';
-import type { OwnedRuntimeAdapter, OwnedRunRecord, OwnedTailEntry, ParsedRunLog } from '@/lib/runtimes/shared/owned-session/types';
-import { createOwnedSessionStore } from '@/lib/runtimes/shared/owned-session';
+import {
+  AcpRequestError,
+  type AcpInboundRequest,
+  type AcpRawNotification,
+} from '@/lib/acp/client';
+import type { OwnedTailEntry, ParsedRunLog } from '@/lib/runtimes/shared/owned-session/types';
+import {
+  createOwnedAcpSessionStore,
+  type OwnedAcpRunRecord,
+  type OwnedAcpRuntimeAdapter,
+} from '@/lib/runtimes/shared/owned-acp';
 import { compactText, formatClock } from '@/lib/runtimes/shared/owned-session/helpers';
 import { getDataDir } from '@/lib/data-dir-migration';
-
-const GROK_RESULT_SCHEMA = JSON.stringify({
-  type: 'object',
-  properties: {
-    summary: { type: 'string' },
-    status: { type: 'string' },
-    usage: {
-      type: 'object',
-      properties: {
-        inputTokens: { type: 'number' },
-        outputTokens: { type: 'number' },
-        totalCostUsd: { type: 'number' },
-      },
-      additionalProperties: true,
-    },
-  },
-  additionalProperties: true,
-});
+import { resolveCli } from '@/lib/runtimes/shared/cli-resolver';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -74,24 +66,19 @@ function parseEmbeddedJson(value: unknown): Record<string, unknown> | null {
 
 export function grokLaunchArgs(ctx: { prompt: string; model?: string }): string[] {
   return [
-    '-p', ctx.prompt,
-    '--json-schema', GROK_RESULT_SCHEMA,
+    'agent',
     '--always-approve',
+    '--no-leader',
     ...(ctx.model ? ['--model', ctx.model] : []),
+    'stdio',
   ];
 }
 
 export function grokResumeArgs(ctx: { threadId: string; prompt: string; model?: string }): string[] {
-  return [
-    '-p', ctx.prompt,
-    '--resume', ctx.threadId,
-    '--json-schema', GROK_RESULT_SCHEMA,
-    '--always-approve',
-    ...(ctx.model ? ['--model', ctx.model] : []),
-  ];
+  return grokLaunchArgs(ctx);
 }
 
-export function grokParseRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog {
+export function grokParseRunLog(raw: string, run: OwnedAcpRunRecord): ParsedRunLog {
   const fallbackTs = run.finishedAt ?? run.startedAt;
   const entries: OwnedTailEntry[] = [{
     id: `${run.id}:prompt`,
@@ -104,6 +91,22 @@ export function grokParseRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog 
   let threadId: string | undefined;
   let completedTurn = false;
   let noiseIndex = 0;
+  let acpMessage: { index: number; text: string; timestamp: string; timestampLabel?: string } | null = null;
+  const flushAcpMessage = () => {
+    if (!acpMessage?.text.trim()) {
+      acpMessage = null;
+      return;
+    }
+    entries.push({
+      id: `${run.id}:acp-message:${acpMessage.index}`,
+      kind: 'message',
+      label: 'Grok',
+      text: compactText(acpMessage.text, 2_000),
+      timestamp: acpMessage.timestamp,
+      timestampLabel: acpMessage.timestampLabel,
+    });
+    acpMessage = null;
+  };
 
   const wholeDocument = (() => {
     try {
@@ -141,6 +144,85 @@ export function grokParseRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog 
     const type = String(parsed.type ?? parsed.event ?? '').toLowerCase();
     const ts = readString(parsed, 'timestamp', 'created_at') ?? fallbackTs;
     const tsLabel = formatClock(ts) ?? formatClock(fallbackTs);
+
+    if (parsed.method === 'session/update') {
+      const params = isRecord(parsed.params) ? parsed.params : null;
+      const update = isRecord(params?.update) ? params.update : null;
+      const sessionId = readString(params, 'sessionId');
+      if (sessionId) threadId = sessionId;
+      if (update?.sessionUpdate === 'agent_message_chunk') {
+        const content = isRecord(update.content) ? update.content : null;
+        const text = typeof content?.text === 'string' ? content.text : '';
+        if (text) {
+          acpMessage ??= { index: lineIndex, text: '', timestamp: ts, timestampLabel: tsLabel };
+          acpMessage.text += text;
+        }
+        continue;
+      }
+      if (update?.sessionUpdate === 'tool_call') {
+        flushAcpMessage();
+        entries.push({
+          id: `${run.id}:acp-tool:${readString(update, 'toolCallId') ?? lineIndex}`,
+          kind: 'tool',
+          label: readString(update, 'title', 'kind') ?? 'tool',
+          text: compactText(stringifyPreview(update.rawInput ?? {}), 800),
+          timestamp: ts,
+          timestampLabel: tsLabel,
+        });
+      } else if (update?.sessionUpdate === 'tool_call_update' && update.status === 'completed') {
+        flushAcpMessage();
+        entries.push({
+          id: `${run.id}:acp-tool-result:${readString(update, 'toolCallId') ?? lineIndex}`,
+          kind: 'tool-output',
+          label: readString(update, 'title') ?? 'Tool output',
+          text: compactText(extractText(update.content) || stringifyPreview(update.content ?? {}), 800),
+          timestamp: ts,
+          timestampLabel: tsLabel,
+        });
+      }
+      continue;
+    }
+
+    if (parsed.method === '_x.ai/session_notification') {
+      const params = isRecord(parsed.params) ? parsed.params : null;
+      const update = isRecord(params?.update) ? params.update : null;
+      const sessionId = readString(params, 'sessionId');
+      if (sessionId) threadId = sessionId;
+      if (update?.sessionUpdate === 'turn_completed') {
+        flushAcpMessage();
+        completedTurn = true;
+        const usage = isRecord(update.usage) ? update.usage : null;
+        const input = usage?.inputTokens;
+        const output = usage?.outputTokens;
+        const cacheRead = usage?.cachedReadTokens;
+        const costTicks = usage?.costUsdTicks;
+        const cost = typeof costTicks === 'number' ? costTicks / 10_000_000_000 : null;
+        const bits = [
+          typeof input === 'number' ? `${input} in` : null,
+          typeof output === 'number' ? `${output} out` : null,
+          typeof cacheRead === 'number' && cacheRead > 0 ? `${cacheRead} cached` : null,
+          cost !== null ? `$${cost.toFixed(6)}` : null,
+        ].filter(Boolean);
+        entries.push({
+          id: `${run.id}:acp-usage:${lineIndex}`,
+          kind: 'event',
+          label: 'Turn completed',
+          text: bits.length ? `Usage • ${bits.join(' • ')}` : 'Run completed.',
+          timestamp: ts,
+          timestampLabel: tsLabel,
+        });
+      }
+      continue;
+    }
+
+    if (parsed.method === 'o8/session.prompt.settled') {
+      flushAcpMessage();
+      const params = isRecord(parsed.params) ? parsed.params : null;
+      completedTurn = params?.outcome === 'finished';
+      continue;
+    }
+
+    flushAcpMessage();
 
     const rootSessionId = readString(parsed, 'session_id', 'sessionId', 'thread_id', 'threadId');
     if (rootSessionId) threadId = rootSessionId;
@@ -271,6 +353,8 @@ export function grokParseRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog 
     }
   }
 
+  flushAcpMessage();
+
   const outcome = run.outcome === 'running'
     ? completedTurn
       ? 'finished'
@@ -284,28 +368,79 @@ export function grokParseRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog 
   return { threadId, entries, outcome, completedTurn };
 }
 
-const GROK_STDERR_NOISE_PATTERNS: RegExp[] = [
-  /\[debug\]/i,
-  /checking for updates/i,
-  /loaded.*mcp/i,
-];
+function grokPermission(request: AcpInboundRequest): unknown {
+  if (request.method !== 'session/request_permission') {
+    throw new AcpRequestError(-32601, `Unsupported ACP request: ${request.method}`);
+  }
+  const options = Array.isArray(request.params.options) ? request.params.options : [];
+  const allowOnce = options.find((option) => (
+    option
+    && typeof option === 'object'
+    && !Array.isArray(option)
+    && (option as Record<string, unknown>).kind === 'allow_once'
+    && typeof (option as Record<string, unknown>).optionId === 'string'
+  )) as Record<string, unknown> | undefined;
+  return allowOnce
+    ? { outcome: { outcome: 'selected', optionId: allowOnce.optionId } }
+    : { outcome: { outcome: 'cancelled' } };
+}
 
-const grokStore = createOwnedSessionStore({
+function grokAcpSummary(notification: AcpRawNotification): string | null {
+  if (notification.method !== 'session/update') return null;
+  const update = isRecord(notification.params.update) ? notification.params.update : null;
+  if (update?.sessionUpdate !== 'agent_message_chunk') return null;
+  const content = isRecord(update.content) ? update.content : null;
+  return typeof content?.text === 'string' && content.text.trim() ? content.text.trim() : null;
+}
+
+function persistGrokNotification(notification: AcpRawNotification): boolean {
+  if (notification.method !== 'session/update') return true;
+  const update = isRecord(notification.params.update) ? notification.params.update : null;
+  return update?.sessionUpdate !== 'available_commands_update';
+}
+
+const grokStore = createOwnedAcpSessionStore({
   runtimeId: 'grok',
   surfaceIdPrefix: 'grok-owned:',
   rootEnvVar: 'O8_OWNED_GROK_ROOT',
   rootDefault: path.join(getDataDir(), 'owned-grok'),
   binaryName: 'grok',
-  binaryEnvOverride: 'O8_GROK_BIN',
-  binaryExtraEnvOverrides: ['GROK_BUILD_BIN'],
   humanLabel: 'Owned Grok Build',
   squadShortName: 'Grok',
   sessionIdPrefix: 'grok-owned-',
-  launchArgs: grokLaunchArgs,
-  resumeArgs: grokResumeArgs,
+  defaultModel: 'grok-4.6',
+  async resolveLaunch(session) {
+    const resolved = await resolveCli({
+      runtimeId: 'grok',
+      binaryName: 'grok',
+      envOverride: 'O8_GROK_BIN',
+      extraEnvOverrides: ['GROK_BUILD_BIN'],
+    });
+    return {
+      command: resolved.path,
+      args: grokLaunchArgs({ prompt: session.latestPrompt, model: session.model }),
+      commandIdentity: path.basename(resolved.path),
+      version: resolved.version,
+      env: { FORCE_COLOR: '0', NO_COLOR: '1' },
+    };
+  },
+  validateInitialize(result) {
+    if (result.protocolVersion !== 1) {
+      throw new Error(`Grok ACP protocol ${result.protocolVersion} is incompatible; expected 1.`);
+    }
+    return { version: result.agentInfo?.version };
+  },
+  supportsResume(result) {
+    const capabilities = isRecord(result.agentCapabilities?.sessionCapabilities)
+      ? result.agentCapabilities.sessionCapabilities
+      : null;
+    return Boolean(capabilities && 'resume' in capabilities);
+  },
+  handleRequest: grokPermission,
+  shouldPersistNotification: persistGrokNotification,
+  notificationSummary: grokAcpSummary,
   parseRunLog: grokParseRunLog,
-  stderrNoise: GROK_STDERR_NOISE_PATTERNS,
-} satisfies OwnedRuntimeAdapter);
+} satisfies OwnedAcpRuntimeAdapter);
 
 export const launchOwnedGrokSession = grokStore.launch.bind(grokStore);
 export const continueOwnedGrokSession = grokStore.resume.bind(grokStore);

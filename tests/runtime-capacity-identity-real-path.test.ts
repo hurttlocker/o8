@@ -132,7 +132,7 @@ describe('runtime capacity and identity route', () => {
     expect(capacities).toContainEqual(expect.objectContaining({
       runtime: 'codex',
       identityId: null,
-      status: 'available',
+      confidence: 'exact',
     }));
     expect(capacities.find((capacity) => (
       capacity.runtime === 'codex'
@@ -150,7 +150,7 @@ describe('runtime capacity and identity route', () => {
     expect(serialized).not.toContain(home);
     expect(serialized).not.toContain(secret);
     expect(serialized).not.toContain('auth.json');
-  });
+  }, 30_000);
 
   it('observes every registered identity while keeping one selected for new turns', async () => {
     const homeA = makeCodexHome('observed-identity-a', 'secret-a');

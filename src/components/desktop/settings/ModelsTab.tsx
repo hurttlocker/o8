@@ -4,12 +4,11 @@
  * ModelsTab — the Models settings page (Cursor-parity wave 2).
  *
  * One surface for everything model-shaped: per-runtime status + tuning, the
- * orchestrator model, BYOK provider keys, and local models. It does NOT own a
- * private store — every control reads/writes the same live backends the
- * Dispatch tab uses (`/api/panel/operator-defaults`, `/api/v2/keys`) plus
- * runtime detection from `/api/setup/detect`. Dispatch is left intact; Models
- * is a second window onto the same operator defaults, with a link-row across
- * to Dispatch for backend/supervision tuning that would confuse if duplicated.
+ * orchestrator model, runtime-specific worker profiles, BYOK provider keys,
+ * and local models. Shared controls use the same live backends as Dispatch;
+ * harness-specific choices use their runtime adapter's persisted profile.
+ * Dispatch is left intact, with a link-row across to it for backend and
+ * supervision tuning that would be confusing to duplicate here.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -40,6 +39,7 @@ import {
   type ThinkingEffort,
 } from './dispatch-shared';
 import { AcpModelPickerPopover } from './AcpModelPickerPopover';
+import { ClaudeCodeHarnessSection } from './ClaudeCodeHarnessSection';
 
 // ── Runtime detection (real, via /api/setup/detect) ──
 
@@ -79,14 +79,6 @@ function CpuIcon() {
   );
 }
 
-function KeyRowIcon() {
-  return (
-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" />
-    </svg>
-  );
-}
-
 function TierLabel(tier: 'frontier' | 'standard' | 'local'): string {
   if (tier === 'frontier') return 'Frontier';
   if (tier === 'standard') return 'Standard';
@@ -97,7 +89,7 @@ function TierLabel(tier: 'frontier' | 'standard' | 'local'): string {
 // strings run long; these fit a settings row).
 const RUNTIME_BLURB: Record<string, string> = {
   codex: 'GPT-5.6 — Sol orchestrates, Terra works',
-  'claude-code': 'Claude Code CLI worker, sub-billed stream-json',
+  'claude-code': 'Claude Code harness, native account or API gateway',
   gemini: 'Retired CLI adapter — existing lanes stay readable',
   opencode: 'OpenCode 2 multi-provider CLI, routes through your provider keys',
   cursor: 'Cursor CLI worker — subscription or CURSOR_API_KEY',
@@ -359,6 +351,10 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
             }
           />
         </SettingsGroup>
+      </section>
+
+      <section style={{ marginTop: 28 }}>
+        <ClaudeCodeHarnessSection />
       </section>
 
       <section style={{ marginTop: 28 }}>

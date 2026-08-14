@@ -25,7 +25,7 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 
 /** Probe budget. Past this we fail closed (treat the tree as live → keep). */
-const PROBE_TIMEOUT_MS = 2_000;
+const PROBE_TIMEOUT_MS = 5_000;
 
 export type LiveProcessProbeResult =
   | { status: 'clear' }

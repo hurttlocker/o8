@@ -91,6 +91,34 @@ describe('orchestrator thread history persistence', () => {
     ]);
   });
 
+  it('persists terminal cache and cost truth onto the streamed assistant message', async () => {
+    const history = await loadHistoryModule();
+    const thread = history.createMobileOrchestratorThread({ repoPath: '/tmp/repo' });
+    history.appendMobileOrchestratorUserMessage({
+      tabId: thread.id,
+      repoPath: '/tmp/repo',
+      message: 'measure this turn',
+      backend: 'claude',
+      timestampMs: 2_000,
+    });
+    history.upsertMobileOrchestratorAssistantMessage({
+      tabId: thread.id,
+      repoPath: '/tmp/repo',
+      messageId: 'assistant-2000',
+      content: 'done',
+      backend: 'claude',
+      tokens: { input: 203, output: 11, cacheRead: 40_448, cacheWrite: 0 },
+      timestampMs: 2_001,
+    });
+
+    const persisted = JSON.parse(readFileSync(history.safeOrchestratorHistoryPath(thread.id), 'utf-8')) as {
+      messages: Array<{ id?: string; tokens?: unknown }>;
+    };
+    expect(persisted.messages.find((message) => message.id === 'assistant-2000')).toMatchObject({
+      tokens: { input: 203, output: 11, cacheRead: 40_448, cacheWrite: 0 },
+    });
+  });
+
   it('rewinds an undone turn from its exact client message id', async () => {
     const history = await loadHistoryModule();
     const thread = history.createMobileOrchestratorThread({ repoPath: '/tmp/repo' });

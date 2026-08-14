@@ -68,13 +68,15 @@ interface AcpModelPickerProps {
   repoPath?: string | null;
   /** Rendered width — matches the composer menu it opens from. */
   width?: number;
+  /** Optional catalogue route for model sources that are not ACP backends. */
+  catalogueUrl?: string;
 }
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'unavailable' | 'error';
 
 const ROW_TEXT = { fontFamily: 'var(--font-sans-system)', fontWeight: 300, letterSpacing: '0' } as const;
 
-export function AcpModelPicker({ backend, value, onSelect, repoPath, width = 320 }: AcpModelPickerProps) {
+export function AcpModelPicker({ backend, value, onSelect, repoPath, width = 320, catalogueUrl }: AcpModelPickerProps) {
   const [groups, setGroups] = useState<CatalogueGroup[]>([]);
   // Starts at 'loading' rather than 'idle' so the fetch effect never has to
   // setState synchronously on mount (which would cascade a render).
@@ -92,10 +94,12 @@ export function AcpModelPicker({ backend, value, onSelect, repoPath, width = 320
 
   useEffect(() => {
     let cancelled = false;
-    const params = new URLSearchParams({ backend });
+    const params = new URLSearchParams(catalogueUrl ? {} : { backend });
     if (repoPath) params.set('repoPath', repoPath);
     if (reloadKey > 0) params.set('refresh', '1');
-    fetch(`/api/orchestrator/backend-models?${params.toString()}`, { cache: 'no-store' })
+    const baseUrl = catalogueUrl ?? '/api/orchestrator/backend-models';
+    const queryString = params.toString();
+    fetch(`${baseUrl}${queryString ? `?${queryString}` : ''}`, { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => {
         if (cancelled) return;
@@ -110,7 +114,7 @@ export function AcpModelPicker({ backend, value, onSelect, repoPath, width = 320
         setState('error');
       });
     return () => { cancelled = true; };
-  }, [backend, repoPath, reloadKey]);
+  }, [backend, catalogueUrl, repoPath, reloadKey]);
 
   const reload = useCallback(() => {
     setState('loading');

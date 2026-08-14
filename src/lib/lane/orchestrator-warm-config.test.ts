@@ -9,6 +9,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const spawnMock = vi.hoisted(() => vi.fn());
 const configState = vi.hoisted(() => ({ reversed: false }));
+const resolveCarrierMock = vi.hoisted(() => vi.fn(async ({ sessionDir }: { sessionDir: string }) => ({
+  source: 'codex-subscription' as const,
+  model: 'gpt-5.6-sol',
+  spawnEnv: {
+    ANTHROPIC_BASE_URL: 'http://127.0.0.1:8317',
+    ANTHROPIC_AUTH_TOKEN: 'local-orchestrator-token',
+    CLAUDE_CONFIG_DIR: `${sessionDir}/claude-code-codex-config`,
+  },
+  fingerprint: `codex:${sessionDir}`,
+})));
 
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
@@ -20,6 +30,12 @@ vi.mock('@/lib/mcp/tool-spine/emit-claude', () => ({
   toClaudeJson: () => configState.reversed
     ? { mcpServers: { cortex: { command: 'cortex' }, operator: { command: 'operator' } } }
     : { mcpServers: { operator: { command: 'operator' }, cortex: { command: 'cortex' } } },
+}));
+vi.mock('./claude-harness-carrier', () => ({
+  resolveClaudeHarnessCarrier: resolveCarrierMock,
+  nativeClaudeHarnessCarrier: (model: string) => ({
+    source: 'native', model, spawnEnv: {}, fingerprint: `native:${model}`,
+  }),
 }));
 
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-orchestrator-warm-config-'));
@@ -49,6 +65,7 @@ class FakeClaudeProc extends EventEmitter {
 describe('warm orchestrator MCP config reuse', () => {
   beforeEach(() => {
     spawnMock.mockReset();
+    resolveCarrierMock.mockClear();
     configState.reversed = false;
   });
 
@@ -64,17 +81,67 @@ describe('warm orchestrator MCP config reuse', () => {
     const session = ensureOrchestratorSession(repoPath, `thoughts-warm-config-${Date.now()}`);
 
     const firstTurn = sendToOrchestrator(session, 'first', () => {});
-    expect(spawnMock).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(procs[0]!.stdin.write).toHaveBeenCalledTimes(1));
     procs[0]!.stdout.emit('data', Buffer.from('{"type":"result","session_id":"warm-session"}\n'));
     await firstTurn;
 
     configState.reversed = true;
     const secondTurn = sendToOrchestrator(session, 'second', () => {});
+    await vi.waitFor(() => expect(procs[0]!.stdin.write).toHaveBeenCalledTimes(2));
     expect(spawnMock).toHaveBeenCalledTimes(1);
     expect(procs[0]!.kill).not.toHaveBeenCalled();
     procs[0]!.stdout.emit('data', Buffer.from('{"type":"result","session_id":"warm-session"}\n'));
     await secondTurn;
     procs[0]!.exitCode = 0;
     procs[0]!.emit('close', 0);
+  });
+
+  it('keeps separate resident Claude Code Codex sessions for separate orchestrator threads', async () => {
+    const repoPath = mkdtempSync(join(tmpdir(), 'o8-warm-thread-isolation-'));
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repoPath });
+    const procs: FakeClaudeProc[] = [];
+    spawnMock.mockImplementation(() => {
+      const proc = new FakeClaudeProc();
+      procs.push(proc);
+      return proc as unknown as ChildProcess;
+    });
+    const firstSession = ensureOrchestratorSession(repoPath, `thoughts-carrier-a-${Date.now()}`);
+    const secondSession = ensureOrchestratorSession(repoPath, `thoughts-carrier-b-${Date.now()}`);
+
+    const firstTurn = sendToOrchestrator(firstSession, 'first thread', () => {});
+    const secondTurn = sendToOrchestrator(secondSession, 'second thread', () => {});
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => {
+      expect(procs[0]!.stdin.write).toHaveBeenCalledTimes(1);
+      expect(procs[1]!.stdin.write).toHaveBeenCalledTimes(1);
+    });
+    const firstEnv = spawnMock.mock.calls[0]![2].env as NodeJS.ProcessEnv;
+    const secondEnv = spawnMock.mock.calls[1]![2].env as NodeJS.ProcessEnv;
+    expect(firstEnv.ANTHROPIC_AUTH_TOKEN).toBe('local-orchestrator-token');
+    expect(secondEnv.ANTHROPIC_AUTH_TOKEN).toBe('local-orchestrator-token');
+    expect(firstEnv.CLAUDE_CONFIG_DIR).not.toBe(secondEnv.CLAUDE_CONFIG_DIR);
+    expect(firstSession.sessionName).not.toBe(secondSession.sessionName);
+    expect(spawnMock.mock.calls[0]![1]).toContain('gpt-5.6-sol');
+    expect(spawnMock.mock.calls[1]![1]).toContain('gpt-5.6-sol');
+
+    procs[0]!.stdout.emit('data', Buffer.from('{"type":"result","session_id":"thread-a"}\n'));
+    procs[1]!.stdout.emit('data', Buffer.from('{"type":"result","session_id":"thread-b"}\n'));
+    await Promise.all([firstTurn, secondTurn]);
+
+    const firstFollowup = sendToOrchestrator(firstSession, 'follow up a', () => {});
+    const secondFollowup = sendToOrchestrator(secondSession, 'follow up b', () => {});
+    await vi.waitFor(() => {
+      expect(procs[0]!.stdin.write).toHaveBeenCalledTimes(2);
+      expect(procs[1]!.stdin.write).toHaveBeenCalledTimes(2);
+    });
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+    procs[0]!.stdout.emit('data', Buffer.from('{"type":"result","session_id":"thread-a"}\n'));
+    procs[1]!.stdout.emit('data', Buffer.from('{"type":"result","session_id":"thread-b"}\n'));
+    await Promise.all([firstFollowup, secondFollowup]);
+    for (const proc of procs) {
+      proc.exitCode = 0;
+      proc.emit('close', 0);
+    }
   });
 });

@@ -53,6 +53,7 @@ import { getRuntimeIdentityForServer, listRuntimeIdentitiesForServer } from '@/l
 import { readSessionTransformCatalog } from '@/lib/runtime/session-transform-catalog';
 import { readCodexRuntimeCapacity } from '@/lib/usage/cli-scrape';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { readLiveCodexRuntimeCapacity } from '@/lib/codex/live-capacity';
 
 function containsPath(parent: string, child: string): boolean {
   const relative = path.relative(parent, child);
@@ -212,10 +213,19 @@ export const codexRuntime: AgentRuntime = {
       : (await listRuntimeIdentitiesForServer('codex')).find((candidate) => (
           path.resolve(candidate.configHomeRef) === path.resolve(defaultConfigHome)
         )) ?? null;
-    return readCodexRuntimeCapacity({
-      configHome: identityId ? identity?.configHomeRef : defaultConfigHome,
-      identityId: identity?.id ?? null,
-    });
+    const configHome = identityId ? identity?.configHomeRef : defaultConfigHome;
+    const resolvedIdentityId = identity?.id ?? null;
+    if (configHome) {
+      try {
+        return await readLiveCodexRuntimeCapacity({
+          configHome,
+          identityId: resolvedIdentityId,
+        });
+      } catch (error) {
+        console.warn('[codex-runtime] live capacity unavailable; using the latest local observation:', error instanceof Error ? error.message : String(error));
+      }
+    }
+    return readCodexRuntimeCapacity({ configHome, identityId: resolvedIdentityId });
   },
   async validateIdentityConfigHome(configHomeRef) {
     if (!path.isAbsolute(configHomeRef)) {

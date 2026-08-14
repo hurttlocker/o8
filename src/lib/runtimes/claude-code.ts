@@ -1120,10 +1120,10 @@ export const claudeCodeRuntime: AgentRuntime = {
     return {
       ok: result.ok,
       note: result.note,
-      sessionKey: result.surfaceId,
+      sessionKey: result.surfaceId || undefined,
+      sideEffect: result.sideEffect,
     };
   },
-
   async resume(): Promise<RuntimeActionResult> {
     // Resume for discovered Claude sessions stays disabled: `claude --continue`
     // is not the owned interactive stream-json worker path. Owned dispatched

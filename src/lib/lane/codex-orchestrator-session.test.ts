@@ -4,8 +4,8 @@ import { BRAIN_PROMPT_SECTION } from '@/lib/orchestrator/brain-access';
 import { buildCodexOrchestratorPrompt, codexOrchestratorModelFlags } from './codex-orchestrator-session';
 
 describe('codexOrchestratorModelFlags', () => {
-  it('keeps the cloud path verbatim (gpt-5.5 default unchanged)', () => {
-    // This is the primary orchestrator path — any drift breaks every turn.
+  it('keeps a legacy cloud model selection verbatim', () => {
+    // Explicit cloud selections must reach Codex unchanged.
     expect(codexOrchestratorModelFlags('gpt-5.5', 'xhigh')).toEqual([
       '-c',
       'model=gpt-5.5',

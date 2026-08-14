@@ -3,7 +3,14 @@ export type ClaudeCodeStreamJsonChatEvent =
   | { type: 'thinking'; text: string }
   | { type: 'tool_call'; id?: string | null; name: string; status: 'calling' | 'running' | 'done'; args?: Record<string, unknown>; preview?: string }
   | { type: 'tool_result'; id?: string | null; name?: string; args?: Record<string, unknown>; output?: string; preview?: string }
-  | { type: 'usage'; inputTokens: number; outputTokens: number; costUsd?: number }
+  | {
+      type: 'usage';
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadTokens?: number;
+      cacheWriteTokens?: number;
+      costUsd?: number;
+    }
   | { type: 'plan_step'; id?: string | null; text: string; status?: 'pending' | 'active' | 'complete' }
   | { type: 'permission_request'; id?: string | null; name?: string; text: string; args?: Record<string, unknown> };
 
@@ -15,6 +22,8 @@ export type ClaudeCodeStreamJsonParserEvent =
       sessionId?: string;
       inputTokens?: number;
       outputTokens?: number;
+      cacheReadTokens?: number;
+      cacheWriteTokens?: number;
       costUsd?: number;
       duration?: number;
     };
@@ -100,12 +109,20 @@ function usageFromClaude(input: unknown, costUsd?: number): Extract<ClaudeCodeSt
   const usage = asRecord(input);
   const inputTokens = asNumber(usage?.input_tokens) ?? asNumber(usage?.inputTokens) ?? 0;
   const outputTokens = asNumber(usage?.output_tokens) ?? asNumber(usage?.outputTokens) ?? 0;
+  const cacheReadTokens = asNumber(usage?.cache_read_input_tokens)
+    ?? asNumber(usage?.cacheReadTokens)
+    ?? 0;
+  const cacheWriteTokens = asNumber(usage?.cache_creation_input_tokens)
+    ?? asNumber(usage?.cacheWriteTokens)
+    ?? 0;
   const nextCost = costUsd ?? asNumber(usage?.cost_usd) ?? asNumber(usage?.total_cost_usd);
-  if (inputTokens <= 0 && outputTokens <= 0 && typeof nextCost !== 'number') return null;
+  if (inputTokens <= 0 && outputTokens <= 0 && cacheReadTokens <= 0 && cacheWriteTokens <= 0 && typeof nextCost !== 'number') return null;
   return {
     type: 'usage',
     inputTokens,
     outputTokens,
+    ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
+    ...(cacheWriteTokens > 0 ? { cacheWriteTokens } : {}),
     ...(typeof nextCost === 'number' ? { costUsd: nextCost } : {}),
   };
 }
@@ -290,6 +307,8 @@ export function createClaudeCodeStreamJsonParser(
       ...(sessionId ? { sessionId } : {}),
       ...(typeof usage?.inputTokens === 'number' ? { inputTokens: usage.inputTokens } : {}),
       ...(typeof usage?.outputTokens === 'number' ? { outputTokens: usage.outputTokens } : {}),
+      ...(typeof usage?.cacheReadTokens === 'number' ? { cacheReadTokens: usage.cacheReadTokens } : {}),
+      ...(typeof usage?.cacheWriteTokens === 'number' ? { cacheWriteTokens: usage.cacheWriteTokens } : {}),
       ...(typeof costUsd === 'number' ? { costUsd } : {}),
       ...(typeof asNumber(event.duration_ms) === 'number' ? { duration: asNumber(event.duration_ms) } : {}),
     };

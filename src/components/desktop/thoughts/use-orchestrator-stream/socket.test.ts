@@ -176,6 +176,34 @@ describe('orchestrator socket — first-turn streaming race', () => {
     expect(h.statusRef.current).toBe('ready');
   });
 
+  it('attaches terminal cache truth to the completed assistant entry', () => {
+    const assistant: MobileTranscriptEntry = { id: 'a-cache', role: 'assistant', text: 'done' };
+    const current: CurrentAssistantStreamState = { id: 'a-cache', chunks: ['done'], thinkingChunks: [], epoch: 0 };
+    const h = makeHarness({ status: 'busy', current, messages: [userMsg, assistant] });
+
+    h.fire({
+      channel: 'orchestrator',
+      event: 'status',
+      data: {
+        status: 'ready',
+        usage: {
+          inputTokens: 203,
+          outputTokens: 11,
+          cacheReadTokens: 40_448,
+          cacheWriteTokens: 0,
+        },
+      },
+    });
+
+    const messages = h.setMessages.mock.calls.reduce<MobileTranscriptEntry[]>(
+      (state, [updater]) => (typeof updater === 'function' ? updater(state) : updater),
+      [userMsg, assistant],
+    );
+    expect(messages.find((message) => message.id === 'a-cache')).toMatchObject({
+      tokens: { input: 203, output: 11, cacheRead: 40_448, cacheWrite: 0 },
+    });
+  });
+
   it('a snapshot "busy" resyncs an idle client up to busy (reload into an active turn)', () => {
     const h = makeHarness({ status: 'connecting' });
 

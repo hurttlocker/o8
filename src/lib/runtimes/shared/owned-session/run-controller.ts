@@ -573,7 +573,9 @@ export function createOwnedRunController({
     const bridgeSessionName = tmuxSessionName(runtimeId, runId);
     const cliCmd = [spawnBinary, ...spawnArgs].map(quoteShellArg).join(' ');
     const shellCmd = `${stdinPayload ? `printf %s ${quoteShellArg(stdinPayload)} | ` : ''}${cliCmd} | tee '${stdoutPath}' 2>'${stderrPath}'`;
-    const adapterEnv: Record<string, string> = adapter.extraSpawnEnv ? adapter.extraSpawnEnv() : {};
+    const adapterEnv: Record<string, string> = adapter.extraSpawnEnv
+      ? await adapter.extraSpawnEnv(session)
+      : {};
     if (adapter.isolatedConfigHomeEnv && session.identity?.configHomeRef) {
       adapterEnv[adapter.isolatedConfigHomeEnv] = session.identity.configHomeRef;
     }

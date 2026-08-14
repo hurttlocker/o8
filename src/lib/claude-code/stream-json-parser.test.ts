@@ -66,3 +66,36 @@ describe('stream-json parser assistant-replay dedup', () => {
     expect(done?.text).toBe('final canonical text');
   });
 });
+
+describe('stream-json parser usage truth', () => {
+  it('preserves cache reads and writes on usage and terminal events', () => {
+    const parser = createClaudeCodeStreamJsonParser();
+    const events = parser.pushChunk(lines({
+      type: 'result',
+      result: 'done',
+      session_id: 'warm-session',
+      total_cost_usd: 0.224909,
+      usage: {
+        input_tokens: 203,
+        output_tokens: 11,
+        cache_read_input_tokens: 40_448,
+        cache_creation_input_tokens: 32,
+      },
+    }));
+
+    expect(events).toContainEqual({
+      type: 'usage',
+      inputTokens: 203,
+      outputTokens: 11,
+      cacheReadTokens: 40_448,
+      cacheWriteTokens: 32,
+      costUsd: 0.224909,
+    });
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'done',
+      sessionId: 'warm-session',
+      cacheReadTokens: 40_448,
+      cacheWriteTokens: 32,
+    }));
+  });
+});

@@ -38,6 +38,10 @@ export type TurnSummary = {
   filePaths: string[];
   /** Token running-total delta during the turn. */
   tokensUsed: number;
+  /** Prompt-cache truth from the completed harness turn, when reported. */
+  freshInputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
   /** Billable parent + child work attributed to this turn. */
   costUsd?: number | null;
   /** Internal receipt pieces used while an attached mission is still settling. */
@@ -90,10 +94,19 @@ function formatCost(value: number): string {
 }
 
 export function buildTurnSummaryStats(summary: TurnSummary): { key: string; value: string }[] {
+  const cacheDenominator = (summary.freshInputTokens ?? 0)
+    + (summary.cacheReadTokens ?? 0)
+    + (summary.cacheWriteTokens ?? 0);
+  const cacheStat = summary.cacheReadTokens !== undefined && cacheDenominator > 0
+    ? (summary.cacheReadTokens > 0
+        ? `${((summary.cacheReadTokens / cacheDenominator) * 100).toFixed(1)}% prompt cached`
+        : 'cold prompt')
+    : null;
   return [
     { key: 'tools', value: summary.toolCount === 0 ? '0 tools' : `${summary.toolCount} ${summary.toolCount === 1 ? 'tool' : 'tools'}` },
     { key: 'files', value: summary.filesEditedCount === 0 ? '0 files' : `${summary.filesEditedCount} ${summary.filesEditedCount === 1 ? 'file' : 'files'}` },
     { key: 'tokens', value: `${formatTokens(summary.tokensUsed)} tokens` },
+    ...(cacheStat ? [{ key: 'cache', value: cacheStat }] : []),
     ...(typeof summary.costUsd === 'number'
       ? [{ key: 'cost', value: `${formatCost(summary.costUsd)} cost` }]
       : []),

@@ -17,8 +17,9 @@ o8 orchestrates external CLIs; it does not bundle them. Before install, the user
 |---|---|---|
 | **macOS** (Apple Silicon or Intel) | o8 ships as a signed `.dmg` | — |
 | **Node.js ≥ 22** | bundled Next/ws sidecars + better-sqlite3 ABI | `node -v` |
-| **A worker CLI: Codex** (`codex`) | the default + only dispatchable worker runtime | `which codex` |
-| **Claude Code** (`claude`) — optional but expected | orchestrator REPL (subscription-billed) | `which claude` |
+| **A worker CLI: Codex** (`codex`) | the default worker runtime and the simplest first-run proof | `which codex` |
+| **Claude Code** (`claude`) — optional but expected | orchestrator and worker harness | `which claude` |
+| **CLIProxyAPI** (`cliproxyapi`) — optional | local Codex subscription carrier for Claude Code | `which cliproxyapi` |
 | **`gh` CLI** — recommended | GitHub issue/PR ops, higher rate limits | `which gh` |
 | **`git` ≥ 2.5** | worktree-based dispatch | `git --version` |
 
@@ -92,7 +93,29 @@ This is the product. A stranger must be able to do this on day one.
 
 ---
 
-## 5. Mobile pairing (optional for first-10, verify if claimed)
+## 5. Claude Code with a Codex subscription (verify if claimed)
+
+This path consumes real Codex subscription quota, so it stays outside ordinary CI. Run it once before a release that changes the carrier, warm-session lifecycle, cache telemetry, or Codex capacity reader.
+
+1. In **Settings → Models → Claude Code harness**, select **Codex subscription**.
+2. If needed, install `cliproxyapi`, click **Connect Codex**, and finish the browser authorization.
+3. Start one orchestrator chat and complete two turns. Confirm that the second turn stays in the same chat and reports prompt-cache use.
+4. Start a second orchestrator chat. Confirm that it has a separate Claude session and does not know the first chat's conversation.
+5. Confirm that Codex capacity in the app agrees with the current local Codex account state.
+6. Run the real entry proof:
+
+   ```bash
+   O8_LIVE_CLAUDE_CODE_CODEX_ORCHESTRATOR=1 \
+     npx vitest run tests/claude-code-codex-orchestrator-live-smoke.test.ts
+   ```
+
+**PASS §5:** the real process completes both chats, the warm follow-up reports more than 90% prompt-cache reads, the second chat is isolated, and no API key is required.
+
+See [Claude Code model carriers](../user/claude-code-model-carriers.md) for the operator-facing setup and billing boundaries.
+
+---
+
+## 6. Mobile pairing (optional for first-10, verify if claimed)
 
 If mobile is part of the pitch: pair a phone to the running instance and confirm the inbox/approvals surface loads over the WS bridge.
 
@@ -106,6 +129,7 @@ If mobile is part of the pitch: pair a phone to the running instance and confirm
 - [ ] A missing `codex`/`gh` produces a **dispatch-time** UI error with a fix command (GATE-2b).
 - [ ] One packet went dispatch → review → **explicit approve** → merge; the diff was correct.
 - [ ] No never-reviewed packet can reach `main` (GATE-1a invariant holds).
+- [ ] If this release changes the Codex subscription carrier, the opt-in live carrier test passed and two orchestrator chats stayed isolated.
 - [ ] No crash, no "Application error," no orphaned processes after quit.
 
 **Run this 2–3× on a clean profile. Only an all-green run unlocks the first warm invite.** Watch the first real installs like a live red-team and fix friction same-day.

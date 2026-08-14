@@ -163,15 +163,6 @@ export class StdioJsonRpcPeer extends EventEmitter {
     });
   }
 
-  notify(method: string, params?: Record<string, unknown>): void {
-    this.start();
-    this.write({
-      jsonrpc: '2.0',
-      method,
-      ...(params === undefined ? {} : { params }),
-    });
-  }
-
   async close(options: {
     shutdownMethod?: string;
     gracefulMs?: number;

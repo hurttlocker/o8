@@ -14,7 +14,11 @@ const pendingPrompts = new Map();
 function finishPrompt(frame) {
   update(frame.params.sessionId, {
     sessionUpdate: 'agent_message_chunk',
-    content: { type: 'text', text: `fixture response ${turn}` },
+    content: { type: 'text', text: 'fixture response ' },
+  });
+  update(frame.params.sessionId, {
+    sessionUpdate: 'agent_message_chunk',
+    content: { type: 'text', text: String(turn) },
   });
   const prompt = frame.params.prompt?.map((block) => block.text ?? '').join('') ?? '';
   send({

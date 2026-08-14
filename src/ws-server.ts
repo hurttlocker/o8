@@ -1199,7 +1199,7 @@ function handleReboundOrchestratorEvent(record: OrchestratorTurnRecord, event: O
     : null;
   const assistantStartedAtMs = record.assistantStartedAtMs ?? record.startedAt;
 
-  const persistAssistantText = (sessionId: string | null) => {
+  const persistAssistantText = (sessionId: string | null, receipt?: Extract<OrchestratorEvent, { type: 'done' }>) => {
     if (!threadId || !assistantMessageId) return;
     const content = reboundAssistantText.get(record.id) ?? '';
     if (!content) return;
@@ -1212,6 +1212,14 @@ function handleReboundOrchestratorEvent(record: OrchestratorTurnRecord, event: O
         backend,
         sessionId,
         model: record.model ?? null,
+        ...(receipt?.usage ? {
+          tokens: {
+            input: receipt.usage.inputTokens,
+            output: receipt.usage.outputTokens,
+            cacheRead: receipt.usage.cacheReadTokens,
+            cacheWrite: receipt.usage.cacheWriteTokens,
+          },
+        } : {}),
         timestampMs: assistantStartedAtMs,
       });
       if (updatedThread) {
@@ -1278,11 +1286,11 @@ function handleReboundOrchestratorEvent(record: OrchestratorTurnRecord, event: O
       if (threadId && event.sessionId) {
         writeOrchestratorBackendSessionId(threadId, backend, event.sessionId);
       }
-      persistAssistantText(event.sessionId ?? null);
+      persistAssistantText(event.sessionId ?? null, event);
       wsMsg = JSON.stringify({
         channel: 'orchestrator',
         event: 'status',
-        data: { status: 'ready', repoPath, threadId, sessionId: event.sessionId, cost: event.cost, backend },
+        data: { status: 'ready', repoPath, threadId, sessionId: event.sessionId, cost: event.cost, usage: event.usage, backend },
       });
       reboundAssistantText.delete(record.id);
       reboundOrchestratorRecords.delete(record.id);
@@ -5005,10 +5013,14 @@ async function handleOrchestratorSendMsgOnce(
   let lastIncrementalPersistAt = 0;
   const INCREMENTAL_PERSIST_MS = 1_500;
 
-  const persistAssistantText = (sessionId: string | null, backendId: OrchestratorBackendId = activeBackend.id) => {
+  const persistAssistantText = (
+    sessionId: string | null,
+    backendId: OrchestratorBackendId = activeBackend.id,
+    receipt?: Extract<OrchestratorEvent, { type: 'done' }>,
+  ) => {
     if (!isThreadBacked || !assistantMessageId) return;
     if (undoneOrchestratorUserMessageIds.has(userMessageId)) return;
-    if (!assistantTextAccum || assistantTextAccum === lastPersistedAssistantText) return;
+    if (!assistantTextAccum || (assistantTextAccum === lastPersistedAssistantText && !receipt)) return;
     try {
       const updatedThread = upsertMobileOrchestratorAssistantMessage({
         tabId: threadId,
@@ -5019,6 +5031,14 @@ async function handleOrchestratorSendMsgOnce(
         agent: activeAgentTag,
         sessionId,
         model: model ?? null,
+        ...(receipt?.usage ? {
+          tokens: {
+            input: receipt.usage.inputTokens,
+            output: receipt.usage.outputTokens,
+            cacheRead: receipt.usage.cacheReadTokens,
+            cacheWrite: receipt.usage.cacheWriteTokens,
+          },
+        } : {}),
         timestampMs: assistantStartedAtMs,
       });
       lastPersistedAssistantText = assistantTextAccum;
@@ -5203,12 +5223,12 @@ async function handleOrchestratorSendMsgOnce(
         if (threadId && event.sessionId && (turnBackend.id === 'claude' || turnBackend.id === 'codex')) {
           writeOrchestratorBackendSessionId(threadId, turnBackend.id, event.sessionId);
         }
-        persistAssistantText(event.sessionId ?? null, turnBackend.id);
+        persistAssistantText(event.sessionId ?? null, turnBackend.id, event);
         if (sessionName) {
           broadcastToOrchestratorSession(sessionName, JSON.stringify({
             channel: 'orchestrator',
             event: 'status',
-            data: { status: 'ready', repoPath, threadId, sessionId: event.sessionId, cost: event.cost, backend: turnBackend.id, agent: turnAgentTag },
+            data: { status: 'ready', repoPath, threadId, sessionId: event.sessionId, cost: event.cost, usage: event.usage, backend: turnBackend.id, agent: turnAgentTag },
           }));
         }
       };

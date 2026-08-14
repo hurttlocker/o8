@@ -28,6 +28,7 @@ export function AcpModelPickerPopover({
   onClear,
   disabled,
   backend = 'opencode',
+  catalogueUrl,
 }: {
   label: string;
   value: string | null;
@@ -35,6 +36,7 @@ export function AcpModelPickerPopover({
   onClear: () => void;
   disabled?: boolean;
   backend?: string;
+  catalogueUrl?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
@@ -161,6 +163,7 @@ export function AcpModelPickerPopover({
           >
             <AcpModelPicker
               backend={backend}
+              catalogueUrl={catalogueUrl}
               value={value}
               width={PANEL_WIDTH}
               onSelect={(picked) => { onSelect(picked); setOpen(false); }}

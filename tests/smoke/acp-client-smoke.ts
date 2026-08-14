@@ -28,7 +28,7 @@ async function partA(): Promise<void> {
     const init = await client.initialize();
     assert.strictEqual(init.protocolVersion, 1, 'mock initialize → protocolVersion 1');
 
-    const sessionId = await client.newSession(process.cwd(), []);
+    const { sessionId } = await client.newSession(process.cwd(), []);
     assert.strictEqual(sessionId, 'mock-sess', 'mock session/new → sessionId');
 
     const stop = await client.prompt(sessionId, 'do it');
@@ -44,7 +44,7 @@ async function partA(): Promise<void> {
     assert.deepStrictEqual(events[5], { type: 'done', sessionId: 'mock-sess', cost: null }, 'done event');
     console.log('[acp-client-smoke] Part A (mock turn) PASS');
   } finally {
-    client.kill();
+    await client.close();
   }
 }
 
@@ -73,7 +73,7 @@ async function partB(): Promise<void> {
     assert(Array.isArray(configOptions), 'live hermes session/new → configOptions array (may be empty)');
     console.log(`[acp-client-smoke] Part B (live hermes handshake) PASS — agent=${init.agentInfo?.name} v${init.agentInfo?.version}, session=${sessionId.slice(0, 8)}…, configOptions=${configOptions.length}`);
   } finally {
-    client.kill();
+    await client.close();
   }
 }
 

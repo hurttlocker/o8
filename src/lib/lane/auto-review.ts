@@ -563,10 +563,10 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
 
   // Dual-path routing (epic #1044): the `inAppOrchestratorEnabled` toggle is
   // now a runtime selector, not an on/off gate.
-  //   - toggle OFF (default) → Codex GPT-5.5 xhigh runs the review. Free for
-  //     ChatGPT Plus / Codex sub users; no Anthropic Agent SDK draw.
-  //   - toggle ON              → Claude Opus 4.8 runs the review (existing
-  //     behavior, bills against the user's Agent SDK credit pool).
+  //   - toggle OFF (default) → Codex GPT-5.6 Sol xhigh runs the review through
+  //     the connected Codex subscription.
+  //   - toggle ON              → the resident Claude Code harness runs the
+  //     review with the model source selected in Settings > Models.
   // Both backends can call `submit_review` and `lane_command`. Fail-closed
   // approval is enforced by the durable review gate (`requiresSecondPass`),
   // not by backend capability asymmetry.

@@ -5,6 +5,7 @@ import { surfaceEdgeCases } from '@/lib/dispatch/edge-case-surfacer';
 import { computeReadBudget, resolveModelTier } from '@/lib/dispatch/read-budget';
 import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
 import { resolveOpencodeWorkerModelSync } from '@/lib/operator/defaults';
+import { selectedClaudeCodeWorkerModelSync } from '@/lib/claude-code/worker-profile';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import { getLane, findLaneByPacket, listLanes } from '@/lib/lane/registry';
 import { salvagedWorkBlockReason } from '@/lib/supervisor/heal-guard';
@@ -74,11 +75,17 @@ const execFileAsync = promisify(execFile);
 
 /**
  * The operator's pinned worker model for a runtime, or null when unpinned.
- * Only opencode is model-agnostic enough to need this today — every other
- * runtime is bound to its own provider house, where the capability-map default
- * is already the right answer.
+ * OpenCode is model-agnostic. Claude Code is normally provider-bound, but its
+ * o8-owned worker can be pinned to an API gateway model in Settings.
  */
 function operatorWorkerModelFor(runtime: OrchestratorRuntime): string | null {
+  if (runtime === 'claude-code') {
+    try {
+      return selectedClaudeCodeWorkerModelSync();
+    } catch {
+      return null;
+    }
+  }
   if (runtime !== 'opencode') return null;
   try {
     return resolveOpencodeWorkerModelSync();

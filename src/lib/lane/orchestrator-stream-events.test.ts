@@ -7,7 +7,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { createToolCallTracker, processStreamEvent, type OrchestratorEvent } from './orchestrator-stream-events';
+import { createToolCallTracker, parseOrchestratorTurnUsage, processStreamEvent, type OrchestratorEvent } from './orchestrator-stream-events';
 
 function run(rawEvents: Array<Record<string, unknown>>): OrchestratorEvent[] {
   const out: OrchestratorEvent[] = [];
@@ -82,6 +82,24 @@ describe('processStreamEvent — Claude Code terminal errors', () => {
       type: 'error',
       code: 'error_during_execution',
       error: "You've hit your usage limit",
+    });
+  });
+});
+
+describe('parseOrchestratorTurnUsage', () => {
+  it('keeps fresh and cached input separate for a warm harness turn', () => {
+    expect(parseOrchestratorTurnUsage({
+      usage: {
+        input_tokens: 203,
+        output_tokens: 11,
+        cache_read_input_tokens: 40_448,
+        cache_creation_input_tokens: 0,
+      },
+    })).toEqual({
+      inputTokens: 203,
+      outputTokens: 11,
+      cacheReadTokens: 40_448,
+      cacheWriteTokens: 0,
     });
   });
 });

@@ -128,6 +128,7 @@ export const SETTINGS_SEARCH_REGISTRY: SettingsSearchEntry[] = [
   { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Brain routing", label: "Brain uses Claude CLI", description: "Warm claude CLI answers (~2.7s Haiku), sub-billed", founders: true },
   { tab: 'models', tabLabel: 'Models', group: "Engineering Brain", label: "Codex model", description: "Codex subscription model used for Brain classification and cited answers" },
   { tab: 'models', tabLabel: 'Models', group: "Engineering Brain", label: "Codex effort", description: "Reasoning effort used only by Engineering Brain calls" },
+  { tab: 'models', tabLabel: 'Models', group: "Claude Code harness", label: "Model source", description: "Choose the model source for Claude Code orchestrators and workers", keywords: ['orchestrator', 'worker', 'harness', 'gateway', 'codex', 'deepseek', 'grok'] },
   { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Brain routing", label: "Collide aggregator", description: "Who synthesizes when the Collide backend runs", founders: true },
   { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Brain routing", label: "Legacy orchestrator toggle", description: "What backend Auto follows: on = Claude REPL, off = Codex", founders: true },
   { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Brain routing", label: "Q&A composer", description: "Class A composer for Brain answers", founders: true },

@@ -142,6 +142,22 @@ function createAssistantState(
   };
 }
 
+function terminalUsage(value: unknown): MobileTranscriptEntry['tokens'] | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const usage = value as Record<string, unknown>;
+  const token = (candidate: unknown) => (
+    typeof candidate === 'number' && Number.isFinite(candidate) && candidate >= 0
+      ? Math.floor(candidate)
+      : 0
+  );
+  return {
+    input: token(usage.inputTokens),
+    output: token(usage.outputTokens),
+    cacheRead: token(usage.cacheReadTokens),
+    cacheWrite: token(usage.cacheWriteTokens),
+  };
+}
+
 export function createOrchestratorMessageHandler(
   options: CreateOrchestratorMessageHandlerOptions,
 ) {
@@ -482,13 +498,15 @@ export function createOrchestratorMessageHandler(
             const finalThinkingDurationMs = endedState.thinkingDurationMs ?? undefined;
             options.flushCurrentAssistant();
             const finalId = endedState.id;
+            const tokens = terminalUsage(msg.data?.usage);
             setTranscriptMessages((prev) => prev.map((message) => {
               if (message.id !== finalId) return message;
               const needsToolSettle = message.toolCalls?.some((tool) => tool.status === 'running');
               const needsThinkingSettle = message.thinkingActive === true;
-              if (!needsToolSettle && !needsThinkingSettle) return message;
+              if (!needsToolSettle && !needsThinkingSettle && !tokens) return message;
               return {
                 ...message,
+                ...(tokens ? { tokens } : {}),
                 ...(needsToolSettle
                   ? { toolCalls: message.toolCalls!.map((tool) => (tool.status === 'running' ? { ...tool, status: 'done' as const } : tool)) }
                   : {}),
