@@ -128,6 +128,38 @@ describe('Codex orchestrator process lifecycle', () => {
     expect(events.at(-1)).toMatchObject({ type: 'done', sessionId: 'codex-thread' });
   });
 
+  it('publishes Codex CLI usage on the terminal lifecycle event', async () => {
+    const session = ensureCodexOrchestratorSession(process.cwd(), `thoughts-usage-${Date.now()}`);
+    const proc = useFakeProc();
+    const events: OrchestratorEvent[] = [];
+
+    const turn = sendToCodexOrchestrator(session, 'report usage', (event) => events.push(event));
+    await waitForSpawn();
+
+    proc.stdout.emit('data', Buffer.from([
+      JSON.stringify({ type: 'thread.started', thread_id: 'usage-thread' }),
+      JSON.stringify({
+        type: 'turn.completed',
+        usage: { input_tokens: 40_651, cached_input_tokens: 40_448, output_tokens: 11 },
+      }),
+      '',
+    ].join('\n')));
+    proc.exitCode = 0;
+    proc.emit('close', 0);
+    await turn;
+
+    expect(events.at(-1)).toMatchObject({
+      type: 'done',
+      sessionId: 'usage-thread',
+      usage: {
+        inputTokens: 203,
+        outputTokens: 11,
+        cacheReadTokens: 40_448,
+        cacheWriteTokens: 0,
+      },
+    });
+  });
+
   it('wraps a Single turn before spawn and disables config plus native fan-out', async () => {
     const session = ensureCodexOrchestratorSession(process.cwd(), `thoughts-single-${Date.now()}`);
     const proc = useFakeProc();

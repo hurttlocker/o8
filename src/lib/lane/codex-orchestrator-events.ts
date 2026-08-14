@@ -1,4 +1,4 @@
-import type { OrchestratorEvent } from './orchestrator-stream-events';
+import type { OrchestratorEvent, OrchestratorTurnUsage } from './orchestrator-stream-events';
 import { planFromCodexTodoList, planFromToolInput, type OrchestratorPlanSnapshot } from './orchestrator-plan';
 
 export interface ParsedCodexLine {
@@ -15,6 +15,7 @@ export interface ParsedCodexLine {
 export interface CodexLineHandlerState {
   threadId: string | null;
   cost: number | null;
+  usage?: OrchestratorTurnUsage;
   /** Last emitted plan snapshot (serialized) — codex re-sends the identical
    * todo_list on started AND completed; suppress the duplicate. Per-turn:
    * every sendTurn/rebound creates a fresh state literal. */
@@ -53,6 +54,16 @@ function computeUsdCost(usage: ParsedCodexLine['usage']): number | null {
     + (cachedTokens / 1_000_000) * GPT_5_5_CACHED_INPUT_USD_PER_MILLION
     + (outputTokens / 1_000_000) * GPT_5_5_OUTPUT_USD_PER_MILLION;
   return Number.isFinite(total) && total > 0 ? total : null;
+}
+
+function normalizeUsage(usage: NonNullable<ParsedCodexLine['usage']>): OrchestratorTurnUsage {
+  const cacheReadTokens = Math.max(0, usage.cached_input_tokens ?? 0);
+  return {
+    inputTokens: Math.max(0, (usage.input_tokens ?? 0) - cacheReadTokens),
+    outputTokens: Math.max(0, usage.output_tokens ?? 0),
+    cacheReadTokens,
+    cacheWriteTokens: 0,
+  };
 }
 
 export function handleCodexJsonLine(
@@ -218,6 +229,7 @@ export function handleCodexJsonLine(
 
     if (type === 'turn.completed' && parsed.usage) {
       state.cost = options.isLocalModel ? null : computeUsdCost(parsed.usage);
+      state.usage = normalizeUsage(parsed.usage);
     }
     return true;
   } catch {

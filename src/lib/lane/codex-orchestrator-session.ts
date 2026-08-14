@@ -37,7 +37,7 @@ import { BRAIN_PROMPT_SECTION } from '@/lib/orchestrator/brain-access';
 import { buildOrchestratorSystemPrompt } from '@/lib/lane/orchestrator-system-prompt';
 import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
 import { assertOrchestratorRepoPath } from '@/lib/lane/repo-preflight';
-import { handleCodexJsonLine } from './codex-orchestrator-events';
+import { handleCodexJsonLine, type CodexLineHandlerState } from './codex-orchestrator-events';
 import { codexOrchestrationModeFlags } from './orchestrator-backends/orchestration-mode';
 import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
 import { prepareSingleOrchestratorLaunch } from './single-orchestrator-policy';
@@ -152,7 +152,7 @@ export function rehydrateCodexOrchestratorTurns(options: CodexOrchestratorRehydr
     } else {
       session.status = 'busy';
     }
-    const lineState = { cost: null as number | null, threadId: session.threadId };
+    const lineState: CodexLineHandlerState = { cost: null, threadId: session.threadId };
     const isLocalModel = typeof record.model === 'string' && !!parseLocalModel(record.model);
     const emit = (event: OrchestratorEvent) => {
       options.onReboundEvent?.(record, event);
@@ -164,7 +164,12 @@ export function rehydrateCodexOrchestratorTurns(options: CodexOrchestratorRehydr
     const finishRecord = () => {
       if (lineState.threadId) session!.threadId = lineState.threadId;
       session!.status = 'ready';
-      emit({ type: 'done', sessionId: lineState.threadId, cost: lineState.cost });
+      emit({
+        type: 'done',
+        sessionId: lineState.threadId,
+        cost: lineState.cost,
+        ...(lineState.usage ? { usage: lineState.usage } : {}),
+      });
       finishOrchestratorTurn(record, 'completed');
     };
     const replay = readJsonlLines(record.stdoutPath, record.stdoutOffset ?? 0).lines;
@@ -543,7 +548,7 @@ async function sendToCodexOrchestratorAttempt(
     };
 
     let lineBuffer = '';
-    const lineState = { cost: null as number | null, threadId: session.threadId };
+    const lineState: CodexLineHandlerState = { cost: null, threadId: session.threadId };
     let stopCrashTail: (() => void) | null = null;
     let crashTailOffset = 0;
     let settled = false;
@@ -585,7 +590,12 @@ async function sendToCodexOrchestratorAttempt(
       if (lineState.threadId) session.threadId = lineState.threadId;
       session.status = status;
       if (error) onEvent({ type: 'error', error });
-      onEvent({ type: 'done', sessionId: lineState.threadId, cost: lineState.cost });
+      onEvent({
+        type: 'done',
+        sessionId: lineState.threadId,
+        cost: lineState.cost,
+        ...(lineState.usage ? { usage: lineState.usage } : {}),
+      });
       promiseResolve();
     };
 
