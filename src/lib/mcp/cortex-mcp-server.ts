@@ -319,6 +319,10 @@ const TOOLS: McpTool[] = [
         runtime: { type: 'string', description: 'Optional worker runtime override.' },
         model: { type: 'string', description: 'Optional runtime-specific model id.' },
         workerIntent: { type: 'string', enum: ['light_worker', 'heavy_worker', 'reviewer', 'diagnostic', 'orchestrator'], description: 'Optional routing intent.' },
+        readOnly: {
+          type: 'boolean',
+          description: 'Set true for inspect, investigate, verify, or report tasks that must not change files. A clean zero-diff exit then completes as evidence.',
+        },
       },
       required: ['prompt'],
     },
@@ -886,6 +890,7 @@ async function handleLaunchAgent(args: Record<string, unknown>): Promise<McpTool
         runtime: args.runtime || undefined,
         model: args.model || undefined,
         workerIntent: args.workerIntent || undefined,
+        readOnly: args.readOnly === true,
       },
     });
 

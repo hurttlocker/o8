@@ -23,6 +23,10 @@ import {
 } from '@/lib/orchestrator/idempotency-store';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { listLanes } from '@/lib/lane/registry';
+import {
+  buildPacketSelfReviewInstructions,
+  buildReadOnlyPacketSelfReviewInstructions,
+} from '@/lib/orchestrator/self-review';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -57,6 +61,7 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
   const repoPath = (body.repoPath as string)?.trim();
   const taskName = (body.taskName as string)?.trim() || prompt?.slice(0, 60);
   const isolate = body.isolate !== false; // Default true for delegated work
+  const readOnly = body.readOnly === true;
 
   // #530 — Option A. Caller may override the base branch so a fix dispatch
   // forks off a feature branch instead of main. Absent / blank → 'main' so
@@ -168,6 +173,13 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
       taskBody: prompt,
     });
     const launchPrompt = buildProjectBriefPromptV1(projectBrief, prompt);
+    const launchContext = {
+      source: 'agent' as const,
+      presentation: 'split' as const,
+      repoContext: projectContext.repoInProject ? 'registered' as const : 'transient' as const,
+      workMode: readOnly ? 'read-only' as const : 'edit' as const,
+      caller: 'orchestrator',
+    };
 
     const packet: OrchestratorPacket = {
       id: packetId,
@@ -198,7 +210,19 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
       workerRouting,
       huddle,
       prompt: launchPrompt,
+      launchContext,
     };
+
+    const completionContract = readOnly
+      ? [
+          'Read-only packet: inspect the repository and report the requested findings. Do not edit files, create commits, create branches, or run commands that mutate repository state. A clean zero-diff completion is the expected successful outcome.',
+          ...buildReadOnlyPacketSelfReviewInstructions(),
+        ]
+      : [
+          ...buildPacketSelfReviewInstructions(baseBranch),
+          'CRITICAL: Before reporting completion, commit all changes with a descriptive message. Uncommitted changes will be lost when the isolated worktree is cleaned up.',
+        ];
+    const governedLaunchPrompt = [launchPrompt, ...completionContract].join('\n\n');
 
     // Append the packet by MUTATING the state object passed into the
     // withLockedState callback. Critical: do NOT call writeOrchestratorControlPlaneState
@@ -246,9 +270,10 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
     const launchResult = await dispatch({
       verb: 'launch_session',
       laneId,
-      prompt: launchPrompt,
+      prompt: governedLaunchPrompt,
       model: workerRouting.selectedModel ?? undefined,
       clientMutationId,
+      launchContext,
       actor: 'orchestrator',
     });
 
@@ -338,6 +363,7 @@ export async function POST(request: NextRequest) {
     workerIntent: body?.workerIntent ?? null,
     requestedProvider: body?.requestedProvider ?? null,
     huddle: body?.huddle ?? null,
+    readOnly: body?.readOnly === true,
   });
   const binding = bindIdempotencyClientMutation({
     namespace: 'orchestrator_delegate',

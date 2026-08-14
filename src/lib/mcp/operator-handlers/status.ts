@@ -44,6 +44,10 @@ export const STATUS_TOOLS: McpTool[] = [
           type: 'string',
           description: 'Short human-readable name for a new task. Ignored when steering.',
         },
+        readOnly: {
+          type: 'boolean',
+          description: 'Set true when the new task should inspect and report without changing files.',
+        },
       },
       required: ['message'],
     },
@@ -350,6 +354,7 @@ export async function handleSend(args: Record<string, unknown>): Promise<McpTool
           prompt: message,
           repoPath: args.repoPath || undefined,
           taskName: args.taskName || undefined,
+          readOnly: args.readOnly === true,
         },
         'clientMutationId',
       );

@@ -120,6 +120,36 @@ describe('orchestrator delegate worker routing', () => {
     }));
   });
 
+  it('persists read-only delegation and launches it with the governed evidence receipt', async () => {
+    mocks.dispatch.mockClear();
+    mocks.state.packets.length = 0;
+    const response = await delegateRoute.POST(request({
+      runtime: 'codex',
+      readOnly: true,
+      prompt: 'Read package.json and report the version without changing files.',
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.state.packets).toHaveLength(1);
+    expect(mocks.state.packets[0]).toMatchObject({
+      launchContext: {
+        source: 'agent',
+        presentation: 'split',
+        repoContext: 'transient',
+        workMode: 'read-only',
+        caller: 'orchestrator',
+      },
+    });
+    expect(mocks.dispatch).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      verb: 'launch_session',
+      launchContext: expect.objectContaining({ workMode: 'read-only' }),
+      prompt: expect.stringContaining('Read-only evidence gate before completion:'),
+    }));
+    expect(mocks.dispatch).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      prompt: expect.stringContaining('"decision":"finding_ready|partial|blocked"'),
+    }));
+  });
+
   it('uses the OpenCode 2 adapter model instead of a foreign generic default when no pin exists', async () => {
     mocks.dispatch.mockClear();
     mocks.defaults.opencodeWorkerModel = null;
