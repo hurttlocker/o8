@@ -388,14 +388,14 @@ export const ORCHESTRATOR_RUNTIMES = {
     shortLabel: 'DSH',
     dispatchable: true,
     requiresModel: false,
-    defaultModel: 'deepseek-v4-flash',
+    defaultModel: 'deepseek-v4-pro',
     accentColor: '#4d6bfe',
-    binaryName: 'dsh-jsonrpc-agent',
+    binaryName: 'dsh-acp-demo',
     workerProvider: 'deepseek-harness',
     authHouse: 'deepseek-harness',
     reasoningEffort: false,
     tier: 'standard',
-    description: 'DeepSeek Harness developer preview through its persistent stdio JSON-RPC SDK runtime, with provider selection kept separate from the harness.',
+    description: 'DeepSeek Harness developer preview through its official ACP stdio server, with provider selection kept separate from the harness.',
   },
 } satisfies Record<string, OrchestratorRuntimeCapability>;
 

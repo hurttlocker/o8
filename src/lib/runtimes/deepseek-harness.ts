@@ -5,7 +5,6 @@ import type {
   RuntimeCapabilities,
   RuntimeChangedFile,
   RuntimeSession,
-  RuntimeTelemetry,
   RuntimeTranscriptEntry,
 } from './types';
 
@@ -14,11 +13,9 @@ import {
   getOwnedDeepSeekHarnessFleetAdditions,
   getOwnedDeepSeekHarnessReviewPacket,
   getOwnedDeepSeekHarnessRuntimeTail,
-  getOwnedDeepSeekHarnessTelemetrySources,
   interruptOwnedDeepSeekHarnessSession,
   launchOwnedDeepSeekHarnessSession,
 } from '@/lib/deepseek-harness/owned';
-import { parseDeepSeekHarnessSessionCost } from './deepseek-harness-cost-parser';
 import { ownedTailToRuntimeTranscript } from './shared/owned-transcript';
 
 const SESSION_PREFIX = 'deepseek-harness-owned:';
@@ -30,8 +27,8 @@ const capabilities: RuntimeCapabilities = {
   resume: true,
   interrupt: true,
   reviewDiffs: true,
-  costTelemetry: true,
-  streaming: true,
+  costTelemetry: false,
+  streaming: false,
 };
 
 type OwnedAgent = Awaited<ReturnType<typeof getOwnedDeepSeekHarnessFleetAdditions>>['agents'][number];
@@ -147,22 +144,5 @@ export const deepSeekHarnessRuntime: AgentRuntime = {
       additions: file.additions ?? 0,
       deletions: file.deletions ?? 0,
     })) ?? [];
-  },
-
-  async getTelemetry(sessionKey: string): Promise<RuntimeTelemetry | undefined> {
-    if (!sessionKey.startsWith(SESSION_PREFIX)) return undefined;
-    const sources = await getOwnedDeepSeekHarnessTelemetrySources(sessionKey);
-    if (!sources?.stdoutPaths.length) return undefined;
-    const cost = await parseDeepSeekHarnessSessionCost(sources.stdoutPaths).catch(() => null);
-    if (!cost) return undefined;
-    return {
-      totalTokens: cost.inputTokens + cost.outputTokens + cost.cacheReadTokens,
-      contextTokens: cost.inputTokens + cost.cacheReadTokens,
-      inputTokens: cost.inputTokens,
-      outputTokens: cost.outputTokens,
-      cacheReadTokens: cost.cacheReadTokens,
-      cacheWriteTokens: cost.cacheWriteTokens,
-      model: cost.model ?? undefined,
-    };
   },
 };

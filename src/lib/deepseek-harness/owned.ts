@@ -40,16 +40,16 @@ import type {
 } from '@/lib/runtimes/shared/owned-session/types';
 import {
   StdioJsonRpcPeer,
+  type StdioJsonRpcInboundRequest,
   type StdioJsonRpcNotification,
 } from '@/lib/runtimes/shared/stdio-json-rpc';
 import { chainOnKey } from '@/lib/util/keyed-promise-chain';
 import {
   DEEPSEEK_HARNESS_SERVER_NAME,
-  deepSeekHarnessEvent,
-  deepSeekHarnessInboxContains,
   parseDeepSeekHarnessRunLog,
   type DeepSeekHarnessRunRecord,
   validateDeepSeekHarnessInitialize,
+  validateDeepSeekHarnessNewSession,
   validateDeepSeekHarnessPrompt,
 } from './protocol';
 import { resolveDeepSeekHarnessLaunch } from './runtime-resolution';
@@ -57,7 +57,8 @@ import { resolveDeepSeekHarnessLaunch } from './runtime-resolution';
 const SURFACE_PREFIX = 'deepseek-harness-owned:';
 const SESSION_PREFIX = 'deepseek-harness-owned-';
 const RUNS_DIR = 'runs';
-const DEFAULT_MODEL = 'deepseek-v4-flash';
+const DEFAULT_MODEL = 'deepseek-v4-pro';
+const TURN_TIMEOUT_MS = 14_400_000;
 
 interface DeepSeekHarnessSessionRecord {
   surfaceId: string;
@@ -148,27 +149,38 @@ function replaceRun(session: DeepSeekHarnessSessionRecord, run: DeepSeekHarnessR
   if (session.activeRun?.id === run.id) session.activeRun = run;
 }
 
-async function finishRunIfReady(session: DeepSeekHarnessSessionRecord, run: DeepSeekHarnessRunRecord): Promise<void> {
-  if (!run.inboxAccepted || !run.idleSeen || run.outcome !== 'running') return;
-  const parsed = parseDeepSeekHarnessRunLog(
-    await readFile(run.stdoutPath, 'utf8').catch(() => ''),
-    run,
-  );
-  run.finishReason = run.finishReason ?? parsed.finishReason;
-  run.finishedAt = nowIso();
-  run.outcome = run.finishReason === 'error'
-    ? 'failed'
-    : run.finishReason === 'interrupted' || run.finishReason === 'aborted'
-      ? 'interrupted'
-      : 'finished';
-  session.latestSummary = parsed.entries
-    .filter((entry) => entry.kind === 'message')
-    .at(-1)?.text ?? `DeepSeek Harness turn ${run.outcome}.`;
-  replaceRun(session, run);
-  // The Harness process stays alive between turns. Keep the settled run as the
-  // process anchor so the shared liveness and confirmed-kill paths still see
-  // its pid while the UI correctly treats a non-running outcome as idle.
-  session.activeRun = run;
+function acpUpdateText(notification: StdioJsonRpcNotification): string | null {
+  if (notification.method !== 'session/update') return null;
+  const update = notification.params.update;
+  if (!update || typeof update !== 'object' || Array.isArray(update)) return null;
+  const record = update as Record<string, unknown>;
+  if (record.sessionUpdate !== 'agent_message_chunk') return null;
+  const content = record.content;
+  if (!content || typeof content !== 'object' || Array.isArray(content)) return null;
+  const text = (content as Record<string, unknown>).text;
+  return typeof text === 'string' && text.trim() ? text.trim() : null;
+}
+
+function handleAcpRequest(peer: StdioJsonRpcPeer, request: StdioJsonRpcInboundRequest): void {
+  if (request.method !== 'session/request_permission') {
+    peer.respondError(request.id, -32601, `Unsupported ACP request: ${request.method}`);
+    return;
+  }
+  const options = Array.isArray(request.params.options) ? request.params.options : [];
+  const allowOnce = options.find((option) => (
+    option
+    && typeof option === 'object'
+    && !Array.isArray(option)
+    && (option as Record<string, unknown>).kind === 'allow_once'
+    && typeof (option as Record<string, unknown>).optionId === 'string'
+  )) as Record<string, unknown> | undefined;
+  if (!allowOnce) {
+    peer.respond(request.id, { outcome: { outcome: 'cancelled' } });
+    return;
+  }
+  peer.respond(request.id, {
+    outcome: { outcome: 'selected', optionId: allowOnce.optionId },
+  });
 }
 
 async function handleNotification(
@@ -184,40 +196,54 @@ async function handleNotification(
       method: notification.method,
       params: notification.params,
     })}\n`, 'utf8');
-
-    if (notification.method === 'session.event') {
-      const event = deepSeekHarnessEvent(notification.params);
-      if (event?.type === 'agent/inbox/spliced') {
-        const inserted = event.data && typeof event.data === 'object' && !Array.isArray(event.data)
-          ? (event.data as Record<string, unknown>).inserted
-          : null;
-        const firstId = Array.isArray(inserted)
-          ? inserted.map((item) => item && typeof item === 'object' && !Array.isArray(item)
-            ? (item as Record<string, unknown>).id
-            : null).find((value): value is string => typeof value === 'string' && Boolean(value.trim()))
-          : null;
-        if (firstId) {
-          run.messageId = run.messageId ?? firstId;
-          run.inboxAccepted = deepSeekHarnessInboxContains(event, run.messageId);
-        }
-      }
-      if (event?.type === 'turn/end') {
-        const data = event.data && typeof event.data === 'object' && !Array.isArray(event.data)
-          ? event.data as Record<string, unknown>
-          : null;
-        const reason = data?.reason && typeof data.reason === 'object' && !Array.isArray(data.reason)
-          ? data.reason as Record<string, unknown>
-          : null;
-        run.finishReason = typeof reason?.kind === 'string' ? reason.kind : 'unknown';
-      }
-    }
-    if (notification.method === 'session.status'
-      && notification.params.sessionId === session.sessionId
-      && notification.params.status === 'idle') {
-      run.idleSeen = true;
-    }
-    await finishRunIfReady(session, run);
+    const text = acpUpdateText(notification);
+    if (text) session.latestSummary = compactText(text, 2_000);
     replaceRun(session, run);
+    await saveSession(session);
+  });
+}
+
+async function settlePrompt(
+  surfaceId: string,
+  runId: string,
+  result: unknown,
+  error?: unknown,
+): Promise<void> {
+  await withSession(surfaceId, async () => {
+    const session = await findSession(surfaceId, false);
+    const run = session?.recentRuns.find((candidate) => candidate.id === runId);
+    if (!session || !run || run.outcome !== 'running') return;
+    let settlementError = error;
+    let stopReason = 'error';
+    if (!settlementError) {
+      try {
+        stopReason = validateDeepSeekHarnessPrompt(result).stopReason;
+      } catch (validationError) {
+        settlementError = validationError;
+      }
+    }
+    run.finishReason = stopReason;
+    run.finishedAt = nowIso();
+    run.outcome = settlementError
+      ? 'failed'
+      : stopReason === 'cancelled'
+        ? 'interrupted'
+        : 'finished';
+    await appendFile(run.stdoutPath, `${JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'o8/session.prompt.settled',
+      params: { outcome: run.outcome, stopReason },
+    })}\n`, 'utf8');
+    const parsed = parseDeepSeekHarnessRunLog(
+      await readFile(run.stdoutPath, 'utf8').catch(() => ''),
+      run,
+    );
+    session.latestSummary = settlementError
+      ? compactText(settlementError instanceof Error ? settlementError.message : String(settlementError), 2_000)
+      : parsed.entries.filter((entry) => entry.kind === 'message').at(-1)?.text
+        ?? `DeepSeek Harness turn ${run.outcome}.`;
+    replaceRun(session, run);
+    session.activeRun = run;
     await saveSession(session);
   });
 }
@@ -246,29 +272,27 @@ async function recordProcessExit(surfaceId: string, process: ActiveHarnessProces
 async function ensureProcess(session: DeepSeekHarnessSessionRecord): Promise<ActiveHarnessProcess> {
   const existing = activeProcesses.get(session.surfaceId);
   if (existing?.peer.running) return existing;
-  const launch = await resolveDeepSeekHarnessLaunch();
+  const launch = await resolveDeepSeekHarnessLaunch({ model: session.model });
   const peer = new StdioJsonRpcPeer({
     command: launch.command,
     args: launch.args,
     cwd: session.repoPath,
     env: {
       ...process.env,
-      DSH_CWD: session.repoPath,
-      DSH_SESSION_ROOT: path.join(session.sessionDir, 'harness-sessions'),
-      ...(launch.configPath ? { DSH_CORDIS_CONFIG: launch.configPath } : {}),
+      DSH_SNAPSHOT_SESSIONS_ROOT: path.join(session.sessionDir, 'harness-sessions'),
       FORCE_COLOR: '0',
       NO_COLOR: '1',
     },
   }, 30_000);
-  const activeProcess: ActiveHarnessProcess = { peer, sessionId: session.sessionId };
+  const activeProcess: ActiveHarnessProcess = { peer, sessionId: '' };
   activeProcesses.set(session.surfaceId, activeProcess);
   peer.on('notification', (notification: StdioJsonRpcNotification) => {
     void handleNotification(session.surfaceId, notification).catch((error) => {
       console.error('[deepseek-harness] notification persistence failed', error);
     });
   });
-  peer.on('request', (request: { id: string | number; method: string }) => {
-    peer.respondError(request.id, -32601, `o8 has no handler for runtime request ${request.method}.`);
+  peer.on('request', (request: StdioJsonRpcInboundRequest) => {
+    handleAcpRequest(peer, request);
   });
   peer.on('stderr', (chunk: Buffer) => {
     void withSession(session.surfaceId, async () => {
@@ -279,16 +303,22 @@ async function ensureProcess(session: DeepSeekHarnessSessionRecord): Promise<Act
   peer.on('exit', () => { void recordProcessExit(session.surfaceId, activeProcess); });
   try {
     const initialized = validateDeepSeekHarnessInitialize(await peer.request('initialize', {
-      cwd: session.repoPath,
-      provider: globalThis.process.env.O8_DEEPSEEK_HARNESS_PROVIDER?.trim() || 'deepseek-official',
-      model: session.model,
+      protocolVersion: 1,
+      clientCapabilities: { fs: { readTextFile: true, writeTextFile: true }, terminal: true },
+      clientInfo: { name: 'o8', version: '0.1.0' },
     }));
+    const created = validateDeepSeekHarnessNewSession(await peer.request('session/new', {
+      cwd: session.repoPath,
+      mcpServers: [],
+    }));
+    activeProcess.sessionId = created.sessionId;
     await withSession(session.surfaceId, async () => {
       const current = await findSession(session.surfaceId, false);
       if (!current) return;
+      current.sessionId = created.sessionId;
       current.rpcPid = peer.pid;
       current.commandIdentity = path.basename(launch.command);
-      current.serverVersion = initialized.serverInfo.version;
+      current.serverVersion = initialized.agentInfo.version;
       if (current.activeRun) {
         current.activeRun.pid = peer.pid;
         current.activeRun.commandIdentity = current.commandIdentity;
@@ -344,6 +374,13 @@ async function dispatchPrompt(
   prompt: string,
   mode: 'launch' | 'resume',
 ): Promise<{ ok: boolean; note: string; sideEffect?: 'none' | 'unknown' }> {
+  if (mode === 'resume' && !activeProcesses.get(surfaceId)?.peer.running) {
+    return {
+      ok: false,
+      sideEffect: 'none',
+      note: 'The official Harness ACP preview cannot reload a session after its owning process exits; launch a new Harness session instead.',
+    };
+  }
   const run = await createRun(surfaceId, prompt, mode);
   let process: ActiveHarnessProcess;
   try {
@@ -364,37 +401,18 @@ async function dispatchPrompt(
     return { ok: false, sideEffect: 'none', note: error instanceof Error ? error.message : String(error) };
   }
 
-  try {
-    const receipt = validateDeepSeekHarnessPrompt(await process.peer.request('session/prompt', {
-      sessionId: process.sessionId,
-      contentBlocks: [{ type: 'text', text: prompt }],
-    }));
-    await withSession(surfaceId, async () => {
-      const session = await findSession(surfaceId, false);
-      const active = session?.activeRun;
-      if (!session || !active || active.id !== run.id) return;
-      if (active.messageId && active.messageId !== receipt.messageId) {
-        throw new Error('DeepSeek Harness prompt receipt did not match the durable inbox event.');
-      }
-      active.messageId = receipt.messageId;
-      active.inboxAccepted = true;
-      await finishRunIfReady(session, active);
-      replaceRun(session, active);
-      await saveSession(session);
-    });
-    return { ok: true, note: mode === 'launch'
-      ? 'DeepSeek Harness accepted the first turn over its persistent JSON-RPC process.'
-      : 'DeepSeek Harness accepted the follow-up on the same owned session.' };
-  } catch (error) {
-    const note = `DeepSeek Harness may have accepted the turn, but o8 could not settle its receipt: ${error instanceof Error ? error.message : String(error)}`;
-    await withSession(surfaceId, async () => {
-      const session = await findSession(surfaceId, false);
-      if (!session) return;
-      session.latestSummary = note;
-      await saveSession(session);
-    });
-    return { ok: false, sideEffect: 'unknown', note };
-  }
+  void process.peer.request('session/prompt', {
+    sessionId: process.sessionId,
+    prompt: [{ type: 'text', text: prompt }],
+  }, TURN_TIMEOUT_MS).then(
+    (result) => settlePrompt(surfaceId, run.id, result),
+    (error) => settlePrompt(surfaceId, run.id, null, error),
+  ).catch((error) => {
+    console.error('[deepseek-harness] prompt settlement persistence failed', error);
+  });
+  return { ok: true, note: mode === 'launch'
+    ? 'DeepSeek Harness accepted the first turn over its official ACP process.'
+    : 'DeepSeek Harness accepted the follow-up on the same live ACP session.' };
 }
 
 export async function launchOwnedDeepSeekHarnessSession(request: {
@@ -456,6 +474,9 @@ export async function interruptOwnedDeepSeekHarnessSession(surfaceId: string) {
   if (!session) throw new Error('Owned DeepSeek Harness session was not found.');
   const active = activeProcesses.get(surfaceId);
   if (active) {
+    if (session.activeRun?.outcome === 'running') {
+      active.peer.notify('session/cancel', { sessionId: active.sessionId });
+    }
     await withSession(surfaceId, async () => {
       const current = await findSession(surfaceId, false);
       if (!current) return;
@@ -482,20 +503,21 @@ export async function interruptOwnedDeepSeekHarnessSession(surfaceId: string) {
     const current = await findSession(surfaceId, false);
     if (!current) return;
     const run = current.activeRun;
-    if (run) {
+    if (run?.outcome === 'running') {
       run.outcome = 'interrupted';
       run.finishedAt = nowIso();
       replaceRun(current, run);
-      current.activeRun = undefined;
     }
+    current.activeRun = undefined;
     current.rpcPid = undefined;
     await saveSession(current);
   });
-  return { interrupted: true, note: 'The owned DeepSeek Harness process was stopped; the durable session can be resumed in a fresh process.' };
+  return { interrupted: true, note: 'The owned DeepSeek Harness ACP process was stopped. This preview cannot reload that session after process exit.' };
 }
 
 function buildSurface(session: DeepSeekHarnessSessionRecord): RuntimeSurfaceSummary {
   const running = session.activeRun?.outcome === 'running';
+  const liveProcess = activeProcesses.get(session.surfaceId)?.peer.running === true;
   const latest = session.recentRuns[0];
   return {
     id: session.surfaceId,
@@ -506,13 +528,13 @@ function buildSurface(session: DeepSeekHarnessSessionRecord): RuntimeSurfaceSumm
     cwd: session.repoPath.replace(os.homedir(), '~'),
     branch: session.branch,
     sourceLabel: running
-      ? `Owned DeepSeek Harness JSON-RPC • active pid ${session.activeRun?.pid ?? session.rpcPid ?? 'starting'}`
-      : `Owned DeepSeek Harness JSON-RPC • ${session.serverVersion ?? 'ready'}`,
+      ? `Owned DeepSeek Harness ACP • active pid ${session.activeRun?.pid ?? session.rpcPid ?? 'starting'}`
+      : `Owned DeepSeek Harness ACP • ${session.serverVersion ?? 'ready'}`,
     tailSourceLabel: `${session.sessionDir}/${RUNS_DIR}/*.jsonl`,
     capabilities: {
       attach: true,
       readTail: true,
-      sendInput: !running,
+      sendInput: !running && liveProcess,
       interrupt: running || Boolean(session.rpcPid),
       resize: false,
       diffContext: Boolean(session.branch || session.repoSlug),
@@ -525,8 +547,10 @@ function buildSurface(session: DeepSeekHarnessSessionRecord): RuntimeSurfaceSumm
       lastRunStartedAt: latest?.startedAt,
       lastRunFinishedAt: latest?.finishedAt,
       summary: running
-        ? 'A DeepSeek Harness turn is running over the owned JSON-RPC process.'
-        : 'The durable Harness session is ready for a follow-up turn.',
+        ? 'A DeepSeek Harness turn is running over the owned ACP process.'
+        : liveProcess
+          ? 'The live ACP session is ready for a follow-up turn.'
+          : 'The ACP preview process exited and cannot reload this session; launch a new session to continue.',
     },
     reviewContext: { repoSlug: session.repoSlug, branch: session.branch, head: session.head },
   };
@@ -604,7 +628,7 @@ export async function getOwnedDeepSeekHarnessFleetAdditions(): Promise<{
     events: [],
     artifacts: [],
     ownedThreadIds: sessions.map((session) => session.sessionId),
-    sourceLabel: 'Owned DeepSeek Harness JSON-RPC sessions',
+    sourceLabel: 'Owned DeepSeek Harness ACP sessions',
   };
 }
 
@@ -695,7 +719,7 @@ export function invalidateOwnedDeepSeekHarnessFleetCache(): void {
 registerOwnedSessionLifecycleHandler({
   runtimeId: 'deepseek-harness',
   surfaceIdPrefix: SURFACE_PREFIX,
-  commandLabel: 'dsh-jsonrpc-agent',
+  commandLabel: 'dsh-acp-demo',
   resolveRoot: root,
   sessionState: ownedDeepSeekHarnessSessionState,
   archiveSession: archiveOwnedDeepSeekHarnessSession,

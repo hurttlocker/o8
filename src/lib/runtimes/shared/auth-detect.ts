@@ -427,14 +427,18 @@ async function detectDeepSeekHarness(): Promise<RuntimeAuthStatus> {
       fix: deepSeekHarnessInstallGuidance(),
     });
   }
-  const authenticated = Boolean(process.env.DEEPSEEK_API_KEY?.trim());
+  const provider = launch.provider;
+  const authenticated = provider === 'deepseek-official'
+    ? Boolean(process.env.DEEPSEEK_API_KEY?.trim())
+    : Boolean(process.env.OPENROUTER_API_KEY?.trim());
+  const credential = provider === 'deepseek-official' ? 'DEEPSEEK_API_KEY' : 'OPENROUTER_API_KEY';
   return nowStatus('deepseek-harness', 'deepseek-harness', {
     installed: true,
     authenticated,
     detail: authenticated
-      ? `DeepSeek Harness JSON-RPC runtime is available from ${launch.source}${launch.version ? ` (${launch.version})` : ''} and DEEPSEEK_API_KEY is set.`
-      : `DeepSeek Harness JSON-RPC runtime is available from ${launch.source}, but DEEPSEEK_API_KEY is not set.`,
-    fix: authenticated ? 'No action needed.' : 'Set DEEPSEEK_API_KEY before dispatching DeepSeek Harness.',
+      ? `DeepSeek Harness ACP is available from ${launch.source}${launch.version ? ` (${launch.version})` : ''} through ${provider}.`
+      : `DeepSeek Harness ACP is available from ${launch.source}, but ${credential} is not set.`,
+    fix: authenticated ? 'No action needed.' : `Set ${credential} before dispatching DeepSeek Harness.`,
     binaryPath: launch.command,
   });
 }

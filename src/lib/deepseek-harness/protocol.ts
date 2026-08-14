@@ -4,7 +4,7 @@ import type {
 } from '@/lib/runtimes/shared/owned-session/types';
 import { compactText, formatClock } from '@/lib/runtimes/shared/owned-session/helpers';
 
-export const DEEPSEEK_HARNESS_SERVER_NAME = 'deepseek-harness-sdk-runtime';
+export const DEEPSEEK_HARNESS_SERVER_NAME = 'deepseek-harness-acp';
 
 export type DeepSeekHarnessRunMode = 'launch' | 'resume';
 
@@ -26,11 +26,16 @@ export interface DeepSeekHarnessRunRecord {
 }
 
 export interface DeepSeekHarnessInitializeResult {
-  serverInfo: { name: string; version: string };
+  protocolVersion: number;
+  agentInfo: { name: string; version: string };
+}
+
+export interface DeepSeekHarnessNewSessionResult {
+  sessionId: string;
 }
 
 export interface DeepSeekHarnessPromptResult {
-  messageId: string;
+  stopReason: string;
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -57,23 +62,35 @@ function textBlocks(value: unknown): string[] {
 
 export function validateDeepSeekHarnessInitialize(value: unknown): DeepSeekHarnessInitializeResult {
   const result = record(value);
-  const serverInfo = record(result?.serverInfo);
-  if (serverInfo?.name !== DEEPSEEK_HARNESS_SERVER_NAME
-    || typeof serverInfo.version !== 'string'
-    || !serverInfo.version.trim()) {
+  const agentInfo = record(result?.agentInfo);
+  if (result?.protocolVersion !== 1
+    || agentInfo?.name !== DEEPSEEK_HARNESS_SERVER_NAME
+    || typeof agentInfo.version !== 'string'
+    || !agentInfo.version.trim()) {
     throw new Error(
       `DeepSeek Harness initialize returned an incompatible server identity; expected ${DEEPSEEK_HARNESS_SERVER_NAME}.`,
     );
   }
-  return { serverInfo: { name: DEEPSEEK_HARNESS_SERVER_NAME, version: serverInfo.version.trim() } };
+  return {
+    protocolVersion: 1,
+    agentInfo: { name: DEEPSEEK_HARNESS_SERVER_NAME, version: agentInfo.version.trim() },
+  };
+}
+
+export function validateDeepSeekHarnessNewSession(value: unknown): DeepSeekHarnessNewSessionResult {
+  const result = record(value);
+  if (typeof result?.sessionId !== 'string' || !result.sessionId.trim()) {
+    throw new Error('DeepSeek Harness ACP session/new returned no sessionId.');
+  }
+  return { sessionId: result.sessionId.trim() };
 }
 
 export function validateDeepSeekHarnessPrompt(value: unknown): DeepSeekHarnessPromptResult {
   const result = record(value);
-  if (typeof result?.messageId !== 'string' || !result.messageId.trim()) {
-    throw new Error('DeepSeek Harness session/prompt did not return a durable messageId receipt.');
+  if (typeof result?.stopReason !== 'string' || !result.stopReason.trim()) {
+    throw new Error('DeepSeek Harness ACP session/prompt returned no stopReason.');
   }
-  return { messageId: result.messageId.trim() };
+  return { stopReason: result.stopReason.trim() };
 }
 
 export function deepSeekHarnessEvent(value: unknown): Record<string, unknown> | null {
@@ -133,6 +150,49 @@ export function parseDeepSeekHarnessRunLog(
     try {
       frame = JSON.parse(line) as Record<string, unknown>;
     } catch {
+      continue;
+    }
+    if (frame.method === 'session/update') {
+      const params = record(frame.params);
+      const update = record(params?.update);
+      const timestamp = run.finishedAt ?? run.startedAt;
+      if (update?.sessionUpdate === 'agent_message_chunk') {
+        const text = record(update.content)?.text;
+        if (typeof text === 'string' && text.trim()) {
+          entries.push({
+            id: `${run.id}:assistant:${index}`,
+            kind: 'message',
+            label: 'DeepSeek Harness',
+            text: compactText(text.trim(), 2_000),
+            timestamp,
+            timestampLabel: formatClock(timestamp),
+          });
+        }
+      } else if (update?.sessionUpdate === 'tool_call') {
+        entries.push({
+          id: `${run.id}:tool:${update.toolCallId ?? index}`,
+          kind: 'tool',
+          label: typeof update.title === 'string' ? update.title : 'tool',
+          text: compactText(JSON.stringify(update.rawInput ?? {}), 800),
+          timestamp,
+          timestampLabel: formatClock(timestamp),
+        });
+      } else if (update?.sessionUpdate === 'tool_call_update' && update.status === 'completed') {
+        entries.push({
+          id: `${run.id}:tool-result:${update.toolCallId ?? index}`,
+          kind: 'tool-output',
+          label: typeof update.title === 'string' ? update.title : 'tool result',
+          text: compactText(textBlocks(update.content).join('\n') || JSON.stringify(update.content ?? {}), 800),
+          timestamp,
+          timestampLabel: formatClock(timestamp),
+        });
+      }
+      continue;
+    }
+    if (frame.method === 'o8/session.prompt.settled') {
+      const params = record(frame.params);
+      completedTurn = params?.outcome === 'finished';
+      finishReason = typeof params?.stopReason === 'string' ? params.stopReason : undefined;
       continue;
     }
     if (frame.method !== 'session.event') continue;

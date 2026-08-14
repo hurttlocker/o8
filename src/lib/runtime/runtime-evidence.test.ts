@@ -40,8 +40,9 @@ describe('runtime evidence catalog', () => {
     expect(RUNTIME_EVIDENCE_DEFINITIONS.grok.transports).toContain('acp');
     expect(RUNTIME_EVIDENCE_DEFINITIONS.grok.pricing).toEqual([]);
     expect(RUNTIME_EVIDENCE_DEFINITIONS['deepseek-harness'].carriers).toContainEqual(
-      expect.objectContaining({ os: 'darwin', architectures: ['x64'], support: 'unsupported' }),
+      expect.objectContaining({ os: 'darwin', architectures: ['x64'], support: 'supported' }),
     );
+    expect(RUNTIME_EVIDENCE_DEFINITIONS['deepseek-harness'].transports).toContain('acp');
   });
 
   it('projects missing, fresh, and stale evidence without guessing', () => {

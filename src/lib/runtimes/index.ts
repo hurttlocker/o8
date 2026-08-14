@@ -122,10 +122,9 @@ registerRuntime(piRuntime);
 // path once needed. Sessions 'prime-agent-owned:'. See
 // src/lib/prime-agent/owned.ts.
 registerRuntime(primeAgentRuntime);
-// DeepSeek Harness owns one long-lived stdio JSON-RPC process per o8 session.
+// DeepSeek Harness owns one official ACP stdio process per o8 session.
 // Provider/model routing remains a Harness concern rather than a new o8
-// provider branch, so future stateful JSON-RPC harnesses can reuse the same
-// process owner without copying lifecycle and framing code.
+// provider branch; o8 owns only the normalized worker lifecycle around it.
 registerRuntime(deepSeekHarnessRuntime);
 for (const runtime of declarativeWorkerRuntimes) registerRuntime(runtime);
 // #514 — Cloud runtime adapter (self-hosted worker pool).
