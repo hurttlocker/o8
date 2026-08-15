@@ -77,6 +77,8 @@ import {
   type ClassAComposer,
   type WorkersUseBrain,
 } from './defaults-env';
+import { applyStorageReserveUpdate, resolveStorageReserveSettings, resolveStoredStorageReserve, STORAGE_RESERVE_FALLBACK, type StorageReserveDefaults } from './storage-reserve-defaults';
+import { applyWorkspaceParkingUpdate, resolveStoredWorkspaceParking, resolveWorkspaceParkingSettings, WORKSPACE_PARKING_FALLBACK, type WorkspaceParkingDefaults } from './workspace-parking-defaults';
 import {
   applyOperatorDefaultsTomlWithLock,
   getOperatorDefaultsTomlState as readOperatorDefaultsTomlState,
@@ -129,7 +131,7 @@ export type RequireApproval = 'high-risk' | 'surface' | 'always' | 'never';
 
 export function isRequireApproval(value: unknown): value is RequireApproval { return value === 'high-risk' || value === 'surface' || value === 'always' || value === 'never'; }
 
-export interface OperatorDefaults {
+export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParkingDefaults {
   subscriptionProfile: SubscriptionProfile;
   parallelCap: number;
   overlapGate: OverlapGateMode;
@@ -316,14 +318,7 @@ export interface OperatorDefaults {
    * browser instead. Env: `O8_PR_LINK_DESTINATION`.
    */
   prLinkDestination: PrLinkDestination;
-  /**
-   * Retention ceiling for `.cortex-worktrees` packet worktrees — the max number
-   * of SAFE (terminal-lane or orphan, clean git status) worktrees kept per repo
-   * before the existing prune sweep reclaims the oldest first. **Default 20.**
-   * Enforced only at the prune seam; never deletes an active/reviewing lane's
-   * tree or one with uncommitted changes. `0` = unbounded (guard off). Env:
-   * `O8_WORKTREE_MAX_COUNT`.
-   */
+  /** Safe packet-worktree count kept per repo. Zero is unbounded. */
   worktreeMaxCount: number;
   /**
    * Retention ceiling on the total on-disk size (GB) of safe `.cortex-worktrees`
@@ -409,18 +404,14 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   branchPrefix: 'issue',
   // Agent commit attribution OFF — commits carry the raw message as before.
   commitAttributionEnabled: false,
-  // PR rows open the embedded PrPanel, as before.
   prLinkDestination: 'in-app',
-  // Generous defaults — the guard only ever removes SAFE (terminal/orphan +
-  // clean) worktrees oldest-first, so a fresh install behaves as before until a
-  // repo genuinely accumulates >20 stale packet worktrees or >20GB of them.
   worktreeMaxCount: 20,
   worktreeMaxTotalGb: 20,
+  ...STORAGE_RESERVE_FALLBACK,
+  ...WORKSPACE_PARKING_FALLBACK,
 };
 
-// ── File helpers ──
-
-interface StoredOperatorDefaults {
+interface StoredOperatorDefaults extends Partial<StorageReserveDefaults>, Partial<WorkspaceParkingDefaults> {
   subscriptionProfile?: SubscriptionProfile;
   parallelCap?: number;
   overlapGate?: OverlapGateMode;
@@ -638,6 +629,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (typeof stored.worktreeMaxTotalGb === 'number' && Number.isFinite(stored.worktreeMaxTotalGb) && stored.worktreeMaxTotalGb >= 0) {
     result.worktreeMaxTotalGb = stored.worktreeMaxTotalGb;
   }
+  Object.assign(result, resolveStoredStorageReserve(stored), resolveStoredWorkspaceParking(stored));
   const storedTriage = coerceStoredTier(stored.targetingTriage, OPERATOR_DEFAULTS_FALLBACK.targetingTriage);
   if (storedTriage) result.targetingTriage = storedTriage;
   const storedAction = coerceStoredTier(stored.targetingAction, OPERATOR_DEFAULTS_FALLBACK.targetingAction);
@@ -687,6 +679,8 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
   const envPrLink = envPrLinkDestination();
   const envWtCount = envWorktreeMaxCount();
   const envWtSize = envWorktreeMaxTotalGb();
+  const storageReserve = resolveStorageReserveSettings(fileValues);
+  const workspaceParking = resolveWorkspaceParkingSettings(fileValues);
   const envTriage = envTargetingTier('TRIAGE');
   const envAction = envTargetingTier('ACTION');
   const subscriptionProfile =
@@ -770,6 +764,8 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     prLinkDestination: envPrLink ?? fileValues.prLinkDestination ?? OPERATOR_DEFAULTS_FALLBACK.prLinkDestination,
     worktreeMaxCount: envWtCount ?? fileValues.worktreeMaxCount ?? OPERATOR_DEFAULTS_FALLBACK.worktreeMaxCount,
     worktreeMaxTotalGb: envWtSize ?? fileValues.worktreeMaxTotalGb ?? OPERATOR_DEFAULTS_FALLBACK.worktreeMaxTotalGb,
+    ...storageReserve.values,
+    ...workspaceParking.values,
   };
 
   const sources: Record<keyof OperatorDefaults, SettingSource> = {
@@ -832,6 +828,8 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     prLinkDestination: envPrLink !== null ? 'env' : fileValues.prLinkDestination !== undefined ? 'file' : 'default',
     worktreeMaxCount: envWtCount !== null ? 'env' : fileValues.worktreeMaxCount !== undefined ? 'file' : 'default',
     worktreeMaxTotalGb: envWtSize !== null ? 'env' : fileValues.worktreeMaxTotalGb !== undefined ? 'file' : 'default',
+    ...storageReserve.sources,
+    ...workspaceParking.sources,
   };
 
   return { values: resolved, sources };
@@ -1104,6 +1102,8 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>): Pr
     }
     stored.worktreeMaxTotalGb = Math.min(10000, update.worktreeMaxTotalGb);
   }
+  applyStorageReserveUpdate(stored, update);
+  applyWorkspaceParkingUpdate(stored, update);
   if (update.targetingTriage !== undefined) {
     if (!isTargetingTier(update.targetingTriage)) {
       throw new Error('targetingTriage must be { runtime: dispatch-runtime, model: string, effort: thinking-effort }.');

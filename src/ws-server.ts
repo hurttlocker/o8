@@ -8318,7 +8318,36 @@ async function bootstrapWsServer() {
   }
 
   try {
-    const { reconcileStuckLanes, reconcileOrphanedWorktrees } = await import('@/lib/lane/reconcile');
+    const { reconcileExpiredPacketStorageReservations } = await import(
+      '@/lib/orchestrator/storage-admission'
+    );
+    const result = await reconcileExpiredPacketStorageReservations();
+    if (result.inspected > 0) {
+      console.log(
+        `[storage-admission] Startup reconciliation inspected=${result.inspected} `
+        + `reconciled=${result.reconciled} retainedLive=${result.retainedLive} `
+        + `retainedUnknown=${result.retainedUnknown} held=${result.held}`,
+      );
+    }
+  } catch (error) {
+    console.warn(
+      `[storage-admission] WS startup reconciliation failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  try {
+    const [
+      { reconcileStuckLanes, reconcileOrphanedWorktrees },
+      { reconcileInterruptedWorkspaces },
+    ] = await Promise.all([
+      import('@/lib/lane/reconcile'),
+      import('@/lib/workspace/reconciler'),
+    ]);
+    await reconcileInterruptedWorkspaces().catch((error) => {
+      console.warn(
+        `[workspace-reconcile] Startup reconciliation failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
     await reconcileStuckLanes();
     await reconcileOrphanedWorktrees();
   } catch (error) {

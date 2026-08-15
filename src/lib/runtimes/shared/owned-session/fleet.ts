@@ -207,8 +207,19 @@ export function createFleetComputer({
   const MAX_STOP_ATTEMPTS = 3;
 
   async function markActiveRunOrphaned(session: OwnedSessionRecord, reason: string) {
-    const activeRun = session.activeRun;
+    let activeRun = session.activeRun;
     if (!activeRun) return false;
+    if (activeRun.spawnState === 'prepared') {
+      await runController.reconcilePreparedRuns(session);
+      activeRun = session.activeRun;
+      if (activeRun?.spawnState === 'prepared') {
+        console.warn(
+          `[owned-store] Keeping unresolved prepared ${runtimeId} session ${session.surfaceId}; marker liveness is live or unknown.`,
+        );
+        return false;
+      }
+      return true;
+    }
     const costLine = await runController.readCostLine(activeRun);
     const orphanedAt = nowIso();
     let stopFailed = false;

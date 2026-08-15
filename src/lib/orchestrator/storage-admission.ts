@@ -1,0 +1,788 @@
+import 'server-only';
+
+import { readdir } from 'node:fs/promises';
+import path from 'node:path';
+import type Database from 'better-sqlite3';
+
+import { getSqlite } from '@/lib/db';
+import { findLaneByPacket } from '@/lib/lane/registry';
+import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
+import { listMissionRegistryEntries } from '@/lib/orchestrator/mission-registry';
+import type {
+  OrchestratorPacket,
+  OrchestratorPacketStorageAdmission,
+} from '@/lib/orchestrator/types';
+import {
+  observeManagedWorktreeRootIdentity,
+  resolveManagedWorktreeStorageTarget,
+  resolveWorktreeRootLayout,
+} from '@/lib/worktree/root-layout';
+import { measureDirectoryStorage } from '@/lib/worktree/storage-telemetry';
+import {
+  DEFAULT_STORAGE_OBSERVATION_MAX_AGE_MS,
+  observeStorageVolume,
+  storageObservationFailureReason,
+  StorageAdmissionStore,
+  type StorageAdmissionResult,
+  type StorageReservationRecord,
+} from '@/lib/workspace/storage-admission';
+import {
+  durableStorageLaunchGeneration,
+} from './storage-admission-generation';
+import {
+  isMetadataLockProcessIdentity,
+  probeMetadataLockProcessIdentity,
+  sameMetadataLockProcessIdentity,
+} from '@/lib/worktree/metadata-lock-process-identity';
+
+const GIB = 1024 * 1024 * 1024;
+const DEFAULT_ESTIMATE_FLOOR_BYTES = 2 * GIB;
+const HISTORY_HEADROOM_RATIO = 1.25;
+const SOURCE_HEADROOM_RATIO = 2;
+const LAUNCH_RESERVATION_LEASE_MS = 24 * 60 * 60_000;
+
+export type PacketStorageAdmissionState = OrchestratorPacketStorageAdmission['state'];
+export type PacketStorageAdmissionReceipt = OrchestratorPacketStorageAdmission;
+
+export interface PacketStorageAdmissionLease {
+  receipt: PacketStorageAdmissionReceipt;
+  reservation: StorageReservationRecord;
+  baselineWorkspacePaths: string[] | null;
+}
+
+export interface RepoStorageEstimate {
+  status: 'observed' | 'unknown';
+  exactBytes: number | null;
+  source: PacketStorageAdmissionReceipt['estimateSource'];
+  historySamples: number;
+  workspacePaths: string[];
+  error: string | null;
+}
+
+export interface PacketStorageAdmissionCoordinator {
+  reserveForLaunch(packet: OrchestratorPacket, pressureRetryOrdinal?: number): Promise<PacketStorageAdmissionLease>;
+  commitAfterLaunch(lease: PacketStorageAdmissionLease): Promise<PacketStorageAdmissionReceipt>;
+  settleFailedLaunch(
+    packet: OrchestratorPacket,
+    lease: PacketStorageAdmissionLease,
+  ): Promise<PacketStorageAdmissionReceipt>;
+}
+
+export interface PacketStorageAdmissionReconciliationResult {
+  inspected: number;
+  reconciled: number;
+  retainedLive: number;
+  retainedUnknown: number;
+  held: number;
+}
+
+export interface PacketStorageAdmissionOwnerResolution {
+  liveness: 'dead' | 'alive' | 'unknown';
+  source: string;
+  evidence: string;
+}
+
+export interface AdmissionCoordinatorDependencies {
+  sqlite?: Database.Database;
+  store?: StorageAdmissionStore;
+  now?: () => number;
+  observeEstimate?: (repoPath: string) => Promise<RepoStorageEstimate>;
+  observeWorkspacePaths?: (repoPath: string) => Promise<string[]>;
+  resolveReservationTarget?: (repoPath: string) => string;
+  observeRootIdentity?: typeof observeManagedWorktreeRootIdentity;
+  observeReservationVolume?: typeof observeStorageVolume;
+  resolvePolicy?: () => { reserveRatio: number; absoluteFloorBytes: number };
+}
+
+interface StoredMutationRow {
+  result_json: string;
+}
+
+export class PacketStorageAdmissionError extends Error {
+  constructor(
+    message: string,
+    public readonly receipt: PacketStorageAdmissionReceipt,
+  ) {
+    super(message);
+    this.name = 'PacketStorageAdmissionError';
+  }
+}
+
+function safeEstimateBytes(value: number): number {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error('Workspace growth estimate is outside the safe integer range.');
+  }
+  return value;
+}
+
+async function directoryNames(base: string): Promise<string[]> {
+  try {
+    const entries = await readdir(base, { withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+      .map((entry) => path.join(base, entry.name));
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      return [];
+    }
+    throw error;
+  }
+}
+
+export async function observeRepoStorageEstimate(repoPath: string): Promise<RepoStorageEstimate> {
+  const normalizedRepo = path.resolve(repoPath);
+  try {
+    const layout = resolveWorktreeRootLayout(normalizedRepo);
+    const bases = [...new Set(layout.bases.map((base) => path.resolve(base)))];
+    const nested = await Promise.all(bases.map(directoryNames));
+    const workspacePaths = [...new Set(nested.flat().map((candidate) => path.resolve(candidate)))].sort();
+    if (workspacePaths.length > 0) {
+      const measurements = await Promise.all(
+        workspacePaths.map((candidate) => measureDirectoryStorage(candidate)),
+      );
+      if (measurements.some((measurement) => measurement.allocatedBytesAccounting !== 'observed')) {
+        return {
+          status: 'unknown',
+          exactBytes: null,
+          source: 'unknown',
+          historySamples: measurements.length,
+          workspacePaths,
+          error: 'A same-repository worktree size could not be measured.',
+        };
+      }
+      const largest = Math.max(...measurements.map((measurement) => measurement.allocatedBytes ?? 0));
+      return {
+        status: 'observed',
+        exactBytes: safeEstimateBytes(Math.max(
+          DEFAULT_ESTIMATE_FLOOR_BYTES,
+          Math.ceil(largest * HISTORY_HEADROOM_RATIO),
+        )),
+        source: 'same-repo-history',
+        historySamples: measurements.length,
+        workspacePaths,
+        error: null,
+      };
+    }
+
+    // A repository with no prior packet workspace has no growth history. Use
+    // twice the observed source checkout with a 2 GiB minimum. This pays for a
+    // dependency tree and build output without treating an unknown source size
+    // as zero; an unreadable source holds dispatch instead.
+    const source = await measureDirectoryStorage(normalizedRepo);
+    if (source.allocatedBytesAccounting !== 'observed' || source.allocatedBytes === null) {
+      return {
+        status: 'unknown',
+        exactBytes: null,
+        source: 'unknown',
+        historySamples: 0,
+        workspacePaths,
+        error: 'The source checkout size could not be measured for the safe fallback.',
+      };
+    }
+    return {
+      status: 'observed',
+      exactBytes: safeEstimateBytes(Math.max(
+        DEFAULT_ESTIMATE_FLOOR_BYTES,
+        Math.ceil(source.allocatedBytes * SOURCE_HEADROOM_RATIO),
+      )),
+      source: 'source-size-fallback',
+      historySamples: 0,
+      workspacePaths,
+      error: null,
+    };
+  } catch (error) {
+    return {
+      status: 'unknown',
+      exactBytes: null,
+      source: 'unknown',
+      historySamples: 0,
+      workspacePaths: [],
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function observeWorkspacePaths(repoPath: string): Promise<string[]> {
+  const normalizedRepo = path.resolve(repoPath);
+  const layout = resolveWorktreeRootLayout(normalizedRepo);
+  const roots = [...layout.bases, path.join(normalizedRepo, '.claude', 'worktrees')];
+  const nested = await Promise.all([...new Set(roots)].map(directoryNames));
+  return [...new Set(nested.flat().map((candidate) => path.resolve(candidate)))].sort();
+}
+
+function receiptFromResult(
+  result: StorageAdmissionResult,
+  input: {
+    state?: PacketStorageAdmissionState;
+    ownerId: string;
+    ownerGeneration: number;
+    estimateBytes: number;
+    estimateSource: PacketStorageAdmissionReceipt['estimateSource'];
+    historySamples: number;
+    reservationId: string;
+    pressure?: PacketStorageAdmissionReceipt['pressure'];
+  },
+): PacketStorageAdmissionReceipt {
+  const state = input.state ?? (result.decision === 'reserved' ? 'reserved' : 'held');
+  return {
+    schema: 'o8/packet-storage-admission/v1',
+    state,
+    reason: result.reason,
+    reservationId: input.reservationId,
+    mutationId: result.mutationId,
+    ownerId: input.ownerId,
+    ownerGeneration: input.ownerGeneration,
+    estimateBytes: input.estimateBytes,
+    estimateSource: input.estimateSource,
+    historySamples: input.historySamples,
+    volumeId: result.reservation?.volumeId ?? result.observation?.volumeId ?? null,
+    physicalAvailableBytes: result.observation?.availableBytes ?? null,
+    reservedBeforeBytes: result.activeReservedBytes,
+    requiredReserveBytes: result.requiredReserveBytes,
+    dispatchHeadroomBytes: result.headroomBytes,
+    pressure: input.pressure ?? null,
+    recordedAt: result.recordedAt,
+  };
+}
+
+function mutationSuffix(pressureRetryOrdinal: number): string {
+  return pressureRetryOrdinal > 0 ? `:pressure:${pressureRetryOrdinal}` : '';
+}
+
+function unknownEstimateReceipt(
+  packet: OrchestratorPacket,
+  launchGeneration: number,
+  pressureRetryOrdinal: number,
+  error: string,
+  recordedAt: number,
+  reasonPrefix = 'estimate_unknown',
+): PacketStorageAdmissionReceipt {
+  const suffix = mutationSuffix(pressureRetryOrdinal);
+  const reservationId = `packet-storage:${packet.id}:${launchGeneration}${suffix}`;
+  return {
+    schema: 'o8/packet-storage-admission/v1',
+    state: 'held',
+    reason: `${reasonPrefix}: ${error}`,
+    reservationId,
+    mutationId: `packet-storage-reserve:${packet.id}:${launchGeneration}${suffix}`,
+    ownerId: packet.id,
+    ownerGeneration: launchGeneration,
+    estimateBytes: 0,
+    estimateSource: 'unknown',
+    historySamples: 0,
+    volumeId: null,
+    physicalAvailableBytes: null,
+    reservedBeforeBytes: null,
+    requiredReserveBytes: null,
+    dispatchHeadroomBytes: null,
+    pressure: null,
+    recordedAt,
+  };
+}
+
+function priorMutationResult(sqlite: Database.Database, mutationId: string): StorageAdmissionResult | null {
+  const row = sqlite.prepare(
+    'SELECT result_json FROM storage_admission_mutations WHERE mutation_id = ?',
+  ).get(mutationId) as StoredMutationRow | undefined;
+  return row ? { ...(JSON.parse(row.result_json) as Omit<StorageAdmissionResult, 'idempotent'>), idempotent: true } : null;
+}
+
+function reserveReplayIdentityFailure(
+  result: StorageAdmissionResult,
+  input: {
+    mutationId: string;
+    reservationId: string;
+    ownerId: string;
+    ownerGeneration: number;
+    targetPath: string;
+  },
+): string | null {
+  if (result.operation !== 'reserve' || result.mutationId !== input.mutationId) {
+    return 'reservation_mutation_conflict';
+  }
+  const reservation = result.reservation;
+  if (!reservation) return null;
+  if (
+    reservation.reservationId !== input.reservationId
+    || reservation.ownerId !== input.ownerId
+    || reservation.ownerGeneration !== input.ownerGeneration
+    || path.resolve(reservation.targetPath) !== path.resolve(input.targetPath)
+  ) {
+    return 'reservation_identity_conflict';
+  }
+  return null;
+}
+
+function authoritativeReplayDisposition(
+  historical: StorageReservationRecord,
+  current: StorageReservationRecord | null,
+  input: {
+    reservationId: string;
+    ownerId: string;
+    ownerGeneration: number;
+    targetPath: string;
+    replayedAt: number;
+    exactPacketReceipt: PacketStorageAdmissionReceipt | null;
+  },
+): { decision: 'reserved' | 'committed' | 'held'; reason: string } {
+  if (!current) return { decision: 'held', reason: 'reservation_missing' };
+  if (
+    current.reservationId !== input.reservationId
+    || current.volumeId !== historical.volumeId
+    || current.ownerId !== input.ownerId
+    || current.ownerGeneration !== input.ownerGeneration
+    || current.exactBytes !== historical.exactBytes
+    || path.resolve(current.targetPath) !== path.resolve(input.targetPath)
+  ) {
+    return { decision: 'held', reason: 'reservation_conflict' };
+  }
+  if (input.exactPacketReceipt?.state === 'quarantined') {
+    return { decision: 'held', reason: 'launch_effect_unknown' };
+  }
+  if (current.state === 'reserved') {
+    if (!Number.isSafeInteger(current.leaseExpiresAt) || current.leaseExpiresAt <= input.replayedAt) {
+      return { decision: 'held', reason: 'lease_expired' };
+    }
+    return current.generation === historical.generation
+      ? { decision: 'reserved', reason: 'admitted' }
+      : { decision: 'held', reason: 'generation_conflict' };
+  }
+  const expectedCommitMutation = `packet-storage-commit:${current.ownerId}:${current.ownerGeneration}`;
+  if (
+    current.state === 'committed'
+    && current.generation === historical.generation + 1
+    && current.lastMutationId === expectedCommitMutation
+    && current.lastReason === 'committed'
+    && current.terminalAt !== null
+    && current.postMeasurement !== null
+  ) {
+    return { decision: 'committed', reason: 'committed' };
+  }
+  return { decision: 'held', reason: `state_conflict:${current.state}` };
+}
+
+export function createPacketStorageAdmissionCoordinator(
+  dependencies: AdmissionCoordinatorDependencies = {},
+): PacketStorageAdmissionCoordinator {
+  const sqlite = dependencies.sqlite ?? getSqlite();
+  const store = dependencies.store ?? new StorageAdmissionStore(sqlite);
+  const now = dependencies.now ?? Date.now;
+  const estimate = dependencies.observeEstimate ?? observeRepoStorageEstimate;
+  const paths = dependencies.observeWorkspacePaths ?? observeWorkspacePaths;
+  const resolveReservationTarget = dependencies.resolveReservationTarget
+    ?? resolveManagedWorktreeStorageTarget;
+  const observeReservationVolume = dependencies.observeReservationVolume ?? observeStorageVolume;
+  const observeRootIdentity = dependencies.observeRootIdentity ?? observeManagedWorktreeRootIdentity;
+  const resolvePolicy = dependencies.resolvePolicy ?? (() => {
+    const values = getOperatorDefaultsSync().values;
+    return {
+      reserveRatio: values.storageReserveRatio,
+      absoluteFloorBytes: Math.round(values.storageReserveFloorGb * GIB),
+    };
+  });
+
+  return {
+    async reserveForLaunch(packet, pressureRetryOrdinal = 0) {
+      if (!packet.workspaceTargetPath) {
+        throw new Error('Packet has no workspace target for storage admission.');
+      }
+      const launchGeneration = await durableStorageLaunchGeneration(packet, store);
+      if (!Number.isSafeInteger(pressureRetryOrdinal) || pressureRetryOrdinal < 0) {
+        throw new Error('Pressure retry ordinal must be a non-negative safe integer.');
+      }
+      const suffix = mutationSuffix(pressureRetryOrdinal);
+      const reservationId = `packet-storage:${packet.id}:${launchGeneration}${suffix}`;
+      const mutationId = `packet-storage-reserve:${packet.id}:${launchGeneration}${suffix}`;
+      let reservationTargetPath: string;
+      try {
+        reservationTargetPath = path.resolve(resolveReservationTarget(packet.workspaceTargetPath));
+      } catch (error) {
+        const receipt = unknownEstimateReceipt(
+          packet, launchGeneration, pressureRetryOrdinal,
+          error instanceof Error ? error.message : String(error), now(), 'workspace_target_unknown',
+        );
+        throw new PacketStorageAdmissionError(
+          'Dispatch held because the managed workspace storage target is unknown.', receipt,
+        );
+      }
+      const replay = priorMutationResult(sqlite, mutationId);
+      if (replay) {
+        const identityFailure = reserveReplayIdentityFailure(replay, {
+          mutationId,
+          reservationId,
+          ownerId: packet.id,
+          ownerGeneration: launchGeneration,
+          targetPath: reservationTargetPath,
+        });
+        const exactPacketReceipt = packet.storageAdmission?.mutationId === mutationId
+          && packet.storageAdmission.reservationId === reservationId
+          && packet.storageAdmission.ownerId === packet.id
+          && packet.storageAdmission.ownerGeneration === launchGeneration
+          ? packet.storageAdmission
+          : null;
+        const historicalReservation = replay.reservation;
+        const currentReservation = historicalReservation
+          ? store.getReservation(reservationId)
+          : null;
+        const probeStartedAt = now();
+        let liveVolume: Awaited<ReturnType<typeof observeReservationVolume>> | null = null;
+        let probeFailed = false;
+        if (!identityFailure && historicalReservation && currentReservation) {
+          try {
+            liveVolume = await observeReservationVolume(reservationTargetPath);
+          } catch {
+            probeFailed = true;
+          }
+        }
+        const decisionAt = now();
+        const decisionClockValid = Number.isSafeInteger(probeStartedAt)
+          && Number.isSafeInteger(decisionAt)
+          && decisionAt >= probeStartedAt;
+        let disposition = identityFailure
+          ? { decision: 'held' as const, reason: identityFailure }
+          : historicalReservation && currentReservation && decisionClockValid
+          ? authoritativeReplayDisposition(historicalReservation, currentReservation, {
+              reservationId,
+              ownerId: packet.id,
+              ownerGeneration: launchGeneration,
+              targetPath: reservationTargetPath,
+              replayedAt: decisionAt,
+              exactPacketReceipt,
+            })
+          : { decision: 'held' as const, reason: replay.reason };
+        if (!decisionClockValid) {
+          disposition = { decision: 'held', reason: 'observation_stale' };
+        } else if (disposition.decision !== 'held' && currentReservation) {
+          const observationFailure = liveVolume
+            ? storageObservationFailureReason(
+                liveVolume,
+                probeStartedAt,
+                decisionAt,
+                DEFAULT_STORAGE_OBSERVATION_MAX_AGE_MS,
+              )
+            : 'accounting_unknown';
+          if (probeFailed || observationFailure) {
+            disposition = { decision: 'held', reason: observationFailure ?? 'accounting_unknown' };
+          } else if (liveVolume!.volumeId !== currentReservation.volumeId) {
+            disposition = { decision: 'held', reason: 'volume_conflict' };
+          }
+        }
+        let receipt = receiptFromResult(replay, {
+          ownerId: packet.id,
+          ownerGeneration: launchGeneration,
+          estimateBytes: historicalReservation?.exactBytes ?? exactPacketReceipt?.estimateBytes ?? 0,
+          estimateSource: exactPacketReceipt?.estimateSource ?? 'unknown',
+          historySamples: exactPacketReceipt?.historySamples ?? 0,
+          reservationId,
+        });
+        if (disposition.decision === 'held' || !currentReservation) {
+          receipt = {
+            ...receipt,
+            state: 'held',
+            reason: disposition.reason,
+            recordedAt: decisionClockValid ? decisionAt : replay.recordedAt,
+          };
+          throw new PacketStorageAdmissionError(
+            `Dispatch held by storage admission (${disposition.reason}).`,
+            receipt,
+          );
+        }
+        if (disposition.decision === 'committed') {
+          return {
+            receipt: { ...receipt, state: 'committed', reason: 'committed', recordedAt: currentReservation.updatedAt },
+            reservation: currentReservation,
+            baselineWorkspacePaths: null,
+          };
+        }
+        let baselineWorkspacePaths: string[] | null = null;
+        try {
+          baselineWorkspacePaths = await paths(packet.workspaceTargetPath);
+        } catch {
+          baselineWorkspacePaths = null;
+        }
+        return {
+          receipt,
+          reservation: currentReservation,
+          baselineWorkspacePaths,
+        };
+      }
+
+      const observed = await estimate(packet.workspaceTargetPath);
+      if (observed.status !== 'observed' || observed.exactBytes === null) {
+        const receipt = unknownEstimateReceipt(
+          packet,
+          launchGeneration,
+          pressureRetryOrdinal,
+          observed.error ?? 'No safe workspace estimate is available.',
+          now(),
+        );
+        throw new PacketStorageAdmissionError(
+          'Dispatch held because workspace growth accounting is unknown.',
+          receipt,
+        );
+      }
+      let rootIdentity;
+      try {
+        rootIdentity = await observeRootIdentity(packet.workspaceTargetPath);
+      } catch (error) {
+        throw new PacketStorageAdmissionError(
+          'Dispatch held because the managed worktree root identity is unknown.',
+          unknownEstimateReceipt(
+            packet, launchGeneration, pressureRetryOrdinal,
+            error instanceof Error ? error.message : String(error), now(), 'workspace_target_unknown',
+          ),
+        );
+      }
+      const result = await store.reserve({
+        mutationId,
+        reservationId,
+        targetPath: reservationTargetPath,
+        rootIdentity,
+        exactBytes: observed.exactBytes,
+        ownerId: packet.id,
+        ownerGeneration: launchGeneration,
+        leaseExpiresAt: now() + LAUNCH_RESERVATION_LEASE_MS,
+        policy: resolvePolicy(),
+      });
+      const receipt = receiptFromResult(result, {
+        ownerId: packet.id,
+        ownerGeneration: launchGeneration,
+        estimateBytes: observed.exactBytes,
+        estimateSource: observed.source,
+        historySamples: observed.historySamples,
+        reservationId,
+      });
+      if (result.decision !== 'reserved' || !result.reservation) {
+        throw new PacketStorageAdmissionError(
+          `Dispatch held by storage admission (${result.reason}).`,
+          receipt,
+        );
+      }
+      return {
+        receipt,
+        reservation: result.reservation,
+        baselineWorkspacePaths: observed.workspacePaths,
+      };
+    },
+
+    async commitAfterLaunch(lease) {
+      const reservation = lease.reservation;
+      if (reservation.state === 'committed' && lease.receipt.state === 'committed') {
+        return lease.receipt;
+      }
+      try {
+        const result = await store.commit({
+          mutationId: `packet-storage-commit:${reservation.ownerId}:${reservation.ownerGeneration}`,
+          reservationId: reservation.reservationId,
+          volumeId: reservation.volumeId,
+          ownerId: reservation.ownerId,
+          ownerGeneration: reservation.ownerGeneration,
+          expectedGeneration: reservation.generation,
+        });
+        return receiptFromResult(result, {
+          ...lease.receipt,
+          state: result.decision === 'committed' ? 'committed' : 'quarantined',
+        });
+      } catch (error) {
+        return {
+          ...lease.receipt,
+          state: 'quarantined',
+          reason: `post_launch_accounting_failed: ${error instanceof Error ? error.message : String(error)}`,
+          recordedAt: now(),
+        };
+      }
+    },
+
+    async settleFailedLaunch(packet, lease) {
+      const reservation = lease.reservation;
+      if (reservation.state === 'committed') {
+        return {
+          ...lease.receipt,
+          state: 'quarantined',
+          reason: 'committed_launch_reentry_failed',
+          recordedAt: now(),
+        };
+      }
+      let provenPreEffect = false;
+      try {
+        const [currentPaths, lane] = await Promise.all([
+          paths(packet.workspaceTargetPath!),
+          Promise.resolve(findLaneByPacket(packet.id)),
+        ]);
+        provenPreEffect = lease.baselineWorkspacePaths !== null
+          && JSON.stringify(currentPaths) === JSON.stringify(lease.baselineWorkspacePaths)
+          && !lane?.worktreePath
+          && !lane?.sessionKey;
+      } catch {
+        provenPreEffect = false;
+      }
+      if (!provenPreEffect) {
+        return { ...lease.receipt, state: 'quarantined', reason: 'launch_effect_unknown', recordedAt: now() };
+      }
+      try {
+        const result = await store.release({
+          mutationId: `packet-storage-release:${reservation.ownerId}:${reservation.ownerGeneration}`,
+          reservationId: reservation.reservationId,
+          volumeId: reservation.volumeId,
+          ownerId: reservation.ownerId,
+          ownerGeneration: reservation.ownerGeneration,
+          expectedGeneration: reservation.generation,
+        });
+        return receiptFromResult(result, {
+          ...lease.receipt,
+          state: result.decision === 'released' ? 'released' : 'quarantined',
+        });
+      } catch (error) {
+        return {
+          ...lease.receipt,
+          state: 'quarantined',
+          reason: `release_accounting_failed: ${error instanceof Error ? error.message : String(error)}`,
+          recordedAt: now(),
+        };
+      }
+    },
+  };
+}
+
+export async function resolveDurablePacketStorageOwner(
+  reservation: StorageReservationRecord,
+  durablePackets?: OrchestratorPacket[],
+): Promise<PacketStorageAdmissionOwnerResolution> {
+  if (reservation.ownerId.startsWith('managed-worktree-process:')) {
+    const [, rawPid, rawIdentity] = reservation.ownerId.split(':');
+    const pid = Number(rawPid);
+    let identity: unknown;
+    try {
+      identity = JSON.parse(Buffer.from(rawIdentity ?? '', 'base64url').toString('utf8')) as unknown;
+    } catch {
+      identity = null;
+    }
+    if (!Number.isInteger(pid) || pid <= 0 || !isMetadataLockProcessIdentity(identity)) {
+      return { liveness: 'unknown', source: 'managed-worktree-process', evidence: 'The direct worktree owner identity is invalid.' };
+    }
+    const probe = await probeMetadataLockProcessIdentity(pid);
+    if (probe.state === 'absent' || (probe.state === 'live' && !sameMetadataLockProcessIdentity(probe.identity, identity))) {
+      return { liveness: 'dead', source: 'managed-worktree-process', evidence: 'The exact direct worktree owner process ended.' };
+    }
+    if (probe.state === 'live') {
+      return { liveness: 'alive', source: 'managed-worktree-process', evidence: 'The exact direct worktree owner process is still live.' };
+    }
+    return { liveness: 'unknown', source: 'managed-worktree-process', evidence: probe.detail };
+  }
+  const matches = (durablePackets ?? listMissionRegistryEntries({ includeArchived: true })
+    .flatMap((entry) => entry.mission.packets))
+    .filter((packet) => packet.id === reservation.ownerId);
+  if (matches.length !== 1) {
+    return {
+      liveness: 'unknown',
+      source: 'packet-generation',
+      evidence: matches.length === 0
+        ? 'No unique durable packet owner exists.'
+        : 'More than one durable packet claims the reservation owner id.',
+    };
+  }
+  const current = matches[0]!.storageAdmission;
+  if (
+    current
+    && current.ownerId === reservation.ownerId
+    && current.ownerGeneration > reservation.ownerGeneration
+    && current.reservationId !== reservation.reservationId
+  ) {
+    return {
+      liveness: 'dead',
+      source: 'packet-generation',
+      evidence: `Durable admission ${current.reservationId} generation ${current.ownerGeneration} superseded generation ${reservation.ownerGeneration}.`,
+    };
+  }
+  if (
+    current
+    && current.ownerId === reservation.ownerId
+    && current.ownerGeneration === reservation.ownerGeneration
+    && current.reservationId === reservation.reservationId
+  ) {
+    return {
+      liveness: 'alive',
+      source: 'packet-generation',
+      evidence: 'The durable packet still names this exact admission generation.',
+    };
+  }
+  return {
+    liveness: 'unknown',
+    source: 'packet-generation',
+    evidence: 'Durable packet state does not prove that this exact admission owner was retired.',
+  };
+}
+
+/**
+ * Reconcile only expired reservations whose exact logical owner was superseded
+ * by a newer durable packet generation. Missing, current, duplicated, or
+ * otherwise ambiguous owners remain reserved and continue to count.
+ */
+export async function reconcileExpiredPacketStorageReservations(
+  dependencies: {
+    store?: StorageAdmissionStore;
+    now?: () => number;
+    resolveOwner?: (
+      reservation: StorageReservationRecord,
+    ) => PacketStorageAdmissionOwnerResolution | Promise<PacketStorageAdmissionOwnerResolution>;
+  } = {},
+): Promise<PacketStorageAdmissionReconciliationResult> {
+  const now = dependencies.now ?? Date.now;
+  const store = dependencies.store ?? new StorageAdmissionStore(getSqlite(), { now });
+  const resolveOwner = dependencies.resolveOwner ?? resolveDurablePacketStorageOwner;
+  const expired = store.listExpiredForReconciliation(now());
+  const summary: PacketStorageAdmissionReconciliationResult = {
+    inspected: expired.length,
+    reconciled: 0,
+    retainedLive: 0,
+    retainedUnknown: 0,
+    held: 0,
+  };
+
+  for (const reservation of expired) {
+    const owner = await resolveOwner(reservation);
+    if (owner.liveness === 'alive') {
+      summary.retainedLive += 1;
+      continue;
+    }
+    if (owner.liveness !== 'dead') {
+      summary.retainedUnknown += 1;
+      continue;
+    }
+    const observedAt = now();
+    const result = await store.reconcile({
+      mutationId: `packet-storage-reconcile:${reservation.reservationId}:${reservation.generation}:${observedAt}`,
+      reservationId: reservation.reservationId,
+      volumeId: reservation.volumeId,
+      ownerId: reservation.ownerId,
+      ownerGeneration: reservation.ownerGeneration,
+      expectedGeneration: reservation.generation,
+      ownerLiveness: 'dead',
+      ownerDeathReceipt: {
+        source: owner.source,
+        evidence: owner.evidence,
+        observedAt,
+        reservationId: reservation.reservationId,
+        volumeId: reservation.volumeId,
+        ownerId: reservation.ownerId,
+        ownerGeneration: reservation.ownerGeneration,
+      },
+    });
+    if (result.decision === 'reconciled') summary.reconciled += 1;
+    else summary.held += 1;
+  }
+  return summary;
+}
+
+let defaultCoordinator: PacketStorageAdmissionCoordinator | null = null;
+
+export function getPacketStorageAdmissionCoordinator(): PacketStorageAdmissionCoordinator {
+  defaultCoordinator ??= createPacketStorageAdmissionCoordinator();
+  return defaultCoordinator;
+}
+
+export {
+  readPacketStorageAdmissionProjection,
+  type PacketStorageAdmissionProjection,
+} from './storage-admission-projection';
+export { packetStorageLaunchGeneration } from './storage-admission-generation';

@@ -59,6 +59,7 @@ const reset = await import('@/app/api/orchestrator/reset-packet/route');
 const rerun = await import('@/app/api/orchestrator/rerun-with-feedback/route');
 const sessionRules = await import('@/app/api/orchestrator/session-rules/route');
 const merge = await import('@/app/api/orchestrator/merge/route');
+const workspace = await import('@/app/api/orchestrator/workspace/route');
 const devServer = await import('@/app/api/panel/dev-server/route');
 const fileIo = await import('@/app/api/panel/file-io/route');
 const laneEvents = await import('@/app/api/lanes/[id]/events/route');
@@ -216,6 +217,7 @@ describe('principal-authz — packet control verbs reject worker principals (HIG
     { name: 'steer-packet', url: 'http://localhost:3001/api/orchestrator/steer-packet', POST: steer.POST, body: { packetId: 'pkt-x', message: 'go', idempotencyKey: 'authz-steer-1' } },
     { name: 'reset-packet', url: 'http://localhost:3001/api/orchestrator/reset-packet', POST: reset.POST, body: { packetId: 'pkt-x' } },
     { name: 'rerun-with-feedback', url: 'http://localhost:3001/api/orchestrator/rerun-with-feedback', POST: rerun.POST, body: { packetId: 'pkt-x', feedback: 'redo', idempotencyKey: 'authz-rerun-1' } },
+    { name: 'workspace-control', url: 'http://localhost:3001/api/orchestrator/workspace', POST: workspace.POST, body: { action: 'park', packetId: 'pkt-x', clientMutationId: 'authz-workspace-1' } },
   ];
 
   for (const c of cases) {
@@ -235,6 +237,27 @@ describe('principal-authz — packet control verbs reject worker principals (HIG
       expect(res.status).toBe(401);
     });
   }
+});
+
+describe('principal-authz — workspace reads stay packet-bound', () => {
+  it('refuses a real packet-scoped worker credential before workspace lookup', async () => {
+    const workerToken = mintPacketWorkerToken('pkt-workspace-owner');
+    const request = req(
+      'http://localhost:3001/api/orchestrator/workspace?packetId=pkt-workspace-other',
+      {
+        principal: 'worker',
+        method: 'GET',
+        workerToken,
+      },
+    );
+    const response = await workspace.GET(request);
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'worker_packet_mismatch' },
+    });
+  });
 });
 
 describe('principal-authz — worker credentials are bound to their persisted packet owner (#1644)', () => {

@@ -1,8 +1,7 @@
-import { execFile } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
+import { materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
 
 import {
   getLaneSpokenDiffFacts,
@@ -14,7 +13,7 @@ import { appendEvent, setLaneStatus } from '@/lib/lane/registry';
 import type { Lane, LaneCommandResult, LaneEventActor } from '@/lib/lane/types';
 import type { SpokenReviewResolutionTransition } from '@/lib/orchestrator/spoken-review-governance';
 
-const execFileAsync = promisify(execFile);
+const execFileAsync = materializationAwareExecFile;
 
 export class SpokenReviewSnapshotChangedError extends Error {
   constructor() {

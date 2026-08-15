@@ -10,6 +10,7 @@ import {
 } from '@/lib/orchestrator/quiz-gate';
 import { actionReceiptIsInProgress, correlatedActionIsUnsettled, fetchCorrelatedActionReceipt } from '@/lib/orchestrator/action-receipt';
 import { useCorrelatedActionLatch } from '@/components/desktop/use-correlated-action-latch';
+import { WorkspaceParkControl } from '@/components/desktop/workspace-terminal/WorkspaceParkControl';
 import {
   buildConcerns,
   Concern,
@@ -643,6 +644,7 @@ export function ReviewPane({ packet, onActionComplete }: {
         </div>
         </>
       )}
+      <WorkspaceParkControl packetId={packet.id} />
     </div>
   );
 }

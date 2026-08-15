@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 
@@ -35,11 +35,13 @@ const { archiveLane, createLane, getLane } = await import('@/lib/lane/registry')
 const { withRepoActionLock } = await import('@/lib/lane/repo-action-lock');
 const { handleWaitForMissionReady } = await import('@/lib/mcp/operator-handlers/mission');
 const { getOperatorDefaults, updateOperatorDefaults } = await import('@/lib/operator/defaults');
+const { addRepo } = await import('@/lib/repos/registry');
 const { getMissionStatus } = await import('@/lib/orchestrator/operator-mission-service');
 const { withControlPlaneLock, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { normalizeOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const { scanRepo } = await import('@/lib/skeleton');
 const { getWorktreeManager } = await import('@/lib/worktree/launch');
+const { createWorkspaceSnapshot, transitionWorkspaceSnapshot } = await import('@/lib/worktree/snapshot-state');
 const { getOrCreateWsToken } = await import('@/lib/ws-auth');
 
 function git(cwd: string, args: string[]): string {
@@ -305,6 +307,63 @@ afterEach(() => {
 });
 
 describe('requireApproval merge governance through the real command path', () => {
+  it('refuses the real merge route when a parked path is occupied by an unrelated checkout at the reviewed HEAD', async () => {
+    const fixture = await createStandardLane('parked-occupant-route');
+    const replacementPath = `${fixture.lane.worktreePath}-replacement`;
+    execFileSync('git', ['clone', fixture.lane.worktreePath!, replacementPath], { stdio: 'pipe' });
+    git(fixture.repo, ['worktree', 'remove', '--force', fixture.lane.worktreePath!]);
+    renameSync(replacementPath, fixture.lane.worktreePath!);
+    writeFileSync(join(fixture.lane.worktreePath!, 'unrelated-sentinel'), 'must survive\n');
+    const repo = await addRepo(fixture.repo);
+    let snapshot = createWorkspaceSnapshot({
+      repositoryUuid: repo.id,
+      packetId: fixture.lane.packetId!,
+      laneId: fixture.lane.id,
+      originalPath: fixture.lane.worktreePath!,
+      branch: fixture.lane.branch,
+      baseCommit: fixture.baseHeadSha,
+      headCommit: fixture.reviewedHeadSha,
+      treeSha: git(fixture.lane.worktreePath!, ['rev-parse', 'HEAD^{tree}']),
+      recoveryRef: `refs/o8/recovery/${fixture.lane.packetId}`,
+      diffFingerprint: 'parked-route-diff',
+      sessionIdentities: [{ kind: 'owned-session', identity: fixture.lane.sessionKey! }],
+      creationId: `parked-route-${fixture.lane.packetId}-created`,
+    }).record;
+    for (const state of ['parkable', 'hibernating', 'parked'] as const) {
+      const result = transitionWorkspaceSnapshot({
+        repositoryUuid: repo.id,
+        packetId: fixture.lane.packetId!,
+        transitionId: `parked-route-${state}-${fixture.lane.packetId}`,
+        expectedState: snapshot.state,
+        expectedVersion: snapshot.version,
+        toState: state,
+      });
+      if (result.status !== 'applied') throw new Error(`Could not transition to ${state}.`);
+      snapshot = result.record;
+    }
+    persistDispatcherMission(
+      fixture.lane.packetId!,
+      fixture.repo,
+      `thoughts-parked-route-${Date.now()}`,
+    );
+
+    const response = await mergeRoute.POST(mergeRequest(
+      getOrCreateWsToken(),
+      fixture.lane.packetId!,
+    ));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({
+      ok: true,
+      result: { merged: false, reason: 'workspace_restore_required' },
+    });
+    expect(git(fixture.repo, ['rev-parse', 'HEAD'])).toBe(fixture.baseHeadSha);
+    expect(git(fixture.lane.worktreePath!, ['rev-parse', 'HEAD'])).toBe(fixture.reviewedHeadSha);
+    expect(readFileSync(join(fixture.lane.worktreePath!, 'unrelated-sentinel'), 'utf8'))
+      .toBe('must survive\n');
+  }, 30_000);
+
   it('persists task-contract evidence through the review route and clears the durable coverage gate', async () => {
     const fixture = await createStandardLane('contract-evidence', false);
     const taskContract = {

@@ -247,6 +247,9 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   prLinkDestination: enumField('git', 'pr_link_destination', '"in-app" or "browser"', isPrLinkDestination),
   worktreeMaxCount: numberField('git', 'worktree_max_count', 'an integer between 0 and 1000', (value) => Number.isInteger(value) && value >= 0 && value <= 1000),
   worktreeMaxTotalGb: numberField('git', 'worktree_max_total_gb', 'a number between 0 and 10000', (value) => value >= 0 && value <= 10000),
+  storageReserveRatio: numberField('git', 'storage_reserve_ratio', 'a number greater than 0 and no more than 1', (value) => value > 0 && value <= 1),
+  storageReserveFloorGb: numberField('git', 'storage_reserve_floor_gb', 'a number greater than 0 and no more than 10000', (value) => value > 0 && value <= 10000),
+  workspaceParkingMode: enumField('git', 'workspace_parking_mode', '"manual" or "pressure"', (value): value is OperatorDefaults['workspaceParkingMode'] => value === 'manual' || value === 'pressure'),
 } satisfies { [K in keyof OperatorDefaults]: TomlField<OperatorDefaults[K]> };
 
 export const OPERATOR_DEFAULTS_TOML_KEYS = Object.freeze(

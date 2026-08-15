@@ -15,7 +15,8 @@ import {
 } from '@/lib/orchestrator/runtime-capabilities';
 
 export * from './harness-schema';
-
+export * from './workspace-snapshot-schema';
+export * from './storage-admission-schema';
 const ORCHESTRATOR_RUNTIME_ENUM = [...ORCHESTRATOR_RUNTIME_IDS] as [
   OrchestratorRuntime,
   ...OrchestratorRuntime[],
@@ -789,8 +790,8 @@ export const idempotencyKeys = sqliteTable('idempotency_keys', {
   resultJson: text('result_json'),
   /** OS pid that reserved the row. NULL for finalized rows / legacy inserts. */
   pid: integer('pid'),
-  /** Per-execution owner token; prevents a terminated call finalizing over its retry. */
   reservationId: text('reservation_id'),
+  ownerIdentityJson: text('owner_identity_json'),
   /** ms-epoch stamps (integers, not ISO — this table is machine-only). */
   createdAt: integer('created_at').notNull(),
   expiresAt: integer('expires_at').notNull(),

@@ -750,6 +750,7 @@ export async function getMissionStatus(input: MissionStatusInput) {
         releaseState: packet.releaseState,
         blockedBy: node.blockedBy,
         blockedReason: packet.blockedReason ?? null,
+        storageAdmission: packet.storageAdmission ?? null,
         recovery,
         lane: lane ? {
           laneId: lane.id,
@@ -786,9 +787,6 @@ export async function getMissionStatus(input: MissionStatusInput) {
           reviewedHeadSha: packet.review.reviewedHeadSha ?? null,
           auditApprovalId: packet.review.auditApprovalId ?? null,
         } : null,
-        // Visual verification proof (#1147) — slim refs (url + phase/pair/label),
-        // never raw disk paths. Rides back to the orchestrator so a "done/merged"
-        // packet surfaces its before/after screenshots alongside the verdict.
         artifacts: listArtifacts({ packetId: packet.id }).map(toArtifactRef),
       };
     }),

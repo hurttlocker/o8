@@ -1,21 +1,41 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import Database from 'better-sqlite3';
+import { getSqlite } from '@/lib/db';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const launchMock = vi.hoisted(() => ({
-  calls: [] as Array<{ packetId?: string; runtime?: string; branchName?: string }>,
+  calls: [] as Array<{
+    packetId?: string;
+    runtime?: string;
+    branchName?: string;
+    clientMutationId?: string;
+  }>,
+  outcome: 'success' as 'success' | 'failure',
+  gate: null as Promise<void> | null,
 }));
 
 vi.mock('@/lib/runtime/actions', () => ({
-  launchRuntimeSurface: vi.fn(async (input: { packetId?: string; runtime?: string; branchName?: string; repoPath: string }) => {
+  launchRuntimeSurface: vi.fn(async (input: {
+    packetId?: string;
+    runtime?: string;
+    branchName?: string;
+    repoPath: string;
+    clientMutationId?: string;
+  }) => {
+    if (launchMock.gate) await launchMock.gate;
     launchMock.calls.push({
       packetId: input.packetId,
       runtime: input.runtime,
       branchName: input.branchName,
+      clientMutationId: input.clientMutationId,
     });
+    if (launchMock.outcome === 'failure') {
+      return { ok: false, surfaceId: '', note: 'mock pre-effect failure' };
+    }
     return {
       ok: true,
       surfaceId: `codex-owned:${input.packetId}`,
@@ -29,7 +49,13 @@ vi.mock('@/lib/runtimes/shared/auth-detect', () => ({
   assertRuntimeDispatchable: vi.fn(async () => undefined),
 }));
 
-const { createLane, findLaneByPacket, setLaneStatus } = await import('@/lib/lane/registry');
+const {
+  archiveLane,
+  createLane,
+  findLaneByPacket,
+  setLaneStatus,
+  updateLane,
+} = await import('@/lib/lane/registry');
 const { createEmptyOrchestratorMissionState, normalizeOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const { readDispatchHaltState, setDispatchHaltState } = await import('@/lib/orchestrator/dispatch-halt');
 const { hasReviewableCompletionDiff } = await import('@/lib/supervisor/completion-verification');
@@ -43,6 +69,19 @@ const {
   runDispatchTick,
 } = await import('@/lib/orchestrator/scheduling');
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
+import type { PacketStorageAdmissionCoordinator } from '@/lib/orchestrator/storage-admission';
+import {
+  createPacketStorageAdmissionCoordinator,
+  packetStorageLaunchGeneration,
+  PacketStorageAdmissionError,
+  reconcileExpiredPacketStorageReservations,
+} from '@/lib/orchestrator/storage-admission';
+import { createStoragePressureAdmissionCoordinator } from '@/lib/orchestrator/storage-pressure-policy';
+import { ensureV38StorageAdmissionSchema } from '@/lib/db/v38-storage-admission-migration';
+import { resetPacketFields } from '@/lib/orchestrator/operator-mission-service/rerun-with-feedback';
+import { StorageAdmissionStore } from '@/lib/workspace/storage-admission';
+import { resolveWorkerRouting } from '@/lib/agents/routing';
+import { launchPacketWithStorageAdmission } from '@/lib/orchestrator/dispatch-packet-launch';
 
 function makeRepo(initialBranch = 'main'): string {
   const dir = mkdtempSync(join(tmpdir(), 'o8-scheduling-repo-'));
@@ -97,9 +136,98 @@ function missionFixture(repoPath: string, packets: OrchestratorPacket[]): Orches
   };
 }
 
+function storageReceipt(id: string, state: 'reserved' | 'committed' | 'held' | 'released' | 'quarantined') {
+  return {
+    schema: 'o8/packet-storage-admission/v1' as const,
+    state,
+    reason: state,
+    reservationId: `packet-storage:${id}:1`,
+    mutationId: `packet-storage-${state}:${id}:1`,
+    ownerId: id,
+    ownerGeneration: 1,
+    estimateBytes: 2_147_483_648,
+    estimateSource: 'source-size-fallback' as const,
+    historySamples: 0,
+    volumeId: 'device:test',
+    physicalAvailableBytes: 40_000_000_000,
+    reservedBeforeBytes: 0,
+    requiredReserveBytes: 10_000_000_000,
+    dispatchHeadroomBytes: 30_000_000_000,
+    recordedAt: Date.now(),
+  };
+}
+
+function injectedAdmission(id: string, calls: string[]): PacketStorageAdmissionCoordinator {
+  return {
+    reserveForLaunch: async (candidate) => {
+      calls.push('reserve');
+      const generation = packetStorageLaunchGeneration(candidate);
+      const reserved = {
+        ...storageReceipt(id, 'reserved'),
+        reservationId: `packet-storage:${id}:${generation}`,
+        mutationId: `packet-storage-reserve:${id}:${generation}`,
+        ownerGeneration: generation,
+      };
+      return {
+        receipt: reserved,
+        reservation: {
+          reservationId: reserved.reservationId,
+          volumeId: 'device:test',
+          targetPath: '/repo',
+          exactBytes: reserved.estimateBytes,
+          ownerId: id,
+          ownerGeneration: generation,
+          generation: 1,
+          state: 'reserved',
+          leaseExpiresAt: Date.now() + 60_000,
+          preMeasurement: {
+            status: 'observed', targetPath: '/repo', probePath: '/', volumeId: 'device:test',
+            availableBytes: 40_000_000_000, freeBytes: 40_000_000_000,
+            totalBytes: 100_000_000_000, observedAt: Date.now(), error: null,
+          },
+          postMeasurement: null,
+          lastMutationId: reserved.mutationId,
+          lastReason: 'admitted',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          terminalAt: null,
+        },
+        baselineWorkspacePaths: [],
+      };
+    },
+    commitAfterLaunch: async (lease) => {
+      calls.push('commit');
+      return { ...lease.receipt, state: 'committed', reason: 'committed' };
+    },
+    settleFailedLaunch: async (_candidate, lease) => {
+      calls.push('release');
+      return { ...lease.receipt, state: 'released', reason: 'released' };
+    },
+  };
+}
+
+function permissiveAdmission(): PacketStorageAdmissionCoordinator {
+  return {
+    reserveForLaunch: async (candidate) => injectedAdmission(candidate.id, [])
+      .reserveForLaunch(candidate),
+    commitAfterLaunch: async (lease) => ({
+      ...lease.receipt,
+      state: 'committed',
+      reason: 'committed',
+    }),
+    settleFailedLaunch: async (_candidate, lease) => ({
+      ...lease.receipt,
+      state: 'released',
+      reason: 'released',
+    }),
+  };
+}
+
 describe('dispatch scheduling caps and waves', () => {
   beforeEach(() => {
     launchMock.calls.length = 0;
+    launchMock.outcome = 'success';
+    launchMock.gate = null;
     setDispatchHaltState(false);
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
   });
@@ -136,11 +264,291 @@ describe('dispatch scheduling caps and waves', () => {
 
     const next = await runDispatchTick(missionFixture(repoPath, packets), {
       launchBudget: { maxLaunches: Math.min(2, MAX_PARALLEL_DISPATCHES) },
+      storageAdmission: permissiveAdmission(),
     });
 
     expect(launchMock.calls.map((call) => call.packetId)).toHaveLength(Math.min(2, MAX_PARALLEL_DISPATCHES));
     expect(next.packets.filter((packet) => packet.status === 'launching')).toHaveLength(Math.min(2, MAX_PARALLEL_DISPATCHES));
     expect(next.packets.filter((packet) => packet.status === 'queued')).toHaveLength(3 - Math.min(2, MAX_PARALLEL_DISPATCHES));
+  }, 20_000);
+
+  it('reserves before the real launch, commits after settlement, and projects the receipt', async () => {
+    const repoPath = makeRepo();
+    const calls: string[] = [];
+    const next = await runDispatchTick(missionFixture(repoPath, [packetFixture(repoPath, 'admitted')]), {
+      launchBudget: { maxLaunches: 1 },
+      storageAdmission: injectedAdmission('admitted', calls),
+    });
+    expect(calls).toEqual(['reserve', 'commit']);
+    expect(launchMock.calls).toHaveLength(1);
+    expect(next.packets[0]).toMatchObject({
+      status: 'launching',
+      storageAdmission: { state: 'committed', ownerId: 'admitted' },
+    });
+  }, 20_000);
+
+  it('claims one persisted execution for concurrent callers of the real packet launch entry', async () => {
+    const repoPath = makeRepo();
+    const candidate = normalizeOrchestratorMissionState(missionFixture(
+      repoPath,
+      [packetFixture(repoPath, 'exclusive-launch')],
+    )).packets[0]!;
+    let release!: () => void;
+    launchMock.gate = new Promise<void>((resolve) => { release = resolve; });
+    const admission = injectedAdmission(candidate.id, []);
+    const input = {
+      packet: candidate,
+      allPackets: [candidate],
+      workerRouting: resolveWorkerRouting({ requestedRuntime: 'codex', source: 'scheduler-dispatch' }),
+      storageAdmission: admission,
+    };
+
+    const first = launchPacketWithStorageAdmission(input);
+    await vi.waitFor(() => expect(getSqlite().prepare(
+      "SELECT COUNT(*) AS count FROM idempotency_keys WHERE verb = 'packet_storage_launch' AND result_json IS NULL",
+    ).get()).toEqual({ count: 1 }));
+    await expect(launchPacketWithStorageAdmission(input)).rejects.toMatchObject({
+      receipt: { state: 'held', reason: 'launch_in_progress' },
+    });
+    release();
+    await expect(first).resolves.toMatchObject({ laneId: expect.any(String) });
+    expect(launchMock.calls.filter((call) => call.packetId === candidate.id)).toHaveLength(1);
+  }, 20_000);
+
+  it('uses the durable admission generation for the launch mutation after reset', async () => {
+    const repoPath = makeRepo();
+    const prior = storageReceipt('generation-reset', 'held');
+    const candidate = packetFixture(repoPath, 'generation-reset', {
+      launchAttempts: 0,
+      storageAdmission: prior,
+    });
+    await runDispatchTick(missionFixture(repoPath, [candidate]), {
+      launchBudget: { maxLaunches: 1 },
+      storageAdmission: injectedAdmission('generation-reset', []),
+    });
+    expect(launchMock.calls).toEqual([
+      expect.objectContaining({
+        packetId: 'generation-reset',
+        clientMutationId: 'packet-launch:generation-reset:2',
+      }),
+    ]);
+  }, 20_000);
+
+  it('mints a fresh durable reservation after a commit-fold crash and retired reset generation', async () => {
+    const repoPath = makeRepo();
+    const directory = mkdtempSync(join(tmpdir(), 'o8-scheduling-admission-crash-'));
+    const file = join(directory, 'admission.db');
+    let now = 1_000;
+    let estimateCalls = 0;
+    let db = new Database(file);
+    ensureV38StorageAdmissionSchema(db);
+    const buildAdmission = () => {
+      const store = new StorageAdmissionStore(db, {
+        now: () => now,
+        observeVolume: async (targetPath) => ({
+          status: 'observed', targetPath, probePath: repoPath, volumeId: 'device:test',
+          availableBytes: 10_000, freeBytes: 10_000, totalBytes: 20_000,
+          observedAt: now, error: null,
+        }),
+      });
+      return createPacketStorageAdmissionCoordinator({
+        sqlite: db,
+        store,
+        now: () => now,
+        observeEstimate: async () => {
+          estimateCalls += 1;
+          return {
+            status: 'observed', exactBytes: 200, source: 'source-size-fallback',
+            historySamples: 0, workspacePaths: [], error: null,
+          };
+        },
+        observeWorkspacePaths: async () => [],
+        resolveReservationTarget: () => repoPath,
+        observeReservationVolume: async (targetPath) => ({
+          status: 'observed', targetPath, probePath: repoPath, volumeId: 'device:test',
+          availableBytes: 10_000, freeBytes: 10_000, totalBytes: 20_000,
+          observedAt: now, error: null,
+        }),
+        resolvePolicy: () => ({ reserveRatio: 0.1, absoluteFloorBytes: 100 }),
+      });
+    };
+
+    const firstAdmission = buildAdmission();
+    const crashAfterCommit: PacketStorageAdmissionCoordinator = {
+      reserveForLaunch: (candidate, ordinal) => firstAdmission.reserveForLaunch(candidate, ordinal),
+      settleFailedLaunch: (candidate, lease) => firstAdmission.settleFailedLaunch(candidate, lease),
+      commitAfterLaunch: async (lease) => {
+        await firstAdmission.commitAfterLaunch(lease);
+        throw new Error('simulated crash before scheduling fold-back');
+      },
+    };
+    const initial = await runDispatchTick(
+      missionFixture(repoPath, [packetFixture(repoPath, 'fold-crash', { launchAttempts: 2 })]),
+      { launchBudget: { maxLaunches: 1 }, storageAdmission: crashAfterCommit },
+    );
+    expect(initial.packets[0]).toMatchObject({
+      status: 'blocked',
+      storageAdmission: null,
+    });
+    expect(db.prepare(`
+      SELECT owner_generation, state FROM storage_admission_reservations
+      WHERE owner_id = 'fold-crash'
+    `).all()).toEqual([{ owner_generation: 3, state: 'committed' }]);
+    db.close();
+
+    now = 2_000;
+    db = new Database(file);
+    ensureV38StorageAdmissionSchema(db);
+    await expect(reconcileExpiredPacketStorageReservations({
+      store: new StorageAdmissionStore(db, { now: () => now }),
+      now: () => now,
+    })).resolves.toMatchObject({ inspected: 0 });
+
+    const activeLane = findLaneByPacket('fold-crash');
+    expect(activeLane?.sessionKey).toBeTruthy();
+    const ownedRoot = join(directory, 'owned-codex');
+    const ownedSession = join(ownedRoot, 'fold-crash');
+    mkdirSync(ownedSession, { recursive: true });
+    vi.stubEnv('CORTEX_IDE_OWNED_CODEX_ROOT', ownedRoot);
+    writeFileSync(join(ownedSession, 'session.json'), JSON.stringify({
+      surfaceId: activeLane!.sessionKey,
+      cwd: activeLane!.worktreePath,
+      repoPath,
+      laneId: activeLane!.id,
+      packetId: 'fold-crash',
+      launchMutationId: 'packet-launch:fold-crash:3',
+      activeRun: { outcome: 'running' },
+    }));
+    const preFoldPacket = packetFixture(repoPath, 'fold-crash', { launchAttempts: 2 });
+    const recovered = await launchPacketWithStorageAdmission({
+      packet: preFoldPacket,
+      allPackets: [preFoldPacket],
+      workerRouting: resolveWorkerRouting({
+        requestedRuntime: 'codex',
+        source: 'scheduler-dispatch',
+      }),
+      storageAdmission: buildAdmission(),
+    });
+    expect(recovered).toMatchObject({
+      laneId: activeLane!.id,
+      sessionKey: activeLane!.sessionKey,
+      storageAdmission: { state: 'committed', ownerGeneration: 3 },
+    });
+    expect(launchMock.calls).toHaveLength(1);
+
+    updateLane(activeLane!.id, { packetId: '', worktreePath: null });
+    archiveLane(activeLane!.id, 'user');
+    expect(findLaneByPacket('fold-crash')).toBeNull();
+    const resetPacket = initial.packets[0]!;
+    resetPacketFields(resetPacket);
+    expect(resetPacket.storageAdmissionEpoch).toBe(4);
+    const relaunched = await runDispatchTick(
+      missionFixture(repoPath, [resetPacket]),
+      { launchBudget: { maxLaunches: 1 }, storageAdmission: buildAdmission() },
+    );
+
+    expect(relaunched.packets[0]).toMatchObject({
+      status: 'launching',
+      storageAdmission: { state: 'committed', ownerGeneration: 4 },
+    });
+    expect(launchMock.calls.map((call) => call.clientMutationId)).toEqual([
+      'packet-launch:fold-crash:3',
+      'packet-launch:fold-crash:4',
+    ]);
+    expect(db.prepare(`
+      SELECT owner_generation, state FROM storage_admission_reservations
+      WHERE owner_id = 'fold-crash' ORDER BY owner_generation
+    `).all()).toEqual([
+      { owner_generation: 3, state: 'committed' },
+      { owner_generation: 4, state: 'committed' },
+    ]);
+    expect(estimateCalls).toBe(2);
+    db.close();
+    vi.unstubAllEnvs();
+  }, 20_000);
+
+  it('settles a failed real launch and persists the released capacity receipt', async () => {
+    const repoPath = makeRepo();
+    const calls: string[] = [];
+    launchMock.outcome = 'failure';
+    const next = await runDispatchTick(missionFixture(repoPath, [packetFixture(repoPath, 'failed-launch')]), {
+      launchBudget: { maxLaunches: 1 },
+      storageAdmission: injectedAdmission('failed-launch', calls),
+    });
+    expect(calls).toEqual(['reserve', 'release']);
+    expect(next.packets[0]).toMatchObject({
+      status: 'blocked',
+      blockedReason: 'mock pre-effect failure',
+      storageAdmission: { state: 'released', ownerId: 'failed-launch' },
+    });
+  }, 20_000);
+
+  it('runs pressure parking through the real dispatch service before launching the packet', async () => {
+    const repoPath = makeRepo();
+    const calls: string[] = [];
+    const base = injectedAdmission('pressure-entry', calls);
+    const originalReserve = base.reserveForLaunch;
+    base.reserveForLaunch = async (packet, ordinal = 0) => {
+      calls.push(`attempt:${ordinal}`);
+      if (ordinal === 0) {
+        throw new PacketStorageAdmissionError(
+          'held',
+          { ...storageReceipt(packet.id, 'held'), reason: 'reserve_breached' },
+        );
+      }
+      return originalReserve(packet, ordinal);
+    };
+    base.commitAfterLaunch = async (admissionLease) => {
+      calls.push('commit');
+      return { ...admissionLease.receipt, state: 'committed', reason: 'committed' };
+    };
+    const reviewing = createLane({
+      repoPath: '/repos/review',
+      worktreePath: '/worktrees/review',
+      branch: 'inline/review',
+      runtime: 'codex',
+      packetId: 'review-candidate',
+      ownership: 'managed',
+      sessionKey: 'codex-owned:review-candidate',
+    });
+    setLaneStatus(reviewing.id, 'reviewing', 'system', 'review_ready');
+    const pressureAdmission = createStoragePressureAdmissionCoordinator(base, {
+      mode: () => 'pressure',
+      listLanes: () => [{ ...reviewing, status: 'reviewing' }],
+      listRepos: async () => [{
+        id: 'repo-review', name: 'review', localPath: '/repos/review', remoteUrl: null,
+        defaultBranch: 'main', addedAt: new Date().toISOString(), lastOpenedAt: null,
+        storagePressureParkingDisabled: false,
+        setup: {
+          envMode: 'copy', envFiles: [], installCommand: null, installOnCreateWorkspace: false,
+          buildCommand: null, runBuildOnCreateWorkspace: false, devCommand: null, defaultPort: null,
+          workspaceIsolationPreference: 'auto',
+        },
+      }],
+      getSnapshot: () => null,
+      observeVolume: async (targetPath) => ({
+        status: 'observed', targetPath, probePath: '/', volumeId: 'device:test',
+        availableBytes: 1_000, freeBytes: 1_000, totalBytes: 2_000, observedAt: 100, error: null,
+      }),
+      measureAllocatedBytes: async () => 2_000_000_000,
+      parkWorkspace: async () => ({ status: 'parked', snapshot: {} as never }),
+      readParkedReclaimedBytes: () => 1_000_000_000,
+    });
+
+    const next = await runDispatchTick(missionFixture(repoPath, [packetFixture(repoPath, 'pressure-entry')]), {
+      launchBudget: { maxLaunches: 1 },
+      storageAdmission: pressureAdmission,
+    });
+
+    expect(calls).toEqual(['attempt:0', 'attempt:1', 'reserve', 'commit']);
+    expect(launchMock.calls.map((call) => call.packetId)).toEqual(['pressure-entry']);
+    expect(next.packets[0]).toMatchObject({
+      status: 'launching',
+      storageAdmission: {
+        state: 'committed',
+        pressure: { status: 'admitted_after_parking', candidates: [{ packetId: 'review-candidate' }] },
+      },
+    });
   }, 20_000);
 
   it('carries outside launch provenance into the first supervisor announcement', async () => {
@@ -159,6 +567,7 @@ describe('dispatch scheduling caps and waves', () => {
 
     await runDispatchTick(missionFixture(repoPath, [packetFixture(repoPath, 'outside-worker', { launchContext })]), {
       launchBudget: { maxLaunches: 1 },
+      storageAdmission: permissiveAdmission(),
     });
 
     expect(watchBodies).toContainEqual(expect.objectContaining({ launchContext }));
@@ -169,6 +578,7 @@ describe('dispatch scheduling caps and waves', () => {
 
     await runDispatchTick(missionFixture(repoPath, [packetFixture(repoPath, 'master-default')]), {
       launchBudget: { maxLaunches: 1 },
+      storageAdmission: permissiveAdmission(),
     });
 
     expect(findLaneByPacket('master-default')?.baseBranch).toBe('master');
@@ -185,6 +595,7 @@ describe('dispatch scheduling caps and waves', () => {
 
     const next = await runDispatchTick(missionFixture(repoPath, packets), {
       launchBudget: { maxLaunches: 10, perRuntime: { gemini: cap } },
+      storageAdmission: permissiveAdmission(),
     });
 
     expect(launchMock.calls.map((call) => call.packetId)).toHaveLength(cap);
@@ -202,6 +613,7 @@ describe('dispatch scheduling caps and waves', () => {
 
     const next = await runDispatchTick(missionFixture(repoPath, [first, second]), {
       launchBudget: { maxLaunches: 10 },
+      storageAdmission: permissiveAdmission(),
     });
 
     expect(launchMock.calls.map((call) => call.packetId)).toEqual(['wave-first']);
@@ -251,6 +663,7 @@ describe('dispatch scheduling caps and waves', () => {
 
     const resumed = await runDispatchTick(missionFixture(repoPath, [packet]), {
       launchBudget: { maxLaunches: 1 },
+      storageAdmission: permissiveAdmission(),
     });
 
     expect(launchMock.calls.map((call) => call.packetId)).toEqual(['halt-gate']);
@@ -333,6 +746,7 @@ describe('dispatch scheduling caps and waves', () => {
 describe('boot recovery launch guard (#1460)', () => {
   beforeEach(() => {
     launchMock.calls.length = 0;
+    launchMock.outcome = 'success';
     setDispatchHaltState(false);
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
   });

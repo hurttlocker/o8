@@ -762,8 +762,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       pushError = gitErrorMessage(error);
       console.warn(`[lane-merge] Push to origin failed for ${lane.baseBranch} after fast-forwarding ${actualBranch}: ${pushError}`);
     }
-
-    await mgr.cleanup(worktreeId, { force: true, deleteBranch: true, mergedEquivalentHeadSha: spokenEvidence.present ? reviewedSnapshotSha : undefined });
+    await mgr.cleanup(worktreeId, { force: true, deleteBranch: true, mergedEquivalentHeadSha: spokenEvidence.present ? reviewedSnapshotSha : undefined, workspaceRetirementAction: 'merge' });
     void mgr.prune().catch(() => {});
     updateLane(command.laneId, {
       worktreePath: null,

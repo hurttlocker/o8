@@ -28,6 +28,7 @@ import { actionReceiptIsInProgress, correlatedActionIsUnsettled, fetchCorrelated
 import { useCorrelatedActionLatch } from '@/components/desktop/use-correlated-action-latch';
 import type { OrchestratorPacketStatus } from '@/lib/orchestrator/types';
 import type { PacketReviewState } from '@/lib/orchestrator/derive-review-state';
+import { WorkspaceParkControl } from './WorkspaceParkControl';
 
 interface ChatPacketStatusBannerProps {
   status: OrchestratorPacketStatus | null;
@@ -552,6 +553,10 @@ export function ChatPacketStatusBanner({
           {canRequestChanges ? pill('Request changes', () => setFeedbackOpen(true), 'secondary') : null}
           {canDiscard ? pill(pending === 'discard' ? 'Discarding…' : 'Discard', () => { void discard(); }, 'danger', pending === 'discard') : null}
         </div>
+      ) : null}
+
+      {actionPacketId && (p.key === 'awaiting' || p.key === 'ready' || p.key === 'rejected') ? (
+        <WorkspaceParkControl packetId={actionPacketId} />
       ) : null}
 
       {prOnlyMode && p.key === 'awaiting' ? (

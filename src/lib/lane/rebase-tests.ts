@@ -1,11 +1,10 @@
-import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { promisify } from 'node:util';
 
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
+import { materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
 
-const execFileAsync = promisify(execFile);
+const execFileAsync = materializationAwareExecFile;
 
 const TEST_TIMEOUT_MS = 300_000;
 const TEST_MAX_BUFFER_BYTES = 8 * 1024 * 1024;

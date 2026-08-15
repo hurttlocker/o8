@@ -97,6 +97,8 @@ export interface CreateWorktreeOptions {
    * session detection stays in sync.
    */
   packetId?: string;
+  /** Scheduler-owned reservation reused by the manager admission boundary. */
+  storageAdmissionReservationId?: string;
 }
 
 /**
@@ -111,6 +113,8 @@ export interface CleanupOptions {
   overrideLiveGuard?: true;
   /** Exact clean HEAD already published through an equivalent rebased commit. */
   mergedEquivalentHeadSha?: string;
+  /** Durable terminal reason recorded before materialization retirement. */
+  workspaceRetirementAction?: 'pr' | 'merge' | 'discard' | 'cleanup';
 }
 
 /**
@@ -156,4 +160,33 @@ export interface WorktreeMetaEntry {
   isolationKind?: WorkspaceIsolationKind;
   /** Ignored dependency/cache paths hydrated into this workspace */
   hydrationPaths?: string[];
+  /** Exact restored directory identity; later destructive operations must match it. */
+  materializationIdentity?: {
+    device: number;
+    inode: number;
+    canonicalPath: string;
+  };
+  /** Exact parent namespace that owns the materialized directory name. */
+  materializationParentIdentity?: {
+    device: number;
+    inode: number;
+    canonicalPath: string;
+  };
+  /** Durable exact restore target prepared before external Git creation. */
+  restorePreparation?: {
+    /** Historical name; new restores populate this final target directly. */
+    stagePath: string;
+    expectedPath: string;
+    head: string;
+    tree: string;
+    isolationKind: WorkspaceIsolationKind;
+    populationState?: 'empty' | 'populating' | 'populated';
+    cleanupPhase?: 'purging' | 'target-retired' | 'admin-retired';
+    claimOperationId?: string;
+    gitAdminIdentity?: {
+      path: string;
+      device: number;
+      inode: number;
+    };
+  };
 }

@@ -23,6 +23,7 @@ import {
 import { isDispatchRuntime } from '@/lib/operator/defaults-env';
 import { isWorkerStartMode } from '@/lib/operator/worker-start-mode';
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { withStoragePressurePolicyLock } from '@/lib/orchestrator/storage-pressure-policy-lock';
 import { SettingsTomlConflictError } from '@/lib/settings/operator-defaults-store';
 import { validateCredentialSafeUrl } from '@/lib/settings/credential-safe-url';
 import {
@@ -48,6 +49,31 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isWorkerRuntimeList(value: unknown): value is OperatorDefaults['workerRuntimes'] {
   return Array.isArray(value) && value.length > 0 && value.every(isDispatchRuntime);
+}
+
+function workspaceStorageValidationError(body: Record<string, unknown>): string | null {
+  if (body.storageReserveRatio !== undefined) {
+    const parsed = typeof body.storageReserveRatio === 'number'
+      ? body.storageReserveRatio
+      : Number(body.storageReserveRatio);
+    if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 1) {
+      return 'storageReserveRatio must be greater than 0 and no more than 1.';
+    }
+  }
+  if (body.storageReserveFloorGb !== undefined) {
+    const parsed = typeof body.storageReserveFloorGb === 'number'
+      ? body.storageReserveFloorGb
+      : Number(body.storageReserveFloorGb);
+    if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 10000) {
+      return 'storageReserveFloorGb must be greater than 0 and no more than 10000.';
+    }
+  }
+  if (body.workspaceParkingMode !== undefined
+    && body.workspaceParkingMode !== 'manual'
+    && body.workspaceParkingMode !== 'pressure') {
+    return 'workspaceParkingMode must be "manual" or "pressure".';
+  }
+  return null;
 }
 
 function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefaults> {
@@ -425,6 +451,24 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.worktreeMaxTotalGb = parsed;
   }
 
+  if (body.storageReserveRatio !== undefined) {
+    const parsed = typeof body.storageReserveRatio === 'number'
+      ? body.storageReserveRatio
+      : Number(body.storageReserveRatio);
+    if (Number.isFinite(parsed) && parsed > 0 && parsed <= 1) update.storageReserveRatio = parsed;
+  }
+
+  if (body.storageReserveFloorGb !== undefined) {
+    const parsed = typeof body.storageReserveFloorGb === 'number'
+      ? body.storageReserveFloorGb
+      : Number(body.storageReserveFloorGb);
+    if (Number.isFinite(parsed) && parsed > 0 && parsed <= 10000) update.storageReserveFloorGb = parsed;
+  }
+
+  if (body.workspaceParkingMode === 'manual' || body.workspaceParkingMode === 'pressure') {
+    update.workspaceParkingMode = body.workspaceParkingMode;
+  }
+
   const validateTier = (raw: unknown, name: string): OperatorDefaults['targetingTriage'] => {
     if (!raw || typeof raw !== 'object') throw new Error(`${name} must be an object { runtime, model, effort }.`);
     const o = raw as Record<string, unknown>;
@@ -470,7 +514,9 @@ export async function POST(request: Request) {
         return response({ error: 'settingsTomlRevision is required to save settings.toml.' }, 400);
       }
       const [updated, cliAuth] = await Promise.all([
-        applyOperatorDefaultsToml(body.settingsToml, body.settingsTomlRevision),
+        withStoragePressurePolicyLock(() => (
+          applyOperatorDefaultsToml(body.settingsToml as string, body.settingsTomlRevision as string)
+        )),
         getRuntimeAuthSnapshot(),
       ]);
       const [settingsToml, dispatchableRuntimes] = await Promise.all([
@@ -482,6 +528,8 @@ export async function POST(request: Request) {
     if (body.workerRuntimes !== undefined && !isWorkerRuntimeList(body.workerRuntimes)) {
       return response({ error: 'workerRuntimes must contain at least one dispatchable runtime.' }, 400);
     }
+    const storageValidationError = workspaceStorageValidationError(body);
+    if (storageValidationError) return response({ error: storageValidationError }, 400);
 
     const update = normalizeUpdate(body);
     if (Object.keys(update).length === 0) {
@@ -489,7 +537,7 @@ export async function POST(request: Request) {
     }
 
     const [updated, cliAuth] = await Promise.all([
-      updateOperatorDefaults(update),
+      withStoragePressurePolicyLock(() => updateOperatorDefaults(update)),
       getRuntimeAuthSnapshot(),
     ]);
     const [settingsToml, dispatchableRuntimes] = await Promise.all([

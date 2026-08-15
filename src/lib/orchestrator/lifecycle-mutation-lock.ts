@@ -1,4 +1,8 @@
 import { chainOnKey } from '@/lib/util/keyed-promise-chain';
+import {
+  acquireWorkspaceLifecycleLease,
+  releaseWorkspaceLifecycleLease,
+} from '@/lib/orchestrator/workspace-lifecycle-lease';
 
 const packetLifecycleChains = new Map<string, Promise<unknown>>();
 const packetLifecycleDepth = new Map<string, number>();
@@ -23,7 +27,14 @@ export async function withPacketLifecycleMutationLock<T>(
   const contended = (packetLifecycleDepth.get(key) ?? 0) > 0;
   packetLifecycleDepth.set(key, (packetLifecycleDepth.get(key) ?? 0) + 1);
   try {
-    return await chainOnKey(packetLifecycleChains, key, () => mutation({ contended }));
+    return await chainOnKey(packetLifecycleChains, key, async () => {
+      const lease = await acquireWorkspaceLifecycleLease(key);
+      try {
+        return await mutation({ contended: contended || lease.contended });
+      } finally {
+        releaseWorkspaceLifecycleLease(lease);
+      }
+    });
   } finally {
     const remaining = (packetLifecycleDepth.get(key) ?? 1) - 1;
     if (remaining > 0) packetLifecycleDepth.set(key, remaining);

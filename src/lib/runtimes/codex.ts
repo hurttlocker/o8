@@ -374,9 +374,11 @@ export const codexRuntime: AgentRuntime = {
     // Owned sessions: use existing owned pipeline
     if (sessionKey.startsWith('codex-owned:')) {
       const result = await continueOwnedCodexSession(sessionKey, message);
-      scheduleCodexUsageDispatch(sessionKey, startedAtMs, baseline, undefined, undefined, () =>
-        waitForOwnedRunToFinish(sessionKey, startedAtMs));
-      return { ok: true, note: result.note, sessionKey };
+      if (result.ok) {
+        scheduleCodexUsageDispatch(sessionKey, startedAtMs, baseline, undefined, undefined, () =>
+          waitForOwnedRunToFinish(sessionKey, startedAtMs));
+      }
+      return { ok: result.ok, note: result.note, sessionKey };
     }
 
     if (sessionKey.startsWith('codex-live:')) {

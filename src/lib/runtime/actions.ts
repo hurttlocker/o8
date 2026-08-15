@@ -1,6 +1,6 @@
 import type { AgentSummary } from '@/lib/fleet/types';
 import { recordLaneEvent } from '@/lib/lane/events';
-import { listLanes } from '@/lib/lane/registry';
+import { listLanes, updateLane } from '@/lib/lane/registry';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import {
@@ -96,6 +96,8 @@ export interface RuntimeLaunchRequest {
   // tied to a packet. Also drives the worktree directory naming (one slot
   // per packet, instead of a shared taskName-derived slot).
   packetId?: string;
+  /** Scheduler-owned storage reservation reused by the managed-worktree boundary. */
+  storageAdmissionReservationId?: string;
 }
 
 export interface RuntimeLaunchResult {
@@ -223,6 +225,7 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
         envFiles: repoEntry?.setup.envFiles,
         isolationPreference: repoEntry?.setup.workspaceIsolationPreference,
         packetId: payload.packetId,
+        storageAdmissionReservationId: payload.storageAdmissionReservationId,
       });
       if (launchWorktree?.worktree) {
         clearFetchUnreachable(repoPath);
@@ -367,6 +370,23 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
   }
 
   const cwd = launchWorktree?.cwd ?? repoPath;
+  if (packetNeedsWorktree && payload.existingLaneId && payload.packetId && launchWorktree?.worktree) {
+    const lane = listLanes().find((candidate) => candidate.id === payload.existingLaneId);
+    if (!lane
+      || lane.packetId !== payload.packetId
+      || lane.status !== 'launching'
+      || lane.sessionKey !== null
+      || lane.repoPath !== repoPath
+      || lane.branch !== payload.branchName
+      || (lane.worktreePath !== null && lane.worktreePath !== cwd)) {
+      const note = 'Managed worktree was prepared without an exact unbound pre-launch lane.';
+      throw packetWorktreeProvisionError(payload, runtimeId, repoPath, note, note);
+    }
+    if (!updateLane(lane.id, { worktreePath: cwd }, 'system')) {
+      const note = 'Managed replacement worktree could not be bound before launch.';
+      throw packetWorktreeProvisionError(payload, runtimeId, repoPath, note, note);
+    }
+  }
   const result = await runtime.launch({
     cwd,
     prompt: launchPrompt,

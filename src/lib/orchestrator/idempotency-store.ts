@@ -35,6 +35,12 @@
 
 import { createHash, randomUUID } from 'node:crypto';
 import { getDb, getSqlite } from '@/lib/db';
+import {
+  isMetadataLockProcessIdentity,
+  probeMetadataLockProcessIdentity,
+  sameMetadataLockProcessIdentity,
+  type MetadataLockProcessIdentity,
+} from '@/lib/worktree/metadata-lock-process-identity';
 
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
 
@@ -138,6 +144,7 @@ interface KeyRow {
   expires_at: number;
   pid: number | null;
   reservation_id: string | null;
+  owner_identity_json: string | null;
 }
 
 interface CompletedFallback {
@@ -163,14 +170,29 @@ function selectCompletedFallback(key: string, now: number): CompletedFallback | 
   return fallback;
 }
 
-function isPidAlive(pid: number | null): boolean {
-  if (pid === null || !Number.isInteger(pid) || pid <= 0) return false;
+let currentProcessIdentityPromise: Promise<MetadataLockProcessIdentity> | null = null;
+
+async function currentProcessIdentity(): Promise<MetadataLockProcessIdentity> {
+  currentProcessIdentityPromise ??= probeMetadataLockProcessIdentity(process.pid).then((probe) => {
+    if (probe.state !== 'live') throw new Error('The idempotency owner process identity is unavailable.');
+    return probe.identity;
+  });
+  return currentProcessIdentityPromise;
+}
+
+async function reservationOwnerState(row: KeyRow): Promise<'alive' | 'dead' | 'unknown'> {
+  if (row.pid === null || !Number.isInteger(row.pid) || row.pid <= 0) return 'dead';
+  const probe = await probeMetadataLockProcessIdentity(row.pid);
+  if (probe.state === 'absent') return 'dead';
+  if (probe.state !== 'live' || !row.owner_identity_json) return 'unknown';
+  let recorded: unknown;
   try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'EPERM';
+    recorded = JSON.parse(row.owner_identity_json) as unknown;
+  } catch {
+    return 'unknown';
   }
+  if (!isMetadataLockProcessIdentity(recorded)) return 'unknown';
+  return sameMetadataLockProcessIdentity(probe.identity, recorded) ? 'alive' : 'dead';
 }
 
 function pruneExpired(now: number): void {
@@ -190,7 +212,7 @@ function pruneExpired(now: number): void {
 
 function selectFresh(key: string, now: number): KeyRow | undefined {
   const row = getSqlite()
-    .prepare('SELECT result_json, expires_at, pid, reservation_id FROM idempotency_keys WHERE key = ?')
+    .prepare('SELECT result_json, expires_at, pid, reservation_id, owner_identity_json FROM idempotency_keys WHERE key = ?')
     .get(key) as KeyRow | undefined;
   if (!row) return undefined;
   if (row.result_json !== null && row.expires_at <= now) return undefined;
@@ -203,27 +225,36 @@ function reserve(
   verb: string,
   packetId: string,
   reservationId: string,
+  ownerIdentity: MetadataLockProcessIdentity,
   now: number,
   expiresAt: number,
 ): boolean {
   const info = getSqlite()
     .prepare(
-      `INSERT OR IGNORE INTO idempotency_keys (key, verb, packet_id, result_json, pid, reservation_id, created_at, expires_at)
-       VALUES (?, ?, ?, NULL, ?, ?, ?, ?)`,
+      `INSERT OR IGNORE INTO idempotency_keys
+        (key, verb, packet_id, result_json, pid, reservation_id, owner_identity_json, created_at, expires_at)
+       VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
     )
-    .run(key, verb, packetId, process.pid, reservationId, now, expiresAt);
+    .run(key, verb, packetId, process.pid, reservationId, JSON.stringify(ownerIdentity), now, expiresAt);
   return info.changes > 0;
 }
 
-function finalize(key: string, reservationId: string, resultJson: string, expiresAt: number): void {
+function finalize(
+  key: string,
+  reservationId: string,
+  ownerIdentity: MetadataLockProcessIdentity,
+  resultJson: string,
+  expiresAt: number,
+): void {
   // Clear pid on finalize — a finalized row is a replay cache with no live
   // owner, so it must never look like a reapable in-flight reservation.
   const updated = getSqlite()
     .prepare(
-      `UPDATE idempotency_keys SET result_json = ?, pid = NULL, expires_at = ?
-       WHERE key = ? AND reservation_id = ? AND pid = ? AND result_json IS NULL`,
+      `UPDATE idempotency_keys SET result_json = ?, pid = NULL, owner_identity_json = NULL, expires_at = ?
+       WHERE key = ? AND reservation_id = ? AND pid = ?
+         AND owner_identity_json = ? AND result_json IS NULL`,
     )
-    .run(resultJson, expiresAt, key, reservationId, process.pid);
+    .run(resultJson, expiresAt, key, reservationId, process.pid, JSON.stringify(ownerIdentity));
   if (updated.changes !== 1) {
     throw new ReservationOwnershipLostError(
       `Idempotency reservation ownership was lost before ${key} could be finalized.`,
@@ -235,15 +266,18 @@ function finalizeUnresolved(
   key: string,
   reservationId: string,
   priorPid: number | null,
+  priorOwnerIdentityJson: string | null,
   resultJson: string,
   expiresAt: number,
 ): boolean {
   const updated = getSqlite()
     .prepare(
-      `UPDATE idempotency_keys SET result_json = ?, pid = NULL, expires_at = ?
-       WHERE key = ? AND reservation_id = ? AND pid IS ? AND result_json IS NULL`,
+      `UPDATE idempotency_keys
+       SET result_json = ?, pid = NULL, owner_identity_json = NULL, expires_at = ?
+       WHERE key = ? AND reservation_id = ? AND pid IS ?
+         AND owner_identity_json IS ? AND result_json IS NULL`,
     )
-    .run(resultJson, expiresAt, key, reservationId, priorPid);
+    .run(resultJson, expiresAt, key, reservationId, priorPid, priorOwnerIdentityJson);
   return updated.changes === 1;
 }
 
@@ -316,7 +350,8 @@ export async function withIdempotency<T>(
     if (existing.result_json !== null) {
       return { replayed: true, inProgress: false, result: JSON.parse(existing.result_json) as T };
     }
-    const unresolved = !isPidAlive(existing.pid);
+    const ownerState = await reservationOwnerState(existing);
+    const unresolved = ownerState === 'dead';
     if (unresolved && existing.reservation_id && params.reconcileUnresolved) {
       try {
         const reconciled = await params.reconcileUnresolved();
@@ -324,6 +359,7 @@ export async function withIdempotency<T>(
           key,
           existing.reservation_id,
           existing.pid,
+          existing.owner_identity_json,
           JSON.stringify(reconciled),
           expiresAt,
         )) {
@@ -342,14 +378,15 @@ export async function withIdempotency<T>(
   }
 
   const reservationId = randomUUID();
-  const won = reserve(key, verb, scopeId, reservationId, now, expiresAt);
+  const ownerIdentity = await currentProcessIdentity();
+  const won = reserve(key, verb, scopeId, reservationId, ownerIdentity, now, expiresAt);
   if (!won) {
     // Lost the reserve race between select and insert — re-read the winner's row.
     const raced = selectFresh(key, now);
     if (raced?.result_json != null) {
       return { replayed: true, inProgress: false, result: JSON.parse(raced.result_json) as T };
     }
-    const unresolved = Boolean(raced && !isPidAlive(raced.pid));
+    const unresolved = raced ? await reservationOwnerState(raced) === 'dead' : false;
     return {
       replayed: true,
       inProgress: true,
@@ -374,7 +411,7 @@ export async function withIdempotency<T>(
   // re-execution by this key.
   const finalizedExpiresAt = (params.now ?? Date.now()) + ttlMs;
   try {
-    finalize(key, reservationId, JSON.stringify(result ?? null), finalizedExpiresAt);
+    finalize(key, reservationId, ownerIdentity, JSON.stringify(result ?? null), finalizedExpiresAt);
   } catch (error) {
     // A storage error leaves our reservation in place, so an in-process
     // fallback can truthfully replay the completed result. If ownership was

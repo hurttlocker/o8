@@ -48,6 +48,26 @@ function fullPacketFixture() {
     launchAttempts: 3,
     operatorStopped: true,
     blockedReason: 'operator_stopped',
+    storageAdmission: {
+      schema: 'o8/packet-storage-admission/v1',
+      state: 'held',
+      reason: 'reserve_breached',
+      reservationId: 'packet-storage:pkt-control-1:3',
+      mutationId: 'packet-storage-reserve:pkt-control-1:3',
+      ownerId: 'pkt-control-1',
+      ownerGeneration: 3,
+      estimateBytes: 2_147_483_648,
+      estimateSource: 'same-repo-history',
+      historySamples: 2,
+      volumeId: 'device:1',
+      physicalAvailableBytes: 12_000_000_000,
+      reservedBeforeBytes: 4_000_000_000,
+      requiredReserveBytes: 10_000_000_000,
+      dispatchHeadroomBytes: -2_000_000_000,
+      pressure: null,
+      recordedAt: NOW.getTime(),
+    },
+    storageAdmissionEpoch: 7,
     lastEventAt: '2026-01-01T00:03:00.000Z',
     lastEventLabel: 'review_requested',
     archivedAt: '2026-01-01T00:04:00.000Z',
@@ -209,6 +229,7 @@ describe('packet fields survive normalize', () => {
       dispatchRuntimePin: undefined,
       orchestratorThreadId: undefined,
       taskContractRequired: undefined,
+      storageAdmissionEpoch: undefined,
     }));
 
     expect(normalized.packets[0].operatorStopped).toBeUndefined();
@@ -216,6 +237,7 @@ describe('packet fields survive normalize', () => {
     expect(normalized.packets[0].dispatchRuntimePin).toBeNull();
     expect(normalized.packets[0].orchestratorThreadId).toBeUndefined();
     expect(normalized.packets[0].taskContractRequired).toBeUndefined();
+    expect(normalized.packets[0].storageAdmissionEpoch).toBe(1);
   });
 
   it('truncates an oversized deviations raw body with an explicit marker', () => {

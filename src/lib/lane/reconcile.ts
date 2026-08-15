@@ -7,6 +7,7 @@ import { getLaneEvents, listLanes, setLaneStatus } from '@/lib/lane/registry';
 import type { Lane, LaneRuntime, LaneStatus } from '@/lib/lane/types';
 import { getRuntime } from '@/lib/runtimes';
 import { crashSurvivableWorkersEnabled } from '@/lib/runtimes/shared/owned-session/crash-survival';
+import { listWorkspaceSnapshotsByPacketId } from '@/lib/worktree/snapshot-state';
 
 const execFileAsync = promisify(execFile);
 
@@ -189,6 +190,21 @@ async function laneMergeConfirmed(lane: Lane): Promise<boolean> {
 // and double-log; fold a concurrent call into the in-flight one.
 let reconcileInFlight: Promise<number> | null = null;
 
+function workspaceLifecycleOwnsMissingPath(lane: Lane): boolean {
+  const packetId = lane.packetId?.trim();
+  if (!packetId) return false;
+  try {
+    const snapshots = listWorkspaceSnapshotsByPacketId(packetId);
+    if (snapshots.length === 0) return false;
+    return snapshots.length !== 1 || snapshots[0]!.state !== 'materialized';
+  } catch (error) {
+    console.warn(
+      `[reconcile] Skipping missing-worktree inference for packet ${packetId}; durable workspace truth is unreadable: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return true;
+  }
+}
+
 export function reconcileOrphanedWorktrees(): Promise<number> {
   if (reconcileInFlight) return reconcileInFlight;
   reconcileInFlight = runReconcileOrphanedWorktrees().finally(() => {
@@ -202,7 +218,8 @@ async function runReconcileOrphanedWorktrees(): Promise<number> {
     (lane) =>
       RECONCILABLE_WORKTREE_STATUSES.has(lane.status)
       && typeof lane.worktreePath === 'string'
-      && lane.worktreePath.length > 0,
+      && lane.worktreePath.length > 0
+      && !workspaceLifecycleOwnsMissingPath(lane),
   );
   if (reconcilableLanes.length === 0) return 0;
 

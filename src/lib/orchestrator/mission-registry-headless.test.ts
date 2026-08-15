@@ -287,6 +287,17 @@ describe('headless mission registry dispatch', () => {
 
     const packetId = first.packets[0]?.id;
     expect(packetId).toBeTruthy();
+    const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
+    const durablePacket = readMissionRegistryEntry(first.missionId, { includeArchived: true })
+      ?.mission.packets.find((candidate) => candidate.id === packetId);
+    const { createLane, findLaneByPacket, getLane } = await import('@/lib/lane/registry');
+    const retiredLane = createLane({
+      repoPath,
+      branch: durablePacket!.branchTarget,
+      runtime: 'codex',
+      packetId: packetId!,
+    });
+    expect(retiredLane?.id).toMatch(/^lane-/);
     const { listApprovalsForContext, recordOrchestratorReview } = await import('@/lib/approvals/store');
     recordOrchestratorReview(packetId!, {
       approved: true,
@@ -299,15 +310,18 @@ describe('headless mission registry dispatch', () => {
       reason: 'retry non-current packet',
     }));
 
-    const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
+    const { readMissionRegistryEntry: readResetMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
     const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
-    const packet = readMissionRegistryEntry(first.missionId, { includeArchived: true })?.mission.packets
+    const packet = readResetMissionRegistryEntry(first.missionId, { includeArchived: true })?.mission.packets
       .find((candidate) => candidate.id === packetId);
 
     expect(retryResult.reset).toBe(true);
     expect(retryResult.referenceLabel).toBe('inline-1');
     expect(packet?.status).toBe('draft');
     expect(packet?.queueState).toBe('held');
+    expect(packet?.storageAdmissionEpoch).toBe(2);
+    expect(findLaneByPacket(packetId!)).toBeNull();
+    expect(getLane(retiredLane.id)?.packetId).toBeFalsy();
     expect(readOrchestratorControlPlaneState().missionId).toBe(second.missionId);
     expect(listApprovalsForContext({ packetId }).find((approval) => (
       approval.toolName === 'orchestrator_review'
@@ -356,6 +370,7 @@ describe('headless mission registry dispatch', () => {
       queueState: 'held',
       archivedAt: null,
       lane: null,
+      storageAdmissionEpoch: 2,
     });
     expect(getLane(oldLane!.id)?.packetId).toBeFalsy();
 
@@ -816,6 +831,17 @@ describe('headless mission registry dispatch', () => {
 
     const packetId = first.packets[0]?.id;
     expect(packetId).toBeTruthy();
+    const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
+    const durablePacket = readMissionRegistryEntry(first.missionId, { includeArchived: true })
+      ?.mission.packets.find((candidate) => candidate.id === packetId);
+    const { createLane, findLaneByPacket, getLane } = await import('@/lib/lane/registry');
+    const retiredLane = createLane({
+      repoPath,
+      branch: durablePacket!.branchTarget,
+      runtime: 'codex',
+      packetId: packetId!,
+    });
+    expect(retiredLane?.id).toMatch(/^lane-/);
     const { listApprovalsForContext, recordOrchestratorReview } = await import('@/lib/approvals/store');
     recordOrchestratorReview(packetId!, {
       approved: true,
@@ -828,11 +854,16 @@ describe('headless mission registry dispatch', () => {
       feedback: 'tighten the implementation',
     }));
 
-    const { findLaneByPacket } = await import('@/lib/lane/registry');
     const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
     expect(result.dispatched).toBe(true);
     expect(result.referenceLabel).toBe('inline-1');
     expect(findLaneByPacket(packetId!)?.id).toMatch(/^lane-/);
+    expect(findLaneByPacket(packetId!)?.id).not.toBe(retiredLane!.id);
+    expect(getLane(retiredLane!.id)?.packetId).toBeFalsy();
+    const rerunPacket = (await import('@/lib/orchestrator/mission-registry'))
+      .readMissionRegistryEntry(first.missionId, { includeArchived: true })?.mission.packets
+      .find((candidate) => candidate.id === packetId);
+    expect(rerunPacket?.storageAdmissionEpoch).toBe(2);
     expect(readOrchestratorControlPlaneState().missionId).toBe(second.missionId);
     expect(listApprovalsForContext({ packetId }).find((approval) => (
       approval.toolName === 'orchestrator_review'

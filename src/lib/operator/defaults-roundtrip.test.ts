@@ -58,6 +58,9 @@ const NON_DEFAULT_UPDATE = {
   prLinkDestination: 'browser',
   worktreeMaxCount: 12,
   worktreeMaxTotalGb: 8,
+  storageReserveRatio: 0.15,
+  storageReserveFloorGb: 12,
+  workspaceParkingMode: 'pressure',
 } as const;
 
 describe('updateOperatorDefaults round-trip', () => {

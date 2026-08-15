@@ -43,6 +43,17 @@ export interface OwnedRunRecord {
   pid: number;
   /** Spawned executable basename, used to reject recycled PIDs before signaling. */
   commandIdentity?: string;
+  /** Durable POSIX process-group identity, retained after the leader exits. */
+  processGroupId?: number;
+  /** Unique inherited env marker used to find descendants that escape the original group. */
+  processMarker?: string;
+  /**
+   * Durable spawn journal phase. `prepared` is persisted before any process
+   * side effect; `started` means PID/tmux identity was advanced after spawn;
+   * `reconciled_clear` means a marker scan proved the prepared intent left no
+   * process behind.
+   */
+  spawnState?: 'prepared' | 'started' | 'reconciled_clear';
   stdoutPath: string;
   stderrPath: string;
   outcome: OwnedRunOutcome;
@@ -72,6 +83,8 @@ export interface OwnedSessionRecord {
   sessionDir: string;
   cwd: string;
   repoPath: string;
+  /** Stable logical workspace identity. The cwd may disappear while a packet is parked. */
+  workspaceBinding?: OwnedWorkspaceBinding;
   repoSlug?: string;
   branch?: string;
   head?: string;
@@ -96,12 +109,65 @@ export interface OwnedSessionRecord {
   reviewDispositionUpdatedAt?: string;
   activeRun?: OwnedRunRecord;
   recentRuns: OwnedRunRecord[];
+  /**
+   * Durable proof that recentRuns still contains every run ever started for
+   * this session. Once retention truncates an identity, complete stays false.
+   * Legacy records omit this object and must be treated as incomplete.
+   */
+  runIdentityLedger?: {
+    version: 1;
+    totalRuns: number | null;
+    complete: boolean;
+  };
   autoRetry?: boolean;
   retryCount?: number;
   orphanedAt?: string;
   orphanedReason?: string;
   orphanedCostLine?: string;
 }
+
+export interface OwnedWorkspaceBinding {
+  logicalWorkspaceId: string;
+  repositoryUuid: string | null;
+  packetId: string | null;
+  cwd: string;
+  version: number;
+  verifiedAt: string;
+}
+
+export interface OwnedWorkspaceBindingReceipt {
+  surfaceId: string;
+  runtimeId: string;
+  sessionState: OwnedSessionState;
+  binding: OwnedWorkspaceBinding;
+  activeRun: Pick<OwnedRunRecord, 'pid' | 'commandIdentity' | 'processGroupId' | 'processMarker' | 'spawnState' | 'tmuxSession'> | null;
+  /**
+   * Every bounded run identity retained by the session that could still own a
+   * process. Finished leaders stay here because a process-group member or an
+   * escaped marker-bearing descendant can outlive them.
+   */
+  retainedRuns: Array<Pick<
+    OwnedRunRecord,
+    'id' | 'outcome' | 'pid' | 'commandIdentity' | 'processGroupId' | 'processMarker' | 'spawnState' | 'tmuxSession'
+  >>;
+  /** False means the bounded ledger omitted or conflicted with persisted run identity. */
+  retainedRunsComplete: boolean;
+  /** Total runs ever recorded when durable ledger truth is valid; null for legacy/corrupt state. */
+  retainedRunTotal: number | null;
+}
+
+export interface RebindOwnedWorkspaceInput {
+  logicalWorkspaceId: string;
+  repositoryUuid: string;
+  packetId: string;
+  expectedCwd: string;
+  nextCwd: string;
+  expectedVersion: number;
+}
+
+export type RebindOwnedWorkspaceResult =
+  | { status: 'rebound' | 'idempotent'; receipt: OwnedWorkspaceBindingReceipt }
+  | { status: 'conflict' | 'missing' | 'archived'; receipt: OwnedWorkspaceBindingReceipt | null; note: string };
 
 // ── Tail entries / groups ────────────────────────────────────────────────────
 
@@ -348,6 +414,11 @@ export interface OwnedSessionStore {
     stdoutPaths: string[];
   } | null>;
   getSessionIdentityId(surfaceId: string): Promise<string | null>;
+  getWorkspaceBinding?(surfaceId: string): Promise<OwnedWorkspaceBindingReceipt | null>;
+  rebindWorkspace?(
+    surfaceId: string,
+    input: RebindOwnedWorkspaceInput,
+  ): Promise<RebindOwnedWorkspaceResult>;
   setReviewDisposition(
     surfaceId: string,
     disposition: OwnedReviewDisposition,

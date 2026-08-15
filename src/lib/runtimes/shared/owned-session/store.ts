@@ -37,6 +37,10 @@ import {
 import { createOwnedSessionIo } from './session-io';
 import { createOwnedRunController } from './run-controller';
 import { createReviewTailController } from './review-tail';
+import {
+  OwnedWorkspaceUnavailableError,
+  type OwnedWorkspaceSpawnGuard,
+} from './workspace-spawn-guard';
 import type {
   OwnedFleetAdditions,
   OwnedLaunchRequest,
@@ -45,9 +49,16 @@ import type {
   OwnedRuntimeAdapter,
   OwnedSessionRecord,
   OwnedSessionStore,
+  OwnedWorkspaceBinding,
+  OwnedWorkspaceBindingReceipt,
+  RebindOwnedWorkspaceInput,
+  RebindOwnedWorkspaceResult,
 } from './types';
 
-export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSessionStore {
+export function createOwnedSessionStore(
+  adapter: OwnedRuntimeAdapter,
+  options: { workspaceSpawnGuard?: OwnedWorkspaceSpawnGuard } = {},
+): OwnedSessionStore {
   const runtimeId = adapter.runtimeId;
   const surfacePrefix = adapter.surfaceIdPrefix;
   const root = process.env[adapter.rootEnvVar] || adapter.rootDefault;
@@ -61,6 +72,15 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
   const resumeGroupLabel = adapter.resumeGroupLabel ?? 'Resume turn';
   const lifecycleContext = { adapter, runtimeId };
   const ACTIVE_ORPHAN_GRACE_MS = 120_000;
+  const workspaceSpawnGuard: OwnedWorkspaceSpawnGuard = options.workspaceSpawnGuard ?? (async (input) => {
+    try {
+      const { inspectOwnedWorkspaceMaterialization } = await import('@/lib/workspace/materialization-guard');
+      const decision = await inspectOwnedWorkspaceMaterialization(input);
+      return decision;
+    } catch {
+      return { status: 'unknown', note: 'Owned workspace snapshot truth could not be loaded, so the run was refused.' };
+    }
+  });
 
   let fleetCache: { value: OwnedFleetAdditions; cachedAt: number } | null = null;
   let fleetInflight: Promise<OwnedFleetAdditions> | null = null;
@@ -91,6 +111,7 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     stderrNoise,
     io,
     withSurfaceLock,
+    workspaceSpawnGuard,
     invalidateFleetCache,
   });
   const reviewTailController = createReviewTailController({
@@ -158,6 +179,7 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
       selectedIdentity = await getSelectedRuntimeIdentity(runtimeId);
     }
 
+    const createdAt = nowIso();
     const session = {
       surfaceId: `${surfacePrefix}${id}`,
       launchMutationId: request.clientMutationId?.trim() || undefined,
@@ -166,12 +188,22 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
       sessionDir,
       cwd: repoPath,
       repoPath,
+      workspaceBinding: {
+        logicalWorkspaceId: request.packetId?.trim()
+          ? `packet:${request.packetId.trim()}`
+          : `session:${surfacePrefix}${id}`,
+        repositoryUuid: null,
+        packetId: request.packetId?.trim() || null,
+        cwd: repoPath,
+        version: 1,
+        verifiedAt: createdAt,
+      },
       repoSlug: repo.repoSlug,
       branch: repo.branch,
       head: repo.head,
       title: repo.title,
-      createdAt: nowIso(),
-      updatedAt: nowIso(),
+      createdAt,
+      updatedAt: createdAt,
       latestPrompt: prompt,
       latestSummary: compactText(prompt, 140) || `Owned ${adapter.squadShortName} session launched from o8.`,
       model: request.model?.trim() || adapter.defaultModel || undefined,
@@ -185,10 +217,24 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
       reviewDisposition: 'watching' as const,
       reviewDispositionUpdatedAt: nowIso(),
       recentRuns: [],
+      runIdentityLedger: { version: 1 as const, totalRuns: 0, complete: true },
     };
 
     await io.saveSession(session);
-    const run = await runController.spawnOwnedRun(session, prompt, 'launch');
+    let run;
+    try {
+      run = await withSurfaceLock(session.surfaceId, () => (
+        runController.spawnOwnedRun(session, prompt, 'launch')
+      ));
+    } catch (error) {
+      if (error instanceof OwnedWorkspaceUnavailableError) {
+        return {
+          ok: false, runtime: runtimeId, surfaceId: session.surfaceId,
+          note: error.message, sideEffect: error.sideEffect,
+        };
+      }
+      throw error;
+    }
     invalidateFleetCache();
     void sweepRecentlyOrphanedActiveRuns().catch(() => {});
     const failedBeforeLaunch = run.outcome === 'failed';
@@ -241,6 +287,9 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     try {
       await runController.refreshSession(session);
 
+      if (session.activeRun?.spawnState === 'prepared') {
+        throw new Error(`This owned ${adapter.squadShortName} session has an unresolved prepared run. Wait for marker reconciliation before resuming it.`);
+      }
       if (session.activeRun && isPidAlive(session.activeRun.pid)) {
         throw new Error(`This owned ${adapter.squadShortName} session still has an active run. Wait for it to settle or interrupt it first.`);
       }
@@ -263,6 +312,9 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
       };
     } catch (error) {
       await rollbackColdRestore();
+      if (error instanceof OwnedWorkspaceUnavailableError) {
+        return { ok: false, note: error.message, sideEffect: error.sideEffect };
+      }
       throw error;
     }
   }
@@ -278,6 +330,12 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     }
     await runController.refreshSession(session);
 
+    if (session.activeRun?.spawnState === 'prepared') {
+      return {
+        interrupted: false,
+        note: `The owned ${adapter.squadShortName} run has a durable prepared marker but no signalable PID yet; it remains unresolved rather than being reported stopped.`,
+      };
+    }
     if (!session.activeRun || !isPidAlive(session.activeRun.pid)) {
       return { interrupted: false, note: `No active owned ${adapter.squadShortName} run was in flight.` };
     }
@@ -388,6 +446,158 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     return session?.identity?.id?.trim() || null;
   }
 
+  function normalizedWorkspaceBinding(session: OwnedSessionRecord): OwnedWorkspaceBinding {
+    return session.workspaceBinding ?? {
+      logicalWorkspaceId: session.packetId?.trim()
+        ? `packet:${session.packetId.trim()}`
+        : `session:${session.surfaceId}`,
+      repositoryUuid: null,
+      packetId: session.packetId?.trim() || null,
+      cwd: path.resolve(session.cwd),
+      version: 1,
+      verifiedAt: session.updatedAt || session.createdAt,
+    };
+  }
+
+  function bindingReceipt(
+    session: OwnedSessionRecord,
+    sessionState: 'active' | 'archived',
+  ): OwnedWorkspaceBindingReceipt {
+    const recentRuns = Array.isArray(session.recentRuns) ? session.recentRuns : [];
+    const ledger = session.runIdentityLedger;
+    const ledgerValid = ledger?.version === 1
+      && (ledger.totalRuns === null
+        ? !ledger.complete
+        : Number.isSafeInteger(ledger.totalRuns)
+          && ledger.totalRuns >= recentRuns.length
+          && (!ledger.complete || ledger.totalRuns === recentRuns.length));
+    const retainedRuns = [] as OwnedWorkspaceBindingReceipt['retainedRuns'];
+    const seenRuns = new Map<string, OwnedWorkspaceBindingReceipt['retainedRuns'][number]>();
+    let retainedRunsComplete = Boolean(ledgerValid && ledger?.complete)
+      && new Set(recentRuns.map((run) => run.id)).size === recentRuns.length
+      && (!session.activeRun || recentRuns.some((run) => run.id === session.activeRun?.id));
+    for (const run of [session.activeRun, ...recentRuns]) {
+      if (!run) continue;
+      if (run.spawnState === 'reconciled_clear'
+        && run.pid <= 0
+        && !run.processGroupId
+        && !run.tmuxSession) continue;
+      if (run.pid <= 0 && !run.processGroupId && !run.processMarker && !run.tmuxSession) continue;
+      const identity = {
+        id: run.id,
+        outcome: run.outcome,
+        pid: run.pid,
+        commandIdentity: run.commandIdentity,
+        processGroupId: run.processGroupId,
+        processMarker: run.processMarker,
+        spawnState: run.spawnState,
+        tmuxSession: run.tmuxSession,
+      };
+      const prior = seenRuns.get(run.id);
+      if (prior) {
+        if (JSON.stringify(prior) !== JSON.stringify(identity)) retainedRunsComplete = false;
+        continue;
+      }
+      if (!run.id.trim() || retainedRuns.length === 16) {
+        retainedRunsComplete = false;
+        continue;
+      }
+      seenRuns.set(run.id, identity);
+      retainedRuns.push(identity);
+    }
+    return {
+      surfaceId: session.surfaceId,
+      runtimeId,
+      sessionState,
+      binding: normalizedWorkspaceBinding(session),
+      activeRun: session.activeRun ? {
+        pid: session.activeRun.pid,
+        commandIdentity: session.activeRun.commandIdentity,
+        processGroupId: session.activeRun.processGroupId,
+        processMarker: session.activeRun.processMarker,
+        spawnState: session.activeRun.spawnState,
+        tmuxSession: session.activeRun.tmuxSession,
+      } : null,
+      retainedRuns,
+      retainedRunsComplete,
+      retainedRunTotal: ledgerValid ? ledger?.totalRuns ?? null : null,
+    };
+  }
+
+  function getWorkspaceBinding(surfaceId: string): Promise<OwnedWorkspaceBindingReceipt | null> {
+    return withSurfaceLock(surfaceId, async () => {
+      const active = await io.findSession(surfaceId);
+      if (active) {
+        await runController.reconcilePreparedRuns(active);
+        return bindingReceipt(active, 'active');
+      }
+      const archived = await io.findArchivedSession(surfaceId);
+      return archived ? bindingReceipt(archived, 'archived') : null;
+    });
+  }
+
+  function rebindWorkspace(
+    surfaceId: string,
+    input: RebindOwnedWorkspaceInput,
+  ): Promise<RebindOwnedWorkspaceResult> {
+    return withSurfaceLock(surfaceId, async () => {
+      const session = await io.findSession(surfaceId);
+      if (!session) {
+        const archived = await io.findArchivedSession(surfaceId);
+        return archived
+          ? {
+              status: 'archived' as const,
+              receipt: bindingReceipt(archived, 'archived'),
+              note: 'Archived owned sessions cannot be rebound in place.',
+            }
+          : { status: 'missing' as const, receipt: null, note: 'Owned session was not found.' };
+      }
+      await runController.reconcilePreparedRuns(session);
+      const current = normalizedWorkspaceBinding(session);
+      const expectedCwd = path.resolve(input.expectedCwd);
+      const nextCwd = path.resolve(input.nextCwd);
+      const identityMatches = current.logicalWorkspaceId === input.logicalWorkspaceId
+        && (current.repositoryUuid === null || current.repositoryUuid === input.repositoryUuid)
+        && (current.packetId === null || current.packetId === input.packetId);
+      const replayed = identityMatches
+        && current.repositoryUuid === input.repositoryUuid
+        && current.packetId === input.packetId
+        && current.cwd === nextCwd
+        && current.version === input.expectedVersion + 1;
+      if (replayed) {
+        return { status: 'idempotent' as const, receipt: bindingReceipt(session, 'active') };
+      }
+      if (!identityMatches || current.cwd !== expectedCwd || current.version !== input.expectedVersion) {
+        return {
+          status: 'conflict' as const,
+          receipt: bindingReceipt(session, 'active'),
+          note: 'Owned workspace binding changed before the rebind could be applied.',
+        };
+      }
+      if (session.activeRun) {
+        return {
+          status: 'conflict' as const,
+          receipt: bindingReceipt(session, 'active'),
+          note: 'An owned run is still attached to this workspace binding.',
+        };
+      }
+      const nextBinding: OwnedWorkspaceBinding = {
+        logicalWorkspaceId: input.logicalWorkspaceId,
+        repositoryUuid: input.repositoryUuid,
+        packetId: input.packetId,
+        cwd: nextCwd,
+        version: current.version + 1,
+        verifiedAt: nowIso(),
+      };
+      session.cwd = nextCwd;
+      session.repoPath = nextCwd;
+      session.workspaceBinding = nextBinding;
+      await io.saveSession(session);
+      invalidateFleetCache();
+      return { status: 'rebound' as const, receipt: bindingReceipt(session, 'active') };
+    });
+  }
+
   const TIMER_KEY = Symbol.for(`o8.ownedSession.refreshTimer.${runtimeId}`);
   const globalStore = globalThis as unknown as Record<symbol, NodeJS.Timeout | undefined>;
   if (!globalStore[TIMER_KEY]) {
@@ -426,6 +636,8 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     sweepOrphanedSessions: fleetComputer.sweepOrphanedSessions,
     getTelemetrySources: reviewTailController.getTelemetrySources,
     getSessionIdentityId,
+    getWorkspaceBinding,
+    rebindWorkspace,
     setReviewDisposition,
     invalidateFleetCache,
   };

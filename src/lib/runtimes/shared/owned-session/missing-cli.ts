@@ -1,6 +1,7 @@
 import { writeFile } from 'node:fs/promises';
 
 import { formatMissingCliError } from '@/lib/runtimes/shared/cli-unavailable';
+import { prependOwnedRun } from './run-ledger';
 import type {
   OwnedRunMode,
   OwnedRunRecord,
@@ -59,7 +60,7 @@ export async function stageMissingCliRun({
   session.reviewDisposition = 'watching';
   session.reviewDispositionUpdatedAt = finishedAt;
   session.activeRun = undefined;
-  session.recentRuns = [run, ...session.recentRuns].slice(0, 16);
+  prependOwnedRun(session, run);
 
   return run;
 }

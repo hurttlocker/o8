@@ -5,6 +5,8 @@ export const PACKET_SUBCOMMANDS = [
   'commit',
   'heartbeat',
   'review',
+  'park',
+  'restore',
   'close',
   'reset',
   'stop',
@@ -27,6 +29,8 @@ export const PACKET_COMMAND_LINES = `  packet info [id]     packet metadata; exp
   packet commit -m ".." stage + commit the current worktree with an explicit pathspec
   packet heartbeat [id] update a packet lane heartbeat
   packet review [id]   approve + merge a reviewed packet
+  packet park [id]     remove a verified review-ready workspace while preserving immutable review
+  packet restore [id]  restore a parked workspace to its exact reviewed state
   packet close [id]    close without merging (--reason adopted_elsewhere|superseded|spec_changed|wontfix)
   packet reset [id]    wipe a stuck packet's worktree + lane (then mission dispatch)
   packet stop [id]     interrupt the worker and hold the packet (resume with packet reset/rerun)

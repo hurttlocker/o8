@@ -275,10 +275,18 @@ export async function POST(request: Request) {
           }
         }
         const previous = (await listRepos()).find((repo) => repo.id === body.id);
+        if ('storagePressureParkingDisabled' in body
+          && body.storagePressureParkingDisabled !== undefined
+          && typeof body.storagePressureParkingDisabled !== 'boolean') {
+          return NextResponse.json({ error: 'storagePressureParkingDisabled must be a boolean.' }, { status: 400 });
+        }
         const repo = await updateRepo(body.id, {
           localPath: 'localPath' in body ? body.localPath : undefined,
           setup: 'setup' in body ? body.setup : undefined,
           lastOpenedAt: 'lastOpenedAt' in body ? body.lastOpenedAt : undefined,
+          storagePressureParkingDisabled: 'storagePressureParkingDisabled' in body
+            ? body.storagePressureParkingDisabled
+            : undefined,
         });
         if (previous && previous.localPath !== repo.localPath) {
           await repointRepoPathInProjects(previous.localPath, repo.localPath);

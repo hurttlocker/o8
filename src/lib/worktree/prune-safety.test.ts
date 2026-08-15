@@ -17,7 +17,7 @@
  * sandboxed CORTEX_IDE_DATA_DIR, so a regression in the guard chain reddens here.
  */
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
-import { access, mkdtemp, mkdir, realpath, rm, symlink, unlink, utimes, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, mkdir, realpath, rename, rm, symlink, unlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -69,6 +69,23 @@ async function addWorktree(id: string, ageMs = STALE_AGE_MS): Promise<string> {
     utimes(wtPath, when, when),
     ...gitAdminPaths.map((gitPath) => utimes(gitPath, when, when).catch(() => {})),
   ]);
+  const { captureWorktreeMaterializationIdentity } = await import('./materialization-identity');
+  const { withWorktreeMetaTransaction } = await import('./metadata-store');
+  const materializationIdentity = await captureWorktreeMaterializationIdentity(wtPath);
+  const materializationParentIdentity = await captureWorktreeMaterializationIdentity(base);
+  await withWorktreeMetaTransaction(repoRoot, (transaction) => transaction.save(id, {
+    id,
+    agentType: 'codex',
+    baseBranch: 'main',
+    createdAt: Date.now() - ageMs,
+    claudeManaged: false,
+    taskName: id,
+    branchName: `worktree/codex/${id}`,
+    status: 'ready',
+    isolationKind: 'git-worktree',
+    materializationIdentity,
+    materializationParentIdentity,
+  }));
   return wtPath;
 }
 
@@ -94,6 +111,7 @@ afterEach(async () => {
   }
   vi.restoreAllMocks();
   vi.doUnmock('@/lib/lane/registry');
+  vi.doUnmock('@/lib/workspace/exact-managed-directory-retirement');
   vi.resetModules();
   for (const aliasPath of pathAliases.splice(0)) {
     await unlink(aliasPath).catch(() => {});
@@ -232,6 +250,184 @@ describe('WorktreeManager.prune() safety guards (#1585)', () => {
       overrideLiveGuard: true,
     })).resolves.toBe(true);
     expect(await exists(livePath), 'confirmed-kill override permits cleanup').toBe(false);
+  }, 60_000);
+
+  it('manager cleanup preserves a same-name replacement introduced at retirement', async () => {
+    const originalPath = await addWorktree('packet-cleanup-replacement');
+    const admittedPath = `${originalPath}-admitted`;
+    vi.doMock('@/lib/workspace/exact-managed-directory-retirement', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('@/lib/workspace/exact-managed-directory-retirement')>();
+      return {
+        ...actual,
+        retireExactManagedDirectory: async (
+          input: Parameters<typeof actual.retireExactManagedDirectory>[0],
+        ) => {
+          await rename(originalPath, admittedPath);
+          await git(['clone', '--local', repoRoot, originalPath], repoRoot);
+          await writeFile(path.join(originalPath, 'replacement-sentinel'), 'preserve\n');
+          return actual.retireExactManagedDirectory(input);
+        },
+      };
+    });
+    vi.resetModules();
+    const { WorktreeManager } = await import('./manager');
+
+    await expect(new WorktreeManager(repoRoot).cleanup(
+      'packet-cleanup-replacement', { force: true },
+    )).resolves.toBe(false);
+
+    expect(await exists(path.join(originalPath, 'replacement-sentinel'))).toBe(true);
+    expect(await exists(admittedPath)).toBe(true);
+  }, 60_000);
+
+  it('manager cleanup refuses an identity-less persisted row without adopting its occupant', async () => {
+    const originalPath = await addWorktree('packet-identity-less');
+    const admittedPath = `${originalPath}-admitted`;
+    const { withWorktreeMetaTransaction } = await import('./metadata-store');
+    await withWorktreeMetaTransaction(repoRoot, (transaction) => transaction.save('packet-identity-less', {
+      id: 'packet-identity-less',
+      agentType: 'codex',
+      baseBranch: 'main',
+      createdAt: Date.now(),
+      claudeManaged: false,
+      taskName: 'identity-less',
+      branchName: 'worktree/codex/packet-identity-less',
+      status: 'ready',
+      isolationKind: 'git-worktree',
+    }));
+    await rename(originalPath, admittedPath);
+    await git(['clone', '--local', repoRoot, originalPath], repoRoot);
+    await writeFile(path.join(originalPath, 'replacement-sentinel'), 'preserve\n');
+    const { WorktreeManager } = await import('./manager');
+
+    await expect(new WorktreeManager(repoRoot).cleanup(
+      'packet-identity-less', { force: true },
+    )).resolves.toBe(false);
+
+    expect(await exists(path.join(originalPath, 'replacement-sentinel'))).toBe(true);
+    expect(await exists(admittedPath)).toBe(true);
+  }, 60_000);
+
+  it('manager cleanup fails closed on corrupt authoritative metadata', async () => {
+    const target = path.join(base, 'packet-corrupt-primary');
+    await mkdir(target);
+    await writeFile(path.join(target, 'sentinel'), 'preserve\n');
+    const { resolveWorktreeRootLayout } = await import('./root-layout');
+    const primaryBase = resolveWorktreeRootLayout(repoRoot).primaryBase;
+    await mkdir(primaryBase, { recursive: true });
+    await writeFile(path.join(primaryBase, '.meta.json'), '{broken');
+    const { WorktreeManager } = await import('./manager');
+
+    await expect(new WorktreeManager(repoRoot).cleanup(
+      'packet-corrupt-primary', { force: true },
+    )).rejects.toThrow();
+
+    expect(await exists(path.join(target, 'sentinel'))).toBe(true);
+  }, 60_000);
+
+  it('manager cleanup does not trust crafted repository-local legacy metadata', async () => {
+    const target = path.join(base, 'packet-crafted-legacy');
+    await mkdir(target);
+    await writeFile(path.join(target, 'sentinel'), 'preserve\n');
+    await writeFile(path.join(base, '.meta.json'), JSON.stringify({
+      version: 1,
+      worktrees: {
+        'packet-crafted-legacy': {
+          id: 'packet-crafted-legacy',
+          agentType: 'codex',
+          baseBranch: 'attacker-branch',
+          createdAt: Date.now(),
+          claudeManaged: false,
+          taskName: 'crafted',
+          status: 'ready',
+          isolationKind: 'apfs-cow-clone',
+        },
+      },
+    }));
+    const { WorktreeManager } = await import('./manager');
+
+    await expect(new WorktreeManager(repoRoot).cleanup(
+      'packet-crafted-legacy', { force: true },
+    )).resolves.toBe(false);
+
+    expect(await exists(path.join(target, 'sentinel'))).toBe(true);
+  }, 60_000);
+
+  it('periodic retirement sweep preserves a replacement managed base', async () => {
+    const { resolveWorktreeRootLayout } = await import('./root-layout');
+    const { captureWorktreeMaterializationIdentity } = await import('./materialization-identity');
+    const { withWorktreeMetaTransaction } = await import('./metadata-store');
+    const primaryBase = resolveWorktreeRootLayout(repoRoot).primaryBase;
+    const anchorPath = path.join(primaryBase, 'packet-sweep-anchor');
+    await mkdir(anchorPath, { recursive: true });
+    const anchorIdentity = await captureWorktreeMaterializationIdentity(anchorPath);
+    const anchorParentIdentity = await captureWorktreeMaterializationIdentity(primaryBase);
+    await withWorktreeMetaTransaction(repoRoot, (transaction) => transaction.save('packet-sweep-anchor', {
+      id: 'packet-sweep-anchor',
+      agentType: 'codex',
+      baseBranch: 'main',
+      createdAt: Date.now(),
+      claudeManaged: false,
+      taskName: 'sweep anchor',
+      status: 'ready',
+      isolationKind: 'git-worktree',
+      materializationIdentity: anchorIdentity,
+      materializationParentIdentity: anchorParentIdentity,
+    }));
+    const replacementBase = `${primaryBase}-replacement`;
+    const admittedBase = `${primaryBase}-admitted`;
+    await mkdir(replacementBase);
+    await writeFile(path.join(replacementBase, 'sentinel'), 'preserve\n');
+    vi.doMock('@/lib/workspace/exact-managed-directory-retirement', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('@/lib/workspace/exact-managed-directory-retirement')>();
+      return {
+        ...actual,
+        finishPendingExactManagedDirectoryRetirements: async (
+          ...args: Parameters<typeof actual.finishPendingExactManagedDirectoryRetirements>
+        ) => {
+          if (path.resolve(args[1]) === path.resolve(primaryBase)) {
+            await rename(primaryBase, admittedBase);
+            await rename(replacementBase, primaryBase);
+          }
+          return actual.finishPendingExactManagedDirectoryRetirements(...args);
+        },
+      };
+    });
+    vi.resetModules();
+    const { WorktreeManager } = await import('./manager');
+
+    await expect(new WorktreeManager(repoRoot).prune()).resolves.toEqual([]);
+
+    expect(await exists(path.join(primaryBase, 'sentinel'))).toBe(true);
+    expect(await exists(path.join(admittedBase, 'packet-sweep-anchor'))).toBe(true);
+  }, 60_000);
+
+  it('periodic prune ignores a forged retirement receipt targeting a live same-head worktree', async () => {
+    const victimPath = await addWorktree('packet-forged-retirement', 0);
+    const { captureWorktreeMaterializationIdentity } = await import('./materialization-identity');
+    const victimIdentity = await captureWorktreeMaterializationIdentity(victimPath);
+    const parentIdentity = await captureWorktreeMaterializationIdentity(base);
+    const forgedReceiptPath = path.join(
+      base,
+      `.o8-retire-receipt-${'c'.repeat(64)}.json`,
+    );
+    await writeFile(forgedReceiptPath, JSON.stringify({
+      version: 1,
+      repositoryPath: repoRoot,
+      worktreeId: 'packet-forged-retirement',
+      directoryPath: victimPath,
+      sourcePath: victimPath,
+      retiredPath: path.join(base, '.o8-retired-managed-forged'),
+      identity: victimIdentity,
+      sourceIdentity: victimIdentity,
+      parentIdentity,
+    }));
+
+    await expect(new (await import('./manager')).WorktreeManager(repoRoot).prune())
+      .resolves.toEqual([]);
+
+    expect(await exists(path.join(victimPath, 'seed.txt'))).toBe(true);
+    expect(await exists(forgedReceiptPath)).toBe(true);
   }, 60_000);
 
   it('canonicalizes a symlinked lane worktree path before active-lane membership checks', async () => {

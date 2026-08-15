@@ -6,6 +6,9 @@ import type { ApproveAndMergeInput, MergePacketResult, PickComparisonWinnerInput
 import { autoResolveMergedPacketVerificationIncidents } from '@/lib/supervisor/merged-incident-resolution';
 import { attachQualitySearchReceipt, ensureComparisonWinnerReview, resolveQualitySearchComparison } from './quality-search-selection';
 import { alreadyReleasedResultForPacket, buildAlreadyReleasedResult } from './release-truth';
+import { withPacketMergeWorkspace } from './merge-workspace-guard';
+import { selectMergeSequence } from './merge-order';
+export { selectMergeSequence } from './merge-order';
 type LaneRegistryModule = typeof import('@/lib/lane/registry');
 type ActivePacketLane = NonNullable<ReturnType<LaneRegistryModule['findLatestLaneByPacket']>>;
 
@@ -58,25 +61,6 @@ interface OrderedMergeCandidate extends MergeOrderCandidate {
   recommendation: MergeOrderRecommendation;
   /** Worktree ids whose diffs touch at least one file this candidate also touches (#1525). */
   overlappingWorktreeIds: Set<string>;
-}
-
-/**
- * #1525 — the merge sequence for a requested packet. The recommended order is
- * a heuristic (bigger diffs first); it must only be ENFORCED between packets
- * whose diffs actually overlap. Parallel packets with disjoint files merge in
- * any order — earlier-positioned disjoint siblings are not prerequisites.
- */
-export function selectMergeSequence<T extends { worktree: { id: string }; overlappingWorktreeIds: Set<string> }>(
-  ordered: T[],
-  targetIndex: number,
-): T[] {
-  const target = ordered[targetIndex];
-  if (!target) return [];
-  return [
-    ...ordered.slice(0, targetIndex).filter((candidate) =>
-      target.overlappingWorktreeIds.has(candidate.worktree.id)),
-    target,
-  ];
 }
 
 export class HeadShaMismatchError extends Error {
@@ -316,6 +300,7 @@ async function dispatchPacketMerge(
   packet: OrchestratorPacket,
   input: ApproveAndMergeInput,
   actor: 'orchestrator' | 'user',
+  workspaceLockHeld = false,
 ): Promise<MergePacketResult> {
   const [
     { findLatestLaneByPacket, appendEvent, setLaneStatus },
@@ -341,6 +326,9 @@ async function dispatchPacketMerge(
   const lane = findLatestLaneByPacket(packet.id);
   if (!lane) {
     throw new Error(`Packet ${packet.id} is not bound to an active lane.`);
+  }
+  if (!workspaceLockHeld) {
+    return withPacketMergeWorkspace(lane, () => dispatchPacketMerge(packet, input, actor, true));
   }
   let carriedReviewedHeadSha: string | undefined;
   const reviewedHead = await checkReviewedHeadIntegrity(lane, lane.worktreePath || lane.repoPath);

@@ -56,8 +56,13 @@ import {
 } from '@/lib/lane/spoken-review-snapshot';
 import { commitDirtyWorktree, readHeadSha } from '@/lib/lane/worktree-merge-git';
 import { withRepoActionLock } from '@/lib/lane/repo-action-lock';
+import { materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
 import { persistLanePacketHold } from '@/lib/lane/packet-stop-hold';
 import { killLaneSessionsConfirmed } from '@/lib/lane/reap-sessions';
+import {
+  withWorkspaceMaterializedMutation,
+  WorkspaceMutationUnavailableError,
+} from '@/lib/workspace/mutation-materialization-guard';
 
 /**
  * #2 Stage 5b — worker-context merge governance. A dispatched worker that calls
@@ -85,7 +90,30 @@ export async function raiseWorkerMergeApproval(
   });
 }
 
-export async function dispatch(command: LaneCommand): Promise<LaneCommandResult> {
+export async function dispatch(
+  command: LaneCommand,
+  dependencies: { afterWorkspaceMaterializationProof?: () => Promise<void> } = {},
+): Promise<LaneCommandResult> {
+  if (command.verb === 'merge' || command.verb === 'create_pr') {
+    const lane = getLane(command.laneId);
+    if (lane) {
+      try {
+        return await withWorkspaceMaterializedMutation(lane, async () => {
+          await dependencies.afterWorkspaceMaterializationProof?.();
+          return dispatchUnlocked(command);
+        });
+      } catch (error) {
+        if (error instanceof WorkspaceMutationUnavailableError) {
+          return { ok: false, laneId: command.laneId, note: error.message, reason: error.code };
+        }
+        throw error;
+      }
+    }
+  }
+  return dispatchUnlocked(command);
+}
+
+async function dispatchUnlocked(command: LaneCommand): Promise<LaneCommandResult> {
   const actor: LaneEventActor = command.actor ?? 'user';
 
   switch (command.verb) {
@@ -568,10 +596,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
         if (publicationGovernanceDrift) return publicationGovernanceDrift;
 
         // Push the immutable reviewed commit, never the mutable local branch.
-        const { execFile } = await import('node:child_process');
-        const { promisify } = await import('node:util');
-        const execFileAsync = promisify(execFile);
-        await execFileAsync('git', [
+        await materializationAwareExecFile('git', [
           'push',
           'origin',
           `${reviewedSnapshotSha}:refs/heads/${lockedLane.branch}`,
@@ -579,7 +604,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
 
         // Create PR via gh CLI
         const prTitle = lockedLane.label || `${lockedLane.branch}`;
-        const prResult = await execFileAsync('gh', [
+        const prResult = await materializationAwareExecFile('gh', [
           'pr', 'create',
           '--base', lockedLane.baseBranch,
           '--head', lockedLane.branch,

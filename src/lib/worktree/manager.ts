@@ -19,39 +19,70 @@
  * @see https://github.com/hurttlocker/o8/issues/608
  */
 
-import { execFile } from 'node:child_process';
-import { access, copyFile, lstat, mkdir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { access, lstat, realpath, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { promisify } from 'node:util';
 import type {
   CleanupOptions,
   ConflictReport,
   CreateWorktreeOptions,
   WorktreeInfo,
   WorktreeMetaEntry,
-  WorktreeMetaStore,
   WorktreeStatus,
   WorkspaceIsolationKind,
   WorkspaceIsolationPreference,
 } from './types';
 import { getApfsCowCapability } from './apfs';
 import { worktreeActivityMtimeMs } from './activity';
-import { resetTrackedWorkspaceChanges } from './clean';
+import {
+  withWorktreeMetadataBoundary,
+  withWorktreeMetaTransaction,
+} from './metadata-store';
 import { allowWorktreeRemoval } from './live-process-guard';
-import { removeLockedDir } from './remove-locked-dir';
-import { resolveWorktreeRootLayout } from './root-layout';
+import {
+  assertWorktreeMaterializationIdentity,
+  captureWorktreeMaterializationIdentity,
+} from './materialization-identity';
+import { withWorktreeMaterializationExecution } from './materialization-execution';
+import {
+  createPinnedWorkspaceBinding,
+  ensurePinnedWorkspaceDirectory,
+  ensurePinnedWorkspaceFile,
+  inspectPinnedWorkspaceEntry,
+  isPinnedWorkspacePublishError,
+  readPinnedWorkspaceFile,
+  writePinnedWorkspaceFile,
+} from './materialization-leaf-io';
+import {
+  completeExactManagedDirectoryRetirement,
+  finishPendingExactManagedDirectoryRetirements,
+  retireExactManagedDirectory,
+} from '@/lib/workspace/exact-managed-directory-retirement';
+import { readExactWorkspaceClaim } from '@/lib/workspace/exact-workspace-claim-state';
+import {
+  finishWorkspaceMaterializationRetirement,
+  getWorkspaceRetirementAction,
+  prepareWorkspaceMaterializationRetirement,
+  rollbackWorkspaceMaterializationRetirement,
+} from '@/lib/workspace/workspace-materialization-retirement';
+import { materializationAwareExecFile } from './materialization-execution';
+import type { StorageRootIdentity } from '@/lib/workspace/storage-admission';
+import {
+  assertManagedWorktreeCreatedBoundary,
+  assertManagedWorktreeMaterializationBoundary,
+  resolveWorktreeRootLayout,
+} from './root-layout';
+import { withManagedWorktreeStorageAdmission } from './launch-storage-admission';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import {
   gitCommandErrorMessage,
   shouldClassifyFetchAsOriginMissing,
 } from './errors';
 
-const execFileAsync = promisify(execFile);
-const META_FILENAME = '.meta.json';
-// #1673 — lock-fallback quarantine dir (Windows EBUSY/EPERM survivor slot).
+const execFileAsync = materializationAwareExecFile;
 const TRASH_DIR_NAME = '.o8-trash';
 const CLAUDE_WORKTREE_DIR = '.claude/worktrees';
 const STALE_THRESHOLD_MS = 24 * 60 * 60_000; // 24 hours
+const RETENTION_CREATION_GRACE_MS = 5 * 60_000;
 const AUTO_PRUNE_COOLDOWN_MS = 6 * 60 * 60_000; // 6 hours
 const NODE_INSTALL_TIMEOUT_MS = 45 * 60_000;
 const APFS_COW_ENV_FLAG = 'O8_APFS_COW_WORKSPACES';
@@ -157,9 +188,7 @@ export class WorktreeFetchUnreachableError extends Error {
  * branch is broken", that turned into a permanent, entirely misdiagnosed
  * dispatch blocker on Windows. Same trap as #1758, second location.
  */
-const TSC_BIN_CANDIDATES = process.platform === 'win32'
-  ? ['tsc.cmd', 'tsc.exe', 'tsc']
-  : ['tsc'];
+const TSC_SCRIPT = 'node_modules/typescript/bin/tsc';
 
 export class WorktreeBaseTypecheckError extends Error {
   public readonly baseBranch: string;
@@ -242,16 +271,12 @@ export class WorktreeManager {
   private repoRoot: string;
   private worktreeBase: string;
   private worktreeBases: string[];
-  private metaPath: string;
-  private legacyMetaPath: string;
 
   constructor(repoRoot: string) {
     this.repoRoot = path.resolve(repoRoot);
     const layout = resolveWorktreeRootLayout(this.repoRoot);
     this.worktreeBase = layout.primaryBase;
     this.worktreeBases = layout.bases;
-    this.metaPath = path.join(this.worktreeBase, META_FILENAME);
-    this.legacyMetaPath = path.join(layout.legacyBase, META_FILENAME);
   }
 
   // ── Create ──
@@ -266,6 +291,48 @@ export class WorktreeManager {
    *   at deploy time keep working until they drain.
    */
   async create(opts: CreateWorktreeOptions): Promise<WorktreeInfo> {
+    if (opts.agentType === 'claude-code' && !opts.managed) {
+      return this.createMaterialized(opts, null, null, () => {});
+    }
+    return withManagedWorktreeStorageAdmission({
+      repoRoot: this.repoRoot,
+      packetId: opts.packetId,
+      reservationId: opts.storageAdmissionReservationId,
+    }, async (volumeId, rootIdentity) => {
+      let baseIdentity: StorageRootIdentity | null = null;
+      const created = await this.createMaterialized(
+        opts, volumeId, rootIdentity, (identity) => { baseIdentity = identity; },
+      );
+      const capturedBase = baseIdentity as StorageRootIdentity | null;
+      if (!capturedBase) throw new Error('Managed worktree base ownership was not captured.');
+      await assertManagedWorktreeCreatedBoundary(
+        this.repoRoot, created.path, volumeId, rootIdentity, capturedBase,
+      );
+      const materializationIdentity = await captureWorktreeMaterializationIdentity(created.path);
+      await withWorktreeMetadataBoundary(this.repoRoot, {
+        root: rootIdentity,
+        base: {
+          canonicalPath: capturedBase.canonicalPath,
+          device: Number(capturedBase.device),
+          inode: Number(capturedBase.inode),
+        },
+      }, () => withWorktreeMetaTransaction(this.repoRoot, async (transaction) => {
+          const entry = (await transaction.readAll())[created.id];
+          if (!entry || entry.claudeManaged) {
+            throw new Error('Managed workspace metadata disappeared before ownership was receipted.');
+          }
+          await transaction.save(created.id, { ...entry, materializationIdentity });
+        }));
+      return created;
+    });
+  }
+
+  private async createMaterialized(
+    opts: CreateWorktreeOptions,
+    admittedVolumeId: string | null,
+    admittedRootIdentity: StorageRootIdentity | null = null,
+    captureBase: (identity: StorageRootIdentity) => void,
+  ): Promise<WorktreeInfo> {
     // Git worktree maintenance and creation mutate the same shared registry.
     // Keep every create behind the throttled prune instead of letting a cold
     // start race `git worktree prune` against `git worktree add`.
@@ -329,8 +396,12 @@ export class WorktreeManager {
     const anyDirExists = async (id: string) => (
       (await Promise.all(probeWorktreeDirs(id).map(dirExists))).some(Boolean)
     );
+    const hasPendingRetirement = (id: string) => Boolean(
+      readExactWorkspaceClaim('managed-retirement', this.repoRoot, id),
+    );
     let collided = existingMeta[taskId]
       || (await anyDirExists(taskId))
+      || hasPendingRetirement(taskId)
       || (!branchPinned && (await branchExists(attemptBranch)));
     while (collided) {
       const suffix = Math.random().toString(36).slice(2, 6);
@@ -341,6 +412,7 @@ export class WorktreeManager {
       attemptBranch = sanitizeBranchName(opts.branchName?.trim() || `worktree/${opts.agentType}/${taskId}`);
       collided = existingMeta[taskId]
         || (await anyDirExists(taskId))
+        || hasPendingRetirement(taskId)
         || (!branchPinned && (await branchExists(attemptBranch)));
     }
     const branchName = attemptBranch;
@@ -381,8 +453,23 @@ export class WorktreeManager {
     // For Codex and all other agents: we manage the full worktree lifecycle
     const worktreePath = path.join(this.worktreeBase, taskId);
 
-    // Ensure worktree base directory exists
-    await mkdir(this.worktreeBase, { recursive: true });
+    if (!admittedVolumeId || !admittedRootIdentity) {
+      throw new Error('Managed worktree creation requires an exact storage admission root.');
+    }
+    const baseIdentity = await assertManagedWorktreeMaterializationBoundary(
+      this.repoRoot, admittedVolumeId, admittedRootIdentity,
+    );
+    captureBase(baseIdentity);
+    const baseExecutionIdentity = await captureWorktreeMaterializationIdentity(this.worktreeBase);
+    if (String(baseExecutionIdentity.device) !== baseIdentity.device
+      || String(baseExecutionIdentity.inode) !== baseIdentity.inode
+      || baseExecutionIdentity.canonicalPath !== baseIdentity.canonicalPath) {
+      throw new Error('Managed worktree base changed before its execution handle was captured.');
+    }
+    return withWorktreeMetadataBoundary(this.repoRoot, {
+      root: admittedRootIdentity,
+      base: baseExecutionIdentity,
+    }, async () => {
 
     const isolationKind = await this.resolveIsolationKind(resolveIsolationPreference(opts));
     if (isolationKind === 'apfs-cow-clone') {
@@ -393,10 +480,19 @@ export class WorktreeManager {
         baseBranch,
         worktreePath,
         now,
+        baseExecutionIdentity,
+        admittedVolumeId,
+        admittedRootIdentity,
+        baseIdentity,
       });
     }
 
-    // Save metadata with 'creating' status before git operation
+    const preparedExecutionIdentity = await ensurePinnedWorkspaceDirectory(
+      this.worktreeBase, baseExecutionIdentity, taskId,
+    );
+    // Persist the empty directory's exact inode before Git can populate it.
+    // A crash after Git returns therefore leaves reclaimable authority rather
+    // than an identity-less workspace that cleanup must refuse forever.
     await this.saveMeta(taskId, {
       id: taskId,
       agentType: opts.agentType,
@@ -407,15 +503,33 @@ export class WorktreeManager {
       branchName,
       status: 'creating',
       isolationKind: 'git-worktree',
+      materializationIdentity: preparedExecutionIdentity,
+      materializationParentIdentity: baseExecutionIdentity,
     });
 
-    // Create the worktree + branch
-    await execFileAsync('git', [
-      'worktree', 'add',
-      worktreePath,
-      '-b', branchName,
-      baseBranch,
-    ], { windowsHide: true, cwd: this.repoRoot, timeout: 30_000 });
+    try {
+    const { stdout: gitDirectoryOutput } = await execFileAsync(
+      'git', ['rev-parse', '--absolute-git-dir'],
+      { windowsHide: true, cwd: this.repoRoot, timeout: 5000 },
+    );
+    const gitDirectory = gitDirectoryOutput.trim();
+    if (!path.isAbsolute(gitDirectory)) throw new Error('Repository Git directory is not absolute.');
+    await withWorktreeMaterializationExecution(this.worktreeBase, baseExecutionIdentity, () => (
+      execFileAsync('git', [
+        `--git-dir=${gitDirectory}`,
+        'worktree', 'add',
+        taskId,
+        '-b', branchName,
+        baseBranch,
+      ], { windowsHide: true, cwd: this.worktreeBase, timeout: 30_000 })
+    ));
+    await assertManagedWorktreeCreatedBoundary(
+      this.repoRoot, worktreePath, admittedVolumeId, admittedRootIdentity, baseIdentity,
+    );
+    const createdExecutionIdentity = await assertWorktreeMaterializationIdentity(
+      worktreePath, preparedExecutionIdentity,
+    );
+    await this.bindCreatedMaterializationIdentity(taskId, createdExecutionIdentity);
 
     // Rebase onto origin/<baseBranch> before handing the worktree to an agent.
     // The worktree was branched from local <baseBranch>, which may be behind
@@ -424,35 +538,11 @@ export class WorktreeManager {
     // On conflict we abort + tear down the worktree and throw a typed error so
     // the caller can surface it to the operator instead of spawning codex into
     // a broken tree.
-    try {
+    return await withWorktreeMaterializationExecution(worktreePath, createdExecutionIdentity, async () => {
       if (pinnedLaneBranch) {
         await this.assertCreatedWorktreeBranch(worktreePath, pinnedLaneBranch);
       }
       await this.rebaseOntoBase(worktreePath, baseBranch, branchName);
-    } catch (err) {
-      // Best-effort cleanup of the partially-created worktree. Conflict is
-      // caller's problem to surface; we just make sure we don't leak a broken
-      // tree on disk. Failures here are swallowed — the caller still sees the
-      // original rebase error.
-      try {
-        if (await allowWorktreeRemoval(worktreePath, { logPrefix: 'worktree-create-rollback' })) {
-          await execFileAsync('git', ['worktree', 'remove', worktreePath, '--force'], {
-            windowsHide: true,
-            cwd: this.repoRoot,
-            timeout: 15_000,
-          });
-        }
-      } catch { /* tree may already be gone */ }
-      try {
-        await execFileAsync('git', ['branch', '-D', branchName], {
-          windowsHide: true,
-          cwd: this.repoRoot,
-          timeout: 5000,
-        });
-      } catch { /* branch may not exist */ }
-      await this.removeMeta(taskId);
-      throw err;
-    }
 
     const info: WorktreeInfo = {
       id: taskId,
@@ -468,16 +558,16 @@ export class WorktreeManager {
       isolationKind: 'git-worktree',
     };
 
-    await this.bootstrapEnvFiles(worktreePath, opts);
-    await this.injectSafetyHooks(worktreePath);
+    await this.bootstrapEnvFiles(worktreePath, createdExecutionIdentity, opts);
+    await this.injectSafetyHooks(worktreePath, createdExecutionIdentity);
 
     // Run project setup unless skipped
     if (!opts.skipSetup) {
       info.status = 'setup';
       await this.updateMetaStatus(taskId, 'setup');
-      await this.runSetup(worktreePath);
+      await this.runSetup(worktreePath, createdExecutionIdentity);
     }
-    await resetTrackedWorkspaceChanges(worktreePath);
+    await this.resetTrackedWorkspaceChanges(worktreePath);
 
     // Pre-launch typecheck gate (#1107). The agent's diff is ALWAYS measured
     // against the worktree's tsc, so a non-atomic commit on main HEAD (consumer
@@ -492,11 +582,10 @@ export class WorktreeManager {
     // mutate or erase the operator's main checkout.
     const tscBin = process.env.O8_SKIP_PRELAUNCH_TYPECHECK === '1'
       ? null
-      : await this.resolveTscBinary(worktreePath);
+      : await this.resolveTscBinary(worktreePath, createdExecutionIdentity);
     if (tscBin) {
       try {
-        const tscRun = cliInvocation(tscBin, ['--noEmit', '--incremental', 'false']);
-        await execFileAsync(tscRun.command, tscRun.args, {
+        await execFileAsync(process.execPath, [tscBin, '--noEmit', '--incremental', 'false'], {
           windowsHide: true,
           cwd: worktreePath,
           timeout: 180_000,
@@ -512,25 +601,6 @@ export class WorktreeManager {
           text(processError.stderr),
           err instanceof Error ? err.message : String(err),
         ].map((value) => value.trim()).filter(Boolean).join('\n');
-        // Mirror the rebase-conflict cleanup path — tear down the bad tree so
-        // we don't leak it on disk; remove the meta so the caller can retry.
-        try {
-          if (await allowWorktreeRemoval(worktreePath, { logPrefix: 'worktree-typecheck-rollback' })) {
-            await execFileAsync('git', ['worktree', 'remove', worktreePath, '--force'], {
-              windowsHide: true,
-              cwd: this.repoRoot,
-              timeout: 15_000,
-            });
-          }
-        } catch { /* tree may already be gone */ }
-        try {
-          await execFileAsync('git', ['branch', '-D', branchName], {
-            windowsHide: true,
-            cwd: this.repoRoot,
-            timeout: 5000,
-          });
-        } catch { /* branch may not exist */ }
-        await this.removeMeta(taskId);
         throw new WorktreeBaseTypecheckError({
           baseBranch,
           worktreePath,
@@ -543,6 +613,26 @@ export class WorktreeManager {
     info.status = 'ready';
     await this.updateMetaStatus(taskId, 'ready');
     return info;
+    });
+    } catch (err) {
+      if (isPinnedWorkspacePublishError(err)) throw err;
+      try {
+        await this.retireFailedManagedCreation(
+          taskId, worktreePath, preparedExecutionIdentity, baseExecutionIdentity,
+        );
+      } catch (retirementError) {
+        throw this.creationRetirementRefusal(err, retirementError);
+      }
+      await execFileAsync('git', ['branch', '-D', branchName], {
+        windowsHide: true,
+        cwd: this.repoRoot,
+        timeout: 5000,
+      }).catch(() => {});
+      await this.removeMeta(taskId);
+      completeExactManagedDirectoryRetirement(this.repoRoot, taskId);
+      throw err;
+    }
+    });
   }
 
   private async resolveIsolationKind(
@@ -570,9 +660,19 @@ export class WorktreeManager {
     baseBranch: string;
     worktreePath: string;
     now: number;
+    baseExecutionIdentity: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>>;
+    admittedVolumeId: string;
+    admittedRootIdentity: StorageRootIdentity;
+    baseIdentity: StorageRootIdentity;
   }): Promise<WorktreeInfo> {
-    const { opts, taskId, branchName, baseBranch, worktreePath, now } = params;
+    const {
+      opts, taskId, branchName, baseBranch, worktreePath, now, baseExecutionIdentity,
+      admittedVolumeId, admittedRootIdentity, baseIdentity,
+    } = params;
 
+    const preparedExecutionIdentity = await ensurePinnedWorkspaceDirectory(
+      this.worktreeBase, baseExecutionIdentity, taskId,
+    );
     await this.saveMeta(taskId, {
       id: taskId,
       agentType: opts.agentType,
@@ -584,14 +684,28 @@ export class WorktreeManager {
       status: 'creating',
       isolationKind: 'apfs-cow-clone',
       hydrationPaths: [],
+      materializationIdentity: preparedExecutionIdentity,
+      materializationParentIdentity: baseExecutionIdentity,
     });
 
+    let createdExecutionIdentity: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>> | null = preparedExecutionIdentity;
     try {
-      await execFileAsync('git', ['clone', '--local', '--no-checkout', this.repoRoot, worktreePath], {
-        windowsHide: true,
-        cwd: this.repoRoot,
-        timeout: 60_000,
-      });
+      await withWorktreeMaterializationExecution(this.worktreeBase, baseExecutionIdentity, () => (
+        execFileAsync('git', ['clone', '--local', '--no-checkout', this.repoRoot, taskId], {
+          windowsHide: true,
+          cwd: this.worktreeBase,
+          timeout: 60_000,
+        })
+      ));
+      await assertManagedWorktreeCreatedBoundary(
+        this.repoRoot, worktreePath, admittedVolumeId, admittedRootIdentity, baseIdentity,
+      );
+      const capturedExecutionIdentity = await assertWorktreeMaterializationIdentity(
+        worktreePath, preparedExecutionIdentity,
+      );
+      createdExecutionIdentity = capturedExecutionIdentity;
+      await this.bindCreatedMaterializationIdentity(taskId, capturedExecutionIdentity);
+      return await withWorktreeMaterializationExecution(worktreePath, capturedExecutionIdentity, async () => {
 
       const originUrl = await this.getOriginUrl();
       if (originUrl) {
@@ -615,10 +729,6 @@ export class WorktreeManager {
       try {
         await this.rebaseOntoBase(worktreePath, baseBranch, branchName);
       } catch (err) {
-        await this.removeMeta(taskId);
-        if (await allowWorktreeRemoval(worktreePath, { logPrefix: 'worktree-cow-rebase-rollback' })) {
-          await rm(worktreePath, { recursive: true, force: true });
-        }
         throw err;
       }
 
@@ -633,7 +743,7 @@ export class WorktreeManager {
       // Ignored files (.env, node_modules) are intentionally preserved —
       // hydration / bootstrap fills those next.
       try {
-        await resetTrackedWorkspaceChanges(worktreePath);
+        await this.resetTrackedWorkspaceChanges(worktreePath);
         await execFileAsync('git', ['clean', '-fd'], {
           windowsHide: true,
           cwd: worktreePath,
@@ -660,28 +770,41 @@ export class WorktreeManager {
         hydrationPaths: [],
       };
 
-      const hydrationPaths = await this.hydrateApfsCowAssets(worktreePath);
+      const hydrationPaths = await this.hydrateApfsCowAssets(worktreePath, capturedExecutionIdentity);
       info.hydrationPaths = hydrationPaths;
       await this.updateMetaHydrationPaths(taskId, hydrationPaths);
 
-      await this.bootstrapEnvFiles(worktreePath, opts);
-      await this.injectSafetyHooks(worktreePath);
+      await this.bootstrapEnvFiles(worktreePath, capturedExecutionIdentity, opts);
+      await this.injectSafetyHooks(worktreePath, capturedExecutionIdentity);
 
       if (!opts.skipSetup) {
         info.status = 'setup';
         await this.updateMetaStatus(taskId, 'setup');
-        await this.runSetup(worktreePath);
+        await this.runSetup(worktreePath, capturedExecutionIdentity);
       }
-      await resetTrackedWorkspaceChanges(worktreePath);
+      await this.resetTrackedWorkspaceChanges(worktreePath);
 
       info.status = 'ready';
       await this.updateMetaStatus(taskId, 'ready');
       return info;
+      });
     } catch (err) {
-      if (await this.pathExists(worktreePath) && await allowWorktreeRemoval(worktreePath, { logPrefix: 'worktree-cow-create-rollback' })) {
-        await rm(worktreePath, { recursive: true, force: true }).catch(() => {});
+      if (isPinnedWorkspacePublishError(err)) throw err;
+      if (createdExecutionIdentity) {
+        try {
+          await this.retireFailedManagedCreation(
+            taskId, worktreePath, createdExecutionIdentity, baseExecutionIdentity,
+          );
+        } catch (retirementError) {
+          throw this.creationRetirementRefusal(err, retirementError);
+        }
       }
-      await this.removeMeta(taskId).catch(() => {});
+      try {
+        await this.removeMeta(taskId);
+        completeExactManagedDirectoryRetirement(this.repoRoot, taskId);
+      } catch {
+        // Retain the trusted purge claim until metadata removal can replay.
+      }
       throw err;
     }
   }
@@ -1018,13 +1141,16 @@ export class WorktreeManager {
    * Node dependencies always live inside the worktree. A legacy symlink is
    * removed as a link before npm is allowed to touch the path.
    */
-  async runSetup(worktreePath: string): Promise<void> {
+  async runSetup(
+    worktreePath: string,
+    identity?: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>>,
+  ): Promise<void> {
     // Node.js — install a real dependency tree inside the worktree.
     const hasPackageLock = await this.pathExists(path.join(worktreePath, 'package-lock.json'));
     const hasPackageJson = await this.pathExists(path.join(worktreePath, 'package.json'));
 
     const nodeDepsReady = (hasPackageLock || hasPackageJson)
-      ? await this.hasHealthyLocalNodeModules(worktreePath)
+      ? await this.hasHealthyLocalNodeModules(worktreePath, identity)
       : false;
 
     if (!nodeDepsReady && hasPackageLock) {
@@ -1073,6 +1199,51 @@ export class WorktreeManager {
     }
   }
 
+  private async resetTrackedWorkspaceChanges(worktreePath: string): Promise<void> {
+    await execFileAsync('git', ['reset', '--hard', 'HEAD'], {
+      windowsHide: true,
+      cwd: worktreePath,
+      timeout: 15_000,
+      maxBuffer: 8 * 1024 * 1024,
+    });
+  }
+
+  private async retireFailedManagedCreation(
+    worktreeId: string,
+    worktreePath: string,
+    identity: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>>,
+    parentIdentity: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>>,
+  ): Promise<void> {
+    await retireExactManagedDirectory({
+      repositoryPath: this.repoRoot,
+      worktreeId,
+      directoryPath: worktreePath,
+      identity,
+      parentIdentity,
+    });
+    await execFileAsync('git', ['worktree', 'prune'], {
+      windowsHide: true,
+      cwd: this.repoRoot,
+      timeout: 15_000,
+    });
+  }
+
+  private creationRetirementRefusal(
+    creationError: unknown,
+    retirementError: unknown,
+  ): Error {
+    const creationMessage = creationError instanceof Error
+      ? creationError.message
+      : String(creationError);
+    const retirementMessage = retirementError instanceof Error
+      ? retirementError.message
+      : String(retirementError);
+    return new Error(
+      `${creationMessage} Exact retirement was refused; durable workspace ownership was retained: ${retirementMessage}`,
+      { cause: retirementError },
+    );
+  }
+
   private async getOriginUrl(): Promise<string | null> {
     try {
       const { stdout } = await execFileAsync('git', ['config', '--get', 'remote.origin.url'], {
@@ -1086,25 +1257,25 @@ export class WorktreeManager {
     }
   }
 
-  private async hydrateApfsCowAssets(worktreePath: string): Promise<string[]> {
+  private async hydrateApfsCowAssets(
+    worktreePath: string,
+    identity: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>>,
+  ): Promise<string[]> {
     const capability = await getApfsCowCapability(this.repoRoot, worktreePath);
     if (!capability.canCowClone) return [];
 
     const hydrated: string[] = [];
     for (const relativePath of APFS_HYDRATION_CANDIDATES) {
       const sourcePath = path.join(this.repoRoot, relativePath);
-      const targetPath = path.join(worktreePath, relativePath);
-
       if (!(await this.pathExists(sourcePath))) continue;
-      if (await this.pathExists(targetPath)) continue;
       try {
-        await mkdir(path.dirname(targetPath), { recursive: true });
-        await execFileAsync('cp', ['-cR', sourcePath, targetPath], {
-          windowsHide: true,
-          timeout: 120_000,
+        const disposition = await createPinnedWorkspaceBinding(worktreePath, identity, relativePath, {
+          mode: 'copy-tree',
+          source: sourcePath,
         });
-        hydrated.push(relativePath);
+        if (disposition === 'created') hydrated.push(relativePath);
       } catch (err) {
+        if (isPinnedWorkspacePublishError(err)) throw err;
         console.warn(
           `[worktree] APFS hydration skipped for ${relativePath}: ${err instanceof Error ? err.message : String(err)}`,
         );
@@ -1127,31 +1298,37 @@ export class WorktreeManager {
    * Skipping when there is nothing to check keeps the gate meaningful for the
    * repos it was written for and silent everywhere else.
    */
-  private async resolveTscBinary(worktreePath: string): Promise<string | null> {
-    const exists = async (candidate: string) => {
-      try {
-        await access(candidate);
-        return true;
-      } catch {
-        return false;
-      }
-    };
-    if (!await exists(path.join(worktreePath, 'tsconfig.json'))) {
+  private async resolveTscBinary(
+    worktreePath: string,
+    identity: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>>,
+  ): Promise<string | null> {
+    if (await readPinnedWorkspaceFile(worktreePath, identity, 'tsconfig.json') === null) {
       console.log('[worktree] no tsconfig.json — skipping the pre-launch typecheck');
       return null;
     }
-    for (const name of TSC_BIN_CANDIDATES) {
-      const candidate = path.join(worktreePath, 'node_modules', '.bin', name);
-      if (await exists(candidate)) return candidate;
+    if (await readPinnedWorkspaceFile(worktreePath, identity, TSC_SCRIPT) === null) {
+      console.log('[worktree] no worktree-local tsc — skipping the pre-launch typecheck');
+      return null;
     }
-    console.log('[worktree] no worktree-local tsc — skipping the pre-launch typecheck');
-    return null;
+    return TSC_SCRIPT;
   }
 
-  private async hasHealthyLocalNodeModules(worktreePath: string): Promise<boolean> {
+  private async hasHealthyLocalNodeModules(
+    worktreePath: string,
+    identity?: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>>,
+  ): Promise<boolean> {
     const targetPath = path.join(worktreePath, 'node_modules');
-    const linked = await lstat(targetPath).catch(() => null);
-    if (linked?.isSymbolicLink()) {
+    const target = identity
+      ? await inspectPinnedWorkspaceEntry(worktreePath, identity, 'node_modules')
+      : await lstat(targetPath).then((entry) => ({
+          kind: entry.isSymbolicLink() ? 'symlink' as const
+            : entry.isDirectory() ? 'directory' as const
+            : entry.isFile() ? 'file' as const : 'other' as const,
+        })).catch(() => null);
+    if (target?.kind === 'symlink') {
+      if (identity) {
+        throw new Error(`Refusing to install through linked node_modules at ${targetPath}.`);
+      }
       try {
         await rm(targetPath, { force: true });
       } catch (error) {
@@ -1169,25 +1346,26 @@ export class WorktreeManager {
     return false;
   }
 
-  private async bootstrapEnvFiles(worktreePath: string, opts: CreateWorktreeOptions): Promise<void> {
+  private async bootstrapEnvFiles(
+    worktreePath: string,
+    identity: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>>,
+    opts: CreateWorktreeOptions,
+  ): Promise<void> {
     const envMode = opts.envMode ?? 'copy';
     if (envMode === 'skip') return;
 
     const envFiles = opts.envFiles?.filter(Boolean) ?? ['.env', '.env.local'];
     for (const envFile of envFiles) {
-      const targetPath = path.join(worktreePath, envFile);
-      if (await this.pathExists(targetPath)) continue;
-
       const sourcePath = await this.resolveEnvBootstrapSource(envFile);
       if (!sourcePath) continue;
 
       try {
-        if (envMode === 'symlink') {
-          await symlink(sourcePath, targetPath);
-        } else {
-          await copyFile(sourcePath, targetPath);
-        }
-      } catch {
+        await createPinnedWorkspaceBinding(worktreePath, identity, envFile, {
+          mode: envMode === 'symlink' ? 'symlink' : 'copy-file',
+          source: sourcePath,
+        });
+      } catch (error) {
+        if (isPinnedWorkspacePublishError(error)) throw error;
         // Keep env bootstrap best-effort; missing env should show in readiness instead of killing creation.
       }
     }
@@ -1216,11 +1394,11 @@ export class WorktreeManager {
    * Hooks resolve relative to the o8 install (this.repoRoot) so they work
    * regardless of where the user's repo lives.
    */
-  private async injectSafetyHooks(worktreePath: string): Promise<void> {
+  private async injectSafetyHooks(
+    worktreePath: string,
+    identity: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>>,
+  ): Promise<void> {
     try {
-      const hooksDir = path.join(worktreePath, '.claude');
-      await mkdir(hooksDir, { recursive: true });
-
       const o8Root = this.repoRoot;
       const settings = {
         hooks: {
@@ -1253,8 +1431,9 @@ export class WorktreeManager {
         },
       };
 
-      const settingsPath = path.join(hooksDir, 'settings.json');
-      await writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
+      await writePinnedWorkspaceFile(
+        worktreePath, identity, '.claude/settings.json', JSON.stringify(settings, null, 2),
+      );
 
       // Add .claude/ to the worktree's LOCAL git exclude so the injected
       // settings.json never shows up in `git status`, `git add -A`, or any
@@ -1265,48 +1444,90 @@ export class WorktreeManager {
       // affects the upstream .gitignore. `--git-path` is required because a
       // linked worktree's `.git` is a file, not a directory.
       try {
-        const { stdout: excludePathOutput } = await execFileAsync(
-          'git', ['rev-parse', '--git-path', 'info/exclude'],
-          { windowsHide: true, cwd: worktreePath, timeout: 5000 },
+        const gitAdmin = await this.captureManagedGitAdmin(worktreePath, identity);
+        await ensurePinnedWorkspaceDirectory(gitAdmin.commonPath, gitAdmin.commonIdentity, 'info');
+        await ensurePinnedWorkspaceFile(
+          gitAdmin.commonPath,
+          gitAdmin.commonIdentity,
+          'info/o8-managed-excludes',
+          '.claude/\n',
         );
-        const resolvedExcludePath = excludePathOutput.trim();
-        const excludePath = path.isAbsolute(resolvedExcludePath)
-          ? resolvedExcludePath
-          : path.join(worktreePath, resolvedExcludePath);
-        let existing = '';
-        try { existing = await readFile(excludePath, 'utf8'); } catch { /* file may not exist yet */ }
-        if (!existing.split('\n').some((line) => line.trim() === '.claude/')) {
-          const next = existing.endsWith('\n') || existing.length === 0
-            ? `${existing}.claude/\n`
-            : `${existing}\n.claude/\n`;
-          await mkdir(path.dirname(excludePath), { recursive: true });
-          await writeFile(excludePath, next, 'utf8');
-        }
-      } catch {
-        // Non-fatal — the worktree still works, just may leak the file.
+        await withWorktreeMaterializationExecution(
+          gitAdmin.adminPath,
+          gitAdmin.adminIdentity,
+          () => execFileAsync('git', [
+            '--git-dir=.',
+            `--work-tree=${identity.canonicalPath}`,
+            '-c', `core.excludesFile=${path.join(gitAdmin.commonPath, 'info', 'o8-managed-excludes')}`,
+            'update-index', '--skip-worktree', '.claude/settings.json',
+          ], {
+            windowsHide: true,
+            cwd: gitAdmin.adminPath,
+            timeout: 10_000,
+          }),
+        );
+      } catch (error) {
+        if (isPinnedWorkspacePublishError(error)) throw error;
+        // Non-fatal: the managed workspace remains usable, but its injected
+        // settings may remain visible to Git.
       }
-
-      // .git/info/exclude only hides UNTRACKED files. When o8 dispatches into a
-      // repo where .claude/settings.json is TRACKED (o8 self-hosting!), the
-      // injected hooks show as `M .claude/settings.json` and any `git add -A`
-      // (an agent's own commit, or the recovery-salvage auto-commit) ships it as
-      // scope creep. `--skip-worktree` hides a TRACKED file's local modifications
-      // from `git status` + `git add`, while the agent still reads the hooks.
-      // Best-effort: harmlessly errors when the file is untracked (exclude covers
-      // that case) or not yet in the index.
-      try {
-        await execFileAsync('git', ['update-index', '--skip-worktree', '.claude/settings.json'], {
-          windowsHide: true,
-          cwd: worktreePath,
-          timeout: 10_000,
-        });
-      } catch {
-        // untracked / not-in-index — the exclude above handles it
-      }
-    } catch {
+    } catch (error) {
+      if (isPinnedWorkspacePublishError(error)) throw error;
       // Best-effort — don't block worktree creation if hook injection fails
       console.log('[worktree] hook injection failed (non-fatal)');
     }
+  }
+
+  private async captureManagedGitAdmin(
+    worktreePath: string,
+    identity: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>>,
+  ): Promise<{
+    adminPath: string;
+    adminIdentity: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>>;
+    commonPath: string;
+    commonIdentity: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>>;
+  }> {
+    const resolveGitPath = async (cwd: string, flag: '--absolute-git-dir' | '--git-common-dir') => {
+      const { stdout } = await execFileAsync('git', ['rev-parse', flag], {
+        windowsHide: true,
+        cwd,
+        timeout: 5000,
+      });
+      const candidate = path.resolve(cwd, stdout.trim());
+      const link = await lstat(candidate);
+      if (!link.isDirectory() || link.isSymbolicLink()) {
+        throw new Error('Managed Git administration path is not an exact directory.');
+      }
+      return realpath(candidate);
+    };
+    const commonPath = await resolveGitPath(worktreePath, '--git-common-dir');
+    const adminPath = await resolveGitPath(worktreePath, '--absolute-git-dir');
+    const workspaceGitPath = path.join(identity.canonicalPath, '.git');
+    if (commonPath === workspaceGitPath) {
+      const localGit = await inspectPinnedWorkspaceEntry(worktreePath, identity, '.git');
+      if (localGit?.kind !== 'directory') {
+        throw new Error('Managed clone Git administration escaped the workspace.');
+      }
+    } else {
+      const repoCommonPath = await resolveGitPath(this.repoRoot, '--git-common-dir');
+      if (commonPath !== repoCommonPath
+        || (adminPath !== commonPath
+          && !adminPath.startsWith(`${commonPath}${path.sep}worktrees${path.sep}`))) {
+        throw new Error('Managed worktree Git administration escaped its repository.');
+      }
+    }
+    if (adminPath !== commonPath && !adminPath.startsWith(`${commonPath}${path.sep}`)) {
+      throw new Error('Managed Git administration is outside its common directory.');
+    }
+    const adminIdentity = await captureWorktreeMaterializationIdentity(adminPath);
+    const commonIdentity = adminPath === commonPath
+      ? adminIdentity
+      : await captureWorktreeMaterializationIdentity(commonPath);
+    if (await resolveGitPath(worktreePath, '--git-common-dir') !== commonPath
+      || await resolveGitPath(worktreePath, '--absolute-git-dir') !== adminPath) {
+      throw new Error('Managed Git administration changed during capture.');
+    }
+    return { adminPath, adminIdentity, commonPath, commonIdentity };
   }
 
   // ── Conflict Detection ──
@@ -1363,6 +1584,7 @@ export class WorktreeManager {
     // the operator's main. No lane-lifecycle git write may ever target a
     // registered repo root — refuse the whole cleanup instead.
     const worktreePath = await this.resolveManagedWorktreePath(worktreeId);
+    const pathInitiallyExists = await this.pathExists(worktreePath);
     const resolvedTarget = path.resolve(worktreePath);
     const resolvedBases = this.worktreeBases.map((base) => path.resolve(base));
     const containingBase = resolvedBases.find((base) => (
@@ -1377,108 +1599,133 @@ export class WorktreeManager {
       console.error(`[worktree-prune] REFUSED cleanup for unsafe worktreeId ${JSON.stringify(worktreeId)} → ${resolvedTarget} (repo-root write guard, #1404)`);
       return false;
     }
+    if (!entry && pathInitiallyExists) {
+      console.error(
+        `[worktree-cleanup] REFUSED cleanup without authoritative metadata ${JSON.stringify(worktreeId)}`,
+      );
+      return false;
+    }
+    if (entry && !entry.claudeManaged && !entry.materializationIdentity) {
+      console.error(
+        `[worktree-cleanup] REFUSED cleanup for legacy identity-less metadata ${JSON.stringify(worktreeId)}`,
+      );
+      return false;
+    }
+    if (entry && !entry.claudeManaged && !entry.materializationParentIdentity) {
+      console.error(
+        `[worktree-cleanup] REFUSED cleanup without parent ownership ${JSON.stringify(worktreeId)}`,
+      );
+      return false;
+    }
 
-    // Safety: preserve uncommitted agent work before removing
-    if (await this.pathExists(worktreePath)) {
-      const preserved = await this.preserveUncommittedWork(worktreePath, worktreeId);
-      if (preserved === 'skip') return false; // Could not save work — abort prune
+    const retirementAction = opts?.workspaceRetirementAction
+      ?? getWorkspaceRetirementAction(worktreePath)
+      ?? 'cleanup';
 
-      let reviewedHeadWasMerged = false;
-      if (opts?.mergedEquivalentHeadSha) {
-        try {
-          const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
-            windowsHide: true,
-            cwd: worktreePath,
-            timeout: 5000,
-          });
-          reviewedHeadWasMerged = stdout.trim() === opts.mergedEquivalentHeadSha;
-        } catch {
-          // Fall through to the normal preservation guard.
-        }
-      }
+    let cleanupIdentity: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>> | null = null;
 
-      // #1103 — a *clean* worktree can still hold committed-but-unmerged work
-      // (an agent committed, but the lane was marked no_changes_produced before
-      // review and the worktree later went stale). Removing the dir + force-
-      // deleting the branch would discard those commits. Copy them into the main
-      // repo as a `preserved/<id>` branch first, so disk is still reclaimed but
-      // the work survives and is recoverable.
-      if (!reviewedHeadWasMerged) {
-        const committed = await this.preserveCommittedWork(
+    // Safety: preserve uncommitted agent work before removing. Every Git read
+    // and preservation write stays on the same captured workspace inode that
+    // the eventual retirement receipt owns.
+    if (pathInitiallyExists) {
+      try {
+        cleanupIdentity = entry?.materializationIdentity
+          ? await assertWorktreeMaterializationIdentity(worktreePath, entry.materializationIdentity)
+          : await captureWorktreeMaterializationIdentity(worktreePath);
+        const preserved = await withWorktreeMaterializationExecution(
           worktreePath,
-          worktreeId,
-          entry?.baseBranch ?? 'main',
-          entry?.isolationKind ?? 'git-worktree',
+          cleanupIdentity,
+          async () => {
+          const uncommitted = await this.preserveUncommittedWork(worktreePath, worktreeId);
+          if (uncommitted === 'skip') return false;
+          let reviewedHeadWasMerged = false;
+          if (opts?.mergedEquivalentHeadSha) {
+            try {
+              const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
+                windowsHide: true,
+                cwd: worktreePath,
+                timeout: 5000,
+              });
+              reviewedHeadWasMerged = stdout.trim() === opts.mergedEquivalentHeadSha;
+            } catch {
+              // Fall through to the normal preservation guard.
+            }
+          }
+          if (!reviewedHeadWasMerged) {
+            const committed = await this.preserveCommittedWork(
+              worktreePath,
+              worktreeId,
+              entry?.baseBranch ?? 'main',
+              entry?.isolationKind ?? 'git-worktree',
+            );
+            if (committed === 'skip') return false;
+          }
+          return true;
+          },
         );
-        if (committed === 'skip') return false; // Could not preserve commits — abort to avoid loss
+        if (!preserved) return false;
+      } catch (error) {
+        console.error(
+          `[worktree-cleanup] REFUSED preservation boundary for ${worktreePath}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return false;
       }
     }
 
-    const trashBase = path.join(containingBase, TRASH_DIR_NAME);
-
-    if ((entry?.isolationKind ?? 'git-worktree') === 'apfs-cow-clone') {
-      if (await this.pathExists(worktreePath)) {
-        if (!(await allowWorktreeRemoval(worktreePath, {
-          logPrefix: 'worktree-cleanup',
-          overrideLiveGuard: opts?.overrideLiveGuard,
-        }))) return false;
-        // #1673 — Windows can hold a file handle open inside worktreePath
-        // (running node, git, Defender); retry-then-quarantine instead of a
-        // raw rm that throws EBUSY/EPERM mid-cleanup.
-        const removal = await removeLockedDir(worktreePath, { quarantineBase: trashBase, logPrefix: 'worktree-cleanup' });
-        if (removal.status === 'failed') {
-          console.error(`[worktree-cleanup] FAILED to remove or quarantine ${worktreePath}`);
-          return false;
-        }
-      }
-    } else {
-      // Remove the git worktree
-      const args = ['worktree', 'remove', worktreePath];
-      if (opts?.force) args.push('--force');
-
-      if (await this.pathExists(worktreePath) && !(await allowWorktreeRemoval(worktreePath, {
+    if (entry?.materializationIdentity && entry.materializationParentIdentity) {
+      cleanupIdentity ??= entry.materializationIdentity;
+      if (!(await allowWorktreeRemoval(worktreePath, {
         logPrefix: 'worktree-cleanup',
         overrideLiveGuard: opts?.overrideLiveGuard,
-      }))) return false;
-
-      let gitRemoveFailedOnLock = false;
-      try {
-        await execFileAsync('git', args, { windowsHide: true, cwd: this.repoRoot, timeout: 15_000 });
-      } catch (err) {
-        // If directory already gone, that's fine. #1673 — on Windows, git
-        // itself can refuse removal because a handle inside the worktree is
-        // still open (EBUSY/EPERM/"Unlink of file" style messages); fall
-        // through to the F39 rm-fallback below instead of throwing, so the
-        // lock-retry + quarantine path gets a chance. Any OTHER git refusal
-        // (e.g. a dirty tree without --force) must keep throwing — we never
-        // force-delete work git is protecting.
-        const msg = err instanceof Error ? err.message : '';
-        const isLockClassGitError = /EBUSY|EPERM|Permission denied|Unlink of file/.test(msg);
-        if (!msg.includes('is not a working tree') && !isLockClassGitError) throw err;
-        gitRemoveFailedOnLock = isLockClassGitError;
+      }))) {
+        if (await this.pathExists(worktreePath)) return false;
       }
-
-      // F39 (#1031): even when `git worktree remove` succeeds OR bails with
-      // "is not a working tree" (orphan case — dev-bridge restart wiped git's
-      // .git/worktrees registration), the directory itself can still be left
-      // on disk. Without this rm, every merge under those conditions leaks the
-      // whole packet worktree (~1-3 GB) and disk fills within days.
-      if (await this.pathExists(worktreePath)) {
-        if (!(await allowWorktreeRemoval(worktreePath, {
-          logPrefix: 'worktree-cleanup-fallback',
-          overrideLiveGuard: opts?.overrideLiveGuard,
-        }))) return false;
-        const removal = await removeLockedDir(worktreePath, { quarantineBase: trashBase, logPrefix: 'worktree-cleanup-fallback' });
-        if (removal.status === 'failed') {
-          console.error(`[worktree-cleanup-fallback] FAILED to remove or quarantine ${worktreePath}`);
-          return false;
+      let retirementTruth: Awaited<ReturnType<typeof prepareWorkspaceMaterializationRetirement>>;
+      try {
+        retirementTruth = await prepareWorkspaceMaterializationRetirement(
+          this.repoRoot, worktreePath, retirementAction,
+        );
+      } catch (error) {
+        console.error(
+          `[worktree-cleanup] REFUSED durable retirement begin for ${worktreePath}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return false;
+      }
+      try {
+        if (retirementTruth?.state !== 'retired') {
+          await retireExactManagedDirectory({
+            repositoryPath: this.repoRoot,
+            worktreeId,
+            directoryPath: worktreePath,
+            identity: cleanupIdentity,
+            parentIdentity: entry.materializationParentIdentity,
+          });
         }
-        if (gitRemoveFailedOnLock) {
-          // Clear git's now-stale .git/worktrees registration for the path
-          // we just removed via the fallback so a future `git worktree add`
-          // at the same slot doesn't collide with a dangling entry.
-          await execFileAsync('git', ['worktree', 'prune'], { windowsHide: true, cwd: this.repoRoot, timeout: 10_000 }).catch(() => {});
+      } catch (error) {
+        try {
+          await assertWorktreeMaterializationIdentity(
+            worktreePath, entry.materializationIdentity,
+          );
+          rollbackWorkspaceMaterializationRetirement(
+            worktreePath, retirementAction, error,
+          );
+        } catch {
+          // Missing or replaced public names keep the durable retiring claim
+          // for exact crash replay; they cannot be rolled back safely.
         }
+        console.error(
+          `[worktree-cleanup] REFUSED exact retirement for ${worktreePath}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return false;
+      }
+      if (await this.pathExists(worktreePath)) return false;
+      await finishWorkspaceMaterializationRetirement(worktreePath, retirementAction);
+      if ((entry?.isolationKind ?? 'git-worktree') === 'git-worktree') {
+        await execFileAsync('git', ['worktree', 'prune'], {
+          windowsHide: true,
+          cwd: this.repoRoot,
+          timeout: 10_000,
+        }).catch(() => {});
       }
     }
 
@@ -1494,6 +1741,7 @@ export class WorktreeManager {
 
     // Remove our metadata
     await this.removeMeta(worktreeId);
+    completeExactManagedDirectoryRetirement(this.repoRoot, worktreeId);
     return true;
   }
 
@@ -1503,6 +1751,7 @@ export class WorktreeManager {
    */
   async prune(maxAgeMs = STALE_THRESHOLD_MS): Promise<string[]> {
     const worktrees = await this.list();
+    const authoritativeMeta = await this.loadAllMeta();
     const now = Date.now();
     const pruned: string[] = [];
 
@@ -1533,11 +1782,32 @@ export class WorktreeManager {
       return [];
     }
 
+    // A crash after exact source→retired rename leaves the public child absent
+    // but retains metadata and the receipt. Resume through cleanup so branch,
+    // materialization state, and metadata advance together instead of letting
+    // the generic receipt sweep erase the only replay authority.
+    for (const entry of Object.values(authoritativeMeta)) {
+      if (entry.claudeManaged || !entry.materializationIdentity
+        || !entry.materializationParentIdentity) continue;
+      const ownedPath = entry.materializationIdentity.canonicalPath;
+      if (await this.pathExists(ownedPath) || activeLanePaths.has(ownedPath)) continue;
+      const removed = await this.cleanup(entry.id, {
+        force: true,
+        deleteBranch: true,
+        overrideLiveGuard: true,
+      });
+      if (removed) pruned.push(entry.id);
+    }
+
     const handledPaths = new Set(
       await Promise.all(worktrees.map((worktree) => this.canonicalPath(worktree.path))),
     );
     for (const wt of worktrees) {
-      if (now - wt.lastActivityAt > maxAgeMs && wt.status !== 'active') {
+      if (now - wt.lastActivityAt > maxAgeMs
+        && wt.status !== 'active'
+        && wt.status !== 'creating'
+        && wt.status !== 'setup'
+        && now - wt.createdAt >= RETENTION_CREATION_GRACE_MS) {
         // Check if this worktree backs an active lane
         const wtPath = wt.path;
         const [canonicalWtPath, canonicalListedPath] = await Promise.all([
@@ -1563,14 +1833,55 @@ export class WorktreeManager {
     try {
       const { readdir } = await import('node:fs/promises');
       for (const worktreeBase of this.worktreeBases) {
+        let worktreeBaseIdentity: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>> | null = null;
+        for (const candidate of Object.values(authoritativeMeta)) {
+          const parentIdentity = candidate.materializationParentIdentity;
+          if (!parentIdentity || candidate.claudeManaged) continue;
+          try {
+            await assertWorktreeMaterializationIdentity(worktreeBase, parentIdentity);
+            worktreeBaseIdentity = parentIdentity;
+            break;
+          } catch {
+            // A durable parent receipt from another or replaced base is not authority here.
+          }
+        }
+        for (const candidate of Object.values(authoritativeMeta)) {
+          if (worktreeBaseIdentity) break;
+          const childIdentity = candidate.materializationIdentity;
+          if (!childIdentity || candidate.claudeManaged) continue;
+          const candidatePath = path.join(worktreeBase, candidate.id);
+          try {
+            await assertWorktreeMaterializationIdentity(candidatePath, childIdentity);
+            const capturedBase = await captureWorktreeMaterializationIdentity(worktreeBase);
+            if (path.dirname(childIdentity.canonicalPath) !== capturedBase.canonicalPath) continue;
+            await assertWorktreeMaterializationIdentity(candidatePath, childIdentity);
+            worktreeBaseIdentity = capturedBase;
+            break;
+          } catch {
+            // A durable child receipt from another base is not authority here.
+          }
+        }
         const entries = await readdir(worktreeBase, { withFileTypes: true }).catch(() => []);
+        if (!worktreeBaseIdentity) {
+          for (const entry of entries) {
+            if (!entry.isDirectory() || !entry.name.startsWith('packet-')) continue;
+            const mtime = await this.probeMtimeMs(path.join(worktreeBase, entry.name));
+            if (mtime === null) {
+              console.warn(`[worktree-prune] SKIPPED orphan ${entry.name} — mtime probe failed/unknown (never deleting on unknown age)`);
+            }
+          }
+          continue;
+        }
         for (const entry of entries) {
           if (!entry.isDirectory()) continue;
           // #1673 — the quarantine dir itself is never an orphan candidate.
           if (entry.name === TRASH_DIR_NAME) continue;
           if (!entry.name.startsWith('packet-')) continue;
           const orphanPath = path.join(worktreeBase, entry.name);
-          const canonicalOrphanPath = await this.canonicalPath(orphanPath);
+          const orphanIdentity = await captureWorktreeMaterializationIdentity(orphanPath)
+            .catch(() => null);
+          if (!orphanIdentity) continue;
+          const canonicalOrphanPath = orphanIdentity.canonicalPath;
           if (handledPaths.has(canonicalOrphanPath) || activeLanePaths.has(canonicalOrphanPath)) continue;
           // #1585: an UNKNOWN mtime must mean KEEP, never delete. The old code
           // (`.catch(() => 0)`) turned a failed probe into epoch 0 and fell
@@ -1582,31 +1893,39 @@ export class WorktreeManager {
             continue;
           }
           if (now - mtime <= maxAgeMs) continue;
-          if (!(await allowWorktreeRemoval(orphanPath, { logPrefix: 'worktree-prune-orphan' }))) continue;
-          // #1673 — lock-retry + quarantine instead of a raw rm that throws
-          // EBUSY/EPERM on Windows.
-          const removal = await removeLockedDir(orphanPath, {
-            quarantineBase: path.join(worktreeBase, TRASH_DIR_NAME),
-            logPrefix: 'worktree-prune-orphan',
-          });
-          if (removal.status === 'failed') {
-            console.warn(`[worktree-prune] FAILED to remove or quarantine orphan ${entry.name}`);
+          try {
+            await assertWorktreeMaterializationIdentity(orphanPath, orphanIdentity);
+          } catch {
             continue;
           }
-          console.log(`[worktree-prune] Reaped orphan ${entry.name} (no meta, no git, age ${Math.round((now - mtime) / 3_600_000)}h, ${removal.status})`);
+          if (!(await allowWorktreeRemoval(orphanPath, { logPrefix: 'worktree-prune-orphan' }))) continue;
+          try {
+            await retireExactManagedDirectory({
+              repositoryPath: this.repoRoot,
+              worktreeId: entry.name,
+              directoryPath: orphanPath,
+              identity: orphanIdentity,
+              parentIdentity: worktreeBaseIdentity,
+            });
+          } catch (error) {
+            console.warn(
+              `[worktree-prune] REFUSED exact orphan retirement ${entry.name}: ${error instanceof Error ? error.message : String(error)}`,
+            );
+            continue;
+          }
+          completeExactManagedDirectoryRetirement(this.repoRoot, entry.name);
+          console.log(`[worktree-prune] Reaped orphan ${entry.name} (no meta, no git, age ${Math.round((now - mtime) / 3_600_000)}h)`);
           pruned.push(entry.name);
         }
 
-        // #1673 — best-effort retry pass over previously quarantined entries.
-        // A dir that was locked at quarantine time may have released its
-        // handle by now; still-locked entries just get retried on the next
-        // sweep. Failures here are never fatal to the prune pass.
-        const trashDir = path.join(worktreeBase, TRASH_DIR_NAME);
-        const trashEntries = await readdir(trashDir, { withFileTypes: true }).catch(() => []);
-        for (const trashEntry of trashEntries) {
-          const trashedPath = path.join(trashDir, trashEntry.name);
-          await rm(trashedPath, { recursive: true, force: true }).catch(() => {});
-        }
+        // Resume only SQLite-claimed exact retirements. Arbitrary names under
+        // the base or legacy quarantine directory are never sweep targets.
+        await finishPendingExactManagedDirectoryRetirements(
+          this.repoRoot,
+          worktreeBase,
+          worktreeBaseIdentity,
+          (worktreeId) => !(worktreeId in authoritativeMeta),
+        );
       }
     } catch (err) {
       console.warn(`[worktree-prune] Orphan scan failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -1685,6 +2004,8 @@ export class WorktreeManager {
     );
     const candidates = all
       .filter((_, i) => inScope[i])
+      .filter((wt) => wt.status !== 'creating' && wt.status !== 'setup')
+      .filter((wt) => Date.now() - wt.createdAt >= RETENTION_CREATION_GRACE_MS)
       // #1585: an unknown / zero / non-finite mtime must NOT sort as "oldest"
       // and get reaped first — that ranked the NEWEST worktrees for deletion.
       // Exclude unknown-age candidates from retention entirely.
@@ -1756,15 +2077,16 @@ export class WorktreeManager {
    * Associate a worktree with an agent session key.
    */
   async linkSession(worktreeId: string, sessionKey: string): Promise<void> {
-    const meta = await this.loadAllMeta();
-    const entry = meta[worktreeId];
-    if (entry) {
-      entry.sessionKey = sessionKey;
-      if (entry.status === 'creating' || entry.status === 'setup') {
-        entry.status = 'active';
+    await withWorktreeMetaTransaction(this.repoRoot, async (transaction) => {
+      const entry = (await transaction.readAll())[worktreeId];
+      if (entry) {
+        entry.sessionKey = sessionKey;
+        if (entry.status === 'creating' || entry.status === 'setup') {
+          entry.status = 'active';
+        }
+        await transaction.save(worktreeId, entry);
       }
-      await this.writeMetaStore({ version: 1, worktrees: meta });
-    }
+    });
   }
 
   // ── Private Helpers ──
@@ -1816,8 +2138,9 @@ export class WorktreeManager {
         return 'skip';
       }
     } catch {
-      // git status failed — worktree might already be gone, safe to proceed
-      return 'clean';
+      // The caller captured a live directory identity before entering this
+      // guard, so an unreadable Git state is unknown work, never clean work.
+      return 'skip';
     }
   }
 
@@ -1849,8 +2172,9 @@ export class WorktreeManager {
       headSha = stdout.trim();
       if (!headSha) return 'clean';
     } catch {
-      // Not a resolvable git worktree (already gone) — nothing to save.
-      return 'clean';
+      // The cleanup caller proved the directory exists. If HEAD cannot be
+      // resolved, ownership is ambiguous and destructive cleanup must stop.
+      return 'skip';
     }
 
     // If HEAD is already an ancestor of base, the work is merged — o8 rebases
@@ -2090,67 +2414,63 @@ export class WorktreeManager {
 
   // ── Metadata Persistence ──
 
-  private async readMetaStore(metaPath: string): Promise<Record<string, WorktreeMetaEntry>> {
-    try {
-      const raw = await readFile(metaPath, 'utf-8');
-      const store = JSON.parse(raw) as WorktreeMetaStore;
-      return store.worktrees;
-    } catch {
-      return {};
-    }
-  }
-
   private async loadAllMeta(): Promise<Record<string, WorktreeMetaEntry>> {
-    const [legacy, primary] = await Promise.all([
-      this.readMetaStore(this.legacyMetaPath),
-      this.readMetaStore(this.metaPath),
-    ]);
-    return { ...legacy, ...primary };
-  }
-
-  private async writeMetaStoreAt(metaPath: string, store: WorktreeMetaStore): Promise<void> {
-    await mkdir(path.dirname(metaPath), { recursive: true });
-    await writeFile(metaPath, JSON.stringify(store, null, 2), 'utf-8');
-  }
-
-  private async writeMetaStore(store: WorktreeMetaStore): Promise<void> {
-    await this.writeMetaStoreAt(this.metaPath, store);
+    return withWorktreeMetaTransaction(
+      this.repoRoot,
+      (transaction) => transaction.readAll(),
+    );
   }
 
   private async saveMeta(id: string, entry: WorktreeMetaEntry): Promise<void> {
-    const existing = await this.loadAllMeta();
-    existing[id] = entry;
-    await this.writeMetaStore({ version: 1, worktrees: existing });
+    await withWorktreeMetaTransaction(this.repoRoot, (transaction) => transaction.save(id, entry));
   }
 
   private async removeMeta(id: string): Promise<void> {
-    const [existing, legacy] = await Promise.all([
-      this.loadAllMeta(),
-      this.readMetaStore(this.legacyMetaPath),
-    ]);
-    delete existing[id];
-    await this.writeMetaStore({ version: 1, worktrees: existing });
-    if (id in legacy) {
-      delete legacy[id];
-      await this.writeMetaStoreAt(this.legacyMetaPath, { version: 1, worktrees: legacy });
-    }
+    await withWorktreeMetaTransaction(this.repoRoot, (transaction) => transaction.remove(id));
   }
 
   private async updateMetaStatus(id: string, status: WorktreeStatus): Promise<void> {
-    const existing = await this.loadAllMeta();
-    const entry = existing[id];
-    if (entry) {
+    await withWorktreeMetaTransaction(this.repoRoot, async (transaction) => {
+      const entry = (await transaction.readAll())[id];
+      if (!entry) return;
       entry.status = status;
-      await this.writeMetaStore({ version: 1, worktrees: existing });
-    }
+      await transaction.save(id, entry);
+    });
   }
 
   private async updateMetaHydrationPaths(id: string, hydrationPaths: string[]): Promise<void> {
-    const existing = await this.loadAllMeta();
-    const entry = existing[id];
-    if (entry) {
+    await withWorktreeMetaTransaction(this.repoRoot, async (transaction) => {
+      const entry = (await transaction.readAll())[id];
+      if (!entry) return;
       entry.hydrationPaths = hydrationPaths;
-      await this.writeMetaStore({ version: 1, worktrees: existing });
-    }
+      await transaction.save(id, entry);
+    });
+  }
+
+  private async bindCreatedMaterializationIdentity(
+    id: string,
+    identity: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>>,
+  ): Promise<void> {
+    const parentIdentity = await captureWorktreeMaterializationIdentity(
+      path.dirname(identity.canonicalPath),
+    );
+    await assertWorktreeMaterializationIdentity(identity.canonicalPath, identity);
+    await withWorktreeMetaTransaction(this.repoRoot, async (transaction) => {
+      const entry = (await transaction.readAll())[id];
+      if (!entry || entry.claudeManaged) {
+        throw new Error('Created managed workspace metadata is absent before ownership binding.');
+      }
+      if (entry.materializationIdentity
+        && (entry.materializationIdentity.device !== identity.device
+          || entry.materializationIdentity.inode !== identity.inode
+          || entry.materializationIdentity.canonicalPath !== identity.canonicalPath)) {
+        throw new Error('Created managed workspace metadata already names another materialization.');
+      }
+      await transaction.save(id, {
+        ...entry,
+        materializationIdentity: identity,
+        materializationParentIdentity: parentIdentity,
+      });
+    });
   }
 }

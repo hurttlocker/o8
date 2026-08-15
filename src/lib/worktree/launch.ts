@@ -88,6 +88,8 @@ export interface WorktreeLaunchOptions {
    * own clone instead of colliding on a taskName-derived slot.
    */
   packetId?: string;
+  /** Scheduler-owned reservation reused at the materialization boundary. */
+  storageAdmissionReservationId?: string;
 }
 
 /**
@@ -142,6 +144,7 @@ export async function prepareLaunchWorktree(
     envFiles: opts.envFiles,
     isolationPreference: opts.isolationPreference,
     packetId: opts.packetId,
+    storageAdmissionReservationId: opts.storageAdmissionReservationId,
     managed: opts.agentType === 'claude-code' ? true : undefined,
   });
 

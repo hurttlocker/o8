@@ -93,6 +93,7 @@ function repoEntry(id: string, localPath: string): RepoRegistryEntry {
     defaultBranch: 'main',
     addedAt: '2026-01-01T00:00:00.000Z',
     lastOpenedAt: null,
+    storagePressureParkingDisabled: false,
     setup: {
       envMode: 'skip',
       envFiles: [],

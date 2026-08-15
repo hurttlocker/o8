@@ -211,6 +211,48 @@ export interface PacketTaskContract {
   exclusions: string[];
 }
 
+export interface OrchestratorPacketStorageAdmission {
+  schema: 'o8/packet-storage-admission/v1';
+  state: 'reserved' | 'committed' | 'held' | 'released' | 'quarantined';
+  reason: string;
+  reservationId: string;
+  mutationId: string;
+  ownerId: string;
+  ownerGeneration: number;
+  estimateBytes: number;
+  estimateSource: 'same-repo-history' | 'source-size-fallback' | 'unknown';
+  historySamples: number;
+  volumeId: string | null;
+  physicalAvailableBytes: number | null;
+  reservedBeforeBytes: number | null;
+  requiredReserveBytes: number | null;
+  dispatchHeadroomBytes: number | null;
+  /** Optional for backward-compatible packet receipts written before pressure policy existed. */
+  pressure?: OrchestratorStoragePressureReceipt | null;
+  recordedAt: number;
+}
+
+export interface OrchestratorStoragePressureCandidateReceipt {
+  packetId: string;
+  repositoryUuid: string | null;
+  laneId: string;
+  operationId: string;
+  measuredAllocatedBytes: number | null;
+  verifiedReclaimedAvailableBytes: number | null;
+  outcome: 'parked' | 'already_parked' | 'refused';
+  reason: string;
+}
+
+export interface OrchestratorStoragePressureReceipt {
+  schema: 'o8/storage-pressure-decision/v1';
+  mode: 'manual' | 'pressure';
+  status: 'disabled' | 'admitted_after_parking' | 'exhausted';
+  trigger: 'reserve_breached';
+  launchGeneration: number;
+  candidates: OrchestratorStoragePressureCandidateReceipt[];
+  recordedAt: number;
+}
+
 export interface OrchestratorPacket {
   id: string;
   referenceLabel: string;
@@ -265,6 +307,10 @@ export interface OrchestratorPacket {
    */
   operatorStopped?: boolean;
   blockedReason?: string | null;
+  /** Durable dispatch admission decision; reserved bytes are not physical usage. */
+  storageAdmission?: OrchestratorPacketStorageAdmission | null;
+  /** Durable lifecycle floor incremented by reset/rerun before any fresh dispatch. */
+  storageAdmissionEpoch?: number;
   /** Recoverable reviewed work banked before a merge-failure escalation or
    * terminal cleanup. This remains visible even when the lane is archived. */
   recovery?: OrchestratorPacketRecovery | null;

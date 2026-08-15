@@ -56,6 +56,7 @@ import { runPacketRuntimeDrift } from './commands/packet/runtime-drift.js';
 import { runPacketDiff } from './commands/packet/diff.js';
 import { runPacketCommit } from './commands/packet/commit.js';
 import { runPacketClose } from './commands/packet/close.js';
+import { runPacketWorkspace } from './commands/packet/workspace.js';
 import { runPacketStop } from './commands/packet/stop.js';
 import {
   PACKET_COMMAND_LINES,
@@ -406,6 +407,9 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       if (secondary === 'commit') return runPacketCommit(args.mode, args.rest);
       if (secondary === 'heartbeat') return runPacketHeartbeat(args.mode, args.rest);
       if (secondary === 'review') return runPacketReview(args.mode, args.rest);
+      if (secondary === 'park' || secondary === 'restore') {
+        return runPacketWorkspace(args.mode, secondary, args.rest);
+      }
       if (secondary === 'close') return runPacketClose(args.mode, args.rest);
       if (secondary === 'reset') return runPacketReset(args.mode, args.rest);
       if (secondary === 'stop' || secondary === 'cancel') return runPacketStop(args.mode, args.rest);

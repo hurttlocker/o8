@@ -4,6 +4,7 @@ import { normalizeRuntimeStatusToOrchestratorStatus } from '@/lib/orchestrator/r
 import { runtimeTruthHasActiveWriter } from '@/lib/orchestrator/runtime-truth';
 import { normalizePacketRecovery } from '@/lib/lane/recovery-info';
 import { normalizeQualitySearchPacketState } from '@/lib/orchestrator/quality-search';
+import { normalizePacketStorageAdmission, normalizePacketStorageAdmissionEpoch } from '@/lib/orchestrator/packet-storage-admission-normalize';
 import { hydrateOrchestratorTurnPinEntry, installOrchestratorTurnPinFetchPatch, persistOrchestratorTurnPin, readCachedOrchestratorTurnPin, stageOrchestratorTurnPin } from '@/lib/orchestrator/turn-pins';
 import {
   normalizeRequestedRuntime,
@@ -27,7 +28,6 @@ import type {
 } from '@/lib/orchestrator/types';
 import { isDispatchableRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
-/** Deserializer — validates and coerces an unknown value to OrchestratorRuntime. */
 function normalizeRuntime(value: unknown): OrchestratorRuntime {
   return isDispatchableRuntime(value) ? value : 'codex';
 }
@@ -65,7 +65,6 @@ function friendlyAwaitingInputReason(label: string | null | undefined): string |
 const MAX_LAUNCH_ATTEMPTS = 5;
 const RECOVERY_COOLDOWN_MS = 60_000;
 let orchestratorMissionCache = createEmptyOrchestratorMissionState();
-
 /**
  * Mission IDs that have already had a "Mission complete" card delivered.
  * Shared so the two delivery paths never double-card the same mission:
@@ -394,6 +393,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     // it here and a rerun/re-read would silently disarm the huddle.
     huddle: typeof packet.huddle === 'boolean' ? packet.huddle : undefined,
     blockedReason: typeof packet.blockedReason === 'string' ? packet.blockedReason : null,
+    storageAdmission: normalizePacketStorageAdmission(packet.storageAdmission), storageAdmissionEpoch: normalizePacketStorageAdmissionEpoch(packet.storageAdmissionEpoch),
     recovery: normalizePacketRecovery(packet.recovery),
     lastEventAt: typeof packet.lastEventAt === 'string' ? packet.lastEventAt : null,
     lastEventLabel: typeof packet.lastEventLabel === 'string' ? packet.lastEventLabel : null,

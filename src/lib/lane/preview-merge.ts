@@ -19,7 +19,7 @@ import type { Lane } from '@/lib/lane/types';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import type { PacketDiffBaseResolution } from '@/lib/diff/base-resolution';
 import { runMergeGate, type MergeGateResult, type MergeViolation } from './merge-gate';
-import { resolveLaneReviewTarget } from './review-target';
+import { immutableSnapshotDiffBase, resolveLaneReviewSource } from './review-source';
 
 // ── Public Types ──
 
@@ -50,6 +50,8 @@ export interface MergePreviewResult {
   blockers: string[];
   branch: string | null;
   diffBase?: PacketDiffBaseResolution;
+  reviewSource?: 'materialized' | 'immutable_snapshot';
+  mergeUnavailableReason?: string;
   /** Populated when no lane is bound so the gate could not run. */
   unwired?: boolean;
 }
@@ -160,15 +162,27 @@ export async function buildPreviewForLane(
   packetId: string,
   options: MergePreviewOptions = {},
 ): Promise<MergePreviewResult> {
-  const target = resolveLaneReviewTarget(lane);
-  const resolvedLane = lane.worktreePath === target.cwd
+  const reviewSource = await resolveLaneReviewSource(lane);
+  if (reviewSource.kind === 'immutable_snapshot') {
+    return {
+      packetId,
+      wouldMerge: false,
+      checks: ALL_CHECKS.map((name) => ({ name, verdict: 'skipped' as const })),
+      blockers: ['workspace-parked'],
+      branch: reviewSource.branch,
+      diffBase: immutableSnapshotDiffBase(reviewSource, lane.baseBranch),
+      reviewSource: reviewSource.kind,
+      mergeUnavailableReason: 'Restore the parked workspace and rerun verification before merge.',
+    };
+  }
+  const resolvedLane = lane.worktreePath === reviewSource.cwd
     ? lane
-    : { ...lane, worktreePath: target.cwd };
+    : { ...lane, worktreePath: reviewSource.cwd };
   const orchestratorApproved = options.orchestratorApproved ?? hasApprovedOrchestratorReview(packetId);
   const gateResult = await runMergeGate(resolvedLane, undefined, orchestratorApproved);
   const checks = buildCheckList(gateResult);
   const blockers = buildBlockerList(gateResult);
-  const dirtyDetail = readDirtyWorktreeDetail(target.cwd);
+  const dirtyDetail = readDirtyWorktreeDetail(reviewSource.cwd);
   if (dirtyDetail) {
     const cleanCheck = checks.find((check) => check.name === 'clean-worktree');
     if (cleanCheck) {
@@ -184,6 +198,7 @@ export async function buildPreviewForLane(
     blockers,
     branch: lane.branch ?? null,
     diffBase: gateResult.diffBase,
+    reviewSource: reviewSource.kind,
   };
 }
 

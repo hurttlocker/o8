@@ -15,7 +15,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { listApprovalsForContext } from '@/lib/approvals/store';
 import type { ApprovalRecord } from '@/lib/approvals/types';
-import { getLaneSpokenDiffFacts, type LaneSpokenDiffFacts } from '@/lib/lane/lane-diff-facts';
+import type { LaneSpokenDiffFacts } from '@/lib/lane/lane-diff-facts';
+import { readLaneSpokenDiffFacts } from '@/lib/lane/review-source';
 import { normalizeHeadSha } from '@/lib/lane/head-sha-lock';
 import { findLatestLaneByPacket, findLaneBySession, getLaneEvents } from '@/lib/lane/registry';
 import { recoveryInfoFromLaneEvents } from '@/lib/lane/recovery-info';
@@ -248,7 +249,7 @@ export async function GET(request: NextRequest) {
         );
       }
       try {
-        spokenDiffFacts = await getLaneSpokenDiffFacts(lane);
+        spokenDiffFacts = await readLaneSpokenDiffFacts(lane);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unable to read packet diff evidence.';
         console.warn(`${LOG_PREFIX} spoken diff evidence failed for packet ${packetId}:`, error);
@@ -286,7 +287,7 @@ export async function GET(request: NextRequest) {
     }
     if (includeSpokenReview && lane && spokenDiffFacts) {
       try {
-        const verifiedFacts = await getLaneSpokenDiffFacts(lane);
+        const verifiedFacts = await readLaneSpokenDiffFacts(lane);
         if (
           verifiedFacts.headSha !== spokenDiffFacts.headSha
           || verifiedFacts.fingerprint !== spokenDiffFacts.fingerprint

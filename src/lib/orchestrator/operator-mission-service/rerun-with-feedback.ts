@@ -6,6 +6,7 @@ import {
   LaneSessionArchiveUnconfirmedError,
 } from '@/lib/lane/reap-sessions';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { advancePacketStorageAdmissionEpoch } from '@/lib/orchestrator/packet-storage-admission-normalize';
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 import { frontierEscalationModelForCheapTier } from '@/lib/operator/subscription-profile';
 import { supersedeDurableApprovedReviews } from '@/lib/lane/durable-review-approval';
@@ -166,6 +167,7 @@ export function resetPacketFields(packet: OrchestratorPacket) {
   packet.lastRecoveryAt = null;
   // A fresh dispatch earns a fresh launch budget; the intra-cycle cap still
   // stops the launching<->idle thrash within this new attempt.
+  advancePacketStorageAdmissionEpoch(packet);
   packet.launchAttempts = 0;
   // Deliberately NOT reset: packet.typecheckAutoRetries. The auto-rerun
   // budget (#1108 layer 1) must survive redispatch — zeroing it here would

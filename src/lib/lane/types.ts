@@ -151,6 +151,7 @@ export type LaneCommand =
       effort?: ThinkingEffort;
       /** Stable for one packet launch attempt so a crash can reconcile the owned session. */
       clientMutationId?: string;
+      storageAdmissionReservationId?: string;
       launchContext?: WorkerLaunchContext;
       actor?: LaneEventActor;
     }

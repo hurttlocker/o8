@@ -1,10 +1,9 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 
 import { detectTypecheckSkip, isMissingTscOutput } from './typecheck-availability';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
+import { materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
 
-const execFileAsync = promisify(execFile);
+const execFileAsync = materializationAwareExecFile;
 
 const TYPECHECK_TIMEOUT_MS = 120_000;
 const TYPECHECK_MAX_BUFFER_BYTES = 4 * 1024 * 1024;

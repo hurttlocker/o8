@@ -24,6 +24,10 @@ export type {
   OwnedArchiveResponse,
   OwnedRuntimeAdapter,
   OwnedSessionStore,
+  OwnedWorkspaceBinding,
+  OwnedWorkspaceBindingReceipt,
+  RebindOwnedWorkspaceInput,
+  RebindOwnedWorkspaceResult,
 } from './types';
 
 export { createOwnedSessionStore } from './store';

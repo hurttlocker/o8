@@ -17,6 +17,7 @@ import type {
 } from './types';
 import { isRepoWorkspaceIsolationPreference } from './types';
 import { emitProductEvent } from '@/lib/analytics/server';
+import { withStoragePressurePolicyLock } from '@/lib/orchestrator/storage-pressure-policy-lock';
 
 const execFileAsync = promisify(execFile);
 
@@ -49,6 +50,7 @@ function normalizeRepoEntry(repo: RepoRegistryEntry): RepoRegistryEntry {
     ...repo,
     defaultBranch: repo.defaultBranch || 'main',
     isGitRepo: repo.isGitRepo ?? true,
+    storagePressureParkingDisabled: repo.storagePressureParkingDisabled ?? false,
     setup: normalizeSetupConfig(repo.setup),
   };
 }
@@ -303,6 +305,7 @@ function sortRepos(repos: RepoRegistryEntry[]) {
 // paths (addRepo / updateRepo / removeRepo) invalidate via writeStore().
 let _cachedStore: { value: RepoRegistryStore; ts: number } | null = null;
 const STORE_CACHE_TTL_MS = 5_000;
+let registryMutationQueue: Promise<void> = Promise.resolve();
 
 function invalidateStoreCache() {
   _cachedStore = null;
@@ -330,6 +333,23 @@ async function readStore(): Promise<RepoRegistryStore> {
   };
   _cachedStore = { value, ts: Date.now() };
   return value;
+}
+
+async function readStoreFresh(): Promise<RepoRegistryStore> {
+  invalidateStoreCache();
+  return readStore();
+}
+
+async function withRegistryMutation<T>(operation: () => Promise<T>): Promise<T> {
+  const previous = registryMutationQueue;
+  let release!: () => void;
+  registryMutationQueue = new Promise<void>((resolve) => { release = resolve; });
+  await previous;
+  try {
+    return await withStoragePressurePolicyLock(operation);
+  } finally {
+    release();
+  }
 }
 
 async function writeStore(store: RepoRegistryStore) {
@@ -386,6 +406,12 @@ export async function listRepos() {
   return store.repos;
 }
 
+/** Disk-fresh read for destructive policy decisions made under the registry mutation lock. */
+export async function listReposFresh() {
+  const store = await readStoreFresh();
+  return store.repos;
+}
+
 export async function findRepoByLocalPath(localPath: string) {
   const target = path.resolve(localPath);
   const repos = await listRepos();
@@ -398,45 +424,45 @@ export async function validateRepo(localPath: string) {
 
 export async function addRepo(localPath: string) {
   const candidate = await inspectLocalRepo(localPath);
-  const store = await readStore();
-  const now = nowIso();
-  const existing = store.repos.find((repo) => repo.localPath === candidate.localPath);
+  const { entry, created } = await withRegistryMutation(async () => {
+    const store = await readStoreFresh();
+    const now = nowIso();
+    const existing = store.repos.find((repo) => repo.localPath === candidate.localPath);
 
-  if (existing) {
-    const updated: RepoRegistryEntry = {
-      ...existing,
+    if (existing) {
+      const updated: RepoRegistryEntry = {
+        ...existing,
+        name: candidate.name,
+        remoteUrl: candidate.remoteUrl,
+        defaultBranch: candidate.defaultBranch,
+        isGitRepo: candidate.isGitRepo ?? true,
+        setup: normalizeSetupConfig(existing.setup ?? candidate.setup),
+        lastOpenedAt: now,
+      };
+      const repos = store.repos.map((repo) => (repo.id === existing.id ? updated : repo));
+      await writeStore({ version: 1, repos });
+      return { entry: updated, created: false };
+    }
+
+    const added: RepoRegistryEntry = {
+      id: randomUUID(),
       name: candidate.name,
+      localPath: candidate.localPath,
       remoteUrl: candidate.remoteUrl,
       defaultBranch: candidate.defaultBranch,
       isGitRepo: candidate.isGitRepo ?? true,
-      setup: normalizeSetupConfig(existing.setup ?? candidate.setup),
+      addedAt: now,
       lastOpenedAt: now,
+      storagePressureParkingDisabled: false,
+      setup: candidate.setup,
     };
-
-    const repos = store.repos.map((repo) => (repo.id === existing.id ? updated : repo));
-    await writeStore({ version: 1, repos });
-    fireSignatureRecompute();
-    return updated;
-  }
-
-  const entry: RepoRegistryEntry = {
-    id: randomUUID(),
-    name: candidate.name,
-    localPath: candidate.localPath,
-    remoteUrl: candidate.remoteUrl,
-    defaultBranch: candidate.defaultBranch,
-    isGitRepo: candidate.isGitRepo ?? true,
-    addedAt: now,
-    lastOpenedAt: now,
-    setup: candidate.setup,
-  };
-
-  await writeStore({
-    version: 1,
-    repos: [...store.repos, entry],
+    await writeStore({ version: 1, repos: [...store.repos, added] });
+    return { entry: added, created: true };
   });
 
   fireSignatureRecompute();
+
+  if (!created) return entry;
 
   // #1114 — fire-and-forget spec ingest so the Engineering Brain has
   // substrate to answer design/convention questions about this repo. Done
@@ -494,34 +520,37 @@ export async function updateRepo(
     localPath?: string;
     setup?: RepoSetupConfig;
     lastOpenedAt?: string | null;
+    storagePressureParkingDisabled?: boolean;
   },
 ) {
-  const store = await readStore();
-  const existing = store.repos.find((repo) => repo.id === id);
-  if (!existing) {
-    throw new Error('Repository not found.');
-  }
-
   const candidate = updates.localPath === undefined ? null : await inspectLocalRepo(updates.localPath);
-  if (candidate && store.repos.some((repo) => repo.id !== id && repo.localPath === candidate.localPath)) {
-    throw new Error('Another registered repository already uses that folder.');
-  }
-
-  const next: RepoRegistryEntry = {
-    ...existing,
-    ...(candidate ? {
-      name: candidate.name,
-      localPath: candidate.localPath,
-      remoteUrl: candidate.remoteUrl,
-      defaultBranch: candidate.defaultBranch,
-      isGitRepo: candidate.isGitRepo,
-    } : {}),
-    setup: normalizeSetupConfig(updates.setup ?? existing.setup),
-    lastOpenedAt: updates.lastOpenedAt === undefined ? existing.lastOpenedAt : updates.lastOpenedAt,
-  };
-
-  const repos = store.repos.map((repo) => (repo.id === id ? next : repo));
-  await writeStore({ version: 1, repos });
+  const next = await withRegistryMutation(async () => {
+    const store = await readStoreFresh();
+    const existing = store.repos.find((repo) => repo.id === id);
+    if (!existing) throw new Error('Repository not found.');
+    if (candidate && store.repos.some((repo) => repo.id !== id && repo.localPath === candidate.localPath)) {
+      throw new Error('Another registered repository already uses that folder.');
+    }
+    const updated: RepoRegistryEntry = {
+      ...existing,
+      ...(candidate ? {
+        name: candidate.name,
+        localPath: candidate.localPath,
+        remoteUrl: candidate.remoteUrl,
+        defaultBranch: candidate.defaultBranch,
+        isGitRepo: candidate.isGitRepo,
+      } : {}),
+      setup: normalizeSetupConfig(updates.setup ?? existing.setup),
+      lastOpenedAt: updates.lastOpenedAt === undefined ? existing.lastOpenedAt : updates.lastOpenedAt,
+      storagePressureParkingDisabled: updates.storagePressureParkingDisabled
+        ?? existing.storagePressureParkingDisabled,
+    };
+    await writeStore({
+      version: 1,
+      repos: store.repos.map((repo) => (repo.id === id ? updated : repo)),
+    });
+    return updated;
+  });
   if (candidate) {
     fireSignatureRecompute();
     void scheduleSpecIngest(next.localPath, next.name);
@@ -534,15 +563,13 @@ export async function touchRepo(id: string, timestamp = nowIso()) {
 }
 
 export async function removeRepo(id: string) {
-  const store = await readStore();
-  const existing = store.repos.find((repo) => repo.id === id);
-  if (!existing) {
-    throw new Error('Repository not found.');
-  }
-
-  await writeStore({
-    version: 1,
-    repos: store.repos.filter((repo) => repo.id !== id),
+  await withRegistryMutation(async () => {
+    const store = await readStoreFresh();
+    if (!store.repos.some((repo) => repo.id === id)) throw new Error('Repository not found.');
+    await writeStore({
+      version: 1,
+      repos: store.repos.filter((repo) => repo.id !== id),
+    });
   });
 
   fireSignatureRecompute();

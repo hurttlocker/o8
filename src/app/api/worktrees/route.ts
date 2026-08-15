@@ -86,7 +86,9 @@ export async function POST(req: NextRequest) {
       taskName: body.taskName,
       branchName: body.branchName,
       baseBranch: body.baseBranch,
-      managed: body.managed,
+      // This route promises a created o8 workspace. External-runtime metadata
+      // registration is a separate lifecycle and must not masquerade as 201.
+      managed: true,
       skipSetup: body.skipSetup,
       envMode: body.envMode,
       envFiles: body.envFiles,
@@ -144,10 +146,20 @@ export async function DELETE(req: NextRequest) {
         return NextResponse.json({ error: 'worktreeId required for cleanup' }, { status: 400 });
       }
 
-      await mgr.cleanup(body.worktreeId, {
+      const cleaned = await mgr.cleanup(body.worktreeId, {
         force: body.force,
         deleteBranch: body.deleteBranch,
       });
+      if (!cleaned) {
+        return NextResponse.json({
+          ok: false,
+          error: {
+            code: 'cleanup_refused',
+            message: 'Worktree cleanup was refused; its durable ownership was retained.',
+          },
+          worktreeId: body.worktreeId,
+        }, { status: 409 });
+      }
 
       return NextResponse.json({ ok: true, cleaned: body.worktreeId });
     }

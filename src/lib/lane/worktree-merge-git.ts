@@ -1,10 +1,9 @@
-import { execFile } from 'node:child_process';
 import { mkdtemp, rm, stat, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
-import { promisify } from 'node:util';
+import { materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
 
-const execFileAsync = promisify(execFile);
+const execFileAsync = materializationAwareExecFile;
 
 export async function git(
   cwd: string,

@@ -8,6 +8,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 const { createLane, getLane, setLaneStatus } = await import('@/lib/lane/registry');
 const { reconcileOrphanedWorktrees } = await import('@/lib/lane/reconcile');
 const { isAncestorCommit } = await import('@/lib/orchestrator/operator-mission-service/merge-truth');
+const { createWorkspaceSnapshot, transitionWorkspaceSnapshot } = await import('@/lib/worktree/snapshot-state');
 
 const roots: string[] = [];
 
@@ -40,6 +41,46 @@ function missingWorktree(repo: string, name: string) {
   const path = join(repo, name);
   expect(existsSync(path)).toBe(false);
   return path;
+}
+
+function persistWorkspaceState(
+  lane: ReturnType<typeof createLane>,
+  state: 'parked' | 'hibernating' | 'restoring',
+  head: string,
+) {
+  const packetId = lane.packetId!;
+  const repositoryUuid = `repo-${packetId}`;
+  let record = createWorkspaceSnapshot({
+    repositoryUuid,
+    packetId,
+    laneId: lane.id,
+    originalPath: lane.worktreePath!,
+    branch: lane.branch,
+    baseCommit: head,
+    headCommit: head,
+    treeSha: head,
+    recoveryRef: `refs/o8/recovery/${packetId}`,
+    diffFingerprint: `diff-${packetId}`,
+    sessionIdentities: [],
+    creationId: `create-${packetId}`,
+  }).record;
+  const transitions = state === 'hibernating'
+    ? ['parkable', 'hibernating'] as const
+    : state === 'parked'
+      ? ['parkable', 'hibernating', 'parked'] as const
+      : ['parkable', 'hibernating', 'parked', 'restoring'] as const;
+  for (const toState of transitions) {
+    const result = transitionWorkspaceSnapshot({
+      repositoryUuid,
+      packetId,
+      transitionId: `${packetId}-${toState}`,
+      expectedState: record.state,
+      expectedVersion: record.version,
+      toState,
+    });
+    if (!result.record) throw new Error('Workspace snapshot transition unexpectedly disappeared.');
+    record = result.record;
+  }
 }
 
 afterAll(() => {
@@ -146,4 +187,26 @@ describe('merge truth by git ancestry', () => {
     expect(await reconcileOrphanedWorktrees()).toBe(0);
     expect(getLane(lane.id)?.status).toBe('awaiting_orchestrator');
   });
+
+  it.each(['parked', 'hibernating', 'restoring'] as const)(
+    'does not reinterpret an intentionally %s workspace as an orphaned lane',
+    async (state) => {
+      const repo = makeRepo(`o8-merge-truth-${state}-`);
+      const head = git(repo, ['rev-parse', 'HEAD']);
+      const packetId = `pkt-${state}-${Date.now()}`;
+      const lane = createLane({
+        repoPath: repo,
+        worktreePath: missingWorktree(repo, `missing-${state}`),
+        branch: `inline/${state}`,
+        baseBranch: 'main',
+        runtime: 'codex',
+        packetId,
+      });
+      setLaneStatus(lane.id, 'reviewing', 'system', 'review_ready');
+      persistWorkspaceState(lane, state, head);
+
+      expect(await reconcileOrphanedWorktrees()).toBe(0);
+      expect(getLane(lane.id)?.status).toBe('reviewing');
+    },
+  );
 });

@@ -365,3 +365,13 @@ export function envWorktreeMaxCount(): number | null {
 export function envWorktreeMaxTotalGb(): number | null {
   return envPositiveNumber('O8_WORKTREE_MAX_TOTAL_GB');
 }
+
+export function envStorageReserveRatio(): number | null {
+  const value = envPositiveNumber('O8_STORAGE_RESERVE_RATIO');
+  return value !== null && value <= 1 ? value : null;
+}
+
+export function envStorageReserveFloorGb(): number | null {
+  const value = envPositiveNumber('O8_STORAGE_RESERVE_FLOOR_GB');
+  return value !== null && value <= 10000 ? value : null;
+}

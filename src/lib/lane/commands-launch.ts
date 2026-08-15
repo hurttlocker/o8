@@ -148,6 +148,7 @@ export async function launchSession(
       skipSetup: true,
       existingLaneId: command.laneId,
       packetId: lane.packetId ?? undefined,
+      storageAdmissionReservationId: command.storageAdmissionReservationId,
     });
 
     if (!result.ok) {

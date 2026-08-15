@@ -3,22 +3,15 @@ import { promisify } from 'node:util';
 
 import { surfaceEdgeCases } from '@/lib/dispatch/edge-case-surfacer';
 import { computeReadBudget, resolveModelTier } from '@/lib/dispatch/read-budget';
-import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
-import { resolveOpencodeWorkerModelSync } from '@/lib/operator/defaults';
-import { selectedClaudeCodeWorkerModelSync } from '@/lib/claude-code/worker-profile';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import { getLane, findLaneByPacket, listLanes } from '@/lib/lane/registry';
 import { salvagedWorkBlockReason } from '@/lib/supervisor/heal-guard';
 import { isGitWorkTreeSync } from '@/lib/lane/repo-preflight';
-import { recordLaneEvent } from '@/lib/lane/events';
-import { listSessionRuleTexts } from '@/lib/db/session-rules-store';
 import { resolveOverlapGateSync, resolveParallelCapSync } from '@/lib/operator/defaults';
 import { clearStaleLaneBinding, getDispatchableWave } from '@/lib/orchestrator/dag';
 import { normalizeOrchestratorMissionState, packetReleaseBlockedBy } from '@/lib/orchestrator/store';
 import { fanOutComparisonPackets } from '@/lib/orchestrator/comparison-fanout';
 import { releaseAbandonedMissionLifecycleHold } from '@/lib/orchestrator/mission-lifecycle-hold';
-import { getProjectContext } from '@/lib/projects/context';
-import { resolveDefaultBranch } from '@/lib/repos/registry';
 import { resolveWorkerRouting } from '@/lib/agents/routing';
 import {
   MCP_DISPATCH_TILE_SENTINEL,
@@ -29,11 +22,16 @@ import {
   type WorkerRouting,
 } from '@/lib/orchestrator/types';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
-import { assertRuntimeDispatchable } from '@/lib/runtimes/shared/auth-detect';
 import { bindWorkerLaunchParent } from '@/lib/orchestrator/worker-launch-context';
+import { launchPacketWithStorageAdmission } from '@/lib/orchestrator/dispatch-packet-launch';
+import {
+  PacketStorageAdmissionError,
+  type PacketStorageAdmissionCoordinator,
+  type PacketStorageAdmissionReceipt,
+} from '@/lib/orchestrator/storage-admission';
+import { getStoragePressureAdmissionCoordinator } from '@/lib/orchestrator/storage-pressure-policy';
 import { isDispatchHalted } from './dispatch-halt';
 
-import { buildPacketPrompt } from './packet-prompt';
 import { computePredictedFiles, filterOverlappingPackets } from './preservation-envelope';
 
 // Back-compat export — resolves env var, then the persisted operator default,
@@ -72,28 +70,6 @@ export function buildRemainingLaunchBudget(): DispatchLaunchBudget {
 const RECOVERY_COOLDOWN_MS = 60_000;
 const SESSION_RECOVERY_COMMIT_MESSAGE = 'auto-commit: session recovery';
 const execFileAsync = promisify(execFile);
-
-/**
- * The operator's pinned worker model for a runtime, or null when unpinned.
- * OpenCode is model-agnostic. Claude Code is normally provider-bound, but its
- * o8-owned worker can be pinned to an API gateway model in Settings.
- */
-function operatorWorkerModelFor(runtime: OrchestratorRuntime): string | null {
-  if (runtime === 'claude-code') {
-    try {
-      return selectedClaudeCodeWorkerModelSync();
-    } catch {
-      return null;
-    }
-  }
-  if (runtime !== 'opencode') return null;
-  try {
-    return resolveOpencodeWorkerModelSync();
-  } catch {
-    return null;
-  }
-}
-
 
 // #1551 — one canonical work-tree probe, shared with both orchestrator spawn
 // preflights (repo-preflight.ts) so the dispatch gate and the spawn gate can
@@ -149,15 +125,10 @@ interface LaunchedDispatchResult {
   laneId: string;
   sessionKey: string | null;
   workerRouting: WorkerRouting;
+  storageAdmission: PacketStorageAdmissionReceipt;
 }
 
 type DispatchResult = AwaitingReviewDispatchResult | LaunchedDispatchResult;
-
-interface LaunchDispatchResult {
-  laneId: string;
-  sessionKey: string | null;
-  workerRouting: WorkerRouting;
-}
 
 interface RecoveryDispatchContext {
   lane: OrchestratorLaneBinding | null;
@@ -219,6 +190,7 @@ async function dispatchOrRecoverPacket(
   packet: OrchestratorPacket,
   allPackets: OrchestratorPacket[],
   recoveryContext?: RecoveryDispatchContext | null,
+  storageAdmission = getStoragePressureAdmissionCoordinator(),
 ): Promise<DispatchResult> {
   if (packet.status === 'recovering' && recoveryContext?.worktreePath) {
     const worktreePath = recoveryContext.worktreePath;
@@ -281,100 +253,25 @@ async function dispatchOrRecoverPacket(
           : packet.workerRouting,
       }
     : packet;
-  const launchResult = await dispatchPacket(launchPacket, allPackets);
+  const workerRouting = resolveWorkerRouting({
+    workerIntent: launchPacket.workerIntent,
+    requestedProvider: launchPacket.workerRouting?.requestedProvider,
+    requestedRuntime: launchPacket.workerRouting?.requestedRuntime ?? launchPacket.runtime,
+    requestedModel: launchPacket.workerRouting?.requestedModel ?? launchPacket.assignedModel,
+    source: 'scheduler-dispatch',
+  });
+  const launchResult = await launchPacketWithStorageAdmission({
+    packet: launchPacket,
+    allPackets,
+    workerRouting,
+    storageAdmission,
+  });
   return {
     kind: 'launched',
     laneId: launchResult.laneId,
     sessionKey: launchResult.sessionKey,
     workerRouting: launchResult.workerRouting,
-  };
-}
-
-async function dispatchPacket(
-  packet: OrchestratorPacket,
-  allPackets: OrchestratorPacket[],
-): Promise<LaunchDispatchResult> {
-  const workerRouting = resolveWorkerRouting({
-    workerIntent: packet.workerIntent,
-    requestedProvider: packet.workerRouting?.requestedProvider,
-    requestedRuntime: packet.workerRouting?.requestedRuntime ?? packet.runtime,
-    requestedModel: packet.workerRouting?.requestedModel ?? packet.assignedModel,
-    source: 'scheduler-dispatch',
-  });
-  const launchContext = packetLaunchContext(packet);
-  const projectContext = await getProjectContext({ repoPath: packet.workspaceTargetPath });
-  const baseBranch = await resolveDefaultBranch(packet.workspaceTargetPath!);
-  await assertRuntimeDispatchable(
-    workerRouting.selectedRuntime,
-    workerRouting.selectedModel,
-    packet.workspaceTargetPath,
-  );
-  const laneResult = await dispatchLaneCommand({
-    verb: 'open_lane',
-    packetId: packet.id,
-    repoPath: packet.workspaceTargetPath!,
-    projectId: projectContext.runtimeProjectId,
-    branch: packet.branchTarget,
-    baseBranch,
-    runtime: workerRouting.selectedRuntime,
-    label: packet.title,
-    actor: 'orchestrator',
-  });
-
-  if (!laneResult.ok || !laneResult.laneId) {
-    throw new Error(laneResult.note || 'Unable to open lane.');
-  }
-
-  const launchResult = await dispatchLaneCommand({
-    verb: 'launch_session',
-    laneId: laneResult.laneId,
-    prompt: await buildPacketPrompt(
-      packet,
-      allPackets,
-      laneResult.lane?.baseBranch ?? baseBranch,
-      laneResult.lane?.worktreePath ?? null,
-    ),
-    // Fallback ladder: explicit packet model → operator's pinned worker model
-    // for this runtime → capability-map default → undefined. The operator pin
-    // sits between the two so a per-packet choice still wins, while an unpinned
-    // dispatch keeps the old capability-map behaviour exactly.
-    model: (
-      workerRouting.selectedModel
-      ?? operatorWorkerModelFor(workerRouting.selectedRuntime)
-      ?? getRuntimeCapability(workerRouting.selectedRuntime).defaultModel
-    ) ?? undefined,
-    effort: workerRouting.selectedEffort ?? undefined,
-    clientMutationId: `packet-launch:${packet.id}:${(packet.launchAttempts ?? 0) + 1}`,
-    launchContext,
-    actor: 'orchestrator',
-  });
-
-  if (!launchResult.ok) {
-    throw new Error(launchResult.note || 'Unable to launch session.');
-  }
-
-  // #1329 — audit trail. Snapshot the exact session rules that governed this
-  // packet at dispatch, so review reads as "what changed, under which
-  // constraints." Best-effort — a bad read never blocks the launch.
-  if (packet.orchestratorThreadId) {
-    try {
-      const rules = listSessionRuleTexts(packet.orchestratorThreadId);
-      if (rules.length > 0) {
-        recordLaneEvent(laneResult.laneId, 'rules_applied', 'orchestrator', {
-          threadId: packet.orchestratorThreadId,
-          ruleCount: rules.length,
-          rules,
-        });
-      }
-    } catch (error) {
-      console.warn('[session-rules] failed to record rules_applied event', error);
-    }
-  }
-
-  return {
-    laneId: laneResult.laneId,
-    sessionKey: launchResult.lane?.sessionKey ?? null,
-    workerRouting,
+    storageAdmission: launchResult.storageAdmission,
   };
 }
 
@@ -482,7 +379,12 @@ export function mergeDispatchTickOutcome(
 
 export async function runDispatchTick(
   state: OrchestratorMissionState,
-  options: { launchBudget?: DispatchLaunchBudget; enforceBootRecoveryGuard?: boolean; missionArchived?: boolean } = {},
+  options: {
+    launchBudget?: DispatchLaunchBudget;
+    enforceBootRecoveryGuard?: boolean;
+    missionArchived?: boolean;
+    storageAdmission?: PacketStorageAdmissionCoordinator;
+  } = {},
 ): Promise<OrchestratorMissionState> {
   let nextState = releaseAbandonedMissionLifecycleHold(normalizeOrchestratorMissionState(state));
   if (nextState.lifecycleHold) return nextState;
@@ -682,7 +584,12 @@ export async function runDispatchTick(
     console.log(`[dag-scheduler] Dispatching ${batch.length} packets in parallel (cap ${parallelCap}): ${batch.map(({ packet }) => packet.id).join(', ')}`);
 
     const results = await Promise.allSettled(
-      batch.map(({ packet, recoveryContext }) => dispatchOrRecoverPacket(packet, nextState.packets, recoveryContext)),
+      batch.map(({ packet, recoveryContext }) => dispatchOrRecoverPacket(
+        packet,
+        nextState.packets,
+        recoveryContext,
+        options.storageAdmission,
+      )),
     );
     nextState = normalizeOrchestratorMissionState({
       ...nextState,
@@ -766,17 +673,22 @@ export async function runDispatchTick(
               launchContext: packetLaunchContext(candidate),
               status: 'launching',
               blockedReason: null,
+              storageAdmission: result.value.storageAdmission,
               lane: createLaneBinding(candidate, result.value.laneId, result.value.sessionKey, workerRouting),
             };
           }
 
           const reason = result.reason instanceof Error ? result.reason.message : 'Dispatch failed.';
+          const storageReceipt = result.reason instanceof PacketStorageAdmissionError
+            ? result.reason.receipt
+            : candidate.storageAdmission ?? null;
           console.error(`[dag-scheduler] Failed to dispatch packet ${candidate.id}: ${reason}`);
           return {
             ...candidate,
             ...recoveryFields,
             status: 'blocked',
             blockedReason: reason,
+            storageAdmission: storageReceipt,
           };
         } catch (foldErr) {
           const msg = foldErr instanceof Error ? foldErr.message : 'Dispatch post-processing failed.';
@@ -786,6 +698,9 @@ export async function runDispatchTick(
             ...recoveryFields,
             status: 'blocked',
             blockedReason: msg,
+            storageAdmission: foldErr instanceof PacketStorageAdmissionError
+              ? foldErr.receipt
+              : candidate.storageAdmission ?? null,
           };
         }
       }),

@@ -51,6 +51,8 @@ export interface RepoRegistryEntry {
   isGitRepo?: boolean;
   addedAt: string;
   lastOpenedAt: string | null;
+  /** Durable opt-out from global storage-pressure parking. Missing legacy values normalize to false. */
+  storagePressureParkingDisabled: boolean;
   setup: RepoSetupConfig;
   readiness?: RepoReadiness;
 }
@@ -95,6 +97,7 @@ export interface RepoRegistryUpdateBody {
   localPath?: string;
   setup?: RepoSetupConfig;
   lastOpenedAt?: string | null;
+  storagePressureParkingDisabled?: boolean;
 }
 
 export interface RepoRegistryTouchBody {

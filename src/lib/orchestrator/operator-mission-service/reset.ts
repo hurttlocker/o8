@@ -23,6 +23,7 @@ import {
   withMissionRegistryState,
 } from '@/lib/orchestrator/mission-registry';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { advancePacketStorageAdmissionEpoch } from '@/lib/orchestrator/packet-storage-admission-normalize';
 import { resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
 import { supersedeDurableApprovedReviews } from '@/lib/lane/durable-review-approval';
 import {
@@ -85,6 +86,7 @@ function markPacketResetHeld(packet: OrchestratorPacket) {
   // Same for the self-review stall budget + the operator-Stop flag (2026-06-22):
   // a reset gives a fresh stall budget and re-enables dispatch.
   packet.stallRetries = 0;
+  advancePacketStorageAdmissionEpoch(packet);
   packet.launchAttempts = 0;
   packet.operatorStopped = false;
   packet.tierEscalated = undefined;

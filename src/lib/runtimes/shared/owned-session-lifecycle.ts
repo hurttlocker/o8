@@ -1,4 +1,10 @@
-import type { OwnedArchiveResponse, OwnedSessionStore } from './owned-session/types';
+import type {
+  OwnedArchiveResponse,
+  OwnedSessionStore,
+  OwnedWorkspaceBindingReceipt,
+  RebindOwnedWorkspaceInput,
+  RebindOwnedWorkspaceResult,
+} from './owned-session/types';
 import type { OwnedSessionState } from './owned-session/types';
 
 export interface OwnedSessionLifecycleRegistration {
@@ -8,6 +14,8 @@ export interface OwnedSessionLifecycleRegistration {
   resolveRoot(): string;
   sessionState(surfaceId: string): Promise<OwnedSessionState>;
   archiveSession(surfaceId: string): Promise<OwnedArchiveResponse>;
+  getWorkspaceBinding?(surfaceId: string): Promise<OwnedWorkspaceBindingReceipt | null>;
+  rebindWorkspace?(surfaceId: string, input: RebindOwnedWorkspaceInput): Promise<RebindOwnedWorkspaceResult>;
 }
 
 const registrations = new Map<string, OwnedSessionLifecycleRegistration>();
@@ -34,6 +42,12 @@ export function registerOwnedSessionLifecycle(options: {
     resolveRoot: () => process.env[options.rootEnvVar] || options.rootDefault,
     sessionState: (surfaceId) => options.store.sessionState(surfaceId),
     archiveSession: (surfaceId) => options.store.archiveSession(surfaceId),
+    ...(options.store.getWorkspaceBinding && options.store.rebindWorkspace ? {
+      getWorkspaceBinding: (surfaceId: string) => options.store.getWorkspaceBinding!(surfaceId),
+      rebindWorkspace: (surfaceId: string, input: RebindOwnedWorkspaceInput) => (
+        options.store.rebindWorkspace!(surfaceId, input)
+      ),
+    } : {}),
   };
   return registerOwnedSessionLifecycleHandler(registration);
 }

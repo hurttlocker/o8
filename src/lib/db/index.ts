@@ -29,7 +29,7 @@ import { ensureV18FactsSourceAuthoritySchema } from '@/lib/db/v18-facts-source-a
 import { ensureV19DocDistillStateSchema } from '@/lib/db/v19-doc-distill-state-migration';
 import { ensureV20FactsEmbeddingSchema } from '@/lib/db/v20-facts-embedding-migration';
 import { ensureV35UnifiedSearchSchema } from '@/lib/db/v35-unified-search-migration';
-import { ensureV36HarnessSchema } from '@/lib/db/v36-harness-migration';
+import { ensureLatestSchemas } from '@/lib/db/latest-schema-migrations';
 import { quarantineDeadIdempotencyReservations } from '@/lib/db/idempotency-reservation-recovery';
 import { DEFAULT_PROJECT_ID } from '@/lib/repos/projects';
 // ── Data directory ──
@@ -40,7 +40,7 @@ const DATA_DIR = getDataDir();
 // second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
-const DB_SCHEMA_VERSION = 36;
+const DB_SCHEMA_VERSION = 42;
 function migrationMarkerPath(version: number): string {
   return path.join(DATA_DIR, `.db-migrated-v${version}`);
 }
@@ -162,7 +162,7 @@ function ensureIdempotentColumnAdds(sqlite: Database.Database): void {
   // scoring. Backfill is opt-in via `scripts/backfill-fact-embeddings.ts`.
   ensureV20FactsEmbeddingSchema(sqlite);
   ensureV35UnifiedSearchSchema(sqlite);
-  ensureV36HarnessSchema(sqlite);
+  ensureLatestSchemas(sqlite);
   // #835 — recover any session_outcomes rows whose `valid_from` was inserted
   // as NULL (legacy seeds, raw INSERTs that bypassed the Drizzle schema
   // default). The column-add backfill in `ensureSessionOutcomeColumns` only
@@ -221,19 +221,19 @@ function ensureIdempotencyKeysTable(sqlite: Database.Database): void {
       result_json TEXT,
       pid INTEGER,
       reservation_id TEXT,
+      owner_identity_json TEXT,
       created_at INTEGER NOT NULL,
       expires_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_idempotency_expires ON idempotency_keys(expires_at);
   `);
-  // v33 — additive column for installs created at v32 (table already existed
-  // without `pid`). Tolerant of the duplicate-column race on a repeat boot.
   if (!tableColumnExists(sqlite, 'idempotency_keys', 'pid')) {
     addColumnTolerant(sqlite, 'ALTER TABLE idempotency_keys ADD COLUMN pid INTEGER');
   }
-  if (!tableColumnExists(sqlite, 'idempotency_keys', 'reservation_id')) {
+  if (!tableColumnExists(sqlite, 'idempotency_keys', 'reservation_id'))
     addColumnTolerant(sqlite, 'ALTER TABLE idempotency_keys ADD COLUMN reservation_id TEXT');
-  }
+  if (!tableColumnExists(sqlite, 'idempotency_keys', 'owner_identity_json'))
+    addColumnTolerant(sqlite, 'ALTER TABLE idempotency_keys ADD COLUMN owner_identity_json TEXT');
   quarantineDeadIdempotencyReservations(sqlite);
 }
 

@@ -13,6 +13,7 @@ import { spawnBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
 import { ensureDispatchBackendReady } from '@/lib/runtimes/shared/dispatch-readiness';
 import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
+import { guardedWorkspaceInvocation } from '@/lib/worktree/materialization-execution';
 import { tmuxSessionName } from '@/lib/terminal/tmux';
 import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
 
@@ -31,6 +32,9 @@ import {
   pathExists,
 } from './helpers';
 import { stageMissingCliRun } from './missing-cli';
+import { prependOwnedRun } from './run-ledger';
+import { probeOwnedRunMarker, resolveSpawnedProcessGroupId } from './run-process-proof';
+import { assertOwnedWorkspaceSpawnAvailable, type OwnedWorkspaceSpawnGuard } from './workspace-spawn-guard';
 import {
   prepareWorkerSandbox,
   SandboxUnavailableError,
@@ -54,6 +58,7 @@ export interface OwnedRunController {
   }>;
   readCostLine(run: OwnedRunRecord): Promise<string | undefined>;
   refreshSession(session: OwnedSessionRecord): Promise<OwnedSessionRecord>;
+  reconcilePreparedRuns(session: OwnedSessionRecord): Promise<OwnedSessionRecord>;
   spawnOwnedRun(
     session: OwnedSessionRecord,
     prompt: string,
@@ -69,6 +74,7 @@ export function createOwnedRunController({
   stderrNoise,
   io,
   withSurfaceLock,
+  workspaceSpawnGuard,
   invalidateFleetCache,
 }: {
   adapter: OwnedRuntimeAdapter;
@@ -78,6 +84,7 @@ export function createOwnedRunController({
   stderrNoise: RegExp[];
   io: OwnedSessionIo;
   withSurfaceLock: <T>(surfaceId: string, fn: () => Promise<T>) => Promise<T>;
+  workspaceSpawnGuard: OwnedWorkspaceSpawnGuard;
   invalidateFleetCache: () => void;
 }): OwnedRunController {
   const pendingAutoRetries = new Set<string>();
@@ -91,7 +98,6 @@ export function createOwnedRunController({
   }>();
   const RUN_ARTIFACT_CACHE_MAX = 48;
   const RAW_RETENTION_MAX_BYTES = 2 * 1024 * 1024;
-
   function recordSandboxDenialEvent(
     laneId: string,
     surfaceId: string,
@@ -335,10 +341,34 @@ export function createOwnedRunController({
     }
   }
 
+  async function reconcilePreparedRuns(session: OwnedSessionRecord): Promise<OwnedSessionRecord> {
+    let dirty = false;
+    for (let index = 0; index < session.recentRuns.length; index += 1) {
+      const run = session.recentRuns[index];
+      if (!run || run.spawnState !== 'prepared') continue;
+      const markerState = await probeOwnedRunMarker(run.processMarker);
+      if (markerState !== 'clear') continue;
+      const reconciled: OwnedRunRecord = {
+        ...run,
+        spawnState: 'reconciled_clear',
+        outcome: 'failed',
+        finishedAt: run.finishedAt ?? nowIso(),
+      };
+      session.recentRuns[index] = reconciled;
+      if (session.activeRun?.id === run.id) session.activeRun = undefined;
+      dirty = true;
+    }
+    if (dirty) await io.saveSession(session);
+    return session;
+  }
+
   async function refreshSession(session: OwnedSessionRecord) {
     let dirty = false;
 
     for (const run of session.recentRuns) {
+      // A prepared journal is deliberately preserved until the binding path,
+      // under the same surface lock as spawn, reconciles its durable marker.
+      if (run.spawnState === 'prepared') continue;
       const { stdoutRaw, stderrRaw, parsed } = await readRunArtifacts(run);
 
       if (!session.threadId && parsed.threadId) {
@@ -382,7 +412,9 @@ export function createOwnedRunController({
       }
     }
 
-    if (session.activeRun && !(await isOwnedRunAlive(session.activeRun))) {
+    if (session.activeRun
+      && session.activeRun.spawnState !== 'prepared'
+      && !(await isOwnedRunAlive(session.activeRun))) {
       session.activeRun = undefined;
       dirty = true;
     }
@@ -557,7 +589,7 @@ export function createOwnedRunController({
         session.reviewDisposition = 'watching';
         session.reviewDispositionUpdatedAt = nowIso();
         session.activeRun = undefined;
-        session.recentRuns = [failedRun, ...session.recentRuns].slice(0, 16);
+        prependOwnedRun(session, failedRun);
         await io.saveSession(session);
         return failedRun;
       }
@@ -571,8 +603,6 @@ export function createOwnedRunController({
     let pendingDetachedExit: OwnedChildExitOutcome | undefined;
 
     const bridgeSessionName = tmuxSessionName(runtimeId, runId);
-    const cliCmd = [spawnBinary, ...spawnArgs].map(quoteShellArg).join(' ');
-    const shellCmd = `${stdinPayload ? `printf %s ${quoteShellArg(stdinPayload)} | ` : ''}${cliCmd} | tee '${stdoutPath}' 2>'${stderrPath}'`;
     const adapterEnv: Record<string, string> = adapter.extraSpawnEnv
       ? await adapter.extraSpawnEnv(session)
       : {};
@@ -597,95 +627,136 @@ export function createOwnedRunController({
       // treat BROWSER as a launch binary fail to exec it, same net effect.
       BROWSER: 'none',
       O8_WORKER_TOKEN: workerToken,
+      O8_OWNED_RUN_MARKER: runId,
       ...(session.packetId ? { O8_WORKER_PACKET_ID: session.packetId } : {}),
       ...sandboxEnvExtra,
     };
 
     await ensureDispatchBackendReady(runtimeId, mode);
+    const durableSession = await io.findSession(session.surfaceId);
+    if (!durableSession) throw new Error('Owned session disappeared before its run could start.');
+    Object.assign(session, durableSession);
+    const spawnDecision = await assertOwnedWorkspaceSpawnAvailable({
+      surfaceId: session.surfaceId, sessionPacketId: session.packetId ?? null, laneId: session.laneId ?? null,
+      runtimeId, mode, binding: session.workspaceBinding ?? null, repoPath: session.repoPath,
+    }, workspaceSpawnGuard);
+    const materializationIdentity = spawnDecision.materializationIdentity ?? null;
+    const bridgeLaunch = guardedWorkspaceInvocation(spawnBinary, spawnArgs, materializationIdentity);
+    const cliCmd = [bridgeLaunch.command, ...bridgeLaunch.args].map(quoteShellArg).join(' ');
+    const shellCmd = `${stdinPayload ? `printf %s ${quoteShellArg(stdinPayload)} | ` : ''}${cliCmd} | tee '${stdoutPath}' 2>'${stderrPath}'`;
 
-    if (!crashSurvivableWorkersEnabled()) {
-      try {
-        const result = await spawnBridgeTerminalSession({
-          sessionName: bridgeSessionName,
-          shellCommand: shellCmd,
-          cwd: session.repoPath,
-          env: spawnEnv,
-        });
-        terminalSessionName = result.sessionName;
-        pid = typeof result.pid === 'number' ? result.pid : 0;
-      } catch {
-        // bridge spawn failed; fall through to detached spawn
-      }
-    }
-
-    if (!terminalSessionName) {
-      const stdoutFd = openSync(stdoutPath, 'a');
-      const stderrFd = openSync(stderrPath, 'a');
-      try {
-        // On Windows the resolved CLI is usually a `.cmd` shim (that is what npm
-        // installs), and Node refuses to execute one without an interpreter —
-        // it fails before a process exists, so the run dies in milliseconds with
-        // pid 0 and an empty stderr, which reads like the agent instantly gave
-        // up. cliInvocation is the identity for real executables. See #1758.
-        const winLaunch = cliInvocation(spawnBinary, spawnArgs);
-        const child = process.platform === 'win32'
-          ? spawn(winLaunch.command, winLaunch.args, {
-              windowsHide: true,
-              cwd: session.repoPath,
-              detached: true,
-              stdio: [stdinPayload ? 'pipe' : 'ignore', stdoutFd, stderrFd],
-              env: { ...process.env, ...spawnEnv },
-            })
-          : spawn('nice', ['-n', '10', spawnBinary, ...spawnArgs], {
-              windowsHide: true,
-              cwd: session.repoPath,
-              detached: true,
-              stdio: [stdinPayload ? 'pipe' : 'ignore', stdoutFd, stderrFd],
-              env: { ...process.env, ...spawnEnv },
-            });
-        detachedChild = child;
-        observeChildExit(child, (childExit) => {
-          if (!runPersisted) {
-            pendingDetachedExit = childExit;
-            return;
-          }
-          void recordDetachedChildExit(session.surfaceId, runId, stderrPath, childExit).catch((err) => {
-            console.warn(`[owned-store] ${runtimeId} child-exit recording failed for ${runId}:`, err);
-          });
-        });
-        if (stdinPayload && child.stdin) {
-          child.stdin.end(stdinPayload, 'utf8');
-        }
-        child.unref();
-        pid = child.pid ?? 0;
-        detachMode = 'detached';
-      } finally {
-        closeSync(stdoutFd);
-        closeSync(stderrFd);
-      }
-    }
-
-    const run: OwnedRunRecord = {
+    const preparedRun: OwnedRunRecord = {
       id: runId,
       mode,
       prompt,
       startedAt: nowIso(),
-      pid,
+      pid: 0,
       commandIdentity: path.basename(spawnBinary),
+      processMarker: runId,
+      spawnState: 'prepared',
       stdoutPath,
       stderrPath,
       outcome: 'running',
       sandboxed: sandboxEnabled,
-      tmuxSession: terminalSessionName,
-      detachMode,
     };
-
     session.latestPrompt = prompt;
     session.latestSummary = compactText(prompt, 140) || session.latestSummary;
     session.reviewDisposition = 'watching';
     session.reviewDispositionUpdatedAt = nowIso();
+    session.activeRun = preparedRun;
+    prependOwnedRun(session, preparedRun);
+    await io.saveSession(session);
+
+    try {
+      if (!crashSurvivableWorkersEnabled()) {
+        try {
+          const result = await spawnBridgeTerminalSession({
+            sessionName: bridgeSessionName,
+            shellCommand: shellCmd,
+            cwd: session.repoPath,
+            env: spawnEnv,
+          });
+          terminalSessionName = result.sessionName;
+          pid = typeof result.pid === 'number' ? result.pid : 0;
+        } catch {
+          // bridge spawn failed; fall through to detached spawn
+        }
+      }
+
+      if (!terminalSessionName) {
+        const stdoutFd = openSync(stdoutPath, 'a');
+        const stderrFd = openSync(stderrPath, 'a');
+        try {
+          // On Windows the resolved CLI is usually a `.cmd` shim (that is what npm
+          // installs), and Node refuses to execute one without an interpreter —
+          // it fails before a process exists, so the run dies in milliseconds with
+          // pid 0 and an empty stderr, which reads like the agent instantly gave
+          // up. cliInvocation is the identity for real executables. See #1758.
+          const winLaunch = cliInvocation(spawnBinary, spawnArgs);
+          const directLaunch = process.platform === 'win32'
+            ? guardedWorkspaceInvocation(winLaunch.command, winLaunch.args, materializationIdentity)
+            : guardedWorkspaceInvocation(
+                '/usr/bin/nice',
+                ['-n', '10', spawnBinary, ...spawnArgs],
+                materializationIdentity,
+              );
+          const child = process.platform === 'win32'
+            ? spawn(directLaunch.command, directLaunch.args, {
+                windowsHide: true,
+                cwd: session.repoPath,
+                detached: true,
+                stdio: [stdinPayload ? 'pipe' : 'ignore', stdoutFd, stderrFd],
+                env: { ...process.env, ...spawnEnv },
+              })
+            : spawn(directLaunch.command, directLaunch.args, {
+                windowsHide: true,
+                cwd: session.repoPath,
+                detached: true,
+                stdio: [stdinPayload ? 'pipe' : 'ignore', stdoutFd, stderrFd],
+                env: { ...process.env, ...spawnEnv },
+              });
+          detachedChild = child;
+          observeChildExit(child, (childExit) => {
+            if (!runPersisted) {
+              pendingDetachedExit = childExit;
+              return;
+            }
+            void recordDetachedChildExit(session.surfaceId, runId, stderrPath, childExit).catch((err) => {
+              console.warn(`[owned-store] ${runtimeId} child-exit recording failed for ${runId}:`, err);
+            });
+          });
+          if (stdinPayload && child.stdin) {
+            child.stdin.end(stdinPayload, 'utf8');
+          }
+          child.unref();
+          pid = child.pid ?? 0;
+          detachMode = 'detached';
+        } finally {
+          closeSync(stdoutFd);
+          closeSync(stderrFd);
+        }
+      }
+    } catch (error) {
+      // A synchronous failure can still follow an ambiguous bridge response,
+      // so settle only when the durable marker scan proves no process exists.
+      await reconcilePreparedRuns(session);
+      throw error;
+    }
+
+    const processGroupId = process.platform !== 'win32' && detachMode === 'detached' && pid > 0
+      ? pid
+      : await resolveSpawnedProcessGroupId(pid);
+    const run: OwnedRunRecord = {
+      ...preparedRun,
+      pid,
+      processGroupId,
+      spawnState: 'started',
+      tmuxSession: terminalSessionName,
+      detachMode,
+    };
+
     session.activeRun = run;
-    session.recentRuns = [run, ...session.recentRuns].slice(0, 16);
+    session.recentRuns = session.recentRuns.map((candidate) => candidate.id === run.id ? run : candidate);
     await io.saveSession(session);
     runPersisted = true;
     if (detachedChild && pendingDetachedExit) {
@@ -700,6 +771,7 @@ export function createOwnedRunController({
     readRunArtifacts,
     readCostLine,
     refreshSession,
+    reconcilePreparedRuns,
     spawnOwnedRun,
   };
 }
