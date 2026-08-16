@@ -223,6 +223,7 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
         skipSetup: payload.skipSetup,
         envMode: repoEntry?.setup.envMode,
         envFiles: repoEntry?.setup.envFiles,
+        repoSetup: repoEntry?.setup,
         isolationPreference: repoEntry?.setup.workspaceIsolationPreference,
         packetId: payload.packetId,
         storageAdmissionReservationId: payload.storageAdmissionReservationId,

@@ -33,7 +33,10 @@ const { createLane, findLatestLaneByPacket, setLaneStatus } = await import('@/li
 const { readLaneReviewDiff, resolveLaneReviewSource } = await import('@/lib/lane/review-source');
 const { addRepo } = await import('@/lib/repos/registry');
 const { registerOwnedSessionLifecycleHandler } = await import('@/lib/runtimes/shared/owned-session-lifecycle');
+const { measureWorkspaceStorage } = await import('@/lib/workspace/hibernator');
+const { captureWorktreeMaterializationIdentity } = await import('@/lib/worktree/materialization-identity');
 const { resolveWorktreeRootLayout } = await import('@/lib/worktree/root-layout');
+const { listWorkspaceSnapshotTransitions } = await import('@/lib/worktree/snapshot-state');
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
@@ -75,7 +78,16 @@ describe('workspace park production route', () => {
     writeFileSync(path.join(worktreePath, 'tracked.txt'), 'reviewed change\n');
     git(worktreePath, 'add', 'tracked.txt');
     git(worktreePath, 'commit', '-qm', 'packet change');
+    mkdirSync(path.join(worktreePath, 'node_modules'));
+    writeFileSync(
+      path.join(worktreePath, 'node_modules', 'dogfood-payload.bin'),
+      Buffer.alloc(8 * 1024 * 1024, 0x5a),
+    );
     const reviewedHead = git(worktreePath, 'rev-parse', 'HEAD');
+    const materializationIdentity = await captureWorktreeMaterializationIdentity(worktreePath);
+    const materializationParentIdentity = await captureWorktreeMaterializationIdentity(
+      path.dirname(worktreePath),
+    );
     writeFileSync(path.join(resolveWorktreeRootLayout(registeredRepoPath).primaryBase, '.meta.json'), JSON.stringify({
       version: 1,
       worktrees: {
@@ -90,6 +102,8 @@ describe('workspace park production route', () => {
           branchName: branch,
           status: 'ready',
           isolationKind: 'git-worktree',
+          materializationIdentity,
+          materializationParentIdentity,
         },
       },
     }));
@@ -150,9 +164,11 @@ describe('workspace park production route', () => {
     });
     setLaneStatus(lane.id, 'reviewing');
 
+    const parkStartedAt = performance.now();
     const parked = await POST(post('park', packetId, 'real-park-1'));
+    const parkDurationMs = Math.round(performance.now() - parkStartedAt);
     const parkedBody = await parked.json();
-    expect(parked.status).toBe(200);
+    expect(parked.status, JSON.stringify(parkedBody)).toBe(200);
     expect(parkedBody).toMatchObject({
       ok: true,
       result: { status: 'parked', state: 'parked', reviewable: true },
@@ -160,6 +176,13 @@ describe('workspace park production route', () => {
     expect(JSON.stringify(parkedBody)).not.toContain(worktreePath);
     expect(JSON.stringify(parkedBody)).not.toContain(surfaceId);
     expect(existsSync(worktreePath)).toBe(false);
+    const parkedTransition = listWorkspaceSnapshotTransitions(repo.id, packetId)
+      .find((transition) => transition.transitionId === 'real-park-1:parked');
+    const logicalBytesBefore = parkedTransition?.receipt?.logicalBytesBefore;
+    const reclaimedAvailableBytes = parkedTransition?.receipt?.reclaimedAvailableBytes;
+    expect(typeof logicalBytesBefore).toBe('number');
+    expect(logicalBytesBefore).toBeGreaterThanOrEqual(8 * 1024 * 1024);
+    expect(typeof reclaimedAvailableBytes).toBe('number');
 
     closeDb();
     const reboundLane = findLatestLaneByPacket(packetId)!;
@@ -169,7 +192,9 @@ describe('workspace park production route', () => {
       source: { kind: 'immutable_snapshot', mergeAvailable: false },
     });
 
+    const restoreStartedAt = performance.now();
     const restored = await POST(post('restore', packetId, 'real-restore-1'));
+    const restoreDurationMs = Math.round(performance.now() - restoreStartedAt);
     const restoredBody = await restored.json();
     expect(restored.status).toBe(200);
     expect(restoredBody).toMatchObject({
@@ -190,5 +215,18 @@ describe('workspace park production route', () => {
         version: 2,
       },
     });
-  }, 15_000);
+    const restoredStorage = await measureWorkspaceStorage(worktreePath);
+    if (process.env.O8_THIN_WORKSPACE_DOGFOOD === '1') {
+      console.info('[thin-workspaces-dogfood]', JSON.stringify({
+        logicalBytesBefore,
+        parkedPathBytes: 0,
+        restoredLogicalBytes: restoredStorage.logicalBytes,
+        reclaimedAvailableBytes,
+        parkDurationMs,
+        restoreDurationMs,
+        parkedReviewSource: parkedReview.source.kind,
+        restoredReviewSource: 'materialized',
+      }));
+    }
+  }, 60_000);
 });

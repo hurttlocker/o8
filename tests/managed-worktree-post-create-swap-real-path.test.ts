@@ -1,9 +1,11 @@
 import { execFileSync } from 'node:child_process';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   renameSync,
   symlinkSync,
   writeFileSync,
@@ -31,8 +33,9 @@ vi.mock('@/lib/worktree/materialization-leaf-io', async (importOriginal) => {
     writePinnedWorkspaceFile: async (
       ...args: Parameters<typeof actual.writePinnedWorkspaceFile>
     ) => {
-      await actual.writePinnedWorkspaceFile(...args);
+      const receipt = await actual.writePinnedWorkspaceFile(...args);
       h.afterWrite?.(args[0], args[2]);
+      return receipt;
     },
   };
 });
@@ -42,6 +45,7 @@ const { prepareLaunchWorktree } = await import('@/lib/worktree/launch');
 const {
   observeManagedWorktreeRootIdentity,
   resolveManagedWorktreeStorageTarget,
+  resolveWorktreeRootLayout,
 } = await import('@/lib/worktree/root-layout');
 const { StorageAdmissionStore } = await import('@/lib/workspace/storage-admission');
 
@@ -126,7 +130,7 @@ it('preserves dirty replacement files when reset and rollback see a changed work
   const packetId = `reset-swap-${Date.now()}`;
   const reservationId = await reserve(repoRoot, packetId);
   h.afterWrite = (workspacePath, relativePath) => {
-    if (relativePath !== '.claude/settings.json') return;
+    if (relativePath !== '.claude/settings.local.json') return;
     h.afterWrite = null;
     swapWorkspace(workspacePath, replacement);
   };
@@ -138,6 +142,27 @@ it('preserves dirty replacement files when reset and rollback see a changed work
   })).rejects.toThrow(/ownership changed|identity changed/);
 
   expect(readFileSync(path.join(replacement, 'README.md'), 'utf8')).toBe('dirty replacement\n');
+  const metadataRoot = realpathSync(resolveWorktreeRootLayout(repoRoot).primaryBase);
+  const metaPath = path.join(metadataRoot, '.meta.json');
+  const mirrored = JSON.parse(readFileSync(metaPath, 'utf8')) as {
+    worktrees: Record<string, { materializationIdentity?: unknown }>;
+  };
+  const durable = getSqlite().prepare(`
+    SELECT payload_json, mirror_identity_json
+    FROM worktree_metadata_state
+    WHERE metadata_root = ?
+  `).get(metadataRoot) as {
+    payload_json: string;
+    mirror_identity_json: string;
+  };
+  const durablePayload = JSON.parse(durable.payload_json) as typeof mirrored;
+  const worktreeId = `packet-${packetId}`;
+  expect(durablePayload.worktrees[worktreeId]).toEqual(mirrored.worktrees[worktreeId]);
+  const metaIdentity = lstatSync(metaPath);
+  expect(JSON.parse(durable.mirror_identity_json)).toEqual({
+    device: metaIdentity.dev,
+    inode: metaIdentity.ino,
+  });
 }, 30_000);
 
 it('does not hydrate cache bytes after an APFS clone is replaced', async () => {

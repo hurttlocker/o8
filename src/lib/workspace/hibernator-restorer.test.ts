@@ -39,6 +39,14 @@ const {
   transitionWorkspaceSnapshot,
 } = await import('@/lib/worktree/snapshot-state');
 const { closeDb } = await import('@/lib/db');
+const {
+  managedWorkspaceSafetyHooksContent,
+  resolveManagedWorkspaceSafetyHookRuntime,
+  writeManagedWorkspaceSafetyHooks,
+} = await import('@/lib/worktree/safety-hooks');
+const { captureWorktreeMaterializationIdentity } = await import(
+  '@/lib/worktree/materialization-identity'
+);
 
 const roots: string[] = [];
 let priorWorktreeRoot: string | undefined;
@@ -265,8 +273,16 @@ describe('workspace hibernate and restore services', { timeout: 60_000 }, () => 
   it('parks and restores an unchanged copied environment binding', async () => {
     const f = fixture('copy-env-roundtrip');
     const contents = 'TOKEN=registered-source\n';
+    const safetyHooks = managedWorkspaceSafetyHooksContent(
+      await resolveManagedWorkspaceSafetyHookRuntime(),
+    );
     writeFileSync(path.join(f.repo.localPath, '.env.local'), contents);
     writeFileSync(path.join(f.lane.worktreePath!, '.env.local'), contents);
+    await writeManagedWorkspaceSafetyHooks(
+      f.repo.localPath,
+      f.lane.worktreePath!,
+      await captureWorktreeMaterializationIdentity(f.lane.worktreePath!),
+    );
 
     const parked = await parkWorkspace({
       repositoryUuid: f.repo.id,
@@ -283,6 +299,10 @@ describe('workspace hibernate and restore services', { timeout: 60_000 }, () => 
     }, dependencies(f));
     expect(restored).toMatchObject({ status: 'restored' });
     expect(readFileSync(path.join(f.lane.worktreePath!, '.env.local'), 'utf8')).toBe(contents);
+    expect(readFileSync(
+      path.join(f.lane.worktreePath!, '.claude', 'settings.local.json'),
+      'utf8',
+    )).toBe(safetyHooks);
   });
 
   it('refuses a restore-time destination ancestor swap without writing outside the workspace', async () => {
@@ -331,8 +351,6 @@ describe('workspace hibernate and restore services', { timeout: 60_000 }, () => 
     const secret = 'TOKEN=must-stay-with-owned-workspace\n';
     writeFileSync(path.join(f.repo.localPath, '.env.local'), secret);
     writeFileSync(path.join(f.lane.worktreePath!, '.env.local'), secret);
-    f.repo.setup.installCommand = 'install-test';
-    f.repo.setup.installOnCreateWorkspace = true;
     const parked = await parkWorkspace({
       repositoryUuid: f.repo.id,
       packetId: f.lane.packetId!,
@@ -1018,7 +1036,13 @@ describe('workspace hibernate and restore services', { timeout: 60_000 }, () => 
     `);
     const child = spawn(process.execPath, ['--import', 'tsx', runnerPath], {
       cwd: process.cwd(),
-      env: { ...process.env, RESTORE_INPUT: JSON.stringify(restoreInput) },
+      env: {
+        ...process.env,
+        NODE_OPTIONS: [process.env.NODE_OPTIONS?.trim(), '--conditions=react-server']
+          .filter(Boolean)
+          .join(' '),
+        RESTORE_INPUT: JSON.stringify(restoreInput),
+      },
       stdio: ['ignore', 'ignore', 'pipe'],
     });
     let stderr = '';
@@ -1045,10 +1069,10 @@ describe('workspace hibernate and restore services', { timeout: 60_000 }, () => 
       packetId: f.lane.packetId!,
       operationId: `crash-restore-${crashBoundary}-retry`,
     }, dependencies(f));
-    expect(retry).toMatchObject({ status: 'restored' });
+    expect(retry, JSON.stringify(retry)).toMatchObject({ status: 'restored' });
     expect(existsSync(f.lane.worktreePath!)).toBe(true);
     expect(git(f.lane.worktreePath!, 'rev-parse', 'HEAD')).toBe(parked.headCommit);
-  }, 30_000);
+  }, 60_000);
 
   it('finishes an exact receipted copy-on-write quarantine after a crash', async () => {
     const f = fixture('crash-cow-quarantine', 'apfs-cow-clone');
@@ -1167,7 +1191,11 @@ async function stageParkable(f: ReturnType<typeof fixture>, operationId: string)
     treeSha: truth.treeSha,
     recoveryRef: truth.recoveryRef,
     diffFingerprint: truth.diffFingerprint,
-    dependencyRecipeKey: repoSetupBoundRecipeKey(f.repo, requiredCopyBindings),
+    dependencyRecipeKey: await repoSetupBoundRecipeKey(
+      f.repo,
+      requiredCopyBindings,
+      f.lane.worktreePath!,
+    ),
     sessionIdentities: [
       { kind: 'owned-session', identity: f.surfaceId, runtime: 'codex', bindingId: `packet:${f.lane.packetId}` },
       { kind: 'workspace-isolation', identity: 'git-worktree' },

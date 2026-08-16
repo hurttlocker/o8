@@ -17,6 +17,7 @@ import {
   resolveWorktreeRootLayout,
 } from '@/lib/worktree/root-layout';
 import type { WorktreeMetaEntry, WorktreeMetaStore } from '@/lib/worktree/types';
+import { isMetadataLockProcessIdentity } from './metadata-lock-process-identity';
 import { observeStorageVolume, type StorageRootIdentity } from '@/lib/workspace/storage-admission';
 import {
   readPinnedWorkspaceFile,
@@ -84,6 +85,18 @@ function isWorktreeMetaEntry(value: unknown, id: string): value is WorktreeMetaE
     && (entry.hydrationPaths === undefined
       || (Array.isArray(entry.hydrationPaths)
         && entry.hydrationPaths.every((item) => typeof item === 'string')))
+    && (entry.dependencyRecipeKey === undefined
+      || (typeof entry.dependencyRecipeKey === 'string'
+        && /^[0-9a-f]{64}$/.test(entry.dependencyRecipeKey)))
+    && (entry.creationOwner === undefined
+      || (typeof entry.creationOwner === 'object'
+        && entry.creationOwner !== null
+        && Number.isInteger(entry.creationOwner.pid)
+        && entry.creationOwner.pid > 0
+        && isMetadataLockProcessIdentity(entry.creationOwner.identity)))
+    && (entry.creationBranchHead === undefined
+      || (typeof entry.creationBranchHead === 'string'
+        && /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(entry.creationBranchHead)))
     && (entry.materializationIdentity === undefined
       || (typeof entry.materializationIdentity === 'object'
         && entry.materializationIdentity !== null

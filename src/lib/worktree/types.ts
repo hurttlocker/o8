@@ -5,7 +5,12 @@
  * Designed to generalize to IsolationProvider (containers, VMs) in 2028.
  */
 
-import type { RepoSetupEnvMode, RepoWorkspaceIsolationPreference } from '@/lib/repos/types';
+import type {
+  RepoSetupConfig,
+  RepoSetupEnvMode,
+  RepoWorkspaceIsolationPreference,
+} from '@/lib/repos/types';
+import type { MetadataLockProcessIdentity } from './metadata-lock-process-identity';
 
 export type WorktreeStatus = 'creating' | 'setup' | 'ready' | 'active' | 'stale' | 'merging' | 'cleaning';
 
@@ -47,6 +52,8 @@ export interface WorktreeInfo {
   isolationKind?: WorkspaceIsolationKind;
   /** Ignored dependency/cache paths hydrated into this workspace */
   hydrationPaths?: string[];
+  /** Deterministic package-manager recipe installed into this private workspace. */
+  dependencyRecipeKey?: string;
 }
 
 /**
@@ -87,6 +94,8 @@ export interface CreateWorktreeOptions {
   envMode?: RepoSetupEnvMode;
   /** Env files to copy/symlink when bootstrapping */
   envFiles?: string[];
+  /** Registry-owned package-manager contract; absent callers use strict lockfile detection. */
+  repoSetup?: RepoSetupConfig;
   /** Preferred workspace isolation implementation */
   isolationPreference?: WorkspaceIsolationPreference;
   /**
@@ -160,6 +169,15 @@ export interface WorktreeMetaEntry {
   isolationKind?: WorkspaceIsolationKind;
   /** Ignored dependency/cache paths hydrated into this workspace */
   hydrationPaths?: string[];
+  /** Deterministic package-manager recipe installed into this private workspace. */
+  dependencyRecipeKey?: string;
+  /** Exact process that owns an unfinished managed creation. */
+  creationOwner?: {
+    pid: number;
+    identity: MetadataLockProcessIdentity;
+  };
+  /** Exact branch tip proven inside the owned creation before retirement. */
+  creationBranchHead?: string;
   /** Exact restored directory identity; later destructive operations must match it. */
   materializationIdentity?: {
     device: number;

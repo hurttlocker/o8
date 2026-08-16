@@ -45,6 +45,12 @@ function mockObservedStorage(): void {
   }));
 }
 
+function configureManagedWorktreeRoot(root: string): void {
+  const worktreeRoot = path.join(root, 'worktrees');
+  mkdirSync(worktreeRoot);
+  process.env.O8_WORKTREE_ROOT = worktreeRoot;
+}
+
 afterEach(() => {
   vi.doUnmock('@/lib/worktree/materialization-leaf-io');
   vi.doUnmock('@/lib/worktree/storage-telemetry');
@@ -52,11 +58,50 @@ afterEach(() => {
   vi.resetModules();
 });
 
+it('refuses launch without overwriting or hiding tracked local Claude settings', async () => {
+  const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'o8-hook-tracked-local-refusal-')));
+  const repo = makeRepo(root);
+  const settingsBytes = '{"permissions":{"deny":["Bash"]}}\n';
+  mkdirSync(path.join(repo, '.claude'));
+  writeFileSync(path.join(repo, '.claude', 'settings.local.json'), settingsBytes);
+  execFileSync('git', ['add', '-f', '.claude/settings.local.json'], { cwd: repo });
+  execFileSync('git', [
+    '-c', 'user.name=o8-test', '-c', 'user.email=o8@example.test',
+    'commit', '-q', '-m', 'tracked local settings',
+  ], { cwd: repo });
+  const worktree = path.join(root, 'worktree');
+  execFileSync('git', ['worktree', 'add', '-qb', 'inline/hook-tracked-local-refusal', worktree], {
+    cwd: repo,
+  });
+  const { captureWorktreeMaterializationIdentity } = await import(
+    '@/lib/worktree/materialization-identity'
+  );
+  const { writeManagedWorkspaceSafetyHooks } = await import('@/lib/worktree/safety-hooks');
+
+  await expect(writeManagedWorkspaceSafetyHooks(
+    repo,
+    worktree,
+    await captureWorktreeMaterializationIdentity(worktree),
+  )).rejects.toThrow(/refuses to replace existing \.claude\/settings\.local\.json/);
+
+  expect(readFileSync(path.join(repo, '.claude', 'settings.local.json'), 'utf8')).toBe(settingsBytes);
+  expect(readFileSync(path.join(worktree, '.claude', 'settings.local.json'), 'utf8')).toBe(settingsBytes);
+  expect(execFileSync(
+    'git', ['show', 'HEAD:.claude/settings.local.json'], { cwd: repo, encoding: 'utf8' },
+  )).toBe(settingsBytes);
+  expect(() => execFileSync(
+    'git', ['config', '--worktree', '--get', 'core.excludesFile'], { cwd: worktree },
+  )).toThrow();
+  expect(readFileSync(path.join(repo, '.git', 'info', 'exclude'), 'utf8'))
+    .not.toContain('.claude/settings.local.json');
+  rmSync(root, { recursive: true, force: true });
+}, 60_000);
+
 it('refuses launch and retains authority when the final hook-settings publish is replaced', async () => {
   const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'o8-hook-publish-refusal-')));
   const repo = makeRepo(root);
   process.env.CORTEX_IDE_DATA_DIR = path.join(root, 'data');
-  process.env.O8_WORKTREE_ROOT = path.join(root, 'worktrees');
+  configureManagedWorktreeRoot(root);
   process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
   mockObservedStorage();
   let admitted = '';
@@ -70,8 +115,8 @@ it('refuses launch and retains authority when the final hook-settings publish is
         relativePath: string,
         content: string,
       ) => actual.writePinnedWorkspaceFile(workspacePath, identity, relativePath, content, async (segment) => {
-        if (relativePath !== '.claude/settings.json' || segment !== 'atomic-opened') return;
-        const target = path.join(workspacePath, '.claude', 'settings.json');
+        if (relativePath !== '.claude/settings.local.json' || segment !== 'atomic-opened') return;
+        const target = path.join(workspacePath, '.claude', 'settings.local.json');
         admitted = `${target}-admitted`;
         renameSync(target, admitted);
         writeFileSync(target, '{"attacker":true}\n');
@@ -95,7 +140,7 @@ it('refuses launch and retains authority when the final hook-settings publish is
   })).rejects.toThrow('target changed before direct write');
 
   const workspace = path.join(resolveWorktreeRootLayout(repo).primaryBase, id);
-  expect(readFileSync(path.join(workspace, '.claude', 'settings.json'), 'utf8'))
+  expect(readFileSync(path.join(workspace, '.claude', 'settings.local.json'), 'utf8'))
     .toBe('{"attacker":true}\n');
   expect(existsSync(admitted)).toBe(true);
   await expect(withWorktreeMetaTransaction(
@@ -106,24 +151,25 @@ it('refuses launch and retains authority when the final hook-settings publish is
   rmSync(root, { recursive: true, force: true });
 }, 60_000);
 
-it('refuses launch without mutating a hardlinked hook-settings target', async () => {
+it('refuses launch without mutating an existing hardlinked local hook-settings target', async () => {
   const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'o8-hook-hardlink-refusal-')));
   const repo = makeRepo(root);
   const external = path.join(root, 'external-settings');
   writeFileSync(external, 'external-sentinel');
   process.env.CORTEX_IDE_DATA_DIR = path.join(root, 'data');
-  process.env.O8_WORKTREE_ROOT = path.join(root, 'worktrees');
+  configureManagedWorktreeRoot(root);
   process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
   mockObservedStorage();
   const { closeDb } = await import('@/lib/db');
   const { WorktreeManager } = await import('@/lib/worktree/manager');
   const { withWorktreeMetaTransaction } = await import('@/lib/worktree/metadata-store');
+  const { resolveWorktreeRootLayout } = await import('@/lib/worktree/root-layout');
   const id = 'hook-hardlink-refusal';
   const manager = new WorktreeManager(repo);
   Object.defineProperty(manager, 'bootstrapEnvFiles', {
     value: async (workspacePath: string) => {
       mkdirSync(path.join(workspacePath, '.claude'), { recursive: true });
-      linkSync(external, path.join(workspacePath, '.claude', 'settings.json'));
+      linkSync(external, path.join(workspacePath, '.claude', 'settings.local.json'));
     },
   });
 
@@ -135,13 +181,14 @@ it('refuses launch without mutating a hardlinked hook-settings target', async ()
     managed: true,
     skipSetup: true,
     isolationPreference: 'git-worktree',
-  })).rejects.toThrow('not exclusively linked');
+  })).rejects.toThrow(/refuses to replace existing \.claude\/settings\.local\.json/);
 
   expect(readFileSync(external, 'utf8')).toBe('external-sentinel');
+  expect(existsSync(path.join(resolveWorktreeRootLayout(repo).primaryBase, id))).toBe(false);
   await expect(withWorktreeMetaTransaction(
     repo,
     async (transaction) => (await transaction.readAll())[id]?.materializationIdentity,
-  )).resolves.toBeDefined();
+  )).resolves.toBeUndefined();
   closeDb();
   rmSync(root, { recursive: true, force: true });
 }, 60_000);
@@ -151,7 +198,7 @@ it('refuses launch without copying env bytes into a replaced final target', asyn
   const repo = makeRepo(root);
   writeFileSync(path.join(repo, '.env'), 'trusted-secret');
   process.env.CORTEX_IDE_DATA_DIR = path.join(root, 'data');
-  process.env.O8_WORKTREE_ROOT = path.join(root, 'worktrees');
+  configureManagedWorktreeRoot(root);
   process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
   mockObservedStorage();
   let admitted = '';
@@ -208,7 +255,7 @@ it('refuses launch when a bootstrapped env symlink is replaced before its receip
   const source = path.join(repo, '.env');
   writeFileSync(source, 'trusted-secret');
   process.env.CORTEX_IDE_DATA_DIR = path.join(root, 'data');
-  process.env.O8_WORKTREE_ROOT = path.join(root, 'worktrees');
+  configureManagedWorktreeRoot(root);
   process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
   mockObservedStorage();
   let admitted = '';
@@ -263,7 +310,7 @@ it('refuses launch and retains authority when the final hydrated-cache publish i
   mkdirSync(path.join(repo, '.next', 'cache'), { recursive: true });
   writeFileSync(path.join(repo, '.next', 'cache', 'trusted'), 'trusted-cache');
   process.env.CORTEX_IDE_DATA_DIR = path.join(root, 'data');
-  process.env.O8_WORKTREE_ROOT = path.join(root, 'worktrees');
+  configureManagedWorktreeRoot(root);
   process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
   mockObservedStorage();
   vi.doMock('@/lib/worktree/apfs', async (importOriginal) => ({
@@ -328,7 +375,7 @@ it('refuses launch and retains authority when direct cache hydration fails after
   const failingSource = path.join(repo, '.next', 'cache', 'b-fail');
   writeFileSync(failingSource, 'must-not-launch');
   process.env.CORTEX_IDE_DATA_DIR = path.join(root, 'data');
-  process.env.O8_WORKTREE_ROOT = path.join(root, 'worktrees');
+  configureManagedWorktreeRoot(root);
   process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
   mockObservedStorage();
   vi.doMock('@/lib/worktree/apfs', async (importOriginal) => ({

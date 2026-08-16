@@ -18,11 +18,21 @@ import type {
 import { isRepoWorkspaceIsolationPreference } from './types';
 import { emitProductEvent } from '@/lib/analytics/server';
 import { withStoragePressurePolicyLock } from '@/lib/orchestrator/storage-pressure-policy-lock';
+import { dependencyInstallCommandForManager } from '@/lib/workspace/dependency-manager-contract';
 
 const execFileAsync = promisify(execFile);
 
 const REGISTRY_DIR = getDataDir();
 const REGISTRY_PATH = path.join(REGISTRY_DIR, 'repos.json');
+const AUTO_DETECTED_DEPENDENCY_INSTALL_COMMANDS = new Set([
+  'npm ci --prefer-offline',
+  'npm install',
+  'pnpm install --frozen-lockfile',
+  'yarn install --frozen-lockfile',
+  'yarn install --immutable',
+  'bun install --frozen-lockfile',
+  'bun install',
+]);
 
 function nowIso() {
   return new Date().toISOString();
@@ -43,6 +53,23 @@ function normalizeSetupConfig(setup: Partial<RepoSetupConfig> | null | undefined
       ? setup.workspaceIsolationPreference
       : 'auto',
   };
+}
+
+function reconcileDetectedSetup(
+  stored: Partial<RepoSetupConfig> | null | undefined,
+  detected: RepoSetupConfig,
+): RepoSetupConfig {
+  const normalized = normalizeSetupConfig(stored ?? detected);
+  if (detected.installCommand === null
+    && normalized.installCommand !== null
+    && AUTO_DETECTED_DEPENDENCY_INSTALL_COMMANDS.has(normalized.installCommand)) {
+    return {
+      ...normalized,
+      installCommand: null,
+      installOnCreateWorkspace: false,
+    };
+  }
+  return normalized;
 }
 
 function normalizeRepoEntry(repo: RepoRegistryEntry): RepoRegistryEntry {
@@ -170,10 +197,22 @@ async function detectSetupConfig(repoRoot: string): Promise<RepoSetupConfig> {
 
   let installCommand: string | null = null;
   if (hasPackageJson) {
-    if (packageManager === 'pnpm') installCommand = 'pnpm install --frozen-lockfile';
-    else if (packageManager === 'yarn') installCommand = 'yarn install --immutable';
-    else if (packageManager === 'bun') installCommand = 'bun install';
-    else installCommand = hasPackageLock ? 'npm ci --prefer-offline' : 'npm install';
+    const declaredVersion = packageJson?.packageManager
+      ?.match(new RegExp(`^${packageManager}@(\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?)`))?.[1]
+      ?? null;
+    const hasManagerLock = packageManager === 'npm'
+      ? hasPackageLock
+      : packageManager === 'pnpm'
+        ? await pathExists(path.join(repoRoot, 'pnpm-lock.yaml'))
+        : packageManager === 'yarn'
+          ? await pathExists(path.join(repoRoot, 'yarn.lock'))
+          : await pathExists(path.join(repoRoot, 'bun.lock'))
+            || await pathExists(path.join(repoRoot, 'bun.lockb'));
+    installCommand = dependencyInstallCommandForManager(
+      packageManager,
+      declaredVersion,
+      hasManagerLock,
+    );
   }
 
   let buildCommand: string | null = null;
@@ -436,7 +475,7 @@ export async function addRepo(localPath: string) {
         remoteUrl: candidate.remoteUrl,
         defaultBranch: candidate.defaultBranch,
         isGitRepo: candidate.isGitRepo ?? true,
-        setup: normalizeSetupConfig(existing.setup ?? candidate.setup),
+        setup: reconcileDetectedSetup(existing.setup, candidate.setup),
         lastOpenedAt: now,
       };
       const repos = store.repos.map((repo) => (repo.id === existing.id ? updated : repo));

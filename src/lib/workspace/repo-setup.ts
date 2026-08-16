@@ -4,7 +4,6 @@ import { lstat, readlink, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
 import type { RepoRegistryEntry } from '@/lib/repos/types';
-import { guardedWorkspaceInvocation } from '@/lib/worktree/materialization-execution';
 import {
   assertWorktreeMaterializationIdentity,
   type WorktreeMaterializationIdentity,
@@ -14,20 +13,28 @@ import {
   type WorkspaceCopyBindingRequirement,
 } from './storage-verifier';
 import { createExactChildDirectory } from './exact-parent-operation';
+import {
+  deriveDependencyInstallRecipe,
+  runDependencyInstall,
+  type DependencyInstallInvocation,
+  type DependencyInstallRecipe,
+  type SupportedPackageManager,
+} from './dependency-install';
 
-export interface RepoSetupCommandInvocation {
-  command: string;
-  args: string[];
-  cwd: string;
-  timeoutMs: number;
-}
+export type RepoSetupCommandInvocation = DependencyInstallInvocation;
+
+export const REPO_SETUP_POLICY_IDENTITY_KIND = 'repo-setup-policy';
 
 export interface RepoSetupReceipt {
   recipeKey: string;
   install: {
     requested: boolean;
     commandId: string | null;
-    packageManager: string | null;
+    packageManager: SupportedPackageManager | null;
+    packageManagerVersion: string | null;
+    dependencyRecipeKey: string | null;
+    cacheAuthorityId: string | null;
+    privateViewVerified: boolean;
     completed: boolean;
   };
   envBindings: Array<{
@@ -48,6 +55,9 @@ export interface RepoSetupOptions {
   beforeBindingParentPrepare?: (relativePath: string, workspacePath: string) => Promise<void>;
   /** Exact manager receipt held from restore publication through setup completion. */
   materializationIdentity?: WorktreeMaterializationIdentity;
+  expectedRecipeKey?: string;
+  resolvePackageManagerVersion?: (manager: SupportedPackageManager) => Promise<string>;
+  packageManagerCacheRoot?: string;
 }
 
 interface PreparedBindingTarget {
@@ -307,41 +317,33 @@ async function copyBindingFile(
   }
 }
 
-function defaultRun(
-  invocation: RepoSetupCommandInvocation,
-  identity?: WorktreeMaterializationIdentity,
-): Promise<void> {
-  const shell = process.platform === 'win32' ? process.env.ComSpec || 'cmd.exe' : '/bin/sh';
-  const args = process.platform === 'win32'
-    ? ['/d', '/s', '/c', invocation.command]
-    : ['-lc', invocation.command];
-  const guarded = guardedWorkspaceInvocation(shell, args, identity ?? null);
-  return new Promise((resolve, reject) => {
-    execFile(guarded.command, guarded.args, {
-      cwd: invocation.cwd,
-      timeout: invocation.timeoutMs,
-      maxBuffer: 8 * 1024 * 1024,
-      windowsHide: true,
-      env: { ...process.env, NODE_ENV: 'development' },
-    }, (error) => error ? reject(error) : resolve());
-  });
-}
-
-export function repoSetupRecipeKey(repo: RepoRegistryEntry): string {
+function setupRecipeKey(
+  repo: RepoRegistryEntry,
+  dependencyRecipe: DependencyInstallRecipe | null,
+): string {
   return hashJson({
     repositoryUuid: repo.id,
     envMode: repo.setup.envMode,
     envFiles: repo.setup.envFiles.map((entry) => safeRelativePath(entry)).sort(),
     installOnCreateWorkspace: repo.setup.installOnCreateWorkspace,
     installCommandId: repo.setup.installCommand ? hashJson(repo.setup.installCommand) : null,
+    dependencyRecipeKey: dependencyRecipe?.key ?? null,
   });
 }
 
-export function repoSetupBoundRecipeKey(
+/** Stable before a checkout is materialized; excludes checkout-owned dependency bytes. */
+export function repoSetupPolicyKey(
   repo: RepoRegistryEntry,
   requiredCopyBindings: Record<string, WorkspaceCopyBindingRequirement>,
 ): string {
-  if (repo.setup.envMode !== 'copy') return repoSetupRecipeKey(repo);
+  const recipeKey = hashJson({
+    repositoryUuid: repo.id,
+    envMode: repo.setup.envMode,
+    envFiles: repo.setup.envFiles.map((entry) => safeRelativePath(entry)).sort(),
+    installOnCreateWorkspace: repo.setup.installOnCreateWorkspace,
+    installCommandId: repo.setup.installCommand ? hashJson(repo.setup.installCommand) : null,
+  });
+  if (repo.setup.envMode !== 'copy') return recipeKey;
   const bindings = Object.entries(requiredCopyBindings)
     .map(([relativePath, requirement]) => ({
       relativePath,
@@ -350,7 +352,66 @@ export function repoSetupBoundRecipeKey(
       sourceContentFingerprint: requirement.sourceContentFingerprint,
     }))
     .sort((left, right) => left.relativePath.localeCompare(right.relativePath));
-  return hashJson({ recipeKey: repoSetupRecipeKey(repo), copyBindings: bindings });
+  return hashJson({ recipeKey, copyBindings: bindings });
+}
+
+async function dependencyRecipeForSetup(
+  repo: RepoRegistryEntry,
+  workspacePath: string,
+  resolveVersion?: RepoSetupOptions['resolvePackageManagerVersion'],
+): Promise<DependencyInstallRecipe | null> {
+  if (!repo.setup.installOnCreateWorkspace) return null;
+  const installCommand = repo.setup.installCommand?.trim();
+  if (!installCommand) {
+    throw new Error('The registered repo requires install-on-create but has no install command.');
+  }
+  return deriveDependencyInstallRecipe(workspacePath, installCommand, {
+    resolveVersion,
+  });
+}
+
+export async function repoSetupRecipeKey(
+  repo: RepoRegistryEntry,
+  workspacePath: string = repo.localPath,
+  resolveVersion?: RepoSetupOptions['resolvePackageManagerVersion'],
+): Promise<string> {
+  return setupRecipeKey(
+    repo,
+    await dependencyRecipeForSetup(repo, workspacePath, resolveVersion),
+  );
+}
+
+export async function repoSetupBoundRecipeKey(
+  repo: RepoRegistryEntry,
+  requiredCopyBindings: Record<string, WorkspaceCopyBindingRequirement>,
+  workspacePath: string = repo.localPath,
+  resolveVersion?: RepoSetupOptions['resolvePackageManagerVersion'],
+): Promise<string> {
+  const recipeKey = await repoSetupRecipeKey(repo, workspacePath, resolveVersion);
+  if (repo.setup.envMode !== 'copy') return recipeKey;
+  const bindings = Object.entries(requiredCopyBindings)
+    .map(([relativePath, requirement]) => ({
+      relativePath,
+      canonicalSourcePath: requirement.canonicalSourcePath,
+      sourceIdentityFingerprint: requirement.sourceIdentityFingerprint,
+      sourceContentFingerprint: requirement.sourceContentFingerprint,
+    }))
+    .sort((left, right) => left.relativePath.localeCompare(right.relativePath));
+  return hashJson({ recipeKey, copyBindings: bindings });
+}
+
+/** Verify setup policy before a parked checkout exists, including legacy receipts. */
+export async function repoSetupPolicyMatchesSnapshot(
+  repo: RepoRegistryEntry,
+  requiredCopyBindings: Record<string, WorkspaceCopyBindingRequirement>,
+  expectedDependencyRecipeKey: string | null,
+  expectedPolicyKey: string | null,
+): Promise<boolean> {
+  const currentPolicyKey = repoSetupPolicyKey(repo, requiredCopyBindings);
+  if (expectedPolicyKey) return currentPolicyKey === expectedPolicyKey;
+  if (expectedDependencyRecipeKey === currentPolicyKey) return true;
+  if (repo.setup.installOnCreateWorkspace) return false;
+  return await repoSetupBoundRecipeKey(repo, requiredCopyBindings) === expectedDependencyRecipeKey;
 }
 
 /** Capture the exact registered source identity copied environment files must retain. */
@@ -461,7 +522,28 @@ export async function runRegisteredRepoSetup(
   const requiredCopyBindings = repo.setup.envMode === 'copy'
     ? options.requiredCopyBindings ?? await repoSetupCopyBindingRequirements(repo)
     : {};
-  const recipeKey = repoSetupBoundRecipeKey(repo, requiredCopyBindings);
+  const dependencyRecipe = await dependencyRecipeForSetup(
+    repo,
+    resolvedWorkspace,
+    options.resolvePackageManagerVersion,
+  );
+  const unboundRecipeKey = setupRecipeKey(repo, dependencyRecipe);
+  const recipeKey = repo.setup.envMode === 'copy'
+    ? hashJson({
+        recipeKey: unboundRecipeKey,
+        copyBindings: Object.entries(requiredCopyBindings)
+          .map(([relativePath, requirement]) => ({
+            relativePath,
+            canonicalSourcePath: requirement.canonicalSourcePath,
+            sourceIdentityFingerprint: requirement.sourceIdentityFingerprint,
+            sourceContentFingerprint: requirement.sourceContentFingerprint,
+          }))
+          .sort((left, right) => left.relativePath.localeCompare(right.relativePath)),
+      })
+    : unboundRecipeKey;
+  if (options.expectedRecipeKey && options.expectedRecipeKey !== recipeKey) {
+    throw new Error('Registered repo dependency recipe drifted before install.');
+  }
 
   if (repo.setup.envMode !== 'skip') {
     for (const configuredPath of repo.setup.envFiles) {
@@ -532,16 +614,16 @@ export async function runRegisteredRepoSetup(
   if (repo.setup.installOnCreateWorkspace && !installCommand) {
     throw new Error('The registered repo requires install-on-create but has no install command.');
   }
-  if (installCommand) {
-    const invocation = {
-      command: installCommand,
-      args: [],
-      cwd: resolvedWorkspace,
-      timeoutMs: 45 * 60_000,
-    };
-    if (options.run) await options.run(invocation);
-    else await defaultRun(invocation, options.materializationIdentity);
-  }
+  const installReceipt = installCommand && dependencyRecipe
+    ? await runDependencyInstall(resolvedWorkspace, installCommand, {
+        run: options.run,
+        resolveVersion: options.resolvePackageManagerVersion,
+        cacheRoot: options.packageManagerCacheRoot,
+        now: options.now,
+        materializationIdentity: options.materializationIdentity,
+        preparedRecipe: dependencyRecipe,
+      })
+    : null;
   if (options.materializationIdentity) {
     await assertWorktreeMaterializationIdentity(
       resolvedWorkspace,
@@ -553,7 +635,11 @@ export async function runRegisteredRepoSetup(
     install: {
       requested: Boolean(installCommand),
       commandId: installCommand ? hashJson(installCommand) : null,
-      packageManager: installCommand?.split(/\s+/, 1)[0] ?? null,
+      packageManager: installReceipt?.recipe.packageManager ?? null,
+      packageManagerVersion: installReceipt?.recipe.packageManagerVersion ?? null,
+      dependencyRecipeKey: installReceipt?.recipe.key ?? null,
+      cacheAuthorityId: installReceipt?.recipe.cacheAuthorityId ?? null,
+      privateViewVerified: installReceipt?.privateViewVerified ?? false,
       completed: Boolean(installCommand),
     },
     envBindings,

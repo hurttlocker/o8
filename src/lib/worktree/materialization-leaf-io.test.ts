@@ -18,8 +18,20 @@ import {
   createPinnedWorkspaceBinding,
   ensurePinnedWorkspaceDirectory,
   ensurePinnedWorkspaceFile,
+  inspectPinnedWorkspaceEntry,
   writePinnedWorkspaceFile,
 } from './materialization-leaf-io';
+
+it('terminates an absent pinned inspection with a null receipt', async () => {
+  const workspace = mkdtempSync(path.join(os.tmpdir(), 'o8-pinned-absent-inspection-'));
+  const identity = await captureWorktreeMaterializationIdentity(workspace);
+
+  await expect(inspectPinnedWorkspaceEntry(
+    workspace,
+    identity,
+    'node_modules',
+  )).resolves.toBeNull();
+}, 5_000);
 
 it('refuses an ancestor swap between pinned descendant components', async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'o8-pinned-chain-root-'));

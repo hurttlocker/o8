@@ -15,9 +15,11 @@ import {
 import { verifyImmutableWorkspaceTruth } from './hibernator';
 import { probeOwnedSessionProcessQuiescence } from './process-probes';
 import {
+  REPO_SETUP_POLICY_IDENTITY_KIND,
   repoSetupBoundRecipeKey,
   repoSetupCopyBindingRequirements,
   repoSetupExternalSymlinkAllowlist,
+  repoSetupPolicyMatchesSnapshot,
 } from './repo-setup';
 import {
   rollbackInterruptedRestore,
@@ -117,7 +119,7 @@ function restoringOperationId(snapshot: WorkspaceSnapshotRecord): string {
 function allowedRebuildablePaths(repo: Awaited<ReturnType<typeof listRepos>>[number]): string[] {
   return [...new Set([
     ...repo.setup.envFiles,
-    'node_modules', '.next/cache', '.turbo', '.venv', 'vendor', 'target', 'Pods', 'DerivedData',
+    'node_modules', '.o8-install-runtime', '.claude/settings.json', '.claude/settings.local.json', '.next/cache', '.turbo', '.venv', 'vendor', 'target', 'Pods', 'DerivedData',
   ])];
 }
 
@@ -231,7 +233,14 @@ export async function reconcileWorkspaceSnapshot(
             current.originalPath,
           );
           const requiredCopyBindings = await repoSetupCopyBindingRequirements(repo);
-          if (repoSetupBoundRecipeKey(repo, requiredCopyBindings) !== current.dependencyRecipeKey) {
+          const expectedPolicyKey = current.sessionIdentities
+            .find((entry) => entry.kind === REPO_SETUP_POLICY_IDENTITY_KIND)?.identity ?? null;
+          if (!await repoSetupPolicyMatchesSnapshot(
+            repo,
+            requiredCopyBindings,
+            current.dependencyRecipeKey,
+            expectedPolicyKey,
+          )) {
             throw new Error('Registered copied environment sources changed after the workspace snapshot.');
           }
           await dependencies.resolveQuarantine({
@@ -243,6 +252,13 @@ export async function reconcileWorkspaceSnapshot(
             expectedSessionKey: sessionKey,
             probeProcessQuiescence: dependencies.processProbe,
             verifyQuarantinedClone: async (quarantinePath) => {
+              if (await repoSetupBoundRecipeKey(
+                repo,
+                requiredCopyBindings,
+                quarantinePath,
+              ) !== current.dependencyRecipeKey) {
+                throw new Error('Registered dependency recipe changed after the workspace snapshot.');
+              }
               await verifyRestoredWorkspaceCheckout(current, quarantinePath);
               const scan = await dependencies.scanWorkspace(quarantinePath, {
                 allowedIgnoredPaths,
@@ -283,7 +299,43 @@ export async function reconcileWorkspaceSnapshot(
         }
       }
     }
+    let preparedRestoreDisposition: 'absent' | 'removed' | 'unknown' | null = null;
+    if (current.state === 'restoring' && repo) {
+      const isolation = current.sessionIdentities
+        .find((entry) => entry.kind === 'workspace-isolation')?.identity;
+      if (isolation !== 'git-worktree' && isolation !== 'apfs-cow-clone') {
+        return quarantineRefusal(current, 'Interrupted restore has no exact isolation receipt.');
+      }
+      try {
+        preparedRestoreDisposition = await dependencies.discardPreparedRestore({
+          repoPath: repo.localPath,
+          worktreeId: path.basename(current.originalPath),
+          expectedPath: current.originalPath,
+          branch: current.branch,
+          head: current.headCommit,
+          tree: current.treeSha,
+          isolationKind: isolation,
+        });
+      } catch (error) {
+        return quarantineRefusal(
+          current,
+          `Interrupted restore stage recovery failed: ${compactError(error)}`,
+        );
+      }
+      if (preparedRestoreDisposition === 'unknown') {
+        return quarantineRefusal(
+          current,
+          'Interrupted restore stage ownership could not be proven; manual recovery is required.',
+        );
+      }
+    }
     const exists = await pathExists(current.originalPath);
+    if (preparedRestoreDisposition === 'removed' && exists) {
+      return quarantineRefusal(
+        current,
+        'Interrupted restore stage retirement completed but the exact path still exists.',
+      );
+    }
     if (current.state === 'restoring' && exists) {
       if (!repo) {
         return quarantineRefusal(current, 'Registered repository UUID is unavailable.');
@@ -367,36 +419,6 @@ export async function reconcileWorkspaceSnapshot(
     }
 
     if (!exists && !immutableError && current.state !== 'parkable') {
-      if (current.state === 'restoring' && repo) {
-        const isolation = current.sessionIdentities
-          .find((entry) => entry.kind === 'workspace-isolation')?.identity;
-        if (isolation !== 'git-worktree' && isolation !== 'apfs-cow-clone') {
-          return quarantineRefusal(current, 'Interrupted restore has no exact isolation receipt.');
-        }
-        let disposition: 'absent' | 'removed' | 'unknown';
-        try {
-          disposition = await dependencies.discardPreparedRestore({
-            repoPath: repo.localPath,
-            worktreeId: path.basename(current.originalPath),
-            expectedPath: current.originalPath,
-            branch: current.branch,
-            head: current.headCommit,
-            tree: current.treeSha,
-            isolationKind: isolation,
-          });
-        } catch (error) {
-          return quarantineRefusal(
-            current,
-            `Interrupted restore stage recovery failed: ${compactError(error)}`,
-          );
-        }
-        if (disposition === 'unknown') {
-          return quarantineRefusal(
-            current,
-            'Interrupted restore stage ownership could not be proven; manual recovery is required.',
-          );
-        }
-      }
       const note = current.state === 'hibernating'
         ? 'Original path is absent and immutable recovery truth is complete.'
         : 'Interrupted restore left no path and immutable recovery truth is complete.';

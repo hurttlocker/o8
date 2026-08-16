@@ -11,6 +11,7 @@ import {
   type StorageByteCategory,
   type StorageMeasurementError,
 } from '@/lib/worktree/storage-telemetry';
+import { dependencyCacheRoot } from '@/lib/workspace/dependency-cache-root';
 
 export const DEPENDENCY_STORAGE_PATHS = [
   'node_modules',
@@ -85,6 +86,7 @@ export interface StorageCategorySnapshot {
     ttlMs: number;
   };
   categories: Record<Exclude<StorageByteCategory, 'workspace'>, StorageCategoryUsage>;
+  dependencyCacheMeasurements: DirectoryStorageTelemetry[];
   repos: RepoStorageCategoryProjection[];
 }
 
@@ -98,6 +100,7 @@ interface StorageCategoryDependencies {
 export interface ReadStorageCategoryOptions {
   forceRefresh?: boolean;
   ownedRootPaths?: string[];
+  dependencyCacheRootPaths?: string[];
   ttlMs?: number;
   dependencies?: Partial<StorageCategoryDependencies>;
 }
@@ -516,13 +519,18 @@ function resolvedOwnedRoots(overrides?: string[]): string[] {
   return [...new Set(allRoots)];
 }
 
-function snapshotKey(repos: StorageCategoryRepoInput[], roots: string[]): string {
+function snapshotKey(
+  repos: StorageCategoryRepoInput[],
+  roots: string[],
+  dependencyCacheRoots: string[],
+): string {
   return JSON.stringify({
     repos: repos.map((repo) => ({
       repositoryUuid: repo.repositoryUuid,
       bases: [...new Set(repo.bases.map((base) => path.resolve(base)))].sort(),
     })).sort((left, right) => left.repositoryUuid.localeCompare(right.repositoryUuid)),
     roots: [...roots].sort(),
+    dependencyCacheRoots: [...dependencyCacheRoots].sort(),
   });
 }
 
@@ -530,6 +538,7 @@ async function buildSnapshot(
   key: string,
   repos: StorageCategoryRepoInput[],
   roots: string[],
+  dependencyCacheRoots: string[],
   dependencies: StorageCategoryDependencies,
 ): Promise<SnapshotCacheEntry> {
   const limitMeasurement = createAsyncLimiter(MEASUREMENT_CONCURRENCY);
@@ -539,17 +548,31 @@ async function buildSnapshot(
       () => dependencies.measureDirectory(targetPath),
     ),
   };
-  const [repoProjections, owned] = await Promise.all([
+  const [repoProjections, owned, dependencyCacheMeasurements] = await Promise.all([
     Promise.all(repos.map((repo) => measureRepoCategories(repo, boundedDependencies))),
     measureOwnedCategories(roots, boundedDependencies),
+    mapWithConcurrency(
+      dependencyCacheRoots,
+      MEASUREMENT_CONCURRENCY,
+      (targetPath) => measurePath(targetPath, 'dependency', boundedDependencies),
+    ),
   ]);
   const source = sumCategoryUsages(
     'source',
     repoProjections.map((repo) => repo.categories.source),
   );
-  const dependency = sumCategoryUsages(
+  const workspaceDependencies = sumCategoryUsages(
     'dependency',
     repoProjections.map((repo) => repo.categories.dependency),
+  );
+  const dependencyCache = usageFromMeasurements(
+    'dependency',
+    'known-path-sum',
+    dependencyCacheMeasurements,
+  );
+  const dependency = sumCategoryUsages(
+    'dependency',
+    [workspaceDependencies, dependencyCache],
   );
   const build = sumCategoryUsages(
     'build',
@@ -577,6 +600,7 @@ async function buildSnapshot(
       measuredAt: new Date(measuredAtMs).toISOString(),
       accountingStatus,
       categories,
+      dependencyCacheMeasurements,
       repos: repoProjections,
     },
   };
@@ -605,7 +629,10 @@ export async function readStorageCategorySnapshot(
   const defaults = defaultDependencies();
   const dependencies = { ...defaults, ...options.dependencies };
   const roots = resolvedOwnedRoots(options.ownedRootPaths);
-  const key = snapshotKey(repos, roots);
+  const dependencyCacheRoots = [...new Set(
+    (options.dependencyCacheRootPaths ?? [dependencyCacheRoot()]).map((root) => path.resolve(root)),
+  )];
+  const key = snapshotKey(repos, roots, dependencyCacheRoots);
   const ttlMs = options.ttlMs ?? CATEGORY_SNAPSHOT_TTL_MS;
   const nowMs = dependencies.now();
   if (!options.forceRefresh
@@ -617,7 +644,7 @@ export async function readStorageCategorySnapshot(
     const entry = await snapshotInflight.promise;
     return withFreshness(entry, dependencies.now(), 'coalesced', ttlMs);
   }
-  const promise = buildSnapshot(key, repos, roots, dependencies);
+  const promise = buildSnapshot(key, repos, roots, dependencyCacheRoots, dependencies);
   snapshotInflight = { key, promise };
   try {
     const entry = await promise;

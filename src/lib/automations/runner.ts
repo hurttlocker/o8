@@ -21,6 +21,7 @@ import type { automations } from '@/lib/db/schema';
 import type { LaneRuntime } from '@/lib/lane/types';
 import type { AgentType } from '@/lib/worktree/types';
 import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
+import { findRepoByLocalPath } from '@/lib/repos/registry';
 
 export interface RunAutomationResult {
   ok: boolean;
@@ -42,6 +43,10 @@ export async function runAutomation(
 ): Promise<RunAutomationResult> {
   const runtime = asLaneRuntime(row.runtime);
   const agentType: AgentType = runtime === 'claude-code' ? 'claude-code' : runtime as AgentType;
+  const repo = await findRepoByLocalPath(row.repoPath);
+  if (!repo) {
+    return { ok: false, note: 'worktree: registered repository not found' };
+  }
 
   // 1. Open the lane.
   const openResult = await dispatch({
@@ -67,7 +72,10 @@ export async function runAutomation(
       agentType,
       taskName: `automation:${row.name}`,
       branchName: row.branch,
-      isolationPreference: 'auto',
+      envMode: repo.setup.envMode,
+      envFiles: repo.setup.envFiles,
+      repoSetup: repo.setup,
+      isolationPreference: repo.setup.workspaceIsolationPreference,
     });
     if (wt) worktreeCwd = wt.cwd;
   } catch (err) {

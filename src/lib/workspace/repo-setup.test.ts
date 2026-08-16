@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -24,6 +25,18 @@ describe('registered repo restore setup', () => {
     mkdirSync(repoPath);
     mkdirSync(workspacePath);
     writeFileSync(path.join(repoPath, '.env.local'), 'TOKEN=super-secret-value\n');
+    writeFileSync(path.join(workspacePath, 'package.json'), JSON.stringify({
+      name: 'setup-fixture',
+      version: '1.0.0',
+      packageManager: 'pnpm@10.6.5',
+    }));
+    writeFileSync(path.join(workspacePath, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n');
+    execFileSync('git', ['init', '-q'], { cwd: workspacePath });
+    execFileSync('git', ['add', 'package.json', 'pnpm-lock.yaml'], { cwd: workspacePath });
+    execFileSync('git', [
+      '-c', 'user.name=o8-test', '-c', 'user.email=test@invalid',
+      'commit', '-qm', 'fixture',
+    ], { cwd: workspacePath });
     const repo: RepoRegistryEntry = {
       id: 'repo-setup-test',
       name: 'setup-test',
@@ -45,19 +58,29 @@ describe('registered repo restore setup', () => {
         workspaceIsolationPreference: 'git-worktree',
       },
     };
-    const run = vi.fn(async () => {});
+    const run = vi.fn(async () => {
+      mkdirSync(path.join(workspacePath, 'node_modules', 'fixture'), { recursive: true });
+      writeFileSync(path.join(workspacePath, 'node_modules', 'fixture', 'index.js'), 'module.exports = true;\n');
+    });
 
-    const receipt = await runRegisteredRepoSetup(repo, workspacePath, { run });
+    const receipt = await runRegisteredRepoSetup(repo, workspacePath, {
+      run,
+      resolvePackageManagerVersion: async () => '10.6.5',
+      packageManagerCacheRoot: path.join(root, 'cache'),
+    });
 
     expect(run).toHaveBeenCalledWith(expect.objectContaining({
-      command: 'pnpm install --frozen-lockfile',
+      command: 'pnpm',
+      args: expect.arrayContaining(['install', '--frozen-lockfile', '--store-dir']),
       cwd: workspacePath,
     }));
     expect(readFileSync(path.join(workspacePath, '.env.local'), 'utf8')).toContain('super-secret-value');
     expect(receipt.install.packageManager).toBe('pnpm');
+    expect(receipt.install.packageManagerVersion).toBe('10.6.5');
+    expect(receipt.install.privateViewVerified).toBe(true);
     expect(JSON.stringify(receipt)).not.toContain('super-secret-value');
     expect(receipt.envBindings[0]?.bindingId).toMatch(/^[0-9a-f]{64}$/);
-  });
+  }, 30_000);
 
   it.each(['target', 'ancestor'] as const)('refuses an existing %s symlink without changing its external file', async (kind) => {
     const root = mkdtempSync(path.join(os.tmpdir(), 'o8-repo-setup-symlink-'));

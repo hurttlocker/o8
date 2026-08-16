@@ -1,0 +1,753 @@
+import { createHash, randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { lstat, mkdir, readFile, readdir, realpath, stat } from 'node:fs/promises';
+import path from 'node:path';
+import { promisify } from 'node:util';
+
+import { guardedWorkspaceInvocation } from '@/lib/worktree/materialization-execution';
+import {
+  captureWorktreeMaterializationIdentity,
+  type WorktreeMaterializationIdentity,
+} from '@/lib/worktree/materialization-identity';
+import {
+  ensurePinnedWorkspaceDirectory,
+  ensurePinnedWorkspaceFile,
+} from '@/lib/worktree/materialization-leaf-io';
+import { purgeExactDirectory } from './exact-directory-purge';
+import {
+  assertContainedTrackedSymlinks,
+  trackedGitEntries,
+} from './dependency-recipe-git-identity';
+import {
+  assertContainedConfigTarget,
+  assertSafeDependencyManagerConfig,
+  DependencyAuthenticationUnsupportedError,
+  RECIPE_CONFIG_NAMES,
+  yarnExecutionTargets,
+} from './dependency-manager-config';
+import { dependencyInstallCommandForManager } from './dependency-manager-contract';
+import { dependencyCacheRoot } from './dependency-cache-root';
+
+const execFileAsync = promisify(execFile);
+
+export type SupportedPackageManager = 'npm' | 'pnpm' | 'yarn' | 'bun';
+
+export interface DependencyInstallInvocation {
+  command: string;
+  args: string[];
+  cwd: string;
+  timeoutMs: number;
+  env: NodeJS.ProcessEnv;
+}
+
+export interface DependencyInstallRecipe {
+  key: string;
+  packageManager: SupportedPackageManager;
+  packageManagerVersion: string;
+  runtimeAbi: string;
+  platform: NodeJS.Platform;
+  architecture: string;
+  installArgs: string[];
+  lifecycleScripts: 'enabled' | 'disabled';
+  gitTreeSha: string;
+  lockfile: { path: string; digest: string };
+  inputDigests: Array<{ path: string; digest: string }>;
+  localDependencyDigests: Array<{ identity: string; digest: string }>;
+  cacheAuthorityId: string;
+}
+
+export interface DependencyInstallReceipt {
+  recipe: DependencyInstallRecipe;
+  privateViewVerified: boolean;
+  completedAt: string;
+}
+
+export { DependencyAuthenticationUnsupportedError } from './dependency-manager-config';
+
+export function isDependencyAuthenticationUnsupportedError(error: unknown): error is DependencyAuthenticationUnsupportedError {
+  const candidate = error as { code?: unknown; message?: unknown; name?: unknown };
+  return candidate?.code === 'dependency_authentication_unsupported'
+    && candidate.message === 'Credential-bearing package-manager configuration is unsupported for public dependency installs.'
+    && candidate.name === 'DependencyAuthenticationUnsupportedError';
+}
+
+export interface DependencyInstallOptions {
+  run?: (invocation: DependencyInstallInvocation) => Promise<void>;
+  resolveVersion?: (manager: SupportedPackageManager) => Promise<string>;
+  cacheRoot?: string;
+  now?: () => Date;
+  materializationIdentity?: WorktreeMaterializationIdentity;
+  /** Recipe derived at the same pinned setup boundary, before execution. */
+  preparedRecipe?: DependencyInstallRecipe;
+  runtimeFacts?: {
+    abi: string;
+    platform: NodeJS.Platform;
+    architecture: string;
+  };
+  /** Deterministic safety seam after exact runtime capture and before namespace retirement. */
+  afterRuntimeTreeCapture?: (runtimePath: string) => Promise<void>;
+}
+
+interface ParsedInstallCommand {
+  manager: SupportedPackageManager;
+  args: string[];
+}
+
+const LOCKFILES: Record<SupportedPackageManager, readonly string[]> = {
+  npm: ['package-lock.json', 'npm-shrinkwrap.json'],
+  pnpm: ['pnpm-lock.yaml'],
+  yarn: ['yarn.lock'],
+  bun: ['bun.lock', 'bun.lockb'],
+};
+
+const ALLOWED_INSTALL_FLAGS: Record<SupportedPackageManager, ReadonlySet<string>> = {
+  npm: new Set([
+    '--prefer-offline', '--offline', '--ignore-scripts', '--foreground-scripts',
+    '--no-audit', '--audit=false', '--no-fund', '--fund=false',
+    '--include=dev', '--include=optional', '--omit=dev', '--omit=optional', '--omit=peer',
+    '--strict-peer-deps', '--legacy-peer-deps', '--workspaces', '--include-workspace-root',
+  ]),
+  pnpm: new Set([
+    '--frozen-lockfile', '--prefer-offline', '--offline', '--ignore-scripts',
+    '--prod', '--dev', '--no-optional', '--strict-peer-dependencies', '--workspace-root',
+  ]),
+  yarn: new Set([
+    '--immutable', '--immutable-cache', '--check-cache', '--frozen-lockfile',
+    '--offline', '--ignore-scripts',
+  ]),
+  bun: new Set([
+    '--frozen-lockfile', '--offline', '--ignore-scripts', '--production', '--development',
+  ]),
+};
+
+const SAFE_HOST_ENV_NAMES = [
+  'PATH', 'Path', 'PATHEXT', 'SystemRoot', 'COMSPEC',
+  'TMPDIR', 'TMP', 'TEMP',
+  'LANG', 'LANGUAGE', 'LC_ALL', 'LC_CTYPE',
+] as const;
+
+function digestBytes(value: Buffer | string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function digestJson(value: unknown): string {
+  return digestBytes(JSON.stringify(value));
+}
+
+function pathInside(candidate: string, root: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function parseInstallCommand(command: string): ParsedInstallCommand {
+  const trimmed = command.trim();
+  if (!trimmed) throw new Error('Dependency install command is empty.');
+  if (/[\r\n\0'"`\\;&|<>$(){}[\]*?!~]/.test(trimmed)) {
+    throw new Error('Dependency install command requires unsupported shell syntax.');
+  }
+  const tokens = trimmed.split(/\s+/);
+  const executable = tokens.shift()!;
+  if (!/^(?:npm|pnpm|yarn|bun)(?:\.exe)?$/.test(executable)) {
+    throw new Error(`Unsupported package-manager executable: ${executable}`);
+  }
+  const manager = executable.replace(/\.exe$/, '') as SupportedPackageManager;
+  if (!Object.hasOwn(LOCKFILES, manager)) {
+    throw new Error(`Unsupported package manager in saved install command: ${executable}`);
+  }
+  const args = tokens;
+  const subcommand = args[0];
+  const allowedSubcommands: Record<SupportedPackageManager, readonly string[]> = {
+    npm: ['ci', 'install', 'i'],
+    pnpm: ['install', 'i'],
+    yarn: ['install'],
+    bun: ['install', 'i'],
+  };
+  if (!subcommand || !allowedSubcommands[manager].includes(subcommand)) {
+    throw new Error(`Saved ${manager} command is not an install contract.`);
+  }
+  for (const arg of args.slice(1)) {
+    if (!ALLOWED_INSTALL_FLAGS[manager].has(arg)) {
+      throw new Error(`Saved ${manager} install contract has an unsupported argument: ${arg}`);
+    }
+  }
+  return { manager, args };
+}
+
+async function regularFileBytes(root: string, relativePath: string): Promise<Buffer> {
+  const absolutePath = path.join(root, relativePath);
+  const entry = await lstat(absolutePath);
+  if (!entry.isFile() || entry.isSymbolicLink()) {
+    throw new Error(`Dependency recipe input is not a regular file: ${relativePath}`);
+  }
+  const canonicalRoot = await realpath(root);
+  const canonicalPath = await realpath(absolutePath);
+  if (!pathInside(canonicalPath, canonicalRoot)) {
+    throw new Error(`Dependency recipe input escapes its workspace: ${relativePath}`);
+  }
+  return readFile(absolutePath);
+}
+
+async function trackedFiles(workspacePath: string): Promise<string[]> {
+  const { stdout } = await execFileAsync('git', ['ls-files', '-z'], {
+    cwd: workspacePath,
+    encoding: 'buffer',
+    timeout: 15_000,
+    maxBuffer: 32 * 1024 * 1024,
+    windowsHide: true,
+  });
+  return stdout.toString('utf8').split('\0').filter(Boolean).sort();
+}
+
+async function committedTreeReceipt(workspacePath: string): Promise<string> {
+  const [tree, status] = await Promise.all([
+    execFileAsync('git', ['rev-parse', '--verify', 'HEAD^{tree}'], {
+      cwd: workspacePath,
+      encoding: 'utf8',
+      timeout: 15_000,
+      windowsHide: true,
+    }),
+    execFileAsync('git', ['status', '--porcelain=v1', '--untracked-files=no'], {
+      cwd: workspacePath,
+      encoding: 'utf8',
+      timeout: 15_000,
+      maxBuffer: 32 * 1024 * 1024,
+      windowsHide: true,
+    }),
+  ]);
+  const treeSha = tree.stdout.trim();
+  if (!/^[0-9a-f]{40,64}$/.test(treeSha) || status.stdout.trim()) {
+    throw new Error('Dependency recipe requires an exact clean committed Git tree.');
+  }
+  return treeSha;
+}
+
+function packageManagerField(bytes: Buffer): string | null {
+  try {
+    const parsed = JSON.parse(bytes.toString('utf8')) as { packageManager?: unknown };
+    return typeof parsed.packageManager === 'string' ? parsed.packageManager.trim() : null;
+  } catch {
+    throw new Error('Root package.json is not valid JSON.');
+  }
+}
+
+function parsePackageManagerDeclaration(
+  value: string | null,
+): { manager: SupportedPackageManager; version: string | null } | null {
+  if (!value) return null;
+  const match = /^(npm|pnpm|yarn|bun)(?:@(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(?:\+sha(?:224|256|384|512)\.[0-9A-Fa-f]+)?)?$/.exec(value);
+  if (!match?.[1]) throw new Error('package.json packageManager is not canonical.');
+  return {
+    manager: match[1] as SupportedPackageManager,
+    version: match[2] ?? null,
+  };
+}
+
+function localSpecifiers(bytes: Buffer): string[] {
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(bytes.toString('utf8')) as Record<string, unknown>;
+  } catch {
+    throw new Error('A workspace package.json is not valid JSON.');
+  }
+  const groups = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies', 'resolutions'];
+  const result: string[] = [];
+  for (const group of groups) {
+    const value = parsed[group];
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+    for (const specifier of Object.values(value)) {
+      if (typeof specifier === 'string'
+        && (specifier.startsWith('file:')
+          || specifier.startsWith('link:')
+          || specifier.startsWith('workspace:'))) {
+        result.push(specifier);
+      }
+    }
+  }
+  return result.sort();
+}
+
+async function localDependencyDigests(
+  workspacePath: string,
+  manifestInputs: readonly { path: string; bytes: Buffer }[],
+): Promise<Array<{ identity: string; digest: string }>> {
+  const result: Array<{ identity: string; digest: string }> = [];
+  const canonicalRoot = await realpath(workspacePath);
+  for (const manifest of manifestInputs) {
+    for (const specifier of localSpecifiers(manifest.bytes)) {
+      if (specifier.startsWith('workspace:')) {
+        result.push({ identity: `${manifest.path}:${specifier}`, digest: digestBytes(specifier) });
+        continue;
+      }
+      const targetText = specifier.slice(specifier.indexOf(':') + 1);
+      const manifestDirectory = path.dirname(path.join(workspacePath, manifest.path));
+      const targetPath = path.resolve(manifestDirectory, targetText);
+      let canonicalTarget: string;
+      try {
+        canonicalTarget = await realpath(targetPath);
+      } catch {
+        throw new Error(`Local dependency target is unavailable: ${manifest.path}:${specifier}`);
+      }
+      if (!pathInside(canonicalTarget, canonicalRoot)) {
+        throw new Error(`Local dependency escapes its workspace: ${manifest.path}:${specifier}`);
+      }
+      const relativeTarget = path.relative(workspacePath, targetPath).replaceAll(path.sep, '/');
+      const entries = await trackedGitEntries(workspacePath, relativeTarget);
+      if (entries.length === 0) {
+        throw new Error(`Local dependency has no tracked identity: ${manifest.path}:${specifier}`);
+      }
+      await assertContainedTrackedSymlinks(workspacePath, entries);
+      const hash = createHash('sha256');
+      for (const entry of entries) {
+        hash.update(entry.mode);
+        hash.update('\0');
+        hash.update(entry.objectId);
+        hash.update('\0');
+        hash.update(entry.path);
+        hash.update('\0');
+      }
+      result.push({ identity: `${manifest.path}:${specifier}`, digest: hash.digest('hex') });
+    }
+  }
+  return result.sort((left, right) => left.identity.localeCompare(right.identity));
+}
+
+async function resolveManagerVersion(manager: SupportedPackageManager): Promise<string> {
+  const { stdout } = await execFileAsync(manager, ['--version'], {
+    encoding: 'utf8',
+    timeout: 15_000,
+    windowsHide: true,
+  });
+  const version = stdout.trim();
+  if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) {
+    throw new Error(`${manager} returned an invalid version.`);
+  }
+  return version;
+}
+
+export async function detectDependencyInstallCommand(workspacePath: string): Promise<string | null> {
+  let packageBytes: Buffer;
+  try {
+    packageBytes = await regularFileBytes(workspacePath, 'package.json');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+  const declaration = parsePackageManagerDeclaration(packageManagerField(packageBytes));
+  const declared = declaration?.manager;
+  const present: SupportedPackageManager[] = [];
+  for (const manager of Object.keys(LOCKFILES) as SupportedPackageManager[]) {
+    for (const lockfile of LOCKFILES[manager]) {
+      try {
+        await lstat(path.join(workspacePath, lockfile));
+        present.push(manager);
+        break;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    }
+  }
+  const unique = [...new Set(present)];
+  if (declared && unique.some((manager) => manager !== declared)) {
+    throw new Error('Package-manager declaration conflicts with the repository lockfile.');
+  }
+  if (!declared && unique.length > 1) {
+    throw new Error('Repository has conflicting package-manager lockfiles.');
+  }
+  const manager = declared ?? unique[0];
+  if (!manager) return null;
+  return dependencyInstallCommandForManager(
+    manager,
+    declaration?.version ?? null,
+    unique.includes(manager),
+  );
+}
+
+export async function deriveDependencyInstallRecipe(
+  workspacePath: string,
+  installCommand: string,
+  options: Pick<DependencyInstallOptions, 'resolveVersion' | 'runtimeFacts'> = {},
+): Promise<DependencyInstallRecipe> {
+  const parsed = parseInstallCommand(installCommand);
+  const lifecycleScripts = parsed.args.some((arg) => (
+    arg === '--ignore-scripts'
+      || arg === '--ignore-scripts=true'
+  )) ? 'disabled' as const : 'enabled' as const;
+  const initialTreeSha = await committedTreeReceipt(workspacePath);
+  const tracked = await trackedFiles(workspacePath);
+  for (const configName of RECIPE_CONFIG_NAMES) {
+    if (configName === 'package.json' || tracked.includes(configName)) continue;
+    try {
+      await lstat(path.join(workspacePath, configName));
+      assertSafeDependencyManagerConfig(
+        configName,
+        await regularFileBytes(workspacePath, configName),
+      );
+      throw new Error(`Dependency manager config must be tracked: ${configName}`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+  const lockCandidates = LOCKFILES[parsed.manager].filter((candidate) => tracked.includes(candidate));
+  if (lockCandidates.length !== 1) {
+    throw new Error(`Saved ${parsed.manager} install contract requires exactly one tracked lockfile.`);
+  }
+  const otherLocks = (Object.entries(LOCKFILES) as Array<[SupportedPackageManager, readonly string[]]>)
+    .filter(([manager]) => manager !== parsed.manager)
+    .flatMap(([, names]) => names)
+    .filter((candidate) => tracked.includes(candidate));
+  if (otherLocks.length > 0) {
+    throw new Error(`Saved ${parsed.manager} install contract conflicts with another tracked lockfile.`);
+  }
+  const inputPathSet = new Set(tracked.filter((entry) => {
+    const basename = path.posix.basename(entry);
+    return basename === 'package.json'
+      || RECIPE_CONFIG_NAMES.has(entry)
+      || entry.startsWith('patches/')
+      || entry.startsWith('.yarn/patches/')
+      || entry.startsWith('.yarn/plugins/')
+      || entry.startsWith('.yarn/releases/')
+      || entry.endsWith('.patch');
+  }));
+  if (parsed.manager === 'yarn' && tracked.includes('.yarnrc.yml')) {
+    const configBytes = await regularFileBytes(workspacePath, '.yarnrc.yml');
+    for (const target of yarnExecutionTargets(configBytes)) {
+      const normalized = assertContainedConfigTarget(workspacePath, target);
+      if (!tracked.includes(normalized)) {
+        throw new Error(`Yarn executable config target must be tracked: ${normalized}`);
+      }
+      inputPathSet.add(normalized);
+    }
+  }
+  const inputPaths = [...inputPathSet].sort();
+  if (!inputPaths.includes('package.json')) throw new Error('Dependency recipe has no tracked package.json.');
+  const inputs = await Promise.all(inputPaths.map(async (inputPath) => ({
+    path: inputPath,
+    bytes: await regularFileBytes(workspacePath, inputPath),
+  })));
+  for (const input of inputs) assertSafeDependencyManagerConfig(input.path, input.bytes);
+  const rootPackage = inputs.find((entry) => entry.path === 'package.json')!;
+  const declared = parsePackageManagerDeclaration(packageManagerField(rootPackage.bytes));
+  const version = await (options.resolveVersion ?? resolveManagerVersion)(parsed.manager);
+  if (declared) {
+    if (declared.manager !== parsed.manager) {
+      throw new Error('Saved install command does not match package.json packageManager.');
+    }
+    if (declared.version && declared.version !== version) {
+      throw new Error(`Installed ${parsed.manager} version does not match package.json packageManager.`);
+    }
+  }
+  const lockfilePath = lockCandidates[0]!;
+  const lockfileBytes = await regularFileBytes(workspacePath, lockfilePath);
+  const inputDigests = inputs.map((entry) => ({
+    path: entry.path,
+    digest: digestBytes(entry.bytes),
+  }));
+  const locals = await localDependencyDigests(
+    workspacePath,
+    inputs.filter((entry) => path.posix.basename(entry.path) === 'package.json'),
+  );
+  const runtimeFacts = options.runtimeFacts ?? {
+    abi: process.versions.modules,
+    platform: process.platform,
+    architecture: process.arch,
+  };
+  const unsigned = {
+    packageManager: parsed.manager,
+    packageManagerVersion: version,
+    runtimeAbi: runtimeFacts.abi,
+    platform: runtimeFacts.platform,
+    architecture: runtimeFacts.architecture,
+    installArgs: parsed.args,
+    lifecycleScripts,
+    gitTreeSha: initialTreeSha,
+    lockfile: { path: lockfilePath, digest: digestBytes(lockfileBytes) },
+    inputDigests,
+    localDependencyDigests: locals,
+  };
+  if (await committedTreeReceipt(workspacePath) !== initialTreeSha) {
+    throw new Error('Dependency recipe Git tree changed during derivation.');
+  }
+  const key = digestJson(unsigned);
+  return {
+    key,
+    ...unsigned,
+    cacheAuthorityId: `native-download-cache:${parsed.manager}:recipe:${key}`,
+  };
+}
+
+async function ensurePrivateDirectory(directoryPath: string, parentPath?: string): Promise<void> {
+  try {
+    await mkdir(directoryPath, { recursive: parentPath === undefined, mode: 0o700 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+  }
+  const [entry, canonical, canonicalRoot] = await Promise.all([
+    lstat(directoryPath),
+    realpath(directoryPath),
+    realpath(parentPath ?? directoryPath),
+  ]);
+  if (!entry.isDirectory()
+    || entry.isSymbolicLink()
+    || (process.platform !== 'win32' && (entry.mode & 0o077) !== 0)
+    || (parentPath !== undefined
+      && canonical !== path.join(canonicalRoot, path.basename(directoryPath)))) {
+    throw new Error('Package-manager recipe authority is not an exact private directory.');
+  }
+}
+
+interface RecipeCacheAuthority {
+  root: string;
+  cache: string;
+}
+
+interface InstallRuntimePaths {
+  root: string;
+  home: string;
+  config: string;
+  xdgCache: string;
+  temp: string;
+  corepack: string;
+  emptyUserConfig: string;
+  emptyGlobalConfig: string;
+  device: number;
+  inode: number;
+}
+
+async function ensureRecipeAuthority(
+  cacheRoot: string,
+  recipe: DependencyInstallRecipe,
+): Promise<RecipeCacheAuthority> {
+  if (!/^[0-9a-f]{64}$/.test(recipe.key)
+    || recipe.cacheAuthorityId !== `native-download-cache:${recipe.packageManager}:recipe:${recipe.key}`) {
+    throw new Error('Dependency recipe cache authority is invalid.');
+  }
+  await ensurePrivateDirectory(cacheRoot);
+  const managerRoot = path.join(cacheRoot, recipe.packageManager);
+  await ensurePrivateDirectory(managerRoot, cacheRoot);
+  const root = path.join(managerRoot, recipe.key);
+  await ensurePrivateDirectory(root, managerRoot);
+  const authority = {
+    root,
+    cache: path.join(root, 'cache'),
+  };
+  await ensurePrivateDirectory(authority.cache, root);
+  return authority;
+}
+
+async function createInstallRuntime(
+  workspacePath: string,
+  workspaceIdentity: WorktreeMaterializationIdentity,
+): Promise<InstallRuntimePaths> {
+  const runtimeParentRelative = '.o8-install-runtime';
+  await ensurePinnedWorkspaceDirectory(
+    workspacePath,
+    workspaceIdentity,
+    runtimeParentRelative,
+  );
+  const rootRelative = `${runtimeParentRelative}/${randomUUID()}`;
+  const rootIdentity = await ensurePinnedWorkspaceDirectory(
+    workspacePath,
+    workspaceIdentity,
+    rootRelative,
+  );
+  const root = path.join(workspacePath, rootRelative);
+  const paths: InstallRuntimePaths = {
+    root,
+    home: path.join(root, 'home'),
+    config: path.join(root, 'config'),
+    xdgCache: path.join(root, 'xdg-cache'),
+    temp: path.join(root, 'tmp'),
+    corepack: path.join(root, 'corepack'),
+    emptyUserConfig: path.join(root, 'config', 'user.rc'),
+    emptyGlobalConfig: path.join(root, 'config', 'global.rc'),
+    device: rootIdentity.device,
+    inode: rootIdentity.inode,
+  };
+  for (const relative of ['home', 'config', 'xdg-cache', 'tmp', 'corepack']) {
+    await ensurePinnedWorkspaceDirectory(
+      workspacePath,
+      workspaceIdentity,
+      `${rootRelative}/${relative}`,
+    );
+  }
+  await ensurePinnedWorkspaceFile(
+    workspacePath,
+    workspaceIdentity,
+    `${rootRelative}/config/user.rc`,
+    '',
+  );
+  await ensurePinnedWorkspaceFile(
+    workspacePath,
+    workspaceIdentity,
+    `${rootRelative}/config/global.rc`,
+    '',
+  );
+  return paths;
+}
+
+async function retireInstallRuntime(
+  runtime: InstallRuntimePaths,
+  afterTreeCapture?: DependencyInstallOptions['afterRuntimeTreeCapture'],
+): Promise<void> {
+  await purgeExactDirectory(
+    runtime.root,
+    { device: runtime.device, inode: runtime.inode },
+    undefined,
+    afterTreeCapture,
+  );
+}
+
+function isolatedInstallEnvironment(runtime: InstallRuntimePaths): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { NODE_ENV: 'development' };
+  for (const name of SAFE_HOST_ENV_NAMES) {
+    const value = process.env[name];
+    if (value !== undefined) env[name] = value;
+  }
+  env.HOME = runtime.home;
+  env.USERPROFILE = runtime.home;
+  env.XDG_CONFIG_HOME = runtime.config;
+  env.XDG_CACHE_HOME = runtime.xdgCache;
+  env.COREPACK_HOME = runtime.corepack;
+  env.TMPDIR = runtime.temp;
+  env.TMP = runtime.temp;
+  env.TEMP = runtime.temp;
+  return env;
+}
+
+function nativeInvocation(
+  workspacePath: string,
+  recipe: DependencyInstallRecipe,
+  authority: RecipeCacheAuthority,
+  runtime: InstallRuntimePaths,
+): DependencyInstallInvocation {
+  const env = isolatedInstallEnvironment(runtime);
+  const args = [...recipe.installArgs];
+  if (recipe.packageManager === 'npm') {
+    env.npm_config_cache = authority.cache;
+    env.npm_config_userconfig = runtime.emptyUserConfig;
+    env.npm_config_globalconfig = runtime.emptyGlobalConfig;
+    env.npm_config_prefer_offline = 'true';
+  } else if (recipe.packageManager === 'pnpm') {
+    env.npm_config_userconfig = runtime.emptyUserConfig;
+    env.npm_config_globalconfig = runtime.emptyGlobalConfig;
+    args.push('--store-dir', authority.cache, '--package-import-method=copy');
+  } else if (recipe.packageManager === 'yarn') {
+    env.YARN_CACHE_FOLDER = authority.cache;
+    env.YARN_ENABLE_GLOBAL_CACHE = 'true';
+    env.YARN_GLOBAL_FOLDER = authority.cache;
+    env.YARN_NODE_LINKER = 'node-modules';
+  } else {
+    env.BUN_INSTALL_CACHE_DIR = authority.cache;
+  }
+  return {
+    command: recipe.packageManager,
+    args,
+    cwd: workspacePath,
+    timeoutMs: 45 * 60_000,
+    env,
+  };
+}
+
+async function defaultRun(
+  invocation: DependencyInstallInvocation,
+  identity?: WorktreeMaterializationIdentity,
+): Promise<void> {
+  const guarded = guardedWorkspaceInvocation(
+    invocation.command,
+    invocation.args,
+    identity ?? null,
+  );
+  await execFileAsync(guarded.command, guarded.args, {
+    cwd: invocation.cwd,
+    timeout: invocation.timeoutMs,
+    maxBuffer: 8 * 1024 * 1024,
+    windowsHide: true,
+    env: invocation.env,
+  });
+}
+
+async function auditInstalledEntry(workspacePath: string, absolutePath: string): Promise<void> {
+  const entry = await lstat(absolutePath);
+  if (entry.isSymbolicLink()) {
+    const target = await realpath(absolutePath);
+    if (!pathInside(target, await realpath(workspacePath))) {
+      throw new Error(`Installed dependency link escapes its private workspace: ${path.relative(workspacePath, absolutePath)}`);
+    }
+    return;
+  }
+  if (entry.isFile() && entry.nlink > 1) {
+    throw new Error(`Installed dependency uses a shared hardlink: ${path.relative(workspacePath, absolutePath)}`);
+  }
+  if (!entry.isDirectory()) return;
+  const children = await readdir(absolutePath);
+  for (const child of children) {
+    await auditInstalledEntry(workspacePath, path.join(absolutePath, child));
+  }
+}
+
+export async function auditPrivateDependencyView(workspacePath: string): Promise<void> {
+  const nodeModules = path.join(workspacePath, 'node_modules');
+  let root;
+  try {
+    root = await lstat(nodeModules);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new Error('Package-manager install completed without a private node_modules view.');
+    }
+    throw error;
+  }
+  if (!root.isDirectory() || root.isSymbolicLink() || (root.mode & 0o200) === 0) {
+    throw new Error('Installed dependency view is not a private writable directory.');
+  }
+  await auditInstalledEntry(workspacePath, nodeModules);
+}
+
+export async function runDependencyInstall(
+  workspacePath: string,
+  installCommand: string,
+  options: DependencyInstallOptions = {},
+): Promise<DependencyInstallReceipt> {
+  const parsed = parseInstallCommand(installCommand);
+  const recipe = options.preparedRecipe
+    ?? await deriveDependencyInstallRecipe(workspacePath, installCommand, options);
+  if (recipe.packageManager !== parsed.manager
+    || JSON.stringify(recipe.installArgs) !== JSON.stringify(parsed.args)) {
+    throw new Error('Prepared dependency recipe does not match the saved install command.');
+  }
+  const cacheRoot = path.resolve(options.cacheRoot ?? dependencyCacheRoot());
+  const authority = await ensureRecipeAuthority(cacheRoot, recipe);
+  const materializationIdentity = options.materializationIdentity
+    ?? await captureWorktreeMaterializationIdentity(workspacePath);
+  const runtime = await createInstallRuntime(workspacePath, materializationIdentity);
+  try {
+    const invocation = nativeInvocation(workspacePath, recipe, authority, runtime);
+    if (options.run) await options.run(invocation);
+    else await defaultRun(invocation, options.materializationIdentity);
+    await auditPrivateDependencyView(workspacePath);
+    return {
+      recipe,
+      privateViewVerified: true,
+      completedAt: (options.now ?? (() => new Date()))().toISOString(),
+    };
+  } finally {
+    await retireInstallRuntime(runtime, options.afterRuntimeTreeCapture);
+  }
+}
+
+export async function measureDependencyTreeBytes(workspacePath: string): Promise<number> {
+  const root = path.join(workspacePath, 'node_modules');
+  let total = 0;
+  async function walk(candidate: string): Promise<void> {
+    const entry = await lstat(candidate);
+    if (entry.isSymbolicLink()) return;
+    if (entry.isFile()) {
+      total += entry.size;
+      return;
+    }
+    if (!entry.isDirectory()) return;
+    for (const child of await readdir(candidate)) await walk(path.join(candidate, child));
+  }
+  await stat(root);
+  await walk(root);
+  return total;
+}

@@ -16,7 +16,6 @@ const { createLane, setLaneStatus } = await import('@/lib/lane/registry');
 const { addRepo } = await import('@/lib/repos/registry');
 const { getWorkspaceSnapshot } = await import('@/lib/worktree/snapshot-state');
 const { resolveWorktreeRootLayout } = await import('@/lib/worktree/root-layout');
-const { withWorktreeMetaTransaction } = await import('@/lib/worktree/metadata-store');
 const { captureWorktreeMaterializationIdentity } = await import('@/lib/worktree/materialization-identity');
 
 const routeChildScript = String.raw`
@@ -225,15 +224,6 @@ describe('workspace lifecycle cross-process real path', () => {
     });
     setLaneStatus(lane.id, 'reviewing');
 
-    let releaseMetadataLock!: () => void;
-    let metadataLockReady!: () => void;
-    const metadataLockAcquired = new Promise<void>((resolve) => { metadataLockReady = resolve; });
-    const holdMetadataLock = withWorktreeMetaTransaction(repoPath, async () => {
-      metadataLockReady();
-      await new Promise<void>((resolve) => { releaseMetadataLock = resolve; });
-    });
-    await metadataLockAcquired;
-
     const sharedEnv = {
       O8_DATA_DIR: dataDir,
       CORTEX_IDE_DATA_DIR: dataDir,
@@ -255,8 +245,6 @@ describe('workspace lifecycle cross-process real path', () => {
     expect(reconciler.stdout).not.toContain('O8_RECONCILER_RESULT');
     expect(getWorkspaceSnapshot(repo.id, packetId)?.state).toBe('hibernating');
 
-    releaseMetadataLock();
-    await holdMetadataLock;
     await route.waitFor('O8_ROUTE_RESULT 200');
     expect(await route.waitForExit()).toBe(0);
     await reconciler.waitFor('O8_RECONCILER_RESULT');

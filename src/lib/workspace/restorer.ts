@@ -22,9 +22,10 @@ import {
 import { verifyImmutableWorkspaceTruth } from './hibernator';
 import { probeOwnedSessionProcessQuiescence } from './process-probes';
 import {
-  repoSetupBoundRecipeKey,
+  REPO_SETUP_POLICY_IDENTITY_KIND,
   repoSetupCopyBindingRequirements,
   repoSetupExternalSymlinkAllowlist,
+  repoSetupPolicyMatchesSnapshot,
   runRegisteredRepoSetup,
 } from './repo-setup';
 import {
@@ -34,6 +35,7 @@ import {
 } from './storage-verifier';
 import { parkExactWorktree, restoreExactWorktree } from './worktree-exact';
 import { assertManagedWorkspaceMaterialization } from './managed-materialization-identity';
+import { writeManagedWorkspaceSafetyHooks } from '@/lib/worktree/safety-hooks';
 
 
 export interface RestoreWorkspaceInput {
@@ -56,6 +58,7 @@ export interface RestoreDependencies {
   firstScan: typeof scanWorkspaceStorageState;
   secondScan: typeof scanWorkspaceStorageState;
   processProbe: typeof probeOwnedSessionProcessQuiescence;
+  writeSafetyHooks: typeof writeManagedWorkspaceSafetyHooks;
   afterExactRestore?: (workspacePath: string) => Promise<void> | void;
 }
 
@@ -68,6 +71,7 @@ const DEFAULT_DEPENDENCIES: RestoreDependencies = {
   firstScan: scanWorkspaceStorageState,
   secondScan: scanWorkspaceStorageState,
   processProbe: probeOwnedSessionProcessQuiescence,
+  writeSafetyHooks: writeManagedWorkspaceSafetyHooks,
 };
 
 function compactError(error: unknown): string {
@@ -83,7 +87,7 @@ function isolationFromSnapshot(snapshot: WorkspaceSnapshotRecord): WorkspaceIsol
 function allowedRebuildablePaths(repo: RepoRegistryEntry, extra: string[] | undefined): string[] {
   return [...new Set([
     ...repo.setup.envFiles,
-    'node_modules', '.next/cache', '.turbo', '.venv', 'vendor', 'target', 'Pods', 'DerivedData',
+    'node_modules', '.o8-install-runtime', '.claude/settings.json', '.claude/settings.local.json', '.next/cache', '.turbo', '.venv', 'vendor', 'target', 'Pods', 'DerivedData',
     ...(extra ?? []),
   ])];
 }
@@ -295,7 +299,14 @@ export async function restoreWorkspace(
         throw new Error('Lane repository or original path does not match the parked snapshot.');
       }
       requiredCopyBindings = await repoSetupCopyBindingRequirements(repo);
-      if (repoSetupBoundRecipeKey(repo, requiredCopyBindings) !== snapshot.dependencyRecipeKey) {
+      const expectedPolicyKey = snapshot.sessionIdentities
+        .find((entry) => entry.kind === REPO_SETUP_POLICY_IDENTITY_KIND)?.identity ?? null;
+      if (!await repoSetupPolicyMatchesSnapshot(
+        repo,
+        requiredCopyBindings,
+        snapshot.dependencyRecipeKey,
+        expectedPolicyKey,
+      )) {
         throw new Error('Registered repo setup changed after parking; exact restore requires the saved recipe.');
       }
       await verifyImmutableWorkspaceTruth(repo.localPath, snapshot);
@@ -337,10 +348,12 @@ export async function restoreWorkspace(
       const setupReceipt = await deps.runSetup(repo, snapshot.originalPath, {
         requiredCopyBindings,
         materializationIdentity,
+        expectedRecipeKey: snapshot.dependencyRecipeKey ?? undefined,
       });
       if (setupReceipt.recipeKey !== snapshot.dependencyRecipeKey) {
         throw new Error('Restored setup receipt does not match the saved recipe.');
       }
+      await deps.writeSafetyHooks(repo.localPath, snapshot.originalPath, materializationIdentity);
       await verifyRestoredWorkspaceCheckout(snapshot);
       const first = await deps.firstScan(snapshot.originalPath, {
         allowedIgnoredPaths,

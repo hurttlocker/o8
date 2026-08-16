@@ -4,7 +4,11 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { archiveRootForOwnedSessionRoot } from '@/lib/runtimes/shared/owned-session/archive';
-import { aggregateDirectoryStorage, type DirectoryStorageTelemetry } from './storage-telemetry';
+import {
+  aggregateDirectoryStorage,
+  measureDirectoryStorage,
+  type DirectoryStorageTelemetry,
+} from './storage-telemetry';
 import {
   classifyOwnedSessionArtifact,
   readStorageCategorySnapshot,
@@ -67,6 +71,12 @@ describe('storage category telemetry', () => {
       writeFile(path.join(worktree, 'node_modules', 'package-a', 'index.js'), 'dependency\n'),
       writeFile(path.join(worktree, '.next', 'server', 'page.js'), 'build output\n'),
     ]);
+    const dependencyCacheRoot = path.join(testRoot, 'package-manager-cache');
+    await mkdir(path.join(dependencyCacheRoot, 'npm', 'recipe-key', 'cache'), { recursive: true });
+    await writeFile(
+      path.join(dependencyCacheRoot, 'npm', 'recipe-key', 'cache', 'package.tgz'),
+      'persisted native dependency cache\n',
+    );
 
     const ownedRoot = path.join(testRoot, 'owned-runtime');
     const activeSession = path.join(ownedRoot, 'active-session');
@@ -88,7 +98,11 @@ describe('storage category telemetry', () => {
 
     const snapshot = await readStorageCategorySnapshot(
       [{ repositoryUuid: 'repo-1', bases: [base] }],
-      { forceRefresh: true, ownedRootPaths: [ownedRoot] },
+      {
+        forceRefresh: true,
+        ownedRootPaths: [ownedRoot],
+        dependencyCacheRootPaths: [dependencyCacheRoot],
+      },
     );
     const workspace = aggregateDirectoryStorage(snapshot.repos[0]!.workspaceMeasurements);
     const categories = snapshot.repos[0]!.categories;
@@ -99,6 +113,21 @@ describe('storage category telemetry', () => {
     expect(categories.source.measurementMethod).toBe('workspace-residual');
     expect(categories.dependency.allocatedBytes).toBeGreaterThan(0);
     expect(categories.dependency.measurementMethod).toBe('known-path-sum');
+    const dependencyCache = await measureDirectoryStorage(dependencyCacheRoot);
+    expect(snapshot.dependencyCacheMeasurements).toEqual([
+      expect.objectContaining({
+        path: dependencyCacheRoot,
+        presence: 'present',
+        allocatedBytes: dependencyCache.allocatedBytes,
+        logicalBytes: dependencyCache.logicalBytes,
+      }),
+    ]);
+    expect(snapshot.categories.dependency.allocatedBytes).toBe(
+      (categories.dependency.allocatedBytes ?? 0) + (dependencyCache.allocatedBytes ?? 0),
+    );
+    expect(snapshot.categories.dependency.logicalBytes).toBe(
+      (categories.dependency.logicalBytes ?? 0) + (dependencyCache.logicalBytes ?? 0),
+    );
     expect(categories.build.allocatedBytes).toBeGreaterThan(0);
     expect(
       (categories.source.allocatedBytes ?? 0)
@@ -119,7 +148,7 @@ describe('storage category telemetry', () => {
 
     const cached = await readStorageCategorySnapshot(
       [{ repositoryUuid: 'repo-1', bases: [base] }],
-      { ownedRootPaths: [ownedRoot] },
+      { ownedRootPaths: [ownedRoot], dependencyCacheRootPaths: [dependencyCacheRoot] },
     );
     expect(cached.measuredAt).toBe(snapshot.measuredAt);
     expect(cached.freshness.source).toBe('cache');
@@ -135,6 +164,7 @@ describe('storage category telemetry', () => {
       {
         forceRefresh: true,
         ownedRootPaths: [ownedRoot],
+        dependencyCacheRootPaths: [],
         dependencies: {
           readDirectory: async (targetPath) => {
             if (targetPath === base) return [{ name: 'packet-a', isDirectory: () => true }];
@@ -184,6 +214,7 @@ describe('storage category telemetry', () => {
     const options = {
       forceRefresh: true,
       ownedRootPaths: [ownedRoot],
+      dependencyCacheRootPaths: [],
       dependencies: {
         readDirectory: async () => { throw errno('ENOENT'); },
         measureDirectory: async (targetPath: string) => {

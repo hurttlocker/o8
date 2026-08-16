@@ -240,9 +240,9 @@ async function main() {
   const relative = process.argv[2];
   let prepared;
   try {
-    prepared = await prepareParent(relative, operation !== 'read' && operation !== 'inspect');
+    prepared = await prepareParent(relative, operation !== 'read' && operation !== 'inspect-entry');
   } catch (error) {
-    if ((operation === 'read' || operation === 'inspect') && error.code === 'ENOENT') {
+    if ((operation === 'read' || operation === 'inspect-entry') && error.code === 'ENOENT') {
       process.exitCode = 44;
       return;
     }
@@ -270,7 +270,7 @@ async function main() {
     }
     return;
   }
-  if (operation === 'inspect') {
+  if (operation === 'inspect-entry') {
     try {
       const entry = fs.lstatSync(prepared.target);
       const kind = entry.isSymbolicLink() ? 'symlink'
@@ -498,7 +498,7 @@ function safeRelativePath(value: string): string {
 async function runPinnedLeaf(
   workspacePath: string,
   identity: WorktreeMaterializationIdentity,
-  operation: 'read' | 'inspect' | 'atomic-write' | 'copy-file' | 'symlink' | 'copy-tree' | 'ensure-directory' | 'ensure-file',
+  operation: 'read' | 'inspect-entry' | 'atomic-write' | 'copy-file' | 'symlink' | 'copy-tree' | 'ensure-directory' | 'ensure-file',
   relativePath: string,
   sourceOrTarget?: string,
   content?: string,
@@ -616,7 +616,7 @@ export async function inspectPinnedWorkspaceEntry(
   identity: WorktreeMaterializationIdentity,
   relativePath: string,
 ): Promise<{ kind: 'file' | 'directory' | 'symlink' | 'other'; device: number; inode: number } | null> {
-  const receipt = await runPinnedLeaf(workspacePath, identity, 'inspect', relativePath);
+  const receipt = await runPinnedLeaf(workspacePath, identity, 'inspect-entry', relativePath);
   if (receipt.code === 44) return null;
   const parsed = JSON.parse(receipt.stdout) as {
     kind?: unknown; device?: unknown; inode?: unknown;

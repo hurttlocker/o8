@@ -20,7 +20,7 @@
 
 import { WorktreeManager } from './manager';
 import type { AgentType, WorktreeInfo, WorkspaceIsolationPreference } from './types';
-import type { RepoSetupEnvMode } from '@/lib/repos/types';
+import type { RepoSetupConfig, RepoSetupEnvMode } from '@/lib/repos/types';
 
 // Cache managers per repo to avoid re-instantiating
 const managers = new Map<string, WorktreeManager>();
@@ -80,6 +80,8 @@ export interface WorktreeLaunchOptions {
   envMode?: RepoSetupEnvMode;
   /** Env files to copy/symlink into the worktree */
   envFiles?: string[];
+  /** Registry-owned package-manager and environment setup contract. */
+  repoSetup?: RepoSetupConfig;
   /** Preferred workspace isolation implementation */
   isolationPreference?: WorkspaceIsolationPreference;
   /**
@@ -142,6 +144,7 @@ export async function prepareLaunchWorktree(
     skipSetup: opts.skipSetup,
     envMode: opts.envMode,
     envFiles: opts.envFiles,
+    repoSetup: opts.repoSetup,
     isolationPreference: opts.isolationPreference,
     packetId: opts.packetId,
     storageAdmissionReservationId: opts.storageAdmissionReservationId,

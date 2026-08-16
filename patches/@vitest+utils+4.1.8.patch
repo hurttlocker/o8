@@ -1,0 +1,16 @@
+diff --git a/node_modules/@vitest/utils/dist/source-map/node.js b/node_modules/@vitest/utils/dist/source-map/node.js
+index b1e322a..4788a36 100644
+--- a/node_modules/@vitest/utils/dist/source-map/node.js
++++ b/node_modules/@vitest/utils/dist/source-map/node.js
+@@ -8,2 +8,9 @@
+-	const map = (convertSourceMap.fromSource(code) || convertSourceMap.fromMapFileSource(code, createConvertSourceMapReadMap(filePath)))?.toObject();
+-	return map ? { map } : undefined;
++	try {
++		const map = (convertSourceMap.fromSource(code) || convertSourceMap.fromMapFileSource(code, createConvertSourceMapReadMap(filePath)))?.toObject();
++		return map ? { map } : undefined;
++	} catch (error) {
++		// Some dependencies contain source-map-looking text inside generated
++		// string literals. Keep the original stack frame when it is not a map.
++		if (error instanceof SyntaxError) return undefined;
++		throw error;
++	}

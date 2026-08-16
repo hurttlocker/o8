@@ -27,9 +27,11 @@ import {
 } from '@/lib/worktree/materialization-execution';
 import { probeOwnedSessionProcessQuiescence } from './process-probes';
 import {
+  REPO_SETUP_POLICY_IDENTITY_KIND,
   repoSetupBoundRecipeKey,
   repoSetupCopyBindingRequirements,
   repoSetupExternalSymlinkAllowlist,
+  repoSetupPolicyKey,
 } from './repo-setup';
 import {
   compareWorkspaceStorageScans,
@@ -238,7 +240,7 @@ export async function measureWorkspaceStorage(workspacePath: string): Promise<Wo
 function allowedRebuildablePaths(repo: RepoRegistryEntry, extra: string[] | undefined): string[] {
   return [...new Set([
     ...repo.setup.envFiles,
-    'node_modules', '.next/cache', '.turbo', '.venv', 'vendor', 'target', 'Pods', 'DerivedData',
+    'node_modules', '.o8-install-runtime', '.claude/settings.json', '.claude/settings.local.json', '.next/cache', '.turbo', '.venv', 'vendor', 'target', 'Pods', 'DerivedData',
     ...(extra ?? []),
   ])];
 }
@@ -323,6 +325,7 @@ export async function parkWorkspace(
       if (!input.operationId.trim()) throw new Error('operationId is required.');
       repo = (await deps.listRepos()).find((entry) => entry.id === input.repositoryUuid);
       if (!repo) throw new Error('Registered repository UUID was not found.');
+      const registeredRepo = repo;
       const lane = deps.findLaneByPacket(input.packetId);
       if (!lane || lane.packetId !== input.packetId || lane.status !== 'reviewing') {
         throw new Error('Only a reviewing packet lane can be parked.');
@@ -382,7 +385,6 @@ export async function parkWorkspace(
         lane.worktreePath,
       );
       const requiredCopyBindings = await repoSetupCopyBindingRequirements(repo);
-      const dependencyRecipeKey = repoSetupBoundRecipeKey(repo, requiredCopyBindings);
       const first = await deps.firstScan(lane.worktreePath, {
         allowedIgnoredPaths,
         allowedExternalSymlinks,
@@ -393,6 +395,11 @@ export async function parkWorkspace(
       if (processReceipt.state !== 'quiescent') {
         throw new Error(`Owned workspace process state is ${processReceipt.state}.`);
       }
+      const dependencyRecipeKey = await repoSetupBoundRecipeKey(
+        repo,
+        requiredCopyBindings,
+        lane.worktreePath,
+      );
       let truth = await readImmutableWorkspaceTruth(repo, lane, existing?.snapshotGeneration ?? 1);
       const beforeStorage = await deps.measureStorage(lane.worktreePath);
       const sessionIdentities = [
@@ -405,6 +412,12 @@ export async function parkWorkspace(
         {
           kind: 'workspace-isolation',
           identity: truth.isolationKind,
+          runtime: null,
+          bindingId: null,
+        },
+        {
+          kind: REPO_SETUP_POLICY_IDENTITY_KIND,
+          identity: repoSetupPolicyKey(repo, requiredCopyBindings),
           runtime: null,
           bindingId: null,
         },
@@ -488,6 +501,14 @@ export async function parkWorkspace(
       if (comparison.state !== 'verified_clean' || !comparison.identical) {
         throw new Error('Workspace changed across its immutable snapshot boundary.');
       }
+      const secondDependencyRecipeKey = await repoSetupBoundRecipeKey(
+        repo,
+        requiredCopyBindings,
+        lane.worktreePath,
+      );
+      if (secondDependencyRecipeKey !== dependencyRecipeKey) {
+        throw new Error('Workspace dependency recipe changed across its immutable snapshot boundary.');
+      }
       snapshot = transition(snapshot, input.operationId, 'parkable', 'parkable', {
         firstFingerprint: first.fingerprint,
         secondFingerprint: second.fingerprint,
@@ -512,6 +533,14 @@ export async function parkWorkspace(
           });
           if (boundaryScan.state !== 'verified_clean' || boundaryScan.fingerprint !== second.fingerprint) {
             throw new Error('Workspace changed at the final destructive boundary.');
+          }
+          const boundaryDependencyRecipeKey = await repoSetupBoundRecipeKey(
+            registeredRepo,
+            requiredCopyBindings,
+            workspacePath,
+          );
+          if (boundaryDependencyRecipeKey !== dependencyRecipeKey) {
+            throw new Error('Workspace dependency recipe changed at the final destructive boundary.');
           }
           return deps.processProbe(sessionKey, workspacePath);
         },

@@ -19,7 +19,7 @@
  * @see https://github.com/hurttlocker/o8/issues/608
  */
 
-import { access, lstat, realpath, rm, stat } from 'node:fs/promises';
+import { access, lstat, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type {
   CleanupOptions,
@@ -42,15 +42,17 @@ import {
   assertWorktreeMaterializationIdentity,
   captureWorktreeMaterializationIdentity,
 } from './materialization-identity';
-import { withWorktreeMaterializationExecution } from './materialization-execution';
+import {
+  isMaterializationExecutionRefusal,
+  materializationAwareExecFile,
+  withWorktreeMaterializationExecution,
+} from './materialization-execution';
 import {
   createPinnedWorkspaceBinding,
   ensurePinnedWorkspaceDirectory,
-  ensurePinnedWorkspaceFile,
   inspectPinnedWorkspaceEntry,
   isPinnedWorkspacePublishError,
   readPinnedWorkspaceFile,
-  writePinnedWorkspaceFile,
 } from './materialization-leaf-io';
 import {
   completeExactManagedDirectoryRetirement,
@@ -64,7 +66,6 @@ import {
   prepareWorkspaceMaterializationRetirement,
   rollbackWorkspaceMaterializationRetirement,
 } from '@/lib/workspace/workspace-materialization-retirement';
-import { materializationAwareExecFile } from './materialization-execution';
 import type { StorageRootIdentity } from '@/lib/workspace/storage-admission';
 import {
   assertManagedWorktreeCreatedBoundary,
@@ -72,11 +73,20 @@ import {
   resolveWorktreeRootLayout,
 } from './root-layout';
 import { withManagedWorktreeStorageAdmission } from './launch-storage-admission';
-import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import {
   gitCommandErrorMessage,
   shouldClassifyFetchAsOriginMissing,
 } from './errors';
+import {
+  deriveDependencyInstallRecipe,
+  detectDependencyInstallCommand,
+  runDependencyInstall,
+} from '@/lib/workspace/dependency-install';
+import {
+  probeMetadataLockProcessIdentity,
+  sameMetadataLockProcessIdentity,
+} from './metadata-lock-process-identity';
+import { writeManagedWorkspaceSafetyHooks } from './safety-hooks';
 
 const execFileAsync = materializationAwareExecFile;
 const TRASH_DIR_NAME = '.o8-trash';
@@ -84,7 +94,6 @@ const CLAUDE_WORKTREE_DIR = '.claude/worktrees';
 const STALE_THRESHOLD_MS = 24 * 60 * 60_000; // 24 hours
 const RETENTION_CREATION_GRACE_MS = 5 * 60_000;
 const AUTO_PRUNE_COOLDOWN_MS = 6 * 60 * 60_000; // 6 hours
-const NODE_INSTALL_TIMEOUT_MS = 45 * 60_000;
 const APFS_COW_ENV_FLAG = 'O8_APFS_COW_WORKSPACES';
 const APFS_HYDRATION_CANDIDATES = [
   '.next/cache',
@@ -466,6 +475,7 @@ export class WorktreeManager {
       || baseExecutionIdentity.canonicalPath !== baseIdentity.canonicalPath) {
       throw new Error('Managed worktree base changed before its execution handle was captured.');
     }
+    const creationOwner = await this.captureCreationOwner();
     return withWorktreeMetadataBoundary(this.repoRoot, {
       root: admittedRootIdentity,
       base: baseExecutionIdentity,
@@ -484,6 +494,7 @@ export class WorktreeManager {
         admittedVolumeId,
         admittedRootIdentity,
         baseIdentity,
+        creationOwner,
       });
     }
 
@@ -505,6 +516,7 @@ export class WorktreeManager {
       isolationKind: 'git-worktree',
       materializationIdentity: preparedExecutionIdentity,
       materializationParentIdentity: baseExecutionIdentity,
+      creationOwner,
     });
 
     try {
@@ -565,7 +577,15 @@ export class WorktreeManager {
     if (!opts.skipSetup) {
       info.status = 'setup';
       await this.updateMetaStatus(taskId, 'setup');
-      await this.runSetup(worktreePath, createdExecutionIdentity);
+      const dependencyRecipeKey = await this.runSetup(
+        worktreePath,
+        createdExecutionIdentity,
+        opts.repoSetup,
+      );
+      if (dependencyRecipeKey) {
+        info.dependencyRecipeKey = dependencyRecipeKey;
+        await this.updateMetaDependencyRecipeKey(taskId, dependencyRecipeKey);
+      }
     }
     await this.resetTrackedWorkspaceChanges(worktreePath);
 
@@ -617,17 +637,21 @@ export class WorktreeManager {
     } catch (err) {
       if (isPinnedWorkspacePublishError(err)) throw err;
       try {
+        const creationBranchHead = await this.captureCreationBranchHead(
+          taskId,
+          worktreePath,
+          preparedExecutionIdentity,
+          branchName,
+        );
         await this.retireFailedManagedCreation(
           taskId, worktreePath, preparedExecutionIdentity, baseExecutionIdentity,
         );
+        if (creationBranchHead) {
+          await this.deleteCreationBranch(branchName, creationBranchHead);
+        }
       } catch (retirementError) {
         throw this.creationRetirementRefusal(err, retirementError);
       }
-      await execFileAsync('git', ['branch', '-D', branchName], {
-        windowsHide: true,
-        cwd: this.repoRoot,
-        timeout: 5000,
-      }).catch(() => {});
       await this.removeMeta(taskId);
       completeExactManagedDirectoryRetirement(this.repoRoot, taskId);
       throw err;
@@ -664,10 +688,12 @@ export class WorktreeManager {
     admittedVolumeId: string;
     admittedRootIdentity: StorageRootIdentity;
     baseIdentity: StorageRootIdentity;
+    creationOwner: NonNullable<WorktreeMetaEntry['creationOwner']>;
   }): Promise<WorktreeInfo> {
     const {
       opts, taskId, branchName, baseBranch, worktreePath, now, baseExecutionIdentity,
       admittedVolumeId, admittedRootIdentity, baseIdentity,
+      creationOwner,
     } = params;
 
     const preparedExecutionIdentity = await ensurePinnedWorkspaceDirectory(
@@ -686,6 +712,7 @@ export class WorktreeManager {
       hydrationPaths: [],
       materializationIdentity: preparedExecutionIdentity,
       materializationParentIdentity: baseExecutionIdentity,
+      creationOwner,
     });
 
     let createdExecutionIdentity: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>> | null = preparedExecutionIdentity;
@@ -780,7 +807,15 @@ export class WorktreeManager {
       if (!opts.skipSetup) {
         info.status = 'setup';
         await this.updateMetaStatus(taskId, 'setup');
-        await this.runSetup(worktreePath, capturedExecutionIdentity);
+        const dependencyRecipeKey = await this.runSetup(
+          worktreePath,
+          capturedExecutionIdentity,
+          opts.repoSetup,
+        );
+        if (dependencyRecipeKey) {
+          info.dependencyRecipeKey = dependencyRecipeKey;
+          await this.updateMetaDependencyRecipeKey(taskId, dependencyRecipeKey);
+        }
       }
       await this.resetTrackedWorkspaceChanges(worktreePath);
 
@@ -1063,6 +1098,7 @@ export class WorktreeManager {
           claudeManaged: entry.claudeManaged,
           isolationKind,
           hydrationPaths: entry.hydrationPaths ?? [],
+          dependencyRecipeKey: entry.dependencyRecipeKey,
         };
       }),
     );
@@ -1144,31 +1180,28 @@ export class WorktreeManager {
   async runSetup(
     worktreePath: string,
     identity?: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>>,
-  ): Promise<void> {
-    // Node.js — install a real dependency tree inside the worktree.
-    const hasPackageLock = await this.pathExists(path.join(worktreePath, 'package-lock.json'));
+    repoSetup?: CreateWorktreeOptions['repoSetup'],
+  ): Promise<string | null> {
     const hasPackageJson = await this.pathExists(path.join(worktreePath, 'package.json'));
-
-    const nodeDepsReady = (hasPackageLock || hasPackageJson)
-      ? await this.hasHealthyLocalNodeModules(worktreePath, identity)
-      : false;
-
-    if (!nodeDepsReady && hasPackageLock) {
-      const npmCi = cliInvocation('npm', ['ci', '--prefer-offline']);
-      await execFileAsync(npmCi.command, npmCi.args, {
-        windowsHide: true,
-        cwd: worktreePath,
-        timeout: NODE_INSTALL_TIMEOUT_MS,
-        env: { ...process.env, NODE_ENV: 'development' },
+    let dependencyRecipeKey: string | null = null;
+    const installCommand = repoSetup
+      ? repoSetup.installOnCreateWorkspace
+        ? repoSetup.installCommand?.trim() || null
+        : null
+      : hasPackageJson
+        ? await detectDependencyInstallCommand(worktreePath)
+        : null;
+    if (repoSetup?.installOnCreateWorkspace && !installCommand) {
+      throw new Error('The registered repo requires install-on-create but has no install command.');
+    }
+    if (installCommand) {
+      const recipe = await deriveDependencyInstallRecipe(worktreePath, installCommand);
+      await this.assertInstallableLocalNodeModules(worktreePath, identity);
+      const receipt = await runDependencyInstall(worktreePath, installCommand, {
+        materializationIdentity: identity,
+        preparedRecipe: recipe,
       });
-    } else if (!nodeDepsReady && hasPackageJson) {
-      const npmInstall = cliInvocation('npm', ['install']);
-      await execFileAsync(npmInstall.command, npmInstall.args, {
-        windowsHide: true,
-        cwd: worktreePath,
-        timeout: NODE_INSTALL_TIMEOUT_MS,
-        env: { ...process.env, NODE_ENV: 'development' },
-      });
+      dependencyRecipeKey = receipt.recipe.key;
     }
 
     // Python
@@ -1197,6 +1230,7 @@ export class WorktreeManager {
         timeout: 120_000,
       }).catch(() => { /* cargo may not be available */ });
     }
+    return dependencyRecipeKey;
   }
 
   private async resetTrackedWorkspaceChanges(worktreePath: string): Promise<void> {
@@ -1226,6 +1260,149 @@ export class WorktreeManager {
       cwd: this.repoRoot,
       timeout: 15_000,
     });
+  }
+
+  private async captureCreationOwner(): Promise<NonNullable<WorktreeMetaEntry['creationOwner']>> {
+    const probe = await probeMetadataLockProcessIdentity(process.pid);
+    if (probe.state !== 'live') {
+      throw new Error('Managed worktree creation could not prove its process owner.');
+    }
+    return { pid: process.pid, identity: probe.identity };
+  }
+
+  private async captureCreationBranchHead(
+    worktreeId: string,
+    worktreePath: string,
+    identity: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>>,
+    branchName: string,
+  ): Promise<string | null> {
+    let topLevel: string;
+    let actualBranch: string;
+    let branchHead: string;
+    try {
+      const [topLevelReceipt, branchReceipt, headReceipt] = await withWorktreeMaterializationExecution(
+        worktreePath,
+        identity,
+        () => Promise.all([
+          execFileAsync('git', ['rev-parse', '--show-toplevel'], {
+            windowsHide: true,
+            cwd: worktreePath,
+            timeout: 5_000,
+          }),
+          execFileAsync('git', ['symbolic-ref', '--quiet', '--short', 'HEAD'], {
+            windowsHide: true,
+            cwd: worktreePath,
+            timeout: 5_000,
+          }),
+          execFileAsync('git', ['rev-parse', '--verify', 'HEAD^{commit}'], {
+            windowsHide: true,
+            cwd: worktreePath,
+            timeout: 5_000,
+          }),
+        ]),
+      );
+      topLevel = await realpath(topLevelReceipt.stdout.trim());
+      actualBranch = branchReceipt.stdout.trim();
+      branchHead = headReceipt.stdout.trim();
+    } catch (error) {
+      if (isMaterializationExecutionRefusal(error)) throw error;
+      return null;
+    }
+    if (topLevel !== identity.canonicalPath || actualBranch !== branchName) return null;
+    await this.updateMetaCreationBranchHead(worktreeId, branchHead);
+    return branchHead;
+  }
+
+  private async deleteCreationBranch(branchName: string, expectedHead: string): Promise<void> {
+    const refName = `refs/heads/${branchName}`;
+    const { stdout } = await execFileAsync('git', ['show-ref', '--hash', '--verify', refName], {
+      windowsHide: true,
+      cwd: this.repoRoot,
+      timeout: 5_000,
+    }).catch((error: unknown) => {
+      const code = error instanceof Error && 'code' in error
+        ? Number((error as NodeJS.ErrnoException).code)
+        : null;
+      if (code === 1) return { stdout: '', stderr: '' };
+      throw error;
+    });
+    const currentHead = stdout.trim();
+    if (!currentHead) return;
+    if (currentHead !== expectedHead) {
+      throw new Error(`Creation branch ${branchName} changed after its ownership receipt.`);
+    }
+    await execFileAsync('git', ['update-ref', '-d', refName, expectedHead], {
+      windowsHide: true,
+      cwd: this.repoRoot,
+      timeout: 5_000,
+    });
+  }
+
+  private async recoverInterruptedCreations(
+    entries: Record<string, WorktreeMetaEntry>,
+  ): Promise<string[]> {
+    const recovered: string[] = [];
+    for (const entry of Object.values(entries)) {
+      if (entry.claudeManaged
+        || (entry.status !== 'creating' && entry.status !== 'setup')
+        || !entry.creationOwner
+        || !entry.materializationIdentity
+        || !entry.materializationParentIdentity) continue;
+      const owner = await probeMetadataLockProcessIdentity(entry.creationOwner.pid);
+      const ownerIsDead = owner.state === 'absent'
+        || (owner.state === 'live'
+          && !sameMetadataLockProcessIdentity(owner.identity, entry.creationOwner.identity));
+      if (!ownerIsDead) continue;
+
+      const worktreePath = entry.materializationIdentity.canonicalPath;
+      const pathExists = await this.pathExists(worktreePath);
+      const pendingRetirement = readExactWorkspaceClaim(
+        'managed-retirement', this.repoRoot, entry.id,
+      );
+      if (!pathExists && !pendingRetirement) continue;
+      if (pathExists && !(await allowWorktreeRemoval(worktreePath, {
+        logPrefix: 'worktree-creation-recovery',
+      }))) continue;
+
+      try {
+        const branchName = entry.branchName ?? `worktree/${entry.agentType}/${entry.id}`;
+        let creationBranchHead = entry.creationBranchHead ?? null;
+        if (pathExists && entry.isolationKind === 'git-worktree') {
+          creationBranchHead = await this.captureCreationBranchHead(
+            entry.id,
+            worktreePath,
+            entry.materializationIdentity,
+            branchName,
+          ) ?? creationBranchHead;
+        }
+        if (entry.isolationKind === 'git-worktree' && !creationBranchHead) {
+          const branchExists = await execFileAsync(
+            'git', ['show-ref', '--verify', '--quiet', `refs/heads/${branchName}`],
+            { windowsHide: true, cwd: this.repoRoot, timeout: 5_000 },
+          ).then(() => true, () => false);
+          if (branchExists) {
+            throw new Error(`Creation branch ${branchName} has no exact ownership receipt.`);
+          }
+        }
+        await this.retireFailedManagedCreation(
+          entry.id,
+          worktreePath,
+          entry.materializationIdentity,
+          entry.materializationParentIdentity,
+        );
+        if (entry.isolationKind === 'git-worktree' && creationBranchHead) {
+          await this.deleteCreationBranch(branchName, creationBranchHead);
+        }
+        await this.removeMeta(entry.id);
+        completeExactManagedDirectoryRetirement(this.repoRoot, entry.id);
+        recovered.push(entry.id);
+      } catch (error) {
+        console.error(
+          `[worktree-creation-recovery] REFUSED recovery for ${entry.id}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    return recovered;
   }
 
   private creationRetirementRefusal(
@@ -1313,10 +1490,10 @@ export class WorktreeManager {
     return TSC_SCRIPT;
   }
 
-  private async hasHealthyLocalNodeModules(
+  private async assertInstallableLocalNodeModules(
     worktreePath: string,
     identity?: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>>,
-  ): Promise<boolean> {
+  ): Promise<void> {
     const targetPath = path.join(worktreePath, 'node_modules');
     const target = identity
       ? await inspectPinnedWorkspaceEntry(worktreePath, identity, 'node_modules')
@@ -1326,24 +1503,8 @@ export class WorktreeManager {
             : entry.isFile() ? 'file' as const : 'other' as const,
         })).catch(() => null);
     if (target?.kind === 'symlink') {
-      if (identity) {
-        throw new Error(`Refusing to install through linked node_modules at ${targetPath}.`);
-      }
-      try {
-        await rm(targetPath, { force: true });
-      } catch (error) {
-        throw new Error(
-          `Refusing to install through linked node_modules at ${targetPath}: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-      return false;
+      throw new Error(`Refusing to install through linked node_modules at ${targetPath}.`);
     }
-
-    // Existence is not health. An install killed part-way leaves a directory,
-    // so require a completion marker before skipping the local install.
-    if (await this.pathExists(path.join(targetPath, '.package-lock.json'))) return true;
-    if (await this.pathExists(targetPath) && await this.pathExists(path.join(targetPath, '.bin'))) return true;
-    return false;
   }
 
   private async bootstrapEnvFiles(
@@ -1386,7 +1547,7 @@ export class WorktreeManager {
   // ── Safety Hook Injection ──
 
   /**
-   * Inject o8 safety hooks into a worktree's .claude/settings.json.
+   * Inject o8 safety hooks into a worktree's private Claude settings overlay.
    * Ensures every dispatched agent gets:
    *  - PreToolUse: destructive command blocker
    *  - PostToolUse: typecheck after edits + completion gate
@@ -1398,136 +1559,7 @@ export class WorktreeManager {
     worktreePath: string,
     identity: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>>,
   ): Promise<void> {
-    try {
-      const o8Root = this.repoRoot;
-      const settings = {
-        hooks: {
-          PreToolUse: [{
-            matcher: '*',
-            hooks: [{
-              type: 'command',
-              command: `node "${path.join(o8Root, 'dist/hooks/claude-code-pretool-hook.js')}"`,
-              timeout: 10,
-            }],
-          }],
-          PostToolUse: [
-            {
-              matcher: 'Write|Edit|MultiEdit',
-              hooks: [{
-                type: 'command',
-                command: `node "${path.join(o8Root, 'dist/hooks/post-edit-typecheck.js')}"`,
-                timeout: 35,
-              }],
-            },
-            {
-              matcher: 'Stop|TaskComplete',
-              hooks: [{
-                type: 'command',
-                command: `node "${path.join(o8Root, 'dist/hooks/completion-gate.js')}"`,
-                timeout: 50,
-              }],
-            },
-          ],
-        },
-      };
-
-      await writePinnedWorkspaceFile(
-        worktreePath, identity, '.claude/settings.json', JSON.stringify(settings, null, 2),
-      );
-
-      // Add .claude/ to the worktree's LOCAL git exclude so the injected
-      // settings.json never shows up in `git status`, `git add -A`, or any
-      // agent's diff. Without this, every Codex/Gemini/opencode packet
-      // commits the file by accident (observed on o8-site #8 and #9) — the
-      // file then ships scope-creep that has to be reverted in review.
-      // Writing to Git's resolved info/exclude is repository-local and never
-      // affects the upstream .gitignore. `--git-path` is required because a
-      // linked worktree's `.git` is a file, not a directory.
-      try {
-        const gitAdmin = await this.captureManagedGitAdmin(worktreePath, identity);
-        await ensurePinnedWorkspaceDirectory(gitAdmin.commonPath, gitAdmin.commonIdentity, 'info');
-        await ensurePinnedWorkspaceFile(
-          gitAdmin.commonPath,
-          gitAdmin.commonIdentity,
-          'info/o8-managed-excludes',
-          '.claude/\n',
-        );
-        await withWorktreeMaterializationExecution(
-          gitAdmin.adminPath,
-          gitAdmin.adminIdentity,
-          () => execFileAsync('git', [
-            '--git-dir=.',
-            `--work-tree=${identity.canonicalPath}`,
-            '-c', `core.excludesFile=${path.join(gitAdmin.commonPath, 'info', 'o8-managed-excludes')}`,
-            'update-index', '--skip-worktree', '.claude/settings.json',
-          ], {
-            windowsHide: true,
-            cwd: gitAdmin.adminPath,
-            timeout: 10_000,
-          }),
-        );
-      } catch (error) {
-        if (isPinnedWorkspacePublishError(error)) throw error;
-        // Non-fatal: the managed workspace remains usable, but its injected
-        // settings may remain visible to Git.
-      }
-    } catch (error) {
-      if (isPinnedWorkspacePublishError(error)) throw error;
-      // Best-effort — don't block worktree creation if hook injection fails
-      console.log('[worktree] hook injection failed (non-fatal)');
-    }
-  }
-
-  private async captureManagedGitAdmin(
-    worktreePath: string,
-    identity: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>>,
-  ): Promise<{
-    adminPath: string;
-    adminIdentity: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>>;
-    commonPath: string;
-    commonIdentity: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>>;
-  }> {
-    const resolveGitPath = async (cwd: string, flag: '--absolute-git-dir' | '--git-common-dir') => {
-      const { stdout } = await execFileAsync('git', ['rev-parse', flag], {
-        windowsHide: true,
-        cwd,
-        timeout: 5000,
-      });
-      const candidate = path.resolve(cwd, stdout.trim());
-      const link = await lstat(candidate);
-      if (!link.isDirectory() || link.isSymbolicLink()) {
-        throw new Error('Managed Git administration path is not an exact directory.');
-      }
-      return realpath(candidate);
-    };
-    const commonPath = await resolveGitPath(worktreePath, '--git-common-dir');
-    const adminPath = await resolveGitPath(worktreePath, '--absolute-git-dir');
-    const workspaceGitPath = path.join(identity.canonicalPath, '.git');
-    if (commonPath === workspaceGitPath) {
-      const localGit = await inspectPinnedWorkspaceEntry(worktreePath, identity, '.git');
-      if (localGit?.kind !== 'directory') {
-        throw new Error('Managed clone Git administration escaped the workspace.');
-      }
-    } else {
-      const repoCommonPath = await resolveGitPath(this.repoRoot, '--git-common-dir');
-      if (commonPath !== repoCommonPath
-        || (adminPath !== commonPath
-          && !adminPath.startsWith(`${commonPath}${path.sep}worktrees${path.sep}`))) {
-        throw new Error('Managed worktree Git administration escaped its repository.');
-      }
-    }
-    if (adminPath !== commonPath && !adminPath.startsWith(`${commonPath}${path.sep}`)) {
-      throw new Error('Managed Git administration is outside its common directory.');
-    }
-    const adminIdentity = await captureWorktreeMaterializationIdentity(adminPath);
-    const commonIdentity = adminPath === commonPath
-      ? adminIdentity
-      : await captureWorktreeMaterializationIdentity(commonPath);
-    if (await resolveGitPath(worktreePath, '--git-common-dir') !== commonPath
-      || await resolveGitPath(worktreePath, '--absolute-git-dir') !== adminPath) {
-      throw new Error('Managed Git administration changed during capture.');
-    }
-    return { adminPath, adminIdentity, commonPath, commonIdentity };
+    await writeManagedWorkspaceSafetyHooks(this.repoRoot, worktreePath, identity);
   }
 
   // ── Conflict Detection ──
@@ -1750,9 +1782,7 @@ export class WorktreeManager {
    * Skips worktrees that have an active lane (running/reviewing/merging).
    */
   async prune(maxAgeMs = STALE_THRESHOLD_MS): Promise<string[]> {
-    const worktrees = await this.list();
-    const authoritativeMeta = await this.loadAllMeta();
-    const now = Date.now();
+    let authoritativeMeta = await this.loadAllMeta();
     const pruned: string[] = [];
 
     // Guard: never prune a worktree bound to a NON-TERMINAL lane. "Active" is
@@ -1781,6 +1811,11 @@ export class WorktreeManager {
       );
       return [];
     }
+
+    pruned.push(...await this.recoverInterruptedCreations(authoritativeMeta));
+    authoritativeMeta = await this.loadAllMeta();
+    const worktrees = await this.list();
+    const now = Date.now();
 
     // A crash after exact source→retired rename leaves the public child absent
     // but retains metadata and the receipt. Resume through cleanup so branch,
@@ -2084,6 +2119,7 @@ export class WorktreeManager {
         if (entry.status === 'creating' || entry.status === 'setup') {
           entry.status = 'active';
         }
+        delete entry.creationOwner;
         await transaction.save(worktreeId, entry);
       }
     });
@@ -2434,6 +2470,7 @@ export class WorktreeManager {
       const entry = (await transaction.readAll())[id];
       if (!entry) return;
       entry.status = status;
+      if (status !== 'creating' && status !== 'setup') delete entry.creationOwner;
       await transaction.save(id, entry);
     });
   }
@@ -2443,6 +2480,24 @@ export class WorktreeManager {
       const entry = (await transaction.readAll())[id];
       if (!entry) return;
       entry.hydrationPaths = hydrationPaths;
+      await transaction.save(id, entry);
+    });
+  }
+
+  private async updateMetaDependencyRecipeKey(id: string, dependencyRecipeKey: string): Promise<void> {
+    await withWorktreeMetaTransaction(this.repoRoot, async (transaction) => {
+      const entry = (await transaction.readAll())[id];
+      if (!entry) return;
+      entry.dependencyRecipeKey = dependencyRecipeKey;
+      await transaction.save(id, entry);
+    });
+  }
+
+  private async updateMetaCreationBranchHead(id: string, creationBranchHead: string): Promise<void> {
+    await withWorktreeMetaTransaction(this.repoRoot, async (transaction) => {
+      const entry = (await transaction.readAll())[id];
+      if (!entry) return;
+      entry.creationBranchHead = creationBranchHead;
       await transaction.save(id, entry);
     });
   }

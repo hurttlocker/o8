@@ -8,6 +8,7 @@ import { cpSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, rea
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { prepareNativeBundle } from './native-bundle.mjs';
+import { exportTauriSafetyHookResources } from './tauri-hook-resources.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
@@ -38,6 +39,11 @@ if (!existsSync(standalone)) {
   console.error('❌ No standalone build at .next/standalone — run next build first');
   process.exit(1);
 }
+
+// Managed worktree hook settings reference immutable files from the running
+// o8 installation. Keep those programs beside the packaged server so the
+// Next sidecar can resolve them from its resource-root cwd.
+exportTauriSafetyHookResources(root, server);
 
 // ── Frontend (loader HTML for Tauri webview) ──
 //
