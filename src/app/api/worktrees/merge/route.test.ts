@@ -17,10 +17,19 @@ const h = vi.hoisted(() => ({
   snapshots: [] as WorkspaceSnapshotRecord[],
 }));
 
-vi.mock('@/lib/lane/registry', () => ({ listLanes: () => h.lanes }));
-vi.mock('@/lib/repos/registry', () => ({ findRepoByLocalPath: h.findRepoByLocalPath }));
+vi.mock('@/lib/lane/registry', () => ({
+  findLatestLaneByPacket: (packetId: string) => h.lanes.find((lane) => lane.packetId === packetId),
+  listLanes: () => h.lanes,
+}));
+vi.mock('@/lib/repos/registry', () => ({
+  findRepoByLocalPath: h.findRepoByLocalPath,
+  listRepos: () => [],
+}));
 vi.mock('@/lib/worktree/snapshot-state', () => ({
   listWorkspaceSnapshotsByPacketId: () => h.snapshots,
+  listWorkspaceSnapshotsByRepositoryUuid: (repositoryUuid: string) => (
+    h.snapshots.filter((snapshot) => snapshot.repositoryUuid === repositoryUuid)
+  ),
 }));
 vi.mock('@/lib/worktree/launch', () => ({
   getWorktreeManager: () => ({ get: h.getWorktree, cleanup: h.cleanup }),
@@ -42,7 +51,7 @@ process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
 const { panelGateMiddleware } = await import('@/middleware');
 const { withPacketLifecycleMutationLock } = await import('@/lib/orchestrator/lifecycle-mutation-lock');
-const { createWorktreeMergePostForTesting } = await import('./route');
+const { createWorktreeMergePostForTesting } = await import('./handler');
 const post = createWorktreeMergePostForTesting({
   discardExact: async () => { await h.cleanup(); },
 });
@@ -154,7 +163,7 @@ describe('mobile worktree publication route', () => {
 
     const response = await post(request('discard'));
 
-    expect(response.status).toBe(200);
+    expect(response.status, JSON.stringify(await response.clone().json())).toBe(200);
     expect(h.cleanup).toHaveBeenCalledOnce();
   });
 

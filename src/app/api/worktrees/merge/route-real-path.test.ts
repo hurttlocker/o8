@@ -55,7 +55,7 @@ const {
   transitionWorkspaceSnapshot,
 } = await import('@/lib/worktree/snapshot-state');
 const { panelGateMiddleware } = await import('@/middleware');
-const { createWorktreeMergePostForTesting } = await import('./route');
+const { createWorktreeMergePostForTesting } = await import('./handler');
 
 const repo = await addRepo(repoPath);
 if (getRepoRegistryPath() !== path.join(dataDir, 'repos.json')) {
