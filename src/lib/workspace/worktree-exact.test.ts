@@ -1137,6 +1137,56 @@ describe('exact managed worktree parking', { timeout: 90_000 }, () => {
     expect(git(f.worktree, 'rev-parse', 'HEAD')).toBe(f.head);
   });
 
+  it('receipts the prepared source tree after a rebuildable dependency detach', async () => {
+    const f = fixture('cow-prepared-manifest', 'apfs-cow-clone');
+    const dependencyPath = path.join(f.worktree, 'node_modules', 'fixture-package', 'index.js');
+    mkdirSync(path.dirname(dependencyPath), { recursive: true });
+    writeFileSync(dependencyPath, 'module.exports = "mounted";\n');
+    const location = locateExactWorktreeQuarantine(
+      quarantineInput(f, 'cow-prepared-manifest'),
+    );
+    const events: string[] = [];
+
+    await expect(parkExactWorktree({
+      repoPath: f.repo,
+      worktreeId: f.worktreeId,
+      expectedPath: f.worktree,
+      expectedBranch: 'inline/test',
+      expectedHead: f.head,
+      expectedSessionKey: 'test-owned:session',
+      probeProcessQuiescence: async (sessionKey, workspacePath) => {
+        events.push(workspacePath === f.worktree ? 'source-process' : 'quarantine-process');
+        return processReceipt(sessionKey);
+      },
+      quarantine: { snapshotFingerprint: 'cow-prepared-manifest', intent: 'park' },
+      prepareQuarantineSource: async (workspacePath) => {
+        events.push('prepare');
+        rmSync(path.join(workspacePath, 'node_modules'), { recursive: true });
+        mkdirSync(path.join(workspacePath, 'node_modules'));
+      },
+      afterQuarantineRename: async () => {
+        const receipt = JSON.parse(
+          readFileSync(location.receiptPath, 'utf8'),
+        ) as ExactWorktreeQuarantineReceipt;
+        const receiptedPaths = receipt.sourceManifest?.map((entry) => entry.relative) ?? [];
+        expect(receiptedPaths).toContain('node_modules');
+        expect(receiptedPaths)
+          .not.toContain('node_modules/fixture-package');
+      },
+      verifyQuarantinedClone: async (quarantinePath) => {
+        expect(existsSync(path.join(quarantinePath, 'node_modules'))).toBe(true);
+        expect(existsSync(path.join(quarantinePath, 'node_modules', 'fixture-package'))).toBe(false);
+      },
+    })).resolves.toBe('apfs-cow-clone');
+
+    expect(events).toEqual([
+      'source-process',
+      'prepare',
+      'source-process',
+      'quarantine-process',
+    ]);
+  });
+
   it('never deletes an APFS replacement symlink with matching Git truth and ignored external bytes', async () => {
     const f = fixture('cow-symlink-swap', 'apfs-cow-clone');
     const externalPath = path.join(path.dirname(f.repo), 'externally-owned-clone');

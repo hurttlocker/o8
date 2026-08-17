@@ -24,7 +24,7 @@ const { createOwnedSessionStore } = await import('@/lib/runtimes/shared/owned-se
 const { resolveWorktreeRootLayout } = await import('@/lib/worktree/root-layout');
 const { parkWorkspace, readImmutableWorkspaceTruth } = await import('./hibernator');
 const { restoreWorkspace } = await import('./restorer');
-const { parkExactWorktree } = await import('./worktree-exact');
+const { inspectExactWorktreeQuarantine, parkExactWorktree } = await import('./worktree-exact');
 const {
   repoSetupBoundRecipeKey,
   repoSetupCopyBindingRequirements,
@@ -633,6 +633,150 @@ describe('workspace hibernate and restore services', { timeout: 60_000 }, () => 
       operationId: `process-${state}`,
     }, dependencies(f, state));
     expect(result.status).toBe('refused');
+    expect(existsSync(f.lane.worktreePath!)).toBe(true);
+  });
+
+  it('remounts the exact dependency lease when preparation refuses before manifest capture', async () => {
+    const f = fixture('dependency-park-rollback');
+    const receipt = {
+      mode: 'image' as const,
+      status: 'mounted' as const,
+      installCommand: 'npm ci --ignore-scripts',
+      recipeKey: 'a'.repeat(64),
+      leaseId: 'lease-park-rollback',
+      generation: 'generation-park-rollback',
+      workspaceDevice: lstatSync(f.lane.worktreePath!).dev,
+      workspaceInode: lstatSync(f.lane.worktreePath!).ino,
+    };
+    const order: string[] = [];
+    const scanDetachedStates: boolean[] = [];
+    let detached = false;
+    const result = await parkWorkspace({
+      repositoryUuid: f.repo.id,
+      packetId: f.lane.packetId!,
+      operationId: 'dependency-park-rollback',
+    }, {
+      ...dependencies(f),
+      readDependencyMaterialization: async () => receipt,
+      secondScan: async (workspacePath, options) => {
+        scanDetachedStates.push(detached);
+        return scanWorkspaceStorageState(workspacePath, options);
+      },
+      detachDependencies: async (workspacePath, expected) => {
+        expect(workspacePath).toBe(f.lane.worktreePath);
+        expect(expected).toBe(receipt);
+        detached = true;
+        order.push('detach');
+      },
+      restoreDependencies: async (_repoPath, _worktreeId, expected) => {
+        order.push('remount');
+        return expected;
+      },
+      parkExact: async (input) => {
+        order.push('park-gates');
+        await input.prepareQuarantineSource?.(input.expectedPath);
+        const scansAfterPreparation = scanDetachedStates.length;
+        const processReceipt = await input.probeProcessQuiescence(
+          input.expectedSessionKey,
+          input.expectedPath,
+        );
+        expect(processReceipt.state).toBe('quiescent');
+        expect(scanDetachedStates).toHaveLength(scansAfterPreparation);
+        throw new Error('deterministic refusal before manifest capture');
+      },
+    });
+
+    expect(result).toMatchObject({ status: 'refused', code: 'park_refused' });
+    expect(order).toEqual(['park-gates', 'detach', 'remount']);
+    expect(scanDetachedStates).toEqual([false, false, true]);
+    expect(existsSync(f.lane.worktreePath!)).toBe(true);
+  });
+
+  it('exact-restores the source before remounting after post-rename verification fails', async () => {
+    const f = fixture('dependency-post-rename-rollback', 'apfs-cow-clone');
+    const receipt = {
+      mode: 'image' as const,
+      status: 'mounted' as const,
+      installCommand: 'npm ci --ignore-scripts',
+      recipeKey: 'b'.repeat(64),
+      leaseId: 'lease-post-rename-rollback',
+      generation: 'generation-post-rename-rollback',
+      workspaceDevice: lstatSync(f.lane.worktreePath!).dev,
+      workspaceInode: lstatSync(f.lane.worktreePath!).ino,
+    };
+    const order: string[] = [];
+    const result = await parkWorkspace({
+      repositoryUuid: f.repo.id,
+      packetId: f.lane.packetId!,
+      operationId: 'dependency-post-rename-rollback',
+    }, {
+      ...dependencies(f),
+      readDependencyMaterialization: async () => receipt,
+      detachDependencies: async () => { order.push('detach'); },
+      restoreDependencies: async (_repoPath, _worktreeId, expected) => {
+        expect(existsSync(f.lane.worktreePath!)).toBe(true);
+        order.push('remount');
+        return expected;
+      },
+      parkExact: async (input) => {
+        const verify = input.verifyQuarantinedClone!;
+        return parkExactWorktree({
+          ...input,
+          verifyQuarantinedClone: async (quarantinePath) => {
+            await verify(quarantinePath);
+            order.push('post-rename-verify');
+            throw new Error('deterministic post-rename verification refusal');
+          },
+        });
+      },
+    });
+
+    expect(result).toMatchObject({ status: 'refused', code: 'park_refused' });
+    expect(order).toEqual(['detach', 'post-rename-verify', 'remount']);
+    expect(existsSync(f.lane.worktreePath!)).toBe(true);
+    expect(await inspectExactWorktreeQuarantine({
+      repoPath: f.repo.localPath,
+      worktreeId: f.worktreeId,
+      expectedPath: f.lane.worktreePath!,
+      quarantine: {
+        snapshotFingerprint: result.snapshot!.snapshotFingerprint,
+        intent: 'park',
+      },
+    })).toMatchObject({ state: 'clear', originalExists: true, quarantineExists: false });
+  });
+
+  it('fails closed when a prepared dependency lease cannot be remounted', async () => {
+    const f = fixture('dependency-remount-refusal');
+    const receipt = {
+      mode: 'image' as const,
+      status: 'mounted' as const,
+      installCommand: 'npm ci --ignore-scripts',
+      recipeKey: 'c'.repeat(64),
+      leaseId: 'lease-remount-refusal',
+      generation: 'generation-remount-refusal',
+      workspaceDevice: lstatSync(f.lane.worktreePath!).dev,
+      workspaceInode: lstatSync(f.lane.worktreePath!).ino,
+    };
+    const result = await parkWorkspace({
+      repositoryUuid: f.repo.id,
+      packetId: f.lane.packetId!,
+      operationId: 'dependency-remount-refusal',
+    }, {
+      ...dependencies(f),
+      readDependencyMaterialization: async () => receipt,
+      detachDependencies: async () => undefined,
+      restoreDependencies: async () => { throw new Error('synthetic remount refusal'); },
+      parkExact: async (input) => {
+        await input.prepareQuarantineSource?.(input.expectedPath);
+        throw new Error('synthetic pre-capture refusal');
+      },
+    });
+
+    expect(result).toMatchObject({
+      status: 'refused',
+      code: 'park_refused',
+      note: expect.stringContaining('exact dependency remount was incomplete'),
+    });
     expect(existsSync(f.lane.worktreePath!)).toBe(true);
   });
 

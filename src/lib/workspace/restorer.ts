@@ -15,6 +15,7 @@ import {
   type WorkspaceSnapshotRecord,
 } from '@/lib/worktree/snapshot-state';
 import type { WorkspaceIsolationKind } from '@/lib/worktree/types';
+import { WorktreeManager } from '@/lib/worktree/manager';
 import {
   materializationAwareExecFile,
   withWorktreeMaterializationExecution,
@@ -36,6 +37,10 @@ import {
 import { parkExactWorktree, restoreExactWorktree } from './worktree-exact';
 import { assertManagedWorkspaceMaterialization } from './managed-materialization-identity';
 import { writeManagedWorkspaceSafetyHooks } from '@/lib/worktree/safety-hooks';
+import {
+  queueDependencyImagePublication,
+  type DependencyMaterializationReceipt,
+} from './dependency-materializer';
 
 
 export interface RestoreWorkspaceInput {
@@ -59,6 +64,13 @@ export interface RestoreDependencies {
   secondScan: typeof scanWorkspaceStorageState;
   processProbe: typeof probeOwnedSessionProcessQuiescence;
   writeSafetyHooks: typeof writeManagedWorkspaceSafetyHooks;
+  detachDependencies: (repoPath: string, worktreeId: string) => Promise<void>;
+  recordDependencyMaterialization: (
+    repoPath: string,
+    worktreeId: string,
+    receipt: DependencyMaterializationReceipt,
+  ) => Promise<void>;
+  queueDependencyPublication: typeof queueDependencyImagePublication;
   afterExactRestore?: (workspacePath: string) => Promise<void> | void;
 }
 
@@ -72,6 +84,13 @@ const DEFAULT_DEPENDENCIES: RestoreDependencies = {
   secondScan: scanWorkspaceStorageState,
   processProbe: probeOwnedSessionProcessQuiescence,
   writeSafetyHooks: writeManagedWorkspaceSafetyHooks,
+  detachDependencies: (repoPath, worktreeId) => (
+    new WorktreeManager(repoPath).detachDependencyMaterialization(worktreeId)
+  ),
+  recordDependencyMaterialization: (repoPath, worktreeId, receipt) => (
+    new WorktreeManager(repoPath).recordDependencyMaterialization(worktreeId, receipt)
+  ),
+  queueDependencyPublication: queueDependencyImagePublication,
 };
 
 function compactError(error: unknown): string {
@@ -181,6 +200,7 @@ async function recordRestoreFailure(
   }
 
   try {
+    await deps.detachDependencies(repo.localPath, path.basename(current.originalPath));
     const scan = await deps.firstScan(current.originalPath, {
       allowedIgnoredPaths,
       allowedExternalSymlinks,
@@ -353,6 +373,13 @@ export async function restoreWorkspace(
       if (setupReceipt.recipeKey !== snapshot.dependencyRecipeKey) {
         throw new Error('Restored setup receipt does not match the saved recipe.');
       }
+      if (setupReceipt.install.materialization) {
+        await deps.recordDependencyMaterialization(
+          repo.localPath,
+          path.basename(snapshot.originalPath),
+          setupReceipt.install.materialization,
+        );
+      }
       await deps.writeSafetyHooks(repo.localPath, snapshot.originalPath, materializationIdentity);
       await verifyRestoredWorkspaceCheckout(snapshot);
       const first = await deps.firstScan(snapshot.originalPath, {
@@ -400,10 +427,21 @@ export async function restoreWorkspace(
       }
       snapshot = transition(snapshot, input.operationId, 'materialized', 'materialized', {
         setupRecipeKey: setupReceipt.recipeKey,
+        dependencyMode: setupReceipt.install.materialization?.mode ?? null,
+        dependencyLeaseId: setupReceipt.install.materialization?.leaseId ?? null,
+        dependencyGeneration: setupReceipt.install.materialization?.generation ?? null,
+        dependencyWorkspaceDevice: setupReceipt.install.materialization?.workspaceDevice ?? null,
+        dependencyWorkspaceInode: setupReceipt.install.materialization?.workspaceInode ?? null,
         envBindingCount: setupReceipt.envBindings.length,
         firstFingerprint: first.fingerprint,
         secondFingerprint: second.fingerprint,
       });
+      if (setupReceipt.install.materialization) {
+        deps.queueDependencyPublication(
+          snapshot.originalPath,
+          setupReceipt.install.materialization,
+        );
+      }
       return { status: 'restored', snapshot };
         },
       );

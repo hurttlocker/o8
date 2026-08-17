@@ -78,10 +78,14 @@ import {
   shouldClassifyFetchAsOriginMissing,
 } from './errors';
 import {
-  deriveDependencyInstallRecipe,
   detectDependencyInstallCommand,
-  runDependencyInstall,
 } from '@/lib/workspace/dependency-install';
+import {
+  detachDependencyMaterialization,
+  materializeDependencyInstall,
+  queueDependencyImagePublication,
+  type DependencyMaterializationReceipt,
+} from '@/lib/workspace/dependency-materializer';
 import {
   probeMetadataLockProcessIdentity,
   sameMetadataLockProcessIdentity,
@@ -577,14 +581,15 @@ export class WorktreeManager {
     if (!opts.skipSetup) {
       info.status = 'setup';
       await this.updateMetaStatus(taskId, 'setup');
-      const dependencyRecipeKey = await this.runSetup(
+      const dependencyMaterialization = await this.runSetupWithMaterialization(
         worktreePath,
         createdExecutionIdentity,
         opts.repoSetup,
       );
-      if (dependencyRecipeKey) {
-        info.dependencyRecipeKey = dependencyRecipeKey;
-        await this.updateMetaDependencyRecipeKey(taskId, dependencyRecipeKey);
+      if (dependencyMaterialization) {
+        info.dependencyRecipeKey = dependencyMaterialization.recipeKey;
+        info.dependencyMaterialization = dependencyMaterialization;
+        await this.updateMetaDependencyMaterialization(taskId, dependencyMaterialization);
       }
     }
     await this.resetTrackedWorkspaceChanges(worktreePath);
@@ -632,11 +637,18 @@ export class WorktreeManager {
 
     info.status = 'ready';
     await this.updateMetaStatus(taskId, 'ready');
+    if (info.dependencyMaterialization) {
+      queueDependencyImagePublication(worktreePath, info.dependencyMaterialization);
+    }
     return info;
     });
     } catch (err) {
       if (isPinnedWorkspacePublishError(err)) throw err;
       try {
+        await this.detachDependencyMaterializationForWorkspace(
+          worktreePath,
+          (await this.loadAllMeta())[taskId]?.dependencyMaterialization,
+        );
         const creationBranchHead = await this.captureCreationBranchHead(
           taskId,
           worktreePath,
@@ -807,26 +819,34 @@ export class WorktreeManager {
       if (!opts.skipSetup) {
         info.status = 'setup';
         await this.updateMetaStatus(taskId, 'setup');
-        const dependencyRecipeKey = await this.runSetup(
+        const dependencyMaterialization = await this.runSetupWithMaterialization(
           worktreePath,
           capturedExecutionIdentity,
           opts.repoSetup,
         );
-        if (dependencyRecipeKey) {
-          info.dependencyRecipeKey = dependencyRecipeKey;
-          await this.updateMetaDependencyRecipeKey(taskId, dependencyRecipeKey);
+        if (dependencyMaterialization) {
+          info.dependencyRecipeKey = dependencyMaterialization.recipeKey;
+          info.dependencyMaterialization = dependencyMaterialization;
+          await this.updateMetaDependencyMaterialization(taskId, dependencyMaterialization);
         }
       }
       await this.resetTrackedWorkspaceChanges(worktreePath);
 
       info.status = 'ready';
       await this.updateMetaStatus(taskId, 'ready');
+      if (info.dependencyMaterialization) {
+        queueDependencyImagePublication(worktreePath, info.dependencyMaterialization);
+      }
       return info;
       });
     } catch (err) {
       if (isPinnedWorkspacePublishError(err)) throw err;
       if (createdExecutionIdentity) {
         try {
+          await this.detachDependencyMaterializationForWorkspace(
+            worktreePath,
+            (await this.loadAllMeta())[taskId]?.dependencyMaterialization,
+          );
           await this.retireFailedManagedCreation(
             taskId, worktreePath, createdExecutionIdentity, baseExecutionIdentity,
           );
@@ -1099,6 +1119,7 @@ export class WorktreeManager {
           isolationKind,
           hydrationPaths: entry.hydrationPaths ?? [],
           dependencyRecipeKey: entry.dependencyRecipeKey,
+          dependencyMaterialization: entry.dependencyMaterialization,
         };
       }),
     );
@@ -1182,8 +1203,28 @@ export class WorktreeManager {
     identity?: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>>,
     repoSetup?: CreateWorktreeOptions['repoSetup'],
   ): Promise<string | null> {
+    const materialization = await this.runSetupWithMaterialization(
+      worktreePath,
+      identity,
+      repoSetup,
+    );
+    if (materialization) {
+      const worktreeId = path.basename(worktreePath);
+      if ((await this.loadAllMeta())[worktreeId]) {
+        await this.updateMetaDependencyMaterialization(worktreeId, materialization);
+      }
+      queueDependencyImagePublication(worktreePath, materialization);
+    }
+    return materialization?.recipeKey ?? null;
+  }
+
+  private async runSetupWithMaterialization(
+    worktreePath: string,
+    identity?: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>>,
+    repoSetup?: CreateWorktreeOptions['repoSetup'],
+  ): Promise<DependencyMaterializationReceipt | null> {
     const hasPackageJson = await this.pathExists(path.join(worktreePath, 'package.json'));
-    let dependencyRecipeKey: string | null = null;
+    let dependencyMaterialization: DependencyMaterializationReceipt | null = null;
     const installCommand = repoSetup
       ? repoSetup.installOnCreateWorkspace
         ? repoSetup.installCommand?.trim() || null
@@ -1195,13 +1236,16 @@ export class WorktreeManager {
       throw new Error('The registered repo requires install-on-create but has no install command.');
     }
     if (installCommand) {
-      const recipe = await deriveDependencyInstallRecipe(worktreePath, installCommand);
       await this.assertInstallableLocalNodeModules(worktreePath, identity);
-      const receipt = await runDependencyInstall(worktreePath, installCommand, {
+      const result = await materializeDependencyInstall(worktreePath, installCommand, {
         materializationIdentity: identity,
-        preparedRecipe: recipe,
+        persistReceipt: (receipt) => (
+          receipt
+            ? this.recordDependencyMaterialization(path.basename(worktreePath), receipt)
+            : this.clearDependencyMaterialization(path.basename(worktreePath))
+        ),
       });
-      dependencyRecipeKey = receipt.recipe.key;
+      dependencyMaterialization = result.receipt;
     }
 
     // Python
@@ -1230,7 +1274,7 @@ export class WorktreeManager {
         timeout: 120_000,
       }).catch(() => { /* cargo may not be available */ });
     }
-    return dependencyRecipeKey;
+    return dependencyMaterialization;
   }
 
   private async resetTrackedWorkspaceChanges(worktreePath: string): Promise<void> {
@@ -1723,8 +1767,16 @@ export class WorktreeManager {
         );
         return false;
       }
+      let dependencyDetachStarted = false;
       try {
         if (retirementTruth?.state !== 'retired') {
+          if (entry.dependencyMaterialization?.mode === 'image') {
+            dependencyDetachStarted = true;
+            await this.detachDependencyMaterializationForWorkspace(
+              worktreePath,
+              entry.dependencyMaterialization,
+            );
+          }
           await retireExactManagedDirectory({
             repositoryPath: this.repoRoot,
             worktreeId,
@@ -1734,6 +1786,7 @@ export class WorktreeManager {
           });
         }
       } catch (error) {
+        let refusal = error;
         try {
           await assertWorktreeMaterializationIdentity(
             worktreePath, entry.materializationIdentity,
@@ -1741,12 +1794,22 @@ export class WorktreeManager {
           rollbackWorkspaceMaterializationRetirement(
             worktreePath, retirementAction, error,
           );
-        } catch {
+          if (dependencyDetachStarted && entry.dependencyMaterialization) {
+            await this.restoreDependencyMaterialization(
+              worktreeId,
+              entry.dependencyMaterialization,
+            );
+          }
+        } catch (recoveryError) {
           // Missing or replaced public names keep the durable retiring claim
           // for exact crash replay; they cannot be rolled back safely.
+          refusal = new Error(
+            `Exact retirement failed and dependency rollback was incomplete: ${recoveryError instanceof Error ? recoveryError.message : String(recoveryError)}`,
+            { cause: error },
+          );
         }
         console.error(
-          `[worktree-cleanup] REFUSED exact retirement for ${worktreePath}: ${error instanceof Error ? error.message : String(error)}`,
+          `[worktree-cleanup] REFUSED exact retirement for ${worktreePath}: ${refusal instanceof Error ? refusal.message : String(refusal)}`,
         );
         return false;
       }
@@ -2484,13 +2547,174 @@ export class WorktreeManager {
     });
   }
 
-  private async updateMetaDependencyRecipeKey(id: string, dependencyRecipeKey: string): Promise<void> {
+  private async updateMetaDependencyMaterialization(
+    id: string,
+    dependencyMaterialization: DependencyMaterializationReceipt,
+  ): Promise<void> {
     await withWorktreeMetaTransaction(this.repoRoot, async (transaction) => {
       const entry = (await transaction.readAll())[id];
       if (!entry) return;
-      entry.dependencyRecipeKey = dependencyRecipeKey;
+      entry.dependencyRecipeKey = dependencyMaterialization.recipeKey;
+      entry.dependencyMaterialization = dependencyMaterialization;
       await transaction.save(id, entry);
     });
+  }
+
+  async recordDependencyMaterialization(
+    worktreeId: string,
+    dependencyMaterialization: DependencyMaterializationReceipt,
+  ): Promise<void> {
+    await this.updateMetaDependencyMaterialization(worktreeId, dependencyMaterialization);
+    const entry = (await this.loadAllMeta())[worktreeId];
+    if (!entry || JSON.stringify(entry.dependencyMaterialization) !== JSON.stringify(dependencyMaterialization)) {
+      throw new Error('Managed workspace lost its dependency materialization receipt.');
+    }
+  }
+
+  async clearDependencyMaterialization(worktreeId: string): Promise<void> {
+    await this.markDependencyMaterializationUnavailable(worktreeId, null);
+  }
+
+  async markDependencyMaterializationUnavailable(
+    worktreeId: string,
+    dependencyMaterialization: DependencyMaterializationReceipt | null,
+  ): Promise<void> {
+    await withWorktreeMetaTransaction(this.repoRoot, async (transaction) => {
+      const entry = (await transaction.readAll())[worktreeId];
+      if (!entry) return;
+      if (dependencyMaterialization) {
+        entry.dependencyRecipeKey = dependencyMaterialization.recipeKey;
+        entry.dependencyMaterialization = dependencyMaterialization;
+      } else {
+        delete entry.dependencyRecipeKey;
+        delete entry.dependencyMaterialization;
+      }
+      if (entry.status === 'ready' || entry.status === 'active') entry.status = 'setup';
+      await transaction.save(worktreeId, entry);
+    });
+    const entry = (await this.loadAllMeta())[worktreeId];
+    if (dependencyMaterialization === null
+      && (entry?.dependencyMaterialization || entry?.dependencyRecipeKey)) {
+      throw new Error('Managed workspace retained a cleared dependency materialization receipt.');
+    }
+  }
+
+  async restoreDependencyMaterialization(
+    worktreeId: string,
+    expected: DependencyMaterializationReceipt,
+  ): Promise<DependencyMaterializationReceipt> {
+    if (expected.mode !== 'image' || !expected.leaseId || !expected.generation) return expected;
+    const entry = (await this.loadAllMeta())[worktreeId];
+    if (!entry?.materializationIdentity) {
+      throw new Error('Exact dependency remount lost its managed workspace identity.');
+    }
+    const workspacePath = entry.materializationIdentity.canonicalPath;
+    if (expected.workspaceDevice !== entry.materializationIdentity.device
+      || expected.workspaceInode !== entry.materializationIdentity.inode) {
+      throw new Error('Exact dependency remount receipt differs from its managed workspace identity.');
+    }
+    const installCommand = expected.installCommand.trim();
+    if (!installCommand) {
+      throw new Error('Exact dependency remount lost its install command.');
+    }
+    await this.assertInstallableLocalNodeModules(
+      workspacePath,
+      entry.materializationIdentity,
+    );
+    let persistedReceipt: DependencyMaterializationReceipt | null = expected;
+    const result = await materializeDependencyInstall(workspacePath, installCommand, {
+      materializationIdentity: entry.materializationIdentity,
+      exactGenerationRemount: {
+        recipeKey: expected.recipeKey,
+        generation: expected.generation,
+        workspacePath,
+      },
+      afterMount: async (receipt) => {
+        if (receipt.leaseId === expected.leaseId
+          || receipt.recipeKey !== expected.recipeKey
+          || receipt.generation !== expected.generation
+          || receipt.workspaceDevice !== expected.workspaceDevice
+          || receipt.workspaceInode !== expected.workspaceInode) {
+          throw new Error('Exact dependency remount returned invalid replacement authority.');
+        }
+      },
+      persistReceipt: async (receipt) => {
+        await this.replaceDependencyMaterialization(
+          worktreeId,
+          persistedReceipt,
+          receipt,
+        );
+        persistedReceipt = receipt;
+      },
+    });
+    if (result.receipt.mode !== 'image'
+      || result.receipt.status !== 'mounted'
+      || result.receipt.leaseId === expected.leaseId
+      || result.receipt.recipeKey !== expected.recipeKey
+      || result.receipt.generation !== expected.generation
+      || result.receipt.workspaceDevice !== expected.workspaceDevice
+      || result.receipt.workspaceInode !== expected.workspaceInode) {
+      throw new Error('Exact dependency remount returned invalid replacement authority.');
+    }
+    return result.receipt;
+  }
+
+  private async replaceDependencyMaterialization(
+    worktreeId: string,
+    expected: DependencyMaterializationReceipt | null,
+    replacement: DependencyMaterializationReceipt | null,
+  ): Promise<void> {
+    await withWorktreeMetaTransaction(this.repoRoot, async (transaction) => {
+      const entry = (await transaction.readAll())[worktreeId];
+      if (!entry) {
+        throw new Error('Exact dependency remount lost its managed workspace metadata.');
+      }
+      const current = entry.dependencyMaterialization ?? null;
+      if (JSON.stringify(current) !== JSON.stringify(expected)) {
+        throw new Error('Exact dependency remount lost its receipt compare-and-swap.');
+      }
+      if (replacement) {
+        entry.dependencyRecipeKey = replacement.recipeKey;
+        entry.dependencyMaterialization = replacement;
+      } else {
+        delete entry.dependencyRecipeKey;
+        delete entry.dependencyMaterialization;
+        if (entry.status === 'ready' || entry.status === 'active') entry.status = 'setup';
+      }
+      await transaction.save(worktreeId, entry);
+    });
+  }
+
+  async listDependencyMaterializationAuthorities(): Promise<Array<{
+    worktreeId: string;
+    workspacePath: string;
+    receipt: DependencyMaterializationReceipt;
+  }>> {
+    return Object.values(await this.loadAllMeta()).flatMap((entry) => (
+      entry.materializationIdentity && entry.dependencyMaterialization
+        ? [{
+            worktreeId: entry.id,
+            workspacePath: entry.materializationIdentity.canonicalPath,
+            receipt: entry.dependencyMaterialization,
+          }]
+        : []
+    ));
+  }
+
+  async detachDependencyMaterialization(worktreeId: string): Promise<void> {
+    const entry = (await this.loadAllMeta())[worktreeId];
+    if (!entry?.materializationIdentity) return;
+    await this.detachDependencyMaterializationForWorkspace(
+      entry.materializationIdentity.canonicalPath,
+      entry.dependencyMaterialization,
+    );
+  }
+
+  private async detachDependencyMaterializationForWorkspace(
+    workspacePath: string,
+    dependencyMaterialization?: DependencyMaterializationReceipt,
+  ): Promise<void> {
+    await detachDependencyMaterialization(workspacePath, dependencyMaterialization);
   }
 
   private async updateMetaCreationBranchHead(id: string, creationBranchHead: string): Promise<void> {

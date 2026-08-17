@@ -88,6 +88,30 @@ function isWorktreeMetaEntry(value: unknown, id: string): value is WorktreeMetaE
     && (entry.dependencyRecipeKey === undefined
       || (typeof entry.dependencyRecipeKey === 'string'
         && /^[0-9a-f]{64}$/.test(entry.dependencyRecipeKey)))
+    && (entry.dependencyMaterialization === undefined
+      || (typeof entry.dependencyMaterialization === 'object'
+        && entry.dependencyMaterialization !== null
+        && (entry.dependencyMaterialization.mode === 'native'
+          || entry.dependencyMaterialization.mode === 'image')
+        && (entry.dependencyMaterialization.status === 'prepared'
+          || entry.dependencyMaterialization.status === 'mounted')
+        && typeof entry.dependencyMaterialization.installCommand === 'string'
+        && entry.dependencyMaterialization.installCommand.length > 0
+        && typeof entry.dependencyMaterialization.recipeKey === 'string'
+        && /^[0-9a-f]{64}$/.test(entry.dependencyMaterialization.recipeKey)
+        && (entry.dependencyMaterialization.mode === 'native'
+          ? entry.dependencyMaterialization.status === 'mounted'
+            && entry.dependencyMaterialization.leaseId === null
+            && entry.dependencyMaterialization.generation === null
+          : typeof entry.dependencyMaterialization.leaseId === 'string'
+            && entry.dependencyMaterialization.leaseId.length > 0
+            && typeof entry.dependencyMaterialization.generation === 'string'
+            && entry.dependencyMaterialization.generation.length > 0)
+        && Number.isSafeInteger(entry.dependencyMaterialization.workspaceDevice)
+        && entry.dependencyMaterialization.workspaceDevice >= 0
+        && Number.isSafeInteger(entry.dependencyMaterialization.workspaceInode)
+        && entry.dependencyMaterialization.workspaceInode > 0
+        && entry.dependencyRecipeKey === entry.dependencyMaterialization.recipeKey))
     && (entry.creationOwner === undefined
       || (typeof entry.creationOwner === 'object'
         && entry.creationOwner !== null

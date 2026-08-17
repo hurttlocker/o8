@@ -1,6 +1,16 @@
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -13,7 +23,10 @@ import {
   resolveDurablePacketStorageOwner,
   type RepoStorageEstimate,
 } from './storage-admission';
-import { resolveManagedWorktreeStorageTarget } from '@/lib/worktree/root-layout';
+import {
+  observeManagedWorktreeRootIdentity,
+  resolveManagedWorktreeStorageTarget,
+} from '@/lib/worktree/root-layout';
 import {
   StorageAdmissionStore,
   type StorageVolumeObservation,
@@ -285,13 +298,49 @@ describe('packet dispatch storage admission', () => {
       ...process.env,
       O8_WORKTREE_ROOT: missingRoot,
     });
-    expect(createdTarget).toContain(realpathSync(missingRoot));
-    await expect(createPacketStorageAdmissionCoordinator(dependencies)
-      .reserveForLaunch(packet('missing-root'))).resolves.toMatchObject({
+    expect(createdTarget).toContain(join(realpathSync(missingParent), 'missing'));
+    expect(existsSync(missingRoot)).toBe(false);
+    const admittedMissingRoot = await createPacketStorageAdmissionCoordinator(dependencies)
+      .reserveForLaunch(packet('missing-root'));
+    expect(admittedMissingRoot).toMatchObject({
       reservation: {
         rootIdentity: { canonicalPath: realpathSync(missingRoot) },
       },
     });
+
+    const missingAncestorRoot = join(missingParent, 'missing-ancestor', 'root');
+    expect(() => resolveManagedWorktreeStorageTarget('/repo', {
+      ...process.env,
+      O8_WORKTREE_ROOT: missingAncestorRoot,
+    })).toThrow('Explicit worktree root parent must already exist.');
+    expect(existsSync(join(missingParent, 'missing-ancestor'))).toBe(false);
+
+    const redirectedTarget = join(missingParent, 'redirected-target');
+    const redirectedParent = join(missingParent, 'redirected-parent');
+    mkdirSync(redirectedTarget);
+    symlinkSync(redirectedTarget, redirectedParent, 'dir');
+    expect(() => resolveManagedWorktreeStorageTarget('/repo', {
+      ...process.env,
+      O8_WORKTREE_ROOT: join(redirectedParent, 'escaped'),
+    })).toThrow('Explicit worktree root parent must be a real directory.');
+    expect(existsSync(join(redirectedTarget, 'escaped'))).toBe(false);
+
+    const raceParent = join(missingParent, 'race-parent');
+    const movedParent = join(missingParent, 'race-parent-original');
+    const raceRoot = join(raceParent, 'root');
+    const sentinel = join(raceParent, 'replacement-sentinel');
+    mkdirSync(raceParent);
+    vi.stubEnv('O8_WORKTREE_ROOT', raceRoot);
+    await expect(observeManagedWorktreeRootIdentity('/repo', {
+      afterParentProof: async () => {
+        renameSync(raceParent, movedParent);
+        mkdirSync(raceParent);
+        writeFileSync(sentinel, 'replacement-parent\n');
+      },
+    })).rejects.toThrow('parent changed during exact creation');
+    expect(readFileSync(sentinel, 'utf8')).toBe('replacement-parent\n');
+    expect(existsSync(join(raceParent, 'root'))).toBe(false);
+    expect(existsSync(join(movedParent, 'root'))).toBe(false);
   });
 
   it('replays a same-epoch crash-persisted reservation after SQLite reopen', async () => {

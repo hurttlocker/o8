@@ -94,6 +94,8 @@ export interface ExactParkWorktreeInput {
   probeProcessQuiescence: (sessionKey: string, workspacePath: string) => Promise<ProcessQuiescenceReceipt>;
   quarantine: ExactWorktreeQuarantineKey;
   verifyQuarantinedClone?: (quarantinePath: string) => Promise<void>;
+  /** Prepare rebuildable workspace content before its exact purge manifest is captured. */
+  prepareQuarantineSource?: (workspacePath: string) => Promise<void>;
   /** Deterministic race seam used to prove the atomic rename boundary. */
   beforeQuarantineRename?: () => Promise<void>;
   /** Deterministic crash seam after the original path is no longer targeted. */
@@ -482,6 +484,37 @@ async function parkExactWorktreeInTransaction(
     throw new Error('Exact parking refused because managed workspace ownership is absent or changed.');
   }
   const verificationPath = destructiveIdentity.canonicalPath;
+  const verifySourceGates = async (
+    gitAdminIdentity: Awaited<ReturnType<typeof captureGitWorktreeAdminIdentity>> | null,
+  ): Promise<void> => {
+    await verifyFreshProcessQuiescence(
+      input.expectedSessionKey,
+      expectedPath,
+      input.probeProcessQuiescence,
+    );
+    await verifyDestructiveDirectoryIdentity(destructiveIdentity);
+    const [{ stdout: branch }, { stdout: head }, { stdout: status }] = await Promise.all([
+      execFileAsync('git', ['symbolic-ref', '--quiet', '--short', 'HEAD'], {
+        windowsHide: true, cwd: verificationPath, timeout: 5_000,
+      }),
+      execFileAsync('git', ['rev-parse', 'HEAD'], {
+        windowsHide: true, cwd: verificationPath, timeout: 5_000,
+      }),
+      execFileAsync('git', ['status', '--porcelain=v1', '--untracked-files=all'], {
+        windowsHide: true, cwd: verificationPath, timeout: 10_000,
+      }),
+    ]);
+    await verifyDestructiveDirectoryIdentity(destructiveIdentity);
+    if (branch.trim() !== input.expectedBranch || head.trim() !== input.expectedHead) {
+      throw new Error('Exact parking refused because final canonical Git truth changed.');
+    }
+    if (status.trim()) {
+      throw new Error('Exact parking refused because final Git status contains tracked or untracked writes.');
+    }
+    if (gitAdminIdentity) {
+      await verifyGitWorktreeAdminIdentity(repoPath, verificationPath, gitAdminIdentity);
+    }
+  };
   const [{ stdout: branch }, { stdout: head }] = await Promise.all([
     execFileAsync('git', ['symbolic-ref', '--quiet', '--short', 'HEAD'], {
       windowsHide: true, cwd: verificationPath, timeout: 5_000,
@@ -498,31 +531,7 @@ async function parkExactWorktreeInTransaction(
       afterMarkerLstat: input.afterGitAdminMarkerLstat,
       afterMarkerRead: input.afterGitAdminMarkerRead,
     });
-    await verifyFreshProcessQuiescence(
-      input.expectedSessionKey,
-      expectedPath,
-      input.probeProcessQuiescence,
-    );
-    await verifyDestructiveDirectoryIdentity(destructiveIdentity);
-    const [{ stdout: finalBranch }, { stdout: finalHead }, { stdout: finalStatus }] = await Promise.all([
-      execFileAsync('git', ['symbolic-ref', '--quiet', '--short', 'HEAD'], {
-        windowsHide: true, cwd: destructiveIdentity.canonicalPath, timeout: 5_000,
-      }),
-      execFileAsync('git', ['rev-parse', 'HEAD'], {
-        windowsHide: true, cwd: destructiveIdentity.canonicalPath, timeout: 5_000,
-      }),
-      execFileAsync('git', ['status', '--porcelain=v1', '--untracked-files=all'], {
-        windowsHide: true, cwd: destructiveIdentity.canonicalPath, timeout: 10_000,
-      }),
-    ]);
-    await verifyDestructiveDirectoryIdentity(destructiveIdentity);
-    if (finalBranch.trim() !== input.expectedBranch || finalHead.trim() !== input.expectedHead) {
-      throw new Error('Exact parking refused because final canonical Git truth changed.');
-    }
-    if (finalStatus.trim()) {
-      throw new Error('Exact parking refused because final Git status contains tracked or untracked writes.');
-    }
-    await verifyGitWorktreeAdminIdentity(repoPath, verificationPath, gitAdminIdentity);
+    await verifySourceGates(gitAdminIdentity);
     const locatorInput: ExactWorktreeQuarantineLocatorInput = {
       repoPath,
       worktreeId: input.worktreeId,
@@ -534,6 +543,8 @@ async function parkExactWorktreeInTransaction(
     if (initial.state !== 'clear' || !initial.originalExists) {
       throw new Error(`Git worktree parking refused: ${initial.note}`);
     }
+    await input.prepareQuarantineSource?.(expectedPath);
+    if (input.prepareQuarantineSource) await verifySourceGates(gitAdminIdentity);
     const sourceManifest = await captureExactDirectoryManifest(
       expectedPath,
       {
@@ -563,29 +574,16 @@ async function parkExactWorktreeInTransaction(
       { device: quarantineReceipt.sourceDevice, inode: quarantineReceipt.sourceInode },
     );
     await input.afterQuarantineRename?.();
-    const quarantined = await inspectExactWorktreeQuarantine(locatorInput);
-    if (quarantined.state !== 'quarantined') {
-      if (!quarantined.originalExists && await pathKind(location.quarantinePath) !== 'absent') {
-        await renameExactChildDirectory(
-          location.quarantineRoot,
-          {
-            device: quarantineReceipt.quarantineRootDevice,
-            inode: quarantineReceipt.quarantineRootInode,
-            canonicalPath: quarantineReceipt.canonicalQuarantineRoot,
-          },
-          location.quarantinePath,
-          expectedPath,
-          { device: quarantineReceipt.sourceDevice, inode: quarantineReceipt.sourceInode },
-        ).catch(() => {});
-      }
-      throw new Error(`Git worktree quarantine identity verification refused removal: ${quarantined.note}`);
-    }
-    await verifyFreshProcessQuiescence(
-      input.expectedSessionKey,
-      location.quarantinePath,
-      input.probeProcessQuiescence,
-    );
     try {
+      const quarantined = await inspectExactWorktreeQuarantine(locatorInput);
+      if (quarantined.state !== 'quarantined') {
+        throw new Error(`Git worktree quarantine identity verification refused removal: ${quarantined.note}`);
+      }
+      await verifyFreshProcessQuiescence(
+        input.expectedSessionKey,
+        location.quarantinePath,
+        input.probeProcessQuiescence,
+      );
       if (!input.verifyQuarantinedClone) {
         throw new Error('Git worktree parking requires post-rename content verification.');
       }
@@ -648,6 +646,9 @@ async function parkExactWorktreeInTransaction(
     if (await pathKind(location.quarantineRoot) !== 'directory') {
       throw new Error('APFS copy-on-write parking quarantine root is not a regular directory.');
     }
+    await verifySourceGates(null);
+    await input.prepareQuarantineSource?.(expectedPath);
+    if (input.prepareQuarantineSource) await verifySourceGates(null);
     const sourceManifest = await captureExactDirectoryManifest(
       expectedPath,
       {
@@ -663,15 +664,6 @@ async function parkExactWorktreeInTransaction(
       null,
       input.beforeQuarantineReceiptWrite,
     );
-    try {
-      await verifyFreshProcessQuiescence(
-        input.expectedSessionKey,
-        expectedPath,
-        input.probeProcessQuiescence,
-      );
-    } catch (error) {
-      throw error;
-    }
     try {
       await input.beforeQuarantineRename?.();
       await renameExactChildDirectory(
@@ -689,36 +681,31 @@ async function parkExactWorktreeInTransaction(
       throw error;
     }
     await input.afterQuarantineRename?.();
-    const quarantined = await inspectExactWorktreeQuarantine(locatorInput);
-    if (quarantined.state !== 'quarantined') {
-      if (!quarantined.originalExists && await pathKind(location.quarantinePath) !== 'absent') {
-        const receipt = quarantined.receipt;
-        if (receipt) {
-          await renameExactChildDirectory(
-            location.quarantineRoot,
-            {
-              device: receipt.quarantineRootDevice,
-              inode: receipt.quarantineRootInode,
-              canonicalPath: receipt.canonicalQuarantineRoot,
-            },
-            location.quarantinePath,
-            expectedPath,
-            { device: receipt.sourceDevice, inode: receipt.sourceInode },
-          ).catch(() => {});
-        }
-      }
-      throw new Error(`Copy-on-write quarantine identity verification refused removal: ${quarantined.note}`);
-    }
+    let quarantined: ExactWorktreeQuarantineInspection;
     try {
+      quarantined = await inspectExactWorktreeQuarantine(locatorInput);
+      if (quarantined.state !== 'quarantined') {
+        throw new Error(`Copy-on-write quarantine identity verification refused removal: ${quarantined.note}`);
+      }
+      await verifyFreshProcessQuiescence(
+        input.expectedSessionKey,
+        location.quarantinePath,
+        input.probeProcessQuiescence,
+      );
       await input.verifyQuarantinedClone(location.quarantinePath);
     } catch (error) {
       try {
-        await restoreClaimedQuarantine(
-          quarantined,
-          location.quarantinePath,
-          input.beforeQuarantineRestoreRename,
-        );
-        await retireQuarantineReceipt(quarantined, input.afterQuarantineReceiptRetired);
+        const heldAfterFailure = await inspectExactWorktreeQuarantine(locatorInput);
+        if (heldAfterFailure.state === 'quarantined'
+          && await pathKind(expectedPath) === 'absent') {
+          const claimedPath = await claimExactWorktreeQuarantine(heldAfterFailure);
+          await restoreClaimedQuarantine(
+            heldAfterFailure,
+            claimedPath,
+            input.beforeQuarantineRestoreRename,
+          );
+          await retireQuarantineReceipt(heldAfterFailure, input.afterQuarantineReceiptRetired);
+        }
       } catch (restoreError) {
         throw new ExactWorktreeQuarantineError(
           `Copy-on-write quarantine verification failed and exact restore was incomplete: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,

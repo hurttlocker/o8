@@ -10,6 +10,7 @@ import type {
   RepoSetupEnvMode,
   RepoWorkspaceIsolationPreference,
 } from '@/lib/repos/types';
+import type { DependencyMaterializationReceipt } from '@/lib/workspace/dependency-materializer';
 import type { MetadataLockProcessIdentity } from './metadata-lock-process-identity';
 
 export type WorktreeStatus = 'creating' | 'setup' | 'ready' | 'active' | 'stale' | 'merging' | 'cleaning';
@@ -54,6 +55,8 @@ export interface WorktreeInfo {
   hydrationPaths?: string[];
   /** Deterministic package-manager recipe installed into this private workspace. */
   dependencyRecipeKey?: string;
+  /** Exact native install or mounted dependency-image receipt for this workspace. */
+  dependencyMaterialization?: DependencyMaterializationReceipt;
 }
 
 /**
@@ -171,6 +174,8 @@ export interface WorktreeMetaEntry {
   hydrationPaths?: string[];
   /** Deterministic package-manager recipe installed into this private workspace. */
   dependencyRecipeKey?: string;
+  /** Exact native install or mounted dependency-image receipt for this workspace. */
+  dependencyMaterialization?: DependencyMaterializationReceipt;
   /** Exact process that owns an unfinished managed creation. */
   creationOwner?: {
     pid: number;

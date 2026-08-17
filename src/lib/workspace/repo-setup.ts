@@ -15,11 +15,15 @@ import {
 import { createExactChildDirectory } from './exact-parent-operation';
 import {
   deriveDependencyInstallRecipe,
-  runDependencyInstall,
   type DependencyInstallInvocation,
   type DependencyInstallRecipe,
   type SupportedPackageManager,
 } from './dependency-install';
+import {
+  materializeDependencyInstall,
+  type DependencyImageProvider,
+  type DependencyMaterializationReceipt,
+} from './dependency-materializer';
 
 export type RepoSetupCommandInvocation = DependencyInstallInvocation;
 
@@ -36,6 +40,7 @@ export interface RepoSetupReceipt {
     cacheAuthorityId: string | null;
     privateViewVerified: boolean;
     completed: boolean;
+    materialization: DependencyMaterializationReceipt | null;
   };
   envBindings: Array<{
     relativePath: string;
@@ -58,6 +63,10 @@ export interface RepoSetupOptions {
   expectedRecipeKey?: string;
   resolvePackageManagerVersion?: (manager: SupportedPackageManager) => Promise<string>;
   packageManagerCacheRoot?: string;
+  dependencyImageRegistryRoot?: string;
+  dependencyImageProvider?: DependencyImageProvider;
+  dependencyImagePlatform?: NodeJS.Platform;
+  probeDependencyImageApfs?: (workspacePath: string) => Promise<boolean>;
 }
 
 interface PreparedBindingTarget {
@@ -614,14 +623,18 @@ export async function runRegisteredRepoSetup(
   if (repo.setup.installOnCreateWorkspace && !installCommand) {
     throw new Error('The registered repo requires install-on-create but has no install command.');
   }
-  const installReceipt = installCommand && dependencyRecipe
-    ? await runDependencyInstall(resolvedWorkspace, installCommand, {
+  const dependencyMaterialization = installCommand && dependencyRecipe
+    ? await materializeDependencyInstall(resolvedWorkspace, installCommand, {
         run: options.run,
         resolveVersion: options.resolvePackageManagerVersion,
         cacheRoot: options.packageManagerCacheRoot,
         now: options.now,
         materializationIdentity: options.materializationIdentity,
         preparedRecipe: dependencyRecipe,
+        imageRegistryRoot: options.dependencyImageRegistryRoot,
+        provider: options.dependencyImageProvider,
+        platform: options.dependencyImagePlatform,
+        probeApfs: options.probeDependencyImageApfs,
       })
     : null;
   if (options.materializationIdentity) {
@@ -635,12 +648,14 @@ export async function runRegisteredRepoSetup(
     install: {
       requested: Boolean(installCommand),
       commandId: installCommand ? hashJson(installCommand) : null,
-      packageManager: installReceipt?.recipe.packageManager ?? null,
-      packageManagerVersion: installReceipt?.recipe.packageManagerVersion ?? null,
-      dependencyRecipeKey: installReceipt?.recipe.key ?? null,
-      cacheAuthorityId: installReceipt?.recipe.cacheAuthorityId ?? null,
-      privateViewVerified: installReceipt?.privateViewVerified ?? false,
+      packageManager: dependencyRecipe?.packageManager ?? null,
+      packageManagerVersion: dependencyRecipe?.packageManagerVersion ?? null,
+      dependencyRecipeKey: dependencyMaterialization?.receipt.recipeKey ?? null,
+      cacheAuthorityId: dependencyRecipe?.cacheAuthorityId ?? null,
+      privateViewVerified: dependencyMaterialization?.installReceipt?.privateViewVerified
+        ?? dependencyMaterialization?.receipt.mode === 'image',
       completed: Boolean(installCommand),
+      materialization: dependencyMaterialization?.receipt ?? null,
     },
     envBindings,
     completedAt: (options.now ?? (() => new Date()))().toISOString(),

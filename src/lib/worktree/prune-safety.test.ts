@@ -17,7 +17,7 @@
  * sandboxed CORTEX_IDE_DATA_DIR, so a regression in the guard chain reddens here.
  */
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
-import { access, mkdtemp, mkdir, realpath, rename, rm, symlink, unlink, utimes, writeFile } from 'node:fs/promises';
+import { access, lstat, mkdtemp, mkdir, realpath, rename, rm, symlink, unlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -112,6 +112,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
   vi.doUnmock('@/lib/lane/registry');
   vi.doUnmock('@/lib/workspace/exact-managed-directory-retirement');
+  vi.doUnmock('@/lib/workspace/dependency-materializer');
   vi.resetModules();
   for (const aliasPath of pathAliases.splice(0)) {
     await unlink(aliasPath).catch(() => {});
@@ -177,7 +178,8 @@ describe('WorktreeManager.prune() safety guards (#1585)', () => {
 
   it('(c) aborts with [] and touches no disk when the lane registry import fails', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    vi.doMock('@/lib/lane/registry', () => ({
+    vi.doMock('@/lib/lane/registry', async (importOriginal) => ({
+      ...await importOriginal<typeof import('@/lib/lane/registry')>(),
       listLanes: () => { throw new Error('registry boom (simulated import/read failure)'); },
     }));
     vi.resetModules();
@@ -235,15 +237,41 @@ describe('WorktreeManager.prune() safety guards (#1585)', () => {
   }, 60_000);
 
   it('manager cleanup refuses a live worktree at the deletion seam unless confirmed-kill override is explicit', async () => {
-    const { WorktreeManager } = await import('./manager');
     const livePath = await addWorktree('packet-live-cleanup-seam');
+    const detach = vi.fn(async () => {});
+    vi.doMock('@/lib/workspace/dependency-materializer', async (importOriginal) => ({
+      ...await importOriginal<typeof import('@/lib/workspace/dependency-materializer')>(),
+      detachDependencyMaterialization: detach,
+    }));
+    vi.resetModules();
+    const { withWorktreeMetaTransaction } = await import('./metadata-store');
+    const identity = await lstat(livePath);
+    await withWorktreeMetaTransaction(repoRoot, async (transaction) => {
+      const entry = (await transaction.readAll())['packet-live-cleanup-seam']!;
+      await transaction.save(entry.id, {
+        ...entry,
+        dependencyRecipeKey: 'a'.repeat(64),
+        dependencyMaterialization: {
+          mode: 'image',
+          status: 'mounted',
+          installCommand: 'npm ci --ignore-scripts',
+          recipeKey: 'a'.repeat(64),
+          leaseId: 'live-cleanup-lease',
+          generation: 'live-cleanup-generation',
+          workspaceDevice: identity.dev,
+          workspaceInode: identity.ino,
+        },
+      });
+    });
     const child = spawn('sleep', ['60'], { cwd: livePath, stdio: 'ignore', detached: false });
     bornProcs.push(child);
     await new Promise((resolve) => setTimeout(resolve, 400));
 
+    const { WorktreeManager } = await import('./manager');
     const mgr = new WorktreeManager(repoRoot);
     await expect(mgr.cleanup('packet-live-cleanup-seam', { force: true })).resolves.toBe(false);
     expect(await exists(livePath), 'live worktree survives ordinary cleanup').toBe(true);
+    expect(detach).not.toHaveBeenCalled();
 
     await expect(mgr.cleanup('packet-live-cleanup-seam', {
       force: true,

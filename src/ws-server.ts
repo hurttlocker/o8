@@ -8335,6 +8335,35 @@ async function bootstrapWsServer() {
     );
   }
 
+  let dependencyImagesReconciled = false;
+  try {
+    const { reconcileDependencyImagesAtStartup } = await import(
+      '@/lib/workspace/dependency-image-startup'
+    );
+    const receipt = await reconcileDependencyImagesAtStartup();
+    dependencyImagesReconciled = receipt.complete;
+    if (receipt.publications.inspected > 0) {
+      console.log(
+        `[dependency-image] Startup publication reconciliation inspected=${receipt.publications.inspected} `
+        + `ready=${receipt.publications.ready} retired=${receipt.publications.retired} `
+        + `blocked=${receipt.publications.blocked}`,
+      );
+    }
+    if (receipt.materializations.inspected > 0 || receipt.materializations.unavailable > 0) {
+      console.log(
+        `[dependency-image] Startup lease reconciliation inspected=${receipt.materializations.inspected} `
+        + `adopted=${receipt.materializations.adopted} `
+        + `detachedUnowned=${receipt.materializations.detachedUnowned} `
+        + `unavailable=${receipt.materializations.unavailable} `
+        + `blocked=${receipt.materializations.blocked}`,
+      );
+    }
+  } catch (error) {
+    console.warn(
+      `[dependency-image] Startup publication/lease reconciliation failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
   try {
     const [
       { reconcileStuckLanes, reconcileOrphanedWorktrees },
@@ -8343,11 +8372,15 @@ async function bootstrapWsServer() {
       import('@/lib/lane/reconcile'),
       import('@/lib/workspace/reconciler'),
     ]);
-    await reconcileInterruptedWorkspaces().catch((error) => {
-      console.warn(
-        `[workspace-reconcile] Startup reconciliation failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    });
+    if (dependencyImagesReconciled) {
+      await reconcileInterruptedWorkspaces().catch((error) => {
+        console.warn(
+          `[workspace-reconcile] Startup reconciliation failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+    } else {
+      console.warn('[workspace-reconcile] Startup reconciliation held until dependency-image leases reconcile.');
+    }
     await reconcileStuckLanes();
     await reconcileOrphanedWorktrees();
   } catch (error) {

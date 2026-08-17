@@ -21,6 +21,7 @@ import {
 } from '@/lib/worktree/snapshot-state';
 import { beginWorkspaceSnapshotGeneration } from '@/lib/worktree/snapshot-generation';
 import type { WorkspaceIsolationKind } from '@/lib/worktree/types';
+import { WorktreeManager } from '@/lib/worktree/manager';
 import {
   materializationAwareExecFile,
   withWorktreeMaterializationExecution,
@@ -38,6 +39,10 @@ import {
   scanWorkspaceStorageState,
   type WorkspaceScanReceipt,
 } from './storage-verifier';
+import {
+  detachDependencyMaterialization,
+  type DependencyMaterializationReceipt,
+} from './dependency-materializer';
 import { inspectExactWorktreeQuarantine, parkExactWorktree } from './worktree-exact';
 import { assertManagedWorkspaceMaterialization } from './managed-materialization-identity';
 
@@ -80,6 +85,19 @@ export interface HibernateDependencies {
   processProbe: typeof probeOwnedSessionProcessQuiescence;
   parkExact: typeof parkExactWorktree;
   measureStorage: typeof measureWorkspaceStorage;
+  readDependencyMaterialization: (
+    repoPath: string,
+    worktreeId: string,
+  ) => Promise<DependencyMaterializationReceipt | null>;
+  detachDependencies: (
+    workspacePath: string,
+    receipt: DependencyMaterializationReceipt,
+  ) => Promise<void>;
+  restoreDependencies: (
+    repoPath: string,
+    worktreeId: string,
+    receipt: DependencyMaterializationReceipt,
+  ) => Promise<DependencyMaterializationReceipt>;
 }
 
 const DEFAULT_DEPENDENCIES: HibernateDependencies = {
@@ -90,6 +108,13 @@ const DEFAULT_DEPENDENCIES: HibernateDependencies = {
   processProbe: probeOwnedSessionProcessQuiescence,
   parkExact: parkExactWorktree,
   measureStorage: measureWorkspaceStorage,
+  readDependencyMaterialization: async (repoPath, worktreeId) => (
+    (await new WorktreeManager(repoPath).get(worktreeId))?.dependencyMaterialization ?? null
+  ),
+  detachDependencies: detachDependencyMaterialization,
+  restoreDependencies: (repoPath, worktreeId, receipt) => (
+    new WorktreeManager(repoPath).restoreDependencyMaterialization(worktreeId, receipt)
+  ),
 };
 
 function compactError(error: unknown): string {
@@ -385,16 +410,24 @@ export async function parkWorkspace(
         lane.worktreePath,
       );
       const requiredCopyBindings = await repoSetupCopyBindingRequirements(repo);
+      const worktreeId = path.basename(lane.worktreePath);
+      const dependencyMaterialization = await deps.readDependencyMaterialization(
+        repo.localPath,
+        worktreeId,
+      );
+      if (dependencyMaterialization?.status === 'prepared') {
+        throw new Error('Workspace dependency image is still prepared and cannot be parked.');
+      }
+      const processReceipt = await deps.processProbe(lane.sessionKey, lane.worktreePath);
+      if (processReceipt.state !== 'quiescent') {
+        throw new Error(`Owned workspace process state is ${processReceipt.state}.`);
+      }
       const first = await deps.firstScan(lane.worktreePath, {
         allowedIgnoredPaths,
         allowedExternalSymlinks,
         requiredCopyBindings,
       });
       if (first.state !== 'verified_clean') throw new Error('First workspace storage scan did not prove a clean rebuildable tree.');
-      const processReceipt = await deps.processProbe(lane.sessionKey, lane.worktreePath);
-      if (processReceipt.state !== 'quiescent') {
-        throw new Error(`Owned workspace process state is ${processReceipt.state}.`);
-      }
       const dependencyRecipeKey = await repoSetupBoundRecipeKey(
         repo,
         requiredCopyBindings,
@@ -451,7 +484,14 @@ export async function parkWorkspace(
           dependencyRecipeKey,
           sessionIdentities,
           creationId: `${input.operationId}:create`,
-          receipt: { isolationKind: truth.isolationKind },
+          receipt: {
+            isolationKind: truth.isolationKind,
+            dependencyMode: dependencyMaterialization?.mode ?? null,
+            dependencyLeaseId: dependencyMaterialization?.leaseId ?? null,
+            dependencyGeneration: dependencyMaterialization?.generation ?? null,
+            dependencyWorkspaceDevice: dependencyMaterialization?.workspaceDevice ?? null,
+            dependencyWorkspaceInode: dependencyMaterialization?.workspaceInode ?? null,
+          },
         }).record;
       } else if (existing.state === 'materialized' && !existingDiffers) {
         await ensureWorkspaceRecoveryRef(repo.localPath, lane.worktreePath, truth);
@@ -485,7 +525,15 @@ export async function parkWorkspace(
           expectedState: priorState,
           expectedVersion: existing.version,
           expectedGeneration: existing.snapshotGeneration,
-          receipt: { isolationKind: truth.isolationKind, laneId: lane.id },
+          receipt: {
+            isolationKind: truth.isolationKind,
+            laneId: lane.id,
+            dependencyMode: dependencyMaterialization?.mode ?? null,
+            dependencyLeaseId: dependencyMaterialization?.leaseId ?? null,
+            dependencyGeneration: dependencyMaterialization?.generation ?? null,
+            dependencyWorkspaceDevice: dependencyMaterialization?.workspaceDevice ?? null,
+            dependencyWorkspaceInode: dependencyMaterialization?.workspaceInode ?? null,
+          },
         });
         if (generation.status === 'missing' || generation.status === 'conflict') {
           throw new Error('Workspace snapshot generation supersession lost its compare-and-swap.');
@@ -512,58 +560,90 @@ export async function parkWorkspace(
       snapshot = transition(snapshot, input.operationId, 'parkable', 'parkable', {
         firstFingerprint: first.fingerprint,
         secondFingerprint: second.fingerprint,
+        dependencyMode: dependencyMaterialization?.mode ?? null,
+        dependencyLeaseId: dependencyMaterialization?.leaseId ?? null,
+        dependencyGeneration: dependencyMaterialization?.generation ?? null,
+        dependencyWorkspaceDevice: dependencyMaterialization?.workspaceDevice ?? null,
+        dependencyWorkspaceInode: dependencyMaterialization?.workspaceInode ?? null,
       });
       snapshot = transition(snapshot, input.operationId, 'hibernating', 'hibernating', {
         recoveryRef: truth.recoveryRef,
         beforeAvailableBytes: beforeStorage.availableBytes,
       });
-      const worktreeId = path.basename(lane.worktreePath);
-      await deps.parkExact({
-        repoPath: repo.localPath,
-        worktreeId,
-        expectedPath: lane.worktreePath,
-        expectedBranch: truth.branch,
-        expectedHead: truth.headCommit,
-        expectedSessionKey: lane.sessionKey,
-        probeProcessQuiescence: async (sessionKey, workspacePath) => {
-          const boundaryScan = await deps.secondScan(workspacePath, {
-            allowedIgnoredPaths,
-            allowedExternalSymlinks,
-            requiredCopyBindings,
-          });
-          if (boundaryScan.state !== 'verified_clean' || boundaryScan.fingerprint !== second.fingerprint) {
-            throw new Error('Workspace changed at the final destructive boundary.');
+      let dependencyRemountRequired = false;
+      let preparedFingerprint = second.fingerprint;
+      try {
+        await deps.parkExact({
+          repoPath: repo.localPath,
+          worktreeId,
+          expectedPath: lane.worktreePath,
+          expectedBranch: truth.branch,
+          expectedHead: truth.headCommit,
+          expectedSessionKey: lane.sessionKey,
+          probeProcessQuiescence: deps.processProbe,
+          prepareQuarantineSource: async (workspacePath) => {
+            const boundaryScan = await deps.secondScan(workspacePath, {
+              allowedIgnoredPaths,
+              allowedExternalSymlinks,
+              requiredCopyBindings,
+            });
+            if (boundaryScan.state !== 'verified_clean' || boundaryScan.fingerprint !== second.fingerprint) {
+              throw new Error('Workspace changed at the final destructive boundary.');
+            }
+            const boundaryDependencyRecipeKey = await repoSetupBoundRecipeKey(
+              registeredRepo,
+              requiredCopyBindings,
+              workspacePath,
+            );
+            if (boundaryDependencyRecipeKey !== dependencyRecipeKey) {
+              throw new Error('Workspace dependency recipe changed at the final destructive boundary.');
+            }
+            preparedFingerprint = boundaryScan.fingerprint;
+            if (dependencyMaterialization?.mode === 'image') {
+              dependencyRemountRequired = true;
+              await deps.detachDependencies(workspacePath, dependencyMaterialization);
+              const detachedScan = await deps.secondScan(workspacePath, {
+                allowedIgnoredPaths,
+                allowedExternalSymlinks,
+                requiredCopyBindings,
+              });
+              if (detachedScan.state !== 'verified_clean') {
+                throw new Error('Detached workspace storage scan did not prove a clean rebuildable tree.');
+              }
+              preparedFingerprint = detachedScan.fingerprint;
+            }
+          },
+          quarantine: {
+            snapshotFingerprint: snapshot.snapshotFingerprint,
+            intent: 'park',
+          },
+          verifyQuarantinedClone: async (quarantinePath) => {
+            const quarantinedScan = await deps.secondScan(quarantinePath, {
+              allowedIgnoredPaths,
+              allowedExternalSymlinks,
+              requiredCopyBindings,
+            });
+            if (quarantinedScan.state !== 'verified_clean'
+              || quarantinedScan.fingerprint !== preparedFingerprint) {
+              throw new Error('Quarantined copy-on-write clone changed after the snapshot boundary.');
+            }
+          },
+        });
+        if (await pathExists(lane.worktreePath)) throw new Error('Exact worktree path still exists after parking.');
+      } catch (error) {
+        if (dependencyRemountRequired && dependencyMaterialization
+          && await pathExists(lane.worktreePath)) {
+          try {
+            await deps.restoreDependencies(repo.localPath, worktreeId, dependencyMaterialization);
+          } catch (restoreError) {
+            throw new Error(
+              `Workspace parking failed and exact dependency remount was incomplete: ${compactError(restoreError)}`,
+              { cause: error },
+            );
           }
-          const boundaryDependencyRecipeKey = await repoSetupBoundRecipeKey(
-            registeredRepo,
-            requiredCopyBindings,
-            workspacePath,
-          );
-          if (boundaryDependencyRecipeKey !== dependencyRecipeKey) {
-            throw new Error('Workspace dependency recipe changed at the final destructive boundary.');
-          }
-          return deps.processProbe(sessionKey, workspacePath);
-        },
-        quarantine: {
-          snapshotFingerprint: snapshot.snapshotFingerprint,
-          intent: 'park',
-        },
-        verifyQuarantinedClone: async (quarantinePath) => {
-          const quarantinedScan = await deps.secondScan(quarantinePath, {
-            allowedIgnoredPaths,
-            allowedExternalSymlinks,
-            requiredCopyBindings,
-          });
-          if (quarantinedScan.state !== 'verified_clean' || quarantinedScan.fingerprint !== second.fingerprint) {
-            throw new Error('Quarantined copy-on-write clone changed after the snapshot boundary.');
-          }
-          const quarantinedProcess = await deps.processProbe(lane.sessionKey!, quarantinePath);
-          if (quarantinedProcess.state !== 'quiescent') {
-            throw new Error('Quarantined copy-on-write clone still has a live or unknown process user.');
-          }
-        },
-      });
-      if (await pathExists(lane.worktreePath)) throw new Error('Exact worktree path still exists after parking.');
+        }
+        throw error;
+      }
       await verifyImmutableWorkspaceTruth(repo.localPath, truth);
       const afterStorage = await deps.measureStorage(path.dirname(lane.worktreePath));
       snapshot = transition(snapshot, input.operationId, 'parked', 'parked', {
