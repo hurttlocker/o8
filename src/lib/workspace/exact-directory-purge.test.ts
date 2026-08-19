@@ -90,6 +90,13 @@ describe('exact directory purge', () => {
         NODE_ENV: 'test',
         O8_TEST_PURGE_STOP_MARKER: markerPath,
         O8_PURGE_TEST_INPUT: JSON.stringify({ directoryPath, identity, manifest }),
+        // The crash child is a bare node process, so it never sees Vitest's
+        // 'server-only' alias. Load the purge module the way the packaged
+        // server does, or its transitive 'server-only' poison pill throws
+        // before any namespace entry is released.
+        NODE_OPTIONS: [process.env.NODE_OPTIONS?.trim(), '--conditions=react-server']
+          .filter(Boolean)
+          .join(' '),
       },
       stdio: 'ignore',
     });
