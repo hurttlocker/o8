@@ -669,7 +669,11 @@ describe('exact managed worktree parking', { timeout: 90_000 }, () => {
           },
           afterClaimedContentRelease: async () => {
             process.stdout.write('O8_CONTENT_RELEASED\\n');
-            await new Promise(() => {});
+            // Hold the event loop open so the parent's SIGKILL is what ends
+            // this process. A bare never-resolving promise registers no
+            // handle, so the child could exit cleanly on its own and the
+            // parent would then wait forever for an 'exit' already fired.
+            await new Promise(() => { setInterval(() => {}, 1000); });
           },
         }).catch((error) => {
           console.error(error);
@@ -765,7 +769,11 @@ describe('exact managed worktree parking', { timeout: 90_000 }, () => {
         },
         afterQuarantineReceiptRetired: async () => {
           process.stdout.write('O8_RECEIPT_RETIRED\\n');
-          await new Promise(() => {});
+          // Hold the event loop open so the parent's SIGKILL is what ends
+          // this process. A bare never-resolving promise registers no
+          // handle, so the child could exit cleanly on its own and the
+          // parent would then wait forever for an 'exit' already fired.
+          await new Promise(() => { setInterval(() => {}, 1000); });
         },
       }).catch((error) => {
         console.error(error);
@@ -845,7 +853,11 @@ describe('exact managed worktree parking', { timeout: 90_000 }, () => {
         }),
         beforeQuarantineReceiptWrite: async () => {
           process.stdout.write('O8_CLAIM_PREPARED\\n');
-          await new Promise(() => {});
+          // Hold the event loop open so the parent's SIGKILL is what ends
+          // this process. A bare never-resolving promise registers no
+          // handle, so the child could exit cleanly on its own and the
+          // parent would then wait forever for an 'exit' already fired.
+          await new Promise(() => { setInterval(() => {}, 1000); });
         },
       }).catch((error) => {
         console.error(error);
