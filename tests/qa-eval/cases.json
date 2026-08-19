@@ -833,10 +833,10 @@
       "category": "literal-lookup",
       "repoPath": "/workspace/o8",
       "question": "What is the current DB_SCHEMA_VERSION in src/lib/db/index.ts?",
-      "expectedAnswer": "DB_SCHEMA_VERSION is 36.",
+      "expectedAnswer": "DB_SCHEMA_VERSION is 42.",
       "sourceOfTruth": "src/lib/db/index.ts:36-44",
       "expectedFacts": [
-        "36"
+        "42"
       ],
       "expectedCitations": [],
       "rubric": {
