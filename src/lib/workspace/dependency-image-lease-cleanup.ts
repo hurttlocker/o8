@@ -25,6 +25,10 @@ import {
   type DependencySeedLeaseRecord,
 } from './dependency-seed-registry';
 
+/** ~3s of bounded re-observation for a helper that has not exited yet. */
+const DETACH_SETTLE_ATTEMPTS = 15;
+const DETACH_SETTLE_INTERVAL_MS = 200;
+
 export type DependencySeedCleanupPhase = 'planned' | 'detaching' | 'verifying' | 'blocked';
 export type DependencySeedCleanupTargetState = 'planned' | 'absent';
 
@@ -546,23 +550,39 @@ async function detachReattestedUnmountedTarget(input: {
   } catch (error) {
     detachError = error;
   }
-  const observed = await Promise.all([
-    input.listDevices(),
-    input.listMounts(),
-  ]);
-  assertInventoryMatchesCleanupJournal(input.lease, input.journalTargets, observed[0]);
-  if (!await proveTargetAbsent(
-    input.target,
-    observed[0],
-    observed[1],
-    input.authoritySeams.probeProcess,
-  )) {
-    const detail = detachError
-      ? ` after detach reported: ${detachError instanceof Error ? detachError.message : String(detachError)}`
-      : '';
-    throw new Error(`Dependency image cleanup still contains its exact target${detail}.`);
+  // hdiutil returns before its helper releases the image, so the inventory can still
+  // carry the target — as a device-less record its helper still holds — for a short
+  // window after a detach that landed. Re-observe on a bounded budget instead of
+  // failing a cleanup that is only mid-teardown; a target that never clears still
+  // fails closed with the same refusal.
+  let observed: [HdiImageInfo[], MountedFilesystem[]] = [[], []];
+  let settleError: unknown = null;
+  for (let attempt = 0; attempt < DETACH_SETTLE_ATTEMPTS; attempt += 1) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, DETACH_SETTLE_INTERVAL_MS));
+    }
+    observed = await Promise.all([
+      input.listDevices(),
+      input.listMounts(),
+    ]);
+    try {
+      assertInventoryMatchesCleanupJournal(input.lease, input.journalTargets, observed[0]);
+      if (await proveTargetAbsent(
+        input.target,
+        observed[0],
+        observed[1],
+        input.authoritySeams.probeProcess,
+      )) return observed[0];
+      settleError = null;
+    } catch (error) {
+      settleError = error;
+    }
   }
-  return observed[0];
+  if (settleError) throw settleError;
+  const detail = detachError
+    ? ` after detach reported: ${detachError instanceof Error ? detachError.message : String(detachError)}`
+    : '';
+  throw new Error(`Dependency image cleanup still contains its exact target${detail}.`);
 }
 
 async function ensureCleanupPlan(

@@ -13,6 +13,7 @@ import {
 import {
   mountedDependencyImages,
   normalizedNamespacePath,
+  type HdiImageInfo,
 } from './dependency-image-device-authority';
 import { DependencyImageRefusalError } from './dependency-image-source-authority';
 
@@ -39,6 +40,7 @@ export interface DependencyImageMount {
 
 export interface DependencyImageDetachOptions {
   afterShadowUnlinked?: (leaseId: string) => Promise<void>;
+  listDevices?: () => Promise<HdiImageInfo[]>;
 }
 
 export type DependencyImageExpectedLease = DependencyImagePreparedLease;

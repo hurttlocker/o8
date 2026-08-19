@@ -219,37 +219,106 @@ export async function parseDependencyValidationAttachInfo(
   };
 }
 
-function parseImageRecord(raw: unknown): HdiImageInfo {
+/** Null for an image whose device tree is already gone; see the teardown note below. */
+function parseImageRecord(raw: unknown): HdiImageInfo | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new Error('Disk image inventory contains an unsupported image record.');
   }
   const image = raw as Record<string, unknown>;
   const imagePath = image['image-path'];
-  if (typeof imagePath !== 'string' || typeof image.writeable !== 'boolean') {
+  if (typeof imagePath !== 'string') {
     throw new Error('Disk image inventory contains an incomplete image record.');
   }
-  const systemEntities = parseSystemEntities(image['system-entities']);
-  const mounted = systemEntities.filter((entity) => entity.mountPath !== null);
   const rawPid = image['hdid-pid'];
+  const helperPid = Number.isInteger(rawPid) && Number(rawPid) > 0 ? Number(rawPid) : null;
+  const rawEntities = image['system-entities'];
+  const shadowPath = typeof image['shadow-path'] === 'string'
+    ? normalizedNamespacePath(image['shadow-path']) : null;
+  // hdiutil keeps reporting an image between the moment its device tree is torn down
+  // and the moment its helper exits. That is a real teardown state, not a malformed
+  // record, and it contributes no devices to a device inventory. Absence stays gated
+  // on the helper-identity probe in proveTargetAbsent, which the record cannot fool.
+  if (rawEntities === undefined || (Array.isArray(rawEntities) && rawEntities.length === 0)) {
+    return null;
+  }
+  if (typeof image.writeable !== 'boolean') {
+    throw new Error('Disk image inventory contains an incomplete image record.');
+  }
+  const systemEntities = parseSystemEntities(rawEntities);
+  const mounted = systemEntities.filter((entity) => entity.mountPath !== null);
   return {
     imagePath: normalizedNamespacePath(imagePath),
-    shadowPath: typeof image['shadow-path'] === 'string'
-      ? normalizedNamespacePath(image['shadow-path']) : null,
+    shadowPath,
     deviceEntry: systemEntities[0]!.deviceEntry,
     mountPath: mounted.length === 1 ? mounted[0]!.mountPath : null,
     mountDevice: mounted.length === 1 ? mounted[0]!.deviceEntry : null,
     systemEntities,
-    helperPid: Number.isInteger(rawPid) && Number(rawPid) > 0 ? Number(rawPid) : null,
+    helperPid,
     writable: image.writeable,
   };
 }
 
-export async function listLiveDependencyImageDevices(): Promise<HdiImageInfo[]> {
-  const plist = await plistJson((await runHdiCommand(['info', '-plist'])).stdout);
+// Our images and shadows are content-addressed as <recipeKey>-<generation|leaseId>,
+// and a publication validates its staging image before it is named. Any string that
+// carries one of those marks makes a record ours no matter which registry root holds it.
+const DEPENDENCY_ARTIFACT_NAME = /^[0-9a-f]{64}-[0-9a-f-]{36}\.(?:dmg|shadow)$/;
+
+function salvagedRecordStrings(raw: unknown): string[] {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+  const record = raw as Record<string, unknown>;
+  const strings = Object.values(record).filter((value): value is string => typeof value === 'string');
+  const entities = record['system-entities'];
+  if (Array.isArray(entities)) {
+    for (const entity of entities) {
+      if (!entity || typeof entity !== 'object' || Array.isArray(entity)) continue;
+      strings.push(...Object.values(entity as Record<string, unknown>)
+        .filter((value): value is string => typeof value === 'string'));
+    }
+  }
+  return strings;
+}
+
+function unreadableRecordIsOurs(raw: unknown): boolean {
+  return salvagedRecordStrings(raw).some((value) => {
+    if (value.includes('/dependency-images/')) return true;
+    const name = value.slice(value.lastIndexOf('/') + 1);
+    return name === 'image.dmg' || DEPENDENCY_ARTIFACT_NAME.test(name);
+  });
+}
+
+/**
+ * hdiutil reports every disk image on the host, including ones no o8 lease will ever
+ * touch. A single foreign record caught mid-teardown used to throw here and poison the
+ * inventory that every lease cleanup reads, so one unrelated image broke detach for all
+ * of them. Foreign records that cannot be read are dropped; a record naming one of our
+ * own artifacts still throws, because nothing can be proven about a device we could not
+ * parse.
+ */
+export function parseLiveDependencyImageInventory(
+  plist: Record<string, unknown>,
+): HdiImageInfo[] {
   if (!Array.isArray(plist.images)) {
     throw new Error('Disk image inventory did not return a complete image list.');
   }
-  return plist.images.map(parseImageRecord);
+  const inventory: HdiImageInfo[] = [];
+  for (const raw of plist.images) {
+    try {
+      const record = parseImageRecord(raw);
+      if (record) inventory.push(record);
+    } catch (error) {
+      if (unreadableRecordIsOurs(raw)) throw error;
+      console.warn(
+        `[dependency-image] Skipped an unreadable foreign disk image record: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  return inventory;
+}
+
+export async function listLiveDependencyImageDevices(): Promise<HdiImageInfo[]> {
+  return parseLiveDependencyImageInventory(
+    await plistJson((await runHdiCommand(['info', '-plist'])).stdout),
+  );
 }
 
 export const mountedDependencyImages = listLiveDependencyImageDevices;

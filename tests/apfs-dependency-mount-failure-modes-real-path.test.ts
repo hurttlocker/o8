@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import {
   chmod, lstat, mkdir, mkdtemp, readdir, readFile, rm, writeFile,
 } from 'node:fs/promises';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -26,8 +26,19 @@ import {
   listDependencySeedLeases, readDependencySeedImage,
 } from '@/lib/workspace/dependency-seed-registry';
 import {
-  mountedDependencyImages, runHdiCommand,
+  mountedDependencyImages, parseLiveDependencyImageInventory, runHdiCommand,
 } from '@/lib/workspace/dependency-image-device-authority';
+
+/** The host's real hdiutil inventory, still in its unparsed record shape. */
+async function liveImageRecords(): Promise<unknown[]> {
+  const { stdout } = await execFileAsync(
+    '/bin/sh',
+    ['-c', '/usr/bin/hdiutil info -plist | /usr/bin/plutil -convert json -o - -'],
+    { maxBuffer: 16 * 1024 * 1024, timeout: 30_000 },
+  );
+  const plist = JSON.parse(stdout) as { images?: unknown[] };
+  return plist.images ?? [];
+}
 
 const execFileAsync = promisify(execFile);
 const command = 'npm ci --ignore-scripts --no-audit --no-fund';
@@ -336,5 +347,49 @@ describe.skipIf(process.platform !== 'darwin')('APFS dependency mount failure mo
       },
       { registryRoot, resolveVersion: async () => npmVersion },
     )).rejects.toThrow(/without a private node_modules view/);
+  }, 300_000);
+
+  it('detaches a lease while an unreadable foreign image poisons the inventory', async () => {
+    const source = await makeSource('source-inventory-poison', '6.0.0');
+    await publishDependencyImage(source.sourceReceipt, {
+      registryRoot,
+      resolveVersion: async () => npmVersion,
+    });
+    const workspace = await cloneWorkspace(source.workspace, 'workspace-inventory-poison');
+    const mount = await mountDependencyImage(workspace, command, source.receipt, {
+      registryRoot,
+      resolveVersion: async () => npmVersion,
+    });
+
+    // Some other disk image on this host, caught mid-teardown: hdiutil hands back a
+    // record without the fields a complete one carries. It used to throw out of the
+    // inventory read and break cleanup for every lease, ours included.
+    const poisonedInventory = async () => parseLiveDependencyImageInventory({
+      images: [
+        ...await liveImageRecords(),
+        { 'shadow-path': path.join(os.tmpdir(), 'someone-elses-image.shadow') },
+      ],
+    });
+    expect((await poisonedInventory()).some((device) => (
+      device.deviceEntry === mount.deviceEntry
+    ))).toBe(true);
+
+    // The real detach completes against the poisoned inventory.
+    await detachDependencyImageLease(mount.leaseId, { listDevices: poisonedInventory });
+    expect(listDependencySeedLeases(source.receipt.recipe.key)).toEqual([]);
+    expect((await mountedDependencyImages()).some((device) => (
+      device.deviceEntry === mount.deviceEntry
+    ))).toBe(false);
+    await expect(lstat(mount.shadowPath)).rejects.toMatchObject({ code: 'ENOENT' });
+
+    // Fail closed the other way: an unreadable record naming one of our own
+    // artifacts is never skipped, because a device we could not parse proves nothing.
+    expect(() => parseLiveDependencyImageInventory({
+      images: [{
+        'shadow-path': path.join(
+          registryRoot, 'shadows', `${'a'.repeat(64)}-${randomUUID()}.shadow`,
+        ),
+      }],
+    })).toThrow(/incomplete image record/);
   }, 300_000);
 });
