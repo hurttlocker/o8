@@ -52,18 +52,25 @@ export async function inspectOwnedWorkspaceMaterialization(
         input.binding!.repositoryUuid === null || repo.id === input.binding!.repositoryUuid
       ));
       const matches: Array<Awaited<ReturnType<typeof assertManagedWorkspaceMaterialization>>> = [];
+      const refusals: string[] = [];
       for (const repository of repositories) {
         try {
           matches.push(await dependencies.assertManagedWorkspaceMaterialization(
             repository.localPath,
             bindingPath,
           ));
-        } catch {
+        } catch (error) {
           // This repository does not own the exact managed path.
+          refusals.push(error instanceof Error ? error.message : String(error));
         }
       }
       if (matches.length !== 1) {
-        throw new Error('Managed workspace ownership is absent or ambiguous across registered repositories.');
+        // A single consulted repository refused for one exact, auditable
+        // reason. Reporting registry ambiguity instead would send the
+        // operator to the repo list rather than the replaced directory.
+        throw new Error(matches.length === 0 && refusals.length === 1
+          ? refusals[0]!
+          : 'Managed workspace ownership is absent or ambiguous across registered repositories.');
       }
       const materializationIdentity = matches[0]!;
       return { status: 'available', source: 'materialized', materializationIdentity };

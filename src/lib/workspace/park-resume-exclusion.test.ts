@@ -302,7 +302,7 @@ describe('owned run and workspace parking exclusion', () => {
     await expect(f.store.resume(f.surfaceId, 'resume ordinary managed workspace')).resolves.toMatchObject({
       ok: false,
       sideEffect: 'none',
-      note: expect.stringContaining('identity'),
+      note: expect.stringContaining('materialization ownership changed'),
     });
     const session = JSON.parse(
       readFileSync(path.join(f.sessionDir, 'session.json'), 'utf8'),
@@ -369,7 +369,10 @@ describe('owned run and workspace parking exclusion', () => {
       let processProbeCalls = 0;
       let pauseGuard = true;
       const guard: OwnedWorkspaceSpawnGuard = async (input) => {
-        const decision = await inspectOwnedWorkspaceMaterialization(input);
+        const decision = await inspectOwnedWorkspaceMaterialization(input, {
+          listRepos: async () => [f.repo],
+          assertManagedWorkspaceMaterialization,
+        });
         if (pauseGuard && decision.status === 'available' && decision.source === 'materialized') {
           pauseGuard = false;
           resumeGuardPassed.resolve();
