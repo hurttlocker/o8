@@ -101,7 +101,7 @@ export interface DependencyImageDeviceAuthoritySeams {
   probeProcess?: typeof probeMetadataLockProcessIdentity;
 }
 
-function normalizedNamespacePath(value: string): string {
+export function normalizedNamespacePath(value: string): string {
   const resolved = path.resolve(value);
   return resolved.startsWith('/private/var/') || resolved.startsWith('/private/tmp/')
     ? resolved.slice('/private'.length)

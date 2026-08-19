@@ -368,24 +368,49 @@ function authorityFromLease(lease: DependencySeedLeaseRecord): DependencyImageDe
   };
 }
 
-function cleanupTarget(
+async function cleanupTargetMountPath(
+  lease: DependencySeedLeaseRecord,
+  authority: DependencyImageDeviceAuthority,
+): Promise<string> {
+  const mounted = authority.systemEntities.flatMap((entity) => (
+    entity.mountPath === null ? [] : [entity.mountPath]
+  ));
+  const named = mounted.filter((mountPath) => mountPath === lease.mountPath);
+  if (named.length === 1) return named[0]!;
+  // The workspace directory can be renamed out from under a live mount. The lease
+  // stays the detach authority, so re-identify its leaf by the durable mount vnode
+  // that was recorded at attach rather than by the name it used to carry.
+  if (mounted.length === 0 || named.length > 1
+    || lease.mountDevice === null || lease.mountInode === null) {
+    throw new Error('Dependency image cleanup authority lost its requested mounted leaf.');
+  }
+  const drifted: string[] = [];
+  for (const mountPath of mounted) {
+    const entry = await lstat(mountPath).catch(() => null);
+    if (entry && entry.dev === lease.mountDevice && entry.ino === lease.mountInode) {
+      drifted.push(mountPath);
+    }
+  }
+  if (drifted.length !== 1) {
+    throw new Error('Dependency image cleanup authority lost its requested mounted leaf.');
+  }
+  return drifted[0]!;
+}
+
+async function cleanupTarget(
   lease: DependencySeedLeaseRecord,
   image: DependencySeedImageRecord | null,
   authority: DependencyImageDeviceAuthority,
   provenance: DependencySeedCleanupTarget['provenance'],
-): Omit<DependencySeedCleanupTarget, 'leaseId' | 'state' | 'createdAt' | 'updatedAt'> {
-  const mounted = authority.systemEntities.filter((entity) => entity.mountPath !== null);
-  if (mounted.length === 0
-    || mounted.filter((entity) => entity.mountPath === lease.mountPath).length !== 1) {
-    throw new Error('Dependency image cleanup authority lost its requested mounted leaf.');
-  }
+): Promise<Omit<DependencySeedCleanupTarget, 'leaseId' | 'state' | 'createdAt' | 'updatedAt'>> {
+  const mountPath = await cleanupTargetMountPath(lease, authority);
   const imagePath = lease.attachedImagePath ?? image?.imagePath;
   if (!imagePath) throw new Error('Dependency image cleanup lost its invocation image path.');
   return {
     ...authority,
     imagePath,
     shadowPath: lease.shadowPath,
-    mountPath: lease.mountPath,
+    mountPath,
     provenance,
   };
 }
@@ -638,7 +663,7 @@ async function ensureCleanupPlan(
   }
   planDependencySeedLeaseCleanup({
     leaseId: lease.leaseId,
-    targets: [cleanupTarget(
+    targets: [await cleanupTarget(
       cleanupLease,
       image,
       classified.authority,

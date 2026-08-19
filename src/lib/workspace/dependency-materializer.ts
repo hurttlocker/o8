@@ -18,6 +18,7 @@ import {
   type DependencyImagePreparedLease,
   type DependencyImageSourceReceipt,
 } from './apfs-dependency-image';
+import { normalizedNamespacePath } from './dependency-image-device-authority';
 import {
   auditPrivateDependencyView,
   deriveDependencyInstallRecipe,
@@ -28,6 +29,12 @@ import {
 } from './dependency-install';
 
 export const APFS_DEPENDENCY_IMAGES_ENV = 'O8_APFS_DEPENDENCY_IMAGES';
+
+// Durable lease paths are stored in the namespace the disk-image tooling reports,
+// so a caller-supplied canonical path only compares equal after the same collapse.
+function sameWorkspaceNamespace(first: string, second: string): boolean {
+  return normalizedNamespacePath(first) === normalizedNamespacePath(second);
+}
 
 export interface DependencyMaterializationReceipt {
   mode: 'native' | 'image';
@@ -373,7 +380,7 @@ export async function materializeDependencyInstall(
   if (options.expectedLease && (
     options.expectedLease.recipeKey !== recipe.key
     || options.expectedLease.generation !== availability.authority.generation
-    || path.resolve(options.expectedLease.workspacePath) !== workspace
+    || !sameWorkspaceNamespace(options.expectedLease.workspacePath, workspace)
   )) {
     throw new DependencyMaterializationRefusalError(
       'Exact dependency image remount receipt differs from current workspace authority.',
@@ -402,7 +409,7 @@ export async function materializeDependencyInstall(
       afterLeasePrepared: async (lease) => {
         if (lease.recipeKey !== recipe.key
           || lease.generation !== availability.authority.generation
-          || path.resolve(lease.workspacePath) !== workspace
+          || !sameWorkspaceNamespace(lease.workspacePath, workspace)
           || (options.expectedLease && lease.leaseId !== options.expectedLease.leaseId)) {
           throw new DependencyMaterializationRefusalError(
             'Prepared dependency image lease differs from the requested workspace authority.',
@@ -603,7 +610,7 @@ export async function reconcileDependencyMaterializations(
     const receiptMatches = owner
       && owner.receipt.recipeKey === outcome.recipeKey
       && owner.receipt.generation === outcome.generation
-      && path.resolve(owner.workspacePath) === path.resolve(outcome.workspacePath);
+      && sameWorkspaceNamespace(owner.workspacePath, outcome.workspacePath);
     let workspaceMatches = false;
     if (receiptMatches && owner) {
       try {

@@ -292,6 +292,52 @@ beforeEach(async () => {
   git(repoPath, 'commit', '-qm', 'fixture');
 }, 30_000);
 
+function attributableDevices(roots: string[]): { bases: string[]; leaves: string[] } {
+  const bases: string[] = [];
+  const leaves: string[] = [];
+  const info = execFileSync('/usr/bin/hdiutil', ['info'], { encoding: 'utf8' });
+  for (const block of info.split('================================================')) {
+    if (!roots.some((entry) => block.includes(entry))) continue;
+    const devices = block.split('\n')
+      .map((line) => line.split('\t'))
+      .filter((columns) => /^\/dev\/disk\d+(s\d+)?$/.test(columns[0]?.trim() ?? ''))
+      .map((columns) => ({
+        deviceEntry: columns[0]!.trim(),
+        mountPath: (columns[2] ?? '').trim(),
+      }));
+    // The first device in an hdiutil block is the attached image itself. Never detach
+    // the synthesized APFS container that follows it.
+    if (devices[0]) bases.push(devices[0].deviceEntry);
+    for (const device of devices) {
+      if (device.mountPath) leaves.push(device.deviceEntry);
+    }
+  }
+  return { bases: [...new Set(bases)], leaves: [...new Set(leaves)] };
+}
+
+function releaseAttributableDevices(roots: string[]): string[] {
+  const released: string[] = [];
+  const { bases, leaves } = attributableDevices(roots);
+  for (const leaf of leaves) {
+    try {
+      execFileSync('/sbin/umount', [leaf], { stdio: 'ignore' });
+      released.push(leaf);
+    } catch { /* Detaching the base below is the second chance. */ }
+  }
+  for (const base of bases) {
+    try {
+      execFileSync('/usr/bin/hdiutil', ['detach', base], { stdio: 'ignore' });
+      released.push(base);
+    } catch {
+      try {
+        execFileSync('/usr/bin/hdiutil', ['detach', base, '-force'], { stdio: 'ignore' });
+        released.push(base);
+      } catch { /* Reported as retained residue below. */ }
+    }
+  }
+  return released;
+}
+
 afterEach(async () => {
   for (const target of cleanupTargets.splice(0)) {
     await runChild({ action: 'cleanup', ...target }).catch(() => undefined);
@@ -299,13 +345,23 @@ afterEach(async () => {
   packageServer?.kill('SIGTERM');
   packageServer = null;
   const canonicalRoot = root.startsWith('/var/') ? `/private${root}` : root;
-  const diskImages = execFileSync('/usr/bin/hdiutil', ['info'], { encoding: 'utf8' });
-  const mounts = execFileSync('/sbin/mount', [], { encoding: 'utf8' });
-  if (diskImages.includes(root) || diskImages.includes(canonicalRoot)
-    || mounts.includes(root) || mounts.includes(canonicalRoot)) {
-    throw new Error(`APFS materializer fixture retained an attributable device; preserved ${root}`);
+  const roots = [root, canonicalRoot];
+  const retained = () => {
+    const diskImages = execFileSync('/usr/bin/hdiutil', ['info'], { encoding: 'utf8' });
+    const mounts = execFileSync('/sbin/mount', [], { encoding: 'utf8' });
+    return roots.some((entry) => diskImages.includes(entry) || mounts.includes(entry));
+  };
+  // A failing test must never leave a live APFS mount or attached image behind, so
+  // release anything attributable to this fixture root before reporting the leak.
+  const retainedBefore = retained();
+  const released = retainedBefore ? releaseAttributableDevices(roots) : [];
+  const stillRetained = retainedBefore && retained();
+  if (existsSync(root) && !stillRetained) rmSync(root, { recursive: true, force: true });
+  if (retainedBefore) {
+    throw new Error(stillRetained
+      ? `APFS materializer fixture retained an attributable device after releasing ${released.join(', ') || 'nothing'}; preserved ${root}`
+      : `APFS materializer fixture retained an attributable device; released ${released.join(', ')}`);
   }
-  if (existsSync(root)) rmSync(root, { recursive: true, force: true });
 });
 
 describe.skipIf(process.platform !== 'darwin')(

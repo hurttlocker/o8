@@ -91,10 +91,17 @@ async function dependencyRollbackEvidence(
   return {
     ...evidence,
     pathExists: existsSync(workspacePath),
-    nodeModulesUsable: readFileSync(
-      path.join(mountPath, 'fixture-package', 'index.js'),
-      'utf8',
-    ).includes('sealed fixture'),
+    // Evidence collection must never throw away the rollback receipt it is describing.
+    nodeModulesUsable: (() => {
+      try {
+        return readFileSync(
+          path.join(mountPath, 'fixture-package', 'index.js'),
+          'utf8',
+        ).includes('sealed fixture');
+      } catch {
+        return false;
+      }
+    })(),
     oldLease: oldLease ? registry.readDependencySeedLease(oldLease.leaseId) : null,
     oldShadowExists: oldLease ? existsSync(oldLease.shadowPath) : null,
     workspaceLeases: registry.listDependencySeedLeases().filter((lease) => (

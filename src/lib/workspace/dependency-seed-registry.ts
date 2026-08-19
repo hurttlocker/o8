@@ -1,7 +1,10 @@
 import path from 'node:path';
 import { getSqlite } from '@/lib/db';
 import type { MetadataLockProcessIdentity } from '@/lib/worktree/metadata-lock-process-identity';
-import type { HdiSystemEntity } from './dependency-image-device-authority';
+import {
+  normalizedNamespacePath,
+  type HdiSystemEntity,
+} from './dependency-image-device-authority';
 import { retireGovernedDependencyFile } from './dependency-image-file-authority';
 export type DependencySeedImageState = 'building' | 'built' | 'ready' | 'retiring';
 export type DependencySeedLeaseState = 'mounting' | 'mounted' | 'detaching' | 'blocked';
@@ -482,9 +485,9 @@ export function beginDependencySeedLease(input: {
       input.leaseId,
       input.recipeKey,
       input.generation,
-      path.resolve(input.workspacePath),
+      normalizedNamespacePath(input.workspacePath),
       path.resolve(input.shadowPath),
-      path.resolve(input.mountPath),
+      normalizedNamespacePath(input.mountPath),
       input.ownerPid,
       JSON.stringify(input.ownerIdentity),
       now,
@@ -509,7 +512,7 @@ export function findDependencySeedLeaseForWorkspace(
 ): DependencySeedLeaseRecord | null {
   const row = sqlite().prepare(
     'SELECT * FROM dependency_seed_leases WHERE workspace_path = ?',
-  ).get(path.resolve(workspacePath)) as LeaseRow | undefined;
+  ).get(normalizedNamespacePath(workspacePath)) as LeaseRow | undefined;
   return row ? decodeLease(row) : null;
 }
 export function listDependencySeedLeases(recipeKey?: string): DependencySeedLeaseRecord[] {

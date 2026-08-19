@@ -1,5 +1,4 @@
 import { lstat } from 'node:fs/promises';
-import path from 'node:path';
 
 import {
   isMetadataLockProcessIdentity,
@@ -11,7 +10,10 @@ import {
   type DependencySeedImageRecord,
   type DependencySeedLeaseRecord,
 } from './dependency-seed-registry';
-import { mountedDependencyImages } from './dependency-image-device-authority';
+import {
+  mountedDependencyImages,
+  normalizedNamespacePath,
+} from './dependency-image-device-authority';
 import { DependencyImageRefusalError } from './dependency-image-source-authority';
 
 export interface DependencyImagePreparedLease {
@@ -89,7 +91,7 @@ export function assertExpectedDependencyImageLease(
     || lease.leaseId !== expected.leaseId
     || lease.recipeKey !== expected.recipeKey
     || lease.generation !== expected.generation
-    || lease.workspacePath !== path.resolve(expected.workspacePath)) {
+    || lease.workspacePath !== normalizedNamespacePath(expected.workspacePath)) {
     throw new DependencyImageRefusalError(
       'Persisted dependency mount differs from the expected lease receipt.',
     );
