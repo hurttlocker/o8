@@ -16,6 +16,7 @@ const { closeDb, getDb } = await import('@/lib/db');
 const { registerOwnedSessionLifecycleHandler } = await import('@/lib/runtimes/shared/owned-session-lifecycle');
 const { resolveWorktreeRootLayout } = await import('@/lib/worktree/root-layout');
 const { getWorkspaceSnapshot, listWorkspaceSnapshotTransitions } = await import('@/lib/worktree/snapshot-state');
+const { withWorktreeMetaTransaction } = await import('@/lib/worktree/metadata-store');
 const { parkWorkspace } = await import('./hibernator');
 const { restoreWorkspace } = await import('./restorer');
 const { materializeReplacementWorkspace } = await import('./replacement-materialization');
@@ -27,7 +28,7 @@ function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 }
 
-function fixture(label: string) {
+async function fixture(label: string) {
   sequence += 1;
   const root = mkdtempSync(path.join(os.tmpdir(), `o8-generation-${label}-`));
   roots.push(root);
@@ -43,10 +44,9 @@ function fixture(label: string) {
 
   const repoId = `repo-generation-${sequence}`;
   const packetId = `packet-generation-${sequence}`;
-  const metadataPath = path.join(resolveWorktreeRootLayout(repoPath).primaryBase, '.meta.json');
-  mkdirSync(path.dirname(metadataPath), { recursive: true });
+  mkdirSync(resolveWorktreeRootLayout(repoPath).primaryBase, { recursive: true });
   let generation = 1;
-  let lane = createLane(generation);
+  let lane = await createLane(generation);
   let binding = createBinding(lane);
   registerOwnedSessionLifecycleHandler({
     runtimeId: 'codex',
@@ -95,7 +95,7 @@ function fixture(label: string) {
     },
   };
 
-  function createLane(nextGeneration: number): Lane {
+  async function createLane(nextGeneration: number): Promise<Lane> {
     const worktreeId = `packet-${packetId}-run-${nextGeneration}`;
     const worktreePath = path.join(resolveWorktreeRootLayout(repoPath).primaryBase, worktreeId);
     const branch = `inline/${packetId}-run-${nextGeneration}`;
@@ -103,27 +103,29 @@ function fixture(label: string) {
     writeFileSync(path.join(worktreePath, 'tracked.txt'), `generation ${nextGeneration}\n`);
     git(worktreePath, 'add', 'tracked.txt');
     git(worktreePath, 'commit', '-qm', `generation ${nextGeneration}`);
-    const metadata = existsSync(metadataPath)
-      ? JSON.parse(readFileSync(metadataPath, 'utf8')) as { version: number; worktrees: Record<string, unknown> }
-      : { version: 1, worktrees: {} };
-    metadata.worktrees[worktreeId] = {
-      id: worktreeId,
-      agentType: 'codex',
-      sessionKey: `generation-${sequence}:session-${nextGeneration}`,
-      baseBranch: 'main',
-      createdAt: nextGeneration,
-      claudeManaged: false,
-      taskName: worktreeId,
-      branchName: branch,
-      status: 'ready',
-      isolationKind: 'git-worktree',
-      materializationIdentity: {
-        device: lstatSync(worktreePath).dev,
-        inode: lstatSync(worktreePath).ino,
-        canonicalPath: realpathSync(worktreePath),
-      },
-    };
-    writeFileSync(metadataPath, JSON.stringify(metadata));
+    // Ownership must be registered through the metadata transaction store the
+    // way production does. Its durable state is authoritative and the
+    // `.meta.json` file is only a mirror, so a direct write to that file is
+    // invisible to every transaction after the first one on this metadata root.
+    await withWorktreeMetaTransaction(repoPath, async (transaction) => {
+      await transaction.save(worktreeId, {
+        id: worktreeId,
+        agentType: 'codex',
+        sessionKey: `generation-${sequence}:session-${nextGeneration}`,
+        baseBranch: 'main',
+        createdAt: nextGeneration,
+        claudeManaged: false,
+        taskName: worktreeId,
+        branchName: branch,
+        status: 'ready',
+        isolationKind: 'git-worktree',
+        materializationIdentity: {
+          device: lstatSync(worktreePath).dev,
+          inode: lstatSync(worktreePath).ino,
+          canonicalPath: realpathSync(worktreePath),
+        },
+      });
+    });
     return {
       id: `lane-generation-${sequence}-${nextGeneration}`,
       projectId: null,
@@ -171,9 +173,9 @@ function fixture(label: string) {
     repo,
     packetId,
     lane: () => lane,
-    nextLane: () => {
+    nextLane: async () => {
       generation += 1;
-      lane = createLane(generation);
+      lane = await createLane(generation);
       binding = createBinding(lane);
       return lane;
     },
@@ -190,7 +192,7 @@ function fixture(label: string) {
   };
 }
 
-function dependencies(f: ReturnType<typeof fixture>) {
+function dependencies(f: Awaited<ReturnType<typeof fixture>>) {
   return {
     listRepos: async () => [f.repo],
     findLaneByPacket: () => f.lane(),
@@ -220,7 +222,7 @@ afterAll(() => {
 
 describe('workspace snapshot generations through production lifecycle services', { timeout: 120_000 }, () => {
   it('parks, restores, accepts new committed work, reparks, restarts, and restores generation two', async () => {
-    const f = fixture('roundtrip');
+    const f = await fixture('roundtrip');
     expect(await parkWorkspace({
       repositoryUuid: f.repo.id,
       packetId: f.packetId,
@@ -266,7 +268,7 @@ describe('workspace snapshot generations through production lifecycle services',
   }, 120_000);
 
   it('retries after a post-capture scan failure without poisoning materialized truth', async () => {
-    const f = fixture('retry');
+    const f = await fixture('retry');
     const refused = await parkWorkspace({
       repositoryUuid: f.repo.id,
       packetId: f.packetId,
@@ -292,7 +294,7 @@ describe('workspace snapshot generations through production lifecycle services',
   });
 
   it('keeps parked truth when a replacement lane is absent, then supersedes it once materialized', async () => {
-    const f = fixture('replacement');
+    const f = await fixture('replacement');
     expect(await parkWorkspace({
       repositoryUuid: f.repo.id,
       packetId: f.packetId,
@@ -312,7 +314,7 @@ describe('workspace snapshot generations through production lifecycle services',
       snapshotFingerprint: first.snapshotFingerprint,
     });
 
-    const replacement = f.nextLane();
+    const replacement = await f.nextLane();
     const replacementPark = await parkWorkspace({
       repositoryUuid: f.repo.id,
       packetId: f.packetId,
@@ -335,7 +337,7 @@ describe('workspace snapshot generations through production lifecycle services',
   });
 
   it('materializes one exact reset replacement before spawn and replays it across DB reopen', async () => {
-    const f = fixture('prelaunch-replacement');
+    const f = await fixture('prelaunch-replacement');
     expect(await parkWorkspace({
       repositoryUuid: f.repo.id,
       packetId: f.packetId,
@@ -405,7 +407,7 @@ describe('workspace snapshot generations through production lifecycle services',
   });
 
   it('supersedes a restored old lane before a reset replacement starts', async () => {
-    const f = fixture('restored-prelaunch-replacement');
+    const f = await fixture('restored-prelaunch-replacement');
     expect(await parkWorkspace({
       repositoryUuid: f.repo.id,
       packetId: f.packetId,
@@ -420,7 +422,7 @@ describe('workspace snapshot generations through production lifecycle services',
     const oldLane = f.lane();
     git(f.repo.localPath, 'worktree', 'remove', '--force', restored.originalPath);
     git(f.repo.localPath, 'branch', '-D', oldLane.branch);
-    const lane = f.nextLane();
+    const lane = await f.nextLane();
     git(f.repo.localPath, 'worktree', 'remove', '--force', lane.worktreePath!);
     git(f.repo.localPath, 'worktree', 'add', '-q', restored.originalPath, lane.branch);
     lane.worktreePath = restored.originalPath;
@@ -467,7 +469,7 @@ describe('workspace snapshot generations through production lifecycle services',
   });
 
   it('keeps parked truth when the replacement path is absent or an unrelated occupant', async () => {
-    const f = fixture('prelaunch-conflict');
+    const f = await fixture('prelaunch-conflict');
     expect(await parkWorkspace({
       repositoryUuid: f.repo.id,
       packetId: f.packetId,
@@ -511,7 +513,7 @@ describe('workspace snapshot generations through production lifecycle services',
   });
 
   it('refuses to bless a clean same-repo same-HEAD replacement with a different inode', async () => {
-    const f = fixture('prelaunch-same-head-owner-swap');
+    const f = await fixture('prelaunch-same-head-owner-swap');
     expect(await parkWorkspace({
       repositoryUuid: f.repo.id,
       packetId: f.packetId,
