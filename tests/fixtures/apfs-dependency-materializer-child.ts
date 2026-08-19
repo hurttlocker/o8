@@ -31,6 +31,7 @@ interface FixtureInput {
   imagePath?: string;
   recipeKey?: string;
   markerPath?: string;
+  cycleTag?: string | number;
 }
 
 const parsedInput = JSON.parse(
@@ -255,7 +256,9 @@ async function lifecycle(action: 'park' | 'restore') {
       body: JSON.stringify({
         action,
         packetId: input.packetId,
-        clientMutationId: `apfs-materializer-${action}`,
+        clientMutationId: input.cycleTag !== undefined
+          ? `apfs-materializer-${action}-${input.cycleTag}`
+          : `apfs-materializer-${action}`,
       }),
     },
   ));
