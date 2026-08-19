@@ -124,6 +124,7 @@ writeFileSync(join(dataDir, 'ws-token'), `${WS_TOKEN}\n`, 'utf-8');
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
+const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
 const { buildPacketPrompt } = await import('@/lib/orchestrator/packet-prompt');
 const { addSessionRule } = await import('@/lib/db/session-rules-store');
 const mergeRoute = await import('@/app/api/orchestrator/merge/route');
@@ -889,6 +890,11 @@ describe('seam G — merge truth verifies release claims and carries same-patch 
   });
 
   it('stale released flag with no main ancestry self-repairs and merge proceeds', async () => {
+    // Merge here crosses the storage governor, which is not what this seam proves.
+    await updateOperatorDefaults({
+      storageReserveRatio: 0.0001,
+      storageReserveFloorGb: 0.001,
+    });
     const repoPath = makeMergeRepo('o8-seam-G-stale-');
     const packetId = 'pkt-seam-G-stale';
     const branch = 'inline/seam-g-stale';
@@ -913,6 +919,11 @@ describe('seam G — merge truth verifies release claims and carries same-patch 
   }, 20_000);
 
   it('patch-id carry allows unchanged rebased review and still rejects changed content', async () => {
+    // Merge here crosses the storage governor, which is not what this seam proves.
+    await updateOperatorDefaults({
+      storageReserveRatio: 0.0001,
+      storageReserveFloorGb: 0.001,
+    });
     const repoPath = makeMergeRepo('o8-seam-G-patch-id-');
     const packetId = 'pkt-seam-G-patch-id';
     const branch = 'inline/seam-g-patch-id';
@@ -1061,6 +1072,12 @@ describe('seam I — archiveLane backfills a missing ending and reports the cont
 
 describe('seam J — create_pr success persists the pull-request ending', () => {
   it('the real lane command push/PR path stamps pr_opened with the PR reference', async () => {
+    // Dispatch here crosses the storage governor, which is not what this seam proves.
+    // Pinning the reserve keeps the assertion independent of the host's free disk.
+    await updateOperatorDefaults({
+      storageReserveRatio: 0.0001,
+      storageReserveFloorGb: 0.001,
+    });
     const repoPath = makeMergeRepo('o8-seam-J-pr-');
     const packetId = `pkt-seam-J-${Date.now()}`;
     const branch = 'agent/seam-j-pr';

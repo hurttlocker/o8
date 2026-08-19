@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, wr
 import os from 'node:os';
 import { join, relative } from 'node:path';
 
-import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
@@ -186,6 +186,16 @@ function packetFixture(id: string, repoPath: string, retries = 0): OrchestratorP
     branchTarget: `inline/${id}`,
   } as OrchestratorPacket;
 }
+
+beforeAll(async () => {
+  // The storage governor is not under test here; keep its reserve out of the way so
+  // these merge-path assertions do not depend on the host's free disk.
+  await updateOperatorDefaults({
+    productTelemetryEnabled: false,
+    storageReserveRatio: 0.0001,
+    storageReserveFloorGb: 0.001,
+  });
+});
 
 afterEach(async () => {
   try {
