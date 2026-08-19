@@ -5,6 +5,8 @@ import path from 'node:path';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
+import type { WorktreeMetaEntry } from '@/lib/worktree/types';
+
 const dataDir = mkdtempSync(path.join(os.tmpdir(), 'o8-mutation-materialization-'));
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 const root = mkdtempSync(path.join(os.tmpdir(), 'o8-parked-publish-'));
@@ -42,6 +44,7 @@ const { closeDb } = await import('@/lib/db');
 const { dispatch } = await import('@/lib/lane/commands');
 const { createLane } = await import('@/lib/lane/registry');
 const { withPacketLifecycleMutationLock } = await import('@/lib/orchestrator/lifecycle-mutation-lock');
+const { withWorktreeMetaTransaction } = await import('@/lib/worktree/metadata-store');
 const { resolveWorktreeRootLayout } = await import('@/lib/worktree/root-layout');
 const {
   createWorkspaceSnapshot,
@@ -51,6 +54,21 @@ const {
   withWorkspaceMaterializedMutation,
   WorkspaceMutationUnavailableError,
 } = await import('./mutation-materialization-guard');
+
+/** Emitted by the exec-time workspace ownership guard before it refuses. */
+const OWNERSHIP_REFUSAL = 'Managed workspace ownership changed before process execution.';
+
+/**
+ * Register managed workspace ownership the way production does — through the
+ * metadata transaction store. Its durable state is authoritative; the
+ * `.meta.json` file is only a mirror, so a direct write to that file is
+ * invisible to every transaction after the first one on this metadata root.
+ */
+async function registerManagedWorktree(entry: WorktreeMetaEntry): Promise<void> {
+  await withWorktreeMetaTransaction(repoPath, async (transaction) => {
+    await transaction.save(entry.id, entry);
+  });
+}
 
 afterAll(() => {
   closeDb();
@@ -124,29 +142,23 @@ describe('parked workspace publication guard', () => {
       sessionKey: 'codex:publication-order',
     });
     const worktreeId = path.basename(workspacePath);
-    const metadataPath = path.join(resolveWorktreeRootLayout(repoPath).primaryBase, '.meta.json');
-    mkdirSync(path.dirname(metadataPath), { recursive: true });
-    writeFileSync(metadataPath, JSON.stringify({
-      version: 1,
-      worktrees: {
-        [worktreeId]: {
-          id: worktreeId,
-          agentType: 'codex',
-          baseBranch: 'main',
-          createdAt: 1,
-          claudeManaged: false,
-          taskName: worktreeId,
-          branchName: 'main',
-          status: 'ready',
-          isolationKind: 'apfs-cow-clone',
-          materializationIdentity: {
-            device: lstatSync(workspacePath).dev,
-            inode: lstatSync(workspacePath).ino,
-            canonicalPath: realpathSync(workspacePath),
-          },
-        },
+    mkdirSync(resolveWorktreeRootLayout(repoPath).primaryBase, { recursive: true });
+    await registerManagedWorktree({
+      id: worktreeId,
+      agentType: 'codex',
+      baseBranch: 'main',
+      createdAt: 1,
+      claudeManaged: false,
+      taskName: worktreeId,
+      branchName: 'main',
+      status: 'ready',
+      isolationKind: 'apfs-cow-clone',
+      materializationIdentity: {
+        device: lstatSync(workspacePath).dev,
+        inode: lstatSync(workspacePath).ino,
+        canonicalPath: realpathSync(workspacePath),
       },
-    }));
+    });
     let snapshot = createWorkspaceSnapshot({
       repositoryUuid,
       packetId,
@@ -222,32 +234,31 @@ describe('parked workspace publication guard', () => {
       sessionKey: 'codex:publication-owner-swap',
     });
     const worktreeId = path.basename(workspacePath);
-    const metadataPath = path.join(resolveWorktreeRootLayout(repoPath).primaryBase, '.meta.json');
-    mkdirSync(path.dirname(metadataPath), { recursive: true });
+    mkdirSync(resolveWorktreeRootLayout(repoPath).primaryBase, { recursive: true });
     const materializationIdentity = {
       device: lstatSync(workspacePath).dev,
       inode: lstatSync(workspacePath).ino,
       canonicalPath: realpathSync(workspacePath),
     };
-    writeFileSync(metadataPath, JSON.stringify({
-      version: 1,
-      worktrees: {
-        [worktreeId]: {
-          id: worktreeId, agentType: 'codex', baseBranch: 'main', createdAt: 1,
-          claudeManaged: false, taskName: worktreeId, branchName: 'main', status: 'ready',
-          isolationKind: 'apfs-cow-clone', materializationIdentity,
-        },
-      },
-    }));
+    await registerManagedWorktree({
+      id: worktreeId, agentType: 'codex', baseBranch: 'main', createdAt: 1,
+      claudeManaged: false, taskName: worktreeId, branchName: 'main', status: 'ready',
+      isolationKind: 'apfs-cow-clone', materializationIdentity,
+    });
     const swapAfterProof = async (retainedPath: string) => {
       renameSync(workspacePath, retainedPath);
       git(root, 'clone', repoPath, workspacePath);
       writeFileSync(path.join(workspacePath, 'tracked.txt'), 'unrelated dirty bytes\n');
     };
     const retainedForMerge = path.join(root, 'publication-manager-owned-retained-merge');
-    await expect(dispatch({ verb: 'merge', laneId: lane.id, actor: 'user' }, {
+    const merge = await dispatch({ verb: 'merge', laneId: lane.id, actor: 'user' }, {
       afterWorkspaceMaterializationProof: () => swapAfterProof(retainedForMerge),
-    })).resolves.toMatchObject({ ok: false });
+    });
+    expect(merge).toMatchObject({ ok: false });
+    // The refusal must come from the exec-time ownership proof, not from some
+    // later incidental failure: without it, `git rebase` runs inside the
+    // unrelated occupant that took over the path.
+    expect(merge.note).toContain(OWNERSHIP_REFUSAL);
     expect(readFileSync(path.join(workspacePath, 'tracked.txt'), 'utf8')).toBe('unrelated dirty bytes\n');
     expect(git(workspacePath, 'status', '--porcelain')).toContain('tracked.txt');
     expect(git(retainedForMerge, 'rev-parse', 'HEAD')).toBe(git(workspacePath, 'rev-parse', 'HEAD'));
@@ -255,9 +266,11 @@ describe('parked workspace publication guard', () => {
     rmSync(workspacePath, { recursive: true });
     renameSync(retainedForMerge, workspacePath);
     const retainedForPr = path.join(root, 'publication-manager-owned-retained-pr');
-    await expect(dispatch({ verb: 'create_pr', laneId: lane.id, actor: 'user' }, {
+    const createPr = await dispatch({ verb: 'create_pr', laneId: lane.id, actor: 'user' }, {
       afterWorkspaceMaterializationProof: () => swapAfterProof(retainedForPr),
-    })).resolves.toMatchObject({ ok: false });
+    });
+    expect(createPr).toMatchObject({ ok: false });
+    expect(createPr.note).toContain(OWNERSHIP_REFUSAL);
     expect(readFileSync(path.join(workspacePath, 'tracked.txt'), 'utf8')).toBe('unrelated dirty bytes\n');
     expect(git(workspacePath, 'status', '--porcelain')).toContain('tracked.txt');
     expect(git(retainedForPr, 'rev-parse', 'HEAD')).toBe(git(workspacePath, 'rev-parse', 'HEAD'));
