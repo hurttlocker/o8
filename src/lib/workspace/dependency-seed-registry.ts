@@ -108,6 +108,34 @@ interface LeaseRow {
   updated_at: number;
 }
 let initializedDatabasePath: string | null = null;
+// Leases written before the namespace fix stored /private-prefixed paths that the
+// disk-image tooling never reports back, stranding those rows against every lookup
+// and authority compare. Collapse them once, when the registry opens.
+function normalizeStoredLeaseNamespaces(db: ReturnType<typeof getSqlite>): void {
+  const rows = db.prepare(
+    'SELECT lease_id, workspace_path, shadow_path, mount_path FROM dependency_seed_leases',
+  ).all() as Array<Pick<LeaseRow, 'lease_id' | 'workspace_path' | 'shadow_path' | 'mount_path'>>;
+  const update = db.prepare(`
+    UPDATE dependency_seed_leases
+    SET workspace_path = ?, shadow_path = ?, mount_path = ?
+    WHERE lease_id = ?
+  `);
+  for (const row of rows) {
+    const workspacePath = normalizedNamespacePath(row.workspace_path);
+    const shadowPath = normalizedNamespacePath(row.shadow_path);
+    const mountPath = normalizedNamespacePath(row.mount_path);
+    if (workspacePath === row.workspace_path
+      && shadowPath === row.shadow_path
+      && mountPath === row.mount_path) continue;
+    try {
+      update.run(workspacePath, shadowPath, mountPath, row.lease_id);
+    } catch (error) {
+      // A row already duplicated under both spellings is its own fault to resolve.
+      // Leaving it untouched keeps the registry openable for every other lease.
+      if ((error as { code?: unknown }).code !== 'SQLITE_CONSTRAINT_UNIQUE') throw error;
+    }
+  }
+}
 function sqlite() {
   const db = getSqlite();
   if (initializedDatabasePath !== db.name) {
@@ -202,6 +230,7 @@ function sqlite() {
         db.exec(`ALTER TABLE dependency_seed_leases ADD COLUMN ${column} ${definition}`);
       }
     }
+    normalizeStoredLeaseNamespaces(db);
     initializedDatabasePath = db.name;
   }
   return db;
@@ -486,7 +515,7 @@ export function beginDependencySeedLease(input: {
       input.recipeKey,
       input.generation,
       normalizedNamespacePath(input.workspacePath),
-      path.resolve(input.shadowPath),
+      normalizedNamespacePath(input.shadowPath),
       normalizedNamespacePath(input.mountPath),
       input.ownerPid,
       JSON.stringify(input.ownerIdentity),
