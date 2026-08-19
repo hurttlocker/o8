@@ -411,9 +411,13 @@ async function publishDependencyImageExclusive(
     try {
       await assertCurrentDependencyImageSource(receipt);
       await runHdiCommand([
+        // NEVER pass `-quiet` here: it suppresses hdiutil's failure cause on
+        // stderr too, so a full volume surfaced as a blank `hdiutil failed (1):`
+        // with nothing an operator or the escalation chain could act on. The
+        // sealing itself was already fail-closed; only the diagnosis was lost.
         'create', '-srcfolder', receipt.sourcePath, '-format', 'UDRO', '-fs', 'APFS',
         '-volname', `o8deps-${receipt.recipeKey.slice(0, 12)}`,
-        '-atomic', '-quiet', stagingPath,
+        '-atomic', stagingPath,
       ]);
       await options.afterImageCreated?.(stagingPath);
       const created = await lstat(stagingPath);
