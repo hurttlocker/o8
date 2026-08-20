@@ -36,6 +36,7 @@ import {
 } from './commands/harness.js';
 import { runInbox } from './commands/inbox.js';
 import { runLaneTouches } from './commands/lane.js';
+import { runLease } from './commands/lease.js';
 import { runMission } from './commands/mission.js';
 import { runMcp } from './commands/mcp.js';
 import { runProject, runRepo } from './commands/resources.js';
@@ -225,6 +226,10 @@ commands:
   browser close        end this scope's engine (headless Chrome) session
   cortex observe       propose a worker observation for the orchestrator
   lane touches         active lanes touching a path or packet diff
+  lease acquire <resource> [--ttl 2h] [--wait]  acquire or queue for a named resource
+  lease release <resource>  release a resource held by this agent process
+  lease status <resource>   read the holder and FIFO queue for one resource
+  lease list           list active named resources
   worker spawn         create + dispatch one governed worker from any Git repo (--title --body [--repo path] [--runtime id] [--caller label] [--read-only])
   mission create       create a mission from an inline task (--title --body [--dispatch] [--caller label] [--read-only] [--existingBranchPolicy auto|reset|continue|error] [--compare m1,m2] [--quality-search-contract file])
   mission dispatch     dispatch packets to workers (async; --wait blocks for launch; --watch blocks until review/terminal — the spawner's notification) [--mission <id>]
@@ -370,6 +375,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       if (secondary === 'touches') return runLaneTouches(args.mode, args.rest);
       throw unknownSubcommandError('lane', secondary);
     }
+    case 'lease':
+      return runLease(args.mode, secondary, args.rest);
     case 'mission':
       return runMission(args.mode, secondary, args.rest);
     case 'worker': {

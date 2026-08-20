@@ -149,6 +149,8 @@ const WORKER_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }>
   { methods: new Set(['GET']), path: /^\/api\/panel\/(?:approvals|problem-dossiers|status)\/?$/ },
   { methods: new Set(['GET', 'POST', 'DELETE']), path: /^\/api\/panel\/managed-runs\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/panel\/artifacts(?:\/mirror)?\/?$/ },
+  // Agents can coordinate named resources but cannot bypass ownership checks in the handler.
+  { methods: new Set(['GET', 'POST']), path: /^\/api\/leases\/?$/ },
   { methods: new Set(['GET']), path: /^\/api\/lanes(?:\/[^/]+(?:\/(?:scope|diff))?)?\/?$/ },
   { methods: new Set(['GET', 'POST']), path: /^\/api\/lanes\/[^/]+\/(?:events|heartbeat)\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/(?:browser\/agent|cortex\/ask\/answer)\/?$/ },

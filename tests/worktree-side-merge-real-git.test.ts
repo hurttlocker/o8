@@ -35,6 +35,7 @@ const { createLaneActionApproval } = await import('@/lib/lane/commands-approval'
 const { getLaneSpokenDiffFacts } = await import('@/lib/lane/lane-diff-facts');
 const { createDetachedIntegrationWorktree } = await import('@/lib/lane/worktree-merge-git');
 const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
+const { getSqlite } = await import('@/lib/db');
 
 const tempDirs: string[] = [dataDir];
 
@@ -313,6 +314,14 @@ describe('worktree-side merge with real git repos', () => {
     expect(git(repo, ['show', 'HEAD:file.txt'])).toContain('worker');
     expect(getLane(lane.id)?.status).toBe('completed');
     expect(approvals).toEqual([]);
+    expect(getSqlite().prepare(`
+      SELECT verb FROM resource_lease_events
+      WHERE resource = ?
+      ORDER BY sequence ASC
+    `).all(`repo-tree:${repo}`)).toEqual([
+      { verb: 'acquired' },
+      { verb: 'released' },
+    ]);
     expect(existsSync(worktree.path)).toBe(false);
   }, 20_000);
 

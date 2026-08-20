@@ -21,8 +21,10 @@ vi.mock('@clerk/nextjs/server', () => ({
 
 const TEST_TOKEN = 'vitest-gate-token-0123456789abcdef';
 const DEVICE_TOKEN = 'vitest-device-token-0123456789abcdef';
+const WORKER_TOKEN = 'vitest-worker-token-0123456789abcdef';
 const dataDir = mkdtempSync(path.join(os.tmpdir(), 'o8-gate-test-'));
 writeFileSync(path.join(dataDir, 'ws-token'), `${TEST_TOKEN}\n`, 'utf-8');
+writeFileSync(path.join(dataDir, 'worker-token'), `${WORKER_TOKEN}\n`, 'utf-8');
 writeFileSync(
   path.join(dataDir, 'mobile-device-tokens'),
   `${createHash('sha256').update(DEVICE_TOKEN).digest('hex')}\n`,
@@ -395,6 +397,28 @@ describe('panelGateMiddleware — bearer token fallback for LAN clients', () => 
   });
 });
 
+describe('panelGateMiddleware — worker capability scope', () => {
+  function workerRequest(pathname: string, method = 'GET') {
+    return panelGateMiddleware(gatedRequest(`http://192.168.1.50:3001${pathname}`, {
+      method,
+      headers: {
+        host: '192.168.1.50:3001',
+        authorization: `Bearer ${WORKER_TOKEN}`,
+      },
+    }));
+  }
+
+  it('allows workers to read and mutate the named lease surface', () => {
+    expect(workerRequest('/api/leases', 'GET').status).toBe(200);
+    expect(workerRequest('/api/leases', 'POST').status).toBe(200);
+  });
+
+  it('keeps ungranted lease methods and operator mutations closed to workers', () => {
+    expect(workerRequest('/api/leases', 'DELETE').status).toBe(403);
+    expect(workerRequest('/api/orchestrator/merge', 'POST').status).toBe(403);
+  });
+});
+
 describe('panelGateMiddleware — per-device capability scope', () => {
   function deviceRequest(pathname: string, method = 'GET') {
     return panelGateMiddleware(gatedRequest(`http://192.168.1.50:3001${pathname}`, {
@@ -482,6 +506,7 @@ describe('panelGateMiddleware — per-device capability scope', () => {
     '/api/panel/github-device',
     '/api/setup/mcp-servers',
     '/api/orchestrator/merge',
+    '/api/leases',
   ])('denies device credentials outside the mobile capability set: %s', (pathname) => {
     expect(deviceRequest(pathname, 'POST').status).toBe(403);
   });

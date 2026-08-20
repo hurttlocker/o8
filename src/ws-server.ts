@@ -8335,6 +8335,25 @@ async function bootstrapWsServer() {
     );
   }
 
+  try {
+    const { reconcileResourceLeasesAtStartup } = await import(
+      '@/lib/leases/resource-lease-service'
+    );
+    const result = await reconcileResourceLeasesAtStartup();
+    if (result.inspected > 0) {
+      console.log(
+        `[resource-lease] Startup reconciliation inspected=${result.inspected} `
+        + `holdersReaped=${result.holdersReaped} waitersReaped=${result.waitersReaped} `
+        + `promoted=${result.promoted} retainedLive=${result.retainedLive} `
+        + `retainedUnknown=${result.retainedUnknown}`,
+      );
+    }
+  } catch (error) {
+    console.warn(
+      `[resource-lease] WS startup reconciliation failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
   let dependencyImagesReconciled = false;
   try {
     const { reconcileDependencyImagesAtStartup } = await import(

@@ -83,4 +83,24 @@ describe('operator MCP process profiles', () => {
       });
     }
   });
+
+  it('publishes strict resource lease tools only in the full profile', () => {
+    const leaseNames = [
+      'o8_lease_acquire',
+      'o8_lease_release',
+      'o8_lease_status',
+      'o8_lease_list',
+    ];
+    const fullTools = operatorToolsForProfile('full');
+    const dogfoodNames = operatorToolsForProfile('dogfood').map((tool) => tool.name);
+    for (const name of leaseNames) {
+      expect(fullTools.find((tool) => tool.name === name)?.inputSchema).toMatchObject({
+        type: 'object',
+        additionalProperties: false,
+        properties: expect.any(Object),
+        required: expect.any(Array),
+      });
+      expect(dogfoodNames).not.toContain(name);
+    }
+  });
 });

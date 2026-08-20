@@ -110,6 +110,7 @@ const LOOPBACK_READ = [
 ];
 const EXPLICIT_GATED = [
   /^\/api\/mcp\/?$/,
+  /^\/api\/leases\/?$/,
   // #1619: local Codex app-server lifecycle + streamed audio/transcript events.
   // Operator-only because it can start a local Codex thread and reads OAuth state.
   /^\/api\/voice\/realtime\/codex\/?$/,
