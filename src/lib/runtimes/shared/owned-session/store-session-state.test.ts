@@ -4,7 +4,12 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { OwnedRuntimeAdapter, OwnedSessionRecord, ParsedRunLog } from './types';
 
-vi.mock('@/lib/lane/registry', () => ({ listActiveLanes: () => [] }));
+// Partial mock: other modules in this import graph bind registry exports at
+// load time, so a replacement factory rots the moment the registry grows one.
+vi.mock('@/lib/lane/registry', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/lane/registry')>(),
+  listActiveLanes: () => [],
+}));
 
 function testAdapter(root: string): OwnedRuntimeAdapter {
   return {
