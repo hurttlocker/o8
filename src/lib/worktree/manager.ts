@@ -19,7 +19,7 @@
  * @see https://github.com/hurttlocker/o8/issues/608
  */
 
-import { access, lstat, realpath, stat } from 'node:fs/promises';
+import { access, lstat, realpath, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type {
   CleanupOptions,
@@ -1235,8 +1235,15 @@ export class WorktreeManager {
     if (repoSetup?.installOnCreateWorkspace && !installCommand) {
       throw new Error('The registered repo requires install-on-create but has no install command.');
     }
-    if (installCommand) {
+    // A legacy link is retired whenever the workspace has Node dependencies at
+    // all, not only when an install command was detected. A repository with no
+    // lockfile and no packageManager declaration installs nothing here, and
+    // leaving the link in place would hand the packet's own `npm ci` a path
+    // straight into the operator's checkout.
+    if (hasPackageJson) {
       await this.assertInstallableLocalNodeModules(worktreePath, identity);
+    }
+    if (installCommand) {
       const result = await materializeDependencyInstall(worktreePath, installCommand, {
         materializationIdentity: identity,
         persistReceipt: (receipt) => (
@@ -1534,6 +1541,17 @@ export class WorktreeManager {
     return TSC_SCRIPT;
   }
 
+  /**
+   * Make node_modules installable, or refuse.
+   *
+   * Older worktrees were hydrated with node_modules symlinked at the host
+   * repo's. npm's removal step is readdir + rm per entry, so an install through
+   * that link empties the OPERATOR's tree. An unpinned workspace is migrated by
+   * removing the link itself - never its contents - so the install lands
+   * locally. A pinned managed workspace has no governed primitive for removing
+   * a leaf, and nothing in the managed path creates that link any more, so an
+   * unexpected one is refused rather than repaired.
+   */
   private async assertInstallableLocalNodeModules(
     worktreePath: string,
     identity?: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>>,
@@ -1546,8 +1564,16 @@ export class WorktreeManager {
             : entry.isDirectory() ? 'directory' as const
             : entry.isFile() ? 'file' as const : 'other' as const,
         })).catch(() => null);
-    if (target?.kind === 'symlink') {
+    if (target?.kind !== 'symlink') return;
+    if (identity) {
       throw new Error(`Refusing to install through linked node_modules at ${targetPath}.`);
+    }
+    try {
+      await rm(targetPath, { force: true });
+    } catch (error) {
+      throw new Error(
+        `Refusing to install through linked node_modules at ${targetPath}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 

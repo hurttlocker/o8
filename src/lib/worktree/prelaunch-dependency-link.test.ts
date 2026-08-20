@@ -148,7 +148,11 @@ describe('legacy linked node_modules migration', () => {
     expect(await lstat(path.join(worktreeModules, 'local-dep')).then(() => true)).toBe(true);
   }, 120_000);
 
-  it('unlinks before npm install and preserves the host tree without a lockfile', async () => {
+  // Dependency installs are driven by a detected package manager, so a
+  // repository with neither a lockfile nor a packageManager declaration
+  // installs nothing. The legacy link still has to go: leaving it would let
+  // the packet's own npm reach the operator's node_modules.
+  it('unlinks and preserves the host tree when there is nothing to install', async () => {
     const { repo } = await createFixture({ lockfile: false });
     const hostSentinel = await addHostSentinel(repo);
     const manager = new WorktreeManager(repo);
@@ -163,9 +167,8 @@ describe('legacy linked node_modules migration', () => {
     await (manager as unknown as { runSetup(p: string): Promise<void> }).runSetup(worktree.path);
 
     expect(await lstat(hostSentinel).then(() => true)).toBe(true);
-    expect((await lstat(worktreeModules)).isDirectory()).toBe(true);
-    expect((await lstat(worktreeModules)).isSymbolicLink()).toBe(false);
-    expect(await lstat(path.join(worktreeModules, 'local-dep')).then(() => true)).toBe(true);
+    expect(await lstat(path.join(repo, 'node_modules', 'host-only')).then(() => true)).toBe(true);
+    expect(await lstat(worktreeModules).then(() => true).catch(() => false)).toBe(false);
   }, 120_000);
 });
 
