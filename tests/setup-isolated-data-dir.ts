@@ -16,6 +16,9 @@
  * O8_DATA_DIR unset here so the canonical resolver's modern-name precedence
  * cannot shadow those per-test overrides.
  */
+import { afterAll } from 'vitest';
+import { removeOwnedWorkerDataRoot } from './global-test-data-dir';
+
 type FsModule = typeof import('node:fs');
 type OsModule = typeof import('node:os');
 type PathModule = typeof import('node:path');
@@ -33,11 +36,14 @@ if (!fs || !os || !path) {
 }
 
 if (!process.env.O8_TEST_DATA_DIR_PINNED) {
+  const runRoot = process.env.O8_TEST_RUN_DATA_ROOT?.trim();
   const configuredDir = process.env.CORTEX_IDE_DATA_DIR?.trim();
   const workerId = process.env.VITEST_POOL_ID?.trim()
     || process.env.VITEST_WORKER_ID?.trim()
     || String(process.pid);
-  process.env.O8_TEST_DATA_DIR_PINNED = configuredDir
+  process.env.O8_TEST_DATA_DIR_PINNED = runRoot
+    ? path.join(path.resolve(runRoot), `vitest-worker-${workerId.replace(/[^a-zA-Z0-9_-]/g, '_')}-${process.pid}`)
+    : configuredDir
     ? path.join(path.resolve(configuredDir), `vitest-worker-${workerId.replace(/[^a-zA-Z0-9_-]/g, '_')}`)
     : fs.mkdtempSync(path.join(os.tmpdir(), 'o8-test-data-'));
 }
@@ -49,6 +55,17 @@ if (!process.env.O8_TEST_DATA_DIR_PINNED) {
 // isolation audit can inspect the supplied scratch root.
 const pinnedDataDir = process.env.O8_TEST_DATA_DIR_PINNED!;
 fs.mkdirSync(pinnedDataDir, { recursive: true });
+const runRoot = process.env.O8_TEST_RUN_DATA_ROOT?.trim();
+const ownedRunRoot = runRoot
+  && path.dirname(path.resolve(pinnedDataDir)) === path.resolve(runRoot)
+  && /^vitest-worker-[a-zA-Z0-9_-]+-\d+$/.test(path.basename(pinnedDataDir))
+  ? runRoot
+  : null;
+if (ownedRunRoot) {
+  afterAll(() => {
+    removeOwnedWorkerDataRoot(ownedRunRoot, pinnedDataDir);
+  });
+}
 delete process.env.O8_DATA_DIR;
 process.env.CORTEX_IDE_DATA_DIR = pinnedDataDir;
 

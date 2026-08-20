@@ -12,6 +12,7 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    globalSetup: ['tests/global-test-data-dir.ts'],
     // Hermetic data dir for EVERY worker before any app module loads — see file.
     setupFiles: ['tests/setup-isolated-data-dir.ts'],
     include: ['src/**/*.test.ts', 'tests/**/*.test.ts', 'cli/**/*.test.ts'],
