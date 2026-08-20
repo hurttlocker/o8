@@ -59,6 +59,7 @@ export interface OperatorDefaults {
   healBotEnabled: boolean;
   supervisorAutoEscalate: boolean;
   reviewContinuation: boolean;
+  apfsDependencyImages: boolean;
   requireApproval: RequireApproval;
   thinkingEffort: ThinkingEffort;
   promptCachingEnabled: boolean;

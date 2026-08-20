@@ -127,6 +127,13 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.reviewContinuation = body.reviewContinuation;
   }
 
+  if (body.apfsDependencyImages !== undefined) {
+    if (typeof body.apfsDependencyImages !== 'boolean') {
+      throw new Error('apfsDependencyImages must be boolean.');
+    }
+    update.apfsDependencyImages = body.apfsDependencyImages;
+  }
+
   if (body.thinkingEffort !== undefined) {
     if (!isThinkingEffort(body.thinkingEffort)) {
       throw new Error('thinkingEffort must be a valid effort level.');

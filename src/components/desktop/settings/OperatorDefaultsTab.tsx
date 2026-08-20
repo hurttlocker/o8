@@ -421,6 +421,15 @@ export function OperatorDefaultsTab() {
               />
             }
             disabled={envLocked('overlapGate') || busyField === 'overlapGate'}
+            divider
+          />
+          <SettingsRow
+            icon={<WrenchIcon />}
+            label="APFS dependency images (pilot)"
+            subtitle="Reuse eligible npm dependencies from APFS disk images on macOS"
+            checked={values.apfsDependencyImages}
+            disabled={busyField === 'apfsDependencyImages'}
+            onToggle={(next) => { updateField('apfsDependencyImages', next); }}
           />
         </SettingsGroup>
       </section>

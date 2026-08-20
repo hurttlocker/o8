@@ -200,6 +200,7 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   healBotEnabled: booleanField('operator', 'heal_bot_enabled'),
   supervisorAutoEscalate: booleanField('operator', 'supervisor_auto_escalate'),
   reviewContinuation: booleanField('review', 'continuation_enabled'),
+  apfsDependencyImages: booleanField('git', 'apfs_dependency_images'),
   thinkingEffort: enumField('models', 'thinking_effort', 'a valid thinking effort', isThinkingEffort),
   promptCachingEnabled: booleanField('models', 'prompt_caching_enabled'),
   mergeTestReplayEnabled: booleanField('review', 'merge_test_replay_enabled'),

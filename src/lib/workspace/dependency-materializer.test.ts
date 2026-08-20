@@ -8,6 +8,8 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { updateOperatorDefaults } from '@/lib/operator/defaults';
+
 import {
   APFS_DEPENDENCY_IMAGES_ENV,
   detachDependencyMaterialization,
@@ -104,6 +106,37 @@ afterEach(() => {
 });
 
 describe('dependency materializer policy boundary', () => {
+  it.each([
+    { label: 'uses the operator default when env is unset', setting: true, env: {}, expected: 'image' },
+    { label: 'lets env 0 force off', setting: true, env: { [APFS_DEPENDENCY_IMAGES_ENV]: '0' }, expected: 'native' },
+    { label: 'lets env 1 force on', setting: false, env: { [APFS_DEPENDENCY_IMAGES_ENV]: '1' }, expected: 'image' },
+  ] as const)('$label', async ({ setting, env, expected }) => {
+    await updateOperatorDefaults({ apfsDependencyImages: setting });
+    const workspace = fixture();
+    const imageProvider = provider({
+      lookupReadyImage: vi.fn(async ({ recipe }) => ({
+        status: 'ready' as const,
+        authority: { recipeKey: recipe.key, generation: 'ready-generation' },
+      })),
+      mount: vi.fn(async ({ workspacePath, recipe }) => {
+        mkdirSync(path.join(workspacePath, 'node_modules', 'fixture'), { recursive: true });
+        return {
+          leaseId: 'truth-table-lease',
+          recipeKey: recipe.key,
+          generation: 'ready-generation',
+        };
+      }),
+    });
+
+    const result = await materializeDependencyInstall(
+      workspace,
+      'npm ci --prefer-offline --ignore-scripts',
+      { ...options(imageProvider), env },
+    );
+
+    expect(result.receipt.mode).toBe(expected);
+  });
+
   it('uses native TW-09 only for a missing image and defers publication until readiness', async () => {
     const workspace = fixture();
     const imageProvider = provider();

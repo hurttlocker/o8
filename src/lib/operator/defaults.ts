@@ -6,6 +6,7 @@ import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinki
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import type { UpdateAutoApply } from '@/lib/app-update/types';
 import { validateCredentialSafeUrl } from '@/lib/settings/credential-safe-url';
+import { applyApfsDependencyImagesUpdate, APFS_DEPENDENCY_IMAGES_FALLBACK, resolveStoredApfsDependencyImages, type ApfsDependencyImagesDefaults } from './apfs-dependency-images-default';
 import {
   resolveDefaultDispatchRuntime as resolvePairedDefaultDispatchRuntime,
 } from './dispatch-runtime-default';
@@ -131,7 +132,7 @@ export type RequireApproval = 'high-risk' | 'surface' | 'always' | 'never';
 
 export function isRequireApproval(value: unknown): value is RequireApproval { return value === 'high-risk' || value === 'surface' || value === 'always' || value === 'never'; }
 
-export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParkingDefaults {
+export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParkingDefaults, ApfsDependencyImagesDefaults {
   subscriptionProfile: SubscriptionProfile;
   parallelCap: number;
   overlapGate: OverlapGateMode;
@@ -343,6 +344,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   healBotEnabled: true,
   supervisorAutoEscalate: false,
   reviewContinuation: true,
+  ...APFS_DEPENDENCY_IMAGES_FALLBACK,
   // Operator-pinned: Opus 4.8 with max thinking is the default orchestrator
   // brain. Subscription-billed via the REPL migration, so cost is the user's
   // existing Claude Code MAX plan — not a per-token API charge.
@@ -411,7 +413,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   ...WORKSPACE_PARKING_FALLBACK,
 };
 
-interface StoredOperatorDefaults extends Partial<StorageReserveDefaults>, Partial<WorkspaceParkingDefaults> {
+interface StoredOperatorDefaults extends Partial<StorageReserveDefaults>, Partial<WorkspaceParkingDefaults>, Partial<ApfsDependencyImagesDefaults> {
   subscriptionProfile?: SubscriptionProfile;
   parallelCap?: number;
   overlapGate?: OverlapGateMode;
@@ -495,6 +497,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (typeof stored.reviewContinuation === 'boolean') {
     result.reviewContinuation = stored.reviewContinuation;
   }
+  Object.assign(result, resolveStoredApfsDependencyImages(stored));
   if (stored.thinkingEffort && isThinkingEffort(stored.thinkingEffort)) {
     result.thinkingEffort = stored.thinkingEffort;
   }
@@ -707,6 +710,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
       envEsc ?? fileValues.supervisorAutoEscalate ?? OPERATOR_DEFAULTS_FALLBACK.supervisorAutoEscalate,
     reviewContinuation:
       fileValues.reviewContinuation ?? OPERATOR_DEFAULTS_FALLBACK.reviewContinuation,
+    apfsDependencyImages: fileValues.apfsDependencyImages ?? OPERATOR_DEFAULTS_FALLBACK.apfsDependencyImages,
     thinkingEffort: envThink ?? fileValues.thinkingEffort ?? OPERATOR_DEFAULTS_FALLBACK.thinkingEffort,
     promptCachingEnabled:
       envCache ?? fileValues.promptCachingEnabled ?? OPERATOR_DEFAULTS_FALLBACK.promptCachingEnabled,
@@ -776,6 +780,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     supervisorAutoEscalate:
       envEsc !== null ? 'env' : fileValues.supervisorAutoEscalate !== undefined ? 'file' : 'default',
     reviewContinuation: fileValues.reviewContinuation !== undefined ? 'file' : 'default',
+    apfsDependencyImages: fileValues.apfsDependencyImages !== undefined ? 'file' : 'default',
     thinkingEffort: envThink !== null ? 'env' : fileValues.thinkingEffort !== undefined ? 'file' : 'default',
     promptCachingEnabled:
       envCache !== null ? 'env' : fileValues.promptCachingEnabled !== undefined ? 'file' : 'default',
@@ -895,6 +900,7 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>): Pr
   if (update.reviewContinuation !== undefined) {
     stored.reviewContinuation = Boolean(update.reviewContinuation);
   }
+  applyApfsDependencyImagesUpdate(stored, update);
   if (update.thinkingEffort !== undefined) {
     if (!isThinkingEffort(update.thinkingEffort)) {
       throw new Error('thinkingEffort must be a valid ThinkingEffort value.');
@@ -1151,17 +1157,11 @@ export function resolveHealBotEnabledSync(): boolean { return getOperatorDefault
 
 export function resolvePromptCachingEnabledSync(): boolean { return getOperatorDefaultsSync().values.promptCachingEnabled; }
 
-export function resolveMergeTestReplayEnabledSync(): boolean {
-  return getOperatorDefaultsSync().values.mergeTestReplayEnabled;
-}
+export function resolveMergeTestReplayEnabledSync(): boolean { return getOperatorDefaultsSync().values.mergeTestReplayEnabled; }
 
-export function resolveRequireApprovalSync(): RequireApproval {
-  return getOperatorDefaultsSync().values.requireApproval;
-}
+export function resolveRequireApprovalSync(): RequireApproval { return getOperatorDefaultsSync().values.requireApproval; }
 
-export function resolveDefaultDispatchRuntimeSync(): OrchestratorRuntime {
-  return getOperatorDefaultsSync().values.defaultDispatchRuntime;
-}
+export function resolveDefaultDispatchRuntimeSync(): OrchestratorRuntime { return getOperatorDefaultsSync().values.defaultDispatchRuntime; }
 
 export function resolveDefaultWorkerEffortSync(
   runtime: OrchestratorRuntime,

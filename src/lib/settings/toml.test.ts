@@ -20,7 +20,7 @@ const {
   OPERATOR_DEFAULTS_TOML_MAPPING,
   parseOperatorDefaultsToml,
 } = await import('./toml');
-const { POST } = await import('@/app/api/panel/operator-defaults/route');
+const { GET, POST } = await import('@/app/api/panel/operator-defaults/route');
 
 const tomlPath = getOperatorDefaultsTomlPath();
 const jsonPath = join(dataDir, 'operator-defaults.json');
@@ -65,6 +65,22 @@ backend = "codex"
     expect(response.status).toBe(200);
     expect(resolveOrchestratorBackendSync()).toBe('codex');
     expect((await getOperatorDefaults()).values.orchestratorBackend).toBe('codex');
+  });
+
+  it('persists APFS dependency images through the real route and store', async () => {
+    expect((await getOperatorDefaults()).values.apfsDependencyImages).toBe(false);
+
+    const response = await POST(postDefaults({ apfsDependencyImages: true }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.values.apfsDependencyImages).toBe(true);
+    expect(payload.sources.apfsDependencyImages).toBe('file');
+    expect(parseOperatorDefaultsToml(readFileSync(tomlPath, 'utf8')).apfsDependencyImages)
+      .toBe(true);
+
+    const readResponse = await GET();
+    expect((await readResponse.json()).values.apfsDependencyImages).toBe(true);
   });
 
   it('rejects an invalid value with its key and leaves settings unchanged', async () => {

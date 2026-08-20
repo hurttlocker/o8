@@ -27,6 +27,8 @@ converts without risk.
 
 ## Deviations
 
+- **TW-10 APFS default plumbing lives in a focused operator module.** `defaults.ts` already
+  exceeds the standard file ceiling, so the changed-line rule rejects any growth there.
 - **`ship`, `tauri:build:signed`, `tauri:build:nonotary` left as `sh -c` verbatim.** They
   read the minisign key with `$(cat ~/.tauri/cortex-ide.key)` and `unset APPLE_ID …`,
   and the whole chain (`cargo tauri build` + `sign-and-notarize`) is macOS-only. Converting

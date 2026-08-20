@@ -1,6 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 import { getApfsCowCapability } from '@/lib/worktree/apfs';
 import {
   captureWorktreeMaterializationIdentity,
@@ -327,7 +328,9 @@ export async function materializeDependencyInstall(
     workspace,
     options.materializationIdentity,
   );
-  const enabled = (options.env ?? process.env)[APFS_DEPENDENCY_IMAGES_ENV] === '1';
+  const envOverride = (options.env ?? process.env)[APFS_DEPENDENCY_IMAGES_ENV];
+  const enabled = envOverride === '1'
+    || (envOverride === undefined && getOperatorDefaultsSync().values.apfsDependencyImages);
   if (options.expectedLease && options.exactGenerationRemount) {
     throw new DependencyMaterializationRefusalError(
       'Dependency image materialization cannot adopt a lease and remount a generation together.',
