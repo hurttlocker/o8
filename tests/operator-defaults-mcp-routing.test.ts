@@ -14,11 +14,29 @@ const ensureDispatchBackendReadyMock = vi.hoisted(() => vi.fn(async () => ({
   attempts: 1,
 })));
 
+vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/worktree/storage-telemetry')>(),
+  measureHostVolume: vi.fn(async () => ({
+    accountingStatus: 'observed' as const,
+    probePath: '/',
+    availableBytes: 90_000_000_000,
+    freeBytes: 90_000_000_000,
+    totalBytes: 100_000_000_000,
+    error: null,
+  })),
+}));
+
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
   return {
     ...actual,
-    spawn: spawnMock,
+    spawn: (
+      command: string,
+      args: string[] = [],
+      options: import('node:child_process').SpawnOptions = {},
+    ) => options.detached
+      ? spawnMock(command, args, options)
+      : actual.spawn(command, args, options),
   };
 });
 
@@ -107,6 +125,13 @@ function createTempRepo() {
   return repoPath;
 }
 
+async function createRegisteredTempRepo() {
+  const repoPath = createTempRepo();
+  const { addRepo } = await import('@/lib/repos/registry');
+  await addRepo(repoPath);
+  return repoPath;
+}
+
 async function createMissionThroughRoute(input: {
   repoPath: string;
   issueNumber: number;
@@ -141,8 +166,11 @@ async function createMissionThroughRoute(input: {
 }
 
 function spawnedArgv(callIndex = 0): string[] {
-  const [, args] = spawnMock.mock.calls[callIndex]!;
-  return process.platform === 'win32' ? args : args.slice(2);
+  const [command, args] = spawnMock.mock.calls[callIndex]!;
+  const directArgs = command === process.execPath && args[0] === '-e'
+    ? args.slice(4)
+    : args;
+  return process.platform === 'win32' ? directArgs : directArgs.slice(3);
 }
 
 function stubOperatorDefaultsApi() {
@@ -295,7 +323,7 @@ describe('MCP operator defaults and dispatch routing', () => {
     });
     expect(defaultsResult.isError).not.toBe(true);
 
-    const repoPath = createTempRepo();
+    const repoPath = await createRegisteredTempRepo();
     const { NextRequest } = await import('next/server');
     const { POST } = await import('@/app/api/orchestrator/create-mission/route');
     const response = await POST(new NextRequest('http://127.0.0.1:47120/api/orchestrator/create-mission', {
@@ -316,9 +344,7 @@ describe('MCP operator defaults and dispatch routing', () => {
     expect(dispatched.dispatched).toBe(1);
     expect(spawnMock).toHaveBeenCalledTimes(1);
 
-    const [command, args] = spawnMock.mock.calls[0]!;
-    expect(command).toBe(process.platform === 'win32' ? process.execPath : 'nice');
-    const argv = process.platform === 'win32' ? args : args.slice(2);
+    const argv = spawnedArgv();
     const modelIndex = argv.indexOf('--model');
     expect(modelIndex).toBeGreaterThan(-1);
     expect(argv[modelIndex + 1]).toBe('gpt-5.6-sol');
@@ -334,7 +360,7 @@ describe('MCP operator defaults and dispatch routing', () => {
     expect(defaultsResult.isError).not.toBe(true);
 
     const created = await createMissionThroughRoute({
-      repoPath: createTempRepo(),
+      repoPath: await createRegisteredTempRepo(),
       issueNumber: 2,
       requestedRuntime: 'claude-code',
     });
@@ -357,7 +383,7 @@ describe('MCP operator defaults and dispatch routing', () => {
     expect(defaultsResult.isError).not.toBe(true);
 
     const created = await createMissionThroughRoute({
-      repoPath: createTempRepo(),
+      repoPath: await createRegisteredTempRepo(),
       issueNumber: 3,
       requestedRuntime: 'claude-code',
     });
@@ -390,7 +416,7 @@ describe('MCP operator defaults and dispatch routing', () => {
 
     const requestedModel = 'claude-opus-5';
     const created = await createMissionThroughRoute({
-      repoPath: createTempRepo(),
+      repoPath: await createRegisteredTempRepo(),
       issueNumber: 4,
       requestedRuntime: 'claude-code',
       requestedModel,

@@ -106,15 +106,22 @@ mode = "custom"
       branchPrefix: 'agent',
       requireApproval: 'always',
     }));
-    const updated = await response.json();
+    await response.json();
     expect(response.status).toBe(200);
     const raw = readFileSync(tomlPath, 'utf8');
     const reparsed = parseOperatorDefaultsToml(raw);
     const rawDocument = parse(raw) as Record<string, Record<string, unknown>>;
+    const expectedPersisted = {
+      ...OPERATOR_DEFAULTS_FALLBACK,
+      parallelCap: 4,
+      thinkingEffort: 'xhigh',
+      branchPrefix: 'agent',
+      requireApproval: 'always',
+    };
 
     expect(Object.keys(reparsed).sort()).toEqual(Object.keys(OPERATOR_DEFAULTS_FALLBACK).sort());
     for (const key of Object.keys(OPERATOR_DEFAULTS_FALLBACK) as Array<keyof typeof OPERATOR_DEFAULTS_FALLBACK>) {
-      expect(reparsed[key], `TOML key for ${key} evaporated`).toEqual(updated.values[key]);
+      expect(reparsed[key], `TOML key for ${key} evaporated`).toEqual(expectedPersisted[key]);
     }
     expect(rawDocument.operator.future_toggle).toBe('keep-me');
     expect(rawDocument.agent_extension.mode).toBe('custom');

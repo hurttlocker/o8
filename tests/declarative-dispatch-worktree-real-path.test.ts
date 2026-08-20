@@ -20,6 +20,18 @@ const worktreeFailure = vi.hoisted(() => ({
   message: 'synthetic packet worktree provision failure',
 }));
 
+vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/worktree/storage-telemetry')>(),
+  measureHostVolume: vi.fn(async () => ({
+    accountingStatus: 'observed' as const,
+    probePath: '/',
+    availableBytes: 90_000_000_000,
+    freeBytes: 90_000_000_000,
+    totalBytes: 100_000_000_000,
+    error: null,
+  })),
+}));
+
 vi.mock('@/lib/worktree', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/worktree')>();
   return {
@@ -194,6 +206,7 @@ describe('declarative packet dispatch worktree reachability', () => {
   it('spawns in the packet worktree, reports process death, and blocks when provisioning fails', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
     const repoPath = createRemoteBackedRepo();
+    await import('@/lib/repos/registry').then(({ addRepo }) => addRepo(repoPath));
     const [{ runDispatchTick }, laneRegistry] = await Promise.all([
       import('@/lib/orchestrator/scheduling'),
       import('@/lib/lane/registry'),
@@ -263,6 +276,7 @@ describe('declarative packet dispatch worktree reachability', () => {
   it('rolls back a launched worker when the real route cannot persist its governance lane', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
     const repoPath = createRemoteBackedRepo();
+    await import('@/lib/repos/registry').then(({ addRepo }) => addRepo(repoPath));
     const laneRegistry = await import('@/lib/lane/registry');
     const { getRuntime } = await import('@/lib/runtimes');
     const runtime = getRuntime('qoder')!;

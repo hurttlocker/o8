@@ -106,7 +106,7 @@ describe('Claude Code dispatch spawn', () => {
     expect(spawnMock).toHaveBeenCalledTimes(1);
 
     const [command, args, options] = spawnMock.mock.calls[0]!;
-    expect(command).toBe(process.platform === 'win32' ? process.execPath : 'nice');
+    expect(command).toBe(process.platform === 'win32' ? process.execPath : '/usr/bin/nice');
     const argv = process.platform === 'win32' ? args : args.slice(2);
     expect(argv).toEqual([
       process.execPath,

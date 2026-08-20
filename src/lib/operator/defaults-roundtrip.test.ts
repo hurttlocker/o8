@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -7,7 +7,12 @@ import { describe, expect, it } from 'vitest';
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-operator-defaults-'));
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
-const { getOperatorDefaults, updateOperatorDefaults } = await import('./defaults');
+const {
+  getOperatorDefaults,
+  getOperatorDefaultsTomlPath,
+  updateOperatorDefaults,
+} = await import('./defaults');
+const { parseOperatorDefaultsToml } = await import('@/lib/settings/toml');
 
 /**
  * Evaporation guard: updateOperatorDefaults copies each field from the update
@@ -72,9 +77,10 @@ describe('updateOperatorDefaults round-trip', () => {
   });
 
   it('persists every settable field (no silent evaporation)', async () => {
-    const result = await updateOperatorDefaults({ ...NON_DEFAULT_UPDATE });
+    await updateOperatorDefaults({ ...NON_DEFAULT_UPDATE });
+    const persisted = parseOperatorDefaultsToml(readFileSync(getOperatorDefaultsTomlPath(), 'utf8'));
     for (const [field, expected] of Object.entries(NON_DEFAULT_UPDATE)) {
-      expect(result.values[field as keyof typeof result.values], `field ${field} evaporated in updateOperatorDefaults`).toEqual(expected);
+      expect(persisted[field as keyof typeof persisted], `field ${field} evaporated in updateOperatorDefaults`).toEqual(expected);
     }
   });
 
