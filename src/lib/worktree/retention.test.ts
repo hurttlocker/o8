@@ -94,6 +94,31 @@ beforeAll(async () => {
     }
   }
 
+  const { captureWorktreeMaterializationIdentity } = await import('./materialization-identity');
+  const { withWorktreeMetaTransaction } = await import('./metadata-store');
+  const materializationParentIdentity = await captureWorktreeMaterializationIdentity(base);
+  const materializationIdentities = new Map(await Promise.all(WORKTREES.map(async (wt) => [
+    wt.id,
+    await captureWorktreeMaterializationIdentity(path.join(base, wt.id)),
+  ] as const)));
+  await withWorktreeMetaTransaction(repoRoot, async (transaction) => {
+    for (const wt of WORKTREES) {
+      await transaction.save(wt.id, {
+        id: wt.id,
+        agentType: 'codex',
+        baseBranch: 'main',
+        createdAt: Date.now() - wt.ageMinutes * 60_000,
+        claudeManaged: false,
+        taskName: wt.id,
+        branchName: `worktree/codex/${wt.id}`,
+        status: 'ready',
+        isolationKind: 'git-worktree',
+        materializationIdentity: materializationIdentities.get(wt.id)!,
+        materializationParentIdentity,
+      });
+    }
+  });
+
   // Stamp deterministic filesystem + git-admin activity LAST. Retention uses
   // the max of both, so a commit can refresh activity even when the root dir
   // mtime stays old.

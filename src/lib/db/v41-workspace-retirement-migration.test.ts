@@ -73,7 +73,7 @@ describe('workspace retirement schema migration', () => {
     ensureV37WorkspaceSnapshotSchema(sqlite);
     sqlite.close();
     sqlite = null;
-    const childPath = path.join(process.cwd(), 'tests/fixtures/workspace-retirement-migration-child.test.ts');
+    const childPath = path.join(process.cwd(), 'tests/fixtures/workspace-retirement-migration-child.ts');
     const env = {
       ...process.env,
       O8_MIGRATION_DB_PATH: dbPath,

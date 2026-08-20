@@ -24,6 +24,9 @@ const {
   writeOrchestratorControlPlaneState,
 } = await import('@/lib/orchestrator/control-plane');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+const { addRepo } = await import('@/lib/repos/registry');
+const { captureWorktreeMaterializationIdentity } = await import('@/lib/worktree/materialization-identity');
+const { withWorktreeMetaTransaction } = await import('@/lib/worktree/metadata-store');
 const { worktreeRepoKey } = await import('@/lib/worktree/root-layout');
 
 const roots: string[] = [];
@@ -64,35 +67,7 @@ function packetFixture(packetId: string, canonicalRepo: string, branch: string):
   } as OrchestratorPacket;
 }
 
-function registerCanonicalRepo(canonicalRepo: string, origin: string): void {
-  const dataDir = process.env.CORTEX_IDE_DATA_DIR!;
-  writeFileSync(join(dataDir, 'repos.json'), `${JSON.stringify({
-    version: 1,
-    repos: [{
-      id: `repo-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      name: 'canonical',
-      localPath: canonicalRepo,
-      remoteUrl: origin,
-      defaultBranch: 'main',
-      isGitRepo: true,
-      addedAt: new Date().toISOString(),
-      lastOpenedAt: new Date().toISOString(),
-      setup: {
-        envMode: 'skip',
-        envFiles: [],
-        installCommand: null,
-        installOnCreateWorkspace: false,
-        buildCommand: null,
-        runBuildOnCreateWorkspace: false,
-        devCommand: null,
-        defaultPort: null,
-        workspaceIsolationPreference: 'auto',
-      },
-    }],
-  }, null, 2)}\n`);
-}
-
-function createRelocatedCloneMission(label: string) {
+async function createRelocatedCloneMission(label: string) {
   const root = mkdtempSync(join(os.tmpdir(), `o8-direct-merge-${label}-`));
   const origin = join(root, 'github-like.git');
   const canonicalRepo = join(root, 'canonical');
@@ -124,9 +99,26 @@ function createRelocatedCloneMission(label: string) {
   writeFileSync(join(packetClone, 'feature.txt'), `${label}\n`);
   const packetSha = commitAll(packetClone, `feat: ${label} [via-o8]`);
 
-  registerCanonicalRepo(canonicalRepo, origin);
+  await addRepo(canonicalRepo);
+  const worktreeId = `packet-${packetId}`;
+  const materializationIdentity = await captureWorktreeMaterializationIdentity(packetClone);
+  const materializationParentIdentity = await captureWorktreeMaterializationIdentity(relocatedBase);
+  await withWorktreeMetaTransaction(canonicalRepo, (transaction) => transaction.save(worktreeId, {
+    id: worktreeId,
+    agentType: 'codex',
+    sessionKey: `codex:${packetId}`,
+    baseBranch: 'main',
+    createdAt: Date.now(),
+    claudeManaged: false,
+    taskName: `Canonical merge ${label}`,
+    branchName: branch,
+    status: 'ready',
+    isolationKind: 'apfs-cow-clone',
+    materializationIdentity,
+    materializationParentIdentity,
+  }));
   const lane = createLane({
-    repoPath: packetClone,
+    repoPath: canonicalRepo,
     worktreePath: packetClone,
     branch,
     baseBranch: 'main',
@@ -164,7 +156,7 @@ function createRelocatedCloneMission(label: string) {
   return { baseSha, branch, canonicalRepo, lane, packetClone, packetId, packetSha };
 }
 
-async function reviewAndMerge(fixture: ReturnType<typeof createRelocatedCloneMission>) {
+async function reviewAndMerge(fixture: Awaited<ReturnType<typeof createRelocatedCloneMission>>) {
   await submitPacketReview({
     packetId: fixture.packetId,
     approved: true,
@@ -185,7 +177,7 @@ afterEach(() => {
 
 describe('direct merge publishes through the canonical mission repository', () => {
   it('lands a relocated full-clone packet commit on canonical main', async () => {
-    const fixture = createRelocatedCloneMission('success');
+    const fixture = await createRelocatedCloneMission('success');
     expect(git(fixture.packetClone, ['remote', 'get-url', 'origin'])).not.toBe(fixture.canonicalRepo);
 
     const result = await reviewAndMerge(fixture);
@@ -196,7 +188,7 @@ describe('direct merge publishes through the canonical mission repository', () =
   }, 30_000);
 
   it('blocks and escalates when canonical main loses the candidate after git merge succeeds', async () => {
-    const fixture = createRelocatedCloneMission('postcondition');
+    const fixture = await createRelocatedCloneMission('postcondition');
     const hook = join(fixture.canonicalRepo, '.git', 'hooks', 'post-merge');
     writeFileSync(hook, `#!/bin/sh\ngit reset --hard ${fixture.baseSha} >/dev/null\n`);
     chmodSync(hook, 0o755);

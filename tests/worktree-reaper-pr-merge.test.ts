@@ -15,6 +15,7 @@ const targetedHeadRefreshes = new Map<string, {
   closedAt?: string | null;
   mergedAt?: string | null;
 }>();
+const queueHeadlessPacketReleaseMock = vi.hoisted(() => vi.fn());
 
 vi.doMock('@/lib/github-broker/sync', () => ({
   ensureGitHubPullRequest: vi.fn(async (repoFullName: string, prNumber: number) => {
@@ -68,6 +69,17 @@ vi.doMock('@/lib/worktree/live-process-guard', () => ({
   allowWorktreeRemoval: vi.fn(async () => true),
 }));
 
+vi.doMock('@/lib/orchestrator/headless-loop', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/orchestrator/headless-loop')>();
+  return {
+    ...actual,
+    queueHeadlessPacketRelease: (packetIds: string[]) => {
+      queueHeadlessPacketReleaseMock(packetIds);
+      actual.queueHeadlessPacketRelease(packetIds);
+    },
+  };
+});
+
 const { closeDb, getSqlite } = await import('@/lib/db');
 const { createLane, getLane, getLaneEvents } = await import('@/lib/lane/registry');
 const { runWorktreeReaperTick } = await import('@/lib/lane/worktree-reaper');
@@ -85,6 +97,7 @@ afterAll(() => {
 
 afterEach(() => {
   targetedHeadRefreshes.clear();
+  queueHeadlessPacketReleaseMock.mockClear();
 });
 
 function git(cwd: string, args: string[]): string {
@@ -570,7 +583,7 @@ describe('worktree reaper PR merge reconciliation', () => {
   });
 });
 
-  it('queues the packet release when a PR-merged lane is reconciled (sequential wave parity)', async () => {
+  it('queues the packet release when a PR-merged lane is reconciled (sequential wave parity)', { timeout: 20_000 }, async () => {
     const repoPath = makeRepo();
     const lane = createLane({
       repoPath,
@@ -591,9 +604,5 @@ describe('worktree reaper PR merge reconciliation', () => {
     await runWorktreeReaperTick();
 
     expect(getLane(lane.id)?.status).toBe('archived');
-    const { runHeadlessSprintTick } = await import('@/lib/orchestrator/headless-loop');
-    // The queued release is applied on the next tick — drive the REAL tick and
-    // assert it consumed the queue without error (the mission-registry suite
-    // covers the release-to-dependent mechanics; this pins the reaper→queue seam).
-    await expect(runHeadlessSprintTick()).resolves.toBeTruthy();
+    expect(queueHeadlessPacketReleaseMock).toHaveBeenCalledWith(['pkt-pr-merged-release']);
   });

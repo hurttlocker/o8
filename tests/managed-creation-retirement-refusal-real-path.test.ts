@@ -63,7 +63,7 @@ it.each(['git-worktree', 'apfs-cow-clone'] as const)(
     const repo = makeRepo(`repo-${isolationKind}`);
     const id = `rollback-${isolationKind}`;
     const manager = new WorktreeManager(repo);
-    Object.defineProperty(manager, 'runSetup', {
+    Object.defineProperty(manager, 'runSetupWithMaterialization', {
       value: async () => { throw new Error('forced setup failure'); },
     });
     Object.defineProperty(manager, 'hydrateApfsCowAssets', { value: async () => [] });

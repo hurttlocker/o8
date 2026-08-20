@@ -72,6 +72,37 @@ describe('WorktreeManager retention activity truth (#1586)', () => {
     const untouchedPath = path.join(legacyBase, 'packet-newer-root');
     await git(['worktree', 'add', editedPath, '-b', 'worktree/codex/recent-edit'], repoRoot);
     await git(['worktree', 'add', untouchedPath, '-b', 'worktree/codex/newer-root'], repoRoot);
+    const { captureWorktreeMaterializationIdentity } = await import('./materialization-identity');
+    const { withWorktreeMetaTransaction } = await import('./metadata-store');
+    const materializationParentIdentity = await captureWorktreeMaterializationIdentity(legacyBase);
+    await withWorktreeMetaTransaction(repoRoot, async (transaction) => {
+      await transaction.save('packet-recent-edit', {
+        id: 'packet-recent-edit',
+        agentType: 'codex',
+        baseBranch: 'main',
+        createdAt: Date.now() - 60 * 60_000,
+        claudeManaged: false,
+        taskName: 'recent edit',
+        branchName: 'worktree/codex/recent-edit',
+        status: 'ready',
+        isolationKind: 'git-worktree',
+        materializationIdentity: await captureWorktreeMaterializationIdentity(editedPath),
+        materializationParentIdentity,
+      });
+      await transaction.save('packet-newer-root', {
+        id: 'packet-newer-root',
+        agentType: 'codex',
+        baseBranch: 'main',
+        createdAt: Date.now() - 30 * 60_000,
+        claudeManaged: false,
+        taskName: 'newer root',
+        branchName: 'worktree/codex/newer-root',
+        status: 'ready',
+        isolationKind: 'git-worktree',
+        materializationIdentity: await captureWorktreeMaterializationIdentity(untouchedPath),
+        materializationParentIdentity,
+      });
+    });
     await ageWorktree(editedPath, 60 * 60_000);
     await ageWorktree(untouchedPath, 30 * 60_000);
 

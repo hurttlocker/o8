@@ -28,7 +28,7 @@ describe('createOwnedSessionStore child exit recording', () => {
   beforeEach(async () => {
     tempRoot = await mkdtemp(path.join(process.cwd(), '.tmp-owned-child-exit-'));
     repoPath = path.join(tempRoot, 'repo');
-    execFileSync('git', ['init', '-q', repoPath]);
+    execFileSync('git', ['init', '-q', '-b', 'main', repoPath]);
     priorRoot = process.env.O8_TEST_CHILD_EXIT_ROOT;
     priorBin = process.env.O8_TEST_CHILD_EXIT_BIN;
     priorSandbox = process.env.O8_WORKER_SANDBOX;
@@ -95,10 +95,42 @@ describe('createOwnedSessionStore child exit recording', () => {
       import('./store'),
     ]);
     const packetId = `pkt-sandbox-denial-${Date.now()}`;
+    execFileSync('git', [
+      '-c', 'user.email=test@o8.test',
+      '-c', 'user.name=o8-test',
+      'commit', '--allow-empty', '-m', 'seed',
+    ], { cwd: repoPath });
+    const worktreeBase = path.join(repoPath, '.cortex-worktrees');
+    const worktreePath = path.join(worktreeBase, packetId);
+    const branch = `agent/${packetId}`;
+    await mkdir(worktreeBase, { recursive: true });
+    execFileSync('git', ['worktree', 'add', worktreePath, '-b', branch], { cwd: repoPath });
+    const [{ addRepo }, { captureWorktreeMaterializationIdentity }, { withWorktreeMetaTransaction }] = await Promise.all([
+      import('@/lib/repos/registry'),
+      import('@/lib/worktree/materialization-identity'),
+      import('@/lib/worktree/metadata-store'),
+    ]);
+    await addRepo(repoPath);
+    const materializationIdentity = await captureWorktreeMaterializationIdentity(worktreePath);
+    const materializationParentIdentity = await captureWorktreeMaterializationIdentity(worktreeBase);
+    await withWorktreeMetaTransaction(repoPath, (transaction) => transaction.save(packetId, {
+      id: packetId,
+      agentType: 'codex',
+      baseBranch: 'main',
+      createdAt: Date.now(),
+      claudeManaged: false,
+      taskName: 'sandbox denial real path',
+      branchName: branch,
+      status: 'ready',
+      isolationKind: 'git-worktree',
+      materializationIdentity,
+      materializationParentIdentity,
+    }));
     const lane = createLane({
       label: 'sandbox denial real path',
       repoPath,
-      branch: `agent/${packetId}`,
+      worktreePath,
+      branch,
       baseBranch: 'main',
       runtime: 'codex',
       packetId,
@@ -106,7 +138,7 @@ describe('createOwnedSessionStore child exit recording', () => {
     const store = createOwnedSessionStore(testAdapter('sandbox-denial'));
 
     const launched = await store.launch({
-      cwd: repoPath,
+      cwd: worktreePath,
       prompt: 'attempt denied read',
       laneId: lane.id,
       packetId,

@@ -15,13 +15,15 @@
  * putting the disk walk back on the 5-second timer.
  */
 import { execFile } from 'node:child_process';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { WorktreeManager } from './manager';
+import { captureWorktreeMaterializationIdentity } from './materialization-identity';
+import { withWorktreeMetaTransaction } from './metadata-store';
 
 const execFileAsync = promisify(execFile);
 
@@ -45,7 +47,7 @@ async function git(args: string[], cwd: string) {
 }
 
 beforeAll(async () => {
-  repoRoot = await mkdtemp(path.join(tmpdir(), 'o8-wt-cost-'));
+  repoRoot = await realpath(await mkdtemp(path.join(tmpdir(), 'o8-wt-cost-')));
 
   await git(['init', '-b', 'main'], repoRoot);
   await writeFile(path.join(repoRoot, 'seed.txt'), 'seed\n', 'utf-8');
@@ -65,25 +67,21 @@ beforeAll(async () => {
   await git(['add', 'payload.txt'], worktreePath);
   await git(['commit', '-m', 'payload'], worktreePath);
 
-  // The metadata entry `list()` reads. Store shape is { version, worktrees }.
-  await writeFile(
-    path.join(base, '.meta.json'),
-    JSON.stringify({
-      version: 1,
-      worktrees: {
-        [WT_ID]: {
-          id: WT_ID,
-          agentType: 'codex',
-          baseBranch: 'main',
-          createdAt: Date.now(),
-          claudeManaged: false,
-          taskName: 'cost probe',
-          branchName: `worktree/codex/${WT_ID}`,
-        },
-      },
-    }),
-    'utf-8',
-  );
+  const materializationIdentity = await captureWorktreeMaterializationIdentity(worktreePath);
+  const materializationParentIdentity = await captureWorktreeMaterializationIdentity(base);
+  await withWorktreeMetaTransaction(repoRoot, (transaction) => transaction.save(WT_ID, {
+    id: WT_ID,
+    agentType: 'codex',
+    baseBranch: 'main',
+    createdAt: Date.now(),
+    claudeManaged: false,
+    taskName: 'cost probe',
+    branchName: `worktree/codex/${WT_ID}`,
+    status: 'ready',
+    isolationKind: 'git-worktree',
+    materializationIdentity,
+    materializationParentIdentity,
+  }));
 }, 60_000);
 
 afterAll(async () => {

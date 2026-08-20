@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -159,7 +159,9 @@ describe('retention usage admission target selection', () => {
   });
 
   it('marks admission accounting unknown when the configured managed root is unavailable', async () => {
-    process.env.O8_WORKTREE_ROOT = path.join(fixtureRoot, 'missing-managed-root');
+    const unavailableRoot = path.join(fixtureRoot, 'unavailable-managed-root');
+    writeFileSync(unavailableRoot, 'not a directory\n');
+    process.env.O8_WORKTREE_ROOT = unavailableRoot;
 
     const response = await GET(new NextRequest('http://127.0.0.1/api/worktrees/retention-usage'));
     const payload = await response.json();
