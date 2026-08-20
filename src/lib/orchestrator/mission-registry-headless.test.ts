@@ -21,6 +21,18 @@ const retrySalvageKillSeam = vi.hoisted(() => ({
 }));
 const tempDirs: string[] = [];
 
+vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/worktree/storage-telemetry')>(),
+  measureHostVolume: vi.fn(async () => ({
+    accountingStatus: 'observed' as const,
+    probePath: '/',
+    availableBytes: 90_000_000_000,
+    freeBytes: 90_000_000_000,
+    totalBytes: 100_000_000_000,
+    error: null,
+  })),
+}));
+
 vi.mock('@/lib/runtime/actions', () => ({
   launchRuntimeSurface: vi.fn(async (input: { packetId?: string; repoPath: string }) => {
     launchMock.calls.push({ packetId: input.packetId, repoPath: input.repoPath });

@@ -5,6 +5,18 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/worktree/storage-telemetry')>(),
+  measureHostVolume: vi.fn(async () => ({
+    accountingStatus: 'observed' as const,
+    probePath: '/',
+    availableBytes: 90_000_000_000,
+    freeBytes: 90_000_000_000,
+    totalBytes: 100_000_000_000,
+    error: null,
+  })),
+}));
+
 vi.mock('@/lib/worktree/apfs', () => ({
   getApfsCowCapability: vi.fn(async (sourcePath: string, targetPath: string) => ({
     macos: true,

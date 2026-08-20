@@ -3,9 +3,21 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+
+vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/worktree/storage-telemetry')>(),
+  measureHostVolume: vi.fn(async () => ({
+    accountingStatus: 'observed' as const,
+    probePath: '/',
+    availableBytes: 90_000_000_000,
+    freeBytes: 90_000_000_000,
+    totalBytes: 100_000_000_000,
+    error: null,
+  })),
+}));
 
 const { createLane, getLane, getLaneEvents, setLaneStatus } = await import('@/lib/lane/registry');
 const { prepareLaunchWorktree } = await import('@/lib/worktree/launch');
