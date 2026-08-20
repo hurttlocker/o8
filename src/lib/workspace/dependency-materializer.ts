@@ -28,8 +28,9 @@ import {
   type DependencyInstallRecipe,
   type DependencyInstallReceipt,
 } from './dependency-install';
+import { resolveApfsDependencyImagesOverride } from './dependency-image-policy';
 
-export const APFS_DEPENDENCY_IMAGES_ENV = 'O8_APFS_DEPENDENCY_IMAGES';
+export { APFS_DEPENDENCY_IMAGES_ENV } from './dependency-image-policy';
 
 // Durable lease paths are stored in the namespace the disk-image tooling reports,
 // so a caller-supplied canonical path only compares equal after the same collapse.
@@ -328,9 +329,9 @@ export async function materializeDependencyInstall(
     workspace,
     options.materializationIdentity,
   );
-  const envOverride = (options.env ?? process.env)[APFS_DEPENDENCY_IMAGES_ENV];
-  const enabled = envOverride === '1'
-    || (envOverride === undefined && getOperatorDefaultsSync().values.apfsDependencyImages);
+  const effectiveOverride = resolveApfsDependencyImagesOverride(options.env ?? process.env);
+  const enabled = effectiveOverride
+    ?? getOperatorDefaultsSync().values.apfsDependencyImages;
   if (options.expectedLease && options.exactGenerationRemount) {
     throw new DependencyMaterializationRefusalError(
       'Dependency image materialization cannot adopt a lease and remount a generation together.',

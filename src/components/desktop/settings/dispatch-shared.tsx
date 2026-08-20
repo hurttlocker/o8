@@ -113,6 +113,9 @@ export interface OperatorDefaults {
 export interface OperatorDefaultsResponse {
   values: OperatorDefaults;
   sources: Record<keyof OperatorDefaults, SettingSource>;
+  effectiveOverride: {
+    apfsDependencyImages: boolean | null;
+  };
   settingsToml?: {
     path: string;
     text: string;

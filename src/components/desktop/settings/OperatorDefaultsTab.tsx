@@ -25,6 +25,7 @@ import {
 } from './shared';
 import { GroupFootnote, GroupHeader, SettingsGroup, SettingsRow } from './grouped';
 import { fetchOperatorDefaults } from './operator-defaults-client';
+import { ApfsDependencyImagesRow } from './ApfsDependencyImagesRow';
 import { useEntitlement } from '@/lib/entitlement/context';
 import { DispatchFoundersSection } from './DispatchFoundersSection';
 import { WorktreeRetentionSection } from './WorktreeRetentionSection';
@@ -423,12 +424,11 @@ export function OperatorDefaultsTab() {
             disabled={envLocked('overlapGate') || busyField === 'overlapGate'}
             divider
           />
-          <SettingsRow
+          <ApfsDependencyImagesRow
             icon={<WrenchIcon />}
-            label="APFS dependency images (pilot)"
-            subtitle="Reuse eligible npm dependencies from APFS disk images on macOS"
-            checked={values.apfsDependencyImages}
-            disabled={busyField === 'apfsDependencyImages'}
+            persistedValue={values.apfsDependencyImages}
+            effectiveOverride={data.effectiveOverride.apfsDependencyImages}
+            busy={busyField === 'apfsDependencyImages'}
             onToggle={(next) => { updateField('apfsDependencyImages', next); }}
           />
         </SettingsGroup>
