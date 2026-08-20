@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import {
   DependencyImageRefusalError,
@@ -38,6 +38,45 @@ const command = 'npm ci --ignore-scripts --no-audit --no-fund';
 let root = '';
 let registryRoot = '';
 let npmVersion = '';
+const spawnedChildren = new Set<ReturnType<typeof spawn>>();
+
+function trackChild(child: ReturnType<typeof spawn>): ReturnType<typeof spawn> {
+  spawnedChildren.add(child);
+  const forget = () => spawnedChildren.delete(child);
+  child.once('error', forget);
+  child.once('exit', forget);
+  return child;
+}
+
+function waitForChildToStop(
+  child: ReturnType<typeof spawn>,
+  timeoutMs: number,
+): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const finish = (stopped: boolean) => {
+      clearTimeout(timeout);
+      child.off('exit', onExit);
+      resolve(stopped);
+    };
+    const onExit = () => finish(true);
+    const timeout = setTimeout(() => finish(false), timeoutMs);
+    timeout.unref();
+    child.once('exit', onExit);
+  });
+}
+
+async function stopSpawnedChildren(): Promise<void> {
+  for (const child of [...spawnedChildren]) {
+    if (child.exitCode !== null || child.signalCode !== null) continue;
+    child.kill('SIGTERM');
+    if (await waitForChildToStop(child, 2_000)) continue;
+    child.kill('SIGKILL');
+    if (!await waitForChildToStop(child, 2_000)) {
+      throw new Error(`APFS test child ${child.pid ?? 'unknown'} survived teardown.`);
+    }
+  }
+}
 
 async function git(cwd: string, args: string[]): Promise<void> {
   await execFileAsync('git', args, { cwd, timeout: 15_000 });
@@ -99,7 +138,12 @@ describe.skipIf(process.platform !== 'darwin')('APFS dependency image real path'
     npmVersion = (await execFileAsync('npm', ['--version'])).stdout.trim();
   });
 
+  afterEach(async () => {
+    await stopSpawnedChildren();
+  });
+
   afterAll(async () => {
+    await stopSpawnedChildren();
     for (const lease of listDependencySeedLeases()) {
       await detachDependencyImageLease(lease.leaseId).catch(() => undefined);
     }
@@ -167,11 +211,11 @@ describe.skipIf(process.platform !== 'darwin')('APFS dependency image real path'
         },
       );
     `;
-    const child = spawn(process.execPath, ['--import=tsx', '--input-type=module', '--eval', childScript], {
+    const child = trackChild(spawn(process.execPath, ['--import=tsx', '--input-type=module', '--eval', childScript], {
       cwd: process.cwd(),
       env: { ...process.env },
       stdio: 'pipe',
-    });
+    }));
     const childExit = await waitForExit(child);
     expect(childExit.code, childExit.stderr).toBe(86);
     await reconcileDependencyImageLeases();
@@ -194,9 +238,9 @@ describe.skipIf(process.platform !== 'darwin')('APFS dependency image real path'
         { afterShadowUnlinked: async () => process.exit(87) },
       );
     `;
-    const detachChild = spawn(process.execPath, [
+    const detachChild = trackChild(spawn(process.execPath, [
       '--import=tsx', '--input-type=module', '--eval', detachScript,
-    ], { cwd: process.cwd(), env: { ...process.env }, stdio: 'pipe' });
+    ], { cwd: process.cwd(), env: { ...process.env }, stdio: 'pipe' }));
     const detachExit = await waitForExit(detachChild);
     expect(detachExit.code, detachExit.stderr).toBe(87);
     expect(listDependencySeedLeases(source.receipt.recipe.key)[0]?.state).toBe('detaching');
@@ -301,9 +345,9 @@ describe.skipIf(process.platform !== 'darwin')('APFS dependency image real path'
       );
       await writeFile(${JSON.stringify(resultPath)}, JSON.stringify({ generation: image.generation }));
     `;
-    const child = spawn(process.execPath, [
+    const child = trackChild(spawn(process.execPath, [
       '--import=tsx', '--input-type=module', '--eval', childScript,
-    ], { cwd: process.cwd(), env: { ...process.env }, stdio: 'pipe' });
+    ], { cwd: process.cwd(), env: { ...process.env }, stdio: 'pipe' }));
     for (let attempt = 0; attempt < 300; attempt += 1) {
       try {
         await lstat(startedPath);
@@ -375,9 +419,9 @@ describe.skipIf(process.platform !== 'darwin')('APFS dependency image real path'
       );
       await writeFile(${JSON.stringify(resultPath)}, JSON.stringify({ leaseId: mount.leaseId }));
     `;
-    const child = spawn(process.execPath, [
+    const child = trackChild(spawn(process.execPath, [
       '--import=tsx', '--input-type=module', '--eval', childScript,
-    ], { cwd: process.cwd(), env: { ...process.env }, stdio: 'pipe' });
+    ], { cwd: process.cwd(), env: { ...process.env }, stdio: 'pipe' }));
     for (let attempt = 0; attempt < 300; attempt += 1) {
       try {
         await lstat(startedPath);
@@ -448,9 +492,9 @@ describe.skipIf(process.platform !== 'darwin')('APFS dependency image real path'
         },
       );
     `;
-    const child = spawn(process.execPath, [
+    const child = trackChild(spawn(process.execPath, [
       '--import=tsx', '--input-type=module', '--eval', childScript,
-    ], { cwd: process.cwd(), env: { ...process.env }, stdio: 'pipe' });
+    ], { cwd: process.cwd(), env: { ...process.env }, stdio: 'pipe' }));
     const childExit = await waitForExit(child);
     expect(childExit.code, childExit.stderr).toBe(88);
     const crashed = readDependencySeedImage(source.receipt.recipe.key);
@@ -481,9 +525,9 @@ describe.skipIf(process.platform !== 'darwin')('APFS dependency image real path'
         },
       );
     `;
-    const retireChild = spawn(process.execPath, [
+    const retireChild = trackChild(spawn(process.execPath, [
       '--import=tsx', '--input-type=module', '--eval', retireScript,
-    ], { cwd: process.cwd(), env: { ...process.env }, stdio: 'pipe' });
+    ], { cwd: process.cwd(), env: { ...process.env }, stdio: 'pipe' }));
     const retireExit = await waitForExit(retireChild);
     expect(retireExit.code, retireExit.stderr).toBe(89);
     const retiring = readDependencySeedImage(source.receipt.recipe.key);
