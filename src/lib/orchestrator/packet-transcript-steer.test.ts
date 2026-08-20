@@ -28,7 +28,10 @@ const registryMock = vi.hoisted(() => ({
   ],
 }));
 
-vi.mock('@/lib/lane/registry', () => ({
+// Partial mock: other modules in this import graph bind registry exports at
+// load time, so a replacement factory rots the moment the registry grows one.
+vi.mock('@/lib/lane/registry', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/lane/registry')>(),
   getLaneEvents: vi.fn(() => registryMock.events),
   listLanes: vi.fn(() => registryMock.lanes),
 }));
