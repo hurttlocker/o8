@@ -1,4 +1,5 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join, relative } from 'node:path';
@@ -36,6 +37,10 @@ const { getLaneSpokenDiffFacts } = await import('@/lib/lane/lane-diff-facts');
 const { createDetachedIntegrationWorktree } = await import('@/lib/lane/worktree-merge-git');
 const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
 const { getSqlite } = await import('@/lib/db');
+const {
+  getResourceLeaseStore,
+} = await import('@/lib/leases/resource-lease-service');
+const { observeResourceLeaseParticipant } = await import('@/lib/leases/resource-lease-participant');
 
 const tempDirs: string[] = [dataDir];
 
@@ -101,13 +106,17 @@ function mergeCommand(laneId: string) {
   };
 }
 
-async function mergeLane(lane: ReturnType<typeof createLane>) {
+async function mergeLane(
+  lane: ReturnType<typeof createLane>,
+  repoActionLeaseMaxWaitMs?: number,
+) {
   const approvals: Array<{ policyRuleId: string; note: string; metadata?: Record<string, string> }> = [];
   const result = await performWorktreeSideMerge({
     lane,
     command: mergeCommand(lane.id),
     actor: 'system',
     gateResult: { passed: true, violations: [] },
+    repoActionLeaseMaxWaitMs,
     createLaneActionApproval: async (_lane, _actor, input) => {
       approvals.push({
         policyRuleId: input.policyRuleId,
@@ -324,6 +333,70 @@ describe('worktree-side merge with real git repos', () => {
     ]);
     expect(existsSync(worktree.path)).toBe(false);
   }, 20_000);
+
+  it('refuses a merge within its lease deadline when a live external holder is stuck', async () => {
+    const { repo } = makeRepo('o8-merge-lease-timeout');
+    const worktree = await makeWorktree(repo, 'pkt-lease-timeout', 'inline/lease-timeout');
+    writeFileSync(join(worktree.path, 'file.txt'), 'base\nworker\n');
+    commitAll(worktree.path, 'worker change');
+    const lane = createLane({
+      repoPath: repo,
+      worktreePath: worktree.path,
+      branch: 'inline/lease-timeout',
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId: 'pkt-lease-timeout',
+    });
+    const holder = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+    expect(holder.pid).toBeTypeOf('number');
+    const participant = await observeResourceLeaseParticipant({
+      owner: { id: 'stuck-holder', label: 'stuck-holder', pid: holder.pid! },
+      actor: 'operator',
+      claimToken: 'stuck-holder-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+    });
+    await getResourceLeaseStore().acquire({
+      resource: `repo-tree:${repo}`,
+      participant,
+      ttlMs: 60_000,
+    });
+
+    try {
+      const attempt = mergeLane(lane, 100);
+      const observed = await Promise.race([
+        attempt,
+        new Promise<'timed-out'>((resolve) => setTimeout(() => resolve('timed-out'), 500)),
+      ]);
+      const completed = observed === 'timed-out' ? await attempt : observed;
+
+      expect(observed).not.toBe('timed-out');
+      expect(completed.result).toMatchObject({
+        ok: false,
+        reason: 'repo_action_lease_wait_timeout',
+      });
+      expect(completed.result.note).toContain('stuck-holder');
+      expect(getLane(lane.id)?.status).toBe('reviewing');
+      expect(existsSync(worktree.path)).toBe(true);
+      expect(await getResourceLeaseStore().status(`repo-tree:${repo}`)).toMatchObject({
+        holder: { owner: { id: 'stuck-holder' } },
+        waiters: [],
+      });
+      expect(getSqlite().prepare(`
+        SELECT verb, actor FROM resource_lease_events
+        WHERE resource = ?
+        ORDER BY sequence ASC
+      `).all(`repo-tree:${repo}`)).toEqual([
+        { verb: 'acquired', actor: 'operator' },
+        { verb: 'wait_enqueued', actor: 'system:repo-action' },
+        { verb: 'wait_timed_out', actor: 'system:repo-action' },
+      ]);
+    } finally {
+      if (holder.exitCode === null && holder.signalCode === null) {
+        const exited = once(holder, 'exit');
+        holder.kill('SIGKILL');
+        await exited;
+      }
+    }
+  }, 10_000);
 
   it('escalates a dirty operator checkout instead of stashing or force-merging it', async () => {
     const { repo } = makeRepo('o8-merge-dirty');

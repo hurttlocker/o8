@@ -10,6 +10,7 @@ export function ensureV43ResourceLeaseSchema(sqlite: Database.Database): void {
       owner_label TEXT NOT NULL,
       owner_pid INTEGER NOT NULL CHECK (owner_pid > 0),
       owner_identity_json TEXT NOT NULL,
+      claim_token_hash TEXT NOT NULL CHECK (length(claim_token_hash) = 64),
       acquired_at INTEGER NOT NULL,
       ttl_ms INTEGER NOT NULL CHECK (ttl_ms > 0),
       heartbeat_at INTEGER NOT NULL
@@ -23,6 +24,8 @@ export function ensureV43ResourceLeaseSchema(sqlite: Database.Database): void {
       owner_label TEXT NOT NULL,
       owner_pid INTEGER NOT NULL CHECK (owner_pid > 0),
       owner_identity_json TEXT NOT NULL,
+      actor TEXT NOT NULL,
+      claim_token_hash TEXT NOT NULL CHECK (length(claim_token_hash) = 64),
       waiter_pid INTEGER NOT NULL CHECK (waiter_pid > 0),
       waiter_identity_json TEXT NOT NULL,
       ttl_ms INTEGER NOT NULL CHECK (ttl_ms > 0),
@@ -61,4 +64,16 @@ export function ensureV43ResourceLeaseSchema(sqlite: Database.Database): void {
       SELECT RAISE(ABORT, 'resource lease events are append-only');
     END;
   `);
+
+  const holderColumns = sqlite.pragma('table_info(resource_leases)') as Array<{ name: string }>;
+  if (!holderColumns.some((column) => column.name === 'claim_token_hash')) {
+    sqlite.exec('ALTER TABLE resource_leases ADD COLUMN claim_token_hash TEXT');
+  }
+  const waiterColumns = sqlite.pragma('table_info(resource_lease_waiters)') as Array<{ name: string }>;
+  if (!waiterColumns.some((column) => column.name === 'actor')) {
+    sqlite.exec('ALTER TABLE resource_lease_waiters ADD COLUMN actor TEXT');
+  }
+  if (!waiterColumns.some((column) => column.name === 'claim_token_hash')) {
+    sqlite.exec('ALTER TABLE resource_lease_waiters ADD COLUMN claim_token_hash TEXT');
+  }
 }

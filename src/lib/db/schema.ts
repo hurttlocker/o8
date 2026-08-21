@@ -13,6 +13,7 @@ import {
   ORCHESTRATOR_RUNTIME_IDS,
   type OrchestratorRuntime,
 } from '@/lib/orchestrator/runtime-capabilities';
+import { workerTokenColumns } from './worker-token-schema';
 
 export * from './harness-schema';
 export * from './workspace-snapshot-schema';
@@ -447,16 +448,7 @@ export const dispatchRules = sqliteTable('dispatch_rules', {
   signalScoreIdx: index('idx_dispatch_rules_signal_score_desc').on(desc(table.signalScore)),
 }));
 
-export const workerTokens = sqliteTable('worker_tokens', {
-  id: text('id').primaryKey(),
-  tokenHash: text('token_hash').notNull().unique(),
-  packetId: text('packet_id'),
-  label: text('label'),
-  scope: text('scope').notNull(),
-  maxWorkers: integer('max_workers').notNull().default(10),
-  createdAt: text('created_at').notNull(),
-  revokedAt: text('revoked_at'),
-}, (table) => ({
+export const workerTokens = sqliteTable('worker_tokens', workerTokenColumns(), (table) => ({
   packetIdIdx: index('idx_worker_tokens_packet_id').on(table.packetId),
 }));
 

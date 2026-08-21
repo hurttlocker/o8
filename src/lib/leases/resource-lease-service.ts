@@ -7,30 +7,29 @@ import type Database from 'better-sqlite3';
 import { getSqlite } from '@/lib/db';
 import { ensureV43ResourceLeaseSchema } from '@/lib/db/v43-resource-leases-migration';
 import {
-  isMetadataLockProcessIdentity,
   probeMetadataLockProcessIdentity,
   sameMetadataLockProcessIdentity,
-  type MetadataLockProcessIdentity,
   type MetadataLockProcessProbe,
 } from '@/lib/worktree/metadata-lock-process-identity';
 import {
-  ResourceLeaseSafetyError,
-  normalizeResourceLeaseOwner,
   normalizeResourceLeaseTtl,
   normalizeResourceLeaseWaiterId,
   normalizeResourceName,
-  type ObservedResourceLeaseOwner,
   type ResourceLeaseAcquireResult,
   type ResourceLeaseHolder,
-  type ResourceLeaseOwnerInput,
   type ResourceLeaseParticipant,
   type ResourceLeaseReleaseResult,
   type ResourceLeaseSnapshot,
   type ResourceLeaseWaiter,
 } from './resource-lease-types';
+import {
+  parseResourceLeaseProcessIdentity,
+  sameObservedResourceLeaseOwner,
+  sameObservedResourceLeaseParticipant,
+  sameResourceLeaseClaimHash,
+} from './resource-lease-participant';
 
 const ACQUIRE_RACE_LIMIT = 8;
-const INTERNAL_WAIT_INTERVAL_MS = 50;
 
 interface HolderRow {
   resource: string;
@@ -39,6 +38,7 @@ interface HolderRow {
   owner_label: string;
   owner_pid: number;
   owner_identity_json: string;
+  claim_token_hash: string | null;
   acquired_at: number;
   ttl_ms: number;
   heartbeat_at: number;
@@ -52,6 +52,8 @@ interface WaiterRow {
   owner_label: string;
   owner_pid: number;
   owner_identity_json: string;
+  actor: string | null;
+  claim_token_hash: string | null;
   waiter_pid: number;
   waiter_identity_json: string;
   ttl_ms: number;
@@ -84,21 +86,8 @@ function iso(timestamp: number): string {
   return new Date(timestamp).toISOString();
 }
 
-function parseIdentity(value: string): MetadataLockProcessIdentity | null {
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return isMetadataLockProcessIdentity(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function sameObservedOwner(row: HolderRow, owner: ObservedResourceLeaseOwner): boolean {
-  const storedIdentity = parseIdentity(row.owner_identity_json);
-  return row.owner_id === owner.id
-    && row.owner_pid === owner.pid
-    && storedIdentity !== null
-    && sameMetadataLockProcessIdentity(storedIdentity, owner.identity);
+function hasPersistedWaiterAuthority(row: WaiterRow): boolean {
+  return Boolean(row.actor?.trim()) && Boolean(row.claim_token_hash?.match(/^[a-f0-9]{64}$/));
 }
 
 function publicHolder(row: HolderRow, now: number): ResourceLeaseHolder {
@@ -124,46 +113,6 @@ function publicWaiter(row: WaiterRow, position: number): ResourceLeaseWaiter {
     enqueuedAt: iso(row.enqueued_at),
     lastSeenAt: iso(row.last_seen_at),
     ttlMs: row.ttl_ms,
-  };
-}
-
-function waitBriefly(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, INTERNAL_WAIT_INTERVAL_MS));
-}
-
-export async function observeResourceLeaseParticipant(input: {
-  owner: ResourceLeaseOwnerInput;
-  waiterPid?: number;
-}): Promise<ResourceLeaseParticipant> {
-  const owner = normalizeResourceLeaseOwner(input.owner);
-  const waiterPid = input.waiterPid ?? owner.pid;
-  if (!Number.isSafeInteger(waiterPid) || waiterPid <= 0) {
-    throw new ResourceLeaseSafetyError('waiter_identity_unknown', 'Lease waiter PID is invalid.');
-  }
-  const ownerProbe = await probeMetadataLockProcessIdentity(owner.pid);
-  if (ownerProbe.state !== 'live') {
-    throw new ResourceLeaseSafetyError(
-      'owner_identity_unknown',
-      ownerProbe.state === 'unknown'
-        ? `Lease owner identity is unknown: ${ownerProbe.detail}`
-        : 'Lease owner process is no longer live.',
-    );
-  }
-  const waiterProbe = waiterPid === owner.pid
-    ? ownerProbe
-    : await probeMetadataLockProcessIdentity(waiterPid);
-  if (waiterProbe.state !== 'live') {
-    throw new ResourceLeaseSafetyError(
-      'waiter_identity_unknown',
-      waiterProbe.state === 'unknown'
-        ? `Lease waiter identity is unknown: ${waiterProbe.detail}`
-        : 'Lease waiter process is no longer live.',
-    );
-  }
-  return {
-    owner: { ...owner, identity: ownerProbe.identity },
-    waiterPid,
-    waiterIdentity: waiterProbe.identity,
   };
 }
 
@@ -214,7 +163,7 @@ export class ResourceLeaseStore {
   }
 
   private async exactProcessState(pid: number, identityJson: string): Promise<ExactProcessState> {
-    const identity = parseIdentity(identityJson);
+    const identity = parseResourceLeaseProcessIdentity(identityJson);
     if (!identity) return { state: 'unknown', detail: 'Stored process identity is invalid.' };
     const probe = await this.probe(pid);
     if (probe.state === 'absent') return { state: 'dead', reason: 'process_absent' };
@@ -293,6 +242,13 @@ export class ResourceLeaseStore {
     let reaped = 0;
     let blocked: ResourceLeaseSnapshot['blocked'] = null;
     for (const row of this.readWaiters(resource)) {
+      if (!hasPersistedWaiterAuthority(row)) {
+        blocked ??= {
+          code: 'waiter_claim_unavailable',
+          message: `FIFO waiter ${row.owner_label} has no proved claim authority, so later waiters cannot pass it.`,
+        };
+        continue;
+      }
       const [ownerState, waiterState] = await Promise.all([
         this.exactProcessState(row.owner_pid, row.owner_identity_json),
         this.exactProcessState(row.waiter_pid, row.waiter_identity_json),
@@ -330,8 +286,8 @@ export class ResourceLeaseStore {
       const inserted = this.sqlite.prepare(`
         INSERT OR IGNORE INTO resource_leases (
           resource, lease_id, owner_id, owner_label, owner_pid, owner_identity_json,
-          acquired_at, ttl_ms, heartbeat_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          claim_token_hash, acquired_at, ttl_ms, heartbeat_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         row.resource,
         leaseId,
@@ -339,6 +295,7 @@ export class ResourceLeaseStore {
         row.owner_label,
         row.owner_pid,
         row.owner_identity_json,
+        row.claim_token_hash,
         acquiredAt,
         row.ttl_ms,
         acquiredAt,
@@ -346,7 +303,7 @@ export class ResourceLeaseStore {
       if (inserted.changes !== 1) return null;
       this.sqlite.prepare('DELETE FROM resource_lease_waiters WHERE waiter_id = ?')
         .run(row.waiter_id);
-      this.recordEvent(this.sqlite, row.resource, 'acquired', row.owner_id, {
+      this.recordEvent(this.sqlite, row.resource, 'acquired', row.actor ?? 'system:unproven-waiter', {
         leaseId,
         owner: { id: row.owner_id, label: row.owner_label, pid: row.owner_pid },
         ttlMs: row.ttl_ms,
@@ -367,6 +324,16 @@ export class ResourceLeaseStore {
       if (holder) return { row: holder, promoted: false, blocked: null };
       const row = this.readWaiters(resource)[0];
       if (!row) return { row: null, promoted: false, blocked: null };
+      if (!hasPersistedWaiterAuthority(row)) {
+        return {
+          row: null,
+          promoted: false,
+          blocked: {
+            code: 'waiter_claim_unavailable',
+            message: `FIFO waiter ${row.owner_label} has no proved claim authority and cannot be promoted.`,
+          },
+        };
+      }
       const [ownerState, waiterState] = await Promise.all([
         this.exactProcessState(row.owner_pid, row.owner_identity_json),
         this.exactProcessState(row.waiter_pid, row.waiter_identity_json),
@@ -440,8 +407,8 @@ export class ResourceLeaseStore {
       const inserted = this.sqlite.prepare(`
         INSERT OR IGNORE INTO resource_leases (
           resource, lease_id, owner_id, owner_label, owner_pid, owner_identity_json,
-          acquired_at, ttl_ms, heartbeat_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          claim_token_hash, acquired_at, ttl_ms, heartbeat_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         resource,
         leaseId,
@@ -449,12 +416,13 @@ export class ResourceLeaseStore {
         participant.owner.label,
         participant.owner.pid,
         JSON.stringify(participant.owner.identity),
+        participant.claimTokenHash,
         acquiredAt,
         ttlMs,
         acquiredAt,
       );
       if (inserted.changes !== 1) return null;
-      this.recordEvent(this.sqlite, resource, 'acquired', participant.owner.id, {
+      this.recordEvent(this.sqlite, resource, 'acquired', participant.actor, {
         leaseId,
         owner: {
           id: participant.owner.id,
@@ -486,6 +454,7 @@ export class ResourceLeaseStore {
         JSON.stringify(participant.owner.identity),
       ) as WaiterRow | undefined;
       if (existing) {
+        if (!sameResourceLeaseClaimHash(existing.claim_token_hash, participant.claimTokenHash)) return existing;
         this.sqlite.prepare(`
           UPDATE resource_lease_waiters SET last_seen_at = ?, ttl_ms = ? WHERE waiter_id = ?
         `).run(now, ttlMs, existing.waiter_id);
@@ -494,8 +463,8 @@ export class ResourceLeaseStore {
       this.sqlite.prepare(`
         INSERT INTO resource_lease_waiters (
           waiter_id, resource, owner_id, owner_label, owner_pid, owner_identity_json,
-          waiter_pid, waiter_identity_json, ttl_ms, enqueued_at, last_seen_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          actor, claim_token_hash, waiter_pid, waiter_identity_json, ttl_ms, enqueued_at, last_seen_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         waiterId,
         resource,
@@ -503,13 +472,15 @@ export class ResourceLeaseStore {
         participant.owner.label,
         participant.owner.pid,
         JSON.stringify(participant.owner.identity),
+        participant.actor,
+        participant.claimTokenHash,
         participant.waiterPid,
         JSON.stringify(participant.waiterIdentity),
         ttlMs,
         now,
         now,
       );
-      this.recordEvent(this.sqlite, resource, 'wait_enqueued', participant.owner.id, {
+      this.recordEvent(this.sqlite, resource, 'wait_enqueued', participant.actor, {
         waiterId,
         owner: {
           id: participant.owner.id,
@@ -540,7 +511,16 @@ export class ResourceLeaseStore {
     for (let attempt = 0; attempt < ACQUIRE_RACE_LIMIT; attempt += 1) {
       const reconciled = await this.reconcile(resource);
       const current = this.readHolder(resource);
-      if (current && sameObservedOwner(current, input.participant.owner)) {
+      if (current && sameObservedResourceLeaseOwner(current, input.participant.owner)) {
+        if (!sameResourceLeaseClaimHash(current.claim_token_hash, input.participant.claimTokenHash)) {
+          return {
+            state: 'refused',
+            reason: 'claim_unproven',
+            holder: publicHolder(current, this.now()),
+            nextWaiter: reconciled.snapshot.waiters[0] ?? null,
+            blocked: reconciled.snapshot.blocked,
+          };
+        }
         const heartbeatAt = this.now();
         this.sqlite.prepare(`
           UPDATE resource_leases SET heartbeat_at = ?, ttl_ms = ?
@@ -551,6 +531,23 @@ export class ResourceLeaseStore {
           lease: publicHolder({ ...current, heartbeat_at: heartbeatAt, ttl_ms: ttlMs }, heartbeatAt),
           waited: reconciled.promoted || reconciled.snapshot.waiters.length > 0,
           replayed: true,
+        };
+      }
+      const sameOwnerWaiter = this.readWaiters(resource).find((row) => {
+        const storedIdentity = parseResourceLeaseProcessIdentity(row.owner_identity_json);
+        return row.owner_id === input.participant.owner.id
+          && row.owner_pid === input.participant.owner.pid
+          && storedIdentity !== null
+          && sameMetadataLockProcessIdentity(storedIdentity, input.participant.owner.identity);
+      });
+      if (sameOwnerWaiter
+        && !sameResourceLeaseClaimHash(sameOwnerWaiter.claim_token_hash, input.participant.claimTokenHash)) {
+        return {
+          state: 'refused',
+          reason: 'claim_unproven',
+          holder: reconciled.snapshot.holder,
+          nextWaiter: reconciled.snapshot.waiters[0] ?? null,
+          blocked: reconciled.snapshot.blocked,
         };
       }
       if (!current && reconciled.snapshot.waiters.length === 0 && !reconciled.snapshot.blocked) {
@@ -575,7 +572,7 @@ export class ResourceLeaseStore {
       const queued = this.enqueue(resource, input.participant, ttlMs, waiterId);
       const afterQueue = await this.reconcile(resource);
       const promotedHolder = this.readHolder(resource);
-      if (promotedHolder && sameObservedOwner(promotedHolder, input.participant.owner)) {
+      if (promotedHolder && sameObservedResourceLeaseParticipant(promotedHolder, input.participant)) {
         return {
           state: 'acquired',
           lease: publicHolder(promotedHolder, this.now()),
@@ -608,7 +605,7 @@ export class ResourceLeaseStore {
 
   async release(input: {
     resource: string;
-    owner: ObservedResourceLeaseOwner;
+    participant: ResourceLeaseParticipant;
   }): Promise<ResourceLeaseReleaseResult> {
     const resource = normalizeResourceName(input.resource);
     const reconciled = await this.reconcile(resource);
@@ -625,7 +622,7 @@ export class ResourceLeaseStore {
         },
       };
     }
-    if (!sameObservedOwner(current, input.owner)) {
+    if (!sameObservedResourceLeaseOwner(current, input.participant.owner)) {
       return {
         released: false,
         lease: publicHolder(current, this.now()),
@@ -637,6 +634,18 @@ export class ResourceLeaseStore {
         },
       };
     }
+    if (!sameResourceLeaseClaimHash(current.claim_token_hash, input.participant.claimTokenHash)) {
+      return {
+        released: false,
+        lease: publicHolder(current, this.now()),
+        nextHolder: null,
+        refusal: {
+          code: 'claim_unproven',
+          message: `The caller did not prove the private claim for ${resource}.`,
+          holder: publicHolder(current, this.now()),
+        },
+      };
+    }
     const releasedAt = this.now();
     const released = this.sqlite.transaction(() => {
       const deleted = this.sqlite.prepare(`
@@ -644,7 +653,7 @@ export class ResourceLeaseStore {
         WHERE resource = ? AND lease_id = ? AND owner_identity_json = ?
       `).run(resource, current.lease_id, current.owner_identity_json);
       if (deleted.changes !== 1) return false;
-      this.recordEvent(this.sqlite, resource, 'released', input.owner.id, {
+      this.recordEvent(this.sqlite, resource, 'released', input.participant.actor, {
         leaseId: current.lease_id,
         owner: { id: current.owner_id, label: current.owner_label, pid: current.owner_pid },
         heldMs: Math.max(0, releasedAt - current.acquired_at),
@@ -663,14 +672,14 @@ export class ResourceLeaseStore {
 
   async heartbeat(input: {
     resource: string;
-    owner: ObservedResourceLeaseOwner;
+    participant: ResourceLeaseParticipant;
     ttlMs?: number;
   }): Promise<ResourceLeaseHolder | null> {
     const resource = normalizeResourceName(input.resource);
     const ttlMs = normalizeResourceLeaseTtl(input.ttlMs);
     await this.reconcile(resource);
     const current = this.readHolder(resource);
-    if (!current || !sameObservedOwner(current, input.owner)) return null;
+    if (!current || !sameObservedResourceLeaseParticipant(current, input.participant)) return null;
     const heartbeatAt = this.now();
     const updated = this.sqlite.prepare(`
       UPDATE resource_leases SET heartbeat_at = ?, ttl_ms = ?
@@ -679,6 +688,39 @@ export class ResourceLeaseStore {
     return updated.changes === 1
       ? publicHolder({ ...current, heartbeat_at: heartbeatAt, ttl_ms: ttlMs }, heartbeatAt)
       : null;
+  }
+
+  async timeoutWait(input: {
+    resource: string;
+    participant: ResourceLeaseParticipant;
+    waiterId: string;
+  }): Promise<ResourceLeaseSnapshot> {
+    const resource = normalizeResourceName(input.resource);
+    const waiterId = normalizeResourceLeaseWaiterId(input.waiterId);
+    if (waiterId) {
+      const timedOutAt = this.now();
+      this.sqlite.transaction(() => {
+        const deleted = this.sqlite.prepare(`
+          DELETE FROM resource_lease_waiters
+          WHERE waiter_id = ? AND resource = ? AND claim_token_hash = ?
+        `).run(waiterId, resource, input.participant.claimTokenHash);
+        if (deleted.changes === 1) {
+          this.recordEvent(this.sqlite, resource, 'wait_timed_out', input.participant.actor, {
+            waiterId,
+            owner: {
+              id: input.participant.owner.id,
+              label: input.participant.owner.label,
+              pid: input.participant.owner.pid,
+            },
+          }, timedOutAt);
+        }
+      }).immediate();
+    }
+    const current = this.readHolder(resource);
+    if (current && sameObservedResourceLeaseParticipant(current, input.participant)) {
+      await this.release({ resource, participant: input.participant });
+    }
+    return this.status(resource);
   }
 
   async status(resource: string): Promise<ResourceLeaseSnapshot> {
@@ -745,50 +787,4 @@ export function getResourceLeaseStore(): ResourceLeaseStore {
 
 export async function reconcileResourceLeasesAtStartup() {
   return getResourceLeaseStore().reconcileAll();
-}
-
-export async function withResourceLease<T>(input: {
-  resource: string;
-  owner: ResourceLeaseOwnerInput;
-  ttlMs?: number;
-}, action: () => Promise<T>): Promise<T> {
-  const ttlMs = normalizeResourceLeaseTtl(input.ttlMs);
-  const participant = await observeResourceLeaseParticipant({ owner: input.owner });
-  const store = getResourceLeaseStore();
-  const waiterId = `waiter-${randomUUID()}`;
-  let lease: ResourceLeaseHolder | null = null;
-  while (!lease) {
-    const result = await store.acquire({
-      resource: input.resource,
-      participant,
-      ttlMs,
-      wait: true,
-      waiterId,
-    });
-    if (result.state === 'acquired') lease = result.lease;
-    else await waitBriefly();
-  }
-  const heartbeatEveryMs = Math.max(1_000, Math.min(30_000, Math.floor(ttlMs / 3)));
-  const heartbeat = setInterval(() => {
-    void store.heartbeat({ resource: input.resource, owner: participant.owner, ttlMs })
-      .catch(() => undefined);
-  }, heartbeatEveryMs);
-  heartbeat.unref?.();
-  let actionError: unknown;
-  try {
-    return await action();
-  } catch (error) {
-    actionError = error;
-    throw error;
-  } finally {
-    clearInterval(heartbeat);
-    try {
-      await store.release({ resource: input.resource, owner: participant.owner });
-    } catch (releaseError) {
-      if (actionError === undefined) throw releaseError;
-      console.warn(
-        `[resource-lease] Release failed after the guarded action failed: ${releaseError instanceof Error ? releaseError.message : String(releaseError)}`,
-      );
-    }
-  }
 }

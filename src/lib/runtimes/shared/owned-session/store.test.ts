@@ -177,6 +177,36 @@ describe('createOwnedSessionStore launch readiness gate', () => {
     });
   });
 
+  it('binds a packet worker credential to the spawned run identity', async () => {
+    const { resolvePacketWorkerToken } = await import('@/lib/auth/packet-worker-token');
+    const { createOwnedSessionStore } = await import('./store');
+    ensureDispatchBackendReadyMock.mockResolvedValue(readyResult());
+    let workerToken = '';
+    let processMarker = '';
+    spawnMock.mockImplementationOnce((_command, _args, options: { env?: NodeJS.ProcessEnv }) => {
+      workerToken = options.env?.O8_WORKER_TOKEN ?? '';
+      processMarker = options.env?.O8_OWNED_RUN_MARKER ?? '';
+      return { pid: 42, unref: vi.fn(), once: vi.fn() };
+    });
+
+    const store = createOwnedSessionStore(testAdapter(), {
+      workspaceSpawnGuard: async () => ({ status: 'available', source: 'no-snapshot' }),
+    });
+    await expect(store.launch({
+      cwd: repoPath,
+      prompt: 'bind packet identity',
+      packetId: 'packet-process-binding',
+    })).resolves.toMatchObject({ ok: true });
+
+    expect(workerToken).toMatch(/^o8pw_/);
+    expect(processMarker).not.toBe('');
+    expect(resolvePacketWorkerToken(workerToken)).toMatchObject({
+      packetId: 'packet-process-binding',
+      leaseProcessMarker: processMarker,
+      leaseProcessPid: 42,
+    });
+  });
+
   it('reconciles a confirmed pre-spawn failure without incrementing the ledger twice', async () => {
     const { createOwnedSessionStore } = await import('./store');
     ensureDispatchBackendReadyMock.mockResolvedValue(readyResult());

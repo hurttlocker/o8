@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 
 import {
   apiFetch,
@@ -11,6 +11,7 @@ import {
 } from './shared';
 
 const WAIT_POLL_MS = 100;
+const claimTokens = new Map<string, string>();
 
 export const LEASE_TOOLS: McpTool[] = [
   {
@@ -85,6 +86,8 @@ export async function handleLeaseAcquire(args: Record<string, unknown>): Promise
   const wait = args.wait === true;
   const leaseOwner = owner();
   const waiterId = `waiter:mcp:${process.pid}:${randomUUID()}`;
+  const claimToken = claimTokens.get(resource) ?? randomBytes(32).toString('base64url');
+  claimTokens.set(resource, claimToken);
   try {
     for (;;) {
       const data = await apiFetch('/api/leases', {
@@ -93,6 +96,7 @@ export async function handleLeaseAcquire(args: Record<string, unknown>): Promise
           action: 'acquire',
           resource,
           owner: leaseOwner,
+          claimToken,
           waiterPid: wait ? process.pid : undefined,
           ttlMs: optionalTtl(args),
           wait,
@@ -117,15 +121,22 @@ export async function handleLeaseAcquire(args: Record<string, unknown>): Promise
 
 export async function handleLeaseRelease(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
+    const resource = requiredString(args, 'resource');
+    const claimToken = claimTokens.get(resource);
+    if (!claimToken) {
+      return textResult(`o8_lease_release failed: this MCP process has no private claim for ${resource}.`, true);
+    }
     const data = await apiFetch('/api/leases', {
       method: 'POST',
       body: JSON.stringify({
         action: 'release',
-        resource: requiredString(args, 'resource'),
+        resource,
         owner: owner(),
+        claimToken,
       }),
       acceptedErrorStatuses: [404, 409],
     }) as { ok?: boolean };
+    if (data.ok) claimTokens.delete(resource);
     return data.ok ? jsonResult(data) : textResult(JSON.stringify(data), true);
   } catch (error) {
     return textResult(`o8_lease_release failed: ${errorText(error)}`, true);

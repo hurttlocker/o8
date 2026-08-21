@@ -8,7 +8,14 @@ export type RequestPrincipal = 'operator' | 'worker' | 'device' | 'anonymous';
 
 export type RequestPrincipalContext =
   | { role: 'operator' }
-  | { role: 'worker'; packetId: string | null; tokenId: string | null }
+  | {
+      role: 'worker';
+      packetId: string | null;
+      tokenId: string | null;
+      leaseProcessMarker: string | null;
+      leaseProcessPid: number | null;
+      leaseProcessGroupId: number | null;
+    }
   | { role: 'device' }
   | { role: 'anonymous' };
 
@@ -52,11 +59,32 @@ export function resolveRequestPrincipalContext(req: Request): RequestPrincipalCo
   if (isPacketWorkerToken(bearer)) {
     const worker = resolvePacketWorkerToken(bearer);
     return worker
-      ? { role: 'worker', packetId: worker.packetId, tokenId: worker.tokenId }
-      : { role: 'worker', packetId: null, tokenId: null };
+      ? {
+          role: 'worker',
+          packetId: worker.packetId,
+          tokenId: worker.tokenId,
+          leaseProcessMarker: worker.leaseProcessMarker,
+          leaseProcessPid: worker.leaseProcessPid,
+          leaseProcessGroupId: worker.leaseProcessGroupId,
+        }
+      : {
+          role: 'worker',
+          packetId: null,
+          tokenId: null,
+          leaseProcessMarker: null,
+          leaseProcessPid: null,
+          leaseProcessGroupId: null,
+        };
   }
   if (isLegacyLocalWorkerToken(bearer)) {
-    return { role: 'worker', packetId: null, tokenId: null };
+    return {
+      role: 'worker',
+      packetId: null,
+      tokenId: null,
+      leaseProcessMarker: null,
+      leaseProcessPid: null,
+      leaseProcessGroupId: null,
+    };
   }
   if (bearer && tokenMatches(bearer, getOrCreateWsToken().trim())) return { role: 'operator' };
   if (isDeviceToken(bearer)) return { role: 'device' };

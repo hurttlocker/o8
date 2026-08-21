@@ -18,5 +18,14 @@ export function ensureWorkerTokenStorage(sqlite: Database.Database): void {
   if (!columns.some((column) => column.name === 'packet_id')) {
     sqlite.exec('ALTER TABLE worker_tokens ADD COLUMN packet_id TEXT');
   }
+  if (!columns.some((column) => column.name === 'lease_process_marker')) {
+    sqlite.exec('ALTER TABLE worker_tokens ADD COLUMN lease_process_marker TEXT');
+  }
+  if (!columns.some((column) => column.name === 'lease_process_pid')) {
+    sqlite.exec('ALTER TABLE worker_tokens ADD COLUMN lease_process_pid INTEGER');
+  }
+  if (!columns.some((column) => column.name === 'lease_process_group_id')) {
+    sqlite.exec('ALTER TABLE worker_tokens ADD COLUMN lease_process_group_id INTEGER');
+  }
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_worker_tokens_packet_id ON worker_tokens(packet_id)');
 }

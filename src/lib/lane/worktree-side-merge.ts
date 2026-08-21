@@ -55,7 +55,8 @@ import {
   refreshOriginBaseBestEffort,
   worktreeExistsOnDisk,
 } from '@/lib/lane/worktree-merge-git';
-import { withRepoActionLock } from '@/lib/lane/repo-action-lock';
+import { repoActionLeaseRefusalResult, withRepoActionLock } from '@/lib/lane/repo-action-lock';
+import { enqueueMergeDecompositions } from '@/lib/lane/merge-decomposition';
 import { canonicalRepoRoot } from '@/lib/worktree/root-layout';
 
 const BASE_ADVANCED_RETRY_LIMIT = 3;
@@ -89,25 +90,7 @@ export interface WorktreeSideMergeInput {
   actor: LaneEventActor;
   gateResult: ApprovalGateResult;
   createLaneActionApproval: CreateLaneActionApproval;
-}
-
-async function enqueueDecompositions(repoPath: string, runtime: Lane['runtime']): Promise<string> {
-  try {
-    const { enqueueDecompositionsAfterMerge } = await import('@/lib/dispatch/decomposition-pipeline');
-    const decomposition = await enqueueDecompositionsAfterMerge({ repoPath, runtime });
-    if (decomposition.enqueued === 0) {
-      return '';
-    }
-    const names = decomposition.candidates
-      .map((candidate) => candidate.relativePath)
-      .join(', ');
-    return ` Enqueued ${decomposition.enqueued} decomposition dispatch${decomposition.enqueued === 1 ? '' : 'es'} for over-ceiling file${decomposition.enqueued === 1 ? '' : 's'}: ${names}.`;
-  } catch (error) {
-    console.warn(
-      `[lane-merge] Decomposition scan failed for ${repoPath}: ${error instanceof Error ? error.message : String(error)}`,
-    );
-    return '';
-  }
+  repoActionLeaseMaxWaitMs?: number;
 }
 
 function classifyFastForwardFailure(message: string): 'dirty-working-tree' | 'non-fast-forward' | 'invalid-ref' | 'merge-failed' {
@@ -472,7 +455,14 @@ async function retryBaseAdvancedAfterRebase(
 export async function performWorktreeSideMerge(input: WorktreeSideMergeInput): Promise<LaneCommandResult> {
   const canonicalRepoPath = canonicalRepoRoot(input.command.canonicalRepoPath ?? input.lane.repoPath);
   const canonicalInput = canonicalRepoPath === input.lane.repoPath ? input : { ...input, lane: { ...input.lane, repoPath: canonicalRepoPath } };
-  return withRepoActionLock(canonicalRepoPath, () => performWorktreeSideMergeInner(canonicalInput));
+  const guarded = await withRepoActionLock(
+    canonicalRepoPath,
+    () => performWorktreeSideMergeInner(canonicalInput),
+    { maxWaitMs: input.repoActionLeaseMaxWaitMs },
+  );
+  return guarded.state === 'completed'
+    ? guarded.value
+    : repoActionLeaseRefusalResult(input.command.laneId, guarded.refusal);
 }
 
 async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Promise<LaneCommandResult> {
@@ -777,7 +767,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
     // Coarse product signal: the governance loop closed. Fire-and-forget.
     void emitProductEvent('merge.approved', { runtime: lane.runtime, pushed: pushedToOrigin });
 
-    const decompositionNote = await enqueueDecompositions(lane.repoPath, lane.runtime);
+    const decompositionNote = await enqueueMergeDecompositions(lane.repoPath, lane.runtime);
     const updated = getLane(command.laneId);
     const mergeNote = pushedToOrigin
       ? `Rebased ${lane.branch} onto ${lane.baseBranch}, fast-forwarded ${lane.baseBranch}, and pushed to origin.${decompositionNote}`

@@ -47,12 +47,18 @@ describe('resource lease MCP handlers', () => {
       ttlMs: 30_000,
       wait: true,
       owner: { pid: process.pid },
+      claimToken: expect.stringMatching(/^[A-Za-z0-9_-]{32,256}$/),
       waiterPid: process.pid,
     });
     expect(bodies[1]?.waiterId).toBe(bodies[0]?.waiterId);
   });
 
   it('surfaces structured holder conflicts as tool errors', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+      ok: true,
+      result: { state: 'acquired', lease: { resource: 'repo-tree:/repo' } },
+    })));
+    await handleLeaseAcquire({ resource: 'repo-tree:/repo' });
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
       ok: false,
       result: {

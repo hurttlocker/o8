@@ -4,14 +4,16 @@ import { resolveRequestPrincipalContext, type RequestPrincipalContext } from '@/
 import { isLegacyLocalWorkerToken } from '@/lib/auth/worker-token';
 import {
   getResourceLeaseStore,
-  observeResourceLeaseParticipant,
 } from '@/lib/leases/resource-lease-service';
+import { observeResourceLeaseParticipant } from '@/lib/leases/resource-lease-participant';
 import {
   ResourceLeaseInputError,
   ResourceLeaseSafetyError,
   normalizeResourceLeaseOwner,
+  normalizeResourceName,
   type ResourceLeaseOwnerInput,
 } from '@/lib/leases/resource-lease-types';
+import { probeOwnedRunProcessClaim } from '@/lib/runtimes/shared/owned-session/run-process-proof';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -20,6 +22,7 @@ interface LeaseMutationBody {
   action?: unknown;
   resource?: unknown;
   owner?: unknown;
+  claimToken?: unknown;
   waiterPid?: unknown;
   ttlMs?: unknown;
   wait?: unknown;
@@ -27,6 +30,7 @@ interface LeaseMutationBody {
 }
 
 type AuthorizedLeasePrincipal = Extract<RequestPrincipalContext, { role: 'operator' | 'worker' }>;
+const GOVERNANCE_RESOURCE_PREFIXES = ['repo-tree:', 'test-suite:', 'apfs-mounts:'] as const;
 
 function noStore<T>(body: T, status = 200) {
   return NextResponse.json(body, {
@@ -93,6 +97,61 @@ function principalOwner(
   return { ...owner, id: authority, label: authority };
 }
 
+function principalActor(principal: AuthorizedLeasePrincipal): string {
+  if (principal.role === 'operator') return 'operator';
+  return principal.packetId
+    ? `packet:${principal.packetId}`
+    : principal.tokenId ? `worker-token:${principal.tokenId}` : 'worker:legacy';
+}
+
+function isGovernanceResource(resource: string): boolean {
+  return GOVERNANCE_RESOURCE_PREFIXES.some((prefix) => resource.startsWith(prefix));
+}
+
+function reservedNamespaceRefusal(resource: string) {
+  return noStore({
+    schema: 'o8/resource-lease.acquire/v1',
+    ok: false,
+    result: {
+      state: 'refused',
+      reason: 'reserved_namespace',
+      holder: null,
+      nextWaiter: null,
+      blocked: null,
+      message: `${resource} is reserved for the governed o8 pipeline.`,
+    },
+  }, 409);
+}
+
+async function workerProcessRefusal(
+  principal: AuthorizedLeasePrincipal,
+  pids: number[],
+): Promise<NextResponse | null> {
+  if (principal.role !== 'worker') return null;
+  if (!principal.packetId || !principal.tokenId || !principal.leaseProcessMarker) {
+    return errorResponse(
+      'worker_process_unbound',
+      'The worker credential has no authenticated process binding for lease mutation.',
+      409,
+    );
+  }
+  for (const pid of new Set(pids)) {
+    const proof = await probeOwnedRunProcessClaim({
+      pid,
+      marker: principal.leaseProcessMarker,
+      rootPid: principal.leaseProcessPid,
+    });
+    if (proof.state !== 'match') {
+      return errorResponse(
+        'worker_process_unproven',
+        `Lease mutation refused because PID ${pid} is not proved by the authenticated worker credential: ${proof.detail}`,
+        409,
+      );
+    }
+  }
+  return null;
+}
+
 export async function GET(request: NextRequest) {
   const principal = authorizedPrincipal(request);
   if (principal instanceof NextResponse) return principal;
@@ -115,12 +174,23 @@ export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null) as LeaseMutationBody | null;
   if (!body) return errorResponse('invalid_json', 'A JSON lease mutation is required.', 400);
   const action = typeof body.action === 'string' ? body.action.trim() : '';
-  const resource = typeof body.resource === 'string' ? body.resource : '';
   try {
+    if (action !== 'acquire' && action !== 'release' && action !== 'heartbeat') {
+      return errorResponse('invalid_action', 'Lease action must be acquire, release, or heartbeat.', 400);
+    }
+    const resource = normalizeResourceName(typeof body.resource === 'string' ? body.resource : '');
+    if (principal.role === 'worker' && isGovernanceResource(resource)) {
+      return reservedNamespaceRefusal(resource);
+    }
     const owner = principalOwner(principal, body.owner);
+    const waiterPid = integer(body.waiterPid) ?? owner.pid;
+    const processRefusal = await workerProcessRefusal(principal, [owner.pid, waiterPid]);
+    if (processRefusal) return processRefusal;
     const participant = await observeResourceLeaseParticipant({
       owner,
-      waiterPid: integer(body.waiterPid),
+      waiterPid,
+      actor: principalActor(principal),
+      claimToken: typeof body.claimToken === 'string' ? body.claimToken : '',
     });
     if (action === 'acquire') {
       const result = await getResourceLeaseStore().acquire({
@@ -134,14 +204,14 @@ export async function POST(request: NextRequest) {
       return noStore({ schema: 'o8/resource-lease.acquire/v1', ok: result.state === 'acquired', result }, status);
     }
     if (action === 'release') {
-      const result = await getResourceLeaseStore().release({ resource, owner: participant.owner });
+      const result = await getResourceLeaseStore().release({ resource, participant });
       const status = result.released ? 200 : result.refusal?.code === 'not_found' ? 404 : 409;
       return noStore({ schema: 'o8/resource-lease.release/v1', ok: result.released, result }, status);
     }
     if (action === 'heartbeat') {
       const lease = await getResourceLeaseStore().heartbeat({
         resource,
-        owner: participant.owner,
+        participant,
         ttlMs: integer(body.ttlMs),
       });
       return lease

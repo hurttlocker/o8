@@ -156,8 +156,13 @@ Workers authenticate via `Authorization: Bearer cwk_*` per-request, not the pane
 
 Operator and worker credentials can use this route. Device and anonymous callers are denied.
 The handler captures the submitted local owner PID's exact boot/start identity before recording
-ownership, and binds worker-facing identity labels to their authenticated authority. An overdue
-lease remains held until release or confirmed process death; an unknown identity fails closed.
+ownership. Worker mutations additionally prove that the submitted owner and waiter PIDs belong to
+the process tree bound to that packet credential; worker labels and ledger actors come from the
+authenticated principal, not the request body. Workers cannot mutate the governance-reserved
+`repo-tree:`, `test-suite:`, or `apfs-mounts:` namespaces. Acquire creates a private claim that is
+never returned by status/list; release and heartbeat require both the exact process identity and
+that claim. An overdue lease remains held until release or confirmed process death; an unknown
+identity fails closed.
 
 | Method | Path | Purpose |
 |---|---|---|

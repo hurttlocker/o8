@@ -5,6 +5,8 @@ export const MIN_RESOURCE_LEASE_TTL_MS = 1_000;
 export const MAX_RESOURCE_LEASE_TTL_MS = 24 * 60 * 60_000;
 export const MAX_RESOURCE_NAME_LENGTH = 2_048;
 export const MAX_RESOURCE_LEASE_WAITER_ID_LENGTH = 512;
+export const MIN_RESOURCE_LEASE_CLAIM_TOKEN_LENGTH = 32;
+export const MAX_RESOURCE_LEASE_CLAIM_TOKEN_LENGTH = 256;
 
 export interface ResourceLeaseOwnerInput {
   id: string;
@@ -20,6 +22,8 @@ export interface ResourceLeaseParticipant {
   owner: ObservedResourceLeaseOwner;
   waiterPid: number;
   waiterIdentity: MetadataLockProcessIdentity;
+  actor: string;
+  claimTokenHash: string;
 }
 
 export interface ResourceLeaseHolder {
@@ -49,7 +53,7 @@ export interface ResourceLeaseSnapshot {
   holder: ResourceLeaseHolder | null;
   waiters: ResourceLeaseWaiter[];
   blocked: {
-    code: 'holder_identity_unknown' | 'waiter_identity_unknown';
+    code: 'holder_identity_unknown' | 'waiter_identity_unknown' | 'waiter_claim_unavailable';
     message: string;
   } | null;
 }
@@ -69,7 +73,7 @@ export type ResourceLeaseAcquireResult =
     }
   | {
       state: 'refused';
-      reason: 'held' | 'fifo_waiter_precedes' | 'identity_unknown';
+      reason: 'held' | 'fifo_waiter_precedes' | 'identity_unknown' | 'claim_unproven';
       holder: ResourceLeaseHolder | null;
       nextWaiter: ResourceLeaseWaiter | null;
       blocked: ResourceLeaseSnapshot['blocked'];
@@ -80,7 +84,7 @@ export interface ResourceLeaseReleaseResult {
   lease: ResourceLeaseHolder | null;
   nextHolder: ResourceLeaseHolder | null;
   refusal: {
-    code: 'not_found' | 'not_owner' | 'identity_unknown';
+    code: 'not_found' | 'not_owner' | 'identity_unknown' | 'claim_unproven';
     message: string;
     holder: ResourceLeaseHolder | null;
   } | null;
@@ -140,6 +144,26 @@ export function normalizeResourceLeaseOwner(input: ResourceLeaseOwnerInput): Res
     throw new ResourceLeaseInputError('Lease owner PID must be a positive safe integer.');
   }
   return { id, label, pid: input.pid };
+}
+
+export function normalizeResourceLeaseActor(value: string): string {
+  const actor = value.trim();
+  if (!actor || actor.length > 256 || /[^\x20-\x7e]/.test(actor)) {
+    throw new ResourceLeaseInputError('Lease actor must be 1 to 256 printable ASCII characters.');
+  }
+  return actor;
+}
+
+export function normalizeResourceLeaseClaimToken(value: string): string {
+  const token = value.trim();
+  if (token.length < MIN_RESOURCE_LEASE_CLAIM_TOKEN_LENGTH
+    || token.length > MAX_RESOURCE_LEASE_CLAIM_TOKEN_LENGTH
+    || !/^[A-Za-z0-9_-]+$/.test(token)) {
+    throw new ResourceLeaseInputError(
+      `Lease claim token must be ${MIN_RESOURCE_LEASE_CLAIM_TOKEN_LENGTH} to ${MAX_RESOURCE_LEASE_CLAIM_TOKEN_LENGTH} base64url characters.`,
+    );
+  }
+  return token;
 }
 
 export function normalizeResourceLeaseWaiterId(value: string | undefined): string | null {

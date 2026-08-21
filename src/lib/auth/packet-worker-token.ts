@@ -12,11 +12,17 @@ interface PacketWorkerTokenRow {
   token_hash: string;
   packet_id: string | null;
   revoked_at: string | null;
+  lease_process_marker: string | null;
+  lease_process_pid: number | null;
+  lease_process_group_id: number | null;
 }
 
 export interface PacketWorkerIdentity {
   tokenId: string;
   packetId: string;
+  leaseProcessMarker: string | null;
+  leaseProcessPid: number | null;
+  leaseProcessGroupId: number | null;
 }
 
 function normalizedPacketId(packetId: string): string {
@@ -28,8 +34,15 @@ function normalizedPacketId(packetId: string): string {
 }
 
 /** Mint a one-way, packet-bound credential for one local worker process. */
-export function mintPacketWorkerToken(packetId: string): string {
+export function mintPacketWorkerToken(
+  packetId: string,
+  options: { processMarker?: string } = {},
+): string {
   const boundPacketId = normalizedPacketId(packetId);
+  const processMarker = options.processMarker?.trim() || null;
+  if (processMarker && (!/^[A-Za-z0-9._-]{1,160}$/.test(processMarker))) {
+    throw new Error('A valid process marker is required to bind a worker credential.');
+  }
   const id = `wtok_local_${randomUUID()}`;
   const plaintextToken = `o8pw_${randomBytes(32).toString('base64url')}`;
   const tokenHash = createHash('sha256').update(plaintextToken).digest('hex');
@@ -37,9 +50,18 @@ export function mintPacketWorkerToken(packetId: string): string {
 
   getSqlite().prepare(`
     INSERT INTO worker_tokens
-      (id, token_hash, packet_id, label, scope, max_workers, created_at, revoked_at)
-    VALUES (?, ?, ?, ?, ?, 1, ?, NULL)
-  `).run(id, tokenHash, boundPacketId, `Local packet ${boundPacketId}`, PACKET_WORKER_SCOPE, now);
+      (id, token_hash, packet_id, label, scope, max_workers, created_at, revoked_at,
+       lease_process_marker, lease_process_pid, lease_process_group_id)
+    VALUES (?, ?, ?, ?, ?, 1, ?, NULL, ?, NULL, NULL)
+  `).run(
+    id,
+    tokenHash,
+    boundPacketId,
+    `Local packet ${boundPacketId}`,
+    PACKET_WORKER_SCOPE,
+    now,
+    processMarker,
+  );
 
   try {
     registerPacketWorkerTokenHash(tokenHash);
@@ -50,13 +72,42 @@ export function mintPacketWorkerToken(packetId: string): string {
   return plaintextToken;
 }
 
+export function bindPacketWorkerTokenProcess(
+  presented: string,
+  input: { pid: number; processGroupId?: number; processMarker: string },
+): void {
+  if (!Number.isSafeInteger(input.pid) || input.pid <= 0) {
+    throw new Error('A live worker process PID is required to bind its credential.');
+  }
+  const marker = input.processMarker.trim();
+  if (!/^[A-Za-z0-9._-]{1,160}$/.test(marker)) {
+    throw new Error('A valid process marker is required to bind a worker credential.');
+  }
+  const processGroupId = input.processGroupId;
+  if (processGroupId !== undefined
+    && (!Number.isSafeInteger(processGroupId) || processGroupId <= 0)) {
+    throw new Error('Worker process group identity is invalid.');
+  }
+  const tokenHash = createHash('sha256').update(presented).digest('hex');
+  const updated = getSqlite().prepare(`
+    UPDATE worker_tokens
+    SET lease_process_pid = ?, lease_process_group_id = ?
+    WHERE token_hash = ? AND scope = ? AND revoked_at IS NULL
+      AND lease_process_marker = ?
+  `).run(input.pid, processGroupId ?? null, tokenHash, PACKET_WORKER_SCOPE, marker);
+  if (updated.changes !== 1) {
+    throw new Error('Worker credential process binding could not be persisted.');
+  }
+}
+
 /** Resolve a packet worker bearer against its authoritative persisted row. */
 export function resolvePacketWorkerToken(presented: string): PacketWorkerIdentity | null {
   if (!presented) return null;
   const presentedHash = createHash('sha256').update(presented).digest('hex');
   try {
     const row = getSqlite().prepare(`
-      SELECT id, token_hash, packet_id, revoked_at
+      SELECT id, token_hash, packet_id, revoked_at,
+             lease_process_marker, lease_process_pid, lease_process_group_id
       FROM worker_tokens
       WHERE token_hash = ? AND scope = ?
       LIMIT 1
@@ -65,7 +116,13 @@ export function resolvePacketWorkerToken(presented: string): PacketWorkerIdentit
     const expected = Buffer.from(row.token_hash, 'hex');
     const actual = Buffer.from(presentedHash, 'hex');
     if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return null;
-    return { tokenId: row.id, packetId: row.packet_id };
+    return {
+      tokenId: row.id,
+      packetId: row.packet_id,
+      leaseProcessMarker: row.lease_process_marker,
+      leaseProcessPid: row.lease_process_pid,
+      leaseProcessGroupId: row.lease_process_group_id,
+    };
   } catch {
     return null;
   }

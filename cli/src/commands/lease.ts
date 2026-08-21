@@ -1,19 +1,31 @@
 import { spawnSync } from 'node:child_process';
+import { createHash, randomBytes } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 import { apiFetch, CliError, EXIT } from '../api.js';
-import { resolveConfig } from '../config.js';
+import { resolveCliDataDir, resolveConfig } from '../config.js';
 import { printHumanHeading, printHumanKv, printJson, type OutputMode } from '../output.js';
 
 const DEFAULT_TTL_MS = 2 * 60 * 60_000;
 const MIN_TTL_MS = 1_000;
 const MAX_TTL_MS = 24 * 60 * 60_000;
 const WAIT_POLL_MS = 100;
+const CLAIM_FILE_SCHEMA = 'o8/cli/lease-claim/v1';
 
 interface LeaseOwner {
   id: string;
   label: string;
   pid: number;
+}
+
+interface StoredLeaseClaim {
+  schema: typeof CLAIM_FILE_SCHEMA;
+  resource: string;
+  ownerId: string;
+  ownerPid: number;
+  claimToken: string;
 }
 
 interface LeaseHolder {
@@ -267,6 +279,94 @@ function waiterId(owner: LeaseOwner): string {
   return `waiter:${owner.id}:${process.pid}:${Date.now()}`.slice(0, 512);
 }
 
+function claimFileName(resource: string, owner: LeaseOwner): string {
+  const digest = createHash('sha256')
+    .update(JSON.stringify([resource, owner.id, owner.pid]), 'utf8')
+    .digest('hex');
+  return `${digest}.json`;
+}
+
+function claimDirectories(): string[] {
+  const uid = typeof process.getuid === 'function' ? String(process.getuid()) : 'current-user';
+  return [
+    path.join(resolveCliDataDir(), 'lease-claims'),
+    path.join(os.tmpdir(), `o8-lease-claims-${uid}`),
+  ];
+}
+
+function readLeaseClaim(resource: string, owner: LeaseOwner): { claim: StoredLeaseClaim; path: string } | null {
+  const fileName = claimFileName(resource, owner);
+  for (const directory of claimDirectories()) {
+    const file = path.join(directory, fileName);
+    if (!existsSync(file)) continue;
+    try {
+      const parsed = JSON.parse(readFileSync(file, 'utf8')) as StoredLeaseClaim;
+      if (parsed.schema === CLAIM_FILE_SCHEMA
+        && parsed.resource === resource
+        && parsed.ownerId === owner.id
+        && parsed.ownerPid === owner.pid
+        && /^[A-Za-z0-9_-]{32,256}$/.test(parsed.claimToken)) {
+        return { claim: parsed, path: file };
+      }
+      throw new Error('claim contents do not match this process and resource');
+    } catch (error) {
+      throw new CliError(
+        'lease_claim_invalid',
+        `The private lease claim at ${file} is invalid: ${error instanceof Error ? error.message : String(error)}`,
+        EXIT.CONFLICT,
+      );
+    }
+  }
+  return null;
+}
+
+function loadOrCreateLeaseClaim(resource: string, owner: LeaseOwner): { claim: StoredLeaseClaim; path: string } {
+  const existing = readLeaseClaim(resource, owner);
+  if (existing) return existing;
+  const claim: StoredLeaseClaim = {
+    schema: CLAIM_FILE_SCHEMA,
+    resource,
+    ownerId: owner.id,
+    ownerPid: owner.pid,
+    claimToken: randomBytes(32).toString('base64url'),
+  };
+  const fileName = claimFileName(resource, owner);
+  let lastError: unknown;
+  for (const directory of claimDirectories()) {
+    const file = path.join(directory, fileName);
+    try {
+      mkdirSync(directory, { recursive: true, mode: 0o700 });
+      writeFileSync(file, `${JSON.stringify(claim)}\n`, {
+        encoding: 'utf8',
+        mode: 0o600,
+        flag: 'wx',
+      });
+      return { claim, path: file };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+        const concurrent = readLeaseClaim(resource, owner);
+        if (concurrent) return concurrent;
+      }
+      lastError = error;
+    }
+  }
+  throw new CliError(
+    'lease_claim_unavailable',
+    `The private lease claim could not be persisted: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
+    EXIT.CONFLICT,
+  );
+}
+
+function removeLeaseClaim(file: string): void {
+  try {
+    unlinkSync(file);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      process.stderr.write('warning: released lease, but could not remove its private claim file\n');
+    }
+  }
+}
+
 function holderSummary(holder: LeaseHolder | null | undefined): string {
   if (!holder) return '(none)';
   return `${holder.owner.label} (${holder.owner.id}, pid ${holder.owner.pid})`;
@@ -296,6 +396,7 @@ async function acquire(mode: OutputMode, rest: string[]): Promise<number> {
     );
   }
   const owner = leaseOwner();
+  const leaseClaim = loadOrCreateLeaseClaim(resource, owner);
   const wait = rest.includes('--wait');
   const ttlMs = parseLeaseTtlMs(flag(rest, 'ttl'));
   const requestId = waiterId(owner);
@@ -317,6 +418,7 @@ async function acquire(mode: OutputMode, rest: string[]): Promise<number> {
           action: 'acquire',
           resource,
           owner,
+          claimToken: leaseClaim.claim.claimToken,
           waiterPid: wait ? process.pid : undefined,
           ttlMs,
           wait,
@@ -354,6 +456,15 @@ async function release(mode: OutputMode, rest: string[]): Promise<number> {
   if (!resource) {
     throw new CliError('invalid_args', 'o8 lease release requires a resource name.', EXIT.INVALID_ARGS);
   }
+  const owner = leaseOwner();
+  const leaseClaim = readLeaseClaim(resource, owner);
+  if (!leaseClaim) {
+    throw new CliError(
+      'lease_claim_unavailable',
+      `This process has no private claim for ${resource}.`,
+      EXIT.CONFLICT,
+    );
+  }
   const response = await apiFetch<{
     ok: boolean;
     result?: { released: boolean; lease: LeaseHolder | null; nextHolder: LeaseHolder | null; refusal?: unknown };
@@ -361,7 +472,12 @@ async function release(mode: OutputMode, rest: string[]): Promise<number> {
     method: 'POST',
     allowConflict: true,
     allowNotFound: true,
-    body: { action: 'release', resource, owner: leaseOwner() },
+    body: {
+      action: 'release',
+      resource,
+      owner,
+      claimToken: leaseClaim.claim.claimToken,
+    },
   });
   const result = response.data?.result;
   const payload = { schema: 'o8/cli/lease.release/v1', ok: result?.released === true, resource, result: result ?? null };
@@ -375,6 +491,7 @@ async function release(mode: OutputMode, rest: string[]): Promise<number> {
   } else {
     printJson(payload);
   }
+  if (result?.released) removeLeaseClaim(leaseClaim.path);
   return result?.released ? EXIT.OK : response.status === 404 ? EXIT.NOT_FOUND : EXIT.CONFLICT;
 }
 

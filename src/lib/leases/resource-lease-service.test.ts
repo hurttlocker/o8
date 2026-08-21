@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type {
@@ -18,6 +19,8 @@ function participant(id: string, pid: number): ResourceLeaseParticipant {
     owner: { id, label: id, pid, identity: processIdentity },
     waiterPid: pid,
     waiterIdentity: processIdentity,
+    actor: `principal:${id}`,
+    claimTokenHash: createHash('sha256').update(`claim:${id}`).digest('hex'),
   };
 }
 
@@ -85,11 +88,11 @@ describe('resource lease store', () => {
       ttlMs: 1_000,
     });
     expect(acquired).toMatchObject({ state: 'acquired', lease: { owner: { id: 'second' } } });
-    expect(f.sqlite.prepare('SELECT verb FROM resource_lease_events ORDER BY sequence').all())
+    expect(f.sqlite.prepare('SELECT verb, actor FROM resource_lease_events ORDER BY sequence').all())
       .toEqual([
-        { verb: 'acquired' },
-        { verb: 'reaped' },
-        { verb: 'acquired' },
+        { verb: 'acquired', actor: 'principal:first' },
+        { verb: 'reaped', actor: 'system' },
+        { verb: 'acquired', actor: 'principal:second' },
       ]);
   });
 
@@ -116,7 +119,7 @@ describe('resource lease store', () => {
 
     const firstRelease = await f.store.release({
       resource,
-      owner: participant('first', 101).owner,
+      participant: participant('first', 101),
     });
     expect(firstRelease).toMatchObject({
       released: true,
@@ -129,7 +132,7 @@ describe('resource lease store', () => {
 
     const secondRelease = await f.store.release({
       resource,
-      owner: participant('second', 202).owner,
+      participant: participant('second', 202),
     });
     expect(secondRelease).toMatchObject({
       released: true,
@@ -137,13 +140,13 @@ describe('resource lease store', () => {
     });
     expect(f.sqlite.prepare('SELECT verb, actor FROM resource_lease_events ORDER BY sequence').all())
       .toEqual([
-        { verb: 'acquired', actor: 'first' },
-        { verb: 'wait_enqueued', actor: 'second' },
-        { verb: 'wait_enqueued', actor: 'third' },
-        { verb: 'released', actor: 'first' },
-        { verb: 'acquired', actor: 'second' },
-        { verb: 'released', actor: 'second' },
-        { verb: 'acquired', actor: 'third' },
+        { verb: 'acquired', actor: 'principal:first' },
+        { verb: 'wait_enqueued', actor: 'principal:second' },
+        { verb: 'wait_enqueued', actor: 'principal:third' },
+        { verb: 'released', actor: 'principal:first' },
+        { verb: 'acquired', actor: 'principal:second' },
+        { verb: 'released', actor: 'principal:second' },
+        { verb: 'acquired', actor: 'principal:third' },
       ]);
   });
 
@@ -169,7 +172,7 @@ describe('resource lease store', () => {
 
     const conflict = await f.store.release({
       resource,
-      owner: participant('third', 303).owner,
+      participant: participant('third', 303),
     });
     expect(conflict).toMatchObject({
       released: false,
@@ -177,7 +180,7 @@ describe('resource lease store', () => {
     });
     const release = await f.store.release({
       resource,
-      owner: participant('first', 101).owner,
+      participant: participant('first', 101),
     });
     expect(release).toMatchObject({ released: true, nextHolder: null });
     expect(await f.store.status(resource)).toMatchObject({
@@ -228,17 +231,45 @@ describe('resource lease store', () => {
     f.advance(500);
     expect(await f.store.heartbeat({
       resource: 'heartbeat-owner',
-      owner: participant('second', 202).owner,
+      participant: participant('second', 202),
       ttlMs: 2_000,
     })).toBeNull();
     expect(await f.store.heartbeat({
       resource: 'heartbeat-owner',
-      owner: participant('first', 101).owner,
+      participant: participant('first', 101),
       ttlMs: 2_000,
     })).toMatchObject({
       heartbeatAt: new Date(1_700_000_000_500).toISOString(),
       expiresAt: new Date(1_700_000_002_500).toISOString(),
       overdue: false,
     });
+  });
+
+  it('requires the private claim even when public holder fields and process identity match', async () => {
+    const f = fixture();
+    openDatabases.push(f.sqlite);
+    f.setLive(101);
+    const holder = participant('first', 101);
+    await f.store.acquire({ resource: 'private-claim', participant: holder });
+    const forged = {
+      ...holder,
+      actor: 'principal:attacker',
+      claimTokenHash: createHash('sha256').update('attacker-claim').digest('hex'),
+    };
+
+    expect(await f.store.heartbeat({
+      resource: 'private-claim',
+      participant: forged,
+    })).toBeNull();
+    expect(await f.store.release({
+      resource: 'private-claim',
+      participant: forged,
+    })).toMatchObject({
+      released: false,
+      refusal: { code: 'claim_unproven' },
+    });
+    expect(f.sqlite.prepare(`
+      SELECT verb, actor FROM resource_lease_events ORDER BY sequence
+    `).all()).toEqual([{ verb: 'acquired', actor: 'principal:first' }]);
   });
 });

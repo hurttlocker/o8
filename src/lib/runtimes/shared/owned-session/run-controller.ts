@@ -5,7 +5,10 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 import { getOrCreateLocalWorkerToken } from '@/lib/auth/worker-token';
-import { mintPacketWorkerToken } from '@/lib/auth/packet-worker-token';
+import {
+  bindPacketWorkerTokenProcess,
+  mintPacketWorkerToken,
+} from '@/lib/auth/packet-worker-token';
 import { recordLaneEvent } from '@/lib/lane/events';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { resolvePortInfo } from '@/lib/panel/api-port';
@@ -610,7 +613,7 @@ export function createOwnedRunController({
       adapterEnv[adapter.isolatedConfigHomeEnv] = session.identity.configHomeRef;
     }
     const workerToken = session.packetId
-      ? mintPacketWorkerToken(session.packetId)
+      ? mintPacketWorkerToken(session.packetId, { processMarker: runId })
       : getOrCreateLocalWorkerToken();
     const spawnEnv = {
       ...adapterEnv,
@@ -754,6 +757,20 @@ export function createOwnedRunController({
       tmuxSession: terminalSessionName,
       detachMode,
     };
+
+    if (session.packetId) {
+      try {
+        bindPacketWorkerTokenProcess(workerToken, {
+          pid,
+          processGroupId,
+          processMarker: runId,
+        });
+      } catch (error) {
+        console.warn(
+          `[owned-session] ${runtimeId} worker credential process binding failed closed for lease mutations: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
 
     session.activeRun = run;
     session.recentRuns = session.recentRuns.map((candidate) => candidate.id === run.id ? run : candidate);
