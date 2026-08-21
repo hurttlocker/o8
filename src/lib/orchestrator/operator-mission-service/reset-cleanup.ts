@@ -2,6 +2,9 @@ import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { cleanupLaneWorktree } from '@/lib/lane/worktree-cleanup';
+import type { LaneRuntime } from '@/lib/lane/types';
+import { runRuntimeAwareWorktreeCleanup } from '@/lib/orchestrator/runtime-worktree-cleanup';
+import { formatWorktreeHolderPids } from '@/lib/worktree/holder-diagnostics';
 
 const execFileAsync = promisify(execFile);
 
@@ -9,6 +12,7 @@ export interface ResetCleanupTarget {
   id: string;
   repoPath: string;
   branch: string;
+  runtime: LaneRuntime;
   worktreePath: string | null;
   overrideLiveGuard?: true;
 }
@@ -69,13 +73,19 @@ export async function cleanupResetPacketTargets(
       // reset is an explicit operator/recovery action — force past the prune
       // gate (records prune_forced) so a non-terminal lane's worktree can be
       // torn down for the restart. The head is banked first (force path).
-      const removed = await cleanupLaneWorktree(target, {
-        deleteBranch: false,
-        force: true,
-        overrideLiveGuard: target.overrideLiveGuard,
+      const cleanupAttempt = await runRuntimeAwareWorktreeCleanup({
+        runtime: target.runtime,
+        worktreePath: target.worktreePath,
+        cleanup: () => cleanupLaneWorktree(target, {
+          deleteBranch: false,
+          force: true,
+          overrideLiveGuard: target.overrideLiveGuard,
+        }),
+        removed: (removed) => removed || !existsSync(target.worktreePath!),
       });
+      const removed = cleanupAttempt.result;
       if (!removed && existsSync(target.worktreePath)) {
-        throw new Error(`Worktree cleanup was not confirmed for lane ${target.id} at ${target.worktreePath}.`);
+        throw new Error(`Worktree cleanup was not confirmed for lane ${target.id} at ${target.worktreePath}.${formatWorktreeHolderPids(cleanupAttempt.holderPids)}`);
       }
       worktreePruned = removed || worktreePruned;
     }

@@ -15,6 +15,7 @@ describe('declarative OpenCode 2 owned adapter', () => {
       '--format', 'json',
       '--model', 'opencode/deepseek-v4-flash-free',
       '--auto',
+      '--standalone',
     ]);
     expect(opencodeAdapter.resumeArgs({
       threadId: 'ses_123',
@@ -26,6 +27,7 @@ describe('declarative OpenCode 2 owned adapter', () => {
       '--session', 'ses_123',
       '--model', 'opencode/deepseek-v4-flash-free',
       '--auto',
+      '--standalone',
     ]);
 
     const run: OwnedRunRecord = {

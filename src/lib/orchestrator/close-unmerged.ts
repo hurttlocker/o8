@@ -19,6 +19,8 @@ import {
 import { collectPacketLifecycleLanes } from '@/lib/orchestrator/packet-lifecycle-targets';
 import { markOutcomeClosedUnmerged } from '@/lib/orchestrator/context-relay';
 import { removeMergedWorktree } from '@/lib/orchestrator/worktree-cleanup';
+import { runRuntimeAwareWorktreeCleanup } from '@/lib/orchestrator/runtime-worktree-cleanup';
+import { formatWorktreeHolderPids } from '@/lib/worktree/holder-diagnostics';
 import { requestRealtimeRefresh } from '@/lib/realtime/publisher';
 import { unregisterWatchedAgent } from '@/lib/supervisor/agent-supervisor';
 // #1570 build fix: the client-safe vocabulary (dispositions, labels, types)
@@ -283,14 +285,20 @@ async function closePacketUnmergedUnlocked(input: {
     let worktreeRemoved = false;
     for (const candidate of lanesToClose) {
       try {
-        const cleanup = await removeMergedWorktree(candidate);
+        const cleanupAttempt = await runRuntimeAwareWorktreeCleanup({
+          runtime: candidate.runtime,
+          worktreePath: candidate.worktreePath,
+          cleanup: () => removeMergedWorktree(candidate),
+          removed: (result) => result.removed || result.reason === 'worktree-equals-repo',
+        });
+        const cleanup = cleanupAttempt.result;
         const intentionalMainCheckout = cleanup.reason === 'worktree-equals-repo';
         if (!cleanup.removed && !intentionalMainCheckout) {
           await markPacketLifecycleFailure(guard, 'worktree_cleanup_failed');
           return {
             ok: false,
             code: 'close_failed',
-            message: `Close refused because worktree cleanup for lane ${candidate.id} was not confirmed (${cleanup.reason ?? 'unknown'}). The packet remains held and the checkout remains visible.`,
+            message: `Close refused because worktree cleanup for lane ${candidate.id} was not confirmed (${cleanup.reason ?? 'unknown'}). The packet remains held and the checkout remains visible.${formatWorktreeHolderPids(cleanupAttempt.holderPids)}`,
             status: 409,
           };
         }

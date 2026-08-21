@@ -39,6 +39,7 @@ const opencodeRegistration = registerDeclarativeOwnedRuntime({
     '--format', 'json',
     '--model', '{{model}}',
     '--auto',
+    '--standalone',
   ],
   resumeArgs: [
     'run',
@@ -47,6 +48,7 @@ const opencodeRegistration = registerDeclarativeOwnedRuntime({
     '--session', '{{threadId}}',
     { when: 'model', args: ['--model', '{{model}}'] },
     '--auto',
+    '--standalone',
   ],
   parseRunLog: {
     patterns: [

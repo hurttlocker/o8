@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 
@@ -9,6 +9,7 @@ import { NextRequest } from 'next/server';
 import { eq } from 'drizzle-orm';
 
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { createOpenCodeServiceFixture } from './helpers/opencode-service-fixture';
 
 const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-close-unmerged-'));
 const wsToken = 'operator-close-unmerged-token-0123456789';
@@ -41,6 +42,72 @@ function operatorRequest(body: Record<string, unknown>) {
     },
     body: JSON.stringify({ clientMutationId: `close-test-${randomUUID()}`, ...body }),
   });
+}
+
+function createLinkedWorktree(prefix: string, branch: string) {
+  const root = mkdtempSync(join(dataDir, prefix));
+  const repoPath = join(root, 'repo');
+  const worktreePath = join(root, 'worktree');
+  const git = (cwd: string, ...args: string[]) => execFileSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    stdio: 'pipe',
+  });
+  git(root, 'init', '--initial-branch=main', repoPath);
+  git(repoPath, '-c', 'user.email=test@o8.test', '-c', 'user.name=o8-test',
+    'commit', '--allow-empty', '-m', 'init');
+  git(repoPath, 'worktree', 'add', '-b', branch, worktreePath);
+  return { root, repoPath, worktreePath };
+}
+
+function persistOpenCodeClosePacket(input: {
+  packetId: string;
+  repoPath: string;
+  worktreePath: string;
+  branch: string;
+}) {
+  const lane = createLane({
+    repoPath: input.repoPath,
+    worktreePath: input.worktreePath,
+    branch: input.branch,
+    baseBranch: 'main',
+    runtime: 'opencode',
+    label: 'OpenCode service cleanup',
+    packetId: input.packetId,
+  });
+  setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
+  writeOrchestratorControlPlaneState({
+    ...createEmptyOrchestratorMissionState(),
+    missionId: `mission-${input.packetId}`,
+    repoPath: input.repoPath,
+    runtime: 'opencode',
+    packets: [{
+      id: input.packetId,
+      referenceLabel: '#1799',
+      title: 'Release OpenCode workspace before close',
+      summary: 'The completed worker no longer owns its worktree.',
+      workspaceTargetPath: input.repoPath,
+      branchTarget: input.branch,
+      runtime: 'opencode',
+      dependencyLabels: [],
+      dependencyPacketIds: [],
+      queueState: 'held',
+      releaseState: 'pending',
+      status: 'awaiting_review',
+      blockedReason: null,
+      lane: {
+        tileId: lane.id,
+        tabId: lane.id,
+        repoPath: input.repoPath,
+        worktreePath: input.worktreePath,
+        runtime: 'opencode',
+        laneId: lane.id,
+      },
+      review: null,
+    } as OrchestratorPacket],
+    updatedAt: new Date().toISOString(),
+  });
+  return lane;
 }
 
 describe('close_packet_unmerged real path (#1570)', () => {
@@ -558,5 +625,81 @@ process.exit(run.status ?? 1);
       blockedReason: 'worktree_cleanup_failed',
       lane: { laneId: lane.id, worktreePath },
     });
+  });
+
+  it('releases the OpenCode service location before close removes the worktree', { timeout: 20_000 }, async () => {
+    const packetId = 'pkt-opencode-close-release';
+    const branch = 'issue/opencode-close-release';
+    const { root, repoPath, worktreePath } = createLinkedWorktree('opencode-close-', branch);
+    const lane = persistOpenCodeClosePacket({ packetId, repoPath, worktreePath, branch });
+    const fixture = createOpenCodeServiceFixture(root, worktreePath);
+    const originalPath = process.env.PATH;
+    const originalBinary = process.env.O8_OPENCODE_BIN;
+
+    let response: Response;
+    try {
+      process.env.PATH = `${fixture.binDir}:${originalPath ?? ''}`;
+      process.env.O8_OPENCODE_BIN = fixture.opencodeBin;
+      response = await closeRoute.POST(operatorRequest({ packetId, disposition: 'wontfix' }));
+    } finally {
+      process.env.PATH = originalPath;
+      if (originalBinary === undefined) delete process.env.O8_OPENCODE_BIN;
+      else process.env.O8_OPENCODE_BIN = originalBinary;
+    }
+
+    expect(response.status).toBe(200);
+    expect(existsSync(worktreePath)).toBe(false);
+    expect(getLane(lane.id)?.status).toBe('archived');
+    const calls = fixture.readLog();
+    const releaseIndex = calls.findIndex((call) => call.startsWith('opencode api delete /api/debug/location?'));
+    const removalProbeIndex = calls.findIndex((call) => call.startsWith('lsof -a -d cwd'));
+    expect(releaseIndex).toBeGreaterThanOrEqual(0);
+    expect(removalProbeIndex).toBeGreaterThan(releaseIndex);
+    expect(calls.filter((call) => call.startsWith('opencode api delete /api/debug/location?'))).toHaveLength(1);
+  });
+
+  it('retries OpenCode cleanup once and names the remaining holder PID', { timeout: 20_000 }, async () => {
+    const packetId = 'pkt-opencode-close-held';
+    const branch = 'issue/opencode-close-held';
+    const { root, repoPath, worktreePath } = createLinkedWorktree('opencode-held-', branch);
+    const lane = persistOpenCodeClosePacket({ packetId, repoPath, worktreePath, branch });
+    const fixture = createOpenCodeServiceFixture(root, worktreePath, {
+      stickyLocation: true,
+      holderPid: 54321,
+    });
+    const originalPath = process.env.PATH;
+    const originalBinary = process.env.O8_OPENCODE_BIN;
+
+    let response: Response;
+    try {
+      process.env.PATH = `${fixture.binDir}:${originalPath ?? ''}`;
+      process.env.O8_OPENCODE_BIN = fixture.opencodeBin;
+      response = await closeRoute.POST(operatorRequest({ packetId, disposition: 'wontfix' }));
+    } finally {
+      process.env.PATH = originalPath;
+      if (originalBinary === undefined) delete process.env.O8_OPENCODE_BIN;
+      else process.env.O8_OPENCODE_BIN = originalBinary;
+    }
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: 'close_failed',
+        message: expect.stringContaining('Holder PID: 54321'),
+      },
+    });
+    expect(existsSync(worktreePath)).toBe(true);
+    expect(getLane(lane.id)).toMatchObject({ status: 'reviewing', worktreePath });
+    expect(readOrchestratorControlPlaneState().packets[0]).toMatchObject({
+      status: 'blocked',
+      queueState: 'held',
+      blockedReason: 'worktree_cleanup_failed',
+      lane: { laneId: lane.id, worktreePath },
+    });
+    const calls = fixture.readLog();
+    expect(calls.filter((call) => call.startsWith('opencode api delete /api/debug/location?'))).toHaveLength(2);
+    expect(calls.filter((call) => call.startsWith('lsof -a -d cwd'))).toHaveLength(2);
+    expect(calls.filter((call) => call.startsWith('lsof -Fn +D'))).toHaveLength(1);
   });
 });

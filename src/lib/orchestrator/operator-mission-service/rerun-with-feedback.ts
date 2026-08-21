@@ -205,6 +205,7 @@ async function retireRerunGeneration(guard: PacketLifecycleGuard): Promise<boole
       id: target.id,
       repoPath: target.repoPath,
       branch: target.branch,
+      runtime: target.runtime,
       worktreePath: target.worktreePath,
       overrideLiveGuard: target.sessionKey?.trim()
         && confirmedKills.has(`${target.id}\0${target.sessionKey}`)
@@ -271,6 +272,7 @@ async function retireFailedRerunReplacement(guard: PacketLifecycleGuard): Promis
       id: lane.id,
       repoPath: lane.repoPath,
       branch: lane.branch,
+      runtime: lane.runtime,
       worktreePath: lane.worktreePath,
       overrideLiveGuard: lane.sessionKey?.trim()
         && confirmed.has(`${lane.id}\0${lane.sessionKey}`)

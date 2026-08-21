@@ -1,8 +1,10 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import { createOpenCodeServiceFixture } from './helpers/opencode-service-fixture';
 
 const h = vi.hoisted(() => ({
   publishRealtimeMutation: vi.fn(async () => true),
@@ -49,6 +51,22 @@ afterAll(() => {
   closeDb();
   rmSync(dataDir, { recursive: true, force: true });
 });
+
+function createLinkedWorktree(prefix: string, branch: string) {
+  const root = mkdtempSync(join(dataDir, prefix));
+  const repoPath = join(root, 'repo');
+  const worktreePath = join(root, 'worktree');
+  const git = (cwd: string, ...args: string[]) => execFileSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    stdio: 'pipe',
+  });
+  git(root, 'init', '--initial-branch=main', repoPath);
+  git(repoPath, '-c', 'user.email=test@o8.test', '-c', 'user.name=o8-test',
+    'commit', '--allow-empty', '-m', 'init');
+  git(repoPath, 'worktree', 'add', '-b', branch, worktreePath);
+  return { root, repoPath, worktreePath };
+}
 
 describe('reset lifecycle retirement through the operator route', () => {
   it('rejects an uncorrelated reset before touching packet state', async () => {
@@ -123,5 +141,66 @@ describe('reset lifecycle retirement through the operator route', () => {
       result: { replayed: true },
     });
     expect(h.publishRealtimeMutation).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases the OpenCode service location before reset removes the worktree', { timeout: 20_000 }, async () => {
+    const packetId = 'packet-reset-opencode-release';
+    const branch = 'issue/reset-opencode-release';
+    const { root, repoPath, worktreePath } = createLinkedWorktree('reset-opencode-', branch);
+    const lane = createLane({
+      repoPath,
+      branch,
+      runtime: 'opencode',
+      packetId,
+      worktreePath,
+    });
+    setLaneStatus(lane.id, 'failed', 'system', 'worker_completed');
+    const fixture = createOpenCodeServiceFixture(root, worktreePath);
+    const originalPath = process.env.PATH;
+    const originalBinary = process.env.O8_OPENCODE_BIN;
+
+    let response: Response;
+    try {
+      process.env.PATH = `${fixture.binDir}:${originalPath ?? ''}`;
+      process.env.O8_OPENCODE_BIN = fixture.opencodeBin;
+      response = await route.POST(new NextRequest('http://localhost:3001/api/orchestrator/reset-packet', {
+        method: 'POST',
+        headers: {
+          host: 'localhost:3001',
+          authorization: `Bearer ${operatorToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          packetId,
+          clearWorktree: true,
+          idempotencyKey: 'reset-opencode-release-route',
+        }),
+      }));
+    } finally {
+      process.env.PATH = originalPath;
+      if (originalBinary === undefined) delete process.env.O8_OPENCODE_BIN;
+      else process.env.O8_OPENCODE_BIN = originalBinary;
+    }
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      result: {
+        reset: true,
+        packetId,
+        worktreePruned: true,
+      },
+    });
+    expect(existsSync(worktreePath)).toBe(false);
+    expect(getLane(lane.id)).toMatchObject({
+      status: 'archived',
+      packetId: '',
+      worktreePath: null,
+    });
+    const calls = fixture.readLog();
+    const releaseIndex = calls.findIndex((call) => call.startsWith('opencode api delete /api/debug/location?'));
+    const removalProbeIndex = calls.findIndex((call) => call.startsWith('lsof -a -d cwd'));
+    expect(releaseIndex).toBeGreaterThanOrEqual(0);
+    expect(removalProbeIndex).toBeGreaterThan(releaseIndex);
   });
 });

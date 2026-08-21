@@ -450,6 +450,7 @@ async function resetPacketUnlocked(input: ResetPacketInput) {
           id: lane.id,
           repoPath: lane.repoPath,
           branch: lane.branch,
+          runtime: lane.runtime,
           worktreePath: lane.worktreePath,
           overrideLiveGuard: confirmedKills.has(lane.id) ? true : undefined,
         });
