@@ -144,10 +144,8 @@ export const MISSION_TOOLS: McpTool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        missionId: {
-          type: 'string',
-          description: 'Optional mission ID. If omitted, dispatches the current stored mission.',
-        },
+        missionId: { type: 'string', description: 'Optional mission ID. If omitted, dispatches the current stored mission.' },
+        runtime: { type: 'string', enum: listDispatchableRuntimes(), description: 'Optional per-dispatch worker runtime. When set, it overrides the runtime stamped on every not-yet-launched packet admitted by this dispatch.' },
       },
     },
   },
@@ -902,6 +900,7 @@ export async function handleDispatchMission(args: Record<string, unknown>): Prom
   try {
     const result = await dispatchMission({
       missionId: optionalString(args, 'missionId') || undefined,
+      runtime: args.runtime === undefined ? undefined : parseMissionRuntime(args.runtime),
     });
     return jsonResult(result);
   } catch (error) {

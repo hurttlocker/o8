@@ -85,6 +85,7 @@ export interface CreateMissionInput {
 
 export interface DispatchMissionInput {
   missionId?: string;
+  runtime?: OrchestratorRuntime;
 }
 
 export interface MissionStatusInput {

@@ -2,7 +2,7 @@ import { reconcileOrchestratorControlPlaneState, withLockedState } from '@/lib/o
 import { withMissionHandoffBarrier } from '@/lib/orchestrator/lifecycle-mutation-lock';
 import { releaseAbandonedMissionLifecycleHold } from '@/lib/orchestrator/mission-lifecycle-hold';
 import { withMissionRegistryState } from '@/lib/orchestrator/mission-registry';
-import { rearmHeldPacketsForExplicitDispatch } from './dispatch-result';
+import { preparePacketsForExplicitDispatch } from './dispatch-runtime-override';
 import { resolveMissionDispatchTarget } from './mission';
 import { currentMissionState } from './shared';
 import type { DispatchMissionInput } from './types';
@@ -22,7 +22,7 @@ export async function prepareMissionDispatch(input: DispatchMissionInput) {
           reconcileOrchestratorControlPlaneState(stored),
           { allowOwnerTakeover: true },
         );
-        if (!prepared.lifecycleHold) rearmHeldPacketsForExplicitDispatch(prepared);
+        if (!prepared.lifecycleHold) preparePacketsForExplicitDispatch(prepared, input.runtime);
         return { state: prepared, result: undefined };
       });
       return { missionId: requestedMissionId, blocked: Boolean(state.lifecycleHold) };
@@ -30,7 +30,7 @@ export async function prepareMissionDispatch(input: DispatchMissionInput) {
 
     const { state } = await withLockedState(async (stored) => {
       const prepared = releaseAbandonedMissionLifecycleHold(stored, { allowOwnerTakeover: true });
-      if (!prepared.lifecycleHold) rearmHeldPacketsForExplicitDispatch(prepared);
+      if (!prepared.lifecycleHold) preparePacketsForExplicitDispatch(prepared, input.runtime);
       Object.assign(stored, prepared);
     });
     return { missionId: requestedMissionId, blocked: Boolean(state.lifecycleHold) };

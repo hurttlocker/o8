@@ -459,7 +459,7 @@ export async function dispatchMission(input: DispatchMissionInput) {
   try {
     return await correlatedApiRequest<Awaited<ReturnType<typeof import('@/lib/orchestrator/operator-mission-service').dispatchMission>>>(
       '/api/orchestrator/dispatch',
-      { missionId: input.missionId },
+      { missionId: input.missionId, runtime: input.runtime },
     );
   } catch (error) {
     return missionToolError('dispatchMission', error, 'Failed to dispatch mission.');

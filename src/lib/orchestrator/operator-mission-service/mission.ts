@@ -28,7 +28,7 @@ import { getTopRulesForPacket, readRepoScopedRules } from '@/lib/dispatch/rules-
 import { prepareMissionBranches, type MissionBranchDecision } from './branch-cleanup';
 import { recordOutgoingMissionSnapshot } from './mission-handoff';
 import { logDispatchRoutingRecommendations } from './mission-routing-log';
-import { rearmHeldPacketsForExplicitDispatch, summarizeDispatchMission } from './dispatch-result';
+import { preparePacketsForExplicitDispatch, summarizeDispatchMission } from './dispatch-runtime-override';
 import {
   buildMissionId,
   buildMissionPrompt,
@@ -398,7 +398,7 @@ export async function dispatchMission(input: DispatchMissionInput) {
         reconcileOrchestratorControlPlaneState(stored),
         { allowOwnerTakeover: true },
       );
-      if (!registryBefore.lifecycleHold) rearmHeldPacketsForExplicitDispatch(registryBefore);
+      if (!registryBefore.lifecycleHold) preparePacketsForExplicitDispatch(registryBefore, input.runtime);
       const afterDispatch = await runDispatchTick(registryBefore, { launchBudget: buildRemainingLaunchBudget() });
       return { state: afterDispatch, result: summarizeDispatchMission(registryBefore, afterDispatch) };
     });
@@ -421,7 +421,7 @@ export async function dispatchMission(input: DispatchMissionInput) {
     // (so reset doesn't boomerang); an explicit dispatch_mission is the operator
     // opting back in, so promote held -> queued here before dispatching.
     Object.assign(current, releaseAbandonedMissionLifecycleHold(current, { allowOwnerTakeover: true }));
-    if (!current.lifecycleHold) rearmHeldPacketsForExplicitDispatch(current);
+    if (!current.lifecycleHold) preparePacketsForExplicitDispatch(current, input.runtime);
     const afterDispatch = await runDispatchTick(current, { launchBudget: buildRemainingLaunchBudget() });
     // #1293 — make withLockedState's end-of-lock reconcile+write use the
     // post-dispatch state, not the unmutated pre-callback `current`. Without this
