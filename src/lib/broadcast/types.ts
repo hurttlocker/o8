@@ -10,6 +10,8 @@ export const BROADCAST_EVENT_KINDS = [
   'approval',
   'agent_completed',
   'message',
+  'commentary',
+  'conversation',
 ] as const;
 
 export type BroadcastEventKind = (typeof BROADCAST_EVENT_KINDS)[number];
@@ -17,7 +19,7 @@ export type BroadcastEventKind = (typeof BROADCAST_EVENT_KINDS)[number];
 export interface BroadcastEvent {
   schema: 'o8/broadcast.event/v1';
   id: string;
-  source: 'lane' | 'lease' | 'approval';
+  source: 'lane' | 'lease' | 'approval' | 'broadcast';
   kind: BroadcastEventKind;
   laneId: string | null;
   packetId: string | null;

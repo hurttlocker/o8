@@ -31,6 +31,8 @@ const PAYLOAD_SUMMARY_KEYS = [
   'resource',
   'summary',
   'note',
+  'text',
+  'audience',
   'approved',
   'status',
 ] as const;
@@ -38,7 +40,7 @@ const PAYLOAD_SUMMARY_KEYS = [
 interface RawBroadcastRow {
   id: string;
   source: BroadcastEvent['source'];
-  raw_source: 'lane' | 'lease' | 'approval_create' | 'approval_event';
+  raw_source: 'lane' | 'lease' | 'approval_create' | 'approval_event' | 'broadcast';
   ordinal: number;
   source_kind: string;
   actor: string;
@@ -166,6 +168,29 @@ const EVENT_UNION_SQL = `
   FROM approval_events event
   JOIN approvals approval ON approval.id = event.approval_id
   LEFT JOIN lanes lane ON lane.id = approval.lane_id
+
+  UNION ALL
+
+  SELECT
+    event.id AS id,
+    'broadcast' AS source,
+    'broadcast' AS raw_source,
+    event.sequence AS ordinal,
+    event.kind AS source_kind,
+    event.actor AS actor,
+    json_patch(
+      event.metadata_json,
+      json_object('text', event.text, 'audience', event.audience)
+    ) AS payload_json,
+    event.created_at AS timestamp,
+    event.lane_id AS lane_id,
+    event.packet_id AS packet_id,
+    NULL AS repo_path,
+    NULL AS lane_label,
+    NULL AS approval_title,
+    NULL AS approval_risk,
+    NULL AS resource
+  FROM broadcast_events event
 `;
 
 function parsePayload(payloadJson: string): Record<string, unknown> {
@@ -199,7 +224,15 @@ export function decodeBroadcastCursor(value: string): BroadcastCursor | null {
         return Number.isSafeInteger(position) && Number(position) >= 0;
       })
     ) return null;
-    return parsed as BroadcastCursor;
+    const broadcast = parsed.positions.broadcast;
+    if (broadcast !== undefined && (!Number.isSafeInteger(broadcast) || broadcast < 0)) return null;
+    return {
+      v: 1,
+      positions: {
+        ...parsed.positions,
+        broadcast: broadcast ?? 0,
+      } as BroadcastCursor['positions'],
+    };
   } catch {
     return null;
   }
@@ -216,6 +249,7 @@ function rawRowsAfter(
       OR (raw_source = 'lease' AND ordinal > ?)
       OR (raw_source = 'approval_create' AND ordinal > ?)
       OR (raw_source = 'approval_event' AND ordinal > ?)
+      OR (raw_source = 'broadcast' AND ordinal > ?)
     ORDER BY timestamp ASC, raw_source ASC, ordinal ASC
     LIMIT ?
   `).all(
@@ -223,6 +257,7 @@ function rawRowsAfter(
     cursor.positions.lease,
     cursor.positions.approval_create,
     cursor.positions.approval_event,
+    cursor.positions.broadcast,
     limit,
   ) as RawBroadcastRow[];
 }
@@ -260,7 +295,8 @@ function currentCursor(sqlite: Database.Database): BroadcastCursor {
       COALESCE((SELECT MAX(rowid) FROM lane_events), 0) AS lane,
       COALESCE((SELECT MAX(sequence) FROM resource_lease_events), 0) AS lease,
       COALESCE((SELECT MAX(rowid) FROM approvals), 0) AS approval_create,
-      COALESCE((SELECT MAX(rowid) FROM approval_events), 0) AS approval_event
+      COALESCE((SELECT MAX(rowid) FROM approval_events), 0) AS approval_event,
+      COALESCE((SELECT MAX(sequence) FROM broadcast_events), 0) AS broadcast
   `).get() as BroadcastCursor['positions'];
   return { v: 1, positions: row };
 }
@@ -273,6 +309,7 @@ function emptyCursor(): BroadcastCursor {
       lease: 0,
       approval_create: 0,
       approval_event: 0,
+      broadcast: 0,
     },
   };
 }
@@ -288,6 +325,10 @@ function advanceCursor(cursor: BroadcastCursor, row: RawBroadcastRow): Broadcast
 }
 
 function eventKind(row: RawBroadcastRow, payload: Record<string, unknown>): BroadcastEventKind | null {
+  if (row.source === 'broadcast') {
+    if (row.source_kind === 'commentary' || row.source_kind === 'conversation') return row.source_kind;
+    return null;
+  }
   if (row.source === 'lease') {
     if (row.source_kind === 'acquired') return 'lease_acquired';
     if (row.source_kind === 'released' || row.source_kind === 'reaped') return 'lease_released';
@@ -324,6 +365,9 @@ function repoLabel(repoPath: string | null): string | null {
 }
 
 function detailFor(kind: BroadcastEventKind, row: RawBroadcastRow, payload: Record<string, unknown>): string | null {
+  if (kind === 'commentary' || kind === 'conversation') {
+    return typeof payload.text === 'string' ? payload.text : null;
+  }
   if (kind === 'progress') return typeof payload.message === 'string' ? payload.message : null;
   if (kind === 'brain_consulted') return typeof payload.question === 'string' ? payload.question : null;
   if (kind === 'lease_timeout') return typeof payload.resource === 'string' ? payload.resource : null;
@@ -359,6 +403,10 @@ function titleFor(
     approval: 'Approval activity',
     agent_completed: 'Agent completed',
     message: 'Agent message',
+    commentary: 'Commentary',
+    conversation: typeof payload.audience === 'string' && payload.audience.trim()
+      ? `Conversation · ${row.actor} to ${payload.audience.trim()}`
+      : `Conversation · ${row.actor}`,
   };
   return subject ? `${labels[kind]} · ${subject}` : labels[kind];
 }

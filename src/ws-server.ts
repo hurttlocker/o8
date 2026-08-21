@@ -227,6 +227,7 @@ import {
 import { isLoopbackAddress } from './lib/auth/loopback-request';
 import { bootCompactorScheduler } from './lib/cortex/compactor-scheduler';
 import { bootAutomationsScheduler } from './lib/automations/scheduler';
+import { startBroadcastDirectorLoop } from './lib/broadcast/director';
 import type {
   LaneLifecycleEventPayload,
   RealtimeBatchMessage,
@@ -8969,6 +8970,7 @@ async function bootstrapWsServer() {
 
     bootCompactorScheduler();
     bootAutomationsScheduler();
+    startBroadcastDirectorLoop();
 
     void (async () => {
       try {

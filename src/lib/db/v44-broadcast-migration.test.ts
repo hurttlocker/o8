@@ -10,7 +10,7 @@ afterEach(() => {
 });
 
 describe('v44 Broadcast migration', () => {
-  it('is additive, repeatable, and constrains stored credentials to hashes', () => {
+  it('is additive, repeatable, and constrains credentials and feed text', () => {
     const sqlite = new Database(':memory:');
     openDatabases.push(sqlite);
     sqlite.exec('CREATE TABLE legacy_state (id TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO legacy_state VALUES (\'live\', \'untouched\');');
@@ -28,5 +28,18 @@ describe('v44 Broadcast migration', () => {
       INSERT INTO broadcast_tokens (id, token_hash, created_at)
       VALUES ('bad', 'plaintext', 'now')
     `).run()).toThrow();
+    sqlite.prepare(`
+      INSERT INTO broadcast_events (id, kind, actor, text, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).run('broadcast-one', 'commentary', 'mister', 'A bounded line.', new Date().toISOString());
+    expect(sqlite.prepare('SELECT kind, actor, text FROM broadcast_events').get()).toEqual({
+      kind: 'commentary',
+      actor: 'mister',
+      text: 'A bounded line.',
+    });
+    expect(() => sqlite.prepare(`
+      INSERT INTO broadcast_events (id, kind, actor, text, created_at)
+      VALUES ('broadcast-too-long', 'commentary', 'mister', ?, 'now')
+    `).run('x'.repeat(2_001))).toThrow();
   });
 });

@@ -200,6 +200,23 @@ export const STATUS_TOOLS: McpTool[] = [
           enum: ['adaptive', 'low', 'medium', 'high', 'max', 'xhigh'],
           description: 'Codex reasoning effort used only by Engineering Brain calls.',
         },
+        broadcastCommentary: {
+          type: 'string',
+          enum: ['off', 'interval'],
+          description: 'Whether Mister posts bounded interval commentary to Broadcast.',
+        },
+        broadcastCommentaryIntervalMinutes: {
+          type: 'number',
+          description: 'Minimum minutes between director commentary turns. Default 4.',
+        },
+        broadcastCommentaryMinNewEvents: {
+          type: 'number',
+          description: 'Minimum new feed events required for a commentary turn. Default 3.',
+        },
+        broadcastCommentaryMaxPerHour: {
+          type: 'number',
+          description: 'Maximum director commentary turns in one hour. Default 12.',
+        },
         claudeWorkerEffort: {
           type: 'string',
           enum: ['adaptive', 'low', 'medium', 'high', 'max', 'xhigh'],
@@ -284,6 +301,10 @@ const OPERATOR_DEFAULTS_KEYS = [
   'claudeWorkerEffort',
   'brainCodexModel',
   'brainCodexEffort',
+  'broadcastCommentary',
+  'broadcastCommentaryIntervalMinutes',
+  'broadcastCommentaryMinNewEvents',
+  'broadcastCommentaryMaxPerHour',
   'overlapGate',
   'parallelCap',
   'meteredPacketCostCapUsd',

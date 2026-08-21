@@ -19,7 +19,41 @@ afterEach(() => {
   else process.env.O8_WORKER_PACKET_ID = originalWorkerPacketId;
 });
 
-describe('Broadcast CLI token commands', () => {
+describe('Broadcast CLI commands', () => {
+  it('posts a conversation through the aligned post endpoint', async () => {
+    process.env.O8_API_PORT = '40123';
+    process.env.O8_API_TOKEN = 'operator-token';
+    delete process.env.O8_WORKER_TOKEN;
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      schema: 'o8/broadcast.post/v1',
+      ok: true,
+      event: {
+        id: 'broadcast-one',
+        kind: 'conversation',
+        actor: 'operator',
+        audience: 'mister',
+        text: 'Give us the latest.',
+        timestamp: '2026-08-21T00:00:00.000Z',
+      },
+    }), { status: 201, headers: { 'Content-Type': 'application/json' } }));
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    await expect(runBroadcast(
+      { human: false, verbose: false },
+      'post',
+      ['--kind', 'conversation', '--as', 'operator', '--to', 'mister', 'Give us the latest.'],
+    )).resolves.toBe(0);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe('http://127.0.0.1:40123/api/broadcast/post');
+    expect(JSON.parse(String(init?.body))).toEqual({
+      kind: 'conversation',
+      actor: 'operator',
+      audience: 'mister',
+      text: 'Give us the latest.',
+    });
+  });
+
   it('mints through the real API client and emits a fragment-only spectator URL', async () => {
     process.env.O8_API_PORT = '40123';
     process.env.O8_API_TOKEN = 'operator-token';

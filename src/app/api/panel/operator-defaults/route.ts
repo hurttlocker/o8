@@ -20,6 +20,7 @@ import {
   type OperatorDefaults,
   type OverlapGateMode,
 } from '@/lib/operator/defaults';
+import { isBroadcastCommentaryMode } from '@/lib/operator/broadcast-commentary-defaults';
 import { isDispatchRuntime } from '@/lib/operator/defaults-env';
 import { isWorkerStartMode } from '@/lib/operator/worker-start-mode';
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
@@ -139,6 +140,26 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
       throw new Error('reviewContinuation must be boolean.');
     }
     update.reviewContinuation = body.reviewContinuation;
+  }
+
+  if (body.broadcastCommentary !== undefined) {
+    if (!isBroadcastCommentaryMode(body.broadcastCommentary)) {
+      throw new Error('broadcastCommentary must be "off" or "interval".');
+    }
+    update.broadcastCommentary = body.broadcastCommentary;
+  }
+
+  for (const [field, maximum] of [
+    ['broadcastCommentaryIntervalMinutes', 1_440],
+    ['broadcastCommentaryMinNewEvents', 100],
+    ['broadcastCommentaryMaxPerHour', 60],
+  ] as const) {
+    if (body[field] === undefined) continue;
+    const value = body[field];
+    if (!Number.isSafeInteger(value) || Number(value) < 1 || Number(value) > maximum) {
+      throw new Error(`${field} must be an integer from 1 through ${maximum}.`);
+    }
+    update[field] = Number(value);
   }
 
   if (body.apfsDependencyImages !== undefined) {

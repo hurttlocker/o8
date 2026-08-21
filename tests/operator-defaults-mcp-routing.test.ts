@@ -296,6 +296,10 @@ describe('MCP operator defaults and dispatch routing', () => {
       claudeWorkerEffort: expect.any(Object),
       brainCodexModel: expect.any(Object),
       brainCodexEffort: expect.any(Object),
+      broadcastCommentary: expect.any(Object),
+      broadcastCommentaryIntervalMinutes: expect.any(Object),
+      broadcastCommentaryMinNewEvents: expect.any(Object),
+      broadcastCommentaryMaxPerHour: expect.any(Object),
       brainUseClaudeCli: expect.any(Object),
       defaultDispatchModel: expect.any(Object),
       meteredPacketCostCapUsd: expect.any(Object),
@@ -315,6 +319,10 @@ describe('MCP operator defaults and dispatch routing', () => {
       requireApproval: 'always',
       meteredPacketCostCapUsd: 0.75,
       meteredPacketInputTokenCap: 400_000,
+      broadcastCommentary: 'interval',
+      broadcastCommentaryIntervalMinutes: 6,
+      broadcastCommentaryMinNewEvents: 4,
+      broadcastCommentaryMaxPerHour: 10,
     });
     expect(result.isError).not.toBe(true);
     expect(resultJson(result).values).toMatchObject({
@@ -325,6 +333,10 @@ describe('MCP operator defaults and dispatch routing', () => {
       requireApproval: 'always',
       meteredPacketCostCapUsd: 0.75,
       meteredPacketInputTokenCap: 400_000,
+      broadcastCommentary: 'interval',
+      broadcastCommentaryIntervalMinutes: 6,
+      broadcastCommentaryMinNewEvents: 4,
+      broadcastCommentaryMaxPerHour: 10,
     });
 
     const { getOperatorDefaults } = await import('@/lib/operator/defaults');
@@ -336,6 +348,10 @@ describe('MCP operator defaults and dispatch routing', () => {
       requireApproval: 'always',
       meteredPacketCostCapUsd: 0.75,
       meteredPacketInputTokenCap: 400_000,
+      broadcastCommentary: 'interval',
+      broadcastCommentaryIntervalMinutes: 6,
+      broadcastCommentaryMinNewEvents: 4,
+      broadcastCommentaryMaxPerHour: 10,
     });
   }, 15_000);
 

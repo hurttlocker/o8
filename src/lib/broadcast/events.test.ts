@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { ensureV43ResourceLeaseSchema } from '@/lib/db/v43-resource-leases-migration';
+import { ensureV44BroadcastSchema } from '@/lib/db/v44-broadcast-migration';
 import { listBroadcastEvents, listRecentBroadcastEvents } from './events';
 
 const openDatabases: Database.Database[] = [];
@@ -44,6 +45,7 @@ function fixture(): Database.Database {
     );
   `);
   ensureV43ResourceLeaseSchema(sqlite);
+  ensureV44BroadcastSchema(sqlite);
   sqlite.prepare('INSERT INTO lanes VALUES (?, ?, ?, ?)')
     .run('lane-one', 'packet-one', '/Users/example/work/o8', 'B1 Broadcast');
   return sqlite;
@@ -158,6 +160,11 @@ describe('Broadcast event projection', () => {
 
   it('fails closed on malformed cursors and unknown kinds', () => {
     const sqlite = fixture();
+    const preCommentaryCursor = Buffer.from(JSON.stringify({
+      v: 1,
+      positions: { lane: 0, lease: 0, approval_create: 0, approval_event: 0 },
+    })).toString('base64url');
+    expect(() => listBroadcastEvents({ cursor: preCommentaryCursor }, sqlite)).not.toThrow();
     expect(() => listBroadcastEvents({ cursor: 'not-a-cursor' }, sqlite)).toThrow(/cursor is invalid/);
     expect(() => listBroadcastEvents({ kinds: ['uncollected'] }, sqlite)).toThrow(/Unknown Broadcast event kind/);
   });

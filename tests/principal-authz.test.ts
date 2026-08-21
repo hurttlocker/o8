@@ -73,6 +73,8 @@ const lanes = await import('@/app/api/lanes/route');
 const managedRuns = await import('@/app/api/panel/managed-runs/route');
 const laneEvents = await import('@/app/api/lanes/[id]/events/route');
 const broadcastEvents = await import('@/app/api/broadcast/events/route');
+const broadcastCommentary = await import('@/app/api/broadcast/commentary/route');
+const broadcastPost = await import('@/app/api/broadcast/post/route');
 const broadcastSnapshot = await import('@/app/api/broadcast/snapshot/route');
 const broadcastTokens = await import('@/app/api/broadcast/tokens/route');
 const { createTestApproval, getApproval } = await import('@/lib/approvals/store');
@@ -161,6 +163,17 @@ describe('principal-authz — Broadcast spectator is read-only through the real 
       events: expect.any(Array),
     });
 
+    const commentaryResponse = broadcastCommentary.GET(req(
+      'http://localhost:3001/api/broadcast/commentary',
+      { principal: 'spectator', method: 'GET' },
+    ));
+    expect(commentaryResponse.status).toBe(200);
+    await expect(commentaryResponse.json()).resolves.toMatchObject({
+      schema: 'o8/broadcast.commentary/v1',
+      commentary: expect.any(Array),
+      cursor: expect.any(String),
+    });
+
     const snapshotRequest = req('http://localhost:3001/api/broadcast/snapshot?events=5', {
       principal: 'spectator',
       method: 'GET',
@@ -173,6 +186,54 @@ describe('principal-authz — Broadcast spectator is read-only through the real 
       activeAgents: expect.any(Array),
       pendingApprovals: { count: expect.any(Number) },
     });
+  });
+
+  it('posts through the real route as operator or packet-bound worker, never spectator', async () => {
+    const packetId = `packet-broadcast-post-${Date.now()}`;
+    const packetWorkerToken = mintPacketWorkerToken(packetId);
+    const operatorResponse = await broadcastPost.POST(req('http://localhost:3001/api/broadcast/post', {
+      principal: 'operator',
+      body: {
+        kind: 'conversation',
+        actor: 'operator',
+        audience: 'mister',
+        text: 'Give the room a short update.',
+      },
+    }));
+    expect(operatorResponse.status).toBe(201);
+
+    const workerRequest = req('http://localhost:3001/api/broadcast/post', {
+      principal: 'worker',
+      workerToken: packetWorkerToken,
+      body: {
+        kind: 'commentary',
+        actor: 'worker',
+        text: 'The packet is ready for review.',
+      },
+    });
+    expect(panelGateMiddleware(workerRequest).status).toBe(200);
+    const workerResponse = await broadcastPost.POST(workerRequest);
+    expect(workerResponse.status).toBe(201);
+    await expect(workerResponse.json()).resolves.toMatchObject({
+      event: { refs: { packetId } },
+    });
+
+    const spectatorRequest = req('http://localhost:3001/api/broadcast/post', {
+      principal: 'spectator',
+      body: { kind: 'commentary', actor: 'spectator', text: 'Denied.' },
+    });
+    expect(panelGateMiddleware(spectatorRequest).status).toBe(403);
+    const spectatorResponse = await broadcastPost.POST(spectatorRequest);
+    expect(spectatorResponse.status).toBe(403);
+    await expect(spectatorResponse.json()).resolves.toMatchObject({
+      error: { code: 'broadcast_post_forbidden' },
+    });
+
+    const legacyWorkerResponse = await broadcastPost.POST(req('http://localhost:3001/api/broadcast/post', {
+      principal: 'worker',
+      body: { kind: 'commentary', actor: 'worker', text: 'Unbound.' },
+    }));
+    expect(legacyWorkerResponse.status).toBe(403);
   });
 
   it('long-polls the real feed route until a new ledger event arrives', async () => {

@@ -81,6 +81,8 @@ import {
 import { applyStorageReserveUpdate, resolveStorageReserveSettings, resolveStoredStorageReserve, STORAGE_RESERVE_FALLBACK, type StorageReserveDefaults } from './storage-reserve-defaults';
 import { applyWorkspaceParkingUpdate, resolveStoredWorkspaceParking, resolveWorkspaceParkingSettings, WORKSPACE_PARKING_FALLBACK, type WorkspaceParkingDefaults } from './workspace-parking-defaults';
 import { applyMeteredPacketCapUpdate, METERED_PACKET_CAP_FALLBACK, resolveMeteredPacketCapSettings, resolveStoredMeteredPacketCap, type MeteredPacketCapDefaults } from './metered-packet-cap-defaults';
+import { applyBroadcastCommentaryUpdate, BROADCAST_COMMENTARY_FALLBACK, broadcastCommentarySettingSources, resolveBroadcastCommentaryDefaults, resolveStoredBroadcastCommentary, type BroadcastCommentaryDefaults } from './broadcast-commentary-defaults';
+import { applyReviewContinuationUpdate, REVIEW_CONTINUATION_FALLBACK, resolveStoredReviewContinuation, type ReviewContinuationDefault } from './review-continuation-default';
 import {
   applyOperatorDefaultsTomlWithLock,
   getOperatorDefaultsTomlState as readOperatorDefaultsTomlState,
@@ -129,20 +131,12 @@ export type RequireApproval = 'high-risk' | 'surface' | 'always' | 'never';
 
 export function isRequireApproval(value: unknown): value is RequireApproval { return value === 'high-risk' || value === 'surface' || value === 'always' || value === 'never'; }
 
-export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParkingDefaults, ApfsDependencyImagesDefaults, MeteredPacketCapDefaults {
+export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParkingDefaults, ApfsDependencyImagesDefaults, MeteredPacketCapDefaults, BroadcastCommentaryDefaults, ReviewContinuationDefault {
   subscriptionProfile: SubscriptionProfile;
   parallelCap: number;
   overlapGate: OverlapGateMode;
   healBotEnabled: boolean;
   supervisorAutoEscalate: boolean;
-  /**
-   * #1481 — when a mission lane reaches review-ready, queue a bounded
-   * self-continuation turn on the orchestrator ("review + merge per the
-   * standing instruction") instead of parking until the operator re-prompts.
-   * Distinct from supervisorAutoEscalate (noisy failure investigations,
-   * default off): this is the core review loop, default on.
-   */
-  reviewContinuation: boolean;
   thinkingEffort: ThinkingEffort;
   promptCachingEnabled: boolean;
   /** Opt-in: replay the repo's test command against a rebased branch in the
@@ -339,7 +333,8 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   overlapGate: 'advisory',
   healBotEnabled: true,
   supervisorAutoEscalate: false,
-  reviewContinuation: true,
+  ...REVIEW_CONTINUATION_FALLBACK,
+  ...BROADCAST_COMMENTARY_FALLBACK,
   ...APFS_DEPENDENCY_IMAGES_FALLBACK,
   // Operator-pinned: Opus 4.8 with max thinking is the default orchestrator
   // brain. Subscription-billed via the REPL migration, so cost is the user's
@@ -409,13 +404,12 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   ...WORKSPACE_PARKING_FALLBACK,
   ...METERED_PACKET_CAP_FALLBACK,
 };
-interface StoredOperatorDefaults extends Partial<StorageReserveDefaults>, Partial<WorkspaceParkingDefaults>, Partial<ApfsDependencyImagesDefaults>, Partial<MeteredPacketCapDefaults> {
+interface StoredOperatorDefaults extends Partial<StorageReserveDefaults>, Partial<WorkspaceParkingDefaults>, Partial<ApfsDependencyImagesDefaults>, Partial<MeteredPacketCapDefaults>, Partial<BroadcastCommentaryDefaults>, Partial<ReviewContinuationDefault> {
   subscriptionProfile?: SubscriptionProfile;
   parallelCap?: number;
   overlapGate?: OverlapGateMode;
   healBotEnabled?: boolean;
   supervisorAutoEscalate?: boolean;
-  reviewContinuation?: boolean;
   thinkingEffort?: ThinkingEffort;
   promptCachingEnabled?: boolean;
   mergeTestReplayEnabled?: boolean;
@@ -490,9 +484,8 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (typeof stored.supervisorAutoEscalate === 'boolean') {
     result.supervisorAutoEscalate = stored.supervisorAutoEscalate;
   }
-  if (typeof stored.reviewContinuation === 'boolean') {
-    result.reviewContinuation = stored.reviewContinuation;
-  }
+  Object.assign(result, resolveStoredReviewContinuation(stored));
+  Object.assign(result, resolveStoredBroadcastCommentary(stored));
   Object.assign(result, resolveStoredApfsDependencyImages(stored));
   if (stored.thinkingEffort && isThinkingEffort(stored.thinkingEffort)) {
     result.thinkingEffort = stored.thinkingEffort;
@@ -705,8 +698,8 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     healBotEnabled: envHeal ?? fileValues.healBotEnabled ?? OPERATOR_DEFAULTS_FALLBACK.healBotEnabled,
     supervisorAutoEscalate:
       envEsc ?? fileValues.supervisorAutoEscalate ?? OPERATOR_DEFAULTS_FALLBACK.supervisorAutoEscalate,
-    reviewContinuation:
-      fileValues.reviewContinuation ?? OPERATOR_DEFAULTS_FALLBACK.reviewContinuation,
+    reviewContinuation: fileValues.reviewContinuation ?? OPERATOR_DEFAULTS_FALLBACK.reviewContinuation,
+    ...resolveBroadcastCommentaryDefaults(fileValues),
     apfsDependencyImages: fileValues.apfsDependencyImages ?? OPERATOR_DEFAULTS_FALLBACK.apfsDependencyImages,
     thinkingEffort: envThink ?? fileValues.thinkingEffort ?? OPERATOR_DEFAULTS_FALLBACK.thinkingEffort,
     promptCachingEnabled:
@@ -778,6 +771,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     supervisorAutoEscalate:
       envEsc !== null ? 'env' : fileValues.supervisorAutoEscalate !== undefined ? 'file' : 'default',
     reviewContinuation: fileValues.reviewContinuation !== undefined ? 'file' : 'default',
+    ...broadcastCommentarySettingSources(fileValues),
     apfsDependencyImages: fileValues.apfsDependencyImages !== undefined ? 'file' : 'default',
     thinkingEffort: envThink !== null ? 'env' : fileValues.thinkingEffort !== undefined ? 'file' : 'default',
     promptCachingEnabled:
@@ -896,9 +890,8 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>): Pr
   if (update.supervisorAutoEscalate !== undefined) {
     stored.supervisorAutoEscalate = Boolean(update.supervisorAutoEscalate);
   }
-  if (update.reviewContinuation !== undefined) {
-    stored.reviewContinuation = Boolean(update.reviewContinuation);
-  }
+  applyReviewContinuationUpdate(stored, update);
+  applyBroadcastCommentaryUpdate(stored, update);
   applyApfsDependencyImagesUpdate(stored, update);
   if (update.thinkingEffort !== undefined) {
     if (!isThinkingEffort(update.thinkingEffort)) {
