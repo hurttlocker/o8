@@ -13,6 +13,7 @@
  * Capability matrix asserted (RF-1 §1.3), per principal:
  *   - operator (ws-token bearer)             → allowed / reaches real logic
  *   - worker   (local-worker token)          → 403 (or governance card), never mutates
+ *   - spectator (Broadcast bearer)           → two read projections only, never mutates
  *   - unauthenticated remote (LAN, no token) → 401 at the real entry point
  *
  * The worker-token file + ws-token file are written to a temp data dir BEFORE any
@@ -39,11 +40,17 @@ const WS_TOKEN = 'operator-ws-token-0123456789abcdefaaaa';
 // An enrolled per-device bearer (managed remote access). The middleware + steer
 // route resolve it against the registry's derived active-token-hash file.
 const DEVICE_TOKEN = 'enrolled-device-token-cafef00d0123456789abcd';
+const SPECTATOR_TOKEN = 'broadcast-spectator-token-cafef00d0123456789';
 writeFileSync(join(dataDir, 'worker-token'), `${WORKER_TOKEN}\n`, 'utf-8');
 writeFileSync(join(dataDir, 'ws-token'), `${WS_TOKEN}\n`, 'utf-8');
 writeFileSync(
   join(dataDir, 'mobile-device-tokens'),
   `${createHash('sha256').update(DEVICE_TOKEN).digest('hex')}\n`,
+  'utf-8',
+);
+writeFileSync(
+  join(dataDir, 'broadcast-spectator-tokens'),
+  `${createHash('sha256').update(SPECTATOR_TOKEN).digest('hex')}\n`,
   'utf-8',
 );
 process.env.O8_DATA_DIR = dataDir;
@@ -63,13 +70,26 @@ const workspace = await import('@/app/api/orchestrator/workspace/route');
 const devServer = await import('@/app/api/panel/dev-server/route');
 const fileIo = await import('@/app/api/panel/file-io/route');
 const laneEvents = await import('@/app/api/lanes/[id]/events/route');
+const broadcastEvents = await import('@/app/api/broadcast/events/route');
+const broadcastSnapshot = await import('@/app/api/broadcast/snapshot/route');
+const broadcastTokens = await import('@/app/api/broadcast/tokens/route');
 const { createTestApproval, getApproval } = await import('@/lib/approvals/store');
 const { panelGateMiddleware } = await import('@/middleware');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { mintPacketWorkerToken } = await import('@/lib/auth/packet-worker-token');
+const { getSqlite } = await import('@/lib/db');
+getSqlite().prepare(`
+  INSERT OR IGNORE INTO broadcast_tokens (id, token_hash, label, created_at, revoked_at)
+  VALUES (?, ?, ?, ?, NULL)
+`).run(
+  'spectator-authz-fixture',
+  createHash('sha256').update(SPECTATOR_TOKEN).digest('hex'),
+  'principal authz fixture',
+  new Date().toISOString(),
+);
 
-type Principal = 'operator' | 'worker';
+type Principal = 'operator' | 'worker' | 'spectator';
 
 /** A loopback request (so in-handler requirePanelAuth passes) carrying the
  *  worker token when principal='worker'. This is how a dispatched worker's `o8`
@@ -88,8 +108,10 @@ function req(
   if (principal === 'worker') {
     headers.authorization = `Bearer ${workerToken ?? WORKER_TOKEN}`;
     if (workerPacketId) headers['x-o8-worker-packet-id'] = workerPacketId;
-  } else {
+  } else if (principal === 'operator') {
     headers.authorization = `Bearer ${WS_TOKEN}`;
+  } else {
+    headers.authorization = `Bearer ${SPECTATOR_TOKEN}`;
   }
   return new NextRequest(url, {
     method,
@@ -97,6 +119,113 @@ function req(
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 }
+
+describe('principal-authz — Broadcast spectator is read-only through the real entry point', () => {
+  it('mints once, authorizes the feed, and revokes on the next middleware read', async () => {
+    const mintResponse = await broadcastTokens.POST(req('http://localhost:3001/api/broadcast/tokens', {
+      principal: 'operator',
+      body: { action: 'mint', label: 'principal test' },
+    }));
+    expect(mintResponse.status).toBe(200);
+    const minted = await mintResponse.json() as { bearer: string; token: { id: string } };
+    expect(minted.bearer).toMatch(/^o8sp_/);
+    expect(JSON.stringify(getSqlite().prepare('SELECT * FROM broadcast_tokens WHERE id = ?').get(minted.token.id)))
+      .not.toContain(minted.bearer);
+
+    const feedRequest = new NextRequest('http://localhost:3001/api/broadcast/events', {
+      headers: { host: 'localhost:3001', authorization: `Bearer ${minted.bearer}` },
+    });
+    expect(panelGateMiddleware(feedRequest).status).toBe(200);
+    expect((await broadcastEvents.GET(feedRequest)).status).toBe(200);
+
+    const revokeResponse = await broadcastTokens.POST(req('http://localhost:3001/api/broadcast/tokens', {
+      principal: 'operator',
+      body: { action: 'revoke', id: minted.token.id },
+    }));
+    expect(revokeResponse.status).toBe(200);
+    expect(panelGateMiddleware(feedRequest).status).toBe(401);
+  });
+
+  it('reads both Broadcast projections with its dedicated bearer', async () => {
+    const eventsRequest = req('http://localhost:3001/api/broadcast/events?limit=5', {
+      principal: 'spectator',
+      method: 'GET',
+    });
+    expect(panelGateMiddleware(eventsRequest).status).toBe(200);
+    const eventsResponse = await broadcastEvents.GET(eventsRequest);
+    expect(eventsResponse.status).toBe(200);
+    await expect(eventsResponse.json()).resolves.toMatchObject({
+      schema: 'o8/broadcast.events/v1',
+      events: expect.any(Array),
+    });
+
+    const snapshotRequest = req('http://localhost:3001/api/broadcast/snapshot?events=5', {
+      principal: 'spectator',
+      method: 'GET',
+    });
+    expect(panelGateMiddleware(snapshotRequest).status).toBe(200);
+    const snapshotResponse = await broadcastSnapshot.GET(snapshotRequest);
+    expect(snapshotResponse.status).toBe(200);
+    await expect(snapshotResponse.json()).resolves.toMatchObject({
+      schema: 'o8/broadcast.snapshot/v1',
+      activeAgents: expect.any(Array),
+      pendingApprovals: { count: expect.any(Number) },
+    });
+  });
+
+  it('long-polls the real feed route until a new ledger event arrives', async () => {
+    const { appendEvent, createLane } = await import('@/lib/lane/registry');
+    const lane = createLane({
+      label: 'Broadcast long poll',
+      repoPath: '/tmp/broadcast-long-poll',
+      branch: `agent/broadcast-long-poll-${Date.now()}`,
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId: `packet-broadcast-long-poll-${Date.now()}`,
+    });
+    const initialResponse = await broadcastEvents.GET(req(
+      'http://localhost:3001/api/broadcast/events?limit=100',
+      { principal: 'spectator', method: 'GET' },
+    ));
+    const initial = await initialResponse.json() as { cursor: string };
+    const pending = broadcastEvents.GET(req(
+      `http://localhost:3001/api/broadcast/events?limit=10&wait=1000&cursor=${encodeURIComponent(initial.cursor)}`,
+      { principal: 'spectator', method: 'GET' },
+    ));
+    setTimeout(() => {
+      appendEvent(lane.id, 'agent_report', 'orchestrator', {
+        event: 'progress',
+        message: 'long poll delivered',
+      });
+    }, 50);
+
+    const response = await pending;
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      events: [{ kind: 'progress', laneId: lane.id, detail: 'long poll delivered' }],
+    });
+  });
+
+  it('cannot reach token management or any representative mutating route', async () => {
+    const mutations = [
+      'http://localhost:3001/api/broadcast/tokens',
+      'http://localhost:3001/api/panel/approvals',
+      'http://localhost:3001/api/lanes',
+      'http://localhost:3001/api/leases',
+    ];
+    for (const url of mutations) {
+      expect(panelGateMiddleware(req(url, { principal: 'spectator', body: {} })).status).toBe(403);
+    }
+    const response = await broadcastTokens.POST(req('http://localhost:3001/api/broadcast/tokens', {
+      principal: 'spectator',
+      body: { action: 'mint' },
+    }));
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: 'broadcast_operator_forbidden' },
+    });
+  });
+});
 
 function packetFixture(overrides: Partial<OrchestratorPacket> = {}): OrchestratorPacket {
   return {

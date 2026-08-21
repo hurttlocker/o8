@@ -3,8 +3,9 @@ import { resolvePacketWorkerToken } from './packet-worker-token';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 import { readActiveTokenHashes } from '@/lib/mobile/device-token-file';
+import { readActiveSpectatorTokenHashes } from '@/lib/broadcast/spectator-token-file';
 
-export type RequestPrincipal = 'operator' | 'worker' | 'device' | 'anonymous';
+export type RequestPrincipal = 'operator' | 'worker' | 'device' | 'spectator' | 'anonymous';
 
 export type RequestPrincipalContext =
   | { role: 'operator' }
@@ -17,6 +18,7 @@ export type RequestPrincipalContext =
       leaseProcessGroupId: number | null;
     }
   | { role: 'device' }
+  | { role: 'spectator' }
   | { role: 'anonymous' };
 
 export interface WorkerPacketRefusal {
@@ -36,10 +38,16 @@ function isDeviceToken(presented: string): boolean {
   return readActiveTokenHashes().has(hash);
 }
 
+function isSpectatorToken(presented: string): boolean {
+  if (!presented) return false;
+  const hash = createHash('sha256').update(presented).digest('hex');
+  return readActiveSpectatorTokenHashes().has(hash);
+}
+
 /**
  * Resolve the caller's principal for governance authorization. A dispatched
  * worker presents the local-worker token (O8_WORKER_TOKEN, attached by its
- * `o8` CLI). Operator and device authority require an affirmative bearer match;
+ * `o8` CLI). Operator, device, and spectator authority require an affirmative bearer match;
  * an absent or unknown credential is anonymous even when the socket is loopback.
  *
  * Fail-closed by construction: loopback location is transport evidence, not an
@@ -86,6 +94,7 @@ export function resolveRequestPrincipalContext(req: Request): RequestPrincipalCo
       leaseProcessGroupId: null,
     };
   }
+  if (isSpectatorToken(bearer)) return { role: 'spectator' };
   if (bearer && tokenMatches(bearer, getOrCreateWsToken().trim())) return { role: 'operator' };
   if (isDeviceToken(bearer)) return { role: 'device' };
   return { role: 'anonymous' };

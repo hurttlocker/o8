@@ -13,6 +13,7 @@ import {
   O8_AUTH_MODE_META,
   O8_WEB_MACHINE_SURFACE,
 } from '@/lib/connect/web-machine-surface';
+import { O8_BROADCAST_SURFACE_HEADER } from '@/lib/broadcast/surface';
 
 export const metadata: Metadata = {
   title: 'o8',
@@ -43,10 +44,11 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   // src/lib/panel/ws-port-client.ts for the reader.
   const { wsPort } = resolvePortInfo();
   const requestHeaders = await headers();
+  const isBroadcast = requestHeaders.get(O8_BROADCAST_SURFACE_HEADER) === '1';
   const isWebMachine = headersIndicateWebMachineRelay((name) => requestHeaders.get(name));
   const isLocal = !isWebMachine
     && headersIndicateLoopback((name) => requestHeaders.get(name));
-  const operatorToken = isLocal ? getOrCreateWsToken() : '';
+  const operatorToken = isLocal && !isBroadcast ? getOrCreateWsToken() : '';
 
   return (
     <html lang="en" style={{ background: '#1C1C1E' }} suppressHydrationWarning>
@@ -74,13 +76,13 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
             `,
           }}
         />
-        <NavigationBridge />
+        {isBroadcast ? null : <NavigationBridge />}
         {/* UpdateBanner removed — the inline UpdateCard renders inside
             AgentPanel above the chrome icons (o8/AgentPanel.tsx).
             That stops it from covering the workspace tab strip + reconnect
             banner when an update lands. */}
-        <O8AuthProvider>{children}</O8AuthProvider>
-        <script
+        {isBroadcast ? children : <O8AuthProvider>{children}</O8AuthProvider>}
+        {isBroadcast ? null : <script
           dangerouslySetInnerHTML={{
             __html: `
               if ('serviceWorker' in navigator && !window.__TAURI_INTERNALS__) {
@@ -145,7 +147,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
               }
             `,
           }}
-        />
+        />}
       </body>
     </html>
   );

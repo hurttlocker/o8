@@ -103,4 +103,16 @@ describe('operator MCP process profiles', () => {
       expect(dogfoodNames).not.toContain(name);
     }
   });
+
+  it('publishes the strict Broadcast token tool only in the full profile', () => {
+    const fullTools = operatorToolsForProfile('full');
+    const dogfoodNames = operatorToolsForProfile('dogfood').map((tool) => tool.name);
+    expect(fullTools.find((tool) => tool.name === 'o8_broadcast_token')?.inputSchema).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+      properties: expect.any(Object),
+      required: ['action'],
+    });
+    expect(dogfoodNames).not.toContain('o8_broadcast_token');
+  });
 });

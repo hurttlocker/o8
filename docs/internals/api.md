@@ -2,7 +2,7 @@
 
 This is the canonical reference for o8's HTTP surface. All routes live under
 `src/app/api/` as Next.js route handlers. The filesystem currently contains
-**303 route files across 34 top-level families** (audited 2026-07-23 against
+**331 route files across 39 top-level families** (audited 2026-08-21 against
 `main`).
 
 ## Auth model
@@ -12,7 +12,7 @@ o8's API is default-deny:
 - **Operator:** stateful and sensitive routes require
   `Authorization: Bearer <ws-token>`, including requests originating on
   loopback. The desktop, CLI, and MCP proxy attach the token.
-- **Paired device / worker:** device and worker tokens can reach only the
+- **Paired device / worker / spectator:** device, worker, and spectator tokens can reach only the
   method-and-path capabilities explicitly listed in `src/middleware.ts`.
 - **Public or self-authenticating:** the small public-read, enrollment,
   webhook, cloud-worker, and service-account surfaces are individually
@@ -67,6 +67,26 @@ Routes are grouped by their first path segment.
 |---|---|---|
 | GET | `/api/browser/inventory` | Snapshot of attachable browser surfaces. |
 | POST | `/api/browser/attach` | Attach a browser surface via the named provider. |
+
+### `/api/broadcast/*` — Read-only spectator projection
+
+A spectator bearer is a distinct read-only principal. Active hashes are durable in SQLite and
+projected into an owner-only data-dir file so middleware can validate them without loading a native
+database addon. The bearer is returned only when minted. The `/broadcast` page receives it through
+the URL fragment, moves it into session storage, and scrubs the fragment before calling the API.
+The page shell never receives the operator token or operator auth providers.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/broadcast/events?cursor=...&wait=...&repo=...&lane=...&kinds=...` | Cursor-paginated, optionally long-polled projection of approved ledger event kinds. Operator or spectator bearer. |
+| GET | `/api/broadcast/snapshot?events=30` | Current lanes, packets, active agents, pending approvals, and recent redacted events. Operator or spectator bearer. |
+| POST | `/api/broadcast/tokens` | Operator-only `mint` or `revoke` mutation for spectator credentials. |
+
+An events request without a cursor starts at the ledger head and pages forward. Live-tail clients
+bootstrap from the snapshot's recent events and continue from the cursor returned with that snapshot.
+Every projection recursively redacts credential/environment fields, environment values, and absolute
+home paths before serialization. A spectator credential has no write capability; any other API route
+is refused by the global middleware even when it originates on loopback.
 
 ### `/api/claude-code/*` — Claude Code runtime transcript + send (gated)
 

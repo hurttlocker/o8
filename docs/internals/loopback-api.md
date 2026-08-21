@@ -14,25 +14,33 @@ the only thing standing between a LAN device and that surface.
 
 ## The decision ladder
 
-The middleware `matcher` restricts it to `/api/*`, and the model is
+The middleware `matcher` covers `/api/*` plus the `/broadcast` page shell, and the API model is
 **default-deny**: every `/api/*` request is denied unless it matches an explicit
 escape. There is no fail-open "ungated family" — an unlisted new route is
 denied, not exposed (this closed the fail-open + trailing-slash gate class,
 audit 2026-07-02). In order:
 
-1. **Self-authenticating bypass** (`SELF_AUTH_PREFIXES`). `/api/worker/*`,
+1. **Spectator capability.** A recognized spectator bearer can reach only the
+   two exact Broadcast GET/HEAD routes. Every other path is refused before any
+   public or self-authenticating exception is considered.
+2. **Self-authenticating bypass** (`SELF_AUTH_PREFIXES`). `/api/worker/*`,
    `/api/cloud/*`, and `/api/github/webhook` skip the gate — they are reachable
    off-host by design and each handler verifies its own credential (worker
    `worker_tokens` / cloud-worker keys / GitHub HMAC-SHA256). Matched with a
    trailing-boundary check so a prefix can't cover a sibling path.
-2. **Allowlist.** `ALLOWLIST_READ_ONLY` passes GET/HEAD only (setup wizard
+3. **Allowlist.** `ALLOWLIST_READ_ONLY` passes GET/HEAD only (setup wizard
    reads, VAPID public key, panel status). `ALLOWLIST_ANY_METHOD` passes the
    OAuth handshakes + mobile enroll. Keep both lists minimal.
-3. **Loopback trust** (`isTrustedLocalRequest`) — see tiers below.
-4. **Bearer token fallback.** Non-loopback callers must present the ws-token
-   (`~/.o8/ws-token`) as `Authorization: Bearer <token>` or `?token=`, or an
-   active per-device token. Comparison is constant-time (`timingSafeEqual`).
-5. Otherwise (the default): `401`.
+4. **Narrow loopback reads.** A small explicit set of iframe and boot resources
+   may use socket-truth loopback because navigation cannot attach a bearer.
+5. **Bearer principals.** The operator ws-token can reach every API. Worker and
+   paired-device bearers can reach only explicit method-and-path capabilities.
+6. Otherwise (the default): `401`.
+
+`/broadcast` itself is an unprivileged HTML shell. Middleware stamps its internal
+request so the root layout omits the operator bearer, auth provider, navigation
+bridge, and service-worker bootstrap. The spectator bearer travels in the URL
+fragment, which is removed before the page makes authenticated feed requests.
 
 ## Loopback trust tiers
 

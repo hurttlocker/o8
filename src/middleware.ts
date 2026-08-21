@@ -38,12 +38,14 @@ import { getDataDir, migrateDataDirOnce } from '@/lib/data-dir-migration';
 // this does NOT pull better-sqlite3 into the middleware bundle — it is pure fs.
 import { readActiveTokenHashes } from '@/lib/mobile/device-token-file';
 import { isLocalWorkerToken } from '@/lib/auth/worker-token';
+import { readActiveSpectatorTokenHashes } from '@/lib/broadcast/spectator-token-file';
+import { O8_BROADCAST_SURFACE_HEADER } from '@/lib/broadcast/surface';
 
 migrateDataDirOnce();
 
 // Middleware must run in Node runtime to read the ws-token file.
 export const config = {
-  matcher: ['/api/:path*'],
+  matcher: ['/api/:path*', '/broadcast/:path*'],
   runtime: 'nodejs',
 };
 
@@ -157,6 +159,10 @@ const WORKER_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }>
   { methods: new Set(['GET', 'POST', 'PATCH', 'DELETE']), path: /^\/api\/repo-spec(?:\/|$)/ },
   { methods: new Set(['GET']), path: /^\/api\/tasks(?:\/[^/]+)?\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/tasks\/[^/]+\/(?:report|block)\/?$/ },
+];
+
+const SPECTATOR_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }> = [
+  { methods: new Set(['GET', 'HEAD']), path: /^\/api\/broadcast\/(?:events|snapshot)\/?$/ },
 ];
 
 const LOOPBACK_READ_CAPABILITIES: RegExp[] = [
@@ -298,6 +304,12 @@ function isActiveDeviceToken(presented: string): boolean {
   return readActiveTokenHashes().has(hash);
 }
 
+function isActiveSpectatorToken(presented: string): boolean {
+  if (!presented) return false;
+  const hash = createHash('sha256').update(presented, 'utf-8').digest('hex');
+  return readActiveSpectatorTokenHashes().has(hash);
+}
+
 function deviceMayAccess(pathname: string, method: string): boolean {
   return DEVICE_CAPABILITIES.some((capability) => (
     capability.methods.has(method) && capability.path.test(pathname)
@@ -306,6 +318,12 @@ function deviceMayAccess(pathname: string, method: string): boolean {
 
 function workerMayAccess(pathname: string, method: string): boolean {
   return WORKER_CAPABILITIES.some((capability) => (
+    capability.methods.has(method) && capability.path.test(pathname)
+  ));
+}
+
+function spectatorMayAccess(pathname: string, method: string): boolean {
+  return SPECTATOR_CAPABILITIES.some((capability) => (
     capability.methods.has(method) && capability.path.test(pathname)
   ));
 }
@@ -340,6 +358,26 @@ export function panelGateMiddleware(req: NextRequest): NextResponse {
   const { pathname } = req.nextUrl;
   const method = req.method.toUpperCase();
 
+  // Broadcast HTML is an unprivileged shell. Stamp the request so RootLayout
+  // omits every operator bootstrap, then let its client present a spectator
+  // bearer explicitly to the two read routes below.
+  if (pathname === '/broadcast' || pathname.startsWith('/broadcast/')) {
+    const requestHeaders = new Headers(req.headers);
+    requestHeaders.set(O8_BROADCAST_SURFACE_HEADER, '1');
+    return NextResponse.next({ request: { headers: requestHeaders } });
+  }
+
+  // A recognized spectator bearer is a strict capability, even on routes that
+  // are otherwise public or self-authenticating. It never inherits an ambient
+  // mutation surface merely because an anonymous caller could begin a separate
+  // credential handshake there.
+  const auth = req.headers.get('authorization');
+  const bearer = auth?.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+  if (isActiveSpectatorToken(bearer)) {
+    if (spectatorMayAccess(pathname, method)) return NextResponse.next();
+    return NextResponse.json({ error: 'Spectator token is not authorized for this endpoint.' }, { status: 403 });
+  }
+
   // Self-authenticating routes (worker protocol + HMAC webhook) run their own
   // auth in-handler and bypass the loopback/token gate.
   if (isSelfAuthRoute(pathname)) {
@@ -365,9 +403,6 @@ export function panelGateMiddleware(req: NextRequest): NextResponse {
 
   // An operator bearer is valid on every API route. The root layout installs
   // it on same-origin fetches before hydration for local desktop pages.
-  const auth = req.headers.get('authorization');
-  const bearer = auth?.startsWith('Bearer ') ? auth.slice(7).trim() : '';
-
   const panelToken = loadPanelToken();
   if (panelToken) {
     if (bearer && tokenMatches(bearer, panelToken)) {

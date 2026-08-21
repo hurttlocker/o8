@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createLane, getLane, setLaneStatus } from './registry';
+import { createLane, getLane, getLaneEvents, setLaneStatus } from './registry';
 import {
   LANE_TERMINAL_STATUSES,
   TERMINAL_LANE_STATUSES,
@@ -95,6 +95,14 @@ describe('unified terminal-state truth (lane vs worker)', () => {
 });
 
 describe('terminal lane status guard - real callers', () => {
+  it('persists the semantic status label in the append-only event payload', () => {
+    const lane = laneFixture('inline/status-event-label');
+    setLaneStatus(lane.id, 'running', 'system', 'session_launched');
+
+    expect(getLaneEvents(lane.id).findLast((event) => event.verb === 'status_change')?.payload)
+      .toMatchObject({ status: 'running', eventLabel: 'session_launched' });
+  });
+
   it('refuses direct registry re-open writes after completion', () => {
     const lane = laneFixture('inline/terminal-registry');
     setLaneStatus(lane.id, 'completed', 'system', 'merged');

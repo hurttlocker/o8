@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
   if (!action) return errorResponse(400, 'missing_action', 'action is required');
 
   const principal = resolveRequestPrincipalContext(request);
-  if (principal.role === 'anonymous' || principal.role === 'device') {
+  if (principal.role !== 'operator' && principal.role !== 'worker') {
     return errorResponse(403, 'operator_or_worker_required', 'Harness routes require an operator or packet-bound worker credential.');
   }
 

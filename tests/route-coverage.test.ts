@@ -10,12 +10,14 @@
  * nobody mirrored here) FAILS the build instead of shipping unclassified.
  *
  * The policy manifest below mirrors src/middleware.ts. Each discovered route is
- * classified into exactly one of {self-auth, public-any, public-read, gated} and
+ * classified into exactly one of {self-auth, public-any, public-read,
+ * loopback-read, spectator-read, gated} and
  * the middleware's ACTUAL behavior (from LAN, from loopback) is asserted to
  * match. Default is `gated` — an unclassified route that the middleware lets
  * through from LAN trips the `else → expect deny` branch and reddens the suite.
  */
 import { mkdtempSync, writeFileSync, readdirSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -27,8 +29,14 @@ vi.mock('@clerk/nextjs/server', () => ({
 }));
 
 const TEST_TOKEN = 'vitest-route-coverage-token-0123456789';
+const SPECTATOR_TOKEN = 'vitest-route-coverage-spectator-0123456789';
 const dataDir = mkdtempSync(path.join(os.tmpdir(), 'o8-route-cov-'));
 writeFileSync(path.join(dataDir, 'ws-token'), `${TEST_TOKEN}\n`, 'utf-8');
+writeFileSync(
+  path.join(dataDir, 'broadcast-spectator-tokens'),
+  `${createHash('sha256').update(SPECTATOR_TOKEN).digest('hex')}\n`,
+  'utf-8',
+);
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
@@ -111,18 +119,24 @@ const LOOPBACK_READ = [
 const EXPLICIT_GATED = [
   /^\/api\/mcp\/?$/,
   /^\/api\/leases\/?$/,
+  /^\/api\/broadcast\/tokens\/?$/,
   // #1619: local Codex app-server lifecycle + streamed audio/transcript events.
   // Operator-only because it can start a local Codex thread and reads OAuth state.
   /^\/api\/voice\/realtime\/codex\/?$/,
 ];
+const SPECTATOR_READ = [
+  /^\/api\/broadcast\/events\/?$/,
+  /^\/api\/broadcast\/snapshot\/?$/,
+];
 
-type Policy = 'self-auth' | 'public-any' | 'public-read' | 'loopback-read' | 'gated';
+type Policy = 'self-auth' | 'public-any' | 'public-read' | 'loopback-read' | 'spectator-read' | 'gated';
 
 function expectedPolicy(pathname: string): Policy {
   if (SELF_AUTH.some((p) => p.test(pathname))) return 'self-auth';
   if (PUBLIC_ANY.some((p) => p.test(pathname))) return 'public-any';
   if (PUBLIC_READ.some((p) => p.test(pathname))) return 'public-read';
   if (LOOPBACK_READ.some((p) => p.test(pathname))) return 'loopback-read';
+  if (SPECTATOR_READ.some((p) => p.test(pathname))) return 'spectator-read';
   if (EXPLICIT_GATED.some((p) => p.test(pathname))) return 'gated';
   return 'gated';
 }
@@ -174,6 +188,12 @@ describe('route-coverage — every /api route resolves to an explicit middleware
         expect(postLan).toBe(401);
         expect(status(pathname, 'GET', LOOPBACK)).toBe(200);
         expect(status(pathname, 'POST', LOOPBACK)).toBe(401);
+      } else if (policy === 'spectator-read') {
+        expect(getLan).toBe(401);
+        expect(postLan).toBe(401);
+        expect(status(pathname, 'GET', LAN, SPECTATOR_TOKEN)).toBe(200);
+        expect(status(pathname, 'HEAD', LAN, SPECTATOR_TOKEN)).toBe(200);
+        expect(status(pathname, 'POST', LAN, SPECTATOR_TOKEN)).toBe(403);
       } else {
         // GATED — the default. A route that reaches this branch but is silently
         // public from LAN means someone added a public route without listing it
@@ -188,7 +208,7 @@ describe('route-coverage — every /api route resolves to an explicit middleware
   it('every explicit policy entry maps to a real route on disk (no stale manifest)', () => {
     // A manifest pattern that matches NO real route is dead config that hides
     // intent — force it to be pruned.
-    const allClassified = [...SELF_AUTH, ...PUBLIC_ANY, ...PUBLIC_READ, ...LOOPBACK_READ, ...EXPLICIT_GATED];
+    const allClassified = [...SELF_AUTH, ...PUBLIC_ANY, ...PUBLIC_READ, ...LOOPBACK_READ, ...SPECTATOR_READ, ...EXPLICIT_GATED];
     for (const pattern of allClassified) {
       const matched = routes.some((r) => pattern.test(r.pathname));
       expect(matched, `manifest pattern ${pattern} matches no route file`).toBe(true);

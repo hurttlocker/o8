@@ -3,7 +3,7 @@
  *
  * Covers the Tier-1 security model:
  *   - loopback is transport context, not an authenticated principal
- *   - operator, worker, and device bearer capabilities are distinct
+ *   - operator, worker, device, and spectator bearer capabilities are distinct
  *   - read-only iframe exceptions and self-authenticating routes stay explicit
  */
 import { mkdtempSync, writeFileSync } from 'node:fs';
@@ -22,12 +22,18 @@ vi.mock('@clerk/nextjs/server', () => ({
 const TEST_TOKEN = 'vitest-gate-token-0123456789abcdef';
 const DEVICE_TOKEN = 'vitest-device-token-0123456789abcdef';
 const WORKER_TOKEN = 'vitest-worker-token-0123456789abcdef';
+const SPECTATOR_TOKEN = 'vitest-spectator-token-0123456789abcdef';
 const dataDir = mkdtempSync(path.join(os.tmpdir(), 'o8-gate-test-'));
 writeFileSync(path.join(dataDir, 'ws-token'), `${TEST_TOKEN}\n`, 'utf-8');
 writeFileSync(path.join(dataDir, 'worker-token'), `${WORKER_TOKEN}\n`, 'utf-8');
 writeFileSync(
   path.join(dataDir, 'mobile-device-tokens'),
   `${createHash('sha256').update(DEVICE_TOKEN).digest('hex')}\n`,
+  'utf-8',
+);
+writeFileSync(
+  path.join(dataDir, 'broadcast-spectator-tokens'),
+  `${createHash('sha256').update(SPECTATOR_TOKEN).digest('hex')}\n`,
   'utf-8',
 );
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
@@ -43,6 +49,53 @@ function gatedRequest(
     headers: options.headers,
   });
 }
+
+describe('panelGateMiddleware — Broadcast spectator capability', () => {
+  const authorization = `Bearer ${SPECTATOR_TOKEN}`;
+
+  it('allows only the two exact read routes and refuses every write', () => {
+    for (const pathname of ['/api/broadcast/events', '/api/broadcast/snapshot']) {
+      expect(panelGateMiddleware(gatedRequest(`http://localhost:3001${pathname}`, {
+        headers: { authorization },
+      })).status).toBe(200);
+      expect(panelGateMiddleware(gatedRequest(`http://localhost:3001${pathname}`, {
+        method: 'HEAD',
+        headers: { authorization },
+      })).status).toBe(200);
+      expect(panelGateMiddleware(gatedRequest(`http://localhost:3001${pathname}`, {
+        method: 'POST',
+        headers: { authorization },
+      })).status).toBe(403);
+    }
+    expect(panelGateMiddleware(gatedRequest('http://localhost:3001/api/broadcast/tokens', {
+      method: 'POST',
+      headers: { authorization },
+    })).status).toBe(403);
+    expect(panelGateMiddleware(gatedRequest('http://localhost:3001/api/lanes', {
+      method: 'POST',
+      headers: { authorization },
+    })).status).toBe(403);
+    expect(panelGateMiddleware(gatedRequest('http://localhost:3001/api/panel/repos', {
+      headers: { authorization },
+    })).status).toBe(403);
+    expect(panelGateMiddleware(gatedRequest('http://localhost:3001/api/mobile/enroll', {
+      method: 'POST',
+      headers: { authorization },
+    })).status).toBe(403);
+    expect(panelGateMiddleware(gatedRequest('http://localhost:3001/api/worker/event', {
+      method: 'POST',
+      headers: { authorization },
+    })).status).toBe(403);
+  });
+
+  it('serves an unprivileged Broadcast shell stamped for root-layout isolation', () => {
+    const response = panelGateMiddleware(gatedRequest('http://192.168.1.50:3001/broadcast', {
+      headers: { host: '192.168.1.50:3001' },
+    }));
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-middleware-request-x-o8-broadcast-surface')).toBe('1');
+  });
+});
 
 describe('panelGateMiddleware — loopback trust', () => {
   it('rejects curl-style loopback requests without an operator credential', () => {

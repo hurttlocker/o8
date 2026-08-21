@@ -10,9 +10,11 @@ const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-worker-tok-'));
 const WORKER_TOKEN = 'local-worker-token-abcdef0123456789abcdef';
 const OPERATOR_TOKEN = 'operator-ws-token-abcdef0123456789abcdef';
 const DEVICE_TOKEN = 'device-token-abcdef0123456789abcdef';
+const SPECTATOR_TOKEN = 'spectator-token-abcdef0123456789abcdef';
 writeFileSync(join(dataDir, 'worker-token'), `${WORKER_TOKEN}\n`, 'utf-8');
 writeFileSync(join(dataDir, 'ws-token'), `${OPERATOR_TOKEN}\n`, 'utf-8');
 writeFileSync(join(dataDir, 'mobile-device-tokens'), `${createHash('sha256').update(DEVICE_TOKEN).digest('hex')}\n`, 'utf-8');
+writeFileSync(join(dataDir, 'broadcast-spectator-tokens'), `${createHash('sha256').update(SPECTATOR_TOKEN).digest('hex')}\n`, 'utf-8');
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
 const { resolveRequestPrincipal } = await import('./principal');
@@ -42,6 +44,10 @@ describe('resolveRequestPrincipal (CRIT-1 governance principal)', () => {
 
   it('classifies an enrolled per-device bearer as DEVICE', () => {
     expect(resolveRequestPrincipal(req({ authorization: `Bearer ${DEVICE_TOKEN}` }))).toBe('device');
+  });
+
+  it('classifies an active Broadcast bearer as SPECTATOR', () => {
+    expect(resolveRequestPrincipal(req({ authorization: `Bearer ${SPECTATOR_TOKEN}` }))).toBe('spectator');
   });
 
   it('rejects a truncated/near-miss of the worker token (constant-time compare, length guard)', () => {

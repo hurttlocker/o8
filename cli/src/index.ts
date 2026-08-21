@@ -19,6 +19,7 @@
 import { runAsk } from './commands/ask.js';
 import { runApp } from './commands/app.js';
 import { runBrowser } from './commands/browser.js';
+import { runBroadcast } from './commands/broadcast.js';
 import { runConnect } from './commands/connect.js';
 import { runDoctor } from './commands/doctor.js';
 import { runCortexObserve } from './commands/cortex.js';
@@ -224,6 +225,7 @@ commands:
   browser type <sel> <text…>  type into an input (--submit presses Enter)
   browser wait <sel>   poll until a selector resolves (--text, --timeout)
   browser close        end this scope's engine (headless Chrome) session
+  broadcast token mint|revoke  create or revoke a read-only Broadcast spectator bearer
   cortex observe       propose a worker observation for the orchestrator
   lane touches         active lanes touching a path or packet diff
   lease acquire <resource> [--ttl 2h] [--wait]  acquire or queue for a named resource
@@ -367,6 +369,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runUpdate(args.mode, secondary, args.rest);
     case 'browser':
       return runBrowser(args.mode, secondary, args.rest);
+    case 'broadcast':
+      return runBroadcast(args.mode, secondary, args.rest);
     case 'cortex': {
       if (secondary === 'observe') return runCortexObserve(args.mode, args.rest);
       throw unknownSubcommandError('cortex', secondary);

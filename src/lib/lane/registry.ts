@@ -560,7 +560,7 @@ export function setLaneStatus(
   const lane = updateLane(
     laneId,
     { status, lastEventAt: now, lastEventLabel: eventLabel ?? status },
-    actor,
+    actor, { eventLabel: eventLabel ?? status },
   );
 
   if (
