@@ -1,26 +1,60 @@
+import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 
-const SENSITIVE_KEY = /authorization|bearer|credential|password|secret|token|api.?key|^env(?:ironment)?(?:_?variables?)?$/i;
+import { readActiveTokenHashes } from '@/lib/mobile/device-token-file';
+import { getOrCreateWsToken } from '@/lib/ws-auth';
+
+const SENSITIVE_KEY = /authorization|bearer|credential|password|(?:^|[_.-])pw(?:$|[_.-])|auth|cookie|secret|token|api.?key|session.?key|ws.?token|device.?token|^env(?:ironment)?(?:_?variables?)?$/i;
 const GENERIC_HOME_PATHS = [
   /\/Users\/[^/\s]+(?=\/|\b)/g,
   /\/home\/[^/\s]+(?=\/|\b)/g,
   /[A-Za-z]:\\Users\\[^\\\s]+(?=\\|\b)/g,
 ];
 
+export interface BroadcastRedactionContext {
+  activeDeviceTokenHashes: Set<string>;
+  environmentValues: string[];
+  operatorToken: string | null;
+}
+
 function environmentValues(): string[] {
-  return [...new Set(Object.values(process.env)
-    .filter((value): value is string => typeof value === 'string' && value.length >= 8))]
+  return [...new Set(Object.entries(process.env)
+    .flatMap(([key, value]) => (
+      typeof value === 'string' && value.length > 0 && (value.length >= 8 || SENSITIVE_KEY.test(key))
+        ? [value]
+        : []
+    )))]
     .sort((left, right) => right.length - left.length);
 }
 
-export function redactBroadcastText(value: string): string {
+export function createBroadcastRedactionContext(): BroadcastRedactionContext {
+  const operatorToken = getOrCreateWsToken().trim();
+  return {
+    activeDeviceTokenHashes: readActiveTokenHashes(),
+    environmentValues: environmentValues(),
+    operatorToken: operatorToken || null,
+  };
+}
+
+function isExactCredential(value: string, context: BroadcastRedactionContext): boolean {
+  if (context.operatorToken === value) return true;
+  if (!value) return false;
+  const hash = createHash('sha256').update(value).digest('hex');
+  return context.activeDeviceTokenHashes.has(hash);
+}
+
+export function redactBroadcastText(
+  value: string,
+  context: BroadcastRedactionContext = createBroadcastRedactionContext(),
+): string {
+  if (isExactCredential(value, context)) return '[redacted-token]';
   let redacted = value
     .replace(/\bBearer\s+[^\s,;]+/gi, 'Bearer [redacted]')
     .replace(/\b(?:o8sp|o8pw|cwk)_[A-Za-z0-9_-]{12,}\b/g, '[redacted-token]');
   const home = homedir();
   if (home && home !== '/') redacted = redacted.split(home).join('~');
   for (const pattern of GENERIC_HOME_PATHS) redacted = redacted.replace(pattern, '~');
-  for (const environmentValue of environmentValues()) {
+  for (const environmentValue of context.environmentValues) {
     if (redacted.includes(environmentValue)) {
       redacted = redacted.split(environmentValue).join('[redacted-env]');
     }
@@ -28,20 +62,27 @@ export function redactBroadcastText(value: string): string {
   return redacted;
 }
 
-export function redactBroadcastValue(value: unknown, key = ''): unknown {
+export function redactBroadcastValue(
+  value: unknown,
+  key = '',
+  context: BroadcastRedactionContext = createBroadcastRedactionContext(),
+): unknown {
   if (SENSITIVE_KEY.test(key)) return '[redacted]';
-  if (typeof value === 'string') return redactBroadcastText(value);
-  if (Array.isArray(value)) return value.map((entry) => redactBroadcastValue(entry));
+  if (typeof value === 'string') return redactBroadcastText(value, context);
+  if (Array.isArray(value)) return value.map((entry) => redactBroadcastValue(entry, '', context));
   if (value && typeof value === 'object') {
     const output: Record<string, unknown> = {};
     for (const [entryKey, entryValue] of Object.entries(value as Record<string, unknown>)) {
-      output[entryKey] = redactBroadcastValue(entryValue, entryKey);
+      output[entryKey] = redactBroadcastValue(entryValue, entryKey, context);
     }
     return output;
   }
   return value;
 }
 
-export function redactBroadcastRecord(value: Record<string, unknown>): Record<string, unknown> {
-  return redactBroadcastValue(value) as Record<string, unknown>;
+export function redactBroadcastRecord(
+  value: Record<string, unknown>,
+  context: BroadcastRedactionContext = createBroadcastRedactionContext(),
+): Record<string, unknown> {
+  return redactBroadcastValue(value, '', context) as Record<string, unknown>;
 }

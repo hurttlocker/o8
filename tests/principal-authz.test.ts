@@ -69,6 +69,8 @@ const merge = await import('@/app/api/orchestrator/merge/route');
 const workspace = await import('@/app/api/orchestrator/workspace/route');
 const devServer = await import('@/app/api/panel/dev-server/route');
 const fileIo = await import('@/app/api/panel/file-io/route');
+const lanes = await import('@/app/api/lanes/route');
+const managedRuns = await import('@/app/api/panel/managed-runs/route');
 const laneEvents = await import('@/app/api/lanes/[id]/events/route');
 const broadcastEvents = await import('@/app/api/broadcast/events/route');
 const broadcastSnapshot = await import('@/app/api/broadcast/snapshot/route');
@@ -570,6 +572,29 @@ describe('principal-authz — worker file access is confined to registered repos
   });
 });
 
+describe('principal-authz — spectator cannot bypass middleware at sensitive read handlers', () => {
+  it('file-io GET rejects the spectator before reading a valid absolute path', async () => {
+    const request = req(`http://localhost:3001/api/panel/file-io?path=${encodeURIComponent('/etc/hosts')}`, {
+      principal: 'spectator',
+      method: 'GET',
+    });
+    expect(panelGateMiddleware(request).status).toBe(403);
+    expect((await fileIo.GET(request)).status).toBe(403);
+  });
+
+  it('lanes GET rejects the spectator before reconciliation or fleet reads', async () => {
+    const request = req('http://localhost:3001/api/lanes', { principal: 'spectator', method: 'GET' });
+    expect(panelGateMiddleware(request).status).toBe(403);
+    expect((await lanes.GET(request)).status).toBe(403);
+  });
+
+  it('managed-runs GET rejects the spectator before tmux reconciliation', async () => {
+    const request = req('http://localhost:3001/api/panel/managed-runs', { principal: 'spectator', method: 'GET' });
+    expect(panelGateMiddleware(request).status).toBe(403);
+    expect((await managedRuns.GET(request)).status).toBe(403);
+  });
+});
+
 // Fail-closed sweep: the absence of a credential must never read as operator.
 describe('principal-authz — fail-closed: unknown/absent principal is denied on every mutating verb', () => {
   const mutating = [
@@ -643,9 +668,9 @@ describe('principal-authz — /api/lanes actor comes from the credential, never 
   // The hole: dispatch(body) with actor defaulting to trusted 'user' let ANY
   // loopback caller (worker token, tokenless same-origin fetch) self-assert
   // 'user' — which pre-approves merges and skips the governance card. The
-  // route now clamps: only the operator credential may act as 'user'; every
-  // other principal is forced to 'orchestrator'. Proven through the REAL
-  // route handler against a persisted lane, observing the lane event actor.
+  // route now clamps: only the operator credential may act as 'user'; workers
+  // are forced to 'orchestrator', and other principals are refused. Proven
+  // through the REAL route handler against a persisted lane and its events.
   it('worker token archiving a lane is recorded as orchestrator even when the body claims user', async () => {
     const lanesRoute = await import('@/app/api/lanes/route');
     const { createLane, getLaneEvents } = await import('@/lib/lane/registry');
@@ -692,7 +717,7 @@ describe('principal-authz — /api/lanes actor comes from the credential, never 
     expect(archived?.actor).toBe('user');
   });
 
-  it('tokenless loopback is clamped to orchestrator (fail-closed for the self-merge class)', async () => {
+  it('tokenless loopback is refused by the explicit operator/worker allowlist', async () => {
     const lanesRoute = await import('@/app/api/lanes/route');
     const { createLane, getLaneEvents } = await import('@/lib/lane/registry');
     const lane = createLane({
@@ -707,11 +732,11 @@ describe('principal-authz — /api/lanes actor comes from the credential, never 
       laneId: lane.id,
       actor: 'user',
     }));
-    expect(res.status).toBeLessThan(500);
+    expect(res.status).toBe(403);
     const events = getLaneEvents(lane.id, 20);
-    const archived = events.filter((event) => event.verb === 'status_change')
-      .find((event) => (event.payload as { status?: string }).status === 'archived');
-    expect(archived).toBeTruthy();
-    expect(archived?.actor).toBe('orchestrator');
+    expect(events.some((event) => (
+      event.verb === 'status_change'
+      && (event.payload as { status?: string }).status === 'archived'
+    ))).toBe(false);
   });
 });

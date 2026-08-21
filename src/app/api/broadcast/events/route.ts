@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
     const deadline = Date.now() + waitMs;
     for (;;) {
       const page = listBroadcastEvents(options);
-      if (page.events.length > 0 || waitMs === 0 || Date.now() >= deadline) {
+      if (page.events.length > 0 || page.hasMore || waitMs === 0 || Date.now() >= deadline) {
         return broadcastNoStore(page);
       }
       options.cursor = page.cursor;

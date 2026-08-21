@@ -30,12 +30,12 @@ import { isPathInRegisteredRepo } from '@/lib/llm/repo-scope';
  * worktree to overwrite ~/.zshrc / a launchd plist etc. (§HIGH-6). The operator
  * keeps full arbitrary-path access (this card is a terminal-grade operator tool).
  */
-async function denyWorkerOutsideRepo(request: Request, absPath: string): Promise<NextResponse | null> {
+async function authorizeFileAccess(request: Request, absPath: string): Promise<NextResponse | null> {
   const principal = resolveRequestPrincipal(request);
-  if (principal === 'anonymous' || principal === 'device') {
+  if (principal !== 'operator' && principal !== 'worker') {
     return NextResponse.json({ error: 'File access requires an operator or dispatched-worker credential.' }, { status: 403 });
   }
-  if (principal !== 'worker') return null;
+  if (principal === 'operator') return null;
   if (await isPathInRegisteredRepo(absPath)) return null;
   return NextResponse.json(
     { error: 'Workers may only access files inside a registered repository.' },
@@ -71,7 +71,7 @@ export async function GET(request: Request) {
   if (!path) {
     return NextResponse.json({ error: 'Absolute path required' }, { status: 400 });
   }
-  const workerDenied = await denyWorkerOutsideRepo(request, path);
+  const workerDenied = await authorizeFileAccess(request, path);
   if (workerDenied) return workerDenied;
   try {
     const info = await stat(path);
@@ -108,7 +108,7 @@ export async function PUT(request: Request) {
   if (!path) {
     return NextResponse.json({ error: 'Absolute path required' }, { status: 400 });
   }
-  const workerDenied = await denyWorkerOutsideRepo(request, path);
+  const workerDenied = await authorizeFileAccess(request, path);
   if (workerDenied) return workerDenied;
   try {
     // Edit-existing-files only — the card opens what's already on disk.

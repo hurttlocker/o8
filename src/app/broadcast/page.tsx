@@ -12,13 +12,6 @@ import type {
 const TOKEN_STORAGE_KEY = 'o8.broadcast.spectator-token';
 const SNAPSHOT_REFRESH_MS = 10_000;
 const FEED_LIMIT = 250;
-const LANE_DOT_COLORS = [
-  'var(--t-accent)',
-  'var(--t-success)',
-  'var(--t-warning)',
-  'var(--t-danger)',
-  'var(--t-text-muted)',
-];
 
 function readBootstrapToken(): string {
   const fragment = new URLSearchParams(window.location.hash.slice(1));
@@ -29,15 +22,6 @@ function readBootstrapToken(): string {
     return incoming;
   }
   return window.sessionStorage.getItem(TOKEN_STORAGE_KEY)?.trim() ?? '';
-}
-
-function laneColor(laneId: string | null): string {
-  if (!laneId) return 'var(--t-text-faint)';
-  let hash = 0;
-  for (let index = 0; index < laneId.length; index += 1) {
-    hash = ((hash << 5) - hash + laneId.charCodeAt(index)) | 0;
-  }
-  return LANE_DOT_COLORS[Math.abs(hash) % LANE_DOT_COLORS.length];
 }
 
 function formatTime(value: string): string {
@@ -62,7 +46,16 @@ function mergeEvents(current: BroadcastEvent[], incoming: BroadcastEvent[]): Bro
     .slice(-FEED_LIMIT);
 }
 
-function StatusDot({ color, size = 6 }: { color: string; size?: number }) {
+function eventDotIsFilled(kind: BroadcastEvent['kind']): boolean {
+  return kind === 'session_launched'
+    || kind === 'progress'
+    || kind === 'brain_consulted'
+    || kind === 'lease_acquired'
+    || kind === 'approval'
+    || kind === 'message';
+}
+
+function StatusDot({ filled, size = 6 }: { filled: boolean; size?: number }) {
   return (
     <span
       aria-hidden="true"
@@ -71,7 +64,9 @@ function StatusDot({ color, size = 6 }: { color: string; size?: number }) {
         height: size,
         minWidth: size,
         borderRadius: '50%',
-        background: color,
+        border: '1px solid var(--t-accent)',
+        background: filled ? 'var(--t-accent)' : 'transparent',
+        boxSizing: 'border-box',
         display: 'inline-block',
       }}
     />
@@ -126,7 +121,7 @@ function OnAirStrip({ agents }: { agents: BroadcastAgentSnapshot[] }) {
             letterSpacing: '-0.1px',
           }}
         >
-          <StatusDot color={laneColor(agent.laneId)} />
+          <StatusDot filled />
           <span style={{ overflowWrap: 'anywhere' }}>{agent.label}</span>
           <span style={{ color: 'var(--t-text-faint)', fontSize: 9.5, fontWeight: 260 }}>
             {agent.repo} · {agent.status}
@@ -154,7 +149,7 @@ function EventRow({ event }: { event: BroadcastEvent }) {
       }}
     >
       <span style={{ paddingTop: 5, display: 'flex', justifyContent: 'center' }}>
-        <StatusDot color={laneColor(event.laneId)} />
+        <StatusDot filled={eventDotIsFilled(event.kind)} />
       </span>
       <div style={{ minWidth: 0 }}>
         <div
@@ -221,6 +216,7 @@ function BroadcastSurface() {
   const [snapshot, setSnapshot] = useState<BroadcastSnapshot | null>(null);
   const [events, setEvents] = useState<BroadcastEvent[]>([]);
   const [state, setState] = useState<'booting' | 'live' | 'missing-token' | 'forbidden' | 'offline'>('booting');
+  const [isDocumentVisible, setIsDocumentVisible] = useState(true);
   const cursorRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -233,7 +229,17 @@ function BroadcastSurface() {
   }, []);
 
   useEffect(() => {
-    if (!token) return;
+    const updateVisibility = () => setIsDocumentVisible(document.visibilityState === 'visible');
+    const frame = window.requestAnimationFrame(updateVisibility);
+    document.addEventListener('visibilitychange', updateVisibility);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener('visibilitychange', updateVisibility);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!token || !isDocumentVisible) return;
     const controller = new AbortController();
     let stopped = false;
     let refreshTimer: ReturnType<typeof setInterval> | null = null;
@@ -316,7 +322,7 @@ function BroadcastSurface() {
       controller.abort();
       if (refreshTimer) clearInterval(refreshTimer);
     };
-  }, [token]);
+  }, [isDocumentVisible, token]);
 
   const visibleEvents = useMemo(() => [...events].reverse(), [events]);
   const statusCopy = state === 'live'
@@ -390,14 +396,14 @@ function BroadcastSurface() {
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: 7,
-                color: state === 'live' ? 'var(--t-success)' : 'var(--t-warning)',
+                color: 'var(--t-text-secondary)',
                 fontSize: 9,
                 fontWeight: 300,
                 letterSpacing: '0.04em',
                 lineHeight: '14px',
               }}
             >
-              <StatusDot color={state === 'live' ? 'var(--t-success)' : 'var(--t-warning)'} />
+              <StatusDot filled={state === 'live'} />
               {statusCopy}
             </span>
           </div>

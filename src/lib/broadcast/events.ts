@@ -5,7 +5,12 @@ import path from 'node:path';
 import type Database from 'better-sqlite3';
 
 import { getSqlite } from '@/lib/db';
-import { redactBroadcastRecord, redactBroadcastText } from './redaction';
+import {
+  createBroadcastRedactionContext,
+  redactBroadcastRecord,
+  redactBroadcastText,
+  type BroadcastRedactionContext,
+} from './redaction';
 import {
   BROADCAST_EVENT_KINDS,
   type BroadcastEvent,
@@ -16,6 +21,19 @@ import {
 const BROADCAST_KIND_SET = new Set<string>(BROADCAST_EVENT_KINDS);
 const RAW_BATCH_SIZE = 250;
 const MAX_EVENT_LIMIT = 100;
+const MAX_ROWS_SCANNED = 5_000;
+const MAX_EVENT_PAYLOAD_BYTES = 8 * 1024;
+const PAYLOAD_SUMMARY_KEYS = [
+  'event',
+  'eventLabel',
+  'message',
+  'question',
+  'resource',
+  'summary',
+  'note',
+  'approved',
+  'status',
+] as const;
 
 interface RawBroadcastRow {
   id: string;
@@ -357,17 +375,58 @@ function laneMatches(row: RawBroadcastRow, requested: string | null | undefined)
   return !filter || row.lane_id === filter;
 }
 
+function serializedBytes(value: Record<string, unknown>): number {
+  return Buffer.byteLength(JSON.stringify(value), 'utf8');
+}
+
+function fitStringProperty(
+  output: Record<string, unknown>,
+  key: string,
+  value: string,
+): void {
+  let low = 0;
+  let high = value.length;
+  let accepted = '';
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const candidate = `${value.slice(0, middle)}${middle < value.length ? '…' : ''}`;
+    if (serializedBytes({ ...output, [key]: candidate }) <= MAX_EVENT_PAYLOAD_BYTES) {
+      accepted = candidate;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+  if (accepted) output[key] = accepted;
+}
+
+function boundEventPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  if (serializedBytes(payload) <= MAX_EVENT_PAYLOAD_BYTES) return payload;
+  const output: Record<string, unknown> = { truncated: true };
+  for (const key of PAYLOAD_SUMMARY_KEYS) {
+    const value = payload[key];
+    if (typeof value === 'string') {
+      fitStringProperty(output, key, value);
+    } else if (typeof value === 'number' || typeof value === 'boolean' || value === null) {
+      const candidate = { ...output, [key]: value };
+      if (serializedBytes(candidate) <= MAX_EVENT_PAYLOAD_BYTES) output[key] = value;
+    }
+  }
+  return output;
+}
+
 function mapEvent(
   row: RawBroadcastRow,
   requestedKinds: Set<string> | null,
   repo: string | null | undefined,
   lane: string | null | undefined,
+  redactionContext: BroadcastRedactionContext,
 ): BroadcastEvent | null {
   if (!repoMatches(row, repo) || !laneMatches(row, lane)) return null;
   const payload = parsePayload(row.payload_json);
   const kind = eventKind(row, payload);
   if (!kind || (requestedKinds && !requestedKinds.has(kind))) return null;
-  const redactedPayload = redactBroadcastRecord(payload);
+  const redactedPayload = boundEventPayload(redactBroadcastRecord(payload, redactionContext));
   const detail = detailFor(kind, row, redactedPayload);
   return {
     schema: 'o8/broadcast.event/v1',
@@ -377,9 +436,9 @@ function mapEvent(
     laneId: row.lane_id,
     packetId: row.packet_id,
     repo: repoLabel(row.repo_path),
-    actor: redactBroadcastText(row.actor),
-    title: redactBroadcastText(titleFor(kind, row, redactedPayload)),
-    detail: detail ? redactBroadcastText(detail) : null,
+    actor: redactBroadcastText(row.actor, redactionContext),
+    title: redactBroadcastText(titleFor(kind, row, redactedPayload), redactionContext),
+    detail: detail ? redactBroadcastText(detail, redactionContext) : null,
     payload: redactedPayload,
     timestamp: row.timestamp,
   };
@@ -401,6 +460,7 @@ export function listBroadcastEvents(
 ): BroadcastEventPage {
   const limit = normalizeLimit(options.limit);
   const kinds = requestedKinds(options.kinds);
+  const redactionContext = createBroadcastRedactionContext();
   const encodedInput = options.cursor?.trim() || null;
   const decoded = encodedInput ? decodeBroadcastCursor(encodedInput) : null;
   if (encodedInput && !decoded) throw new BroadcastQueryError('Broadcast cursor is invalid.');
@@ -410,12 +470,15 @@ export function listBroadcastEvents(
     ? { v: 1, positions: { ...decoded.positions } }
     : emptyCursor();
   let hasMore = false;
-  for (;;) {
-    const rows = rawRowsAfter(sqlite, scanCursor, RAW_BATCH_SIZE);
+  let rowsScanned = 0;
+  while (rowsScanned < MAX_ROWS_SCANNED) {
+    const batchLimit = Math.min(RAW_BATCH_SIZE, MAX_ROWS_SCANNED - rowsScanned);
+    const rows = rawRowsAfter(sqlite, scanCursor, batchLimit);
     if (rows.length === 0) break;
     for (const row of rows) {
+      rowsScanned += 1;
       scanCursor = advanceCursor(scanCursor, row);
-      const event = mapEvent(row, kinds, options.repo, options.lane);
+      const event = mapEvent(row, kinds, options.repo, options.lane, redactionContext);
       if (event) events.push(event);
       if (events.length === limit) {
         hasMore = rawRowsAfter(sqlite, scanCursor, 1).length > 0;
@@ -427,8 +490,9 @@ export function listBroadcastEvents(
         };
       }
     }
-    if (rows.length < RAW_BATCH_SIZE) break;
+    if (rows.length < batchLimit) break;
   }
+  hasMore = rowsScanned === MAX_ROWS_SCANNED && rawRowsAfter(sqlite, scanCursor, 1).length > 0;
   return {
     schema: 'o8/broadcast.events/v1',
     events,
@@ -443,16 +507,20 @@ export function listRecentBroadcastEvents(
 ): BroadcastEventPage {
   const limit = normalizeLimit(options.limit);
   const kinds = requestedKinds(options.kinds);
+  const redactionContext = createBroadcastRedactionContext();
   const events: BroadcastEvent[] = [];
   let scanCursor: RawScanCursor | null = null;
   const headCursor = currentCursor(sqlite);
   let hasMore = false;
-  for (;;) {
-    const rows = rawRowsBefore(sqlite, scanCursor, RAW_BATCH_SIZE);
+  let rowsScanned = 0;
+  while (rowsScanned < MAX_ROWS_SCANNED) {
+    const batchLimit = Math.min(RAW_BATCH_SIZE, MAX_ROWS_SCANNED - rowsScanned);
+    const rows = rawRowsBefore(sqlite, scanCursor, batchLimit);
     if (rows.length === 0) break;
     for (const row of rows) {
+      rowsScanned += 1;
       scanCursor = { timestamp: row.timestamp, rawSource: row.raw_source, ordinal: row.ordinal };
-      const event = mapEvent(row, kinds, options.repo, options.lane);
+      const event = mapEvent(row, kinds, options.repo, options.lane, redactionContext);
       if (event) events.push(event);
       if (events.length === limit) {
         hasMore = rawRowsBefore(sqlite, scanCursor, 1).length > 0;
@@ -464,8 +532,9 @@ export function listRecentBroadcastEvents(
         };
       }
     }
-    if (rows.length < RAW_BATCH_SIZE) break;
+    if (rows.length < batchLimit) break;
   }
+  hasMore = rowsScanned === MAX_ROWS_SCANNED && rawRowsBefore(sqlite, scanCursor, 1).length > 0;
   return {
     schema: 'o8/broadcast.events/v1',
     events: events.reverse(),

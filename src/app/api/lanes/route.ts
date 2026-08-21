@@ -30,6 +30,13 @@ export async function GET(req: NextRequest) {
   const startedAt = performance.now();
   const denied = requirePanelAuth(req);
   if (denied) return denied;
+  const principal = resolveRequestPrincipalContext(req);
+  if (principal.role !== 'operator' && principal.role !== 'worker') {
+    return NextResponse.json(
+      { ok: false, error: { code: 'operator_or_worker_required', message: 'Lane routes require an operator or packet-bound worker credential.' } },
+      { status: 403 },
+    );
+  }
 
   // #534 follow-up — reconcile lanes whose worktrees were deleted out-of-band
   // (orchestrator bash-merge bypasses the merge verb) so the sidebar doesn't
@@ -46,7 +53,6 @@ export async function GET(req: NextRequest) {
   // pass through untouched; only retired (archived/completed) lanes collapse.
   const collapse = url.searchParams.get('collapse') === 'true';
 
-  const principal = resolveRequestPrincipalContext(req);
   const visibleLanes = activeOnly ? listActiveLanes() : listLanes();
   const baseLanes = principal.role === 'worker'
     ? visibleLanes.filter((lane) => Boolean(principal.packetId) && lane.packetId === principal.packetId)
@@ -109,6 +115,13 @@ function createPrIdempotencyBody(command: Extract<LaneCommand, { verb: 'create_p
 export async function POST(req: NextRequest, options: LanePostExecutionOptions = {}) {
   const denied = requirePanelAuth(req);
   if (denied) return denied;
+  const principal = resolveRequestPrincipalContext(req);
+  if (principal.role !== 'operator' && principal.role !== 'worker') {
+    return NextResponse.json(
+      { ok: false, error: { code: 'operator_or_worker_required', message: 'Lane routes require an operator or packet-bound worker credential.' } },
+      { status: 403 },
+    );
+  }
 
   const body = await req.json().catch(() => null) as LaneCommand | null;
   if (!body || !body.verb) {
@@ -120,11 +133,10 @@ export async function POST(req: NextRequest, options: LanePostExecutionOptions =
   // governance card — so any loopback caller, including a dispatched worker's
   // token or a prompt-injected same-origin fetch, could merge to main
   // silently). Only a live operator credential (ws-token) may act as 'user';
-  // every other caller — worker token, tokenless loopback — is clamped to
-  // 'orchestrator', which routes governed verbs through the approval card
-  // exactly like /api/orchestrator/merge's worker branch. Internal server
-  // callers import dispatch() directly and are unaffected.
-  const principal = resolveRequestPrincipalContext(req);
+  // authenticated workers are clamped to 'orchestrator', which routes governed
+  // verbs through the approval card exactly like /api/orchestrator/merge's
+  // worker branch. The allowlist above rejects other principals. Internal
+  // server callers import dispatch() directly and are unaffected.
   const commandPacketId = body.verb === 'open_lane'
     ? body.packetId ?? null
     : 'laneId' in body

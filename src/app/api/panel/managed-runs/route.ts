@@ -20,8 +20,14 @@ const MAX_FIELD = 4096; // cap persisted/echoed strings — no unbounded command
 /** GET — list managed runs (reconciled against live tmux). */
 export async function GET(request: Request) {
   const startedAt = performance.now();
+  const principal = resolveRequestPrincipalContext(request);
+  if (principal.role !== 'operator' && principal.role !== 'worker') {
+    return NextResponse.json(
+      { schema: 'o8/managed-runs/v1', runs: [], error: 'operator_or_worker_required' },
+      { status: 403, headers: serverTimingHeaders(startedAt) },
+    );
+  }
   try {
-    const principal = resolveRequestPrincipalContext(request);
     const allRuns = await listManagedRuns();
     const runs = principal.role === 'worker'
       ? allRuns.filter((run) => Boolean(principal.packetId) && run.packetId === principal.packetId)
@@ -56,14 +62,16 @@ type RegisterBody = {
 
 /** POST — register a run (default), finish one (action:'finish'), or kill one (action:'kill'). */
 export async function POST(req: Request) {
+  const principal = resolveRequestPrincipalContext(req);
+  if (principal.role !== 'operator' && principal.role !== 'worker') {
+    return NextResponse.json({ ok: false, error: 'operator_or_worker_required' }, { status: 403 });
+  }
   let body: RegisterBody;
   try {
     body = (await req.json()) as RegisterBody;
   } catch {
     return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 });
   }
-  const principal = resolveRequestPrincipalContext(req);
-
   if (body.action === 'register' || !body.action) {
     const ownershipRefusal = workerPacketRefusal(principal, body.packetId);
     if (ownershipRefusal) {
