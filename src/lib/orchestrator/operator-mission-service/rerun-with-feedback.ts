@@ -169,10 +169,9 @@ export function resetPacketFields(packet: OrchestratorPacket) {
   // stops the launching<->idle thrash within this new attempt.
   advancePacketStorageAdmissionEpoch(packet);
   packet.launchAttempts = 0;
-  // Deliberately NOT reset: packet.typecheckAutoRetries. The auto-rerun
-  // budget (#1108 layer 1) must survive redispatch — zeroing it here would
-  // let a persistently type-broken packet loop full workers forever. Only
-  // operator reset_packet refreshes it.
+  // Deliberately NOT reset: packet.typecheckAutoRetries or
+  // packet.leaseWaitAutoRetries. Both budgets must survive redispatch; only
+  // operator reset_packet refreshes them.
 }
 
 async function retireRerunGeneration(guard: PacketLifecycleGuard): Promise<boolean> {

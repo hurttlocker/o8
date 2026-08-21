@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join, relative } from 'node:path';
 
@@ -62,6 +62,17 @@ function git(cwd: string, args: string[]): string {
 function commitAll(cwd: string, message: string) {
   git(cwd, ['add', '-A']);
   git(cwd, ['-c', 'user.name=o8-test', '-c', 'user.email=o8@example.test', 'commit', '-m', message]);
+}
+
+async function waitFor(
+  predicate: () => boolean | Promise<boolean>,
+  timeoutMs = 30_000,
+): Promise<void> {
+  const startedAt = Date.now();
+  while (!(await predicate())) {
+    if (Date.now() - startedAt >= timeoutMs) throw new Error('Timed out waiting for merge fixture state.');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
 }
 
 function makeRepo(name: string) {
@@ -172,7 +183,12 @@ async function spokenMergeCommand(lane: ReturnType<typeof createLane>) {
   };
 }
 
-function packetFixture(id: string, repoPath: string, retries = 0): OrchestratorPacket {
+function packetFixture(
+  id: string,
+  repoPath: string,
+  retries = 0,
+  leaseWaitRetries = 0,
+): OrchestratorPacket {
   return {
     id,
     referenceLabel: id,
@@ -192,6 +208,7 @@ function packetFixture(id: string, repoPath: string, retries = 0): OrchestratorP
     lastEventLabel: null,
     recoveryCount: 0,
     typecheckAutoRetries: retries,
+    leaseWaitAutoRetries: leaseWaitRetries,
     workspaceTargetPath: repoPath,
     branchTarget: `inline/${id}`,
   } as OrchestratorPacket;
@@ -336,6 +353,11 @@ describe('worktree-side merge with real git repos', () => {
 
   it('refuses a merge within its lease deadline when a live external holder is stuck', async () => {
     const { repo } = makeRepo('o8-merge-lease-timeout');
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      repoPath: repo,
+      packets: [packetFixture('pkt-lease-timeout', repo)],
+    });
     const worktree = await makeWorktree(repo, 'pkt-lease-timeout', 'inline/lease-timeout');
     writeFileSync(join(worktree.path, 'file.txt'), 'base\nworker\n');
     commitAll(worktree.path, 'worker change');
@@ -364,7 +386,7 @@ describe('worktree-side merge with real git repos', () => {
       const attempt = mergeLane(lane, 100);
       const observed = await Promise.race([
         attempt,
-        new Promise<'timed-out'>((resolve) => setTimeout(() => resolve('timed-out'), 500)),
+        new Promise<'timed-out'>((resolve) => setTimeout(() => resolve('timed-out'), 1_000)),
       ]);
       const completed = observed === 'timed-out' ? await attempt : observed;
 
@@ -374,7 +396,8 @@ describe('worktree-side merge with real git repos', () => {
         reason: 'repo_action_lease_wait_timeout',
       });
       expect(completed.result.note).toContain('stuck-holder');
-      expect(getLane(lane.id)?.status).toBe('reviewing');
+      expect(getLane(lane.id)?.status).toBe('awaiting_orchestrator');
+      expect(readOrchestratorControlPlaneState().packets[0]?.leaseWaitAutoRetries).toBe(1);
       expect(existsSync(worktree.path)).toBe(true);
       expect(await getResourceLeaseStore().status(`repo-tree:${repo}`)).toMatchObject({
         holder: { owner: { id: 'stuck-holder' } },
@@ -388,7 +411,32 @@ describe('worktree-side merge with real git repos', () => {
         { verb: 'acquired', actor: 'operator' },
         { verb: 'wait_enqueued', actor: 'system:repo-action' },
         { verb: 'wait_timed_out', actor: 'system:repo-action' },
+        { verb: 'wait_enqueued', actor: 'system:repo-action' },
+        { verb: 'wait_timed_out', actor: 'system:repo-action' },
       ]);
+      const events = getLaneEvents(lane.id);
+      expect(events.filter((event) => event.verb === 'lease_wait_timeout')).toMatchObject([
+        {
+          payload: {
+            holder: { owner: { id: 'stuck-holder' } },
+            waitedMs: expect.any(Number),
+            retryCount: 0,
+            willRetry: true,
+          },
+        },
+        {
+          payload: {
+            holder: { owner: { id: 'stuck-holder' } },
+            waitedMs: expect.any(Number),
+            retryCount: 1,
+            willRetry: false,
+          },
+        },
+      ]);
+      expect(events.some((event) =>
+        event.verb === 'status_change'
+        && event.payload.status === 'recovering'
+      )).toBe(true);
     } finally {
       if (holder.exitCode === null && holder.signalCode === null) {
         const exited = once(holder, 'exit');
@@ -397,6 +445,100 @@ describe('worktree-side merge with real git repos', () => {
       }
     }
   }, 10_000);
+
+  it('lets a second real merge wait beyond five seconds for the repo-tree lease', async () => {
+    const { repo } = makeRepo('o8-merge-lease-long-wait');
+    const firstWorktree = await makeWorktree(repo, 'pkt-lease-first', 'inline/lease-first');
+    writeFileSync(join(firstWorktree.path, 'first.txt'), 'first\n');
+    commitAll(firstWorktree.path, 'first merge');
+    const firstLane = createLane({
+      repoPath: repo,
+      worktreePath: firstWorktree.path,
+      branch: 'inline/lease-first',
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId: 'pkt-lease-first',
+    });
+    const secondWorktree = await makeWorktree(repo, 'pkt-lease-second', 'inline/lease-second');
+    writeFileSync(join(secondWorktree.path, 'second.txt'), 'second\n');
+    commitAll(secondWorktree.path, 'second merge');
+    const secondLane = createLane({
+      repoPath: repo,
+      worktreePath: secondWorktree.path,
+      branch: 'inline/lease-second',
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId: 'pkt-lease-second',
+    });
+    const hookPath = join(repo, '.git', 'hooks', 'pre-push');
+    writeFileSync(hookPath, [
+      '#!/bin/sh',
+      'marker="$(git rev-parse --git-common-dir)/o8-test-slow-push"',
+      'if [ ! -f "$marker" ]; then',
+      '  : > "$marker"',
+      '  sleep 7',
+      'fi',
+      '',
+    ].join('\n'));
+    chmodSync(hookPath, 0o755);
+
+    const resultPath = join(repo, '.git', 'o8-test-first-merge-result.json');
+    const child = spawn(process.execPath, [
+      './node_modules/vitest/vitest.mjs', 'run',
+      'tests/fixtures/worktree-side-merge-child.test.ts', '--reporter=dot',
+    ], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        CORTEX_IDE_DATA_DIR: dataDir,
+        O8_DATA_DIR: dataDir,
+        O8_TEST_DATA_DIR_PINNED: dataDir,
+        O8_SKIP_PRELAUNCH_TYPECHECK: '1',
+        O8_TEST_MERGE_LANE_ID: firstLane.id,
+        O8_TEST_MERGE_RESULT_PATH: resultPath,
+      },
+      stdio: 'pipe',
+    });
+    let childOutput = '';
+    child.stdout.on('data', (chunk) => { childOutput += String(chunk); });
+    child.stderr.on('data', (chunk) => { childOutput += String(chunk); });
+    const childDone = new Promise<void>((resolve, reject) => {
+      child.once('error', reject);
+      child.once('exit', (code) => code === 0
+        ? resolve()
+        : reject(new Error(`Merge child exited ${code}.\n${childOutput}`)));
+    });
+
+    try {
+      await Promise.race([
+        waitFor(async () => {
+          const snapshot = await getResourceLeaseStore().status(`repo-tree:${repo}`);
+          return snapshot.holder?.owner.id.startsWith('repo-action:') === true;
+        }),
+        childDone.then(() => {
+          throw new Error(`Merge child exited before acquiring the repo-tree lease.\n${childOutput}`);
+        }),
+      ]);
+      const startedAt = Date.now();
+      const second = await mergeLane(secondLane);
+      const waitedMs = Date.now() - startedAt;
+      await childDone;
+
+      expect(JSON.parse(readFileSync(resultPath, 'utf8'))).toMatchObject({ ok: true });
+      expect(second.result).toMatchObject({ ok: true });
+      expect(waitedMs).toBeGreaterThanOrEqual(5_000);
+      expect(getLaneEvents(secondLane.id).filter((event) => event.verb === 'lease_wait_timeout'))
+        .toHaveLength(0);
+      expect(git(repo, ['show', 'HEAD:first.txt'])).toBe('first');
+      expect(git(repo, ['show', 'HEAD:second.txt'])).toBe('second');
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) {
+        const exited = once(child, 'exit');
+        child.kill('SIGKILL');
+        await exited;
+      }
+    }
+  }, 45_000);
 
   it('escalates a dirty operator checkout instead of stashing or force-merging it', async () => {
     const { repo } = makeRepo('o8-merge-dirty');

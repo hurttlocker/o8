@@ -30,6 +30,7 @@ import {
 } from './resource-lease-participant';
 
 const ACQUIRE_RACE_LIMIT = 8;
+const WAITER_HEARTBEAT_INTERVAL_MS = 5_000;
 
 interface HolderRow {
   resource: string;
@@ -242,13 +243,6 @@ export class ResourceLeaseStore {
     let reaped = 0;
     let blocked: ResourceLeaseSnapshot['blocked'] = null;
     for (const row of this.readWaiters(resource)) {
-      if (!hasPersistedWaiterAuthority(row)) {
-        blocked ??= {
-          code: 'waiter_claim_unavailable',
-          message: `FIFO waiter ${row.owner_label} has no proved claim authority, so later waiters cannot pass it.`,
-        };
-        continue;
-      }
       const [ownerState, waiterState] = await Promise.all([
         this.exactProcessState(row.owner_pid, row.owner_identity_json),
         this.exactProcessState(row.waiter_pid, row.waiter_identity_json),
@@ -258,6 +252,13 @@ export class ResourceLeaseStore {
         : waiterState.state === 'dead' ? `waiter_${waiterState.reason}` : null;
       if (deadReason) {
         if (this.reapWaiter(row, deadReason)) reaped += 1;
+        continue;
+      }
+      if (!hasPersistedWaiterAuthority(row)) {
+        blocked ??= {
+          code: 'waiter_claim_unavailable',
+          message: `FIFO waiter ${row.owner_label} has no proved claim authority, so later waiters cannot pass it.`,
+        };
         continue;
       }
       if (!blocked && (ownerState.state === 'unknown' || waiterState.state === 'unknown')) {
@@ -324,16 +325,6 @@ export class ResourceLeaseStore {
       if (holder) return { row: holder, promoted: false, blocked: null };
       const row = this.readWaiters(resource)[0];
       if (!row) return { row: null, promoted: false, blocked: null };
-      if (!hasPersistedWaiterAuthority(row)) {
-        return {
-          row: null,
-          promoted: false,
-          blocked: {
-            code: 'waiter_claim_unavailable',
-            message: `FIFO waiter ${row.owner_label} has no proved claim authority and cannot be promoted.`,
-          },
-        };
-      }
       const [ownerState, waiterState] = await Promise.all([
         this.exactProcessState(row.owner_pid, row.owner_identity_json),
         this.exactProcessState(row.waiter_pid, row.waiter_identity_json),
@@ -344,6 +335,16 @@ export class ResourceLeaseStore {
       if (deadReason) {
         this.reapWaiter(row, deadReason);
         continue;
+      }
+      if (!hasPersistedWaiterAuthority(row)) {
+        return {
+          row: null,
+          promoted: false,
+          blocked: {
+            code: 'waiter_claim_unavailable',
+            message: `FIFO waiter ${row.owner_label} has no proved claim authority and cannot be promoted.`,
+          },
+        };
       }
       if (ownerState.state === 'unknown' || waiterState.state === 'unknown') {
         const detail = ownerState.state === 'unknown' ? ownerState.detail : waiterState.state === 'unknown' ? waiterState.detail : '';
@@ -455,6 +456,10 @@ export class ResourceLeaseStore {
       ) as WaiterRow | undefined;
       if (existing) {
         if (!sameResourceLeaseClaimHash(existing.claim_token_hash, participant.claimTokenHash)) return existing;
+        if (
+          existing.ttl_ms === ttlMs
+          && now - existing.last_seen_at < WAITER_HEARTBEAT_INTERVAL_MS
+        ) return existing;
         this.sqlite.prepare(`
           UPDATE resource_lease_waiters SET last_seen_at = ?, ttl_ms = ? WHERE waiter_id = ?
         `).run(now, ttlMs, existing.waiter_id);

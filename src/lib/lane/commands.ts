@@ -55,7 +55,7 @@ import {
   validateSpokenReviewEvidenceBundle,
 } from '@/lib/lane/spoken-review-snapshot';
 import { commitDirtyWorktree, readHeadSha } from '@/lib/lane/worktree-merge-git';
-import { repoActionLeaseRefusalResult, withRepoActionLock } from '@/lib/lane/repo-action-lock';
+import { withRepoActionRecovery } from '@/lib/lane/repo-action-lock';
 import { materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
 import { persistLanePacketHold } from '@/lib/lane/packet-stop-hold';
 import { killLaneSessionsConfirmed } from '@/lib/lane/reap-sessions';
@@ -496,7 +496,10 @@ async function dispatchUnlocked(command: LaneCommand): Promise<LaneCommandResult
         console.log(`[headless] Auto-approved orchestrator review for lane ${lane.id} (create_pr)`);
       }
 
-      const guarded = await withRepoActionLock(lane.repoPath, async () => {
+      return withRepoActionRecovery(lane.repoPath, {
+        laneId: command.laneId,
+        packetId: lane.packetId,
+      }, async () => {
         const lockedLane = getLane(command.laneId);
         if (!lockedLane) {
           return { ok: false, laneId: command.laneId, note: 'Lane not found.' };
@@ -628,9 +631,6 @@ async function dispatchUnlocked(command: LaneCommand): Promise<LaneCommandResult
           return { ok: false, laneId: command.laneId, note: message };
         }
       });
-      return guarded.state === 'completed'
-        ? guarded.value
-        : repoActionLeaseRefusalResult(command.laneId, guarded.refusal);
     }
 
     case 'merge': {

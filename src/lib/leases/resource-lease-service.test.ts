@@ -52,6 +52,75 @@ afterEach(() => {
 });
 
 describe('resource lease store', () => {
+  it('reaps a confirmed-dead pre-authority FIFO waiter before admitting the next claimant', async () => {
+    const sqlite = new Database(':memory:');
+    openDatabases.push(sqlite);
+    sqlite.exec(`
+      CREATE TABLE resource_lease_waiters (
+        queue_sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+        waiter_id TEXT NOT NULL UNIQUE,
+        resource TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        owner_label TEXT NOT NULL,
+        owner_pid INTEGER NOT NULL CHECK (owner_pid > 0),
+        owner_identity_json TEXT NOT NULL,
+        waiter_pid INTEGER NOT NULL CHECK (waiter_pid > 0),
+        waiter_identity_json TEXT NOT NULL,
+        ttl_ms INTEGER NOT NULL CHECK (ttl_ms > 0),
+        enqueued_at INTEGER NOT NULL,
+        last_seen_at INTEGER NOT NULL,
+        UNIQUE(resource, owner_id, owner_pid, owner_identity_json)
+      );
+    `);
+    const legacyIdentity = JSON.stringify(identity('404'));
+    sqlite.prepare(`
+      INSERT INTO resource_lease_waiters (
+        waiter_id, resource, owner_id, owner_label, owner_pid, owner_identity_json,
+        waiter_pid, waiter_identity_json, ttl_ms, enqueued_at, last_seen_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      'legacy-waiter',
+      'legacy-fifo',
+      'legacy-owner',
+      'legacy-owner',
+      404,
+      legacyIdentity,
+      404,
+      legacyIdentity,
+      60_000,
+      1_700_000_000_000,
+      1_700_000_000_000,
+    );
+    const store = new ResourceLeaseStore(sqlite, {
+      now: () => 1_700_000_001_000,
+      probe: async (pid) => pid === 202
+        ? { state: 'live', identity: identity('202') }
+        : { state: 'absent' },
+      eventId: (() => {
+        let id = 0;
+        return () => `legacy-event-${++id}`;
+      })(),
+      leaseId: () => 'authenticated-lease',
+    });
+
+    const acquired = await store.acquire({
+      resource: 'legacy-fifo',
+      participant: participant('authenticated', 202),
+    });
+
+    expect(acquired).toMatchObject({
+      state: 'acquired',
+      lease: { owner: { id: 'authenticated' } },
+    });
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM resource_lease_waiters').get())
+      .toEqual({ count: 0 });
+    expect(sqlite.prepare('SELECT verb, actor FROM resource_lease_events ORDER BY sequence').all())
+      .toEqual([
+        { verb: 'waiter_reaped', actor: 'system' },
+        { verb: 'acquired', actor: 'principal:authenticated' },
+      ]);
+  });
+
   it('keeps an overdue holder when exact process death is unknown, then reaps only after proof', async () => {
     const f = fixture();
     openDatabases.push(f.sqlite);

@@ -279,6 +279,11 @@ export interface OrchestratorPacket {
    */
   typecheckAutoRetries?: number;
   /**
+   * Repo-tree lease-wait retry budget spent. Preserved across redispatch and
+   * zeroed only by operator reset_packet, matching typecheckAutoRetries.
+   */
+  leaseWaitAutoRetries?: number;
+  /**
    * Self-review-stall auto-retry budget spent (loop bound, 2026-06-22). Same
    * lifecycle as {@link typecheckAutoRetries} — lives ON the packet because a
    * per-lane count resets on every stall redispatch (the bug: a stalling packet

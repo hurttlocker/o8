@@ -83,6 +83,7 @@ function markPacketResetHeld(packet: OrchestratorPacket) {
   // Operator reset also refreshes the typecheck auto-rerun budget (#1108) —
   // this is the ONLY place it resets; rerun_with_feedback preserves it.
   packet.typecheckAutoRetries = 0;
+  packet.leaseWaitAutoRetries = 0;
   // Same for the self-review stall budget + the operator-Stop flag (2026-06-22):
   // a reset gives a fresh stall budget and re-enables dispatch.
   packet.stallRetries = 0;

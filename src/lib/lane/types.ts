@@ -275,6 +275,9 @@ export type LaneEventVerb =
   // typecheck_escalation — layer 2 promoted the lane to awaiting_orchestrator
   | 'typecheck_auto_retry'
   | 'typecheck_escalation'
+  // A repo publication action exhausted its bounded resource-lease wait.
+  // Payload: { resource, waitedMs, holder, retryCount, willRetry }
+  | 'lease_wait_timeout'
   // Worker consulted the Engineering Brain via `o8 ask` (2026-06-11).
   // Payload: { question, class, cacheHit, sourcesConsidered, citedCount, topTitles }
   | 'brain_consulted'

@@ -161,7 +161,9 @@ the process tree bound to that packet credential; worker labels and ledger actor
 authenticated principal, not the request body. Workers cannot mutate the governance-reserved
 `repo-tree:`, `test-suite:`, or `apfs-mounts:` namespaces. Acquire creates a private claim that is
 never returned by status/list; release and heartbeat require both the exact process identity and
-that claim. An overdue lease remains held until release or confirmed process death; an unknown
+that claim. Claim files inside the o8 data directory are readable by the same operating-system
+user; worker-to-worker isolation comes from the server-verified process binding, not secrecy of
+the claim token. An overdue lease remains held until release or confirmed process death; an unknown
 identity fails closed.
 
 | Method | Path | Purpose |

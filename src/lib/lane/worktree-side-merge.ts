@@ -55,7 +55,7 @@ import {
   refreshOriginBaseBestEffort,
   worktreeExistsOnDisk,
 } from '@/lib/lane/worktree-merge-git';
-import { repoActionLeaseRefusalResult, withRepoActionLock } from '@/lib/lane/repo-action-lock';
+import { withRepoActionRecovery } from '@/lib/lane/repo-action-lock';
 import { enqueueMergeDecompositions } from '@/lib/lane/merge-decomposition';
 import { canonicalRepoRoot } from '@/lib/worktree/root-layout';
 
@@ -455,14 +455,15 @@ async function retryBaseAdvancedAfterRebase(
 export async function performWorktreeSideMerge(input: WorktreeSideMergeInput): Promise<LaneCommandResult> {
   const canonicalRepoPath = canonicalRepoRoot(input.command.canonicalRepoPath ?? input.lane.repoPath);
   const canonicalInput = canonicalRepoPath === input.lane.repoPath ? input : { ...input, lane: { ...input.lane, repoPath: canonicalRepoPath } };
-  const guarded = await withRepoActionLock(
+  return withRepoActionRecovery(
     canonicalRepoPath,
+    {
+      laneId: input.command.laneId,
+      packetId: input.lane.packetId,
+      maxWaitMs: input.repoActionLeaseMaxWaitMs,
+    },
     () => performWorktreeSideMergeInner(canonicalInput),
-    { maxWaitMs: input.repoActionLeaseMaxWaitMs },
   );
-  return guarded.state === 'completed'
-    ? guarded.value
-    : repoActionLeaseRefusalResult(input.command.laneId, guarded.refusal);
 }
 
 async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Promise<LaneCommandResult> {
