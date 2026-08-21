@@ -17,10 +17,16 @@ export interface BroadcastRedactionContext {
   operatorToken: string | null;
 }
 
+// Values shorter than this are never treated as secrets, whatever their key:
+// flags like FOO_TOKEN=1 would otherwise scrub every "1" out of the feed.
+const MIN_ENV_SECRET_LENGTH = 6;
+
 function environmentValues(): string[] {
   return [...new Set(Object.entries(process.env)
     .flatMap(([key, value]) => (
-      typeof value === 'string' && value.length > 0 && (value.length >= 8 || SENSITIVE_KEY.test(key))
+      typeof value === 'string'
+        && value.length >= MIN_ENV_SECRET_LENGTH
+        && (value.length >= 8 || SENSITIVE_KEY.test(key))
         ? [value]
         : []
     )))]
