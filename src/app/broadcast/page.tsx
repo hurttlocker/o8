@@ -1,13 +1,17 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { motion, useReducedMotion } from 'framer-motion';
 
 import { ThemeProvider } from '@/lib/theme/context';
-import type {
-  BroadcastAgentSnapshot,
-  BroadcastEvent,
-  BroadcastSnapshot,
-} from '@/lib/broadcast/types';
+import type { BroadcastEvent, BroadcastSnapshot } from '@/lib/broadcast/types';
+
+import {
+  BroadcastSidebar,
+  type BroadcastConnectionState,
+  EventFeed,
+  StatusDot,
+} from './BroadcastStage';
 
 const TOKEN_STORAGE_KEY = 'o8.broadcast.spectator-token';
 const SNAPSHOT_REFRESH_MS = 10_000;
@@ -24,20 +28,6 @@ function readBootstrapToken(): string {
   return window.sessionStorage.getItem(TOKEN_STORAGE_KEY)?.trim() ?? '';
 }
 
-function formatTime(value: string): string {
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return new Intl.DateTimeFormat(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  }).format(parsed);
-}
-
-function kindLabel(kind: string): string {
-  return kind.replaceAll('_', ' ').toUpperCase();
-}
-
 function mergeEvents(current: BroadcastEvent[], incoming: BroadcastEvent[]): BroadcastEvent[] {
   const byId = new Map(current.map((event) => [event.id, event]));
   for (const event of incoming) byId.set(event.id, event);
@@ -46,203 +36,74 @@ function mergeEvents(current: BroadcastEvent[], incoming: BroadcastEvent[]): Bro
     .slice(-FEED_LIMIT);
 }
 
-function eventDotIsFilled(kind: BroadcastEvent['kind']): boolean {
-  return kind === 'session_launched'
-    || kind === 'progress'
-    || kind === 'brain_consulted'
-    || kind === 'lease_acquired'
-    || kind === 'approval'
-    || kind === 'message';
-}
-
-function StatusDot({ filled, size = 6 }: { filled: boolean; size?: number }) {
-  return (
-    <span
-      aria-hidden="true"
-      style={{
-        width: size,
-        height: size,
-        minWidth: size,
-        borderRadius: '50%',
-        border: '1px solid var(--t-accent)',
-        background: filled ? 'var(--t-accent)' : 'transparent',
-        boxSizing: 'border-box',
-        display: 'inline-block',
-      }}
-    />
-  );
-}
-
-function OnAirStrip({ agents }: { agents: BroadcastAgentSnapshot[] }) {
-  return (
-    <section
-      aria-label="Agents on air"
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        flexWrap: 'wrap',
-        gap: 12,
-        minWidth: 0,
-        paddingTop: 12,
-        paddingRight: 14,
-        paddingBottom: 12,
-        paddingLeft: 14,
-        border: '1px solid var(--t-panel-border)',
-        borderRadius: 12,
-        background: 'var(--t-panel)',
-      }}
-    >
-      <span
-        style={{
-          color: 'var(--t-text-faint)',
-          fontSize: 9,
-          fontWeight: 300,
-          letterSpacing: '0.04em',
-          lineHeight: '14px',
-        }}
-      >
-        ON AIR
-      </span>
-      {agents.length === 0 ? (
-        <span style={{ color: 'var(--t-text-muted)', fontSize: 11, fontWeight: 300 }}>
-          No agents running
-        </span>
-      ) : agents.map((agent) => (
-        <span
-          key={agent.laneId}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 7,
-            minWidth: 0,
-            color: 'var(--t-text-secondary)',
-            fontSize: 11,
-            fontWeight: 300,
-            letterSpacing: '-0.1px',
-          }}
-        >
-          <StatusDot filled />
-          <span style={{ overflowWrap: 'anywhere' }}>{agent.label}</span>
-          <span style={{ color: 'var(--t-text-faint)', fontSize: 9.5, fontWeight: 260 }}>
-            {agent.repo} · {agent.status}
-          </span>
-        </span>
-      ))}
-    </section>
-  );
-}
-
-function EventRow({ event }: { event: BroadcastEvent }) {
-  return (
-    <article
-      style={{
-        display: 'grid',
-        gridTemplateColumns: '12px minmax(0, 1fr) auto',
-        columnGap: 10,
-        alignItems: 'start',
-        minWidth: 0,
-        paddingTop: 12,
-        paddingRight: 12,
-        paddingBottom: 12,
-        paddingLeft: 12,
-        borderBottom: '1px solid var(--t-divider-subtle)',
-      }}
-    >
-      <span style={{ paddingTop: 5, display: 'flex', justifyContent: 'center' }}>
-        <StatusDot filled={eventDotIsFilled(event.kind)} />
-      </span>
-      <div style={{ minWidth: 0 }}>
-        <div
-          style={{
-            color: 'var(--t-text)',
-            fontSize: 13.5,
-            fontWeight: 300,
-            letterSpacing: '-0.1px',
-            lineHeight: 1.25,
-            overflowWrap: 'anywhere',
-          }}
-        >
-          {event.title}
-        </div>
-        {event.detail ? (
-          <div
-            style={{
-              marginTop: 4,
-              color: 'var(--t-text-secondary)',
-              fontSize: 13,
-              fontWeight: 300,
-              letterSpacing: '-0.1px',
-              lineHeight: 1.5,
-              overflowWrap: 'anywhere',
-              whiteSpace: 'pre-wrap',
-            }}
-          >
-            {event.detail}
-          </div>
-        ) : null}
-        <div
-          style={{
-            marginTop: 4,
-            color: 'var(--t-text-faint)',
-            fontSize: 9.5,
-            fontWeight: 260,
-            letterSpacing: '-0.4px',
-            lineHeight: 1.25,
-            overflowWrap: 'anywhere',
-          }}
-        >
-          {kindLabel(event.kind)}{event.repo ? ` · ${event.repo}` : ''}{event.actor ? ` · ${event.actor}` : ''}
-        </div>
-      </div>
-      <time
-        dateTime={event.timestamp}
-        style={{
-          color: 'var(--t-text-faint)',
-          fontSize: 9.5,
-          fontWeight: 260,
-          letterSpacing: '-0.4px',
-          lineHeight: 1.25,
-          whiteSpace: 'nowrap',
-        }}
-      >
-        {formatTime(event.timestamp)}
-      </time>
-    </article>
-  );
-}
-
 function BroadcastSurface() {
   const [token, setToken] = useState('');
   const [snapshot, setSnapshot] = useState<BroadcastSnapshot | null>(null);
   const [events, setEvents] = useState<BroadcastEvent[]>([]);
-  const [state, setState] = useState<'booting' | 'live' | 'missing-token' | 'forbidden' | 'offline'>('booting');
+  const [state, setState] = useState<BroadcastConnectionState>('booting');
   const [isDocumentVisible, setIsDocumentVisible] = useState(true);
+  const [isWide, setIsWide] = useState(false);
+  const [compact, setCompact] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [reconnectPulse, setReconnectPulse] = useState(0);
   const cursorRef = useRef<string | null>(null);
+  const wasOfflineRef = useRef(false);
+  const reduceMotion = useReducedMotion() ?? false;
 
   useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
-      const nextToken = readBootstrapToken();
-      setToken(nextToken);
-      setState(nextToken ? 'booting' : 'missing-token');
-    });
-    return () => window.cancelAnimationFrame(frame);
+    const nextToken = readBootstrapToken();
+    // This state transition intentionally happens in the mount effect. Hash
+    // bootstrap must run while hidden and cannot depend on a paint callback.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setToken(nextToken);
+    setState(nextToken ? 'booting' : 'missing-token');
   }, []);
 
   useEffect(() => {
     const updateVisibility = () => setIsDocumentVisible(document.visibilityState === 'visible');
-    const frame = window.requestAnimationFrame(updateVisibility);
+    updateVisibility();
     document.addEventListener('visibilitychange', updateVisibility);
+    return () => document.removeEventListener('visibilitychange', updateVisibility);
+  }, []);
+
+  useEffect(() => {
+    const updateLayout = () => {
+      setIsWide(window.innerWidth >= 1_600);
+      setCompact(new URLSearchParams(window.location.search).get('compact') === '1');
+    };
+    updateLayout();
+    window.addEventListener('resize', updateLayout);
+    window.addEventListener('popstate', updateLayout);
     return () => {
-      window.cancelAnimationFrame(frame);
-      document.removeEventListener('visibilitychange', updateVisibility);
+      window.removeEventListener('resize', updateLayout);
+      window.removeEventListener('popstate', updateLayout);
     };
   }, []);
+
+  useEffect(() => {
+    if (!isDocumentVisible) return;
+    const timer = setInterval(() => setNowMs(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, [isDocumentVisible]);
 
   useEffect(() => {
     if (!token) return;
     const controller = new AbortController();
     let stopped = false;
     let refreshTimer: ReturnType<typeof setInterval> | null = null;
+
+    const markLive = () => {
+      if (wasOfflineRef.current) {
+        wasOfflineRef.current = false;
+        setReconnectPulse((current) => current + 1);
+      }
+      setState('live');
+    };
+
+    const markOffline = () => {
+      wasOfflineRef.current = true;
+      setState('offline');
+    };
 
     const request = async <T,>(route: string): Promise<T> => {
       const response = await fetch(route, {
@@ -263,7 +124,7 @@ function BroadcastSurface() {
         setEvents(next.recentEvents);
         cursorRef.current = next.cursor;
       }
-      setState('live');
+      markLive();
     };
 
     const poll = async () => {
@@ -278,14 +139,14 @@ function BroadcastSurface() {
           if (stopped) return;
           cursorRef.current = page.cursor;
           if (page.events.length) setEvents((current) => mergeEvents(current, page.events));
-          setState('live');
+          markLive();
         } catch (error) {
           if (stopped || controller.signal.aborted) return;
           if (error instanceof Error && error.message === 'forbidden') {
             setState('forbidden');
             return;
           }
-          setState('offline');
+          markOffline();
           await new Promise((resolve) => setTimeout(resolve, 1_000));
         }
       }
@@ -302,7 +163,9 @@ function BroadcastSurface() {
           if (!isDocumentVisible) return;
           refreshTimer = setInterval(() => {
             void refreshSnapshot(false).catch((error) => {
-              if (!stopped && error instanceof Error && error.message === 'forbidden') setState('forbidden');
+              if (stopped) return;
+              if (error instanceof Error && error.message === 'forbidden') setState('forbidden');
+              else markOffline();
             });
           }, SNAPSHOT_REFRESH_MS);
           void poll();
@@ -313,7 +176,7 @@ function BroadcastSurface() {
             setState('forbidden');
             return;
           }
-          setState('offline');
+          markOffline();
           await new Promise((resolve) => setTimeout(resolve, 1_000));
         }
       }
@@ -328,7 +191,6 @@ function BroadcastSurface() {
     };
   }, [isDocumentVisible, token]);
 
-  const visibleEvents = useMemo(() => [...events].reverse(), [events]);
   const statusCopy = state === 'live'
     ? 'LIVE'
     : state === 'booting' ? 'CONNECTING'
@@ -345,14 +207,15 @@ function BroadcastSurface() {
         background: 'var(--t-bg-gradient)',
         color: 'var(--t-text)',
         fontFamily: 'var(--font-sans-system)',
-        paddingTop: 28,
+        fontSize: 18,
+        paddingTop: compact ? 18 : 28,
         paddingRight: 28,
         paddingBottom: 48,
         paddingLeft: 28,
       }}
     >
-      <div style={{ width: '100%', maxWidth: 1040, minWidth: 0, marginRight: 'auto', marginLeft: 'auto' }}>
-        <header
+      <div style={{ width: '100%', maxWidth: 1880, minWidth: 0, marginRight: 'auto', marginLeft: 'auto' }}>
+        {compact ? null : <header
           style={{
             display: 'flex',
             alignItems: 'flex-end',
@@ -365,9 +228,12 @@ function BroadcastSurface() {
           <div style={{ minWidth: 0 }}>
             <h1
               style={{
-                margin: 0,
+                marginTop: 0,
+                marginRight: 0,
+                marginBottom: 0,
+                marginLeft: 0,
                 color: 'var(--t-text-strong)',
-                fontSize: 18,
+                fontSize: 28,
                 fontWeight: 400,
                 letterSpacing: '-0.2px',
                 lineHeight: 1.25,
@@ -382,7 +248,7 @@ function BroadcastSurface() {
                 marginBottom: 0,
                 marginLeft: 0,
                 color: 'var(--t-text-muted)',
-                fontSize: 11,
+                fontSize: 18,
                 fontWeight: 300,
                 letterSpacing: '-0.1px',
                 lineHeight: 1.35,
@@ -391,83 +257,58 @@ function BroadcastSurface() {
               Live governed activity from the o8 ledger
             </p>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            <span style={{ color: 'var(--t-text-secondary)', fontSize: 11, fontWeight: 300 }}>
-              {snapshot?.pendingApprovals.count ?? 0} pending approvals
-            </span>
-            <span
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+            <motion.span
+              key={reconnectPulse}
+              initial={false}
+              animate={reconnectPulse > 0 && !reduceMotion
+                ? { opacity: [1, 0.55, 1], scale: [1, 1.04, 1] }
+                : { opacity: 1, scale: 1 }}
+              transition={reduceMotion ? { duration: 0 } : { duration: 0.55 }}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: 7,
+                paddingTop: 7,
+                paddingRight: 11,
+                paddingBottom: 7,
+                paddingLeft: 11,
+                borderRadius: 14,
+                background: 'var(--t-input-bg)',
                 color: 'var(--t-text-secondary)',
-                fontSize: 9,
+                fontSize: 13,
                 fontWeight: 300,
                 letterSpacing: '0.04em',
-                lineHeight: '14px',
+                lineHeight: '18px',
               }}
             >
               <StatusDot filled={state === 'live'} />
               {statusCopy}
-            </span>
+            </motion.span>
           </div>
         </header>
+        }
 
-        <OnAirStrip agents={snapshot?.activeAgents ?? []} />
-
-        <section
-          aria-label="Broadcast event feed"
-          aria-live="polite"
+        <div
+          aria-label="Broadcast stage"
           style={{
+            display: isWide ? 'grid' : 'flex',
+            flexDirection: isWide ? undefined : 'column',
+            gridTemplateColumns: isWide ? 'minmax(0, 3fr) minmax(0, 2fr)' : undefined,
+            gridTemplateAreas: isWide ? "'stream sidebar'" : undefined,
+            gap: isWide ? 24 : 16,
             minWidth: 0,
-            marginTop: 16,
-            border: '1px solid var(--t-panel-border)',
-            borderRadius: 12,
-            background: 'var(--t-panel)',
-            overflowX: 'hidden',
           }}
         >
-          <div
-            style={{
-              paddingTop: 11,
-              paddingRight: 12,
-              paddingBottom: 10,
-              paddingLeft: 12,
-              borderBottom: '1px solid var(--t-divider-subtle)',
-              color: 'var(--t-text-faint)',
-              fontSize: 9,
-              fontWeight: 300,
-              letterSpacing: '0.04em',
-              lineHeight: '14px',
-            }}
-          >
-            EVENT STREAM
-          </div>
-          {visibleEvents.length ? visibleEvents.map((event) => (
-            <EventRow key={event.id} event={event} />
-          )) : (
-            <div
-              style={{
-                paddingTop: 28,
-                paddingRight: 20,
-                paddingBottom: 28,
-                paddingLeft: 20,
-                color: 'var(--t-text-muted)',
-                fontSize: 13,
-                fontWeight: 300,
-                lineHeight: 1.5,
-                textAlign: 'center',
-                overflowWrap: 'anywhere',
-              }}
-            >
-              {state === 'missing-token'
-                ? 'Open the spectator URL returned by o8 broadcast token mint.'
-                : state === 'forbidden'
-                  ? 'This spectator credential is no longer authorized.'
-                  : 'Waiting for governed activity.'}
-            </div>
-          )}
-        </section>
+          <BroadcastSidebar snapshot={snapshot} events={events} nowMs={nowMs} />
+          <EventFeed
+            events={events}
+            lanes={snapshot?.lanes ?? []}
+            state={state}
+            nowMs={nowMs}
+            reduceMotion={reduceMotion}
+          />
+        </div>
       </div>
     </main>
   );
