@@ -7,6 +7,7 @@ import { join, relative } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { setRepoActionLeaseMaxWaitMsForTests } from '@/lib/lane/lane-route-test-seams';
 
 const originalEnv = {
   HOME: process.env.HOME,
@@ -505,7 +506,8 @@ describe('worktree-side merge with real git repos', () => {
     }) as import('next/server').NextRequest;
 
     try {
-      const firstResponse = lanesRoute.POST(makeRequest(), { repoActionLeaseMaxWaitMs: 200 });
+      setRepoActionLeaseMaxWaitMsForTests(200);
+      const firstResponse = lanesRoute.POST(makeRequest());
       await waitFor(() => {
         const row = getSqlite().prepare(`
           SELECT COUNT(*) AS count FROM resource_lease_events
@@ -513,7 +515,7 @@ describe('worktree-side merge with real git repos', () => {
         `).get(`repo-tree:${repo}`) as { count: number };
         return row.count === 1;
       });
-      const secondResponse = lanesRoute.POST(makeRequest(), { repoActionLeaseMaxWaitMs: 200 });
+      const secondResponse = lanesRoute.POST(makeRequest());
 
       await waitFor(() => getLaneEvents(lane.id).some((event) => event.verb === 'lease_wait_timeout'));
       const exited = once(holder, 'exit');
@@ -558,6 +560,7 @@ describe('worktree-side merge with real git repos', () => {
         event.verb === 'status_change' && event.payload.status === 'awaiting_orchestrator'
       )).toBe(false);
     } finally {
+      setRepoActionLeaseMaxWaitMsForTests(undefined);
       if (originalPath === undefined) delete process.env.PATH;
       else process.env.PATH = originalPath;
       if (holder.exitCode === null && holder.signalCode === null) {

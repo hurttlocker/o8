@@ -10,6 +10,7 @@ import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
 import { reconcileOrphanedWorktrees } from '@/lib/lane/reconcile';
 import { serverTimingHeaders } from '@/lib/performance/server-timing';
 import { resolvePacketLaunchContexts } from '@/lib/orchestrator/packet-launch-context';
+import { repoActionLeaseMaxWaitMsForTests } from '@/lib/lane/lane-route-test-seams';
 import { deriveIdempotencyKey, withIdempotency } from '@/lib/orchestrator/idempotency-store';
 import type { LaneCommand } from '@/lib/lane/types';
 
@@ -91,11 +92,6 @@ export async function GET(req: NextRequest) {
   });
 }
 
-interface LanePostExecutionOptions {
-  params?: Promise<unknown>;
-  /** Internal test seam; request bodies cannot override the production budget. */
-  repoActionLeaseMaxWaitMs?: number;
-}
 
 function createPrIdempotencyBody(command: Extract<LaneCommand, { verb: 'create_pr' }>): string {
   return JSON.stringify({
@@ -112,7 +108,7 @@ function createPrIdempotencyBody(command: Extract<LaneCommand, { verb: 'create_p
   });
 }
 
-export async function POST(req: NextRequest, options: LanePostExecutionOptions = {}) {
+export async function POST(req: NextRequest) {
   const denied = requirePanelAuth(req);
   if (denied) return denied;
   const principal = resolveRequestPrincipalContext(req);
@@ -167,7 +163,7 @@ export async function POST(req: NextRequest, options: LanePostExecutionOptions =
         scopeId: command.laneId,
         attachToInFlight: true,
       }, () => dispatch(command, {
-        repoActionLeaseMaxWaitMs: options.repoActionLeaseMaxWaitMs,
+        repoActionLeaseMaxWaitMs: repoActionLeaseMaxWaitMsForTests(),
       }));
       if (outcome.inProgress) {
         return NextResponse.json(outcome.result, {
