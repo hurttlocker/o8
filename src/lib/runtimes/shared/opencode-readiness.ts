@@ -1,9 +1,15 @@
 import "server-only";
 
+import { execFile } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
 
+import { cliInvocation } from "./cli-spawn";
 import { OPENCODE_PROVIDER_ENVIRONMENT_KEYS } from "./opencode-provider-environments";
+
+const execFileAsync = promisify(execFile);
+const SERVICE_PROBE_TIMEOUT_MS = 1_500;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -397,4 +403,111 @@ export function providerIdForModel(model: string): string | null {
   return separator > 0 && separator < normalized.length - 1
     ? normalized.slice(0, separator)
     : null;
+}
+
+export interface OpencodeServiceVersionProbeResult {
+  state: "not_running" | "compatible" | "version_skew" | "incompatible" | "unknown";
+  cliVersion: string | null;
+  serviceVersion: string | null;
+}
+
+export interface OpencodeServiceVersionProbeDependencies {
+  run(args: string[]): Promise<string>;
+}
+
+let serviceProbeDependenciesForTests: OpencodeServiceVersionProbeDependencies | null = null;
+
+export function setOpencodeServiceProbeDependenciesForTests(
+  dependencies: OpencodeServiceVersionProbeDependencies | null,
+): void {
+  serviceProbeDependenciesForTests = dependencies;
+}
+
+function normalizeOpencodeVersion(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  return value.match(
+    /(?:^|\s)v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)(?=\s|$)/,
+  )?.[1] ?? null;
+}
+
+function loopbackServiceUrl(value: string): URL | null {
+  const candidate = value.match(/https?:\/\/[^\s]+/i)?.[0];
+  if (!candidate) return null;
+  try {
+    const endpoint = new URL(candidate);
+    const hostname = endpoint.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    if (hostname !== "localhost" && hostname !== "127.0.0.1" && hostname !== "::1") {
+      return null;
+    }
+    return endpoint;
+  } catch {
+    return null;
+  }
+}
+
+async function runOpencodeProbe(binaryPath: string, args: string[]): Promise<string> {
+  const invocation = cliInvocation(binaryPath, args);
+  const { stdout, stderr } = await execFileAsync(invocation.command, invocation.args, {
+    windowsHide: true,
+    timeout: SERVICE_PROBE_TIMEOUT_MS,
+    env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1" },
+    maxBuffer: 64 * 1024,
+  });
+  return `${stdout}\n${stderr}`.trim();
+}
+
+export async function probeOpencodeServiceVersion(
+  binaryPath: string,
+  dependencies?: OpencodeServiceVersionProbeDependencies,
+): Promise<OpencodeServiceVersionProbeResult> {
+  const run = (dependencies ?? serviceProbeDependenciesForTests)?.run
+    ?? ((args: string[]) => runOpencodeProbe(binaryPath, args));
+  let cliVersion: string | null = null;
+  try {
+    cliVersion = normalizeOpencodeVersion(await run(["--version"]));
+  } catch {
+    return { state: "unknown", cliVersion: null, serviceVersion: null };
+  }
+
+  let serviceStatus: string;
+  try {
+    serviceStatus = await run(["service", "status"]);
+  } catch {
+    return { state: "unknown", cliVersion, serviceVersion: null };
+  }
+  if (/\bstopped\b/i.test(serviceStatus)) {
+    return { state: "not_running", cliVersion, serviceVersion: null };
+  }
+
+  if (!loopbackServiceUrl(serviceStatus)) {
+    return { state: "unknown", cliVersion, serviceVersion: null };
+  }
+
+  let healthOutput: string;
+  try {
+    // The resident service protects /api/health with per-service Basic auth.
+    // `opencode2 api` supplies those credentials; direct fetch returns 401.
+    // Checking `service status` first avoids starting a stopped service.
+    healthOutput = await run(["api", "get", "/api/health"]);
+  } catch {
+    return { state: "incompatible", cliVersion, serviceVersion: null };
+  }
+
+  let health: unknown;
+  try {
+    health = JSON.parse(healthOutput);
+  } catch {
+    return { state: "incompatible", cliVersion, serviceVersion: null };
+  }
+  const serviceVersion = isRecord(health)
+    ? normalizeOpencodeVersion(health.version)
+    : null;
+  if (!cliVersion || !serviceVersion) {
+    return { state: "incompatible", cliVersion, serviceVersion };
+  }
+  return {
+    state: cliVersion === serviceVersion ? "compatible" : "version_skew",
+    cliVersion,
+    serviceVersion,
+  };
 }

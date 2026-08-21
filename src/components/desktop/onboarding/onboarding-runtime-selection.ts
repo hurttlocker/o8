@@ -10,7 +10,7 @@ export interface DispatchableRuntimeInventoryItem {
   id: DispatchRuntime;
   label: string;
   available: boolean;
-  unavailableReason: 'not_installed' | 'needs_auth' | 'adapter_unavailable' | null;
+  unavailableReason: 'not_installed' | 'needs_auth' | 'needs_restart' | 'adapter_unavailable' | null;
   detail: string;
   fix: string;
 }

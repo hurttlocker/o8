@@ -18,6 +18,7 @@ import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import {
   localProviderIds,
   opencodeCredentialProviders,
+  probeOpencodeServiceVersion,
   providerHasConfiguredCredential,
   providerIdForModel,
   readOpencodeConfig,
@@ -35,7 +36,7 @@ const TRUSTED_KEYLESS_OPENCODE_MODELS = new Set([
 ]);
 
 export type RuntimeHouse = RuntimeAuthHouse;
-export type RuntimeUnavailableReason = 'not_installed' | 'needs_auth' | 'adapter_unavailable';
+export type RuntimeUnavailableReason = 'not_installed' | 'needs_auth' | 'needs_restart' | 'adapter_unavailable';
 
 export interface RuntimeAuthStatus {
   house: RuntimeHouse | null;
@@ -285,12 +286,35 @@ async function detectOpencode(): Promise<RuntimeAuthStatus> {
     });
   }
 
-  const [credentialProviders, config] = await Promise.all([
+  const [credentialProviders, config, serviceVersion] = await Promise.all([
     opencodeCredentialProviders(os.homedir()),
     readOpencodeConfig(os.homedir()),
+    probeOpencodeServiceVersion(binaryPath),
   ]);
   const authenticated = credentialProviders.size > 0;
   const localProviderConfigured = localProviderIds(config).size > 0;
+  if (serviceVersion.state === 'version_skew') {
+    return nowStatus('opencode', 'opencode', {
+      installed: true,
+      authenticated,
+      ready: false,
+      unavailableReason: 'needs_restart',
+      detail: `OpenCode 2 CLI ${serviceVersion.cliVersion} does not match resident service ${serviceVersion.serviceVersion}.`,
+      fix: 'Run `opencode2 service restart` so the resident service matches the installed CLI.',
+      binaryPath,
+    });
+  }
+  if (serviceVersion.state === 'incompatible') {
+    return nowStatus('opencode', 'opencode', {
+      installed: true,
+      authenticated,
+      ready: false,
+      unavailableReason: 'needs_restart',
+      detail: 'OpenCode 2 has a running resident service that did not return a compatible health response.',
+      fix: 'Run `opencode2 service restart` before dispatching OpenCode 2.',
+      binaryPath,
+    });
+  }
   const defaultModel = getRuntimeCapability('opencode').defaultModel;
   const defaultModelReady = Boolean(
     defaultModel && TRUSTED_KEYLESS_OPENCODE_MODELS.has(defaultModel),
@@ -508,7 +532,14 @@ export function invalidateRuntimeAuthCache(): void {
 }
 
 export async function getRuntimeAuthSnapshot(): Promise<RuntimeAuthSnapshot> {
-  if (cache && Date.now() - cache.cachedAt < CACHE_TTL_MS) return cache.snapshot;
+  if (cache && Date.now() - cache.cachedAt < CACHE_TTL_MS) {
+    const opencode = await detectOpencode();
+    cache.snapshot = {
+      ...cache.snapshot,
+      statuses: { ...cache.snapshot.statuses, opencode },
+    };
+    return cache.snapshot;
+  }
   const entries = await Promise.all(listDispatchableRuntimes().map(async (runtime) => {
     const house = getRuntimeCapability(runtime).authHouse;
     if (!house) throw new Error(`Dispatchable runtime ${runtime} has no auth house.`);
@@ -567,10 +598,17 @@ export async function assertRuntimeDispatchable(
   model?: string | null,
   cwd?: string | null,
 ): Promise<void> {
-  const availability = (await getDispatchableRuntimeAvailability()).find((entry) => entry.id === runtime);
-  const house = houseForRuntime(runtime);
   const snapshot = await getRuntimeAuthSnapshot();
+  const availability = (await getDispatchableRuntimeAvailability(snapshot)).find((entry) => entry.id === runtime);
+  const house = houseForRuntime(runtime);
   const status = house ? snapshot.statuses[house] : null;
+  if (
+    runtime === 'opencode'
+    && status?.unavailableReason === 'needs_restart'
+    && availability?.unavailableReason !== 'adapter_unavailable'
+  ) {
+    throw new DispatchPreflightError(status);
+  }
   if (
     runtime === 'opencode'
     && model?.trim()
