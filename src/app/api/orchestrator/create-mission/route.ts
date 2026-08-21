@@ -8,6 +8,10 @@ import { resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-p
 import { resolveWorkerHuddle } from '@/lib/operator/worker-start-mode';
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { normalizePacketTaskContract } from '@/lib/orchestrator/packet-task-contract';
+import {
+  isClaudeCodeModelSource,
+  normalizeClaudeCodeGatewayModel,
+} from '@/lib/claude-code/worker-profile-types';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import {
   formatDispatchableRuntimeChoices,
@@ -138,6 +142,13 @@ export async function POST(request: NextRequest) {
   // requested routing metadata.
   const requestedRuntimeRaw = record.requestedRuntime ?? record.runtime;
   const requestedModel = record.requestedModel ?? record.model;
+  const requestedModelText = typeof requestedModel === 'string' ? requestedModel.trim() || null : null;
+  const carrierRaw = record.claudeCodeCarrier ?? record.carrier;
+  const claudeCodeCarrier = isClaudeCodeModelSource(carrierRaw) ? carrierRaw : null;
+  if (carrierRaw !== undefined && carrierRaw !== null && carrierRaw !== '' && !claudeCodeCarrier) {
+    return operatorError('invalid_request', 'carrier must be one of: "native", "openrouter", "codex-subscription".', 400);
+  }
+  const claudeCodeModel = normalizeClaudeCodeGatewayModel(requestedModel);
   const requestedEffortRaw = record.requestedEffort ?? record.thinkingEffort;
   const requestedEffort = isThinkingEffort(requestedEffortRaw)
     ? requestedEffortRaw
@@ -157,7 +168,7 @@ export async function POST(request: NextRequest) {
   const profileRouting = resolveSubscriptionProfileRouting({
     profile: defaults.subscriptionProfile,
     requestedRuntime: explicitRuntimeRequested || defaults.subscriptionProfile === 'both' ? requestedRuntime : null,
-    requestedModel: typeof requestedModel === 'string' ? requestedModel : null,
+    requestedModel: claudeCodeCarrier ? null : requestedModelText,
     defaultDispatchModel: defaults.defaultDispatchModel,
   });
   if (!profileRouting.ok) {
@@ -170,7 +181,7 @@ export async function POST(request: NextRequest) {
     const issueProfileRouting = resolveSubscriptionProfileRouting({
       profile: defaults.subscriptionProfile,
       requestedRuntime: issue.runtime,
-      requestedModel: typeof requestedModel === 'string' ? requestedModel : null,
+      requestedModel: claudeCodeCarrier ? null : requestedModelText,
       defaultDispatchModel: defaults.defaultDispatchModel,
     });
     if (!issueProfileRouting.ok) {
@@ -185,6 +196,15 @@ export async function POST(request: NextRequest) {
     requestedEffort,
     source: 'create-mission-api',
   });
+  const hasClaudeCodePacket = issues.some((issue) => (
+    (issue.runtime ?? workerRouting.selectedRuntime) === 'claude-code'
+  ));
+  if (claudeCodeCarrier && !hasClaudeCodePacket) {
+    return operatorError('invalid_request', 'carrier can only be set when the mission includes a claude-code packet.', 400);
+  }
+  if (hasClaudeCodePacket && requestedModelText && !claudeCodeModel) {
+    return operatorError('invalid_request', 'model must be a valid claude-code worker model identifier.', 400);
+  }
   const huddle = resolveWorkerHuddle({
     mode: defaults.workerStartMode,
     explicitHuddle: typeof record.huddle === 'boolean' ? record.huddle : undefined,
@@ -244,6 +264,8 @@ export async function POST(request: NextRequest) {
       requestedProvider: workerRouting.requestedProvider,
       requestedRuntime: profileRouting.requestedRuntime,
       requestedModel: workerRouting.requestedModel,
+      ...(hasClaudeCodePacket && claudeCodeModel ? { claudeCodeModel } : {}),
+      ...(hasClaudeCodePacket && claudeCodeCarrier ? { claudeCodeCarrier } : {}),
       requestedEffort,
       constraints: typeof record.constraints === 'string' ? record.constraints : '',
       sequential: record.sequential === true,

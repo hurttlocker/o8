@@ -111,6 +111,8 @@ function fullPacketFixture() {
     comparisonGroupId: 'cmp-1',
     comparisonIndex: 1,
     assignedModel: 'gpt-5.5',
+    claudeCodeModel: 'gateway/model-y',
+    claudeCodeCarrier: 'openrouter',
     qualitySearch: {
       version: 1,
       role: 'robustness_complete',

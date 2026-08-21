@@ -80,6 +80,7 @@ import type {
   SubmitReviewInput,
 } from '@/lib/orchestrator/operator-mission-service';
 import type { OrchestratorRuntime, PacketTaskContract, WorkerIntent, WorkerProvider } from '@/lib/orchestrator/types';
+import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 import { getDataDir } from '@/lib/data-dir-migration';
 
 const execFileAsync = promisify(execFile);
@@ -108,6 +109,7 @@ interface CreateMissionInput {
   requestedProvider?: WorkerProvider | null;
   requestedRuntime?: OrchestratorRuntime | null;
   requestedModel?: string | null;
+  claudeCodeCarrier?: ClaudeCodeModelSource | null;
   constraints: string;
   sequential?: boolean;
   existingBranchPolicy?: ExistingBranchPolicy;
@@ -137,6 +139,7 @@ interface CreateMissionInlineInput {
   requestedProvider?: WorkerProvider | null;
   requestedRuntime?: OrchestratorRuntime | null;
   requestedModel?: string | null;
+  claudeCodeCarrier?: ClaudeCodeModelSource | null;
   constraints: string;
   sequential?: boolean;
   existingBranchPolicy?: ExistingBranchPolicy;
@@ -394,6 +397,8 @@ export async function createMission(input: CreateMissionInput) {
           requestedProvider: input.requestedProvider,
           requestedRuntime: input.requestedRuntime,
           requestedModel: input.requestedModel,
+          claudeCodeModel: input.requestedModel,
+          claudeCodeCarrier: input.claudeCodeCarrier,
           constraints: input.constraints,
           sequential: input.sequential,
           existingBranchPolicy: input.existingBranchPolicy,
@@ -438,6 +443,8 @@ export async function createMissionInline(input: CreateMissionInlineInput) {
           requestedProvider: input.requestedProvider,
           requestedRuntime: input.requestedRuntime,
           requestedModel: input.requestedModel,
+          claudeCodeModel: input.requestedModel,
+          claudeCodeCarrier: input.claudeCodeCarrier,
           constraints: input.constraints,
           sequential: input.sequential,
           existingBranchPolicy: input.existingBranchPolicy,

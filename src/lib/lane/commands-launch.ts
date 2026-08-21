@@ -142,6 +142,8 @@ export async function launchSession(
       branchName: lane.branch,
       baseBranch: lane.baseBranch,
       model: command.model,
+      claudeCodeModel: command.claudeCodeModel,
+      claudeCodeCarrier: command.claudeCodeCarrier,
       effort: command.effort,
       clientMutationId: command.clientMutationId,
       isolate: !lane.worktreePath,

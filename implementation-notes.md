@@ -53,3 +53,13 @@ converts without risk.
   does — not `??`.
 - `kill-port` matches listeners by foreign address (`0.0.0.0:0` / `[::]:0`) rather than the
   `LISTENING` state word, which is localized on non-English Windows.
+
+## Packet #1796
+
+### Deviations
+
+None.
+
+### Edge-case review
+
+- The codename loop, principal null sentinels, archive summary ordering, lane command error handlers, dogfood guard, and worktree reconciliation do not read mission model or carrier fields. They remain outside this patch.

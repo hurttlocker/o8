@@ -13,6 +13,13 @@ const ensureDispatchBackendReadyMock = vi.hoisted(() => vi.fn(async () => ({
   waitedMs: 0,
   attempts: 1,
 })));
+const ensureCodexSubscriptionProxyReadyMock = vi.hoisted(() => vi.fn(async () => ({
+  baseUrl: 'http://127.0.0.1:8317',
+  clientToken: 'global-carrier-token',
+  models: ['global-model-x'],
+})));
+const ensureCodexSubscriptionClaudeConfigDirMock = vi.hoisted(() => vi.fn(async (sessionDir: string) =>
+  path.join(sessionDir, 'claude-code-codex-config')));
 
 vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/worktree/storage-telemetry')>(),
@@ -47,6 +54,11 @@ vi.mock('@/lib/runtimes/shared/dispatch-readiness', async (importOriginal) => {
     ensureDispatchBackendReady: ensureDispatchBackendReadyMock,
   };
 });
+
+vi.mock('@/lib/claude-code/codex-subscription-proxy', () => ({
+  ensureCodexSubscriptionProxyReady: ensureCodexSubscriptionProxyReadyMock,
+  ensureCodexSubscriptionClaudeConfigDir: ensureCodexSubscriptionClaudeConfigDirMock,
+}));
 
 vi.mock('@/lib/runtimes/shared/auth-detect', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/runtimes/shared/auth-detect')>();
@@ -107,6 +119,8 @@ const controlledEnvKeys = [
   'O8_DEFAULT_DISPATCH_RUNTIME',
   'O8_CODEX_WORKER_EFFORT',
   'O8_CLAUDE_WORKER_EFFORT',
+  'O8_PACKAGED_APP',
+  'OPENROUTER_API_KEY',
 ] as const;
 
 function resultJson(result: { content: Array<{ type: 'text'; text: string } | { type: 'image' }> }) {
@@ -137,6 +151,7 @@ async function createMissionThroughRoute(input: {
   issueNumber: number;
   requestedRuntime: 'codex' | 'claude-code';
   requestedModel?: string;
+  carrier?: 'native' | 'openrouter' | 'codex-subscription';
 }) {
   const { NextRequest } = await import('next/server');
   const { POST } = await import('@/app/api/orchestrator/create-mission/route');
@@ -148,6 +163,7 @@ async function createMissionThroughRoute(input: {
       repoPath: input.repoPath,
       requestedRuntime: input.requestedRuntime,
       ...(input.requestedModel ? { requestedModel: input.requestedModel } : {}),
+      ...(input.carrier ? { carrier: input.carrier } : {}),
       issues: [{
         number: input.issueNumber,
         title: `Route worker model ${input.issueNumber}`,
@@ -212,11 +228,19 @@ beforeEach(() => {
   process.env.O8_CLAUDE_CODE_BIN = process.execPath;
   process.env.O8_CRASH_SURVIVABLE_WORKERS = '1';
   process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
+  writeFileSync(path.join(testRoot, 'claude-code-worker.json'), JSON.stringify({
+    version: 2,
+    source: 'native',
+    model: null,
+    codexModel: null,
+  }));
   delete process.env.O8_DISPATCH_MODEL;
   delete process.env.O8_SUBSCRIPTION_PROFILE;
   delete process.env.O8_DEFAULT_DISPATCH_RUNTIME;
   delete process.env.O8_CODEX_WORKER_EFFORT;
   delete process.env.O8_CLAUDE_WORKER_EFFORT;
+  delete process.env.O8_PACKAGED_APP;
+  delete process.env.OPENROUTER_API_KEY;
   vi.resetModules();
 
   spawnMock.mockReset();
@@ -227,6 +251,8 @@ beforeEach(() => {
     once: vi.fn(),
   });
   ensureDispatchBackendReadyMock.mockClear();
+  ensureCodexSubscriptionProxyReadyMock.mockClear();
+  ensureCodexSubscriptionClaudeConfigDirMock.mockClear();
   stubOperatorDefaultsApi();
 });
 
@@ -244,6 +270,21 @@ afterEach(() => {
 });
 
 describe('MCP operator defaults and dispatch routing', () => {
+  it('advertises per-packet model and carrier on the create_mission schema', async () => {
+    const { MISSION_TOOLS } = await import('@/lib/mcp/operator-handlers/mission');
+    const tool = MISSION_TOOLS.find((candidate) => candidate.name === 'create_mission');
+    expect(tool?.inputSchema).toMatchObject({
+      type: 'object',
+      properties: {
+        model: { type: 'string' },
+        carrier: {
+          type: 'string',
+          enum: ['native', 'openrouter', 'codex-subscription'],
+        },
+      },
+    });
+  }, 15_000);
+
   it('sets worker effort and merge approval posture through the registered MCP schema and real handler', async () => {
     const { STATUS_TOOLS, handleOperatorDefaults } = await import('@/lib/mcp/operator-handlers/status');
     const tool = STATUS_TOOLS.find((candidate) => candidate.name === 'o8_operator_defaults');
@@ -428,5 +469,59 @@ describe('MCP operator defaults and dispatch routing', () => {
     expect(argv).toContain('--model');
     expect(argv).toContain(requestedModel);
     expect(argv).not.toContain(MODEL_IDS.claudeWorkerDefault);
+  }, 30_000);
+
+  it('keeps the global harness carrier while a mission packet pins a different carrier and model', async () => {
+    process.env.OPENROUTER_API_KEY = 'packet-carrier-token';
+    const profile = await import('@/lib/claude-code/worker-profile');
+    await profile.writeClaudeCodeWorkerProfile({
+      source: 'codex-subscription',
+      model: 'global-openrouter-model',
+      codexModel: 'global-model-x',
+    });
+
+    const created = await createMissionThroughRoute({
+      repoPath: await createRegisteredTempRepo(),
+      issueNumber: 5,
+      requestedRuntime: 'claude-code',
+      requestedModel: 'gateway/model-y',
+      carrier: 'openrouter',
+    });
+    const { currentMissionState } = await import('@/lib/orchestrator/operator-mission-service/shared');
+    expect(currentMissionState().packets[0]).toMatchObject({
+      id: created.packets[0]!.id,
+      claudeCodeModel: 'gateway/model-y',
+      claudeCodeCarrier: 'openrouter',
+    });
+
+    const { dispatchMission } = await import('@/lib/orchestrator/operator-mission-service/mission');
+    expect((await dispatchMission({ missionId: created.missionId })).dispatched).toBe(1);
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    const [, , spawnOptions] = spawnMock.mock.calls[0]!;
+    expect(spawnedArgv()).toContain('gateway/model-y');
+    expect(spawnOptions.env).toMatchObject({
+      ANTHROPIC_BASE_URL: 'https://openrouter.ai/api',
+      ANTHROPIC_AUTH_TOKEN: 'packet-carrier-token',
+      ANTHROPIC_MODEL: 'gateway/model-y',
+    });
+
+    const { resolveClaudeHarnessCarrier } = await import('@/lib/lane/claude-harness-carrier');
+    const harness = await resolveClaudeHarnessCarrier({
+      requestedModel: 'orchestrator-request',
+      sessionDir: path.join(testRoot!, 'orchestrator-session'),
+    });
+    expect(harness).toMatchObject({
+      source: 'codex-subscription',
+      model: 'global-model-x',
+      spawnEnv: {
+        ANTHROPIC_BASE_URL: 'http://127.0.0.1:8317',
+        ANTHROPIC_MODEL: 'global-model-x',
+      },
+    });
+    expect(profile.readClaudeCodeWorkerProfileSync()).toEqual({
+      source: 'codex-subscription',
+      model: 'global-openrouter-model',
+      codexModel: 'global-model-x',
+    });
   }, 30_000);
 });

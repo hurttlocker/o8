@@ -14,6 +14,7 @@
  */
 
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 import type { OrchestratorRuntime, WorkerLaunchContext } from '@/lib/orchestrator/types';
 import { isWorkerTerminal } from '@/lib/lane/terminal-states';
 
@@ -148,6 +149,8 @@ export type LaneCommand =
       laneId: string;
       prompt: string;
       model?: string;
+      claudeCodeModel?: string;
+      claudeCodeCarrier?: ClaudeCodeModelSource;
       effort?: ThinkingEffort;
       /** Stable for one packet launch attempt so a crash can reconcile the owned session. */
       clientMutationId?: string;

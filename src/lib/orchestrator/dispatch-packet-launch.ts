@@ -133,6 +133,8 @@ export async function launchPacketWithStorageAdmission(input: {
           ?? operatorWorkerModelFor(workerRouting.selectedRuntime)
           ?? getRuntimeCapability(workerRouting.selectedRuntime).defaultModel
         ) ?? undefined,
+        claudeCodeModel: packet.claudeCodeModel ?? undefined,
+        claudeCodeCarrier: packet.claudeCodeCarrier ?? undefined,
         effort: workerRouting.selectedEffort ?? undefined,
         clientMutationId: `packet-launch:${packet.id}:${launchGeneration}`,
         storageAdmissionReservationId: admissionLease.receipt.reservationId,

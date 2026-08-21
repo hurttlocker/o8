@@ -33,6 +33,18 @@ export function normalizePacketTaskContractFields(
   };
 }
 
+export function normalizeClaudeCodePacketPins(
+  packet: Pick<Partial<OrchestratorPacket>, 'claudeCodeModel' | 'claudeCodeCarrier'>,
+): Pick<OrchestratorPacket, 'claudeCodeModel' | 'claudeCodeCarrier'> {
+  const carrier = packet.claudeCodeCarrier;
+  return {
+    claudeCodeModel: (typeof packet.claudeCodeModel === 'string' && packet.claudeCodeModel.trim()) || null,
+    claudeCodeCarrier: carrier === 'native' || carrier === 'openrouter' || carrier === 'codex-subscription'
+      ? carrier
+      : null,
+  };
+}
+
 /**
  * Normalise the decomposition metadata block carried by `packetType: 'decompose'`
  * packets. Returns undefined if any required field is missing or malformed so

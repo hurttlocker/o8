@@ -9,6 +9,7 @@
  *
  *   o8 mission create   --title "…" [--body "…"] [--repo <path>] [--runtime r]
  *                       [--model m] [--constraints "…"] [--sequential]
+ *                       [--carrier native|openrouter|codex-subscription]
  *                       [--compare m1,m2] [--huddle] [--brain] [--number n]
  *                       [--read-only]
  *                       [--existingBranchPolicy auto|reset|continue|error]
@@ -281,6 +282,8 @@ async function runMissionCreate(mode: OutputMode, rest: string[]): Promise<numbe
   if (runtime) body.runtime = runtime;
   const model = flag(rest, 'model');
   if (model) body.model = model;
+  const carrier = flag(rest, 'carrier');
+  if (carrier) body.carrier = carrier;
   const constraints = flag(rest, 'constraints');
   if (constraints) body.constraints = constraints;
   if (hasFlag(rest, 'sequential')) body.sequential = true;

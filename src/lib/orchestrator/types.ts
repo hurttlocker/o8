@@ -1,5 +1,6 @@
 // Orchestrator domain types — runtimes, packets, lanes
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
+import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 import type { LaneMergeMode } from '@/lib/lane/merge-mode';
 import type { QualitySearchPacketState } from '@/lib/orchestrator/quality-search';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
@@ -344,6 +345,10 @@ export interface OrchestratorPacket {
   comparisonIndex?: number;
   /** The model this specific packet runs on (set during fan-out). */
   assignedModel?: string | null;
+  /** Explicit model pin for a Claude Code packet. It wins over the global worker profile. */
+  claudeCodeModel?: string | null;
+  /** Explicit carrier pin for a Claude Code packet. It wins over the global worker profile. */
+  claudeCodeCarrier?: ClaudeCodeModelSource | null;
   /** Opt-in two-candidate search state. The seed has a null role; fan-out
    * assigns one bounded role to each isolated candidate. */
   qualitySearch?: QualitySearchPacketState;

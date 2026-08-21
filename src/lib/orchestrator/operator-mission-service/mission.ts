@@ -236,6 +236,7 @@ export async function createMission(input: CreateMissionInput) {
       review: null,
       lane: null,
       assignedModel: packetRouting.selectedModel,
+      ...(packetRouting.selectedRuntime === 'claude-code' ? { claudeCodeModel: input.claudeCodeModel?.trim() || null, claudeCodeCarrier: input.claudeCodeCarrier ?? null } : {}),
       workerIntent: packetRouting.workerIntent,
       workerRouting: packetRouting,
       dispatchRuntimePin: packetRouting.requestedRuntime ?? packetRouting.selectedRuntime,

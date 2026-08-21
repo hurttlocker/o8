@@ -1,5 +1,5 @@
 import type { LaneMergeMode } from '@/lib/lane/merge-mode';
-import { normalizeDecompositionMetadata, normalizePacketDispatcher, normalizePacketLaunchContext, normalizePacketTaskContractFields, normalizePacketType } from '@/lib/orchestrator/normalize/decomposition';
+import { normalizeClaudeCodePacketPins, normalizeDecompositionMetadata, normalizePacketDispatcher, normalizePacketLaunchContext, normalizePacketTaskContractFields, normalizePacketType } from '@/lib/orchestrator/normalize/decomposition';
 import { normalizeRuntimeStatusToOrchestratorStatus } from '@/lib/orchestrator/runtime-status';
 import { runtimeTruthHasActiveWriter } from '@/lib/orchestrator/runtime-truth';
 import { normalizePacketRecovery } from '@/lib/lane/recovery-info';
@@ -409,7 +409,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     comparisonIndex: typeof packet.comparisonIndex === 'number' && Number.isFinite(packet.comparisonIndex) && packet.comparisonIndex >= 0
       ? Math.floor(packet.comparisonIndex)
       : undefined,
-    assignedModel: (typeof packet.assignedModel === 'string' && packet.assignedModel.trim()) || null,
+    assignedModel: (typeof packet.assignedModel === 'string' && packet.assignedModel.trim()) || null, ...normalizeClaudeCodePacketPins(packet),
     qualitySearch: normalizeQualitySearchPacketState(packet.qualitySearch),
     tierEscalated: packet.tierEscalated === true ? true : undefined,
     predictedFiles: Array.isArray(packet.predictedFiles)

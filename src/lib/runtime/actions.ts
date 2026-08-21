@@ -2,6 +2,7 @@ import type { AgentSummary } from '@/lib/fleet/types';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { listLanes, updateLane } from '@/lib/lane/registry';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import {
   listDeclarativeRuntimes,
@@ -65,6 +66,8 @@ export interface RuntimeLaunchRequest {
   runtime: RuntimeId;
   prompt: string;
   model?: string;
+  claudeCodeModel?: string;
+  claudeCodeCarrier?: ClaudeCodeModelSource;
   /** Requested reasoning effort — passed to the runtime's launch; per-runtime no-op. */
   effort?: ThinkingEffort;
   clientMutationId?: string;
@@ -393,6 +396,8 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
     prompt: launchPrompt,
     clientMutationId: payload.clientMutationId,
     model: payload.model,
+    claudeCodeModel: payload.claudeCodeModel,
+    claudeCodeCarrier: payload.claudeCodeCarrier,
     effort: payload.effort,
     worktreeFlag: launchWorktree?.claudeWorktreeFlag,
     worktreePath: launchWorktree?.worktree?.path,

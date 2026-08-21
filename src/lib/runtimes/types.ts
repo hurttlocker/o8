@@ -2,6 +2,7 @@ import type { BrowserSurfaceSummary } from '@/lib/browser/types';
 import type { CompactionEvent } from '@/lib/runtimes/compaction-detector';
 import type { DispatchCapability } from '@/lib/runtimes/shared/turn-dispatcher';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 
 /**
  * Universal Agent Runtime Contract
@@ -266,6 +267,9 @@ export interface LaunchOptions {
   /** Stable caller correlation persisted before an owned process is spawned. */
   clientMutationId?: string;
   model?: string;
+  /** Explicit packet-only model/carrier pins for the Claude Code adapter. */
+  claudeCodeModel?: string;
+  claudeCodeCarrier?: ClaudeCodeModelSource;
   /** Requested reasoning effort — applied per-runtime (codex today); a no-op elsewhere. */
   effort?: ThinkingEffort;
   worktreeFlag?: string;

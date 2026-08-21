@@ -26,11 +26,7 @@ import {
 import { getTaskPool, getTaskPoolTask } from '@/lib/tasks/pool';
 import type { ExistingBranchPolicy } from '@/lib/orchestrator/operator-mission-service';
 import { nextInlineIssueNumbers } from '@/lib/orchestrator/operator-mission-service/shared';
-import {
-  isRuntimeWorkerProvider,
-  listDispatchableRuntimes,
-  listDispatchableWorkerProviders,
-} from '@/lib/orchestrator/runtime-capabilities';
+import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import {
   apiFetch,
   type McpTool,
@@ -46,10 +42,10 @@ import {
   requiredString,
   textResult,
 } from './shared';
-import type { WorkerIntent, WorkerProvider } from '@/lib/orchestrator/types';
+import type { WorkerIntent } from '@/lib/orchestrator/types';
 import { parseMissionCandidateMode, QUALITY_SEARCH_INPUT_SCHEMA } from './quality-search-input';
+import { MISSION_WORKER_PIN_PROPERTIES, parseMissionWorkerPinInput, parseWorkerProvider, WORKER_PROVIDER_OPTIONS } from './mission-worker-input';
 import { CONTRACT_COVERAGE_EVIDENCE_SCHEMA, parseContractCoverageEvidenceInput } from './review-coverage-input';
-const WORKER_PROVIDER_OPTIONS: WorkerProvider[] = [...listDispatchableWorkerProviders(), 'minimax'];
 
 export const MISSION_TOOLS: McpTool[] = [
   {
@@ -95,6 +91,7 @@ export const MISSION_TOOLS: McpTool[] = [
           enum: WORKER_PROVIDER_OPTIONS,
           description: 'Future provider hint. Preserved in routing metadata; production still selects Codex.',
         },
+        ...MISSION_WORKER_PIN_PROPERTIES,
         constraints: {
           type: 'string',
           description: 'Optional sprint-wide constraints that should be included in packet scope.',
@@ -788,18 +785,13 @@ function parseWorkerIntent(value: unknown): WorkerIntent | undefined {
   throw new Error('workerIntent must be one of: light_worker, heavy_worker, reviewer, diagnostic, orchestrator.');
 }
 
-function parseWorkerProvider(value: unknown): WorkerProvider | null | undefined {
-  if (value === undefined || value === null || value === '') return undefined;
-  if (value === 'minimax' || isRuntimeWorkerProvider(value)) return value;
-  throw new Error(`requestedProvider must be one of: ${WORKER_PROVIDER_OPTIONS.join(', ')}.`);
-}
-
 export async function handleCreateMission(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
     const repoPath = requiredString(args, 'repoPath');
     const runtime = parseMissionRuntime(args.runtime);
     const workerIntent = parseWorkerIntent(args.workerIntent);
     const requestedProvider = parseWorkerProvider(args.requestedProvider);
+    const workerPinInput = parseMissionWorkerPinInput(args);
     const constraints = optionalString(args, 'constraints');
     const inlineIssues = Array.isArray(args.issues_inline) ? args.issues_inline : null;
     const ghIssues = Array.isArray(args.issues) && args.issues.length > 0 ? args.issues : null;
@@ -837,6 +829,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
         workerIntent,
         requestedProvider,
         requestedRuntime: runtime,
+        ...workerPinInput,
         constraints,
         sequential,
         existingBranchPolicy,
@@ -871,6 +864,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
       workerIntent,
       requestedProvider,
       requestedRuntime: runtime,
+      ...workerPinInput,
       constraints,
       sequential,
       existingBranchPolicy,

@@ -10,6 +10,7 @@ import type {
   WorkerProvider,
 } from '@/lib/orchestrator/types';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 
 export interface LoadedIssue {
   number: number;
@@ -34,6 +35,10 @@ export interface CreateMissionInput {
   requestedProvider?: WorkerProvider | null;
   requestedRuntime?: OrchestratorRuntime | null;
   requestedModel?: string | null;
+  /** Explicit per-packet model pin for Claude Code workers. */
+  claudeCodeModel?: string | null;
+  /** Explicit per-packet carrier pin for Claude Code workers. */
+  claudeCodeCarrier?: ClaudeCodeModelSource | null;
   /** Requested worker reasoning effort. Applied at launch only for runtimes with
    *  a reasoning-effort surface (codex/claude-code); a no-op elsewhere. Omit for
    *  today's behavior (runtime default). */

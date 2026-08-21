@@ -20,10 +20,10 @@ import type {
 import { getDataDir } from '@/lib/data-dir-migration';
 import {
   buildClaudeCodeWorkerSpawnEnv,
-  readClaudeCodeWorkerProfileSync,
   resolveClaudeCodeWorkerGatewayKey,
-  selectedClaudeCodeWorkerModelSync,
+  resolveClaudeCodeWorkerSelection,
 } from '@/lib/claude-code/worker-profile';
+import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 import {
   ensureCodexSubscriptionClaudeConfigDir,
   ensureCodexSubscriptionProxyReady,
@@ -151,15 +151,18 @@ export async function launchOwnedClaudeCodeSession(request: {
   prompt: string;
   clientMutationId?: string;
   model?: string;
+  claudeCodeModel?: string;
+  claudeCodeCarrier?: ClaudeCodeModelSource;
   effort?: ThinkingEffort;
   laneId?: string;
   packetId?: string;
 }) {
-  const profile = readClaudeCodeWorkerProfileSync();
-  const selectedModel = profile.source === 'openrouter' || profile.source === 'codex-subscription'
-    ? selectedClaudeCodeWorkerModelSync()
-    : request.model;
-  if (profile.source === 'openrouter' && !await resolveClaudeCodeWorkerGatewayKey()) {
+  const selection = resolveClaudeCodeWorkerSelection({
+    carrier: request.claudeCodeCarrier,
+    model: request.claudeCodeModel,
+  });
+  const selectedModel = selection.model ?? request.model;
+  if (selection.source === 'openrouter' && !await resolveClaudeCodeWorkerGatewayKey()) {
     return {
       ok: false,
       runtime: 'claude-code',
@@ -168,7 +171,7 @@ export async function launchOwnedClaudeCodeSession(request: {
       note: 'Claude Code gateway workers require an OpenRouter API key in Settings > Models > API keys. No worker was started.',
     };
   }
-  if (profile.source === 'codex-subscription') {
+  if (selection.source === 'codex-subscription') {
     try {
       await ensureCodexSubscriptionProxyReady();
     } catch (error) {
@@ -184,7 +187,7 @@ export async function launchOwnedClaudeCodeSession(request: {
   return claudeCodeOwnedStore.launch({
     ...request,
     model: selectedModel ?? undefined,
-    runtimeConfig: { modelSource: profile.source },
+    runtimeConfig: { modelSource: selection.source },
   });
 }
 

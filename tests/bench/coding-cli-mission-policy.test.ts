@@ -67,10 +67,16 @@ describe('mission existing-branch policy', () => {
     await runMission(mode, 'create', [
       '--title', 'policy parity',
       '--existingBranchPolicy', 'reset',
+      '--model', 'gateway/model-y',
+      '--carrier', 'openrouter',
     ]);
     await runMission(mode, 'create', ['--title', 'route default parity']);
 
     expect(bodies[0]?.existingBranchPolicy).toBe('reset');
+    expect(bodies[0]).toMatchObject({
+      model: 'gateway/model-y',
+      carrier: 'openrouter',
+    });
     expect(bodies[1]).not.toHaveProperty('existingBranchPolicy');
     expect(write.mock.calls.map(([value]) => String(value)).join('')).toContain(
       '"schema": "o8/cli/mission.create/v1"',

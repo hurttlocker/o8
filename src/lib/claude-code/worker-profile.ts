@@ -67,6 +67,23 @@ export function selectedClaudeCodeWorkerModelSync(): string | null {
   return null;
 }
 
+export function resolveClaudeCodeWorkerSelection(input: {
+  carrier?: unknown;
+  model?: unknown;
+} = {}): { source: ClaudeCodeWorkerProfile['source']; model: string | null } {
+  const profile = readClaudeCodeWorkerProfileSync();
+  const source = isClaudeCodeModelSource(input.carrier) ? input.carrier : profile.source;
+  const pinnedModel = normalizeClaudeCodeGatewayModel(input.model);
+  if (pinnedModel) return { source, model: pinnedModel };
+  if (source === 'openrouter') {
+    return { source, model: profile.model ?? OPENROUTER_CLAUDE_CODE_DEFAULT_MODEL };
+  }
+  if (source === 'codex-subscription') {
+    return { source, model: profile.codexModel ?? CODEX_SUBSCRIPTION_CLAUDE_CODE_DEFAULT_MODEL };
+  }
+  return { source, model: null };
+}
+
 export async function resolveClaudeCodeWorkerGatewayKey(): Promise<string | null> {
   return resolveOpenRouterKey();
 }
