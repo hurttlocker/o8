@@ -215,9 +215,14 @@ export async function submitPacketReview(input: SubmitReviewInput) {
   }
   const verdictLane = orphanLane ?? findLaneByPacket(input.packetId);
   const activeReviewTurnId = verdictLane ? findActiveReviewTurnId(verdictLane.id) : null;
-  const reviewTurn = activeReviewTurnId
-    ? { id: activeReviewTurnId, outcome: 'active' as const }
-    : { id: `review-turn-standalone-${randomUUID()}`, outcome: 'completed' as const };
+  // submit_review is the completed verdict artifact even when its transport
+  // turn is still streaming. Persist it as merge-authorizing immediately; the
+  // turn finalizer can still downgrade and supersede it if that turn later
+  // fails or exhausts quota.
+  const reviewTurn = {
+    id: activeReviewTurnId ?? `review-turn-standalone-${randomUUID()}`,
+    outcome: 'completed' as const,
+  };
   const summary = buildReviewSummary(input.findings, input.approved);
   const auditApprovalId = recordPacketReviewAudit(
     packet,
