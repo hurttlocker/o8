@@ -144,8 +144,12 @@ function OnAirLane({ agent, lane, nowMs }: {
   );
 }
 
+// Only lanes with a live process belong on air. Finished lanes waiting on
+// review or a human sit in the ledger for days and would read as stuck.
+const ON_AIR_STATUSES = new Set(['launching', 'running', 'recovering']);
+
 function OnAirCard({ snapshot, nowMs }: { snapshot: BroadcastSnapshot | null; nowMs: number }) {
-  const agents = snapshot?.activeAgents ?? [];
+  const agents = (snapshot?.activeAgents ?? []).filter((agent) => ON_AIR_STATUSES.has(agent.status));
   const lanesById = new Map((snapshot?.lanes ?? []).map((lane) => [lane.id, lane]));
   return (
     <section aria-label="Lanes on air" style={{ ...cardStyle, paddingTop: 18, paddingRight: 20, paddingBottom: 4, paddingLeft: 20 }}>
