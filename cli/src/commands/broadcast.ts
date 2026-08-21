@@ -25,10 +25,15 @@ interface PostResponse {
   ok: boolean;
   event: {
     id: string;
-    kind: 'commentary' | 'conversation';
+    kind: 'commentary' | 'conversation' | 'focus';
     actor: string;
-    audience: string | null;
-    text: string;
+    audience?: string | null;
+    text?: string;
+    title?: string | null;
+    goal?: string | null;
+    issue?: number | null;
+    startedAt?: string | null;
+    cleared?: boolean;
     timestamp: string;
   };
 }
@@ -67,6 +72,54 @@ export async function runBroadcast(
   group: string | undefined,
   rest: string[],
 ): Promise<number> {
+  if (group === 'focus') {
+    const allowedFlags = new Set(['--goal', '--issue', '--clear']);
+    const unknownFlag = rest.find((value) => value.startsWith('--') && !allowedFlags.has(value));
+    if (unknownFlag) {
+      throw new CliError('unknown_flag', `Unknown broadcast focus flag: ${unknownFlag}`, EXIT.INVALID_ARGS);
+    }
+    const clear = rest.includes('--clear');
+    const goal = readFlag(rest, '--goal');
+    const issueValue = readFlag(rest, '--issue');
+    const titleArgs = positional(rest, new Set(['--goal', '--issue']));
+    const issue = issueValue === null ? null : Number(issueValue);
+    if (
+      (clear && (rest.length !== 1 || rest[0] !== '--clear'))
+      || (!clear && titleArgs.length !== 1)
+      || (issueValue !== null && (!Number.isSafeInteger(issue) || issue < 1))
+    ) {
+      throw new CliError(
+        'invalid_args',
+        'Use `o8 broadcast focus "<title>" [--goal "<text>"] [--issue N]` or `o8 broadcast focus --clear`.',
+        EXIT.INVALID_ARGS,
+      );
+    }
+    const cfg = resolveConfig();
+    const response = await apiFetch<PostResponse>(cfg, '/api/broadcast/post', {
+      method: 'POST',
+      body: clear
+        ? { kind: 'focus', clear: true }
+        : { kind: 'focus', title: titleArgs[0], goal, issue },
+    });
+    if (!response.data) throw new CliError('invalid_response', 'Broadcast focus returned no data.', EXIT.INVALID_ARGS);
+    const payload = {
+      schema: 'o8/cli/broadcast.focus/v1',
+      ok: true,
+      event: response.data.event,
+    };
+    if (mode.human) {
+      printHumanHeading(clear ? 'Broadcast focus cleared' : 'Broadcast focus');
+      printHumanKv([
+        ['id', payload.event.id],
+        ['title', payload.event.title ?? '(cleared)'],
+        ['issue', payload.event.issue ? `#${payload.event.issue}` : '(none)'],
+      ]);
+    } else {
+      printJson(payload);
+    }
+    return EXIT.OK;
+  }
+
   if (group === 'post') {
     const allowedFlags = new Set(['--kind', '--as', '--to']);
     const unknownFlag = rest.find((value) => value.startsWith('--') && !allowedFlags.has(value));
@@ -114,7 +167,7 @@ export async function runBroadcast(
       'unknown_broadcast_subcommand',
       `Unknown broadcast subcommand: ${group ?? '(none)'}`,
       EXIT.INVALID_ARGS,
-      'Use `o8 broadcast post ...` or `o8 broadcast token mint|revoke ...`.',
+      'Use `o8 broadcast focus ...`, `o8 broadcast post ...`, or `o8 broadcast token mint|revoke ...`.',
     );
   }
   const [action, ...args] = positional(rest, new Set(['--label']));

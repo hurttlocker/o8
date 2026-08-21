@@ -16,7 +16,7 @@ export async function POST(request: Request) {
       schema: 'o8/broadcast.post/v1',
       ok: true,
       event,
-    }, 201);
+    }, event.kind === 'focus' ? 200 : 201);
   } catch (error) {
     if (error instanceof BroadcastPostError) {
       return broadcastNoStore({

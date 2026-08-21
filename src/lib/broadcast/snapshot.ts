@@ -11,6 +11,7 @@ import { listRecentBroadcastEvents } from './events';
 import { redactBroadcastText } from './redaction';
 import type {
   BroadcastApprovalSnapshot,
+  BroadcastFocusSnapshot,
   BroadcastSnapshot,
 } from './types';
 
@@ -33,6 +34,12 @@ interface PendingApprovalRow {
   created_at: number;
 }
 
+interface FocusRow {
+  text: string;
+  metadata_json: string;
+  created_at: string;
+}
+
 function repoLabel(repoPath: string): string {
   const normalized = repoPath.replace(/[\\/]+$/, '');
   return path.basename(normalized) || 'repository';
@@ -52,6 +59,44 @@ function pendingApprovals(sqlite: Database.Database): BroadcastApprovalSnapshot[
     risk: row.risk,
     createdAt: new Date(row.created_at).toISOString(),
   }));
+}
+
+function currentFocus(sqlite: Database.Database): BroadcastFocusSnapshot | null {
+  const row = sqlite.prepare(`
+    SELECT text, metadata_json, created_at
+    FROM broadcast_events
+    WHERE kind = 'focus'
+    ORDER BY sequence DESC
+    LIMIT 1
+  `).get() as FocusRow | undefined;
+  if (!row) return null;
+  let metadata: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(row.metadata_json) as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      metadata = parsed as Record<string, unknown>;
+    }
+  } catch {
+    return null;
+  }
+  if (metadata.cleared === true) return null;
+  const title = typeof metadata.title === 'string' ? metadata.title : row.text;
+  if (!title.trim()) return null;
+  const goal = typeof metadata.goal === 'string' && metadata.goal.trim()
+    ? redactBroadcastText(metadata.goal)
+    : null;
+  const issue = Number.isSafeInteger(metadata.issue) && Number(metadata.issue) > 0
+    ? Number(metadata.issue)
+    : null;
+  const startedAt = typeof metadata.startedAt === 'string' && !Number.isNaN(Date.parse(metadata.startedAt))
+    ? metadata.startedAt
+    : row.created_at;
+  return {
+    title: redactBroadcastText(title),
+    goal,
+    issue,
+    startedAt,
+  };
 }
 
 export function buildBroadcastSnapshot(
@@ -98,6 +143,7 @@ export function buildBroadcastSnapshot(
       count: approvals.length,
       items: approvals,
     },
+    focus: currentFocus(sqlite),
     recentEvents: recent.events,
     cursor: recent.cursor,
   };

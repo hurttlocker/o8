@@ -4,6 +4,9 @@ import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { BroadcastSnapshot } from '@/lib/broadcast/types';
+import { getPalette, resolveTheme } from '@/lib/theme/registry';
+
 type MotionProps = {
   children?: ReactNode;
   initial?: unknown;
@@ -30,10 +33,6 @@ vi.mock('framer-motion', () => {
   };
 });
 
-vi.mock('@/lib/theme/context', () => ({
-  ThemeProvider: ({ children }: { children?: ReactNode }) => children,
-}));
-
 import BroadcastPage from './page';
 
 function setVisibility(value: DocumentVisibilityState): void {
@@ -41,7 +40,7 @@ function setVisibility(value: DocumentVisibilityState): void {
   document.dispatchEvent(new Event('visibilitychange'));
 }
 
-const snapshot = {
+const snapshot: BroadcastSnapshot = {
   schema: 'o8/broadcast.snapshot/v1',
   generatedAt: '2026-08-21T12:00:00.000Z',
   lanes: [{
@@ -65,6 +64,7 @@ const snapshot = {
     startedAt: '2026-08-21T12:00:00.000Z',
   }],
   pendingApprovals: { count: 0, items: [] },
+  focus: null,
   recentEvents: [{
     schema: 'o8/broadcast.event/v1',
     id: 'lane:event-one',
@@ -85,7 +85,7 @@ const snapshot = {
 describe('Broadcast spectator page', () => {
   let container: HTMLDivElement;
   let root: Root;
-  let snapshotPayload = snapshot;
+  let snapshotPayload: BroadcastSnapshot = snapshot;
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     if (String(input).includes('/api/broadcast/snapshot')) {
       return Promise.resolve(Response.json(snapshotPayload));
@@ -186,6 +186,55 @@ describe('Broadcast spectator page', () => {
 
     expect(container.querySelector('header')).toBeNull();
     expect(container.querySelector('[aria-label="Broadcast stage"]')).not.toBeNull();
+  });
+
+  it('pins focus first, ticks its elapsed timer, and hides it after clear', async () => {
+    window.history.replaceState(null, '', '/broadcast?compact=1');
+    snapshotPayload = {
+      ...snapshot,
+      focus: {
+        title: 'Broadcast focus card',
+        goal: 'Keep spectators oriented.',
+        issue: 1842,
+        startedAt: '2026-08-21T11:59:55.000Z',
+      },
+    };
+    await act(async () => { root.render(createElement(BroadcastPage)); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(20); });
+
+    const sidebar = container.querySelector('[aria-label="Broadcast sidebar"]');
+    expect(sidebar?.firstElementChild?.getAttribute('aria-label')).toBe('Now building');
+    expect(sidebar?.firstElementChild?.textContent).toContain('Broadcast focus card');
+    expect(sidebar?.firstElementChild?.textContent).toContain('Keep spectators oriented.');
+    expect(sidebar?.firstElementChild?.textContent).toContain('#1842');
+    expect(container.querySelector('[aria-label="Focus elapsed time"]')?.textContent).toBe('00:05');
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(container.querySelector('[aria-label="Focus elapsed time"]')?.textContent).toBe('00:06');
+
+    snapshotPayload = { ...snapshot, focus: null };
+    await act(async () => { await vi.advanceTimersByTimeAsync(9_000); });
+    await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[aria-label="Now building"]')).toBeNull();
+  });
+
+  it('applies explicit dark and light palette tokens from the theme registry', async () => {
+    window.history.replaceState(null, '', '/broadcast?theme=dark');
+    await act(async () => { root.render(createElement(BroadcastPage)); });
+    await act(async () => { await Promise.resolve(); });
+
+    const dark = resolveTheme(getPalette('dark'), 'solid');
+    expect(container.querySelector('main')?.getAttribute('data-broadcast-theme')).toBe('dark');
+    expect(document.documentElement.style.getPropertyValue('--t-bg-gradient'))
+      .toBe(dark.cssVars['--t-bg-gradient']);
+    expect(document.body.style.background).toBe('var(--t-bg-gradient)');
+
+    const light = resolveTheme(getPalette('light'), 'solid');
+    window.history.replaceState(null, '', '/broadcast?theme=light');
+    await act(async () => { window.dispatchEvent(new PopStateEvent('popstate')); });
+    expect(container.querySelector('main')?.getAttribute('data-broadcast-theme')).toBe('light');
+    expect(document.documentElement.style.getPropertyValue('--t-bg-gradient'))
+      .toBe(light.cssVars['--t-bg-gradient']);
   });
 
   it('shows lane-aware dead air after 90 seconds', async () => {

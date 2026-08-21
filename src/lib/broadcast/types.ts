@@ -12,6 +12,7 @@ export const BROADCAST_EVENT_KINDS = [
   'message',
   'commentary',
   'conversation',
+  'focus',
 ] as const;
 
 export type BroadcastEventKind = (typeof BROADCAST_EVENT_KINDS)[number];
@@ -77,6 +78,13 @@ export interface BroadcastApprovalSnapshot {
   createdAt: string;
 }
 
+export interface BroadcastFocusSnapshot {
+  title: string;
+  goal: string | null;
+  issue: number | null;
+  startedAt: string;
+}
+
 export interface BroadcastSnapshot {
   schema: 'o8/broadcast.snapshot/v1';
   generatedAt: string;
@@ -87,6 +95,7 @@ export interface BroadcastSnapshot {
     count: number;
     items: BroadcastApprovalSnapshot[];
   };
+  focus: BroadcastFocusSnapshot | null;
   recentEvents: BroadcastEvent[];
   cursor: string | null;
 }

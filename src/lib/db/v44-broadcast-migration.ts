@@ -17,7 +17,7 @@ export function ensureV44BroadcastSchema(sqlite: Database.Database): void {
     CREATE TABLE IF NOT EXISTS broadcast_events (
       sequence INTEGER PRIMARY KEY AUTOINCREMENT,
       id TEXT NOT NULL UNIQUE,
-      kind TEXT NOT NULL CHECK (kind IN ('commentary', 'conversation')),
+      kind TEXT NOT NULL CHECK (kind IN ('commentary', 'conversation', 'focus')),
       actor TEXT NOT NULL,
       audience TEXT,
       text TEXT NOT NULL CHECK (length(text) BETWEEN 1 AND 2000),

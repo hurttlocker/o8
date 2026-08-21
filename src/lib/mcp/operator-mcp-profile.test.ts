@@ -117,8 +117,12 @@ describe('operator MCP process profiles', () => {
     expect(fullTools.find((tool) => tool.name === 'o8_broadcast_post')?.inputSchema).toMatchObject({
       type: 'object',
       additionalProperties: false,
-      properties: expect.any(Object),
-      required: ['kind', 'actor', 'text'],
+      properties: {
+        kind: { enum: ['commentary', 'conversation', 'focus'] },
+        title: { maxLength: 120 },
+        goal: { maxLength: 400 },
+      },
+      required: ['kind'],
     });
     expect(dogfoodNames).not.toContain('o8_broadcast_post');
   });

@@ -5,6 +5,7 @@ import { motion } from 'framer-motion';
 import type {
   BroadcastAgentSnapshot,
   BroadcastEvent,
+  BroadcastFocusSnapshot,
   BroadcastLaneSnapshot,
   BroadcastSnapshot,
 } from '@/lib/broadcast/types';
@@ -34,6 +35,20 @@ function formatElapsed(nowMs: number, value: string | null): string {
   return `${Math.floor(elapsedMinutes / 60)}h since last event`;
 }
 
+function formatFocusElapsed(nowMs: number, startedAt: string): string {
+  const parsed = Date.parse(startedAt);
+  if (Number.isNaN(parsed)) return '00:00';
+  const elapsedSeconds = Math.max(0, Math.floor((nowMs - parsed) / 1_000));
+  if (elapsedSeconds < 3_600) {
+    const minutes = Math.floor(elapsedSeconds / 60).toString().padStart(2, '0');
+    const seconds = (elapsedSeconds % 60).toString().padStart(2, '0');
+    return `${minutes}:${seconds}`;
+  }
+  const hours = Math.floor(elapsedSeconds / 3_600);
+  const minutes = Math.floor((elapsedSeconds % 3_600) / 60).toString().padStart(2, '0');
+  return `${hours}:${minutes}`;
+}
+
 function kindLabel(kind: string): string {
   return kind.replaceAll('_', ' ').toUpperCase();
 }
@@ -46,7 +61,8 @@ function eventDotIsFilled(kind: string): boolean {
     || kind === 'approval'
     || kind === 'message'
     || kind === 'commentary'
-    || kind === 'conversation';
+    || kind === 'conversation'
+    || kind === 'focus';
 }
 
 export function StatusDot({ filled, size = 6 }: { filled: boolean; size?: number }) {
@@ -90,6 +106,38 @@ const cardStyle = {
   background: 'var(--t-panel)',
   overflowX: 'hidden' as const,
 };
+
+function FocusCard({ focus, nowMs }: { focus: BroadcastFocusSnapshot; nowMs: number }) {
+  return (
+    <section aria-label="Now building" style={{ ...cardStyle, paddingTop: 20, paddingRight: 22, paddingBottom: 22, paddingLeft: 22 }}>
+      <SectionLabel>NOW BUILDING</SectionLabel>
+      <div
+        style={{
+          marginTop: 12,
+          color: 'var(--t-text-strong)',
+          fontSize: 30,
+          fontWeight: 400,
+          letterSpacing: '-0.2px',
+          lineHeight: 1.2,
+          overflowWrap: 'anywhere',
+        }}
+      >
+        {focus.title}
+      </div>
+      {focus.goal ? (
+        <div style={{ marginTop: 10, color: 'var(--t-text-secondary)', fontSize: 18, fontWeight: 300, lineHeight: 1.45, overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
+          {focus.goal}
+        </div>
+      ) : null}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, color: 'var(--t-text-faint)', fontSize: 14, fontWeight: 260, letterSpacing: '-0.4px', lineHeight: 1.25 }}>
+        {focus.issue ? <span>#{focus.issue}</span> : null}
+        <time aria-label="Focus elapsed time" dateTime={focus.startedAt}>
+          {formatFocusElapsed(nowMs, focus.startedAt)}
+        </time>
+      </div>
+    </section>
+  );
+}
 
 function OnAirLane({ agent, lane, nowMs }: {
   agent: BroadcastAgentSnapshot;
@@ -236,6 +284,7 @@ export function BroadcastSidebar({ snapshot, events, nowMs }: {
 }) {
   return (
     <aside aria-label="Broadcast sidebar" style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0, gridArea: 'sidebar' }}>
+      {snapshot?.focus ? <FocusCard focus={snapshot.focus} nowMs={nowMs} /> : null}
       <OnAirCard snapshot={snapshot} nowMs={nowMs} />
       <ApprovalCard count={snapshot?.pendingApprovals.count ?? 0} />
       <CommentaryCard events={events} />

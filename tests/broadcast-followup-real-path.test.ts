@@ -13,8 +13,9 @@ import { NextRequest } from 'next/server';
 
 const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-broadcast-followup-'));
 const SPECTATOR_TOKEN = 'broadcast-followup-spectator-token-0123456789';
+const OPERATOR_TOKEN = 'operator-broadcast-followup-token-0123456789';
 const SHORT_DEVICE_TOKEN = 'dv!43y';
-writeFileSync(join(dataDir, 'ws-token'), 'operator-broadcast-followup-token-0123456789\n', 'utf8');
+writeFileSync(join(dataDir, 'ws-token'), `${OPERATOR_TOKEN}\n`, 'utf8');
 writeFileSync(
   join(dataDir, 'mobile-device-tokens'),
   `${createHash('sha256').update(SHORT_DEVICE_TOKEN).digest('hex')}\n`,
@@ -29,7 +30,9 @@ process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
 const broadcastEvents = await import('@/app/api/broadcast/events/route');
+const broadcastPost = await import('@/app/api/broadcast/post/route');
 const broadcastSnapshot = await import('@/app/api/broadcast/snapshot/route');
+const { mintPacketWorkerToken } = await import('@/lib/auth/packet-worker-token');
 const { decodeBroadcastCursor } = await import('@/lib/broadcast/events');
 const { getSqlite } = await import('@/lib/db');
 const { appendEvent, createLane } = await import('@/lib/lane/registry');
@@ -41,6 +44,18 @@ function spectatorRequest(path: string): NextRequest {
       host: 'localhost:3001',
       authorization: `Bearer ${SPECTATOR_TOKEN}`,
     },
+  });
+}
+
+function postRequest(token: string, body: Record<string, unknown>): NextRequest {
+  return new NextRequest('http://localhost:3001/api/broadcast/post', {
+    method: 'POST',
+    headers: {
+      host: 'localhost:3001',
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(body),
   });
 }
 
@@ -177,5 +192,50 @@ describe('Broadcast follow-up bounds and redaction through real routes', () => {
     ));
     expect(snapshotResponse.status).toBe(200);
     await expect(snapshotResponse.json()).resolves.toMatchObject({ recentEvents: [] });
+  });
+
+  it('sets focus only for an operator and projects it directly in the snapshot', async () => {
+    const operatorResponse = await broadcastPost.POST(postRequest(OPERATOR_TOKEN, {
+      kind: 'focus',
+      title: 'Broadcast real-path focus',
+      goal: 'Prove the spectator projection.',
+      issue: 1842,
+    }));
+    expect(operatorResponse.status).toBe(200);
+
+    const workerToken = mintPacketWorkerToken(`packet-broadcast-focus-${Date.now()}`);
+    const workerResponse = await broadcastPost.POST(postRequest(workerToken, {
+      kind: 'focus',
+      title: 'Worker cannot replace focus',
+    }));
+    expect(workerResponse.status).toBe(403);
+    await expect(workerResponse.json()).resolves.toMatchObject({
+      error: { code: 'broadcast_focus_forbidden' },
+    });
+
+    const spectatorResponse = await broadcastPost.POST(postRequest(SPECTATOR_TOKEN, {
+      kind: 'focus',
+      title: 'Spectator cannot replace focus',
+    }));
+    expect(spectatorResponse.status).toBe(403);
+
+    const snapshotResponse = await broadcastSnapshot.GET(spectatorRequest('/api/broadcast/snapshot?events=1'));
+    expect(snapshotResponse.status).toBe(200);
+    await expect(snapshotResponse.json()).resolves.toMatchObject({
+      focus: {
+        title: 'Broadcast real-path focus',
+        goal: 'Prove the spectator projection.',
+        issue: 1842,
+        startedAt: expect.any(String),
+      },
+    });
+
+    const clearResponse = await broadcastPost.POST(postRequest(OPERATOR_TOKEN, {
+      kind: 'focus',
+      clear: true,
+    }));
+    expect(clearResponse.status).toBe(200);
+    const clearedSnapshot = await broadcastSnapshot.GET(spectatorRequest('/api/broadcast/snapshot?events=1'));
+    await expect(clearedSnapshot.json()).resolves.toMatchObject({ focus: null });
   });
 });

@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 
-import { ThemeProvider } from '@/lib/theme/context';
 import type { BroadcastEvent, BroadcastSnapshot } from '@/lib/broadcast/types';
+import { getPalette, resolveTheme, type PaletteId } from '@/lib/theme/registry';
 
 import {
   BroadcastSidebar,
@@ -36,6 +36,15 @@ function mergeEvents(current: BroadcastEvent[], incoming: BroadcastEvent[]): Bro
     .slice(-FEED_LIMIT);
 }
 
+function readBroadcastPalette(): PaletteId {
+  const params = new URLSearchParams(window.location.search);
+  if (params.has('theme')) return params.get('theme') === 'dark' ? 'dark' : 'light';
+  if (typeof window.matchMedia === 'function') {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  return 'light';
+}
+
 function BroadcastSurface() {
   const [token, setToken] = useState('');
   const [snapshot, setSnapshot] = useState<BroadcastSnapshot | null>(null);
@@ -46,6 +55,7 @@ function BroadcastSurface() {
   const [compact, setCompact] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [reconnectPulse, setReconnectPulse] = useState(0);
+  const [paletteId, setPaletteId] = useState<PaletteId>('light');
   const cursorRef = useRef<string | null>(null);
   const wasOfflineRef = useRef(false);
   const reduceMotion = useReducedMotion() ?? false;
@@ -57,6 +67,20 @@ function BroadcastSurface() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setToken(nextToken);
     setState(nextToken ? 'booting' : 'missing-token');
+  }, []);
+
+  useEffect(() => {
+    const media = typeof window.matchMedia === 'function'
+      ? window.matchMedia('(prefers-color-scheme: dark)')
+      : null;
+    const updatePalette = () => setPaletteId(readBroadcastPalette());
+    updatePalette();
+    window.addEventListener('popstate', updatePalette);
+    media?.addEventListener?.('change', updatePalette);
+    return () => {
+      window.removeEventListener('popstate', updatePalette);
+      media?.removeEventListener?.('change', updatePalette);
+    };
   }, []);
 
   useEffect(() => {
@@ -196,23 +220,70 @@ function BroadcastSurface() {
     : state === 'booting' ? 'CONNECTING'
       : state === 'missing-token' ? 'TOKEN REQUIRED'
         : state === 'forbidden' ? 'ACCESS REVOKED' : 'RECONNECTING';
+  const resolvedTheme = useMemo(
+    () => resolveTheme(getPalette(paletteId), 'solid'),
+    [paletteId],
+  );
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const body = document.body;
+    const previousVars = Object.keys(resolvedTheme.cssVars).map((name) => ({
+      name,
+      value: root.style.getPropertyValue(name),
+      priority: root.style.getPropertyPriority(name),
+    }));
+    const previous = {
+      colorScheme: root.style.colorScheme,
+      theme: root.dataset.theme,
+      palette: root.dataset.palette,
+      surface: root.dataset.surface,
+      bodyBackground: body.style.background,
+    };
+    for (const [name, value] of Object.entries(resolvedTheme.cssVars)) {
+      root.style.setProperty(name, value);
+    }
+    root.style.colorScheme = resolvedTheme.colorScheme;
+    root.dataset.theme = resolvedTheme.paletteId;
+    root.dataset.palette = resolvedTheme.paletteId;
+    root.dataset.surface = resolvedTheme.surface;
+    body.style.background = 'var(--t-bg-gradient)';
+    return () => {
+      for (const variable of previousVars) {
+        if (variable.value) root.style.setProperty(variable.name, variable.value, variable.priority);
+        else root.style.removeProperty(variable.name);
+      }
+      root.style.colorScheme = previous.colorScheme;
+      if (previous.theme === undefined) delete root.dataset.theme;
+      else root.dataset.theme = previous.theme;
+      if (previous.palette === undefined) delete root.dataset.palette;
+      else root.dataset.palette = previous.palette;
+      if (previous.surface === undefined) delete root.dataset.surface;
+      else root.dataset.surface = previous.surface;
+      body.style.background = previous.bodyBackground;
+    };
+  }, [resolvedTheme]);
+
+  const surfaceStyle: CSSProperties = {
+    ...resolvedTheme.cssVars,
+    boxSizing: 'border-box',
+    width: '100%',
+    minHeight: '100dvh',
+    overflowX: 'hidden',
+    background: 'var(--t-bg-gradient)',
+    color: 'var(--t-text)',
+    fontFamily: 'var(--font-sans-system)',
+    fontSize: 18,
+    paddingTop: compact ? 18 : 28,
+    paddingRight: 28,
+    paddingBottom: 48,
+    paddingLeft: 28,
+  };
 
   return (
     <main
-      style={{
-        boxSizing: 'border-box',
-        width: '100%',
-        minHeight: '100dvh',
-        overflowX: 'hidden',
-        background: 'var(--t-bg-gradient)',
-        color: 'var(--t-text)',
-        fontFamily: 'var(--font-sans-system)',
-        fontSize: 18,
-        paddingTop: compact ? 18 : 28,
-        paddingRight: 28,
-        paddingBottom: 48,
-        paddingLeft: 28,
-      }}
+      data-broadcast-theme={paletteId}
+      style={surfaceStyle}
     >
       <div style={{ width: '100%', maxWidth: 1880, minWidth: 0, marginRight: 'auto', marginLeft: 'auto' }}>
         {compact ? null : <header
@@ -317,9 +388,5 @@ function BroadcastSurface() {
 }
 
 export default function BroadcastPage() {
-  return (
-    <ThemeProvider>
-      <BroadcastSurface />
-    </ThemeProvider>
-  );
+  return <BroadcastSurface />;
 }

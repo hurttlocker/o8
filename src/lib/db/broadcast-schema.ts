@@ -15,7 +15,7 @@ export const broadcastTokens = sqliteTable('broadcast_tokens', {
 export const broadcastEvents = sqliteTable('broadcast_events', {
   sequence: integer('sequence').primaryKey({ autoIncrement: true }),
   id: text('id').notNull().unique(),
-  kind: text('kind', { enum: ['commentary', 'conversation'] }).notNull(),
+  kind: text('kind', { enum: ['commentary', 'conversation', 'focus'] }).notNull(),
   actor: text('actor').notNull(),
   audience: text('audience'),
   text: text('text').notNull(),

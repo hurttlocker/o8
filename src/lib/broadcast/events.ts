@@ -326,7 +326,11 @@ function advanceCursor(cursor: BroadcastCursor, row: RawBroadcastRow): Broadcast
 
 function eventKind(row: RawBroadcastRow, payload: Record<string, unknown>): BroadcastEventKind | null {
   if (row.source === 'broadcast') {
-    if (row.source_kind === 'commentary' || row.source_kind === 'conversation') return row.source_kind;
+    if (
+      row.source_kind === 'commentary'
+      || row.source_kind === 'conversation'
+      || row.source_kind === 'focus'
+    ) return row.source_kind;
     return null;
   }
   if (row.source === 'lease') {
@@ -368,6 +372,11 @@ function detailFor(kind: BroadcastEventKind, row: RawBroadcastRow, payload: Reco
   if (kind === 'commentary' || kind === 'conversation') {
     return typeof payload.text === 'string' ? payload.text : null;
   }
+  if (kind === 'focus') {
+    return payload.cleared === true
+      ? null
+      : typeof payload.title === 'string' ? payload.title : null;
+  }
   if (kind === 'progress') return typeof payload.message === 'string' ? payload.message : null;
   if (kind === 'brain_consulted') return typeof payload.question === 'string' ? payload.question : null;
   if (kind === 'lease_timeout') return typeof payload.resource === 'string' ? payload.resource : null;
@@ -407,6 +416,7 @@ function titleFor(
     conversation: typeof payload.audience === 'string' && payload.audience.trim()
       ? `Conversation · ${row.actor} to ${payload.audience.trim()}`
       : `Conversation · ${row.actor}`,
+    focus: payload.cleared === true ? 'Focus cleared' : 'Focus set',
   };
   return subject ? `${labels[kind]} · ${subject}` : labels[kind];
 }

@@ -225,7 +225,7 @@ commands:
   browser type <sel> <text…>  type into an input (--submit presses Enter)
   browser wait <sel>   poll until a selector resolves (--text, --timeout)
   browser close        end this scope's engine (headless Chrome) session
-  broadcast post|token         post narration/conversation or manage spectator bearers
+  broadcast focus|post|token   set the live focus, post narration, or manage spectator bearers
   cortex observe       propose a worker observation for the orchestrator
   lane touches         active lanes touching a path or packet diff
   lease acquire <resource> [--ttl 2h] [--wait]  acquire or queue for a named resource

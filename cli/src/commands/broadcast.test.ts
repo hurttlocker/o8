@@ -20,6 +20,52 @@ afterEach(() => {
 });
 
 describe('Broadcast CLI commands', () => {
+  it('sets and clears focus through the aligned post endpoint', async () => {
+    process.env.O8_API_PORT = '40123';
+    process.env.O8_API_TOKEN = 'operator-token';
+    delete process.env.O8_WORKER_TOKEN;
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => (
+      new Response(JSON.stringify({
+        schema: 'o8/broadcast.post/v1',
+        ok: true,
+        event: {
+          id: 'focus-one',
+          kind: 'focus',
+          actor: 'operator',
+          title: 'Ship focus',
+          goal: 'Keep the room oriented.',
+          issue: 1842,
+          startedAt: '2026-08-21T00:00:00.000Z',
+          cleared: false,
+          timestamp: '2026-08-21T00:00:00.000Z',
+        },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    ));
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    await expect(runBroadcast(
+      { human: false, verbose: false },
+      'focus',
+      ['Ship focus', '--goal', 'Keep the room oriented.', '--issue', '1842'],
+    )).resolves.toBe(0);
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      kind: 'focus',
+      title: 'Ship focus',
+      goal: 'Keep the room oriented.',
+      issue: 1842,
+    });
+
+    await expect(runBroadcast(
+      { human: false, verbose: false },
+      'focus',
+      ['--clear'],
+    )).resolves.toBe(0);
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      kind: 'focus',
+      clear: true,
+    });
+  });
+
   it('posts a conversation through the aligned post endpoint', async () => {
     process.env.O8_API_PORT = '40123';
     process.env.O8_API_TOKEN = 'operator-token';

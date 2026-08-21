@@ -10,19 +10,23 @@ import {
 export const BROADCAST_TOOLS: McpTool[] = [
   {
     name: 'o8_broadcast_post',
-    description: 'Post commentary or a conversation line to the live Broadcast feed.',
+    description: 'Set or clear the live Broadcast focus, or post commentary and conversation lines.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        kind: { type: 'string', enum: ['commentary', 'conversation'] },
+        kind: { type: 'string', enum: ['commentary', 'conversation', 'focus'] },
         actor: { type: 'string', minLength: 1, maxLength: 160 },
         audience: { type: 'string', maxLength: 160 },
         text: { type: 'string', minLength: 1, maxLength: 2000 },
+        title: { type: 'string', minLength: 1, maxLength: 120 },
+        goal: { type: 'string', maxLength: 400 },
+        issue: { type: 'integer', minimum: 1 },
+        clear: { type: 'boolean' },
         laneId: { type: 'string', maxLength: 160 },
         packetId: { type: 'string', maxLength: 160 },
       },
-      required: ['kind', 'actor', 'text'],
+      required: ['kind'],
     },
   },
   {
@@ -42,8 +46,38 @@ export const BROADCAST_TOOLS: McpTool[] = [
 ];
 
 export async function handleBroadcastPost(args: Record<string, unknown>): Promise<McpToolResult> {
-  if (args.kind !== 'commentary' && args.kind !== 'conversation') {
-    return textResult('kind must be commentary or conversation.', true);
+  if (args.kind !== 'commentary' && args.kind !== 'conversation' && args.kind !== 'focus') {
+    return textResult('kind must be commentary, conversation, or focus.', true);
+  }
+  if (args.kind === 'focus') {
+    if (args.clear !== undefined && typeof args.clear !== 'boolean') {
+      return textResult('clear must be a boolean.', true);
+    }
+    if (args.clear !== true && (typeof args.title !== 'string' || !args.title.trim())) {
+      return textResult('title is required when focus is not cleared.', true);
+    }
+    if (args.goal !== undefined && typeof args.goal !== 'string') {
+      return textResult('goal must be a string.', true);
+    }
+    if (args.issue !== undefined && (!Number.isSafeInteger(args.issue) || Number(args.issue) < 1)) {
+      return textResult('issue must be a positive integer.', true);
+    }
+    try {
+      const result = await apiFetch('/api/broadcast/post', {
+        method: 'POST',
+        body: JSON.stringify(args.clear === true
+          ? { kind: 'focus', clear: true }
+          : {
+              kind: 'focus',
+              title: (args.title as string).trim(),
+              goal: typeof args.goal === 'string' ? args.goal.trim() : undefined,
+              issue: args.issue,
+            }),
+      });
+      return jsonResult(result);
+    } catch (error) {
+      return textResult(`o8_broadcast_post failed: ${errorText(error)}`, true);
+    }
   }
   if (typeof args.actor !== 'string' || !args.actor.trim()) {
     return textResult('actor is required.', true);
