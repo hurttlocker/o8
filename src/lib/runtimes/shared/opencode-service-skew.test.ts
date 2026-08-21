@@ -39,6 +39,7 @@ const {
   setOpencodeServiceProbeDependenciesForTests,
 } = await import('./opencode-readiness');
 const {
+  getRuntimeAuthSnapshot,
   invalidateRuntimeAuthCache,
 } = await import('./auth-detect');
 const operatorDefaultsRoute = await import('@/app/api/panel/operator-defaults/route');
@@ -156,6 +157,10 @@ describe('OpenCode resident service version readiness', () => {
     const beforePersistedState = readFileSync(controlPlanePath, 'utf8');
 
     residentVersion = '0.0.0-beta-17793';
+    // The OpenCode probe is now throttled to a 10s TTL (see auth-detect.ts) even while the
+    // outer 60s auth-snapshot cache is fresh, so force a fresh probe the same way an operator
+    // manually re-checking readiness after a restart would.
+    invalidateRuntimeAuthCache();
     const readinessResponse = await operatorDefaultsRoute.GET();
     expect(readinessResponse.status).toBe(200);
     await expect(readinessResponse.json()).resolves.toMatchObject({
@@ -188,5 +193,31 @@ describe('OpenCode resident service version readiness', () => {
     expect(payload.error.message).toContain('0.0.0-beta-17793');
     expect(payload.error.message).toContain('opencode2 service restart');
     expect(readFileSync(controlPlanePath, 'utf8')).toBe(beforePersistedState);
+  });
+
+  it('throttles the OpenCode probe to a 10s TTL independent of the 60s auth-snapshot cache', async () => {
+    const run = serviceRun(() => '0.0.0-beta-17794');
+    setOpencodeServiceProbeDependenciesForTests({ run });
+    invalidateRuntimeAuthCache();
+
+    // Seed the main auth-snapshot cache under real timers first (same path every other test in
+    // this file exercises), so we only enter fake-timer territory for the OpenCode-specific
+    // throttle itself and never risk a mocked clock stalling an unrelated real timeout.
+    await getRuntimeAuthSnapshot();
+    expect(run).toHaveBeenCalledTimes(3);
+
+    try {
+      vi.useFakeTimers({ now: Date.now() });
+
+      await getRuntimeAuthSnapshot();
+      await getRuntimeAuthSnapshot();
+      expect(run).toHaveBeenCalledTimes(3);
+
+      await vi.advanceTimersByTimeAsync(10_001);
+      await getRuntimeAuthSnapshot();
+      expect(run).toHaveBeenCalledTimes(6);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

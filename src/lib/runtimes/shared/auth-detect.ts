@@ -86,6 +86,11 @@ class DispatchPreflightError extends Error {
 export { DispatchPreflightError };
 
 let cache: { snapshot: RuntimeAuthSnapshot; cachedAt: number } | null = null;
+// The OpenCode probe alone spawns 2-3 subprocesses (up to PROBE_TIMEOUT_MS each), so it gets its
+// own short TTL + in-flight coalescing on top of the general CACHE_TTL_MS cache below — otherwise
+// every getRuntimeAuthSnapshot() call inside a fresh main-cache window re-probes it unconditionally.
+let opencodeRefresh: { promise: Promise<RuntimeAuthStatus>; refreshedAt: number } | null = null;
+const OPENCODE_REFRESH_TTL_MS = 10_000;
 
 function nowStatus(
   house: RuntimeHouse,
@@ -339,6 +344,25 @@ async function detectOpencode(): Promise<RuntimeAuthStatus> {
   });
 }
 
+/**
+ * Runs detectOpencode() at most once per OPENCODE_REFRESH_TTL_MS, coalescing any callers that
+ * land inside an in-flight probe onto the same promise instead of spawning another one.
+ */
+function refreshOpencodeStatus(): Promise<RuntimeAuthStatus> {
+  const now = Date.now();
+  if (opencodeRefresh && now - opencodeRefresh.refreshedAt < OPENCODE_REFRESH_TTL_MS) {
+    return opencodeRefresh.promise;
+  }
+  const promise = detectOpencode();
+  opencodeRefresh = { promise, refreshedAt: now };
+  promise.catch(() => {
+    if (opencodeRefresh?.promise === promise) {
+      opencodeRefresh = null;
+    }
+  });
+  return promise;
+}
+
 async function detectCursor(): Promise<RuntimeAuthStatus> {
   const binaryPath = scanAndLink('cursor-agent') ?? undefined;
   if (!binaryPath) {
@@ -529,11 +553,12 @@ function suggestProfile(statuses: Record<RuntimeHouse, RuntimeAuthStatus>): Mach
 
 export function invalidateRuntimeAuthCache(): void {
   cache = null;
+  opencodeRefresh = null;
 }
 
 export async function getRuntimeAuthSnapshot(): Promise<RuntimeAuthSnapshot> {
   if (cache && Date.now() - cache.cachedAt < CACHE_TTL_MS) {
-    const opencode = await detectOpencode();
+    const opencode = await refreshOpencodeStatus();
     cache.snapshot = {
       ...cache.snapshot,
       statuses: { ...cache.snapshot.statuses, opencode },
@@ -543,6 +568,9 @@ export async function getRuntimeAuthSnapshot(): Promise<RuntimeAuthSnapshot> {
   const entries = await Promise.all(listDispatchableRuntimes().map(async (runtime) => {
     const house = getRuntimeCapability(runtime).authHouse;
     if (!house) throw new Error(`Dispatchable runtime ${runtime} has no auth house.`);
+    if (runtime === 'opencode') {
+      return [house, await refreshOpencodeStatus()] as const;
+    }
     return [house, await detectRuntimeAuthStatus(runtime)] as const;
   }));
   const statuses = Object.fromEntries(entries) as Record<RuntimeHouse, RuntimeAuthStatus>;
