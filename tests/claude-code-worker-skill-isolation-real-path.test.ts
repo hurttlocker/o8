@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import os from 'node:os';
@@ -64,6 +65,10 @@ describe('Claude Code worker skill isolation real path', () => {
       '---',
       'Load a large unrelated reference tree.',
     ].join('\n'));
+    writeFileSync(
+      path.join(fakeHome, '.claude', '.credentials.json'),
+      JSON.stringify({ claudeAiOauth: { accessToken: 'operator-real-oauth-token' } }),
+    );
 
     for (const key of [
       'HOME',
@@ -165,6 +170,16 @@ describe('Claude Code worker skill isolation real path', () => {
     expect(existsSync(configDir)).toBe(true);
     expect(existsSync(path.join(configDir, 'skills'))).toBe(false);
     expect(args).toContain('--disable-slash-commands');
+
+    // Native carrier: the isolated config dir must be seeded with a copy of
+    // the operator's real credentials (Claude Code stores OAuth creds at
+    // <config dir>/.credentials.json), so the worker doesn't spawn logged out.
+    const sourceCredentialsPath = path.join(fakeHome, '.claude', '.credentials.json');
+    const seededCredentialsPath = path.join(configDir, '.credentials.json');
+    expect(existsSync(seededCredentialsPath)).toBe(true);
+    expect(readFileSync(seededCredentialsPath, 'utf8')).toBe(readFileSync(sourceCredentialsPath, 'utf8'));
+    expect(statSync(seededCredentialsPath).mode & 0o777).toBe(0o600);
+    expect(readFileSync(sourceCredentialsPath, 'utf8')).toContain('operator-real-oauth-token');
     expect(prompt).toContain('Claude Code skills are unavailable in this dispatched worker.');
     expect(prompt).not.toContain('Load a large unrelated reference tree.');
     expect(spawnMock.mock.results[0]?.value.stdin.end).toHaveBeenCalledWith(
@@ -198,6 +213,79 @@ describe('Claude Code worker skill isolation real path', () => {
       cacheReadTokens: 40_448,
       contextTokens: 40_651,
     });
+  }, 30_000);
+
+  it('proceeds without seeding credentials when the operator has none (macOS Keychain case)', async () => {
+    const noCredsHome = path.join(tempRoot, 'operator-home-no-creds');
+    mkdirSync(path.join(noCredsHome, '.claude'), { recursive: true });
+    const noCredsRepoPath = path.join(noCredsHome, 'repo');
+    execFileSync('git', ['init', '-q', '-b', 'main', noCredsRepoPath]);
+
+    const { writeClaudeCodeWorkerProfile } = await import('@/lib/claude-code/worker-profile');
+    const { buildPacketPrompt } = await import('@/lib/orchestrator/packet-prompt');
+    const { createLane } = await import('@/lib/lane/registry');
+    const { claudeCodeRuntime } = await import('@/lib/runtimes/claude-code');
+
+    await writeClaudeCodeWorkerProfile({
+      source: 'native',
+      model: null,
+      codexModel: null,
+      repoSkillAllowlist: [],
+    });
+
+    const packetId = 'pkt-claude-no-source-credentials';
+    const packet = {
+      id: packetId,
+      referenceLabel: 'PKT-NO-CREDS',
+      title: 'Verify spawn proceeds without a source credentials file',
+      summary: 'Verify the real Claude worker launch boundary when the operator has no credentials file.',
+      status: 'draft',
+      queueState: 'queued',
+      releaseState: 'pending',
+      blockedReason: null,
+      lane: null,
+      review: null,
+      runtime: 'claude-code',
+      workspaceTargetPath: noCredsRepoPath,
+      branchTarget: 'test/no-source-credentials',
+      dependencyPacketIds: [],
+      dependencyLabels: [],
+      attemptCount: 0,
+      lastEventAt: new Date().toISOString(),
+      lastEventLabel: 'created',
+      recoveryCount: 0,
+      typecheckAutoRetries: 0,
+      orchestratorThreadId: null,
+    } as OrchestratorPacket;
+    const prompt = await buildPacketPrompt(packet, [], 'main', noCredsRepoPath);
+    const lane = createLane({
+      repoPath: noCredsRepoPath,
+      worktreePath: noCredsRepoPath,
+      branch: packet.branchTarget,
+      runtime: 'claude-code',
+      label: packet.title,
+      packetId,
+    });
+
+    const callCountBefore = spawnMock.mock.calls.length;
+    const priorHome = process.env.HOME;
+    process.env.HOME = noCredsHome;
+    let result: Awaited<ReturnType<typeof claudeCodeRuntime.launch>>;
+    try {
+      result = await claudeCodeRuntime.launch({
+        cwd: noCredsRepoPath,
+        laneId: lane.id,
+        prompt,
+      });
+    } finally {
+      process.env.HOME = priorHome;
+    }
+
+    if (!result.ok) throw new Error(result.note);
+    const [, , options] = spawnMock.mock.calls[callCountBefore]!;
+    const configDir = options.env.CLAUDE_CONFIG_DIR as string;
+    expect(existsSync(configDir)).toBe(true);
+    expect(existsSync(path.join(configDir, '.credentials.json'))).toBe(false);
   }, 30_000);
 
   it('injects only explicitly allowlisted repository skill instructions', async () => {

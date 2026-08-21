@@ -103,11 +103,11 @@ const claudeCodeOwnedAdapter: OwnedRuntimeAdapter = {
   binaryEnvOverride: 'O8_CLAUDE_CODE_BIN',
   binaryExtraEnvOverrides: ['CLAUDE_BIN'],
   extraSpawnEnv: async (session) => {
-    const isolatedConfigDir = await ensureClaudeCodeWorkerConfigDir(session.sessionDir);
     const configuredSource = session.runtimeConfig?.modelSource;
     const source = configuredSource === 'openrouter' || configuredSource === 'codex-subscription'
       ? configuredSource
       : 'native';
+    const isolatedConfigDir = await ensureClaudeCodeWorkerConfigDir(session.sessionDir, source);
     const key = source === 'openrouter' ? await resolveClaudeCodeWorkerGatewayKey() : null;
     if (source === 'openrouter' && !key) {
       throw new Error('This Claude Code worker is pinned to OpenRouter, but its API key is no longer configured. Add the key in Settings > Models > API keys before resuming it.');

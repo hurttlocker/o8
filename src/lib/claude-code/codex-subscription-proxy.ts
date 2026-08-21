@@ -12,11 +12,13 @@ import {
   rm,
   writeFile,
 } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 
 import { getDataDir } from '@/lib/data-dir-migration';
 import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
 import { browserOpenInvocation, findLatestCodexOAuthUrl } from './codex-subscription-oauth';
+import type { ClaudeCodeModelSource } from './worker-profile-types';
 
 const DEFAULT_PORT = 8317;
 const START_TIMEOUT_MS = 12_000;
@@ -311,10 +313,39 @@ export async function ensureCodexSubscriptionClaudeConfigDir(sessionDir: string)
   return ensureClaudeCodeWorkerConfigDir(sessionDir);
 }
 
-export async function ensureClaudeCodeWorkerConfigDir(sessionDir: string): Promise<string> {
+export async function ensureClaudeCodeWorkerConfigDir(
+  sessionDir: string,
+  source?: ClaudeCodeModelSource,
+): Promise<string> {
   const configDir = path.join(sessionDir, 'claude-code-worker-config');
   await mkdir(configDir, { recursive: true, mode: 0o700 });
   await chmod(configDir, 0o700);
   await rm(path.join(configDir, 'skills'), { recursive: true, force: true });
+  if (source === 'native') {
+    await seedNativeWorkerCredentials(configDir);
+  }
   return configDir;
+}
+
+// On the native carrier, the isolated config dir replaces the operator's real
+// CLAUDE_CONFIG_DIR (or ~/.claude), so a worker that spawns there is otherwise
+// logged out: Claude Code stores OAuth credentials at
+// <config dir>/.credentials.json on Linux (macOS keeps them in Keychain,
+// which is per-user and survives the config-dir swap). Copy the credentials
+// file into the isolated dir so a native worker can still authenticate.
+// Never symlink — a symlink would let a worker rewrite the operator's file.
+async function seedNativeWorkerCredentials(configDir: string): Promise<void> {
+  const sourceConfigDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+  const sourceCredentialsPath = path.join(sourceConfigDir, '.credentials.json');
+  let credentials: Buffer;
+  try {
+    credentials = await readFile(sourceCredentialsPath);
+  } catch {
+    // No credentials file to seed (e.g. macOS Keychain carries the OAuth
+    // token instead) — proceed without failing the spawn.
+    return;
+  }
+  const destCredentialsPath = path.join(configDir, '.credentials.json');
+  await writeFile(destCredentialsPath, credentials, { mode: 0o600 });
+  await chmod(destCredentialsPath, 0o600);
 }
