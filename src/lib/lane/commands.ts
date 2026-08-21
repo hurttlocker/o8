@@ -92,7 +92,10 @@ export async function raiseWorkerMergeApproval(
 
 export async function dispatch(
   command: LaneCommand,
-  dependencies: { afterWorkspaceMaterializationProof?: () => Promise<void> } = {},
+  dependencies: {
+    afterWorkspaceMaterializationProof?: () => Promise<void>;
+    repoActionLeaseMaxWaitMs?: number;
+  } = {},
 ): Promise<LaneCommandResult> {
   if (command.verb === 'merge' || command.verb === 'create_pr') {
     const lane = getLane(command.laneId);
@@ -100,7 +103,7 @@ export async function dispatch(
       try {
         return await withWorkspaceMaterializedMutation(lane, async () => {
           await dependencies.afterWorkspaceMaterializationProof?.();
-          return dispatchUnlocked(command);
+          return dispatchUnlocked(command, dependencies);
         });
       } catch (error) {
         if (error instanceof WorkspaceMutationUnavailableError) {
@@ -110,10 +113,13 @@ export async function dispatch(
       }
     }
   }
-  return dispatchUnlocked(command);
+  return dispatchUnlocked(command, dependencies);
 }
 
-async function dispatchUnlocked(command: LaneCommand): Promise<LaneCommandResult> {
+async function dispatchUnlocked(
+  command: LaneCommand,
+  dependencies: { repoActionLeaseMaxWaitMs?: number } = {},
+): Promise<LaneCommandResult> {
   const actor: LaneEventActor = command.actor ?? 'user';
 
   switch (command.verb) {
@@ -499,6 +505,7 @@ async function dispatchUnlocked(command: LaneCommand): Promise<LaneCommandResult
       return withRepoActionRecovery(lane.repoPath, {
         laneId: command.laneId,
         packetId: lane.packetId,
+        maxWaitMs: dependencies.repoActionLeaseMaxWaitMs,
       }, async () => {
         const lockedLane = getLane(command.laneId);
         if (!lockedLane) {

@@ -10,6 +10,7 @@ import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
 import { reconcileOrphanedWorktrees } from '@/lib/lane/reconcile';
 import { serverTimingHeaders } from '@/lib/performance/server-timing';
 import { resolvePacketLaunchContexts } from '@/lib/orchestrator/packet-launch-context';
+import { deriveIdempotencyKey, withIdempotency } from '@/lib/orchestrator/idempotency-store';
 import type { LaneCommand } from '@/lib/lane/types';
 
 export const runtime = 'nodejs';
@@ -84,7 +85,28 @@ export async function GET(req: NextRequest) {
   });
 }
 
-export async function POST(req: NextRequest) {
+interface LanePostExecutionOptions {
+  params?: Promise<unknown>;
+  /** Internal test seam; request bodies cannot override the production budget. */
+  repoActionLeaseMaxWaitMs?: number;
+}
+
+function createPrIdempotencyBody(command: Extract<LaneCommand, { verb: 'create_pr' }>): string {
+  return JSON.stringify({
+    laneId: command.laneId,
+    commitMessage: command.commitMessage ?? null,
+    reviewSummary: command.reviewSummary ?? null,
+    expectedDiffFingerprint: command.expectedDiffFingerprint ?? null,
+    expectedGovernanceFingerprint: command.expectedGovernanceFingerprint ?? null,
+    spokenReviewApprovalId: command.spokenReviewApprovalId ?? null,
+    spokenReviewClaimId: command.spokenReviewClaimId ?? null,
+    spokenReviewUpdatedAt: command.spokenReviewUpdatedAt ?? null,
+    spokenReviewLaneStatus: command.spokenReviewLaneStatus ?? null,
+    actor: command.actor ?? null,
+  });
+}
+
+export async function POST(req: NextRequest, options: LanePostExecutionOptions = {}) {
   const denied = requirePanelAuth(req);
   if (denied) return denied;
 
@@ -121,6 +143,33 @@ export async function POST(req: NextRequest) {
   };
 
   try {
+    if (command.verb === 'create_pr') {
+      const key = deriveIdempotencyKey({
+        verb: 'lane_create_pr',
+        scopeId: command.laneId,
+        body: createPrIdempotencyBody(command),
+      });
+      const outcome = await withIdempotency({
+        key,
+        verb: 'lane_create_pr',
+        scopeId: command.laneId,
+        attachToInFlight: true,
+      }, () => dispatch(command, {
+        repoActionLeaseMaxWaitMs: options.repoActionLeaseMaxWaitMs,
+      }));
+      if (outcome.inProgress) {
+        return NextResponse.json(outcome.result, {
+          status: 202,
+          headers: { 'Cache-Control': 'no-store, max-age=0' },
+        });
+      }
+      const result = outcome.result;
+      return NextResponse.json(result, {
+        status: result.ok ? 200 : 422,
+        headers: { 'Cache-Control': 'no-store, max-age=0' },
+      });
+    }
+
     const result = await dispatch(command);
     return NextResponse.json(result, {
       status: result.ok ? 200 : 422,

@@ -152,6 +152,11 @@ interface CompletedFallback {
   expiresAt: number;
 }
 
+// SQLite remains the authority for whether an execution may start. This map
+// only lets a duplicate request in the owning process await that execution's
+// terminal receipt instead of receiving the generic in-progress marker.
+const activeExecutions = new Map<string, Promise<IdempotencyOutcome<unknown>>>();
+
 class ReservationOwnershipLostError extends Error {}
 
 // A finalization write happens after the external side effect. If SQLite fails
@@ -313,7 +318,7 @@ function inProgressMarker<T>(verb: string, outcomeUnknown = false): T {
  * Degrades to a plain `run()` (no dedup) when the DB is unavailable — the guard
  * must never break the route.
  */
-export async function withIdempotency<T>(
+async function executeWithIdempotency<T>(
   params: {
     key: string;
     verb: string;
@@ -433,9 +438,45 @@ export async function withIdempotency<T>(
   return { replayed: false, inProgress: false, result };
 }
 
+/**
+ * Use the persisted reservation protocol, optionally attaching same-process
+ * duplicates to the owning execution so both callers receive one result.
+ */
+export async function withIdempotency<T>(
+  params: {
+    key: string;
+    verb: string;
+    scopeId: string;
+    ttlMs?: number;
+    now?: number;
+    /** Rebuild a terminal receipt from durable verb-specific side-effect truth. */
+    reconcileUnresolved?: () => Promise<T | null>;
+    /** Await the owning same-process execution instead of returning a 202 marker. */
+    attachToInFlight?: boolean;
+  },
+  run: () => Promise<T>,
+): Promise<IdempotencyOutcome<T>> {
+  if (!params.attachToInFlight) return executeWithIdempotency(params, run);
+
+  const active = activeExecutions.get(params.key);
+  if (active) {
+    const attached = await active as IdempotencyOutcome<T>;
+    return { ...attached, replayed: true };
+  }
+
+  const execution = executeWithIdempotency(params, run);
+  activeExecutions.set(params.key, execution as Promise<IdempotencyOutcome<unknown>>);
+  try {
+    return await execution;
+  } finally {
+    if (activeExecutions.get(params.key) === execution) activeExecutions.delete(params.key);
+  }
+}
+
 /** Test-only: wipe the table. */
 export function __resetIdempotencyStoreForTests(): void {
   completedFallbacks.clear();
+  activeExecutions.clear();
   try {
     getSqlite().prepare('DELETE FROM idempotency_keys').run();
   } catch {

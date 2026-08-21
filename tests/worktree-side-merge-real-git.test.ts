@@ -41,6 +41,9 @@ const {
   getResourceLeaseStore,
 } = await import('@/lib/leases/resource-lease-service');
 const { observeResourceLeaseParticipant } = await import('@/lib/leases/resource-lease-participant');
+const { getOrCreateWsToken } = await import('@/lib/ws-auth');
+const lanesRoute = await import('@/app/api/lanes/route');
+const { __resetIdempotencyStoreForTests } = await import('@/lib/orchestrator/idempotency-store');
 
 const tempDirs: string[] = [dataDir];
 
@@ -228,6 +231,7 @@ afterEach(async () => {
   try {
     await updateOperatorDefaults({ productTelemetryEnabled: false });
     writeOrchestratorControlPlaneState(createEmptyOrchestratorMissionState());
+    __resetIdempotencyStoreForTests();
   } finally {
     for (const dir of tempDirs.splice(1)) {
       rmSync(dir, { recursive: true, force: true });
@@ -445,6 +449,124 @@ describe('worktree-side merge with real git repos', () => {
       }
     }
   }, 10_000);
+
+  it('deduplicates concurrent create_pr route recovery behind one persisted lane key', async () => {
+    const { repo, root } = makeRepo('o8-create-pr-idempotent-recovery');
+    const worktree = await makeWorktree(repo, 'pkt-create-pr-idempotent', 'inline/create-pr-idempotent');
+    writeFileSync(join(worktree.path, 'worker.txt'), 'worker\n');
+    commitAll(worktree.path, 'worker change');
+    const lane = createLane({
+      repoPath: repo,
+      worktreePath: worktree.path,
+      branch: 'inline/create-pr-idempotent',
+      baseBranch: 'main',
+      runtime: 'codex',
+      label: 'Idempotent PR recovery',
+    });
+
+    const binDir = join(root, 'bin');
+    const ghMarker = join(root, 'gh-invocations');
+    mkdirSync(binDir, { recursive: true });
+    writeFileSync(join(binDir, 'gh'), [
+      '#!/bin/sh',
+      `marker=${JSON.stringify(ghMarker)}`,
+      'if [ -e "$marker" ]; then',
+      '  echo "duplicate create_pr execution" >&2',
+      '  exit 9',
+      'fi',
+      'printf "1\\n" > "$marker"',
+      'printf "https://example.test/pull/314\\n"',
+      '',
+    ].join('\n'));
+    chmodSync(join(binDir, 'gh'), 0o755);
+
+    const holder = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+    expect(holder.pid).toBeTypeOf('number');
+    const participant = await observeResourceLeaseParticipant({
+      owner: { id: 'slow-create-pr-holder', label: 'slow-create-pr-holder', pid: holder.pid! },
+      actor: 'operator',
+      claimToken: 'slow-create-pr-holder-ffffffffffffffffffffffffff',
+    });
+    await getResourceLeaseStore().acquire({
+      resource: `repo-tree:${repo}`,
+      participant,
+      ttlMs: 60_000,
+    });
+
+    const originalPath = process.env.PATH;
+    process.env.PATH = `${binDir}:${originalPath ?? ''}`;
+    const makeRequest = () => new Request('http://o8.test/api/lanes', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${getOrCreateWsToken()}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ verb: 'create_pr', laneId: lane.id, actor: 'user' }),
+    }) as import('next/server').NextRequest;
+
+    try {
+      const firstResponse = lanesRoute.POST(makeRequest(), { repoActionLeaseMaxWaitMs: 200 });
+      await waitFor(() => {
+        const row = getSqlite().prepare(`
+          SELECT COUNT(*) AS count FROM resource_lease_events
+          WHERE resource = ? AND verb = 'wait_enqueued' AND actor = 'system:repo-action'
+        `).get(`repo-tree:${repo}`) as { count: number };
+        return row.count === 1;
+      });
+      const secondResponse = lanesRoute.POST(makeRequest(), { repoActionLeaseMaxWaitMs: 200 });
+
+      await waitFor(() => getLaneEvents(lane.id).some((event) => event.verb === 'lease_wait_timeout'));
+      const exited = once(holder, 'exit');
+      holder.kill('SIGKILL');
+      await exited;
+
+      const [first, second] = await Promise.all([firstResponse, secondResponse]);
+      const [firstBody, secondBody] = await Promise.all([first.json(), second.json()]);
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      expect(secondBody).toEqual(firstBody);
+      expect(firstBody).toMatchObject({
+        ok: true,
+        laneId: lane.id,
+        note: 'PR created: https://example.test/pull/314',
+      });
+      expect(readFileSync(ghMarker, 'utf8')).toBe('1\n');
+
+      const leaseEvents = getSqlite().prepare(`
+        SELECT verb FROM resource_lease_events
+        WHERE resource = ? AND actor = 'system:repo-action'
+        ORDER BY sequence ASC
+      `).all(`repo-tree:${repo}`) as Array<{ verb: string }>;
+      const waiterEvents = leaseEvents.filter((event) => event.verb === 'wait_enqueued');
+      expect(waiterEvents.length).toBeGreaterThanOrEqual(1);
+      expect(waiterEvents.length).toBeLessThanOrEqual(2);
+      expect(leaseEvents.filter((event) => event.verb === 'wait_timed_out')).toHaveLength(1);
+      expect(leaseEvents.filter((event) => event.verb === 'acquired')).toHaveLength(1);
+      expect(leaseEvents.filter((event) => event.verb === 'released')).toHaveLength(1);
+
+      const laneEvents = getLaneEvents(lane.id);
+      expect(laneEvents.filter((event) => event.verb === 'lease_wait_timeout')).toMatchObject([
+        { payload: { retryCount: 0, willRetry: true } },
+      ]);
+      expect(laneEvents.filter((event) =>
+        event.verb === 'status_change' && event.payload.status === 'recovering'
+      )).toHaveLength(1);
+      expect(laneEvents.filter((event) =>
+        event.verb === 'status_change' && event.payload.status === 'reviewing'
+      )).toHaveLength(1);
+      expect(laneEvents.some((event) =>
+        event.verb === 'status_change' && event.payload.status === 'awaiting_orchestrator'
+      )).toBe(false);
+    } finally {
+      if (originalPath === undefined) delete process.env.PATH;
+      else process.env.PATH = originalPath;
+      if (holder.exitCode === null && holder.signalCode === null) {
+        const exited = once(holder, 'exit');
+        holder.kill('SIGKILL');
+        await exited;
+      }
+    }
+  }, 20_000);
 
   it('lets a second real merge wait beyond five seconds for the repo-tree lease', async () => {
     const { repo } = makeRepo('o8-merge-lease-long-wait');

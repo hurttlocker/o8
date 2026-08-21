@@ -409,6 +409,70 @@ describe('persisted idempotency — steer_packet through the real route', () => 
 });
 
 describe('persisted idempotency store finalization safety', () => {
+  it('attaches a same-process duplicate to the owning terminal result', async () => {
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    let executions = 0;
+    const params = {
+      key: 'attached-in-flight:test',
+      verb: 'attached_in_flight_test',
+      scopeId: 'attached-in-flight',
+      attachToInFlight: true,
+    };
+
+    const firstPromise = idempotency.withIdempotency(params, async () => {
+      executions += 1;
+      await blocked;
+      return { ok: true, receipt: 'one-result' };
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const duplicatePromise = idempotency.withIdempotency(params, async () => {
+      executions += 1;
+      return { ok: false, receipt: 'duplicate-execution' };
+    });
+
+    release();
+    const [first, duplicate] = await Promise.all([firstPromise, duplicatePromise]);
+    expect(first).toMatchObject({ replayed: false, inProgress: false });
+    expect(duplicate).toEqual({ ...first, replayed: true, inProgress: false });
+    expect(executions).toBe(1);
+  });
+
+  it('preserves an in-progress result when local callers attach to a persisted owner', async () => {
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    let executions = 0;
+    const params = {
+      key: 'attached-persisted-owner:test',
+      verb: 'attached_persisted_owner_test',
+      scopeId: 'attached-persisted-owner',
+    };
+    const owner = idempotency.withIdempotency(params, async () => {
+      executions += 1;
+      await blocked;
+      return { ok: true };
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const firstDuplicate = idempotency.withIdempotency({ ...params, attachToInFlight: true }, async () => {
+      executions += 1;
+      return { ok: false };
+    });
+    const attachedDuplicate = idempotency.withIdempotency({ ...params, attachToInFlight: true }, async () => {
+      executions += 1;
+      return { ok: false };
+    });
+    try {
+      const [first, attached] = await Promise.all([firstDuplicate, attachedDuplicate]);
+      expect(first).toMatchObject({ replayed: true, inProgress: true });
+      expect(attached).toMatchObject({ replayed: true, inProgress: true });
+      expect(executions).toBe(1);
+    } finally {
+      release();
+      await owner;
+    }
+  });
+
   it('preserves a live reservation past its TTL so a second execution cannot reserve', async () => {
     let release!: () => void;
     const blocked = new Promise<void>((resolve) => { release = resolve; });
