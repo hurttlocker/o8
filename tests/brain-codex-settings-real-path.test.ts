@@ -62,4 +62,28 @@ describe('Engineering Brain Codex settings real path', () => {
     expect(args).toContain('-c');
     expect(args[args.indexOf('-c') + 1]).toBe('model_reasoning_effort=xhigh');
   }, 15_000);
+
+  // Acceptance check 5 (#1775): an unsupported model must fail VISIBLY at the
+  // settings surface and must never reach the Codex launch path — the QA
+  // cascade keeps serving the previously-configured route.
+  it('rejects an invalid model visibly and keeps serving the configured route', async () => {
+    const { POST } = await import('@/app/api/panel/operator-defaults/route');
+    const rejected = await POST(new Request('http://127.0.0.1/api/panel/operator-defaults', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ brainCodexModel: 'gpt-9-bogus' }),
+    }));
+    expect(rejected.status).toBe(400);
+    const payload = (await rejected.json()) as { error?: string };
+    expect(payload.error).toContain('unsupported');
+    expect(payload.error).toContain('valid values');
+
+    // Rejected write changed nothing — the next Brain ask still launches the
+    // previously-configured model instead of inheriting the bogus id.
+    const { callCodex, resetCodexProviderCache } = await import('@/lib/cortex/qa/llm/codex-adapter');
+    resetCodexProviderCache();
+    await expect(callCodex('Does the route survive a bad write?')).resolves.toBe('Configured Brain answer.');
+    const args = JSON.parse(readFileSync(argsPath, 'utf8')) as string[];
+    expect(args[args.indexOf('--model') + 1]).toBe('gpt-5.6-terra');
+  }, 15_000);
 });
