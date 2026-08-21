@@ -3,12 +3,16 @@ import { parseCost } from './shared/cost-parser-registry';
 import type { RuntimeTelemetry } from './types';
 
 export async function readClaudeRuntimeTelemetry(jsonlPath: string): Promise<RuntimeTelemetry | undefined> {
-  const sessionCost = await parseCost('claude-code', [jsonlPath]);
+  return readClaudeRuntimeTelemetryFromPaths([jsonlPath]);
+}
+
+export async function readClaudeRuntimeTelemetryFromPaths(jsonlPaths: string[]): Promise<RuntimeTelemetry | undefined> {
+  const sessionCost = await parseCost('claude-code', jsonlPaths);
   if (!sessionCost) return undefined;
 
   // Cost includes native child-agent transcripts. Context pressure remains
   // parent-only because child internals never entered the parent prompt.
-  const parentContextCost = await parseSessionCost(jsonlPath, {
+  const parentContextCost = await parseSessionCost(jsonlPaths.at(-1)!, {
     includeChildSessions: false,
   });
   return {
@@ -21,6 +25,7 @@ export async function readClaudeRuntimeTelemetry(jsonlPath: string): Promise<Run
       + parentContextCost.cacheReadTokens
       + parentContextCost.cacheWriteTokens,
     estimatedCostUsd: sessionCost.totalCostUsd,
+    costSource: 'estimate',
     inputTokens: sessionCost.inputTokens,
     outputTokens: sessionCost.outputTokens,
     cacheReadTokens: sessionCost.cacheReadTokens,

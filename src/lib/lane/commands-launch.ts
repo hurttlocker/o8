@@ -150,6 +150,7 @@ export async function launchSession(
       skipSetup: true,
       existingLaneId: command.laneId,
       packetId: lane.packetId ?? undefined,
+      spendCap: command.spendCap,
       storageAdmissionReservationId: command.storageAdmissionReservationId,
     });
 

@@ -3,6 +3,7 @@ import { normalizeClaudeCodePacketPins, normalizeDecompositionMetadata, normaliz
 import { normalizeRuntimeStatusToOrchestratorStatus } from '@/lib/orchestrator/runtime-status';
 import { runtimeTruthHasActiveWriter } from '@/lib/orchestrator/runtime-truth';
 import { normalizePacketRecovery } from '@/lib/lane/recovery-info';
+import { normalizePacketSpendCap, normalizePacketSpendTelemetry } from '@/lib/orchestrator/metered-spend';
 import { normalizeQualitySearchPacketState } from '@/lib/orchestrator/quality-search';
 import { normalizePacketStorageAdmission, normalizePacketStorageAdmissionEpoch } from '@/lib/orchestrator/packet-storage-admission-normalize';
 import { hydrateOrchestratorTurnPinEntry, installOrchestratorTurnPinFetchPatch, persistOrchestratorTurnPin, readCachedOrchestratorTurnPin, stageOrchestratorTurnPin } from '@/lib/orchestrator/turn-pins';
@@ -378,17 +379,16 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     maxAttempts: normalizeMaxAttempts(packet.maxAttempts),
     recoveryCount: normalizeAttemptCount(packet.recoveryCount),
     lastRecoveryAt: typeof packet.lastRecoveryAt === 'string' ? packet.lastRecoveryAt : null,
-    // Packet-stored control counters MUST be preserved here — this is the single
-    // normalize chokepoint every read/write funnels through, and an omitted field
-    // is silently dropped on the next round-trip. Typecheck and lease-wait budgets
+    // Packet-stored control counters MUST survive this normalize chokepoint;
+    // omitted fields are silently dropped. Typecheck and lease-wait budgets
     // have event fallbacks, but persistence keeps the packet lifecycle honest;
-    // stallRetries and operatorStopped live ONLY on the packet, so dropping them
-    // would reset the stall cap and make a Stop forget itself on the next read.
+    // stallRetries/operatorStopped live only here; dropping them resets their guards.
     typecheckAutoRetries: normalizeAttemptCount(packet.typecheckAutoRetries),
     leaseWaitAutoRetries: normalizeAttemptCount(packet.leaseWaitAutoRetries),
     stallRetries: normalizeAttemptCount(packet.stallRetries),
     launchAttempts: normalizeAttemptCount(packet.launchAttempts),
     operatorStopped: packet.operatorStopped === true ? true : undefined,
+    spendCap: normalizePacketSpendCap(packet.spendCap), spendTelemetry: normalizePacketSpendTelemetry(packet.spendTelemetry),
     // Huddle mode (per-mission alignment turn) lives only on the packet — drop
     // it here and a rerun/re-read would silently disarm the huddle.
     huddle: typeof packet.huddle === 'boolean' ? packet.huddle : undefined,

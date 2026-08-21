@@ -752,6 +752,7 @@ export async function getMissionStatus(input: MissionStatusInput) {
         blockedBy: node.blockedBy,
         blockedReason: packet.blockedReason ?? null,
         storageAdmission: packet.storageAdmission ?? null,
+        spendCap: packet.spendCap ?? null, spendTelemetry: packet.spendTelemetry ?? null,
         recovery,
         lane: lane ? {
           laneId: lane.id,

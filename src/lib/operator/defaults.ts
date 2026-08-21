@@ -80,6 +80,7 @@ import {
 } from './defaults-env';
 import { applyStorageReserveUpdate, resolveStorageReserveSettings, resolveStoredStorageReserve, STORAGE_RESERVE_FALLBACK, type StorageReserveDefaults } from './storage-reserve-defaults';
 import { applyWorkspaceParkingUpdate, resolveStoredWorkspaceParking, resolveWorkspaceParkingSettings, WORKSPACE_PARKING_FALLBACK, type WorkspaceParkingDefaults } from './workspace-parking-defaults';
+import { applyMeteredPacketCapUpdate, METERED_PACKET_CAP_FALLBACK, resolveMeteredPacketCapSettings, resolveStoredMeteredPacketCap, type MeteredPacketCapDefaults } from './metered-packet-cap-defaults';
 import {
   applyOperatorDefaultsTomlWithLock,
   getOperatorDefaultsTomlState as readOperatorDefaultsTomlState,
@@ -92,7 +93,6 @@ import {
   type OperatorDefaultsTomlState,
 } from '@/lib/settings/operator-defaults-store';
 export { getOperatorDefaultsTomlPath } from '@/lib/settings/operator-defaults-store';
-
 export { isOrchestratorBackendSetting, isReviewerBackendSetting, isCollideAggregator, isPrLinkDestination } from './defaults-env';
 export type {
   OverlapGateMode,
@@ -116,9 +116,7 @@ export {
  * Operator defaults — the dispatch/supervision knobs exposed in Settings
  * (one field per knob in {@link OperatorDefaults}; the count grows, don't
  * hardcode it in docs).
- *
  * Resolution order (every knob): env var > persisted file > hardcoded fallback.
- *
  * Canonical file: `~/.o8/settings.toml`. The legacy
  * `operator-defaults.json` remains a synchronized last-good fallback so an
  * invalid hand edit never prevents startup.
@@ -126,13 +124,12 @@ export {
  * read — a stale copy of this file there silently does nothing (bit the
  * operator flow 2026-07-07; always verify against getOperatorDefaultsPath()).
  */
-
 export type SettingSource = 'env' | 'file' | 'default';
 export type RequireApproval = 'high-risk' | 'surface' | 'always' | 'never';
 
 export function isRequireApproval(value: unknown): value is RequireApproval { return value === 'high-risk' || value === 'surface' || value === 'always' || value === 'never'; }
 
-export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParkingDefaults, ApfsDependencyImagesDefaults {
+export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParkingDefaults, ApfsDependencyImagesDefaults, MeteredPacketCapDefaults {
   subscriptionProfile: SubscriptionProfile;
   parallelCap: number;
   overlapGate: OverlapGateMode;
@@ -336,7 +333,6 @@ export interface OperatorDefaultsWithSources {
 }
 
 // ── Hardcoded fallbacks (the "locked defaults") ──
-
 export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   subscriptionProfile: 'both',
   parallelCap: 5,
@@ -411,9 +407,9 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   worktreeMaxTotalGb: 20,
   ...STORAGE_RESERVE_FALLBACK,
   ...WORKSPACE_PARKING_FALLBACK,
+  ...METERED_PACKET_CAP_FALLBACK,
 };
-
-interface StoredOperatorDefaults extends Partial<StorageReserveDefaults>, Partial<WorkspaceParkingDefaults>, Partial<ApfsDependencyImagesDefaults> {
+interface StoredOperatorDefaults extends Partial<StorageReserveDefaults>, Partial<WorkspaceParkingDefaults>, Partial<ApfsDependencyImagesDefaults>, Partial<MeteredPacketCapDefaults> {
   subscriptionProfile?: SubscriptionProfile;
   parallelCap?: number;
   overlapGate?: OverlapGateMode;
@@ -632,7 +628,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (typeof stored.worktreeMaxTotalGb === 'number' && Number.isFinite(stored.worktreeMaxTotalGb) && stored.worktreeMaxTotalGb >= 0) {
     result.worktreeMaxTotalGb = stored.worktreeMaxTotalGb;
   }
-  Object.assign(result, resolveStoredStorageReserve(stored), resolveStoredWorkspaceParking(stored));
+  Object.assign(result, resolveStoredStorageReserve(stored), resolveStoredWorkspaceParking(stored), resolveStoredMeteredPacketCap(stored));
   const storedTriage = coerceStoredTier(stored.targetingTriage, OPERATOR_DEFAULTS_FALLBACK.targetingTriage);
   if (storedTriage) result.targetingTriage = storedTriage;
   const storedAction = coerceStoredTier(stored.targetingAction, OPERATOR_DEFAULTS_FALLBACK.targetingAction);
@@ -643,6 +639,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
 // ── Resolution ──
 
 function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWithSources {
+  const meteredPacketCap = resolveMeteredPacketCapSettings(fileValues);
   const envProfile = envSubscriptionProfile();
   const envCap = envParallelCap();
   const envGate = envOverlapGate();
@@ -770,6 +767,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     worktreeMaxTotalGb: envWtSize ?? fileValues.worktreeMaxTotalGb ?? OPERATOR_DEFAULTS_FALLBACK.worktreeMaxTotalGb,
     ...storageReserve.values,
     ...workspaceParking.values,
+    ...meteredPacketCap.values,
   };
 
   const sources: Record<keyof OperatorDefaults, SettingSource> = {
@@ -835,6 +833,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     worktreeMaxTotalGb: envWtSize !== null ? 'env' : fileValues.worktreeMaxTotalGb !== undefined ? 'file' : 'default',
     ...storageReserve.sources,
     ...workspaceParking.sources,
+    ...meteredPacketCap.sources,
   };
 
   return { values: resolved, sources };
@@ -1110,6 +1109,7 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>): Pr
   }
   applyStorageReserveUpdate(stored, update);
   applyWorkspaceParkingUpdate(stored, update);
+  applyMeteredPacketCapUpdate(stored, update);
   if (update.targetingTriage !== undefined) {
     if (!isTargetingTier(update.targetingTriage)) {
       throw new Error('targetingTriage must be { runtime: dispatch-runtime, model: string, effort: thinking-effort }.');

@@ -4,6 +4,7 @@ import { resolveRuntimeSessionIdentityId } from '@/lib/runtime/session-identity'
 import { runtimeIdFromSessionKey } from '@/lib/runtime/transcript';
 import { isOrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import type { OrchestratorMissionState, OrchestratorPacket, OrchestratorRuntime } from '@/lib/orchestrator/types';
+import type { PacketCostSource } from '@/lib/orchestrator/metered-spend';
 
 export interface PacketCostSummary {
   packetId: string;
@@ -15,6 +16,7 @@ export interface PacketCostSummary {
   outputTokens: number;
   totalCostUsd: number;
   hasTelemetry: boolean;
+  costSource: PacketCostSource;
 }
 
 export interface RuntimeTokenSummary {
@@ -61,6 +63,7 @@ type CachedTelemetrySummary = {
   totalCostUsd: number;
   model: string | null;
   hasTelemetry: boolean;
+  costSource: PacketCostSource;
 };
 
 type AttributedSessionCost = CachedTelemetrySummary & {
@@ -102,6 +105,7 @@ function buildEmptyPacketCostSummary(
     outputTokens: 0,
     totalCostUsd: 0,
     hasTelemetry: false,
+    costSource: 'unknown',
   };
 }
 
@@ -189,6 +193,7 @@ async function resolveSessionTelemetry(
           totalCostUsd: roundUsd(toFiniteNumber(telemetry.estimatedCostUsd)),
           model: telemetry.model?.trim() || null,
           hasTelemetry: true,
+          costSource: telemetry.costSource ?? 'estimate',
         };
       }
     } catch (error) {
@@ -206,6 +211,7 @@ async function resolveSessionTelemetry(
         totalCostUsd: 0,
         model: null,
         hasTelemetry: false,
+        costSource: 'unknown',
       });
   cache.set(sessionKey, next);
   return next;
@@ -242,6 +248,7 @@ async function resolvePacketTelemetry(
   let outputTokens = 0;
   let totalCostUsd = 0;
   let hasTelemetry = false;
+  const costSources = new Set<PacketCostSource>();
   const sessionCosts: AttributedSessionCost[] = [];
 
   for (const candidate of candidates) {
@@ -255,6 +262,7 @@ async function resolvePacketTelemetry(
     outputTokens += telemetry.outputTokens;
     totalCostUsd += telemetry.totalCostUsd;
     hasTelemetry = hasTelemetry || telemetry.hasTelemetry;
+    if (telemetry.hasTelemetry) costSources.add(telemetry.costSource);
     if (telemetry.model) models.add(telemetry.model);
     if (telemetry.identityId) identityIds.add(telemetry.identityId);
   }
@@ -268,6 +276,7 @@ async function resolvePacketTelemetry(
       outputTokens,
       totalCostUsd: roundUsd(totalCostUsd),
       hasTelemetry,
+      costSource: costSources.has('estimate') ? 'estimate' : costSources.has('gateway') ? 'gateway' : 'unknown',
     },
     sessionCosts,
   };
@@ -324,6 +333,7 @@ export async function aggregateMissionCost(
         totalCostUsd: 0,
         model: null,
         hasTelemetry: false,
+        costSource: 'unknown',
         packetId: null,
         sessionKey,
         runtime,

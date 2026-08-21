@@ -214,6 +214,14 @@ export const STATUS_TOOLS: McpTool[] = [
           type: 'number',
           description: 'Max packets running in parallel (1-32).',
         },
+        meteredPacketCostCapUsd: {
+          type: 'number',
+          description: 'Maximum authoritative gateway spend in USD for one metered packet. Default 1.',
+        },
+        meteredPacketInputTokenCap: {
+          type: 'number',
+          description: 'Fallback input-token cap when a metered gateway does not report cost. Default 500000.',
+        },
         defaultDispatchRuntime: {
           type: 'string',
           enum: listDispatchableRuntimes(),
@@ -278,6 +286,8 @@ const OPERATOR_DEFAULTS_KEYS = [
   'brainCodexEffort',
   'overlapGate',
   'parallelCap',
+  'meteredPacketCostCapUsd',
+  'meteredPacketInputTokenCap',
   'defaultDispatchRuntime',
   'defaultDispatchModel',
   'opencodeOrchestratorModel',
@@ -432,6 +442,7 @@ export async function handleStatus(args: Record<string, unknown>): Promise<McpTo
       ? (rawApprovals as Record<string, unknown>).count as number
       : approvalItems.length;
     const recentActivity = (data.recentActivity ?? []) as Array<Record<string, unknown>>;
+    const spendCapHits = (data.spendCapHits ?? []) as Array<Record<string, unknown>>;
 
     // #1476 lie 1 — the summary must be derived from the SAME agents array
     // this payload ships. Trusting the API's summary string let the two
@@ -451,6 +462,7 @@ export async function handleStatus(args: Record<string, unknown>): Promise<McpTo
         approvals: approvalItems,
         approvalCount,
         recentActivity,
+        spendCapHits,
       },
     });
   } catch (err) {

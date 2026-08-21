@@ -126,6 +126,7 @@ interface LaunchedDispatchResult {
   sessionKey: string | null;
   workerRouting: WorkerRouting;
   storageAdmission: PacketStorageAdmissionReceipt;
+  spendCap?: import('@/lib/orchestrator/metered-spend').PacketSpendCap;
 }
 
 type DispatchResult = AwaitingReviewDispatchResult | LaunchedDispatchResult;
@@ -272,6 +273,7 @@ async function dispatchOrRecoverPacket(
     sessionKey: launchResult.sessionKey,
     workerRouting: launchResult.workerRouting,
     storageAdmission: launchResult.storageAdmission,
+    spendCap: launchResult.spendCap,
   };
 }
 
@@ -674,6 +676,7 @@ export async function runDispatchTick(
               status: 'launching',
               blockedReason: null,
               storageAdmission: result.value.storageAdmission,
+              spendCap: result.value.spendCap,
               lane: createLaneBinding(candidate, result.value.laneId, result.value.sessionKey, workerRouting),
             };
           }

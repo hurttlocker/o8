@@ -55,6 +55,8 @@ export interface TargetingTierUI {
 export interface OperatorDefaults {
   subscriptionProfile: SubscriptionProfile;
   parallelCap: number;
+  meteredPacketCostCapUsd: number;
+  meteredPacketInputTokenCap: number;
   overlapGate: OverlapGateMode;
   healBotEnabled: boolean;
   supervisorAutoEscalate: boolean;

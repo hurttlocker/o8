@@ -19,6 +19,7 @@ export interface PersistSessionCostInput {
   repoPath: string;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+  costSource?: 'gateway' | 'estimate' | 'unknown';
 }
 
 export interface PersistedSessionCost {
@@ -26,6 +27,7 @@ export interface PersistedSessionCost {
   outputTokens: number;
   totalCostUsd: number;
   model: string | null;
+  costSource: 'gateway' | 'estimate';
 }
 
 function billingPeriodFor(date = new Date()) {
@@ -55,6 +57,7 @@ export function readPersistedSessionCost(sessionKey: string): PersistedSessionCo
       outputTokens: usageLogs.outputTokens,
       costUsd: usageLogs.costUsd,
       model: usageLogs.model,
+      provider: usageLogs.provider,
     })
     .from(usageLogs)
     .where(eq(usageLogs.sessionKey, normalized))
@@ -66,13 +69,15 @@ export function readPersistedSessionCost(sessionKey: string): PersistedSessionCo
     outputTokens: normalizeTokenCount(row.outputTokens),
     totalCostUsd: normalizeUsd(row.costUsd),
     model: row.model?.trim() || null,
+    costSource: row.provider === 'openrouter' ? 'gateway' : 'estimate',
   };
 }
 
 // Problem C — exhaustive dispatch switch: maps runtime → billing provider.
 // Each runtime routes to a different payment provider (anthropic/openai/google).
 // Add a new runtime case here when adding a new adapter. Never collapse to a label lookup.
-function providerForRuntime(runtime: string): UsageProvider {
+function providerForRuntime(runtime: string, costSource?: PersistSessionCostInput['costSource']): UsageProvider {
+  if (costSource === 'gateway') return 'openrouter';
   if (runtime === 'claude-code') {
     return 'anthropic';
   }
@@ -106,7 +111,7 @@ export async function persistSessionCost(input: PersistSessionCostInput): Promis
     return false;
   }
 
-  const provider = providerForRuntime(input.runtime);
+  const provider = providerForRuntime(input.runtime, input.costSource);
   const existing = db
     .select({
       id: usageLogs.id,
@@ -115,6 +120,7 @@ export async function persistSessionCost(input: PersistSessionCostInput): Promis
       cacheReadTokens: usageLogs.cacheReadTokens,
       cacheWriteTokens: usageLogs.cacheWriteTokens,
       costUsd: usageLogs.costUsd,
+      provider: usageLogs.provider,
     })
     .from(usageLogs)
     .where(eq(usageLogs.sessionKey, sessionKey))
@@ -123,12 +129,16 @@ export async function persistSessionCost(input: PersistSessionCostInput): Promis
   if (existing) {
     db.update(usageLogs).set({
       model: input.model?.trim() || input.runtime,
-      provider,
+      provider: existing.provider === 'openrouter' && input.costSource !== 'gateway' ? 'openrouter' : provider,
       inputTokens: Math.max(normalizeTokenCount(existing.inputTokens), normalizeTokenCount(input.inputTokens)),
       outputTokens: Math.max(normalizeTokenCount(existing.outputTokens), normalizeTokenCount(input.outputTokens)),
       cacheReadTokens: Math.max(normalizeTokenCount(existing.cacheReadTokens), normalizeTokenCount(input.cacheReadTokens)),
       cacheWriteTokens: Math.max(normalizeTokenCount(existing.cacheWriteTokens), normalizeTokenCount(input.cacheWriteTokens)),
-      costUsd: Math.max(normalizeUsd(existing.costUsd), normalizeUsd(input.costUsd)),
+      costUsd: input.costSource === 'gateway'
+        ? normalizeUsd(input.costUsd)
+        : existing.provider === 'openrouter'
+          ? normalizeUsd(existing.costUsd)
+          : Math.max(normalizeUsd(existing.costUsd), normalizeUsd(input.costUsd)),
       repoPath: resolve(input.repoPath),
       agentName: agentNameForRuntime(input.runtime),
       billingPeriod: billingPeriodFor(),
@@ -175,7 +185,7 @@ export async function persistRuntimeSessionCost(input: {
       return false;
     }
 
-    return persistSessionCost({
+    const persisted = await persistSessionCost({
       sessionKey: input.sessionKey,
       runtime: input.runtime,
       model: telemetry.model,
@@ -185,7 +195,26 @@ export async function persistRuntimeSessionCost(input: {
       repoPath: input.repoPath,
       cacheReadTokens: telemetry.cacheReadTokens,
       cacheWriteTokens: telemetry.cacheWriteTokens,
+      costSource: telemetry.costSource,
     });
+    if (persisted) {
+      const { getLaneEvents, listLanes } = await import('@/lib/lane/registry');
+      const lane = listLanes().find((candidate) => candidate.sessionKey === input.sessionKey && candidate.packetId);
+      if (lane?.packetId) {
+        const { patchMissionPacket } = await import('@/lib/orchestrator/operator-mission-service/packet-patch');
+        await patchMissionPacket(lane.packetId, {
+          spendTelemetry: {
+            costUsd: finiteNumber(telemetry.estimatedCostUsd),
+            inputTokens: normalizeTokenCount(telemetry.inputTokens),
+            outputTokens: normalizeTokenCount(telemetry.outputTokens),
+            costSource: telemetry.costSource ?? 'estimate',
+            capHit: getLaneEvents(lane.id, 200).some((event) => event.verb === 'spend_cap_hit'),
+            updatedAt: new Date().toISOString(),
+          },
+        });
+      }
+    }
+    return persisted;
   } catch (error) {
     console.error(`${LOG_PREFIX} Failed to persist runtime session cost for ${input.sessionKey}.`, error);
     return false;

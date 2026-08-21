@@ -298,6 +298,8 @@ describe('MCP operator defaults and dispatch routing', () => {
       brainCodexEffort: expect.any(Object),
       brainUseClaudeCli: expect.any(Object),
       defaultDispatchModel: expect.any(Object),
+      meteredPacketCostCapUsd: expect.any(Object),
+      meteredPacketInputTokenCap: expect.any(Object),
       workersUseBrain: expect.any(Object),
       crossHouseWorkerFallback: expect.any(Object),
       requireApproval: expect.objectContaining({
@@ -311,6 +313,8 @@ describe('MCP operator defaults and dispatch routing', () => {
       brainCodexEffort: 'xhigh',
       codexWorkerEffort: 'xhigh',
       requireApproval: 'always',
+      meteredPacketCostCapUsd: 0.75,
+      meteredPacketInputTokenCap: 400_000,
     });
     expect(result.isError).not.toBe(true);
     expect(resultJson(result).values).toMatchObject({
@@ -319,6 +323,8 @@ describe('MCP operator defaults and dispatch routing', () => {
       brainCodexEffort: 'xhigh',
       codexWorkerEffort: 'xhigh',
       requireApproval: 'always',
+      meteredPacketCostCapUsd: 0.75,
+      meteredPacketInputTokenCap: 400_000,
     });
 
     const { getOperatorDefaults } = await import('@/lib/operator/defaults');
@@ -328,6 +334,8 @@ describe('MCP operator defaults and dispatch routing', () => {
       brainCodexEffort: 'xhigh',
       codexWorkerEffort: 'xhigh',
       requireApproval: 'always',
+      meteredPacketCostCapUsd: 0.75,
+      meteredPacketInputTokenCap: 400_000,
     });
   }, 15_000);
 
@@ -500,7 +508,7 @@ describe('MCP operator defaults and dispatch routing', () => {
     const [, , spawnOptions] = spawnMock.mock.calls[0]!;
     expect(spawnedArgv()).toContain('gateway/model-y');
     expect(spawnOptions.env).toMatchObject({
-      ANTHROPIC_BASE_URL: 'https://openrouter.ai/api',
+      ANTHROPIC_BASE_URL: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\//),
       ANTHROPIC_AUTH_TOKEN: 'packet-carrier-token',
       ANTHROPIC_MODEL: 'gateway/model-y',
     });

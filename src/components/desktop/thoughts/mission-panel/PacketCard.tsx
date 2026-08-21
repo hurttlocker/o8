@@ -22,6 +22,7 @@ import { PacketTabStrip, type PacketTabId } from '@/components/desktop/orchestra
 import { LivingAgentPanel } from '@/components/desktop/orchestrator/LivingAgentPanel';
 import { AgentStatusDot, agentStatusToDotState } from '@/components/desktop/AgentStatusDot';
 import { packetVisualState } from '@/components/desktop/repo-focus/utils';
+import { PacketSpendLine } from './PacketSpendLine';
 
 interface PacketCardProps {
   packet: OrchestratorPacket;
@@ -47,12 +48,10 @@ interface PacketCardProps {
   onStop?: () => void;
   onOpenReviewDiff?: () => void;
 }
-
-// #517 — Packets that belong to a best-of-n comparison group render via
+// Packets that belong to a best-of-n comparison group render via
 // ComparisonCard at the ThoughtsMissionPanel level. PacketCard is the
-// single-packet path; guard here as defense in depth so a misplaced packet
+// single-packet path; guard here so a misplaced packet
 // never flashes as a rogue single-card row.
-
 export function PacketCard({
   packet,
   allPackets,
@@ -681,6 +680,7 @@ export function PacketCard({
       ) : (
         <div style={{ padding: '0 14px 8px', display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>{runtimeMeta.label}</span>
+          <PacketSpendLine packet={packet} />
           {targetLabel ? <><span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>·</span><span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>{targetLabel}</span></> : null}
           {packet.lane ? <><span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>·</span><span style={{ fontSize: 10, color: '#22c55e', fontWeight: 400 }}>Live</span></> : null}
           {packet.lane?.laneId ? <><span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>·</span><span style={{ fontSize: 10, color: 'var(--t-text-muted)', fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)' }}>{packet.lane.laneId.slice(0, 12)}</span></> : null}

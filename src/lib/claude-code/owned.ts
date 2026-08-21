@@ -24,6 +24,9 @@ import {
   resolveClaudeCodeWorkerSelection,
 } from '@/lib/claude-code/worker-profile';
 import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
+import type { PacketSpendCap } from '@/lib/orchestrator/metered-spend';
+import { prepareMeteredGatewaySession } from '@/lib/claude-code/metered-gateway';
+import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 import {
   ensureCodexSubscriptionClaudeConfigDir,
   ensureCodexSubscriptionProxyReady,
@@ -111,7 +114,21 @@ const claudeCodeOwnedAdapter: OwnedRuntimeAdapter = {
         CLAUDE_CONFIG_DIR: await ensureCodexSubscriptionClaudeConfigDir(session.sessionDir),
       };
     }
-    return buildClaudeCodeWorkerSpawnEnv(source, session.model, key);
+    const env = buildClaudeCodeWorkerSpawnEnv(source, session.model, key);
+    if (source === 'openrouter') {
+      const costUsd = Number(session.runtimeConfig?.spendCapCostUsd);
+      const inputTokens = Number(session.runtimeConfig?.spendCapInputTokens);
+      const cap: PacketSpendCap = { carrier: 'openrouter', costUsd, inputTokens };
+      if (!Number.isFinite(costUsd) || costUsd <= 0 || !Number.isFinite(inputTokens) || inputTokens <= 0) {
+        throw new Error('Metered worker launch refused because its packet spend cap is missing.');
+      }
+      env.ANTHROPIC_BASE_URL = await prepareMeteredGatewaySession(
+        session,
+        process.env.O8_OPENROUTER_CLAUDE_CODE_BASE_URL?.trim() || env.ANTHROPIC_BASE_URL,
+        cap,
+      );
+    }
+    return env;
   },
   humanLabel: 'Owned Claude Code',
   squadShortName: 'Claude',
@@ -156,12 +173,23 @@ export async function launchOwnedClaudeCodeSession(request: {
   effort?: ThinkingEffort;
   laneId?: string;
   packetId?: string;
+  spendCap?: PacketSpendCap;
 }) {
   const selection = resolveClaudeCodeWorkerSelection({
     carrier: request.claudeCodeCarrier,
     model: request.claudeCodeModel,
   });
   const selectedModel = selection.model ?? request.model;
+  const meteredDefaults = selection.source === 'openrouter' && !request.spendCap
+    ? getOperatorDefaultsSync().values
+    : null;
+  const spendCap = selection.source === 'openrouter'
+    ? request.spendCap ?? {
+        carrier: 'openrouter' as const,
+        costUsd: meteredDefaults!.meteredPacketCostCapUsd,
+        inputTokens: meteredDefaults!.meteredPacketInputTokenCap,
+      }
+    : undefined;
   if (selection.source === 'openrouter' && !await resolveClaudeCodeWorkerGatewayKey()) {
     return {
       ok: false,
@@ -187,7 +215,13 @@ export async function launchOwnedClaudeCodeSession(request: {
   return claudeCodeOwnedStore.launch({
     ...request,
     model: selectedModel ?? undefined,
-    runtimeConfig: { modelSource: selection.source },
+    runtimeConfig: {
+      modelSource: selection.source,
+      ...(spendCap ? {
+        spendCapCostUsd: String(spendCap.costUsd),
+        spendCapInputTokens: String(spendCap.inputTokens),
+      } : {}),
+    },
   });
 }
 

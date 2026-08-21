@@ -467,6 +467,49 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
         </SettingsGroup>
       </section>
 
+      <section style={{ marginTop: 28 }}>
+        <SettingsGroup
+          header="Metered packet limits"
+          footnote="Captured on each gateway-backed packet at launch. Authoritative cost stops the worker first; input tokens are the fail-closed fallback when cost is unavailable."
+        >
+          <SettingsRow
+            icon={<CpuIcon />}
+            label="Cost cap"
+            subtitle="Maximum gateway-reported spend per packet (USD)"
+            accessory={(
+              <input
+                key={values.meteredPacketCostCapUsd}
+                type="number"
+                min="0.01"
+                step="0.01"
+                defaultValue={values.meteredPacketCostCapUsd}
+                disabled={busyField === 'meteredPacketCostCapUsd'}
+                onBlur={(event) => { updateField('meteredPacketCostCapUsd', Number(event.currentTarget.value)); }}
+                style={{ width: 92, minHeight: 30, borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--t-input-border)', borderRadius: 8, background: 'var(--t-input-bg)', color: 'var(--t-text)', paddingLeft: 9, paddingRight: 9, fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)', fontSize: 11 }}
+              />
+            )}
+            divider
+          />
+          <SettingsRow
+            icon={<CpuIcon />}
+            label="Input fallback"
+            subtitle="Token ceiling used only when gateway cost is unknown"
+            accessory={(
+              <input
+                key={values.meteredPacketInputTokenCap}
+                type="number"
+                min="1"
+                step="1000"
+                defaultValue={values.meteredPacketInputTokenCap}
+                disabled={busyField === 'meteredPacketInputTokenCap'}
+                onBlur={(event) => { updateField('meteredPacketInputTokenCap', Number(event.currentTarget.value)); }}
+                style={{ width: 92, minHeight: 30, borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--t-input-border)', borderRadius: 8, background: 'var(--t-input-bg)', color: 'var(--t-text)', paddingLeft: 9, paddingRight: 9, fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)', fontSize: 11 }}
+              />
+            )}
+          />
+        </SettingsGroup>
+      </section>
+
       {/* ── API keys (BYOK — unhidden here, no env flag) ── */}
       <section style={{ marginTop: 28 }}>
         <GroupHeader>API keys</GroupHeader>

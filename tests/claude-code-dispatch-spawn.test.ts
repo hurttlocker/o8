@@ -101,7 +101,7 @@ describe('Claude Code dispatch spawn', () => {
       laneId: 'lane-claude',
     });
 
-    expect(result.ok).toBe(true);
+    expect(result.ok, result.note).toBe(true);
     expect(ensureDispatchBackendReadyMock).toHaveBeenCalledWith('claude-code', 'launch');
     expect(spawnMock).toHaveBeenCalledTimes(1);
 
@@ -140,7 +140,7 @@ describe('Claude Code dispatch spawn', () => {
       laneId: 'lane-claude',
     });
 
-    expect(result.ok).toBe(true);
+    expect(result.ok, result.note).toBe(true);
     expect(resolveDefaultWorkerEffortSyncMock).toHaveBeenCalledWith('claude-code', 'high');
     expect(spawnMock).toHaveBeenCalledTimes(1);
 
@@ -220,14 +220,15 @@ describe('Claude Code dispatch spawn', () => {
       prompt: 'implement through the Claude Code harness',
       model: 'claude-sonnet-4-5',
       laneId: 'lane-gateway',
+      spendCap: { carrier: 'openrouter', costUsd: 1, inputTokens: 500_000 },
     });
 
-    expect(result.ok).toBe(true);
+    expect(result.ok, result.note).toBe(true);
     const [, args, options] = spawnMock.mock.calls[0]!;
     const argv = process.platform === 'win32' ? args : args.slice(2);
     expect(argv).toContain('deepseek/deepseek-v4-pro-0813');
     expect(options.env).toMatchObject({
-      ANTHROPIC_BASE_URL: 'https://openrouter.ai/api',
+      ANTHROPIC_BASE_URL: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\//),
       ANTHROPIC_AUTH_TOKEN: 'sk-or-test-worker',
       ANTHROPIC_API_KEY: '',
       CLAUDE_CODE_SUBAGENT_MODEL: 'deepseek/deepseek-v4-pro-0813',
@@ -235,11 +236,11 @@ describe('Claude Code dispatch spawn', () => {
     const sessionRoot = path.join(tempRoot, 'owned', result.sessionKey!.replace('claude-code-owned:', ''));
     const metadata = JSON.parse(readFileSync(path.join(sessionRoot, 'session.json'), 'utf8')) as {
       model?: string;
-      runtimeConfig?: { modelSource?: string };
+      runtimeConfig?: { modelSource?: string; spendCapCostUsd?: string; spendCapInputTokens?: string };
     };
     expect(metadata).toMatchObject({
       model: 'deepseek/deepseek-v4-pro-0813',
-      runtimeConfig: { modelSource: 'openrouter' },
+      runtimeConfig: { modelSource: 'openrouter', spendCapCostUsd: '1', spendCapInputTokens: '500000' },
     });
   }, 20_000);
 

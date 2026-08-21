@@ -3,6 +3,7 @@ import type { CompactionEvent } from '@/lib/runtimes/compaction-detector';
 import type { DispatchCapability } from '@/lib/runtimes/shared/turn-dispatcher';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
+import type { PacketCostSource, PacketSpendCap } from '@/lib/orchestrator/metered-spend';
 
 /**
  * Universal Agent Runtime Contract
@@ -276,6 +277,7 @@ export interface LaunchOptions {
   worktreePath?: string;
   laneId?: string;
   packetId?: string;
+  spendCap?: PacketSpendCap;
 }
 
 // ── Telemetry ──
@@ -287,6 +289,7 @@ export interface RuntimeTelemetry {
   contextTokens?: number;
   remainingTokens?: number;
   estimatedCostUsd?: number;
+  costSource?: PacketCostSource;
   inputTokens?: number;
   outputTokens?: number;
   cacheReadTokens?: number;

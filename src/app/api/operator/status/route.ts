@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { listApprovals, listUnsettledApprovalContinuations } from '@/lib/approvals/store';
-import { listLanes } from '@/lib/lane/registry';
+import { getLaneEvents, listLanes } from '@/lib/lane/registry';
 import { buildOperatorStatusAgents, summarizeOperatorStatus } from '@/lib/orchestrator/operator-status-model';
 
 export const runtime = 'nodejs';
@@ -21,7 +21,20 @@ export async function GET(request: NextRequest) {
 
     // ── Agents ──
     const sessions = snapshot.agents ?? [];
-    const agents = buildOperatorStatusAgents(sessions, listLanes(), sessionKeyFilter);
+    const lanes = listLanes();
+    const agents = buildOperatorStatusAgents(sessions, lanes, sessionKeyFilter);
+    const spendCapHits = lanes.flatMap((lane) => getLaneEvents(lane.id, 200)
+      .filter((event) => event.verb === 'spend_cap_hit')
+      .map((event) => ({
+        ...event.payload,
+        laneId: lane.id,
+        packetId: typeof event.payload.packetId === 'string' && event.payload.packetId.trim()
+          ? event.payload.packetId
+          : lane.packetId,
+        timestamp: event.timestamp,
+      })))
+      .sort((left, right) => right.timestamp.localeCompare(left.timestamp))
+      .slice(0, 10);
 
     // ── Approvals ──
     const pending = sessionKeyFilter
@@ -57,7 +70,7 @@ export async function GET(request: NextRequest) {
     });
 
     return NextResponse.json(
-      { summary, agents, approvals, recentActivity },
+      { summary, agents, approvals, recentActivity, spendCapHits },
       { headers: { 'Cache-Control': 'no-store, max-age=0' } },
     );
   } catch (error) {

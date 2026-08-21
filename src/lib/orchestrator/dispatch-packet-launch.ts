@@ -1,10 +1,11 @@
 import 'server-only';
 
-import { selectedClaudeCodeWorkerModelSync } from '@/lib/claude-code/worker-profile';
+import { resolveClaudeCodeWorkerSelection, selectedClaudeCodeWorkerModelSync } from '@/lib/claude-code/worker-profile';
 import { listSessionRuleTexts } from '@/lib/db/session-rules-store';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import { recordLaneEvent } from '@/lib/lane/events';
-import { resolveOpencodeWorkerModelSync } from '@/lib/operator/defaults';
+import { getOperatorDefaultsSync, resolveOpencodeWorkerModelSync } from '@/lib/operator/defaults';
+import type { PacketSpendCap } from './metered-spend';
 import { getProjectContext } from '@/lib/projects/context';
 import { resolveDefaultBranch } from '@/lib/repos/registry';
 import { assertRuntimeDispatchable } from '@/lib/runtimes/shared/auth-detect';
@@ -29,6 +30,20 @@ export interface LaunchPacketResult {
   sessionKey: string | null;
   workerRouting: WorkerRouting;
   storageAdmission: PacketStorageAdmissionReceipt;
+  spendCap?: PacketSpendCap;
+}
+
+function resolvePacketSpendCap(packet: OrchestratorPacket, runtime: OrchestratorRuntime): PacketSpendCap | undefined {
+  if (packet.spendCap) return packet.spendCap;
+  if (runtime !== 'claude-code') return undefined;
+  const selection = resolveClaudeCodeWorkerSelection({ carrier: packet.claudeCodeCarrier, model: packet.claudeCodeModel });
+  if (selection.source !== 'openrouter') return undefined;
+  const defaults = getOperatorDefaultsSync().values;
+  return {
+    carrier: 'openrouter',
+    costUsd: defaults.meteredPacketCostCapUsd,
+    inputTokens: defaults.meteredPacketInputTokenCap,
+  };
 }
 
 function operatorWorkerModelFor(runtime: OrchestratorRuntime): string | null {
@@ -54,6 +69,7 @@ export async function launchPacketWithStorageAdmission(input: {
   storageAdmission: PacketStorageAdmissionCoordinator;
 }): Promise<LaunchPacketResult> {
   const { packet, allPackets, workerRouting, storageAdmission } = input;
+  const spendCap = resolvePacketSpendCap(packet, workerRouting.selectedRuntime);
   const launchContext = bindWorkerLaunchParent(packet.launchContext, {
     threadId: packet.orchestratorThreadId,
   });
@@ -86,6 +102,7 @@ export async function launchPacketWithStorageAdmission(input: {
       sessionKey: lane.sessionKey,
       workerRouting,
       storageAdmission: admissionLease.receipt,
+      spendCap,
     };
   }
   const claimKey = `packet-storage-launch:${admissionLease.receipt.reservationId}`;
@@ -101,6 +118,7 @@ export async function launchPacketWithStorageAdmission(input: {
         sessionKey: lane.sessionKey,
         workerRouting,
         storageAdmission: await storageAdmission.commitAfterLaunch(admissionLease),
+        spendCap,
       };
     },
   }, async () => {
@@ -135,6 +153,7 @@ export async function launchPacketWithStorageAdmission(input: {
         ) ?? undefined,
         claudeCodeModel: packet.claudeCodeModel ?? undefined,
         claudeCodeCarrier: packet.claudeCodeCarrier ?? undefined,
+        spendCap,
         effort: workerRouting.selectedEffort ?? undefined,
         clientMutationId: `packet-launch:${packet.id}:${launchGeneration}`,
         storageAdmissionReservationId: admissionLease.receipt.reservationId,
@@ -170,6 +189,7 @@ export async function launchPacketWithStorageAdmission(input: {
       sessionKey: launchResult.lane?.sessionKey ?? null,
       workerRouting,
       storageAdmission: storageReceipt,
+      spendCap,
     };
   });
   if (!outcome.inProgress) return outcome.result;

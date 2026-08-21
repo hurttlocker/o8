@@ -4,6 +4,7 @@ import { listLanes, updateLane } from '@/lib/lane/registry';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import type { PacketSpendCap } from '@/lib/orchestrator/metered-spend';
 import {
   listDeclarativeRuntimes,
 } from '@/lib/orchestrator/runtime-capabilities';
@@ -99,6 +100,7 @@ export interface RuntimeLaunchRequest {
   // tied to a packet. Also drives the worktree directory naming (one slot
   // per packet, instead of a shared taskName-derived slot).
   packetId?: string;
+  spendCap?: PacketSpendCap;
   /** Scheduler-owned storage reservation reused by the managed-worktree boundary. */
   storageAdmissionReservationId?: string;
 }
@@ -403,6 +405,7 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
     worktreePath: launchWorktree?.worktree?.path,
     laneId: payload.existingLaneId ?? undefined,
     packetId: payload.packetId,
+    spendCap: payload.spendCap,
   });
 
   return settleRuntimeLaunchGovernance({

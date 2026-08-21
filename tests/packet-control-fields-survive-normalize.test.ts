@@ -48,6 +48,15 @@ function fullPacketFixture() {
     stallRetries: 2,
     launchAttempts: 3,
     operatorStopped: true,
+    spendCap: { carrier: 'openrouter', costUsd: 1, inputTokens: 500_000 },
+    spendTelemetry: {
+      costUsd: 0.09,
+      inputTokens: 653_000,
+      outputTokens: 100,
+      costSource: 'gateway',
+      capHit: false,
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    },
     blockedReason: 'operator_stopped',
     storageAdmission: {
       schema: 'o8/packet-storage-admission/v1',

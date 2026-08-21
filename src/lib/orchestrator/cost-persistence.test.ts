@@ -73,4 +73,21 @@ describe('runtime cost persistence', () => {
       costUsd: 0.3,
     })]);
   });
+
+  it('replaces a list-price estimate with authoritative gateway cost and never lets a later estimate overwrite it', async () => {
+    const base = {
+      sessionKey: 'claude-code-owned:gateway-cost',
+      runtime: 'claude-code',
+      model: 'provider/model',
+      inputTokens: 653_000,
+      outputTokens: 10,
+      repoPath: '/tmp/o8-cost-test-repo',
+    };
+    await persistSessionCost({ ...base, costUsd: 6.5, costSource: 'estimate' });
+    await persistSessionCost({ ...base, costUsd: 0.09, costSource: 'gateway' });
+    await persistSessionCost({ ...base, costUsd: 7, costSource: 'estimate' });
+
+    const row = getDb()?.select().from(usageLogs).all().find((entry) => entry.sessionKey === base.sessionKey);
+    expect(row).toMatchObject({ provider: 'openrouter', costUsd: 0.09 });
+  });
 });

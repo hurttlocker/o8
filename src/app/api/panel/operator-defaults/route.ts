@@ -106,6 +106,13 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.parallelCap = Math.floor(parsed);
   }
 
+  for (const field of ['meteredPacketCostCapUsd', 'meteredPacketInputTokenCap'] as const) {
+    if (body[field] === undefined) continue;
+    const parsed = typeof body[field] === 'number' ? body[field] : Number(body[field]);
+    if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`${field} must be greater than 0.`);
+    update[field] = field === 'meteredPacketInputTokenCap' ? Math.round(parsed) : parsed;
+  }
+
   if (body.overlapGate !== undefined) {
     if (body.overlapGate !== 'advisory' && body.overlapGate !== 'strict') {
       throw new Error('overlapGate must be "advisory" or "strict".');

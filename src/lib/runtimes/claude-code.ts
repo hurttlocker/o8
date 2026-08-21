@@ -5,7 +5,6 @@
  * reads transcripts from JSONL files, and manages lifecycle
  * via the `claude` CLI.
  */
-
 import { execFile } from 'node:child_process';
 import { access, open, readdir, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
@@ -28,6 +27,7 @@ import {
   type JsonlEntry,
 } from '@/lib/runtimes/compaction-detector';
 import { readClaudeRuntimeTelemetry } from '@/lib/runtimes/claude-cost-attribution';
+import { readOwnedClaudeRuntimeTelemetry } from '@/lib/runtimes/claude-owned-telemetry';
 import { ownedTailToRuntimeTranscript } from '@/lib/runtimes/shared/owned-transcript';
 import { getRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
 import {
@@ -37,12 +37,9 @@ import {
 } from '@/lib/claude-code/owned';
 import { resolveDefaultWorkerEffortSync } from '@/lib/operator/defaults';
 import { readClaudeRuntimeCapacity } from '@/lib/usage/cli-scrape';
-
 const execFileAsync = promisify(execFile);
-
 const CLAUDE_HOME = process.env.CLAUDE_HOME || path.join(os.homedir(), '.claude');
 const CLAUDE_PROJECTS_DIR = path.join(CLAUDE_HOME, 'projects');
-
 const RECENT_WINDOW_MS = 6 * 60 * 60_000; // 6 hours
 const CLAUDE_DEFAULT_CONTEXT_WINDOW_TOKENS = 200_000;
 const CLAUDE_ONE_MILLION_CONTEXT_WINDOW_TOKENS = 1_000_000;
@@ -1190,6 +1187,9 @@ export const claudeCodeRuntime: AgentRuntime = {
   },
 
   async getTelemetry(sessionKey: string): Promise<RuntimeTelemetry | undefined> {
+    if (sessionKey.startsWith('claude-code-owned:')) {
+      return readOwnedClaudeRuntimeTelemetry(sessionKey);
+    }
     let sessionId = sessionKey.replace('claude-code:', '');
     if (sessionId.startsWith('live-')) {
       const pid = Number(sessionId.replace('live-', ''));

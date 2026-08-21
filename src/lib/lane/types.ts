@@ -16,6 +16,7 @@
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 import type { OrchestratorRuntime, WorkerLaunchContext } from '@/lib/orchestrator/types';
+import type { PacketSpendCap } from '@/lib/orchestrator/metered-spend';
 import { isWorkerTerminal } from '@/lib/lane/terminal-states';
 
 // ── Lane Status ──
@@ -151,6 +152,7 @@ export type LaneCommand =
       model?: string;
       claudeCodeModel?: string;
       claudeCodeCarrier?: ClaudeCodeModelSource;
+      spendCap?: PacketSpendCap;
       effort?: ThinkingEffort;
       /** Stable for one packet launch attempt so a crash can reconcile the owned session. */
       clientMutationId?: string;
@@ -312,6 +314,7 @@ export type LaneEventVerb =
   | 'worker_quota_exhausted'
   | 'worker_fallback'
   | 'worker_fallback_terminal'
+  | 'spend_cap_hit'
   // Orchestrator review verdict, append-only (#1476 lie 3). Lane events are
   // never rescored or evicted, so review-state can always recover the verdict
   // even after mission-state resets or approval-context drift.
