@@ -260,7 +260,9 @@ function BroadcastSurface() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
             <motion.span
               key={reconnectPulse}
-              initial={false}
+              initial={reconnectPulse > 0 && !reduceMotion
+                ? { opacity: 1, scale: 1 }
+                : false}
               animate={reconnectPulse > 0 && !reduceMotion
                 ? { opacity: [1, 0.55, 1], scale: [1, 1.04, 1] }
                 : { opacity: 1, scale: 1 }}
