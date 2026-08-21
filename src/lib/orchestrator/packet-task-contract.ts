@@ -93,23 +93,26 @@ export function stripPacketTaskContract(text: string): string {
   return text.replace(buildTaskContractPattern('g'), '').trim();
 }
 
-export function buildPacketTaskContractInstructions(): string[] {
+export function buildPacketTaskContractInstructions(implementationNotesPath = 'the packet notes artifact'): string[] {
   return [
     'Pre-edit task contract:',
     '1. Before using any write/edit tool, inspect the task and the real production entry points, then enumerate every explicit obligation as an atomic requirement. Read-only inspection may happen first.',
     `2. Before editing, emit exactly one machine-readable contract block in an assistant message: ${PACKET_TASK_CONTRACT_TAG_START} {"version":1,"requirements":[{"id":"R1","source":"exact task wording","expectedBehavior":"observable result","productionPath":"real entry point and call path","verification":"command or evidence that will prove it"}],"smallestRoute":[{"path":"repo-relative file or change unit","requirements":["R1"],"reason":"why this is the smallest complete route"}],"exclusions":["explicit non-goal"]} ${PACKET_TASK_CONTRACT_TAG_END}`,
     '3. Every requirement ID must appear in smallestRoute. Do not begin implementation with an unmapped requirement.',
     '4. If an alignment turn is armed, include the contract block in the huddle response before stopping. Otherwise emit it after read-only inspection and continue.',
-    "5. Treat the first contract as immutable. If implementation forces a different route, record the change under implementation-notes.md '## Deviations' with the affected requirement IDs and the reason.",
+    `5. Treat the first contract as immutable. If implementation forces a different route, record the change under ${implementationNotesPath} '## Deviations' with the affected requirement IDs and the reason.`,
   ];
 }
 
-export function buildSealedPacketTaskContractInstructions(contract: PacketTaskContract): string[] {
+export function buildSealedPacketTaskContractInstructions(
+  contract: PacketTaskContract,
+  implementationNotesPath = 'the packet notes artifact',
+): string[] {
   return [
     'Sealed pre-edit task contract:',
     JSON.stringify(contract),
     'This contract was fixed before candidate generation. Do not rewrite, narrow, or replace it.',
-    "If implementation forces a different route, record the change under implementation-notes.md '## Deviations' with the affected requirement IDs and the reason.",
+    `If implementation forces a different route, record the change under ${implementationNotesPath} '## Deviations' with the affected requirement IDs and the reason.`,
   ];
 }
 

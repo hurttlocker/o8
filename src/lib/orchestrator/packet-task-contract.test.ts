@@ -73,10 +73,12 @@ describe('packet task contract', () => {
   });
 
   it('keeps pre-edit ordering and immutable-contract rules in the worker instructions', () => {
-    const prompt = buildPacketTaskContractInstructions().join('\n');
+    const notesPath = '.o8/packet-artifacts/pkt-1/implementation-notes.md';
+    const prompt = buildPacketTaskContractInstructions(notesPath).join('\n');
     expect(prompt).toContain('Before using any write/edit tool');
     expect(prompt).toContain(PACKET_TASK_CONTRACT_TAG_START);
     expect(prompt).toContain('Treat the first contract as immutable');
     expect(prompt).toContain('Every requirement ID must appear in smallestRoute');
+    expect(prompt).toContain(notesPath);
   });
 });

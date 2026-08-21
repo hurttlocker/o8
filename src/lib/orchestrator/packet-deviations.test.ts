@@ -1,14 +1,17 @@
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  DEVIATIONS_CLAUSE,
+  buildDeviationsClause,
   IMPLEMENTATION_NOTES_FILENAME,
   MAX_NOTES_BYTES,
+  packetImplementationNotesPath,
   parseDeviations,
   readPacketDeviations,
 } from './packet-deviations';
+
+const packetId = 'pkt-notes-test';
 
 describe('parseDeviations', () => {
   it('returns null when there is no Deviations heading', () => {
@@ -63,18 +66,21 @@ describe('readPacketDeviations', () => {
   });
 
   it('returns null for a missing worktree path or missing file', () => {
-    expect(readPacketDeviations(null)).toBeNull();
-    expect(readPacketDeviations('')).toBeNull();
+    expect(readPacketDeviations(null, packetId)).toBeNull();
+    expect(readPacketDeviations('', packetId)).toBeNull();
     const dir = mkdtempSync(join(tmpdir(), 'dev-'));
     dirs.push(dir);
-    expect(readPacketDeviations(dir)).toBeNull();
+    expect(readPacketDeviations(dir, packetId)).toBeNull();
   });
 
-  it('reads and parses the notes file with a capturedAt timestamp', () => {
+  it('reads and parses the ignored packet artifact instead of the tracked root filename', () => {
     const dir = mkdtempSync(join(tmpdir(), 'dev-'));
     dirs.push(dir);
-    writeFileSync(join(dir, IMPLEMENTATION_NOTES_FILENAME), '## Deviations\n- swapped approach\n');
-    const result = readPacketDeviations(dir);
+    writeFileSync(join(dir, IMPLEMENTATION_NOTES_FILENAME), '## Deviations\n- stale root note\n');
+    const notesPath = join(dir, packetImplementationNotesPath(packetId));
+    mkdirSync(dirname(notesPath), { recursive: true });
+    writeFileSync(notesPath, '## Deviations\n- swapped approach\n');
+    const result = readPacketDeviations(dir, packetId);
     expect(result?.entries).toEqual(['swapped approach']);
     expect(typeof result?.capturedAt).toBe('string');
     expect(Number.isNaN(Date.parse(result!.capturedAt))).toBe(false);
@@ -84,8 +90,10 @@ describe('readPacketDeviations', () => {
     const dir = mkdtempSync(join(tmpdir(), 'dev-'));
     dirs.push(dir);
     const huge = `## Deviations\n- ${'x'.repeat(MAX_NOTES_BYTES * 2)}\n`;
-    writeFileSync(join(dir, IMPLEMENTATION_NOTES_FILENAME), huge);
-    const result = readPacketDeviations(dir);
+    const notesPath = join(dir, packetImplementationNotesPath(packetId));
+    mkdirSync(dirname(notesPath), { recursive: true });
+    writeFileSync(notesPath, huge);
+    const result = readPacketDeviations(dir, packetId);
     expect(result).not.toBeNull();
     // The parsed raw body is bounded by the read cap (never the full 2x file).
     expect(result!.raw.length).toBeLessThanOrEqual(MAX_NOTES_BYTES);
@@ -93,10 +101,12 @@ describe('readPacketDeviations', () => {
   });
 });
 
-describe('DEVIATIONS_CLAUSE', () => {
-  it('names the notes file and the Deviations heading so briefs stay consistent', () => {
-    expect(DEVIATIONS_CLAUSE).toContain(IMPLEMENTATION_NOTES_FILENAME);
-    expect(DEVIATIONS_CLAUSE).toContain('## Deviations');
-    expect(DEVIATIONS_CLAUSE).toContain('conservative');
+describe('buildDeviationsClause', () => {
+  it('names the ignored packet path and the Deviations heading so briefs stay consistent', () => {
+    const clause = buildDeviationsClause(packetId);
+    expect(clause).toContain(packetImplementationNotesPath(packetId));
+    expect(clause).toContain('## Deviations');
+    expect(clause).toContain('conservative');
+    expect(clause).not.toContain('worktree root');
   });
 });

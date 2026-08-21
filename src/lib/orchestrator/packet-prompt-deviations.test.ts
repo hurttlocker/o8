@@ -13,7 +13,7 @@ import type { OrchestratorPacket } from './types';
 process.env.CORTEX_IDE_DATA_DIR = mkdtempSync(join(os.tmpdir(), 'o8-pkt-dev-'));
 
 const { buildPacketPrompt } = await import('./packet-prompt');
-const { DEVIATIONS_CLAUSE } = await import('./packet-deviations');
+const { packetImplementationNotesPath } = await import('./packet-deviations');
 
 function minimalPacket(overrides: Partial<OrchestratorPacket> = {}): OrchestratorPacket {
   return {
@@ -35,7 +35,10 @@ function minimalPacket(overrides: Partial<OrchestratorPacket> = {}): Orchestrato
 
 describe('buildPacketPrompt deviations clause', () => {
   it('always includes the standing deviations clause', async () => {
-    const prompt = await buildPacketPrompt(minimalPacket(), []);
-    expect(prompt).toContain(DEVIATIONS_CLAUSE);
+    const packet = minimalPacket();
+    const prompt = await buildPacketPrompt(packet, []);
+    expect(prompt).toContain(packetImplementationNotesPath(packet.id));
+    expect(prompt).toContain('ignored, per-packet artifact');
+    expect(prompt).not.toContain('implementation-notes.md file at the worktree root');
   });
 });

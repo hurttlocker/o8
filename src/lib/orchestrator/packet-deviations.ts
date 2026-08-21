@@ -2,10 +2,10 @@
  * Worker deviations log (#1490).
  *
  * Every worker brief now carries a standing clause telling the agent to keep an
- * `implementation-notes.md` at the worktree root and log any forced departure
- * from the plan under a `## Deviations` heading. When a packet reaches review we
- * read that file, extract the Deviations section, and surface it ABOVE the diff
- * so the human (and the auto-reviewer) sees where the worker went off-plan.
+ * ignored, packet-scoped `implementation-notes.md` artifact and log any forced
+ * departure from the plan under a `## Deviations` heading. When a packet reaches
+ * review we read that file, extract the Deviations section, and surface it ABOVE
+ * the diff so the human (and the auto-reviewer) sees where the worker went off-plan.
  *
  * This module is pure + fs-only (no store / mission-state imports) so the
  * parser is unit-testable in isolation.
@@ -14,8 +14,18 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-/** Filename the worker is told to keep at the worktree root. */
+/** Legacy tracked root filename. Merge governance ignores this path as worker noise. */
 export const IMPLEMENTATION_NOTES_FILENAME = 'implementation-notes.md';
+const PACKET_ARTIFACTS_DIR = join('.o8', 'packet-artifacts');
+
+function safePacketSegment(packetId: string): string {
+  return packetId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 160) || 'unassigned';
+}
+
+/** Ignored, worktree-relative notes path unique to one packet. */
+export function packetImplementationNotesPath(packetId: string): string {
+  return join(PACKET_ARTIFACTS_DIR, safePacketSegment(packetId), IMPLEMENTATION_NOTES_FILENAME);
+}
 
 /**
  * Cap on how much of implementation-notes.md we read. A bloated notes file would
@@ -26,13 +36,14 @@ export const MAX_NOTES_BYTES = 64 * 1024;
 
 /**
  * The standing brief clause. Rendered as its own section in every packet prompt
- * (see `buildPacketPrompt`). Kept as a single string so the wording is asserted
- * by a unit test and never drifts silently.
+ * (see `buildPacketPrompt`). Kept here so the wording is asserted by a unit
+ * test and never drifts silently.
  */
-export const DEVIATIONS_CLAUSE =
-  `Keep an ${IMPLEMENTATION_NOTES_FILENAME} file at the worktree root. If an edge case forces you off the plan: `
+export function buildDeviationsClause(packetId: string): string {
+  return `Keep worker notes at ${packetImplementationNotesPath(packetId)} (an ignored, per-packet artifact), not at the repository root. If an edge case forces you off the plan: `
   + `pick the conservative option, log it under a '## Deviations' heading `
   + `(one bullet per deviation: what + one line why), and keep going.`;
+}
 
 export interface PacketDeviations {
   /** The raw Deviations section body, verbatim (heading stripped). */
@@ -79,18 +90,21 @@ export function parseDeviations(content: string): { raw: string; entries: string
 }
 
 /**
- * Read + parse the worktree's implementation-notes.md. Returns null when the
- * file is absent, unreadable, or has no Deviations heading — callers render the
+ * Read + parse one packet's ignored notes artifact. Returns null when the file
+ * is absent, unreadable, or has no Deviations heading — callers render the
  * asserted "No deviations reported" empty state in that case.
  */
-export function readPacketDeviations(worktreePath: string | null | undefined): PacketDeviations | null {
+export function readPacketDeviations(
+  worktreePath: string | null | undefined,
+  packetId: string,
+): PacketDeviations | null {
   const dir = worktreePath?.trim();
   if (!dir) {
     return null;
   }
   let content: string;
   try {
-    content = readFileSync(join(dir, IMPLEMENTATION_NOTES_FILENAME), 'utf8');
+    content = readFileSync(join(dir, packetImplementationNotesPath(packetId)), 'utf8');
   } catch {
     return null;
   }

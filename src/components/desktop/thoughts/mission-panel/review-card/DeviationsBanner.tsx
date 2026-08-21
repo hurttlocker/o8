@@ -6,7 +6,7 @@ import { FONT_FAMILY } from './shared';
 /**
  * #1490 — worker deviations, rendered ABOVE the diff in every human review
  * surface. `packet.deviations` is captured at review time from the lane
- * worktree's implementation-notes.md. Empty/absent renders an asserted
+ * worktree's ignored packet notes artifact. Empty/absent renders an asserted
  * "No deviations reported" line, never nothing — silence here is a real signal.
  */
 export function DeviationsBanner({ packet }: { packet: OrchestratorPacket }) {

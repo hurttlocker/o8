@@ -14,7 +14,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { DEVIATIONS_CLAUSE } from '../../src/lib/orchestrator/packet-deviations';
+import {
+  buildDeviationsClause,
+  packetImplementationNotesPath,
+} from '../../src/lib/orchestrator/packet-deviations';
 import {
   buildPacketTaskContractInstructions,
 } from '../../src/lib/orchestrator/packet-task-contract';
@@ -87,12 +90,13 @@ const JUDGING_FILE = path.join(WORK_ROOT, 'judging.json');
 const ARM_TIMEOUT_SECONDS = 2_400;
 const JUDGE_TIMEOUT_SECONDS = 1_800;
 const DEFAULT_SEED = 20_260_802;
+const BENCHMARK_NOTES_PATH = packetImplementationNotesPath('benchmark-contract');
 
 const CONTRACT_INTERVENTION = [
   'Contract-first intervention:',
-  ...buildPacketTaskContractInstructions(),
+  ...buildPacketTaskContractInstructions(BENCHMARK_NOTES_PATH),
   `6. In addition to the assistant-message block, write the same contract JSON object, without tags or a Markdown fence, to ${CODING_TASK_CONTRACT_FILE} in the worktree root before any implementation edit. This artifact is mandatory and must remain unchanged after it is written.`,
-  DEVIATIONS_CLAUSE,
+  buildDeviationsClause('benchmark-contract'),
 ].join('\n');
 
 interface CommandReceipt {

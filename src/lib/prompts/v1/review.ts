@@ -95,7 +95,7 @@ export function buildAutoReviewPromptV1(input: AutoReviewPromptInputV1): string 
     ? [
         '## Worker deviations from brief',
         '',
-        'The worker logged these departures from the plan (implementation-notes.md → ## Deviations). Verify each is the conservative call the brief asked for, and factor them into your verdict:',
+        'The worker logged these departures from the plan (packet notes artifact → ## Deviations). Verify each is the conservative call the brief asked for, and factor them into your verdict:',
         ...input.deviationsEntries.map((entry) => `- ${entry}`),
       ].join('\n')
     : '## Worker deviations from brief\n\nNo deviations reported by the worker.';

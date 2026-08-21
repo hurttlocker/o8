@@ -444,8 +444,8 @@ export interface OrchestratorPacket {
   }>;
   /**
    * Worker deviations log (#1490). Captured when the packet reaches review by
-   * reading `implementation-notes.md` from the lane worktree and extracting its
-   * `## Deviations` section. Rendered ABOVE the diff in the human review
+   * reading the ignored packet notes artifact from the lane worktree and
+   * extracting its `## Deviations` section. Rendered ABOVE the diff in the human review
    * surfaces and fed into the auto-review context. Null/undefined → the surface
    * renders the asserted "No deviations reported" empty state.
    */

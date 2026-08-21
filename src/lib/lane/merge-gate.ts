@@ -24,6 +24,7 @@ import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { resolvePacketDiffBase, type PacketDiffBaseResolution } from '@/lib/diff/base-resolution';
 import { isSafeGitRef } from '@/lib/git/refs';
+import { IMPLEMENTATION_NOTES_FILENAME } from '@/lib/orchestrator/packet-deviations';
 import type { PacketSelfReview } from '@/lib/orchestrator/types';
 import { getAllCached } from '@/lib/skeleton';
 import { checkUntrackedImports } from './check-untracked-imports';
@@ -101,6 +102,10 @@ interface AddedDiffLine {
   text: string;
 }
 
+function isWorkerScratchNoise(file: string | null): boolean {
+  return file === IMPLEMENTATION_NOTES_FILENAME;
+}
+
 const WEBVIEW_LATCH_FILE = 'src-tauri/src/webview_latch.rs';
 const WEBVIEW_LATCH_BRIDGE_CALL = 'webview.' + 'ev' + 'al(js.as_ref())';
 const MERGE_GATE_FILE = 'src/lib/lane/merge-gate.ts';
@@ -168,7 +173,7 @@ function getAddedLines(cwd: string, baseBranch: string): AddedDiffLine[] {
         continue;
       }
 
-      if (line.startsWith('+')) {
+      if (line.startsWith('+') && !isWorkerScratchNoise(currentFile)) {
         addedLines.push({ file: currentFile, text: line });
       }
     }
@@ -217,7 +222,7 @@ function getDiffNumstat(cwd: string, baseBranch: string): DiffNumstat[] {
         const insertions = parseInt(add, 10);
         const deletions = parseInt(del, 10);
         if (!file || isNaN(insertions) || isNaN(deletions)) return null;
-        return { file, insertions, deletions };
+        return isWorkerScratchNoise(file) ? null : { file, insertions, deletions };
       })
       .filter((entry): entry is DiffNumstat => entry !== null);
   } catch {

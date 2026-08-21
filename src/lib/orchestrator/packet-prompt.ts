@@ -18,7 +18,10 @@ import {
   buildReadOnlyPacketSelfReviewInstructions,
 } from '@/lib/orchestrator/self-review';
 import { buildWorkerOutcomeOwnershipPromptV1 } from '@/lib/prompts/v1';
-import { DEVIATIONS_CLAUSE } from '@/lib/orchestrator/packet-deviations';
+import {
+  buildDeviationsClause,
+  packetImplementationNotesPath,
+} from '@/lib/orchestrator/packet-deviations';
 import type { OrchestratorPacket, PacketContext } from '@/lib/orchestrator/types';
 import { truncateText } from '@/lib/util/text';
 
@@ -317,10 +320,11 @@ export async function buildPacketPrompt(
   // block so weaker models see adjacent risk surfaces up-front.
   const edgeCaseSections = renderEdgeCaseSections(packet.edgeCaseSites);
   const sandboxVerificationSections = buildSandboxVerificationSections(packet);
+  const implementationNotesPath = packetImplementationNotesPath(packet.id);
   const taskContractSections = packet.taskContract
-    ? buildSealedPacketTaskContractInstructions(packet.taskContract)
+    ? buildSealedPacketTaskContractInstructions(packet.taskContract, implementationNotesPath)
     : packet.taskContractRequired
-      ? buildPacketTaskContractInstructions()
+      ? buildPacketTaskContractInstructions(implementationNotesPath)
       : [];
   const qualitySearchRoleSection = packet.qualitySearch?.role
     ? buildQualitySearchRolePrompt(packet.qualitySearch.role)
@@ -432,10 +436,10 @@ export async function buildPacketPrompt(
     ...sandboxVerificationSections,
     ...taskContractSections,
     qualitySearchRoleSection,
-    // #1490 — standing deviations clause. Every worker keeps an
-    // implementation-notes.md and logs forced departures from the plan under a
-    // '## Deviations' heading; review reads it back and surfaces it.
-    readOnlyPacket ? null : DEVIATIONS_CLAUSE,
+    // #1490/#1802 — every worker keeps an ignored packet-scoped notes artifact
+    // and logs forced departures under a '## Deviations' heading; review reads
+    // it back and surfaces it without polluting the branch diff.
+    readOnlyPacket ? null : buildDeviationsClause(packet.id),
     'Files in this repository follow an 800-line maximum. If your implementation would push a file past this threshold, extract code into focused modules first, then implement your changes. Files with explicit waivers are exempt from this rule.',
     'If a task step needs a long-running or long-output process — a test suite, build, backtest, data job, or a server the task itself requires — start it with `o8 run -- <cmd>` (e.g. `o8 run -- pytest -q`) rather than a bare shell exec, so the operator can watch its live output. This is about genuinely long jobs; still follow any sandbox UI-verification guidance above (do not start dev servers just to smoke-test).',
     captureProofSection,

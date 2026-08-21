@@ -508,7 +508,7 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
   let taskContractRequired = false;
   if (lane.packetId) {
     try {
-      deviations = readPacketDeviations(lane.worktreePath || lane.repoPath);
+      deviations = readPacketDeviations(lane.worktreePath || lane.repoPath, lane.packetId);
       const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
       taskContractRequired = readOrchestratorControlPlaneState().packets
         .find((packet) => packet.id === lane.packetId)?.taskContractRequired === true;
