@@ -82,6 +82,22 @@ Runtime-specific switches are acceptable only when behavior actually diverges,
 such as a resume protocol or session-key format. Labels, colors, picker options,
 auth houses, validation, and runtime membership come from the catalog.
 
+### OpenCode: standalone workers, resident service for the operator only
+
+`src/lib/opencode/owned.ts` passes `--standalone` on both `launchArgs` and
+`resumeArgs`. Dispatched workers each run as a fully self-contained process —
+no shared resident `opencode2 service` holds or caches the packet worktree, so
+a worker's launch and every resume turn spawn and exit independently of that
+service. The resident service (started separately, outside the owned-session
+store) exists only for the operator's own interactive OpenCode use; the
+location-cache release path in `src/lib/opencode/service-lifecycle.ts` is
+reachable solely from packet-close cleanup
+(`src/lib/orchestrator/runtime-worktree-cleanup.ts`), never from launch or
+resume. The consequence: standalone workers share no session state with the
+resident service or with each other — each resume rehydrates strictly from the
+persisted thread id parsed out of that run's own JSONL log, not from anything
+the service cached in memory.
+
 ## Current runtime set
 
 The catalog contains seventeen runtimes. Sixteen are dispatchable; `antigravity`
