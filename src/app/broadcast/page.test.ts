@@ -95,8 +95,12 @@ describe('Broadcast spectator page', () => {
 
     await act(async () => {
       setVisibility('hidden');
-      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(20);
     });
+    // A hidden page paints the latest snapshot once, then stays quiet: no
+    // long-poll, no refresh interval.
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/snapshot'))).toHaveLength(2);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/events'))).toHaveLength(1);
     const hiddenCallCount = fetchMock.mock.calls.length;
     await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
     expect(fetchMock).toHaveBeenCalledTimes(hiddenCallCount);
@@ -105,7 +109,18 @@ describe('Broadcast spectator page', () => {
       setVisibility('visible');
       await vi.advanceTimersByTimeAsync(20);
     });
-    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/snapshot'))).toHaveLength(2);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/snapshot'))).toHaveLength(3);
     expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/events'))).toHaveLength(2);
+  });
+
+  it('paints the first snapshot even when it loads hidden, without polling', async () => {
+    setVisibility('hidden');
+    await act(async () => { root.render(createElement(BroadcastPage)); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(20); });
+    await act(async () => { await Promise.resolve(); });
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/snapshot'))).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/events'))).toHaveLength(0);
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/events'))).toHaveLength(0);
   });
 });

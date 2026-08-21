@@ -239,7 +239,7 @@ function BroadcastSurface() {
   }, []);
 
   useEffect(() => {
-    if (!token || !isDocumentVisible) return;
+    if (!token) return;
     const controller = new AbortController();
     let stopped = false;
     let refreshTimer: ReturnType<typeof setInterval> | null = null;
@@ -296,6 +296,10 @@ function BroadcastSurface() {
         try {
           await refreshSnapshot(true);
           if (stopped) return;
+          // A hidden page (background tab, inactive OBS scene) still paints the
+          // latest snapshot once; the long-poll and refresh loop only run while
+          // visible, and the effect re-runs on the next visibilitychange.
+          if (!isDocumentVisible) return;
           refreshTimer = setInterval(() => {
             void refreshSnapshot(false).catch((error) => {
               if (!stopped && error instanceof Error && error.message === 'forbidden') setState('forbidden');
