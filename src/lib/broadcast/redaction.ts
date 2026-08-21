@@ -17,8 +17,11 @@ export interface BroadcastRedactionContext {
   operatorToken: string | null;
 }
 
-// Values shorter than this are never treated as secrets, whatever their key:
-// flags like FOO_TOKEN=1 would otherwise scrub every "1" out of the feed.
+// Only values under secret-looking keys are treated as secrets. A blanket
+// "any value over N chars" rule scrubbed ordinary words out of the feed
+// (NODE_ENV=production turned every "production" into [redacted-env]).
+// Values shorter than this are never secrets whatever their key: flags like
+// FOO_TOKEN=1 would otherwise scrub every "1".
 const MIN_ENV_SECRET_LENGTH = 6;
 
 function environmentValues(): string[] {
@@ -26,7 +29,7 @@ function environmentValues(): string[] {
     .flatMap(([key, value]) => (
       typeof value === 'string'
         && value.length >= MIN_ENV_SECRET_LENGTH
-        && (value.length >= 8 || SENSITIVE_KEY.test(key))
+        && SENSITIVE_KEY.test(key)
         ? [value]
         : []
     )))]

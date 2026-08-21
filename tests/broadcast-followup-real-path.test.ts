@@ -58,6 +58,8 @@ describe('Broadcast follow-up bounds and redaction through real routes', () => {
     // A flag-sized value under a secret-looking key must not scrub digits out
     // of ordinary text ("#1800" once rendered as "#[redacted-env]800").
     process.env.O8_BROADCAST_TEST_FLAG_TOKEN = '1';
+    // Long values under ordinary keys are not secrets (NODE_ENV=production).
+    process.env.O8_BROADCAST_TEST_MODE = 'production';
     const lane = createLane({
       label: 'Broadcast redaction route',
       repoPath: '/tmp/broadcast-redaction-route',
@@ -79,7 +81,7 @@ describe('Broadcast follow-up bounds and redaction through real routes', () => {
     };
     appendEvent(lane.id, 'agent_report', 'orchestrator', {
       event: 'progress',
-      message: 'redaction route proof for #1800',
+      message: 'redaction route proof for #1800 through the production launcher',
       metadata: {
         ...sensitiveValues,
         first: shortOperatorToken,
@@ -104,6 +106,7 @@ describe('Broadcast follow-up bounds and redaction through real routes', () => {
     expect(serialized).toContain('[redacted');
     expect(serialized).not.toContain('[redacted-env]800');
     expect(serialized).toContain('#1800');
+    expect(serialized).toContain('production launcher');
   });
 
   it('caps a projected event payload at 8 KB and marks it truncated', async () => {
