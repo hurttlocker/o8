@@ -115,6 +115,12 @@ export interface Lane {
 
 export type LaneEventActor = 'user' | 'orchestrator' | 'system';
 
+export interface LaneTurnContextUsage {
+  inputTokens: number;
+  cacheReadTokens: number;
+  contextTokens: number;
+}
+
 export interface LaneEvent {
   id: string;
   laneId: string;

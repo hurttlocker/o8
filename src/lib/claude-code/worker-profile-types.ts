@@ -10,12 +10,15 @@ export interface ClaudeCodeWorkerProfile {
   model: string | null;
   /** Codex OAuth model id. Retained while another source is selected. */
   codexModel: string | null;
+  /** Repository skills whose root SKILL.md instructions may be injected into packet prompts. */
+  repoSkillAllowlist?: string[];
 }
 
 export const CLAUDE_CODE_WORKER_PROFILE_FALLBACK: ClaudeCodeWorkerProfile = {
   source: 'native',
   model: null,
   codexModel: null,
+  repoSkillAllowlist: [],
 };
 
 export function isClaudeCodeModelSource(value: unknown): value is ClaudeCodeModelSource {
@@ -28,4 +31,13 @@ export function normalizeClaudeCodeGatewayModel(value: unknown): string | null {
   const model = value.trim();
   if (!model || model.length > 200 || !/^[~a-z0-9][a-z0-9._~:/-]*$/i.test(model)) return null;
   return model;
+}
+
+export function normalizeClaudeCodeRepoSkillAllowlist(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.flatMap((entry) => {
+    if (typeof entry !== 'string') return [];
+    const name = entry.trim();
+    return /^[a-z0-9][a-z0-9._-]{0,79}$/i.test(name) ? [name] : [];
+  }))].slice(0, 8);
 }

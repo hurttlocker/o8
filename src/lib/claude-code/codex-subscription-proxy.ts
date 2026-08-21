@@ -308,8 +308,13 @@ export async function getCodexSubscriptionProxyStatus(): Promise<CodexSubscripti
 }
 
 export async function ensureCodexSubscriptionClaudeConfigDir(sessionDir: string): Promise<string> {
-  const configDir = path.join(sessionDir, 'claude-code-codex-config');
+  return ensureClaudeCodeWorkerConfigDir(sessionDir);
+}
+
+export async function ensureClaudeCodeWorkerConfigDir(sessionDir: string): Promise<string> {
+  const configDir = path.join(sessionDir, 'claude-code-worker-config');
   await mkdir(configDir, { recursive: true, mode: 0o700 });
   await chmod(configDir, 0o700);
+  await rm(path.join(configDir, 'skills'), { recursive: true, force: true });
   return configDir;
 }

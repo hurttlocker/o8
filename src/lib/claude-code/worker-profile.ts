@@ -12,10 +12,11 @@ import {
   OPENROUTER_CLAUDE_CODE_DEFAULT_MODEL,
   isClaudeCodeModelSource,
   normalizeClaudeCodeGatewayModel,
+  normalizeClaudeCodeRepoSkillAllowlist,
   type ClaudeCodeWorkerProfile,
 } from './worker-profile-types';
 
-const PROFILE_VERSION = 2;
+const PROFILE_VERSION = 3;
 export const OPENROUTER_CLAUDE_CODE_BASE_URL = 'https://openrouter.ai/api';
 export { OPENROUTER_CLAUDE_CODE_DEFAULT_MODEL } from './worker-profile-types';
 
@@ -36,6 +37,7 @@ function normalizeProfile(value: unknown): ClaudeCodeWorkerProfile {
       : CLAUDE_CODE_WORKER_PROFILE_FALLBACK.source,
     model: normalizeClaudeCodeGatewayModel(record.model),
     codexModel: normalizeClaudeCodeGatewayModel(record.codexModel),
+    repoSkillAllowlist: normalizeClaudeCodeRepoSkillAllowlist(record.repoSkillAllowlist),
   };
 }
 

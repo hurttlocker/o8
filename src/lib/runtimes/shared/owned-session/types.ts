@@ -13,6 +13,7 @@ import type {
   SquadSummary,
 } from '@/lib/fleet/types';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import type { LaneTurnContextUsage } from '@/lib/lane/types';
 import type { SandboxDenial } from './sandbox-denial';
 
 // ── Run / session primitives ─────────────────────────────────────────────────
@@ -199,6 +200,7 @@ export interface ParsedRunLog {
   entries: OwnedTailEntry[];
   outcome: OwnedRunOutcome;
   completedTurn: boolean;
+  turnContextUsage?: LaneTurnContextUsage;
 }
 
 export interface OwnedRunEvidence {

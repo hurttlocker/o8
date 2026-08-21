@@ -10,6 +10,7 @@ import { getCodexSubscriptionProxyStatus } from '@/lib/claude-code/codex-subscri
 import {
   isClaudeCodeModelSource,
   normalizeClaudeCodeGatewayModel,
+  normalizeClaudeCodeRepoSkillAllowlist,
 } from '@/lib/claude-code/worker-profile-types';
 import { requirePanelAuth } from '@/lib/panel/auth';
 
@@ -59,9 +60,10 @@ export async function POST(request: NextRequest) {
   if (body.codexModel !== null && body.codexModel !== undefined && body.codexModel !== '' && !codexModel) {
     return NextResponse.json({ ok: false, error: 'codexModel must be a valid model id.' }, { status: 400 });
   }
+  const repoSkillAllowlist = normalizeClaudeCodeRepoSkillAllowlist(body.repoSkillAllowlist);
 
   try {
-    await writeClaudeCodeWorkerProfile({ source: body.source, model, codexModel });
+    await writeClaudeCodeWorkerProfile({ source: body.source, model, codexModel, repoSkillAllowlist });
     return NextResponse.json(await responseBody(), {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });

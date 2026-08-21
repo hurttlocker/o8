@@ -38,12 +38,14 @@ describe('Claude Code worker profile', () => {
       source: 'openrouter',
       model: 'deepseek/deepseek-v4-pro-0813',
       codexModel: 'gpt-5.6-sol',
+      repoSkillAllowlist: ['review-only'],
     });
 
     expect(profile.readClaudeCodeWorkerProfileSync()).toEqual({
       source: 'openrouter',
       model: 'deepseek/deepseek-v4-pro-0813',
       codexModel: 'gpt-5.6-sol',
+      repoSkillAllowlist: ['review-only'],
     });
     const raw = readFileSync(path.join(dataDir, 'claude-code-worker.json'), 'utf8');
     expect(raw).toContain('deepseek/deepseek-v4-pro-0813');
@@ -53,7 +55,7 @@ describe('Claude Code worker profile', () => {
   it('fails back to the native account when the stored profile is malformed', async () => {
     writeFileSync(path.join(dataDir, 'claude-code-worker.json'), '{broken');
     const profile = await import('./worker-profile');
-    expect(profile.readClaudeCodeWorkerProfileSync()).toEqual({ source: 'native', model: null, codexModel: null });
+    expect(profile.readClaudeCodeWorkerProfileSync()).toEqual({ source: 'native', model: null, codexModel: null, repoSkillAllowlist: [] });
   });
 
   it('builds a child-only OpenRouter environment for every Claude Code model role', () => {

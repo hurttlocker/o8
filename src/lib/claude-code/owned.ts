@@ -28,7 +28,7 @@ import type { PacketSpendCap } from '@/lib/orchestrator/metered-spend';
 import { prepareMeteredGatewaySession } from '@/lib/claude-code/metered-gateway';
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 import {
-  ensureCodexSubscriptionClaudeConfigDir,
+  ensureClaudeCodeWorkerConfigDir,
   ensureCodexSubscriptionProxyReady,
 } from '@/lib/claude-code/codex-subscription-proxy';
 
@@ -76,12 +76,21 @@ function parseClaudeOwnedRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog 
     .filter((entry): entry is OwnedTailEntry => entry !== null);
   const done = events.find((event): event is Extract<ClaudeCodeStreamJsonParserEvent, { type: 'done' }> =>
     event.type === 'done');
+  const usage = [...events].reverse().find(
+    (event): event is Extract<ClaudeCodeStreamJsonParserEvent, { type: 'usage' }> => event.type === 'usage',
+  );
+  const inputTokens = done?.inputTokens ?? usage?.inputTokens ?? 0;
+  const cacheReadTokens = done?.cacheReadTokens ?? usage?.cacheReadTokens ?? 0;
+  const contextTokens = inputTokens + cacheReadTokens;
 
   return {
     threadId: done?.sessionId,
     entries,
     outcome: done ? 'finished' : 'running',
     completedTurn: Boolean(done),
+    ...(contextTokens > 0 ? {
+      turnContextUsage: { inputTokens, cacheReadTokens, contextTokens },
+    } : {}),
   };
 }
 
@@ -94,6 +103,7 @@ const claudeCodeOwnedAdapter: OwnedRuntimeAdapter = {
   binaryEnvOverride: 'O8_CLAUDE_CODE_BIN',
   binaryExtraEnvOverrides: ['CLAUDE_BIN'],
   extraSpawnEnv: async (session) => {
+    const isolatedConfigDir = await ensureClaudeCodeWorkerConfigDir(session.sessionDir);
     const configuredSource = session.runtimeConfig?.modelSource;
     const source = configuredSource === 'openrouter' || configuredSource === 'codex-subscription'
       ? configuredSource
@@ -111,7 +121,7 @@ const claudeCodeOwnedAdapter: OwnedRuntimeAdapter = {
           connection.clientToken,
           connection.baseUrl,
         ),
-        CLAUDE_CONFIG_DIR: await ensureCodexSubscriptionClaudeConfigDir(session.sessionDir),
+        CLAUDE_CONFIG_DIR: isolatedConfigDir,
       };
     }
     const env = buildClaudeCodeWorkerSpawnEnv(source, session.model, key);
@@ -128,13 +138,17 @@ const claudeCodeOwnedAdapter: OwnedRuntimeAdapter = {
         cap,
       );
     }
+    env.CLAUDE_CONFIG_DIR = isolatedConfigDir;
     return env;
   },
   humanLabel: 'Owned Claude Code',
   squadShortName: 'Claude',
   sessionIdPrefix: 'claude-code-owned-',
   defaultModel: MODEL_IDS.claudeWorkerDefault,
-  launchArgs: ({ model, effort }) => buildClaudeStreamJsonArgs(model ?? null, 'bypassPermissions', null, effort),
+  launchArgs: ({ model, effort }) => [
+    ...buildClaudeStreamJsonArgs(model ?? null, 'bypassPermissions', null, effort),
+    '--disable-slash-commands',
+  ],
   launchStdin: ({ prompt }) => buildClaudeStreamJsonUserPayload(prompt),
   resumeArgs: () => null,
   parseRunLog: parseClaudeOwnedRunLog,

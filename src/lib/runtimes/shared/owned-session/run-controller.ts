@@ -261,6 +261,7 @@ export function createOwnedRunController({
           classification: childExit.classification,
           stderr,
           completedTurn: artifacts?.parsed.completedTurn ?? false,
+          ...(artifacts?.parsed.turnContextUsage ?? {}),
         });
       } catch (error) {
         console.warn(`[owned-store] Failed to record runtime_process_exit for lane ${laneId}:`, error);

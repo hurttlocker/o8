@@ -147,7 +147,7 @@ export function ClaudeCodeHarnessSection() {
           <PickerMenu<ClaudeCodeModelSource>
             value={profile.source}
             options={SOURCE_OPTIONS}
-            onChange={(source) => { void save({ source, model: profile.model, codexModel: profile.codexModel }); }}
+            onChange={(source) => { void save({ ...profile, source }); }}
             disabled={busy}
             minWidth={150}
           />
@@ -234,6 +234,45 @@ export function ClaudeCodeHarnessSection() {
           divider
         />
       ) : null}
+      <SettingsRow
+        icon={<HarnessIcon />}
+        label="Repository skills"
+        subtitle="Comma-separated skill names explicitly injected into dispatched worker prompts"
+        accessory={
+          <input
+            key={profile.repoSkillAllowlist?.join(',') ?? ''}
+            defaultValue={profile.repoSkillAllowlist?.join(', ') ?? ''}
+            placeholder="None"
+            aria-label="Claude Code repository skill allowlist"
+            disabled={busy}
+            onBlur={(event) => {
+              const repoSkillAllowlist = event.currentTarget.value
+                .split(',')
+                .map((name) => name.trim())
+                .filter(Boolean);
+              void save({ ...profile, repoSkillAllowlist });
+            }}
+            style={{
+              width: 180,
+              minHeight: 34,
+              paddingTop: 0,
+              paddingRight: 10,
+              paddingBottom: 0,
+              paddingLeft: 10,
+              borderWidth: 1,
+              borderStyle: 'solid',
+              borderColor: 'var(--t-border)',
+              borderRadius: 9,
+              background: 'var(--t-input-bg)',
+              color: 'var(--t-text)',
+              fontFamily: 'var(--font-sans-system)',
+              fontSize: 12,
+              outline: 'none',
+            }}
+          />
+        }
+        divider
+      />
       <SettingsRow
         icon={<HarnessIcon />}
         label="Billing"

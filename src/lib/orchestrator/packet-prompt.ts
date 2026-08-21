@@ -1,3 +1,7 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+
+import { readClaudeCodeWorkerProfileSync } from '@/lib/claude-code/worker-profile';
 import { buildContextBlock } from '@/lib/codebase-memory/build-context';
 import { resolvePacketAlignment } from '@/lib/orchestrator/alignment-access';
 import { BRAIN_PROMPT_SECTION, resolvePacketBrainEnabled } from '@/lib/orchestrator/brain-access';
@@ -45,6 +49,32 @@ function formatInlinePromptList(items: string[], maxItems = 4) {
     return items.join('; ');
   }
   return `${items.slice(0, maxItems).join('; ')} (+${items.length - maxItems} more)`;
+}
+
+const CLAUDE_CODE_SKILL_BOUNDARY = 'Claude Code skills are unavailable in this dispatched worker. Do not invoke user or repository skills; only operator-allowlisted skill instructions embedded in this prompt apply.';
+const MAX_ALLOWLISTED_SKILL_PROMPT_CHARS = 32_000;
+
+function buildClaudeCodeSkillSections(packet: OrchestratorPacket): string[] {
+  if (packet.runtime !== 'claude-code') return [];
+  const sections = [CLAUDE_CODE_SKILL_BOUNDARY];
+  const repoPath = packet.workspaceTargetPath?.trim();
+  if (!repoPath) return sections;
+
+  let remainingChars = MAX_ALLOWLISTED_SKILL_PROMPT_CHARS;
+  for (const skillName of readClaudeCodeWorkerProfileSync().repoSkillAllowlist ?? []) {
+    if (remainingChars <= 0) break;
+    const skillPath = path.join(repoPath, '.claude', 'skills', skillName, 'SKILL.md');
+    try {
+      const instructions = readFileSync(skillPath, 'utf8').trim();
+      if (!instructions) continue;
+      const bounded = truncateText(instructions, Math.min(8_000, remainingChars));
+      sections.push(`Operator-allowlisted repository skill "${skillName}":\n${bounded}`);
+      remainingChars -= bounded.length;
+    } catch (error) {
+      console.warn(`[claude-code-skills] Unable to load allowlisted skill ${skillName}:`, error);
+    }
+  }
+  return sections;
 }
 
 function formatPacketReviewFallback(packet: OrchestratorPacket): string[] {
@@ -338,6 +368,7 @@ export async function buildPacketPrompt(
   // a rule set in the thread governs every Codex worker dispatched from it.
   // Null when the packet has no originating thread or that thread has no rules.
   const sessionRulesSection = buildSessionRulesBlock(packet.orchestratorThreadId);
+  const claudeCodeSkillSections = buildClaudeCodeSkillSections(packet);
   const readOnlyPacket = packet.launchContext?.workMode === 'read-only';
   const readOnlySection = readOnlyPacket
     ? 'Read-only packet: inspect the repository and report the requested findings. Do not edit files, create commits, create branches, or run commands that mutate repository state. A clean zero-diff completion is the expected successful outcome.'
@@ -417,6 +448,7 @@ export async function buildPacketPrompt(
     // Session rules ride at the TOP — binding operator constraints the worker
     // reads before the task itself.
     sessionRulesSection,
+    ...claudeCodeSkillSections,
     `Packet: ${packet.title}`,
     packet.summary ? `Summary: ${packet.summary}` : null,
     livePacketSpec,

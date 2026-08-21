@@ -18,6 +18,7 @@ const ensureCodexSubscriptionProxyReadyMock = vi.hoisted(() => vi.fn(async () =>
   models: ['gpt-5.6-sol'],
 })));
 const ensureCodexSubscriptionClaudeConfigDirMock = vi.hoisted(() => vi.fn());
+const ensureClaudeCodeWorkerConfigDirMock = vi.hoisted(() => vi.fn());
 
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
@@ -46,6 +47,7 @@ vi.mock('@/lib/operator/defaults', async (importOriginal) => {
 vi.mock('@/lib/claude-code/codex-subscription-proxy', () => ({
   ensureCodexSubscriptionProxyReady: ensureCodexSubscriptionProxyReadyMock,
   ensureCodexSubscriptionClaudeConfigDir: ensureCodexSubscriptionClaudeConfigDirMock,
+  ensureClaudeCodeWorkerConfigDir: ensureClaudeCodeWorkerConfigDirMock,
 }));
 
 describe('Claude Code dispatch spawn', () => {
@@ -76,6 +78,8 @@ describe('Claude Code dispatch spawn', () => {
     ensureCodexSubscriptionProxyReadyMock.mockClear();
     ensureCodexSubscriptionClaudeConfigDirMock.mockImplementation(async (sessionDir: string) =>
       path.join(sessionDir, 'claude-code-codex-config'));
+    ensureClaudeCodeWorkerConfigDirMock.mockImplementation(async (sessionDir: string) =>
+      path.join(sessionDir, 'claude-code-worker-config'));
     resolveDefaultWorkerEffortSyncMock.mockImplementation((runtime, explicitEffort) => explicitEffort ?? undefined);
   });
 
@@ -120,6 +124,7 @@ describe('Claude Code dispatch spawn', () => {
       '--include-partial-messages',
       '--model',
       'claude-sonnet-4-5',
+      '--disable-slash-commands',
     ]);
     expect(argv).not.toContain('-p');
     expect(argv).not.toContain('--print');
@@ -160,6 +165,7 @@ describe('Claude Code dispatch spawn', () => {
       'claude-opus-4-8',
       '--effort',
       'high',
+      '--disable-slash-commands',
     ]);
     expect(argv).not.toContain('-p');
     expect(argv).not.toContain('--print');
@@ -288,7 +294,7 @@ describe('Claude Code dispatch spawn', () => {
       CLAUDE_CODE_SUBAGENT_MODEL: 'gpt-5.6-sol',
       CLAUDE_CODE_ALWAYS_ENABLE_EFFORT: '1',
       ENABLE_TOOL_SEARCH: 'false',
-      CLAUDE_CONFIG_DIR: expect.stringContaining('claude-code-codex-config'),
+      CLAUDE_CONFIG_DIR: expect.stringContaining('claude-code-worker-config'),
     });
     const sessionRoot = path.join(tempRoot, 'owned', result.sessionKey!.replace('claude-code-owned:', ''));
     const metadata = JSON.parse(readFileSync(path.join(sessionRoot, 'session.json'), 'utf8')) as {
