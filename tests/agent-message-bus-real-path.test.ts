@@ -25,6 +25,7 @@ const heartbeatRoute = await import('@/app/api/lanes/[id]/heartbeat/route');
 const presenceRoute = await import('@/app/api/agents/presence/route');
 const inboxRoute = await import('@/app/api/agents/inbox/route');
 const messageRoute = await import('@/app/api/agents/message/route');
+const { createAgentMessagePostHandler } = await import('@/lib/agents/message-route-handler');
 const broadcastEventsRoute = await import('@/app/api/broadcast/events/route');
 const { panelGateMiddleware } = await import('@/middleware');
 
@@ -58,7 +59,7 @@ describe('agent message bus real path', () => {
   const workerToken = mintPacketWorkerToken(packetId);
   const sendClaude = vi.fn(async () => {});
   const sendCodex = vi.fn(async () => {});
-  const postMessage = messageRoute.createAgentMessagePostHandler({ sendClaude, sendCodex });
+  const postMessage = createAgentMessagePostHandler({ sendClaude, sendCodex });
 
   beforeEach(() => {
     sendClaude.mockClear();
