@@ -215,9 +215,12 @@ function routeFixture(name: string, source: string): string {
 }
 
 describe('route module shape', () => {
+  // Parses every route file with the TypeScript compiler. On a machine under
+  // load that is comfortably past the 5s default, and a timeout here fails
+  // `npm run typecheck` for reasons that have nothing to do with the code.
   it('passes every route in the real API tree', () => {
     expect(routeFiles.flatMap(routeShapeErrors)).toEqual([]);
-  });
+  }, 120_000);
 
   it('rejects a fixture route with a stray value export', () => {
     const file = routeFixture('stray-export', 'export const POST = async () => new Response();\nexport const testSeam = true;\n');
