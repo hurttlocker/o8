@@ -19,5 +19,13 @@ export default defineConfig({
     // No globals — tests import { describe, it, expect } from 'vitest'
     // explicitly so tsc/eslint see real symbols.
     globals: false,
+    // Vitest defaults to 5s. Much of this suite does real work — real git,
+    // real filesystem, real route handlers, parsing every route file with the
+    // TypeScript compiler — and on a machine that is busy (a fleet of workers,
+    // a build, a screen encoder) those legitimately run past 5s. Failing then
+    // reports a timeout as a broken test and, through the merge gate's
+    // post-rebase typecheck, blocks merges for reasons unrelated to the code.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
   },
 });
