@@ -29,6 +29,8 @@ interface Lane {
   updatedAt: string;
   lastEventAt: string | null;
   lastEventLabel: string | null;
+  lastTranscriptAt?: string | null;
+  transcriptFault?: { code?: string; stalledForMs?: number | null } | null;
 }
 
 interface Approval {
@@ -193,11 +195,14 @@ function summarizeLane(l: Lane) {
     updatedAt: l.updatedAt,
     lastEventAt: l.lastEventAt,
     lastEventLabel: l.lastEventLabel,
+    lastTranscriptAt: l.lastTranscriptAt ?? null,
+    transcriptFault: l.transcriptFault ?? null,
   };
 }
 
 function formatLaneLine(l: Lane): string {
   const status = l.status.padEnd(15);
   const id = (l.packetId ?? l.id).padEnd(28);
-  return `  ${status} ${id} ${l.label}\n`;
+  const fault = l.transcriptFault?.code === 'transcript_stalled' ? '  [transcript stalled]' : '';
+  return `  ${status} ${id} ${l.label}${fault}\n`;
 }

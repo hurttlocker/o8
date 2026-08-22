@@ -97,12 +97,15 @@ interface PendingCall { seq: number; tool: string; }
  * malformed lines are skipped. Returns `[]` when input is empty or entirely
  * unparseable so callers can treat absence as a benign condition.
  */
-export function normalizeCodexEvents(rawJsonl: string): TranscriptEvent[] {
+export function normalizeCodexEvents(
+  rawJsonl: string,
+  fallbackTimestamp = new Date().toISOString(),
+): TranscriptEvent[] {
   if (!rawJsonl || typeof rawJsonl !== 'string') return [];
 
   const out: TranscriptEvent[] = [];
   const pending = new Map<string, PendingCall>();
-  const fallbackTs = new Date().toISOString();
+  const fallbackTs = fallbackTimestamp;
   let seq = 0;
   const nextSeq = () => (seq += 1);
 
@@ -193,6 +196,11 @@ export function normalizeCodexEvents(rawJsonl: string): TranscriptEvent[] {
 
     if (type === 'item.started') {
       const item = safeObject(parsed.item);
+      if (item && readStr(item, 'type') === 'command_execution') {
+        const callId = readStr(item, 'id') || `exec-${seq + 1}`;
+        pushToolCall(ts, callId, 'exec_command', clip(readStr(item, 'command'), MAX_ARGS));
+        continue;
+      }
       if (item && readStr(item, 'type') === 'tool_use') {
         const callId = readStr(item, 'id') || `tool-${seq + 1}`;
         const tool = readStr(item, 'name', 'tool_name') || 'tool';

@@ -47,10 +47,6 @@ export function createReviewTailController({
       return null;
     }
 
-    if (activeSession) {
-      await runController.refreshSession(session);
-    }
-
     return {
       threadId: session.threadId,
       model: session.model,
@@ -113,7 +109,10 @@ export function createReviewTailController({
     }
 
     if (activeSession) {
-      await runController.refreshSession(session);
+      // Transcript polling runs every second while a pane is visible. Keep it
+      // independent of lifecycle reconciliation: process/tmux probes can be
+      // slow under fleet load, while the durable JSONL is already authoritative
+      // for transcript activity and safe to read directly.
       const tail = await collectTailEntries(session, limit);
       if (!session.threadId && tail.threadId) {
         session.threadId = tail.threadId;

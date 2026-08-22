@@ -162,7 +162,12 @@ export function createOwnedRunController({
       stderrKey,
       stdoutRaw: withinRawCap ? stdoutRaw : null,
       stderrRaw: withinRawCap ? stderrRaw : null,
-      parsed: adapter.parseRunLog(stdoutRaw, run),
+      parsed: adapter.parseRunLog(
+        stdoutRaw,
+        run,
+        stdoutKey === 'absent' ? undefined
+          : new Date(Number(stdoutKey.slice(stdoutKey.indexOf(':') + 1))).toISOString(),
+      ),
     };
     runArtifactCache.set(run.id, entry);
     while (runArtifactCache.size > RUN_ARTIFACT_CACHE_MAX) {

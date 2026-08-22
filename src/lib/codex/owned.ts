@@ -296,7 +296,11 @@ export function codexResumeArgs(ctx: { threadId: string; prompt: string; model?:
 
 // ── Codex JSONL stdout parser ────────────────────────────────────────────────
 
-export function codexParseRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog {
+export function codexParseRunLog(
+  raw: string,
+  run: OwnedRunRecord,
+  fallbackTimestamp = run.finishedAt ?? run.startedAt,
+): ParsedRunLog {
   const entries: OwnedTailEntry[] = [
     {
       id: `${run.id}:prompt`,
@@ -318,7 +322,7 @@ export function codexParseRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog
     try {
       const parsed = JSON.parse(trimmed) as Record<string, unknown>;
       const type = String(parsed.type ?? '');
-      const { timestamp, timestampLabel } = parseEntryTimestamp(parsed.timestamp, run.finishedAt ?? run.startedAt);
+      const { timestamp, timestampLabel } = parseEntryTimestamp(parsed.timestamp, fallbackTimestamp);
       const payload = safeObject(parsed.payload);
 
       if (type === 'thread.started') {
@@ -499,6 +503,18 @@ export function codexParseRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog
 
       if (type === 'item.started') {
         const item = safeObject(parsed.item);
+        if (item?.type === 'command_execution') {
+          const command = String(item.command ?? '').trim();
+          entries.push({
+            id: `${run.id}:tool-start:${readStringField(item, 'id') ?? lineIndex}`,
+            kind: 'tool',
+            label: 'exec_command',
+            text: command ? `Running ${compactText(command, 180)}` : 'Running shell command',
+            timestamp,
+            timestampLabel,
+          });
+          continue;
+        }
         if (item?.type === 'tool_use') {
           const toolName = readStringField(item, 'name', 'tool_name') ?? 'tool';
           const toolInput = item.input ?? item.arguments ?? item.invocation ?? item;

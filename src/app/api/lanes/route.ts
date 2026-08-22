@@ -11,6 +11,7 @@ import { reconcileOrphanedWorktrees } from '@/lib/lane/reconcile';
 import { serverTimingHeaders } from '@/lib/performance/server-timing';
 import { resolvePacketLaunchContexts } from '@/lib/orchestrator/packet-launch-context';
 import { repoActionLeaseMaxWaitMsForTests } from '@/lib/lane/lane-route-test-seams';
+import { resolveLaneTranscriptHealth } from '@/lib/lane/transcript-health';
 import { deriveIdempotencyKey, withIdempotency } from '@/lib/orchestrator/idempotency-store';
 import type { LaneCommand } from '@/lib/lane/types';
 
@@ -74,8 +75,9 @@ export async function GET(req: NextRequest) {
   const launchContexts = resolvePacketLaunchContexts(
     resolvedLanes.flatMap((lane) => lane.packetId ? [lane.packetId] : []),
   );
-  const lanes = resolvedLanes.map((lane) => ({
+  const lanes = await Promise.all(resolvedLanes.map(async (lane) => ({
     ...lane,
+    ...await resolveLaneTranscriptHealth(lane),
     launchContext: lane.packetId
       ? launchContexts.get(lane.packetId)?.launchContext ?? null
       : null,
@@ -85,7 +87,7 @@ export async function GET(req: NextRequest) {
     archiveSummary: lane.status === 'archived' || lane.status === 'completed'
       ? summarizeLaneArchive(lane, getLaneEvents(lane.id, 80))
       : null,
-  }));
+  })));
 
   return NextResponse.json({ lanes }, {
     headers: serverTimingHeaders(startedAt, { 'Cache-Control': 'no-store, max-age=0' }),

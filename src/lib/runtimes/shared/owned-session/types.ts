@@ -340,7 +340,7 @@ export interface OwnedRuntimeAdapter {
   }): string[] | null;
 
   /** Parse a run's stdout into normalized entries + outcome + discovered thread id. */
-  parseRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog;
+  parseRunLog(raw: string, run: OwnedRunRecord, fallbackTimestamp?: string): ParsedRunLog;
 
   /**
    * Extract command/tool evidence + an assistant summary for the review packet.

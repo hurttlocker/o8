@@ -22,7 +22,13 @@ type TranscriptRuntime = 'codex' | 'opencode' | 'claude-code' | 'gemini' | null;
 interface ResolvedJsonl {
   raw: string;
   runtime: TranscriptRuntime;
+  fallbackTimestamp?: string;
   unsupportedReason?: string;
+}
+
+interface RawTailSnapshot {
+  raw: string;
+  modifiedAt?: string;
 }
 
 export interface SessionTranscriptReadback {
@@ -62,37 +68,43 @@ function resolveSessionKeyFromLaneRegistry(packetId: string): string | null {
   }
 }
 
-async function readRawTail(filePath: string, maxBytes = MAX_TAIL_BYTES): Promise<string> {
+async function readRawTailSnapshot(filePath: string, maxBytes = MAX_TAIL_BYTES): Promise<RawTailSnapshot> {
   try {
     const resolved = await realpath(filePath);
     const handle = await open(resolved, 'r');
     try {
       const stat = await handle.stat();
       const bytesToRead = Math.min(stat.size, maxBytes);
-      if (bytesToRead <= 0) return '';
+      if (bytesToRead <= 0) return { raw: '', modifiedAt: stat.mtime.toISOString() };
       const buffer = Buffer.alloc(bytesToRead);
       await handle.read(buffer, 0, bytesToRead, stat.size - bytesToRead);
-      return buffer.toString('utf8');
+      return { raw: buffer.toString('utf8'), modifiedAt: stat.mtime.toISOString() };
     } finally {
       await handle.close();
     }
   } catch {
-    return '';
+    return { raw: '' };
   }
 }
 
-async function readOwnedRunStdouts(stdoutPaths: string[]): Promise<string> {
+async function readRawTail(filePath: string, maxBytes = MAX_TAIL_BYTES): Promise<string> {
+  return (await readRawTailSnapshot(filePath, maxBytes)).raw;
+}
+
+async function readOwnedRunStdouts(stdoutPaths: string[]): Promise<RawTailSnapshot> {
   const chunks: string[] = [];
   let budget = MAX_TAIL_BYTES;
-  for (const stdoutPath of stdoutPaths) {
+  let modifiedAt: string | undefined;
+  for (const stdoutPath of [...stdoutPaths].reverse()) {
     if (budget <= 0) break;
-    const chunk = await readRawTail(stdoutPath, budget);
-    if (chunk) {
-      chunks.push(chunk);
-      budget -= Buffer.byteLength(chunk, 'utf8');
+    const snapshot = await readRawTailSnapshot(stdoutPath, budget);
+    if (!modifiedAt && snapshot.modifiedAt) modifiedAt = snapshot.modifiedAt;
+    if (snapshot.raw) {
+      chunks.unshift(snapshot.raw);
+      budget -= Buffer.byteLength(snapshot.raw, 'utf8');
     }
   }
-  return chunks.join('\n');
+  return { raw: chunks.join('\n'), modifiedAt };
 }
 
 async function findClaudeCodeJsonl(sessionId: string): Promise<string | null> {
@@ -123,7 +135,8 @@ async function resolveRawJsonlForSession(sessionKey: string): Promise<ResolvedJs
     try {
       const sources = await getOwnedCodexTelemetrySources(sessionKey);
       if (!sources) return { raw: '', runtime: 'codex' };
-      return { raw: await readOwnedRunStdouts(sources.stdoutPaths), runtime: 'codex' };
+      const tail = await readOwnedRunStdouts(sources.stdoutPaths);
+      return { raw: tail.raw, runtime: 'codex', fallbackTimestamp: tail.modifiedAt };
     } catch {
       return { raw: '', runtime: 'codex' };
     }
@@ -143,7 +156,7 @@ async function resolveRawJsonlForSession(sessionKey: string): Promise<ResolvedJs
     try {
       const sources = await getOwnedOpencodeTelemetrySources(sessionKey);
       if (!sources) return { raw: '', runtime: 'opencode' };
-      return { raw: await readOwnedRunStdouts(sources.stdoutPaths), runtime: 'opencode' };
+      return { raw: (await readOwnedRunStdouts(sources.stdoutPaths)).raw, runtime: 'opencode' };
     } catch {
       return { raw: '', runtime: 'opencode' };
     }
@@ -153,7 +166,7 @@ async function resolveRawJsonlForSession(sessionKey: string): Promise<ResolvedJs
     try {
       const sources = await getOwnedClaudeCodeTelemetrySources(sessionKey);
       if (!sources) return { raw: '', runtime: 'claude-code' };
-      return { raw: await readOwnedRunStdouts(sources.stdoutPaths), runtime: 'claude-code' };
+      return { raw: (await readOwnedRunStdouts(sources.stdoutPaths)).raw, runtime: 'claude-code' };
     } catch {
       return { raw: '', runtime: 'claude-code' };
     }
@@ -195,11 +208,15 @@ async function resolveRawJsonlForSession(sessionKey: string): Promise<ResolvedJs
   return { raw: '', runtime: null };
 }
 
-function normalizeForRuntime(runtime: TranscriptRuntime, raw: string): TranscriptEvent[] {
+function normalizeForRuntime(
+  runtime: TranscriptRuntime,
+  raw: string,
+  fallbackTimestamp?: string,
+): TranscriptEvent[] {
   if (!raw) return [];
   switch (runtime) {
     case 'codex':
-      return normalizeCodexEvents(raw);
+      return normalizeCodexEvents(raw, fallbackTimestamp);
     case 'opencode':
       return normalizeOpencodeEvents(raw);
     case 'claude-code':
@@ -301,7 +318,7 @@ export async function readSessionTranscriptEvents(sessionKey: string): Promise<S
     sessionKey,
     runtime: resolved.runtime,
     events: mergeTranscriptEvents(
-      normalizeForRuntime(resolved.runtime, resolved.raw),
+      normalizeForRuntime(resolved.runtime, resolved.raw, resolved.fallbackTimestamp),
       [...laneHuddleEventsForSession(sessionKey), ...laneSteerEventsForSession(sessionKey)],
     ),
   };
