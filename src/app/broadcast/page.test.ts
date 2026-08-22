@@ -4,7 +4,7 @@ import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { BroadcastSnapshot } from '@/lib/broadcast/types';
+import type { BroadcastEvent, BroadcastSnapshot } from '@/lib/broadcast/types';
 import { getPalette, resolveTheme } from '@/lib/theme/registry';
 
 type MotionProps = {
@@ -84,6 +84,17 @@ const snapshot: BroadcastSnapshot = {
   cursor: 'cursor-one',
 };
 
+const OVERLAY_TOKEN = 'o8sp_overlay_spectator_token';
+
+const commentaryEvent: BroadcastEvent = {
+  ...snapshot.recentEvents[0],
+  id: 'commentary-one',
+  kind: 'commentary',
+  title: 'Mister',
+  detail: 'The ship focus is set to v0.1.700.',
+  timestamp: '2026-08-21T11:59:59.000Z',
+};
+
 describe('Broadcast spectator page', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -105,7 +116,8 @@ describe('Broadcast spectator page', () => {
     vi.stubGlobal('fetch', fetchMock);
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     window.sessionStorage.clear();
-    window.sessionStorage.setItem('o8.broadcast.spectator-token', 'spectator-test-token');
+    window.localStorage.clear();
+    window.localStorage.setItem('o8.broadcast.spectator-token', 'spectator-test-token');
     window.history.replaceState(null, '', '/broadcast');
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1_280, writable: true });
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: 1_080, writable: true });
@@ -169,7 +181,7 @@ describe('Broadcast spectator page', () => {
   });
 
   it('reads a hash token without waiting for requestAnimationFrame', async () => {
-    window.sessionStorage.clear();
+    window.localStorage.clear();
     window.history.replaceState(null, '', '/broadcast#token=hash-spectator-token');
     const animationFrame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => {
       throw new Error('token boot must not wait for an animation frame');
@@ -180,8 +192,94 @@ describe('Broadcast spectator page', () => {
 
     expect(animationFrame).not.toHaveBeenCalled();
     expect(fetchMock.mock.calls[0]?.[1]?.headers).toEqual({ Authorization: 'Bearer hash-spectator-token' });
-    expect(window.location.hash).toBe('');
-    expect(window.sessionStorage.getItem('o8.broadcast.spectator-token')).toBe('hash-spectator-token');
+    // The fragment is the overlay's durable carrier — stripping it made the
+    // credential single-use and stranded the card after any store loss (#1828).
+    expect(window.location.hash).toBe('#token=hash-spectator-token');
+    expect(window.localStorage.getItem('o8.broadcast.spectator-token')).toBe('hash-spectator-token');
+  });
+
+  it('still boots from a sessionStorage token written by an older build', async () => {
+    window.localStorage.clear();
+    window.sessionStorage.setItem('o8.broadcast.spectator-token', 'legacy-session-token');
+    await act(async () => { root.render(createElement(BroadcastPage)); });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toEqual({ Authorization: 'Bearer legacy-session-token' });
+  });
+
+  it('boots the real overlay URL from its fragment and renders commentary from the API', async () => {
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+    snapshotPayload = { ...snapshot, recentEvents: [...snapshot.recentEvents, commentaryEvent] };
+    window.history.replaceState(null, '', `/broadcast?compact=1&theme=dark#token=${OVERLAY_TOKEN}`);
+
+    await act(async () => { root.render(createElement(BroadcastPage)); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(20); });
+
+    // The token reached component state: it is the credential on the real request.
+    expect(fetchMock.mock.calls[0]?.[0]).toContain('/api/broadcast/snapshot');
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toEqual({ Authorization: `Bearer ${OVERLAY_TOKEN}` });
+    // The overlay URL survives its own boot, so the next load can re-bootstrap.
+    expect(window.location.hash).toBe(`#token=${OVERLAY_TOKEN}`);
+    expect(window.location.search).toBe('?compact=1&theme=dark');
+    // Commentary comes from the fetched snapshot, not the empty state.
+    const commentary = container.querySelector('[aria-label="Latest commentary or conversation"]');
+    expect(commentary?.textContent).toContain('The ship focus is set to v0.1.700.');
+    expect(commentary?.textContent).not.toContain('No commentary has been broadcast yet.');
+    expect(container.textContent).not.toContain('Open the spectator URL returned by o8 broadcast token mint.');
+  });
+
+  it('survives a browser-source recreation that reloads the URL with storage cleared', async () => {
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+    snapshotPayload = { ...snapshot, recentEvents: [...snapshot.recentEvents, commentaryEvent] };
+    window.history.replaceState(null, '', `/broadcast?compact=1&theme=dark#token=${OVERLAY_TOKEN}`);
+
+    await act(async () => { root.render(createElement(BroadcastPage)); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(20); });
+    await act(async () => root.unmount());
+
+    // An OBS browser source is recreated: fresh document, storage gone, and the
+    // only thing that survives is the URL the operator configured.
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+    fetchMock.mockClear();
+    container.remove();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => { root.render(createElement(BroadcastPage)); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(20); });
+
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toEqual({ Authorization: `Bearer ${OVERLAY_TOKEN}` });
+    expect(container.querySelector('[aria-label="Latest commentary or conversation"]')?.textContent)
+      .toContain('The ship focus is set to v0.1.700.');
+  });
+
+  it('recovers a tokenless overlay when its fragment URL is re-navigated in place', async () => {
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+    snapshotPayload = { ...snapshot, recentEvents: [...snapshot.recentEvents, commentaryEvent] };
+    window.history.replaceState(null, '', '/broadcast?compact=1&theme=dark');
+
+    await act(async () => { root.render(createElement(BroadcastPage)); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(20); });
+    expect(container.textContent).toContain('Open the spectator URL returned by o8 broadcast token mint.');
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // Re-pasting the overlay URL only changes the fragment, so the browser does a
+    // same-document navigation: nothing reloads and no mount effect runs again.
+    await act(async () => {
+      window.history.replaceState(null, '', `/broadcast?compact=1&theme=dark#token=${OVERLAY_TOKEN}`);
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+      await vi.advanceTimersByTimeAsync(20);
+    });
+
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toEqual({ Authorization: `Bearer ${OVERLAY_TOKEN}` });
+    expect(container.querySelector('[aria-label="Latest commentary or conversation"]')?.textContent)
+      .toContain('The ship focus is set to v0.1.700.');
+    expect(container.textContent).not.toContain('Open the spectator URL returned by o8 broadcast token mint.');
   });
 
   it('hides the header when compact mode is requested', async () => {

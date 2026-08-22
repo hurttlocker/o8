@@ -18,15 +18,45 @@ const TOKEN_STORAGE_KEY = 'o8.broadcast.spectator-token';
 const SNAPSHOT_REFRESH_MS = 10_000;
 const FEED_LIMIT = 250;
 
+function readFragmentToken(): string {
+  return new URLSearchParams(window.location.hash.slice(1)).get('token')?.trim() ?? '';
+}
+
+function readStoredToken(): string {
+  try {
+    // localStorage is the live store; sessionStorage is read for overlays that
+    // were bootstrapped by an older build and are still on air.
+    const stored = window.localStorage.getItem(TOKEN_STORAGE_KEY)
+      ?? window.sessionStorage.getItem(TOKEN_STORAGE_KEY);
+    return stored?.trim() ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function rememberToken(token: string): void {
+  try {
+    window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
+  } catch {
+    // A storage-denied browser source still runs off the fragment, so a failed
+    // write must never block the boot.
+  }
+}
+
 function readBootstrapToken(): string {
-  const fragment = new URLSearchParams(window.location.hash.slice(1));
-  const incoming = fragment.get('token')?.trim() ?? '';
+  // The fragment is the DURABLE carrier and is never stripped. A stream overlay
+  // outlives its own document: an OBS browser source gets recreated, scenes
+  // reset, the machine reboots. Stripping the fragment on first read made the
+  // credential single-use — once the store cleared, the card was permanently
+  // tokenless with no recovery but re-pasting the URL, mid-stream. Keeping the
+  // fragment means every reload re-bootstraps from the URL the operator
+  // configured once; storage only covers a load that arrives without one.
+  const incoming = readFragmentToken();
   if (incoming) {
-    window.sessionStorage.setItem(TOKEN_STORAGE_KEY, incoming);
-    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+    rememberToken(incoming);
     return incoming;
   }
-  return window.sessionStorage.getItem(TOKEN_STORAGE_KEY)?.trim() ?? '';
+  return readStoredToken();
 }
 
 function mergeEvents(current: BroadcastEvent[], incoming: BroadcastEvent[]): BroadcastEvent[] {
@@ -62,12 +92,25 @@ function BroadcastSurface() {
   const reduceMotion = useReducedMotion() ?? false;
 
   useEffect(() => {
-    const nextToken = readBootstrapToken();
-    // This state transition intentionally happens in the mount effect. Hash
-    // bootstrap must run while hidden and cannot depend on a paint callback.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setToken(nextToken);
-    setState(nextToken ? 'booting' : 'missing-token');
+    let applied: string | null = null;
+    const applyToken = () => {
+      const nextToken = readBootstrapToken();
+      // Re-navigating a live overlay to its full URL only changes the fragment,
+      // so nothing remounts and the resolved token is usually unchanged —
+      // reconnecting on every hashchange would flap a healthy feed.
+      if (applied === nextToken) return;
+      applied = nextToken;
+      // Bootstrap runs on mount, not on a paint callback: an overlay in a hidden
+      // OBS scene never paints and must still connect.
+      setToken(nextToken);
+      setState(nextToken ? 'booting' : 'missing-token');
+    };
+    applyToken();
+    // Pasting the overlay URL back into a live browser source is a SAME-DOCUMENT
+    // navigation: no reload, no remount, no mount effect. Without this listener a
+    // tokenless card can never recover in place.
+    window.addEventListener('hashchange', applyToken);
+    return () => window.removeEventListener('hashchange', applyToken);
   }, []);
 
   useEffect(() => {
