@@ -11,6 +11,7 @@ const COMMAND_MAX_BUFFER = 10 * 1024 * 1024;
 export interface LaneWorktreePreservation {
   preserved: boolean;
   autoCommitted: boolean;
+  alreadyPreserved: boolean;
   branchName?: string;
   refName?: string;
   headSha?: string;
@@ -55,12 +56,21 @@ async function preserveHeadRef(
   }
 }
 
+async function resolveRefSha(repoPath: string, refName: string): Promise<string | null> {
+  try {
+    const { stdout } = await git(repoPath, ['rev-parse', '--verify', refName]);
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function preserveLaneWorktreeHead(
   lane: Pick<Lane, 'id' | 'repoPath' | 'worktreePath' | 'baseBranch'>,
 ): Promise<LaneWorktreePreservation> {
   const worktreePath = lane.worktreePath?.trim();
   if (!worktreePath) {
-    return { preserved: false, autoCommitted: false };
+    return { preserved: false, autoCommitted: false, alreadyPreserved: false };
   }
 
   // Capture the raw working state to an out-of-band ref BEFORE any commit logic
@@ -75,6 +85,7 @@ export async function preserveLaneWorktreeHead(
     return {
       preserved: false,
       autoCommitted: false,
+      alreadyPreserved: false,
       captured: capture.captured,
       captureRef: capture.ref,
     };
@@ -83,15 +94,22 @@ export async function preserveLaneWorktreeHead(
   const id = branchSafeId(path.basename(worktreePath) || lane.id);
   const branchName = `preserved/${id}`;
   const refName = `refs/heads/${branchName}`;
-  await preserveHeadRef(lane.repoPath, worktreePath, refName);
   const { stdout } = await git(worktreePath, ['rev-parse', 'HEAD']);
+  const headSha = stdout.trim() || undefined;
+  const alreadyPreserved = Boolean(
+    headSha && await resolveRefSha(lane.repoPath, refName) === headSha,
+  );
+  if (!alreadyPreserved) {
+    await preserveHeadRef(lane.repoPath, worktreePath, refName);
+  }
 
   return {
     preserved: true,
     autoCommitted,
+    alreadyPreserved,
     branchName,
     refName,
-    headSha: stdout.trim() || undefined,
+    headSha,
     captured: capture.captured,
     captureRef: capture.ref,
   };

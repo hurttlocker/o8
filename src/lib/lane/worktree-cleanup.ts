@@ -54,12 +54,6 @@ export async function cleanupLaneWorktree(
   const terminal = opts.terminal === true;
   const force = opts.force === true;
 
-  // Bank the head branch ref before any destructive step. manager.cleanup also
-  // preserves uncommitted work internally; this covers the commit history.
-  if (terminal || force) {
-    if (!(await preserveHeadBeforeRemoval(lane, worktreePath))) return false;
-  }
-
   // Single prune gate (Rock 1 item 3): a terminal owning lane passes cleanly; a
   // non-terminal lane with uncommitted work / recent activity is refused unless
   // the caller explicitly forces (reset/recovery), which records `prune_forced`.
@@ -73,6 +67,14 @@ export async function cleanupLaneWorktree(
   if (!gate.ok) {
     console.warn(`[lane-worktree] Skipping cleanup for ${lane.id}: prune gate refused (${gate.reason}).`);
     return false;
+  }
+
+  // The gate is read-only. Once it allows cleanup, bank the head branch ref
+  // before any destructive step. manager.cleanup also preserves uncommitted
+  // work internally; this covers the commit history. Fail closed if the ref
+  // cannot be confirmed.
+  if (terminal || force) {
+    if (!(await preserveHeadBeforeRemoval(lane, worktreePath))) return false;
   }
 
   try {

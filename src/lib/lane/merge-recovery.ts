@@ -19,6 +19,10 @@ export async function preserveAndRecordLaneRecovery(
     message: recoverableWorkMessage(preservation.branchName, preservation.headSha ?? null, options.reviewed),
     recommendedAction: 'retry_packet',
   };
+  // A prior cleanup attempt can bank the ref and then fail to remove the tree.
+  // Confirmed same-ref retries are safe, but they are not new recovery events.
+  if (preservation.alreadyPreserved) return recovery;
+
   appendEvent(lane.id, 'update', actor, {
     event: RECOVERABLE_WORK_EVENT,
     reason,
