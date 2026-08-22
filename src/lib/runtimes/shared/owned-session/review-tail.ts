@@ -68,10 +68,17 @@ export function createReviewTailController({
 
     for (const run of runs) {
       const { parsed, stderrRaw } = await runController.readRunArtifacts(run);
+      // Discover the thread id before the empty-transcript skip below: a run
+      // can legitimately produce no visible entries (a quiet/tool-only turn)
+      // while its adapter still reports the runtime's session/thread id in
+      // the parsed log. Skipping straight past it here silently loses the
+      // only thread id the session will ever get, which then makes #1524
+      // cold-resume permanently unavailable for that session — resume()
+      // fails "session was not found" even though the run finished cleanly.
+      discoveredThreadId = discoveredThreadId ?? parsed.threadId;
       if (!parsed.entries.length) continue;
 
       const outcome = deriveRunOutcome(run, parsed, stderrRaw, stderrNoise);
-      discoveredThreadId = discoveredThreadId ?? parsed.threadId;
       entries.push(...parsed.entries);
       groups.push({
         id: run.id,

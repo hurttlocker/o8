@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -116,11 +116,23 @@ describe('owned-session orphan sweep — test-context interrupt guard (#1585)', 
       const store = createOwnedSessionStore(testAdapter());
       // No active lanes → this session is an orphan candidate; the sweep will
       // reach markActiveRunOrphaned for the seeded live pid.
-      const archived = await store.sweepOrphanedSessions(new Set<string>(), 120_000);
+      await store.sweepOrphanedSessions(new Set<string>(), 120_000);
 
-      // Sanity: the session WAS classified orphaned (the sweep did reach the
-      // interrupt decision — otherwise this test proves nothing).
-      expect(archived).toBe(1);
+      // Sanity: the session WAS classified orphaned and archived (the sweep
+      // reached the interrupt decision — otherwise this test proves nothing).
+      // Check the real filesystem outcome rather than this call's own return
+      // value: creating the store above also fires its own background
+      // self-sweep as a side effect (sweepRecentlyOrphanedActiveRuns,
+      // store.ts, fire-and-forget with no handle to await), which races this
+      // explicit call for the SAME surfaceId. withSurfaceLock serializes them
+      // so only one of the two actually does the archiving -- the loser
+      // correctly finds nothing left and returns false/0, so pinning the
+      // assertion to this call's return value is flaky by construction.
+      // Whichever one wins, the rename onto disk is complete by the time this
+      // await resolves (withSurfaceLock only releases after its callback,
+      // including the archive rename, settles).
+      const archivePath = path.join(`${sessionsRoot}-archive`, 'test-owned-orphan-guard-1');
+      expect(existsSync(archivePath)).toBe(true);
       // The guard must have skipped the interrupt: NO SIGINT delivered to the
       // live foreign pid. (Without the O8_TEST_DATA_DIR_PINNED guard this array
       // contains a SIGINT to -pid — the fleet-kill.)

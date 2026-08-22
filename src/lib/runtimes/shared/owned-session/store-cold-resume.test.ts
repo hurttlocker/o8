@@ -15,6 +15,7 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { getDataDir } from '@/lib/data-dir-migration';
 import type { OwnedRuntimeAdapter, ParsedRunLog } from './types';
 
 const spawnMock = vi.hoisted(() => vi.fn());
@@ -69,7 +70,16 @@ describe('owned-session store cold resume (#1524)', () => {
   let priorBin: string | undefined;
 
   beforeEach(() => {
-    tempRoot = mkdtempSync(path.join(process.cwd(), '.tmp-owned-cold-'));
+    // validateWorkspace (helpers.ts) fail-closes owned-runtime launches to
+    // paths under the home dir or the configured data dir -- a real security
+    // boundary, not something to weaken. A repo checkout is normally under
+    // $HOME so a process.cwd()-based temp dir passed that check incidentally,
+    // but that stops holding the moment the checkout (or a worktree of it)
+    // lives somewhere else. Anchor to getDataDir() instead, which is one of
+    // validateWorkspace's allowed roots regardless of where the repo sits on
+    // disk, and which the per-worker vitest setup already pins to an isolated
+    // scratch dir (tests/setup-isolated-data-dir.ts).
+    tempRoot = mkdtempSync(path.join(getDataDir(), '.tmp-owned-cold-'));
     repoPath = path.join(tempRoot, 'repo');
     execFileSync('git', ['init', '-q', repoPath]);
     sessionsRoot = path.join(tempRoot, 'sessions');
