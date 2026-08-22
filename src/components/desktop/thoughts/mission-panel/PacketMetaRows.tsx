@@ -184,6 +184,11 @@ export function PacketMetaRows({
     : null;
 
   const runtimeDisplay = orchestratorRuntimeTone(packet.runtime).label;
+  const resolvedWorkerModel = packet.workerRouting?.selectedModel ?? packet.assignedModel ?? null;
+  const resolvedWorkerEffort = packet.workerRouting?.selectedEffort ?? null;
+  const resolvedWorkerLabel = [resolvedWorkerModel, resolvedWorkerEffort]
+    .filter((value): value is string => Boolean(value))
+    .join(' · ');
   const materializationLabel = dependencyMaterializationLabel(
     packet.lane?.dependencyMaterializationMode,
   );
@@ -498,6 +503,29 @@ export function PacketMetaRows({
           </div>
         ) : null}
       </div>
+
+      {resolvedWorkerLabel ? (
+        <div
+          data-packet-row
+          title={`Resolved worker launch: ${resolvedWorkerLabel}`}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            minHeight: 28,
+            paddingTop: 5,
+            paddingRight: 10,
+            paddingBottom: 5,
+            paddingLeft: 10,
+            borderBottomWidth: 1,
+            borderBottomStyle: 'solid',
+            borderBottomColor: 'var(--t-divider-subtle)',
+          }}
+        >
+          <span style={rowLabelStyle}>worker</span>
+          <span style={rowValueStyle}>{resolvedWorkerLabel}</span>
+        </div>
+      ) : null}
 
       {/* Repo row */}
       <div data-packet-row style={{ position: 'relative', borderBottomWidth: 1, borderBottomStyle: 'solid', borderBottomColor: 'var(--t-divider-subtle)' }}>

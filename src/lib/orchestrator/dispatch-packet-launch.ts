@@ -1,10 +1,16 @@
 import 'server-only';
 
 import { resolveClaudeCodeWorkerSelection, selectedClaudeCodeWorkerModelSync } from '@/lib/claude-code/worker-profile';
+import { resolveCodexReasoningEffort } from '@/lib/codex/reasoning-effort';
 import { listSessionRuleTexts } from '@/lib/db/session-rules-store';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import { recordLaneEvent } from '@/lib/lane/events';
-import { getOperatorDefaultsSync, resolveOpencodeWorkerModelSync } from '@/lib/operator/defaults';
+import {
+  getOperatorDefaultsSync,
+  resolveDefaultWorkerEffortSync,
+  resolveOpencodeWorkerModelSync,
+} from '@/lib/operator/defaults';
+import { resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-profile';
 import type { PacketSpendCap } from './metered-spend';
 import { getProjectContext } from '@/lib/projects/context';
 import { resolveDefaultBranch } from '@/lib/repos/registry';
@@ -63,13 +69,47 @@ function operatorWorkerModelFor(runtime: OrchestratorRuntime): string | null {
   }
 }
 
+function resolveLaunchWorkerRouting(workerRouting: WorkerRouting): WorkerRouting {
+  const defaults = getOperatorDefaultsSync().values;
+  const profileRouting = resolveSubscriptionProfileRouting({
+    profile: defaults.subscriptionProfile,
+    requestedRuntime: workerRouting.selectedRuntime,
+    requestedModel: workerRouting.selectedModel,
+    defaultDispatchModel: defaults.defaultDispatchModel,
+  });
+  const configuredModel = profileRouting.ok ? profileRouting.requestedModel : null;
+  const selectedModel = configuredModel
+    ?? operatorWorkerModelFor(workerRouting.selectedRuntime)
+    ?? getRuntimeCapability(workerRouting.selectedRuntime).defaultModel
+    ?? null;
+  const defaultEffort = resolveDefaultWorkerEffortSync(
+    workerRouting.selectedRuntime,
+    workerRouting.selectedEffort,
+  );
+  const concreteEffort = defaultEffort === 'adaptive' ? undefined : defaultEffort;
+  const selectedEffort = concreteEffort && workerRouting.selectedRuntime === 'codex'
+    ? resolveCodexReasoningEffort(concreteEffort, selectedModel) as typeof concreteEffort
+    : concreteEffort ?? null;
+
+  return {
+    ...workerRouting,
+    requestedModel: workerRouting.requestedModel ?? selectedModel,
+    requestedEffort: workerRouting.requestedEffort ?? selectedEffort,
+    selectedModel,
+    selectedEffort,
+    reason: `${workerRouting.reason} Launch resolved model ${selectedModel ?? 'runtime default'} and effort ${selectedEffort ?? 'runtime default'}.`,
+    decidedAt: new Date().toISOString(),
+  };
+}
+
 export async function launchPacketWithStorageAdmission(input: {
   packet: OrchestratorPacket;
   allPackets: OrchestratorPacket[];
   workerRouting: WorkerRouting;
   storageAdmission: PacketStorageAdmissionCoordinator;
 }): Promise<LaunchPacketResult> {
-  const { packet, allPackets, workerRouting, storageAdmission } = input;
+  const { packet, allPackets, storageAdmission } = input;
+  const workerRouting = resolveLaunchWorkerRouting(input.workerRouting);
   const spendCap = resolvePacketSpendCap(packet, workerRouting.selectedRuntime);
   const launchContext = bindWorkerLaunchParent(packet.launchContext, {
     threadId: packet.orchestratorThreadId,
@@ -149,11 +189,7 @@ export async function launchPacketWithStorageAdmission(input: {
           laneResult.lane?.baseBranch ?? baseBranch,
           laneResult.lane?.worktreePath ?? null,
         ),
-        model: (
-          workerRouting.selectedModel
-          ?? operatorWorkerModelFor(workerRouting.selectedRuntime)
-          ?? getRuntimeCapability(workerRouting.selectedRuntime).defaultModel
-        ) ?? undefined,
+        model: workerRouting.selectedModel ?? undefined,
         claudeCodeModel: packet.claudeCodeModel ?? undefined,
         claudeCodeCarrier: packet.claudeCodeCarrier ?? undefined,
         spendCap,

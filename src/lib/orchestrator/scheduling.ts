@@ -689,6 +689,7 @@ export async function runDispatchTick(
               // stops re-admitting this packet once it hits MAX_LAUNCH_ATTEMPTS.
               launchAttempts: (candidate.launchAttempts ?? 0) + 1,
               runtime: workerRouting.selectedRuntime,
+              assignedModel: workerRouting.selectedModel,
               workerIntent: workerRouting.workerIntent,
               workerRouting,
               launchContext: packetLaunchContext(candidate),
