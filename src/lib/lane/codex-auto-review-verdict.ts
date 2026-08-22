@@ -1,6 +1,8 @@
 import type { ApprovalAuditEvent, OrchestratorReviewFinding } from '@/lib/approvals/types';
+import { recordLaneEvent } from '@/lib/lane/events';
 import { parseReviewFindings } from '@/lib/orchestrator/review-finding-input';
 import { readCoverageEvidence, type ReviewCoverageEvidence } from '@/lib/orchestrator/task-contract-coverage';
+import type { OrchestratorBackend, OrchestratorBackendId } from './orchestrator-backends/types';
 import type { Lane } from './types';
 
 const CODEX_AUTO_REVIEW_MARKER = 'CODEX_AUTO_REVIEW:';
@@ -12,12 +14,19 @@ export interface ParsedCodexAutoReviewVerdict {
   rawText: string;
   contractCoverageEvidence?: ReviewCoverageEvidence;
   parseWarning?: string;
+  /**
+   * The reviewer failed to produce a machine-readable verdict (#1812). That is
+   * a REVIEWER failure, never a packet rejection — callers must not persist an
+   * approval row or synthesize a finding attributed to the packet.
+   */
+  reviewUnavailable?: boolean;
 }
 
 export interface RecordedCodexAutoReviewVerdict {
-  event: ApprovalAuditEvent;
+  event: ApprovalAuditEvent | null;
   verdict: ParsedCodexAutoReviewVerdict;
   reviewedHeadSha?: string;
+  reviewUnavailable: boolean;
 }
 
 function trimOptional(value: unknown): string | undefined {
@@ -36,6 +45,16 @@ function fallbackFinding(description: string): OrchestratorReviewFinding {
     severity: 'rule_violation',
     description: truncateRawText(description) || 'Codex auto-review returned no verdict text.',
     resolution: 'deferred',
+  };
+}
+
+function reviewUnavailable(rawText: string, parseWarning: string): ParsedCodexAutoReviewVerdict {
+  return {
+    approved: false,
+    findings: [],
+    rawText: truncateRawText(rawText),
+    parseWarning,
+    reviewUnavailable: true,
   };
 }
 
@@ -73,6 +92,35 @@ function takeBalancedJsonObject(input: string): string | null {
   return null;
 }
 
+function isVerdictShapedPayload(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  return 'approved' in value || 'verdict' in value || 'findings' in value;
+}
+
+/**
+ * Walk `{` candidates right-to-left and return the LAST balanced object that
+ * looks like a verdict (#1812). A reviewer that preambles ("I'm applying the
+ * … skill") or narrates around its JSON must not destroy a valid verdict, so
+ * the payload never has to be the whole response.
+ */
+function takeLastVerdictJsonObject(input: string): Record<string, unknown> | null {
+  let index = input.lastIndexOf('{');
+  while (index >= 0) {
+    const candidate = takeBalancedJsonObject(input.slice(index));
+    if (candidate) {
+      try {
+        const parsed = JSON.parse(candidate) as unknown;
+        if (isVerdictShapedPayload(parsed)) return parsed;
+      } catch {
+        // Not JSON at this offset — keep walking left.
+      }
+    }
+    if (index === 0) break;
+    index = input.lastIndexOf('{', index - 1);
+  }
+  return null;
+}
+
 function extractJsonPayload(rawText: string): Record<string, unknown> | null {
   const markerIndex = rawText.lastIndexOf(CODEX_AUTO_REVIEW_MARKER);
   if (markerIndex >= 0) {
@@ -81,7 +129,8 @@ function extractJsonPayload(rawText: string): Record<string, unknown> | null {
       try {
         return JSON.parse(markedJson) as Record<string, unknown>;
       } catch {
-        return null;
+        // Malformed payload behind the marker — fall through to the other
+        // strategies instead of discarding a verdict that may still be here.
       }
     }
   }
@@ -99,7 +148,7 @@ function extractJsonPayload(rawText: string): Record<string, unknown> | null {
     }
   }
 
-  return null;
+  return takeLastVerdictJsonObject(rawText);
 }
 
 function readApproved(payload: Record<string, unknown>): boolean | null {
@@ -126,7 +175,22 @@ export function appendCodexAutoReviewVerdictInstructions(prompt: string): string
     `${CODEX_AUTO_REVIEW_MARKER} {"approved":true,"findings":[],"contractCoverageEvidence":{"contractVersion":1,"headSha":"<git rev-parse HEAD>","entries":[{"requirementId":"R1","productionPath":"src/example.ts","anchor":"symbol or line","verification":"command or observed behavior"}]}}`,
     'When the review prompt contains a pre-edit task contract, contractCoverageEvidence is required and must contain every sealed requirement ID. Omit it only for legacy reviews with no task contract.',
     'For requested changes, set approved to false and include findings with file, line when known, severity (bug|rule_violation|note), description, and status (fixed|accepted|deferred).',
-    'Do not put any text after the CODEX_AUTO_REVIEW line.',
+    'The final line must be the CODEX_AUTO_REVIEW marker followed by the JSON payload and nothing else — no prose, no code fence, no skill announcements, no text after it.',
+  ].join('\n');
+}
+
+/**
+ * Second and final attempt after an unparseable verdict (#1812). Same review,
+ * stricter contract: emit the machine-readable line only.
+ */
+export function buildStrictCodexAutoReviewRetryPrompt(reviewPrompt: string): string {
+  return [
+    appendCodexAutoReviewVerdictInstructions(reviewPrompt),
+    '',
+    '## Verdict format retry',
+    '',
+    'Your previous reply contained no machine-readable verdict, so it could not be recorded.',
+    'Reply with the single CODEX_AUTO_REVIEW line and nothing else — no preamble, no explanation, no code fence.',
   ].join('\n');
 }
 
@@ -134,22 +198,12 @@ export function parseCodexAutoReviewVerdict(rawText: string): ParsedCodexAutoRev
   const raw = truncateRawText(rawText);
   const payload = extractJsonPayload(rawText);
   if (!payload) {
-    return {
-      approved: false,
-      findings: [fallbackFinding(`Codex auto-review verdict was not structured. Raw verdict: ${raw}`)],
-      rawText: raw,
-      parseWarning: 'missing CODEX_AUTO_REVIEW JSON payload',
-    };
+    return reviewUnavailable(rawText, 'missing CODEX_AUTO_REVIEW JSON payload');
   }
 
   const approved = readApproved(payload);
   if (approved === null) {
-    return {
-      approved: false,
-      findings: [fallbackFinding(`Codex auto-review JSON did not include a valid approved/verdict value. Raw verdict: ${raw}`)],
-      rawText: raw,
-      parseWarning: 'invalid approved/verdict value',
-    };
+    return reviewUnavailable(rawText, 'invalid approved/verdict value');
   }
 
   try {
@@ -167,12 +221,8 @@ export function parseCodexAutoReviewVerdict(rawText: string): ParsedCodexAutoRev
     }
     return { approved, findings, rawText: raw, contractCoverageEvidence };
   } catch (error) {
-    return {
-      approved: false,
-      findings: [fallbackFinding(`Codex auto-review findings were invalid: ${error instanceof Error ? error.message : String(error)}. Raw verdict: ${raw}`)],
-      rawText: raw,
-      parseWarning: 'invalid structured findings',
-    };
+    console.warn(`[auto-review] Codex verdict findings were invalid: ${error instanceof Error ? error.message : String(error)}`);
+    return reviewUnavailable(rawText, 'invalid structured findings');
   }
 }
 
@@ -188,18 +238,94 @@ async function captureReviewedHeadSha(lane: Lane): Promise<string | undefined> {
   }
 }
 
+export interface CodexAutoReviewRetryInput {
+  /** The exact review prompt to re-send with the stricter verdict contract. */
+  reviewPrompt: string;
+  threadId: string;
+  /** Test seams — mirror runReviewerTurnWithQuotaFallback's backend overrides. */
+  initialBackend?: OrchestratorBackend;
+  backendResolver?: (backend: OrchestratorBackendId) => OrchestratorBackend;
+}
+
+async function retryReviewTurnForVerdict(
+  lane: Lane,
+  retry: CodexAutoReviewRetryInput,
+): Promise<{ rawText: string; reviewTurnId: string | null } | null> {
+  try {
+    const { runReviewerTurnWithQuotaFallback } = await import('./review-quota-fallback');
+    const turn = await runReviewerTurnWithQuotaFallback({
+      laneId: lane.id,
+      repoPath: lane.repoPath,
+      threadId: retry.threadId,
+      surface: 'auto-review',
+      prompt: buildStrictCodexAutoReviewRetryPrompt(retry.reviewPrompt),
+      ...(retry.initialBackend ? { initialBackend: retry.initialBackend } : {}),
+      ...(retry.backendResolver ? { backendResolver: retry.backendResolver } : {}),
+    });
+    if (!turn.ok) {
+      console.warn(`[auto-review] Strict verdict retry for lane ${lane.id} failed: ${turn.errors.join('; ').slice(0, 200)}`);
+      return null;
+    }
+    return { rawText: turn.text, reviewTurnId: turn.reviewTurnId };
+  } catch (error) {
+    console.warn(`[auto-review] Strict verdict retry threw for lane ${lane.id}:`, error);
+    return null;
+  }
+}
+
 export async function recordCodexAutoReviewVerdict(input: {
   lane: Lane;
   rawText: string;
   requiresSecondPass: boolean;
   reviewTurnId: string | null;
+  retry?: CodexAutoReviewRetryInput;
 }): Promise<RecordedCodexAutoReviewVerdict | null> {
   if (!input.lane.packetId) {
     console.warn(`[auto-review] Codex verdict for lane ${input.lane.id} had no packet id; skipping approval record`);
     return null;
   }
 
-  const verdict = parseCodexAutoReviewVerdict(input.rawText);
+  let verdict = parseCodexAutoReviewVerdict(input.rawText);
+  let reviewTurnId = input.reviewTurnId;
+  let attempts = 1;
+
+  // #1812 — one stricter retry before giving up. The reviewer preambling is a
+  // reviewer problem; the packet has not been judged yet either way.
+  if (verdict.reviewUnavailable && input.retry) {
+    console.warn(`[auto-review] Codex verdict for lane ${input.lane.id} was unparseable (${verdict.parseWarning}); retrying once with a stricter instruction`);
+    const retried = await retryReviewTurnForVerdict(input.lane, input.retry);
+    if (retried) {
+      attempts = 2;
+      const retriedVerdict = parseCodexAutoReviewVerdict(retried.rawText);
+      if (!retriedVerdict.reviewUnavailable) {
+        verdict = retriedVerdict;
+        reviewTurnId = retried.reviewTurnId ?? reviewTurnId;
+      } else {
+        verdict = retriedVerdict;
+      }
+    }
+  }
+
+  // A parser failure is NOT a packet failure: record the reviewer outage on the
+  // lane (raw text kept for debugging) and leave any existing verdict alone.
+  if (verdict.reviewUnavailable) {
+    console.warn(`[auto-review] Codex auto-review unavailable for lane ${input.lane.id}: ${verdict.parseWarning}`);
+    try {
+      recordLaneEvent(input.lane.id, 'review_unavailable', 'system', {
+        surface: 'auto-review',
+        reviewer: 'codex',
+        packetId: input.lane.packetId,
+        reason: verdict.parseWarning ?? 'unparseable verdict',
+        attempts,
+        rawText: verdict.rawText,
+        note: 'Reviewer returned no machine-readable verdict; the packet was not judged and any existing verdict stands.',
+      });
+    } catch (error) {
+      console.warn(`[auto-review] Failed to record review_unavailable for lane ${input.lane.id}:`, error);
+    }
+    return { event: null, verdict, reviewUnavailable: true };
+  }
+
   const reviewedHeadSha = await captureReviewedHeadSha(input.lane);
   const { recordOrchestratorReview } = await import('@/lib/approvals/store');
   const event = recordOrchestratorReview(input.lane.packetId, {
@@ -211,11 +337,11 @@ export async function recordCodexAutoReviewVerdict(input: {
     requiresSecondPass: verdict.approved && input.requiresSecondPass,
     rawText: verdict.parseWarning ? verdict.rawText : undefined,
     parseWarning: verdict.parseWarning,
-    ...(input.reviewTurnId ? {
-      reviewTurnId: input.reviewTurnId,
+    ...(reviewTurnId ? {
+      reviewTurnId,
       reviewTurnOutcome: 'completed',
     } : {}),
   });
 
-  return { event, verdict, reviewedHeadSha };
+  return { event, verdict, reviewedHeadSha, reviewUnavailable: false };
 }

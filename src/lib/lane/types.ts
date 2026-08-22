@@ -315,6 +315,11 @@ export type LaneEventVerb =
   // A subscription-backed model surface crossed houses at the same policy
   // tier after quota exhaustion. These events are operator-visible audit rows.
   | 'review_fallback'
+  // The auto-reviewer produced no machine-readable verdict even after a
+  // stricter retry (#1812). A reviewer outage, never a packet rejection:
+  // no approval row is written and any existing verdict stands.
+  // Payload: { surface, reviewer, packetId, reason, attempts, rawText, note }
+  | 'review_unavailable'
   | 'review_turn_started'
   | 'review_turn_finished'
   | 'worker_quota_exhausted'

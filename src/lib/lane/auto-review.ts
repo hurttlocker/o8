@@ -607,8 +607,17 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
       rawText: reviewTurn.text,
       requiresSecondPass: reviewRisk.tier === 'high',
       reviewTurnId: reviewTurn.reviewTurnId,
+      // #1812 — one stricter retry when the reviewer answers with prose. A
+      // verdict that fails to parse is a reviewer outage, not a packet
+      // rejection, so nothing is written against the packet if it fails twice.
+      retry: {
+        reviewPrompt,
+        threadId: `auto-review-${lane.id}-${review.id}-verdict-retry`,
+      },
     });
-    if (recorded?.verdict.parseWarning) {
+    if (recorded?.reviewUnavailable) {
+      console.warn(`[auto-review] Codex review unavailable for lane ${lane.id} (${recorded.verdict.parseWarning}); existing verdict left untouched`);
+    } else if (recorded?.verdict.parseWarning) {
       console.warn(`[auto-review] Codex verdict for lane ${lane.id} needed parser fallback: ${recorded.verdict.parseWarning}`);
     }
   }
