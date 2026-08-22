@@ -195,6 +195,7 @@ export const BRAIN_CODEX_MODEL_OPTIONS: Array<{ value: string; label: string; de
 
 export const ORCHESTRATOR_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
   { value: MODEL_IDS.raw.anthropicClaudeFable5, label: 'Fable 5' },
+  { value: MODEL_IDS.raw.anthropicClaudeOpus5, label: 'Opus 5' },
   { value: MODEL_IDS.raw.anthropicClaudeOpus48, label: 'Opus 4.8' },
   { value: MODEL_IDS.raw.anthropicClaudeOpus47, label: 'Opus 4.7' },
   { value: MODEL_IDS.raw.anthropicClaudeOpus46, label: 'Opus 4.6' },

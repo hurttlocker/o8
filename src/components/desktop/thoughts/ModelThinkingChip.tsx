@@ -84,7 +84,8 @@ const COMPOSER_MODEL_GROUPS: ComposerModelGroup[] = [
     label: 'Claude',
     options: [
       { value: MODEL_IDS.raw.anthropicClaudeFable5, label: 'Fable 5', backend: 'fable', model: MODEL_IDS.fableDefault, sub: 'flagship' },
-      { value: MODEL_IDS.raw.anthropicClaudeOpus48, label: 'Opus 4.8', backend: 'claude', model: MODEL_IDS.orchestratorDefault, sub: 'deep reasoning' },
+      { value: MODEL_IDS.raw.anthropicClaudeOpus5, label: 'Opus 5', backend: 'claude', model: MODEL_IDS.raw.anthropicClaudeOpus5, sub: 'deep reasoning' },
+      { value: MODEL_IDS.raw.anthropicClaudeOpus48, label: 'Opus 4.8', backend: 'claude', model: MODEL_IDS.orchestratorDefault, sub: 'previous Opus' },
       { value: MODEL_IDS.raw.anthropicClaudeSonnet5, label: 'Sonnet 5', backend: 'claude', model: MODEL_IDS.claudeQaDefault, sub: 'everyday' },
     ],
   },
