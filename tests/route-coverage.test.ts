@@ -16,10 +16,11 @@
  * match. Default is `gated` — an unclassified route that the middleware lets
  * through from LAN trips the `else → expect deny` branch and reddens the suite.
  */
-import { mkdtempSync, writeFileSync, readdirSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
+import ts from 'typescript';
 
 import { describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
@@ -82,6 +83,152 @@ function fileToPathname(file: string): string {
 
 const routeFiles = walkRouteFiles(API_ROOT);
 const routes = routeFiles.map((file) => ({ file, pathname: fileToPathname(file) }));
+
+const ALLOWED_ROUTE_EXPORTS = new Set([
+  'GET',
+  'POST',
+  'PUT',
+  'PATCH',
+  'DELETE',
+  'HEAD',
+  'OPTIONS',
+  'runtime',
+  'dynamic',
+  'revalidate',
+  'fetchCache',
+  'preferredRegion',
+  'maxDuration',
+  'generateStaticParams',
+]);
+const ROUTE_HANDLER_EXPORTS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']);
+
+function hasModifier(node: ts.Node, kind: ts.SyntaxKind): boolean {
+  return Boolean(ts.getModifiers(node as ts.HasModifiers)?.some((modifier) => modifier.kind === kind));
+}
+
+function bindingNames(name: ts.BindingName): string[] {
+  if (ts.isIdentifier(name)) return [name.text];
+  return name.elements.flatMap((element) => (
+    ts.isOmittedExpression(element) ? [] : bindingNames(element.name)
+  ));
+}
+
+function routeShapeErrors(file: string): string[] {
+  const sourceFile = ts.createSourceFile(
+    file,
+    readFileSync(file, 'utf8'),
+    ts.ScriptTarget.Latest,
+    true,
+    file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+  const relativeFile = path.relative(process.cwd(), file);
+  const errors: string[] = [];
+  const localDeclarations = new Map<string, ts.FunctionDeclaration | ts.VariableDeclaration>();
+  const exportedBindings = new Map<string, string>();
+
+  for (const statement of sourceFile.statements) {
+    if (ts.isFunctionDeclaration(statement) && statement.name) {
+      localDeclarations.set(statement.name.text, statement);
+    }
+    if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        for (const name of bindingNames(declaration.name)) localDeclarations.set(name, declaration);
+      }
+    }
+  }
+
+  function recordExport(exportedName: string, localName = exportedName): void {
+    if (!ALLOWED_ROUTE_EXPORTS.has(exportedName)) {
+      errors.push(`${relativeFile} exports unsupported route field "${exportedName}"`);
+    }
+    if (ROUTE_HANDLER_EXPORTS.has(exportedName)) exportedBindings.set(exportedName, localName);
+  }
+
+  for (const statement of sourceFile.statements) {
+    if (ts.isExportAssignment(statement)) {
+      recordExport('default');
+      continue;
+    }
+    if (ts.isExportDeclaration(statement)) {
+      if (statement.isTypeOnly) continue;
+      if (!statement.exportClause || ts.isNamespaceExport(statement.exportClause)) {
+        recordExport('*');
+        continue;
+      }
+      for (const element of statement.exportClause.elements) {
+        if (!element.isTypeOnly) recordExport(element.name.text, element.propertyName?.text ?? element.name.text);
+      }
+      continue;
+    }
+    if (!hasModifier(statement, ts.SyntaxKind.ExportKeyword)) continue;
+    if (ts.isInterfaceDeclaration(statement) || ts.isTypeAliasDeclaration(statement)) continue;
+    if (ts.isFunctionDeclaration(statement) && statement.name) {
+      recordExport(statement.name.text);
+    } else if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        for (const name of bindingNames(declaration.name)) recordExport(name);
+      }
+    } else if (
+      (ts.isClassDeclaration(statement) || ts.isEnumDeclaration(statement) || ts.isModuleDeclaration(statement))
+      && statement.name
+      && ts.isIdentifier(statement.name)
+    ) {
+      recordExport(statement.name.text);
+    }
+  }
+
+  function handlerArity(localName: string, seen = new Set<string>()): number | null {
+    if (seen.has(localName)) return null;
+    seen.add(localName);
+    const declaration = localDeclarations.get(localName);
+    if (!declaration) return null;
+    if (ts.isFunctionDeclaration(declaration)) return declaration.parameters.length;
+    const initializer = declaration.initializer;
+    if (!initializer) return null;
+    if (ts.isArrowFunction(initializer) || ts.isFunctionExpression(initializer)) {
+      return initializer.parameters.length;
+    }
+    if (ts.isIdentifier(initializer)) return handlerArity(initializer.text, seen);
+    return null;
+  }
+
+  for (const [exportedName, localName] of exportedBindings) {
+    const arity = handlerArity(localName);
+    if (arity !== null && arity > 2) {
+      errors.push(`${relativeFile} exports ${exportedName} with ${arity} arguments; route handlers accept at most 2`);
+    }
+  }
+
+  return errors;
+}
+
+function routeFixture(name: string, source: string): string {
+  const fixtureDir = path.join(dataDir, 'route-shape-fixtures', name);
+  mkdirSync(fixtureDir, { recursive: true });
+  const file = path.join(fixtureDir, 'route.ts');
+  writeFileSync(file, source, 'utf8');
+  return file;
+}
+
+describe('route module shape', () => {
+  it('passes every route in the real API tree', () => {
+    expect(routeFiles.flatMap(routeShapeErrors)).toEqual([]);
+  });
+
+  it('rejects a fixture route with a stray value export', () => {
+    const file = routeFixture('stray-export', 'export const POST = async () => new Response();\nexport const testSeam = true;\n');
+    expect(routeShapeErrors(file)).toEqual([
+      expect.stringContaining('exports unsupported route field "testSeam"'),
+    ]);
+  });
+
+  it('rejects a fixture route with a three-argument handler', () => {
+    const file = routeFixture('three-argument-handler', 'export async function POST(request: Request, context: unknown, extra: unknown) { return Response.json({ request, context, extra }); }\n');
+    expect(routeShapeErrors(file)).toEqual([
+      expect.stringContaining('exports POST with 3 arguments; route handlers accept at most 2'),
+    ]);
+  });
+});
 
 // ── Policy manifest (mirrors src/middleware.ts). Adding a route to any bucket
 //    here is the deliberate act of classifying a route as public — the whole
