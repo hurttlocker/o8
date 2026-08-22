@@ -584,14 +584,19 @@ export async function runMergeGate(
   const checkoutSafety = await inspectOperatorCheckoutMergeSafety({
     repoPath: lane.repoPath,
     candidateCwd: cwd,
+    candidateBaseRef: comparisonRef,
     baseBranch,
   });
-  const checkoutViolations: MergeViolation[] = checkoutSafety.safe ? [] : [{
-    category: 'integrity',
-    severity: 'block',
-    label: 'Operator checkout blocks base fast-forward',
-    detail: checkoutSafety.detail ?? `o8 found branch "${checkoutSafety.foundBranch}"; merge needs branch "${checkoutSafety.neededBranch}".`,
-  }];
+  const checkoutViolations: MergeViolation[] = checkoutSafety.status === 'safe'
+    ? []
+    : [{
+      category: 'integrity',
+      severity: checkoutSafety.status === 'unsafe' ? 'block' : 'warn',
+      label: checkoutSafety.status === 'unsafe'
+        ? 'Operator checkout blocks base fast-forward'
+        : 'Operator checkout safety could not be verified',
+      detail: checkoutSafety.detail ?? `o8 found branch "${checkoutSafety.foundBranch}"; merge needs branch "${checkoutSafety.neededBranch}".`,
+    }];
 
   if (shouldUseBranchMergeGate(cwd, comparisonRef)) {
     const branchResult = runBranchMergeGate(lane, selfReview, orchestratorApproved, cwd);
@@ -602,7 +607,7 @@ export async function runMergeGate(
       ? branchResult.violations
       : [...branchResult.violations, ...checkoutViolations];
     return {
-      passed: branchResult.passed && checkoutViolations.length === 0,
+      passed: branchResult.passed && checkoutSafety.status !== 'unsafe',
       violations,
       diffBase: branchResult.diffBase ?? diffBase,
     };

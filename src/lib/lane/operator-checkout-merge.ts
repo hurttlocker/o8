@@ -9,7 +9,7 @@ export interface OperatorCheckoutMergeSafety {
   foundBranch: string;
   neededBranch: string;
   conflictingPaths: string[];
-  safe: boolean;
+  status: 'safe' | 'unsafe' | 'unverified';
   detail: string | null;
 }
 
@@ -29,6 +29,7 @@ function pathsOverlap(left: string, right: string): boolean {
 export async function inspectOperatorCheckoutMergeSafety(input: {
   repoPath: string;
   candidateCwd: string;
+  candidateBaseRef: string;
   baseBranch: string;
 }): Promise<OperatorCheckoutMergeSafety> {
   const foundBranch = await currentBranch(input.repoPath);
@@ -37,7 +38,7 @@ export async function inspectOperatorCheckoutMergeSafety(input: {
       foundBranch,
       neededBranch: input.baseBranch,
       conflictingPaths: [],
-      safe: true,
+      status: 'safe',
       detail: null,
     };
   }
@@ -51,20 +52,20 @@ export async function inspectOperatorCheckoutMergeSafety(input: {
         'diff',
         '--name-only',
         '-z',
-        `refs/heads/${input.baseBranch}...HEAD`,
+        `${input.candidateBaseRef}...HEAD`,
       ]),
     ]);
     const dirtyPaths = [...new Set([...unstaged, ...staged, ...untracked])];
     const conflictingPaths = dirtyPaths.filter((dirtyPath) => (
       packetChanges.some((packetPath) => pathsOverlap(dirtyPath, packetPath))
     ));
-    const safe = conflictingPaths.length === 0;
+    const status = conflictingPaths.length === 0 ? 'safe' : 'unsafe';
     return {
       foundBranch,
       neededBranch: input.baseBranch,
       conflictingPaths,
-      safe,
-      detail: safe
+      status,
+      detail: status === 'safe'
         ? null
         : `o8 found operator checkout branch "${foundBranch}"; merge needs base branch "${input.baseBranch}". Uncommitted changes to ${conflictingPaths.join(', ')} would be disturbed by the fast-forward.`,
     };
@@ -73,7 +74,7 @@ export async function inspectOperatorCheckoutMergeSafety(input: {
       foundBranch,
       neededBranch: input.baseBranch,
       conflictingPaths: [],
-      safe: false,
+      status: 'unverified',
       detail: `o8 found operator checkout branch "${foundBranch}"; merge needs base branch "${input.baseBranch}". Checkout safety could not be verified: ${gitErrorMessage(error)}`,
     };
   }
