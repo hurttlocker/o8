@@ -14,6 +14,8 @@ type MotionProps = {
   transition?: unknown;
 } & Record<string, unknown>;
 
+const motionState = vi.hoisted(() => ({ reduced: false }));
+
 vi.mock('framer-motion', () => {
   const renderMotionElement = (tag: 'article' | 'span', props: MotionProps) => {
     const domProps = { ...props };
@@ -29,7 +31,7 @@ vi.mock('framer-motion', () => {
       article: (props: MotionProps) => renderMotionElement('article', props),
       span: (props: MotionProps) => renderMotionElement('span', props),
     },
-    useReducedMotion: () => false,
+    useReducedMotion: () => motionState.reduced,
   };
 });
 
@@ -106,6 +108,8 @@ describe('Broadcast spectator page', () => {
     window.sessionStorage.setItem('o8.broadcast.spectator-token', 'spectator-test-token');
     window.history.replaceState(null, '', '/broadcast');
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1_280, writable: true });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 1_080, writable: true });
+    motionState.reduced = false;
     snapshotPayload = snapshot;
     setVisibility('visible');
     container = document.createElement('div');
@@ -253,6 +257,84 @@ describe('Broadcast spectator page', () => {
     expect(container.textContent).not.toContain('Waiting for governed activity');
   });
 
+  it('breathes while events arrive, then leaves the LIVE indicator dim and still when idle', async () => {
+    await act(async () => { root.render(createElement(BroadcastPage)); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(20); });
+
+    const indicator = container.querySelector<HTMLElement>('[data-broadcast-feed-state]');
+    expect(indicator?.dataset.broadcastFeedState).toBe('active');
+    expect(indicator?.style.background).toBe('var(--t-accent-soft-strong)');
+    expect(indicator?.style.boxShadow).toContain('var(--t-accent-ring)');
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(90_001); });
+    expect(indicator?.dataset.broadcastFeedState).toBe('idle');
+    expect(indicator?.style.background).toBe('var(--t-input-bg)');
+    expect(indicator?.style.boxShadow).toBe('none');
+  });
+
+  it('groups consecutive event kinds and preserves room for verdicts', async () => {
+    const approval = { ...snapshot.recentEvents[0], kind: 'approval' as const, title: 'Approval requested' };
+    snapshotPayload = {
+      ...snapshot,
+      recentEvents: [
+        { ...approval, id: 'approval-one', timestamp: '2026-08-21T11:59:54.000Z' },
+        { ...approval, id: 'approval-two', timestamp: '2026-08-21T11:59:55.000Z' },
+        { ...approval, id: 'verdict', kind: 'review_verdict', title: 'Review passed', timestamp: '2026-08-21T11:59:56.000Z' },
+        { ...approval, id: 'progress-one', kind: 'progress', title: 'Working', timestamp: '2026-08-21T11:59:57.000Z' },
+        { ...approval, id: 'progress-two', kind: 'progress', title: 'Still working', timestamp: '2026-08-21T11:59:58.000Z' },
+      ],
+    };
+    await act(async () => { root.render(createElement(BroadcastPage)); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(20); });
+
+    const groups = [...container.querySelectorAll<HTMLElement>('[data-broadcast-event-group]')];
+    expect(groups.map((group) => [group.dataset.broadcastEventGroup, group.dataset.eventCount])).toEqual([
+      ['progress', '2'],
+      ['review_verdict', '1'],
+      ['approval', '2'],
+    ]);
+    expect(groups[0].style.paddingTop).toBe('10px');
+    expect(groups[1].style.paddingTop).toBe('18px');
+    expect(groups[2].textContent).toContain('APPROVAL × 2');
+  });
+
+  it('renders approval titles, packet targets, and visibly stale ages from the snapshot', async () => {
+    snapshotPayload = {
+      ...snapshot,
+      pendingApprovals: {
+        count: 2,
+        items: [
+          { id: 'approval-fresh', laneId: 'lane-one', packetId: 'packet-fresh', title: 'Review the visual patch', risk: 'medium', createdAt: '2026-08-21T11:55:00.000Z' },
+          { id: 'approval-stale', laneId: 'lane-two', packetId: 'packet-stale', title: 'Approve the merge', risk: 'high', createdAt: '2026-08-21T11:30:00.000Z' },
+        ],
+      },
+    };
+    await act(async () => { root.render(createElement(BroadcastPage)); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(20); });
+
+    const approvals = [...container.querySelectorAll<HTMLElement>('[data-broadcast-approval="true"]')];
+    expect(approvals).toHaveLength(2);
+    expect(approvals[0].textContent).toContain('Review the visual patch');
+    expect(approvals[0].textContent).toContain('packet-fresh · medium');
+    expect(approvals[0].querySelector('time')?.textContent).toBe('5m');
+    expect(approvals[0].dataset.broadcastAge).toBe('fresh');
+    expect(approvals[1].textContent).toContain('Approve the merge');
+    expect(approvals[1].querySelector('time')?.textContent).toBe('30m');
+    expect(approvals[1].dataset.broadcastAge).toBe('stale');
+    expect(approvals[1].style.background).toBe('var(--t-warning-soft)');
+  });
+
+  it('keeps active-item contrast but disables shimmer under reduced motion', async () => {
+    motionState.reduced = true;
+    await act(async () => { root.render(createElement(BroadcastPage)); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(20); });
+
+    const activeLane = container.querySelector<HTMLElement>('[data-broadcast-on-air="active"]');
+    expect(activeLane?.style.background).toBe('var(--t-accent-soft)');
+    expect(activeLane?.querySelector<HTMLElement>('div > div')?.style.animation).toBe('');
+    expect(container.querySelector('[data-broadcast-feed-state]')?.getAttribute('data-broadcast-feed-state')).toBe('active');
+  });
+
   it('uses a 60/40 stage at the 1600px breakpoint and a single column below it', async () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1_600, writable: true });
     await act(async () => { root.render(createElement(BroadcastPage)); });
@@ -260,10 +342,15 @@ describe('Broadcast spectator page', () => {
     const stage = container.querySelector<HTMLElement>('[aria-label="Broadcast stage"]');
     expect(stage?.style.display).toBe('grid');
     expect(stage?.style.gridTemplateColumns).toBe('minmax(0, 3fr) minmax(0, 2fr)');
+    expect(stage?.style.height).toBe('calc(100dvh - 140px)');
+    expect(stage?.style.overflow).toBe('hidden');
+    expect(container.querySelector<HTMLElement>('[aria-label="Broadcast sidebar"]')?.style.display).toBe('grid');
+    expect(container.querySelector<HTMLElement>('[aria-label="Broadcast event feed"]')?.style.height).toBe('100%');
 
     window.innerWidth = 1_599;
     await act(async () => { window.dispatchEvent(new Event('resize')); });
     expect(stage?.style.display).toBe('flex');
     expect(stage?.style.flexDirection).toBe('column');
+    expect(stage?.style.height).toBe('');
   });
 });
