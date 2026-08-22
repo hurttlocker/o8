@@ -6,13 +6,14 @@ const TTS_TIMEOUT_MS = 5 * 60_000;
 const POLL_MS = 100;
 
 let client: O8WebviewClient | null = null;
+let nativeTtsTail: Promise<void> = Promise.resolve();
 
 function webviewClient(): O8WebviewClient {
   if (!client) client = new O8WebviewClient();
   return client;
 }
 
-export async function speakBroadcastWithNativeTts(text: string): Promise<void> {
+async function speakBroadcastWithNativeTtsOnce(text: string): Promise<void> {
   const key = `__o8BroadcastTts_${randomUUID().replaceAll('-', '')}`;
   const keyLiteral = JSON.stringify(key);
   const code = `(() => {
@@ -46,4 +47,10 @@ export async function speakBroadcastWithNativeTts(text: string): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, POLL_MS));
   }
   throw new Error('Native Broadcast TTS timed out.');
+}
+
+export function speakBroadcastWithNativeTts(text: string): Promise<void> {
+  const run = nativeTtsTail.then(() => speakBroadcastWithNativeTtsOnce(text));
+  nativeTtsTail = run.catch(() => undefined);
+  return run;
 }

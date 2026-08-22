@@ -35,7 +35,7 @@ function firstFinding(payload: Record<string, unknown>): { file: string | null; 
   return file || description ? { file, description } : null;
 }
 
-function eventSpecifics(
+export function broadcastEventSpecifics(
   event: BroadcastEvent,
   previousStatus: { status: string; timestamp: string } | null,
 ): Record<string, unknown> {
@@ -93,7 +93,7 @@ function buildFeed(events: BroadcastEvent[], contextEvents: BroadcastEvent[]) {
   for (const event of contextEvents) {
     const statusKey = event.laneId ?? event.packetId ?? event.id;
     const previousStatus = previousStatuses.get(statusKey) ?? null;
-    const specifics = eventSpecifics(event, previousStatus);
+    const specifics = broadcastEventSpecifics(event, previousStatus);
     if (typeof specifics.status === 'string') {
       previousStatuses.set(statusKey, { status: specifics.status, timestamp: event.timestamp });
     }
