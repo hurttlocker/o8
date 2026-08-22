@@ -1,10 +1,14 @@
 export interface ApfsDependencyImagesDefaults {
-  /** Reuse eligible dependency installs through APFS disk images. Default off. */
+  /** Reuse eligible dependency installs through APFS disk images. */
   apfsDependencyImages: boolean;
 }
 
+export function defaultApfsDependencyImages(platform: NodeJS.Platform = process.platform): boolean {
+  return platform === 'darwin';
+}
+
 export const APFS_DEPENDENCY_IMAGES_FALLBACK: ApfsDependencyImagesDefaults = {
-  apfsDependencyImages: false,
+  apfsDependencyImages: defaultApfsDependencyImages(),
 };
 
 export function resolveStoredApfsDependencyImages(

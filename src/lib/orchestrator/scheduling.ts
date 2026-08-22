@@ -81,6 +81,7 @@ function createLaneBinding(
   laneId: string,
   sessionKey?: string | null,
   workerRouting?: WorkerRouting,
+  dependencyMaterializationMode?: 'native' | 'image' | null,
 ): OrchestratorLaneBinding {
   // Read the SQLite lane row so the binding reflects what `updateLane` already
   // persisted (most importantly `worktreePath`, written in commands.ts during
@@ -104,6 +105,7 @@ function createLaneBinding(
     lastHeartbeatAt: null,
     lastEventAt: new Date().toISOString(),
     lastEventLabel: 'dispatch_started',
+    dependencyMaterializationMode: dependencyMaterializationMode ?? null,
   };
 }
 
@@ -127,6 +129,7 @@ interface LaunchedDispatchResult {
   workerRouting: WorkerRouting;
   storageAdmission: PacketStorageAdmissionReceipt;
   spendCap?: import('@/lib/orchestrator/metered-spend').PacketSpendCap;
+  dependencyMaterializationMode: 'native' | 'image' | null;
 }
 
 type DispatchResult = AwaitingReviewDispatchResult | LaunchedDispatchResult;
@@ -274,6 +277,7 @@ async function dispatchOrRecoverPacket(
     workerRouting: launchResult.workerRouting,
     storageAdmission: launchResult.storageAdmission,
     spendCap: launchResult.spendCap,
+    dependencyMaterializationMode: launchResult.dependencyMaterializationMode,
   };
 }
 
@@ -677,7 +681,13 @@ export async function runDispatchTick(
               blockedReason: null,
               storageAdmission: result.value.storageAdmission,
               spendCap: result.value.spendCap,
-              lane: createLaneBinding(candidate, result.value.laneId, result.value.sessionKey, workerRouting),
+              lane: createLaneBinding(
+                candidate,
+                result.value.laneId,
+                result.value.sessionKey,
+                workerRouting,
+                result.value.dependencyMaterializationMode,
+              ),
             };
           }
 

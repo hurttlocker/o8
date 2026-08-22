@@ -68,7 +68,8 @@ backend = "codex"
   });
 
   it('persists APFS dependency images through the real route and store', async () => {
-    expect((await getOperatorDefaults()).values.apfsDependencyImages).toBe(false);
+    expect((await getOperatorDefaults()).values.apfsDependencyImages)
+      .toBe(process.platform === 'darwin');
 
     const response = await POST(postDefaults({ apfsDependencyImages: true }));
     const payload = await response.json();

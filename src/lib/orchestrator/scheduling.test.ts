@@ -16,6 +16,7 @@ const launchMock = vi.hoisted(() => ({
   }>,
   outcome: 'success' as 'success' | 'failure',
   gate: null as Promise<void> | null,
+  dependencyMode: null as 'native' | 'image' | null,
 }));
 
 vi.mock('@/lib/runtime/actions', () => ({
@@ -40,7 +41,12 @@ vi.mock('@/lib/runtime/actions', () => ({
       ok: true,
       surfaceId: `codex-owned:${input.packetId}`,
       note: 'mock launch',
-      worktree: { path: input.repoPath },
+      worktree: {
+        path: input.repoPath,
+        dependencyMaterialization: launchMock.dependencyMode
+          ? { mode: launchMock.dependencyMode }
+          : undefined,
+      },
     };
   }),
 }));
@@ -228,6 +234,7 @@ describe('dispatch scheduling caps and waves', () => {
     launchMock.calls.length = 0;
     launchMock.outcome = 'success';
     launchMock.gate = null;
+    launchMock.dependencyMode = null;
     setDispatchHaltState(false);
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
   });
@@ -236,6 +243,22 @@ describe('dispatch scheduling caps and waves', () => {
     expect(MAX_PARALLEL_DISPATCHES).toBeGreaterThanOrEqual(1);
     expect(RUNTIME_PARALLEL_CAP.gemini).toBe(3);
   });
+
+  it('persists the dependency materialization path on the packet lane binding', async () => {
+    launchMock.dependencyMode = 'image';
+    const repoPath = makeRepo();
+    const next = await runDispatchTick(
+      missionFixture(repoPath, [packetFixture(repoPath, 'materialization-receipt')]),
+      {
+        launchBudget: { maxLaunches: 1 },
+        storageAdmission: permissiveAdmission(),
+      },
+    );
+
+    expect(next.packets[0]?.lane?.dependencyMaterializationMode).toBe('image');
+    expect(normalizeOrchestratorMissionState(next).packets[0]?.lane?.dependencyMaterializationMode)
+      .toBe('image');
+  }, 20_000);
 
   it('subtracts active lane rows from the remaining launch budget', () => {
     const before = buildRemainingLaunchBudget();

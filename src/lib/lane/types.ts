@@ -395,6 +395,8 @@ export interface LaneCommandResult {
   laneId: string;
   note: string;
   lane?: Lane;
+  /** Dependency setup path selected while provisioning this lane's worktree. */
+  dependencyMaterializationMode?: 'native' | 'image' | null;
   /** Set when the command requires human approval before proceeding */
   approvalId?: string;
   /** Merge-specific — true only when `git push origin <baseBranch>` also succeeded */

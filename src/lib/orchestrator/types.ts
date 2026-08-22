@@ -122,6 +122,8 @@ export interface OrchestratorLaneBinding {
   lastEventLabel?: string | null;
   mergeMode?: LaneMergeMode;
   mergeModeNote?: string | null;
+  /** Worktree dependency setup selected during launch. */
+  dependencyMaterializationMode?: 'native' | 'image' | null;
 }
 
 export interface OrchestratorPacketReviewFinding {

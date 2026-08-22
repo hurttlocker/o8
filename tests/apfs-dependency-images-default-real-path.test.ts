@@ -12,6 +12,9 @@ const root = mkdtempSync(path.join(os.tmpdir(), 'o8-apfs-default-real-path-'));
 const dataDir = path.join(root, 'data');
 const repoPath = path.join(root, 'repo');
 const workspacePath = path.join(root, 'workspace');
+const defaultImageWorkspacePath = path.join(root, 'workspace-default-image');
+const probeFallbackWorkspacePath = path.join(root, 'workspace-probe-fallback');
+const explicitOffWorkspacePath = path.join(root, 'workspace-explicit-off');
 const originalDataDir = process.env.CORTEX_IDE_DATA_DIR;
 const originalO8DataDir = process.env.O8_DATA_DIR;
 const originalOverride = process.env.O8_APFS_DEPENDENCY_IMAGES;
@@ -42,10 +45,14 @@ writeFileSync(path.join(repoPath, 'package-lock.json'), `${JSON.stringify({
 git(repoPath, 'add', '.gitignore', 'package.json', 'package-lock.json');
 git(repoPath, '-c', 'user.name=o8-test', '-c', 'user.email=test@invalid', 'commit', '-qm', 'fixture');
 git(repoPath, 'worktree', 'add', '-q', '-b', 'apfs-default-test', workspacePath);
+git(repoPath, 'worktree', 'add', '-q', '-b', 'apfs-default-image', defaultImageWorkspacePath);
+git(repoPath, 'worktree', 'add', '-q', '-b', 'apfs-probe-fallback', probeFallbackWorkspacePath);
+git(repoPath, 'worktree', 'add', '-q', '-b', 'apfs-explicit-off', explicitOffWorkspacePath);
 
-const [{ GET, POST }, { runRegisteredRepoSetup }] = await Promise.all([
+const [{ GET, POST }, { runRegisteredRepoSetup }, { getOperatorDefaultsTomlPath }] = await Promise.all([
   import('@/app/api/panel/operator-defaults/route'),
   import('@/lib/workspace/repo-setup'),
+  import('@/lib/operator/defaults'),
 ]);
 
 function post(body: unknown): Request {
@@ -54,6 +61,49 @@ function post(body: unknown): Request {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
+}
+
+const repo: RepoRegistryEntry = {
+  id: 'apfs-default-real-path',
+  name: 'APFS default real path',
+  localPath: repoPath,
+  remoteUrl: null,
+  defaultBranch: 'main',
+  addedAt: '2026-08-20T00:00:00.000Z',
+  lastOpenedAt: null,
+  storagePressureParkingDisabled: false,
+  setup: {
+    envMode: 'skip',
+    envFiles: [],
+    installCommand: 'npm ci --prefer-offline --ignore-scripts',
+    installOnCreateWorkspace: true,
+    buildCommand: null,
+    runBuildOnCreateWorkspace: false,
+    devCommand: null,
+    defaultPort: null,
+    workspaceIsolationPreference: 'auto',
+  },
+};
+
+function readyProvider(tag: string): DependencyImageProvider {
+  return {
+    lookupReadyImage: vi.fn(async ({ recipe }) => ({
+      status: 'ready' as const,
+      authority: { recipeKey: recipe.key, generation: `${tag}-generation` },
+    })),
+    mount: vi.fn(async ({ workspacePath: target, recipe }) => {
+      mkdirSync(path.join(target, 'node_modules', 'fixture'), { recursive: true });
+      return {
+        leaseId: `${tag}-lease`,
+        recipeKey: recipe.key,
+        generation: `${tag}-generation`,
+      };
+    }),
+    captureSource: vi.fn(async () => { throw new Error('unexpected native publication'); }),
+    publish: vi.fn(async () => { throw new Error('unexpected native publication'); }),
+    detach: vi.fn(async () => {}),
+    reconcile: vi.fn(async () => []),
+  };
 }
 
 afterAll(() => {
@@ -67,6 +117,57 @@ afterAll(() => {
 });
 
 describe.sequential('APFS dependency images persisted default through production repo setup', () => {
+  it('defaults to images when the darwin APFS capability probe succeeds', async () => {
+    const imageProvider = readyProvider('default');
+    const imageResult = await runRegisteredRepoSetup(repo, defaultImageWorkspacePath, {
+      run: vi.fn(async () => { throw new Error('unexpected native install'); }),
+      resolvePackageManagerVersion: async () => '10.0.0',
+      dependencyImageProvider: imageProvider,
+      dependencyImagePlatform: 'darwin',
+      probeDependencyImageApfs: async () => true,
+    });
+    expect(imageResult.install.materialization?.mode).toBe('image');
+  }, 30_000);
+
+  it('falls back silently to native materialization when the probe fails', async () => {
+    const fallbackProvider = readyProvider('fallback');
+    const fallbackRun = vi.fn(async ({ cwd }: { cwd: string }) => {
+      mkdirSync(path.join(cwd, 'node_modules', 'fixture'), { recursive: true });
+    });
+    const fallbackResult = await runRegisteredRepoSetup(repo, probeFallbackWorkspacePath, {
+      run: fallbackRun,
+      resolvePackageManagerVersion: async () => '10.0.0',
+      packageManagerCacheRoot: path.join(root, 'cache-probe-fallback'),
+      dependencyImageProvider: fallbackProvider,
+      dependencyImagePlatform: 'darwin',
+      probeDependencyImageApfs: async () => false,
+    });
+    expect(fallbackResult.install.materialization?.mode).toBe('native');
+    expect(fallbackRun).toHaveBeenCalledOnce();
+    expect(fallbackProvider.lookupReadyImage).not.toHaveBeenCalled();
+  }, 30_000);
+
+  it('preserves an explicit operator setting that disables dependency images', async () => {
+    writeFileSync(getOperatorDefaultsTomlPath(), '[git]\napfs_dependency_images = false\n');
+    const explicitOffProvider = readyProvider('explicit-off');
+    const explicitOffProbe = vi.fn(async () => true);
+    const explicitOffRun = vi.fn(async ({ cwd }: { cwd: string }) => {
+      mkdirSync(path.join(cwd, 'node_modules', 'fixture'), { recursive: true });
+    });
+    const explicitOffResult = await runRegisteredRepoSetup(repo, explicitOffWorkspacePath, {
+      run: explicitOffRun,
+      resolvePackageManagerVersion: async () => '10.0.0',
+      packageManagerCacheRoot: path.join(root, 'cache-explicit-off'),
+      dependencyImageProvider: explicitOffProvider,
+      dependencyImagePlatform: 'darwin',
+      probeDependencyImageApfs: explicitOffProbe,
+    });
+    expect(explicitOffResult.install.materialization?.mode).toBe('native');
+    expect(explicitOffRun).toHaveBeenCalledOnce();
+    expect(explicitOffProbe).not.toHaveBeenCalled();
+    expect(explicitOffProvider.lookupReadyImage).not.toHaveBeenCalled();
+  }, 30_000);
+
   it('surfaces environment truth without mutating the persisted default', async () => {
     const persistedResponse = await POST(post({ apfsDependencyImages: true }));
     const persisted = await persistedResponse.json();
@@ -114,28 +215,6 @@ describe.sequential('APFS dependency images persisted default through production
       reconcile: vi.fn(async () => []),
     };
     const run = vi.fn(async () => { throw new Error('unexpected native install'); });
-    const repo: RepoRegistryEntry = {
-      id: 'apfs-default-real-path',
-      name: 'APFS default real path',
-      localPath: repoPath,
-      remoteUrl: null,
-      defaultBranch: 'main',
-      addedAt: '2026-08-20T00:00:00.000Z',
-      lastOpenedAt: null,
-      storagePressureParkingDisabled: false,
-      setup: {
-        envMode: 'skip',
-        envFiles: [],
-        installCommand: 'npm ci --prefer-offline --ignore-scripts',
-        installOnCreateWorkspace: true,
-        buildCommand: null,
-        runBuildOnCreateWorkspace: false,
-        devCommand: null,
-        defaultPort: null,
-        workspaceIsolationPreference: 'auto',
-      },
-    };
-
     expect(process.env.O8_APFS_DEPENDENCY_IMAGES).toBeUndefined();
     const receipt = await runRegisteredRepoSetup(repo, workspacePath, {
       run,

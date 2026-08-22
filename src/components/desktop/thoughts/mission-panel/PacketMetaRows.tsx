@@ -48,6 +48,12 @@ const RECOMMENDATION_TTL_MS = 10_000;
 // without touching the per-mount cleanup contract.
 const inFlightByRepo = new Map<string, Promise<RuntimeRecommendationPayload | null>>();
 
+export function dependencyMaterializationLabel(mode: 'native' | 'image' | null | undefined): string | null {
+  if (mode === 'image') return 'Shared APFS image';
+  if (mode === 'native') return 'Native install';
+  return null;
+}
+
 function fetchRecommendationFor(repoPath: string): Promise<RuntimeRecommendationPayload | null> {
   const existing = inFlightByRepo.get(repoPath);
   if (existing) return existing;
@@ -178,6 +184,9 @@ export function PacketMetaRows({
     : null;
 
   const runtimeDisplay = orchestratorRuntimeTone(packet.runtime).label;
+  const materializationLabel = dependencyMaterializationLabel(
+    packet.lane?.dependencyMaterializationMode,
+  );
 
   const rowChromeStyle: React.CSSProperties = {
     display: 'flex',
@@ -284,6 +293,28 @@ export function PacketMetaRows({
           </button>
         )}
       </div>
+
+      {materializationLabel ? (
+        <div
+          data-packet-row
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            minHeight: 28,
+            paddingTop: 5,
+            paddingRight: 10,
+            paddingBottom: 5,
+            paddingLeft: 10,
+            borderBottomWidth: 1,
+            borderBottomStyle: 'solid',
+            borderBottomColor: 'var(--t-divider-subtle)',
+          }}
+        >
+          <span style={rowLabelStyle}>dependencies</span>
+          <span style={rowValueStyle}>{materializationLabel}</span>
+        </div>
+      ) : null}
 
       {/* Runtime row */}
       <div data-packet-row style={{ position: 'relative', borderBottomWidth: 1, borderBottomStyle: 'solid', borderBottomColor: 'var(--t-divider-subtle)' }}>

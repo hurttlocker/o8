@@ -2,6 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
+import { defaultApfsDependencyImages } from '@/lib/operator/apfs-dependency-images-default';
 import { getApfsCowCapability } from '@/lib/worktree/apfs';
 import {
   captureWorktreeMaterializationIdentity,
@@ -329,16 +330,20 @@ export async function materializeDependencyInstall(
     workspace,
     options.materializationIdentity,
   );
+  const platform = options.platform ?? process.platform;
   const effectiveOverride = resolveApfsDependencyImagesOverride(options.env ?? process.env);
+  const operatorDefaults = getOperatorDefaultsSync();
   const enabled = effectiveOverride
-    ?? getOperatorDefaultsSync().values.apfsDependencyImages;
+    ?? (operatorDefaults.sources.apfsDependencyImages === 'default'
+      ? defaultApfsDependencyImages(platform)
+      : operatorDefaults.values.apfsDependencyImages);
   if (options.expectedLease && options.exactGenerationRemount) {
     throw new DependencyMaterializationRefusalError(
       'Dependency image materialization cannot adopt a lease and remount a generation together.',
     );
   }
   const imageRequired = Boolean(options.expectedLease || options.exactGenerationRemount);
-  if ((!enabled && !imageRequired) || (options.platform ?? process.platform) !== 'darwin'
+  if ((!enabled && !imageRequired) || platform !== 'darwin'
     || !await isDependencyImageRecipeEligible(workspace, recipe)) {
     if (imageRequired) {
       throw new DependencyMaterializationRefusalError(

@@ -195,7 +195,13 @@ export async function launchSession(
     }
 
     const updated = getLane(command.laneId);
-    return { ok: true, laneId: command.laneId, note: result.note, lane: updated ?? undefined };
+    return {
+      ok: true,
+      laneId: command.laneId,
+      note: result.note,
+      lane: updated ?? undefined,
+      dependencyMaterializationMode: result.worktree?.dependencyMaterialization?.mode ?? null,
+    };
   } catch (err) {
     if (getLane(command.laneId)?.status === 'launching') {
       setLaneStatus(command.laneId, 'idle', 'system', 'launch_error');

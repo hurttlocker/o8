@@ -31,6 +31,7 @@ export interface LaunchPacketResult {
   workerRouting: WorkerRouting;
   storageAdmission: PacketStorageAdmissionReceipt;
   spendCap?: PacketSpendCap;
+  dependencyMaterializationMode: 'native' | 'image' | null;
 }
 
 function resolvePacketSpendCap(packet: OrchestratorPacket, runtime: OrchestratorRuntime): PacketSpendCap | undefined {
@@ -103,6 +104,7 @@ export async function launchPacketWithStorageAdmission(input: {
       workerRouting,
       storageAdmission: admissionLease.receipt,
       spendCap,
+      dependencyMaterializationMode: packet.lane?.dependencyMaterializationMode ?? null,
     };
   }
   const claimKey = `packet-storage-launch:${admissionLease.receipt.reservationId}`;
@@ -119,6 +121,7 @@ export async function launchPacketWithStorageAdmission(input: {
         workerRouting,
         storageAdmission: await storageAdmission.commitAfterLaunch(admissionLease),
         spendCap,
+        dependencyMaterializationMode: packet.lane?.dependencyMaterializationMode ?? null,
       };
     },
   }, async () => {
@@ -190,6 +193,7 @@ export async function launchPacketWithStorageAdmission(input: {
       workerRouting,
       storageAdmission: storageReceipt,
       spendCap,
+      dependencyMaterializationMode: launchResult.dependencyMaterializationMode ?? null,
     };
   });
   if (!outcome.inProgress) return outcome.result;
