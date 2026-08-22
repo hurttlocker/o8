@@ -13,6 +13,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
+import { writeTestRunOwner } from './test-fixture-lifecycle';
 
 interface AttachedImage {
   baseDevice: string;
@@ -39,6 +40,7 @@ function nestedVitest(testPath: string, env: Record<string, string>) {
 
 function attachImage(parent: string, prefix: string, volumeName: string): AttachedImage {
   const root = mkdtempSync(path.join(parent, prefix));
+  writeTestRunOwner(root);
   const mountPath = path.join(root, 'mount');
   mkdirSync(mountPath);
   const imageBase = path.join(root, 'fixture');

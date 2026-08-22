@@ -1,10 +1,14 @@
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, utimesSync } from 'node:fs';
+import {
+  existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { removeOwnedWorkerDataRoot, sweepStaleTestDataRoots } from './global-test-data-dir';
+import { TEST_RUN_OWNER_FILE, writeTestRunOwner } from './test-fixture-lifecycle';
 
 const roots: string[] = [];
 
@@ -22,9 +26,14 @@ describe('test data root cleanup', () => {
     const recentRun = path.join(parent, 'o8-test-data-run-Ij56Kl');
     const foreign = path.join(parent, 'o8-test-data-foreign-name');
     const linked = path.join(parent, 'o8-test-data-Mn78Op');
-    for (const target of [staleLegacy, staleRun, recentRun, foreign]) mkdirSync(target);
-    symlinkSync(external, linked);
     const now = Date.now();
+    for (const target of [staleLegacy, staleRun, recentRun, foreign]) mkdirSync(target);
+    for (const target of [staleLegacy, staleRun, recentRun, foreign]) writeTestRunOwner(target);
+    writeFileSync(path.join(staleRun, TEST_RUN_OWNER_FILE), JSON.stringify({
+      pid: Number.MAX_SAFE_INTEGER,
+      startedAt: new Date(now - (25 * 60 * 60 * 1_000)).toISOString(),
+    }));
+    symlinkSync(external, linked);
     const stale = new Date(now - (25 * 60 * 60 * 1_000));
     for (const target of [staleLegacy, staleRun, foreign, linked]) utimesSync(target, stale, stale);
 

@@ -7,6 +7,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { lstat, readFile, readdir, realpath, rm } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
@@ -107,14 +108,52 @@ function isPidLive(pid: number): boolean {
   }
 }
 
-async function hasLiveRunOwner(target: string): Promise<boolean> {
+async function readTestRunOwner(target: string): Promise<TestRunOwner | null> {
   try {
+    const ownerPath = path.join(target, TEST_RUN_OWNER_FILE);
+    const identity = await lstat(ownerPath);
+    if (!identity.isFile() || identity.isSymbolicLink() || identity.nlink !== 1) return null;
     const owner = JSON.parse(
-      await readFile(path.join(target, TEST_RUN_OWNER_FILE), 'utf8'),
+      await readFile(ownerPath, 'utf8'),
     ) as TestRunOwner;
-    return isPidLive(owner.pid);
+    if (!Number.isInteger(owner.pid) || owner.pid <= 0
+      || !Number.isFinite(Date.parse(owner.startedAt))) return null;
+    return owner;
   } catch {
-    return false;
+    return null;
+  }
+}
+
+async function hasLiveRunOwner(target: string): Promise<boolean> {
+  const owner = await readTestRunOwner(target);
+  return owner ? isPidLive(owner.pid) : false;
+}
+
+function pathIsInsideRoot(target: string, root: string): boolean {
+  const relative = path.relative(root, target);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+async function realTemporaryRoots(): Promise<string[]> {
+  const candidates = process.platform === 'win32'
+    ? [os.tmpdir()]
+    : ['/tmp', '/var/tmp'];
+  if (process.platform === 'darwin') {
+    try {
+      const { stdout } = await execFileAsync('/usr/bin/getconf', ['DARWIN_USER_TEMP_DIR'], {
+        encoding: 'utf8',
+      });
+      if (stdout.trim()) candidates.push(stdout.trim());
+    } catch { /* Fixed system temporary roots remain the fail-closed fallback. */ }
+  }
+  const roots = await Promise.all(candidates.map((candidate) => realpath(candidate).catch(() => null)));
+  return [...new Set(roots.filter((candidate): candidate is string => candidate !== null))];
+}
+
+async function assertTemporarySweepParent(canonicalParent: string): Promise<void> {
+  const temporaryRoots = await realTemporaryRoots();
+  if (!temporaryRoots.some((root) => pathIsInsideRoot(canonicalParent, root))) {
+    throw new Error(`Fixture sweep parent is outside a real temporary root: ${canonicalParent}`);
   }
 }
 
@@ -160,6 +199,17 @@ function enclosingRunRoot(parentDir: string, fixtureRoot: string): string | null
   return runIndex < 0 ? null : path.join(path.resolve(parentDir), ...parts.slice(0, runIndex + 1));
 }
 
+async function fixtureOwnershipRoot(
+  parentDir: string,
+  fixtureRoot: string,
+): Promise<string | null> {
+  const runRoot = enclosingRunRoot(parentDir, fixtureRoot);
+  for (const candidate of [fixtureRoot, runRoot]) {
+    if (candidate && await readTestRunOwner(candidate)) return candidate;
+  }
+  return null;
+}
+
 async function imageIsOrphaned(
   parentDir: string,
   image: AttachedFixtureImage,
@@ -190,7 +240,16 @@ async function detachOrphanedFixtureImages(
   const detached: string[] = [];
   const retained: string[] = [];
   for (const image of attachedFixtureImages(parentDir, output)) {
+    const ownershipRoot = await fixtureOwnershipRoot(parentDir, image.fixtureRoot);
+    if (!ownershipRoot) {
+      retained.push(image.fixtureRoot);
+      continue;
+    }
     if (!await imageIsOrphaned(parentDir, image, now, thresholdMs)) {
+      retained.push(image.fixtureRoot);
+      continue;
+    }
+    if (!await readTestRunOwner(ownershipRoot)) {
       retained.push(image.fixtureRoot);
       continue;
     }
@@ -260,6 +319,7 @@ export async function sweepStaleTestFixtures(
   const now = options.now ?? Date.now();
   const thresholdMs = options.thresholdMs ?? DEFAULT_STALE_FIXTURE_AGE_MS;
   const canonicalParent = await realpath(parentDir);
+  await assertTemporarySweepParent(canonicalParent);
   const imageSweep = await detachOrphanedFixtureImages(canonicalParent, now, thresholdMs);
   const mountPaths = await readMountPaths();
   const receipt: FixtureSweepReceipt = {
@@ -279,6 +339,7 @@ export async function sweepStaleTestFixtures(
     const identity = await lstat(target).catch(() => null);
     if (!identity || identity.isSymbolicLink() || !identity.isDirectory()) continue;
     if (now - identity.mtimeMs < thresholdMs) continue;
+    if (!await readTestRunOwner(target)) continue;
     if (RUN_FIXTURE_NAME.test(entry.name) && await hasLiveRunOwner(target)) {
       receipt.skippedLivePaths.push(target);
       continue;
@@ -298,6 +359,7 @@ export async function sweepStaleTestFixtures(
 
   const finalMountPaths = await readMountPaths();
   for (const target of candidates) {
+    if (!await readTestRunOwner(target)) continue;
     if (!finalMountPaths || fixturePathHasMount(target, finalMountPaths)) {
       receipt.skippedMountedPaths.push(target);
       continue;
