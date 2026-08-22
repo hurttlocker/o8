@@ -30,6 +30,7 @@ import { getAllCached } from '@/lib/skeleton';
 import { checkUntrackedImports } from './check-untracked-imports';
 import { getRelocatedDeletionCredits } from './diff-relocation';
 import { hasScopePartitionToken } from './review-risk';
+import { inspectOperatorCheckoutMergeSafety } from './operator-checkout-merge';
 import type { Lane } from './types';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 
@@ -580,10 +581,31 @@ export async function runMergeGate(
   const headSha = readHeadSha(cwd);
   const diffBase = await resolvePacketDiffBase(cwd, baseBranch, headSha);
   const comparisonRef = diffBase.mergeBase ?? diffBase.comparisonRef;
+  const checkoutSafety = await inspectOperatorCheckoutMergeSafety({
+    repoPath: lane.repoPath,
+    candidateCwd: cwd,
+    baseBranch,
+  });
+  const checkoutViolations: MergeViolation[] = checkoutSafety.safe ? [] : [{
+    category: 'integrity',
+    severity: 'block',
+    label: 'Operator checkout blocks base fast-forward',
+    detail: checkoutSafety.detail ?? `o8 found branch "${checkoutSafety.foundBranch}"; merge needs branch "${checkoutSafety.neededBranch}".`,
+  }];
 
   if (shouldUseBranchMergeGate(cwd, comparisonRef)) {
     const branchResult = runBranchMergeGate(lane, selfReview, orchestratorApproved, cwd);
-    return { ...branchResult, diffBase: branchResult.diffBase ?? diffBase };
+    const alreadyChecked = branchResult.violations.some((violation) => (
+      violation.label === 'Operator checkout blocks base fast-forward'
+    ));
+    const violations = alreadyChecked
+      ? branchResult.violations
+      : [...branchResult.violations, ...checkoutViolations];
+    return {
+      passed: branchResult.passed && checkoutViolations.length === 0,
+      violations,
+      diffBase: branchResult.diffBase ?? diffBase,
+    };
   }
 
   const addedLines = getAddedLines(cwd, comparisonRef);
@@ -601,6 +623,7 @@ export async function runMergeGate(
     ...scopePartitionViolations,
     ...budgetViolations,
     ...importViolations,
+    ...checkoutViolations,
     ...integrityViolations,
   ];
   const hasBlocks = violations.some((v) => v.severity === 'block');

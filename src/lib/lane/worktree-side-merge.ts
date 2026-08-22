@@ -58,6 +58,7 @@ import {
 import { withRepoActionRecovery } from '@/lib/lane/repo-action-lock';
 import { settleReturnedMergeState } from '@/lib/lane/merge-state-settlement';
 import { enqueueMergeDecompositions } from '@/lib/lane/merge-decomposition';
+import { fastForwardBaseBranch } from '@/lib/lane/operator-checkout-merge';
 import { canonicalRepoRoot } from '@/lib/worktree/root-layout';
 
 const BASE_ADVANCED_RETRY_LIMIT = 3;
@@ -145,7 +146,7 @@ async function createFastForwardFailureApproval(
   const message = gitErrorMessage(error);
   const failureCategory = classifyFastForwardFailure(message);
   const title = failureCategory === 'dirty-working-tree'
-    ? `Fast-forward blocked: ${lane.label} (main has uncommitted changes)`
+    ? `Fast-forward blocked: ${lane.label} (${lane.baseBranch} has uncommitted changes)`
     : failureCategory === 'non-fast-forward'
       ? `Fast-forward blocked: ${lane.label} (base moved)`
       : failureCategory === 'invalid-ref'
@@ -697,16 +698,6 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
         if (retryResult) return retryResult;
       }
 
-      const mainCheckoutBranch = await currentBranch(lane.repoPath);
-      if (mainCheckoutBranch !== lane.baseBranch) {
-        setLaneStatus(command.laneId, 'reviewing', 'system', 'base_checkout_mismatch');
-        return {
-          ok: false,
-          laneId: command.laneId,
-          note: `Fast-forward requires ${lane.repoPath} to be on ${lane.baseBranch}; current branch is ${mainCheckoutBranch}.`,
-        };
-      }
-
       const integrationSha = (await git(lane.repoPath, ['rev-parse', integrationRef], { timeout: 5000 })).stdout.trim();
       mergeCandidateSha = integrationSha;
       if (integrationSha !== rebasedSha) {
@@ -727,7 +718,12 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       if (finalGovernanceDrift) return finalGovernanceDrift;
 
       try {
-        await git(lane.repoPath, ['merge', '--ff-only', integrationRef], { timeout: 60_000 });
+        await fastForwardBaseBranch({
+          repoPath: lane.repoPath,
+          baseBranch: lane.baseBranch,
+          candidateRef: integrationRef,
+          candidateSha: integrationSha,
+        });
       } catch (error) {
         return createFastForwardFailureApproval(input, error);
       }

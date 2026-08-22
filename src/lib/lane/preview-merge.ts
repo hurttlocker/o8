@@ -111,6 +111,9 @@ function resolveCheckName(violation: MergeViolation): MergeCheckName {
   if (violation.label === 'Untracked imported files') {
     return 'untracked-imports';
   }
+  if (violation.label === 'Operator checkout blocks base fast-forward') {
+    return 'clean-worktree';
+  }
   return 'self-review-integrity';
 }
 
