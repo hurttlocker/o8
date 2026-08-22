@@ -118,7 +118,7 @@ export async function runBroadcastDirectorOnce(options: {
       ? { model: options.model, reasoningEffort: options.reasoningEffort }
       : resolveBrainCodexRouteSync();
     const runner = options.runner ?? callCodex;
-    const output = (await runner(buildBroadcastCommentaryPrompt(newEvents), route)).trim();
+    const output = (await runner(buildBroadcastCommentaryPrompt(newEvents, recent), route)).trim();
     const text = output.replace(/\s+/g, ' ').slice(0, BROADCAST_TEXT_MAX_LENGTH).trim();
     if (!text) throw new Error('Broadcast commentary runner returned no text.');
     if (broadcastGeneratedLinesSince(sqlite, new Date(now.getTime() - 60 * 60_000).toISOString()) >= settings.maxPerHour) {
