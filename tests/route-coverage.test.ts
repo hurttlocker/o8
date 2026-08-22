@@ -162,6 +162,10 @@ function routeShapeErrors(file: string): string[] {
     }
     if (!hasModifier(statement, ts.SyntaxKind.ExportKeyword)) continue;
     if (ts.isInterfaceDeclaration(statement) || ts.isTypeAliasDeclaration(statement)) continue;
+    if (hasModifier(statement, ts.SyntaxKind.DefaultKeyword)) {
+      recordExport('default');
+      continue;
+    }
     if (ts.isFunctionDeclaration(statement) && statement.name) {
       recordExport(statement.name.text);
     } else if (ts.isVariableStatement(statement)) {
@@ -219,6 +223,13 @@ describe('route module shape', () => {
     const file = routeFixture('stray-export', 'export const POST = async () => new Response();\nexport const testSeam = true;\n');
     expect(routeShapeErrors(file)).toEqual([
       expect.stringContaining('exports unsupported route field "testSeam"'),
+    ]);
+  });
+
+  it('rejects a default export even when its local name is an allowed handler', () => {
+    const file = routeFixture('default-export', 'export default function POST() { return new Response(); }\n');
+    expect(routeShapeErrors(file)).toEqual([
+      expect.stringContaining('exports unsupported route field "default"'),
     ]);
   });
 
