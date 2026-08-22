@@ -1,9 +1,13 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { eq } from 'drizzle-orm';
 
 import { getDb, lanes } from '@/lib/db';
+import { getResourceLeaseStore } from '@/lib/leases/resource-lease-service';
 import { invalidateProcessCwdSnapshot } from '@/lib/runtime/process-cwd-snapshot';
 import { isBridgeSessionAlive } from '@/lib/runtime/pty-bridge';
 import { getRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
+import { canonicalRepoRoot } from '@/lib/worktree/root-layout';
 import type { Lane } from './types';
 import {
   appendEvent,
@@ -25,7 +29,7 @@ import { assessStaleLaneLiveness } from './reaper-liveness';
 
 export const LANE_ZOMBIE_REAPER_INTERVAL_MS = 5 * 60_000;
 export const LANE_HEARTBEAT_STALE_MS = 90_000;
-
+const execFileAsync = promisify(execFile);
 
 let zombieReaperTimer: ReturnType<typeof setInterval> | null = null;
 let zombieReaperInFlight = false;
@@ -43,7 +47,7 @@ export interface ZombieLaneCandidate {
   staleMs: number;
   lastHeartbeatAt: number | null;
   probe: LaneOwnerProbe;
-  reason: 'missing_heartbeat' | 'stale_heartbeat' | 'stale_merging';
+  reason: 'missing_heartbeat' | 'stale_heartbeat' | 'stale_merging' | 'abandoned_merging';
 }
 
 function getLaneDb() {
@@ -124,6 +128,29 @@ function heartbeatStaleMs(lane: Lane, now: number): number {
   }
   const updatedAtMs = Date.parse(lane.updatedAt);
   return Number.isFinite(updatedAtMs) ? now - updatedAtMs : Number.POSITIVE_INFINITY;
+}
+
+async function localBranchExists(lane: Lane): Promise<boolean | null> {
+  try {
+    await execFileAsync('git', ['show-ref', '--verify', '--quiet', `refs/heads/${lane.branch}`], {
+      windowsHide: true,
+      cwd: lane.repoPath,
+      timeout: 5_000,
+    });
+    return true;
+  } catch (error) {
+    const code = (error as { code?: string | number }).code;
+    return code === 1 || code === '1' ? false : null;
+  }
+}
+
+async function repoActionLeaseHeld(repoPath: string): Promise<boolean | null> {
+  try {
+    const snapshot = await getResourceLeaseStore().status(`repo-tree:${repoPath}`);
+    return snapshot.holder !== null;
+  } catch {
+    return null;
+  }
 }
 
 function actorStatusTransitionGraceMs(lane: Lane, now: number): number | null {
@@ -212,6 +239,25 @@ export async function listZombieLaneCandidates(now: number = Date.now()): Promis
   for (const lane of mergingLanes) {
     const lastTouch = lane.lastEventAt ? Date.parse(lane.lastEventAt) : Number.NaN;
     const staleMs = Number.isFinite(lastTouch) ? now - lastTouch : Number.MAX_SAFE_INTEGER;
+    const [branchExists, leaseHeld, ownerProbe] = await Promise.all([
+      localBranchExists(lane),
+      repoActionLeaseHeld(canonicalRepoRoot(lane.repoPath)),
+      probeLaneOwner(lane),
+    ]);
+    if (branchExists === false && leaseHeld === false && ownerProbe.alive === false) {
+      candidates.push({
+        lane,
+        staleMs,
+        lastHeartbeatAt: lane.lastHeartbeatAt,
+        probe: {
+          alive: false,
+          source: 'merging-abandoned',
+          note: 'merge branch absent with no repo-action lease or live lane owner',
+        },
+        reason: 'abandoned_merging',
+      });
+      continue;
+    }
     if (staleMs <= MERGING_STALE_MS) continue;
     candidates.push({
       lane,
@@ -311,7 +357,9 @@ export async function reapZombieLane(
           worktreePath: before.worktreePath,
           sessionKey: before.sessionKey,
           baseBranch: before.baseBranch,
-          note: 'Zombie reaper moved this stale running lane to recovering. Run retry_packet to resume the existing worktree.',
+          note: before.status === 'merging'
+            ? 'Merge wedge detected with no branch, repo-action lease, or live owner. The lane moved to recovering; inspect Git truth before retrying.'
+            : 'Zombie reaper moved this stale running lane to recovering. Run retry_packet to resume the existing worktree.',
         },
       });
     } catch (error) {
@@ -340,6 +388,11 @@ export async function runLaneZombieReaperTick(): Promise<void> {
   if (zombieReaperInFlight) return;
   zombieReaperInFlight = true;
   try {
+    // Git truth wins before wedge recovery: a process may have died after the
+    // merge landed but before its terminal lane write. Reconcile that receipt
+    // first so the reaper never demotes a successfully merged lane.
+    const { reconcileOrphanedWorktrees } = await import('./reconcile');
+    await reconcileOrphanedWorktrees();
     const reaped = await reapZombieLanes({ source: 'sidecar' });
     for (const item of reaped) {
       console.log(

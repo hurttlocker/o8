@@ -70,24 +70,31 @@ export async function cleanupResetPacketTargets(
 
   for (const target of targets) {
     if (target.worktreePath) {
-      // reset is an explicit operator/recovery action — force past the prune
-      // gate (records prune_forced) so a non-terminal lane's worktree can be
-      // torn down for the restart. The head is banked first (force path).
-      const cleanupAttempt = await runRuntimeAwareWorktreeCleanup({
-        runtime: target.runtime,
-        worktreePath: target.worktreePath,
-        cleanup: () => cleanupLaneWorktree(target, {
-          deleteBranch: false,
-          force: true,
-          overrideLiveGuard: target.overrideLiveGuard,
-        }),
-        removed: (removed) => removed || !existsSync(target.worktreePath!),
-      });
-      const removed = cleanupAttempt.result;
-      if (!removed && existsSync(target.worktreePath)) {
-        throw new Error(`Worktree cleanup was not confirmed for lane ${target.id} at ${target.worktreePath}.${formatWorktreeHolderPids(cleanupAttempt.holderPids)}`);
+      // An already-absent checkout is the cleanup postcondition, not a failure.
+      // Skip preservation/prune probes that necessarily require the path to
+      // exist; stale lane metadata must remain resettable through this handler.
+      if (!existsSync(target.worktreePath)) {
+        worktreePruned = true;
+      } else {
+        // reset is an explicit operator/recovery action — force past the prune
+        // gate (records prune_forced) so a non-terminal lane's worktree can be
+        // torn down for the restart. The head is banked first (force path).
+        const cleanupAttempt = await runRuntimeAwareWorktreeCleanup({
+          runtime: target.runtime,
+          worktreePath: target.worktreePath,
+          cleanup: () => cleanupLaneWorktree(target, {
+            deleteBranch: false,
+            force: true,
+            overrideLiveGuard: target.overrideLiveGuard,
+          }),
+          removed: (removed) => removed || !existsSync(target.worktreePath!),
+        });
+        const removed = cleanupAttempt.result;
+        if (!removed && existsSync(target.worktreePath)) {
+          throw new Error(`Worktree cleanup was not confirmed for lane ${target.id} at ${target.worktreePath}.${formatWorktreeHolderPids(cleanupAttempt.holderPids)}`);
+        }
+        worktreePruned = removed || worktreePruned;
       }
-      worktreePruned = removed || worktreePruned;
     }
     const key = `${normalizeRepoPath(target.repoPath)}\0${target.branch}`;
     groups.set(key, [...(groups.get(key) ?? []), target]);

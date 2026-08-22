@@ -70,8 +70,9 @@ function pickLatestTimestamp(candidates: Array<string | null | undefined>): stri
 /**
  * Deterministic state machine. Order matters — the first matching rule wins.
  *
- *   1. `merged`          — packet release flipped to `released`, OR the
- *                          packet's status is already `released`.
+ *   1. `merged`          — packet release flipped to `released`, the packet
+ *                          is already `released`, or the lane reached the
+ *                          terminal merged outcome.
  *   2. `failed`          — lane or packet status is `failed`.
  *   3. `needs-revision`  — orchestrator rejected the diff OR the merge gate
  *                          flagged any blocking violation.
@@ -85,7 +86,7 @@ export function derivePacketReviewState(input: DeriveReviewStateInput): DeriveRe
   const now = new Date().toISOString();
 
   // 1. merged
-  if (isPacketReleased(packet)) {
+  if (isPacketReleased(packet) || (lane?.status === 'completed' && lane.outcome === 'merged')) {
     const ts = pickLatestTimestamp([
       orchestratorReview?.ts,
       mergeGate?.ts,

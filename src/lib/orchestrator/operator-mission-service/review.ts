@@ -1,13 +1,13 @@
 import { randomUUID } from 'node:crypto';
 
 import { resolveApproval } from '@/lib/approvals/resolution';
-import { createApproval, recordApprovalAudit } from '@/lib/approvals/store';
+import { createApproval, listApprovalsForContext, recordApprovalAudit } from '@/lib/approvals/store';
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
 import { getLaneDiffFacts } from '@/lib/lane/lane-diff-facts';
 import { normalizeHeadSha, readHeadSha } from '@/lib/lane/head-sha-lock';
 import { findLaneByPacket, findLatestLaneByPacket } from '@/lib/lane/registry';
 import { classifyReviewRisk } from '@/lib/lane/review-risk';
-import { findActiveReviewTurnId } from '@/lib/lane/review-turn-state';
+import { findActiveReviewTurn } from '@/lib/lane/review-turn-state';
 import type { Lane } from '@/lib/lane/types';
 import { withLockedState } from '@/lib/orchestrator/control-plane';
 import { synthesizePacketFromLane } from '@/lib/orchestrator/synthesize-packet';
@@ -127,6 +127,20 @@ function requiresSecondPassForLane(lane: Lane | null, approved: boolean) {
   }
 }
 
+function hasApprovedVerdict(packet: OrchestratorPacket, lane: Lane | null): boolean {
+  if (packet.review?.approved === true) return true;
+  return listApprovalsForContext({
+    packetId: packet.id,
+    laneId: lane?.id,
+    sessionKey: lane?.sessionKey ?? undefined,
+  }).some((approval) => (
+    approval.toolName === 'orchestrator_review'
+    && approval.status === 'approved'
+    && approval.args?.approved === true
+    && approval.args?.reviewSuperseded !== true
+  ));
+}
+
 function recordPacketReviewAudit(
   packet: OrchestratorPacket,
   findings: OrchestratorReviewFinding[],
@@ -214,13 +228,43 @@ export async function submitPacketReview(input: SubmitReviewInput) {
     }
   }
   const verdictLane = orphanLane ?? findLaneByPacket(input.packetId);
-  const activeReviewTurnId = verdictLane ? findActiveReviewTurnId(verdictLane.id) : null;
+  const activeReviewTurn = verdictLane ? findActiveReviewTurn(verdictLane.id) : null;
+  if (activeReviewTurn?.surface === 'packet-explainer') {
+    log(`Ignored non-authoritative packet-explainer verdict for packet ${packet.id}.`, {
+      approved: input.approved,
+      findings: input.findings.length,
+      reviewTurnId: activeReviewTurn.id,
+    });
+    return {
+      recorded: false,
+      findingsCount: 0,
+      reviewedHeadSha: null,
+      warning: undefined,
+      auditEventType: null,
+      auditApprovalId: null,
+      ignoredReason: 'packet_explainer_non_authoritative',
+    };
+  }
+  if (!input.approved && input.findings.length === 0 && hasApprovedVerdict(packet, verdictLane)) {
+    log(`Ignored finding-free rejection that would replace an approved verdict for packet ${packet.id}.`, {
+      reviewTurnId: activeReviewTurn?.id ?? null,
+    });
+    return {
+      recorded: false,
+      findingsCount: 0,
+      reviewedHeadSha: null,
+      warning: undefined,
+      auditEventType: null,
+      auditApprovalId: null,
+      ignoredReason: 'finding_free_rejection_cannot_replace_approval',
+    };
+  }
   // submit_review is the completed verdict artifact even when its transport
   // turn is still streaming. Persist it as merge-authorizing immediately; the
   // turn finalizer can still downgrade and supersede it if that turn later
   // fails or exhausts quota.
   const reviewTurn = {
-    id: activeReviewTurnId ?? `review-turn-standalone-${randomUUID()}`,
+    id: activeReviewTurn?.id ?? `review-turn-standalone-${randomUUID()}`,
     outcome: 'completed' as const,
   };
   const summary = buildReviewSummary(input.findings, input.approved);

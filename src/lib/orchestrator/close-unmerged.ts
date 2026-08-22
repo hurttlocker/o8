@@ -1,5 +1,3 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { dispatch } from '@/lib/lane/commands';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { findLatestLaneByPacket, listLanes } from '@/lib/lane/registry';
@@ -32,9 +30,11 @@ import {
   closeUnmergedDispositionLabel,
   closeUnmergedOutcomeNote,
   type BranchPreservationFailure,
+  type BranchPreservationReceipt,
   type CloseUnmergedDisposition,
   type CloseUnmergedResult,
 } from './close-unmerged-shared';
+import { classifyClosePreservation } from './close-unmerged-preservation';
 
 // Re-export the shared vocabulary so existing server-side importers of this
 // module keep working unchanged.
@@ -50,7 +50,6 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-const execFileAsync = promisify(execFile);
 const CLOSEABLE_LANE_STATUSES = new Set([
   'idle',
   'paused',
@@ -61,68 +60,6 @@ const CLOSEABLE_LANE_STATUSES = new Set([
   'reviewing',
   'failed',
 ]);
-
-async function preserveCloseTarget(
-  packetId: string,
-  lane: Parameters<typeof removeMergedWorktree>[0] & { branch: string },
-): Promise<{ branch: string | null; failure: BranchPreservationFailure | null }> {
-  if (!lane.worktreePath || !lane.branch || !lane.repoPath) {
-    return { branch: null, failure: null };
-  }
-  const preservedRef = `refs/heads/${lane.branch}`;
-  let failure: BranchPreservationFailure | null = null;
-  try {
-    await execFileAsync('git', ['fetch', lane.worktreePath, `${lane.branch}:refs/heads/${lane.branch}`], {
-      windowsHide: true,
-      cwd: lane.repoPath,
-      timeout: 30_000,
-    });
-    try {
-      await execFileAsync('git', ['show-ref', '--verify', preservedRef], {
-        windowsHide: true,
-        cwd: lane.repoPath,
-        timeout: 10_000,
-      });
-    } catch (verifyError) {
-      failure = {
-        code: 'branch_preservation_failed',
-        reason: 'ref_verification_failed',
-        branch: lane.branch,
-        ref: preservedRef,
-        message: errorMessage(verifyError),
-      };
-    }
-  } catch (preserveError) {
-    failure = {
-      code: 'branch_preservation_failed',
-      reason: 'ref_write_failed',
-      branch: lane.branch,
-      ref: preservedRef,
-      message: errorMessage(preserveError),
-    };
-  }
-  if (!failure) return { branch: lane.branch, failure: null };
-
-  const auditNote = `Preservation FAILED for ${failure.ref}; the worktree remains intact and close was refused.`;
-  console.error(
-    `[discard-packet] ${auditNote} lane=${lane.id} reason=${failure.reason}`,
-    failure.message,
-  );
-  try {
-    recordLaneEvent(lane.id, 'branch_preservation_failed', 'system', {
-      code: failure.code,
-      reason: failure.reason,
-      packetId,
-      branch: failure.branch,
-      ref: failure.ref,
-      note: auditNote,
-      gcRisk: false,
-    });
-  } catch (error) {
-    console.warn(`[discard-packet] Could not record branch preservation failure for ${lane.id}:`, error);
-  }
-  return { branch: null, failure };
-}
 
 async function markPacketClosed(guard: PacketLifecycleGuard, closedAt: string): Promise<boolean> {
   const closed = await mutatePacketLifecycleGuard(guard, (packet) => {
@@ -235,26 +172,51 @@ async function closePacketUnmergedUnlocked(input: {
     }
 
     const preservedBranches: string[] = [];
+    const preservationReceipts: BranchPreservationReceipt[] = [];
     let preservationFailure: BranchPreservationFailure | null = null;
     const distinctTargets = [...new Map(lanesToClose
-      .filter((target) => target.worktreePath?.trim() && target.branch.trim())
-      .map((target) => [`${target.repoPath}\0${target.worktreePath}\0${target.branch}`, target] as const)).values()];
+      .filter((target) => target.repoPath.trim() && target.branch.trim())
+      .map((target) => [`${target.repoPath}\0${target.branch}`, target] as const)).values()];
     for (const target of distinctTargets) {
-      const preservation = await preserveCloseTarget(input.packetId, target);
-      if (preservation.branch && !preservedBranches.includes(preservation.branch)) {
-        preservedBranches.push(preservation.branch);
+      const preservation = await classifyClosePreservation(input.packetId, target);
+      preservationReceipts.push(preservation.receipt);
+      if (preservation.receipt.reason.startsWith('preserved/')
+        && !preservedBranches.includes(preservation.receipt.reason)) {
+        preservedBranches.push(preservation.receipt.reason);
       }
       if (preservation.failure) {
         preservationFailure = preservation.failure;
+        const auditNote = preservation.failure.code === 'unmerged_work_present'
+          ? preservation.failure.message
+          : `Preservation FAILED for ${preservation.failure.ref}; the worktree remains intact and close was refused.`;
+        recordLaneEvent(target.id, preservation.failure.code === 'branch_preservation_failed'
+          ? 'branch_preservation_failed'
+          : 'update', 'system', {
+          code: preservation.failure.code,
+          reason: preservation.failure.reason,
+          packetId: input.packetId,
+          branch: preservation.failure.branch,
+          ref: preservation.failure.ref,
+          receipt: preservation.receipt,
+          note: auditNote,
+          gcRisk: false,
+        });
         break;
       }
     }
     if (preservationFailure) {
-      await markPacketLifecycleFailure(guard, 'branch_preservation_failed');
+      await markPacketLifecycleFailure(
+        guard,
+        preservationFailure.code === 'unmerged_work_present'
+          ? 'branch_preservation_failed'
+          : preservationFailure.code,
+      );
       return {
         ok: false,
-        code: 'branch_preservation_failed',
-        message: `Close refused because work on ${preservationFailure.branch} could not be preserved. The lane and worktree remain intact.`,
+        code: preservationFailure.code,
+        message: preservationFailure.code === 'unmerged_work_present'
+          ? `Close refused because ${preservationFailure.message} The lane and worktree remain intact.`
+          : `Close refused because work on ${preservationFailure.branch} could not be preserved. The lane and worktree remain intact.`,
         status: 409,
       };
     }
@@ -265,6 +227,7 @@ async function closePacketUnmergedUnlocked(input: {
       note,
       preservedBranch,
       preservedBranches,
+      preservationReceipts,
       preservationFailure,
     });
     try {
@@ -367,6 +330,7 @@ async function closePacketUnmergedUnlocked(input: {
         worktreeRemoved,
         preservedBranch,
         preservedBranches,
+        preservationReceipts,
         preservationFailure,
         note: `${outcomeNote}${worktreeRemoved ? ' Worktree removed.' : ''}`,
       },

@@ -217,14 +217,16 @@ async function runReconcileOrphanedWorktrees(): Promise<number> {
   const reconcilableLanes = listLanes().filter(
     (lane) =>
       RECONCILABLE_WORKTREE_STATUSES.has(lane.status)
-      && typeof lane.worktreePath === 'string'
-      && lane.worktreePath.length > 0
       && !workspaceLifecycleOwnsMissingPath(lane),
   );
   if (reconcilableLanes.length === 0) return 0;
 
   // Worktree-gone candidates (original #541 logic)
-  const worktreeGone = reconcilableLanes.filter((lane) => !existsSync(lane.worktreePath!));
+  const worktreeGone = reconcilableLanes.filter((lane) => (
+    typeof lane.worktreePath === 'string'
+    && lane.worktreePath.length > 0
+    && !existsSync(lane.worktreePath)
+  ));
 
   // Branch-gone candidates (#558) — worktree still on disk but branch removed
   // AND the lane was actually merged into its base branch. The merge-verify
@@ -234,7 +236,7 @@ async function runReconcileOrphanedWorktrees(): Promise<number> {
   const branchSetsByRepo = new Map<string, Set<string> | null>();
   const branchGone: Lane[] = [];
   for (const lane of reconcilableLanes) {
-    if (!existsSync(lane.worktreePath!)) continue; // already caught by worktreeGone
+    if (lane.worktreePath && !existsSync(lane.worktreePath)) continue; // already caught by worktreeGone
     if (!lane.branch) continue;
     if (!branchSetsByRepo.has(lane.repoPath)) {
       branchSetsByRepo.set(lane.repoPath, await getLocalBranchSetForRepo(lane.repoPath));

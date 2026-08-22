@@ -5,8 +5,9 @@ import { join } from 'node:path';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
-const { createLane, getLane, setLaneStatus } = await import('@/lib/lane/registry');
+const { appendEvent, createLane, getLane, setLaneStatus } = await import('@/lib/lane/registry');
 const { reconcileOrphanedWorktrees } = await import('@/lib/lane/reconcile');
+const { listZombieLaneCandidates } = await import('@/lib/lane/reaper');
 const { isAncestorCommit } = await import('@/lib/orchestrator/operator-mission-service/merge-truth');
 const { createWorkspaceSnapshot, transitionWorkspaceSnapshot } = await import('@/lib/worktree/snapshot-state');
 
@@ -110,6 +111,46 @@ describe('merge truth by git ancestry', () => {
 
     expect(await reconcileOrphanedWorktrees()).toBeGreaterThanOrEqual(1);
     expect(getLane(lane.id)?.status).toBe('completed');
+  });
+
+  it('finishes a merging lane whose worktree metadata is already cleared when Git proves the merge landed', async () => {
+    const repo = makeRepo('o8-merge-truth-cleared-path-');
+    git(repo, ['checkout', '-b', 'inline/cleared-path']);
+    writeFileSync(join(repo, 'feature.txt'), 'feature\n');
+    const laneHead = commitAll(repo, 'feature');
+    git(repo, ['checkout', 'main']);
+    git(repo, ['merge', '--ff-only', 'inline/cleared-path']);
+    git(repo, ['branch', '-D', 'inline/cleared-path']);
+    const lane = createLane({
+      repoPath: repo,
+      branch: 'inline/cleared-path',
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId: 'pkt-cleared-path',
+    });
+    setLaneStatus(lane.id, 'merging', 'system', 'merging');
+    appendEvent(lane.id, 'merge', 'system', { laneHeadSha: laneHead, baseBranch: 'main' });
+
+    expect(await reconcileOrphanedWorktrees()).toBeGreaterThanOrEqual(1);
+    expect(getLane(lane.id)?.status).toBe('completed');
+  });
+
+  it('surfaces a fresh merging wedge when its branch, repo lease, and owner process are absent', async () => {
+    const repo = makeRepo('o8-merge-truth-abandoned-');
+    const lane = createLane({
+      repoPath: repo,
+      branch: 'inline/never-created',
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId: 'pkt-abandoned-merging',
+    });
+    setLaneStatus(lane.id, 'merging', 'system', 'merging');
+
+    const candidates = await listZombieLaneCandidates();
+    expect(candidates.find((candidate) => candidate.lane.id === lane.id)).toMatchObject({
+      reason: 'abandoned_merging',
+      probe: { alive: false, source: 'merging-abandoned' },
+    });
   });
 
   it('reports not merged when the branch contains the advanced base but base lacks the lane head', async () => {

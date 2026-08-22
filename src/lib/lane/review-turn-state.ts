@@ -6,6 +6,12 @@ import { recordLaneEvent } from '@/lib/lane/events';
 
 interface ReviewTurnEventPayload {
   reviewTurnId?: unknown;
+  surface?: unknown;
+}
+
+export interface ActiveReviewTurn {
+  id: string;
+  surface: string | null;
 }
 
 export function startReviewTurn(input: {
@@ -24,7 +30,7 @@ export function startReviewTurn(input: {
   return reviewTurnId;
 }
 
-export function findActiveReviewTurnId(laneId: string): string | null {
+export function findActiveReviewTurn(laneId: string): ActiveReviewTurn | null {
   const row = getSqlite().prepare(`
     SELECT verb, payload_json
     FROM lane_events
@@ -36,10 +42,19 @@ export function findActiveReviewTurnId(laneId: string): string | null {
   if (!row || row.verb !== 'review_turn_started') return null;
   try {
     const payload = JSON.parse(row.payload_json) as ReviewTurnEventPayload;
-    return typeof payload.reviewTurnId === 'string' ? payload.reviewTurnId : null;
+    return typeof payload.reviewTurnId === 'string'
+      ? {
+          id: payload.reviewTurnId,
+          surface: typeof payload.surface === 'string' ? payload.surface : null,
+        }
+      : null;
   } catch {
     return null;
   }
+}
+
+export function findActiveReviewTurnId(laneId: string): string | null {
+  return findActiveReviewTurn(laneId)?.id ?? null;
 }
 
 export function finishReviewTurn(input: {

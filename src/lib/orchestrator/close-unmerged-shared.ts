@@ -25,11 +25,17 @@ export const CLOSE_UNMERGED_DISPOSITIONS = [
 export type CloseUnmergedDisposition = typeof CLOSE_UNMERGED_DISPOSITIONS[number];
 
 export type BranchPreservationFailure = {
-  code: 'branch_preservation_failed';
-  reason: 'ref_write_failed' | 'ref_verification_failed';
+  code: 'branch_preservation_failed' | 'unmerged_work_present';
+  reason: 'ref_write_failed' | 'ref_verification_failed' | 'unmerged_work_present';
   branch: string;
   ref: string;
   message: string;
+};
+
+export type BranchPreservationReceipt = {
+  branch: string;
+  reason: 'already-merged' | 'branch-absent' | `preserved/${string}`;
+  ref: string | null;
 };
 
 export type CloseUnmergedResult =
@@ -44,6 +50,7 @@ export type CloseUnmergedResult =
       worktreeRemoved: boolean;
       preservedBranch: string | null;
       preservedBranches: string[];
+      preservationReceipts: BranchPreservationReceipt[];
       preservationFailure: BranchPreservationFailure | null;
       note: string;
     };
@@ -77,6 +84,7 @@ export function closeUnmergedOutcomeNote(input: {
   note?: string | null;
   preservedBranch?: string | null;
   preservedBranches?: string[];
+  preservationReceipts?: BranchPreservationReceipt[];
   preservationFailure?: BranchPreservationFailure | null;
 }): string {
   const details = input.note?.trim();
@@ -85,8 +93,11 @@ export function closeUnmergedOutcomeNote(input: {
   const preserved = preservedBranches.length > 0
     ? ` Work preserved on ${preservedBranches.length === 1 ? 'branch' : 'branches'} ${preservedBranches.join(', ')}.`
     : '';
+  const receipt = input.preservationReceipts?.length
+    ? ` Preservation receipt: ${input.preservationReceipts.map((entry) => `${entry.branch}=${entry.reason}`).join(', ')}.`
+    : '';
   const preservationFailed = input.preservationFailure
     ? ` Preservation FAILED (${input.preservationFailure.reason}): commits may only remain as dangling Git objects and are at risk of garbage collection.`
     : '';
-  return `Closed unmerged — ${closeUnmergedDispositionLabel(input.disposition)}.${preserved}${preservationFailed}${details ? ` ${details}` : ''}`;
+  return `Closed unmerged — ${closeUnmergedDispositionLabel(input.disposition)}.${preserved}${receipt}${preservationFailed}${details ? ` ${details}` : ''}`;
 }

@@ -539,7 +539,7 @@ process.exit(run.status ?? 1);
         reason: 'ref_verification_failed',
         packetId,
         branch,
-        ref: `refs/heads/${branch}`,
+        ref: expect.stringMatching(/^refs\/heads\/o8-close-check\//),
         gcRisk: false,
         note: expect.stringContaining('worktree remains intact'),
       },
@@ -566,6 +566,8 @@ process.exit(run.status ?? 1);
     git(worktreePath, 'add', 'committed.ts');
     git(worktreePath, '-c', 'user.email=test@o8.test', '-c', 'user.name=o8-test',
       'commit', '-m', 'committed work');
+    git(repoPath, 'fetch', worktreePath, `${branch}:refs/heads/${branch}`);
+    git(repoPath, 'merge', '--ff-only', branch);
     writeFileSync(join(worktreePath, 'dirty.ts'), 'export const dirty = true;\n');
 
     const lane = createLane({

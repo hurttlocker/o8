@@ -56,6 +56,7 @@ import {
   worktreeExistsOnDisk,
 } from '@/lib/lane/worktree-merge-git';
 import { withRepoActionRecovery } from '@/lib/lane/repo-action-lock';
+import { settleReturnedMergeState } from '@/lib/lane/merge-state-settlement';
 import { enqueueMergeDecompositions } from '@/lib/lane/merge-decomposition';
 import { canonicalRepoRoot } from '@/lib/worktree/root-layout';
 
@@ -455,7 +456,7 @@ async function retryBaseAdvancedAfterRebase(
 export async function performWorktreeSideMerge(input: WorktreeSideMergeInput): Promise<LaneCommandResult> {
   const canonicalRepoPath = canonicalRepoRoot(input.command.canonicalRepoPath ?? input.lane.repoPath);
   const canonicalInput = canonicalRepoPath === input.lane.repoPath ? input : { ...input, lane: { ...input.lane, repoPath: canonicalRepoPath } };
-  return withRepoActionRecovery(
+  const result = await withRepoActionRecovery(
     canonicalRepoPath,
     {
       laneId: input.command.laneId,
@@ -464,6 +465,7 @@ export async function performWorktreeSideMerge(input: WorktreeSideMergeInput): P
     },
     () => performWorktreeSideMergeInner(canonicalInput),
   );
+  return settleReturnedMergeState(input.command.laneId, result, input.actor);
 }
 
 async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Promise<LaneCommandResult> {
