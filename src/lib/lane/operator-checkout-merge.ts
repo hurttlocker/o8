@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import {
   currentBranch,
   git,
@@ -24,6 +25,36 @@ async function changedPaths(cwd: string, args: string[]): Promise<string[]> {
 
 function pathsOverlap(left: string, right: string): boolean {
   return left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
+}
+
+function parseWorktreeBranches(output: string): Array<{ path: string; branch: string | null }> {
+  const worktrees: Array<{ path: string; branch: string | null }> = [];
+  let current: { path: string; branch: string | null } | null = null;
+  for (const line of output.split('\0')) {
+    if (line.startsWith('worktree ')) {
+      if (current) worktrees.push(current);
+      current = { path: line.slice('worktree '.length), branch: null };
+    } else if (current && line.startsWith('branch ')) {
+      current.branch = line.slice('branch '.length);
+    }
+  }
+  if (current) worktrees.push(current);
+  return worktrees;
+}
+
+async function findOtherBaseWorktree(
+  repoPath: string,
+  baseRef: string,
+): Promise<string | null> {
+  const { stdout } = await git(
+    repoPath,
+    ['worktree', 'list', '--porcelain', '-z'],
+    { timeout: 5000 },
+  );
+  const canonicalRepoPath = resolve(repoPath);
+  return parseWorktreeBranches(stdout).find((worktree) => (
+    worktree.branch === baseRef && resolve(worktree.path) !== canonicalRepoPath
+  ))?.path ?? null;
 }
 
 export async function inspectOperatorCheckoutMergeSafety(input: {
@@ -98,6 +129,12 @@ export async function fastForwardBaseBranch(input: {
     const previousBaseSha = stdout.trim();
     if (!(await isAncestor(input.repoPath, previousBaseSha, input.candidateRef))) {
       throw new Error(`${baseRef} is not an ancestor of ${input.candidateRef}.`);
+    }
+    const baseWorktree = await findOtherBaseWorktree(input.repoPath, baseRef);
+    if (baseWorktree) {
+      throw new Error(
+        `${baseRef} is checked out in another worktree at "${baseWorktree}"; refusing to advance the ref without updating that worktree's index and files.`,
+      );
     }
     await git(input.repoPath, [
       'update-ref',

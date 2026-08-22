@@ -162,7 +162,7 @@ async function createFixture(label: string, approved: boolean) {
     totalWaves: 1,
   });
   writeOrchestratorControlPlaneState(missionState);
-  return { lane, repo, origin, packetId, reviewedHeadSha };
+  return { lane, repo, origin, packetId, reviewedHeadSha, root };
 }
 
 function mergeRequest(packetId: string): NextRequest {
@@ -209,6 +209,32 @@ afterAll(() => {
 });
 
 describe('merge checkout coupling through real handlers', () => {
+  it('refuses before advancing a base branch held by another worktree', async () => {
+    const fixture = await createFixture('base-held-elsewhere', true);
+    git(fixture.repo, ['checkout', '-b', 'operator/wip']);
+    const baseWorktree = join(fixture.root, 'base-holder');
+    git(fixture.repo, ['worktree', 'add', baseWorktree, 'main']);
+    const baseShaBefore = git(fixture.repo, ['rev-parse', 'refs/heads/main']);
+    const baseIndexBefore = git(baseWorktree, ['write-tree']);
+    const baseStatusBefore = git(baseWorktree, ['status', '--porcelain']);
+    const baseFileBefore = readFileSync(join(baseWorktree, 'file.txt'), 'utf8');
+
+    const response = await mergeRoute.POST(mergeRequest(fixture.packetId));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({
+      ok: true,
+      result: { merged: false },
+    });
+    expect(payload.result.approvalId).toEqual(expect.any(String));
+    expect(git(fixture.repo, ['rev-parse', 'refs/heads/main'])).toBe(baseShaBefore);
+    expect(git(baseWorktree, ['rev-parse', 'HEAD'])).toBe(baseShaBefore);
+    expect(git(baseWorktree, ['write-tree'])).toBe(baseIndexBefore);
+    expect(git(baseWorktree, ['status', '--porcelain'])).toBe(baseStatusBefore);
+    expect(readFileSync(join(baseWorktree, 'file.txt'), 'utf8')).toBe(baseFileBefore);
+  }, 30_000);
+
   it('lands the base ref while leaving an unrelated dirty operator checkout untouched', async () => {
     const fixture = await createFixture('unrelated-dirty', true);
     git(fixture.repo, ['checkout', '-b', 'operator/wip']);
