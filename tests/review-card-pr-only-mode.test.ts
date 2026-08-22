@@ -9,6 +9,16 @@ const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-review-card-pr-only-'));
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
+// These routes resolve the caller's principal from an explicit bearer token —
+// loopback location is transport evidence, not identity (src/lib/auth/principal.ts
+// is fail-closed by design), so a same-origin test request with no Authorization
+// header resolves to 'anonymous' and the route correctly 403s it. Mint an
+// operator ws-token the same way tests/principal-authz.test.ts does and present
+// it on every request below.
+const WS_TOKEN = 'review-card-pr-only-ws-token-0123456789';
+writeFileSync(join(dataDir, 'ws-token'), `${WS_TOKEN}\n`, 'utf-8');
+process.env.WS_TOKEN = WS_TOKEN;
+
 const lanesRoute = await import('@/app/api/lanes/route');
 const { createLane, setLaneStatus } = await import('@/lib/lane/registry');
 const { DOGFOOD_PR_ONLY_NOTE } = await import('@/lib/lane/merge-mode');
@@ -18,7 +28,7 @@ const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator
 function lanesReq() {
   return new NextRequest('http://localhost:3001/api/lanes?active=false', {
     method: 'GET',
-    headers: { host: 'localhost:3001' },
+    headers: { host: 'localhost:3001', authorization: `Bearer ${WS_TOKEN}` },
   });
 }
 
