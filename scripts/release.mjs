@@ -28,6 +28,7 @@ import { buildManifest, readPublished, releaseRange, resolveNewFixes } from './l
 import { publishFixed } from './publish-fixed.mjs';
 import { syncReports } from './sync-reports.mjs';
 import { verifyNativeBundle } from './native-bundle.mjs';
+import { runShipWorkflow } from './lib/ship-broadcast.mjs';
 
 const REPO = 'hurttlocker/o8';
 const PUBLIC_MIRROR = 'hurttlocker/o8-releases';
@@ -63,6 +64,9 @@ if (process.argv[2] === '--verify-native-bundle') {
   }
 }
 
+const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+const version = pkg.version;
+const tag = `v${version}`;
 
 // The authoring toolchain stays pinned to Node 22 via package.json + .nvmrc.
 // Runtime ABI compatibility is independent of this guard: tauri-export now
@@ -72,6 +76,16 @@ if (nodeMajor !== 22) {
   console.error(`[release] FATAL: builds must run on Node 22 LTS (current: ${process.version})`);
   console.error(`[release] Run \`nvm use\` (reads .nvmrc) then retry npm run ship.`);
   process.exit(1);
+}
+
+if (process.argv[2] === '--ship') {
+  try {
+    await runShipWorkflow({ root, version });
+    process.exit(0);
+  } catch (error) {
+    console.error(`[release] ship failed: ${error?.message ?? error}`);
+    process.exit(1);
+  }
 }
 
 // `npm run ship` detaches stale DMGs before this script. Garbage-collect their
@@ -84,10 +98,6 @@ if (process.platform === 'darwin') {
     console.warn(`[release] LaunchServices garbage collection skipped: ${error?.message ?? error}`);
   }
 }
-
-const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-const version = pkg.version;
-const tag = `v${version}`;
 
 // Manual community-announce path: preview prints, announce posts. For backfill
 // (a release that shipped before the webhook existed) or a re-run after a
