@@ -121,6 +121,7 @@ const EXPLICIT_GATED = [
   /^\/api\/leases\/?$/,
   /^\/api\/broadcast\/tokens\/?$/,
   /^\/api\/broadcast\/post\/?$/,
+  /^\/api\/broadcast\/say\/?$/,
   // #1619: local Codex app-server lifecycle + streamed audio/transcript events.
   // Operator-only because it can start a local Codex thread and reads OAuth state.
   /^\/api\/voice\/realtime\/codex\/?$/,

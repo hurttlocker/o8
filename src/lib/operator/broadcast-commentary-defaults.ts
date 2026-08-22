@@ -5,6 +5,8 @@ export interface BroadcastCommentaryDefaults {
   broadcastCommentaryIntervalMinutes: number;
   broadcastCommentaryMinNewEvents: number;
   broadcastCommentaryMaxPerHour: number;
+  broadcastVoice: 'off' | 'on';
+  broadcastVoiceLullMinutes: number;
 }
 
 export const BROADCAST_COMMENTARY_FALLBACK: BroadcastCommentaryDefaults = {
@@ -12,6 +14,8 @@ export const BROADCAST_COMMENTARY_FALLBACK: BroadcastCommentaryDefaults = {
   broadcastCommentaryIntervalMinutes: 4,
   broadcastCommentaryMinNewEvents: 3,
   broadcastCommentaryMaxPerHour: 12,
+  broadcastVoice: 'off',
+  broadcastVoiceLullMinutes: 6,
 };
 
 export function isBroadcastCommentaryMode(value: unknown): value is BroadcastCommentaryMode {
@@ -25,10 +29,14 @@ export function resolveStoredBroadcastCommentary(
   if (isBroadcastCommentaryMode(stored.broadcastCommentary)) {
     result.broadcastCommentary = stored.broadcastCommentary;
   }
+  if (stored.broadcastVoice === 'off' || stored.broadcastVoice === 'on') {
+    result.broadcastVoice = stored.broadcastVoice;
+  }
   for (const [field, maximum] of [
     ['broadcastCommentaryIntervalMinutes', 1_440],
     ['broadcastCommentaryMinNewEvents', 100],
     ['broadcastCommentaryMaxPerHour', 60],
+    ['broadcastVoiceLullMinutes', 1_440],
   ] as const) {
     const value = stored[field];
     if (Number.isSafeInteger(value) && Number(value) >= 1) {
@@ -55,6 +63,8 @@ export function broadcastCommentarySettingSources(
     broadcastCommentaryIntervalMinutes: stored.broadcastCommentaryIntervalMinutes !== undefined ? 'file' : 'default',
     broadcastCommentaryMinNewEvents: stored.broadcastCommentaryMinNewEvents !== undefined ? 'file' : 'default',
     broadcastCommentaryMaxPerHour: stored.broadcastCommentaryMaxPerHour !== undefined ? 'file' : 'default',
+    broadcastVoice: stored.broadcastVoice !== undefined ? 'file' : 'default',
+    broadcastVoiceLullMinutes: stored.broadcastVoiceLullMinutes !== undefined ? 'file' : 'default',
   };
 }
 
@@ -68,10 +78,17 @@ export function applyBroadcastCommentaryUpdate(
     }
     stored.broadcastCommentary = update.broadcastCommentary;
   }
+  if (update.broadcastVoice !== undefined) {
+    if (update.broadcastVoice !== 'off' && update.broadcastVoice !== 'on') {
+      throw new Error('broadcastVoice must be "off" or "on".');
+    }
+    stored.broadcastVoice = update.broadcastVoice;
+  }
   for (const [field, maximum] of [
     ['broadcastCommentaryIntervalMinutes', 1_440],
     ['broadcastCommentaryMinNewEvents', 100],
     ['broadcastCommentaryMaxPerHour', 60],
+    ['broadcastVoiceLullMinutes', 1_440],
   ] as const) {
     const value = update[field];
     if (value === undefined) continue;

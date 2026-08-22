@@ -206,6 +206,8 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   broadcastCommentaryIntervalMinutes: numberField('broadcast', 'interval_minutes', 'an integer from 1 through 1440', (value) => Number.isInteger(value) && value >= 1 && value <= 1_440),
   broadcastCommentaryMinNewEvents: numberField('broadcast', 'min_new_events', 'an integer from 1 through 100', (value) => Number.isInteger(value) && value >= 1 && value <= 100),
   broadcastCommentaryMaxPerHour: numberField('broadcast', 'max_per_hour', 'an integer from 1 through 60', (value) => Number.isInteger(value) && value >= 1 && value <= 60),
+  broadcastVoice: enumField('broadcast', 'voice', '"off" or "on"', (value): value is OperatorDefaults['broadcastVoice'] => value === 'off' || value === 'on'),
+  broadcastVoiceLullMinutes: numberField('broadcast', 'voice_lull_minutes', 'an integer from 1 through 1440', (value) => Number.isInteger(value) && value >= 1 && value <= 1_440),
   apfsDependencyImages: booleanField('git', 'apfs_dependency_images'),
   thinkingEffort: enumField('models', 'thinking_effort', 'a valid thinking effort', isThinkingEffort),
   promptCachingEnabled: booleanField('models', 'prompt_caching_enabled'),

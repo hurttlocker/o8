@@ -6,7 +6,7 @@ import { O8_WEBVIEW_TOOLS, createO8WebviewToolHandlers } from '@/lib/mcp/o8-webv
 import { APPROVE_TOOLS, handleApprove, handleApproveAndMerge, handleMergePreview, handleReject } from '@/lib/mcp/operator-handlers/approve';
 import { AGENT_MESSAGE_TOOLS, handleAgentMessageInbox, handleAgentMessageSend } from '@/lib/mcp/operator-handlers/agents';
 import { CANVAS_TOOLS, handleCanvas, handleRender } from '@/lib/mcp/operator-handlers/canvas';
-import { BROADCAST_TOOLS, handleBroadcastPost, handleBroadcastToken } from '@/lib/mcp/operator-handlers/broadcast';
+import { BROADCAST_TOOLS, handleBroadcastPost, handleBroadcastSay, handleBroadcastToken } from '@/lib/mcp/operator-handlers/broadcast';
 import { CLOSE_PACKET_TOOLS, handleClosePacketUnmerged } from '@/lib/mcp/operator-handlers/close-packet';
 import { CORTEX_TOOLS, handleAsk, handleProposeObservation } from '@/lib/mcp/operator-handlers/cortex';
 import { DIGEST_TOOLS, handleDigest, handleFetchRaw } from '@/lib/mcp/operator-handlers/digest';
@@ -367,6 +367,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   o8_msg_send: handleAgentMessageSend,
   o8_msg_inbox: handleAgentMessageInbox,
   o8_broadcast_post: handleBroadcastPost,
+  o8_broadcast_say: handleBroadcastSay,
   o8_broadcast_token: handleBroadcastToken,
   o8_update_apply: handleUpdateApply,
   o8_spec_read: handleSpecRead,

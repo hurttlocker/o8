@@ -4611,6 +4611,16 @@ fn tts_speak(text: String, message_id: Option<String>) {
     tts::playback::play_thread_with_message(text, tts::load_config(), message_id);
 }
 
+/// Speak one Broadcast line and resolve only after native playback finishes.
+/// The ws-server speaker queue uses this receipt to keep utterances serialized.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+async fn broadcast_tts_speak(text: String) -> Result<bool, String> {
+    tts::playback::play_thread_with_completion(text, tts::load_config())
+        .await
+        .map_err(|_| "Broadcast TTS completion channel closed.".to_string())
+}
+
 /// Speak a short Symon status callout, gated at speak time by Voice settings.
 /// Main webview only: the native browser child must not gain app-level speech.
 #[cfg(target_os = "macos")]
@@ -7126,6 +7136,8 @@ pub fn run() {
             stt_set_input_device,
             #[cfg(target_os = "macos")]
             tts_speak,
+            #[cfg(target_os = "macos")]
+            broadcast_tts_speak,
             #[cfg(target_os = "macos")]
             symon_speak_status,
             #[cfg(target_os = "macos")]

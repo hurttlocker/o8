@@ -32,6 +32,8 @@ const NON_DEFAULT_UPDATE = {
   broadcastCommentaryIntervalMinutes: 7,
   broadcastCommentaryMinNewEvents: 5,
   broadcastCommentaryMaxPerHour: 9,
+  broadcastVoice: 'on',
+  broadcastVoiceLullMinutes: 8,
   thinkingEffort: 'low',
   promptCachingEnabled: false,
   orchestratorModel: 'claude-opus-4-8',

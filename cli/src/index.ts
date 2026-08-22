@@ -226,7 +226,7 @@ commands:
   browser type <sel> <text…>  type into an input (--submit presses Enter)
   browser wait <sel>   poll until a selector resolves (--text, --timeout)
   browser close        end this scope's engine (headless Chrome) session
-  broadcast focus|post|token   set the live focus, post narration, or manage spectator bearers
+  broadcast say|focus|post|token   speak on demand, set focus, post narration, or manage spectator bearers
   msg send|inbox       send a durable agent message or read this session's inbox
   presence join        register an external session in this repo (--as <agent>)
   cortex observe       propose a worker observation for the orchestrator

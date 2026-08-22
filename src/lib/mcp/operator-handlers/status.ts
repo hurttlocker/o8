@@ -217,6 +217,15 @@ export const STATUS_TOOLS: McpTool[] = [
           type: 'number',
           description: 'Maximum director commentary turns in one hour. Default 12.',
         },
+        broadcastVoice: {
+          type: 'string',
+          enum: ['off', 'on'],
+          description: 'Whether Symon speaks new Broadcast commentary. Default off.',
+        },
+        broadcastVoiceLullMinutes: {
+          type: 'number',
+          description: 'Quiet minutes before Symon speaks one focus-aware lull line. Default 6.',
+        },
         claudeWorkerEffort: {
           type: 'string',
           enum: ['adaptive', 'low', 'medium', 'high', 'max', 'xhigh'],
@@ -305,6 +314,8 @@ const OPERATOR_DEFAULTS_KEYS = [
   'broadcastCommentaryIntervalMinutes',
   'broadcastCommentaryMinNewEvents',
   'broadcastCommentaryMaxPerHour',
+  'broadcastVoice',
+  'broadcastVoiceLullMinutes',
   'overlapGate',
   'parallelCap',
   'meteredPacketCostCapUsd',

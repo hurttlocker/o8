@@ -13,6 +13,8 @@ export const BROADCAST_EVENT_KINDS = [
   'commentary',
   'conversation',
   'focus',
+  'packet_failed',
+  'spend_cap',
 ] as const;
 
 export type BroadcastEventKind = (typeof BROADCAST_EVENT_KINDS)[number];

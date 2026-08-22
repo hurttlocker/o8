@@ -348,6 +348,7 @@ function eventKind(row: RawBroadcastRow, payload: Record<string, unknown>): Broa
   if (row.source_kind === 'brain_consulted') return 'brain_consulted';
   if (row.source_kind === 'lease_wait_timeout') return 'lease_timeout';
   if (row.source_kind === 'review_recorded') return 'review_verdict';
+  if (row.source_kind === 'spend_cap_hit') return 'spend_cap';
   if (row.source_kind === 'merge' || row.source_kind === 'pr_merged_reconciled' || row.source_kind === 'merged_by_ancestry_reconciled') return 'merge';
   if (row.source_kind === 'message') return 'message';
   if (row.source_kind === 'agent_report') {
@@ -358,6 +359,7 @@ function eventKind(row: RawBroadcastRow, payload: Record<string, unknown>): Broa
     if (label === 'session_launched' || label === 'session_launch_recovered') return 'session_launched';
     if (label === 'agent_completed' || label === 'completed') return 'agent_completed';
     if (label === 'merged' || label === 'merged_pushed') return 'merge';
+    if (payload.status === 'failed' || label === 'failed' || label === 'agent_failed') return 'packet_failed';
   }
   return null;
 }
@@ -372,6 +374,7 @@ function detailFor(kind: BroadcastEventKind, row: RawBroadcastRow, payload: Reco
   if (kind === 'commentary' || kind === 'conversation') {
     return typeof payload.text === 'string' ? payload.text : null;
   }
+  if (kind === 'spend_cap') return typeof payload.reason === 'string' ? payload.reason : null;
   if (kind === 'focus') {
     return payload.cleared === true
       ? null
@@ -417,6 +420,8 @@ function titleFor(
       ? `Conversation · ${row.actor} to ${payload.audience.trim()}`
       : `Conversation · ${row.actor}`,
     focus: payload.cleared === true ? 'Focus cleared' : 'Focus set',
+    packet_failed: 'Packet failed',
+    spend_cap: 'Spend cap hit',
   };
   return subject ? `${labels[kind]} · ${subject}` : labels[kind];
 }

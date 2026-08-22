@@ -149,10 +149,18 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.broadcastCommentary = body.broadcastCommentary;
   }
 
+  if (body.broadcastVoice !== undefined) {
+    if (body.broadcastVoice !== 'off' && body.broadcastVoice !== 'on') {
+      throw new Error('broadcastVoice must be "off" or "on".');
+    }
+    update.broadcastVoice = body.broadcastVoice;
+  }
+
   for (const [field, maximum] of [
     ['broadcastCommentaryIntervalMinutes', 1_440],
     ['broadcastCommentaryMinNewEvents', 100],
     ['broadcastCommentaryMaxPerHour', 60],
+    ['broadcastVoiceLullMinutes', 1_440],
   ] as const) {
     if (body[field] === undefined) continue;
     const value = body[field];

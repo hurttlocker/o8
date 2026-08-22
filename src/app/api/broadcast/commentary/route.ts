@@ -31,6 +31,8 @@ export function GET(request: NextRequest) {
         actor: event.actor,
         text: event.detail ?? '',
         timestamp: event.timestamp,
+        ...(event.payload.speechPriority === true ? { priority: true } : {}),
+        ...(event.payload.speechSuppressed === true ? { suppressed: true } : {}),
       })),
       cursor: page.cursor,
       hasMore: page.hasMore,

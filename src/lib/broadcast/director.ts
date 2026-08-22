@@ -62,13 +62,15 @@ function lastDirectorRun(sqlite: Database.Database): DirectorRunRow | null {
   `).get() as DirectorRunRow | undefined ?? null;
 }
 
-function directorRunsSince(sqlite: Database.Database, timestamp: string): number {
+export function broadcastGeneratedLinesSince(sqlite: Database.Database, timestamp: string): number {
   const row = sqlite.prepare(`
     SELECT COUNT(*) AS count
     FROM broadcast_events
     WHERE kind = 'commentary'
-      AND actor = 'mister'
-      AND json_extract(metadata_json, '$.director') = 1
+      AND (
+        json_extract(metadata_json, '$.director') = 1
+        OR json_extract(metadata_json, '$.hourlyCapped') = 1
+      )
       AND created_at >= ?
   `).get(timestamp) as { count: number };
   return row.count;
@@ -96,7 +98,7 @@ export async function runBroadcastDirectorOnce(options: {
       return { status: 'skipped', reason: 'interval' };
     }
   }
-  if (directorRunsSince(sqlite, new Date(now.getTime() - 60 * 60_000).toISOString()) >= settings.maxPerHour) {
+  if (broadcastGeneratedLinesSince(sqlite, new Date(now.getTime() - 60 * 60_000).toISOString()) >= settings.maxPerHour) {
     return { status: 'skipped', reason: 'max_per_hour' };
   }
 
@@ -119,6 +121,9 @@ export async function runBroadcastDirectorOnce(options: {
     const output = (await runner(buildBroadcastCommentaryPrompt(newEvents), route)).trim();
     const text = output.replace(/\s+/g, ' ').slice(0, BROADCAST_TEXT_MAX_LENGTH).trim();
     if (!text) throw new Error('Broadcast commentary runner returned no text.');
+    if (broadcastGeneratedLinesSince(sqlite, new Date(now.getTime() - 60 * 60_000).toISOString()) >= settings.maxPerHour) {
+      return { status: 'skipped', reason: 'max_per_hour', newEventCount: newEvents.length };
+    }
     const event = appendBroadcastEvent({
       kind: 'commentary',
       actor: 'mister',
