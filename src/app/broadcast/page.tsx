@@ -10,6 +10,7 @@ import {
   BroadcastSidebar,
   type BroadcastConnectionState,
   EventFeed,
+  isBroadcastFeedActive,
   StatusDot,
 } from './BroadcastStage';
 
@@ -218,8 +219,9 @@ function BroadcastSurface() {
   const statusCopy = state === 'live'
     ? 'LIVE'
     : state === 'booting' ? 'CONNECTING'
-      : state === 'missing-token' ? 'TOKEN REQUIRED'
-        : state === 'forbidden' ? 'ACCESS REVOKED' : 'RECONNECTING';
+        : state === 'missing-token' ? 'TOKEN REQUIRED'
+          : state === 'forbidden' ? 'ACCESS REVOKED' : 'RECONNECTING';
+  const feedActive = state === 'live' && isBroadcastFeedActive(events, snapshot?.lanes ?? [], nowMs);
   const resolvedTheme = useMemo(
     () => resolveTheme(getPalette(paletteId), 'solid'),
     [paletteId],
@@ -331,13 +333,14 @@ function BroadcastSurface() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
             <motion.span
               key={reconnectPulse}
-              initial={reconnectPulse > 0 && !reduceMotion
-                ? { opacity: 1, scale: 1 }
-                : false}
-              animate={reconnectPulse > 0 && !reduceMotion
-                ? { opacity: [1, 0.55, 1], scale: [1, 1.04, 1] }
-                : { opacity: 1, scale: 1 }}
-              transition={reduceMotion ? { duration: 0 } : { duration: 0.55 }}
+              data-broadcast-feed-state={state === 'live' ? feedActive ? 'active' : 'idle' : 'connection'}
+              initial={false}
+              animate={feedActive && !reduceMotion
+                ? { opacity: [1, 0.52, 1], scale: [1, 1.035, 1] }
+                : { opacity: state === 'live' ? 0.58 : 1, scale: 1 }}
+              transition={feedActive && !reduceMotion
+                ? { duration: 2.35, repeat: Infinity, ease: 'easeInOut' }
+                : { duration: reduceMotion ? 0 : 0.2 }}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -347,8 +350,10 @@ function BroadcastSurface() {
                 paddingBottom: 7,
                 paddingLeft: 11,
                 borderRadius: 14,
-                background: 'var(--t-input-bg)',
-                color: 'var(--t-text-secondary)',
+                border: `1px solid ${feedActive ? 'var(--t-accent-border)' : 'var(--t-divider-subtle)'}`,
+                background: feedActive ? 'var(--t-accent-soft-strong)' : 'var(--t-input-bg)',
+                color: feedActive ? 'var(--t-accent)' : 'var(--t-text-faint)',
+                boxShadow: feedActive ? '0 0 18px var(--t-accent-ring)' : 'none',
                 fontSize: 13,
                 fontWeight: 300,
                 letterSpacing: '0.04em',
@@ -371,9 +376,12 @@ function BroadcastSurface() {
             gridTemplateAreas: isWide ? "'stream sidebar'" : undefined,
             gap: isWide ? 24 : 16,
             minWidth: 0,
+            minHeight: isWide ? 640 : undefined,
+            height: isWide ? compact ? 'calc(100dvh - 36px)' : 'calc(100dvh - 140px)' : undefined,
+            overflow: isWide ? 'hidden' : undefined,
           }}
         >
-          <BroadcastSidebar snapshot={snapshot} events={events} nowMs={nowMs} />
+          <BroadcastSidebar snapshot={snapshot} events={events} nowMs={nowMs} reduceMotion={reduceMotion} isWide={isWide} />
           <EventFeed
             events={events}
             lanes={snapshot?.lanes ?? []}

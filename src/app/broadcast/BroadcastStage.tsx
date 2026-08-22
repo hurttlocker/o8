@@ -2,6 +2,7 @@
 
 import { motion } from 'framer-motion';
 
+import { BroadcastApprovalInbox, broadcastStateAge } from '@/components/broadcast/BroadcastApprovalInbox';
 import type {
   BroadcastAgentSnapshot,
   BroadcastEvent,
@@ -139,13 +140,18 @@ function FocusCard({ focus, nowMs }: { focus: BroadcastFocusSnapshot; nowMs: num
   );
 }
 
-function OnAirLane({ agent, lane, nowMs }: {
+function OnAirLane({ agent, lane, nowMs, active, reduceMotion }: {
   agent: BroadcastAgentSnapshot;
   lane: BroadcastLaneSnapshot | undefined;
   nowMs: number;
+  active: boolean;
+  reduceMotion: boolean;
 }) {
+  const stateAge = broadcastStateAge(nowMs, agent.startedAt);
+  const activityAge = broadcastStateAge(nowMs, lane?.lastEventAt ?? agent.startedAt);
   return (
     <div
+      data-broadcast-on-air={active ? 'active' : activityAge.stale ? 'stale' : 'fresh'}
       style={{
         display: 'grid',
         gridTemplateColumns: '14px minmax(0, 1fr)',
@@ -156,6 +162,7 @@ function OnAirLane({ agent, lane, nowMs }: {
         paddingBottom: 14,
         paddingLeft: 0,
         borderBottom: '1px solid var(--t-divider-subtle)',
+        background: activityAge.stale ? 'var(--t-warning-soft)' : active ? 'var(--t-accent-soft)' : 'transparent',
       }}
     >
       <span style={{ paddingTop: 7, display: 'flex', justifyContent: 'center' }}>
@@ -170,6 +177,7 @@ function OnAirLane({ agent, lane, nowMs }: {
             letterSpacing: '-0.1px',
             lineHeight: 1.25,
             overflowWrap: 'anywhere',
+            animation: active && !reduceMotion ? 'o8-text-shimmer 2.35s ease-in-out infinite' : undefined,
           }}
         >
           {agent.label}
@@ -185,7 +193,7 @@ function OnAirLane({ agent, lane, nowMs }: {
             overflowWrap: 'anywhere',
           }}
         >
-          {agent.repo} · {agent.status} · {formatElapsed(nowMs, lane?.lastEventAt ?? null)}
+          {agent.repo} · {agent.status} · on air {stateAge.label} · {formatElapsed(nowMs, lane?.lastEventAt ?? null)}
         </div>
       </div>
     </div>
@@ -196,39 +204,21 @@ function OnAirLane({ agent, lane, nowMs }: {
 // review or a human sit in the ledger for days and would read as stuck.
 const ON_AIR_STATUSES = new Set(['launching', 'running', 'recovering']);
 
-function OnAirCard({ snapshot, nowMs }: { snapshot: BroadcastSnapshot | null; nowMs: number }) {
+function OnAirCard({ snapshot, nowMs, reduceMotion }: { snapshot: BroadcastSnapshot | null; nowMs: number; reduceMotion: boolean }) {
   const agents = (snapshot?.activeAgents ?? []).filter((agent) => ON_AIR_STATUSES.has(agent.status));
   const lanesById = new Map((snapshot?.lanes ?? []).map((lane) => [lane.id, lane]));
+  const onAirLanes = agents.map((agent) => lanesById.get(agent.laneId)).filter((lane): lane is BroadcastLaneSnapshot => Boolean(lane));
+  const activeLaneId = newestLane(onAirLanes)?.id ?? agents[0]?.laneId ?? null;
   return (
-    <section aria-label="Lanes on air" style={{ ...cardStyle, paddingTop: 18, paddingRight: 20, paddingBottom: 4, paddingLeft: 20 }}>
+    <section aria-label="Lanes on air" style={{ ...cardStyle, minHeight: 0, display: 'flex', flexDirection: 'column', paddingTop: 18, paddingRight: 20, paddingBottom: 4, paddingLeft: 20 }}>
       <SectionLabel>ON AIR</SectionLabel>
-      {agents.length ? agents.map((agent) => (
-        <OnAirLane key={agent.laneId} agent={agent} lane={lanesById.get(agent.laneId)} nowMs={nowMs} />
-      )) : (
+      {agents.length ? <div style={{ minHeight: 0, overflowY: 'auto' }}>{agents.map((agent) => (
+        <OnAirLane key={agent.laneId} agent={agent} lane={lanesById.get(agent.laneId)} nowMs={nowMs} active={agent.laneId === activeLaneId} reduceMotion={reduceMotion} />
+      ))}</div> : (
         <div style={{ paddingTop: 18, paddingRight: 0, paddingBottom: 18, paddingLeft: 0, color: 'var(--t-text-muted)', fontSize: 18, fontWeight: 300 }}>
           No lanes on air
         </div>
       )}
-    </section>
-  );
-}
-
-function ApprovalCard({ count }: { count: number }) {
-  return (
-    <section aria-label="Pending approvals" style={{ ...cardStyle, paddingTop: 18, paddingRight: 20, paddingBottom: 18, paddingLeft: 20 }}>
-      <SectionLabel>PENDING APPROVALS</SectionLabel>
-      <div
-        style={{
-          marginTop: 8,
-          color: 'var(--t-text)',
-          fontSize: 28,
-          fontWeight: 400,
-          letterSpacing: '-0.2px',
-          lineHeight: 1.25,
-        }}
-      >
-        {count}
-      </div>
     </section>
   );
 }
@@ -277,16 +267,18 @@ function CommentaryCard({ events }: { events: BroadcastEvent[] }) {
   );
 }
 
-export function BroadcastSidebar({ snapshot, events, nowMs }: {
+export function BroadcastSidebar({ snapshot, events, nowMs, reduceMotion, isWide }: {
   snapshot: BroadcastSnapshot | null;
   events: BroadcastEvent[];
   nowMs: number;
+  reduceMotion: boolean;
+  isWide: boolean;
 }) {
   return (
-    <aside aria-label="Broadcast sidebar" style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0, gridArea: 'sidebar' }}>
+    <aside aria-label="Broadcast sidebar" style={{ display: isWide ? 'grid' : 'flex', flexDirection: isWide ? undefined : 'column', gridTemplateRows: isWide ? `${snapshot?.focus ? 'auto ' : ''}minmax(150px, 0.8fr) minmax(150px, 0.8fr) minmax(160px, 1fr)` : undefined, gap: 12, minWidth: 0, minHeight: 0, height: '100%', gridArea: 'sidebar' }}>
       {snapshot?.focus ? <FocusCard focus={snapshot.focus} nowMs={nowMs} /> : null}
-      <OnAirCard snapshot={snapshot} nowMs={nowMs} />
-      <ApprovalCard count={snapshot?.pendingApprovals.count ?? 0} />
+      <OnAirCard snapshot={snapshot} nowMs={nowMs} reduceMotion={reduceMotion} />
+      <BroadcastApprovalInbox items={snapshot?.pendingApprovals.items ?? []} nowMs={nowMs} reduceMotion={reduceMotion} />
       <CommentaryCard events={events} />
     </aside>
   );
@@ -314,6 +306,11 @@ function latestActivityAt(events: BroadcastEvent[], lanes: BroadcastLaneSnapshot
   return latest;
 }
 
+export function isBroadcastFeedActive(events: BroadcastEvent[], lanes: BroadcastLaneSnapshot[], nowMs: number): boolean {
+  const latestAt = latestActivityAt(events, lanes);
+  return latestAt !== null && nowMs - latestAt < DEAD_AIR_MS;
+}
+
 function DeadAirLine({ lanes }: { lanes: BroadcastLaneSnapshot[] }) {
   const lane = newestLane(lanes);
   return (
@@ -337,9 +334,13 @@ function DeadAirLine({ lanes }: { lanes: BroadcastLaneSnapshot[] }) {
   );
 }
 
-function EventRow({ event, reduceMotion }: { event: BroadcastEvent; reduceMotion: boolean }) {
+function EventRow({ event, count, reduceMotion }: { event: BroadcastEvent; count: number; reduceMotion: boolean }) {
+  const important = event.kind === 'merge' || event.kind === 'review_verdict' || event.kind === 'packet_failed';
+  const compact = event.kind === 'progress' || event.kind === 'brain_consulted' || event.kind.startsWith('lease_');
   return (
     <motion.article
+      data-broadcast-event-group={event.kind}
+      data-event-count={count}
       initial={reduceMotion ? false : { opacity: 0, y: 18 }}
       animate={{ opacity: 1, y: 0 }}
       transition={reduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 400, damping: 30 }}
@@ -349,9 +350,9 @@ function EventRow({ event, reduceMotion }: { event: BroadcastEvent; reduceMotion
         columnGap: 12,
         alignItems: 'start',
         minWidth: 0,
-        paddingTop: 18,
+        paddingTop: important ? 18 : compact ? 10 : 14,
         paddingRight: 18,
-        paddingBottom: 18,
+        paddingBottom: important ? 18 : compact ? 10 : 14,
         paddingLeft: 18,
         borderBottom: '1px solid var(--t-divider-subtle)',
       }}
@@ -360,16 +361,16 @@ function EventRow({ event, reduceMotion }: { event: BroadcastEvent; reduceMotion
         <StatusDot filled={eventDotIsFilled(String(event.kind))} />
       </span>
       <div style={{ minWidth: 0 }}>
-        <div style={{ color: 'var(--t-text)', fontSize: 22, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, overflowWrap: 'anywhere' }}>
+        <div style={{ color: 'var(--t-text)', fontSize: important ? 22 : 18, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, overflowWrap: 'anywhere' }}>
           {event.title}
         </div>
         {event.detail ? (
-          <div style={{ marginTop: 4, color: 'var(--t-text-secondary)', fontSize: 18, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.5, overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
+          <div style={{ marginTop: 4, color: 'var(--t-text-secondary)', fontSize: important ? 18 : 15, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.45, overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
             {event.detail}
           </div>
         ) : null}
         <div style={{ marginTop: 4, color: 'var(--t-text-faint)', fontSize: 14, fontWeight: 260, letterSpacing: '-0.4px', lineHeight: 1.25, overflowWrap: 'anywhere' }}>
-          {kindLabel(String(event.kind))}{event.repo ? ` · ${event.repo}` : ''}{event.actor ? ` · ${event.actor}` : ''}
+          {kindLabel(String(event.kind))}{count > 1 ? ` × ${count}` : ''}{event.repo ? ` · ${event.repo}` : ''}{event.actor ? ` · ${event.actor}` : ''}
         </div>
       </div>
       <time dateTime={event.timestamp} style={{ color: 'var(--t-text-faint)', fontSize: 14, fontWeight: 260, letterSpacing: '-0.4px', lineHeight: 1.25, whiteSpace: 'nowrap' }}>
@@ -377,6 +378,16 @@ function EventRow({ event, reduceMotion }: { event: BroadcastEvent; reduceMotion
       </time>
     </motion.article>
   );
+}
+
+function groupConsecutiveEvents(events: BroadcastEvent[]): Array<{ event: BroadcastEvent; count: number }> {
+  const groups: Array<{ event: BroadcastEvent; count: number }> = [];
+  for (const event of [...events].reverse()) {
+    const previous = groups.at(-1);
+    if (previous?.event.kind === event.kind) previous.count += 1;
+    else groups.push({ event, count: 1 });
+  }
+  return groups;
 }
 
 export function EventFeed({ events, lanes, state, nowMs, reduceMotion }: {
@@ -388,15 +399,15 @@ export function EventFeed({ events, lanes, state, nowMs, reduceMotion }: {
 }) {
   const latestAt = latestActivityAt(events, lanes);
   const hasDeadAir = lanes.length > 0 && (latestAt === null || nowMs - latestAt >= DEAD_AIR_MS);
-  const visibleEvents = [...events].reverse();
+  const visibleEvents = groupConsecutiveEvents(events);
   return (
-    <section aria-label="Broadcast event feed" aria-live="polite" style={{ ...cardStyle, gridArea: 'stream' }}>
+    <section aria-label="Broadcast event feed" aria-live="polite" style={{ ...cardStyle, minHeight: 0, height: '100%', overflowY: 'auto', gridArea: 'stream' }}>
       <div style={{ paddingTop: 14, paddingRight: 18, paddingBottom: 13, paddingLeft: 18, borderBottom: '1px solid var(--t-divider-subtle)' }}>
         <SectionLabel>EVENT STREAM</SectionLabel>
       </div>
       {hasDeadAir ? <DeadAirLine lanes={lanes} /> : null}
-      {visibleEvents.length ? visibleEvents.map((event) => (
-        <EventRow key={event.id} event={event} reduceMotion={reduceMotion} />
+      {visibleEvents.length ? visibleEvents.map(({ event, count }) => (
+        <EventRow key={event.id} event={event} count={count} reduceMotion={reduceMotion} />
       )) : hasDeadAir ? null : lanes.length ? (
         <div style={{ paddingTop: 34, paddingRight: 24, paddingBottom: 34, paddingLeft: 24, color: 'var(--t-text-muted)', fontSize: 18, fontWeight: 300, lineHeight: 1.5, textAlign: 'center', overflowWrap: 'anywhere' }}>
           Following {lanes.length} {lanes.length === 1 ? 'lane' : 'lanes'}.
