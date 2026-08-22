@@ -1,6 +1,5 @@
 import 'server-only';
 
-import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
 
@@ -15,9 +14,7 @@ import type {
 import {
   observeManagedWorktreeRootIdentity,
   resolveManagedWorktreeStorageTarget,
-  resolveWorktreeRootLayout,
 } from '@/lib/worktree/root-layout';
-import { measureDirectoryStorage } from '@/lib/worktree/storage-telemetry';
 import {
   DEFAULT_STORAGE_OBSERVATION_MAX_AGE_MS,
   observeStorageVolume,
@@ -34,11 +31,16 @@ import {
   probeMetadataLockProcessIdentity,
   sameMetadataLockProcessIdentity,
 } from '@/lib/worktree/metadata-lock-process-identity';
+import {
+  observeRepoStorageEstimate,
+  observeRepoWorkspacePaths,
+  type RepoStorageEstimate,
+} from './storage-estimate';
+
+export { observeRepoStorageEstimate } from './storage-estimate';
+export type { RepoStorageEstimate } from './storage-estimate';
 
 const GIB = 1024 * 1024 * 1024;
-const DEFAULT_ESTIMATE_FLOOR_BYTES = 2 * GIB;
-const HISTORY_HEADROOM_RATIO = 1.25;
-const SOURCE_HEADROOM_RATIO = 2;
 const LAUNCH_RESERVATION_LEASE_MS = 24 * 60 * 60_000;
 
 export type PacketStorageAdmissionState = OrchestratorPacketStorageAdmission['state'];
@@ -48,15 +50,6 @@ export interface PacketStorageAdmissionLease {
   receipt: PacketStorageAdmissionReceipt;
   reservation: StorageReservationRecord;
   baselineWorkspacePaths: string[] | null;
-}
-
-export interface RepoStorageEstimate {
-  status: 'observed' | 'unknown';
-  exactBytes: number | null;
-  source: PacketStorageAdmissionReceipt['estimateSource'];
-  historySamples: number;
-  workspacePaths: string[];
-  error: string | null;
 }
 
 export interface PacketStorageAdmissionCoordinator {
@@ -106,108 +99,6 @@ export class PacketStorageAdmissionError extends Error {
     super(message);
     this.name = 'PacketStorageAdmissionError';
   }
-}
-
-function safeEstimateBytes(value: number): number {
-  if (!Number.isSafeInteger(value) || value <= 0) {
-    throw new Error('Workspace growth estimate is outside the safe integer range.');
-  }
-  return value;
-}
-
-async function directoryNames(base: string): Promise<string[]> {
-  try {
-    const entries = await readdir(base, { withFileTypes: true });
-    return entries
-      .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
-      .map((entry) => path.join(base, entry.name));
-  } catch (error) {
-    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
-      return [];
-    }
-    throw error;
-  }
-}
-
-export async function observeRepoStorageEstimate(repoPath: string): Promise<RepoStorageEstimate> {
-  const normalizedRepo = path.resolve(repoPath);
-  try {
-    const layout = resolveWorktreeRootLayout(normalizedRepo);
-    const bases = [...new Set(layout.bases.map((base) => path.resolve(base)))];
-    const nested = await Promise.all(bases.map(directoryNames));
-    const workspacePaths = [...new Set(nested.flat().map((candidate) => path.resolve(candidate)))].sort();
-    if (workspacePaths.length > 0) {
-      const measurements = await Promise.all(
-        workspacePaths.map((candidate) => measureDirectoryStorage(candidate)),
-      );
-      if (measurements.some((measurement) => measurement.allocatedBytesAccounting !== 'observed')) {
-        return {
-          status: 'unknown',
-          exactBytes: null,
-          source: 'unknown',
-          historySamples: measurements.length,
-          workspacePaths,
-          error: 'A same-repository worktree size could not be measured.',
-        };
-      }
-      const largest = Math.max(...measurements.map((measurement) => measurement.allocatedBytes ?? 0));
-      return {
-        status: 'observed',
-        exactBytes: safeEstimateBytes(Math.max(
-          DEFAULT_ESTIMATE_FLOOR_BYTES,
-          Math.ceil(largest * HISTORY_HEADROOM_RATIO),
-        )),
-        source: 'same-repo-history',
-        historySamples: measurements.length,
-        workspacePaths,
-        error: null,
-      };
-    }
-
-    // A repository with no prior packet workspace has no growth history. Use
-    // twice the observed source checkout with a 2 GiB minimum. This pays for a
-    // dependency tree and build output without treating an unknown source size
-    // as zero; an unreadable source holds dispatch instead.
-    const source = await measureDirectoryStorage(normalizedRepo);
-    if (source.allocatedBytesAccounting !== 'observed' || source.allocatedBytes === null) {
-      return {
-        status: 'unknown',
-        exactBytes: null,
-        source: 'unknown',
-        historySamples: 0,
-        workspacePaths,
-        error: 'The source checkout size could not be measured for the safe fallback.',
-      };
-    }
-    return {
-      status: 'observed',
-      exactBytes: safeEstimateBytes(Math.max(
-        DEFAULT_ESTIMATE_FLOOR_BYTES,
-        Math.ceil(source.allocatedBytes * SOURCE_HEADROOM_RATIO),
-      )),
-      source: 'source-size-fallback',
-      historySamples: 0,
-      workspacePaths,
-      error: null,
-    };
-  } catch (error) {
-    return {
-      status: 'unknown',
-      exactBytes: null,
-      source: 'unknown',
-      historySamples: 0,
-      workspacePaths: [],
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
-}
-
-async function observeWorkspacePaths(repoPath: string): Promise<string[]> {
-  const normalizedRepo = path.resolve(repoPath);
-  const layout = resolveWorktreeRootLayout(normalizedRepo);
-  const roots = [...layout.bases, path.join(normalizedRepo, '.claude', 'worktrees')];
-  const nested = await Promise.all([...new Set(roots)].map(directoryNames));
-  return [...new Set(nested.flat().map((candidate) => path.resolve(candidate)))].sort();
 }
 
 function receiptFromResult(
@@ -368,7 +259,7 @@ export function createPacketStorageAdmissionCoordinator(
   const store = dependencies.store ?? new StorageAdmissionStore(sqlite);
   const now = dependencies.now ?? Date.now;
   const estimate = dependencies.observeEstimate ?? observeRepoStorageEstimate;
-  const paths = dependencies.observeWorkspacePaths ?? observeWorkspacePaths;
+  const paths = dependencies.observeWorkspacePaths ?? observeRepoWorkspacePaths;
   const resolveReservationTarget = dependencies.resolveReservationTarget
     ?? resolveManagedWorktreeStorageTarget;
   const observeReservationVolume = dependencies.observeReservationVolume ?? observeStorageVolume;

@@ -41,6 +41,26 @@ interface Approval {
   createdAt?: string;
 }
 
+interface MissionStatusPacket {
+  id: string;
+  title?: string;
+  status?: string;
+  blockedReason?: string | null;
+  storageAdmission?: {
+    state?: string;
+    reason?: string;
+    recordedAt?: number;
+    estimateBytes?: number;
+    physicalAvailableBytes?: number | null;
+    requiredReserveBytes?: number | null;
+  } | null;
+}
+
+interface MissionStatusResponse {
+  ok: boolean;
+  result?: { packets?: MissionStatusPacket[] };
+}
+
 const RUNNING_STATUSES = new Set([
   'running',
   'launching',
@@ -52,15 +72,28 @@ const RUNNING_STATUSES = new Set([
 export async function runStatus(mode: OutputMode): Promise<number> {
   const cfg = resolveConfig();
 
-  const [activeRes, allRes, approvalsRes] = await Promise.all([
+  const [activeRes, allRes, approvalsRes, missionRes] = await Promise.all([
     apiFetch<{ lanes: Lane[] }>(cfg, '/api/lanes', { query: { active: 'true' } }),
     apiFetch<{ lanes: Lane[] }>(cfg, '/api/lanes', { query: { active: 'false' } }),
     apiFetch<{ approvals: Approval[] }>(cfg, '/api/panel/approvals', { query: { status: 'pending' } }),
+    apiFetch<MissionStatusResponse>(cfg, '/api/orchestrator/status', { allowNotFound: true }),
   ]);
 
   const activeLanes = activeRes.data?.lanes ?? [];
   const allLanes = allRes.data?.lanes ?? [];
   const approvals = approvalsRes.data?.approvals ?? [];
+  const storageHolds = (missionRes.data?.result?.packets ?? [])
+    .filter((packet) => packet.storageAdmission?.state === 'held')
+    .map((packet) => ({
+      packetId: packet.id,
+      title: packet.title ?? '',
+      status: packet.status ?? 'queued',
+      reason: packet.blockedReason ?? packet.storageAdmission?.reason ?? 'Storage admission held dispatch.',
+      recordedAt: packet.storageAdmission?.recordedAt ?? null,
+      estimateBytes: packet.storageAdmission?.estimateBytes ?? null,
+      physicalAvailableBytes: packet.storageAdmission?.physicalAvailableBytes ?? null,
+      requiredReserveBytes: packet.storageAdmission?.requiredReserveBytes ?? null,
+    }));
 
   const running = activeLanes.filter((l) => RUNNING_STATUSES.has(l.status));
   // Review packets remain active but are not always included in an upstream
@@ -83,6 +116,7 @@ export async function runStatus(mode: OutputMode): Promise<number> {
       activeLanes: activeLanes.length,
       recentMerges: recentMerges.length,
       pendingApprovals: approvals.length,
+      storageHolds: storageHolds.length,
     },
     activeLanesTruncated: activeLanes.length > LANE_CAP,
     awaitingReviewTruncated: awaitingReview.length > LANE_CAP,
@@ -99,6 +133,7 @@ export async function runStatus(mode: OutputMode): Promise<number> {
       laneId: a.laneId ?? null,
       createdAt: a.createdAt ?? null,
     })),
+    storageHolds,
   };
 
   if (mode.human) {
@@ -108,7 +143,8 @@ export async function runStatus(mode: OutputMode): Promise<number> {
         `   review ${color(String(awaitingReview.length), 'yellow')}` +
         `   active ${activeLanes.length}` +
         `   merges ${recentMerges.length}` +
-        `   approvals ${color(String(approvals.length), 'yellow')}\n`,
+        `   approvals ${color(String(approvals.length), 'yellow')}` +
+        `   storage holds ${color(String(storageHolds.length), 'yellow')}\n`,
     );
     if (running.length > 0) {
       printHumanHeading('running');
@@ -128,6 +164,12 @@ export async function runStatus(mode: OutputMode): Promise<number> {
         process.stdout.write(
           `  ${a.id.padEnd(28)} ${a.kind ?? '?'}  ${a.summary ?? ''}\n`,
         );
+      }
+    }
+    if (storageHolds.length > 0) {
+      printHumanHeading('storage holds');
+      for (const hold of storageHolds) {
+        process.stdout.write(`  ${hold.status.padEnd(15)} ${hold.packetId.padEnd(28)} ${hold.reason}\n`);
       }
     }
   } else {

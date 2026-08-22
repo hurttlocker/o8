@@ -68,6 +68,8 @@ export function buildRemainingLaunchBudget(): DispatchLaunchBudget {
 }
 
 const RECOVERY_COOLDOWN_MS = 60_000;
+const STORAGE_ADMISSION_RETRY_BASE_MS = 10_000;
+const STORAGE_ADMISSION_RETRY_MAX_MS = 5 * 60_000;
 const SESSION_RECOVERY_COMMIT_MESSAGE = 'auto-commit: session recovery';
 const execFileAsync = promisify(execFile);
 
@@ -144,6 +146,13 @@ interface RecoveryDispatchContext {
 
 function isDispatchReadyStatus(packet: OrchestratorPacket) {
   return packet.status === 'queued' || packet.status === 'recovering';
+}
+
+export function storageAdmissionRetryDelayMs(packet: OrchestratorPacket): number {
+  const receipt = packet.storageAdmission;
+  if (receipt?.state !== 'held' || packet.lastEventLabel !== 'storage_admission_held') return 0;
+  const exponent = Math.min(8, Math.max(0, receipt.ownerGeneration - 1));
+  return Math.min(STORAGE_ADMISSION_RETRY_MAX_MS, STORAGE_ADMISSION_RETRY_BASE_MS * (2 ** exponent));
 }
 
 export function getBootRecoveryLaunchBlocker(input: {
@@ -315,6 +324,12 @@ export function getDispatchBlocker(
   }
   if (!isDispatchReadyStatus(candidate)) {
     return `Status is ${candidate.status}`;
+  }
+  const storageRetryDelay = storageAdmissionRetryDelayMs(candidate);
+  const storageRecordedAt = candidate.storageAdmission?.recordedAt;
+  if (storageRetryDelay > 0 && typeof storageRecordedAt === 'number') {
+    const retryInMs = storageRetryDelay - (Date.now() - storageRecordedAt);
+    if (retryInMs > 0) return `Storage admission retry backoff (${Math.ceil(retryInMs / 1000)}s)`;
   }
   // #455 — Block dispatch if recovery limit exceeded
   if (candidate.status === 'recovering' && (candidate.recoveryCount ?? 0) >= MAX_RECOVERY_DISPATCHES) {
@@ -695,25 +710,32 @@ export async function runDispatchTick(
           const storageReceipt = result.reason instanceof PacketStorageAdmissionError
             ? result.reason.receipt
             : candidate.storageAdmission ?? null;
+          const retryableStorageHold = storageReceipt?.state === 'held';
           console.error(`[dag-scheduler] Failed to dispatch packet ${candidate.id}: ${reason}`);
           return {
             ...candidate,
             ...recoveryFields,
-            status: 'blocked',
+            status: retryableStorageHold ? 'queued' : 'blocked',
             blockedReason: reason,
             storageAdmission: storageReceipt,
+            lastEventAt: retryableStorageHold ? new Date().toISOString() : candidate.lastEventAt,
+            lastEventLabel: retryableStorageHold ? 'storage_admission_held' : candidate.lastEventLabel,
           };
         } catch (foldErr) {
           const msg = foldErr instanceof Error ? foldErr.message : 'Dispatch post-processing failed.';
           console.error(`[dag-scheduler] Fold-back error for ${candidate.id} — marking blocked so the tick can't loop:`, msg);
+          const storageReceipt = foldErr instanceof PacketStorageAdmissionError
+            ? foldErr.receipt
+            : candidate.storageAdmission ?? null;
+          const retryableStorageHold = storageReceipt?.state === 'held';
           return {
             ...candidate,
             ...recoveryFields,
-            status: 'blocked',
+            status: retryableStorageHold ? 'queued' : 'blocked',
             blockedReason: msg,
-            storageAdmission: foldErr instanceof PacketStorageAdmissionError
-              ? foldErr.receipt
-              : candidate.storageAdmission ?? null,
+            storageAdmission: storageReceipt,
+            lastEventAt: retryableStorageHold ? new Date().toISOString() : candidate.lastEventAt,
+            lastEventLabel: retryableStorageHold ? 'storage_admission_held' : candidate.lastEventLabel,
           };
         }
       }),

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
+const DU_TIMEOUT_MS = 30_000;
 
 export type StorageAccountingStatus = 'observed' | 'partial' | 'unknown';
 export type MeasurementAccounting = 'observed' | 'unknown';
@@ -87,6 +88,14 @@ export interface VolumeTelemetryDependencies {
   readVolumeId?: (targetPath: string) => Promise<string>;
 }
 
+interface CachedDirectoryStorage {
+  measurement: DirectoryStorageTelemetry;
+  observedAt: number;
+}
+
+const directoryStorageCache = new Map<string, CachedDirectoryStorage>();
+const directoryStorageRefreshes = new Map<string, Promise<DirectoryStorageTelemetry>>();
+
 function errorCode(error: unknown): string | null {
   if (!error || typeof error !== 'object' || !('code' in error)) return null;
   return typeof error.code === 'string' ? error.code : null;
@@ -112,7 +121,7 @@ async function runDuSize(targetPath: string, apparent: boolean): Promise<string>
   const { stdout } = await execFileAsync('du', args, {
     env: { ...process.env, LC_ALL: 'C' },
     windowsHide: true,
-    timeout: 8_000,
+    timeout: DU_TIMEOUT_MS,
   });
   return stdout;
 }
@@ -246,6 +255,33 @@ export async function measureDirectoryStorage(
     logicalBytesAccounting: logicalBytes === null ? 'unknown' : 'observed',
     errors,
   };
+}
+
+export function readCachedDirectoryStorage(targetPath: string): DirectoryStorageTelemetry | null {
+  return directoryStorageCache.get(path.resolve(targetPath))?.measurement ?? null;
+}
+
+/**
+ * Refresh one directory measurement without letting concurrent consumers fan
+ * out duplicate `du` walks. A failed refresh preserves the last observed byte
+ * count, because stale growth history is safer than erasing it during I/O
+ * contention.
+ */
+export function refreshDirectoryStorage(targetPath: string): Promise<DirectoryStorageTelemetry> {
+  const resolvedPath = path.resolve(targetPath);
+  const active = directoryStorageRefreshes.get(resolvedPath);
+  if (active) return active;
+
+  const refresh = measureDirectoryStorage(resolvedPath).then((measurement) => {
+    if (measurement.allocatedBytesAccounting === 'observed') {
+      directoryStorageCache.set(resolvedPath, { measurement, observedAt: Date.now() });
+    }
+    return measurement;
+  }).finally(() => {
+    directoryStorageRefreshes.delete(resolvedPath);
+  });
+  directoryStorageRefreshes.set(resolvedPath, refresh);
+  return refresh;
 }
 
 export function aggregateDirectoryStorage(
