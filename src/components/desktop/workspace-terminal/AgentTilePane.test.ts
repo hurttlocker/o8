@@ -1,10 +1,91 @@
-import { describe, expect, it } from 'vitest';
+// @vitest-environment jsdom
+
+import { act, createElement, type ReactNode } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+
+const transcriptMock = vi.hoisted(() => ({
+  slice: {
+    messages: [] as MobileTranscriptEntry[],
+    status: 'fresh' as const,
+    error: null,
+  },
+}));
+
+vi.mock('@/lib/transcripts/useTranscript', () => ({
+  useTranscript: () => transcriptMock.slice,
+}));
+
+vi.mock('framer-motion', () => ({
+  AnimatePresence: ({ children }: { children: ReactNode }) => children,
+  motion: {
+    form: ({ children, ...props }: { children?: ReactNode }) => createElement('form', props, children),
+  },
+}));
+
+vi.mock('./SessionTransformMenu', () => ({ SessionTransformMenu: () => null }));
+vi.mock('./WorkspaceTranscript', () => ({
+  WorkspaceTranscript: ({ entries }: { entries: MobileTranscriptEntry[] }) => createElement(
+    'div',
+    null,
+    entries.map((entry) => entry.text).join(''),
+  ),
+}));
+
 import {
+  AgentTilePane,
   canSteerAgentState,
   classifyAgentTileStatus,
   normalizeAgentTileTranscript,
   resolveAgentTileStatus,
 } from './AgentTilePane';
+
+let root: Root | null = null;
+let host: HTMLDivElement | null = null;
+let animationFrames = new Map<number, FrameRequestCallback>();
+let nextAnimationFrame = 1;
+let resizeCallbacks: ResizeObserverCallback[] = [];
+
+function flushAnimationFrame() {
+  const pending = [...animationFrames.values()];
+  animationFrames.clear();
+  pending.forEach((callback) => callback(performance.now()));
+}
+
+beforeEach(() => {
+  animationFrames = new Map();
+  nextAnimationFrame = 1;
+  resizeCallbacks = [];
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+    const frame = nextAnimationFrame;
+    nextAnimationFrame += 1;
+    animationFrames.set(frame, callback);
+    return frame;
+  });
+  vi.stubGlobal('cancelAnimationFrame', (frame: number) => {
+    animationFrames.delete(frame);
+  });
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(callback: ResizeObserverCallback) {
+      resizeCallbacks.push(callback);
+    }
+
+    observe() {}
+    disconnect() {}
+  });
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  root = createRoot(host);
+});
+
+afterEach(() => {
+  act(() => root?.unmount());
+  host?.remove();
+  root = null;
+  host = null;
+  vi.unstubAllGlobals();
+});
 
 describe('normalizeAgentTileTranscript', () => {
   it('shows the assigned task instead of the injected worker envelope', () => {
@@ -67,6 +148,74 @@ describe('normalizeAgentTileTranscript', () => {
     });
 
     expect(entries).toHaveLength(1);
+  });
+});
+
+describe('AgentTilePane live transcript scrolling', () => {
+  it('follows a growing entry across frames and yields after the operator scrolls up', () => {
+    const renderPane = (text: string) => {
+      transcriptMock.slice.messages = [{ id: 'assistant-live', role: 'assistant', text }];
+      act(() => {
+        root?.render(createElement(AgentTilePane, {
+          sessionKey: 'codex-owned:live-worker',
+          agent: { name: 'Worker', status: 'running', runtime: 'codex' },
+          focused: true,
+          onClose: () => {},
+          onFocus: () => {},
+        }));
+      });
+    };
+
+    renderPane('Starting');
+    const scroller = host?.querySelector('.cortex-scroll-fade-y') as HTMLDivElement | null;
+    expect(scroller).not.toBeNull();
+    if (!scroller) return;
+
+    let scrollHeight = 1_000;
+    Object.defineProperties(scroller, {
+      clientHeight: { configurable: true, get: () => 400 },
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+    });
+
+    act(flushAnimationFrame);
+    expect(scroller.scrollTop).toBe(1_000);
+
+    scrollHeight = 1_100;
+    renderPane('Starting and continuing');
+    act(flushAnimationFrame);
+    expect(scroller.scrollTop).toBe(1_100);
+
+    scrollHeight = 1_200;
+    renderPane('Starting and continuing across another frame');
+    act(flushAnimationFrame);
+    expect(scroller.scrollTop).toBe(1_200);
+
+    scrollHeight = 1_300;
+    act(() => {
+      resizeCallbacks.forEach((callback) => callback([], {} as ResizeObserver));
+    });
+    expect(scroller.scrollTop).toBe(1_300);
+
+    act(() => {
+      scroller.scrollTop = 600;
+      scroller.dispatchEvent(new Event('scroll'));
+    });
+    scrollHeight = 1_400;
+    renderPane('More output that must not yank the operator back down');
+    act(flushAnimationFrame);
+    act(() => {
+      resizeCallbacks.forEach((callback) => callback([], {} as ResizeObserver));
+    });
+    expect(scroller.scrollTop).toBe(600);
+
+    act(() => {
+      scroller.scrollTop = 1_000;
+      scroller.dispatchEvent(new Event('scroll'));
+    });
+    scrollHeight = 1_500;
+    renderPane('Pinning resumes after the operator returns to the bottom');
+    act(flushAnimationFrame);
+    expect(scroller.scrollTop).toBe(1_500);
   });
 });
 

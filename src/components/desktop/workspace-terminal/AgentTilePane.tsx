@@ -10,6 +10,7 @@ import {
   useState,
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type UIEvent as ReactUIEvent,
 } from 'react';
 import type { FleetAgent } from '@/components/desktop/thoughts/types';
 import { mergeAdjacentToolOnlyEntries } from '@/components/desktop/thoughts/chat-panel/ToolCallChipCluster';
@@ -157,6 +158,61 @@ export function normalizeAgentTileTranscript(
 // composer reveal animation when a lane flips to running/awaiting_input.
 const COMPOSER_SPRING = { type: 'spring', stiffness: 400, damping: 30 } as const;
 const TRANSCRIPT_STEER_LOADING_TIMEOUT_MS = 10_000;
+const STICK_TO_BOTTOM_THRESHOLD_PX = 120;
+
+function isNearBottom(container: HTMLElement): boolean {
+  return container.scrollHeight - container.scrollTop - container.clientHeight < STICK_TO_BOTTOM_THRESHOLD_PX;
+}
+
+function useAgentTileStickToBottom(active: boolean, changeKey: string, hasContent: boolean) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
+
+  const pinToBottom = useCallback(() => {
+    const container = scrollRef.current;
+    if (!container || !stickToBottomRef.current) return;
+    container.scrollTop = container.scrollHeight;
+  }, []);
+
+  const handleScroll = useCallback((event: ReactUIEvent<HTMLDivElement>) => {
+    stickToBottomRef.current = isNearBottom(event.currentTarget);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') return;
+    const frame = window.requestAnimationFrame(pinToBottom);
+    return () => window.cancelAnimationFrame?.(frame);
+  }, [changeKey, pinToBottom]);
+
+  useEffect(() => {
+    const container = scrollRef.current;
+    const content = contentRef.current;
+    if (!container || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(pinToBottom);
+    observer.observe(container);
+    if (content) observer.observe(content);
+    return () => observer.disconnect();
+  }, [hasContent, pinToBottom]);
+
+  useEffect(() => {
+    if (!active || typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') return;
+    let frame = 0;
+    let cancelled = false;
+    const pin = () => {
+      if (cancelled) return;
+      pinToBottom();
+      frame = window.requestAnimationFrame(pin);
+    };
+    frame = window.requestAnimationFrame(pin);
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame?.(frame);
+    };
+  }, [active, pinToBottom]);
+
+  return { contentRef, handleScroll, scrollRef };
+}
 
 export function canSteerAgentState(
   agent: Pick<FleetAgent, 'status'> | null,
@@ -175,7 +231,6 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
   const entries = slice.messages;
   const loading = slice.status === 'loading' || slice.status === 'idle';
   const error = slice.status === 'error' ? slice.error ?? 'Unable to load transcript.' : null;
-  const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -201,6 +256,11 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
   const lastEntryKey = displayEntries.length > 0
     ? `${displayEntries[displayEntries.length - 1]?.id}:${entryContent(displayEntries[displayEntries.length - 1]!)}`
     : '';
+  const { contentRef, handleScroll, scrollRef } = useAgentTileStickToBottom(
+    status === 'running',
+    lastEntryKey,
+    displayEntries.length > 0,
+  );
 
   // Fix #1: keep a ref in sync with latest agent so submitSteer re-derives
   // canSteer at call time, not at callback-creation time.
@@ -316,12 +376,6 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
     void bootstrapTranscripts([sessionKey]);
   }, [sessionKey, slice.status]);
 
-  useEffect(() => {
-    requestAnimationFrame(() => {
-      if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    });
-  }, [lastEntryKey]);
-
   return (
     <div
       onMouseDown={() => onFocus(sessionKey)}
@@ -406,6 +460,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
 
       <div
         ref={scrollRef}
+        onScroll={handleScroll}
         className="cortex-scroll-fade-y cortex-themed-scroll"
         style={{
           flex: 1, minHeight: 0, overflowY: 'auto',
@@ -416,6 +471,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
       >
         {displayEntries.length === 0 ? (
           <div
+            ref={contentRef}
             style={{
               flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center',
               color: 'var(--t-text-secondary)', fontSize: 12, lineHeight: 1.5,
@@ -425,6 +481,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
           </div>
         ) : (
           <div
+            ref={contentRef}
             style={{
               width: '100%', maxWidth: 'var(--cortex-chat-column-max)', minHeight: '100%',
               marginRight: 'auto', marginLeft: 'auto', display: 'flex', flexDirection: 'column', gap: 18,
