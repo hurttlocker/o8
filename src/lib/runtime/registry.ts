@@ -5,6 +5,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 import type { LaneRuntime } from '@/lib/lane/types';
+import { readProcessCwdSnapshot } from '@/lib/runtime/process-cwd-snapshot';
 
 const execFileAsync = promisify(execFile);
 
@@ -38,12 +39,6 @@ export interface RuntimeProcessOwner {
   binaryPath: string;
 }
 
-interface ProcessCwdRow {
-  pid: number;
-  cwd: string;
-  commandName?: string;
-}
-
 interface ProcessCommandRow {
   pid: number;
   command: string;
@@ -70,48 +65,6 @@ function pathWithinWorktree(candidatePath: string, worktreePath: string): boolea
   const candidate = stripTrailingSlash(candidatePath);
   const worktree = stripTrailingSlash(worktreePath);
   return candidate === worktree || candidate.startsWith(`${worktree}${path.sep}`);
-}
-
-function parseLsofCwdOutput(raw: string): ProcessCwdRow[] {
-  const rows: ProcessCwdRow[] = [];
-  let current: Partial<ProcessCwdRow> = {};
-
-  const flush = () => {
-    if (typeof current.pid === 'number' && current.cwd) {
-      rows.push(current as ProcessCwdRow);
-    }
-    current = {};
-  };
-
-  for (const line of raw.split('\n')) {
-    if (!line) continue;
-    const tag = line[0];
-    const value = line.slice(1);
-    if (tag === 'p') {
-      flush();
-      const pid = Number(value);
-      if (Number.isFinite(pid)) current.pid = pid;
-    } else if (tag === 'c') {
-      current.commandName = value;
-    } else if (tag === 'n') {
-      current.cwd = value;
-    }
-  }
-  flush();
-  return rows;
-}
-
-async function readProcessCwds(): Promise<ProcessCwdRow[]> {
-  try {
-    const { stdout } = await execFileAsync('lsof', ['-nP', '-d', 'cwd', '-F', 'pcn'], {
-      windowsHide: true,
-      maxBuffer: 16 * 1024 * 1024,
-      timeout: 3_000,
-    });
-    return parseLsofCwdOutput(stdout);
-  } catch {
-    return [];
-  }
 }
 
 function firstCommandToken(command: string): string {
@@ -190,10 +143,11 @@ async function readProcessCommands(): Promise<Map<number, ProcessCommandRow>> {
 
 export async function listRuntimeProcessesForWorktree(worktreePath: string): Promise<RuntimeProcessOwner[]> {
   const normalizedWorktree = await normalizeFsPath(worktreePath);
-  const [cwdRows, commandRows] = await Promise.all([
-    readProcessCwds(),
+  const [cwdSnapshot, commandRows] = await Promise.all([
+    readProcessCwdSnapshot(),
     readProcessCommands(),
   ]);
+  const cwdRows = cwdSnapshot.status === 'ready' ? cwdSnapshot.rows : [];
 
   const owners: RuntimeProcessOwner[] = [];
   for (const row of cwdRows) {

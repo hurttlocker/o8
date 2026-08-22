@@ -2,8 +2,11 @@ import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
+import { readProcessCwdsForPids } from '@/lib/runtime/process-cwd-snapshot';
+
 const execFileAsync = promisify(execFile);
-const INDEX_TTL_MS = 2_000;
+const ACTIVE_INDEX_TTL_MS = 15_000;
+const IDLE_INDEX_TTL_MS = 30_000;
 
 export interface LiveCodexProcess {
   pid: number;
@@ -15,7 +18,8 @@ export interface LiveCodexProcess {
 type ProcessReader = () => Promise<LiveCodexProcess[]>;
 
 let processReader: ProcessReader | null = null;
-let cachedIndex: { builtAt: number; byCwd: Map<string, LiveCodexProcess> } | null = null;
+let cachedIndex: { expiresAt: number; byCwd: Map<string, LiveCodexProcess> } | null = null;
+let indexInflight: Promise<Map<string, LiveCodexProcess>> | null = null;
 
 function normalizeCwd(cwd: string | null | undefined): string | null {
   const trimmed = cwd?.trim();
@@ -59,44 +63,42 @@ async function readCodexProcessRows(): Promise<LiveCodexProcess[]> {
   }
   if (rows.length === 0) return [];
 
-  try {
-    const { stdout } = await execFileAsync(
-      'lsof',
-      ['-a', '-p', rows.map((row) => row.pid).join(','), '-d', 'cwd', '-Fn'],
-      { windowsHide: true, maxBuffer: 512 * 1024, timeout: 4000 },
-    );
-    let currentPid: number | null = null;
-    for (const line of stdout.split('\n')) {
-      if (line.startsWith('p')) {
-        currentPid = Number(line.slice(1));
-      } else if (line.startsWith('n/') && currentPid !== null) {
-        const row = rows.find((candidate) => candidate.pid === currentPid);
-        if (row) row.cwd = line.slice(1);
-      }
-    }
-  } catch {
-    // CWD lookup is best-effort; callers only treat a positive CWD match as live.
+  const cwdByPid = await readProcessCwdsForPids(rows.map((row) => row.pid));
+  for (const row of rows) {
+    row.cwd = cwdByPid.get(row.pid);
   }
 
   return rows;
 }
 
 async function buildIndex(now: number): Promise<Map<string, LiveCodexProcess>> {
-  if (cachedIndex && now - cachedIndex.builtAt < INDEX_TTL_MS) {
+  if (cachedIndex && now < cachedIndex.expiresAt) {
     return cachedIndex.byCwd;
   }
+  if (indexInflight) return indexInflight;
 
-  const reader = processReader ?? readCodexProcessRows;
-  const byCwd = new Map<string, LiveCodexProcess>();
-  const processes = await reader();
-  for (const proc of processes) {
-    const cwd = normalizeCwd(proc.cwd);
-    if (!cwd || byCwd.has(cwd)) continue;
-    byCwd.set(cwd, proc);
+  const promise = (async () => {
+    const reader = processReader ?? readCodexProcessRows;
+    const byCwd = new Map<string, LiveCodexProcess>();
+    const processes = await reader();
+    for (const proc of processes) {
+      const cwd = normalizeCwd(proc.cwd);
+      if (!cwd || byCwd.has(cwd)) continue;
+      byCwd.set(cwd, proc);
+    }
+
+    cachedIndex = {
+      expiresAt: now + (byCwd.size > 0 ? ACTIVE_INDEX_TTL_MS : IDLE_INDEX_TTL_MS),
+      byCwd,
+    };
+    return byCwd;
+  })();
+  indexInflight = promise;
+  try {
+    return await promise;
+  } finally {
+    if (indexInflight === promise) indexInflight = null;
   }
-
-  cachedIndex = { builtAt: now, byCwd };
-  return byCwd;
 }
 
 export async function findLiveCodexProcessByCwd(
@@ -111,10 +113,12 @@ export async function findLiveCodexProcessByCwd(
 
 export function resetCodexProcessCwdIndexForTesting(): void {
   cachedIndex = null;
+  indexInflight = null;
   processReader = null;
 }
 
 export function setCodexProcessReaderForTesting(reader: ProcessReader): void {
   cachedIndex = null;
+  indexInflight = null;
   processReader = reader;
 }

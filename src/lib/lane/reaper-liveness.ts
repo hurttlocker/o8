@@ -20,18 +20,16 @@
  *      the real streaming pulse; a log written inside the stale window means the
  *      worker is producing output right now → NOT a zombie, regardless of a
  *      frozen heartbeat.
- *   2. LIVE-PROCESS GUARD — `hasLiveProcessInside(worktree)` (reused from the
- *      worktree-pruner fix, d0c14791) answers "does any live process have its cwd
- *      inside this worktree?" via an ANDed `lsof -d cwd +D` query. A detached `codex exec` worker is
- *      exactly this case. It fails CLOSED: any probe uncertainty (error/timeout/
- *      missing binary) reads as "live" so the lane is KEPT — we would rather leak
- *      a stale lane than abort a live worker.
+ *   2. LIVE-PROCESS GUARD — the shared machine-wide cwd snapshot answers "does
+ *      any live process have its cwd inside this worktree?" without starting a
+ *      separate lsof for each lane. A detached worker is exactly this case. It
+ *      fails CLOSED: any probe uncertainty reads as "live" so the lane is KEPT.
  */
 import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
+import { hasLiveProcessCwdInside } from '@/lib/runtime/process-cwd-snapshot';
 import { ownedRoots } from '@/lib/runtimes/shared/owned-session-index';
-import { hasLiveProcessInside } from '@/lib/worktree/live-process-guard';
 import type { Lane } from './types';
 
 // Source of truth: src/lib/runtimes/shared/owned-session/helpers.ts. Inlined here
@@ -181,7 +179,7 @@ export async function assessOwnedTranscriptActivity(
  * Decide whether a stale-heartbeat lane the owner-probe already called dead is
  * REALLY a zombie. Returns `keep:true` when ANY of:
  *   - the owned transcript was written within `staleThresholdMs` (fresh streaming)
- *   - a live process has its cwd inside the worktree (`hasLiveProcessInside`)
+ *   - a live process has its cwd inside the worktree
  *   - the live-process probe is uncertain / throws (fail closed → KEEP)
  * Returns `keep:false` only when both signals cleanly report no life.
  */
@@ -191,7 +189,7 @@ export async function assessStaleLaneLiveness(
 ): Promise<StaleLaneLivenessDecision> {
   const { staleThresholdMs, now } = opts;
   const transcriptMtimeMs = opts.probes?.transcriptMtimeMs ?? ownedTranscriptMtimeMs;
-  const liveProcessInside = opts.probes?.liveProcessInside ?? hasLiveProcessInside;
+  const liveProcessInside = opts.probes?.liveProcessInside ?? hasLiveProcessCwdInside;
 
   // 1. Transcript activity — the real streaming pulse. Transcript activity IS a
   //    heartbeat: a lane streaming tokens inside the stale window is not a zombie.

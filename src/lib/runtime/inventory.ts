@@ -9,6 +9,7 @@ import { listCurrentIdeRepoPaths } from '@/lib/runtime/ide-terminal-state';
 import { listIdeRuntimeSessions, listIdeRuntimeTabs, type IdeRuntimeSessionDescriptor } from '@/lib/runtime/ide-session-registry';
 import { getRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
 import { readSessionTransformCatalog } from '@/lib/runtime/session-transform-catalog';
+import { invalidateProcessCwdSnapshot } from '@/lib/runtime/process-cwd-snapshot';
 import {
   isDispatchableRuntime,
   ORCHESTRATOR_RUNTIMES,
@@ -18,13 +19,14 @@ import type { Lane, LaneEvent } from '@/lib/lane/types';
 
 const RUNTIME_INVENTORY_TTL_MS = 15_000;
 const RUNTIME_INVENTORY_FRESH_COALESCE_MS = 2_000;
+const RUNTIME_INVENTORY_IDLE_TTL_MS = 30_000;
 // Hard ceiling on how long a single snapshot build can take before we serve
 // the prior cached snapshot (or an empty shell) and let discovery finish in
 // the background. When the local codex sessions directory has hundreds of
 // stale entries, discoverSessions balloons past 10s and the client fetch
 // surfaces as a 'Load failed' TypeError in the Next.js dev overlay.
 const RUNTIME_INVENTORY_BUILD_TIMEOUT_MS = 3_500;
-const runtimeInventoryCache = new Map<string, { snapshot: FleetSnapshot; cachedAt: number }>();
+const runtimeInventoryCache = new Map<string, { snapshot: FleetSnapshot; cachedAt: number; idle: boolean }>();
 const runtimeInventoryInflight = new Map<string, { generation: number; promise: Promise<FleetSnapshot> }>();
 let runtimeInventoryGeneration = 0;
 // #1293 — retire dead/orphaned owned-session corpses continuously, not just at
@@ -38,6 +40,14 @@ export function invalidateRuntimeInventoryCache() {
   runtimeInventoryGeneration += 1;
   runtimeInventoryCache.clear();
   runtimeInventoryInflight.clear();
+  invalidateProcessCwdSnapshot();
+}
+
+function inventoryHasOwnedOrLiveSession(snapshot: FleetSnapshot): boolean {
+  return snapshot.agents.some((agent) => (
+    agent.runtimeSurface?.ownership === 'owned'
+    || ['running', 'waiting', 'reviewing', 'huddling'].includes(agent.status)
+  ));
 }
 
 function relativeAge(timestamp: Date) {
@@ -603,7 +613,11 @@ export async function getRuntimeInventorySnapshot(
   const generation = runtimeInventoryGeneration;
 
   const cached = runtimeInventoryCache.get(cacheKey);
-  const maxCacheAge = fresh ? RUNTIME_INVENTORY_FRESH_COALESCE_MS : RUNTIME_INVENTORY_TTL_MS;
+  const maxCacheAge = cached?.idle
+    ? RUNTIME_INVENTORY_IDLE_TTL_MS
+    : fresh
+      ? RUNTIME_INVENTORY_FRESH_COALESCE_MS
+      : RUNTIME_INVENTORY_TTL_MS;
   if (cached && (now - cached.cachedAt) < maxCacheAge) {
     return cached.snapshot;
   }
@@ -677,7 +691,11 @@ export async function getRuntimeInventorySnapshot(
       && snapshot.meta.gatewayFreshness === 'fresh'
       && !snapshot.meta.observablePending;
     if (generation === runtimeInventoryGeneration && canCache) {
-      runtimeInventoryCache.set(cacheKey, { snapshot, cachedAt: Date.now() });
+      runtimeInventoryCache.set(cacheKey, {
+        snapshot,
+        cachedAt: Date.now(),
+        idle: !inventoryHasOwnedOrLiveSession(snapshot),
+      });
     }
     return snapshot;
   })();

@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 
 import { getDb, lanes } from '@/lib/db';
+import { invalidateProcessCwdSnapshot } from '@/lib/runtime/process-cwd-snapshot';
 import { isBridgeSessionAlive } from '@/lib/runtime/pty-bridge';
 import { getRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
 import type { Lane } from './types';
@@ -155,6 +156,7 @@ export function recordLaneHeartbeat(laneId: string, heartbeatAt: number = Date.n
 export async function listZombieLaneCandidates(now: number = Date.now()): Promise<ZombieLaneCandidate[]> {
   const candidates: ZombieLaneCandidate[] = [];
   const runningLanes = listActiveLanes().filter((lane) => lane.status === 'running');
+  let processSnapshotStarted = false;
 
   for (const lane of runningLanes) {
     const staleMs = heartbeatStaleMs(lane, now);
@@ -164,6 +166,13 @@ export async function listZombieLaneCandidates(now: number = Date.now()): Promis
 
     const probe = await probeLaneOwner(lane);
     if (probe.alive !== false) continue;
+
+    // This is one reaper poll. Refresh the shared snapshot once before its
+    // first process check, then let every remaining lane reuse that snapshot.
+    if (!processSnapshotStarted) {
+      invalidateProcessCwdSnapshot();
+      processSnapshotStarted = true;
+    }
 
     // #1585: the lane heartbeat is a fragile, worker-volitional signal — it only
     // advances when the worker itself runs `o8 packet heartbeat`, so a Codex

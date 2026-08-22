@@ -22,7 +22,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 
 import { resetCodexProcessCwdIndexForTesting, setCodexProcessReaderForTesting } from '@/lib/runtimes/shared/codex-process-cwd';
 import { resetOwnedSessionIndex } from '@/lib/runtimes/shared/owned-session-index';
-import * as liveProcessGuard from '@/lib/worktree/live-process-guard';
+import * as processCwdSnapshot from '@/lib/runtime/process-cwd-snapshot';
 
 // Point the SQLite store + owned root at temp dirs BEFORE importing the registry.
 const testDataDir = mkdtempSync(join(tmpdir(), 'o8-reaper-liveness-'));
@@ -159,8 +159,10 @@ describe('zombie reaper secondary liveness gates (#1585)', () => {
     const child = spawn('sleep', ['30'], { cwd: wt, stdio: 'ignore' });
     spawnedChildren.push(child);
     await new Promise((r) => setTimeout(r, 300)); // let it settle in the process table
+    const liveProbe = vi.spyOn(processCwdSnapshot, 'hasLiveProcessCwdInside').mockResolvedValue(true);
 
     const candidates = await listZombieLaneCandidates(now);
+    liveProbe.mockRestore();
 
     expect(candidates.some((c) => c.lane.id === lane.id)).toBe(false);
     expect(getLane(lane.id)?.status).toBe('running');
@@ -177,7 +179,7 @@ describe('zombie reaper secondary liveness gates (#1585)', () => {
     // A saturated full-suite host can make the real 2s lsof probe time out;
     // production correctly keeps the lane fail-closed in that case. This case
     // specifically proves the clean "no process" branch, so make it explicit.
-    const liveProbe = vi.spyOn(liveProcessGuard, 'hasLiveProcessInside').mockResolvedValue(false);
+    const liveProbe = vi.spyOn(processCwdSnapshot, 'hasLiveProcessCwdInside').mockResolvedValue(false);
     const candidates = await listZombieLaneCandidates(now);
     liveProbe.mockRestore();
 
@@ -217,7 +219,7 @@ describe('zombie reaper secondary liveness gates (#1585)', () => {
     });
     const now = Date.now();
     const lane = makeRunningLane(wt, sessionKey, now, runtime);
-    const liveProbe = vi.spyOn(liveProcessGuard, 'hasLiveProcessInside').mockResolvedValue(false);
+    const liveProbe = vi.spyOn(processCwdSnapshot, 'hasLiveProcessCwdInside').mockResolvedValue(false);
 
     const candidates = await listZombieLaneCandidates(now);
     liveProbe.mockRestore();

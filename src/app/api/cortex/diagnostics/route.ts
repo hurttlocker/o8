@@ -33,6 +33,10 @@ import {
   summarizeTimings,
   type RecallTimingSummary,
 } from '@/lib/cortex/diagnostics';
+import {
+  readProcessCwdProbeDiagnostics,
+  type ProcessCwdProbeDiagnostics,
+} from '@/lib/runtime/process-cwd-snapshot';
 import { SUBSTRATE_EVAL_THRESHOLDS } from '@/lib/cortex/substrate-eval-thresholds';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -44,6 +48,7 @@ interface DiagnosticsResponse {
   timing: RecallTimingSummary;
   timing7d: RecallTimingSummary;
   thresholds: typeof SUBSTRATE_EVAL_THRESHOLDS;
+  processCwdProbe: ProcessCwdProbeDiagnostics;
   /**
    * Substrate "health" verdict — green/amber/red — derived from the same
    * thresholds the doc records. The UI uses this to colour the row.
@@ -140,6 +145,7 @@ export async function GET() {
     timing,
     timing7d,
     thresholds: SUBSTRATE_EVAL_THRESHOLDS,
+    processCwdProbe: readProcessCwdProbeDiagnostics(),
     health,
     notes,
   };

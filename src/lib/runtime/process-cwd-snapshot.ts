@@ -1,0 +1,231 @@
+import { execFile } from 'node:child_process';
+import path from 'node:path';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
+const ACTIVE_SNAPSHOT_TTL_MS = 15_000;
+const IDLE_SNAPSHOT_TTL_MS = 30_000;
+
+export interface ProcessCwdRow {
+  pid: number;
+  cwd: string;
+  commandName?: string;
+}
+
+export type ProcessCwdSnapshot =
+  | { status: 'ready'; rows: ProcessCwdRow[]; capturedAt: number }
+  | { status: 'unavailable'; rows: []; capturedAt: number; reason: string };
+
+interface ProcessCwdCommandResult {
+  stdout: string | Buffer;
+}
+
+export type ProcessCwdExecFile = (
+  file: string,
+  args: string[],
+  options: {
+    windowsHide: boolean;
+    maxBuffer: number;
+    timeout: number;
+  },
+) => Promise<ProcessCwdCommandResult>;
+
+export interface ProcessCwdSnapshotOptions {
+  /** Deterministic process seam for real-path tests. */
+  execFile?: ProcessCwdExecFile;
+  now?: () => number;
+}
+
+export interface ProcessCwdProbeDiagnostics {
+  lsofInvocations: number;
+  cacheHits: number;
+  singleFlightJoins: number;
+  emptyRequestSkips: number;
+  failures: number;
+  inflight: boolean;
+  lastProbeAt: number | null;
+  lastDurationMs: number | null;
+  lastRowCount: number;
+}
+
+let cachedSnapshot: { value: ProcessCwdSnapshot; expiresAt: number } | null = null;
+let snapshotInflight: Promise<ProcessCwdSnapshot> | null = null;
+let lsofInvocations = 0;
+let cacheHits = 0;
+let singleFlightJoins = 0;
+let emptyRequestSkips = 0;
+let failures = 0;
+let lastProbeAt: number | null = null;
+let lastDurationMs: number | null = null;
+let lastRowCount = 0;
+
+function outputText(value: string | Buffer): string {
+  return typeof value === 'string' ? value : value.toString('utf8');
+}
+
+export function parseProcessCwdSnapshot(raw: string): ProcessCwdRow[] {
+  const rows: ProcessCwdRow[] = [];
+  let current: Partial<ProcessCwdRow> = {};
+
+  const flush = () => {
+    if (typeof current.pid === 'number' && current.cwd) {
+      rows.push(current as ProcessCwdRow);
+    }
+    current = {};
+  };
+
+  for (const line of raw.split('\n')) {
+    if (!line) continue;
+    const tag = line[0];
+    const value = line.slice(1);
+    if (tag === 'p') {
+      flush();
+      const pid = Number(value);
+      if (Number.isFinite(pid)) current.pid = pid;
+    } else if (tag === 'c') {
+      current.commandName = value;
+    } else if (tag === 'n') {
+      current.cwd = value;
+    }
+  }
+  flush();
+  return rows;
+}
+
+function compactError(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error))
+    .trim()
+    .replace(/\s+/g, ' ')
+    .slice(0, 300) || 'unknown lsof failure';
+}
+
+function defaultExecFile(
+  file: string,
+  args: string[],
+  options: Parameters<ProcessCwdExecFile>[2],
+): Promise<ProcessCwdCommandResult> {
+  return execFileAsync(file, args, options);
+}
+
+/**
+ * Read one machine-wide cwd snapshot. All callers share the same cache and
+ * in-flight promise, so concurrent inventory, registry, and reaper reads never
+ * fan out into overlapping lsof processes.
+ */
+export async function readProcessCwdSnapshot(
+  options: ProcessCwdSnapshotOptions = {},
+): Promise<ProcessCwdSnapshot> {
+  const now = options.now ?? Date.now;
+  const requestedAt = now();
+  if (cachedSnapshot && requestedAt < cachedSnapshot.expiresAt) {
+    cacheHits += 1;
+    return cachedSnapshot.value;
+  }
+  if (snapshotInflight) {
+    singleFlightJoins += 1;
+    return snapshotInflight;
+  }
+
+  const run = options.execFile ?? defaultExecFile;
+  const startedAt = requestedAt;
+  lsofInvocations += 1;
+  lastProbeAt = startedAt;
+  const promise = (async (): Promise<ProcessCwdSnapshot> => {
+    let snapshot: ProcessCwdSnapshot;
+    try {
+      const { stdout } = await run('lsof', ['-nP', '-d', 'cwd', '-F', 'pcn'], {
+        windowsHide: true,
+        maxBuffer: 16 * 1024 * 1024,
+        timeout: 3_000,
+      });
+      const rows = parseProcessCwdSnapshot(outputText(stdout));
+      snapshot = { status: 'ready', rows, capturedAt: startedAt };
+      lastRowCount = rows.length;
+    } catch (error) {
+      failures += 1;
+      lastRowCount = 0;
+      snapshot = {
+        status: 'unavailable',
+        rows: [],
+        capturedAt: startedAt,
+        reason: compactError(error),
+      };
+    }
+
+    lastDurationMs = Math.max(0, now() - startedAt);
+    const ttlMs = snapshot.status === 'ready' && snapshot.rows.length > 0
+      ? ACTIVE_SNAPSHOT_TTL_MS
+      : IDLE_SNAPSHOT_TTL_MS;
+    cachedSnapshot = { value: snapshot, expiresAt: now() + ttlMs };
+    return snapshot;
+  })();
+
+  snapshotInflight = promise;
+  try {
+    return await promise;
+  } finally {
+    if (snapshotInflight === promise) snapshotInflight = null;
+  }
+}
+
+/** Skip lsof entirely when a caller has no candidate process IDs. */
+export async function readProcessCwdsForPids(
+  pids: number[],
+  options: ProcessCwdSnapshotOptions = {},
+): Promise<Map<number, string>> {
+  const wanted = new Set(pids.filter((pid) => Number.isInteger(pid) && pid > 0));
+  if (wanted.size === 0) {
+    emptyRequestSkips += 1;
+    return new Map();
+  }
+  const snapshot = await readProcessCwdSnapshot(options);
+  if (snapshot.status !== 'ready') return new Map();
+  return new Map(
+    snapshot.rows
+      .filter((row) => wanted.has(row.pid))
+      .map((row) => [row.pid, row.cwd]),
+  );
+}
+
+/** Reaper-only fail-closed view of the shared cwd snapshot. */
+export async function hasLiveProcessCwdInside(dirPath: string): Promise<boolean> {
+  const target = path.resolve(dirPath).replace(/\/+$/, '');
+  if (!target || target === path.parse(target).root) return true;
+  const snapshot = await readProcessCwdSnapshot();
+  if (snapshot.status !== 'ready') return true;
+  return snapshot.rows.some((row) => {
+    const cwd = path.resolve(row.cwd).replace(/\/+$/, '');
+    return cwd === target || cwd.startsWith(`${target}${path.sep}`);
+  });
+}
+
+export function readProcessCwdProbeDiagnostics(): ProcessCwdProbeDiagnostics {
+  return {
+    lsofInvocations,
+    cacheHits,
+    singleFlightJoins,
+    emptyRequestSkips,
+    failures,
+    inflight: snapshotInflight !== null,
+    lastProbeAt,
+    lastDurationMs,
+    lastRowCount,
+  };
+}
+
+export function invalidateProcessCwdSnapshot(): void {
+  cachedSnapshot = null;
+}
+
+export function resetProcessCwdProbeForTesting(): void {
+  cachedSnapshot = null;
+  snapshotInflight = null;
+  lsofInvocations = 0;
+  cacheHits = 0;
+  singleFlightJoins = 0;
+  emptyRequestSkips = 0;
+  failures = 0;
+  lastProbeAt = null;
+  lastDurationMs = null;
+  lastRowCount = 0;
+}
