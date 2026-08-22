@@ -1,6 +1,5 @@
 import { spawn } from 'node:child_process';
 import { lstat } from 'node:fs/promises';
-import path from 'node:path';
 
 import {
   isMetadataLockProcessIdentity,
@@ -9,12 +8,14 @@ import {
   type MetadataLockProcessIdentity,
 } from '@/lib/worktree/metadata-lock-process-identity';
 import type { HeldExactDependencyFile } from './dependency-image-file-authority';
+import {
+  exactDependencyImageRoot,
+  normalizedNamespacePath,
+  type HdiSystemEntity,
+} from './dependency-image-device-identity';
 
-export interface HdiSystemEntity {
-  deviceEntry: string;
-  mountPath: string | null;
-  contentHint: string | null;
-}
+export { normalizedNamespacePath } from './dependency-image-device-identity';
+export type { HdiSystemEntity } from './dependency-image-device-identity';
 
 export interface HdiImageInfo {
   imagePath: string;
@@ -99,13 +100,6 @@ export interface DependencyImageDeviceAuthoritySeams {
   listDevices?: () => Promise<HdiImageInfo[]>;
   listHelperFiles?: (pid: number) => Promise<HelperFiles>;
   probeProcess?: typeof probeMetadataLockProcessIdentity;
-}
-
-export function normalizedNamespacePath(value: string): string {
-  const resolved = path.resolve(value);
-  return resolved.startsWith('/private/var/') || resolved.startsWith('/private/tmp/')
-    ? resolved.slice('/private'.length)
-    : resolved;
 }
 
 function runCommand(command: string, args: string[], input?: Buffer): Promise<CommandReceipt> {
@@ -198,9 +192,10 @@ function exactMountedEntity(systemEntities: HdiSystemEntity[], context: string):
 export async function parseDependencyAttachInfo(bytes: Buffer): Promise<HdiAttachInfo> {
   const plist = await plistJson(bytes);
   const systemEntities = parseSystemEntities(plist['system-entities']);
+  const root = exactDependencyImageRoot(systemEntities);
   const mounted = systemEntities.filter((entity) => entity.mountPath !== null);
   return {
-    deviceEntry: systemEntities[0]!.deviceEntry,
+    deviceEntry: root.deviceEntry,
     mountPath: mounted.length === 1 ? mounted[0]!.mountPath : null,
     mountDevice: mounted.length === 1 ? mounted[0]!.deviceEntry : null,
     systemEntities,
@@ -245,11 +240,12 @@ function parseImageRecord(raw: unknown): HdiImageInfo | null {
     throw new Error('Disk image inventory contains an incomplete image record.');
   }
   const systemEntities = parseSystemEntities(rawEntities);
+  const root = exactDependencyImageRoot(systemEntities);
   const mounted = systemEntities.filter((entity) => entity.mountPath !== null);
   return {
     imagePath: normalizedNamespacePath(imagePath),
     shadowPath,
-    deviceEntry: systemEntities[0]!.deviceEntry,
+    deviceEntry: root.deviceEntry,
     mountPath: mounted.length === 1 ? mounted[0]!.mountPath : null,
     mountDevice: mounted.length === 1 ? mounted[0]!.deviceEntry : null,
     systemEntities,

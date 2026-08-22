@@ -35,8 +35,8 @@ function plist(systemEntities: string): Buffer {
     <plist version="1.0"><dict><key>system-entities</key><array>${systemEntities}</array></dict></plist>`);
 }
 
-function entity(device: string, mountPath?: string): string {
-  return `<dict><key>dev-entry</key><string>${device}</string><key>content-hint</key><string>APFS</string>${
+function entity(device: string, mountPath?: string, contentHint = 'APFS'): string {
+  return `<dict><key>dev-entry</key><string>${device}</string><key>content-hint</key><string>${contentHint}</string>${
     mountPath ? `<key>mount-point</key><string>${mountPath}</string>` : ''
   }</dict>`;
 }
@@ -62,7 +62,7 @@ function liveDevice(imagePath: string, shadowPath: string, mountPath: string): H
 describe('dependency image device authority', () => {
   it('retains every attach entity before deciding whether the mount is usable', async () => {
     await expect(parseDependencyAttachInfo(plist([
-      entity('/dev/disk60'),
+      entity('/dev/disk60', undefined, 'GUID_partition_scheme'),
       entity('/dev/disk61s1', '/tmp/expected'),
       entity('/dev/disk61s2', '/tmp/unexpected'),
     ].join('')))).resolves.toMatchObject({
@@ -74,6 +74,19 @@ describe('dependency image device authority', () => {
         { deviceEntry: '/dev/disk61s1', mountPath: '/tmp/expected' },
         { deviceEntry: '/dev/disk61s2', mountPath: '/tmp/unexpected' },
       ],
+    });
+  });
+
+  it('identifies the image root when attach entities arrive out of order', async () => {
+    await expect(parseDependencyAttachInfo(plist([
+      entity('/dev/disk60s1', undefined, 'Apple_APFS'),
+      entity('/dev/disk60', undefined, 'GUID_partition_scheme'),
+      entity('/dev/disk61s1', '/tmp/expected'),
+      entity('/dev/disk61'),
+    ].join('')))).resolves.toMatchObject({
+      deviceEntry: '/dev/disk60',
+      mountPath: '/tmp/expected',
+      mountDevice: '/dev/disk61s1',
     });
   });
 
