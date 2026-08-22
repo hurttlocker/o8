@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
 import { O8_WEBVIEW_TOOLS, createO8WebviewToolHandlers } from '@/lib/mcp/o8-webview-tools';
 import { APPROVE_TOOLS, handleApprove, handleApproveAndMerge, handleMergePreview, handleReject } from '@/lib/mcp/operator-handlers/approve';
+import { AGENT_MESSAGE_TOOLS, handleAgentMessageInbox, handleAgentMessageSend } from '@/lib/mcp/operator-handlers/agents';
 import { CANVAS_TOOLS, handleCanvas, handleRender } from '@/lib/mcp/operator-handlers/canvas';
 import { BROADCAST_TOOLS, handleBroadcastPost, handleBroadcastToken } from '@/lib/mcp/operator-handlers/broadcast';
 import { CLOSE_PACKET_TOOLS, handleClosePacketUnmerged } from '@/lib/mcp/operator-handlers/close-packet';
@@ -274,6 +275,7 @@ const TOOLS: McpTool[] = [
   ...SPEC_TOOLS,
   ...TARGETING_TOOLS,
   ...LEASE_TOOLS,
+  ...AGENT_MESSAGE_TOOLS,
   ...BROADCAST_TOOLS,
   ...UPDATE_TOOLS,
   ...O8_WEBVIEW_TOOLS,
@@ -362,6 +364,8 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   o8_lease_release: handleLeaseRelease,
   o8_lease_status: handleLeaseStatus,
   o8_lease_list: handleLeaseList,
+  o8_msg_send: handleAgentMessageSend,
+  o8_msg_inbox: handleAgentMessageInbox,
   o8_broadcast_post: handleBroadcastPost,
   o8_broadcast_token: handleBroadcastToken,
   o8_update_apply: handleUpdateApply,

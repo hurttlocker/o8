@@ -4,6 +4,7 @@ import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/
 import { getLane } from '@/lib/lane/registry';
 import { recordLaneHeartbeat } from '@/lib/lane/reaper';
 import { checkSessionBindingFault } from '@/lib/lane/session-binding-fault';
+import { heartbeatAgentPresence } from '@/lib/agents/service';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -32,6 +33,7 @@ export async function POST(
   // #1502 — a live worker heartbeating with no session binding is running into
   // the void (empty transcript, silent-exit misfire). Raise the fault once.
   checkSessionBindingFault(id);
+  heartbeatAgentPresence(lane, heartbeatAt);
 
   return NextResponse.json({
     ok: true,

@@ -17,6 +17,7 @@
  */
 
 import { runAsk } from './commands/ask.js';
+import { runMsg, runPresence } from './commands/agents.js';
 import { runApp } from './commands/app.js';
 import { runBrowser } from './commands/browser.js';
 import { runBroadcast } from './commands/broadcast.js';
@@ -226,6 +227,8 @@ commands:
   browser wait <sel>   poll until a selector resolves (--text, --timeout)
   browser close        end this scope's engine (headless Chrome) session
   broadcast focus|post|token   set the live focus, post narration, or manage spectator bearers
+  msg send|inbox       send a durable agent message or read this session's inbox
+  presence join        register an external session in this repo (--as <agent>)
   cortex observe       propose a worker observation for the orchestrator
   lane touches         active lanes touching a path or packet diff
   lease acquire <resource> [--ttl 2h] [--wait]  acquire or queue for a named resource
@@ -371,6 +374,10 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runBrowser(args.mode, secondary, args.rest);
     case 'broadcast':
       return runBroadcast(args.mode, secondary, args.rest);
+    case 'msg':
+      return runMsg(args.mode, secondary, args.rest);
+    case 'presence':
+      return runPresence(args.mode, secondary, args.rest);
     case 'cortex': {
       if (secondary === 'observe') return runCortexObserve(args.mode, args.rest);
       throw unknownSubcommandError('cortex', secondary);

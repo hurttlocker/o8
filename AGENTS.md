@@ -151,6 +151,11 @@ o8 packet merge-preview [--packet <id>]                  # read-only five-layer 
 o8 packet review --approve [--expected-sha <sha>] [--commit-message "..."]   # records review, then uses the gated merge path
 o8 packet approve-merge [--packet <id>] [--commit-message "..."]   # worker context raises an operator card; it does not self-merge
 
+# Agent message bus — durable repo-scoped addressing with native delivery when available.
+o8 presence join --as <agent>               # external session: register name, runtime, repo, and worktree
+o8 msg send --to <agent> "<text>"            # persist, mirror to Broadcast, and deliver or queue
+o8 msg inbox                                 # read this session's inbox; pass its cursor on the next read
+
 # Mission orchestration — fan out sub-work to fellow agents and track it without leaving the CLI.
 o8 worker spawn --title "..." [--body "..."] [--repo <path>] [--runtime r] [--caller <label>]   # one-step outside dispatch; repo stays out of saved Projects and opens as a split pane
 o8 mission create --title "..." [--body "..."] [--repo <path>] [--dispatch] [--compare m1,m2] [--runtime r]   # create a transient-repo mission; --dispatch starts it now
@@ -219,6 +224,8 @@ o8 spec reply    [--repo <path>] --to <id> --body "<msg>" [--by AI]
 o8 spec resolve  [--repo <path>] --id <id> [--summary "<note>"]
 o8 spec suggest  [--repo <path>] --kind add|del|sub --anchor "<text>" [--text "<add>"] [--new "<replacement>"]
 ```
+
+Claude and Codex sessions receive addressed messages through their native user-turn path when o8 has a live session binding. Other runtimes must run `o8 msg inbox` at turn start and continue from the returned cursor. Every message remains in the durable inbox when native delivery is unavailable.
 
 Output is JSON by default (pass `--human` for pretty ANSI). Errors use stable schemas and exit codes: 1 invalid arguments, 2 connection refused, 3 unauthorized, 4 not found, and 5 conflict. The CLI resolves the active port and bearer token from dispatch env, `~/.o8`, or the legacy fallback; do not replace it with handwritten HTTP calls.
 

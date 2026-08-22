@@ -185,7 +185,7 @@ const EVENT_UNION_SQL = `
     event.created_at AS timestamp,
     event.lane_id AS lane_id,
     event.packet_id AS packet_id,
-    NULL AS repo_path,
+    json_extract(event.metadata_json, '$.repoPath') AS repo_path,
     NULL AS lane_label,
     NULL AS approval_title,
     NULL AS approval_risk,
