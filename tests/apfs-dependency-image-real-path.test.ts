@@ -32,6 +32,10 @@ import {
   listDependencySeedLeaseCleanupTargets,
   readDependencySeedLeaseCleanupAction,
 } from '@/lib/workspace/dependency-image-lease-cleanup';
+import {
+  detachAttachedApfsFixtureImages,
+  removeFixtureDirectoryIfUnmountedSync,
+} from './test-fixture-lifecycle';
 
 const execFileAsync = promisify(execFile);
 const command = 'npm ci --ignore-scripts --no-audit --no-fund';
@@ -143,11 +147,25 @@ describe.skipIf(process.platform !== 'darwin')('APFS dependency image real path'
   });
 
   afterAll(async () => {
-    await stopSpawnedChildren();
-    for (const lease of listDependencySeedLeases()) {
-      await detachDependencyImageLease(lease.leaseId).catch(() => undefined);
+    try {
+      await stopSpawnedChildren();
+      for (const lease of listDependencySeedLeases()) {
+        await detachDependencyImageLease(lease.leaseId).catch(() => undefined);
+      }
+    } finally {
+      if (root) {
+        const imageCleanup = await detachAttachedApfsFixtureImages(root);
+        if (imageCleanup.retained.length > 0) {
+          throw new Error(
+            `APFS dependency image fixture retained attached images: ${imageCleanup.retained.join(', ')}`,
+          );
+        }
+        const rootIdentity = await lstat(root).catch(() => null);
+        if (rootIdentity && !removeFixtureDirectoryIfUnmountedSync(root)) {
+          throw new Error(`APFS dependency image fixture remained mounted: ${root}`);
+        }
+      }
     }
-    if (root) await rm(root, { recursive: true, force: true });
   });
 
   it('seals, mounts, crash-adopts, isolates, and retires exact generations', async () => {

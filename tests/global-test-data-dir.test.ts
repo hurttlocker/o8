@@ -13,7 +13,7 @@ afterEach(() => {
 });
 
 describe('test data root cleanup', () => {
-  it('removes only stale owned roots without following links or deleting recent runs', async () => {
+  it('removes stale o8 fixture roots without following links or deleting recent runs', async () => {
     const parent = mkdtempSync(path.join(os.tmpdir(), 'o8-test-sweep-parent-'));
     const external = mkdtempSync(path.join(os.tmpdir(), 'o8-test-sweep-external-'));
     roots.push(parent, external);
@@ -28,15 +28,17 @@ describe('test data root cleanup', () => {
     const stale = new Date(now - (25 * 60 * 60 * 1_000));
     for (const target of [staleLegacy, staleRun, foreign, linked]) utimesSync(target, stale, stale);
 
-    await expect(sweepStaleTestDataRoots(parent, now)).resolves.toEqual([
+    const removed = await sweepStaleTestDataRoots(parent, now);
+    expect(removed.sort()).toEqual([
       path.join(realpathSync(parent), path.basename(staleLegacy)),
       path.join(realpathSync(parent), path.basename(staleRun)),
-    ]);
+      path.join(realpathSync(parent), path.basename(foreign)),
+    ].sort());
 
     expect(existsSync(staleLegacy)).toBe(false);
     expect(existsSync(staleRun)).toBe(false);
     expect(existsSync(recentRun)).toBe(true);
-    expect(existsSync(foreign)).toBe(true);
+    expect(existsSync(foreign)).toBe(false);
     expect(existsSync(linked)).toBe(true);
     expect(existsSync(external)).toBe(true);
   });

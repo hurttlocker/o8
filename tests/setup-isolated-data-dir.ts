@@ -62,8 +62,13 @@ const ownedRunRoot = runRoot
   ? runRoot
   : null;
 if (ownedRunRoot) {
-  afterAll(() => {
+  const cleanupWorkerRoot = () => {
     removeOwnedWorkerDataRoot(ownedRunRoot, pinnedDataDir);
+  };
+  process.once('exit', cleanupWorkerRoot);
+  afterAll(() => {
+    process.off('exit', cleanupWorkerRoot);
+    cleanupWorkerRoot();
   });
 }
 delete process.env.O8_DATA_DIR;
