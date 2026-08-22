@@ -11,7 +11,7 @@ vi.mock('@/lib/worktree/live-process-guard', async (importOriginal) => ({
 }));
 
 const { getSqlite } = await import('@/lib/db');
-const { createLane, getLaneEvents } = await import('@/lib/lane/registry');
+const { createLane, getLane, getLaneEvents } = await import('@/lib/lane/registry');
 const { sweepTerminalCortexWorktrees } = await import('@/lib/lane/terminal-worktree-sweep');
 
 const roots: string[] = [];
@@ -34,7 +34,7 @@ function commitAll(cwd: string, message: string): string {
   return git(cwd, ['rev-parse', 'HEAD']);
 }
 
-function createArchivedCloneFixture() {
+function createCloneFixture(status: 'completed' | 'archived' = 'archived') {
   const root = mkdtempSync(join(tmpdir(), 'o8-terminal-preserve-loop-'));
   roots.push(root);
   const origin = join(root, 'origin.git');
@@ -66,9 +66,9 @@ function createArchivedCloneFixture() {
   });
   getSqlite().prepare(`
     UPDATE lanes
-    SET status = 'archived', worktree_path = NULL
+    SET status = ?, worktree_path = NULL
     WHERE id = ?
-  `).run(lane.id);
+  `).run(status, lane.id);
 
   return { headSha, laneId: lane.id, packetId, repoPath, worktreePath };
 }
@@ -81,7 +81,7 @@ afterEach(() => {
 
 describe('terminal worktree sweep preservation', () => {
   it('records one preservation across repeated failed sweeps of an archived lane', async () => {
-    const fixture = createArchivedCloneFixture();
+    const fixture = createCloneFixture();
 
     const first = await sweepTerminalCortexWorktrees(fixture.repoPath);
     const second = await sweepTerminalCortexWorktrees(fixture.repoPath);
@@ -97,5 +97,35 @@ describe('terminal worktree sweep preservation', () => {
     const preservedRef = `refs/heads/preserved/packet-${fixture.packetId}`;
     expect(git(fixture.repoPath, ['rev-parse', preservedRef])).toBe(fixture.headSha);
     expect(git(fixture.worktreePath, ['rev-parse', 'HEAD'])).toBe(fixture.headSha);
+  }, 30_000);
+
+  it('reconciles an outcome when archival follows the first preservation pass', async () => {
+    const fixture = createCloneFixture('completed');
+
+    const first = await sweepTerminalCortexWorktrees(fixture.repoPath);
+    expect(first).toMatchObject({ scanned: 1, removed: 0, failed: 1 });
+    expect(getLane(fixture.laneId)?.outcome).toBeNull();
+
+    getSqlite().prepare(`
+      UPDATE lanes
+      SET status = 'archived', outcome = 'no_changes', outcome_note = NULL
+      WHERE id = ?
+    `).run(fixture.laneId);
+
+    const second = await sweepTerminalCortexWorktrees(fixture.repoPath);
+    expect(second).toMatchObject({ scanned: 1, removed: 0, failed: 1 });
+
+    const preservedEvents = getLaneEvents(fixture.laneId, 100).filter((event) => (
+      event.payload.event === 'recoverable_work_preserved'
+      && event.payload.reason === 'terminal_worktree_cleanup'
+    ));
+    expect(preservedEvents).toHaveLength(1);
+    expect(getLane(fixture.laneId)).toMatchObject({
+      status: 'archived',
+      outcome: 'archived_recoverable',
+    });
+
+    const preservedRef = `refs/heads/preserved/packet-${fixture.packetId}`;
+    expect(git(fixture.repoPath, ['rev-parse', preservedRef])).toBe(fixture.headSha);
   }, 30_000);
 });

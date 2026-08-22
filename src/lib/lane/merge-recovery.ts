@@ -20,17 +20,17 @@ export async function preserveAndRecordLaneRecovery(
     recommendedAction: 'retry_packet',
   };
   // A prior cleanup attempt can bank the ref and then fail to remove the tree.
-  // Confirmed same-ref retries are safe, but they are not new recovery events.
-  if (preservation.alreadyPreserved) return recovery;
-
-  appendEvent(lane.id, 'update', actor, {
-    event: RECOVERABLE_WORK_EVENT,
-    reason,
-    preservedRef: recovery.preservedRef,
-    preservedHeadSha: recovery.preservedHeadSha,
-    reviewed: options.reviewed === true,
-    recommendedAction: recovery.recommendedAction,
-  });
+  // Confirmed same-ref retries are safe, but only new preservation is an event.
+  if (!preservation.alreadyPreserved) {
+    appendEvent(lane.id, 'update', actor, {
+      event: RECOVERABLE_WORK_EVENT,
+      reason,
+      preservedRef: recovery.preservedRef,
+      preservedHeadSha: recovery.preservedHeadSha,
+      reviewed: options.reviewed === true,
+      recommendedAction: recovery.recommendedAction,
+    });
+  }
 
   const current = getLane(lane.id);
   if (current?.status === 'archived' && (!current.outcome || current.outcome === 'no_changes')) {
