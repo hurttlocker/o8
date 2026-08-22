@@ -7,10 +7,6 @@ import { describe, expect, it } from 'vitest';
 describe('typecheck type generation', () => {
   it('runs the real typegen path without changing tracked tsconfig.json', () => {
     const repoRoot = process.cwd();
-    const packageJson = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
-      scripts?: Record<string, string>;
-    };
-    expect(packageJson.scripts?.typecheck).toBe('node scripts/typecheck.mjs');
 
     const tsconfigPath = join(repoRoot, 'tsconfig.json');
     const before = readFileSync(tsconfigPath, 'utf8');

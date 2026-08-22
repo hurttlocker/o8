@@ -109,6 +109,7 @@ function fullPacketFixture() {
       lastEventLabel: 'review_ready',
       mergeMode: 'pr_only',
       mergeModeNote: 'test note',
+      dependencyMaterializationMode: 'image',
     },
     packetType: 'decompose',
     decomposition: {
