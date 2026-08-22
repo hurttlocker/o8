@@ -31,7 +31,8 @@ describe('o8 status awaiting-review visibility (#1570)', () => {
         lastEventAt: '2026-07-18T00:00:00.000Z',
         lastEventLabel: 'review_requested',
       }] } })
-      .mockResolvedValueOnce({ data: { approvals: [] } });
+      .mockResolvedValueOnce({ data: { approvals: [] } })
+      .mockResolvedValueOnce({ data: { ok: true, result: { packets: [] } } });
 
     await runStatus({ human: false, verbose: false });
 

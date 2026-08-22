@@ -245,6 +245,7 @@ describe('mission cost persisted-state path', () => {
       outputTokens: 80,
       totalCostUsd: 0.0045,
       hasTelemetry: true,
+      costSource: 'estimate',
     }]);
     expect(status.cost.tokensByRuntime.opencode).toEqual({
       inputTokens: 450,
