@@ -55,7 +55,8 @@ vi.mock('@/lib/runtimes/shared/dispatch-readiness', async (importOriginal) => {
   };
 });
 
-vi.mock('@/lib/claude-code/codex-subscription-proxy', () => ({
+vi.mock('@/lib/claude-code/codex-subscription-proxy', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/claude-code/codex-subscription-proxy')>(),
   ensureCodexSubscriptionProxyReady: ensureCodexSubscriptionProxyReadyMock,
   ensureCodexSubscriptionClaudeConfigDir: ensureCodexSubscriptionClaudeConfigDirMock,
 }));
@@ -546,6 +547,7 @@ describe('MCP operator defaults and dispatch routing', () => {
       source: 'codex-subscription',
       model: 'global-openrouter-model',
       codexModel: 'global-model-x',
+      repoSkillAllowlist: [],
     });
   }, 30_000);
 });

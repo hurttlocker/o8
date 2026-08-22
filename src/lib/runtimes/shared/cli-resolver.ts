@@ -205,7 +205,13 @@ async function probeVersion(
   spec: CliResolverSpec,
 ): Promise<string | undefined> {
   const args = spec.versionArgs ?? ['--version'];
-  const pattern = spec.versionPattern ?? /\b(\d+\.\d+\.\d+)\b/;
+  // A leading `\b` misses version strings where a letter is glued directly to
+  // the digits (e.g. node's own `v22.23.2` — 'v' and '2' are both \w, so no
+  // boundary exists between them and the whole probe silently reports
+  // "could not determine version"). A negative digit-lookbehind still blocks
+  // matching mid-number (won't split "12345.6.7"), but allows a `v` or other
+  // non-digit prefix glued on.
+  const pattern = spec.versionPattern ?? /(?<!\d)(\d+\.\d+\.\d+)\b/;
   try {
     const probe = cliInvocation(binPath, args);
     const { stdout, stderr } = await execFileAsync(probe.command, probe.args, {

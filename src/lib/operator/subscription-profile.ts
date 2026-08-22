@@ -130,6 +130,23 @@ function subscriptionRuntimeHouse(runtime: OrchestratorRuntime): 'claude' | 'cod
   return null;
 }
 
+/**
+ * A model id is usable for a target runtime house when either side is
+ * unclassifiable (an id we can't attribute to a house, or a runtime without
+ * one), or both houses agree. Guards against a stale/mismatched
+ * `defaultDispatchModel` (e.g. a Codex model id left over from before the
+ * operator's `defaultDispatchRuntime` was switched to claude-code) leaking
+ * straight into a different house's spawn argv.
+ */
+function modelCompatibleWithRuntimeHouse(
+  model: string,
+  runtimeHouse: 'claude' | 'codex' | null,
+): boolean {
+  if (!runtimeHouse) return true;
+  const house = modelHouse(model);
+  return !house || house === runtimeHouse;
+}
+
 function effectiveProfileModel(input: ResolveSubscriptionProfileInput, fallbackModel: string | null): string | null {
   const requested = input.requestedModel?.trim();
   if (requested && modelAllowedForProfile(input.profile, requested)) return requested;
@@ -160,12 +177,17 @@ export function resolveSubscriptionProfileRouting(
 
   const house = resolveSubscriptionProfileHouseDefaults(input.profile);
   if (!house) {
+    const requestedModel = input.requestedModel?.trim() || null;
+    const storedDefault = input.defaultDispatchModel?.trim() || null;
+    const resolvedModel = requestedModel && modelCompatibleWithRuntimeHouse(requestedModel, requestedRuntimeHouse)
+      ? requestedModel
+      : storedDefault && modelCompatibleWithRuntimeHouse(storedDefault, requestedRuntimeHouse)
+        ? storedDefault
+        : null;
     return {
       ok: true,
       requestedRuntime: input.requestedRuntime ?? null,
-      requestedModel: input.requestedModel?.trim()
-        || input.defaultDispatchModel?.trim()
-        || null,
+      requestedModel: resolvedModel,
     };
   }
 
