@@ -19,6 +19,7 @@ export interface FleetAgent {
   sessionKey?: string;
   model?: string;
   lastEventAt?: string;
+  transcriptUnsupportedReason?: string | null;
   activity?: { headline?: string };
   runtime?: string;
   isCurrentSession?: boolean;

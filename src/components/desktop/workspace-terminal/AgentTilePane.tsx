@@ -229,11 +229,10 @@ export function canSteerAgentState(
 
 function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocus }: AgentTilePaneProps) {
   const slice = useTranscript(sessionKey);
-  const hasStructuredPacketTranscript = packet?.runtime === 'codex'
-    || packet?.runtime === 'opencode'
-    || packet?.runtime === 'claude-code';
+  const transcriptUnsupportedReason = agent?.transcriptUnsupportedReason?.trim() || null;
+  const usesStructuredPacketTranscript = Boolean(packet?.id && !transcriptUnsupportedReason);
   const packetTranscript = usePacketTranscriptPoll({
-    enabled: Boolean(packet?.id && hasStructuredPacketTranscript),
+    enabled: usesStructuredPacketTranscript,
     packetIdHint: packet?.id ?? null,
     sessionKey,
     // Agent tiles are mounted only while visible. Keep every visible split
@@ -241,8 +240,16 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
     active: true,
     statusHint: packet?.status ?? null,
   });
-  const entries = packet?.id && hasStructuredPacketTranscript ? packetTranscript.entries : slice.messages;
-  const loading = packet?.id && hasStructuredPacketTranscript
+  const entries = useMemo<MobileTranscriptEntry[]>(() => {
+    if (!packet?.id) return slice.messages;
+    if (!transcriptUnsupportedReason) return packetTranscript.entries;
+    return [{
+      id: `transcript-unsupported:${transcriptUnsupportedReason}`,
+      role: 'system',
+      text: `Live structured transcript unavailable (${transcriptUnsupportedReason}). Showing runtime history fallback.`,
+    }, ...slice.messages];
+  }, [packet?.id, packetTranscript.entries, slice.messages, transcriptUnsupportedReason]);
+  const loading = usesStructuredPacketTranscript
     ? packetTranscript.entries.length === 0 && (slice.status === 'loading' || slice.status === 'idle')
     : slice.status === 'loading' || slice.status === 'idle';
   const error = slice.status === 'error' ? slice.error ?? 'Unable to load transcript.' : null;

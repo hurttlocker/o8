@@ -105,11 +105,14 @@ async function flushPaneEffects(): Promise<void> {
   });
 }
 
-async function renderPacketPane(runtime: OrchestratorPacket['runtime'] = 'opencode'): Promise<void> {
+async function renderPacketPane(
+  runtime: OrchestratorPacket['runtime'] = 'opencode',
+  transcriptUnsupportedReason?: string,
+): Promise<void> {
   await act(async () => {
     root.render(createElement(AgentTilePane, {
       sessionKey: 'opencode-owned:worker-pane',
-      agent: { name: 'Worker', status: 'running', runtime },
+      agent: { name: 'Worker', status: 'running', runtime, transcriptUnsupportedReason },
       packet: packetFixture(runtime),
       focused: true,
       onClose: () => {},
@@ -223,6 +226,18 @@ describe('AgentTilePane structured packet transcript delivery', () => {
     expect(fetchMock).toHaveBeenCalled();
     expect(transcriptRenderMock.entries.flatMap((entry) => entry.toolCalls ?? [])[0]).toMatchObject({
       name: 'shell',
+    });
+  });
+
+  it('makes an unsupported structured transcript fallback explicit', async () => {
+    const fetchMock = stubPacketTranscript(() => [toolEvent]);
+    const unsupportedReason = 'runtime-transcript-not-supported-yet';
+    await renderPacketPane('gemini', unsupportedReason);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(transcriptRenderMock.entries[0]).toMatchObject({
+      role: 'system',
+      text: expect.stringContaining(unsupportedReason),
     });
   });
 });
