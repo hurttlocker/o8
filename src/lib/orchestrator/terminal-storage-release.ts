@@ -4,7 +4,7 @@ import { getSqlite } from '@/lib/db';
 import { getLaneEvents } from '@/lib/lane/registry';
 import { releaseReservedStorageForTerminalOwner } from '@/lib/workspace/storage-admission-terminal-release';
 
-function storageOwnerGenerationForLane(laneId: string): number | undefined {
+export function storageOwnerGenerationForLane(laneId: string): number | undefined {
   const generation = getLaneEvents(laneId, 200).findLast((event) => (
     event.verb === 'update'
     && Number.isSafeInteger(event.payload.storageAdmissionOwnerGeneration)

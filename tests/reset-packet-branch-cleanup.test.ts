@@ -13,8 +13,11 @@ delete process.env.O8_DATA_DIR;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DB_PATH = join(dataDir, 'cortex-ide.db');
 
-const { createLane, getLane, getLaneEvents, setLaneStatus } = await import('@/lib/lane/registry');
+const { getSqlite } = await import('@/lib/db');
+const { appendEvent, createLane, getLane, getLaneEvents, setLaneStatus } = await import('@/lib/lane/registry');
+const { cleanupIssueBranch } = await import('@/lib/orchestrator/operator-mission-service/branch-cleanup');
 const { resetPacket } = await import('@/lib/orchestrator/operator-mission-service/reset');
+const { StorageAdmissionStore } = await import('@/lib/workspace/storage-admission');
 
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -48,6 +51,47 @@ function branchExists(repoPath: string, branch: string): boolean {
 }
 
 describe('reset_packet clearWorktree branch cleanup', () => {
+  it('releases a restored terminal lane reservation through cleanupIssueBranch', async () => {
+    const branch = 'inline/restored-terminal-cleanup';
+    const repoPath = initRepo(branch);
+    const packetId = 'pkt-restored-terminal-cleanup';
+    const worktreePath = join(repoPath, '.cortex-worktrees', `packet-${packetId}`);
+    const lane = createLane({
+      repoPath,
+      branch,
+      runtime: 'codex',
+      packetId,
+      worktreePath,
+    });
+    appendEvent(lane.id, 'update', 'orchestrator', {
+      storageAdmissionOwnerGeneration: 1,
+      storageAdmissionReservationId: 'packet-storage:restored-terminal-cleanup:1',
+    });
+    setLaneStatus(lane.id, 'completed', 'system', 'restored_terminal_lane');
+    const now = Date.now();
+    const store = new StorageAdmissionStore(getSqlite(), {
+      now: () => now,
+      observeVolume: async () => ({
+        status: 'observed', targetPath: repoPath, probePath: repoPath,
+        volumeId: 'device:restored-terminal-cleanup', availableBytes: 10_000,
+        freeBytes: 10_000, totalBytes: 20_000, observedAt: now, error: null,
+      }),
+    });
+    const reservationId = 'packet-storage:restored-terminal-cleanup:1';
+    await store.reserve({
+      mutationId: 'reserve-restored-terminal-cleanup', reservationId,
+      targetPath: repoPath, exactBytes: 2_000, ownerId: packetId,
+      ownerGeneration: 1, leaseExpiresAt: now + 60_000,
+      policy: { reserveRatio: 0.1, absoluteFloorBytes: 1_000 },
+    });
+
+    const result = await cleanupIssueBranch(repoPath, branch);
+
+    expect(result).toMatchObject({ worktreePruned: true, branchDeleted: true });
+    expect(existsSync(worktreePath)).toBe(false);
+    expect(store.getReservation(reservationId)?.state).toBe('released');
+  });
+
   it('archives only the reset packet lane and retains a branch owned by a live sibling lane', async () => {
     const branch = 'inline/reset-shared-branch';
     const repoPath = initRepo(branch);

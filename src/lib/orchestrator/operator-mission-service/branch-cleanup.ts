@@ -8,6 +8,10 @@ import {
 } from '@/lib/lane/reaper-liveness';
 import { getWorktreeManager } from '@/lib/worktree/launch';
 import type { Lane } from '@/lib/lane/types';
+import {
+  releaseTerminalPacketStorageReservations,
+  storageOwnerGenerationForLane,
+} from '@/lib/orchestrator/terminal-storage-release';
 import type { ExistingBranchPolicy, LoadedIssue } from './types';
 
 const execFileAsync = promisify(execFile);
@@ -40,6 +44,13 @@ interface ExistingBranchProbe {
   staleLanes: Lane[];
   hasBranch: boolean;
   hasWorktree: boolean;
+}
+
+interface BranchCleanupStorageOwner {
+  laneId: string;
+  packetId: string | null;
+  ownerGeneration?: number;
+  worktreePath: string;
 }
 
 function normalizeRepoPath(repoPath: string) {
@@ -265,6 +276,16 @@ async function archiveLanesForBranch(repoPath: string, branch: string) {
   const worktreePaths = lanes
     .map((lane) => lane.worktreePath?.trim())
     .filter((path): path is string => Boolean(path));
+  const storageOwners: BranchCleanupStorageOwner[] = lanes.flatMap((lane) => {
+    const worktreePath = lane.worktreePath?.trim();
+    if (!worktreePath) return [];
+    return [{
+      laneId: lane.id,
+      packetId: lane.packetId,
+      ownerGeneration: storageOwnerGenerationForLane(lane.id),
+      worktreePath,
+    }];
+  });
   let archived = 0;
 
   for (const lane of lanes) {
@@ -279,7 +300,7 @@ async function archiveLanesForBranch(repoPath: string, branch: string) {
     archived += 1;
   }
 
-  return { archived, worktreePaths };
+  return { archived, storageOwners, worktreePaths };
 }
 
 async function probeExistingBranch(repoPath: string, branch: string): Promise<ExistingBranchProbe> {
@@ -302,8 +323,16 @@ export async function cleanupIssueBranch(
   branch: string,
 ): Promise<IssueBranchCleanupResult> {
   const branchExisted = await localBranchExists(repoPath, branch);
-  const { archived, worktreePaths } = await archiveLanesForBranch(repoPath, branch);
+  const { archived, storageOwners, worktreePaths } = await archiveLanesForBranch(repoPath, branch);
   const worktreesRemoved = await cleanupWorktreesForBranch(repoPath, branch, worktreePaths);
+  for (const owner of storageOwners) {
+    if (await pathExists(owner.worktreePath)) continue;
+    releaseTerminalPacketStorageReservations({
+      packetId: owner.packetId,
+      laneId: owner.laneId,
+      ownerGeneration: owner.ownerGeneration,
+    });
+  }
   const deleted = await deleteLocalBranch(repoPath, branch);
   const branchDeleted = branchExisted && (deleted || !(await localBranchExists(repoPath, branch)));
 
