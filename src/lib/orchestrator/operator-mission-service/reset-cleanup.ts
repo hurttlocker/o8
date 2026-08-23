@@ -71,7 +71,13 @@ export async function cleanupResetPacketTargets(
   let branchDeleted = false;
 
   for (const target of targets) {
-    if (target.worktreePath) {
+    if (!target.worktreePath) {
+      releaseTerminalPacketStorageReservations({
+        packetId,
+        laneId: target.id,
+        ownerGeneration: target.storageAdmissionOwnerGeneration,
+      });
+    } else {
       // An already-absent checkout is the cleanup postcondition, not a failure.
       // Skip preservation/prune probes that necessarily require the path to
       // exist; stale lane metadata must remain resettable through this handler.

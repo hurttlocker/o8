@@ -9,6 +9,7 @@ import { ResetCleanupFailedError } from './reset-errors';
 import { archiveResetLaneSessions, confirmedKilledLaneIds } from './reset-lifecycle-retirement';
 import { log } from './shared';
 import type { ResetPacketInput } from './types';
+import { storageOwnerGenerationForLane } from '@/lib/orchestrator/terminal-storage-release';
 
 export interface ResetAuthoritativeBinding {
   packet: OrchestratorPacket;
@@ -66,6 +67,8 @@ export async function resetPacketViaLaneFallback(
       branch: lane.branch,
       runtime: lane.runtime,
       worktreePath: lane.worktreePath,
+      storageAdmissionOwnerGeneration: authoritative?.packet.storageAdmission?.ownerGeneration
+        ?? storageOwnerGenerationForLane(lane.id),
       overrideLiveGuard: confirmedKills.has(lane.id) ? true : undefined,
     });
     if (!persistedIds.has(lane.id)) continue;

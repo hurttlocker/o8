@@ -21,6 +21,7 @@ import {
 import { collectPacketLifecycleLanes } from '@/lib/orchestrator/packet-lifecycle-targets';
 import { cleanupResetPacketTargets, type ResetCleanupTarget } from './reset-cleanup';
 import { unregisterWatchedAgent } from '@/lib/supervisor/agent-supervisor';
+import { storageOwnerGenerationForLane } from '@/lib/orchestrator/terminal-storage-release';
 
 /**
  * #662 — One-click rerun-with-feedback.
@@ -275,6 +276,7 @@ async function retireFailedRerunReplacement(guard: PacketLifecycleGuard): Promis
       branch: lane.branch,
       runtime: lane.runtime,
       worktreePath: lane.worktreePath,
+      storageAdmissionOwnerGeneration: storageOwnerGenerationForLane(lane.id),
       overrideLiveGuard: lane.sessionKey?.trim()
         && confirmed.has(`${lane.id}\0${lane.sessionKey}`)
         ? true

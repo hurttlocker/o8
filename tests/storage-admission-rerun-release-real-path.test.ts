@@ -195,6 +195,33 @@ describe('storage reservation release through rerun retirement', () => {
     expect(store.getReservation(reservationId)?.state).toBe('released');
   });
 
+  it('releases a packet-owned reservation through rerun when no worktree was recorded', async () => {
+    const { packetId, lane } = await createRunningPacket('rerun-null-worktree-release', false);
+    const { reservationId, store } = await reserveForOwner(packetId);
+
+    const response = await rerunRoute.POST(new NextRequest(
+      'http://localhost:3001/api/orchestrator/rerun-with-feedback',
+      {
+        method: 'POST',
+        headers: {
+          host: 'localhost:3001', authorization: `Bearer ${operatorToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          packetId, feedback: 'retry a packet without a recorded worktree',
+          idempotencyKey: 'storage-rerun-null-worktree-release',
+        }),
+      },
+    ));
+
+    expect(response.status).toBe(409);
+    expect(getLane(lane.id)).toMatchObject({
+      status: 'archived', packetId: '', worktreePath: null,
+      outcome: 'discarded', outcomeNote: 'Superseded by rerun',
+    });
+    expect(store.getReservation(reservationId)?.state).toBe('released');
+  });
+
   it('releases a packet-owned reservation through rerun worktree cleanup without terminal true', async () => {
     const { packetId, lane, worktreePath } = await createRunningPacket('rerun-release');
     const { reservationId, store } = await reserveForOwner(packetId);
