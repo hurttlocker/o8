@@ -331,7 +331,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     summary: typeof packet.summary === 'string' ? packet.summary : '',
     workspaceTargetPath: typeof packet.workspaceTargetPath === 'string' && packet.workspaceTargetPath.trim() ? packet.workspaceTargetPath : null,
     branchTarget: branchTarget || (queueState === 'draft' ? '' : 'main'),
-    runtime: workerRouting.selectedRuntime,
+    runtime: workerRouting.selectedRuntime, model: typeof packet.model === 'string' && packet.model.trim() ? packet.model.trim() : null,
     dependencyLabels: Array.isArray(packet.dependencyLabels)
       ? packet.dependencyLabels.map((label) => String(label).trim()).filter(Boolean).slice(0, 8)
       : [],
