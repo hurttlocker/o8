@@ -14,6 +14,7 @@ import {
 } from 'react';
 import type { FleetAgent } from '@/components/desktop/thoughts/types';
 import { mergeAdjacentToolOnlyEntries } from '@/components/desktop/thoughts/chat-panel/ToolCallChipCluster';
+import { usePacketTranscriptPoll } from '@/components/desktop/workspace-terminal/use-packet-transcript-poll';
 import { WorkspaceTranscript } from '@/components/desktop/workspace-terminal/WorkspaceTranscript';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
@@ -228,8 +229,22 @@ export function canSteerAgentState(
 
 function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocus }: AgentTilePaneProps) {
   const slice = useTranscript(sessionKey);
-  const entries = slice.messages;
-  const loading = slice.status === 'loading' || slice.status === 'idle';
+  const hasStructuredPacketTranscript = packet?.runtime === 'codex'
+    || packet?.runtime === 'opencode'
+    || packet?.runtime === 'claude-code';
+  const packetTranscript = usePacketTranscriptPoll({
+    enabled: Boolean(packet?.id && hasStructuredPacketTranscript),
+    packetIdHint: packet?.id ?? null,
+    sessionKey,
+    // Agent tiles are mounted only while visible. Keep every visible split
+    // live; statusHint stops the interval once the packet becomes terminal.
+    active: true,
+    statusHint: packet?.status ?? null,
+  });
+  const entries = packet?.id && hasStructuredPacketTranscript ? packetTranscript.entries : slice.messages;
+  const loading = packet?.id && hasStructuredPacketTranscript
+    ? packetTranscript.entries.length === 0 && (slice.status === 'loading' || slice.status === 'idle')
+    : slice.status === 'loading' || slice.status === 'idle';
   const error = slice.status === 'error' ? slice.error ?? 'Unable to load transcript.' : null;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [draft, setDraft] = useState('');

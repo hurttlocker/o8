@@ -216,6 +216,7 @@ interface UsePacketTranscriptPollArgs {
   packetIdHint: string | null;
   sessionKey: string | null;
   active: boolean;
+  statusHint?: string | null;
 }
 
 /**
@@ -232,6 +233,7 @@ export function usePacketTranscriptPoll({
   packetIdHint,
   sessionKey,
   active,
+  statusHint = null,
 }: UsePacketTranscriptPollArgs): PacketTranscriptPollResult {
   const [packetEvents, setPacketEvents] = useState<MobileTranscriptEntry[]>([]);
   const [packetActivity, setPacketActivity] = useState<PacketTranscriptActivity | null>(null);
@@ -250,7 +252,7 @@ export function usePacketTranscriptPoll({
   }, [orchestratorData?.missionState?.packets, packetIdHint, sessionKey]);
 
   const packetId = livePacket?.id ?? packetIdHint;
-  const status = livePacket?.status ?? null;
+  const status = livePacket?.status ?? statusHint;
   const visiblePacketEvents = enabled && (packetId || sessionKey) ? packetEvents : [];
   const visiblePacketActivity = enabled && (packetId || sessionKey) ? packetActivity : null;
 
