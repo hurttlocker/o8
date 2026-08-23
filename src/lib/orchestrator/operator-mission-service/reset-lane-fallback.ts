@@ -68,7 +68,7 @@ export async function resetPacketViaLaneFallback(
       runtime: lane.runtime,
       worktreePath: lane.worktreePath,
       storageAdmissionOwnerGeneration: authoritative?.packet.storageAdmission?.ownerGeneration
-        ?? storageOwnerGenerationForLane(lane.id),
+        ?? storageOwnerGenerationForLane(lane.id, input.packetId),
       overrideLiveGuard: confirmedKills.has(lane.id) ? true : undefined,
     });
     if (!persistedIds.has(lane.id)) continue;

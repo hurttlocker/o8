@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it } from 'vitest';
 
 import type { StorageVolumeObservation } from '@/lib/workspace/storage-admission';
 
@@ -53,10 +53,21 @@ function reservationId(packetId: string, generation: number) {
 /**
  * Persist the exact state a real dispatch leaves behind: `reserved` rows owned
  * by the packet plus the lane `update` events `launchPacketWithStorageAdmission`
- * records to carry the owner generation. Event timestamps are stamped apart so
- * "latest generation wins" is deterministic rather than a same-millisecond tie.
+ * records to carry the owner generation.
+ *
+ * `generationEvents` selects which real-world shape to persist:
+ *  - `staggered` — generations recorded a second apart (the ordinary relaunch);
+ *  - `tied` — both stamped at the identical millisecond, which `lane_events`
+ *    permits and a fast relaunch produces;
+ *  - `reversed` — a replay stamps the lower generation later than the higher;
+ *  - `none` — reservations exist but the lane never recorded a generation, so
+ *    no release scope is provable.
  */
-async function seedLaunchedPacket(packetId: string, generations: number[]) {
+async function seedLaunchedPacket(
+  packetId: string,
+  generations: number[],
+  generationEvents: 'staggered' | 'tied' | 'reversed' | 'none' = 'staggered',
+) {
   const repoPath = mkdtempSync(join(tmpdir(), `o8-storage-chokepoint-${packetId}-`));
   roots.push(repoPath);
   const store = makeStore();
@@ -79,15 +90,22 @@ async function seedLaunchedPacket(packetId: string, generations: number[]) {
     packetId,
     label: `packet ${packetId}`,
   });
-  generations.forEach((generation, index) => {
-    const event = recordLaneEvent(lane.id, 'update', 'orchestrator', {
-      storageAdmissionOwnerGeneration: generation,
-      storageAdmissionReservationId: reservationId(packetId, generation),
+  if (generationEvents !== 'none') {
+    generations.forEach((generation, index) => {
+      const event = recordLaneEvent(lane.id, 'update', 'orchestrator', {
+        storageAdmissionOwnerGeneration: generation,
+        storageAdmissionReservationId: reservationId(packetId, generation),
+      });
+      const offsetMs = generationEvents === 'tied'
+        ? 0
+        : generationEvents === 'reversed'
+          ? (generations.length - index) * 1_000
+          : index * 1_000;
+      getSqlite()
+        .prepare('UPDATE lane_events SET timestamp = ? WHERE id = ?')
+        .run(new Date(now + offsetMs).toISOString(), event.id);
     });
-    getSqlite()
-      .prepare('UPDATE lane_events SET timestamp = ? WHERE id = ?')
-      .run(new Date(now + index * 1_000).toISOString(), event.id);
-  });
+  }
   return { lane, repoPath, store };
 }
 
@@ -105,6 +123,8 @@ function reservationStates(packetId: string, generations: number[]) {
  * Dropping the trigger models the fault clearing, which is what makes the
  * "still recoverable" half of the assertion meaningful.
  */
+let clearInjectedFailure: (() => void) | null = null;
+
 function injectSettlementFailure(targetReservationId: string) {
   getSqlite().exec(`
     CREATE TRIGGER poison_settlement
@@ -115,8 +135,20 @@ function injectSettlementFailure(targetReservationId: string) {
       SELECT RAISE(ABORT, 'injected settlement failure');
     END;
   `);
-  return () => getSqlite().exec('DROP TRIGGER poison_settlement');
+  clearInjectedFailure = () => {
+    getSqlite().exec('DROP TRIGGER IF EXISTS poison_settlement');
+    clearInjectedFailure = null;
+  };
+  return clearInjectedFailure;
 }
+
+// The trigger is shared process state on one connection. An assertion that fails
+// before its in-test `clearFailure()` would otherwise leave settlement poisoned
+// for every later test in the file, turning one real failure into a cascade of
+// fake ones — so teardown owns the drop and the in-test call is just early.
+afterEach(() => {
+  clearInjectedFailure?.();
+});
 
 afterAll(() => {
   closeDb();
@@ -138,7 +170,8 @@ describe('lane packet-association chokepoint releases storage reservations', () 
     const packetId = 'chokepoint-rerun-unbind';
     const { lane } = await seedLaunchedPacket(packetId, [1]);
 
-    // Real production entry point (#1214 lane-rebind path).
+    // Legacy lane-rebind helper; the unbind crosses the production updateLane
+    // chokepoint that every current caller shares.
     archiveLanesForPacket(packetId, packetId);
 
     expect(getLane(lane.id)?.packetId ?? '').toBe('');
@@ -164,6 +197,94 @@ describe('lane packet-association chokepoint releases storage reservations', () 
 
     expect(getLane(lane.id)).toBeNull();
     expect(reservationStates(packetId, [1, 2])).toEqual(['released', 'released']);
+  });
+
+  it('releases both generations when the two generation events share a timestamp', async () => {
+    const packetId = 'chokepoint-tied-timestamps';
+    const { lane } = await seedLaunchedPacket(packetId, [1, 2], 'tied');
+
+    // Both `update` events carry the identical millisecond, so SQLite is free to
+    // return either first. Picking the newest ROW resolves to generation 1 here
+    // and scopes the release to `<= 1`, stranding generation 2's reserved bytes.
+    // The authoritative generation is the MAXIMUM, which no row order can move.
+    setLaneStatus(lane.id, 'failed', 'system', 'launch_attempts_exhausted');
+
+    expect(reservationStates(packetId, [1, 2])).toEqual(['released', 'released']);
+  });
+
+  it('does not let a later replay of an older generation narrow the release scope', async () => {
+    const packetId = 'chokepoint-reversed-timestamps';
+    const { lane } = await seedLaunchedPacket(packetId, [1, 2], 'reversed');
+
+    setLaneStatus(lane.id, 'failed', 'system', 'launch_attempts_exhausted');
+
+    expect(reservationStates(packetId, [1, 2])).toEqual(['released', 'released']);
+  });
+
+  it('scopes a reused lane generation to its current packet owner', async () => {
+    const packetId = 'chokepoint-current-owner';
+    const stalePacketId = 'chokepoint-stale-owner';
+    const { lane, repoPath, store } = await seedLaunchedPacket(packetId, [1, 2, 3], 'none');
+    await store.reserve({
+      mutationId: `reserve-${stalePacketId}-5`,
+      reservationId: reservationId(stalePacketId, 5),
+      targetPath: repoPath,
+      exactBytes: 1_000,
+      ownerId: stalePacketId,
+      ownerGeneration: 5,
+      leaseExpiresAt: now + 60_000,
+      policy: { reserveRatio: 0.1, absoluteFloorBytes: 1_000 },
+    });
+    const currentEvent = recordLaneEvent(lane.id, 'update', 'orchestrator', {
+      storageAdmissionOwnerGeneration: 1,
+      storageAdmissionReservationId: reservationId(packetId, 1),
+    });
+    const staleEvent = recordLaneEvent(lane.id, 'update', 'orchestrator', {
+      storageAdmissionOwnerGeneration: 5,
+      storageAdmissionReservationId: reservationId(stalePacketId, 5),
+    });
+    getSqlite().prepare('UPDATE lane_events SET timestamp = ? WHERE id = ?')
+      .run(new Date(now).toISOString(), currentEvent.id);
+    getSqlite().prepare('UPDATE lane_events SET timestamp = ? WHERE id = ?')
+      .run(new Date(now + 2_000).toISOString(), staleEvent.id);
+    const newerSibling = createLane({
+      repoPath,
+      branch: `inline/${packetId}-newer`,
+      runtime: 'codex',
+      packetId,
+      label: `packet ${packetId} newer`,
+    });
+    recordLaneEvent(newerSibling.id, 'update', 'orchestrator', {
+      storageAdmissionOwnerGeneration: 2,
+      storageAdmissionReservationId: reservationId(packetId, 2),
+    });
+
+    updateLane(lane.id, { packetId: '' }, 'system');
+
+    expect(reservationStates(packetId, [1, 2, 3])).toEqual(['released', 'reserved', 'reserved']);
+    expect(store.getReservation(reservationId(stalePacketId, 5))?.state).toBe('reserved');
+    expect(getLane(newerSibling.id)?.packetId).toBe(packetId);
+  });
+
+  it('releases only the current generation when an older live sibling remains', async () => {
+    const packetId = 'chokepoint-older-sibling';
+    const { lane, repoPath } = await seedLaunchedPacket(packetId, [1, 2]);
+    const olderSibling = createLane({
+      repoPath,
+      branch: `inline/${packetId}-older`,
+      runtime: 'codex',
+      packetId,
+      label: `packet ${packetId} older`,
+    });
+    recordLaneEvent(olderSibling.id, 'update', 'orchestrator', {
+      storageAdmissionOwnerGeneration: 1,
+      storageAdmissionReservationId: reservationId(packetId, 1),
+    });
+
+    updateLane(lane.id, { packetId: '' }, 'system');
+
+    expect(reservationStates(packetId, [1, 2])).toEqual(['reserved', 'released']);
+    expect(getLane(olderSibling.id)?.packetId).toBe(packetId);
   });
 
   it('restores dispatch headroom once the association-loss release lands', async () => {
@@ -198,6 +319,67 @@ describe('lane packet-association chokepoint releases storage reservations', () 
     });
     expect(admitted.decision).toBe('reserved');
     expect(admitted.activeReservedBytes).toBe(0);
+  });
+});
+
+describe('an unprovable release scope fails the association-losing write closed', () => {
+  it('rejects an unbind when one reserved generation has no proven owner generation', async () => {
+    const packetId = 'chokepoint-unproven-single';
+    const { lane } = await seedLaunchedPacket(packetId, [1], 'none');
+
+    // Succeeding here is the defect: the reassignment would commit while the
+    // reserved row keeps holding headroom under an owner nothing points at.
+    expect(() => updateLane(lane.id, { packetId: 'pkt-unproven-successor' }, 'system'))
+      .toThrow(/unprovable/);
+
+    expect(getLane(lane.id)?.packetId).toBe(packetId);
+    expect(reservationStates(packetId, [1])).toEqual(['reserved']);
+  });
+
+  it('rejects a delete when several reserved generations have no proven owner generation', async () => {
+    const packetId = 'chokepoint-unproven-multi';
+    const { lane } = await seedLaunchedPacket(packetId, [1, 2], 'none');
+
+    expect(() => deleteLane(lane.id)).toThrow(/unprovable/);
+
+    expect(getLane(lane.id)?.packetId).toBe(packetId);
+    expect(getLaneEvents(lane.id, 50).length).toBeGreaterThan(0);
+    expect(reservationStates(packetId, [1, 2])).toEqual(['reserved', 'reserved']);
+  });
+
+  it('rejects loss of the last association when a newer generation is reserved', async () => {
+    const packetId = 'chokepoint-newer-unbound';
+    const { lane } = await seedLaunchedPacket(packetId, [1, 2], 'none');
+    recordLaneEvent(lane.id, 'update', 'orchestrator', {
+      storageAdmissionOwnerGeneration: 1,
+      storageAdmissionReservationId: reservationId(packetId, 1),
+    });
+
+    expect(() => updateLane(lane.id, { packetId: '' }, 'system'))
+      .toThrow(/newer reserved generation/);
+
+    expect(getLane(lane.id)?.packetId).toBe(packetId);
+    expect(reservationStates(packetId, [1, 2])).toEqual(['reserved', 'reserved']);
+  });
+
+  it('allows the ambiguous lane to unbind while a live sibling still names the packet', async () => {
+    const packetId = 'chokepoint-unproven-sibling';
+    const { lane, repoPath } = await seedLaunchedPacket(packetId, [1, 2], 'none');
+    const sibling = createLane({
+      repoPath,
+      branch: `inline/${packetId}-sibling`,
+      runtime: 'codex',
+      packetId,
+      label: `packet ${packetId} sibling`,
+    });
+
+    // Association survives on the sibling, so the reservations stay reachable
+    // and this lane may drop its binding without stranding anything.
+    updateLane(lane.id, { packetId: '' }, 'system');
+
+    expect(getLane(lane.id)?.packetId ?? '').toBe('');
+    expect(getLane(sibling.id)?.packetId).toBe(packetId);
+    expect(reservationStates(packetId, [1, 2])).toEqual(['reserved', 'reserved']);
   });
 });
 

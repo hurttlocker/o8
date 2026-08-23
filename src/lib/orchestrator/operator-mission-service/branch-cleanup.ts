@@ -282,7 +282,7 @@ async function archiveLanesForBranch(repoPath: string, branch: string) {
     return [{
       laneId: lane.id,
       packetId: lane.packetId,
-      ownerGeneration: storageOwnerGenerationForLane(lane.id),
+      ownerGeneration: storageOwnerGenerationForLane(lane.id, lane.packetId?.trim() || lane.id),
       worktreePath,
     }];
   });

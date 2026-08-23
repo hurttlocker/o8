@@ -14,6 +14,7 @@ process.env.O8_DATA_DIR = dataDir;
 
 const { closeDb, getSqlite } = await import('@/lib/db');
 const { createLane, setLaneStatus } = await import('@/lib/lane/registry');
+const { recordLaneEvent } = await import('@/lib/lane/events');
 const { sweepTerminalCortexWorktrees } = await import('@/lib/lane/terminal-worktree-sweep');
 const {
   createPacketStorageAdmissionCoordinator,
@@ -101,6 +102,10 @@ describe('storage reservation lifecycle real paths', () => {
       packetId,
       worktreePath,
     });
+    recordLaneEvent(lane.id, 'update', 'orchestrator', {
+      storageAdmissionOwnerGeneration: 1,
+      storageAdmissionReservationId: 'packet-storage:terminal-release:1',
+    });
 
     setLaneStatus(lane.id, 'completed', 'system', 'merged');
     await sweepTerminalCortexWorktrees(repoPath);
@@ -178,6 +183,12 @@ describe('storage reservation lifecycle real paths', () => {
       runtime: 'codex',
       packetId,
     });
+    for (const lane of [oldLane, liveLane]) {
+      recordLaneEvent(lane.id, 'update', 'orchestrator', {
+        storageAdmissionOwnerGeneration: 1,
+        storageAdmissionReservationId: 'packet-storage:terminal-with-live-successor:1',
+      });
+    }
 
     setLaneStatus(oldLane.id, 'completed', 'system', 'merged');
     expect(store.getReservation('packet-storage:terminal-with-live-successor:1')?.state).toBe('reserved');

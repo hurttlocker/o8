@@ -30,9 +30,9 @@ import type { Lane, LaneStatus } from './types';
  *    leave the reservation recoverable, not commit an unreachable row. Callers
  *    must not wrap this in a catch.
  *
- * Running before the write also keeps the live-sibling guard honest: the helper
- * excludes `terminalLaneId` itself, so a sibling lane that still holds the packet
- * blocks release exactly as it would have.
+ * Running before the write also keeps live-sibling protection honest: the helper
+ * excludes `terminalLaneId` itself and retains any generation a surviving lane
+ * still owns while releasing generations that only the retiring lane can own.
  */
 export function settleLaneStorageOnAssociationLoss(
   lane: Pick<Lane, 'id' | 'packetId'>,
@@ -48,12 +48,13 @@ export function settleLaneStorageOnAssociationLoss(
   if (!associationLost && !wentTerminal) return;
 
   const sqlite = getSqlite();
+  // Read inside the transaction, before the lane's events are appended to or
+  // deleted, so the generation still reflects the launch that reserved.
+  const ownerGeneration = laneStorageOwnerGeneration(sqlite, lane.id, packetId);
   releaseReservedStorageForTerminalOwner({
     sqlite,
     ownerIds: [packetId, lane.id],
-    // Read inside the transaction, before the lane's events are appended to or
-    // deleted, so the generation still reflects the launch that reserved.
-    ownerGeneration: laneStorageOwnerGeneration(sqlite, lane.id),
+    ownerGeneration,
     terminalLaneId: lane.id,
     mutationIdPrefix: `packet-storage-terminal-release:${lane.id}`,
   });

@@ -276,7 +276,7 @@ async function retireFailedRerunReplacement(guard: PacketLifecycleGuard): Promis
       branch: lane.branch,
       runtime: lane.runtime,
       worktreePath: lane.worktreePath,
-      storageAdmissionOwnerGeneration: storageOwnerGenerationForLane(lane.id),
+      storageAdmissionOwnerGeneration: storageOwnerGenerationForLane(lane.id, guard.packetId),
       overrideLiveGuard: lane.sessionKey?.trim()
         && confirmed.has(`${lane.id}\0${lane.sessionKey}`)
         ? true
