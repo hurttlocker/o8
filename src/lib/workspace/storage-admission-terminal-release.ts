@@ -70,7 +70,13 @@ function mapReservation(row: ReservationRow): StorageReservationRecord {
   };
 }
 
-function laneStorageOwnerGeneration(sqlite: Database.Database, laneId: string): number | undefined {
+/**
+ * The owner generation a lane's storage reservation was admitted under, read
+ * straight from `lane_events` on the caller's connection so it stays readable
+ * inside an open transaction (the settlement chokepoint runs before the lane's
+ * own events are rewritten or deleted).
+ */
+export function laneStorageOwnerGeneration(sqlite: Database.Database, laneId: string): number | undefined {
   const events = sqlite.prepare(`
     SELECT payload_json FROM lane_events
     WHERE lane_id = ? AND verb = 'update'
@@ -105,7 +111,7 @@ export function releaseReservedStorageForTerminalOwner(input: {
   if (!Number.isSafeInteger(releasedAt) || releasedAt <= 0) {
     throw new Error('releasedAt must be a positive safe integer.');
   }
-  const execute = input.sqlite.transaction(() => {
+  const settle = (): TerminalOwnerStorageReleaseResult => {
     const rows: ReservationRow[] = [];
     for (const ownerId of ownerIds) {
       const liveLaneIds = input.sqlite.prepare(`
@@ -165,6 +171,12 @@ export function releaseReservedStorageForTerminalOwner(input: {
       releasedBytes += row.exact_bytes;
     }
     return { released: rows.length, releasedBytes };
-  });
-  return execute.immediate();
+  };
+  // Settlement must be able to join a caller's open transaction. When the lane
+  // write that loses the packet association is already mid-transaction, running
+  // the body directly makes release and association loss commit or roll back as
+  // one unit — a nested BEGIN IMMEDIATE cannot. Standalone callers still get
+  // their own immediate transaction.
+  if (input.sqlite.inTransaction) return settle();
+  return input.sqlite.transaction(settle).immediate();
 }
