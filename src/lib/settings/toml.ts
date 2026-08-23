@@ -265,6 +265,28 @@ export const OPERATOR_DEFAULTS_TOML_KEYS = Object.freeze(
   Object.keys(OPERATOR_DEFAULTS_TOML_MAPPING) as Array<keyof OperatorDefaults>,
 );
 
+const EXPLICIT_OPT_IN_FLAG_KEYS = [
+  'broadcastCommentary',
+  'broadcastVoice',
+  'apfsDependencyImages',
+  'mergeTestReplayEnabled',
+  'quizGateEnabled',
+  'buyinDocEnabled',
+  'productTelemetryEnabled',
+  'telemetryOptIn',
+  'crashReportsEnabled',
+] as const satisfies ReadonlyArray<keyof OperatorDefaults>;
+
+/** Settings-backed feature switches whose off state can hide shipped behavior. */
+export const OPERATOR_EXPERIMENTAL_OR_OPT_IN_FLAG_KEYS = Object.freeze([
+  ...OPERATOR_DEFAULTS_TOML_KEYS.filter((key) => OPERATOR_DEFAULTS_TOML_MAPPING[key].path[0] === 'experimental'),
+  ...EXPLICIT_OPT_IN_FLAG_KEYS,
+].filter((key, index, keys) => keys.indexOf(key) === index));
+
+export function getOperatorDefaultsTomlKey(key: keyof OperatorDefaults): string {
+  return OPERATOR_DEFAULTS_TOML_MAPPING[key].path.join('.');
+}
+
 export class SettingsTomlParseError extends Error {
   constructor(message: string) {
     super(`settings.toml could not be parsed: ${message}`);
