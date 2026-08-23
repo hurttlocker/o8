@@ -44,6 +44,7 @@ export function synthesizePacketFromLane(packetId: string, lane: Lane): Orchestr
     workspaceTargetPath: lane.repoPath || null,
     branchTarget: lane.branch,
     runtime: lane.runtime,
+    model: lane.model,
     dependencyLabels: [],
     dependencyPacketIds: [],
     queueState: 'held',

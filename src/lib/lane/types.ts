@@ -96,6 +96,7 @@ export interface Lane {
   branch: string;
   baseBranch: string;
   runtime: LaneRuntime;
+  model?: string | null;
   sessionKey: string | null;
   packetId: string | null;
   prNumber: number | null;

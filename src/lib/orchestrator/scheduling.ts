@@ -102,6 +102,7 @@ function createLaneBinding(
     repoPath: packet.workspaceTargetPath,
     worktreePath: laneRow?.worktreePath ?? null,
     runtime: workerRouting?.selectedRuntime ?? packet.runtime,
+    model: laneRow?.model ?? workerRouting?.selectedModel ?? packet.model ?? packet.assignedModel ?? null,
     laneId,
     sessionKey: sessionKey ?? null,
     lastHeartbeatAt: null,
@@ -689,6 +690,7 @@ export async function runDispatchTick(
               // stops re-admitting this packet once it hits MAX_LAUNCH_ATTEMPTS.
               launchAttempts: (candidate.launchAttempts ?? 0) + 1,
               runtime: workerRouting.selectedRuntime,
+              model: getLane(result.value.laneId)?.model ?? workerRouting.selectedModel,
               assignedModel: workerRouting.selectedModel,
               workerIntent: workerRouting.workerIntent,
               workerRouting,

@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { deriveSpawnedAgentState, formatSpawnedAgentElapsed } from './spawned-agents-hover-card-utils';
 import type { ExtraAgentRow } from './AgentPanelExtraAgentRow';
 import type { TranscriptEvent } from '@/lib/orchestrator/transcript-normalizer';
+import { runtimeModelDisplayLabel } from '@/lib/orchestrator/display';
 
 interface SpawnedAgentHoverCardProps {
   row: ExtraAgentRow;
@@ -204,7 +205,7 @@ export function SpawnedAgentHoverCard({
               whiteSpace: 'nowrap',
             }}
           >
-            {row.runtime || row.origin}
+            {runtimeModelDisplayLabel(row.runtime, row.model)}
           </div>
         </div>
         <div

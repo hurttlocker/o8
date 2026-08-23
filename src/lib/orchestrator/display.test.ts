@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { runtimeDisplayLabel, agentDisplayLabel, orchestratorBackendDisplayLabel } from './display';
+import { runtimeDisplayLabel, agentDisplayLabel, orchestratorBackendDisplayLabel, packetRuntimeModelDisplayLabel, runtimeModelDisplayLabel } from './display';
 
 // Regression guard for the recurring "raw session id leaks into a label" bug.
 // The canonical helpers MUST never emit a raw id or an owned-key prefix
@@ -18,6 +18,26 @@ describe('runtimeDisplayLabel', () => {
     expect(runtimeDisplayLabel(undefined)).toBe('Agent');
     expect(runtimeDisplayLabel('')).toBe('Agent');
     expect(runtimeDisplayLabel('something-weird')).toBe('Agent');
+  });
+});
+
+describe('resolved model labels', () => {
+  it('renders the runtime and resolved model together', () => {
+    expect(runtimeModelDisplayLabel('opencode', 'ox-alpha')).toBe('OpenCode 2 · ox-alpha');
+    expect(packetRuntimeModelDisplayLabel({
+      runtime: 'codex',
+      model: 'gpt-5.6-sol',
+      lane: null,
+    })).toBe('Codex · gpt-5.6-sol');
+  });
+
+  it('prefers the persisted lane model over a stale requested model', () => {
+    expect(packetRuntimeModelDisplayLabel({
+      runtime: 'claude-code',
+      model: 'gpt-5.6-sol',
+      assignedModel: 'gpt-5.6-sol',
+      lane: { tileId: 'tile', tabId: 'tab', repoPath: null, runtime: 'claude-code', model: 'claude-sonnet-5' },
+    })).toBe('Claude Code · claude-sonnet-5');
   });
 });
 

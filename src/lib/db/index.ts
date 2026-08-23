@@ -754,7 +754,7 @@ function ensureTables(sqlite: Database.Database): void {
       worktree_path TEXT,
       branch TEXT NOT NULL,
       base_branch TEXT NOT NULL,
-      runtime TEXT NOT NULL,
+      runtime TEXT NOT NULL, model TEXT,
       session_key TEXT,
       packet_id TEXT, pr_number INTEGER,
       status TEXT NOT NULL, outcome TEXT, outcome_note TEXT,
@@ -1119,7 +1119,7 @@ function ensureChatHistoryColumns(sqlite: Database.Database): void {
 }
 
 function ensureLaneHeartbeatColumns(sqlite: Database.Database): void {
-  for (const [column, type] of Object.entries({ last_heartbeat_at: 'INTEGER', pr_number: 'INTEGER', outcome: 'TEXT', outcome_note: 'TEXT' })) {
+  for (const [column, type] of Object.entries({ last_heartbeat_at: 'INTEGER', pr_number: 'INTEGER', outcome: 'TEXT', outcome_note: 'TEXT', model: 'TEXT' })) {
     if (!tableColumnExists(sqlite, 'lanes', column)) addColumnTolerant(sqlite, `ALTER TABLE lanes ADD COLUMN ${column} ${type}`);
   }
 }

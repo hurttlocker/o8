@@ -21,10 +21,9 @@ import {
   compareBranchAgents,
   formatBranchDisplayName,
   formatCompactAge,
-  orchestratorRuntimeTone,
   orchestratorStatusTone,
   packetMatchesBranch,
-  resolveDisplayRuntime,
+  resolveDisplayRuntime, packetRuntimeModelDisplayLabel,
   resolveFloatingPanelPosition,
   sessionStatusTone,
   AgentSpinner,
@@ -816,7 +815,6 @@ function RepoBranchRowBase({
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {branchPackets.map((packet) => {
                 const displayRuntime = resolveDisplayRuntime(packet);
-                const runtimeTone = orchestratorRuntimeTone(displayRuntime);
                 const statusTone = orchestratorStatusTone(packet.status);
                 const isSelectedPacket = Boolean(packet.lane?.sessionKey && packet.lane.sessionKey === activeSessionKey);
                 const marker = packet.releaseState === 'released'
@@ -871,7 +869,7 @@ function RepoBranchRowBase({
                         branch rows that have the same reserved column. */}
                     <span style={{ width: 12, flexShrink: 0 }} />
                     <span
-                      title={runtimeTone.label}
+                      title={packetRuntimeModelDisplayLabel(packet)}
                       style={{
                         display: 'inline-flex',
                         alignItems: 'center',
@@ -921,7 +919,7 @@ function RepoBranchRowBase({
                           color: 'var(--t-text-faint)',
                         }}
                       >
-                        <span>{runtimeTone.label}</span>
+                        <span>{packetRuntimeModelDisplayLabel(packet)}</span>
                         <span>·</span>
                         <span>{statusTone.label}</span>
                         {marker ? (

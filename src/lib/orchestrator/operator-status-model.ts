@@ -6,6 +6,7 @@ export interface OperatorStatusAgent {
   name: string;
   repo: string;
   runtime: string;
+  model: string | null;
   status: string;
   branch: string;
   elapsed: string;
@@ -47,6 +48,7 @@ export function buildOperatorStatusAgents(
       name: session.name || session.sessionKey,
       repo: repoFromWorkspace(lane?.repoPath || session.workspace),
       runtime: session.runtime || 'unknown',
+      model: lane?.model ?? session.model ?? null,
       status: canonicalAgentStatus(session, lane),
       branch: lane?.branch || session.branch || 'main',
       elapsed: session.lastEventAt || '',

@@ -21,6 +21,7 @@ import {
 } from './shared';
 import { RepoBranchRow } from './RepoBranchRow';
 import type { RepoCardModel } from './useRepoCardModel';
+import { packetRuntimeModelDisplayLabel } from '@/lib/orchestrator/display';
 
 interface RepoCardExpandedContentProps {
   repo: RepoRegistryEntry;
@@ -233,26 +234,24 @@ function RepoCardExpandedContentBase({
                   >
                     {packet.title}
                   </span>
-                  {packet.branchTarget ? (
-                    <span
-                      title={packet.branchTarget}
-                      style={{
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        fontSize: 10,
-                        fontWeight: 440,
-                        color: 'var(--t-text-muted)',
-                        letterSpacing: '-0.005em',
-                        fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)',
-                      }}
-                    >
-                      {packet.branchTarget}
-                    </span>
-                  ) : null}
+                  <span
+                    title={[packetRuntimeModelDisplayLabel(packet), packet.branchTarget].filter(Boolean).join(' · ')}
+                    style={{
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      fontSize: 10,
+                      fontWeight: 440,
+                      color: 'var(--t-text-muted)',
+                      letterSpacing: '-0.005em',
+                      fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)',
+                    }}
+                  >
+                    {[packetRuntimeModelDisplayLabel(packet), packet.branchTarget].filter(Boolean).join(' · ')}
+                  </span>
                 </div>
                 <span
-                  title={runtimeTone.label}
+                  title={packetRuntimeModelDisplayLabel(packet)}
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',

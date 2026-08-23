@@ -39,6 +39,7 @@ import {
 } from './AgentPanelExtraAgentRow';
 import { SpawnedAgentHoverCard } from './SpawnedAgentHoverCard';
 import { callRetryPacket } from '@/lib/orchestrator/packet-actions';
+import { runtimeModelDisplayLabel } from '@/lib/orchestrator/display';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { archiveRuntimeTarget } from '@/lib/runtime/archive-client';
 import { SectionLabel } from './repo-focus/tabs/chats/shared';
@@ -62,6 +63,7 @@ export interface LaneSummary {
   repoPath: string;
   branch: string;
   runtime: OrchestratorRuntime;
+  model?: string | null;
   sessionKey: string | null;
   packetId: string | null;
   status: LaneStatus;
@@ -153,8 +155,9 @@ function buildRows(
       origin,
       status,
       runtime: lane.runtime,
+      model: lane.model ?? null,
       name: lane.label || `${lane.runtime} lane`,
-      subtitle: lane.branch,
+      subtitle: `${runtimeModelDisplayLabel(lane.runtime, lane.model)} · ${lane.branch}`,
       lastActivityAt: parseTimestamp(lane.lastEventAt),
       sessionKey: lane.sessionKey,
       repoPath: normalizePath(lane.repoPath),
@@ -179,8 +182,9 @@ function buildRows(
       origin,
       status,
       runtime: agent.runtime ?? '',
+      model: agent.model ?? null,
       name: agent.name || agent.runtime || 'Agent',
-      subtitle: agent.currentTask ?? '',
+      subtitle: [runtimeModelDisplayLabel(agent.runtime, agent.model), agent.currentTask].filter(Boolean).join(' · '),
       lastActivityAt: parseTimestamp(agent.lastEventAt),
       sessionKey: agent.sessionKey,
       repoPath: normalizePath(agent.workspace),

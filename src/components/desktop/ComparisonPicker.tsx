@@ -1,9 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { orchestratorStatusTone } from '@/lib/orchestrator/display';
+import { orchestratorStatusTone, packetRuntimeModelDisplayLabel } from '@/lib/orchestrator/display';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
-import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 
 interface ComparisonPickerProps {
   groupId: string;
@@ -18,11 +17,7 @@ interface ComparisonPickerProps {
 type PacketChangeCountMap = Record<string, number | null | undefined>;
 
 function modelLabel(packet: OrchestratorPacket) {
-  if (packet.assignedModel?.trim()) {
-    return packet.assignedModel.trim();
-  }
-  // Capability-map lookup for runtime display label; packet.runtime is OrchestratorRuntime.
-  return ORCHESTRATOR_RUNTIMES[packet.runtime].label;
+  return packetRuntimeModelDisplayLabel(packet);
 }
 
 async function resolvePacketWorkspacePath(packet: OrchestratorPacket) {

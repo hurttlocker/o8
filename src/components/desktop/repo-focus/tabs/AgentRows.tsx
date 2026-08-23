@@ -3,6 +3,7 @@
 import { ClaudeIcon, CodexIcon, GeminiIcon, OpenCodeIcon } from '@/components/desktop/repo-registry/shared';
 import { AgentStatusDot, agentStatusToDotState } from '@/components/desktop/AgentStatusDot';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { packetRuntimeModelDisplayLabel } from '@/lib/orchestrator/display';
 import type { IdeWorkspaceSession } from '../types';
 import {
   formatElapsed,
@@ -140,7 +141,7 @@ export function PacketRow({
           {packet.referenceLabel ? `${packet.referenceLabel}: ${packet.title}` : packet.title}
         </span>
         <span style={{ display: 'block', marginTop: 4, color: 'var(--t-text-faint)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', lineHeight: 1.25 }}>
-          {packetTimeLabel(packet)}
+          {packetRuntimeModelDisplayLabel(packet)} · {packetTimeLabel(packet)}
         </span>
       </span>
       <StatusPill label={packetStatusLabel(packet)} color={packetStatusColor(packet)} />

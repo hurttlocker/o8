@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { orchestratorRuntimeTone, orchestratorStatusTone } from '@/lib/orchestrator/display';
+import { orchestratorStatusTone, packetRuntimeModelDisplayLabel } from '@/lib/orchestrator/display';
 import { deriveGithubIssueUrl } from '@/lib/orchestrator/issue-url';
 import { packetReleaseBlockedBy } from '@/lib/orchestrator/store';
 import type { OrchestratorPacket, OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
@@ -73,7 +73,6 @@ export function PacketCard({
   onOpenReviewDiff,
 }: PacketCardProps) {
   const statusMeta = orchestratorStatusTone(packet.status);
-  const runtimeMeta = orchestratorRuntimeTone(packet.runtime);
   const dependencyBlocker = packetReleaseBlockedBy(packet, allPackets);
   const hasBranchTarget = hasPacketBranchTarget(packet.branchTarget);
   const terminalPacket = packet.releaseState === 'released' || packet.status === 'released' || packet.status === 'archived' || packet.status === 'awaiting_review';
@@ -223,7 +222,7 @@ export function PacketCard({
               {packet.title}
             </span>
             <span style={{ display: 'block', marginTop: 1, fontSize: 9, lineHeight: 1.3, color: 'var(--t-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {orchestratorRuntimeTone(packet.runtime).label}
+              {packetRuntimeModelDisplayLabel(packet)}
             </span>
           </span>
           <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 300, color: statusMeta.color, letterSpacing: '-0.1px' }}>
@@ -679,7 +678,7 @@ export function PacketCard({
         </div>
       ) : (
         <div style={{ padding: '0 14px 8px', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>{runtimeMeta.label}</span>
+          <span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>{packetRuntimeModelDisplayLabel(packet)}</span>
           <PacketSpendLine packet={packet} />
           {targetLabel ? <><span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>·</span><span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>{targetLabel}</span></> : null}
           {packet.lane ? <><span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>·</span><span style={{ fontSize: 10, color: '#22c55e', fontWeight: 400 }}>Live</span></> : null}

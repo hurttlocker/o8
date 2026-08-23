@@ -29,6 +29,7 @@ function fullPacketFixture() {
     workspaceTargetPath: '/repo/o8',
     branchTarget: 'inline/full-normalize',
     runtime: 'codex',
+    model: null,
     dependencyLabels: ['P0'],
     dependencyPacketIds: ['pkt-control-0'],
     queueState: 'queued',

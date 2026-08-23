@@ -115,6 +115,7 @@ export interface OrchestratorLaneBinding {
   repoPath: string | null;
   worktreePath?: string | null;
   runtime: OrchestratorRuntime;
+  model?: string | null;
   sessionKey?: string | null;
   laneId?: string | null;
   lastHeartbeatAt?: string | null;
@@ -265,6 +266,8 @@ export interface OrchestratorPacket {
   workspaceTargetPath: string | null;
   branchTarget: string;
   runtime: OrchestratorRuntime;
+  /** Resolved model that actually launched, after routing guards and defaults. */
+  model?: string | null;
   dependencyLabels: string[];
   dependencyPacketIds: string[];
   queueState: OrchestratorQueueState;

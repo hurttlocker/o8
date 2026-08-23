@@ -16,6 +16,7 @@ import { MetaRow, resolveHoverPosition } from './SpawnedAgentHoverCard';
 import { AGENT_STATUS_ACCENT } from './AgentStatusDot';
 import { attentionBand, type AttentionBand } from './repo-focus/tabs/chats/sections';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { packetRuntimeModelDisplayLabel } from '@/lib/orchestrator/display';
 
 const AGENT_LIST_CAP = 6;
 
@@ -151,6 +152,20 @@ export function OrchestratorHoverCard({
                 title={packet.title}
               >
                 {packet.title}
+              </span>
+              <span
+                style={{
+                  flexShrink: 0,
+                  maxWidth: 124,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  fontSize: 9.5,
+                  color: 'var(--t-text-faint)',
+                  whiteSpace: 'nowrap',
+                }}
+                title={packetRuntimeModelDisplayLabel(packet)}
+              >
+                {packetRuntimeModelDisplayLabel(packet)}
               </span>
               <span
                 style={{

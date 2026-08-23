@@ -17,7 +17,7 @@ import { mergeAdjacentToolOnlyEntries } from '@/components/desktop/thoughts/chat
 import { WorkspaceTranscript } from '@/components/desktop/workspace-terminal/WorkspaceTranscript';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
-import { orchestratorRuntimeTone, agentDisplayLabel } from '@/lib/orchestrator/display';
+import { agentDisplayLabel, runtimeModelDisplayLabel } from '@/lib/orchestrator/display';
 import {
   ORCHESTRATOR_RUNTIME_IDS,
   getRuntimeCapability,
@@ -245,7 +245,6 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
     packet?.issue?.body ? { id: packet.id, text: packet.issue.body } : null,
   ), [entries, name, packet?.id, packet?.issue?.body]);
   const runtime = useMemo(() => inferRuntime(sessionKey, agent?.runtime), [agent?.runtime, sessionKey]);
-  const runtimeTone = useMemo(() => orchestratorRuntimeTone(runtime), [runtime]);
   const status = useMemo(
     () => resolveAgentTileStatus(agent?.status, packet?.status, packet?.blockedReason),
     [agent?.status, packet?.blockedReason, packet?.status],
@@ -414,7 +413,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
                 color: 'var(--t-text-faint)', fontSize: 10, fontWeight: 300, lineHeight: 1,
               }}
             >
-              {runtimeTone.label}
+              {runtimeModelDisplayLabel(runtime, agent?.model ?? packet?.lane?.model ?? packet?.model ?? packet?.workerRouting?.selectedModel ?? packet?.assignedModel)}
             </span>
           </div>
         </div>

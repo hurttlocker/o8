@@ -15,6 +15,7 @@ export interface ExtraAgentRow {
   origin: AgentOrigin;
   status: VisualStatus;
   runtime: string;
+  model: string | null;
   name: string;
   subtitle: string;
   lastActivityAt: number;

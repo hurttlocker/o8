@@ -15,7 +15,7 @@
  * "beautiful cards, inline" direction.
  */
 
-import { orchestratorRuntimeTone, orchestratorStatusTone, resolveDisplayRuntime } from '@/lib/orchestrator/display';
+import { orchestratorRuntimeTone, orchestratorStatusTone, packetRuntimeModelDisplayLabel, resolveDisplayRuntime } from '@/lib/orchestrator/display';
 import { packetTerminalState } from '@/lib/orchestrator/packet-state';
 import type { OrchestratorPacket, OrchestratorPacketStatus, OrchestratorRuntime } from '@/lib/orchestrator/types';
 
@@ -334,7 +334,7 @@ export function SwarmStatusCard({ packets, scouts = [], onFocusPacket }: SwarmSt
               dotColor={tone.color}
               dotGlow={tone.background}
               title={title}
-              sub={`${tone.label}${eventLabel ? ` · ${eventLabel}` : ''}`}
+              sub={`${packetRuntimeModelDisplayLabel(packet)}${eventLabel ? ` · ${eventLabel}` : ''}`}
               status={statusTone(status)}
               showTopBorder={index > 0 || scouts.length > 0}
               onClick={() => focusSwarmPacket(packet, onFocusPacket)}

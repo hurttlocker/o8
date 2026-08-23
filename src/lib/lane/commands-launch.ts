@@ -5,14 +5,18 @@ import { emitProductEvent } from '@/lib/analytics/server';
 import { getLanePolicy } from '@/lib/lane/policy';
 import { appendEvent, attachSession, getLane, getLaneEvents, setLaneStatus, updateLane } from '@/lib/lane/registry';
 import { resolvePortInfo } from '@/lib/panel/api-port';
-import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
+import { getRuntimeCapability, listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
-import type { LaneCommand, LaneCommandResult, LaneEventActor } from '@/lib/lane/types';
+import type { LaneCommand, LaneCommandResult, LaneEventActor, LaneRuntime } from '@/lib/lane/types';
 import { findOwnedLaunchByMutationId } from '@/lib/runtimes/shared/owned-session-index';
 
 const LAUNCH_ATTEMPT_CAP = 5;
 
 type LaunchSessionCommand = Extract<LaneCommand, { verb: 'launch_session' }>;
+
+function resolvedLaunchModel(command: LaunchSessionCommand, runtime: LaneRuntime): string | null {
+  return command.claudeCodeModel?.trim() || command.model?.trim() || getRuntimeCapability(runtime).defaultModel?.trim() || null;
+}
 
 export async function launchSession(
   command: LaunchSessionCommand,
@@ -72,6 +76,7 @@ export async function launchSession(
           note: 'Recovered a failed owned launch from its durable session record.',
         };
       }
+      updateLane(command.laneId, { model: resolvedLaunchModel(command, lane.runtime) }, 'system');
       attachSession(command.laneId, recovered.surfaceId, actor);
       setLaneStatus(command.laneId, 'running', actor, 'session_launch_recovered');
       return {
@@ -159,6 +164,7 @@ export async function launchSession(
       return { ok: false, laneId: command.laneId, note: result.note };
     }
 
+    updateLane(command.laneId, { model: resolvedLaunchModel(command, lane.runtime) }, 'system');
     attachSession(command.laneId, result.surfaceId, actor);
     if (result.worktree?.path && !lane.worktreePath) {
       updateLane(command.laneId, { worktreePath: result.worktree.path }, 'system');

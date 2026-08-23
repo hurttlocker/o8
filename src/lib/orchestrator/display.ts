@@ -1,4 +1,5 @@
 import type {
+  OrchestratorPacket,
   OrchestratorPacketStatus,
   OrchestratorRuntime,
   WorkspaceOrchestrationPacketBadge,
@@ -219,6 +220,24 @@ export function laneDisplayTitle(
 export function runtimeDisplayLabel(runtime?: OrchestratorRuntime | string | null): string {
   const cap = runtime ? ORCHESTRATOR_RUNTIMES[runtime as OrchestratorRuntime] : null;
   return cap?.label ?? 'Agent';
+}
+
+/** Runtime and the resolved model that actually launched, for audit-bearing agent surfaces. */
+export function runtimeModelDisplayLabel(
+  runtime?: OrchestratorRuntime | string | null,
+  model?: string | null,
+): string {
+  const runtimeLabel = runtimeDisplayLabel(runtime);
+  const modelLabel = model?.trim();
+  return modelLabel ? `${runtimeLabel} · ${modelLabel}` : runtimeLabel;
+}
+
+export function packetRuntimeModelDisplayLabel(
+  packet?: Pick<OrchestratorPacket, 'runtime' | 'model' | 'lane' | 'workerRouting' | 'assignedModel'> | null,
+): string {
+  const runtime = resolveDisplayRuntime(packet);
+  const model = packet?.lane?.model ?? packet?.model ?? packet?.workerRouting?.selectedModel ?? packet?.assignedModel ?? null;
+  return runtimeModelDisplayLabel(runtime, model);
 }
 
 /**

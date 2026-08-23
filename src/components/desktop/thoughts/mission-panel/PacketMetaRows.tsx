@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { BranchPickerPopover } from '@/components/desktop/thoughts/BranchPickerPopover';
-import { orchestratorRuntimeTone } from '@/lib/orchestrator/display';
+import { orchestratorRuntimeTone, packetRuntimeModelDisplayLabel } from '@/lib/orchestrator/display';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import type { OrchestratorPacket, OrchestratorRuntime, OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
 import {
@@ -183,7 +183,7 @@ export function PacketMetaRows({
     ? (workspaceTargets.find((t) => t.localPath === packet.workspaceTargetPath)?.label ?? packet.workspaceTargetPath.split('/').pop() ?? 'target')
     : null;
 
-  const runtimeDisplay = orchestratorRuntimeTone(packet.runtime).label;
+  const runtimeDisplay = packetRuntimeModelDisplayLabel(packet);
   const resolvedWorkerModel = packet.workerRouting?.selectedModel ?? packet.assignedModel ?? null;
   const resolvedWorkerEffort = packet.workerRouting?.selectedEffort ?? null;
   const resolvedWorkerLabel = [resolvedWorkerModel, resolvedWorkerEffort]

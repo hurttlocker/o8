@@ -410,6 +410,7 @@ export const lanes = sqliteTable('lanes', {
   branch: text('branch').notNull(),
   baseBranch: text('base_branch').notNull(),
   runtime: text('runtime', { enum: ORCHESTRATOR_RUNTIME_ENUM }).notNull(),
+  model: text('model'),
   sessionKey: text('session_key'),
   packetId: text('packet_id'),
   prNumber: integer('pr_number'),

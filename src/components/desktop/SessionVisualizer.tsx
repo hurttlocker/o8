@@ -4,6 +4,7 @@ import { memo, useCallback, useMemo } from 'react';
 import type { FleetAgent } from './thoughts/types';
 import { AgentStatusDot, agentStatusToDotState } from './AgentStatusDot';
 import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
+import { runtimeModelDisplayLabel } from '@/lib/orchestrator/display';
 
 export interface SessionPillContextMenuRequest {
   sessionKey: string;
@@ -30,6 +31,8 @@ export type VisualRuntime = 'codex' | 'claude-code' | 'other';
 interface VisualSession {
   key: string;
   runtime: VisualRuntime;
+  rawRuntime: string | null;
+  model: string | null;
   name: string;
   workspace: string | null;
   status: VisualStatus;
@@ -89,6 +92,8 @@ function toVisualSession(agent: FleetAgent, index: number): VisualSession {
   return {
     key,
     runtime,
+    rawRuntime: agent.runtime ?? null,
+    model: agent.model ?? null,
     name: agent.name?.trim() || runtimeLabel(runtime),
     workspace: workspaceLabel(agent.workspace),
     status: classifyStatus(agent.status),
@@ -178,7 +183,7 @@ function SessionPillBase({
 
   return (
     <div
-      title={`${session.name} — ${session.headline}`}
+      title={`${session.name} — ${runtimeModelDisplayLabel(session.rawRuntime, session.model)} — ${session.headline}`}
       onContextMenu={onRequestContextMenu ? handleContextMenu : undefined}
       style={{
         position: 'relative',
@@ -237,7 +242,7 @@ function SessionPillBase({
               flexShrink: 0,
             }}
           >
-            {runtimeLabel(session.runtime)}
+            {runtimeModelDisplayLabel(session.rawRuntime, session.model)}
           </span>
           <span
             style={{
@@ -337,6 +342,8 @@ const SessionPill = memo(SessionPillBase, (prev, next) => {
   return (
     a.key === b.key
     && a.runtime === b.runtime
+    && a.rawRuntime === b.rawRuntime
+    && a.model === b.model
     && a.name === b.name
     && a.workspace === b.workspace
     && a.status === b.status

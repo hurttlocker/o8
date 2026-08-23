@@ -6,6 +6,7 @@ import { ReviewFileRow } from '@/components/desktop/review/panel/ReviewFileRow';
 import type { ComparisonCandidate } from './useComparisonGroups';
 import { useComparisonDiff } from './useComparisonDiff';
 import { useMergePreview } from './useMergePreview';
+import { packetRuntimeModelDisplayLabel } from '@/lib/orchestrator/display';
 
 // Best-of-N candidates branch from the repo's default branch; the compare shows
 // each candidate's committed diff vs this base (three-dot, merge-base relative).
@@ -50,7 +51,7 @@ export function ComparisonColumn({
   // verdict (passes / blocked-by) so the operator picks with the gate in view.
   const preview = useMergePreview(candidate.packet.id, candidate.complete);
   const { packet } = candidate;
-  const model = packet.assignedModel || packet.runtime || `candidate ${index + 1}`;
+  const model = packetRuntimeModelDisplayLabel(packet) || `candidate ${index + 1}`;
   const roleLabel = packet.qualitySearch?.role === 'minimal_complete'
     ? 'smallest complete route'
     : packet.qualitySearch?.role === 'robustness_complete'

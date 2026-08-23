@@ -20,6 +20,7 @@ import { motion } from 'framer-motion';
 import { UpdateCard } from '@/components/desktop/UpdateCard';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
 import { STATUS_COLORS } from '@/components/desktop/SessionVisualizer';
+import { packetRuntimeModelDisplayLabel } from '@/lib/orchestrator/display';
 import {
   readFleetCanvasPositions,
   writeFleetCanvasPosition,
@@ -281,7 +282,7 @@ function FleetCard({
   const tone = packetTone(packet.status);
   const working = tone === 'working';
   const repo = repoBasename(packet.workspaceTargetPath);
-  const meta = [repo, packet.runtime, packet.referenceLabel].filter(Boolean).join(' · ');
+  const meta = [repo, packetRuntimeModelDisplayLabel(packet), packet.referenceLabel].filter(Boolean).join(' · ');
 
   return (
     <motion.div

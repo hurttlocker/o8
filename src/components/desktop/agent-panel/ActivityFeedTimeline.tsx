@@ -35,6 +35,7 @@ import type {
   PRHoverDetail,
   RepoTaskLaunchRequest,
 } from './types';
+import { packetRuntimeModelDisplayLabel } from '@/lib/orchestrator/display';
 
 const FEED_ICON: Record<string, { icon: ReactNode; bg: string; color: string }> = {
   commit: { icon: <GitCommit size={11} strokeWidth={2} />, bg: 'rgba(34,197,94,0.08)', color: '#22c55e' },
@@ -83,7 +84,7 @@ function activityItemSubtitle(item: ActivityItem, agentForEvent: AgentDetail | n
   if (item.kind === 'ci') return `${item.workflow} • ${item.branch}`;
   if (item.kind === 'issue') return `${item.author} opened this in ${shortRepoLabel(item.repo)}`;
   if (item.kind === 'commit') return `${shortRepoLabel(item.repo)} • ${item.hash}`;
-  if (item.kind === 'packet') return `${item.packet.runtime} • ${item.packet.status}`;
+  if (item.kind === 'packet') return `${packetRuntimeModelDisplayLabel(item.packet)} • ${item.packet.status}`;
   return agentForEvent ? `${agentForEvent.name} • ${agentForEvent.model}` : item.data.timestamp;
 }
 
@@ -336,7 +337,7 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                         <span>{item.data.timestamp}</span>
                       </>
                     ) : (
-                      <span>{item.packet.runtime}</span>
+                      <span>{packetRuntimeModelDisplayLabel(item.packet)}</span>
                     )}
                   </div>
                 </div>
