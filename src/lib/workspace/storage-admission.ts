@@ -591,7 +591,8 @@ export class StorageAdmissionStore {
     if (!Number.isSafeInteger(probeStartedAt)) {
       throw new StorageAdmissionInputError('Storage admission clock is unavailable.');
     }
-    const observation = initial
+    const requiresObservation = operation !== 'reconcile';
+    const observation = initial && requiresObservation
       ? await this.observeVolume(initial.target_path)
       : null;
     const decisionAt = this.now();
@@ -623,11 +624,11 @@ export class StorageAdmissionStore {
           DEFAULT_STORAGE_OBSERVATION_MAX_AGE_MS,
         );
         if (!reason && observation.volumeId !== normalized.volumeId) reason = 'volume_conflict';
-      } else if (!reason) {
+      } else if (!reason && requiresObservation) {
         reason = 'accounting_unknown';
       }
 
-      if (reason || !current || !observation) {
+      if (reason || !current || (requiresObservation && !observation)) {
         const result: StoredStorageAdmissionResult = {
           operation,
           decision: 'held',
@@ -670,7 +671,7 @@ export class StorageAdmissionStore {
           AND generation = ? AND owner_id = ? AND owner_generation = ?
       `).run(
         nextState,
-        JSON.stringify(observation),
+        observation ? JSON.stringify(observation) : null,
         normalized.mutationId,
         terminalReason,
         decisionAt,
@@ -696,7 +697,7 @@ export class StorageAdmissionStore {
         activeReservedBytes: null,
         headroomBytes: null,
         observedAvailableDeltaBytes:
-          current.pre_measurement_json && reservation.preMeasurement.availableBytes !== null
+          observation && current.pre_measurement_json && reservation.preMeasurement.availableBytes !== null
             && observation.availableBytes !== null
             ? reservation.preMeasurement.availableBytes - observation.availableBytes
             : null,

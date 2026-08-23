@@ -694,7 +694,7 @@ describe('packet dispatch storage admission', () => {
     ]);
   });
 
-  it('records an accounting hold without poisoning the next exact startup retry', async () => {
+  it('reconciles an expired lease without requiring fresh volume accounting', async () => {
     const db = sqlite();
     let now = 1_000;
     let accountingObserved = true;
@@ -728,20 +728,19 @@ describe('packet dispatch storage admission', () => {
     await expect(reconcileExpiredPacketStorageReservations({
       store,
       now: () => now,
-    })).resolves.toMatchObject({ inspected: 1, reconciled: 0, held: 1 });
+    })).resolves.toMatchObject({ inspected: 1, reconciled: 1, held: 0 });
 
     now = 2_010;
     accountingObserved = true;
     await expect(reconcileExpiredPacketStorageReservations({
       store,
       now: () => now,
-    })).resolves.toMatchObject({ inspected: 1, reconciled: 1, held: 0 });
+    })).resolves.toMatchObject({ inspected: 0, reconciled: 0, held: 0 });
     expect(db.prepare(`
       SELECT mutation_id FROM storage_admission_mutations
       WHERE operation = 'reconcile' ORDER BY recorded_at
     `).pluck().all()).toEqual([
       'packet-storage-reconcile:packet-storage:retry:1:1:2000',
-      'packet-storage-reconcile:packet-storage:retry:1:1:2010',
     ]);
   });
 });
