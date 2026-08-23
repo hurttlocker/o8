@@ -1,6 +1,7 @@
 export const PACKET_SUBCOMMANDS = [
   'info',
   'scope',
+  'expand-scope',
   'diff',
   'commit',
   'heartbeat',
@@ -25,6 +26,7 @@ export const PACKET_SUBCOMMANDS = [
 
 export const PACKET_COMMAND_LINES = `  packet info [id]     packet metadata; explicit packet/lane id overrides cwd
   packet scope [id]    one-call worker context (auto-resolves from cwd)
+  packet expand-scope [id] request bounded paths (--paths <path[,path]> --reason <text>)
   packet diff [id]     the packet's code diff vs base (committed + uncommitted)
   packet commit -m ".." stage + commit the current worktree with an explicit pathspec
   packet heartbeat [id] update a packet lane heartbeat

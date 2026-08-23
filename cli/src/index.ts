@@ -55,6 +55,7 @@ import { runPacketCapture } from './commands/packet/capture.js';
 import { runPacketMirrorProof } from './commands/packet/mirror-proof.js';
 import { runPacketReview } from './commands/packet/review.js';
 import { runPacketScope } from './commands/packet/scope.js';
+import { runPacketExpandScope } from './commands/packet/expand-scope.js';
 import { runPacketRuntimeDrift } from './commands/packet/runtime-drift.js';
 import { runPacketDiff } from './commands/packet/diff.js';
 import { runPacketCommit } from './commands/packet/commit.js';
@@ -421,6 +422,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
     case 'packet': {
       if (secondary === 'info') return runPacketInfo(args.mode, args.rest);
       if (secondary === 'scope') return runPacketScope(args.mode, args.rest);
+      if (secondary === 'expand-scope') return runPacketExpandScope(args.mode, args.rest);
       if (secondary === 'diff') return runPacketDiff(args.mode, args.rest);
       if (secondary === 'commit') return runPacketCommit(args.mode, args.rest);
       if (secondary === 'heartbeat') return runPacketHeartbeat(args.mode, args.rest);

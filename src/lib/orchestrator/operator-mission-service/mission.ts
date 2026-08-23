@@ -3,7 +3,7 @@ import { projectMissionFunnel } from '@/lib/orchestrator/mission-funnel';
 import { resolveWorkerRouting } from '@/lib/agents/routing';
 import { reconcileOrchestratorControlPlaneState, withLockedState, writeOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { buildDagMetadata, buildDependencyGraph } from '@/lib/orchestrator/dag';
-import { buildRemainingLaunchBudget, runDispatchTick } from '@/lib/orchestrator/dispatch';
+import { applyPacketScopePolicy, buildRemainingLaunchBudget, computePredictedFiles, runDispatchTick } from '@/lib/orchestrator/dispatch';
 import { findLaneByPacket, getLaneEvents, listLanes } from '@/lib/lane/registry';
 import { recoveryInfoFromLaneEvents } from '@/lib/lane/recovery-info';
 import { resolveBranchPrefixSync } from '@/lib/operator/defaults';
@@ -162,7 +162,7 @@ export async function createMission(input: CreateMissionInput) {
   const launchContext = bindWorkerLaunchParent(input.launchContext, {
     threadId: input.orchestratorThreadId,
   });
-  const packets = loadedIssues.map((issue, index) => {
+  const packetDrafts = loadedIssues.map((issue, index) => {
     const dependencyNumbers = explicitDependencies[index].length > 0
       ? explicitDependencies[index]
       : !hasExplicitDependencies && input.sequential && index > 0
@@ -271,7 +271,7 @@ export async function createMission(input: CreateMissionInput) {
         : {}),
     } satisfies OrchestratorPacket;
   });
-
+  const packets = packetDrafts.map((packet) => applyPacketScopePolicy(packet, computePredictedFiles(packet)));
   const missionBase = normalizeOrchestratorMissionState({
     version: 2,
     missionId,

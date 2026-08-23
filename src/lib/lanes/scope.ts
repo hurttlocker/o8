@@ -10,6 +10,7 @@ import { parseDirectiveFile, type ParsedDirective } from '@/lib/cortex/directive
 import { appendEvent, getLane, getLaneEvents, listLanes } from '@/lib/lane/registry';
 import type { Lane, LaneRuntime, LaneStatus } from '@/lib/lane/types';
 import { FILE_SIZE_BLOCK_THRESHOLD_LINES } from '@/lib/orchestrator/preservation-envelope';
+import { resolvePacketScope } from '@/lib/orchestrator/packet-scope-policy';
 import { currentMissionState } from '@/lib/orchestrator/operator-mission-service/shared';
 import type { OrchestratorPacket, OrchestratorPacketStatus } from '@/lib/orchestrator/types';
 import { buildProjectTaskBrief, getProjectContext, type ProjectContextRepo } from '@/lib/projects/context';
@@ -129,11 +130,7 @@ function packetOverlapPaths(packet: OrchestratorPacket | null): string[] {
 
 function packetAllowedPaths(packet: OrchestratorPacket | null): string[] {
   if (!packet) return [];
-  if (packet.allowedFiles && packet.allowedFiles.length > 0) {
-    return [...new Set(packet.allowedFiles.map((path) => path.trim()).filter(Boolean))];
-  }
-  const inlineIssue = (packet.issue?.number ?? 0) >= 90001 && !packet.issue?.url;
-  return inlineIssue ? ['**/*'] : packetOverlapPaths(packet);
+  return resolvePacketScope(packet).allowedPaths;
 }
 
 function normalizePathPattern(path: string): string {
@@ -368,6 +365,7 @@ export async function getPacketScope(input: GetPacketScopeInput): Promise<Packet
       },
       definitionOfDone: [
         'Stay inside allowed paths unless the task explicitly requires a scoped expansion.',
+        'Request bounded expansion with o8 packet expand-scope and record why each added path is required.',
         'Run targeted checks for the changed surface, or report why checks were not possible.',
         'Report changed repos, locks/conflicts, and review handoffs before completion.',
       ],

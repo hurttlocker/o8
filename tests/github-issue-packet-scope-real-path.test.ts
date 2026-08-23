@@ -1,0 +1,213 @@
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import { join } from 'node:path';
+
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-github-scope-data-'));
+process.env.O8_DATA_DIR = dataDir;
+process.env.CORTEX_IDE_DATA_DIR = dataDir;
+
+const launchPacket = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/orchestrator/dispatch-packet-launch', () => ({
+  launchPacketWithStorageAdmission: launchPacket,
+}));
+vi.mock('@/lib/runtime/registry', () => ({
+  getRuntimeProcessForWorktree: vi.fn(async () => null),
+}));
+
+const tempDirs = [dataDir];
+
+function git(cwd: string, ...args: string[]) {
+  execFileSync('git', args, { cwd, stdio: 'pipe' });
+}
+
+function createRepo() {
+  const repoPath = mkdtempSync(join(os.tmpdir(), 'o8-github-scope-repo-'));
+  tempDirs.push(repoPath);
+  git(repoPath, 'init', '-q', '-b', 'main');
+  git(repoPath, 'config', 'user.email', 'test@o8.dev');
+  git(repoPath, 'config', 'user.name', 'o8 test');
+  mkdirSync(join(repoPath, 'src'), { recursive: true });
+  writeFileSync(join(repoPath, 'o8.md'), '# Operator spec\n');
+  writeFileSync(join(repoPath, 'src', 'worker.ts'), 'export const worker = true;\n');
+  git(repoPath, 'add', '.');
+  git(repoPath, 'commit', '-q', '-m', 'base');
+  return repoPath;
+}
+
+afterAll(() => {
+  for (const dir of tempDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+beforeEach(() => {
+  launchPacket.mockReset();
+});
+
+describe('GitHub issue packet scope real path', () => {
+  it('never launches a packet whose only predicted file is forbidden by its task brief', async () => {
+    const repoPath = createRepo();
+    const { scanRepo } = await import('@/lib/skeleton');
+    await scanRepo({ repoPath, chunks: false });
+
+    const { createLane } = await import('@/lib/lane/registry');
+    launchPacket.mockImplementation(async ({ packet, workerRouting }) => {
+      const lane = createLane({
+        repoPath,
+        worktreePath: repoPath,
+        branch: packet.branchTarget,
+        runtime: packet.runtime,
+        packetId: packet.id,
+        sessionKey: `codex-owned:${packet.id}`,
+      });
+      return {
+        laneId: lane.id,
+        sessionKey: lane.sessionKey,
+        workerRouting,
+        storageAdmission: {
+          state: 'admitted',
+          recordedAt: Date.now(),
+          ownerGeneration: 1,
+        },
+        dependencyMaterializationMode: null,
+      };
+    });
+
+    const { createMission, dispatchMission } = await import('@/lib/orchestrator/operator-mission-service');
+    const created = await createMission({
+      issues: [{
+        number: 18_360,
+        title: 'Repair packet dispatch scope',
+        body: 'The file prediction points at `o8.md`. Never touch o8.md at the repo root.',
+        url: 'https://example.test/issues/18360',
+      }],
+      repoPath,
+      runtime: 'codex',
+      constraints: 'Keep the worker inside a useful packet scope.',
+    });
+    const packetId = created.packets[0]!.id;
+    const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+    const createdPacket = readOrchestratorControlPlaneState().packets.find((candidate) => candidate.id === packetId)!;
+    expect(createdPacket.predictedFiles).toEqual(['o8.md']);
+    expect(createdPacket.allowedFiles).toEqual(['**/*']);
+
+    await dispatchMission({ missionId: created.missionId });
+
+    const { getPacketScope } = await import('@/lib/lanes/scope');
+    const state = readOrchestratorControlPlaneState();
+    const packet = state.packets.find((candidate) => candidate.id === packetId)!;
+    const scope = await getPacketScope({ packetId });
+    const launchedUnsatisfiableScope = launchPacket.mock.calls.length > 0
+      && scope?.allowedPaths.length === 1
+      && scope.allowedPaths[0] === 'o8.md';
+
+    expect(packet.predictedFiles).toEqual(['o8.md']);
+    expect(launchedUnsatisfiableScope).toBe(false);
+    if (launchPacket.mock.calls.length === 0) {
+      expect(packet.blockedReason).toMatch(/unsatisfiable packet scope/i);
+    } else {
+      expect(scope?.allowedPaths).not.toEqual(['o8.md']);
+    }
+  });
+
+  it('records a bounded worker scope expansion reason on the packet lane', async () => {
+    const repoPath = createRepo();
+    const packetId = 'pkt-bounded-scope-expansion';
+    const { createLane, getLaneEvents } = await import('@/lib/lane/registry');
+    const lane = createLane({
+      repoPath,
+      worktreePath: repoPath,
+      branch: 'issue/18360-bounded-expansion',
+      runtime: 'codex',
+      packetId,
+    });
+    const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+    const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      missionId: 'mission-bounded-scope-expansion',
+      repoPath,
+      packets: [{
+        id: packetId,
+        referenceLabel: 'P1',
+        title: 'Repair the worker',
+        summary: 'Edit src/worker.ts.',
+        workspaceTargetPath: repoPath,
+        branchTarget: lane.branch,
+        runtime: 'codex',
+        dependencyLabels: [],
+        dependencyPacketIds: [],
+        queueState: 'queued',
+        releaseState: 'pending',
+        status: 'running',
+        lane: null,
+        predictedFiles: ['src/worker.ts'],
+        allowedFiles: ['src/worker.ts'],
+        issue: { number: 18_361, body: 'Edit src/worker.ts.', url: 'https://example.test/issues/18361' },
+      }],
+    });
+
+    const { requestPacketScopeExpansion } = await import('@/lib/orchestrator/packet-scope-expansion');
+    const result = await requestPacketScopeExpansion({
+      packetId,
+      paths: ['tests/scope/**'],
+      reason: 'The real-path regression belongs in this test directory.',
+    });
+
+    const packet = readOrchestratorControlPlaneState().packets.find((candidate) => candidate.id === packetId)!;
+    const event = getLaneEvents(lane.id).find((candidate) => candidate.verb === 'scope_expansion_requested');
+    expect(result).toMatchObject({ expanded: true, allowedPaths: ['src/worker.ts', 'tests/scope/**'] });
+    expect(packet.allowedFiles).toEqual(['src/worker.ts', 'tests/scope/**']);
+    expect(event?.payload).toMatchObject({
+      requestedPaths: ['tests/scope/**'],
+      reason: 'The real-path regression belongs in this test directory.',
+      expanded: true,
+    });
+    await expect(requestPacketScopeExpansion({
+      packetId,
+      paths: ['**/*'],
+      reason: 'A repository-wide request must remain rejected.',
+    })).rejects.toThrow(/not bounded/i);
+  });
+
+  it('refuses dispatch with a clear reason when an explicit allowlist is entirely forbidden', async () => {
+    const repoPath = createRepo();
+    const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+    const state = {
+      ...createEmptyOrchestratorMissionState(),
+      missionId: 'mission-unsatisfiable-explicit-scope',
+      repoPath,
+      packets: [{
+        id: 'pkt-unsatisfiable-explicit-scope',
+        referenceLabel: 'P1',
+        title: 'Respect the operator spec',
+        summary: 'Never touch o8.md at the repo root.',
+        workspaceTargetPath: repoPath,
+        branchTarget: 'issue/18362-unsatisfiable-explicit-scope',
+        runtime: 'codex' as const,
+        dependencyLabels: [],
+        dependencyPacketIds: [],
+        queueState: 'queued' as const,
+        releaseState: 'pending' as const,
+        status: 'queued' as const,
+        lane: null,
+        predictedFiles: ['o8.md'],
+        allowedFiles: ['o8.md'],
+        issue: { number: 18_362, body: 'Never touch o8.md at the repo root.', url: 'https://example.test/issues/18362' },
+      }],
+    };
+
+    const { runDispatchTick } = await import('@/lib/orchestrator/dispatch');
+    const result = await runDispatchTick(state);
+    expect(launchPacket).not.toHaveBeenCalled();
+    expect(result.packets[0]).toMatchObject({
+      queueState: 'held',
+      status: 'blocked',
+      lastEventLabel: 'scope_unsatisfiable',
+      blockedReason: expect.stringMatching(/unsatisfiable packet scope.*o8\.md/i),
+    });
+  });
+});

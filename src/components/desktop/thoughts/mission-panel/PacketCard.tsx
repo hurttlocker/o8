@@ -159,11 +159,12 @@ export function PacketCard({
   // Changes count — files modified from review state (best-effort).
   const changesCount = reviewState?.snapshot?.changedFiles?.length ?? null;
 
-  // Files tab content — predictedFiles or actual changed files.
+  // Files tab leads with the effective packet allowlist.
   const filesList: string[] = useMemo(() => {
+    if (packet.allowedFiles?.length) return packet.allowedFiles;
     const fromReview = reviewState?.snapshot?.changedFiles?.map((f) => f.path) ?? [];
     if (fromReview.length > 0) return fromReview;
-    return packet.predictedFiles ?? packet.allowedFiles ?? [];
+    return packet.predictedFiles ?? [];
   }, [packet.predictedFiles, packet.allowedFiles, reviewState?.snapshot?.changedFiles]);
 
   // #517 — Packets in a best-of-n comparison group render via ComparisonCard at
@@ -757,7 +758,7 @@ function FilesTabList({ files }: { files: string[] }) {
           fontFamily: 'var(--font-sans-system)',
         }}
       >
-        No predicted or changed files yet. Files appear here once the agent runs.
+        No allowed, predicted, or changed files are available for this packet.
       </div>
     );
   }

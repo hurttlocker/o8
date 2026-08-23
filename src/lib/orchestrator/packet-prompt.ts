@@ -482,6 +482,7 @@ export async function buildPacketPrompt(
       ? buildReadOnlyPacketSelfReviewInstructions()
       : buildPacketSelfReviewInstructions(baseBranch)),
     readOnlyPacket ? null : 'CRITICAL: Before reporting completion, you MUST commit all changes: run `git add -A && git commit -m "<descriptive message>"`. Uncommitted changes will be lost when the worktree is cleaned up.',
+    readOnlyPacket ? null : 'If the task requires a path outside the packet allowlist, request a bounded audited expansion with `o8 packet expand-scope --paths <path[,path]> --reason "<why the task requires it>"` before editing that path.',
     'Stay within this packet scope. Surface blockers, review handoffs, and required operator decisions explicitly.',
   ].filter((value): value is string => Boolean(value)).join('\n');
 }

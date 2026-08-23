@@ -410,7 +410,7 @@ export interface OrchestratorPacket {
   launchContext?: WorkerLaunchContext | null;
   /** Rendered packet prompt body (surfaced in details popover). Optional. */
   prompt?: string;
-  /** Files allowed to be touched by this packet. Alias of predictedFiles when present. */
+  /** Effective writable paths after predictions are reconciled with the task brief. */
   allowedFiles?: string[];
   /** Learned guardrails injected into the packet's prompt (surfaced in details popover). */
   learnedRules?: string[];

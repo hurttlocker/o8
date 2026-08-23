@@ -307,6 +307,9 @@ export type LaneEventVerb =
   // Packet dispatch refused to launch without a managed worktree.
   // Payload: { code, runtime, packetId, laneId, repoPath, cause, note }
   | 'worktree_provision_failed'
+  // Worker-requested bounded scope expansion. Payload records requested paths,
+  // effective allowlist, reason, and whether the request widened the scope.
+  | 'scope_expansion_requested'
   // An owned runtime child exited. Payload includes exit code/signal, stderr,
   // and whether the runtime emitted its protocol-level result event.
   | 'runtime_process_exit'

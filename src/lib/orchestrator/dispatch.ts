@@ -8,6 +8,10 @@ export {
 } from './preservation-envelope';
 
 export {
+  applyPacketScopePolicy,
+} from './packet-scope-policy';
+
+export {
   MAX_PARALLEL_DISPATCHES,
   MAX_RECOVERY_DISPATCHES,
   RUNTIME_PARALLEL_CAP,

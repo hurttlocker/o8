@@ -33,6 +33,7 @@ import { getStoragePressureAdmissionCoordinator } from '@/lib/orchestrator/stora
 import { isDispatchHalted } from './dispatch-halt';
 
 import { computePredictedFiles, filterOverlappingPackets } from './preservation-envelope';
+import { applyPacketScopePolicy, packetScopeDispatchBlocker } from './packet-scope-policy';
 
 // Back-compat export — resolves env var, then the persisted operator default,
 // then the locked fallback (5). Existing imports keep working.
@@ -317,6 +318,10 @@ export function getDispatchBlocker(
   if (candidate.operatorStopped) {
     return 'Operator stopped';
   }
+  const scopeBlocker = packetScopeDispatchBlocker(candidate);
+  if (scopeBlocker) {
+    return scopeBlocker;
+  }
   if (candidate.queueState !== 'queued') {
     return 'Not queued';
   }
@@ -440,9 +445,8 @@ export async function runDispatchTick(
   nextState = {
     ...nextState,
     packets: nextState.packets.map((packet) => {
-      if (packet.predictedFiles) return packet;
-      const files = computePredictedFiles(packet);
-      return files.length > 0 ? { ...packet, predictedFiles: files } : packet;
+      const files = packet.predictedFiles ?? computePredictedFiles(packet);
+      return applyPacketScopePolicy(packet, files);
     }),
   };
 
