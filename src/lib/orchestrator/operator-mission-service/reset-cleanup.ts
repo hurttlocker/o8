@@ -82,7 +82,7 @@ export async function cleanupResetPacketTargets(
         const cleanupAttempt = await runRuntimeAwareWorktreeCleanup({
           runtime: target.runtime,
           worktreePath: target.worktreePath,
-          cleanup: () => cleanupLaneWorktree(target, {
+          cleanup: () => cleanupLaneWorktree({ ...target, packetId }, {
             deleteBranch: false,
             force: true,
             overrideLiveGuard: target.overrideLiveGuard,

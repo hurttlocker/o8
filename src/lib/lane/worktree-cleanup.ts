@@ -12,8 +12,8 @@ function formatError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
-function settleTerminalReservation(lane: CleanupLane, terminal: boolean, removed: boolean): boolean {
-  if (removed && terminal) {
+function settleRemovedWorktreeReservation(lane: CleanupLane, removed: boolean): boolean {
+  if (removed) {
     releaseTerminalPacketStorageReservations({ packetId: lane.packetId, laneId: lane.id });
   }
   return removed;
@@ -96,7 +96,7 @@ export async function cleanupLaneWorktree(
         deleteBranch: opts.deleteBranch ?? true,
         overrideLiveGuard: opts.overrideLiveGuard,
       });
-      return settleTerminalReservation(lane, terminal, removed);
+      return settleRemovedWorktreeReservation(lane, removed);
     }
   } catch (error) {
     console.warn(`[lane-worktree] Manager cleanup failed for ${lane.id}: ${formatError(error)}`);
@@ -111,7 +111,7 @@ export async function cleanupLaneWorktree(
     skipPruneGate: true,
     overrideLiveGuard: opts.overrideLiveGuard,
   });
-  return settleTerminalReservation(lane, terminal, removed);
+  return settleRemovedWorktreeReservation(lane, removed);
 }
 
 export async function pruneRepoWorktrees(repoPath: string): Promise<string[]> {

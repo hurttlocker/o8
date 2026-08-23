@@ -23,14 +23,18 @@ vi.mock('@/lib/lane/durable-review-approval', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/lane/durable-review-approval')>();
   return {
     ...actual,
-    supersedeDurableApprovedReviews: vi.fn(async () => {
-      throw new Error('stop after prior generation retirement');
+    supersedeDurableApprovedReviews: vi.fn(async (...args: Parameters<typeof actual.supersedeDurableApprovedReviews>) => {
+      if (args[1].includes('rerun_with_feedback')) {
+        throw new Error('stop after prior generation retirement');
+      }
+      return actual.supersedeDurableApprovedReviews(...args);
     }),
   };
 });
 
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-storage-rerun-release-'));
 const repoPath = mkdtempSync(join(tmpdir(), 'o8-storage-rerun-repo-'));
+const worktreeRoot = mkdtempSync(join(tmpdir(), 'o8-storage-cleanup-worktrees-'));
 execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repoPath });
 execFileSync('git', ['-c', 'user.email=test@o8.local', '-c', 'user.name=o8-test',
   'commit', '--allow-empty', '-q', '-m', 'base'], { cwd: repoPath });
@@ -40,6 +44,7 @@ process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.O8_DATA_DIR = dataDir;
 
 const rerunRoute = await import('@/app/api/orchestrator/rerun-with-feedback/route');
+const resetRoute = await import('@/app/api/orchestrator/reset-packet/route');
 const { closeDb, getSqlite } = await import('@/lib/db');
 const { createLane, getLane, setLaneStatus } = await import('@/lib/lane/registry');
 const { createMission } = await import('@/lib/orchestrator/operator-mission-service');
@@ -50,51 +55,94 @@ afterAll(() => {
   closeDb();
   rmSync(dataDir, { recursive: true, force: true });
   rmSync(repoPath, { recursive: true, force: true });
+  rmSync(worktreeRoot, { recursive: true, force: true });
 });
 
-describe('storage reservation release through rerun retirement', () => {
-  it('releases a lane-owned reservation through the persisted rerun route after packetId is cleared', async () => {
-    const mission = await createMission({
-      issues: [{ number: 1, title: 'inline: rerun release', body: 'rerun release', url: '' }],
-      repoPath,
-      runtime: 'codex',
-      constraints: '',
-    });
-    const packetId = mission.packets[0]!.id;
-    const lane = createLane({
-      repoPath,
-      branch: 'inline/rerun-release',
-      runtime: 'codex',
-      packetId,
-    });
-    setLaneStatus(lane.id, 'running', 'system', 'test_running');
-    await withLockedState((state) => {
-      const packet = state.packets.find((candidate) => candidate.id === packetId)!;
-      packet.status = 'running';
-      packet.queueState = 'queued';
-      packet.lane = {
-        tileId: 'tile-rerun-release', tabId: 'tab-rerun-release', repoPath,
-        worktreePath: null, runtime: 'codex', laneId: lane.id, sessionKey: null,
-        lastHeartbeatAt: null, lastEventAt: null, lastEventLabel: null,
-      };
-    });
-    const now = Date.now();
-    const observation: StorageVolumeObservation = {
-      status: 'observed', targetPath: repoPath, probePath: repoPath,
-      volumeId: 'device:rerun-release', availableBytes: 10_000,
-      freeBytes: 10_000, totalBytes: 20_000, observedAt: now, error: null,
+function createWorktree(label: string): { branch: string; worktreePath: string } {
+  const branch = `inline/${label}`;
+  const worktreePath = join(worktreeRoot, label);
+  execFileSync('git', ['worktree', 'add', '-q', '-b', branch, worktreePath, 'main'], { cwd: repoPath });
+  return { branch, worktreePath };
+}
+
+async function createRunningPacket(label: string, withWorktree = true) {
+  const mission = await createMission({
+    issues: [{ number: Date.now(), title: `inline: ${label}`, body: label, url: '' }],
+    repoPath,
+    runtime: 'codex',
+    constraints: '',
+  });
+  const packetId = mission.packets[0]!.id;
+  const branch = `inline/${label}`;
+  const worktreePath = withWorktree ? createWorktree(label).worktreePath : null;
+  const lane = createLane({ repoPath, branch, worktreePath: worktreePath ?? undefined, runtime: 'codex', packetId });
+  setLaneStatus(lane.id, 'running', 'system', 'test_running');
+  await withLockedState((state) => {
+    const packet = state.packets.find((candidate) => candidate.id === packetId)!;
+    packet.status = 'running';
+    packet.queueState = 'queued';
+    packet.branchTarget = branch;
+    packet.lane = {
+      tileId: `tile-${label}`, tabId: `tab-${label}`, repoPath,
+      worktreePath, runtime: 'codex', laneId: lane.id, sessionKey: null,
+      lastHeartbeatAt: null, lastEventAt: null, lastEventLabel: null,
     };
-    const store = new StorageAdmissionStore(getSqlite(), {
-      now: () => now,
-      observeVolume: async () => observation,
+  });
+  return { packetId, lane, worktreePath };
+}
+
+async function reserveForOwner(ownerId: string) {
+  const now = Date.now();
+  const observation: StorageVolumeObservation = {
+    status: 'observed', targetPath: repoPath, probePath: repoPath,
+    volumeId: 'device:reset-rerun-release', availableBytes: 10_000,
+    freeBytes: 10_000, totalBytes: 20_000, observedAt: now, error: null,
+  };
+  const store = new StorageAdmissionStore(getSqlite(), {
+    now: () => now,
+    observeVolume: async () => observation,
+  });
+  const reservationId = `packet-storage:${ownerId}:1`;
+  await store.reserve({
+    mutationId: `reserve-${ownerId}`, reservationId, targetPath: repoPath,
+    exactBytes: 2_000, ownerId, ownerGeneration: 1,
+    leaseExpiresAt: now + 60_000,
+    policy: { reserveRatio: 0.1, absoluteFloorBytes: 1_000 },
+  });
+  return { reservationId, store };
+}
+
+describe('storage reservation release through rerun retirement', () => {
+  it('releases a lane-owned reservation after rerun clears packetId with no worktree', async () => {
+    const { packetId, lane } = await createRunningPacket('rerun-cleared-packet', false);
+    const { reservationId, store } = await reserveForOwner(lane.id);
+
+    const response = await rerunRoute.POST(new NextRequest(
+      'http://localhost:3001/api/orchestrator/rerun-with-feedback',
+      {
+        method: 'POST',
+        headers: {
+          host: 'localhost:3001', authorization: `Bearer ${operatorToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          packetId, feedback: 'retry after clearing the packet binding',
+          idempotencyKey: 'storage-rerun-cleared-packet',
+        }),
+      },
+    ));
+
+    expect(response.status).toBe(409);
+    expect(getLane(lane.id)).toMatchObject({
+      status: 'archived', packetId: '', outcome: 'discarded',
+      outcomeNote: 'Superseded by rerun',
     });
-    const reservationId = `packet-storage:${lane.id}:1`;
-    await store.reserve({
-      mutationId: 'reserve-rerun-release', reservationId, targetPath: repoPath,
-      exactBytes: 2_000, ownerId: lane.id, ownerGeneration: 1,
-      leaseExpiresAt: now + 60_000,
-      policy: { reserveRatio: 0.1, absoluteFloorBytes: 1_000 },
-    });
+    expect(store.getReservation(reservationId)?.state).toBe('released');
+  });
+
+  it('releases a packet-owned reservation through rerun worktree cleanup without terminal true', async () => {
+    const { packetId, lane, worktreePath } = await createRunningPacket('rerun-release');
+    const { reservationId, store } = await reserveForOwner(packetId);
 
     const response = await rerunRoute.POST(new NextRequest(
       'http://localhost:3001/api/orchestrator/rerun-with-feedback',
@@ -120,6 +168,39 @@ describe('storage reservation release through rerun retirement', () => {
       status: 'archived', packetId: '', outcome: 'discarded',
       outcomeNote: 'Superseded by rerun',
     });
+    expect(() => execFileSync('test', ['-e', worktreePath!])).toThrow();
+    expect(store.getReservation(reservationId)?.state).toBe('released');
+  });
+
+  it('releases a packet-owned reservation through reset worktree cleanup without terminal true', async () => {
+    const { packetId, lane, worktreePath } = await createRunningPacket('reset-release');
+    const { reservationId, store } = await reserveForOwner(packetId);
+
+    const response = await resetRoute.POST(new NextRequest(
+      'http://localhost:3001/api/orchestrator/reset-packet',
+      {
+        method: 'POST',
+        headers: {
+          host: 'localhost:3001', authorization: `Bearer ${operatorToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          packetId, clearWorktree: true,
+          idempotencyKey: 'storage-reset-release',
+        }),
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      result: { reset: true, worktreePruned: true },
+    });
+    expect(getLane(lane.id)).toMatchObject({
+      status: 'archived', packetId: '', outcome: 'discarded',
+      outcomeNote: 'Superseded by reset',
+    });
+    expect(() => execFileSync('test', ['-e', worktreePath!])).toThrow();
     expect(store.getReservation(reservationId)?.state).toBe('released');
   });
 });
