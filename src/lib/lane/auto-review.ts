@@ -24,6 +24,7 @@ import { resolveLaneReviewScreenshotReference, type LaneReviewScreenshotReferenc
 import { buildBlindSecondPassPrompt, findPendingSecondPassApproval, parseSecondPassVerdict } from './blind-second-pass-review';
 import { appendCodexAutoReviewVerdictInstructions, recordCodexAutoReviewVerdict } from './codex-auto-review-verdict';
 import { runReviewerTurnWithQuotaFallback } from './review-quota-fallback';
+import { enqueueLaneReview, surfaceReviewQueueBlocker } from './review-queue';
 import type { Lane } from './types';
 
 const MAX_REVIEW_ATTEMPTS = 5;
@@ -63,29 +64,6 @@ function getDb() {
   return getSqlite();
 }
 
-function enqueueReview(lane: Lane): boolean {
-  const db = getDb();
-
-  // Don't enqueue if already pending/in_progress for this lane
-  const existing = db.prepare(
-    `SELECT id FROM review_queue WHERE lane_id = ? AND status IN ('pending', 'in_progress')`,
-  ).get(lane.id) as { id: string } | undefined;
-
-  if (existing) {
-    console.log(`[auto-review] Review already queued for lane ${lane.id}`);
-    return false;
-  }
-
-  const id = `review-${randomUUID().slice(0, 8)}`;
-  db.prepare(
-    `INSERT INTO review_queue (id, lane_id, repo_path, status, attempts, created_at, updated_at)
-     VALUES (?, ?, ?, 'pending', 0, datetime('now'), datetime('now'))`,
-  ).run(id, lane.id, lane.repoPath);
-
-  console.log(`[auto-review] Enqueued review ${id} for lane ${lane.id} (${lane.label})`);
-  return true;
-}
-
 interface QueuedReview {
   id: string;
   lane_id: string;
@@ -115,12 +93,13 @@ function markReviewCompleted(reviewId: string): void {
   ).run(reviewId);
 }
 
-function markReviewFailed(reviewId: string, error: string, attempts: number): void {
+function markReviewFailed(reviewId: string, laneId: string, error: string, attempts: number): void {
   const db = getDb();
   if (attempts >= MAX_REVIEW_ATTEMPTS) {
     db.prepare(
       `UPDATE review_queue SET status = 'failed', last_error = ?, attempts = ?, updated_at = datetime('now') WHERE id = ?`,
     ).run(error, attempts, reviewId);
+    surfaceReviewQueueBlocker({ laneId, reviewId, reason: error, attempts });
   } else {
     // Return to pending for retry
     db.prepare(
@@ -136,7 +115,7 @@ function markReviewFailed(reviewId: string, error: string, attempts: number): vo
  * Enqueues a durable review job — does not block the caller.
  */
 export function triggerAutoReview(lane: Lane): void {
-  enqueueReview(lane);
+  enqueueLaneReview(lane);
 }
 
 /**
@@ -191,7 +170,7 @@ async function drainReviewQueue(): Promise<void> {
 
     // Don't review concurrently for the same lane
     if (reviewingLanes.has(review.lane_id)) {
-      markReviewFailed(review.id, 'Lane already being reviewed', review.attempts);
+      markReviewFailed(review.id, review.lane_id, 'Lane already being reviewed', review.attempts);
       return;
     }
 
@@ -205,7 +184,7 @@ async function drainReviewQueue(): Promise<void> {
         return;
       }
       const errorMsg = err instanceof Error ? err.message : String(err);
-      markReviewFailed(review.id, errorMsg, review.attempts + 1);
+      markReviewFailed(review.id, review.lane_id, errorMsg, review.attempts + 1);
       console.error(`[auto-review] Review ${review.id} failed (attempt ${review.attempts + 1}): ${errorMsg}`);
     } finally {
       reviewingLanes.delete(review.lane_id);

@@ -324,6 +324,8 @@ export type LaneEventVerb =
   // no approval row is written and any existing verdict stands.
   // Payload: { surface, reviewer, packetId, reason, attempts, rawText, note }
   | 'review_unavailable'
+  | 'second_pass_rearmed'
+  | 'review_queue_blocked'
   | 'review_turn_started'
   | 'review_turn_finished'
   | 'worker_quota_exhausted'

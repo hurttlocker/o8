@@ -183,7 +183,10 @@ function recordPacketReviewAudit(
   });
   recordApprovalAudit(approval.id, 'orchestrator_review', 'system', summary);
   const resolved = resolveApproval(approval.id, approved ? 'approve' : 'reject', 'system', summary);
-  return resolved?.id ?? approval.id;
+  return {
+    approvalId: resolved?.id ?? approval.id,
+    requiresSecondPass,
+  };
 }
 
 export async function submitPacketReview(input: SubmitReviewInput) {
@@ -268,7 +271,7 @@ export async function submitPacketReview(input: SubmitReviewInput) {
     outcome: 'completed' as const,
   };
   const summary = buildReviewSummary(input.findings, input.approved);
-  const auditApprovalId = recordPacketReviewAudit(
+  const auditReview = recordPacketReviewAudit(
     packet,
     input.findings,
     input.approved,
@@ -281,7 +284,7 @@ export async function submitPacketReview(input: SubmitReviewInput) {
   // Only update mission state when the packet actually lives there — orphan
   // path leaves state unchanged (the audit log is the record of truth for
   // that case until the merge happens via the lane-fallback merge path).
-  let resolvedAuditApprovalId: string | null = auditApprovalId ?? null;
+  let resolvedAuditApprovalId: string | null = auditReview.approvalId;
   if (missionPacket) {
     // #1488 — mutate under the lock against a FRESH read, never a whole-state
     // write from the snapshot taken at function entry: the reviewed-HEAD
@@ -297,7 +300,7 @@ export async function submitPacketReview(input: SubmitReviewInput) {
         input.approved,
         summary,
         reviewedHeadSha,
-        auditApprovalId,
+        auditReview.approvalId,
         input.directivesApplied,
         input.directivesViolated,
       );
@@ -327,6 +330,17 @@ export async function submitPacketReview(input: SubmitReviewInput) {
     }
   }
 
+  let secondPassSchedulingWarning: string | undefined;
+  if (auditReview.requiresSecondPass && verdictLane && activeReviewTurn?.surface !== 'auto-review') {
+    const { rearmPendingSecondPassApproval } = await import('@/lib/lane/blind-second-pass-review');
+    const refreshedLane = findLatestLaneByPacket(input.packetId) ?? verdictLane;
+    const rearmed = await rearmPendingSecondPassApproval(refreshedLane, {
+      approvalId: auditReview.approvalId,
+      reviewedHeadSha,
+    });
+    secondPassSchedulingWarning = rearmed.reason;
+  }
+
   log(`Recorded review for packet ${packet.id}${orphanLane ? ` (orphan via lane ${orphanLane.id})` : ''}.`, {
     approved: input.approved,
     findings: input.findings.length,
@@ -338,7 +352,9 @@ export async function submitPacketReview(input: SubmitReviewInput) {
     recorded: true,
     findingsCount: input.findings.length,
     reviewedHeadSha: reviewedHeadSha ?? null,
-    ...(reviewedHeadAutoCaptured ? {
+    ...(secondPassSchedulingWarning ? {
+      warning: secondPassSchedulingWarning,
+    } : reviewedHeadAutoCaptured ? {
       warning: 'reviewedHeadSha was omitted; pinned to the worktree HEAD at review time — pass the packet-diff headSha to pin exactly what you read.',
     } : {}),
     ...(reviewedHeadSha ? {} : {
