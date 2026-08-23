@@ -72,7 +72,7 @@ const toolEvent: TranscriptEvent = {
 let root: Root;
 let host: HTMLDivElement;
 
-function packetFixture(): OrchestratorPacket {
+function packetFixture(runtime: OrchestratorPacket['runtime'] = 'opencode'): OrchestratorPacket {
   return {
     id: 'packet-worker-pane',
     referenceLabel: 'inline-1',
@@ -80,7 +80,7 @@ function packetFixture(): OrchestratorPacket {
     summary: 'Verify the worker transcript pane.',
     workspaceTargetPath: '/tmp/worker-pane',
     branchTarget: 'inline/worker-pane',
-    runtime: 'opencode',
+    runtime,
     dependencyLabels: [],
     dependencyPacketIds: [],
     queueState: 'queued',
@@ -91,7 +91,7 @@ function packetFixture(): OrchestratorPacket {
       tabId: 'tab-worker-pane',
       repoPath: '/tmp/worker-pane',
       worktreePath: '/tmp/worker-pane',
-      runtime: 'opencode',
+      runtime,
       sessionKey: 'opencode-owned:worker-pane',
     },
   };
@@ -105,12 +105,12 @@ async function flushPaneEffects(): Promise<void> {
   });
 }
 
-async function renderPacketPane(): Promise<void> {
+async function renderPacketPane(runtime: OrchestratorPacket['runtime'] = 'opencode'): Promise<void> {
   await act(async () => {
     root.render(createElement(AgentTilePane, {
       sessionKey: 'opencode-owned:worker-pane',
-      agent: { name: 'Worker', status: 'running', runtime: 'opencode' },
-      packet: packetFixture(),
+      agent: { name: 'Worker', status: 'running', runtime },
+      packet: packetFixture(runtime),
       focused: true,
       onClose: () => {},
       onFocus: () => {},
@@ -214,5 +214,15 @@ describe('AgentTilePane structured packet transcript delivery', () => {
 
     expect(fetchMock).toHaveBeenCalled();
     expect(transcriptRenderMock.entries.some((entry) => entry.text.trim() === 'tool-calls')).toBe(false);
+  });
+
+  it('uses the structured route for a dispatchable runtime outside the original allowlist', async () => {
+    const fetchMock = stubPacketTranscript(() => [toolEvent]);
+    await renderPacketPane('grok');
+
+    expect(fetchMock).toHaveBeenCalled();
+    expect(transcriptRenderMock.entries.flatMap((entry) => entry.toolCalls ?? [])[0]).toMatchObject({
+      name: 'shell',
+    });
   });
 });
