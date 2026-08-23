@@ -463,9 +463,6 @@ export function updateLane(
 
     nextValues.updatedAt = now;
     statusChanged = nextValues.status !== undefined;
-    // Settle storage BEFORE the association-losing write, inside this same
-    // transaction. A throw here rolls the whole lane write back rather than
-    // committing a reservation nothing can reach again.
     settleLaneStorageOnAssociationLoss(lane, changes);
     if (
       statusChanged
@@ -926,9 +923,6 @@ export function deleteLane(laneId: string): Lane | null {
   }
 
   getSqlite().transaction(() => {
-    // Deleting the lane destroys the association AND the lane events the owner
-    // generation is read from, so settlement runs first and inside this
-    // transaction: it either commits with the delete or rolls it back.
     settleLaneStorageOnAssociationLoss(lane, { packetId: '' });
     getSqlite()
       .prepare('DELETE FROM worker_events WHERE worker_run_id IN (SELECT id FROM worker_runs WHERE lane_id = ?)')
