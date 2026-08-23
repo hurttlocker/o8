@@ -207,6 +207,7 @@ async function retireRerunGeneration(guard: PacketLifecycleGuard): Promise<boole
       branch: target.branch,
       runtime: target.runtime,
       worktreePath: target.worktreePath,
+      storageAdmissionOwnerGeneration: guard.previousPacket.storageAdmission?.ownerGeneration,
       overrideLiveGuard: target.sessionKey?.trim()
         && confirmedKills.has(`${target.id}\0${target.sessionKey}`)
         ? true

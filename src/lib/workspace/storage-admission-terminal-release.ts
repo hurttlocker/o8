@@ -31,6 +31,10 @@ interface ReservationRow {
   terminal_at: number | null;
 }
 
+interface LaneEventPayloadRow {
+  payload_json: string;
+}
+
 export interface TerminalOwnerStorageReleaseResult {
   released: number;
   releasedBytes: number;
@@ -66,15 +70,35 @@ function mapReservation(row: ReservationRow): StorageReservationRecord {
   };
 }
 
+function laneStorageOwnerGeneration(sqlite: Database.Database, laneId: string): number | undefined {
+  const events = sqlite.prepare(`
+    SELECT payload_json FROM lane_events
+    WHERE lane_id = ? AND verb = 'update'
+    ORDER BY timestamp DESC
+  `).all(laneId) as LaneEventPayloadRow[];
+  for (const event of events) {
+    const payload = JSON.parse(event.payload_json) as Record<string, unknown>;
+    const generation = payload.storageAdmissionOwnerGeneration;
+    if (Number.isSafeInteger(generation) && Number(generation) > 0) return Number(generation);
+  }
+  return undefined;
+}
+
 export function releaseReservedStorageForTerminalOwner(input: {
   sqlite: Database.Database;
   ownerIds: string[];
+  ownerGeneration?: number;
   terminalLaneId: string;
   mutationIdPrefix: string;
   releasedAt?: number;
 }): TerminalOwnerStorageReleaseResult {
   const ownerIds = [...new Set(input.ownerIds.map((ownerId) => ownerId.trim()).filter(Boolean))];
   if (ownerIds.length === 0) throw new Error('ownerIds must include at least one owner.');
+  const ownerGeneration = input.ownerGeneration;
+  if (ownerGeneration !== undefined
+    && (!Number.isSafeInteger(ownerGeneration) || ownerGeneration <= 0)) {
+    throw new Error('ownerGeneration must be a positive safe integer.');
+  }
   const terminalLaneId = requiredText(input.terminalLaneId, 'terminalLaneId');
   const mutationIdPrefix = requiredText(input.mutationIdPrefix, 'mutationIdPrefix');
   const releasedAt = input.releasedAt ?? Date.now();
@@ -84,16 +108,25 @@ export function releaseReservedStorageForTerminalOwner(input: {
   const execute = input.sqlite.transaction(() => {
     const rows: ReservationRow[] = [];
     for (const ownerId of ownerIds) {
-      const liveLanes = input.sqlite.prepare(`
-        SELECT COUNT(*) FROM lanes
+      const liveLaneIds = input.sqlite.prepare(`
+        SELECT id FROM lanes
         WHERE packet_id = ? AND id != ? AND status NOT IN ('failed', 'completed', 'archived')
-      `).pluck().get(ownerId, terminalLaneId) as number;
-      if (liveLanes > 0) continue;
-      rows.push(...input.sqlite.prepare(`
+      `).pluck().all(ownerId, terminalLaneId) as string[];
+      const liveLaneBlocksRelease = liveLaneIds.some((laneId) => {
+        if (ownerGeneration === undefined) return true;
+        const liveGeneration = laneStorageOwnerGeneration(input.sqlite, laneId);
+        return liveGeneration === undefined || liveGeneration <= ownerGeneration;
+      });
+      if (liveLaneBlocksRelease) continue;
+      const ownerRows = input.sqlite.prepare(`
         SELECT * FROM storage_admission_reservations
         WHERE owner_id = ? AND state = 'reserved'
+          AND (? IS NULL OR owner_generation <= ?)
         ORDER BY owner_generation ASC, reservation_id ASC
-      `).all(ownerId) as ReservationRow[]);
+      `).all(ownerId, ownerGeneration ?? null, ownerGeneration ?? null) as ReservationRow[];
+      if (ownerGeneration === undefined
+        && new Set(ownerRows.map((row) => row.owner_generation)).size > 1) continue;
+      rows.push(...ownerRows);
     }
     let releasedBytes = 0;
     for (const row of rows) {

@@ -6,7 +6,8 @@ import type { Lane } from './types';
 import { releaseTerminalPacketStorageReservations } from '@/lib/orchestrator/terminal-storage-release';
 
 type CleanupLane = Pick<Lane, 'id' | 'repoPath' | 'worktreePath'>
-  & Partial<Pick<Lane, 'baseBranch' | 'packetId'>>;
+  & Partial<Pick<Lane, 'baseBranch' | 'packetId'>>
+  & { storageAdmissionOwnerGeneration?: number };
 
 function formatError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
@@ -14,7 +15,11 @@ function formatError(error: unknown) {
 
 function settleRemovedWorktreeReservation(lane: CleanupLane, removed: boolean): boolean {
   if (removed) {
-    releaseTerminalPacketStorageReservations({ packetId: lane.packetId, laneId: lane.id });
+    releaseTerminalPacketStorageReservations({
+      packetId: lane.packetId,
+      laneId: lane.id,
+      ownerGeneration: lane.storageAdmissionOwnerGeneration,
+    });
   }
   return removed;
 }

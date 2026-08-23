@@ -192,6 +192,10 @@ export async function launchPacketWithStorageAdmission(input: {
       if (!launchingLane || launchingLane.status !== 'launching') {
         throw new Error('Unable to reserve the lane for launch before provisioning.');
       }
+      recordLaneEvent(laneResult.laneId, 'update', 'orchestrator', {
+        storageAdmissionOwnerGeneration: launchGeneration,
+        storageAdmissionReservationId: admissionLease.receipt.reservationId,
+      });
       launchResult = await dispatchLaneCommand({
         verb: 'launch_session',
         laneId: laneResult.laneId,

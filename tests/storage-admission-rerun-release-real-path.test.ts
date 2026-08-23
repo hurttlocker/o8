@@ -46,7 +46,7 @@ process.env.O8_DATA_DIR = dataDir;
 const rerunRoute = await import('@/app/api/orchestrator/rerun-with-feedback/route');
 const resetRoute = await import('@/app/api/orchestrator/reset-packet/route');
 const { closeDb, getSqlite } = await import('@/lib/db');
-const { createLane, getLane, setLaneStatus } = await import('@/lib/lane/registry');
+const { appendEvent, createLane, getLane, setLaneStatus } = await import('@/lib/lane/registry');
 const { createMission } = await import('@/lib/orchestrator/operator-mission-service');
 const { withLockedState } = await import('@/lib/orchestrator/control-plane');
 const { StorageAdmissionStore } = await import('@/lib/workspace/storage-admission');
@@ -76,6 +76,10 @@ async function createRunningPacket(label: string, withWorktree = true) {
   const branch = `inline/${label}`;
   const worktreePath = withWorktree ? createWorktree(label).worktreePath : null;
   const lane = createLane({ repoPath, branch, worktreePath: worktreePath ?? undefined, runtime: 'codex', packetId });
+  appendEvent(lane.id, 'update', 'orchestrator', {
+    storageAdmissionOwnerGeneration: 1,
+    storageAdmissionReservationId: `packet-storage:${packetId}:1`,
+  });
   setLaneStatus(lane.id, 'running', 'system', 'test_running');
   await withLockedState((state) => {
     const packet = state.packets.find((candidate) => candidate.id === packetId)!;
@@ -113,6 +117,55 @@ async function reserveForOwner(ownerId: string) {
 }
 
 describe('storage reservation release through rerun retirement', () => {
+  it('releases only the retired generation while a newer packet lane remains live', async () => {
+    const packetId = 'generation-scoped-release';
+    const oldLane = createLane({
+      repoPath, branch: 'inline/generation-old', runtime: 'codex', packetId,
+    });
+    const newerLane = createLane({
+      repoPath, branch: 'inline/generation-new', runtime: 'codex', packetId,
+    });
+    appendEvent(oldLane.id, 'update', 'orchestrator', {
+      storageAdmissionOwnerGeneration: 1,
+      storageAdmissionReservationId: 'packet-storage:generation-scoped-release:1',
+    });
+    appendEvent(newerLane.id, 'update', 'orchestrator', {
+      storageAdmissionOwnerGeneration: 2,
+      storageAdmissionReservationId: 'packet-storage:generation-scoped-release:2',
+    });
+    setLaneStatus(oldLane.id, 'running', 'system', 'old_generation_running');
+    setLaneStatus(newerLane.id, 'running', 'system', 'new_generation_running');
+    const now = Date.now();
+    const store = new StorageAdmissionStore(getSqlite(), {
+      now: () => now,
+      observeVolume: async () => ({
+        status: 'observed', targetPath: repoPath, probePath: repoPath,
+        volumeId: 'device:generation-release', availableBytes: 10_000,
+        freeBytes: 10_000, totalBytes: 20_000, observedAt: now, error: null,
+      }),
+    });
+    await store.reserve({
+      mutationId: 'reserve-generation-1',
+      reservationId: 'packet-storage:generation-scoped-release:1',
+      targetPath: repoPath, exactBytes: 2_000, ownerId: packetId,
+      ownerGeneration: 1, leaseExpiresAt: now + 60_000,
+      policy: { reserveRatio: 0.1, absoluteFloorBytes: 1_000 },
+    });
+    await store.reserve({
+      mutationId: 'reserve-generation-2',
+      reservationId: 'packet-storage:generation-scoped-release:2',
+      targetPath: repoPath, exactBytes: 2_000, ownerId: packetId,
+      ownerGeneration: 2, leaseExpiresAt: now + 60_000,
+      policy: { reserveRatio: 0.1, absoluteFloorBytes: 1_000 },
+    });
+
+    setLaneStatus(oldLane.id, 'completed', 'system', 'old_generation_retired');
+
+    expect(store.getReservation('packet-storage:generation-scoped-release:1')?.state).toBe('released');
+    expect(store.getReservation('packet-storage:generation-scoped-release:2')?.state).toBe('reserved');
+    expect(getLane(newerLane.id)?.status).toBe('running');
+  });
+
   it('releases a lane-owned reservation after rerun clears packetId with no worktree', async () => {
     const { packetId, lane } = await createRunningPacket('rerun-cleared-packet', false);
     const { reservationId, store } = await reserveForOwner(lane.id);

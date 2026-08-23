@@ -14,6 +14,7 @@ export interface ResetCleanupTarget {
   branch: string;
   runtime: LaneRuntime;
   worktreePath: string | null;
+  storageAdmissionOwnerGeneration?: number;
   overrideLiveGuard?: true;
 }
 
