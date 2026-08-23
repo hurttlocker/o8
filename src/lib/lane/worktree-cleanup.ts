@@ -3,11 +3,20 @@ import { preserveAndRecordLaneRecovery } from './merge-recovery';
 import { removeCortexWorktreePath } from './worktree-clone-removal';
 import { checkPruneGate } from './prune-gate';
 import type { Lane } from './types';
+import { releaseTerminalPacketStorageReservations } from '@/lib/orchestrator/terminal-storage-release';
 
-type CleanupLane = Pick<Lane, 'id' | 'repoPath' | 'worktreePath'> & Partial<Pick<Lane, 'baseBranch'>>;
+type CleanupLane = Pick<Lane, 'id' | 'repoPath' | 'worktreePath'>
+  & Partial<Pick<Lane, 'baseBranch' | 'packetId'>>;
 
 function formatError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function settleTerminalReservation(lane: CleanupLane, terminal: boolean, removed: boolean): boolean {
+  if (removed && terminal && lane.packetId) {
+    releaseTerminalPacketStorageReservations({ packetId: lane.packetId, laneId: lane.id });
+  }
+  return removed;
 }
 
 /**
@@ -82,17 +91,18 @@ export async function cleanupLaneWorktree(
     const worktree = (await manager.list()).find((candidate) => candidate.path === worktreePath);
     if (worktree) {
       // manager.cleanup already calls preserveUncommittedWork internally
-      return manager.cleanup(worktree.id, {
+      const removed = await manager.cleanup(worktree.id, {
         force: true,
         deleteBranch: opts.deleteBranch ?? true,
         overrideLiveGuard: opts.overrideLiveGuard,
       });
+      return settleTerminalReservation(lane, terminal, removed);
     }
   } catch (error) {
     console.warn(`[lane-worktree] Manager cleanup failed for ${lane.id}: ${formatError(error)}`);
   }
 
-  return removeCortexWorktreePath({
+  const removed = await removeCortexWorktreePath({
     repoRoot: lane.repoPath,
     worktreePath,
     laneId: lane.id,
@@ -101,6 +111,7 @@ export async function cleanupLaneWorktree(
     skipPruneGate: true,
     overrideLiveGuard: opts.overrideLiveGuard,
   });
+  return settleTerminalReservation(lane, terminal, removed);
 }
 
 export async function pruneRepoWorktrees(repoPath: string): Promise<string[]> {

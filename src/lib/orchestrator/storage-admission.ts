@@ -4,13 +4,14 @@ import path from 'node:path';
 import type Database from 'better-sqlite3';
 
 import { getSqlite } from '@/lib/db';
-import { findLaneByPacket } from '@/lib/lane/registry';
+import { findLaneByPacket, listLanes } from '@/lib/lane/registry';
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 import { listMissionRegistryEntries } from '@/lib/orchestrator/mission-registry';
 import type {
   OrchestratorPacket,
   OrchestratorPacketStorageAdmission,
 } from '@/lib/orchestrator/types';
+import { packetTerminalState } from '@/lib/orchestrator/packet-state';
 import {
   observeManagedWorktreeRootIdentity,
   resolveManagedWorktreeStorageTarget,
@@ -89,6 +90,11 @@ export interface AdmissionCoordinatorDependencies {
 
 interface StoredMutationRow {
   result_json: string;
+}
+
+interface ReservedOwnerRow {
+  owner_id: string;
+  exact_bytes: number;
 }
 
 export class PacketStorageAdmissionError extends Error {
@@ -176,6 +182,53 @@ function priorMutationResult(sqlite: Database.Database, mutationId: string): Sto
     'SELECT result_json FROM storage_admission_mutations WHERE mutation_id = ?',
   ).get(mutationId) as StoredMutationRow | undefined;
   return row ? { ...(JSON.parse(row.result_json) as Omit<StorageAdmissionResult, 'idempotent'>), idempotent: true } : null;
+}
+
+function terminalReservationHoldSummary(
+  sqlite: Database.Database,
+  volumeId: string,
+): { bytes: number; packets: number } {
+  const terminalOwners = new Set<string>();
+  for (const entry of listMissionRegistryEntries({ includeArchived: true })) {
+    for (const packet of entry.mission.packets) {
+      const terminal = packetTerminalState(packet);
+      if (terminal === 'released' || terminal === 'archived') {
+        terminalOwners.add(packet.id);
+      }
+    }
+  }
+  for (const lane of listLanes()) {
+    if (lane.packetId && (lane.status === 'completed' || lane.status === 'archived')) {
+      terminalOwners.add(lane.packetId);
+    }
+  }
+  const rows = sqlite.prepare(`
+    SELECT owner_id, exact_bytes FROM storage_admission_reservations
+    WHERE volume_id = ? AND state = 'reserved'
+  `).all(volumeId) as ReservedOwnerRow[];
+  const held = rows.filter((row) => terminalOwners.has(row.owner_id));
+  return {
+    bytes: held.reduce((sum, row) => sum + row.exact_bytes, 0),
+    packets: new Set(held.map((row) => row.owner_id)).size,
+  };
+}
+
+function storageAdmissionHeldMessage(
+  reason: string,
+  volumeId: string | null,
+  sqlite: Database.Database,
+): string {
+  const base = `Dispatch held by storage admission (${reason}).`;
+  if (reason !== 'reserve_breached' || !volumeId) return base;
+  let terminal: ReturnType<typeof terminalReservationHoldSummary>;
+  try {
+    terminal = terminalReservationHoldSummary(sqlite, volumeId);
+  } catch {
+    return base;
+  }
+  if (terminal.packets === 0) return base;
+  const gib = (terminal.bytes / GIB).toFixed(2);
+  return `${base} ${gib} GB held by ${terminal.packets} terminal packet${terminal.packets === 1 ? '' : 's'}.`;
 }
 
 function reserveReplayIdentityFailure(
@@ -277,6 +330,7 @@ export function createPacketStorageAdmissionCoordinator(
       if (!packet.workspaceTargetPath) {
         throw new Error('Packet has no workspace target for storage admission.');
       }
+      await reconcileExpiredPacketStorageReservations({ store, now });
       const launchGeneration = await durableStorageLaunchGeneration(packet, store);
       if (!Number.isSafeInteger(pressureRetryOrdinal) || pressureRetryOrdinal < 0) {
         throw new Error('Pressure retry ordinal must be a non-negative safe integer.');
@@ -374,7 +428,11 @@ export function createPacketStorageAdmissionCoordinator(
             recordedAt: decisionClockValid ? decisionAt : replay.recordedAt,
           };
           throw new PacketStorageAdmissionError(
-            `Dispatch held by storage admission (${disposition.reason}).`,
+            storageAdmissionHeldMessage(
+              disposition.reason,
+              currentReservation?.volumeId ?? replay.observation?.volumeId ?? null,
+              sqlite,
+            ),
             receipt,
           );
         }
@@ -445,7 +503,11 @@ export function createPacketStorageAdmissionCoordinator(
       });
       if (result.decision !== 'reserved' || !result.reservation) {
         throw new PacketStorageAdmissionError(
-          `Dispatch held by storage admission (${result.reason}).`,
+          storageAdmissionHeldMessage(
+            result.reason,
+            result.observation?.volumeId ?? null,
+            sqlite,
+          ),
           receipt,
         );
       }
@@ -604,23 +666,15 @@ export async function resolveDurablePacketStorageOwner(
   };
 }
 
-/**
- * Reconcile only expired reservations whose exact logical owner was superseded
- * by a newer durable packet generation. Missing, current, duplicated, or
- * otherwise ambiguous owners remain reserved and continue to count.
- */
+/** Lease expiry is the durable authority to stop counting a reservation. */
 export async function reconcileExpiredPacketStorageReservations(
   dependencies: {
     store?: StorageAdmissionStore;
     now?: () => number;
-    resolveOwner?: (
-      reservation: StorageReservationRecord,
-    ) => PacketStorageAdmissionOwnerResolution | Promise<PacketStorageAdmissionOwnerResolution>;
   } = {},
 ): Promise<PacketStorageAdmissionReconciliationResult> {
   const now = dependencies.now ?? Date.now;
   const store = dependencies.store ?? new StorageAdmissionStore(getSqlite(), { now });
-  const resolveOwner = dependencies.resolveOwner ?? resolveDurablePacketStorageOwner;
   const expired = store.listExpiredForReconciliation(now());
   const summary: PacketStorageAdmissionReconciliationResult = {
     inspected: expired.length,
@@ -631,15 +685,6 @@ export async function reconcileExpiredPacketStorageReservations(
   };
 
   for (const reservation of expired) {
-    const owner = await resolveOwner(reservation);
-    if (owner.liveness === 'alive') {
-      summary.retainedLive += 1;
-      continue;
-    }
-    if (owner.liveness !== 'dead') {
-      summary.retainedUnknown += 1;
-      continue;
-    }
     const observedAt = now();
     const result = await store.reconcile({
       mutationId: `packet-storage-reconcile:${reservation.reservationId}:${reservation.generation}:${observedAt}`,
@@ -650,8 +695,8 @@ export async function reconcileExpiredPacketStorageReservations(
       expectedGeneration: reservation.generation,
       ownerLiveness: 'dead',
       ownerDeathReceipt: {
-        source: owner.source,
-        evidence: owner.evidence,
+        source: 'lease-expiration',
+        evidence: `The reservation lease expired at ${reservation.leaseExpiresAt}.`,
         observedAt,
         reservationId: reservation.reservationId,
         volumeId: reservation.volumeId,

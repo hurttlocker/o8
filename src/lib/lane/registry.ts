@@ -22,7 +22,7 @@ import type {
   LaneRuntime,
   LaneStatus,
 } from './types';
-import { cleanupLaneWorktree } from './worktree-cleanup';
+import { scheduleTerminalLaneCleanup } from './terminal-lane-cleanup';
 import { getDataDir } from '@/lib/data-dir-migration';
 
 export {
@@ -502,12 +502,10 @@ export function updateLane(
   const terminalCleanupLane = laneBeforeTerminalCleanup as Lane | null;
   if (
     statusChanged
-    && terminalCleanupLane?.worktreePath
+    && terminalCleanupLane
     && isWorktreeCleanupTerminalStatus(resolvedLane.status)
   ) {
-    void cleanupLaneWorktree(terminalCleanupLane, { terminal: true }).catch((error) => {
-      console.error(`[lane-worktree] Terminal cleanup failed for ${resolvedLane.id}: ${error instanceof Error ? error.message : String(error)}`);
-    });
+    scheduleTerminalLaneCleanup(terminalCleanupLane);
   }
 
   return resolvedLane;
@@ -931,11 +929,7 @@ export function deleteLane(laneId: string): Lane | null {
     getSqlite().prepare('DELETE FROM lanes WHERE id = ?').run(laneId);
   })();
 
-  if (lane.worktreePath) {
-    void cleanupLaneWorktree(lane, { terminal: true }).catch((error) => {
-      console.error(`[lane-worktree] Cleanup failed while pruning ${lane.id}: ${error instanceof Error ? error.message : String(error)}`);
-    });
-  }
+  scheduleTerminalLaneCleanup(lane);
 
   return lane;
 }
