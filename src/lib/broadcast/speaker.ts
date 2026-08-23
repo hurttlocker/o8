@@ -9,15 +9,29 @@ import { broadcastEventSpecifics } from './commentary-prompt';
 import { buildBroadcastSnapshot } from './snapshot';
 import { broadcastGeneratedLinesSince } from './director';
 import { listBroadcastEvents } from './events';
+import {
+  BROADCAST_SPOKEN_MAX_LENGTH,
+  clipPhrase,
+  firstSentence,
+  isMomentEvent,
+  momentFactKey,
+  narratedFactKeysSince,
+  narrationWindowStart,
+  NARRATION_REPETITION_WINDOW_MS,
+  speakableText,
+} from './narration';
 import { speakBroadcastWithNativeTts } from './native-tts';
-import { appendBroadcastEvent, BROADCAST_TEXT_MAX_LENGTH } from './post';
+import { appendBroadcastEvent } from './post';
 import type { BroadcastEvent } from './types';
 
 const SPEAKER_TICK_MS = 1_000;
 const MAX_QUEUE_DEPTH = 3;
 const COMMENTARY_PAGE_LIMIT = 100;
 const MOMENT_COALESCE_MS = 1_000;
-const REPETITION_WINDOW_MS = 30_000;
+const REPETITION_WINDOW_MS = NARRATION_REPETITION_WINDOW_MS;
+const SUBJECT_MAX_LENGTH = 64;
+const DETAIL_MAX_LENGTH = 88;
+const MAX_DEFERRED_MOMENTS = 6;
 
 export interface BroadcastVoiceSettings {
   broadcastVoice: 'off' | 'on';
@@ -105,17 +119,11 @@ function payloadText(event: BroadcastEvent, ...keys: string[]): string | null {
 }
 
 function packetLabel(event: BroadcastEvent, specifics = broadcastEventSpecifics(event, null)): string {
-  const issue = specifics.issue;
   const title = subject(event);
-  if (typeof issue === 'number' || typeof issue === 'string') return `issue #${issue}, ${title}`;
-  if (title !== 'the current packet') return title;
-  return event.packetId ? `packet ${event.packetId}` : event.laneId ? `lane ${event.laneId}` : title;
-}
-
-function listPhrase(items: string[]): string {
-  if (items.length < 2) return items[0] ?? '';
-  if (items.length === 2) return `${items[0]} and ${items[1]}`;
-  return `${items.slice(0, -1).join(', ')}, and ${items.at(-1)}`;
+  if (title !== 'the current packet') return clipPhrase(title, SUBJECT_MAX_LENGTH);
+  const issue = specifics.issue;
+  if (typeof issue === 'number' || typeof issue === 'string') return `issue #${issue}`;
+  return 'an unnamed packet';
 }
 
 function countPhrase(count: number, singular: string): string {
@@ -126,112 +134,101 @@ function formatUsd(value: number): string {
   return `$${value.toFixed(value < 1 ? 2 : 0)}`;
 }
 
-function momentFactKey(event: BroadcastEvent): string {
-  const specifics = broadcastEventSpecifics(event, null);
-  const identity = event.packetId ?? event.laneId ?? String(specifics.issue ?? packetLabel(event, specifics));
-  if (event.kind === 'review_verdict') return `review:${identity}:${String(specifics.approved)}`;
-  if (event.kind === 'approval') return `approval:${identity}:${String(event.payload.status ?? '')}:${event.detail ?? ''}`;
-  if (event.kind === 'spend_cap') {
-    return `spend:${identity}:${String(specifics.costUsd ?? specifics.inputTokens ?? '')}`;
+function mergeSentence(event: BroadcastEvent, specifics: Record<string, unknown>): string {
+  const label = packetLabel(event, specifics);
+  const commitSubject = stringSpecific(specifics, 'commitSubject');
+  const changedFileCount = numberSpecific(specifics, 'changedFileCount');
+  const evidence = [
+    commitSubject ? `\u201c${clipPhrase(commitSubject, DETAIL_MAX_LENGTH)}\u201d` : null,
+    changedFileCount !== null ? countPhrase(changedFileCount, 'file') : null,
+  ].filter((value): value is string => value !== null);
+  return evidence.length > 0 ? `${label} merged: ${evidence.join(', ')}.` : `${label} merged.`;
+}
+
+function approvalSentence(event: BroadcastEvent, specifics: Record<string, unknown>): string {
+  const action = event.detail || payloadText(event, 'summary', 'command', 'description');
+  const label = packetLabel(event, specifics);
+  if (!action || label.toLowerCase() === action.toLowerCase()) return `Approval pending for ${label}.`;
+  return `Approval pending for ${label}: ${firstSentence(action, DETAIL_MAX_LENGTH)}.`;
+}
+
+function reviewSentence(event: BroadcastEvent, specifics: Record<string, unknown>): string {
+  const label = packetLabel(event, specifics);
+  const findingsCount = numberSpecific(specifics, 'findingsCount');
+  const firstFinding = specifics.firstFinding && typeof specifics.firstFinding === 'object'
+    ? specifics.firstFinding as { file?: unknown }
+    : null;
+  const file = typeof firstFinding?.file === 'string' && firstFinding.file ? firstFinding.file : null;
+  const evidence = findingsCount !== null && findingsCount > 0
+    ? `${countPhrase(findingsCount, 'finding')}${file ? ` in ${clipPhrase(file, DETAIL_MAX_LENGTH)}` : ''}`
+    : null;
+  if (specifics.approved === true) {
+    return evidence ? `Review approved for ${label}, ${evidence}.` : `Review approved for ${label}.`;
   }
-  if (event.kind === 'lease_timeout') return `lease_timeout:${identity}:${String(specifics.resource ?? event.detail ?? '')}`;
-  return `${event.kind}:${identity}`;
+  return evidence
+    ? `Review requests changes on ${label}: ${evidence}.`
+    : `Review requests changes on ${label}.`;
 }
 
-function mergeLine(events: BroadcastEvent[]): string {
-  if (events.length === 0) return '';
-  const details = events.map((event) => {
-    const specifics = broadcastEventSpecifics(event, null);
-    const commitSubject = stringSpecific(specifics, 'commitSubject');
-    const changedFileCount = numberSpecific(specifics, 'changedFileCount');
-    const sha = stringSpecific(specifics, 'mergeSha');
-    const change = commitSubject
-      ? `“${commitSubject}”${changedFileCount !== null ? ` changed ${countPhrase(changedFileCount, 'file')}` : ''}${sha ? ` at commit ${sha}` : ''}`
-      : changedFileCount !== null
-        ? `${countPhrase(changedFileCount, 'file')} changed${sha ? ` at commit ${sha}` : ''}`
-        : sha ? `commit ${sha} is the recorded change` : null;
-    return change
-      ? `${packetLabel(event, specifics)}: ${change}`
-      : `${packetLabel(event, specifics)} has no commit detail in the feed`;
-  });
-  const state = events.length === 1 ? 'The merge landed.' : 'Both merges landed.';
-  return `${listPhrase(details)}. ${state}`;
+function failureSentence(event: BroadcastEvent, specifics: Record<string, unknown>): string {
+  const label = packetLabel(event, specifics);
+  const reason = event.detail || payloadText(event, 'reason', 'message', 'error');
+  return reason
+    ? `${label} failed: ${firstSentence(reason, DETAIL_MAX_LENGTH)}.`
+    : `${label} failed and needs attention.`;
 }
 
-function approvalLine(events: BroadcastEvent[]): string {
-  if (events.length === 0) return '';
-  const details = events.map((event) => {
-    const action = event.detail || payloadText(event, 'summary', 'command', 'description') || 'an operator decision';
-    const label = packetLabel(event);
-    return label.toLowerCase() === action.toLowerCase() ? action : `${label}: ${action}`;
-  });
-  return `${listPhrase(details)}. ${events.length === 1 ? 'Approval is pending.' : `${events.length} approvals are pending.`}`;
+function spendSentence(event: BroadcastEvent, specifics: Record<string, unknown>): string {
+  const label = packetLabel(event, specifics);
+  const cost = numberSpecific(specifics, 'costUsd');
+  const tokens = numberSpecific(specifics, 'inputTokens');
+  const amount = cost !== null
+    ? formatUsd(cost)
+    : tokens !== null ? `${tokens.toLocaleString()} tokens` : null;
+  return amount ? `${label} hit the spend cap at ${amount}.` : `${label} hit the spend cap.`;
 }
 
-function reviewLine(events: BroadcastEvent[]): string {
-  if (events.length === 0) return '';
-  return events.map((event) => {
-    const specifics = broadcastEventSpecifics(event, null);
-    const approved = specifics.approved === true;
-    const findingsCount = numberSpecific(specifics, 'findingsCount');
-    const firstFinding = specifics.firstFinding && typeof specifics.firstFinding === 'object'
-      ? specifics.firstFinding as { file?: unknown; description?: unknown }
-      : null;
-    const finding = firstFinding
-      ? [firstFinding.file, firstFinding.description].filter((value): value is string => typeof value === 'string' && Boolean(value)).join(': ').replace(/[.!?]+$/, '')
-      : null;
-    const evidence = findingsCount !== null
-      ? `${countPhrase(findingsCount, 'finding')}${finding ? `, first at ${finding}` : ''}`
-      : event.detail || 'no finding count in the feed';
-    return `Review for ${packetLabel(event, specifics)} has ${evidence}. ${approved ? 'The verdict is approved.' : 'Changes are requested.'}`;
-  }).join(' ');
+function leaseTimeoutSentence(event: BroadcastEvent, specifics: Record<string, unknown>): string {
+  const label = packetLabel(event, specifics);
+  const resource = stringSpecific(specifics, 'resource') || event.detail;
+  return resource
+    ? `${label} timed out waiting for ${clipPhrase(resource, DETAIL_MAX_LENGTH)}.`
+    : `${label} timed out waiting on a lease.`;
 }
 
-function failureLine(events: BroadcastEvent[]): string {
-  if (events.length === 0) return '';
-  return events.map((event) => {
-    const specifics = broadcastEventSpecifics(event, null);
-    const elapsed = stringSpecific(specifics, 'elapsedInPreviousStatus');
-    const reason = event.detail || payloadText(event, 'reason', 'message', 'error');
-    const evidence = [elapsed ? `after ${elapsed}` : null, reason].filter((value): value is string => value !== null);
-    return `${packetLabel(event, specifics)} ${evidence.length > 0 ? evidence.join(': ') : 'has no failure reason in the feed'}. The packet failed and needs attention.`;
-  }).join(' ');
+function momentSentence(event: BroadcastEvent): string | null {
+  const specifics = broadcastEventSpecifics(event, null);
+  if (event.kind === 'packet_failed') return failureSentence(event, specifics);
+  if (event.kind === 'review_verdict') return reviewSentence(event, specifics);
+  if (event.kind === 'merge') return mergeSentence(event, specifics);
+  if (event.kind === 'approval') return approvalSentence(event, specifics);
+  if (event.kind === 'spend_cap') return spendSentence(event, specifics);
+  if (event.kind === 'lease_timeout') return leaseTimeoutSentence(event, specifics);
+  return null;
 }
 
-function spendLine(events: BroadcastEvent[]): string {
-  if (events.length === 0) return '';
-  return events.map((event) => {
-    const specifics = broadcastEventSpecifics(event, null);
-    const cost = numberSpecific(specifics, 'costUsd');
-    const costCap = numberSpecific(specifics, 'costCapUsd');
-    const tokens = numberSpecific(specifics, 'inputTokens');
-    const tokenCap = numberSpecific(specifics, 'inputTokenCap');
-    const amount = cost !== null
-      ? `${formatUsd(cost)}${costCap !== null ? ` against a ${formatUsd(costCap)} cap` : ''}`
-      : tokens !== null ? `${tokens.toLocaleString()} tokens${tokenCap !== null ? ` against a ${tokenCap.toLocaleString()} token cap` : ''}` : 'an unspecified amount';
-    return `${packetLabel(event, specifics)} reached ${amount}. The spend cap is holding the work.`;
-  }).join(' ');
+/** Highest-signal first — a burst that overflows defers the tail, it never truncates it. */
+const MOMENT_ORDER: BroadcastEvent['kind'][] = [
+  'packet_failed',
+  'review_verdict',
+  'merge',
+  'approval',
+  'spend_cap',
+  'lease_timeout',
+];
+
+export interface ComposedMomentLine {
+  text: string;
+  spokenEvents: BroadcastEvent[];
+  deferredEvents: BroadcastEvent[];
 }
 
-function leaseTimeoutLine(events: BroadcastEvent[]): string {
-  if (events.length === 0) return '';
-  return events.map((event) => {
-    const specifics = broadcastEventSpecifics(event, null);
-    const resource = stringSpecific(specifics, 'resource') || event.detail || 'an unnamed resource';
-    return `${packetLabel(event, specifics)} waited for ${resource}. The lease timed out.`;
-  }).join(' ');
-}
-
-function isMomentEvent(event: BroadcastEvent): boolean {
-  return event.kind === 'merge'
-    || (event.kind === 'approval' && event.payload.status === 'pending')
-    || event.kind === 'review_verdict'
-    || event.kind === 'packet_failed'
-    || event.kind === 'spend_cap'
-    || event.kind === 'lease_timeout';
-}
-
-export function broadcastMomentLine(input: BroadcastEvent | BroadcastEvent[]): string | null {
+/**
+ * Build one short spoken line from a burst. Sentences are added while the line
+ * stays inside the spoken length budget; whatever does not fit is handed back
+ * so the next tick speaks it instead of this one running long.
+ */
+export function composeMomentLine(input: BroadcastEvent | BroadcastEvent[]): ComposedMomentLine | null {
   const events = (Array.isArray(input) ? input : [input]).filter(isMomentEvent);
   if (events.length === 0) return null;
   const reviewPackets = new Set(events.filter((event) => event.kind === 'review_verdict').map((event) => event.packetId).filter(Boolean));
@@ -241,15 +238,41 @@ export function broadcastMomentLine(input: BroadcastEvent | BroadcastEvent[]): s
     && reviewPackets.has(event.packetId)
     && /review/i.test(event.detail ?? '')
   ));
-  const groups = [
-    mergeLine(relevant.filter((event) => event.kind === 'merge')),
-    approvalLine(relevant.filter((event) => event.kind === 'approval')),
-    reviewLine(relevant.filter((event) => event.kind === 'review_verdict')),
-    failureLine(relevant.filter((event) => event.kind === 'packet_failed')),
-    spendLine(relevant.filter((event) => event.kind === 'spend_cap')),
-    leaseTimeoutLine(relevant.filter((event) => event.kind === 'lease_timeout')),
-  ].filter(Boolean);
-  return groups.join(' ').slice(0, BROADCAST_TEXT_MAX_LENGTH).trim() || null;
+  const ordered = [...relevant].sort((left, right) => (
+    MOMENT_ORDER.indexOf(left.kind) - MOMENT_ORDER.indexOf(right.kind)
+  ));
+
+  const sentences: string[] = [];
+  const spokenEvents: BroadcastEvent[] = [];
+  const deferredEvents: BroadcastEvent[] = [];
+  const composedFacts = new Set<string>();
+  let length = 0;
+  for (const event of ordered) {
+    const sentence = momentSentence(event);
+    if (!sentence) continue;
+    // One fact, one sentence — the same verdict arrives from two tables and
+    // must not be said twice inside a single utterance (o8 #1822).
+    const fact = momentFactKey(event);
+    if (composedFacts.has(fact) || sentences.includes(sentence)) {
+      spokenEvents.push(event);
+      continue;
+    }
+    composedFacts.add(fact);
+    const projected = length + sentence.length + (sentences.length > 0 ? 1 : 0);
+    if (sentences.length > 0 && projected > BROADCAST_SPOKEN_MAX_LENGTH) {
+      deferredEvents.push(event);
+      continue;
+    }
+    sentences.push(sentence);
+    spokenEvents.push(event);
+    length = projected;
+  }
+  const text = speakableText(sentences.join(' '));
+  return text ? { text, spokenEvents, deferredEvents } : null;
+}
+
+export function broadcastMomentLine(input: BroadcastEvent | BroadcastEvent[]): string | null {
+  return composeMomentLine(input)?.text ?? null;
 }
 
 function lullLine(sqlite: Database.Database): string | null {
@@ -265,10 +288,12 @@ function lullLine(sqlite: Database.Database): string | null {
     event.kind !== 'commentary' && event.kind !== 'conversation' && event.kind !== 'focus'
   ));
   const latestMoment = latest ? broadcastMomentLine(latest) : null;
-  const latestDetail = latestMoment || (latest?.detail ? `Latest update for ${packetLabel(latest)}: ${latest.detail}.` : null);
-  const focus = `${snapshot.focus.issue ? `issue #${snapshot.focus.issue}, ` : ''}${snapshot.focus.title}`;
-  const goal = snapshot.focus.goal ? ` The goal is ${snapshot.focus.goal}.` : '';
-  return `${latestDetail ? `${latestDetail} ` : ''}Still on ${focus}.${goal} ${lanePhrase}${waiting ? ', with review pending' : ''}.`;
+  const latestDetail = latestMoment || (latest?.detail
+    ? `Latest for ${packetLabel(latest)}: ${firstSentence(latest.detail, DETAIL_MAX_LENGTH)}.`
+    : null);
+  const focus = `${snapshot.focus.issue ? `issue #${snapshot.focus.issue}, ` : ''}${clipPhrase(snapshot.focus.title, SUBJECT_MAX_LENGTH)}`;
+  const goal = snapshot.focus.goal ? ` The goal is ${clipPhrase(snapshot.focus.goal, DETAIL_MAX_LENGTH)}.` : '';
+  return speakableText(`${latestDetail ? `${latestDetail} ` : ''}Still on ${focus}.${goal} ${lanePhrase}${waiting ? ', with review pending' : ''}.`) || null;
 }
 
 export class BroadcastSpeaker {
@@ -322,14 +347,14 @@ export class BroadcastSpeaker {
     let output = 'Queued updates condensed:';
     for (let index = 0; index < unique.length; index += 1) {
       const candidate = `${output} ${unique[index]}`;
-      if (candidate.length <= BROADCAST_TEXT_MAX_LENGTH) {
+      if (candidate.length <= BROADCAST_SPOKEN_MAX_LENGTH) {
         output = candidate;
       } else {
         output += ` ${unique.length - index} more queued ${unique.length - index === 1 ? 'update is' : 'updates are'} included.`;
         break;
       }
     }
-    return output.slice(0, BROADCAST_TEXT_MAX_LENGTH);
+    return speakableText(output);
   }
 
   private collapseOverflow(sqlite: Database.Database): void {
@@ -363,7 +388,8 @@ export class BroadcastSpeaker {
     if (this.seen.has(line.id) || line.suppressed || !line.text.trim()) return;
     this.pruneRecent(nowMs);
     const textKey = this.textKey(line.text);
-    if (this.recentTexts.has(textKey) || this.queue.some((entry) => this.textKey(entry.text) === textKey)) return;
+    if (line.priority !== true
+      && (this.recentTexts.has(textKey) || this.queue.some((entry) => this.textKey(entry.text) === textKey))) return;
     this.seen.add(line.id);
     const entry: QueueEntry = {
       ...line,
@@ -407,6 +433,7 @@ export class BroadcastSpeaker {
     sourceEventIds: string[],
     now: Date,
     sqlite: Database.Database,
+    factKeys: string[] = [],
   ): BroadcastSpeechLine {
     const event = appendBroadcastEvent({ kind: 'commentary', actor: 'symon', text }, {
       sqlite,
@@ -416,6 +443,7 @@ export class BroadcastSpeaker {
         sourceEventId: sourceEventIds[0] ?? null,
         sourceEventIds,
         hourlyCapped: true,
+        ...(factKeys.length > 0 ? { factKeys } : {}),
       },
     });
     return {
@@ -424,6 +452,7 @@ export class BroadcastSpeaker {
       text,
       timestamp: event.timestamp,
       priority: false,
+      factKeys,
     };
   }
 
@@ -484,19 +513,34 @@ export class BroadcastSpeaker {
           this.pruneRecent(now.getTime());
           const burstFacts = new Set<string>();
           const queuedFacts = new Set(this.queue.flatMap((entry) => entry.factKeys ?? []));
+          // The shared suppression view: anything the director already narrated
+          // (and anything this speaker said before a restart) counts as said.
+          const narratedFacts = narratedFactKeysSince(sqlite, narrationWindowStart(now));
           const unsaid = this.pendingMoments.filter((event) => {
             const fact = momentFactKey(event);
-            if (this.recentFacts.has(fact) || queuedFacts.has(fact) || burstFacts.has(fact)) return false;
+            if (this.recentFacts.has(fact) || queuedFacts.has(fact) || burstFacts.has(fact) || narratedFacts.has(fact)) {
+              return false;
+            }
             burstFacts.add(fact);
             return true;
           });
           this.pendingMoments = [];
-          const text = broadcastMomentLine(unsaid);
-          if (text && broadcastGeneratedLinesSince(sqlite, new Date(now.getTime() - 60 * 60_000).toISOString()) < settings.maxPerHour) {
-            const line = this.generatedLine(text, 'moment', unsaid.map((event) => event.id), now, sqlite);
-            line.factKeys = [...burstFacts];
+          const composed = composeMomentLine(unsaid);
+          if (composed && broadcastGeneratedLinesSince(sqlite, new Date(now.getTime() - 60 * 60_000).toISOString()) < settings.maxPerHour) {
+            const spokenFacts = [...new Set(composed.spokenEvents.map((event) => momentFactKey(event)))];
+            const line = this.generatedLine(
+              composed.text,
+              'moment',
+              composed.spokenEvents.map((event) => event.id),
+              now,
+              sqlite,
+              spokenFacts,
+            );
             generated.push(line.id);
             this.enqueue(line, sqlite, now.getTime());
+            // Whatever did not fit stays unsaid rather than making this line run
+            // long; the next tick speaks it as its own short update.
+            this.pendingMoments = composed.deferredEvents.slice(0, MAX_DEFERRED_MOMENTS);
           }
         }
 

@@ -218,11 +218,11 @@ describe('Broadcast speaker real path', () => {
     expect(spoken[0]).toContain('Release wiring packet');
     expect(spoken[0]).toContain('fix: coalesce spoken moment bursts');
     expect(spoken[0]).toContain('3 files');
-    expect(spoken[0]).toContain('a17c0de');
+    expect(spoken[0]).not.toContain('a17c0de');
     expect(spoken[0]).toContain('Approve release wiring');
     expect(spoken[0]).toContain('1 finding');
     expect(spoken[0]).toContain('src/lib/broadcast/speaker.ts');
-    expect(spoken[0].match(/The merge landed\./g)).toHaveLength(1);
+    expect(spoken[0].match(/merged/g)).toHaveLength(1);
 
     appendEvent(mergedLane.id, 'merge', 'system', {
       laneHeadSha: 'a17c0de55f11',

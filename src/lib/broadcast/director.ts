@@ -9,7 +9,15 @@ import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 import { resolveBrainCodexRouteSync } from '@/lib/operator/brain-routing';
 import { buildBroadcastCommentaryPrompt } from './commentary-prompt';
 import { listRecentBroadcastEvents } from './events';
-import { appendBroadcastEvent, BROADCAST_TEXT_MAX_LENGTH } from './post';
+import {
+  isGeneratedCommentary,
+  isMomentEvent,
+  momentFactKey,
+  narratedFactKeysSince,
+  narrationWindowStart,
+  speakableText,
+} from './narration';
+import { appendBroadcastEvent } from './post';
 
 const DIRECTOR_TICK_MS = 30_000;
 const FEED_SLICE_LIMIT = 100;
@@ -103,9 +111,13 @@ export async function runBroadcastDirectorOnce(options: {
   }
 
   const recent = listRecentBroadcastEvents({ limit: FEED_SLICE_LIMIT }, sqlite).events;
+  // The shared suppression view: a fact the speaker already voiced is not news,
+  // and a generated voice line is not feed input to narrate back (o8 #1822).
+  const narratedFacts = narratedFactKeysSince(sqlite, narrationWindowStart(now));
   const newEvents = recent.filter((event) => (
     (!lastRun || event.timestamp > lastRun.created_at)
-    && !(event.kind === 'commentary' && event.actor === 'mister')
+    && !isGeneratedCommentary(event)
+    && !(isMomentEvent(event) && narratedFacts.has(momentFactKey(event)))
   ));
   if (newEvents.length === 0) return { status: 'skipped', reason: 'no_new_events', newEventCount: 0 };
   if (newEvents.length < settings.minNewEvents) {
@@ -119,7 +131,7 @@ export async function runBroadcastDirectorOnce(options: {
       : resolveBrainCodexRouteSync();
     const runner = options.runner ?? callCodex;
     const output = (await runner(buildBroadcastCommentaryPrompt(newEvents, recent), route)).trim();
-    const text = output.replace(/\s+/g, ' ').slice(0, BROADCAST_TEXT_MAX_LENGTH).trim();
+    const text = speakableText(output);
     if (!text) throw new Error('Broadcast commentary runner returned no text.');
     if (broadcastGeneratedLinesSince(sqlite, new Date(now.getTime() - 60 * 60_000).toISOString()) >= settings.maxPerHour) {
       return { status: 'skipped', reason: 'max_per_hour', newEventCount: newEvents.length };
@@ -136,6 +148,7 @@ export async function runBroadcastDirectorOnce(options: {
         model: route.model,
         reasoningEffort: route.reasoningEffort ?? null,
         feedEventCount: newEvents.length,
+        factKeys: [...new Set(newEvents.filter(isMomentEvent).map(momentFactKey))],
       },
     });
     return {
