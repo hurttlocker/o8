@@ -76,13 +76,14 @@ function titleSeed(value: string | null | undefined) {
   return normalized && !isMissionStatsTitle(normalized) ? normalized : '';
 }
 
-function firstMeaningfulTranscriptLine(
+function meaningfulTranscriptLine(
   messages: MobileTranscriptEntry[],
-  roles?: MobileTranscriptEntry['role'][],
+  options: { roles?: MobileTranscriptEntry['role'][]; from: 'start' | 'end' },
 ) {
-  for (const message of messages) {
+  const ordered = options.from === 'end' ? [...messages].reverse() : messages;
+  for (const message of ordered) {
     if (message.type === 'command') continue;
-    if (roles && !roles.includes(message.role)) continue;
+    if (options.roles && !options.roles.includes(message.role)) continue;
     const source = message.type === 'compaction'
       ? message.compaction?.summary ?? message.text
       : message.text;
@@ -92,6 +93,20 @@ function firstMeaningfulTranscriptLine(
     }
   }
   return '';
+}
+
+function firstMeaningfulTranscriptLine(
+  messages: MobileTranscriptEntry[],
+  roles?: MobileTranscriptEntry['role'][],
+) {
+  return meaningfulTranscriptLine(messages, { roles, from: 'start' });
+}
+
+function lastMeaningfulTranscriptLine(
+  messages: MobileTranscriptEntry[],
+  roles?: MobileTranscriptEntry['role'][],
+) {
+  return meaningfulTranscriptLine(messages, { roles, from: 'end' });
 }
 
 export function extractLatestCompactionSummary(messages: MobileTranscriptEntry[]) {
@@ -110,13 +125,19 @@ export function buildMissionArchiveTitle(input: {
   compactionSummary?: string | null;
   outcomeTitles?: string[];
 }) {
-  const userSeed = titleSeed(firstMeaningfulTranscriptLine(input.messages ?? [], ['user']));
+  // Seed order is archive-specificity, strongest first (#1848). A mission archive
+  // is cut out of a long-lived orchestrator thread, so any seed drawn from the
+  // TOP of the transcript describes the thread, not this mission — every archive
+  // from one thread would inherit the same opening line. Packet titles are the
+  // only per-mission signal; the compaction summary and the operator's LAST
+  // message at least move with the archived slice.
   const outcomeSeed = input.outcomeTitles
     ?.map(titleSeed)
     .find(Boolean) ?? '';
   const compactionSeed = titleSeed(firstMeaningfulCompactionLine(input.compactionSummary));
+  const userSeed = titleSeed(lastMeaningfulTranscriptLine(input.messages ?? [], ['user']));
   const missionSeed = titleSeed(input.missionSummary.replace(/^sprint mission for\s+/iu, ''));
-  return compactTitle(userSeed || outcomeSeed || compactionSeed || missionSeed || 'Mission complete');
+  return compactTitle(outcomeSeed || compactionSeed || userSeed || missionSeed || 'Mission complete');
 }
 
 export function buildOrchestratorArchiveTitle(input: {
