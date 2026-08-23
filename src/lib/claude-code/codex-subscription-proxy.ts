@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { closeSync, openSync } from 'node:fs';
 import {
@@ -53,6 +53,28 @@ export interface CodexSubscriptionProxyStatus {
   connecting: boolean;
   modelCount: number;
   error?: string;
+}
+
+export class ClaudeCodeWorkerAuthenticationError extends Error {
+  readonly code = 'worker_not_authenticated';
+
+  constructor(readonly reason: string) {
+    super(`worker_not_authenticated: ${reason}`);
+    this.name = 'ClaudeCodeWorkerAuthenticationError';
+  }
+}
+
+function execFileUtf8(
+  command: string,
+  args: string[],
+  env?: NodeJS.ProcessEnv,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { encoding: 'utf8', env, timeout: 5_000 }, (error, stdout) => {
+      if (error) reject(error);
+      else resolve(stdout);
+    });
+  });
 }
 
 function rootDir(): string {
@@ -323,29 +345,65 @@ export async function ensureClaudeCodeWorkerConfigDir(
   await rm(path.join(configDir, 'skills'), { recursive: true, force: true });
   if (source === 'native') {
     await seedNativeWorkerCredentials(configDir);
+    await assertNativeWorkerAuthenticated(configDir);
   }
   return configDir;
 }
 
 // On the native carrier, the isolated config dir replaces the operator's real
 // CLAUDE_CONFIG_DIR (or ~/.claude), so a worker that spawns there is otherwise
-// logged out: Claude Code stores OAuth credentials at
-// <config dir>/.credentials.json on Linux (macOS keeps them in Keychain,
-// which is per-user and survives the config-dir swap). Copy the credentials
-// file into the isolated dir so a native worker can still authenticate.
+// logged out. Current macOS Claude Code stores the live OAuth object in the
+// "Claude Code-credentials" Keychain item, and that lookup does not survive a
+// config-dir swap. Other platforms store it at <config dir>/.credentials.json.
+// Snapshot the live credential into the isolated dir for this worker.
 // Never symlink — a symlink would let a worker rewrite the operator's file.
 async function seedNativeWorkerCredentials(configDir: string): Promise<void> {
   const sourceConfigDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
   const sourceCredentialsPath = path.join(sourceConfigDir, '.credentials.json');
-  let credentials: Buffer;
-  try {
-    credentials = await readFile(sourceCredentialsPath);
-  } catch {
-    // No credentials file to seed (e.g. macOS Keychain carries the OAuth
-    // token instead) — proceed without failing the spawn.
-    return;
+  const keychainCredentials = process.platform === 'darwin'
+    ? await execFileUtf8('/usr/bin/security', [
+        'find-generic-password', '-s', 'Claude Code-credentials', '-w',
+      ]).catch(() => '')
+    : '';
+  const fileCredentials = await readFile(sourceCredentialsPath, 'utf8').catch(() => '');
+  const credentials = hasClaudeOAuth(keychainCredentials)
+    ? keychainCredentials
+    : hasClaudeOAuth(fileCredentials) ? fileCredentials : '';
+  if (!credentials) {
+    throw new ClaudeCodeWorkerAuthenticationError('No live Claude OAuth credential was available to seed.');
   }
   const destCredentialsPath = path.join(configDir, '.credentials.json');
   await writeFile(destCredentialsPath, credentials, { mode: 0o600 });
   await chmod(destCredentialsPath, 0o600);
+}
+
+function hasClaudeOAuth(raw: string): boolean {
+  try {
+    const oauth = (JSON.parse(raw) as { claudeAiOauth?: Record<string, unknown> }).claudeAiOauth;
+    return typeof oauth?.accessToken === 'string' || typeof oauth?.refreshToken === 'string';
+  } catch {
+    return false;
+  }
+}
+
+async function assertNativeWorkerAuthenticated(configDir: string): Promise<void> {
+  let binary: string;
+  try {
+    binary = (await resolveCli({
+      runtimeId: 'claude-code',
+      binaryName: 'claude',
+      envOverride: 'O8_CLAUDE_CODE_BIN',
+      extraEnvOverrides: ['CLAUDE_BIN'],
+    })).path;
+  } catch {
+    throw new ClaudeCodeWorkerAuthenticationError('Claude Code could not verify the seeded credential.');
+  }
+  const raw = await execFileUtf8(binary, ['auth', 'status', '--json'], {
+    ...process.env,
+    CLAUDE_CONFIG_DIR: configDir,
+  }).catch(() => '');
+  try {
+    if ((JSON.parse(raw) as { loggedIn?: boolean }).loggedIn === true) return;
+  } catch {}
+  throw new ClaudeCodeWorkerAuthenticationError('Claude Code rejected the seeded credential.');
 }

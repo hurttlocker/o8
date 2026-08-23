@@ -16,6 +16,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
 const spawnMock = vi.hoisted(() => vi.fn());
+const authStatusMock = vi.hoisted(() => ({ loggedIn: true }));
 const ensureDispatchBackendReadyMock = vi.hoisted(() => vi.fn(async () => ({
   ready: true,
   reason: 'http_200',
@@ -27,6 +28,18 @@ vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
   return {
     ...actual,
+    execFile: ((file: string, args: string[], options: unknown, callback: (...args: unknown[]) => void) => {
+      if (file === '/usr/bin/security') {
+        const error = Object.assign(new Error('test keychain item unavailable'), { code: 44 });
+        callback(error, '', '');
+        return {};
+      }
+      if (args[0] === 'auth' && args[1] === 'status') {
+        callback(null, JSON.stringify({ loggedIn: authStatusMock.loggedIn }), '');
+        return {};
+      }
+      return actual.execFile(file, args, options as Parameters<typeof actual.execFile>[2], callback);
+    }) as typeof actual.execFile,
     spawn: (...args: Parameters<typeof actual.spawn>) => (
       Array.isArray(args[1]) && args[1].includes('--input-format')
         ? spawnMock(...args)
@@ -215,7 +228,7 @@ describe('Claude Code worker skill isolation real path', () => {
     });
   }, 30_000);
 
-  it('proceeds without seeding credentials when the operator has none (macOS Keychain case)', async () => {
+  it('fails the persisted dispatch path before spawn when no live credential can be seeded', async () => {
     const noCredsHome = path.join(tempRoot, 'operator-home-no-creds');
     mkdirSync(path.join(noCredsHome, '.claude'), { recursive: true });
     const noCredsRepoPath = path.join(noCredsHome, 'repo');
@@ -223,8 +236,8 @@ describe('Claude Code worker skill isolation real path', () => {
 
     const { writeClaudeCodeWorkerProfile } = await import('@/lib/claude-code/worker-profile');
     const { buildPacketPrompt } = await import('@/lib/orchestrator/packet-prompt');
-    const { createLane } = await import('@/lib/lane/registry');
-    const { claudeCodeRuntime } = await import('@/lib/runtimes/claude-code');
+    const { createLane, getLane, getLaneEvents } = await import('@/lib/lane/registry');
+    const { dispatch: dispatchLaneCommand } = await import('@/lib/lane/commands');
 
     await writeClaudeCodeWorkerProfile({
       source: 'native',
@@ -270,23 +283,53 @@ describe('Claude Code worker skill isolation real path', () => {
     const callCountBefore = spawnMock.mock.calls.length;
     const priorHome = process.env.HOME;
     process.env.HOME = noCredsHome;
-    let result: Awaited<ReturnType<typeof claudeCodeRuntime.launch>>;
+    let result: Awaited<ReturnType<typeof dispatchLaneCommand>>;
     try {
-      result = await claudeCodeRuntime.launch({
-        cwd: noCredsRepoPath,
+      result = await dispatchLaneCommand({
+        verb: 'launch_session',
         laneId: lane.id,
         prompt,
+        actor: 'orchestrator',
       });
     } finally {
       process.env.HOME = priorHome;
     }
 
-    if (!result.ok) throw new Error(result.note);
-    const [, , options] = spawnMock.mock.calls[callCountBefore]!;
-    const configDir = options.env.CLAUDE_CONFIG_DIR as string;
-    expect(existsSync(configDir)).toBe(true);
-    expect(existsSync(path.join(configDir, '.credentials.json'))).toBe(false);
+    expect(result).toMatchObject({ ok: false });
+    expect(result.note).toContain('worker_not_authenticated');
+    expect(result.note).toContain('No worker was started');
+    expect(spawnMock.mock.calls.length).toBe(callCountBefore);
+    expect(getLane(lane.id)?.status).toBe('idle');
+    expect(getLaneEvents(lane.id, 200)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        verb: 'worker_not_authenticated',
+        payload: expect.objectContaining({
+          runtime: 'claude-code',
+          code: 'worker_not_authenticated',
+        }),
+      }),
+      expect.objectContaining({
+        verb: 'status_change',
+        payload: expect.objectContaining({ eventLabel: 'launch_error' }),
+      }),
+    ]));
   }, 30_000);
+
+  it('rejects a seeded credential when Claude Code reports the isolated config is logged out', async () => {
+    const { ensureClaudeCodeWorkerConfigDir } = await import('@/lib/claude-code/codex-subscription-proxy');
+    authStatusMock.loggedIn = false;
+    try {
+      await expect(ensureClaudeCodeWorkerConfigDir(
+        path.join(tempRoot, 'rejected-credential-session'),
+        'native',
+      )).rejects.toMatchObject({
+        code: 'worker_not_authenticated',
+        reason: 'Claude Code rejected the seeded credential.',
+      });
+    } finally {
+      authStatusMock.loggedIn = true;
+    }
+  });
 
   it('injects only explicitly allowlisted repository skill instructions', async () => {
     const allowedSkill = path.join(repoPath, '.claude', 'skills', 'review-only');

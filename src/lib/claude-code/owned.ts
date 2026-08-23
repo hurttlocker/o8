@@ -27,7 +27,9 @@ import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-typ
 import type { PacketSpendCap } from '@/lib/orchestrator/metered-spend';
 import { prepareMeteredGatewaySession } from '@/lib/claude-code/metered-gateway';
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
+import { recordLaneEvent } from '@/lib/lane/events';
 import {
+  ClaudeCodeWorkerAuthenticationError,
   ensureClaudeCodeWorkerConfigDir,
   ensureCodexSubscriptionProxyReady,
 } from '@/lib/claude-code/codex-subscription-proxy';
@@ -226,17 +228,36 @@ export async function launchOwnedClaudeCodeSession(request: {
       };
     }
   }
-  return claudeCodeOwnedStore.launch({
-    ...request,
-    model: selectedModel ?? undefined,
-    runtimeConfig: {
-      modelSource: selection.source,
-      ...(spendCap ? {
-        spendCapCostUsd: String(spendCap.costUsd),
-        spendCapInputTokens: String(spendCap.inputTokens),
-      } : {}),
-    },
-  });
+  try {
+    return await claudeCodeOwnedStore.launch({
+      ...request,
+      model: selectedModel ?? undefined,
+      runtimeConfig: {
+        modelSource: selection.source,
+        ...(spendCap ? {
+          spendCapCostUsd: String(spendCap.costUsd),
+          spendCapInputTokens: String(spendCap.inputTokens),
+        } : {}),
+      },
+    });
+  } catch (error) {
+    if (!(error instanceof ClaudeCodeWorkerAuthenticationError)) throw error;
+    if (request.laneId) {
+      recordLaneEvent(request.laneId, 'worker_not_authenticated', 'system', {
+        runtime: 'claude-code',
+        code: error.code,
+        reason: error.reason,
+        note: error.message,
+      });
+    }
+    return {
+      ok: false,
+      runtime: 'claude-code',
+      surfaceId: '',
+      sideEffect: 'none' as const,
+      note: `${error.message} No worker was started. Sign in with the operator Claude CLI, then retry the packet.`,
+    };
+  }
 }
 
 export async function getOwnedClaudeCodeFleetAdditions(options?: { fresh?: boolean }) {
