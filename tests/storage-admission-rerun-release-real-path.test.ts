@@ -65,7 +65,7 @@ function createWorktree(label: string): { branch: string; worktreePath: string }
   return { branch, worktreePath };
 }
 
-async function createRunningPacket(label: string, withWorktree = true) {
+async function createRunningPacket(label: string, withWorktree = true, absentWorktree = false) {
   const mission = await createMission({
     issues: [{ number: Date.now(), title: `inline: ${label}`, body: label, url: '' }],
     repoPath,
@@ -74,7 +74,9 @@ async function createRunningPacket(label: string, withWorktree = true) {
   });
   const packetId = mission.packets[0]!.id;
   const branch = `inline/${label}`;
-  const worktreePath = withWorktree ? createWorktree(label).worktreePath : null;
+  const worktreePath = withWorktree
+    ? absentWorktree ? join(worktreeRoot, `absent-${label}`) : createWorktree(label).worktreePath
+    : null;
   const lane = createLane({ repoPath, branch, worktreePath: worktreePath ?? undefined, runtime: 'codex', packetId });
   appendEvent(lane.id, 'update', 'orchestrator', {
     storageAdmissionOwnerGeneration: 1,
@@ -254,6 +256,38 @@ describe('storage reservation release through rerun retirement', () => {
       outcomeNote: 'Superseded by reset',
     });
     expect(() => execFileSync('test', ['-e', worktreePath!])).toThrow();
+    expect(store.getReservation(reservationId)?.state).toBe('released');
+  });
+
+  it('releases a packet-owned reservation when reset finds the worktree already absent', async () => {
+    const { packetId, lane, worktreePath } = await createRunningPacket('reset-absent-release', true, true);
+    const { reservationId, store } = await reserveForOwner(packetId);
+
+    const response = await resetRoute.POST(new NextRequest(
+      'http://localhost:3001/api/orchestrator/reset-packet',
+      {
+        method: 'POST',
+        headers: {
+          host: 'localhost:3001', authorization: `Bearer ${operatorToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          packetId, clearWorktree: true,
+          idempotencyKey: 'storage-reset-absent-release',
+        }),
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      result: { reset: true, worktreePruned: true },
+    });
+    expect(worktreePath).not.toBeNull();
+    expect(getLane(lane.id)).toMatchObject({
+      status: 'archived', packetId: '', outcome: 'discarded',
+      outcomeNote: 'Superseded by reset',
+    });
     expect(store.getReservation(reservationId)?.state).toBe('released');
   });
 });

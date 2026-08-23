@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import { cleanupLaneWorktree } from '@/lib/lane/worktree-cleanup';
 import type { LaneRuntime } from '@/lib/lane/types';
 import { runRuntimeAwareWorktreeCleanup } from '@/lib/orchestrator/runtime-worktree-cleanup';
+import { releaseTerminalPacketStorageReservations } from '@/lib/orchestrator/terminal-storage-release';
 import { formatWorktreeHolderPids } from '@/lib/worktree/holder-diagnostics';
 
 const execFileAsync = promisify(execFile);
@@ -75,6 +76,11 @@ export async function cleanupResetPacketTargets(
       // Skip preservation/prune probes that necessarily require the path to
       // exist; stale lane metadata must remain resettable through this handler.
       if (!existsSync(target.worktreePath)) {
+        releaseTerminalPacketStorageReservations({
+          packetId,
+          laneId: target.id,
+          ownerGeneration: target.storageAdmissionOwnerGeneration,
+        });
         worktreePruned = true;
       } else {
         // reset is an explicit operator/recovery action — force past the prune
