@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { basename } from 'node:path';
 import { promisify } from 'node:util';
 
-import { appendEvent, archiveLane, getLane, listLanes, updateLane } from '@/lib/lane/registry';
+import { appendEvent, archiveLane, getLane, getLaneEvents, listLanes, updateLane } from '@/lib/lane/registry';
 import { assessOwnedTranscriptActivity } from '@/lib/lane/reaper-liveness';
 import type { Lane } from '@/lib/lane/types';
 import {
@@ -97,6 +97,20 @@ const detectBackoff = new MergedByAncestryBackoff();
 function candidateKey(candidate: Candidate): string {
   return candidate.laneId
     ?? (candidate.packet ? `packet:${candidate.packet.id}` : `repo:${candidate.repoPath}:${candidate.branch}`);
+}
+
+function hasDurableLaunchEvidence(candidate: Candidate): boolean {
+  if (candidate.lane?.sessionKey) return true;
+  if (!candidate.laneId) return false;
+  return getLaneEvents(candidate.laneId, 10_000).some((event) => (
+    event.verb === 'attach_session'
+    || event.verb === 'runtime_process_exit'
+    || (
+      event.verb === 'status_change'
+      && ['agent_completed', 'agent_turn_completed', 'silent_exit_work_present']
+        .includes(String(event.payload.eventLabel ?? ''))
+    )
+  ));
 }
 
 async function git(
@@ -283,9 +297,12 @@ async function detectMergedByAncestry(candidate: Candidate): Promise<MergeEviden
   const branchRef = await resolveBranchRef(repoPath, branch);
   const baseRef = await resolveBaseRef(repoPath, baseBranch);
   const laneAlreadyMerged = candidate.lane?.outcome === 'merged';
-  const noChangesEligible = !laneAlreadyMerged && (
-    candidate.packet === null || candidate.packet.status === 'awaiting_review'
-  );
+  const durableLaunch = hasDurableLaunchEvidence(candidate);
+  const noChangesEligible = !laneAlreadyMerged
+    && durableLaunch
+    && (
+      candidate.packet === null || candidate.packet.status === 'awaiting_review'
+    );
   if (!branchRef && baseRef && noChangesEligible) {
     // A settled lane whose branch resolves nowhere has no reviewable commit.
     // Preserve that terminal truth explicitly instead of archiving it as an
@@ -316,20 +333,19 @@ async function detectMergedByAncestry(candidate: Candidate): Promise<MergeEviden
 
   const publishedBranchExists = branch !== baseBranch
     && await refExists(repoPath, `origin/${branch}`);
-  if (
-    noChangesEligible
-    && headSha === baseSha
-    && (branch === baseBranch || !publishedBranchExists)
-  ) {
-    return {
-      kind: 'no-changes',
-      repoPath,
-      branchRef,
-      baseRef,
-      headSha,
-      baseSha,
-      noChangesReason: 'branch_matches_base',
-    };
+  if (headSha === baseSha && !laneAlreadyMerged) {
+    if (noChangesEligible && (branch === baseBranch || !publishedBranchExists)) {
+      return {
+        kind: 'no-changes',
+        repoPath,
+        branchRef,
+        baseRef,
+        headSha,
+        baseSha,
+        noChangesReason: 'branch_matches_base',
+      };
+    }
+    if (!durableLaunch) return null;
   }
 
   if (await isAncestor(repoPath, headSha, baseRef)) {

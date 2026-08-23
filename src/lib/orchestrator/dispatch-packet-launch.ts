@@ -5,6 +5,7 @@ import { resolveCodexReasoningEffort } from '@/lib/codex/reasoning-effort';
 import { listSessionRuleTexts } from '@/lib/db/session-rules-store';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import { recordLaneEvent } from '@/lib/lane/events';
+import { getLane, setLaneStatus } from '@/lib/lane/registry';
 import {
   getOperatorDefaultsSync,
   resolveDefaultWorkerEffortSync,
@@ -167,6 +168,7 @@ export async function launchPacketWithStorageAdmission(input: {
   }, async () => {
     let laneResult: Awaited<ReturnType<typeof dispatchLaneCommand>>;
     let launchResult: Awaited<ReturnType<typeof dispatchLaneCommand>>;
+    let openedLaneId: string | null = null;
     try {
       laneResult = await dispatchLaneCommand({
         verb: 'open_lane',
@@ -180,6 +182,16 @@ export async function launchPacketWithStorageAdmission(input: {
         actor: 'orchestrator',
       });
       if (!laneResult.ok || !laneResult.laneId) throw new Error(laneResult.note || 'Unable to open lane.');
+      openedLaneId = laneResult.laneId;
+      const launchingLane = setLaneStatus(
+        laneResult.laneId,
+        'launching',
+        'orchestrator',
+        'launching_session',
+      );
+      if (!launchingLane || launchingLane.status !== 'launching') {
+        throw new Error('Unable to reserve the lane for launch before provisioning.');
+      }
       launchResult = await dispatchLaneCommand({
         verb: 'launch_session',
         laneId: laneResult.laneId,
@@ -201,6 +213,9 @@ export async function launchPacketWithStorageAdmission(input: {
       });
       if (!launchResult.ok) throw new Error(launchResult.note || 'Unable to launch session.');
     } catch (error) {
+      if (openedLaneId && getLane(openedLaneId)?.status === 'launching') {
+        setLaneStatus(openedLaneId, 'failed', 'system', 'launch_preparation_failed');
+      }
       const receipt = await storageAdmission.settleFailedLaunch(packet, admissionLease);
       throw new PacketStorageAdmissionError(
         error instanceof Error ? error.message : 'Unable to launch session.',

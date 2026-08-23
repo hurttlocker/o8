@@ -41,7 +41,10 @@ export async function launchSession(
   const priorLaunchAttempts = getLaneEvents(command.laneId, 200).filter(
     (event) => event.verb === 'status_change' && event.payload?.status === 'launching',
   ).length;
-  if (priorLaunchAttempts >= LAUNCH_ATTEMPT_CAP) {
+  const launchAttemptCapReached = lane.status === 'launching'
+    ? priorLaunchAttempts > LAUNCH_ATTEMPT_CAP
+    : priorLaunchAttempts >= LAUNCH_ATTEMPT_CAP;
+  if (launchAttemptCapReached) {
     setLaneStatus(command.laneId, 'failed', 'system', 'launch_attempts_exhausted');
     try {
       updateLane(command.laneId, { sessionKey: null }, 'system');
@@ -88,7 +91,9 @@ export async function launchSession(
     }
   }
 
-  setLaneStatus(command.laneId, 'launching', actor, 'launching_session');
+  if (lane.status !== 'launching') {
+    setLaneStatus(command.laneId, 'launching', actor, 'launching_session');
+  }
 
   const refreshTarget = (() => {
     if (!lane.worktreePath) return null;

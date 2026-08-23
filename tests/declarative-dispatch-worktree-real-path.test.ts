@@ -20,6 +20,30 @@ const worktreeFailure = vi.hoisted(() => ({
   message: 'synthetic packet worktree provision failure',
 }));
 
+const provisioningRace = vi.hoisted(() => ({
+  enabled: false,
+  promptEntered: false,
+  releasePrompt: false,
+  provisioningEntered: false,
+  releaseProvisioning: false,
+}));
+
+vi.mock('@/lib/orchestrator/packet-prompt', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/orchestrator/packet-prompt')>();
+  return {
+    ...actual,
+    buildPacketPrompt: async (...args: Parameters<typeof actual.buildPacketPrompt>) => {
+      if (provisioningRace.enabled) {
+        provisioningRace.promptEntered = true;
+        while (!provisioningRace.releasePrompt) {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+      }
+      return actual.buildPacketPrompt(...args);
+    },
+  };
+});
+
 vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/worktree/storage-telemetry')>(),
   measureHostVolume: vi.fn(async () => ({
@@ -39,6 +63,14 @@ vi.mock('@/lib/worktree', async (importOriginal) => {
     prepareLaunchWorktree: async (
       options: Parameters<typeof actual.prepareLaunchWorktree>[0],
     ) => {
+      if (provisioningRace.enabled) {
+        provisioningRace.provisioningEntered = true;
+        while (!provisioningRace.releaseProvisioning) {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+        await actual.prepareLaunchWorktree(options);
+        throw new Error(worktreeFailure.message);
+      }
       if (worktreeFailure.enabled) {
         throw new Error(worktreeFailure.message);
       }
@@ -88,6 +120,7 @@ const envKeys = [
   'O8_QODER_BIN',
   'O8_FAKE_QODER_CAPTURE',
   'O8_CRASH_SURVIVABLE_WORKERS',
+  'O8_PACKAGED_APP',
   'O8_SKIP_PRELAUNCH_TYPECHECK',
 ] as const;
 
@@ -98,6 +131,7 @@ process.env.O8_OWNED_QODER_ROOT = ownedRoot;
 process.env.O8_QODER_BIN = fakeQoderPath;
 process.env.O8_FAKE_QODER_CAPTURE = capturePath;
 process.env.O8_CRASH_SURVIVABLE_WORKERS = '1';
+process.env.O8_PACKAGED_APP = '0';
 process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
 
 writeFileSync(
@@ -190,6 +224,11 @@ async function waitFor<T>(
 describe('declarative packet dispatch worktree reachability', () => {
   beforeEach(() => {
     worktreeFailure.enabled = false;
+    provisioningRace.enabled = false;
+    provisioningRace.promptEntered = false;
+    provisioningRace.releasePrompt = false;
+    provisioningRace.provisioningEntered = false;
+    provisioningRace.releaseProvisioning = false;
   });
 
   afterAll(async () => {
@@ -271,6 +310,75 @@ describe('declarative packet dispatch worktree reachability', () => {
     ]));
     const captureAfterFailure = readFileSync(capturePath, 'utf8').trim().split('\n').filter(Boolean);
     expect(captureAfterFailure).toEqual(captureBeforeFailure);
+  }, 40_000);
+
+  it('keeps a never-launched lane live while slow worktree provisioning fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
+    const repoPath = createRemoteBackedRepo();
+    await import('@/lib/repos/registry').then(({ addRepo }) => addRepo(repoPath));
+    const [{ runDispatchTick, mergeDispatchTickOutcome }, laneRegistry, controlPlane, ancestry] = await Promise.all([
+      import('@/lib/orchestrator/scheduling'),
+      import('@/lib/lane/registry'),
+      import('@/lib/orchestrator/control-plane'),
+      import('@/lib/orchestrator/merged-by-ancestry'),
+    ]);
+
+    const packetId = 'pkt-slow-provision-race';
+    const initial = mission(repoPath, packet(repoPath, packetId));
+    controlPlane.writeOrchestratorControlPlaneState(initial);
+    provisioningRace.enabled = true;
+    const dispatchPromise = runDispatchTick(initial, {
+      launchBudget: { maxLaunches: 1 },
+    });
+    const openedLane = await waitFor(() => {
+      if (!provisioningRace.promptEntered) return null;
+      return laneRegistry.findLatestLaneByPacket(packetId);
+    }, 'opened pre-launch lane');
+
+    const sweepResult = await ancestry.sweepPacketsMergedByAncestry();
+    provisioningRace.releasePrompt = true;
+    await waitFor(
+      () => provisioningRace.provisioningEntered ? true : null,
+      'slow worktree provisioning',
+    );
+    const laneDuringProvisioning = laneRegistry.getLane(openedLane.id);
+    provisioningRace.releaseProvisioning = true;
+    const dispatched = await dispatchPromise;
+    await controlPlane.withLockedState((fresh) => {
+      mergeDispatchTickOutcome(fresh, initial, dispatched);
+    });
+
+    expect(sweepResult.merged).toBe(0);
+    expect(laneDuringProvisioning).toMatchObject({
+      status: 'launching',
+      outcome: null,
+    });
+    const persistedPacket = controlPlane.readOrchestratorControlPlaneState().packets
+      .find((candidate) => candidate.id === packetId);
+    expect(persistedPacket).toMatchObject({
+      status: 'failed',
+      blockedReason: expect.stringContaining('packet_worktree_provision_failed'),
+    });
+    expect(laneRegistry.getLane(openedLane.id)).toMatchObject({
+      status: 'failed',
+      outcome: null,
+    });
+    expect(laneRegistry.getLaneEvents(openedLane.id, 200)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        verb: 'worktree_provision_failed',
+        payload: expect.objectContaining({
+          code: 'packet_worktree_provision_failed',
+          packetId,
+          cause: worktreeFailure.message,
+        }),
+      }),
+    ]));
+    expect(laneRegistry.getLaneEvents(openedLane.id, 200)).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        payload: expect.objectContaining({ reason: 'branch_missing_reconciled' }),
+      }),
+    ]));
+    expect(existsSync(capturePath) ? readFileSync(capturePath, 'utf8') : '').not.toContain(packetId);
   }, 40_000);
 
   it('rolls back a launched worker when the real route cannot persist its governance lane', async () => {
