@@ -107,7 +107,7 @@ function hasDurableLaunchEvidence(candidate: Candidate): boolean {
     || event.verb === 'runtime_process_exit'
     || (
       event.verb === 'status_change'
-      && ['agent_completed', 'agent_turn_completed', 'silent_exit_work_present']
+      && ['agent_completed', 'silent_exit_work_present']
         .includes(String(event.payload.eventLabel ?? ''))
     )
   ));
