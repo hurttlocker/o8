@@ -68,12 +68,13 @@ function mapReservation(row: ReservationRow): StorageReservationRecord {
 
 export function releaseReservedStorageForTerminalOwner(input: {
   sqlite: Database.Database;
-  ownerId: string;
+  ownerIds: string[];
   terminalLaneId: string;
   mutationIdPrefix: string;
   releasedAt?: number;
 }): TerminalOwnerStorageReleaseResult {
-  const ownerId = requiredText(input.ownerId, 'ownerId');
+  const ownerIds = [...new Set(input.ownerIds.map((ownerId) => ownerId.trim()).filter(Boolean))];
+  if (ownerIds.length === 0) throw new Error('ownerIds must include at least one owner.');
   const terminalLaneId = requiredText(input.terminalLaneId, 'terminalLaneId');
   const mutationIdPrefix = requiredText(input.mutationIdPrefix, 'mutationIdPrefix');
   const releasedAt = input.releasedAt ?? Date.now();
@@ -81,18 +82,22 @@ export function releaseReservedStorageForTerminalOwner(input: {
     throw new Error('releasedAt must be a positive safe integer.');
   }
   const execute = input.sqlite.transaction(() => {
-    const liveLanes = input.sqlite.prepare(`
-      SELECT COUNT(*) FROM lanes
-      WHERE packet_id = ? AND id != ? AND status NOT IN ('failed', 'completed', 'archived')
-    `).pluck().get(ownerId, terminalLaneId) as number;
-    if (liveLanes > 0) return { released: 0, releasedBytes: 0 };
-    const rows = input.sqlite.prepare(`
-      SELECT * FROM storage_admission_reservations
-      WHERE owner_id = ? AND state = 'reserved'
-      ORDER BY owner_generation ASC, reservation_id ASC
-    `).all(ownerId) as ReservationRow[];
+    const rows: ReservationRow[] = [];
+    for (const ownerId of ownerIds) {
+      const liveLanes = input.sqlite.prepare(`
+        SELECT COUNT(*) FROM lanes
+        WHERE packet_id = ? AND id != ? AND status NOT IN ('failed', 'completed', 'archived')
+      `).pluck().get(ownerId, terminalLaneId) as number;
+      if (liveLanes > 0) continue;
+      rows.push(...input.sqlite.prepare(`
+        SELECT * FROM storage_admission_reservations
+        WHERE owner_id = ? AND state = 'reserved'
+        ORDER BY owner_generation ASC, reservation_id ASC
+      `).all(ownerId) as ReservationRow[]);
+    }
     let releasedBytes = 0;
     for (const row of rows) {
+      const ownerId = row.owner_id;
       const mutationId = `${mutationIdPrefix}:${row.reservation_id}:${row.generation}`;
       const request = {
         operation: 'release', mutationId, reservationId: row.reservation_id,

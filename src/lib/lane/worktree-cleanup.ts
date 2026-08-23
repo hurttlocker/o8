@@ -13,7 +13,7 @@ function formatError(error: unknown) {
 }
 
 function settleTerminalReservation(lane: CleanupLane, terminal: boolean, removed: boolean): boolean {
-  if (removed && terminal && lane.packetId) {
+  if (removed && terminal) {
     releaseTerminalPacketStorageReservations({ packetId: lane.packetId, laneId: lane.id });
   }
   return removed;

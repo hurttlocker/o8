@@ -6,7 +6,6 @@ type TerminalCleanupLane = Pick<Lane, 'id' | 'repoPath' | 'worktreePath' | 'pack
   & Partial<Pick<Lane, 'baseBranch'>>;
 
 function releaseWithoutWorktree(lane: TerminalCleanupLane): void {
-  if (!lane.packetId) return;
   try {
     releaseTerminalPacketStorageReservations({ packetId: lane.packetId, laneId: lane.id });
   } catch (error) {
