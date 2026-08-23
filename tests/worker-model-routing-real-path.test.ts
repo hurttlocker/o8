@@ -12,9 +12,6 @@ import { join } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
-import type { PacketStorageAdmissionCoordinator } from '@/lib/orchestrator/storage-admission';
-
 const testCacheRoot = join(process.cwd(), 'node_modules', '.cache');
 mkdirSync(testCacheRoot, { recursive: true });
 const dataDir = mkdtempSync(join(testCacheRoot, 'o8-worker-model-route-'));
@@ -90,99 +87,6 @@ function makeRepo(): string {
   return repoPath;
 }
 
-function packetFixture(
-  repoPath: string,
-  id: string,
-  overrides: Partial<OrchestratorPacket> = {},
-): OrchestratorPacket {
-  return {
-    id,
-    referenceLabel: id.toUpperCase(),
-    title: `packet ${id}`,
-    summary: `packet ${id}`,
-    status: 'queued',
-    queueState: 'queued',
-    releaseState: 'pending',
-    runtime: 'codex',
-    wave: 1,
-    dependencyPacketIds: [],
-    blockedReason: null,
-    lane: null,
-    review: null,
-    workspaceTargetPath: repoPath,
-    branchTarget: `fix/${id}`,
-    ...overrides,
-  } as OrchestratorPacket;
-}
-
-function storageAdmission(): PacketStorageAdmissionCoordinator {
-  return {
-    reserveForLaunch: async (packet) => {
-      const recordedAt = Date.now();
-      const receipt = {
-        schema: 'o8/packet-storage-admission/v1' as const,
-        state: 'reserved' as const,
-        reason: 'test admission',
-        reservationId: `packet-storage:${packet.id}:1`,
-        mutationId: `packet-storage-reserve:${packet.id}:1`,
-        ownerId: packet.id,
-        ownerGeneration: 1,
-        estimateBytes: 2_147_483_648,
-        estimateSource: 'source-size-fallback' as const,
-        historySamples: 0,
-        volumeId: 'device:test',
-        physicalAvailableBytes: 40_000_000_000,
-        reservedBeforeBytes: 0,
-        requiredReserveBytes: 10_000_000_000,
-        dispatchHeadroomBytes: 30_000_000_000,
-        recordedAt,
-      };
-      return {
-        receipt,
-        reservation: {
-          reservationId: receipt.reservationId,
-          volumeId: receipt.volumeId,
-          targetPath: packet.workspaceTargetPath!,
-          exactBytes: receipt.estimateBytes,
-          ownerId: packet.id,
-          ownerGeneration: 1,
-          generation: 1,
-          state: 'reserved' as const,
-          leaseExpiresAt: recordedAt + 60_000,
-          preMeasurement: {
-            status: 'observed' as const,
-            targetPath: packet.workspaceTargetPath!,
-            probePath: '/',
-            volumeId: receipt.volumeId,
-            availableBytes: 40_000_000_000,
-            freeBytes: 40_000_000_000,
-            totalBytes: 100_000_000_000,
-            observedAt: recordedAt,
-            error: null,
-          },
-          postMeasurement: null,
-          lastMutationId: receipt.mutationId,
-          lastReason: receipt.reason,
-          createdAt: recordedAt,
-          updatedAt: recordedAt,
-          terminalAt: null,
-        },
-        baselineWorkspacePaths: [],
-      };
-    },
-    commitAfterLaunch: async (lease) => ({
-      ...lease.receipt,
-      state: 'committed' as const,
-      reason: 'committed',
-    }),
-    settleFailedLaunch: async (_packet, lease) => ({
-      ...lease.receipt,
-      state: 'released' as const,
-      reason: 'released',
-    }),
-  };
-}
-
 function readArgvCalls(): string[][] {
   if (!existsSync(argsPath)) return [];
   return readFileSync(argsPath, 'utf8')
@@ -202,8 +106,24 @@ async function waitForArgvCalls(count: number): Promise<string[][]> {
   throw new Error(`Timed out waiting for ${count} Codex launches.`);
 }
 
+async function createAndDispatchWorker(repoPath: string, id: string, requestedModel?: string) {
+  const { createMission, dispatchMission } = await import('@/lib/orchestrator/operator-mission-service');
+  const created = await createMission({
+    issues: [{ number: Number(id), title: `packet ${id}`, body: `packet ${id}`, url: '' }],
+    repoPath,
+    runtime: 'codex',
+    requestedRuntime: 'codex',
+    requestedModel,
+    constraints: '',
+  });
+  const { currentMissionState } = await import('@/lib/orchestrator/operator-mission-service/shared');
+  expect(currentMissionState().missionId).toBe(created.missionId);
+  await dispatchMission({ missionId: created.missionId });
+  return currentMissionState();
+}
+
 beforeAll(() => {
-const fixture = `#!/usr/bin/env node
+  const fixture = `#!/usr/bin/env node
 import { appendFileSync, writeFileSync } from 'node:fs';
 const args = process.argv.slice(2);
 if (args.includes('--version')) {
@@ -252,36 +172,13 @@ describe('worker model routing real path', () => {
 
     const defaultRepoPath = makeRepo();
     const pinnedRepoPath = makeRepo();
-    const { resolveWorkerRouting } = await import('@/lib/agents/routing');
-    const pinnedRouting = resolveWorkerRouting({
-      requestedRuntime: 'codex',
-      requestedModel: 'gpt-5.5',
-      source: 'worker-model-real-path-test',
-    });
-    const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
-    const defaultState: OrchestratorMissionState = {
-      ...createEmptyOrchestratorMissionState(),
-      missionId: 'mission-default-worker-model-route',
-      repoPath: defaultRepoPath,
-      packets: [packetFixture(defaultRepoPath, 'default-worker')],
-    };
-    const pinnedState: OrchestratorMissionState = {
-      ...createEmptyOrchestratorMissionState(),
-      missionId: 'mission-pinned-worker-model-route',
-      repoPath: pinnedRepoPath,
-      packets: [packetFixture(pinnedRepoPath, 'pinned-worker', {
-        assignedModel: 'gpt-5.5',
-        workerRouting: pinnedRouting,
-      })],
-    };
-    const { runDispatchTick } = await import('@/lib/orchestrator/scheduling');
-    const dispatchedDefault = await runDispatchTick(defaultState, { storageAdmission: storageAdmission() });
-    const dispatchedPinned = await runDispatchTick(pinnedState, { storageAdmission: storageAdmission() });
+    const dispatchedDefault = await createAndDispatchWorker(defaultRepoPath, '90001');
+    const dispatchedPinned = await createAndDispatchWorker(pinnedRepoPath, '90002', 'gpt-5.5');
 
     const workerCalls = (await waitForArgvCalls(2)).filter((args) => args.includes('--json'));
     expect(workerCalls).toHaveLength(2);
-    const defaultCall = workerCalls.find((args) => args.some((arg) => arg.includes('packet default-worker')));
-    const pinnedCall = workerCalls.find((args) => args.some((arg) => arg.includes('packet pinned-worker')));
+    const defaultCall = workerCalls.find((args) => args.some((arg) => arg.includes('packet 90001')));
+    const pinnedCall = workerCalls.find((args) => args.some((arg) => arg.includes('packet 90002')));
     expect(defaultCall).toBeDefined();
     expect(defaultCall?.[defaultCall.indexOf('--model') + 1]).toBe('gpt-5.6-sol');
     expect(defaultCall).toContain('model_reasoning_effort=high');
@@ -289,14 +186,14 @@ describe('worker model routing real path', () => {
     expect(pinnedCall?.[pinnedCall.indexOf('--model') + 1]).toBe('gpt-5.5');
     expect(pinnedCall).toContain('model_reasoning_effort=high');
 
-    expect(dispatchedDefault.packets.find((packet) => packet.id === 'default-worker')).toMatchObject({
+    expect(dispatchedDefault.packets[0]).toMatchObject({
       assignedModel: 'gpt-5.6-sol',
       workerRouting: {
         selectedModel: 'gpt-5.6-sol',
         selectedEffort: 'high',
       },
     });
-    expect(dispatchedPinned.packets.find((packet) => packet.id === 'pinned-worker')).toMatchObject({
+    expect(dispatchedPinned.packets[0]).toMatchObject({
       assignedModel: 'gpt-5.5',
       workerRouting: {
         selectedModel: 'gpt-5.5',
@@ -318,22 +215,15 @@ describe('worker model routing real path', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         subscriptionProfile: 'codex-only',
+        parallelCap: 3,
         defaultDispatchModel: '',
       }),
     }));
     expect(codexOnlyResponse.status).toBe(200);
     const codexOnlyRepoPath = makeRepo();
-    const codexOnlyState: OrchestratorMissionState = {
-      ...createEmptyOrchestratorMissionState(),
-      missionId: 'mission-codex-only-worker-model-route',
-      repoPath: codexOnlyRepoPath,
-      packets: [packetFixture(codexOnlyRepoPath, 'codex-only-worker')],
-    };
-    const dispatchedCodexOnly = await runDispatchTick(codexOnlyState, {
-      storageAdmission: storageAdmission(),
-    });
+    const dispatchedCodexOnly = await createAndDispatchWorker(codexOnlyRepoPath, '90003');
     const codexOnlyCall = (await waitForArgvCalls(4))
-      .find((args) => args.some((arg) => arg.includes('packet codex-only-worker')));
+      .find((args) => args.some((arg) => arg.includes('packet 90003')));
     expect(codexOnlyCall?.[codexOnlyCall.indexOf('--model') + 1]).toBe('gpt-5.6-terra');
     expect(dispatchedCodexOnly.packets[0]).toMatchObject({
       assignedModel: 'gpt-5.6-terra',
