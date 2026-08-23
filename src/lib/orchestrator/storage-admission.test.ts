@@ -20,6 +20,7 @@ import {
   createPacketStorageAdmissionCoordinator,
   PacketStorageAdmissionError,
   reconcileExpiredPacketStorageReservations,
+  resolveDurablePacketStorageOwner,
   type RepoStorageEstimate,
 } from './storage-admission';
 import {
@@ -459,7 +460,7 @@ describe('packet dispatch storage admission', () => {
     });
   });
 
-  it('reconciles leases expired before replay and preserves other authoritative terminal states', async () => {
+  it('uses authoritative terminal state and lease truth when replaying after SQLite reopen', async () => {
     const directory = mkdtempSync(join(os.tmpdir(), 'o8-admission-authoritative-replay-'));
     temporaryDirectories.push(directory);
     const file = join(directory, 'admission.db');
@@ -554,8 +555,8 @@ describe('packet dispatch storage admission', () => {
         receipt: { state: 'reserved', ownerGeneration: 2 },
       });
     }
-    await expect(restarted.reserveForLaunch(packet('expired-replay'))).resolves.toMatchObject({
-      receipt: { state: 'reserved', ownerGeneration: 2 },
+    await expect(restarted.reserveForLaunch(packet('expired-replay'))).rejects.toMatchObject({
+      receipt: { state: 'held', reason: 'lease_expired', ownerGeneration: 1 },
     });
     const committed = await restarted.reserveForLaunch(packet('committed-replay'));
     expect(committed).toMatchObject({
@@ -564,7 +565,7 @@ describe('packet dispatch storage admission', () => {
       baselineWorkspacePaths: null,
     });
     await expect(restarted.commitAfterLaunch(committed)).resolves.toEqual(committed.receipt);
-    expect(estimateCalls).toBe(3);
+    expect(estimateCalls).toBe(2);
     expect(pathCalls).toBe(0);
   });
 
@@ -637,7 +638,7 @@ describe('packet dispatch storage admission', () => {
     ).pluck().get()).toBe(1);
   });
 
-  it('reconciles every expired lease after SQLite reopen', async () => {
+  it('reconciles only an expired owner superseded by durable packet truth after SQLite reopen', async () => {
     const directory = mkdtempSync(join(os.tmpdir(), 'o8-packet-admission-startup-'));
     temporaryDirectories.push(directory);
     const file = join(directory, 'admission.db');
@@ -674,27 +675,61 @@ describe('packet dispatch storage admission', () => {
       now: () => now,
       observeVolume: async () => observed(now, 800),
     });
+    const deadPacket = packet('dead');
+    deadPacket.storageAdmission = {
+      schema: 'o8/packet-storage-admission/v1',
+      state: 'held',
+      reason: 'reserve_breached',
+      reservationId: 'packet-storage:dead:2',
+      mutationId: 'packet-storage-reserve:dead:2',
+      ownerId: 'dead',
+      ownerGeneration: 2,
+      estimateBytes: 200,
+      estimateSource: 'source-size-fallback',
+      historySamples: 0,
+      volumeId: 'device:test',
+      physicalAvailableBytes: 800,
+      reservedBeforeBytes: 600,
+      requiredReserveBytes: 100,
+      dispatchHeadroomBytes: 700,
+      pressure: null,
+      recordedAt: now,
+    };
+    const livePacket = packet('live');
+    livePacket.storageAdmission = {
+      ...deadPacket.storageAdmission,
+      state: 'quarantined',
+      reason: 'launch_effect_unknown',
+      reservationId: 'packet-storage:live:1',
+      mutationId: 'packet-storage-reserve:live:1',
+      ownerId: 'live',
+      ownerGeneration: 1,
+    };
     const result = await reconcileExpiredPacketStorageReservations({
       store,
       now: () => now,
+      resolveOwner: (reservation) => resolveDurablePacketStorageOwner(
+        reservation,
+        reservation.ownerId === 'unknown' ? [] : [deadPacket, livePacket],
+      ),
     });
     expect(result).toEqual({
       inspected: 3,
-      reconciled: 3,
-      retainedLive: 0,
-      retainedUnknown: 0,
+      reconciled: 1,
+      retainedLive: 1,
+      retainedUnknown: 1,
       held: 0,
     });
     expect(db.prepare(`
       SELECT owner_id, state FROM storage_admission_reservations ORDER BY owner_id
     `).all()).toEqual([
       { owner_id: 'dead', state: 'reconciled' },
-      { owner_id: 'live', state: 'reconciled' },
-      { owner_id: 'unknown', state: 'reconciled' },
+      { owner_id: 'live', state: 'reserved' },
+      { owner_id: 'unknown', state: 'reserved' },
     ]);
   });
 
-  it('reconciles an expired lease without requiring fresh volume accounting', async () => {
+  it('reconciles a durably dead expired owner without fresh volume accounting', async () => {
     const db = sqlite();
     let now = 1_000;
     let accountingObserved = true;
@@ -725,9 +760,15 @@ describe('packet dispatch storage admission', () => {
 
     now = 2_000;
     accountingObserved = false;
+    const owner = async () => ({
+      liveness: 'dead' as const,
+      source: 'packet-generation',
+      evidence: 'Durable generation 2 superseded generation 1.',
+    });
     await expect(reconcileExpiredPacketStorageReservations({
       store,
       now: () => now,
+      resolveOwner: owner,
     })).resolves.toMatchObject({ inspected: 1, reconciled: 1, held: 0 });
 
     now = 2_010;
@@ -735,6 +776,7 @@ describe('packet dispatch storage admission', () => {
     await expect(reconcileExpiredPacketStorageReservations({
       store,
       now: () => now,
+      resolveOwner: owner,
     })).resolves.toMatchObject({ inspected: 0, reconciled: 0, held: 0 });
     expect(db.prepare(`
       SELECT mutation_id FROM storage_admission_mutations

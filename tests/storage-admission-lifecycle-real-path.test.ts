@@ -125,7 +125,7 @@ describe('storage reservation lifecycle real paths', () => {
     expect(next.activeReservedBytes).toBe(0);
   });
 
-  it('reconciles an expired reservation without requiring a surviving owner record', async () => {
+  it('retains an expired reservation when owner liveness is unknown', async () => {
     const repoPath = mkdtempSync(join(tmpdir(), 'o8-storage-expired-'));
     roots.push(repoPath);
     let now = 1_000;
@@ -148,8 +148,8 @@ describe('storage reservation lifecycle real paths', () => {
     await expect(reconcileExpiredPacketStorageReservations({
       store,
       now: () => now,
-    })).resolves.toMatchObject({ inspected: 1, reconciled: 1, retainedUnknown: 0 });
-    expect(store.getReservation('packet-storage:expired-ownerless:1')?.state).toBe('reconciled');
+    })).resolves.toMatchObject({ inspected: 1, reconciled: 0, retainedUnknown: 1 });
+    expect(store.getReservation('packet-storage:expired-ownerless:1')?.state).toBe('reserved');
   });
 
   it('does not release a packet reservation while another lane for it is active', async () => {

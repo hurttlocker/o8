@@ -666,15 +666,23 @@ export async function resolveDurablePacketStorageOwner(
   };
 }
 
-/** Lease expiry is the durable authority to stop counting a reservation. */
+/**
+ * Reconcile only expired reservations whose exact logical owner was superseded
+ * by durable owner evidence. Lease expiry makes a row eligible for inspection;
+ * it is not itself proof that a live or unknown owner stopped using storage.
+ */
 export async function reconcileExpiredPacketStorageReservations(
   dependencies: {
     store?: StorageAdmissionStore;
     now?: () => number;
+    resolveOwner?: (
+      reservation: StorageReservationRecord,
+    ) => PacketStorageAdmissionOwnerResolution | Promise<PacketStorageAdmissionOwnerResolution>;
   } = {},
 ): Promise<PacketStorageAdmissionReconciliationResult> {
   const now = dependencies.now ?? Date.now;
   const store = dependencies.store ?? new StorageAdmissionStore(getSqlite(), { now });
+  const resolveOwner = dependencies.resolveOwner ?? resolveDurablePacketStorageOwner;
   const expired = store.listExpiredForReconciliation(now());
   const summary: PacketStorageAdmissionReconciliationResult = {
     inspected: expired.length,
@@ -685,6 +693,15 @@ export async function reconcileExpiredPacketStorageReservations(
   };
 
   for (const reservation of expired) {
+    const owner = await resolveOwner(reservation);
+    if (owner.liveness === 'alive') {
+      summary.retainedLive += 1;
+      continue;
+    }
+    if (owner.liveness !== 'dead') {
+      summary.retainedUnknown += 1;
+      continue;
+    }
     const observedAt = now();
     const result = await store.reconcile({
       mutationId: `packet-storage-reconcile:${reservation.reservationId}:${reservation.generation}:${observedAt}`,
@@ -695,8 +712,8 @@ export async function reconcileExpiredPacketStorageReservations(
       expectedGeneration: reservation.generation,
       ownerLiveness: 'dead',
       ownerDeathReceipt: {
-        source: 'lease-expiration',
-        evidence: `The reservation lease expired at ${reservation.leaseExpiresAt}.`,
+        source: owner.source,
+        evidence: owner.evidence,
         observedAt,
         reservationId: reservation.reservationId,
         volumeId: reservation.volumeId,
