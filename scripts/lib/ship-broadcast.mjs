@@ -150,9 +150,11 @@ function defaultShipPlan(root) {
     prepare: [{ command: process.execPath, args: [join(root, 'scripts/detach-stale-dmg.mjs')] }],
     build: { command: 'npm', args: ['run', 'tauri:build:nonotary'] },
     notarize: { command: 'npm', args: ['run', 'sign-and-notarize'] },
-    publish: { command: process.execPath, args: [join(root, 'scripts/release.mjs'), '--publish-only'] },
-    cleanup: [
+    publish: { command: process.execPath, args: [join(root, 'scripts/release.mjs')] },
+    alwaysCleanup: [
       { command: process.execPath, args: [join(root, 'scripts/detach-stale-dmg.mjs')] },
+    ],
+    successOnlyCleanup: [
       {
         command: process.execPath,
         args: [join(root, 'scripts/postship-cleanup.mjs'), '--best-effort'],
@@ -218,6 +220,7 @@ export async function runShipWorkflow({ root, version }) {
   const emitted = new Set();
   let activeStage = 'pre-release cleanup';
   let mirrorFailed = false;
+  let shipSucceeded = false;
 
   const emitMilestone = (marker) => {
     if (emitted.has(marker.label)) return;
@@ -258,11 +261,16 @@ export async function runShipWorkflow({ root, version }) {
     } else {
       emitMilestone(DEFAULT_STAGE_MARKERS[4]);
     }
+    shipSucceeded = true;
   } catch (error) {
     broadcast.failure(activeStage);
     throw error;
   } finally {
-    for (const command of plan.cleanup ?? []) {
+    const cleanupCommands = [
+      ...(plan.alwaysCleanup ?? []),
+      ...(shipSucceeded ? plan.successOnlyCleanup ?? [] : []),
+    ];
+    for (const command of cleanupCommands) {
       try {
         await runCommand(command, root);
       } catch (error) {

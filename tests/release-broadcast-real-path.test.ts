@@ -13,18 +13,29 @@ interface Fixture {
   planPath: string;
   broadcastPath: string;
   broadcastLog: string;
+  cleanupLog: string;
 }
 
-function makeFixture(options: { failNotary?: boolean; failMirror?: boolean } = {}): Fixture {
+function makeFixture(options: {
+  failAlwaysCleanup?: boolean;
+  failMirror?: boolean;
+  failNotary?: boolean;
+} = {}): Fixture {
   const root = mkdtempSync(join(tmpdir(), 'o8-release-broadcast-'));
   roots.push(root);
   const stageStub = join(root, 'stage-stub.mjs');
   const broadcastPath = join(root, 'o8-stub.mjs');
   const broadcastLog = join(root, 'broadcast.jsonl');
+  const cleanupLog = join(root, 'cleanup.log');
   const planPath = join(root, 'plan.json');
 
   writeFileSync(stageStub, `
+import { appendFileSync } from 'node:fs';
 const stage = process.argv[2];
+if (stage.endsWith('cleanup')) {
+  appendFileSync(process.env.O8_STUB_CLEANUP_LOG, stage + '\\n');
+  if (process.env.O8_STUB_FAIL_CLEANUP === '1') process.exit(19);
+}
 if (stage === 'notarize') {
   console.log('[sign-and-notarize] zipping for notarization');
   console.log('[sign-and-notarize] submitting to Apple notary (stub)');
@@ -57,10 +68,15 @@ if (process.env.O8_STUB_FAIL_BROADCAST === '1') process.exit(23);
     build: command('build'),
     notarize: command('notarize', options.failNotary ? { O8_STUB_FAIL_NOTARY: '1' } : {}),
     publish: command('publish', options.failMirror ? { O8_STUB_FAIL_MIRROR: '1' } : {}),
-    cleanup: [],
+    alwaysCleanup: [
+      command('always-cleanup', options.failAlwaysCleanup ? { O8_STUB_FAIL_CLEANUP: '1' } : {}),
+    ],
+    successOnlyCleanup: [
+      command('success-cleanup'),
+    ],
   }));
 
-  return { root, planPath, broadcastPath, broadcastLog };
+  return { root, planPath, broadcastPath, broadcastLog, cleanupLog };
 }
 
 function runRelease(fixture: Fixture, failBroadcast = false) {
@@ -74,9 +90,18 @@ function runRelease(fixture: Fixture, failBroadcast = false) {
       O8_RELEASE_BROADCAST_CLI: fixture.broadcastPath,
       O8_RELEASE_BROADCAST_TIMEOUT_MS: '1000',
       O8_TEST_BROADCAST_LOG: fixture.broadcastLog,
+      O8_STUB_CLEANUP_LOG: fixture.cleanupLog,
       O8_STUB_FAIL_BROADCAST: failBroadcast ? '1' : '0',
     },
   });
+}
+
+function readCleanupCalls(fixture: Fixture): string[] {
+  try {
+    return readFileSync(fixture.cleanupLog, 'utf8').trim().split('\n').filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 async function readBroadcastCalls(fixture: Fixture, expectedCount: number): Promise<string[][]> {
@@ -157,5 +182,36 @@ describe('release Broadcast milestones through the release entry point', () => {
     const calls = await readBroadcastCalls(fixture, 7);
     expect(calls).toHaveLength(7);
     expect(calls.at(-1)).toEqual(['broadcast', 'focus', '--clear']);
+  });
+
+  it('runs both cleanup classes after a successful ship', () => {
+    const fixture = makeFixture();
+    const result = runRelease(fixture);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(readCleanupCalls(fixture)).toEqual(['always-cleanup', 'success-cleanup']);
+  });
+
+  it('runs only always-safe cleanup after a failed ship', () => {
+    const fixture = makeFixture({ failNotary: true });
+    const result = runRelease(fixture);
+
+    expect(result.status).toBe(1);
+    expect(readCleanupCalls(fixture)).toEqual(['always-cleanup']);
+  });
+
+  it('warns without changing the ship outcome when cleanup fails', () => {
+    const fixture = makeFixture({ failAlwaysCleanup: true });
+    const result = runRelease(fixture);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toContain('[release] post-ship cleanup skipped:');
+    expect(readCleanupCalls(fixture)).toEqual(['always-cleanup', 'success-cleanup']);
+
+    const failedFixture = makeFixture({ failAlwaysCleanup: true, failNotary: true });
+    const failedResult = runRelease(failedFixture);
+    expect(failedResult.status).toBe(1);
+    expect(failedResult.stderr).toContain('[release] post-ship cleanup skipped:');
+    expect(readCleanupCalls(failedFixture)).toEqual(['always-cleanup']);
   });
 });
