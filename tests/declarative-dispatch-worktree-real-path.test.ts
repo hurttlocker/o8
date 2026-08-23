@@ -68,7 +68,6 @@ vi.mock('@/lib/worktree', async (importOriginal) => {
         while (!provisioningRace.releaseProvisioning) {
           await new Promise((resolve) => setTimeout(resolve, 5));
         }
-        await actual.prepareLaunchWorktree(options);
         throw new Error(worktreeFailure.message);
       }
       if (worktreeFailure.enabled) {
@@ -347,14 +346,22 @@ describe('declarative packet dispatch worktree reachability', () => {
     await controlPlane.withLockedState((fresh) => {
       mergeDispatchTickOutcome(fresh, initial, dispatched);
     });
+    const persistedPacket = controlPlane.readOrchestratorControlPlaneState().packets
+      .find((candidate) => candidate.id === packetId);
+
+    controlPlane.writeOrchestratorControlPlaneState({
+      ...initial,
+      packets: [],
+      updatedAt: new Date().toISOString(),
+    });
+    const postFailureSweep = await ancestry.sweepPacketsMergedByAncestry();
 
     expect(sweepResult.merged).toBe(0);
+    expect(postFailureSweep.merged).toBe(0);
     expect(laneDuringProvisioning).toMatchObject({
       status: 'launching',
       outcome: null,
     });
-    const persistedPacket = controlPlane.readOrchestratorControlPlaneState().packets
-      .find((candidate) => candidate.id === packetId);
     expect(persistedPacket).toMatchObject({
       status: 'failed',
       blockedReason: expect.stringContaining('packet_worktree_provision_failed'),
