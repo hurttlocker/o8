@@ -489,7 +489,7 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
       ?? new Date().toISOString(),
     model: telemetry?.model?.trim()
       || agent?.model?.trim()
-      || runtimeId
+      || lane?.model?.trim()
       || 'unknown',
     ...approvalReviewContext,
   };
