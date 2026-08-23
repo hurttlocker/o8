@@ -101,6 +101,7 @@ export function normalizeOpencodeEvents(rawJsonl: string): TranscriptEvent[] {
   if (!rawJsonl || typeof rawJsonl !== 'string') return [];
 
   const out: TranscriptEvent[] = [];
+  const emittedTools = new Map<string, { callIndex: number; resultIndex?: number }>();
   const fallbackTs = new Date().toISOString();
   let seq = 0;
   const nextSeq = () => (seq += 1);
@@ -138,30 +139,42 @@ export function normalizeOpencodeEvents(rawJsonl: string): TranscriptEvent[] {
       const input = state?.input ?? part?.input ?? {};
       const args = argsPreview(input);
 
-      const callSeq = nextSeq();
-      out.push({
-        seq: callSeq,
-        ts,
+      const emitted = emittedTools.get(callId);
+      const previousCall = emitted ? out[emitted.callIndex] : undefined;
+      const toolCall: TranscriptEvent = {
+        seq: previousCall?.seq ?? nextSeq(),
+        ts: previousCall?.ts ?? ts,
         type: 'tool_call',
         tool,
         args,
         summary: clip(args || `call ${tool}`, MAX_SUMMARY),
-      });
+      };
+      if (emitted) out[emitted.callIndex] = toolCall;
+      else {
+        out.push(toolCall);
+        emittedTools.set(callId, { callIndex: out.length - 1 });
+      }
 
       if (status === 'completed' || status === 'error') {
         const output = state?.output ?? state?.result ?? '';
         const ok = status !== 'error';
         const summaryRaw = typeof output === 'string' ? output : argsPreview(output);
-        out.push({
-          seq: nextSeq(),
-          ts,
+        const current = emittedTools.get(callId)!;
+        const previousResult = current.resultIndex === undefined ? undefined : out[current.resultIndex];
+        const toolResult: TranscriptEvent = {
+          seq: previousResult?.seq ?? nextSeq(),
+          ts: previousResult?.ts ?? ts,
           type: 'tool_result',
           tool,
           ok,
           summary: clip(summaryRaw || (ok ? 'ok' : 'error'), MAX_SUMMARY),
-        });
-        // Use callId so listeners can pair if they care; suppress unused warning
-        void callId;
+        };
+        if (current.resultIndex === undefined) {
+          out.push(toolResult);
+          current.resultIndex = out.length - 1;
+        } else {
+          out[current.resultIndex] = toolResult;
+        }
       }
       continue;
     }

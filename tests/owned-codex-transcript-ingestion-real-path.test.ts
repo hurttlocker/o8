@@ -60,6 +60,80 @@ afterAll(() => {
 });
 
 describe('owned Codex run-log transcript ingestion real path', () => {
+  it('deduplicates replayed command items without collapsing reused item ids', async () => {
+    const sessionId = 'codex-owned-replayed-items';
+    const sessionKey = `codex-owned:${sessionId}`;
+    const sessionDir = join(ownedCodexRoot, sessionId);
+    const runsDir = join(sessionDir, 'runs');
+    const firstStdoutPath = join(runsDir, 'first.jsonl');
+    const secondStdoutPath = join(runsDir, 'second.jsonl');
+    const stderrPath = join(runsDir, 'run.stderr.log');
+    const firstCommand = '/bin/echo first';
+    const secondCommand = '/bin/echo second';
+    const commandEvents = (command: string, output: string) => [
+      JSON.stringify({
+        type: 'item.started',
+        item: { id: 'item_1', type: 'command_execution', command },
+      }),
+      JSON.stringify({
+        type: 'item.completed',
+        item: {
+          id: 'item_1',
+          type: 'command_execution',
+          command,
+          aggregated_output: output,
+          exit_code: 0,
+        },
+      }),
+    ];
+
+    mkdirSync(runsDir, { recursive: true });
+    const firstEvents = commandEvents(firstCommand, 'first');
+    writeFileSync(firstStdoutPath, `${firstEvents.join('\n')}\n`);
+    writeFileSync(secondStdoutPath, `${[
+      ...firstEvents,
+      ...commandEvents(secondCommand, 'second'),
+    ].join('\n')}\n`);
+    writeFileSync(stderrPath, '');
+    const recentRuns = [
+      { id: 'first', startedAt: '2026-08-23T12:00:00.000Z', stdoutPath: firstStdoutPath },
+      { id: 'second', startedAt: '2026-08-23T12:01:00.000Z', stdoutPath: secondStdoutPath },
+    ].map((run) => ({
+      ...run,
+      mode: 'launch',
+      prompt: 'Exercise replayed transcript items.',
+      pid: process.pid,
+      stderrPath,
+      outcome: 'completed',
+    }));
+    writeFileSync(join(sessionDir, 'session.json'), JSON.stringify({
+      surfaceId: sessionKey,
+      sessionDir,
+      cwd: dataDir,
+      repoPath: dataDir,
+      title: 'Replayed items fixture',
+      createdAt: recentRuns[0]!.startedAt,
+      updatedAt: recentRuns[1]!.startedAt,
+      latestPrompt: recentRuns[1]!.prompt,
+      latestSummary: 'completed',
+      activeRun: null,
+      recentRuns,
+    }));
+
+    const readback = await readSessionTranscriptEvents(sessionKey);
+    const calls = readback.events.filter((event) => event.type === 'tool_call');
+    const results = readback.events.filter((event) => event.type === 'tool_result');
+
+    expect(calls).toEqual([
+      expect.objectContaining({ args: firstCommand }),
+      expect.objectContaining({ args: secondCommand }),
+    ]);
+    expect(results).toEqual([
+      expect.objectContaining({ summary: 'first' }),
+      expect.objectContaining({ summary: 'second' }),
+    ]);
+  });
+
   it('streams every later append through mobile sync and advances transcript activity', async () => {
     const sessionId = 'codex-owned-live-append';
     const sessionKey = `codex-owned:${sessionId}`;

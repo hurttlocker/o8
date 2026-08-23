@@ -136,4 +136,35 @@ describe('worker transcript persisted packet route', () => {
       expect.objectContaining({ type: 'assistant', text: 'Second burst reached the pane.' }),
     ]));
   });
+
+  it('emits one call and one result while a tool part advances status', async () => {
+    const callID = 'call-status-progression';
+    const timestamp = '2026-08-23T04:00:05.000Z';
+    appendFileSync(stdoutPath, ['idle', 'running', 'completed'].map((status) => JSON.stringify({
+      type: 'tool_use',
+      timestamp,
+      part: {
+        type: 'tool',
+        tool: 'shell',
+        callID,
+        state: {
+          status,
+          input: { command: 'git status --short' },
+          ...(status === 'completed' ? { output: 'clean' } : {}),
+        },
+      },
+    })).join('\n') + '\n');
+
+    const response = await getPacketTranscript(request());
+    const payload = await response.json() as { events: Array<Record<string, unknown>> };
+    const matchingCalls = payload.events.filter((event) => (
+      event.type === 'tool_call' && event.args === JSON.stringify({ command: 'git status --short' })
+    ));
+    const matchingResults = payload.events.filter((event) => (
+      event.type === 'tool_result' && event.summary === 'clean'
+    ));
+
+    expect(matchingCalls).toHaveLength(1);
+    expect(matchingResults).toHaveLength(1);
+  });
 });

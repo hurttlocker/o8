@@ -91,6 +91,7 @@ function normalizeTs(raw: unknown, fallback: string): string {
 }
 
 interface PendingCall { seq: number; tool: string; }
+interface EmittedTool { callIndex: number; resultIndex?: number; tool: string; }
 
 /**
  * Normalize raw Codex JSONL into a TranscriptEvent stream. Never throws —
@@ -105,27 +106,52 @@ export function normalizeCodexEvents(
 
   const out: TranscriptEvent[] = [];
   const pending = new Map<string, PendingCall>();
+  const emitted = new Map<string, EmittedTool>();
   const fallbackTs = fallbackTimestamp;
   let seq = 0;
   const nextSeq = () => (seq += 1);
 
   const pushToolCall = (ts: string, callId: string, tool: string, args: string) => {
+    const previous = emitted.get(callId);
+    if (previous) {
+      const previousCall = out[previous.callIndex];
+      out[previous.callIndex] = {
+        seq: previousCall!.seq,
+        ts: previousCall!.ts,
+        type: 'tool_call',
+        tool,
+        args,
+        summary: clip(args || `call ${tool}`, MAX_SUMMARY),
+      };
+      previous.tool = tool;
+      pending.set(callId, { seq: previousCall!.seq, tool });
+      return;
+    }
     const thisSeq = nextSeq();
     pending.set(callId, { seq: thisSeq, tool });
     const summary = clip(args || `call ${tool}`, MAX_SUMMARY);
     out.push({ seq: thisSeq, ts, type: 'tool_call', tool, args, summary });
+    emitted.set(callId, { callIndex: out.length - 1, tool });
   };
 
   const pushToolResult = (ts: string, callId: string | undefined, fallbackTool: string, rawOutput: string, exitCode: number | undefined) => {
     const pendingCall = callId ? pending.get(callId) : undefined;
     if (callId) pending.delete(callId);
-    const tool = pendingCall?.tool ?? fallbackTool;
+    const previous = callId ? emitted.get(callId) : undefined;
+    const tool = pendingCall?.tool ?? previous?.tool ?? fallbackTool;
     const output = clip(rawOutput, MAX_SUMMARY);
     const ok = exitCode === undefined ? true : exitCode === 0;
-    out.push({
-      seq: nextSeq(), ts, type: 'tool_result', tool, ok,
+    const previousResult = previous?.resultIndex === undefined ? undefined : out[previous.resultIndex];
+    const result: TranscriptEvent = {
+      seq: previousResult?.seq ?? nextSeq(), ts: previousResult?.ts ?? ts, type: 'tool_result', tool, ok,
       summary: output || (ok ? 'ok' : `exit ${exitCode}`),
-    });
+    };
+    if (previous && previous.resultIndex !== undefined) {
+      out[previous.resultIndex] = result;
+      return;
+    }
+    out.push(result);
+    if (previous) previous.resultIndex = out.length - 1;
   };
 
   for (const rawLine of rawJsonl.split(/\r?\n/)) {
@@ -165,7 +191,9 @@ export function normalizeCodexEvents(
       }
 
       if (itemType === 'command_execution') {
-        const callId = readStr(item, 'id');
+        const command = readStr(item, 'command');
+        const itemId = readStr(item, 'id');
+        const callId = itemId && command ? `${itemId}\u0000${command}` : itemId;
         pushToolResult(ts, callId, 'exec_command', extractText(item!.aggregated_output), readNum(item, 'exit_code'));
         continue;
       }
@@ -197,8 +225,10 @@ export function normalizeCodexEvents(
     if (type === 'item.started') {
       const item = safeObject(parsed.item);
       if (item && readStr(item, 'type') === 'command_execution') {
-        const callId = readStr(item, 'id') || `exec-${seq + 1}`;
-        pushToolCall(ts, callId, 'exec_command', clip(readStr(item, 'command'), MAX_ARGS));
+        const command = readStr(item, 'command');
+        const itemId = readStr(item, 'id');
+        const callId = itemId && command ? `${itemId}\u0000${command}` : itemId || `exec-${seq + 1}`;
+        pushToolCall(ts, callId, 'exec_command', clip(command, MAX_ARGS));
         continue;
       }
       if (item && readStr(item, 'type') === 'tool_use') {
