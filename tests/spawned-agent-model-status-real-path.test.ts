@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { OrchestratorMissionState, OrchestratorPacket, WorkerRouting } from '@/lib/orchestrator/types';
+import type { PacketStorageAdmissionCoordinator } from '@/lib/orchestrator/storage-admission';
 
 const testCacheRoot = join(process.cwd(), 'node_modules', '.cache');
 mkdirSync(testCacheRoot, { recursive: true });
@@ -77,6 +78,57 @@ function packet(repoPath: string, id: string, routing: WorkerRouting): Orchestra
   };
 }
 
+function permissiveAdmission(): PacketStorageAdmissionCoordinator {
+  return {
+    reserveForLaunch: async (candidate) => {
+      const now = Date.now();
+      const receipt = {
+        schema: 'o8/packet-storage-admission/v1' as const,
+        state: 'reserved' as const,
+        reason: 'admitted',
+        reservationId: `packet-storage:${candidate.id}:1`,
+        mutationId: `packet-storage-reserve:${candidate.id}:1`,
+        ownerId: candidate.id,
+        ownerGeneration: 1,
+        estimateBytes: 1,
+        estimateSource: 'source-size-fallback' as const,
+        historySamples: 0,
+        volumeId: 'device:test',
+        physicalAvailableBytes: 10,
+        reservedBeforeBytes: 0,
+        requiredReserveBytes: 0,
+        dispatchHeadroomBytes: 10,
+        pressure: null,
+        recordedAt: now,
+      };
+      return {
+        receipt,
+        reservation: {
+          reservationId: receipt.reservationId,
+          volumeId: receipt.volumeId,
+          targetPath: candidate.workspaceTargetPath!,
+          exactBytes: 1,
+          ownerId: candidate.id,
+          ownerGeneration: 1,
+          generation: 1,
+          state: 'reserved',
+          leaseExpiresAt: now + 60_000,
+          preMeasurement: null as never,
+          postMeasurement: null,
+          lastMutationId: receipt.mutationId,
+          lastReason: receipt.reason,
+          createdAt: now,
+          updatedAt: now,
+          terminalAt: null,
+        },
+        baselineWorkspacePaths: [],
+      };
+    },
+    commitAfterLaunch: async (lease) => ({ ...lease.receipt, state: 'committed', reason: 'committed' }),
+    settleFailedLaunch: async (_candidate, lease) => ({ ...lease.receipt, state: 'released', reason: 'released' }),
+  };
+}
+
 beforeAll(() => {
   vi.stubGlobal('fetch', vi.fn(async () => Response.json({ ok: true })));
 });
@@ -114,10 +166,11 @@ describe('spawned agent resolved model status real path', () => {
     });
     if (!guarded.ok) throw new Error(guarded.message);
     const claudeRouting = resolveWorkerRouting({
-      requestedRuntime: guarded.requestedRuntime,
-      requestedModel: guarded.requestedModel,
+      requestedRuntime: 'claude-code',
+      requestedModel: MODEL_IDS.codexDefault,
       source: 'resolved-model-status-test-guarded',
     });
+    expect(claudeRouting).toMatchObject({ requestedModel: MODEL_IDS.codexDefault, selectedModel: null });
 
     const codexRepoPath = makeRepo();
     const opencodeRepoPath = makeRepo();
@@ -128,34 +181,22 @@ describe('spawned agent resolved model status real path', () => {
       packet(opencodeRepoPath, 'opencode-packet', opencodeRouting),
       packet(claudeRepoPath, 'guarded-claude-packet', claudeRouting),
     ];
-    const { dispatch } = await import('@/lib/lane/commands');
+    const { launchPacketWithStorageAdmission } = await import('@/lib/orchestrator/dispatch-packet-launch');
     for (const candidate of packets) {
-      const opened = await dispatch({
-        verb: 'open_lane',
-        repoPath: candidate.workspaceTargetPath!,
-        branch: candidate.branchTarget,
-        runtime: candidate.runtime,
-        packetId: candidate.id,
-        label: candidate.title,
-        actor: 'orchestrator',
+      const launched = await launchPacketWithStorageAdmission({
+        packet: candidate,
+        allPackets: packets,
+        workerRouting: candidate.workerRouting!,
+        storageAdmission: permissiveAdmission(),
       });
-      expect(opened.ok).toBe(true);
-      const launched = await dispatch({
-        verb: 'launch_session',
-        laneId: opened.laneId,
-        prompt: candidate.summary,
-        model: candidate.workerRouting?.selectedModel ?? undefined,
-        actor: 'orchestrator',
-      });
-      expect(launched.ok).toBe(true);
       candidate.status = 'running';
       candidate.lane = {
         tileId: 'test',
         tabId: 'test',
         repoPath: candidate.workspaceTargetPath,
-        runtime: candidate.runtime,
-        laneId: opened.laneId,
-        sessionKey: launched.lane?.sessionKey ?? null,
+        runtime: launched.workerRouting.selectedRuntime,
+        laneId: launched.laneId,
+        sessionKey: launched.sessionKey,
       };
     }
     const state: OrchestratorMissionState = {
