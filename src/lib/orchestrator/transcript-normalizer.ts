@@ -107,12 +107,25 @@ export function normalizeCodexEvents(
   const out: TranscriptEvent[] = [];
   const pending = new Map<string, PendingCall>();
   const emitted = new Map<string, EmittedTool>();
+  /** tool+args+timestamp → the call id that first emitted it. See pushToolCall. */
+  const identityAlias = new Map<string, string>();
   const fallbackTs = fallbackTimestamp;
   let seq = 0;
   const nextSeq = () => (seq += 1);
 
   const pushToolCall = (ts: string, callId: string, tool: string, args: string) => {
-    const previous = emitted.get(callId);
+    // Codex carries ONE command in several stream shapes -- `exec_command_begin`,
+    // `item.started`, `response_item` -- and each derives its call id
+    // differently (`call_id` vs `id` vs `id\0command`). Keyed on id alone, the
+    // same command emitted four identical `tool_call` rows sharing a timestamp
+    // to the millisecond, and at a 50-event cap those copies displaced real
+    // history (#1845). A genuine re-run carries a distinct timestamp, so
+    // tool+args+ts identifies the emission itself rather than the shape that
+    // announced it.
+    const identity = `${tool}\u0000${args}\u0000${ts}`;
+    const aliasId = identityAlias.get(identity);
+    const previous = emitted.get(callId)
+      ?? (aliasId !== undefined ? emitted.get(aliasId) : undefined);
     if (previous) {
       const previousCall = out[previous.callIndex];
       out[previous.callIndex] = {
@@ -124,6 +137,9 @@ export function normalizeCodexEvents(
         summary: clip(args || `call ${tool}`, MAX_SUMMARY),
       };
       previous.tool = tool;
+      // Every id shape naming this call must reach the same record, so the
+      // result pairs with the row already on screen instead of orphaning.
+      emitted.set(callId, previous);
       pending.set(callId, { seq: previousCall!.seq, tool });
       return;
     }
@@ -132,6 +148,7 @@ export function normalizeCodexEvents(
     const summary = clip(args || `call ${tool}`, MAX_SUMMARY);
     out.push({ seq: thisSeq, ts, type: 'tool_call', tool, args, summary });
     emitted.set(callId, { callIndex: out.length - 1, tool });
+    identityAlias.set(identity, callId);
   };
 
   const pushToolResult = (ts: string, callId: string | undefined, fallbackTool: string, rawOutput: string, exitCode: number | undefined) => {
