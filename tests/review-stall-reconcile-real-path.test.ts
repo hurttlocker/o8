@@ -25,6 +25,7 @@ const h = vi.hoisted(() => ({
     laneId: string;
     note: string;
     approvalId?: string;
+    reason?: string;
   },
   settleSuccessfulDispatch: true,
   dispatch: vi.fn(),
@@ -319,6 +320,87 @@ describe('missed merge dispatch after second-pass agreement (#1856)', () => {
     expect(eventsWithVerb(lane.id, 'merge_dispatch_failed')).toHaveLength(0);
   });
 
+  it.each([
+    ['fetch_unreachable', 'the base branch fetch is temporarily unavailable'],
+    ['typecheck_auto_retry', 'a fresh worker is repairing the post-rebase typecheck'],
+  ] as const)('records %s as deferred recovery instead of a terminal blocker', async (reason, note) => {
+    const repoDir = createRepo();
+    const slug = reason.replace(/_/g, '-');
+    git(repoDir, ['checkout', '-q', '-b', `inline/${slug}`]);
+    const packetId = `pkt-${slug}`;
+    const lane = createLane({
+      repoPath: repoDir,
+      worktreePath: repoDir,
+      branch: `inline/${slug}`,
+      baseBranch: 'main',
+      runtime: 'codex',
+      label: `${slug} fixture`,
+      packetId,
+      sessionKey: `test-runtime:${slug}`,
+    });
+    const headSha = commitHighRiskChange(repoDir, slug);
+    setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
+    const approvalId = await approveHighRiskHead({ packetId, laneId: lane.id, headSha });
+    markSecondPassAgreed(approvalId);
+    h.mergeResult = { ok: false, laneId: lane.id, note, reason };
+
+    await reconcileReviewStalls();
+
+    expect(h.dispatch).toHaveBeenCalledTimes(1);
+    expect(eventsWithVerb(lane.id, 'merge_dispatch_attempted')).toHaveLength(1);
+    const deferred = eventsWithVerb(lane.id, 'merge_dispatch_deferred');
+    expect(deferred).toHaveLength(1);
+    expect(deferred[0]!.payload).toMatchObject({ approvalId, attempt: 1, recovery: reason });
+    expect(eventsWithVerb(lane.id, 'merge_dispatch_failed')).toHaveLength(0);
+    expect(eventsWithVerb(lane.id, 'review_queue_blocked')).toHaveLength(0);
+    expect(getLane(lane.id)?.status).toBe('reviewing');
+  });
+
+  it('retries a deferred fetch recovery after its lease, then settles success', async () => {
+    const repoDir = createRepo();
+    git(repoDir, ['checkout', '-q', '-b', 'inline/deferred-fetch-retry']);
+    const packetId = 'pkt-deferred-fetch-retry';
+    const lane = createLane({
+      repoPath: repoDir,
+      worktreePath: repoDir,
+      branch: 'inline/deferred-fetch-retry',
+      baseBranch: 'main',
+      runtime: 'codex',
+      label: 'deferred fetch retry fixture',
+      packetId,
+      sessionKey: 'test-runtime:deferred-fetch-retry',
+    });
+    const headSha = commitHighRiskChange(repoDir, 'deferred-fetch-retry');
+    setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
+    const approvalId = await approveHighRiskHead({ packetId, laneId: lane.id, headSha });
+    markSecondPassAgreed(approvalId);
+    h.mergeResult = {
+      ok: false,
+      laneId: lane.id,
+      note: 'origin fetch unavailable',
+      reason: 'fetch_unreachable',
+    };
+
+    await reconcileReviewStalls();
+    await reconcileReviewStalls();
+    expect(h.dispatch).toHaveBeenCalledTimes(1);
+
+    const deferred = eventsWithVerb(lane.id, 'merge_dispatch_deferred')[0]!;
+    getSqlite().prepare(
+      'UPDATE lane_events SET timestamp = ? WHERE id = ?',
+    ).run(new Date(Date.now() - 120_000).toISOString(), deferred.id);
+    h.mergeResult = { ok: true, laneId: lane.id, note: 'merged after fetch recovered' };
+
+    await reconcileReviewStalls();
+
+    expect(h.dispatch).toHaveBeenCalledTimes(2);
+    expect(eventsWithVerb(lane.id, 'merge_dispatch_attempted')).toHaveLength(2);
+    expect(eventsWithVerb(lane.id, 'merge_dispatch_succeeded')).toHaveLength(1);
+    expect(eventsWithVerb(lane.id, 'merge_dispatch_failed')).toHaveLength(0);
+    expect(eventsWithVerb(lane.id, 'review_queue_blocked')).toHaveLength(0);
+    expect(getLane(lane.id)?.status).toBe('completed');
+  });
+
   it('rejects ok:true when dispatch produces no durable merge settlement', async () => {
     const repoDir = createRepo();
     git(repoDir, ['checkout', '-q', '-b', 'inline/false-success']);
@@ -338,6 +420,7 @@ describe('missed merge dispatch after second-pass agreement (#1856)', () => {
     const approvalId = await approveHighRiskHead({ packetId, laneId: lane.id, headSha });
     markSecondPassAgreed(approvalId);
     h.settleSuccessfulDispatch = false;
+    h.mergeResult.reason = 'fetch_unreachable';
 
     await reconcileReviewStalls();
 
@@ -399,7 +482,7 @@ describe('missed merge dispatch after second-pass agreement (#1856)', () => {
     expect(getLane(lane.id)?.status).toBe('awaiting_orchestrator');
   });
 
-  it('surfaces a blocker instead of retrying an interrupted dispatch forever', async () => {
+  it('surfaces a blocker instead of deferring merge recovery forever', async () => {
     const repoDir = createRepo();
     git(repoDir, ['checkout', '-q', '-b', 'inline/exhausted-merge']);
     const packetId = 'pkt-exhausted-merge';
@@ -430,6 +513,18 @@ describe('missed merge dispatch after second-pass agreement (#1856)', () => {
       getSqlite().prepare(
         'UPDATE lane_events SET timestamp = ? WHERE id = ?',
       ).run(new Date(Date.now() - 120_000).toISOString(), event.id);
+      const deferred = recordLaneEvent(lane.id, 'merge_dispatch_deferred', 'system', {
+        packetId,
+        approvalId,
+        reviewedHeadSha: headSha,
+        trigger: 'stall_reconcile',
+        attemptId: `merge-dispatch-exhausted-${attempt}`,
+        attempt,
+        recovery: 'fetch_unreachable',
+      });
+      getSqlite().prepare(
+        'UPDATE lane_events SET timestamp = ? WHERE id = ?',
+      ).run(new Date(Date.now() - 120_000).toISOString(), deferred.id);
     }
 
     await reconcileReviewStalls();

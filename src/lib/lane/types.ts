@@ -343,6 +343,10 @@ export type LaneEventVerb =
   // The claimed dispatch reached a durable merge settlement. Payload adds
   // { attemptId, attempt, mergeSha, status, note }.
   | 'merge_dispatch_succeeded'
+  // The merge path started its own bounded recovery (for example an automatic
+  // typecheck rerun or a retryable fetch outage). This remains claimable after
+  // the dispatch lease expires; it is not a terminal failure.
+  | 'merge_dispatch_deferred'
   // That dispatch did not merge. Payload adds { note, reason, routedApprovalId }
   // — routedApprovalId set means it became an operator approval card.
   | 'merge_dispatch_failed'

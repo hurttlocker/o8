@@ -191,6 +191,7 @@ function createFetchUnreachableResult(
     ok: false,
     laneId: command.laneId,
     note: `Cannot refresh ${lane.baseBranch} before rebase: ${error.message}`,
+    reason: 'fetch_unreachable',
   };
 }
 
@@ -353,6 +354,7 @@ async function handlePostRebaseVerifyFailure(
     ok: false,
     laneId: command.laneId,
     note: `Typecheck failed after rebase onto ${lane.baseBranch}. Auto-rerun dispatched with the tsc output as feedback; the packet will retry in a fresh worktree.\n\n${truncatedOutput}`,
+    reason: 'typecheck_auto_retry',
   };
 }
 

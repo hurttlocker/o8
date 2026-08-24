@@ -42,9 +42,21 @@ type MergeDispatchClaim =
   | { kind: 'exhausted' | 'unavailable'; reason: string };
 
 interface MergeDispatchLedgerRow {
-  verb: 'merge_dispatch_attempted' | 'merge_dispatch_succeeded' | 'merge_dispatch_failed';
+  verb:
+    | 'merge_dispatch_attempted'
+    | 'merge_dispatch_succeeded'
+    | 'merge_dispatch_deferred'
+    | 'merge_dispatch_failed';
   payload_json: string;
   timestamp: string;
+}
+
+type MergeDispatchRecovery = 'fetch_unreachable' | 'typecheck_auto_retry';
+
+function readMergeDispatchRecovery(reason: string | undefined): MergeDispatchRecovery | null {
+  return reason === 'fetch_unreachable' || reason === 'typecheck_auto_retry'
+    ? reason
+    : null;
 }
 
 function claimMergeDispatch(input: {
@@ -59,7 +71,8 @@ function claimMergeDispatch(input: {
       const rows = sqlite.prepare(`
         SELECT verb, payload_json, timestamp FROM lane_events
         WHERE lane_id = ? AND verb IN (
-          'merge_dispatch_attempted', 'merge_dispatch_succeeded', 'merge_dispatch_failed'
+          'merge_dispatch_attempted', 'merge_dispatch_succeeded',
+          'merge_dispatch_deferred', 'merge_dispatch_failed'
         ) ORDER BY rowid ASC
       `).all(input.lane.id) as MergeDispatchLedgerRow[];
       let attempts = 0;
@@ -93,6 +106,10 @@ function claimMergeDispatch(input: {
             reason: 'This authorization already has a durable merge settlement.',
             routedApprovalId: null,
           };
+        } else if (row.verb === 'merge_dispatch_deferred') {
+          const parsed = Date.parse(row.timestamp);
+          pendingAt = Number.isFinite(parsed) ? parsed : 0;
+          outcome = null;
         } else {
           pendingAt = null;
           outcome = {
@@ -192,12 +209,14 @@ export async function dispatchSecondPassMerge(input: {
   let ok = false;
   let note = '';
   let routedApprovalId: string | null = null;
+  let recovery: MergeDispatchRecovery | null = null;
   try {
     const { dispatch } = await import('@/lib/lane/commands');
     const mergeResult = await dispatch({ verb: 'merge', laneId: lane.id, actor: 'orchestrator' });
     ok = mergeResult.ok;
     note = mergeResult.note ?? '';
     routedApprovalId = mergeResult.approvalId ?? null;
+    recovery = ok ? null : readMergeDispatchRecovery(mergeResult.reason);
     if (ok) {
       const settledLane = getLane(lane.id);
       const mergeSha = 'mergeSha' in mergeResult && typeof mergeResult.mergeSha === 'string'
@@ -224,6 +243,23 @@ export async function dispatchSecondPassMerge(input: {
   } catch (error) {
     ok = false;
     note = error instanceof Error ? error.message : String(error);
+  }
+
+  if (!ok && !routedApprovalId && recovery) {
+    recordLaneEvent(lane.id, 'merge_dispatch_deferred', 'system', {
+      packetId: lane.packetId ?? null,
+      approvalId,
+      reviewedHeadSha,
+      trigger,
+      attemptId: claim.attemptId,
+      attempt: claim.attempt,
+      recovery,
+      note: note || null,
+    });
+    console.warn(
+      `[auto-review] Merge dispatch for lane ${lane.id} entered ${recovery}; retry remains bounded by the dispatch ledger.`,
+    );
+    return { ok: false, note, dispatched: true, approvalId: null };
   }
 
   const reason = `Second-pass agreement at HEAD ${reviewedHeadSha} did not merge: ${note || 'the merge dispatch returned no reason.'}`;
