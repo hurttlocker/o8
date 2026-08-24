@@ -25,14 +25,16 @@ export type CurrentBranchResolution =
   | { state: 'detached'; evidence: string }
   | { state: 'unknown'; evidence: string };
 
+function commandOutput(value: unknown): string {
+  return typeof value === 'string' ? value.trim()
+    : value instanceof Buffer ? value.toString('utf8').trim()
+    : '';
+}
+
 export function gitErrorMessage(error: unknown): string {
   const err = error as { stdout?: unknown; stderr?: unknown; message?: unknown };
-  const stderr = typeof err.stderr === 'string' ? err.stderr.trim()
-    : err.stderr instanceof Buffer ? err.stderr.toString('utf8').trim()
-    : '';
-  const stdout = typeof err.stdout === 'string' ? err.stdout.trim()
-    : err.stdout instanceof Buffer ? err.stdout.toString('utf8').trim()
-    : '';
+  const stderr = commandOutput(err.stderr);
+  const stdout = commandOutput(err.stdout);
   const message = typeof err.message === 'string' ? err.message.trim() : String(error);
   return stderr || stdout || message || 'Git command failed.';
 }
@@ -83,11 +85,25 @@ export async function resolveCurrentBranch(
     };
   } catch (error) {
     const code = Number((error as NodeJS.ErrnoException).code);
-    if (code === 1) {
-      return {
-        state: 'detached',
-        evidence: 'git symbolic-ref confirmed that HEAD is not attached to a branch.',
-      };
+    const stderr = commandOutput((error as { stderr?: unknown }).stderr);
+    // materializationAwareExecFile invokes a Node ownership guard before Git.
+    // Guard throws also exit 1, but carry stderr. Require Git's silent exit 1
+    // plus a readable HEAD commit before calling the checkout detached.
+    if (code === 1 && !stderr) {
+      try {
+        const { stdout } = await runGit(cwd, ['rev-parse', '--verify', 'HEAD'], { timeout: 5000 });
+        if (stdout.trim()) {
+          return {
+            state: 'detached',
+            evidence: 'git symbolic-ref refused silently and the detached HEAD commit is readable.',
+          };
+        }
+      } catch (confirmationError) {
+        return {
+          state: 'unknown',
+          evidence: `The branch probe was inconclusive and HEAD confirmation failed: ${gitErrorMessage(confirmationError)}`,
+        };
+      }
     }
     return {
       state: 'unknown',
