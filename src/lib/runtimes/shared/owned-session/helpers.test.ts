@@ -7,6 +7,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import {
   filterStderrNoise,
   isOwnedRunAlive,
+  relativeAge,
   repoSlugFromOrigin,
   writeJsonFile,
 } from './helpers';
@@ -98,5 +99,30 @@ describe('writeJsonFile', () => {
 
     const leftovers = (await readdir(tmpDir)).filter((name) => name.endsWith('.tmp'));
     expect(leftovers).toEqual([]);
+  });
+});
+
+describe('relativeAge', () => {
+  it('does not render NaN for a timestamp it cannot parse', () => {
+    // o8_status showed a just-launched agent as "NaNd ago" because every
+    // comparison against NaN is false, so all four bucket guards fell through
+    // to the day branch (#1859).
+    for (const bad of ['', 'not-a-date', '2026-13-45T99:99:99Z', 'undefined']) {
+      const rendered = relativeAge(bad);
+      expect(rendered).not.toContain('NaN');
+      expect(rendered).toBe('just now');
+    }
+  });
+
+  it('still buckets real timestamps', () => {
+    const now = Date.now();
+    expect(relativeAge(new Date(now - 5_000).toISOString())).toBe('just now');
+    expect(relativeAge(new Date(now - 5 * 60_000).toISOString())).toBe('5m ago');
+    expect(relativeAge(new Date(now - 3 * 3_600_000).toISOString())).toBe('3h ago');
+    expect(relativeAge(new Date(now - 2 * 86_400_000).toISOString())).toBe('2d ago');
+  });
+
+  it('treats a missing stamp the same as an unparseable one', () => {
+    expect(relativeAge(undefined)).toBe('just now');
   });
 });
