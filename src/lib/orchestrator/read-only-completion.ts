@@ -3,20 +3,17 @@ import type { Lane } from '@/lib/lane/types';
 import { readOrchestratorControlPlaneState, withLockedState } from '@/lib/orchestrator/control-plane';
 import { withMissionRegistryState } from '@/lib/orchestrator/mission-registry';
 import { resolvePacketLaunchContext } from '@/lib/orchestrator/packet-launch-context';
+import { markPacketReleased } from '@/lib/orchestrator/packet-release-truth';
 import type { OrchestratorPacket, PacketContext } from '@/lib/orchestrator/types';
 
 export const READ_ONLY_COMPLETED_EVENT_LABEL = 'read_only_completed';
 
 function markPacketCompleted(packet: OrchestratorPacket, completedAt: string, lane: Lane): void {
-  packet.status = 'released';
-  packet.queueState = 'held';
-  packet.releaseState = 'released';
-  packet.releaseStatePayload = {
-    ...(packet.releaseStatePayload ?? {}),
-    releasedAt: completedAt,
+  markPacketReleased(packet, {
     source: READ_ONLY_COMPLETED_EVENT_LABEL,
-  };
-  packet.blockedReason = null;
+    evidenceKind: 'read_only_no_merge_required',
+    releasedAt: completedAt,
+  });
   packet.lastEventAt = completedAt;
   packet.lastEventLabel = READ_ONLY_COMPLETED_EVENT_LABEL;
   if (packet.lane) {

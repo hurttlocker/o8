@@ -282,6 +282,11 @@ export type LaneEventVerb =
   | 'runtime_drift'
   | 'pr_merged_reconciled'
   | 'merged_by_ancestry_reconciled'
+  // The ancestry sweep proved a merge, then found the branch had advanced past
+  // the commit it proved before the release could land — a steer inside the
+  // detect→write window. Release truth is withheld and the reason recorded.
+  // Payload: { packetId, evidenceKind, branchRef, baseRef, provedHeadSha, reason }
+  | 'merge_ancestry_release_declined'
   // Post-rebase typecheck escalation (#1108):
   // typecheck_auto_retry — layer 1 fired a programmatic rerun_with_feedback
   // typecheck_escalation — layer 2 promoted the lane to awaiting_orchestrator
@@ -336,6 +341,15 @@ export type LaneEventVerb =
   // without producing a turn. Payload:
   // { packetId, approvalId, reviewedHeadSha, reviewId, queued, requeue }
   | 'review_requeue_reconciled'
+  // An active review attempt was pinned to a commit that HEAD has moved past —
+  // a steer landed a successor. The attempt settles durably instead of holding
+  // the lane's active-row slot against the new HEAD (#1844).
+  // Payload: { packetId, reviewId, reviewedHeadSha, currentHeadSha, previousStatus, reason }
+  | 'review_superseded'
+  // A claimed attempt whose lease expired without settling. Reclaimed back into
+  // the normal failure ladder rather than waiting on a ws-server restart.
+  // Payload: { reviewId, claimedAt, claimOwner, leaseMs, attempts }
+  | 'review_attempt_abandoned'
   // Second-pass agreement dispatched a merge (#1856). Written BEFORE the
   // dispatch so a process that dies mid-transition still leaves a trace.
   // Payload: { packetId, approvalId, reviewedHeadSha, trigger }

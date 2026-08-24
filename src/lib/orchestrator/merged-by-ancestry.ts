@@ -12,6 +12,7 @@ import {
 } from '@/lib/orchestrator/control-plane';
 import { MergedByAncestryBackoff } from '@/lib/orchestrator/merged-by-ancestry-backoff';
 import { packetTerminalState } from '@/lib/orchestrator/packet-state';
+import { markPacketReleased } from '@/lib/orchestrator/packet-release-truth';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { enqueueInboxItem } from '@/lib/supervisor/inbox';
 import { autoResolveMergedPacketVerificationIncidents } from '@/lib/supervisor/merged-incident-resolution';
@@ -440,8 +441,36 @@ function buildCandidates(): Candidate[] {
   return [...packetCandidates, ...laneOnlyCandidates];
 }
 
+/**
+ * Re-prove the evidence against the branch as it stands NOW.
+ *
+ * Detection and the release write are separated by a control-plane lock
+ * acquisition, and a steer can land a successor commit inside that window. The
+ * detected proof then describes a commit the packet has already moved past, and
+ * releasing on it marks work merged that is not on the base branch at all.
+ */
+async function evidenceStillHolds(evidence: MergeEvidence): Promise<boolean> {
+  if (evidence.kind === 'no-changes') return true;
+  const currentHeadSha = await revParse(evidence.repoPath, evidence.branchRef);
+  return currentHeadSha === evidence.headSha;
+}
+
 async function releasePacket(candidate: Candidate, evidence: MergeEvidence): Promise<void> {
   const releasedAt = new Date().toISOString();
+  if (!(await evidenceStillHolds(evidence))) {
+    if (candidate.laneId) {
+      appendEvent(candidate.laneId, 'merge_ancestry_release_declined', 'system', {
+        packetId: candidate.packet?.id ?? candidate.lane?.packetId ?? null,
+        evidenceKind: evidence.kind,
+        branchRef: evidence.branchRef,
+        baseRef: evidence.baseRef,
+        provedHeadSha: evidence.headSha,
+        reason: 'The branch advanced after the merge proof was taken, so the proof no longer covers its HEAD.',
+      });
+    }
+    return;
+  }
+
   if (candidate.packet) {
     const packetId = candidate.packet.id;
     await withLockedState((state) => {
@@ -450,16 +479,13 @@ async function releasePacket(candidate: Candidate, evidence: MergeEvidence): Pro
       const terminal = packetTerminalState(packet);
       if (terminal === 'released' || terminal === 'archived') return;
 
-      packet.status = 'released';
-      packet.queueState = 'held';
-      packet.releaseState = 'released';
-      packet.releaseStatePayload = {
-        ...(packet.releaseStatePayload ?? {}),
-        mergeCommit: evidence.baseSha,
-        releasedAt,
+      markPacketReleased(packet, {
         source: MERGED_BY_ANCESTRY_SOURCE,
-      };
-      packet.blockedReason = null;
+        mergeCommit: evidence.baseSha,
+        headSha: evidence.headSha || null,
+        evidenceKind: evidence.kind,
+        releasedAt,
+      });
       packet.lastEventAt = releasedAt;
       packet.lastEventLabel = evidence.kind === 'ancestor'
         ? 'merged_by_ancestry'

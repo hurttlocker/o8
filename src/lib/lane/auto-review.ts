@@ -25,6 +25,8 @@ import { buildBlindSecondPassPrompt, findPendingSecondPassApproval, parseSecondP
 import { appendCodexAutoReviewVerdictInstructions, recordCodexAutoReviewVerdict } from './codex-auto-review-verdict';
 import { runReviewerTurnWithQuotaFallback } from './review-quota-fallback';
 import { enqueueLaneReview } from './review-queue';
+import { reclaimAbandonedReviewAttempts } from './review-attempt-head';
+import { claimNextReview, runReviewRecoveryPass, type QueuedReview } from './review-drain-recovery';
 import {
   markReviewCompleted,
   markReviewFailed,
@@ -36,12 +38,9 @@ import {
   isReviewAttemptCancelled,
 } from './review-cancellation';
 import { dispatchSecondPassMerge } from './second-pass-merge-dispatch';
-import { reconcileReviewStalls } from './review-stall-reconcile';
 import type { Lane } from './types';
 
 const DRAIN_INTERVAL_MS = 10_000;
-/** Stall reconciliation is git-touching, so it runs on a slower cadence than the drain. */
-const STALL_RECONCILE_INTERVAL_MS = 30_000;
 const REVIEW_DIFF_LINES = {
   'fast-track': 120,
   standard: 200,
@@ -52,7 +51,6 @@ const REVIEW_DIFF_LINES = {
 const reviewingLanes = new Set<string>();
 
 let drainTimer: ReturnType<typeof setInterval> | null = null;
-let lastStallReconcileAt = 0;
 
 export function isLaneAutoReviewActive(laneId: string): boolean {
   return reviewingLanes.has(laneId);
@@ -61,33 +59,6 @@ export function isLaneAutoReviewActive(laneId: string): boolean {
 export { cancelAutoReviewForLane };
 
 // ── Queue Operations (SQLite-backed) ──
-
-function getDb() {
-  return getSqlite();
-}
-
-interface QueuedReview {
-  id: string;
-  lane_id: string;
-  repo_path: string;
-  attempts: number;
-}
-
-function claimNextReview(): QueuedReview | null {
-  const db = getDb();
-  const row = db.prepare(
-    `SELECT id, lane_id, repo_path, attempts FROM review_queue
-     WHERE status = 'pending' ORDER BY created_at ASC LIMIT 1`,
-  ).get() as QueuedReview | undefined;
-
-  if (!row) return null;
-
-  db.prepare(
-    `UPDATE review_queue SET status = 'in_progress', updated_at = datetime('now') WHERE id = ?`,
-  ).run(row.id);
-
-  return row;
-}
 
 // ── Public API ──
 
@@ -105,12 +76,12 @@ export function triggerAutoReview(lane: Lane): void {
 export function startReviewQueueDrain(): () => void {
   if (drainTimer) return () => { /* already running */ };
 
-  // Recover any reviews stuck in 'in_progress' from a previous crash
+  // Recover any reviews stuck in 'in_progress' from a previous crash. At boot
+  // no claim from a previous process can still be live, so the lease is zero —
+  // but each reclaim now leaves a durable `review_attempt_abandoned` receipt
+  // instead of silently flipping the row back to pending.
   try {
-    getDb().prepare(
-      `UPDATE review_queue SET status = 'pending', updated_at = datetime('now')
-       WHERE status = 'in_progress'`,
-    ).run();
+    reclaimAbandonedReviewAttempts({ leaseMs: 0 });
   } catch {
     // DB may not be ready yet — drain loop will handle it
   }
@@ -160,23 +131,21 @@ const skipped = (reason: string): AutoReviewOutcome => ({ kind: 'skipped', reaso
  * queue path deterministically instead of waiting on the interval.
  */
 export async function drainReviewQueue(): Promise<void> {
+  // Recovery runs OUTSIDE the in-flight guard on purpose.
+  //
+  // `drainInFlight` is released in a `finally`, but only when the awaited
+  // attempt settles. A reviewer turn that never resolves therefore pinned the
+  // flag for the life of the process, and reconciliation — the thing built to
+  // notice a stalled lane — was itself behind the flag. The one hung attempt
+  // silently disabled every repair path. Reclamation and stall reconciliation
+  // are both idempotent and independent of whichever attempt is running, so
+  // they belong in front of it.
+  await runReviewRecoveryPass();
+
   if (drainInFlight) return;
   drainInFlight = true;
 
   try {
-    // Reconcile before claiming: a lane whose merge dispatch was missed, or
-    // whose successor review was skipped, has no queue row left to carry it,
-    // so nothing downstream would ever look at it again.
-    const now = Date.now();
-    if (now - lastStallReconcileAt >= STALL_RECONCILE_INTERVAL_MS) {
-      lastStallReconcileAt = now;
-      try {
-        await reconcileReviewStalls();
-      } catch (error) {
-        console.warn('[auto-review] Review stall reconciliation failed:', error);
-      }
-    }
-
     const review = claimNextReview();
     if (!review) return;
 

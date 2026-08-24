@@ -22,7 +22,9 @@ import { recordLaneEvent } from './events';
 import { listLanes } from './registry';
 import { assessDurableApprovedReview } from './durable-review-approval';
 import { findPendingSecondPassApproval } from './review-verdict-recency';
-import { enqueueLaneReview, surfaceReviewQueueBlocker } from './review-queue';
+import { enqueueLaneReview } from './review-queue';
+import { surfaceReviewQueueBlocker } from './review-queue-blocker';
+import { laneReviewHeadSha, settleSupersededReviewAttempts } from './review-attempt-head';
 import { dispatchSecondPassMerge } from './second-pass-merge-dispatch';
 import type { Lane } from './types';
 
@@ -34,6 +36,8 @@ export interface ReviewStallReconcileResult {
   mergesDispatched: number;
   reviewsRequeued: number;
   blockersSurfaced: number;
+  /** Attempts settled because they were pinned to a HEAD that has been replaced. */
+  attemptsSuperseded: number;
 }
 
 function hasActiveQueueRow(laneId: string): boolean {
@@ -83,6 +87,15 @@ async function reconcileLane(
   lane: Lane,
   result: ReviewStallReconcileResult,
 ): Promise<void> {
+  // Settle first. Path B below early-returns on `hasActiveQueueRow()`, and an
+  // attempt pinned to a HEAD the steer already replaced still counts as active
+  // — so the dead row hid the very lane this reconciler exists to repair.
+  result.attemptsSuperseded += settleSupersededReviewAttempts({
+    lane,
+    currentHeadSha: laneReviewHeadSha(lane),
+    reason: 'HEAD moved past the commit this review was claimed for',
+  });
+
   // A — fully authorized, never dispatched.
   //
   // Deliberately narrow: only an approval that REQUIRED a blind second pass
@@ -141,6 +154,7 @@ export async function reconcileReviewStalls(): Promise<ReviewStallReconcileResul
     mergesDispatched: 0,
     reviewsRequeued: 0,
     blockersSurfaced: 0,
+    attemptsSuperseded: 0,
   };
 
   const lanes = listLanes().filter((lane) => lane.status === 'reviewing');

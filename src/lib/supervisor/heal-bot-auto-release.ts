@@ -2,6 +2,7 @@ import { hasDurableApprovedReview } from '@/lib/lane/durable-review-approval';
 import { findLaneByPacket, getLane, setLaneStatus } from '@/lib/lane/registry';
 import { probeBranchMerged } from '@/lib/orchestrator/branch-merge-probe';
 import { readOrchestratorControlPlaneState, withLockedState } from '@/lib/orchestrator/control-plane';
+import { markPacketReleased } from '@/lib/orchestrator/packet-release-truth';
 
 const AUTO_RELEASE_PROBE_RETRY_MS = 60_000;
 const AUTO_RELEASE_MIN_EVENT_AGE_MS = 30_000;
@@ -53,16 +54,12 @@ export async function runAwaitingReviewAutoReleaseSweep(): Promise<void> {
         const packetState = current.packets.find((candidate) => candidate.id === packet.id);
         if (!packetState || packetState.releaseState === 'released' || packetState.status !== 'awaiting_review') return false;
 
-        packetState.status = 'released';
-        packetState.queueState = 'held';
-        packetState.releaseState = 'released';
-        packetState.releaseStatePayload = {
-          ...(packetState.releaseStatePayload ?? {}),
-          mergeCommit: probe.mergeCommit,
-          releasedAt,
+        markPacketReleased(packetState, {
           source: 'heal_bot_auto_release',
-        };
-        packetState.blockedReason = null;
+          mergeCommit: probe.mergeCommit,
+          evidenceKind: 'branch_merged_probe',
+          releasedAt,
+        });
         packetState.lastEventAt = releasedAt;
         packetState.lastEventLabel = 'auto_released';
         if (packetState.lane) {

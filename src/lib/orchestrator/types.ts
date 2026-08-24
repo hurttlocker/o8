@@ -78,6 +78,10 @@ export interface OrchestratorReleaseStatePayload {
   mergeCommit?: string | null;
   releasedAt?: string | null;
   source?: string | null;
+  /** Packet HEAD the release was proved against, so later drift is detectable. */
+  headSha?: string | null;
+  /** How the merge was proven: 'ancestor' | 'patch-id' | path-specific. */
+  evidenceKind?: string | null;
 }
 
 export interface OrchestratorPacketRecovery {

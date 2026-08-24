@@ -1,0 +1,390 @@
+/**
+ * Real-path regressions for the steered-review settlement race (#1844 / #1856).
+ *
+ * The live recurrence on v0.1.706: a same-session steer produced a successor
+ * commit while an auto-review attempt was claimed. The claimed `review_queue`
+ * row stayed `in_progress` with no receipt, every later enqueue answered
+ * "Review already in progress", the stall reconciler skipped the lane because
+ * the dead row still counted as live, and the packet read `released` with its
+ * commits nowhere on `main`.
+ *
+ * Each test drives a production entry point against persisted state:
+ *   - the real enqueue chokepoint + the real drain claim, on a real git repo;
+ *   - the real restart path (`startReviewQueueDrain`);
+ *   - the real merge gate (`assessDurableApprovedReview`);
+ *   - the real control-plane write (`withLockedState`), which is where release
+ *     truth was being derived.
+ */
+
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import { join } from 'node:path';
+
+import { afterAll, describe, expect, it, vi } from 'vitest';
+import type { OrchestratorLaneBinding, OrchestratorPacket } from '@/lib/orchestrator/types';
+
+const h = vi.hoisted(() => ({
+  /** Resolvers for reviewer turns the test wants to hold open mid-flight. */
+  heldTurns: [] as Array<() => void>,
+  holdNextTurn: false,
+  reviewedThreadIds: [] as string[],
+}));
+
+vi.mock('@/lib/lane/review-quota-fallback', async () => {
+  const { finishReviewTurn, startReviewTurn } = await import('@/lib/lane/review-turn-state');
+  return {
+    runReviewerTurnWithQuotaFallback: vi.fn(async (input: {
+      laneId: string;
+      threadId: string;
+      surface: string;
+    }) => {
+      h.reviewedThreadIds.push(input.threadId);
+      if (h.holdNextTurn) {
+        h.holdNextTurn = false;
+        // The live shape: the process that claimed the row is still inside the
+        // reviewer turn when the steer lands, so nothing settles the claim.
+        await new Promise<void>((resolve) => { h.heldTurns.push(resolve); });
+      }
+      const reviewTurnId = startReviewTurn({
+        laneId: input.laneId,
+        threadId: input.threadId,
+        backend: 'claude',
+        surface: input.surface,
+      });
+      finishReviewTurn({ laneId: input.laneId, reviewTurnId, outcome: 'completed' });
+      return {
+        ok: true,
+        backend: 'claude' as const,
+        text: 'Reviewed. No blocking findings.',
+        errors: [] as string[],
+        fallback: null,
+        reviewTurnId,
+      };
+    }),
+  };
+});
+
+vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
+vi.mock('@/lib/command-center/snapshot', () => ({ invalidateCommandCenterSnapshotCaches: vi.fn() }));
+vi.mock('@/lib/mobile/inbox', () => ({ invalidateInboxCache: vi.fn() }));
+
+const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-steer-settlement-data-'));
+writeFileSync(join(dataDir, 'ws-token'), 'steer-settlement-ws-token-0123456789\n', 'utf8');
+process.env.O8_DATA_DIR = dataDir;
+process.env.CORTEX_IDE_DATA_DIR = dataDir;
+
+const repoDirs: string[] = [];
+
+const { closeDb, getSqlite } = await import('@/lib/db');
+const { drainReviewQueue, startReviewQueueDrain, triggerAutoReview } = await import('@/lib/lane/auto-review');
+const { createLane, getLane, getLaneEvents, setLaneStatus } = await import('@/lib/lane/registry');
+const { enqueueLaneReview } = await import('@/lib/lane/review-queue');
+const { assessDurableApprovedReview } = await import('@/lib/lane/durable-review-approval');
+const { submitPacketReview } = await import('@/lib/orchestrator/operator-mission-service/review');
+const { readOrchestratorControlPlaneState, withLockedState, writeOrchestratorControlPlaneState } =
+  await import('@/lib/orchestrator/control-plane');
+const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+
+function git(repoDir: string, args: string[]): string {
+  return execFileSync('git', args, { cwd: repoDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+}
+
+function commitFile(repoDir: string, path: string, contents: string, message: string): string {
+  const absolutePath = join(repoDir, path);
+  mkdirSync(join(absolutePath, '..'), { recursive: true });
+  writeFileSync(absolutePath, contents, 'utf8');
+  git(repoDir, ['add', '--', path]);
+  git(repoDir, ['-c', 'user.name=o8-test', '-c', 'user.email=o8@example.test', 'commit', '-q', '-m', message]);
+  return git(repoDir, ['rev-parse', 'HEAD']);
+}
+
+function createRepo(branch: string): string {
+  const repoDir = mkdtempSync(join(os.tmpdir(), 'o8-steer-settlement-repo-'));
+  repoDirs.push(repoDir);
+  git(repoDir, ['init', '-q', '-b', 'main']);
+  git(repoDir, ['config', 'user.email', 'o8@example.test']);
+  git(repoDir, ['config', 'user.name', 'o8-test']);
+  commitFile(repoDir, 'README.md', 'fixture\n', 'base');
+  git(repoDir, ['checkout', '-q', '-b', branch]);
+  return repoDir;
+}
+
+/** The high-risk classifier keys on `db` paths, so this is the blind-second-pass shape. */
+function commitHighRiskChange(repoDir: string, slug: string): string {
+  return commitFile(
+    repoDir,
+    `src/lib/db/${slug}-fixture.ts`,
+    `export const ${slug.replace(/-/g, '')}Fixture = ${Date.now()};\n`,
+    'high-risk change',
+  );
+}
+
+function queueRows(laneId: string) {
+  return getSqlite().prepare(
+    'SELECT id, status, head_sha, last_error, claimed_at FROM review_queue WHERE lane_id = ? ORDER BY created_at ASC',
+  ).all(laneId) as Array<{
+    id: string;
+    status: string;
+    head_sha: string | null;
+    last_error: string | null;
+    claimed_at: string | null;
+  }>;
+}
+
+function eventsWithVerb(laneId: string, verb: string) {
+  return getLaneEvents(laneId, 300).filter((event) => event.verb === verb);
+}
+
+function packetFixture(repoPath: string, packetId: string, laneId: string, branch: string): OrchestratorPacket {
+  return {
+    id: packetId,
+    referenceLabel: packetId,
+    title: packetId,
+    summary: packetId,
+    workspaceTargetPath: repoPath,
+    branchTarget: branch,
+    runtime: 'codex',
+    dependencyLabels: [],
+    dependencyPacketIds: [],
+    queueState: 'queued',
+    releaseState: 'pending',
+    status: 'awaiting_review',
+    blockedReason: null,
+    lastEventAt: null,
+    lastEventLabel: null,
+    archivedAt: null,
+    review: null,
+    lane: {
+      tileId: laneId,
+      tabId: laneId,
+      repoPath,
+      worktreePath: repoPath,
+      runtime: 'codex',
+      laneId,
+      sessionKey: `codex-owned:${laneId}`,
+    } satisfies OrchestratorLaneBinding,
+  };
+}
+
+/** Settle any turn this test is holding open so the suite cannot leak a pending promise. */
+function releaseHeldTurns(): void {
+  while (h.heldTurns.length > 0) h.heldTurns.pop()!();
+}
+
+afterAll(async () => {
+  releaseHeldTurns();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  closeDb();
+  rmSync(dataDir, { recursive: true, force: true });
+  for (const repoDir of repoDirs) rmSync(repoDir, { recursive: true, force: true });
+});
+
+describe('steer during an in-progress review, followed by a successor commit (#1844)', () => {
+  it('settles the old attempt, re-arms the successor HEAD, and keeps recovery running while the old turn hangs', async () => {
+    const branch = 'inline/steer-settlement';
+    const repoDir = createRepo(branch);
+    const lane = createLane({
+      repoPath: repoDir,
+      worktreePath: repoDir,
+      branch,
+      baseBranch: 'main',
+      runtime: 'codex',
+      label: 'steer settlement fixture',
+      packetId: 'pkt-steer-settlement',
+      sessionKey: 'codex-owned:steer-settlement',
+    });
+    const oldHead = commitHighRiskChange(repoDir, 'steer-settlement');
+    setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
+
+    // Real enqueue chokepoint: the row is keyed to the HEAD it will review.
+    const first = enqueueLaneReview(getLane(lane.id)!);
+    expect(first.queued).toBe(true);
+    expect(queueRows(lane.id)[0]).toMatchObject({ id: first.reviewId, head_sha: oldHead });
+
+    // Real drain claim; the reviewer turn is held open, so the claim never settles.
+    h.holdNextTurn = true;
+    const hungDrain = drainReviewQueue();
+    await vi.waitFor(() => {
+      expect(queueRows(lane.id)[0]!.status).toBe('in_progress');
+      expect(h.heldTurns).toHaveLength(1);
+    });
+    expect(queueRows(lane.id)[0]!.claimed_at).toBeTruthy();
+
+    // The steer lands its successor commit while that attempt is still claimed.
+    const successorHead = commitHighRiskChange(repoDir, 'steer-settlement-successor');
+    expect(successorHead).not.toBe(oldHead);
+
+    // The steered lane goes back to reviewing and re-enters through the real
+    // trigger the review route uses.
+    triggerAutoReview(getLane(lane.id)!);
+
+    // 1. The old attempt reached a durable terminal receipt.
+    const rows = queueRows(lane.id);
+    const stale = rows.find((row) => row.id === first.reviewId)!;
+    expect(stale.status).toBe('completed');
+    expect(stale.last_error).toContain('Superseded');
+    expect(stale.last_error).toContain(oldHead);
+    const superseded = eventsWithVerb(lane.id, 'review_superseded');
+    expect(superseded).toHaveLength(1);
+    expect(superseded[0]!.payload).toMatchObject({
+      reviewId: first.reviewId,
+      reviewedHeadSha: oldHead,
+      currentHeadSha: successorHead,
+      previousStatus: 'in_progress',
+    });
+
+    // 2. The successor HEAD has its own independent, current-HEAD attempt.
+    const successorRow = rows.find((row) => row.id !== first.reviewId);
+    expect(successorRow).toBeDefined();
+    expect(successorRow).toMatchObject({ status: 'pending', head_sha: successorHead });
+
+    // 3. Recovery still runs while the first attempt is hung — the drain's
+    //    in-flight guard no longer gates the repair paths behind it.
+    await expect(drainReviewQueue()).resolves.toBeUndefined();
+
+    // 4. The successor attempt actually runs a reviewer turn at the new HEAD.
+    releaseHeldTurns();
+    await hungDrain;
+    await drainReviewQueue();
+    expect(h.reviewedThreadIds.some((threadId) => threadId.includes(successorRow!.id))).toBe(true);
+    expect(queueRows(lane.id).find((row) => row.id === successorRow!.id)!.status).not.toBe('pending');
+  });
+
+  it('reclaims a claim stranded by a dead process on restart, with a durable receipt', async () => {
+    const branch = 'inline/steer-stranded';
+    const repoDir = createRepo(branch);
+    const lane = createLane({
+      repoPath: repoDir,
+      worktreePath: repoDir,
+      branch,
+      baseBranch: 'main',
+      runtime: 'codex',
+      label: 'stranded claim fixture',
+      packetId: 'pkt-steer-stranded',
+      sessionKey: 'codex-owned:steer-stranded',
+    });
+    const headSha = commitHighRiskChange(repoDir, 'steer-stranded');
+    setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
+
+    // Real enqueue, then the exact persisted shape the live incident left: a
+    // row claimed by a process that is gone, with no receipt of any kind.
+    const queued = enqueueLaneReview(getLane(lane.id)!);
+    getSqlite().prepare(
+      `UPDATE review_queue
+       SET status = 'in_progress', head_sha = ?, claimed_at = datetime('now', '-2 hours'), claim_owner = 'pid:999999'
+       WHERE id = ?`,
+    ).run(headSha, queued.reviewId);
+
+    // The real restart path. Before the fix it flipped the row back to pending
+    // with no trace that an attempt had ever been abandoned.
+    const stop = startReviewQueueDrain();
+    stop();
+
+    const abandoned = eventsWithVerb(lane.id, 'review_attempt_abandoned');
+    expect(abandoned).toHaveLength(1);
+    expect(abandoned[0]!.payload).toMatchObject({
+      reviewId: queued.reviewId,
+      claimOwner: 'pid:999999',
+    });
+    const row = queueRows(lane.id).find((entry) => entry.id === queued.reviewId)!;
+    expect(row.status).toBe('pending');
+    expect(row.last_error).toContain('never settled');
+    expect(row.claimed_at).toBeNull();
+
+    // Hygiene, synchronously before the restart drain's first async tick: the
+    // reclaimed row is genuinely runnable now, and letting it run a full
+    // reviewer turn against a torn-down fixture repo outlives the test.
+    getSqlite().prepare(
+      `UPDATE review_queue SET status = 'completed' WHERE id = ?`,
+    ).run(queued.reviewId);
+    await drainReviewQueue();
+  });
+});
+
+describe('release truth requires evidence (#1844 / #1856)', () => {
+  it('refuses a stale approval at the merge gate once HEAD moves', async () => {
+    const branch = 'inline/steer-stale-approval';
+    const repoDir = createRepo(branch);
+    const packetId = 'pkt-steer-stale-approval';
+    const lane = createLane({
+      repoPath: repoDir,
+      worktreePath: repoDir,
+      branch,
+      baseBranch: 'main',
+      runtime: 'codex',
+      label: 'stale approval fixture',
+      packetId,
+      sessionKey: 'codex-owned:steer-stale-approval',
+    });
+    const reviewedHead = commitHighRiskChange(repoDir, 'steer-stale-approval');
+    setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
+
+    const review = await submitPacketReview({
+      packetId,
+      findings: [],
+      approved: true,
+      reviewedHeadSha: reviewedHead,
+    });
+    expect(review.auditApprovalId).toBeTruthy();
+
+    // A successor commit lands after the approval was recorded.
+    const successorHead = commitHighRiskChange(repoDir, 'steer-stale-approval-successor');
+    expect(successorHead).not.toBe(reviewedHead);
+
+    const gate = await assessDurableApprovedReview(getLane(lane.id)!);
+    expect(gate.approved).toBe(false);
+    expect(gate.approvalId).toBeNull();
+    expect(gate.reason).toContain('does not authorize the current HEAD');
+  });
+
+  it('does not mint releaseState from a lane that merely completed', async () => {
+    const branch = 'inline/steer-release-truth';
+    const repoDir = createRepo(branch);
+    const packetId = 'pkt-steer-release-truth';
+    const lane = createLane({
+      repoPath: repoDir,
+      worktreePath: repoDir,
+      branch,
+      baseBranch: 'main',
+      runtime: 'codex',
+      label: 'release truth fixture',
+      packetId,
+      sessionKey: 'codex-owned:steer-release-truth',
+    });
+    commitHighRiskChange(repoDir, 'steer-release-truth');
+
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      packets: [packetFixture(repoDir, packetId, lane.id, branch)],
+    });
+
+    // The live shape: the lane settles `completed` through a path that never
+    // touched the base branch (worktree_missing_reconciled writes exactly this).
+    setLaneStatus(lane.id, 'completed', 'system', 'worktree_missing_reconciled');
+
+    // Real control-plane write — reconciliation runs inside it.
+    await withLockedState(() => {});
+    const derived = readOrchestratorControlPlaneState().packets.find((entry) => entry.id === packetId)!;
+    expect(derived.status).toBe('released');
+    expect(derived.releaseState).not.toBe('released');
+    expect(derived.releaseStatePayload?.source ?? null).toBeNull();
+
+    // With a merge receipt behind it, the same derivation carries release truth.
+    await withLockedState((state) => {
+      const packet = state.packets.find((entry) => entry.id === packetId);
+      if (packet) {
+        packet.releaseStatePayload = {
+          mergeCommit: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+          releasedAt: new Date().toISOString(),
+          source: 'approve_and_merge',
+          headSha: null,
+          evidenceKind: 'merge_command',
+        };
+      }
+    });
+    const proved = readOrchestratorControlPlaneState().packets.find((entry) => entry.id === packetId)!;
+    expect(proved.releaseState).toBe('released');
+    expect(proved.releaseStatePayload?.source).toBe('approve_and_merge');
+  });
+});

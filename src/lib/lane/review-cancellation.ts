@@ -35,6 +35,15 @@ export function cancelAutoReviewForLane(laneId: string, reason: string): void {
   }
 }
 
+/**
+ * Cancel ONE claimed attempt without touching the lane's other rows. Used when
+ * HEAD drifts past the commit an attempt is pinned to: that attempt is dead,
+ * every later attempt on the lane is not.
+ */
+export function cancelReviewAttempt(reviewId: string): void {
+  cancelledReviewAttempts.add(reviewId);
+}
+
 export function isReviewAttemptCancelled(reviewId: string): boolean {
   return cancelledReviewAttempts.has(reviewId);
 }

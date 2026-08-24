@@ -6,6 +6,7 @@ import type { ApproveAndMergeInput, MergePacketResult, PickComparisonWinnerInput
 import { autoResolveMergedPacketVerificationIncidents } from '@/lib/supervisor/merged-incident-resolution';
 import { attachQualitySearchReceipt, ensureComparisonWinnerReview, resolveQualitySearchComparison } from './quality-search-selection';
 import { alreadyReleasedResultForPacket, buildAlreadyReleasedResult } from './release-truth';
+import { markPacketReleased } from '@/lib/orchestrator/packet-release-truth';
 import { withPacketMergeWorkspace } from './merge-workspace-guard';
 import { selectMergeSequence } from './merge-order';
 export { selectMergeSequence } from './merge-order';
@@ -518,16 +519,12 @@ async function dispatchPacketMerge(
     await withLockedState((fresh) => {
       const packetState = fresh.packets.find((candidate) => candidate.id === input.packetId);
       if (!packetState) return;
-      packetState.status = 'released';
-      packetState.queueState = 'held';
-      packetState.releaseState = 'released';
-      packetState.releaseStatePayload = {
-        ...(packetState.releaseStatePayload ?? {}),
-        mergeCommit: result.mergeSha ?? null,
-        releasedAt: new Date().toISOString(),
+      markPacketReleased(packetState, {
         source: 'approve_and_merge',
-      };
-      packetState.blockedReason = null;
+        mergeCommit: result.mergeSha ?? null,
+        headSha: result.reviewedHeadSha ?? null,
+        evidenceKind: 'merge_command',
+      });
       if (packetState.lane) {
         packetState.lane.lastEventLabel = 'merged';
       }

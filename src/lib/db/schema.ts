@@ -530,11 +530,18 @@ export const reviewQueue = sqliteTable('review_queue', {
   status: text('status', { enum: ['pending', 'in_progress', 'completed', 'failed'] }).notNull().default('pending'),
   attempts: integer('attempts').notNull().default(0),
   lastError: text('last_error'),
+  /** Worktree HEAD this attempt reviews. Drift from it supersedes the attempt (#1844). */
+  headSha: text('head_sha'),
+  /** When the row was claimed — the lease an abandoned claim is reclaimed against. */
+  claimedAt: text('claimed_at'),
+  /** Which process holds the claim. */
+  claimOwner: text('claim_owner'),
   createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
   updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
 }, (table) => ({
   statusIdx: index('idx_review_queue_status').on(table.status),
   laneIdIdx: index('idx_review_queue_lane_id').on(table.laneId),
+  laneStatusIdx: index('idx_review_queue_lane_status').on(table.laneId, table.status),
 }));
 
 // ══════════════════════════════════════════════════════════════════
