@@ -139,6 +139,7 @@ function PickerPopover({
       {open && pos && typeof document !== 'undefined' ? createPortal(
         <div
           ref={popRef}
+          data-o8-settings-portal="true"
           style={{
             position: 'fixed',
             top: pos.top,

@@ -206,6 +206,7 @@ export function RepoPickerRow({
       {openPopover && checked && popoverPosition && typeof document !== 'undefined' ? createPortal(
         <div
           ref={popoverRef}
+          data-o8-settings-portal="true"
           style={{
             position: 'fixed',
             top: popoverPosition.top,

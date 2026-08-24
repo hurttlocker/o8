@@ -27,6 +27,11 @@ export function useSettingsOverlayDismiss({
       const target = event.target as Node | null;
       const targetElement = target instanceof Element ? target : null;
       if (targetElement?.closest('[aria-label="Settings"]')) return;
+      // Settings pickers portal to document.body, so they sit outside panelRef
+      // and this capture-phase handler used to close the whole overlay on the
+      // first click into a menu -- which read as "the setting will not change".
+      // Any portaled settings surface opts back in with this attribute (#1685).
+      if (targetElement?.closest('[data-o8-settings-portal]')) return;
       const panel = panelRef.current;
       if (panel && target && panel.contains(target)) return;
       closeSettingsOverlay();
