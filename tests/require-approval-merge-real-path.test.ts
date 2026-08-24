@@ -685,6 +685,29 @@ describe('requireApproval merge governance through the real command path', () =>
     });
   }, 30_000);
 
+  it('keeps an operator-routed dispatcher approval visible in the operator inbox', async () => {
+    await updateOperatorDefaults({ requireApproval: 'surface' });
+    const operator = await createStandardLane('surface-risk-operator', true, true);
+    persistDispatcherMission(
+      operator.lane.packetId!,
+      operator.repo,
+      'cli',
+      { dispatcher: { surface: 'operator', id: 'cli' } },
+    );
+
+    const result = await dispatch({
+      verb: 'merge',
+      laneId: operator.lane.id,
+      actor: 'orchestrator',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.approvalId).toBeTruthy();
+    expect(listApprovals({ status: 'pending', projectId: null }).some((candidate) => (
+      candidate.id === result.approvalId
+    ))).toBe(true);
+  }, 30_000);
+
   it('merges an easy high-confidence packet in the loop under surface posture', async () => {
     await updateOperatorDefaults({ requireApproval: 'surface' });
     const { lane, repo, reviewedHeadSha } = await createStandardLane('surface-easy');

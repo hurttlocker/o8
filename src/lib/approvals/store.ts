@@ -1,12 +1,12 @@
 import { and, desc, eq, gte, type SQL } from 'drizzle-orm';
 import {
-  buildApprovalContextMatchPredicate,
-  extractApprovalContextIds,
+  buildApprovalContextMatchPredicate, extractApprovalContextIds,
   isOrchestratorReviewApproval,
   normalizeApprovalLookupValue,
   scoreApprovalContextMatch,
 } from '@/lib/approvals/context';
 import { stableApprovalJson } from '@/lib/approvals/fingerprint';
+import { belongsInOperatorInbox } from '@/lib/approvals/inbox-visibility';
 import {
   allFindingsResolved,
   buildOrchestratorReviewApprovalInput,
@@ -321,7 +321,7 @@ export function listApprovals(options: { status?: ApprovalRecord['status'] | 'al
       .all()
       .map((row) => mapApprovalRow(row)!)
       .filter((approval): approval is ApprovalRecord => approval !== null)
-      .filter((approval) => approval.args?.approvalRoute !== 'dispatcher');
+      .filter(belongsInOperatorInbox);
   }
 
   if (status !== 'all' && sessionKey) {
@@ -338,7 +338,7 @@ export function listApprovals(options: { status?: ApprovalRecord['status'] | 'al
       .all()
       .map((row) => mapApprovalRow(row)!)
       .filter((approval): approval is ApprovalRecord => approval !== null)
-      .filter((approval) => approval.args?.approvalRoute !== 'dispatcher');
+      .filter(belongsInOperatorInbox);
   }
 
   if (status !== 'all') {
@@ -352,7 +352,7 @@ export function listApprovals(options: { status?: ApprovalRecord['status'] | 'al
       .all()
       .map((row) => mapApprovalRow(row)!)
       .filter((approval): approval is ApprovalRecord => approval !== null)
-      .filter((approval) => approval.args?.approvalRoute !== 'dispatcher');
+      .filter(belongsInOperatorInbox);
   }
 
   const rows = projectId
@@ -371,7 +371,7 @@ export function listApprovals(options: { status?: ApprovalRecord['status'] | 'al
   return rows
     .map((row) => mapApprovalRow(row)!)
     .filter((approval): approval is ApprovalRecord => approval !== null)
-    .filter((approval) => approval.args?.approvalRoute !== 'dispatcher');
+    .filter(belongsInOperatorInbox);
 }
 
 export function listUnsettledApprovalContinuations(options: { sessionKey?: string; projectId?: string | null } = {}) { return listApprovals({ status: 'all', ...options }).filter((approval) => approval.resolution?.continuationStatus === 'pending' || approval.resolution?.continuationStatus === 'outcome_unknown'); }
