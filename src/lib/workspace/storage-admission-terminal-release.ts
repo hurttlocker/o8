@@ -40,6 +40,10 @@ interface ReservationOwnerRow {
   owner_generation: number;
 }
 
+interface OwnerGenerationRow {
+  owner_generation: number;
+}
+
 export interface TerminalOwnerStorageReleaseResult {
   released: number;
   releasedBytes: number;
@@ -50,6 +54,19 @@ function requiredText(value: string, field: string): string {
   const normalized = value.trim();
   if (!normalized) throw new Error(`${field} is required.`);
   return normalized;
+}
+
+export function latestReservedStorageOwnerGeneration(
+  sqlite: Database.Database,
+  ownerId: string,
+): number | undefined {
+  const row = sqlite.prepare(`
+    SELECT owner_generation FROM storage_admission_reservations
+    WHERE owner_id = ? AND state = 'reserved'
+    ORDER BY owner_generation DESC, created_at DESC, reservation_id DESC
+    LIMIT 1
+  `).get(requiredText(ownerId, 'ownerId')) as OwnerGenerationRow | undefined;
+  return row?.owner_generation;
 }
 
 function mapReservation(row: ReservationRow): StorageReservationRecord {

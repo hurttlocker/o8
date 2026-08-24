@@ -276,6 +276,152 @@ describe('storage reservation lifecycle real paths', () => {
     expect(readOrchestratorControlPlaneState().packets).toHaveLength(0);
   });
 
+  it('prunes a terminal task whose newer legacy reservation missed its lane receipt', async () => {
+    const packetId = 'task-prune-legacy-generation';
+    const firstReservationId = `packet-storage:${packetId}:1`;
+    const secondReservationId = `packet-storage:${packetId}:2`;
+    const { repoPath, branch, worktreePath } = makeRepo(packetId);
+    git(repoPath, ['worktree', 'remove', '--force', worktreePath]);
+    const now = Date.now();
+    const store = new StorageAdmissionStore(getSqlite(), {
+      now: () => now,
+      observeVolume: async (targetPath) => observed(targetPath, now),
+    });
+    await store.reserve({
+      mutationId: `reserve-${packetId}-1`,
+      reservationId: firstReservationId,
+      targetPath: repoPath,
+      exactBytes: 2_000,
+      ownerId: packetId,
+      ownerGeneration: 1,
+      leaseExpiresAt: now + 60_000,
+      policy: { reserveRatio: 0.1, absoluteFloorBytes: 1_000 },
+    });
+    await store.commit({
+      mutationId: `commit-${packetId}-1`,
+      reservationId: firstReservationId,
+      volumeId: 'device:lifecycle-test',
+      ownerId: packetId,
+      ownerGeneration: 1,
+      expectedGeneration: 1,
+    });
+    await store.reserve({
+      mutationId: `reserve-${packetId}-2`,
+      reservationId: secondReservationId,
+      targetPath: repoPath,
+      exactBytes: 2_000,
+      ownerId: packetId,
+      ownerGeneration: 2,
+      leaseExpiresAt: now + 60_000,
+      policy: { reserveRatio: 0.1, absoluteFloorBytes: 1_000 },
+    });
+    const lane = createLane({ repoPath, branch, runtime: 'codex', packetId });
+    recordLaneEvent(lane.id, 'update', 'orchestrator', {
+      storageAdmissionOwnerGeneration: 1,
+      storageAdmissionReservationId: firstReservationId,
+    });
+    setLaneStatus(lane.id, 'archived', 'system', 'merged_by_ancestry_reconciled');
+
+    const packet = terminalPacketWithAdmission({
+      packetId,
+      reservationId: firstReservationId,
+      repoPath,
+      worktreePath: null,
+    });
+    packet.storageAdmission = {
+      ...packet.storageAdmission!,
+      state: 'committed',
+      reason: 'committed',
+    };
+    packet.lane = { ...packet.lane!, laneId: lane.id };
+    await withLockedState((state) => {
+      state.missionId = 'mission-task-prune-legacy-storage';
+      state.repoPath = repoPath;
+      state.prompt = 'Task prune legacy storage lifecycle';
+      state.summary = 'Task prune legacy storage lifecycle';
+      state.runtime = 'codex';
+      state.packets = [packet];
+      state.updatedAt = new Date(now).toISOString();
+      return null;
+    });
+
+    expect(store.getReservation(secondReservationId)?.state).toBe('reserved');
+    await expect(pruneTask(packetId, { repoPath })).resolves.toMatchObject({
+      ok: true,
+      action: 'prune',
+      packetId,
+    });
+    expect(getLane(lane.id)).toBeNull();
+    expect(store.getReservation(firstReservationId)?.state).toBe('committed');
+    expect(store.getReservation(secondReservationId)?.state).toBe('released');
+    expect(readOrchestratorControlPlaneState().packets).toHaveLength(0);
+  });
+
+  it('refuses the ledger-wide removal scope for a nonterminal packet', async () => {
+    const packetId = 'task-prune-live-owner';
+    const firstReservationId = `packet-storage:${packetId}:1`;
+    const secondReservationId = `packet-storage:${packetId}:2`;
+    const repoPath = mkdtempSync(join(tmpdir(), 'o8-storage-live-removal-'));
+    roots.push(repoPath);
+    const now = Date.now();
+    const store = new StorageAdmissionStore(getSqlite(), {
+      now: () => now,
+      observeVolume: async (targetPath) => observed(targetPath, now),
+    });
+    await store.reserve({
+      mutationId: `reserve-${packetId}-1`,
+      reservationId: firstReservationId,
+      targetPath: repoPath,
+      exactBytes: 2_000,
+      ownerId: packetId,
+      ownerGeneration: 1,
+      leaseExpiresAt: now + 60_000,
+      policy: { reserveRatio: 0.1, absoluteFloorBytes: 1_000 },
+    });
+    await store.commit({
+      mutationId: `commit-${packetId}-1`,
+      reservationId: firstReservationId,
+      volumeId: 'device:lifecycle-test',
+      ownerId: packetId,
+      ownerGeneration: 1,
+      expectedGeneration: 1,
+    });
+    await store.reserve({
+      mutationId: `reserve-${packetId}-2`,
+      reservationId: secondReservationId,
+      targetPath: repoPath,
+      exactBytes: 2_000,
+      ownerId: packetId,
+      ownerGeneration: 2,
+      leaseExpiresAt: now + 60_000,
+      policy: { reserveRatio: 0.1, absoluteFloorBytes: 1_000 },
+    });
+    const packet = terminalPacketWithAdmission({
+      packetId,
+      reservationId: firstReservationId,
+      repoPath,
+      worktreePath: null,
+    });
+    packet.storageAdmission = {
+      ...packet.storageAdmission!,
+      state: 'committed',
+      reason: 'committed',
+    };
+    packet.status = 'running';
+    packet.releaseState = 'pending';
+
+    await expect(settlePacketStorageBeforeRemoval(packet)).rejects.toThrow(/not terminal/);
+    expect(store.getReservation(secondReservationId)?.state).toBe('reserved');
+    await store.release({
+      mutationId: `release-${packetId}-2`,
+      reservationId: secondReservationId,
+      volumeId: 'device:lifecycle-test',
+      ownerId: packetId,
+      ownerGeneration: 2,
+      expectedGeneration: 1,
+    });
+  });
+
   it('retains an expired reservation when owner liveness is unknown', async () => {
     const repoPath = mkdtempSync(join(tmpdir(), 'o8-storage-expired-'));
     roots.push(repoPath);

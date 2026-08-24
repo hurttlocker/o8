@@ -621,12 +621,16 @@ export async function pruneTask(taskId: string, input: TaskPruneInput = {}): Pro
   const lane = task.laneId ? getLane(task.laneId) : task.packetId ? findLaneByPacket(task.packetId) : null;
   const note = input.reason?.trim() || 'Pruned terminal task-pool row.';
   const prunedAt = nowIso();
+  const packet = task.packetId
+    ? readOrchestratorControlPlaneState().packets.find((item) => item.id === task.packetId)
+    : undefined;
 
-  const deletedLane = lane ? await cleanupAndDeleteLane(lane.id) : null;
+  const deletedLane = lane ? await cleanupAndDeleteLane(lane.id, {
+    beforeDelete: packet ? () => settlePacketStorageBeforeRemoval(packet) : undefined,
+  }) : null;
 
   if (task.packetId) {
-    const packet = readOrchestratorControlPlaneState().packets.find((item) => item.id === task.packetId);
-    if (packet) await settlePacketStorageBeforeRemoval(packet);
+    if (packet && !lane) await settlePacketStorageBeforeRemoval(packet);
     await withLockedState((state) => {
       const before = state.packets.length;
       state.packets = state.packets.filter((packet) => packet.id !== task.packetId);
@@ -653,12 +657,16 @@ export async function removeTask(taskId: string, input: TaskPruneInput = {}): Pr
   const lane = task.laneId ? getLane(task.laneId) : task.packetId ? findLaneByPacket(task.packetId) : null;
   const note = input.reason?.trim() || 'Removed task-pool row.';
   const removedAt = nowIso();
+  const packet = task.packetId
+    ? readOrchestratorControlPlaneState().packets.find((item) => item.id === task.packetId)
+    : undefined;
 
-  const deletedLane = lane ? await cleanupAndDeleteLane(lane.id) : null;
+  const deletedLane = lane ? await cleanupAndDeleteLane(lane.id, {
+    beforeDelete: packet ? () => settlePacketStorageBeforeRemoval(packet) : undefined,
+  }) : null;
 
   if (task.packetId) {
-    const packet = readOrchestratorControlPlaneState().packets.find((item) => item.id === task.packetId);
-    if (packet) await settlePacketStorageBeforeRemoval(packet);
+    if (packet && !lane) await settlePacketStorageBeforeRemoval(packet);
     await withLockedState((state) => {
       const before = state.packets.length;
       state.packets = state.packets.filter((packet) => packet.id !== task.packetId);

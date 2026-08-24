@@ -10,7 +10,14 @@ import { cleanupLaneWorktree } from './worktree-cleanup';
  * generation before cleanup settles them. The low-level deleteLane guard makes
  * this the only production route for a lane whose checkout still exists.
  */
-export async function cleanupAndDeleteLane(laneId: string): Promise<Lane | null> {
+export interface CleanupAndDeleteLaneOptions {
+  beforeDelete?: (lane: Lane) => Promise<void> | void;
+}
+
+export async function cleanupAndDeleteLane(
+  laneId: string,
+  options: CleanupAndDeleteLaneOptions = {},
+): Promise<Lane | null> {
   const lane = getLane(laneId);
   if (!lane) return null;
 
@@ -24,5 +31,6 @@ export async function cleanupAndDeleteLane(laneId: string): Promise<Lane | null>
     }
   }
 
+  await options.beforeDelete?.(lane);
   return deleteLane(laneId);
 }
