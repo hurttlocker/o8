@@ -154,11 +154,13 @@ function persistedPacket(packetId: string) {
 }
 
 afterEach(() => {
-  while (laneIds.length > 0) {
-    deleteLane(laneIds.pop()!);
-  }
+  // The storage lifecycle guard requires checkout absence before lane evidence
+  // is deleted. Remove each isolated fixture repo first, then clear its lane.
   while (tempDirs.length > 0) {
     rmSync(tempDirs.pop()!, { recursive: true, force: true });
+  }
+  while (laneIds.length > 0) {
+    deleteLane(laneIds.pop()!);
   }
 });
 
