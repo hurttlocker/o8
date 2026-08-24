@@ -99,6 +99,33 @@ export function narrationWindowStart(now: Date): string {
   return new Date(now.getTime() - NARRATION_REPETITION_WINDOW_MS).toISOString();
 }
 
+/**
+ * How far back a fact still counts as one the listener has heard. A packet
+ * reviewed at 03:25 and re-reviewed at 04:28 is a genuinely new event, so
+ * suppression correctly lets it through -- but narrating it in the first
+ * utterance's exact words makes the voice sound like it stuttered. Twelve
+ * hours covers a working session without treating yesterday as recent.
+ */
+export const NARRATION_REVISIT_LOOKBACK_MS = 12 * 60 * 60_000;
+
+export function narrationRevisitWindowStart(now: Date): string {
+  return new Date(now.getTime() - NARRATION_REVISIT_LOOKBACK_MS).toISOString();
+}
+
+/**
+ * Facts narrated earlier in the session whose suppression has since expired.
+ * The narrator already computes this knowledge to decide what to suppress; this
+ * hands the same knowledge to the phrasing, so a second visit to a subject is
+ * spoken as a second visit rather than as news (#1842).
+ */
+export function expiredNarratedFactKeys(sqlite: Database.Database, now: Date): Set<string> {
+  const suppressed = narratedFactKeysSince(sqlite, narrationWindowStart(now));
+  const heard = narratedFactKeysSince(sqlite, narrationRevisitWindowStart(now));
+  const expired = new Set<string>();
+  for (const key of heard) if (!suppressed.has(key)) expired.add(key);
+  return expired;
+}
+
 /** Clip to a whole word, never mid-word, and never past `maxLength`. */
 export function clipPhrase(value: string, maxLength: number): string {
   const normalized = value.replace(/\s+/g, ' ').trim();
