@@ -9,9 +9,9 @@ have to re-derive the class from a stalled lane.
 - Issue [#1844](https://github.com/hurttlocker/o8/issues/1844) — *A steered packet can become permanently unmergeable: the second pass never re-runs at the new HEAD*
 - Issue [#1856](https://github.com/hurttlocker/o8/issues/1856) — *Second pass agrees, merge never dispatches: a fully-authorized packet parks in reviewing with no attempt and no failure recorded*
 
-Both are open upstream at the time of writing; the code paths described below are merged
-and released. Nothing here closes either issue — this is the durable account of what the
-class is and what has shipped against it.
+The issue links are the upstream record; the code paths described below are merged and
+released. Their open or closed state does not change this durable account of the defect
+class and what shipped against it.
 
 ## Background: what the gate demands
 
@@ -145,6 +145,26 @@ against persisted state rather than exercising a guard with direct arguments.
 
 Verified at `eaa21427d` (v0.1.706): all three files pass, 14 tests.
 
+## Live control-plane proof protocol
+
+A live proof must follow one packet through the operator control plane, preserving its lane
+ID and reviewed HEAD. The code-form equivalent of the required pre-steer review state is:
+
+```ts
+setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
+```
+
+After an explicit steer changes HEAD, the durable event ledger must show this ordered
+sequence for that same lane and authorized HEAD:
+`second_pass_rearmed` -> `review_turn_started` -> `merge_dispatch_attempted` ->
+`merge_dispatch_succeeded` -> `merge`. The final `merge` is the canonical receipt written
+after merge ancestry is proven and the base branch is fast-forwarded. A missing,
+out-of-order, or different-HEAD receipt does not prove recovery.
+
+This section specifies the proof to collect; it does not claim that the live sequence has
+occurred. Only a later explicit steer may authorize recording that observation and
+advancing the proof marker.
+
 ## Releases
 
 | Release | Date | Carries |
@@ -170,4 +190,4 @@ Either of these, on a lane in `reviewing`:
 Both are shapes the reconciler now looks for whenever it runs, so a recurrence means the
 reconciler did not run or did not see the lane — not that the receipt was never written.
 
-Proof state: phase-one-ready
+Proof state: phase-two-awaiting-steer
