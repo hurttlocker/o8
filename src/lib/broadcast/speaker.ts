@@ -7,7 +7,7 @@ import { apiFetch } from '@/lib/mcp/operator-handlers/shared';
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 import { broadcastEventSpecifics } from './commentary-prompt';
 import { buildBroadcastSnapshot } from './snapshot';
-import { broadcastGeneratedLinesSince } from './director';
+import { claimBroadcastLineSlot } from './hourly-cap';
 import { listBroadcastEvents } from './events';
 import {
   BROADCAST_SPOKEN_MAX_LENGTH,
@@ -447,18 +447,25 @@ export class BroadcastSpeaker {
     now: Date,
     sqlite: Database.Database,
     factKeys: string[] = [],
-  ): BroadcastSpeechLine {
-    const event = appendBroadcastEvent({ kind: 'commentary', actor: 'symon', text }, {
-      sqlite,
-      now,
-      metadata: {
-        voiceTrigger: trigger,
-        sourceEventId: sourceEventIds[0] ?? null,
-        sourceEventIds,
-        hourlyCapped: true,
-        ...(factKeys.length > 0 ? { factKeys } : {}),
+    maxPerHour: number,
+  ): BroadcastSpeechLine | null {
+    // The cap is claimed in the same transaction as the insert, so the
+    // director cannot append between this speaker's check and its write (#1840).
+    const event = claimBroadcastLineSlot(sqlite, now, maxPerHour, () => appendBroadcastEvent(
+      { kind: 'commentary', actor: 'symon', text },
+      {
+        sqlite,
+        now,
+        metadata: {
+          voiceTrigger: trigger,
+          sourceEventId: sourceEventIds[0] ?? null,
+          sourceEventIds,
+          hourlyCapped: true,
+          ...(factKeys.length > 0 ? { factKeys } : {}),
+        },
       },
-    });
+    ));
+    if (!event) return null;
     return {
       id: `broadcast:${event.id}`,
       actor: event.actor,
@@ -542,7 +549,7 @@ export class BroadcastSpeaker {
           });
           this.pendingMoments = [];
           const composed = composeMomentLine(unsaid, revisitFacts);
-          if (composed && broadcastGeneratedLinesSince(sqlite, new Date(now.getTime() - 60 * 60_000).toISOString()) < settings.maxPerHour) {
+          if (composed) {
             const spokenFacts = [...new Set(composed.spokenEvents.map((event) => momentFactKey(event)))];
             const line = this.generatedLine(
               composed.text,
@@ -551,24 +558,28 @@ export class BroadcastSpeaker {
               now,
               sqlite,
               spokenFacts,
+              settings.maxPerHour,
             );
-            generated.push(line.id);
-            this.enqueue(line, sqlite, now.getTime());
-            // Whatever did not fit stays unsaid rather than making this line run
-            // long; the next tick speaks it as its own short update.
-            this.pendingMoments = composed.deferredEvents.slice(0, MAX_DEFERRED_MOMENTS);
+            if (line) {
+              generated.push(line.id);
+              this.enqueue(line, sqlite, now.getTime());
+              // Whatever did not fit stays unsaid rather than making this line
+              // run long; the next tick speaks it as its own short update.
+              this.pendingMoments = composed.deferredEvents.slice(0, MAX_DEFERRED_MOMENTS);
+            }
           }
         }
 
         const lullAt = (this.lastFeedEventAt ?? now.getTime()) + settings.lullMinutes * 60_000;
-        if (!this.lullAnnounced && now.getTime() >= lullAt
-          && broadcastGeneratedLinesSince(sqlite, new Date(now.getTime() - 60 * 60_000).toISOString()) < settings.maxPerHour) {
+        if (!this.lullAnnounced && now.getTime() >= lullAt) {
           const text = lullLine(sqlite);
           if (text) {
-            const line = this.generatedLine(text, 'lull', [], now, sqlite);
-            generated.push(line.id);
-            this.enqueue(line, sqlite, now.getTime());
-            this.lullAnnounced = true;
+            const line = this.generatedLine(text, 'lull', [], now, sqlite, [], settings.maxPerHour);
+            if (line) {
+              generated.push(line.id);
+              this.enqueue(line, sqlite, now.getTime());
+              this.lullAnnounced = true;
+            }
           }
         }
       }
