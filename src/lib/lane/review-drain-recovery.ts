@@ -87,8 +87,98 @@ export function isReviewClaimCurrent(review: Pick<QueuedReview, 'id' | 'claim_ow
 interface TransientFailedReviewRow {
   id: string;
   lane_id: string;
+  status: string;
   attempts: number;
   last_error: string | null;
+}
+
+const INTERRUPTED_TRANSIENT_RECOVERY_ERROR =
+  'Skipped: Lane is no longer reviewing (awaiting_human).';
+
+interface ReviewRecoveryLineageEvent {
+  verb: string;
+  payload: Record<string, unknown>;
+}
+
+function reviewRecoveryLineageEvents(laneId: string): ReviewRecoveryLineageEvent[] {
+  const rows = getDb().prepare(
+    `SELECT verb, payload_json FROM lane_events
+     WHERE lane_id = ?
+       AND verb IN ('review_queue_blocked', 'wedge_timeout',
+                    'review_transient_recovered', 'review_skipped')
+     ORDER BY timestamp ASC`,
+  ).all(laneId) as Array<{ verb: string; payload_json: string }>;
+
+  return rows.map((row) => {
+    try {
+      const payload = JSON.parse(row.payload_json) as unknown;
+      return {
+        verb: row.verb,
+        payload: payload && typeof payload === 'object' && !Array.isArray(payload)
+          ? payload as Record<string, unknown>
+          : {},
+      };
+    } catch {
+      return { verb: row.verb, payload: {} };
+    }
+  });
+}
+
+/**
+ * Prove that an `awaiting_human` lane was escalated solely because this exact
+ * review row exhausted on reviewer contention. A generic human-owned lane must
+ * never be resumed automatically; the blocker + wedge receipts make this a
+ * narrow reversal of the stale alarm created by the failure being repaired.
+ *
+ * v0.1.707 could requeue the row without clearing that alarm, after which the
+ * drain claimed and skipped it. `requireInterruptedRecovery` recognizes only
+ * that exact receipt chain so affected installs can heal on their next boot.
+ */
+function isStaleTransientReviewAlarm(input: {
+  laneId: string;
+  reviewId: string;
+  laneStatus: string;
+  laneLastEventLabel: string | null;
+  requireInterruptedRecovery: boolean;
+}): boolean {
+  if (
+    input.laneStatus !== 'awaiting_human'
+    || input.laneLastEventLabel !== 'orchestrator_wedge_timeout'
+  ) {
+    return false;
+  }
+
+  const events = reviewRecoveryLineageEvents(input.laneId);
+  const blockerIndex = events.findLastIndex((event) => (
+    event.verb === 'review_queue_blocked'
+    && event.payload.reviewId === input.reviewId
+    && isReviewerSessionBusyMessage(event.payload.reason)
+  ));
+  if (blockerIndex < 0) return false;
+
+  const wedgeIndex = events.findIndex((event, index) => (
+    index > blockerIndex
+    && event.verb === 'wedge_timeout'
+    && event.payload.from === 'awaiting_orchestrator'
+    && event.payload.to === 'awaiting_human'
+    && event.payload.blockedReason === 'orchestrator_wedge_timeout'
+  ));
+  if (wedgeIndex < 0) return false;
+  if (!input.requireInterruptedRecovery) return true;
+
+  const recoveredIndex = events.findIndex((event, index) => (
+    index > wedgeIndex
+    && event.verb === 'review_transient_recovered'
+    && event.payload.reviewId === input.reviewId
+  ));
+  if (recoveredIndex < 0) return false;
+
+  return events.some((event, index) => (
+    index > recoveredIndex
+    && event.verb === 'review_skipped'
+    && event.payload.reviewId === input.reviewId
+    && event.payload.reason === 'Lane is no longer reviewing (awaiting_human).'
+  ));
 }
 
 /**
@@ -99,28 +189,50 @@ interface TransientFailedReviewRow {
 async function recoverTransientReviewFailures(): Promise<number> {
   const db = getDb();
   const rows = db.prepare(
-    `SELECT id, lane_id, attempts, last_error FROM review_queue WHERE status = 'failed'`,
-  ).all() as TransientFailedReviewRow[];
+    `SELECT id, lane_id, status, attempts, last_error FROM review_queue
+     WHERE status = 'failed'
+        OR (status = 'completed' AND last_error = ?)`,
+  ).all(INTERRUPTED_TRANSIENT_RECOVERY_ERROR) as TransientFailedReviewRow[];
   let recovered = 0;
 
   for (const row of rows) {
-    if (!isReviewerSessionBusyMessage(row.last_error)) continue;
     const lane = getLane(row.lane_id);
     if (!lane) continue;
+    const staleHumanAlarm = isStaleTransientReviewAlarm({
+      laneId: lane.id,
+      reviewId: row.id,
+      laneStatus: lane.status,
+      laneLastEventLabel: lane.lastEventLabel,
+      requireInterruptedRecovery: row.status === 'completed',
+    });
+    const interruptedRecovery = row.status === 'completed'
+      && row.last_error === INTERRUPTED_TRANSIENT_RECOVERY_ERROR
+      && staleHumanAlarm;
+    const legacyBusyFailure = row.status === 'failed'
+      && isReviewerSessionBusyMessage(row.last_error);
+    if (!legacyBusyFailure && !interruptedRecovery) continue;
+
     const currentHeadSha = laneReviewHeadSha(lane) ?? null;
-    const reason = row.last_error?.trim() || 'Reviewer session busy';
+    const reason = interruptedRecovery
+      ? 'Stale awaiting-human alarm interrupted transient review recovery'
+      : row.last_error?.trim() || 'Reviewer session busy';
+    const restoreReviewing = (
+      lane.status === 'awaiting_orchestrator'
+      && lane.lastEventLabel === 'review_queue_failed'
+    ) || staleHumanAlarm;
+    // A human-owned or otherwise non-reviewing lane without the exact stale
+    // alarm proof must stay untouched. Requeueing it would only let the drain
+    // claim and skip the row again, erasing the durable failure receipt.
+    if (lane.status !== 'reviewing' && !restoreReviewing) continue;
     const result = db.prepare(
       `UPDATE review_queue
        SET status = 'pending', attempts = 0, last_error = ?, head_sha = ?,
            claimed_at = NULL, claim_owner = NULL, updated_at = datetime('now')
-       WHERE id = ? AND status = 'failed' AND last_error = ?`,
-    ).run(`Deferred after restart: ${reason}`, currentHeadSha, row.id, row.last_error);
+       WHERE id = ? AND status = ? AND last_error = ?`,
+    ).run(`Deferred after restart: ${reason}`, currentHeadSha, row.id, row.status, row.last_error);
     if (result.changes !== 1) continue;
 
-    if (
-      lane.status === 'awaiting_orchestrator'
-      && lane.lastEventLabel === 'review_queue_failed'
-    ) {
+    if (restoreReviewing) {
       setLaneStatus(lane.id, 'reviewing', 'system', 'review_queue_transient_recovered');
     }
     let releaseRepaired = false;
@@ -135,6 +247,8 @@ async function recoverTransientReviewFailures(): Promise<number> {
       reason,
       currentHeadSha,
       releaseRepaired,
+      previousStatus: row.status,
+      laneRestoredFrom: restoreReviewing ? lane.status : null,
     });
     recovered += 1;
   }

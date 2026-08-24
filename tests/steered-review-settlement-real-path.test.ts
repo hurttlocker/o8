@@ -95,7 +95,9 @@ const repoDirs: string[] = [];
 const { closeDb, getSqlite } = await import('@/lib/db');
 const { drainReviewQueue, startReviewQueueDrain, triggerAutoReview } = await import('@/lib/lane/auto-review');
 const { reclaimAbandonedReviewAttempts } = await import('@/lib/lane/review-attempt-head');
+const { runReviewRecoveryPass } = await import('@/lib/lane/review-drain-recovery');
 const { createLane, getLane, getLaneEvents, setLaneStatus } = await import('@/lib/lane/registry');
+const { recordLaneEvent } = await import('@/lib/lane/events');
 const { enqueueLaneReview } = await import('@/lib/lane/review-queue');
 const { assessDurableApprovedReview } = await import('@/lib/lane/durable-review-approval');
 const { submitPacketReview } = await import('@/lib/orchestrator/operator-mission-service/review');
@@ -428,7 +430,7 @@ describe('steer during an in-progress review, followed by a successor commit (#1
     expect(queueRows(lane.id).find((row) => row.id === queued.reviewId)?.status).toBe('completed');
   });
 
-  it('repairs the exact legacy failed-busy registry shape against the packet worktree HEAD', async () => {
+  it('repairs a legacy failed-busy row after its stale alarm escalated to a human', async () => {
     const branch = 'inline/legacy-busy-restart';
     const { repoDir, worktreeDir, mainHead } = createRepoWithPacketWorktree(branch);
     const packetHead = commitHighRiskChange(worktreeDir, 'legacy-busy-restart');
@@ -454,6 +456,19 @@ describe('steer during an in-progress review, followed by a successor commit (#1
        ) VALUES (?, ?, ?, 'failed', 5, 'Review turn failed: Codex session busy', NULL,
          datetime('now', '-1 minute'), datetime('now'))`,
     ).run('review-legacy-busy', lane.id, repoDir);
+    recordLaneEvent(lane.id, 'review_queue_blocked', 'system', {
+      packetId,
+      reviewId: 'review-legacy-busy',
+      reason: 'Review turn failed: Codex session busy',
+      attempts: 5,
+    });
+    recordLaneEvent(lane.id, 'wedge_timeout', 'system', {
+      from: 'awaiting_orchestrator',
+      to: 'awaiting_human',
+      blockedReason: 'orchestrator_wedge_timeout',
+      action: 'escalate_human',
+    });
+    setLaneStatus(lane.id, 'awaiting_human', 'system', 'orchestrator_wedge_timeout');
 
     const falseRelease = packetFixture(repoDir, packetId, lane.id, branch);
     falseRelease.status = 'released';
@@ -510,6 +525,103 @@ describe('steer during an in-progress review, followed by a successor commit (#1
 
     await drainReviewQueue();
     expect(queueRows(lane.id).find((row) => row.id === 'review-legacy-busy')?.status).toBe('completed');
+  });
+
+  it('repairs the v0.1.707 recovery that was skipped behind the stale human alarm', async () => {
+    const branch = 'inline/interrupted-busy-recovery';
+    const { repoDir, worktreeDir } = createRepoWithPacketWorktree(branch);
+    const packetHead = commitHighRiskChange(worktreeDir, 'interrupted-busy-recovery');
+    const packetId = 'pkt-interrupted-busy-recovery';
+    const lane = createLane({
+      repoPath: repoDir,
+      worktreePath: worktreeDir,
+      branch,
+      baseBranch: 'main',
+      runtime: 'codex',
+      label: 'interrupted busy recovery fixture',
+      packetId,
+      sessionKey: 'codex-owned:interrupted-busy-recovery',
+    });
+    setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
+    setLaneStatus(lane.id, 'awaiting_orchestrator', 'system', 'review_queue_failed');
+
+    getSqlite().prepare(
+      `INSERT INTO review_queue (
+         id, lane_id, repo_path, status, attempts, last_error, head_sha, created_at, updated_at
+       ) VALUES (?, ?, ?, 'completed', 0,
+         'Skipped: Lane is no longer reviewing (awaiting_human).', ?,
+         datetime('now', '-1 minute'), datetime('now'))`,
+    ).run('review-interrupted-busy', lane.id, repoDir, packetHead);
+    recordLaneEvent(lane.id, 'review_queue_blocked', 'system', {
+      packetId,
+      reviewId: 'review-interrupted-busy',
+      reason: 'Review turn failed: Codex session busy',
+      attempts: 5,
+    });
+    recordLaneEvent(lane.id, 'wedge_timeout', 'system', {
+      from: 'awaiting_orchestrator',
+      to: 'awaiting_human',
+      blockedReason: 'orchestrator_wedge_timeout',
+      action: 'escalate_human',
+    });
+    setLaneStatus(lane.id, 'awaiting_human', 'system', 'orchestrator_wedge_timeout');
+    recordLaneEvent(lane.id, 'review_transient_recovered', 'system', {
+      packetId,
+      reviewId: 'review-interrupted-busy',
+      previousAttempts: 5,
+      reason: 'Review turn failed: Codex session busy',
+      currentHeadSha: packetHead,
+      releaseRepaired: true,
+    });
+    recordLaneEvent(lane.id, 'review_skipped', 'system', {
+      packetId,
+      reviewId: 'review-interrupted-busy',
+      reason: 'Lane is no longer reviewing (awaiting_human).',
+    });
+
+    await runReviewRecoveryPass();
+
+    expect(queueRows(lane.id).find((row) => row.id === 'review-interrupted-busy')).toMatchObject({
+      status: 'pending',
+      attempts: 0,
+      head_sha: packetHead,
+    });
+    expect(getLane(lane.id)?.status).toBe('reviewing');
+    expect(eventsWithVerb(lane.id, 'review_transient_recovered')).toHaveLength(2);
+
+    h.busyTurnsRemaining = 1;
+    await drainReviewQueue();
+    expect(queueRows(lane.id).find((row) => row.id === 'review-interrupted-busy')?.status).toBe('pending');
+    h.busyTurnsRemaining = 0;
+    await drainReviewQueue();
+    expect(queueRows(lane.id).find((row) => row.id === 'review-interrupted-busy')?.status).toBe('completed');
+  });
+
+  it('does not override a genuine human-owned lane without the review-failure lineage', async () => {
+    const repoDir = createRepo('inline/genuine-human-review-hold');
+    const lane = createLane({
+      repoPath: repoDir,
+      branch: 'inline/genuine-human-review-hold',
+      baseBranch: 'main',
+      runtime: 'codex',
+      label: 'genuine human review hold fixture',
+      packetId: 'pkt-genuine-human-review-hold',
+      sessionKey: 'codex-owned:genuine-human-review-hold',
+    });
+    setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
+    setLaneStatus(lane.id, 'awaiting_human', 'system', 'operator_question');
+    getSqlite().prepare(
+      `INSERT INTO review_queue (
+         id, lane_id, repo_path, status, attempts, last_error, created_at, updated_at
+       ) VALUES (?, ?, ?, 'failed', 5, 'Review turn failed: Codex session busy',
+         datetime('now', '-1 minute'), datetime('now'))`,
+    ).run('review-genuine-human-hold', lane.id, repoDir);
+
+    await runReviewRecoveryPass();
+
+    expect(getLane(lane.id)?.status).toBe('awaiting_human');
+    expect(queueRows(lane.id).find((row) => row.id === 'review-genuine-human-hold')?.status).toBe('failed');
+    expect(eventsWithVerb(lane.id, 'review_transient_recovered')).toHaveLength(0);
   });
 });
 
