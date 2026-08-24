@@ -722,7 +722,26 @@ export interface LiveClaudeProcess {
   cwd?: string;
 }
 
-export async function findLiveClaudeProcesses(): Promise<LiveClaudeProcess[]> {
+export interface LiveClaudeProbe {
+  processes: LiveClaudeProcess[];
+  /**
+   * False when the probe itself could not run. An empty `processes` then means
+   * "unknown", not "none" -- and a caller must not treat it as proof that a
+   * session's worker has exited.
+   */
+  probed: boolean;
+}
+
+/**
+ * Probe for live Claude Code CLI processes, reporting whether the probe ran.
+ *
+ * The pipeline's `grep` exits 1 with no output when nothing matches, which
+ * `execFileAsync` raises -- so the ordinary "no Claude running" case arrives
+ * here as an error and must be told apart from a genuine probe failure
+ * (timeout, missing binary, signal). Callers that infer state from absence
+ * depend on that distinction (#1855).
+ */
+export async function probeLiveClaudeProcesses(): Promise<LiveClaudeProbe> {
   try {
     // Find Claude Code CLI processes (not Claude Desktop app)
     const { stdout } = await execFileAsync(
@@ -734,7 +753,7 @@ export async function findLiveClaudeProcesses(): Promise<LiveClaudeProcess[]> {
       const match = line.trim().match(/^(\d+)/);
       if (match) pids.push(Number(match[1]));
     }
-    if (pids.length === 0) return [];
+    if (pids.length === 0) return { processes: [], probed: true };
 
     // #476 — Batch all PIDs into a single lsof call instead of O(N) sequential calls.
     // lsof accepts comma-separated PIDs with -p and OR's them by default.
@@ -757,20 +776,35 @@ export async function findLiveClaudeProcesses(): Promise<LiveClaudeProcess[]> {
     } catch {
       // lsof failed — processes returned without CWD info (status detection still works)
     }
-    return processes;
-  } catch {
-    return [];
+    return { processes, probed: true };
+  } catch (err) {
+    // `grep` exits 1 with no output when nothing matched: a successful probe
+    // reporting zero processes. Anything else leaves liveness unknown.
+    const failure = err as { code?: unknown; killed?: unknown };
+    const cleanNoMatch = failure.code === 1 && !failure.killed;
+    return { processes: [], probed: cleanNoMatch };
   }
 }
 
-function inferHistoricalClaudeStatus(meta: SessionMeta): RuntimeSession['status'] {
-  if (meta.hasErrorInTail) {
-    const ageMs = Date.now() - meta.lastModified.getTime();
-    if (ageMs < 30 * 60_000) return 'failed';
-  }
+/** Back-compat view for callers that only need the list, not the probe's fate. */
+export async function findLiveClaudeProcesses(): Promise<LiveClaudeProcess[]> {
+  return (await probeLiveClaudeProcesses()).processes;
+}
 
-  const ageMs = Date.now() - meta.lastModified.getTime();
-  if (ageMs < 5 * 60_000) return 'reviewing';
+export function inferHistoricalClaudeStatus(
+  meta: Pick<SessionMeta, 'hasErrorInTail' | 'lastModified'>,
+  livenessKnown: boolean,
+  now = Date.now(),
+): RuntimeSession['status'] {
+  const ageMs = now - meta.lastModified.getTime();
+  if (meta.hasErrorInTail && ageMs < 30 * 60_000) return 'failed';
+  // This runs only for a session no live process owns. When the probe actually
+  // ran, that absence is the answer: the turn is over. Reporting `reviewing`
+  // off transcript mtime claimed a worker was still thinking for five minutes
+  // after its process had exited, which is also when an operator most wants to
+  // steer it (#1855). The mtime hedge survives only for the case the probe
+  // could not run, where absence proves nothing.
+  if (!livenessKnown && ageMs < 5 * 60_000) return 'reviewing';
   return 'idle';
 }
 
@@ -790,12 +824,13 @@ export const claudeCodeRuntime: AgentRuntime = {
       projectDirs = [];
     }
 
-    const [allSessions, liveProcesses] = await Promise.all([
+    const [allSessions, liveProbe] = await Promise.all([
       projectDirs.length > 0
         ? Promise.all(projectDirs.map((dir) => discoverProjectSessions(dir))).then((r) => r.flat())
         : Promise.resolve([]),
-      findLiveClaudeProcesses(),
+      probeLiveClaudeProcesses(),
     ]);
+    const liveProcesses = liveProbe.processes;
 
     // Sort by most recent first
     allSessions.sort((a, b) => b.lastModified.getTime() - a.lastModified.getTime());
@@ -815,7 +850,7 @@ export const claudeCodeRuntime: AgentRuntime = {
       if (isLiveSession) {
         claimedLiveSlots.set(normalizedCwd, claimedSlots + 1);
       }
-      const status = isLiveSession ? 'running' : inferHistoricalClaudeStatus(meta);
+      const status = isLiveSession ? 'running' : inferHistoricalClaudeStatus(meta, liveProbe.probed);
       const name = `${projectDisplayName(meta.projectPath)}${meta.gitBranch ? ` • ${meta.gitBranch}` : ''}`;
       // #658 — Orchestrator-dispatched lanes spawn `claude` with cwd inside
       // `.cortex-worktrees/packet-*`. Mark them as 'owned' so the runtime
