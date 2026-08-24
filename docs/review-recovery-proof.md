@@ -157,9 +157,10 @@ setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
 After an explicit steer changes HEAD, the durable event ledger must show this ordered
 sequence for that same lane and authorized HEAD:
 `second_pass_rearmed` -> `review_turn_started` -> `merge_dispatch_attempted` ->
-`merge_dispatch_succeeded` -> `merge`. The final `merge` is the canonical receipt written
-after merge ancestry is proven and the base branch is fast-forwarded. A missing,
-out-of-order, or different-HEAD receipt does not prove recovery.
+`merge` -> `merge_dispatch_succeeded`. The `merge` event is the canonical ancestry/base-branch
+receipt written after merge ancestry is proven and the base branch is fast-forwarded.
+`merge_dispatch_succeeded` is recorded after the dispatch call returns. A missing, out-of-order,
+or different-HEAD receipt does not prove recovery.
 
 This section specifies the proof to collect; it does not claim that the live sequence has
 occurred. Only a later explicit steer may authorize recording that observation and
