@@ -154,13 +154,22 @@ ID and reviewed HEAD. The code-form equivalent of the required pre-steer review 
 setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
 ```
 
-After an explicit steer changes HEAD, the durable event ledger must show this ordered
-sequence for that same lane and authorized HEAD:
-`second_pass_rearmed` -> `review_turn_started` -> `merge_dispatch_attempted` ->
-`merge` -> `merge_dispatch_succeeded`. The `merge` event is the canonical ancestry/base-branch
-receipt written after merge ancestry is proven and the base branch is fast-forwarded.
-`merge_dispatch_succeeded` is recorded after the dispatch call returns. A missing, out-of-order,
-or different-HEAD receipt does not prove recovery.
+The two repaired transitions have related but distinct live receipts. When a review is
+recorded outside the active auto-review turn after a steer changes HEAD, the #1844 path
+must write `second_pass_rearmed` before the queued `review_turn_started` at that same HEAD.
+A normal auto-review may proceed directly from its first-pass approval into the blind
+`review_turn_started`; it does not re-arm a queue item and therefore does not write
+`second_pass_rearmed`. That direct path is not, by itself, live proof of #1844.
+
+Once the blind pass agrees, the #1856 path must show this ordered sequence for the same
+lane and authorized HEAD: `merge_dispatch_attempted` -> `merge` ->
+`merge_dispatch_succeeded`. The `merge` event is the canonical ancestry/base-branch receipt
+written after merge ancestry is proven and the base branch is fast-forwarded.
+`merge_dispatch_succeeded` is recorded after the dispatch call returns. A combined proof
+may therefore read `second_pass_rearmed` -> `review_turn_started` ->
+`merge_dispatch_attempted` -> `merge` -> `merge_dispatch_succeeded`, but only when the
+first transition actually used the external-review re-arm path. A missing, out-of-order,
+or different-HEAD receipt does not prove the corresponding recovery.
 
 This section specifies the proof to collect; it does not claim that the live sequence has
 occurred. Only a later explicit steer may authorize recording that observation and
@@ -172,12 +181,14 @@ advancing the proof marker.
 |---|---|---|
 | [v0.1.704](https://github.com/hurttlocker/o8/releases/tag/v0.1.704) | 2026-08-23 | the #1844 side: blind review re-armed from the review-recording path, latest-verdict recency honored before a blind pass, and the scheduling helper extracted |
 | [v0.1.705](https://github.com/hurttlocker/o8/releases/tag/v0.1.705) | 2026-08-24 | the #1856 side: recorded merge dispatch, review-skip receipts, stall reconciliation, interrupted-transition recovery, deferred recoverable outcomes, and the merge branch-probe hardening |
-| [v0.1.706](https://github.com/hurttlocker/o8/releases/tag/v0.1.706) | 2026-08-24 | the current release; carries the full set above |
+| [v0.1.706](https://github.com/hurttlocker/o8/releases/tag/v0.1.706) | 2026-08-24 | exact-HEAD review and merge recovery hardening used by the first live canary |
+| [v0.1.707](https://github.com/hurttlocker/o8/releases/tag/v0.1.707) | 2026-08-24 | exact review-claim settlement, busy deferral, startup repair, strict release evidence, and merged-ancestry truth |
+| [v0.1.708](https://github.com/hurttlocker/o8/releases/tag/v0.1.708) | 2026-08-24 | exact receipt-lineage recovery for a stale machine-generated awaiting-human alarm; the current release |
 
-The versions to cite for the shipped review-recovery behavior are **v0.1.705 and v0.1.706**
-— v0.1.705 is where the invariant became enforceable on both transitions, and v0.1.706 is
-the release a current build actually runs. v0.1.704 is listed because the #1844 half landed
-there first and the story is incomplete without it.
+The versions to cite for the complete shipped review-recovery behavior are **v0.1.704
+through v0.1.708**. v0.1.705 made the invariant enforceable on both transitions; the later
+releases close the settlement, release-truth, transient-contention, and stale-alarm gaps
+found by driving a preserved live lane through the recovery path.
 
 ## What would count as a recurrence
 
