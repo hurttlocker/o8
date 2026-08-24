@@ -24,12 +24,12 @@ import { resolveLaneReviewScreenshotReference, type LaneReviewScreenshotReferenc
 import { buildBlindSecondPassPrompt, findPendingSecondPassApproval, parseSecondPassVerdict } from './blind-second-pass-review';
 import { appendCodexAutoReviewVerdictInstructions, recordCodexAutoReviewVerdict } from './codex-auto-review-verdict';
 import { runReviewerTurnWithQuotaFallback } from './review-quota-fallback';
+import { enqueueLaneReview } from './review-queue';
 import {
-  enqueueLaneReview,
   markReviewCompleted,
   markReviewFailed,
   markReviewSkipped,
-} from './review-queue';
+} from './review-queue-settlement';
 import {
   cancelAutoReviewForLane,
   clearReviewAttemptCancellation,
