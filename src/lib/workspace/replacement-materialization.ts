@@ -4,7 +4,10 @@ import { getLane } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
 import { findRepoByLocalPath } from '@/lib/repos/registry';
 import { beginWorkspaceSnapshotGeneration } from '@/lib/worktree/snapshot-generation';
-import type { WorkspaceSnapshotRecord } from '@/lib/worktree/snapshot-state';
+import {
+  listWorkspaceSnapshotTransitions,
+  type WorkspaceSnapshotRecord,
+} from '@/lib/worktree/snapshot-state';
 import { withWorktreeMetaTransaction } from '@/lib/worktree/metadata-store';
 import { assertWorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
 import type { WorktreeMetaEntry } from '@/lib/worktree/types';
@@ -81,6 +84,13 @@ function immutableAnchorMatches(
     && snapshot.diffFingerprint === truth.diffFingerprint;
 }
 
+function isCleanupRetirement(snapshot: WorkspaceSnapshotRecord): boolean {
+  const terminalAction = listWorkspaceSnapshotTransitions(snapshot.repositoryUuid, snapshot.packetId)
+    .findLast((transition) => transition.receipt?.terminalAction !== undefined)
+    ?.receipt?.terminalAction;
+  return terminalAction === 'cleanup';
+}
+
 /**
  * Promote one parked packet snapshot to the exact replacement lane before its
  * first owned child starts. Git protection precedes the durable generation CAS,
@@ -96,8 +106,15 @@ export async function materializeReplacementWorkspace(
   if (!repo || repo.id !== snapshot.repositoryUuid) {
     refuse('Replacement workspace repository does not match the parked snapshot.');
   }
-  if (snapshot.packetId !== input.packetId
-    || path.resolve(snapshot.originalPath) !== path.resolve(input.workspacePath)) {
+  if (snapshot.packetId !== input.packetId) {
+    refuse('Replacement workspace packet does not match the prior snapshot.');
+  }
+  const retiredCleanupReplacement = snapshot.state === 'retired' && isCleanupRetirement(snapshot);
+  if (snapshot.state === 'retired' && !retiredCleanupReplacement) {
+    refuse('Only a confirmed cleanup retirement may launch a replacement workspace.');
+  }
+  if (!retiredCleanupReplacement
+    && path.resolve(snapshot.originalPath) !== path.resolve(input.workspacePath)) {
     refuse('Replacement workspace path does not match the parked snapshot.');
   }
   const worktreeId = path.basename(input.workspacePath);
@@ -129,7 +146,11 @@ export async function materializeReplacementWorkspace(
       return snapshot;
     }
   }
-  if (snapshot.state !== 'parked' && snapshot.state !== 'materialized') {
+  if (
+    snapshot.state !== 'parked'
+    && snapshot.state !== 'materialized'
+    && snapshot.state !== 'retired'
+  ) {
     refuse(`Workspace snapshot is ${snapshot.state}; replacement launch remains held.`);
   }
 
@@ -175,6 +196,7 @@ export async function materializeReplacementWorkspace(
     expectedState: snapshot.state,
     expectedVersion: snapshot.version,
     expectedGeneration: snapshot.snapshotGeneration,
+    ...(retiredCleanupReplacement ? { retiredCleanupReplacement: true as const } : {}),
     receipt: {
       source: 'replacement-owned-launch',
       laneId: lane.id,

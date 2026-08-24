@@ -130,9 +130,11 @@ export interface TransitionWorkspaceSnapshotInput {
 }
 
 export interface BeginWorkspaceSnapshotGenerationInput extends CreateWorkspaceSnapshotInput {
-  expectedState: 'materialized' | 'parked';
+  expectedState: 'materialized' | 'parked' | 'retired';
   expectedVersion: number;
   expectedGeneration: number;
+  /** Required when a confirmed cleanup retirement is superseded by a replacement launch. */
+  retiredCleanupReplacement?: true;
 }
 
 export type CreateWorkspaceSnapshotResult =

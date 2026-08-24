@@ -78,6 +78,15 @@ function generationAnchorMatches(
   }
 }
 
+function receiptField(receipt: WorkspaceSnapshotChainReceipt, field: string): unknown {
+  if (!receipt.receipt_json) return undefined;
+  try {
+    return (JSON.parse(receipt.receipt_json) as Record<string, unknown>)[field];
+  } catch {
+    return undefined;
+  }
+}
+
 export function verifyWorkspaceSnapshotReceiptChain(
   row: WorkspaceSnapshotChainRow,
   recomputedFingerprint: string,
@@ -124,7 +133,15 @@ export function verifyWorkspaceSnapshotReceiptChain(
     const validToState = toState as WorkspaceSnapshotState;
 
     if (receipt.transition_kind === 'created') {
-      if ((previousState !== 'materialized' && previousState !== 'parked')
+      const priorReceipt = receipts[index - 1]!;
+      const validGenerationSource = previousState === 'materialized'
+        || previousState === 'parked'
+        || (
+          previousState === 'retired'
+          && receiptField(priorReceipt, 'terminalAction') === 'cleanup'
+          && receiptField(receipt, 'source') === 'replacement-owned-launch'
+        );
+      if (!validGenerationSource
         || validToState !== 'materialized'
         || receipt.snapshot_generation !== generation + 1
         || receipt.error_json !== null

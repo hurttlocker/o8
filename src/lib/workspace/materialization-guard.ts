@@ -87,13 +87,18 @@ export async function inspectOwnedWorkspaceMaterialization(
 
   let snapshot = snapshots[0]!;
   const bindingPath = path.resolve(input.binding.cwd);
+  const retiredReplacementLaunch = input.mode === 'launch' && snapshot.state === 'retired';
   if (path.resolve(input.repoPath) !== bindingPath
-    || path.resolve(snapshot.originalPath) !== bindingPath
+    || (!retiredReplacementLaunch && path.resolve(snapshot.originalPath) !== bindingPath)
     || (input.binding.repositoryUuid !== null
       && input.binding.repositoryUuid !== snapshot.repositoryUuid)) {
     return { status: 'unknown', note: 'Owned workspace snapshot identity does not match the durable session binding, so the run was refused.' };
   }
-  if (input.mode === 'launch' && (snapshot.state === 'parked' || snapshot.state === 'materialized')) {
+  if (input.mode === 'launch' && (
+    snapshot.state === 'parked'
+    || snapshot.state === 'materialized'
+    || snapshot.state === 'retired'
+  )) {
     const laneId = input.laneId?.trim();
     const runtimeId = input.runtimeId?.trim();
     if (!laneId || !runtimeId) {

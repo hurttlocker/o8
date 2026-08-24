@@ -51,18 +51,27 @@ function immutableTruth(record: WorkspaceSnapshotRecord) {
 }
 
 /**
- * Atomically supersede one fully materialized snapshot generation.
+ * Atomically supersede one snapshot generation.
  *
  * The current projection moves to the new truth, while the append-only
- * generation receipt preserves and links the prior fingerprint for audit.
+ * generation receipt preserves and links the prior fingerprint for audit. A
+ * terminal snapshot can advance only through the explicit cleanup-replacement
+ * capability; merge, PR, and discard retirement remain terminal.
  */
 export function beginWorkspaceSnapshotGeneration(
   input: BeginWorkspaceSnapshotGenerationInput,
 ): BeginWorkspaceSnapshotGenerationResult {
   const expectedVersion = positiveInteger(input.expectedVersion, 'expectedVersion');
   const expectedGeneration = positiveInteger(input.expectedGeneration, 'expectedGeneration');
-  if (input.expectedState !== 'materialized' && input.expectedState !== 'parked') {
-    throw new Error('A new snapshot generation can start only from materialized or parked truth.');
+  if (
+    input.expectedState !== 'materialized'
+    && input.expectedState !== 'parked'
+    && input.expectedState !== 'retired'
+  ) {
+    throw new Error('A new snapshot generation can start only from materialized, parked, or cleanup-retired truth.');
+  }
+  if (input.expectedState === 'retired' && input.retiredCleanupReplacement !== true) {
+    throw new Error('Retired truth requires an explicit cleanup-replacement capability.');
   }
   const sqlite = getSqlite();
   const execute = sqlite.transaction((): BeginWorkspaceSnapshotGenerationResult => {

@@ -647,4 +647,48 @@ describe('workspace snapshot persistence', () => {
       record: { version: 3, snapshotGeneration: 2, state: 'parkable' },
     });
   });
+
+  it('keeps merge retirement terminal even with the cleanup-replacement capability', () => {
+    const input = snapshotInput();
+    const created = createWorkspaceSnapshot(input).record;
+    const retiring = transitionWorkspaceSnapshot({
+      repositoryUuid: input.repositoryUuid,
+      packetId: input.packetId,
+      transitionId: `${input.packetId}-merge-retiring`,
+      expectedState: 'materialized',
+      expectedVersion: created.version,
+      expectedGeneration: created.snapshotGeneration,
+      toState: 'retiring',
+      receipt: { terminalAction: 'merge' },
+    });
+    if (retiring.status === 'missing') throw new Error('retiring snapshot disappeared');
+    const retired = transitionWorkspaceSnapshot({
+      repositoryUuid: input.repositoryUuid,
+      packetId: input.packetId,
+      transitionId: `${input.packetId}-merge-retired`,
+      expectedState: 'retiring',
+      expectedVersion: retiring.record.version,
+      expectedGeneration: retiring.record.snapshotGeneration,
+      toState: 'retired',
+      receipt: { terminalAction: 'merge' },
+    });
+    if (retired.status === 'missing') throw new Error('retired snapshot disappeared');
+
+    expect(() => beginWorkspaceSnapshotGeneration({
+      ...input,
+      laneId: `${input.laneId}-replacement`,
+      creationId: `${input.creationId}-forbidden-replacement`,
+      expectedState: 'retired',
+      expectedVersion: retired.record.version,
+      expectedGeneration: retired.record.snapshotGeneration,
+      retiredCleanupReplacement: true,
+      transitionStartedAt: retired.record.updatedAt + 1,
+      recordedAt: retired.record.updatedAt + 2,
+      receipt: { source: 'replacement-owned-launch' },
+    })).toThrow(/invalid generation supersession receipt/);
+    expect(getWorkspaceSnapshot(input.repositoryUuid, input.packetId)).toMatchObject({
+      state: 'retired',
+      snapshotGeneration: 1,
+    });
+  });
 });
