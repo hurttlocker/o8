@@ -39,7 +39,6 @@ import {
   amendViaO8Suffix,
   commitDirtyWorktree,
   createDetachedIntegrationWorktree,
-  currentBranch,
   deleteRefBestEffort,
   exactPushLeaseForCandidate,
   fetchWorkerHeadIntoMainRepo,
@@ -55,6 +54,10 @@ import {
   refreshOriginBaseBestEffort,
   worktreeExistsOnDisk,
 } from '@/lib/lane/worktree-merge-git';
+import {
+  resolveMergeBranchForLane,
+  type MergeBranchResolver,
+} from '@/lib/lane/worktree-merge-branch';
 import { withRepoActionRecovery } from '@/lib/lane/repo-action-lock';
 import { settleReturnedMergeState } from '@/lib/lane/merge-state-settlement';
 import { enqueueMergeDecompositions } from '@/lib/lane/merge-decomposition';
@@ -93,6 +96,7 @@ export interface WorktreeSideMergeInput {
   gateResult: ApprovalGateResult;
   createLaneActionApproval: CreateLaneActionApproval;
   repoActionLeaseMaxWaitMs?: number;
+  branchResolver?: MergeBranchResolver;
 }
 
 function classifyFastForwardFailure(message: string): 'dirty-working-tree' | 'non-fast-forward' | 'invalid-ref' | 'merge-failed' {
@@ -550,10 +554,13 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       };
     }
 
-    const actualBranch = await currentBranch(worktreePath);
-    if (!actualBranch || actualBranch === 'HEAD') {
-      return { ok: false, laneId: command.laneId, note: 'Cannot merge detached worktree HEAD.' };
-    }
+    const branch = await resolveMergeBranchForLane({
+      lane,
+      worktreePath,
+      branchResolver: input.branchResolver,
+    });
+    if (!branch.ok) return branch.result;
+    const actualBranch = branch.actualBranch;
     console.log(`[lane-merge] Actual worktree branch: ${actualBranch} (lane.branch: ${lane.branch})`);
 
     if (command.strategy === 'manual') {

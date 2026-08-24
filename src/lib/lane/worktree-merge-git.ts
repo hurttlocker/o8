@@ -18,6 +18,13 @@ export async function git(
   });
 }
 
+export type GitCommandRunner = typeof git;
+
+export type CurrentBranchResolution =
+  | { state: 'attached'; branch: string; evidence: string }
+  | { state: 'detached'; evidence: string }
+  | { state: 'unknown'; evidence: string };
+
 export function gitErrorMessage(error: unknown): string {
   const err = error as { stdout?: unknown; stderr?: unknown; message?: unknown };
   const stderr = typeof err.stderr === 'string' ? err.stderr.trim()
@@ -44,6 +51,49 @@ export async function worktreeExistsOnDisk(worktreePath: string): Promise<boolea
 export async function currentBranch(cwd: string): Promise<string> {
   const { stdout } = await git(cwd, ['rev-parse', '--abbrev-ref', 'HEAD'], { timeout: 5000 });
   return stdout.trim();
+}
+
+/**
+ * Resolve branch attachment without treating an empty probe as proof that HEAD
+ * is detached. `git symbolic-ref` exit 1 is the documented detached result;
+ * an empty successful response or any other failure is inconclusive and must
+ * remain retryable.
+ */
+export async function resolveCurrentBranch(
+  cwd: string,
+  runGit: GitCommandRunner = git,
+): Promise<CurrentBranchResolution> {
+  try {
+    const { stdout } = await runGit(
+      cwd,
+      ['symbolic-ref', '--quiet', '--short', 'HEAD'],
+      { timeout: 5000 },
+    );
+    const branch = stdout.trim();
+    if (!branch) {
+      return {
+        state: 'unknown',
+        evidence: 'The branch probe exited successfully but returned no branch name.',
+      };
+    }
+    return {
+      state: 'attached',
+      branch,
+      evidence: `HEAD is attached to ${branch}.`,
+    };
+  } catch (error) {
+    const code = Number((error as NodeJS.ErrnoException).code);
+    if (code === 1) {
+      return {
+        state: 'detached',
+        evidence: 'git symbolic-ref confirmed that HEAD is not attached to a branch.',
+      };
+    }
+    return {
+      state: 'unknown',
+      evidence: `The branch probe was inconclusive: ${gitErrorMessage(error)}`,
+    };
+  }
 }
 
 export async function readHeadSha(cwd: string): Promise<string> {

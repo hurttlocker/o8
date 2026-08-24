@@ -252,6 +252,54 @@ afterAll(async () => {
 });
 
 describe('worktree-side merge with real git repos', () => {
+  it('defers an empty branch probe without misreporting a detached worktree', async () => {
+    const { repo } = makeRepo('o8-merge-empty-branch-probe');
+    const worktree = await makeWorktree(
+      repo,
+      'pkt-empty-branch-probe',
+      'inline/empty-branch-probe',
+    );
+    writeFileSync(join(worktree.path, 'worker.txt'), 'worker\n');
+    commitAll(worktree.path, 'worker change');
+    const lane = createLane({
+      repoPath: repo,
+      worktreePath: worktree.path,
+      branch: 'inline/empty-branch-probe',
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId: 'pkt-empty-branch-probe',
+    });
+
+    const result = await performWorktreeSideMerge({
+      lane,
+      command: mergeCommand(lane.id),
+      actor: 'system',
+      gateResult: { passed: true, violations: [] },
+      branchResolver: async () => ({
+        state: 'unknown',
+        evidence: 'The branch probe exited successfully but returned no branch name.',
+      }),
+      createLaneActionApproval: async () => {
+        throw new Error('An inconclusive branch probe must not route a human approval.');
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: 'branch_probe_unknown',
+      note: expect.stringContaining('not classified as detached'),
+    });
+    expect(result.note).not.toContain('Cannot merge detached');
+    expect(getLane(lane.id)?.status).toBe('reviewing');
+    expect(getLaneEvents(lane.id).some((event) => (
+      event.verb === 'update'
+      && event.payload.event === 'merge_branch_probe_unknown'
+    ))).toBe(true);
+    expect(git(worktree.path, ['symbolic-ref', '--short', 'HEAD']))
+      .toBe('inline/empty-branch-probe');
+    expect(git(repo, ['show', 'HEAD:file.txt'])).toBe('base');
+  }, 20_000);
+
   it('preserves local transport config and resolves relative remotes in the disposable clone', async () => {
     const { repo, origin } = makeRepo('o8-merge-transport-config');
     const worktree = await makeWorktree(repo, 'pkt-transport-config', 'inline/transport-config');

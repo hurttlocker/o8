@@ -51,10 +51,12 @@ interface MergeDispatchLedgerRow {
   timestamp: string;
 }
 
-type MergeDispatchRecovery = 'fetch_unreachable' | 'typecheck_auto_retry';
+export type MergeDispatchRecovery = 'branch_probe_unknown' | 'fetch_unreachable' | 'typecheck_auto_retry';
 
-function readMergeDispatchRecovery(reason: string | undefined): MergeDispatchRecovery | null {
-  return reason === 'fetch_unreachable' || reason === 'typecheck_auto_retry'
+export function readMergeDispatchRecovery(reason: string | undefined): MergeDispatchRecovery | null {
+  return reason === 'branch_probe_unknown'
+    || reason === 'fetch_unreachable'
+    || reason === 'typecheck_auto_retry'
     ? reason
     : null;
 }
