@@ -163,7 +163,7 @@ Settings → MCP → Install. o8 exposes its operator tools — `create_mission`
 
 ## Free vs. paid, plainly
 
-**Everything that runs on your machine is free and open source, forever.** The full app, all 13 runtimes, governance, memory, the Brain, the mobile surface, voice with your own keys. No feature gates, no seat limits.
+**Everything that runs on your machine is free and open source, forever.** The full app, all 18 runtimes, governance, memory, the Brain, the mobile surface, voice with your own keys. No feature gates, no seat limits.
 
 Optional paid services (coming after launch) are the things that run on **our** servers: managed inference for the no-setup path, hosted voice, remote access without network config. Convenience, never capability. If you never pay, you have the whole product.
 
