@@ -79,3 +79,56 @@ export function surfaceReviewQueueBlocker(input: {
     attempts: input.attempts,
   });
 }
+
+// ── Terminal writers ──
+// Every claimed row must reach a terminal state that carries a receipt: a
+// review turn, an explicit skip reason, or a failure. A row that lands on
+// `completed` with attempts=0 and last_error=NULL and no lane event is the
+// silent-completion defect this owns (#1856).
+
+export const MAX_REVIEW_ATTEMPTS = 5;
+
+export function markReviewCompleted(reviewId: string): void {
+  getSqlite().prepare(
+    `UPDATE review_queue SET status = 'completed', updated_at = datetime('now') WHERE id = ?`,
+  ).run(reviewId);
+}
+
+/**
+ * A claimed review that never ran a reviewer turn. The reason is persisted on
+ * the row AND emitted as a lane event so the ledger can never claim a review
+ * happened when it did not.
+ */
+export function markReviewSkipped(input: {
+  reviewId: string;
+  laneId: string;
+  reason: string;
+}): void {
+  getSqlite().prepare(
+    `UPDATE review_queue
+     SET status = 'completed', last_error = ?, updated_at = datetime('now')
+     WHERE id = ?`,
+  ).run(`Skipped: ${input.reason}`, input.reviewId);
+
+  const lane = getLane(input.laneId);
+  recordLaneEvent(input.laneId, 'review_skipped', 'system', {
+    packetId: lane?.packetId ?? null,
+    reviewId: input.reviewId,
+    reason: input.reason,
+  });
+}
+
+export function markReviewFailed(reviewId: string, laneId: string, error: string, attempts: number): void {
+  const db = getSqlite();
+  if (attempts >= MAX_REVIEW_ATTEMPTS) {
+    db.prepare(
+      `UPDATE review_queue SET status = 'failed', last_error = ?, attempts = ?, updated_at = datetime('now') WHERE id = ?`,
+    ).run(error, attempts, reviewId);
+    surfaceReviewQueueBlocker({ laneId, reviewId, reason: error, attempts });
+  } else {
+    // Return to pending for retry
+    db.prepare(
+      `UPDATE review_queue SET status = 'pending', last_error = ?, attempts = ?, updated_at = datetime('now') WHERE id = ?`,
+    ).run(error, attempts, reviewId);
+  }
+}

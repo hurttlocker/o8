@@ -328,6 +328,21 @@ export type LaneEventVerb =
   | 'review_unavailable'
   | 'second_pass_rearmed'
   | 'review_queue_blocked'
+  // A claimed review_queue row that never ran a reviewer turn (#1856). The
+  // reason is durable so a skipped job can never read as a completed review.
+  // Payload: { packetId, reviewId, reason }
+  | 'review_skipped'
+  // Reconciliation requeued a second-pass review whose queue row went terminal
+  // without producing a turn. Payload:
+  // { packetId, approvalId, reviewedHeadSha, reviewId, queued, requeue }
+  | 'review_requeue_reconciled'
+  // Second-pass agreement dispatched a merge (#1856). Written BEFORE the
+  // dispatch so a process that dies mid-transition still leaves a trace.
+  // Payload: { packetId, approvalId, reviewedHeadSha, trigger }
+  | 'merge_dispatch_attempted'
+  // That dispatch did not merge. Payload adds { note, reason, routedApprovalId }
+  // — routedApprovalId set means it became an operator approval card.
+  | 'merge_dispatch_failed'
   | 'review_turn_started'
   | 'review_turn_finished'
   | 'worker_quota_exhausted'

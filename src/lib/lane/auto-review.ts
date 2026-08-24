@@ -24,11 +24,24 @@ import { resolveLaneReviewScreenshotReference, type LaneReviewScreenshotReferenc
 import { buildBlindSecondPassPrompt, findPendingSecondPassApproval, parseSecondPassVerdict } from './blind-second-pass-review';
 import { appendCodexAutoReviewVerdictInstructions, recordCodexAutoReviewVerdict } from './codex-auto-review-verdict';
 import { runReviewerTurnWithQuotaFallback } from './review-quota-fallback';
-import { enqueueLaneReview, surfaceReviewQueueBlocker } from './review-queue';
+import {
+  enqueueLaneReview,
+  markReviewCompleted,
+  markReviewFailed,
+  markReviewSkipped,
+} from './review-queue';
+import {
+  cancelAutoReviewForLane,
+  clearReviewAttemptCancellation,
+  isReviewAttemptCancelled,
+} from './review-cancellation';
+import { dispatchSecondPassMerge } from './second-pass-merge-dispatch';
+import { reconcileReviewStalls } from './review-stall-reconcile';
 import type { Lane } from './types';
 
-const MAX_REVIEW_ATTEMPTS = 5;
 const DRAIN_INTERVAL_MS = 10_000;
+/** Stall reconciliation is git-touching, so it runs on a slower cadence than the drain. */
+const STALL_RECONCILE_INTERVAL_MS = 30_000;
 const REVIEW_DIFF_LINES = {
   'fast-track': 120,
   standard: 200,
@@ -37,26 +50,15 @@ const REVIEW_DIFF_LINES = {
 
 /** Lanes currently being reviewed — prevents concurrent review of the same lane */
 const reviewingLanes = new Set<string>();
-const cancelledReviewLanes = new Set<string>();
 
 let drainTimer: ReturnType<typeof setInterval> | null = null;
+let lastStallReconcileAt = 0;
 
 export function isLaneAutoReviewActive(laneId: string): boolean {
   return reviewingLanes.has(laneId);
 }
 
-export function cancelAutoReviewForLane(laneId: string, reason: string): void {
-  cancelledReviewLanes.add(laneId);
-  try {
-    getDb().prepare(
-      `UPDATE review_queue
-       SET status = 'completed', last_error = ?, updated_at = datetime('now')
-       WHERE lane_id = ? AND status IN ('pending', 'in_progress')`,
-    ).run(`Cancelled: ${reason}`, laneId);
-  } catch (error) {
-    console.warn(`[auto-review] Failed to persist cancellation for lane ${laneId}:`, error);
-  }
-}
+export { cancelAutoReviewForLane };
 
 // ── Queue Operations (SQLite-backed) ──
 
@@ -85,27 +87,6 @@ function claimNextReview(): QueuedReview | null {
   ).run(row.id);
 
   return row;
-}
-
-function markReviewCompleted(reviewId: string): void {
-  getDb().prepare(
-    `UPDATE review_queue SET status = 'completed', updated_at = datetime('now') WHERE id = ?`,
-  ).run(reviewId);
-}
-
-function markReviewFailed(reviewId: string, laneId: string, error: string, attempts: number): void {
-  const db = getDb();
-  if (attempts >= MAX_REVIEW_ATTEMPTS) {
-    db.prepare(
-      `UPDATE review_queue SET status = 'failed', last_error = ?, attempts = ?, updated_at = datetime('now') WHERE id = ?`,
-    ).run(error, attempts, reviewId);
-    surfaceReviewQueueBlocker({ laneId, reviewId, reason: error, attempts });
-  } else {
-    // Return to pending for retry
-    db.prepare(
-      `UPDATE review_queue SET status = 'pending', last_error = ?, attempts = ?, updated_at = datetime('now') WHERE id = ?`,
-    ).run(error, attempts, reviewId);
-  }
 }
 
 // ── Public API ──
@@ -160,11 +141,42 @@ let drainInFlight = false;
 
 type ReviewDepth = keyof typeof REVIEW_DIFF_LINES;
 
-async function drainReviewQueue(): Promise<void> {
+/**
+ * Terminal outcome of a claimed review attempt (#1856).
+ *
+ * `performAutoReview` used to return `void`, so the drain could not tell a
+ * review that ran from one that returned early — it marked both `completed`.
+ * A skip now carries its reason all the way to the durable row and a lane
+ * event, so no queue row can end `completed` with no receipt behind it.
+ */
+type AutoReviewOutcome =
+  | { kind: 'reviewed' }
+  | { kind: 'skipped'; reason: string };
+
+const skipped = (reason: string): AutoReviewOutcome => ({ kind: 'skipped', reason });
+
+/**
+ * Run one drain tick. Exported so real-path tests can drive the production
+ * queue path deterministically instead of waiting on the interval.
+ */
+export async function drainReviewQueue(): Promise<void> {
   if (drainInFlight) return;
   drainInFlight = true;
 
   try {
+    // Reconcile before claiming: a lane whose merge dispatch was missed, or
+    // whose successor review was skipped, has no queue row left to carry it,
+    // so nothing downstream would ever look at it again.
+    const now = Date.now();
+    if (now - lastStallReconcileAt >= STALL_RECONCILE_INTERVAL_MS) {
+      lastStallReconcileAt = now;
+      try {
+        await reconcileReviewStalls();
+      } catch (error) {
+        console.warn('[auto-review] Review stall reconciliation failed:', error);
+      }
+    }
+
     const review = claimNextReview();
     if (!review) return;
 
@@ -176,18 +188,27 @@ async function drainReviewQueue(): Promise<void> {
 
     reviewingLanes.add(review.lane_id);
     try {
-      await performAutoReview(review);
-      markReviewCompleted(review.id);
-    } catch (err) {
-      if (cancelledReviewLanes.has(review.lane_id)) {
+      const outcome = await performAutoReview(review);
+      if (outcome.kind === 'skipped') {
+        markReviewSkipped({ reviewId: review.id, laneId: review.lane_id, reason: outcome.reason });
+      } else {
         markReviewCompleted(review.id);
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      if (isReviewAttemptCancelled(review.id)) {
+        markReviewSkipped({
+          reviewId: review.id,
+          laneId: review.lane_id,
+          reason: `Review attempt cancelled mid-flight: ${errorMsg}`,
+        });
         return;
       }
-      const errorMsg = err instanceof Error ? err.message : String(err);
       markReviewFailed(review.id, review.lane_id, errorMsg, review.attempts + 1);
       console.error(`[auto-review] Review ${review.id} failed (attempt ${review.attempts + 1}): ${errorMsg}`);
     } finally {
       reviewingLanes.delete(review.lane_id);
+      clearReviewAttemptCancellation(review.id);
     }
   } finally {
     drainInFlight = false;
@@ -451,7 +472,7 @@ function buildReviewPrompt(
   });
 }
 
-async function performAutoReview(review: QueuedReview): Promise<void> {
+async function performAutoReview(review: QueuedReview): Promise<AutoReviewOutcome> {
   const { getLane, getLatestLaneReviewScreenshot } = await import('@/lib/lane/registry');
   const lane = getLane(review.lane_id);
   if (!lane) {
@@ -460,11 +481,11 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
 
   if (lane.status !== 'reviewing') {
     console.log(`[auto-review] Lane ${lane.id} is no longer reviewing (${lane.status}) — skipping`);
-    return;
+    return skipped(`Lane is no longer reviewing (${lane.status}).`);
   }
-  if (cancelledReviewLanes.has(lane.id)) {
-    console.log(`[auto-review] Lane ${lane.id} was released before review — skipping`);
-    return;
+  if (isReviewAttemptCancelled(review.id)) {
+    console.log(`[auto-review] Review ${review.id} was cancelled before it started — skipping`);
+    return skipped('This review attempt was cancelled before it started.');
   }
 
   let completionContext = null;
@@ -535,9 +556,9 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
     taskContractRequired,
   );
 
-  if (cancelledReviewLanes.has(lane.id)) {
-    console.log(`[auto-review] Lane ${lane.id} was released while preparing review — skipping`);
-    return;
+  if (isReviewAttemptCancelled(review.id)) {
+    console.log(`[auto-review] Review ${review.id} was cancelled while preparing — skipping`);
+    return skipped('This review attempt was cancelled while its prompt was being prepared.');
   }
 
   // Dual-path routing (epic #1044): the `inAppOrchestratorEnabled` toggle is
@@ -572,9 +593,9 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
       }
     },
   });
-  if (cancelledReviewLanes.has(lane.id)) {
-    console.log(`[auto-review] Lane ${lane.id} was released during review — discarding the result`);
-    return;
+  if (isReviewAttemptCancelled(review.id)) {
+    console.log(`[auto-review] Review ${review.id} was cancelled during the turn — discarding the result`);
+    return skipped('This review attempt was cancelled while the reviewer turn was running.');
   }
   if (!reviewTurn.ok) {
     throw new Error(`Review turn failed: ${reviewTurn.errors.join('; ').slice(0, 500)}`);
@@ -630,14 +651,14 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
 
   if (reviewRisk.tier !== 'high') {
     console.log(`[auto-review] Review complete for lane ${lane.id}`);
-    return;
+    return { kind: 'reviewed' };
   }
 
   const pendingSecondPass = await findPendingSecondPassApproval(lane);
   if (!pendingSecondPass) {
     console.log(`[auto-review] High-risk lane ${lane.id} has no current-head approval awaiting second pass`);
     console.log(`[auto-review] Review complete for lane ${lane.id}`);
-    return;
+    return { kind: 'reviewed' };
   }
 
   const blindPrompt = buildBlindSecondPassPrompt(
@@ -680,11 +701,11 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
     currentHeadSha = normalizeHeadSha(await readHeadSha(lane.worktreePath || lane.repoPath));
   } catch (error) {
     console.warn(`[auto-review] Failed to re-read HEAD after second pass for lane ${lane.id}:`, error);
-    return;
+    return { kind: 'reviewed' };
   }
   if (currentHeadSha !== pendingSecondPass.reviewedHeadSha) {
     console.warn(`[auto-review] Second pass refused to stamp lane ${lane.id}: HEAD moved from ${pendingSecondPass.reviewedHeadSha} to ${currentHeadSha ?? '(unknown)'}`);
-    return;
+    return { kind: 'reviewed' };
   }
 
   const verdict = secondPassErrors.length > 0
@@ -692,12 +713,18 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
     : parseSecondPassVerdict(secondPassText);
 
   if (verdict.verdict === 'agree') {
+    // Agreement and dispatch are ONE recorded transition (#1856). The attempt
+    // event lands before the dispatch, so a merge that never happens leaves a
+    // reason behind instead of parking the lane in a live-looking state.
     markSecondPassAgreed(pendingSecondPass.approval.id);
-    const { dispatch } = await import('@/lib/lane/commands');
-    const mergeResult = await dispatch({ verb: 'merge', laneId: lane.id, actor: 'orchestrator' });
-    console.log(`[auto-review] Second-pass agreed for lane ${lane.id}; merge result ok=${mergeResult.ok} note=${mergeResult.note}`);
+    await dispatchSecondPassMerge({
+      lane,
+      approvalId: pendingSecondPass.approval.id,
+      reviewedHeadSha: pendingSecondPass.reviewedHeadSha,
+      trigger: 'second_pass_agreed',
+    });
     console.log(`[auto-review] Review complete for lane ${lane.id}`);
-    return;
+    return { kind: 'reviewed' };
   }
 
   const finding = verdict.verdict === 'disagree' ? verdict.finding : verdict.reason;
@@ -732,4 +759,5 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
   });
   console.warn(`[auto-review] Second pass blocked lane ${lane.id}: ${finding}`);
   console.log(`[auto-review] Review complete for lane ${lane.id}`);
+  return { kind: 'reviewed' };
 }
