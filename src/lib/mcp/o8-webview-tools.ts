@@ -199,7 +199,7 @@ function looksLikeObjectLiteralExpression(trimmed: string): boolean {
   return depth === 0;
 }
 
-function wrapEvalCode(userCode: string): string {
+export function wrapEvalCode(userCode: string): string {
   const trimmed = userCode.trim();
   // Run the user code via indirect eval — `(0, eval)(code)` evaluates in the
   // global scope AND returns the completion value of the last statement,
@@ -236,6 +236,23 @@ function wrapEvalCode(userCode: string): string {
         message: (__o8_err__ && __o8_err__.message) || String(__o8_err__),
         name: (__o8_err__ && __o8_err__.name) || 'Error',
         stack: (__o8_err__ && __o8_err__.stack) || null,
+      },
+    });
+  }
+
+  // The execute_js transport takes this function's SYNCHRONOUS completion
+  // value, so a Promise cannot be awaited here. A pending Promise also has no
+  // own enumerable keys, so it serialized to {} and sailed through every
+  // serializability probe below as ok:true -- the caller was told the eval
+  // succeeded and handed an empty object (#1735). Say what actually happened
+  // instead, and name the pattern that does work.
+  if (__o8_value__ && (typeof __o8_value__.then === 'function')) {
+    return JSON.stringify({
+      ok: false,
+      error: {
+        name: 'AsyncEvalUnsupported',
+        message: 'The expression returned a Promise, and this eval bridge reads a synchronous completion value, so the resolved value cannot be returned. Start the async work and stash its result (window.__myKey = await ...), then read window.__myKey with a second, synchronous eval.',
+        stack: null,
       },
     });
   }
