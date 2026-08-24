@@ -279,7 +279,7 @@ describe('parked replacement through the production owned launch guard', { timeo
       binaryName: 'node', binaryEnvOverride: 'O8_REPLACEMENT_TEST_NODE',
       humanLabel: 'Retired replacement test', squadShortName: 'Replacement',
       launchArgs: () => ['-e', 'setInterval(() => {}, 1000)'],
-      resumeArgs: () => ['-e', 'process.exit(0)'],
+      resumeArgs: () => ['-e', 'setInterval(() => {}, 1000)'],
       parseRunLog: (): ParsedRunLog => ({
         threadId: 'retired-replacement-thread', entries: [], outcome: 'running', completedTurn: false,
       }),
