@@ -32,8 +32,15 @@ const tempDirs: string[] = [];
 const defaultsPath = join(process.env.CORTEX_IDE_DATA_DIR!, 'operator-defaults.json');
 const settingsTomlPath = join(process.env.CORTEX_IDE_DATA_DIR!, 'settings.toml');
 
-const { listApprovals, listApprovalsForContext, recordOrchestratorReview } = await import('@/lib/approvals/store');
+const {
+  expireStaleApprovals,
+  getApproval,
+  listApprovals,
+  listApprovalsForContext,
+  recordOrchestratorReview,
+} = await import('@/lib/approvals/store');
 const { claimApprovalResolution } = await import('@/lib/approvals/resolution');
+const { getSqlite } = await import('@/lib/db');
 const mergeRoute = await import('@/app/api/orchestrator/merge/route');
 const approvalsRoute = await import('@/app/api/panel/approvals/route');
 const reviewRoute = await import('@/app/api/orchestrator/review/route');
@@ -706,6 +713,17 @@ describe('requireApproval merge governance through the real command path', () =>
     expect(listApprovals({ status: 'pending', projectId: null }).some((candidate) => (
       candidate.id === result.approvalId
     ))).toBe(true);
+
+    getSqlite().prepare(
+      'UPDATE approvals SET created_at = ? WHERE id = ?',
+    ).run(Date.now() - 31 * 60 * 1000, result.approvalId);
+
+    expect(expireStaleApprovals()).toBe(0);
+    expect(getApproval(result.approvalId!)).toMatchObject({ status: 'pending' });
+
+    archiveLane(operator.lane.id, 'system');
+    expect(expireStaleApprovals()).toBe(1);
+    expect(getApproval(result.approvalId!)).toMatchObject({ status: 'rejected' });
   }, 30_000);
 
   it('merges an easy high-confidence packet in the loop under surface posture', async () => {

@@ -7,8 +7,9 @@ import {
 } from './resolution';
 import { createApproval, getApproval, listUnsettledApprovalContinuations } from './store';
 import { getSqlite } from '@/lib/db';
+import { createLane, setLaneStatus } from '@/lib/lane/registry';
 
-function makeApproval(suffix: string) {
+function makeApproval(suffix: string, laneId = `lane-${suffix}`) {
   return createApproval({
     source: 'runtime',
     runtime: 'codex',
@@ -19,7 +20,7 @@ function makeApproval(suffix: string) {
     summary: 'Merge reviewed packet',
     risk: 'medium',
     policyRuleId: 'lane-merge',
-    continuation: { kind: 'lane', laneId: `lane-${suffix}`, verb: 'merge' },
+    continuation: { kind: 'lane', laneId, verb: 'merge' },
   });
 }
 
@@ -78,6 +79,25 @@ describe('approval evidence-drift recovery', () => {
       actor: 'system',
     });
     expect(getApproval(approval.id)?.status).toBe('pending');
+  });
+
+  it('does not present a terminal lane continuation as live inbox work', () => {
+    const suffix = `terminal-${Date.now()}-${Math.random()}`;
+    const lane = createLane({
+      repoPath: process.cwd(),
+      branch: `inline/${suffix}`,
+      baseBranch: 'main',
+      runtime: 'codex',
+      label: suffix,
+      packetId: `pkt-${suffix}`,
+    });
+    const approval = makeApproval(suffix, lane.id);
+    claimApprovalResolution(approval.id, 'approve', 'desktop');
+    setLaneStatus(lane.id, 'completed', 'system', 'merged');
+
+    expect(listUnsettledApprovalContinuations({ projectId: null }).some((candidate) => (
+      candidate.id === approval.id
+    ))).toBe(false);
   });
 
   it('gives exactly one resolver ownership and rejects a stale reopen', () => {

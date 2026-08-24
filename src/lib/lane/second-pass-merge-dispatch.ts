@@ -15,6 +15,7 @@
 
 import { randomUUID } from 'node:crypto';
 
+import { isStaleApprovalExpiryResolution } from '@/lib/approvals/expiry';
 import { getSqlite } from '@/lib/db';
 import { recordLaneEvent } from './events';
 import { getLane } from './registry';
@@ -61,6 +62,13 @@ export function readMergeDispatchRecovery(reason: string | undefined): MergeDisp
     : null;
 }
 
+function routedApprovalExpiredByStaleTtl(approvalId: string): boolean {
+  const row = getSqlite().prepare(
+    'SELECT status, resolution_json FROM approvals WHERE id = ?',
+  ).get(approvalId) as { status: string; resolution_json: string | null } | undefined;
+  return Boolean(row && isStaleApprovalExpiryResolution(row.status, row.resolution_json));
+}
+
 function claimMergeDispatch(input: {
   lane: Lane;
   approvalId: string;
@@ -79,6 +87,7 @@ function claimMergeDispatch(input: {
       `).all(input.lane.id) as MergeDispatchLedgerRow[];
       let attempts = 0;
       let pendingAt: number | null = null;
+      let recoveredExpiredRoutedApprovalId: string | null = null;
       let outcome: {
         kind: 'success' | 'failure';
         reason: string;
@@ -129,11 +138,18 @@ function claimMergeDispatch(input: {
         return { kind: 'settled_success', reason: outcome.reason };
       }
       if (outcome?.kind === 'failure') {
-        return {
-          kind: 'settled_failure',
-          reason: outcome.reason,
-          routedApprovalId: outcome.routedApprovalId,
-        };
+        if (
+          outcome.routedApprovalId
+          && routedApprovalExpiredByStaleTtl(outcome.routedApprovalId)
+        ) {
+          recoveredExpiredRoutedApprovalId = outcome.routedApprovalId;
+        } else {
+          return {
+            kind: 'settled_failure',
+            reason: outcome.reason,
+            routedApprovalId: outcome.routedApprovalId,
+          };
+        }
       }
       if (pendingAt !== null && Date.now() - pendingAt < MERGE_DISPATCH_STALE_MS) {
         return { kind: 'in_flight', reason: 'A merge dispatch attempt is still inside its recovery grace period.' };
@@ -161,6 +177,7 @@ function claimMergeDispatch(input: {
         trigger: input.trigger,
         attemptId,
         attempt,
+        recoveredExpiredRoutedApprovalId,
       });
       return { kind: 'claimed', attemptId, attempt };
     }).immediate();

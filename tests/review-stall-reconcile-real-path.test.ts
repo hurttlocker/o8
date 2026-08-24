@@ -89,7 +89,13 @@ process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
 const { closeDb, getSqlite } = await import('@/lib/db');
-const { getApproval, markSecondPassAgreed } = await import('@/lib/approvals/store');
+const {
+  createApproval,
+  getApproval,
+  markSecondPassAgreed,
+  resolveApproval,
+} = await import('@/lib/approvals/store');
+const { STALE_APPROVAL_EXPIRY_NOTE } = await import('@/lib/approvals/expiry');
 const { drainReviewQueue } = await import('@/lib/lane/auto-review');
 const { cancelAutoReviewForLane, isReviewAttemptCancelled } = await import('@/lib/lane/review-cancellation');
 const { assessDurableApprovedReview } = await import('@/lib/lane/durable-review-approval');
@@ -318,6 +324,142 @@ describe('missed merge dispatch after second-pass agreement (#1856)', () => {
     expect(attempts[1]!.payload).toMatchObject({ approvalId, attempt: 2 });
     expect(eventsWithVerb(lane.id, 'merge_dispatch_succeeded')).toHaveLength(1);
     expect(eventsWithVerb(lane.id, 'merge_dispatch_failed')).toHaveLength(0);
+  });
+
+  it('reissues a merge dispatch whose operator card expired under the stale TTL', async () => {
+    const repoDir = createRepo();
+    git(repoDir, ['checkout', '-q', '-b', 'inline/expired-operator-card']);
+    const packetId = 'pkt-expired-operator-card';
+    const lane = createLane({
+      repoPath: repoDir,
+      worktreePath: repoDir,
+      branch: 'inline/expired-operator-card',
+      baseBranch: 'main',
+      runtime: 'codex',
+      label: 'expired operator card fixture',
+      packetId,
+      sessionKey: 'test-runtime:expired-operator-card',
+    });
+    const headSha = commitHighRiskChange(repoDir, 'expired-operator-card');
+    setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
+    const approvalId = await approveHighRiskHead({ packetId, laneId: lane.id, headSha });
+    markSecondPassAgreed(approvalId);
+    getSqlite().prepare(
+      "UPDATE review_queue SET status = 'completed', last_error = 'fixture: second pass already settled' WHERE lane_id = ?",
+    ).run(lane.id);
+    const routed = createApproval({
+      source: 'runtime',
+      runtime: 'codex',
+      agent: 'merge dispatcher',
+      sessionKey: lane.sessionKey!,
+      title: `Dispatcher review ${lane.id}`,
+      description: 'Operator merge decision',
+      summary: 'Operator merge decision',
+      risk: 'high',
+      policyRuleId: 'surface-dispatcher-review',
+      args: {
+        approvalRoute: 'dispatcher',
+        dispatcherSurface: 'operator',
+        dispatcherId: 'cli',
+      },
+      continuation: { kind: 'lane', laneId: lane.id, verb: 'merge' },
+    });
+    const { recordLaneEvent } = await import('@/lib/lane/events');
+    recordLaneEvent(lane.id, 'merge_dispatch_attempted', 'system', {
+      packetId,
+      approvalId,
+      reviewedHeadSha: headSha,
+      trigger: 'second_pass_agreed',
+      attemptId: 'merge-dispatch-expired-card',
+      attempt: 1,
+    });
+    recordLaneEvent(lane.id, 'merge_dispatch_failed', 'system', {
+      packetId,
+      approvalId,
+      reviewedHeadSha: headSha,
+      trigger: 'second_pass_agreed',
+      attemptId: 'merge-dispatch-expired-card',
+      attempt: 1,
+      reason: 'Merge routed to an operator card.',
+      routedApprovalId: routed.id,
+    });
+    resolveApproval(routed.id, 'reject', 'system', STALE_APPROVAL_EXPIRY_NOTE);
+
+    await reconcileReviewStalls();
+
+    expect(h.dispatch).toHaveBeenCalledTimes(1);
+    const attempts = eventsWithVerb(lane.id, 'merge_dispatch_attempted');
+    expect(attempts).toHaveLength(2);
+    expect(attempts[1]!.payload).toMatchObject({
+      approvalId,
+      attempt: 2,
+      recoveredExpiredRoutedApprovalId: routed.id,
+    });
+    expect(eventsWithVerb(lane.id, 'merge_dispatch_succeeded')).toHaveLength(1);
+  });
+
+  it('does not reissue a merge card that the operator rejected', async () => {
+    const repoDir = createRepo();
+    git(repoDir, ['checkout', '-q', '-b', 'inline/operator-rejected-card']);
+    const packetId = 'pkt-operator-rejected-card';
+    const lane = createLane({
+      repoPath: repoDir,
+      worktreePath: repoDir,
+      branch: 'inline/operator-rejected-card',
+      baseBranch: 'main',
+      runtime: 'codex',
+      label: 'operator rejected card fixture',
+      packetId,
+      sessionKey: 'test-runtime:operator-rejected-card',
+    });
+    const headSha = commitHighRiskChange(repoDir, 'operator-rejected-card');
+    setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
+    const approvalId = await approveHighRiskHead({ packetId, laneId: lane.id, headSha });
+    markSecondPassAgreed(approvalId);
+    getSqlite().prepare(
+      "UPDATE review_queue SET status = 'completed', last_error = 'fixture: second pass already settled' WHERE lane_id = ?",
+    ).run(lane.id);
+    const routed = createApproval({
+      source: 'runtime',
+      runtime: 'codex',
+      agent: 'merge dispatcher',
+      sessionKey: lane.sessionKey!,
+      title: `Rejected dispatcher review ${lane.id}`,
+      description: 'Operator merge decision',
+      summary: 'Operator merge decision',
+      risk: 'high',
+      policyRuleId: 'surface-dispatcher-review',
+      args: {
+        approvalRoute: 'dispatcher',
+        dispatcherSurface: 'operator',
+        dispatcherId: 'cli',
+      },
+      continuation: { kind: 'lane', laneId: lane.id, verb: 'merge' },
+    });
+    const { recordLaneEvent } = await import('@/lib/lane/events');
+    recordLaneEvent(lane.id, 'merge_dispatch_attempted', 'system', {
+      packetId,
+      approvalId,
+      reviewedHeadSha: headSha,
+      attemptId: 'merge-dispatch-operator-rejected',
+      attempt: 1,
+    });
+    recordLaneEvent(lane.id, 'merge_dispatch_failed', 'system', {
+      packetId,
+      approvalId,
+      reviewedHeadSha: headSha,
+      attemptId: 'merge-dispatch-operator-rejected',
+      attempt: 1,
+      reason: 'Merge routed to an operator card.',
+      routedApprovalId: routed.id,
+    });
+    resolveApproval(routed.id, 'reject', 'desktop', 'Operator declined the merge.');
+
+    await reconcileReviewStalls();
+
+    expect(h.dispatch).not.toHaveBeenCalled();
+    expect(eventsWithVerb(lane.id, 'merge_dispatch_attempted')).toHaveLength(1);
+    expect(eventsWithVerb(lane.id, 'merge_dispatch_succeeded')).toHaveLength(0);
   });
 
   it.each([

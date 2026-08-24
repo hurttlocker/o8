@@ -6,6 +6,7 @@ import {
   scoreApprovalContextMatch,
 } from '@/lib/approvals/context';
 import { stableApprovalJson } from '@/lib/approvals/fingerprint';
+import { expireStaleApprovals } from '@/lib/approvals/expiry';
 import { belongsInOperatorInbox } from '@/lib/approvals/inbox-visibility';
 import {
   allFindingsResolved,
@@ -15,7 +16,7 @@ import {
   normalizeOrchestratorReview,
   type OrchestratorReviewRecordInput,
 } from '@/lib/approvals/orchestrator-review';
-import { approvals as approvalsTable, approvalEvents as approvalEventsTable, getDb, getSqlite } from '@/lib/db';
+import { approvals as approvalsTable, approvalEvents as approvalEventsTable, getDb } from '@/lib/db';
 import type { EventSeverity } from '@/lib/fleet/types';
 import { findLaneByPacket, getLane } from '@/lib/lane/registry';
 import { getActiveProjectScopeForRepoSync } from '@/lib/repos/projects';
@@ -27,17 +28,14 @@ import type {
   CreateApprovalInput,
   MobileApprovalCard,
 } from '@/lib/approvals/types';
-import { resolveApproval } from '@/lib/approvals/resolution';
-
 export { resolveApproval } from '@/lib/approvals/resolution';
+export { expireStaleApprovals } from '@/lib/approvals/expiry';
 
 type ApprovalRow = typeof approvalsTable.$inferSelect;
 type ApprovalInsert = typeof approvalsTable.$inferInsert;
 
 const APPROVAL_CONTEXT_LOOKUP_LIMIT = 100;
 const APPROVAL_CONTEXT_LOOKBACK_MS = 1000 * 60 * 60 * 24 * 90;
-const STALE_APPROVAL_TTL_MS = 1000 * 60 * 30;
-
 export type ReviewTurnOutcome = 'active' | 'completed' | 'failed' | 'quota_discarded';
 
 function getApprovalDb() {
@@ -268,31 +266,6 @@ export function approvalSeverity(risk: ApprovalRisk): EventSeverity {
   return 'info';
 }
 
-export function expireStaleApprovals() {
-  const cutoff = Date.now() - STALE_APPROVAL_TTL_MS;
-  const staleIds = getSqlite()
-    .prepare(`
-      SELECT id FROM approvals
-      WHERE status = 'pending'
-        AND created_at < ?
-    `)
-    .all(cutoff) as Array<{ id: string }>;
-
-  let changes = 0;
-  for (const { id } of staleIds) {
-    const resolved = resolveApproval(id, 'reject', 'system', 'Expired: stale pending approval TTL exceeded');
-    if (resolved) {
-      changes += 1;
-    }
-  }
-
-  if (changes > 0) {
-    console.log(`[approvals] Expired ${changes} stale pending approvals`);
-  }
-
-  return changes;
-}
-
 export function listApprovals(options: { status?: ApprovalRecord['status'] | 'all'; sessionKey?: string; projectId?: string | null } = {}) {
   const { status = 'pending', sessionKey } = options;
   const projectId = options.projectId === undefined
@@ -374,7 +347,15 @@ export function listApprovals(options: { status?: ApprovalRecord['status'] | 'al
     .filter(belongsInOperatorInbox);
 }
 
-export function listUnsettledApprovalContinuations(options: { sessionKey?: string; projectId?: string | null } = {}) { return listApprovals({ status: 'all', ...options }).filter((approval) => approval.resolution?.continuationStatus === 'pending' || approval.resolution?.continuationStatus === 'outcome_unknown'); }
+export function listUnsettledApprovalContinuations(options: { sessionKey?: string; projectId?: string | null } = {}) {
+  return listApprovals({ status: 'all', ...options }).filter((approval) => {
+    const unsettled = approval.resolution?.continuationStatus === 'pending'
+      || approval.resolution?.continuationStatus === 'outcome_unknown';
+    if (!unsettled || approval.continuation?.kind !== 'lane') return unsettled;
+    const lane = getLane(approval.continuation.laneId);
+    return !lane || (lane.status !== 'completed' && lane.status !== 'archived');
+  });
+}
 export function getApproval(id: string) {
   const row = getApprovalDb()
     .select()
