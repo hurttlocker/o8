@@ -76,7 +76,7 @@ import {
   mergeToolResultIntoEntry,
   sendScratchChatMessage,
 } from '@/components/desktop/orchestrator/send-chat-message';
-import { dedupeDisplayMessages } from './chat-panel/dedupe-display-messages';
+import { resolveDisplayMessages } from './chat-panel/resolve-display-messages';
 import { EmptyStateCard } from './chat-panel/EmptyStateCard';
 import { ThreadExportButton } from './chat-panel/ThreadExportButton';
 import { useClearCommand } from './chat-panel/useClearCommand';
@@ -1444,11 +1444,15 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     if (!isOrchestratorMode || isChatMode) return chatMessages;
     // Loaded history + the live stream overlap after a mid-conversation reload;
     // the same user turn can survive in both the restored (persisted id) and
-    // the live-minted (optimistic id) form. Dedupe so it never double-renders.
-    const base = orchStream.messages.length > 0 ? orchStream.messages : chatMessages;
-    return dedupeDisplayMessages(threadHistoryEntries.length > 0
-      ? [...threadHistoryEntries, ...base]
-      : base);
+    // the live-minted (optimistic id) form. resolveDisplayMessages concatenates
+    // all three sources and lets dedupeDisplayMessages collapse the overlap --
+    // it used to pick the stream OR the history, which dropped a whole restored
+    // thread the moment one live event arrived (#1839).
+    return resolveDisplayMessages({
+      historyEntries: threadHistoryEntries,
+      chatMessages,
+      streamMessages: orchStream.messages,
+    });
   }, [chatMessages, isChatMode, isOrchestratorMode, orchStream.messages, threadHistoryEntries]);
   // See `composerRepoLabelBase` for the rationale — derived here so
   // the empty-state check matches the empty-state-override condition.
