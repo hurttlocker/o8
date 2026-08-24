@@ -125,7 +125,7 @@ async function recoverTransientReviewFailures(): Promise<number> {
     }
     let releaseRepaired = false;
     if (lane.packetId) {
-      const { repairUnprovenPacketRelease } = await import('@/lib/orchestrator/packet-release-truth');
+      const { repairUnprovenPacketRelease } = await import('@/lib/orchestrator/packet-release-repair');
       releaseRepaired = await repairUnprovenPacketRelease(lane.packetId, lane.id);
     }
     recordLaneEvent(lane.id, 'review_transient_recovered', 'system', {
