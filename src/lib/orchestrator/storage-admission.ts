@@ -27,6 +27,7 @@ import {
 import {
   durableStorageLaunchGeneration,
 } from './storage-admission-generation';
+import { resolvePacketCheckout } from './storage-admission-owner-liveness';
 import {
   isMetadataLockProcessIdentity,
   probeMetadataLockProcessIdentity,
@@ -634,7 +635,8 @@ export async function resolveDurablePacketStorageOwner(
         : 'More than one durable packet claims the reservation owner id.',
     };
   }
-  const current = matches[0]!.storageAdmission;
+  const ownerPacket = matches[0]!;
+  const current = ownerPacket.storageAdmission;
   if (
     current
     && current.ownerId === reservation.ownerId
@@ -653,6 +655,29 @@ export async function resolveDurablePacketStorageOwner(
     && current.ownerGeneration === reservation.ownerGeneration
     && current.reservationId === reservation.reservationId
   ) {
+    const terminal = packetTerminalState(ownerPacket);
+    if (terminal) {
+      const checkout = await resolvePacketCheckout(ownerPacket);
+      if (checkout.state === 'absent') {
+        return {
+          liveness: 'dead',
+          source: 'terminal-packet-checkout',
+          evidence: `The durable packet is ${terminal} and its checkout is confirmed absent. ${checkout.evidence}`,
+        };
+      }
+      if (checkout.state === 'unknown') {
+        return {
+          liveness: 'unknown',
+          source: 'terminal-packet-checkout',
+          evidence: `The durable packet is ${terminal}, but checkout absence is unproved. ${checkout.evidence}`,
+        };
+      }
+      return {
+        liveness: 'alive',
+        source: 'terminal-packet-checkout',
+        evidence: `The durable packet is ${terminal}, but its checkout still exists. ${checkout.evidence}`,
+      };
+    }
     return {
       liveness: 'alive',
       source: 'packet-generation',

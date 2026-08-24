@@ -4,12 +4,12 @@ import { randomUUID } from 'node:crypto';
 
 import {
   archiveLane,
-  deleteLane,
   findLaneByPacket,
   getLane,
   setLaneStatus,
   updateLane,
 } from '@/lib/lane/registry';
+import { cleanupAndDeleteLane } from '@/lib/lane/cleanup-and-delete';
 import {
   isAgentReportReason,
   normalizeAgentReportEvent,
@@ -20,7 +20,8 @@ import {
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import type { AgentReportReason, Lane, LaneEventActor } from '@/lib/lane/types';
 import { resolveWorkerRouting } from '@/lib/agents/routing';
-import { withLockedState } from '@/lib/orchestrator/control-plane';
+import { readOrchestratorControlPlaneState, withLockedState } from '@/lib/orchestrator/control-plane';
+import { settlePacketStorageBeforeRemoval } from '@/lib/orchestrator/packet-storage-removal';
 import { nextPacketReferenceLabel } from '@/lib/orchestrator/store';
 import type {
   OrchestratorLaneBinding,
@@ -621,7 +622,11 @@ export async function pruneTask(taskId: string, input: TaskPruneInput = {}): Pro
   const note = input.reason?.trim() || 'Pruned terminal task-pool row.';
   const prunedAt = nowIso();
 
+  const deletedLane = lane ? await cleanupAndDeleteLane(lane.id) : null;
+
   if (task.packetId) {
+    const packet = readOrchestratorControlPlaneState().packets.find((item) => item.id === task.packetId);
+    if (packet) await settlePacketStorageBeforeRemoval(packet);
     await withLockedState((state) => {
       const before = state.packets.length;
       state.packets = state.packets.filter((packet) => packet.id !== task.packetId);
@@ -632,7 +637,6 @@ export async function pruneTask(taskId: string, input: TaskPruneInput = {}): Pro
     });
   }
 
-  const deletedLane = lane ? deleteLane(lane.id) : null;
   if (!task.packetId && !deletedLane) {
     throw new TaskMutationError(404, `Lane not found for task ${task.id}`);
   }
@@ -650,7 +654,11 @@ export async function removeTask(taskId: string, input: TaskPruneInput = {}): Pr
   const note = input.reason?.trim() || 'Removed task-pool row.';
   const removedAt = nowIso();
 
+  const deletedLane = lane ? await cleanupAndDeleteLane(lane.id) : null;
+
   if (task.packetId) {
+    const packet = readOrchestratorControlPlaneState().packets.find((item) => item.id === task.packetId);
+    if (packet) await settlePacketStorageBeforeRemoval(packet);
     await withLockedState((state) => {
       const before = state.packets.length;
       state.packets = state.packets.filter((packet) => packet.id !== task.packetId);
@@ -661,7 +669,6 @@ export async function removeTask(taskId: string, input: TaskPruneInput = {}): Pr
     });
   }
 
-  const deletedLane = lane ? deleteLane(lane.id) : null;
   if (!task.packetId && !deletedLane) {
     throw new TaskMutationError(404, `Lane not found for task ${task.id}`);
   }

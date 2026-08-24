@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -67,9 +67,12 @@ async function seedLaunchedPacket(
   packetId: string,
   generations: number[],
   generationEvents: 'staggered' | 'tied' | 'reversed' | 'none' = 'staggered',
+  withWorktree = false,
 ) {
   const repoPath = mkdtempSync(join(tmpdir(), `o8-storage-chokepoint-${packetId}-`));
   roots.push(repoPath);
+  const worktreePath = join(repoPath, '.cortex-worktrees', `packet-${packetId}`);
+  if (withWorktree) mkdirSync(worktreePath, { recursive: true });
   const store = makeStore();
   for (const generation of generations) {
     await store.reserve({
@@ -89,6 +92,7 @@ async function seedLaunchedPacket(
     runtime: 'codex',
     packetId,
     label: `packet ${packetId}`,
+    worktreePath: withWorktree ? worktreePath : undefined,
   });
   if (generationEvents !== 'none') {
     generations.forEach((generation, index) => {
@@ -106,7 +110,7 @@ async function seedLaunchedPacket(
         .run(new Date(now + offsetMs).toISOString(), event.id);
     });
   }
-  return { lane, repoPath, store };
+  return { lane, repoPath, store, worktreePath };
 }
 
 function reservationStates(packetId: string, generations: number[]) {
@@ -156,7 +160,21 @@ afterAll(() => {
 });
 
 describe('lane packet-association chokepoint releases storage reservations', () => {
-  it('releases when a launch failure takes the lane to failed', async () => {
+  it('retains a failed lane reservation while its checkout still exists', async () => {
+    const packetId = 'chokepoint-failed-with-checkout';
+    const { lane, worktreePath } = await seedLaunchedPacket(packetId, [1], 'staggered', true);
+
+    setLaneStatus(lane.id, 'failed', 'system', 'launch_attempts_exhausted');
+
+    expect(existsSync(worktreePath)).toBe(true);
+    expect(reservationStates(packetId, [1])).toEqual(['reserved']);
+
+    rmSync(worktreePath, { recursive: true, force: true });
+    updateLane(lane.id, { packetId: '' }, 'system');
+    expect(reservationStates(packetId, [1])).toEqual(['released']);
+  });
+
+  it('releases a failed launch when no checkout exists', async () => {
     const packetId = 'chokepoint-failed';
     const { lane } = await seedLaunchedPacket(packetId, [1]);
 

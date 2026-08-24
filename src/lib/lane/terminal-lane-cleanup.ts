@@ -3,11 +3,16 @@ import { cleanupLaneWorktree } from './worktree-cleanup';
 import { releaseTerminalPacketStorageReservations } from '@/lib/orchestrator/terminal-storage-release';
 
 type TerminalCleanupLane = Pick<Lane, 'id' | 'repoPath' | 'worktreePath' | 'packetId'>
-  & Partial<Pick<Lane, 'baseBranch'>>;
+  & Partial<Pick<Lane, 'baseBranch'>>
+  & { storageAdmissionOwnerGeneration?: number };
 
 function releaseWithoutWorktree(lane: TerminalCleanupLane): void {
   try {
-    releaseTerminalPacketStorageReservations({ packetId: lane.packetId, laneId: lane.id });
+    releaseTerminalPacketStorageReservations({
+      packetId: lane.packetId,
+      laneId: lane.id,
+      ownerGeneration: lane.storageAdmissionOwnerGeneration,
+    });
   } catch (error) {
     console.error(
       `[storage-admission] Terminal reservation release failed for ${lane.id}: ${error instanceof Error ? error.message : String(error)}`,

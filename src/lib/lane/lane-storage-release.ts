@@ -1,3 +1,5 @@
+import { lstatSync } from 'node:fs';
+
 import { getSqlite } from '@/lib/db';
 import {
   laneStorageOwnerGeneration,
@@ -6,36 +8,52 @@ import {
 import { LANE_TERMINAL_STATUSES } from './terminal-states';
 import type { Lane, LaneStatus } from './types';
 
+export function worktreeIsConfirmedAbsent(worktreePath: string | null): boolean {
+  const normalized = worktreePath?.trim();
+  if (!normalized) return true;
+  try {
+    lstatSync(normalized);
+    return false;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === 'ENOENT' || code === 'ENOTDIR';
+  }
+}
+
+function captureLaneStorageOwnerGeneration(
+  lane: Pick<Lane, 'id' | 'packetId'>,
+): number | undefined {
+  const packetId = lane.packetId?.trim();
+  if (!packetId) return undefined;
+  return laneStorageOwnerGeneration(getSqlite(), lane.id, packetId);
+}
+
+export function captureLaneStorageCleanup(lane: Lane): Lane & {
+  storageAdmissionOwnerGeneration?: number;
+} {
+  return { ...lane, storageAdmissionOwnerGeneration: captureLaneStorageOwnerGeneration(lane) };
+}
+
 /**
- * A packet-owned storage reservation is only reachable while the lane row still
- * names its packet — the reservation's owner id IS the packet id. So the moment
- * a lane write clears or reassigns `lanes.packet_id`, or drops the lane to a
- * terminal status, the reservation must already be settled or it is orphaned:
- * nothing left in the database points at it, and its bytes are subtracted from
- * dispatch headroom forever.
+ * A packet storage reservation accounts for its checkout, not merely the lane
+ * row that currently names the packet. Association loss or a `failed` status is
+ * therefore not release evidence while that checkout still exists.
  *
- * Every production write of that shape funnels through `updateLane`/`deleteLane`,
- * so settlement is derived there rather than at each caller — a helper callers
- * must remember to invoke is what leaked the reservations in the first place.
+ * This chokepoint handles only the complementary case: the lane is losing its
+ * packet association (or becoming terminal) after the checkout is already
+ * confirmed absent. Ordinary terminal cleanup carries the exact owner
+ * generation to `cleanupLaneWorktree`, which releases only after removal.
  *
  * This function MUST be called from inside the caller's open transaction, and
- * before the association-losing write. Two properties follow, and both are the
- * point of the design:
+ * before the association-losing write. That keeps the no-checkout case atomic:
  *
  *  - `releaseReservedStorageForTerminalOwner` joins the open transaction rather
- *    than opening its own, so the release and the association loss commit as one
- *    unit. There is no window in which the association is gone but the
- *    reservation is still `reserved`.
+ *    than opening its own, so release and association loss commit together.
  *  - Errors PROPAGATE. A settlement failure must roll the lane write back and
- *    leave the reservation recoverable, not commit an unreachable row. Callers
- *    must not wrap this in a catch.
- *
- * Running before the write also keeps live-sibling protection honest: the helper
- * excludes `terminalLaneId` itself and retains any generation a surviving lane
- * still owns while releasing generations that only the retiring lane can own.
+ *    leave the reservation recoverable. Callers must not wrap this in a catch.
  */
 export function settleLaneStorageOnAssociationLoss(
-  lane: Pick<Lane, 'id' | 'packetId'>,
+  lane: Pick<Lane, 'id' | 'packetId' | 'worktreePath'>,
   changes: { packetId?: unknown; status?: unknown },
 ): void {
   const packetId = lane.packetId?.trim();
@@ -46,6 +64,7 @@ export function settleLaneStorageOnAssociationLoss(
   const wentTerminal = typeof changes.status === 'string'
     && LANE_TERMINAL_STATUSES.has(changes.status as LaneStatus);
   if (!associationLost && !wentTerminal) return;
+  if (!worktreeIsConfirmedAbsent(lane.worktreePath)) return;
 
   const sqlite = getSqlite();
   // Read inside the transaction, before the lane's events are appended to or

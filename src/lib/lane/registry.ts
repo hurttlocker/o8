@@ -23,7 +23,7 @@ import type {
   LaneStatus,
 } from './types';
 import { scheduleTerminalLaneCleanup } from './terminal-lane-cleanup';
-import { settleLaneStorageOnAssociationLoss } from './lane-storage-release';
+import { captureLaneStorageCleanup, settleLaneStorageOnAssociationLoss, worktreeIsConfirmedAbsent } from './lane-storage-release';
 import { getDataDir } from '@/lib/data-dir-migration';
 
 export {
@@ -420,7 +420,7 @@ export function updateLane(
   let statusChanged = false;
   let statusChangeEventId: string | null = null;
   let lifecycleTimestamp: string | null = null;
-  let laneBeforeTerminalCleanup: Lane | null = null;
+  let laneBeforeTerminalCleanup: (Lane & { storageAdmissionOwnerGeneration?: number }) | null = null;
 
   db.transaction(() => {
     const lane = getLane(laneId);
@@ -469,7 +469,7 @@ export function updateLane(
       && typeof nextValues.status === 'string'
       && isWorktreeCleanupTerminalStatus(nextValues.status as LaneStatus)
     ) {
-      laneBeforeTerminalCleanup = lane;
+      laneBeforeTerminalCleanup = captureLaneStorageCleanup(lane);
     }
     updateLaneRecord(laneId, nextValues);
 
@@ -921,6 +921,7 @@ export function deleteLane(laneId: string): Lane | null {
   if (!lane) {
     return null;
   }
+  if (!worktreeIsConfirmedAbsent(lane.worktreePath)) throw new Error(`Refusing to delete lane ${laneId} before checkout removal is confirmed.`);
 
   getSqlite().transaction(() => {
     settleLaneStorageOnAssociationLoss(lane, { packetId: '' });
@@ -931,8 +932,6 @@ export function deleteLane(laneId: string): Lane | null {
     getSqlite().prepare('DELETE FROM lane_events WHERE lane_id = ?').run(laneId);
     getSqlite().prepare('DELETE FROM lanes WHERE id = ?').run(laneId);
   })();
-
-  scheduleTerminalLaneCleanup(lane);
 
   return lane;
 }
