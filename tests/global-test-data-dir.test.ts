@@ -7,8 +7,16 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { removeOwnedWorkerDataRoot, sweepStaleTestDataRoots } from './global-test-data-dir';
-import { TEST_RUN_OWNER_FILE, writeTestRunOwner } from './test-fixture-lifecycle';
+import {
+  removeOwnedTestRunRootUnlessRetained,
+  removeOwnedWorkerDataRoot,
+  sweepStaleTestDataRoots,
+} from './global-test-data-dir';
+import {
+  retainTestRunAfterTimeout,
+  TEST_RUN_OWNER_FILE,
+  writeTestRunOwner,
+} from './test-fixture-lifecycle';
 
 const roots: string[] = [];
 
@@ -66,5 +74,16 @@ describe('test data root cleanup', () => {
     expect(() => removeOwnedWorkerDataRoot(parent, sibling)).toThrow(
       'outside the owned run parent',
     );
+  });
+
+  it('retains a timed-out run root until the stale-fixture sweep owns cleanup', () => {
+    const parent = mkdtempSync(path.join(os.tmpdir(), 'o8-test-retain-parent-'));
+    const runRoot = mkdtempSync(path.join(parent, 'o8-test-data-run-'));
+    roots.push(parent);
+    writeTestRunOwner(runRoot);
+    retainTestRunAfterTimeout(runRoot);
+
+    expect(removeOwnedTestRunRootUnlessRetained(parent, runRoot)).toBe(false);
+    expect(existsSync(runRoot)).toBe(true);
   });
 });

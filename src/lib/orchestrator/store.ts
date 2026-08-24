@@ -28,7 +28,12 @@ import type {
   WorkerRouting,
 } from '@/lib/orchestrator/types';
 import { isDispatchableRuntime } from '@/lib/orchestrator/runtime-capabilities';
-import { applyLaneCompletedRelease } from '@/lib/orchestrator/packet-release-truth';
+import {
+  applyLaneCompletedRelease,
+  clearUnprovenReleaseClaim,
+  hasCanonicalReleaseEvidence,
+} from '@/lib/orchestrator/packet-release-truth';
+import { normalizeReleaseStatePayload } from '@/lib/orchestrator/release-state-payload';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 function normalizeRuntime(value: unknown): OrchestratorRuntime {
   return isDispatchableRuntime(value) ? value : 'codex';
@@ -298,29 +303,6 @@ function normalizeWorkerRouting(value: unknown, runtime: OrchestratorRuntime, wo
     confidence,
     source: 'orchestrator-state',
   });
-}
-
-function normalizeReleaseStatePayload(value: unknown): OrchestratorPacket['releaseStatePayload'] {
-  if (!value || typeof value !== 'object') return null;
-  const raw = value as Partial<NonNullable<OrchestratorPacket['releaseStatePayload']>>;
-  const mergeCommit = typeof raw.mergeCommit === 'string' && raw.mergeCommit.trim()
-    ? raw.mergeCommit.trim()
-    : null;
-  const releasedAt = typeof raw.releasedAt === 'string' && raw.releasedAt.trim()
-    ? raw.releasedAt.trim()
-    : null;
-  const source = typeof raw.source === 'string' && raw.source.trim()
-    ? raw.source.trim()
-    : null;
-  const headSha = typeof raw.headSha === 'string' && raw.headSha.trim()
-    ? raw.headSha.trim()
-    : null;
-  const evidenceKind = typeof raw.evidenceKind === 'string' && raw.evidenceKind.trim()
-    ? raw.evidenceKind.trim()
-    : null;
-  return mergeCommit || releasedAt || source || headSha || evidenceKind
-    ? { mergeCommit, releasedAt, source, headSha, evidenceKind }
-    : null;
 }
 
 function normalizePacket(raw: unknown, index: number, existing: Array<Pick<OrchestratorPacket, 'referenceLabel'>>) {
@@ -1004,7 +986,7 @@ export function reconcileOrchestratorMissionState(
       return next;
     }
 
-    if (packet.releaseState === 'released') {
+    if (packet.releaseState === 'released' && hasCanonicalReleaseEvidence(packet)) {
       next.status = 'released';
       next.blockedReason = null;
       return {
@@ -1012,6 +994,7 @@ export function reconcileOrchestratorMissionState(
         lane: laneMatch ? next.lane : null,
       };
     }
+    clearUnprovenReleaseClaim(next);
 
     if (packet.status === 'failed' && (!domainLane || domainLane.status === 'failed')) {
       next.status = 'failed';

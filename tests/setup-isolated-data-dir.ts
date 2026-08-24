@@ -16,8 +16,12 @@
  * O8_DATA_DIR unset here so the canonical resolver's modern-name precedence
  * cannot shadow those per-test overrides.
  */
-import { afterAll } from 'vitest';
+import { afterAll, afterEach } from 'vitest';
 import { removeOwnedWorkerDataRoot } from './global-test-data-dir';
+import {
+  retainTestRunAfterTimeout,
+  testRunRetainedAfterTimeout,
+} from './test-fixture-lifecycle';
 
 type FsModule = typeof import('node:fs');
 type OsModule = typeof import('node:os');
@@ -62,11 +66,30 @@ const ownedRunRoot = runRoot
   ? runRoot
   : null;
 if (ownedRunRoot) {
+  const taskTimedOutOrWasCancelled = (task: {
+    result?: { errors?: Array<{ message?: string }> };
+    tasks?: Array<unknown>;
+  }): boolean => {
+    const ownError = task.result?.errors?.some((error) => (
+      /timed out|cancelled|canceled/i.test(error.message ?? '')
+    )) ?? false;
+    return ownError || (task.tasks ?? []).some((child) => (
+      taskTimedOutOrWasCancelled(child as Parameters<typeof taskTimedOutOrWasCancelled>[0])
+    ));
+  };
+  const retainRunRoot = () => {
+    retainTestRunAfterTimeout(ownedRunRoot);
+  };
+  afterEach((context) => {
+    if (context.signal.aborted || taskTimedOutOrWasCancelled(context.task)) retainRunRoot();
+  });
   const cleanupWorkerRoot = () => {
+    if (testRunRetainedAfterTimeout(ownedRunRoot)) return;
     removeOwnedWorkerDataRoot(ownedRunRoot, pinnedDataDir);
   };
   process.once('exit', cleanupWorkerRoot);
-  afterAll(() => {
+  afterAll(({}, suite) => {
+    if (taskTimedOutOrWasCancelled(suite)) retainRunRoot();
     process.off('exit', cleanupWorkerRoot);
     cleanupWorkerRoot();
   });

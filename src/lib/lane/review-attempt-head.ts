@@ -16,16 +16,18 @@
  *
  * Both now settle durably: a superseded attempt gets a terminal receipt keyed
  * to the HEAD that replaced it, and an abandoned claim is reclaimed against a
- * lease. Cancellation stays ATTEMPT-scoped — the specific review id is
- * cancelled, never the lane.
+ * lease. Cancellation stays claim-generation-scoped: the exact row and owner
+ * nonce are cancelled, never the lane or a later retry that reuses the row id.
  */
 
 import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 
 import { getSqlite } from '@/lib/db';
 import { recordLaneEvent } from './events';
 import { cancelReviewAttempt } from './review-cancellation';
-import { markReviewFailed } from './review-queue-settlement';
+import { surfaceReviewQueueBlocker } from './review-queue-blocker';
+import { MAX_REVIEW_ATTEMPTS } from './review-queue-settlement';
 import type { Lane } from './types';
 
 /** How long a claimed attempt may sit untouched before it is reclaimable. */
@@ -36,6 +38,7 @@ interface ActiveAttemptRow {
   status: 'pending' | 'in_progress';
   head_sha: string | null;
   attempts: number;
+  claim_owner: string | null;
 }
 
 interface AbandonedAttemptRow {
@@ -47,7 +50,11 @@ interface AbandonedAttemptRow {
 }
 
 export function reviewAttemptOwnerId(): string {
-  return `pid:${process.pid}`;
+  // The pid identifies the process for operators; the nonce identifies this
+  // claim generation. A reclaimed row can be claimed again with the same row
+  // id while its old reviewer call is still hung, so row id + pid alone cannot
+  // stop the old continuation from cancelling or settling its replacement.
+  return `pid:${process.pid}:${randomUUID()}`;
 }
 
 export function normalizeAttemptHeadSha(value?: string | null): string | undefined {
@@ -100,7 +107,7 @@ export function settleSupersededReviewAttempts(input: {
   try {
     const db = getSqlite();
     const active = db.prepare(
-      `SELECT id, status, head_sha, attempts FROM review_queue
+      `SELECT id, status, head_sha, attempts, claim_owner FROM review_queue
        WHERE lane_id = ? AND status IN ('pending', 'in_progress')`,
     ).all(input.lane.id) as ActiveAttemptRow[];
 
@@ -109,15 +116,17 @@ export function settleSupersededReviewAttempts(input: {
       if (!rowHead || rowHead === currentHeadSha) continue;
 
       const note = `Superseded: ${input.reason} (reviewed HEAD ${rowHead}, current HEAD ${currentHeadSha}).`;
-      db.prepare(
+      const result = db.prepare(
         `UPDATE review_queue
-         SET status = 'completed', last_error = ?, updated_at = datetime('now')
-         WHERE id = ?`,
-      ).run(note, row.id);
+         SET status = 'completed', last_error = ?, claimed_at = NULL, claim_owner = NULL,
+             updated_at = datetime('now')
+         WHERE id = ? AND status = ? AND head_sha = ? AND claim_owner IS ?`,
+      ).run(note, row.id, row.status, rowHead, row.claim_owner);
+      if (result.changes !== 1) continue;
 
       // Attempt-scoped: only the row that is actually pinned to the dead HEAD
       // is cancelled, so a successor attempt on the same lane still runs.
-      if (row.status === 'in_progress') cancelReviewAttempt(row.id);
+      if (row.status === 'in_progress') cancelReviewAttempt(row.id, row.claim_owner);
 
       recordLaneEvent(input.lane.id, 'review_superseded', 'system', {
         packetId: input.lane.packetId ?? null,
@@ -150,6 +159,8 @@ export function settleSupersededReviewAttempts(input: {
 export function reclaimAbandonedReviewAttempts(options: {
   leaseMs?: number;
   nowMs?: number;
+  /** False during startup, when no continuation from the prior process exists. */
+  cancelInMemory?: boolean;
 } = {}): number {
   const leaseMs = options.leaseMs ?? REVIEW_ATTEMPT_LEASE_MS;
   const nowMs = options.nowMs ?? Date.now();
@@ -169,22 +180,39 @@ export function reclaimAbandonedReviewAttempts(options: {
       const expired = claimedAtMs === null || nowMs - claimedAtMs >= leaseMs;
       if (!expired) continue;
 
+      const attempts = row.attempts + 1;
+      const error = `Review attempt was claimed at ${row.claimed_at ?? 'an unrecorded time'} and never settled.`;
+      const status = attempts >= MAX_REVIEW_ATTEMPTS ? 'failed' : 'pending';
+      const result = db.prepare(
+        `UPDATE review_queue
+         SET status = ?, attempts = ?, last_error = ?, claimed_at = NULL, claim_owner = NULL,
+             updated_at = datetime('now')
+         WHERE id = ? AND status = 'in_progress'
+           AND claimed_at IS ? AND claim_owner IS ?`,
+      ).run(status, attempts, error, row.id, row.claimed_at, row.claim_owner);
+      if (result.changes !== 1) continue;
+
+      if (
+        options.cancelInMemory !== false
+        && row.claim_owner?.startsWith(`pid:${process.pid}:`)
+      ) {
+        cancelReviewAttempt(row.id, row.claim_owner);
+      }
       recordLaneEvent(row.lane_id, 'review_attempt_abandoned', 'system', {
         reviewId: row.id,
         claimedAt: row.claimed_at,
         claimOwner: row.claim_owner,
         leaseMs,
-        attempts: row.attempts,
+        attempts,
       });
-      db.prepare(
-        `UPDATE review_queue SET claimed_at = NULL, claim_owner = NULL WHERE id = ?`,
-      ).run(row.id);
-      markReviewFailed(
-        row.id,
-        row.lane_id,
-        `Review attempt was claimed at ${row.claimed_at ?? 'an unrecorded time'} and never settled.`,
-        row.attempts + 1,
-      );
+      if (status === 'failed') {
+        surfaceReviewQueueBlocker({
+          laneId: row.lane_id,
+          reviewId: row.id,
+          reason: error,
+          attempts,
+        });
+      }
       reclaimed += 1;
     }
   } catch (error) {

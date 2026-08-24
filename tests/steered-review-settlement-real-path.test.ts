@@ -28,6 +28,7 @@ const h = vi.hoisted(() => ({
   /** Resolvers for reviewer turns the test wants to hold open mid-flight. */
   heldTurns: [] as Array<() => void>,
   holdNextTurn: false,
+  busyTurnsRemaining: 0,
   reviewedThreadIds: [] as string[],
 }));
 
@@ -38,8 +39,21 @@ vi.mock('@/lib/lane/review-quota-fallback', async () => {
       laneId: string;
       threadId: string;
       surface: string;
+      expectedHeadSha?: string | null;
     }) => {
       h.reviewedThreadIds.push(input.threadId);
+      if (h.busyTurnsRemaining > 0) {
+        h.busyTurnsRemaining -= 1;
+        return {
+          ok: false,
+          backend: 'codex' as const,
+          text: '',
+          errors: ['Codex session busy'],
+          fallback: null,
+          reviewTurnId: null,
+          unavailableReason: 'session_busy' as const,
+        };
+      }
       if (h.holdNextTurn) {
         h.holdNextTurn = false;
         // The live shape: the process that claimed the row is still inside the
@@ -51,6 +65,7 @@ vi.mock('@/lib/lane/review-quota-fallback', async () => {
         threadId: input.threadId,
         backend: 'claude',
         surface: input.surface,
+        expectedHeadSha: input.expectedHeadSha,
       });
       finishReviewTurn({ laneId: input.laneId, reviewTurnId, outcome: 'completed' });
       return {
@@ -60,6 +75,7 @@ vi.mock('@/lib/lane/review-quota-fallback', async () => {
         errors: [] as string[],
         fallback: null,
         reviewTurnId,
+        unavailableReason: null,
       };
     }),
   };
@@ -78,13 +94,18 @@ const repoDirs: string[] = [];
 
 const { closeDb, getSqlite } = await import('@/lib/db');
 const { drainReviewQueue, startReviewQueueDrain, triggerAutoReview } = await import('@/lib/lane/auto-review');
+const { reclaimAbandonedReviewAttempts } = await import('@/lib/lane/review-attempt-head');
 const { createLane, getLane, getLaneEvents, setLaneStatus } = await import('@/lib/lane/registry');
 const { enqueueLaneReview } = await import('@/lib/lane/review-queue');
 const { assessDurableApprovedReview } = await import('@/lib/lane/durable-review-approval');
 const { submitPacketReview } = await import('@/lib/orchestrator/operator-mission-service/review');
+const { finishReviewTurn, startReviewTurn } = await import('@/lib/lane/review-turn-state');
 const { readOrchestratorControlPlaneState, withLockedState, writeOrchestratorControlPlaneState } =
   await import('@/lib/orchestrator/control-plane');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
+const { markPacketReleased } = await import('@/lib/orchestrator/packet-release-truth');
+const { packetTerminalState } = await import('@/lib/orchestrator/packet-state');
 
 function git(repoDir: string, args: string[]): string {
   return execFileSync('git', args, { cwd: repoDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -110,6 +131,26 @@ function createRepo(branch: string): string {
   return repoDir;
 }
 
+function createRepoWithPacketWorktree(branch: string): {
+  repoDir: string;
+  worktreeDir: string;
+  mainHead: string;
+} {
+  const rootDir = mkdtempSync(join(os.tmpdir(), 'o8-steer-settlement-isolated-'));
+  repoDirs.push(rootDir);
+  const repoDir = join(rootDir, 'repo');
+  const worktreeDir = join(rootDir, 'packet');
+  mkdirSync(repoDir, { recursive: true });
+  git(repoDir, ['init', '-q', '-b', 'main']);
+  git(repoDir, ['config', 'user.email', 'o8@example.test']);
+  git(repoDir, ['config', 'user.name', 'o8-test']);
+  commitFile(repoDir, 'README.md', 'fixture\n', 'base');
+  const mainHead = git(repoDir, ['rev-parse', 'HEAD']);
+  git(repoDir, ['branch', branch]);
+  git(repoDir, ['worktree', 'add', '-q', worktreeDir, branch]);
+  return { repoDir, worktreeDir, mainHead };
+}
+
 /** The high-risk classifier keys on `db` paths, so this is the blind-second-pass shape. */
 function commitHighRiskChange(repoDir: string, slug: string): string {
   return commitFile(
@@ -122,13 +163,15 @@ function commitHighRiskChange(repoDir: string, slug: string): string {
 
 function queueRows(laneId: string) {
   return getSqlite().prepare(
-    'SELECT id, status, head_sha, last_error, claimed_at FROM review_queue WHERE lane_id = ? ORDER BY created_at ASC',
+    'SELECT id, status, attempts, head_sha, last_error, claimed_at, claim_owner FROM review_queue WHERE lane_id = ? ORDER BY created_at ASC',
   ).all(laneId) as Array<{
     id: string;
     status: string;
+    attempts: number;
     head_sha: string | null;
     last_error: string | null;
     claimed_at: string | null;
+    claim_owner: string | null;
   }>;
 }
 
@@ -239,16 +282,64 @@ describe('steer during an in-progress review, followed by a successor commit (#1
     expect(successorRow).toBeDefined();
     expect(successorRow).toMatchObject({ status: 'pending', head_sha: successorHead });
 
-    // 3. Recovery still runs while the first attempt is hung — the drain's
-    //    in-flight guard no longer gates the repair paths behind it.
+    // 3. The replacement runs while the first backend promise is STILL hung.
+    //    Recording recovery is insufficient if an in-memory boolean keeps the
+    //    reviewer slot pinned until that promise returns.
     await expect(drainReviewQueue()).resolves.toBeUndefined();
-
-    // 4. The successor attempt actually runs a reviewer turn at the new HEAD.
-    releaseHeldTurns();
-    await hungDrain;
-    await drainReviewQueue();
+    expect(h.heldTurns).toHaveLength(1);
     expect(h.reviewedThreadIds.some((threadId) => threadId.includes(successorRow!.id))).toBe(true);
     expect(queueRows(lane.id).find((row) => row.id === successorRow!.id)!.status).not.toBe('pending');
+
+    // 4. The old continuation cannot overwrite the successor when it wakes.
+    releaseHeldTurns();
+    await hungDrain;
+    expect(queueRows(lane.id).find((row) => row.id === first.reviewId)).toMatchObject({
+      status: 'completed',
+      last_error: expect.stringContaining('Superseded'),
+    });
+  });
+
+  it('retries a reclaimed row under a new claim generation while its old call remains hung', async () => {
+    const branch = 'inline/reclaimed-generation';
+    const repoDir = createRepo(branch);
+    const lane = createLane({
+      repoPath: repoDir,
+      worktreePath: repoDir,
+      branch,
+      baseBranch: 'main',
+      runtime: 'codex',
+      label: 'reclaimed generation fixture',
+      packetId: 'pkt-reclaimed-generation',
+      sessionKey: 'codex-owned:reclaimed-generation',
+    });
+    commitHighRiskChange(repoDir, 'reclaimed-generation');
+    setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
+    const queued = enqueueLaneReview(getLane(lane.id)!);
+
+    h.holdNextTurn = true;
+    const hungDrain = drainReviewQueue();
+    await vi.waitFor(() => {
+      expect(queueRows(lane.id).find((row) => row.id === queued.reviewId)?.status).toBe('in_progress');
+      expect(h.heldTurns).toHaveLength(1);
+    });
+    const oldClaimOwner = queueRows(lane.id).find((row) => row.id === queued.reviewId)?.claim_owner;
+    expect(oldClaimOwner).toBeTruthy();
+
+    expect(reclaimAbandonedReviewAttempts({ leaseMs: 0 })).toBe(1);
+    expect(queueRows(lane.id).find((row) => row.id === queued.reviewId)).toMatchObject({
+      status: 'pending',
+      attempts: 1,
+      claim_owner: null,
+    });
+
+    await drainReviewQueue();
+    expect(h.heldTurns).toHaveLength(1);
+    expect(h.reviewedThreadIds.filter((threadId) => threadId.includes(queued.reviewId))).toHaveLength(2);
+    expect(queueRows(lane.id).find((row) => row.id === queued.reviewId)?.status).toBe('completed');
+
+    releaseHeldTurns();
+    await hungDrain;
+    expect(queueRows(lane.id).find((row) => row.id === queued.reviewId)?.status).toBe('completed');
   });
 
   it('reclaims a claim stranded by a dead process on restart, with a durable receipt', async () => {
@@ -300,9 +391,174 @@ describe('steer during an in-progress review, followed by a successor commit (#1
     ).run(queued.reviewId);
     await drainReviewQueue();
   });
+
+  it('defers repeated reviewer contention without spending the terminal attempt budget', async () => {
+    const branch = 'inline/reviewer-contention';
+    const repoDir = createRepo(branch);
+    const lane = createLane({
+      repoPath: repoDir,
+      worktreePath: repoDir,
+      branch,
+      baseBranch: 'main',
+      runtime: 'codex',
+      label: 'reviewer contention fixture',
+      packetId: 'pkt-reviewer-contention',
+      sessionKey: 'codex-owned:reviewer-contention',
+    });
+    commitHighRiskChange(repoDir, 'reviewer-contention');
+    setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
+    const queued = enqueueLaneReview(getLane(lane.id)!);
+
+    h.busyTurnsRemaining = 6;
+    try {
+      for (let index = 0; index < 6; index += 1) {
+        await drainReviewQueue();
+        expect(queueRows(lane.id).find((row) => row.id === queued.reviewId)).toMatchObject({
+          status: 'pending',
+          attempts: 0,
+        });
+        expect(getLane(lane.id)?.status).toBe('reviewing');
+      }
+    } finally {
+      h.busyTurnsRemaining = 0;
+    }
+
+    expect(eventsWithVerb(lane.id, 'review_deferred')).toHaveLength(6);
+    await drainReviewQueue();
+    expect(queueRows(lane.id).find((row) => row.id === queued.reviewId)?.status).toBe('completed');
+  });
+
+  it('repairs the exact legacy failed-busy registry shape against the packet worktree HEAD', async () => {
+    const branch = 'inline/legacy-busy-restart';
+    const { repoDir, worktreeDir, mainHead } = createRepoWithPacketWorktree(branch);
+    const packetHead = commitHighRiskChange(worktreeDir, 'legacy-busy-restart');
+    expect(packetHead).not.toBe(mainHead);
+    const packetId = 'pkt-legacy-busy-restart';
+    const missionId = 'mission-legacy-busy-restart';
+    const lane = createLane({
+      repoPath: repoDir,
+      worktreePath: worktreeDir,
+      branch,
+      baseBranch: 'main',
+      runtime: 'codex',
+      label: 'legacy busy restart fixture',
+      packetId,
+      sessionKey: 'codex-owned:legacy-busy-restart',
+    });
+    setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
+    setLaneStatus(lane.id, 'awaiting_orchestrator', 'system', 'review_queue_failed');
+
+    getSqlite().prepare(
+      `INSERT INTO review_queue (
+         id, lane_id, repo_path, status, attempts, last_error, head_sha, created_at, updated_at
+       ) VALUES (?, ?, ?, 'failed', 5, 'Review turn failed: Codex session busy', NULL,
+         datetime('now', '-1 minute'), datetime('now'))`,
+    ).run('review-legacy-busy', lane.id, repoDir);
+
+    const falseRelease = packetFixture(repoDir, packetId, lane.id, branch);
+    falseRelease.status = 'released';
+    falseRelease.releaseState = 'released';
+    falseRelease.releaseStatePayload = null;
+    falseRelease.lane = {
+      ...falseRelease.lane!,
+      repoPath: repoDir,
+      worktreePath: worktreeDir,
+    };
+    const registryState = {
+      ...createEmptyOrchestratorMissionState(),
+      missionId,
+      repoPath: repoDir,
+      packets: [falseRelease],
+    };
+    const now = Date.now();
+    getSqlite().prepare(
+      `INSERT INTO missions (
+         id, repo_path, runtime, prompt, summary, constraints, packet_meta_json,
+         total_waves, created_at, updated_at, archived_at, mission_state_json
+       ) VALUES (?, ?, 'codex', '', '', '', '[]', 1, ?, ?, ?, ?)`,
+    ).run(missionId, repoDir, now, now, now, JSON.stringify(registryState));
+
+    h.busyTurnsRemaining = 1;
+    const stopDrain = startReviewQueueDrain();
+    try {
+      await vi.waitFor(() => {
+        expect(eventsWithVerb(lane.id, 'review_transient_recovered')).toHaveLength(1);
+        expect(eventsWithVerb(lane.id, 'review_transient_recovered')[0]?.payload).toMatchObject({
+          releaseRepaired: true,
+        });
+        expect(queueRows(lane.id).find((row) => row.id === 'review-legacy-busy')?.status).toBe('pending');
+      });
+    } finally {
+      stopDrain();
+      h.busyTurnsRemaining = 0;
+    }
+
+    expect(queueRows(lane.id).find((row) => row.id === 'review-legacy-busy')).toMatchObject({
+      status: 'pending',
+      attempts: 0,
+      head_sha: packetHead,
+    });
+    expect(getLane(lane.id)?.status).toBe('reviewing');
+    const repairedPacket = readMissionRegistryEntry(missionId, { includeArchived: true })
+      ?.mission.packets.find((packet) => packet.id === packetId);
+    expect(repairedPacket).toMatchObject({
+      status: 'awaiting_review',
+      queueState: 'queued',
+      releaseState: 'pending',
+      releaseStatePayload: null,
+    });
+
+    await drainReviewQueue();
+    expect(queueRows(lane.id).find((row) => row.id === 'review-legacy-busy')?.status).toBe('completed');
+  });
 });
 
 describe('release truth requires evidence (#1844 / #1856)', () => {
+  it('rejects a tool verdict when its auto-review turn was pinned to the prior HEAD', async () => {
+    const branch = 'inline/turn-head-drift';
+    const repoDir = createRepo(branch);
+    const packetId = 'pkt-turn-head-drift';
+    const lane = createLane({
+      repoPath: repoDir,
+      worktreePath: repoDir,
+      branch,
+      baseBranch: 'main',
+      runtime: 'codex',
+      label: 'turn head drift fixture',
+      packetId,
+      sessionKey: 'codex-owned:turn-head-drift',
+    });
+    const reviewedHead = commitHighRiskChange(repoDir, 'turn-head-drift');
+    setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
+    const reviewTurnId = startReviewTurn({
+      laneId: lane.id,
+      threadId: 'auto-review-turn-head-drift',
+      backend: 'claude',
+      surface: 'auto-review',
+      expectedHeadSha: reviewedHead,
+    });
+    const successorHead = commitHighRiskChange(repoDir, 'turn-head-drift-successor');
+
+    const verdict = await submitPacketReview({
+      packetId,
+      findings: [],
+      approved: true,
+    });
+    expect(verdict).toMatchObject({
+      recorded: false,
+      auditApprovalId: null,
+      ignoredReason: 'review_head_drift',
+    });
+    expect(eventsWithVerb(lane.id, 'review_head_drift_rejected')[0]?.payload).toMatchObject({
+      expectedHeadSha: reviewedHead,
+      currentHeadSha: successorHead,
+    });
+    await expect(assessDurableApprovedReview(getLane(lane.id)!)).resolves.toMatchObject({
+      approved: false,
+    });
+    finishReviewTurn({ laneId: lane.id, reviewTurnId, outcome: 'completed' });
+  });
+
   it('refuses a stale approval at the merge gate once HEAD moves', async () => {
     const branch = 'inline/steer-stale-approval';
     const repoDir = createRepo(branch);
@@ -366,11 +622,13 @@ describe('release truth requires evidence (#1844 / #1856)', () => {
     // Real control-plane write — reconciliation runs inside it.
     await withLockedState(() => {});
     const derived = readOrchestratorControlPlaneState().packets.find((entry) => entry.id === packetId)!;
-    expect(derived.status).toBe('released');
-    expect(derived.releaseState).not.toBe('released');
+    expect(derived.status).toBe('awaiting_review');
+    expect(derived.releaseState).toBe('pending');
     expect(derived.releaseStatePayload?.source ?? null).toBeNull();
+    expect(packetTerminalState(derived)).toBeNull();
 
-    // With a merge receipt behind it, the same derivation carries release truth.
+    // A detached payload is still not authority. Only the atomic evidence
+    // writer may move the packet into the released state.
     await withLockedState((state) => {
       const packet = state.packets.find((entry) => entry.id === packetId);
       if (packet) {
@@ -383,8 +641,30 @@ describe('release truth requires evidence (#1844 / #1856)', () => {
         };
       }
     });
+    const payloadOnly = readOrchestratorControlPlaneState().packets.find((entry) => entry.id === packetId)!;
+    expect(payloadOnly.releaseState).toBe('pending');
+    expect(packetTerminalState(payloadOnly)).toBeNull();
+
+    const incompleteProof = packetFixture(repoDir, 'pkt-incomplete-proof', lane.id, branch);
+    expect(() => markPacketReleased(incompleteProof, {
+      source: 'approve_and_merge',
+      evidenceKind: 'merge_command',
+    })).toThrow('Release evidence from approve_and_merge is incomplete.');
+    expect(incompleteProof.releaseState).toBe('pending');
+
+    await withLockedState((state) => {
+      const packet = state.packets.find((entry) => entry.id === packetId);
+      if (packet) {
+        markPacketReleased(packet, {
+          source: 'approve_and_merge',
+          mergeCommit: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+          evidenceKind: 'merge_command',
+        });
+      }
+    });
     const proved = readOrchestratorControlPlaneState().packets.find((entry) => entry.id === packetId)!;
     expect(proved.releaseState).toBe('released');
     expect(proved.releaseStatePayload?.source).toBe('approve_and_merge');
+    expect(packetTerminalState(proved)).toBe('released');
   });
 });

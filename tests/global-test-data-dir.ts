@@ -9,6 +9,7 @@ import {
   removeFixtureDirectoryIfUnmountedSync,
   removeOwnedTestRunRootSync,
   sweepStaleTestFixtures,
+  testRunRetainedAfterTimeout,
   writeTestRunOwner,
 } from './test-fixture-lifecycle';
 
@@ -49,6 +50,14 @@ export function removeOwnedWorkerDataRoot(runRoot: string, workerRoot: string): 
   return removeFixtureDirectoryIfUnmountedSync(resolvedWorkerRoot);
 }
 
+export function removeOwnedTestRunRootUnlessRetained(
+  parentDir: string,
+  runRoot: string,
+): boolean {
+  if (testRunRetainedAfterTimeout(runRoot)) return false;
+  return removeOwnedTestRunRootSync(parentDir, runRoot);
+}
+
 export default async function setupTestRunDataRoot(): Promise<() => Promise<void>> {
   const priorRunRoot = process.env.O8_TEST_RUN_DATA_ROOT;
   const priorTemp = {
@@ -77,7 +86,7 @@ export default async function setupTestRunDataRoot(): Promise<() => Promise<void
   process.env.TMP = runRoot;
   process.env.TEMP = runRoot;
   const exitCleanup = () => {
-    removeOwnedTestRunRootSync(parentDir, runRoot);
+    removeOwnedTestRunRootUnlessRetained(parentDir, runRoot);
   };
   process.once('exit', exitCleanup);
 
@@ -86,7 +95,7 @@ export default async function setupTestRunDataRoot(): Promise<() => Promise<void
       const canonicalParent = await realpath(parentDir);
       const canonicalRunRoot = await realpath(runRoot).catch(() => null);
       if (canonicalRunRoot && RUN_TEST_DATA_NAME.test(path.basename(canonicalRunRoot))) {
-        removeOwnedTestRunRootSync(canonicalParent, canonicalRunRoot);
+        removeOwnedTestRunRootUnlessRetained(canonicalParent, canonicalRunRoot);
       }
     } finally {
       process.off('exit', exitCleanup);

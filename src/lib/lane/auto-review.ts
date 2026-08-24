@@ -11,7 +11,6 @@
 
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { getSqlite } from '@/lib/db';
 import { isSafeGitRef } from '@/lib/git/refs';
 import { capturePacketCompletionContext, readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
 import { readPacketDeviations, type PacketDeviations } from '@/lib/orchestrator/packet-deviations';
@@ -25,10 +24,20 @@ import { buildBlindSecondPassPrompt, findPendingSecondPassApproval, parseSecondP
 import { appendCodexAutoReviewVerdictInstructions, recordCodexAutoReviewVerdict } from './codex-auto-review-verdict';
 import { runReviewerTurnWithQuotaFallback } from './review-quota-fallback';
 import { enqueueLaneReview } from './review-queue';
-import { reclaimAbandonedReviewAttempts } from './review-attempt-head';
-import { claimNextReview, runReviewRecoveryPass, type QueuedReview } from './review-drain-recovery';
+import {
+  laneReviewHeadSha,
+  normalizeAttemptHeadSha,
+  reclaimAbandonedReviewAttempts,
+} from './review-attempt-head';
+import {
+  claimNextReview,
+  isReviewClaimCurrent,
+  runReviewRecoveryPass,
+  type QueuedReview,
+} from './review-drain-recovery';
 import {
   markReviewCompleted,
+  markReviewDeferred,
   markReviewFailed,
   markReviewSkipped,
 } from './review-queue-settlement';
@@ -47,8 +56,8 @@ const REVIEW_DIFF_LINES = {
   'deep-dive': 320,
 } as const;
 
-/** Lanes currently being reviewed — prevents concurrent review of the same lane */
-const reviewingLanes = new Set<string>();
+/** Lane -> exact claim generation currently allowed to write review results. */
+const reviewingLanes = new Map<string, string>();
 
 let drainTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -57,8 +66,6 @@ export function isLaneAutoReviewActive(laneId: string): boolean {
 }
 
 export { cancelAutoReviewForLane };
-
-// ── Queue Operations (SQLite-backed) ──
 
 // ── Public API ──
 
@@ -76,12 +83,9 @@ export function triggerAutoReview(lane: Lane): void {
 export function startReviewQueueDrain(): () => void {
   if (drainTimer) return () => { /* already running */ };
 
-  // Recover any reviews stuck in 'in_progress' from a previous crash. At boot
-  // no claim from a previous process can still be live, so the lease is zero —
-  // but each reclaim now leaves a durable `review_attempt_abandoned` receipt
-  // instead of silently flipping the row back to pending.
+  // At boot no claim from the prior process is live; reclaim with a receipt.
   try {
-    reclaimAbandonedReviewAttempts({ leaseMs: 0 });
+    reclaimAbandonedReviewAttempts({ leaseMs: 0, cancelInMemory: false });
   } catch {
     // DB may not be ready yet — drain loop will handle it
   }
@@ -108,79 +112,119 @@ export function startReviewQueueDrain(): () => void {
 
 // ── Drain Logic ──
 
-let drainInFlight = false;
+/** Exact claim occupying the serialized slot; stale claims do not pin it. */
+let activeReviewClaim: QueuedReview | null = null;
+
+function claimGeneration(review: Pick<QueuedReview, 'id' | 'claim_owner'>): string {
+  return `${review.id}\u0000${review.claim_owner}`;
+}
+
+function releaseActiveReviewSlot(review: QueuedReview): void {
+  if (reviewingLanes.get(review.lane_id) === claimGeneration(review)) {
+    reviewingLanes.delete(review.lane_id);
+  }
+  if (
+    activeReviewClaim?.id === review.id
+    && activeReviewClaim.claim_owner === review.claim_owner
+  ) {
+    activeReviewClaim = null;
+  }
+}
 
 type ReviewDepth = keyof typeof REVIEW_DIFF_LINES;
 
-/**
- * Terminal outcome of a claimed review attempt (#1856).
- *
- * `performAutoReview` used to return `void`, so the drain could not tell a
- * review that ran from one that returned early — it marked both `completed`.
- * A skip now carries its reason all the way to the durable row and a lane
- * event, so no queue row can end `completed` with no receipt behind it.
- */
+/** Structured settlement prevents an early return from looking completed. */
 type AutoReviewOutcome =
   | { kind: 'reviewed' }
+  | { kind: 'deferred'; reason: string }
   | { kind: 'skipped'; reason: string };
 
 const skipped = (reason: string): AutoReviewOutcome => ({ kind: 'skipped', reason });
+const deferred = (reason: string): AutoReviewOutcome => ({ kind: 'deferred', reason });
+
+function requeueIfReviewHeadMoved(review: QueuedReview, lane: Lane): boolean {
+  const reviewedHeadSha = normalizeAttemptHeadSha(review.head_sha);
+  const currentHeadSha = laneReviewHeadSha(lane);
+  if (!reviewedHeadSha || !currentHeadSha || reviewedHeadSha === currentHeadSha) return false;
+  enqueueLaneReview(lane, { headSha: currentHeadSha });
+  console.warn(
+    `[auto-review] Review ${review.id} superseded: HEAD moved from ${reviewedHeadSha} to ${currentHeadSha}`,
+  );
+  return true;
+}
 
 /**
  * Run one drain tick. Exported so real-path tests can drive the production
  * queue path deterministically instead of waiting on the interval.
  */
 export async function drainReviewQueue(): Promise<void> {
-  // Recovery runs OUTSIDE the in-flight guard on purpose.
-  //
-  // `drainInFlight` is released in a `finally`, but only when the awaited
-  // attempt settles. A reviewer turn that never resolves therefore pinned the
-  // flag for the life of the process, and reconciliation — the thing built to
-  // notice a stalled lane — was itself behind the flag. The one hung attempt
-  // silently disabled every repair path. Reclamation and stall reconciliation
-  // are both idempotent and independent of whichever attempt is running, so
-  // they belong in front of it.
+  // Recovery must run before the slot check so a hung turn cannot disable the
+  // path that reclaims it and starts its replacement.
   await runReviewRecoveryPass();
 
-  if (drainInFlight) return;
-  drainInFlight = true;
+  if (activeReviewClaim) {
+    if (isReviewClaimCurrent(activeReviewClaim)) return;
+    releaseActiveReviewSlot(activeReviewClaim);
+  }
 
+  const review = claimNextReview();
+  if (!review) return;
+
+  // Don't review concurrently for the same lane. This is a defensive guard;
+  // activeReviewClaim normally owns the only serialized reviewer slot.
+  if (reviewingLanes.has(review.lane_id)) {
+    markReviewDeferred({
+      reviewId: review.id,
+      claimOwner: review.claim_owner,
+      laneId: review.lane_id,
+      reason: 'Lane already being reviewed',
+    });
+    return;
+  }
+
+  activeReviewClaim = review;
+  reviewingLanes.set(review.lane_id, claimGeneration(review));
   try {
-    const review = claimNextReview();
-    if (!review) return;
-
-    // Don't review concurrently for the same lane
-    if (reviewingLanes.has(review.lane_id)) {
-      markReviewFailed(review.id, review.lane_id, 'Lane already being reviewed', review.attempts);
+    const outcome = await performAutoReview(review);
+    if (outcome.kind === 'deferred') {
+      markReviewDeferred({
+        reviewId: review.id,
+        claimOwner: review.claim_owner,
+        laneId: review.lane_id,
+        reason: outcome.reason,
+      });
+    } else if (outcome.kind === 'skipped') {
+      markReviewSkipped({
+        reviewId: review.id,
+        claimOwner: review.claim_owner,
+        laneId: review.lane_id,
+        reason: outcome.reason,
+      });
+    } else {
+      markReviewCompleted({ reviewId: review.id, claimOwner: review.claim_owner });
+    }
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    if (isReviewAttemptCancelled(review.id, review.claim_owner)) {
+      markReviewSkipped({
+        reviewId: review.id,
+        claimOwner: review.claim_owner,
+        laneId: review.lane_id,
+        reason: `Review attempt cancelled mid-flight: ${errorMsg}`,
+      });
       return;
     }
-
-    reviewingLanes.add(review.lane_id);
-    try {
-      const outcome = await performAutoReview(review);
-      if (outcome.kind === 'skipped') {
-        markReviewSkipped({ reviewId: review.id, laneId: review.lane_id, reason: outcome.reason });
-      } else {
-        markReviewCompleted(review.id);
-      }
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      if (isReviewAttemptCancelled(review.id)) {
-        markReviewSkipped({
-          reviewId: review.id,
-          laneId: review.lane_id,
-          reason: `Review attempt cancelled mid-flight: ${errorMsg}`,
-        });
-        return;
-      }
-      markReviewFailed(review.id, review.lane_id, errorMsg, review.attempts + 1);
-      console.error(`[auto-review] Review ${review.id} failed (attempt ${review.attempts + 1}): ${errorMsg}`);
-    } finally {
-      reviewingLanes.delete(review.lane_id);
-      clearReviewAttemptCancellation(review.id);
-    }
+    markReviewFailed({
+      reviewId: review.id,
+      claimOwner: review.claim_owner,
+      laneId: review.lane_id,
+      error: errorMsg,
+      attempts: review.attempts + 1,
+    });
+    console.error(`[auto-review] Review ${review.id} failed (attempt ${review.attempts + 1}): ${errorMsg}`);
   } finally {
-    drainInFlight = false;
+    releaseActiveReviewSlot(review);
+    clearReviewAttemptCancellation(review.id, review.claim_owner);
   }
 }
 
@@ -452,9 +496,12 @@ async function performAutoReview(review: QueuedReview): Promise<AutoReviewOutcom
     console.log(`[auto-review] Lane ${lane.id} is no longer reviewing (${lane.status}) — skipping`);
     return skipped(`Lane is no longer reviewing (${lane.status}).`);
   }
-  if (isReviewAttemptCancelled(review.id)) {
+  if (isReviewAttemptCancelled(review.id, review.claim_owner)) {
     console.log(`[auto-review] Review ${review.id} was cancelled before it started — skipping`);
     return skipped('This review attempt was cancelled before it started.');
+  }
+  if (requeueIfReviewHeadMoved(review, lane)) {
+    return skipped('HEAD moved before this review turn started; a successor review was queued.');
   }
 
   let completionContext = null;
@@ -525,9 +572,12 @@ async function performAutoReview(review: QueuedReview): Promise<AutoReviewOutcom
     taskContractRequired,
   );
 
-  if (isReviewAttemptCancelled(review.id)) {
+  if (isReviewAttemptCancelled(review.id, review.claim_owner)) {
     console.log(`[auto-review] Review ${review.id} was cancelled while preparing — skipping`);
     return skipped('This review attempt was cancelled while its prompt was being prepared.');
+  }
+  if (requeueIfReviewHeadMoved(review, lane)) {
+    return skipped('HEAD moved while this review prompt was being prepared; a successor review was queued.');
   }
 
   // Dual-path routing (epic #1044): the `inAppOrchestratorEnabled` toggle is
@@ -549,6 +599,7 @@ async function performAutoReview(review: QueuedReview): Promise<AutoReviewOutcom
     repoPath: lane.repoPath,
     threadId: `auto-review-${lane.id}-${review.id}`,
     surface: 'auto-review',
+    expectedHeadSha: review.head_sha,
     prompt: (backendId) => backendId === 'codex'
       ? appendCodexAutoReviewVerdictInstructions(reviewPrompt)
       : reviewPrompt,
@@ -562,9 +613,15 @@ async function performAutoReview(review: QueuedReview): Promise<AutoReviewOutcom
       }
     },
   });
-  if (isReviewAttemptCancelled(review.id)) {
+  if (isReviewAttemptCancelled(review.id, review.claim_owner)) {
     console.log(`[auto-review] Review ${review.id} was cancelled during the turn — discarding the result`);
     return skipped('This review attempt was cancelled while the reviewer turn was running.');
+  }
+  if (requeueIfReviewHeadMoved(review, lane)) {
+    return skipped('HEAD moved while this review turn was running; its verdict was discarded.');
+  }
+  if (reviewTurn.unavailableReason === 'session_busy') {
+    return deferred('Reviewer session busy');
   }
   if (!reviewTurn.ok) {
     throw new Error(`Review turn failed: ${reviewTurn.errors.join('; ').slice(0, 500)}`);
@@ -647,6 +704,7 @@ async function performAutoReview(review: QueuedReview): Promise<AutoReviewOutcom
     repoPath: lane.repoPath,
     threadId: secondPassThreadId,
     surface: 'merge-gate-review',
+    expectedHeadSha: pendingSecondPass.reviewedHeadSha,
     prompt: blindPrompt,
     onEvent: (turnBackend, event) => {
       if (event.type === 'text') {
@@ -658,6 +716,9 @@ async function performAutoReview(review: QueuedReview): Promise<AutoReviewOutcom
       }
     },
   });
+  if (secondPassTurn.unavailableReason === 'session_busy') {
+    return deferred('Blind second-pass reviewer session busy');
+  }
   secondPassText = secondPassTurn.text;
   secondPassErrors.push(...secondPassTurn.errors);
 

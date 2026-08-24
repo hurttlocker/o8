@@ -15,6 +15,7 @@ const execFileAsync = promisify(execFile);
 
 export const DEFAULT_STALE_FIXTURE_AGE_MS = 2 * 60 * 60 * 1_000;
 export const TEST_RUN_OWNER_FILE = '.o8-test-run-owner.json';
+export const TEST_RUN_RETAIN_FILE = '.o8-test-run-retain.json';
 
 const FIXTURE_NAME = /^o8-[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const RUN_FIXTURE_NAME = /^o8-test-data-run-[A-Za-z0-9]{6}$/;
@@ -417,6 +418,32 @@ export function writeTestRunOwner(runRoot: string): void {
   writeFileSync(path.join(runRoot, TEST_RUN_OWNER_FILE), `${JSON.stringify(owner)}\n`, {
     flag: 'wx',
   });
+}
+
+export function retainTestRunAfterTimeout(runRoot: string): void {
+  const resolvedRoot = path.resolve(runRoot);
+  if (!RUN_FIXTURE_NAME.test(path.basename(resolvedRoot))) {
+    throw new Error('Vitest retained run root does not have an owned run name.');
+  }
+  try {
+    writeFileSync(path.join(resolvedRoot, TEST_RUN_RETAIN_FILE), `${JSON.stringify({
+      retainedAt: new Date().toISOString(),
+      reason: 'test_timeout_or_cancellation',
+    })}\n`, { flag: 'wx' });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+  }
+}
+
+export function testRunRetainedAfterTimeout(runRoot: string): boolean {
+  try {
+    lstatSync(path.join(path.resolve(runRoot), TEST_RUN_RETAIN_FILE));
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    // Cleanup is fail-closed: an unreadable marker must never arm deletion.
+    return true;
+  }
 }
 
 export function fixtureSweepSummary(receipt: FixtureSweepReceipt): string {

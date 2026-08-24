@@ -263,7 +263,7 @@ export function outsideWorkerSessionKeysForSettledPackets(
   packets: ReadonlyArray<{ id: string; status: string; releaseState: string; archivedAt?: string | null }>,
 ): string[] {
   return outsideWorkerSessionKeysForPacketIds(new Set(packets
-    .filter((packet) => packet.releaseState === 'released' || packet.status === 'released' || packet.status === 'archived' || Boolean(packet.archivedAt))
+    .filter((packet) => packet.releaseState === 'released' || packet.status === 'archived' || Boolean(packet.archivedAt))
     .map((packet) => packet.id)));
 }
 

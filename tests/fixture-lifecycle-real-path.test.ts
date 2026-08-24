@@ -13,7 +13,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { writeTestRunOwner } from './test-fixture-lifecycle';
+import { TEST_RUN_RETAIN_FILE, writeTestRunOwner } from './test-fixture-lifecycle';
 
 interface AttachedImage {
   baseDevice: string;
@@ -24,6 +24,13 @@ interface AttachedImage {
 
 const cleanupRoots: string[] = [];
 const attachedDevices: string[] = [];
+
+async function waitForFile(target: string, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!existsSync(target) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
 
 function nestedVitest(testPath: string, env: Record<string, string>) {
   return spawnSync(
@@ -139,6 +146,44 @@ describe('fixture lifecycle through consecutive Vitest suites', () => {
     expect(swept.status, `${swept.stdout}\n${swept.stderr}`).toBe(0);
     expect(existsSync(leakedPath)).toBe(false);
     expect(swept.stdout).toMatch(/\[fixture-cleanup] Reclaimed [1-9]\d* fixture bytes/);
+  });
+
+  it('retains a timed-out worker cwd, then reclaims it through the stale sweep', async () => {
+    const parent = mkdtempSync(path.join(os.tmpdir(), 'o8-timeout-retain-real-'));
+    const rootMarker = path.join(parent, 'run-root.json');
+    const childMarker = path.join(parent, 'child-result.txt');
+    cleanupRoots.push(parent);
+    const commonEnv = {
+      CORTEX_IDE_DATA_DIR: '',
+      O8_TEST_DATA_DIR_PINNED: '',
+      O8_TEST_FIXTURE_SWEEP_PARENT: parent,
+      O8_TEST_FIXTURE_MAX_AGE_MS: '1',
+      O8_TEST_RUN_DATA_ROOT: '',
+    };
+
+    const failed = nestedVitest('tests/fixtures/fixture-timeout-retention.test.ts', {
+      ...commonEnv,
+      O8_TEST_TIMEOUT_ROOT_MARKER: rootMarker,
+      O8_TEST_TIMEOUT_CHILD_MARKER: childMarker,
+    });
+    expect(failed.status, `${failed.stdout}\n${failed.stderr}`).not.toBe(0);
+    const retained = JSON.parse(readFileSync(rootMarker, 'utf8')) as {
+      runRoot: string;
+      workerRoot: string;
+    };
+    await waitForFile(childMarker);
+    expect(readFileSync(childMarker, 'utf8')).toBe('cwd-ok');
+    expect(existsSync(retained.workerRoot)).toBe(true);
+    expect(existsSync(path.join(retained.runRoot, TEST_RUN_RETAIN_FILE))).toBe(true);
+
+    const stale = new Date(Date.now() - 60_000);
+    utimesSync(retained.runRoot, stale, stale);
+    const swept = nestedVitest('tests/fixtures/fixture-sweep-probe.test.ts', {
+      ...commonEnv,
+      O8_TEST_EXPECT_REMOVED_PATH: retained.runRoot,
+    });
+    expect(swept.status, `${swept.stdout}\n${swept.stderr}`).toBe(0);
+    expect(existsSync(retained.runRoot)).toBe(false);
   });
 
   it.runIf(process.platform === 'darwin')(

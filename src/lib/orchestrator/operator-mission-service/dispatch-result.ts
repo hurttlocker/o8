@@ -44,7 +44,7 @@ export function rearmHeldPacketsForExplicitDispatch(state: OrchestratorMissionSt
   for (const packet of state.packets) {
     if (packet.queueState !== 'held') continue;
     if (packet.archivedAt || packet.status === 'archived') continue;
-    if (packet.releaseState === 'released' || packet.status === 'released') continue;
+    if (packet.releaseState === 'released') continue;
     if (packet.status === 'failed' || packet.operatorStopped || hasLaneBinding(packet)) continue;
 
     packet.queueState = 'queued';
@@ -87,7 +87,7 @@ function classifySkippedPacket(
   allPackets: OrchestratorPacket[],
 ): DispatchMissionSkippedPacket {
   const base = { packetId: packet.id, referenceLabel: packet.referenceLabel };
-  if (packet.releaseState === 'released' || packet.status === 'released') {
+  if (packet.releaseState === 'released') {
     return { ...base, reason: 'released', detail: 'Packet is already released.' };
   }
   if (packet.archivedAt || packet.status === 'archived') {

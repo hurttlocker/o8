@@ -450,27 +450,50 @@ function buildCandidates(): Candidate[] {
  * releasing on it marks work merged that is not on the base branch at all.
  */
 async function evidenceStillHolds(evidence: MergeEvidence): Promise<boolean> {
-  if (evidence.kind === 'no-changes') return true;
-  const currentHeadSha = await revParse(evidence.repoPath, evidence.branchRef);
-  return currentHeadSha === evidence.headSha;
-}
+  const currentBaseSha = await revParse(evidence.repoPath, evidence.baseRef);
+  if (!currentBaseSha) return false;
 
-async function releasePacket(candidate: Candidate, evidence: MergeEvidence): Promise<void> {
-  const releasedAt = new Date().toISOString();
-  if (!(await evidenceStillHolds(evidence))) {
-    if (candidate.laneId) {
-      appendEvent(candidate.laneId, 'merge_ancestry_release_declined', 'system', {
-        packetId: candidate.packet?.id ?? candidate.lane?.packetId ?? null,
-        evidenceKind: evidence.kind,
-        branchRef: evidence.branchRef,
-        baseRef: evidence.baseRef,
-        provedHeadSha: evidence.headSha,
-        reason: 'The branch advanced after the merge proof was taken, so the proof no longer covers its HEAD.',
-      });
+  if (evidence.kind === 'no-changes') {
+    if (evidence.noChangesReason === 'branch_missing') {
+      const currentBranchRef = await resolveBranchRef(evidence.repoPath, evidence.branchRef);
+      const currentHeadSha = await revParse(evidence.repoPath, 'HEAD');
+      return currentBranchRef === null && currentHeadSha === currentBaseSha;
     }
-    return;
+    const currentHeadSha = await revParse(evidence.repoPath, evidence.branchRef);
+    return currentHeadSha === evidence.headSha && currentHeadSha === currentBaseSha;
   }
 
+  const currentHeadSha = await revParse(evidence.repoPath, evidence.branchRef);
+  if (currentHeadSha !== evidence.headSha) return false;
+  if (evidence.kind === 'ancestor') {
+    return isAncestor(evidence.repoPath, currentHeadSha, evidence.baseRef);
+  }
+  return (await squashPatchExistsOnBase(
+    evidence.repoPath,
+    evidence.branchRef,
+    evidence.baseRef,
+  )).merged;
+}
+
+function recordEvidenceDeclined(candidate: Candidate, evidence: MergeEvidence): void {
+  if (!candidate.laneId) return;
+  appendEvent(candidate.laneId, 'merge_ancestry_release_declined', 'system', {
+    packetId: candidate.packet?.id ?? candidate.lane?.packetId ?? null,
+    evidenceKind: evidence.kind,
+    branchRef: evidence.branchRef,
+    baseRef: evidence.baseRef,
+    provedHeadSha: evidence.headSha,
+    reason: 'The Git state changed after reconciliation detected its outcome, so that proof no longer applies.',
+  });
+}
+
+async function releasePacket(candidate: Candidate, evidence: MergeEvidence): Promise<boolean> {
+  if (!(await evidenceStillHolds(evidence))) {
+    recordEvidenceDeclined(candidate, evidence);
+    return false;
+  }
+
+  const releasedAt = new Date().toISOString();
   if (candidate.packet) {
     const packetId = candidate.packet.id;
     await withLockedState((state) => {
@@ -524,9 +547,15 @@ async function releasePacket(candidate: Candidate, evidence: MergeEvidence): Pro
       event: MERGED_BY_ANCESTRY_SOURCE,
     });
   }
+  return true;
 }
 
-async function finishWithoutChanges(candidate: Candidate, evidence: MergeEvidence): Promise<void> {
+async function finishWithoutChanges(candidate: Candidate, evidence: MergeEvidence): Promise<boolean> {
+  if (!(await evidenceStillHolds(evidence))) {
+    recordEvidenceDeclined(candidate, evidence);
+    return false;
+  }
+
   const finishedAt = new Date().toISOString();
   const note = 'Agent finished without making changes';
   const packetId = candidate.packet?.id ?? candidate.lane?.packetId ?? null;
@@ -583,6 +612,7 @@ async function finishWithoutChanges(candidate: Candidate, evidence: MergeEvidenc
       note: `${packetTitle} in ${repoName} produced no changes.`,
     },
   });
+  return true;
 }
 
 export async function sweepPacketsMergedByAncestry(): Promise<MergedByAncestrySweepResult> {
@@ -631,12 +661,11 @@ export async function sweepPacketsMergedByAncestry(): Promise<MergedByAncestrySw
           continue;
         }
       }
-      if (evidence.kind === 'no-changes') {
-        await finishWithoutChanges(candidate, evidence);
-      } else {
-        await releasePacket(candidate, evidence);
-      }
-      merged += 1;
+      const settled = evidence.kind === 'no-changes'
+        ? await finishWithoutChanges(candidate, evidence)
+        : await releasePacket(candidate, evidence);
+      if (settled) merged += 1;
+      else skipped += 1;
     } catch (error) {
       detectBackoff.recordFailure(key, now);
       skipped += 1;

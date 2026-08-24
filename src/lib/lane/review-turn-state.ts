@@ -7,11 +7,13 @@ import { recordLaneEvent } from '@/lib/lane/events';
 interface ReviewTurnEventPayload {
   reviewTurnId?: unknown;
   surface?: unknown;
+  expectedHeadSha?: unknown;
 }
 
 export interface ActiveReviewTurn {
   id: string;
   surface: string | null;
+  expectedHeadSha: string | null;
 }
 
 export function startReviewTurn(input: {
@@ -19,6 +21,7 @@ export function startReviewTurn(input: {
   threadId: string;
   backend: string;
   surface: string;
+  expectedHeadSha?: string | null;
 }): string {
   const reviewTurnId = `review-turn-${randomUUID()}`;
   recordLaneEvent(input.laneId, 'review_turn_started', 'system', {
@@ -26,6 +29,7 @@ export function startReviewTurn(input: {
     threadId: input.threadId,
     backend: input.backend,
     surface: input.surface,
+    expectedHeadSha: input.expectedHeadSha ?? null,
   });
   return reviewTurnId;
 }
@@ -46,6 +50,9 @@ export function findActiveReviewTurn(laneId: string): ActiveReviewTurn | null {
       ? {
           id: payload.reviewTurnId,
           surface: typeof payload.surface === 'string' ? payload.surface : null,
+          expectedHeadSha: typeof payload.expectedHeadSha === 'string'
+            ? payload.expectedHeadSha
+            : null,
         }
       : null;
   } catch {

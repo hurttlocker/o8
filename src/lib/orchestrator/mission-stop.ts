@@ -52,7 +52,6 @@ export interface GlobalDispatchHaltResult {
 function isPacketTerminal(packet: OrchestratorPacket): boolean {
   return Boolean(packet.archivedAt)
     || packet.releaseState === 'released'
-    || packet.status === 'released'
     || packet.status === 'archived';
 }
 

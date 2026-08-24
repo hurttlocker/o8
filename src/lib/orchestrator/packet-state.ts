@@ -5,7 +5,7 @@ type PacketTerminalFields = Pick<OrchestratorPacket, 'releaseState' | 'status' |
 export type CanonicalPacketStatus = OrchestratorPacket['status'];
 
 export function isPacketReleased(packet: Pick<OrchestratorPacket, 'releaseState' | 'status'>): boolean {
-  return packet.releaseState === 'released' || packet.status === 'released';
+  return packet.releaseState === 'released';
 }
 
 export function isPacketFailed(packet: Pick<OrchestratorPacket, 'status'>): boolean {

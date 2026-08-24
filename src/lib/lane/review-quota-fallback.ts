@@ -13,6 +13,10 @@ import {
   getOrchestratorBackend,
 } from './orchestrator-backends/registry';
 import type { OrchestratorBackend, OrchestratorBackendId } from './orchestrator-backends/types';
+import {
+  isReviewerSessionBusyMessage,
+  type ReviewUnavailableReason,
+} from './review-transient-failure';
 
 export interface ReviewFallbackTurnResult {
   ok: boolean;
@@ -21,6 +25,7 @@ export interface ReviewFallbackTurnResult {
   errors: string[];
   fallback: CrossHouseFallbackDecision | null;
   reviewTurnId: string | null;
+  unavailableReason: ReviewUnavailableReason | null;
 }
 
 interface ReviewAttemptResult {
@@ -28,6 +33,7 @@ interface ReviewAttemptResult {
   errors: string[];
   quotaError: string | null;
   reviewTurnId: string | null;
+  unavailableReason: ReviewUnavailableReason | null;
 }
 
 function message(error: unknown): string {
@@ -41,16 +47,18 @@ async function runAttempt(input: {
   laneId: string;
   surface: string;
   prompt: string;
+  expectedHeadSha?: string | null;
   model?: string;
   onEvent?: (backend: OrchestratorBackend, event: OrchestratorEvent) => void;
 }): Promise<ReviewAttemptResult> {
   const session = input.backend.ensureSession(input.repoPath, undefined, input.threadId);
-  if (session.status === 'busy' || session.status === 'dead') {
+  if (session.status === 'busy') {
     return {
       text: '',
       errors: [`${input.backend.label} session ${session.status}`],
       quotaError: null,
       reviewTurnId: null,
+      unavailableReason: 'session_busy',
     };
   }
 
@@ -59,9 +67,11 @@ async function runAttempt(input: {
     threadId: input.threadId,
     backend: input.backend.id,
     surface: input.surface,
+    expectedHeadSha: input.expectedHeadSha,
   });
   let text = '';
   let quotaError: string | null = null;
+  let unavailableReason: ReviewUnavailableReason | null = null;
   const errors: string[] = [];
   try {
     await input.backend.sendTurn(input.repoPath, input.prompt, (event) => {
@@ -77,7 +87,11 @@ async function runAttempt(input: {
     });
   } catch (error) {
     if (isRuntimeQuotaLimitError(error)) quotaError = message(error);
-    else errors.push(message(error));
+    else {
+      const errorMessage = message(error);
+      if (isReviewerSessionBusyMessage(errorMessage)) unavailableReason = 'session_busy';
+      errors.push(errorMessage);
+    }
   }
   // Claude Code can emit a terminal subscription denial as ordinary assistant
   // text and then exit successfully. Treat that observed frame as exhaustion so
@@ -92,7 +106,7 @@ async function runAttempt(input: {
   } catch (error) {
     errors.push(`Review turn finalization failed: ${message(error)}`);
   }
-  return { text, errors, quotaError, reviewTurnId };
+  return { text, errors, quotaError, reviewTurnId, unavailableReason };
 }
 
 export async function runReviewerTurnWithQuotaFallback(input: {
@@ -101,6 +115,8 @@ export async function runReviewerTurnWithQuotaFallback(input: {
   threadId: string;
   surface: 'auto-review' | 'merge-gate-review' | 'packet-explainer' | 'buyin-doc';
   prompt: string | ((backend: OrchestratorBackendId) => string);
+  /** HEAD this turn's prompt and diff describe. */
+  expectedHeadSha?: string | null;
   onEvent?: (backend: OrchestratorBackend, event: OrchestratorEvent) => void;
   initialBackend?: OrchestratorBackend;
   backendResolver?: (backend: OrchestratorBackendId) => OrchestratorBackend;
@@ -117,8 +133,20 @@ export async function runReviewerTurnWithQuotaFallback(input: {
     repoPath: input.repoPath,
     threadId: input.threadId,
     prompt: promptFor(initialBackend.id),
+    expectedHeadSha: input.expectedHeadSha,
     onEvent: input.onEvent,
   });
+  if (first.unavailableReason) {
+    return {
+      ok: false,
+      backend: initialBackend.id,
+      text: '',
+      errors: first.errors,
+      fallback: null,
+      reviewTurnId: first.reviewTurnId,
+      unavailableReason: first.unavailableReason,
+    };
+  }
   if (!first.quotaError) {
     return {
       ok: first.errors.length === 0,
@@ -127,6 +155,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
       errors: first.errors,
       fallback: null,
       reviewTurnId: first.reviewTurnId,
+      unavailableReason: null,
     };
   }
 
@@ -143,6 +172,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
       errors: [first.quotaError],
       fallback: null,
       reviewTurnId: first.reviewTurnId,
+      unavailableReason: null,
     };
   }
 
@@ -166,6 +196,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
       errors: [first.quotaError],
       fallback: decision,
       reviewTurnId: first.reviewTurnId,
+      unavailableReason: null,
     };
   }
 
@@ -177,9 +208,21 @@ export async function runReviewerTurnWithQuotaFallback(input: {
     repoPath: input.repoPath,
     threadId: input.threadId,
     prompt: promptFor(fallbackBackend.id),
+    expectedHeadSha: input.expectedHeadSha,
     model: decision.toModel,
     onEvent: input.onEvent,
   });
+  if (second.unavailableReason) {
+    return {
+      ok: false,
+      backend: fallbackBackend.id,
+      text: '',
+      errors: second.errors,
+      fallback: decision,
+      reviewTurnId: second.reviewTurnId,
+      unavailableReason: second.unavailableReason,
+    };
+  }
   if (second.quotaError) {
     recordLaneEvent(input.laneId, 'review_fallback', 'system', {
       surface: input.surface,
@@ -197,5 +240,6 @@ export async function runReviewerTurnWithQuotaFallback(input: {
     errors,
     fallback: decision,
     reviewTurnId: second.reviewTurnId,
+    unavailableReason: null,
   };
 }

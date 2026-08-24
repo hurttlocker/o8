@@ -350,6 +350,17 @@ export type LaneEventVerb =
   // the normal failure ladder rather than waiting on a ws-server restart.
   // Payload: { reviewId, claimedAt, claimOwner, leaseMs, attempts }
   | 'review_attempt_abandoned'
+  // A reviewer backend was temporarily unavailable. The row returned to
+  // pending without consuming its terminal failure budget.
+  // Payload: { packetId, reviewId, reason }
+  | 'review_deferred'
+  // Startup repaired a legacy row that exhausted only on reviewer contention.
+  // Payload: { packetId, reviewId, previousAttempts, reason, currentHeadSha, releaseRepaired }
+  | 'review_transient_recovered'
+  // An auto-review submit_review call no longer described the claimed HEAD.
+  // No approval is recorded; the successor HEAD must receive its own turn.
+  // Payload: { packetId, reviewTurnId, expectedHeadSha, submittedHeadSha, currentHeadSha }
+  | 'review_head_drift_rejected'
   // Second-pass agreement dispatched a merge (#1856). Written BEFORE the
   // dispatch so a process that dies mid-transition still leaves a trace.
   // Payload: { packetId, approvalId, reviewedHeadSha, trigger }

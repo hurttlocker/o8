@@ -12,7 +12,6 @@ function canApplyRuntimeOverride(packet: OrchestratorPacket): boolean {
   if (packet.queueState !== 'queued' || packet.lane) return false;
   if (packet.archivedAt || packet.releaseState === 'released' || packet.operatorStopped) return false;
   return packet.status !== 'archived'
-    && packet.status !== 'released'
     && packet.status !== 'failed'
     && packet.status !== 'launching'
     && packet.status !== 'running'

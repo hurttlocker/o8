@@ -3,8 +3,25 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { OrchestratorLaneBinding, OrchestratorPacket } from '@/lib/orchestrator/types';
+
+const h = vi.hoisted(() => ({
+  beforeActivityAssessment: null as null | (() => void),
+}));
+
+vi.mock('@/lib/lane/reaper-liveness', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/lane/reaper-liveness')>();
+  return {
+    ...actual,
+    assessOwnedTranscriptActivity: async (...args: Parameters<typeof actual.assessOwnedTranscriptActivity>) => {
+      const callback = h.beforeActivityAssessment;
+      h.beforeActivityAssessment = null;
+      callback?.();
+      return actual.assessOwnedTranscriptActivity(...args);
+    },
+  };
+});
 
 process.env.CORTEX_IDE_DATA_DIR = mkdtempSync(join(tmpdir(), 'o8-merged-by-ancestry-data-'));
 process.env.O8_DATA_DIR = process.env.CORTEX_IDE_DATA_DIR;
@@ -154,6 +171,7 @@ function persistedPacket(packetId: string) {
 }
 
 afterEach(() => {
+  h.beforeActivityAssessment = null;
   // The storage lifecycle guard requires checkout absence before lane evidence
   // is deleted. Remove each isolated fixture repo first, then clear its lane.
   while (tempDirs.length > 0) {
@@ -361,6 +379,25 @@ describe('merged-by-ancestry reconciliation', () => {
       outcome: 'no_changes',
       outcomeNote: 'Agent finished without making changes',
     });
+  }, 20_000);
+
+  it('keeps a successor commit that lands after no-changes detection', async () => {
+    const { clone } = makeRepo('o8-lane-only-no-change-race');
+    const lane = seedLaneOnly(clone);
+    h.beforeActivityAssessment = () => {
+      writeFileSync(join(clone, 'successor.txt'), 'landed after detection\n');
+      commitAll(clone, 'successor after no-changes detection');
+    };
+
+    await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({
+      merged: 0,
+      skipped: 1,
+    });
+    expect(getLane(lane.id)).toMatchObject({
+      status: 'reviewing',
+      outcome: null,
+    });
+    expect(git(clone, ['show', 'HEAD:successor.txt'])).toBe('landed after detection');
   }, 20_000);
 
   it('never touches an orphaned lane with unmerged branch content', async () => {

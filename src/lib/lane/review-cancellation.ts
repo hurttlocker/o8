@@ -14,20 +14,27 @@
 
 import { getSqlite } from '@/lib/db';
 
-/** Claimed review attempts cancelled mid-flight. Cleared when the attempt settles. */
+/** Claimed review generations cancelled mid-flight. Cleared when that generation settles. */
 const cancelledReviewAttempts = new Set<string>();
+
+function cancellationKey(reviewId: string, claimOwner?: string | null): string {
+  return claimOwner ? `${reviewId}\u0000${claimOwner}` : reviewId;
+}
 
 export function cancelAutoReviewForLane(laneId: string, reason: string): void {
   try {
     const db = getSqlite();
     const claimed = db.prepare(
-      `SELECT id FROM review_queue WHERE lane_id = ? AND status = 'in_progress'`,
-    ).all(laneId) as { id: string }[];
-    for (const row of claimed) cancelledReviewAttempts.add(row.id);
+      `SELECT id, claim_owner FROM review_queue WHERE lane_id = ? AND status = 'in_progress'`,
+    ).all(laneId) as Array<{ id: string; claim_owner: string | null }>;
+    for (const row of claimed) {
+      cancelledReviewAttempts.add(cancellationKey(row.id, row.claim_owner));
+    }
 
     db.prepare(
       `UPDATE review_queue
-       SET status = 'completed', last_error = ?, updated_at = datetime('now')
+       SET status = 'completed', last_error = ?, claimed_at = NULL, claim_owner = NULL,
+           updated_at = datetime('now')
        WHERE lane_id = ? AND status IN ('pending', 'in_progress')`,
     ).run(`Cancelled: ${reason}`, laneId);
   } catch (error) {
@@ -40,14 +47,20 @@ export function cancelAutoReviewForLane(laneId: string, reason: string): void {
  * HEAD drifts past the commit an attempt is pinned to: that attempt is dead,
  * every later attempt on the lane is not.
  */
-export function cancelReviewAttempt(reviewId: string): void {
-  cancelledReviewAttempts.add(reviewId);
+export function cancelReviewAttempt(reviewId: string, claimOwner?: string | null): void {
+  cancelledReviewAttempts.add(cancellationKey(reviewId, claimOwner));
 }
 
-export function isReviewAttemptCancelled(reviewId: string): boolean {
-  return cancelledReviewAttempts.has(reviewId);
+export function isReviewAttemptCancelled(reviewId: string, claimOwner?: string | null): boolean {
+  if (claimOwner) {
+    return cancelledReviewAttempts.has(cancellationKey(reviewId, claimOwner))
+      || cancelledReviewAttempts.has(reviewId);
+  }
+  if (cancelledReviewAttempts.has(reviewId)) return true;
+  const prefix = `${reviewId}\u0000`;
+  return [...cancelledReviewAttempts].some((key) => key.startsWith(prefix));
 }
 
-export function clearReviewAttemptCancellation(reviewId: string): void {
-  cancelledReviewAttempts.delete(reviewId);
+export function clearReviewAttemptCancellation(reviewId: string, claimOwner?: string | null): void {
+  cancelledReviewAttempts.delete(cancellationKey(reviewId, claimOwner));
 }

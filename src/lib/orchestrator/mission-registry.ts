@@ -59,7 +59,7 @@ function queueArchiveRegistryRow(id: string) {
 
 function packetIsActive(packet: OrchestratorPacket) {
   if (packet.archivedAt || packet.releaseState === 'released') return false;
-  if (packet.status === 'failed' || packet.status === 'released' || packet.status === 'archived') return false;
+  if (packet.status === 'failed' || packet.status === 'archived') return false;
   if (packet.queueState === 'queued' || packet.queueState === 'held') return true;
   return packet.status === 'launching'
     || packet.status === 'running'

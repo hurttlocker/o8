@@ -9,6 +9,8 @@ import type Database from 'better-sqlite3';
  * successor enqueue, and it blinded the stall reconciler built to repair
  * exactly that shape. `head_sha` makes drift detectable; `claimed_at` +
  * `claim_owner` make an abandoned claim reclaimable without a process restart.
+ * The owner includes a per-claim nonce so a late continuation cannot settle a
+ * replacement generation that reused the same queue-row id.
  */
 export function ensureV46ReviewAttemptHeadSchema(sqlite: Database.Database): void {
   // Idempotent and order-independent: `ensureTables()` is marker-gated, so on a

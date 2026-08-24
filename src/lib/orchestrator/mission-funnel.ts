@@ -271,7 +271,7 @@ function packetDisposition(packet: OrchestratorPacket, attempts: MissionFunnelAt
   const lanes = attempts.map((attempt) => attempt.terminalStatus);
   const latestLane = attempts.at(-1);
   if (attempts.some((attempt) => attempt.phases.mergedAt) || packet.releaseStatePayload?.mergeCommit) return 'merged';
-  if (packet.releaseState === 'released' || packet.status === 'released') return 'closed';
+  if (packet.releaseState === 'released') return 'closed';
   if (packet.operatorStopped) return 'cancelled';
   if (packet.status === 'failed' || latestLane?.terminalStatus === 'failed') return 'failed';
   if (packet.archivedAt || packet.status === 'archived') {

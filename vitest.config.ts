@@ -16,6 +16,10 @@ export default defineConfig({
     // Hermetic data dir for EVERY worker before any app module loads — see file.
     setupFiles: ['tests/setup-isolated-data-dir.ts'],
     include: ['src/**/*.test.ts', 'tests/**/*.test.ts', 'cli/**/*.test.ts'],
+    // Keep the default local gate identical to CI. This suite includes real
+    // Git, APFS, worktree, and child-process tests; CPU-count parallelism turns
+    // resource contention into timeouts and teardown cascades (#1633).
+    fileParallelism: false,
     // No globals — tests import { describe, it, expect } from 'vitest'
     // explicitly so tsc/eslint see real symbols.
     globals: false,

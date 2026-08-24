@@ -5,7 +5,7 @@ import { createApproval, listApprovalsForContext, recordApprovalAudit } from '@/
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
 import { getLaneDiffFacts } from '@/lib/lane/lane-diff-facts';
 import { normalizeHeadSha, readHeadSha } from '@/lib/lane/head-sha-lock';
-import { findLaneByPacket, findLatestLaneByPacket } from '@/lib/lane/registry';
+import { appendEvent, findLaneByPacket, findLatestLaneByPacket } from '@/lib/lane/registry';
 import { classifyReviewRisk } from '@/lib/lane/review-risk';
 import { findActiveReviewTurn } from '@/lib/lane/review-turn-state';
 import type { Lane } from '@/lib/lane/types';
@@ -210,6 +210,9 @@ export async function submitPacketReview(input: SubmitReviewInput) {
     packet = synthesizePacketFromLane(input.packetId, orphanLane);
   }
 
+  const verdictLane = orphanLane ?? findLaneByPacket(input.packetId);
+  const activeReviewTurn = verdictLane ? findActiveReviewTurn(verdictLane.id) : null;
+
   // Explicit pin from the caller wins (#1363 — pass the headSha the diff was
   // read at). Fallback: capture the lane worktree HEAD at review time, which
   // authorizes the durable-review merge exactly as before but can pin a HEAD
@@ -218,9 +221,45 @@ export async function submitPacketReview(input: SubmitReviewInput) {
   // (head_moved_since_review) still guards commits landing after this point.
   let reviewedHeadSha = normalizeHeadSha(input.reviewedHeadSha);
   let reviewedHeadAutoCaptured = false;
-  if (!reviewedHeadSha) {
-    const lane = orphanLane ?? findLaneByPacket(input.packetId);
-    const cwd = lane?.worktreePath?.trim() || undefined;
+  const expectedHeadSha = activeReviewTurn?.surface === 'auto-review'
+    ? normalizeHeadSha(activeReviewTurn.expectedHeadSha)
+    : undefined;
+  if (expectedHeadSha) {
+    const cwd = verdictLane?.worktreePath?.trim() || undefined;
+    let currentHeadSha: string | undefined;
+    if (cwd) {
+      try {
+        currentHeadSha = normalizeHeadSha(await readHeadSha(cwd));
+      } catch (error) {
+        console.warn(`[review] Failed to re-prove auto-review HEAD for packet ${input.packetId}:`, error);
+      }
+    }
+    if (
+      currentHeadSha !== expectedHeadSha
+      || (reviewedHeadSha !== undefined && reviewedHeadSha !== expectedHeadSha)
+    ) {
+      if (verdictLane) {
+        appendEvent(verdictLane.id, 'review_head_drift_rejected', 'system', {
+          packetId: input.packetId,
+          reviewTurnId: activeReviewTurn?.id ?? null,
+          expectedHeadSha,
+          submittedHeadSha: reviewedHeadSha ?? null,
+          currentHeadSha: currentHeadSha ?? null,
+        });
+      }
+      return {
+        recorded: false,
+        findingsCount: 0,
+        reviewedHeadSha: null,
+        warning: 'The review turn no longer matches the packet HEAD. A successor review is required.',
+        auditEventType: null,
+        auditApprovalId: null,
+        ignoredReason: 'review_head_drift',
+      };
+    }
+    reviewedHeadSha = expectedHeadSha;
+  } else if (!reviewedHeadSha) {
+    const cwd = verdictLane?.worktreePath?.trim() || undefined;
     if (cwd) {
       try {
         reviewedHeadSha = normalizeHeadSha(await readHeadSha(cwd));
@@ -230,8 +269,6 @@ export async function submitPacketReview(input: SubmitReviewInput) {
       }
     }
   }
-  const verdictLane = orphanLane ?? findLaneByPacket(input.packetId);
-  const activeReviewTurn = verdictLane ? findActiveReviewTurn(verdictLane.id) : null;
   if (activeReviewTurn?.surface === 'packet-explainer') {
     log(`Ignored non-authoritative packet-explainer verdict for packet ${packet.id}.`, {
       approved: input.approved,

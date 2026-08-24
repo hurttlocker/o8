@@ -20,7 +20,7 @@ export function buildAlreadyReleasedResult(mergeSha: string): MergePacketResult 
 }
 
 function isAlreadyReleasedPacket(packet: OrchestratorPacket | null | undefined) {
-  return packet?.releaseState === 'released' || packet?.status === 'released';
+  return packet?.releaseState === 'released';
 }
 
 function recordedMergeSha(packet: OrchestratorPacket | null | undefined) {

@@ -123,6 +123,36 @@ describe('cross-house quota fallback real paths', () => {
     });
   });
 
+  it('reports reviewer contention as structured transient unavailability', async () => {
+    const lane = createLane({
+      repoPath: '/tmp/o8-review-busy-seam',
+      branch: 'inline/review-busy-seam',
+      runtime: 'codex',
+      packetId: `pkt-review-busy-${Date.now()}`,
+    });
+    const sendTurn = vi.fn<OrchestratorBackend['sendTurn']>();
+    const busyBackend: OrchestratorBackend = {
+      ...fakeBackend('codex', sendTurn),
+      ensureSession: () => ({ sessionName: 'test-codex-busy', status: 'busy' }),
+    };
+
+    const result = await runReviewerTurnWithQuotaFallback({
+      laneId: lane.id,
+      repoPath: lane.repoPath,
+      threadId: `auto-review-${lane.id}`,
+      surface: 'auto-review',
+      prompt: 'Review the complete packet.',
+      initialBackend: busyBackend,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      unavailableReason: 'session_busy',
+      errors: ['Codex session busy'],
+    });
+    expect(sendTurn).not.toHaveBeenCalled();
+  });
+
   it('falls back once when Claude reports disabled subscription access as ordinary text', async () => {
     const lane = createLane({
       repoPath: '/tmp/o8-review-disabled-subscription-seam',

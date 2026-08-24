@@ -24,7 +24,12 @@ import type { OrchestratorPacket, OrchestratorReleaseStatePayload } from '@/lib/
 
 export interface PacketReleaseEvidence {
   /** Which path proved the release — always recorded, never inferred. */
-  source: string;
+  source:
+    | 'approve_and_merge'
+    | 'headless_released'
+    | 'heal_bot_auto_release'
+    | 'merged_by_ancestry_reconcile'
+    | 'read_only_completed';
   /** The base-branch commit the work reached, when the path resolved one. */
   mergeCommit?: string | null;
   /** The packet HEAD the proof was taken against. Lets later drift be detected. */
@@ -46,19 +51,38 @@ type ReleasablePacket = Pick<
 export function hasCanonicalReleaseEvidence(
   packet: Pick<OrchestratorPacket, 'releaseStatePayload'>,
 ): boolean {
-  const source = packet.releaseStatePayload?.source;
-  return typeof source === 'string' && source.trim().length > 0;
+  const payload = packet.releaseStatePayload;
+  const source = payload?.source?.trim() ?? '';
+  const mergeCommit = payload?.mergeCommit?.trim() ?? '';
+  const evidenceKind = payload?.evidenceKind?.trim() ?? '';
+
+  if (source === 'read_only_completed') {
+    return evidenceKind === '' || evidenceKind === 'read_only_no_merge_required';
+  }
+  if (source === 'headless_released') {
+    return evidenceKind === 'headless_loop';
+  }
+  if (
+    source === 'approve_and_merge'
+    || source === 'heal_bot_auto_release'
+    || source === 'merged_by_ancestry_reconcile'
+  ) {
+    return mergeCommit.length > 0;
+  }
+  return false;
 }
 
 export function buildReleaseStatePayload(
-  existing: OrchestratorReleaseStatePayload | null | undefined,
+  _existing: OrchestratorReleaseStatePayload | null | undefined,
   evidence: PacketReleaseEvidence,
 ): OrchestratorReleaseStatePayload {
   return {
-    ...(existing ?? {}),
-    mergeCommit: evidence.mergeCommit ?? existing?.mergeCommit ?? null,
-    headSha: evidence.headSha ?? existing?.headSha ?? null,
-    evidenceKind: evidence.evidenceKind ?? existing?.evidenceKind ?? null,
+    // A new proof replaces the old receipt. Carrying fields forward can attach
+    // a stale merge SHA to a later headless/read-only release and make two
+    // different events look like one coherent proof.
+    mergeCommit: evidence.mergeCommit ?? null,
+    headSha: evidence.headSha ?? null,
+    evidenceKind: evidence.evidenceKind ?? null,
     releasedAt: evidence.releasedAt ?? new Date().toISOString(),
     source: evidence.source,
   };
@@ -72,11 +96,27 @@ export function markPacketReleased(
   packet: ReleasablePacket,
   evidence: PacketReleaseEvidence,
 ): void {
+  const releaseStatePayload = buildReleaseStatePayload(packet.releaseStatePayload, evidence);
+  if (!hasCanonicalReleaseEvidence({ releaseStatePayload })) {
+    throw new Error(`Release evidence from ${evidence.source} is incomplete.`);
+  }
   packet.status = 'released';
   packet.queueState = 'held';
   packet.releaseState = 'released';
-  packet.releaseStatePayload = buildReleaseStatePayload(packet.releaseStatePayload, evidence);
+  packet.releaseStatePayload = releaseStatePayload;
   packet.blockedReason = null;
+}
+
+export function clearUnprovenReleaseClaim(packet: ReleasablePacket): boolean {
+  const claimsRelease = packet.releaseState === 'released' || packet.status === 'released';
+  if (!claimsRelease) return false;
+  if (packet.releaseState === 'released' && hasCanonicalReleaseEvidence(packet)) return false;
+  packet.releaseState = 'pending';
+  packet.releaseStatePayload = null;
+  if (packet.status === 'released') packet.status = 'awaiting_review';
+  if (packet.queueState === 'held') packet.queueState = 'queued';
+  packet.blockedReason = 'Release evidence is missing; review recovery is required.';
+  return true;
 }
 
 /**
@@ -91,6 +131,62 @@ export function markPacketReleased(
  * The durable claim is left to the merge paths that carry evidence.
  */
 export function applyLaneCompletedRelease(packet: ReleasablePacket): void {
-  packet.status = 'released';
-  if (hasCanonicalReleaseEvidence(packet)) packet.releaseState = 'released';
+  if (packet.releaseState === 'released' && hasCanonicalReleaseEvidence(packet)) {
+    packet.status = 'released';
+    packet.blockedReason = null;
+    return;
+  }
+  clearUnprovenReleaseClaim(packet);
+  packet.status = 'awaiting_review';
+  packet.blockedReason = 'Lane completed without canonical release evidence.';
+}
+
+/** Repair the current or registry-backed packet that owns a recovered review. */
+export async function repairUnprovenPacketRelease(
+  packetId: string,
+  expectedLaneId?: string | null,
+): Promise<boolean> {
+  const normalizedPacketId = packetId.trim();
+  if (!normalizedPacketId) return false;
+  const matchesLane = (packet: OrchestratorPacket) => (
+    !expectedLaneId || !packet.lane?.laneId || packet.lane.laneId === expectedLaneId
+  );
+  const repair = (packet: OrchestratorPacket): boolean => {
+    if (!matchesLane(packet) || !clearUnprovenReleaseClaim(packet)) return false;
+    packet.status = 'awaiting_review';
+    packet.queueState = 'queued';
+    packet.blockedReason = null;
+    return true;
+  };
+
+  const { withLockedState } = await import(
+    '@/lib/orchestrator/control-plane'
+  );
+  const {
+    findMissionRegistryEntryByPacketId,
+    withMissionRegistryState,
+  } = await import('@/lib/orchestrator/mission-registry');
+  const { withMissionHandoffBarrier } = await import('@/lib/orchestrator/lifecycle-mutation-lock');
+  return withMissionHandoffBarrier(async () => {
+    let currentMissionId = '';
+    const { result: current } = await withLockedState((state) => {
+      currentMissionId = state.missionId?.trim() ?? '';
+      const packet = state.packets.find((candidate) => candidate.id === normalizedPacketId);
+      return packet
+        ? { found: true, repaired: repair(packet) }
+        : { found: false, repaired: false };
+    });
+    if (current.found) return current.repaired;
+
+    const registry = findMissionRegistryEntryByPacketId(normalizedPacketId, {
+      includeArchived: true,
+      excludeMissionId: currentMissionId || undefined,
+    });
+    if (!registry) return false;
+    const { result } = await withMissionRegistryState(registry.id, (state) => {
+      const packet = state.packets.find((candidate) => candidate.id === normalizedPacketId);
+      return { state, result: packet ? repair(packet) : false };
+    });
+    return result;
+  });
 }

@@ -13,7 +13,7 @@ import { applyHeadlessTickDeadline } from '@/lib/orchestrator/headless-tick-dead
 import { hasRegistryPendingHeadlessWork, listActiveMissionRegistryEntries, missionHasPendingHeadlessWork, persistMissionRegistryState, withMissionRegistryState } from '@/lib/orchestrator/mission-registry';
 import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
 import type { OrchestratorMissionState } from '@/lib/orchestrator/types';
-import { buildReleaseStatePayload } from '@/lib/orchestrator/packet-release-truth';
+import { markPacketReleased } from '@/lib/orchestrator/packet-release-truth';
 
 const DEFAULT_INTERVAL_MS = 10_000;
 const MIN_INTERVAL_MS = 1_000;
@@ -82,16 +82,14 @@ function markReleasedPackets(
     }
 
     changed = true;
+    const releasedPacket = { ...packet };
+    markPacketReleased(releasedPacket, {
+      source: 'headless_released',
+      evidenceKind: 'headless_loop',
+      releasedAt,
+    });
     return {
-      ...packet,
-      releaseState: 'released',
-      releaseStatePayload: buildReleaseStatePayload(packet.releaseStatePayload, {
-        source: 'headless_released',
-        evidenceKind: 'headless_loop',
-        releasedAt,
-      }),
-      status: 'released',
-      blockedReason: null,
+      ...releasedPacket,
       lastEventAt: releasedAt,
       lastEventLabel: 'headless_released',
     };
