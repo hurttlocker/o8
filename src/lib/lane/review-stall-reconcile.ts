@@ -23,7 +23,7 @@ import { listLanes } from './registry';
 import { assessDurableApprovedReview } from './durable-review-approval';
 import { findPendingSecondPassApproval } from './review-verdict-recency';
 import { enqueueLaneReview, surfaceReviewQueueBlocker } from './review-queue';
-import { dispatchSecondPassMerge, hasRecordedMergeDispatch } from './second-pass-merge-dispatch';
+import { dispatchSecondPassMerge } from './second-pass-merge-dispatch';
 import type { Lane } from './types';
 
 /** How many times reconciliation may requeue a stalled successor review before escalating. */
@@ -92,17 +92,16 @@ async function reconcileLane(
   // it from reconciliation would merge packets nobody dispatched.
   const durable = await assessDurableApprovedReview(lane);
   if (durable.approved && durable.approvalId && await isAgreedSecondPassApproval(durable.approvalId)) {
-    if (hasRecordedMergeDispatch(lane.id, durable.approvalId)) return;
     const { normalizeHeadSha, readHeadSha } = await import('@/lib/lane/head-sha-lock');
     const headSha = normalizeHeadSha(await readHeadSha(lane.worktreePath || lane.repoPath));
     if (!headSha) return;
-    await dispatchSecondPassMerge({
+    const dispatch = await dispatchSecondPassMerge({
       lane,
       approvalId: durable.approvalId,
       reviewedHeadSha: headSha,
       trigger: 'stall_reconcile',
     });
-    result.mergesDispatched += 1;
+    if (dispatch.dispatched) result.mergesDispatched += 1;
     return;
   }
 

@@ -340,6 +340,9 @@ export type LaneEventVerb =
   // dispatch so a process that dies mid-transition still leaves a trace.
   // Payload: { packetId, approvalId, reviewedHeadSha, trigger }
   | 'merge_dispatch_attempted'
+  // The claimed dispatch reached a durable merge settlement. Payload adds
+  // { attemptId, attempt, mergeSha, status, note }.
+  | 'merge_dispatch_succeeded'
   // That dispatch did not merge. Payload adds { note, reason, routedApprovalId }
   // — routedApprovalId set means it became an operator approval card.
   | 'merge_dispatch_failed'

@@ -158,6 +158,43 @@ describe('Codex auto-review verdict fallback', () => {
 // stricter retry turn through runReviewerTurnWithQuotaFallback → persistence)
 // with a stubbed reviewer runtime.
 describe('Codex auto-review parse failure is a reviewer failure, not a packet rejection (#1812)', () => {
+  it('does not parse or retry prose after the same turn already submitted a durable verdict', async () => {
+    const { repoPath, head } = createGitRepo();
+    const packetId = `pkt-codex-tool-verdict-${Date.now()}`;
+    const lane = makeReviewLane(repoPath, packetId);
+    const reviewTurnId = 'review-turn-tool-verdict';
+    recordOrchestratorReview(packetId, {
+      findings: [],
+      reviewer: 'codex',
+      approved: true,
+      reviewedHeadSha: head,
+      reviewTurnId,
+      reviewTurnOutcome: 'completed',
+    });
+    const retryBackend = stubReviewerBackend(
+      'CODEX_AUTO_REVIEW: {"approved":true,"findings":[]}',
+    );
+
+    const recorded = await recordCodexAutoReviewVerdict({
+      lane,
+      requiresSecondPass: false,
+      reviewTurnId,
+      rawText: 'The verdict was submitted through the review tool.',
+      retry: {
+        reviewPrompt: 'Review the complete packet.',
+        threadId: `auto-review-${lane.id}-verdict-retry`,
+        initialBackend: retryBackend,
+        backendResolver: () => retryBackend,
+      },
+    });
+
+    expect(recorded).toBeNull();
+    expect(vi.mocked(retryBackend.sendTurn)).not.toHaveBeenCalled();
+    const approvals = orchestratorReviews(lane, packetId);
+    expect(approvals).toHaveLength(1);
+    expect(approvals[0]?.args?.reviewTurnId).toBe(reviewTurnId);
+  });
+
   it('records review_unavailable and leaves an existing verdict untouched when both turns are prose', async () => {
     const { repoPath, head } = createGitRepo();
     const packetId = `pkt-codex-prose-${Date.now()}`;

@@ -26,16 +26,21 @@ const h = vi.hoisted(() => ({
     note: string;
     approvalId?: string;
   },
+  settleSuccessfulDispatch: true,
   dispatch: vi.fn(),
   reviewerCalls: [] as Array<{ laneId: string; threadId: string; surface: string }>,
 }));
 
 vi.mock('@/lib/lane/commands', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/lane/commands')>();
-  h.dispatch.mockImplementation(async (command: { laneId: string }) => ({
-    ...h.mergeResult,
-    laneId: command.laneId,
-  }));
+  h.dispatch.mockImplementation(async (command: { laneId: string }) => {
+    const result = { ...h.mergeResult, laneId: command.laneId };
+    if (result.ok && h.settleSuccessfulDispatch) {
+      const { setLaneStatus } = await import('@/lib/lane/registry');
+      setLaneStatus(command.laneId, 'completed', 'system', 'merged');
+    }
+    return result;
+  });
   return { ...actual, dispatch: h.dispatch };
 });
 
@@ -199,8 +204,10 @@ async function approveHighRiskHead(input: {
 }
 
 beforeEach(() => {
+  h.dispatch.mockClear();
   h.reviewerCalls.length = 0;
   h.mergeResult = { ok: true, laneId: '', note: 'merged' };
+  h.settleSuccessfulDispatch = true;
 });
 
 afterAll(() => {
@@ -255,14 +262,185 @@ describe('missed merge dispatch after second-pass agreement (#1856)', () => {
     expect(h.dispatch).toHaveBeenCalledWith(
       expect.objectContaining({ verb: 'merge', laneId: lane.id }),
     );
+    expect(eventsWithVerb(lane.id, 'merge_dispatch_succeeded')).toHaveLength(1);
     expect(eventsWithVerb(lane.id, 'merge_dispatch_failed')).toHaveLength(0);
 
-    // Idempotent: the recorded attempt is the guard, so a second reconcile
-    // must not re-dispatch the same authorization.
+    // Idempotent: the durable success receipt is the guard, so a second
+    // reconcile must not re-dispatch the same authorization.
     h.dispatch.mockClear();
     await reconcileReviewStalls();
     expect(h.dispatch).not.toHaveBeenCalled();
     expect(eventsWithVerb(lane.id, 'merge_dispatch_attempted')).toHaveLength(1);
+  });
+
+  it('reclaims a stale attempted-only dispatch after a process interruption', async () => {
+    const repoDir = createRepo();
+    git(repoDir, ['checkout', '-q', '-b', 'inline/interrupted-merge']);
+    const packetId = 'pkt-interrupted-merge';
+    const lane = createLane({
+      repoPath: repoDir,
+      worktreePath: repoDir,
+      branch: 'inline/interrupted-merge',
+      baseBranch: 'main',
+      runtime: 'codex',
+      label: 'interrupted merge fixture',
+      packetId,
+      sessionKey: 'test-runtime:interrupted-merge',
+    });
+    const headSha = commitHighRiskChange(repoDir, 'interrupted-merge');
+    setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
+    const approvalId = await approveHighRiskHead({ packetId, laneId: lane.id, headSha });
+    markSecondPassAgreed(approvalId);
+
+    const interrupted = (await import('@/lib/lane/events')).recordLaneEvent(
+      lane.id,
+      'merge_dispatch_attempted',
+      'system',
+      {
+        packetId,
+        approvalId,
+        reviewedHeadSha: headSha,
+        trigger: 'second_pass_agreed',
+        attemptId: 'merge-dispatch-interrupted',
+        attempt: 1,
+      },
+    );
+    getSqlite().prepare(
+      'UPDATE lane_events SET timestamp = ? WHERE id = ?',
+    ).run(new Date(Date.now() - 120_000).toISOString(), interrupted.id);
+
+    await reconcileReviewStalls();
+
+    expect(h.dispatch).toHaveBeenCalledTimes(1);
+    const attempts = eventsWithVerb(lane.id, 'merge_dispatch_attempted');
+    expect(attempts).toHaveLength(2);
+    expect(attempts[1]!.payload).toMatchObject({ approvalId, attempt: 2 });
+    expect(eventsWithVerb(lane.id, 'merge_dispatch_succeeded')).toHaveLength(1);
+    expect(eventsWithVerb(lane.id, 'merge_dispatch_failed')).toHaveLength(0);
+  });
+
+  it('rejects ok:true when dispatch produces no durable merge settlement', async () => {
+    const repoDir = createRepo();
+    git(repoDir, ['checkout', '-q', '-b', 'inline/false-success']);
+    const packetId = 'pkt-false-success';
+    const lane = createLane({
+      repoPath: repoDir,
+      worktreePath: repoDir,
+      branch: 'inline/false-success',
+      baseBranch: 'main',
+      runtime: 'codex',
+      label: 'false success fixture',
+      packetId,
+      sessionKey: 'test-runtime:false-success',
+    });
+    const headSha = commitHighRiskChange(repoDir, 'false-success');
+    setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
+    const approvalId = await approveHighRiskHead({ packetId, laneId: lane.id, headSha });
+    markSecondPassAgreed(approvalId);
+    h.settleSuccessfulDispatch = false;
+
+    await reconcileReviewStalls();
+
+    expect(h.dispatch).toHaveBeenCalledTimes(1);
+    expect(eventsWithVerb(lane.id, 'merge_dispatch_attempted')).toHaveLength(1);
+    const failures = eventsWithVerb(lane.id, 'merge_dispatch_failed');
+    expect(failures).toHaveLength(1);
+    expect(String(failures[0]!.payload.reason)).toContain('remained reviewing with no merge receipt');
+    expect(eventsWithVerb(lane.id, 'review_queue_blocked')).toHaveLength(1);
+    expect(getLane(lane.id)?.status).toBe('awaiting_orchestrator');
+  });
+
+  it('repairs a crash between the failed-dispatch receipt and its blocker', async () => {
+    const repoDir = createRepo();
+    git(repoDir, ['checkout', '-q', '-b', 'inline/failure-before-blocker']);
+    const packetId = 'pkt-failure-before-blocker';
+    const lane = createLane({
+      repoPath: repoDir,
+      worktreePath: repoDir,
+      branch: 'inline/failure-before-blocker',
+      baseBranch: 'main',
+      runtime: 'codex',
+      label: 'failure before blocker fixture',
+      packetId,
+      sessionKey: 'test-runtime:failure-before-blocker',
+    });
+    const headSha = commitHighRiskChange(repoDir, 'failure-before-blocker');
+    setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
+    const approvalId = await approveHighRiskHead({ packetId, laneId: lane.id, headSha });
+    markSecondPassAgreed(approvalId);
+    const { recordLaneEvent } = await import('@/lib/lane/events');
+    recordLaneEvent(lane.id, 'merge_dispatch_attempted', 'system', {
+      packetId,
+      approvalId,
+      reviewedHeadSha: headSha,
+      trigger: 'second_pass_agreed',
+      attemptId: 'merge-dispatch-failed-before-blocker',
+      attempt: 1,
+    });
+    recordLaneEvent(lane.id, 'merge_dispatch_failed', 'system', {
+      packetId,
+      approvalId,
+      reviewedHeadSha: headSha,
+      trigger: 'second_pass_agreed',
+      attemptId: 'merge-dispatch-failed-before-blocker',
+      attempt: 1,
+      reason: 'dispatch failed before blocker persistence',
+      routedApprovalId: null,
+    });
+
+    await reconcileReviewStalls();
+
+    expect(h.dispatch).not.toHaveBeenCalled();
+    expect(eventsWithVerb(lane.id, 'merge_dispatch_attempted')).toHaveLength(1);
+    expect(eventsWithVerb(lane.id, 'merge_dispatch_failed')).toHaveLength(1);
+    const blockers = eventsWithVerb(lane.id, 'review_queue_blocked');
+    expect(blockers).toHaveLength(1);
+    expect(String(blockers[0]!.payload.reason)).toContain('failed before blocker persistence');
+    expect(getLane(lane.id)?.status).toBe('awaiting_orchestrator');
+  });
+
+  it('surfaces a blocker instead of retrying an interrupted dispatch forever', async () => {
+    const repoDir = createRepo();
+    git(repoDir, ['checkout', '-q', '-b', 'inline/exhausted-merge']);
+    const packetId = 'pkt-exhausted-merge';
+    const lane = createLane({
+      repoPath: repoDir,
+      worktreePath: repoDir,
+      branch: 'inline/exhausted-merge',
+      baseBranch: 'main',
+      runtime: 'codex',
+      label: 'exhausted merge fixture',
+      packetId,
+      sessionKey: 'test-runtime:exhausted-merge',
+    });
+    const headSha = commitHighRiskChange(repoDir, 'exhausted-merge');
+    setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
+    const approvalId = await approveHighRiskHead({ packetId, laneId: lane.id, headSha });
+    markSecondPassAgreed(approvalId);
+    const { recordLaneEvent } = await import('@/lib/lane/events');
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const event = recordLaneEvent(lane.id, 'merge_dispatch_attempted', 'system', {
+        packetId,
+        approvalId,
+        reviewedHeadSha: headSha,
+        trigger: 'stall_reconcile',
+        attemptId: `merge-dispatch-exhausted-${attempt}`,
+        attempt,
+      });
+      getSqlite().prepare(
+        'UPDATE lane_events SET timestamp = ? WHERE id = ?',
+      ).run(new Date(Date.now() - 120_000).toISOString(), event.id);
+    }
+
+    await reconcileReviewStalls();
+
+    expect(h.dispatch).not.toHaveBeenCalled();
+    expect(eventsWithVerb(lane.id, 'merge_dispatch_attempted')).toHaveLength(3);
+    const failures = eventsWithVerb(lane.id, 'merge_dispatch_failed');
+    expect(failures).toHaveLength(1);
+    expect(failures[0]!.payload).toMatchObject({ approvalId, exhausted: true, attempts: 3 });
+    expect(eventsWithVerb(lane.id, 'review_queue_blocked')).toHaveLength(1);
+    expect(getLane(lane.id)?.status).toBe('awaiting_orchestrator');
   });
 
   it('leaves a durable failure receipt when the recovered dispatch does not merge', async () => {

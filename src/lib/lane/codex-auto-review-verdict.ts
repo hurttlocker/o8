@@ -273,6 +273,33 @@ async function retryReviewTurnForVerdict(
   }
 }
 
+/**
+ * A reviewer may submit its verdict through `submit_review` before its runtime
+ * turn returns prose. That durable tool result is authoritative; parsing the
+ * prose again would duplicate the verdict and can launch an unnecessary retry.
+ */
+async function findCompletedReviewForTurn(lane: Lane, reviewTurnId: string | null): Promise<string | null> {
+  if (!lane.packetId || !reviewTurnId) return null;
+  try {
+    const { listApprovalsForContext } = await import('@/lib/approvals/store');
+    const recorded = listApprovalsForContext({
+      packetId: lane.packetId,
+      laneId: lane.id,
+      sessionKey: lane.sessionKey ?? undefined,
+      projectId: null,
+    }).find((approval) => (
+      approval.toolName === 'orchestrator_review'
+      && approval.args?.reviewTurnId === reviewTurnId
+      && approval.args?.reviewTurnOutcome === 'completed'
+      && approval.args?.reviewSuperseded !== true
+    ));
+    return recorded?.id ?? null;
+  } catch (error) {
+    console.warn(`[auto-review] Could not inspect durable verdicts for review turn ${reviewTurnId}:`, error);
+    return null;
+  }
+}
+
 export async function recordCodexAutoReviewVerdict(input: {
   lane: Lane;
   rawText: string;
@@ -282,6 +309,14 @@ export async function recordCodexAutoReviewVerdict(input: {
 }): Promise<RecordedCodexAutoReviewVerdict | null> {
   if (!input.lane.packetId) {
     console.warn(`[auto-review] Codex verdict for lane ${input.lane.id} had no packet id; skipping approval record`);
+    return null;
+  }
+
+  const completedApprovalId = await findCompletedReviewForTurn(input.lane, input.reviewTurnId);
+  if (completedApprovalId) {
+    console.log(
+      `[auto-review] Review turn ${input.reviewTurnId} already persisted verdict ${completedApprovalId}; skipping prose parsing and retry.`,
+    );
     return null;
   }
 
