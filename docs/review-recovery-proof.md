@@ -190,4 +190,6 @@ Either of these, on a lane in `reviewing`:
 Both are shapes the reconciler now looks for whenever it runs, so a recurrence means the
 reconciler did not run or did not see the lane — not that the receipt was never written.
 
-Proof state: phase-two-awaiting-steer
+This commit is the steered successor HEAD.
+
+Proof state: phase-two-steered
