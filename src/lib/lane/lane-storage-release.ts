@@ -1,6 +1,7 @@
 import { lstatSync } from 'node:fs';
 
 import { getSqlite } from '@/lib/db';
+import { recordLaneEvent } from './events';
 import {
   laneStorageOwnerGeneration,
   releaseReservedStorageForTerminalOwner,
@@ -49,8 +50,10 @@ export function captureLaneStorageCleanup(lane: Lane): Lane & {
  *
  *  - `releaseReservedStorageForTerminalOwner` joins the open transaction rather
  *    than opening its own, so release and association loss commit together.
- *  - Errors PROPAGATE. A settlement failure must roll the lane write back and
- *    leave the reservation recoverable. Callers must not wrap this in a catch.
+ *  - Errors PROPAGATE when the write destroys association evidence. A status-
+ *    only terminal transition may retain an unprovable reservation because the
+ *    lane still names the packet and a later cleanup can retry with that proof.
+ *    Storage mutation failures still roll every lane write back.
  */
 export function settleLaneStorageOnAssociationLoss(
   lane: Pick<Lane, 'id' | 'packetId' | 'worktreePath'>,
@@ -70,11 +73,20 @@ export function settleLaneStorageOnAssociationLoss(
   // Read inside the transaction, before the lane's events are appended to or
   // deleted, so the generation still reflects the launch that reserved.
   const ownerGeneration = laneStorageOwnerGeneration(sqlite, lane.id, packetId);
-  releaseReservedStorageForTerminalOwner({
+  const settlement = releaseReservedStorageForTerminalOwner({
     sqlite,
     ownerIds: [packetId, lane.id],
     ownerGeneration,
     terminalLaneId: lane.id,
     mutationIdPrefix: `packet-storage-terminal-release:${lane.id}`,
+    unprovableScopePolicy: associationLost ? 'throw' : 'retain',
   });
+  if (settlement.retainedUnprovableOwnerIds.length > 0) {
+    recordLaneEvent(lane.id, 'storage_release_deferred', 'system', {
+      packetId,
+      ownerGeneration: ownerGeneration ?? null,
+      retainedOwnerIds: settlement.retainedUnprovableOwnerIds,
+      reason: 'terminal_status_preserved_association_evidence',
+    });
+  }
 }

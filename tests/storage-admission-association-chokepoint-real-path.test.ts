@@ -341,6 +341,48 @@ describe('lane packet-association chokepoint releases storage reservations', () 
 });
 
 describe('an unprovable release scope fails the association-losing write closed', () => {
+  it('allows terminal status while retaining an unprovable newer generation', async () => {
+    const packetId = 'chokepoint-terminal-newer-generation';
+    const { lane } = await seedLaunchedPacket(packetId, [1, 2], 'none');
+    recordLaneEvent(lane.id, 'update', 'orchestrator', {
+      storageAdmissionOwnerGeneration: 1,
+      storageAdmissionReservationId: reservationId(packetId, 1),
+    });
+
+    expect(() => setLaneStatus(lane.id, 'completed', 'system', 'worktree_missing_reconciled'))
+      .not.toThrow();
+
+    expect(getLane(lane.id)).toMatchObject({ status: 'completed', packetId });
+    expect(reservationStates(packetId, [1, 2])).toEqual(['reserved', 'reserved']);
+    expect(getLaneEvents(lane.id, 50).some((event) => (
+      event.verb === 'storage_release_deferred'
+      && event.payload.reason === 'terminal_status_preserved_association_evidence'
+    ))).toBe(true);
+
+    // Association loss remains fail-closed until the newer generation can be
+    // proved; terminal status did not destroy the evidence needed to retry.
+    expect(() => updateLane(lane.id, { packetId: '' }, 'system'))
+      .toThrow(/newer reserved generation/);
+    expect(getLane(lane.id)?.packetId).toBe(packetId);
+  });
+
+  it('allows a legacy unproven lane to terminalize but still refuses deletion', async () => {
+    const packetId = 'chokepoint-terminal-legacy-generation';
+    const { lane } = await seedLaunchedPacket(packetId, [1], 'none');
+
+    expect(() => setLaneStatus(lane.id, 'failed', 'system', 'launch_attempts_exhausted'))
+      .not.toThrow();
+    expect(getLane(lane.id)).toMatchObject({ status: 'failed', packetId });
+    expect(reservationStates(packetId, [1])).toEqual(['reserved']);
+
+    expect(() => deleteLane(lane.id)).toThrow(/unprovable/);
+    expect(getLane(lane.id)?.packetId).toBe(packetId);
+    expect(getLaneEvents(lane.id, 50).some((event) => (
+      event.verb === 'storage_release_deferred'
+      && event.payload.reason === 'terminal_status_preserved_association_evidence'
+    ))).toBe(true);
+  });
+
   it('rejects an unbind when one reserved generation has no proven owner generation', async () => {
     const packetId = 'chokepoint-unproven-single';
     const { lane } = await seedLaunchedPacket(packetId, [1], 'none');

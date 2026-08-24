@@ -43,6 +43,7 @@ interface ReservationOwnerRow {
 export interface TerminalOwnerStorageReleaseResult {
   released: number;
   releasedBytes: number;
+  retainedUnprovableOwnerIds: string[];
 }
 
 function requiredText(value: string, field: string): string {
@@ -134,6 +135,7 @@ export function releaseReservedStorageForTerminalOwner(input: {
   ownerGeneration?: number;
   terminalLaneId: string;
   mutationIdPrefix: string;
+  unprovableScopePolicy?: 'throw' | 'retain';
   releasedAt?: number;
 }): TerminalOwnerStorageReleaseResult {
   const ownerIds = [...new Set(input.ownerIds.map((ownerId) => ownerId.trim()).filter(Boolean))];
@@ -151,6 +153,7 @@ export function releaseReservedStorageForTerminalOwner(input: {
   }
   const settle = (): TerminalOwnerStorageReleaseResult => {
     const rows: ReservationRow[] = [];
+    const retainedUnprovableOwnerIds: string[] = [];
     for (const ownerId of ownerIds) {
       const ownerRows = input.sqlite.prepare(`
         SELECT * FROM storage_admission_reservations
@@ -165,6 +168,10 @@ export function releaseReservedStorageForTerminalOwner(input: {
       const liveLaneIds = laneIdsStillNamingOwner(input.sqlite, ownerId, terminalLaneId);
       if (ownerGeneration === undefined) {
         if (liveLaneIds.length > 0) continue;
+        if (input.unprovableScopePolicy === 'retain') {
+          retainedUnprovableOwnerIds.push(ownerId);
+          continue;
+        }
         throw new Error(
           `Storage release scope is unprovable for owner ${ownerId}: reserved rows exist, `
           + `lane ${terminalLaneId} records no matching owner generation, and no live sibling lane `
@@ -177,6 +184,10 @@ export function releaseReservedStorageForTerminalOwner(input: {
       if (liveGenerations.some((generation) => generation === undefined)) continue;
       if (liveLaneIds.length === 0
         && ownerRows.some((row) => row.owner_generation > ownerGeneration)) {
+        if (input.unprovableScopePolicy === 'retain') {
+          retainedUnprovableOwnerIds.push(ownerId);
+          continue;
+        }
         throw new Error(
           `Storage release scope is unprovable for owner ${ownerId}: lane ${terminalLaneId} `
           + `proves generation ${ownerGeneration}, but a newer reserved generation would lose `
@@ -225,7 +236,7 @@ export function releaseReservedStorageForTerminalOwner(input: {
       `).run(mutationId, requestHash, row.reservation_id, row.volume_id, JSON.stringify(result), releasedAt);
       releasedBytes += row.exact_bytes;
     }
-    return { released: rows.length, releasedBytes };
+    return { released: rows.length, releasedBytes, retainedUnprovableOwnerIds };
   };
   // Settlement must be able to join a caller's open transaction. When the lane
   // write that loses the packet association is already mid-transaction, running

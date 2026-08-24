@@ -350,6 +350,9 @@ export type LaneEventVerb =
   // That dispatch did not merge. Payload adds { note, reason, routedApprovalId }
   // — routedApprovalId set means it became an operator approval card.
   | 'merge_dispatch_failed'
+  // A terminal status-only transition retained an ambiguously owned storage
+  // reservation while preserving the packet association for a later retry.
+  | 'storage_release_deferred'
   | 'review_turn_started'
   | 'review_turn_finished'
   | 'worker_quota_exhausted'
