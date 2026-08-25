@@ -431,6 +431,25 @@ export function isOrchestratorRuntime(value: unknown): value is OrchestratorRunt
   return typeof value === 'string' && Object.prototype.hasOwnProperty.call(ORCHESTRATOR_RUNTIMES, value);
 }
 
+/**
+ * The runtime a session key names, or null when it names none.
+ *
+ * Keys are `<runtime>-owned:<id>` / `<runtime>-discovered:<id>`, so the key
+ * itself carries runtime identity — which is why a surface holding only a
+ * session key still knows what is running in it (#1749).
+ *
+ * Pure and client-safe on purpose. `runtimeIdFromSessionKey` in
+ * `runtime/transcript.ts` does the same parse but validates against the adapter
+ * registry, pulling every adapter with it; a React surface cannot import that.
+ */
+export function runtimeFromSessionKeyId(sessionKey: string | null | undefined): OrchestratorRuntime | null {
+  const normalized = sessionKey?.trim() ?? '';
+  const separator = normalized.indexOf(':');
+  if (separator <= 0) return null;
+  const prefix = normalized.slice(0, separator).trim().replace(/-(?:owned|discovered)$/, '');
+  return isOrchestratorRuntime(prefix) ? prefix : null;
+}
+
 export function runtimeFromOwnedSessionKey(value: unknown): OrchestratorRuntime | null {
   if (typeof value !== 'string') return null;
   const sessionKey = value.trim();

@@ -19,7 +19,7 @@ import {
   type WorkspaceUsageTokens,
   type WorkspaceStreamEvent,
 } from '@/components/desktop/workspace-terminal/workspace-stream-events';
-import { getRuntimeCapability, type OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
+import { getRuntimeCapability, runtimeFromSessionKeyId, type OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import {
   correlatedActionIsUnsettled,
 } from '@/lib/orchestrator/action-receipt';
@@ -101,11 +101,17 @@ export function useWorkspaceChatPane({
   const streamRequest = useActiveLongLivedRequest(active);
 
   const tabId = tab.id;
+  const chatSessionKey = tab.chatSessionKey;
+  // The session key is a third source of runtime identity, and often the only
+  // one present: four live claude-code lanes showed the composer's Codex
+  // default because neither the packet nor the tab carried a runtime, while
+  // their `claude-code-owned:*` keys said exactly what was running (#1749).
   const chatRuntime = (
     tab.orchestrationPacket?.runtime
     ?? tab.chatRuntime
+    ?? runtimeFromSessionKeyId(chatSessionKey)
+    ?? undefined
   ) as OrchestratorRuntime | undefined;
-  const chatSessionKey = tab.chatSessionKey;
   const linkedIssue = tab.linkedIssue ?? null;
   const normalizedSessionKey = useMemo(
     () => normalizeWorkspaceChatSessionKey(chatRuntime, chatSessionKey),
@@ -115,8 +121,10 @@ export function useWorkspaceChatPane({
     () => runtimeTransportSessionId(chatRuntime, chatSessionKey),
     [chatRuntime, chatSessionKey],
   );
+  // Naming a runtime we cannot identify is how "Codex working…" ended up over
+  // a Claude worker. When no source resolves, say nothing specific.
   const runtimeLabel = useMemo(
-    () => getRuntimeCapability(chatRuntime ?? 'codex').label,
+    () => (chatRuntime ? getRuntimeCapability(chatRuntime).label : 'Agent'),
     [chatRuntime],
   );
   const { availableModels, selectedModel } = useWorkspaceChatModelOptions(chatRuntime, tab.chatModel);
