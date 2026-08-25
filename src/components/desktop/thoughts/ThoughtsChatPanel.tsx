@@ -1171,31 +1171,27 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   useEffect(() => {
     if (!isOrchestratorMode || isChatMode || orchStream.messages.length === 0) return;
     if (!orchStream.messages.some((entry) => entry.role !== 'system')) return;
-    setChatMessages((prev) => {
-      if (
-        prev.length === orchStream.messages.length
-        && prev.every((entry, index) => {
-          const liveEntry = orchStream.messages[index];
-          if (!liveEntry) return false;
-          return entry.id === liveEntry?.id
-            && entry.role === liveEntry.role
-            && entry.text === liveEntry.text
-            && entry.thinking === liveEntry.thinking
-            && entry.toolCalls === liveEntry.toolCalls
-            && entry.statusEvent === liveEntry.statusEvent
-            && entry.collide === liveEntry.collide;
-        })
-      ) {
-        return prev;
-      }
-      return orchStream.messages;
-    });
+    // Keep the restored transcript while syncing the current live turn into
+    // retained state. Replacing this state with the stream repeated #1839 one
+    // effect earlier than the display resolver could repair it.
+    setChatMessages((prev) => resolveDisplayMessages({
+      historyEntries: [],
+      chatMessages: prev,
+      streamMessages: orchStream.messages,
+    }));
   }, [isChatMode, isOrchestratorMode, orchStream.messages]);
 
   useEffect(() => {
     if (!isOrchestratorMode) return;
 
-    const msgs = orchStream.messages.length > 0 ? orchStream.messages : chatMessages;
+    // Persist the same composed transcript that the panel renders. Persisting
+    // the live stream alone could temporarily overwrite restored history with
+    // one new event before retained state caught up.
+    const msgs = resolveDisplayMessages({
+      historyEntries: [],
+      chatMessages,
+      streamMessages: orchStream.messages,
+    });
 
     // If a thread already has a placeholder row (minted on + New), keep
     // writing even while empty so History reflects reality. Once a user

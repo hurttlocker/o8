@@ -24,6 +24,8 @@ describe('runtimeFromSessionKeyId (#1749)', () => {
     expect(runtimeFromSessionKeyId('not-a-runtime-owned:abc')).toBeNull();
     expect(runtimeFromSessionKeyId('thoughts-1787358397405')).toBeNull();
     expect(runtimeFromSessionKeyId(':leading-colon')).toBeNull();
+    expect(runtimeFromSessionKeyId('claude-code-owned:')).toBeNull();
+    expect(runtimeFromSessionKeyId('codex:   ')).toBeNull();
     expect(runtimeFromSessionKeyId('')).toBeNull();
     expect(runtimeFromSessionKeyId(null)).toBeNull();
     expect(runtimeFromSessionKeyId(undefined)).toBeNull();

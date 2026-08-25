@@ -134,9 +134,11 @@ async function all() {
   process.once('SIGTERM', () => { void shutdown('SIGTERM'); });
 
   for (const child of [next, ws]) {
-    child.on('exit', (code) => {
+    child.on('exit', (code, signal) => {
       forget(child.pid);
-      void shutdown('SIGTERM', code);
+      // A signal exit reports a null code. Preserve that failure instead of
+      // turning an unexpectedly killed wrapper into a successful dev command.
+      void shutdown('SIGTERM', code ?? (signal ? 1 : 0));
     });
   }
 }

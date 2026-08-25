@@ -11,6 +11,7 @@ import {
 } from '@/lib/mcp/o8-webview-composites';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
 import { buildPrepareComposerTargetScript } from '@/lib/mcp/o8-webview-composer-target';
+import { O8_WEBVIEW_ASYNC_EVAL_GUARD } from '@/lib/mcp/o8-webview-async-eval-guard';
 
 type TextContent = { type: 'text'; text: string };
 type ImageContent = { type: 'image'; data: string; mimeType: string };
@@ -240,22 +241,7 @@ export function wrapEvalCode(userCode: string): string {
     });
   }
 
-  // The execute_js transport takes this function's SYNCHRONOUS completion
-  // value, so a Promise cannot be awaited here. A pending Promise also has no
-  // own enumerable keys, so it serialized to {} and sailed through every
-  // serializability probe below as ok:true -- the caller was told the eval
-  // succeeded and handed an empty object (#1735). Say what actually happened
-  // instead, and name the pattern that does work.
-  if (__o8_value__ && (typeof __o8_value__.then === 'function')) {
-    return JSON.stringify({
-      ok: false,
-      error: {
-        name: 'AsyncEvalUnsupported',
-        message: 'The expression returned a Promise, and this eval bridge reads a synchronous completion value, so the resolved value cannot be returned. Start the async work and stash its result (window.__myKey = await ...), then read window.__myKey with a second, synchronous eval.',
-        stack: null,
-      },
-    });
-  }
+${O8_WEBVIEW_ASYNC_EVAL_GUARD}
 
   // Probe JSON serializability. JSON.stringify on a top-level non-serializable
   // (function, undefined) returns undefined; on a property with such a value

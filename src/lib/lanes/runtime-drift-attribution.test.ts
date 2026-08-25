@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { runtimeDriftIsAttributable } from './scope';
 
-const REPO = '/Users/dev/o8';
-const WORKTREE = '/Users/dev/.o8/worktrees/o8-56fb96a161ae/.cortex-worktrees/packet-pkt-2b597664';
+const REPO = '/repo';
+const WORKTREE = '/worktrees/packet';
 
 describe('runtimeDriftIsAttributable (#1838)', () => {
   it('refuses to attribute a process in the shared repo root', () => {
@@ -27,6 +27,11 @@ describe('runtimeDriftIsAttributable (#1838)', () => {
   it('refuses a process outside the worktree, including a sibling packet', () => {
     expect(runtimeDriftIsAttributable(WORKTREE, REPO, REPO)).toBe(false);
     expect(runtimeDriftIsAttributable(WORKTREE, REPO, `${WORKTREE}-other/src`)).toBe(false);
+    expect(runtimeDriftIsAttributable(WORKTREE, REPO, `${WORKTREE}/../shared-repo`)).toBe(false);
     expect(runtimeDriftIsAttributable(WORKTREE, REPO, null)).toBe(false);
+  });
+
+  it('canonicalizes the worktree path before comparing it with the process cwd', () => {
+    expect(runtimeDriftIsAttributable('/worktrees/nested/../packet', REPO, `${WORKTREE}/src`)).toBe(true);
   });
 });

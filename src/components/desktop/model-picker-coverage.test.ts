@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { MODEL_IDS } from '@/lib/models';
-import { formatModelLabel } from '@/lib/format';
 import { ORCHESTRATOR_MODEL_OPTIONS } from './settings/dispatch-shared';
 import { CLAUDE_CLI_MODELS } from './workspace-terminal/constants';
 
@@ -28,9 +27,12 @@ describe('Claude model picker coverage', () => {
 
   it('has a real label for each of them, never the bare id', () => {
     for (const id of CURRENT_CLAUDE_FLAGSHIPS) {
-      const label = formatModelLabel(id);
-      expect(label).not.toBe(id);
-      expect(label.length).toBeGreaterThan(0);
+      const settingsOption = ORCHESTRATOR_MODEL_OPTIONS.find((option) => option.value === id);
+      const workspaceOption = CLAUDE_CLI_MODELS.find((option) => option.id === id);
+      expect(settingsOption?.label.trim()).toBeTruthy();
+      expect(settingsOption?.label).not.toBe(id);
+      expect(workspaceOption?.label.trim()).toBeTruthy();
+      expect(workspaceOption?.label).not.toBe(id);
     }
   });
 });

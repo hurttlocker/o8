@@ -71,6 +71,46 @@ describe('normalizeCodexEvents — one command, one row (#1845)', () => {
     expect(events.filter((event) => event.type === 'tool_call')).toHaveLength(2);
   });
 
+  it('keeps same-millisecond duplicate commands distinct within one stream shape', () => {
+    const events = normalizeCodexEvents([
+      execBegin(TS, 'call_a', COMMAND),
+      execBegin(TS, 'call_b', COMMAND),
+      itemStarted(TS, 'item_a', COMMAND),
+      itemStarted(TS, 'item_b', COMMAND),
+    ].join('\n'));
+
+    expect(events.filter((event) => event.type === 'tool_call')).toHaveLength(2);
+  });
+
+  it('does not alias calls whose timestamps are missing or invalid', () => {
+    const events = normalizeCodexEvents([
+      line({ type: 'event_msg', timestamp: 'not-a-date', payload: { type: 'exec_command_begin', call_id: 'call_a', command: COMMAND } }),
+      line({ type: 'item.started', item: { type: 'command_execution', id: 'item_a', command: COMMAND } }),
+    ].join('\n'), TS);
+
+    expect(events.filter((event) => event.type === 'tool_call')).toHaveLength(2);
+  });
+
+  it('uses the full arguments for alias identity, not the clipped display prefix', () => {
+    const prefix = 'x'.repeat(700);
+    const events = normalizeCodexEvents([
+      execBegin(TS, 'call_a', `${prefix} first`),
+      itemStarted(TS, 'item_b', `${prefix} second`),
+    ].join('\n'));
+
+    expect(events.filter((event) => event.type === 'tool_call')).toHaveLength(2);
+  });
+
+  it('keeps generated call ids unique after an alias match', () => {
+    const events = normalizeCodexEvents([
+      execBegin(TS, 'call_explicit', COMMAND),
+      line({ type: 'item.started', timestamp: TS, item: { type: 'command_execution', command: COMMAND } }),
+      line({ type: 'item.started', timestamp: TS, item: { type: 'command_execution', command: 'git status --short' } }),
+    ].join('\n'));
+
+    expect(events.filter((event) => event.type === 'tool_call')).toHaveLength(2);
+  });
+
   it('returns an empty stream for empty or unparseable input', () => {
     expect(normalizeCodexEvents('')).toEqual([]);
     expect(normalizeCodexEvents('not json\n{oops')).toEqual([]);

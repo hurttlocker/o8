@@ -72,26 +72,37 @@ function extractText(source: unknown): string {
   return '';
 }
 
-function argsPreview(input: unknown): string {
+function normalizedArgs(input: unknown): string {
   if (input === undefined || input === null) return '';
-  if (typeof input === 'string') return clip(input, MAX_ARGS);
-  try { return clip(JSON.stringify(input), MAX_ARGS); } catch { return ''; }
+  if (typeof input === 'string') return input.trim();
+  try { return JSON.stringify(input); } catch { return ''; }
 }
 
-function normalizeTs(raw: unknown, fallback: string): string {
+function argsPreview(input: unknown): string {
+  return clip(normalizedArgs(input), MAX_ARGS);
+}
+
+interface NormalizedTimestamp {
+  value: string;
+  reliable: boolean;
+}
+
+function normalizeTs(raw: unknown, fallback: string): NormalizedTimestamp {
   if (typeof raw === 'string' && raw.trim()) {
     const parsed = new Date(raw);
-    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
+    if (!Number.isNaN(parsed.getTime())) return { value: parsed.toISOString(), reliable: true };
   }
   if (typeof raw === 'number' && Number.isFinite(raw)) {
     const parsed = new Date(raw);
-    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
+    if (!Number.isNaN(parsed.getTime())) return { value: parsed.toISOString(), reliable: true };
   }
-  return fallback;
+  return { value: fallback, reliable: false };
 }
 
 interface PendingCall { seq: number; tool: string; }
 interface EmittedTool { callIndex: number; resultIndex?: number; tool: string; }
+type ToolCallShape = 'response-function' | 'response-custom' | 'event-exec' | 'item-exec' | 'item-tool';
+interface IdentityAlias { callId: string; shapes: Set<ToolCallShape>; }
 
 /**
  * Normalize raw Codex JSONL into a TranscriptEvent stream. Never throws —
@@ -107,13 +118,24 @@ export function normalizeCodexEvents(
   const out: TranscriptEvent[] = [];
   const pending = new Map<string, PendingCall>();
   const emitted = new Map<string, EmittedTool>();
-  /** tool+args+timestamp → the call id that first emitted it. See pushToolCall. */
-  const identityAlias = new Map<string, string>();
+  /** Full tool+args+timestamp → cross-shape occurrences in arrival order. */
+  const identityAliases = new Map<string, IdentityAlias[]>();
   const fallbackTs = fallbackTimestamp;
   let seq = 0;
+  let syntheticCallSeq = 0;
   const nextSeq = () => (seq += 1);
+  const nextSyntheticCallId = (prefix: string) => `${prefix}-synthetic-${syntheticCallSeq += 1}`;
 
-  const pushToolCall = (ts: string, callId: string, tool: string, args: string) => {
+  const pushToolCall = (input: {
+    ts: string;
+    timestampReliable: boolean;
+    callId: string;
+    shape: ToolCallShape;
+    tool: string;
+    args: string;
+    identityArgs: string;
+  }) => {
+    const { ts, timestampReliable, callId, shape, tool, args, identityArgs } = input;
     // Codex carries ONE command in several stream shapes -- `exec_command_begin`,
     // `item.started`, `response_item` -- and each derives its call id
     // differently (`call_id` vs `id` vs `id\0command`). Keyed on id alone, the
@@ -122,10 +144,18 @@ export function normalizeCodexEvents(
     // history (#1845). A genuine re-run carries a distinct timestamp, so
     // tool+args+ts identifies the emission itself rather than the shape that
     // announced it.
-    const identity = `${tool}\u0000${args}\u0000${ts}`;
-    const aliasId = identityAlias.get(identity);
+    // Alias only when both the timestamp and full arguments are trustworthy.
+    // The displayed arguments are clipped, and missing/invalid timestamps use
+    // fallbackTs; neither is safe as an identity. Track shape occurrences so
+    // two legitimate same-millisecond calls with the same arguments pair by
+    // ordinal instead of collapsing into one row.
+    const identity = timestampReliable && identityArgs
+      ? `${tool}\u0000${identityArgs}\u0000${ts}`
+      : null;
+    const aliases = identity ? (identityAliases.get(identity) ?? []) : [];
+    const alias = aliases.find((candidate) => !candidate.shapes.has(shape));
     const previous = emitted.get(callId)
-      ?? (aliasId !== undefined ? emitted.get(aliasId) : undefined);
+      ?? (alias ? emitted.get(alias.callId) : undefined);
     if (previous) {
       const previousCall = out[previous.callIndex];
       out[previous.callIndex] = {
@@ -141,6 +171,16 @@ export function normalizeCodexEvents(
       // result pairs with the row already on screen instead of orphaning.
       emitted.set(callId, previous);
       pending.set(callId, { seq: previousCall!.seq, tool });
+      if (identity) {
+        const existingAlias = alias
+          ?? aliases.find((candidate) => emitted.get(candidate.callId) === previous);
+        if (existingAlias) {
+          existingAlias.shapes.add(shape);
+        } else {
+          aliases.push({ callId, shapes: new Set([shape]) });
+          identityAliases.set(identity, aliases);
+        }
+      }
       return;
     }
     const thisSeq = nextSeq();
@@ -148,7 +188,10 @@ export function normalizeCodexEvents(
     const summary = clip(args || `call ${tool}`, MAX_SUMMARY);
     out.push({ seq: thisSeq, ts, type: 'tool_call', tool, args, summary });
     emitted.set(callId, { callIndex: out.length - 1, tool });
-    identityAlias.set(identity, callId);
+    if (identity) {
+      aliases.push({ callId, shapes: new Set([shape]) });
+      identityAliases.set(identity, aliases);
+    }
   };
 
   const pushToolResult = (ts: string, callId: string | undefined, fallbackTool: string, rawOutput: string, exitCode: number | undefined) => {
@@ -180,7 +223,8 @@ export function normalizeCodexEvents(
     if (!parsed) continue;
 
     const type = readStr(parsed, 'type');
-    const ts = normalizeTs(parsed.timestamp, fallbackTs);
+    const normalizedTimestamp = normalizeTs(parsed.timestamp, fallbackTs);
+    const ts = normalizedTimestamp.value;
     const payload = safeObject(parsed.payload);
     const payloadType = payload ? readStr(payload, 'type') : '';
 
@@ -225,17 +269,33 @@ export function normalizeCodexEvents(
 
     // Tool calls
     if (type === 'response_item' && (payloadType === 'function_call' || payloadType === 'custom_tool_call')) {
-      const callId = readStr(payload, 'call_id', 'id') || `tool-${seq + 1}`;
+      const callId = readStr(payload, 'call_id', 'id') || nextSyntheticCallId('tool');
       const tool = readStr(payload, 'name', 'namespace', 'execution') || 'tool';
       const rawArgs = payloadType === 'custom_tool_call' ? payload!.input : payload!.arguments;
-      pushToolCall(ts, callId, tool, argsPreview(rawArgs));
+      pushToolCall({
+        ts,
+        timestampReliable: normalizedTimestamp.reliable,
+        callId,
+        shape: payloadType === 'custom_tool_call' ? 'response-custom' : 'response-function',
+        tool,
+        args: argsPreview(rawArgs),
+        identityArgs: normalizedArgs(rawArgs),
+      });
       continue;
     }
 
     if (type === 'event_msg' && payloadType === 'exec_command_begin') {
-      const callId = readStr(payload, 'call_id', 'id') || `exec-${seq + 1}`;
+      const callId = readStr(payload, 'call_id', 'id') || nextSyntheticCallId('exec');
       const command = readStr(payload, 'parsed_cmd', 'cmd', 'command');
-      pushToolCall(ts, callId, 'exec_command', clip(command, MAX_ARGS));
+      pushToolCall({
+        ts,
+        timestampReliable: normalizedTimestamp.reliable,
+        callId,
+        shape: 'event-exec',
+        tool: 'exec_command',
+        args: clip(command, MAX_ARGS),
+        identityArgs: normalizedArgs(command),
+      });
       continue;
     }
 
@@ -244,15 +304,31 @@ export function normalizeCodexEvents(
       if (item && readStr(item, 'type') === 'command_execution') {
         const command = readStr(item, 'command');
         const itemId = readStr(item, 'id');
-        const callId = itemId && command ? `${itemId}\u0000${command}` : itemId || `exec-${seq + 1}`;
-        pushToolCall(ts, callId, 'exec_command', clip(command, MAX_ARGS));
+        const callId = itemId && command ? `${itemId}\u0000${command}` : itemId || nextSyntheticCallId('exec');
+        pushToolCall({
+          ts,
+          timestampReliable: normalizedTimestamp.reliable,
+          callId,
+          shape: 'item-exec',
+          tool: 'exec_command',
+          args: clip(command, MAX_ARGS),
+          identityArgs: normalizedArgs(command),
+        });
         continue;
       }
       if (item && readStr(item, 'type') === 'tool_use') {
-        const callId = readStr(item, 'id') || `tool-${seq + 1}`;
+        const callId = readStr(item, 'id') || nextSyntheticCallId('tool');
         const tool = readStr(item, 'name', 'tool_name') || 'tool';
         const rawInput = item.input ?? item.arguments ?? item.invocation;
-        pushToolCall(ts, callId, tool, argsPreview(rawInput));
+        pushToolCall({
+          ts,
+          timestampReliable: normalizedTimestamp.reliable,
+          callId,
+          shape: 'item-tool',
+          tool,
+          args: argsPreview(rawInput),
+          identityArgs: normalizedArgs(rawInput),
+        });
         continue;
       }
     }

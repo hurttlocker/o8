@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 
 import { getDataDir } from '@/lib/data-dir-migration';
@@ -229,14 +229,22 @@ export function runtimeDriftIsAttributable(
   repoPath: string,
   processCwd: string | null | undefined,
 ): boolean {
-  const worktree = worktreePath?.trim();
+  const worktreeInput = worktreePath?.trim();
   // No isolated directory means nothing can prove ownership.
-  if (!worktree) return false;
+  if (!worktreeInput) return false;
+  const worktree = resolve(worktreeInput);
+  const repo = resolve(repoPath.trim());
   // A "worktree" that is the repo root is the shared checkout, not this packet's.
-  if (worktree === repoPath.trim()) return false;
-  const cwd = processCwd?.trim();
-  if (!cwd) return false;
-  return cwd === worktree || cwd.startsWith(`${worktree}/`);
+  if (worktree === repo) return false;
+  const cwdInput = processCwd?.trim();
+  if (!cwdInput) return false;
+  const cwd = resolve(cwdInput);
+  const fromWorktree = relative(worktree, cwd);
+  return fromWorktree === '' || (
+    fromWorktree !== '..'
+    && !fromWorktree.startsWith(`..${sep}`)
+    && !isAbsolute(fromWorktree)
+  );
 }
 
 function recordRuntimeDriftOnce(

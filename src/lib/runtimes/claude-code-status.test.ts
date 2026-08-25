@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { inferHistoricalClaudeStatus } from './claude-code';
+import { inferHistoricalClaudeStatus, probeLiveClaudeProcesses } from './claude-code';
 
 const NOW = Date.parse('2026-08-24T12:00:00.000Z');
 const ago = (ms: number) => ({ lastModified: new Date(NOW - ms), hasErrorInTail: false });
@@ -33,5 +33,19 @@ describe('inferHistoricalClaudeStatus', () => {
   it('stops calling a stale error tail failed', () => {
     const old = { lastModified: new Date(NOW - 31 * 60_000), hasErrorInTail: true };
     expect(inferHistoricalClaudeStatus(old, true, NOW)).toBe('idle');
+  });
+});
+
+describe('probeLiveClaudeProcesses', () => {
+  it('keeps liveness unknown when PID discovery succeeds but CWD resolution fails', async () => {
+    const result = await probeLiveClaudeProcesses({
+      execFile: async (file) => {
+        if (file === 'bash') return { stdout: '4312 claude --model claude-opus-5\n' };
+        throw new Error('lsof unavailable');
+      },
+    });
+
+    expect(result).toEqual({ processes: [{ pid: 4312 }], probed: false });
+    expect(inferHistoricalClaudeStatus(ago(10_000), result.probed, NOW)).toBe('reviewing');
   });
 });

@@ -446,6 +446,7 @@ export function runtimeFromSessionKeyId(sessionKey: string | null | undefined): 
   const normalized = sessionKey?.trim() ?? '';
   const separator = normalized.indexOf(':');
   if (separator <= 0) return null;
+  if (!normalized.slice(separator + 1).trim()) return null;
   const prefix = normalized.slice(0, separator).trim().replace(/-(?:owned|discovered)$/, '');
   return isOrchestratorRuntime(prefix) ? prefix : null;
 }

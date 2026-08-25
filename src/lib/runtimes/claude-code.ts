@@ -37,6 +37,14 @@ import {
 } from '@/lib/claude-code/owned';
 import { resolveDefaultWorkerEffortSync } from '@/lib/operator/defaults';
 import { readClaudeRuntimeCapacity } from '@/lib/usage/cli-scrape';
+import { findLiveClaudeProcesses, probeLiveClaudeProcesses } from '@/lib/runtimes/claude-code-process-probe';
+export {
+  findLiveClaudeProcesses,
+  probeLiveClaudeProcesses,
+  type ClaudeProcessProbeExec,
+  type LiveClaudeProbe,
+  type LiveClaudeProcess,
+} from '@/lib/runtimes/claude-code-process-probe';
 const execFileAsync = promisify(execFile);
 const CLAUDE_HOME = process.env.CLAUDE_HOME || path.join(os.homedir(), '.claude');
 const CLAUDE_PROJECTS_DIR = path.join(CLAUDE_HOME, 'projects');
@@ -713,82 +721,6 @@ async function discoverProjectSessions(projectDirName: string): Promise<SessionM
   }
 
   return sessions;
-}
-
-// ── Live process detection ──
-
-export interface LiveClaudeProcess {
-  pid: number;
-  cwd?: string;
-}
-
-export interface LiveClaudeProbe {
-  processes: LiveClaudeProcess[];
-  /**
-   * False when the probe itself could not run. An empty `processes` then means
-   * "unknown", not "none" -- and a caller must not treat it as proof that a
-   * session's worker has exited.
-   */
-  probed: boolean;
-}
-
-/**
- * Probe for live Claude Code CLI processes, reporting whether the probe ran.
- *
- * The pipeline's `grep` exits 1 with no output when nothing matches, which
- * `execFileAsync` raises -- so the ordinary "no Claude running" case arrives
- * here as an error and must be told apart from a genuine probe failure
- * (timeout, missing binary, signal). Callers that infer state from absence
- * depend on that distinction (#1855).
- */
-export async function probeLiveClaudeProcesses(): Promise<LiveClaudeProbe> {
-  try {
-    // Find Claude Code CLI processes (not Claude Desktop app)
-    const { stdout } = await execFileAsync(
-      'bash', ['-c', 'ps -eo pid=,command= | grep -E "claude (--|-)" | grep -v grep | grep -v ".app/"'],
-      { windowsHide: true, timeout: 3000 },
-    );
-    const pids: number[] = [];
-    for (const line of stdout.trim().split('\n').filter(Boolean)) {
-      const match = line.trim().match(/^(\d+)/);
-      if (match) pids.push(Number(match[1]));
-    }
-    if (pids.length === 0) return { processes: [], probed: true };
-
-    // #476 — Batch all PIDs into a single lsof call instead of O(N) sequential calls.
-    // lsof accepts comma-separated PIDs with -p and OR's them by default.
-    const processes: LiveClaudeProcess[] = pids.map((pid) => ({ pid }));
-    try {
-      const { stdout: cwdOut } = await execFileAsync(
-        'lsof', ['-a', '-p', pids.join(','), '-d', 'cwd', '-Fn'],
-        { windowsHide: true, timeout: 4000 },
-      );
-      // lsof output: "p<PID>\nn<path>\n" blocks per process
-      let currentPid: number | null = null;
-      for (const line of cwdOut.split('\n')) {
-        if (line.startsWith('p')) {
-          currentPid = Number(line.slice(1));
-        } else if (line.startsWith('n/') && currentPid !== null) {
-          const proc = processes.find((p) => p.pid === currentPid);
-          if (proc) proc.cwd = line.slice(1);
-        }
-      }
-    } catch {
-      // lsof failed — processes returned without CWD info (status detection still works)
-    }
-    return { processes, probed: true };
-  } catch (err) {
-    // `grep` exits 1 with no output when nothing matched: a successful probe
-    // reporting zero processes. Anything else leaves liveness unknown.
-    const failure = err as { code?: unknown; killed?: unknown };
-    const cleanNoMatch = failure.code === 1 && !failure.killed;
-    return { processes: [], probed: cleanNoMatch };
-  }
-}
-
-/** Back-compat view for callers that only need the list, not the probe's fate. */
-export async function findLiveClaudeProcesses(): Promise<LiveClaudeProcess[]> {
-  return (await probeLiveClaudeProcesses()).processes;
 }
 
 export function inferHistoricalClaudeStatus(

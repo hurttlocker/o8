@@ -1,5 +1,6 @@
 import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import { MODEL_IDS } from '@/lib/models';
 
 /**
  * Cross-house model bleed guard, driven by the runtime registry.
@@ -52,4 +53,17 @@ export function resolveRuntimeOrchestratorModel(
   if (modelBelongsToRuntime(trimmed, runtimeId)) return trimmed;
   onReject?.(trimmed, defaultModel, runtimeId);
   return defaultModel;
+}
+
+export const DEFAULT_CLAUDE_ORCHESTRATOR_MODEL = MODEL_IDS.orchestratorDefault;
+
+export function resolveClaudeOrchestratorModel(requested: string | undefined): string {
+  return resolveRuntimeOrchestratorModel(
+    requested,
+    'claude-code',
+    DEFAULT_CLAUDE_ORCHESTRATOR_MODEL,
+    (rejected, replacement, runtimeId) => {
+      console.warn(`[orchestrator-session] Ignoring model "${rejected}" -- ${runtimeId} cannot launch it; using "${replacement}".`);
+    },
+  );
 }

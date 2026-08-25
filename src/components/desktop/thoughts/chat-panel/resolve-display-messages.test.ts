@@ -42,6 +42,29 @@ describe('resolveDisplayMessages', () => {
     expect(out.at(-1)?.id).toBe('system-live');
   });
 
+  it('keeps restored entries when the live stream is synced into retained state', () => {
+    const restored = persistedThread();
+    const live = [
+      entry({ id: 'assistant-live', role: 'assistant', text: 'Current turn', timestamp: BASE_TS + 60_000 }),
+    ];
+
+    const retained = resolveDisplayMessages({
+      historyEntries: [],
+      chatMessages: restored,
+      streamMessages: live,
+    });
+    const rendered = resolveDisplayMessages({
+      historyEntries: [],
+      chatMessages: retained,
+      streamMessages: live,
+    });
+
+    expect(retained).toHaveLength(26);
+    expect(rendered).toHaveLength(26);
+    expect(rendered[0]?.id).toBe('orch-user-1');
+    expect(rendered.at(-1)?.id).toBe('assistant-live');
+  });
+
   it('renders the persisted thread while no turn is live', () => {
     const chatMessages = persistedThread();
     const out = resolveDisplayMessages({ historyEntries: [], chatMessages, streamMessages: [] });

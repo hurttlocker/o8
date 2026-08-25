@@ -39,6 +39,11 @@ describe('orchestrator thread project resolution (#1752)', () => {
       .toThrow(OrchestratorThreadProjectError);
   });
 
+  it('refuses a stale unknown project id already persisted on the thread', () => {
+    expect(() => resolveOrchestratorThreadProjectId('proj-does-not-exist', undefined))
+      .toThrow(OrchestratorThreadProjectError);
+  });
+
   it('resolves a real SQLite project normally', () => {
     const project = createProject({ name: 'Real Project' });
     expect(resolveOrchestratorThreadProjectId(null, project.id)).toBe(project.id);

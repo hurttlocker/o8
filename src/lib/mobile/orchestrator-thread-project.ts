@@ -88,7 +88,7 @@ export function resolveOrchestratorThreadProjectId(
   // A thread persisted before a repo was registered carries the sentinel too,
   // so it has to be normalized on this path as well or those threads keep
   // failing after the operator fixes their setup (#1752).
-  const existingProjectId = existingRaw && isUnresolvedLegacyDefault(existingRaw) ? null : existingRaw;
+  const existingProjectId = validateRequestedProjectId(existingRaw);
   const requestedProjectId = validateRequestedProjectId(requestedValue);
   if (existingProjectId && requestedProjectId && existingProjectId !== requestedProjectId) {
     throw new OrchestratorThreadProjectError({

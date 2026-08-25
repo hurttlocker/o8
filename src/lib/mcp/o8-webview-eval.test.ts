@@ -3,7 +3,6 @@ import { wrapEvalCode } from './o8-webview-tools';
 
 /** The wrapper is a self-contained expression; run it the way the webview does. */
 function runWrapped(userCode: string): { ok: boolean; value?: unknown; error?: { name: string; message: string } } {
-  // eslint-disable-next-line no-eval
   return JSON.parse((0, eval)(wrapEvalCode(userCode)) as string);
 }
 
@@ -26,6 +25,20 @@ describe('wrapEvalCode', () => {
 
   it('catches a bare thenable', () => {
     expect(runWrapped('({ then: function (r) { r(1); } })').ok).toBe(false);
+  });
+
+  it('returns a structured error when reading then throws', () => {
+    const result = runWrapped('Object.defineProperty({}, "then", { get: function () { throw new Error("bad then"); } })');
+    expect(result.ok).toBe(false);
+    expect(result.error?.name).toBe('AsyncEvalUnsupported');
+    expect(result.error?.message).toContain('bad then');
+  });
+
+  it('handles an already-rejected Promise before returning', async () => {
+    const result = runWrapped('Promise.reject(new Error("rejected"))');
+    expect(result.ok).toBe(false);
+    expect(result.error?.name).toBe('AsyncEvalUnsupported');
+    await new Promise((resolve) => setTimeout(resolve, 0));
   });
 
   it('still returns ordinary synchronous values', () => {

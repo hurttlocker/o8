@@ -174,7 +174,7 @@ function reviewSentence(event: BroadcastEvent, specifics: Record<string, unknown
   const changes = isRevisit ? `Review requests changes again on ${label}` : `Review requests changes on ${label}`;
   return evidence
     ? `${changes}: ${evidence}.`
-    : `Review requests changes on ${label}.`;
+    : `${changes}.`;
 }
 
 function failureSentence(event: BroadcastEvent, specifics: Record<string, unknown>): string {

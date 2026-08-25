@@ -249,4 +249,27 @@ describe('Broadcast voice repetition real path', () => {
     expect(second).not.toBe(first);
     for (const line of spoken) expect(line.length).toBeLessThanOrEqual(BROADCAST_SPOKEN_MAX_LENGTH);
   });
+
+  it('keeps return-visit wording when a repeated change request has no findings', async () => {
+    const speaker = new BroadcastSpeaker({
+      sqlite: getSqlite(),
+      speak: async () => {},
+      loadCommentary: emptyCommentary,
+    });
+    const base = Date.now();
+    await speaker.tick({ now: new Date(base), settings: voiceOn });
+
+    const lane = newLane('Re-review without structured findings', `revisit-empty-${base}`);
+    recordOrchestratorReview(lane.packetId!, { approved: false, reviewer: 'codex', findings: [] });
+    await speaker.tick({ now: new Date(base + 1_500), settings: voiceOn });
+    await speaker.flush();
+
+    const later = base + 63 * 60_000;
+    recordOrchestratorReview(lane.packetId!, { approved: false, reviewer: 'codex', findings: [] });
+    await speaker.tick({ now: new Date(later), settings: voiceOn });
+    await speaker.tick({ now: new Date(later + 1_500), settings: voiceOn });
+    await speaker.flush();
+
+    expect(momentTexts().at(-1)).toContain('Review requests changes again on Re-review without structured findings.');
+  });
 });
