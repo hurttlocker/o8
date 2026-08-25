@@ -40,6 +40,18 @@ export interface OrchestratorRuntimeCapability<
   workerProvider: WorkerProvider;
   /** Auth inventory bucket; null only for discovery-only runtimes. */
   authHouse: AuthHouse | null;
+  /**
+   * Model ids this runtime's CLI can actually launch, when that set is
+   * knowable. Codex cannot run an Anthropic id and the Claude harness cannot
+   * run an OpenAI one; handing either the other house's model fails the turn
+   * (#1807, and the codex-direction hit on 2026-07-05).
+   *
+   * OMIT for a runtime that legitimately fronts several providers -- cursor,
+   * opencode and the gateway-backed harnesses all do. Absent means "do not
+   * guess", and the model passes through untouched. A wrong constraint here
+   * would block a valid selection, which is worse than the bug it prevents.
+   */
+  modelIdPattern?: RegExp;
   /** Whether launch accepts a reasoning-effort selection. */
   reasoningEffort: boolean;
   /** Provider-native durable session transforms. Missing means unsupported. */
@@ -78,6 +90,7 @@ export const ORCHESTRATOR_RUNTIMES = {
     binaryName: 'codex',
     workerProvider: 'codex',
     authHouse: 'codex',
+    modelIdPattern: /^(gpt-|o\d|openai\/)/i,
     reasoningEffort: true,
     sessionTransforms: {
       import: true,
@@ -101,6 +114,7 @@ export const ORCHESTRATOR_RUNTIMES = {
     binaryName: 'claude',
     workerProvider: 'claude',
     authHouse: 'claude',
+    modelIdPattern: /^(claude|anthropic\/)/i,
     reasoningEffort: true,
     tier: 'frontier',
     description: 'Claude Code CLI worker via interactive stream-json. Uses the existing Claude account by default or an explicitly selected API gateway model; never --print.',
@@ -120,6 +134,7 @@ export const ORCHESTRATOR_RUNTIMES = {
     binaryName: 'gemini',
     workerProvider: 'gemini',
     authHouse: 'gemini',
+    modelIdPattern: /^(gemini|google\/)/i,
     reasoningEffort: false,
     tier: 'standard',
     description: 'Google Gemini CLI worker via headless stream-json with owned-session resume and review support.',
@@ -363,6 +378,7 @@ export const ORCHESTRATOR_RUNTIMES = {
     binaryName: 'grok',
     workerProvider: 'grok',
     authHouse: 'grok',
+    modelIdPattern: /^(grok|x-ai\/|xai\/)/i,
     reasoningEffort: false,
     tier: 'frontier',
     description: 'Grok Build coding CLI with provider-selected current defaults, structured headless output, and durable resume.',
