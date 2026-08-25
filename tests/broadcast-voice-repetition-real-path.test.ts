@@ -214,4 +214,62 @@ describe('Broadcast voice repetition real path', () => {
     }
     expect(spoken.join(' ')).toContain('Broadcast voice stays concise');
   });
+
+  it('phrases a second review turn as a return visit, not the first line again (#1842)', async () => {
+    const spoken: string[] = [];
+    const speaker = new BroadcastSpeaker({
+      sqlite: getSqlite(),
+      speak: async (text) => { spoken.push(text); },
+      loadCommentary: emptyCommentary,
+    });
+    const base = Date.now();
+    await speaker.tick({ now: new Date(base), settings: voiceOn });
+
+    const lane = newLane('Show the model on every spawned agent', `revisit-${base}`);
+    recordOrchestratorReview(lane.packetId!, { approved: true, reviewer: 'codex', findings: [] });
+    await speaker.tick({ now: new Date(base + 1_500), settings: voiceOn });
+    await speaker.flush();
+
+    const first = momentTexts().at(-1) ?? '';
+    expect(first).toContain('Review approved for Show the model on every spawned agent');
+    expect(first).not.toContain('again');
+
+    // The packet is steered, runs again, and passes a SECOND review turn 63
+    // minutes later -- past the 30-minute suppression window, so this is real
+    // news that must be spoken. It must not be spoken in the same words.
+    const later = base + 63 * 60_000;
+    recordOrchestratorReview(lane.packetId!, { approved: true, reviewer: 'codex', findings: [] });
+    await speaker.tick({ now: new Date(later), settings: voiceOn });
+    await speaker.tick({ now: new Date(later + 1_500), settings: voiceOn });
+    await speaker.flush();
+
+    const second = momentTexts().at(-1) ?? '';
+    expect(second).toContain('Show the model on every spawned agent');
+    expect(second).toContain('Review approved again for');
+    expect(second).not.toBe(first);
+    for (const line of spoken) expect(line.length).toBeLessThanOrEqual(BROADCAST_SPOKEN_MAX_LENGTH);
+  });
+
+  it('keeps return-visit wording when a repeated change request has no findings', async () => {
+    const speaker = new BroadcastSpeaker({
+      sqlite: getSqlite(),
+      speak: async () => {},
+      loadCommentary: emptyCommentary,
+    });
+    const base = Date.now();
+    await speaker.tick({ now: new Date(base), settings: voiceOn });
+
+    const lane = newLane('Re-review without structured findings', `revisit-empty-${base}`);
+    recordOrchestratorReview(lane.packetId!, { approved: false, reviewer: 'codex', findings: [] });
+    await speaker.tick({ now: new Date(base + 1_500), settings: voiceOn });
+    await speaker.flush();
+
+    const later = base + 63 * 60_000;
+    recordOrchestratorReview(lane.packetId!, { approved: false, reviewer: 'codex', findings: [] });
+    await speaker.tick({ now: new Date(later), settings: voiceOn });
+    await speaker.tick({ now: new Date(later + 1_500), settings: voiceOn });
+    await speaker.flush();
+
+    expect(momentTexts().at(-1)).toContain('Review requests changes again on Re-review without structured findings.');
+  });
 });

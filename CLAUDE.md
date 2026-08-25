@@ -102,7 +102,7 @@ Runs on push/PR to `main`: TypeCheck → Lint → Unit Tests (`npm test`) → Go
 
 Universal `AgentRuntime` interface (`types.ts`) with capability-gated discovery. UI never talks to a specific runtime directly — always routes through the registry (`registry.ts`).
 
-**13 dispatchable runtimes** register in `orchestrator/runtime-capabilities.ts` (the count README advertises). Seven have dedicated adapter files — `codex.ts`, `claude-code.ts`, `gemini.ts`, `opencode.ts`, `cursor.ts`, `grok.ts`, `pi.ts` — while `declarative-workers.ts` carries the CLI-described rest (openhands, goose, qwen, kimi, aider) and `antigravity` ships as a discovery skeleton. All share capabilities: discover, readTranscript, launch, resume, interrupt, reviewDiffs. Codex distinguishes "owned" (IDE-spawned, full control) vs "discovered" (user terminal, read-only) sessions.
+**18 dispatchable runtimes** register in `orchestrator/runtime-capabilities.ts` (the count README advertises). Eleven have dedicated adapter files — `codex.ts`, `claude-code.ts`, `gemini.ts`, `antigravity.ts`, `magnitude.ts`, `opencode.ts`, `pi.ts`, `cursor.ts`, `grok.ts`, `prime-agent.ts`, `deepseek-harness.ts` — while `declarative-workers.ts` carries the CLI-described rest (openhands, goose, qwen, qoder, kimi, aider, 3code). All share capabilities: discover, readTranscript, launch, resume, interrupt, reviewDiffs. Codex distinguishes "owned" (IDE-spawned, full control) vs "discovered" (user terminal, read-only) sessions.
 
 `discoverAllSessions()` runs all adapters in parallel via `Promise.allSettled`. `routeAction()` dispatches resume/interrupt to the correct runtime.
 
@@ -336,7 +336,7 @@ If you're documenting a route here, also confirm it's in `GATED_PREFIXES` (or `A
 
 **~74 feature domains.** This grew fast; the canonical list is `ls src/lib/`. Don't try to enumerate every dir here — point at it and call out the load-bearing ones:
 
-- **Runtime layer**: `runtimes/` (13 dispatchable runtimes — 7 dedicated adapters: codex, claude-code, gemini, opencode, cursor, grok, pi; declarative-workers for openhands/goose/qwen/kimi/aider; + antigravity skeleton), `runtime/` (IDE session registries, actions, inventory), per-runtime dirs `codex/`, `claude-code/`, `gemini/`, `opencode/`, `cursor/`, `grok/`, `pi/`.
+- **Runtime layer**: `runtimes/` (18 dispatchable runtimes — 11 dedicated adapters: codex, claude-code, gemini, antigravity, magnitude, opencode, pi, cursor, grok, prime-agent, deepseek-harness; declarative-workers for openhands/goose/qwen/qoder/kimi/aider/3code), `runtime/` (IDE session registries, actions, inventory), per-runtime support dirs `codex/`, `claude-code/`, `gemini/`, `opencode/`, `cursor/`, `grok/`, `pi/`, `prime-agent/`, `deepseek-harness/`. Antigravity and Magnitude currently remain single adapter files under `runtimes/`.
 - **Dispatch + lanes**: `lane/` (single-lane logic incl. `worktree-side-merge.ts` + `codex-orchestrator-session.ts`), `lanes/` (multi-lane fleet view), `dispatch/`, `supervisor/`, `intake/`.
 - **Orchestrator**: `orchestrator/` (types, backends, runtime-capabilities, auto-compact), `agents/`.
 - **Cortex v2**: `cortex/` (see "Cortex v2" section above — directives, ledger, qa, embeddings, indexer, ingest).

@@ -46,6 +46,11 @@ export const GEMINI_FALLBACK_CASCADE: ReadonlyArray<string> = [
 ];
 
 export const CLAUDE_CLI_MODELS: WorkspaceCliModelOption[] = [
+  // Every Claude surface keeps its own hand-written list, so a registry
+  // addition has to be copied into each one and Opus 5 reached the composer
+  // and Settings but never here (#1808). `model-picker-coverage.test.ts` pins
+  // the three lists together until they are generated from the registry.
+  { id: MODEL_IDS.raw.anthropicClaudeOpus5, label: 'Opus 5', color: '#8b5cf6' },
   { id: MODEL_IDS.raw.anthropicClaudeOpus48, label: 'Opus 4.8 (1M)', color: '#8b5cf6' },
   { id: MODEL_IDS.raw.anthropicClaudeOpus47, label: 'Opus 4.7 (1M)', color: '#8b5cf6' },
   { id: MODEL_IDS.raw.anthropicClaudeSonnet5, label: 'Sonnet 5', color: '#8b5cf6' },

@@ -2,6 +2,8 @@ import 'server-only';
 
 import type Database from 'better-sqlite3';
 
+import { broadcastGeneratedLinesSince as countGeneratedLines, claimBroadcastLineSlot } from './hourly-cap';
+
 import { callCodex, type CallCodexOptions } from '@/lib/cortex/qa/llm/codex-adapter';
 import { getSqlite } from '@/lib/db';
 import { ensureV44BroadcastSchema } from '@/lib/db/v44-broadcast-migration';
@@ -70,19 +72,9 @@ function lastDirectorRun(sqlite: Database.Database): DirectorRunRow | null {
   `).get() as DirectorRunRow | undefined ?? null;
 }
 
-export function broadcastGeneratedLinesSince(sqlite: Database.Database, timestamp: string): number {
-  const row = sqlite.prepare(`
-    SELECT COUNT(*) AS count
-    FROM broadcast_events
-    WHERE kind = 'commentary'
-      AND (
-        json_extract(metadata_json, '$.director') = 1
-        OR json_extract(metadata_json, '$.hourlyCapped') = 1
-      )
-      AND created_at >= ?
-  `).get(timestamp) as { count: number };
-  return row.count;
-}
+// Re-exported from its own module so the claim path and the count share one
+// definition and neither file has to import the other (#1840).
+export { broadcastGeneratedLinesSince } from './hourly-cap';
 
 export async function runBroadcastDirectorOnce(options: {
   sqlite?: Database.Database;
@@ -106,7 +98,9 @@ export async function runBroadcastDirectorOnce(options: {
       return { status: 'skipped', reason: 'interval' };
     }
   }
-  if (broadcastGeneratedLinesSince(sqlite, new Date(now.getTime() - 60 * 60_000).toISOString()) >= settings.maxPerHour) {
+  // Cheap early exit so a full window costs no commentary call. The binding
+  // decision is the claim around the insert below.
+  if (countGeneratedLines(sqlite, new Date(now.getTime() - 60 * 60_000).toISOString()) >= settings.maxPerHour) {
     return { status: 'skipped', reason: 'max_per_hour' };
   }
 
@@ -133,10 +127,9 @@ export async function runBroadcastDirectorOnce(options: {
     const output = (await runner(buildBroadcastCommentaryPrompt(newEvents, recent), route)).trim();
     const text = speakableText(output);
     if (!text) throw new Error('Broadcast commentary runner returned no text.');
-    if (broadcastGeneratedLinesSince(sqlite, new Date(now.getTime() - 60 * 60_000).toISOString()) >= settings.maxPerHour) {
-      return { status: 'skipped', reason: 'max_per_hour', newEventCount: newEvents.length };
-    }
-    const event = appendBroadcastEvent({
+    // The commentary call above is an await, so the count read before it is
+    // stale by now. Claim the slot in the same transaction as the insert.
+    const event = claimBroadcastLineSlot(sqlite, now, settings.maxPerHour, () => appendBroadcastEvent({
       kind: 'commentary',
       actor: 'mister',
       text,
@@ -150,7 +143,10 @@ export async function runBroadcastDirectorOnce(options: {
         feedEventCount: newEvents.length,
         factKeys: [...new Set(newEvents.filter(isMomentEvent).map(momentFactKey))],
       },
-    });
+    }));
+    if (!event) {
+      return { status: 'skipped', reason: 'max_per_hour', newEventCount: newEvents.length };
+    }
     return {
       status: 'posted',
       reason: 'posted',

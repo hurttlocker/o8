@@ -224,6 +224,13 @@ export function canSteerAgentState(
   const blockedReason = (packet?.blockedReason ?? '').toLowerCase();
   if (agentStatus === 'running' || packetStatus === 'running') return true;
   if (packetStatus.includes('awaiting_') || agentStatus.includes('awaiting_')) return true;
+  // A parked session is exactly when steering is the cheap recovery path -- it
+  // reuses the warm thread instead of throwing it away for a redispatch. The
+  // steer route itself gates on whether a session binding resolves, not on the
+  // display status, and an `idle` packet steered successfully while its pane
+  // showed no composer at all (#1846). `recovering` is the retry-pending pause
+  // between escalation layers, and is steerable for the same reason.
+  if (packetStatus === 'idle' || packetStatus === 'recovering') return true;
   return packetStatus === 'blocked' && (blockedReason === 'huddle_ready' || blockedReason === 'worker_question');
 }
 

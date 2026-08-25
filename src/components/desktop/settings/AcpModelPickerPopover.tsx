@@ -147,6 +147,7 @@ export function AcpModelPickerPopover({
         ? createPortal(
           <div
             ref={panelRef}
+            data-o8-settings-portal="true"
             style={{
               position: 'fixed',
               top,

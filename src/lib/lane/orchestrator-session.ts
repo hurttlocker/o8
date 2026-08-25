@@ -26,7 +26,7 @@ import { getRuntime, type RuntimeSession } from '@/lib/runtimes';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { toClaudeJson } from '@/lib/mcp/tool-spine/emit-claude';
 import type { ToolProfile } from '@/lib/mcp/tool-spine/registry';
-import { MODEL_IDS } from '@/lib/models';
+import { DEFAULT_CLAUDE_ORCHESTRATOR_MODEL, resolveClaudeOrchestratorModel } from './orchestrator-model-guard';
 import { fableEnvOverride } from '@/lib/lane/fable-profile';
 import { assertOrchestratorRepoPath } from '@/lib/lane/repo-preflight';
 import { buildOrchestratorSystemPrompt } from '@/lib/lane/orchestrator-system-prompt';
@@ -490,7 +490,7 @@ export function ensureOrchestratorSession(repoPath: string, threadId?: string | 
  *   chip is toggled to "Read-only" — the safe-mode orchestrator.
  */
 export type OrchestratorPermissionMode = 'full' | 'plan';
-export const DEFAULT_ORCHESTRATOR_MODEL = MODEL_IDS.orchestratorDefault;
+export const DEFAULT_ORCHESTRATOR_MODEL = DEFAULT_CLAUDE_ORCHESTRATOR_MODEL;
 
 export interface SendToOrchestratorOptions {
   permissionMode?: OrchestratorPermissionMode;
@@ -910,7 +910,7 @@ export async function sendToOrchestrator(
 ): Promise<void> {
   const permissionMode: OrchestratorPermissionMode = options.permissionMode ?? 'full';
   const thinkingEffort: ThinkingEffort = options.thinkingEffort ?? 'adaptive';
-  const requestedModel = options.model?.trim() || DEFAULT_ORCHESTRATOR_MODEL;
+  const requestedModel = resolveClaudeOrchestratorModel(options.model);
   const toolProfile: ToolProfile = options.toolProfile ?? 'full';
   const w = getWarmState(session.sessionName);
 

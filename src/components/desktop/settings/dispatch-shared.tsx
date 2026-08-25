@@ -365,6 +365,7 @@ export function PickerMenu<T extends string>({ value, options, onChange, disable
         <div
           id={listboxId}
           ref={popoverRef}
+          data-o8-settings-portal="true"
           role="listbox"
           aria-label="Settings picker options"
           aria-activedescendant={highlightedIndex >= 0 ? `${listboxId}-option-${highlightedIndex}` : undefined}

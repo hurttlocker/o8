@@ -37,6 +37,14 @@ import {
 } from '@/lib/claude-code/owned';
 import { resolveDefaultWorkerEffortSync } from '@/lib/operator/defaults';
 import { readClaudeRuntimeCapacity } from '@/lib/usage/cli-scrape';
+import { findLiveClaudeProcesses, probeLiveClaudeProcesses } from '@/lib/runtimes/claude-code-process-probe';
+export {
+  findLiveClaudeProcesses,
+  probeLiveClaudeProcesses,
+  type ClaudeProcessProbeExec,
+  type LiveClaudeProbe,
+  type LiveClaudeProcess,
+} from '@/lib/runtimes/claude-code-process-probe';
 const execFileAsync = promisify(execFile);
 const CLAUDE_HOME = process.env.CLAUDE_HOME || path.join(os.homedir(), '.claude');
 const CLAUDE_PROJECTS_DIR = path.join(CLAUDE_HOME, 'projects');
@@ -715,62 +723,20 @@ async function discoverProjectSessions(projectDirName: string): Promise<SessionM
   return sessions;
 }
 
-// ── Live process detection ──
-
-export interface LiveClaudeProcess {
-  pid: number;
-  cwd?: string;
-}
-
-export async function findLiveClaudeProcesses(): Promise<LiveClaudeProcess[]> {
-  try {
-    // Find Claude Code CLI processes (not Claude Desktop app)
-    const { stdout } = await execFileAsync(
-      'bash', ['-c', 'ps -eo pid=,command= | grep -E "claude (--|-)" | grep -v grep | grep -v ".app/"'],
-      { windowsHide: true, timeout: 3000 },
-    );
-    const pids: number[] = [];
-    for (const line of stdout.trim().split('\n').filter(Boolean)) {
-      const match = line.trim().match(/^(\d+)/);
-      if (match) pids.push(Number(match[1]));
-    }
-    if (pids.length === 0) return [];
-
-    // #476 — Batch all PIDs into a single lsof call instead of O(N) sequential calls.
-    // lsof accepts comma-separated PIDs with -p and OR's them by default.
-    const processes: LiveClaudeProcess[] = pids.map((pid) => ({ pid }));
-    try {
-      const { stdout: cwdOut } = await execFileAsync(
-        'lsof', ['-a', '-p', pids.join(','), '-d', 'cwd', '-Fn'],
-        { windowsHide: true, timeout: 4000 },
-      );
-      // lsof output: "p<PID>\nn<path>\n" blocks per process
-      let currentPid: number | null = null;
-      for (const line of cwdOut.split('\n')) {
-        if (line.startsWith('p')) {
-          currentPid = Number(line.slice(1));
-        } else if (line.startsWith('n/') && currentPid !== null) {
-          const proc = processes.find((p) => p.pid === currentPid);
-          if (proc) proc.cwd = line.slice(1);
-        }
-      }
-    } catch {
-      // lsof failed — processes returned without CWD info (status detection still works)
-    }
-    return processes;
-  } catch {
-    return [];
-  }
-}
-
-function inferHistoricalClaudeStatus(meta: SessionMeta): RuntimeSession['status'] {
-  if (meta.hasErrorInTail) {
-    const ageMs = Date.now() - meta.lastModified.getTime();
-    if (ageMs < 30 * 60_000) return 'failed';
-  }
-
-  const ageMs = Date.now() - meta.lastModified.getTime();
-  if (ageMs < 5 * 60_000) return 'reviewing';
+export function inferHistoricalClaudeStatus(
+  meta: Pick<SessionMeta, 'hasErrorInTail' | 'lastModified'>,
+  livenessKnown: boolean,
+  now = Date.now(),
+): RuntimeSession['status'] {
+  const ageMs = now - meta.lastModified.getTime();
+  if (meta.hasErrorInTail && ageMs < 30 * 60_000) return 'failed';
+  // This runs only for a session no live process owns. When the probe actually
+  // ran, that absence is the answer: the turn is over. Reporting `reviewing`
+  // off transcript mtime claimed a worker was still thinking for five minutes
+  // after its process had exited, which is also when an operator most wants to
+  // steer it (#1855). The mtime hedge survives only for the case the probe
+  // could not run, where absence proves nothing.
+  if (!livenessKnown && ageMs < 5 * 60_000) return 'reviewing';
   return 'idle';
 }
 
@@ -790,12 +756,13 @@ export const claudeCodeRuntime: AgentRuntime = {
       projectDirs = [];
     }
 
-    const [allSessions, liveProcesses] = await Promise.all([
+    const [allSessions, liveProbe] = await Promise.all([
       projectDirs.length > 0
         ? Promise.all(projectDirs.map((dir) => discoverProjectSessions(dir))).then((r) => r.flat())
         : Promise.resolve([]),
-      findLiveClaudeProcesses(),
+      probeLiveClaudeProcesses(),
     ]);
+    const liveProcesses = liveProbe.processes;
 
     // Sort by most recent first
     allSessions.sort((a, b) => b.lastModified.getTime() - a.lastModified.getTime());
@@ -815,7 +782,7 @@ export const claudeCodeRuntime: AgentRuntime = {
       if (isLiveSession) {
         claimedLiveSlots.set(normalizedCwd, claimedSlots + 1);
       }
-      const status = isLiveSession ? 'running' : inferHistoricalClaudeStatus(meta);
+      const status = isLiveSession ? 'running' : inferHistoricalClaudeStatus(meta, liveProbe.probed);
       const name = `${projectDisplayName(meta.projectPath)}${meta.gitBranch ? ` • ${meta.gitBranch}` : ''}`;
       // #658 — Orchestrator-dispatched lanes spawn `claude` with cwd inside
       // `.cortex-worktrees/packet-*`. Mark them as 'owned' so the runtime
@@ -840,7 +807,11 @@ export const claudeCodeRuntime: AgentRuntime = {
         },
         lastActivityAt: meta.lastModified,
         initialTask: meta.firstUserMessage,
-        model: meta.model ?? 'claude',
+        // `model` is optional on RuntimeSession and the display helper renders
+        // the runtime alone when it is absent. Substituting the bare string
+        // 'claude' -- which is not a model id -- printed "Claude Code · claude"
+        // as though a real model had been selected (#1869).
+        model: meta.model,
         contextUsedPercent: meta.contextUsedPercent,
         tmuxSession: getRuntimeTerminalSession(`claude-code:${meta.sessionId}`)?.sessionName ?? undefined,
       };
@@ -932,7 +903,9 @@ export const claudeCodeRuntime: AgentRuntime = {
         },
         lastActivityAt: new Date(),
         initialTask: firstUserMessage ?? `Live Claude Code session (PID ${proc.pid})`,
-        model: model ?? 'claude',
+        // Same as the historical path above: absent is a supported state, and
+        // a fabricated model id is not (#1869).
+        model,
         contextUsedPercent,
         tmuxSession: realSessionId ? (getRuntimeTerminalSession(`claude-code:${realSessionId}`)?.sessionName ?? undefined) : undefined,
       });

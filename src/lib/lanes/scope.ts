@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 
 import { getDataDir } from '@/lib/data-dir-migration';
@@ -214,6 +214,39 @@ async function readHeadSha(cwd: string): Promise<string | null> {
   }
 }
 
+/**
+ * Whether a running process may be attributed to this packet's worker.
+ *
+ * Drift is a governance claim about THIS packet -- "it declared codex and ran
+ * claude-code" -- so it may only be made about a process inside the packet's
+ * own worktree. A lane with no worktree falls back to the repo root, which the
+ * operator's own resident orchestrator also occupies; attributing that process
+ * produced an audit record stating a packet ran a runtime it never ran, sitting
+ * next to a real failure and reading as its explanation (#1838).
+ */
+export function runtimeDriftIsAttributable(
+  worktreePath: string | null | undefined,
+  repoPath: string,
+  processCwd: string | null | undefined,
+): boolean {
+  const worktreeInput = worktreePath?.trim();
+  // No isolated directory means nothing can prove ownership.
+  if (!worktreeInput) return false;
+  const worktree = resolve(worktreeInput);
+  const repo = resolve(repoPath.trim());
+  // A "worktree" that is the repo root is the shared checkout, not this packet's.
+  if (worktree === repo) return false;
+  const cwdInput = processCwd?.trim();
+  if (!cwdInput) return false;
+  const cwd = resolve(cwdInput);
+  const fromWorktree = relative(worktree, cwd);
+  return fromWorktree === '' || (
+    fromWorktree !== '..'
+    && !fromWorktree.startsWith(`..${sep}`)
+    && !isAbsolute(fromWorktree)
+  );
+}
+
 function recordRuntimeDriftOnce(
   lane: Lane,
   declaredRuntime: string,
@@ -221,13 +254,15 @@ function recordRuntimeDriftOnce(
   processInfo: RuntimeProcessOwner | null,
 ) {
   if (!actualRuntime || declaredRuntime === actualRuntime) return;
+  if (!runtimeDriftIsAttributable(lane.worktreePath, lane.repoPath, processInfo?.cwd)) return;
   const alreadyLogged = getLaneEvents(lane.id, 1000).some((event) => event.verb === 'runtime_drift');
   if (alreadyLogged) return;
 
   appendEvent(lane.id, 'runtime_drift', 'system', {
     declaredRuntime,
     actualRuntime,
-    worktreePath: lane.worktreePath ?? lane.repoPath,
+    worktreePath: lane.worktreePath,
+    processCwd: processInfo?.cwd ?? null,
     pid: processInfo?.pid ?? null,
     binaryPath: processInfo?.binaryPath ?? null,
   });

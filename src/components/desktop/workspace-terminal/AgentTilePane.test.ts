@@ -251,4 +251,23 @@ describe('canSteerAgentState', () => {
       { status: 'failed', blockedReason: 'runtime_process_exit' },
     )).toBe(false);
   });
+
+  it('offers the composer for an idle packet, which steers successfully (#1846)', () => {
+    // The reported pane read `Codex · Codex · Idle` with no composer, while
+    // steer_packet against that same packet resumed the worker and produced a
+    // new commit. The pane was asserting a false state.
+    expect(canSteerAgentState({ status: 'idle' }, { status: 'idle' })).toBe(true);
+  });
+
+  it('offers the composer while a packet is recovering between escalation layers', () => {
+    expect(canSteerAgentState({ status: 'idle' }, { status: 'recovering' })).toBe(true);
+  });
+
+  it('still hides the composer where there is no session to steer', () => {
+    expect(canSteerAgentState({ status: 'idle' }, { status: 'draft' })).toBe(false);
+    expect(canSteerAgentState({ status: 'idle' }, { status: 'queued' })).toBe(false);
+    expect(canSteerAgentState({ status: 'idle' }, { status: 'archived' })).toBe(false);
+    expect(canSteerAgentState({ status: 'idle' }, { status: 'released' })).toBe(false);
+    expect(canSteerAgentState(null, null)).toBe(false);
+  });
 });

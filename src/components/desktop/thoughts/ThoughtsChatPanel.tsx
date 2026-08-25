@@ -76,7 +76,7 @@ import {
   mergeToolResultIntoEntry,
   sendScratchChatMessage,
 } from '@/components/desktop/orchestrator/send-chat-message';
-import { dedupeDisplayMessages } from './chat-panel/dedupe-display-messages';
+import { resolveDisplayMessages } from './chat-panel/resolve-display-messages';
 import { EmptyStateCard } from './chat-panel/EmptyStateCard';
 import { ThreadExportButton } from './chat-panel/ThreadExportButton';
 import { useClearCommand } from './chat-panel/useClearCommand';
@@ -1171,31 +1171,27 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   useEffect(() => {
     if (!isOrchestratorMode || isChatMode || orchStream.messages.length === 0) return;
     if (!orchStream.messages.some((entry) => entry.role !== 'system')) return;
-    setChatMessages((prev) => {
-      if (
-        prev.length === orchStream.messages.length
-        && prev.every((entry, index) => {
-          const liveEntry = orchStream.messages[index];
-          if (!liveEntry) return false;
-          return entry.id === liveEntry?.id
-            && entry.role === liveEntry.role
-            && entry.text === liveEntry.text
-            && entry.thinking === liveEntry.thinking
-            && entry.toolCalls === liveEntry.toolCalls
-            && entry.statusEvent === liveEntry.statusEvent
-            && entry.collide === liveEntry.collide;
-        })
-      ) {
-        return prev;
-      }
-      return orchStream.messages;
-    });
+    // Keep the restored transcript while syncing the current live turn into
+    // retained state. Replacing this state with the stream repeated #1839 one
+    // effect earlier than the display resolver could repair it.
+    setChatMessages((prev) => resolveDisplayMessages({
+      historyEntries: [],
+      chatMessages: prev,
+      streamMessages: orchStream.messages,
+    }));
   }, [isChatMode, isOrchestratorMode, orchStream.messages]);
 
   useEffect(() => {
     if (!isOrchestratorMode) return;
 
-    const msgs = orchStream.messages.length > 0 ? orchStream.messages : chatMessages;
+    // Persist the same composed transcript that the panel renders. Persisting
+    // the live stream alone could temporarily overwrite restored history with
+    // one new event before retained state caught up.
+    const msgs = resolveDisplayMessages({
+      historyEntries: [],
+      chatMessages,
+      streamMessages: orchStream.messages,
+    });
 
     // If a thread already has a placeholder row (minted on + New), keep
     // writing even while empty so History reflects reality. Once a user
@@ -1444,11 +1440,15 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     if (!isOrchestratorMode || isChatMode) return chatMessages;
     // Loaded history + the live stream overlap after a mid-conversation reload;
     // the same user turn can survive in both the restored (persisted id) and
-    // the live-minted (optimistic id) form. Dedupe so it never double-renders.
-    const base = orchStream.messages.length > 0 ? orchStream.messages : chatMessages;
-    return dedupeDisplayMessages(threadHistoryEntries.length > 0
-      ? [...threadHistoryEntries, ...base]
-      : base);
+    // the live-minted (optimistic id) form. resolveDisplayMessages concatenates
+    // all three sources and lets dedupeDisplayMessages collapse the overlap --
+    // it used to pick the stream OR the history, which dropped a whole restored
+    // thread the moment one live event arrived (#1839).
+    return resolveDisplayMessages({
+      historyEntries: threadHistoryEntries,
+      chatMessages,
+      streamMessages: orchStream.messages,
+    });
   }, [chatMessages, isChatMode, isOrchestratorMode, orchStream.messages, threadHistoryEntries]);
   // See `composerRepoLabelBase` for the rationale — derived here so
   // the empty-state check matches the empty-state-override condition.

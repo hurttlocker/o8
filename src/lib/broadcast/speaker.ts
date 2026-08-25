@@ -7,13 +7,14 @@ import { apiFetch } from '@/lib/mcp/operator-handlers/shared';
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 import { broadcastEventSpecifics } from './commentary-prompt';
 import { buildBroadcastSnapshot } from './snapshot';
-import { broadcastGeneratedLinesSince } from './director';
+import { claimBroadcastLineSlot } from './hourly-cap';
 import { listBroadcastEvents } from './events';
 import {
   BROADCAST_SPOKEN_MAX_LENGTH,
   clipPhrase,
   firstSentence,
   isMomentEvent,
+  expiredNarratedFactKeys,
   momentFactKey,
   narratedFactKeysSince,
   narrationWindowStart,
@@ -145,14 +146,15 @@ function mergeSentence(event: BroadcastEvent, specifics: Record<string, unknown>
   return evidence.length > 0 ? `${label} merged: ${evidence.join(', ')}.` : `${label} merged.`;
 }
 
-function approvalSentence(event: BroadcastEvent, specifics: Record<string, unknown>): string {
+function approvalSentence(event: BroadcastEvent, specifics: Record<string, unknown>, isRevisit = false): string {
   const action = event.detail || payloadText(event, 'summary', 'command', 'description');
   const label = packetLabel(event, specifics);
-  if (!action || label.toLowerCase() === action.toLowerCase()) return `Approval pending for ${label}.`;
-  return `Approval pending for ${label}: ${firstSentence(action, DETAIL_MAX_LENGTH)}.`;
+  const opening = isRevisit ? `Approval still pending for ${label}` : `Approval pending for ${label}`;
+  if (!action || label.toLowerCase() === action.toLowerCase()) return `${opening}.`;
+  return `${opening}: ${firstSentence(action, DETAIL_MAX_LENGTH)}.`;
 }
 
-function reviewSentence(event: BroadcastEvent, specifics: Record<string, unknown>): string {
+function reviewSentence(event: BroadcastEvent, specifics: Record<string, unknown>, isRevisit = false): string {
   const label = packetLabel(event, specifics);
   const findingsCount = numberSpecific(specifics, 'findingsCount');
   const firstFinding = specifics.firstFinding && typeof specifics.firstFinding === 'object'
@@ -162,12 +164,17 @@ function reviewSentence(event: BroadcastEvent, specifics: Record<string, unknown
   const evidence = findingsCount !== null && findingsCount > 0
     ? `${countPhrase(findingsCount, 'finding')}${file ? ` in ${clipPhrase(file, DETAIL_MAX_LENGTH)}` : ''}`
     : null;
+  // A second review turn on the same packet is real news, so it is not
+  // suppressed -- but repeating the first utterance verbatim makes the voice
+  // sound like it stuttered. One word places it in sequence (#1842).
   if (specifics.approved === true) {
-    return evidence ? `Review approved for ${label}, ${evidence}.` : `Review approved for ${label}.`;
+    const verdict = isRevisit ? `Review approved again for ${label}` : `Review approved for ${label}`;
+    return evidence ? `${verdict}, ${evidence}.` : `${verdict}.`;
   }
+  const changes = isRevisit ? `Review requests changes again on ${label}` : `Review requests changes on ${label}`;
   return evidence
-    ? `Review requests changes on ${label}: ${evidence}.`
-    : `Review requests changes on ${label}.`;
+    ? `${changes}: ${evidence}.`
+    : `${changes}.`;
 }
 
 function failureSentence(event: BroadcastEvent, specifics: Record<string, unknown>): string {
@@ -196,12 +203,12 @@ function leaseTimeoutSentence(event: BroadcastEvent, specifics: Record<string, u
     : `${label} timed out waiting on a lease.`;
 }
 
-function momentSentence(event: BroadcastEvent): string | null {
+function momentSentence(event: BroadcastEvent, isRevisit = false): string | null {
   const specifics = broadcastEventSpecifics(event, null);
   if (event.kind === 'packet_failed') return failureSentence(event, specifics);
-  if (event.kind === 'review_verdict') return reviewSentence(event, specifics);
+  if (event.kind === 'review_verdict') return reviewSentence(event, specifics, isRevisit);
   if (event.kind === 'merge') return mergeSentence(event, specifics);
-  if (event.kind === 'approval') return approvalSentence(event, specifics);
+  if (event.kind === 'approval') return approvalSentence(event, specifics, isRevisit);
   if (event.kind === 'spend_cap') return spendSentence(event, specifics);
   if (event.kind === 'lease_timeout') return leaseTimeoutSentence(event, specifics);
   return null;
@@ -228,7 +235,10 @@ export interface ComposedMomentLine {
  * stays inside the spoken length budget; whatever does not fit is handed back
  * so the next tick speaks it instead of this one running long.
  */
-export function composeMomentLine(input: BroadcastEvent | BroadcastEvent[]): ComposedMomentLine | null {
+export function composeMomentLine(
+  input: BroadcastEvent | BroadcastEvent[],
+  revisitFacts: ReadonlySet<string> = new Set(),
+): ComposedMomentLine | null {
   const events = (Array.isArray(input) ? input : [input]).filter(isMomentEvent);
   if (events.length === 0) return null;
   const reviewPackets = new Set(events.filter((event) => event.kind === 'review_verdict').map((event) => event.packetId).filter(Boolean));
@@ -248,11 +258,11 @@ export function composeMomentLine(input: BroadcastEvent | BroadcastEvent[]): Com
   const composedFacts = new Set<string>();
   let length = 0;
   for (const event of ordered) {
-    const sentence = momentSentence(event);
+    const fact = momentFactKey(event);
+    const sentence = momentSentence(event, revisitFacts.has(fact));
     if (!sentence) continue;
     // One fact, one sentence — the same verdict arrives from two tables and
     // must not be said twice inside a single utterance (o8 #1822).
-    const fact = momentFactKey(event);
     if (composedFacts.has(fact) || sentences.includes(sentence)) {
       spokenEvents.push(event);
       continue;
@@ -271,8 +281,11 @@ export function composeMomentLine(input: BroadcastEvent | BroadcastEvent[]): Com
   return text ? { text, spokenEvents, deferredEvents } : null;
 }
 
-export function broadcastMomentLine(input: BroadcastEvent | BroadcastEvent[]): string | null {
-  return composeMomentLine(input)?.text ?? null;
+export function broadcastMomentLine(
+  input: BroadcastEvent | BroadcastEvent[],
+  revisitFacts?: ReadonlySet<string>,
+): string | null {
+  return composeMomentLine(input, revisitFacts)?.text ?? null;
 }
 
 function lullLine(sqlite: Database.Database): string | null {
@@ -434,18 +447,25 @@ export class BroadcastSpeaker {
     now: Date,
     sqlite: Database.Database,
     factKeys: string[] = [],
-  ): BroadcastSpeechLine {
-    const event = appendBroadcastEvent({ kind: 'commentary', actor: 'symon', text }, {
-      sqlite,
-      now,
-      metadata: {
-        voiceTrigger: trigger,
-        sourceEventId: sourceEventIds[0] ?? null,
-        sourceEventIds,
-        hourlyCapped: true,
-        ...(factKeys.length > 0 ? { factKeys } : {}),
+    maxPerHour: number,
+  ): BroadcastSpeechLine | null {
+    // The cap is claimed in the same transaction as the insert, so the
+    // director cannot append between this speaker's check and its write (#1840).
+    const event = claimBroadcastLineSlot(sqlite, now, maxPerHour, () => appendBroadcastEvent(
+      { kind: 'commentary', actor: 'symon', text },
+      {
+        sqlite,
+        now,
+        metadata: {
+          voiceTrigger: trigger,
+          sourceEventId: sourceEventIds[0] ?? null,
+          sourceEventIds,
+          hourlyCapped: true,
+          ...(factKeys.length > 0 ? { factKeys } : {}),
+        },
       },
-    });
+    ));
+    if (!event) return null;
     return {
       id: `broadcast:${event.id}`,
       actor: event.actor,
@@ -516,6 +536,9 @@ export class BroadcastSpeaker {
           // The shared suppression view: anything the director already narrated
           // (and anything this speaker said before a restart) counts as said.
           const narratedFacts = narratedFactKeysSince(sqlite, narrationWindowStart(now));
+          // Said earlier this session, suppression since expired — a genuine
+          // second visit, phrased as one rather than repeated verbatim (#1842).
+          const revisitFacts = expiredNarratedFactKeys(sqlite, now);
           const unsaid = this.pendingMoments.filter((event) => {
             const fact = momentFactKey(event);
             if (this.recentFacts.has(fact) || queuedFacts.has(fact) || burstFacts.has(fact) || narratedFacts.has(fact)) {
@@ -525,8 +548,8 @@ export class BroadcastSpeaker {
             return true;
           });
           this.pendingMoments = [];
-          const composed = composeMomentLine(unsaid);
-          if (composed && broadcastGeneratedLinesSince(sqlite, new Date(now.getTime() - 60 * 60_000).toISOString()) < settings.maxPerHour) {
+          const composed = composeMomentLine(unsaid, revisitFacts);
+          if (composed) {
             const spokenFacts = [...new Set(composed.spokenEvents.map((event) => momentFactKey(event)))];
             const line = this.generatedLine(
               composed.text,
@@ -535,24 +558,28 @@ export class BroadcastSpeaker {
               now,
               sqlite,
               spokenFacts,
+              settings.maxPerHour,
             );
-            generated.push(line.id);
-            this.enqueue(line, sqlite, now.getTime());
-            // Whatever did not fit stays unsaid rather than making this line run
-            // long; the next tick speaks it as its own short update.
-            this.pendingMoments = composed.deferredEvents.slice(0, MAX_DEFERRED_MOMENTS);
+            if (line) {
+              generated.push(line.id);
+              this.enqueue(line, sqlite, now.getTime());
+              // Whatever did not fit stays unsaid rather than making this line
+              // run long; the next tick speaks it as its own short update.
+              this.pendingMoments = composed.deferredEvents.slice(0, MAX_DEFERRED_MOMENTS);
+            }
           }
         }
 
         const lullAt = (this.lastFeedEventAt ?? now.getTime()) + settings.lullMinutes * 60_000;
-        if (!this.lullAnnounced && now.getTime() >= lullAt
-          && broadcastGeneratedLinesSince(sqlite, new Date(now.getTime() - 60 * 60_000).toISOString()) < settings.maxPerHour) {
+        if (!this.lullAnnounced && now.getTime() >= lullAt) {
           const text = lullLine(sqlite);
           if (text) {
-            const line = this.generatedLine(text, 'lull', [], now, sqlite);
-            generated.push(line.id);
-            this.enqueue(line, sqlite, now.getTime());
-            this.lullAnnounced = true;
+            const line = this.generatedLine(text, 'lull', [], now, sqlite, [], settings.maxPerHour);
+            if (line) {
+              generated.push(line.id);
+              this.enqueue(line, sqlite, now.getTime());
+              this.lullAnnounced = true;
+            }
           }
         }
       }

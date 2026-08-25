@@ -11,6 +11,7 @@ import {
 } from '@/lib/mcp/o8-webview-composites';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
 import { buildPrepareComposerTargetScript } from '@/lib/mcp/o8-webview-composer-target';
+import { O8_WEBVIEW_ASYNC_EVAL_GUARD } from '@/lib/mcp/o8-webview-async-eval-guard';
 
 type TextContent = { type: 'text'; text: string };
 type ImageContent = { type: 'image'; data: string; mimeType: string };
@@ -199,7 +200,7 @@ function looksLikeObjectLiteralExpression(trimmed: string): boolean {
   return depth === 0;
 }
 
-function wrapEvalCode(userCode: string): string {
+export function wrapEvalCode(userCode: string): string {
   const trimmed = userCode.trim();
   // Run the user code via indirect eval — `(0, eval)(code)` evaluates in the
   // global scope AND returns the completion value of the last statement,
@@ -239,6 +240,8 @@ function wrapEvalCode(userCode: string): string {
       },
     });
   }
+
+${O8_WEBVIEW_ASYNC_EVAL_GUARD}
 
   // Probe JSON serializability. JSON.stringify on a top-level non-serializable
   // (function, undefined) returns undefined; on a property with such a value

@@ -1,9 +1,9 @@
 {
   "schema": "o8/test-classification/v1",
   "generatedBy": "node scripts/classify-tests.mjs --write",
-  "totalTests": 836,
-  "hermeticTests": 541,
-  "resourceOwningTests": 295,
+  "totalTests": 848,
+  "hermeticTests": 551,
+  "resourceOwningTests": 297,
   "resourceOwning": [
     {
       "path": "src/app/api/leases/route.test.ts",
@@ -86,6 +86,13 @@
       "path": "src/components/desktop/workspace-terminal/WorkspaceTerminalPanels.test.ts",
       "reasons": [
         "terminal-tool"
+      ]
+    },
+    {
+      "path": "src/lib/broadcast/hourly-cap.integration.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal"
       ]
     },
     {
@@ -407,6 +414,12 @@
       "path": "src/lib/runtime/owned-surface-interrupt.test.ts",
       "reasons": [
         "process-signal"
+      ]
+    },
+    {
+      "path": "src/lib/runtimes/claude-code-status.test.ts",
+      "reasons": [
+        "terminal-tool"
       ]
     },
     {
@@ -1773,7 +1786,7 @@
       "path": "tests/release-preflight.test.ts",
       "reasons": [
         "git-cli",
-        "terminal-tool"
+        "native-build"
       ]
     },
     {

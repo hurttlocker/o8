@@ -46,10 +46,14 @@ describe('sentry — dormant without a DSN', () => {
     }
   });
 
-  it('resolveSentryConfig reports dormant with production defaults + a boolean founder', () => {
+  it('resolveSentryConfig reports dormant, tagged development, with a boolean founder', () => {
+    // This asserted `production` while the value was a hardcoded constant --
+    // the premise #1679 removed. An unpackaged local stack is a development
+    // environment, and saying so is the point: dogfooding noise must not share
+    // a bucket with real user crashes.
     const cfg = resolveSentryConfig();
     expect(cfg.dsn).toBe('');
-    expect(cfg.environment).toBe('production');
+    expect(cfg.environment).toBe('development');
     expect(cfg.enabled).toBe(false); // reporting requires an explicit opt-in
     expect(typeof cfg.founder).toBe('boolean');
     expect(cfg.release.length).toBeGreaterThan(0);

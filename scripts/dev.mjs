@@ -107,24 +107,38 @@ async function all() {
   remember(next.pid, 'dev:next-wrapper');
   remember(ws.pid, 'dev:ws-wrapper');
 
-  const stop = (signal) => {
+  const signalChildren = (signal) => {
     for (const child of [next, ws]) {
       try {
         child.kill(signal);
       } catch {}
     }
   };
-  process.once('SIGINT', () => stop('SIGINT'));
-  process.once('SIGTERM', () => stop('SIGTERM'));
 
+  // Ctrl-C used to exit here the moment a wrapper died, before either wrapper
+  // had reaped its own `next dev` / `tsx ws-server` grandchild -- so 47120 and
+  // 47125 stayed bound and the pid file kept entries for processes we never
+  // waited on. Route every exit path through cleanup(), the same pass
+  // `dev:cleanup` runs, so the ports are free and the pid file is accurate by
+  // the time the shell comes back (#1678).
   let exiting = false;
+  const shutdown = async (signal, code) => {
+    if (exiting) return;
+    exiting = true;
+    signalChildren(signal);
+    await cleanup();
+    process.exit(code ?? 0);
+  };
+
+  process.once('SIGINT', () => { void shutdown('SIGINT'); });
+  process.once('SIGTERM', () => { void shutdown('SIGTERM'); });
+
   for (const child of [next, ws]) {
-    child.on('exit', (code) => {
+    child.on('exit', (code, signal) => {
       forget(child.pid);
-      if (exiting) return;
-      exiting = true;
-      stop('SIGTERM');
-      process.exit(code ?? 0);
+      // A signal exit reports a null code. Preserve that failure instead of
+      // turning an unexpectedly killed wrapper into a successful dev command.
+      void shutdown('SIGTERM', code ?? (signal ? 1 : 0));
     });
   }
 }

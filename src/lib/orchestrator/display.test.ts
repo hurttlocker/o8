@@ -22,6 +22,19 @@ describe('runtimeDisplayLabel', () => {
 });
 
 describe('resolved model labels', () => {
+  it('renders the runtime alone when no model is known (#1869)', () => {
+    // The claude-code adapter used to substitute the bare string 'claude' for
+    // an unknown model. It is not a model id -- the registry has claude-opus-5,
+    // claude-sonnet-5 -- so the surface printed a model that does not exist,
+    // indistinguishable from a real selection. `model` is optional precisely so
+    // absent can be said honestly.
+    expect(runtimeModelDisplayLabel('claude-code', undefined)).toBe('Claude Code');
+    expect(runtimeModelDisplayLabel('claude-code', null)).toBe('Claude Code');
+    expect(runtimeModelDisplayLabel('claude-code', '   ')).toBe('Claude Code');
+    // What the fabricated fallback used to render:
+    expect(runtimeModelDisplayLabel('claude-code', 'claude')).toBe('Claude Code · claude');
+  });
+
   it('renders the runtime and resolved model together', () => {
     expect(runtimeModelDisplayLabel('opencode', 'ox-alpha')).toBe('OpenCode 2 · ox-alpha');
     expect(packetRuntimeModelDisplayLabel({
