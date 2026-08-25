@@ -16,7 +16,11 @@ import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, rmSync 
 import { tmpdir } from 'node:os';
 import { listCortexTmuxSessions } from '@/lib/terminal/tmux';
 import { getDataDir } from '@/lib/data-dir-migration';
-import type { ManagedRunRecord, ManagedRunStatus } from './types';
+import type {
+  ManagedRunRecord,
+  ManagedRunStatus,
+  ManagedRunTerminationReceipt,
+} from './types';
 
 /** keep at most this many records (running always kept; oldest terminal dropped) */
 const RETENTION = 50;
@@ -129,6 +133,10 @@ export function registerManagedRun(rec: ManagedRunRecord): ManagedRunRecord {
   return rec;
 }
 
+export function findManagedRun(idOrSession: string): ManagedRunRecord | null {
+  return runs.get(idOrSession) ?? [...runs.values()].find((run) => run.id === idOrSession) ?? null;
+}
+
 /**
  * Mark a run finished. Idempotent + monotonic: a terminal record is never
  * re-stamped or downgraded; a real exit code may only UPGRADE a record whose
@@ -157,13 +165,19 @@ export function finishManagedRun(
 }
 
 /** Mark a run killed by the operator (only a still-running record transitions). */
-export function killManagedRun(session: string): ManagedRunRecord | null {
+export function killManagedRun(
+  session: string,
+  exitCode: number | null,
+  termination: ManagedRunTerminationReceipt,
+): ManagedRunRecord | null {
   const rec = runs.get(session) ?? null;
   if (!rec) return null;
-  if (rec.status === 'running') {
+  if (!termination.confirmedDead) return rec;
+  if (rec.status === 'running' || rec.status === 'gone') {
     rec.status = 'killed';
     rec.finishedAt = new Date().toISOString();
-    rec.exitCode = null;
+    rec.exitCode = exitCode;
+    rec.termination = termination;
     persist();
   }
   return rec;

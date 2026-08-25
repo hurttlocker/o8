@@ -69,7 +69,7 @@ Never copy these fallback ports into application code. The packaged shell choose
 
 `npx tsc --noEmit` is the mandatory local completion gate for every code change. `npm run typecheck` is the fuller variant: it clears generated Next types, runs `next typegen`, then runs TypeScript.
 
-Vitest is configured in `vitest.config.ts` with isolated data directories and no global test APIs. Run the smallest relevant test set during iteration (`npx vitest run <paths>`), then `npm test` when the change crosses domains, changes a shared contract, or needs the full suite. For Rust changes, run the relevant Cargo test from `src-tauri`, normally `cargo test --lib`.
+Vitest is configured in `vitest.config.ts` with isolated data directories and no global test APIs. Run the smallest relevant test set during iteration (`npx vitest run <paths>`), then `npm test` for the bounded-parallel hermetic completion gate. Use `npm run test:integration` for resource-owning Git, worktree, APFS, subprocess, listener, and native-build tests, or `npm run test:all` to run both lanes with causal summaries. For Rust changes, run the relevant Cargo test from `src-tauri`, normally `cargo test --lib`.
 
 Run `npm run rule-check -- --base=<ref>` for changed TypeScript/TSX. It enforces the changed-line UI/port/path invariants and the file ceiling. Run ESLint only on touched files (`npx eslint <changed files>`); repo-wide `npm run lint` carries known baseline debt and is not a normal packet completion gate.
 

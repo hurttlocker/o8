@@ -18,6 +18,26 @@ export type ManagedRunStatus = 'running' | 'finished' | 'killed' | 'gone';
 /** stream = CLI blocks + mirrors output to its own stdout; detach = fire-and-register. */
 export type ManagedRunMode = 'stream' | 'detach';
 
+export type ManagedRunTerminationSignal = 'SIGINT' | 'SIGTERM' | 'SIGKILL';
+
+export interface ManagedRunTerminationReceipt {
+  schema: 'o8/managed-run-termination/v1';
+  reason: 'stream_sigint' | 'operator_stop';
+  exitCode: number | null;
+  requestedAt: string;
+  confirmedAt: string | null;
+  confirmedDead: boolean;
+  alreadyDead: boolean;
+  steps: Array<{
+    signal: ManagedRunTerminationSignal;
+    groupSignaled: boolean;
+    signaledPids: number[];
+    sessionAliveAfter: boolean;
+    markerPidsAfter: number[];
+    errors: string[];
+  }>;
+}
+
 export interface ManagedRunRecord {
   /** short unique id; session is `cortex-run-<id>` */
   id: string;
@@ -38,9 +58,15 @@ export interface ManagedRunRecord {
   /** tmux pane pid — the ports route attributes a port by walking the listening
    *  process's ppid chain up to this pid (o8 owns the session). */
   panePid?: number | null;
+  /** POSIX group resolved from the live tmux pane; never trusted without that session. */
+  processGroupId?: number | null;
+  /** Unique inherited marker used to find descendants that escape the process group. */
+  processMarker?: string | null;
   mode: ManagedRunMode;
   startedAt: string;
   finishedAt?: string | null;
   exitCode?: number | null;
   status: ManagedRunStatus;
+  /** Durable only after the server proved both the tmux session and marked descendants dead. */
+  termination?: ManagedRunTerminationReceipt | null;
 }

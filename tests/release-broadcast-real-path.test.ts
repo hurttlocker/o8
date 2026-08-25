@@ -14,12 +14,15 @@ interface Fixture {
   broadcastPath: string;
   broadcastLog: string;
   cleanupLog: string;
+  stageLog: string;
+  envLog: string;
 }
 
 function makeFixture(options: {
   failAlwaysCleanup?: boolean;
   failMirror?: boolean;
   failNotary?: boolean;
+  failPreflight?: boolean;
 } = {}): Fixture {
   const root = mkdtempSync(join(tmpdir(), 'o8-release-broadcast-'));
   roots.push(root);
@@ -27,11 +30,21 @@ function makeFixture(options: {
   const broadcastPath = join(root, 'o8-stub.mjs');
   const broadcastLog = join(root, 'broadcast.jsonl');
   const cleanupLog = join(root, 'cleanup.log');
+  const stageLog = join(root, 'stages.log');
+  const envLog = join(root, 'env.json');
   const planPath = join(root, 'plan.json');
 
   writeFileSync(stageStub, `
 import { appendFileSync } from 'node:fs';
 const stage = process.argv[2];
+appendFileSync(process.env.O8_STUB_STAGE_LOG, stage + '\\n');
+if (stage === 'preflight' && process.env.O8_STUB_FAIL_PREFLIGHT === '1') process.exit(29);
+if (stage === 'build') {
+  appendFileSync(process.env.O8_STUB_ENV_LOG, JSON.stringify({
+    modern: process.env.O8_DATA_DIR,
+    legacy: process.env.CORTEX_IDE_DATA_DIR,
+  }));
+}
 if (stage.endsWith('cleanup')) {
   appendFileSync(process.env.O8_STUB_CLEANUP_LOG, stage + '\\n');
   if (process.env.O8_STUB_FAIL_CLEANUP === '1') process.exit(19);
@@ -64,6 +77,7 @@ if (process.env.O8_STUB_FAIL_BROADCAST === '1') process.exit(23);
     env,
   });
   writeFileSync(planPath, JSON.stringify({
+    preflight: command('preflight', options.failPreflight ? { O8_STUB_FAIL_PREFLIGHT: '1' } : {}),
     prepare: [],
     build: command('build'),
     notarize: command('notarize', options.failNotary ? { O8_STUB_FAIL_NOTARY: '1' } : {}),
@@ -76,7 +90,7 @@ if (process.env.O8_STUB_FAIL_BROADCAST === '1') process.exit(23);
     ],
   }));
 
-  return { root, planPath, broadcastPath, broadcastLog, cleanupLog };
+  return { root, planPath, broadcastPath, broadcastLog, cleanupLog, stageLog, envLog };
 }
 
 function runRelease(fixture: Fixture, failBroadcast = false) {
@@ -91,6 +105,8 @@ function runRelease(fixture: Fixture, failBroadcast = false) {
       O8_RELEASE_BROADCAST_TIMEOUT_MS: '1000',
       O8_TEST_BROADCAST_LOG: fixture.broadcastLog,
       O8_STUB_CLEANUP_LOG: fixture.cleanupLog,
+      O8_STUB_STAGE_LOG: fixture.stageLog,
+      O8_STUB_ENV_LOG: fixture.envLog,
       O8_STUB_FAIL_BROADCAST: failBroadcast ? '1' : '0',
     },
   });
@@ -127,6 +143,33 @@ afterEach(() => {
 });
 
 describe('release Broadcast milestones through the release entry point', () => {
+  it('runs preflight before build and isolates every build worker from operator state', () => {
+    const fixture = makeFixture();
+    const result = runRelease(fixture);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(readFileSync(fixture.stageLog, 'utf8').trim().split('\n').slice(0, 2))
+      .toEqual(['preflight', 'build']);
+    const buildEnv = JSON.parse(readFileSync(fixture.envLog, 'utf8')) as {
+      modern: string;
+      legacy: string;
+    };
+    expect(buildEnv.modern).toBe(buildEnv.legacy);
+    expect(buildEnv.modern).toContain('o8-release-build-data-');
+    expect(buildEnv.modern).not.toContain('/.o8');
+  });
+
+  it('does not start the build when preflight fails', () => {
+    const fixture = makeFixture({ failPreflight: true });
+    const result = runRelease(fixture);
+
+    expect(result.status).toBe(1);
+    expect(readFileSync(fixture.stageLog, 'utf8').trim().split('\n')).toEqual([
+      'preflight',
+      'always-cleanup',
+    ]);
+  });
+
   it('posts every successful stage once in order and clears the ship focus', async () => {
     const fixture = makeFixture();
     const result = runRelease(fixture);

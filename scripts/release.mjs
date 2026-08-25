@@ -240,7 +240,8 @@ try {
   execFileSync('git', ['ls-remote', '--exit-code', 'origin', `refs/tags/${tag}`], { stdio: 'pipe' });
   console.log(`[release] tag ${tag} present on origin`);
 } catch {
-  console.error(`[release] tag ${tag} is not on origin. run: git push --follow-tags`);
+  console.error(`[release] tag ${tag} is not on origin.`);
+  console.error(`[release] run: git push origin main refs/tags/${tag}:refs/tags/${tag}`);
   process.exit(1);
 }
 
@@ -258,7 +259,10 @@ const uploadArgs = [DMG, APP_TAR, APP_SIG, latestJsonPath, fixedJsonPath];
 // build (the 2026-07-08 #1499 incident). Refuse unless explicitly overridden.
 if (releaseExists && process.env.O8_RELEASE_CLOBBER !== '1') {
   console.error(`[release] REFUSING: ${tag} is already published. Did you forget to bump?`);
-  console.error('[release]   npm version patch && git push origin main --follow-tags && npm run ship');
+  console.error('[release]   npm version patch');
+  console.error('[release]   release_version=$(node -p "require(\'./package.json\').version")');
+  console.error('[release]   git push origin main "refs/tags/v${release_version}:refs/tags/v${release_version}"');
+  console.error('[release]   npm run ship');
   console.error('[release] To deliberately replace the existing release assets in place:');
   console.error('[release]   O8_RELEASE_CLOBBER=1 npm run ship');
   process.exit(1);

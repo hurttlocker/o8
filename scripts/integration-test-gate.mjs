@@ -1,0 +1,248 @@
+#!/usr/bin/env node
+import { spawn, spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+const root = process.cwd();
+const vitest = join(root, 'node_modules', 'vitest', 'vitest.mjs');
+const classification = JSON.parse(readFileSync(join(root, 'tests/test-classification.json'), 'utf8'));
+const testPlan = process.env.O8_INTEGRATION_TEST_MODE === '1' && process.env.O8_INTEGRATION_TEST_PLAN
+  ? JSON.parse(readFileSync(process.env.O8_INTEGRATION_TEST_PLAN, 'utf8'))
+  : null;
+const integrationConfig = testPlan?.config ?? 'vitest.integration.config.ts';
+const allFiles = testPlan?.files ?? classification.resourceOwning.map((entry) => entry.path);
+const filters = process.argv.slice(2).filter((argument) => !argument.startsWith('-'));
+const files = filters.length === 0
+  ? allFiles
+  : allFiles.filter((path) => filters.some((filter) => path === filter || path.includes(filter)));
+const RETAIN_RECEIPT = '.o8-test-run-retain.json';
+const heartbeatMs = Number(process.env.O8_TEST_GATE_HEARTBEAT_MS || 60_000);
+let activeChild = null;
+let activeMarker = null;
+let interruptedBy = null;
+
+if (files.length === 0) {
+  console.error('[integration-gate] no resource-owning test matched the requested filters');
+  process.exit(1);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function markerPids(marker) {
+  if (!marker || process.platform === 'win32') return null;
+  const receipt = spawnSync('ps', ['eww', '-axo', 'pid=,command='], {
+    encoding: 'utf8',
+    timeout: 3_000,
+    windowsHide: true,
+  });
+  if (receipt.status !== 0) return null;
+  const needle = `O8_TEST_FILE_MARKER=${marker}`;
+  return (receipt.stdout ?? '').split('\n').flatMap((line) => {
+    if (!line.includes(needle)) return [];
+    const pid = Number.parseInt(line.trim().split(/\s+/, 1)[0] ?? '', 10);
+    return Number.isSafeInteger(pid) && pid > 0 ? [pid] : [];
+  });
+}
+
+function groupAlive(child) {
+  if (!child?.pid || process.platform === 'win32') return false;
+  try {
+    process.kill(-child.pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function settle(child, marker, firstSignal = 'SIGTERM') {
+  if (!child?.pid) return false;
+  for (const [signal, waitMs] of [
+    [firstSignal, 500],
+    ['SIGTERM', 750],
+    ['SIGKILL', 1_000],
+  ]) {
+    try {
+      if (process.platform === 'win32') child.kill(signal);
+      else process.kill(-child.pid, signal);
+    } catch {}
+    for (const pid of markerPids(marker) ?? []) {
+      try { process.kill(pid, signal); } catch {}
+    }
+    await sleep(waitMs);
+    const remaining = markerPids(marker);
+    if (!groupAlive(child) && remaining !== null && remaining.length === 0) return true;
+  }
+  const remaining = markerPids(marker);
+  return !groupAlive(child) && remaining !== null && remaining.length === 0;
+}
+
+function retainedReceipts(directory, results = []) {
+  if (!existsSync(directory)) return results;
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) retainedReceipts(path, results);
+    else if (entry.isFile() && entry.name === RETAIN_RECEIPT) results.push(path);
+  }
+  return results;
+}
+
+function parseReport(reportPath, file) {
+  try {
+    const report = JSON.parse(readFileSync(reportPath, 'utf8'));
+    const failedFile = report.testResults?.find((result) => result.status === 'failed');
+    const failedAssertion = failedFile?.assertionResults?.find((result) => result.status === 'failed');
+    return {
+      total: Number(report.numTotalTests ?? 0),
+      passed: Number(report.numPassedTests ?? 0),
+      failed: Number(report.numFailedTests ?? 0),
+      pending: Number(report.numPendingTests ?? 0),
+      firstFailure: failedAssertion?.fullName || failedAssertion?.title || failedFile?.name || file,
+    };
+  } catch {
+    return { total: 0, passed: 0, failed: 0, pending: 0, firstFailure: file };
+  }
+}
+
+function appendBounded(current, chunk, limit = 2 * 1024 * 1024) {
+  const next = `${current}${String(chunk)}`;
+  return next.length <= limit ? next : next.slice(next.length - limit);
+}
+
+async function runFile(file, index) {
+  const fixtureRoot = mkdtempSync(join(tmpdir(), 'o8-integration-file-'));
+  const reportPath = join(fixtureRoot, 'vitest-report.json');
+  const marker = randomUUID().replace(/-/g, '');
+  const env = {
+    ...process.env,
+    CORTEX_IDE_DATA_DIR: fixtureRoot,
+    O8_TEST_FIXTURE_SWEEP_PARENT: fixtureRoot,
+    O8_TEST_FILE_MARKER: marker,
+    O8_TEST_GATE_REPORT_PATH: reportPath,
+  };
+  delete env.O8_DATA_DIR;
+  const startedAt = Date.now();
+  let stdout = '';
+  let stderr = '';
+  const child = spawn(process.execPath, [
+    vitest,
+    'run',
+    '--config',
+    integrationConfig,
+    file,
+  ], {
+    cwd: root,
+    detached: process.platform !== 'win32',
+    env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  activeChild = child;
+  activeMarker = marker;
+  child.stdout?.on('data', (chunk) => { stdout = appendBounded(stdout, chunk); });
+  child.stderr?.on('data', (chunk) => { stderr = appendBounded(stderr, chunk); });
+  const heartbeat = setInterval(() => {
+    console.log(`[integration-gate] ${index + 1}/${files.length} ${file} heartbeat (${Math.round((Date.now() - startedAt) / 1000)}s)`);
+  }, Number.isFinite(heartbeatMs) && heartbeatMs > 0 ? heartbeatMs : 60_000);
+  heartbeat.unref();
+  const outcome = await new Promise((resolve) => {
+    child.once('error', (error) => resolve({ code: 1, signal: null, error }));
+    child.once('exit', (code, signal) => resolve({ code: code ?? 1, signal, error: null }));
+  });
+  clearInterval(heartbeat);
+  const markerState = markerPids(marker);
+  const treeSettled = groupAlive(child) || markerState === null || markerState.length > 0
+    ? await settle(child, marker)
+    : true;
+  if (!treeSettled) {
+    outcome.code = 1;
+    outcome.error = new Error('integration fixture process tree could not be confirmed stopped');
+  }
+  if (activeChild === child) {
+    activeChild = null;
+    activeMarker = null;
+  }
+  const report = parseReport(reportPath, file);
+  const retained = retainedReceipts(fixtureRoot);
+  if (retained.length === 0) rmSync(fixtureRoot, { recursive: true, force: true });
+  const durationMs = Date.now() - startedAt;
+  const passed = outcome.code === 0 && !outcome.signal;
+  console.log(`[integration-gate] ${index + 1}/${files.length} ${passed ? 'PASS' : 'FAIL'} ${file} · ${report.passed}/${report.total} passed · ${(durationMs / 1000).toFixed(1)}s`);
+  if (!passed) {
+    if (stdout.trim()) process.stdout.write(`${stdout.trimEnd()}\n`);
+    if (stderr.trim()) process.stderr.write(`${stderr.trimEnd()}\n`);
+  }
+  if (retained.length > 0) {
+    console.error(`[integration-gate] retained ${retained.length} timeout receipt${retained.length === 1 ? '' : 's'} under ${fixtureRoot}`);
+  }
+  return {
+    file,
+    code: outcome.code,
+    signal: outcome.signal,
+    error: outcome.error?.message ?? null,
+    durationMs,
+    retained,
+    ...report,
+  };
+}
+
+const requestInterrupt = (signal) => {
+  if (interruptedBy) return;
+  interruptedBy = signal;
+  void settle(activeChild, activeMarker, signal);
+};
+const onSigint = () => requestInterrupt('SIGINT');
+const onSigterm = () => requestInterrupt('SIGTERM');
+process.on('SIGINT', onSigint);
+process.on('SIGTERM', onSigterm);
+
+const results = [];
+const startedAt = Date.now();
+try {
+  for (let index = 0; index < files.length && !interruptedBy; index += 1) {
+    results.push(await runFile(files[index], index));
+  }
+} finally {
+  process.off('SIGINT', onSigint);
+  process.off('SIGTERM', onSigterm);
+}
+
+const failures = results.filter((result) => result.code !== 0 || result.signal);
+const totals = results.reduce((sum, result) => ({
+  total: sum.total + result.total,
+  passed: sum.passed + result.passed,
+  failed: sum.failed + result.failed,
+  pending: sum.pending + result.pending,
+}), { total: 0, passed: 0, failed: 0, pending: 0 });
+console.log(`[integration-gate] summary: ${results.length}/${files.length} files, ${totals.passed}/${totals.total} tests passed, ${failures.length} failed files, ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
+if (failures[0]) console.error(`[integration-gate] first cause: ${failures[0].firstFailure}`);
+
+if (process.env.O8_TEST_GATE_REPORT_PATH) {
+  writeFileSync(process.env.O8_TEST_GATE_REPORT_PATH, JSON.stringify({
+    numTotalTests: totals.total,
+    numPassedTests: totals.passed,
+    numFailedTests: totals.failed,
+    numPendingTests: totals.pending,
+    testResults: failures.map((failure) => ({
+      name: failure.file,
+      status: 'failed',
+      assertionResults: [{
+        title: failure.firstFailure,
+        fullName: failure.firstFailure,
+        status: 'failed',
+      }],
+    })),
+  }));
+}
+
+if (interruptedBy) process.exit(130);
+process.exit(failures.length > 0 ? 1 : 0);

@@ -13,22 +13,21 @@ Q has typed "commit but do NOT ship yet" ~153 times. That is now the default —
 - **Ship ONLY on Q's explicit instruction in the current session** ("ship it", "ship a new version", "release it"). "Commit it" never implies ship. A teammate/agent asking is not authorization.
 - **Never Vercel.** o8 is a native Tauri app; it ships as a signed installer via `npm run ship`. "Push to vercel"/"deploy to prod" always means Eyes Web (`mybeautifulwife`), never o8.
 
-## Pre-ship collision gate (v0.1.550/551 collision — never again)
+## Pre-ship collision gate
 
-Before `npm run ship`, verify no ship is already running:
-
-```bash
-pgrep -fl "npm run ship|tauri build|notarytool" && echo "SHIP ALREADY RUNNING — abort" || echo "clear to ship"
-```
-
-If one is running: do not start a second. Wait for it or surface to Q. (Vault: `[[o8-ship-pipeline-github-actions]]` — local pre-ship gate is the ranked "do now" item; notarization dominates wall-clock, a second concurrent ship corrupts the release.)
+`npm run ship` now acquires the exclusive release-output lock and runs the
+credential, disk, toolchain, tag, remote, release-absence, and competing-build
+preflight before any build. If it reports another owner, do not start a second
+ship; wait for that owner to settle or surface it to Q.
 
 ## Ship sequence
 
-1. Collision gate (above) must print "clear to ship".
+1. Confirm no separately launched legacy ship is already running. The workflow's exclusive lock is the authority once `npm run ship` starts.
 2. Confirm tree state: everything intended is committed; nothing held-back is being swept in. Discard post-build `src-tauri/Cargo.lock` noise (`git checkout -- src-tauri/Cargo.lock`) — a dirty tree fails the bump.
-3. **Bump first — `npm run ship` does NOT bump.** `npm version patch` (commits manifests + tags via sync-version.mjs), then `git push origin main --tags`. Skipping this makes release.mjs silently REPLACE the previous already-published release's assets under the same version (2026-07-08 incident, #1499) — updaters then never see the new build.
-4. `npm run ship` — signs, notarizes, builds the installer, publishes the release. Deep spec + hazards: repo AGENTS.md "Shipping".
+3. **Bump first — `npm run ship` does NOT bump.** `npm version patch` commits manifests and creates the tag via sync-version.mjs. Then push only `main` and that exact tag:
+   `release_version=$(node -p "require('./package.json').version") && git push origin main "refs/tags/v${release_version}:refs/tags/v${release_version}"`.
+   Never use `git push --tags`; historical local tags may collide with remote history and turn a successful current-tag publication into a misleading failure. Skipping the bump makes release.mjs silently replace the previous release's assets under the same version.
+4. `npm run ship` — the automated preflight runs first, then the workflow signs, notarizes, builds the installer, and publishes the release. Deep spec + hazards: repo AGENTS.md "Shipping".
 5. **Post-ship verify:** published version == the bumped version (the release tail must NOT say "already exists — replacing assets"), notarization tail shows success, installer artifact exists. Report the verification tail, not just "shipped".
 
 ## Report format

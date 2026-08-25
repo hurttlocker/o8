@@ -29,7 +29,9 @@ cargo tauri dev          # Tauri native shell (from src-tauri/)
 # Verification (run before every commit)
 npx tsc --noEmit         # Quick type check (skips next typegen)
 npm run typecheck        # Full: rm types cache → next typegen → tsc --noEmit
-npm test                 # Vitest unit suite (middleware gate, locks, lane guards)
+npm test                 # Fast hermetic suite; bounded workers, no real Git/process fixtures
+npm run test:integration # Resource-owning suite; one disposable process per test file
+npm run test:all         # Both gates in order, with causal summaries and fixture receipts
 npm run test:watch       # Vitest watch mode
 cargo test --lib         # Rust unit tests (from src-tauri/ — utf8_head, Symon fs sandbox, speech_text)
 
@@ -40,7 +42,8 @@ npm run tauri:build:signed  # Signed (updater-ready) build, passes --features de
 
 # Ship (local release — bypasses CI, publishes to GitHub)
 npm version patch            # bump + sync all manifests + tag (runs sync-version.mjs hook)
-git push --follow-tags
+release_version=$(node -p "require('./package.json').version")
+git push origin main "refs/tags/v${release_version}:refs/tags/v${release_version}"
 npm run ship                 # build signed + upload via scripts/release.mjs
 
 # Lint
@@ -438,7 +441,9 @@ npm version patch              # 0.1.X → 0.1.X+1 — sync-version.mjs hook upd
                                # package.json + src-tauri/tauri.conf.json +
                                # src-tauri/Cargo.toml in a single commit, then
                                # npm creates the v0.1.X+1 tag
-git push --follow-tags          # send commit + tag to origin
+release_version=$(node -p "require('./package.json').version")
+git push origin main "refs/tags/v${release_version}:refs/tags/v${release_version}"
+                               # send main + only the current release tag
 npm run ship                    # cargo tauri build with signing key +
                                # dev-mcp-plugin feature, then
                                # scripts/release.mjs creates the GH release
@@ -449,7 +454,7 @@ The user's installed `o8.app` sees the new version via the `UpdateCard` componen
 
 ### Why local instead of CI
 
-GitHub Actions macOS runners failed because of billing. Local `npm run ship` takes ~2–4 min vs ~6 min CI and costs nothing. The CI release workflow (`.github/workflows/release.yml`) still exists as a **manual-only** fallback (`workflow_dispatch`) — the `v*` tag trigger was **removed** so every `git push --follow-tags` no longer spins billed macOS runners (`matrix.platform = macos-latest` ×2) that only failed on billing. Run it on-demand from the Actions tab if the local ship path is ever unavailable (e.g. CI macOS billing gets fixed). It uses the same `TAURI_SIGNING_PRIVATE_KEY` secret; `gh release create` in the local script errors cleanly when the release already exists (use `--clobber` to replace assets).
+GitHub Actions macOS runners failed because of billing, so the normal release runs locally. The CI release workflow (`.github/workflows/release.yml`) still exists as a **manual-only** fallback (`workflow_dispatch`) — the `v*` tag trigger was **removed** so publishing a release tag no longer starts billed macOS runners automatically. Push only the current tag; never use `git push --tags`, because unrelated historical tags can collide with remote history. Run the workflow on-demand from the Actions tab only when the local ship path is unavailable. It uses the same `TAURI_SIGNING_PRIVATE_KEY` secret; `gh release create` in the local script errors cleanly when the release already exists (use `--clobber` to replace assets).
 
 ### Signing
 

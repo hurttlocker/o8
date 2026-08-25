@@ -1,8 +1,10 @@
 import { spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
+import { acquireReleaseLock } from './ship-preflight.mjs';
 
 const WORKER_FLAG = '--broadcast-worker';
 const DEFAULT_POST_TIMEOUT_MS = 5_000;
@@ -147,6 +149,7 @@ export function createShipBroadcast(version) {
 
 function defaultShipPlan(root) {
   return {
+    preflight: { command: process.execPath, args: [join(root, 'scripts/ship-preflight.mjs')] },
     prepare: [{ command: process.execPath, args: [join(root, 'scripts/detach-stale-dmg.mjs')] }],
     build: { command: 'npm', args: ['run', 'tauri:build:nonotary'] },
     notarize: { command: 'npm', args: ['run', 'sign-and-notarize'] },
@@ -185,37 +188,118 @@ function mirrorOutput(stream, destination, onLine) {
   });
 }
 
-function runCommand(spec, root, onLine = () => {}) {
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function stopChildGroup(child, firstSignal = 'SIGTERM') {
+  if (!child?.pid) return;
+  const signal = (nextSignal) => {
+    try {
+      if (process.platform === 'win32') child.kill(nextSignal);
+      else process.kill(-child.pid, nextSignal);
+    } catch {}
+  };
+  signal(firstSignal);
+  await sleep(750);
+  signal('SIGTERM');
+  await sleep(750);
+  signal('SIGKILL');
+}
+
+function runCommand(spec, root, options = {}) {
+  const {
+    onLine = () => {},
+    baseEnv = process.env,
+    label = spec?.command ?? 'release command',
+  } = options;
   return new Promise((resolve, reject) => {
     if (!spec) {
       resolve();
       return;
     }
     let child;
+    let interruptedBy = null;
+    let settled = false;
+    const startedAt = Date.now();
+    const heartbeatMs = parsePositiveInteger(
+      process.env.O8_RELEASE_HEARTBEAT_MS,
+      60_000,
+    );
+    const heartbeat = setInterval(() => {
+      const elapsed = Math.round((Date.now() - startedAt) / 1000);
+      console.log(`[release] ${label} heartbeat (${elapsed}s)`);
+    }, heartbeatMs);
+    heartbeat.unref();
+    const removeSignalHandlers = () => {
+      process.off('SIGINT', onSigint);
+      process.off('SIGTERM', onSigterm);
+      clearInterval(heartbeat);
+    };
+    const onInterrupt = (signal) => {
+      if (interruptedBy) return;
+      interruptedBy = signal;
+      void stopChildGroup(child, signal);
+    };
+    const onSigint = () => onInterrupt('SIGINT');
+    const onSigterm = () => onInterrupt('SIGTERM');
     try {
       child = spawn(spec.command, spec.args ?? [], {
         cwd: root,
-        env: { ...process.env, ...(spec.env ?? {}) },
+        detached: process.platform !== 'win32',
+        env: { ...baseEnv, ...(spec.env ?? {}) },
         stdio: ['inherit', 'pipe', 'pipe'],
       });
     } catch (error) {
+      removeSignalHandlers();
       reject(error);
       return;
     }
+    process.once('SIGINT', onSigint);
+    process.once('SIGTERM', onSigterm);
+    console.log(`[release] ${label} started`);
     mirrorOutput(child.stdout, process.stdout, onLine);
     mirrorOutput(child.stderr, process.stderr, onLine);
-    child.once('error', reject);
-    child.once('exit', (code, signal) => {
-      if (code === 0) resolve();
-      else reject(new Error(
-        `${spec.command} exited ${signal ? `on ${signal}` : `with code ${code ?? 'unknown'}`}`,
-      ));
+    child.once('error', async (error) => {
+      if (settled) return;
+      settled = true;
+      await stopChildGroup(child);
+      removeSignalHandlers();
+      reject(error);
+    });
+    child.once('exit', async (code, signal) => {
+      if (settled) return;
+      settled = true;
+      if (code !== 0 || signal || interruptedBy) await stopChildGroup(child);
+      removeSignalHandlers();
+      const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
+      if (code === 0 && !signal && !interruptedBy) {
+        console.log(`[release] ${label} completed in ${seconds}s`);
+        resolve();
+      } else {
+        reject(new Error(
+          `${spec.command} exited ${interruptedBy ? `after ${interruptedBy}` : signal ? `on ${signal}` : `with code ${code ?? 'unknown'}`} after ${seconds}s`,
+        ));
+      }
     });
   });
 }
 
 export async function runShipWorkflow({ root, version }) {
   const plan = readShipPlan(root);
+  const lock = acquireReleaseLock();
+  let buildDataDir;
+  try {
+    buildDataDir = mkdtempSync(join(tmpdir(), 'o8-release-build-data-'));
+  } catch (error) {
+    lock.release();
+    throw error;
+  }
+  const workflowEnv = {
+    ...process.env,
+    O8_DATA_DIR: buildDataDir,
+    CORTEX_IDE_DATA_DIR: buildDataDir,
+  };
   const broadcast = createShipBroadcast(version);
   const emitted = new Set();
   let activeStage = 'pre-release cleanup';
@@ -240,21 +324,42 @@ export async function runShipWorkflow({ root, version }) {
   };
 
   try {
+    activeStage = 'preflight';
+    await runCommand(plan.preflight, root, {
+      baseEnv: workflowEnv,
+      label: 'preflight',
+    });
+
     for (const command of plan.prepare ?? []) {
-      await runCommand(command, root);
+      await runCommand(command, root, {
+        baseEnv: workflowEnv,
+        label: 'pre-release cleanup',
+      });
     }
 
     activeStage = 'build';
     broadcast.stage('Build started');
     emitted.add('Build started');
-    await runCommand(plan.build, root, consumeMilestone);
+    await runCommand(plan.build, root, {
+      onLine: consumeMilestone,
+      baseEnv: workflowEnv,
+      label: 'build',
+    });
 
     activeStage = 'app signing';
-    await runCommand(plan.notarize, root, consumeMilestone);
+    await runCommand(plan.notarize, root, {
+      onLine: consumeMilestone,
+      baseEnv: workflowEnv,
+      label: 'sign and notarize',
+    });
     for (const marker of DEFAULT_STAGE_MARKERS.slice(0, 3)) emitMilestone(marker);
 
     activeStage = 'release publication';
-    await runCommand(plan.publish, root, consumeMilestone);
+    await runCommand(plan.publish, root, {
+      onLine: consumeMilestone,
+      baseEnv: workflowEnv,
+      label: 'publish',
+    });
     emitMilestone(DEFAULT_STAGE_MARKERS[3]);
     if (mirrorFailed) {
       broadcast.failure('version publication');
@@ -272,12 +377,20 @@ export async function runShipWorkflow({ root, version }) {
     ];
     for (const command of cleanupCommands) {
       try {
-        await runCommand(command, root);
+        await runCommand(command, root, {
+          baseEnv: workflowEnv,
+          label: 'post-ship cleanup',
+        });
       } catch (error) {
         console.warn(`[release] post-ship cleanup skipped: ${error?.message ?? error}`);
       }
     }
     broadcast.close();
+    try {
+      rmSync(buildDataDir, { recursive: true, force: true });
+    } finally {
+      lock.release();
+    }
   }
 }
 

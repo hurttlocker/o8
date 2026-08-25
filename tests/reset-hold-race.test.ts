@@ -75,6 +75,17 @@ function packetFixture(overrides: Partial<OrchestratorPacket> = {}): Orchestrato
   };
 }
 
+async function waitForResetHold(packetId: string, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const state = readOrchestratorControlPlaneState();
+    const packet = state.packets.find((candidate) => candidate.id === packetId);
+    if (packet?.queueState === 'held') return { state, packet };
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`reset did not persist the initial hold within ${timeoutMs}ms`);
+}
+
 describe('#1527 — reset hold cannot be reverted by writes racing the cleanup window', () => {
   it('a hold landed mid-cleanup survives the reset write, and the reset hold lands on fresh state', async () => {
     const repoPath = join(dataDir, 'repo');
@@ -112,12 +123,8 @@ describe('#1527 — reset hold cannot be reverted by writes racing the cleanup w
     // Start the reset — it takes its entry snapshot (both packets 'queued'),
     // then blocks inside the cleanup phase on the held session interrupt.
     const resetPromise = resetPacket({ packetId: 'pkt-hold-race-a', reason: 'archive analysis packet' });
-    await new Promise((resolve) => setTimeout(resolve, 50));
-
-    const duringCleanup = readOrchestratorControlPlaneState();
-    const heldDuringCleanup = duringCleanup.packets.find((candidate) => candidate.id === 'pkt-hold-race-a');
-    expect(heldDuringCleanup).toMatchObject({ queueState: 'held' });
-    expect(getDispatchBlocker(heldDuringCleanup!, duringCleanup.packets)).toBe('Operator stopped');
+    const { state: duringCleanup, packet: heldDuringCleanup } = await waitForResetHold('pkt-hold-race-a');
+    expect(getDispatchBlocker(heldDuringCleanup, duringCleanup.packets)).toBe('Operator stopped');
 
     // The overlapping second reset: packet B's hold lands through the locked
     // seam while packet A's reset is still mid-cleanup.

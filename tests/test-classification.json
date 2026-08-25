@@ -1,0 +1,2187 @@
+{
+  "schema": "o8/test-classification/v1",
+  "generatedBy": "node scripts/classify-tests.mjs --write",
+  "totalTests": 836,
+  "hermeticTests": 541,
+  "resourceOwningTests": 295,
+  "resourceOwning": [
+    {
+      "path": "src/app/api/leases/route.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "process-signal"
+      ]
+    },
+    {
+      "path": "src/app/api/mobile/sync/route.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
+      "path": "src/app/api/panel/prs/route.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/app/api/setup/detect/route.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
+      "path": "src/app/api/v2/proxy/cli/route.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
+      "path": "src/app/api/worktrees/merge/route-real-path.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "src/app/api/worktrees/merge/route.test.ts",
+      "reasons": [
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "src/app/api/worktrees/retention-usage/route-path-selection.test.ts",
+      "reasons": [
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "src/app/api/worktrees/retention-usage/route.test.ts",
+      "reasons": [
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "src/app/api/worktrees/route-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "src/components/desktop/thoughts/mission-panel/PacketMetaRows.test.ts",
+      "reasons": [
+        "apfs-tool"
+      ]
+    },
+    {
+      "path": "src/components/desktop/workspace-terminal/WorkspaceTerminalPanels.test.ts",
+      "reasons": [
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "src/lib/codex/appserver-probe.test.ts",
+      "reasons": [
+        "executable-fixture"
+      ]
+    },
+    {
+      "path": "src/lib/codex/live-capacity.test.ts",
+      "reasons": [
+        "executable-fixture"
+      ]
+    },
+    {
+      "path": "src/lib/codex/multi-identity-sessions.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture"
+      ]
+    },
+    {
+      "path": "src/lib/codex/session-transforms.test.ts",
+      "reasons": [
+        "executable-fixture"
+      ]
+    },
+    {
+      "path": "src/lib/connect/machine-attach.test.ts",
+      "reasons": [
+        "network-listener"
+      ]
+    },
+    {
+      "path": "src/lib/connect/machine-full-surface.test.ts",
+      "reasons": [
+        "network-listener"
+      ]
+    },
+    {
+      "path": "src/lib/connect/machine-registry.test.ts",
+      "reasons": [
+        "network-listener"
+      ]
+    },
+    {
+      "path": "src/lib/db/v41-workspace-retirement-migration.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
+      "path": "src/lib/diff/base-resolution.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/inbox/card-copy.test.ts",
+      "reasons": [
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "src/lib/lane/codex-auto-review-verdict.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/lane/codex-orchestrator-lifecycle.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal"
+      ]
+    },
+    {
+      "path": "src/lib/lane/commands-stop.test.ts",
+      "reasons": [
+        "process-signal"
+      ]
+    },
+    {
+      "path": "src/lib/lane/durable-review-approval.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/lane/lane-diff-facts.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/lane/merge-gate-script.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
+      "path": "src/lib/lane/merge-gate.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/lane/no-changes-produced.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/lane/orchestrator-permission-lockout.test.ts",
+      "reasons": [
+        "process-signal"
+      ]
+    },
+    {
+      "path": "src/lib/lane/orchestrator-warm-config.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "process-signal"
+      ]
+    },
+    {
+      "path": "src/lib/lane/prune-gate.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "src/lib/lane/remote-fetch.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/lane/review-source.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/lane/single-orchestrator-policy.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "process-signal",
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "src/lib/lane/worktree-capture.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "git-cli",
+        "worktree"
+      ]
+    },
+    {
+      "path": "src/lib/lane/worktree-merge-git.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "worktree"
+      ]
+    },
+    {
+      "path": "src/lib/leases/resource-lease-service.test.ts",
+      "reasons": [
+        "apfs-tool"
+      ]
+    },
+    {
+      "path": "src/lib/mcp/operator-handlers/mission-inline-issues.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/mcp/operator-node22-locator.test.ts",
+      "reasons": [
+        "executable-fixture"
+      ]
+    },
+    {
+      "path": "src/lib/mobile/inbox.test.ts",
+      "reasons": [
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "src/lib/mobile/review-units.test.ts",
+      "reasons": [
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "src/lib/orchestrator/huddle-zero-diff.test.ts",
+      "reasons": [
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "src/lib/orchestrator/merged-by-ancestry.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/orchestrator/mission-registry-headless.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/orchestrator/mission-stop.test.ts",
+      "reasons": [
+        "process-signal"
+      ]
+    },
+    {
+      "path": "src/lib/orchestrator/operator-mission-service/create-mission-session-rules.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/orchestrator/operator-mission-service/inline-branch-names.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/orchestrator/operator-mission-service/mission-routing-lifecycle.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/orchestrator/outcome-ownership-prompt.test.ts",
+      "reasons": [
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/orchestrator/packet-prompt-alignment.test.ts",
+      "reasons": [
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/orchestrator/scheduling.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/orchestrator/storage-admission.test.ts",
+      "reasons": [
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "src/lib/orchestrator/workspace-lifecycle-lease.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal"
+      ]
+    },
+    {
+      "path": "src/lib/pi/owned.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal"
+      ]
+    },
+    {
+      "path": "src/lib/problems/service.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/runtime/actions-owned-surface.test.ts",
+      "reasons": [
+        "process-signal"
+      ]
+    },
+    {
+      "path": "src/lib/runtime/interrupt-escalation.test.ts",
+      "reasons": [
+        "process-signal",
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "src/lib/runtime/owned-surface-interrupt.test.ts",
+      "reasons": [
+        "process-signal"
+      ]
+    },
+    {
+      "path": "src/lib/runtimes/declarative-workers-smoke.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "process-signal"
+      ]
+    },
+    {
+      "path": "src/lib/runtimes/shared/auth-detect.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/runtimes/shared/cli-spawn.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
+      "path": "src/lib/runtimes/shared/opencode-service-skew.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/runtimes/shared/owned-session-index.test.ts",
+      "reasons": [
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "src/lib/runtimes/shared/owned-session/helpers.test.ts",
+      "reasons": [
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "src/lib/runtimes/shared/owned-session/identity-pinning.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/runtimes/shared/owned-session/sandbox.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "src/lib/runtimes/shared/owned-session/store-child-exit.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "process-signal",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "src/lib/runtimes/shared/owned-session/store-cold-resume.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/runtimes/shared/owned-session/store-completion-push.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener"
+      ]
+    },
+    {
+      "path": "src/lib/runtimes/shared/owned-session/store-orphan-sweep-guard.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal"
+      ]
+    },
+    {
+      "path": "src/lib/runtimes/shared/owned-session/store.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/runtimes/threecode-live.integration.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/settings/toml.test.ts",
+      "reasons": [
+        "apfs-tool"
+      ]
+    },
+    {
+      "path": "src/lib/supervisor/liveness-probes.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/supervisor/process-cwd-budget-real-path.test.ts",
+      "reasons": [
+        "real-path",
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "src/lib/supervisor/self-review-stall-guard.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/supervisor/silent-exit-detector.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/transcripts/no-git-repo-error.test.ts",
+      "reasons": [
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/workspace/dependency-image-device-authority.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "src/lib/workspace/dependency-image-lease-cleanup.test.ts",
+      "reasons": [
+        "apfs-tool"
+      ]
+    },
+    {
+      "path": "src/lib/workspace/dependency-install.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/workspace/dependency-materializer.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/workspace/exact-directory-purge.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal"
+      ]
+    },
+    {
+      "path": "src/lib/workspace/hibernator-restorer.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "process-signal",
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "src/lib/workspace/mutation-materialization-guard.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/workspace/park-resume-exclusion.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/workspace/process-cwd.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "src/lib/workspace/process-probes.test.ts",
+      "reasons": [
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "src/lib/workspace/process-quiescence.test.ts",
+      "reasons": [
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "src/lib/workspace/replacement-owned-launch.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/workspace/repo-setup.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/workspace/snapshot-generation-lifecycle.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/workspace/storage-verifier.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/workspace/worktree-exact.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "git-cli",
+        "process-signal",
+        "worktree",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "src/lib/worktree/activity-retention.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "src/lib/worktree/create-auto-prune-serialization.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "src/lib/worktree/dependency-install-manager-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "process-signal",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "src/lib/worktree/live-process-guard.test.ts",
+      "reasons": [
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "src/lib/worktree/manager-list-cost.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "src/lib/worktree/materialization-leaf-io.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "src/lib/worktree/metadata-store-lock.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal"
+      ]
+    },
+    {
+      "path": "src/lib/worktree/prelaunch-dependency-link.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "src/lib/worktree/prune-safety.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "git-cli",
+        "process-signal",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "src/lib/worktree/remove-locked-dir.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
+      "path": "src/lib/worktree/retention.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "src/lib/worktree/root-layout.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "src/lib/ws-server/next-fetch.test.ts",
+      "reasons": [
+        "network-listener"
+      ]
+    },
+    {
+      "path": "src/lib/ws-server/terminal-host.test.ts",
+      "reasons": [
+        "terminal-host"
+      ]
+    },
+    {
+      "path": "tests/activity-local-commits.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/agent-control-persisted-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/agent-control-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/agent-message-bus-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/apfs-dependency-image-real-path.test.ts",
+      "reasons": [
+        "apfs",
+        "apfs-tool",
+        "child-process",
+        "fixture-lifecycle",
+        "git-cli",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/apfs-dependency-images-default-real-path.test.ts",
+      "reasons": [
+        "apfs",
+        "apfs-tool",
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/apfs-dependency-materializer-integration-real-path.test.ts",
+      "reasons": [
+        "apfs",
+        "apfs-tool",
+        "child-process",
+        "git-cli",
+        "integration",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/apfs-dependency-mount-failure-modes-real-path.test.ts",
+      "reasons": [
+        "apfs",
+        "apfs-tool",
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/attempt-learnings-respawn.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/automation-repo-setup-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/bench-score-coding.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
+      "path": "tests/bench-score-governance.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
+      "path": "tests/bench/coding-arm-outcome.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/bench/coding-end-to-end-base.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/bench/coding-o8-cli.test.ts",
+      "reasons": [
+        "executable-fixture"
+      ]
+    },
+    {
+      "path": "tests/bench/coding.test.ts",
+      "reasons": [
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/blocked-reason-truth.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/brain-codex-settings-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/broadcast-director-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/broadcast-followup-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/broadcast-speaker-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/broadcast-voice-repetition-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/claude-code-codex-orchestrator-live-smoke.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/claude-code-codex-subscription-live-smoke.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/claude-code-dispatch-spawn.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/claude-code-gateway-live-smoke.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/claude-code-pretool-hook.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener"
+      ]
+    },
+    {
+      "path": "tests/claude-code-worker-profile-route.test.ts",
+      "reasons": [
+        "executable-fixture"
+      ]
+    },
+    {
+      "path": "tests/claude-code-worker-skill-isolation-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/cli-connect-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/cli-control-plane-contract.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener"
+      ]
+    },
+    {
+      "path": "tests/cli-huddle-report-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/cli-packet-target-parsing.test.ts",
+      "reasons": [
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/cli-resource-management-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/cli-slow-route-timeouts.test.ts",
+      "reasons": [
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/cli-usage-api-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/close-packet-unmerged-preservation-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/close-packet-unmerged.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "tests/cold-start-runtime-spawn-routes.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/completion-ledger-model-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/confirmed-kill.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal"
+      ]
+    },
+    {
+      "path": "tests/contract-coverage-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/cortex-launch-agent-readonly-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/crash-survival.test.ts",
+      "reasons": [
+        "process-signal",
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "tests/create-mission-declarative-runtimes.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/dash-gc.test.ts",
+      "reasons": [
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "tests/declarative-dispatch-worktree-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path",
+        "worktree",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/deepseek-harness-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/dependency-seed-lease-namespace-backcompat.test.ts",
+      "reasons": [
+        "apfs-tool"
+      ]
+    },
+    {
+      "path": "tests/direct-merge-canonical-repo-real-path.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/dispatch-mission-runtime-override-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/dispatch-stale-base-refresh.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/dogfood-loop-wrapper.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "process-signal"
+      ]
+    },
+    {
+      "path": "tests/fixed-reports-range.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/fixture-lifecycle-real-path.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "fixture-lifecycle",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/fixture-sweeper-ownership-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/fixtures/fixture-leak-failure.test.ts",
+      "reasons": [
+        "fixture-lifecycle"
+      ]
+    },
+    {
+      "path": "tests/fixtures/fixture-sweep-probe.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process"
+      ]
+    },
+    {
+      "path": "tests/fixtures/fixture-timeout-retention.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
+      "path": "tests/fixtures/managed-cleanup-crash-child.test.ts",
+      "reasons": [
+        "process-signal",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/fixtures/managed-create-pause-child.test.ts",
+      "reasons": [
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/fixtures/managed-creation-crash-child.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "process-signal",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/fixtures/worktree-side-merge-child.test.ts",
+      "reasons": [
+        "worktree"
+      ]
+    },
+    {
+      "path": "tests/github-device-consolidation.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
+      "path": "tests/github-issue-packet-scope-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/global-test-data-dir.test.ts",
+      "reasons": [
+        "fixture-lifecycle"
+      ]
+    },
+    {
+      "path": "tests/grok-acp-live-smoke.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/grok-acp-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/harness-cli-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/harness-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/heal-guard-salvaged-work.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/huddle-zero-diff-classification.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/implementation-notes-artifact-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/inline-packet-scope.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/lane-branch-binding-diff.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/lane-lifecycle-1810-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/lane-reaper-liveness.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "process-signal",
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "tests/lane-reaper-salvage.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/live-runtime-zero-diff-guard.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/managed-create-prune-concurrency-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/managed-creation-crash-recovery-real-path.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/managed-creation-retirement-refusal-real-path.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/managed-run-cli-interrupt-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path",
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "tests/managed-run-registry-termination.test.ts",
+      "reasons": [
+        "process-signal"
+      ]
+    },
+    {
+      "path": "tests/managed-run-termination-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path",
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "tests/managed-run-termination.test.ts",
+      "reasons": [
+        "process-signal",
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "tests/managed-worktree-admission-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/managed-worktree-creation-crash-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "process-signal",
+        "real-path",
+        "worktree",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/managed-worktree-descendant-swap-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree"
+      ]
+    },
+    {
+      "path": "tests/managed-worktree-direct-admission-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/managed-worktree-git-admin-boundary-real-path.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/managed-worktree-post-create-swap-real-path.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree"
+      ]
+    },
+    {
+      "path": "tests/managed-worktree-publish-refusal-real-path.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/managed-worktree-safety-hook-runtime.test.ts",
+      "reasons": [
+        "child-process",
+        "worktree"
+      ]
+    },
+    {
+      "path": "tests/mcp-project-install.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/mcp-source-boot.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal"
+      ]
+    },
+    {
+      "path": "tests/merge-checkout-coupling-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/merge-truth-ancestry-real-git.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-git"
+      ]
+    },
+    {
+      "path": "tests/metadata-store-root-boundary-real-path.test.ts",
+      "reasons": [
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/metered-packet-cap-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/mission-cost-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/mission-funnel-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/mission-status-storage-pressure-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/mission-stop-lock-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/mission-stop-receipt-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/mobile-activity-route.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/mobile-e2ee-required-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/native-bundle-immutability.test.ts",
+      "reasons": [
+        "native-build"
+      ]
+    },
+    {
+      "path": "tests/onboarding-runtime-picker-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/openclaw-spawn-preflight.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/opencode-standalone-resume.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/operator-defaults-mcp-routing.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/operator-mcp-review-merge-freshness-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/orchestrator-spawn-preflight.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/orchestrator-state-patch.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal"
+      ]
+    },
+    {
+      "path": "tests/owned-codex-transcript-ingestion-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/packet-explainer-priority-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/packet-launch-cross-process-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/panel-repos-clone.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/patch-id-aggregate-carry.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/persistent-terminals.test.ts",
+      "reasons": [
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "tests/principal-authz.test.ts",
+      "reasons": [
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "tests/product-telemetry-entry-points.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/product-telemetry-toggle.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
+      "path": "tests/project-delete.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/quota-fallback-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/real-path-seams.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/realtime-protocol-negotiation-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/realtime-session-history-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/release-broadcast-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/release-claim-branch-advanced-real-git.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-git"
+      ]
+    },
+    {
+      "path": "tests/release-preflight.test.ts",
+      "reasons": [
+        "git-cli",
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "tests/repo-package-manager-contract-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/repo-readiness-missing.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/repo-repoint-contract.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/repo-storage-pressure-policy-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/require-approval-merge-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/reset-lifecycle-retirement-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "tests/reset-packet-branch-cleanup.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/reset-stop-registry-truth.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/resource-lease-cli-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/review-head-integrity.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/review-stall-reconcile-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/runtime-action-idempotency-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/runtime-archive-generic-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/runtime-capacity-identity-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/runtime-launch-idempotency-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/script-shell-neutral.test.ts",
+      "reasons": [
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "tests/session-transform-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/shipped-dark-audit-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/sign-and-notarize.test.ts",
+      "reasons": [
+        "native-build"
+      ]
+    },
+    {
+      "path": "tests/spawned-agent-model-status-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/status-truth.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/steer-idempotency-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/steer-packet-owned-resume.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
+      "path": "tests/steered-review-settlement-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/steered-second-pass-rearm-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/stop-generation-guard.test.ts",
+      "reasons": [
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/storage-admission-association-chokepoint-real-path.test.ts",
+      "reasons": [
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/storage-admission-dispatch-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/storage-admission-lifecycle-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/storage-admission-rerun-release-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/symon-text-say-loop.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal"
+      ]
+    },
+    {
+      "path": "tests/terminal-worktree-sweep-preservation-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/test-classification.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "git-cli",
+        "network-listener"
+      ]
+    },
+    {
+      "path": "tests/test-gate-runner-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/thin-workspace-review-merge-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/typecheck-tsconfig-clean.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/validate-qa-cases.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
+      "path": "tests/voice-codex-realtime-route.test.ts",
+      "reasons": [
+        "executable-fixture"
+      ]
+    },
+    {
+      "path": "tests/worker-model-routing-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/worker-start-mode-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/worker-transcript-route-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/workspace-dependency-recipe-route-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/workspace-lifecycle-cross-process-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/workspace-park-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/workspace-parking-mode-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/worktree-diff-transport.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "worktree"
+      ]
+    },
+    {
+      "path": "tests/worktree-maintenance-sweep.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "worktree",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/worktree-reaper-pr-merge.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "terminal-tool",
+        "worktree",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/worktree-retention-usage-real-path.test.ts",
+      "reasons": [
+        "real-path",
+        "worktree"
+      ]
+    },
+    {
+      "path": "tests/worktree-root-write-guard.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "worktree",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/worktree-side-merge-real-git.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "process-signal",
+        "real-git",
+        "worktree",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/worktree-source-wip-isolation.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "git-cli",
+        "worktree"
+      ]
+    },
+    {
+      "path": "tests/ws-info-route.test.ts",
+      "reasons": [
+        "network-listener"
+      ]
+    }
+  ]
+}

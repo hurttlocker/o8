@@ -2,11 +2,12 @@ import { NextResponse } from 'next/server';
 import {
   registerManagedRun,
   finishManagedRun,
+  findManagedRun,
   killManagedRun,
   listManagedRuns,
 } from '@/lib/runtimes/managed-runs/registry';
-import { killTmuxSession } from '@/lib/terminal/tmux';
 import type { ManagedRunRecord } from '@/lib/runtimes/managed-runs/types';
+import { terminateManagedRun } from '@/lib/runtimes/managed-runs/termination';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { serverTimingHeaders } from '@/lib/performance/server-timing';
 
@@ -58,6 +59,9 @@ type RegisterBody = {
   mode?: string;
   startedAt?: string;
   exitCode?: number;
+  processGroupId?: number;
+  processMarker?: string;
+  reason?: 'stream_sigint' | 'operator_stop';
 };
 
 /** POST — register a run (default), finish one (action:'finish'), or kill one (action:'kill'). */
@@ -102,9 +106,21 @@ export async function POST(req: Request) {
     if (!session || !RUN_SESSION_RE.test(session)) {
       return NextResponse.json({ ok: false, error: 'invalid_session' }, { status: 400 });
     }
-    await killTmuxSession(session); // best-effort; no-op if already gone
-    const rec = killManagedRun(session);
-    return NextResponse.json({ ok: Boolean(rec), run: rec });
+    const target = findManagedRun(session);
+    if (!target) {
+      return NextResponse.json({ ok: false, error: 'run_not_found' }, { status: 404 });
+    }
+    const reason = body.reason === 'stream_sigint' ? 'stream_sigint' : 'operator_stop';
+    const exitCode = reason === 'stream_sigint' ? 130 : null;
+    const termination = await terminateManagedRun(target, { reason, exitCode });
+    if (!termination.confirmedDead) {
+      return NextResponse.json(
+        { ok: false, error: 'termination_unconfirmed', termination },
+        { status: 409 },
+      );
+    }
+    const rec = killManagedRun(session, exitCode, termination);
+    return NextResponse.json({ ok: Boolean(rec), run: rec, termination });
   }
 
   // ── register (default) ──
@@ -122,6 +138,13 @@ export async function POST(req: Request) {
   if (!RUN_SESSION_RE.test(body.session) || body.session !== `cortex-run-${body.id}`) {
     return NextResponse.json({ ok: false, error: 'invalid_session' }, { status: 400 });
   }
+  if (body.processMarker !== undefined && !/^[A-Za-z0-9._-]{1,160}$/.test(body.processMarker)) {
+    return NextResponse.json({ ok: false, error: 'invalid_process_marker' }, { status: 400 });
+  }
+  if (body.processGroupId !== undefined
+    && (!Number.isSafeInteger(body.processGroupId) || body.processGroupId <= 0)) {
+    return NextResponse.json({ ok: false, error: 'invalid_process_group' }, { status: 400 });
+  }
   if (body.command.length > MAX_FIELD || body.cwd.length > MAX_FIELD || (body.title?.length ?? 0) > MAX_FIELD || (body.startedAt?.length ?? 0) > MAX_FIELD) {
     return NextResponse.json({ ok: false, error: 'field_too_long' }, { status: 400 });
   }
@@ -136,6 +159,8 @@ export async function POST(req: Request) {
     packetId: body.packetId ?? null,
     laneId: body.laneId ?? null,
     panePid: typeof body.panePid === 'number' ? body.panePid : null,
+    processGroupId: typeof body.processGroupId === 'number' ? body.processGroupId : null,
+    processMarker: typeof body.processMarker === 'string' ? body.processMarker : null,
     mode: body.mode === 'detach' ? 'detach' : 'stream',
     startedAt: typeof body.startedAt === 'string' && body.startedAt.trim()
       ? body.startedAt.trim()
@@ -143,6 +168,7 @@ export async function POST(req: Request) {
     finishedAt: null,
     exitCode: null,
     status: 'running',
+    termination: null,
   };
   registerManagedRun(rec);
   return NextResponse.json({ ok: true, run: rec });

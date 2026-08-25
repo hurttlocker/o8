@@ -55,6 +55,101 @@ function sq(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
+function liveMarkerPids(marker: string): number[] | null {
+  if (process.platform === 'win32') return null;
+  try {
+    const output = execFileSync('ps', ['eww', '-axo', 'pid=,command='], {
+      encoding: 'utf8',
+      timeout: 3_000,
+      windowsHide: true,
+    });
+    const needle = `O8_MANAGED_RUN_MARKER=${marker}`;
+    return output.split('\n').flatMap((line) => {
+      if (!line.includes(needle)) return [];
+      const pid = Number.parseInt(line.trim().split(/\s+/, 1)[0] ?? '', 10);
+      return Number.isSafeInteger(pid) && pid > 0 ? [pid] : [];
+    });
+  } catch {
+    return null;
+  }
+}
+
+function liveSessionProcessGroup(session: string, expected: number | null): number | null {
+  if (process.platform === 'win32') return null;
+  try {
+    execFileSync('tmux', ['has-session', '-t', session], {
+      timeout: 3_000,
+      windowsHide: true,
+      stdio: 'ignore',
+    });
+    const panePid = Number.parseInt(execFileSync(
+      'tmux',
+      ['list-panes', '-t', session, '-F', '#{pane_pid}'],
+      { encoding: 'utf8', timeout: 3_000, windowsHide: true },
+    ).trim(), 10);
+    const group = Number.parseInt(execFileSync(
+      'ps',
+      ['-o', 'pgid=', '-p', String(panePid)],
+      { encoding: 'utf8', timeout: 2_000, windowsHide: true },
+    ).trim(), 10);
+    if (!Number.isSafeInteger(group) || group <= 0) return null;
+    return expected && expected !== group ? null : group;
+  } catch {
+    return null;
+  }
+}
+
+function ownedSessionAlive(session: string): boolean {
+  try {
+    execFileSync('tmux', ['has-session', '-t', session], {
+      timeout: 3_000,
+      windowsHide: true,
+      stdio: 'ignore',
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function settleOwnedSessionLocally(
+  session: string,
+  processGroupId: number | null,
+  marker: string,
+): Promise<boolean> {
+  for (const [signal, waitMs] of [
+    ['SIGINT', 800],
+    ['SIGTERM', 1_200],
+    ['SIGKILL', 1_500],
+  ] as const) {
+    const currentGroup = liveSessionProcessGroup(session, processGroupId);
+    if (currentGroup) {
+      try { process.kill(-currentGroup, signal); } catch {}
+    }
+    for (const pid of liveMarkerPids(marker) ?? []) {
+      try { process.kill(pid, signal); } catch {}
+    }
+    if (signal === 'SIGKILL') {
+      try {
+        execFileSync('tmux', ['kill-session', '-t', session], {
+          timeout: 5_000,
+          windowsHide: true,
+          stdio: 'ignore',
+        });
+      } catch {}
+    }
+    await sleep(waitMs);
+    const remaining = liveMarkerPids(marker);
+    if (!ownedSessionAlive(session)
+      && remaining !== null
+      && remaining.length === 0) return true;
+  }
+  const remaining = liveMarkerPids(marker);
+  return !ownedSessionAlive(session)
+    && remaining !== null
+    && remaining.length === 0;
+}
+
 /**
  * Pull the command out of the RAW argv. The shared dispatcher greedily eats the
  * first two bare tokens as command words, so it can't be trusted to carry an
@@ -202,6 +297,7 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
   const cwd = process.cwd();
   const cmd = command.join(' ');
   const startedAt = new Date().toISOString();
+  const processMarker = randomUUID().replace(/-/g, '');
 
   const base = join(tmpdir(), `o8-run-${id}`);
   const logFile = `${base}.log`;
@@ -221,6 +317,7 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) continue;
     envLines.push(`export ${k}=${sq(v)}`);
   }
+  envLines.push(`export O8_MANAGED_RUN_MARKER=${sq(processMarker)}`);
   // Mode 0600 — the env-file mirrors the agent's full environment (incl.
   // O8_API_TOKEN + provider keys) into shared /tmp; never world-readable.
   try { writeFileSync(envFile, envLines.join('\n'), { mode: 0o600 }); } catch { /* best effort */ }
@@ -271,6 +368,23 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
     }).trim();
     panePid = Number.parseInt(out, 10) || null;
   } catch { /* informational only */ }
+  let processGroupId: number | null = null;
+  if (panePid && process.platform !== 'win32') {
+    try {
+      const out = execFileSync('ps', ['-o', 'pgid=', '-p', String(panePid)], {
+        windowsHide: true,
+        encoding: 'utf8',
+        timeout: 2_000,
+      }).trim();
+      processGroupId = Number.parseInt(out, 10) || null;
+    } catch { /* the exact tmux session remains the ownership authority */ }
+  }
+
+  let interruptRequested = false;
+  const onSigint = () => {
+    interruptRequested = true;
+  };
+  if (!detach) process.on('SIGINT', onSigint);
 
   // Only stream mode needs the pane teed to a log file (we tail it to stdout).
   // Detached runs are watched by attaching the tmux session directly, so piping
@@ -285,7 +399,22 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
     } catch { /* without pipe-pane the operator can still attach live; agent just won't see stream */ }
   }
 
-  writeFileSync(goFile, ''); // release — command starts now
+  try {
+    writeFileSync(goFile, ''); // release — command starts now
+  } catch (error) {
+    process.off('SIGINT', onSigint);
+    try {
+      execFileSync('tmux', ['kill-session', '-t', session], {
+        windowsHide: true,
+        timeout: 5_000,
+        stdio: 'ignore',
+      });
+    } catch {}
+    for (const f of [logFile, exitFile, goFile, envFile]) {
+      try { rmSync(f, { force: true }); } catch {}
+    }
+    throw error;
+  }
 
   // Resolve packet context (best effort) and register the run (soft — a down
   // server must not block the agent's work; the command still runs in tmux).
@@ -304,7 +433,20 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
   try {
     const res = await apiFetch<{ ok?: boolean }>(cfg, '/api/panel/managed-runs', {
       method: 'POST',
-      body: { action: 'register', id, session, command: cmd, cwd, packetId, laneId, panePid, mode: detach ? 'detach' : 'stream', startedAt },
+      body: {
+        action: 'register',
+        id,
+        session,
+        command: cmd,
+        cwd,
+        packetId,
+        laneId,
+        panePid,
+        processGroupId,
+        processMarker,
+        mode: detach ? 'detach' : 'stream',
+        startedAt,
+      },
     });
     registered = Boolean(res.data?.ok);
   } catch { /* server unreachable — degrade to run-without-visibility */ }
@@ -367,46 +509,83 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
 
   let tick = 0;
   let exitFound = false;
-  for (;;) {
-    pump();
-    if (existsSync(exitFile)) { exitFound = true; break; }
-    tick += 1;
-    // Fallback (~2s): session vanished without writing exit = killed externally.
-    if (tick % 13 === 0 && !sessionAlive()) break;
-    await sleep(150);
-  }
-  // Final drain — pipe-pane's `cat` flushes async; keep pumping until the log
-  // stops growing (no new bytes across two reads) or a ~1.5s cap, so an agent
-  // parsing this captured stdout isn't truncated vs the live tmux view.
-  for (let i = 0, stable = 0; i < 30 && stable < 2; i += 1) {
-    const before = pos;
-    await sleep(50);
-    pump();
-    stable = pos === before ? stable + 1 : 0;
-  }
-
   let exitCode = 0;
-  if (exitFound) {
-    try {
-      const parsed = Number.parseInt(readFileSync(exitFile, 'utf-8').trim(), 10);
-      exitCode = Number.isNaN(parsed) ? 0 : parsed;
-    } catch { exitCode = 0; }
-  } else {
-    exitCode = 130; // session killed out from under us
-  }
-
-  if (fd !== null) { try { closeSync(fd); } catch { /* noop */ } }
-  for (const f of [logFile, exitFile, goFile, envFile]) {
-    try { rmSync(f, { force: true }); } catch { /* noop */ }
-  }
-
   try {
-    await apiFetch(cfg, '/api/panel/managed-runs', {
-      method: 'POST',
-      body: { action: 'finish', session, exitCode },
-    });
-  } catch { /* best effort */ }
+    for (;;) {
+      pump();
+      if (existsSync(exitFile)) { exitFound = true; break; }
+      if (interruptRequested) {
+        let confirmed = false;
+        if (registered) {
+          try {
+            const response = await apiFetch<{ ok?: boolean }>(cfg, '/api/panel/managed-runs', {
+              method: 'POST',
+              body: { action: 'kill', session, reason: 'stream_sigint', exitCode: 130 },
+            });
+            confirmed = response.data?.ok === true;
+          } catch { /* fall through to the same local ownership proof */ }
+        }
+        if (!confirmed) {
+          confirmed = await settleOwnedSessionLocally(session, processGroupId, processMarker);
+          if (confirmed && registered) {
+            try {
+              const response = await apiFetch<{ ok?: boolean }>(cfg, '/api/panel/managed-runs', {
+                method: 'POST',
+                body: { action: 'kill', session, reason: 'stream_sigint', exitCode: 130 },
+              });
+              confirmed = response.data?.ok === true;
+            } catch { /* local proof still prevents an orphan */ }
+          }
+        }
+        if (!confirmed) {
+          throw new CliError(
+            'run_interrupt_unsettled',
+            `Interrupted run ${session}, but its complete process tree could not be confirmed stopped.`,
+            EXIT.CONFLICT,
+          );
+        }
+        exitCode = 130;
+        break;
+      }
+      tick += 1;
+      // Fallback (~2s): session vanished without writing exit = killed externally.
+      if (tick % 13 === 0 && !sessionAlive()) break;
+      await sleep(150);
+    }
+    // Final drain — pipe-pane's `cat` flushes async; keep pumping until the log
+    // stops growing (no new bytes across two reads) or a ~1.5s cap, so an agent
+    // parsing this captured stdout isn't truncated vs the live tmux view.
+    for (let i = 0, stable = 0; i < 30 && stable < 2; i += 1) {
+      const before = pos;
+      await sleep(50);
+      pump();
+      stable = pos === before ? stable + 1 : 0;
+    }
 
-  process.stderr.write(`[o8 run] ${session} exited ${exitCode}\n`);
-  return exitCode;
+    if (!interruptRequested) {
+      if (exitFound) {
+        try {
+          const parsed = Number.parseInt(readFileSync(exitFile, 'utf-8').trim(), 10);
+          exitCode = Number.isNaN(parsed) ? 0 : parsed;
+        } catch { exitCode = 0; }
+      } else {
+        exitCode = 130; // session killed out from under us
+      }
+      try {
+        await apiFetch(cfg, '/api/panel/managed-runs', {
+          method: 'POST',
+          body: { action: 'finish', session, exitCode },
+        });
+      } catch { /* best effort */ }
+    }
+
+    process.stderr.write(`[o8 run] ${session} exited ${exitCode}\n`);
+    return exitCode;
+  } finally {
+    process.off('SIGINT', onSigint);
+    if (fd !== null) { try { closeSync(fd); } catch { /* noop */ } }
+    for (const f of [logFile, exitFile, goFile, envFile]) {
+      try { rmSync(f, { force: true }); } catch { /* noop */ }
+    }
+  }
 }
