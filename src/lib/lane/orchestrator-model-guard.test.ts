@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { MODEL_IDS } from '@/lib/models';
-import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
+import { ORCHESTRATOR_RUNTIMES, getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { modelBelongsToRuntime, resolveRuntimeOrchestratorModel } from './orchestrator-model-guard';
 
@@ -30,7 +30,7 @@ describe('modelBelongsToRuntime', () => {
     // cursor and opencode legitimately run models from more than one house. A
     // wrong constraint would block a valid selection.
     for (const runtimeId of ['cursor', 'opencode'] as OrchestratorRuntime[]) {
-      expect(ORCHESTRATOR_RUNTIMES[runtimeId].modelIdPattern).toBeUndefined();
+      expect(getRuntimeCapability(runtimeId).modelIdPattern).toBeUndefined();
       expect(modelBelongsToRuntime(MODEL_IDS.raw.anthropicClaudeOpus5, runtimeId)).toBe(true);
       expect(modelBelongsToRuntime(MODEL_IDS.raw.openAiGpt56Sol, runtimeId)).toBe(true);
     }
@@ -39,10 +39,11 @@ describe('modelBelongsToRuntime', () => {
   it('accepts every runtime default under its own pattern', () => {
     // A registry row that constrains itself out of its own default is a bug in
     // the row, and this is the assertion that catches it when #19 is added.
-    for (const [id, capability] of Object.entries(ORCHESTRATOR_RUNTIMES)) {
+    for (const id of Object.keys(ORCHESTRATOR_RUNTIMES) as OrchestratorRuntime[]) {
+      const capability = getRuntimeCapability(id);
       if (!capability.modelIdPattern || !capability.defaultModel) continue;
       expect(
-        modelBelongsToRuntime(capability.defaultModel, id as OrchestratorRuntime),
+        modelBelongsToRuntime(capability.defaultModel, id),
         `${id} rejects its own defaultModel ${capability.defaultModel}`,
       ).toBe(true);
     }
