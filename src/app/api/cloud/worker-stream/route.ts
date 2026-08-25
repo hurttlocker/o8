@@ -1,15 +1,13 @@
 /**
- * Cloud worker stream endpoint (issue #514 v0 scaffolding)
+ * Cloud worker stream endpoint
  *
  * Workers POST transcript chunks + lifecycle events to this endpoint:
  *   POST /api/cloud/worker-stream
  *   Authorization: Bearer <cwk_...>
- *   Body: { jobId: string, type: 'chunk'|'completed'|'errored', payload: ... }
+ *   Body: { jobId, workerId, leaseToken, type, payload }
  *
- * V0 is write-only persistence — chunks are accepted, job status transitions
- * are enforced (terminal states cannot regress), and subscribers (the
- * adapter's readTranscript path) will read from the durable log once the
- * worker CLI is shipped.
+ * Every accepted event is appended to SQLite in order. The worker identity
+ * and unexpired lease token gate output and terminal transitions.
  *
  * Why not use `/api/worker/event` which already exists?
  *   The existing /api/worker/* routes are bound to the push-based
@@ -21,7 +19,7 @@
 import { NextResponse } from 'next/server';
 import { buildErrorPayload } from '@/lib/api/error-format';
 import { verifyCloudWorkerKey } from '@/lib/cloud/worker-auth';
-import { getJob, setJobStatus } from '@/lib/cloud/job-queue';
+import { appendJobEvent } from '@/lib/cloud/job-queue';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -65,40 +63,51 @@ export async function POST(request: Request) {
   }
 
   const jobId = typeof body.jobId === 'string' ? body.jobId.trim() : '';
+  const leaseToken = typeof body.leaseToken === 'string' ? body.leaseToken.trim() : '';
+  const workerId = typeof body.workerId === 'string' && body.workerId.trim()
+    ? body.workerId.trim()
+    : auth.keyId;
   const type = body.type;
-  if (!jobId || !isStreamEventType(type) || !('payload' in body)) {
+  if (!jobId || !leaseToken || !isStreamEventType(type) || !('payload' in body)) {
     return badRequest('Invalid stream payload');
   }
 
   try {
-    const job = getJob(auth.teamId, jobId);
-    if (!job) {
+    const result = appendJobEvent({
+      teamId: auth.teamId,
+      jobId,
+      workerId,
+      leaseToken,
+      type,
+      payload: body.payload,
+    });
+    if (!result.accepted && result.reason === 'job_not_found') {
       // Either the job belongs to a different team or it was never enqueued.
       // Either way, from this worker's perspective it doesn't exist.
       return authErrorResponse(403, 'job_not_found_or_wrong_team');
     }
-
-    // TODO(#514-followup): persist the chunk to disk/DB so readTranscript can
-    // replay it. For v0 we accept the write and update lifecycle state only,
-    // which keeps the contract stable for the worker CLI without committing
-    // to a storage shape yet.
-    switch (type) {
-      case 'chunk':
-      case 'heartbeat':
-        // No-op persistence in v0. The worker CLI can start POSTing chunks
-        // now — they'll be accepted by the server, and the persistence layer
-        // is a separate issue that doesn't change this contract.
-        break;
-      case 'completed':
-        setJobStatus(auth.teamId, jobId, 'completed');
-        break;
-      case 'errored':
-        setJobStatus(auth.teamId, jobId, 'errored');
-        break;
+    if (!result.accepted) {
+      return NextResponse.json(
+        {
+          error: 'Cloud job lease rejected',
+          reason: result.reason,
+          status: result.job?.status,
+        },
+        { status: 409, headers: NO_STORE_HEADERS },
+      );
     }
 
     return NextResponse.json(
-      { ok: true, jobId, accepted: type },
+      {
+        ok: true,
+        jobId,
+        accepted: type,
+        eventId: result.eventId,
+        status: result.job.status,
+        leaseExpiresAt: result.job.leaseExpiresAt,
+        executionAttempts: result.job.executionAttempts,
+        maxAttempts: result.job.maxAttempts,
+      },
       { headers: NO_STORE_HEADERS },
     );
   } catch (error) {

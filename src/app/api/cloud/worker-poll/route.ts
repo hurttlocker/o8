@@ -1,13 +1,14 @@
 /**
- * Cloud worker long-poll endpoint (issue #514 v0 scaffolding)
+ * Cloud worker long-poll endpoint
  *
  * Workers hit this endpoint with a cursor:
  *   GET /api/cloud/worker-poll?cursor=0&workerId=<opaque>
  *   Authorization: Bearer <cwk_...>
  *
  * The server holds the request open up to `LONG_POLL_TIMEOUT_MS`. If a job is
- * available at or after the presented cursor, it responds with the job. If
- * the timeout fires first, it returns 204 so the worker can re-poll cheaply.
+ * available at or after the presented cursor, it atomically leases the job
+ * to this worker and returns the lease token. If the timeout fires first, it
+ * returns 204 so the worker can re-poll cheaply.
  *
  * Why a separate auth path from `/api/panel/*`?
  *   The panel middleware (src/middleware.ts) gates on loopback origin + the
@@ -21,13 +22,35 @@
 import { NextResponse } from 'next/server';
 import { buildErrorPayload } from '@/lib/api/error-format';
 import { verifyCloudWorkerKey } from '@/lib/cloud/worker-auth';
-import { claimNextJob, waitForJob } from '@/lib/cloud/job-queue';
+import {
+  claimNextJob,
+  cloudJobLeaseMs,
+  type CloudJob,
+  waitForJob,
+} from '@/lib/cloud/job-queue';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const NO_STORE_HEADERS = { 'Cache-Control': 'no-store' };
 const LONG_POLL_TIMEOUT_MS = 25_000;
+
+function jobPayload(job: CloudJob) {
+  return {
+    id: job.id,
+    cursor: job.cursor,
+    launch: job.launch,
+    enqueuedAt: job.enqueuedAt,
+    claimedAt: job.claimedAt,
+    claimedBy: job.claimedBy,
+    leaseToken: job.leaseToken,
+    leaseExpiresAt: job.leaseExpiresAt,
+    claimCount: job.claimCount,
+    leaseRecoveryCount: job.leaseRecoveryCount,
+    executionAttempts: job.executionAttempts,
+    maxAttempts: job.maxAttempts,
+  };
+}
 
 function authErrorResponse(status: 401 | 403, reason: string) {
   return NextResponse.json(
@@ -45,8 +68,12 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const cursorParam = url.searchParams.get('cursor');
   const workerIdParam = url.searchParams.get('workerId');
+  const waitMsParam = url.searchParams.get('waitMs');
   const cursor = cursorParam ? Number.parseInt(cursorParam, 10) : 0;
   const workerId = workerIdParam?.trim() || auth.keyId;
+  const waitMs = waitMsParam == null
+    ? LONG_POLL_TIMEOUT_MS
+    : Number.parseInt(waitMsParam, 10);
 
   if (!Number.isFinite(cursor) || cursor < 0) {
     return NextResponse.json(
@@ -54,21 +81,20 @@ export async function GET(request: Request) {
       { status: 400, headers: NO_STORE_HEADERS },
     );
   }
+  if (!Number.isFinite(waitMs) || waitMs < 0 || waitMs > LONG_POLL_TIMEOUT_MS) {
+    return NextResponse.json(
+      { error: 'Invalid waitMs', reason: 'wait_out_of_range' },
+      { status: 400, headers: NO_STORE_HEADERS },
+    );
+  }
 
   try {
+    const leaseMs = cloudJobLeaseMs();
     // Fast path — job already waiting for this cursor.
-    const immediate = claimNextJob(auth.teamId, cursor, workerId);
+    const immediate = claimNextJob(auth.teamId, cursor, workerId, leaseMs);
     if (immediate) {
       return NextResponse.json(
-        {
-          job: {
-            id: immediate.id,
-            cursor: immediate.cursor,
-            launch: immediate.launch,
-            enqueuedAt: immediate.enqueuedAt,
-            claimedAt: immediate.claimedAt,
-          },
-        },
+        { job: jobPayload(immediate) },
         { headers: NO_STORE_HEADERS },
       );
     }
@@ -76,7 +102,7 @@ export async function GET(request: Request) {
     // Slow path — long-poll until a job arrives or timeout.
     // The AbortSignal on the incoming request fires when the worker hangs
     // up early; in that case we cancel the waiter so we don't leak memory.
-    const waiter = waitForJob(auth.teamId, LONG_POLL_TIMEOUT_MS);
+    const waiter = waitForJob(auth.teamId, cursor, workerId, waitMs, leaseMs);
     const abort = request.signal;
     if (abort.aborted) {
       waiter.cancel();
@@ -91,15 +117,7 @@ export async function GET(request: Request) {
         return new NextResponse(null, { status: 204, headers: NO_STORE_HEADERS });
       }
       return NextResponse.json(
-        {
-          job: {
-            id: job.id,
-            cursor: job.cursor,
-            launch: job.launch,
-            enqueuedAt: job.enqueuedAt,
-            claimedAt: job.claimedAt,
-          },
-        },
+        { job: jobPayload(job) },
         { headers: NO_STORE_HEADERS },
       );
     } finally {

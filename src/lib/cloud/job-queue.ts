@@ -1,170 +1,165 @@
 /**
- * Cloud runtime — in-memory job queue (issue #514 v0 scaffolding)
+ * Durable cloud job queue.
  *
- * Workers connect to the o8 backend over outbound-only HTTPS and long-poll
- * this queue for the next job. Each worker tracks its own cursor so N workers
- * can ride the same team queue without dropping jobs.
- *
- * This is deliberately in-memory for v0. Persistence lands in the follow-up
- * that promotes the config-file model to SQLite. See #514 follow-up note.
+ * SQLite owns accepted work, claims, leases, retry accounting, and output.
+ * Process memory is used only to wake local long-poll requests early; periodic
+ * polling keeps waiters correct when another process enqueues the job.
  */
+import { getSqlite } from '@/lib/db';
 import type { LaunchOptions } from '@/lib/runtimes/types';
+import type {
+  AppendCloudJobEventInput,
+  AppendCloudJobEventResult,
+  CloudJob,
+  CloudJobEvent,
+} from './job-store';
+import { SqliteCloudJobStore } from './sqlite-job-store';
 
-/**
- * A cloud job is the server-side view of one `launch()` call that has been
- * accepted but not yet picked up by a worker (or is still streaming back).
- */
-export interface CloudJob {
-  id: string;
-  teamId: string;
-  /** Monotonic cursor assigned at enqueue time. Workers use this to resume. */
-  cursor: number;
-  launch: LaunchOptions;
-  enqueuedAt: string;
-  /** When a worker actually started processing the job. */
-  claimedAt?: string;
-  claimedBy?: string;
-  /** Final status — populated from /api/cloud/worker-stream 'completed'/'errored'. */
-  status: 'pending' | 'claimed' | 'completed' | 'errored' | 'cancelled';
+export type { CloudJob, CloudJobEvent } from './job-store';
+export { CloudPacketActiveError } from './job-store';
+
+const DEFAULT_LEASE_MS = 30_000;
+const MIN_LEASE_MS = 100;
+const MAX_LEASE_MS = 10 * 60_000;
+const DURABLE_POLL_INTERVAL_MS = 100;
+
+const store = new SqliteCloudJobStore();
+const teamWaiters = new Map<string, Set<() => void>>();
+const activeWaitCancels = new Set<() => void>();
+
+export function cloudJobLeaseMs(): number {
+  const configured = Number.parseInt(process.env.O8_CLOUD_JOB_LEASE_MS ?? '', 10);
+  if (!Number.isFinite(configured)) return DEFAULT_LEASE_MS;
+  return Math.min(Math.max(configured, MIN_LEASE_MS), MAX_LEASE_MS);
 }
 
-interface TeamQueueState {
-  nextCursor: number;
-  jobs: CloudJob[];
-  waiters: Array<(job: CloudJob | null) => void>;
+function notifyTeam(teamId: string): void {
+  for (const wake of teamWaiters.get(teamId) ?? []) wake();
 }
 
-const teamQueues = new Map<string, TeamQueueState>();
-
-function getOrCreateTeam(teamId: string): TeamQueueState {
-  let state = teamQueues.get(teamId);
-  if (!state) {
-    state = { nextCursor: 1, jobs: [], waiters: [] };
-    teamQueues.set(teamId, state);
-  }
-  return state;
-}
-
-/**
- * Enqueue a job and wake up any waiting long-poll connections.
- * Returns the CloudJob handle — caller holds the id to reference later.
- */
+/** Persist the accepted request before returning its dispatch receipt. */
 export function enqueueCloudJob(teamId: string, jobId: string, launch: LaunchOptions): CloudJob {
-  const state = getOrCreateTeam(teamId);
-  const job: CloudJob = {
+  const job = store.enqueue({
     id: jobId,
     teamId,
-    cursor: state.nextCursor,
+    idempotencyKey: launch.clientMutationId?.trim() || jobId,
+    packetId: launch.packetId,
     launch,
-    enqueuedAt: new Date().toISOString(),
-    status: 'pending',
-  };
-  state.nextCursor += 1;
-  state.jobs.push(job);
-
-  // Hand the job to the first waiter that hasn't already been resolved.
-  while (state.waiters.length > 0) {
-    const waiter = state.waiters.shift();
-    if (waiter) {
-      waiter(job);
-      job.status = 'claimed';
-      job.claimedAt = new Date().toISOString();
-      break;
-    }
-  }
-
+  });
+  notifyTeam(teamId);
   return job;
 }
 
-/**
- * Claim the next pending job for a team at or after the worker's cursor.
- * Returns `null` if nothing is pending.
- */
-export function claimNextJob(teamId: string, cursor: number, workerId: string): CloudJob | null {
-  const state = teamQueues.get(teamId);
-  if (!state) return null;
-
-  const pending = state.jobs.find((j) => j.status === 'pending' && j.cursor >= cursor);
-  if (!pending) return null;
-
-  pending.status = 'claimed';
-  pending.claimedAt = new Date().toISOString();
-  pending.claimedBy = workerId;
-  return pending;
+/** Atomically claim one pending job and issue a worker-bound lease token. */
+export function claimNextJob(
+  teamId: string,
+  cursor: number,
+  workerId: string,
+  leaseMs: number = cloudJobLeaseMs(),
+): CloudJob | null {
+  return store.claimNext({ teamId, cursor, workerId, leaseMs });
 }
 
 /**
- * Register a long-poll waiter. Resolves either when a new job arrives for the
- * team or when the timeout fires (handler will then return 204).
- *
- * The returned disposer lets the route handler cancel the wait cleanly if the
- * client disconnects.
+ * Wait for a durable claim. The interval is required because enqueue and poll
+ * can run in separate app processes, where an in-memory wake signal cannot
+ * cross the process boundary.
  */
 export function waitForJob(
   teamId: string,
+  cursor: number,
+  workerId: string,
   timeoutMs: number,
+  leaseMs: number = cloudJobLeaseMs(),
 ): { promise: Promise<CloudJob | null>; cancel: () => void } {
-  const state = getOrCreateTeam(teamId);
   let settled = false;
-  let resolveFn: (job: CloudJob | null) => void = () => {};
+  let finish: (job: CloudJob | null) => void = () => {};
+  let cancelWait: () => void = () => {};
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  let interval: ReturnType<typeof setInterval> | null = null;
+  const waiters = teamWaiters.get(teamId) ?? new Set<() => void>();
+  teamWaiters.set(teamId, waiters);
+
+  const cleanup = () => {
+    waiters.delete(check);
+    activeWaitCancels.delete(cancelWait);
+    if (waiters.size === 0) teamWaiters.delete(teamId);
+    if (timeout) clearTimeout(timeout);
+    if (interval) clearInterval(interval);
+    timeout = null;
+    interval = null;
+  };
+  const settle = (job: CloudJob | null) => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    finish(job);
+  };
+  const check = () => {
+    if (settled) return;
+    try {
+      const job = claimNextJob(teamId, cursor, workerId, leaseMs);
+      if (job) settle(job);
+    } catch (error) {
+      console.error('[cloud-job-queue] durable poll failed:', error);
+    }
+  };
 
   const promise = new Promise<CloudJob | null>((resolve) => {
-    resolveFn = (job) => {
-      if (settled) return;
-      settled = true;
-      resolve(job);
-    };
-    state.waiters.push(resolveFn);
-
-    setTimeout(() => {
-      if (settled) return;
-      // Remove ourselves from the waiter list so we don't pin memory.
-      const idx = state.waiters.indexOf(resolveFn);
-      if (idx >= 0) state.waiters.splice(idx, 1);
-      resolveFn(null);
-    }, timeoutMs);
+    finish = resolve;
+    waiters.add(check);
+    interval = setInterval(check, DURABLE_POLL_INTERVAL_MS);
+    timeout = setTimeout(() => settle(null), Math.max(0, timeoutMs));
+    check();
   });
 
-  return {
-    promise,
-    cancel: () => {
-      if (settled) return;
-      const idx = state.waiters.indexOf(resolveFn);
-      if (idx >= 0) state.waiters.splice(idx, 1);
-      resolveFn(null);
-    },
-  };
+  cancelWait = () => settle(null);
+  if (!settled) activeWaitCancels.add(cancelWait);
+  return { promise, cancel: cancelWait };
 }
 
-/**
- * Get a job by id (for status/stream/interrupt lookups).
- */
+export function appendJobEvent(
+  input: Omit<AppendCloudJobEventInput, 'leaseMs'> & { leaseMs?: number },
+): AppendCloudJobEventResult {
+  return store.appendEvent({ ...input, leaseMs: input.leaseMs ?? cloudJobLeaseMs() });
+}
+
+export function recoverExpiredJobLeases(teamId: string, nowMs?: number): number {
+  const recovered = store.recoverExpiredLeases(teamId, nowMs);
+  if (recovered > 0) notifyTeam(teamId);
+  return recovered;
+}
+
 export function getJob(teamId: string, jobId: string): CloudJob | undefined {
-  return teamQueues.get(teamId)?.jobs.find((j) => j.id === jobId);
+  return store.get(teamId, jobId);
 }
 
-/**
- * Mark a job as completed, errored, or cancelled. Idempotent for terminal
- * states — once a job is terminal it cannot regress.
- */
-export function setJobStatus(
+export function listJobs(teamId: string, limit?: number): CloudJob[] {
+  return store.list(teamId, limit);
+}
+
+export function readJobEvents(
   teamId: string,
   jobId: string,
-  status: 'completed' | 'errored' | 'cancelled',
-): CloudJob | undefined {
-  const job = getJob(teamId, jobId);
-  if (!job) return undefined;
-  if (job.status === 'completed' || job.status === 'errored' || job.status === 'cancelled') {
-    return job;
-  }
-  job.status = status;
+  sinceId?: number,
+  limit?: number,
+): CloudJobEvent[] {
+  return store.readEvents(teamId, jobId, sinceId, limit);
+}
+
+export function cancelJob(teamId: string, jobId: string): CloudJob | undefined {
+  const job = store.cancel(teamId, jobId);
+  if (job) notifyTeam(teamId);
   return job;
 }
 
-/**
- * Test-only reset. Not exported through a public path, but the job queue
- * keeps module-level state and tests will need a door eventually.
- */
-export function __resetCloudQueueForTests() {
-  teamQueues.clear();
+/** Test-only reset for the durable queue and local waiter registry. */
+export function __resetCloudQueueForTests(): void {
+  for (const cancel of [...activeWaitCancels]) cancel();
+  activeWaitCancels.clear();
+  teamWaiters.clear();
+  getSqlite().transaction(() => {
+    getSqlite().prepare('DELETE FROM cloud_job_events').run();
+    getSqlite().prepare('DELETE FROM cloud_jobs').run();
+  })();
 }

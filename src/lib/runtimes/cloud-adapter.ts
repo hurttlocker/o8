@@ -1,21 +1,20 @@
 /**
- * Cloud Runtime Adapter (issue #514 v0 scaffolding)
+ * Cloud Runtime Adapter
  *
  * Workers run on customer infra (Kubernetes, VMs, bare metal) and open
  * outbound-only HTTPS to the o8 backend. They long-poll the job queue, pick
  * up dispatched jobs, and stream transcripts + diffs back over POST.
  *
  * This is the o8-side surface that makes the runtime dispatchable. The
- * worker CLI is a separate ship — until it exists, the unimplemented methods
- * throw with a TODO pointing at that follow-up issue.
+ * worker CLI is a separate ship. Resume and diff retrieval stay unavailable
+ * until that client can service them.
  *
  * Parallel to `codex.ts` and `claude-code.ts`. Registered under runtime id
  * `cloud` via `src/lib/runtimes/index.ts`.
  *
- * Design choice: the in-memory job queue is team-scoped so N workers in a
+ * Design choice: the durable job queue is team-scoped so N workers in a
  * pool can share a queue and each tracks its own cursor. This matches the
- * Cursor self-hosted shape (10 workers/user, 50 workers/team). Full
- * persistence + DB tables lands in a follow-up issue.
+ * Cursor self-hosted shape (10 workers/user, 50 workers/team).
  */
 import type {
   AgentRuntime,
@@ -26,24 +25,23 @@ import type {
   RuntimeSession,
   RuntimeTranscriptEntry,
 } from './types';
-import { enqueueCloudJob, getJob, setJobStatus } from '@/lib/cloud/job-queue';
+import {
+  cancelJob,
+  CloudPacketActiveError,
+  enqueueCloudJob,
+  getJob,
+  listJobs,
+  readJobEvents,
+} from '@/lib/cloud/job-queue';
 import { randomUUID } from 'node:crypto';
 
 /**
- * Until the worker CLI ships, only launch() is functionally enqueuing jobs —
- * everything downstream of that (resume, readTranscript, reviewDiffs) needs
- * the worker streaming protocol to be wired end-to-end. Capabilities reflect
- * that honestly so the UI doesn't render controls that silently no-op.
- *
- * The moment worker-stream + worker-poll are carrying live traffic from a
- * real worker CLI, flip these to true alongside the method implementation.
+ * Launch, discovery, transcript replay, and interrupt use the durable job
+ * ledger. Resume and diff retrieval remain unavailable.
  */
 const capabilities: RuntimeCapabilities = {
-  // Discovery is `true` because `discoverSessions` is legitimately implemented
-  // as "inspect the in-memory queue" — that's a real capability even in v0.
   discover: true,
-  // Transcript/review stubbed until worker-stream is wired end-to-end.
-  readTranscript: false,
+  readTranscript: true,
   launch: true,
   resume: false,
   interrupt: true,
@@ -79,6 +77,30 @@ function jobIdFromSessionKey(sessionKey: string): string {
   return sessionKey.startsWith(prefix) ? sessionKey.slice(prefix.length) : sessionKey;
 }
 
+function textFromPayload(payload: unknown, fallback: string): string {
+  if (typeof payload === 'string') return payload;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return fallback;
+  const record = payload as Record<string, unknown>;
+  for (const key of ['text', 'message', 'output', 'result', 'error', 'reason']) {
+    if (typeof record[key] === 'string' && record[key]) return record[key];
+  }
+  return fallback;
+}
+
+function eventText(type: string, payload: unknown): string {
+  switch (type) {
+    case 'accepted': return 'Cloud job accepted.';
+    case 'claimed': return 'Cloud worker claimed the job.';
+    case 'chunk': return textFromPayload(payload, 'Cloud worker emitted output.');
+    case 'heartbeat': return 'Cloud worker lease renewed.';
+    case 'completed': return textFromPayload(payload, 'Cloud job completed.');
+    case 'errored': return `Error: ${textFromPayload(payload, 'Cloud worker execution failed.')}`;
+    case 'lease_recovered': return 'Cloud worker lease expired; the job returned to the queue.';
+    case 'cancelled': return 'Cloud job cancelled.';
+    default: return `Cloud job event: ${type}`;
+  }
+}
+
 export const cloudRuntime: AgentRuntime = {
   id: RUNTIME_ID,
   displayName: 'Cloud Worker',
@@ -86,33 +108,54 @@ export const cloudRuntime: AgentRuntime = {
 
   // ── Discovery ──
   //
-  // Returns jobs currently in-flight on the team queue. This is useful even
-  // in v0: the operator can see what has been dispatched but not yet picked
-  // up by a worker, which is a real signal that workers are offline.
+  // Includes terminal jobs so status remains readable after a restart.
   async discoverSessions(): Promise<RuntimeSession[]> {
-    // For v0 we don't walk all teams — there's only one team scope on-desktop.
-    // Follow-up issue wires per-team discovery when the Settings UI exposes
-    // multi-team config.
-    //
-    // The queue module doesn't export a "list all jobs" helper on purpose —
-    // we'd rather have that function live here than leak queue internals.
-    // When DB persistence lands the equivalent query goes to SQLite.
-    return [];
+    return listJobs(DEFAULT_TEAM_ID).map((job) => ({
+      sessionKey: sessionKeyFor(job.id),
+      runtimeId: RUNTIME_ID,
+      displayName: job.packetId
+        ? `Cloud packet ${job.packetId}`
+        : `Cloud job ${job.id.slice(0, 8)}`,
+      cwd: job.launch.cwd,
+      status: job.status === 'leased'
+        ? 'running'
+        : job.status === 'pending'
+          ? 'waiting'
+          : job.status === 'completed'
+            ? 'completed'
+            : 'failed',
+      ownership: 'provider',
+      sessionCapabilities: {
+        canSendInput: false,
+        canInterrupt: job.status === 'pending' || job.status === 'leased',
+        canReviewDiffs: false,
+      },
+      lastActivityAt: new Date(job.updatedAt),
+      initialTask: job.launch.prompt,
+      model: job.launch.model,
+    }));
   },
 
   // ── Transcript ──
   async readTranscript(
     sessionKey: string,
-    _sinceId?: string,
-    _limit?: number,
+    sinceId?: string,
+    limit?: number,
   ): Promise<RuntimeTranscriptEntry[]> {
-    // TODO(#514-followup): read from the persisted stream written by
-    // /api/cloud/worker-stream. Until workers actually POST chunks, there's
-    // nothing durable to read.
-    void sessionKey;
-    void _sinceId;
-    void _limit;
-    notImplemented('readTranscript');
+    const jobId = jobIdFromSessionKey(sessionKey);
+    const parsedSince = sinceId ? Number.parseInt(sinceId, 10) : 0;
+    return readJobEvents(
+      DEFAULT_TEAM_ID,
+      jobId,
+      Number.isFinite(parsedSince) ? parsedSince : 0,
+      limit,
+    ).map((event) => ({
+      id: String(event.id),
+      role: event.type === 'chunk' ? 'assistant' : event.type === 'errored' ? 'tool' : 'system',
+      text: eventText(event.type, event.payload),
+      timestamp: new Date(event.createdAt),
+      type: 'message',
+    }));
   },
 
   // ── Lifecycle ──
@@ -121,9 +164,7 @@ export const cloudRuntime: AgentRuntime = {
    * Enqueue a job onto the team queue. The next long-poll tick on
    * /api/cloud/worker-poll will hand it to an idle worker.
    *
-   * This method is fully implemented in v0 because it doesn't need the
-   * worker CLI — it's just "put a LaunchOptions into the queue." The worker
-   * is what makes the job actually run.
+   * The SQLite insert commits before this method reports success.
    */
   async launch(opts: LaunchOptions): Promise<RuntimeActionResult> {
     try {
@@ -135,6 +176,13 @@ export const cloudRuntime: AgentRuntime = {
         sessionKey: sessionKeyFor(job.id),
       };
     } catch (error) {
+      if (error instanceof CloudPacketActiveError) {
+        return {
+          ok: false,
+          note: error.message,
+          sessionKey: sessionKeyFor(error.activeJob.id),
+        };
+      }
       return {
         ok: false,
         note: error instanceof Error ? error.message : String(error),
@@ -166,7 +214,7 @@ export const cloudRuntime: AgentRuntime = {
         sessionKey,
       };
     }
-    setJobStatus(DEFAULT_TEAM_ID, jobId, 'cancelled');
+    cancelJob(DEFAULT_TEAM_ID, jobId);
     // TODO(#514-followup): when the worker CLI is wired, push an abort signal
     // through the stream endpoint so in-flight work stops immediately.
     return {
