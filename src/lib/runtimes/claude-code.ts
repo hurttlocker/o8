@@ -875,7 +875,11 @@ export const claudeCodeRuntime: AgentRuntime = {
         },
         lastActivityAt: meta.lastModified,
         initialTask: meta.firstUserMessage,
-        model: meta.model ?? 'claude',
+        // `model` is optional on RuntimeSession and the display helper renders
+        // the runtime alone when it is absent. Substituting the bare string
+        // 'claude' -- which is not a model id -- printed "Claude Code · claude"
+        // as though a real model had been selected (#1869).
+        model: meta.model,
         contextUsedPercent: meta.contextUsedPercent,
         tmuxSession: getRuntimeTerminalSession(`claude-code:${meta.sessionId}`)?.sessionName ?? undefined,
       };
@@ -967,7 +971,9 @@ export const claudeCodeRuntime: AgentRuntime = {
         },
         lastActivityAt: new Date(),
         initialTask: firstUserMessage ?? `Live Claude Code session (PID ${proc.pid})`,
-        model: model ?? 'claude',
+        // Same as the historical path above: absent is a supported state, and
+        // a fabricated model id is not (#1869).
+        model,
         contextUsedPercent,
         tmuxSession: realSessionId ? (getRuntimeTerminalSession(`claude-code:${realSessionId}`)?.sessionName ?? undefined) : undefined,
       });
