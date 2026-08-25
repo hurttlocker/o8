@@ -6,10 +6,14 @@ import { pathToFileURL } from 'node:url';
 
 export const POSTSHIP_GENERATED_DIRS = [
   '.next',
-  'out',
   'src-tauri/target',
   'src-tauri/sidecars/speech-local/.build',
 ];
+
+// `out` is the verified release artifact, not disposable scratch space. Its
+// provenance manifest and checksummed outputs let the next exact-match
+// prebuild reuse the web and speech artifacts instead of rebuilding them.
+export const POSTSHIP_PRESERVED_DIRS = ['out'];
 
 function isInside(root, candidate) {
   const relative = path.relative(root, candidate);

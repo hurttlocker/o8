@@ -1,4 +1,5 @@
 export const POSTSHIP_GENERATED_DIRS: string[];
+export const POSTSHIP_PRESERVED_DIRS: string[];
 
 export interface PostshipCleanupResult {
   removed: string[];

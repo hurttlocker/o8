@@ -3,7 +3,15 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { cleanupPostshipOutputs, POSTSHIP_GENERATED_DIRS } from '../scripts/postship-cleanup.mjs';
+import {
+  cleanupPostshipOutputs,
+  POSTSHIP_GENERATED_DIRS,
+  POSTSHIP_PRESERVED_DIRS,
+} from '../scripts/postship-cleanup.mjs';
+import {
+  verifyReleaseArtifactManifest,
+  writeReleaseArtifactManifest,
+} from '../scripts/lib/release-artifacts.mjs';
 
 const cleanupRoots: string[] = [];
 
@@ -26,13 +34,45 @@ describe('postship generated-output cleanup', () => {
       await mkdir(path.join(root, relativePath), { recursive: true });
       await writeFile(path.join(root, relativePath, 'generated.bin'), 'generated', 'utf8');
     }
+    for (const relativePath of POSTSHIP_PRESERVED_DIRS) {
+      await mkdir(path.join(root, relativePath), { recursive: true });
+      await writeFile(path.join(root, relativePath, 'verified.bin'), 'verified', 'utf8');
+    }
     await mkdir(path.join(root, 'src-tauri', 'keep-me'), { recursive: true });
     await writeFile(path.join(root, 'src-tauri', 'keep-me', 'source.txt'), 'keep', 'utf8');
 
     const result = await cleanupPostshipOutputs(root);
 
     expect(result).toEqual({ removed: POSTSHIP_GENERATED_DIRS, skipped: [], refused: [] });
+    for (const relativePath of POSTSHIP_PRESERVED_DIRS) {
+      await expect(readFile(path.join(root, relativePath, 'verified.bin'), 'utf8')).resolves.toBe('verified');
+    }
     await expect(readFile(path.join(root, 'src-tauri', 'keep-me', 'source.txt'), 'utf8')).resolves.toBe('keep');
+  });
+
+  it('keeps the verified release artifact reusable after cleanup', async () => {
+    const root = await makeRepoRoot();
+    for (const relativePath of POSTSHIP_GENERATED_DIRS) {
+      await mkdir(path.join(root, relativePath), { recursive: true });
+      await writeFile(path.join(root, relativePath, 'generated.bin'), 'generated', 'utf8');
+    }
+    await mkdir(path.join(root, 'out', 'frontend'), { recursive: true });
+    await mkdir(path.join(root, 'src-tauri', 'helpers'), { recursive: true });
+    await writeFile(path.join(root, 'out', 'frontend', 'index.html'), '<h1>verified</h1>', 'utf8');
+    for (const name of [
+      'speech-local',
+      'speech-local-aarch64-apple-darwin',
+      'speech-local-x86_64-apple-darwin',
+    ]) {
+      await writeFile(path.join(root, 'src-tauri', 'helpers', name), `binary-${name}`, 'utf8');
+    }
+    const recipe = { recipeSha256: 'recipe-a', head: 'head-a', version: '0.1.999' };
+    writeReleaseArtifactManifest(root, recipe);
+
+    const result = await cleanupPostshipOutputs(root);
+
+    expect(result).toEqual({ removed: POSTSHIP_GENERATED_DIRS, skipped: [], refused: [] });
+    expect(verifyReleaseArtifactManifest(root, recipe)).toMatchObject({ reusable: true });
   });
 
   it('refuses a generated-directory symlink without touching its destination', async () => {
