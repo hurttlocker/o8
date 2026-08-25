@@ -229,7 +229,7 @@ commands:
   browser close        end this scope's engine (headless Chrome) session
   broadcast say|focus|post|token   speak on demand, set focus, post narration, or manage spectator bearers
   msg send|inbox       send a durable agent message or read this session's inbox
-  presence join        register an external session in this repo (--as <agent>)
+  presence list|join   list live sessions or register an explicit external name
   cortex observe       propose a worker observation for the orchestrator
   lane touches         active lanes touching a path or packet diff
   lease acquire <resource> [--ttl 2h] [--wait]  acquire or queue for a named resource

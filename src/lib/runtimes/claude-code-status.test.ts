@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { inferHistoricalClaudeStatus, probeLiveClaudeProcesses } from './claude-code';
+import { createLiveClaudeSessionMatcher } from './claude-code-process-probe';
 
 const NOW = Date.parse('2026-08-24T12:00:00.000Z');
 const ago = (ms: number) => ({ lastModified: new Date(NOW - ms), hasErrorInTail: false });
@@ -47,5 +48,41 @@ describe('probeLiveClaudeProcesses', () => {
 
     expect(result).toEqual({ processes: [{ pid: 4312 }], probed: false });
     expect(inferHistoricalClaudeStatus(ago(10_000), result.probed, NOW)).toBe('reviewing');
+  });
+
+  it('binds a live process to the exact session registry identity', async () => {
+    const result = await probeLiveClaudeProcesses({
+      execFile: async (file) => {
+        if (file === 'bash') return { stdout: '4312 claude --dangerously-skip-permissions\n' };
+        return { stdout: 'p4312\nfcwd\nn/tmp/project\nf0\nn/dev/ttys004\n' };
+      },
+      readSessionState: async (pid) => ({
+        cwd: `/tmp/project-${pid}`,
+        sessionId: 'session-exact-4312',
+      }),
+    });
+
+    expect(result).toEqual({
+      processes: [{
+        pid: 4312,
+        cwd: '/tmp/project-4312',
+        sessionId: 'session-exact-4312',
+        tty: '/dev/ttys004',
+      }],
+      probed: true,
+    });
+  });
+});
+
+describe('createLiveClaudeSessionMatcher', () => {
+  it('prefers exact session IDs and spends fallback CWD slots once', () => {
+    const matches = createLiveClaudeSessionMatcher([
+      { pid: 1, cwd: '/tmp/repo', sessionId: 'exact-session' },
+      { pid: 2, cwd: '/tmp/repo' },
+    ]);
+
+    expect(matches('exact-session', '/tmp/repo')).toBe(true);
+    expect(matches('fallback-session', '/tmp/repo')).toBe(true);
+    expect(matches('extra-session', '/tmp/repo')).toBe(false);
   });
 });

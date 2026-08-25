@@ -49,14 +49,6 @@ function positionals(rest: string[], valueFlags: ReadonlySet<string>): string[] 
   return values;
 }
 
-function agentId(): string {
-  return process.env.CLAUDE_CODE_SESSION_ID
-    || process.env.CODEX_THREAD_ID
-    || process.env.CODEX_SESSION_ID
-    || process.env.TERM_SESSION_ID
-    || `pid-${process.ppid || process.pid}`;
-}
-
 function runtimeLabel(): string {
   const explicit = process.env.AI_AGENT?.trim();
   if (explicit) return explicit.split('_')[0] || explicit;
@@ -65,11 +57,25 @@ function runtimeLabel(): string {
   return 'poll';
 }
 
-function sessionKey(): string | null {
+function rawSessionKey(): string | null {
   return process.env.CLAUDE_CODE_SESSION_ID
     || process.env.CODEX_THREAD_ID
     || process.env.CODEX_SESSION_ID
     || null;
+}
+
+function sessionKey(): string | null {
+  const raw = rawSessionKey();
+  if (!raw) return null;
+  const runtime = runtimeLabel();
+  return raw.startsWith(`${runtime}:`) ? raw : `${runtime}:${raw}`;
+}
+
+function agentId(): string {
+  const session = sessionKey();
+  if (session) return `session:${session}`;
+  const terminal = process.env.TERM_SESSION_ID?.trim();
+  return terminal ? `terminal:${terminal}` : `process:${process.ppid || process.pid}`;
 }
 
 function gitOutput(args: string[]): string {
@@ -103,17 +109,59 @@ function rejectUnknownFlags(rest: string[], allowed: ReadonlySet<string>): void 
   if (unknown) throw new CliError('unknown_flag', `Unknown flag: ${unknown}`, EXIT.INVALID_ARGS);
 }
 
+async function joinCurrentSession(
+  context: { repo: string; worktreePath: string },
+): Promise<void> {
+  const cfg = resolveConfig();
+  await apiFetch(cfg, '/api/agents/presence', {
+    method: 'POST',
+    body: {
+      automatic: true,
+      agentId: agentId(),
+      repo: context.repo,
+      worktreePath: context.worktreePath,
+      runtime: runtimeLabel(),
+      sessionKey: sessionKey(),
+    },
+  });
+}
+
 export async function runPresence(
   mode: OutputMode,
   action: string | undefined,
   rest: string[],
 ): Promise<number> {
+  if (action === 'list') {
+    const allowed = new Set(['--repo']);
+    rejectUnknownFlags(rest, allowed);
+    if (positionals(rest, allowed).length > 0) {
+      throw new CliError('invalid_args', 'Presence list accepts flags only.', EXIT.INVALID_ARGS);
+    }
+    const context = repoContext(flag(rest, '--repo'));
+    await joinCurrentSession(context);
+    const cfg = resolveConfig();
+    const response = await apiFetch<{ agents: PresenceAgent[] }>(cfg, '/api/agents/presence', {
+      query: { repo: context.repo },
+    });
+    if (!response.data) throw new CliError('invalid_response', 'Presence list returned no data.', EXIT.INVALID_ARGS);
+    const output = { schema: 'o8/cli/presence.list/v1', ok: true, agents: response.data.agents };
+    if (mode.human) {
+      printHumanHeading('live agent presence');
+      if (output.agents.length === 0) process.stdout.write('No live agents.\n');
+      for (const agent of output.agents) {
+        process.stdout.write(`${agent.name}  ${agent.runtime}  ${agent.worktreePath ?? agent.repo}\n`);
+      }
+    } else {
+      printJson(output);
+    }
+    return EXIT.OK;
+  }
   if (action !== 'join') {
     throw new CliError(
       'unknown_presence_subcommand',
       `Unknown presence subcommand: ${action ?? '(none)'}`,
       EXIT.INVALID_ARGS,
-      'Use `o8 presence join --as <agent>`.',
+      'Use `o8 presence list` or `o8 presence join --as <agent>`.',
     );
   }
   const allowed = new Set(['--as', '--repo', '--runtime', '--session']);
@@ -170,6 +218,7 @@ export async function runMsg(
       );
     }
     const context = repoContext(flag(rest, '--repo'));
+    await joinCurrentSession(context);
     const response = await apiFetch<{ ok: true; message: AgentMessage }>(cfg, '/api/agents/message', {
       method: 'POST',
       body: {
@@ -195,11 +244,13 @@ export async function runMsg(
     return EXIT.OK;
   }
   if (action === 'inbox') {
-    const allowed = new Set(['--agent', '--cursor', '--limit']);
+    const allowed = new Set(['--agent', '--cursor', '--limit', '--repo']);
     rejectUnknownFlags(rest, allowed);
     if (positionals(rest, allowed).length > 0) {
       throw new CliError('invalid_args', 'Message inbox accepts flags only.', EXIT.INVALID_ARGS);
     }
+    const namedAgent = flag(rest, '--agent');
+    if (!namedAgent) await joinCurrentSession(repoContext(flag(rest, '--repo')));
     const response = await apiFetch<{
       agent: PresenceAgent;
       messages: AgentMessage[];
@@ -207,8 +258,8 @@ export async function runMsg(
       hasMore: boolean;
     }>(cfg, '/api/agents/inbox', {
       query: {
-        agent: flag(rest, '--agent') ?? undefined,
-        agentId: flag(rest, '--agent') ? undefined : agentId(),
+        agent: namedAgent ?? undefined,
+        agentId: namedAgent ? undefined : agentId(),
         cursor: flag(rest, '--cursor') ?? undefined,
         limit: flag(rest, '--limit') ?? undefined,
       },

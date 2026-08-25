@@ -4,6 +4,10 @@ import {
   defaultAgentMessageDeliverySeams,
   type AgentMessageDeliverySeams,
 } from './delivery';
+import {
+  defaultLiveAgentPresenceSeams,
+  type LiveAgentPresenceSeams,
+} from './live-presence';
 import { AgentBusError, postAgentMessage } from './service';
 
 function response(body: unknown, status: number): Response {
@@ -20,6 +24,7 @@ function response(body: unknown, status: number): Response {
  */
 export function createAgentMessagePostHandler(
   seams: AgentMessageDeliverySeams = defaultAgentMessageDeliverySeams,
+  presenceSeams: LiveAgentPresenceSeams = defaultLiveAgentPresenceSeams,
 ) {
   return async function POST(request: Request): Promise<Response> {
     try {
@@ -28,6 +33,8 @@ export function createAgentMessagePostHandler(
         body,
         resolveRequestPrincipalContext(request),
         seams,
+        undefined,
+        presenceSeams,
       );
       return response({ schema: 'o8/agents.message/v1', ok: true, message }, 201);
     } catch (error) {

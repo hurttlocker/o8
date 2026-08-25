@@ -37,7 +37,11 @@ import {
 } from '@/lib/claude-code/owned';
 import { resolveDefaultWorkerEffortSync } from '@/lib/operator/defaults';
 import { readClaudeRuntimeCapacity } from '@/lib/usage/cli-scrape';
-import { findLiveClaudeProcesses, probeLiveClaudeProcesses } from '@/lib/runtimes/claude-code-process-probe';
+import {
+  createLiveClaudeSessionMatcher,
+  findLiveClaudeProcesses,
+  probeLiveClaudeProcesses,
+} from '@/lib/runtimes/claude-code-process-probe';
 export {
   findLiveClaudeProcesses,
   probeLiveClaudeProcesses,
@@ -766,22 +770,11 @@ export const claudeCodeRuntime: AgentRuntime = {
 
     // Sort by most recent first
     allSessions.sort((a, b) => b.lastModified.getTime() - a.lastModified.getTime());
-    const liveSlotsByCwd = new Map<string, number>();
-    for (const proc of liveProcesses) {
-      const cwd = normalizeFsPath(proc.cwd);
-      if (!cwd) continue;
-      liveSlotsByCwd.set(cwd, (liveSlotsByCwd.get(cwd) ?? 0) + 1);
-    }
-    const claimedLiveSlots = new Map<string, number>();
+    const matchesLiveSession = createLiveClaudeSessionMatcher(liveProcesses);
 
     const results: RuntimeSession[] = allSessions.map((meta): RuntimeSession => {
       const normalizedCwd = normalizeFsPath(meta.cwd ?? meta.projectPath);
-      const availableSlots = liveSlotsByCwd.get(normalizedCwd) ?? 0;
-      const claimedSlots = claimedLiveSlots.get(normalizedCwd) ?? 0;
-      const isLiveSession = availableSlots > claimedSlots;
-      if (isLiveSession) {
-        claimedLiveSlots.set(normalizedCwd, claimedSlots + 1);
-      }
+      const isLiveSession = matchesLiveSession(meta.sessionId, normalizedCwd);
       const status = isLiveSession ? 'running' : inferHistoricalClaudeStatus(meta, liveProbe.probed);
       const name = `${projectDisplayName(meta.projectPath)}${meta.gitBranch ? ` • ${meta.gitBranch}` : ''}`;
       // #658 — Orchestrator-dispatched lanes spawn `claude` with cwd inside
@@ -829,15 +822,19 @@ export const claudeCodeRuntime: AgentRuntime = {
 
     for (const proc of liveProcesses) {
       if (!proc.cwd) continue;
-      const alreadyMatched = [...matchedCwds].some(
-        (cwd) => cwd && (proc.cwd!.startsWith(cwd) || cwd.startsWith(proc.cwd!)),
-      );
+      const alreadyMatched = proc.sessionId
+        ? results.some(
+          (session) => session.sessionKey === `claude-code:${proc.sessionId}` && session.status === 'running',
+        )
+        : [...matchedCwds].some(
+          (cwd) => cwd && (proc.cwd!.startsWith(cwd) || cwd.startsWith(proc.cwd!)),
+        );
       if (alreadyMatched) continue;
 
       // Find the project dir for this CWD
       const encodedDir = `-${proc.cwd.replace(/^\/+/, '').replace(/\//g, '-')}`;
       const projectDirPath = path.join(CLAUDE_PROJECTS_DIR, encodedDir);
-      let realSessionId: string | undefined;
+      let realSessionId: string | undefined = proc.sessionId;
       let contextUsedPercent: number | undefined;
       let firstUserMessage: string | undefined;
       let gitBranch: string | undefined;
@@ -846,7 +843,7 @@ export const claudeCodeRuntime: AgentRuntime = {
       try {
         const dirEntries = await readdir(projectDirPath);
         const jsonlFiles = dirEntries.filter((e) => e.endsWith('.jsonl'));
-        if (jsonlFiles.length > 0) {
+        if (!realSessionId && jsonlFiles.length > 0) {
           // Find most recently modified JSONL
           const withStats = await Promise.all(
             jsonlFiles.map(async (f) => {

@@ -15,6 +15,12 @@ import {
   deliverAgentMessage,
 } from './delivery';
 import {
+  availableAutomaticAgentName,
+  type LiveAgentPresenceSeams,
+  defaultLiveAgentPresenceSeams,
+  reconcileLiveAgentPresence,
+} from './live-presence';
+import {
   AGENT_MESSAGE_TEXT_MAX_LENGTH,
   type AgentMessageRefs,
   type AgentPresence,
@@ -121,11 +127,44 @@ function messageRefs(body: Record<string, unknown>, lane: Lane | null): AgentMes
   };
 }
 
+function normalizedAgentAlias(value: string): string {
+  return value.trim().toLowerCase().replace(/[\s_]+/g, '-');
+}
+
+function presenceMatchesRuntimeAlias(presence: AgentPresence, target: string): boolean {
+  const runtime = normalizedAgentAlias(presence.runtime);
+  return target === runtime || target === runtime.split('-')[0];
+}
+
+function resolveAgentTarget(
+  to: string,
+  repo: string | null,
+  sqlite: Database.Database,
+): AgentPresence | null {
+  const exact = findAgentPresence({ name: to, repo }, sqlite);
+  if (exact && isPresenceLive(exact)) return exact;
+  if (!repo) return exact;
+
+  const alias = normalizedAgentAlias(to);
+  const candidates = listAgentPresence(repo, {}, sqlite)
+    .filter((presence) => presenceMatchesRuntimeAlias(presence, alias));
+  if (candidates.length === 1) return candidates[0];
+  if (candidates.length > 1) {
+    throw new AgentBusError(
+      `Agent name ${to} is ambiguous in that repository. Use one of: ${candidates.map((candidate) => candidate.name).join(', ')}.`,
+      'agent_target_ambiguous',
+      409,
+    );
+  }
+  return exact;
+}
+
 export async function postAgentMessage(
   input: unknown,
   principal: RequestPrincipalContext,
   seams: AgentMessageDeliverySeams = defaultAgentMessageDeliverySeams,
   sqlite: Database.Database = getSqlite(),
+  presenceSeams: LiveAgentPresenceSeams = defaultLiveAgentPresenceSeams,
 ) {
   requireBusPrincipal(principal);
   const body = objectInput(input, 'invalid_agent_message');
@@ -149,7 +188,8 @@ export async function postAgentMessage(
     }
     repo = sender.repo;
   }
-  const target = findAgentPresence({ name: to, repo }, sqlite);
+  if (repo) await reconcileLiveAgentPresence(repo, presenceSeams, sqlite);
+  const target = resolveAgentTarget(to, repo, sqlite);
   if (!target) {
     throw new AgentBusError(
       repo ? `No agent named ${to} is registered in that repository.` : `Agent name ${to} is absent or ambiguous.`,
@@ -192,10 +232,16 @@ export function joinAgentPresence(
     throw new AgentBusError('Presence join requires an operator credential.', 'agent_presence_join_forbidden', 403);
   }
   const body = objectInput(input, 'invalid_agent_presence');
+  const agentId = requiredString(body.agentId, 'agentId');
+  const repo = requiredString(body.repo, 'repo', 2_000);
+  const automatic = body.automatic === true;
+  const name = automatic
+    ? optionalString(body.name, 'name') ?? availableAutomaticAgentName(agentId, resolve(repo), sqlite)
+    : requiredString(body.name, 'name');
   return upsertAgentPresence({
-    agentId: requiredString(body.agentId, 'agentId'),
-    name: requiredString(body.name, 'name'),
-    repo: requiredString(body.repo, 'repo', 2_000),
+    agentId,
+    name,
+    repo,
     worktreePath: optionalString(body.worktreePath, 'worktreePath', 2_000),
     runtime: requiredString(body.runtime, 'runtime'),
     sessionKey: optionalString(body.sessionKey, 'sessionKey', 500),
@@ -205,11 +251,12 @@ export function joinAgentPresence(
   }, sqlite);
 }
 
-export function readAgentPresence(
+export async function readAgentPresence(
   repo: string | null,
   principal: RequestPrincipalContext,
   sqlite: Database.Database = getSqlite(),
-): AgentPresence[] {
+  presenceSeams: LiveAgentPresenceSeams = defaultLiveAgentPresenceSeams,
+): Promise<AgentPresence[]> {
   requireBusPrincipal(principal);
   const lane = workerLane(principal);
   if (principal.role === 'worker' && !lane) {
@@ -219,6 +266,7 @@ export function readAgentPresence(
   if (lane && repo && resolve(repo) !== resolve(lane.repoPath)) {
     throw new AgentBusError('Workers can inspect only their repository.', 'agent_repo_mismatch', 403);
   }
+  await reconcileLiveAgentPresence(requestedRepo, presenceSeams, sqlite);
   return listAgentPresence(requestedRepo, {}, sqlite);
 }
 

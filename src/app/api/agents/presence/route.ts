@@ -20,7 +20,7 @@ function agentError(error: AgentBusError): Response {
 
 export async function GET(request: NextRequest): Promise<Response> {
   try {
-    const agents = readAgentPresence(
+    const agents = await readAgentPresence(
       request.nextUrl.searchParams.get('repo'),
       resolveRequestPrincipalContext(request),
     );
