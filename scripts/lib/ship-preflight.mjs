@@ -64,19 +64,26 @@ function freeDiskGiB(root) {
 
 function assertNoCompetingBuilds(run, root, env) {
   if (process.platform === 'win32') return;
-  const receipt = run('pgrep', [
-    '-af',
-    '(next[^ ]* build|cargo( +tauri)? +build|cargo-tauri.*build|scripts/release\\.mjs +--ship)',
-  ], { cwd: root, env, timeoutMs: 3_000 });
-  if (receipt.status !== 0 && receipt.status !== 1) {
+  const receipt = run('ps', ['-axo', 'pid=,ppid=,command='], {
+    cwd: root,
+    env,
+    timeoutMs: 3_000,
+  });
+  if (receipt.status !== 0) {
     throw new Error(`could not inspect competing release processes: ${receipt.stderr.trim() || `exit ${receipt.status}`}`);
   }
+  const buildPattern = /(?:next[^ ]* build|cargo(?: +tauri)? +build|cargo-tauri.*build|scripts\/release\.mjs +--ship)/;
   const competing = receipt.stdout
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
-    .filter((line) => !line.startsWith(`${process.pid} `))
-    .filter((line) => !line.startsWith(`${process.ppid} `));
+    .flatMap((line) => {
+      const match = line.match(/^(\d+)\s+(\d+)\s+(.+)$/);
+      if (!match) return [];
+      return [{ pid: Number(match[1]), parentPid: Number(match[2]), command: match[3] }];
+    })
+    .filter((row) => row.pid !== process.pid && row.pid !== process.ppid)
+    .filter((row) => buildPattern.test(row.command));
   if (competing.length > 0) {
     throw new Error(`another ship or build owns the release output (${competing.length} process${competing.length === 1 ? '' : 'es'})`);
   }

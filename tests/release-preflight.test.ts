@@ -45,7 +45,13 @@ describe('ship preflight', () => {
         return { status: 0, stdout: `${head}\trefs/tags/v0.1.999^{}\n`, stderr: '' };
       }
       if (command === 'gh' && args[0] === 'release') return { status: 1, stdout: '', stderr: 'not found' };
-      if (command === 'pgrep') return { status: 1, stdout: '', stderr: '' };
+      if (command === 'ps') {
+        return {
+          status: 0,
+          stdout: `${process.pid} 1 node scripts/ship-preflight.mjs\n${process.ppid} 1 node scripts/release.mjs --ship\n`,
+          stderr: '',
+        };
+      }
       return { status: 0, stdout: `${command} test-version\n`, stderr: '' };
     };
 
@@ -56,7 +62,7 @@ describe('ship preflight', () => {
     expect(receipt.releaseAbsent).toBe(true);
     expect(receipt.credentialNames).not.toContain('not-a-real-secret');
     expect(calls).toContain('gh release view v0.1.999 --repo example/release-repo --json tagName');
-    expect(calls.at(-1)).toContain('pgrep');
+    expect(calls.at(-1)).toBe('ps -axo pid=,ppid=,command=');
   });
 
   it('refuses a mismatched remote tag before any release lookup', () => {
@@ -89,5 +95,34 @@ describe('ship preflight', () => {
     first.release();
     const second = acquireReleaseLock({ lockPath });
     second.release();
+  });
+
+  it('refuses a real competing build without counting the current release parent', () => {
+    const { root, head, env } = fixture();
+    const run = (command: string, args: string[]) => {
+      if (command === 'git' && args[0] === 'rev-parse') return { status: 0, stdout: head, stderr: '' };
+      if (command === 'git' && args[0] === 'rev-list') return { status: 0, stdout: head, stderr: '' };
+      if (command === 'git' && args[0] === 'status') return { status: 0, stdout: '', stderr: '' };
+      if (command === 'git' && args[0] === 'remote') {
+        return { status: 0, stdout: 'https://github.com/example/release-repo.git\n', stderr: '' };
+      }
+      if (command === 'git' && args[0] === 'ls-remote') {
+        return { status: 0, stdout: `${head}\trefs/tags/v0.1.999^{}\n`, stderr: '' };
+      }
+      if (command === 'gh' && args[0] === 'release') {
+        return { status: 1, stdout: '', stderr: 'not found' };
+      }
+      if (command === 'ps') {
+        return {
+          status: 0,
+          stdout: `${process.ppid} 1 node scripts/release.mjs --ship\n99999 1 cargo tauri build\n`,
+          stderr: '',
+        };
+      }
+      return { status: 0, stdout: `${command} test-version\n`, stderr: '' };
+    };
+
+    expect(() => performShipPreflight({ root, version: '0.1.999', env, run }))
+      .toThrow('another ship or build owns the release output');
   });
 });
