@@ -29,23 +29,54 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const readline = require('node:readline');
 
-async function manifestAt(relative = '.') {
-  const stat = await fsp.lstat(relative);
-  const kind = stat.isSymbolicLink() ? 'symlink' : stat.isDirectory() ? 'directory' : stat.isFile() ? 'file' : 'other';
-  const entries = [{
-    relative,
-    device: stat.dev,
-    inode: stat.ino,
-    kind,
-    mode: stat.mode,
-    linkCount: stat.nlink,
-  }];
-  if (kind === 'directory') {
-    for (const name of (await fsp.readdir(relative)).sort()) {
-      entries.push(...await manifestAt(path.join(relative, name)));
+async function manifestAt() {
+  const entries = [];
+  const pending = ['.'];
+  while (pending.length > 0) {
+    const relative = pending.pop();
+    const stat = await fsp.lstat(relative);
+    const kind = stat.isSymbolicLink() ? 'symlink' : stat.isDirectory() ? 'directory' : stat.isFile() ? 'file' : 'other';
+    entries.push({
+      relative,
+      device: stat.dev,
+      inode: stat.ino,
+      kind,
+      mode: stat.mode,
+      linkCount: stat.nlink,
+    });
+    if (kind === 'directory') {
+      const names = (await fsp.readdir(relative)).sort().reverse();
+      for (const name of names) pending.push(path.join(relative, name));
     }
   }
   return entries;
+}
+
+function inodeKey(entry) {
+  return entry.kind === 'file' ? entry.device + ':' + entry.inode : '';
+}
+
+function countFileNames(manifest) {
+  const counts = new Map();
+  for (const entry of manifest) {
+    if (entry.kind !== 'file') continue;
+    const key = inodeKey(entry);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return counts;
+}
+
+function childNamesByParent(manifest) {
+  const names = new Map();
+  for (const entry of manifest) {
+    if (entry.relative === '.') continue;
+    const parent = path.dirname(entry.relative);
+    const children = names.get(parent) || [];
+    children.push(path.basename(entry.relative));
+    names.set(parent, children);
+  }
+  for (const children of names.values()) children.sort();
+  return names;
 }
 
 function sameIdentity(actual, expected) {
@@ -62,6 +93,8 @@ function sameNamespaceIdentity(actual, expected) {
 function verifyMonotonicManifest(current, expected) {
   const expectedByPath = new Map(expected.map((entry) => [entry.relative, entry]));
   const currentPaths = new Set(current.map((entry) => entry.relative));
+  const expectedFileNames = countFileNames(expected);
+  const currentFileNames = countFileNames(current);
   for (const actual of current) {
     const prior = expectedByPath.get(actual.relative);
     if (!prior || actual.device !== prior.device || actual.inode !== prior.inode
@@ -69,12 +102,9 @@ function verifyMonotonicManifest(current, expected) {
       throw new Error('Exact purge tree is not a monotonic subset of its durable manifest.');
     }
     if (actual.kind === 'file') {
-      const originalNames = expected.filter((entry) => (
-        entry.kind === 'file' && entry.device === prior.device && entry.inode === prior.inode
-      )).length;
-      const remainingNames = current.filter((entry) => (
-        entry.kind === 'file' && entry.device === prior.device && entry.inode === prior.inode
-      )).length;
+      const key = inodeKey(prior);
+      const originalNames = expectedFileNames.get(key) || 0;
+      const remainingNames = currentFileNames.get(key) || 0;
       if (actual.linkCount !== prior.linkCount - (originalNames - remainingNames)) {
         throw new Error('Exact purge file link identity changed outside monotonic namespace release.');
       }
@@ -90,15 +120,13 @@ function verifyMonotonicManifest(current, expected) {
 }
 
 async function releaseContent(manifest) {
+  const expectedChildNames = childNamesByParent(manifest);
   for (const expected of manifest) {
     const actual = await fsp.lstat(expected.relative);
     if (!sameIdentity(actual, expected)) throw new Error('Exact purge tree identity changed after capture.');
     if (expected.kind === 'directory') {
       const actualNames = (await fsp.readdir(expected.relative)).sort();
-      const expectedNames = manifest
-        .filter((entry) => entry.relative !== expected.relative
-          && path.dirname(entry.relative) === (expected.relative === '.' ? '.' : expected.relative))
-        .map((entry) => path.basename(entry.relative)).sort();
+      const expectedNames = expectedChildNames.get(expected.relative) || [];
       if (JSON.stringify(actualNames) !== JSON.stringify(expectedNames)) {
         throw new Error('Exact purge directory entries changed after capture.');
       }

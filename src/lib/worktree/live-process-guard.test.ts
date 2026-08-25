@@ -3,38 +3,41 @@ import { describe, expect, it } from 'vitest';
 import { hasLiveProcessInside, probeLiveProcessInside } from './live-process-guard';
 
 describe('live-process guard lsof taxonomy', () => {
-  it('ANDs the recursive scan with cwd descriptors so watcher file handles do not count', async () => {
-    let observedArgs: string[] = [];
-    const runLsof = async (_target: string, args: string[]) => {
-      observedArgs = args;
-      throw { code: 1, stdout: '', stderr: '' };
-    };
+  it('filters one machine-wide cwd snapshot without recursively scanning the tree', async () => {
+    const readSnapshot = async () => ({
+      status: 'ready' as const,
+      capturedAt: Date.now(),
+      rows: [{ pid: 42, cwd: '/tmp/another-tree', commandName: 'node' }],
+    });
 
-    await expect(hasLiveProcessInside('/tmp/worktree', { runLsof })).resolves.toBe(false);
-    expect(observedArgs).toEqual(['-a', '-d', 'cwd', '+D', '/tmp/worktree', '-t']);
+    await expect(hasLiveProcessInside('/tmp/worktree', { readSnapshot })).resolves.toBe(false);
   });
 
-  it('fails closed when lsof exits 1 with empty stdout but a partial-scan warning', async () => {
-    const runLsof = async () => {
-      throw {
-        code: 1,
-        stdout: '',
-        stderr: 'lsof: WARNING: can\'t opendir(/tmp/worktree/locked): Permission denied',
-      };
-    };
+  it('fails closed when the machine-wide snapshot is unavailable', async () => {
+    const readSnapshot = async () => ({
+      status: 'unavailable' as const,
+      capturedAt: Date.now(),
+      rows: [] as [],
+      reason: 'permission denied',
+    });
 
-    await expect(hasLiveProcessInside('/tmp/worktree', { runLsof })).resolves.toBe(true);
-    await expect(probeLiveProcessInside('/tmp/worktree', { runLsof })).resolves.toMatchObject({
+    await expect(hasLiveProcessInside('/tmp/worktree', { readSnapshot })).resolves.toBe(true);
+    await expect(probeLiveProcessInside('/tmp/worktree', { readSnapshot })).resolves.toMatchObject({
       status: 'inconclusive',
-      reason: expect.stringContaining('Permission denied'),
+      reason: expect.stringContaining('permission denied'),
     });
   });
 
-  it('accepts exit 1 as clear only when stdout and stderr are both empty', async () => {
-    const runLsof = async () => {
-      throw { code: 1, stdout: '', stderr: '' };
-    };
+  it('detects a process cwd nested anywhere under the worktree', async () => {
+    const readSnapshot = async () => ({
+      status: 'ready' as const,
+      capturedAt: Date.now(),
+      rows: [{ pid: 77, cwd: '/tmp/worktree/packages/app', commandName: 'node' }],
+    });
 
-    await expect(hasLiveProcessInside('/tmp/worktree', { runLsof })).resolves.toBe(false);
+    await expect(probeLiveProcessInside('/tmp/worktree', { readSnapshot })).resolves.toEqual({
+      status: 'live',
+      pids: ['77'],
+    });
   });
 });

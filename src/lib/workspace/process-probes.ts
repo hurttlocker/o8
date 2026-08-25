@@ -1,8 +1,12 @@
 import { execFile } from 'node:child_process';
-import path from 'node:path';
-
 import type { OwnedWorkspaceBindingReceipt } from '@/lib/runtimes/shared/owned-session';
 import { getOwnedSessionLifecycle } from '@/lib/runtimes/shared/owned-session-lifecycle';
+import {
+  parseProcessCwdSnapshot,
+  processCwdRowsInside,
+  readProcessCwdSnapshot,
+  type ProcessCwdSnapshot,
+} from '@/lib/runtime/process-cwd-snapshot';
 import {
   processProbe,
   synthesizeProcessQuiescence,
@@ -18,6 +22,7 @@ interface CommandReceipt {
 
 export interface OwnedProcessProbeOptions {
   run?: (command: string, args: string[], timeoutMs: number) => Promise<CommandReceipt>;
+  readCwdSnapshot?: () => Promise<ProcessCwdSnapshot>;
   now?: () => Date;
 }
 
@@ -56,6 +61,27 @@ function parsePids(raw: string): number[] {
     .split(/\s+/)
     .map((value) => Number.parseInt(value, 10))
     .filter((value) => Number.isInteger(value) && value > 0);
+}
+
+async function machineCwdSnapshot(
+  options: OwnedProcessProbeOptions,
+  run: NonNullable<OwnedProcessProbeOptions['run']>,
+): Promise<ProcessCwdSnapshot> {
+  if (options.readCwdSnapshot) return options.readCwdSnapshot();
+  if (!options.run) return readProcessCwdSnapshot({ forceRefresh: true });
+  const receipt = await run('lsof', ['-nP', '-d', 'cwd', '-F', 'pcn'], 3_000);
+  if (receipt.code === 0) {
+    return { status: 'ready', rows: parseProcessCwdSnapshot(receipt.stdout), capturedAt: Date.now() };
+  }
+  if (receipt.code === 1 && !receipt.stdout.trim() && !receipt.stderr.trim()) {
+    return { status: 'ready', rows: [], capturedAt: Date.now() };
+  }
+  return {
+    status: 'unavailable',
+    rows: [],
+    capturedAt: Date.now(),
+    reason: receipt.stderr.trim() || `lsof cwd snapshot exited ${receipt.code}`,
+  };
 }
 
 async function probeDescendants(
@@ -326,21 +352,16 @@ export async function probeOwnedSessionProcessQuiescence(
       : 'The retained-run ledger is legacy, corrupt, or permanently incomplete.',
   ));
 
-  const filesystem = await run('lsof', ['-Fn', '+D', path.resolve(workspacePath)], 5_000);
-  if (commandUnavailable(filesystem)) {
-    probes.push(processProbe('filesystem_users', 'unknown', 'lsof is unavailable, so open files cannot be ruled out.'));
-  } else if (filesystem.code === 1 && !filesystem.stdout.trim() && !filesystem.stderr.trim()) {
-    probes.push(processProbe('filesystem_users', 'clear', 'No process has an open file under the workspace.'));
-  } else if (filesystem.code !== 0) {
-    probes.push(processProbe('filesystem_users', 'unknown', `Filesystem-user probe failed with exit ${filesystem.code}.`));
+  const cwdSnapshot = await machineCwdSnapshot(options, run);
+  if (cwdSnapshot.status !== 'ready') {
+    probes.push(processProbe('filesystem_users', 'unknown', `Machine cwd snapshot failed: ${cwdSnapshot.reason}`));
   } else {
-    const pids = filesystem.stdout.split('\n')
-      .filter((line) => line.startsWith('p'))
-      .map((line) => Number.parseInt(line.slice(1), 10))
-      .filter((pid) => Number.isInteger(pid) && pid > 0);
-    probes.push(pids.length > 0
-      ? processProbe('filesystem_users', 'live', 'Processes still have files open under the workspace.', pids)
-      : processProbe('filesystem_users', 'clear', 'No process has an open file under the workspace.'));
+    const cwdUsers = processCwdRowsInside(cwdSnapshot, workspacePath).map((row) => row.pid);
+    if (cwdUsers.length > 0) {
+      probes.push(processProbe('filesystem_users', 'live', 'Processes still have a cwd under the workspace.', cwdUsers));
+    } else {
+      probes.push(processProbe('filesystem_users', 'clear', 'No process has a cwd under the workspace.'));
+    }
   }
 
   return synthesizeProcessQuiescence({

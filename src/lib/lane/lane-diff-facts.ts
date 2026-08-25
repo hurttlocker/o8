@@ -16,6 +16,13 @@ export interface LaneDiffFacts {
   changedFiles: string[];
   fileChanges: LaneFileChange[];
   addedLines: string[];
+  addedDiffLines: AddedDiffLine[];
+}
+
+export interface AddedDiffLine {
+  file: string;
+  line: number | null;
+  text: string;
 }
 
 export interface LaneSpokenDiffFacts extends LaneDiffFacts {
@@ -38,9 +45,43 @@ export interface LaneFileChange {
 }
 
 export function extractAddedLines(diff: string): string[] {
-  return diff
-    .split('\n')
-    .filter((line) => line.startsWith('+') && !line.startsWith('+++'));
+  return extractAddedDiffLines(diff).map((line) => line.text);
+}
+
+function parseDiffPath(value: string): string | null {
+  const candidate = value.trim();
+  if (!candidate || candidate === '/dev/null') return null;
+  return candidate.startsWith('b/') ? candidate.slice(2) : candidate;
+}
+
+/** Preserve the source file and new-file line number for every added line. */
+export function extractAddedDiffLines(diff: string): AddedDiffLine[] {
+  const added: AddedDiffLine[] = [];
+  let currentFile: string | null = null;
+  let nextNewLine: number | null = null;
+
+  for (const rawLine of diff.split('\n')) {
+    if (rawLine.startsWith('+++ ')) {
+      currentFile = parseDiffPath(rawLine.slice(4));
+      nextNewLine = null;
+      continue;
+    }
+    if (rawLine.startsWith('@@ ')) {
+      const match = /\+(\d+)(?:,\d+)?/.exec(rawLine);
+      nextNewLine = match ? Number(match[1]) : null;
+      continue;
+    }
+    if (rawLine.startsWith('+') && !rawLine.startsWith('+++')) {
+      if (currentFile) {
+        added.push({ file: currentFile, line: nextNewLine, text: rawLine });
+      }
+      if (nextNewLine !== null) nextNewLine += 1;
+      continue;
+    }
+    if (rawLine.startsWith('\\ No newline at end of file')) continue;
+    if (!rawLine.startsWith('-') && nextNewLine !== null) nextNewLine += 1;
+  }
+  return added;
 }
 
 /** Parse `git diff --stat` output into per-file insertion/deletion counts. */
@@ -248,6 +289,7 @@ export async function getLaneSpokenDiffFacts(lane: Lane): Promise<LaneSpokenDiff
       changedFiles: fileChanges.map((entry) => entry.path),
       fileChanges,
       addedLines: extractAddedLines(diff),
+      addedDiffLines: extractAddedDiffLines(diff),
     };
   }
 
@@ -299,5 +341,6 @@ export function getLaneDiffFacts(
       : stat ? parseDiffStat(stat).map((entry) => entry.file) : [],
     fileChanges,
     addedLines: extractAddedLines(diff),
+    addedDiffLines: extractAddedDiffLines(diff),
   };
 }

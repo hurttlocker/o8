@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
@@ -34,6 +35,8 @@ export interface ProcessCwdSnapshotOptions {
   /** Deterministic process seam for real-path tests. */
   execFile?: ProcessCwdExecFile;
   now?: () => number;
+  /** Destructive boundaries must not rely on the inventory cache. */
+  forceRefresh?: boolean;
 }
 
 export interface ProcessCwdProbeDiagnostics {
@@ -117,7 +120,7 @@ export async function readProcessCwdSnapshot(
 ): Promise<ProcessCwdSnapshot> {
   const now = options.now ?? Date.now;
   const requestedAt = now();
-  if (cachedSnapshot && requestedAt < cachedSnapshot.expiresAt) {
+  if (!options.forceRefresh && cachedSnapshot && requestedAt < cachedSnapshot.expiresAt) {
     cacheHits += 1;
     return cachedSnapshot.value;
   }
@@ -187,16 +190,34 @@ export async function readProcessCwdsForPids(
   );
 }
 
+function canonicalCwdPath(candidate: string): string {
+  try {
+    return realpathSync.native(candidate).replace(/\/+$/, '');
+  } catch {
+    return path.resolve(candidate).replace(/\/+$/, '');
+  }
+}
+
+/** Match cwd rows through filesystem aliases such as macOS `/var` → `/private/var`. */
+export function processCwdRowsInside(
+  snapshot: ProcessCwdSnapshot,
+  dirPath: string,
+): ProcessCwdRow[] {
+  if (snapshot.status !== 'ready') return [];
+  const target = canonicalCwdPath(dirPath);
+  return snapshot.rows.filter((row) => {
+    const cwd = canonicalCwdPath(row.cwd);
+    return cwd === target || cwd.startsWith(`${target}${path.sep}`);
+  });
+}
+
 /** Reaper-only fail-closed view of the shared cwd snapshot. */
 export async function hasLiveProcessCwdInside(dirPath: string): Promise<boolean> {
   const target = path.resolve(dirPath).replace(/\/+$/, '');
   if (!target || target === path.parse(target).root) return true;
   const snapshot = await readProcessCwdSnapshot();
   if (snapshot.status !== 'ready') return true;
-  return snapshot.rows.some((row) => {
-    const cwd = path.resolve(row.cwd).replace(/\/+$/, '');
-    return cwd === target || cwd.startsWith(`${target}${path.sep}`);
-  });
+  return processCwdRowsInside(snapshot, target).length > 0;
 }
 
 export function readProcessCwdProbeDiagnostics(): ProcessCwdProbeDiagnostics {

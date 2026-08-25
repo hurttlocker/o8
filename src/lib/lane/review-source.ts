@@ -10,6 +10,7 @@ import { resolvePacketDiffBase } from '@/lib/diff/base-resolution';
 import { isSafeGitRef } from '@/lib/git/refs';
 import { readHeadSha } from '@/lib/lane/head-sha-lock';
 import {
+  extractAddedDiffLines,
   extractAddedLines,
   getLaneSpokenDiffFacts,
   parseNameStatus,
@@ -328,6 +329,7 @@ export async function readLaneSpokenDiffFacts(lane: Lane): Promise<LaneSpokenDif
       changedFiles: fileChanges.map((entry) => entry.path),
       fileChanges,
       addedLines: extractAddedLines(full),
+      addedDiffLines: extractAddedDiffLines(full),
     };
   } catch (error) {
     if (error instanceof ImmutableReviewUnavailableError) throw error;

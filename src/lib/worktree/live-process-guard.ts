@@ -9,51 +9,31 @@
  * process was still living in the directory before the destructive step.
  *
  * `hasLiveProcessInside(dir)` answers "does any live process have its cwd under
- * `dir`?" via an ANDed `lsof -d cwd +D` query. Descriptor selection matters:
- * the Next backend watches files in every worktree, so an any-open-fd scan
- * makes every tree look live while o8 is running. A real worker is spawned with
- * cwd=<worktree>, which this detects even when the path is absent from argv.
+ * `dir`?" by filtering one machine-wide `lsof -d cwd` snapshot. This avoids a
+ * recursive filesystem walk for every candidate while still excluding backend
+ * watcher file descriptors. A real worker is spawned with cwd=<worktree>, which
+ * this detects even when the path is absent from argv.
  *
  * Fail CLOSED: any probe error — timeout, missing `lsof`, permission, a
  * nonsense path — is treated as "live" so the caller KEEPS the worktree. We
  * would rather leak a stale directory than abort a live worker's turn.
  */
-import { execFile } from 'node:child_process';
 import path from 'node:path';
-import { promisify } from 'node:util';
-
-const execFileAsync = promisify(execFile);
-
-/** Probe budget. Past this we fail closed (treat the tree as live → keep). */
-const PROBE_TIMEOUT_MS = 5_000;
+import {
+  readProcessCwdSnapshot,
+  processCwdRowsInside,
+  type ProcessCwdSnapshot,
+} from '@/lib/runtime/process-cwd-snapshot';
 
 export type LiveProcessProbeResult =
   | { status: 'clear' }
   | { status: 'live'; pids: string[] }
   | { status: 'inconclusive'; reason: string };
 
-interface LiveProcessCommandResult {
-  stdout: string | Buffer;
-  stderr?: string | Buffer;
-}
-
 export interface LiveProcessProbeOptions {
-  /** Test seam for deterministic lsof exit/error shapes. */
-  runLsof?: (target: string, args: string[]) => Promise<LiveProcessCommandResult>;
-}
-
-function outputText(value: unknown): string {
-  if (typeof value === 'string') return value;
-  return Buffer.isBuffer(value) ? value.toString('utf8') : '';
-}
-
-function compactDetail(value: unknown): string {
-  return outputText(value).trim().replace(/\s+/g, ' ').slice(0, 500);
-}
-
-function liveResult(stdout: unknown): LiveProcessProbeResult | null {
-  const pids = outputText(stdout).split(/\s+/).map((pid) => pid.trim()).filter(Boolean);
-  return pids.length > 0 ? { status: 'live', pids } : null;
+  /** Test/fleet seam for a single machine-wide cwd capture. */
+  snapshot?: ProcessCwdSnapshot;
+  readSnapshot?: () => Promise<ProcessCwdSnapshot>;
 }
 
 /**
@@ -68,53 +48,19 @@ export async function probeLiveProcessInside(
   options: LiveProcessProbeOptions = {},
 ): Promise<LiveProcessProbeResult> {
   const target = path.resolve(dirPath);
-  // A blank or root path would make `lsof +D` scan the whole filesystem —
-  // refuse and fail closed.
+  // A blank or root target cannot be bounded safely — refuse and fail closed.
   if (!target || target === '/' || target === path.parse(target).root) {
     return { status: 'inconclusive', reason: `unsafe probe target ${JSON.stringify(target)}` };
   }
 
-  try {
-    // `-a` ANDs the cwd-descriptor and recursive-directory selectors. This
-    // excludes backend watcher FDs while retaining a worker cwd'd anywhere in
-    // the tree. Exit 1 with empty stdout+stderr is the only clear signal.
-    const args = ['-a', '-d', 'cwd', '+D', target, '-t'];
-    const { stdout } = options.runLsof
-      ? await options.runLsof(target, args)
-      : await execFileAsync('lsof', args, { windowsHide: true, timeout: PROBE_TIMEOUT_MS });
-    return liveResult(stdout)
-      ?? { status: 'inconclusive', reason: 'lsof exited 0 without reporting a PID' };
-  } catch (err) {
-    const e = err as {
-      code?: number | string;
-      killed?: boolean;
-      signal?: string;
-      stdout?: string | Buffer;
-      stderr?: string | Buffer;
-      message?: string;
-    };
-    // Timeout (killed by signal) → we could not finish the probe → fail closed.
-    if (e?.killed === true || e?.signal) {
-      return { status: 'inconclusive', reason: `lsof timed out after ${PROBE_TIMEOUT_MS / 1000}s` };
-    }
-
-    // lsof exit 1 == "nothing found under the dir" (the clean not-live path).
-    // But lsof also exits 1 in some partial-scan cases while still having
-    // printed live PIDs — if stdout carried any PID, treat as live.
-    if (e?.code === 1 || e?.code === '1') {
-      const live = liveResult(e.stdout);
-      if (live) return live;
-      const stderr = compactDetail(e.stderr);
-      return stderr
-        ? { status: 'inconclusive', reason: `lsof partial/failed scan: ${stderr}` }
-        : { status: 'clear' };
-    }
-
-    // Any other failure — lsof missing (ENOENT), permission, exit 2+ — is
-    // genuine uncertainty. Fail closed.
-    const detail = compactDetail(e?.stderr) || compactDetail(e?.message) || 'unknown error';
-    return { status: 'inconclusive', reason: `lsof failed${e?.code ? ` (${String(e.code)})` : ''}: ${detail}` };
+  const snapshot = options.snapshot
+    ?? await (options.readSnapshot?.() ?? readProcessCwdSnapshot());
+  if (snapshot.status !== 'ready') {
+    return { status: 'inconclusive', reason: `machine cwd snapshot unavailable: ${snapshot.reason}` };
   }
+  const pids = processCwdRowsInside(snapshot, target)
+    .map((row) => String(row.pid));
+  return pids.length > 0 ? { status: 'live', pids } : { status: 'clear' };
 }
 
 export async function hasLiveProcessInside(

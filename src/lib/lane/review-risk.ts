@@ -1,8 +1,13 @@
+import path from 'node:path';
+
+import type { AddedDiffLine } from './lane-diff-facts';
+
 export type ReviewRiskTier = 'standard' | 'high';
 
 export interface ReviewRiskClassification {
   tier: ReviewRiskTier;
   reasons: string[];
+  responsibleFiles: string[];
 }
 
 const HIGH_RISK_PATH_RULES: Array<{ pattern: RegExp; reason: string }> = [
@@ -41,9 +46,26 @@ export function hasScopePartitionToken(line: string): boolean {
   );
 }
 
-function addUnique(reasons: string[], seen: Set<string>, reason: string): void {
-  if (seen.has(reason)) return;
-  seen.add(reason);
+const EXECUTABLE_OR_CONFIG_EXTENSIONS = new Set([
+  '.c', '.cc', '.cjs', '.cpp', '.cts', '.go', '.h', '.hpp', '.java', '.js', '.json',
+  '.jsx', '.kt', '.kts', '.mjs', '.mts', '.py', '.rb', '.rs', '.sh', '.sql', '.swift',
+  '.toml', '.ts', '.tsx', '.yaml', '.yml', '.zsh',
+]);
+const EXECUTABLE_OR_CONFIG_BASENAMES = new Set([
+  'dockerfile', 'makefile', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock',
+]);
+
+export function isExecutableOrConfigFile(file: string): boolean {
+  const normalized = file.trim().toLowerCase();
+  if (!normalized) return false;
+  const basename = path.posix.basename(normalized);
+  return EXECUTABLE_OR_CONFIG_BASENAMES.has(basename)
+    || EXECUTABLE_OR_CONFIG_EXTENSIONS.has(path.posix.extname(basename));
+}
+
+function addUnique(reasons: string[], seen: Set<string>, key: string, reason: string): void {
+  if (seen.has(key)) return;
+  seen.add(key);
   reasons.push(reason);
 }
 
@@ -53,50 +75,64 @@ function normalizeAddedLine(line: string): string {
 
 export function classifyReviewRisk(
   changedFiles: string[],
-  addedLines: string[],
+  addedLines: AddedDiffLine[],
 ): ReviewRiskClassification {
   const reasons: string[] = [];
   const seen = new Set<string>();
+  const responsibleFiles = new Set<string>();
 
   for (const file of changedFiles) {
     const normalized = file.trim();
-    if (!normalized) continue;
+    if (!normalized || !isExecutableOrConfigFile(normalized)) continue;
     for (const rule of HIGH_RISK_PATH_RULES) {
       if (rule.pattern.test(normalized)) {
-        addUnique(reasons, seen, `${rule.reason}: ${normalized}`);
+        addUnique(reasons, seen, `path:${normalized}`, `${rule.reason}: ${normalized}`);
+        responsibleFiles.add(normalized);
         break;
       }
     }
   }
 
-  for (const rawLine of addedLines) {
-    const line = normalizeAddedLine(rawLine);
+  for (const addedLine of addedLines) {
+    if (!isExecutableOrConfigFile(addedLine.file)) continue;
+    const line = normalizeAddedLine(addedLine.text);
+    const location = `${addedLine.file}${addedLine.line === null ? '' : `:${addedLine.line}`}`;
     for (const rule of HIGH_RISK_LINE_RULES) {
       if (rule.pattern.test(line)) {
-        addUnique(reasons, seen, rule.reason);
+        addUnique(reasons, seen, `${rule.reason}:${addedLine.file}`, `${rule.reason}: ${location}`);
+        responsibleFiles.add(addedLine.file);
       }
     }
   }
 
   const tier: ReviewRiskTier = reasons.length > 0 ? 'high' : 'standard';
   if (tier === 'high') {
-    for (const rawLine of addedLines) {
-      const line = normalizeAddedLine(rawLine);
+    for (const addedLine of addedLines) {
+      if (!isExecutableOrConfigFile(addedLine.file)) continue;
+      const line = normalizeAddedLine(addedLine.text);
+      const location = `${addedLine.file}${addedLine.line === null ? '' : `:${addedLine.line}`}`;
       for (const rule of ADVISORY_LINE_RULES) {
         if (rule.pattern.test(line)) {
-          addUnique(reasons, seen, rule.reason);
+          addUnique(reasons, seen, `${rule.reason}:${addedLine.file}`, `${rule.reason}: ${location}`);
+          responsibleFiles.add(addedLine.file);
         }
       }
       if (
         /\b(?:writeFile|writeFileSync|mkdir|mkdirSync)\s*\(/i.test(line)
         && !hasScopePartitionToken(line)
       ) {
-        addUnique(reasons, seen, 'advisory: write added without an obvious partition key');
+        addUnique(
+          reasons,
+          seen,
+          `unpartitioned-write:${addedLine.file}`,
+          `advisory: write added without an obvious partition key: ${location}`,
+        );
+        responsibleFiles.add(addedLine.file);
       }
     }
   }
 
-  return { tier, reasons };
+  return { tier, reasons, responsibleFiles: [...responsibleFiles].sort() };
 }
 
 export function buildAdversarialReviewProtocol(tier: ReviewRiskTier): string {

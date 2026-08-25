@@ -21,6 +21,15 @@ export function worktreeIsConfirmedAbsent(worktreePath: string | null): boolean 
   }
 }
 
+/** Main-checkout sessions have no lane-owned directory to retire. */
+export function laneOwnsWorktree(
+  lane: Pick<Lane, 'repoPath' | 'worktreePath'>,
+): boolean {
+  const worktreePath = lane.worktreePath?.trim().replace(/\/+$/, '');
+  const repoPath = lane.repoPath.trim().replace(/\/+$/, '');
+  return Boolean(worktreePath && worktreePath !== repoPath);
+}
+
 function captureLaneStorageOwnerGeneration(
   lane: Pick<Lane, 'id' | 'packetId'>,
 ): number | undefined {
@@ -56,7 +65,7 @@ export function captureLaneStorageCleanup(lane: Lane): Lane & {
  *    Storage mutation failures still roll every lane write back.
  */
 export function settleLaneStorageOnAssociationLoss(
-  lane: Pick<Lane, 'id' | 'packetId' | 'worktreePath'>,
+  lane: Pick<Lane, 'id' | 'packetId' | 'repoPath' | 'worktreePath'>,
   changes: { packetId?: unknown; status?: unknown },
 ): void {
   const packetId = lane.packetId?.trim();
@@ -67,7 +76,7 @@ export function settleLaneStorageOnAssociationLoss(
   const wentTerminal = typeof changes.status === 'string'
     && LANE_TERMINAL_STATUSES.has(changes.status as LaneStatus);
   if (!associationLost && !wentTerminal) return;
-  if (!worktreeIsConfirmedAbsent(lane.worktreePath)) return;
+  if (laneOwnsWorktree(lane) && !worktreeIsConfirmedAbsent(lane.worktreePath)) return;
 
   const sqlite = getSqlite();
   // Read inside the transaction, before the lane's events are appended to or

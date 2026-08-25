@@ -26,6 +26,7 @@ export interface ReviewFallbackTurnResult {
   fallback: CrossHouseFallbackDecision | null;
   reviewTurnId: string | null;
   unavailableReason: ReviewUnavailableReason | null;
+  approximateCost: number | null;
 }
 
 interface ReviewAttemptResult {
@@ -34,6 +35,7 @@ interface ReviewAttemptResult {
   quotaError: string | null;
   reviewTurnId: string | null;
   unavailableReason: ReviewUnavailableReason | null;
+  approximateCost: number | null;
 }
 
 function message(error: unknown): string {
@@ -49,6 +51,7 @@ async function runAttempt(input: {
   prompt: string;
   expectedHeadSha?: string | null;
   model?: string;
+  signal?: AbortSignal;
   onEvent?: (backend: OrchestratorBackend, event: OrchestratorEvent) => void;
 }): Promise<ReviewAttemptResult> {
   const session = input.backend.ensureSession(input.repoPath, undefined, input.threadId);
@@ -59,6 +62,7 @@ async function runAttempt(input: {
       quotaError: null,
       reviewTurnId: null,
       unavailableReason: 'session_busy',
+      approximateCost: null,
     };
   }
 
@@ -72,10 +76,12 @@ async function runAttempt(input: {
   let text = '';
   let quotaError: string | null = null;
   let unavailableReason: ReviewUnavailableReason | null = null;
+  let approximateCost: number | null = null;
   const errors: string[] = [];
   try {
     await input.backend.sendTurn(input.repoPath, input.prompt, (event) => {
       if (event.type === 'text') text += event.text;
+      if (event.type === 'done' && typeof event.cost === 'number') approximateCost = event.cost;
       if (event.type === 'error') {
         if (isRuntimeQuotaLimitError(event)) quotaError = event.error;
         else errors.push(event.error);
@@ -84,6 +90,7 @@ async function runAttempt(input: {
     }, {
       threadId: input.threadId,
       ...(input.model ? { model: input.model } : {}),
+      ...(input.signal ? { signal: input.signal } : {}),
     });
   } catch (error) {
     if (isRuntimeQuotaLimitError(error)) quotaError = message(error);
@@ -106,7 +113,7 @@ async function runAttempt(input: {
   } catch (error) {
     errors.push(`Review turn finalization failed: ${message(error)}`);
   }
-  return { text, errors, quotaError, reviewTurnId, unavailableReason };
+  return { text, errors, quotaError, reviewTurnId, unavailableReason, approximateCost };
 }
 
 export async function runReviewerTurnWithQuotaFallback(input: {
@@ -120,6 +127,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
   onEvent?: (backend: OrchestratorBackend, event: OrchestratorEvent) => void;
   initialBackend?: OrchestratorBackend;
   backendResolver?: (backend: OrchestratorBackendId) => OrchestratorBackend;
+  signal?: AbortSignal;
 }): Promise<ReviewFallbackTurnResult> {
   const initialBackend = input.initialBackend ?? getActiveReviewerBackend();
   const backendResolver = input.backendResolver ?? getOrchestratorBackend;
@@ -135,6 +143,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
     prompt: promptFor(initialBackend.id),
     expectedHeadSha: input.expectedHeadSha,
     onEvent: input.onEvent,
+    signal: input.signal,
   });
   if (first.unavailableReason) {
     return {
@@ -145,6 +154,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
       fallback: null,
       reviewTurnId: first.reviewTurnId,
       unavailableReason: first.unavailableReason,
+      approximateCost: first.approximateCost,
     };
   }
   if (!first.quotaError) {
@@ -156,6 +166,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
       fallback: null,
       reviewTurnId: first.reviewTurnId,
       unavailableReason: null,
+      approximateCost: first.approximateCost,
     };
   }
 
@@ -173,6 +184,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
       fallback: null,
       reviewTurnId: first.reviewTurnId,
       unavailableReason: null,
+      approximateCost: first.approximateCost,
     };
   }
 
@@ -197,6 +209,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
       fallback: decision,
       reviewTurnId: first.reviewTurnId,
       unavailableReason: null,
+      approximateCost: first.approximateCost,
     };
   }
 
@@ -211,6 +224,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
     expectedHeadSha: input.expectedHeadSha,
     model: decision.toModel,
     onEvent: input.onEvent,
+    signal: input.signal,
   });
   if (second.unavailableReason) {
     return {
@@ -221,6 +235,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
       fallback: decision,
       reviewTurnId: second.reviewTurnId,
       unavailableReason: second.unavailableReason,
+      approximateCost: second.approximateCost ?? first.approximateCost,
     };
   }
   if (second.quotaError) {
@@ -241,5 +256,6 @@ export async function runReviewerTurnWithQuotaFallback(input: {
     fallback: decision,
     reviewTurnId: second.reviewTurnId,
     unavailableReason: null,
+    approximateCost: second.approximateCost ?? first.approximateCost,
   };
 }

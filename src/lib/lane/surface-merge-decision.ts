@@ -23,7 +23,7 @@ export async function decideSurfaceMerge(
 
   try {
     const facts = getLaneDiffFacts(lane);
-    const risk = classifyReviewRisk(facts.changedFiles, facts.addedLines);
+    const risk = classifyReviewRisk(facts.changedFiles, facts.addedDiffLines);
     if (risk.tier === 'high') reasons.push(...risk.reasons);
   } catch {
     reasons.push('Diff risk could not be classified safely.');

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Lane } from '@/lib/lane/types';
-import { getLaneSpokenDiffFacts, parseNameStatus } from './lane-diff-facts';
+import { extractAddedDiffLines, getLaneSpokenDiffFacts, parseNameStatus } from './lane-diff-facts';
 import {
   commitSpokenReviewSnapshot,
   SpokenReviewSnapshotChangedError,
@@ -57,6 +57,27 @@ afterEach(() => {
 });
 
 describe('parseNameStatus', () => {
+  it('preserves the file and new-file line number for added diff lines', () => {
+    expect(extractAddedDiffLines([
+      'diff --git a/docs/guide.md b/docs/guide.md',
+      '--- a/docs/guide.md',
+      '+++ b/docs/guide.md',
+      '@@ -4,2 +4,3 @@ heading',
+      ' context',
+      '+setLaneStatus is mentioned in prose',
+      'diff --git a/src/state.ts b/src/state.ts',
+      '--- a/src/state.ts',
+      '+++ b/src/state.ts',
+      '@@ -10,0 +12,2 @@',
+      '+setLaneStatus(id, \'completed\');',
+      '+next();',
+    ].join('\n'))).toEqual([
+      { file: 'docs/guide.md', line: 5, text: '+setLaneStatus is mentioned in prose' },
+      { file: 'src/state.ts', line: 12, text: '+setLaneStatus(id, \'completed\');' },
+      { file: 'src/state.ts', line: 13, text: '+next();' },
+    ]);
+  });
+
   it('preserves additions, modifications, deletions, and rename destinations', () => {
     expect(parseNameStatus([
       'A', 'src/new.ts',

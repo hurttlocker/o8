@@ -40,7 +40,7 @@ function explainerFilename(packetId: string): string {
   return `.o8-packet-explainer-${safe}.html`;
 }
 
-interface GenerateExplainerParams {
+export interface GenerateExplainerParams {
   lane: Lane;
   packetId: string;
   packetTitle: string;
@@ -49,6 +49,15 @@ interface GenerateExplainerParams {
   changedFileCount: number;
   deviationsRaw: string | null;
   reviewContext: string;
+  signal?: AbortSignal;
+}
+
+export interface PacketExplainerGenerationResult {
+  outcome: 'ready' | 'deferred' | 'failed';
+  backend: string | null;
+  durationMs: number;
+  approximateCost: number | null;
+  reason?: string;
 }
 
 /**
@@ -128,7 +137,12 @@ function buildExplainerPrompt(params: GenerateExplainerParams): string {
  * await (fire-and-forget). Sets the packet's explainer status as it progresses.
  * All failures are swallowed into a `failed` status so the caller never breaks.
  */
-export async function generatePacketExplainer(params: GenerateExplainerParams): Promise<void> {
+export async function generatePacketExplainer(
+  params: GenerateExplainerParams,
+): Promise<PacketExplainerGenerationResult> {
+  const startedAt = Date.now();
+  let observedBackend: string | null = null;
+  let observedCost: number | null = null;
   const { patchMissionPacket } = await import('@/lib/orchestrator/operator-mission-service/packet-patch');
   const stamp = async (explainer: NonNullable<import('@/lib/orchestrator/types').OrchestratorPacket['explainer']>) => {
     try {
@@ -137,8 +151,6 @@ export async function generatePacketExplainer(params: GenerateExplainerParams): 
       console.warn(`[explainer] Failed to stamp explainer status for packet ${params.packetId}:`, error);
     }
   };
-
-  await stamp({ status: 'generating', changedFileCount: params.changedFileCount, generatedAt: null });
 
   try {
     const threadId = `explainer-${params.lane.id}`;
@@ -149,12 +161,33 @@ export async function generatePacketExplainer(params: GenerateExplainerParams): 
       threadId,
       surface: 'packet-explainer',
       prompt,
+      signal: params.signal,
       onEvent: (backend, event) => {
-      if (event.type === 'error' && event.error) {
-        console.warn(`[explainer] ${backend.label} error: ${event.error}`);
-      }
+        if (event.type === 'error' && event.error) {
+          console.warn(`[explainer] ${backend.label} error: ${event.error}`);
+        }
       },
     });
+    observedBackend = turn.backend;
+    observedCost = turn.approximateCost;
+    if (params.signal?.aborted) {
+      return {
+        outcome: 'deferred',
+        backend: turn.backend,
+        durationMs: Date.now() - startedAt,
+        approximateCost: turn.approximateCost,
+        reason: 'correctness review took priority',
+      };
+    }
+    if (turn.unavailableReason === 'session_busy') {
+      return {
+        outcome: 'deferred',
+        backend: turn.backend,
+        durationMs: Date.now() - startedAt,
+        approximateCost: turn.approximateCost,
+        reason: 'reviewer backend was busy',
+      };
+    }
     if (!turn.ok) throw new Error(turn.errors.join('; ') || 'reviewer turn failed');
 
     const worktree = params.lane.worktreePath || params.lane.repoPath;
@@ -199,14 +232,30 @@ export async function generatePacketExplainer(params: GenerateExplainerParams): 
       generatedAt: new Date().toISOString(),
     });
     console.log(`[explainer] Ready for packet ${params.packetId} (${quiz?.questions.length ?? 0} quiz questions)`);
+    return {
+      outcome: 'ready',
+      backend: turn.backend,
+      durationMs: Date.now() - startedAt,
+      approximateCost: turn.approximateCost,
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    await stamp({
-      status: 'failed',
-      changedFileCount: params.changedFileCount,
-      generatedAt: new Date().toISOString(),
-      error: message.slice(0, 300),
-    });
+    if (params.signal?.aborted) {
+      return {
+        outcome: 'deferred',
+        backend: observedBackend,
+        durationMs: Date.now() - startedAt,
+        approximateCost: observedCost,
+        reason: 'correctness review took priority',
+      };
+    }
     console.warn(`[explainer] Generation failed for packet ${params.packetId}: ${message}`);
+    return {
+      outcome: 'failed',
+      backend: observedBackend,
+      durationMs: Date.now() - startedAt,
+      approximateCost: observedCost,
+      reason: message,
+    };
   }
 }

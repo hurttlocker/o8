@@ -317,7 +317,7 @@ export async function GET(request: NextRequest) {
     if (includeSpokenReview && spokenDiffFacts && lane) {
       const diffFacts = spokenDiffFacts;
       const completionContext = await readPacketCompletionContext(packetId);
-      const reviewRisk = classifyReviewRisk(diffFacts.changedFiles, diffFacts.addedLines);
+      const reviewRisk = classifyReviewRisk(diffFacts.changedFiles, diffFacts.addedDiffLines);
       const durableFindings = spokenFindings(spokenReviewApproval?.args?.findings);
       const completionHeadSha = normalizeHeadSha(completionContext?.headSha);
       const completionEvidenceCurrent = Boolean(

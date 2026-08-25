@@ -17,7 +17,7 @@ import { readPacketDeviations, type PacketDeviations } from '@/lib/orchestrator/
 import type { PacketSelfReview, PacketTaskContract } from '@/lib/orchestrator/types';
 import { buildAutoReviewPromptV1 } from '@/lib/prompts/v1';
 import { runMergeGate, formatMergeGateForReview, type MergeGateResult } from './merge-gate';
-import { extractAddedLines, getLaneDiffFacts, parseDiffStat } from './lane-diff-facts';
+import { extractAddedLines, getLaneDiffFacts, parseDiffStat, type AddedDiffLine } from './lane-diff-facts';
 import { buildAdversarialReviewProtocol, classifyReviewRisk } from './review-risk';
 import { resolveLaneReviewScreenshotReference, type LaneReviewScreenshotReference } from './review-screenshot';
 import { buildBlindSecondPassPrompt, findPendingSecondPassApproval, parseSecondPassVerdict } from './blind-second-pass-review';
@@ -47,6 +47,7 @@ import {
   isReviewAttemptCancelled,
 } from './review-cancellation';
 import { dispatchSecondPassMerge } from './second-pass-merge-dispatch';
+import { drainPacketExplainerQueue, enqueuePacketExplainer, startPacketExplainerQueueDrain } from './packet-explainer-queue';
 import type { Lane } from './types';
 
 const DRAIN_INTERVAL_MS = 10_000;
@@ -60,6 +61,7 @@ const REVIEW_DIFF_LINES = {
 const reviewingLanes = new Map<string, string>();
 
 let drainTimer: ReturnType<typeof setInterval> | null = null;
+let stopExplainerDrain: (() => void) | null = null;
 
 export function isLaneAutoReviewActive(laneId: string): boolean {
   return reviewingLanes.has(laneId);
@@ -95,6 +97,7 @@ export function startReviewQueueDrain(): () => void {
       console.error('[auto-review] Drain error:', err);
     });
   }, DRAIN_INTERVAL_MS);
+  stopExplainerDrain = startPacketExplainerQueueDrain();
 
   console.log(`[auto-review] Started review queue drain (${DRAIN_INTERVAL_MS}ms interval)`);
 
@@ -105,6 +108,8 @@ export function startReviewQueueDrain(): () => void {
     if (drainTimer) {
       clearInterval(drainTimer);
       drainTimer = null;
+      stopExplainerDrain?.();
+      stopExplainerDrain = null;
       console.log('[auto-review] Stopped review queue drain');
     }
   };
@@ -225,6 +230,7 @@ export async function drainReviewQueue(): Promise<void> {
   } finally {
     releaseActiveReviewSlot(review);
     clearReviewAttemptCancellation(review.id, review.claim_owner);
+    void drainPacketExplainerQueue().catch(() => {});
   }
 }
 
@@ -285,6 +291,7 @@ interface ReviewDiffSummary {
   summary: string;
   changedFiles: string[];
   addedLines: string[];
+  addedDiffLines: AddedDiffLine[];
   cwd: string;
 }
 
@@ -317,12 +324,13 @@ function getDiffSummary(lane: Lane, depth: ReviewDepth, comparisonRef?: string):
     }
 
     if (!stat && !diff) {
-      return { summary: 'No changes detected in the worktree.', changedFiles: facts.changedFiles, addedLines: facts.addedLines, cwd };
+      return { summary: 'No changes detected in the worktree.', changedFiles: facts.changedFiles, addedLines: facts.addedLines, addedDiffLines: facts.addedDiffLines, cwd };
     }
     return {
       summary: `## Diff summary\n\n\`\`\`\n${stat}\n\`\`\`\n\n## Changes\n\n\`\`\`diff\n${diff}\n\`\`\``,
       changedFiles: facts.changedFiles,
       addedLines: facts.addedLines,
+      addedDiffLines: facts.addedDiffLines,
       cwd,
     };
   } catch {
@@ -330,6 +338,7 @@ function getDiffSummary(lane: Lane, depth: ReviewDepth, comparisonRef?: string):
       summary: 'Unable to generate diff — the worktree may not have commits yet.',
       changedFiles: [],
       addedLines: [],
+      addedDiffLines: [],
       cwd,
     };
   }
@@ -449,7 +458,7 @@ function buildReviewPrompt(
   lane: Lane,
   diffSummary: string,
   changedFiles: string[],
-  addedLines: string[],
+  addedLines: AddedDiffLine[],
   selfReview: PacketSelfReview | undefined,
   depth: ReviewDepth,
   mechanicalChecksSummary?: string,
@@ -544,7 +553,13 @@ async function performAutoReview(review: QueuedReview): Promise<AutoReviewOutcom
     ?? mergeGateResult.diffBase?.comparisonRef;
   const mechanicalChecks = runMechanicalChecks(lane, comparisonRef);
   const diffSummary = getDiffSummary(lane, depth, comparisonRef);
-  const reviewRisk = classifyReviewRisk(diffSummary.changedFiles, diffSummary.addedLines);
+  const reviewRisk = classifyReviewRisk(diffSummary.changedFiles, diffSummary.addedDiffLines);
+  const { appendEvent } = await import('@/lib/lane/registry');
+  appendEvent(lane.id, 'review_risk_classified', 'system', {
+    tier: reviewRisk.tier,
+    reasons: reviewRisk.reasons,
+    responsibleFiles: reviewRisk.responsibleFiles,
+  });
   let reviewScreenshot: LaneReviewScreenshotReference | null = null;
   if (lane.runtime === 'codex') {
     try {
@@ -560,7 +575,7 @@ async function performAutoReview(review: QueuedReview): Promise<AutoReviewOutcom
     lane,
     diffSummary.summary,
     diffSummary.changedFiles,
-    diffSummary.addedLines,
+    diffSummary.addedDiffLines,
     completionContext?.selfReview,
     depth,
     mechanicalChecks.summary || undefined,
@@ -648,30 +663,22 @@ async function performAutoReview(review: QueuedReview): Promise<AutoReviewOutcom
     }
   }
 
-  // #1491 — HTML packet explainer + quiz. Fire-and-forget so it never blocks
-  // the review transition or the second-pass path below; the packet carries a
-  // generating→ready|failed status and the surface degrades to the diff on
-  // failure. Off when the operator disabled it.
+  // The current review row stays in_progress through any blind pass, so the
+  // independent explainer queue cannot claim capacity until correctness settles.
   if (lane.packetId) {
     try {
-      const { resolvePacketExplainerEnabledSync } = await import('@/lib/operator/defaults');
-      if (resolvePacketExplainerEnabledSync()) {
-        const { generatePacketExplainer } = await import('./packet-explainer');
-        void generatePacketExplainer({
-          lane,
-          packetId: lane.packetId,
-          packetTitle: lane.label || lane.branch,
-          packetSummary: completionContext?.summary ?? '',
-          diffSummary: diffSummary.summary,
-          changedFileCount: diffSummary.changedFiles.length,
-          deviationsRaw: deviations?.raw ?? null,
-          reviewContext: mechanicalChecks.summary || '',
-        }).catch((error) => {
-          console.warn(`[auto-review] Explainer generation threw for lane ${lane.id}:`, error);
-        });
-      }
+      await enqueuePacketExplainer({
+        lane,
+        packetId: lane.packetId,
+        packetTitle: lane.label || lane.branch,
+        packetSummary: completionContext?.summary ?? '',
+        diffSummary: diffSummary.summary,
+        changedFileCount: diffSummary.changedFiles.length,
+        deviationsRaw: deviations?.raw ?? null,
+        reviewContext: mechanicalChecks.summary || '',
+      });
     } catch (error) {
-      console.warn(`[auto-review] Failed to launch explainer for lane ${lane.id}:`, error);
+      console.warn(`[auto-review] Failed to enqueue explainer for lane ${lane.id}:`, error);
     }
   }
 

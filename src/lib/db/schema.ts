@@ -19,6 +19,7 @@ export * from './harness-schema';
 export * from './workspace-snapshot-schema';
 export * from './storage-admission-schema';
 export * from './broadcast-schema';
+export * from './explainer-queue-schema';
 const ORCHESTRATOR_RUNTIME_ENUM = [...ORCHESTRATOR_RUNTIME_IDS] as [
   OrchestratorRuntime,
   ...OrchestratorRuntime[],

@@ -120,7 +120,7 @@ function requiresSecondPassForLane(lane: Lane | null, approved: boolean) {
 
   try {
     const facts = getLaneDiffFacts(lane);
-    return classifyReviewRisk(facts.changedFiles, facts.addedLines).tier === 'high';
+    return classifyReviewRisk(facts.changedFiles, facts.addedDiffLines).tier === 'high';
   } catch (error) {
     console.warn(`[review] Failed to classify second-pass requirement for lane ${lane.id}:`, error);
     return false;

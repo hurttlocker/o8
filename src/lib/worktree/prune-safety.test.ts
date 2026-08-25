@@ -206,7 +206,7 @@ describe('WorktreeManager.prune() safety guards (#1585)', () => {
     const livePath = await addWorktree('packet-live-worker');
 
     // Spawn a real child whose cwd is inside the worktree — the live-worker
-    // signature. `lsof +D` detects it by cwd even though the path is not argv.
+    // signature. The shared cwd snapshot detects it even though the path is not argv.
     const child = spawn('sleep', ['60'], { cwd: livePath, stdio: 'ignore', detached: false });
     bornProcs.push(child);
     await new Promise((resolve) => setTimeout(resolve, 400)); // let it register

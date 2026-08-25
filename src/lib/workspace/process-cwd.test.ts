@@ -4,10 +4,9 @@
  * process-probes.ts identity primitives (pid / process_group / descendants /
  * owned_marker / tmux / runtime) key off PID, process-group id, command-line
  * substring, and env markers — never off a process's current working
- * directory. `filesystem_users` is the one primitive that IS cwd-sensitive:
- * it shells out to `lsof -Fn +D <workspacePath>`, which reports ANY process
- * with an open file (including its cwd) under that path, with no ownership
- * filter. Because `synthesizeProcessQuiescence` treats "positive liveness
+ * directory. `filesystem_users` uses one machine-wide cwd snapshot, which
+ * reports ANY process rooted under that path, with no ownership filter. Because
+ * `synthesizeProcessQuiescence` treats "positive liveness
  * wins" (any 'live' probe forces overall state 'live'), the design is:
  *
  *   1. A workspace-owned process that chdir's AWAY from the workspace must

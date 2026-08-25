@@ -1,6 +1,7 @@
 import type { Lane } from './types';
 import { cleanupLaneWorktree } from './worktree-cleanup';
 import { releaseTerminalPacketStorageReservations } from '@/lib/orchestrator/terminal-storage-release';
+import { laneOwnsWorktree } from './lane-storage-release';
 
 type TerminalCleanupLane = Pick<Lane, 'id' | 'repoPath' | 'worktreePath' | 'packetId'>
   & Partial<Pick<Lane, 'baseBranch'>>
@@ -21,11 +22,36 @@ function releaseWithoutWorktree(lane: TerminalCleanupLane): void {
 }
 
 export function scheduleTerminalLaneCleanup(lane: TerminalCleanupLane): void {
-  if (!lane.worktreePath) {
+  if (!lane.worktreePath || !laneOwnsWorktree(lane)) {
     releaseWithoutWorktree(lane);
+    if (lane.worktreePath) {
+      void import('./registry').then(({ getLane, updateLane }) => {
+        if (getLane(lane.id)?.worktreePath === lane.worktreePath) {
+          updateLane(lane.id, { worktreePath: null }, 'system', { phase: 'terminal_cleanup' });
+        }
+      });
+    }
     return;
   }
-  void cleanupLaneWorktree(lane, { terminal: true }).catch((error) => {
+  void (async () => {
+    const removed = await cleanupLaneWorktree(lane, { terminal: true });
+    const { appendEvent, getLane, updateLane } = await import('./registry');
+    const current = getLane(lane.id);
+    if (removed && current?.worktreePath === lane.worktreePath) {
+      updateLane(lane.id, { worktreePath: null }, 'system', {
+        phase: 'terminal_cleanup',
+        worktreeRemoved: true,
+      });
+      return;
+    }
+    if (!removed) {
+      appendEvent(lane.id, 'update', 'system', {
+        phase: 'terminal_cleanup',
+        worktreeRemoved: false,
+        worktreePath: lane.worktreePath,
+      });
+    }
+  })().catch((error) => {
     console.error(
       `[lane-worktree] Terminal cleanup failed for ${lane.id}: ${error instanceof Error ? error.message : String(error)}`,
     );

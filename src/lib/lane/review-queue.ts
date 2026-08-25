@@ -7,6 +7,7 @@ import {
   normalizeAttemptHeadSha,
   settleSupersededReviewAttempts,
 } from './review-attempt-head';
+import { notifyCorrectnessReviewQueued } from './packet-explainer-queue';
 
 export { surfaceReviewQueueBlocker } from './review-queue-blocker';
 
@@ -50,6 +51,10 @@ export function enqueueLaneReview(
   lane: Lane,
   options: EnqueueLaneReviewOptions = {},
 ): EnqueueLaneReviewResult {
+  // Optional explainers yield before any correctness claim is inspected or
+  // created. Existing pending/in-progress reviews deserve the same priority as
+  // a brand-new row.
+  notifyCorrectnessReviewQueued();
   const db = getSqlite();
   const currentHeadSha = normalizeAttemptHeadSha(options.headSha) ?? laneReviewHeadSha(lane);
   const supersededAttempts = settleSupersededReviewAttempts({

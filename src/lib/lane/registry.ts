@@ -23,7 +23,7 @@ import type {
   LaneStatus,
 } from './types';
 import { scheduleTerminalLaneCleanup } from './terminal-lane-cleanup';
-import { captureLaneStorageCleanup, settleLaneStorageOnAssociationLoss, worktreeIsConfirmedAbsent } from './lane-storage-release';
+import { captureLaneStorageCleanup, laneOwnsWorktree, settleLaneStorageOnAssociationLoss, worktreeIsConfirmedAbsent } from './lane-storage-release';
 import { getDataDir } from '@/lib/data-dir-migration';
 
 export {
@@ -903,11 +903,11 @@ export function archiveLane(laneId: string, actor: LaneEventActor = 'user', endi
   }
   const ending = resolveArchiveEnding(lane, getLaneEvents(lane.id, 100), endingOverride);
   if (ending.contractViolation) reportMissingArchiveEnding(lane);
-  // Keep sessionKey for archived-session correlation; clear worktreePath so cleanup cannot re-enter.
+  // Cleanup alone clears worktreePath after proving absence; failures stay retryable.
   const updated = updateLane(laneId, {
     status: 'archived',
     ...ending.updates,
-    worktreePath: null,
+    ...(laneOwnsWorktree(lane) ? {} : { worktreePath: null }),
     writerToken: null,
     lastEventAt: nowIso(),
     lastEventLabel: 'archived',

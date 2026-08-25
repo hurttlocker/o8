@@ -10,6 +10,7 @@ import { ensureV43ResourceLeaseSchema } from '@/lib/db/v43-resource-leases-migra
 import { ensureV44BroadcastSchema } from '@/lib/db/v44-broadcast-migration';
 import { ensureV45BroadcastFocusSchema } from '@/lib/db/v45-broadcast-focus-migration';
 import { ensureV46ReviewAttemptHeadSchema } from '@/lib/db/v46-review-attempt-head-migration';
+import { ensureV47ExplainerQueueSchema } from '@/lib/db/v47-explainer-queue-migration';
 
 /**
  * Keep the current additive migrations behind one boot hook. `db/index.ts` is
@@ -28,4 +29,5 @@ export function ensureLatestSchemas(sqlite: Database.Database): void {
   ensureV44BroadcastSchema(sqlite);
   ensureV45BroadcastFocusSchema(sqlite);
   ensureV46ReviewAttemptHeadSchema(sqlite);
+  ensureV47ExplainerQueueSchema(sqlite);
 }

@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { getActiveReviewerBackend } from '@/lib/lane/orchestrator-backends/registry';
 import { classifyReviewRisk } from '@/lib/lane/review-risk';
+import { extractAddedDiffLines } from '@/lib/lane/lane-diff-facts';
 import { EVALUATOR_DIFF_BYTE_LIMIT } from './capabilities';
 import type {
   HarnessEvaluationFinding,
@@ -27,10 +28,6 @@ function changedFiles(diff: string): string[] {
     if (match && match[1] !== '/dev/null') files.add(match[1]);
   }
   return [...files];
-}
-
-function addedLines(diff: string): string[] {
-  return diff.split('\n').filter((line) => line.startsWith('+') && !line.startsWith('+++'));
 }
 
 function cleanFinding(value: unknown): HarnessEvaluationFinding | null {
@@ -148,7 +145,7 @@ export async function evaluateDiff(input: {
     .map((criterion) => criterion.trim())
     .filter(Boolean)
     .slice(0, 100);
-  const risk = classifyReviewRisk(changedFiles(input.diff), addedLines(input.diff));
+  const risk = classifyReviewRisk(changedFiles(input.diff), extractAddedDiffLines(input.diff));
   const backend = getActiveReviewerBackend();
   if (input.disallowTools && !BLIND_REVIEW_TOOL_EVENT_BACKENDS.has(backend.id)) {
     return parseEvaluationResponse({

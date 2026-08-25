@@ -14,10 +14,10 @@ import {
   countLaneEventsByVerbSinceLastLaunch,
   getLane,
   setLaneStatus,
-  updateLane,
 } from '@/lib/lane/registry';
 import { runLaneRebaseVerify } from '@/lib/lane/rebase-verify';
 import type { Lane, LaneCommand, LaneCommandResult, LaneEventActor } from '@/lib/lane/types';
+import { settleSuccessfulMergeWorktreeCleanup } from '@/lib/lane/successful-merge-worktree-cleanup';
 import {
   commitSpokenReviewSnapshotWithDriftRecovery,
   rejectInvalidSpokenReviewExecution,
@@ -760,16 +760,13 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       pushError = gitErrorMessage(error);
       console.warn(`[lane-merge] Push to origin failed for ${lane.baseBranch} after fast-forwarding ${actualBranch}: ${pushError}`);
     }
-    await mgr.cleanup(worktreeId, { force: true, deleteBranch: true, mergedEquivalentHeadSha: spokenEvidence.present ? reviewedSnapshotSha : undefined, workspaceRetirementAction: 'merge' });
-    void mgr.prune().catch(() => {});
-    updateLane(command.laneId, {
-      worktreePath: null,
-      // Durable terminal outcome — post-merge cleanup archives this lane
-      // soon after, and the rail's Recent group renders this chip so merged
-      // agents never evaporate from the clean view (Q ruling 2026-07-18).
-      outcome: 'merged',
-      outcomeNote: `Merged ${lane.branch} into ${lane.baseBranch}${pushedToOrigin ? ' and pushed to origin' : ''}.`,
-    }, 'system');
+    const worktreeRemoved = await settleSuccessfulMergeWorktreeCleanup({
+      manager: mgr,
+      lane,
+      worktreeId,
+      pushedToOrigin,
+      mergedEquivalentHeadSha: spokenEvidence.present ? reviewedSnapshotSha : undefined,
+    });
     setLaneStatus(command.laneId, 'completed', actor, pushedToOrigin ? 'merged_pushed' : 'merged');
 
     // Coarse product signal: the governance loop closed. Fire-and-forget.
@@ -777,9 +774,10 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
 
     const decompositionNote = await enqueueMergeDecompositions(lane.repoPath, lane.runtime);
     const updated = getLane(command.laneId);
+    const cleanupNote = worktreeRemoved ? '' : ' Worktree cleanup is pending and remains addressable for retry.';
     const mergeNote = pushedToOrigin
-      ? `Rebased ${lane.branch} onto ${lane.baseBranch}, fast-forwarded ${lane.baseBranch}, and pushed to origin.${decompositionNote}`
-      : `Rebased ${lane.branch} onto ${lane.baseBranch} and fast-forwarded ${lane.baseBranch} LOCALLY - push to origin failed: ${pushError ?? 'unknown error'}. Run \`git push origin ${lane.baseBranch}\` to ship the commit.${decompositionNote}`;
+      ? `Rebased ${lane.branch} onto ${lane.baseBranch}, fast-forwarded ${lane.baseBranch}, and pushed to origin.${cleanupNote}${decompositionNote}`
+      : `Rebased ${lane.branch} onto ${lane.baseBranch} and fast-forwarded ${lane.baseBranch} LOCALLY - push to origin failed: ${pushError ?? 'unknown error'}. Run \`git push origin ${lane.baseBranch}\` to ship the commit.${cleanupNote}${decompositionNote}`;
     return {
       ok: true,
       laneId: command.laneId,
