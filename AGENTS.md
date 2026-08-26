@@ -105,6 +105,7 @@ The `o8` CLI is symlinked onto `$PATH` after o8.app runs once. Inside packet wor
 
 ```
 o8 status                                  # fleet snapshot: packets, lanes, merges, approvals
+o8 history <thoughts-thread-id> [--limit 200]  # continuous transcript + audited handoff seams
 o8 version                                 # CLI + connected server version
 o8 doctor [--reap] [--repair]              # diagnose server/config; reap zombies; repair CLI symlink
 o8 app restart [--if-update-pending]        # request a running-app restart

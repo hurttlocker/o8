@@ -485,7 +485,7 @@ export function useOrchestratorStream(
         next[idx] = {
           ...next[idx],
           text: text || (thinking ? '' : ''),
-          thinking, backend: current.backend ?? next[idx].backend,
+          thinking, backend: current.backend ?? next[idx].backend, model: current.model ?? next[idx].model,
           ...(thinkingDurationMs !== undefined ? { thinkingDurationMs } : {}),
           thinkingActive,
           timestamp: next[idx].timestamp ?? Date.now(),
@@ -498,7 +498,7 @@ export function useOrchestratorStream(
         id: current.id,
         role: 'assistant',
         text: text || (thinking ? '' : ''),
-        thinking, backend: current.backend,
+        thinking, backend: current.backend, model: current.model,
         ...(thinkingDurationMs !== undefined ? { thinkingDurationMs } : {}),
         thinkingActive,
         timestamp: Date.now(),
@@ -1001,10 +1001,10 @@ export function useOrchestratorStream(
         orchestrationMode,
         thinkingEffort,
         model,
-        // Per-turn backend override keeps the composer chip truthful even while
-        // the global operator default write is still settling.
+        // Per-turn override stays truthful while the global default write settles.
         backend,
         collideBaseBackend,
+        handoffMode: options?.handoffMode,
         attachments: options?.attachments,
       });
       const pendingRecord = {

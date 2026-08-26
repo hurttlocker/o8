@@ -3,7 +3,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useReducer, useRef, useState } from 'react';
 import { CollapsiblePlanCard } from '@/components/desktop/CollapsiblePlanCard';
 import { composeComposerTurnMessage, resolveComposerExecutionMode, type ComposerMode } from './composer-mode';
-import { formatModelLabel } from '@/lib/format';
 import { orchestratorBackendDisplayLabel, orchestratorRuntimeTone } from '@/lib/orchestrator/display';
 import { correlatedActionIsUnsettled } from '@/lib/orchestrator/action-receipt';
 import { fetchRuntimeLaunchReceipt, fetchRuntimeSteerReceipt } from '@/lib/orchestrator/runtime-mutation-receipt';
@@ -48,6 +47,7 @@ import {
   resolveThreadLoadPlan,
 } from './utils';
 import { useOrchestratorStream } from './useOrchestratorStream';
+import type { OrchestratorSendOptions } from './use-orchestrator-stream/types';
 import { useOrchestratorStatusFeed } from './useOrchestratorStatusFeed';
 import { getPendingMissionCards } from './mission-complete-detector';
 import { useOrchestratorContextResidency } from '@/components/desktop/orchestrator/context-residency';
@@ -58,6 +58,7 @@ import { ipcFetch } from '@/lib/tauri/ipc-fetch';
 import { track } from '@/lib/analytics/track';
 import { ChatToastStack } from './chat-panel/ChatToastStack';
 import { ComposerArea } from './chat-panel/ComposerArea';
+import { BackendSwitchChoice } from './chat-panel/BackendSwitchChoice';
 import { ComposerSendBufferStatus } from './chat-panel/ComposerSendBufferStatus';
 import { useDefaultComposerSendBuffer } from './chat-panel/useDefaultComposerSendBuffer';
 import { shouldApplyAutoRestoreAfterFetch } from './chat-panel/autoRestoreGuard';
@@ -105,13 +106,18 @@ import type {
 import {
   fetchThoughtsOperatorDefaults,
   THOUGHTS_OPERATOR_DEFAULTS_FALLBACK,
-  type ThoughtsOperatorDefaults,
   type OrchestratorBackendSetting,
 } from './operator-defaults';
 import {
   mapHistoryMessagesToTranscript,
   type ThoughtsHistoryMessage,
 } from './history-transcript';
+import {
+  composerBackendTurnOverride,
+  formatComposerBackendLabel,
+  resolveActiveComposerBackend,
+  useBackendSwitchChoice,
+} from './useBackendSwitchChoice';
 
 export type { ThoughtsChatPanelHandle, ThoughtsChatPanelChromeState, ThoughtsChatPermissionMode };
 function isRuntimeSessionKey(sessionKey: string): boolean {
@@ -127,28 +133,6 @@ function isRuntimeSessionKey(sessionKey: string): boolean {
 function repoPathLabel(path: string | null | undefined): string | null {
   if (!path?.trim()) return null;
   return path.split('/').filter(Boolean).pop() ?? path;
-}
-
-function resolveActiveComposerBackend(defaults: {
-  orchestratorBackend: OrchestratorBackendSetting;
-  inAppOrchestratorEnabled: boolean;
-}): OrchestratorBackendSetting {
-  if (defaults.orchestratorBackend !== 'auto') return defaults.orchestratorBackend;
-  return defaults.inAppOrchestratorEnabled ? 'claude' : 'codex';
-}
-
-function formatComposerBackendLabel(backend: OrchestratorBackendSetting, model: string): string {
-  if (backend === 'codex') return 'Codex GPT-5.6';
-  if (backend === 'fable') return 'Fable 5';
-  if (backend === 'openclaw') return 'OpenClaw';
-  if (backend === 'hermes') return 'Hermes';
-  if (backend === 'collide') return 'Collide';
-  if (backend === 'o8') return 'o8';
-  return formatModelLabel(model);
-}
-
-function composerBackendTurnOverride(backend: OrchestratorBackendSetting): OrchestratorBackendId | undefined {
-  return backend === 'auto' ? undefined : backend;
 }
 
 export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
@@ -444,6 +428,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const [threadId, setThreadId] = useState<string | null>(null);
   const threadIdRef = useRef<string | null>(null);
   const [activeThreadBackend, setActiveThreadBackend] = useState<OrchestratorBackendId | null>(null);
+  const latestAssistantBackendRef = useRef<OrchestratorBackendId | null>(null);
   // Stored on thread load but no longer read for the composer label — the chip
   // predicts the next turn, which runs the backend's default agent (see the
   // activeBackendLabel note). Kept as a setter-only slot for the load pipeline.
@@ -461,6 +446,18 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const loadGenerationRef = useRef(0);
   const exportFeedbackTimerRef = useRef<number | null>(null);
   const [resolvedRepoPath, setResolvedRepoPath] = useState<string | null>(repoPathProp ?? null);
+  const backendSwitch = useBackendSwitchChoice({
+    backendSourceRef,
+    currentModel: orchestratorModel,
+    latestAssistantBackendRef,
+    operatorDefaults,
+    repoPath: resolvedRepoPath,
+    setActiveThreadAgent,
+    setActiveThreadBackend,
+    setBackend: setOrchestratorBackend,
+    setModel: setOrchestratorModel,
+    setOperatorDefaults,
+  });
   const [threadProjectId, setThreadProjectId] = useState<string | null>(projectIdProp ?? null);
   useEffect(() => {
     if (threadIdRef.current !== null) return;
@@ -1099,6 +1096,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
 
   const handleReset = useCallback(() => {
     setInput('');
+    backendSwitch.reset();
     setPreEnhanceInput(null);
     setChatMessages([]);
     resetThreadHistoryWindow();
@@ -1136,7 +1134,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     singleRuntimeSessionRef.current = null;
     singleRuntimeLaunchPromiseRef.current = null;
     setTimeout(() => inputRef.current?.focus(), 50);
-  }, [cancelPendingPersist, clearPolling, orchStream, isOrchestratorMode, operatorDefaults, orchestratorBackend, projectIdProp, resetThreadHistoryWindow]);
+  }, [backendSwitch, cancelPendingPersist, clearPolling, orchStream, isOrchestratorMode, operatorDefaults, orchestratorBackend, projectIdProp, resetThreadHistoryWindow]);
 
   const handleEnhance = useCallback(async () => {
     if (!input.trim() || enhancing) return;
@@ -1450,6 +1448,11 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       streamMessages: orchStream.messages,
     });
   }, [chatMessages, isChatMode, isOrchestratorMode, orchStream.messages, threadHistoryEntries]);
+  useEffect(() => {
+    const latestAssistant = [...displayMessages].reverse().find((message) => message.role === 'assistant');
+    latestAssistantBackendRef.current = latestAssistant?.backend ?? null;
+    backendSwitch.observeLatestBackend(latestAssistant?.backend ?? null);
+  }, [backendSwitch, displayMessages]);
   // See `composerRepoLabelBase` for the rationale — derived here so
   // the empty-state check matches the empty-state-override condition.
   const composerRepoLabel = displayMessages.length === 0 ? null : composerRepoLabelBase;
@@ -1584,9 +1587,14 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const latestInputRef = useRef('');
   useEffect(() => { latestInputRef.current = input; }, [input]);
 
+  const sendOrchestrator = useCallback((message: string, options: OrchestratorSendOptions) => {
+    const handoffMode = backendSwitch.currentHandoffMode();
+    return orchStream.send(message, handoffMode ? { ...options, handoffMode } : options);
+  }, [backendSwitch, orchStream]);
+
   const startSlashOrchestration = useCallback(async (request: SlashOrchestrationRequest) => {
     const localEntriesAfterUser = request.commandEntry ? [request.commandEntry] : [];
-    orchStream.send(request.displayMessage, {
+    sendOrchestrator(request.displayMessage, {
       permissionMode,
       backend: composerBackendTurnOverride(orchestratorBackend),
       thinkingEffort,
@@ -1597,7 +1605,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       orchestrationMode: resolveComposerExecutionMode('multitask', swarmEnabled, soloOrchestrator),
       collide: collideEnabled,
     });
-  }, [orchStream, orchestratorBackend, orchestratorModel, permissionMode, thinkingEffort, swarmEnabled, soloOrchestrator, collideEnabled]);
+  }, [sendOrchestrator, orchestratorBackend, orchestratorModel, permissionMode, thinkingEffort, swarmEnabled, soloOrchestrator, collideEnabled]);
 
   const runLocalOrchestratorSlash = useCallback(async (rawInput: string) => {
     if (!isOrchestratorMode || isChatMode) return false;
@@ -1713,7 +1721,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
             : undefined;
           setInput('');
           latestInputRef.current = '';
-          orchStream.send(body, {
+          sendOrchestrator(body, {
             permissionMode,
             backend: composerBackendTurnOverride(orchestratorBackend),
             thinkingEffort,
@@ -1862,11 +1870,11 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         // KEEP the composer text so the user's message isn't lost to the void
         // (the fresh-user "I typed and nothing happened" trap). Leave the toggle
         // armed — nothing dispatched, so the clarify intent still stands.
-        orchStream.send(displayMessage, { ...orchOptions, displayMessage });
+        sendOrchestrator(displayMessage, { ...orchOptions, displayMessage });
         return;
       }
       setInput('');
-      orchStream.send(displayMessage, { ...orchOptions, displayMessage });
+      sendOrchestrator(displayMessage, { ...orchOptions, displayMessage });
       clearAttachments();
       return;
     }
@@ -1922,7 +1930,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       ]);
       if (!receiptUnsettled) setWaitingForReply(false);
     }
-  }, [attachedImages, captureServerSnapshot, chatMessages, chatOpenrouterModel, chatStreamRequest, clearAttachments, ensureSingleRuntimeSession, input, isChatMode, isOrchestratorMode, isSingleMode, lockedMode, onSpawnChatTab, onSpawnSingleTab, orchStream, orchestratorBackend, orchestratorModel, permissionMode, resolvedRepoPath, runLocalOrchestratorSlash, selectedChatModel, singleRuntime, startPolling, startPollingForSession, targetAgent, targetSessionKey, thinkingEffort, swarmEnabled, soloOrchestrator, collideEnabled, waitingForReply]);
+  }, [attachedImages, captureServerSnapshot, chatMessages, chatOpenrouterModel, chatStreamRequest, clearAttachments, ensureSingleRuntimeSession, input, isChatMode, isOrchestratorMode, isSingleMode, lockedMode, onSpawnChatTab, onSpawnSingleTab, orchStream, orchestratorBackend, orchestratorModel, permissionMode, resolvedRepoPath, runLocalOrchestratorSlash, selectedChatModel, sendOrchestrator, singleRuntime, startPolling, startPollingForSession, targetAgent, targetSessionKey, thinkingEffort, swarmEnabled, soloOrchestrator, collideEnabled, waitingForReply]);
 
   const sendNow = useCallback((text?: string, options?: ThoughtsSendNowOptions) => {
     const msg = (typeof text === 'string' ? text : latestInputRef.current).trim();
@@ -1948,7 +1956,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           ? attachedImages.map((img) => ({ dataUri: img.dataUri, name: img.name }))
           : undefined);
         const { displayMessage, wireMessage, orchestrationMode: turnOrchestrationMode } = composeComposerTurnMessage(msg, composerModeRef.current, swarmEnabled, soloOrchestrator);
-        orchStream.send(displayMessage, {
+        sendOrchestrator(displayMessage, {
           permissionMode,
           backend: composerBackendTurnOverride(orchestratorBackend),
           thinkingEffort,
@@ -1968,13 +1976,13 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     latestInputRef.current = msg;
     setTimeout(() => { void handleTaskSend(msg); }, 0);
     return true;
-  }, [attachedImages, clearAttachments, handleTaskSend, isChatMode, isOrchestratorMode, orchStream, orchestratorBackend, orchestratorModel, permissionMode, runLocalOrchestratorSlash, thinkingEffort, swarmEnabled, soloOrchestrator, collideEnabled, waitingForReply]);
+  }, [attachedImages, clearAttachments, handleTaskSend, isChatMode, isOrchestratorMode, orchStream, orchestratorBackend, orchestratorModel, permissionMode, runLocalOrchestratorSlash, sendOrchestrator, thinkingEffort, swarmEnabled, soloOrchestrator, collideEnabled, waitingForReply]);
 
   const dispatchBufferedOrchestratorSend = useCallback((text: string, images: Array<{ name: string; dataUri: string }>) => {
     if (!isOrchestratorMode) return null;
     const { displayMessage, wireMessage, orchestrationMode: turnOrchestrationMode } = composeComposerTurnMessage(text, composerModeRef.current, swarmEnabled, soloOrchestrator);
     track('orchestrator.message');
-    return orchStream.send(displayMessage, {
+    return sendOrchestrator(displayMessage, {
       permissionMode,
       backend: composerBackendTurnOverride(orchestratorBackend),
       thinkingEffort,
@@ -1985,7 +1993,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       collide: collideEnabled,
       ...(images.length > 0 ? { attachments: images } : {}),
     });
-  }, [collideEnabled, isOrchestratorMode, orchStream, orchestratorBackend, orchestratorModel, permissionMode, soloOrchestrator, swarmEnabled, thinkingEffort]);
+  }, [collideEnabled, isOrchestratorMode, orchestratorBackend, orchestratorModel, permissionMode, sendOrchestrator, soloOrchestrator, swarmEnabled, thinkingEffort]);
 
   const { sendBuffer, handleSend: handleComposerSend } = useDefaultComposerSendBuffer({
     active: isOrchestratorMode,
@@ -2097,37 +2105,15 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     writeStoredOrchestratorThinkingOverride(nextOverride);
   }, []);
 
-  const handleBackendChange = useCallback((next: OrchestratorBackendSetting) => {
-    backendSourceRef.current = 'user';
-    setOrchestratorBackend(next);
-    setActiveThreadBackend(composerBackendTurnOverride(next) ?? null);
-    setActiveThreadAgent(null);
-    void fetch('/api/panel/operator-defaults', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ orchestratorBackend: next }),
-    })
-      .then(async (response) => {
-        const payload = await response.json().catch(() => null) as { values?: Partial<ThoughtsOperatorDefaults>; error?: string } | null;
-        if (!response.ok) {
-          throw new Error(payload?.error || 'Failed to persist orchestrator backend.');
-        }
-        return payload;
-      })
-      .then((payload: { values?: Partial<ThoughtsOperatorDefaults> } | null) => {
-        if (!payload?.values) return;
-        const defaults: ThoughtsOperatorDefaults = {
-          ...operatorDefaults,
-          ...payload.values,
-        };
-        setOperatorDefaults(defaults);
-        setOrchestratorBackend(resolveActiveComposerBackend(defaults));
-      })
-      .catch((error) => {
-        console.log('[thoughts] failed to persist orchestrator backend', error);
-        setOrchestratorBackend(resolveActiveComposerBackend(operatorDefaults));
-      });
-  }, [operatorDefaults]);
+  const handleBackendStartFresh = useCallback(() => {
+    if (!backendSwitch.pending) return;
+    const draft = latestInputRef.current;
+    const target = backendSwitch.pending;
+    handleReset();
+    setInput(draft);
+    latestInputRef.current = draft;
+    backendSwitch.apply(target.backend, target.model);
+  }, [backendSwitch, handleReset]);
 
   const handleCopyMarkdown = useCallback(async (): Promise<boolean> => {
     if (displayMessages.length === 0) return false;
@@ -2302,6 +2288,14 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           transform: 'none',
         }}
       >
+      {backendSwitch.pending ? (
+        <BackendSwitchChoice
+          target={backendSwitch.pending}
+          onHandoff={backendSwitch.acceptHandoff}
+          onStartFresh={handleBackendStartFresh}
+          onCancel={backendSwitch.clearPending}
+        />
+      ) : null}
       <ComposerArea
         ref={inputRef} activeComposer={open}
         input={input}
@@ -2341,11 +2335,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         modelLabel={isChatMode ? selectedChatModel.label : isSingleMode ? activeTargetLabel : isOrchestratorMode ? activeBackendLabel ?? formatComposerBackendLabel(orchestratorBackend, orchestratorModel) : activeTargetLabel}
         modelId={isOrchestratorMode ? orchestratorModel : undefined}
         onModelChange={isOrchestratorMode ? (model) => {
+          backendSwitch.clearPending();
           setOrchestratorModel(model);
           writeStoredOrchestratorModel(resolvedRepoPath, model);
         } : undefined}
         activeBackend={isOrchestratorMode ? orchestratorBackend : undefined}
-        onBackendChange={isOrchestratorMode ? handleBackendChange : undefined}
+        onBackendChange={isOrchestratorMode ? backendSwitch.request : undefined}
         effort={thinkingEffort}
         onEffortChange={handleEffortChange}
         adaptiveEnabled={adaptiveThinkingEnabled}

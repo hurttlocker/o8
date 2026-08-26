@@ -121,13 +121,14 @@ export async function requestOrchestratorCompaction(
   activeRepoPath: string,
   nextRunningTotal: number,
   nextMessages: MobileTranscriptEntry[],
-  options?: { keepTailCount?: number; trigger?: 'auto' | 'manual' | 'handoff' },
+  options?: { keepTailCount?: number; trigger?: 'auto' | 'manual' | 'handoff'; threadId?: string | null },
 ): Promise<CompactResponsePayload | null> {
   const response = await fetch('/api/orchestrator/compact', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       repoPath: activeRepoPath,
+      threadId: options?.threadId,
       runningTotal: nextRunningTotal,
       messages: nextMessages,
       keepTailCount: options?.keepTailCount,

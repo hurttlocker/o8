@@ -101,6 +101,44 @@ const userMsg: MobileTranscriptEntry = {
   timestampLabel: '12:00',
 };
 
+describe('orchestrator socket — handoff seam', () => {
+  it('renders one durable handoff marker and keeps destination attribution', () => {
+    const h = makeHarness({ status: 'busy', messages: [userMsg] });
+    const handoff = {
+      handoffId: 'handoff-live-1',
+      from: { backend: 'claude', model: 'source/model' },
+      to: { backend: 'codex', model: 'destination/model' },
+      lossless: false,
+      carries: {
+        narrative: 'full',
+        intent: 'summary',
+        workspace: 'full',
+        governance: 'full',
+        provenance: 'summary',
+      },
+    };
+    h.fire({ channel: 'orchestrator', event: 'handoff', data: { ...handoff, beforeMessageId: userMsg.id } });
+    h.fire({ channel: 'orchestrator', event: 'handoff', data: { ...handoff, beforeMessageId: userMsg.id } });
+    h.fire({
+      channel: 'orchestrator',
+      event: 'output',
+      data: { text: 'continued', backend: 'codex', model: 'destination/model' },
+    });
+
+    const messages = h.setMessages.mock.calls.reduce<MobileTranscriptEntry[]>(
+      (state, [updater]) => (typeof updater === 'function' ? updater(state) : updater),
+      [userMsg],
+    );
+    expect(messages.filter((message) => message.id === 'handoff-live-1')).toHaveLength(1);
+    expect(messages.find((message) => message.id === 'handoff-live-1')).toMatchObject({
+      type: 'handoff',
+      handoff,
+    });
+    expect(messages.map((message) => message.id).slice(0, 2)).toEqual(['handoff-live-1', userMsg.id]);
+    expect(h.currentAssistantRef.current).toMatchObject({ backend: 'codex', model: 'destination/model' });
+  });
+});
+
 describe('orchestrator socket — first-turn streaming race', () => {
   it('drops late stream events after undo until the interrupted turn settles', () => {
     const h = makeHarness({ status: 'ready', suppressTurnEvents: true });
@@ -148,9 +186,14 @@ describe('orchestrator socket — first-turn streaming race', () => {
   it('a tool-use event also promotes to busy instead of dropping the pill', () => {
     const h = makeHarness({ status: 'ready' });
 
-    h.fire({ channel: 'orchestrator', event: 'tool-use', data: { name: 'Bash' } });
+    h.fire({ channel: 'orchestrator', event: 'tool-use', data: { name: 'Bash', backend: 'claude', model: 'claude-opus-5' } });
     expect(h.statusRef.current).toBe('busy');
     expect(h.currentAssistantRef.current).not.toBeNull();
+    const messages = h.setMessages.mock.calls.reduce<MobileTranscriptEntry[]>(
+      (state, [updater]) => (typeof updater === 'function' ? updater(state) : updater),
+      [],
+    );
+    expect(messages[0]).toMatchObject({ backend: 'claude', model: 'claude-opus-5' });
   });
 
   it('keeps messagesRef in lockstep with socket transcript mutations', () => {

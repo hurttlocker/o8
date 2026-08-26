@@ -314,7 +314,7 @@ export interface MobileTranscriptEntry {
   /** Monotonic server persistence revision for this message. */
   persistedVersion?: number;
   pinned?: boolean;
-  type?: 'message' | 'compaction' | 'command';
+  type?: 'message' | 'compaction' | 'command' | 'handoff';
   media?: MobileTranscriptMedia[];
   toolCalls?: MobileTranscriptToolCall[];
   timestamp?: number;
@@ -337,6 +337,15 @@ export interface MobileTranscriptEntry {
   claudeCodeEvents?: ClaudeCodeStreamJsonChatEvent[];
   recalledFacts?: number;
   command?: MobileTranscriptCommand;
+  handoff?: {
+    handoffId: string;
+    from: { backend: string; model: string | null } | null;
+    to: { backend: string; model: string | null };
+    lossless: boolean;
+    carries: Record<'narrative' | 'intent' | 'workspace' | 'governance' | 'provenance', 'full' | 'summary' | 'omitted'>;
+    /** Serializable HandoffPacket snapshot for the inline detail drawer. */
+    packet?: Record<string, unknown>;
+  };
   compaction?: {
     timestamp: number;
     tokensBefore?: number;
@@ -344,6 +353,13 @@ export interface MobileTranscriptEntry {
     trigger: CompactionTrigger;
     source?: 'explicit' | 'summary' | 'inferred';
     summary?: string;
+    compactedBy?: {
+      backend: OrchestratorBackendId;
+      model: string;
+      reasoningEffort: string | null;
+    };
+    /** Stable archive basename; the full turns remain retrievable through /recall. */
+    archiveRef?: string;
   };
   /** Structured orchestrator status event (mission complete / merge / heal) — rendered as OrchestratorStatusCard. */
   statusEvent?: import('@/lib/orchestrator/status-events').OrchestratorStatusEventData;

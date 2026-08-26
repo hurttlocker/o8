@@ -313,7 +313,7 @@ export function ModelThinkingChip({
   modelId?: string;
   onModelChange?: (model: string) => void;
   activeBackend?: OrchestratorBackendSetting;
-  onBackendChange?: (backend: OrchestratorBackendSetting) => void;
+  onBackendChange?: (backend: OrchestratorBackendSetting, model?: string) => void;
   effort: ThinkingEffort;
   adaptiveEnabled: boolean;
   onEffortChange?: (effort: ThinkingEffort) => void;
@@ -669,8 +669,8 @@ export function ModelThinkingChip({
                           value={activeBackend === group.key ? (modelId ?? null) : null}
                           width={SEARCHABLE_HOUSE_MENU_WIDTH}
                           onSelect={(picked: string) => {
-                            onModelChange?.(picked);
-                            if (activeBackend !== group.key) onBackendChange?.(group.key as OrchestratorBackendSetting);
+                            if (activeBackend === group.key) onModelChange?.(picked);
+                            else onBackendChange?.(group.key as OrchestratorBackendSetting, picked);
                             // Fan-out backends replace the selected backend at
                             // send time, so a stale Collide/Swarm flag would
                             // route the turn away from this pick entirely.
@@ -690,8 +690,11 @@ export function ModelThinkingChip({
                             role="menuitemradio"
                             aria-checked={active}
                             onClick={() => {
-                              if (option.model) onModelChange?.(option.model);
-                              if (!active) onBackendChange?.(option.backend);
+                              if (activeBackend === option.backend) {
+                                if (option.model) onModelChange?.(option.model);
+                              } else {
+                                onBackendChange?.(option.backend, option.model);
+                              }
                               // Codex/Sol keeps ultra available; Terra + any Claude
                               // model cap at max — drop a stale ultra selection.
                               if (option.model !== MODEL_IDS.raw.openAiGpt56Sol && effort === 'ultra') onEffortChange?.('max');

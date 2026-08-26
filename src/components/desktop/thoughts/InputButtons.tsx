@@ -449,7 +449,7 @@ export function InputButtons({
   /** When set, the chip menu grows a Model section (Fable/Opus/Sonnet). */
   onModelChange?: (model: string) => void;
   activeBackend?: OrchestratorBackendSetting;
-  onBackendChange?: (backend: OrchestratorBackendSetting) => void;
+  onBackendChange?: (backend: OrchestratorBackendSetting, model?: string) => void;
   effort?: ThinkingEffort;
   onEffortChange?: (effort: ThinkingEffort) => void;
   adaptiveEnabled?: boolean;

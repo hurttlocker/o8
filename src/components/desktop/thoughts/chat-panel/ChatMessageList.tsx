@@ -8,6 +8,7 @@ import { ShimmerLine } from './turn-line';
 import { mergeAdjacentToolOnlyEntries } from './ToolCallChipCluster';
 import { CollideProposalCard } from './CollideProposalCard';
 import { MissionCompleteGroupCard } from './MissionCompleteGroupCard';
+import { HandoffTranscriptCard } from './HandoffTranscriptCard';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { noteUserScroll } from '@/lib/tts/scroll-follow';
 
@@ -223,6 +224,9 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
                 <CollideProposalCard collide={msg.collide} />
               </Fragment>
             );
+          }
+          if (msg.type === 'handoff' && msg.handoff) {
+            return <HandoffTranscriptCard key={msg.id} handoff={msg.handoff} timestampLabel={msg.timestampLabel} />;
           }
           // The "Worked for Ns" line anchors ABOVE the turn's FIRST assistant
           // message (Cursor position — right under the operator prompt).

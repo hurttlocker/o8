@@ -1,6 +1,6 @@
 import { basename } from 'node:path';
 import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
-import type { MobileOrchestratorBackend, MobileOrchestratorThread } from '@/lib/mobile/types';
+import type { MobileOrchestratorBackend, MobileOrchestratorThread, MobileTranscriptEntry } from '@/lib/mobile/types';
 import {
   ORCHESTRATOR_RUNTIME_IDS,
   isOrchestratorRuntime,
@@ -31,6 +31,9 @@ export type ChatHistoryMessage = {
    */
   backend?: string;
   model?: string;
+  type?: MobileTranscriptEntry['type'];
+  handoff?: MobileTranscriptEntry['handoff'];
+  toolCalls?: MobileTranscriptEntry['toolCalls'];
   tokens?: {
     input: number;
     output: number;

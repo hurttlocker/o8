@@ -186,8 +186,9 @@ export async function GET(request: NextRequest) {
 
   const repoPath = request.nextUrl.searchParams.get('repoPath')?.trim() ?? '';
   const query = request.nextUrl.searchParams.get('q')?.trim() ?? '';
+  const archiveRef = request.nextUrl.searchParams.get('ref')?.trim() ?? '';
   const limit = Math.max(1, Math.min(10, Number.parseInt(request.nextUrl.searchParams.get('limit') ?? '5', 10) || 5));
-  if (!repoPath || !query) {
+  if (!repoPath || (!query && !archiveRef)) {
     return NextResponse.json({ matches: [] }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
   }
 
@@ -197,6 +198,25 @@ export async function GET(request: NextRequest) {
       status: resolved.status,
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
+  }
+
+  if (archiveRef) {
+    if (path.basename(archiveRef) !== archiveRef || !archiveRef.endsWith('.json')) {
+      return NextResponse.json({ error: 'Invalid archive reference.' }, { status: 400 });
+    }
+    const raw = await readFile(path.join(ARCHIVE_DIR, archiveRef), 'utf8').catch(() => '');
+    if (!raw) return NextResponse.json({ error: 'Archive not found.' }, { status: 404 });
+    try {
+      const archive = JSON.parse(raw) as Record<string, unknown>;
+      if (String(archive.repoPath ?? '').trim().replace(/\/+$/, '') !== resolved.repoRoot) {
+        return NextResponse.json({ error: 'Archive not found.' }, { status: 404 });
+      }
+      return NextResponse.json({ archive: { ref: archiveRef, ...archive } }, {
+        headers: { 'Cache-Control': 'no-store, max-age=0' },
+      });
+    } catch {
+      return NextResponse.json({ error: 'Archive is unreadable.' }, { status: 500 });
+    }
   }
 
   const [threadMatches, compactionMatches] = await Promise.all([

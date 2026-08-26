@@ -16,6 +16,7 @@ export async function POST(request: NextRequest) {
     repoPath?: unknown;
     runningTotal?: unknown;
     messages?: unknown;
+    threadId?: unknown;
     keepTailCount?: unknown;
     trigger?: unknown;
   } | null;
@@ -39,6 +40,7 @@ export async function POST(request: NextRequest) {
   try {
     const result = await autoCompactOrchestratorThread({
       repoPath: repoRoot,
+      threadId: typeof body?.threadId === 'string' ? body.threadId : undefined,
       runningTotal: typeof body?.runningTotal === 'number' ? body.runningTotal : undefined,
       liveMessages: Array.isArray(body?.messages) ? body.messages as MobileTranscriptEntry[] : undefined,
       keepTailCount: typeof body?.keepTailCount === 'number' ? body.keepTailCount : undefined,

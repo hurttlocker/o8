@@ -31,15 +31,17 @@ export interface ChatMessageLike {
   backend?: unknown;
   model?: unknown;
   persistedVersion?: unknown;
+  type?: unknown;
+  handoff?: unknown;
 }
 
-const AUTHORSHIP_FIELDS = ['backend', 'model', 'persistedVersion'] as const;
+const SERVER_METADATA_FIELDS = ['backend', 'model', 'persistedVersion', 'type', 'handoff'] as const;
 
 function preserveStoredAuthorship<T extends ChatMessageLike>(existing: T, inbound: T): T {
   const existingRecord = existing as Record<string, unknown>;
   const inboundRecord = inbound as Record<string, unknown>;
   let next: Record<string, unknown> | null = null;
-  for (const field of AUTHORSHIP_FIELDS) {
+  for (const field of SERVER_METADATA_FIELDS) {
     if (inboundRecord[field] !== undefined || existingRecord[field] === undefined) continue;
     next ??= { ...inboundRecord };
     next[field] = existingRecord[field];

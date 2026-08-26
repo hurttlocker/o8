@@ -13,6 +13,7 @@ JSON to stdout is the default; pass `--human` for ANSI-formatted output.
 | `o8 version` | CLI version + connected server version |
 | `o8 doctor` | Verify port + token resolution; ping `/api/panel/status` |
 | `o8 status` | Snapshot: running packets, active lanes, recent merges, pending approvals |
+| `o8 history <thoughts-thread-id> [--limit 200]` | Read one continuous orchestrator transcript with permanent, audited handoff seams |
 | `o8 worker spawn --title "..." [--repo <path>]` | Create and dispatch one governed worker from any local repo without adding it to Projects; the running app opens a dedicated worker pane |
 | `o8 mission create --title "..." [--dispatch]` | Create a transient-repo mission; `--dispatch` starts it immediately |
 | `o8 repo list` | List every repository registered in the running app |

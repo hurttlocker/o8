@@ -24,6 +24,8 @@ export interface OrchestratorSendOptions {
   localEntriesAfterUser?: MobileTranscriptEntry[];
   orchestrationMode?: OrchestratorExecutionMode;
   collide?: boolean;
+  /** Explicit consent to seed a cold cross-backend continuation. */
+  handoffMode?: 'handoff';
   attachments?: Array<{ dataUri: string; name?: string }>;
 }
 

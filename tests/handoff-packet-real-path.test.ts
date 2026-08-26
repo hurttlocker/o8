@@ -47,10 +47,15 @@ writeFileSync(join(handoffWorktreePath, 'notes.txt'), 'base\nworktree change\n',
 writeFileSync(join(handoffWorktreePath, 'handoff-untracked.txt'), 'worktree-only work\n', 'utf-8');
 
 const history = await import('@/lib/mobile/orchestrator-thread-history');
+const chatHistoryStore = await import('@/lib/llm/chat-history-store');
 const laneRegistry = await import('@/lib/lane/registry');
 const approvals = await import('@/lib/approvals/store');
 const handoff = await import('@/lib/orchestrator/handoff-packet');
+const backendCarry = await import('@/lib/orchestrator/backend-switch-carry');
+const controlPlane = await import('@/lib/orchestrator/control-plane');
+const orchestratorStore = await import('@/lib/orchestrator/store');
 const route = await import('@/app/api/orchestrator/handoff/route');
+const historyRoute = await import('@/app/api/orchestrator/history/route');
 
 function createThread(input: {
   assistantBackend?: 'o8';
@@ -86,6 +91,42 @@ afterAll(() => {
 });
 
 describe('handoff packet real path', () => {
+  it('persists the seam immediately before the accepted operator turn', () => {
+    const threadId = createThread({ assistantBackend: 'o8', assistantModel: 'source/model' });
+    history.appendMobileOrchestratorUserMessage({
+      tabId: threadId,
+      message: 'Continue after the seam.',
+      messageId: 'handoff-user-turn',
+      repoPath,
+      backend: 'codex',
+      handoff: {
+        handoffId: 'handoff-atomic-seam',
+        from: { backend: 'o8', model: 'source/model' },
+        to: { backend: 'codex', model: 'destination/model' },
+        lossless: false,
+        carries: {
+          narrative: 'full',
+          intent: 'summary',
+          workspace: 'full',
+          governance: 'omitted',
+          provenance: 'summary',
+        },
+      },
+    });
+
+    expect(chatHistoryStore.readPersistedLlmChat(threadId)?.history.messages.slice(-2)).toMatchObject([
+      { id: 'handoff-atomic-seam', type: 'handoff', role: 'system' },
+      { id: 'handoff-user-turn', role: 'user', content: 'Continue after the seam.' },
+    ]);
+    history.truncateMobileOrchestratorThreadFromMessage({
+      tabId: threadId,
+      messageId: 'handoff-user-turn',
+    });
+    expect(chatHistoryStore.readPersistedLlmChat(threadId)?.history.messages.some((message) => (
+      message.id === 'handoff-atomic-seam' || message.id === 'handoff-user-turn'
+    ))).toBe(false);
+  });
+
   it('builds an authenticated packet from persisted thread, Git, lane, and approval state', async () => {
     const threadId = createThread({
       assistantBackend: 'o8',
@@ -189,7 +230,10 @@ describe('handoff packet real path', () => {
       expect.objectContaining({ id: approval.id, status: 'pending' }),
     ]);
     expect(packet.governance?.events.some((event) => event.verb === 'status_change')).toBe(true);
-    expect(packet.governance?.retryBudget.executionFailuresConsumed).toBeNull();
+    expect(packet.governance?.retryBudget).toMatchObject({
+      executionFailuresConsumed: 0,
+      byPacket: [expect.objectContaining({ packetId: 'pkt-handoff-real', attemptCount: 0 })],
+    });
     expect(packet.provenance).toMatchObject({
       sourceTurnCount: 2,
       attributedAssistantTurns: 2,
@@ -218,6 +262,132 @@ describe('handoff packet real path', () => {
       unattributedAssistantTurns: 1,
       claimsClassified: false,
     });
+  });
+
+  it('normalizes source-native tool calls into portable described actions', async () => {
+    const threadId = createThread({ assistantBackend: 'o8', assistantModel: 'gateway/local' });
+    const persisted = chatHistoryStore.readPersistedLlmChat(threadId);
+    if (!persisted) throw new Error('expected persisted thread');
+    chatHistoryStore.persistCanonicalChatHistoryRecord(threadId, {
+      ...persisted.history,
+      messages: persisted.history.messages.map((message) => message.role === 'assistant'
+        ? {
+          ...message,
+          toolCalls: [{
+            name: 'source_native_edit',
+            args: { file_path: '/source-only/path.ts' },
+            preview: 'Updated the workspace file.',
+            sideEffectClass: 'write' as const,
+            status: 'done' as const,
+          }],
+        }
+        : message),
+    });
+
+    const packet = await handoff.buildHandoffPacket({
+      threadId,
+      to: { backend: 'codex', model: 'destination/model' },
+    });
+    expect(packet.narrative.messages.find((message) => message.role === 'assistant')?.actions).toEqual([{
+      description: 'Updated the workspace file.',
+      sideEffect: 'write',
+      status: 'completed',
+    }]);
+    const prelude = backendCarry.renderBackendSwitchHandoffPrelude(packet);
+    expect(prelude).toContain('Updated the workspace file.');
+    expect(prelude).not.toContain('source_native_edit');
+    expect(prelude).not.toContain('file_path');
+  });
+
+  it('discovers thread-bound packet obligations and records the permanent lane seam', async () => {
+    const threadId = createThread({ assistantBackend: 'o8', assistantModel: 'gateway/local' });
+    const packetId = 'pkt-thread-bound-handoff';
+    const lane = laneRegistry.createLane({
+      repoPath,
+      worktreePath: handoffWorktreePath,
+      branch: 'handoff-work',
+      runtime: 'codex',
+      packetId,
+      sessionKey: 'governed-session',
+      projectId: null,
+    });
+    laneRegistry.updateLane(lane.id, { status: 'running' });
+    const state = orchestratorStore.createEmptyOrchestratorMissionState();
+    state.missionId = 'mission-thread-bound-handoff';
+    state.repoPath = repoPath;
+    state.packets = [{
+      id: packetId,
+      referenceLabel: 'P1',
+      title: 'Preserve governed work',
+      summary: 'The receiver inherits this active obligation.',
+      workspaceTargetPath: handoffWorktreePath,
+      branchTarget: 'handoff-work',
+      runtime: 'codex',
+      dependencyLabels: [],
+      dependencyPacketIds: [],
+      queueState: 'held',
+      releaseState: 'pending',
+      status: 'running',
+      attemptCount: 2,
+      maxAttempts: 4,
+      recoveryCount: 1,
+      typecheckAutoRetries: 1,
+      orchestratorThreadId: threadId,
+    }];
+    controlPlane.writeOrchestratorControlPlaneState(state);
+
+    const prepared = await backendCarry.prepareBackendSwitchHandoff({
+      threadId,
+      to: { backend: 'codex', model: 'destination/model' },
+    });
+    expect(prepared?.packet.governance).toMatchObject({
+      packets: [expect.objectContaining({ packetId, laneId: lane.id, attemptCount: 2, maxAttempts: 4 })],
+      retryBudget: {
+        executionFailuresConsumed: 2,
+        limit: 4,
+        byPacket: [expect.objectContaining({ packetId, recoveryCount: 1, typecheckAutoRetries: 1 })],
+      },
+    });
+    if (!prepared) throw new Error('expected governed handoff');
+    history.appendMobileOrchestratorUserMessage({
+      tabId: threadId,
+      repoPath,
+      message: 'Continue the governed work.',
+      backend: 'codex',
+      handoff: {
+        handoffId: prepared.packet.handoffId,
+        from: prepared.seam.from,
+        to: prepared.seam.to,
+        lossless: prepared.seam.lossless,
+        carries: prepared.packet.carries,
+        packet: prepared.packet as unknown as Record<string, unknown>,
+      },
+    });
+    backendCarry.recordBackendSwitchHandoffAudit(prepared);
+
+    expect(laneRegistry.getLaneEvents(lane.id, 20).at(-1)).toMatchObject({
+      verb: 'handoff',
+      actor: 'orchestrator',
+      payload: {
+        handoffId: prepared.packet.handoffId,
+        threadId,
+        lossless: false,
+      },
+    });
+    const historyResponse = await historyRoute.GET(new NextRequest(
+      `https://operator.example.test/api/orchestrator/history?threadId=${threadId}`,
+      { headers: { Authorization: `Bearer ${operatorToken}` } },
+    ));
+    expect(historyResponse.status).toBe(200);
+    const historyPayload = await historyResponse.json() as {
+      timeline: Array<{ kind: string; handoff?: { handoffId: string }; audits: Array<{ laneId: string }> }>;
+    };
+    expect(historyPayload.timeline).toContainEqual(expect.objectContaining({
+      kind: 'handoff',
+      handoff: expect.objectContaining({ handoffId: prepared.packet.handoffId }),
+      audits: [expect.objectContaining({ laneId: lane.id })],
+    }));
+    controlPlane.writeOrchestratorControlPlaneState(orchestratorStore.createEmptyOrchestratorMissionState());
   });
 
   it('rejects governance from a lane in another workspace', async () => {

@@ -5,14 +5,21 @@ import { resolve } from 'node:path';
 
 import { listApprovalsForContext } from '@/lib/approvals/store';
 import { getRuntimeRepoReview } from '@/lib/git/runtime-review';
-import { getLane, getLaneEvents } from '@/lib/lane/registry';
+import { getLane, getLaneEvents, listLanes } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
 import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
-import type { OrchestratorHistoryRecord } from '@/lib/mobile/orchestrator-thread-projection';
+import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import type { ChatHistoryMessage, OrchestratorHistoryRecord } from '@/lib/mobile/orchestrator-thread-projection';
 import { safeOrchestratorHistoryPath } from '@/lib/mobile/orchestrator-thread-history';
+import { autoCompactOrchestratorThread } from '@/lib/orchestrator/auto-compact';
+import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
+import { listMissionRegistryEntries } from '@/lib/orchestrator/mission-registry';
+import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
 export const HANDOFF_PACKET_SCHEMA = 'o8/handoff.packet/v1' as const;
 const GOVERNANCE_EVENT_LIMIT = 200;
+export const HANDOFF_FULL_NARRATIVE_TOKEN_LIMIT = 48_000;
+const HANDOFF_COMPACTION_TAIL_COUNT = 12;
 
 export type HandoffCarry = 'full' | 'summary' | 'omitted';
 
@@ -31,6 +38,7 @@ export interface BuildHandoffPacketInput {
   unverifiedClaims?: string[];
   handoffId?: string;
   createdAt?: string;
+  narrativeMode?: 'auto' | 'full' | 'compact';
   /** Internal launch-path exclusion when fallback selection follows persistence. */
   excludeMessageId?: string;
 }
@@ -54,10 +62,25 @@ export interface HandoffPacket {
       content: string;
       backend: string | null;
       model: string | null;
+      actions?: Array<{
+        description: string;
+        status: 'completed' | 'failed' | 'incomplete' | 'unknown';
+        sideEffect: 'read' | 'write' | 'meta' | 'unknown';
+      }>;
     }>;
     seams: number[];
     tokenEstimate: number;
-    compactedBy: null;
+    compaction: {
+      summary: string;
+      fullNarrativeRef: string;
+      archivedTurnCount: number;
+      retainedTurnCount: number;
+    } | null;
+    compactedBy: {
+      backend: string;
+      model: string;
+      reasoningEffort: string | null;
+    } | null;
   };
   intent: HandoffIntent | null;
   workspace: {
@@ -76,6 +99,10 @@ export interface HandoffPacket {
       status: string;
       runtime: string;
       sessionKey: string | null;
+      branch: string | null;
+      worktreePath: string | null;
+      attemptCount: number;
+      maxAttempts: number | null;
     }>;
     approvals: Array<{
       id: string;
@@ -97,8 +124,18 @@ export interface HandoffPacket {
     }>;
     eventsTruncated: boolean;
     retryBudget: {
-      executionFailuresConsumed: null;
-      limit: null;
+      executionFailuresConsumed: number;
+      limit: number | null;
+      byPacket: Array<{
+        packetId: string;
+        attemptCount: number;
+        maxAttempts: number | null;
+        recoveryCount: number;
+        typecheckAutoRetries: number;
+        leaseWaitAutoRetries: number;
+        stallRetries: number;
+        launchAttempts: number;
+      }>;
       note: string;
     };
   } | null;
@@ -176,6 +213,31 @@ function sourceFromMessages(
   };
 }
 
+function describedActions(
+  message: ChatHistoryMessage,
+): HandoffPacket['narrative']['messages'][number]['actions'] {
+  const actions = message?.toolCalls?.map((tool) => {
+    const sideEffect: 'read' | 'write' | 'meta' | 'unknown' = tool.sideEffectClass ?? 'unknown';
+    const fallback = sideEffect === 'read'
+      ? 'Inspected source workspace state.'
+      : sideEffect === 'write'
+        ? 'Changed source workspace state.'
+        : sideEffect === 'meta'
+          ? 'Updated source orchestration state.'
+          : 'Performed a source-runtime action.';
+    const description = tool.preview?.trim() || fallback;
+    const status = tool.status === 'done'
+      ? 'completed' as const
+      : tool.status === 'error'
+        ? 'failed' as const
+        : tool.status === 'running' || tool.status === 'calling'
+          ? 'incomplete' as const
+          : 'unknown' as const;
+    return { description, status, sideEffect };
+  }).filter((action) => action.description);
+  return actions && actions.length > 0 ? actions : undefined;
+}
+
 function narrativeFromRecord(
   record: OrchestratorHistoryRecord,
   excludeMessageId?: string,
@@ -193,6 +255,7 @@ function narrativeFromRecord(
       content: message.content,
       backend: typeof message.backend === 'string' && message.backend ? message.backend : null,
       model: typeof message.model === 'string' && message.model ? message.model : null,
+      actions: describedActions(message),
     });
   }
 
@@ -207,6 +270,23 @@ function narrativeFromRecord(
     previous = { backend: message.backend, model: message.model };
   }
   return { messages, seams };
+}
+
+function narrativeFromTranscript(entries: MobileTranscriptEntry[]): {
+  messages: HandoffPacket['narrative']['messages'];
+  seams: number[];
+} {
+  return narrativeFromRecord({
+    messages: entries.map((entry) => ({
+      id: entry.id,
+      role: entry.role,
+      content: entry.type === 'compaction' ? entry.compaction?.summary ?? entry.text : entry.text,
+      timestamp: entry.timestamp,
+      backend: entry.backend,
+      model: entry.model,
+      toolCalls: entry.toolCalls,
+    })),
+  });
 }
 
 async function buildWorkspace(
@@ -262,39 +342,94 @@ function resolveHandoffLane(
   return lane;
 }
 
-function buildGovernance(lane: Lane | null): HandoffPacket['governance'] {
-  if (!lane) return null;
-  const eventWindow = getLaneEvents(lane.id, GOVERNANCE_EVENT_LIMIT + 1);
-  const eventsTruncated = eventWindow.length > GOVERNANCE_EVENT_LIMIT;
-  const events = eventWindow.slice(eventsTruncated ? 1 : 0);
-  const approvals = listApprovalsForContext({
+function packetHasOpenObligation(packet: OrchestratorPacket): boolean {
+  return !packet.archivedAt
+    && packet.releaseState !== 'released'
+    && packet.status !== 'archived'
+    && packet.status !== 'failed';
+}
+
+function findThreadPackets(threadId: string): OrchestratorPacket[] {
+  const states = [
+    readOrchestratorControlPlaneState(),
+    ...listMissionRegistryEntries({ includeArchived: false }).map((entry) => entry.mission),
+  ];
+  const packets = new Map<string, OrchestratorPacket>();
+  for (const state of states) {
+    for (const packet of state.packets) {
+      if (packet.orchestratorThreadId !== threadId || !packetHasOpenObligation(packet)) continue;
+      packets.set(packet.id, packet);
+    }
+  }
+  return [...packets.values()];
+}
+
+function resolveGovernanceSources(
+  threadId: string,
+  explicitLane: Lane | null,
+): { packets: OrchestratorPacket[]; lanes: Lane[] } {
+  const packets = findThreadPackets(threadId);
+  const packetById = new Map(packets.map((packet) => [packet.id, packet]));
+  const lanesById = new Map<string, Lane>();
+  for (const lane of listLanes()) {
+    if (lane.packetId && packetById.has(lane.packetId)) lanesById.set(lane.id, lane);
+  }
+  if (explicitLane) lanesById.set(explicitLane.id, explicitLane);
+  return { packets, lanes: [...lanesById.values()] };
+}
+
+function buildGovernance(
+  packets: OrchestratorPacket[],
+  lanes: Lane[],
+): HandoffPacket['governance'] {
+  if (packets.length === 0 && lanes.length === 0) return null;
+  const packetById = new Map(packets.map((packet) => [packet.id, packet]));
+  const eventWindows = lanes.flatMap((lane) => getLaneEvents(lane.id, GOVERNANCE_EVENT_LIMIT + 1));
+  const eventsTruncated = eventWindows.length > GOVERNANCE_EVENT_LIMIT;
+  const events = eventWindows
+    .sort((left, right) => left.timestamp.localeCompare(right.timestamp))
+    .slice(-GOVERNANCE_EVENT_LIMIT);
+  const approvals = lanes.flatMap((lane) => listApprovalsForContext({
     laneId: lane.id,
     packetId: lane.packetId ?? undefined,
     sessionKey: lane.sessionKey ?? undefined,
     projectId: lane.projectId,
-  });
+  }));
+  const approvalById = new Map(approvals.map((approval) => [approval.id, approval]));
+  const packetRows: Array<{ packet: OrchestratorPacket | null; lane: Lane | null }> = packets
+    .map((packet) => ({ packet, lane: lanes.find((candidate) => candidate.packetId === packet.id) ?? null }));
+  for (const lane of lanes) {
+    if (!lane.packetId || packetById.has(lane.packetId)) continue;
+    packetRows.push({ packet: null, lane });
+  }
 
   return {
-    packets: lane.packetId ? [{
-      packetId: lane.packetId,
-      laneId: lane.id,
-      status: lane.status,
-      runtime: lane.runtime,
-      sessionKey: lane.sessionKey,
-    }] : [],
-    approvals: approvals.map((approval) => ({
+    packets: packetRows.map(({ packet, lane }) => {
+      return {
+        packetId: packet?.id ?? lane?.packetId ?? '',
+        laneId: lane?.id ?? '',
+        status: lane?.status ?? packet?.status ?? 'unknown',
+        runtime: lane?.runtime ?? packet?.runtime ?? 'unknown',
+        sessionKey: lane?.sessionKey ?? null,
+        branch: lane?.branch ?? packet?.branchTarget ?? null,
+        worktreePath: lane?.worktreePath ?? packet?.workspaceTargetPath ?? null,
+        attemptCount: packet?.attemptCount ?? 0,
+        maxAttempts: packet?.maxAttempts ?? null,
+      };
+    }),
+    approvals: [...approvalById.values()].map((approval) => ({
       id: approval.id,
       status: approval.status,
       risk: approval.risk,
       title: approval.title,
       updatedAt: approval.updatedAt,
     })),
-    laneStates: [{
+    laneStates: lanes.map((lane) => ({
       laneId: lane.id,
       status: lane.status,
       outcome: lane.outcome ?? null,
       updatedAt: lane.updatedAt,
-    }],
+    })),
     events: events.map((event) => ({
       verb: event.verb,
       actor: event.actor,
@@ -302,9 +437,21 @@ function buildGovernance(lane: Lane | null): HandoffPacket['governance'] {
     })),
     eventsTruncated,
     retryBudget: {
-      executionFailuresConsumed: null,
-      limit: null,
-      note: 'The lane ledger does not expose one canonical execution-failure budget yet.',
+      executionFailuresConsumed: packetRows.reduce((total, { packet }) => total + (packet?.attemptCount ?? 0), 0),
+      limit: packetRows.every(({ packet }) => typeof packet?.maxAttempts === 'number')
+        ? packetRows.reduce((total, { packet }) => total + (packet?.maxAttempts ?? 0), 0)
+        : null,
+      byPacket: packetRows.map(({ packet, lane }) => ({
+        packetId: packet?.id ?? lane?.packetId ?? '',
+        attemptCount: packet?.attemptCount ?? 0,
+        maxAttempts: packet?.maxAttempts ?? null,
+        recoveryCount: packet?.recoveryCount ?? 0,
+        typecheckAutoRetries: packet?.typecheckAutoRetries ?? 0,
+        leaseWaitAutoRetries: packet?.leaseWaitAutoRetries ?? 0,
+        stallRetries: packet?.stallRetries ?? 0,
+        launchAttempts: packet?.launchAttempts ?? 0,
+      })),
+      note: 'Packet-scoped retry counters are carried unchanged; the handoff does not reset them.',
     },
   };
 }
@@ -348,8 +495,8 @@ export async function buildHandoffPacket(input: BuildHandoffPacketInput): Promis
     );
   }
 
-  const narrative = narrativeFromRecord(record, input.excludeMessageId);
-  const messages = narrative.messages;
+  const fullNarrative = narrativeFromRecord(record, input.excludeMessageId);
+  const messages = fullNarrative.messages;
   const assistantMessages = messages.filter((message) => message.role === 'assistant');
   if (assistantMessages.length === 0) {
     throw new HandoffPacketError(
@@ -360,12 +507,46 @@ export async function buildHandoffPacket(input: BuildHandoffPacketInput): Promis
   }
 
   const lane = resolveHandoffLane(input.laneId?.trim() || undefined, repoPath);
-  const worktreePath = lane?.worktreePath ?? repoPath;
-  const workspace = await buildWorkspace(lane?.repoPath ?? repoPath, worktreePath);
-  const governance = buildGovernance(lane);
+  const governanceSources = resolveGovernanceSources(threadId, lane);
+  const workspaceLane = lane ?? governanceSources.lanes.find((candidate) => candidate.worktreePath) ?? null;
+  const worktreePath = workspaceLane?.worktreePath ?? repoPath;
+  const workspace = await buildWorkspace(workspaceLane?.repoPath ?? repoPath, worktreePath);
+  const governance = buildGovernance(governanceSources.packets, governanceSources.lanes);
   const verifiedClaims = cleanTextList(input.verifiedClaims);
   const unverifiedClaims = cleanTextList(input.unverifiedClaims);
   const attributedAssistantTurns = assistantMessages.filter((message) => message.backend).length;
+  const fullTokenEstimate = estimateNarrativeTokens(messages);
+  const shouldCompact = input.narrativeMode === 'compact'
+    || (input.narrativeMode !== 'full' && fullTokenEstimate > HANDOFF_FULL_NARRATIVE_TOKEN_LIMIT);
+  let carriedNarrative = fullNarrative;
+  let compaction: HandoffPacket['narrative']['compaction'] = null;
+  let compactedBy: HandoffPacket['narrative']['compactedBy'] = null;
+  if (shouldCompact) {
+    const result = await autoCompactOrchestratorThread({
+      repoPath,
+      threadId,
+      keepTailCount: HANDOFF_COMPACTION_TAIL_COUNT,
+      trigger: 'handoff',
+      force: true,
+    });
+    const summaryEntry = result.transcript.find((entry) => entry.type === 'compaction');
+    const summary = summaryEntry?.compaction?.summary?.trim();
+    if (!result.applied || !summary || !result.archiveRef || !result.compactedBy) {
+      throw new HandoffPacketError(
+        'The narrative exceeds the full-context limit and could not be compacted truthfully.',
+        'handoff_compaction_failed',
+        500,
+      );
+    }
+    carriedNarrative = narrativeFromTranscript(result.transcript);
+    compactedBy = result.compactedBy;
+    compaction = {
+      summary,
+      fullNarrativeRef: result.archiveRef,
+      archivedTurnCount: Math.max(0, messages.length - carriedNarrative.messages.length),
+      retainedTurnCount: carriedNarrative.messages.length,
+    };
+  }
 
   return {
     schema: HANDOFF_PACKET_SCHEMA,
@@ -375,17 +556,18 @@ export async function buildHandoffPacket(input: BuildHandoffPacketInput): Promis
     from: sourceFromMessages(messages, record),
     to,
     carries: {
-      narrative: 'full',
+      narrative: compaction ? 'summary' : 'full',
       intent: normalizedIntent ? 'full' : 'omitted',
       workspace: workspace ? 'full' : 'omitted',
       governance: governance ? 'summary' : 'omitted',
       provenance: 'summary',
     },
     narrative: {
-      messages,
-      seams: narrative.seams,
-      tokenEstimate: estimateNarrativeTokens(messages),
-      compactedBy: null,
+      messages: carriedNarrative.messages,
+      seams: carriedNarrative.seams,
+      tokenEstimate: estimateNarrativeTokens(carriedNarrative.messages),
+      compaction,
+      compactedBy,
     },
     intent: normalizedIntent,
     workspace,

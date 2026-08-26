@@ -117,6 +117,7 @@ import { getBrowserProvider } from './lib/browser/inventory';
 import type { CommandCenterSnapshot } from './lib/command-center/snapshot';
 import type { MobileInboxSnapshot, MobileOrchestratorThread, MobileTranscriptEntry } from './lib/mobile/types';
 import {
+  appendMobileOrchestratorUserMessage,
   listMobileOrchestratorRevealRequests,
   listMobileOrchestratorThreads,
   markMobileOrchestratorThreadFailed,
@@ -131,7 +132,11 @@ import { getLiveReviewChangeSet } from './lib/review/live-changes';
 import { deriveIdempotencyKey, withIdempotency } from './lib/orchestrator/idempotency-store';
 import { isManualThinkingEffort, type ManualThinkingEffort } from './lib/orchestrator/thinking-effort';
 import { withSessionRules } from './lib/orchestrator/session-rules-prompt';
-import { prepareBackendSwitchHandoff } from './lib/orchestrator/backend-switch-carry';
+import {
+  backendSwitchRequiresExplicitHandoff,
+  prepareBackendSwitchHandoff,
+  recordBackendSwitchHandoffAudit,
+} from './lib/orchestrator/backend-switch-carry';
 import { resolveOrchestratorTranscriptMessage } from './lib/orchestrator/composer-wire';
 import {
   resolveOrchestratorMessageRepoPath,
@@ -4980,6 +4985,16 @@ async function handleOrchestratorSendMsgOnce(
   let activeAgentId = requestedAgentId;
   let activeAgentTag = activeAgentId || undefined;
   const threadId = resolveMsgThreadId(msg);
+  if (backendSwitchRequiresExplicitHandoff({ threadId, toBackend: activeBackend.id }) && msg.handoffMode !== 'handoff') {
+    const error = 'Choose “Start fresh” or “Hand off” before switching runtimes.';
+    send(client, {
+      channel: 'orchestrator',
+      event: 'error',
+      data: { error, repoPath, threadId, backend: activeBackend.id, agent: activeAgentTag, ...orchestratorCommandAckCorrelation(correlationId) },
+    });
+    if (correlationId) throw new OrchestratorSendRejectedBeforeAcceptance(error);
+    return;
+  }
   let abortKey = orchestratorAbortKey(repoPath, activeBackend.id, activeAgentId, threadId);
   const turnAbortKeys = new Set<string>([abortKey]);
 
@@ -5007,6 +5022,7 @@ async function handleOrchestratorSendMsgOnce(
   const assistantStartedAtMs = turnStartedAtMs;
   let assistantTextAccum = '';
   let lastPersistedAssistantText = '';
+  let activeAssistantModel = model ?? null;
   // Incremental persistence (2026-06-22): persist the streamed assistant text
   // every ~1.5s WHILE the turn runs, not only at terminal points. Without this,
   // a turn whose child wedges (never emits 'done', the await never resolves)
@@ -5020,6 +5036,7 @@ async function handleOrchestratorSendMsgOnce(
     sessionId: string | null,
     backendId: OrchestratorBackendId = activeBackend.id,
     receipt?: Extract<OrchestratorEvent, { type: 'done' }>,
+    assistantModel: string | null = activeAssistantModel,
   ) => {
     if (!isThreadBacked || !assistantMessageId) return;
     if (undoneOrchestratorUserMessageIds.has(userMessageId)) return;
@@ -5033,7 +5050,7 @@ async function handleOrchestratorSendMsgOnce(
         backend: backendId,
         agent: activeAgentTag,
         sessionId,
-        model: model ?? null,
+        model: assistantModel,
         ...(receipt?.usage ? {
           tokens: {
             input: receipt.usage.inputTokens,
@@ -5087,6 +5104,14 @@ async function handleOrchestratorSendMsgOnce(
       backend: activeBackend.id,
       agent: activeAgentTag,
       timestampMs: turnStartedAtMs,
+      handoff: backendSwitchHandoff ? {
+        handoffId: backendSwitchHandoff.packet.handoffId,
+        from: backendSwitchHandoff.seam.from,
+        to: backendSwitchHandoff.seam.to,
+        lossless: backendSwitchHandoff.seam.lossless,
+        carries: backendSwitchHandoff.packet.carries,
+        packet: backendSwitchHandoff.packet as unknown as Record<string, unknown>,
+      } : undefined,
     });
     if (updatedThread) {
       broadcast({
@@ -5134,6 +5159,20 @@ async function handleOrchestratorSendMsgOnce(
       }
     }
     if (undoneOrchestratorUserMessageIds.has(userMessageId)) return;
+    if (backendSwitchHandoff) {
+      try {
+        recordBackendSwitchHandoffAudit(backendSwitchHandoff);
+      } catch (error) {
+        truncateMobileOrchestratorThreadFromMessage({
+          tabId: threadId,
+          messageId: backendSwitchHandoff.packet.handoffId,
+        });
+        throw error;
+      }
+    }
+    const resolveTurnModel = (turnBackend: OrchestratorBackend, overrideModel?: string) => (
+      overrideModel ?? (turnBackend.id === 'codex' && turnBackend.id !== requestedBackend.id ? undefined : model)
+    );
     const sendTurn = (
       turnBackend: OrchestratorBackend,
       turnAgentTag: string | undefined,
@@ -5143,7 +5182,7 @@ async function handleOrchestratorSendMsgOnce(
       overrideMessage?: string,
       leadingEvents: readonly OrchestratorEvent[] = [],
     ): Promise<void> => {
-      const effectiveModel = overrideModel ?? (turnBackend.id === 'codex' && turnBackend.id !== requestedBackend.id ? undefined : model);
+      const effectiveModel = resolveTurnModel(turnBackend, overrideModel);
       return sendOrchestratorBackendTurn(turnBackend, repoPath, overrideMessage ?? turnMessage, onEvent, {
         permissionMode,
         thinkingEffort,
@@ -5228,18 +5267,20 @@ async function handleOrchestratorSendMsgOnce(
       overrideMessage?: string,
       leadingEvents: readonly OrchestratorEvent[] = [],
     ) => {
+      const effectiveTurnModel = resolveTurnModel(turnBackend, overrideModel) ?? null;
+      activeAssistantModel = effectiveTurnModel;
       let pendingDone: Extract<OrchestratorEvent, { type: 'done' }> | null = null;
       const emitDone = (event: Extract<OrchestratorEvent, { type: 'done' }>) => {
         sawTerminal = true;
         if (threadId && event.sessionId && (turnBackend.id === 'claude' || turnBackend.id === 'codex')) {
           writeOrchestratorBackendSessionId(threadId, turnBackend.id, event.sessionId);
         }
-        persistAssistantText(event.sessionId ?? null, turnBackend.id, event);
+        persistAssistantText(event.sessionId ?? null, turnBackend.id, event, effectiveTurnModel);
         if (sessionName) {
           broadcastToOrchestratorSession(sessionName, JSON.stringify({
             channel: 'orchestrator',
             event: 'status',
-            data: { status: 'ready', repoPath, threadId, sessionId: event.sessionId, cost: event.cost, usage: event.usage, backend: turnBackend.id, agent: turnAgentTag },
+            data: { status: 'ready', repoPath, threadId, sessionId: event.sessionId, cost: event.cost, usage: event.usage, backend: turnBackend.id, model: effectiveTurnModel, agent: turnAgentTag },
           }));
         }
       };
@@ -5262,13 +5303,13 @@ async function handleOrchestratorSendMsgOnce(
               // reload instead of dropping to user-only on disk.
               if (Date.now() - lastIncrementalPersistAt > INCREMENTAL_PERSIST_MS) {
                 lastIncrementalPersistAt = Date.now();
-                persistAssistantText(null, turnBackend.id);
+                persistAssistantText(null, turnBackend.id, undefined, effectiveTurnModel);
               }
             }
             wsMsg = JSON.stringify({
               channel: 'orchestrator',
               event: 'output',
-              data: { text: event.text, repoPath, threadId, thinking: false, backend: turnBackend.id, agent: turnAgentTag, assistantMessageId },
+              data: { text: event.text, repoPath, threadId, thinking: false, backend: turnBackend.id, model: effectiveTurnModel, agent: turnAgentTag, assistantMessageId },
             });
             break;
 
@@ -5276,7 +5317,7 @@ async function handleOrchestratorSendMsgOnce(
             wsMsg = JSON.stringify({
               channel: 'orchestrator',
               event: 'output',
-              data: { text: event.text, repoPath, threadId, thinking: true, backend: turnBackend.id, agent: turnAgentTag, assistantMessageId },
+              data: { text: event.text, repoPath, threadId, thinking: true, backend: turnBackend.id, model: effectiveTurnModel, agent: turnAgentTag, assistantMessageId },
             });
             break;
 
@@ -5284,7 +5325,7 @@ async function handleOrchestratorSendMsgOnce(
             wsMsg = JSON.stringify({
               channel: 'orchestrator',
               event: 'tool-use',
-              data: { name: event.name, args: event.input, toolUseId: event.id ?? null, repoPath, threadId, backend: turnBackend.id, agent: turnAgentTag, assistantMessageId },
+              data: { name: event.name, args: event.input, toolUseId: event.id ?? null, repoPath, threadId, backend: turnBackend.id, model: effectiveTurnModel, agent: turnAgentTag, assistantMessageId },
             });
             break;
 
@@ -5300,6 +5341,7 @@ async function handleOrchestratorSendMsgOnce(
                 repoPath,
                 threadId,
                 backend: turnBackend.id,
+                model: effectiveTurnModel,
                 agent: turnAgentTag,
                 ...(event.isError ? { isError: true } : {}),
               },
@@ -5317,6 +5359,7 @@ async function handleOrchestratorSendMsgOnce(
                 explanation: event.explanation,
                 steps: event.steps,
                 backend: turnBackend.id,
+                model: effectiveTurnModel,
                 agent: turnAgentTag,
               },
             });
@@ -5339,6 +5382,34 @@ async function handleOrchestratorSendMsgOnce(
           //    because the operator needs to know whether the new agent
           //    inherited the real session or a replay.
           case 'handoff':
+            {
+              const handoffId = event.handoffId
+                ?? `handoff-${threadId ?? 'repo'}-${turnStartedAtMs}-${turnBackend.id}`;
+              const carries = event.carries ?? {
+                narrative: 'full',
+                intent: 'full',
+                workspace: 'full',
+                governance: 'full',
+                provenance: 'full',
+              } as const;
+              const handoff = {
+                handoffId,
+                from: event.from,
+                to: event.to,
+                lossless: event.lossless,
+                carries,
+                packet: event.packet,
+              };
+              appendMobileOrchestratorUserMessage({
+                tabId: threadId,
+                repoPath,
+                message: transcriptMessage,
+                messageId: userMessageId,
+                backend: turnBackend.id,
+                agent: turnAgentTag,
+                handoff,
+                timestampMs: turnStartedAtMs,
+              });
             wsMsg = JSON.stringify({
               channel: 'orchestrator',
               event: 'handoff',
@@ -5346,12 +5417,18 @@ async function handleOrchestratorSendMsgOnce(
                 from: event.from,
                 to: event.to,
                 lossless: event.lossless,
+                handoffId,
+                carries,
+                packet: event.packet,
                 repoPath,
                 threadId,
+                beforeMessageId: userMessageId,
                 backend: turnBackend.id,
+                model: effectiveTurnModel,
                 agent: turnAgentTag,
               },
             });
+            }
             break;
 
           case 'collide_proposal':
@@ -5376,7 +5453,7 @@ async function handleOrchestratorSendMsgOnce(
               break;
             }
             sawTerminal = true;
-            persistAssistantText(null, turnBackend.id);
+            persistAssistantText(null, turnBackend.id, undefined, effectiveTurnModel);
             try {
               const failedThread = markMobileOrchestratorThreadFailed({
                 tabId: threadId,
@@ -5517,6 +5594,7 @@ async function handleOrchestratorSendMsgOnce(
           to: { backend: activeBackend.id, model: fallback.toModel },
           excludeMessageId: userMessageId,
         });
+        if (fallbackHandoff) recordBackendSwitchHandoffAudit(fallbackHandoff);
         // Rebuild from the raw operator message even when the fallback returns
         // to the source backend. Reusing `turnMessage` here could leak the
         // failed destination's packet (whose `to` names the wrong backend).
@@ -5599,7 +5677,7 @@ async function handleOrchestratorSendMsgOnce(
     // Save any partial assistant text accumulated before the failure so
     // mobile listings still show what arrived rather than a blank turn.
     persistAssistantText(null);
-    if (!turnWasUndone && !projectError) {
+    if (!turnWasUndone && !projectError && commandAccepted) {
       try {
         const failedThread = markMobileOrchestratorThreadFailed({
           tabId: threadId,

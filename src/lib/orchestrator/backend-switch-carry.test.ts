@@ -168,6 +168,25 @@ describe('cross-backend cold-start handoff', () => {
       threadId,
       to: { backend: 'codex', model: 'destination/model' },
     })).resolves.toBeNull();
+    expect(loaded.handoff.backendSwitchRequiresExplicitHandoff({
+      threadId,
+      toBackend: 'codex',
+    })).toBe(false);
+  });
+
+  it('requires explicit consent only for a proven backend change', async () => {
+    const loaded = await loadModules();
+    const threadId = 'thoughts-handoff-choice';
+    seedSourceThread(loaded, threadId);
+
+    expect(loaded.handoff.backendSwitchRequiresExplicitHandoff({
+      threadId,
+      toBackend: 'codex',
+    })).toBe(true);
+    expect(loaded.handoff.backendSwitchRequiresExplicitHandoff({
+      threadId,
+      toBackend: 'claude',
+    })).toBe(false);
   });
 
   it('seeds a return switch even when that backend still has an older native session', async () => {

@@ -40,7 +40,7 @@ interface ComposerAreaProps {
   /** Orchestrator-mode model switching from the composer chip. */
   onModelChange?: (model: string) => void;
   activeBackend?: OrchestratorBackendSetting;
-  onBackendChange?: (backend: OrchestratorBackendSetting) => void;
+  onBackendChange?: (backend: OrchestratorBackendSetting, model?: string) => void;
   effort: ThinkingEffort;
   onEffortChange: (next: ThinkingEffort) => void;
   adaptiveEnabled: boolean;

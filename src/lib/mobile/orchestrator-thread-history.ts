@@ -3,7 +3,8 @@ import { readdir as readdirAsync, stat as statAsync } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { persistCanonicalChatHistoryRecord } from '@/lib/llm/chat-history-store';
-import type { MobileOrchestratorBackend, MobileOrchestratorThread } from '@/lib/mobile/types';
+import type { MobileOrchestratorBackend, MobileOrchestratorThread, MobileTranscriptEntry } from '@/lib/mobile/types';
+import { createHandoffHistoryMarker, truncateBoundaryWithHandoff } from './orchestrator-handoff-history';
 import { ensureOrchestratorHistoryDir as ensureHistoryDir, ORCHESTRATOR_HISTORY_DIR, safeOrchestratorHistoryPath } from './orchestrator-thread-path';
 import { resolveOrchestratorThreadProjectId } from './orchestrator-thread-project';
 import { repairComposerPreambleHistory } from './orchestrator-thread-history-repair';
@@ -493,13 +494,12 @@ export function appendMobileOrchestratorUserMessage(input: {
   backend?: MobileOrchestratorBackend | null;
   agent?: string | null;
   timestampMs?: number;
+  handoff?: MobileTranscriptEntry['handoff'];
 }): MobileOrchestratorThread | null {
   const tabId = input.tabId;
   if (!tabId?.startsWith('thoughts-')) return null;
-
   const content = input.message.trim();
   if (!content) return readProjectedThread(tabId);
-
   const timestamp = typeof input.timestampMs === 'number' && Number.isFinite(input.timestampMs)
     ? input.timestampMs
     : Date.now();
@@ -525,18 +525,19 @@ export function appendMobileOrchestratorUserMessage(input: {
   const messages = Array.isArray(existing.messages) ? existing.messages : [];
   const last = messages[messages.length - 1];
   const alreadyLastUserMessage = last?.role === 'user' && last.content === content;
-  const nextMessages = alreadyLastUserMessage
-    ? messages
-    : [
-      ...messages,
-      {
-        id: input.messageId?.trim() || `user-${now.getTime()}`,
-        role: 'user',
-        content,
-        timestamp,
-      },
-    ];
-
+  const nextMessages = [...messages];
+  const handoff = input.handoff;
+  if (handoff && !nextMessages.some((message) => message.id === handoff.handoffId)) {
+    nextMessages.splice(alreadyLastUserMessage ? nextMessages.length - 1 : nextMessages.length, 0, createHandoffHistoryMarker(handoff, timestamp));
+  }
+  if (!alreadyLastUserMessage) {
+    nextMessages.push({
+      id: input.messageId?.trim() || `user-${now.getTime()}`,
+      role: 'user',
+      content,
+      timestamp: handoff ? timestamp + 1 : timestamp,
+    });
+  }
   writeHistoryRecord(tabId, {
     ...existing,
     messages: nextMessages,
@@ -574,16 +575,15 @@ export function truncateMobileOrchestratorThreadFromMessage(input: {
   const tabId = input.tabId;
   const messageId = input.messageId.trim();
   if (!tabId?.startsWith('thoughts-') || !messageId) return null;
-
   const existing = readHistoryRecord(tabId);
   if (!existing) return null;
   const messages = Array.isArray(existing.messages) ? existing.messages : [];
   const boundary = messages.findIndex((message) => message.id === messageId);
   if (boundary < 0) return readProjectedThread(tabId);
-
+  const truncateBoundary = truncateBoundaryWithHandoff(messages, boundary);
   writeHistoryRecord(tabId, {
     ...existing,
-    messages: messages.slice(0, boundary),
+    messages: messages.slice(0, truncateBoundary),
     savedAt: new Date().toISOString(),
     orchestratorTerminalStatus: null,
     orchestratorTerminalError: null,

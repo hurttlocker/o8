@@ -177,6 +177,23 @@ describe('mobile first orchestrator conversation', () => {
     }));
   });
 
+  it('puts explicit handoff consent on the WebSocket command', () => {
+    const payload = JSON.parse(buildOrchestratorSendPayload({
+      repoPath: '/tmp/repos/shared-desktop-repo',
+      threadId: 'thoughts-explicit-handoff',
+      clientMessageId: 'desktop-message-handoff',
+      wireMessage: 'Continue with measured context.',
+      displayMessage: 'Continue with measured context.',
+      permissionMode: 'full',
+      orchestrationMode: 'fleet',
+      model: 'destination/model',
+      backend: 'codex',
+      handoffMode: 'handoff',
+    })) as Record<string, unknown>;
+
+    expect(payload.handoffMode).toBe('handoff');
+  });
+
   it('rejects an unknown project from the desktop WebSocket persistence entry', () => {
     const payload = JSON.parse(buildOrchestratorSendPayload({
       repoPath: '/tmp/repos/shared-desktop-repo',

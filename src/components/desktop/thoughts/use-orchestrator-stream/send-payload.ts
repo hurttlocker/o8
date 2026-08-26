@@ -16,6 +16,7 @@ export function buildOrchestratorSendPayload(input: {
   model: string;
   backend?: OrchestratorBackendId;
   collideBaseBackend?: OrchestratorBackendId;
+  handoffMode?: 'handoff';
   attachments?: Array<{ dataUri: string; name?: string }>;
 }): string {
   return JSON.stringify({
@@ -34,6 +35,7 @@ export function buildOrchestratorSendPayload(input: {
     model: input.model,
     ...(input.backend ? { backend: input.backend } : {}),
     ...(input.collideBaseBackend ? { collideBaseBackend: input.collideBaseBackend } : {}),
+    ...(input.handoffMode ? { handoffMode: input.handoffMode } : {}),
     ...(input.attachments?.length ? { attachments: input.attachments } : {}),
   });
 }

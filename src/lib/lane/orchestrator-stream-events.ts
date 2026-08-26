@@ -33,6 +33,9 @@ export type OrchestratorEvent =
     from: { backend: string; model: string | null } | null;
     to: { backend: string; model: string | null };
     lossless: boolean;
+    handoffId?: string;
+    carries?: Record<'narrative' | 'intent' | 'workspace' | 'governance' | 'provenance', 'full' | 'summary' | 'omitted'>;
+    packet?: Record<string, unknown>;
   };
 
 export interface OrchestratorTurnUsage {

@@ -7,12 +7,32 @@ import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { MODEL_IDS } from '@/lib/models';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
-import { persistCanonicalChatHistoryRecord } from '@/lib/llm/chat-history-store';
+import { getCanonicalChatHistoryPath, persistCanonicalChatHistoryRecord } from '@/lib/llm/chat-history-store';
 const HISTORY_DIR = path.join(getDataDir(), 'chat-history');
 const ARCHIVE_DIR = path.join(getDataDir(), 'orchestrator-archives');
 const inFlight = new Map<string, Promise<AutoCompactResult>>();
 type PersistedThread = { filePath: string; tabId: string; payload: Record<string, unknown>; messages: MobileTranscriptEntry[]; mtimeMs: number };
-export interface AutoCompactResult { applied: boolean; transcript: MobileTranscriptEntry[]; resumePrelude: string | null; tokensAfter: number; }
+export const ORCHESTRATOR_COMPACTION_PROVENANCE = {
+  backend: 'codex',
+  model: MODEL_IDS.codexDefault,
+  reasoningEffort: 'medium',
+} as const;
+export interface AutoCompactResult {
+  applied: boolean;
+  transcript: MobileTranscriptEntry[];
+  resumePrelude: string | null;
+  tokensAfter: number;
+  compactedBy: typeof ORCHESTRATOR_COMPACTION_PROVENANCE | null;
+  archiveRef: string | null;
+}
+const notApplied = (transcript: MobileTranscriptEntry[], tokensAfter = 0): AutoCompactResult => ({
+  applied: false,
+  transcript,
+  resumePrelude: null,
+  tokensAfter,
+  compactedBy: null,
+  archiveRef: null,
+});
 const fmtStamp = (value: Date) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')} ${String(value.getHours()).padStart(2, '0')}:${String(value.getMinutes()).padStart(2, '0')}`;
 const approxTokens = (value: string) => Math.max(0, Math.ceil(value.length / 4));
 const stripCompactionTags = (value: string) => value.replace(/<\/?compacted_context\b[^>]*>/gi, '').trim();
@@ -28,7 +48,27 @@ function coerceEntry(value: unknown): MobileTranscriptEntry | null {
     }
     : null;
 }
-async function readLatestThread(repoPath: string): Promise<PersistedThread | null> {
+async function readThread(repoPath: string, threadId?: string): Promise<PersistedThread | null> {
+  if (threadId?.startsWith('thoughts-')) {
+    const filePath = getCanonicalChatHistoryPath(threadId);
+    const raw = await readFile(filePath, 'utf8').catch(() => '');
+    if (!raw) return null;
+    try {
+      const payload = JSON.parse(raw) as Record<string, unknown>;
+      if ((payload.repoPath as string | undefined)?.trim() !== repoPath) return null;
+      const fileStat = await stat(filePath).catch(() => null);
+      const messages = Array.isArray(payload.messages) ? payload.messages.map(coerceEntry).filter(Boolean) as MobileTranscriptEntry[] : [];
+      return messages.length === 0 || !fileStat ? null : {
+        filePath,
+        tabId: threadId,
+        payload,
+        messages,
+        mtimeMs: fileStat.mtimeMs,
+      };
+    } catch {
+      return null;
+    }
+  }
   const files = await readdir(HISTORY_DIR).catch(() => [] as string[]);
   const candidates = await Promise.all(files.filter((file) => file.startsWith('thoughts-') && file.endsWith('.json')).map(async (file) => {
     const filePath = path.join(HISTORY_DIR, file);
@@ -240,42 +280,46 @@ export async function digest(text: string, repoPath: string): Promise<DigestResu
 
 export async function autoCompactOrchestratorThread(input: {
   repoPath: string;
+  threadId?: string;
   liveMessages?: MobileTranscriptEntry[];
   /** Parent-session context tokens only. Child usage belongs to cost receipts. */
   runningTotal?: number;
   keepTailCount?: number;
   trigger?: 'auto' | 'manual' | 'handoff';
+  /** Explicit handoffs must compact truthfully even when background compaction is disabled. */
+  force?: boolean;
 }): Promise<AutoCompactResult> {
   const repoPath = input.repoPath.trim();
   const snapshot = Array.isArray(input.liveMessages) ? input.liveMessages.map(coerceEntry).filter(Boolean) as MobileTranscriptEntry[] : [];
-  if (!repoPath) return { applied: false, transcript: snapshot, resumePrelude: null, tokensAfter: 0 };
+  if (!repoPath) return notApplied(snapshot);
 
   // Gate background LLM work on the in-app orchestrator toggle (#1046, epic
   // #1044). Toggle ON means user has at least one sub (Codex) and wants the
   // background performance features. Toggle OFF means we silently skip
   // compaction — the thread keeps growing but no LLM calls happen.
   const { resolveInAppOrchestratorEnabledSync } = await import('@/lib/operator/defaults');
-  if (!resolveInAppOrchestratorEnabledSync()) {
-    return { applied: false, transcript: snapshot, resumePrelude: null, tokensAfter: 0 };
+  if (!input.force && !resolveInAppOrchestratorEnabledSync()) {
+    return notApplied(snapshot);
   }
-  const existing = inFlight.get(repoPath);
+  const inFlightKey = `${repoPath}\0${input.threadId?.trim() ?? ''}`;
+  const existing = inFlight.get(inFlightKey);
   if (existing) return existing;
   const job = (async () => {
-    const thread = await readLatestThread(repoPath);
+    const thread = await readThread(repoPath, input.threadId?.trim());
     const transcript = mergeSnapshots(thread?.messages ?? [], snapshot);
-    if (transcript.length < 2) return { applied: false, transcript, resumePrelude: null, tokensAfter: 0 };
+    if (transcript.length < 2) return notApplied(transcript);
     const keepTailCount = typeof input.keepTailCount === 'number' && Number.isFinite(input.keepTailCount)
       ? Math.max(1, Math.floor(input.keepTailCount))
       : null;
     if (keepTailCount !== null && transcript.length <= keepTailCount + 1) {
-      return { applied: false, transcript, resumePrelude: null, tokensAfter: 0 };
+      return notApplied(transcript);
     }
     const compactedCount = keepTailCount !== null
       ? Math.max(1, transcript.length - keepTailCount)
       : Math.max(1, Math.floor(transcript.length * 0.6));
     const { compactedTurns, pinnedTurns, liveTurns, retainedTurns } = splitCompactionWindow(transcript, compactedCount);
     if (compactedTurns.length === 0) {
-      return { applied: false, transcript, resumePrelude: null, tokensAfter: 0 };
+      return notApplied(transcript);
     }
     const compactedAt = new Date();
     const compactedStamp = fmtStamp(compactedAt);
@@ -295,6 +339,7 @@ export async function autoCompactOrchestratorThread(input: {
         trigger: input.trigger === 'handoff' ? 'manual' : input.trigger ?? 'auto',
         source: 'summary',
         summary: displaySummary,
+        compactedBy: ORCHESTRATOR_COMPACTION_PROVENANCE,
       },
     };
     const nextTranscript = [compactionEntry, ...pinnedTurns, ...liveTurns];
@@ -302,13 +347,16 @@ export async function autoCompactOrchestratorThread(input: {
     const tokensAfter = approxTokens(resumePrelude);
     compactionEntry.compaction!.tokensAfter = tokensAfter;
     await mkdir(ARCHIVE_DIR, { recursive: true });
-    await writeFile(path.join(ARCHIVE_DIR, `${thread?.tabId ?? 'thoughts'}-${compactionEntry.id}.json`), JSON.stringify({
+    const archiveRef = `${thread?.tabId ?? 'thoughts'}-${compactionEntry.id}.json`;
+    compactionEntry.compaction!.archiveRef = archiveRef;
+    await writeFile(path.join(ARCHIVE_DIR, archiveRef), JSON.stringify({
       repoPath,
       tabId: thread?.tabId ?? null,
       archivedAt: compactedAt.toISOString(),
       compactedCount: compactedTurns.length,
       turns: compactedTurns.map(toStoredMessage),
       summary,
+      compactedBy: ORCHESTRATOR_COMPACTION_PROVENANCE,
     }));
     if (thread) {
       persistCanonicalChatHistoryRecord(thread.tabId, {
@@ -317,10 +365,17 @@ export async function autoCompactOrchestratorThread(input: {
         savedAt: compactedAt.toISOString(),
       });
     }
-    return { applied: true, transcript: nextTranscript, resumePrelude, tokensAfter };
+    return {
+      applied: true,
+      transcript: nextTranscript,
+      resumePrelude,
+      tokensAfter,
+      compactedBy: ORCHESTRATOR_COMPACTION_PROVENANCE,
+      archiveRef,
+    };
   })().finally(() => {
-    inFlight.delete(repoPath);
+    inFlight.delete(inFlightKey);
   });
-  inFlight.set(repoPath, job);
+  inFlight.set(inFlightKey, job);
   return job;
 }

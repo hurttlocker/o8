@@ -8,6 +8,7 @@ import {
   formatTimestampLabel,
   type OrchestratorStreamStatus,
 } from './shared';
+import { parseHandoffEventData } from './handoff-socket';
 
 interface RefLike<T> {
   current: T;
@@ -27,6 +28,7 @@ export interface CurrentAssistantStreamState {
   thinkingChunks: string[];
   epoch: number;
   backend?: MobileTranscriptEntry['backend'];
+  model?: string;
   /** Wall-clock start of the reasoning phase. Claude 5-family thinking is
    *  signature-redacted (empty text), so the empty thinking marker is the only
    *  start signal — the duration it yields drives the "Thought for Ns" line. */
@@ -132,6 +134,7 @@ function createAssistantState(
   resetEpochRef: RefLike<number>,
   assistantMessageId?: unknown,
   backend?: unknown,
+  model?: unknown,
 ): CurrentAssistantStreamState {
   return {
     id: typeof assistantMessageId === 'string' && assistantMessageId.trim()
@@ -141,6 +144,7 @@ function createAssistantState(
     thinkingChunks: [],
     epoch: resetEpochRef.current,
     backend: isOrchestratorBackendId(backend) ? backend : undefined,
+    model: typeof model === 'string' && model.trim() ? model.trim() : undefined,
     verbatimStream: typeof backend === 'string' && VERBATIM_STREAM_BACKENDS.has(backend),
   };
 }
@@ -302,6 +306,35 @@ export function createOrchestratorMessageHandler(
     }
 
     switch (msg.event) {
+      case 'handoff': {
+        const handoff = parseHandoffEventData(msg.data);
+        if (!handoff) break;
+        const timestamp = Date.now();
+        setTranscriptMessages((prev) => {
+          const entry: MobileTranscriptEntry = {
+            id: handoff.handoffId,
+            role: 'system',
+            text: `${handoff.from?.model ?? handoff.from?.backend ?? 'Unknown source'} handed off to ${handoff.to.model ?? handoff.to.backend}.`,
+            type: 'handoff',
+            handoff,
+            timestamp,
+            timestampLabel: formatTimestampLabel(timestamp),
+          };
+          const index = prev.findIndex((message) => message.id === entry.id);
+          if (index < 0) {
+            const beforeMessageId = typeof msg.data?.beforeMessageId === 'string' ? msg.data.beforeMessageId : null;
+            const beforeIndex = beforeMessageId ? prev.findIndex((message) => message.id === beforeMessageId) : -1;
+            const next = [...prev];
+            next.splice(beforeIndex >= 0 ? beforeIndex : next.length, 0, entry);
+            return next;
+          }
+          const next = [...prev];
+          next[index] = entry;
+          return next;
+        });
+        break;
+      }
+
       case 'output': {
         const text = typeof msg.data?.text === 'string' ? msg.data.text : '';
         const isThinkingMarker = msg.data?.thinking === true;
@@ -319,7 +352,7 @@ export function createOrchestratorMessageHandler(
               options.statusRef.current = 'busy';
               options.setStatus('busy');
             }
-            options.currentAssistantRef.current = createAssistantState(options.resetEpochRef, msg.data?.assistantMessageId, msg.data?.backend);
+            options.currentAssistantRef.current = createAssistantState(options.resetEpochRef, msg.data?.assistantMessageId, msg.data?.backend, msg.data?.model);
           }
           const thinkingState = options.currentAssistantRef.current;
           if (thinkingState.thinkingStartedAt == null) {
@@ -328,7 +361,7 @@ export function createOrchestratorMessageHandler(
               const idx = prev.findIndex((message) => message.id === thinkingState.id);
               if (idx >= 0) {
                 const next = [...prev];
-                next[idx] = { ...next[idx], backend: thinkingState.backend, thinkingActive: true };
+                next[idx] = { ...next[idx], backend: thinkingState.backend, model: thinkingState.model, thinkingActive: true };
                 return next;
               }
               return [...prev, {
@@ -336,6 +369,7 @@ export function createOrchestratorMessageHandler(
                 role: 'assistant' as const,
                 text: '',
                 backend: thinkingState.backend,
+                model: thinkingState.model,
                 thinkingActive: true,
                 timestamp: Date.now(),
                 timestampLabel: formatTimestampLabel(Date.now()),
@@ -375,7 +409,7 @@ export function createOrchestratorMessageHandler(
             options.statusRef.current = 'busy';
             options.setStatus('busy');
           }
-          options.currentAssistantRef.current = createAssistantState(options.resetEpochRef, msg.data?.assistantMessageId, msg.data?.backend);
+          options.currentAssistantRef.current = createAssistantState(options.resetEpochRef, msg.data?.assistantMessageId, msg.data?.backend, msg.data?.model);
         }
 
         if (isThinking) {
@@ -545,7 +579,7 @@ export function createOrchestratorMessageHandler(
             options.statusRef.current = 'busy';
             options.setStatus('busy');
           }
-          options.currentAssistantRef.current = createAssistantState(options.resetEpochRef, msg.data?.assistantMessageId, msg.data?.backend);
+          options.currentAssistantRef.current = createAssistantState(options.resetEpochRef, msg.data?.assistantMessageId, msg.data?.backend, msg.data?.model);
         }
 
         const current = options.currentAssistantRef.current;
@@ -575,6 +609,8 @@ export function createOrchestratorMessageHandler(
             );
             next[idx] = {
               ...existing,
+              backend: current.backend ?? existing.backend,
+              model: current.model ?? existing.model,
               toolCalls: [...updatedTools, toolCall],
               ...(thinkingDurationMs !== undefined ? { thinkingDurationMs, thinkingActive: false } : {}),
             };
@@ -584,6 +620,8 @@ export function createOrchestratorMessageHandler(
             id: current.id,
             role: 'assistant' as const,
             text: '',
+            backend: current.backend,
+            model: current.model,
             toolCalls: [toolCall],
             ...(thinkingDurationMs !== undefined ? { thinkingDurationMs, thinkingActive: false } : {}),
             timestamp: Date.now(),

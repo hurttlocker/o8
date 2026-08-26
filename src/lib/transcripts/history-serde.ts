@@ -21,6 +21,7 @@ export type StoredTranscriptMessage = {
   thinkingDurationMs?: MobileTranscriptEntry['thinkingDurationMs'];
   recalledFacts?: MobileTranscriptEntry['recalledFacts'];
   command?: MobileTranscriptEntry['command'];
+  handoff?: MobileTranscriptEntry['handoff'];
   compaction?: MobileTranscriptEntry['compaction'];
   statusEvent?: MobileTranscriptEntry['statusEvent'];
   isPartial?: boolean;
@@ -103,6 +104,7 @@ function deserializeMessage(value: unknown, dropInvalid: boolean): MobileTranscr
       ? (typeof message.recalledFacts === 'number' ? message.recalledFacts : undefined)
       : message.recalledFacts,
     command: message.command,
+    handoff: message.handoff,
     compaction: message.compaction,
     statusEvent: message.statusEvent,
   };
@@ -133,6 +135,7 @@ export function serializeTranscriptForStorage(
     thinkingDurationMs: entry.thinkingDurationMs,
     recalledFacts: entry.recalledFacts,
     command: entry.command,
+    handoff: entry.handoff,
     compaction: entry.compaction,
     statusEvent: entry.statusEvent,
   }));
