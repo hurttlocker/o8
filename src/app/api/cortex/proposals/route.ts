@@ -15,8 +15,10 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
+import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { readCachedProposals, snoozeProposal } from '@/lib/cortex/proposer';
 import { dismissObservationProposal, proposeObservation, readObservationProposals } from '@/lib/cortex/proposals';
+import { getLane } from '@/lib/lane/registry';
 
 export function GET(request: NextRequest) {
   try {
@@ -41,6 +43,16 @@ interface DismissBody {
   id?: string;
   filePattern?: string;
   fixPattern?: string;
+  packetId?: string;
+  laneId?: string;
+  proposed_by?: string;
+  kind?: string;
+  text?: string;
+  scope?: string;
+}
+
+function forbidden(code: string, message: string) {
+  return NextResponse.json({ ok: false, error: { code, message } }, { status: 403 });
 }
 
 export async function POST(request: NextRequest) {
@@ -51,9 +63,48 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: 'Invalid JSON body.' }, { status: 400 });
   }
 
+  const principal = resolveRequestPrincipalContext(request);
+  if (principal.role !== 'operator' && principal.role !== 'worker') {
+    return forbidden(
+      'operator_or_worker_required',
+      'Proposal mutations require an operator or packet-bound worker credential.',
+    );
+  }
+  if (principal.role === 'worker' && body?.action !== 'propose_observation') {
+    return forbidden('operator_required', 'Only an operator may mutate existing proposals.');
+  }
+
   if (body?.action === 'propose_observation') {
     try {
-      const proposal = proposeObservation(body);
+      let proposalInput: DismissBody = body;
+      if (principal.role === 'worker') {
+        const ownershipRefusal = workerPacketRefusal(principal, body.packetId);
+        if (ownershipRefusal) {
+          return forbidden(ownershipRefusal.code, ownershipRefusal.message);
+        }
+        const packetId = principal.packetId;
+        if (!packetId) {
+          return forbidden(
+            'worker_packet_required',
+            'Worker observations require a packet-bound credential.',
+          );
+        }
+        const laneId = typeof body.laneId === 'string' ? body.laneId.trim() : '';
+        const lane = laneId ? getLane(laneId) : null;
+        if (!lane || lane.packetId !== packetId) {
+          return forbidden(
+            'worker_lane_mismatch',
+            'Worker observations must name a lane owned by the authenticated packet.',
+          );
+        }
+        proposalInput = {
+          ...body,
+          packetId,
+          laneId: lane.id,
+          proposed_by: packetId,
+        };
+      }
+      const proposal = proposeObservation(proposalInput);
       return NextResponse.json({ ok: true, proposal }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to propose observation.';

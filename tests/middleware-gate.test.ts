@@ -474,6 +474,12 @@ describe('panelGateMiddleware — worker capability scope', () => {
     expect(workerRequest('/api/leases', 'POST').status).toBe(200);
   });
 
+  it('allows only the worker observation proposal method through the global gate', () => {
+    expect(workerRequest('/api/cortex/proposals', 'POST').status).toBe(200);
+    expect(workerRequest('/api/cortex/proposals', 'GET').status).toBe(403);
+    expect(workerRequest('/api/cortex/proposals', 'DELETE').status).toBe(403);
+  });
+
   it('keeps ungranted lease methods and operator mutations closed to workers', () => {
     expect(workerRequest('/api/leases', 'DELETE').status).toBe(403);
     expect(workerRequest('/api/orchestrator/merge', 'POST').status).toBe(403);

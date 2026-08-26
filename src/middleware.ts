@@ -156,6 +156,7 @@ const WORKER_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }>
   { methods: new Set(['GET']), path: /^\/api\/lanes(?:\/[^/]+(?:\/(?:scope|diff))?)?\/?$/ },
   { methods: new Set(['GET', 'POST']), path: /^\/api\/lanes\/[^/]+\/(?:events|heartbeat)\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/(?:browser\/agent|cortex\/ask\/answer)\/?$/ },
+  { methods: new Set(['POST']), path: /^\/api\/cortex\/proposals\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/broadcast\/post\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/agents\/message\/?$/ },
   { methods: new Set(['GET']), path: /^\/api\/agents\/(?:inbox|presence)\/?$/ },
