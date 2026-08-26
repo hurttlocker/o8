@@ -23,6 +23,7 @@ export interface PersistedLlmChatMessage {
   content: string;
   type?: MobileTranscriptEntry['type'];
   media?: MobileTranscriptMedia[];
+  backend?: MobileTranscriptEntry['backend'];
   model?: string;
   tokens?: { input: number; output: number };
   costUsd?: number;
@@ -212,6 +213,7 @@ export function mapLlmHistoryToMobileTranscript(messages: PersistedLlmChatMessag
     timestampLabel: message.timestampLabel ?? (message.timestamp
       ? new Date(message.timestamp).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
       : ''),
+    backend: message.backend,
     model: message.model,
     tokens: message.tokens,
     costUsd: message.costUsd,

@@ -28,6 +28,23 @@
 export interface ChatMessageLike {
   id?: unknown;
   timestamp?: unknown;
+  backend?: unknown;
+  model?: unknown;
+  persistedVersion?: unknown;
+}
+
+const AUTHORSHIP_FIELDS = ['backend', 'model', 'persistedVersion'] as const;
+
+function preserveStoredAuthorship<T extends ChatMessageLike>(existing: T, inbound: T): T {
+  const existingRecord = existing as Record<string, unknown>;
+  const inboundRecord = inbound as Record<string, unknown>;
+  let next: Record<string, unknown> | null = null;
+  for (const field of AUTHORSHIP_FIELDS) {
+    if (inboundRecord[field] !== undefined || existingRecord[field] === undefined) continue;
+    next ??= { ...inboundRecord };
+    next[field] = existingRecord[field];
+  }
+  return (next ?? inboundRecord) as T;
 }
 
 function duplicateAdjacentMessage(left: ChatMessageLike, right: ChatMessageLike): boolean {
@@ -68,24 +85,26 @@ export function mergeChatMessages<T extends ChatMessageLike>(existing: T[], inbo
   // back to the EARLIER of the two timestamps: a re-stamp can never push a
   // message forward, so no client bug can reorder a thread. (The Assistant
   // tab's legitimate edits bypass merge entirely via replace:true.)
-  const existingTsById = new Map<string, number>();
+  const existingById = new Map<string, T>();
   for (const message of existingList) {
     if (message && typeof message.id === 'string') {
-      const ts = timestampOf(message);
-      if (ts !== null) existingTsById.set(message.id, ts);
+      existingById.set(message.id, message);
     }
   }
-  let pinnedAny = false;
+  let normalizedAny = false;
   const normalizedInbound = inboundList.map((message) => {
     if (!message || typeof message.id !== 'string') return message;
-    const priorTs = existingTsById.get(message.id);
-    if (priorTs === undefined) return message;
-    const ownTs = timestampOf(message);
-    if (ownTs === null || priorTs < ownTs) {
-      pinnedAny = true;
-      return { ...message, timestamp: priorTs } as T;
+    const existingMessage = existingById.get(message.id);
+    if (!existingMessage) return message;
+    const withAuthorship = preserveStoredAuthorship(existingMessage, message);
+    const priorTs = timestampOf(existingMessage);
+    const ownTs = timestampOf(withAuthorship);
+    if (priorTs !== null && (ownTs === null || priorTs < ownTs)) {
+      normalizedAny = true;
+      return { ...withAuthorship, timestamp: priorTs } as T;
     }
-    return message;
+    if (withAuthorship !== message) normalizedAny = true;
+    return withAuthorship;
   });
 
   const inboundIds = new Set<string>();
@@ -104,7 +123,7 @@ export function mergeChatMessages<T extends ChatMessageLike>(existing: T[], inbo
   // to be pinned (the normal full-transcript POST) — return it untouched, no
   // reordering. If we pinned anything we must fall through to the sort so the
   // corrected timestamps actually reorder the thread.
-  if (preserved.length === 0 && !pinnedAny) return collapseAdjacentDuplicates(inboundList);
+  if (preserved.length === 0 && !normalizedAny) return collapseAdjacentDuplicates(inboundList);
 
   const concat: T[] = [...normalizedInbound, ...preserved];
   const decorated = concat.map((message, index) => ({ message, index, ts: timestampOf(message) }));

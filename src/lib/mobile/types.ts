@@ -319,6 +319,8 @@ export interface MobileTranscriptEntry {
   toolCalls?: MobileTranscriptToolCall[];
   timestamp?: number;
   timestampLabel?: string;
+  /** Runtime family that authored this individual turn. */
+  backend?: OrchestratorBackendId;
   model?: string;
   tokens?: { input: number; output: number; cacheRead?: number; cacheWrite?: number };
   costUsd?: number;

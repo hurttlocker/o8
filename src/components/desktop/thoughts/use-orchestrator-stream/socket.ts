@@ -1,6 +1,7 @@
 import type { Dispatch, SetStateAction } from 'react';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { isCortexAskTool, parseBrainFeed } from '@/components/desktop/thoughts/brain-feed';
+import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import { isPaneOwnedThread } from '@/lib/orchestrator/pane-thread-registry';
 import { skipDuplicateBySeq } from '@/lib/orchestrator/replay-cursor';
 import {
@@ -25,6 +26,7 @@ export interface CurrentAssistantStreamState {
   chunks: string[];
   thinkingChunks: string[];
   epoch: number;
+  backend?: MobileTranscriptEntry['backend'];
   /** Wall-clock start of the reasoning phase. Claude 5-family thinking is
    *  signature-redacted (empty text), so the empty thinking marker is the only
    *  start signal — the duration it yields drives the "Thought for Ns" line. */
@@ -138,6 +140,7 @@ function createAssistantState(
     chunks: [],
     thinkingChunks: [],
     epoch: resetEpochRef.current,
+    backend: isOrchestratorBackendId(backend) ? backend : undefined,
     verbatimStream: typeof backend === 'string' && VERBATIM_STREAM_BACKENDS.has(backend),
   };
 }
@@ -325,13 +328,14 @@ export function createOrchestratorMessageHandler(
               const idx = prev.findIndex((message) => message.id === thinkingState.id);
               if (idx >= 0) {
                 const next = [...prev];
-                next[idx] = { ...next[idx], thinkingActive: true };
+                next[idx] = { ...next[idx], backend: thinkingState.backend, thinkingActive: true };
                 return next;
               }
               return [...prev, {
                 id: thinkingState.id,
                 role: 'assistant' as const,
                 text: '',
+                backend: thinkingState.backend,
                 thinkingActive: true,
                 timestamp: Date.now(),
                 timestampLabel: formatTimestampLabel(Date.now()),

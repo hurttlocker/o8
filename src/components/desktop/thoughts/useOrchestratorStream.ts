@@ -485,7 +485,7 @@ export function useOrchestratorStream(
         next[idx] = {
           ...next[idx],
           text: text || (thinking ? '' : ''),
-          thinking,
+          thinking, backend: current.backend ?? next[idx].backend,
           ...(thinkingDurationMs !== undefined ? { thinkingDurationMs } : {}),
           thinkingActive,
           timestamp: next[idx].timestamp ?? Date.now(),
@@ -498,7 +498,7 @@ export function useOrchestratorStream(
         id: current.id,
         role: 'assistant',
         text: text || (thinking ? '' : ''),
-        thinking,
+        thinking, backend: current.backend,
         ...(thinkingDurationMs !== undefined ? { thinkingDurationMs } : {}),
         thinkingActive,
         timestamp: Date.now(),

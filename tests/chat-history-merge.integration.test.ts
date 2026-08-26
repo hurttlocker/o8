@@ -21,6 +21,12 @@ async function storedIds(): Promise<string[]> {
   return (data.messages ?? []).map((m: { id: string }) => m.id);
 }
 
+async function storedMessages(): Promise<Array<Record<string, unknown>>> {
+  const res = await GET(new NextRequest(`http://localhost/api/v2/chat-history?tabId=${encodeURIComponent(tabId)}`));
+  const data = await res.json();
+  return data.messages ?? [];
+}
+
 const user = { id: 'u1', role: 'user', timestamp: 100, content: 'Hey buddy' };
 const assistant = { id: 'a1', role: 'assistant', timestamp: 101, content: 'hi!' };
 
@@ -39,5 +45,20 @@ describe('chat-history route merge (#1282)', () => {
     await post({ tabId, replace: true, messages: [user, assistant] }); // reset
     await post({ tabId, replace: true, messages: [user] });            // truncate
     expect(await storedIds()).toEqual(['u1']);                         // assistant dropped
+  });
+
+  it('keeps server-authored runtime attribution through a legacy full-transcript POST', async () => {
+    await post({
+      tabId,
+      replace: true,
+      messages: [user, { ...assistant, backend: 'codex', model: 'gpt-5.6', persistedVersion: 2 }],
+    });
+    await post({ tabId, messages: [user, assistant] });
+
+    expect((await storedMessages()).find((message) => message.id === 'a1')).toMatchObject({
+      backend: 'codex',
+      model: 'gpt-5.6',
+      persistedVersion: 2,
+    });
   });
 });

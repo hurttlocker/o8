@@ -46,6 +46,28 @@ describe('mergeChatMessages (#1282 transcript-loss)', () => {
     expect(merged.find((m) => m.id === 'u1')?.pinned).toBe(true);
   });
 
+  it('preserves server-authored turn attribution omitted by an older client', () => {
+    const existing = [msg('a1', 'assistant', 101, {
+      backend: 'codex',
+      model: 'gpt-5.6',
+      persistedVersion: 3,
+    })];
+    const inbound = [msg('a1', 'assistant', 101, { content: 'Complete response.' })];
+
+    expect(mergeChatMessages(existing, inbound)).toEqual([expect.objectContaining({
+      backend: 'codex',
+      model: 'gpt-5.6',
+      persistedVersion: 3,
+    })]);
+  });
+
+  it('allows an explicitly attributed inbound turn to replace prior attribution', () => {
+    const existing = [msg('a1', 'assistant', 101, { backend: 'codex', model: 'gpt-5.6' })];
+    const inbound = [msg('a1', 'assistant', 101, { backend: 'claude', model: 'claude-opus-5' })];
+
+    expect(mergeChatMessages(existing, inbound)).toBe(inbound);
+  });
+
   it('keeps a stored message that lacks an id (defensive)', () => {
     const existing = [msg('u1', 'user', 100), { role: 'assistant', timestamp: 101, content: 'no-id' }];
     const inbound = [msg('u1', 'user', 100)];

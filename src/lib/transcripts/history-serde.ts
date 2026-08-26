@@ -11,6 +11,7 @@ export type StoredTranscriptMessage = {
   toolCalls?: MobileTranscriptEntry['toolCalls'];
   timestamp?: number;
   timestampLabel?: string;
+  backend?: MobileTranscriptEntry['backend'];
   model?: string;
   tokens?: MobileTranscriptEntry['tokens'];
   costUsd?: number;
@@ -82,6 +83,7 @@ function deserializeMessage(value: unknown, dropInvalid: boolean): MobileTranscr
     timestampLabel: typeof message.timestampLabel === 'string'
       ? message.timestampLabel
       : timestampLabelFrom(message.timestamp),
+    backend: message.backend,
     model: dropInvalid
       ? (typeof message.model === 'string' ? message.model : undefined)
       : message.model,
@@ -121,6 +123,7 @@ export function serializeTranscriptForStorage(
     toolCalls: entry.toolCalls,
     timestamp: entry.timestamp ?? (timestampFallback === 'zero' ? 0 : Date.now()),
     timestampLabel: entry.timestampLabel,
+    backend: entry.backend,
     model: entry.model,
     tokens: entry.tokens,
     costUsd: entry.costUsd,
