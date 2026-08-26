@@ -22,8 +22,24 @@ interface AgentMessageActivityProps {
 }
 
 const COLLAPSED_KEY = 'o8:agent-panel:agent-messages-collapsed';
+const SEEN_SEQUENCES_KEY = 'o8:agent-panel:agent-messages-seen';
 const POLL_INTERVAL_MS = 15_000;
 const MESSAGE_LIMIT = 8;
+
+type SeenSequences = Record<string, number>;
+
+function readSeenSequences(): SeenSequences {
+  if (typeof window === 'undefined') return {};
+  try {
+    const value = JSON.parse(window.localStorage.getItem(SEEN_SEQUENCES_KEY) ?? '{}') as unknown;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, number] => (
+      typeof entry[1] === 'number' && Number.isFinite(entry[1])
+    )));
+  } catch {
+    return {};
+  }
+}
 
 function elapsedLabel(value: string, now: number): string {
   const at = Date.parse(value);
@@ -44,9 +60,9 @@ function deliveryLabel(delivery: AgentMessage['delivery']): string {
 }
 
 function deliveryColor(delivery: AgentMessage['delivery']): string {
-  if (delivery === 'native') return AGENT_STATUS_ACCENT.merged;
+  if (delivery === 'native') return 'var(--t-text-faint)';
   if (delivery === 'failed') return AGENT_STATUS_ACCENT.failed;
-  return 'var(--t-text-faint)';
+  return 'var(--t-warning)';
 }
 
 function uniqueSnapshots(snapshots: RepoSnapshot[]) {
@@ -66,10 +82,30 @@ function AgentMessageActivityBase({ repos }: AgentMessageActivityProps) {
   const [refreshedAt, setRefreshedAt] = useState(0);
   const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    return window.localStorage.getItem(COLLAPSED_KEY) === '1';
+    if (typeof window === 'undefined') return true;
+    const stored = window.localStorage.getItem(COLLAPSED_KEY);
+    return stored === null ? true : stored === '1';
   });
+  const [seenSequences, setSeenSequences] = useState<SeenSequences>(readSeenSequences);
   const abortRef = useRef<AbortController | null>(null);
+  const collapsedRef = useRef(collapsed);
+  const seenSequencesRef = useRef(seenSequences);
+
+  const recordSeenSequences = useCallback((nextSnapshots: RepoSnapshot[], advanceExisting: boolean) => {
+    const nextSeen = { ...seenSequencesRef.current };
+    let changed = false;
+    for (const snapshot of nextSnapshots) {
+      const latest = snapshot.messages.reduce((highest, message) => Math.max(highest, message.sequence), 0);
+      if (!(snapshot.repo.localPath in nextSeen) || (advanceExisting && latest > nextSeen[snapshot.repo.localPath])) {
+        nextSeen[snapshot.repo.localPath] = latest;
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    seenSequencesRef.current = nextSeen;
+    setSeenSequences(nextSeen);
+    window.localStorage.setItem(SEEN_SEQUENCES_KEY, JSON.stringify(nextSeen));
+  }, []);
 
   const fetchSnapshot = useCallback(async () => {
     abortRef.current?.abort();
@@ -96,8 +132,9 @@ function AgentMessageActivityBase({ repos }: AgentMessageActivityProps) {
     if (!controller.signal.aborted) {
       setSnapshots(next);
       setRefreshedAt(Date.now());
+      recordSeenSequences(next, !collapsedRef.current);
     }
-  }, [repos]);
+  }, [recordSeenSequences, repos]);
 
   useEffect(() => {
     if (repos.length === 0) return undefined;
@@ -115,14 +152,17 @@ function AgentMessageActivityBase({ repos }: AgentMessageActivityProps) {
 
   const { messages, agents } = useMemo(() => uniqueSnapshots(snapshots), [snapshots]);
   const repoNames = useMemo(() => new Map(repos.map((repo) => [repo.localPath, repo.name])), [repos]);
+  const unreadCount = useMemo(() => messages.filter((message) => (
+    message.sequence > (seenSequences[message.repo] ?? message.sequence)
+  )).length, [messages, seenSequences]);
 
   const toggleCollapsed = useCallback(() => {
-    setCollapsed((current) => {
-      const next = !current;
-      window.localStorage.setItem(COLLAPSED_KEY, next ? '1' : '0');
-      return next;
-    });
-  }, []);
+    const next = !collapsedRef.current;
+    collapsedRef.current = next;
+    setCollapsed(next);
+    window.localStorage.setItem(COLLAPSED_KEY, next ? '1' : '0');
+    if (!next) recordSeenSequences(snapshots, true);
+  }, [recordSeenSequences, snapshots]);
 
   if (repos.length === 0 || (messages.length === 0 && agents.length === 0)) return null;
 
@@ -131,7 +171,8 @@ function AgentMessageActivityBase({ repos }: AgentMessageActivityProps) {
       <SectionLabel
         label="Agent messages"
         compact
-        count={messages.length || undefined}
+        count={unreadCount || undefined}
+        countTone={unreadCount > 0 ? 'var(--t-accent)' : undefined}
         collapsed={collapsed}
         onToggle={toggleCollapsed}
       />
@@ -193,9 +234,6 @@ function AgentMessageActivityBase({ repos }: AgentMessageActivityProps) {
                   <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {message.from} → {message.to}
                   </span>
-                  <span style={{ color: deliveryColor(message.delivery), fontSize: 9.5, fontWeight: 300, letterSpacing: '-0.2px', lineHeight: 1.25, flexShrink: 0 }}>
-                    {deliveryLabel(message.delivery)}
-                  </span>
                 </span>
                 <span
                   style={{
@@ -215,7 +253,8 @@ function AgentMessageActivityBase({ repos }: AgentMessageActivityProps) {
                   {message.text}
                 </span>
                 <span style={{ display: 'block', marginTop: 4, color: 'var(--t-text-faint)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', lineHeight: 1.25 }}>
-                  {repoLabel} · {elapsedLabel(message.timestamp, refreshedAt)}
+                  {repoLabel} · {elapsedLabel(message.timestamp, refreshedAt)} ·{' '}
+                  <span style={{ color: deliveryColor(message.delivery) }}>{deliveryLabel(message.delivery)}</span>
                 </span>
                 {expanded && message.deliveryNote ? (
                   <span data-agent-delivery-note="true" style={{ display: 'block', marginTop: 4, color: 'var(--t-text-faint)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', lineHeight: 1.35 }}>
