@@ -119,8 +119,25 @@ function appendBounded(current, chunk, limit = 2 * 1024 * 1024) {
   return next.length <= limit ? next : next.slice(next.length - limit);
 }
 
+/**
+ * Base for per-file fixture roots.
+ *
+ * NOT `os.tmpdir()`. On macOS that resolves to a 49-character
+ * `/var/folders/<...>/T/` path, and the fixture root nests twice more before a
+ * child process gets to create anything: the gate's own directory, then the
+ * suite's `o8-test-data-run-*` (which `tests/global-test-data-dir.ts` also
+ * assigns to TMPDIR). By the time tsx builds its IPC pipe at
+ * `$TMPDIR/tsx-<uid>/<pid>.pipe` the path is 118 characters, past the 104-char
+ * limit for unix socket paths — so every cross-process test died with
+ * EADDRINUSE before its own logic ran. Measured: a 114-char TMPDIR reproduces
+ * it; the default passes clean.
+ *
+ * A short base keeps the same nesting inside budget (58 characters).
+ */
+const FIXTURE_BASE = process.platform === 'win32' ? tmpdir() : '/tmp';
+
 async function runFile(file, index) {
-  const fixtureRoot = mkdtempSync(join(tmpdir(), 'o8-integration-file-'));
+  const fixtureRoot = mkdtempSync(join(FIXTURE_BASE, 'o8g-'));
   const reportPath = join(fixtureRoot, 'vitest-report.json');
   const marker = randomUUID().replace(/-/g, '');
   const env = {
