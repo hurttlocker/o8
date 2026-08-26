@@ -77,6 +77,17 @@ import { appendFileSync, readFileSync } from 'node:fs';
 const args = process.argv.slice(2);
 const state = JSON.parse(readFileSync(${JSON.stringify(statePath)}, 'utf8'));
 appendFileSync(${JSON.stringify(logPath)}, \`lsof \${args.join(' ')}\\n\`);
+// #1853 replaced the per-directory probes with one machine-wide snapshot:
+// \`lsof -nP -d cwd -F pcn\`. Real lsof exits 0 and emits p/c/n records; a tree
+// with nothing open is a SUCCESSFUL probe that matches no rows. Exiting
+// non-zero instead reads as "probe failed", and the guard fails closed on that.
+if (args.includes('pcn') || args.includes('-Fpcn')) {
+  if (state.cached) process.stdout.write(${JSON.stringify(`p${holderPid}
+copencode
+n${worktreePath}
+`)});
+  process.exit(0);
+}
 if (args.includes('-Fn')) {
   if (state.cached) process.stdout.write(${JSON.stringify(`p${holderPid}\nn${worktreePath}/held\n`)});
   process.exit(state.cached ? 0 : 1);
