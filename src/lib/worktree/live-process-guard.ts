@@ -84,7 +84,14 @@ export async function allowWorktreeRemoval(
     return true;
   }
 
-  const probe = await probeLiveProcessInside(dirPath);
+  // The machine cwd snapshot is cached for up to 15s so high-frequency callers
+  // do not each pay for an `lsof` (#1853). This seam is not one of them: it
+  // makes an irreversible decision, and a snapshot taken before a process
+  // exited reports it as still live, so a legitimate removal is refused. Force
+  // a fresh read here and leave every other caller on the cache.
+  const probe = await probeLiveProcessInside(dirPath, {
+    readSnapshot: () => readProcessCwdSnapshot({ forceRefresh: true }),
+  });
   if (probe.status === 'clear') return true;
   if (probe.status === 'live') {
     console.error(`[${options.logPrefix}] REFUSED worktree removal for ${dirPath} — live process found (pid ${probe.pids.join(', ')})`);

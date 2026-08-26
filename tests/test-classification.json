@@ -1,9 +1,9 @@
 {
   "schema": "o8/test-classification/v1",
   "generatedBy": "node scripts/classify-tests.mjs --write",
-  "totalTests": 862,
+  "totalTests": 863,
   "hermeticTests": 555,
-  "resourceOwningTests": 307,
+  "resourceOwningTests": 308,
   "resourceOwning": [
     {
       "path": "src/app/api/leases/route.test.ts",
@@ -1425,6 +1425,13 @@
         "child-process",
         "git-cli",
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/live-process-guard-deletion-seam.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal"
       ]
     },
     {
