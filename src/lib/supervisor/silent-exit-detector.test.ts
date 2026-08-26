@@ -106,11 +106,11 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  if (ownedRoot) rmSync(ownedRoot, { recursive: true, force: true });
+  if (tempWorktree) rmSync(tempWorktree, { recursive: true, force: true });
   while (testLaneIds.length > 0) {
     deleteLane(testLaneIds.pop()!);
   }
-  if (ownedRoot) rmSync(ownedRoot, { recursive: true, force: true });
-  if (tempWorktree) rmSync(tempWorktree, { recursive: true, force: true });
   ownedRoot = null;
   tempWorktree = null;
   delete process.env.CORTEX_IDE_OWNED_CODEX_ROOT;

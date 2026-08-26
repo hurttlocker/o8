@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const dataDir = process.env.CORTEX_IDE_DATA_DIR!;
 const ownedRoot = path.join(dataDir, 'worker-pane-owned-opencode');
+const laneWorktree = path.join(dataDir, 'worker-pane-lane-worktree');
 process.env.O8_OWNED_OPENCODE_ROOT = ownedRoot;
 
 const { GET: getPacketTranscript } = await import('@/app/api/orchestrator/packet-transcript/route');
@@ -76,10 +77,11 @@ function writePersistedFirstBurst(): void {
 
 describe('worker transcript persisted packet route', () => {
   beforeAll(() => {
+    mkdirSync(laneWorktree, { recursive: true });
     writePersistedFirstBurst();
     const lane = createLane({
       repoPath: dataDir,
-      worktreePath: dataDir,
+      worktreePath: laneWorktree,
       branch: 'inline/worker-transcript-fixture',
       runtime: 'opencode',
       packetId,
@@ -89,8 +91,9 @@ describe('worker transcript persisted packet route', () => {
   });
 
   afterAll(() => {
-    deleteLane(laneId);
     rmSync(ownedRoot, { recursive: true, force: true });
+    rmSync(laneWorktree, { recursive: true, force: true });
+    deleteLane(laneId);
   });
 
   it('returns a structured tool event without projecting the step_finish reason', async () => {

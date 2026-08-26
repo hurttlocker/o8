@@ -118,11 +118,11 @@ function ageInboxItem(id: string, createdAt: string) {
 }
 
 afterEach(() => {
-  while (laneIds.length > 0) {
-    deleteLane(laneIds.pop()!);
-  }
   while (tempDirs.length > 0) {
     rmSync(tempDirs.pop()!, { recursive: true, force: true });
+  }
+  while (laneIds.length > 0) {
+    deleteLane(laneIds.pop()!);
   }
   writeOrchestratorControlPlaneState(createEmptyOrchestratorMissionState());
 });
