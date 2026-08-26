@@ -1,3 +1,6 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
 import { isBridgeSessionAlive, signalBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
 import { lookupOwnedActiveRunFresh } from '@/lib/runtimes/shared/owned-session-index';
 import { isPidAlive, pidCommandLine } from '@/lib/runtimes/shared/owned-session/helpers';
@@ -18,6 +21,7 @@ export type InterruptEscalationMechanism = InterruptEscalationSignal | 'taskkill
 
 export interface InterruptEscalationTarget {
   pid?: number;
+  processGroupId?: number;
   tmuxSession?: string;
   commandLabel?: string;
 }
@@ -28,8 +32,13 @@ export interface InterruptEscalationStep {
   /** What was actually used. Differs from `signal` on Windows. */
   mechanism: InterruptEscalationMechanism;
   sent: boolean;
+  /** True only when the complete worker process tree was verified gone. */
+  confirmedDead: boolean;
+  /** Fail-closed: false is only possible when `confirmedDead` is true. */
   aliveAfter: boolean;
   error?: string;
+  verificationNote?: string;
+  unconfirmedPids?: number[];
 }
 
 export interface InterruptEscalationResult {
@@ -43,9 +52,16 @@ export interface InterruptEscalationResult {
 }
 
 export interface InterruptEscalationDeps {
-  isAlive(target: InterruptEscalationTarget): Promise<boolean> | boolean;
+  isAlive(target: InterruptEscalationTarget): Promise<boolean | InterruptLivenessProbe> | boolean | InterruptLivenessProbe;
   kill(target: InterruptEscalationTarget, signal: InterruptEscalationSignal): Promise<void> | void;
   sleep(ms: number): Promise<void>;
+}
+
+export interface InterruptLivenessProbe {
+  alive: boolean;
+  confirmedDead: boolean;
+  note?: string;
+  unconfirmedPids?: number[];
 }
 
 const ESCALATION_STEPS: ReadonlyArray<{ signal: InterruptEscalationSignal; waitMs: number }> = [
@@ -56,6 +72,112 @@ const ESCALATION_STEPS: ReadonlyArray<{ signal: InterruptEscalationSignal; waitM
 
 function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const execFileAsync = promisify(execFile);
+
+interface PosixProcessTreeState {
+  processGroupId: number;
+  trackedPids: Set<number>;
+  rootObserved: boolean;
+  groupObserved: boolean;
+  verificationFailures: Map<number, string>;
+}
+
+interface DefaultInterruptState {
+  posixTree?: PosixProcessTreeState;
+  treeKillConfirmed: boolean;
+}
+
+function createDefaultInterruptState(target: InterruptEscalationTarget): DefaultInterruptState {
+  const pid = target.pid;
+  return {
+    treeKillConfirmed: false,
+    ...(process.platform !== 'win32' && pid
+      ? {
+          posixTree: {
+            processGroupId: target.processGroupId && target.processGroupId > 0
+              ? target.processGroupId
+              : pid,
+            trackedPids: new Set([pid]),
+            rootObserved: false,
+            groupObserved: false,
+            verificationFailures: new Map(),
+          },
+        }
+      : {}),
+  };
+}
+
+function errnoCode(error: unknown): string | number | undefined {
+  return (error as NodeJS.ErrnoException | undefined)?.code;
+}
+
+function pidList(values: Iterable<number>): number[] {
+  return [...new Set(values)].filter((pid) => Number.isSafeInteger(pid) && pid > 0).sort((a, b) => a - b);
+}
+
+async function directChildPids(pid: number): Promise<number[]> {
+  try {
+    const { stdout } = await execFileAsync('pgrep', ['-P', String(pid)], { windowsHide: true });
+    return pidList(stdout.split(/\s+/).map((value) => Number.parseInt(value, 10)));
+  } catch (error) {
+    // pgrep uses exit 1 for a successful query with no matches.
+    if (errnoCode(error) === 1) return [];
+    throw new Error(`pgrep -P ${pid} failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function snapshotPosixDescendants(state: PosixProcessTreeState): Promise<void> {
+  const queue = pidList(state.trackedPids);
+  const visited = new Set<number>();
+  while (queue.length > 0) {
+    const parentPid = queue.shift()!;
+    if (visited.has(parentPid) || !isPidAlive(parentPid)) continue;
+    visited.add(parentPid);
+    let children: number[];
+    try {
+      children = await directChildPids(parentPid);
+      state.verificationFailures.delete(parentPid);
+    } catch (error) {
+      state.verificationFailures.set(parentPid, error instanceof Error ? error.message : String(error));
+      continue;
+    }
+    for (const childPid of children) {
+      if (!state.trackedPids.has(childPid)) state.trackedPids.add(childPid);
+      queue.push(childPid);
+    }
+  }
+}
+
+function probePosixProcessGroup(processGroupId: number): 'alive' | 'dead' | 'unknown' {
+  try {
+    process.kill(-processGroupId, 0);
+    return 'alive';
+  } catch (error) {
+    if (errnoCode(error) === 'EPERM') return 'alive';
+    if (errnoCode(error) === 'ESRCH') return 'dead';
+    return 'unknown';
+  }
+}
+
+async function posixProcessGroupId(pid: number): Promise<number | null> {
+  try {
+    const { stdout } = await execFileAsync('ps', ['-o', 'pgid=', '-p', String(pid)], { windowsHide: true });
+    const processGroupId = Number.parseInt(stdout.trim(), 10);
+    return Number.isSafeInteger(processGroupId) && processGroupId > 0 ? processGroupId : null;
+  } catch {
+    return null;
+  }
+}
+
+function signalPid(pid: number, signal: InterruptEscalationSignal): void {
+  try {
+    process.kill(pid, signal);
+  } catch (error) {
+    if (errnoCode(error) === 'ESRCH') return;
+    throw error;
+  }
 }
 
 /**
@@ -75,12 +197,75 @@ export function interruptMechanism(
   return 'taskkill-tree';
 }
 
-async function defaultIsAlive(target: InterruptEscalationTarget): Promise<boolean> {
-  if (target.tmuxSession && await isBridgeSessionAlive(target.tmuxSession)) return true;
-  return isPidAlive(target.pid);
+async function defaultIsAlive(
+  target: InterruptEscalationTarget,
+  state: DefaultInterruptState,
+): Promise<InterruptLivenessProbe> {
+  if (target.tmuxSession) {
+    if (await isBridgeSessionAlive(target.tmuxSession)) {
+      return { alive: true, confirmedDead: false };
+    }
+    if (!target.pid) return { alive: false, confirmedDead: true };
+  }
+
+  if (!target.pid) return { alive: false, confirmedDead: true };
+
+  if (process.platform === 'win32') {
+    if (isPidAlive(target.pid)) {
+      return { alive: true, confirmedDead: false, unconfirmedPids: [target.pid] };
+    }
+    if (state.treeKillConfirmed) return { alive: false, confirmedDead: true };
+    return {
+      alive: true,
+      confirmedDead: false,
+      unconfirmedPids: [target.pid],
+      note: `Pid ${target.pid} was absent before a process-tree kill could verify its descendants stopped.`,
+    };
+  }
+
+  const tree = state.posixTree!;
+  if (isPidAlive(target.pid)) tree.rootObserved = true;
+  await snapshotPosixDescendants(tree);
+
+  const groupStatus = probePosixProcessGroup(tree.processGroupId);
+  if (groupStatus === 'alive') tree.groupObserved = true;
+  const livePids = pidList(tree.trackedPids).filter((pid) => isPidAlive(pid));
+  if (groupStatus === 'alive' || livePids.length > 0) {
+    return {
+      alive: true,
+      confirmedDead: false,
+      unconfirmedPids: livePids.length > 0 ? livePids : [tree.processGroupId],
+    };
+  }
+
+  const failedPids = pidList(tree.verificationFailures.keys());
+  if (groupStatus === 'unknown' || failedPids.length > 0) {
+    const unknownPids = failedPids.length > 0 ? failedPids : [tree.processGroupId];
+    return {
+      alive: true,
+      confirmedDead: false,
+      unconfirmedPids: unknownPids,
+      note: `Process-tree verification failed for pids ${unknownPids.join(', ')}.`,
+    };
+  }
+
+  if (!tree.rootObserved && !tree.groupObserved) {
+    return {
+      alive: true,
+      confirmedDead: false,
+      unconfirmedPids: [target.pid],
+      note: `Pid ${target.pid} and process group ${tree.processGroupId} were absent before descendants could be verified.`,
+    };
+  }
+
+  return { alive: false, confirmedDead: true };
 }
 
-async function defaultKill(target: InterruptEscalationTarget, signal: InterruptEscalationSignal): Promise<void> {
+async function defaultKill(
+  target: InterruptEscalationTarget,
+  signal: InterruptEscalationSignal,
+  state: DefaultInterruptState,
+): Promise<void> {
   if (target.tmuxSession) {
     await signalBridgeTerminalSession(target.tmuxSession, signal);
     return;
@@ -109,12 +294,94 @@ async function defaultKill(target: InterruptEscalationTarget, signal: InterruptE
         `taskkill could not confirm the process tree for pid ${target.pid} was stopped (requested ${signal})`,
       );
     }
+    state.treeKillConfirmed = true;
     return;
   }
+
+  const tree = state.posixTree!;
+  await snapshotPosixDescendants(tree);
+  const snapshotError = tree.verificationFailures.size > 0
+    ? [...tree.verificationFailures.entries()]
+      .map(([pid, error]) => `${pid} (${error})`)
+      .join(', ')
+    : null;
+
+  let groupSignaled = false;
+  let groupSignalError: string | undefined;
   try {
-    process.kill(-target.pid, signal);
-  } catch {
-    process.kill(target.pid, signal);
+    process.kill(-tree.processGroupId, signal);
+    tree.groupObserved = true;
+    groupSignaled = true;
+  } catch (error) {
+    if (errnoCode(error) !== 'ESRCH') {
+      groupSignalError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  // A worker can escape the recorded process group while it remains a
+  // descendant of the interpreter. Signal those descendants explicitly. When
+  // the group is unavailable, this becomes the portable POSIX tree-kill
+  // fallback instead of signaling only the interpreter and losing the child
+  // when it reparents.
+  const tracked = pidList(tree.trackedPids).sort((a, b) => b - a);
+  const unaddressed: number[] = [];
+  for (const pid of tracked) {
+    if (!isPidAlive(pid)) continue;
+    if (groupSignaled) {
+      const processGroupId = await posixProcessGroupId(pid);
+      if (processGroupId === tree.processGroupId) continue;
+      if (processGroupId === null && !isPidAlive(pid)) continue;
+    }
+    try {
+      signalPid(pid, signal);
+    } catch {
+      unaddressed.push(pid);
+    }
+  }
+  if (unaddressed.length > 0) {
+    const groupContext = groupSignalError
+      ? ` Process group ${tree.processGroupId} also failed: ${groupSignalError}.`
+      : '';
+    throw new Error(
+      `Could not signal process-tree pids ${pidList(unaddressed).join(', ')} with ${signal}.${groupContext}`,
+    );
+  }
+  if (snapshotError) {
+    throw new Error(`Could not snapshot the complete process tree before ${signal}: ${snapshotError}`);
+  }
+  if (!groupSignaled && !tree.rootObserved && !tree.groupObserved) {
+    throw new Error(
+      `Pid ${target.pid} and process group ${tree.processGroupId} were absent before the process tree could be signaled with ${signal}.`,
+    );
+  }
+  if (!groupSignaled && groupSignalError && probePosixProcessGroup(tree.processGroupId) !== 'dead') {
+    throw new Error(
+      `Could not signal process group ${tree.processGroupId} with ${signal}: ${groupSignalError}`,
+    );
+  }
+}
+
+function normalizeProbe(value: boolean | InterruptLivenessProbe): InterruptLivenessProbe {
+  if (typeof value !== 'boolean') {
+    if (value.confirmedDead) return { ...value, alive: false };
+    return { ...value, alive: true };
+  }
+  return { alive: value, confirmedDead: !value };
+}
+
+async function probeLiveness(
+  deps: InterruptEscalationDeps,
+  target: InterruptEscalationTarget,
+): Promise<InterruptLivenessProbe> {
+  try {
+    return normalizeProbe(await deps.isAlive(target));
+  } catch (error) {
+    return {
+      alive: true,
+      confirmedDead: false,
+      note: error instanceof Error ? error.message : String(error),
+      unconfirmedPids: target.pid ? [target.pid] : undefined,
+    };
   }
 }
 
@@ -122,14 +389,16 @@ export async function escalateInterrupt(
   target: InterruptEscalationTarget,
   deps: Partial<InterruptEscalationDeps> = {},
 ): Promise<InterruptEscalationResult> {
+  const defaultState = createDefaultInterruptState(target);
   const runtimeDeps: InterruptEscalationDeps = {
-    isAlive: deps.isAlive ?? defaultIsAlive,
-    kill: deps.kill ?? defaultKill,
+    isAlive: deps.isAlive ?? ((probeTarget) => defaultIsAlive(probeTarget, defaultState)),
+    kill: deps.kill ?? ((killTarget, signal) => defaultKill(killTarget, signal, defaultState)),
     sleep: deps.sleep ?? defaultSleep,
   };
   const steps: InterruptEscalationStep[] = [];
 
-  if (!await runtimeDeps.isAlive(target)) {
+  const initialProbe = await probeLiveness(runtimeDeps, target);
+  if (initialProbe.confirmedDead) {
     return {
       attempted: false,
       confirmedDead: true,
@@ -152,9 +421,19 @@ export async function escalateInterrupt(
       error = err instanceof Error ? err.message : String(err);
     }
     await runtimeDeps.sleep(step.waitMs);
-    const aliveAfter = await runtimeDeps.isAlive(target);
-    steps.push({ signal: step.signal, mechanism, sent, aliveAfter, error });
-    if (!aliveAfter) {
+    const probe = await probeLiveness(runtimeDeps, target);
+    const aliveAfter = !probe.confirmedDead;
+    steps.push({
+      signal: step.signal,
+      mechanism,
+      sent,
+      confirmedDead: probe.confirmedDead,
+      aliveAfter,
+      error,
+      verificationNote: probe.note,
+      unconfirmedPids: probe.unconfirmedPids,
+    });
+    if (probe.confirmedDead) {
       return {
         attempted: true,
         confirmedDead: true,
@@ -167,6 +446,14 @@ export async function escalateInterrupt(
     }
   }
 
+  const finalStep = steps.at(-1);
+  const unconfirmedPids = pidList(finalStep?.unconfirmedPids ?? (target.pid ? [target.pid] : []));
+  const verificationSuffix = finalStep?.verificationNote
+    ? ` ${finalStep.verificationNote}`
+    : unconfirmedPids.length > 0
+      ? ` Unconfirmed pids: ${unconfirmedPids.join(', ')}.`
+      : '';
+
   return {
     attempted: true,
     confirmedDead: false,
@@ -174,7 +461,7 @@ export async function escalateInterrupt(
     steps,
     pid: target.pid,
     tmuxSession: target.tmuxSession,
-    note: `Worker remained live after ${describeAttempts(steps)}.`,
+    note: `Worker tree could not be confirmed stopped after ${describeAttempts(steps)}.${verificationSuffix}`,
   };
 }
 
@@ -220,10 +507,20 @@ export async function escalateInterruptOwnedSurface(surfaceId: string): Promise<
   if (!activeRun) {
     return {
       attempted: false,
+      confirmedDead: false,
+      alreadyDead: false,
+      steps: [],
+      note: 'Owned runtime process evidence is unavailable, so the worker tree could not be confirmed stopped.',
+    };
+  }
+
+  if (!activeRun.pid && !activeRun.tmuxSession) {
+    return {
+      attempted: false,
       confirmedDead: true,
       alreadyDead: true,
       steps: [],
-      note: 'Owned runtime surface exists outside the live inventory or has no active run.',
+      note: 'The owned runtime recorded no active run.',
     };
   }
 
@@ -236,21 +533,22 @@ export async function escalateInterruptOwnedSurface(surfaceId: string): Promise<
   if (activeRun.pid && !bridgeAlive) {
     const expectedCommand = activeRun.commandIdentity ?? commandLabel;
     const commandLine = await pidCommandLine(activeRun.pid);
-    if (!commandLine || !commandLine.includes(expectedCommand)) {
+    if (commandLine && !commandLine.includes(expectedCommand)) {
       return {
         attempted: false,
-        confirmedDead: true,
-        alreadyDead: true,
+        confirmedDead: false,
+        alreadyDead: false,
         steps: [],
         pid: activeRun.pid,
         tmuxSession: activeRun.tmuxSession,
-        note: `Stored pid ${activeRun.pid} no longer matches the owned ${expectedCommand} run.`,
+        note: `Stored pid ${activeRun.pid} no longer matches the owned ${expectedCommand} run, so its process tree was not signaled or confirmed stopped.`,
       };
     }
   }
 
   return escalateInterrupt({
     pid: activeRun.pid,
+    processGroupId: activeRun.processGroupId,
     tmuxSession: activeRun.tmuxSession,
     commandLabel,
   });

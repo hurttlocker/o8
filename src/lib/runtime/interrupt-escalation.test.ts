@@ -1,5 +1,8 @@
+import { spawn } from 'node:child_process';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { escalateInterrupt, type InterruptEscalationSignal } from './interrupt-escalation';
+import { isPidAlive } from '@/lib/runtimes/shared/owned-session/helpers';
 
 const realPlatform = process.platform;
 
@@ -49,10 +52,70 @@ describe('interrupt escalation ladder', () => {
     );
 
     expect(result.confirmedDead).toBe(false);
-    expect(result.note).toBe('Worker remained live after SIGINT, SIGTERM, and SIGKILL.');
+    expect(result.note).toBe(
+      'Worker tree could not be confirmed stopped after SIGINT, SIGTERM, and SIGKILL. Unconfirmed pids: 456.',
+    );
     expect(kill).toHaveBeenCalledTimes(3);
     expect(result.steps.map((step) => step.signal)).toEqual(['SIGINT', 'SIGTERM', 'SIGKILL']);
     expect(result.steps.map((step) => step.mechanism)).toEqual(['SIGINT', 'SIGTERM', 'SIGKILL']);
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('POSIX process-tree escalation', () => {
+  it('kills and verifies descendants when the recorded pid is not a process-group leader', async () => {
+    const grandchildScript = [
+      "process.on('SIGINT', () => {});",
+      "process.on('SIGTERM', () => {});",
+      "process.send?.('ready');",
+      'setInterval(() => {}, 1000);',
+    ].join('');
+    const interpreterScript = [
+      "const { spawn } = require('node:child_process');",
+      "process.on('SIGINT', () => {});",
+      "process.on('SIGTERM', () => {});",
+      `const child = spawn(process.execPath, ['-e', ${JSON.stringify(grandchildScript)}], `,
+      "  { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });",
+      "child.on('message', () => process.send?.({ childPid: child.pid }));",
+      'setInterval(() => {}, 1000);',
+    ].join('');
+    const interpreter = spawn(process.execPath, ['-e', interpreterScript], {
+      stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+    });
+    const interpreterPid = interpreter.pid!;
+    const interpreterExited = new Promise<void>((resolve) => interpreter.once('exit', () => resolve()));
+    let childPid = 0;
+
+    try {
+      childPid = await new Promise<number>((resolve, reject) => {
+        interpreter.once('message', (message) => resolve((message as { childPid: number }).childPid));
+        interpreter.once('error', reject);
+      });
+      expect(isPidAlive(interpreterPid)).toBe(true);
+      expect(isPidAlive(childPid)).toBe(true);
+
+      const result = await escalateInterrupt({ pid: interpreterPid });
+
+      expect(result.confirmedDead).toBe(true);
+      expect(result.steps.at(-1)?.confirmedDead).toBe(true);
+      expect(result.steps.at(-1)?.aliveAfter).toBe(false);
+      await interpreterExited;
+      expect(isPidAlive(interpreterPid)).toBe(false);
+      expect(isPidAlive(childPid)).toBe(false);
+    } finally {
+      for (const pid of [childPid, interpreterPid]) {
+        if (!pid) continue;
+        try { process.kill(pid, 'SIGKILL'); } catch {}
+      }
+    }
+  }, 15_000);
+
+  it('does not infer tree death when the interpreter was gone before descendants could be inspected', async () => {
+    const missingPid = 2_000_000_000;
+    const result = await escalateInterrupt({ pid: missingPid }, { sleep: async () => {} });
+
+    expect(result.confirmedDead).toBe(false);
+    expect(result.steps.every((step) => step.aliveAfter && !step.confirmedDead)).toBe(true);
+    expect(result.note).toContain(`Pid ${missingPid} and process group ${missingPid} were absent`);
   });
 });
 
@@ -90,7 +153,9 @@ describe('interrupt escalation audit trail on Windows', () => {
     );
 
     expect(result.confirmedDead).toBe(false);
-    expect(result.note).toBe('Worker remained live after 3 taskkill-tree attempts.');
+    expect(result.note).toBe(
+      'Worker tree could not be confirmed stopped after 3 taskkill-tree attempts. Unconfirmed pids: 456.',
+    );
   });
 
   it('keeps the real signal for a tmux target, which delivers one for real', async () => {
