@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import type { AutomationRecord, RunStatus } from './types';
+import type { AutomationFireRecord, AutomationRecord, RunStatus } from './types';
 
 const UI_FONT = 'var(--font-sans-system)';
 
@@ -37,6 +37,30 @@ function statusColor(status: RunStatus): string {
   if (status === 'ok') return 'var(--t-success)';
   if (status === 'error') return 'var(--t-brand-red)';
   return 'var(--t-text-faint)';
+}
+
+function fireStatusColor(status: AutomationFireRecord['status']): string {
+  if (status === 'leased') return 'var(--t-accent)';
+  if (status === 'succeeded') return 'var(--t-success)';
+  if (status === 'parked' || status === 'cancelled') return 'var(--t-brand-red)';
+  if (status === 'retrying' || status === 'recovered') return 'var(--t-warning)';
+  return 'var(--t-text-faint)';
+}
+
+function durationLabel(ms: number | null): string {
+  if (ms == null) return '—';
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;
+  return `${Math.round(ms / 60_000)}m`;
+}
+
+function fireExplanation(fire: AutomationFireRecord): string {
+  if (fire.status === 'retrying') return `Retry ${fire.attemptCount + 1} of ${fire.maxAttempts} queued`;
+  if (fire.status === 'recovered') return `Recovered after ${fire.recoveryCount} lost lease${fire.recoveryCount === 1 ? '' : 's'}`;
+  if (fire.status === 'parked') return fire.resultNote || 'Parked after bounded retries';
+  if (fire.status === 'cancelled') return fire.resultNote || 'Cancelled';
+  if (fire.recoveryCount > 0) return `Recovered ${fire.recoveryCount} time${fire.recoveryCount === 1 ? '' : 's'}`;
+  return fire.resultNote || (fire.status === 'succeeded' ? 'Dispatched successfully' : 'Waiting for capacity');
 }
 
 function statusTitle(row: AutomationRecord): string {
@@ -175,6 +199,7 @@ export function AutomationListRow({
   const [hovered, setHovered] = useState(false);
   const [focusWithin, setFocusWithin] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [busy, setBusy] = useState<'toggle' | 'run' | 'delete' | null>(null);
   const running = row.lastRunStatus === 'running' || busy === 'run';
   const revealActions = hovered || focusWithin || confirmDelete;
@@ -244,6 +269,31 @@ export function AutomationListRow({
             {row.runtime}
             <MetaSeparator />
             <LastRunLink row={row} onOpenLane={onOpenLane} />
+            <MetaSeparator />
+            <button
+              type="button"
+              aria-expanded={historyOpen}
+              onClick={(event) => {
+                event.stopPropagation();
+                setHistoryOpen((current) => !current);
+              }}
+              style={{
+                paddingTop: 0,
+                paddingRight: 0,
+                paddingBottom: 0,
+                paddingLeft: 0,
+                borderWidth: 0,
+                background: 'transparent',
+                color: 'inherit',
+                fontSize: 'inherit',
+                fontWeight: 'inherit',
+                letterSpacing: 'inherit',
+                fontFamily: 'inherit',
+                cursor: 'pointer',
+              }}
+            >
+              history {row.fireMetrics.count}
+            </button>
           </span>
         </div>
         <Toggle
@@ -274,6 +324,59 @@ export function AutomationListRow({
           <ActionButton danger onClick={() => setConfirmDelete(true)}>Delete</ActionButton>
         </div>
       </div>
+      {historyOpen ? (
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 5,
+          paddingTop: 7,
+          paddingRight: 10,
+          paddingBottom: 9,
+          paddingLeft: 25,
+          borderTopWidth: 1,
+          borderTopStyle: 'solid',
+          borderTopColor: 'var(--t-divider-subtle)',
+        }}>
+          <span style={{ color: 'var(--t-text-faint)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px' }}>
+            queue p50 {durationLabel(row.fireMetrics.queueDelayMs.p50)} · p95 {durationLabel(row.fireMetrics.queueDelayMs.p95)} · max concurrent {row.fireMetrics.maxConcurrentFires} · duplicates {row.fireMetrics.duplicateFireCount}
+          </span>
+          {row.fires.length === 0 ? (
+            <span style={{ color: 'var(--t-text-muted)', fontSize: 11, fontWeight: 300 }}>No fires recorded yet.</span>
+          ) : row.fires.map((fire) => (
+            <div key={fire.id} style={{ minHeight: 26, display: 'flex', alignItems: 'center', gap: 7 }}>
+              <span aria-hidden="true" style={{ width: 5, height: 5, flexShrink: 0, borderRadius: '50%', background: fireStatusColor(fire.status) }} />
+              <span style={{ width: 58, color: 'var(--t-text-muted)', fontSize: 10.5, fontWeight: 300, textTransform: 'capitalize' }}>
+                {fire.status}
+              </span>
+              <span style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--t-text-muted)', fontSize: 10.5, fontWeight: 300 }} title={fire.resultNote ?? undefined}>
+                {fire.source} · {formatRelative(fire.scheduledAt, 'now')} · {fireExplanation(fire)}
+              </span>
+              {fire.laneId ? (
+                <button
+                  type="button"
+                  onClick={() => onOpenLane({ ...row, lastLaneId: fire.laneId })}
+                  style={{
+                    paddingTop: 2,
+                    paddingRight: 5,
+                    paddingBottom: 2,
+                    paddingLeft: 5,
+                    borderWidth: 0,
+                    borderRadius: 5,
+                    background: 'transparent',
+                    color: 'var(--t-text-muted)',
+                    fontSize: 10.5,
+                    fontWeight: 300,
+                    fontFamily: UI_FONT,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Open lane
+                </button>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
       {confirmDelete ? (
         <div style={{
           display: 'flex',

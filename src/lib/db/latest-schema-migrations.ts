@@ -12,6 +12,8 @@ import { ensureV45BroadcastFocusSchema } from '@/lib/db/v45-broadcast-focus-migr
 import { ensureV46ReviewAttemptHeadSchema } from '@/lib/db/v46-review-attempt-head-migration';
 import { ensureV47ExplainerQueueSchema } from '@/lib/db/v47-explainer-queue-migration';
 import { ensureV48CloudJobSchema } from '@/lib/db/v48-cloud-job-migration';
+import { ensureV49CloudJobControlSchema } from '@/lib/db/v49-cloud-job-control-migration';
+import { ensureV50AutomationFireSchema } from '@/lib/db/v50-automation-fire-migration';
 
 /**
  * Keep the current additive migrations behind one boot hook. `db/index.ts` is
@@ -32,4 +34,9 @@ export function ensureLatestSchemas(sqlite: Database.Database): void {
   ensureV46ReviewAttemptHeadSchema(sqlite);
   ensureV47ExplainerQueueSchema(sqlite);
   ensureV48CloudJobSchema(sqlite);
+  ensureV49CloudJobControlSchema(sqlite);
+}
+
+export function ensurePostAutomationSchemas(sqlite: Database.Database): void {
+  ensureV50AutomationFireSchema(sqlite);
 }

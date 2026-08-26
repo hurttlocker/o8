@@ -25,6 +25,7 @@ import { verifyCloudWorkerKey } from '@/lib/cloud/worker-auth';
 import {
   claimNextJob,
   cloudJobLeaseMs,
+  getJobDrainStatus,
   type CloudJob,
   waitForJob,
 } from '@/lib/cloud/job-queue';
@@ -96,6 +97,13 @@ export async function GET(request: Request) {
       return NextResponse.json(
         { job: jobPayload(immediate) },
         { headers: NO_STORE_HEADERS },
+      );
+    }
+    const drain = getJobDrainStatus(auth.teamId);
+    if (drain.draining) {
+      return NextResponse.json(
+        { draining: true, reason: 'app_restart', activeLeases: drain.activeLeases },
+        { status: 409, headers: { ...NO_STORE_HEADERS, 'Retry-After': '1' } },
       );
     }
 

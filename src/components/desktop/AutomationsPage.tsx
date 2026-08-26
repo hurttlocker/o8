@@ -280,12 +280,17 @@ export function AutomationsPage({ currentOwner, onClose }: { currentOwner: strin
   const handleRun = useCallback(async (id: string) => {
     setRows((current) => current.map((row) => row.id === id ? { ...row, lastRunStatus: 'running', lastRunAt: Date.now() } : row));
     try {
-      const response = await fetch(`/api/automations/${id}/run`, { method: 'POST' });
+      const response = await fetch(`/api/automations/${id}/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientMutationId: crypto.randomUUID() }),
+      });
       const data = await response.json() as { ok?: boolean; note?: string };
       if (!response.ok || data.ok === false) {
         setRows((current) => current.map((row) => row.id === id
           ? { ...row, lastRunStatus: 'error', lastErrorMessage: data.note ?? 'run failed' }
           : row));
+        void fetchRows();
         return;
       }
       void fetchRows();

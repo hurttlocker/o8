@@ -6,22 +6,31 @@
  * polling keeps waiters correct when another process enqueues the job.
  */
 import { getSqlite } from '@/lib/db';
+import { randomUUID } from 'node:crypto';
 import type { LaunchOptions } from '@/lib/runtimes/types';
 import type {
+  AcknowledgeCloudJobControlResult,
   AppendCloudJobEventInput,
   AppendCloudJobEventResult,
+  ClaimCloudJobControlResult,
   CloudJob,
+  CloudJobControl,
+  CloudJobControlType,
+  CloudJobDrainStatus,
   CloudJobEvent,
+  CloudJobMetrics,
+  QueueCloudJobControlResult,
 } from './job-store';
 import { SqliteCloudJobStore } from './sqlite-job-store';
 
-export type { CloudJob, CloudJobEvent } from './job-store';
+export type { CloudJob, CloudJobControl, CloudJobEvent, CloudJobMetrics } from './job-store';
 export { CloudPacketActiveError } from './job-store';
 
 const DEFAULT_LEASE_MS = 30_000;
 const MIN_LEASE_MS = 100;
 const MAX_LEASE_MS = 10 * 60_000;
 const DURABLE_POLL_INTERVAL_MS = 100;
+const CLOUD_JOB_BOOT_ID = process.env.O8_BOOT_ID?.trim() || `process:${process.pid}:${randomUUID()}`;
 
 const store = new SqliteCloudJobStore();
 const teamWaiters = new Map<string, Set<() => void>>();
@@ -57,7 +66,7 @@ export function claimNextJob(
   workerId: string,
   leaseMs: number = cloudJobLeaseMs(),
 ): CloudJob | null {
-  return store.claimNext({ teamId, cursor, workerId, leaseMs });
+  return store.claimNext({ teamId, cursor, workerId, bootId: CLOUD_JOB_BOOT_ID, leaseMs });
 }
 
 /**
@@ -134,6 +143,10 @@ export function getJob(teamId: string, jobId: string): CloudJob | undefined {
   return store.get(teamId, jobId);
 }
 
+export function getLatestSessionJob(teamId: string, sessionId: string): CloudJob | undefined {
+  return store.getLatestForSession(teamId, sessionId);
+}
+
 export function listJobs(teamId: string, limit?: number): CloudJob[] {
   return store.list(teamId, limit);
 }
@@ -145,6 +158,70 @@ export function readJobEvents(
   limit?: number,
 ): CloudJobEvent[] {
   return store.readEvents(teamId, jobId, sinceId, limit);
+}
+
+export function readSessionJobEvents(
+  teamId: string,
+  sessionId: string,
+  sinceId?: number,
+  limit?: number,
+): CloudJobEvent[] {
+  return store.readSessionEvents(teamId, sessionId, sinceId, limit);
+}
+
+export function queueJobControl(input: {
+  teamId: string;
+  sessionId: string;
+  controlId: string;
+  type: CloudJobControlType;
+  payload: unknown;
+}): QueueCloudJobControlResult | undefined {
+  const result = store.queueControl(input);
+  if (result?.followUpJob) notifyTeam(input.teamId);
+  return result;
+}
+
+export function claimJobControl(input: {
+  teamId: string;
+  jobId: string;
+  workerId: string;
+  leaseToken: string;
+  deliveryLeaseMs?: number;
+}): ClaimCloudJobControlResult {
+  return store.claimControl({ ...input, deliveryLeaseMs: input.deliveryLeaseMs ?? cloudJobLeaseMs() });
+}
+
+export function acknowledgeJobControl(input: {
+  teamId: string;
+  jobId: string;
+  workerId: string;
+  leaseToken: string;
+  controlId: string;
+  deliveryToken: string;
+}): AcknowledgeCloudJobControlResult {
+  const result = store.acknowledgeControl(input);
+  if (result.accepted && result.job.status === 'cancelled') notifyTeam(input.teamId);
+  return result;
+}
+
+export function listJobControls(teamId: string, jobId: string): CloudJobControl[] {
+  return store.listControls(teamId, jobId);
+}
+
+export function getJobMetrics(teamId: string, jobId: string): CloudJobMetrics | undefined {
+  return store.metrics(teamId, jobId);
+}
+
+export function beginJobDrain(teamId: string): CloudJobDrainStatus {
+  return store.beginDrain(teamId, CLOUD_JOB_BOOT_ID);
+}
+
+export function finishJobDrain(teamId: string): CloudJobDrainStatus {
+  return store.finishDrain(teamId, CLOUD_JOB_BOOT_ID);
+}
+
+export function getJobDrainStatus(teamId: string): CloudJobDrainStatus {
+  return store.drainStatus(teamId, CLOUD_JOB_BOOT_ID);
 }
 
 export function cancelJob(teamId: string, jobId: string): CloudJob | undefined {
@@ -159,7 +236,9 @@ export function __resetCloudQueueForTests(): void {
   activeWaitCancels.clear();
   teamWaiters.clear();
   getSqlite().transaction(() => {
+    getSqlite().prepare('DELETE FROM cloud_job_controls').run();
     getSqlite().prepare('DELETE FROM cloud_job_events').run();
     getSqlite().prepare('DELETE FROM cloud_jobs').run();
+    getSqlite().prepare('DELETE FROM cloud_job_drain_state').run();
   })();
 }

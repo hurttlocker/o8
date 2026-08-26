@@ -26,12 +26,12 @@ import type {
   RuntimeTranscriptEntry,
 } from './types';
 import {
-  cancelJob,
   CloudPacketActiveError,
   enqueueCloudJob,
-  getJob,
+  getLatestSessionJob,
   listJobs,
-  readJobEvents,
+  queueJobControl,
+  readSessionJobEvents,
 } from '@/lib/cloud/job-queue';
 import { randomUUID } from 'node:crypto';
 
@@ -43,9 +43,9 @@ const capabilities: RuntimeCapabilities = {
   discover: true,
   readTranscript: true,
   launch: true,
-  resume: false,
+  resume: true,
   interrupt: true,
-  reviewDiffs: false,
+  reviewDiffs: true,
   costTelemetry: false,
   // Server-sent streaming lives in the worker-stream POST endpoint, but the
   // adapter can't surface it until the CLI is producing chunks.
@@ -61,12 +61,6 @@ const RUNTIME_ID = 'cloud' as const;
  * the LaunchOptions will carry a teamId and we'll read from that instead.
  */
 const DEFAULT_TEAM_ID = 'team_default';
-
-function notImplemented(method: string): never {
-  // TODO(#514-followup): remove once the worker CLI exists and can service
-  // this method over worker-poll/worker-stream.
-  throw new Error(`cloud-adapter: not yet implemented (${method})`);
-}
 
 function sessionKeyFor(jobId: string): string {
   return `${RUNTIME_ID}:${jobId}`;
@@ -92,10 +86,16 @@ function eventText(type: string, payload: unknown): string {
     case 'accepted': return 'Cloud job accepted.';
     case 'claimed': return 'Cloud worker claimed the job.';
     case 'chunk': return textFromPayload(payload, 'Cloud worker emitted output.');
+    case 'diff': return 'Cloud worker persisted changed-file evidence.';
     case 'heartbeat': return 'Cloud worker lease renewed.';
     case 'completed': return textFromPayload(payload, 'Cloud job completed.');
     case 'errored': return `Error: ${textFromPayload(payload, 'Cloud worker execution failed.')}`;
     case 'lease_recovered': return 'Cloud worker lease expired; the job returned to the queue.';
+    case 'lease_released': return 'Cloud worker lease released for app restart.';
+    case 'control_queued': return 'Cloud session control persisted.';
+    case 'control_delivered': return 'Cloud session control delivered to the worker.';
+    case 'control_applied': return 'Cloud session control applied by the worker.';
+    case 'follow_up_queued': return 'Cloud steer queued as a follow-up turn.';
     case 'cancelled': return 'Cloud job cancelled.';
     default: return `Cloud job event: ${type}`;
   }
@@ -110,8 +110,12 @@ export const cloudRuntime: AgentRuntime = {
   //
   // Includes terminal jobs so status remains readable after a restart.
   async discoverSessions(): Promise<RuntimeSession[]> {
-    return listJobs(DEFAULT_TEAM_ID).map((job) => ({
-      sessionKey: sessionKeyFor(job.id),
+    const latestBySession = new Map<string, ReturnType<typeof listJobs>[number]>();
+    for (const job of listJobs(DEFAULT_TEAM_ID)) {
+      if (!latestBySession.has(job.sessionId)) latestBySession.set(job.sessionId, job);
+    }
+    return [...latestBySession.values()].map((job) => ({
+      sessionKey: sessionKeyFor(job.sessionId),
       runtimeId: RUNTIME_ID,
       displayName: job.packetId
         ? `Cloud packet ${job.packetId}`
@@ -126,9 +130,9 @@ export const cloudRuntime: AgentRuntime = {
             : 'failed',
       ownership: 'provider',
       sessionCapabilities: {
-        canSendInput: false,
+        canSendInput: true,
         canInterrupt: job.status === 'pending' || job.status === 'leased',
-        canReviewDiffs: false,
+        canReviewDiffs: true,
       },
       lastActivityAt: new Date(job.updatedAt),
       initialTask: job.launch.prompt,
@@ -143,8 +147,11 @@ export const cloudRuntime: AgentRuntime = {
     limit?: number,
   ): Promise<RuntimeTranscriptEntry[]> {
     const jobId = jobIdFromSessionKey(sessionKey);
+    if (!getLatestSessionJob(DEFAULT_TEAM_ID, jobId)) {
+      throw new Error(`Transcript sync is unsupported for unknown cloud session ${sessionKey}.`);
+    }
     const parsedSince = sinceId ? Number.parseInt(sinceId, 10) : 0;
-    return readJobEvents(
+    return readSessionJobEvents(
       DEFAULT_TEAM_ID,
       jobId,
       Number.isFinite(parsedSince) ? parsedSince : 0,
@@ -191,12 +198,24 @@ export const cloudRuntime: AgentRuntime = {
   },
 
   async resume(sessionKey: string, message: string): Promise<RuntimeActionResult> {
-    // TODO(#514-followup): queue a turn against an existing session.
-    // This requires worker-stream to support bidirectional flow — the worker
-    // pulls job deltas, not just initial prompts. Not in scope for v0.
-    void sessionKey;
-    void message;
-    notImplemented('resume');
+    const sessionId = jobIdFromSessionKey(sessionKey);
+    const result = queueJobControl({
+      teamId: DEFAULT_TEAM_ID,
+      sessionId,
+      controlId: randomUUID(),
+      type: 'steer',
+      payload: { message },
+    });
+    if (!result) {
+      return { ok: false, note: `No cloud session found for ${sessionKey}.`, sessionKey };
+    }
+    return {
+      ok: true,
+      note: result.followUpJob
+        ? `Cloud session had already reached terminal state; steer queued as follow-up job ${result.followUpJob.id}.`
+        : `Cloud steer ${result.control.id} persisted for ordered worker delivery.`,
+      sessionKey,
+    };
   },
 
   /**
@@ -205,8 +224,8 @@ export const cloudRuntime: AgentRuntime = {
    * stubbed until the worker CLI wires its own side.
    */
   async interrupt(sessionKey: string): Promise<RuntimeActionResult> {
-    const jobId = jobIdFromSessionKey(sessionKey);
-    const job = getJob(DEFAULT_TEAM_ID, jobId);
+    const sessionId = jobIdFromSessionKey(sessionKey);
+    const job = getLatestSessionJob(DEFAULT_TEAM_ID, sessionId);
     if (!job) {
       return {
         ok: false,
@@ -214,22 +233,45 @@ export const cloudRuntime: AgentRuntime = {
         sessionKey,
       };
     }
-    cancelJob(DEFAULT_TEAM_ID, jobId);
-    // TODO(#514-followup): when the worker CLI is wired, push an abort signal
-    // through the stream endpoint so in-flight work stops immediately.
+    const result = queueJobControl({
+      teamId: DEFAULT_TEAM_ID,
+      sessionId,
+      controlId: randomUUID(),
+      type: 'abort',
+      payload: {},
+    });
+    if (!result || result.control.status === 'superseded') {
+      return {
+        ok: false,
+        note: `Cloud session ${sessionKey} is already terminal; abort was recorded as superseded.`,
+        sessionKey,
+      };
+    }
     return {
       ok: true,
-      note: `Cloud job ${jobId} marked cancelled. Worker will abort on next stream tick.`,
+      note: result.control.status === 'applied'
+        ? `Cloud job ${job.id} was cancelled before worker pickup.`
+        : `Cloud abort ${result.control.id} persisted for one-time worker delivery.`,
       sessionKey,
     };
   },
 
   // ── Review ──
   async getChangedFiles(sessionKey: string): Promise<RuntimeChangedFile[]> {
-    // TODO(#514-followup): read diff artifact from the worker stream — the
-    // worker CLI is responsible for pushing a structured diff payload when it
-    // finishes, and the server persists it alongside the transcript.
-    void sessionKey;
-    notImplemented('getChangedFiles');
+    const sessionId = jobIdFromSessionKey(sessionKey);
+    const latestDiff = readSessionJobEvents(DEFAULT_TEAM_ID, sessionId, 0, 5_000)
+      .filter((event) => event.type === 'diff')
+      .at(-1)?.payload;
+    if (!latestDiff || typeof latestDiff !== 'object' || Array.isArray(latestDiff)) return [];
+    const files = (latestDiff as { files?: unknown }).files;
+    if (!Array.isArray(files)) return [];
+    return files.filter((file): file is RuntimeChangedFile => {
+      if (!file || typeof file !== 'object' || Array.isArray(file)) return false;
+      const candidate = file as Partial<RuntimeChangedFile>;
+      return typeof candidate.path === 'string'
+        && ['added', 'modified', 'deleted', 'renamed'].includes(String(candidate.status))
+        && Number.isInteger(candidate.additions)
+        && Number.isInteger(candidate.deletions);
+    });
   },
 };

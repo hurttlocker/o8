@@ -26,8 +26,8 @@ export const dynamic = 'force-dynamic';
 
 const NO_STORE_HEADERS = { 'Cache-Control': 'no-store' };
 
-type StreamEventType = 'chunk' | 'completed' | 'errored' | 'heartbeat';
-const STREAM_EVENT_TYPES = new Set<StreamEventType>(['chunk', 'completed', 'errored', 'heartbeat']);
+type StreamEventType = 'chunk' | 'diff' | 'completed' | 'errored' | 'heartbeat';
+const STREAM_EVENT_TYPES = new Set<StreamEventType>(['chunk', 'diff', 'completed', 'errored', 'heartbeat']);
 
 function isStreamEventType(value: unknown): value is StreamEventType {
   return typeof value === 'string' && STREAM_EVENT_TYPES.has(value as StreamEventType);
@@ -35,6 +35,20 @@ function isStreamEventType(value: unknown): value is StreamEventType {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isDiffPayload(value: unknown): boolean {
+  if (!isRecord(value) || !Array.isArray(value.files)) return false;
+  return value.files.every((file) => (
+    isRecord(file)
+    && typeof file.path === 'string'
+    && ['added', 'modified', 'deleted', 'renamed'].includes(String(file.status))
+    && Number.isInteger(file.additions)
+    && Number(file.additions) >= 0
+    && Number.isInteger(file.deletions)
+    && Number(file.deletions) >= 0
+    && (file.originalPath === undefined || typeof file.originalPath === 'string')
+  ));
 }
 
 function authErrorResponse(status: 401 | 403, reason: string) {
@@ -70,6 +84,9 @@ export async function POST(request: Request) {
   const type = body.type;
   if (!jobId || !leaseToken || !isStreamEventType(type) || !('payload' in body)) {
     return badRequest('Invalid stream payload');
+  }
+  if (type === 'diff' && !isDiffPayload(body.payload)) {
+    return badRequest('Invalid diff payload');
   }
 
   try {

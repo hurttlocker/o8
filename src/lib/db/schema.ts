@@ -20,6 +20,7 @@ export * from './workspace-snapshot-schema';
 export * from './storage-admission-schema';
 export * from './broadcast-schema';
 export * from './explainer-queue-schema';
+export * from './automation-schema';
 const ORCHESTRATOR_RUNTIME_ENUM = [...ORCHESTRATOR_RUNTIME_IDS] as [
   OrchestratorRuntime,
   ...OrchestratorRuntime[],
@@ -671,50 +672,6 @@ export const mobileLiveActivityTokens = sqliteTable('mobile_live_activity_tokens
   updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
 }, (table) => ({
   updatedAtIdx: index('idx_mobile_live_activity_tokens_updated_at').on(table.updatedAt),
-}));
-
-// ══════════════════════════════════════════════════════════════════
-//  Automations — scheduled / on-demand agent runs
-//  (cron-style scheduled runs.)
-// ══════════════════════════════════════════════════════════════════
-
-export const automations = sqliteTable('automations', {
-  id: text('id').primaryKey(),
-  name: text('name').notNull(),
-  /** Owner email — single-user today; "Team" automations require server (P3). */
-  owner: text('owner').notNull(),
-  /** Project id (from projects table) — null if cross-project / unscoped. */
-  projectId: text('project_id'),
-  /** Repo path on disk. Re-resolved against the registry on dispatch. */
-  repoPath: text('repo_path').notNull(),
-  branch: text('branch').notNull().default('main'),
-  /** Runtime adapter id — 'codex' | 'gemini' | 'opencode'. */
-  runtime: text('runtime').notNull(),
-  /** Instruction text passed to the agent on each run. */
-  prompt: text('prompt').notNull(),
-  /** 'manual' = Run button only · 'cron' = scheduled by cronExpr. */
-  triggerKind: text('trigger_kind', { enum: ['manual', 'cron'] }).notNull().default('manual'),
-  /** Standard 5-field cron expression (null when triggerKind='manual'). */
-  cronExpr: text('cron_expr'),
-  /** Enabled rows fire on their trigger; disabled rows are paused. */
-  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
-  /** Computed next-fire timestamp (ms epoch); recomputed after each run. */
-  nextRunAt: integer('next_run_at'),
-  /** Last fire timestamp (ms epoch); null until first run. */
-  lastRunAt: integer('last_run_at'),
-  /** Last run status — drives the status dot in the page table. */
-  lastRunStatus: text('last_run_status', {
-    enum: ['idle', 'running', 'ok', 'error'],
-  }).notNull().default('idle'),
-  /** Last run's lane id (for click-through to transcript). */
-  lastLaneId: text('last_lane_id'),
-  /** Human-readable error from the last failed run; null when ok or never run. */
-  lastErrorMessage: text('last_error_message'),
-  createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
-  updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
-}, (table) => ({
-  ownerCreatedIdx: index('idx_automations_owner_created').on(table.owner, table.createdAt),
-  enabledNextRunIdx: index('idx_automations_enabled_next_run').on(table.enabled, table.nextRunAt),
 }));
 
 /**

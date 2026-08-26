@@ -10,10 +10,11 @@
  */
 
 import { NextResponse } from 'next/server';
-import { eq, desc, sql } from 'drizzle-orm';
+import { eq, desc } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
 import { automations } from '@/lib/db/schema';
 import { computeNextRunAt, validateCron } from '@/lib/automations/cron';
+import { automationApiRecord } from '@/lib/automations/api-shape';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -31,29 +32,8 @@ interface CreateBody {
   triggerKind?: TriggerKind;
   cronExpr?: string | null;
   enabled?: boolean;
-}
-
-function rowFromDb(row: typeof automations.$inferSelect) {
-  return {
-    id: row.id,
-    name: row.name,
-    owner: row.owner,
-    projectId: row.projectId,
-    repoPath: row.repoPath,
-    branch: row.branch,
-    runtime: row.runtime,
-    prompt: row.prompt,
-    triggerKind: row.triggerKind,
-    cronExpr: row.cronExpr,
-    enabled: row.enabled,
-    nextRunAt: row.nextRunAt,
-    lastRunAt: row.lastRunAt,
-    lastRunStatus: row.lastRunStatus,
-    lastLaneId: row.lastLaneId,
-    lastErrorMessage: row.lastErrorMessage,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  };
+  catchUpPolicy?: 'latest' | 'all' | 'skip';
+  repoConcurrencyLimit?: number;
 }
 
 export async function GET(request: Request) {
@@ -64,7 +44,7 @@ export async function GET(request: Request) {
   const rows = owner
     ? db.select().from(automations).where(eq(automations.owner, owner)).orderBy(desc(automations.createdAt)).all()
     : db.select().from(automations).orderBy(desc(automations.createdAt)).all();
-  return NextResponse.json({ automations: rows.map(rowFromDb) });
+  return NextResponse.json({ automations: rows.map(automationApiRecord) });
 }
 
 export async function POST(request: Request) {
@@ -83,12 +63,21 @@ export async function POST(request: Request) {
   const triggerKind: TriggerKind = body.triggerKind === 'cron' ? 'cron' : 'manual';
   const branch = (body.branch ?? 'main').trim() || 'main';
   const cronExpr = body.cronExpr ? body.cronExpr.trim() : null;
+  const catchUpPolicy = body.catchUpPolicy === 'all' || body.catchUpPolicy === 'skip'
+    ? body.catchUpPolicy
+    : 'latest';
+  const repoConcurrencyLimit = Number.isInteger(body.repoConcurrencyLimit)
+    ? Number(body.repoConcurrencyLimit)
+    : 1;
 
   if (!name) return NextResponse.json({ error: 'name required' }, { status: 400 });
   if (!owner) return NextResponse.json({ error: 'owner required' }, { status: 400 });
   if (!repoPath) return NextResponse.json({ error: 'repoPath required' }, { status: 400 });
   if (!runtime) return NextResponse.json({ error: 'runtime required' }, { status: 400 });
   if (!prompt) return NextResponse.json({ error: 'prompt required' }, { status: 400 });
+  if (repoConcurrencyLimit < 1 || repoConcurrencyLimit > 16) {
+    return NextResponse.json({ error: 'repoConcurrencyLimit must be between 1 and 16' }, { status: 400 });
+  }
   if (triggerKind === 'cron') {
     if (!cronExpr) return NextResponse.json({ error: 'cronExpr required when triggerKind=cron' }, { status: 400 });
     if (!validateCron(cronExpr)) return NextResponse.json({ error: `invalid cron expression: ${cronExpr}` }, { status: 400 });
@@ -114,6 +103,8 @@ export async function POST(request: Request) {
     cronExpr,
     enabled,
     nextRunAt,
+    catchUpPolicy,
+    repoConcurrencyLimit,
     lastRunAt: null,
     lastRunStatus: 'idle',
     lastLaneId: null,
@@ -121,5 +112,5 @@ export async function POST(request: Request) {
 
   const created = db.select().from(automations).where(eq(automations.id, id)).get();
   if (!created) return NextResponse.json({ error: 'insert failed' }, { status: 500 });
-  return NextResponse.json({ automation: rowFromDb(created) });
+  return NextResponse.json({ automation: automationApiRecord(created) });
 }

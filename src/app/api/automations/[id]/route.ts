@@ -12,6 +12,8 @@ import { eq } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
 import { automations } from '@/lib/db/schema';
 import { computeNextRunAt, validateCron } from '@/lib/automations/cron';
+import { automationApiRecord } from '@/lib/automations/api-shape';
+import { cancelAutomationFires } from '@/lib/automations/fire-store';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -28,18 +30,8 @@ interface PatchBody {
   cronExpr?: string | null;
   enabled?: boolean;
   projectId?: string | null;
-}
-
-function rowFromDb(row: typeof automations.$inferSelect) {
-  return {
-    id: row.id, name: row.name, owner: row.owner, projectId: row.projectId,
-    repoPath: row.repoPath, branch: row.branch, runtime: row.runtime,
-    prompt: row.prompt, triggerKind: row.triggerKind, cronExpr: row.cronExpr,
-    enabled: row.enabled, nextRunAt: row.nextRunAt, lastRunAt: row.lastRunAt,
-    lastRunStatus: row.lastRunStatus, lastLaneId: row.lastLaneId,
-    lastErrorMessage: row.lastErrorMessage,
-    createdAt: row.createdAt, updatedAt: row.updatedAt,
-  };
+  catchUpPolicy?: 'latest' | 'all' | 'skip';
+  repoConcurrencyLimit?: number;
 }
 
 export async function PATCH(request: Request, ctx: { params: Promise<{ id: string }> }) {
@@ -66,6 +58,18 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
   if (typeof body.branch === 'string') next.branch = (body.branch.trim() || 'main');
   if (body.projectId !== undefined) next.projectId = body.projectId;
   if (typeof body.enabled === 'boolean') next.enabled = body.enabled;
+  if (body.catchUpPolicy !== undefined) {
+    if (!['latest', 'all', 'skip'].includes(body.catchUpPolicy)) {
+      return NextResponse.json({ error: 'invalid catchUpPolicy' }, { status: 400 });
+    }
+    next.catchUpPolicy = body.catchUpPolicy;
+  }
+  if (body.repoConcurrencyLimit !== undefined) {
+    if (!Number.isInteger(body.repoConcurrencyLimit) || body.repoConcurrencyLimit < 1 || body.repoConcurrencyLimit > 16) {
+      return NextResponse.json({ error: 'repoConcurrencyLimit must be between 1 and 16' }, { status: 400 });
+    }
+    next.repoConcurrencyLimit = body.repoConcurrencyLimit;
+  }
 
   const triggerKind: TriggerKind = body.triggerKind ?? existing.triggerKind as TriggerKind;
   const cronExpr = body.cronExpr !== undefined ? body.cronExpr : existing.cronExpr;
@@ -82,9 +86,10 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
   }
 
   db.update(automations).set(next).where(eq(automations.id, id)).run();
+  if (body.enabled === false) cancelAutomationFires(id);
   const updated = db.select().from(automations).where(eq(automations.id, id)).get();
   if (!updated) return NextResponse.json({ error: 'update failed' }, { status: 500 });
-  return NextResponse.json({ automation: rowFromDb(updated) });
+  return NextResponse.json({ automation: automationApiRecord(updated) });
 }
 
 export async function DELETE(_request: Request, ctx: { params: Promise<{ id: string }> }) {

@@ -65,6 +65,8 @@ function emptyForm(repos: RegisteredRepo[]): AutomationFormState {
     branch: first?.defaultBranch ?? 'main',
     triggerKind: 'cron',
     cronExpr: '0 9 * * *',
+    catchUpPolicy: 'latest',
+    repoConcurrencyLimit: 1,
   };
 }
 
@@ -77,6 +79,8 @@ function formFromRecord(record: AutomationRecord): AutomationFormState {
     branch: record.branch,
     triggerKind: record.triggerKind,
     cronExpr: record.cronExpr ?? '0 9 * * *',
+    catchUpPolicy: record.catchUpPolicy,
+    repoConcurrencyLimit: record.repoConcurrencyLimit,
   };
 }
 
@@ -352,6 +356,8 @@ export function AutomationEditor({
         branch: form.branch.trim() || 'main',
         triggerKind: form.triggerKind,
         cronExpr: form.triggerKind === 'cron' ? form.cronExpr.trim() : null,
+        catchUpPolicy: form.catchUpPolicy,
+        repoConcurrencyLimit: form.repoConcurrencyLimit,
       };
       const response = await fetch(editing ? `/api/automations/${initial.id}` : '/api/automations', {
         method: editing ? 'PATCH' : 'POST',
@@ -544,28 +550,57 @@ export function AutomationEditor({
             </div>
           </Field>
           {form.triggerKind === 'cron' ? (
-            <Field label="Cron expression">
-              <input
-                type="text"
-                aria-label="Cron expression"
-                value={form.cronExpr}
-                onChange={(event) => update({ cronExpr: event.target.value })}
-                placeholder="0 9 * * *"
-                spellCheck={false}
-                style={{ ...inputStyle, fontFamily: MONO_FONT }}
-              />
-              <span style={{
-                fontSize: 9.5,
-                fontWeight: 260,
-                letterSpacing: '-0.4px',
-                lineHeight: 1.25,
-                color: cronValid ? 'var(--t-text-muted)' : 'var(--t-brand-red)',
-              }}>
-                {cronValid
-                  ? nextRunLabel ? `Next run ${nextRunLabel}` : 'This schedule has no run in the next year.'
-                  : 'Use five fields: minute, hour, day of month, month, day of week.'}
-              </span>
-            </Field>
+            <>
+              <Field label="Cron expression">
+                <input
+                  type="text"
+                  aria-label="Cron expression"
+                  value={form.cronExpr}
+                  onChange={(event) => update({ cronExpr: event.target.value })}
+                  placeholder="0 9 * * *"
+                  spellCheck={false}
+                  style={{ ...inputStyle, fontFamily: MONO_FONT }}
+                />
+                <span style={{
+                  fontSize: 9.5,
+                  fontWeight: 260,
+                  letterSpacing: '-0.4px',
+                  lineHeight: 1.25,
+                  color: cronValid ? 'var(--t-text-muted)' : 'var(--t-brand-red)',
+                }}>
+                  {cronValid
+                    ? nextRunLabel ? `Next run ${nextRunLabel}` : 'This schedule has no run in the next year.'
+                    : 'Use five fields: minute, hour, day of month, month, day of week.'}
+                </span>
+              </Field>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <Field label="After downtime">
+                  <InlinePicker
+                    value={form.catchUpPolicy}
+                    options={[
+                      { value: 'latest', label: 'Run latest', detail: 'Run only the newest missed slot.' },
+                      { value: 'all', label: 'Run all', detail: 'Keep every missed scheduled slot.' },
+                      { value: 'skip', label: 'Skip missed', detail: 'Resume at the next future slot.' },
+                    ]}
+                    onChange={(catchUpPolicy) => update({ catchUpPolicy: catchUpPolicy as AutomationFormState['catchUpPolicy'] })}
+                    ariaLabel="Choose catch-up policy"
+                  />
+                </Field>
+                <Field label="Repo concurrency">
+                  <input
+                    type="number"
+                    min={1}
+                    max={16}
+                    aria-label="Repository concurrency limit"
+                    value={form.repoConcurrencyLimit}
+                    onChange={(event) => update({
+                      repoConcurrencyLimit: Math.min(16, Math.max(1, Number.parseInt(event.target.value, 10) || 1)),
+                    })}
+                    style={inputStyle}
+                  />
+                </Field>
+              </div>
+            </>
           ) : null}
           {error ? (
             <div role="alert" style={{ fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.35, color: 'var(--t-brand-red)' }}>

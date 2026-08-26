@@ -89,6 +89,22 @@ export function validateCron(expr: string): boolean {
   }
 }
 
+function cronMatches(parsed: ParsedExpr, date: Date): boolean {
+  const dom = date.getDate();
+  const dow = date.getDay();
+  const dayMatches = parsed.domRestricted && parsed.dowRestricted
+    ? parsed.dom.has(dom) || parsed.dow.has(dow)
+    : parsed.domRestricted
+      ? parsed.dom.has(dom)
+      : parsed.dowRestricted
+        ? parsed.dow.has(dow)
+        : true;
+  return parsed.minute.has(date.getMinutes())
+    && parsed.hour.has(date.getHours())
+    && parsed.month.has(date.getMonth() + 1)
+    && dayMatches;
+}
+
 /**
  * Compute the next minute (>= fromMs) when the cron expression fires.
  * Returns null if no match within a year (effectively "never" — pathological
@@ -107,32 +123,26 @@ export function computeNextRunAt(expr: string, fromMs: number): number | null {
 
   const ceilingMs = fromMs + 366 * 24 * 60 * 60 * 1000;
   while (d.getTime() <= ceilingMs) {
-    const minute = d.getMinutes();
-    const hour = d.getHours();
-    const dom = d.getDate();
-    const month = d.getMonth() + 1; // JS months 0-11; cron 1-12
-    const dow = d.getDay(); // JS dow Sunday=0..Saturday=6 — matches cron
-
-    let dayMatches: boolean;
-    if (parsed.domRestricted && parsed.dowRestricted) {
-      dayMatches = parsed.dom.has(dom) || parsed.dow.has(dow);
-    } else if (parsed.domRestricted) {
-      dayMatches = parsed.dom.has(dom);
-    } else if (parsed.dowRestricted) {
-      dayMatches = parsed.dow.has(dow);
-    } else {
-      dayMatches = true;
-    }
-
-    if (
-      parsed.minute.has(minute)
-      && parsed.hour.has(hour)
-      && parsed.month.has(month)
-      && dayMatches
-    ) {
-      return d.getTime();
-    }
+    if (cronMatches(parsed, d)) return d.getTime();
     d.setMinutes(d.getMinutes() + 1);
+  }
+  return null;
+}
+
+/** Compute the latest matching minute at or before `atOrBeforeMs`. */
+export function computePreviousRunAt(expr: string, atOrBeforeMs: number): number | null {
+  let parsed: ParsedExpr;
+  try { parsed = parseCron(expr); }
+  catch { return null; }
+
+  const date = new Date(atOrBeforeMs);
+  date.setMilliseconds(0);
+  date.setSeconds(0);
+  const floorMs = date.getTime();
+  const earliestMs = floorMs - 366 * 24 * 60 * 60 * 1000;
+  while (date.getTime() >= earliestMs) {
+    if (cronMatches(parsed, date)) return date.getTime();
+    date.setMinutes(date.getMinutes() - 1);
   }
   return null;
 }

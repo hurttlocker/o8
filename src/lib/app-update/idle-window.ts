@@ -7,6 +7,7 @@ import { resolvePortInfo } from '@/lib/panel/api-port';
 import { listManagedRuns } from '@/lib/runtimes/managed-runs/registry';
 import { listOwnedActiveRuns } from '@/lib/runtimes/shared/owned-session-index';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
+import { listJobs } from '@/lib/cloud/job-queue';
 
 export interface UpdateIdleLane {
   id: string;
@@ -37,6 +38,14 @@ export interface UpdateIdleOwnedSession {
   tmuxSession: string | null;
 }
 
+export interface UpdateIdleCloudJob {
+  id: string;
+  sessionId: string;
+  packetId: string | null;
+  workerId: string | null;
+  leaseExpiresAt: string | null;
+}
+
 export interface UpdateIdleWindow {
   idle: boolean;
   active: {
@@ -44,6 +53,7 @@ export interface UpdateIdleWindow {
     terminalSessions: UpdateIdleTerminalSession[];
     managedRuns: UpdateIdleManagedRun[];
     ownedSessions: UpdateIdleOwnedSession[];
+    cloudJobs: UpdateIdleCloudJob[];
   };
   unavailable: string[];
   checkedAt: string;
@@ -54,6 +64,7 @@ interface IdleWindowInput {
   terminalSessions: UpdateIdleTerminalSession[];
   managedRuns: UpdateIdleManagedRun[];
   ownedSessions: UpdateIdleOwnedSession[];
+  cloudJobs?: UpdateIdleCloudJob[];
   terminalInventoryAvailable: boolean;
   checkedAt?: string;
 }
@@ -69,12 +80,14 @@ export function evaluateUpdateIdleWindow(input: IdleWindowInput): UpdateIdleWind
       && terminalSessions.length === 0
       && input.managedRuns.length === 0
       && input.ownedSessions.length === 0
+      && (input.cloudJobs?.length ?? 0) === 0
       && unavailable.length === 0,
     active: {
       lanes: activeLanes,
       terminalSessions,
       managedRuns: input.managedRuns,
       ownedSessions: input.ownedSessions,
+      cloudJobs: input.cloudJobs ?? [],
     },
     unavailable,
     checkedAt: input.checkedAt ?? new Date().toISOString(),
@@ -133,6 +146,15 @@ export async function getUpdateIdleWindow(): Promise<UpdateIdleWindow> {
     runtime: lane.runtime,
     sessionKey: lane.sessionKey,
   }));
+  const cloudJobs = listJobs('team_default')
+    .filter((job) => job.status === 'leased')
+    .map((job) => ({
+      id: job.id,
+      sessionId: job.sessionId,
+      packetId: job.packetId ?? null,
+      workerId: job.claimedBy ?? null,
+      leaseExpiresAt: job.leaseExpiresAt ?? null,
+    }));
   return evaluateUpdateIdleWindow({
     lanes,
     terminalSessions: terminalInventory.sessions,
@@ -142,6 +164,7 @@ export async function getUpdateIdleWindow(): Promise<UpdateIdleWindow> {
       pid: session.pid ?? null,
       tmuxSession: session.tmuxSession ?? null,
     })),
+    cloudJobs,
     managedRuns: managedRuns
       .filter((run) => run.status === 'running')
       .map((run) => ({ id: run.id, session: run.session, command: run.command, cwd: run.cwd })),

@@ -4,16 +4,33 @@ import type Database from 'better-sqlite3';
 import { getSqlite } from '@/lib/db';
 import type { LaunchOptions } from '@/lib/runtimes/types';
 import {
+  beginCloudJobDrain,
+  cancelCloudJob,
+  finishCloudJobDrain,
+  promoteSteerControls,
+  readCloudJobDrainStatus,
+  readCloudJobMetrics,
+} from './sqlite-job-control';
+import { claimDurableJobRow } from './sqlite-job-claim';
+import {
   CloudPacketActiveError,
+  type AcknowledgeCloudJobControlResult,
   type AppendCloudJobEventInput,
   type AppendCloudJobEventResult,
   type ClaimCloudJobInput,
+  type ClaimCloudJobControlResult,
   type CloudJob,
+  type CloudJobControl,
+  type CloudJobControlStatus,
+  type CloudJobControlType,
+  type CloudJobDrainStatus,
   type CloudJobEvent,
   type CloudJobEventType,
+  type CloudJobMetrics,
   type CloudJobStatus,
   type CloudJobStore,
   type EnqueueCloudJobInput,
+  type QueueCloudJobControlResult,
 } from './job-store';
 
 interface CloudJobRow {
@@ -22,6 +39,8 @@ interface CloudJobRow {
   cursor: number;
   idempotency_key: string;
   packet_id: string | null;
+  session_id: string | null;
+  parent_job_id: string | null;
   launch_json: string;
   status: CloudJobStatus;
   enqueued_at: string;
@@ -29,12 +48,34 @@ interface CloudJobRow {
   claimed_by: string | null;
   lease_token: string | null;
   lease_expires_at: number | null;
+  available_at: number | null;
+  concurrency_key: string | null;
+  concurrency_limit: number | null;
+  concurrent_count: number | null;
   claim_count: number;
   lease_recovery_count: number;
   execution_attempts: number;
   max_attempts: number;
   last_error: string | null;
   completed_at: string | null;
+  updated_at: string;
+}
+
+interface CloudJobControlRow {
+  id: string;
+  team_id: string;
+  job_id: string;
+  sequence: number;
+  control_type: CloudJobControlType;
+  payload_json: string;
+  status: CloudJobControlStatus;
+  delivery_token: string | null;
+  delivery_expires_at: number | null;
+  delivery_count: number;
+  follow_up_job_id: string | null;
+  created_at: string;
+  delivered_at: string | null;
+  applied_at: string | null;
   updated_at: string;
 }
 
@@ -70,6 +111,8 @@ function jobFromRow(row: CloudJobRow): CloudJob {
     cursor: row.cursor,
     idempotencyKey: row.idempotency_key,
     packetId: row.packet_id ?? undefined,
+    sessionId: row.session_id || row.id,
+    parentJobId: row.parent_job_id ?? undefined,
     launch: parseLaunch(row.launch_json),
     status: row.status,
     enqueuedAt: row.enqueued_at,
@@ -77,12 +120,36 @@ function jobFromRow(row: CloudJobRow): CloudJob {
     claimedBy: row.claimed_by ?? undefined,
     leaseToken: row.lease_token ?? undefined,
     leaseExpiresAt: row.lease_expires_at == null ? undefined : iso(row.lease_expires_at),
+    availableAt: row.available_at == null ? undefined : iso(row.available_at),
+    concurrencyKey: row.concurrency_key ?? undefined,
+    concurrencyLimit: row.concurrency_limit ?? undefined,
+    concurrentCount: row.concurrent_count ?? undefined,
     claimCount: row.claim_count,
     leaseRecoveryCount: row.lease_recovery_count,
     executionAttempts: row.execution_attempts,
     maxAttempts: row.max_attempts,
     lastError: row.last_error ?? undefined,
     completedAt: row.completed_at ?? undefined,
+    updatedAt: row.updated_at,
+  };
+}
+
+function controlFromRow(row: CloudJobControlRow): CloudJobControl {
+  return {
+    id: row.id,
+    teamId: row.team_id,
+    jobId: row.job_id,
+    sequence: row.sequence,
+    type: row.control_type,
+    payload: parsePayload(row.payload_json),
+    status: row.status,
+    deliveryToken: row.delivery_token ?? undefined,
+    deliveryExpiresAt: row.delivery_expires_at == null ? undefined : iso(row.delivery_expires_at),
+    deliveryCount: row.delivery_count,
+    followUpJobId: row.follow_up_job_id ?? undefined,
+    createdAt: row.created_at,
+    deliveredAt: row.delivered_at ?? undefined,
+    appliedAt: row.applied_at ?? undefined,
     updatedAt: row.updated_at,
   };
 }
@@ -117,6 +184,8 @@ export class SqliteCloudJobStore implements CloudJobStore {
     const nowMs = input.nowMs ?? Date.now();
     const now = iso(nowMs);
     const packetId = input.packetId?.trim() || null;
+    const sessionId = input.sessionId?.trim() || input.id;
+    const parentJobId = input.parentJobId?.trim() || null;
     const maxAttempts = Math.max(1, Math.floor(input.maxAttempts ?? 3));
     const enqueue = sqlite.transaction(() => {
       const existing = sqlite.prepare(
@@ -134,25 +203,32 @@ export class SqliteCloudJobStore implements CloudJobStore {
       ).get(input.teamId) as { cursor: number };
       sqlite.prepare(`
         INSERT INTO cloud_jobs (
-          id, team_id, cursor, idempotency_key, packet_id, launch_json, status,
-          enqueued_at, claim_count, lease_recovery_count, execution_attempts,
+          id, team_id, cursor, idempotency_key, packet_id, session_id, parent_job_id,
+          launch_json, status,
+          enqueued_at, available_at, concurrency_key, concurrency_limit,
+          claim_count, lease_recovery_count, execution_attempts,
           max_attempts, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, 0, 0, 0, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, 0, 0, 0, ?, ?)
       `).run(
         input.id,
         input.teamId,
         next.cursor,
         input.idempotencyKey,
         packetId,
+        sessionId,
+        parentJobId,
         launchJson,
         now,
+        input.availableAtMs ?? nowMs,
+        input.concurrencyKey?.trim() || null,
+        input.concurrencyLimit == null ? null : Math.max(1, Math.floor(input.concurrencyLimit)),
         maxAttempts,
         now,
       );
       sqlite.prepare(`
         INSERT INTO cloud_job_events (job_id, event_type, payload_json, created_at)
         VALUES (?, 'accepted', ?, ?)
-      `).run(input.id, JSON.stringify({ packetId }), now);
+      `).run(input.id, JSON.stringify({ packetId, sessionId, parentJobId }), now);
       return jobFromRow(sqlite.prepare('SELECT * FROM cloud_jobs WHERE id = ?').get(input.id) as CloudJobRow);
     });
 
@@ -173,35 +249,12 @@ export class SqliteCloudJobStore implements CloudJobStore {
 
   claimNext(input: ClaimCloudJobInput): CloudJob | null {
     const sqlite = this.sqliteProvider();
-    const nowMs = input.nowMs ?? Date.now();
-    const now = iso(nowMs);
-    const leaseExpiresAt = nowMs + Math.max(1, Math.floor(input.leaseMs));
-    const claim = sqlite.transaction(() => {
-      this.recoverExpiredLeasesWithin(sqlite, input.teamId, nowMs);
-      const row = sqlite.prepare(`
-        SELECT * FROM cloud_jobs
-        WHERE team_id = ? AND status = 'pending'
-          AND (cursor >= ? OR lease_recovery_count > 0)
-        ORDER BY cursor ASC
-        LIMIT 1
-      `).get(input.teamId, input.cursor) as CloudJobRow | undefined;
-      if (!row) return null;
-
-      const leaseToken = randomUUID();
-      const changed = sqlite.prepare(`
-        UPDATE cloud_jobs
-        SET status = 'leased', claimed_at = ?, claimed_by = ?, lease_token = ?,
-            lease_expires_at = ?, claim_count = claim_count + 1, updated_at = ?
-        WHERE id = ? AND status = 'pending'
-      `).run(now, input.workerId, leaseToken, leaseExpiresAt, now, row.id);
-      if (changed.changes !== 1) return null;
-      sqlite.prepare(`
-        INSERT INTO cloud_job_events (job_id, event_type, payload_json, worker_id, created_at)
-        VALUES (?, 'claimed', ?, ?, ?)
-      `).run(row.id, JSON.stringify({ leaseExpiresAt: iso(leaseExpiresAt) }), input.workerId, now);
-      return jobFromRow(sqlite.prepare('SELECT * FROM cloud_jobs WHERE id = ?').get(row.id) as CloudJobRow);
-    });
-    return claim.immediate();
+    const row = claimDurableJobRow<CloudJobRow>(
+      sqlite,
+      input,
+      (nowMs) => { this.recoverExpiredLeasesWithin(sqlite, input.teamId, nowMs); },
+    );
+    return row ? jobFromRow(row) : null;
   }
 
   appendEvent(input: AppendCloudJobEventInput): AppendCloudJobEventResult {
@@ -234,27 +287,30 @@ export class SqliteCloudJobStore implements CloudJobStore {
         sqlite.prepare(`
           UPDATE cloud_jobs
           SET status = 'completed', lease_token = NULL, lease_expires_at = NULL,
-              completed_at = ?, updated_at = ?
+              available_at = NULL, completed_at = ?, updated_at = ?
           WHERE id = ? AND status = 'leased' AND lease_token = ?
         `).run(now, now, row.id, input.leaseToken);
+        promoteSteerControls(sqlite, row, nowMs);
       } else if (input.type === 'errored') {
         const executionAttempts = row.execution_attempts + 1;
-        const parked = executionAttempts >= row.max_attempts;
+        const parked = input.terminalOnFailure || executionAttempts >= row.max_attempts;
         sqlite.prepare(`
           UPDATE cloud_jobs
           SET status = ?, execution_attempts = ?, last_error = ?, claimed_at = NULL,
               claimed_by = NULL, lease_token = NULL, lease_expires_at = NULL,
-              completed_at = ?, updated_at = ?
+              available_at = ?, completed_at = ?, updated_at = ?
           WHERE id = ? AND status = 'leased' AND lease_token = ?
         `).run(
           parked ? 'parked' : 'pending',
           executionAttempts,
           messageFromPayload(input.payload),
+          parked ? null : nowMs + Math.max(0, Math.floor(input.retryDelayMs ?? 0)),
           parked ? now : null,
           now,
           row.id,
           input.leaseToken,
         );
+        if (parked) promoteSteerControls(sqlite, row, nowMs);
       } else {
         const leaseExpiresAt = nowMs + Math.max(1, Math.floor(input.leaseMs));
         sqlite.prepare(`
@@ -274,31 +330,242 @@ export class SqliteCloudJobStore implements CloudJobStore {
     return append.immediate();
   }
 
+  queueControl(input: {
+    teamId: string;
+    sessionId: string;
+    controlId: string;
+    type: CloudJobControlType;
+    payload: unknown;
+    nowMs?: number;
+  }): QueueCloudJobControlResult | undefined {
+    const sqlite = this.sqliteProvider();
+    const nowMs = input.nowMs ?? Date.now();
+    const now = iso(nowMs);
+    const queue = sqlite.transaction(() => {
+      const row = sqlite.prepare(`
+        SELECT * FROM cloud_jobs
+        WHERE team_id = ? AND (session_id = ? OR id = ?)
+        ORDER BY cursor DESC
+        LIMIT 1
+      `).get(input.teamId, input.sessionId, input.sessionId) as CloudJobRow | undefined;
+      if (!row) return undefined;
+
+      const next = sqlite.prepare(
+        'SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM cloud_job_controls WHERE job_id = ?',
+      ).get(row.id) as { sequence: number };
+      const terminal = row.status !== 'pending' && row.status !== 'leased';
+      const initialStatus: CloudJobControlStatus = terminal
+        ? input.type === 'steer' ? 'pending' : 'superseded'
+        : 'pending';
+      sqlite.prepare(`
+        INSERT INTO cloud_job_controls (
+          id, team_id, job_id, sequence, control_type, payload_json, status,
+          delivery_count, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+      `).run(
+        input.controlId,
+        input.teamId,
+        row.id,
+        next.sequence,
+        input.type,
+        JSON.stringify(input.payload ?? null),
+        initialStatus,
+        now,
+        now,
+      );
+      sqlite.prepare(`
+        INSERT INTO cloud_job_events (job_id, event_type, payload_json, created_at)
+        VALUES (?, 'control_queued', ?, ?)
+      `).run(row.id, JSON.stringify({ controlId: input.controlId, type: input.type }), now);
+
+      let followUpJob: CloudJob | undefined;
+      if (terminal && input.type === 'steer') {
+        followUpJob = promoteSteerControls(sqlite, row, nowMs);
+      } else if (row.status === 'pending' && input.type === 'abort') {
+        sqlite.prepare(`
+          UPDATE cloud_job_controls
+          SET status = 'applied', applied_at = ?, updated_at = ?
+          WHERE id = ? AND status = 'pending'
+        `).run(now, now, input.controlId);
+        cancelCloudJob(sqlite, row, nowMs, { controlId: input.controlId });
+        followUpJob = promoteSteerControls(sqlite, row, nowMs);
+      }
+
+      const controlRow = sqlite.prepare(
+        'SELECT * FROM cloud_job_controls WHERE id = ?',
+      ).get(input.controlId) as CloudJobControlRow;
+      const updatedJob = sqlite.prepare('SELECT * FROM cloud_jobs WHERE id = ?').get(row.id) as CloudJobRow;
+      return {
+        control: controlFromRow(controlRow),
+        job: jobFromRow(updatedJob),
+        followUpJob,
+      };
+    });
+    return queue.immediate();
+  }
+
+  claimControl(input: {
+    teamId: string;
+    jobId: string;
+    workerId: string;
+    leaseToken: string;
+    deliveryLeaseMs: number;
+    nowMs?: number;
+  }): ClaimCloudJobControlResult {
+    const sqlite = this.sqliteProvider();
+    const nowMs = input.nowMs ?? Date.now();
+    const now = iso(nowMs);
+    const claim = sqlite.transaction((): ClaimCloudJobControlResult => {
+      const row = sqlite.prepare(
+        'SELECT * FROM cloud_jobs WHERE team_id = ? AND id = ?',
+      ).get(input.teamId, input.jobId) as CloudJobRow | undefined;
+      const rejection = this.leaseRejectionWithin(sqlite, row, input.workerId, input.leaseToken, nowMs);
+      if (rejection) return rejection;
+
+      const controlRow = sqlite.prepare(`
+        SELECT * FROM cloud_job_controls
+        WHERE team_id = ? AND job_id = ?
+          AND status IN ('pending', 'delivered')
+        ORDER BY sequence ASC
+        LIMIT 1
+      `).get(input.teamId, input.jobId) as CloudJobControlRow | undefined;
+      if (!controlRow) return { accepted: true };
+      if (controlRow.status === 'delivered') {
+        if (controlRow.control_type === 'abort') {
+          return { accepted: true };
+        }
+        if (controlRow.delivery_expires_at != null && controlRow.delivery_expires_at > nowMs) {
+          return { accepted: true };
+        }
+      }
+
+      const deliveryToken = randomUUID();
+      const deliveryExpiresAt = nowMs + Math.max(1, Math.floor(input.deliveryLeaseMs));
+      sqlite.prepare(`
+        UPDATE cloud_job_controls
+        SET status = 'delivered', delivery_token = ?, delivery_expires_at = ?,
+            delivery_count = delivery_count + 1, delivered_at = ?, updated_at = ?
+        WHERE id = ? AND status IN ('pending', 'delivered')
+      `).run(deliveryToken, deliveryExpiresAt, now, now, controlRow.id);
+      sqlite.prepare(`
+        INSERT INTO cloud_job_events (job_id, event_type, payload_json, worker_id, created_at)
+        VALUES (?, 'control_delivered', ?, ?, ?)
+      `).run(
+        row!.id,
+        JSON.stringify({ controlId: controlRow.id, type: controlRow.control_type }),
+        input.workerId,
+        now,
+      );
+      const updated = sqlite.prepare(
+        'SELECT * FROM cloud_job_controls WHERE id = ?',
+      ).get(controlRow.id) as CloudJobControlRow;
+      return { accepted: true, control: controlFromRow(updated) };
+    });
+    return claim.immediate();
+  }
+
+  acknowledgeControl(input: {
+    teamId: string;
+    jobId: string;
+    workerId: string;
+    leaseToken: string;
+    controlId: string;
+    deliveryToken: string;
+    nowMs?: number;
+  }): AcknowledgeCloudJobControlResult {
+    const sqlite = this.sqliteProvider();
+    const nowMs = input.nowMs ?? Date.now();
+    const now = iso(nowMs);
+    const acknowledge = sqlite.transaction((): AcknowledgeCloudJobControlResult => {
+      const row = sqlite.prepare(
+        'SELECT * FROM cloud_jobs WHERE team_id = ? AND id = ?',
+      ).get(input.teamId, input.jobId) as CloudJobRow | undefined;
+      const rejection = this.leaseRejectionWithin(sqlite, row, input.workerId, input.leaseToken, nowMs);
+      if (rejection) return rejection;
+      const controlRow = sqlite.prepare(`
+        SELECT * FROM cloud_job_controls
+        WHERE team_id = ? AND job_id = ? AND id = ?
+      `).get(input.teamId, input.jobId, input.controlId) as CloudJobControlRow | undefined;
+      if (!controlRow) return { accepted: false, reason: 'control_not_found', job: jobFromRow(row!) };
+      if (controlRow.status !== 'delivered') {
+        return {
+          accepted: false,
+          reason: 'control_not_delivered',
+          job: jobFromRow(row!),
+          control: controlFromRow(controlRow),
+        };
+      }
+      if (controlRow.delivery_token !== input.deliveryToken) {
+        return {
+          accepted: false,
+          reason: 'delivery_mismatch',
+          job: jobFromRow(row!),
+          control: controlFromRow(controlRow),
+        };
+      }
+
+      sqlite.prepare(`
+        UPDATE cloud_job_controls
+        SET status = 'applied', applied_at = ?, delivery_expires_at = NULL, updated_at = ?
+        WHERE id = ? AND status = 'delivered' AND delivery_token = ?
+      `).run(now, now, controlRow.id, input.deliveryToken);
+      sqlite.prepare(`
+        INSERT INTO cloud_job_events (job_id, event_type, payload_json, worker_id, created_at)
+        VALUES (?, 'control_applied', ?, ?, ?)
+      `).run(
+        row!.id,
+        JSON.stringify({ controlId: controlRow.id, type: controlRow.control_type }),
+        input.workerId,
+        now,
+      );
+      if (controlRow.control_type === 'abort') {
+        cancelCloudJob(sqlite, row!, nowMs, { controlId: controlRow.id, workerId: input.workerId });
+        promoteSteerControls(sqlite, row!, nowMs);
+      } else {
+        sqlite.prepare(`
+          UPDATE cloud_jobs SET lease_expires_at = ?, updated_at = ?
+          WHERE id = ? AND status = 'leased' AND lease_token = ?
+        `).run(nowMs + 30_000, now, row!.id, input.leaseToken);
+      }
+      const updatedControl = sqlite.prepare(
+        'SELECT * FROM cloud_job_controls WHERE id = ?',
+      ).get(controlRow.id) as CloudJobControlRow;
+      const updatedJob = sqlite.prepare('SELECT * FROM cloud_jobs WHERE id = ?').get(row!.id) as CloudJobRow;
+      return { accepted: true, control: controlFromRow(updatedControl), job: jobFromRow(updatedJob) };
+    });
+    return acknowledge.immediate();
+  }
+
   recoverExpiredLeases(teamId: string, nowMs: number = Date.now()): number {
     const sqlite = this.sqliteProvider();
     const recover = sqlite.transaction(() => this.recoverExpiredLeasesWithin(sqlite, teamId, nowMs));
     return recover.immediate();
   }
 
+  beginDrain(teamId: string, bootId: string, nowMs: number = Date.now()): CloudJobDrainStatus {
+    return beginCloudJobDrain(this.sqliteProvider(), teamId, bootId, nowMs);
+  }
+
+  finishDrain(teamId: string, bootId: string, nowMs: number = Date.now()): CloudJobDrainStatus {
+    const sqlite = this.sqliteProvider();
+    const finish = sqlite.transaction(() => finishCloudJobDrain(sqlite, teamId, bootId, nowMs));
+    return finish.immediate();
+  }
+
+  drainStatus(teamId: string, bootId: string): CloudJobDrainStatus {
+    return readCloudJobDrainStatus(this.sqliteProvider(), teamId, bootId);
+  }
+
   cancel(teamId: string, jobId: string, nowMs: number = Date.now()): CloudJob | undefined {
     const sqlite = this.sqliteProvider();
-    const now = iso(nowMs);
     const cancel = sqlite.transaction(() => {
       const row = sqlite.prepare(
         'SELECT * FROM cloud_jobs WHERE team_id = ? AND id = ?',
       ).get(teamId, jobId) as CloudJobRow | undefined;
       if (!row) return undefined;
       if (row.status === 'pending' || row.status === 'leased') {
-        sqlite.prepare(`
-          UPDATE cloud_jobs
-          SET status = 'cancelled', lease_token = NULL, lease_expires_at = NULL,
-              completed_at = ?, updated_at = ?
-          WHERE id = ? AND status IN ('pending', 'leased')
-        `).run(now, now, jobId);
-        sqlite.prepare(`
-          INSERT INTO cloud_job_events (job_id, event_type, payload_json, created_at)
-          VALUES (?, 'cancelled', '{}', ?)
-        `).run(jobId, now);
+        cancelCloudJob(sqlite, row, nowMs);
+        promoteSteerControls(sqlite, row, nowMs);
       }
       return jobFromRow(sqlite.prepare('SELECT * FROM cloud_jobs WHERE id = ?').get(jobId) as CloudJobRow);
     });
@@ -309,6 +576,16 @@ export class SqliteCloudJobStore implements CloudJobStore {
     const row = this.sqliteProvider().prepare(
       'SELECT * FROM cloud_jobs WHERE team_id = ? AND id = ?',
     ).get(teamId, jobId) as CloudJobRow | undefined;
+    return row ? jobFromRow(row) : undefined;
+  }
+
+  getLatestForSession(teamId: string, sessionId: string): CloudJob | undefined {
+    const row = this.sqliteProvider().prepare(`
+      SELECT * FROM cloud_jobs
+      WHERE team_id = ? AND (session_id = ? OR id = ?)
+      ORDER BY cursor DESC
+      LIMIT 1
+    `).get(teamId, sessionId, sessionId) as CloudJobRow | undefined;
     return row ? jobFromRow(row) : undefined;
   }
 
@@ -342,6 +619,70 @@ export class SqliteCloudJobStore implements CloudJobStore {
     return rows.map(eventFromRow);
   }
 
+  readSessionEvents(
+    teamId: string,
+    sessionId: string,
+    sinceId: number = 0,
+    limit: number = 500,
+  ): CloudJobEvent[] {
+    const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 5_000);
+    const rows = this.sqliteProvider().prepare(`
+      SELECT event.id, event.job_id, event.event_type, event.payload_json,
+             event.worker_id, event.created_at
+      FROM cloud_job_events event
+      JOIN cloud_jobs job ON job.id = event.job_id
+      WHERE job.team_id = ? AND (job.session_id = ? OR job.id = ?) AND event.id > ?
+      ORDER BY event.id ASC
+      LIMIT ?
+    `).all(
+      teamId,
+      sessionId,
+      sessionId,
+      Math.max(0, Math.floor(sinceId)),
+      safeLimit,
+    ) as CloudJobEventRow[];
+    return rows.map(eventFromRow);
+  }
+
+  listControls(teamId: string, jobId: string): CloudJobControl[] {
+    const rows = this.sqliteProvider().prepare(`
+      SELECT * FROM cloud_job_controls
+      WHERE team_id = ? AND job_id = ?
+      ORDER BY sequence ASC
+    `).all(teamId, jobId) as CloudJobControlRow[];
+    return rows.map(controlFromRow);
+  }
+
+  metrics(teamId: string, jobId: string): CloudJobMetrics | undefined {
+    return readCloudJobMetrics(this.sqliteProvider(), teamId, jobId);
+  }
+
+  private leaseRejectionWithin(
+    sqlite: Database.Database,
+    row: CloudJobRow | undefined,
+    workerId: string,
+    leaseToken: string,
+    nowMs: number,
+  ): {
+    accepted: false;
+    reason: 'job_not_found' | 'job_not_leased' | 'lease_mismatch' | 'lease_expired';
+    job?: CloudJob;
+  } | null {
+    if (!row) return { accepted: false, reason: 'job_not_found' };
+    if (row.status !== 'leased') {
+      return { accepted: false, reason: 'job_not_leased', job: jobFromRow(row) };
+    }
+    if (row.lease_token !== leaseToken || row.claimed_by !== workerId) {
+      return { accepted: false, reason: 'lease_mismatch', job: jobFromRow(row) };
+    }
+    if (row.lease_expires_at == null || row.lease_expires_at <= nowMs) {
+      this.recoverLeaseWithin(sqlite, row, nowMs);
+      const recovered = sqlite.prepare('SELECT * FROM cloud_jobs WHERE id = ?').get(row.id) as CloudJobRow;
+      return { accepted: false, reason: 'lease_expired', job: jobFromRow(recovered) };
+    }
+    return null;
+  }
+
   private recoverExpiredLeasesWithin(
     sqlite: Database.Database,
     teamId: string,
@@ -361,13 +702,49 @@ export class SqliteCloudJobStore implements CloudJobStore {
 
   private recoverLeaseWithin(sqlite: Database.Database, row: CloudJobRow, nowMs: number): boolean {
     const now = iso(nowMs);
+    const abort = sqlite.prepare(`
+      SELECT id FROM cloud_job_controls
+      WHERE job_id = ? AND control_type = 'abort' AND status IN ('pending', 'delivered')
+      ORDER BY sequence ASC LIMIT 1
+    `).get(row.id) as { id: string } | undefined;
+    if (abort) {
+      const changed = sqlite.prepare(`
+        UPDATE cloud_jobs
+        SET status = 'cancelled', claimed_at = NULL, claimed_by = NULL,
+            lease_token = NULL, lease_expires_at = NULL,
+            lease_recovery_count = lease_recovery_count + 1,
+            completed_at = ?, updated_at = ?
+        WHERE id = ? AND status = 'leased' AND lease_token = ? AND lease_expires_at <= ?
+      `).run(now, now, row.id, row.lease_token, nowMs);
+      if (changed.changes !== 1) return false;
+      sqlite.prepare(`
+        UPDATE cloud_job_controls
+        SET status = 'applied', applied_at = ?, delivery_expires_at = NULL, updated_at = ?
+        WHERE id = ? AND status IN ('pending', 'delivered')
+      `).run(now, now, abort.id);
+      sqlite.prepare(`
+        INSERT INTO cloud_job_events (job_id, event_type, payload_json, worker_id, created_at)
+        VALUES (?, 'lease_recovered', ?, ?, ?)
+      `).run(
+        row.id,
+        JSON.stringify({ expiredAt: row.lease_expires_at == null ? null : iso(row.lease_expires_at) }),
+        row.claimed_by,
+        now,
+      );
+      sqlite.prepare(`
+        INSERT INTO cloud_job_events (job_id, event_type, payload_json, worker_id, created_at)
+        VALUES (?, 'cancelled', ?, ?, ?)
+      `).run(row.id, JSON.stringify({ controlId: abort.id }), row.claimed_by, now);
+      promoteSteerControls(sqlite, row, nowMs);
+      return true;
+    }
     const changed = sqlite.prepare(`
       UPDATE cloud_jobs
       SET status = 'pending', claimed_at = NULL, claimed_by = NULL,
           lease_token = NULL, lease_expires_at = NULL,
-          lease_recovery_count = lease_recovery_count + 1, updated_at = ?
+          available_at = ?, lease_recovery_count = lease_recovery_count + 1, updated_at = ?
       WHERE id = ? AND status = 'leased' AND lease_token = ? AND lease_expires_at <= ?
-    `).run(now, row.id, row.lease_token, nowMs);
+    `).run(nowMs, now, row.id, row.lease_token, nowMs);
     if (changed.changes !== 1) return false;
     sqlite.prepare(`
       INSERT INTO cloud_job_events (job_id, event_type, payload_json, worker_id, created_at)

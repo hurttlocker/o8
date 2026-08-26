@@ -29,7 +29,7 @@ import { ensureV18FactsSourceAuthoritySchema } from '@/lib/db/v18-facts-source-a
 import { ensureV19DocDistillStateSchema } from '@/lib/db/v19-doc-distill-state-migration';
 import { ensureV20FactsEmbeddingSchema } from '@/lib/db/v20-facts-embedding-migration';
 import { ensureV35UnifiedSearchSchema } from '@/lib/db/v35-unified-search-migration';
-import { ensureLatestSchemas } from '@/lib/db/latest-schema-migrations';
+import { ensureLatestSchemas, ensurePostAutomationSchemas } from '@/lib/db/latest-schema-migrations';
 import { quarantineDeadIdempotencyReservations } from '@/lib/db/idempotency-reservation-recovery';
 import { DEFAULT_PROJECT_ID } from '@/lib/repos/projects';
 // ── Data directory ──
@@ -39,8 +39,7 @@ const DATA_DIR = getDataDir();
 // copy still points at the right file. Renaming the file would require a
 // second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
-// Bump when ensureTables() adds new schema or backfill work.
-const DB_SCHEMA_VERSION = 48;
+const DB_SCHEMA_VERSION = 50;
 function migrationMarkerPath(version: number): string {
   return path.join(DATA_DIR, `.db-migrated-v${version}`);
 }
@@ -174,6 +173,7 @@ function ensureIdempotentColumnAdds(sqlite: Database.Database): void {
   // Schema v24 — `automations.last_error_message` so the UI can surface WHY a
   // failed run errored (not just the boolean status). Idempotent column-add.
   ensureAutomationsErrorColumn(sqlite);
+  ensurePostAutomationSchemas(sqlite);
   // Schema v25 (#1099) — `app_state` table for top-level kv state +
   // `projects.color` / `projects.sort_order` columns. Drops the JSON ledger
   // sidecar at `~/.o8/projects.json` as the source of truth for activeProjectId,

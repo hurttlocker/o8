@@ -1,24 +1,21 @@
-/**
- * POST /api/automations/[id]/run — fire an automation now.
- *
- * Updates lastRunAt + lastRunStatus on the row. For cron rows, also recomputes
- * nextRunAt off the current time so an early manual fire pushes the next
- * scheduled fire forward (matches typical cron semantics).
- *
- * Loopback-gated via middleware.
- */
-
-import { NextResponse } from 'next/server';
+/** Persist and execute one idempotent manual automation fire. */
+import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
+import { NextResponse } from 'next/server';
+
+import {
+  claimNextAutomationFire,
+  getAutomationFire,
+  persistManualAutomationFire,
+} from '@/lib/automations/fire-store';
+import { runClaimedAutomationFire } from '@/lib/automations/fire-runner';
 import { getDb } from '@/lib/db';
 import { automations } from '@/lib/db/schema';
-import { runAutomation } from '@/lib/automations/runner';
-import { computeNextRunAt } from '@/lib/automations/cron';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export async function POST(_request: Request, ctx: { params: Promise<{ id: string }> }) {
+export async function POST(request: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
   const db = getDb();
   if (!db) return NextResponse.json({ error: 'db unavailable' }, { status: 500 });
@@ -26,32 +23,46 @@ export async function POST(_request: Request, ctx: { params: Promise<{ id: strin
   if (!row) return NextResponse.json({ error: 'not found' }, { status: 404 });
   if (!row.enabled) return NextResponse.json({ error: 'automation is disabled' }, { status: 409 });
 
-  // Mark as running before dispatch so the UI reflects state immediately.
-  const startedAt = Date.now();
-  db.update(automations).set({
-    lastRunAt: startedAt,
-    lastRunStatus: 'running',
-  }).where(eq(automations.id, id)).run();
-
-  const result = await runAutomation(row);
-
-  const finalStatus = result.ok ? 'ok' : 'error';
-  // Recompute next-fire timestamp off this run for cron rows.
-  const nextRunAt = row.triggerKind === 'cron' && row.cronExpr
-    ? computeNextRunAt(row.cronExpr, startedAt)
-    : null;
-
-  db.update(automations).set({
-    lastRunStatus: finalStatus,
-    lastLaneId: result.laneId ?? row.lastLaneId,
-    nextRunAt,
-    // Persist the note when it errored so the UI can surface a tooltip;
-    // clear it on a clean run so a one-off failure doesn't haunt the row.
-    lastErrorMessage: result.ok ? null : (result.note ?? 'run failed'),
-  }).where(eq(automations.id, id)).run();
-
-  if (!result.ok) {
-    return NextResponse.json({ ok: false, laneId: result.laneId ?? null, note: result.note ?? 'run failed' }, { status: 502 });
+  const body = await request.json().catch(() => null) as { clientMutationId?: unknown } | null;
+  const clientMutationId = typeof body?.clientMutationId === 'string' && body.clientMutationId.trim()
+    ? body.clientMutationId.trim()
+    : request.headers.get('x-o8-client-mutation-id')?.trim() || randomUUID();
+  const fire = persistManualAutomationFire(id, clientMutationId);
+  if (!fire) return NextResponse.json({ error: 'automation is disabled or unavailable' }, { status: 409 });
+  if (fire.status === 'succeeded' || fire.status === 'parked' || fire.status === 'cancelled') {
+    return NextResponse.json({
+      ok: fire.status === 'succeeded',
+      fire,
+      laneId: fire.laneId,
+      note: fire.resultNote,
+      replayed: true,
+    }, { status: fire.status === 'succeeded' ? 200 : 502 });
   }
-  return NextResponse.json({ ok: true, laneId: result.laneId, note: result.note });
+
+  const workerId = `manual:${process.env.O8_BOOT_ID?.trim() || process.pid}`;
+  const claimed = claimNextAutomationFire({
+    workerId,
+    leaseMs: 60 * 60 * 1000,
+    concurrencyCap: Math.max(1, Number.parseInt(process.env.O8_AUTOMATION_CONCURRENCY ?? '4', 10) || 4),
+    fireId: fire.id,
+  });
+  if (!claimed) {
+    return NextResponse.json({
+      ok: true,
+      fire: getAutomationFire(fire.id),
+      queued: true,
+      note: 'Automation fire is persisted and waiting for scheduler capacity.',
+    }, { status: 202 });
+  }
+  const settled = await runClaimedAutomationFire(claimed);
+  if (!settled) {
+    return NextResponse.json({ ok: false, fireId: fire.id, note: 'fire settlement unavailable' }, { status: 503 });
+  }
+  const ok = settled.status === 'succeeded';
+  return NextResponse.json({
+    ok,
+    fire: settled,
+    laneId: settled.laneId,
+    note: settled.resultNote,
+  }, { status: ok ? 200 : 502 });
 }

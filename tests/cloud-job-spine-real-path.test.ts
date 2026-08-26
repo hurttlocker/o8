@@ -15,8 +15,11 @@ process.env.O8_CLOUD_JOB_LEASE_MS = '100';
 const runtimeRoute = await import('@/app/api/runtime/launch/route');
 const pollRoute = await import('@/app/api/cloud/worker-poll/route');
 const streamRoute = await import('@/app/api/cloud/worker-stream/route');
+const controlRoute = await import('@/app/api/cloud/worker-control/route');
+const statusRoute = await import('@/app/api/cloud/job-status/route');
+const drainRoute = await import('@/app/api/panel/cloud-jobs/drain/route');
 const { createCloudWorkerKey } = await import('@/lib/cloud/worker-auth');
-const { getJob } = await import('@/lib/cloud/job-queue');
+const { getJob, getLatestSessionJob, getJobDrainStatus, listJobControls } = await import('@/lib/cloud/job-queue');
 const { closeDb } = await import('@/lib/db');
 const { cloudRuntime } = await import('@/lib/runtimes/cloud-adapter');
 
@@ -124,6 +127,45 @@ function workerStream(body: Record<string, unknown>) {
   }));
 }
 
+function workerControl(job: {
+  id: string;
+  claimedBy: string;
+  leaseToken: string;
+}) {
+  return controlRoute.GET(new NextRequest(
+    `http://localhost/api/cloud/worker-control?jobId=${encodeURIComponent(job.id)}&workerId=${encodeURIComponent(job.claimedBy)}&leaseToken=${encodeURIComponent(job.leaseToken)}`,
+    { headers: { authorization: `Bearer ${workerKey.plaintext}` } },
+  ));
+}
+
+function acknowledgeControl(job: {
+  id: string;
+  claimedBy: string;
+  leaseToken: string;
+}, control: { id: string; deliveryToken: string }) {
+  return controlRoute.POST(new NextRequest('http://localhost/api/cloud/worker-control', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${workerKey.plaintext}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      jobId: job.id,
+      workerId: job.claimedBy,
+      leaseToken: job.leaseToken,
+      controlId: control.id,
+      deliveryToken: control.deliveryToken,
+    }),
+  }));
+}
+
+function jobStatus(jobId: string) {
+  return statusRoute.GET(new NextRequest(
+    `http://localhost/api/cloud/job-status?jobId=${encodeURIComponent(jobId)}&sinceId=0`,
+    { headers: { authorization: `Bearer ${workerKey.plaintext}` } },
+  ));
+}
+
 afterAll(() => {
   closeDb();
   rmSync(dataDir, { recursive: true, force: true });
@@ -216,6 +258,21 @@ describe('durable cloud execution through the runtime launch path', () => {
       payload: { text: 'durable worker output' },
     });
     expect(output.status).toBe(200);
+    const diff = await workerStream({
+      jobId,
+      workerId: recoveredClaim?.claimedBy,
+      leaseToken: recoveredClaim?.leaseToken,
+      type: 'diff',
+      payload: {
+        files: [{
+          path: 'src/durable-output.ts',
+          status: 'modified',
+          additions: 4,
+          deletions: 1,
+        }],
+      },
+    });
+    expect(diff.status).toBe(200);
     const completed = await workerStream({
       jobId,
       workerId: recoveredClaim?.claimedBy,
@@ -243,5 +300,167 @@ describe('durable cloud execution through the runtime launch path', () => {
       leaseRecoveryCount: 1,
       executionAttempts: 0,
     });
+    await expect(cloudRuntime.getChangedFiles(launchBody.surfaceId)).resolves.toEqual([{
+      path: 'src/durable-output.ts',
+      status: 'modified',
+      additions: 4,
+      deletions: 1,
+    }]);
+    const status = await jobStatus(jobId);
+    expect(status.status).toBe(200);
+    await expect(status.json()).resolves.toMatchObject({
+      job: { id: jobId, status: 'completed' },
+      metrics: {
+        claimCount: 2,
+        leaseRecoveryCount: 1,
+        executionAttempts: 0,
+        queueWaitMs: expect.any(Number),
+        terminalLatencyMs: expect.any(Number),
+      },
+    });
+  }, 60_000);
+
+  it('parks real failures and resolves steer, abort, and restart-drain races deterministically', async () => {
+    process.env.O8_CLOUD_JOB_LEASE_MS = '2000';
+
+    const failedLaunch = await runtimeLaunch({
+      runtime: 'cloud',
+      prompt: 'Fail within the bounded execution budget.',
+      cwd: dataDir,
+      repoPath: dataDir,
+      skipSetup: true,
+      packetId: 'packet-cloud-failure-budget',
+      clientMutationId: 'cloud-failure-budget-1',
+    });
+    const failedSurface = (await failedLaunch.json() as { surfaceId: string }).surfaceId;
+    const failedJobId = failedSurface.replace(/^cloud:/, '');
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const poll = await workerPoll(`failure-worker-${attempt}`);
+      expect(poll.status).toBe(200);
+      const claim = (await poll.json() as PollResult['body'])?.job;
+      const failure = await workerStream({
+        jobId: failedJobId,
+        workerId: claim?.claimedBy,
+        leaseToken: claim?.leaseToken,
+        type: 'errored',
+        payload: { error: `execution failure ${attempt}` },
+      });
+      expect(failure.status).toBe(200);
+    }
+    expect(getJob('team_default', failedJobId)).toMatchObject({
+      status: 'parked',
+      executionAttempts: 3,
+      maxAttempts: 3,
+      leaseRecoveryCount: 0,
+    });
+
+    const steerLaunch = await runtimeLaunch({
+      runtime: 'cloud',
+      prompt: 'Reach terminal while a steer is waiting.',
+      cwd: dataDir,
+      repoPath: dataDir,
+      skipSetup: true,
+      packetId: 'packet-cloud-steer-race',
+      clientMutationId: 'cloud-steer-race-1',
+    });
+    const steerSurface = (await steerLaunch.json() as { surfaceId: string }).surfaceId;
+    const steerJobId = steerSurface.replace(/^cloud:/, '');
+    const steerPoll = await workerPoll('steer-race-worker');
+    const steerClaim = (await steerPoll.json() as PollResult['body'])?.job;
+    await expect(cloudRuntime.resume(steerSurface, 'Run this as the next ordered turn.')).resolves.toMatchObject({
+      ok: true,
+    });
+    const steerCompletion = await workerStream({
+      jobId: steerJobId,
+      workerId: steerClaim?.claimedBy,
+      leaseToken: steerClaim?.leaseToken,
+      type: 'completed',
+      payload: { result: 'first turn finished before steer delivery' },
+    });
+    expect(steerCompletion.status).toBe(200);
+    const followUp = getLatestSessionJob('team_default', steerJobId);
+    expect(followUp).toMatchObject({
+      status: 'pending',
+      parentJobId: steerJobId,
+      sessionId: steerJobId,
+      launch: { prompt: 'Run this as the next ordered turn.' },
+    });
+    expect(listJobControls('team_default', steerJobId)).toEqual([
+      expect.objectContaining({ type: 'steer', status: 'follow_up', followUpJobId: followUp?.id }),
+    ]);
+    const followUpPoll = await workerPoll('follow-up-worker');
+    const followUpClaim = (await followUpPoll.json() as PollResult['body'])?.job;
+    expect(followUpClaim).toMatchObject({ id: followUp?.id });
+    expect((await workerStream({
+      jobId: followUp?.id,
+      workerId: followUpClaim?.claimedBy,
+      leaseToken: followUpClaim?.leaseToken,
+      type: 'completed',
+      payload: { result: 'follow-up complete' },
+    })).status).toBe(200);
+
+    const abortLaunch = await runtimeLaunch({
+      runtime: 'cloud',
+      prompt: 'Wait for a durable abort.',
+      cwd: dataDir,
+      repoPath: dataDir,
+      skipSetup: true,
+      packetId: 'packet-cloud-abort-race',
+      clientMutationId: 'cloud-abort-race-1',
+    });
+    const abortSurface = (await abortLaunch.json() as { surfaceId: string }).surfaceId;
+    const abortJobId = abortSurface.replace(/^cloud:/, '');
+    const abortPoll = await workerPoll('abort-worker');
+    const abortClaim = (await abortPoll.json() as PollResult['body'])?.job;
+    await expect(cloudRuntime.interrupt(abortSurface)).resolves.toMatchObject({ ok: true });
+    const deliveredAbort = await workerControl(abortClaim!);
+    expect(deliveredAbort.status).toBe(200);
+    const abortControl = (await deliveredAbort.json() as {
+      control: { id: string; deliveryToken: string; type: string };
+    }).control;
+    expect(abortControl.type).toBe('abort');
+    expect((await workerControl(abortClaim!)).status).toBe(204);
+    const abortAck = await acknowledgeControl(abortClaim!, abortControl);
+    expect(abortAck.status).toBe(200);
+    expect(getJob('team_default', abortJobId)).toMatchObject({ status: 'cancelled' });
+
+    const drainLaunch = await runtimeLaunch({
+      runtime: 'cloud',
+      prompt: 'Release this lease during restart.',
+      cwd: dataDir,
+      repoPath: dataDir,
+      skipSetup: true,
+      packetId: 'packet-cloud-drain',
+      clientMutationId: 'cloud-drain-1',
+    });
+    const drainJobId = (await drainLaunch.json() as { surfaceId: string }).surfaceId.replace(/^cloud:/, '');
+    expect((await workerPoll('drain-worker')).status).toBe(200);
+    const beginDrain = await drainRoute.POST(new NextRequest('http://localhost/api/panel/cloud-jobs/drain', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }));
+    await expect(beginDrain.json()).resolves.toMatchObject({
+      drain: { draining: true, activeLeases: 1 },
+    });
+    const finalizeDrain = await drainRoute.POST(new NextRequest('http://localhost/api/panel/cloud-jobs/drain', {
+      method: 'POST',
+      body: JSON.stringify({ finalize: true }),
+    }));
+    await expect(finalizeDrain.json()).resolves.toMatchObject({
+      drain: { draining: true, activeLeases: 0, pendingJobs: 1 },
+    });
+    expect(getJob('team_default', drainJobId)).toMatchObject({
+      status: 'pending',
+      executionAttempts: 0,
+      leaseRecoveryCount: 0,
+    });
+
+    const restartedWorker = new PollChild('post-restart-worker');
+    await restartedWorker.waitFor('READY');
+    restartedWorker.child.stdin.end('go\n');
+    const restartedClaim = await restartedWorker.result();
+    await restartedWorker.waitForExit();
+    expect(restartedClaim).toMatchObject({ status: 200, body: { job: { id: drainJobId } } });
+    expect(getJobDrainStatus('team_default').draining).toBe(false);
   }, 60_000);
 });
