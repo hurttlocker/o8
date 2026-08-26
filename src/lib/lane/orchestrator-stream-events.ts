@@ -31,7 +31,7 @@ export type OrchestratorEvent =
   | {
     type: 'handoff';
     from: { backend: string; model: string | null } | null;
-    to: { backend: string; model: string };
+    to: { backend: string; model: string | null };
     lossless: boolean;
   };
 

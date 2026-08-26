@@ -1,28 +1,40 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-// RC2 (69RMXR) — auto-carry conversation history across an orchestrator backend
-// switch. Driven against REAL persisted thread state written by the REAL store
-// functions (append/upsert/writeSessionId), the exact inputs the ws-server send
-// path feeds `buildBackendSwitchCarryPrelude` at its `withSessionRules`
-// chokepoint. homedir() is mocked to a temp dir per the store's isolation
-// pattern (see orchestrator-thread-history.test.ts).
+import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
+import type { OrchestratorBackend } from '@/lib/lane/orchestrator-backends/types';
 
 const tempHomes: string[] = [];
 
+function git(cwd: string, ...args: string[]): string {
+  return execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf-8' }).trim();
+}
+
 async function loadModules() {
-  const home = mkdtempSync(join(tmpdir(), 'o8-carry-'));
+  const home = mkdtempSync(join(tmpdir(), 'o8-handoff-launch-'));
+  const repoPath = join(home, 'repo');
   tempHomes.push(home);
+  mkdirSync(repoPath, { recursive: true });
+  git(repoPath, 'init', '-b', 'main');
+  git(repoPath, 'config', 'user.name', 'Handoff Test');
+  git(repoPath, 'config', 'user.email', 'handoff@example.test');
+  writeFileSync(join(repoPath, 'notes.txt'), 'measured workspace\n', 'utf-8');
+  git(repoPath, 'add', 'notes.txt');
+  git(repoPath, 'commit', '-m', 'test: seed handoff workspace');
+
   vi.resetModules();
   vi.doMock('node:os', async () => ({
     ...(await vi.importActual<typeof import('node:os')>('node:os')),
     homedir: () => home,
   }));
   const history = await import('@/lib/mobile/orchestrator-thread-history');
-  const carry = await import('./backend-switch-carry');
-  return { history, carry };
+  const handoff = await import('./backend-switch-carry');
+  const launch = await import('@/lib/lane/orchestrator-send-entry');
+  return { history, handoff, launch, repoPath };
 }
 
 afterEach(() => {
@@ -33,81 +45,219 @@ afterEach(() => {
   }
 });
 
-type History = Awaited<ReturnType<typeof loadModules>>['history'];
+type Loaded = Awaited<ReturnType<typeof loadModules>>;
 
-const REPO = '/tmp/repo';
-
-// Seed a thread that ran on `claude`: two prior exchanges + a stored claude
-// session id (so claude "keeps its own context", codex does not).
-function seedClaudeThread(history: History, tabId: string) {
-  history.appendMobileOrchestratorUserMessage({ tabId, repoPath: REPO, message: 'How does the API gate work?', backend: 'claude', timestampMs: 1000 });
-  history.upsertMobileOrchestratorAssistantMessage({ tabId, repoPath: REPO, messageId: 'assistant-1000', content: 'The middleware is default-deny on /api/*.', backend: 'claude', timestampMs: 1001 });
-  history.appendMobileOrchestratorUserMessage({ tabId, repoPath: REPO, message: 'And how is the token checked?', backend: 'claude', timestampMs: 2000 });
-  history.upsertMobileOrchestratorAssistantMessage({ tabId, repoPath: REPO, messageId: 'assistant-2000', content: 'A bearer ws-token, constant-time compared.', backend: 'claude', timestampMs: 2001 });
-  history.writeOrchestratorBackendSessionId(tabId, 'claude', 'claude-session-xyz');
+function seedSourceThread(loaded: Loaded, threadId: string) {
+  loaded.history.appendMobileOrchestratorUserMessage({
+    tabId: threadId,
+    repoPath: loaded.repoPath,
+    message: 'Inspect the API gate.',
+    backend: 'claude',
+    timestampMs: 1_000,
+  });
+  loaded.history.upsertMobileOrchestratorAssistantMessage({
+    tabId: threadId,
+    repoPath: loaded.repoPath,
+    messageId: 'assistant-source',
+    content: 'The middleware is default-deny. <tool_use name="Write">never replay me</tool_use>',
+    backend: 'claude',
+    model: 'source/model',
+    sessionId: 'source-session',
+    timestampMs: 1_001,
+  });
 }
 
-describe('buildBackendSwitchCarryPrelude — RC2 auto-carry on backend switch', () => {
-  it('switching to a backend with NO session on this thread carries the prior transcript', async () => {
-    const { history, carry } = await loadModules();
-    const tabId = 'thoughts-switch-1';
-    seedClaudeThread(history, tabId);
+function fakeBackend(
+  sendTurn: OrchestratorBackend['sendTurn'],
+): OrchestratorBackend {
+  return {
+    id: 'codex',
+    label: 'destination',
+    peekSession: () => null,
+    ensureSession: () => ({ sessionName: 'destination-session', status: 'ready' }),
+    sendTurn,
+  };
+}
 
-    // Operator switched the picker to codex; codex has never run on this thread.
-    const prelude = carry.buildBackendSwitchCarryPrelude({ threadId: tabId, backend: 'codex' });
+describe('cross-backend cold-start handoff', () => {
+  it('seeds the real backend launch with a full measured packet and emits one cold seam first', async () => {
+    const loaded = await loadModules();
+    const threadId = 'thoughts-handoff-launch';
+    seedSourceThread(loaded, threadId);
 
-    expect(prelude).not.toBeNull();
-    expect(prelude).toContain('<carried_context>');
-    // Prior BOTH-role history is carried so the new model has full context.
-    expect(prelude).toContain('The middleware is default-deny on /api/*.');
-    expect(prelude).toContain('A bearer ws-token, constant-time compared.');
-    expect(prelude).toContain('How does the API gate work?');
+    const prepared = await loaded.handoff.prepareBackendSwitchHandoff({
+      threadId,
+      to: { backend: 'codex', model: null },
+    });
+    expect(prepared).not.toBeNull();
+    if (!prepared) throw new Error('expected a prepared handoff');
+
+    expect(prepared.packet.schema).toBe('o8/handoff.packet/v1');
+    expect(prepared.packet.to).toEqual({ backend: 'codex', model: null });
+    expect(prepared.packet.workspace).toMatchObject({
+      repoPath: loaded.repoPath,
+      worktreePath: loaded.repoPath,
+      branch: 'main',
+      dirty: false,
+    });
+    expect(prepared.packet.carries).toMatchObject({
+      narrative: 'full',
+      intent: 'omitted',
+      workspace: 'full',
+      governance: 'omitted',
+    });
+    expect(prepared.prelude).toContain('COLD cross-backend continuation');
+    expect(prepared.prelude).toContain('Omitted layers: intent, governance');
+    expect(prepared.prelude).not.toContain('<tool_use');
+    expect(prepared.prelude).toContain('\\u003ctool_use');
+
+    const currentOperatorMessage = 'Add a rate limit without changing the approval gate.';
+    const outbound = `${prepared.prelude}\n\n${currentOperatorMessage}`;
+    const eventOrder: string[] = [];
+    let launchedMessage = '';
+    const destination = fakeBackend(async (_repoPath, message, onEvent) => {
+      launchedMessage = message;
+      onEvent({ type: 'text', text: 'Continuing from the measured state.' });
+      onEvent({ type: 'done', sessionId: 'destination-session', cost: null });
+    });
+    const onEvent = (event: OrchestratorEvent) => eventOrder.push(event.type);
+
+    await loaded.launch.sendOrchestratorBackendTurn(
+      destination,
+      loaded.repoPath,
+      outbound,
+      onEvent,
+      { threadId },
+      'single',
+      [prepared.seam],
+    );
+
+    expect(eventOrder).toEqual(['handoff', 'text', 'done']);
+    expect(eventOrder.filter((event) => event === 'handoff')).toHaveLength(1);
+    expect(prepared.seam).toMatchObject({
+      from: { backend: 'claude', model: 'source/model' },
+      to: { backend: 'codex', model: null },
+      lossless: false,
+    });
+    expect(launchedMessage).toBe(outbound);
+    expect(launchedMessage.endsWith(currentOperatorMessage)).toBe(true);
   });
 
-  it('the ws-server outbound payload (carry + message) carries the prior transcript AND the new turn', async () => {
-    const { history, carry } = await loadModules();
-    const tabId = 'thoughts-switch-2';
-    seedClaudeThread(history, tabId);
+  it('does not replay after the destination has produced the latest attributed turn', async () => {
+    const loaded = await loadModules();
+    const threadId = 'thoughts-handoff-once';
+    seedSourceThread(loaded, threadId);
+    loaded.history.appendMobileOrchestratorUserMessage({
+      tabId: threadId,
+      repoPath: loaded.repoPath,
+      message: 'Continue here.',
+      backend: 'codex',
+      timestampMs: 2_000,
+    });
+    loaded.history.upsertMobileOrchestratorAssistantMessage({
+      tabId: threadId,
+      repoPath: loaded.repoPath,
+      messageId: 'assistant-destination',
+      content: 'The destination continued the work.',
+      backend: 'codex',
+      model: 'destination/model',
+      timestampMs: 2_001,
+    });
 
-    const newMessage = 'Now add a rate limit to the gate.';
-    const prelude = carry.buildBackendSwitchCarryPrelude({ threadId: tabId, backend: 'codex' });
-    // Mirrors ws-server: `carryPrelude ? `${carryPrelude}\n\n${message}` : message`.
-    const outbound = prelude ? `${prelude}\n\n${newMessage}` : newMessage;
-
-    expect(outbound).toContain('A bearer ws-token, constant-time compared.'); // prior context
-    expect(outbound).toContain(newMessage); // the new operator turn
+    await expect(loaded.handoff.prepareBackendSwitchHandoff({
+      threadId,
+      to: { backend: 'codex', model: 'destination/model' },
+    })).resolves.toBeNull();
   });
 
-  it('the SAME backend (already has a session id) does NOT carry — the CLI keeps its own context', async () => {
-    const { history, carry } = await loadModules();
-    const tabId = 'thoughts-switch-3';
-    seedClaudeThread(history, tabId);
+  it('seeds a return switch even when that backend still has an older native session', async () => {
+    const loaded = await loadModules();
+    const threadId = 'thoughts-handoff-return';
+    seedSourceThread(loaded, threadId);
+    loaded.history.appendMobileOrchestratorUserMessage({
+      tabId: threadId,
+      repoPath: loaded.repoPath,
+      message: 'A second backend did more work.',
+      backend: 'codex',
+      timestampMs: 2_000,
+    });
+    loaded.history.upsertMobileOrchestratorAssistantMessage({
+      tabId: threadId,
+      repoPath: loaded.repoPath,
+      messageId: 'assistant-second',
+      content: 'The intervening change is complete.',
+      backend: 'codex',
+      model: 'destination/model',
+      timestampMs: 2_001,
+    });
 
-    const prelude = carry.buildBackendSwitchCarryPrelude({ threadId: tabId, backend: 'claude' });
-    expect(prelude).toBeNull();
+    const returned = await loaded.handoff.prepareBackendSwitchHandoff({
+      threadId,
+      to: { backend: 'claude', model: 'return/model' },
+    });
+
+    expect(returned?.seam).toMatchObject({
+      from: { backend: 'codex', model: 'destination/model' },
+      to: { backend: 'claude', model: 'return/model' },
+      lossless: false,
+    });
+    expect(returned?.prelude).toContain('The intervening change is complete.');
   });
 
-  it('a fresh thread with no prior assistant reply does not carry', async () => {
-    const { history, carry } = await loadModules();
-    const tabId = 'thoughts-switch-4';
-    history.appendMobileOrchestratorUserMessage({ tabId, repoPath: REPO, message: 'first message', backend: 'codex', timestampMs: 1000 });
+  it('excludes the already-persisted current message when preparing an automatic fallback', async () => {
+    const loaded = await loadModules();
+    const threadId = 'thoughts-handoff-fallback';
+    const currentMessageId = 'current-user-message';
+    seedSourceThread(loaded, threadId);
+    loaded.history.appendMobileOrchestratorUserMessage({
+      tabId: threadId,
+      repoPath: loaded.repoPath,
+      message: 'This current turn should appear only after the packet.',
+      messageId: currentMessageId,
+      backend: 'claude',
+      timestampMs: 2_000,
+    });
 
-    const prelude = carry.buildBackendSwitchCarryPrelude({ threadId: tabId, backend: 'codex' });
-    expect(prelude).toBeNull();
+    const prepared = await loaded.handoff.prepareBackendSwitchHandoff({
+      threadId,
+      to: { backend: 'o8', model: 'fallback/model' },
+      excludeMessageId: currentMessageId,
+    });
+
+    expect(prepared?.packet.narrative.messages.map((message) => message.content))
+      .not.toContain('This current turn should appear only after the packet.');
   });
 
-  it('backends that do not track a resumable session id are excluded (would carry every turn)', async () => {
-    const { history, carry } = await loadModules();
-    const tabId = 'thoughts-switch-5';
-    seedClaudeThread(history, tabId);
+  it('does not invent a handoff for a fresh or unattributed legacy thread', async () => {
+    const loaded = await loadModules();
+    const freshId = 'thoughts-handoff-fresh';
+    loaded.history.appendMobileOrchestratorUserMessage({
+      tabId: freshId,
+      repoPath: loaded.repoPath,
+      message: 'First message.',
+      backend: 'codex',
+    });
+    await expect(loaded.handoff.prepareBackendSwitchHandoff({
+      threadId: freshId,
+      to: { backend: 'codex', model: null },
+    })).resolves.toBeNull();
 
-    expect(carry.buildBackendSwitchCarryPrelude({ threadId: tabId, backend: 'openclaw' })).toBeNull();
-    expect(carry.buildBackendSwitchCarryPrelude({ threadId: tabId, backend: 'collide' })).toBeNull();
-  });
-
-  it('a non-thoughts thread id never carries', async () => {
-    const { carry } = await loadModules();
-    expect(carry.buildBackendSwitchCarryPrelude({ threadId: 'mission-123', backend: 'codex' })).toBeNull();
-    expect(carry.buildBackendSwitchCarryPrelude({ threadId: null, backend: 'codex' })).toBeNull();
+    const legacyId = 'thoughts-handoff-legacy';
+    loaded.history.appendMobileOrchestratorUserMessage({
+      tabId: legacyId,
+      repoPath: loaded.repoPath,
+      message: 'Legacy prompt.',
+      backend: 'claude',
+    });
+    loaded.history.upsertMobileOrchestratorAssistantMessage({
+      tabId: legacyId,
+      repoPath: loaded.repoPath,
+      messageId: 'legacy-assistant',
+      content: 'Legacy reply with unknown attribution.',
+    });
+    await expect(loaded.handoff.prepareBackendSwitchHandoff({
+      threadId: legacyId,
+      to: { backend: 'codex', model: null },
+    })).resolves.toBeNull();
   });
 });

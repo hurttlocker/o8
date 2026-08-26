@@ -24,13 +24,15 @@ export interface HandoffIntent {
 
 export interface BuildHandoffPacketInput {
   threadId: string;
-  to: { backend: string; model: string };
+  to: { backend: string; model: string | null };
   intent?: HandoffIntent;
   laneId?: string;
   verifiedClaims?: string[];
   unverifiedClaims?: string[];
   handoffId?: string;
   createdAt?: string;
+  /** Internal launch-path exclusion when fallback selection follows persistence. */
+  excludeMessageId?: string;
 }
 
 export interface HandoffPacket {
@@ -44,7 +46,7 @@ export interface HandoffPacket {
     sessionKey: string | null;
     runtime: string | null;
   };
-  to: { backend: string; model: string };
+  to: { backend: string; model: string | null };
   carries: Record<'narrative' | 'intent' | 'workspace' | 'governance' | 'provenance', HandoffCarry>;
   narrative: {
     messages: Array<{
@@ -174,12 +176,16 @@ function sourceFromMessages(
   };
 }
 
-function narrativeFromRecord(record: OrchestratorHistoryRecord): {
+function narrativeFromRecord(
+  record: OrchestratorHistoryRecord,
+  excludeMessageId?: string,
+): {
   messages: HandoffPacket['narrative']['messages'];
   seams: number[];
 } {
   const messages: HandoffPacket['narrative']['messages'] = [];
   for (const message of record.messages ?? []) {
+    if (excludeMessageId && message.id === excludeMessageId) continue;
     if (message.role !== 'user' && message.role !== 'assistant') continue;
     if (typeof message.content !== 'string' || !message.content.trim()) continue;
     messages.push({
@@ -312,11 +318,13 @@ export async function buildHandoffPacket(input: BuildHandoffPacketInput): Promis
   const threadId = cleanText(input.threadId);
   const to = {
     backend: cleanText(input.to.backend),
-    model: cleanText(input.to.model),
+    model: typeof input.to.model === 'string' && input.to.model.trim()
+      ? input.to.model.trim()
+      : null,
   };
-  if (!threadId || !to.backend || !to.model) {
+  if (!threadId || !to.backend) {
     throw new HandoffPacketError(
-      'threadId, destination backend, and destination model are required.',
+      'threadId and destination backend are required.',
       'invalid_handoff_request',
       400,
     );
@@ -340,7 +348,7 @@ export async function buildHandoffPacket(input: BuildHandoffPacketInput): Promis
     );
   }
 
-  const narrative = narrativeFromRecord(record);
+  const narrative = narrativeFromRecord(record, input.excludeMessageId);
   const messages = narrative.messages;
   const assistantMessages = messages.filter((message) => message.role === 'assistant');
   if (assistantMessages.length === 0) {

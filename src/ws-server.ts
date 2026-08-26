@@ -131,7 +131,7 @@ import { getLiveReviewChangeSet } from './lib/review/live-changes';
 import { deriveIdempotencyKey, withIdempotency } from './lib/orchestrator/idempotency-store';
 import { isManualThinkingEffort, type ManualThinkingEffort } from './lib/orchestrator/thinking-effort';
 import { withSessionRules } from './lib/orchestrator/session-rules-prompt';
-import { buildBackendSwitchCarryPrelude } from './lib/orchestrator/backend-switch-carry';
+import { prepareBackendSwitchHandoff } from './lib/orchestrator/backend-switch-carry';
 import { resolveOrchestratorTranscriptMessage } from './lib/orchestrator/composer-wire';
 import {
   resolveOrchestratorMessageRepoPath,
@@ -5064,13 +5064,15 @@ async function handleOrchestratorSendMsgOnce(
       activeBackend.ensureSession(repoPath, activeAgentTag, threadId).sessionName,
       threadId,
     );
-    // RC2 (69RMXR) — auto-carry prior transcript when the operator switched to a
-    // backend that has no CLI session on this thread yet. Computed BEFORE the
-    // current user message is persisted so it reflects PRIOR history only; folded
-    // into the outbound payload alone (the persisted transcript keeps raw message).
-    const carryPrelude = buildBackendSwitchCarryPrelude({ threadId, backend: activeBackend.id });
-    if (carryPrelude) {
-      console.log(`[backend-switch-carry] Injected prior transcript into first ${activeBackend.id} turn (thread=${threadId ?? 'none'})`);
+    // #1730 — a real backend change is always a cold start. Build the packet
+    // BEFORE persisting this turn so the narrative contains prior work only;
+    // the operator's current message stays last in the destination payload.
+    const backendSwitchHandoff = await prepareBackendSwitchHandoff({
+      threadId,
+      to: { backend: activeBackend.id, model: model ?? null },
+    });
+    if (backendSwitchHandoff) {
+      console.log(`[backend-switch-handoff] Seeded first ${activeBackend.id} turn with ${backendSwitchHandoff.packet.handoffId} (thread=${threadId ?? 'none'})`);
     }
     // The undo can arrive while backend/session setup is still resolving. In
     // that case the client already restored the draft and there is no turn to
@@ -5103,7 +5105,9 @@ async function handleOrchestratorSendMsgOnce(
     // what got persisted to the transcript above; only the payload handed to
     // the backend carries the "Operator session rules (binding)" block. Applies
     // across ALL backends because they all forward this argument untouched.
-    const turnBody = carryPrelude ? `${carryPrelude}\n\n${message}` : message;
+    const turnBody = backendSwitchHandoff
+      ? `${backendSwitchHandoff.prelude}\n\n${message}`
+      : message;
     const turnMessage = withSessionRules(turnBody, threadId);
     if (turnMessage !== message) {
       console.log(`[session-rules] Injected session rules into orchestrator turn (thread=${threadId ?? 'none'})`);
@@ -5136,9 +5140,11 @@ async function handleOrchestratorSendMsgOnce(
       onEvent: (event: OrchestratorEvent) => void,
       signal: AbortSignal,
       overrideModel?: string,
+      overrideMessage?: string,
+      leadingEvents: readonly OrchestratorEvent[] = [],
     ): Promise<void> => {
       const effectiveModel = overrideModel ?? (turnBackend.id === 'codex' && turnBackend.id !== requestedBackend.id ? undefined : model);
-      return sendOrchestratorBackendTurn(turnBackend, repoPath, turnMessage, onEvent, {
+      return sendOrchestratorBackendTurn(turnBackend, repoPath, overrideMessage ?? turnMessage, onEvent, {
         permissionMode,
         thinkingEffort,
         model: effectiveModel,
@@ -5156,7 +5162,7 @@ async function handleOrchestratorSendMsgOnce(
           },
         } : {}),
         ...(attachments?.length ? { attachments } : {}),
-      }, msg.orchestrationMode);
+      }, msg.orchestrationMode, leadingEvents);
     };
 
     // Ensure a subscription exists for the selected backend + agent.
@@ -5219,6 +5225,8 @@ async function handleOrchestratorSendMsgOnce(
       turnAgentTag: string | undefined,
       suppressQuotaError: boolean,
       overrideModel?: string,
+      overrideMessage?: string,
+      leadingEvents: readonly OrchestratorEvent[] = [],
     ) => {
       let pendingDone: Extract<OrchestratorEvent, { type: 'done' }> | null = null;
       const emitDone = (event: Extract<OrchestratorEvent, { type: 'done' }>) => {
@@ -5396,7 +5404,7 @@ async function handleOrchestratorSendMsgOnce(
         }
 
         if (wsMsg && sessionName) broadcastToOrchestratorSession(sessionName, wsMsg);
-      }, turnController!.signal, overrideModel);
+      }, turnController!.signal, overrideModel, overrideMessage, leadingEvents);
       if (pendingDone && !quotaFallbackError) emitDone(pendingDone);
     };
 
@@ -5414,7 +5422,14 @@ async function handleOrchestratorSendMsgOnce(
         : null
     );
     try {
-      await runBackendTurn(activeBackend, activeAgentTag, !!resolveQuotaFallback());
+      await runBackendTurn(
+        activeBackend,
+        activeAgentTag,
+        !!resolveQuotaFallback(),
+        undefined,
+        undefined,
+        backendSwitchHandoff ? [backendSwitchHandoff.seam] : [],
+      );
     } catch (err) {
       if (!resolveQuotaFallback() || !isRuntimeQuotaLimitError(err)) throw err;
       quotaFallbackError = err instanceof Error ? err.message : String(err);
@@ -5497,12 +5512,26 @@ async function handleOrchestratorSendMsgOnce(
           data: { status: 'busy', repoPath, threadId, backend: activeBackend.id },
         }));
         quotaFallbackError = null;
+        const fallbackHandoff = await prepareBackendSwitchHandoff({
+          threadId,
+          to: { backend: activeBackend.id, model: fallback.toModel },
+          excludeMessageId: userMessageId,
+        });
+        // Rebuild from the raw operator message even when the fallback returns
+        // to the source backend. Reusing `turnMessage` here could leak the
+        // failed destination's packet (whose `to` names the wrong backend).
+        const fallbackTurnMessage = withSessionRules(
+          fallbackHandoff ? `${fallbackHandoff.prelude}\n\n${message}` : message,
+          threadId,
+        );
         try {
           await runBackendTurn(
             activeBackend,
             activeAgentTag,
             true,
             fallback.toModel,
+            fallbackTurnMessage,
+            fallbackHandoff ? [fallbackHandoff.seam] : [],
           );
         } catch (err) {
           if (!isRuntimeQuotaLimitError(err)) throw err;

@@ -24,7 +24,9 @@ export function sendOrchestratorBackendTurn(
   onEvent: (event: OrchestratorEvent) => void,
   options: OrchestratorTurnOptions,
   rawOrchestrationMode: unknown,
+  leadingEvents: readonly OrchestratorEvent[] = [],
 ): Promise<void> {
+  for (const event of leadingEvents) onEvent(event);
   return backend.sendTurn(repoPath, message, onEvent, {
     ...options,
     orchestrationMode: resolveOrchestratorExecutionMode(rawOrchestrationMode),
