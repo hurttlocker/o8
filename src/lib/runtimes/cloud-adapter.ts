@@ -147,6 +147,11 @@ export const cloudRuntime: AgentRuntime = {
     limit?: number,
   ): Promise<RuntimeTranscriptEntry[]> {
     const jobId = jobIdFromSessionKey(sessionKey);
+    // Transcript authority is per job, not per key prefix. A `cloud:` key whose
+    // job this queue has never seen is UNKNOWN, not empty -- returning [] here
+    // publishes an authoritative empty snapshot for a session we cannot vouch
+    // for, which is exactly the "empty destructive snapshot" the mobile sync
+    // route's adapter fall-through is written to avoid.
     if (!getLatestSessionJob(DEFAULT_TEAM_ID, jobId)) {
       throw new Error(`Transcript sync is unsupported for unknown cloud session ${sessionKey}.`);
     }
