@@ -24,6 +24,7 @@ const { codename } = await import('@/lib/agents/codename');
 const heartbeatRoute = await import('@/app/api/lanes/[id]/heartbeat/route');
 const presenceRoute = await import('@/app/api/agents/presence/route');
 const inboxRoute = await import('@/app/api/agents/inbox/route');
+const messageRoute = await import('@/app/api/agents/message/route');
 const { createAgentMessagePostHandler } = await import('@/lib/agents/message-route-handler');
 const broadcastEventsRoute = await import('@/app/api/broadcast/events/route');
 const { panelGateMiddleware } = await import('@/middleware');
@@ -159,6 +160,37 @@ describe('agent message bus real path', () => {
     await expect(secondInbox.json()).resolves.toMatchObject({
       messages: [expect.objectContaining({ text: 'Please inspect the shared seam.' })],
       hasMore: false,
+    });
+
+    const exchangesRequest = request(
+      `http://localhost:3001/api/agents/message?repo=${encodeURIComponent(repoPath)}&limit=2`,
+      { token: OPERATOR_TOKEN },
+    );
+    expect(panelGateMiddleware(exchangesRequest).status).toBe(200);
+    const exchanges = await messageRoute.GET(exchangesRequest);
+    expect(exchanges.status).toBe(200);
+    await expect(exchanges.json()).resolves.toMatchObject({
+      schema: 'o8/agents.exchanges/v1',
+      repo: repoPath,
+      messages: [
+        expect.objectContaining({
+          from: codename(lane.id),
+          to: 'Receiver',
+          text: 'Please inspect the shared seam.',
+          delivery: 'native',
+          deliveryNote: 'Submitted to the exact live Claude terminal session.',
+        }),
+        expect.objectContaining({ from: 'operator', to: 'Receiver', text: 'Operator check.' }),
+      ],
+    });
+
+    const workerExchanges = await messageRoute.GET(request(
+      `http://localhost:3001/api/agents/message?repo=${encodeURIComponent(repoPath)}`,
+      { token: workerToken },
+    ));
+    expect(workerExchanges.status).toBe(403);
+    await expect(workerExchanges.json()).resolves.toMatchObject({
+      error: { code: 'agent_exchanges_forbidden' },
     });
 
     const broadcast = await broadcastEventsRoute.GET(request(

@@ -28,6 +28,7 @@ import {
   isPresenceLive,
   listAgentInbox,
   listAgentPresence,
+  listRecentAgentMessages,
   persistAgentMessage,
   updateAgentMessageDelivery,
   upsertAgentPresence,
@@ -302,6 +303,25 @@ export function readAgentInbox(
     messages: page.messages,
     cursor: Buffer.from(String(page.cursor), 'utf8').toString('base64url'),
     hasMore: page.hasMore,
+  };
+}
+
+export function readAgentExchanges(
+  input: { repo: string | null; limit: number },
+  principal: RequestPrincipalContext,
+  sqlite: Database.Database = getSqlite(),
+) {
+  if (principal.role !== 'operator') {
+    throw new AgentBusError(
+      'Recent agent exchanges require an operator credential.',
+      'agent_exchanges_forbidden',
+      403,
+    );
+  }
+  const repo = requiredString(input.repo, 'repo', 2_000);
+  return {
+    repo: resolve(repo),
+    messages: listRecentAgentMessages(repo, input.limit, sqlite),
   };
 }
 

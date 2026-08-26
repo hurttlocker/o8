@@ -3,6 +3,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { motion } from 'framer-motion';
 import { AgentPanelExtraAgents } from './AgentPanelExtraAgents';
+import { AgentMessageActivity } from './AgentMessageActivity';
 import { WorkspaceBootLoaderClaim } from './workspace-terminal/workspace-boot-loader-claim';
 import { ConnectionPill } from './ConnectionPill';
 import { UpdateCard } from './UpdateCard';
@@ -478,13 +479,12 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             showKindInMeta
             onCreateOrchestratorForRepo={handleCreateOrchestratorForRepo}
             packets={orchestratorMissionState?.packets ?? orchestratorPackets}
-            // Agents is a flat sibling between Chats and Archived. Worker
-            // packets never nest under their originating chat row.
+            // Agents stay flat between Chats and Archived, never nested under a chat.
             agentsSection={(
-              <AgentPanelExtraAgents
-                activeSessionKey={activeSessionKey}
-                onSelectSession={onSelectSession}
-              />
+              <>
+                <AgentPanelExtraAgents activeSessionKey={activeSessionKey} onSelectSession={onSelectSession} />
+                <AgentMessageActivity repos={railReposForChats} />
+              </>
             )}
           />
         </section>

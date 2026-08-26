@@ -7,41 +7,12 @@ import type Database from 'better-sqlite3';
 
 import { getSqlite } from '@/lib/db';
 import { ensureV45BroadcastFocusSchema } from '@/lib/db/v45-broadcast-focus-migration';
+import type { AgentMessage, AgentMessageRefs, AgentPresence } from './types';
+
+export type { AgentMessage, AgentMessageRefs, AgentPresence } from './types';
 
 export const AGENT_MESSAGE_TEXT_MAX_LENGTH = 4_000;
 export const AGENT_PRESENCE_TTL_MS = 6 * 60_000;
-
-export interface AgentPresence {
-  agentId: string;
-  name: string;
-  repo: string;
-  worktreePath: string | null;
-  runtime: string;
-  sessionKey: string | null;
-  laneId: string | null;
-  packetId: string | null;
-  lastSeen: string;
-}
-
-export interface AgentMessageRefs {
-  laneId: string | null;
-  packetId: string | null;
-}
-
-export interface AgentMessage {
-  schema: 'o8/agents.message-event/v1';
-  kind: 'message';
-  sequence: number;
-  id: string;
-  from: string;
-  to: string;
-  repo: string;
-  text: string;
-  refs: AgentMessageRefs;
-  delivery: 'native' | 'poll' | 'failed';
-  deliveryNote: string | null;
-  timestamp: string;
-}
 
 interface PresenceRow {
   agent_id: string;
@@ -320,4 +291,18 @@ export function listAgentInbox(
     cursor: messages.at(-1)?.sequence ?? input.after,
     hasMore,
   };
+}
+
+export function listRecentAgentMessages(
+  repo: string,
+  limit: number,
+  sqlite: Database.Database = getSqlite(),
+): AgentMessage[] {
+  ensureAgentBusSchema(sqlite);
+  const rows = sqlite.prepare(`
+    SELECT * FROM agent_messages
+    WHERE repo_path = ?
+    ORDER BY sequence DESC LIMIT ?
+  `).all(normalizeRepoPath(repo), limit) as MessageRow[];
+  return rows.map(mapMessage);
 }
