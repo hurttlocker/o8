@@ -10,6 +10,8 @@ import type * as LaneCommands from '../src/lib/lane/commands';
 import type * as LaneRegistry from '../src/lib/lane/registry';
 import type * as HeadShaLock from '../src/lib/lane/head-sha-lock';
 import type * as DurableReviewApproval from '../src/lib/lane/durable-review-approval';
+import type * as MaterializationIdentity from '../src/lib/worktree/materialization-identity';
+import type * as WorktreeMetaStore from '../src/lib/worktree/metadata-store';
 import type * as OperatorMissionService from '../src/lib/orchestrator/operator-mission-service';
 
 const execFileAsync = promisify(execFile);
@@ -22,6 +24,8 @@ interface SmokeApi {
   markSecondPassAgreed: typeof ApprovalsStore.markSecondPassAgreed;
   recordApprovalAudit: typeof ApprovalsStore.recordApprovalAudit;
   dispatch: typeof LaneCommands.dispatch;
+  captureWorktreeMaterializationIdentity: typeof MaterializationIdentity.captureWorktreeMaterializationIdentity;
+  withWorktreeMetaTransaction: typeof WorktreeMetaStore.withWorktreeMetaTransaction;
   createLane: typeof LaneRegistry.createLane;
   submitPacketReview: typeof OperatorMissionService.submitPacketReview;
   hasDurableApprovedReview: typeof DurableReviewApproval.hasDurableApprovedReview;
@@ -162,6 +166,24 @@ async function createCaseRepo(caseId: string, opts: { highRisk?: boolean; projec
 
   const packetId = `pkt-${caseId}`;
   const sessionKey = `sess-${caseId}`;
+  const worktreeId = `${caseId}-wt`;
+  const materializationIdentity = await api.captureWorktreeMaterializationIdentity(worktreePath);
+  const materializationParentIdentity = await api.captureWorktreeMaterializationIdentity(worktreeBase);
+  await api.withWorktreeMetaTransaction(repoPath, (transaction) => transaction.save(worktreeId, {
+    id: worktreeId,
+    agentType: 'codex',
+    sessionKey,
+    baseBranch: 'main',
+    createdAt: Date.now(),
+    claudeManaged: false,
+    taskName: `Smoke ${caseId}`,
+    branchName: branch,
+    status: 'ready',
+    isolationKind: 'git-worktree',
+    materializationIdentity,
+    materializationParentIdentity,
+  }));
+
   const lane = api.createLane({
     repoPath,
     projectId: opts.projectId ?? `project-${caseId}`,
@@ -396,6 +418,8 @@ async function main(): Promise<void> {
     operatorMissionService,
     headShaLock,
     durableReviewApproval,
+    materializationIdentity,
+    worktreeMetaStore,
   ] = await Promise.all([
     import('@/lib/approvals/store'),
     import('@/lib/lane/commands'),
@@ -403,6 +427,8 @@ async function main(): Promise<void> {
     import('@/lib/orchestrator/operator-mission-service'),
     import('@/lib/lane/head-sha-lock'),
     import('@/lib/lane/durable-review-approval'),
+    import('@/lib/worktree/materialization-identity'),
+    import('@/lib/worktree/metadata-store'),
   ]);
   api = {
     createApproval: approvalsStore.createApproval,
@@ -414,6 +440,8 @@ async function main(): Promise<void> {
     submitPacketReview: operatorMissionService.submitPacketReview,
     hasDurableApprovedReview: durableReviewApproval.hasDurableApprovedReview,
     readHeadSha: headShaLock.readHeadSha,
+    captureWorktreeMaterializationIdentity: materializationIdentity.captureWorktreeMaterializationIdentity,
+    withWorktreeMetaTransaction: worktreeMetaStore.withWorktreeMetaTransaction,
   };
 
   await caseA();
