@@ -1,9 +1,9 @@
 {
   "schema": "o8/test-classification/v1",
   "generatedBy": "node scripts/classify-tests.mjs --write",
-  "totalTests": 852,
-  "hermeticTests": 552,
-  "resourceOwningTests": 300,
+  "totalTests": 854,
+  "hermeticTests": 553,
+  "resourceOwningTests": 301,
   "resourceOwning": [
     {
       "path": "src/app/api/leases/route.test.ts",
@@ -1299,6 +1299,14 @@
     {
       "path": "tests/grok-acp-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/handoff-packet-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
         "real-path"
       ]
     },
