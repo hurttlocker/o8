@@ -14,6 +14,8 @@ import path from 'node:path';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
+import { resolveTsxProcess } from '@/lib/testing/tsx-process';
+
 const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'o8-create-crash-real-path-')));
 const dataDir = path.join(root, 'data');
 const worktreeRoot = path.join(root, 'worktrees');
@@ -173,7 +175,8 @@ describe('managed worktree creation crash recovery', () => {
       policy: { reserveRatio: 0, absoluteFloorBytes: 0 },
     });
     expect(reservation.decision).toBe('reserved');
-    const child = spawn(path.join(process.cwd(), 'node_modules/.bin/tsx'), ['--eval', childScript], {
+    const command = resolveTsxProcess(['--eval', childScript]);
+    const child = spawn(command.file, command.args, {
       cwd: process.cwd(),
       env: {
         ...process.env,

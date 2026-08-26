@@ -5,6 +5,8 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
+import { resolveTsxProcess } from '@/lib/testing/tsx-process';
+
 process.env.O8_DATA_DIR ??= mkdtempSync(path.join(os.tmpdir(), 'o8-hourly-cap-integration-'));
 process.env.CORTEX_IDE_DATA_DIR ??= process.env.O8_DATA_DIR;
 
@@ -84,7 +86,8 @@ function spawnClaimant(workerId: string, cap: number): { child: ChildProcess; st
     });
   `;
   let stderrText = '';
-  const child = spawn(path.join(process.cwd(), 'node_modules/.bin/tsx'), ['--eval', childScript], {
+  const command = resolveTsxProcess(['--eval', childScript]);
+  const child = spawn(command.file, command.args, {
     cwd: process.cwd(),
     env: {
       ...process.env,

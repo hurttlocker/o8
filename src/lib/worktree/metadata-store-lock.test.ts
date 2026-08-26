@@ -13,6 +13,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { resolveTsxProcess } from '@/lib/testing/tsx-process';
 import { probeMetadataLockProcessIdentity } from '@/lib/worktree/metadata-lock-process-identity';
 import { withWorktreeMetaTransaction } from '@/lib/worktree/metadata-store';
 import { resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
@@ -94,7 +95,8 @@ function launch(
   hold: boolean,
 ): ChildOutput {
   const inheritedNodeOptions = process.env.NODE_OPTIONS?.trim();
-  const child = spawn(path.join(process.cwd(), 'node_modules/.bin/tsx'), ['--eval', childScript], {
+  const command = resolveTsxProcess(['--eval', childScript]);
+  const child = spawn(command.file, command.args, {
     cwd: process.cwd(),
     env: {
       ...process.env,

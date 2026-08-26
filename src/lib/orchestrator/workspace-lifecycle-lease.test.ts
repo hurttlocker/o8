@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
+import { resolveTsxProcess } from '@/lib/testing/tsx-process';
+
 const roots: string[] = [];
 const childScript = String.raw`
 void (async () => {
@@ -28,7 +30,8 @@ await withPacketLifecycleMutationLock(packetId, async ({ contended }) => {
 `;
 
 function launch(dataDir: string, hold: boolean): ChildProcessWithoutNullStreams {
-  return spawn(path.join(process.cwd(), 'node_modules/.bin/tsx'), ['--eval', childScript], {
+  const command = resolveTsxProcess(['--eval', childScript]);
+  return spawn(command.file, command.args, {
     cwd: process.cwd(),
     env: {
       ...process.env,

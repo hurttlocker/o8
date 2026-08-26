@@ -14,6 +14,8 @@ import path from 'node:path';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
+import { resolveTsxProcess } from '@/lib/testing/tsx-process';
+
 interface PromotionInput {
   cycle: number;
   dataDir: string;
@@ -167,9 +169,10 @@ function createRepo(root: string, name: string, credentialConfig = false): strin
 }
 
 function runChild<T>(action: 'create' | 'park' | 'restore', input: PromotionInput): T {
+  const command = resolveTsxProcess([childPath, action]);
   const output = execFileSync(
-    path.join(process.cwd(), 'node_modules/.bin/tsx'),
-    [childPath, action],
+    command.file,
+    command.args,
     {
       cwd: process.cwd(),
       encoding: 'utf8',

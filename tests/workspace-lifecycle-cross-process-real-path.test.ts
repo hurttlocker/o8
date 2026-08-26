@@ -5,6 +5,8 @@ import path from 'node:path';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
+import { resolveTsxProcess } from '@/lib/testing/tsx-process';
+
 const dataDir = mkdtempSync(path.join(os.tmpdir(), 'o8-workspace-lifecycle-real-path-'));
 const worktreeRoot = path.join(dataDir, 'worktrees');
 process.env.O8_DATA_DIR = dataDir;
@@ -127,7 +129,8 @@ class ChildOutput {
 
 function launch(script: string, env: Record<string, string>): ChildOutput {
   const inheritedNodeOptions = process.env.NODE_OPTIONS?.trim();
-  const child = spawn(path.join(process.cwd(), 'node_modules/.bin/tsx'), ['--eval', script], {
+  const command = resolveTsxProcess(['--eval', script]);
+  const child = spawn(command.file, command.args, {
     cwd: process.cwd(),
     env: {
       ...process.env,

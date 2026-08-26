@@ -15,6 +15,8 @@ import { promisify } from 'node:util';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { resolveTsxProcess } from '@/lib/testing/tsx-process';
+
 const execFileAsync = promisify(execFile);
 const childPath = path.join(
   process.cwd(),
@@ -209,9 +211,10 @@ function materializerChildEnv(input: Record<string, unknown>): NodeJS.ProcessEnv
 }
 
 async function runChild<T>(input: Record<string, unknown>): Promise<T> {
+  const command = resolveTsxProcess([childPath]);
   const { stdout, stderr } = await execFileAsync(
-    path.join(process.cwd(), 'node_modules/.bin/tsx'),
-    [childPath],
+    command.file,
+    command.args,
     {
       cwd: process.cwd(),
       encoding: 'utf8',

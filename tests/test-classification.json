@@ -1,9 +1,9 @@
 {
   "schema": "o8/test-classification/v1",
   "generatedBy": "node scripts/classify-tests.mjs --write",
-  "totalTests": 849,
-  "hermeticTests": 551,
-  "resourceOwningTests": 298,
+  "totalTests": 852,
+  "hermeticTests": 552,
+  "resourceOwningTests": 300,
   "resourceOwning": [
     {
       "path": "src/app/api/leases/route.test.ts",
@@ -1117,6 +1117,12 @@
       ]
     },
     {
+      "path": "tests/cortex-observation-worker-authz-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/crash-survival.test.ts",
       "reasons": [
         "process-signal",
@@ -2060,6 +2066,15 @@
         "git-cli",
         "real-path",
         "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/tsx-process-linked-worktree-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree"
       ]
     },
     {
