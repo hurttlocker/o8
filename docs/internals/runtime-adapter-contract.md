@@ -2,6 +2,11 @@
 
 # Runtime Adapter Contract
 
+This page is for anyone who wants o8 to dispatch work to a coding-agent CLI it
+does not support yet. Pick the shape that matches your CLI below, copy the
+example, and open a pull request. If you are not sure which shape fits, reply on
+the standing "add your agent CLI" issue (#1671) with a link to the CLI's docs.
+
 The adapter contract feeds the product-facing `RuntimeSurface` / `TerminalSession`
 model used for launch, discovery, transcript reads, resume, interrupt, review, and
 telemetry. Capabilities must stay truthful: a one-shot CLI advertises no resume,
