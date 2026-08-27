@@ -33,7 +33,7 @@ Rust changes also need the relevant Cargo check or test from `src-tauri/`.
 Three things about those gates that will otherwise waste your time:
 
 - **The suite prints alarming output on purpose.** Negative-path tests emit things like `LOCKOUT BREACH`, authorization failures, and timeouts to stderr while passing. The Vitest summary and exit code are the verdict.
-- **Lint the files you touched, not the repo.** A repo-wide `npm run lint` still reports known baseline warnings; fixing unrelated ones expands your diff and makes review harder.
+- **Treat repo-wide lint as a ratchet.** `npm run lint` permits the current warning baseline, and that ceiling only goes down. Keep lint fixes focused: when a pull request clears warnings, lower `--max-warnings` in `package.json` in the same pull request instead of leaving unused headroom.
 - **Tests are not yet fully isolated from a running install.** A few suites reach global paths outside `CORTEX_IDE_DATA_DIR`, so quit the desktop app before running the full suite, or expect flakes that are not your fault.
 
 Use one of the established commit prefixes: `feat:`, `fix:`, `chore:`, `docs:`, `perf:`, or `refactor:`. Files have an 800-line ceiling unless an existing waiver applies. New TSX styling uses inline style objects rather than new CSS classes.
