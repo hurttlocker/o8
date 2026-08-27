@@ -351,6 +351,63 @@ describe('workspace snapshot persistence', () => {
     expect(replay.record).toMatchObject({ state: 'hibernating', version: 3 });
   });
 
+  it('reads the projection row and receipt chain from one SQLite snapshot', () => {
+    const input = snapshotInput();
+    const created = createWorkspaceSnapshot(input).record;
+    const sqlite = getSqlite();
+    const writer = new Database(dbPath);
+    writer.pragma('journal_mode = WAL');
+    writer.pragma('busy_timeout = 5000');
+    const originalPrepare = sqlite.prepare.bind(sqlite);
+    let injected = false;
+    const transitionId = `${input.packetId}-concurrent-parkable`;
+    const recordedAt = created.updatedAt + 1;
+
+    sqlite.prepare = ((source: string) => {
+      if (!injected && source.includes('FROM workspace_snapshot_transitions')) {
+        injected = true;
+        writer.transaction(() => {
+          writer.prepare(`
+            UPDATE workspace_snapshots
+            SET state = 'parkable', record_version = 2, last_transition_id = ?,
+                transition_started_at = ?, state_entered_at = ?, updated_at = ?
+            WHERE repository_uuid = ? AND packet_id = ?
+          `).run(transitionId, recordedAt, recordedAt, recordedAt, input.repositoryUuid, input.packetId);
+          writer.prepare(`
+            INSERT INTO workspace_snapshot_transitions (
+              repository_uuid, packet_id, transition_id, transition_kind, from_state,
+              to_state, prior_version, resulting_version, transition_started_at,
+              recorded_at, receipt_json, error_json, snapshot_fingerprint, snapshot_generation
+            ) VALUES (?, ?, ?, 'transition', 'materialized', 'parkable', 1, 2, ?, ?, NULL, NULL, ?, 1)
+          `).run(
+            input.repositoryUuid,
+            input.packetId,
+            transitionId,
+            recordedAt,
+            recordedAt,
+            created.snapshotFingerprint,
+          );
+        }).immediate();
+      }
+      return originalPrepare(source);
+    }) as typeof sqlite.prepare;
+
+    try {
+      expect(getWorkspaceSnapshot(input.repositoryUuid, input.packetId)).toMatchObject({
+        state: 'materialized',
+        version: 1,
+      });
+    } finally {
+      sqlite.prepare = originalPrepare;
+      writer.close();
+    }
+    expect(injected).toBe(true);
+    expect(getWorkspaceSnapshot(input.repositoryUuid, input.packetId)).toMatchObject({
+      state: 'parkable',
+      version: 2,
+    });
+  });
+
   it('rejects clock rollback and orders equal-time receipts by state-machine version', () => {
     const input = snapshotInput({ transitionStartedAt: 7000, recordedAt: 7001 });
     createWorkspaceSnapshot(input);

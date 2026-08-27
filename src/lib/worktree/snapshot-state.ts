@@ -289,6 +289,11 @@ function selectSnapshotReceiptChain(
   `).all(repositoryUuid, packetId) as WorkspaceSnapshotTransitionRow[];
 }
 
+function readConsistentSnapshot<T>(read: () => T): T {
+  const sqlite = getSqlite();
+  return sqlite.inTransaction ? read() : sqlite.transaction(read).deferred();
+}
+
 function mapSnapshotRow(row: WorkspaceSnapshotRow): WorkspaceSnapshotRecord {
   if (!isState(row.state)) {
     throw new WorkspaceSnapshotCorruptError(`Unknown workspace snapshot state: ${row.state}`);
@@ -673,41 +678,47 @@ export function getWorkspaceSnapshot(
   repositoryUuid: string,
   packetId: string,
 ): WorkspaceSnapshotRecord | null {
-  const row = selectSnapshot(
-    requiredText(repositoryUuid, 'repositoryUuid'),
-    requiredText(packetId, 'packetId'),
-  );
-  return row ? mapSnapshotRow(row) : null;
+  return readConsistentSnapshot(() => {
+    const row = selectSnapshot(
+      requiredText(repositoryUuid, 'repositoryUuid'),
+      requiredText(packetId, 'packetId'),
+    );
+    return row ? mapSnapshotRow(row) : null;
+  });
 }
 
 /** Packet-wide lookup for the pre-spawn materialization guard. Multiple rows are ambiguous. */
 export function listWorkspaceSnapshotsByPacketId(packetId: string): WorkspaceSnapshotRecord[] {
-  const rows = getSqlite().prepare(`
-    SELECT * FROM workspace_snapshots
-    WHERE packet_id = ?
-    ORDER BY repository_uuid ASC
-  `).all(requiredText(packetId, 'packetId')) as WorkspaceSnapshotRow[];
-  return rows.map(mapSnapshotRow);
+  return readConsistentSnapshot(() => {
+    const rows = getSqlite().prepare(`
+      SELECT * FROM workspace_snapshots
+      WHERE packet_id = ?
+      ORDER BY repository_uuid ASC
+    `).all(requiredText(packetId, 'packetId')) as WorkspaceSnapshotRow[];
+    return rows.map(mapSnapshotRow);
+  });
 }
 
 /** Exact materialization lookup for cleanup retirement; multiple rows are ambiguous. */
 export function listWorkspaceSnapshotsByOriginalPath(originalPath: string): WorkspaceSnapshotRecord[] {
-  const rows = getSqlite().prepare(`
-    SELECT * FROM workspace_snapshots
-    WHERE original_path = ?
-    ORDER BY repository_uuid ASC, packet_id ASC
-  `).all(originalPath.trim()) as WorkspaceSnapshotRow[];
-  return rows.map(mapSnapshotRow);
+  return readConsistentSnapshot(() => {
+    const rows = getSqlite().prepare(`
+      SELECT * FROM workspace_snapshots
+      WHERE original_path = ?
+      ORDER BY repository_uuid ASC, packet_id ASC
+    `).all(originalPath.trim()) as WorkspaceSnapshotRow[];
+    return rows.map(mapSnapshotRow);
+  });
 }
 
 export function listWorkspaceSnapshotsByRepositoryUuid(
   repositoryUuid: string,
 ): WorkspaceSnapshotRecord[] {
-  return getSqlite().prepare(`
-    SELECT * FROM workspace_snapshots WHERE repository_uuid = ? ORDER BY updated_at DESC
-  `).all(requiredText(repositoryUuid, 'repositoryUuid')).map((row) => mapSnapshotRow(
-    row as WorkspaceSnapshotRow,
-  ));
+  return readConsistentSnapshot(() => getSqlite().prepare(`
+      SELECT * FROM workspace_snapshots WHERE repository_uuid = ? ORDER BY updated_at DESC
+    `).all(requiredText(repositoryUuid, 'repositoryUuid')).map((row) => mapSnapshotRow(
+      row as WorkspaceSnapshotRow,
+    )));
 }
 
 function selectWorkspaceSnapshotsForReconciliation(): WorkspaceSnapshotRow[] {
@@ -719,25 +730,27 @@ function selectWorkspaceSnapshotsForReconciliation(): WorkspaceSnapshotRow[] {
 }
 
 export function listWorkspaceSnapshotsForReconciliation(): WorkspaceSnapshotRecord[] {
-  return selectWorkspaceSnapshotsForReconciliation().map(mapSnapshotRow);
+  return readConsistentSnapshot(() => selectWorkspaceSnapshotsForReconciliation().map(mapSnapshotRow));
 }
 
 /** Isolate corrupt fleet rows during startup; point reads remain strict. */
 export function scanWorkspaceSnapshotsForReconciliation(): WorkspaceSnapshotReconciliationScan {
-  const snapshots: WorkspaceSnapshotRecord[] = [];
-  const corruptions: WorkspaceSnapshotReconciliationScan['corruptions'] = [];
-  for (const row of selectWorkspaceSnapshotsForReconciliation()) {
-    try {
-      snapshots.push(mapSnapshotRow(row));
-    } catch (error) {
-      corruptions.push({
-        repositoryUuid: row.repository_uuid,
-        packetId: row.packet_id,
-        note: error instanceof Error ? error.message : String(error),
-      });
+  return readConsistentSnapshot(() => {
+    const snapshots: WorkspaceSnapshotRecord[] = [];
+    const corruptions: WorkspaceSnapshotReconciliationScan['corruptions'] = [];
+    for (const row of selectWorkspaceSnapshotsForReconciliation()) {
+      try {
+        snapshots.push(mapSnapshotRow(row));
+      } catch (error) {
+        corruptions.push({
+          repositoryUuid: row.repository_uuid,
+          packetId: row.packet_id,
+          note: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
-  }
-  return { snapshots, corruptions };
+    return { snapshots, corruptions };
+  });
 }
 
 export function countWorkspaceSnapshotsByState(state: WorkspaceSnapshotState): number {
@@ -753,17 +766,9 @@ export function listWorkspaceSnapshotTransitions(
 ): WorkspaceSnapshotTransitionReceipt[] {
   const normalizedRepositoryUuid = requiredText(repositoryUuid, 'repositoryUuid');
   const normalizedPacketId = requiredText(packetId, 'packetId');
-  const snapshot = getWorkspaceSnapshot(normalizedRepositoryUuid, normalizedPacketId);
-  if (!snapshot) return [];
-  const rows = getSqlite().prepare(`
-    SELECT * FROM workspace_snapshot_transitions
-    WHERE repository_uuid = ? AND packet_id = ?
-    ORDER BY resulting_version ASC, transition_id ASC
-  `).all(
-    normalizedRepositoryUuid,
-    normalizedPacketId,
-  ) as WorkspaceSnapshotTransitionRow[];
-  return rows.map((row) => {
-    return mapTransitionRow(row);
+  return readConsistentSnapshot(() => {
+    if (!getWorkspaceSnapshot(normalizedRepositoryUuid, normalizedPacketId)) return [];
+    return selectSnapshotReceiptChain(normalizedRepositoryUuid, normalizedPacketId)
+      .map(mapTransitionRow);
   });
 }

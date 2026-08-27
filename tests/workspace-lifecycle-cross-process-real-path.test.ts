@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it } from 'vitest';
 
 import { resolveTsxProcess } from '@/lib/testing/tsx-process';
 
@@ -127,6 +127,8 @@ class ChildOutput {
   }
 }
 
+const activeChildren = new Set<ChildOutput>();
+
 function launch(script: string, env: Record<string, string>): ChildOutput {
   const inheritedNodeOptions = process.env.NODE_OPTIONS?.trim();
   const command = resolveTsxProcess(['--eval', script]);
@@ -139,7 +141,10 @@ function launch(script: string, env: Record<string, string>): ChildOutput {
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
-  return new ChildOutput(child);
+  const output = new ChildOutput(child);
+  activeChildren.add(output);
+  child.once('exit', () => activeChildren.delete(output));
+  return output;
 }
 
 function git(cwd: string, ...args: string[]): string {
@@ -163,6 +168,12 @@ async function waitForSnapshotState(
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 }
+
+afterEach(async () => {
+  const children = [...activeChildren];
+  for (const output of children) output.child.kill('SIGTERM');
+  await Promise.all(children.map((output) => output.waitForExit()));
+});
 
 afterAll(() => {
   closeDb();
