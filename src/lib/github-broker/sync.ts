@@ -7,6 +7,7 @@ import {
   listGitHubPullRequests,
   markGitHubSyncError,
   markGitHubSyncSuccess,
+  pruneClosedGitHubThreads,
   readGitHubSyncState,
   replaceGitHubIssues,
   replaceGitHubPullRequests,
@@ -28,6 +29,7 @@ import {
   OUTSIDER_ATTENTION_RECENTLY_CLOSED_MS,
   type OutsiderAttentionThreadKind,
 } from '@/lib/supervisor/outsider-attention';
+import { listActiveOutsideHumanWaitingThreadNumbers } from '@/lib/supervisor/inbox';
 
 const GITHUB_SNAPSHOT_TTL_MS = 120_000; // 2 min — balance freshness with rate limit budget
 
@@ -435,6 +437,12 @@ async function syncIssues(repoFullName: string) {
     for (const issue of closedIssues) upsertGitHubIssue(issue);
   }
   applyThreadAttention(attention);
+  pruneClosedGitHubThreads(
+    repoFullName,
+    'issue',
+    cutoffIso,
+    listActiveOutsideHumanWaitingThreadNumbers(repoFullName, 'issue'),
+  );
   markGitHubSyncSuccess(repoFullName, 'issues', response.status === 304 ? etag : lastEtag);
 }
 
@@ -502,6 +510,12 @@ async function syncPullRequests(repoFullName: string) {
     for (const pull of closedPulls) upsertGitHubPullRequest(pull);
   }
   applyThreadAttention(attention);
+  pruneClosedGitHubThreads(
+    repoFullName,
+    'pr',
+    cutoffIso,
+    listActiveOutsideHumanWaitingThreadNumbers(repoFullName, 'pr'),
+  );
   markGitHubSyncSuccess(
     repoFullName,
     'pull_requests',

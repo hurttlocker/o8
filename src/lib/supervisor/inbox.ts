@@ -12,7 +12,12 @@ import {
   DEFAULT_PROJECT_ID,
   getActiveProjectScopeForRepoSync,
 } from '@/lib/repos/projects';
-import { reconcileOutsideHumanWaitingInbox } from './outsider-inbox-builder';
+import type { OutsiderAttentionThreadKind } from './outsider-attention';
+import {
+  ACTIVE_OUTSIDE_INCIDENT_STATUSES,
+  parseOutsideIncidentPayload,
+  reconcileOutsideHumanWaitingInbox,
+} from './outsider-inbox-builder';
 
 export { summarizeInboxItems, type SupervisorInboxSummary } from './inbox-summary';
 
@@ -644,6 +649,29 @@ export function buildOutsideHumanWaitingInbox(
       resolvedAt,
     }),
   });
+}
+
+export function listActiveOutsideHumanWaitingThreadNumbers(
+  repoFullName: string,
+  kind: OutsiderAttentionThreadKind,
+): number[] {
+  ensureSupervisorInboxTable();
+  const placeholders = ACTIVE_OUTSIDE_INCIDENT_STATUSES.map(() => '?').join(', ');
+  const rows = getSqlite().prepare(`
+    SELECT payload
+    FROM supervisor_inbox
+    WHERE kind = 'outside_human_waiting'
+      AND status IN (${placeholders})
+  `).all(...ACTIVE_OUTSIDE_INCIDENT_STATUSES) as Array<{ payload: string }>;
+
+  const numbers = new Set<number>();
+  for (const row of rows) {
+    const payload = parseOutsideIncidentPayload(row.payload);
+    if (payload?.threadRepo === repoFullName && payload.threadKind === kind) {
+      numbers.add(payload.threadNumber);
+    }
+  }
+  return [...numbers];
 }
 
 export function listInboxItems(options: {

@@ -8,7 +8,13 @@ import {
 } from './outsider-attention';
 
 const DEFAULT_WAIT_HOURS = 24;
-const ACTIVE_STATUSES = new Set(['pending', 'healing', 'human_required', 'escalated']);
+export const ACTIVE_OUTSIDE_INCIDENT_STATUSES = [
+  'pending',
+  'healing',
+  'human_required',
+  'escalated',
+] as const;
+const ACTIVE_STATUSES = new Set<string>(ACTIVE_OUTSIDE_INCIDENT_STATUSES);
 
 type ExistingOutsideIncident = {
   id: string;
@@ -54,7 +60,7 @@ function threadKey(repo: string, kind: OutsiderAttentionThreadKind, number: numb
   return `${repo}\u0000${kind}\u0000${number}`;
 }
 
-function parsePayload(raw: string): OutsideIncidentPayload | null {
+export function parseOutsideIncidentPayload(raw: string): OutsideIncidentPayload | null {
   try {
     const payload = JSON.parse(raw) as Partial<OutsideIncidentPayload>;
     if (
@@ -104,7 +110,7 @@ export function reconcileOutsideHumanWaitingInbox(input: ReconcileOutsideInboxIn
   const latestByThread = new Map<string, { row: ExistingOutsideIncident; payload: OutsideIncidentPayload }>();
   const activeByThread = new Map<string, { row: ExistingOutsideIncident; payload: OutsideIncidentPayload }>();
   for (const row of rows) {
-    const payload = parsePayload(row.payload);
+    const payload = parseOutsideIncidentPayload(row.payload);
     if (!payload) continue;
     const key = threadKey(payload.threadRepo, payload.threadKind, payload.threadNumber);
     if (!latestByThread.has(key)) latestByThread.set(key, { row, payload });
