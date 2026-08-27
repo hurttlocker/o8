@@ -43,6 +43,9 @@ interface AttachFilesButtonProps {
    *  renders only when both are provided (orchestrator composer). */
   mode?: ComposerMode;
   onModeChange?: (mode: ComposerMode) => void;
+  promptBody?: string;
+  onBrowsePrompts?: () => void;
+  onSavePrompt?: (body: string) => void;
 }
 
 function CheckGlyph() {
@@ -81,12 +84,24 @@ function SearchGlyph() {
   );
 }
 
+function PromptGlyph() {
+  return (
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M6 4h12v16l-6-4-6 4V4Z" />
+      <path d="M9 8h6M9 11h4" />
+    </svg>
+  );
+}
+
 export function AttachFilesButton({
   onFileReferenceSelect,
   onUploadDiskFiles,
   repoPath,
   mode,
   onModeChange,
+  promptBody = '',
+  onBrowsePrompts,
+  onSavePrompt,
 }: AttachFilesButtonProps) {
   const [open, setOpen] = useState(false);
   const [hoveredMode, setHoveredMode] = useState<ComposerMode | null>(null);
@@ -310,6 +325,20 @@ export function AttachFilesButton({
             paddingBottom: 5,
             paddingLeft: 5,
           }}>
+            {onBrowsePrompts ? (
+              <MenuRow
+                icon={<PromptGlyph />}
+                label="Browse saved prompts"
+                onClick={() => { setOpen(false); onBrowsePrompts(); }}
+              />
+            ) : null}
+            {onSavePrompt && promptBody.trim() ? (
+              <MenuRow
+                icon={<PromptGlyph />}
+                label="Save as prompt"
+                onClick={() => { setOpen(false); onSavePrompt(promptBody); }}
+              />
+            ) : null}
             {/* Flat rows, same vocabulary as the mode rows above — the old
                 bordered input-bubbles read as chunky cards (Q 2026-07-17). */}
             <button
@@ -459,5 +488,40 @@ export function AttachFilesButton({
         </div>
       </ComposerPopover>
     </div>
+  );
+}
+
+function MenuRow({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        width: '100%',
+        minHeight: 26,
+        paddingTop: 0,
+        paddingRight: 8,
+        paddingBottom: 0,
+        paddingLeft: 8,
+        borderRadius: 7,
+        borderWidth: 0,
+        background: 'transparent',
+        color: 'var(--t-text-secondary)',
+        cursor: 'pointer',
+        textAlign: 'left',
+        fontSize: 12.5,
+        fontWeight: 300,
+        letterSpacing: '-0.1px',
+        fontFamily: 'var(--font-sans-system)',
+      }}
+      onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover)'; event.currentTarget.style.color = 'var(--t-text)'; }}
+      onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; event.currentTarget.style.color = 'var(--t-text-secondary)'; }}
+    >
+      {icon}
+      {label}
+    </button>
   );
 }

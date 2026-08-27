@@ -11,7 +11,8 @@ export type OrchestratorSlashCommandName =
   | 'recall'
   | 'handoff'
   | 'rule'
-  | 'rules';
+  | 'rules'
+  | 'prompts';
 
 export interface OrchestratorSlashCommandDefinition {
   command: `/${string}`;
@@ -84,6 +85,8 @@ export interface SlashCommandContext {
   /** Open the session-rules manager popover. `/rules` uses this — the add-path
    *  when the composer chip is hidden because no rules exist yet. */
   openRulesManager?: () => void;
+  /** Open the saved-prompt picker over the active composer. */
+  openPromptLibrary?: () => void;
 }
 
 export interface SlashCommandExecutionResult {

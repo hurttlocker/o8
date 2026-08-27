@@ -437,6 +437,8 @@ export function InputButtons({
   inlineMeterSlot,
   voiceModeEnabled,
   onVoiceModeChange,
+  onBrowsePrompts,
+  onSavePrompt,
 }: {
   input: string;
   enhancing: boolean;
@@ -489,6 +491,8 @@ export function InputButtons({
   inlineMeterSlot?: ReactNode;
   voiceModeEnabled?: boolean;
   onVoiceModeChange?: (enabled: boolean) => void;
+  onBrowsePrompts?: () => void;
+  onSavePrompt?: (body: string) => void;
 }) {
   const canSubmit = Boolean(input.trim());
   const showRepoChip = Boolean(repoLabel) && displayMessagesCount === 0;
@@ -573,6 +577,9 @@ export function InputButtons({
         onUploadDiskFiles={onUploadDiskFiles}
         onFileReferenceSelect={onFileReferenceSelect}
         repoPath={repoPath}
+        promptBody={input}
+        onBrowsePrompts={onBrowsePrompts}
+        onSavePrompt={onSavePrompt}
       />
       <MicButton />
       {onVoiceModeChange ? (
