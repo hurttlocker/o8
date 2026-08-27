@@ -40,6 +40,7 @@ function asLaneRuntime(value: string): LaneRuntime {
 
 export async function runAutomation(
   row: typeof automations.$inferSelect,
+  promptOverride?: string,
 ): Promise<RunAutomationResult> {
   const runtime = asLaneRuntime(row.runtime);
   const agentType: AgentType = runtime === 'claude-code' ? 'claude-code' : runtime as AgentType;
@@ -100,7 +101,7 @@ export async function runAutomation(
   const launchResult = await dispatch({
     verb: 'launch_session',
     laneId,
-    prompt: row.prompt,
+    prompt: promptOverride ?? row.prompt,
     actor: 'system',
   });
   if (!launchResult.ok) {

@@ -1,9 +1,9 @@
 {
   "schema": "o8/test-classification/v1",
   "generatedBy": "node scripts/classify-tests.mjs --write",
-  "totalTests": 854,
-  "hermeticTests": 552,
-  "resourceOwningTests": 302,
+  "totalTests": 862,
+  "hermeticTests": 555,
+  "resourceOwningTests": 307,
   "resourceOwning": [
     {
       "path": "src/app/api/leases/route.test.ts",
@@ -309,6 +309,12 @@
       "reasons": [
         "child-process",
         "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/orchestrator/handoff-compaction.test.ts",
+      "reasons": [
+        "executable-fixture"
       ]
     },
     {
@@ -878,10 +884,29 @@
       ]
     },
     {
+      "path": "tests/automation-fire-spine-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/automation-precheck-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/automation-repo-setup-real-path.test.ts",
       "reasons": [
         "child-process",
         "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/automation-watch-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },
@@ -1392,6 +1417,14 @@
       "reasons": [
         "child-process",
         "git-cli"
+      ]
+    },
+    {
+      "path": "tests/launch-failure-truth-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
       ]
     },
     {

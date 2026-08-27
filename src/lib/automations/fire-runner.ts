@@ -3,7 +3,9 @@ import { eq } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
 import { automations } from '@/lib/db/schema';
 import { computeNextRunAt } from './cron';
+import { ensureAutomationPrecheck } from './precheck';
 import { runAutomation } from './runner';
+import { runWatchAutomationAction } from './watch-actions';
 import { getAutomationFire, settleAutomationFire, type AutomationFire } from './fire-store';
 
 export async function runClaimedAutomationFire(
@@ -21,9 +23,33 @@ export async function runClaimedAutomationFire(
     lastRunStatus: 'running',
   }).where(eq(automations.id, row.id)).run();
 
+  const precheck = await ensureAutomationPrecheck(fire, now);
+  if (precheck.action !== 'continue') {
+    const settledPrecheck = settleAutomationFire({
+      fireId: fire.id,
+      workerId: fire.claimedBy,
+      leaseToken: fire.leaseToken,
+      ok: precheck.action === 'skip',
+      note: precheck.note,
+      nowMs: now(),
+      terminalOnFailure: true,
+    });
+    if (!settledPrecheck) return undefined;
+    db.update(automations).set({
+      lastRunStatus: precheck.action === 'skip' ? 'ok' : 'error',
+      lastErrorMessage: precheck.action === 'skip' ? null : precheck.note,
+      nextRunAt: fire.source === 'manual' && row.triggerKind === 'cron' && row.cronExpr
+        ? computeNextRunAt(row.cronExpr, fire.claimedAt ?? now())
+        : row.nextRunAt,
+    }).where(eq(automations.id, row.id)).run();
+    return settledPrecheck;
+  }
+
   let result: Awaited<ReturnType<typeof runAutomation>>;
   try {
-    result = await runAutomation(row);
+    result = fire.source === 'watch'
+      ? await runWatchAutomationAction(row, fire)
+      : await runAutomation(row);
   } catch (error) {
     result = {
       ok: false,

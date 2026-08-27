@@ -196,6 +196,7 @@ export async function listManagedRuns(): Promise<ManagedRunRecord[]> {
   }
   const now = new Date().toISOString();
   let changed = false;
+  const reconciled: ManagedRunRecord[] = [];
   for (const rec of runs.values()) {
     if (rec.status === 'running' && !alive.has(rec.session)) {
       // Only detached runs need exit-file recovery here — streaming runs POST
@@ -207,10 +208,34 @@ export async function listManagedRuns(): Promise<ManagedRunRecord[]> {
       rec.exitCode = code;
       rec.finishedAt = rec.finishedAt ?? now;
       changed = true;
+      reconciled.push(rec);
     }
   }
   if (prune()) changed = true;
   if (changed) persist();
+  if (reconciled.length > 0) {
+    try {
+      const { recordAutomationSourceEvent } = await import('@/lib/automations/source-events');
+      for (const rec of reconciled) {
+        const eventType = rec.status === 'gone'
+          ? 'lost'
+          : rec.exitCode === 0 ? 'exit_clean' : 'exit_failed';
+        recordAutomationSourceEvent({
+          sourceKind: 'managed_run',
+          sourceId: rec.id,
+          repoPath: rec.cwd,
+          eventType,
+          fingerprint: rec.status === 'gone'
+            ? `managed-run:${rec.id}:lost:${rec.finishedAt ?? 'unknown'}`
+            : `managed-run:${rec.id}:finished:${rec.exitCode ?? 'unknown'}`,
+          occurredAt: Date.parse(rec.finishedAt ?? now) || Date.now(),
+          payload: { exitCode: rec.exitCode ?? null, status: rec.status, mode: rec.mode },
+        });
+      }
+    } catch {
+      // Run reconciliation stays available if automation storage is unavailable.
+    }
+  }
   return [...runs.values()].sort(byStartedDesc);
 }
 

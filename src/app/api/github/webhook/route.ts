@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createHash } from 'node:crypto';
 import { verifyGitHubWebhookSignature } from '@/lib/github-broker';
+import { recordAutomationSourceEvent } from '@/lib/automations/source-events';
+import { resolveRepoPath } from '@/lib/intake/resolve-repo';
 import {
   markGitHubSyncSuccess,
   upsertGitHubInstallation,
@@ -15,6 +18,7 @@ export async function POST(request: NextRequest) {
   const rawBody = await request.text();
   const signature = request.headers.get('x-hub-signature-256');
   const event = request.headers.get('x-github-event');
+  const deliveryId = request.headers.get('x-github-delivery');
 
   try {
     if (!verifyGitHubWebhookSignature(rawBody, signature)) {
@@ -81,6 +85,23 @@ export async function POST(request: NextRequest) {
       head?: { ref?: string | null };
       base?: { ref?: string | null };
     };
+    check_run?: {
+      id?: number;
+      name?: string;
+      status?: string;
+      conclusion?: string | null;
+      started_at?: string | null;
+      completed_at?: string | null;
+      pull_requests?: Array<{ number?: number }>;
+    };
+    check_suite?: {
+      id?: number;
+      status?: string;
+      conclusion?: string | null;
+      before_sha?: string;
+      after_sha?: string;
+      pull_requests?: Array<{ number?: number }>;
+    };
   };
   const repoFullName = payload.repository?.full_name;
 
@@ -111,6 +132,26 @@ export async function POST(request: NextRequest) {
         defaultBranch: payload.repository.default_branch ?? null,
         installationId: installation?.id ?? null,
         lastWebhookAt: new Date().toISOString(),
+      });
+    }
+
+    if (['check_run', 'check_suite', 'status', 'workflow_run'].includes(event)) {
+      const check = payload.check_run ?? payload.check_suite ?? {};
+      const checkId = typeof check.id === 'number' ? check.id : null;
+      recordAutomationSourceEvent({
+        sourceKind: 'repository',
+        sourceId: repoFullName,
+        repoPath: resolveRepoPath(repoFullName),
+        eventType: `${event}:${payload.action ?? 'updated'}`,
+        fingerprint: `repository:${deliveryId ?? createHash('sha256').update(rawBody).digest('hex')}`,
+        payload: {
+          repository: repoFullName,
+          deliveryId,
+          event,
+          action: payload.action ?? null,
+          checkId,
+          check,
+        },
       });
     }
 
@@ -201,6 +242,25 @@ export async function POST(request: NextRequest) {
           mergedAt: pr.merged_at ?? null,
         });
         markGitHubSyncSuccess(repoFullName, 'pull_requests', null);
+        recordAutomationSourceEvent({
+          sourceKind: 'repository',
+          sourceId: repoFullName,
+          repoPath: resolveRepoPath(repoFullName),
+          eventType: `pull_request:${payload.action ?? 'updated'}`,
+          fingerprint: `repository:${deliveryId ?? createHash('sha256').update(rawBody).digest('hex')}`,
+          occurredAt: Date.parse(pr.updated_at) || Date.now(),
+          payload: {
+            repository: repoFullName,
+            deliveryId,
+            action: payload.action ?? null,
+            pullRequest: {
+              number: pr.number,
+              state: pr.state,
+              head: pr.head?.ref ?? null,
+              base: pr.base?.ref ?? null,
+            },
+          },
+        });
       }
     }
 

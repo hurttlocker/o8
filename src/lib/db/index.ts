@@ -39,7 +39,7 @@ const DATA_DIR = getDataDir();
 // copy still points at the right file. Renaming the file would require a
 // second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
-const DB_SCHEMA_VERSION = 50;
+const DB_SCHEMA_VERSION = 52;
 function migrationMarkerPath(version: number): string {
   return path.join(DATA_DIR, `.db-migrated-v${version}`);
 }

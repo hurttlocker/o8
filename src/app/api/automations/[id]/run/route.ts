@@ -23,20 +23,22 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
   if (!row) return NextResponse.json({ error: 'not found' }, { status: 404 });
   if (!row.enabled) return NextResponse.json({ error: 'automation is disabled' }, { status: 409 });
 
-  const body = await request.json().catch(() => null) as { clientMutationId?: unknown } | null;
+  const body = await request.json().catch(() => null) as { clientMutationId?: unknown; runAnyway?: unknown } | null;
   const clientMutationId = typeof body?.clientMutationId === 'string' && body.clientMutationId.trim()
     ? body.clientMutationId.trim()
     : request.headers.get('x-o8-client-mutation-id')?.trim() || randomUUID();
-  const fire = persistManualAutomationFire(id, clientMutationId);
+  const runAnyway = body?.runAnyway === true;
+  const fire = persistManualAutomationFire(id, clientMutationId, Date.now(), { bypassPrecheck: runAnyway });
   if (!fire) return NextResponse.json({ error: 'automation is disabled or unavailable' }, { status: 409 });
-  if (fire.status === 'succeeded' || fire.status === 'parked' || fire.status === 'cancelled') {
+  const replaySucceeded = fire.status === 'succeeded' || fire.status === 'skipped_precheck';
+  if (replaySucceeded || fire.status === 'precheck_error' || fire.status === 'parked' || fire.status === 'cancelled') {
     return NextResponse.json({
-      ok: fire.status === 'succeeded',
+      ok: replaySucceeded,
       fire,
       laneId: fire.laneId,
       note: fire.resultNote,
       replayed: true,
-    }, { status: fire.status === 'succeeded' ? 200 : 502 });
+    }, { status: replaySucceeded ? 200 : 502 });
   }
 
   const workerId = `manual:${process.env.O8_BOOT_ID?.trim() || process.pid}`;
@@ -58,7 +60,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
   if (!settled) {
     return NextResponse.json({ ok: false, fireId: fire.id, note: 'fire settlement unavailable' }, { status: 503 });
   }
-  const ok = settled.status === 'succeeded';
+  const ok = settled.status === 'succeeded' || settled.status === 'skipped_precheck';
   return NextResponse.json({
     ok,
     fire: settled,

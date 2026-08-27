@@ -277,13 +277,16 @@ export function AutomationsPage({ currentOwner, onClose }: { currentOwner: strin
     }
   }, [handlePersisted]);
 
-  const handleRun = useCallback(async (id: string) => {
+  const handleRun = useCallback(async (id: string, options: { runAnyway?: boolean } = {}) => {
     setRows((current) => current.map((row) => row.id === id ? { ...row, lastRunStatus: 'running', lastRunAt: Date.now() } : row));
     try {
       const response = await fetch(`/api/automations/${id}/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientMutationId: crypto.randomUUID() }),
+        body: JSON.stringify({
+          clientMutationId: crypto.randomUUID(),
+          runAnyway: options.runAnyway === true,
+        }),
       });
       const data = await response.json() as { ok?: boolean; note?: string };
       if (!response.ok || data.ok === false) {

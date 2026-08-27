@@ -481,6 +481,8 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
 
   let fd: number | null = null;
   let pos = 0;
+  let watchOutput = '';
+  let watchOutputSequence = 0;
   const pump = () => {
     if (fd === null) {
       if (!existsSync(logFile)) return;
@@ -493,7 +495,12 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
       const buf = Buffer.allocUnsafe(len);
       const n = readSync(fd, buf, 0, len, pos);
       if (n > 0) {
-        process.stdout.write(buf.subarray(0, n));
+        const chunk = buf.subarray(0, n);
+        process.stdout.write(chunk);
+        watchOutput = `${watchOutput}${chunk.toString('utf8')}`;
+        if (Buffer.byteLength(watchOutput, 'utf8') > 7_500) {
+          watchOutput = Buffer.from(watchOutput, 'utf8').subarray(-7_500).toString('utf8');
+        }
         pos += n;
       }
     } catch { /* transient read race — retry next tick */ }
@@ -504,6 +511,26 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
       return true;
     } catch {
       return false;
+    }
+  };
+  const flushWatchOutput = async () => {
+    if (!registered || !watchOutput) return;
+    const outputChunk = watchOutput;
+    watchOutput = '';
+    watchOutputSequence += 1;
+    try {
+      await apiFetch(cfg, '/api/panel/managed-runs', {
+        method: 'POST',
+        body: {
+          action: 'output',
+          session,
+          outputChunk,
+          outputSequence: watchOutputSequence,
+          observedAt: Date.now(),
+        },
+      });
+    } catch {
+      // Output delivery is observational; the owned command and terminal remain authoritative.
     }
   };
 
@@ -548,6 +575,7 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
         break;
       }
       tick += 1;
+      if (tick % 7 === 0) await flushWatchOutput();
       // Fallback (~2s): session vanished without writing exit = killed externally.
       if (tick % 13 === 0 && !sessionAlive()) break;
       await sleep(150);
@@ -561,6 +589,7 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
       pump();
       stable = pos === before ? stable + 1 : 0;
     }
+    await flushWatchOutput();
 
     if (!interruptRequested) {
       if (exitFound) {

@@ -1,59 +1,25 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { computeNextRunAt, validateCron } from '@/lib/automations/cron';
 import { useExperimentalGeminiFlag } from '@/lib/operator/use-experimental-gemini';
 import { useExperimentalOpencodeFlag } from '@/lib/operator/use-experimental-opencode';
+import {
+  buttonStyle,
+  Field,
+  InlinePicker,
+  inputStyle,
+  MONO_FONT,
+  type PickerOption,
+  UI_FONT,
+} from './AutomationEditorControls';
+import { AutomationWatchFields } from './AutomationWatchFields';
 import type {
   AutomationFormState,
   AutomationRecord,
   RegisteredRepo,
   TriggerKind,
 } from './types';
-
-const UI_FONT = 'var(--font-sans-system)';
-const MONO_FONT = 'var(--font-mono, "SF Mono", Menlo, monospace)';
-
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  minHeight: 36,
-  paddingTop: 8,
-  paddingRight: 11,
-  paddingBottom: 8,
-  paddingLeft: 11,
-  borderWidth: 1,
-  borderStyle: 'solid',
-  borderColor: 'var(--t-divider)',
-  borderRadius: 9,
-  background: 'var(--t-input-bg)',
-  color: 'var(--t-text)',
-  fontSize: 12.5,
-  fontWeight: 300,
-  letterSpacing: '-0.1px',
-  fontFamily: UI_FONT,
-  lineHeight: 1.4,
-  outline: 'none',
-  boxSizing: 'border-box',
-};
-
-const buttonStyle: React.CSSProperties = {
-  height: 30,
-  paddingTop: 0,
-  paddingRight: 12,
-  paddingBottom: 0,
-  paddingLeft: 12,
-  borderWidth: 1,
-  borderStyle: 'solid',
-  borderColor: 'var(--t-divider)',
-  borderRadius: 8,
-  background: 'transparent',
-  color: 'var(--t-text-muted)',
-  fontSize: 12,
-  fontWeight: 300,
-  letterSpacing: '-0.1px',
-  fontFamily: UI_FONT,
-  cursor: 'pointer',
-};
 
 function emptyForm(repos: RegisteredRepo[]): AutomationFormState {
   const first = repos[0];
@@ -67,6 +33,18 @@ function emptyForm(repos: RegisteredRepo[]): AutomationFormState {
     cronExpr: '0 9 * * *',
     catchUpPolicy: 'latest',
     repoConcurrencyLimit: 1,
+    precheckCommand: '',
+    precheckTimeoutMs: 10_000,
+    watchSourceKind: 'packet',
+    watchSourceId: '',
+    watchEventTypes: 'review_requested, completed, failed',
+    watchLiteralFilter: '',
+    watchQuietMs: 60_000,
+    watchMinIntervalMs: 0,
+    watchBatchWindowMs: 0,
+    watchMaxFiresPerTick: 4,
+    watchActionKind: 'dispatch',
+    watchTargetLaneId: '',
   };
 }
 
@@ -81,186 +59,19 @@ function formFromRecord(record: AutomationRecord): AutomationFormState {
     cronExpr: record.cronExpr ?? '0 9 * * *',
     catchUpPolicy: record.catchUpPolicy,
     repoConcurrencyLimit: record.repoConcurrencyLimit,
+    precheckCommand: record.precheckCommand ?? '',
+    precheckTimeoutMs: record.precheckTimeoutMs,
+    watchSourceKind: record.watchSourceKind ?? 'packet',
+    watchSourceId: record.watchSourceId ?? '',
+    watchEventTypes: record.watchEventTypes.join(', '),
+    watchLiteralFilter: record.watchLiteralFilter ?? '',
+    watchQuietMs: record.watchQuietMs ?? 60_000,
+    watchMinIntervalMs: record.watchMinIntervalMs,
+    watchBatchWindowMs: record.watchBatchWindowMs,
+    watchMaxFiresPerTick: record.watchMaxFiresPerTick,
+    watchActionKind: record.watchActionKind,
+    watchTargetLaneId: record.watchTargetLaneId ?? '',
   };
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <span style={{
-        fontSize: 10,
-        fontWeight: 300,
-        letterSpacing: '0.04em',
-        lineHeight: '14px',
-        textTransform: 'uppercase',
-        color: 'var(--t-text-faint)',
-      }}>
-        {label}
-      </span>
-      {children}
-    </div>
-  );
-}
-
-interface PickerOption {
-  value: string;
-  label: string;
-  detail?: string;
-}
-
-function InlinePicker({
-  value,
-  options,
-  onChange,
-  ariaLabel,
-}: {
-  value: string;
-  options: PickerOption[];
-  onChange: (value: string) => void;
-  ariaLabel: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const selected = options.find((option) => option.value === value) ?? options[0];
-
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    window.addEventListener('pointerdown', close);
-    return () => window.removeEventListener('pointerdown', close);
-  }, [open]);
-
-  return (
-    <div ref={rootRef} style={{ position: 'relative' }}>
-      <button
-        type="button"
-        aria-label={ariaLabel}
-        aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
-        style={{
-          ...inputStyle,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 10,
-          cursor: 'pointer',
-          textAlign: 'left',
-        }}
-      >
-        <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {selected?.label ?? value}
-        </span>
-        <ChevronGlyph open={open} />
-      </button>
-      {open ? (
-        <div style={{
-          position: 'absolute',
-          top: 42,
-          right: 0,
-          left: 0,
-          zIndex: 4,
-          maxHeight: 220,
-          overflowY: 'auto',
-          paddingTop: 4,
-          paddingRight: 4,
-          paddingBottom: 4,
-          paddingLeft: 4,
-          borderWidth: 1,
-          borderStyle: 'solid',
-          borderColor: 'var(--t-divider)',
-          borderRadius: 10,
-          background: 'var(--t-panel)',
-          boxShadow: 'var(--t-shadow-card)',
-        }}>
-          {options.map((option) => {
-            const active = option.value === value;
-            return (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => {
-                  onChange(option.value);
-                  setOpen(false);
-                }}
-                style={{
-                  width: '100%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  paddingTop: 7,
-                  paddingRight: 8,
-                  paddingBottom: 7,
-                  paddingLeft: 8,
-                  borderWidth: 0,
-                  borderRadius: 7,
-                  background: active ? 'var(--t-input-bg)' : 'transparent',
-                  color: 'var(--t-text)',
-                  textAlign: 'left',
-                  fontFamily: UI_FONT,
-                  cursor: 'pointer',
-                }}
-              >
-                <span style={{ width: 12, flexShrink: 0 }}>{active ? <CheckGlyph /> : null}</span>
-                <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
-                  <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25 }}>
-                    {option.label}
-                  </span>
-                  {option.detail ? (
-                    <span style={{
-                      fontSize: 9.5,
-                      fontWeight: 260,
-                      letterSpacing: '-0.4px',
-                      lineHeight: 1.25,
-                      color: 'var(--t-text-muted)',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}>
-                      {option.detail}
-                    </span>
-                  ) : null}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function ChevronGlyph({ open }: { open: boolean }) {
-  return (
-    <svg
-      width="11"
-      height="11"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      style={{
-        flexShrink: 0,
-        color: 'var(--t-text-faint)',
-        transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
-        transition: 'transform 120ms cubic-bezier(0.22, 1, 0.36, 1)',
-      }}
-    >
-      <path d="m6 9 6 6 6-6" />
-    </svg>
-  );
-}
-
-function CheckGlyph() {
-  return (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M20 6 9 17l-5-5" />
-    </svg>
-  );
 }
 
 export function AutomationEditor({
@@ -358,6 +169,22 @@ export function AutomationEditor({
         cronExpr: form.triggerKind === 'cron' ? form.cronExpr.trim() : null,
         catchUpPolicy: form.catchUpPolicy,
         repoConcurrencyLimit: form.repoConcurrencyLimit,
+        precheckCommand: form.precheckCommand.trim() || null,
+        precheckTimeoutMs: form.precheckTimeoutMs,
+        watchSourceKind: form.triggerKind === 'watch' ? form.watchSourceKind : undefined,
+        watchSourceId: form.triggerKind === 'watch' ? form.watchSourceId.trim() || null : undefined,
+        watchEventTypes: form.triggerKind === 'watch'
+          ? form.watchEventTypes.split(',').map((value) => value.trim()).filter(Boolean)
+          : undefined,
+        watchLiteralFilter: form.triggerKind === 'watch' ? form.watchLiteralFilter.trim() || null : undefined,
+        watchQuietMs: form.triggerKind === 'watch' && form.watchSourceKind === 'managed_run'
+          ? form.watchQuietMs
+          : null,
+        watchMinIntervalMs: form.watchMinIntervalMs,
+        watchBatchWindowMs: form.watchBatchWindowMs,
+        watchMaxFiresPerTick: form.watchMaxFiresPerTick,
+        watchActionKind: form.triggerKind === 'watch' ? form.watchActionKind : undefined,
+        watchTargetLaneId: form.triggerKind === 'watch' ? form.watchTargetLaneId.trim() || null : undefined,
       };
       const response = await fetch(editing ? `/api/automations/${initial.id}` : '/api/automations', {
         method: editing ? 'PATCH' : 'POST',
@@ -513,9 +340,38 @@ export function AutomationEditor({
               />
             )}
           </Field>
+          <Field label="Precheck (optional)">
+            <input
+              type="text"
+              aria-label="Automation precheck command"
+              placeholder="git diff --quiet origin/main...HEAD"
+              value={form.precheckCommand}
+              onChange={(event) => update({ precheckCommand: event.target.value })}
+              spellCheck={false}
+              style={{ ...inputStyle, fontFamily: MONO_FONT }}
+            />
+            <span style={{ color: 'var(--t-text-muted)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', lineHeight: 1.25 }}>
+              Exit 0 launches the agent. Any other exit skips it. Errors fail closed.
+            </span>
+          </Field>
+          {form.precheckCommand.trim() ? (
+            <Field label="Precheck timeout (ms)">
+              <input
+                type="number"
+                min={1000}
+                max={300000}
+                aria-label="Automation precheck timeout in milliseconds"
+                value={form.precheckTimeoutMs}
+                onChange={(event) => update({
+                  precheckTimeoutMs: Math.min(300_000, Math.max(1_000, Number.parseInt(event.target.value, 10) || 10_000)),
+                })}
+                style={inputStyle}
+              />
+            </Field>
+          ) : null}
           <Field label="Trigger">
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              {(['manual', 'cron'] as TriggerKind[]).map((triggerKind) => {
+              {(['manual', 'cron', 'watch'] as TriggerKind[]).map((triggerKind) => {
                 const active = form.triggerKind === triggerKind;
                 return (
                   <button
@@ -543,7 +399,7 @@ export function AutomationEditor({
                       cursor: 'pointer',
                     }}
                   >
-                    {triggerKind === 'manual' ? 'Manual' : 'Cron'}
+                    {triggerKind === 'manual' ? 'Manual' : triggerKind === 'cron' ? 'Cron' : 'Watch'}
                   </button>
                 );
               })}
@@ -601,6 +457,9 @@ export function AutomationEditor({
                 </Field>
               </div>
             </>
+          ) : null}
+          {form.triggerKind === 'watch' ? (
+            <AutomationWatchFields form={form} update={update} />
           ) : null}
           {error ? (
             <div role="alert" style={{ fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.35, color: 'var(--t-brand-red)' }}>

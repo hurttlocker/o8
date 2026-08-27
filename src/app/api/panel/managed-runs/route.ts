@@ -10,6 +10,8 @@ import type { ManagedRunRecord } from '@/lib/runtimes/managed-runs/types';
 import { terminateManagedRun } from '@/lib/runtimes/managed-runs/termination';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { serverTimingHeaders } from '@/lib/performance/server-timing';
+import { getLane } from '@/lib/lane/registry';
+import { recordAutomationSourceEvent } from '@/lib/automations/source-events';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -46,7 +48,7 @@ export async function GET(request: Request) {
 }
 
 type RegisterBody = {
-  action?: 'register' | 'finish' | 'kill';
+  action?: 'register' | 'finish' | 'kill' | 'output';
   id?: string;
   session?: string;
   command?: string;
@@ -62,7 +64,14 @@ type RegisterBody = {
   processGroupId?: number;
   processMarker?: string;
   reason?: 'stream_sigint' | 'operator_stop';
+  outputChunk?: string;
+  outputSequence?: number;
+  observedAt?: number;
 };
+
+function managedRunRepoPath(run: ManagedRunRecord): string {
+  return (run.laneId ? getLane(run.laneId)?.repoPath : null) ?? run.cwd;
+}
 
 /** POST — register a run (default), finish one (action:'finish'), or kill one (action:'kill'). */
 export async function POST(req: Request) {
@@ -90,12 +99,44 @@ export async function POST(req: Request) {
     }
   }
 
+  if (body.action === 'output') {
+    const key = body.session ?? body.id;
+    const target = key ? findManagedRun(key) : null;
+    if (!target) return NextResponse.json({ ok: false, error: 'run_not_found' }, { status: 404 });
+    if (typeof body.outputChunk !== 'string' || Buffer.byteLength(body.outputChunk, 'utf8') > 8 * 1024) {
+      return NextResponse.json({ ok: false, error: 'invalid_output_chunk' }, { status: 400 });
+    }
+    if (!Number.isSafeInteger(body.outputSequence) || Number(body.outputSequence) < 1) {
+      return NextResponse.json({ ok: false, error: 'invalid_output_sequence' }, { status: 400 });
+    }
+    recordAutomationSourceEvent({
+      sourceKind: 'managed_run',
+      sourceId: target.id,
+      repoPath: managedRunRepoPath(target),
+      eventType: 'output',
+      fingerprint: `managed-run:${target.id}:output:${body.outputSequence}`,
+      occurredAt: Number.isFinite(body.observedAt) ? Number(body.observedAt) : Date.now(),
+      payload: { chunk: body.outputChunk, mode: target.mode, session: target.session },
+    });
+    return NextResponse.json({ ok: true });
+  }
+
   if (body.action === 'finish') {
     const key = body.session ?? body.id;
     if (!key) {
       return NextResponse.json({ ok: false, error: 'missing_id' }, { status: 400 });
     }
     const rec = finishManagedRun(key, typeof body.exitCode === 'number' ? body.exitCode : null);
+    if (rec) {
+      recordAutomationSourceEvent({
+        sourceKind: 'managed_run',
+        sourceId: rec.id,
+        repoPath: managedRunRepoPath(rec),
+        eventType: rec.exitCode === 0 ? 'exit_clean' : 'exit_failed',
+        fingerprint: `managed-run:${rec.id}:finished:${rec.exitCode ?? 'unknown'}`,
+        payload: { exitCode: rec.exitCode ?? null, status: rec.status, mode: rec.mode },
+      });
+    }
     return NextResponse.json({ ok: Boolean(rec), run: rec });
   }
 
@@ -120,6 +161,16 @@ export async function POST(req: Request) {
       );
     }
     const rec = killManagedRun(session, exitCode, termination);
+    if (rec) {
+      recordAutomationSourceEvent({
+        sourceKind: 'managed_run',
+        sourceId: rec.id,
+        repoPath: managedRunRepoPath(rec),
+        eventType: 'killed',
+        fingerprint: `managed-run:${rec.id}:killed:${rec.finishedAt ?? 'unknown'}`,
+        payload: { exitCode: rec.exitCode ?? null, reason, status: rec.status },
+      });
+    }
     return NextResponse.json({ ok: Boolean(rec), run: rec, termination });
   }
 
@@ -171,5 +222,14 @@ export async function POST(req: Request) {
     termination: null,
   };
   registerManagedRun(rec);
+  recordAutomationSourceEvent({
+    sourceKind: 'managed_run',
+    sourceId: rec.id,
+    repoPath: managedRunRepoPath(rec),
+    eventType: 'started',
+    fingerprint: `managed-run:${rec.id}:started:${rec.startedAt}`,
+    occurredAt: Date.parse(rec.startedAt) || Date.now(),
+    payload: { command: rec.command, mode: rec.mode, packetId: rec.packetId, laneId: rec.laneId },
+  });
   return NextResponse.json({ ok: true, run: rec });
 }

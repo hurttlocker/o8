@@ -4,16 +4,29 @@ import { SqliteCloudJobStore } from '@/lib/cloud/sqlite-job-store';
 import type { CloudJob } from '@/lib/cloud/job-store';
 import { getSqlite } from '@/lib/db';
 import { computeNextRunAt, computePreviousRunAt } from './cron';
+import type { AutomationSourceEvent } from './source-events';
 
-export type AutomationFireSource = 'scheduled' | 'manual';
+export type AutomationFireSource = 'scheduled' | 'manual' | 'watch';
+export type AutomationWatchActionKind = 'dispatch' | 'notify' | 'steer' | 'approval';
 export type AutomationFireStatus =
   | 'pending'
   | 'leased'
   | 'retrying'
   | 'recovered'
   | 'succeeded'
+  | 'skipped_precheck'
+  | 'precheck_error'
   | 'parked'
   | 'cancelled';
+
+export type AutomationPrecheckStatus =
+  | 'none'
+  | 'pending'
+  | 'running'
+  | 'passed'
+  | 'skipped'
+  | 'error'
+  | 'bypassed';
 
 export interface AutomationFire {
   id: string;
@@ -45,6 +58,25 @@ export interface AutomationFire {
   executionMs: number | null;
   concurrentCount: number | null;
   duplicateCount: number;
+  precheckCommand: string | null;
+  precheckTimeoutMs: number | null;
+  precheckBypassed: boolean;
+  precheckStatus: AutomationPrecheckStatus;
+  precheckStartedAt: number | null;
+  precheckCompletedAt: number | null;
+  precheckDurationMs: number | null;
+  precheckExitCode: number | null;
+  precheckStdoutTail: string | null;
+  precheckStderrTail: string | null;
+  precheckErrorMessage: string | null;
+  sourceEventId: number | null;
+  sourceKind: string | null;
+  sourceId: string | null;
+  sourceEventType: string | null;
+  sourceFingerprint: string | null;
+  sourcePayload: Record<string, unknown> | null;
+  actionKind: AutomationWatchActionKind;
+  targetLaneId: string | null;
   updatedAt: number;
 }
 
@@ -61,7 +93,7 @@ interface AutomationFireRow {
   id: string;
   automation_id: string;
   execution_job_id: string;
-  source: AutomationFireSource;
+  source: Exclude<AutomationFireSource, 'watch'>;
   slot_ms: number | null;
   idempotency_key: string;
   repo_path: string;
@@ -78,6 +110,26 @@ interface AutomationFireRow {
   execution_ms: number | null;
   concurrent_count: number | null;
   duplicate_count: number;
+  precheck_command: string | null;
+  precheck_timeout_ms: number | null;
+  precheck_bypassed: number;
+  precheck_status: AutomationPrecheckStatus;
+  precheck_started_at: number | null;
+  precheck_completed_at: number | null;
+  precheck_duration_ms: number | null;
+  precheck_exit_code: number | null;
+  precheck_stdout_tail: string | null;
+  precheck_stderr_tail: string | null;
+  precheck_error_message: string | null;
+  trigger_source: 'watch' | null;
+  source_event_id: number | null;
+  source_kind: string | null;
+  source_id: string | null;
+  source_event_type: string | null;
+  source_fingerprint: string | null;
+  source_payload_json: string | null;
+  action_kind: AutomationWatchActionKind;
+  target_lane_id: string | null;
   updated_at: number;
 }
 
@@ -90,6 +142,8 @@ interface AutomationRow {
   repo_concurrency_limit: number;
   runtime: string;
   prompt: string;
+  precheck_command: string | null;
+  precheck_timeout_ms: number;
 }
 
 const AUTOMATION_QUEUE_ID = 'automation';
@@ -104,6 +158,8 @@ function timeMs(value: string | undefined): number | null {
 }
 
 function statusFromSpine(row: AutomationFireRow, job: CloudJob): AutomationFireStatus {
+  if (row.precheck_status === 'skipped') return 'skipped_precheck';
+  if (row.precheck_status === 'error') return 'precheck_error';
   if (job.status === 'completed') return 'succeeded';
   if (job.status === 'parked' || job.status === 'cancelled' || job.status === 'leased') return job.status;
   if (row.status === 'recovered' || row.status === 'retrying') return row.status;
@@ -117,7 +173,7 @@ function fireFromRow(row: AutomationFireRow, knownJob?: CloudJob): AutomationFir
     id: row.id,
     automationId: row.automation_id,
     executionJobId: row.execution_job_id,
-    source: row.source,
+    source: row.trigger_source === 'watch' ? 'watch' : row.source,
     slotMs: row.slot_ms,
     idempotencyKey: row.idempotency_key,
     repoPath: row.repo_path,
@@ -143,6 +199,34 @@ function fireFromRow(row: AutomationFireRow, knownJob?: CloudJob): AutomationFir
     executionMs: row.execution_ms,
     concurrentCount: row.concurrent_count ?? job.concurrentCount ?? null,
     duplicateCount: row.duplicate_count,
+    precheckCommand: row.precheck_command,
+    precheckTimeoutMs: row.precheck_timeout_ms,
+    precheckBypassed: Boolean(row.precheck_bypassed),
+    precheckStatus: row.precheck_status,
+    precheckStartedAt: row.precheck_started_at,
+    precheckCompletedAt: row.precheck_completed_at,
+    precheckDurationMs: row.precheck_duration_ms,
+    precheckExitCode: row.precheck_exit_code,
+    precheckStdoutTail: row.precheck_stdout_tail,
+    precheckStderrTail: row.precheck_stderr_tail,
+    precheckErrorMessage: row.precheck_error_message,
+    sourceEventId: row.source_event_id,
+    sourceKind: row.source_kind,
+    sourceId: row.source_id,
+    sourceEventType: row.source_event_type,
+    sourceFingerprint: row.source_fingerprint,
+    sourcePayload: row.source_payload_json ? (() => {
+      try {
+        const parsed = JSON.parse(row.source_payload_json) as unknown;
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+          ? parsed as Record<string, unknown>
+          : null;
+      } catch {
+        return null;
+      }
+    })() : null,
+    actionKind: row.action_kind,
+    targetLaneId: row.target_lane_id,
     updatedAt: row.updated_at,
   };
 }
@@ -153,13 +237,20 @@ function scheduledIdentity(automationId: string, slotMs: number): string {
 
 function insertFire(input: {
   automationId: string;
-  source: AutomationFireSource;
+  source: Exclude<AutomationFireSource, 'watch'>;
   slotMs: number | null;
   idempotencyKey: string;
   repoPath: string;
   repoConcurrencyLimit: number;
   runtime: string;
   prompt: string;
+  precheckCommand: string | null;
+  precheckTimeoutMs: number;
+  precheckBypassed?: boolean;
+  triggerSource?: 'watch' | null;
+  sourceEvent?: AutomationSourceEvent;
+  actionKind?: AutomationWatchActionKind;
+  targetLaneId?: string | null;
   scheduledAt: number;
   nowMs: number;
 }): AutomationFire {
@@ -198,8 +289,11 @@ function insertFire(input: {
     INSERT INTO automation_fires (
       id, automation_id, execution_job_id, source, slot_ms, idempotency_key,
       repo_path, repo_concurrency_limit, status, scheduled_at, persisted_at,
-      schedule_delay_ms, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+      schedule_delay_ms, precheck_command, precheck_timeout_ms, precheck_bypassed,
+      precheck_status, trigger_source, source_event_id, source_kind, source_id,
+      source_event_type, source_fingerprint, source_payload_json, action_kind,
+      target_lane_id, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     input.automationId,
@@ -212,6 +306,19 @@ function insertFire(input: {
     input.scheduledAt,
     input.nowMs,
     Math.max(0, input.nowMs - input.scheduledAt),
+    input.precheckCommand,
+    input.precheckCommand ? input.precheckTimeoutMs : null,
+    input.precheckBypassed ? 1 : 0,
+    input.precheckBypassed ? 'bypassed' : input.precheckCommand ? 'pending' : 'none',
+    input.triggerSource ?? null,
+    input.sourceEvent?.sequence ?? null,
+    input.sourceEvent?.sourceKind ?? null,
+    input.sourceEvent?.sourceId ?? null,
+    input.sourceEvent?.eventType ?? null,
+    input.sourceEvent?.fingerprint ?? null,
+    input.sourceEvent ? JSON.stringify(input.sourceEvent.payload) : null,
+    input.actionKind ?? 'dispatch',
+    input.targetLaneId ?? null,
     input.nowMs,
   );
   return fireFromRow(sqlite.prepare('SELECT * FROM automation_fires WHERE id = ?').get(id) as AutomationFireRow, job);
@@ -252,7 +359,7 @@ export function materializeDueAutomationFires(
   const materialize = sqlite.transaction(() => {
     const rows = sqlite.prepare(`
       SELECT id, cron_expr, next_run_at, catch_up_policy, repo_path,
-             repo_concurrency_limit, runtime, prompt
+             repo_concurrency_limit, runtime, prompt, precheck_command, precheck_timeout_ms
       FROM automations
       WHERE enabled = 1 AND trigger_kind = 'cron' AND next_run_at <= ?
       ORDER BY next_run_at ASC
@@ -270,6 +377,8 @@ export function materializeDueAutomationFires(
           repoConcurrencyLimit: row.repo_concurrency_limit,
           runtime: row.runtime,
           prompt: row.prompt,
+          precheckCommand: row.precheck_command,
+          precheckTimeoutMs: row.precheck_timeout_ms,
           scheduledAt: slotMs,
           nowMs,
         }));
@@ -286,15 +395,17 @@ export function persistManualAutomationFire(
   automationId: string,
   idempotencyKey: string,
   nowMs: number = Date.now(),
+  options: { bypassPrecheck?: boolean } = {},
 ): AutomationFire | undefined {
   const sqlite = getSqlite();
   const persist = sqlite.transaction(() => {
     const row = sqlite.prepare(`
-      SELECT id, repo_path, repo_concurrency_limit, runtime, prompt
+      SELECT id, repo_path, repo_concurrency_limit, runtime, prompt,
+             precheck_command, precheck_timeout_ms
       FROM automations WHERE id = ? AND enabled = 1
     `).get(automationId) as Pick<
       AutomationRow,
-      'id' | 'repo_path' | 'repo_concurrency_limit' | 'runtime' | 'prompt'
+      'id' | 'repo_path' | 'repo_concurrency_limit' | 'runtime' | 'prompt' | 'precheck_command' | 'precheck_timeout_ms'
     > | undefined;
     if (!row) return undefined;
     return insertFire({
@@ -306,7 +417,56 @@ export function persistManualAutomationFire(
       repoConcurrencyLimit: row.repo_concurrency_limit,
       runtime: row.runtime,
       prompt: row.prompt,
+      precheckCommand: row.precheck_command,
+      precheckTimeoutMs: row.precheck_timeout_ms,
+      precheckBypassed: options.bypassPrecheck,
       scheduledAt: nowMs,
+      nowMs,
+    });
+  });
+  return persist.immediate();
+}
+
+export function persistWatchAutomationFire(
+  automationId: string,
+  sourceEvent: AutomationSourceEvent,
+  nowMs: number = Date.now(),
+): AutomationFire | undefined {
+  const sqlite = getSqlite();
+  const persist = sqlite.transaction(() => {
+    const row = sqlite.prepare(`
+      SELECT id, repo_path, repo_concurrency_limit, runtime, prompt,
+             precheck_command, precheck_timeout_ms, watch_action_kind, watch_target_lane_id
+      FROM automations
+      WHERE id = ? AND enabled = 1 AND trigger_kind = 'watch'
+    `).get(automationId) as {
+      id: string;
+      repo_path: string;
+      repo_concurrency_limit: number;
+      runtime: string;
+      prompt: string;
+      precheck_command: string | null;
+      precheck_timeout_ms: number;
+      watch_action_kind: AutomationWatchActionKind;
+      watch_target_lane_id: string | null;
+    } | undefined;
+    if (!row) return undefined;
+    return insertFire({
+      automationId,
+      source: 'manual',
+      triggerSource: 'watch',
+      slotMs: null,
+      idempotencyKey: `automation-watch:${automationId}:${sourceEvent.fingerprint}`,
+      repoPath: row.repo_path,
+      repoConcurrencyLimit: row.repo_concurrency_limit,
+      runtime: row.runtime,
+      prompt: row.prompt,
+      precheckCommand: row.precheck_command,
+      precheckTimeoutMs: row.precheck_timeout_ms,
+      sourceEvent,
+      actionKind: row.watch_action_kind,
+      targetLaneId: row.watch_target_lane_id,
+      scheduledAt: sourceEvent.occurredAt,
       nowMs,
     });
   });
@@ -364,6 +524,52 @@ export function claimNextAutomationFire(input: {
   return fireFromRow(row, job);
 }
 
+export function beginAutomationPrecheck(
+  fireId: string,
+  nowMs: number = Date.now(),
+): AutomationFire | undefined {
+  getSqlite().prepare(`
+    UPDATE automation_fires
+    SET precheck_status = 'running', precheck_started_at = ?, updated_at = ?
+    WHERE id = ? AND precheck_status = 'pending'
+  `).run(nowMs, nowMs, fireId);
+  return getAutomationFire(fireId);
+}
+
+export function recordAutomationPrecheckResult(input: {
+  fireId: string;
+  status: 'passed' | 'skipped' | 'error';
+  exitCode: number | null;
+  stdoutTail: string;
+  stderrTail: string;
+  errorMessage?: string | null;
+  nowMs?: number;
+}): AutomationFire | undefined {
+  const nowMs = input.nowMs ?? Date.now();
+  getSqlite().prepare(`
+    UPDATE automation_fires
+    SET precheck_status = ?, precheck_completed_at = ?,
+        precheck_duration_ms = CASE
+          WHEN precheck_started_at IS NULL THEN NULL
+          ELSE MAX(0, ? - precheck_started_at)
+        END,
+        precheck_exit_code = ?, precheck_stdout_tail = ?, precheck_stderr_tail = ?,
+        precheck_error_message = ?, updated_at = ?
+    WHERE id = ? AND precheck_status = 'running'
+  `).run(
+    input.status,
+    nowMs,
+    nowMs,
+    input.exitCode,
+    input.stdoutTail || null,
+    input.stderrTail || null,
+    input.errorMessage ?? null,
+    nowMs,
+    input.fireId,
+  );
+  return getAutomationFire(input.fireId);
+}
+
 export function settleAutomationFire(input: {
   fireId: string;
   workerId: string;
@@ -374,6 +580,7 @@ export function settleAutomationFire(input: {
   note?: string;
   nowMs?: number;
   retryDelayMs?: number;
+  terminalOnFailure?: boolean;
 }): AutomationFire | undefined {
   const row = getSqlite().prepare('SELECT * FROM automation_fires WHERE id = ?')
     .get(input.fireId) as AutomationFireRow | undefined;
@@ -389,7 +596,7 @@ export function settleAutomationFire(input: {
     leaseMs: 60 * 60 * 1000,
     nowMs,
     retryDelayMs: input.retryDelayMs ?? 30_000,
-    terminalOnFailure: Boolean(input.laneId),
+    terminalOnFailure: input.terminalOnFailure ?? Boolean(input.laneId),
   });
   if (!result.accepted) return undefined;
   const status: AutomationFireStatus = result.job.status === 'completed'

@@ -42,7 +42,8 @@ function statusColor(status: RunStatus): string {
 function fireStatusColor(status: AutomationFireRecord['status']): string {
   if (status === 'leased') return 'var(--t-accent)';
   if (status === 'succeeded') return 'var(--t-success)';
-  if (status === 'parked' || status === 'cancelled') return 'var(--t-brand-red)';
+  if (status === 'skipped_precheck') return 'var(--t-text-muted)';
+  if (status === 'precheck_error' || status === 'parked' || status === 'cancelled') return 'var(--t-brand-red)';
   if (status === 'retrying' || status === 'recovered') return 'var(--t-warning)';
   return 'var(--t-text-faint)';
 }
@@ -55,12 +56,18 @@ function durationLabel(ms: number | null): string {
 }
 
 function fireExplanation(fire: AutomationFireRecord): string {
-  if (fire.status === 'retrying') return `Retry ${fire.attemptCount + 1} of ${fire.maxAttempts} queued`;
-  if (fire.status === 'recovered') return `Recovered after ${fire.recoveryCount} lost lease${fire.recoveryCount === 1 ? '' : 's'}`;
-  if (fire.status === 'parked') return fire.resultNote || 'Parked after bounded retries';
-  if (fire.status === 'cancelled') return fire.resultNote || 'Cancelled';
-  if (fire.recoveryCount > 0) return `Recovered ${fire.recoveryCount} time${fire.recoveryCount === 1 ? '' : 's'}`;
-  return fire.resultNote || (fire.status === 'succeeded' ? 'Dispatched successfully' : 'Waiting for capacity');
+  const provenance = fire.source === 'watch'
+    ? `${fire.sourceEventType ?? 'event'} from ${fire.sourceId ?? fire.sourceKind ?? 'configured source'}`
+    : null;
+  const explain = (message: string) => provenance ? `${provenance} · ${message}` : message;
+  if (fire.status === 'retrying') return explain(`Retry ${fire.attemptCount + 1} of ${fire.maxAttempts} queued`);
+  if (fire.status === 'recovered') return explain(`Recovered after ${fire.recoveryCount} lost lease${fire.recoveryCount === 1 ? '' : 's'}`);
+  if (fire.status === 'parked') return explain(fire.resultNote || 'Parked after bounded retries');
+  if (fire.status === 'cancelled') return explain(fire.resultNote || 'Cancelled');
+  if (fire.status === 'skipped_precheck') return explain(fire.resultNote || 'Precheck skipped the agent launch');
+  if (fire.status === 'precheck_error') return explain(fire.precheckErrorMessage || fire.resultNote || 'Precheck failed closed');
+  if (fire.recoveryCount > 0) return explain(`Recovered ${fire.recoveryCount} time${fire.recoveryCount === 1 ? '' : 's'}`);
+  return explain(fire.resultNote || (fire.status === 'succeeded' ? 'Dispatched successfully' : 'Waiting for capacity'));
 }
 
 function statusTitle(row: AutomationRecord): string {
@@ -192,7 +199,7 @@ export function AutomationListRow({
   row: AutomationRecord;
   onToggle: (id: string, next: boolean) => Promise<void>;
   onEdit: (row: AutomationRecord) => void;
-  onRun: (id: string) => Promise<void>;
+  onRun: (id: string, options?: { runAnyway?: boolean }) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onOpenLane: (row: AutomationRecord) => void;
 }) {
@@ -203,7 +210,11 @@ export function AutomationListRow({
   const [busy, setBusy] = useState<'toggle' | 'run' | 'delete' | null>(null);
   const running = row.lastRunStatus === 'running' || busy === 'run';
   const revealActions = hovered || focusWithin || confirmDelete;
-  const trigger = row.triggerKind === 'cron' ? `cron ${row.cronExpr ?? ''}`.trim() : 'manual';
+  const trigger = row.triggerKind === 'cron'
+    ? `cron ${row.cronExpr ?? ''}`.trim()
+    : row.triggerKind === 'watch'
+      ? `${row.watchState ?? 'watch'} ${row.watchSourceKind ?? 'source'}`
+      : 'manual';
 
   return (
     <div
@@ -267,6 +278,12 @@ export function AutomationListRow({
             {repoBasename(row.repoPath)}
             <MetaSeparator />
             {row.runtime}
+            {row.precheckCommand ? (
+              <>
+                <MetaSeparator />
+                precheck
+              </>
+            ) : null}
             <MetaSeparator />
             <LastRunLink row={row} onOpenLane={onOpenLane} />
             <MetaSeparator />
@@ -345,10 +362,10 @@ export function AutomationListRow({
           ) : row.fires.map((fire) => (
             <div key={fire.id} style={{ minHeight: 26, display: 'flex', alignItems: 'center', gap: 7 }}>
               <span aria-hidden="true" style={{ width: 5, height: 5, flexShrink: 0, borderRadius: '50%', background: fireStatusColor(fire.status) }} />
-              <span style={{ width: 58, color: 'var(--t-text-muted)', fontSize: 10.5, fontWeight: 300, textTransform: 'capitalize' }}>
+              <span style={{ width: 92, color: 'var(--t-text-muted)', fontSize: 10.5, fontWeight: 300, textTransform: 'capitalize' }}>
                 {fire.status}
               </span>
-              <span style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--t-text-muted)', fontSize: 10.5, fontWeight: 300 }} title={fire.resultNote ?? undefined}>
+              <span style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--t-text-muted)', fontSize: 10.5, fontWeight: 300 }} title={fireExplanation(fire)}>
                 {fire.source} · {formatRelative(fire.scheduledAt, 'now')} · {fireExplanation(fire)}
               </span>
               {fire.laneId ? (
@@ -371,6 +388,33 @@ export function AutomationListRow({
                   }}
                 >
                   Open lane
+                </button>
+              ) : null}
+              {fire.status === 'skipped_precheck' || fire.status === 'precheck_error' ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBusy('run');
+                    void onRun(row.id, { runAnyway: true }).finally(() => setBusy(null));
+                  }}
+                  style={{
+                    paddingTop: 2,
+                    paddingRight: 5,
+                    paddingBottom: 2,
+                    paddingLeft: 5,
+                    borderWidth: 0,
+                    borderRadius: 5,
+                    background: 'transparent',
+                    color: 'var(--t-text-muted)',
+                    fontSize: 10.5,
+                    fontWeight: 300,
+                    fontFamily: UI_FONT,
+                    cursor: busy === 'run' ? 'default' : 'pointer',
+                    opacity: busy === 'run' ? 0.5 : 1,
+                  }}
+                  disabled={busy === 'run'}
+                >
+                  Run anyway
                 </button>
               ) : null}
             </div>
