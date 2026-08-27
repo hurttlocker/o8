@@ -21,6 +21,7 @@ process.env.CORTEX_IDE_DATA_DIR = dataDir;
 const { createLane } = await import('@/lib/lane/registry');
 const { mintPacketWorkerToken } = await import('@/lib/auth/packet-worker-token');
 const { codename } = await import('@/lib/agents/codename');
+const { getSqlite } = await import('@/lib/db');
 const heartbeatRoute = await import('@/app/api/lanes/[id]/heartbeat/route');
 const presenceRoute = await import('@/app/api/agents/presence/route');
 const inboxRoute = await import('@/app/api/agents/inbox/route');
@@ -209,7 +210,7 @@ describe('agent message bus real path', () => {
     ]));
   });
 
-  it('accepts the full 4,000-character contract and routes Codex targets through resume', async () => {
+  it('accepts the full 4,000-character contract and routes Codex targets through the active-task seam', async () => {
     const join = await presenceRoute.POST(request('http://localhost:3001/api/agents/presence', {
       token: OPERATOR_TOKEN,
       method: 'POST',
@@ -244,6 +245,96 @@ describe('agent message bus real path', () => {
       body: { from: 'operator', to: 'CodexReceiver', repo: repoPath, text: 'm'.repeat(4_001) },
     }));
     expect(rejected.status).toBe(400);
+  });
+
+  it('keeps a deferred native attempt queued, then marks it delivered when the target reads its inbox', async () => {
+    const joined = await presenceRoute.POST(request('http://localhost:3001/api/agents/presence', {
+      token: OPERATOR_TOKEN,
+      method: 'POST',
+      body: {
+        agentId: 'codex-deferred-session',
+        name: 'DeferredReceiver',
+        repo: repoPath,
+        worktreePath: repoPath,
+        runtime: 'codex',
+        sessionKey: 'codex:deferred-receiver',
+      },
+    }));
+    expect(joined.status).toBe(201);
+
+    const deferredPost = createAgentMessagePostHandler({
+      sendClaude,
+      sendCodex: async () => {
+        throw new Error('The task already has an active writer.');
+      },
+    }, noLiveSessions);
+    const accepted = await deferredPost(request('http://localhost:3001/api/agents/message', {
+      token: OPERATOR_TOKEN,
+      method: 'POST',
+      body: {
+        from: 'operator',
+        to: 'DeferredReceiver',
+        repo: repoPath,
+        text: 'Read me from the durable fallback.',
+      },
+    }));
+    expect(accepted.status).toBe(201);
+    const acceptedPayload = await accepted.json() as {
+      message: { id: string; delivery: string; deliveryNote: string };
+    };
+    expect(acceptedPayload).toMatchObject({
+      message: {
+        delivery: 'poll',
+        deliveryNote: expect.stringContaining('retained in the durable inbox'),
+      },
+    });
+
+    getSqlite().prepare(`
+      UPDATE agent_messages
+      SET delivery_status = 'failed', delivery_note = 'Legacy native delivery attempt failed.'
+      WHERE id = ?
+    `).run(acceptedPayload.message.id);
+    const reconciled = await messageRoute.GET(request(
+      `http://localhost:3001/api/agents/message?repo=${encodeURIComponent(repoPath)}&limit=20`,
+      { token: OPERATOR_TOKEN },
+    ));
+    await expect(reconciled.json()).resolves.toMatchObject({
+      messages: expect.arrayContaining([
+        expect.objectContaining({
+          id: acceptedPayload.message.id,
+          delivery: 'poll',
+        }),
+      ]),
+    });
+
+    const inbox = await inboxRoute.GET(request(
+      'http://localhost:3001/api/agents/inbox?agentId=codex-deferred-session&limit=100',
+      { token: OPERATOR_TOKEN },
+    ));
+    expect(inbox.status).toBe(200);
+    await expect(inbox.json()).resolves.toMatchObject({
+      messages: expect.arrayContaining([
+        expect.objectContaining({
+          text: 'Read me from the durable fallback.',
+          delivery: 'native',
+          deliveryNote: 'Read from the durable inbox by the target session.',
+        }),
+      ]),
+    });
+
+    const exchanges = await messageRoute.GET(request(
+      `http://localhost:3001/api/agents/message?repo=${encodeURIComponent(repoPath)}&limit=20`,
+      { token: OPERATOR_TOKEN },
+    ));
+    await expect(exchanges.json()).resolves.toMatchObject({
+      messages: expect.arrayContaining([
+        expect.objectContaining({
+          text: 'Read me from the durable fallback.',
+          delivery: 'native',
+          deliveryNote: 'Read from the durable inbox by the target session.',
+        }),
+      ]),
+    });
   });
 
   it('discovers one live runtime session, addresses it by runtime alias, and rejects an ambiguous alias', async () => {

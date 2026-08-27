@@ -547,7 +547,7 @@ function buildHistoricalMissionStatus(record: import('@/lib/db/missions-store').
 
   const packets = record.packetMeta.map((meta) => {
     const lane = lanesByPacket.get(meta.id) ?? null;
-    const recovery = lane ? recoveryInfoFromLaneEvents(getLaneEvents(lane.id, 100)) : null;
+    const recovery = lane?.outcome === 'merged' ? null : lane ? recoveryInfoFromLaneEvents(getLaneEvents(lane.id, 100)) : null;
     return {
       id: meta.id,
       referenceLabel: meta.referenceLabel,
@@ -734,8 +734,7 @@ export async function getMissionStatus(input: MissionStatusInput) {
     packets: graph.map((node) => {
       const packet = packetById.get(node.packetId)!;
       const lane = laneByPacketId.get(node.packetId);
-      const recovery = packet.recovery
-        ?? (lane ? recoveryInfoFromLaneEvents(getLaneEvents(lane.id, 100)) : null);
+      const recovery = packet.releaseState === 'released' || (lane?.status === 'completed' && lane.outcome === 'merged') ? null : packet.recovery ?? (lane ? recoveryInfoFromLaneEvents(getLaneEvents(lane.id, 100)) : null);
       const laneSessionKey = lane?.sessionKey ?? packet.lane?.sessionKey ?? null;
       const activity = laneSessionKey ? transcriptActivityBySession.get(laneSessionKey) : undefined;
       const lastTranscriptAt = activity?.lastTranscriptAt ?? null;

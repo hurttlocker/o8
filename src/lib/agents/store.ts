@@ -104,6 +104,11 @@ export function ensureAgentBusSchema(sqlite: Database.Database = getSqlite()): v
     CREATE INDEX IF NOT EXISTS idx_agent_messages_inbox
       ON agent_messages(repo_path, to_agent, sequence);
   `);
+  sqlite.prepare(`
+    UPDATE agent_messages
+    SET delivery_status = 'poll'
+    WHERE delivery_status = 'failed'
+  `).run();
 }
 
 function mapPresence(row: PresenceRow): AgentPresence {
@@ -291,6 +296,26 @@ export function listAgentInbox(
     cursor: messages.at(-1)?.sequence ?? input.after,
     hasMore,
   };
+}
+
+export function acknowledgeAgentInbox(
+  input: { agent: AgentPresence; throughSequence: number },
+  sqlite: Database.Database = getSqlite(),
+): void {
+  ensureAgentBusSchema(sqlite);
+  if (input.throughSequence <= 0) return;
+  sqlite.prepare(`
+    UPDATE agent_messages
+    SET
+      delivery_status = 'native',
+      delivery_note = CASE
+        WHEN delivery_status = 'native' THEN delivery_note
+        ELSE 'Read from the durable inbox by the target session.'
+      END
+    WHERE repo_path = ?
+      AND to_agent = ? COLLATE NOCASE
+      AND sequence <= ?
+  `).run(input.agent.repo, input.agent.name, input.throughSequence);
 }
 
 export function listRecentAgentMessages(

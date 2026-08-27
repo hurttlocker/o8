@@ -614,7 +614,7 @@ export const MISSION_TOOLS: McpTool[] = [
         },
         reviewedHeadSha: {
           type: 'string',
-          description: 'Optional worktree HEAD SHA that was reviewed. If omitted, o8 captures the lane worktree HEAD at review time.',
+          description: 'Optional 7- to 40-character hexadecimal worktree HEAD SHA that was reviewed. Abbreviated SHAs are expanded in the packet repository; if omitted, o8 captures the lane worktree HEAD at review time.',
         },
         contractCoverageEvidence: CONTRACT_COVERAGE_EVIDENCE_SCHEMA,
         directivesApplied: {
@@ -1289,7 +1289,7 @@ export async function handleSubmitReview(args: Record<string, unknown>): Promise
       directivesApplied: parseDirectivesApplied(args.directivesApplied),
       directivesViolated: parseDirectivesViolated(args.directivesViolated),
     });
-    return jsonResult(result);
+    return 'error' in result ? textResult(JSON.stringify(result), true) : jsonResult(result);
   } catch (error) {
     console.error(`${'[mcp-operator]'} submit_review failed: ${errorText(error)}`);
     return textResult(`Failed to submit review: ${errorText(error)}`, true);

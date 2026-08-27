@@ -22,6 +22,11 @@ export function normalizeHeadSha(value?: string | null) {
   return normalized || undefined;
 }
 
+export function isValidHeadSha(value?: string | null): boolean {
+  const normalized = normalizeHeadSha(value);
+  return normalized !== undefined && /^[0-9a-f]{7,40}$/i.test(normalized);
+}
+
 export async function readHeadSha(cwd: string) {
   const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
     windowsHide: true,
@@ -31,8 +36,28 @@ export async function readHeadSha(cwd: string) {
   return stdout.trim();
 }
 
-function headShaMatches(currentHeadSha: string, expectedHeadSha: string) {
-  return currentHeadSha === expectedHeadSha || currentHeadSha.startsWith(expectedHeadSha);
+export async function resolveHeadSha(cwd: string, value: string): Promise<string | undefined> {
+  const normalized = normalizeHeadSha(value);
+  if (!isValidHeadSha(normalized)) return undefined;
+
+  try {
+    const { stdout } = await execFileAsync('git', ['rev-parse', '--verify', `${normalized}^{commit}`], {
+      windowsHide: true,
+      cwd,
+      timeout: 5000,
+    });
+    const resolved = stdout.trim().toLowerCase();
+    return /^[0-9a-f]{40}$/.test(resolved) ? resolved : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function headShaMatches(currentHeadSha: string, expectedHeadSha: string) {
+  const current = normalizeHeadSha(currentHeadSha)?.toLowerCase();
+  const expected = normalizeHeadSha(expectedHeadSha)?.toLowerCase();
+  if (!current || !expected || !isValidHeadSha(current) || !isValidHeadSha(expected)) return false;
+  return current === expected || current.startsWith(expected);
 }
 
 export async function checkExpectedHeadSha(

@@ -56,7 +56,11 @@ const { handleWaitForMissionReady } = await import('@/lib/mcp/operator-handlers/
 const { getOperatorDefaults, updateOperatorDefaults } = await import('@/lib/operator/defaults');
 const { addRepo } = await import('@/lib/repos/registry');
 const { getMissionStatus } = await import('@/lib/orchestrator/operator-mission-service');
-const { withControlPlaneLock, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+const {
+  readOrchestratorControlPlaneState,
+  withControlPlaneLock,
+  writeOrchestratorControlPlaneState,
+} = await import('@/lib/orchestrator/control-plane');
 const { normalizeOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const { scanRepo } = await import('@/lib/skeleton');
 const { getWorktreeManager } = await import('@/lib/worktree/launch');
@@ -649,6 +653,29 @@ describe('requireApproval merge governance through the real command path', () =>
     expect(listApprovalsForContext({ laneId: gated.lane.id })
       .find((candidate) => candidate.id === gatedPayload.result.approvalId))
       .toMatchObject({ status: 'pending', policyRuleId: 'merge-gate-violation' });
+  }, 60_000);
+
+  it('removes retry recovery metadata after the real merge route releases a packet', async () => {
+    const fixture = await createStandardLane('released-recovery-coherence');
+    persistDispatcherMission(fixture.lane.packetId!, fixture.repo, `thoughts-recovery-coherence-${Date.now()}`);
+    const beforeMerge = readOrchestratorControlPlaneState();
+    beforeMerge.packets[0]!.recovery = {
+      outcome: 'archived_recoverable',
+      preservedRef: 'preserved/reviewed-work',
+      preservedHeadSha: fixture.reviewedHeadSha,
+      message: 'Reviewed work remains preserved for retry.',
+      recommendedAction: 'retry_packet',
+    };
+    writeOrchestratorControlPlaneState(beforeMerge);
+
+    const response = await mergeRoute.POST(mergeRequest(getOrCreateWsToken(), fixture.lane.packetId!));
+    const payload = await response.json();
+    const status = await getMissionStatus({ includeCost: false });
+    const packet = status.packets.find((candidate) => candidate.id === fixture.lane.packetId);
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({ ok: true, result: { merged: true } });
+    expect(packet).toMatchObject({ releaseState: 'released', recovery: null });
   }, 60_000);
 
   it('routes a review-worthy surface approval to the recorded dispatcher and wakes the mission-ready rail', async () => {

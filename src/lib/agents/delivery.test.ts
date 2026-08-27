@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildClaudeTerminalUserTurn, submitClaudeTerminalUserTurn } from './delivery';
+import {
+  buildClaudeTerminalUserTurn,
+  submitClaudeTerminalUserTurn,
+  submitCodexQueuedUserTurn,
+} from './delivery';
 
 describe('buildClaudeTerminalUserTurn', () => {
   it('keeps arbitrary message text inside one shell-quoted argument', () => {
@@ -30,5 +34,42 @@ describe('buildClaudeTerminalUserTurn', () => {
         '4312',
       ],
     });
+  });
+
+  it('queues into the exact active Codex task instead of opening a second writer', async () => {
+    const calls: Array<{ file: string; args: string[]; cwd: string; codexHome: string | undefined }> = [];
+    await submitCodexQueuedUserTurn({
+      agentId: 'codex-session',
+      name: 'Receiver',
+      repo: '/workspace/o8',
+      worktreePath: '/workspace/o8',
+      runtime: 'codex',
+      sessionKey: 'codex:01a03a17-943f-7130-97db-f22865a3d3a4',
+      laneId: null,
+      packetId: null,
+      lastSeen: new Date().toISOString(),
+    }, 'Peer update.', {
+      resolveBinary: async () => '/opt/codex/bin/codex',
+      resolveSessionHome: async () => ({
+        threadId: '01a03a17-943f-7130-97db-f22865a3d3a4',
+        configHomeRef: '/workspace/.codex',
+      }),
+      run: async (file, args, options) => {
+        calls.push({ file, args, cwd: options.cwd, codexHome: options.env.CODEX_HOME });
+      },
+    });
+
+    expect(calls).toEqual([{
+      file: '/opt/codex/bin/codex',
+      args: [
+        'queue',
+        '--thread',
+        '01a03a17-943f-7130-97db-f22865a3d3a4',
+        '--message',
+        'Peer update.',
+      ],
+      cwd: '/workspace/o8',
+      codexHome: '/workspace/.codex',
+    }]);
   });
 });
