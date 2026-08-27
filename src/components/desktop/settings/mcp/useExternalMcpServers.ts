@@ -37,6 +37,7 @@ export interface UseExternalMcpServersResult {
     env: Record<string, string> | null;
   }) => Promise<boolean>;
   toggle: (server: ExternalMcpServer) => Promise<void>;
+  toggleWorkerInjection: (server: ExternalMcpServer) => Promise<void>;
   remove: (server: ExternalMcpServer) => Promise<void>;
   testingId: string | null;
   /** True when the in-flight test is for an npx-family command (extended timeout). */
@@ -165,6 +166,31 @@ export function useExternalMcpServers(): UseExternalMcpServersResult {
     }
   }, [load]);
 
+  const toggleWorkerInjection = useCallback(async (server: ExternalMcpServer) => {
+    setActionId(server.id);
+    setNote(null);
+    try {
+      const res = await fetch('/api/setup/mcp-servers', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: server.id, workerInjection: !server.workerInjection }),
+      });
+      const body = await res.json().catch(() => ({})) as { error?: string };
+      if (!res.ok) {
+        throw new Error(body.error || 'Failed to update worker attachment');
+      }
+      setNote({
+        message: `${server.name} ${server.workerInjection ? 'detached from' : 'attached to'} supported workers.`,
+        ok: true,
+      });
+      await load();
+    } catch (e) {
+      setNote({ message: e instanceof Error ? e.message : 'Failed to update worker attachment.', ok: false });
+    } finally {
+      setActionId(null);
+    }
+  }, [load]);
+
   const remove = useCallback(async (server: ExternalMcpServer) => {
     setActionId(server.id);
     setNote(null);
@@ -241,6 +267,7 @@ export function useExternalMcpServers(): UseExternalMcpServersResult {
     create,
     createServer,
     toggle,
+    toggleWorkerInjection,
     remove,
     testingId,
     testingNpxFamily,

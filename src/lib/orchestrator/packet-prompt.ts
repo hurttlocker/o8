@@ -22,6 +22,9 @@ import {
   buildReadOnlyPacketSelfReviewInstructions,
 } from '@/lib/orchestrator/self-review';
 import { buildWorkerOutcomeOwnershipPromptV1 } from '@/lib/prompts/v1';
+import { resolveWorkerMcpInjection } from '@/lib/mcp/worker-injection';
+import { workerSandboxEnabled } from '@/lib/runtimes/shared/owned-session/sandbox';
+import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
 import {
   buildDeviationsClause,
   packetImplementationNotesPath,
@@ -369,6 +372,25 @@ export async function buildPacketPrompt(
   // Null when the packet has no originating thread or that thread has no rules.
   const sessionRulesSection = buildSessionRulesBlock(packet.orchestratorThreadId);
   const claudeCodeSkillSections = buildClaudeCodeSkillSections(packet);
+  const workerMcpResolution = packet.runtime === 'claude-code'
+    ? await resolveWorkerMcpInjection({
+        packetId: packet.id,
+        worktreePath: worktreePath ?? packet.lane?.worktreePath ?? packet.workspaceTargetPath ?? '',
+        branch: packet.branchTarget,
+        laneId: packet.lane?.laneId,
+      }, {
+        resolveCommands: workerSandboxEnabled(),
+        pathValue: pathWithNodeRuntime(),
+      })
+    : { servers: [] };
+  const workerMcpSection = workerMcpResolution.servers.length > 0
+    ? [
+        `MCP servers attached to this packet: ${workerMcpResolution.servers
+          .map((server) => `${server.name} (${server.command})`)
+          .join(', ')}.`,
+        'Use these attached tools when they are relevant to the packet.',
+      ]
+    : [];
   const readOnlyPacket = packet.launchContext?.workMode === 'read-only';
   const readOnlySection = readOnlyPacket
     ? 'Read-only packet: inspect the repository and report the requested findings. Do not edit files, create commits, create branches, or run commands that mutate repository state. A clean zero-diff completion is the expected successful outcome.'
@@ -456,6 +478,7 @@ export async function buildPacketPrompt(
     outcomeOwnershipSection,
     alignmentSection,
     packet.branchTarget ? `Branch target: ${packet.branchTarget}` : null,
+    ...workerMcpSection,
     packet.dependencyLabels.length > 0 ? `Dependencies: ${packet.dependencyLabels.join(', ')}` : null,
     dependencySections.length > 0 ? 'Dependency handoff context:' : null,
     ...dependencySections,

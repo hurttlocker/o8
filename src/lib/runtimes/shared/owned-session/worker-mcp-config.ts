@@ -1,0 +1,96 @@
+import { writeFile } from 'node:fs/promises';
+import path from 'node:path';
+
+import { recordLaneEvent } from '@/lib/lane/events';
+import { resolveWorkerMcpInjection } from '@/lib/mcp/worker-injection';
+import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
+
+import type { OwnedRuntimeAdapter, OwnedSessionRecord } from './types';
+
+export interface PreparedOwnedWorkerMcpConfig {
+  configPath?: string;
+  sandboxReadPaths: string[];
+}
+
+function recordWorkerMcpEvent(
+  session: OwnedSessionRecord,
+  verb: 'mcp_injected' | 'mcp_injection_skipped',
+  payload: Record<string, unknown>,
+): void {
+  if (!session.laneId) return;
+  try {
+    recordLaneEvent(session.laneId, verb, 'system', payload);
+  } catch (error) {
+    console.warn(`[owned-session] unable to record ${verb} for ${session.laneId}:`, error);
+  }
+}
+
+export async function prepareOwnedWorkerMcpConfig({
+  adapter,
+  session,
+  runId,
+  sandboxEnabled,
+}: {
+  adapter: OwnedRuntimeAdapter;
+  session: OwnedSessionRecord;
+  runId: string;
+  sandboxEnabled: boolean;
+}): Promise<PreparedOwnedWorkerMcpConfig> {
+  if (!session.packetId || !adapter.workerMcpInjection) {
+    return { sandboxReadPaths: [] };
+  }
+
+  const resolution = await resolveWorkerMcpInjection({
+    packetId: session.packetId,
+    worktreePath: session.repoPath,
+    branch: session.branch ?? '',
+    laneId: session.laneId,
+  }, {
+    resolveCommands: sandboxEnabled,
+    pathValue: pathWithNodeRuntime(),
+  });
+  for (const skipped of resolution.skipped) {
+    recordWorkerMcpEvent(session, 'mcp_injection_skipped', skipped);
+  }
+  if (resolution.error) {
+    recordWorkerMcpEvent(session, 'mcp_injection_skipped', {
+      reason: `Unable to load operator-registered MCP servers: ${resolution.error}`,
+    });
+    return { sandboxReadPaths: [] };
+  }
+  if (resolution.servers.length === 0) return { sandboxReadPaths: [] };
+
+  const injectableServers = resolution.servers;
+  try {
+    const configPath = path.join(session.sessionDir, `o8-worker-mcp-${runId}.json`);
+    const mcpServers = Object.fromEntries(injectableServers.map((server) => [
+      server.name,
+      {
+        command: server.command,
+        args: server.args,
+        env: server.env ?? {},
+      },
+    ]));
+    await writeFile(
+      configPath,
+      `${JSON.stringify({ mcpServers }, null, 2)}\n`,
+      { encoding: 'utf8', mode: 0o600 },
+    );
+    recordWorkerMcpEvent(session, 'mcp_injected', {
+      servers: injectableServers.map((server) => server.name),
+      configPath,
+    });
+    return {
+      configPath,
+      sandboxReadPaths: sandboxEnabled
+        ? [configPath, ...injectableServers.map((server) => path.dirname(server.command))]
+        : [],
+    };
+  } catch (error) {
+    recordWorkerMcpEvent(session, 'mcp_injection_skipped', {
+      servers: injectableServers.map((server) => server.name),
+      reason: error instanceof Error ? error.message : String(error),
+    });
+    return { sandboxReadPaths: [] };
+  }
+}

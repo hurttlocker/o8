@@ -297,6 +297,9 @@ export interface OwnedRuntimeAdapter {
   /** Supported isolated config-home variable for session-pinned identities. */
   isolatedConfigHomeEnv?: string;
 
+  /** This adapter can attach operator-registered MCP servers to packet workers. */
+  workerMcpInjection?: boolean;
+
   /** Current local config home captured when a packet has no named identity. */
   defaultConfigHome?: () => string;
 
@@ -322,6 +325,7 @@ export interface OwnedRuntimeAdapter {
     prompt: string;
     model?: string;
     effort?: ThinkingEffort;
+    workerMcpConfigPath?: string;
   }): string[];
 
   /** Optional stdin payload for runtimes launched as interactive stream processors. */

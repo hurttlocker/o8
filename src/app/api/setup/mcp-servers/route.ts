@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server';
 import {
   insertExternalMcpServer,
   listExternalMcpServers,
-  setExternalMcpServerEnabled,
+  updateExternalMcpServer,
   removeExternalMcpServer,
   type ExternalMcpTransport,
 } from '@/lib/mcp/external-servers';
@@ -73,6 +73,7 @@ export async function POST(request: Request) {
       args?: unknown;
       env?: unknown;
       enabled?: unknown;
+      workerInjection?: unknown;
     };
 
     if (typeof body.name !== 'string' || !body.name.trim()) {
@@ -95,6 +96,7 @@ export async function POST(request: Request) {
       args: parseArgs(body.args),
       env: parseEnv(body.env),
       enabled: body.enabled !== false,
+      workerInjection: body.transport === 'stdio' && body.workerInjection === true,
     });
 
     // Fire-and-forget: warm the npm cache for npx-family commands so the
@@ -118,15 +120,27 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    const body = await request.json().catch(() => ({})) as { id?: unknown; enabled?: unknown };
+    const body = await request.json().catch(() => ({})) as {
+      id?: unknown;
+      enabled?: unknown;
+      workerInjection?: unknown;
+    };
     if (typeof body.id !== 'string' || !body.id.trim()) {
       return NextResponse.json({ error: 'Server id is required' }, { status: 400 });
     }
-    if (typeof body.enabled !== 'boolean') {
-      return NextResponse.json({ error: 'Enabled must be a boolean' }, { status: 400 });
+    const hasEnabled = typeof body.enabled === 'boolean';
+    const hasWorkerInjection = typeof body.workerInjection === 'boolean';
+    if (!hasEnabled && !hasWorkerInjection) {
+      return NextResponse.json(
+        { error: 'Enabled or workerInjection must be a boolean' },
+        { status: 400 },
+      );
     }
 
-    const server = setExternalMcpServerEnabled(body.id, body.enabled);
+    const server = updateExternalMcpServer(body.id, {
+      ...(hasEnabled ? { enabled: body.enabled as boolean } : {}),
+      ...(hasWorkerInjection ? { workerInjection: body.workerInjection as boolean } : {}),
+    });
     if (!server) {
       return NextResponse.json({ error: 'Server not found' }, { status: 404 });
     }

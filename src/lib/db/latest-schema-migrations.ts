@@ -17,6 +17,7 @@ import { ensureV50AutomationFireSchema } from '@/lib/db/v50-automation-fire-migr
 import { ensureV51AutomationPrecheckSchema } from '@/lib/db/v51-automation-precheck-migration';
 import { ensureV52AutomationWatchSchema } from '@/lib/db/v52-automation-watch-migration';
 import { ensureV53PromptLibrarySchema } from '@/lib/db/v53-prompt-library-migration';
+import { ensureV54WorkerMcpInjectionSchema } from '@/lib/db/v54-worker-mcp-injection-migration';
 
 /**
  * Keep the current additive migrations behind one boot hook. `db/index.ts` is
@@ -45,4 +46,5 @@ export function ensurePostAutomationSchemas(sqlite: Database.Database): void {
   ensureV51AutomationPrecheckSchema(sqlite);
   ensureV52AutomationWatchSchema(sqlite);
   ensureV53PromptLibrarySchema(sqlite);
+  ensureV54WorkerMcpInjectionSchema(sqlite);
 }

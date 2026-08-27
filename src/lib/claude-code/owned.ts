@@ -104,6 +104,8 @@ const claudeCodeOwnedAdapter: OwnedRuntimeAdapter = {
   binaryName: 'claude',
   binaryEnvOverride: 'O8_CLAUDE_CODE_BIN',
   binaryExtraEnvOverrides: ['CLAUDE_BIN'],
+  isolatedConfigHomeEnv: 'CLAUDE_CONFIG_DIR',
+  workerMcpInjection: true,
   extraSpawnEnv: async (session) => {
     const configuredSource = session.runtimeConfig?.modelSource;
     const source = configuredSource === 'openrouter' || configuredSource === 'codex-subscription'
@@ -147,9 +149,10 @@ const claudeCodeOwnedAdapter: OwnedRuntimeAdapter = {
   squadShortName: 'Claude',
   sessionIdPrefix: 'claude-code-owned-',
   defaultModel: MODEL_IDS.claudeWorkerDefault,
-  launchArgs: ({ model, effort }) => [
+  launchArgs: ({ model, effort, workerMcpConfigPath }) => [
     ...buildClaudeStreamJsonArgs(model ?? null, 'bypassPermissions', null, effort),
     '--disable-slash-commands',
+    ...(workerMcpConfigPath ? ['--mcp-config', workerMcpConfigPath] : []),
   ],
   launchStdin: ({ prompt }) => buildClaudeStreamJsonUserPayload(prompt),
   resumeArgs: () => null,
