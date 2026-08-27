@@ -14,6 +14,7 @@ import {
   O8_WEB_MACHINE_SURFACE,
 } from '@/lib/connect/web-machine-surface';
 import { O8_BROADCAST_SURFACE_HEADER } from '@/lib/broadcast/surface';
+import { TAURI_SURFACE_STAMP } from '@/lib/tauri/surface-stamp';
 
 export const metadata: Metadata = {
   title: 'o8',
@@ -65,15 +66,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
         {operatorToken ? <ApiBearerBootstrap source="meta" /> : null}
         <script
           dangerouslySetInnerHTML={{
-            __html: `
-              window.__O8_WS_PORT__ = ${JSON.stringify(wsPort)};
-              if (window.__TAURI_INTERNALS__) {
-                document.documentElement.dataset.tauri = 'true';
-                if (document.body) {
-                  document.body.dataset.tauri = 'true';
-                }
-              }
-            `,
+            __html: `window.__O8_WS_PORT__ = ${JSON.stringify(wsPort)};${TAURI_SURFACE_STAMP}`,
           }}
         />
         {isBroadcast ? null : <NavigationBridge />}
