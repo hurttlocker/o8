@@ -54,3 +54,17 @@ O8_RELEASE_BUILD_CACHE_DIR=/tmp/o8-release-cache-canary npm run tauri:build -- -
 ```
 
 Run once from one clean commit, then run the same command from a different clean source commit with unchanged toolchains, lockfiles, build recipes, environment, and command options. The first receipt should report three misses. The second should report compatible hits for web, speech, and native. Both builds must complete normally; a cache hit alone is not a release receipt.
+
+## Measured canary
+
+The 2026-08-27 canary ran the command above twice in the same checkout. The cold run used a clean implementation commit. The warm run used a different clean Git tree with a harmless production TypeScript comment, while toolchains, lockfiles, build recipes, environment, architecture, and command options stayed fixed. The temporary canary commit was not published.
+
+| Phase | Cold build | Changed-source warm build | Saved |
+|---|---:|---:|---:|
+| Speech | 125.464 s | 4.483 s | 120.981 s |
+| Web | 824.043 s | 547.822 s | 276.221 s |
+| Native | 554.052 s | 293.586 s | 260.466 s |
+| Compiler phases | 1,503.559 s | 845.891 s | 657.668 s |
+| Whole command | 1,527.557 s | 905.022 s | 622.535 s |
+
+The cold receipt reported three misses and zero hits. The warm receipt reported three verified compatible hits and zero misses, restored 5,660,587,008 archive bytes, then completed every normal compiler, export, and native link step. Restore and recapture overhead is included in the whole-command comparison.
