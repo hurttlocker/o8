@@ -6,6 +6,7 @@ import {
   captureReleaseBuildCache,
   collectReleaseBuildCacheIdentity,
   finalizeReleaseBuildCacheReceipt,
+  releaseBuildCacheInternals,
   restoreReleaseBuildCache,
   writeReleaseBuildCachePhaseReceipt,
   type ReleaseBuildCacheIdentity,
@@ -46,6 +47,18 @@ function nativeIdentity(source: string): ReleaseBuildCacheIdentity {
 }
 
 describe('shared release build cache', () => {
+  it('hashes local production environment files without recording their values', () => {
+    const { root } = fixture();
+    writeFileSync(join(root, '.env.local'), 'NEXT_PUBLIC_CACHE_CANARY=secret-one\n');
+    const first = releaseBuildCacheInternals.collectWebEnvironmentFiles(root);
+    writeFileSync(join(root, '.env.local'), 'NEXT_PUBLIC_CACHE_CANARY=secret-two\n');
+    const second = releaseBuildCacheInternals.collectWebEnvironmentFiles(root);
+
+    expect(first.find((entry) => entry.path === '.env.local')?.sha256)
+      .not.toBe(second.find((entry) => entry.path === '.env.local')?.sha256);
+    expect(JSON.stringify(first)).not.toContain('secret-one');
+  });
+
   it('changes compatibility when release options or hashed web environment change', () => {
     const root = process.cwd();
     const nativeA = collectReleaseBuildCacheIdentity(root, 'native', {

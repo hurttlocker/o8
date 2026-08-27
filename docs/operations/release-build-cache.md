@@ -16,7 +16,7 @@ Final applications, installers, exported server output, signatures, notarization
 
 Each entry has two identities:
 
-1. The compatibility identity covers the phase, platform, architecture, release mode, command options, toolchain versions, lockfiles, build recipes, target contract, and relevant hashed build-time environment values.
+1. The compatibility identity covers the phase, platform, architecture, release mode, command options, toolchain versions, lockfiles, build recipes, target contract, relevant hashed build-time environment values, and hashes of the production env files loaded by the frontend build.
 2. The full entry identity adds the Git commit, Git tree, and clean-worktree state.
 
 A different source tree may reuse an entry only when the compatibility identity matches. Dirty worktrees bypass both restore and capture, except for the operator-owned `o8.md` review surface.

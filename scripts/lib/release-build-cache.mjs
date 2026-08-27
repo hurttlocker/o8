@@ -35,6 +35,12 @@ const WEB_ENVIRONMENT_PATTERNS = [
   /^O8_SENTRY_DSN$/,
   /^SENTRY_DSN$/,
 ];
+const WEB_ENVIRONMENT_FILES = [
+  '.env',
+  '.env.local',
+  '.env.production',
+  '.env.production.local',
+];
 
 const PHASE_CONFIG = Object.freeze({
   web: Object.freeze({
@@ -153,6 +159,16 @@ function dirtyEntries(root) {
     .filter((line) => !/^(?:[ MADRCU?!]{1,2} )?o8\.md$/.test(line));
 }
 
+function collectWebEnvironmentFiles(root) {
+  return WEB_ENVIRONMENT_FILES.map((path) => {
+    const absolute = join(root, path);
+    return {
+      path,
+      sha256: existsSync(absolute) ? sha256Text(readFileSync(absolute)) : 'missing',
+    };
+  });
+}
+
 export function resolveReleaseBuildCacheRoot(env = process.env) {
   return resolve(env.O8_RELEASE_BUILD_CACHE_DIR?.trim() || join(homedir(), '.o8-build-cache', CACHE_VERSION_DIR));
 }
@@ -184,6 +200,7 @@ export function collectReleaseBuildCacheIdentity(root, phase, options = {}) {
     ])),
     inputs,
     environment,
+    environmentFiles: phase === 'web' ? collectWebEnvironmentFiles(root) : [],
   };
   const source = {
     head: gitOutput(root, ['rev-parse', 'HEAD']),
@@ -549,6 +566,7 @@ export function finalizeReleaseBuildCacheReceipt(cacheRoot, runId, summary) {
 
 export const releaseBuildCacheInternals = {
   PHASE_CONFIG,
+  collectWebEnvironmentFiles,
   normalizeArchivePath,
   pathAllowed,
   sha256File,

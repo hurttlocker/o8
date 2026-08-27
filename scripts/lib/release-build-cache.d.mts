@@ -66,3 +66,11 @@ export function finalizeReleaseBuildCacheReceipt(
     buildDurationMs: number;
   },
 ): { receipt: Record<string, unknown>; receiptPath: string };
+export const releaseBuildCacheInternals: {
+  PHASE_CONFIG: Record<ReleaseBuildCachePhase, unknown>;
+  collectWebEnvironmentFiles(root: string): Array<{ path: string; sha256: string }>;
+  normalizeArchivePath(value: string): string | null;
+  pathAllowed(candidate: string, targets: string[], excludes: string[]): boolean;
+  sha256File(path: string): Promise<string>;
+  stableJson(value: unknown): string;
+};
