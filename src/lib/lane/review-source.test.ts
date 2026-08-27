@@ -40,6 +40,14 @@ interface GitFixture {
   recoveryRef: string;
 }
 
+interface LocalAheadFixture {
+  repoPath: string;
+  worktreePath: string;
+  branch: string;
+  remoteBaseCommit: string;
+  creationBaseCommit: string;
+}
+
 function createGitFixture(label: string): GitFixture {
   const repoPath = join(suiteRoot, label);
   mkdirSync(repoPath, { recursive: true });
@@ -62,11 +70,37 @@ function createGitFixture(label: string): GitFixture {
   return { repoPath, branch, baseCommit, headCommit, treeSha, recoveryRef };
 }
 
+function createLocalAheadFixture(label: string): LocalAheadFixture {
+  const root = join(suiteRoot, label);
+  const origin = join(root, 'origin.git');
+  const repoPath = join(root, 'operator');
+  const worktreePath = join(root, 'packet');
+  mkdirSync(root, { recursive: true });
+  execFileSync('git', ['init', '--bare', origin], { stdio: 'pipe' });
+  execFileSync('git', ['clone', origin, repoPath], { stdio: 'pipe' });
+  git(repoPath, 'checkout', '-b', 'main');
+  git(repoPath, 'config', 'user.email', 'test@o8.test');
+  git(repoPath, 'config', 'user.name', 'o8-test');
+  writeFileSync(join(repoPath, 'base.txt'), 'base\n');
+  git(repoPath, 'add', 'base.txt');
+  git(repoPath, 'commit', '-m', 'base');
+  const remoteBaseCommit = git(repoPath, 'rev-parse', 'HEAD');
+  git(repoPath, 'push', '-u', 'origin', 'main');
+  writeFileSync(join(repoPath, 'held-local.txt'), 'held local change\n');
+  git(repoPath, 'add', 'held-local.txt');
+  git(repoPath, 'commit', '-m', 'held local main commit');
+  const creationBaseCommit = git(repoPath, 'rev-parse', 'HEAD');
+  const branch = `inline/${label}`;
+  git(repoPath, 'worktree', 'add', '-b', branch, worktreePath, 'main');
+  return { repoPath, worktreePath, branch, remoteBaseCommit, creationBaseCommit };
+}
+
 const movedHeadFixture = createGitFixture('moved-head');
 const missingObjectFixture = createGitFixture('missing-object');
 const materializedFixture = createGitFixture('materialized');
 const transitionalFixture = createGitFixture('transitional');
 const foreignSnapshotFixture = createGitFixture('foreign-snapshot');
+const localAheadFixture = createLocalAheadFixture('local-ahead');
 
 function repoEntry(id: string, fixture: GitFixture) {
   return {
@@ -116,6 +150,7 @@ const {
   transitionWorkspaceSnapshot,
 } = await import('@/lib/worktree/snapshot-state');
 const { spokenReviewSnapshotFingerprint } = await import('@/lib/lane/lane-diff-facts');
+const { runMergeGate } = await import('@/lib/lane/merge-gate');
 const diffRoute = await import('@/app/api/lanes/[id]/diff/route');
 const mergePreviewRoute = await import('@/app/api/orchestrator/merge-preview/route');
 const reviewStateRoute = await import('@/app/api/orchestrator/review-state/route');
@@ -325,6 +360,67 @@ describe('parked lane review source', () => {
     });
     expect(realpathSync.native(payload.worktreePath)).toBe(realpathSync.native(materializedFixture.repoPath));
   });
+
+  it('keeps held local base commits out of live diff, spoken review, and merge-gate evidence', async () => {
+    const packetId = 'packet-local-ahead-review';
+    const lane = createLane({
+      repoPath: localAheadFixture.repoPath,
+      worktreePath: localAheadFixture.worktreePath,
+      branch: localAheadFixture.branch,
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId,
+    });
+    writeFileSync(join(localAheadFixture.worktreePath, 'packet.txt'), 'packet change\n');
+    git(localAheadFixture.worktreePath, 'add', 'packet.txt');
+    git(localAheadFixture.worktreePath, 'commit', '-m', 'packet change');
+
+    const response = await diffRoute.GET(
+      operatorGet(`http://localhost:3001/api/lanes/${lane.id}/diff`),
+      { params: Promise.resolve({ id: lane.id }) },
+    );
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload).toMatchObject({
+      ok: true,
+      packetId,
+      diffBase: {
+        requestedRef: localAheadFixture.creationBaseCommit,
+        comparisonRef: localAheadFixture.creationBaseCommit,
+        mergeBase: localAheadFixture.creationBaseCommit,
+        fetchedRemoteBase: false,
+        usedFallback: false,
+      },
+      diff: expect.stringContaining('+packet change'),
+    });
+    expect(payload.diff).not.toContain('held-local.txt');
+    expect(git(localAheadFixture.repoPath, 'rev-parse', 'origin/main'))
+      .toBe(localAheadFixture.remoteBaseCommit);
+
+    const spoken = await reviewStateRoute.GET(
+      operatorGet(`http://localhost:3001/api/orchestrator/review-state?packetId=${packetId}&spoken=1`),
+    );
+    expect(spoken.status).toBe(200);
+    await expect(spoken.json()).resolves.toMatchObject({
+      packetId,
+      spokenReview: {
+        evidence: { diffBase: localAheadFixture.creationBaseCommit },
+        files: { count: 1, touched: ['packet.txt'], omittedCount: 0 },
+      },
+    });
+
+    const gate = await runMergeGate(lane);
+    expect(gate.diffBase).toEqual(expect.objectContaining({
+      requestedRef: localAheadFixture.creationBaseCommit,
+      comparisonRef: localAheadFixture.creationBaseCommit,
+      mergeBase: localAheadFixture.creationBaseCommit,
+      fetchedRemoteBase: false,
+      usedFallback: false,
+    }));
+    expect(gate.violations).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ file: 'held-local.txt' }),
+    ]));
+  }, 20_000);
 
   it.each(['hibernating', 'restoring'] as const)(
     'blocks mutable review while a snapshot is %s',

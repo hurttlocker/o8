@@ -1,4 +1,5 @@
 import type { ApprovalRecord } from '@/lib/approvals/types';
+import { resolveLaneAttributionBase } from '@/lib/lane/attribution-base';
 import type { Lane } from '@/lib/lane/types';
 import type { ContractCoverageResult } from '@/lib/orchestrator/task-contract-coverage';
 import type { PacketTaskContract } from '@/lib/orchestrator/types';
@@ -46,7 +47,7 @@ function reviewedHeadForApproval(approval: ApprovalRecord): string | undefined {
  * work that predates the pipeline would be a regression, not a safety win.
  */
 async function assessContractCoverage(
-  lane: Pick<Lane, 'packetId' | 'worktreePath' | 'repoPath' | 'baseBranch'>,
+  lane: Pick<Lane, 'id' | 'packetId' | 'worktreePath' | 'repoPath' | 'baseBranch'>,
   approval: ApprovalRecord,
   reviewedHeadSha: string,
 ): Promise<ContractCoverageResult | null> {
@@ -83,7 +84,7 @@ async function assessContractCoverage(
     const { evaluateContractCoverage, readCoverageEvidence } =
       await import('@/lib/orchestrator/task-contract-coverage');
     const cwd = lane.worktreePath || lane.repoPath || '';
-    const changed = await listChangedPathsForCoverage(cwd, lane.baseBranch ?? 'main', reviewedHeadSha);
+    const changed = await listChangedPathsForCoverage(lane, cwd, reviewedHeadSha);
     if (!changed.resolved) {
       return {
         status: 'failed',
@@ -127,8 +128,8 @@ async function assessContractCoverage(
  * packet actually changed.
  */
 async function listChangedPathsForCoverage(
+  lane: Pick<Lane, 'id' | 'baseBranch'>,
   cwd: string,
-  baseBranch: string,
   headSha: string,
 ): Promise<{ paths: string[]; resolved: boolean }> {
   if (!cwd) return { paths: [], resolved: false };
@@ -147,8 +148,7 @@ async function listChangedPathsForCoverage(
 
   let comparisonRef: string | null = null;
   try {
-    const { resolvePacketDiffBase } = await import('@/lib/diff/base-resolution');
-    const resolution = await resolvePacketDiffBase(cwd, baseBranch || 'main', headSha);
+    const resolution = await resolveLaneAttributionBase(lane, cwd, headSha);
     comparisonRef = resolution.mergeBase ?? resolution.comparisonRef ?? null;
   } catch {
     comparisonRef = null;

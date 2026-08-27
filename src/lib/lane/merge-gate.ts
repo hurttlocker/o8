@@ -22,8 +22,9 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
-import { resolvePacketDiffBase, type PacketDiffBaseResolution } from '@/lib/diff/base-resolution';
+import type { PacketDiffBaseResolution } from '@/lib/diff/base-resolution';
 import { isSafeGitRef } from '@/lib/git/refs';
+import { resolveLaneAttributionBase } from '@/lib/lane/attribution-base';
 import { IMPLEMENTATION_NOTES_FILENAME } from '@/lib/orchestrator/packet-deviations';
 import type { PacketSelfReview } from '@/lib/orchestrator/types';
 import { getAllCached } from '@/lib/skeleton';
@@ -579,7 +580,7 @@ export async function runMergeGate(
   const cwd = lane.worktreePath || lane.repoPath;
   const baseBranch = lane.baseBranch || 'main';
   const headSha = readHeadSha(cwd);
-  const diffBase = await resolvePacketDiffBase(cwd, baseBranch, headSha);
+  const diffBase = await resolveLaneAttributionBase(lane, cwd, headSha);
   const comparisonRef = diffBase.mergeBase ?? diffBase.comparisonRef;
   const checkoutSafety = await inspectOperatorCheckoutMergeSafety({
     repoPath: lane.repoPath,

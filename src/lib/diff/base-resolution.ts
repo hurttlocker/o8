@@ -7,6 +7,7 @@ const execFileAsync = promisify(execFile);
 const COMMAND_MAX_BUFFER = 1024 * 1024;
 const DEFAULT_FETCH_TIMEOUT_MS = 4_000;
 const FETCH_MEMO_TTL_MS = 60_000;
+const OBJECT_ID_PATTERN = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 
 interface FetchOutcome {
   comparisonRef: string;
@@ -138,4 +139,51 @@ export async function resolvePacketDiffBase(
     usedFallback,
     warning,
   };
+}
+
+/** Resolve the exact baseline for work attributed to one packet. */
+export async function resolvePacketAttributionBase(
+  cwd: string,
+  baseBranch: string,
+  headSha: string,
+  creationBaseCommit?: string | null,
+): Promise<PacketDiffBaseResolution> {
+  const base = baseBranch.trim() || 'main';
+  if (!isSafeGitRef(base)) {
+    throw new Error(`Unsafe base branch for diff: ${base}`);
+  }
+
+  const creationBase = creationBaseCommit?.trim().toLowerCase() ?? '';
+  if (creationBase) {
+    if (!OBJECT_ID_PATTERN.test(creationBase)) {
+      throw new Error('Saved packet creation base is not a full Git object ID.');
+    }
+    try {
+      const resolved = (await gitStdout(
+        cwd,
+        ['rev-parse', '--verify', `${creationBase}^{commit}`],
+        5_000,
+      )).toLowerCase();
+      if (resolved !== creationBase) {
+        throw new Error('the saved object did not resolve to itself');
+      }
+      await gitStdout(cwd, ['merge-base', '--is-ancestor', creationBase, headSha], 5_000);
+      return {
+        baseBranch: base,
+        requestedRef: creationBase,
+        comparisonRef: creationBase,
+        mergeBase: creationBase,
+        fetchedRemoteBase: false,
+        usedFallback: false,
+        warning: null,
+      };
+    } catch (error) {
+      throw new Error(`Saved packet creation base ${creationBase} is unavailable: ${gitErrorMessage(error)}`);
+    }
+  }
+
+  // Legacy lanes predate creation receipts. Preserve their remote-first
+  // behavior because they may have been created from either local or remote
+  // base state, and guessing local can attribute upstream commits to a packet.
+  return resolvePacketDiffBase(cwd, base, headSha);
 }

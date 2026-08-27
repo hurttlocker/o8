@@ -6,8 +6,8 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 import type { PacketDiffBaseResolution } from '@/lib/diff/base-resolution';
-import { resolvePacketDiffBase } from '@/lib/diff/base-resolution';
 import { isSafeGitRef } from '@/lib/git/refs';
+import { resolveLaneAttributionBase } from '@/lib/lane/attribution-base';
 import { readHeadSha } from '@/lib/lane/head-sha-lock';
 import {
   extractAddedDiffLines,
@@ -284,7 +284,7 @@ export async function readLaneReviewDiff(lane: Lane): Promise<LaneReviewDiff> {
   const base = (lane.baseBranch || 'main').trim();
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const headSha = await readHeadSha(source.cwd);
-    const diffBase = await resolvePacketDiffBase(source.cwd, base, headSha);
+    const diffBase = await resolveLaneAttributionBase(lane, source.cwd, headSha);
     const against = diffBase.mergeBase ?? diffBase.comparisonRef;
     const [stat, full] = await Promise.all([
       gitOutput(source.cwd, ['diff', '--stat', against]).catch(() => ''),

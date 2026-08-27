@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process';
+import { and, asc, eq } from 'drizzle-orm';
 
+import { getDb, laneEvents } from '@/lib/db';
 import type { LaneEvent } from './types';
 
 const OBJECT_ID_PATTERN = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
@@ -32,4 +34,25 @@ export function resolveLaneCreationBaseCommit(input: {
 export function laneCreationBaseCommit(events: LaneEvent[]): string | null {
   const value = events.find((event) => event.verb === 'open_lane')?.payload.baseCommit;
   return typeof value === 'string' && OBJECT_ID_PATTERN.test(value) ? value : null;
+}
+
+/** Read a lane's creation base without coupling review paths to the lane registry. */
+export function readLaneCreationBaseCommit(laneId: string): string | null {
+  const db = getDb();
+  if (!db) return null;
+  const row = db
+    .select({ payloadJson: laneEvents.payloadJson })
+    .from(laneEvents)
+    .where(and(eq(laneEvents.laneId, laneId), eq(laneEvents.verb, 'open_lane')))
+    .orderBy(asc(laneEvents.timestamp))
+    .limit(1)
+    .get();
+  if (!row) return null;
+  try {
+    const payload = JSON.parse(row.payloadJson) as Record<string, unknown>;
+    const value = payload.baseCommit;
+    return typeof value === 'string' && OBJECT_ID_PATTERN.test(value) ? value : null;
+  } catch {
+    return null;
+  }
 }

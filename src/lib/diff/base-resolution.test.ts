@@ -5,7 +5,11 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { resetPacketDiffBaseFetchMemoForTest, resolvePacketDiffBase } from './base-resolution';
+import {
+  resetPacketDiffBaseFetchMemoForTest,
+  resolvePacketAttributionBase,
+  resolvePacketDiffBase,
+} from './base-resolution';
 
 const tempDirs: string[] = [];
 
@@ -72,6 +76,38 @@ describe('resolvePacketDiffBase', () => {
     expect(result.usedFallback).toBe(false);
     expect(result.comparisonRef).toBe('origin/main');
     expect(result.mergeBase).toBe(upstreamSha);
+  });
+
+  it('uses the saved creation commit instead of attributing held local base commits to the packet', async () => {
+    const { repo, baseSha } = makeRepo('o8-diff-base-creation');
+    writeFileSync(join(repo, 'held-local.txt'), 'held local change\n');
+    const creationBase = commitAll(repo, 'held local main commit');
+    git(repo, ['checkout', '-b', 'packet']);
+    writeFileSync(join(repo, 'packet.txt'), 'packet change\n');
+    const headSha = commitAll(repo, 'packet');
+
+    const result = await resolvePacketAttributionBase(repo, 'main', headSha, creationBase);
+
+    expect(result).toEqual({
+      baseBranch: 'main',
+      requestedRef: creationBase,
+      comparisonRef: creationBase,
+      mergeBase: creationBase,
+      fetchedRemoteBase: false,
+      usedFallback: false,
+      warning: null,
+    });
+    expect(git(repo, ['rev-parse', 'origin/main'])).toBe(baseSha);
+    expect(git(repo, ['diff', '--name-only', result.mergeBase!, headSha])).toBe('packet.txt');
+  });
+
+  it('fails closed when a saved creation commit is missing', async () => {
+    const { repo } = makeRepo('o8-diff-base-missing-creation');
+    const headSha = git(repo, ['rev-parse', 'HEAD']);
+    const missingCommit = 'f'.repeat(40);
+
+    await expect(resolvePacketAttributionBase(repo, 'main', headSha, missingCommit))
+      .rejects.toThrow(`Saved packet creation base ${missingCommit} is unavailable`);
   });
 
   it('falls back to local main with a provenance warning when origin cannot be fetched', async () => {

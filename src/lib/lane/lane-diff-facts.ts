@@ -4,7 +4,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { resolvePacketDiffBase, type PacketDiffBaseResolution } from '@/lib/diff/base-resolution';
+import type { PacketDiffBaseResolution } from '@/lib/diff/base-resolution';
+import { resolveLaneAttributionBase } from '@/lib/lane/attribution-base';
 import { readHeadSha } from '@/lib/lane/head-sha-lock';
 import { resolveLaneReviewTarget } from '@/lib/lane/review-target';
 import type { Lane } from '@/lib/lane/types';
@@ -238,7 +239,7 @@ export async function getLaneSpokenDiffFacts(lane: Lane): Promise<LaneSpokenDiff
   const cwd = resolveLaneReviewTarget(lane).cwd;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const headSha = await readHeadSha(cwd);
-    const diffBase = await resolvePacketDiffBase(cwd, lane.baseBranch || 'main', headSha);
+    const diffBase = await resolveLaneAttributionBase(lane, cwd, headSha);
     const against = diffBase.mergeBase ?? diffBase.comparisonRef;
     const [stat, diff, nameStatus, dirtyNameOnly, untracked, snapshotTreeHash] = await Promise.all([
       readGitOutputAsync(cwd, ['diff', '--stat', against]),
