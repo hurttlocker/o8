@@ -211,6 +211,7 @@ async function assessDurableReview(input: {
     worktreePath: input.durable.worktreePath,
     repoPath: input.repoRoot,
     baseBranch: 'main',
+    runtime: 'codex',
   });
 }
 
@@ -344,6 +345,7 @@ export async function driveGovernedPipeline(input: {
         worktreePath: worktree,
         repoPath: input.repoRoot,
         baseBranch: 'main',
+        runtime: 'codex',
       });
       if (currentAttempt) currentAttempt.durableAssessment = durableReview;
     }
@@ -424,6 +426,7 @@ export async function driveGovernedPipeline(input: {
         worktreePath: worktree,
         repoPath: input.repoRoot,
         baseBranch: 'main',
+        runtime: 'codex',
       });
       durableReview = postDiffAssessment;
       if (currentAttempt) currentAttempt.durableAssessment = postDiffAssessment;

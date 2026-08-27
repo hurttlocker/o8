@@ -1,6 +1,18 @@
 import { normalizePacketTaskContract } from '@/lib/orchestrator/packet-task-contract';
 import type { PacketTaskContract } from '@/lib/orchestrator/types';
 
+export const TASK_CONTRACT_SETTING_SCHEMA = {
+  type: 'string',
+  enum: ['off'],
+  description: 'Mission-level opt-out for the pre-edit task contract. "off" wins over runtime defaults and cannot be combined with quality search.',
+} as const;
+
+export function parseTaskContractSetting(value: unknown): 'off' | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (value !== 'off') throw new Error('taskContract must be "off" when provided.');
+  return value;
+}
+
 export const QUALITY_SEARCH_INPUT_SCHEMA = {
   type: 'object',
   description: 'Bounded quality search for one task. Two isolated candidates receive different implementation roles from one sealed contract; o8 filters by review and merge evidence before using blast radius as a tie-breaker. Cannot be combined with huddle or comparisonModels.',
@@ -71,6 +83,9 @@ export function parseMissionCandidateMode(args: Record<string, unknown>, huddle:
   }
   if (taskContract && huddle) {
     return { ok: false, error: 'qualitySearch already uses a sealed contract and cannot be combined with huddle mode.' };
+  }
+  if (taskContract && args.taskContract === 'off') {
+    return { ok: false, error: 'qualitySearch already uses a sealed contract and cannot be combined with taskContract: "off".' };
   }
   return {
     ok: true,

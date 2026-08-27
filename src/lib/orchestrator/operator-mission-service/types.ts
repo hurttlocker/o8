@@ -72,6 +72,8 @@ export interface CreateMissionInput {
    * before editing. Armed per-mission; omit (default off) for clear packets.
    */
   huddle?: boolean;
+  /** Disable the pre-edit task contract for every packet in this mission. */
+  taskContract?: 'off';
   /**
    * Best-of-N — stamps the seed packet's
    * `comparisonModels` so the scheduler fans it into N sibling candidates (one

@@ -115,6 +115,7 @@ interface CreateMissionInput {
   existingBranchPolicy?: ExistingBranchPolicy;
   useBrain?: boolean;
   huddle?: boolean;
+  taskContract?: 'off';
   /** Best-of-N (item 3) — forwarded to the create-mission API, clamped ≤4 there. */
   comparisonModels?: string[];
   qualitySearch?: { taskContract: PacketTaskContract };
@@ -145,6 +146,7 @@ interface CreateMissionInlineInput {
   existingBranchPolicy?: ExistingBranchPolicy;
   useBrain?: boolean;
   huddle?: boolean;
+  taskContract?: 'off';
   /** Best-of-N (item 3) — forwarded to the create-mission API, clamped ≤4 there. */
   comparisonModels?: string[];
   qualitySearch?: { taskContract: PacketTaskContract };
@@ -404,6 +406,7 @@ export async function createMission(input: CreateMissionInput) {
           existingBranchPolicy: input.existingBranchPolicy,
           useBrain: input.useBrain,
           huddle: input.huddle,
+          taskContract: input.taskContract,
           comparisonModels: input.comparisonModels,
           qualitySearch: input.qualitySearch,
           orchestratorThreadId: input.orchestratorThreadId,
@@ -450,6 +453,7 @@ export async function createMissionInline(input: CreateMissionInlineInput) {
           existingBranchPolicy: input.existingBranchPolicy,
           useBrain: input.useBrain,
           huddle: input.huddle,
+          taskContract: input.taskContract,
           comparisonModels: input.comparisonModels,
           qualitySearch: input.qualitySearch,
           orchestratorThreadId: input.orchestratorThreadId,

@@ -25,11 +25,16 @@ export function normalizePacketLaunchContext(value: unknown): OrchestratorPacket
 }
 
 export function normalizePacketTaskContractFields(
-  packet: Pick<Partial<OrchestratorPacket>, 'taskContract' | 'taskContractRequired'>,
-): Pick<OrchestratorPacket, 'taskContract' | 'taskContractRequired'> {
+  packet: Pick<Partial<OrchestratorPacket>, 'taskContract' | 'taskContractRequired' | 'taskContractSource'>,
+): Pick<OrchestratorPacket, 'taskContract' | 'taskContractRequired' | 'taskContractSource'> {
   return {
     taskContract: normalizePacketTaskContract(packet.taskContract),
-    taskContractRequired: packet.taskContractRequired === true ? true : undefined,
+    taskContractRequired: typeof packet.taskContractRequired === 'boolean'
+      ? packet.taskContractRequired
+      : undefined,
+    taskContractSource: packet.taskContractSource === 'explicit' || packet.taskContractSource === 'default'
+      ? packet.taskContractSource
+      : undefined,
   };
 }
 

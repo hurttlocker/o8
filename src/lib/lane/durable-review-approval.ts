@@ -4,6 +4,7 @@ import { resolveLaneAttributionBase } from '@/lib/lane/attribution-base';
 import type { Lane } from '@/lib/lane/types';
 import type { ContractCoverageResult } from '@/lib/orchestrator/task-contract-coverage';
 import type { PacketTaskContract } from '@/lib/orchestrator/types';
+import { resolvePacketTaskContractGate } from '@/lib/lane/task-contract-gate';
 
 export interface DurableReviewAssessment {
   approved: boolean;
@@ -57,26 +58,25 @@ function reviewFindingsAreResolved(approval: ApprovalRecord): boolean {
  * Resolve the sealed contract and the review's recorded evidence, then run the
  * deterministic gate.
  *
- * Fail-closed policy is deliberately narrow: it applies ONLY once we have
- * established that this packet requires a contract. If we cannot even determine
- * that, the packet is treated as legacy and judged exactly as before — blocking
- * work that predates the pipeline would be a regression, not a safety win.
+ * Fail-closed policy is deliberately narrow: explicit arming stays hard, while
+ * a runtime-default arm without a captured contract records an audit event and
+ * preserves the legacy approval path. If we cannot determine whether a bound
+ * packet requires a contract, review still fails closed.
  */
 async function assessContractCoverage(
-  lane: Pick<Lane, 'id' | 'packetId' | 'worktreePath' | 'repoPath' | 'baseBranch'>,
+  lane: Pick<Lane, 'id' | 'packetId' | 'worktreePath' | 'repoPath' | 'baseBranch' | 'runtime'>,
   approval: ApprovalRecord,
   reviewedHeadSha: string,
 ): Promise<ContractCoverageResult | null> {
   if (!lane.packetId) return null;
 
-  let contractRequired = false;
   let contract: PacketTaskContract | null = null;
+  let enforceCoverage = false;
   try {
-    const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
-    const packet = readOrchestratorControlPlaneState().packets.find((entry: { id: string }) => entry.id === lane.packetId);
-    if (!packet) return null;
-    contractRequired = packet.taskContractRequired === true;
-    contract = packet.taskContract ?? null;
+    const gate = await resolvePacketTaskContractGate({ lane });
+    if (!gate.packetFound) return null;
+    contract = gate.taskContract;
+    enforceCoverage = gate.enforceCoverage;
   } catch (error) {
     // A packet binding exists but its contract requirement could not be read.
     // Treating that as legacy would let an unverifiable packet merge, so this
@@ -94,7 +94,7 @@ async function assessContractCoverage(
       missingRequirementIds: [],
     };
   }
-  if (!contractRequired) return null;
+  if (!enforceCoverage) return null;
 
   try {
     const { evaluateContractCoverage, readCoverageEvidence } =
@@ -183,7 +183,7 @@ async function listChangedPathsForCoverage(
 // Durable approved-review reader. This is the only signal that authorizes a
 // non-user merge or PR action to skip the operator approval card.
 export async function assessDurableApprovedReview(
-  lane: Pick<Lane, 'id' | 'packetId' | 'sessionKey' | 'worktreePath' | 'repoPath' | 'baseBranch'>,
+  lane: Pick<Lane, 'id' | 'packetId' | 'sessionKey' | 'worktreePath' | 'repoPath' | 'baseBranch' | 'runtime'>,
 ): Promise<DurableReviewAssessment> {
   try {
     const [{ listApprovalsForContext }, { normalizeHeadSha, readHeadSha }] = await Promise.all([
@@ -314,5 +314,10 @@ export async function supersedeDurableApprovedReviews(packetId: string, reason: 
 export async function hasDurableApprovedReview(
   lane: Pick<Lane, 'id' | 'packetId' | 'sessionKey' | 'worktreePath' | 'repoPath' | 'baseBranch'>,
 ): Promise<boolean> {
-  return (await assessDurableApprovedReview(lane)).approved;
+  const runtime = Reflect.get(lane, 'runtime') as Lane['runtime'] | undefined;
+  if (!runtime) return false;
+  return (await assessDurableApprovedReview({
+    ...lane,
+    runtime,
+  })).approved;
 }
