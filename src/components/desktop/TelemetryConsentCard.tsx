@@ -155,7 +155,13 @@ function DisclosureCard({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function TelemetryConsentCard({ blocked = false }: { blocked?: boolean }) {
+export function TelemetryConsentCard({
+  blocked = false,
+  request = fetchOperatorDefaults,
+}: {
+  blocked?: boolean;
+  request?: typeof fetchOperatorDefaults;
+}) {
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [crashReports, setCrashReports] = useState<ConsentChoice>(null);
   const [productUsage, setProductUsage] = useState<ConsentChoice>(null);
@@ -168,7 +174,7 @@ export function TelemetryConsentCard({ blocked = false }: { blocked?: boolean })
     let alive = true;
     void (async () => {
       try {
-        const response = await fetchOperatorDefaults({}, { fresh: true });
+        const response = await request({}, { fresh: true });
         const payload = await response.json().catch(() => ({})) as ConsentResponse;
         if (!response.ok) return;
         if (alive) {
@@ -179,7 +185,7 @@ export function TelemetryConsentCard({ blocked = false }: { blocked?: boolean })
       }
     })();
     return () => { alive = false; };
-  }, []);
+  }, [request]);
 
   useEffect(() => {
     if (loadState === 'visible' && !blocked) dialogRef.current?.focus();
@@ -217,7 +223,7 @@ export function TelemetryConsentCard({ blocked = false }: { blocked?: boolean })
     setSaving(true);
     setError(null);
     try {
-      const response = await fetchOperatorDefaults({
+      const response = await request({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

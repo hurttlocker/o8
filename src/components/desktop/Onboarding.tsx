@@ -23,10 +23,11 @@ import { OnboardingReposStep, type DeviceFlowState } from './onboarding/Onboardi
 import { openExternalUrl } from '@/lib/desktop/open-external';
 import { OnboardingOpen } from './onboarding/OnboardingOpen';
 import { playOnboardingCue } from './onboarding/onboarding-sound';
+import type { OnboardingRequest } from './onboarding/request';
 
 // ── Shared constants ──
 
-type OnboardingStep = 'open' | 'repos' | 'runtimes' | 'dispatch' | 'import' | 'ready';
+export type OnboardingStep = 'open' | 'repos' | 'runtimes' | 'dispatch' | 'import' | 'ready';
 
 const STEP_ORDER: OnboardingStep[] = ['open', 'repos', 'runtimes', 'dispatch', 'import', 'ready'];
 
@@ -126,8 +127,22 @@ function StepIndicator({ steps, current }: { steps: OnboardingStep[]; current: O
 // ── Main Component ──
 // ════════════════════════════════════════════════════════════
 
-export const Onboarding = memo(function Onboarding({ onComplete, completionError }: { onComplete: () => void; completionError?: string | null }) {
-  const [step, setStep] = useState<OnboardingStep>('open');
+export const Onboarding = memo(function Onboarding({
+  onComplete,
+  completionError,
+  initialStep = 'open',
+  request = fetch,
+  pickFolder,
+  openExternal = openExternalUrl,
+}: {
+  onComplete: () => void;
+  completionError?: string | null;
+  initialStep?: OnboardingStep;
+  request?: OnboardingRequest;
+  pickFolder?: () => Promise<string | null>;
+  openExternal?: (url: string) => void;
+}) {
+  const [step, setStep] = useState<OnboardingStep>(initialStep);
 
   // "Get support" popover (bottom-left). Report-an-issue works during
   // onboarding because ReportIssueHost is mounted in the same dashboard tree.
@@ -168,11 +183,11 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
 
   // ── Gate GitHub device CTA unless the bundled app has OAuth configured ──
   useEffect(() => {
-    fetch('/api/panel/github-status')
+    request('/api/panel/github-status')
       .then(r => r.ok ? r.json() : null)
       .then(status => setGithubDeviceFlowEnabled(Boolean(status?.deviceFlowEnabled)))
       .catch(() => setGithubDeviceFlowEnabled(false));
-  }, []);
+  }, [request]);
 
   // ── GitHub auth ──
   const csrfTokenRef = useRef<string | null>(null);
@@ -185,7 +200,7 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
     setGithubFlow({ stage: 'waiting' });
     pollAttemptsRef.current = 0;
     try {
-      const res = await fetch('/api/panel/github-device', {
+      const res = await request('/api/panel/github-device', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'start' }),
@@ -199,7 +214,7 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
       flowIdRef.current = d.flowId;
       csrfTokenRef.current = d.csrfToken ?? null;
       setGithubFlow({ stage: 'polling', userCode: d.userCode, verificationUrl: d.verificationUriComplete || d.verificationUri });
-      if (d.verificationUriComplete || d.verificationUri) openExternalUrl(d.verificationUriComplete || d.verificationUri);
+      if (d.verificationUriComplete || d.verificationUri) openExternal(d.verificationUriComplete || d.verificationUri);
       pollTimerRef.current = setInterval(async () => {
         if (!flowIdRef.current) return;
         pollAttemptsRef.current += 1;
@@ -209,7 +224,7 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
           return;
         }
         try {
-          const pr = await fetch('/api/panel/github-device', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'poll', flowId: flowIdRef.current, csrfToken: csrfTokenRef.current }) });
+          const pr = await request('/api/panel/github-device', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'poll', flowId: flowIdRef.current, csrfToken: csrfTokenRef.current }) });
           if (!pr.ok) return;
           const pd = await pr.json();
           if (pd.status === 'complete') {
@@ -228,7 +243,7 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
     } catch {
       setGithubFlow({ stage: 'error', error: 'Network error.' });
     }
-  }, [goNext]);
+  }, [goNext, openExternal, request]);
 
   // ── Import ──
   const handleImportFile = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -238,7 +253,7 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
     try {
       const formData = new FormData();
       formData.append('file', file);
-      const res = await fetch('/api/connectors/chatgpt', { method: 'POST', body: formData });
+      const res = await request('/api/connectors/chatgpt', { method: 'POST', body: formData });
       if (!res.ok) {
         setImportStatus('error');
         return;
@@ -249,7 +264,7 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
     } catch {
       setImportStatus('error');
     }
-  }, []);
+  }, [request]);
 
   // ═════════════════════════════════════════
   // ── Render ──
@@ -269,7 +284,7 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
           <OnboardingOpen
             onSetup={goNext}
             onFastLane={onComplete}
-            onPrivacy={() => openExternalUrl('https://o8.run/privacy')}
+            onPrivacy={() => openExternal('https://o8.run/privacy')}
           />
         ) : (
         <>
@@ -289,6 +304,8 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
         {/* ── Step 2: Repo Picker ── */}
         {step === 'repos' && (
           <OnboardingReposStep
+            request={request}
+            pickFolder={pickFolder}
             deviceFlowEnabled={githubDeviceFlowEnabled}
             githubFlow={githubFlow}
             onConnectGithub={(onSuccess) => { void startGithubFlow(onSuccess); }}
@@ -306,6 +323,7 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
         {/* ── Step 3: Runtime Detection ── */}
         {step === 'runtimes' && (
           <OnboardingRuntimeStep
+            request={request}
             runtimes={runtimes}
             onRuntimesChange={setRuntimes}
             onContinue={goNext}
@@ -321,6 +339,7 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
         {/* ── Step 4: Orchestrator + worker runtime selection ── */}
         {step === 'dispatch' && (
           <OnboardingDispatchStep
+            request={request}
             onContinue={goNext}
             onSkip={goNext}
             renderButton={({ label, onClick, disabled }) => (
@@ -446,7 +465,7 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
               </div>
               <button
                 type="button"
-                onClick={() => openExternalUrl('https://o8.run/founding')}
+                onClick={() => openExternal('https://o8.run/founding')}
                 style={{ alignSelf: 'flex-start', marginTop: 4, border: 'none', background: 'transparent', color: 'var(--t-brand-orange, #FF5A1F)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: FONT, padding: 0, display: 'inline-flex', alignItems: 'center', gap: 6 }}
               >
                 Become a Founding Operator
@@ -512,7 +531,7 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
             </button>
             <button
               type="button"
-              onClick={() => { setSupportOpen(false); openExternalUrl('https://o8.run/docs'); }}
+              onClick={() => { setSupportOpen(false); openExternal('https://o8.run/docs'); }}
               style={{ display: 'flex', alignItems: 'flex-start', gap: 10, width: '100%', border: 'none', background: 'transparent', borderRadius: 10, paddingTop: 9, paddingBottom: 9, paddingLeft: 10, paddingRight: 10, cursor: 'pointer', fontFamily: FONT, textAlign: 'left' }}
               onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-glass-muted)'; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}

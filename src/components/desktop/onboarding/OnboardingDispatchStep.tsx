@@ -15,6 +15,7 @@ import {
   type DispatchableRuntimeInventoryItem,
   type OnboardingOrchestratorRuntime,
 } from './onboarding-runtime-selection';
+import type { OnboardingRequest } from './request';
 
 const FONT = 'var(--font-sans-system)';
 
@@ -109,10 +110,12 @@ function RuntimeInventoryRow({
 }
 
 export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
+  request = fetch,
   onContinue,
   onSkip,
   renderButton,
 }: {
+  request?: OnboardingRequest;
   onContinue: () => void;
   onSkip: () => void;
   renderButton: (props: {
@@ -130,7 +133,7 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
 
   useEffect(() => {
     let active = true;
-    loadOnboardingRuntimeSelection()
+    loadOnboardingRuntimeSelection(request)
       .then((selection) => {
         if (!active) return;
         setInventory(selection.inventory);
@@ -145,7 +148,7 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
         if (active) setLoading(false);
       });
     return () => { active = false; };
-  }, []);
+  }, [request]);
 
   const orchestratorOptions = useMemo(() => (
     (['codex', 'claude-code'] as const)
@@ -165,14 +168,14 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
     setSaving(true);
     setError(null);
     try {
-      await persistOnboardingRuntimeSelection({ orchestratorRuntime, workerRuntimes });
+      await persistOnboardingRuntimeSelection({ orchestratorRuntime, workerRuntimes }, request);
       onContinue();
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Could not save runtime choices.');
     } finally {
       setSaving(false);
     }
-  }, [onContinue, orchestratorRuntime, readyToSave, workerRuntimes]);
+  }, [onContinue, orchestratorRuntime, readyToSave, request, workerRuntimes]);
 
   return (
     <div style={{

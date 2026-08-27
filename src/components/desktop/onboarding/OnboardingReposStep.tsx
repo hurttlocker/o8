@@ -20,6 +20,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { requestPrompt } from '@/components/shared/ConfirmToastHost';
+import type { OnboardingRequest } from './request';
 
 const FONT = 'var(--font-sans-system)';
 
@@ -96,7 +97,7 @@ const secondaryButtonStyle = (disabled = false): React.CSSProperties => ({
 });
 
 // Reuse the canonical dashboard folder-pick chain (useGlobalRepoState.handleOpenFolder).
-async function pickFolderPath(): Promise<string | null> {
+async function pickFolderPath(request: OnboardingRequest): Promise<string | null> {
   let folderPath: string | null = null;
   try {
     const { open } = await import('@tauri-apps/plugin-dialog');
@@ -104,7 +105,7 @@ async function pickFolderPath(): Promise<string | null> {
     if (typeof result === 'string') folderPath = result;
   } catch {
     try {
-      const response = await fetch('/api/panel/browse-folder', { method: 'POST' });
+      const response = await request('/api/panel/browse-folder', { method: 'POST' });
       const data = await response.json() as { path?: string | null };
       if (data.path) folderPath = data.path;
     } catch {
@@ -116,6 +117,8 @@ async function pickFolderPath(): Promise<string | null> {
 }
 
 export interface OnboardingReposStepProps {
+  request?: OnboardingRequest;
+  pickFolder?: () => Promise<string | null>;
   deviceFlowEnabled: boolean;
   githubFlow: DeviceFlowState;
   /** Starts the GitHub device flow; onSuccess runs when auth completes. */
@@ -127,6 +130,8 @@ export interface OnboardingReposStepProps {
 }
 
 export function OnboardingReposStep({
+  request = fetch,
+  pickFolder,
   deviceFlowEnabled,
   githubFlow,
   onConnectGithub,
@@ -157,12 +162,12 @@ export function OnboardingReposStep({
     setLoading(true);
     setReposError(null);
     try {
-      const statusRes = await fetch('/api/panel/github-status');
+      const statusRes = await request('/api/panel/github-status');
       const status = statusRes.ok ? await statusRes.json() : { authenticated: false };
       const isAuthed = Boolean(status?.authenticated);
       setAuthenticated(isAuthed);
       if (!isAuthed) { setLoading(false); return; }
-      const res = await fetch('/api/panel/repos?source=github&limit=50');
+      const res = await request('/api/panel/repos?source=github&limit=50');
       if (!res.ok) throw new Error(`Repo fetch failed (${res.status})`);
       const data = await res.json();
       setGithubRepos(Array.isArray(data.repos) ? data.repos : Array.isArray(data) ? data : []);
@@ -173,7 +178,7 @@ export function OnboardingReposStep({
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [request]);
 
   useEffect(() => { void loadStatusAndRepos(); }, [loadStatusAndRepos]);
 
@@ -189,12 +194,12 @@ export function OnboardingReposStep({
     if (addingFolder) return;
     setAddingFolder(true);
     try {
-      const folderPath = await pickFolderPath();
+      const folderPath = await (pickFolder ? pickFolder() : pickFolderPath(request));
       if (!folderPath) return;
       // Folder chosen — registration is now in flight. Pin the pending state so
       // the empty state doesn't re-flash before the repo row renders (#1344).
       setRegistering(true);
-      const response = await fetch('/api/panel/repos', {
+      const response = await request('/api/panel/repos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'add', localPath: folderPath }),
@@ -219,7 +224,7 @@ export function OnboardingReposStep({
       setAddingFolder(false);
       setRegistering(false);
     }
-  }, [addingFolder]);
+  }, [addingFolder, pickFolder, request]);
 
   const allItems = useMemo<RepoItem[]>(() => {
     const gh: RepoItem[] = githubRepos.map(r => ({
@@ -261,7 +266,7 @@ export function OnboardingReposStep({
     for (const repo of pending) {
       setRowStatus(prev => ({ ...prev, [repo.key]: 'cloning' }));
       try {
-        const res = await fetch('/api/panel/repos', {
+        const res = await request('/api/panel/repos', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'clone', cloneUrl: repo.cloneUrl, name: repo.name }),
@@ -285,7 +290,7 @@ export function OnboardingReposStep({
       return;
     }
     onContinue(localCount + doneCount);
-  }, [allItems, selected, rowStatus, saving, onContinue]);
+  }, [allItems, selected, rowStatus, saving, onContinue, request]);
 
   // The search box is only meaningful once there's at least one repo to filter.
   const showSearch = allItems.length > 0;

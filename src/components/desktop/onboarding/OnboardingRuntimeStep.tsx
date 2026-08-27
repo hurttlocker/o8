@@ -4,6 +4,7 @@ import { memo, useCallback, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { RuntimeRow } from './RuntimeRow';
+import type { OnboardingRequest } from './request';
 
 const FONT = 'var(--font-sans-system)';
 
@@ -43,11 +44,13 @@ function runtimeScanError(error: unknown) {
 }
 
 export const OnboardingRuntimeStep = memo(function OnboardingRuntimeStep({
+  request = fetch,
   runtimes,
   onRuntimesChange,
   onContinue,
   renderButton,
 }: {
+  request?: OnboardingRequest;
   runtimes: DetectedRuntime[];
   onRuntimesChange: (runtimes: DetectedRuntime[]) => void;
   onContinue: () => void;
@@ -62,7 +65,7 @@ export const OnboardingRuntimeStep = memo(function OnboardingRuntimeStep({
     setError(null);
     setPartial(false);
     try {
-      const res = await fetch('/api/setup/detect');
+      const res = await request('/api/setup/detect');
       const data = await res.json().catch(() => ({})) as DetectPayload;
       if (!res.ok) {
         throw new Error(data.error || `Runtime scan failed (${res.status})`);
@@ -82,7 +85,7 @@ export const OnboardingRuntimeStep = memo(function OnboardingRuntimeStep({
     } finally {
       setLoading(false);
     }
-  }, [onRuntimesChange]);
+  }, [onRuntimesChange, request]);
 
   useEffect(() => {
     void detectRuntimes();
