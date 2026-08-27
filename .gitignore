@@ -4,6 +4,7 @@ node_modules/
 dist/
 build/
 .next/
+next-env.d.ts
 .env
 .env.*
 # But DO track the example — devs need it as a reference on clone.

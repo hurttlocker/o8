@@ -1,9 +1,9 @@
 {
   "schema": "o8/test-classification/v1",
   "generatedBy": "node scripts/classify-tests.mjs --write",
-  "totalTests": 874,
+  "totalTests": 875,
   "hermeticTests": 562,
-  "resourceOwningTests": 312,
+  "resourceOwningTests": 313,
   "resourceOwning": [
     {
       "path": "src/app/api/leases/route.test.ts",
@@ -1215,6 +1215,15 @@
       "path": "tests/dependency-seed-lease-namespace-backcompat.test.ts",
       "reasons": [
         "apfs-tool"
+      ]
+    },
+    {
+      "path": "tests/dev-stack-cleanup-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path"
       ]
     },
     {

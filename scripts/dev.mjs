@@ -15,6 +15,7 @@ const stateDir = join(
 const pidFile = join(stateDir, 'pids.json');
 const env = {
   ...process.env,
+  NODE_ENV: 'development',
   PORT: process.env.PORT || '47120',
   O8_API_PORT: process.env.O8_API_PORT || process.env.PORT || '47120',
   WS_PORT: process.env.WS_PORT || '47125',
@@ -59,14 +60,16 @@ function pidAlive(pid) {
 async function cleanup() {
   const entries = readEntries();
   const ours = entries.filter((entry) => entry && entry.cwd === root && Number.isInteger(entry.pid));
-  for (const entry of ours) {
-    if (!pidAlive(entry.pid)) continue;
+  const liveOurs = ours.filter((entry) => pidAlive(entry.pid));
+  for (const entry of liveOurs) {
     try {
       process.kill(entry.pid, 'SIGTERM');
     } catch {}
   }
-  await new Promise((resolve) => setTimeout(resolve, 800));
-  for (const entry of ours) {
+  if (liveOurs.length > 0) {
+    await new Promise((resolve) => setTimeout(resolve, 800));
+  }
+  for (const entry of liveOurs) {
     if (!pidAlive(entry.pid)) continue;
     try {
       process.kill(entry.pid, 'SIGKILL');
@@ -75,6 +78,23 @@ async function cleanup() {
   const survivors = entries.filter((entry) => entry && entry.cwd !== root && pidAlive(entry.pid));
   if (survivors.length) writeEntries(survivors);
   else if (existsSync(pidFile)) rmSync(pidFile);
+}
+
+function waitForChildExit(child, timeoutMs = 2_000) {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.off('exit', finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    child.once('exit', finish);
+    if (child.exitCode !== null || child.signalCode !== null) finish();
+  });
 }
 
 function run(label, command, args) {
@@ -125,7 +145,13 @@ async function all() {
   const shutdown = async (signal, code) => {
     if (exiting) return;
     exiting = true;
+    const wrappersExited = Promise.all([next, ws].map((child) => waitForChildExit(child)));
     signalChildren(signal);
+    await cleanup();
+    await wrappersExited;
+    // Wrapper exit handlers also update this cross-process ledger. Reconcile
+    // once more after both writers have settled so dead grandchildren cannot
+    // recreate a stale pid file after the first cleanup pass.
     await cleanup();
     process.exit(code ?? 0);
   };

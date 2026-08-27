@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -21,5 +21,10 @@ describe('typecheck type generation', () => {
     expect(readFileSync(tsconfigPath, 'utf8')).toBe(before);
     expect(execFileSync('git', ['diff', '--', 'tsconfig.json'], { cwd: repoRoot, encoding: 'utf8' }))
       .toBe(beforeGitDiff);
+    expect(existsSync(join(repoRoot, 'next-env.d.ts'))).toBe(true);
+    expect(execFileSync('git', ['check-ignore', 'next-env.d.ts'], { cwd: repoRoot, encoding: 'utf8' }).trim())
+      .toBe('next-env.d.ts');
+    expect(execFileSync('git', ['ls-files', '--', 'next-env.d.ts'], { cwd: repoRoot, encoding: 'utf8' }).trim())
+      .toBe('');
   }, 30_000);
 });
