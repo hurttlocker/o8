@@ -150,15 +150,21 @@ async function snapshotPosixDescendants(state: PosixProcessTreeState): Promise<v
   }
 }
 
-function probePosixProcessGroup(processGroupId: number): 'alive' | 'dead' | 'unknown' {
+type PosixLiveness = 'alive' | 'dead' | 'unknown';
+
+function probePosixSignalTarget(pid: number): PosixLiveness {
   try {
-    process.kill(-processGroupId, 0);
+    process.kill(pid, 0);
     return 'alive';
   } catch (error) {
     if (errnoCode(error) === 'EPERM') return 'alive';
     if (errnoCode(error) === 'ESRCH') return 'dead';
     return 'unknown';
   }
+}
+
+function probePosixProcessGroup(processGroupId: number): PosixLiveness {
+  return probePosixSignalTarget(-processGroupId);
 }
 
 async function posixProcessGroupId(pid: number): Promise<number | null> {
@@ -224,12 +230,19 @@ async function defaultIsAlive(
   }
 
   const tree = state.posixTree!;
-  if (isPidAlive(target.pid)) tree.rootObserved = true;
+  const rootStatus = probePosixSignalTarget(target.pid);
+  if (rootStatus === 'alive') tree.rootObserved = true;
   await snapshotPosixDescendants(tree);
 
   const groupStatus = probePosixProcessGroup(tree.processGroupId);
   if (groupStatus === 'alive') tree.groupObserved = true;
-  const livePids = pidList(tree.trackedPids).filter((pid) => isPidAlive(pid));
+  const trackedStatuses = pidList(tree.trackedPids).map((pid) => ({
+    pid,
+    status: probePosixSignalTarget(pid),
+  }));
+  const livePids = trackedStatuses
+    .filter(({ status }) => status === 'alive')
+    .map(({ pid }) => pid);
   if (groupStatus === 'alive' || livePids.length > 0) {
     return {
       alive: true,
@@ -239,8 +252,15 @@ async function defaultIsAlive(
   }
 
   const failedPids = pidList(tree.verificationFailures.keys());
-  if (groupStatus === 'unknown' || failedPids.length > 0) {
-    const unknownPids = failedPids.length > 0 ? failedPids : [tree.processGroupId];
+  const unknownPids = pidList([
+    ...failedPids,
+    ...trackedStatuses
+      .filter(({ status }) => status === 'unknown')
+      .map(({ pid }) => pid),
+    ...(rootStatus === 'unknown' ? [target.pid] : []),
+    ...(groupStatus === 'unknown' ? [tree.processGroupId] : []),
+  ]);
+  if (unknownPids.length > 0) {
     return {
       alive: true,
       confirmedDead: false,
@@ -251,10 +271,9 @@ async function defaultIsAlive(
 
   if (!tree.rootObserved && !tree.groupObserved) {
     return {
-      alive: true,
-      confirmedDead: false,
-      unconfirmedPids: [target.pid],
-      note: `Pid ${target.pid} and process group ${tree.processGroupId} were absent before descendants could be verified.`,
+      alive: false,
+      confirmedDead: true,
+      note: `Pid ${target.pid} and process group ${tree.processGroupId} were decisively absent; no addressable process existed.`,
     };
   }
 

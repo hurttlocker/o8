@@ -11,8 +11,13 @@ function setPlatform(value: string) {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
 });
+
+function errnoError(code: string): NodeJS.ErrnoException {
+  return Object.assign(new Error(code), { code });
+}
 
 describe('interrupt escalation ladder', () => {
   it('escalates SIGINT to SIGTERM and confirms dead', async () => {
@@ -109,13 +114,63 @@ describe.skipIf(process.platform === 'win32')('POSIX process-tree escalation', (
     }
   }, 15_000);
 
-  it('does not infer tree death when the interpreter was gone before descendants could be inspected', async () => {
+  it('treats a decisively absent never-observed pid and process group as already dead', async () => {
     const missingPid = 2_000_000_000;
     const result = await escalateInterrupt({ pid: missingPid }, { sleep: async () => {} });
 
+    expect(result).toMatchObject({
+      attempted: false,
+      confirmedDead: true,
+      alreadyDead: true,
+      steps: [],
+    });
+  });
+
+  it('keeps a never-observed target unconfirmed when its process-group probe is unknown', async () => {
+    const missingPid = 2_000_000_001;
+    const realKill = process.kill.bind(process);
+    vi.spyOn(process, 'kill').mockImplementation((pid, signal) => {
+      if (pid === missingPid) throw errnoError('ESRCH');
+      if (pid === -missingPid) throw errnoError('EIO');
+      return realKill(pid, signal);
+    });
+
+    const result = await escalateInterrupt({ pid: missingPid }, { sleep: async () => {} });
+
     expect(result.confirmedDead).toBe(false);
+    expect(result.alreadyDead).toBe(false);
+    expect(result.steps).toHaveLength(3);
     expect(result.steps.every((step) => step.aliveAfter && !step.confirmedDead)).toBe(true);
-    expect(result.note).toContain(`Pid ${missingPid} and process group ${missingPid} were absent`);
+    expect(result.note).toContain(`Process-tree verification failed for pids ${missingPid}.`);
+  });
+
+  it('keeps an observed worker unconfirmed when later tree verification is ambiguous', async () => {
+    const workerPid = 2_000_000_002;
+    let rootProbes = 0;
+    let groupProbes = 0;
+    const realKill = process.kill.bind(process);
+    vi.spyOn(process, 'kill').mockImplementation((pid, signal) => {
+      if (pid === workerPid) {
+        rootProbes += 1;
+        if (rootProbes === 1) return true;
+        throw errnoError('ESRCH');
+      }
+      if (pid === -workerPid) {
+        if ((signal === 0 || signal === undefined) && groupProbes === 0) {
+          groupProbes += 1;
+          return true;
+        }
+        throw errnoError('EIO');
+      }
+      return realKill(pid, signal);
+    });
+
+    const result = await escalateInterrupt({ pid: workerPid }, { sleep: async () => {} });
+
+    expect(result.confirmedDead).toBe(false);
+    expect(result.alreadyDead).toBe(false);
+    expect(result.steps).toHaveLength(3);
+    expect(result.steps.every((step) => step.aliveAfter && !step.confirmedDead)).toBe(true);
   });
 });
 
