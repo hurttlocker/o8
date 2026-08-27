@@ -26,6 +26,10 @@ interface PreshipGateAuditPayload {
   childStderrTail?: string;
   overrideReason?: string;
   operatorUser?: string;
+  footprintBudgetVersion?: number;
+  idlePhysicalBytes?: number;
+  idleCpuPercent?: number;
+  idleProcessChurn?: number;
 }
 
 function stringMetadata(input: Record<string, unknown>): Record<string, string> {
@@ -70,6 +74,10 @@ function createGateApproval(payload: PreshipGateAuditPayload) {
         consoleErrorCount: 0,
         interactiveElapsedMs: payload.interactiveElapsedMs,
         nodeVersion: payload.nodeVersion,
+        footprintBudgetVersion: payload.footprintBudgetVersion,
+        idlePhysicalBytes: payload.idlePhysicalBytes,
+        idleCpuPercent: payload.idleCpuPercent,
+        idleProcessChurn: payload.idleProcessChurn,
       }),
     });
   }
@@ -98,6 +106,10 @@ function createGateApproval(payload: PreshipGateAuditPayload) {
       version: payload.version,
       gitSha: payload.gitSha,
       signalFailed: payload.signalFailed,
+      footprintBudgetVersion: payload.footprintBudgetVersion,
+      idlePhysicalBytes: payload.idlePhysicalBytes,
+      idleCpuPercent: payload.idleCpuPercent,
+      idleProcessChurn: payload.idleProcessChurn,
     }),
     args: {
       capturedConsoleErrors: payload.capturedConsoleErrors ?? [],

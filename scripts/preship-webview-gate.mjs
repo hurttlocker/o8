@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { collectFootprintReceipt, snapshotProcesses, webkitPids } from './lib/footprint-budget.mjs';
 import { BOOT_PROBE_JS, classifyBootProbe } from './preship-gate-logic.mjs';
 
 // Per-phase deadlines (each phase gets its OWN fresh budget — a shared budget
@@ -16,6 +17,8 @@ const SOCKET_TIMEOUT_MS = 60_000;   // socket file + first connect (Next cold-sp
 const ROUTE_TIMEOUT_MS = 120_000;   // webview window created + /dashboard route active
 const HEALTH_TIMEOUT_MS = 60_000;   // dashboard reaches the interactive mark, no error page
 const ERROR_WINDOW_MS = 8_000;
+const FOOTPRINT_COOLDOWN_MS = 60_000;
+const FOOTPRINT_OBSERVATION_MS = 15_000;
 const POLL_MS = 250;
 const REQUEST_TIMEOUT_MS = 10_000;
 const RELEASE_NOTE_FILE = 'preship-webview-gate-release-note.txt';
@@ -139,6 +142,18 @@ function releaseNotePath(appTar) {
   return appTar ? path.join(path.dirname(appTar), RELEASE_NOTE_FILE) : null;
 }
 
+function footprintReceiptPath(appPath) {
+  return process.env.O8_FOOTPRINT_RECEIPT_PATH
+    ? path.resolve(process.env.O8_FOOTPRINT_RECEIPT_PATH)
+    : path.join(path.dirname(appPath), 'footprint-receipt.json');
+}
+
+function writeFootprintReceipt(appPath, receipt) {
+  const outputPath = footprintReceiptPath(appPath);
+  writeFileSync(outputPath, `${JSON.stringify(receipt, null, 2)}\n`);
+  return outputPath;
+}
+
 function clearReleaseNote(appTar) {
   const marker = releaseNotePath(appTar);
   if (marker && existsSync(marker)) unlinkSync(marker);
@@ -209,12 +224,12 @@ async function executeJs(client, code) {
   return normalizeEvalResult(await client.send('execute_js', { window_label: 'main', code }));
 }
 
-async function invokeTauri(client, command) {
+async function invokeTauri(client, command, args = {}) {
   const code = `(() => { try {
     if (!window.__TAURI_INTERNALS__ || typeof window.__TAURI_INTERNALS__.invoke !== 'function') {
       return JSON.stringify({ ok: false, err: 'tauri internals unavailable' });
     }
-    return window.__TAURI_INTERNALS__.invoke(${JSON.stringify(command)})
+    return window.__TAURI_INTERNALS__.invoke(${JSON.stringify(command)}, ${JSON.stringify(args)})
       .then((r) => JSON.stringify({ ok: true, data: r }))
       .catch((e) => JSON.stringify({ ok: false, err: String(e && e.message || e) }));
   } catch (e) { return JSON.stringify({ ok: false, err: String(e && e.message || e) }); } })()`;
@@ -435,11 +450,13 @@ async function main() {
   const apiPort = await findFreePortFrom(3060);
   const wsPort = await findFreePortFrom(apiPort + 1);
   const client = new WebviewSocketClient(socketPath);
+  const webkitBaseline = webkitPids(snapshotProcesses());
   let child;
   let stdout = '';
   let stderr = '';
   let signalFailed = 'unknown';
   let capturedConsoleErrors = [];
+  let footprintReceipt;
 
   try {
     child = spawn(machO, [], {
@@ -466,6 +483,38 @@ async function main() {
     const dashboardRoute = await waitForDashboard(client, Date.now() + ROUTE_TIMEOUT_MS);
     signalFailed = 'dashboard-boot-health';
     await waitForHealthyBoot(client, Date.now() + HEALTH_TIMEOUT_MS);
+    signalFailed = 'hide-main-window';
+    await invokeTauri(client, 'plugin:window|hide', { label: 'main' });
+    const mainVisible = await invokeTauri(client, 'plugin:window|is_visible', { label: 'main' });
+    if (mainVisible !== false) throw new Error('main window remained visible before idle sampling');
+    signalFailed = 'footprint-budget';
+    await sleep(FOOTPRINT_COOLDOWN_MS);
+    const footprintBefore = snapshotProcesses();
+    await sleep(FOOTPRINT_OBSERVATION_MS);
+    const footprintAfter = snapshotProcesses();
+    footprintReceipt = collectFootprintReceipt({
+      rootPid: child.pid,
+      appPath: resolved.appPath,
+      dataDir,
+      updaterArchivePath: resolved.appTar,
+      webkitBaseline,
+      before: footprintBefore,
+      after: footprintAfter,
+      observationMs: FOOTPRINT_OBSERVATION_MS,
+      version: info.version,
+      gitSha: info.gitSha,
+      mode,
+      scenario: 'idle-hidden',
+    });
+    const receiptPath = writeFootprintReceipt(resolved.appPath, footprintReceipt);
+    if (footprintReceipt.verdict !== 'PASS') {
+      const failed = footprintReceipt.checks
+        .filter((check) => !check.pass)
+        .map((check) => `${check.metric}=${check.actual} ceiling=${check.ceiling}`)
+        .join(', ');
+      throw new Error(`footprint regression ceiling exceeded: ${failed}`);
+    }
+
     signalFailed = 'webview-console-errors';
     capturedConsoleErrors = await collectFatalConsoleErrors(client);
     if (capturedConsoleErrors.length > 0) {
@@ -480,7 +529,12 @@ async function main() {
       dashboardRoute,
       interactiveElapsedMs: Date.now() - started,
       nodeVersion: process.version,
+      footprintBudgetVersion: footprintReceipt.budgetVersion,
+      idlePhysicalBytes: footprintReceipt.metrics.idlePhysicalBytes,
+      idleCpuPercent: footprintReceipt.metrics.idleCpuPercent,
+      idleProcessChurn: footprintReceipt.metrics.idleProcessChurn,
     });
+    console.log(`[preship-webview-gate] footprint receipt ${receiptPath}`);
     console.log(`[preship-webview-gate] PASS real WKWebView booted ${path.basename(resolved.appPath)} in ${Date.now() - started}ms`);
   } catch (error) {
     writeAudit({
@@ -492,6 +546,10 @@ async function main() {
       signalFailed,
       capturedConsoleErrors,
       childStderrTail: tail(stderr),
+      footprintBudgetVersion: footprintReceipt?.budgetVersion,
+      idlePhysicalBytes: footprintReceipt?.metrics.idlePhysicalBytes,
+      idleCpuPercent: footprintReceipt?.metrics.idleCpuPercent,
+      idleProcessChurn: footprintReceipt?.metrics.idleProcessChurn,
     });
     console.error(`[preship-webview-gate] FAIL signal=${signalFailed}: ${error?.message ?? error}`);
     if (capturedConsoleErrors.length > 0) {

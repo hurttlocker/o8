@@ -1,9 +1,9 @@
 {
   "schema": "o8/test-classification/v1",
   "generatedBy": "node scripts/classify-tests.mjs --write",
-  "totalTests": 876,
-  "hermeticTests": 562,
-  "resourceOwningTests": 314,
+  "totalTests": 884,
+  "hermeticTests": 569,
+  "resourceOwningTests": 315,
   "resourceOwning": [
     {
       "path": "src/app/api/leases/route.test.ts",
@@ -1269,6 +1269,12 @@
         "executable-fixture",
         "git-cli",
         "process-signal"
+      ]
+    },
+    {
+      "path": "tests/feedback-sync-reports.test.ts",
+      "reasons": [
+        "executable-fixture"
       ]
     },
     {
