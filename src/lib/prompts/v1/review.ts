@@ -40,10 +40,13 @@ export function buildBlindSecondPassPromptV1(input: BlindSecondPassPromptInputV1
       ? 'COVERAGE checklist: enumerate every task-contract requirement ID as `[x] <ID> <sub-requirement> - evidence <file:line|command output>` or `[ ] <ID> <sub-requirement> - gap <reason>`.'
       : 'COVERAGE checklist: enumerate each packet sub-requirement as `[x] <sub-requirement> - evidence <file:line|command output>` or `[ ] <sub-requirement> - gap <reason>`.',
     contractArmed ? 'MINIMALITY trace: map every changed file or change unit to requirement IDs. Cite the logged deviation for anything outside the smallestRoute, then state whether a substantially smaller complete diff exists.' : null,
+    'COMPLETENESS trace - when the change establishes or restores an invariant, name it, then enumerate every production path with that property:',
+    '`INVARIANT: <one sentence, or NONE>`',
+    '`SITE: <file:line> covered=<yes|no> evidence=<file:line|reason>`',
     'EXECUTION-PATH TRACE: trace the actual call path the change runs under, not the one its name implies.',
     contractArmed
-      ? `You may agree only if ${taskContractMissing ? 'the required structured task contract exists, ' : ''}every guard is live, every write is partitioned correctly, every requirement is covered, the minimality trace clears, and the execution path reaches the changed code.`
-      : 'You may agree only if every guard is live, every write is partitioned correctly, every sub-requirement is covered, and the execution path reaches the changed code.',
+      ? `You may agree only if ${taskContractMissing ? 'the required structured task contract exists, ' : ''}every guard is live, every write is partitioned correctly, every requirement is covered, the minimality trace clears, every COMPLETENESS site is covered, and the execution path reaches the changed code.`
+      : 'You may agree only if every guard is live, every write is partitioned correctly, every sub-requirement is covered, every COMPLETENESS site is covered, and the execution path reaches the changed code.',
     '',
     'Do NOT call submit_review. Do NOT call lane_command. Do not stamp or merge anything yourself.',
     'End your output with EXACTLY one final line:',
@@ -138,9 +141,14 @@ export function buildAutoReviewPromptV1(input: AutoReviewPromptInputV1): string 
     contractArmed ? '`MINIMALITY: <file|change-unit> -> <R1,R2|DEVIATION> necessary=<yes|no> evidence=<reason|implementation-notes entry>`' : null,
     contractArmed ? 'Then state the smallest complete counterfactual diff. If the current diff is substantially larger without requirement-backed evidence, request changes.' : null,
     contractArmed ? '' : null,
+    'COMPLETENESS trace - when the change establishes or restores an invariant, name it, then enumerate every production path with that property:',
+    '`INVARIANT: <one sentence, or NONE>`',
+    '`SITE: <file:line> covered=<yes|no> evidence=<file:line|reason>`',
+    '',
     contractArmed
-      ? `Hard approval rule: You may NOT approve if ${taskContractMissing ? 'the pre-edit task contract is missing, ' : ''}any guard is INERT, any write has partition=NONE, any COVERAGE box is unchecked, or the diff contains an unjustified non-minimal change unit. Request changes instead.`
-      : 'Hard approval rule: You may NOT approve if any guard is INERT, any write has partition=NONE, or any COVERAGE box is unchecked. Request changes instead.',
+      ? `Hard approval rule: You may NOT approve if ${taskContractMissing ? 'the pre-edit task contract is missing, ' : ''}any guard is INERT, any write has partition=NONE, any COVERAGE box is unchecked, the diff contains an unjustified non-minimal change unit, or any COMPLETENESS site is uncovered. Request changes instead.`
+      : 'Hard approval rule: You may NOT approve if any guard is INERT, any write has partition=NONE, any COVERAGE box is unchecked, or any COMPLETENESS site is uncovered. Request changes instead.',
+    'When any COMPLETENESS site is uncovered, list EVERY uncovered `SITE:` line in the request-changes findings so the next worker round receives the full set.',
     contractArmed
       ? 'For submit_review, include contractCoverageEvidence with the sealed contractVersion, the exact reviewed HEAD from `git rev-parse HEAD`, and one entry per requirement: `{ requirementId, productionPath, anchor?, verification? }`. Each productionPath must be a repo-relative file the change actually touched, and reviewedHeadSha must equal contractCoverageEvidence.headSha.'
       : null,

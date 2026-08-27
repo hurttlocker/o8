@@ -53,6 +53,10 @@ describe('programmatic prompt catalog v1', () => {
     expect(blind).toContain('Packet: pkt-1');
     expect(blind).toContain('## Outcome closure review');
     expect(blind).toContain('Try to disprove that the original desired outcome became true');
+    expect(blind).toContain('COMPLETENESS trace - when the change establishes or restores an invariant');
+    expect(blind).toContain('`INVARIANT: <one sentence, or NONE>`');
+    expect(blind).toContain('`SITE: <file:line> covered=<yes|no> evidence=<file:line|reason>`');
+    expect(blind).toContain('every COMPLETENESS site is covered');
 
     const review = buildAutoReviewPromptV1({
       lane: { id: 'lane-1', label: 'Prompt work', branch: 'issue/prompts' },
@@ -66,6 +70,11 @@ describe('programmatic prompt catalog v1', () => {
     expect(review).toContain('## Outcome closure review');
     expect(review).toContain('Treat the worker self-review as a claim');
     expect(review).toContain('lane_command with verb "merge"');
+    expect(review).toContain('COMPLETENESS trace - when the change establishes or restores an invariant');
+    expect(review).toContain('`INVARIANT: <one sentence, or NONE>`');
+    expect(review).toContain('`SITE: <file:line> covered=<yes|no> evidence=<file:line|reason>`');
+    expect(review).toContain('or any COMPLETENESS site is uncovered');
+    expect(review).toContain('list EVERY uncovered `SITE:` line in the request-changes findings');
     expect(review).not.toContain('## Pre-edit task contract');
     expect(review).not.toContain('MINIMALITY:');
   });
@@ -112,7 +121,13 @@ describe('programmatic prompt catalog v1', () => {
       expect(prompt).toContain('R1: Both reviewers verify the same requirement.');
       expect(prompt).toContain('review.ts -> R1');
       expect(prompt).toContain('MINIMALITY');
+      expect(prompt).toContain('COMPLETENESS trace - when the change establishes or restores an invariant');
+      expect(prompt).toContain('`INVARIANT: <one sentence, or NONE>`');
+      expect(prompt).toContain('`SITE: <file:line> covered=<yes|no> evidence=<file:line|reason>`');
     }
+    expect(review).toContain('or any COMPLETENESS site is uncovered');
+    expect(review).toContain('list EVERY uncovered `SITE:` line in the request-changes findings');
+    expect(blind).toContain('every COMPLETENESS site is covered');
     expect(review).toContain('include contractCoverageEvidence');
     expect(review).toContain('reviewedHeadSha must equal contractCoverageEvidence.headSha');
   });
