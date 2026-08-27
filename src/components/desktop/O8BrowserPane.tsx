@@ -26,22 +26,21 @@ import {
 } from '@/lib/browser/url';
 import { isTauri, browserViewEval, browserViewNavigate } from '@/lib/tauri/bridge';
 import { useNativeBrowserViewFlag } from '@/lib/operator/use-native-browser-view';
+import {
+  activeUrlFromBrowserPaneSnapshot,
+  normalizeBrowserPaneScopeKey,
+  readBrowserPaneState,
+  reorderBrowserTabs,
+  writeBrowserPaneState,
+  type BrowserTab,
+} from '@/lib/browser/pane-state';
 import { O8EnginePane } from './O8EnginePane';
 import { NativeBrowserSurface } from './NativeBrowserSurface';
+import { BrowserNewTabState, BrowserRedactedState, BrowserTabFavicon } from './O8BrowserPaneStates';
 
 // ── Types ──
 
-export interface BrowserTab {
-  id: string;
-  url: string;
-  title: string;
-}
-
-interface BrowserPaneStateSnapshot {
-  tabs: BrowserTab[];
-  activeTabId: string | null;
-  activeUrl: string | null;
-}
+export type { BrowserTab } from '@/lib/browser/pane-state';
 
 interface O8BrowserPaneProps {
   previews?: DetectedLocalhostPreview[];
@@ -69,120 +68,18 @@ function newTabId(): string {
   return `btab-${tabCounter}-${Date.now()}`;
 }
 
-/**
- * Real site favicon in the tab pill (Q 2026-07-12) — external
- * sites resolve through Google's favicon service; localhost/dev servers and
- * any failure fall back to the quiet globe glyph.
- */
-function TabFavicon({ url }: { url: string }) {
-  const [failed, setFailed] = useState(false);
-  let host: string | null = null;
-  try {
-    const parsed = new URL(url);
-    if ((parsed.protocol === 'http:' || parsed.protocol === 'https:') && !isLoopbackBrowserUrl(url)) {
-      host = parsed.hostname;
-    }
-  } catch {
-    host = null;
-  }
-  if (!host || failed) {
-    return (
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--t-text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, display: 'block', width: 12, height: 12, minWidth: 12 }}>
-        <circle cx="12" cy="12" r="10" />
-        <line x1="2" y1="12" x2="22" y2="12" />
-        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-      </svg>
-    );
-  }
-  return (
-    // eslint-disable-next-line @next/next/no-img-element -- remote favicons are tiny fallbacks, not page content.
-    <img
-      src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=32`}
-      width={12}
-      height={12}
-      alt=""
-      onError={() => setFailed(true)}
-      style={{ flexShrink: 0, display: 'block', width: 12, height: 12, minWidth: 12, borderRadius: 3 }}
-    />
-  );
-}
-
-const DEFAULT_STATE_SCOPE_KEY = 'right-panel';
-const browserPaneStateStore = new Map<string, BrowserPaneStateSnapshot>();
-const browserPaneListeners = new Set<() => void>();
-
-function normalizeStateScopeKey(key?: string): string {
-  const trimmed = key?.trim();
-  return trimmed || DEFAULT_STATE_SCOPE_KEY;
-}
-
-function cloneTabs(tabs: BrowserTab[]): BrowserTab[] {
-  return tabs.map((tab) => ({ ...tab }));
-}
-
-function readBrowserPaneState(scopeKey: string): BrowserPaneStateSnapshot | null {
-  const stored = browserPaneStateStore.get(scopeKey);
-  if (!stored) return null;
-  const tabs = cloneTabs(stored.tabs);
-  const activeFromId = tabs.find((tab) => tab.id === stored.activeTabId) ?? null;
-  const activeFromUrl = stored.activeUrl ? tabs.find((tab) => tab.url === stored.activeUrl) ?? null : null;
-  const activeTab = activeFromId ?? activeFromUrl ?? tabs[0] ?? null;
-  return {
-    tabs,
-    activeTabId: activeTab?.id ?? null,
-    activeUrl: activeTab?.url ?? null,
-  };
-}
-
-function writeBrowserPaneState(scopeKey: string, tabs: BrowserTab[], activeTabId: string | null): void {
-  const cloned = cloneTabs(tabs);
-  const activeTab = cloned.find((tab) => tab.id === activeTabId) ?? cloned[0] ?? null;
-  browserPaneStateStore.set(scopeKey, {
-    tabs: cloned,
-    activeTabId: activeTab?.id ?? null,
-    activeUrl: activeTab?.url ?? null,
-  });
-  for (const listener of browserPaneListeners) listener();
-}
-
-/** Stable empty reference — `useSyncExternalStore` re-renders forever if the
- *  no-tabs snapshot is a fresh array each read. */
-const NO_BROWSER_TABS: readonly BrowserTab[] = Object.freeze([]);
-
-/** Subscribe to o8's browser-tab state. Fires on any pane write. */
-export function subscribeBrowserPaneTabs(listener: () => void): () => void {
-  browserPaneListeners.add(listener);
-  return () => {
-    browserPaneListeners.delete(listener);
-  };
-}
-
-/**
- * The tabs o8 currently owns in a given pane scope. The returned array is the
- * stored reference — it only changes identity when the pane writes, which is
- * what makes it safe as a `useSyncExternalStore` snapshot.
- */
-export function getBrowserPaneTabs(scopeKey?: string): readonly BrowserTab[] {
-  const stored = browserPaneStateStore.get(normalizeStateScopeKey(scopeKey));
-  return stored?.tabs ?? NO_BROWSER_TABS;
-}
-
-function activeUrlFromSnapshot(snapshot: BrowserPaneStateSnapshot | null): string {
-  if (!snapshot) return '';
-  return snapshot.tabs.find((tab) => tab.id === snapshot.activeTabId)?.url ?? snapshot.activeUrl ?? '';
-}
-
 // ── Component ──
 
 export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onActiveUrlChange, tabStripSlot, onFocusRequest }: O8BrowserPaneProps) {
-  const normalizedStateScopeKey = normalizeStateScopeKey(stateScopeKey);
-  const [initialBrowserState] = useState<BrowserPaneStateSnapshot | null>(() => readBrowserPaneState(normalizedStateScopeKey));
+  const normalizedStateScopeKey = normalizeBrowserPaneScopeKey(stateScopeKey);
+  const [initialBrowserState] = useState(() => readBrowserPaneState(normalizedStateScopeKey));
   const [tabs, setTabs] = useState<BrowserTab[]>(() => initialBrowserState?.tabs ?? []);
   const [activeTabId, setActiveTabId] = useState<string | null>(() => initialBrowserState?.activeTabId ?? null);
-  const [urlInput, setUrlInput] = useState(() => activeUrlFromSnapshot(initialBrowserState));
+  const [urlInput, setUrlInput] = useState(() => activeUrlFromBrowserPaneSnapshot(initialBrowserState));
   const [hoveredTabId, setHoveredTabId] = useState<string | null>(null);
   const urlRef = useRef<HTMLInputElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const draggedTabId = useRef<string | null>(null);
   /** Stable handle for the header-rail "New page" event listener — the
    *  listener mounts before addNewTab is declared below. */
   const addNewTabRef = useRef<(() => void) | null>(null);
@@ -192,7 +89,11 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
   const [agentGlow, setAgentGlow] = useState(false);
   /** URLs that blank out when proxied (auth-gated SPAs) — drive them in the
    *  engine's real Chrome instead, where they render + stay grabbable. */
-  const [engineUrls, setEngineUrls] = useState<Set<string>>(() => new Set());
+  const [engineUrls, setEngineUrls] = useState<Set<string>>(() => new Set(
+    initialBrowserState?.tabs
+      .filter((tab) => tab.surface === 'engine' && tab.url)
+      .map((tab) => tab.url) ?? [],
+  ));
   /** Native browser-view path (docs/internals/native-browser-webview-spec.md). Operator
    *  setting `nativeBrowserView` (default ON, Settings → Operator Defaults);
    *  only in Tauri — the native child window can't exist in the web/dev preview,
@@ -267,8 +168,15 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
   useEffect(() => {
     if (!hasStoredState.current && tabs.length === 0 && activeTabId === null) return;
     hasStoredState.current = true;
-    writeBrowserPaneState(normalizedStateScopeKey, tabs, activeTabId);
-  }, [activeTabId, normalizedStateScopeKey, tabs]);
+    writeBrowserPaneState(normalizedStateScopeKey, tabs.map((tab) => ({
+      ...tab,
+      surface: nativeEnabled && tab.url
+        ? 'native'
+        : engineUrls.has(tab.url)
+          ? 'engine'
+          : 'embedded',
+    })), activeTabId);
+  }, [activeTabId, engineUrls, nativeEnabled, normalizedStateScopeKey, tabs]);
 
   // Navigate to externally-provided URL (e.g. from port popover)
   const lastNavigatedUrl = useRef<string | null>(null);
@@ -321,7 +229,9 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
     const normalized = normalizeBrowserUrl(url);
     if (!normalized) return;
     setTabs(prev => prev.map(t =>
-      t.id === activeTabId ? { ...t, url: normalized, title: browserTitleFromUrl(normalized) } : t
+      t.id === activeTabId
+        ? { ...t, url: normalized, title: browserTitleFromUrl(normalized), redacted: false }
+        : t
     ));
     setUrlInput(normalized);
   }, [activeTabId]);
@@ -474,7 +384,7 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
   }
 
   // New Tab page — show port tiles when tab has no URL
-  const showNewTabPage = activeTab && !activeTab.url;
+  const showNewTabPage = activeTab && !activeTab.url && !activeTab.redacted;
 
   // Adaptive label density (Q ruling 2026-07-12: "don't want it to look
   // janky with a few things open"): full page title when there's room,
@@ -495,6 +405,23 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
           return (
             <div
               key={tab.id}
+              draggable
+              onDragStart={(event) => {
+                draggedTabId.current = tab.id;
+                event.dataTransfer.effectAllowed = 'move';
+                event.dataTransfer.setData('text/plain', tab.id);
+              }}
+              onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; }}
+              onDrop={(event) => {
+                event.preventDefault();
+                const draggedId = draggedTabId.current;
+                if (!draggedId) return;
+                const bounds = event.currentTarget.getBoundingClientRect();
+                const position = event.clientX >= bounds.left + bounds.width / 2 ? 'after' : 'before';
+                setTabs((current) => reorderBrowserTabs(current, draggedId, tab.id, position));
+                draggedTabId.current = null;
+              }}
+              onDragEnd={() => { draggedTabId.current = null; }}
               onClick={() => { onFocusRequest?.(); setActiveTabId(tab.id); }}
               onMouseEnter={() => setHoveredTabId(tab.id)}
               onMouseLeave={() => setHoveredTabId(null)}
@@ -511,7 +438,7 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
             >
               {/* Icon-only + hovered: the favicon SWAPS to the close × in
                   place (Chrome behavior) so the pill never widens. */}
-              {!showLabel && isHovered ? null : <TabFavicon url={tab.url} />}
+              {!showLabel && isHovered ? null : <BrowserTabFavicon url={tab.url} />}
               {showLabel ? (
               <span style={{
                 flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -781,69 +708,10 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
       {/* ── Content area — the Design Mode draw surface (the ink is confined
             here, Q ruling 2026-07-12: "just in the browser"). ── */}
       <div data-o8-draw-surface style={{ flex: 1, minHeight: 0, position: 'relative', boxShadow: agentGlow ? 'inset 0 0 0 1.5px rgba(245,158,11,0.75)' : 'none', transition: 'box-shadow 200ms ease-out' }}>
-        {showNewTabPage ? (
-          <div style={{
-            height: '100%', display: 'flex', flexDirection: 'column',
-            alignItems: 'center', justifyContent: 'center', gap: 18, padding: 32,
-          }}>
-            <span style={{ color: 'var(--t-text-muted)', fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>
-              Open a running dev server
-            </span>
-            {previews.length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', maxWidth: 320 }}>
-                {previews.map(p => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => {
-                      const url = p.url || `http://localhost:${p.port}`;
-                      navigateTo(url);
-                    }}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 12, width: '100%', textAlign: 'left',
-                      paddingTop: 12, paddingRight: 16, paddingBottom: 12, paddingLeft: 14,
-                      borderRadius: 12, border: '1px solid var(--t-divider)',
-                      background: 'var(--t-input-bg)', cursor: 'pointer',
-                      boxShadow: '0 1px 2px rgba(40,30,20,0.04), 0 4px 14px rgba(40,30,20,0.05)',
-                      transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), border-color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = 'var(--t-panel-hover)';
-                      e.currentTarget.style.borderColor = 'var(--t-divider-strong)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = 'var(--t-input-bg)';
-                      e.currentTarget.style.borderColor = 'var(--t-divider)';
-                    }}
-                  >
-                    <div style={{
-                      width: 34, height: 34, borderRadius: 9, flexShrink: 0,
-                      background: 'var(--t-panel-active)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    }}>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
-                        <circle cx="12" cy="12" r="10" />
-                        <line x1="2" y1="12" x2="22" y2="12" />
-                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-                      </svg>
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1, minWidth: 0 }}>
-                      <span style={{ color: 'var(--t-text)', fontSize: 14, fontWeight: 500, letterSpacing: '-0.2px' }}>
-                        :{p.port}
-                      </span>
-                      <span style={{ color: 'var(--t-text-faint)', fontSize: 11, fontWeight: 300, letterSpacing: '-0.05px' }}>
-                        localhost
-                      </span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <span style={{ color: 'var(--t-text-faint)', fontSize: 12, fontWeight: 300 }}>
-                No dev servers detected
-              </span>
-            )}
-          </div>
+        {activeTab?.redacted ? (
+          <BrowserRedactedState />
+        ) : showNewTabPage ? (
+          <BrowserNewTabState previews={previews} onNavigate={navigateTo} />
         ) : nativeEnabled && activeTab?.url ? (
           // Native host-owned child window over this rect — renders origin-
           // sensitive auth apps (Clerk) smoothly AND stays agent-grabbable.

@@ -1,7 +1,7 @@
 'use client';
 
 import { useSyncExternalStore } from 'react';
-import { getBrowserPaneTabs, subscribeBrowserPaneTabs, type BrowserTab } from './O8BrowserPane';
+import { getBrowserPaneTabs, subscribeBrowserPaneTabs, type BrowserTab } from '@/lib/browser/pane-state';
 
 export interface O8BrowserTab {
   id: string;
