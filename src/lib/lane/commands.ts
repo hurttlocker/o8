@@ -426,6 +426,14 @@ async function dispatchUnlocked(
         const baseBranch = lane.baseBranch || 'main';
         const probe = await probeNoChangesProduced(reviewCwd, baseBranch);
         if (probe.noChangesProduced) {
+          if (lane.lastEventLabel === 'launch_failed' || lane.lastEventLabel === 'launch_error') {
+            return {
+              ok: false,
+              laneId: command.laneId,
+              note: lane.outcomeNote ?? lane.lastEventLabel,
+              lane: getLane(command.laneId) ?? undefined,
+            };
+          }
           const { parkHuddleReadyZeroDiffLane } = await import('@/lib/orchestrator/huddle-zero-diff');
           const huddlePark = await parkHuddleReadyZeroDiffLane(lane);
           if (huddlePark.parked) {
@@ -458,7 +466,15 @@ async function dispatchUnlocked(
         }
       } catch (err) {
         console.warn(`[lane] request_review: empty-commit check failed for ${reviewCwd}:`, err);
-        // Non-fatal — proceed; the review panel will show an empty diff at worst
+        if (lane.lastEventLabel === 'launch_failed' || lane.lastEventLabel === 'launch_error') {
+          return {
+            ok: false,
+            laneId: command.laneId,
+            note: lane.outcomeNote ?? lane.lastEventLabel,
+            lane: getLane(command.laneId) ?? undefined,
+          };
+        }
+        // Non-fatal for a worker that ran; the review panel can still show its diff.
       }
 
       const updated = setLaneStatus(command.laneId, 'reviewing', actor, 'review_requested');

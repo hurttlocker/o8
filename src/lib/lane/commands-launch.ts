@@ -8,6 +8,7 @@ import { resolvePortInfo } from '@/lib/panel/api-port';
 import { getRuntimeCapability, listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 import type { LaneCommand, LaneCommandResult, LaneEventActor, LaneRuntime } from '@/lib/lane/types';
+import { scanForBinary } from '@/lib/runtimes/shared/cli-locate';
 import { findOwnedLaunchByMutationId } from '@/lib/runtimes/shared/owned-session-index';
 
 const LAUNCH_ATTEMPT_CAP = 5;
@@ -16,6 +17,30 @@ type LaunchSessionCommand = Extract<LaneCommand, { verb: 'launch_session' }>;
 
 function resolvedLaunchModel(command: LaunchSessionCommand, runtime: LaneRuntime): string | null {
   return command.claudeCodeModel?.trim() || command.model?.trim() || getRuntimeCapability(runtime).defaultModel?.trim() || null;
+}
+
+function recordLaunchFailure(
+  lane: NonNullable<ReturnType<typeof getLane>>,
+  status: 'idle' | 'failed',
+  eventLabel: string,
+  reason: string,
+) {
+  const binaryName = getRuntimeCapability(lane.runtime).binaryName;
+  const resolvedBinaryPath = scanForBinary(binaryName);
+  const now = new Date().toISOString();
+  return updateLane(lane.id, {
+    status,
+    outcomeNote: reason,
+    lastEventAt: now,
+    lastEventLabel: eventLabel,
+  }, 'system', {
+    eventLabel,
+    reason,
+    error: reason,
+    runtime: lane.runtime,
+    binaryName,
+    resolvedBinaryPath,
+  });
 }
 
 export async function launchSession(
@@ -45,7 +70,8 @@ export async function launchSession(
     ? priorLaunchAttempts > LAUNCH_ATTEMPT_CAP
     : priorLaunchAttempts >= LAUNCH_ATTEMPT_CAP;
   if (launchAttemptCapReached) {
-    setLaneStatus(command.laneId, 'failed', 'system', 'launch_attempts_exhausted');
+    const reason = `Launch failed ${priorLaunchAttempts}× — giving up. Reset the packet to retry.`;
+    recordLaunchFailure(lane, 'failed', 'launch_attempts_exhausted', reason);
     try {
       updateLane(command.laneId, { sessionKey: null }, 'system');
     } catch (err) {
@@ -54,17 +80,18 @@ export async function launchSession(
     return {
       ok: false,
       laneId: command.laneId,
-      note: `Launch failed ${priorLaunchAttempts}× — giving up. Reset the packet to retry.`,
+      note: reason,
     };
   }
 
   const launchCwd = lane.worktreePath ?? lane.repoPath;
   if (launchCwd && !existsSync(launchCwd)) {
-    setLaneStatus(command.laneId, 'failed', 'system', 'launch_aborted_missing_cwd');
+    const reason = `Working directory no longer exists: ${launchCwd}. Reset the packet to re-provision.`;
+    recordLaunchFailure(lane, 'failed', 'launch_aborted_missing_cwd', reason);
     return {
       ok: false,
       laneId: command.laneId,
-      note: `Working directory no longer exists: ${launchCwd}. Reset the packet to re-provision.`,
+      note: reason,
     };
   }
 
@@ -72,11 +99,12 @@ export async function launchSession(
     const recovered = await findOwnedLaunchByMutationId(command.clientMutationId);
     if (recovered) {
       if (recovered.outcome === 'failed') {
-        setLaneStatus(command.laneId, 'idle', 'system', 'launch_failed');
+        const reason = 'Recovered a failed owned launch from its durable session record.';
+        recordLaunchFailure(lane, 'idle', 'launch_failed', reason);
         return {
           ok: false,
           laneId: command.laneId,
-          note: 'Recovered a failed owned launch from its durable session record.',
+          note: reason,
         };
       }
       updateLane(command.laneId, { model: resolvedLaunchModel(command, lane.runtime) }, 'system');
@@ -131,11 +159,12 @@ export async function launchSession(
         }
       });
       if (rebasing) {
-        setLaneStatus(command.laneId, 'failed', 'system', 'worktree_mid_rebase');
+        const reason = `Worktree at ${refreshTarget} is stuck mid-rebase after a failed refresh (${note}). Reset the packet to re-provision.`;
+        recordLaunchFailure(lane, 'failed', 'worktree_mid_rebase', reason);
         return {
           ok: false,
           laneId: command.laneId,
-          note: `Worktree at ${refreshTarget} is stuck mid-rebase after a failed refresh (${note}). Reset the packet to re-provision.`,
+          note: reason,
         };
       }
       console.warn(`[lane] pre-launch worktree refresh failed for ${command.laneId} — launching on the existing base: ${note}`);
@@ -165,7 +194,7 @@ export async function launchSession(
     });
 
     if (!result.ok) {
-      setLaneStatus(command.laneId, 'idle', 'system', 'launch_failed');
+      recordLaunchFailure(lane, 'idle', 'launch_failed', result.note);
       return { ok: false, laneId: command.laneId, note: result.note };
     }
 
@@ -214,10 +243,10 @@ export async function launchSession(
       dependencyMaterializationMode: result.worktree?.dependencyMaterialization?.mode ?? null,
     };
   } catch (err) {
-    if (getLane(command.laneId)?.status === 'launching') {
-      setLaneStatus(command.laneId, 'idle', 'system', 'launch_error');
-    }
     const message = err instanceof Error ? err.message : 'Launch failed.';
+    if (getLane(command.laneId)?.status === 'launching') {
+      recordLaunchFailure(lane, 'idle', 'launch_error', message);
+    }
     return { ok: false, laneId: command.laneId, note: message };
   }
 }
