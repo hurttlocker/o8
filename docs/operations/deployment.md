@@ -39,6 +39,8 @@ cd src-tauri && cargo check
 
 Then complete the [pre-ship gate](PRE-SHIP-GATE-CHECKLIST.md) against a clean profile. Verify that the app launches its sidecars, resolves dynamic ports, opens the dashboard, and can complete a real governed packet path before treating the bundle as releasable.
 
+External report reconciliation has its own [configuration and recovery runbook](intake-reconciliation.md). Its preflight state is reported alongside the release checks, but an intentionally disabled intake never blocks an otherwise valid release.
+
 ## Release boundary
 
 A local build or commit is not a release. Publishing uses the repository’s guarded ship workflow and requires explicit operator authorization in the current session. Keep signing material out of the repository, never run concurrent ship processes, and verify the published version and installer after notarization completes.

@@ -10,6 +10,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { inspectIntakeReconciliation } from './intake-reconciliation.mjs';
 
 const DEFAULT_MIN_FREE_GIB = 25;
 
@@ -241,6 +242,7 @@ export function performShipPreflight(options) {
     minFreeGiB,
     credentialNames,
     signingKeyPresent: true,
+    intakeReconciliation: inspectIntakeReconciliation({ env }),
     toolchains: {
       node: process.version,
       ...toolchains,

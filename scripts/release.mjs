@@ -220,7 +220,10 @@ console.log(`[release] wrote ${latestJsonPath}`);
 // recorded on THEIR machine, not ours, so without this every fix we ship for
 // someone else's bug resolves to "unknown id" and never reaches fixed.json.
 try {
-  const { fresh } = await syncReports();
+  const { status, fresh } = await syncReports();
+  if (status === 'disabled') {
+    console.log('[release] external intake reconciliation intentionally disabled; continuing with the local ledger');
+  }
   if (fresh.length > 0) console.log(`[release] imported ${fresh.length} report(s) from the intake channel`);
 } catch (err) {
   console.warn(`[release] ⚠ intake-channel sync failed: ${err?.message ?? err}`);

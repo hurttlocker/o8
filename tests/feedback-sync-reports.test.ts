@@ -10,9 +10,100 @@
  * invented ones — including the pre-id legacy cards that must be skipped.
  */
 
-import { describe, it, expect } from 'vitest';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 // @ts-expect-error — plain .mjs build script, no types
-import { parseReportEmbed } from '../scripts/sync-reports.mjs';
+import { parseReportEmbed, syncReports } from '../scripts/sync-reports.mjs';
+// @ts-expect-error — plain .mjs build script, no types
+import { inspectIntakeReconciliation } from '../scripts/lib/intake-reconciliation.mjs';
+
+const roots: string[] = [];
+
+afterEach(() => {
+  while (roots.length > 0) rmSync(roots.pop()!, { recursive: true, force: true });
+});
+
+function credentialFixture(content?: string, mode = 0o600) {
+  const root = mkdtempSync(join(tmpdir(), 'o8-intake-config-'));
+  roots.push(root);
+  if (content !== undefined) {
+    mkdirSync(root, { recursive: true });
+    const file = join(root, 'discord-bot-token');
+    writeFileSync(file, content, { mode });
+    chmodSync(file, mode);
+  }
+  return root;
+}
+
+describe('external intake reconciliation configuration', () => {
+  it('reports an injected credential without placing it in the receipt', () => {
+    const secret = 'test-secret-that-must-not-leak';
+    const receipt = inspectIntakeReconciliation({
+      env: { O8_INTAKE_RECONCILIATION: 'enabled', O8_DISCORD_BOT_TOKEN: secret },
+    });
+
+    expect(receipt).toEqual({
+      schema: 'o8/intake-reconciliation/v1',
+      status: 'configured',
+      source: 'environment',
+    });
+    expect(JSON.stringify(receipt)).not.toContain(secret);
+  });
+
+  it('accepts a non-empty 0600 runtime credential file', () => {
+    const dataDir = credentialFixture('runtime-secret\n');
+    expect(inspectIntakeReconciliation({ env: { O8_DATA_DIR: dataDir } })).toMatchObject({
+      status: 'configured',
+      source: 'runtime-file',
+    });
+  });
+
+  it.each([
+    ['disabled', () => ({ O8_INTAKE_RECONCILIATION: 'disabled' })],
+    ['missing', () => ({ O8_DATA_DIR: credentialFixture() })],
+    ['misconfigured', () => ({ O8_INTAKE_RECONCILIATION: 'sometimes' })],
+    ['misconfigured', () => ({ O8_DATA_DIR: credentialFixture('') })],
+  ])('distinguishes a %s configuration', (status, makeEnv) => {
+    expect(inspectIntakeReconciliation({ env: makeEnv() })).toMatchObject({ status });
+  });
+
+  it.skipIf(process.platform === 'win32')('rejects a runtime credential file readable by other users', () => {
+    const dataDir = credentialFixture('runtime-secret', 0o644);
+    expect(inspectIntakeReconciliation({ env: { O8_DATA_DIR: dataDir } })).toMatchObject({
+      status: 'misconfigured',
+    });
+  });
+
+  it('does no network work when reconciliation is intentionally disabled', async () => {
+    const fetchImpl = vi.fn();
+    const result = await syncReports({
+      dryRun: true,
+      env: { O8_INTAKE_RECONCILIATION: 'disabled' },
+      fetchImpl,
+    });
+
+    expect(result).toMatchObject({ status: 'disabled', scanned: 0, fresh: [] });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('reaches the report parser through the configured sync entry point', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [REAL_REPORT],
+    });
+    const result = await syncReports({
+      dryRun: true,
+      env: { ...process.env, O8_DISCORD_BOT_TOKEN: 'test-credential' },
+      fetchImpl,
+    });
+
+    expect(result).toMatchObject({ status: 'configured', scanned: 1, legacy: 0 });
+    expect(result.fresh).toHaveLength(1);
+    expect(result.fresh[0]).toMatchObject({ id: 'FYPPHK', origin: 'intake-sync' });
+  });
+});
 
 /** The real FYPPHK card, the first report filed under the id format. */
 const REAL_REPORT = {

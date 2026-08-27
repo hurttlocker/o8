@@ -21,7 +21,7 @@ function fixture() {
   mkdirSync(join(home, '.tauri'), { recursive: true });
   writeFileSync(join(home, '.tauri', 'cortex-ide.key'), 'test-key');
   const head = 'a'.repeat(40);
-  const env = {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     HOME: home,
     APPLE_SIGNING_IDENTITY: 'Developer ID test',
@@ -65,6 +65,7 @@ describe('ship preflight', () => {
     expect(receipt.remoteTagHead).toBe(head);
     expect(receipt.releaseAbsent).toBe(true);
     expect(receipt.credentialNames).not.toContain('not-a-real-secret');
+    expect(receipt.intakeReconciliation).toMatchObject({ status: 'missing' });
     expect(calls).toContain('gh release view v0.1.999 --repo example/release-repo --json tagName');
     expect(calls.at(-1)).toBe('ps -axo pid=,ppid=,command=');
   });
@@ -159,5 +160,28 @@ describe('ship preflight', () => {
 
     expect(receipt.status).toBe('unavailable');
     expect(receipt.message).toContain('browser unavailable');
+  });
+
+  it('keeps an intentionally disabled intake independent from ship readiness', () => {
+    const { root, head, env } = fixture();
+    env.O8_INTAKE_RECONCILIATION = 'disabled';
+    const run = (command: string, args: string[]) => {
+      if (command === 'git' && args[0] === 'rev-parse') return { status: 0, stdout: head, stderr: '' };
+      if (command === 'git' && args[0] === 'rev-list') return { status: 0, stdout: head, stderr: '' };
+      if (command === 'git' && args[0] === 'status') return { status: 0, stdout: '', stderr: '' };
+      if (command === 'git' && args[0] === 'remote') {
+        return { status: 0, stdout: 'https://github.com/example/release-repo.git\n', stderr: '' };
+      }
+      if (command === 'git' && args[0] === 'ls-remote') {
+        return { status: 0, stdout: `${head}\trefs/tags/v0.1.999^{}\n`, stderr: '' };
+      }
+      if (command === 'gh' && args[0] === 'release') return { status: 1, stdout: '', stderr: 'not found' };
+      if (command === 'ps') return { status: 0, stdout: '', stderr: '' };
+      return { status: 0, stdout: `${command} test-version\n`, stderr: '' };
+    };
+
+    const receipt = performShipPreflight({ root, version: '0.1.999', env, run });
+
+    expect(receipt.intakeReconciliation).toMatchObject({ status: 'disabled' });
   });
 });

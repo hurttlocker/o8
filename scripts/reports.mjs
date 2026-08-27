@@ -36,10 +36,9 @@ import {
   recordStatus,
 } from './lib/fixed-reports.mjs';
 import { syncReports } from './sync-reports.mjs';
+import { resolveIntakeReconciliation } from './lib/intake-reconciliation.mjs';
 import { publicTitle } from './lib/sanitize-title.mjs';
-import { appendFileSync, readFileSync } from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
+import { appendFileSync } from 'node:fs';
 
 const CHANNEL_ID = process.env.O8_FEEDBACK_CHANNEL_ID?.trim() || '1531943963295219752';
 
@@ -56,30 +55,21 @@ const COLOR = {
   fixed: '\x1b[32m',          // green
 };
 
-function botToken() {
-  const fromEnv = process.env.O8_DISCORD_BOT_TOKEN?.trim();
-  if (fromEnv) return fromEnv;
-  try {
-    const file = path.join(
-      process.env.O8_DATA_DIR || process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.o8'),
-      'discord-bot-token',
-    );
-    return readFileSync(file, 'utf8').trim() || null;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Mirror a note onto a thread hanging off the original report message, so the
  * trail lives next to the report itself instead of only in a local file.
  * Best-effort — a Discord outage must not lose the note, which is already on disk.
  */
 async function mirrorToDiscord(report, { status, note }) {
-  const token = botToken();
-  if (!token || !report.messageId) return { ok: false, why: !token ? 'no bot token' : 'no message id (run sync:reports)' };
+  const { inspection, credential } = resolveIntakeReconciliation();
+  if (!credential || !report.messageId) {
+    const why = !credential
+      ? `intake reconciliation ${inspection.status}`
+      : 'no message id (run sync:reports)';
+    return { ok: false, why };
+  }
 
-  const headers = { Authorization: `Bot ${token}`, 'Content-Type': 'application/json' };
+  const headers = { Authorization: `Bot ${credential}`, 'Content-Type': 'application/json' };
   const api = 'https://discord.com/api/v10';
 
   const parts = [];
@@ -299,10 +289,16 @@ async function main() {
     case 'list': {
       if (!rest.includes('--no-sync')) {
         try {
-          const { fresh } = await syncReports();
+          const { status, fresh } = await syncReports();
+          if (status === 'disabled') {
+            console.warn(`${DIM}(intake reconciliation intentionally disabled; showing the local ledger)${RESET}\n`);
+          }
           if (fresh.length > 0) console.log(`${DIM}pulled ${fresh.length} new report(s) from the intake channel${RESET}\n`);
-        } catch {
-          console.warn(`${DIM}(intake channel unreachable — showing the local ledger)${RESET}\n`);
+        } catch (error) {
+          const reason = error?.code === 'O8_INTAKE_CONFIGURATION'
+            ? error.message
+            : 'external intake is unreachable';
+          console.warn(`${DIM}(${reason}; showing the local ledger)${RESET}\n`);
         }
       }
       printQueue();

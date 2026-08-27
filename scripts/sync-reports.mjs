@@ -30,30 +30,17 @@
  * Channel: O8_FEEDBACK_CHANNEL_ID env, else the o8 private intake channel.
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { feedbackDir, ledgerPath, readLedger } from './lib/fixed-reports.mjs';
-import path from 'node:path';
-import os from 'node:os';
+import {
+  intakeReconciliationDiagnostic,
+  resolveIntakeReconciliation,
+} from './lib/intake-reconciliation.mjs';
 
 const DRY_RUN = process.argv.includes('--dry-run');
 const CHANNEL_ID = process.env.O8_FEEDBACK_CHANNEL_ID?.trim() || '1531943963295219752';
 const PAGE_LIMIT = 100;
 const MAX_PAGES = 20; // 2000 messages — far past anything we'd need to backfill
-
-function resolveBotToken() {
-  const fromEnv = process.env.O8_DISCORD_BOT_TOKEN?.trim();
-  if (fromEnv) return fromEnv;
-  try {
-    const file = path.join(
-      process.env.O8_DATA_DIR || process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.o8'),
-      'discord-bot-token',
-    );
-    const raw = readFileSync(file, 'utf8').trim();
-    return raw || null;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Reconstruct a ledger record from a report embed.
@@ -106,7 +93,7 @@ export function parseReportEmbed(message) {
   };
 }
 
-async function fetchChannel(token) {
+async function fetchChannel(token, fetchImpl = fetch) {
   const messages = [];
   let before = null;
 
@@ -115,7 +102,7 @@ async function fetchChannel(token) {
     url.searchParams.set('limit', String(PAGE_LIMIT));
     if (before) url.searchParams.set('before', before);
 
-    const response = await fetch(url, { headers: { Authorization: `Bot ${token}` } });
+    const response = await fetchImpl(url, { headers: { Authorization: `Bot ${token}` } });
     if (!response.ok) {
       throw new Error(`Discord returned HTTP ${response.status}: ${(await response.text()).slice(0, 160)}`);
     }
@@ -129,15 +116,18 @@ async function fetchChannel(token) {
   return messages;
 }
 
-export async function syncReports({ dryRun = false } = {}) {
-  const token = resolveBotToken();
-  if (!token) {
-    throw new Error(
-      'No Discord bot token. Set O8_DISCORD_BOT_TOKEN, or write it to ~/.o8/discord-bot-token (chmod 600).',
-    );
+export async function syncReports({ dryRun = false, env = process.env, fetchImpl = fetch } = {}) {
+  const { inspection, credential } = resolveIntakeReconciliation({ env });
+  if (inspection.status === 'disabled') {
+    return { status: 'disabled', fresh: [], enriched: [], legacy: 0, scanned: 0 };
+  }
+  if (!credential) {
+    const error = new Error(intakeReconciliationDiagnostic(inspection));
+    error.code = 'O8_INTAKE_CONFIGURATION';
+    throw error;
   }
 
-  const messages = await fetchChannel(token);
+  const messages = await fetchChannel(credential, fetchImpl);
   const known = readLedger();
 
   const fresh = [];
@@ -170,12 +160,16 @@ export async function syncReports({ dryRun = false } = {}) {
     appendFileSync(ledgerPath(), writes.map((r) => `${JSON.stringify(r)}\n`).join(''), 'utf8');
   }
 
-  return { fresh, enriched, legacy, scanned: messages.length };
+  return { status: 'configured', fresh, enriched, legacy, scanned: messages.length };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   syncReports({ dryRun: DRY_RUN })
-    .then(({ fresh, legacy, scanned }) => {
+    .then(({ status, fresh, legacy, scanned }) => {
+      if (status === 'disabled') {
+        console.log('[disabled] External intake reconciliation is intentionally disabled; the local ledger is unchanged.');
+        return;
+      }
       console.log(`${DRY_RUN ? '[dry-run] ' : ''}Scanned ${scanned} message(s); imported ${fresh.length} report(s).`);
       for (const r of fresh) {
         console.log(`  ${r.id}  ${r.reporter ? `@${r.reporter}` : 'anonymous'}  v${r.version}  ${r.title}`);
