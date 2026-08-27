@@ -24,6 +24,7 @@ import {
   AGENT_MESSAGE_TEXT_MAX_LENGTH,
   type AgentMessageRefs,
   type AgentPresence,
+  acknowledgeAgentInbox,
   findAgentPresence,
   isPresenceLive,
   listAgentInbox,
@@ -216,8 +217,8 @@ export async function postAgentMessage(
   } catch (error) {
     message = updateAgentMessageDelivery(
       message.id,
-      'failed',
-      error instanceof Error ? error.message : String(error),
+      'poll',
+      `Live delivery deferred; retained in the durable inbox. ${error instanceof Error ? error.message : String(error)}`,
       sqlite,
     );
   }
@@ -297,10 +298,21 @@ export function readAgentInbox(
   if (lane && agent.agentId !== lane.id) {
     throw new AgentBusError('Workers can read only their own inbox.', 'agent_inbox_forbidden', 403);
   }
-  const page = listAgentInbox({ agent, after: parseCursor(input.cursor), limit: input.limit }, sqlite);
+  const after = parseCursor(input.cursor);
+  const page = listAgentInbox({ agent, after, limit: input.limit }, sqlite);
+  const acknowledgesDelivery = lane !== null || input.agentId !== null;
+  if (acknowledgesDelivery) {
+    acknowledgeAgentInbox({ agent, throughSequence: page.cursor }, sqlite);
+  }
   return {
     agent,
-    messages: page.messages,
+    messages: acknowledgesDelivery
+      ? page.messages.map((message) => message.delivery === 'native' ? message : {
+        ...message,
+        delivery: 'native' as const,
+        deliveryNote: 'Read from the durable inbox by the target session.',
+      })
+      : page.messages,
     cursor: Buffer.from(String(page.cursor), 'utf8').toString('base64url'),
     hasMore: page.hasMore,
   };

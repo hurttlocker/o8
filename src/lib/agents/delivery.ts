@@ -1,8 +1,10 @@
 import 'server-only';
 
 import { execFile } from 'node:child_process';
+import os from 'node:os';
 import { promisify } from 'node:util';
 
+import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import type { AgentMessage, AgentPresence } from './store';
 
 const execFileAsync = promisify(execFile);
@@ -48,6 +50,28 @@ type TerminalTurnExec = (
   options: { windowsHide: boolean; timeout: number },
 ) => Promise<unknown>;
 
+type CodexQueueExec = (
+  file: string,
+  args: string[],
+  options: {
+    windowsHide: boolean;
+    timeout: number;
+    maxBuffer: number;
+    cwd: string;
+    env: NodeJS.ProcessEnv;
+    encoding: 'utf-8';
+  },
+) => Promise<unknown>;
+
+export interface CodexQueueDependencies {
+  resolveBinary?: () => Promise<string>;
+  resolveSessionHome?: (sessionKey: string) => Promise<{
+    threadId: string;
+    configHomeRef: string;
+  } | null>;
+  run?: CodexQueueExec;
+}
+
 export async function submitClaudeTerminalUserTurn(
   input: { tty: string; pid: number; content: string },
   run: TerminalTurnExec = execFileAsync,
@@ -61,6 +85,64 @@ export async function submitClaudeTerminalUserTurn(
   ], {
     windowsHide: true,
     timeout: 5_000,
+  });
+}
+
+function codexThreadId(sessionKey: string): string {
+  return sessionKey.replace(/^codex:/, '').replace(/^codex-discovered:/, '').trim();
+}
+
+export async function submitCodexQueuedUserTurn(
+  target: AgentPresence,
+  content: string,
+  dependencies: CodexQueueDependencies = {},
+): Promise<void> {
+  if (!target.sessionKey) throw new Error('Codex thread metadata is incomplete.');
+  const threadId = codexThreadId(target.sessionKey);
+  if (!threadId) throw new Error('Codex thread metadata is incomplete.');
+
+  const resolveBinary = dependencies.resolveBinary ?? (async () => {
+    const { resolveCli } = await import('@/lib/runtimes/shared/cli-resolver');
+    return (await resolveCli({
+      runtimeId: 'codex',
+      binaryName: 'codex',
+      envOverride: 'O8_CODEX_BIN',
+      extraEnvOverrides: ['CODEX_HOME'],
+    })).path;
+  });
+  const resolveSessionHome = dependencies.resolveSessionHome ?? (async (sessionKey: string) => {
+    const [{ getRuntime }, { resolveCodexDiscoveredSessionHome }] = await Promise.all([
+      import('@/lib/runtimes'),
+      import('@/lib/codex/sessions'),
+    ]);
+    const identityId = await getRuntime('codex')?.getSessionIdentityId?.(sessionKey);
+    return resolveCodexDiscoveredSessionHome(sessionKey, identityId ?? undefined);
+  });
+  const providerSession = await resolveSessionHome(target.sessionKey);
+  if (!providerSession || providerSession.threadId !== threadId) {
+    throw new Error('The Codex task is missing or ambiguous across registered identities.');
+  }
+
+  const binary = await resolveBinary();
+  const invocation = cliInvocation(binary, [
+    'queue',
+    '--thread',
+    threadId,
+    '--message',
+    content,
+  ]);
+  await (dependencies.run ?? execFileAsync)(invocation.command, invocation.args, {
+    windowsHide: true,
+    timeout: 10_000,
+    maxBuffer: 1024 * 1024,
+    cwd: target.worktreePath || os.homedir(),
+    env: {
+      ...process.env,
+      CODEX_HOME: providerSession.configHomeRef,
+      FORCE_COLOR: '0',
+      NO_COLOR: '1',
+    },
+    encoding: 'utf-8',
   });
 }
 
@@ -118,6 +200,10 @@ async function defaultSendClaude(target: AgentPresence, payload: AgentUserRolePa
 
 async function defaultSendCodex(target: AgentPresence, text: string): Promise<void> {
   if (!target.sessionKey) throw new Error('Codex thread metadata is incomplete.');
+  if (!target.sessionKey.startsWith('codex-owned:')) {
+    await submitCodexQueuedUserTurn(target, text);
+    return;
+  }
   const { getRuntime } = await import('@/lib/runtimes');
   const runtime = getRuntime('codex');
   if (!runtime) throw new Error('Codex runtime is unavailable.');
@@ -143,7 +229,7 @@ export async function deliverAgentMessage(
   if (target.runtime === 'codex') {
     const text = nativeAgentMessageText(message);
     await seams.sendCodex(target, text);
-    return { delivery: 'native', note: 'Accepted through Codex thread resume.' };
+    return { delivery: 'native', note: 'Accepted by the exact Codex task queue.' };
   }
   return { delivery: 'poll', note: 'Target runtime polls the durable inbox.' };
 }
