@@ -188,4 +188,27 @@ describe('mobile history runtime transcript parity', () => {
     const delta = await runtime!.readTranscript(sessionKey, fullTranscript[promptIndex]!.id, 2);
     expect(delta).toEqual(fullTranscript.slice(promptIndex + 1).slice(-2));
   });
+
+  it('keeps durable operator entries when a runtime disowns the session', async () => {
+    const sessionKey = 'cloud:unknown-mobile-history-job';
+    const lane = createLane({
+      repoPath: dataDir,
+      branch: 'test/mobile-history-unknown-cloud',
+      runtime: 'codex',
+      sessionKey,
+    });
+    appendEvent(lane.id, 'steered_packet', 'orchestrator', {
+      source: 'orchestrator',
+      message: 'Keep this durable direction visible.',
+    });
+
+    const transcript = await getMobileSessionTranscript(sessionKey, 50, true);
+
+    expect(transcript).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: 'user',
+        text: expect.stringContaining('Keep this durable direction visible.'),
+      }),
+    ]));
+  });
 });

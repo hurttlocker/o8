@@ -39,20 +39,26 @@ describe('allowWorktreeRemoval — the deletion seam reads live process state, n
       cwd: dir,
       stdio: 'ignore',
     });
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(child.pid).toBeGreaterThan(0);
+    const childPid = child.pid;
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(childPid).toBeGreaterThan(0);
 
-    const whileLive = await allowWorktreeRemoval(dir, { logPrefix: 'seam-test' });
-    // Self-check: if the probe cannot see the live process the rest is vacuous.
-    expect(whileLive).toBe(false);
+      const whileLive = await allowWorktreeRemoval(dir, { logPrefix: 'seam-test' });
+      // Self-check: if the probe cannot see the live process the rest is vacuous.
+      expect(whileLive).toBe(false);
 
-    // The refusal above populated the machine cwd snapshot, which is cached for
-    // 15s. The process now exits well inside that window; a seam that answered
-    // from cache would keep refusing a removal that is already safe.
-    child.kill('SIGTERM');
-    await waitForProcessExit(child.pid!);
+      // The refusal above populated the machine cwd snapshot, which is cached for
+      // 15s. The process now exits well inside that window; a seam that answered
+      // from cache would keep refusing a removal that is already safe.
+      child.kill('SIGTERM');
+      await waitForProcessExit(childPid!);
 
-    const afterExit = await allowWorktreeRemoval(dir, { logPrefix: 'seam-test' });
-    expect(afterExit).toBe(true);
+      const afterExit = await allowWorktreeRemoval(dir, { logPrefix: 'seam-test' });
+      expect(afterExit).toBe(true);
+    } finally {
+      child.kill('SIGKILL');
+      if (childPid) await waitForProcessExit(childPid);
+    }
   }, 30_000);
 });

@@ -133,7 +133,11 @@ async function snapshotPosixDescendants(state: PosixProcessTreeState): Promise<v
   const visited = new Set<number>();
   while (queue.length > 0) {
     const parentPid = queue.shift()!;
-    if (visited.has(parentPid) || !isPidAlive(parentPid)) continue;
+    if (visited.has(parentPid)) continue;
+    if (!isPidAlive(parentPid)) {
+      state.verificationFailures.delete(parentPid);
+      continue;
+    }
     visited.add(parentPid);
     let children: number[];
     try {

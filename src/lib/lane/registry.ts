@@ -903,17 +903,11 @@ export function archiveLane(laneId: string, actor: LaneEventActor = 'user', endi
   }
   const ending = resolveArchiveEnding(lane, getLaneEvents(lane.id, 100), endingOverride);
   if (ending.contractViolation) reportMissingArchiveEnding(lane);
-  // Keep worktreePath only while the lane owns a directory that is still THERE,
-  // so a failed cleanup stays retryable. Once absence is proven the path is
-  // stale, and an archived lane pointing at a removed directory is a lie every
-  // later reader has to re-derive. Retirement proves absence too, not only the
-  // cleanup action.
+  // A failed cleanup keeps its live path retryable; proven absence clears the stale path.
   const updated = updateLane(laneId, {
     status: 'archived',
     ...ending.updates,
-    ...(laneOwnsWorktree(lane) && !worktreeIsConfirmedAbsent(lane.worktreePath)
-      ? {}
-      : { worktreePath: null }),
+    ...(laneOwnsWorktree(lane) && !worktreeIsConfirmedAbsent(lane.worktreePath) ? {} : { worktreePath: null }),
     writerToken: null,
     lastEventAt: nowIso(),
     lastEventLabel: 'archived',

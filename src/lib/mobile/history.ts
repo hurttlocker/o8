@@ -290,7 +290,5 @@ export async function getMobileSessionTranscript(
   }
 
   const runtimeTranscript = await readRegisteredMobileRuntimeTranscript(sessionKey, limit);
-  return runtimeTranscript
-    ? finalizeMobileTranscript(sessionKey, runtimeTranscript, limit)
-    : [];
+  return finalizeMobileTranscript(sessionKey, runtimeTranscript ?? [], limit);
 }

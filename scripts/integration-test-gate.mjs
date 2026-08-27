@@ -69,6 +69,16 @@ function groupAlive(child) {
   }
 }
 
+function childAlive(child) {
+  if (!child?.pid) return false;
+  try {
+    process.kill(child.pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === 'EPERM';
+  }
+}
+
 function remainingTreePids(child, marker, markerState = markerPids(marker)) {
   const pids = new Set(markerState ?? []);
   if (groupAlive(child) && child?.pid) pids.add(child.pid);
@@ -84,17 +94,37 @@ async function settle(child, marker, firstSignal = 'SIGTERM') {
     ['SIGKILL', 1_000],
   ]) {
     try {
-      if (process.platform === 'win32') child.kill(signal);
-      else process.kill(-child.pid, signal);
+      if (process.platform === 'win32') {
+        spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+          encoding: 'utf8',
+          timeout: 5_000,
+          windowsHide: true,
+        });
+      } else {
+        process.kill(-child.pid, signal);
+      }
     } catch {}
+    if (process.platform === 'win32') {
+      try { child.kill(signal); } catch {}
+    }
     for (const pid of markerPids(marker) ?? []) {
       try { process.kill(pid, signal); } catch {}
     }
     await sleep(waitMs);
+    if (process.platform === 'win32' && !childAlive(child)) {
+      return { confirmed: true, remainingPids: [] };
+    }
     const remaining = markerPids(marker);
     if (!groupAlive(child) && remaining !== null && remaining.length === 0) {
       return { confirmed: true, remainingPids: [] };
     }
+  }
+  if (process.platform === 'win32') {
+    const alive = childAlive(child);
+    return {
+      confirmed: !alive,
+      remainingPids: alive ? [child.pid] : [],
+    };
   }
   const remaining = markerPids(marker);
   const confirmed = !groupAlive(child) && remaining !== null && remaining.length === 0;
@@ -268,9 +298,13 @@ async function runFile(file, index) {
   });
   clearInterval(heartbeat);
   const markerState = markerPids(marker);
-  const treeSettlement = outcome.treeSettlement ?? (groupAlive(child) || markerState === null || markerState.length > 0
-    ? await settle(child, marker)
-    : { confirmed: true, remainingPids: [] });
+  const treeSettlement = outcome.treeSettlement ?? (process.platform === 'win32'
+    ? (!childAlive(child)
+        ? { confirmed: true, remainingPids: [] }
+        : await settle(child, marker))
+    : (groupAlive(child) || markerState === null || markerState.length > 0
+        ? await settle(child, marker)
+        : { confirmed: true, remainingPids: [] }));
   if (!treeSettlement.confirmed) {
     outcome.code = 1;
     const treeError = `integration fixture process tree could not be confirmed stopped; pids: ${treeSettlement.remainingPids.join(', ') || child.pid || 'unknown'}`;

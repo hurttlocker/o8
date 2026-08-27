@@ -218,6 +218,17 @@ async function waitForEvent(laneId: string, verb: 'spend_cap_hit' | 'kill_escala
   throw new Error(`Timed out waiting for ${verb}.`);
 }
 
+async function waitForConfirmedKillEvent(laneId: string) {
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    const event = getLaneEvents(laneId, 200).find((candidate) =>
+      candidate.verb === 'kill_escalated' && candidate.payload?.confirmed === true);
+    if (event) return event;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error('Timed out waiting for a confirmed kill_escalated event.');
+}
+
 describe('metered packet cap real path', () => {
   it('uses gateway cost, interrupts the dispatched worker, and surfaces the cap event', async () => {
     await writeClaudeCodeWorkerProfile({ source: 'openrouter', model: 'metered/test', codexModel: null });
@@ -264,7 +275,7 @@ describe('metered packet cap real path', () => {
     const event = await waitForEvent(lane.id, 'spend_cap_hit');
     expect(event.payload).toMatchObject({ costUsd: 0.09, costSource: 'gateway', costCapUsd: 0.05 });
     const workerPids = await waitForFixturePids();
-    const kill = await waitForEvent(lane.id, 'kill_escalated');
+    const kill = await waitForConfirmedKillEvent(lane.id);
     expect(kill.payload).toMatchObject({ confirmed: true });
     for (const pid of [workerPids.interpreterPid, workerPids.workerPid]) {
       expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }));
