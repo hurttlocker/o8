@@ -50,7 +50,7 @@ export function classifyTestSource(path, source) {
   return [...new Set(reasons)].sort();
 }
 
-export function buildTestClassification(root) {
+export function buildTestClassificationReport(root) {
   const files = [];
   for (const testRoot of TEST_ROOTS) {
     const absolute = join(root, testRoot);
@@ -62,13 +62,18 @@ export function buildTestClassification(root) {
     return reasons.length > 0 ? [{ path, reasons }] : [];
   });
   return {
-    schema: 'o8/test-classification/v1',
-    generatedBy: 'node scripts/classify-tests.mjs --write',
-    totalTests: files.length,
+    manifest: {
+      schema: 'o8/test-classification/v1',
+      generatedBy: 'node scripts/classify-tests.mjs --write',
+      resourceOwning,
+    },
     hermeticTests: files.length - resourceOwning.length,
     resourceOwningTests: resourceOwning.length,
-    resourceOwning,
   };
+}
+
+export function buildTestClassification(root) {
+  return buildTestClassificationReport(root).manifest;
 }
 
 export const testClassificationInternals = {

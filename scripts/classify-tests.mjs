@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { buildTestClassification } from './lib/test-classification.mjs';
+import { buildTestClassificationReport } from './lib/test-classification.mjs';
 
 const root = process.cwd();
 const manifestPath = join(root, 'tests/test-classification.json');
-const next = `${JSON.stringify(buildTestClassification(root), null, 2)}\n`;
+const classification = buildTestClassificationReport(root);
+const next = `${JSON.stringify(classification.manifest, null, 2)}\n`;
 const mode = process.argv[2] || '--check';
 
 if (mode === '--write') {
   writeFileSync(manifestPath, next);
-  const manifest = JSON.parse(next);
-  console.log(`[test-classification] ${manifest.hermeticTests} hermetic, ${manifest.resourceOwningTests} resource-owning`);
+  console.log(`[test-classification] ${classification.hermeticTests} hermetic, ${classification.resourceOwningTests} resource-owning`);
   process.exit(0);
 }
 if (mode !== '--check') {
