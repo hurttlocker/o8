@@ -13,6 +13,7 @@ export type { AgentMessage, AgentMessageRefs, AgentPresence } from './types';
 
 export const AGENT_MESSAGE_TEXT_MAX_LENGTH = 4_000;
 export const AGENT_PRESENCE_TTL_MS = 6 * 60_000;
+export const AGENT_NATIVE_WAKE_TTL_MS = 15 * 60_000;
 
 interface PresenceRow {
   agent_id: string;
@@ -37,6 +38,13 @@ interface MessageRow {
   delivery_status: 'native' | 'poll' | 'failed';
   delivery_note: string | null;
   created_at: string;
+}
+
+interface InboxStateRow {
+  acknowledged_sequence: number;
+  native_wake_session_key: string | null;
+  native_wake_through_sequence: number;
+  native_wake_at: string | null;
 }
 
 function normalizeRepoPath(repo: string): string {
@@ -103,6 +111,16 @@ export function ensureAgentBusSchema(sqlite: Database.Database = getSqlite()): v
 
     CREATE INDEX IF NOT EXISTS idx_agent_messages_inbox
       ON agent_messages(repo_path, to_agent, sequence);
+
+    CREATE TABLE IF NOT EXISTS agent_inbox_state (
+      repo_path TEXT NOT NULL,
+      agent_name TEXT NOT NULL COLLATE NOCASE,
+      acknowledged_sequence INTEGER NOT NULL DEFAULT 0 CHECK (acknowledged_sequence >= 0),
+      native_wake_session_key TEXT,
+      native_wake_through_sequence INTEGER NOT NULL DEFAULT 0 CHECK (native_wake_through_sequence >= 0),
+      native_wake_at TEXT,
+      PRIMARY KEY(repo_path, agent_name)
+    );
   `);
   sqlite.prepare(`
     UPDATE agent_messages
@@ -279,14 +297,93 @@ export function updateAgentMessageDelivery(
   return mapMessage(sqlite.prepare('SELECT * FROM agent_messages WHERE id = ?').get(id) as MessageRow);
 }
 
+function ensureAgentInboxState(
+  agent: AgentPresence,
+  sqlite: Database.Database,
+): InboxStateRow {
+  const repo = normalizeRepoPath(agent.repo);
+  sqlite.prepare(`
+    INSERT OR IGNORE INTO agent_inbox_state
+      (repo_path, agent_name, acknowledged_sequence, native_wake_session_key,
+       native_wake_through_sequence, native_wake_at)
+    VALUES (?, ?, 0, NULL, 0, NULL)
+  `).run(repo, agent.name);
+  return sqlite.prepare(`
+    SELECT acknowledged_sequence, native_wake_session_key,
+           native_wake_through_sequence, native_wake_at
+    FROM agent_inbox_state
+    WHERE repo_path = ? AND agent_name = ? COLLATE NOCASE
+  `).get(repo, agent.name) as InboxStateRow;
+}
+
+export function getAgentInboxCursor(
+  agent: AgentPresence,
+  sqlite: Database.Database = getSqlite(),
+): number {
+  ensureAgentBusSchema(sqlite);
+  return ensureAgentInboxState(agent, sqlite).acknowledged_sequence;
+}
+
+export function claimAgentInboxWake(
+  input: { agent: AgentPresence; throughSequence: number; now?: Date },
+  sqlite: Database.Database = getSqlite(),
+): boolean {
+  ensureAgentBusSchema(sqlite);
+  if (!input.agent.sessionKey || input.throughSequence <= 0) return false;
+  const repo = normalizeRepoPath(input.agent.repo);
+  const now = input.now ?? new Date();
+  return sqlite.transaction(() => {
+    const state = ensureAgentInboxState(input.agent, sqlite);
+    const wakeAt = state.native_wake_at ? Date.parse(state.native_wake_at) : Number.NaN;
+    const wakeIsFresh = state.native_wake_session_key === input.agent.sessionKey
+      && Number.isFinite(wakeAt)
+      && now.getTime() - wakeAt < AGENT_NATIVE_WAKE_TTL_MS;
+    if (wakeIsFresh) {
+      sqlite.prepare(`
+        UPDATE agent_inbox_state
+        SET native_wake_through_sequence = MAX(native_wake_through_sequence, ?)
+        WHERE repo_path = ? AND agent_name = ? COLLATE NOCASE
+      `).run(input.throughSequence, repo, input.agent.name);
+      return false;
+    }
+    sqlite.prepare(`
+      UPDATE agent_inbox_state
+      SET native_wake_session_key = ?, native_wake_through_sequence = ?, native_wake_at = ?
+      WHERE repo_path = ? AND agent_name = ? COLLATE NOCASE
+    `).run(
+      input.agent.sessionKey,
+      input.throughSequence,
+      now.toISOString(),
+      repo,
+      input.agent.name,
+    );
+    return true;
+  })();
+}
+
+export function releaseAgentInboxWake(
+  agent: AgentPresence,
+  sqlite: Database.Database = getSqlite(),
+): void {
+  ensureAgentBusSchema(sqlite);
+  if (!agent.sessionKey) return;
+  sqlite.prepare(`
+    UPDATE agent_inbox_state
+    SET native_wake_session_key = NULL, native_wake_through_sequence = 0, native_wake_at = NULL
+    WHERE repo_path = ? AND agent_name = ? COLLATE NOCASE
+      AND native_wake_session_key = ?
+  `).run(normalizeRepoPath(agent.repo), agent.name, agent.sessionKey);
+}
+
 export function listAgentInbox(
-  input: { agent: AgentPresence; after: number; limit: number },
+  input: { agent: AgentPresence; after: number; limit: number; includeDelivered?: boolean },
   sqlite: Database.Database = getSqlite(),
 ): { messages: AgentMessage[]; cursor: number; hasMore: boolean } {
   ensureAgentBusSchema(sqlite);
   const rows = sqlite.prepare(`
     SELECT * FROM agent_messages
     WHERE repo_path = ? AND to_agent = ? COLLATE NOCASE AND sequence > ?
+    ${input.includeDelivered === false ? "AND delivery_status <> 'native'" : ''}
     ORDER BY sequence ASC LIMIT ?
   `).all(input.agent.repo, input.agent.name, input.after, input.limit + 1) as MessageRow[];
   const hasMore = rows.length > input.limit;
@@ -304,18 +401,47 @@ export function acknowledgeAgentInbox(
 ): void {
   ensureAgentBusSchema(sqlite);
   if (input.throughSequence <= 0) return;
-  sqlite.prepare(`
-    UPDATE agent_messages
-    SET
-      delivery_status = 'native',
-      delivery_note = CASE
-        WHEN delivery_status = 'native' THEN delivery_note
-        ELSE 'Read from the durable inbox by the target session.'
-      END
-    WHERE repo_path = ?
-      AND to_agent = ? COLLATE NOCASE
-      AND sequence <= ?
-  `).run(input.agent.repo, input.agent.name, input.throughSequence);
+  const repo = normalizeRepoPath(input.agent.repo);
+  sqlite.transaction(() => {
+    ensureAgentInboxState(input.agent, sqlite);
+    sqlite.prepare(`
+      UPDATE agent_messages
+      SET
+        delivery_status = 'native',
+        delivery_note = CASE
+          WHEN delivery_status = 'native' THEN delivery_note
+          ELSE 'Read from the durable inbox by the target session.'
+        END
+      WHERE repo_path = ?
+        AND to_agent = ? COLLATE NOCASE
+        AND sequence <= ?
+    `).run(repo, input.agent.name, input.throughSequence);
+    sqlite.prepare(`
+      UPDATE agent_inbox_state
+      SET
+        acknowledged_sequence = MAX(acknowledged_sequence, ?),
+        native_wake_session_key = CASE
+          WHEN native_wake_through_sequence <= ? THEN NULL
+          ELSE native_wake_session_key
+        END,
+        native_wake_through_sequence = CASE
+          WHEN native_wake_through_sequence <= ? THEN 0
+          ELSE native_wake_through_sequence
+        END,
+        native_wake_at = CASE
+          WHEN native_wake_through_sequence <= ? THEN NULL
+          ELSE native_wake_at
+        END
+      WHERE repo_path = ? AND agent_name = ? COLLATE NOCASE
+    `).run(
+      input.throughSequence,
+      input.throughSequence,
+      input.throughSequence,
+      input.throughSequence,
+      repo,
+      input.agent.name,
+    );
+  })();
 }
 
 export function listRecentAgentMessages(

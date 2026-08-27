@@ -25,12 +25,15 @@ import {
   type AgentMessageRefs,
   type AgentPresence,
   acknowledgeAgentInbox,
+  claimAgentInboxWake,
   findAgentPresence,
+  getAgentInboxCursor,
   isPresenceLive,
   listAgentInbox,
   listAgentPresence,
   listRecentAgentMessages,
   persistAgentMessage,
+  releaseAgentInboxWake,
   updateAgentMessageDelivery,
   upsertAgentPresence,
 } from './store';
@@ -211,6 +214,39 @@ export async function postAgentMessage(
     refs: messageRefs(body, lane),
   }, sqlite);
   if (!isPresenceLive(target)) return message;
+  const usesCodexInboxWake = target.runtime === 'codex' && target.sessionKey !== null;
+  if (usesCodexInboxWake) {
+    const claimedWake = claimAgentInboxWake({ agent: target, throughSequence: message.sequence }, sqlite);
+    if (!claimedWake) {
+      return updateAgentMessageDelivery(
+        message.id,
+        'poll',
+        'A Codex inbox wake is already pending; retained in the durable inbox.',
+        sqlite,
+      );
+    }
+    try {
+      const result = await deliverAgentMessage(message, target, seams);
+      if (result.delivery !== 'native') {
+        releaseAgentInboxWake(target, sqlite);
+        return updateAgentMessageDelivery(message.id, result.delivery, result.note, sqlite);
+      }
+      return updateAgentMessageDelivery(
+        message.id,
+        'poll',
+        'Codex inbox wake accepted; retained in the durable inbox until the target reads it.',
+        sqlite,
+      );
+    } catch (error) {
+      releaseAgentInboxWake(target, sqlite);
+      return updateAgentMessageDelivery(
+        message.id,
+        'poll',
+        `Live delivery deferred; retained in the durable inbox. ${error instanceof Error ? error.message : String(error)}`,
+        sqlite,
+      );
+    }
+  }
   try {
     const result = await deliverAgentMessage(message, target, seams);
     message = updateAgentMessageDelivery(message.id, result.delivery, result.note, sqlite);
@@ -298,9 +334,18 @@ export function readAgentInbox(
   if (lane && agent.agentId !== lane.id) {
     throw new AgentBusError('Workers can read only their own inbox.', 'agent_inbox_forbidden', 403);
   }
-  const after = parseCursor(input.cursor);
-  const page = listAgentInbox({ agent, after, limit: input.limit }, sqlite);
   const acknowledgesDelivery = lane !== null || input.agentId !== null;
+  const after = input.cursor
+    ? parseCursor(input.cursor)
+    : acknowledgesDelivery
+      ? getAgentInboxCursor(agent, sqlite)
+      : 0;
+  const page = listAgentInbox({
+    agent,
+    after,
+    limit: input.limit,
+    includeDelivered: !acknowledgesDelivery,
+  }, sqlite);
   if (acknowledgesDelivery) {
     acknowledgeAgentInbox({ agent, throughSequence: page.cursor }, sqlite);
   }

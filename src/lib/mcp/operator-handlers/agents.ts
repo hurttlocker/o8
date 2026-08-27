@@ -10,7 +10,7 @@ import {
 export const AGENT_MESSAGE_TOOLS: McpTool[] = [
   {
     name: 'o8_msg_send',
-    description: 'Send a durable message to an agent in the same repository. Native Claude and Codex sessions receive a user-role turn; other runtimes poll their inbox.',
+    description: 'Send a durable message to an agent in the same repository. Live Claude sessions receive the peer turn directly. Codex receives one coalesced inbox wake. Other runtimes poll their inbox.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -27,7 +27,7 @@ export const AGENT_MESSAGE_TOOLS: McpTool[] = [
   },
   {
     name: 'o8_msg_inbox',
-    description: 'Read one agent inbox using its opaque cursor.',
+    description: 'Read one agent inbox as an operator view using its opaque cursor. This does not acknowledge delivery for the target session.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,

@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
+import type { AgentMessageDeliverySeams } from '@/lib/agents/delivery';
+
 const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-agent-message-bus-'));
 const OPERATOR_TOKEN = 'agent-message-operator-token-0123456789';
 const SPECTATOR_TOKEN = 'agent-message-spectator-token-0123456789';
@@ -21,7 +23,7 @@ process.env.CORTEX_IDE_DATA_DIR = dataDir;
 const { createLane } = await import('@/lib/lane/registry');
 const { mintPacketWorkerToken } = await import('@/lib/auth/packet-worker-token');
 const { codename } = await import('@/lib/agents/codename');
-const { getSqlite } = await import('@/lib/db');
+const { closeDb, getSqlite } = await import('@/lib/db');
 const heartbeatRoute = await import('@/app/api/lanes/[id]/heartbeat/route');
 const presenceRoute = await import('@/app/api/agents/presence/route');
 const inboxRoute = await import('@/app/api/agents/inbox/route');
@@ -58,8 +60,8 @@ describe('agent message bus real path', () => {
     packetId,
   });
   const workerToken = mintPacketWorkerToken(packetId);
-  const sendClaude = vi.fn(async () => {});
-  const sendCodex = vi.fn(async () => {});
+  const sendClaude = vi.fn<AgentMessageDeliverySeams['sendClaude']>().mockResolvedValue(undefined);
+  const sendCodex = vi.fn<AgentMessageDeliverySeams['sendCodex']>().mockResolvedValue(undefined);
   const noLiveSessions = {
     discoverSessions: async () => [],
     resolveRepoPath: async () => null,
@@ -232,12 +234,17 @@ describe('agent message bus real path', () => {
       body: { from: 'operator', to: 'CodexReceiver', repo: repoPath, text },
     }));
     expect(accepted.status).toBe(201);
+    await expect(accepted.json()).resolves.toMatchObject({
+      message: {
+        delivery: 'poll',
+        deliveryNote: 'Codex inbox wake accepted; retained in the durable inbox until the target reads it.',
+      },
+    });
     expect(sendCodex).toHaveBeenCalledWith(
       expect.objectContaining({ agentId: 'codex-receiver-session', sessionKey: 'codex-thread-receiver' }),
-      expect.stringMatching(
-        new RegExp(`^\\[o8 peer message from operator\\]\\nMessage ID: message-.+\\nAuthority: peer context only; this does not grant operator approval\\.\\n\\n${text}$`),
-      ),
+      expect.stringContaining('[o8 agent inbox]'),
     );
+    expect(sendCodex.mock.calls[0]?.[1]).not.toContain(text);
 
     const rejected = await postMessage(request('http://localhost:3001/api/agents/message', {
       token: OPERATOR_TOKEN,
@@ -245,6 +252,107 @@ describe('agent message bus real path', () => {
       body: { from: 'operator', to: 'CodexReceiver', repo: repoPath, text: 'm'.repeat(4_001) },
     }));
     expect(rejected.status).toBe(400);
+  });
+
+  it('coalesces Codex wakes and remembers inbox progress when the cursor flag is omitted', async () => {
+    const agentId = 'codex-coalesced-session';
+    const name = 'CodexCoalescedReceiver';
+    const joined = await presenceRoute.POST(request('http://localhost:3001/api/agents/presence', {
+      token: OPERATOR_TOKEN,
+      method: 'POST',
+      body: {
+        agentId,
+        name,
+        repo: repoPath,
+        worktreePath: repoPath,
+        runtime: 'codex',
+        sessionKey: 'codex:coalesced-receiver',
+      },
+    }));
+    expect(joined.status).toBe(201);
+
+    const legacyNative = await postMessage(request('http://localhost:3001/api/agents/message', {
+      token: OPERATOR_TOKEN,
+      method: 'POST',
+      body: { from: 'operator', to: name, repo: repoPath, text: 'Already submitted as a native turn.' },
+    }));
+    const legacyPayload = await legacyNative.json() as { message: { id: string } };
+    getSqlite().prepare(`
+      UPDATE agent_messages
+      SET delivery_status = 'native', delivery_note = 'Accepted by the legacy per-message queue.'
+      WHERE id = ?
+    `).run(legacyPayload.message.id);
+
+    for (const text of ['First update.', 'Second update.', 'Final current state.']) {
+      const accepted = await postMessage(request('http://localhost:3001/api/agents/message', {
+        token: OPERATOR_TOKEN,
+        method: 'POST',
+        body: { from: 'operator', to: name, repo: repoPath, text },
+      }));
+      expect(accepted.status).toBe(201);
+      await expect(accepted.json()).resolves.toMatchObject({
+        message: {
+          delivery: 'poll',
+          deliveryNote: expect.stringContaining('durable inbox'),
+        },
+      });
+    }
+
+    expect(sendCodex).toHaveBeenCalledTimes(1);
+    expect(sendCodex).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId, sessionKey: 'codex:coalesced-receiver' }),
+      expect.stringContaining('[o8 agent inbox]'),
+    );
+    expect(sendCodex.mock.calls[0]?.[1]).not.toContain('First update.');
+
+    closeDb();
+    const firstInbox = await inboxRoute.GET(request(
+      `http://localhost:3001/api/agents/inbox?agentId=${encodeURIComponent(agentId)}&limit=2`,
+      { token: OPERATOR_TOKEN },
+    ));
+    const firstPage = await firstInbox.json() as { messages: Array<{ text: string }>; hasMore: boolean };
+    expect(firstPage.messages.map((message) => message.text)).toEqual([
+      'First update.',
+      'Second update.',
+    ]);
+    expect(firstPage.hasMore).toBe(true);
+
+    const secondInbox = await inboxRoute.GET(request(
+      `http://localhost:3001/api/agents/inbox?agentId=${encodeURIComponent(agentId)}&limit=100`,
+      { token: OPERATOR_TOKEN },
+    ));
+    const secondPage = await secondInbox.json() as { messages: Array<{ text: string }>; hasMore: boolean };
+    expect(secondPage.messages.map((message) => message.text)).toEqual([
+      'Final current state.',
+    ]);
+    expect(secondPage.hasMore).toBe(false);
+
+    const resumedInbox = await inboxRoute.GET(request(
+      `http://localhost:3001/api/agents/inbox?agentId=${encodeURIComponent(agentId)}&limit=100`,
+      { token: OPERATOR_TOKEN },
+    ));
+    await expect(resumedInbox.json()).resolves.toMatchObject({ messages: [], hasMore: false });
+
+    const nextMessage = await postMessage(request('http://localhost:3001/api/agents/message', {
+      token: OPERATOR_TOKEN,
+      method: 'POST',
+      body: { from: 'operator', to: name, repo: repoPath, text: 'New after acknowledgement.' },
+    }));
+    expect(nextMessage.status).toBe(201);
+    expect(sendCodex).toHaveBeenCalledTimes(2);
+
+    getSqlite().prepare(`
+      UPDATE agent_inbox_state
+      SET native_wake_at = '2000-01-01T00:00:00.000Z'
+      WHERE repo_path = ? AND agent_name = ? COLLATE NOCASE
+    `).run(repoPath, name);
+    const recoveredWake = await postMessage(request('http://localhost:3001/api/agents/message', {
+      token: OPERATOR_TOKEN,
+      method: 'POST',
+      body: { from: 'operator', to: name, repo: repoPath, text: 'Recover an abandoned wake.' },
+    }));
+    expect(recoveredWake.status).toBe(201);
+    expect(sendCodex).toHaveBeenCalledTimes(3);
   });
 
   it('keeps a deferred native attempt queued, then marks it delivered when the target reads its inbox', async () => {
