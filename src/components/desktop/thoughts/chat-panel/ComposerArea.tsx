@@ -76,6 +76,8 @@ interface ComposerAreaProps {
   onSteer?: () => void;
   sendBufferStatus?: React.ReactNode;
   promptStash?: PromptStashContext & { onRestore: (text: string) => void };
+  voiceModeEnabled?: boolean;
+  onVoiceModeChange?: (enabled: boolean) => void;
 }
 
 export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(function ComposerArea({
@@ -131,6 +133,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   onSteer,
   sendBufferStatus,
   promptStash,
+  voiceModeEnabled,
+  onVoiceModeChange,
 }, inputRef) {
   const composerCenterRef = useRef<HTMLDivElement>(null);
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
@@ -691,6 +695,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             onSelectRepoPath={onSelectRepoPath}
             inlineLeadingExtras={composerLeadingExtras}
             inlineMeterSlot={showReasoningControls ? footerMeterSlot : null}
+            voiceModeEnabled={voiceModeEnabled}
+            onVoiceModeChange={onVoiceModeChange}
           />
         </div>
       </div>

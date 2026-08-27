@@ -17,6 +17,7 @@ import type { useWorkspaceChatPane } from '@/components/desktop/workspace-termin
 import { useThoughtsComposerAttachments } from '@/components/desktop/thoughts/chat-panel/useThoughtsComposerAttachments';
 import { PendingSteerCard } from '@/components/desktop/thoughts/chat-panel/PendingSteerCard';
 import { InputButtons } from '@/components/desktop/thoughts/InputButtons';
+import { useAgentVoiceMode } from '@/components/desktop/thoughts/chat-panel/useAgentVoiceMode';
 
 type ChatPaneState = ReturnType<typeof useWorkspaceChatPane>;
 
@@ -61,6 +62,26 @@ function WorkspaceChatComposerBase({
   // Codex composer doesn't surface enhance today — stub the callbacks
   // so the component renders without a no-op enhance button.
   const noop = useCallback(() => undefined, []);
+  const fillVoiceDraft = useCallback((text: string) => {
+    chat.setDraft(text);
+    setTimeout(() => chat.composeRef.current?.focus(), 0);
+  }, [chat]);
+  const sendVoiceTurn = useCallback((text: string) => {
+    const message = text.trim();
+    if (!message || isLaneArchived) return false;
+    chat.setDraft('');
+    void chat.sendText(message);
+    return true;
+  }, [chat, isLaneArchived]);
+  const voiceMode = useAgentVoiceMode({
+    active,
+    busy: chat.agentRunning,
+    composerNodeRef: chat.composeRef,
+    fillInput: fillVoiceDraft,
+    messages: chat.messages,
+    sendNow: sendVoiceTurn,
+    surfaceKey: `workspace:${tab.id}`,
+  });
 
   // Sub-pass B — wire attached images into the actual send payload.
   // Codex / Gemini / opencode CLIs accept a plain text prompt; the
@@ -413,6 +434,8 @@ function WorkspaceChatComposerBase({
           repoPath={tab.repo?.localPath ?? null}
           displayMessagesCount={chat.messages.length}
           working={chat.agentRunning}
+          voiceModeEnabled={voiceMode.enabled}
+          onVoiceModeChange={voiceMode.setEnabled}
         />
       </div>
     </div>

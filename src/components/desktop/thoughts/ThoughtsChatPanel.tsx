@@ -51,7 +51,6 @@ import type { OrchestratorSendOptions } from './use-orchestrator-stream/types';
 import { useOrchestratorStatusFeed } from './useOrchestratorStatusFeed';
 import { getPendingMissionCards } from './mission-complete-detector';
 import { useOrchestratorContextResidency } from '@/components/desktop/orchestrator/context-residency';
-import { useDictationHostOptional } from '@/components/desktop/dictation/DictationHost';
 import { ProfiledChatMessageList as ChatMessageList } from './chat-panel/ProfiledChatMessageList';
 import { packetsForOrchestratorThread, SwarmStatusCard, type SwarmScoutView } from './chat-panel/SwarmStatusCard';
 import { ipcFetch } from '@/lib/tauri/ipc-fetch';
@@ -61,6 +60,7 @@ import { ComposerArea } from './chat-panel/ComposerArea';
 import { BackendSwitchChoice } from './chat-panel/BackendSwitchChoice';
 import { ComposerSendBufferStatus } from './chat-panel/ComposerSendBufferStatus';
 import { useDefaultComposerSendBuffer } from './chat-panel/useDefaultComposerSendBuffer';
+import { useAgentVoiceMode } from './chat-panel/useAgentVoiceMode';
 import { shouldApplyAutoRestoreAfterFetch } from './chat-panel/autoRestoreGuard';
 import { loadOrchestrationMode, persistOrchestrationMode, type ChatModelId, type OrchestrationMode } from '@/components/desktop/orchestrator/ModePicker';
 import { useReadyRuntimeCount } from './use-ready-runtimes';
@@ -2026,32 +2026,15 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     setTimeout(() => inputRef.current?.focus(), 0);
   }, []);
 
-  // Dictation bridge — register this composer with the dashboard-level
-  // DictationHost on focus. Registration is sticky: clicking the mic
-  // button blurs the textarea, but the host should still route the
-  // polished transcript here. Another composer focusing will take over;
-  // unmount clears the registration.
-  const dictationHost = useDictationHostOptional();
-  // Pull the stable callback out — depending on the whole host value
-  // would re-run this effect every state transition (snapshotState is
-  // in the host's memo deps), unregistering us mid-recording.
-  const setActiveComposer = dictationHost?.setActiveComposer;
-  useEffect(() => {
-    if (!setActiveComposer) return;
-    const node = inputRef.current;
-    if (!node) return;
-    const claim = () => {
-      setActiveComposer({ node, fill: fillInput });
-    };
-    // Eager-claim on mount so the user can press the mic button or
-    // Ctrl+Z without first clicking into the textarea.
-    claim();
-    node.addEventListener('focus', claim);
-    return () => {
-      node.removeEventListener('focus', claim);
-      setActiveComposer(null);
-    };
-  }, [setActiveComposer, fillInput]);
+  const voiceMode = useAgentVoiceMode({
+    active: open,
+    busy: isChatMode ? waitingForReply : displayWaiting,
+    composerNodeRef: inputRef,
+    fillInput,
+    messages: displayMessages,
+    sendNow,
+    surfaceKey: `${workspaceModeKey}:${lockedMode ?? orchestrationMode}`,
+  });
 
   useImperativeHandle(ref, () => ({
     focusInput() {
@@ -2371,6 +2354,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         selectedRepoPath={resolvedRepoPath}
         onSelectRepoPath={handleSelectComposerRepoPath}
         promptStash={isOrchestratorMode && !isChatMode ? { repoPath: resolvedRepoPath ?? '~', threadId, onRestore: fillInput } : undefined}
+        voiceModeEnabled={voiceMode.enabled}
+        onVoiceModeChange={voiceMode.setEnabled}
       />
       {displayMessages.length === 0 && composerBelowSlot ? composerBelowSlot : null}
       {annotatingIndex !== null && attachedImages[annotatingIndex] ? (() => {

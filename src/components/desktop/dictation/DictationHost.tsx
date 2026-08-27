@@ -23,9 +23,10 @@ import {
 import { DictationPill } from './DictationPill';
 import { useDictation } from './useDictation';
 import { isNativeDictationAvailable, useNativeDictation } from './useNativeDictation';
-import { isTauri, canUseTauriEvents } from '@/lib/tauri/bridge';
+import { canUseTauriEvents } from '@/lib/tauri/bridge';
 import { useSymonEditBridge } from './useSymonEditBridge';
 import type { DictationStartOptions } from './types';
+import { stopPlaybackForDictation } from '@/lib/tts/dictation-barge-in';
 
 interface DictationHostContextValue {
   /** True when a dictation session is active. */
@@ -225,6 +226,7 @@ export function DictationHost({ children }: DictationHostProps) {
   // shortcut) only need to pass surface/context — the host owns the
   // delivery path.
   const start = useCallback((options: DictationStartOptions) => {
+    stopPlaybackForDictation();
     return startInternal({
       ...options,
       onComplete: (text) => {

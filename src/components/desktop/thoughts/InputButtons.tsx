@@ -5,6 +5,7 @@ import { AttachFilesButton } from './AttachFilesButton';
 import { ComposerModeChip, FleetWorkerChip } from './ComposerFleetChips';
 import type { ComposerMode } from './composer-mode';
 import { MicButton } from './MicButton';
+import { VoiceModeButton } from './VoiceModeButton';
 import { SessionRulesChip } from './SessionRulesChip';
 import { ModelThinkingChip } from './ModelThinkingChip';
 import type { OrchestratorBackendSetting } from './operator-defaults';
@@ -434,6 +435,8 @@ export function InputButtons({
   onSelectRepoPath,
   inlineLeadingExtras,
   inlineMeterSlot,
+  voiceModeEnabled,
+  onVoiceModeChange,
 }: {
   input: string;
   enhancing: boolean;
@@ -484,6 +487,8 @@ export function InputButtons({
   onSelectRepoPath?: (next: string) => void;
   inlineLeadingExtras?: ReactNode;
   inlineMeterSlot?: ReactNode;
+  voiceModeEnabled?: boolean;
+  onVoiceModeChange?: (enabled: boolean) => void;
 }) {
   const canSubmit = Boolean(input.trim());
   const showRepoChip = Boolean(repoLabel) && displayMessagesCount === 0;
@@ -570,6 +575,9 @@ export function InputButtons({
         repoPath={repoPath}
       />
       <MicButton />
+      {onVoiceModeChange ? (
+        <VoiceModeButton enabled={Boolean(voiceModeEnabled)} onChange={onVoiceModeChange} />
+      ) : null}
 
       </div>
 
