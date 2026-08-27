@@ -61,6 +61,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: 'codexModel must be a valid model id.' }, { status: 400 });
   }
   const repoSkillAllowlist = normalizeClaudeCodeRepoSkillAllowlist(body.repoSkillAllowlist);
+  if (body.source === 'openrouter' && !await resolveClaudeCodeWorkerGatewayKey()) {
+    return NextResponse.json({
+      ok: false,
+      error: 'Configure an API key in Settings > Models > API keys before selecting the API-billed carrier.',
+    }, { status: 409 });
+  }
 
   try {
     await writeClaudeCodeWorkerProfile({ source: body.source, model, codexModel, repoSkillAllowlist });

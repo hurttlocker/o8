@@ -50,4 +50,29 @@ describe('ModelThinkingChip Claude Code carrier truth', () => {
     expect(container.textContent).toContain('Sol');
     expect(container.textContent).not.toContain('Opus 4.8');
   });
+
+  it('shows the effective API-carried model instead of the stale native selection', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        profile: { source: 'openrouter' },
+        effectiveModel: 'provider/frontier-model',
+      }),
+    } as Response)));
+
+    await act(async () => {
+      root.render(createElement(ModelThinkingChip, {
+        modelLabel: 'Opus 4.8',
+        modelId: 'claude-opus-4-8',
+        activeBackend: 'claude',
+        effort: 'high',
+        adaptiveEnabled: true,
+        onEffortChange: () => {},
+      }));
+    });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+
+    expect(container.textContent).toContain('provider/frontier-model');
+    expect(container.textContent).not.toContain('Opus 4.8');
+  });
 });

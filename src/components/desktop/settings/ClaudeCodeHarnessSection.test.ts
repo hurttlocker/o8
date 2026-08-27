@@ -87,4 +87,33 @@ describe('ClaudeCodeHarnessSection', () => {
     }));
     expect(container.textContent).toContain('Waiting for browser…');
   });
+
+  it('does not offer the API-billed carrier before its key is configured', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+      ok: true,
+      profile: { source: 'native', model: null, codexModel: null },
+      effectiveModel: null,
+      openrouterConfigured: false,
+      billing: 'provider-account',
+      codexSubscriptionSupported: true,
+      codexSubscriptionReason: 'A localhost proxy can use an existing subscription.',
+      codexProxy: { installed: true, authenticated: true, running: true, connecting: false, modelCount: 3 },
+    })));
+
+    await act(async () => {
+      root.render(createElement(ClaudeCodeHarnessSection));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    const sourcePicker = container.querySelector<HTMLButtonElement>('button[aria-haspopup="listbox"]');
+    expect(sourcePicker).not.toBeNull();
+    await act(async () => {
+      sourcePicker!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const options = Array.from(document.body.querySelectorAll('[role="option"]'))
+      .map((option) => option.textContent);
+    expect(options).toContain('Native accountUse the existing Claude Code login or inherited gateway.');
+    expect(options).toContain('Codex subscriptionRoute Claude Code through a localhost Codex OAuth carrier.');
+    expect(options.some((option) => option?.includes('OpenRouter'))).toBe(false);
+  });
 });

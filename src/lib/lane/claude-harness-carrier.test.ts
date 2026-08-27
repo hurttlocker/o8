@@ -75,4 +75,36 @@ describe('Claude Code orchestrator carrier', () => {
     expect(carrier.spawnEnv).not.toHaveProperty('CLAUDE_CODE_SIMPLE');
     expect(carrier.fingerprint).not.toContain('local-carrier-token');
   });
+
+  it('resolves the selected API-billed model and launch environment', async () => {
+    profileState.source = 'openrouter';
+    profileState.model = 'provider/frontier-model';
+    profileState.openRouterKey = 'local-api-carrier-token';
+
+    const carrier = await resolveClaudeHarnessCarrier({
+      requestedModel: 'claude-opus-4-8',
+      sessionDir: '/tmp/api-carrier',
+    });
+
+    expect(carrier).toMatchObject({
+      source: 'openrouter',
+      model: 'provider/frontier-model',
+      spawnEnv: {
+        ANTHROPIC_BASE_URL: 'https://openrouter.ai/api',
+        ANTHROPIC_AUTH_TOKEN: 'local-api-carrier-token',
+        ANTHROPIC_MODEL: 'provider/frontier-model',
+      },
+    });
+    expect(carrier.fingerprint).not.toContain('local-api-carrier-token');
+  });
+
+  it('rejects the API-billed carrier cleanly when its key is absent', async () => {
+    profileState.source = 'openrouter';
+    profileState.model = 'provider/frontier-model';
+
+    await expect(resolveClaudeHarnessCarrier({
+      requestedModel: 'claude-opus-4-8',
+      sessionDir: '/tmp/api-carrier-without-key',
+    })).rejects.toThrow('no API key is configured');
+  });
 });

@@ -9,15 +9,23 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const spawnMock = vi.hoisted(() => vi.fn());
 const configState = vi.hoisted(() => ({ reversed: false }));
-const resolveCarrierMock = vi.hoisted(() => vi.fn(async ({ sessionDir }: { sessionDir: string }) => ({
-  source: 'codex-subscription' as const,
+const carrierState = vi.hoisted(() => ({
+  source: 'codex-subscription' as 'codex-subscription' | 'openrouter',
   model: 'gpt-5.6-sol',
+  baseUrl: 'http://127.0.0.1:8317',
+  token: 'local-orchestrator-token',
+}));
+const resolveCarrierMock = vi.hoisted(() => vi.fn(async ({ sessionDir }: { sessionDir: string }) => ({
+  source: carrierState.source,
+  model: carrierState.model,
   spawnEnv: {
-    ANTHROPIC_BASE_URL: 'http://127.0.0.1:8317',
-    ANTHROPIC_AUTH_TOKEN: 'local-orchestrator-token',
-    CLAUDE_CONFIG_DIR: `${sessionDir}/claude-code-codex-config`,
+    ANTHROPIC_BASE_URL: carrierState.baseUrl,
+    ANTHROPIC_AUTH_TOKEN: carrierState.token,
+    ...(carrierState.source === 'codex-subscription'
+      ? { CLAUDE_CONFIG_DIR: `${sessionDir}/claude-code-codex-config` }
+      : {}),
   },
-  fingerprint: `codex:${sessionDir}`,
+  fingerprint: `${carrierState.source}:${carrierState.model}:${sessionDir}`,
 })));
 
 vi.mock('node:child_process', async (importOriginal) => {
@@ -67,6 +75,10 @@ describe('warm orchestrator MCP config reuse', () => {
     spawnMock.mockReset();
     resolveCarrierMock.mockClear();
     configState.reversed = false;
+    carrierState.source = 'codex-subscription';
+    carrierState.model = 'gpt-5.6-sol';
+    carrierState.baseUrl = 'http://127.0.0.1:8317';
+    carrierState.token = 'local-orchestrator-token';
   });
 
   it('reuses the resident process across semantically identical back-to-back turns', async () => {
@@ -143,5 +155,32 @@ describe('warm orchestrator MCP config reuse', () => {
       proc.exitCode = 0;
       proc.emit('close', 0);
     }
+  });
+
+  it('carries an explicitly selected API model through the real orchestrator launch path', async () => {
+    carrierState.source = 'openrouter';
+    carrierState.model = 'provider/frontier-model';
+    carrierState.baseUrl = 'https://gateway.example/api';
+    carrierState.token = 'api-carrier-token';
+    const repoPath = mkdtempSync(join(tmpdir(), 'o8-api-carrier-launch-'));
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repoPath });
+    const proc = new FakeClaudeProc();
+    spawnMock.mockReturnValue(proc as unknown as ChildProcess);
+    const session = ensureOrchestratorSession(repoPath, `thoughts-api-carrier-${Date.now()}`);
+
+    const turn = sendToOrchestrator(session, 'run through the selected carrier', () => {});
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(proc.stdin.write).toHaveBeenCalledOnce());
+
+    const args = spawnMock.mock.calls[0]![1] as string[];
+    const env = spawnMock.mock.calls[0]![2].env as NodeJS.ProcessEnv;
+    expect(args).toContain('provider/frontier-model');
+    expect(env.ANTHROPIC_BASE_URL).toBe('https://gateway.example/api');
+    expect(env.ANTHROPIC_AUTH_TOKEN).toBe('api-carrier-token');
+
+    proc.stdout.emit('data', Buffer.from('{"type":"result","session_id":"api-carrier-session"}\n'));
+    await turn;
+    proc.exitCode = 0;
+    proc.emit('close', 0);
   });
 });

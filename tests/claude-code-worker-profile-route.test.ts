@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -32,6 +32,7 @@ afterAll(() => {
 describe('Claude Code worker settings through production routes', () => {
   beforeEach(() => {
     delete process.env.OPENROUTER_API_KEY;
+    rmSync(path.join(dataDir, 'claude-code-worker.json'), { force: true });
     vi.unstubAllGlobals();
   });
 
@@ -59,6 +60,20 @@ describe('Claude Code worker settings through production routes', () => {
     const stored = readFileSync(path.join(dataDir, 'claude-code-worker.json'), 'utf8');
     expect(stored).toContain('x-ai/grok-4.6');
     expect(stored).not.toContain('sk-or-route-test');
+  });
+
+  it('rejects an API-billed carrier selection when no key is configured', async () => {
+    const response = await profileRoute.POST(request('/api/runtime/claude-code-profile', {
+      method: 'POST',
+      body: { source: 'openrouter', model: 'provider/frontier-model', codexModel: null },
+    }));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining('Configure an API key'),
+    });
+    expect(existsSync(path.join(dataDir, 'claude-code-worker.json'))).toBe(false);
   });
 
   it('serves only tool-capable live models to the harness picker', async () => {

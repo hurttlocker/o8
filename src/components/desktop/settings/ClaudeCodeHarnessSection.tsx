@@ -129,6 +129,9 @@ export function ClaudeCodeHarnessSection() {
   const codexModel = profile.codexModel ?? CODEX_SUBSCRIPTION_CLAUDE_CODE_DEFAULT_MODEL;
   const gatewayActive = profile.source === 'openrouter';
   const codexActive = profile.source === 'codex-subscription';
+  const sourceOptions = SOURCE_OPTIONS.filter((option) => (
+    option.value !== 'openrouter' || data.openrouterConfigured || gatewayActive
+  ));
 
   return (
     <SettingsGroup
@@ -146,7 +149,7 @@ export function ClaudeCodeHarnessSection() {
         accessory={
           <PickerMenu<ClaudeCodeModelSource>
             value={profile.source}
-            options={SOURCE_OPTIONS}
+            options={sourceOptions}
             onChange={(source) => { void save({ ...profile, source }); }}
             disabled={busy}
             minWidth={150}
