@@ -23,6 +23,9 @@ import { ApprovalInboxBadge } from '../title-bar/ApprovalInboxBadge';
 import { IconColumns, IconTerminal } from '../title-bar/icons';
 import { RightPanelMorphButton } from '../title-bar/RightPanelMorphButton';
 import { CanvasModeButton } from '../title-bar/CanvasModeButton';
+import { TerminalModePill } from './TerminalModePill';
+import { SplitPaneCloseButton } from './SplitPaneCloseButton';
+import type { WorkspaceHeaderStripProps } from './workspace-header-strip-types';
 
 /** Right-edge inset that lands the header's rightmost control on the branch rail
  *  capsule's centre, one row below. Measured, not guessed.
@@ -41,76 +44,6 @@ const RAIL_COLUMN_ALIGN_NUDGE = 4;
  *  the rail capsule's stacked glyphs already use (Q 2026-07-16). */
 const HEADER_CLUSTER_GAP = 4;
 
-interface WorkspaceHeaderStripProps {
-  /** Render the 78px macOS traffic-light spacer — set when this strip is leftmost. */
-  leadingInset?: boolean;
-  /** Sidebar toggle — shown only when a handler is provided (left column collapsed). */
-  sidebarVisible?: boolean;
-  onToggleSidebar?: () => void;
-  /** When the sidebar is collapsed, hovering the toggle pill drops the
-   *  hover-preview overlay (Claude pattern). These handlers wire that
-   *  trigger to the same callbacks the overlay itself uses, so moving
-   *  between pill and overlay doesn't dismiss. 2026-05-27. */
-  onSidebarHoverEnter?: () => void;
-  onSidebarHoverLeave?: () => void;
-  /** Terminal toggle — shown only when a handler is provided. */
-  bottomPanelVisible?: boolean;
-  onToggleBottomPanel?: () => void;
-  /** Split the active workspace tile into a second pane. */
-  onSplitWorkspacePanel?: () => void;
-  /**
-   * O8 panel re-open toggle. Rendered as the rightmost icon ONLY when the
-   * panel is collapsed — when it's open, the toggle in PanelHeaderStrip is
-   * already visible, so we don't duplicate. Operator regression catch
-   * post-#1089: when the panel column disappears, its toggle goes with it,
-   * leaving no re-open affordance.
-   */
-  rightPanelOpen?: boolean;
-  onToggleRightPanel?: () => void;
-  /** Pending approvals badge shown only when the right panel header is absent. */
-  approvalCount?: number;
-  onOpenInbox?: () => void;
-  /** Active workspace tab title rendered in the center slot. Codex / Claude
-   *  put the conversation name in the title bar itself instead of a
-   *  separate strip below. Supports "repo / chat" split styling. Used
-   *  when there's exactly one open tab. */
-  headerLabel?: string | null;
-  /** Full visible-tab list for the single workspace. When length > 1
-   *  the center slot morphs from "title" to a horizontal pill strip
-   *  (Codex pattern). When length <= 1 we fall back to headerLabel. */
-  headerTabs?: Array<{
-    id: string;
-    label: string;
-    kind: string;
-    runtime: string | null;
-    packetStatus: string | null;
-  }>;
-  /** Stable workspace id for routing header pill events back to the owning tile. */
-  workspaceId?: string | null;
-  /** Active tab id from the headerTabs list — drives which pill renders
-   *  as filled. */
-  headerActiveTabId?: string | null;
-  /** Number of non-active finished CLI-session tabs eligible for explicit cleanup. */
-  finishedTabCount?: number;
-  /** Header-owned toggle for the project context rail.
-   *  Hidden unless the active workspace tab can render that rail. */
-  projectContextRailAvailable?: boolean;
-  projectContextRailVisible?: boolean;
-  onToggleProjectContextRail?: () => void;
-  /** Side-by-side pill strips for splits — when populated (2+ entries)
-   *  the center slot renders two pill rows separated by a small vertical
-   *  divider, one per split workspace. Replaces headerLabel + headerTabs
-   *  in this mode. */
-  splitHeaderWorkspaces?: Array<{
-    workspaceId: string;
-    tabs: Array<{ id: string; label: string; kind: string; runtime: string | null; packetStatus: string | null }>;
-    activeTabId: string | null;
-    finishedTabCount?: number;
-    contextRailAvailable?: boolean;
-    contextRailVisible?: boolean;
-  }> | null;
-}
-
 export function WorkspaceHeaderStrip({
   leadingInset = false,
   sidebarVisible = true,
@@ -127,6 +60,7 @@ export function WorkspaceHeaderStrip({
   headerLabel,
   headerTabs,
   workspaceId,
+  terminalModeActive = false,
   headerActiveTabId,
   finishedTabCount = 0,
   projectContextRailAvailable = false,
@@ -196,6 +130,7 @@ export function WorkspaceHeaderStrip({
             {showApprovalBadge && onOpenInbox ? (
               <ApprovalInboxBadge count={approvalCount} onClick={onOpenInbox} />
             ) : null}
+            {workspaceId ? <TerminalModePill active={terminalModeActive} workspaceId={workspaceId} /> : null}
             {onToggleBottomPanel ? (
               <HeaderIconPill
                 icon={<IconTerminal />}
@@ -264,6 +199,7 @@ function SplitHeaderPillStrips({
     finishedTabCount?: number;
     contextRailAvailable?: boolean;
     contextRailVisible?: boolean;
+    terminalModeActive?: boolean;
   }>;
 }) {
   const dispatchSpawn = useCallback((workspaceId: string, kind: 'orchestrator' | 'chat' | 'terminal') => {
@@ -312,6 +248,7 @@ function SplitHeaderPillStrips({
               />
             </div>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2, paddingLeft: 4, paddingRight: 6, flexShrink: 0 }}>
+              <TerminalModePill active={workspace.terminalModeActive === true} workspaceId={workspace.workspaceId} paneLabel={paneLabel(index)} />
               {workspace.contextRailAvailable ? (
                 <HeaderIconPill
                   icon={<IconInfoCircle />}
@@ -335,39 +272,6 @@ function SplitHeaderPillStrips({
         );
       })}
     </div>
-  );
-}
-
-function SplitPaneCloseButton({ onClick, paneLabel }: { onClick: () => void; paneLabel?: string }) {
-  const [hovered, setHovered] = useState(false);
-  return (
-    <button
-      type="button"
-      data-no-drag
-      onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      aria-label={paneLabel ? `Close split (${paneLabel})` : 'Close split'}
-      title="Close split"
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: 22,
-        height: 22,
-        borderRadius: 6,
-        borderWidth: 0,
-        background: hovered ? 'var(--t-hover)' : 'transparent',
-        color: hovered ? 'var(--t-text)' : 'var(--t-text-secondary)',
-        cursor: 'pointer',
-        padding: 0,
-        transition: 'background 120ms ease, color 120ms ease',
-      }}
-    >
-      <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-        <path d="M6 6l12 12M18 6L6 18" />
-      </svg>
-    </button>
   );
 }
 

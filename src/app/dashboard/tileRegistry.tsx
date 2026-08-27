@@ -308,6 +308,23 @@ export function createTileRegistry({
             splitCreated={content.kind === 'terminal' ? effectiveSplitCreated : false}
             availableRepos={workspaceScopeEntries}
             openRepoPaths={openRepoPaths}
+            attachedTerminalSessions={parsedAgents.flatMap((agent) => {
+              const tmuxSession = agent.tmuxSession?.trim();
+              if (!tmuxSession) return [];
+              const repoPath = agent.worktree?.path ?? agent.runtimeSurface?.cwd ?? agent.workspace;
+              return [{
+                sessionKey: agent.sessionKey,
+                tmuxSession,
+                label: agent.surfaceLabel ?? agent.name,
+                repo: repoPath ? {
+                  name: repoPath.split('/').filter(Boolean).pop() ?? repoPath,
+                  localPath: repoPath,
+                  branch: agent.worktree?.branch ?? agent.branch ?? null,
+                  isWorktree: Boolean(agent.worktree),
+                  worktreeStatus: agent.worktree?.status ?? null,
+                } : undefined,
+              }];
+            })}
             canCloseTile={canCloseTerminalTile}
             onActiveChatSessionChange={(sessionKey) => {
               setWorkspaceChatSessionByTileId((current) => (
