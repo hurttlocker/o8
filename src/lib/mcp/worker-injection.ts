@@ -5,6 +5,22 @@ import {
   listEnabledExternalMcpServers,
   type ExternalMcpServerRecord,
 } from '@/lib/mcp/external-servers';
+import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+
+export const WORKER_MCP_INJECTION_SUPPORTED_RUNTIMES: ReadonlySet<OrchestratorRuntime> = new Set([
+  'claude-code',
+  'codex',
+]);
+
+const WORKER_MCP_CONFIG_KEY_PATTERN = /^[A-Za-z0-9_-]+$/;
+
+export function workerMcpInjectionSupported(runtime: OrchestratorRuntime): boolean {
+  return WORKER_MCP_INJECTION_SUPPORTED_RUNTIMES.has(runtime);
+}
+
+export function workerMcpServerNameIsValid(name: string): boolean {
+  return WORKER_MCP_CONFIG_KEY_PATTERN.test(name);
+}
 
 export interface WorkerMcpInjectionContext {
   packetId: string;
@@ -75,11 +91,23 @@ export async function resolveWorkerMcpInjection(
         && (server.teamId === null || server.teamId === context.teamId)
       ))
       .map((server) => templateServer(server, context));
-    if (!options.resolveCommands) return { servers: configuredServers, skipped: [] };
-
-    const servers: ResolvedWorkerMcpServer[] = [];
+    const validServers: ResolvedWorkerMcpServer[] = [];
     const skipped: WorkerMcpInjectionResolution['skipped'] = [];
     for (const server of configuredServers) {
+      if (workerMcpServerNameIsValid(server.name)) {
+        validServers.push(server);
+      } else {
+        skipped.push({
+          server: server.name,
+          command: server.command,
+          reason: 'name is not a valid config key',
+        });
+      }
+    }
+    if (!options.resolveCommands) return { servers: validServers, skipped };
+
+    const servers: ResolvedWorkerMcpServer[] = [];
+    for (const server of validServers) {
       try {
         servers.push({
           ...server,

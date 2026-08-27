@@ -96,7 +96,7 @@ function parseClaudeOwnedRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog 
   };
 }
 
-const claudeCodeOwnedAdapter: OwnedRuntimeAdapter = {
+export const claudeCodeOwnedAdapter: OwnedRuntimeAdapter = {
   runtimeId: 'claude-code',
   surfaceIdPrefix: 'claude-code-owned:',
   rootEnvVar: 'CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT',
@@ -105,7 +105,7 @@ const claudeCodeOwnedAdapter: OwnedRuntimeAdapter = {
   binaryEnvOverride: 'O8_CLAUDE_CODE_BIN',
   binaryExtraEnvOverrides: ['CLAUDE_BIN'],
   isolatedConfigHomeEnv: 'CLAUDE_CONFIG_DIR',
-  workerMcpInjection: true,
+  workerMcpInjection: 'config-file',
   extraSpawnEnv: async (session) => {
     const configuredSource = session.runtimeConfig?.modelSource;
     const source = configuredSource === 'openrouter' || configuredSource === 'codex-subscription'

@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -13,6 +14,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import type { OwnedSessionRecord } from '@/lib/runtimes/shared/owned-session/types';
 
 const spawnMock = vi.hoisted(() => vi.fn());
 const ensureDispatchBackendReadyMock = vi.hoisted(() => vi.fn(async () => ({
@@ -243,7 +245,7 @@ describe.sequential('worker MCP injection real path', () => {
 
     const unsupportedPrompt = await buildPacketPrompt({
       ...packet('pkt-worker-mcp-unsupported', 'test/worker-mcp-unsupported'),
-      runtime: 'codex',
+      runtime: 'gemini',
     }, [], 'main', firstLane.worktreePath);
     expect(unsupportedPrompt).not.toContain('MCP servers attached to this packet:');
 
@@ -278,9 +280,34 @@ describe.sequential('worker MCP injection real path', () => {
     expect(getLaneEvents(firstLane.id, 100)).toEqual(expect.arrayContaining([
       expect.objectContaining({
         verb: 'mcp_injected',
-        payload: { servers: ['packet-observer'], configPath },
+        payload: { servers: ['packet-observer'], configPath, mode: 'launch' },
       }),
     ]));
+
+    const staleConfigPath = path.join(path.dirname(configPath), 'o8-worker-mcp-stale.json');
+    writeFileSync(staleConfigPath, '{}\n');
+    const session = JSON.parse(readFileSync(
+      path.join(path.dirname(configPath), 'session.json'),
+      'utf8',
+    )) as OwnedSessionRecord;
+    const { claudeCodeOwnedAdapter } = await import('@/lib/claude-code/owned');
+    const { prepareOwnedWorkerMcpConfig } = await import(
+      '@/lib/runtimes/shared/owned-session/worker-mcp-config'
+    );
+    const replacement = await prepareOwnedWorkerMcpConfig({
+      adapter: claudeCodeOwnedAdapter,
+      session,
+      runId: 'replacement',
+      mode: 'launch',
+      sandboxEnabled: false,
+    });
+    expect(existsSync(configPath)).toBe(false);
+    expect(existsSync(staleConfigPath)).toBe(false);
+    expect(replacement.configPath).toBe(path.join(
+      path.dirname(configPath),
+      'o8-worker-mcp-replacement.json',
+    ));
+    expect(existsSync(replacement.configPath!)).toBe(true);
 
     updateExternalMcpServer(attached.id, { workerInjection: false });
     const detachedPacket = packet('pkt-worker-mcp-detached', 'test/worker-mcp-detached');

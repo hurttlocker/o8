@@ -22,7 +22,10 @@ import {
   buildReadOnlyPacketSelfReviewInstructions,
 } from '@/lib/orchestrator/self-review';
 import { buildWorkerOutcomeOwnershipPromptV1 } from '@/lib/prompts/v1';
-import { resolveWorkerMcpInjection } from '@/lib/mcp/worker-injection';
+import {
+  resolveWorkerMcpInjection,
+  workerMcpInjectionSupported,
+} from '@/lib/mcp/worker-injection';
 import { workerSandboxEnabled } from '@/lib/runtimes/shared/owned-session/sandbox';
 import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
 import {
@@ -372,7 +375,7 @@ export async function buildPacketPrompt(
   // Null when the packet has no originating thread or that thread has no rules.
   const sessionRulesSection = buildSessionRulesBlock(packet.orchestratorThreadId);
   const claudeCodeSkillSections = buildClaudeCodeSkillSections(packet);
-  const workerMcpResolution = packet.runtime === 'claude-code'
+  const workerMcpResolution = workerMcpInjectionSupported(packet.runtime)
     ? await resolveWorkerMcpInjection({
         packetId: packet.id,
         worktreePath: worktreePath ?? packet.lane?.worktreePath ?? packet.workspaceTargetPath ?? '',

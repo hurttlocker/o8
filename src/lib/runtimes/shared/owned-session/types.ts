@@ -14,6 +14,7 @@ import type {
 } from '@/lib/fleet/types';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { LaneTurnContextUsage } from '@/lib/lane/types';
+import type { ResolvedWorkerMcpServer } from '@/lib/mcp/worker-injection';
 import type { SandboxDenial } from './sandbox-denial';
 
 // ── Run / session primitives ─────────────────────────────────────────────────
@@ -297,8 +298,8 @@ export interface OwnedRuntimeAdapter {
   /** Supported isolated config-home variable for session-pinned identities. */
   isolatedConfigHomeEnv?: string;
 
-  /** This adapter can attach operator-registered MCP servers to packet workers. */
-  workerMcpInjection?: boolean;
+  /** How this adapter attaches operator-registered MCP servers to packet workers. */
+  workerMcpInjection?: 'config-file' | 'config-override';
 
   /** Current local config home captured when a packet has no named identity. */
   defaultConfigHome?: () => string;
@@ -326,6 +327,7 @@ export interface OwnedRuntimeAdapter {
     model?: string;
     effort?: ThinkingEffort;
     workerMcpConfigPath?: string;
+    workerMcpServers?: ResolvedWorkerMcpServer[];
   }): string[];
 
   /** Optional stdin payload for runtimes launched as interactive stream processors. */
@@ -341,6 +343,7 @@ export interface OwnedRuntimeAdapter {
     sessionDir?: string;
     prompt: string;
     model?: string;
+    workerMcpServers?: ResolvedWorkerMcpServer[];
   }): string[] | null;
 
   /** Parse a run's stdout into normalized entries + outcome + discovered thread id. */

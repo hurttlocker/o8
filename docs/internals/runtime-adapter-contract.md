@@ -82,12 +82,15 @@ Runtime-specific switches are acceptable only when behavior actually diverges,
 such as a resume protocol or session-key format. Labels, colors, picker options,
 auth houses, validation, and runtime membership come from the catalog.
 
-Owned-session adapters advertise `workerMcpInjection` only when their launch
-protocol can accept a per-run MCP config. The shared controller derives that
-config exclusively from opted-in operator records, writes it inside the run's
-o8-owned session directory, and supplies its path through `launchArgs`. The packet
-prompt names attached servers only for runtimes whose current launch path can attach
-them. Adapters that omit the flag keep their existing launch behavior.
+Owned-session adapters advertise `workerMcpInjection: 'config-file'` when their
+launch protocol accepts a per-run MCP config file, or `'config-override'` when
+launch and resume accept equivalent command-line configuration overrides. The
+shared controller derives both shapes exclusively from opted-in operator records.
+Config files live inside the run's o8-owned session directory and reach the
+adapter through `workerMcpConfigPath`; override adapters receive resolved servers
+through `workerMcpServers` on every launch and resume. The packet prompt names
+attached servers only for runtimes whose current adapter advertises one of these
+capabilities. Adapters that omit the capability keep their existing behavior.
 
 ### OpenCode: standalone workers, resident service for the operator only
 

@@ -1,9 +1,9 @@
 {
   "schema": "o8/test-classification/v1",
   "generatedBy": "node scripts/classify-tests.mjs --write",
-  "totalTests": 894,
-  "hermeticTests": 575,
-  "resourceOwningTests": 319,
+  "totalTests": 896,
+  "hermeticTests": 576,
+  "resourceOwningTests": 320,
   "resourceOwning": [
     {
       "path": "src/app/api/leases/route.test.ts",
@@ -2222,6 +2222,15 @@
       "path": "tests/voice-codex-realtime-route.test.ts",
       "reasons": [
         "executable-fixture"
+      ]
+    },
+    {
+      "path": "tests/worker-mcp-injection-codex-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
       ]
     },
     {

@@ -28,13 +28,18 @@ export async function prepareOwnedLaunchArgs({
   sandboxEnabled: boolean;
   humanLabel: string;
 }): Promise<PreparedOwnedLaunchArgs> {
+  const workerMcp: PreparedOwnedWorkerMcpConfig = mode === 'launch'
+    || adapter.workerMcpInjection === 'config-override'
+    ? await prepareOwnedWorkerMcpConfig({
+        adapter,
+        session,
+        runId,
+        mode,
+        sandboxEnabled,
+      })
+    : { sandboxReadPaths: [], servers: [] };
+
   if (mode === 'launch') {
-    const workerMcp = await prepareOwnedWorkerMcpConfig({
-      adapter,
-      session,
-      runId,
-      sandboxEnabled,
-    });
     return {
       args: adapter.launchArgs({
         cwd: session.repoPath,
@@ -43,6 +48,7 @@ export async function prepareOwnedLaunchArgs({
         model: session.model,
         effort: session.effort,
         workerMcpConfigPath: workerMcp.configPath,
+        workerMcpServers: workerMcp.servers,
       }),
       stdinPayload: adapter.launchStdin?.({
         cwd: session.repoPath,
@@ -59,6 +65,7 @@ export async function prepareOwnedLaunchArgs({
     sessionDir: session.sessionDir,
     prompt,
     model: session.model,
+    workerMcpServers: workerMcp.servers,
   });
   if (!args) {
     throw new Error(`Resume is not supported by the ${humanLabel} runtime adapter.`);
@@ -66,6 +73,6 @@ export async function prepareOwnedLaunchArgs({
   return {
     args,
     stdinPayload: null,
-    workerMcp: { sandboxReadPaths: [] },
+    workerMcp,
   };
 }
