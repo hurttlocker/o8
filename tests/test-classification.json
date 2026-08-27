@@ -1,9 +1,9 @@
 {
   "schema": "o8/test-classification/v1",
   "generatedBy": "node scripts/classify-tests.mjs --write",
-  "totalTests": 896,
+  "totalTests": 897,
   "hermeticTests": 576,
-  "resourceOwningTests": 320,
+  "resourceOwningTests": 321,
   "resourceOwning": [
     {
       "path": "src/app/api/leases/route.test.ts",
@@ -998,6 +998,12 @@
       "path": "tests/broadcast-voice-repetition-real-path.test.ts",
       "reasons": [
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/bust-stale-patch-cache.test.ts",
+      "reasons": [
+        "child-process"
       ]
     },
     {
