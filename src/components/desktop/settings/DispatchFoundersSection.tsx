@@ -1,13 +1,10 @@
 'use client';
 
 /**
- * DispatchFoundersSection — the Founders-mode half of the Dispatch tab
- * (epic #1450). Everything experimental, tier-tuning, or env-flavored lives
- * here: experimental runtime/surface flags, model tiers,
- * Brain routing knobs, and Local Models. Rendered by OperatorDefaultsTab ONLY
- * when the entitlement says founder — visibility gating only, never
- * capability: every write still goes through the same gated
- * /api/panel/operator-defaults route regardless of what the UI shows.
+ * Advanced Dispatch settings (epic #1450). Operator-owned model tiers, Brain
+ * routing, and local-model controls are available to every installation;
+ * founder mode only reveals experimental preview flags. Every write still goes
+ * through the same gated /api/panel/operator-defaults route.
  */
 
 import { useState } from 'react';
@@ -32,7 +29,7 @@ import {
   type CollideAggregator,
   type DispatchRuntime,
   type OperatorDefaults,
-  type SettingSource,
+  type OperatorDefaultSources,
   type ThinkingEffort,
   type WorkersUseBrain,
 } from './dispatch-shared';
@@ -112,21 +109,28 @@ function BrowserIcon() {
 
 interface FoundersSectionProps {
   values: OperatorDefaults;
-  sources: Record<keyof OperatorDefaults, SettingSource>;
+  sources: OperatorDefaultSources;
   busyField: keyof OperatorDefaults | null;
   updateField: <K extends keyof OperatorDefaults>(field: K, value: OperatorDefaults[K]) => void;
+  showExperimental: boolean;
 }
 
 function envLocked(sources: FoundersSectionProps['sources'], field: keyof OperatorDefaults): boolean {
   return sources[field] === 'env';
 }
 
-export function DispatchFoundersSection({ values, sources, busyField, updateField }: FoundersSectionProps) {
+export function DispatchFoundersSection({
+  values,
+  sources,
+  busyField,
+  updateField,
+  showExperimental,
+}: FoundersSectionProps) {
   // Client-side pref (localStorage via thinking-preferences.ts) — moved here
   // from the env-gated API Keys tab where it was unreachable (#1450 IA pass).
   const [adaptiveThinking, setAdaptiveThinking] = useState(() => readAdaptiveThinkingEnabled());
-  // Managed-plan status mirrors inference-route.ts rule #1: a founder/pro/team
-  // plan token routes Brain calls through the managed proxy first (the perk).
+  // Managed-plan status mirrors inference-route.ts rule #1: an eligible plan
+  // token routes Brain calls through the managed proxy first.
   const { plan } = useEntitlement();
   const managedBrain = plan === 'founder' || plan === 'pro' || plan === 'team';
   const lockedSub = (field: keyof OperatorDefaults, normal: string) =>
@@ -134,7 +138,7 @@ export function DispatchFoundersSection({ values, sources, busyField, updateFiel
 
   return (
     <>
-      <section style={{ marginTop: 28 }}>
+      {showExperimental ? <section style={{ marginTop: 28 }}>
         <SettingsGroup
           header="Experimental"
           footnote={<>Adapters and surfaces that ship wired but hidden until they&apos;ve earned defaults. Turning a runtime off snaps any picker using it back to Codex.</>}
@@ -190,7 +194,7 @@ export function DispatchFoundersSection({ values, sources, busyField, updateFiel
             onToggle={(next) => { updateField('nativeBrowserView', next); }}
           />
         </SettingsGroup>
-      </section>
+      </section> : null}
 
       <section style={{ marginTop: 28 }}>
         <SettingsGroup
@@ -288,10 +292,10 @@ export function DispatchFoundersSection({ values, sources, busyField, updateFiel
         >
           <SettingsRow
             icon={<ZapIcon />}
-            label="Founders fast path"
+            label="Managed inference"
             subtitle={managedBrain
-              ? 'Brain answers ride the managed inference route first — your founding perk'
-              : 'Founding license routes Brain answers through managed inference first'}
+              ? 'Brain answers try the managed inference route first.'
+              : 'Subscribe through o8 to make managed inference the first Brain route.'}
             accessory={managedBrain
               ? <ValuePill tone="success">Active</ValuePill>
               : <ValuePill>Not active</ValuePill>}
@@ -303,8 +307,9 @@ export function DispatchFoundersSection({ values, sources, busyField, updateFiel
             subtitle={lockedSub('classAComposer', 'Class A composer for Brain answers')}
             accessory={
               <PickerMenu<ClassAComposer>
-                value={values.classAComposer === 'sonnet-cli' ? 'sonnet-cli' : values.classAComposer === 'fastest' ? 'fastest' : 'haiku-cli'}
+                value={values.classAComposer}
                 options={[
+                  { value: 'auto', label: 'Auto', detail: 'Choose the best ready route for each request.' },
                   { value: 'haiku-cli', label: 'Haiku', detail: 'Free via the warm REPL pool.' },
                   { value: 'sonnet-cli', label: 'Sonnet', detail: 'Best quality, slower bootstrap.' },
                   { value: 'fastest', label: 'Fastest', detail: 'OpenRouter flash-lite, daily-capped.' },

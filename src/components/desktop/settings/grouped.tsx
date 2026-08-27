@@ -162,6 +162,7 @@ export function SettingsRow({
   onToggle,
   onPress,
   chevron = false,
+  ariaExpanded,
   destructive = false,
   disabled = false,
   divider = false,
@@ -176,6 +177,7 @@ export function SettingsRow({
   onToggle?: (next: boolean) => void;
   onPress?: () => void;
   chevron?: boolean;
+  ariaExpanded?: boolean;
   destructive?: boolean;
   disabled?: boolean;
   divider?: boolean;
@@ -257,6 +259,7 @@ export function SettingsRow({
   const row = clickable ? (
     <button
       type="button"
+      aria-expanded={ariaExpanded}
       onClick={onPress}
       onMouseDown={() => setPressed(true)}
       onMouseUp={() => setPressed(false)}

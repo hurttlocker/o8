@@ -27,6 +27,7 @@ import {
   deepSeekHarnessInstallGuidance,
   resolveDeepSeekHarnessLaunch,
 } from '@/lib/deepseek-harness/runtime-resolution';
+import { validateRuntimeModelSelection } from './model-compatibility';
 
 const execFileAsync = promisify(execFile);
 const CACHE_TTL_MS = 60_000;
@@ -36,7 +37,7 @@ const TRUSTED_KEYLESS_OPENCODE_MODELS = new Set([
 ]);
 
 export type RuntimeHouse = RuntimeAuthHouse;
-export type RuntimeUnavailableReason = 'not_installed' | 'needs_auth' | 'needs_restart' | 'adapter_unavailable';
+export type RuntimeUnavailableReason = 'not_installed' | 'needs_auth' | 'needs_restart' | 'adapter_unavailable' | 'incompatible_model';
 
 export interface RuntimeAuthStatus {
   house: RuntimeHouse | null;
@@ -647,7 +648,26 @@ export async function assertRuntimeDispatchable(
     if (modelStatus.ready) return;
     throw new DispatchPreflightError(modelStatus);
   }
-  if (availability?.available) return;
+  if (availability?.available) {
+    const compatibilityError = validateRuntimeModelSelection(runtime, model, 'Selected');
+    if (compatibilityError) {
+      throw new DispatchPreflightError({
+        ...(status ?? {
+          house,
+          runtime,
+          installed: true,
+          authenticated: true,
+          checkedAt: Date.now(),
+          binaryPath: undefined,
+        }),
+        ready: false,
+        unavailableReason: 'incompatible_model',
+        detail: compatibilityError,
+        fix: 'Open Settings > Models > Runtime routing to choose a supported model or clear the model pin.',
+      });
+    }
+    return;
+  }
 
   throw new DispatchPreflightError(status ?? {
     house,

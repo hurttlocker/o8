@@ -48,7 +48,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const routing = resolveTargetingRouting(score.signals);
+  const routing = resolveTargetingRouting(score.signals, { repoPath, contextId: filePath });
 
   try {
     const [issueNumber] = nextInlineIssueNumbers(1);

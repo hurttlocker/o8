@@ -18,6 +18,8 @@ import {
   type RuntimeAuthHouse,
 } from '@/lib/orchestrator/runtime-capabilities';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import type { AgentRoleRoute } from '@/lib/operator/role-routing';
+import type { RoleRoutingReceipt } from '@/lib/operator/role-routing-ledger';
 import {
   APP_FONT_STACK,
   RAMS_ACCENT,
@@ -29,7 +31,7 @@ import {
 
 export type OverlapGateMode = 'advisory' | 'strict';
 export type { ThinkingEffort };
-export type SettingSource = 'env' | 'file' | 'default';
+export type SettingSource = 'env' | 'file' | 'profile' | 'default';
 
 export type SubscriptionProfile = 'both' | 'claude-only' | 'codex-only';
 export type DispatchRuntime = OrchestratorRuntime;
@@ -112,9 +114,16 @@ export interface OperatorDefaults {
   prLinkDestination: PrLinkDestination;
 }
 
+type ProfileControlledSetting = 'orchestratorBackend' | 'reviewerBackend' | 'defaultDispatchRuntime';
+export type OperatorDefaultSources = {
+  [Key in keyof OperatorDefaults]: Key extends ProfileControlledSetting
+    ? SettingSource
+    : Exclude<SettingSource, 'profile'>;
+};
+
 export interface OperatorDefaultsResponse {
   values: OperatorDefaults;
-  sources: Record<keyof OperatorDefaults, SettingSource>;
+  sources: OperatorDefaultSources;
   effectiveOverride: {
     apfsDependencyImages: boolean | null;
   };
@@ -144,6 +153,8 @@ export interface OperatorDefaultsResponse {
     detail: string;
     fix: string;
   }>;
+  roleRoutes?: AgentRoleRoute[];
+  recentRoleReceipts?: RoleRoutingReceipt[];
 }
 
 export const ENV_LOCKED_REASON = 'Locked by an environment variable — unset it to manage from Settings.';

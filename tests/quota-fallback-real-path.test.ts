@@ -31,6 +31,7 @@ const {
 } = await import('@/lib/orchestrator/cross-house-policy');
 const { handleWorkerRuntimeFailure } = await import('@/lib/dispatch/worker-quota-fallback');
 const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
+const { listRoleRoutingReceipts } = await import('@/lib/operator/role-routing-ledger');
 const { listInboxItems } = await import('@/lib/supervisor/inbox');
 const { composeSupervisorInboxCardCopy } = await import('@/lib/inbox/card-copy');
 const { submitPacketReview } = await import('@/lib/orchestrator/operator-mission-service/review');
@@ -120,6 +121,12 @@ describe('cross-house quota fallback real paths', () => {
         fromHouse: 'openai',
         toHouse: 'anthropic',
       },
+    });
+    expect(listRoleRoutingReceipts({ role: 'review', repoPath: lane.repoPath })[0]).toMatchObject({
+      requested: { backend: 'codex' },
+      effective: { backend: 'claude' },
+      status: 'fallback',
+      fallbackReason: expect.any(String),
     });
   });
 
@@ -319,6 +326,12 @@ describe('cross-house quota fallback real paths', () => {
         status: 'running',
       });
       expect(getLaneEvents(lane.id).find((event) => event.verb === 'worker_fallback')).toBeTruthy();
+      expect(listRoleRoutingReceipts({ role: 'recovery', repoPath: lane.repoPath })[0]).toMatchObject({
+        requested: { runtime: 'codex' },
+        effective: { runtime: 'claude-code' },
+        status: 'fallback',
+        fallbackReason: expect.any(String),
+      });
     } finally {
       await updateOperatorDefaults({ crossHouseWorkerFallback: false });
     }

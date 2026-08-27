@@ -424,34 +424,26 @@ describe('MCP operator defaults and dispatch routing', () => {
     expect(argv).not.toContain('gpt-5.6-terra');
   }, 30_000);
 
-  it('uses the Claude adapter default when a stored Codex model targets a claude-code packet', async () => {
+  it('rejects a cross-house default through the MCP settings path', async () => {
     const { handleOperatorDefaults } = await import('@/lib/mcp/operator-handlers/status');
     const defaultsResult = await handleOperatorDefaults({
       defaultDispatchRuntime: 'claude-code',
       defaultDispatchModel: MODEL_IDS.codexDefault,
     });
-    expect(defaultsResult.isError).not.toBe(true);
+    const message = defaultsResult.content.find((entry) => entry.type === 'text')?.text ?? '';
 
-    const created = await createMissionThroughRoute({
-      repoPath: await createRegisteredTempRepo(),
-      issueNumber: 2,
-      requestedRuntime: 'claude-code',
-    });
-    const { dispatchMission } = await import('@/lib/orchestrator/operator-mission-service/mission');
-    const dispatched = await dispatchMission({ missionId: created.missionId });
-
-    expect(dispatched.dispatched).toBe(1);
-    const argv = spawnedArgv();
-    expect(argv).toContain('--model');
-    expect(argv).toContain(MODEL_IDS.claudeWorkerDefault);
-    expect(argv).not.toContain(MODEL_IDS.codexDefault);
+    expect(defaultsResult.isError).toBe(true);
+    expect(message).toContain('not compatible with Claude Code');
+    expect(message).toContain('Settings > Models > Runtime routing');
+    expect(spawnMock).not.toHaveBeenCalled();
   }, 30_000);
 
-  it('revalidates a frozen packet model after reset instead of replaying a cleared Codex default', async () => {
+  it('preserves a compatible packet model across reset after the operator default changes', async () => {
     const { handleOperatorDefaults } = await import('@/lib/mcp/operator-handlers/status');
+    const configuredClaudeModel = 'claude-opus-5';
     const defaultsResult = await handleOperatorDefaults({
       defaultDispatchRuntime: 'claude-code',
-      defaultDispatchModel: MODEL_IDS.codexDefault,
+      defaultDispatchModel: configuredClaudeModel,
     });
     expect(defaultsResult.isError).not.toBe(true);
 
@@ -462,6 +454,7 @@ describe('MCP operator defaults and dispatch routing', () => {
     });
     const { dispatchMission } = await import('@/lib/orchestrator/operator-mission-service/mission');
     expect((await dispatchMission({ missionId: created.missionId })).dispatched).toBe(1);
+    expect(spawnedArgv()).toContain(configuredClaudeModel);
 
     const cleared = await handleOperatorDefaults({ defaultDispatchModel: '' });
     expect(cleared.isError).not.toBe(true);
@@ -475,9 +468,8 @@ describe('MCP operator defaults and dispatch routing', () => {
 
     expect(spawnMock).toHaveBeenCalledTimes(2);
     const redispatchArgv = spawnedArgv(1);
-    expect(redispatchArgv).toContain(MODEL_IDS.claudeWorkerDefault);
-    expect(redispatchArgv).not.toContain(MODEL_IDS.codexDefault);
-  }, 30_000);
+    expect(redispatchArgv).toContain(configuredClaudeModel);
+  }, 45_000);
 
   it('carries a per-packet Claude model hint through the mission chain into spawn argv', async () => {
     const { handleOperatorDefaults } = await import('@/lib/mcp/operator-handlers/status');

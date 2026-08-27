@@ -201,6 +201,17 @@ describe('worker model routing real path', () => {
       },
     });
 
+    const { listRoleRoutingReceipts } = await import('@/lib/operator/role-routing-ledger');
+    expect(listRoleRoutingReceipts({ role: 'build', repoPath: defaultRepoPath })).toEqual([
+      expect.objectContaining({
+        role: 'build',
+        contextType: 'packet',
+        contextId: dispatchedDefault.packets[0]?.id,
+        effective: expect.objectContaining({ runtime: 'codex', model: 'gpt-5.6-sol', effort: 'high' }),
+        status: 'selected',
+      }),
+    ]);
+
     const { callCodex, resetCodexProviderCache } = await import('@/lib/cortex/qa/llm/codex-adapter');
     resetCodexProviderCache();
     await expect(callCodex('Which Brain route is active?')).resolves.toBe('Configured Brain answer.');

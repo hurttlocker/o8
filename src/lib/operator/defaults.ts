@@ -1,7 +1,5 @@
 import 'server-only';
-
 import { CODEX_MODEL_IDS, isCodexModelId, isSupportedModelId, MODEL_IDS, SUPPORTED_MODEL_IDS } from '@/lib/models';
-
 import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import type { UpdateAutoApply } from '@/lib/app-update/types';
@@ -18,6 +16,7 @@ import {
 import { resolveWorkerEffortDefault } from './worker-effort-default';
 import { isWorkerStartMode, type WorkerStartMode } from './worker-start-mode';
 import { parseStoredJson } from './stored-json';
+import { assertRoutingCompatibility, routingUpdateTouchesCompatibility } from './routing-compatibility';
 import {
   coerceStoredTier,
   envTargetingTier,
@@ -126,7 +125,7 @@ export {
  * read — a stale copy of this file there silently does nothing (bit the
  * operator flow 2026-07-07; always verify against getOperatorDefaultsPath()).
  */
-export type SettingSource = 'env' | 'file' | 'default';
+export type SettingSource = 'env' | 'file' | 'profile' | 'default';
 export type RequireApproval = 'high-risk' | 'surface' | 'always' | 'never';
 
 export function isRequireApproval(value: unknown): value is RequireApproval { return value === 'high-risk' || value === 'surface' || value === 'always' || value === 'never'; }
@@ -781,7 +780,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     orchestratorModel: envModel !== null ? 'env' : fileValues.orchestratorModel !== undefined ? 'file' : 'default',
     opencodeOrchestratorModel: fileValues.opencodeOrchestratorModel !== undefined ? 'file' : 'default',
     opencodeWorkerModel: fileValues.opencodeWorkerModel !== undefined ? 'file' : 'default',
-    defaultDispatchRuntime: envRuntime !== null ? 'env' : fileValues.defaultDispatchRuntimeExplicit ? 'file' : 'default',
+    defaultDispatchRuntime: profileDefaults ? 'profile' : envRuntime !== null ? 'env' : fileValues.defaultDispatchRuntimeExplicit ? 'file' : 'default',
     workerStartMode: fileValues.workerStartMode !== undefined ? 'file' : 'default',
     workerRuntimes: fileValues.workerRuntimes !== undefined ? 'file' : 'default',
     codexWorkerEffort:
@@ -806,8 +805,8 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
       envBrainCli !== null ? 'env' : fileValues.brainUseClaudeCli !== undefined ? 'file' : 'default',
     workersUseBrain: envBrain !== null ? 'env' : fileValues.workersUseBrain !== undefined ? 'file' : 'default',
     crossHouseWorkerFallback: fileValues.crossHouseWorkerFallback !== undefined ? 'file' : 'default',
-    orchestratorBackend: envOrchBackend !== null ? 'env' : fileValues.orchestratorBackend !== undefined ? 'file' : 'default',
-    reviewerBackend: envRevBackend !== null ? 'env' : fileValues.reviewerBackend !== undefined ? 'file' : 'default',
+    orchestratorBackend: profileDefaults ? 'profile' : envOrchBackend !== null ? 'env' : fileValues.orchestratorBackend !== undefined ? 'file' : 'default',
+    reviewerBackend: profileDefaults ? 'profile' : envRevBackend !== null ? 'env' : fileValues.reviewerBackend !== undefined ? 'file' : 'default',
     packetExplainerEnabled: envExplainer !== null ? 'env' : fileValues.packetExplainerEnabled !== undefined ? 'file' : 'default',
     quizGateEnabled: envQuizGate !== null ? 'env' : fileValues.quizGateEnabled !== undefined ? 'file' : 'default',
     buyinDocEnabled: envBuyinDoc !== null ? 'env' : fileValues.buyinDocEnabled !== undefined ? 'file' : 'default',
@@ -1121,6 +1120,7 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>): Pr
     ...OPERATOR_DEFAULTS_FALLBACK,
     ...fileValues,
   };
+  if (routingUpdateTouchesCompatibility(update)) assertRoutingCompatibility(canonicalValues);
   await persistOperatorDefaults(canonicalValues, stored, existingToml, revision);
 
   return getOperatorDefaults();

@@ -711,6 +711,22 @@ describe("OpenCode readiness preflight", () => {
 });
 
 describe("dispatchable runtime readiness", () => {
+  it("rejects a known cross-house model before the runtime launches", async () => {
+    authFixture.installed.add("codex");
+    vi.stubEnv("OPENAI_API_KEY", "test-openai-key");
+    invalidateRuntimeAuthCache();
+
+    await expect(assertRuntimeDispatchable("codex", "claude-opus-4-8")).rejects.toMatchObject({
+      code: "dispatch_cli_auth_unavailable",
+      status: {
+        runtime: "codex",
+        unavailableReason: "incompatible_model",
+        detail: expect.stringContaining("not compatible with Codex"),
+        fix: expect.stringContaining("Settings > Models > Runtime routing"),
+      },
+    });
+  });
+
   it("marks every declarative worker available when its PATH and credential probes pass", async () => {
     authFixture.installed = new Set([
       "opencode2",

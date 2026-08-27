@@ -6,6 +6,9 @@ import {
   type CrossHouseFallbackDecision,
 } from '@/lib/orchestrator/cross-house-policy';
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
+import { createBackendRoleRouteChoice } from '@/lib/operator/role-routing';
+import { recordRoleRoutingReceiptSafely } from '@/lib/operator/role-routing-ledger';
+import { MODEL_IDS } from '@/lib/models';
 import { finishReviewTurn, startReviewTurn } from '@/lib/lane/review-turn-state';
 import type { OrchestratorEvent } from './orchestrator-stream-events';
 import {
@@ -131,6 +134,52 @@ export async function runReviewerTurnWithQuotaFallback(input: {
 }): Promise<ReviewFallbackTurnResult> {
   const initialBackend = input.initialBackend ?? getActiveReviewerBackend();
   const backendResolver = input.backendResolver ?? getOrchestratorBackend;
+  const defaults = getOperatorDefaultsSync();
+  const modelForBackend = (backend: OrchestratorBackendId, override?: string | null) => {
+    if (override) return override;
+    if (backend === 'claude') return defaults.values.orchestratorModel;
+    if (backend === 'codex') return MODEL_IDS.codexDefault;
+    if (backend === 'opencode') return defaults.values.opencodeOrchestratorModel;
+    return null;
+  };
+  const requestedRoute = createBackendRoleRouteChoice(
+    initialBackend.id,
+    modelForBackend(initialBackend.id),
+    defaults.values.thinkingEffort,
+  );
+  const finalize = (result: ReviewFallbackTurnResult): ReviewFallbackTurnResult => {
+    const fallbackReason = result.fallback ? buildCrossHouseFallbackMessage(result.fallback) : null;
+    const effectiveModel = result.fallback?.action === 'handoff'
+      ? modelForBackend(result.backend, result.fallback.toModel)
+      : modelForBackend(result.backend);
+    recordRoleRoutingReceiptSafely({
+      receiptKey: `review:${result.reviewTurnId ?? input.threadId}`,
+      role: 'review',
+      repoPath: input.repoPath,
+      contextType: input.surface,
+      contextId: input.laneId,
+      requested: requestedRoute,
+      effective: createBackendRoleRouteChoice(
+        result.backend,
+        effectiveModel,
+        defaults.values.thinkingEffort,
+      ),
+      sources: {
+        backend: defaults.sources.reviewerBackend,
+        runtime: defaults.values.reviewerBackend === 'follow' ? 'derived' : defaults.sources.reviewerBackend,
+        model: effectiveModel ? 'derived' : 'runtime-default',
+        effort: defaults.sources.thinkingEffort,
+      },
+      reason: result.ok
+        ? `${input.surface} completed on ${result.backend}.`
+        : `${input.surface} did not complete on ${result.backend}: ${result.errors.join('; ') || result.unavailableReason || 'unknown failure'}`,
+      fallbackReason,
+      status: result.ok
+        ? result.fallback ? 'fallback' : 'selected'
+        : result.unavailableReason ? 'refused' : 'failed',
+    });
+    return result;
+  };
   const promptFor = (backend: OrchestratorBackendId) => (
     typeof input.prompt === 'function' ? input.prompt(backend) : input.prompt
   );
@@ -146,7 +195,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
     signal: input.signal,
   });
   if (first.unavailableReason) {
-    return {
+    return finalize({
       ok: false,
       backend: initialBackend.id,
       text: '',
@@ -155,10 +204,10 @@ export async function runReviewerTurnWithQuotaFallback(input: {
       reviewTurnId: first.reviewTurnId,
       unavailableReason: first.unavailableReason,
       approximateCost: first.approximateCost,
-    };
+    });
   }
   if (!first.quotaError) {
-    return {
+    return finalize({
       ok: first.errors.length === 0,
       backend: initialBackend.id,
       text: first.text,
@@ -167,7 +216,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
       reviewTurnId: first.reviewTurnId,
       unavailableReason: null,
       approximateCost: first.approximateCost,
-    };
+    });
   }
 
   const decision = resolveCrossHouseFallback({
@@ -176,7 +225,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
     subscriptionProfile: getOperatorDefaultsSync().values.subscriptionProfile,
   });
   if (!decision) {
-    return {
+    return finalize({
       ok: false,
       backend: initialBackend.id,
       text: '',
@@ -185,7 +234,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
       reviewTurnId: first.reviewTurnId,
       unavailableReason: null,
       approximateCost: first.approximateCost,
-    };
+    });
   }
 
   recordLaneEvent(input.laneId, 'review_fallback', 'system', {
@@ -201,7 +250,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
     note: buildCrossHouseFallbackMessage(decision),
   });
   if (decision.action === 'hold') {
-    return {
+    return finalize({
       ok: false,
       backend: initialBackend.id,
       text: '',
@@ -210,7 +259,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
       reviewTurnId: first.reviewTurnId,
       unavailableReason: null,
       approximateCost: first.approximateCost,
-    };
+    });
   }
 
   const fallbackBackend = backendResolver(decision.toBackend);
@@ -227,7 +276,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
     signal: input.signal,
   });
   if (second.unavailableReason) {
-    return {
+    return finalize({
       ok: false,
       backend: fallbackBackend.id,
       text: '',
@@ -236,7 +285,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
       reviewTurnId: second.reviewTurnId,
       unavailableReason: second.unavailableReason,
       approximateCost: second.approximateCost ?? first.approximateCost,
-    };
+    });
   }
   if (second.quotaError) {
     recordLaneEvent(input.laneId, 'review_fallback', 'system', {
@@ -248,7 +297,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
     });
   }
   const errors = second.quotaError ? [second.quotaError, ...second.errors] : second.errors;
-  return {
+  return finalize({
     ok: errors.length === 0,
     backend: fallbackBackend.id,
     text: errors.length === 0 ? second.text : '',
@@ -257,5 +306,5 @@ export async function runReviewerTurnWithQuotaFallback(input: {
     reviewTurnId: second.reviewTurnId,
     unavailableReason: null,
     approximateCost: second.approximateCost ?? first.approximateCost,
-  };
+  });
 }

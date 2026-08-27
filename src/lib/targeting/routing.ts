@@ -10,7 +10,10 @@
  * rename" savings.
  */
 
-import { resolveTargetingActionSync, resolveTargetingTriageSync, type TargetingTier } from '@/lib/operator/defaults';
+import { getOperatorDefaultsSync, resolveTargetingActionSync, resolveTargetingTriageSync, type TargetingTier } from '@/lib/operator/defaults';
+import { createRoleRouteChoice } from '@/lib/operator/role-routing';
+import { recordRoleRoutingReceiptSafely } from '@/lib/operator/role-routing-ledger';
+import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { TargetSignals } from './signals';
@@ -42,8 +45,43 @@ export interface TargetingRouting {
  * use; the create-mission passthrough carries runtime + model today, per the
  * resolveWorkerRouting contract.)
  */
-export function resolveTargetingRouting(signals: TargetSignals): TargetingRouting {
+export function resolveTargetingRouting(
+  signals: TargetSignals,
+  receiptContext?: { repoPath: string; contextId: string },
+): TargetingRouting {
   const tier = pickTier(signals);
   const cfg: TargetingTier = tier === 'triage' ? resolveTargetingTriageSync() : resolveTargetingActionSync();
+  if (receiptContext) {
+    const defaults = getOperatorDefaultsSync();
+    const source = tier === 'triage' ? defaults.sources.targetingTriage : defaults.sources.targetingAction;
+    const configuredModel = cfg.model.trim() || null;
+    const effectiveModel = configuredModel ?? getRuntimeCapability(cfg.runtime).defaultModel ?? null;
+    recordRoleRoutingReceiptSafely({
+      role: 'triage',
+      repoPath: receiptContext.repoPath,
+      contextType: 'targeting-file',
+      contextId: receiptContext.contextId,
+      requested: createRoleRouteChoice({
+        backend: null,
+        runtime: cfg.runtime,
+        model: configuredModel,
+        effort: cfg.effort,
+      }),
+      effective: createRoleRouteChoice({
+        backend: null,
+        runtime: cfg.runtime,
+        model: effectiveModel,
+        effort: cfg.effort,
+      }),
+      sources: {
+        backend: 'derived',
+        runtime: source,
+        model: configuredModel ? source : 'runtime-default',
+        effort: source,
+      },
+      reason: `Deterministic targeting signals selected the ${tier} tier; the operator-owned ${tier} route supplied its runtime, model, and effort.`,
+      status: 'selected',
+    });
+  }
   return { tier, runtime: cfg.runtime, model: cfg.model, effort: cfg.effort };
 }

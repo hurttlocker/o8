@@ -7,13 +7,38 @@ import {
   resolveCrossHouseFallback,
 } from '@/lib/orchestrator/cross-house-policy';
 import { resolveCrossHouseWorkerFallbackSync, getOperatorDefaultsSync } from '@/lib/operator/defaults';
+import { createRoleRouteChoice } from '@/lib/operator/role-routing';
+import { recordRoleRoutingReceiptSafely } from '@/lib/operator/role-routing-ledger';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
+import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { enqueueInboxItem } from '@/lib/supervisor/inbox';
 
 function backendForRuntime(runtime: string): 'codex' | 'claude' | null {
   if (runtime === 'codex') return 'codex';
   if (runtime === 'claude-code') return 'claude';
   return null;
+}
+
+function workerEffort(
+  runtime: OrchestratorRuntime,
+  defaults: ReturnType<typeof getOperatorDefaultsSync>['values'],
+): ThinkingEffort | null {
+  if (runtime === 'codex') return defaults.codexWorkerEffort;
+  if (runtime === 'claude-code') return defaults.claudeWorkerEffort;
+  return null;
+}
+
+function workerChoice(
+  runtime: OrchestratorRuntime,
+  model: string | null | undefined,
+  defaults: ReturnType<typeof getOperatorDefaultsSync>['values'],
+) {
+  return createRoleRouteChoice({
+    backend: null,
+    runtime,
+    model: model?.trim() || null,
+    effort: workerEffort(runtime, defaults),
+  });
 }
 
 export interface WorkerQuotaFallbackResult {
@@ -111,13 +136,46 @@ export async function handleWorkerQuotaExhaustion(input: {
   const lane = getLane(input.laneId);
   if (!lane) return { handled: false, action: 'ignored' };
 
+  const defaults = getOperatorDefaultsSync();
   const decision = resolveCrossHouseFallback({
     role: 'worker',
     backend,
     model: input.model,
-    subscriptionProfile: getOperatorDefaultsSync().values.subscriptionProfile,
+    subscriptionProfile: defaults.values.subscriptionProfile,
   });
   if (!decision) return { handled: false, action: 'ignored' };
+
+  const requestedRuntime = input.runtime as OrchestratorRuntime;
+  const requestedRoute = workerChoice(requestedRuntime, decision.fromModel ?? input.model, defaults.values);
+  const fallbackRoute = workerChoice(decision.toRuntime, decision.toModel, defaults.values);
+  const routingSources = {
+    backend: 'derived' as const,
+    runtime: 'derived' as const,
+    model: decision.toModel ? 'derived' as const : 'runtime-default' as const,
+    effort: 'derived' as const,
+  };
+  const fallbackReason = buildCrossHouseFallbackMessage(decision);
+  const recordRecovery = (inputReceipt: {
+    receiptKey: string;
+    effective: ReturnType<typeof workerChoice> | null;
+    reason: string;
+    status: 'fallback' | 'refused' | 'failed';
+    fallbackReason?: string;
+  }) => {
+    recordRoleRoutingReceiptSafely({
+      receiptKey: inputReceipt.receiptKey,
+      role: 'recovery',
+      repoPath: lane.repoPath,
+      contextType: 'worker-quota-fallback',
+      contextId: lane.packetId ?? lane.id,
+      requested: requestedRoute,
+      effective: inputReceipt.effective,
+      sources: routingSources,
+      reason: inputReceipt.reason,
+      fallbackReason: inputReceipt.fallbackReason ?? fallbackReason,
+      status: inputReceipt.status,
+    });
+  };
 
   const payload = {
     laneId: lane.id,
@@ -170,6 +228,13 @@ export async function handleWorkerQuotaExhaustion(input: {
         autoFallbackEnabled: resolveCrossHouseWorkerFallbackSync(),
       },
     });
+    recordRecovery({
+      receiptKey: `worker-fallback:${activeFallbackAttempt.attemptId}`,
+      effective: fallbackRoute,
+      reason: 'Both comparable worker routes exhausted their quota. Recovery paused for operator action.',
+      status: 'failed',
+      fallbackReason: terminalPayload.note,
+    });
     return { handled: true, action: 'card', inboxId: item.id };
   }
 
@@ -187,6 +252,12 @@ export async function handleWorkerQuotaExhaustion(input: {
         fallbackAlreadyTried: false,
         autoFallbackEnabled: resolveCrossHouseWorkerFallbackSync(),
       },
+    });
+    recordRecovery({
+      receiptKey: `worker-quota:${lane.id}:${input.surfaceId}`,
+      effective: null,
+      reason: 'The configured worker route exhausted its quota. Automatic cross-account fallback is off.',
+      status: 'refused',
     });
     return { handled: true, action: 'card', toRuntime: decision.toRuntime, inboxId: item.id };
   }
@@ -242,6 +313,12 @@ export async function handleWorkerQuotaExhaustion(input: {
         dispatchRuntimePin: decision.toRuntime,
       });
     }
+    recordRecovery({
+      receiptKey: `worker-fallback:${attemptId}`,
+      effective: fallbackRoute,
+      reason: `Recovery relaunched the packet on ${decision.toRuntime}.`,
+      status: 'fallback',
+    });
     return {
       handled: true,
       action: 'redispatched',
@@ -268,6 +345,12 @@ export async function handleWorkerQuotaExhaustion(input: {
       kind: 'worker_quota_exhausted',
       status: 'human_required',
       payload: { ...payload, autoFallbackEnabled: true, fallbackError },
+    });
+    recordRecovery({
+      receiptKey: `worker-fallback:${attemptId}`,
+      effective: fallbackRoute,
+      reason: `Recovery could not launch ${decision.toRuntime}: ${fallbackError}`,
+      status: 'failed',
     });
     return { handled: true, action: 'card', toRuntime: decision.toRuntime, inboxId: item.id };
   }

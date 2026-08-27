@@ -23,6 +23,8 @@ import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
 import type { TypedRow } from '@/lib/cortex/qa/types';
 import { getEntitlementSync } from '@/lib/entitlement/store';
 import { getOperatorDefaultsSync, type ClassAComposer } from '@/lib/operator/defaults';
+import { createRoleRouteChoice } from '@/lib/operator/role-routing';
+import { recordRoleRoutingReceiptSafely } from '@/lib/operator/role-routing-ledger';
 import { flushBrainQuotaAlerts, noteBrainQuotaError } from './brain-quota-alert';
 
 export type SseEmit = (name: string, payload: unknown) => void;
@@ -84,6 +86,13 @@ export async function composeClassA(
   // investigation than the bill. Production user chat (non-eval-mode)
   // routes through Haiku CLI tier 1 — free for Claude Max users.
   const evalMode = process.env.O8_EVAL_MODE === '1' || process.env.O8_EVAL_MODE === 'true';
+  const routingSnapshot = (() => {
+    try {
+      return getOperatorDefaultsSync();
+    } catch {
+      return null;
+    }
+  })();
 
   let brainCliOn = false;
   let codexCliOn = true;
@@ -98,9 +107,10 @@ export async function composeClassA(
 
   // #971: in production, the user-selected `classAComposer` setting picks
   // which CLI tier leads. Eval mode is never affected (smoke gate is fixed).
-  let classAMode: ClassAComposer = evalMode
+  const configuredClassAMode: ClassAComposer = evalMode
     ? 'auto'
-    : resolveClassAComposerSetting();
+    : routingSnapshot?.values.classAComposer ?? 'auto';
+  let classAMode = configuredClassAMode;
   // B-1 (2026-06-22): managed-inference users (founders / paid plan — `proxy.inference`)
   // get the fast Brain tier automatically — the perk. 'fastest' leads with flash-lite
   // via the capped proxy (~0.5s) instead of the 15-30s CLI bootstrap. Only overrides the
@@ -113,6 +123,53 @@ export async function composeClassA(
   }
   const sonnetCliFirst = classAMode === 'sonnet-cli' && brainCliOn;
   let triedSonnetCli = false;
+  const attemptedRoutes: string[] = [];
+  if (!brainCliOn && (configuredClassAMode === 'haiku-cli' || configuredClassAMode === 'sonnet-cli')) {
+    attemptedRoutes.push(`${configuredClassAMode} (Brain CLI disabled or unavailable)`);
+  }
+  const recordBrainResolution = (input: {
+    backend: string;
+    runtime: 'codex' | 'claude-code' | null;
+    model: string | null;
+    effort?: ReturnType<typeof getOperatorDefaultsSync>['values']['brainCodexEffort'] | null;
+    label: string;
+  }) => {
+    if (evalMode) return;
+    const earlierRoutes = attemptedRoutes.slice(0, -1);
+    const composerSource = routingSnapshot?.sources?.classAComposer ?? 'default';
+    recordRoleRoutingReceiptSafely({
+      role: 'brain',
+      repoPath: repoPath ?? null,
+      contextType: 'brain-compose',
+      requested: createRoleRouteChoice({
+        backend: configuredClassAMode,
+        runtime: null,
+        model: null,
+        effort: null,
+      }),
+      effective: createRoleRouteChoice({
+        backend: input.backend,
+        runtime: input.runtime,
+        model: input.model,
+        effort: input.effort ?? null,
+      }),
+      sources: {
+        backend: composerSource,
+        runtime: input.runtime ? 'derived' : 'request-time',
+        model: input.runtime === 'codex'
+          ? routingSnapshot?.sources?.brainCodexModel ?? 'default'
+          : input.model ? 'derived' : 'request-time',
+        effort: input.runtime === 'codex'
+          ? routingSnapshot?.sources?.brainCodexEffort ?? 'default'
+          : 'request-time',
+      },
+      reason: `Brain composition resolved through ${input.label}.`,
+      fallbackReason: earlierRoutes.length > 0
+        ? `Earlier routes were unavailable or failed: ${earlierRoutes.join(' → ')}.`
+        : null,
+      status: earlierRoutes.length > 0 ? 'fallback' : 'selected',
+    });
+  };
 
   // Eval-mode tier 0: Sonnet 4.6 via the REPL adapter (subscription-billed,
   // #1124) — best reasoning + synthesis, never hedges when rows answer the
@@ -120,28 +177,40 @@ export async function composeClassA(
   // `tryComposeOpenRouter('anthropic/...')` so eval doesn't burn paid
   // OpenRouter credits on the Anthropic models.
   if (evalMode && brainCliOn) {
+    attemptedRoutes.push('sonnet-repl');
     const sonnetAnswer = await tryComposeSonnet(question, repoPath, topRows, options);
     flushBrainQuotaAlerts(emit);
     if (sonnetAnswer) {
       console.info('[qa][composer-A] resolved via sonnet-repl (eval tier 0)');
+      recordBrainResolution({ backend: 'claude', runtime: 'claude-code', model: 'sonnet', label: 'Sonnet CLI' });
       emitClassAAnswer(sonnetAnswer, lookup, emit, options);
       return;
     }
     // Eval-mode tier 0b: Haiku 4.5 via the REPL adapter as cheap fallback.
+    attemptedRoutes.push('haiku-repl');
     const haikuAnswer = await tryComposeHaiku(composePrompt);
     flushBrainQuotaAlerts(emit);
     if (haikuAnswer) {
       console.info('[qa][composer-A] resolved via haiku-repl (eval tier 0b)');
+      recordBrainResolution({ backend: 'claude', runtime: 'claude-code', model: 'haiku', label: 'Haiku CLI' });
       emitClassAAnswer(haikuAnswer, lookup, emit, options);
       return;
     }
   }
 
   if (evalMode && codexCliOn) {
+    attemptedRoutes.push('codex-cli');
     const codexAnswer = await tryComposeCodex(composePrompt);
     flushBrainQuotaAlerts(emit);
     if (codexAnswer) {
       console.info('[qa][composer-A] resolved via codex-cli (eval subscription tier)');
+      recordBrainResolution({
+        backend: 'codex',
+        runtime: 'codex',
+        model: routingSnapshot?.values.brainCodexModel ?? null,
+        effort: routingSnapshot?.values.brainCodexEffort ?? null,
+        label: 'Codex CLI',
+      });
       emitClassAAnswer(codexAnswer, lookup, emit, options);
       return;
     }
@@ -153,15 +222,19 @@ export async function composeClassA(
   // bootstrap. On failure fall through into the normal subscription chain
   // below, so the knob never reduces availability.
   if (classAMode === 'fastest') {
+    attemptedRoutes.push('inference-route');
     const fastAnswer = await tryComposeOpenRouter(composePrompt);
     if (fastAnswer) {
       console.info(`[qa][composer-A] resolved via openrouter:${OPENROUTER_PRIMARY_MODEL} (mode=fastest)`);
+      recordBrainResolution({ backend: 'inference-route', runtime: null, model: null, label: 'managed, local, or BYOK inference route' });
       emitClassAAnswer(fastAnswer, lookup, emit, options);
       return;
     }
+    attemptedRoutes.push('flash');
     const fastFlash = await tryComposeFlash(composePrompt);
     if (fastFlash) {
       console.info('[qa][composer-A] resolved via flash (mode=fastest)');
+      recordBrainResolution({ backend: 'direct-inference', runtime: null, model: 'gemini-2.5-flash', label: 'direct Flash inference' });
       emitClassAAnswer(fastFlash, lookup, emit, options);
       return;
     }
@@ -172,11 +245,13 @@ export async function composeClassA(
   // Falls through to OpenRouter/Flash/heuristic on failure (Haiku + Codex
   // stay skipped because the user explicitly opted in to Sonnet quality).
   if (sonnetCliFirst) {
+    attemptedRoutes.push('sonnet-cli');
     const sonnetAnswer = await tryComposeSonnet(question, repoPath, topRows, options);
     flushBrainQuotaAlerts(emit);
     triedSonnetCli = true;
     if (sonnetAnswer) {
       console.info('[qa][composer-A] resolved via sonnet-cli (mode=sonnet-cli)');
+      recordBrainResolution({ backend: 'claude', runtime: 'claude-code', model: 'sonnet', label: 'Sonnet CLI' });
       emitClassAAnswer(sonnetAnswer, lookup, emit, options);
       return;
     }
@@ -190,10 +265,12 @@ export async function composeClassA(
   // Tier 1 (brainUseClaudeCli ON): Haiku CLI. Skipped in eval mode, sonnet-cli
   // mode, or when the setting is OFF.
   if (!evalMode && !sonnetCliFirst && brainCliOn) {
+    attemptedRoutes.push('haiku-cli');
     const haikuAnswer = await tryComposeHaiku(composePrompt);
     flushBrainQuotaAlerts(emit);
     if (haikuAnswer) {
       console.info('[qa][composer-A] resolved via haiku-cli (tier 1)');
+      recordBrainResolution({ backend: 'claude', runtime: 'claude-code', model: 'haiku', label: 'Haiku CLI' });
       emitClassAAnswer(haikuAnswer, lookup, emit, options);
       return;
     }
@@ -201,27 +278,39 @@ export async function composeClassA(
 
   // Tier 1 (brainUseClaudeCli OFF) / Tier 2 (ON): Codex CLI.
   if (!evalMode && !sonnetCliFirst && codexCliOn) {
+    attemptedRoutes.push('codex-cli');
     const codexAnswer = await tryComposeCodex(composePrompt);
     flushBrainQuotaAlerts(emit);
     if (codexAnswer) {
       console.info(`[qa][composer-A] resolved via codex-cli (${brainCliOn ? 'tier 2' : 'tier 1 default'})`);
+      recordBrainResolution({
+        backend: 'codex',
+        runtime: 'codex',
+        model: routingSnapshot?.values.brainCodexModel ?? null,
+        effort: routingSnapshot?.values.brainCodexEffort ?? null,
+        label: 'Codex CLI',
+      });
       emitClassAAnswer(codexAnswer, lookup, emit, options);
       return;
     }
   }
 
   // Tier 3: OpenRouter (flash-lite primary w/ gpt-5.4-nano + grok-4.3 fallback).
+  attemptedRoutes.push('inference-route');
   const openrouterAnswer = await tryComposeOpenRouter(composePrompt);
   if (openrouterAnswer) {
     console.info(`[qa][composer-A] resolved via openrouter:${OPENROUTER_PRIMARY_MODEL}`);
+    recordBrainResolution({ backend: 'inference-route', runtime: null, model: null, label: 'managed, local, or BYOK inference route' });
     emitClassAAnswer(openrouterAnswer, lookup, emit, options);
     return;
   }
 
   // Tier 4: Flash.
+  attemptedRoutes.push('flash');
   const flashAnswer = await tryComposeFlash(composePrompt);
   if (flashAnswer) {
     console.info('[qa][composer-A] resolved via flash');
+    recordBrainResolution({ backend: 'direct-inference', runtime: null, model: 'gemini-2.5-flash', label: 'direct Flash inference' });
     emitClassAAnswer(flashAnswer, lookup, emit, options);
     return;
   }
@@ -229,17 +318,21 @@ export async function composeClassA(
   // Tier 5: Sonnet CLI (callSonnet's CLI tier — slow but reliable). Skipped
   // in eval mode or when sonnet-cli mode already tried it above (#971).
   if (!evalMode && brainCliOn && !triedSonnetCli) {
+    attemptedRoutes.push('sonnet-cli');
     const sonnetAnswer = await tryComposeSonnet(question, repoPath, topRows, options);
     flushBrainQuotaAlerts(emit);
     if (sonnetAnswer) {
       console.info('[qa][composer-A] resolved via sonnet-cli');
+      recordBrainResolution({ backend: 'claude', runtime: 'claude-code', model: 'sonnet', label: 'Sonnet CLI' });
       emitClassAAnswer(sonnetAnswer, lookup, emit, options);
       return;
     }
   }
 
   // Tier 6: heuristic.
+  attemptedRoutes.push('deterministic-heuristic');
   console.info('[qa][composer-A] resolved via heuristic');
+  recordBrainResolution({ backend: 'deterministic-heuristic', runtime: null, model: null, label: 'deterministic heuristic' });
   emit('token', { text: 'I don\'t have that information yet.' });
   emit('done', {});
 }
@@ -263,14 +356,6 @@ function managedInferenceEnabled(): boolean {
  * `~/.cortex-ide/operator-defaults.json`; failures fall back to 'auto'
  * so a missing/corrupt prefs file never breaks Q&A.
  */
-function resolveClassAComposerSetting(): ClassAComposer {
-  try {
-    return getOperatorDefaultsSync().values.classAComposer;
-  } catch {
-    return 'auto';
-  }
-}
-
 /** Tier 1: Haiku CLI. Free for Claude Max users — primary tier. */
 async function tryComposeHaiku(prompt: string): Promise<string | null> {
   try {

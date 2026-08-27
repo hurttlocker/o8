@@ -26,6 +26,7 @@ process.env.CORTEX_IDE_DATA_DIR = dataDir;
 const heartbeat = await import('@/app/api/lanes/[id]/heartbeat/route');
 const laneEvents = await import('@/app/api/lanes/[id]/events/route');
 const { createLane, setLaneStatus, getLaneEvents } = await import('@/lib/lane/registry');
+const { listRoleRoutingReceipts } = await import('@/lib/operator/role-routing-ledger');
 const { listInboxItems } = await import('@/lib/supervisor/inbox');
 
 // Unique repo + packet per lane so the process-global inbox (deduped on
@@ -98,6 +99,7 @@ describe('session-binding fault — through the real heartbeat route', () => {
 
     expect(faultEvents(lane.id)).toHaveLength(0);
     expect(faultCards(lane.repoPath).some((card) => card.packetId === lane.packetId)).toBe(false);
+    expect(listRoleRoutingReceipts({ repoPath: lane.repoPath })).toEqual([]);
   });
 });
 

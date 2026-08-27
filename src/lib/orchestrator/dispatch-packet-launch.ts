@@ -12,6 +12,8 @@ import {
   resolveOpencodeWorkerModelSync,
 } from '@/lib/operator/defaults';
 import { resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-profile';
+import { recordRoleRoutingReceiptSafely } from '@/lib/operator/role-routing-ledger';
+import type { RoleId, RoleRouteChoice } from '@/lib/operator/role-routing';
 import type { PacketSpendCap } from './metered-spend';
 import { getProjectContext } from '@/lib/projects/context';
 import { resolveDefaultBranch } from '@/lib/repos/registry';
@@ -103,6 +105,56 @@ function resolveLaunchWorkerRouting(workerRouting: WorkerRouting): WorkerRouting
   };
 }
 
+function workerRouteChoice(
+  routing: WorkerRouting,
+  selected: boolean,
+): RoleRouteChoice {
+  const runtime = selected ? routing.selectedRuntime : routing.requestedRuntime;
+  const model = selected ? routing.selectedModel : routing.requestedModel;
+  const effort = selected ? routing.selectedEffort : routing.requestedEffort;
+  const label = runtime
+    ? [getRuntimeCapability(runtime).label, model, effort].filter(Boolean).join(' · ')
+    : 'Runtime default';
+  return {
+    backend: null,
+    runtime,
+    model,
+    effort,
+    label,
+  };
+}
+
+function recordPacketRouting(input: {
+  packet: OrchestratorPacket;
+  requested: WorkerRouting;
+  effective: WorkerRouting | null;
+  receiptKey: string;
+  contextId?: string | null;
+  status: 'selected' | 'fallback' | 'refused' | 'failed';
+  reason: string;
+  fallbackReason?: string | null;
+}) {
+  const role: RoleId = input.packet.status === 'recovering' ? 'recovery' : 'build';
+  recordRoleRoutingReceiptSafely({
+    receiptKey: input.receiptKey,
+    role,
+    repoPath: input.packet.workspaceTargetPath,
+    contextType: 'packet',
+    contextId: input.contextId ?? input.packet.id,
+    requested: workerRouteChoice(input.requested, false),
+    effective: input.effective ? workerRouteChoice(input.effective, true) : null,
+    sources: {
+      backend: 'derived',
+      runtime: 'request-time',
+      model: input.requested.requestedModel ? 'request-time' : 'runtime-default',
+      effort: input.requested.requestedEffort ? 'request-time' : 'runtime-default',
+    },
+    reason: input.reason,
+    fallbackReason: input.fallbackReason ?? null,
+    status: input.status,
+  });
+}
+
 export async function launchPacketWithStorageAdmission(input: {
   packet: OrchestratorPacket;
   allPackets: OrchestratorPacket[];
@@ -117,11 +169,23 @@ export async function launchPacketWithStorageAdmission(input: {
   });
   const projectContext = await getProjectContext({ repoPath: packet.workspaceTargetPath });
   const baseBranch = await resolveDefaultBranch(packet.workspaceTargetPath!);
-  await assertRuntimeDispatchable(
-    workerRouting.selectedRuntime,
-    workerRouting.selectedModel,
-    packet.workspaceTargetPath,
-  );
+  try {
+    await assertRuntimeDispatchable(
+      workerRouting.selectedRuntime,
+      workerRouting.selectedModel,
+      packet.workspaceTargetPath,
+    );
+  } catch (error) {
+    recordPacketRouting({
+      packet,
+      requested: input.workerRouting,
+      effective: null,
+      receiptKey: `packet:${packet.id}:preflight:${workerRouting.decidedAt}`,
+      status: 'refused',
+      reason: error instanceof Error ? error.message : 'The selected runtime failed dispatch preflight.',
+    });
+    throw error;
+  }
   const admissionLease = await storageAdmission.reserveForLaunch(packet);
   const launchGeneration = admissionLease.receipt.ownerGeneration;
   if (
@@ -139,7 +203,7 @@ export async function launchPacketWithStorageAdmission(input: {
         },
       );
     }
-    return {
+    const result = {
       laneId: lane.id,
       sessionKey: lane.sessionKey,
       workerRouting,
@@ -147,6 +211,21 @@ export async function launchPacketWithStorageAdmission(input: {
       spendCap,
       dependencyMaterializationMode: packet.lane?.dependencyMaterializationMode ?? null,
     };
+    const fallback = Boolean(
+      (input.workerRouting.requestedRuntime && input.workerRouting.requestedRuntime !== workerRouting.selectedRuntime)
+      || (input.workerRouting.requestedModel && input.workerRouting.requestedModel !== workerRouting.selectedModel),
+    );
+    recordPacketRouting({
+      packet,
+      requested: input.workerRouting,
+      effective: workerRouting,
+      receiptKey: `packet-storage-launch:${admissionLease.receipt.reservationId}`,
+      contextId: packet.id,
+      status: fallback ? 'fallback' : 'selected',
+      reason: workerRouting.reason,
+      fallbackReason: fallback ? workerRouting.reason : null,
+    });
+    return result;
   }
   const claimKey = `packet-storage-launch:${admissionLease.receipt.reservationId}`;
   const outcome = await withIdempotency<LaunchPacketResult>({
@@ -251,7 +330,23 @@ export async function launchPacketWithStorageAdmission(input: {
       dependencyMaterializationMode: launchResult.dependencyMaterializationMode ?? null,
     };
   });
-  if (!outcome.inProgress) return outcome.result;
+  if (!outcome.inProgress) {
+    const fallback = Boolean(
+      (input.workerRouting.requestedRuntime && input.workerRouting.requestedRuntime !== outcome.result.workerRouting.selectedRuntime)
+      || (input.workerRouting.requestedModel && input.workerRouting.requestedModel !== outcome.result.workerRouting.selectedModel),
+    );
+    recordPacketRouting({
+      packet,
+      requested: input.workerRouting,
+      effective: outcome.result.workerRouting,
+      receiptKey: claimKey,
+      contextId: packet.id,
+      status: fallback ? 'fallback' : 'selected',
+      reason: outcome.result.workerRouting.reason,
+      fallbackReason: fallback ? outcome.result.workerRouting.reason : null,
+    });
+    return outcome.result;
+  }
   throw new PacketStorageAdmissionError(
     outcome.unresolved
       ? 'Dispatch held because the prior launch owner ended before its result was reconciled.'

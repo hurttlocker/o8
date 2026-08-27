@@ -7,7 +7,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 const dataDir = mkdtempSync(path.join(os.tmpdir(), 'o8-onboarding-runtime-picker-'));
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
-let inventory = [
+const fullInventory = [
   {
     id: 'codex',
     label: 'Codex',
@@ -40,6 +40,7 @@ let inventory = [
   detail: string;
   fix: string;
 }>;
+let inventory = fullInventory.map((runtime) => ({ ...runtime }));
 
 vi.mock('@/lib/runtimes/shared/auth-detect', () => ({
   getRuntimeAuthSnapshot: vi.fn(async () => ({
@@ -70,6 +71,20 @@ afterAll(() => {
 
 describe('onboarding runtime picker — real operator-defaults path', () => {
   it('reads discovery, blocks unavailable choices, and persists the orchestrator and worker pool', async () => {
+    inventory = fullInventory.map((runtime) => runtime.id === 'codex'
+      ? {
+          ...runtime,
+          available: false,
+          unavailableReason: 'not_installed' as const,
+          detail: 'Codex CLI is not installed.',
+          fix: 'Install Codex, then run `codex login`.',
+        }
+      : { ...runtime });
+    const singleRuntime = await loadOnboardingRuntimeSelection(routeFetch);
+    expect(singleRuntime.orchestratorRuntime).toBe('claude-code');
+    expect(singleRuntime.workerRuntimes).toEqual(['claude-code']);
+
+    inventory = fullInventory.map((runtime) => ({ ...runtime }));
     const loaded = await loadOnboardingRuntimeSelection(routeFetch);
     expect(loaded.inventory).toEqual(inventory);
     expect(loaded.orchestratorRuntime).toBe('codex');
@@ -93,6 +108,31 @@ describe('onboarding runtime picker — real operator-defaults path', () => {
     expect(persisted.values.defaultDispatchRuntime).toBe('claude-code');
     expect(persisted.values.workerRuntimes).toEqual(['claude-code', 'codex']);
     expect(persisted.sources.workerRuntimes).toBe('file');
+
+    inventory = [
+      {
+        id: 'gemini',
+        label: 'Gemini',
+        available: true,
+        unavailableReason: null,
+        detail: 'Gemini CLI is installed and signed in.',
+        fix: '',
+      },
+      ...inventory.filter((runtime) => runtime.id !== 'gemini'),
+    ];
+
+    const afterLaterInstall = await loadOnboardingRuntimeSelection(routeFetch);
+    expect(afterLaterInstall.orchestratorRuntime).toBe('claude-code');
+    expect(afterLaterInstall.workerRuntimes).toEqual(['claude-code', 'codex']);
+
+    const afterLaterInstallResponse = await route.GET();
+    await expect(afterLaterInstallResponse.json()).resolves.toMatchObject({
+      values: {
+        orchestratorBackend: 'claude',
+        defaultDispatchRuntime: 'claude-code',
+        workerRuntimes: ['claude-code', 'codex'],
+      },
+    });
   });
 
   it('returns an honest, skippable empty selection when no agent CLI is installed', async () => {

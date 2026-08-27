@@ -23,7 +23,6 @@ import {
 } from './shared';
 import { GroupFootnote, GroupHeader, SettingsGroup, SettingsRow, ValuePill } from './grouped';
 import { fetchOperatorDefaults } from './operator-defaults-client';
-import { useEntitlement } from '@/lib/entitlement/context';
 import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 import { ApiKeysProviderList } from './APIKeysTab';
 import { LocalModelsSection } from './LocalModelsSection';
@@ -40,6 +39,7 @@ import {
 } from './dispatch-shared';
 import { AcpModelPickerPopover } from './AcpModelPickerPopover';
 import { ClaudeCodeHarnessSection } from './ClaudeCodeHarnessSection';
+import { AgentRoleRoutingSection } from './AgentRoleRoutingSection';
 
 // ── Runtime detection (real, via /api/setup/detect) ──
 
@@ -119,9 +119,6 @@ function TrailingCluster({ children }: { children: React.ReactNode }) {
 }
 
 export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab) => void }) {
-  const { founder, plan } = useEntitlement();
-  const foundersMode = founder !== null || plan === 'founder';
-
   // ── Operator defaults (shared store with the Dispatch tab) ──
   const [data, setData] = useState<OperatorDefaultsResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -247,8 +244,13 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
         </div>
       ) : null}
 
+      <AgentRoleRoutingSection
+        routes={data?.roleRoutes ?? []}
+        receipts={data?.recentRoleReceipts ?? []}
+      />
+
       {/* ── Runtimes ── */}
-      <section>
+      <section style={{ marginTop: 28 }}>
         <SettingsGroup
           header="Runtimes"
           footnote="Detection is live from your machine. Codex and Claude Code take a worker-effort default; Gemini and OpenCode 2 ship wired but hidden until you turn them on. Effort here is the same fallback the Dispatch tab sets."
@@ -532,35 +534,24 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
         </div>
       </section>
 
-      {/* ── Local models (founders, matching Dispatch) ── */}
-      {foundersMode ? (
-        <LocalModelsSection
-          values={{
-            defaultDispatchModel: values.defaultDispatchModel,
-            localInferenceBaseUrl: values.localInferenceBaseUrl,
-            localEmbedModel: values.localEmbedModel,
-            localChatModel: values.localChatModel,
-          }}
-          sources={{
-            defaultDispatchModel: sources.defaultDispatchModel,
-            localInferenceBaseUrl: sources.localInferenceBaseUrl,
-            localEmbedModel: sources.localEmbedModel,
-            localChatModel: sources.localChatModel,
-          }}
-          busyField={busyField}
-          envDisabledReason={ENV_LOCKED_REASON}
-          onCommit={(field, value) => { updateField(field, value); }}
-        />
-      ) : (
-        <section style={{ marginTop: 28 }}>
-          <GroupHeader>Local models</GroupHeader>
-          <div style={{ maxWidth: 620 }}>
-            <GroupFootnote>
-              Run o8 with zero cloud keys — point dispatch and the Brain at a model on your own machine (Ollama / LM Studio). Unlocks with a founding license.
-            </GroupFootnote>
-          </div>
-        </section>
-      )}
+      {/* ── Local models — operator-owned compute is never paywalled ── */}
+      <LocalModelsSection
+        values={{
+          defaultDispatchModel: values.defaultDispatchModel,
+          localInferenceBaseUrl: values.localInferenceBaseUrl,
+          localEmbedModel: values.localEmbedModel,
+          localChatModel: values.localChatModel,
+        }}
+        sources={{
+          defaultDispatchModel: sources.defaultDispatchModel,
+          localInferenceBaseUrl: sources.localInferenceBaseUrl,
+          localEmbedModel: sources.localEmbedModel,
+          localChatModel: sources.localChatModel,
+        }}
+        busyField={busyField}
+        envDisabledReason={ENV_LOCKED_REASON}
+        onCommit={(field, value) => { updateField(field, value); }}
+      />
 
       <div style={{ marginTop: 32, maxWidth: 620 }}>
         <span style={{ fontSize: 11, color: RAMS_INK_QUIET, fontFamily: APP_FONT_STACK, letterSpacing: '-0.005em' }}>

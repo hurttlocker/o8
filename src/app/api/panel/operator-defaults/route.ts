@@ -16,6 +16,7 @@ import {
   isRequireApproval,
   isReviewerBackendSetting,
   isSubscriptionProfile,
+  OPERATOR_DEFAULTS_FALLBACK,
   updateOperatorDefaults,
   type OperatorDefaults,
   type OverlapGateMode,
@@ -23,6 +24,11 @@ import {
 import { isBroadcastCommentaryMode } from '@/lib/operator/broadcast-commentary-defaults';
 import { isDispatchRuntime } from '@/lib/operator/defaults-env';
 import { isWorkerStartMode } from '@/lib/operator/worker-start-mode';
+import { projectAgentRoleRoutes } from '@/lib/operator/role-routing';
+import { listRoleRoutingReceipts } from '@/lib/operator/role-routing-ledger';
+import {
+  assertRoutingTomlCompatibility,
+} from '@/lib/operator/routing-compatibility';
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { withStoragePressurePolicyLock } from '@/lib/orchestrator/storage-pressure-policy-lock';
 import { SettingsTomlConflictError } from '@/lib/settings/operator-defaults-store';
@@ -49,6 +55,32 @@ function response(payload: unknown, status = 200) {
     status,
     headers: NO_STORE_HEADERS,
   });
+}
+
+type OperatorDefaultsData = Awaited<ReturnType<typeof getOperatorDefaults>>;
+type OperatorDefaultsTomlState = Awaited<ReturnType<typeof getOperatorDefaultsTomlState>>;
+type CliAuthSnapshot = Awaited<ReturnType<typeof getRuntimeAuthSnapshot>>;
+type DispatchableRuntimeInventory = Awaited<ReturnType<typeof getDispatchableRuntimeAvailability>>;
+
+function operatorDefaultsPayload(
+  data: OperatorDefaultsData,
+  settingsToml: OperatorDefaultsTomlState,
+  cliAuth: CliAuthSnapshot,
+  dispatchableRuntimes: DispatchableRuntimeInventory,
+) {
+  return {
+    ...data,
+    effectiveOverride: effectiveOverride(),
+    settingsToml,
+    cliAuth,
+    dispatchableRuntimes,
+    roleRoutes: projectAgentRoleRoutes({
+      values: data.values,
+      sources: data.sources,
+      dispatchableRuntimes,
+    }),
+    recentRoleReceipts: listRoleRoutingReceipts({ limit: 60 }),
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -543,7 +575,7 @@ export async function GET() {
       getRuntimeAuthSnapshot(),
     ]);
     const dispatchableRuntimes = await getDispatchableRuntimeAvailability(cliAuth);
-    return response({ ...data, effectiveOverride: effectiveOverride(), settingsToml, cliAuth, dispatchableRuntimes });
+    return response(operatorDefaultsPayload(data, settingsToml, cliAuth, dispatchableRuntimes));
   } catch (error) {
     console.error('[panel-operator-defaults] Failed to load operator defaults:', error);
     return response({ error: 'Failed to load operator defaults.' }, 500);
@@ -563,6 +595,7 @@ export async function POST(request: Request) {
       if (typeof body.settingsTomlRevision !== 'string' || !body.settingsTomlRevision) {
         return response({ error: 'settingsTomlRevision is required to save settings.toml.' }, 400);
       }
+      assertRoutingTomlCompatibility(body.settingsToml, OPERATOR_DEFAULTS_FALLBACK);
       const [updated, cliAuth] = await Promise.all([
         withStoragePressurePolicyLock(() => (
           applyOperatorDefaultsToml(body.settingsToml as string, body.settingsTomlRevision as string)
@@ -573,7 +606,7 @@ export async function POST(request: Request) {
         getOperatorDefaultsTomlState(),
         getDispatchableRuntimeAvailability(cliAuth),
       ]);
-      return response({ ...updated, effectiveOverride: effectiveOverride(), settingsToml, cliAuth, dispatchableRuntimes });
+      return response(operatorDefaultsPayload(updated, settingsToml, cliAuth, dispatchableRuntimes));
     }
     if (body.workerRuntimes !== undefined && !isWorkerRuntimeList(body.workerRuntimes)) {
       return response({ error: 'workerRuntimes must contain at least one dispatchable runtime.' }, 400);
@@ -585,7 +618,6 @@ export async function POST(request: Request) {
     if (Object.keys(update).length === 0) {
       return response({ error: 'No supported fields in request body.' }, 400);
     }
-
     const [updated, cliAuth] = await Promise.all([
       withStoragePressurePolicyLock(() => updateOperatorDefaults(update)),
       getRuntimeAuthSnapshot(),
@@ -594,7 +626,7 @@ export async function POST(request: Request) {
       getOperatorDefaultsTomlState(),
       getDispatchableRuntimeAvailability(cliAuth),
     ]);
-    return response({ ...updated, effectiveOverride: effectiveOverride(), settingsToml, cliAuth, dispatchableRuntimes });
+    return response(operatorDefaultsPayload(updated, settingsToml, cliAuth, dispatchableRuntimes));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to update operator defaults.';
     console.error('[panel-operator-defaults] Failed to update operator defaults:', message);

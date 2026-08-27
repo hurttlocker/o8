@@ -34,6 +34,10 @@ vi.mock('@/lib/operator/defaults', () => ({
   getOperatorDefaultsSync: vi.fn(),
 }));
 
+vi.mock('@/lib/operator/role-routing-ledger', () => ({
+  recordRoleRoutingReceiptSafely: vi.fn(),
+}));
+
 vi.mock('@/lib/operator/brain-routing', () => ({
   resolveBrainUseClaudeCliSync: vi.fn(),
   resolveBrainUseCodexCliSync: vi.fn(),
@@ -47,6 +51,7 @@ import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
 import { getEntitlementSync } from '@/lib/entitlement/store';
 import { resolveBrainUseClaudeCliSync, resolveBrainUseCodexCliSync } from '@/lib/operator/brain-routing';
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
+import { recordRoleRoutingReceiptSafely } from '@/lib/operator/role-routing-ledger';
 
 const directiveRow: TypedRow = {
   citation: {
@@ -78,6 +83,7 @@ describe('composeClassA provider order', () => {
     vi.mocked(callHaiku).mockReset();
     vi.mocked(callOpenRouter).mockReset();
     vi.mocked(callSonnet).mockReset();
+    vi.mocked(recordRoleRoutingReceiptSafely).mockReset();
     vi.mocked(getOperatorDefaultsSync).mockReturnValue({
       values: { classAComposer: 'auto' },
     } as ReturnType<typeof getOperatorDefaultsSync>);
@@ -126,5 +132,24 @@ describe('composeClassA provider order', () => {
     expect(callOrder).toEqual(['openrouter']);
     expect(callCodex).not.toHaveBeenCalled();
     expect(events).toContainEqual({ name: 'done', payload: {} });
+  });
+
+  it('receipts a disabled pinned CLI as a fallback instead of a selected route', async () => {
+    vi.mocked(getOperatorDefaultsSync).mockReturnValue({
+      values: { classAComposer: 'sonnet-cli', brainCodexModel: 'gpt-5.5', brainCodexEffort: 'high' },
+      sources: { classAComposer: 'file', brainCodexModel: 'file', brainCodexEffort: 'file' },
+    } as ReturnType<typeof getOperatorDefaultsSync>);
+    vi.mocked(callCodex).mockResolvedValue('Fallback answer. [D-brain-first]');
+
+    const { emit } = makeEmit();
+    await composeClassA('What is the Brain-first rule?', '/repo/o8', [directiveRow], emit);
+
+    expect(recordRoleRoutingReceiptSafely).toHaveBeenCalledWith(expect.objectContaining({
+      role: 'brain',
+      requested: expect.objectContaining({ backend: 'sonnet-cli' }),
+      effective: expect.objectContaining({ runtime: 'codex' }),
+      status: 'fallback',
+      fallbackReason: expect.stringContaining('sonnet-cli'),
+    }));
   });
 });

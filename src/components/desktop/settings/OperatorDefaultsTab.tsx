@@ -3,13 +3,10 @@
 /**
  * OperatorDefaultsTab — the Dispatch settings page (epic #1450).
  *
- * Two halves: the regular view (fleet caps, supervision, orchestrator brain,
- * dispatch runtime — what any operator touches in week one) and the Founders
- * section (DispatchFoundersSection — experimental flags, model tiers, Brain
- * routing, local models), rendered only when the entitlement says founder.
- * The gate is VISIBILITY ONLY: every write goes through the same
- * /api/panel/operator-defaults route regardless of what the UI shows.
- * Env-sourced fields stay locked with the reason in the row subtitle.
+ * The common path holds fleet, supervision, orchestration, and worker routing.
+ * Advanced operator-owned model, Brain, and local-inference controls remain
+ * available to every installation; founder mode only reveals experimental
+ * preview flags. Env-sourced fields stay locked with the reason in the row.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -17,8 +14,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   APP_FONT_STACK,
   MONO_FONT_STACK,
-  RAMS_ACCENT,
-  RAMS_INK_QUIET,
   SettingsSegmented,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
@@ -682,57 +677,21 @@ export function OperatorDefaultsTab() {
         <WorktreeRetentionSection />
       </section>
 
-      {foundersMode ? (
-        <>
-          <div style={{
-            marginTop: 40,
-            marginBottom: 12,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-          }}>
-            <span style={{
-              fontFamily: APP_FONT_STACK,
-              fontSize: 10,
-              fontWeight: 400,
-              letterSpacing: '0.2em',
-              textTransform: 'uppercase',
-              color: RAMS_ACCENT,
-            }}>
-              Founders
-            </span>
-            <div style={{ flex: 1, height: 1, background: 'var(--t-divider, rgba(17,17,17,0.06))' }} />
-            <span style={{
-              fontFamily: APP_FONT_STACK,
-              fontSize: 10,
-              fontWeight: 400,
-              letterSpacing: '0.12em',
-              textTransform: 'uppercase',
-              color: RAMS_INK_QUIET,
-            }}>
-              Advanced tuning
-            </span>
-          </div>
-          <GroupFootnote>
-            The extras. Environment variables always win over anything set here — a row showing{' '}
-            <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 11 }}>locked</span> means an env var owns it.
-          </GroupFootnote>
-          <div style={{ height: 8 }} />
-          <DispatchFoundersSection
-            values={values}
-            sources={sources}
-            busyField={busyField}
-            updateField={updateField}
-          />
-        </>
-      ) : (
-        <div style={{ marginTop: 36 }}>
-          <GroupHeader>Founders</GroupHeader>
-          <GroupFootnote>
-            Advanced tuning — experimental runtimes, model tiers, Brain routing, and local models — unlocks with a founding license.
-          </GroupFootnote>
-        </div>
-      )}
+      <div style={{ marginTop: 40 }}>
+        <GroupHeader>Advanced routing</GroupHeader>
+        <GroupFootnote>
+          Model tiers, Brain routing, and local inference stay under your control. Environment variables always win — a row showing{' '}
+          <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 11 }}>locked</span> means the environment owns it.
+        </GroupFootnote>
+        <div style={{ height: 8 }} />
+        <DispatchFoundersSection
+          values={values}
+          sources={sources}
+          busyField={busyField}
+          updateField={updateField}
+          showExperimental={foundersMode}
+        />
+      </div>
     </div>
   );
 }
