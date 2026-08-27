@@ -419,6 +419,7 @@
     {
       "path": "src/lib/runtime/interrupt-escalation.test.ts",
       "reasons": [
+        "child-process",
         "process-signal",
         "terminal-tool"
       ]
@@ -1627,7 +1628,9 @@
         "executable-fixture",
         "git-cli",
         "network-listener",
-        "real-path"
+        "process-signal",
+        "real-path",
+        "terminal-tool"
       ]
     },
     {
@@ -2111,6 +2114,7 @@
       "path": "tests/test-gate-runner-real-path.test.ts",
       "reasons": [
         "child-process",
+        "process-signal",
         "real-path"
       ]
     },
