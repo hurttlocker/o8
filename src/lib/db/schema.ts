@@ -331,6 +331,10 @@ export const githubIssues = sqliteTable('github_issues', {
   createdAt: text('created_at'),
   updatedAt: text('updated_at'),
   closedAt: text('closed_at'),
+  lastHumanCommentAuthorLogin: text('last_human_comment_author_login'),
+  lastHumanCommentAuthorAssociation: text('last_human_comment_author_association'),
+  lastHumanCommentAt: text('last_human_comment_at'),
+  lastInsiderCommentAt: text('last_insider_comment_at'),
 });
 
 export const githubPullRequests = sqliteTable('github_pull_requests', {
@@ -353,6 +357,10 @@ export const githubPullRequests = sqliteTable('github_pull_requests', {
   updatedAt: text('updated_at'),
   closedAt: text('closed_at'),
   mergedAt: text('merged_at'),
+  lastHumanCommentAuthorLogin: text('last_human_comment_author_login'),
+  lastHumanCommentAuthorAssociation: text('last_human_comment_author_association'),
+  lastHumanCommentAt: text('last_human_comment_at'),
+  lastInsiderCommentAt: text('last_insider_comment_at'),
 });
 
 // ══════════════════════════════════════════════════════════════════
@@ -601,7 +609,7 @@ export const supervisorInbox = sqliteTable('supervisor_inbox', {
   repoPath: text('repo_path').notNull(),
   packetId: text('packet_id'),
   kind: text('kind', {
-    enum: ['verification_failed', 'session_lost', 'packet_missing', 'bounded_retry_exhausted', 'merge_blocked', 'fetch_unreachable', 'repo_misconfigured', 'silent_exit_verification_failed', 'silent_exit_no_work', 'silent_exit_but_work_present', 'worker_quota_exhausted'],
+    enum: ['verification_failed', 'session_lost', 'packet_missing', 'bounded_retry_exhausted', 'merge_blocked', 'fetch_unreachable', 'repo_misconfigured', 'silent_exit_verification_failed', 'silent_exit_no_work', 'silent_exit_but_work_present', 'worker_quota_exhausted', 'outside_human_waiting'],
   }).notNull(),
   payload: text('payload').notNull().default('{}'),
   status: text('status', {

@@ -1,6 +1,11 @@
 import 'server-only';
 
 import { getSqlite } from '@/lib/db';
+import { resolveRepoPath } from '@/lib/intake/resolve-repo';
+import type {
+  OutsiderAttentionThread,
+  OutsiderAttentionThreadKind,
+} from '@/lib/supervisor/outsider-attention';
 
 export type GitHubSyncResource = 'issues' | 'pull_requests';
 
@@ -53,6 +58,16 @@ export interface GitHubPullRequestSnapshot {
   updatedAt: string;
   closedAt: string | null;
   mergedAt: string | null;
+}
+
+export interface GitHubThreadAttentionSnapshot {
+  repoFullName: string;
+  kind: OutsiderAttentionThreadKind;
+  number: number;
+  lastHumanCommentAuthorLogin: string | null;
+  lastHumanCommentAuthorAssociation: string | null;
+  lastHumanCommentAt: string | null;
+  lastInsiderCommentAt: string | null;
 }
 
 type GitHubPullRequestRow = {
@@ -534,4 +549,71 @@ export function getGitHubPullRequestByHead(repoFullName: string, headRefName: st
     LIMIT 1
   `).get(repoFullName, headRefName) as GitHubPullRequestRow | undefined;
   return row ? mapPullRequestRow(row) : null;
+}
+
+export function readGitHubThreadUpdatedAt(
+  repoFullName: string,
+  kind: OutsiderAttentionThreadKind,
+): Map<number, string | null> {
+  const table = kind === 'issue' ? 'github_issues' : 'github_pull_requests';
+  const rows = getSqlite().prepare(`
+    SELECT number, updated_at as updatedAt
+    FROM ${table}
+    WHERE repo_full_name = ?
+  `).all(repoFullName) as Array<{ number: number; updatedAt: string | null }>;
+  return new Map(rows.map((row) => [row.number, row.updatedAt]));
+}
+
+export function updateGitHubThreadAttention(attention: GitHubThreadAttentionSnapshot): boolean {
+  const table = attention.kind === 'issue' ? 'github_issues' : 'github_pull_requests';
+  const result = getSqlite().prepare(`
+    UPDATE ${table}
+    SET last_human_comment_author_login = ?,
+        last_human_comment_author_association = ?,
+        last_human_comment_at = ?,
+        last_insider_comment_at = ?
+    WHERE repo_full_name = ? AND number = ?
+  `).run(
+    attention.lastHumanCommentAuthorLogin,
+    attention.lastHumanCommentAuthorAssociation,
+    attention.lastHumanCommentAt,
+    attention.lastInsiderCommentAt,
+    attention.repoFullName,
+    attention.number,
+  );
+  return result.changes > 0;
+}
+
+export function listGitHubAttentionThreads(): OutsiderAttentionThread[] {
+  const sqlite = getSqlite();
+  const repoRows = sqlite.prepare(`
+    SELECT repo_full_name as repo FROM github_issues
+    UNION
+    SELECT repo_full_name as repo FROM github_pull_requests
+  `).all() as Array<{ repo: string }>;
+  const connectedRepos = repoRows
+    .map((row) => row.repo)
+    .filter((repo) => Boolean(resolveRepoPath(repo)));
+  if (connectedRepos.length === 0) return [];
+
+  const placeholders = connectedRepos.map(() => '?').join(', ');
+  return sqlite.prepare(`
+    SELECT repo_full_name as repo, 'issue' as kind, number, url, title, state,
+           closed_at as closedAt,
+           last_human_comment_author_login as lastHumanCommentAuthorLogin,
+           last_human_comment_author_association as lastHumanCommentAuthorAssociation,
+           last_human_comment_at as lastHumanCommentAt,
+           last_insider_comment_at as lastInsiderCommentAt
+    FROM github_issues
+    WHERE repo_full_name IN (${placeholders})
+    UNION ALL
+    SELECT repo_full_name as repo, 'pr' as kind, number, url, title, state,
+           closed_at as closedAt,
+           last_human_comment_author_login as lastHumanCommentAuthorLogin,
+           last_human_comment_author_association as lastHumanCommentAuthorAssociation,
+           last_human_comment_at as lastHumanCommentAt,
+           last_insider_comment_at as lastInsiderCommentAt
+    FROM github_pull_requests
+    WHERE repo_full_name IN (${placeholders})
+  `).all(...connectedRepos, ...connectedRepos) as OutsiderAttentionThread[];
 }

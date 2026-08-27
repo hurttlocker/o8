@@ -1,9 +1,9 @@
 {
   "schema": "o8/test-classification/v1",
   "generatedBy": "node scripts/classify-tests.mjs --write",
-  "totalTests": 897,
-  "hermeticTests": 576,
-  "resourceOwningTests": 321,
+  "totalTests": 901,
+  "hermeticTests": 579,
+  "resourceOwningTests": 322,
   "resourceOwning": [
     {
       "path": "src/app/api/leases/route.test.ts",
@@ -1784,6 +1784,14 @@
         "child-process",
         "network-listener",
         "process-signal"
+      ]
+    },
+    {
+      "path": "tests/outsider-waiting-inbox-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
       ]
     },
     {
