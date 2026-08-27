@@ -248,6 +248,55 @@ export function performShipPreflight(options) {
   };
 }
 
+export function runQuickBenchmarkPreflight(options) {
+  const {
+    root,
+    env = process.env,
+    run = commandReceipt,
+  } = options;
+  const receipt = run(process.execPath, ['scripts/bench/quick.mjs', '--ephemeral'], {
+    cwd: root,
+    env,
+    timeoutMs: 120_000,
+  });
+  if (receipt.status !== 0) {
+    return {
+      schema: 'o8/benchmark-quick-preflight/v1',
+      status: 'unavailable',
+      regressions: [],
+      missing: [],
+      message: receipt.stderr.trim() || receipt.stdout.trim() || `benchmark exited ${receipt.status}`,
+    };
+  }
+
+  const prefix = 'O8_BENCH_QUICK_RECEIPT=';
+  const line = receipt.stdout.split('\n').find((candidate) => candidate.startsWith(prefix));
+  if (!line) {
+    return {
+      schema: 'o8/benchmark-quick-preflight/v1',
+      status: 'unavailable',
+      regressions: [],
+      missing: [],
+      message: 'benchmark receipt was missing',
+    };
+  }
+  try {
+    const parsed = JSON.parse(line.slice(prefix.length));
+    if (parsed?.schema !== 'o8/benchmark-quick-preflight/v1') {
+      throw new Error('benchmark receipt schema was invalid');
+    }
+    return parsed;
+  } catch (error) {
+    return {
+      schema: 'o8/benchmark-quick-preflight/v1',
+      status: 'unavailable',
+      regressions: [],
+      missing: [],
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 export const shipPreflightInternals = {
   commandReceipt,
   parseRemoteTagHead,

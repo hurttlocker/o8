@@ -2,7 +2,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { acquireReleaseLock, performShipPreflight } from '../scripts/lib/ship-preflight.mjs';
+import {
+  acquireReleaseLock,
+  performShipPreflight,
+  runQuickBenchmarkPreflight,
+} from '../scripts/lib/ship-preflight.mjs';
 
 const roots: string[] = [];
 
@@ -124,5 +128,36 @@ describe('ship preflight', () => {
 
     expect(() => performShipPreflight({ root, version: '0.1.999', env, run }))
       .toThrow('another ship or build owns the release output');
+  });
+
+  it('surfaces a quick benchmark regression without turning it into a preflight failure', () => {
+    const { root, env } = fixture();
+    const run = () => ({
+      status: 0,
+      stdout: `noise\nO8_BENCH_QUICK_RECEIPT=${JSON.stringify({
+        schema: 'o8/benchmark-quick-preflight/v1',
+        status: 'regressed',
+        regressions: [{ name: 'time_to_reveal_ms', deltaValue: 125 }],
+        missing: [],
+      })}\n`,
+      stderr: '',
+    });
+
+    const receipt = runQuickBenchmarkPreflight({ root, env, run });
+
+    expect(receipt.status).toBe('regressed');
+    expect(receipt.regressions).toEqual([{ name: 'time_to_reveal_ms', deltaValue: 125 }]);
+  });
+
+  it('keeps ship preflight non-blocking when the quick benchmark cannot run', () => {
+    const { root, env } = fixture();
+    const receipt = runQuickBenchmarkPreflight({
+      root,
+      env,
+      run: () => ({ status: 1, stdout: '', stderr: 'browser unavailable' }),
+    });
+
+    expect(receipt.status).toBe('unavailable');
+    expect(receipt.message).toContain('browser unavailable');
   });
 });

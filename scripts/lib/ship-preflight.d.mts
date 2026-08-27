@@ -18,6 +18,19 @@ export interface ShipPreflightReceipt {
   toolchains: Record<string, string>;
 }
 
+export interface QuickBenchmarkPreflightReceipt {
+  schema: 'o8/benchmark-quick-preflight/v1';
+  status: 'ok' | 'regressed' | 'incomplete' | 'unavailable';
+  regressions: Array<{ name: string; deltaValue: number | null }>;
+  missing: string[];
+  message?: string;
+  durationMs?: number;
+  version?: string;
+  gitSha?: string;
+  comparedTo?: string | null;
+  resultPath?: string | null;
+}
+
 export function acquireReleaseLock(options?: { lockPath?: string }): {
   path: string;
   release(): void;
@@ -32,3 +45,12 @@ export function performShipPreflight(options: {
     timeoutMs?: number;
   }) => ShipCommandReceipt;
 }): ShipPreflightReceipt;
+export function runQuickBenchmarkPreflight(options: {
+  root: string;
+  env?: NodeJS.ProcessEnv;
+  run?: (command: string, args: string[], options?: {
+    cwd?: string;
+    env?: NodeJS.ProcessEnv;
+    timeoutMs?: number;
+  }) => ShipCommandReceipt;
+}): QuickBenchmarkPreflightReceipt;

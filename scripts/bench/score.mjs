@@ -13,8 +13,12 @@ const CATEGORIES = [
   'literal-lookup',
 ];
 
-const SCORECARD_DIR = path.resolve(process.cwd(), 'tests/bench/scorecards');
-const LATEST_DIR = path.resolve(process.cwd(), 'tests/bench/latest');
+const SCORECARD_DIR = path.resolve(process.env.O8_BENCH_SCORECARD_DIR || path.join(process.cwd(), 'tests/bench/scorecards'));
+const LATEST_DIR = path.resolve(process.env.O8_BENCH_LATEST_DIR || path.join(process.cwd(), 'tests/bench/latest'));
+const PRIOR_SCORECARD_DIRS = (process.env.O8_BENCH_PRIOR_SCORECARD_DIRS || SCORECARD_DIR)
+  .split(path.delimiter)
+  .filter(Boolean)
+  .map((directory) => path.resolve(directory));
 const OPERATOR_TRIGGERED_NOT_RUN = 'operator-triggered — not run this release';
 
 function readJsonOptional(filePath) {
@@ -60,11 +64,12 @@ function packageVersion() {
 }
 
 function parseScorecardName(fileName) {
-  const match = fileName.match(/^scorecard-(\d+\.\d+\.\d+)-(.+)\.json$/);
+  const match = fileName.match(/^scorecard-(\d+\.\d+\.\d+)-(.+)\.json$/)
+    ?? fileName.match(/^(\d+\.\d+\.\d+)\.json$/);
   if (!match) return null;
   const versionParts = match[1].split('.').map((part) => Number(part));
   if (versionParts.some((part) => !Number.isFinite(part))) return null;
-  return { version: match[1], sha: match[2], versionParts };
+  return { version: match[1], sha: match[2] ?? null, versionParts };
 }
 
 function compareScorecardEntries(a, b) {
@@ -76,17 +81,17 @@ function compareScorecardEntries(a, b) {
 }
 
 function listScorecards(targetVersion, targetSha) {
-  let names = [];
-  try {
-    names = fs.readdirSync(SCORECARD_DIR);
-  } catch {
-    return [];
-  }
-  return names
-    .map((name) => {
+  return PRIOR_SCORECARD_DIRS.flatMap((directory) => {
+    let names = [];
+    try {
+      names = fs.readdirSync(directory);
+    } catch {
+      return [];
+    }
+    return names.map((name) => {
       const parsed = parseScorecardName(name);
       if (!parsed) return null;
-      const absolute = path.join(SCORECARD_DIR, name);
+      const absolute = path.join(directory, name);
       return {
         ...parsed,
         name,
@@ -94,14 +99,26 @@ function listScorecards(targetVersion, targetSha) {
         excluded: parsed.version === targetVersion && parsed.sha === targetSha,
         mtimeMs: fs.statSync(absolute).mtimeMs,
       };
-    })
+    });
+  })
     .filter(Boolean)
     .sort(compareScorecardEntries);
 }
 
+function compareVersionParts(a, b) {
+  for (let idx = 0; idx < 3; idx++) {
+    const diff = a[idx] - b[idx];
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
 function priorScorecard(version, sha, targetPath) {
   const entries = listScorecards(version, sha);
-  const selected = entries.find((entry) => !entry.excluded);
+  const targetVersionParts = version.split('.').map((part) => Number(part));
+  const selected = entries.find((entry) => (
+    !entry.excluded && compareVersionParts(entry.versionParts, targetVersionParts) < 0
+  ));
   if (selected) {
     return { card: readJsonOptional(selected.absolute).data, source: selected.name };
   }
@@ -150,6 +167,12 @@ function metricEntry({ value, note, direction, threshold, prior, informational =
 function buildSpeedTrack(speed, prior) {
   const metrics = speed?.metrics ?? {};
   const names = [
+    ['time_to_splash_ms', 'lower-better', 25],
+    ['time_to_reveal_ms', 'lower-better', 100],
+    ['boot_api_request_count', 'lower-better', 1],
+    ['max_client_queue_stall_ms', 'lower-better', 25],
+    ['panel_branches_ms', 'lower-better', 25],
+    ['runtime_inventory_ms', 'lower-better', 25],
     ['dashboard_cold_ttfb_ms', 'lower-better', 25],
     ['dashboard_warm_ttfb_ms', 'lower-better', 25],
     ['bootstrap_warm_total_ms', 'lower-better', 25],
@@ -446,6 +469,7 @@ function main() {
     gitSha: sha,
     timestamp: new Date().toISOString(),
     node: process.version,
+    comparedTo: priorSource,
     tracks: {
       speed: buildSpeedTrack(speed, prior),
       memory: buildMemoryTrack(memory, prior),

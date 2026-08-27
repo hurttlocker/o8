@@ -3,7 +3,10 @@ set -euo pipefail
 
 port=$(cat "$HOME/.o8/api-port" 2>/dev/null || echo 3001)
 base_url="${BASE_URL:-http://127.0.0.1:$port}"
-route="${ROUTE:-/api/panel/status}"
+# The liveness route intentionally does not expose Server-Timing. Use the
+# authenticated repository snapshot, whose `total` timing lets this harness
+# separate server work from client/transport overhead.
+route="${ROUTE:-/api/panel/repos}"
 n="${N:-20}"
 token="$(cat "$HOME/.o8/ws-token" 2>/dev/null || true)"
 

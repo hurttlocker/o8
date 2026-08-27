@@ -5,6 +5,12 @@ import os from 'node:os';
 import path from 'node:path';
 
 const METRICS = [
+  'time_to_splash_ms',
+  'time_to_reveal_ms',
+  'boot_api_request_count',
+  'max_client_queue_stall_ms',
+  'panel_branches_ms',
+  'runtime_inventory_ms',
   'dashboard_cold_ttfb_ms',
   'dashboard_warm_ttfb_ms',
   'bootstrap_warm_total_ms',
@@ -13,7 +19,7 @@ const METRICS = [
   'socket_avg_conns',
 ];
 
-const LATEST_DIR = path.resolve(process.cwd(), 'tests/bench/latest');
+const LATEST_DIR = path.resolve(process.env.O8_BENCH_LATEST_DIR || path.join(process.cwd(), 'tests/bench/latest'));
 const OUT_PATH = path.join(LATEST_DIR, 'speed.json');
 
 function nullMetric(note) {
@@ -54,9 +60,9 @@ function stderrFirstLine(result) {
   return stderr.split('\n').find((line) => line.trim())?.trim() || 'no stderr';
 }
 
-function runHarness(scriptName) {
+function runHarness(scriptName, args = []) {
   const absolutePath = path.resolve(process.cwd(), 'scripts', scriptName);
-  const result = spawnSync('bash', [absolutePath], { stdio: ['inherit', 'pipe', 'pipe'] });
+  const result = spawnSync('bash', [absolutePath, ...args], { stdio: ['inherit', 'pipe', 'pipe'] });
   if (result.error || result.status !== 0) {
     const status = result.status ?? 'error';
     return {
@@ -70,6 +76,23 @@ function runHarness(scriptName) {
     stdout: result.stdout ? result.stdout.toString('utf8') : '',
     note: '',
   };
+}
+
+function runNodeHarness(scriptName) {
+  const absolutePath = path.resolve(process.cwd(), 'scripts', 'bench', scriptName);
+  const result = spawnSync(process.execPath, [absolutePath], {
+    encoding: 'utf8',
+    env: process.env,
+    timeout: 65_000,
+  });
+  if (result.error || result.status !== 0) {
+    return {
+      ok: false,
+      stdout: result.stdout || '',
+      note: `harness exit ${result.status ?? 'error'}: ${stderrFirstLine(result)}`,
+    };
+  }
+  return { ok: true, stdout: result.stdout || '', note: '' };
 }
 
 function parseMsFromSeconds(raw) {
@@ -142,6 +165,29 @@ function parseSocket(stdout, metrics) {
   assignParsed(metrics, 'socket_avg_conns', avg);
 }
 
+function parseBrowserBoot(stdout, metrics) {
+  const receiptLine = stdout.split('\n').find((line) => line.startsWith('O8_BROWSER_BOOT_RECEIPT='));
+  if (!receiptLine) {
+    markHarnessFailure(metrics, METRICS.slice(0, 6), 'browser boot receipt missing');
+    return;
+  }
+  try {
+    const receipt = JSON.parse(receiptLine.slice('O8_BROWSER_BOOT_RECEIPT='.length));
+    for (const name of METRICS.slice(0, 6)) {
+      const value = receipt.metrics?.[name];
+      metrics[name] = typeof value === 'number' || (value && typeof value.note === 'string')
+        ? value
+        : nullMetric('browser boot metric missing');
+    }
+  } catch (error) {
+    markHarnessFailure(
+      metrics,
+      METRICS.slice(0, 6),
+      `browser boot receipt invalid: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
 function markHarnessFailure(metrics, names, note) {
   for (const name of names) metrics[name] = nullMetric(note);
 }
@@ -180,6 +226,13 @@ function main() {
     ], render.note);
   }
 
+  const browserBoot = runNodeHarness('measure-browser-boot.mjs');
+  if (browserBoot.ok) {
+    parseBrowserBoot(browserBoot.stdout, metrics);
+  } else {
+    markHarnessFailure(metrics, METRICS.slice(0, 6), browserBoot.note);
+  }
+
   const cli = runHarness('measure-cli.sh');
   if (cli.ok) {
     parseCli(cli.stdout, metrics);
@@ -194,7 +247,12 @@ function main() {
     markHarnessFailure(metrics, ['mcp_client_minus_server_p50_ms'], mcp.note);
   }
 
-  const socket = runHarness('measure-socket.sh');
+  const socket = runHarness(
+    'measure-socket.sh',
+    process.env.O8_BENCH_SOCKET_DURATION_SECONDS
+      ? [process.env.O8_BENCH_SOCKET_DURATION_SECONDS]
+      : [],
+  );
   if (socket.ok) {
     parseSocket(socket.stdout, metrics);
   } else {

@@ -15,6 +15,18 @@ Run against a running target build:
 npm run bench:all
 ```
 
+For the speed-only release preflight, run:
+
+```sh
+npm run bench:quick
+```
+
+The quick run stays under two minutes, writes `tests/bench/results/<version>.json`,
+and compares its speed metrics with the previous release. The local ship
+preflight runs the same measurement in an ephemeral directory. A regression or
+missing measurement prints a warning but does not block an otherwise valid
+release.
+
 Then read:
 
 ```sh
@@ -22,6 +34,14 @@ tests/bench/scorecards/latest.md
 ```
 
 `bench:all` runs speed, memory, the blind governance review, then scoring. Speed writes `tests/bench/latest/speed.json`; memory writes `tests/bench/latest/memory.json`; governance writes `tests/bench/latest/governance.json`; scoring writes `scorecard-<version>-<sha>.json`, a matching `.md`, and refreshes `latest.md`.
+
+The speed track includes dashboard cold and warm HTTP timing, the desktop
+workspace's splash and reveal boundaries, API request fan-out during boot, the
+largest Resource Timing queue wait before an API request starts, and direct
+latencies for `/api/panel/branches` and `/api/runtime/inventory`. Browser timing
+uses a fresh headless Chrome profile against the running build. If Chrome, the
+server, or a registered repository is unavailable, the scorecard records a
+named missing measurement instead of substituting a number.
 
 Run governance alone with:
 
