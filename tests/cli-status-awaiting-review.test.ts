@@ -32,13 +32,24 @@ describe('o8 status awaiting-review visibility (#1570)', () => {
         lastEventLabel: 'review_requested',
       }] } })
       .mockResolvedValueOnce({ data: { approvals: [] } })
-      .mockResolvedValueOnce({ data: { ok: true, result: { packets: [] } } });
+      .mockResolvedValueOnce({ data: { ok: true, result: { packets: [] } } })
+      .mockResolvedValueOnce({ data: {
+        shippedDarkAudit: {
+          status: 'current',
+          checkedAt: '2026-08-27T12:05:00.000Z',
+          currentRelease: '0.1.716',
+          thresholdReleases: 3,
+          checkedFlagCount: 14,
+          flags: [],
+        },
+      } });
 
     await runStatus({ human: false, verbose: false });
 
     expect(printJsonMock).toHaveBeenCalledWith(expect.objectContaining({
       counts: expect.objectContaining({ awaitingReview: 1 }),
       awaitingReview: [expect.objectContaining({ packetId: 'pkt-review', status: 'reviewing' })],
+      shippedDarkWarnings: [],
     }));
   });
 });

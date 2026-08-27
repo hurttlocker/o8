@@ -63,6 +63,23 @@ interface MissionStatusResponse {
   result?: { packets?: MissionStatusPacket[] };
 }
 
+interface ShippedDarkFlagStatus {
+  tomlKey: string;
+  landedRelease: string | null;
+  darkForReleases: number | null;
+}
+
+interface PanelStatusResponse {
+  shippedDarkAudit?: {
+    status?: string;
+    checkedAt?: string;
+    currentRelease?: string | null;
+    thresholdReleases?: number;
+    checkedFlagCount?: number;
+    flags?: ShippedDarkFlagStatus[];
+  };
+}
+
 const RUNNING_STATUSES = new Set([
   'running',
   'launching',
@@ -74,11 +91,12 @@ const RUNNING_STATUSES = new Set([
 export async function runStatus(mode: OutputMode): Promise<number> {
   const cfg = resolveConfig();
 
-  const [activeRes, allRes, approvalsRes, missionRes] = await Promise.all([
+  const [activeRes, allRes, approvalsRes, missionRes, panelStatusRes] = await Promise.all([
     apiFetch<{ lanes: Lane[] }>(cfg, '/api/lanes', { query: { active: 'true' } }),
     apiFetch<{ lanes: Lane[] }>(cfg, '/api/lanes', { query: { active: 'false' } }),
     apiFetch<{ approvals: Approval[] }>(cfg, '/api/panel/approvals', { query: { status: 'pending' } }),
     apiFetch<MissionStatusResponse>(cfg, '/api/orchestrator/status', { allowNotFound: true }),
+    apiFetch<PanelStatusResponse>(cfg, '/api/panel/status', { allowNotFound: true }),
   ]);
 
   const activeLanes = activeRes.data?.lanes ?? [];
@@ -96,6 +114,13 @@ export async function runStatus(mode: OutputMode): Promise<number> {
       physicalAvailableBytes: packet.storageAdmission?.physicalAvailableBytes ?? null,
       requiredReserveBytes: packet.storageAdmission?.requiredReserveBytes ?? null,
     }));
+  const shippedDarkAudit = panelStatusRes.data?.shippedDarkAudit ?? null;
+  const shippedDarkWarnings = (shippedDarkAudit?.flags ?? [])
+    .filter((flag) => (
+      typeof flag.darkForReleases === 'number'
+      && typeof shippedDarkAudit?.thresholdReleases === 'number'
+      && flag.darkForReleases >= shippedDarkAudit.thresholdReleases
+    ));
 
   const running = activeLanes.filter((l) => RUNNING_STATUSES.has(l.status));
   // Review packets remain active but are not always included in an upstream
@@ -119,6 +144,7 @@ export async function runStatus(mode: OutputMode): Promise<number> {
       recentMerges: recentMerges.length,
       pendingApprovals: approvals.length,
       storageHolds: storageHolds.length,
+      shippedDarkWarnings: shippedDarkWarnings.length,
     },
     activeLanesTruncated: activeLanes.length > LANE_CAP,
     awaitingReviewTruncated: awaitingReview.length > LANE_CAP,
@@ -136,6 +162,8 @@ export async function runStatus(mode: OutputMode): Promise<number> {
       createdAt: a.createdAt ?? null,
     })),
     storageHolds,
+    shippedDarkAudit,
+    shippedDarkWarnings,
   };
 
   if (mode.human) {
@@ -146,7 +174,8 @@ export async function runStatus(mode: OutputMode): Promise<number> {
         `   active ${activeLanes.length}` +
         `   merges ${recentMerges.length}` +
         `   approvals ${color(String(approvals.length), 'yellow')}` +
-        `   storage holds ${color(String(storageHolds.length), 'yellow')}\n`,
+        `   storage holds ${color(String(storageHolds.length), 'yellow')}` +
+        `   dark flags ${color(String(shippedDarkWarnings.length), 'yellow')}\n`,
     );
     if (running.length > 0) {
       printHumanHeading('running');
@@ -172,6 +201,15 @@ export async function runStatus(mode: OutputMode): Promise<number> {
       printHumanHeading('storage holds');
       for (const hold of storageHolds) {
         process.stdout.write(`  ${hold.status.padEnd(15)} ${hold.packetId.padEnd(28)} ${hold.reason}\n`);
+      }
+    }
+    if (shippedDarkWarnings.length > 0) {
+      printHumanHeading('shipped but dark');
+      for (const flag of shippedDarkWarnings) {
+        const age = flag.darkForReleases === 1 ? '1 release' : `${flag.darkForReleases} releases`;
+        process.stdout.write(
+          `  ${flag.tomlKey.padEnd(42)} ${age}  landed ${flag.landedRelease ?? 'unknown'}\n`,
+        );
       }
     }
   } else {

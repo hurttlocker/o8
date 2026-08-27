@@ -19,6 +19,7 @@ import { formatDuration } from '@/lib/format/duration';
 import { RecallHealthSection } from './RecallHealthSection';
 import { LoopStatusSection } from './LoopStatusSection';
 import { DemoRunSection } from './DemoRunSection';
+import { ShippedDarkAuditSection } from './ShippedDarkAuditSection';
 import {
   ResetConfirmModal,
   ResetDoneModal,
@@ -252,6 +253,10 @@ export function DiagnosticsTab() {
             />
           ) : null}
         </SettingsGroup>
+      </section>
+
+      <section style={{ marginTop: 28 }}>
+        <ShippedDarkAuditSection />
       </section>
 
       {/* Maintenance */}

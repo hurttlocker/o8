@@ -6,6 +6,28 @@ vi.mock('@/lib/cortex/proposer', () => ({ ensureProposerBootTick: vi.fn() }));
 vi.mock('@/lib/cortex/stack-signature', () => ({ ensureStackSignatureBoot: vi.fn() }));
 vi.mock('@/lib/cortex/cross-repo-proposer', () => ({ ensureCrossRepoProposerBootTick: vi.fn() }));
 vi.mock('@/lib/cortex/external-merge-watcher', () => ({ ensureExternalMergeBootHook: vi.fn() }));
+const { ensureShippedDarkAuditBootHookMock } = vi.hoisted(() => ({
+  ensureShippedDarkAuditBootHookMock: vi.fn(),
+}));
+vi.mock('@/lib/operator/shipped-dark-scheduler', () => ({
+  ensureShippedDarkAuditBootHook: ensureShippedDarkAuditBootHookMock,
+  currentShippedDarkAuditStatus: () => ({
+    schema: 'o8/shipped-dark-audit-status/v1',
+    status: 'attention',
+    checkedAt: '2026-08-27T12:05:00.000Z',
+    currentRelease: '0.1.716',
+    thresholdReleases: 3,
+    checkedFlagCount: 14,
+    flags: [{
+      tomlKey: 'experimental.chat_enabled',
+      codeDefault: false,
+      operatorValue: false,
+      operatorValueSource: 'default',
+      landedRelease: '0.1.681',
+      darkForReleases: 35,
+    }],
+  }),
+}));
 vi.mock('@/lib/terminal/tmux', () => ({ persistentTerminalsEnabled: () => true }));
 vi.mock('@/lib/terminal/persistence-health', () => ({
   currentPersistentTerminalHealth: () => ({
@@ -29,6 +51,15 @@ describe('GET /api/panel/status', () => {
         status: 'degraded',
         reason: 'tmux_unavailable',
       },
+      shippedDarkAudit: {
+        status: 'attention',
+        checkedFlagCount: 14,
+        flags: [expect.objectContaining({
+          tomlKey: 'experimental.chat_enabled',
+          darkForReleases: 35,
+        })],
+      },
     });
+    expect(ensureShippedDarkAuditBootHookMock).toHaveBeenCalledOnce();
   });
 });

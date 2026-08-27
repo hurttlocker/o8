@@ -1,9 +1,9 @@
 {
   "schema": "o8/test-classification/v1",
   "generatedBy": "node scripts/classify-tests.mjs --write",
-  "totalTests": 863,
-  "hermeticTests": 555,
-  "resourceOwningTests": 308,
+  "totalTests": 874,
+  "hermeticTests": 562,
+  "resourceOwningTests": 312,
   "resourceOwning": [
     {
       "path": "src/app/api/leases/route.test.ts",
@@ -24,6 +24,12 @@
       "reasons": [
         "child-process",
         "git-cli"
+      ]
+    },
+    {
+      "path": "src/app/api/panel/status/route.test.ts",
+      "reasons": [
+        "terminal-tool"
       ]
     },
     {
@@ -794,6 +800,12 @@
       ]
     },
     {
+      "path": "src/lib/ws-server/dash-terminal-persistence.test.ts",
+      "reasons": [
+        "terminal-tool"
+      ]
+    },
+    {
       "path": "src/lib/ws-server/next-fetch.test.ts",
       "reasons": [
         "network-listener"
@@ -1035,7 +1047,8 @@
       "reasons": [
         "child-process",
         "git-cli",
-        "real-path"
+        "real-path",
+        "worktree-api"
       ]
     },
     {
@@ -1115,6 +1128,12 @@
       "reasons": [
         "child-process",
         "git-cli"
+      ]
+    },
+    {
+      "path": "tests/committed-storage-reconciliation-real-path.test.ts",
+      "reasons": [
+        "real-path"
       ]
     },
     {
@@ -1996,6 +2015,12 @@
       ]
     },
     {
+      "path": "tests/shipped-dark-scheduler-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/sign-and-notarize.test.ts",
       "reasons": [
         "native-build"
@@ -2190,6 +2215,7 @@
       "reasons": [
         "child-process",
         "git-cli",
+        "process-signal",
         "real-path"
       ]
     },

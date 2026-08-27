@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
+import packageJson from '../package.json';
 
 const originalDataDir = process.env.CORTEX_IDE_DATA_DIR;
 const dataDir = mkdtempSync(path.join(os.tmpdir(), 'o8-shipped-dark-settings-'));
@@ -10,6 +11,7 @@ const repoPath = mkdtempSync(path.join(os.tmpdir(), 'o8-shipped-dark-repo-'));
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
 const { auditShippedButDarkFlags } = await import('@/lib/operator/shipped-dark-audit');
+const { OPERATOR_EXPERIMENTAL_OR_OPT_IN_FLAG_KEYS } = await import('@/lib/settings/toml');
 
 function git(...args: string[]): void {
   execFileSync('git', args, { cwd: repoPath, stdio: 'ignore' });
@@ -79,6 +81,7 @@ describe.sequential('shipped-but-dark flag audit real path', () => {
     const chat = audit.flags.find((flag) => flag.key === 'experimentalChat');
 
     expect(audit.currentRelease).toBe('v0.1.14');
+    expect(audit.checkedFlags).toHaveLength(OPERATOR_EXPERIMENTAL_OR_OPT_IN_FLAG_KEYS.length);
     expect(chat).toMatchObject({
       tomlKey: 'experimental.chat_enabled',
       codeDefault: false,
@@ -105,5 +108,26 @@ describe.sequential('shipped-but-dark flag audit real path', () => {
     ].join('\n'));
     const promoted = await auditShippedButDarkFlags({ repoPath });
     expect(promoted.flags.some((flag) => flag.key === 'experimentalChat')).toBe(false);
+  });
+
+  it('runs the installed path without a Git checkout', async () => {
+    writeFileSync(path.join(dataDir, 'settings.toml'), [
+      '[experimental]',
+      'chat_enabled = false',
+      '',
+    ].join('\n'));
+    const originalCwd = process.cwd();
+    process.chdir(dataDir);
+    try {
+      const audit = await auditShippedButDarkFlags();
+      const currentPatch = Number.parseInt(packageJson.version.split('.')[2] ?? '', 10);
+      expect(audit.currentRelease).toBe(packageJson.version);
+      expect(audit.flags.find((flag) => flag.key === 'experimentalChat')).toMatchObject({
+        landedRelease: '0.1.681',
+        darkForReleases: currentPatch - 681,
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
   });
 });

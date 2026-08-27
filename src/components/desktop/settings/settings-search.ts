@@ -109,6 +109,7 @@ export const SETTINGS_SEARCH_REGISTRY: SettingsSearchEntry[] = [
   { tab: 'diagnostics', tabLabel: 'Diagnostics', group: "Danger", label: "Factory reset", description: "Wipes ~/.o8 \u2014 sessions, keys, mission state, watched repos; opens confirm modal" },
   { tab: 'diagnostics', tabLabel: 'Diagnostics', group: "Demo sequence", label: "Run demo sequence", description: "Button drives live webview dashboard \u2192 Orchestrator tab \u2192 quick action, read-only", founders: true },
   { tab: 'diagnostics', tabLabel: 'Diagnostics', group: "Loop status", label: "Recent merges", description: "Disclosure toggle expanding the last 5 merge commits (interactive only when commits exist)", founders: true },
+  { tab: 'diagnostics', tabLabel: 'Diagnostics', group: "Shipped feature audit", label: "Default-off feature flags", description: "Scheduled release-age check for features that remain dark", keywords: ['flags', 'experimental', 'promotion', 'release age', 'audit'] },
   { tab: 'diagnostics', tabLabel: 'Diagnostics', group: "Maintenance", label: "Prune Codex session archive", description: "Archive sessions older than 14 days; Prune button" },
   { tab: 'diagnostics', tabLabel: 'Diagnostics', group: "Runtimes", label: "Runtime diagnostics", description: "Last checked <time> / Not yet checked; Re-run button refreshes tool detection" },
   { tab: 'mcp', tabLabel: 'MCP', group: "Clients", label: "Claude Code", description: "dynamic connect status: Connected / Ready to connect / Not connected (Install, Update, Remove)" },

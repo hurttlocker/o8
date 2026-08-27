@@ -3,12 +3,18 @@ import 'server-only';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
-import { readOperatorDefaultsTomlForUpdate } from '@/lib/settings/operator-defaults-store';
+import packageJson from '../../../package.json';
 import {
   getOperatorDefaultsTomlKey,
   OPERATOR_EXPERIMENTAL_OR_OPT_IN_FLAG_KEYS,
 } from '@/lib/settings/toml';
-import { OPERATOR_DEFAULTS_FALLBACK, type OperatorDefaults } from './defaults';
+import {
+  getOperatorDefaults,
+  OPERATOR_DEFAULTS_FALLBACK,
+  type OperatorDefaults,
+  type SettingSource,
+} from './defaults';
+import { SHIPPED_DARK_FLAG_LANDING_RELEASES } from './shipped-dark-manifest';
 
 const execFileAsync = promisify(execFile);
 const DEFAULTS_FILE = 'src/lib/operator/defaults.ts';
@@ -28,7 +34,7 @@ export interface ShippedButDarkFlag {
   tomlKey: string;
   codeDefault: unknown;
   operatorValue: unknown;
-  operatorValueSource: 'file' | 'default';
+  operatorValueSource: SettingSource;
   defaultFile: string;
   landedRelease: string | null;
   darkForReleases: number | null;
@@ -36,6 +42,7 @@ export interface ShippedButDarkFlag {
 
 export interface ShippedButDarkAudit {
   currentRelease: string | null;
+  checkedFlags: ShippedButDarkFlag[];
   flags: ShippedButDarkFlag[];
 }
 
@@ -73,6 +80,17 @@ function releaseTags(raw: string): ReleaseTag[] {
 
 function isInactive(value: unknown): boolean {
   return value === false || value === 'off';
+}
+
+function releaseDistance(landedRelease: string, currentRelease: string): number | null {
+  const landed = releaseVersion(landedRelease);
+  const current = releaseVersion(currentRelease);
+  if (!landed || !current) return null;
+  const landedParts = landed.split('.').map(Number);
+  const currentParts = current.split('.').map(Number);
+  if (landedParts[0] !== currentParts[0] || landedParts[1] !== currentParts[1]) return null;
+  const distance = currentParts[2] - landedParts[2];
+  return distance >= 0 ? distance : null;
 }
 
 async function git(repoPath: string, args: string[]): Promise<string> {
@@ -122,42 +140,54 @@ async function findLanding(
 
 /**
  * Lists settings-backed feature flags that remain inactive in both the shipped
- * code default and the operator's persisted settings.toml state.
+ * code default and the operator's active setting state.
  */
 export async function auditShippedButDarkFlags(options: {
   repoPath?: string;
 } = {}): Promise<ShippedButDarkAudit> {
-  const repoPath = options.repoPath ?? process.cwd();
-  const persisted = (await readOperatorDefaultsTomlForUpdate()).values;
-  const releases = releaseTags(await git(repoPath, [
-    'tag',
-    '--merged',
-    'HEAD',
-    '--sort=version:refname',
-  ]));
+  const resolved = await getOperatorDefaults();
+  const releases = options.repoPath
+    ? releaseTags(await git(options.repoPath, [
+      'tag',
+      '--merged',
+      'HEAD',
+      '--sort=version:refname',
+    ]))
+    : [];
+  const currentRelease = options.repoPath
+    ? releases.at(-1)?.tag ?? null
+    : releaseVersion(packageJson.version);
 
-  const darkFlags = OPERATOR_EXPERIMENTAL_OR_OPT_IN_FLAG_KEYS.filter((key) => {
-    const codeDefault = OPERATOR_DEFAULTS_FALLBACK[key];
-    const operatorValue = persisted[key] ?? codeDefault;
-    return isInactive(codeDefault) && isInactive(operatorValue);
-  });
-
-  const flags = await Promise.all(darkFlags.map(async (key): Promise<ShippedButDarkFlag> => {
-    const codeDefault = OPERATOR_DEFAULTS_FALLBACK[key];
-    const defaultFile = FLAG_DEFAULT_FILES[key] ?? DEFAULTS_FILE;
-    return {
-      key,
-      tomlKey: getOperatorDefaultsTomlKey(key),
-      codeDefault,
-      operatorValue: persisted[key] ?? codeDefault,
-      operatorValueSource: persisted[key] === undefined ? 'default' : 'file',
-      defaultFile,
-      ...await findLanding(repoPath, key, defaultFile, releases),
-    };
-  }));
+  const checkedFlags = await Promise.all(OPERATOR_EXPERIMENTAL_OR_OPT_IN_FLAG_KEYS.map(
+    async (key): Promise<ShippedButDarkFlag> => {
+      const codeDefault = OPERATOR_DEFAULTS_FALLBACK[key];
+      const defaultFile = FLAG_DEFAULT_FILES[key] ?? DEFAULTS_FILE;
+      const installedLandingRelease = SHIPPED_DARK_FLAG_LANDING_RELEASES[key] ?? null;
+      return {
+        key,
+        tomlKey: getOperatorDefaultsTomlKey(key),
+        codeDefault,
+        operatorValue: resolved.values[key],
+        operatorValueSource: resolved.sources[key],
+        defaultFile,
+        ...(options.repoPath
+          ? await findLanding(options.repoPath, key, defaultFile, releases)
+          : {
+            landedRelease: installedLandingRelease,
+            darkForReleases: installedLandingRelease && currentRelease
+              ? releaseDistance(installedLandingRelease, currentRelease)
+              : null,
+          }),
+      };
+    },
+  ));
+  const flags = checkedFlags.filter((flag) => (
+    isInactive(flag.codeDefault) && isInactive(flag.operatorValue)
+  ));
 
   return {
-    currentRelease: releases.at(-1)?.tag ?? null,
+    currentRelease,
+    checkedFlags,
     flags,
   };
 }

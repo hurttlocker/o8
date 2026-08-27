@@ -7,6 +7,10 @@ import { ensureProposerBootTick } from '@/lib/cortex/proposer';
 import { ensureStackSignatureBoot } from '@/lib/cortex/stack-signature';
 import { ensureCrossRepoProposerBootTick } from '@/lib/cortex/cross-repo-proposer';
 import { ensureExternalMergeBootHook } from '@/lib/cortex/external-merge-watcher';
+import {
+  currentShippedDarkAuditStatus,
+  ensureShippedDarkAuditBootHook,
+} from '@/lib/operator/shipped-dark-scheduler';
 import { persistentTerminalsEnabled } from '@/lib/terminal/tmux';
 import { currentPersistentTerminalHealth } from '@/lib/terminal/persistence-health';
 
@@ -50,6 +54,9 @@ export async function GET() {
   // appends trailers for new merges, and dedupes against internal-path
   // writes via the trailerLines.includes guard in directive-merges.ts.
   ensureExternalMergeBootHook();
+  // #1819 — the packaged app has no reliable source checkout. The bundled
+  // release manifest drives this daily audit and the receipt survives restart.
+  ensureShippedDarkAuditBootHook();
 
   return NextResponse.json({
     product: 'o8',
@@ -61,5 +68,6 @@ export async function GET() {
     mode: 'local-cli',
     runtime: 'codex+claude-code',
     terminalPersistence: currentPersistentTerminalHealth(persistentTerminalsEnabled()),
+    shippedDarkAudit: currentShippedDarkAuditStatus(),
   });
 }
