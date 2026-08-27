@@ -22,6 +22,7 @@ import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
 
 import { crashSurvivableWorkersEnabled } from './crash-survival';
 import { observeChildExit, readAbnormalStderrTail } from './exit-outcome';
+import { prepareOwnedLaunchArgs } from './launch-args';
 import { detectSandboxDenial, sandboxDenialOperatorMessage } from './sandbox-denial';
 import {
   AUTO_RETRY_FRESHNESS_MS,
@@ -487,30 +488,6 @@ export function createOwnedRunController({
     const stdoutPath = path.join(session.sessionDir, RUNS_DIR, `${runId}.jsonl`);
     const stderrPath = path.join(session.sessionDir, RUNS_DIR, `${runId}.stderr.log`);
 
-    let args: string[];
-    let stdinPayload: string | null = null;
-    if (mode === 'launch') {
-      args = adapter.launchArgs({
-        cwd: session.repoPath,
-        sessionDir: session.sessionDir,
-        prompt,
-        model: session.model,
-        effort: session.effort,
-      });
-      stdinPayload = adapter.launchStdin?.({ cwd: session.repoPath, prompt, model: session.model, effort: session.effort }) ?? null;
-    } else {
-      const built = adapter.resumeArgs({
-        threadId: session.threadId ?? '',
-        sessionDir: session.sessionDir,
-        prompt,
-        model: session.model,
-      });
-      if (!built) {
-        throw new Error(`Resume is not supported by the ${humanLabel} runtime adapter.`);
-      }
-      args = built;
-    }
-
     let binary: string;
     try {
       binary = (await resolveCli({
@@ -543,10 +520,20 @@ export function createOwnedRunController({
       }
     }
 
+    const sandboxEnabled = workerSandboxEnabled();
+    const { args, stdinPayload, workerMcp } = await prepareOwnedLaunchArgs({
+      adapter,
+      session,
+      runId,
+      prompt,
+      mode,
+      sandboxEnabled,
+      humanLabel,
+    });
+
     let spawnBinary = binary;
     let spawnArgs = args;
     const sandboxEnvExtra: Record<string, string> = {};
-    const sandboxEnabled = workerSandboxEnabled();
     if (sandboxEnabled) {
       try {
         const prepared = await prepareWorkerSandbox({
@@ -556,6 +543,7 @@ export function createOwnedRunController({
           repoPath: session.repoPath,
           binary,
           args,
+          extraReadPaths: workerMcp.sandboxReadPaths,
           finalAllowReadWritePaths: session.identity?.configHomeRef
             ? [session.identity.configHomeRef]
             : undefined,

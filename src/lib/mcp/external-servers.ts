@@ -22,6 +22,7 @@ export interface ExternalMcpServerRecord {
   /** OAuth bearer token for authenticated HTTP MCP servers */
   oauthToken: string | null;
   enabled: boolean;
+  workerInjection: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -39,6 +40,12 @@ export interface InsertExternalMcpServerInput {
   /** OAuth bearer token for authenticated HTTP servers (stored as-is) */
   oauthToken?: string | null;
   enabled?: boolean;
+  workerInjection?: boolean;
+}
+
+export interface UpdateExternalMcpServerInput {
+  enabled?: boolean;
+  workerInjection?: boolean;
 }
 
 interface ExternalMcpServerRow {
@@ -52,6 +59,7 @@ interface ExternalMcpServerRow {
   url: string | null;
   oauthToken: string | null;
   enabled: boolean;
+  workerInjection: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -228,6 +236,7 @@ export function insertExternalMcpServer(input: InsertExternalMcpServerInput): Ex
     url: resolvedUrl,
     oauthToken: input.oauthToken?.trim() || null,
     enabled: input.enabled ?? true,
+    workerInjection: input.transport === 'stdio' && input.workerInjection === true,
     createdAt: now,
     updatedAt: now,
   }).run();
@@ -240,10 +249,31 @@ export function insertExternalMcpServer(input: InsertExternalMcpServerInput): Ex
 }
 
 export function setExternalMcpServerEnabled(id: string, enabled: boolean): ExternalMcpServerRecord | null {
+  return updateExternalMcpServer(id, { enabled });
+}
+
+export function updateExternalMcpServer(
+  id: string,
+  input: UpdateExternalMcpServerInput,
+): ExternalMcpServerRecord | null {
   const db = requireDb();
   const now = new Date().toISOString();
+  const existing = db.select()
+    .from(externalMcpServers)
+    .where(eq(externalMcpServers.id, id))
+    .get();
+  if (!existing) return null;
+  if (input.workerInjection === true && existing.transport !== 'stdio') {
+    throw new Error('Worker attachment is supported only for stdio MCP servers');
+  }
+
+  const updates: Partial<Pick<ExternalMcpServerRow, 'enabled' | 'workerInjection' | 'updatedAt'>> = {
+    updatedAt: now,
+  };
+  if (typeof input.enabled === 'boolean') updates.enabled = input.enabled;
+  if (typeof input.workerInjection === 'boolean') updates.workerInjection = input.workerInjection;
   const result = db.update(externalMcpServers)
-    .set({ enabled, updatedAt: now })
+    .set(updates)
     .where(eq(externalMcpServers.id, id))
     .run();
 

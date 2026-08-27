@@ -82,6 +82,13 @@ Runtime-specific switches are acceptable only when behavior actually diverges,
 such as a resume protocol or session-key format. Labels, colors, picker options,
 auth houses, validation, and runtime membership come from the catalog.
 
+Owned-session adapters advertise `workerMcpInjection` only when their launch
+protocol can accept a per-run MCP config. The shared controller derives that
+config exclusively from opted-in operator records, writes it inside the run's
+o8-owned session directory, and supplies its path through `launchArgs`. Adapters that
+omit the flag keep their existing launch behavior and receive only the packet
+prompt's attached-server notice.
+
 ### OpenCode: standalone workers, resident service for the operator only
 
 `src/lib/opencode/owned.ts` passes `--standalone` on both `launchArgs` and

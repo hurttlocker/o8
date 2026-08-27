@@ -332,6 +332,12 @@ export type LaneEventVerb =
   // An opted-in macOS worker sandbox blocked a concrete resource. Payload:
   // { runtime, surfaceId, runId, operation, resource, denialLine, message }
   | 'sandbox_denied'
+  // Operator-registered MCP servers attached to a packet worker. Payload:
+  // { servers, configPath }
+  | 'mcp_injected'
+  // An MCP server or attachment set was skipped without blocking spawn. Payload:
+  // { server?, command?, servers?, reason }
+  | 'mcp_injection_skipped'
   // A subscription-backed model surface crossed houses at the same policy
   // tier after quota exhaustion. These events are operator-visible audit rows.
   | 'review_fallback'

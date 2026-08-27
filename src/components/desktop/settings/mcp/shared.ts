@@ -12,6 +12,7 @@ export interface ExternalMcpServer {
   argsJson: string;
   envJson: string | null;
   enabled: boolean;
+  workerInjection: boolean;
   createdAt: string;
   updatedAt: string;
 }
