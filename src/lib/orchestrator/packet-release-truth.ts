@@ -41,7 +41,7 @@ export interface PacketReleaseEvidence {
 
 type ReleasablePacket = Pick<
   OrchestratorPacket,
-  'releaseState' | 'releaseStatePayload' | 'status' | 'queueState' | 'blockedReason'
+  'releaseState' | 'releaseStatePayload' | 'status' | 'queueState' | 'blockedReason' | 'recovery'
 >;
 
 /**
@@ -105,6 +105,7 @@ export function markPacketReleased(
   packet.releaseState = 'released';
   packet.releaseStatePayload = releaseStatePayload;
   packet.blockedReason = null;
+  packet.recovery = null;
 }
 
 export function clearUnprovenReleaseClaim(packet: ReleasablePacket): boolean {
@@ -134,6 +135,7 @@ export function applyLaneCompletedRelease(packet: ReleasablePacket): void {
   if (packet.releaseState === 'released' && hasCanonicalReleaseEvidence(packet)) {
     packet.status = 'released';
     packet.blockedReason = null;
+    packet.recovery = null;
     return;
   }
   clearUnprovenReleaseClaim(packet);

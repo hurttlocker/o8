@@ -7,7 +7,7 @@ import { NextRequest } from 'next/server';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createLane } from './registry';
-import { hasDurableApprovedReview } from './durable-review-approval';
+import { assessDurableApprovedReview, hasDurableApprovedReview } from './durable-review-approval';
 
 vi.mock('@/lib/realtime/publisher', () => ({
   publishRealtimeMutation: vi.fn(async () => {}),
@@ -21,7 +21,15 @@ const WORKER_TOKEN = 'local-worker-token-durable-review-0123456789';
 writeFileSync(join(process.env.CORTEX_IDE_DATA_DIR!, 'worker-token'), `${WORKER_TOKEN}\n`, 'utf-8');
 
 const approvalsRoute = await import('@/app/api/panel/approvals/route');
-const { getApproval, listApprovalsForContext, markSecondPassAgreed, recordOrchestratorReview } = await import('@/lib/approvals/store');
+const {
+  createApproval,
+  getApproval,
+  listApprovalsForContext,
+  markSecondPassAgreed,
+  recordApprovalAudit,
+  recordOrchestratorReview,
+  resolveApproval,
+} = await import('@/lib/approvals/store');
 
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -69,6 +77,249 @@ function workerRequest(body: unknown): NextRequest {
 }
 
 describe('durable review approval governance invariants', () => {
+  it('refuses an approved-status record whose persisted review verdict rejects', async () => {
+    const repoPath = initRepo();
+    const packetId = `pkt-durable-rejected-verdict-${Date.now()}`;
+    const lane = createReviewLane(repoPath, packetId);
+    const reviewedHeadSha = git(repoPath, ['rev-parse', 'HEAD']);
+
+    recordOrchestratorReview(packetId, {
+      approved: false,
+      findings: [],
+      reviewedHeadSha,
+    });
+    const review = listApprovalsForContext({ packetId, laneId: lane.id, sessionKey: lane.sessionKey ?? undefined })
+      .find((candidate) => candidate.toolName === 'orchestrator_review')!;
+    expect(review).toMatchObject({ status: 'pending', args: { approved: false } });
+
+    resolveApproval(review.id, 'approve', 'test', 'Construct the persisted contradictory status through the production resolver.');
+    expect(getApproval(review.id)).toMatchObject({
+      status: 'approved',
+      args: { approved: false, reviewTurnOutcome: 'completed' },
+    });
+    await expect(assessDurableApprovedReview(lane)).resolves.toMatchObject({
+      approved: false,
+      approvalId: null,
+    });
+  }, 20_000);
+
+  it('keeps an approved verdict with a deferred finding pending and out of the merge gate', async () => {
+    const repoPath = initRepo();
+    const packetId = `pkt-durable-deferred-finding-${Date.now()}`;
+    const lane = createReviewLane(repoPath, packetId);
+    const reviewedHeadSha = git(repoPath, ['rev-parse', 'HEAD']);
+
+    recordOrchestratorReview(packetId, {
+      approved: true,
+      findings: [{
+        file: 'packet.txt',
+        severity: 'bug',
+        description: 'The finding still requires a fix.',
+        resolution: 'deferred',
+      }],
+      reviewedHeadSha,
+    });
+
+    const review = listApprovalsForContext({ packetId, laneId: lane.id, sessionKey: lane.sessionKey ?? undefined })
+      .find((candidate) => candidate.toolName === 'orchestrator_review');
+    expect(review).toMatchObject({
+      status: 'pending',
+      args: { approved: true, findings: [{ resolution: 'deferred' }] },
+    });
+    expect(await hasDurableApprovedReview(lane)).toBe(false);
+  }, 20_000);
+
+  it('lets the latest rejected review override an older approved row for the same HEAD', async () => {
+    const repoPath = initRepo();
+    const packetId = `pkt-durable-latest-refusal-${Date.now()}`;
+    const lane = createReviewLane(repoPath, packetId);
+    const reviewedHeadSha = git(repoPath, ['rev-parse', 'HEAD']);
+
+    recordOrchestratorReview(packetId, {
+      approved: true,
+      findings: [],
+      reviewedHeadSha,
+    });
+    const olderApproval = listApprovalsForContext({ packetId, laneId: lane.id, sessionKey: lane.sessionKey ?? undefined })
+      .find((candidate) => candidate.toolName === 'orchestrator_review')!;
+    expect(olderApproval.status).toBe('approved');
+
+    const latestRefusal = createApproval({
+      source: 'runtime',
+      runtime: 'codex',
+      agent: 'reviewer',
+      sessionKey: lane.sessionKey!,
+      title: 'Orchestrator review',
+      description: 'A later review requested changes.',
+      summary: 'Later orchestrator review',
+      toolName: 'orchestrator_review',
+      args: {
+        packetId,
+        approved: false,
+        findings: [],
+        reviewedHeadSha,
+        reviewTurnId: `review-turn-latest-refusal-${Date.now()}`,
+        reviewTurnOutcome: 'completed',
+      },
+      risk: 'high',
+      metadata: {
+        Packet: packetId,
+        Lane: lane.id,
+        'Reviewed HEAD': reviewedHeadSha,
+      },
+    });
+    recordApprovalAudit(latestRefusal.id, 'orchestrator_review', 'system', 'The later review requested changes.', {
+      approved: false,
+      reviewedHeadSha,
+    });
+    resolveApproval(latestRefusal.id, 'reject', 'system', 'The later review requested changes.');
+
+    expect(getApproval(olderApproval.id)?.status).toBe('approved');
+    expect(getApproval(latestRefusal.id)?.status).toBe('rejected');
+    expect(await hasDurableApprovedReview(lane)).toBe(false);
+  }, 20_000);
+
+  it('authorizes a genuinely approved review whose findings are resolved', async () => {
+    const repoPath = initRepo();
+    const packetId = `pkt-durable-clean-approval-${Date.now()}`;
+    const lane = createReviewLane(repoPath, packetId);
+    const reviewedHeadSha = git(repoPath, ['rev-parse', 'HEAD']);
+
+    recordOrchestratorReview(packetId, {
+      approved: true,
+      findings: [{
+        file: 'packet.txt',
+        severity: 'note',
+        description: 'The review confirmed the final behavior.',
+        resolution: 'fixed',
+      }],
+      reviewedHeadSha,
+    });
+
+    const review = listApprovalsForContext({ packetId, laneId: lane.id, sessionKey: lane.sessionKey ?? undefined })
+      .find((candidate) => candidate.toolName === 'orchestrator_review')!;
+    await expect(assessDurableApprovedReview(lane)).resolves.toMatchObject({
+      approved: true,
+      approvalId: review.id,
+    });
+  }, 20_000);
+
+  it('refuses an abbreviated HEAD that bypassed write-time normalization', async () => {
+    const repoPath = initRepo();
+    const packetId = `pkt-durable-abbreviated-head-${Date.now()}`;
+    const lane = createReviewLane(repoPath, packetId);
+    const reviewedHeadSha = git(repoPath, ['rev-parse', 'HEAD']);
+    const abbreviatedHeadSha = reviewedHeadSha.slice(0, 9);
+
+    recordOrchestratorReview(packetId, {
+      approved: true,
+      findings: [],
+      reviewedHeadSha: abbreviatedHeadSha,
+    });
+
+    await expect(assessDurableApprovedReview(lane)).resolves.toMatchObject({
+      approved: false,
+      approvalId: null,
+      reason: `Review pinned to ${abbreviatedHeadSha} but current HEAD is ${reviewedHeadSha}.`,
+    });
+  }, 20_000);
+
+  it('explains when an abbreviated reviewed HEAD does not match the current HEAD', async () => {
+    const repoPath = initRepo();
+    const packetId = `pkt-durable-mismatched-abbreviated-head-${Date.now()}`;
+    const lane = createReviewLane(repoPath, packetId);
+    const currentHeadSha = git(repoPath, ['rev-parse', 'HEAD']);
+    const mismatchedHeadSha = `${currentHeadSha[0] === 'f' ? 'e' : 'f'}${currentHeadSha.slice(1, 9)}`;
+
+    recordOrchestratorReview(packetId, {
+      approved: true,
+      findings: [],
+      reviewedHeadSha: mismatchedHeadSha,
+    });
+
+    await expect(assessDurableApprovedReview(lane)).resolves.toMatchObject({
+      approved: false,
+      approvalId: null,
+      reason: `Review pinned to ${mismatchedHeadSha} but current HEAD is ${currentHeadSha}.`,
+    });
+  }, 20_000);
+
+  it('demotes an approved record when a later review rejects it and records the transition', async () => {
+    const repoPath = initRepo();
+    const packetId = `pkt-durable-review-demotion-${Date.now()}`;
+    const lane = createReviewLane(repoPath, packetId);
+    const reviewedHeadSha = git(repoPath, ['rev-parse', 'HEAD']);
+
+    recordOrchestratorReview(packetId, {
+      approved: true,
+      findings: [],
+      reviewedHeadSha,
+    });
+    const approved = listApprovalsForContext({ packetId, laneId: lane.id, sessionKey: lane.sessionKey ?? undefined })
+      .find((candidate) => candidate.toolName === 'orchestrator_review')!;
+    expect(approved.status).toBe('approved');
+
+    recordOrchestratorReview(packetId, {
+      approved: false,
+      findings: [{
+        file: 'packet.txt',
+        severity: 'bug',
+        description: 'The later review found a blocking defect.',
+        resolution: 'deferred',
+      }],
+      reviewedHeadSha,
+    });
+
+    const demoted = getApproval(approved.id);
+    expect(demoted).toMatchObject({
+      id: approved.id,
+      status: 'pending',
+      args: { approved: false, findings: [{ resolution: 'deferred' }] },
+    });
+    expect(demoted?.resolvedAt).toBeUndefined();
+    expect(demoted?.resolution).toBeUndefined();
+    expect(demoted?.audit.at(-1)).toMatchObject({
+      type: 'updated',
+      actor: 'orchestrator',
+      note: 'Returned to pending because the review verdict requested changes.',
+    });
+    expect(await hasDurableApprovedReview(lane)).toBe(false);
+  }, 20_000);
+
+  it('demotes an approved record when a later approved verdict leaves a finding unresolved', async () => {
+    const repoPath = initRepo();
+    const packetId = `pkt-durable-unresolved-demotion-${Date.now()}`;
+    const lane = createReviewLane(repoPath, packetId);
+    const reviewedHeadSha = git(repoPath, ['rev-parse', 'HEAD']);
+
+    recordOrchestratorReview(packetId, {
+      approved: true,
+      findings: [],
+      reviewedHeadSha,
+    });
+    const approved = listApprovalsForContext({ packetId, laneId: lane.id, sessionKey: lane.sessionKey ?? undefined })
+      .find((candidate) => candidate.toolName === 'orchestrator_review')!;
+
+    recordOrchestratorReview(packetId, {
+      approved: true,
+      findings: [{
+        file: 'packet.txt',
+        severity: 'bug',
+        description: 'The finding is still unresolved.',
+        resolution: 'deferred',
+      }],
+      reviewedHeadSha,
+    });
+
+    const demoted = getApproval(approved.id);
+    expect(demoted).toMatchObject({
+      status: 'pending',
+      args: { approved: true, findings: [{ resolution: 'deferred' }] },
+    });
+    expect(demoted?.audit.at(-1)?.note).toBe('Returned to pending because unresolved findings remain.');
+    expect(await hasDurableApprovedReview(lane)).toBe(false);
+  }, 20_000);
+
   it('voids an approved review after the reviewed HEAD is amended', async () => {
     const repoPath = initRepo();
     const packetId = `pkt-durable-head-${Date.now()}`;
@@ -99,7 +350,11 @@ describe('durable review approval governance invariants', () => {
       reviewedHeadSha,
       requiresSecondPass: true,
     });
-    expect(await hasDurableApprovedReview(lane)).toBe(false);
+    await expect(assessDurableApprovedReview(lane)).resolves.toMatchObject({
+      approved: false,
+      approvalId: null,
+      reason: 'The latest AI review matches the current HEAD and is awaiting its required second pass.',
+    });
 
     const approval = listApprovalsForContext({ packetId, laneId: lane.id, sessionKey: lane.sessionKey ?? undefined })
       .find((candidate) => candidate.toolName === 'orchestrator_review');
