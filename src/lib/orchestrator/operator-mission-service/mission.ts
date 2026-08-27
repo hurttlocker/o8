@@ -22,6 +22,7 @@ import {
 } from '@/lib/orchestrator/packet-transcript';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { bindWorkerLaunchParent } from '@/lib/orchestrator/worker-launch-context';
+import { assertQualitySearchMissionCompatibility, resolveTaskContractRequired } from '@/lib/orchestrator/task-contract-required';
 import { withMissionHandoffBarrier } from '@/lib/orchestrator/lifecycle-mutation-lock';
 import { releaseAbandonedMissionLifecycleHold } from '@/lib/orchestrator/mission-lifecycle-hold';
 import { getTopRulesForPacket, readRepoScopedRules } from '@/lib/dispatch/rules-store';
@@ -98,15 +99,7 @@ export async function createMission(input: CreateMissionInput) {
   if (!Array.isArray(input.issues) || input.issues.length === 0) {
     throw new Error('At least one loaded issue is required.');
   }
-  if (input.qualitySearch && input.issues.length !== 1) {
-    throw new Error('Quality search requires exactly one task per mission.');
-  }
-  if (input.qualitySearch && input.comparisonModels?.length) {
-    throw new Error('Quality search cannot be combined with a separate comparison fan-out.');
-  }
-  if (input.qualitySearch && input.huddle) {
-    throw new Error('Quality search already uses a sealed contract and cannot be combined with huddle mode.');
-  }
+  assertQualitySearchMissionCompatibility(input);
   const qualitySearchRuntime = input.issues[0]?.runtime ?? input.runtime;
   if (input.qualitySearch && qualitySearchRuntime !== 'codex' && qualitySearchRuntime !== 'claude-code') {
     throw new Error('Quality search is not supported by the selected worker runtime yet.');
@@ -245,14 +238,14 @@ export async function createMission(input: CreateMissionInput) {
       ...(issueMeta ? { issue: issueMeta } : {}),
       ...(typeof input.useBrain === 'boolean' ? { useBrain: input.useBrain } : {}),
       ...(typeof input.huddle === 'boolean' ? { huddle: input.huddle } : {}),
-      // Contract-first is opt-in, not ambient. `taskContractRequired` makes the
-      // coverage gate mandatory, and contract capture from the worker transcript
-      // is best-effort — so arming it universally would make any packet whose
-      // contract failed to parse unmergeable through the governed path. Ordinary
-      // dispatch keeps its prior behavior until the capture path has a record.
+      taskContractRequired: resolveTaskContractRequired({
+        runtime: packetRouting.selectedRuntime,
+        missionOptOut: input.taskContract === 'off',
+        explicit: Boolean(input.qualitySearch),
+      }),
+      taskContractSource: input.qualitySearch ? 'explicit' : 'default',
       ...(input.qualitySearch
         ? {
-            taskContractRequired: true,
             taskContract: input.qualitySearch.taskContract,
             qualitySearch: { version: 1 as const, role: null, repairAttempts: 0 },
           }

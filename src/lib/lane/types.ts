@@ -393,6 +393,12 @@ export type LaneEventVerb =
   // A terminal status-only transition retained an ambiguously owned storage
   // reservation while preserving the packet association for a later retry.
   | 'storage_release_deferred'
+  // Pre-edit contract turn usage, recorded when the first valid contract is captured.
+  // Payload: { runtime, turns, inputTokens?, outputTokens?, durationMs }
+  | 'task_contract_cost'
+  // A runtime-default contract was not captured, so review preserved the legacy gate behavior.
+  // Payload: { runtime, reason }
+  | 'task_contract_missing'
   | 'review_turn_started'
   | 'review_turn_finished'
   | 'worker_quota_exhausted'

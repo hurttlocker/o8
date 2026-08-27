@@ -221,6 +221,8 @@ export interface PacketTaskContract {
   exclusions: string[];
 }
 
+export type PacketTaskContractSource = 'explicit' | 'default';
+
 export interface OrchestratorPacketStorageAdmission {
   schema: 'o8/packet-storage-admission/v1';
   state: 'reserved' | 'committed' | 'held' | 'released' | 'quarantined';
@@ -475,12 +477,13 @@ export interface OrchestratorPacket {
    * claimed smallest route were never made auditable.
    */
   taskContract?: PacketTaskContract | null;
-  /**
-   * True for packets created after the contract-first quality pipeline was
-   * enabled. Legacy/in-flight packets omit it so review does not retroactively
-   * fail work dispatched before the worker received contract instructions.
-   */
+  /** Explicit contract gate for newly created packets. Legacy/in-flight packets
+   * omit it so review does not retroactively fail work dispatched before the
+   * worker received contract instructions. */
   taskContractRequired?: boolean;
+  /** Why the contract gate was armed. Default-armed packets can fail soft when
+   * transcript capture never produced a contract; explicit packets remain hard. */
+  taskContractSource?: PacketTaskContractSource;
   /** Recurring-problem provenance. Execution still belongs to the normal task packet. */
   problemDossierId?: string | null;
   /** One dossier can reopen; each accepted remedy attempt gets a stable id. */

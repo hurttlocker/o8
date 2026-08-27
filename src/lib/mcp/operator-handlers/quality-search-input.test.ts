@@ -38,5 +38,12 @@ describe('mission candidate-mode input', () => {
       ok: false,
       error: 'qualitySearch already uses a sealed contract and cannot be combined with huddle mode.',
     });
+    expect(parseMissionCandidateMode({
+      qualitySearch: { taskContract },
+      taskContract: 'off',
+    }, false)).toEqual({
+      ok: false,
+      error: 'qualitySearch already uses a sealed contract and cannot be combined with taskContract: "off".',
+    });
   });
 });

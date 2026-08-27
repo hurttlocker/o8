@@ -48,6 +48,7 @@ import {
 } from './review-cancellation';
 import { dispatchSecondPassMerge } from './second-pass-merge-dispatch';
 import { drainPacketExplainerQueue, enqueuePacketExplainer, startPacketExplainerQueueDrain } from './packet-explainer-queue';
+import { resolvePacketTaskContractGate } from './task-contract-gate';
 import type { Lane } from './types';
 
 const DRAIN_INTERVAL_MS = 10_000;
@@ -530,18 +531,12 @@ async function performAutoReview(review: QueuedReview): Promise<AutoReviewOutcom
   // where the worker went off-plan. Null (no notes file / no heading) persists
   // as null so the surfaces render the asserted "No deviations reported" line.
   let deviations: PacketDeviations | null = null;
-  let taskContractRequired = false;
+  let enforceCoverage = false;
+  let taskContract: PacketTaskContract | null = completionContext?.taskContract ?? null;
   if (lane.packetId) {
     try {
       deviations = readPacketDeviations(lane.worktreePath || lane.repoPath, lane.packetId);
-      const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
-      taskContractRequired = readOrchestratorControlPlaneState().packets
-        .find((packet) => packet.id === lane.packetId)?.taskContractRequired === true;
-      const { patchMissionPacket } = await import('@/lib/orchestrator/operator-mission-service/packet-patch');
-      await patchMissionPacket(lane.packetId, {
-        deviations: deviations ?? null,
-        taskContract: completionContext?.taskContract ?? null,
-      });
+      ({ taskContract, enforceCoverage } = await resolvePacketTaskContractGate({ lane, completionContext, deviations }));
     } catch (error) {
       console.warn(`[auto-review] Failed to capture deviations for lane ${lane.id}:`, error);
     }
@@ -583,8 +578,8 @@ async function performAutoReview(review: QueuedReview): Promise<AutoReviewOutcom
     reviewScreenshot,
     diffSummary.cwd,
     deviations,
-    completionContext?.taskContract,
-    taskContractRequired,
+    taskContract,
+    enforceCoverage,
   );
 
   if (isReviewAttemptCancelled(review.id, review.claim_owner)) {
@@ -698,8 +693,8 @@ async function performAutoReview(review: QueuedReview): Promise<AutoReviewOutcom
     lane,
     diffSummary,
     reviewRisk.reasons,
-    completionContext?.taskContract,
-    taskContractRequired,
+    taskContract,
+    enforceCoverage,
   );
   const secondPassThreadId = `thoughts-second-pass-${lane.id}-${randomUUID().slice(0, 8)}`;
   let secondPassText = '';

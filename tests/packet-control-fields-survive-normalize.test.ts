@@ -201,6 +201,7 @@ function fullPacketFixture() {
       exclusions: ['No UI changes'],
     },
     taskContractRequired: true,
+    taskContractSource: 'explicit',
     problemDossierId: null,
     problemRemedyId: null,
     explainer: {
@@ -251,6 +252,7 @@ describe('packet fields survive normalize', () => {
       dispatchRuntimePin: undefined,
       orchestratorThreadId: undefined,
       taskContractRequired: undefined,
+      taskContractSource: undefined,
       storageAdmissionEpoch: undefined,
     }));
 
@@ -259,7 +261,19 @@ describe('packet fields survive normalize', () => {
     expect(normalized.packets[0].dispatchRuntimePin).toBeNull();
     expect(normalized.packets[0].orchestratorThreadId).toBeUndefined();
     expect(normalized.packets[0].taskContractRequired).toBeUndefined();
+    expect(normalized.packets[0].taskContractSource).toBeUndefined();
     expect(normalized.packets[0].storageAdmissionEpoch).toBe(1);
+  });
+
+  it('preserves an explicit disabled task-contract gate', () => {
+    const normalized = normalizeOrchestratorMissionState(stateWithPacket({
+      ...fullPacketFixture(),
+      taskContractRequired: false,
+      taskContractSource: 'default',
+    }));
+
+    expect(normalized.packets[0].taskContractRequired).toBe(false);
+    expect(normalized.packets[0].taskContractSource).toBe('default');
   });
 
   it('truncates an oversized deviations raw body with an explicit marker', () => {

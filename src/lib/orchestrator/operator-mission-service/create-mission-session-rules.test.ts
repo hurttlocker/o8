@@ -61,19 +61,14 @@ describe('createMission stamps orchestratorThreadId onto persisted packets', () 
       caller: 'test orchestrator',
       parentThreadId: 'thoughts-e2e',
     });
-    // Contract-first is opt-in. An ordinary packet must NOT be armed: the
-    // coverage gate is mandatory once this is true, while contract capture is
-    // best-effort, so arming it here would make any packet whose contract failed
-    // to parse unmergeable through the governed path.
-    expect(packet!.taskContractRequired).toBeUndefined();
+    expect(packet!.taskContractRequired).toBe(true);
+    expect(packet!.taskContractSource).toBe('default');
 
     // And the worker prompt built from that persisted packet inherits the rules.
     const prompt = await buildPacketPrompt(packet!, persisted.packets);
     expect(prompt).toContain('<Operator session rules (binding)>');
     expect(prompt).toContain('- never bypass the review gate');
-    // An unarmed packet gets no contract instructions, so its worker is never
-    // asked for a contract the coverage gate would then demand evidence against.
-    expect(prompt).not.toContain('Pre-edit task contract:');
+    expect(prompt).toContain('Pre-edit task contract:');
   });
 
   it('omits the field when the input carries no thread id', async () => {
@@ -118,8 +113,9 @@ describe('createMission stamps orchestratorThreadId onto persisted packets', () 
     const packet = persisted.packets.find((candidate) => candidate.id === result.packets[0]!.id);
 
     expect(packet?.taskContract).toEqual(taskContract);
-    // The quality-search path is the one that arms the gate.
+    // Quality search remains explicitly armed with its sealed contract.
     expect(packet?.taskContractRequired).toBe(true);
+    expect(packet?.taskContractSource).toBe('explicit');
     expect(packet?.qualitySearch).toEqual({
       version: 1,
       role: null,
@@ -134,5 +130,14 @@ describe('createMission stamps orchestratorThreadId onto persisted packets', () 
       constraints: '',
       qualitySearch: { taskContract },
     })).rejects.toThrow('not supported by the selected worker runtime');
+
+    await expect(createMission({
+      issues: [{ number: 90005, title: 'inline: contradictory search', body: 'do the thing', url: '' }],
+      repoPath,
+      runtime: 'codex',
+      constraints: '',
+      taskContract: 'off',
+      qualitySearch: { taskContract },
+    })).rejects.toThrow('Quality search already uses a sealed contract and cannot be combined with taskContract: "off".');
   });
 });
