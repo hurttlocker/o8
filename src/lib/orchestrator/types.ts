@@ -6,6 +6,7 @@ import type { QualitySearchPacketState } from '@/lib/orchestrator/quality-search
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorRuntime, RuntimeWorkerProvider } from '@/lib/orchestrator/runtime-capabilities';
 import type { PacketSpendCap, PacketSpendTelemetry } from '@/lib/orchestrator/metered-spend';
+import type { PacketContextTelemetry } from '@/lib/orchestrator/packet-context-telemetry';
 
 export type { OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 export type OrchestratorExecutionMode = 'fleet' | 'single' | 'fusion';
@@ -324,6 +325,7 @@ export interface OrchestratorPacket {
   operatorStopped?: boolean;
   spendCap?: PacketSpendCap;
   spendTelemetry?: PacketSpendTelemetry;
+  contextTelemetry?: PacketContextTelemetry;
   blockedReason?: string | null;
   /** Durable dispatch admission decision; reserved bytes are not physical usage. */
   storageAdmission?: OrchestratorPacketStorageAdmission | null;

@@ -67,6 +67,11 @@ describe('Claude Code worker skill isolation real path', () => {
     const dataDir = path.join(tempRoot, 'data');
     mkdirSync(dataDir, { recursive: true });
     execFileSync('git', ['init', '-q', '-b', 'main', repoPath]);
+    execFileSync('git', [
+      '-c', 'user.email=test@o8.test',
+      '-c', 'user.name=o8-test',
+      'commit', '--allow-empty', '-m', 'seed',
+    ], { cwd: repoPath });
 
     const title = 'Stop workers loading matching operator skills';
     const fakeUserSkill = path.join(fakeHome, '.claude', 'skills', 'matching-trigger');
@@ -123,13 +128,22 @@ describe('Claude Code worker skill isolation real path', () => {
     rmSync(tempRoot, { recursive: true, force: true });
   });
 
-  it('isolates config, disables skill discovery, carries the prompt boundary, and records turn context', async () => {
+  it('isolates five real dispatches, disables skill discovery, and projects bounded turn context to the packet card', async () => {
     const title = 'Stop workers loading matching operator skills';
     const packetId = 'pkt-claude-skill-isolation';
     const { writeClaudeCodeWorkerProfile } = await import('@/lib/claude-code/worker-profile');
     const { buildPacketPrompt } = await import('@/lib/orchestrator/packet-prompt');
-    const { createLane, getLaneEvents } = await import('@/lib/lane/registry');
-    const { claudeCodeRuntime } = await import('@/lib/runtimes/claude-code');
+    const { createLane, getLane, getLaneEvents } = await import('@/lib/lane/registry');
+    const { addRepo } = await import('@/lib/repos/registry');
+    const { captureWorktreeMaterializationIdentity } = await import('@/lib/worktree/materialization-identity');
+    const { withWorktreeMetaTransaction } = await import('@/lib/worktree/metadata-store');
+    const { managedPacketWorktreeId } = await import('@/lib/worktree/root-layout');
+    const { dispatch: dispatchLaneCommand } = await import('@/lib/lane/commands');
+    const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+    const {
+      syncOrchestratorControlPlaneState,
+      writeOrchestratorControlPlaneState,
+    } = await import('@/lib/orchestrator/control-plane');
 
     await writeClaudeCodeWorkerProfile({
       source: 'native',
@@ -161,71 +175,121 @@ describe('Claude Code worker skill isolation real path', () => {
       orchestratorThreadId: null,
     } as OrchestratorPacket;
     const prompt = await buildPacketPrompt(packet, [], 'main', repoPath);
+    await addRepo(repoPath);
+    const worktreeId = managedPacketWorktreeId(packetId);
+    if (!worktreeId) throw new Error('Packet worktree id was not created.');
+    const worktreeBase = path.join(repoPath, '.cortex-worktrees');
+    const worktreePath = path.join(worktreeBase, worktreeId);
+    mkdirSync(worktreeBase, { recursive: true });
+    execFileSync('git', ['worktree', 'add', worktreePath, '-b', packet.branchTarget], { cwd: repoPath });
+    const materializationIdentity = await captureWorktreeMaterializationIdentity(worktreePath);
+    const materializationParentIdentity = await captureWorktreeMaterializationIdentity(worktreeBase);
+    await withWorktreeMetaTransaction(repoPath, (transaction) => transaction.save(worktreeId, {
+      id: worktreeId,
+      agentType: 'claude-code',
+      baseBranch: 'main',
+      createdAt: Date.now(),
+      claudeManaged: false,
+      taskName: title,
+      branchName: packet.branchTarget,
+      status: 'ready',
+      isolationKind: 'git-worktree',
+      materializationIdentity,
+      materializationParentIdentity,
+    }));
     const lane = createLane({
       repoPath,
-      worktreePath: repoPath,
+      worktreePath,
       branch: packet.branchTarget,
       runtime: 'claude-code',
       label: title,
       packetId,
     });
-
-    const result = await claudeCodeRuntime.launch({
-      cwd: repoPath,
-      laneId: lane.id,
-      prompt,
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      missionId: 'mission-claude-skill-isolation',
+      repoPath,
+      runtime: 'claude-code',
+      packets: [packet],
     });
-
-    if (!result.ok) throw new Error(result.note);
-    const [, args, options] = spawnMock.mock.calls[0]!;
-    const configDir = options.env.CLAUDE_CONFIG_DIR as string;
-    expect(configDir.startsWith(fakeHome)).toBe(false);
-    expect(existsSync(configDir)).toBe(true);
-    expect(existsSync(path.join(configDir, 'skills'))).toBe(false);
-    expect(args).toContain('--disable-slash-commands');
-
-    // Native carrier: the isolated config dir must be seeded with a copy of
-    // the operator's real credentials (Claude Code stores OAuth creds at
-    // <config dir>/.credentials.json), so the worker doesn't spawn logged out.
-    const sourceCredentialsPath = path.join(fakeHome, '.claude', '.credentials.json');
-    const seededCredentialsPath = path.join(configDir, '.credentials.json');
-    expect(existsSync(seededCredentialsPath)).toBe(true);
-    expect(readFileSync(seededCredentialsPath, 'utf8')).toBe(readFileSync(sourceCredentialsPath, 'utf8'));
-    expect(statSync(seededCredentialsPath).mode & 0o777).toBe(0o600);
-    expect(readFileSync(sourceCredentialsPath, 'utf8')).toContain('operator-real-oauth-token');
     expect(prompt).toContain('Claude Code skills are unavailable in this dispatched worker.');
     expect(prompt).not.toContain('Load a large unrelated reference tree.');
-    expect(spawnMock.mock.results[0]?.value.stdin.end).toHaveBeenCalledWith(
-      expect.stringContaining('Claude Code skills are unavailable in this dispatched worker.'),
-      'utf8',
-    );
+    const contextByTurn = [40_651, 41_024, 41_809, 42_331, 43_007];
+    const launchCallStart = spawnMock.mock.calls.length;
 
-    const surfaceId = result.sessionKey!;
-    const sessionDir = path.join(tempRoot, 'owned', surfaceId.replace('claude-code-owned:', ''));
-    const session = JSON.parse(readFileSync(path.join(sessionDir, 'session.json'), 'utf8')) as {
-      recentRuns: Array<{ stdoutPath: string }>;
-    };
-    writeFileSync(session.recentRuns[0]!.stdoutPath, `${JSON.stringify({
-      type: 'result',
-      subtype: 'success',
-      result: 'done',
-      session_id: 'claude-turn-isolation',
-      usage: {
-        input_tokens: 203,
-        output_tokens: 11,
-        cache_read_input_tokens: 40_448,
-      },
-    })}\n`);
-    listeners.get('exit')?.(0, null);
-    listeners.get('close')?.(0, null);
+    for (const [turnIndex, contextTokens] of contextByTurn.entries()) {
+      const inputTokens = 203 + turnIndex;
+      const result = await dispatchLaneCommand({
+        verb: 'launch_session',
+        laneId: lane.id,
+        prompt,
+        actor: 'orchestrator',
+      });
+      if (!result.ok) throw new Error(result.note);
 
-    const exitEvent = await waitFor(() => getLaneEvents(lane.id, 200)
-      .find((event) => event.verb === 'runtime_process_exit' && event.payload.runId));
-    expect(exitEvent?.payload).toMatchObject({
-      inputTokens: 203,
-      cacheReadTokens: 40_448,
-      contextTokens: 40_651,
-    });
+      const spawnCallIndex = launchCallStart + turnIndex;
+      const [, args, options] = spawnMock.mock.calls[spawnCallIndex]!;
+      const configDir = options.env.CLAUDE_CONFIG_DIR as string;
+      expect(configDir.startsWith(fakeHome)).toBe(false);
+      expect(existsSync(configDir)).toBe(true);
+      expect(existsSync(path.join(configDir, 'skills'))).toBe(false);
+      expect(args).toContain('--disable-slash-commands');
+      expect(spawnMock.mock.results[spawnCallIndex]?.value.stdin.end).toHaveBeenCalledWith(
+        expect.stringContaining('Claude Code skills are unavailable in this dispatched worker.'),
+        'utf8',
+      );
+
+      // Native carrier: the isolated config dir must be seeded with a copy of
+      // the operator's real credentials, but never their skills directory.
+      const sourceCredentialsPath = path.join(fakeHome, '.claude', '.credentials.json');
+      const seededCredentialsPath = path.join(configDir, '.credentials.json');
+      expect(existsSync(seededCredentialsPath)).toBe(true);
+      expect(readFileSync(seededCredentialsPath, 'utf8')).toBe(readFileSync(sourceCredentialsPath, 'utf8'));
+      expect(statSync(seededCredentialsPath).mode & 0o777).toBe(0o600);
+
+      const surfaceId = getLane(lane.id)?.sessionKey;
+      if (!surfaceId) throw new Error(`Turn ${turnIndex + 1} did not attach a session.`);
+      const sessionDir = path.join(tempRoot, 'owned', surfaceId.replace('claude-code-owned:', ''));
+      const session = JSON.parse(readFileSync(path.join(sessionDir, 'session.json'), 'utf8')) as {
+        recentRuns: Array<{ stdoutPath: string }>;
+      };
+      const exitCountBefore = getLaneEvents(lane.id, 200)
+        .filter((event) => event.verb === 'runtime_process_exit').length;
+      writeFileSync(session.recentRuns[0]!.stdoutPath, `${JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        result: 'done',
+        session_id: `claude-turn-isolation-${turnIndex + 1}`,
+        usage: {
+          input_tokens: inputTokens,
+          output_tokens: 11,
+          cache_read_input_tokens: contextTokens - inputTokens,
+        },
+      })}\n`);
+      listeners.get('exit')?.(0, null);
+      listeners.get('close')?.(0, null);
+      listeners.clear();
+
+      const exitEvent = await waitFor(() => getLaneEvents(lane.id, 200)
+        .filter((event) => event.verb === 'runtime_process_exit')[exitCountBefore]);
+      expect(exitEvent?.payload).toMatchObject({
+        inputTokens,
+        cacheReadTokens: contextTokens - inputTokens,
+        contextTokens,
+      });
+      expect(exitEvent?.payload).not.toHaveProperty('toolName', 'Skill');
+      expect(contextTokens).toBeLessThan(50_000);
+
+      const synced = await syncOrchestratorControlPlaneState();
+      expect(synced.packets[0]?.contextTelemetry).toMatchObject({
+        inputTokens,
+        cacheReadTokens: contextTokens - inputTokens,
+        contextTokens,
+        contextDeltaTokens: turnIndex === 0
+          ? null
+          : contextTokens - contextByTurn[turnIndex - 1]!,
+      });
+    }
   }, 30_000);
 
   it('fails the persisted dispatch path before spawn when no live credential can be seeded', async () => {

@@ -58,6 +58,14 @@ function fullPacketFixture() {
       capHit: false,
       updatedAt: '2026-01-01T00:00:00.000Z',
     },
+    contextTelemetry: {
+      inputTokens: 203,
+      cacheReadTokens: 40_448,
+      contextTokens: 40_651,
+      contextDeltaTokens: 1_024,
+      sourceEventId: 'event-context-1',
+      observedAt: '2026-01-01T00:00:30.000Z',
+    },
     blockedReason: 'operator_stopped',
     storageAdmission: {
       schema: 'o8/packet-storage-admission/v1',

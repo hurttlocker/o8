@@ -5,8 +5,9 @@ import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
 import { getLaneEvents, listLanes } from '@/lib/lane/registry';
 import { recoveryInfoFromLaneEvents } from '@/lib/lane/recovery-info';
 import type { Lane, LaneEvent } from '@/lib/lane/types';
-import type { DomainLaneSummary } from '@/lib/orchestrator/store';
+import type { DomainLaneSummary } from '@/lib/orchestrator/domain-lane-summary';
 import type { OrchestratorMissionState, OrchestratorRuntimeTruth } from '@/lib/orchestrator/types';
+import { packetContextObservationFromEvent } from '@/lib/orchestrator/packet-context-telemetry';
 import {
   createEmptyOrchestratorMissionState,
   normalizeOrchestratorMissionState,
@@ -201,6 +202,7 @@ export function buildDomainLaneSummaries(): DomainLaneSummary[] {
       const events = getLaneEvents(lane.id, 100);
       const recovery = recoveryInfoFromLaneEvents(events);
       const runtimeExited = hasUnreconciledRuntimeExit(lane, events);
+      const contextEvent = events.findLast((event) => event.verb === 'runtime_process_exit');
       return {
         laneId: lane.id,
         packetId: lane.packetId!,
@@ -208,6 +210,7 @@ export function buildDomainLaneSummaries(): DomainLaneSummary[] {
         sessionKey: lane.sessionKey,
         lastEventLabel: runtimeExited ? 'runtime_process_exit' : lane.lastEventLabel,
         recovery,
+        contextObservation: contextEvent ? packetContextObservationFromEvent(contextEvent) : undefined,
         mergeMode: mergePolicy.mode,
         mergeModeNote: mergePolicy.note,
       };

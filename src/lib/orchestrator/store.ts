@@ -1,9 +1,10 @@
-import type { LaneMergeMode } from '@/lib/lane/merge-mode';
 import { normalizeClaudeCodePacketPins, normalizeDecompositionMetadata, normalizePacketDispatcher, normalizePacketLaunchContext, normalizePacketTaskContractFields, normalizePacketType } from '@/lib/orchestrator/normalize/decomposition';
 import { normalizeRuntimeStatusToOrchestratorStatus } from '@/lib/orchestrator/runtime-status';
 import { runtimeTruthHasActiveWriter } from '@/lib/orchestrator/runtime-truth';
 import { normalizePacketRecovery } from '@/lib/lane/recovery-info';
 import { normalizePacketSpendCap, normalizePacketSpendTelemetry } from '@/lib/orchestrator/metered-spend';
+import { normalizePacketContextTelemetry, reconcilePacketContextTelemetry } from '@/lib/orchestrator/packet-context-telemetry';
+import type { DomainLaneSummary } from '@/lib/orchestrator/domain-lane-summary';
 import { normalizeQualitySearchPacketState } from '@/lib/orchestrator/quality-search';
 import { normalizePacketStorageAdmission, normalizePacketStorageAdmissionEpoch } from '@/lib/orchestrator/packet-storage-admission-normalize';
 import { normalizeLaneBinding } from '@/lib/orchestrator/lane-binding';
@@ -35,6 +36,7 @@ import {
 } from '@/lib/orchestrator/packet-release-truth';
 import { normalizeReleaseStatePayload } from '@/lib/orchestrator/release-state-payload';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+export type { DomainLaneSummary } from '@/lib/orchestrator/domain-lane-summary';
 function normalizeRuntime(value: unknown): OrchestratorRuntime {
   return isDispatchableRuntime(value) ? value : 'codex';
 }
@@ -360,6 +362,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     launchAttempts: normalizeAttemptCount(packet.launchAttempts),
     operatorStopped: packet.operatorStopped === true ? true : undefined,
     spendCap: normalizePacketSpendCap(packet.spendCap), spendTelemetry: normalizePacketSpendTelemetry(packet.spendTelemetry),
+    contextTelemetry: normalizePacketContextTelemetry(packet.contextTelemetry),
     // Huddle mode (per-mission alignment turn) lives only on the packet — drop
     // it here and a rerun/re-read would silently disarm the huddle.
     huddle: typeof packet.huddle === 'boolean' ? packet.huddle : undefined,
@@ -899,26 +902,6 @@ export function packetReleaseBlockedBy(packet: OrchestratorPacket, packets: Orch
     ?? null;
 }
 
-export interface DomainLaneSummary {
-  laneId: string;
-  packetId: string;
-  status: string;
-  sessionKey: string | null;
-  lastEventLabel: string | null;
-  recovery?: OrchestratorPacket['recovery'];
-  // Carried through for the footer merge beacon (parked-lane popover rows +
-  // click-to-repoint). Optional — older callers don't set them.
-  branch?: string;
-  repoPath?: string;
-  label?: string;
-  // Merge policy (#1367) — stamped server-side in buildDomainLaneSummaries so
-  // review cards reading missionState (not /api/lanes) can hide the doomed
-  // Merge button in PR-only mode. Live-hit 2026-07-04: the chat banner rendered
-  // Approve & merge because only the lanes route carried the policy.
-  mergeMode?: LaneMergeMode;
-  mergeModeNote?: string | null;
-}
-
 export function reconcileOrchestratorMissionState(
   state: OrchestratorMissionState,
   inputs: {
@@ -934,9 +917,9 @@ export function reconcileOrchestratorMissionState(
   const laneByPacketId = new Map(inputs.laneSnapshots.flatMap((snapshot) => snapshot.packetId ? [[snapshot.packetId, snapshot] as const] : []));
   const runtimeTruthBySession = new Map(inputs.runtimeTruth.map((truth) => [truth.sessionKey, truth] as const));
   // ── Lane domain model (passed from server-side caller) ──
-  const domainLaneByPacketId: Map<string, { status: string; sessionKey: string | null; laneId: string; lastEventLabel: string | null; recovery?: OrchestratorPacket['recovery']; mergeMode?: LaneMergeMode; mergeModeNote?: string | null }> | null =
+  const domainLaneByPacketId: Map<string, DomainLaneSummary> | null =
     inputs.domainLanes && inputs.domainLanes.length > 0
-      ? new Map(inputs.domainLanes.map((dl) => [dl.packetId, { status: dl.status, sessionKey: dl.sessionKey, laneId: dl.laneId, lastEventLabel: dl.lastEventLabel, recovery: dl.recovery, mergeMode: dl.mergeMode, mergeModeNote: dl.mergeModeNote }]))
+      ? new Map(inputs.domainLanes.map((domainLane) => [domainLane.packetId, domainLane]))
       : null;
   const reconciledPackets = packets.map((packet) => {
     const dependency = packetReleaseBlockedBy(packet, packets);
@@ -952,6 +935,7 @@ export function reconcileOrchestratorMissionState(
     const next: OrchestratorPacket = {
       ...packet,
       recovery: domainLane?.recovery ?? packet.recovery ?? null,
+      contextTelemetry: reconcilePacketContextTelemetry(packet.contextTelemetry, domainLane?.contextObservation),
       lane: laneMatch
         ? {
             tileId: laneMatch.tileId,
