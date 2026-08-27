@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, type SQL } from 'drizzle-orm';
+import { and, desc, eq, gte, or, type SQL } from 'drizzle-orm';
 import {
   buildApprovalContextMatchPredicate, extractApprovalContextIds,
   isOrchestratorReviewApproval,
@@ -626,14 +626,20 @@ export function recordOrchestratorReview(
     .select()
     .from(approvalsTable)
     .where(and(
-      eq(approvalsTable.status, 'pending'),
+      or(
+        eq(approvalsTable.status, 'pending'),
+        eq(approvalsTable.status, 'approved'),
+      ),
       eq(approvalsTable.toolName, 'orchestrator_review'),
     ))
     .orderBy(desc(approvalsTable.updatedAt))
     .all()
     .map((row) => mapApprovalRow(row)!)
     .filter((candidate): candidate is ApprovalRecord => candidate !== null)
-    .find((candidate) => isOrchestratorReviewApproval(candidate, normalizedPacketId, lane?.id ?? null)) ?? null;
+    .find((candidate) => (
+      candidate.args?.reviewSuperseded !== true
+      && isOrchestratorReviewApproval(candidate, normalizedPacketId, lane?.id ?? null)
+    )) ?? null;
 
   const shouldInsert = !approval;
   if (!approval) {
@@ -676,7 +682,8 @@ export function recordOrchestratorReview(
     audit: [...approval.audit, reviewEvent],
   };
   let nextApproval = reviewedApproval;
-  if (normalizedReview.approved && allFindingsResolved(normalizedReview.findings) && reviewedApproval.status === 'pending') {
+  const reviewAuthorizes = normalizedReview.approved && allFindingsResolved(normalizedReview.findings);
+  if (reviewAuthorizes && reviewedApproval.status === 'pending') {
     const resolvedAt = Date.now();
     const reviewerLabel = normalizedReview.reviewer ? ` by ${normalizedReview.reviewer}` : '';
     nextApproval = {
@@ -693,6 +700,18 @@ export function recordOrchestratorReview(
         ...reviewedApproval.audit,
         auditEvent('approved', 'orchestrator', `Auto-approved after orchestrator review${reviewerLabel}.`),
       ],
+    };
+  } else if (!reviewAuthorizes && reviewedApproval.status === 'approved') {
+    const note = normalizedReview.approved
+      ? 'Returned to pending because unresolved findings remain.'
+      : 'Returned to pending because the review verdict requested changes.';
+    nextApproval = {
+      ...reviewedApproval,
+      status: 'pending',
+      updatedAt: Date.now(),
+      resolvedAt: undefined,
+      resolution: undefined,
+      audit: [...reviewedApproval.audit, auditEvent('updated', 'orchestrator', note)],
     };
   }
 

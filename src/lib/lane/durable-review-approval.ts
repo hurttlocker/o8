@@ -1,4 +1,5 @@
-import type { ApprovalRecord } from '@/lib/approvals/types';
+import type { ApprovalRecord, OrchestratorReviewFinding } from '@/lib/approvals/types';
+import { allFindingsResolved } from '@/lib/approvals/orchestrator-review';
 import { resolveLaneAttributionBase } from '@/lib/lane/attribution-base';
 import type { Lane } from '@/lib/lane/types';
 import type { ContractCoverageResult } from '@/lib/orchestrator/task-contract-coverage';
@@ -34,6 +35,21 @@ function reviewedHeadForApproval(approval: ApprovalRecord): string | undefined {
   }
 
   return approval.metadata?.['Reviewed HEAD'];
+}
+
+function reviewVerdictTimestamp(approval: ApprovalRecord): number {
+  for (let index = approval.audit.length - 1; index >= 0; index -= 1) {
+    const event = approval.audit[index];
+    if (event?.type === 'orchestrator_review') return event.timestamp;
+  }
+  return approval.updatedAt;
+}
+
+function reviewFindingsAreResolved(approval: ApprovalRecord): boolean {
+  const findings = approval.args?.findings;
+  if (findings === undefined) return true;
+  if (!Array.isArray(findings)) return false;
+  return allFindingsResolved(findings as OrchestratorReviewFinding[]);
 }
 
 
@@ -180,16 +196,15 @@ export async function assessDurableApprovedReview(
       sessionKey: lane.sessionKey ?? undefined,
       projectId: null,
     });
-    const approved = approvals.filter(
+    const completedReviews = approvals.filter(
       (approval) => (
         approval.toolName === 'orchestrator_review'
-        && approval.status === 'approved'
         && approval.args?.reviewSuperseded !== true
         && typeof approval.args?.reviewTurnId === 'string'
         && approval.args.reviewTurnOutcome === 'completed'
       ),
     );
-    if (approved.length === 0) {
+    if (completedReviews.length === 0) {
       return { approved: false, diffBudgetWaived: false, highConfidence: false, approvalId: null, reason: 'No durable approved AI review exists.' };
     }
 
@@ -204,16 +219,25 @@ export async function assessDurableApprovedReview(
     }
     if (!currentHead) return { approved: false, diffBudgetWaived: false, highConfidence: false, approvalId: null, reason: 'Current HEAD is unavailable.' };
 
-    const matchingHead = approved.filter((approval) => {
+    const matchingHead = completedReviews.filter((approval) => {
       const reviewed = normalizeHeadSha(reviewedHeadForApproval(approval));
       return reviewed !== undefined && reviewed === currentHead;
-    });
-    const diffBudgetWaived = matchingHead.some(carriesAcceptedFinding);
-    const matching = matchingHead.find((approval) => (
-      !(approval.args?.requiresSecondPass === true && approval.args?.secondPassAgreed !== true)
+    }).sort((left, right) => (
+      reviewVerdictTimestamp(right) - reviewVerdictTimestamp(left)
+      || right.updatedAt - left.updatedAt
+      || right.id.localeCompare(left.id)
     ));
+    const latestReview = matchingHead[0];
+    const diffBudgetWaived = latestReview ? carriesAcceptedFinding(latestReview) : false;
+    const matching = latestReview
+      && latestReview.status === 'approved'
+      && latestReview.args?.approved !== false
+      && reviewFindingsAreResolved(latestReview)
+      && !(latestReview.args?.requiresSecondPass === true && latestReview.args?.secondPassAgreed !== true)
+      ? latestReview
+      : undefined;
     if (!matching) {
-      return { approved: false, diffBudgetWaived, highConfidence: false, approvalId: null, reason: 'The approved AI review does not authorize the current HEAD.' };
+      return { approved: false, diffBudgetWaived, highConfidence: false, approvalId: null, reason: 'The latest AI review does not authorize the current HEAD.' };
     }
 
     // Coverage gate: an approved-looking review cannot authorize a merge unless

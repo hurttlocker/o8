@@ -311,8 +311,9 @@ export async function GET(request: NextRequest) {
         ?? toDurableOrchestratorReview(reviewApproval)
         ?? toLaneEventOrchestratorReview(lane);
     const mergeGate = toMergeGate(mergePreview, lane?.lastEventAt ?? packet.lastEventAt ?? null);
-    const recovery = packet.recovery
-      ?? (lane ? recoveryInfoFromLaneEvents(getLaneEvents(lane.id, 100)) : null);
+    const recovery = packet.releaseState === 'released' || (lane?.status === 'completed' && lane.outcome === 'merged')
+      ? null
+      : packet.recovery ?? (lane ? recoveryInfoFromLaneEvents(getLaneEvents(lane.id, 100)) : null);
     let spokenReview: SpokenReviewBrief | null = null;
     if (includeSpokenReview && spokenDiffFacts && lane) {
       const diffFacts = spokenDiffFacts;
