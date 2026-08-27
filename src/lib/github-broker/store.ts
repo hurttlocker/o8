@@ -458,6 +458,26 @@ export function replaceGitHubPullRequests(repoFullName: string, pulls: GitHubPul
   transaction(pulls);
 }
 
+export function pruneClosedGitHubThreads(
+  repoFullName: string,
+  kind: OutsiderAttentionThreadKind,
+  cutoffIso: string,
+  keepNumbers: number[],
+): number {
+  const table = kind === 'issue' ? 'github_issues' : 'github_pull_requests';
+  const keepClause = keepNumbers.length > 0
+    ? `AND number NOT IN (${keepNumbers.map(() => '?').join(', ')})`
+    : '';
+  const result = getSqlite().prepare(`
+    DELETE FROM ${table}
+    WHERE repo_full_name = ?
+      AND state != 'open'
+      AND datetime(closed_at) < datetime(?)
+      ${keepClause}
+  `).run(repoFullName, cutoffIso, ...keepNumbers);
+  return result.changes;
+}
+
 export function listGitHubIssues(repoFullName: string): GitHubIssueSnapshot[] {
   const sqlite = getSqlite();
   const rows = sqlite.prepare(`
