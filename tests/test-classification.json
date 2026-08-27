@@ -1,9 +1,9 @@
 {
   "schema": "o8/test-classification/v1",
   "generatedBy": "node scripts/classify-tests.mjs --write",
-  "totalTests": 885,
-  "hermeticTests": 569,
-  "resourceOwningTests": 316,
+  "totalTests": 891,
+  "hermeticTests": 574,
+  "resourceOwningTests": 317,
   "resourceOwning": [
     {
       "path": "src/app/api/leases/route.test.ts",
@@ -1844,6 +1844,12 @@
       "reasons": [
         "child-process",
         "git-cli"
+      ]
+    },
+    {
+      "path": "tests/prompt-library-api-real-path.test.ts",
+      "reasons": [
+        "real-path"
       ]
     },
     {
