@@ -355,7 +355,7 @@ export function useWorkspaceTerminalController(
     if (command) {
       pendingCliCommands.current.set(tabId, command);
     }
-    sendTerminalCreate(120, 30, requestId);
+    sendTerminalCreate(120, 30, requestId, undefined, `workspace:${tabId}`);
   }, [sendTerminalCreate]);
 
   useEffect(() => {
@@ -906,23 +906,23 @@ export function useWorkspaceTerminalController(
     if (requestId) pendingRequestRef.current.delete(requestId);
     if (directTabId) pendingSessionsRef.current.delete(directTabId);
 
-    let claimed = false;
-    setTabs((previous) => {
-      const pendingIndex = directTabId
-        ? previous.findIndex((tab) => tab.id === directTabId && tab.kind === 'terminal' && tab.tmuxSession === null)
-        : previous.findIndex((tab) => tab.kind === 'terminal' && tab.tmuxSession === null);
-      if (pendingIndex < 0) return previous;
-      const updated = [...previous];
-      const tab = updated[pendingIndex];
-      updated[pendingIndex] = { ...tab, tmuxSession: sessionName };
-      claimed = true;
-      return updated;
-    });
-    if (!claimed && requestId && directTabId) {
-      sendTerminalDetach(sessionName);
+    const previous = tabsRef.current;
+    const pendingIndex = directTabId
+      ? previous.findIndex((tab) => tab.id === directTabId && tab.kind === 'terminal' && tab.tmuxSession === null)
+      : previous.findIndex((tab) => tab.kind === 'terminal' && tab.tmuxSession === null);
+    if (pendingIndex < 0) {
+      if (requestId && directTabId) sendTerminalDetach(sessionName);
+      return false;
     }
-    return claimed;
-  }, [sendTerminalDetach]);
+    const updated = [...previous];
+    const tab = updated[pendingIndex];
+    updated[pendingIndex] = { ...tab, tmuxSession: sessionName };
+    tabsRef.current = updated;
+    setTabs(updated);
+    // Flush the crash-recovery pointer now, before the 500 ms UI-state debounce.
+    persistTabsNow(updated, activeTabId || updated[pendingIndex]?.id || '');
+    return true;
+  }, [activeTabId, persistTabsNow, sendTerminalDetach]);
 
   const openWorkspaceCliChatSession = useCallback((options: Parameters<TerminalTabHandle['openCliChatSession']>[0]) => {
     const result = computeCliChatSession(options, tabsRef.current, activeTabId);

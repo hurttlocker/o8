@@ -94,7 +94,16 @@ describe('ThemeProvider on a non-macOS shell', () => {
   it('leaves the macOS stamp on the glass path', () => {
     stampHostPlatform('macos');
 
-    expect(render()?.surface).toBe('glass');
+    const theme = render();
+
+    expect(theme?.surface).toBe('glass');
+    expect(document.documentElement.dataset.workspaceGlass).toBe('true');
+    expect(document.documentElement.style.getPropertyValue('--t-terminal-bg')).toBe('transparent');
+    expect(document.documentElement.style.getPropertyPriority('--t-terminal-bg')).toBe('important');
+
+    act(() => theme?.setWorkspaceGlass(false));
+    expect(document.documentElement.dataset.workspaceGlass).toBeUndefined();
+    expect(document.documentElement.style.getPropertyValue('--t-terminal-bg')).not.toBe('transparent');
   });
 
   it('treats an unstamped host (browser, pre-#1743 shell) as macOS', () => {

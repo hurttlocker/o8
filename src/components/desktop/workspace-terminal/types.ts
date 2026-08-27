@@ -281,7 +281,7 @@ export interface WorkspaceTerminalProps {
   canCloseTile?: boolean;
   onCloseTile?: () => void;
   conversationNavigation?: 'tabs' | 'sidebar';
-  sendTerminalCreate: (cols: number, rows: number, requestId?: string) => void;
+  sendTerminalCreate: (cols: number, rows: number, requestId?: string, cwd?: string, ownerKey?: string) => void;
   sendTerminalAttach: (sessionName: string, cols: number, rows: number) => void;
   sendTerminalInput: (sessionName: string, data: string) => void;
   sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;

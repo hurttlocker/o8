@@ -276,7 +276,10 @@ import {
   tmuxSessionExists,
   isDashTerminalSession,
 } from './lib/ws-server/pty-support';
-import { createDashTmuxSessionSync } from './lib/ws-server/dash-terminal-persistence';
+import {
+  createDashTmuxSessionSync,
+  dashSessionNameForOwnerKey,
+} from './lib/ws-server/dash-terminal-persistence';
 import { parseGitWorktreeList, shortHome } from './lib/ws-server/git-worktrees';
 import {
   BACKPRESSURE_LIMIT,
@@ -1550,7 +1553,8 @@ function spawnDashShellPty(
   });
 }
 
-// #6 persistent terminals — opt-in (default OFF). Inlined to avoid threading an
+// #6 persistent terminals — default ON with an explicit operator opt-out.
+// Inlined to avoid threading an
 // import through this 5000-line module; mirrors persistentTerminalsEnabled() in
 // @/lib/terminal/tmux.ts (which carries the test + doc).
 function dashPersistentTerminalsEnabled(): boolean {
@@ -6209,13 +6213,34 @@ function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>)
   const cols = typeof msg.cols === 'number' ? msg.cols : 120;
   const rows = typeof msg.rows === 'number' ? msg.rows : 30;
   const requestId = typeof msg.requestId === 'string' ? msg.requestId : undefined;
+  const ownerSessionName = dashSessionNameForOwnerKey(
+    typeof msg.ownerKey === 'string' ? msg.ownerKey : undefined,
+  );
   // Optional working directory (canvas terminals spawn per-repo). Validated
   // here so a bad path falls back to the default HOME spawn instead of erroring.
   const requestedCwd = typeof msg.cwd === 'string' ? msg.cwd.trim() : '';
   const cwd = requestedCwd && existsSync(requestedCwd) ? requestedCwd : undefined;
 
-  // Only opportunistically reuse orphaned dashboard shells for non-targeted creates.
-  // Explicit request IDs should always receive a fresh tmux session so ownership is deterministic.
+  // A workspace tab carries a stable owner key. Its derived session name is
+  // deterministic, so a create after an app/ws restart adopts the surviving
+  // tmux session instead of reserving a fresh empty shell. The request id is
+  // still per-attempt and exists only to route the acknowledgement to the tab.
+  if (
+    ownerSessionName
+    && (
+      pendingDashSessions.has(ownerSessionName)
+      || terminalAttachments.has(ownerSessionName)
+      || (dashPersistentTerminalsEnabled() && tmuxSessionExists(ownerSessionName))
+    )
+  ) {
+    console.log(`[ws-server] Reusing owned dashboard PTY session: ${ownerSessionName}`);
+    sendTerminal(client, 'created', { sessionName: ownerSessionName, requestId });
+    handleTerminalAttach(client, { sessionName: ownerSessionName, cols, rows });
+    return;
+  }
+
+  // Untargeted legacy creates may opportunistically reuse an orphan. Targeted
+  // creates without an owner key retain the existing fresh-session behavior.
   const existing = findExistingDashSession();
   if (!requestId && existing) {
     console.log(`[ws-server] Reusing existing dashboard PTY session: ${existing}`);
@@ -6224,8 +6249,7 @@ function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>)
     return;
   }
 
-  const shortId = randomUUID().slice(0, 8);
-  const sessionName = `cortex-dash-${shortId}`;
+  const sessionName = ownerSessionName ?? `cortex-dash-${randomUUID().slice(0, 8)}`;
   pendingDashSessions.set(sessionName, { cols, rows, cwd });
   console.log(`[ws-server] Reserved dashboard PTY session: ${sessionName}${cwd ? ` (cwd ${cwd})` : ''}`);
   sendTerminal(client, 'created', { sessionName, requestId });

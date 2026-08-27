@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createDashTmuxSessionSync } from './dash-terminal-persistence';
+import { createDashTmuxSessionSync, dashSessionNameForOwnerKey } from './dash-terminal-persistence';
 
 function input(enabled = true) {
   return {
@@ -96,5 +96,27 @@ describe('dashboard terminal persistence real fallback path', () => {
     })).toBe(true);
     expect(exec).toHaveBeenCalledTimes(4);
     expect(recordHealth).toHaveBeenCalledWith('ready', 'session_created');
+  });
+});
+
+describe('dashSessionNameForOwnerKey', () => {
+  it('gives one durable owner a stable private tmux identity', () => {
+    const first = dashSessionNameForOwnerKey('workspace:terminal-123');
+    const afterRestart = dashSessionNameForOwnerKey('workspace:terminal-123');
+
+    expect(first).toBe(afterRestart);
+    expect(first).toMatch(/^cortex-dash-[a-f0-9]{32}$/);
+    expect(first).not.toContain('terminal-123');
+  });
+
+  it('keeps separate terminal owners separate', () => {
+    expect(dashSessionNameForOwnerKey('workspace:terminal-a'))
+      .not.toBe(dashSessionNameForOwnerKey('workspace:terminal-b'));
+  });
+
+  it('rejects missing and oversized owner keys', () => {
+    expect(dashSessionNameForOwnerKey()).toBeNull();
+    expect(dashSessionNameForOwnerKey('   ')).toBeNull();
+    expect(dashSessionNameForOwnerKey('x'.repeat(513))).toBeNull();
   });
 });

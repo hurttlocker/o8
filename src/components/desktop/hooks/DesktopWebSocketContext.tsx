@@ -55,7 +55,7 @@ function getWsUrl(): string {
 
 interface SharedWsCommands {
   switchSession: (sessionKey: string) => void;
-  sendTerminalCreate: (cols: number, rows: number, requestId?: string) => void;
+  sendTerminalCreate: (cols: number, rows: number, requestId?: string, cwd?: string, ownerKey?: string) => void;
   sendTerminalAttach: (sessionName: string, cols: number, rows: number) => void;
   sendTerminalInput: (sessionName: string, data: string) => void;
   sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;
@@ -243,8 +243,8 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
     wsSend({ type: 'switch-session', sessionKey: key });
   }, [wsSend]);
 
-  const sendTerminalCreate = useCallback((cols: number, rows: number, requestId?: string) => {
-    wsSend({ type: 'terminal-create', cols, rows, requestId });
+  const sendTerminalCreate = useCallback((cols: number, rows: number, requestId?: string, cwd?: string, ownerKey?: string) => {
+    wsSend({ type: 'terminal-create', cols, rows, requestId, cwd, ownerKey });
   }, [wsSend]);
 
   const sendTerminalAttach = useCallback((sessionName: string, cols: number, rows: number) => {
@@ -498,7 +498,7 @@ interface UseSharedDesktopWsResult {
   connectionState: WsConnectionState;
   isConnected: boolean;
   switchSession: (sessionKey: string) => void;
-  sendTerminalCreate: (cols: number, rows: number, requestId?: string) => void;
+  sendTerminalCreate: (cols: number, rows: number, requestId?: string, cwd?: string, ownerKey?: string) => void;
   sendTerminalAttach: (sessionName: string, cols: number, rows: number) => void;
   sendTerminalInput: (sessionName: string, data: string) => void;
   sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;

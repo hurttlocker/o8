@@ -1,6 +1,22 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { recordPersistentTerminalHealth } from '@/lib/terminal/persistence-health';
 import { resolveTmuxBinary } from '@/lib/ws-server/pty-support';
+
+const DASH_TERMINAL_OWNER_KEY_MAX_LENGTH = 512;
+
+/**
+ * Give a durable workspace tab the same tmux identity on every launch.
+ *
+ * The owner key never reaches the process list or tmux metadata. Hashing also
+ * keeps the session name inside tmux's portable character/length envelope.
+ */
+export function dashSessionNameForOwnerKey(rawOwnerKey?: string | null): string | null {
+  const ownerKey = rawOwnerKey?.trim() ?? '';
+  if (!ownerKey || ownerKey.length > DASH_TERMINAL_OWNER_KEY_MAX_LENGTH) return null;
+  const digest = createHash('sha256').update(ownerKey).digest('hex').slice(0, 32);
+  return `cortex-dash-${digest}`;
+}
 
 interface CreateDashTmuxSessionInput {
   enabled: boolean;

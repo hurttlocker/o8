@@ -42,7 +42,7 @@ interface UseDesktopWebSocketResult {
   connectionState: WsConnectionState;
   isConnected: boolean;
   switchSession: (sessionKey: string) => void;
-  sendTerminalCreate: (cols: number, rows: number, requestId?: string, cwd?: string) => void;
+  sendTerminalCreate: (cols: number, rows: number, requestId?: string, cwd?: string, ownerKey?: string) => void;
   sendTerminalAttach: (sessionName: string, cols: number, rows: number) => void;
   sendTerminalInput: (sessionName: string, data: string) => void;
   sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;
@@ -126,9 +126,9 @@ export function useDesktopWebSocket(
   }, [syncRealtimeSubscriptions]);
 
   // Terminal commands
-  const sendTerminalCreate = useCallback((cols: number, rows: number, requestId?: string, cwd?: string) => {
+  const sendTerminalCreate = useCallback((cols: number, rows: number, requestId?: string, cwd?: string, ownerKey?: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'terminal-create', cols, rows, requestId, cwd }));
+      wsRef.current.send(JSON.stringify({ type: 'terminal-create', cols, rows, requestId, cwd, ownerKey }));
     }
   }, []);
 

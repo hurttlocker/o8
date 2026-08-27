@@ -1,9 +1,9 @@
 {
   "schema": "o8/test-classification/v1",
   "generatedBy": "node scripts/classify-tests.mjs --write",
-  "totalTests": 875,
+  "totalTests": 876,
   "hermeticTests": 562,
-  "resourceOwningTests": 313,
+  "resourceOwningTests": 314,
   "resourceOwning": [
     {
       "path": "src/app/api/leases/route.test.ts",
@@ -1191,6 +1191,16 @@
     {
       "path": "tests/dash-gc.test.ts",
       "reasons": [
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "tests/dash-terminal-restart-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path",
         "terminal-tool"
       ]
     },
