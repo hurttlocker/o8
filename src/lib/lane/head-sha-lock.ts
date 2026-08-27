@@ -57,7 +57,7 @@ export function headShaMatches(currentHeadSha: string, expectedHeadSha: string) 
   const current = normalizeHeadSha(currentHeadSha)?.toLowerCase();
   const expected = normalizeHeadSha(expectedHeadSha)?.toLowerCase();
   if (!current || !expected || !isValidHeadSha(current) || !isValidHeadSha(expected)) return false;
-  return current === expected || current.startsWith(expected) || expected.startsWith(current);
+  return current === expected || current.startsWith(expected);
 }
 
 export async function checkExpectedHeadSha(

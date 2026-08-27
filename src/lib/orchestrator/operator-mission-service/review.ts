@@ -163,7 +163,13 @@ async function normalizeSubmittedReviewHead(
       error: 'reviewedHeadSha must be a 7- to 40-character hexadecimal commit SHA.',
     };
   }
-  if (!cwd) return { ok: true, reviewedHeadSha: normalized };
+  if (!cwd) {
+    return {
+      ok: false,
+      code: 'unresolvable_reviewed_head_sha',
+      error: `reviewedHeadSha ${normalized} cannot be verified because the packet has no repository path.`,
+    };
+  }
 
   const resolved = await resolveHeadSha(cwd, normalized);
   if (!resolved) {

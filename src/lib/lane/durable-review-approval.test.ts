@@ -204,7 +204,7 @@ describe('durable review approval governance invariants', () => {
     });
   }, 20_000);
 
-  it('authorizes an approved review persisted with a current abbreviated HEAD', async () => {
+  it('refuses an abbreviated HEAD that bypassed write-time normalization', async () => {
     const repoPath = initRepo();
     const packetId = `pkt-durable-abbreviated-head-${Date.now()}`;
     const lane = createReviewLane(repoPath, packetId);
@@ -218,8 +218,9 @@ describe('durable review approval governance invariants', () => {
     });
 
     await expect(assessDurableApprovedReview(lane)).resolves.toMatchObject({
-      approved: true,
-      reason: 'Current HEAD has a clean, finding-free AI review.',
+      approved: false,
+      approvalId: null,
+      reason: `Review pinned to ${abbreviatedHeadSha} but current HEAD is ${reviewedHeadSha}.`,
     });
   }, 20_000);
 
@@ -349,7 +350,11 @@ describe('durable review approval governance invariants', () => {
       reviewedHeadSha,
       requiresSecondPass: true,
     });
-    expect(await hasDurableApprovedReview(lane)).toBe(false);
+    await expect(assessDurableApprovedReview(lane)).resolves.toMatchObject({
+      approved: false,
+      approvalId: null,
+      reason: 'The latest AI review matches the current HEAD and is awaiting its required second pass.',
+    });
 
     const approval = listApprovalsForContext({ packetId, laneId: lane.id, sessionKey: lane.sessionKey ?? undefined })
       .find((candidate) => candidate.toolName === 'orchestrator_review');

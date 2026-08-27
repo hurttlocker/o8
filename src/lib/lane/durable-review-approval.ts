@@ -186,7 +186,7 @@ export async function assessDurableApprovedReview(
   lane: Pick<Lane, 'id' | 'packetId' | 'sessionKey' | 'worktreePath' | 'repoPath' | 'baseBranch'>,
 ): Promise<DurableReviewAssessment> {
   try {
-    const [{ listApprovalsForContext }, { headShaMatches, normalizeHeadSha, readHeadSha }] = await Promise.all([
+    const [{ listApprovalsForContext }, { normalizeHeadSha, readHeadSha }] = await Promise.all([
       import('@/lib/approvals/store'),
       import('@/lib/lane/head-sha-lock'),
     ]);
@@ -225,8 +225,8 @@ export async function assessDurableApprovedReview(
       || right.id.localeCompare(left.id)
     ));
     const matchingHead = reviewsByRecency.filter((approval) => {
-      const reviewed = normalizeHeadSha(reviewedHeadForApproval(approval));
-      return reviewed !== undefined && headShaMatches(currentHead, reviewed);
+      const reviewed = normalizeHeadSha(reviewedHeadForApproval(approval))?.toLowerCase();
+      return reviewed !== undefined && reviewed === currentHead.toLowerCase();
     });
     const latestReview = matchingHead[0];
     if (!latestReview) {
@@ -242,11 +242,25 @@ export async function assessDurableApprovedReview(
       };
     }
     const diffBudgetWaived = latestReview ? carriesAcceptedFinding(latestReview) : false;
+    if (
+      latestReview.status === 'approved'
+      && latestReview.args?.approved !== false
+      && reviewFindingsAreResolved(latestReview)
+      && latestReview.args?.requiresSecondPass === true
+      && latestReview.args?.secondPassAgreed !== true
+    ) {
+      return {
+        approved: false,
+        diffBudgetWaived,
+        highConfidence: false,
+        approvalId: null,
+        reason: 'The latest AI review matches the current HEAD and is awaiting its required second pass.',
+      };
+    }
     const matching = latestReview
       && latestReview.status === 'approved'
       && latestReview.args?.approved !== false
       && reviewFindingsAreResolved(latestReview)
-      && !(latestReview.args?.requiresSecondPass === true && latestReview.args?.secondPassAgreed !== true)
       ? latestReview
       : undefined;
     if (!matching) {
