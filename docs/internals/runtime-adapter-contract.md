@@ -98,6 +98,47 @@ through `workerMcpServers` on every launch and resume. The packet prompt names
 attached servers only for runtimes whose current adapter advertises one of these
 capabilities. Adapters that omit the capability keep their existing behavior.
 
+### Attaching operator MCP servers to your runtime's workers
+
+[#1750](https://github.com/hurttlocker/o8/issues/1750) lets an operator opt each
+stdio server into worker attachment from Settings → MCP with **Attach to
+supported workers**. The shared controller reads only those opted-in
+operator-owned records; packets and missions cannot contribute server records or
+configuration.
+
+Choose `workerMcpInjection: 'config-file'` when the CLI accepts a per-run MCP
+config path. The shipped file-based adapter adds `--mcp-config <path>` and the
+controller writes that file inside the o8-owned session directory. Choose
+`'config-override'` when the CLI accepts per-invocation configuration overrides.
+The shipped override adapter turns each server into
+`-c mcp_servers.<name>.command=<TOML>`, `.args=<TOML>`, and `.env=<TOML>` flags
+on launch and resume. If the CLI resumes sessions, repeat the attachment in
+`resumeArgs`; otherwise its tools vanish on the first steer.
+
+### Registering the attachment and proving it
+
+Set `workerMcpInjection` on the owned-session adapter. A file adapter consumes
+`workerMcpConfigPath` in `launchArgs`; an override adapter consumes
+`workerMcpServers` in `launchArgs` and, when supported, `resumeArgs`. Add the
+runtime ID to `WORKER_MCP_INJECTION_SUPPORTED_RUNTIMES` in
+`src/lib/mcp/worker-injection.ts`. That gate decides whether the packet prompt
+says servers are attached, so it must match the adapter. The drift assertion in
+`tests/worker-mcp-injection-codex-real-path.test.ts` fails when they disagree;
+extend its adapter list with the new adapter.
+
+The shared path supplies the `{{packetId}}`, `{{worktreePath}}`, `{{branch}}`, and
+`{{laneId}}` environment templating tokens, server-name validation with
+`^[A-Za-z0-9_-]+$`, sandbox command resolution and read-only admission, and the
+`mcp_injected` and `mcp_injection_skipped` lane events.
+
+In the pull request, add a real-path test modeled on the two existing shapes.
+Drive `buildPacketPrompt` and `launch_session` through the real lane command with
+spawn mocked, then assert the emitted argv or config file and the lane events.
+Also run the real CLI with the exact shape the worker receives and show that it
+loads and can use a server. The override adapter was checked with
+`codex mcp list --json -c …` and one `codex exec` turn carrying the worker's exact
+flags. A green unit test of the argument builder is not enough.
+
 ### OpenCode: standalone workers, resident service for the operator only
 
 `src/lib/opencode/owned.ts` passes `--standalone` on both `launchArgs` and
