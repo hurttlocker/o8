@@ -33,6 +33,7 @@ import { ConfirmToastHost, toast } from '@/components/shared/ConfirmToastHost';
 import type { BottomPanelSurfaceKind, ContextualPanelHandle } from '@/components/desktop/ContextualPanel';
 import { LeftHeaderStrip } from '@/components/desktop/shell/LeftHeaderStrip';
 import { WorkspaceHeaderStrip } from '@/components/desktop/shell/WorkspaceHeaderStrip';
+import { requestTerminalModeToggle } from '@/components/desktop/shell/TerminalModePill';
 import { PanelHeaderStrip } from '@/components/desktop/shell/PanelHeaderStrip';
 import { DesktopStatusBar } from '@/components/desktop/DesktopStatusBar';
 import { DesktopCloseCoordinator } from '@/components/desktop/DesktopCloseCoordinator';
@@ -151,6 +152,7 @@ import { createTileRegistry } from './tileRegistry';
 import type { TerminalTabHandle } from '@/components/desktop/workspace-terminal/types';
 import type { SavedChatRepoContext } from '@/lib/llm/chat-history';
 import { retryingLazy } from '@/lib/react/retrying-lazy';
+import { createDashboardChromeKeydownHandler } from './dashboard-chrome-shortcuts';
 
 // Mark the dashboard module load as early as possible. Runs once when the
 // bundle is first parsed, before the React component is even invoked, so
@@ -806,6 +808,8 @@ function DashboardInner() {
     finishedTabCount: number;
     contextRailAvailable: boolean;
     contextRailVisible: boolean;
+    terminalModeActive: boolean;
+    activeWorkspaceSurface: boolean;
   };
   const [workspaceActiveMap, setWorkspaceActiveMap] = useState<Map<string, WorkspaceActivePayload>>(() => new Map());
   const [pendingHistoryRailSessionKey, setPendingHistoryRailSessionKey] = useState<string | null>(null);
@@ -821,6 +825,8 @@ function DashboardInner() {
         finishedTabCount?: number;
         contextRailAvailable?: boolean;
         contextRailVisible?: boolean;
+        terminalModeActive?: boolean;
+        activeWorkspaceSurface?: boolean;
         removed?: boolean;
       }>).detail;
       const id = detail?.workspaceId;
@@ -841,6 +847,8 @@ function DashboardInner() {
           finishedTabCount: typeof detail?.finishedTabCount === 'number' ? detail.finishedTabCount : 0,
           contextRailAvailable: Boolean(detail?.contextRailAvailable),
           contextRailVisible: detail?.contextRailVisible !== false,
+          terminalModeActive: Boolean(detail?.terminalModeActive),
+          activeWorkspaceSurface: Boolean(detail?.activeWorkspaceSurface),
         };
         const previous = current.get(id);
         const sameTabs = previous?.tabs.length === payload.tabs.length
@@ -853,7 +861,9 @@ function DashboardInner() {
         if (previous && previous.label === payload.label && previous.tabId === payload.tabId
           && previous.kind === payload.kind && previous.finishedTabCount === payload.finishedTabCount
           && previous.contextRailAvailable === payload.contextRailAvailable
-          && previous.contextRailVisible === payload.contextRailVisible && sameTabs) return current;
+          && previous.contextRailVisible === payload.contextRailVisible
+          && previous.terminalModeActive === payload.terminalModeActive
+          && previous.activeWorkspaceSurface === payload.activeWorkspaceSurface && sameTabs) return current;
         const next = new Map(current);
         next.set(id, payload);
         return next;
@@ -871,7 +881,13 @@ function DashboardInner() {
       const [only] = workspaceActiveMap.values();
       return only;
     }
-    return { workspaceId: null, label: null, tabId: null, kind: null, tabs: [], finishedTabCount: 0, contextRailAvailable: false, contextRailVisible: false };
+    return { workspaceId: null, label: null, tabId: null, kind: null, tabs: [], finishedTabCount: 0, contextRailAvailable: false, contextRailVisible: false, terminalModeActive: false, activeWorkspaceSurface: false };
+  }, [workspaceActiveMap]);
+  const toggleActiveTerminalMode = useCallback(() => {
+    const workspaces = Array.from(workspaceActiveMap.values());
+    const target = workspaces.find((workspace) => workspace.activeWorkspaceSurface)
+      ?? (workspaces.length === 1 ? workspaces[0] : null);
+    if (target?.workspaceId) requestTerminalModeToggle(target.workspaceId);
   }, [workspaceActiveMap]);
   const activeWorkspaceTabIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
@@ -894,6 +910,7 @@ function DashboardInner() {
       finishedTabCount: payload.finishedTabCount,
       contextRailAvailable: payload.contextRailAvailable,
       contextRailVisible: payload.contextRailVisible,
+      terminalModeActive: payload.terminalModeActive,
     }));
   }, [workspaceActiveMap]);
 
@@ -4507,57 +4524,25 @@ function DashboardInner() {
 
   // ── Power-user chrome shortcuts ──
   // macOS / VS Code conventions, each mapped to a real existing action:
-  //   ⌘T new tab · ⌘, settings · ⌘B left sidebar · ⌘⌥B right panel · ⌘J terminal
+  //   ⌘T new tab · ⌘, settings · ⌘B left sidebar · ⌘⌥B right panel
+  //   ⌘J bottom terminal · ⌘⇧J Terminal Mode
   // Allowed even while typing — these are app-chrome toggles, none emit text,
   // and power users expect them to fire mid-compose (matches VS Code). Placed
   // here (not with the other hotkey effects above) so toggleSettingsOverlay is
   // already defined — referencing it earlier would hit its const TDZ.
   useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey)) return;
-      // ⌘⌥B — toggle right panel. Calls the same handler as the header
-      // button so the panel kind + commit context stay in lockstep. Option
-      // remaps event.key on macOS (⌥B → '∫'), so match the physical key via
-      // event.code. Other Option combos (⌘⌥← / →, handled elsewhere) fall
-      // through untouched.
-      if (event.altKey) {
-        if (event.code === 'KeyB' && !event.shiftKey) {
-          event.preventDefault();
-          handleToggleO8Panel();
-        }
-        // ⌘⌥C — Canvas mode. Same destination as the header button. `event.code`
-        // for the same reason as ⌘⌥B above: Option remaps event.key (⌥C → 'ç').
-        if (event.code === 'KeyC' && !event.shiftKey) {
-          event.preventDefault();
-          window.location.assign('/preview/canvas-glass');
-        }
-        return;
-      }
-      if (event.shiftKey) return;
-      switch (event.key.toLowerCase()) {
-        case 't':
-          event.preventDefault();
-          dispatchSpawn('orchestrator');
-          break;
-        case 'b':
-          event.preventDefault();
-          toggleSidebarFromChrome();
-          break;
-        case 'j':
-          event.preventDefault();
-          toggleContextualPanelTile();
-          break;
-        case ',':
-          event.preventDefault();
-          toggleSettingsOverlay();
-          break;
-        default:
-          break;
-      }
-    };
+    const handler = createDashboardChromeKeydownHandler({
+      openCanvas: () => window.location.assign('/preview/canvas-glass'),
+      openSettings: toggleSettingsOverlay,
+      spawnOrchestrator: () => dispatchSpawn('orchestrator'),
+      toggleBottomPanel: toggleContextualPanelTile,
+      toggleRightPanel: handleToggleO8Panel,
+      toggleSidebar: toggleSidebarFromChrome,
+      toggleTerminalMode: toggleActiveTerminalMode,
+    });
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [dispatchSpawn, handleToggleO8Panel, toggleContextualPanelTile, toggleSettingsOverlay, toggleSidebarFromChrome]);
+  }, [dispatchSpawn, handleToggleO8Panel, toggleActiveTerminalMode, toggleContextualPanelTile, toggleSettingsOverlay, toggleSidebarFromChrome]);
 
   // ── Symon o8-control: `o8:ui-command` → open a named o8 surface ──
   // The voice agent's `o8_ui_open` tool emits this (src-tauri/src/agent/tools/
@@ -4958,6 +4943,14 @@ function DashboardInner() {
                 ?? workspaceTerminalPreferredRepo?.name
                 ?? null;
 
+              items.push({
+                id: 'workspace:terminal-mode',
+                title: 'Toggle Terminal Mode',
+                detail: 'Show the active workspace terminal full-bleed',
+                shortcut: '⌘⇧J',
+                onActivate: toggleActiveTerminalMode,
+              });
+
               for (const repoEntry of globalRepoEntries) {
                 items.push({
                   id: `repo:focus:${repoEntry.id}`,
@@ -5357,6 +5350,7 @@ function DashboardInner() {
           headerLabel={workspaceHeaderActive.label}
           headerTabs={workspaceHeaderActive.tabs}
           workspaceId={workspaceHeaderActive.workspaceId}
+          terminalModeActive={workspaceHeaderActive.terminalModeActive}
           headerActiveTabId={workspaceHeaderActive.tabId}
           finishedTabCount={workspaceHeaderActive.finishedTabCount}
           splitHeaderWorkspaces={splitHeaderWorkspaces}

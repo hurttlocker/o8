@@ -10,12 +10,40 @@ import {
 } from '@/lib/orchestrator/outside-worker-split';
 import { useSessionTiles } from './use-session-tiles';
 
-vi.mock('@/components/desktop/workspace-terminal/XtermPanel', () => ({
-  XtermPanel: ({ tmuxSession }: { tmuxSession: string }) => createElement('div', { 'data-tmux-session': tmuxSession }),
-}));
+const xtermMockState = vi.hoisted(() => ({ mounts: 0 }));
+
+vi.mock('@/components/desktop/workspace-terminal/XtermPanel', async () => {
+  const { createElement: mockCreateElement, useEffect } = await import('react');
+  return {
+    XtermPanel: ({
+      tmuxSession,
+      visible,
+      sendTerminalAttach,
+      sendTerminalDetach,
+    }: {
+      tmuxSession: string;
+      visible: boolean;
+      sendTerminalAttach: (session: string, cols: number, rows: number) => void;
+      sendTerminalDetach: (session: string) => void;
+    }) => {
+      useEffect(() => {
+        xtermMockState.mounts += 1;
+        sendTerminalAttach(tmuxSession, 120, 30);
+        return () => sendTerminalDetach(tmuxSession);
+      }, [sendTerminalAttach, sendTerminalDetach, tmuxSession]);
+      return mockCreateElement('div', {
+        'data-tmux-session': tmuxSession,
+        'data-visible': visible ? 'true' : 'false',
+      });
+    },
+  };
+});
 
 vi.mock('@/components/desktop/workspace-terminal/WorkspaceChatPane', () => ({
-  WorkspaceChatPane: () => null,
+  WorkspaceChatPane: ({ tab, active }: { tab: TerminalTab; active: boolean }) => createElement('div', {
+    'data-chat-tab': tab.id,
+    'data-active': active ? 'true' : 'false',
+  }),
 }));
 
 vi.mock('@/components/desktop/workspace-terminal/workspace-boot-loader-claim', () => ({
@@ -88,6 +116,7 @@ describe('WorkspaceTerminalPanels resident surface budget', () => {
 
   beforeEach(() => {
     resetOutsideWorkerSplitsForTest();
+    xtermMockState.mounts = 0;
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -105,6 +134,42 @@ describe('WorkspaceTerminalPanels resident surface budget', () => {
 
     expect(container.querySelectorAll('[data-tmux-session]')).toHaveLength(3);
     expect(container.querySelector('[data-tmux-session="tmux-0"]')).not.toBeNull();
+  });
+
+  it('enters and exits Terminal Mode 100 times without replacing the resident XtermPanel', async () => {
+    const previousTab = {
+      id: 'chat-before-mode',
+      label: 'Coding session',
+      kind: 'chat',
+      tmuxSession: null,
+      chatRuntime: 'codex',
+      createdAt: 1,
+      lastActivity: 1,
+    } satisfies TerminalTab;
+    const terminal = terminalTab(1);
+    const props = panelProps([previousTab, terminal]);
+    const renderActive = (effectiveActiveTabId: string) => root.render(createElement(WorkspaceTerminalPanels, {
+      ...props,
+      effectiveActiveTabId,
+    }));
+
+    await act(async () => renderActive(previousTab.id));
+    expect(xtermMockState.mounts).toBe(1);
+    expect(props.sendTerminalAttach).toHaveBeenCalledOnce();
+    props.sendTerminalAttach.mockClear();
+    props.sendTerminalDetach.mockClear();
+
+    for (let index = 0; index < 100; index += 1) {
+      await act(async () => renderActive(terminal.id));
+      await act(async () => renderActive(previousTab.id));
+    }
+
+    expect(xtermMockState.mounts).toBe(1);
+    expect(container.querySelectorAll('[data-tmux-session="tmux-1"]')).toHaveLength(1);
+    expect(container.querySelector('[data-tmux-session="tmux-1"]')?.getAttribute('data-visible')).toBe('false');
+    expect(container.querySelector('[data-chat-tab="chat-before-mode"]')?.getAttribute('data-active')).toBe('true');
+    expect(props.sendTerminalAttach).not.toHaveBeenCalled();
+    expect(props.sendTerminalDetach).not.toHaveBeenCalled();
   });
 
   it('closes an automatic outside-worker host after its last durable leaf retires', async () => {

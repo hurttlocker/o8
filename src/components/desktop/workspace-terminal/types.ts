@@ -16,6 +16,7 @@ import type {
   DetectedLocalhostPreview,
   PreviewSelectionPayload,
 } from '@/lib/panel/preview';
+import type { WorkspaceAttachedTerminalSession } from '@/components/desktop/workspace-terminal/terminal-mode';
 
 export interface RegisteredRepo {
   name: string;
@@ -262,6 +263,8 @@ export interface WorkspaceTerminalProps {
   splitCreated?: boolean;
   availableRepos?: RegisteredRepo[];
   openRepoPaths?: string[];
+  /** Live runtime terminals available for exact session-key attachment. */
+  attachedTerminalSessions?: WorkspaceAttachedTerminalSession[];
   onActiveChatSessionChange?: (sessionKey: string | null) => void;
   onActiveTabKindChange?: (kind: TerminalTab['kind'] | null, tabId: string) => void;
   onChatSessionsChange?: (sessions: MobileInboxSnapshot['sessions']) => void;

@@ -23,6 +23,8 @@ import { ApprovalInboxBadge } from '../title-bar/ApprovalInboxBadge';
 import { IconColumns, IconTerminal } from '../title-bar/icons';
 import { RightPanelMorphButton } from '../title-bar/RightPanelMorphButton';
 import { CanvasModeButton } from '../title-bar/CanvasModeButton';
+import { TerminalModePill } from './TerminalModePill';
+import { SplitPaneCloseButton } from './SplitPaneCloseButton';
 
 /** Right-edge inset that lands the header's rightmost control on the branch rail
  *  capsule's centre, one row below. Measured, not guessed.
@@ -87,6 +89,7 @@ interface WorkspaceHeaderStripProps {
   }>;
   /** Stable workspace id for routing header pill events back to the owning tile. */
   workspaceId?: string | null;
+  terminalModeActive?: boolean;
   /** Active tab id from the headerTabs list — drives which pill renders
    *  as filled. */
   headerActiveTabId?: string | null;
@@ -108,6 +111,7 @@ interface WorkspaceHeaderStripProps {
     finishedTabCount?: number;
     contextRailAvailable?: boolean;
     contextRailVisible?: boolean;
+    terminalModeActive?: boolean;
   }> | null;
 }
 
@@ -127,6 +131,7 @@ export function WorkspaceHeaderStrip({
   headerLabel,
   headerTabs,
   workspaceId,
+  terminalModeActive = false,
   headerActiveTabId,
   finishedTabCount = 0,
   projectContextRailAvailable = false,
@@ -196,6 +201,7 @@ export function WorkspaceHeaderStrip({
             {showApprovalBadge && onOpenInbox ? (
               <ApprovalInboxBadge count={approvalCount} onClick={onOpenInbox} />
             ) : null}
+            {workspaceId ? <TerminalModePill active={terminalModeActive} workspaceId={workspaceId} /> : null}
             {onToggleBottomPanel ? (
               <HeaderIconPill
                 icon={<IconTerminal />}
@@ -264,6 +270,7 @@ function SplitHeaderPillStrips({
     finishedTabCount?: number;
     contextRailAvailable?: boolean;
     contextRailVisible?: boolean;
+    terminalModeActive?: boolean;
   }>;
 }) {
   const dispatchSpawn = useCallback((workspaceId: string, kind: 'orchestrator' | 'chat' | 'terminal') => {
@@ -312,6 +319,7 @@ function SplitHeaderPillStrips({
               />
             </div>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2, paddingLeft: 4, paddingRight: 6, flexShrink: 0 }}>
+              <TerminalModePill active={workspace.terminalModeActive === true} workspaceId={workspace.workspaceId} paneLabel={paneLabel(index)} />
               {workspace.contextRailAvailable ? (
                 <HeaderIconPill
                   icon={<IconInfoCircle />}
@@ -335,39 +343,6 @@ function SplitHeaderPillStrips({
         );
       })}
     </div>
-  );
-}
-
-function SplitPaneCloseButton({ onClick, paneLabel }: { onClick: () => void; paneLabel?: string }) {
-  const [hovered, setHovered] = useState(false);
-  return (
-    <button
-      type="button"
-      data-no-drag
-      onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      aria-label={paneLabel ? `Close split (${paneLabel})` : 'Close split'}
-      title="Close split"
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: 22,
-        height: 22,
-        borderRadius: 6,
-        borderWidth: 0,
-        background: hovered ? 'var(--t-hover)' : 'transparent',
-        color: hovered ? 'var(--t-text)' : 'var(--t-text-secondary)',
-        cursor: 'pointer',
-        padding: 0,
-        transition: 'background 120ms ease, color 120ms ease',
-      }}
-    >
-      <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-        <path d="M6 6l12 12M18 6L6 18" />
-      </svg>
-    </button>
   );
 }
 
