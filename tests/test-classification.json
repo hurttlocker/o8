@@ -1,9 +1,9 @@
 {
   "schema": "o8/test-classification/v1",
   "generatedBy": "node scripts/classify-tests.mjs --write",
-  "totalTests": 862,
+  "totalTests": 863,
   "hermeticTests": 555,
-  "resourceOwningTests": 307,
+  "resourceOwningTests": 308,
   "resourceOwning": [
     {
       "path": "src/app/api/leases/route.test.ts",
@@ -419,6 +419,7 @@
     {
       "path": "src/lib/runtime/interrupt-escalation.test.ts",
       "reasons": [
+        "child-process",
         "process-signal",
         "terminal-tool"
       ]
@@ -1428,6 +1429,13 @@
       ]
     },
     {
+      "path": "tests/live-process-guard-deletion-seam.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal"
+      ]
+    },
+    {
       "path": "tests/live-runtime-zero-diff-guard.test.ts",
       "reasons": [
         "child-process",
@@ -1620,7 +1628,9 @@
         "executable-fixture",
         "git-cli",
         "network-listener",
-        "real-path"
+        "process-signal",
+        "real-path",
+        "terminal-tool"
       ]
     },
     {
@@ -2104,6 +2114,7 @@
       "path": "tests/test-gate-runner-real-path.test.ts",
       "reasons": [
         "child-process",
+        "process-signal",
         "real-path"
       ]
     },

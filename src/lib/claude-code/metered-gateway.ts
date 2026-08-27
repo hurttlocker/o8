@@ -117,7 +117,7 @@ async function enforceCap(registration: Registration): Promise<boolean> {
         sessionKey: registration.session.surfaceId,
         stage: step.mechanism,
         pid: interrupted?.pid,
-        confirmed: !step.aliveAfter,
+        confirmed: step.confirmedDead,
         source: 'spend_cap_hit',
       });
     }

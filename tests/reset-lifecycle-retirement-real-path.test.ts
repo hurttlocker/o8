@@ -199,7 +199,7 @@ describe('reset lifecycle retirement through the operator route', () => {
     });
     const calls = fixture.readLog();
     const releaseIndex = calls.findIndex((call) => call.startsWith('opencode api delete /api/debug/location?'));
-    const removalProbeIndex = calls.findIndex((call) => call.startsWith('lsof -a -d cwd'));
+    const removalProbeIndex = calls.findIndex((call) => call.startsWith('lsof -nP -d cwd'));
     expect(releaseIndex).toBeGreaterThanOrEqual(0);
     expect(removalProbeIndex).toBeGreaterThan(releaseIndex);
   });

@@ -26,6 +26,10 @@ const files = filters.length === 0
   : allFiles.filter((path) => filters.some((filter) => path === filter || path.includes(filter)));
 const RETAIN_RECEIPT = '.o8-test-run-retain.json';
 const heartbeatMs = Number(process.env.O8_TEST_GATE_HEARTBEAT_MS || 60_000);
+const configuredFileTimeoutMs = Number(process.env.O8_TEST_GATE_FILE_TIMEOUT_MS);
+const fileTimeoutMs = Number.isFinite(configuredFileTimeoutMs) && configuredFileTimeoutMs > 0
+  ? configuredFileTimeoutMs
+  : 15 * 60_000;
 let activeChild = null;
 let activeMarker = null;
 let interruptedBy = null;
@@ -60,31 +64,97 @@ function groupAlive(child) {
   try {
     process.kill(-child.pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    return error?.code === 'EPERM';
   }
 }
 
-async function settle(child, marker, firstSignal = 'SIGTERM') {
+function childAlive(child) {
   if (!child?.pid) return false;
+  try {
+    process.kill(child.pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === 'EPERM';
+  }
+}
+
+function remainingTreePids(child, marker, markerState = markerPids(marker)) {
+  const pids = new Set(markerState ?? []);
+  if (groupAlive(child) && child?.pid) pids.add(child.pid);
+  if (markerState === null && child?.pid) pids.add(child.pid);
+  return [...pids].sort((a, b) => a - b);
+}
+
+async function settle(child, marker, firstSignal = 'SIGTERM') {
+  if (!child?.pid) return { confirmed: false, remainingPids: [] };
   for (const [signal, waitMs] of [
     [firstSignal, 500],
     ['SIGTERM', 750],
     ['SIGKILL', 1_000],
   ]) {
     try {
-      if (process.platform === 'win32') child.kill(signal);
-      else process.kill(-child.pid, signal);
+      if (process.platform === 'win32') {
+        spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+          encoding: 'utf8',
+          timeout: 5_000,
+          windowsHide: true,
+        });
+      } else {
+        process.kill(-child.pid, signal);
+      }
     } catch {}
+    if (process.platform === 'win32') {
+      try { child.kill(signal); } catch {}
+    }
     for (const pid of markerPids(marker) ?? []) {
       try { process.kill(pid, signal); } catch {}
     }
     await sleep(waitMs);
+    if (process.platform === 'win32' && !childAlive(child)) {
+      return { confirmed: true, remainingPids: [] };
+    }
     const remaining = markerPids(marker);
-    if (!groupAlive(child) && remaining !== null && remaining.length === 0) return true;
+    if (!groupAlive(child) && remaining !== null && remaining.length === 0) {
+      return { confirmed: true, remainingPids: [] };
+    }
+  }
+  if (process.platform === 'win32') {
+    const alive = childAlive(child);
+    return {
+      confirmed: !alive,
+      remainingPids: alive ? [child.pid] : [],
+    };
   }
   const remaining = markerPids(marker);
-  return !groupAlive(child) && remaining !== null && remaining.length === 0;
+  const confirmed = !groupAlive(child) && remaining !== null && remaining.length === 0;
+  return {
+    confirmed,
+    remainingPids: confirmed ? [] : remainingTreePids(child, marker, remaining),
+  };
+}
+
+function timeoutSeconds(timeoutMs) {
+  const seconds = timeoutMs / 1_000;
+  return Number.isInteger(seconds) ? String(seconds) : seconds.toFixed(1);
+}
+
+function writeTimeoutReceipt(fixtureRoot, file, timeoutMs) {
+  const receiptPath = join(fixtureRoot, RETAIN_RECEIPT);
+  try {
+    writeFileSync(receiptPath, `${JSON.stringify({
+      retainedAt: new Date().toISOString(),
+      reason: 'test_gate_file_timeout',
+      file,
+      timeoutMs,
+    })}\n`, { flag: 'wx' });
+    return receiptPath;
+  } catch (error) {
+    console.error(
+      `[integration-gate] could not write timeout receipt for ${file}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return null;
+  }
 }
 
 function retainedReceipts(directory, results = []) {
@@ -119,8 +189,25 @@ function appendBounded(current, chunk, limit = 2 * 1024 * 1024) {
   return next.length <= limit ? next : next.slice(next.length - limit);
 }
 
+/**
+ * Base for per-file fixture roots.
+ *
+ * NOT `os.tmpdir()`. On macOS that resolves to a 49-character
+ * `/var/folders/<...>/T/` path, and the fixture root nests twice more before a
+ * child process gets to create anything: the gate's own directory, then the
+ * suite's `o8-test-data-run-*` (which `tests/global-test-data-dir.ts` also
+ * assigns to TMPDIR). By the time tsx builds its IPC pipe at
+ * `$TMPDIR/tsx-<uid>/<pid>.pipe` the path is 118 characters, past the 104-char
+ * limit for unix socket paths — so every cross-process test died with
+ * EADDRINUSE before its own logic ran. Measured: a 114-char TMPDIR reproduces
+ * it; the default passes clean.
+ *
+ * A short base keeps the same nesting inside budget (58 characters).
+ */
+const FIXTURE_BASE = process.platform === 'win32' ? tmpdir() : '/tmp';
+
 async function runFile(file, index) {
-  const fixtureRoot = mkdtempSync(join(tmpdir(), 'o8-integration-file-'));
+  const fixtureRoot = mkdtempSync(join(FIXTURE_BASE, 'o8g-'));
   const reportPath = join(fixtureRoot, 'vitest-report.json');
   const marker = randomUUID().replace(/-/g, '');
   const env = {
@@ -155,28 +242,99 @@ async function runFile(file, index) {
   }, Number.isFinite(heartbeatMs) && heartbeatMs > 0 ? heartbeatMs : 60_000);
   heartbeat.unref();
   const outcome = await new Promise((resolve) => {
-    child.once('error', (error) => resolve({ code: 1, signal: null, error }));
-    child.once('exit', (code, signal) => resolve({ code: code ?? 1, signal, error: null }));
+    let decided = false;
+    const finish = (value) => {
+      if (decided) return;
+      decided = true;
+      clearTimeout(hardTimeout);
+      resolve(value);
+    };
+    const hardTimeout = setTimeout(() => {
+      if (decided) return;
+      decided = true;
+      const reason = `timeout after ${timeoutSeconds(fileTimeoutMs)}s`;
+      writeTimeoutReceipt(fixtureRoot, file, fileTimeoutMs);
+      void settle(child, marker).then((treeSettlement) => {
+        if (!treeSettlement.confirmed) {
+          const namedPids = treeSettlement.remainingPids.length > 0
+            ? treeSettlement.remainingPids.join(', ')
+            : String(child.pid ?? 'unknown');
+          console.error(
+            `[integration-gate] TIMEOUT TREE UNCONFIRMED for ${file}; pids still reachable or unverifiable: ${namedPids}`,
+          );
+        }
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        resolve({
+          code: 1,
+          signal: null,
+          error: new Error(reason),
+          timedOut: true,
+          treeSettlement,
+        });
+      }).catch((error) => {
+        const namedPids = remainingTreePids(child, marker);
+        console.error(
+          `[integration-gate] TIMEOUT TREE CLEANUP FAILED for ${file}; pids ${namedPids.join(', ') || child.pid || 'unknown'}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        resolve({
+          code: 1,
+          signal: null,
+          error: new Error(reason),
+          timedOut: true,
+          treeSettlement: { confirmed: false, remainingPids: namedPids },
+        });
+      });
+    }, fileTimeoutMs);
+    child.once('error', (error) => finish({ code: 1, signal: null, error, timedOut: false }));
+    child.once('exit', (code, signal) => finish({
+      code: code ?? 1,
+      signal,
+      error: null,
+      timedOut: false,
+    }));
   });
   clearInterval(heartbeat);
   const markerState = markerPids(marker);
-  const treeSettled = groupAlive(child) || markerState === null || markerState.length > 0
-    ? await settle(child, marker)
-    : true;
-  if (!treeSettled) {
+  const treeSettlement = outcome.treeSettlement ?? (process.platform === 'win32'
+    ? (!childAlive(child)
+        ? { confirmed: true, remainingPids: [] }
+        : await settle(child, marker))
+    : (groupAlive(child) || markerState === null || markerState.length > 0
+        ? await settle(child, marker)
+        : { confirmed: true, remainingPids: [] }));
+  if (!treeSettlement.confirmed) {
     outcome.code = 1;
-    outcome.error = new Error('integration fixture process tree could not be confirmed stopped');
+    const treeError = `integration fixture process tree could not be confirmed stopped; pids: ${treeSettlement.remainingPids.join(', ') || child.pid || 'unknown'}`;
+    outcome.error = new Error(outcome.timedOut && outcome.error
+      ? `${outcome.error.message}; ${treeError}`
+      : treeError);
   }
   if (activeChild === child) {
     activeChild = null;
     activeMarker = null;
   }
   const report = parseReport(reportPath, file);
-  const retained = retainedReceipts(fixtureRoot);
-  if (retained.length === 0) rmSync(fixtureRoot, { recursive: true, force: true });
+  if (outcome.timedOut) {
+    report.failed = Math.max(1, report.failed);
+    report.firstFailure = `${file}: ${outcome.error.message}`;
+  }
+  let retained = retainedReceipts(fixtureRoot);
+  if (outcome.timedOut && retained.length === 0) {
+    writeTimeoutReceipt(fixtureRoot, file, fileTimeoutMs);
+    retained = retainedReceipts(fixtureRoot);
+  }
+  if (retained.length === 0 && !outcome.timedOut) {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  } else if (outcome.timedOut && retained.length === 0) {
+    console.error(`[integration-gate] timeout fixture retained without a readable receipt under ${fixtureRoot}`);
+  }
   const durationMs = Date.now() - startedAt;
   const passed = outcome.code === 0 && !outcome.signal;
-  console.log(`[integration-gate] ${index + 1}/${files.length} ${passed ? 'PASS' : 'FAIL'} ${file} · ${report.passed}/${report.total} passed · ${(durationMs / 1000).toFixed(1)}s`);
+  const failureReason = !passed && outcome.error ? ` · ${outcome.error.message}` : '';
+  console.log(`[integration-gate] ${index + 1}/${files.length} ${passed ? 'PASS' : 'FAIL'} ${file} · ${report.passed}/${report.total} passed · ${(durationMs / 1000).toFixed(1)}s${failureReason}`);
   if (!passed) {
     if (stdout.trim()) process.stdout.write(`${stdout.trimEnd()}\n`);
     if (stderr.trim()) process.stderr.write(`${stderr.trimEnd()}\n`);

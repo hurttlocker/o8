@@ -991,7 +991,9 @@ describe('seam H — reconciled no-commit completion persists an outcome and inb
       packetId,
       label: packetTitle,
     });
-    setLaneStatus(lane.id, 'reviewing', 'system', 'agent_turn_completed');
+    // The real path into `reviewing` is post-completion-packet.ts, which emits
+    // 'agent_completed'; that label is what the durable-launch evidence guard reads.
+    setLaneStatus(lane.id, 'reviewing', 'system', 'agent_completed');
     writeOrchestratorControlPlaneState(createEmptyOrchestratorMissionState());
 
     await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({ merged: 1 });

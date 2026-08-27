@@ -21,6 +21,12 @@ const ensureCodexSubscriptionProxyReadyMock = vi.hoisted(() => vi.fn(async () =>
 const ensureCodexSubscriptionClaudeConfigDirMock = vi.hoisted(() => vi.fn(async (sessionDir: string) =>
   path.join(sessionDir, 'claude-code-codex-config')));
 
+// The native carrier's config dir seeds real Keychain credentials and verifies
+// them with `claude auth status`, which makes routing assertions depend on the
+// operator's live login. Stub it the same way the codex carrier above is stubbed.
+const ensureClaudeCodeWorkerConfigDirMock = vi.hoisted(() => vi.fn(async (sessionDir: string) =>
+  path.join(sessionDir, 'claude-code-worker-config')));
+
 vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/worktree/storage-telemetry')>(),
   measureHostVolume: vi.fn(async () => ({
@@ -59,6 +65,7 @@ vi.mock('@/lib/claude-code/codex-subscription-proxy', async (importOriginal) => 
   ...await importOriginal<typeof import('@/lib/claude-code/codex-subscription-proxy')>(),
   ensureCodexSubscriptionProxyReady: ensureCodexSubscriptionProxyReadyMock,
   ensureCodexSubscriptionClaudeConfigDir: ensureCodexSubscriptionClaudeConfigDirMock,
+  ensureClaudeCodeWorkerConfigDir: ensureClaudeCodeWorkerConfigDirMock,
 }));
 
 vi.mock('@/lib/runtimes/shared/auth-detect', async (importOriginal) => {

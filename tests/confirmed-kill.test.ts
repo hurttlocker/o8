@@ -121,8 +121,8 @@ describe('B. killLaneSessionsConfirmed wiring — events + confirmed signal', ()
       confirmedDead: true,
       alreadyDead: false,
       steps: [
-        { signal: 'SIGINT', mechanism: 'SIGINT', sent: true, aliveAfter: true },
-        { signal: 'SIGTERM', mechanism: 'SIGTERM', sent: true, aliveAfter: false },
+        { signal: 'SIGINT', mechanism: 'SIGINT', sent: true, confirmedDead: false, aliveAfter: true },
+        { signal: 'SIGTERM', mechanism: 'SIGTERM', sent: true, confirmedDead: true, aliveAfter: false },
       ],
       pid: 4321,
       note: 'Worker stopped after SIGTERM.',
@@ -148,9 +148,9 @@ describe('B. killLaneSessionsConfirmed wiring — events + confirmed signal', ()
       confirmedDead: false,
       alreadyDead: false,
       steps: [
-        { signal: 'SIGINT', mechanism: 'SIGINT', sent: true, aliveAfter: true },
-        { signal: 'SIGTERM', mechanism: 'SIGTERM', sent: true, aliveAfter: true },
-        { signal: 'SIGKILL', mechanism: 'SIGKILL', sent: true, aliveAfter: true },
+        { signal: 'SIGINT', mechanism: 'SIGINT', sent: true, confirmedDead: false, aliveAfter: true },
+        { signal: 'SIGTERM', mechanism: 'SIGTERM', sent: true, confirmedDead: false, aliveAfter: true },
+        { signal: 'SIGKILL', mechanism: 'SIGKILL', sent: true, confirmedDead: false, aliveAfter: true },
       ],
       pid: 5555,
       note: 'Worker remained live after SIGINT, SIGTERM, and SIGKILL.',
@@ -176,7 +176,7 @@ describe('B. killLaneSessionsConfirmed wiring — events + confirmed signal', ()
         attempted: true,
         confirmedDead: false,
         alreadyDead: false,
-        steps: [{ signal: 'SIGKILL', mechanism: 'SIGKILL', sent: true, aliveAfter: true }],
+        steps: [{ signal: 'SIGKILL', mechanism: 'SIGKILL', sent: true, confirmedDead: false, aliveAfter: true }],
         pid: 6000 + index,
         note: 'Worker remained live after SIGKILL.',
       } satisfies InterruptEscalationResult);

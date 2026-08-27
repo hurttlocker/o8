@@ -145,7 +145,14 @@ export async function readRegisteredMobileRuntimeTranscript(
   const runtimeId = runtimeIdFromSessionKey(sessionKey);
   const runtime = runtimeId ? getRuntime(runtimeId) : undefined;
   if (!runtime?.capabilities.readTranscript) return null;
-  const entries = await runtime.readTranscript(sessionKey, undefined, limit);
+  // A runtime that declares the capability can still disown an individual
+  // session (an unknown cloud job, say). That is the same "cannot read this"
+  // answer as the check above, not a request failure -- and this helper's
+  // callers render `null` rather than propagating.
+  const entries = await runtime
+    .readTranscript(sessionKey, undefined, limit)
+    .catch(() => null);
+  if (!entries) return null;
   return mobileEntriesFromRuntimeTranscript(entries);
 }
 
@@ -283,7 +290,5 @@ export async function getMobileSessionTranscript(
   }
 
   const runtimeTranscript = await readRegisteredMobileRuntimeTranscript(sessionKey, limit);
-  return runtimeTranscript
-    ? finalizeMobileTranscript(sessionKey, runtimeTranscript, limit)
-    : [];
+  return finalizeMobileTranscript(sessionKey, runtimeTranscript ?? [], limit);
 }

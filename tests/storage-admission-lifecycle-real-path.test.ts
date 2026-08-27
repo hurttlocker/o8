@@ -30,6 +30,7 @@ const {
   readOrchestratorControlPlaneState,
   withLockedState,
 } = await import('@/lib/orchestrator/control-plane');
+const { markPacketReleased } = await import('@/lib/orchestrator/packet-release-truth');
 const { pruneTask } = await import('@/lib/tasks/actions');
 
 const roots: string[] = [dataDir];
@@ -78,7 +79,7 @@ function terminalPacketWithAdmission(input: {
   worktreePath?: string | null;
 }): OrchestratorPacket {
   const recordedAt = Date.now();
-  return {
+  const packet: OrchestratorPacket = {
     id: input.packetId,
     referenceLabel: input.packetId,
     title: input.packetId,
@@ -89,8 +90,8 @@ function terminalPacketWithAdmission(input: {
     dependencyLabels: [],
     dependencyPacketIds: [],
     queueState: 'held',
-    releaseState: 'released',
-    status: 'released',
+    releaseState: 'pending',
+    status: 'awaiting_review',
     storageAdmission: {
       schema: 'o8/packet-storage-admission/v1',
       state: 'reserved',
@@ -117,6 +118,12 @@ function terminalPacketWithAdmission(input: {
       runtime: 'codex',
     },
   };
+  markPacketReleased(packet, {
+    source: 'approve_and_merge',
+    mergeCommit: '0123456789abcdef0123456789abcdef01234567',
+    evidenceKind: 'merge',
+  });
+  return packet;
 }
 
 async function waitFor(check: () => boolean, timeoutMs = 5_000): Promise<void> {
@@ -409,6 +416,7 @@ describe('storage reservation lifecycle real paths', () => {
     };
     packet.status = 'running';
     packet.releaseState = 'pending';
+    packet.releaseStatePayload = null;
 
     await expect(settlePacketStorageBeforeRemoval(packet)).rejects.toThrow(/not terminal/);
     expect(store.getReservation(secondReservationId)?.state).toBe('reserved');

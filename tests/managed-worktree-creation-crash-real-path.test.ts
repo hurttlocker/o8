@@ -210,10 +210,12 @@ describe('managed worktree creation crash recovery', () => {
       { WorktreeManager },
       { probeMetadataLockProcessIdentity, sameMetadataLockProcessIdentity },
       { probeLiveProcessInside },
+      { invalidateProcessCwdSnapshot },
     ] = await Promise.all([
       import('@/lib/worktree/manager'),
       import('@/lib/worktree/metadata-lock-process-identity'),
       import('@/lib/worktree/live-process-guard'),
+      import('@/lib/runtime/process-cwd-snapshot'),
     ]);
     const manager = new WorktreeManager(repoPath);
     const owner = meta.worktrees['packet-creation-crash-recovery']!.creationOwner as {
@@ -228,6 +230,10 @@ describe('managed worktree creation crash recovery', () => {
     await expect(manager.prune(0)).resolves.not.toContain('packet-creation-crash-recovery');
     process.kill(installPid, 'SIGTERM');
     await waitForProcessExit(installPid);
+    // The machine cwd snapshot is cached for up to 15s, so a probe taken before
+    // this exit still reports the pid as live. The process is confirmed gone —
+    // drop the stale snapshot so the assertion reads the world, not the cache.
+    invalidateProcessCwdSnapshot();
     expect(await probeLiveProcessInside(workspacePath)).toMatchObject({ status: 'clear' });
     await expect(manager.prune(0)).resolves.toContain('packet-creation-crash-recovery');
     expect(existsSync(workspacePath)).toBe(false);

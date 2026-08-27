@@ -89,9 +89,9 @@ export async function interruptLaneSessions(lanes: Lane[]): Promise<number> {
  *
  * This reaps each lane's live session through the SIGINT → SIGTERM → SIGKILL
  * escalation ladder (`runtime/interrupt-escalation.ts`, PID-reuse-guarded) and
- * only reports `confirmed` after the process is verified gone (kill(pid,0) →
- * ESRCH). It emits a `kill_escalated` lane event per stage so the operator can
- * audit exactly what ended the worker (payload {stage, pid, confirmed}) — the
+ * only reports `confirmed` after the process group and snapshotted descendants
+ * are verified gone. It emits a `kill_escalated` lane event per stage so the
+ * operator can audit exactly what ended the worker (payload {stage, pid, confirmed}) — the
  * stage names the MECHANISM, which on Windows is a single forced tree-kill on
  * every rung rather than three escalating signals.
  * When even the last rung can't be confirmed, `confirmed:false` bubbles up so
@@ -144,7 +144,7 @@ async function killTargetConfirmed(target: InterruptTarget): Promise<ConfirmedKi
   if (result) {
     const stages: ConfirmedKillStage[] = result.steps.map((step) => ({
       stage: step.mechanism,
-      confirmed: !step.aliveAfter,
+      confirmed: step.confirmedDead,
       pid: result.pid,
     }));
     for (const stage of stages) emit(stage);
@@ -192,7 +192,7 @@ async function killTargetConfirmed(target: InterruptTarget): Promise<ConfirmedKi
       for (const step of escalation.steps) {
         const stage: ConfirmedKillStage = {
           stage: step.mechanism,
-          confirmed: !step.aliveAfter,
+          confirmed: step.confirmedDead,
           pid,
         };
         stages.push(stage);

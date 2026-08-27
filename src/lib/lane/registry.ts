@@ -903,11 +903,11 @@ export function archiveLane(laneId: string, actor: LaneEventActor = 'user', endi
   }
   const ending = resolveArchiveEnding(lane, getLaneEvents(lane.id, 100), endingOverride);
   if (ending.contractViolation) reportMissingArchiveEnding(lane);
-  // Cleanup alone clears worktreePath after proving absence; failures stay retryable.
+  // A failed cleanup keeps its live path retryable; proven absence clears the stale path.
   const updated = updateLane(laneId, {
     status: 'archived',
     ...ending.updates,
-    ...(laneOwnsWorktree(lane) ? {} : { worktreePath: null }),
+    ...(laneOwnsWorktree(lane) && !worktreeIsConfirmedAbsent(lane.worktreePath) ? {} : { worktreePath: null }),
     writerToken: null,
     lastEventAt: nowIso(),
     lastEventLabel: 'archived',

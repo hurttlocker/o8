@@ -296,7 +296,11 @@ describe('problem dossier remedy lifecycle', () => {
       packet.releaseStatePayload = {
         mergeCommit: 'merge-remedy-sha',
         releasedAt: packet.lastEventAt,
-        source: 'review_merge',
+        // `approve_and_merge` is what the real merge path emits. A release
+        // claim whose source is not one hasCanonicalReleaseEvidence accepts is
+        // revoked by clearUnprovenReleaseClaim, so the packet reverted to
+        // `pending` and the dossier never reached provisionally_resolved.
+        source: 'approve_and_merge',
       };
       state.updatedAt = packet.lastEventAt;
     });
@@ -439,7 +443,11 @@ describe('problem dossier remedy lifecycle', () => {
       packet.releaseStatePayload = {
         mergeCommit: 'late-recurrence-release',
         releasedAt: packet.lastEventAt,
-        source: 'review_merge',
+        // `approve_and_merge` is what the real merge path emits. A release
+        // claim whose source is not one hasCanonicalReleaseEvidence accepts is
+        // revoked by clearUnprovenReleaseClaim, so the packet reverted to
+        // `pending` and the dossier never reached provisionally_resolved.
+        source: 'approve_and_merge',
       };
       packet.review = {
         approved: true,

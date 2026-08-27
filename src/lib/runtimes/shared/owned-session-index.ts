@@ -24,6 +24,7 @@ import { listOwnedSessionLifecycles } from './owned-session-lifecycle';
 
 export interface OwnedActiveRun {
   pid?: number;
+  processGroupId?: number;
   tmuxSession?: string;
   commandIdentity?: string;
 }
@@ -120,6 +121,9 @@ async function buildRootIndex(root: string): Promise<RootIndex> {
     index.set(parsed.surfaceId, parsed.activeRun
       ? {
           pid: typeof parsed.activeRun.pid === 'number' ? parsed.activeRun.pid : undefined,
+          processGroupId: typeof parsed.activeRun.processGroupId === 'number'
+            ? parsed.activeRun.processGroupId
+            : undefined,
           tmuxSession: typeof parsed.activeRun.tmuxSession === 'string' ? parsed.activeRun.tmuxSession : undefined,
           commandIdentity: typeof parsed.activeRun.commandIdentity === 'string'
             ? parsed.activeRun.commandIdentity
