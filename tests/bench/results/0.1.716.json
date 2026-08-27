@@ -1,0 +1,112 @@
+{
+  "schema": "o8/benchmark-quick/v1",
+  "version": "0.1.716",
+  "gitSha": "cee70ae21",
+  "timestamp": "2026-08-27T09:58:15.904Z",
+  "durationMs": 51074,
+  "comparedTo": "scorecard-0.1.652-7a1931a46.json",
+  "tracks": {
+    "speed": {
+      "automatable": true,
+      "status": "ok",
+      "metrics": {
+        "time_to_splash_ms": {
+          "value": 77.5,
+          "priorValue": null,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "time_to_reveal_ms": {
+          "value": 4318.1,
+          "priorValue": null,
+          "direction": "lower-better",
+          "threshold": 100,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "boot_api_request_count": {
+          "value": 49,
+          "priorValue": null,
+          "direction": "lower-better",
+          "threshold": 1,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "max_client_queue_stall_ms": {
+          "value": 930,
+          "priorValue": null,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "panel_branches_ms": {
+          "value": 12.5,
+          "priorValue": null,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "runtime_inventory_ms": {
+          "value": 8128.4,
+          "priorValue": null,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "dashboard_cold_ttfb_ms": {
+          "value": 8,
+          "priorValue": 16,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "unchanged",
+          "deltaValue": -8
+        },
+        "dashboard_warm_ttfb_ms": {
+          "value": 8,
+          "priorValue": 11,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "unchanged",
+          "deltaValue": -3
+        },
+        "bootstrap_warm_total_ms": {
+          "value": 2,
+          "priorValue": 22,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "unchanged",
+          "deltaValue": -20
+        },
+        "cli_status_median_ms": {
+          "value": 473,
+          "priorValue": 353,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "regressed",
+          "deltaValue": 120
+        },
+        "mcp_client_minus_server_p50_ms": {
+          "value": 3,
+          "priorValue": null,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "socket_avg_conns": {
+          "value": 11.4,
+          "priorValue": 5.87,
+          "direction": "informational",
+          "threshold": null,
+          "delta": "informational",
+          "deltaValue": null
+        }
+      }
+    }
+  }
+}

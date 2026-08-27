@@ -1,0 +1,292 @@
+{
+  "version": "0.1.716",
+  "gitSha": "cee70ae21",
+  "timestamp": "2026-08-27T10:01:16.121Z",
+  "node": "v22.23.2",
+  "comparedTo": "scorecard-0.1.652-7a1931a46.json",
+  "tracks": {
+    "speed": {
+      "automatable": true,
+      "status": "ok",
+      "metrics": {
+        "time_to_splash_ms": {
+          "value": 74.7,
+          "priorValue": null,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "time_to_reveal_ms": {
+          "value": 7208.7,
+          "priorValue": null,
+          "direction": "lower-better",
+          "threshold": 100,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "boot_api_request_count": {
+          "value": 41,
+          "priorValue": null,
+          "direction": "lower-better",
+          "threshold": 1,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "max_client_queue_stall_ms": {
+          "value": 4360.6,
+          "priorValue": null,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "panel_branches_ms": {
+          "value": 9.2,
+          "priorValue": null,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "runtime_inventory_ms": {
+          "value": 23.4,
+          "priorValue": null,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "dashboard_cold_ttfb_ms": {
+          "value": 8,
+          "priorValue": 16,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "unchanged",
+          "deltaValue": -8
+        },
+        "dashboard_warm_ttfb_ms": {
+          "value": 15,
+          "priorValue": 11,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "unchanged",
+          "deltaValue": 4
+        },
+        "bootstrap_warm_total_ms": {
+          "value": 2,
+          "priorValue": 22,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "unchanged",
+          "deltaValue": -20
+        },
+        "cli_status_median_ms": {
+          "value": 336,
+          "priorValue": 353,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "unchanged",
+          "deltaValue": -17
+        },
+        "mcp_client_minus_server_p50_ms": {
+          "value": 4,
+          "priorValue": null,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "socket_avg_conns": {
+          "value": 9.37,
+          "priorValue": 5.87,
+          "direction": "informational",
+          "threshold": null,
+          "delta": "informational",
+          "deltaValue": null
+        }
+      }
+    },
+    "memory": {
+      "automatable": true,
+      "status": "ok",
+      "sourceResults": "tests/qa-eval/three-way-results-2026-08-02T06-25-16-406Z.json",
+      "metrics": {
+        "overall_full_accuracy": {
+          "value": 0.31315789473684214,
+          "priorValue": 0.31315789473684214,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "unchanged",
+          "deltaValue": 0
+        },
+        "delta_full_vs_strongGrep": {
+          "value": 0.23157894736842108,
+          "priorValue": 0.23157894736842108,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "unchanged",
+          "deltaValue": 0
+        },
+        "ownership_full_accuracy": {
+          "value": 0.51,
+          "priorValue": 0.51,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "unchanged",
+          "deltaValue": 0
+        },
+        "decisions_full_accuracy": {
+          "value": 0.47000000000000003,
+          "priorValue": 0.47000000000000003,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "unchanged",
+          "deltaValue": 0
+        },
+        "processes_full_accuracy": {
+          "value": 0.74,
+          "priorValue": 0.74,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "unchanged",
+          "deltaValue": 0
+        },
+        "incidents_full_accuracy": {
+          "value": 0.2,
+          "priorValue": 0.2,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "unchanged",
+          "deltaValue": 0
+        },
+        "specs_full_accuracy": {
+          "value": 0.06999999999999999,
+          "priorValue": 0.06999999999999999,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "unchanged",
+          "deltaValue": 0
+        },
+        "cross-repo_full_accuracy": {
+          "value": 0.39,
+          "priorValue": 0.39,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "unchanged",
+          "deltaValue": 0
+        },
+        "literal-lookup_full_accuracy": {
+          "value": 0,
+          "priorValue": 0,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "unchanged",
+          "deltaValue": 0
+        }
+      }
+    },
+    "governance": {
+      "automatable": true,
+      "status": "completed with inconclusive reviews",
+      "scopeStatement": "This benchmark measures the AI review tier. It does not measure the human approval gate above it.",
+      "lastRun": {
+        "generatedAt": "2026-08-27T04:08:25.950Z",
+        "reviewerBackendCount": 1,
+        "fixtureCount": 20,
+        "inconclusive": {
+          "total": 20,
+          "planted": 10,
+          "clean": 10
+        },
+        "blindExecution": {
+          "shuffled": true,
+          "groundTruthWithheldFromReviewer": true,
+          "isolatedRepositoryPerInput": true
+        }
+      },
+      "metrics": {
+        "catch_rate": {
+          "value": 0,
+          "priorValue": 1,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "regressed",
+          "deltaValue": -1,
+          "numerator": 0,
+          "denominator": 10
+        },
+        "clean_diffs_blocked": {
+          "value": 0,
+          "priorValue": 0,
+          "direction": "lower-better",
+          "threshold": 0.05,
+          "delta": "unchanged",
+          "deltaValue": 0,
+          "numerator": 0,
+          "denominator": 10
+        },
+        "clean_diffs_with_any_finding": {
+          "value": 0,
+          "priorValue": 0.2,
+          "direction": "lower-better",
+          "threshold": 0.05,
+          "delta": "improved",
+          "deltaValue": -0.2,
+          "numerator": 0,
+          "denominator": 10
+        }
+      }
+    },
+    "coding": {
+      "automatable": false,
+      "status": "ok",
+      "lastRun": {
+        "generatedAt": "2026-08-03T03:38:55.976Z",
+        "protocol": {
+          "seed": 20260802,
+          "paired": true,
+          "conditions": [
+            "codex-raw",
+            "codex-contract",
+            "claude-raw",
+            "claude-contract"
+          ],
+          "judges": [
+            "codex",
+            "claude"
+          ],
+          "turnsPerArm": 1,
+          "repairTurnsPerArm": 0,
+          "armTimeoutSeconds": 2400,
+          "judgeTimeoutSeconds": 1800,
+          "mappingUnsealedAfterAllVerdicts": true,
+          "rawAndTreatmentShareTaskBaseRulesAndBudget": true
+        },
+        "productBarCleared": false
+      },
+      "metrics": {
+        "decisive_contract_wins": {
+          "value": 3,
+          "priorValue": 0,
+          "direction": "higher-better",
+          "threshold": 0,
+          "delta": "improved",
+          "deltaValue": 3,
+          "numerator": 3,
+          "denominator": 6
+        },
+        "contract_excellent_outputs": {
+          "value": 0,
+          "priorValue": 0,
+          "direction": "higher-better",
+          "threshold": 0,
+          "delta": "unchanged",
+          "deltaValue": 0,
+          "numerator": 0,
+          "denominator": 6
+        }
+      }
+    }
+  }
+}
