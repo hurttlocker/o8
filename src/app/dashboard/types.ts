@@ -44,6 +44,8 @@ export interface PaletteAgentSummary {
   status?: string;
   currentTask?: string;
   sessionKey: string;
+  surfaceLabel?: string;
+  tmuxSession?: string;
   alerts?: number;
   approvalStatus?: string;
   isCurrentSession?: boolean;

@@ -52,6 +52,7 @@ export interface XtermPanelProps {
 }
 
 export interface XtermPanelHandle {
+  focus: () => void;
   writeData: (data: string) => void;
   writeRaw: (data: string) => void;
   readText: (lines?: number) => string;
@@ -93,6 +94,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
   const imageCountRef = useRef(0);
 
   useImperativeHandle(ref, () => ({
+    focus: () => termRef.current?.focus(),
     writeData: (data: string) => {
       if (!termRef.current) return;
       if (revealHoldRef.current) {

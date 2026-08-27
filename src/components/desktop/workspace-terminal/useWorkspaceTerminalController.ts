@@ -65,6 +65,8 @@ import {
   computeUpdatedChatSessionKey,
 } from '@/components/desktop/workspace-terminal/terminal-tab-handlers';
 import { useWorkspaceTabCleanup } from '@/components/desktop/workspace-terminal/useWorkspaceTabCleanup';
+import type { WorkspaceAttachedTerminalSession } from '@/components/desktop/workspace-terminal/terminal-mode';
+import { useWorkspaceTabLabelUpdater } from '@/components/desktop/workspace-terminal/use-workspace-tab-label-updater';
 import { recordSpawnEvent, registerIntrospectionContributor } from '@/lib/feedback/workspace-introspect';
 
 type ControllerProps = WorkspaceTerminalProps;
@@ -1009,6 +1011,30 @@ export function useWorkspaceTerminalController(
     return result.activeTabId;
   }, [requestTerminalForTab, setActiveTabIdFromUser]);
 
+  const attachWorkspaceTerminalSession = useCallback((
+    session: WorkspaceAttachedTerminalSession,
+    repo: RegisteredRepo | null,
+  ): string => {
+    const existing = tabsRef.current.find((tab) => (
+      tab.kind === 'terminal' && tab.tmuxSession === session.tmuxSession
+    ));
+    if (existing) return existing.id;
+    const now = Date.now();
+    const newTab: TerminalTab = {
+      id: createWorkspaceTabId('terminal'),
+      label: session.label?.trim() || 'Terminal',
+      kind: 'terminal',
+      tmuxSession: session.tmuxSession,
+      repo: repo ?? undefined,
+      createdAt: now,
+      lastActivity: now,
+    };
+    const nextTabs = [...tabsRef.current, newTab];
+    tabsRef.current = nextTabs;
+    setTabs(nextTabs);
+    return newTab.id;
+  }, []);
+
   useImperativeHandle(ref, () => buildTerminalTabHandle({
     tabsRef,
     panelRefs,
@@ -1049,7 +1075,7 @@ export function useWorkspaceTerminalController(
   }, []);
 
   const handleNewTab = useCallback((agentId: string, repo?: RegisteredRepo) => {
-    openWorkspaceTerminalTab(agentId, repo);
+    return openWorkspaceTerminalTab(agentId, repo);
   }, [openWorkspaceTerminalTab]);
 
   const handleNewChatTab = useCallback((runtime: Exclude<WorkspaceChatRuntime, 'chat'>, repo?: RegisteredRepo) => {
@@ -1103,38 +1129,7 @@ export function useWorkspaceTerminalController(
     )));
   }, []);
 
-  // Operator-initiated rename — keeps the workspace tab's label in
-  // sync with a chat-history PATCH so the header strip reflects the
-  // new title without waiting for a remount.
-  const handleUpdateTabLabel = useCallback((
-    tabId: string,
-    label: string,
-    options?: { threadId?: string | null; source?: 'auto' | 'user' },
-  ) => {
-    const nextLabel = label.trim();
-    if (!nextLabel) return;
-    setTabs((previous) => {
-      let changed = false;
-      const next = previous.map((tab) => {
-        if (tab.id !== tabId) return tab;
-        if (
-          options?.threadId
-          && tab.kind === 'orchestrator'
-          && tab.orchestratorThreadId
-          && tab.orchestratorThreadId !== options.threadId
-        ) {
-          return tab;
-        }
-        if (options?.source !== 'user' && tab.labelSource === 'user') return tab;
-        const labelSource = options?.source === 'user' ? 'user' as const : tab.labelSource;
-        if (tab.label === nextLabel && tab.labelSource === labelSource) return tab;
-        changed = true;
-        return { ...tab, label: nextLabel, labelSource };
-      });
-      if (changed) tabsRef.current = next;
-      return changed ? next : previous;
-    });
-  }, []);
+  const handleUpdateTabLabel = useWorkspaceTabLabelUpdater(setTabs, tabsRef);
 
   const handleSaveCheckpoint = useCallback((tabId: string) => {
     setTabs((previous) => previous.map((tab) => (
@@ -1304,6 +1299,7 @@ export function useWorkspaceTerminalController(
     activeCheckpoint,
     activeRepo,
     activeTab,
+    attachWorkspaceTerminalSession,
     containerDivRef,
     effectiveActiveTabId,
     cleanupFinishedTabs,

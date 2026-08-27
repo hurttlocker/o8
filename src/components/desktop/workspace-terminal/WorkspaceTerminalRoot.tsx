@@ -9,6 +9,7 @@ import { PreviewPane } from '@/components/desktop/workspace-terminal/PreviewPane
 import { THEME_ACCENT, THEME_ACCENT_SOFT_STRONG } from '@/components/desktop/workspace-terminal/constants';
 import { useWorkspaceTerminalController } from '@/components/desktop/workspace-terminal/useWorkspaceTerminalController';
 import { WorkspaceTerminalPanels } from '@/components/desktop/workspace-terminal/WorkspaceTerminalPanels';
+import { useTerminalMode } from '@/components/desktop/workspace-terminal/use-terminal-mode';
 import { useOutsideWorkerSplitMount } from '@/components/desktop/workspace-terminal/use-outside-worker-split-mount';
 import { WorkspaceSpawnProvider, type WorkspaceSpawnHandlers } from '@/components/desktop/workspace-terminal/spawn-context';
 import { workspaceConversationHeaderLabel } from '@/components/desktop/workspace-terminal/utils';
@@ -17,6 +18,26 @@ import type { TerminalTab, TerminalTabHandle, WorkspaceTerminalProps } from '@/c
 export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerminalProps>(
   function WorkspaceTerminalRoot(props, ref) {
     const controller = useWorkspaceTerminalController(props, ref);
+    const workspaceInstanceId = useId();
+    const handleNewTab = controller.handleNewTab;
+    const createTerminalModeShellTab = useCallback(
+      (repo?: import('@/components/desktop/workspace-terminal/types').RegisteredRepo) => handleNewTab('shell', repo),
+      [handleNewTab],
+    );
+    const terminalMode = useTerminalMode({
+      activeTab: controller.activeTab,
+      activeTabId: controller.effectiveActiveTabId,
+      attachedSessions: props.attachedTerminalSessions ?? [],
+      canCloseTile: props.canCloseTile === true,
+      createShellTab: createTerminalModeShellTab,
+      attachTerminalSession: controller.attachWorkspaceTerminalSession,
+      panelRefs: controller.panelRefs,
+      preferredRepo: props.preferredRepo ?? null,
+      selectTab: controller.handleSelectTab,
+      tabs: controller.visibleTabs,
+      workspaceActive: props.activeWorkspaceSurface === true,
+      workspaceId: workspaceInstanceId,
+    });
     const hasPreviews = (props.showPreviewPane ?? true) && controller.previews.length > 0;
     const [cleanupToast, setCleanupToast] = useState<{
       id: number;
@@ -30,7 +51,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
       spawnFleetCanvasTab: controller.spawnFleetCanvasTab,
       updateTabMode: controller.handleUpdateTabMode,
     }), [controller.handleUpdateTabMode, controller.spawnChatTab, controller.spawnFleetCanvasTab, controller.spawnOrchestratorTab, controller.spawnSingleRuntimeTab]);
-    const activeTab = controller.activeTab;
+    const activeTab = terminalMode.terminalTab ?? controller.activeTab;
     // workspaceConversationHeaderLabel only knows chat-shaped tabs
     // (orchestrator / llm-chat / single-runtime chat). For terminals
     // and canvas tabs we fall back to "<repo> / Shell" or "<repo> /
@@ -50,9 +71,6 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
       return repoName ? `${repoName} / ${kindLabel}` : kindLabel;
     })();
 
-    // Stable workspace instance id — declared early so the spawn /
-    // close event listeners below can use it.
-    const workspaceInstanceId = useId();
     useOutsideWorkerSplitMount({
       active: props.activeWorkspaceSurface === true,
       activeTabId: controller.activeTab?.id ?? null,
@@ -67,7 +85,6 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
     // pane responds. Untargeted events (single-mode global play) only
     // the lone pane responds (canCloseTile = false). Lets two split
     // panes' header play buttons drive their own spawns.
-    const handleNewTab = controller.handleNewTab;
     const handleNewLLMChatTab = controller.handleNewLLMChatTab;
     const spawnOrchestratorTab = controller.spawnOrchestratorTab;
     const spawnFleetCanvasTab = controller.spawnFleetCanvasTab;
@@ -158,6 +175,8 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           finishedTabCount: controller.finishedTabCount,
           contextRailAvailable: projectContextRailAvailable,
           contextRailVisible: projectContextRailVisible,
+          terminalModeActive: terminalMode.active,
+          activeWorkspaceSurface: props.activeWorkspaceSurface === true,
         },
       }));
       return () => {
@@ -171,12 +190,14 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
             finishedTabCount: 0,
             contextRailAvailable: false,
             contextRailVisible: false,
+            terminalModeActive: false,
+            activeWorkspaceSurface: false,
             removed: true,
           },
         }));
       };
 
-    }, [conversationHeaderLabel, activeTabId, activeTabKind, workspaceInstanceId, tabsBroadcastSignature, controller.finishedTabCount, projectContextRailAvailable, projectContextRailVisible]);
+    }, [conversationHeaderLabel, activeTabId, activeTabKind, workspaceInstanceId, tabsBroadcastSignature, controller.finishedTabCount, projectContextRailAvailable, projectContextRailVisible, terminalMode.active, props.activeWorkspaceSurface]);
 
     // Listen for chat-history rename so the workspace tab's label
     // refreshes in sync with the chat-history PATCH. The header strip
@@ -283,7 +304,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
             style={{
               height: `${controller.previewHeight * 100}%`,
               minHeight: 120,
-              display: 'flex',
+              display: terminalMode.active ? 'none' : 'flex',
               flexDirection: 'column',
               overflow: 'hidden',
               flexShrink: 0,
@@ -300,7 +321,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           </div>
         ) : null}
 
-        {hasPreviews ? (
+        {hasPreviews && !terminalMode.active ? (
           <div
             onMouseDown={controller.handleDragStart}
             style={{
@@ -337,7 +358,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           workspaceId={workspaceInstanceId}
           visibleTabs={controller.visibleTabs}
           restoreSettled={controller.primaryRestoreSettled}
-          effectiveActiveTabId={controller.effectiveActiveTabId}
+          effectiveActiveTabId={terminalMode.effectiveActiveTabId}
           termWsConnected={controller.termWsConnected}
           panelRefs={controller.panelRefs}
           onCloseTab={controller.handleCloseTab}
