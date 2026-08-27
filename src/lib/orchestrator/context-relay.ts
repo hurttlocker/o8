@@ -15,9 +15,12 @@ import {
   stripPacketSelfReview,
 } from '@/lib/orchestrator/self-review';
 import {
-  parsePacketTaskContract,
   stripPacketTaskContract,
 } from '@/lib/orchestrator/packet-task-contract';
+import {
+  findFirstTaskContractCapture,
+  recordTaskContractCostEvent,
+} from '@/lib/orchestrator/task-contract-cost';
 import type { OrchestratorRuntime, PacketContext } from '@/lib/orchestrator/types';
 import {
   isDispatchableRuntime,
@@ -168,19 +171,6 @@ function findLatestSelfReview(entries: RuntimeTranscriptEntry[]): PacketContext[
   }
 
   return buildMissingPacketSelfReview();
-}
-
-function findFirstTaskContract(entries: RuntimeTranscriptEntry[]): PacketContext['taskContract'] {
-  for (const entry of entries) {
-    if (entry.role !== 'assistant' || !entry.text.trim()) {
-      continue;
-    }
-    const taskContract = parsePacketTaskContract(entry.text);
-    if (taskContract) {
-      return taskContract;
-    }
-  }
-  return undefined;
 }
 
 function buildChangedFileList(entries: RuntimeTranscriptEntry[], runtimeChangedFiles: Array<{ path: string }>): string[] {
@@ -452,7 +442,8 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
   const telemetry = telemetryResult.status === 'fulfilled' ? telemetryResult.value : undefined;
   const lastAssistantEntry = findLastAssistantEntry(transcript);
   const selfReview = findLatestSelfReview(transcript);
-  const taskContract = findFirstTaskContract(transcript);
+  const taskContractCapture = findFirstTaskContractCapture(transcript);
+  const taskContract = taskContractCapture?.contract;
   const matchingApprovals = listApprovalsForContext({
     packetId: normalizedPacketId,
     laneId: lane?.id ?? undefined,
@@ -495,6 +486,13 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
   };
 
   packetCompletionContextStore.set(normalizedPacketId, context);
+  recordTaskContractCostEvent({
+    lane,
+    runtime: runtimeId,
+    transcript,
+    capture: taskContractCapture,
+    telemetry,
+  });
 
   // #984 Stage 1 — index the transcript once, at packet completion. Cmd+K
   // reads this durable FTS document and never scans runtime files per keystroke.

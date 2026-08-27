@@ -31,6 +31,7 @@ import type {
 } from '@/lib/orchestrator/types';
 import { buildProjectTaskBrief, getProjectContext } from '@/lib/projects/context';
 import { buildProjectBriefPromptV1 } from '@/lib/prompts/v1';
+import { resolveTaskContractRequired } from '@/lib/orchestrator/task-contract-required';
 import { assertRuntimeDispatchable, DispatchPreflightError } from '@/lib/runtimes/shared/auth-detect';
 import { getTaskPoolTask, type TaskPoolTask } from './pool';
 
@@ -384,7 +385,11 @@ export async function createTask(input: TaskCreateInput): Promise<TaskMutationRe
         body: input.sourceIssue.body ?? summary,
         url: input.sourceIssue.url ?? undefined,
       } : null,
-      taskContractRequired: true,
+      taskContractRequired: resolveTaskContractRequired({
+        runtime: workerRouting.selectedRuntime,
+        explicit: true,
+      }),
+      taskContractSource: 'explicit',
       problemDossierId: input.problemDossierId ?? null,
       problemRemedyId: input.problemRemedyId ?? null,
       prompt: buildProjectBriefPromptV1(taskBrief, summary),

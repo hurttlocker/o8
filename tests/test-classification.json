@@ -290,6 +290,13 @@
       ]
     },
     {
+      "path": "src/lib/mcp/operator-handlers/mission-task-contract.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
       "path": "src/lib/mcp/operator-node22-locator.test.ts",
       "reasons": [
         "executable-fixture"

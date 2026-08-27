@@ -255,6 +255,13 @@ export async function POST(request: NextRequest) {
   if (qualitySearch && record.huddle === true) {
     return operatorError('invalid_request', 'qualitySearch already uses a sealed contract and cannot be combined with huddle mode.', 400);
   }
+  if (record.taskContract !== undefined && record.taskContract !== 'off') {
+    return operatorError('invalid_request', 'taskContract must be "off" when provided.', 400);
+  }
+  const taskContract = record.taskContract === 'off' ? 'off' as const : undefined;
+  if (qualitySearch && taskContract === 'off') {
+    return operatorError('invalid_request', 'qualitySearch already uses a sealed contract and cannot be combined with taskContract: "off".', 400);
+  }
 
   const createInput = {
       issues,
@@ -272,6 +279,7 @@ export async function POST(request: NextRequest) {
       existingBranchPolicy,
       ...(typeof record.useBrain === 'boolean' ? { useBrain: record.useBrain } : {}),
       ...(!qualitySearch ? { huddle } : {}),
+      ...(taskContract ? { taskContract } : {}),
       // #1329 — carry the dispatching orchestrator thread id so workers inherit
       // its session rules. Optional; thread-less callers omit it.
       ...(typeof record.orchestratorThreadId === 'string' && record.orchestratorThreadId.trim()

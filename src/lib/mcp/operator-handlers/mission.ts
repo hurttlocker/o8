@@ -43,10 +43,9 @@ import {
   textResult,
 } from './shared';
 import type { WorkerIntent } from '@/lib/orchestrator/types';
-import { parseMissionCandidateMode, QUALITY_SEARCH_INPUT_SCHEMA } from './quality-search-input';
+import { parseMissionCandidateMode, parseTaskContractSetting, QUALITY_SEARCH_INPUT_SCHEMA, TASK_CONTRACT_SETTING_SCHEMA } from './quality-search-input';
 import { MISSION_WORKER_PIN_PROPERTIES, parseMissionWorkerPinInput, parseWorkerProvider, WORKER_PROVIDER_OPTIONS } from './mission-worker-input';
 import { CONTRACT_COVERAGE_EVIDENCE_SCHEMA, parseContractCoverageEvidenceInput } from './review-coverage-input';
-
 export const MISSION_TOOLS: McpTool[] = [
   {
     name: 'create_mission',
@@ -117,6 +116,7 @@ export const MISSION_TOOLS: McpTool[] = [
           type: 'boolean',
           description: 'Huddle mode — a bidirectional alignment turn. When true, each worker reads the repo then posts its plan + any pushback (`o8 packet report --event huddle`) and STOPS before editing; you review it (the packet flips to awaiting_orchestrator) and steer it (steer_packet) to align before it implements. Arm it ONLY on packets worth aligning on first — ambiguous scope, risky/cross-cutting, or novel work. Omit (default off) for clear, well-specced packets so they don\'t pay the extra round-trip.',
         },
+        taskContract: TASK_CONTRACT_SETTING_SCHEMA,
         readOnly: { type: 'boolean', description: 'When true, the worker inspects and reports without editing. A clean zero-diff exit is recorded as a successful read-only completion.' },
         comparisonModels: {
           type: 'array',
@@ -834,7 +834,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
         sequential,
         existingBranchPolicy,
         useBrain,
-        huddle,
+        huddle, taskContract: parseTaskContractSetting(args.taskContract),
         comparisonModels,
         qualitySearch,
         orchestratorThreadId, parentWorkspaceId, caller, readOnly,
@@ -869,7 +869,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
       sequential,
       existingBranchPolicy,
       useBrain,
-      huddle,
+      huddle, taskContract: parseTaskContractSetting(args.taskContract),
       comparisonModels,
       qualitySearch,
       orchestratorThreadId, parentWorkspaceId, caller, readOnly,
