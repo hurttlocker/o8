@@ -1,9 +1,9 @@
 {
   "schema": "o8/test-classification/v1",
   "generatedBy": "node scripts/classify-tests.mjs --write",
-  "totalTests": 893,
+  "totalTests": 894,
   "hermeticTests": 575,
-  "resourceOwningTests": 318,
+  "resourceOwningTests": 319,
   "resourceOwning": [
     {
       "path": "src/app/api/leases/route.test.ts",
@@ -1987,6 +1987,12 @@
         "child-process",
         "network-listener",
         "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/review-completeness-trace-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },

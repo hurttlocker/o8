@@ -103,12 +103,15 @@ If you verified the work but the governance tools can't reach the approval yet (
 
 This subsection is reviewer instruction and Brain documentation. It applies to both Codex-default and Claude review backends.
 
-Every VERDICT must be backed by these four terse traces before you choose `approve`, `reject`, or `needs-follow-up`:
+Every VERDICT must be backed by these five terse traces before you choose `approve`, `reject`, or `needs-follow-up`:
 
 1. GUARD/PREDICATE TRACE — for each new guard, condition, or early return, name what fires it and cite an existing file:line that produces that condition. If no code path fires it, call it INERT and flag it.
 2. SCOPE/PARTITION TRACE — for each write or state mutation, state its partition key (repo/tenant/user/project as applicable) and cite the file:line that scopes it. A write with no partition key is a defect to flag; do not rationalize global leakage into every repo.
 3. SUB-REQUIREMENT COVERAGE — enumerate the issue's discrete sub-requirements and mark each covered or uncovered.
 4. EXECUTION-PATH TRACE — trace the actual call path the change runs under, not the path its name implies.
+5. COMPLETENESS TRACE — when the change establishes or restores an invariant, enumerate every production path with that property and mark each covered or uncovered. A diff that patches one site of an un-enumerated invariant is `needs-follow-up` or `reject`, never `approve`; list every uncovered site so one refix round covers the set.
+
+### Adversarial review evidence rules
 
 Do not write `VERIFIED correct`, `looks correct`, or equivalent phrases unless the same sentence includes a cited file:line that demonstrably fires the guard/path or scopes the write. Bare confidence language is not evidence.
 
