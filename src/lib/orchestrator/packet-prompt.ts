@@ -372,15 +372,17 @@ export async function buildPacketPrompt(
   // Null when the packet has no originating thread or that thread has no rules.
   const sessionRulesSection = buildSessionRulesBlock(packet.orchestratorThreadId);
   const claudeCodeSkillSections = buildClaudeCodeSkillSections(packet);
-  const workerMcpResolution = await resolveWorkerMcpInjection({
-    packetId: packet.id,
-    worktreePath: worktreePath ?? packet.lane?.worktreePath ?? packet.workspaceTargetPath ?? '',
-    branch: packet.branchTarget,
-    laneId: packet.lane?.laneId,
-  }, {
-    resolveCommands: workerSandboxEnabled(),
-    pathValue: pathWithNodeRuntime(),
-  });
+  const workerMcpResolution = packet.runtime === 'claude-code'
+    ? await resolveWorkerMcpInjection({
+        packetId: packet.id,
+        worktreePath: worktreePath ?? packet.lane?.worktreePath ?? packet.workspaceTargetPath ?? '',
+        branch: packet.branchTarget,
+        laneId: packet.lane?.laneId,
+      }, {
+        resolveCommands: workerSandboxEnabled(),
+        pathValue: pathWithNodeRuntime(),
+      })
+    : { servers: [] };
   const workerMcpSection = workerMcpResolution.servers.length > 0
     ? [
         `MCP servers attached to this packet: ${workerMcpResolution.servers

@@ -241,6 +241,12 @@ describe.sequential('worker MCP injection real path', () => {
     );
     expect(firstPrompt).toContain(`MCP servers attached to this packet: packet-observer (${process.execPath}).`);
 
+    const unsupportedPrompt = await buildPacketPrompt({
+      ...packet('pkt-worker-mcp-unsupported', 'test/worker-mcp-unsupported'),
+      runtime: 'codex',
+    }, [], 'main', firstLane.worktreePath);
+    expect(unsupportedPrompt).not.toContain('MCP servers attached to this packet:');
+
     const firstCall = spawnMock.mock.calls.length;
     const firstLaunch = await dispatchLaneCommand({
       verb: 'launch_session',

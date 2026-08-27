@@ -180,7 +180,7 @@ export function useExternalMcpServers(): UseExternalMcpServersResult {
         throw new Error(body.error || 'Failed to update worker attachment');
       }
       setNote({
-        message: `${server.name} ${server.workerInjection ? 'detached from' : 'attached to'} dispatched workers.`,
+        message: `${server.name} ${server.workerInjection ? 'detached from' : 'attached to'} supported workers.`,
         ok: true,
       });
       await load();

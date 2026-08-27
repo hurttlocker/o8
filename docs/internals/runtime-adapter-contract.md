@@ -85,9 +85,9 @@ auth houses, validation, and runtime membership come from the catalog.
 Owned-session adapters advertise `workerMcpInjection` only when their launch
 protocol can accept a per-run MCP config. The shared controller derives that
 config exclusively from opted-in operator records, writes it inside the run's
-o8-owned session directory, and supplies its path through `launchArgs`. Adapters that
-omit the flag keep their existing launch behavior and receive only the packet
-prompt's attached-server notice.
+o8-owned session directory, and supplies its path through `launchArgs`. The packet
+prompt names attached servers only for runtimes whose current launch path can attach
+them. Adapters that omit the flag keep their existing launch behavior.
 
 ### OpenCode: standalone workers, resident service for the operator only
 

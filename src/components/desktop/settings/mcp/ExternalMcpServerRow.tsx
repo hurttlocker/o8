@@ -139,13 +139,13 @@ export function ExternalMcpServerRow({
               fontWeight: 300,
               letterSpacing: '-0.005em',
             }}>
-              Attach to dispatched workers
+              Attach to supported workers
               <SettingsToggleButton
                 checked={server.workerInjection}
                 onChange={onToggleWorkerInjection}
                 disabled={busy || pendingRemoval}
-                activeLabel="Attached to dispatched workers"
-                inactiveLabel="Not attached to dispatched workers"
+                activeLabel="Attached to supported workers"
+                inactiveLabel="Not attached to supported workers"
               />
             </span>
           ) : null}
