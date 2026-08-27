@@ -24,7 +24,7 @@ import {
 } from '@/lib/orchestrator/mission-registry';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { advancePacketStorageAdmissionEpoch } from '@/lib/orchestrator/packet-storage-admission-normalize';
-import { resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
+import { managedPacketWorktreeId, resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
 import { supersedeDurableApprovedReviews } from '@/lib/lane/durable-review-approval';
 import {
   withMissionHandoffBarrier,
@@ -579,7 +579,8 @@ async function resetPacketUnlocked(input: ResetPacketInput) {
       const path = await import('node:path');
       for (const baseDir of resolveWorktreeRootLayout(repoPath).bases) {
         const dirs = await readdir(baseDir).catch(() => [] as string[]);
-        const prefix = `packet-${packet.id}`;
+        const prefix = managedPacketWorktreeId(packet.id);
+        if (!prefix) continue;
         const orphans = dirs.filter((name) => name === prefix || name.startsWith(`${prefix}-`));
         for (const name of orphans) {
           const full = path.join(baseDir, name);

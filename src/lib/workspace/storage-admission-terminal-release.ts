@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import type Database from 'better-sqlite3';
 
 import type {
+  OwnerDeathReceipt,
   StorageAdmissionResult,
   StorageReservationRecord,
   StorageReservationState,
@@ -50,6 +51,11 @@ export interface TerminalOwnerStorageReleaseResult {
   retainedUnprovableOwnerIds: string[];
 }
 
+export interface CommittedStorageReleaseResult {
+  released: boolean;
+  releasedBytes: number;
+}
+
 function requiredText(value: string, field: string): string {
   const normalized = value.trim();
   if (!normalized) throw new Error(`${field} is required.`);
@@ -67,6 +73,17 @@ export function latestReservedStorageOwnerGeneration(
     LIMIT 1
   `).get(requiredText(ownerId, 'ownerId')) as OwnerGenerationRow | undefined;
   return row?.owner_generation;
+}
+
+export function listCommittedPacketStorageReservations(
+  sqlite: Database.Database,
+): StorageReservationRecord[] {
+  const rows = sqlite.prepare(`
+    SELECT * FROM storage_admission_reservations
+    WHERE state = 'committed' AND reservation_id LIKE 'packet-storage:%'
+    ORDER BY updated_at ASC, reservation_id ASC
+  `).all() as ReservationRow[];
+  return rows.map(mapReservation);
 }
 
 function mapReservation(row: ReservationRow): StorageReservationRecord {
@@ -260,6 +277,111 @@ export function releaseReservedStorageForTerminalOwner(input: {
   // the body directly makes release and association loss commit or roll back as
   // one unit — a nested BEGIN IMMEDIATE cannot. Standalone callers still get
   // their own immediate transaction.
+  if (input.sqlite.inTransaction) return settle();
+  return input.sqlite.transaction(settle).immediate();
+}
+
+/**
+ * Retire one committed packet row only after its logical owner and checkout
+ * have been proven gone. The transition and immutable release receipt share
+ * one immediate transaction, so a crash cannot leave either half behind.
+ */
+export function releaseCommittedStorageForDeadOwner(input: {
+  sqlite: Database.Database;
+  reservation: StorageReservationRecord;
+  ownerDeathReceipt: OwnerDeathReceipt;
+  releasedAt?: number;
+}): CommittedStorageReleaseResult {
+  const releasedAt = input.releasedAt ?? Date.now();
+  if (!Number.isSafeInteger(releasedAt) || releasedAt <= 0) {
+    throw new Error('releasedAt must be a positive safe integer.');
+  }
+  const receipt = input.ownerDeathReceipt;
+  const reservation = input.reservation;
+  if (!receipt.source.trim() || !receipt.evidence.trim()
+    || receipt.reservationId !== reservation.reservationId
+    || receipt.volumeId !== reservation.volumeId
+    || receipt.ownerId !== reservation.ownerId
+    || receipt.ownerGeneration !== reservation.ownerGeneration
+    || !Number.isSafeInteger(receipt.observedAt)
+    || receipt.observedAt > releasedAt
+    || releasedAt - receipt.observedAt > 30_000) {
+    throw new Error('Committed storage release requires a fresh exact owner-death receipt.');
+  }
+  const settle = (): CommittedStorageReleaseResult => {
+    const current = input.sqlite.prepare(`
+      SELECT * FROM storage_admission_reservations
+      WHERE reservation_id = ?
+    `).get(reservation.reservationId) as ReservationRow | undefined;
+    if (!current || current.state !== 'committed'
+      || current.volume_id !== reservation.volumeId
+      || current.owner_id !== reservation.ownerId
+      || current.owner_generation !== reservation.ownerGeneration
+      || current.generation !== reservation.generation) {
+      return { released: false, releasedBytes: 0 };
+    }
+    const mutationId = `packet-storage-committed-release:${current.reservation_id}:${current.generation}`;
+    const request = {
+      operation: 'release',
+      mutationId,
+      reservationId: current.reservation_id,
+      volumeId: current.volume_id,
+      ownerId: current.owner_id,
+      ownerGeneration: current.owner_generation,
+      expectedGeneration: current.generation,
+      expectedState: 'committed',
+      ownerDeathReceipt: receipt,
+    };
+    const updated = input.sqlite.prepare(`
+      UPDATE storage_admission_reservations
+      SET state = 'released', generation = generation + 1,
+          last_mutation_id = ?, last_reason = 'released', updated_at = ?, terminal_at = ?
+      WHERE reservation_id = ? AND volume_id = ? AND state = 'committed'
+        AND generation = ? AND owner_id = ? AND owner_generation = ?
+    `).run(
+      mutationId,
+      releasedAt,
+      releasedAt,
+      current.reservation_id,
+      current.volume_id,
+      current.generation,
+      current.owner_id,
+      current.owner_generation,
+    );
+    if (updated.changes !== 1) {
+      throw new Error('Committed storage reservation changed during owner release.');
+    }
+    const released = input.sqlite.prepare(
+      'SELECT * FROM storage_admission_reservations WHERE reservation_id = ?',
+    ).get(current.reservation_id) as ReservationRow;
+    const result: Omit<StorageAdmissionResult, 'idempotent'> = {
+      operation: 'release',
+      decision: 'released',
+      reason: 'released',
+      mutationId,
+      reservation: mapReservation(released),
+      observation: null,
+      requiredReserveBytes: null,
+      activeReservedBytes: null,
+      headroomBytes: null,
+      observedAvailableDeltaBytes: null,
+      recordedAt: releasedAt,
+    };
+    const hash = createHash('sha256').update(JSON.stringify(request)).digest('hex');
+    input.sqlite.prepare(`
+      INSERT INTO storage_admission_mutations (
+        mutation_id, operation, request_hash, reservation_id, volume_id, result_json, recorded_at
+      ) VALUES (?, 'release', ?, ?, ?, ?, ?)
+    `).run(
+      mutationId,
+      hash,
+      current.reservation_id,
+      current.volume_id,
+      JSON.stringify(result),
+      releasedAt,
+    );
+    return { released: true, releasedBytes: current.exact_bytes };
+  };
   if (input.sqlite.inTransaction) return settle();
   return input.sqlite.transaction(settle).immediate();
 }

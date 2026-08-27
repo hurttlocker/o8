@@ -70,6 +70,7 @@ import type { StorageRootIdentity } from '@/lib/workspace/storage-admission';
 import {
   assertManagedWorktreeCreatedBoundary,
   assertManagedWorktreeMaterializationBoundary,
+  managedPacketWorktreeId,
   resolveWorktreeRootLayout,
 } from './root-layout';
 import { withManagedWorktreeStorageAdmission } from './launch-storage-admission';
@@ -258,8 +259,8 @@ function sanitizeTaskName(name: string): string {
  * the taskName-derived slug.
  */
 function deriveWorktreeId(opts: CreateWorktreeOptions): string {
-  const packetSlug = opts.packetId ? sanitizeTaskName(opts.packetId) : '';
-  if (packetSlug) return `packet-${packetSlug}`;
+  const packetWorktreeId = opts.packetId ? managedPacketWorktreeId(opts.packetId) : null;
+  if (packetWorktreeId) return packetWorktreeId;
   return sanitizeTaskName(opts.taskName);
 }
 

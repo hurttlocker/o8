@@ -3,7 +3,7 @@ import { removeCortexWorktreePath } from '@/lib/lane/worktree-clone-removal';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { collectPacketLifecycleLanes } from '@/lib/orchestrator/packet-lifecycle-targets';
 import { unregisterWatchedAgent } from '@/lib/supervisor/agent-supervisor';
-import { resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
+import { managedPacketWorktreeId, resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
 import { cleanupResetPacketTargets, type ResetCleanupTarget } from './reset-cleanup';
 import { ResetCleanupFailedError } from './reset-errors';
 import { archiveResetLaneSessions, confirmedKilledLaneIds } from './reset-lifecycle-retirement';
@@ -104,7 +104,8 @@ export async function resetPacketViaLaneFallback(
       for (const repoPath of new Set(allBound.map((lane) => lane.repoPath))) {
         for (const baseDir of resolveWorktreeRootLayout(repoPath).bases) {
           const dirs = await readdir(baseDir).catch(() => [] as string[]);
-          const prefix = `packet-${input.packetId}`;
+          const prefix = managedPacketWorktreeId(input.packetId);
+          if (!prefix) continue;
           for (const name of dirs.filter((entry) => entry === prefix || entry.startsWith(`${prefix}-`))) {
             const full = path.join(baseDir, name);
             const removed = await removeCortexWorktreePath({

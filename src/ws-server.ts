@@ -8428,17 +8428,31 @@ async function bootstrapWsServer() {
   }
 
   try {
-    const { reconcileExpiredPacketStorageReservations } = await import(
-      '@/lib/orchestrator/storage-admission'
+    const { startStorageAdmissionReconciliation } = await import(
+      '@/lib/ws-server/storage-admission-reconciliation'
     );
-    const result = await reconcileExpiredPacketStorageReservations();
-    if (result.inspected > 0) {
+    const logStorageAdmissionReconciliation = (
+      result: Awaited<ReturnType<typeof import('@/lib/ws-server/storage-admission-reconciliation')['reconcileStorageAdmissionLedger']>>,
+    ) => {
+      if (result.expired.inspected === 0 && result.committed.inspected === 0) return;
       console.log(
-        `[storage-admission] Startup reconciliation inspected=${result.inspected} `
-        + `reconciled=${result.reconciled} retainedLive=${result.retainedLive} `
-        + `retainedUnknown=${result.retainedUnknown} held=${result.held}`,
+        `[storage-admission] Reconciliation expiredInspected=${result.expired.inspected} `
+        + `expiredReconciled=${result.expired.reconciled} committedInspected=${result.committed.inspected} `
+        + `committedReleased=${result.committed.released} retainedLive=`
+        + `${result.expired.retainedLive + result.committed.retainedLive} retainedUnknown=`
+        + `${result.expired.retainedUnknown + result.committed.retainedUnknown} `
+        + `held=${result.expired.held + result.committed.held}`,
       );
-    }
+    };
+    const reconciliation = startStorageAdmissionReconciliation({
+      onPeriodicResult: logStorageAdmissionReconciliation,
+      onPeriodicError: (error) => {
+        console.warn(
+          `[storage-admission] Periodic reconciliation failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      },
+    });
+    logStorageAdmissionReconciliation(await reconciliation.initial);
   } catch (error) {
     console.warn(
       `[storage-admission] WS startup reconciliation failed: ${error instanceof Error ? error.message : String(error)}`,

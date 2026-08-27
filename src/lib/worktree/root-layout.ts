@@ -13,6 +13,18 @@ import { guardedWorkspaceInvocation } from './materialization-execution';
 export const LEGACY_WORKTREE_DIR_NAME = '.cortex-worktrees';
 export const WORKTREE_ROOT_ENV = 'O8_WORKTREE_ROOT';
 
+/** Stable directory prefix shared by materialization, cleanup, and reconciliation. */
+export function managedPacketWorktreeId(packetId: string): string | null {
+  const slug = packetId
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-_]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 60);
+  return slug ? `packet-${slug}` : null;
+}
+
 export function canonicalRepoRoot(repoRoot: string): string {
   try {
     return realpathSync.native(repoRoot);
