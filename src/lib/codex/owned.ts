@@ -40,6 +40,10 @@ import {
   type OwnedTailEntry,
   type ParsedRunLog,
 } from '@/lib/runtimes/shared/owned-session';
+import {
+  workerMcpServerNameIsValid,
+  type ResolvedWorkerMcpServer,
+} from '@/lib/mcp/worker-injection';
 import { codexModelArgs } from './local-model';
 import { resolveCodexReasoningEffort } from './reasoning-effort';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
@@ -239,10 +243,10 @@ const DISABLE_IMAGE_TOOL = ['-c', 'tools.image_generation=false'];
 // Inherited MCP servers were killing workers: a dead/auth-broken HTTP MCP entry
 // makes rmcp transport workers crash-loop at spawn (slow launches) and the
 // session-cleanup DELETE-404 signature preceded 6 silent worker deaths in one
-// night. Workers never need MCP — repo answers come from the `o8 ask` CLI and
-// reports go through `o8 packet report`. Everything a worker DOES need (model,
-// effort, sandbox, image-tool off) is passed by flag. The user's interactive
-// Codex and the codex orchestrator session are untouched.
+// night. Workers inherit no user MCP config; operator-attached packet servers
+// are added explicitly through per-run overrides below. Everything else a
+// worker needs (model, effort, sandbox, image-tool off) is passed by flag. The
+// user's interactive Codex and the codex orchestrator session are untouched.
 const IGNORE_USER_CONFIG = ['--ignore-user-config'];
 
 /**
@@ -257,7 +261,30 @@ export function codexReasoningEffortArgs(effort?: ThinkingEffort, model?: string
   return ['-c', `model_reasoning_effort=${resolveCodexReasoningEffort(effort, model)}`];
 }
 
-export function codexLaunchArgs(ctx: { cwd: string; prompt: string; model?: string; effort?: ThinkingEffort }): string[] {
+export function codexWorkerMcpOverrideArgs(servers: ResolvedWorkerMcpServer[]): string[] {
+  return servers
+    .filter((server) => workerMcpServerNameIsValid(server.name))
+    .flatMap((server) => {
+      const prefix = `mcp_servers.${server.name}`;
+      const args = `[${server.args.map((arg) => JSON.stringify(arg)).join(', ')}]`;
+      const env = `{${Object.entries(server.env ?? {})
+        .map(([key, value]) => `${JSON.stringify(key)}=${JSON.stringify(value)}`)
+        .join(', ')}}`;
+      return [
+        '-c', `${prefix}.command=${JSON.stringify(server.command)}`,
+        '-c', `${prefix}.args=${args}`,
+        '-c', `${prefix}.env=${env}`,
+      ];
+    });
+}
+
+export function codexLaunchArgs(ctx: {
+  cwd: string;
+  prompt: string;
+  model?: string;
+  effort?: ThinkingEffort;
+  workerMcpServers?: ResolvedWorkerMcpServer[];
+}): string[] {
   return [
     'exec',
     '--json',
@@ -266,6 +293,7 @@ export function codexLaunchArgs(ctx: { cwd: string; prompt: string; model?: stri
     'danger-full-access',
     ...DISABLE_IMAGE_TOOL,
     ...IGNORE_USER_CONFIG,
+    ...codexWorkerMcpOverrideArgs(ctx.workerMcpServers ?? []),
     '-C',
     ctx.cwd,
     // `ollama:<model>` / `lmstudio:<model>` → run this worker on a LOCAL model
@@ -277,7 +305,12 @@ export function codexLaunchArgs(ctx: { cwd: string; prompt: string; model?: stri
   ];
 }
 
-export function codexResumeArgs(ctx: { threadId: string; prompt: string; model?: string }): string[] {
+export function codexResumeArgs(ctx: {
+  threadId: string;
+  prompt: string;
+  model?: string;
+  workerMcpServers?: ResolvedWorkerMcpServer[];
+}): string[] {
   return [
     'exec',
     'resume',
@@ -290,6 +323,7 @@ export function codexResumeArgs(ctx: { threadId: string; prompt: string; model?:
     '--dangerously-bypass-approvals-and-sandbox',
     ...DISABLE_IMAGE_TOOL,
     ...IGNORE_USER_CONFIG,
+    ...codexWorkerMcpOverrideArgs(ctx.workerMcpServers ?? []),
     ctx.prompt,
   ];
 }
@@ -658,7 +692,7 @@ const CODEX_STDERR_NOISE_PATTERNS: RegExp[] = [
   /mcp.*transport channel closed/i,
 ];
 
-const codexAdapter: OwnedRuntimeAdapter = {
+export const codexOwnedAdapter: OwnedRuntimeAdapter = {
   runtimeId: 'codex',
   // IMPORTANT: Keep 'codex-owned:' prefix — load-bearing for session routing.
   surfaceIdPrefix: 'codex-owned:',
@@ -668,6 +702,7 @@ const codexAdapter: OwnedRuntimeAdapter = {
   binaryEnvOverride: 'O8_CODEX_BIN',
   isolatedConfigHomeEnv: 'CODEX_HOME',
   defaultConfigHome: () => process.env.CODEX_HOME?.trim() || path.join(os.homedir(), '.codex'),
+  workerMcpInjection: 'config-override',
   humanLabel: 'Owned Codex',
   squadShortName: 'Codex',
   sessionIdPrefix: 'codex-owned-',
@@ -681,7 +716,7 @@ const codexAdapter: OwnedRuntimeAdapter = {
   resumeGroupLabel: 'Resume turn',
 };
 
-const codexStore = createOwnedSessionStore(codexAdapter);
+const codexStore = createOwnedSessionStore(codexOwnedAdapter);
 
 // ── Public API (identical signatures to the pre-Wave-2b implementation) ─────
 

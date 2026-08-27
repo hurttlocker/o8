@@ -333,7 +333,7 @@ export type LaneEventVerb =
   // { runtime, surfaceId, runId, operation, resource, denialLine, message }
   | 'sandbox_denied'
   // Operator-registered MCP servers attached to a packet worker. Payload:
-  // { servers, configPath }
+  // { servers, configPath?, mode: 'launch' | 'resume' }
   | 'mcp_injected'
   // An MCP server or attachment set was skipped without blocking spawn. Payload:
   // { server?, command?, servers?, reason }
