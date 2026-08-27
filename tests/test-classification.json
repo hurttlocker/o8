@@ -1,9 +1,9 @@
 {
   "schema": "o8/test-classification/v1",
   "generatedBy": "node scripts/classify-tests.mjs --write",
-  "totalTests": 884,
+  "totalTests": 885,
   "hermeticTests": 569,
-  "resourceOwningTests": 315,
+  "resourceOwningTests": 316,
   "resourceOwning": [
     {
       "path": "src/app/api/leases/route.test.ts",
@@ -1887,6 +1887,12 @@
         "child-process",
         "executable-fixture",
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/release-build-cache.test.ts",
+      "reasons": [
+        "native-build"
       ]
     },
     {

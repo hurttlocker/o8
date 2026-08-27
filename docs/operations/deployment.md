@@ -27,6 +27,8 @@ Development ports are conveniences, not protocol constants. The packaged shell a
 
 The export step keeps native modules external where required, copies runtime-read assets beside the server bundles, and packages the resources declared by `src-tauri/tauri.conf.json`.
 
+Changed releases reuse verified web, native, and speech compiler intermediates through the [release build cache](release-build-cache.md). The cache never reuses final bundles or bypasses signing, notarization, publication, or exact-output verification. Any invalid entry falls back to the normal cold build.
+
 ## Verification
 
 Before a release candidate:
