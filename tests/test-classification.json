@@ -1,9 +1,6 @@
 {
   "schema": "o8/test-classification/v1",
   "generatedBy": "node scripts/classify-tests.mjs --write",
-  "totalTests": 897,
-  "hermeticTests": 576,
-  "resourceOwningTests": 321,
   "resourceOwning": [
     {
       "path": "src/app/api/leases/route.test.ts",
