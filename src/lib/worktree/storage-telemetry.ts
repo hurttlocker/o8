@@ -112,25 +112,32 @@ function measurementError(
   return { metric, code: errorCode(error), message: errorMessage(error) };
 }
 
-async function runDuSize(targetPath: string, apparent: boolean): Promise<string> {
+async function runDuBytes(targetPath: string, apparent: boolean): Promise<number> {
+  const darwin = process.platform === 'darwin';
   const args = apparent
-    ? process.platform === 'darwin'
+    ? darwin
       ? ['-skA', targetPath]
-      : ['-sk', '--apparent-size', targetPath]
-    : ['-sk', targetPath];
+      : ['-s', '--block-size=1', '--apparent-size', targetPath]
+    : darwin
+      ? ['-sk', targetPath]
+      : ['-s', '--block-size=1', targetPath];
   const { stdout } = await execFileAsync('du', args, {
     env: { ...process.env, LC_ALL: 'C' },
     windowsHide: true,
     timeout: DU_TIMEOUT_MS,
   });
-  return stdout;
+  return parseDuBytes(stdout, apparent ? 'logical' : 'allocated', darwin ? 1024 : 1);
 }
 
-function parseDuBytes(stdout: string, metric: 'allocated' | 'logical'): number {
+function parseDuBytes(
+  stdout: string,
+  metric: 'allocated' | 'logical',
+  bytesPerUnit = 1024,
+): number {
   const match = /^\s*(\d+)/.exec(stdout);
   if (!match) throw new Error(`du returned no ${metric} size.`);
-  const kibibytes = Number(match[1]);
-  const bytes = kibibytes * 1024;
+  const units = Number(match[1]);
+  const bytes = units * bytesPerUnit;
   if (!Number.isSafeInteger(bytes) || bytes < 0) {
     throw new Error(`du returned an ${metric} size outside the safe integer range.`);
   }
@@ -202,9 +209,11 @@ export async function measureDirectoryStorage(
   }
 
   const allocatedSize = dependencies.runAllocatedSize
-    ?? ((dir: string) => runDuSize(dir, false));
+    ? async (dir: string) => parseDuBytes(await dependencies.runAllocatedSize!(dir), 'allocated')
+    : (dir: string) => runDuBytes(dir, false);
   const logicalSize = dependencies.runLogicalSize
-    ?? ((dir: string) => runDuSize(dir, true));
+    ? async (dir: string) => parseDuBytes(await dependencies.runLogicalSize!(dir), 'logical')
+    : (dir: string) => runDuBytes(dir, true);
   const [entriesResult, allocatedSizeResult, logicalSizeResult] = await Promise.allSettled([
     readDirectory(resolvedPath),
     allocatedSize(resolvedPath),
@@ -224,21 +233,13 @@ export async function measureDirectoryStorage(
   }
 
   if (allocatedSizeResult.status === 'fulfilled') {
-    try {
-      allocatedBytes = parseDuBytes(allocatedSizeResult.value, 'allocated');
-    } catch (error) {
-      errors.push(measurementError('allocatedBytes', error));
-    }
+    allocatedBytes = allocatedSizeResult.value;
   } else {
     errors.push(measurementError('allocatedBytes', allocatedSizeResult.reason));
   }
 
   if (logicalSizeResult.status === 'fulfilled') {
-    try {
-      logicalBytes = parseDuBytes(logicalSizeResult.value, 'logical');
-    } catch (error) {
-      errors.push(measurementError('logicalBytes', error));
-    }
+    logicalBytes = logicalSizeResult.value;
   } else {
     errors.push(measurementError('logicalBytes', logicalSizeResult.reason));
   }

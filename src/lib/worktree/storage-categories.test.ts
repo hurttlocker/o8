@@ -107,7 +107,12 @@ describe('storage category telemetry', () => {
     const workspace = aggregateDirectoryStorage(snapshot.repos[0]!.workspaceMeasurements);
     const categories = snapshot.repos[0]!.categories;
 
-    expect(snapshot.accountingStatus).toBe('observed');
+    expect(
+      snapshot.accountingStatus,
+      JSON.stringify(Object.fromEntries(
+        Object.entries(snapshot.categories).map(([category, usage]) => [category, usage.errors]),
+      )),
+    ).toBe('observed');
     expect(snapshot.freshness).toMatchObject({ source: 'measured', ttlMs: 5_000 });
     expect(categories.source.allocatedBytes).not.toBeNull();
     expect(categories.source.measurementMethod).toBe('workspace-residual');
