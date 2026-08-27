@@ -60,6 +60,8 @@ describe('packet self-review outcome receipt', () => {
     expect(instructions).toContain('"residual"');
     expect(instructions).toContain('"decision"');
     expect(instructions).toContain('"recurrenceProtection"');
+    expect(instructions).toContain('enumerate every production path with that property in the packet notes');
+    expect(instructions).toContain('do not commit a one-site patch of a many-site invariant as `implementation_ready`');
     expect(instructions).toContain('does not declare the user-facing outcome closed');
   });
 
@@ -68,5 +70,6 @@ describe('packet self-review outcome receipt', () => {
     expect(instructions).toContain('"finding_ready|partial|blocked"');
     expect(instructions).toContain('at least one concrete evidence item');
     expect(instructions).toContain('does not permit edits, commits, mutations');
+    expect(instructions).not.toContain('enumerate every production path with that property');
   });
 });
