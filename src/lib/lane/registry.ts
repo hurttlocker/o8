@@ -14,17 +14,12 @@ import { publishLaneLifecycleEvent } from './lifecycle';
 import { extractLaneReviewScreenshot } from './review-screenshot';
 import { isRefusedTerminalTransition, isWorkerTerminal } from './terminal-states';
 import type {
-  Lane,
-  LaneEvent,
-  LaneEventActor,
-  LaneEventVerb,
-  LaneOwnership,
-  LaneRuntime,
-  LaneStatus,
+  Lane, LaneEvent, LaneEventActor, LaneEventVerb, LaneOwnership, LaneRuntime, LaneStatus,
 } from './types';
 import { scheduleTerminalLaneCleanup } from './terminal-lane-cleanup';
 import { captureLaneStorageCleanup, laneOwnsWorktree, settleLaneStorageOnAssociationLoss, worktreeIsConfirmedAbsent } from './lane-storage-release';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { resolveLaneCreationBaseCommit } from './creation-base';
 
 export {
   findLanesTouching,
@@ -315,6 +310,8 @@ export function createLane(opts: {
       projectId,
       repoPath: opts.repoPath,
       branch: opts.branch,
+      baseBranch: lane.baseBranch,
+      baseCommit: resolveLaneCreationBaseCommit(lane),
       runtime: opts.runtime,
       packetId: opts.packetId ?? null,
       sessionKey: opts.sessionKey ?? null,

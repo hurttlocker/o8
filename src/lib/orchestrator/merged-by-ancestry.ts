@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 
 import { appendEvent, archiveLane, getLane, getLaneEvents, listLanes, updateLane } from '@/lib/lane/registry';
 import { assessOwnedTranscriptActivity } from '@/lib/lane/reaper-liveness';
+import { laneCreationBaseCommit } from '@/lib/lane/creation-base';
 import type { Lane } from '@/lib/lane/types';
 import {
   readOrchestratorControlPlaneState,
@@ -32,6 +33,7 @@ interface MergeEvidence {
   baseRef: string;
   headSha: string;
   baseSha: string;
+  creationBaseSha?: string;
   mergeBaseSha?: string;
   patchId?: string;
   noChangesReason?: NoChangesReason;
@@ -299,6 +301,9 @@ async function detectMergedByAncestry(candidate: Candidate): Promise<MergeEviden
   const baseRef = await resolveBaseRef(repoPath, baseBranch);
   const laneAlreadyMerged = candidate.lane?.outcome === 'merged';
   const durableLaunch = hasDurableLaunchEvidence(candidate);
+  const creationBaseCommit = candidate.laneId
+    ? laneCreationBaseCommit(getLaneEvents(candidate.laneId, 10_000))
+    : null;
   const noChangesEligible = !laneAlreadyMerged
     && durableLaunch
     && (
@@ -332,10 +337,25 @@ async function detectMergedByAncestry(candidate: Candidate): Promise<MergeEviden
   ]);
   if (!headSha || !baseSha) return null;
 
+  if (noChangesEligible && creationBaseCommit === headSha) {
+    return {
+      kind: 'no-changes',
+      repoPath,
+      branchRef,
+      baseRef,
+      headSha,
+      baseSha,
+      creationBaseSha: creationBaseCommit,
+      noChangesReason: 'branch_matches_base',
+    };
+  }
+
   const publishedBranchExists = branch !== baseBranch
     && await refExists(repoPath, `origin/${branch}`);
   if (headSha === baseSha && !laneAlreadyMerged) {
-    if (noChangesEligible && (branch === baseBranch || !publishedBranchExists)) {
+    if (noChangesEligible
+      && creationBaseCommit === null
+      && (branch === baseBranch || !publishedBranchExists)) {
       return {
         kind: 'no-changes',
         repoPath,
@@ -460,7 +480,8 @@ async function evidenceStillHolds(evidence: MergeEvidence): Promise<boolean> {
       return currentBranchRef === null && currentHeadSha === currentBaseSha;
     }
     const currentHeadSha = await revParse(evidence.repoPath, evidence.branchRef);
-    return currentHeadSha === evidence.headSha && currentHeadSha === currentBaseSha;
+    const noChangesBaseSha = evidence.creationBaseSha ?? currentBaseSha;
+    return currentHeadSha === evidence.headSha && currentHeadSha === noChangesBaseSha;
   }
 
   const currentHeadSha = await revParse(evidence.repoPath, evidence.branchRef);
@@ -592,6 +613,7 @@ async function finishWithoutChanges(candidate: Candidate, evidence: MergeEvidenc
       branch: evidence.branchRef,
       baseRef: evidence.baseRef,
       baseSha: evidence.baseSha,
+      creationBaseSha: evidence.creationBaseSha ?? null,
       repoPath: evidence.repoPath,
     });
     archiveLane(candidate.laneId, 'system');

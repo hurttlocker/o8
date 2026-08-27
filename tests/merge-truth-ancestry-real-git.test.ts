@@ -8,6 +8,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 const { appendEvent, createLane, getLane, setLaneStatus } = await import('@/lib/lane/registry');
 const { reconcileOrphanedWorktrees } = await import('@/lib/lane/reconcile');
 const { listZombieLaneCandidates } = await import('@/lib/lane/reaper');
+const { sweepPacketsMergedByAncestry } = await import('@/lib/orchestrator/merged-by-ancestry');
 const { isAncestorCommit } = await import('@/lib/orchestrator/operator-mission-service/merge-truth');
 const { createWorkspaceSnapshot, transitionWorkspaceSnapshot } = await import('@/lib/worktree/snapshot-state');
 
@@ -111,6 +112,47 @@ describe('merge truth by git ancestry', () => {
 
     expect(await reconcileOrphanedWorktrees()).toBeGreaterThanOrEqual(1);
     expect(getLane(lane.id)?.status).toBe('completed');
+  });
+
+  it('records launched work as merged when its branch later converges with the base', async () => {
+    const repo = makeRepo('o8-merge-truth-converged-');
+    git(repo, ['checkout', '-b', 'inline/converged']);
+    const lane = createLane({
+      repoPath: repo,
+      worktreePath: missingWorktree(repo, 'missing-converged'),
+      branch: 'inline/converged',
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId: 'pkt-converged',
+    });
+    writeFileSync(join(repo, 'feature.txt'), 'feature\n');
+    commitAll(repo, 'feature');
+    git(repo, ['checkout', 'main']);
+    git(repo, ['merge', '--ff-only', 'inline/converged']);
+    setLaneStatus(lane.id, 'reviewing', 'system', 'agent_completed');
+
+    expect((await sweepPacketsMergedByAncestry()).merged).toBeGreaterThanOrEqual(1);
+    expect(getLane(lane.id)).toMatchObject({ status: 'archived', outcome: 'merged' });
+  });
+
+  it('keeps a launched no-change branch truthful after the base advances', async () => {
+    const repo = makeRepo('o8-merge-truth-no-change-');
+    git(repo, ['checkout', '-b', 'inline/no-change']);
+    const lane = createLane({
+      repoPath: repo,
+      worktreePath: missingWorktree(repo, 'missing-no-change'),
+      branch: 'inline/no-change',
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId: 'pkt-no-change',
+    });
+    git(repo, ['checkout', 'main']);
+    writeFileSync(join(repo, 'base.txt'), 'base\nadvanced\n');
+    commitAll(repo, 'advance base');
+    setLaneStatus(lane.id, 'reviewing', 'system', 'agent_completed');
+
+    expect((await sweepPacketsMergedByAncestry()).merged).toBeGreaterThanOrEqual(1);
+    expect(getLane(lane.id)).toMatchObject({ status: 'archived', outcome: 'no_changes' });
   });
 
   it('finishes a merging lane whose worktree metadata is already cleared when Git proves the merge landed', async () => {
