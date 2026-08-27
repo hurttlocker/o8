@@ -7,8 +7,9 @@ import { composeSupervisorInboxCardCopy } from '@/lib/inbox/card-copy';
 import { actionReceiptIsInProgress, correlatedActionIsUnsettled, fetchCorrelatedActionReceipt } from '@/lib/orchestrator/action-receipt';
 import { useCorrelatedActionLatch } from '@/components/desktop/use-correlated-action-latch';
 import { fireInvalidation } from '@/lib/query/use-reactive-query';
+import { openExternalUrl } from '@/lib/desktop/open-external';
 import { O8ApprovalCards } from './o8-panel/O8ApprovalCards';
-import { ArchiveGlyph, ChatGlyph, FileTextGlyph, FolderGlyph, RetryGlyph, StopGlyph } from './o8-inbox-glyphs';
+import { ArchiveGlyph, ChatGlyph, ExternalLinkGlyph, FileTextGlyph, FolderGlyph, RetryGlyph, StopGlyph } from './o8-inbox-glyphs';
 
 const KIND_LABELS: Record<SupervisorInboxItem['kind'], string> = {
   verification_failed: 'Verification Failed',
@@ -25,6 +26,7 @@ const KIND_LABELS: Record<SupervisorInboxItem['kind'], string> = {
   silent_exit_no_work: 'Silent Exit · No Work',
   silent_exit_but_work_present: 'Silent Exit · Work Salvaged',
   no_session_binding: 'No Session Binding',
+  outside_human_waiting: 'Outside Human Waiting',
 };
 
 const STATUS_LABELS: Record<SupervisorInboxItem['status'], string> = {
@@ -478,6 +480,8 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
             const isEscalated = item.status === 'escalated';
             const isSelfHealed = item.status === 'self_healed';
             const isResolved = item.status === 'resolved';
+            const isOutsideHumanWaiting = item.kind === 'outside_human_waiting';
+            const threadUrl = typeof item.payload.url === 'string' ? item.payload.url : null;
             const transcriptPreview = expandedTranscriptById[item.id] ?? null;
             const actionNote = actionNoteById[item.id] ?? null;
             const copy = composeSupervisorInboxCardCopy(item);
@@ -583,7 +587,16 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
                   <div style={{ minWidth: 0, flex: 1, fontSize: 10, color: 'var(--t-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {actionNote}
                   </div>
-                  {isHumanRequired && item.packetId ? (
+                  {isOutsideHumanWaiting ? (
+                    <InboxActionButton
+                      title="Open GitHub thread"
+                      onClick={() => openExternalUrl(threadUrl)}
+                      disabled={!threadUrl}
+                    >
+                      <ExternalLinkGlyph />
+                    </InboxActionButton>
+                  ) : null}
+                  {!isOutsideHumanWaiting && isHumanRequired && item.packetId ? (
                     <>
                       <InboxActionButton
                         title="Retry packet (fresh worker)"
@@ -601,25 +614,29 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
                       </InboxActionButton>
                     </>
                   ) : null}
-                  <InboxActionButton
-                    title={transcriptPreview ? 'Hide transcript' : 'Preview transcript'}
-                    onClick={() => { void openTranscript(item); }}
-                    disabled={!item.transcriptLink}
-                  >
-                    <FileTextGlyph />
-                  </InboxActionButton>
-                  <InboxActionButton
-                    title="Open worktree"
-                    onClick={() => { void openWorktree(item); }}
-                  >
-                    <FolderGlyph />
-                  </InboxActionButton>
-                  <InboxActionButton
-                    title="Add to orchestrator chat"
-                    onClick={() => addToChat(item)}
-                  >
-                    <ChatGlyph />
-                  </InboxActionButton>
+                  {!isOutsideHumanWaiting ? (
+                    <>
+                      <InboxActionButton
+                        title={transcriptPreview ? 'Hide transcript' : 'Preview transcript'}
+                        onClick={() => { void openTranscript(item); }}
+                        disabled={!item.transcriptLink}
+                      >
+                        <FileTextGlyph />
+                      </InboxActionButton>
+                      <InboxActionButton
+                        title="Open worktree"
+                        onClick={() => { void openWorktree(item); }}
+                      >
+                        <FolderGlyph />
+                      </InboxActionButton>
+                      <InboxActionButton
+                        title="Add to orchestrator chat"
+                        onClick={() => addToChat(item)}
+                      >
+                        <ChatGlyph />
+                      </InboxActionButton>
+                    </>
+                  ) : null}
                   {!isSelfHealed && !isResolved ? (
                     <InboxActionButton
                       title="Dismiss incident"

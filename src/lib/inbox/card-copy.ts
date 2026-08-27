@@ -51,6 +51,11 @@ export function composeSupervisorInboxCardCopy(item: SupervisorInboxItem): Inbox
   const worktree = clean(item.worktreePath ?? item.repoPath);
 
   switch (item.kind) {
+    case 'outside_human_waiting':
+      return {
+        headline: clean(item.payload.title) ?? 'An outside contributor is waiting for a reply.',
+        subline: clean(item.payload.body) ?? 'Open the GitHub thread to respond.',
+      };
     case 'silent_exit_verification_failed':
       return {
         headline: 'The worker finished but o8 could not verify its work; review the diff and approve or retry.',

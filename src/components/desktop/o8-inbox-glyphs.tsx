@@ -34,3 +34,7 @@ export function StopGlyph() {
 export function ArchiveGlyph() {
   return <svg {...glyphProps}><path d="M4 5.5h16v4H4z" /><path d="M6 9.5V19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V9.5" /><path d="M9.5 14h5" /></svg>;
 }
+
+export function ExternalLinkGlyph() {
+  return <svg {...glyphProps}><path d="M14 4h6v6" /><path d="M20 4 11 13" /><path d="M18 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5" /></svg>;
+}
