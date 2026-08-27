@@ -31,5 +31,10 @@ const cacheMs = statSync(cacheDir).mtimeMs;
 
 if (newestPatchMs > cacheMs) {
   console.log('[bust-stale-patch-cache] patches/ newer than .next/cache — clearing webpack cache so patched dependencies rebundle');
-  rmSync(cacheDir, { recursive: true, force: true });
+  // Build systems can mount `.next/cache` as a persistent cache volume. Removing
+  // the mount root fails with EBUSY on Linux, while removing its contents keeps
+  // the mount intact and invalidates the same webpack artifacts.
+  for (const entry of readdirSync(cacheDir)) {
+    rmSync(join(cacheDir, entry), { recursive: true, force: true });
+  }
 }
