@@ -12,6 +12,9 @@ import {
   DEFAULT_PROJECT_ID,
   getActiveProjectScopeForRepoSync,
 } from '@/lib/repos/projects';
+import { reconcileOutsideHumanWaitingInbox } from './outsider-inbox-builder';
+
+export { summarizeInboxItems, type SupervisorInboxSummary } from './inbox-summary';
 
 export type SupervisorInboxKind =
   | 'verification_failed'
@@ -24,6 +27,7 @@ export type SupervisorInboxKind =
   | 'launch_agent_crash_loop'
   | 'packet_no_changes'
   | 'worker_quota_exhausted'
+  | 'outside_human_waiting'
   // #1502 — a lane reported progress/heartbeat while its sessionKey was null:
   // the worker is running into the void (no transcript, no completion signal).
   // FAULT queue item — never self-closes.
@@ -129,6 +133,7 @@ export const RETENTION_POLICY: Partial<Record<SupervisorInboxKind, {
   no_session_binding: { defaultStatus: 'human_required' },
   packet_no_changes: { defaultStatus: 'pending', autoDismissAfterMs: 7 * 24 * HOUR_MS },
   worker_quota_exhausted: { defaultStatus: 'human_required' },
+  outside_human_waiting: { defaultStatus: 'human_required' },
 };
 
 function ensureSupervisorInboxTable() {
@@ -252,6 +257,13 @@ function buildIncidentKey(input: {
   kind: SupervisorInboxKind;
   payload: SupervisorInboxPayload;
 }): string {
+  if (input.kind === 'outside_human_waiting') {
+    const threadKind = payloadString(input.payload, 'threadKind') ?? '';
+    const threadNumber = typeof input.payload.threadNumber === 'number'
+      ? String(input.payload.threadNumber)
+      : '';
+    return [input.repoPath, input.kind, threadKind, threadNumber].join('\u0000');
+  }
   const laneId = payloadString(input.payload, 'laneId');
   const worktreePath = payloadString(input.payload, 'worktreePath');
   const stage = payloadString(input.payload, 'stage');
@@ -614,12 +626,33 @@ function payloadStringFromRaw(rawPayload: string, key: string): string | null {
   }
 }
 
+export function buildOutsideHumanWaitingInbox(
+  now = new Date(),
+  thresholdMs?: number,
+): { created: number; resolved: number } {
+  ensureSupervisorInboxTable();
+  return reconcileOutsideHumanWaitingInbox({
+    now,
+    thresholdMs,
+    enqueue: enqueueInboxItem,
+    resolve: (id, resolvedAt, payload, insiderReplyAt) => resolveInboxItem(id, null, {
+      note: 'GitHub mirror recorded an insider reply after the outside contributor.',
+      packetId: null,
+      laneId: null,
+      event: 'outside_human_waiting_cleared',
+      evidence: { url: payload.url, waitingSince: payload.waitingSince, insiderReplyAt },
+      resolvedAt,
+    }),
+  });
+}
+
 export function listInboxItems(options: {
   includeDismissed?: boolean;
   includeAllProjects?: boolean;
   projectId?: string | null;
 } = {}): SupervisorInboxItem[] {
   ensureSupervisorInboxTable();
+  buildOutsideHumanWaitingInbox();
   collapseActiveInboxIncidents();
   const projectId = options.projectId ?? getActiveProjectScopeForRepoSync().projectId;
 
@@ -721,62 +754,4 @@ export function listInboxItems(options: {
       }
       return right.lastSeenAt.localeCompare(left.lastSeenAt);
     });
-}
-
-export interface SupervisorInboxSummary {
-  active: number;
-  humanRequired: number;
-  pending: number;
-  healing: number;
-  escalated: number;
-  selfHealed: number;
-  resolved: number;
-  dismissed: number;
-  total: number;
-}
-
-export function summarizeInboxItems(items: SupervisorInboxItem[]): SupervisorInboxSummary {
-  return items.reduce<SupervisorInboxSummary>((summary, item) => {
-    summary.total += 1;
-    switch (item.status) {
-      case 'human_required':
-        summary.humanRequired += 1;
-        summary.active += 1;
-        break;
-      case 'pending':
-        summary.pending += 1;
-        summary.active += 1;
-        break;
-      case 'healing':
-        summary.healing += 1;
-        summary.active += 1;
-        break;
-      case 'escalated':
-        summary.escalated += 1;
-        summary.active += 1;
-        break;
-      case 'self_healed':
-        summary.selfHealed += 1;
-        break;
-      case 'resolved':
-        summary.resolved += 1;
-        break;
-      case 'dismissed':
-        summary.dismissed += 1;
-        break;
-      default:
-        break;
-    }
-    return summary;
-  }, {
-    active: 0,
-    humanRequired: 0,
-    pending: 0,
-    healing: 0,
-    escalated: 0,
-    selfHealed: 0,
-    resolved: 0,
-    dismissed: 0,
-    total: 0,
-  });
 }

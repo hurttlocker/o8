@@ -1784,6 +1784,14 @@
       ]
     },
     {
+      "path": "tests/outsider-waiting-inbox-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/owned-codex-transcript-ingestion-real-path.test.ts",
       "reasons": [
         "real-path"
