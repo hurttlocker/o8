@@ -204,6 +204,45 @@ describe('durable review approval governance invariants', () => {
     });
   }, 20_000);
 
+  it('authorizes an approved review persisted with a current abbreviated HEAD', async () => {
+    const repoPath = initRepo();
+    const packetId = `pkt-durable-abbreviated-head-${Date.now()}`;
+    const lane = createReviewLane(repoPath, packetId);
+    const reviewedHeadSha = git(repoPath, ['rev-parse', 'HEAD']);
+    const abbreviatedHeadSha = reviewedHeadSha.slice(0, 9);
+
+    recordOrchestratorReview(packetId, {
+      approved: true,
+      findings: [],
+      reviewedHeadSha: abbreviatedHeadSha,
+    });
+
+    await expect(assessDurableApprovedReview(lane)).resolves.toMatchObject({
+      approved: true,
+      reason: 'Current HEAD has a clean, finding-free AI review.',
+    });
+  }, 20_000);
+
+  it('explains when an abbreviated reviewed HEAD does not match the current HEAD', async () => {
+    const repoPath = initRepo();
+    const packetId = `pkt-durable-mismatched-abbreviated-head-${Date.now()}`;
+    const lane = createReviewLane(repoPath, packetId);
+    const currentHeadSha = git(repoPath, ['rev-parse', 'HEAD']);
+    const mismatchedHeadSha = `${currentHeadSha[0] === 'f' ? 'e' : 'f'}${currentHeadSha.slice(1, 9)}`;
+
+    recordOrchestratorReview(packetId, {
+      approved: true,
+      findings: [],
+      reviewedHeadSha: mismatchedHeadSha,
+    });
+
+    await expect(assessDurableApprovedReview(lane)).resolves.toMatchObject({
+      approved: false,
+      approvalId: null,
+      reason: `Review pinned to ${mismatchedHeadSha} but current HEAD is ${currentHeadSha}.`,
+    });
+  }, 20_000);
+
   it('demotes an approved record when a later review rejects it and records the transition', async () => {
     const repoPath = initRepo();
     const packetId = `pkt-durable-review-demotion-${Date.now()}`;

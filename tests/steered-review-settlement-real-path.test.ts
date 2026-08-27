@@ -703,7 +703,7 @@ describe('release truth requires evidence (#1844 / #1856)', () => {
     const gate = await assessDurableApprovedReview(getLane(lane.id)!);
     expect(gate.approved).toBe(false);
     expect(gate.approvalId).toBeNull();
-    expect(gate.reason).toContain('does not authorize the current HEAD');
+    expect(gate.reason).toBe(`Review pinned to ${reviewedHead} but current HEAD is ${successorHead}.`);
   });
 
   it('does not mint releaseState from a lane that merely completed', async () => {

@@ -73,6 +73,13 @@ function parseToolResult(result: { content: Array<{ type: string; text?: string 
   return JSON.parse(text!) as Record<string, unknown>;
 }
 
+function parseToolError(result: { content: Array<{ type: string; text?: string }>; isError?: boolean }) {
+  expect(result.isError).toBe(true);
+  const text = result.content.find((entry) => entry.type === 'text')?.text;
+  expect(text).toBeTruthy();
+  return JSON.parse(text!) as Record<string, unknown>;
+}
+
 async function routeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url);
   const request = new NextRequest(url, {
@@ -191,6 +198,7 @@ afterAll(() => rmSync(dataDir, { recursive: true, force: true }));
 describe('operator MCP review-to-merge freshness', () => {
   it('merges from the review persisted by the immediately preceding submit_review', async () => {
     const fixture = await createFixture();
+    const abbreviatedHeadSha = fixture.reviewedHeadSha.slice(0, 9);
     const reviewTurnId = startReviewTurn({
       laneId: fixture.lane.id,
       threadId: `auto-review-${fixture.lane.id}`,
@@ -202,7 +210,7 @@ describe('operator MCP review-to-merge freshness', () => {
       packetId: fixture.packetId,
       findings: [],
       approved: true,
-      reviewedHeadSha: fixture.reviewedHeadSha,
+      reviewedHeadSha: abbreviatedHeadSha,
     }));
     expect(review).toMatchObject({ recorded: true, reviewedHeadSha: fixture.reviewedHeadSha });
 
@@ -235,5 +243,41 @@ describe('operator MCP review-to-merge freshness', () => {
     expect(readOrchestratorControlPlaneState().packets.find((packet) => (
       packet.id === fixture.packetId
     ))?.review?.reviewedHeadSha).toBe(fixture.reviewedHeadSha);
+  }, 60_000);
+
+  it('returns a structured error without persisting an unresolvable reviewed HEAD', async () => {
+    const fixture = await createFixture();
+    const unresolvableHeadSha = `${fixture.reviewedHeadSha[0] === 'f' ? 'e' : 'f'}${fixture.reviewedHeadSha.slice(1, 9)}`;
+
+    const review = parseToolError(await handleSubmitReview({
+      packetId: fixture.packetId,
+      findings: [],
+      approved: true,
+      reviewedHeadSha: unresolvableHeadSha,
+    }));
+
+    expect(review).toMatchObject({
+      recorded: false,
+      reviewedHeadSha: null,
+      code: 'unresolvable_reviewed_head_sha',
+      ignoredReason: 'unresolvable_reviewed_head_sha',
+    });
+    expect(review.error).toContain(`reviewedHeadSha ${unresolvableHeadSha} does not resolve`);
+    expect(listApprovalsForContext({
+      packetId: fixture.packetId,
+      laneId: fixture.lane.id,
+    })).not.toContainEqual(expect.objectContaining({ toolName: 'orchestrator_review' }));
+
+    const tooShort = parseToolError(await handleSubmitReview({
+      packetId: fixture.packetId,
+      findings: [],
+      approved: true,
+      reviewedHeadSha: 'abcdef',
+    }));
+    expect(tooShort).toMatchObject({
+      recorded: false,
+      code: 'invalid_reviewed_head_sha',
+      ignoredReason: 'invalid_reviewed_head_sha',
+    });
   }, 60_000);
 });

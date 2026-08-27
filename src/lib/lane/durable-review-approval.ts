@@ -186,7 +186,7 @@ export async function assessDurableApprovedReview(
   lane: Pick<Lane, 'id' | 'packetId' | 'sessionKey' | 'worktreePath' | 'repoPath' | 'baseBranch'>,
 ): Promise<DurableReviewAssessment> {
   try {
-    const [{ listApprovalsForContext }, { normalizeHeadSha, readHeadSha }] = await Promise.all([
+    const [{ listApprovalsForContext }, { headShaMatches, normalizeHeadSha, readHeadSha }] = await Promise.all([
       import('@/lib/approvals/store'),
       import('@/lib/lane/head-sha-lock'),
     ]);
@@ -219,15 +219,28 @@ export async function assessDurableApprovedReview(
     }
     if (!currentHead) return { approved: false, diffBudgetWaived: false, highConfidence: false, approvalId: null, reason: 'Current HEAD is unavailable.' };
 
-    const matchingHead = completedReviews.filter((approval) => {
-      const reviewed = normalizeHeadSha(reviewedHeadForApproval(approval));
-      return reviewed !== undefined && reviewed === currentHead;
-    }).sort((left, right) => (
+    const reviewsByRecency = completedReviews.slice().sort((left, right) => (
       reviewVerdictTimestamp(right) - reviewVerdictTimestamp(left)
       || right.updatedAt - left.updatedAt
       || right.id.localeCompare(left.id)
     ));
+    const matchingHead = reviewsByRecency.filter((approval) => {
+      const reviewed = normalizeHeadSha(reviewedHeadForApproval(approval));
+      return reviewed !== undefined && headShaMatches(currentHead, reviewed);
+    });
     const latestReview = matchingHead[0];
+    if (!latestReview) {
+      const reviewed = normalizeHeadSha(reviewedHeadForApproval(reviewsByRecency[0]!));
+      return {
+        approved: false,
+        diffBudgetWaived: false,
+        highConfidence: false,
+        approvalId: null,
+        reason: reviewed
+          ? `Review pinned to ${reviewed} but current HEAD is ${currentHead}.`
+          : 'The latest AI review is not pinned to the current HEAD.',
+      };
+    }
     const diffBudgetWaived = latestReview ? carriesAcceptedFinding(latestReview) : false;
     const matching = latestReview
       && latestReview.status === 'approved'

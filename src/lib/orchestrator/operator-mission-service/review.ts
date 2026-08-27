@@ -4,7 +4,13 @@ import { resolveApproval } from '@/lib/approvals/resolution';
 import { createApproval, listApprovalsForContext, recordApprovalAudit } from '@/lib/approvals/store';
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
 import { getLaneDiffFacts } from '@/lib/lane/lane-diff-facts';
-import { normalizeHeadSha, readHeadSha } from '@/lib/lane/head-sha-lock';
+import {
+  headShaMatches,
+  isValidHeadSha,
+  normalizeHeadSha,
+  readHeadSha,
+  resolveHeadSha,
+} from '@/lib/lane/head-sha-lock';
 import { appendEvent, findLaneByPacket, findLatestLaneByPacket } from '@/lib/lane/registry';
 import { classifyReviewRisk } from '@/lib/lane/review-risk';
 import { findActiveReviewTurn } from '@/lib/lane/review-turn-state';
@@ -141,6 +147,35 @@ function hasApprovedVerdict(packet: OrchestratorPacket, lane: Lane | null): bool
   ));
 }
 
+async function normalizeSubmittedReviewHead(
+  input: string | undefined,
+  cwd: string | undefined,
+): Promise<
+  | { ok: true; reviewedHeadSha: string | undefined }
+  | { ok: false; code: 'invalid_reviewed_head_sha' | 'unresolvable_reviewed_head_sha'; error: string }
+> {
+  const normalized = normalizeHeadSha(input)?.toLowerCase();
+  if (!normalized) return { ok: true, reviewedHeadSha: undefined };
+  if (!isValidHeadSha(normalized)) {
+    return {
+      ok: false,
+      code: 'invalid_reviewed_head_sha',
+      error: 'reviewedHeadSha must be a 7- to 40-character hexadecimal commit SHA.',
+    };
+  }
+  if (!cwd) return { ok: true, reviewedHeadSha: normalized };
+
+  const resolved = await resolveHeadSha(cwd, normalized);
+  if (!resolved) {
+    return {
+      ok: false,
+      code: 'unresolvable_reviewed_head_sha',
+      error: `reviewedHeadSha ${normalized} does not resolve to a commit in the packet repository.`,
+    };
+  }
+  return { ok: true, reviewedHeadSha: resolved };
+}
+
 function recordPacketReviewAudit(
   packet: OrchestratorPacket,
   findings: OrchestratorReviewFinding[],
@@ -219,13 +254,30 @@ export async function submitPacketReview(input: SubmitReviewInput) {
   // whose latest commits the reviewer's diff never showed — callers that care
   // must pass reviewedHeadSha explicitly. Merge-time drift refusal
   // (head_moved_since_review) still guards commits landing after this point.
-  let reviewedHeadSha = normalizeHeadSha(input.reviewedHeadSha);
+  const reviewCwd = verdictLane?.worktreePath?.trim()
+    || verdictLane?.repoPath?.trim()
+    || packet.workspaceTargetPath?.trim()
+    || undefined;
+  const submittedHead = await normalizeSubmittedReviewHead(input.reviewedHeadSha, reviewCwd);
+  if (!submittedHead.ok) {
+    return {
+      recorded: false,
+      findingsCount: 0,
+      reviewedHeadSha: null,
+      code: submittedHead.code,
+      error: submittedHead.error,
+      auditEventType: null,
+      auditApprovalId: null,
+      ignoredReason: submittedHead.code,
+    };
+  }
+  let reviewedHeadSha = submittedHead.reviewedHeadSha;
   let reviewedHeadAutoCaptured = false;
   const expectedHeadSha = activeReviewTurn?.surface === 'auto-review'
     ? normalizeHeadSha(activeReviewTurn.expectedHeadSha)
     : undefined;
   if (expectedHeadSha) {
-    const cwd = verdictLane?.worktreePath?.trim() || undefined;
+    const cwd = reviewCwd;
     let currentHeadSha: string | undefined;
     if (cwd) {
       try {
@@ -235,8 +287,9 @@ export async function submitPacketReview(input: SubmitReviewInput) {
       }
     }
     if (
-      currentHeadSha !== expectedHeadSha
-      || (reviewedHeadSha !== undefined && reviewedHeadSha !== expectedHeadSha)
+      !currentHeadSha
+      || !headShaMatches(currentHeadSha, expectedHeadSha)
+      || (reviewedHeadSha !== undefined && !headShaMatches(reviewedHeadSha, expectedHeadSha))
     ) {
       if (verdictLane) {
         appendEvent(verdictLane.id, 'review_head_drift_rejected', 'system', {
@@ -259,7 +312,7 @@ export async function submitPacketReview(input: SubmitReviewInput) {
     }
     reviewedHeadSha = expectedHeadSha;
   } else if (!reviewedHeadSha) {
-    const cwd = verdictLane?.worktreePath?.trim() || undefined;
+    const cwd = reviewCwd;
     if (cwd) {
       try {
         reviewedHeadSha = normalizeHeadSha(await readHeadSha(cwd));
