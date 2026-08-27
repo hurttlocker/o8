@@ -18,6 +18,12 @@ export interface QuickAction {
 
 export const QUICK_ACTIONS: QuickAction[] = [
   {
+    id: 'prompts',
+    verb: 'Prompts',
+    label: 'Insert a saved prompt',
+    promptTemplate: '',
+  },
+  {
     id: 'dispatch',
     verb: 'Dispatch',
     label: 'Dispatch the next packet',

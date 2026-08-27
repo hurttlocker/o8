@@ -21,16 +21,20 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ORCHESTRATOR_SLASH_COMMANDS } from '@/lib/slash-commands/definitions';
 import { OPEN_SETTINGS_TAB_EVENT } from '@/lib/desktop/events';
+import type { PromptLibraryEntry } from '@/lib/prompt-library/client';
+import { PromptLibraryTab } from './customize/PromptLibraryTab';
+import { DetailLine, EmptyState, OpenFileLink, Row, SectionHeader, TruncatedRows } from './customize/shared';
 
 const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = 'var(--font-mono, "SF Mono", Menlo, monospace)';
 
-type CustomizeTab = 'rules' | 'connections' | 'commands' | 'agents' | 'hooks';
+type CustomizeTab = 'rules' | 'commands' | 'prompts' | 'connections' | 'agents' | 'hooks';
 
 const TABS: Array<{ id: CustomizeTab; label: string }> = [
   { id: 'rules', label: 'Rules' },
-  { id: 'connections', label: 'Connections' },
   { id: 'commands', label: 'Commands' },
+  { id: 'prompts', label: 'Prompts' },
+  { id: 'connections', label: 'Connections' },
   { id: 'agents', label: 'Agents' },
   { id: 'hooks', label: 'Hooks' },
 ];
@@ -98,6 +102,7 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
   const [servers, setServers] = useState<ExternalServer[]>([]);
   const [agents, setAgents] = useState<AgentEntry[]>([]);
   const [hooks, setHooks] = useState<HookEntry[]>([]);
+  const [promptCount, setPromptCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
@@ -123,10 +128,13 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const [directivesRes, serversRes, inventoryRes] = await Promise.allSettled([
+      const promptParams = new URLSearchParams({ scope: 'available', limit: '100' });
+      if (repoPath) promptParams.set('repoPath', repoPath);
+      const [directivesRes, serversRes, inventoryRes, promptsRes] = await Promise.allSettled([
         fetch('/api/cortex/directives').then((r) => (r.ok ? r.json() : null)),
         fetch('/api/setup/mcp-servers').then((r) => (r.ok ? r.json() : null)),
         fetch(`/api/customize/inventory${repoPath ? `?repo=${encodeURIComponent(repoPath)}` : ''}`).then((r) => (r.ok ? r.json() : null)),
+        fetch(`/api/prompt-library?${promptParams.toString()}`).then((r) => (r.ok ? r.json() : null)),
       ]);
       if (cancelled) return;
       if (directivesRes.status === 'fulfilled' && directivesRes.value?.directives) {
@@ -138,6 +146,9 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
       if (inventoryRes.status === 'fulfilled' && inventoryRes.value?.ok) {
         setAgents(inventoryRes.value.agents as AgentEntry[]);
         setHooks(inventoryRes.value.hooks as HookEntry[]);
+      }
+      if (promptsRes.status === 'fulfilled' && promptsRes.value?.prompts) {
+        setPromptCount((promptsRes.value.prompts as unknown[]).length);
       }
       setLoading(false);
     })();
@@ -159,8 +170,9 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
   // filtered counts, so the numbers are stable while searching.
   const tabCounts: Record<CustomizeTab, number> = {
     rules: directives.length,
-    connections: BUILTIN_CONNECTIONS.length + servers.length,
     commands: ORCHESTRATOR_SLASH_COMMANDS.length,
+    prompts: promptCount,
+    connections: BUILTIN_CONNECTIONS.length + servers.length,
     agents: agents.length,
     hooks: hooks.length,
   };
@@ -173,6 +185,16 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
     onClose?.();
     if (typeof window === 'undefined') return;
     window.dispatchEvent(new CustomEvent('o8:open-file', { detail: { path } }));
+  };
+
+  const insertPrompt = (prompt: PromptLibraryEntry) => {
+    onClose?.();
+    if (typeof window === 'undefined') return;
+    window.requestAnimationFrame(() => {
+      window.dispatchEvent(new CustomEvent('o8:orchestrator-inject', {
+        detail: { text: prompt.body },
+      }));
+    });
   };
 
   return (
@@ -388,238 +410,20 @@ export function CustomizePage({ onClose }: { onClose?: () => void }) {
           <ConnectionsTab servers={servers.filter((s) => matches(s.name, s.command, s.url))} query={q} expandedRow={expandedRow} onToggleRow={setExpandedRow} />
         ) : tab === 'commands' ? (
           <CommandsTab query={q} />
+        ) : tab === 'prompts' ? (
+          <PromptLibraryTab
+            query={q}
+            repoPath={repoPath}
+            repoName={activeRepoName}
+            onInsert={insertPrompt}
+            onCountDelta={(delta) => setPromptCount((current) => Math.max(0, current + delta))}
+          />
         ) : tab === 'agents' ? (
           <AgentsTab agents={agents.filter((a) => matches(a.name, a.description))} expandedRow={expandedRow} onToggleRow={setExpandedRow} onOpenFile={openFile} />
         ) : (
           <HooksTab hooks={hooks.filter((h) => matches(h.event, h.command, h.matcher))} onOpenFile={openFile} />
         )}
       </div>
-    </div>
-  );
-}
-
-// ── Shared list primitives ──
-
-/** Cursor's "Show N more ›" — sections cap at LIMIT rows until expanded. */
-function TruncatedRows({ rows, limit = 6 }: { rows: React.ReactNode[]; limit?: number }) {
-  const [showAll, setShowAll] = useState(false);
-  if (rows.length <= limit) return <>{rows}</>;
-  if (showAll) return <>{rows}</>;
-  return (
-    <>
-      {rows.slice(0, limit)}
-      <button
-        type="button"
-        onClick={() => setShowAll(true)}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          border: 'none',
-          background: 'transparent',
-          paddingTop: 5,
-          paddingBottom: 5,
-          paddingLeft: 10,
-          paddingRight: 10,
-          textAlign: 'left',
-          cursor: 'pointer',
-          color: 'var(--t-text-muted)',
-          fontSize: 12,
-          fontWeight: 300,
-          letterSpacing: '-0.1px',
-          fontFamily: UI_FONT,
-          WebkitTapHighlightColor: 'transparent',
-        }}
-      >
-        {`Show ${rows.length - limit} more`}
-        <ChevronDownGlyph />
-      </button>
-    </>
-  );
-}
-
-function SectionHeader({ label, count }: { label: string; count: number }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'baseline', gap: 7, paddingTop: 14, paddingBottom: 4 }}>
-      <span style={{ fontSize: 10, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text-faint)' }}>{label}</span>
-      <span style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-faint)' }}>{count}</span>
-    </div>
-  );
-}
-
-function Row({ title, titleMono = false, subtitle, pill, dot, expanded, onClick, children }: {
-  title: string;
-  titleMono?: boolean;
-  subtitle?: string | null;
-  pill?: string | null;
-  /** 6px status dot (the app's only leading affordance — hurttlocker). */
-  dot?: 'green' | 'gray' | null;
-  expanded?: boolean;
-  onClick?: () => void;
-  children?: React.ReactNode;
-}) {
-  const [hover, setHover] = useState(false);
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column' }}>
-      <div
-        {...(onClick
-          ? {
-              role: 'button',
-              tabIndex: 0,
-              onClick,
-              onKeyDown: (event: React.KeyboardEvent) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  onClick();
-                }
-              },
-            }
-          : {})}
-        onMouseEnter={() => setHover(true)}
-        onMouseLeave={() => setHover(false)}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 9,
-          paddingTop: 8,
-          paddingBottom: 8,
-          paddingLeft: 10,
-          paddingRight: 10,
-          borderRadius: 9,
-          background: hover || expanded ? 'var(--t-hover, var(--t-bg-card))' : 'transparent',
-          cursor: onClick ? 'pointer' : 'default',
-          transition: 'background 100ms ease',
-        }}
-      >
-        {dot ? (
-          <span aria-hidden="true" style={{
-            width: 6,
-            height: 6,
-            borderRadius: '50%',
-            flexShrink: 0,
-            background: dot === 'green' ? 'var(--t-terminal-ansi-bright-green, #16a34a)' : 'var(--t-text-faint)',
-          }} />
-        ) : null}
-        <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span style={{
-            fontSize: titleMono ? 12 : 13.5,
-            fontWeight: titleMono ? 400 : 300,
-            letterSpacing: '-0.1px',
-            lineHeight: 1.25,
-            color: 'var(--t-text)',
-            fontFamily: titleMono ? MONO_FONT : UI_FONT,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}>
-            {title}
-          </span>
-          {subtitle ? (
-            <span style={{
-              fontSize: 9.5,
-              fontWeight: 260,
-              letterSpacing: '-0.4px',
-              lineHeight: 1.25,
-              color: 'var(--t-text-muted)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}>
-              {subtitle}
-            </span>
-          ) : null}
-        </div>
-        {pill ? (
-          <span style={{
-            flexShrink: 0,
-            fontSize: 10,
-            fontWeight: 300,
-            letterSpacing: '-0.1px',
-            color: 'var(--t-text-muted)',
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: 'var(--t-divider)',
-            borderRadius: 999,
-            paddingTop: 1,
-            paddingBottom: 1,
-            paddingLeft: 7,
-            paddingRight: 7,
-          }}>
-            {pill}
-          </span>
-        ) : null}
-        {onClick ? <RowChevron open={expanded === true} /> : null}
-      </div>
-      {expanded && children ? (
-        <div style={{
-          marginLeft: 10,
-          marginRight: 10,
-          marginBottom: 6,
-          paddingTop: 8,
-          paddingBottom: 8,
-          paddingLeft: 12,
-          paddingRight: 12,
-          borderRadius: 8,
-          background: 'var(--t-bg-card, rgba(148, 163, 184, 0.06))',
-        }}>
-          {children}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function EmptyState({ title, body, actionLabel, onAction }: {
-  title: string;
-  body: string;
-  actionLabel?: string;
-  onAction?: () => void;
-}) {
-  return (
-    <div style={{
-      marginTop: 16,
-      paddingTop: 28,
-      paddingBottom: 28,
-      paddingLeft: 24,
-      paddingRight: 24,
-      borderRadius: 12,
-      borderWidth: 1,
-      borderStyle: 'solid',
-      borderColor: 'var(--t-divider-subtle)',
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      gap: 6,
-      textAlign: 'center',
-    }}>
-      <span style={{ fontSize: 13.5, fontWeight: 400, letterSpacing: '-0.1px', color: 'var(--t-text)' }}>{title}</span>
-      <span style={{ fontSize: 12, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text-muted)', maxWidth: 420, lineHeight: 1.5 }}>{body}</span>
-      {actionLabel && onAction ? (
-        <button
-          type="button"
-          onClick={onAction}
-          style={{
-            marginTop: 8,
-            paddingTop: 5,
-            paddingBottom: 5,
-            paddingLeft: 12,
-            paddingRight: 12,
-            borderRadius: 8,
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: 'var(--t-divider)',
-            background: 'var(--t-input-bg)',
-            color: 'var(--t-text)',
-            fontSize: 12,
-            fontWeight: 300,
-            letterSpacing: '-0.1px',
-            fontFamily: UI_FONT,
-            cursor: 'pointer',
-          }}
-        >
-          {actionLabel}
-        </button>
-      ) : null}
     </div>
   );
 }
@@ -692,29 +496,6 @@ function RulesTab({ directives, expandedRow, onToggleRow, onOpenFile }: {
   );
 }
 
-function OpenFileLink({ file, onOpenFile }: { file: string; onOpenFile: (path: string) => void }) {
-  return (
-    <button
-      type="button"
-      onClick={() => onOpenFile(file)}
-      style={{
-        alignSelf: 'flex-start',
-        border: 'none',
-        background: 'transparent',
-        padding: 0,
-        fontSize: 12,
-        fontWeight: 300,
-        letterSpacing: '-0.1px',
-        color: 'var(--t-accent, #2563eb)',
-        cursor: 'pointer',
-        fontFamily: UI_FONT,
-      }}
-    >
-      Open file ›
-    </button>
-  );
-}
-
 function ConnectionsTab({ servers, query, expandedRow, onToggleRow }: {
   servers: ExternalServer[];
   query: string;
@@ -775,26 +556,6 @@ function ConnectionsTab({ servers, query, expandedRow, onToggleRow }: {
           </div>
         </Row>
       ))} />}
-    </div>
-  );
-}
-
-function DetailLine({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div style={{ display: 'flex', gap: 8, minWidth: 0 }}>
-      <span style={{ fontSize: 9, fontWeight: 300, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--t-text-faint)', width: 68, flexShrink: 0, paddingTop: 1 }}>
-        {label}
-      </span>
-      <span style={{
-        fontSize: 11,
-        fontWeight: 300,
-        letterSpacing: '-0.1px',
-        color: 'var(--t-text-secondary)',
-        fontFamily: mono ? MONO_FONT : UI_FONT,
-        wordBreak: 'break-all',
-      }}>
-        {value}
-      </span>
     </div>
   );
 }
@@ -976,19 +737,6 @@ function CheckGlyph() {
   return (
     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ color: 'var(--t-text)' }}>
       <path d="M20 6 9 17l-5-5" />
-    </svg>
-  );
-}
-
-function RowChevron({ open }: { open: boolean }) {
-  return (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{
-      flexShrink: 0,
-      color: 'var(--t-text-faint)',
-      transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
-      transition: 'transform 120ms cubic-bezier(0.22, 1, 0.36, 1)',
-    }}>
-      <path d="M9 18l6-6-6-6" />
     </svg>
   );
 }

@@ -4,6 +4,7 @@ import { act, createElement, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { listPromptStash } from '@/lib/orchestrator/prompt-stash';
+import { insertPromptIntoActiveComposer } from '@/lib/prompt-library/client';
 import { ComposerArea } from './ComposerArea';
 
 vi.mock('../InputButtons', () => ({
@@ -96,5 +97,18 @@ describe('ComposerArea prompt stash chord', () => {
       }),
     ]);
     expect(textarea?.value).toBe('');
+  });
+
+  it('inserts a saved prompt at the cursor through the real active composer textarea', () => {
+    act(() => root.render(createElement(Harness)));
+    const textarea = container.querySelector('textarea');
+    expect(textarea?.getAttribute('data-o8-active-composer')).toBe('true');
+    textarea?.setSelectionRange(10, 16);
+
+    act(() => {
+      expect(insertPromptIntoActiveComposer('saved review brief')).toBe(true);
+    });
+
+    expect(textarea?.value).toBe('Park this saved review brief while I fix CI');
   });
 });

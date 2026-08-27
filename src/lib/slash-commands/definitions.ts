@@ -82,4 +82,11 @@ export const ORCHESTRATOR_SLASH_COMMANDS: OrchestratorSlashCommandDefinition[] =
     description: 'Open the rules governing this session.',
     group: 'context',
   },
+  {
+    command: '/prompts',
+    name: 'prompts',
+    title: 'Saved prompts',
+    description: 'Search the prompt library and insert one into this composer.',
+    group: 'context',
+  },
 ];

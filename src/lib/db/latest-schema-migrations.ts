@@ -16,6 +16,7 @@ import { ensureV49CloudJobControlSchema } from '@/lib/db/v49-cloud-job-control-m
 import { ensureV50AutomationFireSchema } from '@/lib/db/v50-automation-fire-migration';
 import { ensureV51AutomationPrecheckSchema } from '@/lib/db/v51-automation-precheck-migration';
 import { ensureV52AutomationWatchSchema } from '@/lib/db/v52-automation-watch-migration';
+import { ensureV53PromptLibrarySchema } from '@/lib/db/v53-prompt-library-migration';
 
 /**
  * Keep the current additive migrations behind one boot hook. `db/index.ts` is
@@ -43,4 +44,5 @@ export function ensurePostAutomationSchemas(sqlite: Database.Database): void {
   ensureV50AutomationFireSchema(sqlite);
   ensureV51AutomationPrecheckSchema(sqlite);
   ensureV52AutomationWatchSchema(sqlite);
+  ensureV53PromptLibrarySchema(sqlite);
 }

@@ -14,6 +14,7 @@ import type { ThoughtsAttachedImage, ThoughtsComposerDragHandlers } from './useT
 import { registerComposerCenter } from '../../composer-center-registry';
 import { PromptStashRow } from '../PromptStashRow';
 import { stashPrompt, type PromptStashContext } from '@/lib/orchestrator/prompt-stash';
+import { OPEN_PROMPT_LIBRARY_EVENT, SAVE_PROMPT_LIBRARY_EVENT } from '@/lib/prompt-library/client';
 
 interface ComposerAreaProps {
   activeComposer?: boolean;
@@ -697,6 +698,14 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             inlineMeterSlot={showReasoningControls ? footerMeterSlot : null}
             voiceModeEnabled={voiceModeEnabled}
             onVoiceModeChange={onVoiceModeChange}
+            onBrowsePrompts={isOrchestratorMode ? () => {
+              window.dispatchEvent(new CustomEvent(OPEN_PROMPT_LIBRARY_EVENT));
+            } : undefined}
+            onSavePrompt={isOrchestratorMode ? (body) => {
+              window.dispatchEvent(new CustomEvent(SAVE_PROMPT_LIBRARY_EVENT, {
+                detail: { body, repoPath: repoPath ?? null },
+              }));
+            } : undefined}
           />
         </div>
       </div>

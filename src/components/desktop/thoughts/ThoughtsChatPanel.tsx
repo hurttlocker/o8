@@ -1658,7 +1658,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         } catch { /* ignore */ }
         return false;
       },
-      openRulesManager: () => window.dispatchEvent(new CustomEvent('o8:open-session-rules')),
+      openRulesManager: () => window.dispatchEvent(new CustomEvent('o8:open-session-rules')), openPromptLibrary: () => window.dispatchEvent(new CustomEvent('o8:prompt-library:open')),
     });
     if (!handled.handled) return false;
     latestInputRef.current = '';

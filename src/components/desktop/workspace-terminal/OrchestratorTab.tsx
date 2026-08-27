@@ -41,8 +41,7 @@ import {
 import { WorkspaceBootLoaderClaim } from '@/components/desktop/workspace-terminal/workspace-boot-loader-claim';
 import { ContextMeter } from '@/components/desktop/orchestrator/ContextMeter';
 import { OrchestratorRunStrip } from '@/components/desktop/orchestrator/OrchestratorRunStrip';
-import { QuickActionPalette } from '@/components/desktop/orchestrator/QuickActionPalette';
-import type { QuickAction } from '@/lib/orchestrator/quick-actions';
+import { OrchestratorPromptControls } from '@/components/desktop/orchestrator/OrchestratorPromptControls';
 import { OrchestratorContextResidencyProvider } from '@/components/desktop/orchestrator/context-residency';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
 import { BranchDetailsLauncher } from '@/components/desktop/BranchDetailsLauncher';
@@ -341,7 +340,6 @@ function OrchestratorTabInner({
     orchestratorBusyState: null,
   });
   const [contextUsage, setContextUsage] = useState({ tokenCount: 0, runningTotal: 0 });
-  const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteDraft, setPaletteDraft] = useState<{ id: string; text: string } | null>(null);
   const chatPanelRef = useRef<ThoughtsChatPanelHandle>(null);
   const activeRef = useRef(active);
@@ -850,33 +848,8 @@ function OrchestratorTabInner({
     chatPanelRef.current?.sendNow(prompt);
   }, []);
 
-  // Cmd+Shift+K opens the quick-action palette. Plain Cmd+K belongs to the
-  // global CommandPalette (dashboard/page.tsx) — both used to bind bare ⌘K
-  // on window and the two palettes opened STACKED on orchestrator tabs.
-  // With shift held the letter reports as 'K', so match both cases.
-  useEffect(() => {
-    if (!active) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      const isMac = event.metaKey;
-      const isCtrl = event.ctrlKey;
-      if ((event.key !== 'k' && event.key !== 'K') || !event.shiftKey || !(isMac || isCtrl)) return;
-      const activeTag = (document.activeElement as HTMLElement | null)?.tagName;
-      if (activeTag === 'TEXTAREA') return;
-      event.preventDefault();
-      setPaletteOpen(true);
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [active]);
-
-  const handlePalettePick = useCallback((action: QuickAction) => {
-    // Piggy-back the existing `draftInjection` pipeline: changing the
-    // id triggers ThoughtsChatPanel's useEffect which appends the text
-    // to the composer input. Operator can edit before sending.
-    setPaletteDraft({
-      id: `quick-action-${action.id}-${Date.now()}`,
-      text: action.promptTemplate,
-    });
+  const handlePaletteDraft = useCallback((text: string, sourceId: string) => {
+    setPaletteDraft({ id: `${sourceId}-${Date.now()}`, text });
     setTimeout(() => chatPanelRef.current?.focusInput(), 40);
   }, []);
 
@@ -1377,11 +1350,7 @@ function OrchestratorTabInner({
             it sits beside the transcript, not the composer — see branchRail. */}
       </div>
       <span style={{ display: 'none' }} aria-hidden data-chrome={chatChromeState.activeTargetLabel} />
-      <QuickActionPalette
-        open={paletteOpen}
-        onClose={() => setPaletteOpen(false)}
-        onPick={handlePalettePick}
-      />
+      <OrchestratorPromptControls active={active} repoPath={repoPath ?? null} repoName={repoLabel?.trim() || repoPath?.split('/').filter(Boolean).pop() || 'This repo'} onDraft={handlePaletteDraft} />
       {sessionTiles.pillContextMenu ? (
         <SessionPillContextMenu
           open
