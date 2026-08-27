@@ -7,6 +7,8 @@ import { ensureProposerBootTick } from '@/lib/cortex/proposer';
 import { ensureStackSignatureBoot } from '@/lib/cortex/stack-signature';
 import { ensureCrossRepoProposerBootTick } from '@/lib/cortex/cross-repo-proposer';
 import { ensureExternalMergeBootHook } from '@/lib/cortex/external-merge-watcher';
+import { persistentTerminalsEnabled } from '@/lib/terminal/tmux';
+import { currentPersistentTerminalHealth } from '@/lib/terminal/persistence-health';
 
 // #926 / F40 follow-up: the CLI and other agents need a stable way to read
 // the running server's version. sync-version.mjs keeps package.json#version
@@ -58,5 +60,6 @@ export async function GET() {
     nodeVersion: process.version,
     mode: 'local-cli',
     runtime: 'codex+claude-code',
+    terminalPersistence: currentPersistentTerminalHealth(persistentTerminalsEnabled()),
   });
 }

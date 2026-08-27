@@ -48,6 +48,12 @@ interface CodexVoiceDoctorCapability {
   };
 }
 
+interface TerminalPersistenceHealth {
+  status: 'unverified' | 'ready' | 'degraded' | 'disabled';
+  reason: string;
+  checkedAt: string;
+}
+
 function parseDoctorArgs(rest: string[]) {
   let reap = false;
   let force = false;
@@ -99,6 +105,7 @@ export async function runDoctor(mode: OutputMode, rest: string[] = []): Promise<
 
   let serverReachable = false;
   let serverPayload: Record<string, unknown> | null = null;
+  let terminalPersistence: TerminalPersistenceHealth | null = null;
   try {
     const res = await apiFetch<Record<string, unknown>>(cfg, '/api/panel/status');
     serverReachable = res.status === 200;
@@ -109,6 +116,32 @@ export async function runDoctor(mode: OutputMode, rest: string[] = []): Promise<
       level: 'error',
       code: (err as { code?: string }).code ?? 'unreachable',
       message: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  const terminalCandidate = serverPayload?.terminalPersistence as Partial<TerminalPersistenceHealth> | undefined;
+  if (
+    terminalCandidate
+    && (terminalCandidate.status === 'unverified'
+      || terminalCandidate.status === 'ready'
+      || terminalCandidate.status === 'degraded'
+      || terminalCandidate.status === 'disabled')
+    && typeof terminalCandidate.reason === 'string'
+    && typeof terminalCandidate.checkedAt === 'string'
+  ) {
+    terminalPersistence = terminalCandidate as TerminalPersistenceHealth;
+  }
+  if (terminalPersistence?.status === 'degraded') {
+    findings.push({
+      level: 'warn',
+      code: 'persistent_terminal_degraded',
+      message: `Persistent terminals fell back to plain shells (${terminalPersistence.reason}).`,
+    });
+  } else if (terminalPersistence?.status === 'unverified') {
+    findings.push({
+      level: 'info',
+      code: 'persistent_terminal_unverified',
+      message: 'Persistent terminals are enabled but no real dashboard shell has receipted the backing path yet.',
     });
   }
 
@@ -199,6 +232,7 @@ export async function runDoctor(mode: OutputMode, rest: string[] = []): Promise<
       authHint: rt.authHint ?? null,
     })),
     codexVoiceCapability,
+    terminalPersistence,
     findings,
   };
 
@@ -210,6 +244,7 @@ export async function runDoctor(mode: OutputMode, rest: string[] = []): Promise<
       ['token', cfg.token ? `present (${cfg.source.token})` : 'none'],
       ['data dir', cfg.dataDir ?? '(none)'],
       ['reachable', serverReachable ? 'yes' : 'no'],
+      ['terminal persistence', terminalPersistence ? `${terminalPersistence.status} (${terminalPersistence.reason})` : 'unknown'],
     ]);
     if (repairPayload) {
       printHumanHeading('cli repair');
