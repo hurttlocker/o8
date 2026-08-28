@@ -57,7 +57,9 @@ describe('useTerminalMode event toggle path', () => {
   let createShellTab: Mock<HookProps['createShellTab']>;
   let attachTerminalSession: Mock<HookProps['attachTerminalSession']>;
   let selectTab: Mock<HookProps['selectTab']>;
+  let fitPanel: Mock<XtermPanelHandle['fit']>;
   let focusPanel: Mock<XtermPanelHandle['focus']>;
+  let panelHandle: XtermPanelHandle;
 
   const render = (overrides: Partial<HookProps> = {}) => {
     props = { ...props, ...overrides };
@@ -77,8 +79,10 @@ describe('useTerminalMode event toggle path', () => {
     createShellTab = vi.fn<HookProps['createShellTab']>(() => 'terminal-new');
     attachTerminalSession = vi.fn<HookProps['attachTerminalSession']>(() => 'terminal-attached');
     selectTab = vi.fn<HookProps['selectTab']>();
+    fitPanel = vi.fn<XtermPanelHandle['fit']>();
     focusPanel = vi.fn<XtermPanelHandle['focus']>();
-    const panelHandle: XtermPanelHandle = {
+    panelHandle = {
+      fit: fitPanel,
       focus: focusPanel,
       writeData: vi.fn(),
       writeRaw: vi.fn(),
@@ -138,6 +142,31 @@ describe('useTerminalMode event toggle path', () => {
     expect(document.activeElement).toBe(priorFocus);
     priorFocus.remove();
     terminalFocus.remove();
+  });
+
+  it('fits and focuses once when a new shell receives its tmux session', async () => {
+    const activeTab = chatTab();
+    const pendingTerminal = terminalTab('terminal-new', null);
+    await act(async () => render({ activeTab, tabs: [activeTab] }));
+
+    await act(async () => {
+      requestTerminalModeToggle('workspace-a');
+      render({ tabs: [activeTab, pendingTerminal] });
+    });
+
+    expect(fitPanel).not.toHaveBeenCalled();
+    expect(focusPanel).not.toHaveBeenCalled();
+
+    const attachedTerminal = terminalTab('terminal-new', 'new-shell-session');
+    props.panelRefs.current.set('new-shell-session', panelHandle);
+    await act(async () => render({ tabs: [activeTab, attachedTerminal] }));
+
+    expect(fitPanel).toHaveBeenCalledOnce();
+    expect(focusPanel).toHaveBeenCalledOnce();
+
+    await act(async () => render({ tabs: [activeTab, { ...attachedTerminal }] }));
+    expect(fitPanel).toHaveBeenCalledOnce();
+    expect(focusPanel).toHaveBeenCalledOnce();
   });
 
   it('creates a shell in the preferred repo and restores on the second toggle', async () => {
