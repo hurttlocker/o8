@@ -99,6 +99,12 @@
       ]
     },
     {
+      "path": "src/components/desktop/workspace-terminal/use-terminal-mode.test.ts",
+      "reasons": [
+        "terminal-tool"
+      ]
+    },
+    {
       "path": "src/lib/broadcast/hourly-cap.integration.test.ts",
       "reasons": [
         "child-process",

@@ -131,6 +131,15 @@ const SPECS: &[CapabilitySpec] = &[
         requires_screen_recording: false,
     },
     CapabilitySpec {
+        id: "messages",
+        category: "Mac apps",
+        title: "Send an approved message",
+        summary: "Resolve one exact contact handle, show the complete text for approval, and send only after confirmation.",
+        examples: &["Send a text to contact@example.com saying I'm running ten minutes late."],
+        tool_names: &["mac_contacts_search", "mac_messages_send"],
+        requires_screen_recording: false,
+    },
+    CapabilitySpec {
         id: "code_and_github",
         category: "Repositories",
         title: "Inspect code and GitHub",

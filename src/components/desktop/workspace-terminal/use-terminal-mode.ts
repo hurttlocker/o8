@@ -105,7 +105,11 @@ export function useTerminalMode({
   const terminalSession = terminalTab?.tmuxSession ?? mode?.tmuxSession ?? null;
   useEffect(() => {
     if (!mode || !terminalSession) return;
-    const frame = window.requestAnimationFrame(() => panelRefs.current.get(terminalSession)?.focus());
+    const frame = window.requestAnimationFrame(() => {
+      const panel = panelRefs.current.get(terminalSession);
+      panel?.fit();
+      panel?.focus();
+    });
     return () => window.cancelAnimationFrame(frame);
   }, [mode, panelRefs, terminalSession]);
 

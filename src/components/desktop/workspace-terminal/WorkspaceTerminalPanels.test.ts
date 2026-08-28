@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement, Fragment } from 'react';
+import { act, createElement, Fragment, type ForwardedRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TerminalTab } from './types';
@@ -10,22 +10,37 @@ import {
 } from '@/lib/orchestrator/outside-worker-split';
 import { useSessionTiles } from './use-session-tiles';
 
-const xtermMockState = vi.hoisted(() => ({ mounts: 0 }));
+const xtermMockState = vi.hoisted(() => ({
+  fits: vi.fn<(session: string, height: number) => void>(),
+  lastFitHeight: 480,
+  mounts: 0,
+}));
 
 vi.mock('@/components/desktop/workspace-terminal/XtermPanel', async () => {
-  const { createElement: mockCreateElement, useEffect } = await import('react');
+  const { createElement: mockCreateElement, forwardRef, useEffect, useImperativeHandle } = await import('react');
+  interface MockXtermPanelProps {
+    tmuxSession: string;
+    visible: boolean;
+    sendTerminalAttach: (session: string, cols: number, rows: number) => void;
+    sendTerminalDetach: (session: string) => void;
+  }
+  interface MockXtermPanelHandle {
+    fit: () => void;
+  }
   return {
-    XtermPanel: ({
+    XtermPanel: forwardRef(function MockXtermPanel({
       tmuxSession,
       visible,
       sendTerminalAttach,
       sendTerminalDetach,
-    }: {
-      tmuxSession: string;
-      visible: boolean;
-      sendTerminalAttach: (session: string, cols: number, rows: number) => void;
-      sendTerminalDetach: (session: string) => void;
-    }) => {
+    }: MockXtermPanelProps, ref: ForwardedRef<MockXtermPanelHandle>) {
+      useImperativeHandle(ref, () => ({
+        fit: () => {
+          const height = visible ? 1189 : 480;
+          xtermMockState.lastFitHeight = height;
+          xtermMockState.fits(tmuxSession, height);
+        },
+      }), [tmuxSession, visible]);
       useEffect(() => {
         xtermMockState.mounts += 1;
         sendTerminalAttach(tmuxSession, 120, 30);
@@ -35,7 +50,7 @@ vi.mock('@/components/desktop/workspace-terminal/XtermPanel', async () => {
         'data-tmux-session': tmuxSession,
         'data-visible': visible ? 'true' : 'false',
       });
-    },
+    }),
   };
 });
 
@@ -116,6 +131,8 @@ describe('WorkspaceTerminalPanels resident surface budget', () => {
 
   beforeEach(() => {
     resetOutsideWorkerSplitsForTest();
+    xtermMockState.fits.mockReset();
+    xtermMockState.lastFitHeight = 480;
     xtermMockState.mounts = 0;
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -126,6 +143,7 @@ describe('WorkspaceTerminalPanels resident surface budget', () => {
     await act(async () => root.unmount());
     resetOutsideWorkerSplitsForTest();
     container.remove();
+    vi.restoreAllMocks();
   });
 
   it('mounts at most three heavy tab surfaces from a large restored workspace', async () => {
@@ -170,6 +188,41 @@ describe('WorkspaceTerminalPanels resident surface budget', () => {
     expect(container.querySelector('[data-chat-tab="chat-before-mode"]')?.getAttribute('data-active')).toBe('true');
     expect(props.sendTerminalAttach).not.toHaveBeenCalled();
     expect(props.sendTerminalDetach).not.toHaveBeenCalled();
+  });
+
+  it('refits a terminal after its hidden container takes the active pane height', async () => {
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      callback(0);
+      return 1;
+    });
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined);
+    const previousTab = {
+      id: 'chat-before-terminal',
+      label: 'Coding session',
+      kind: 'chat',
+      tmuxSession: null,
+      chatRuntime: 'codex',
+      createdAt: 1,
+      lastActivity: 1,
+    } satisfies TerminalTab;
+    const terminal = terminalTab(1);
+    const props = panelProps([previousTab, terminal]);
+
+    await act(async () => root.render(createElement(WorkspaceTerminalPanels, {
+      ...props,
+      effectiveActiveTabId: previousTab.id,
+    })));
+    expect(xtermMockState.lastFitHeight).toBe(480);
+    expect(xtermMockState.fits).not.toHaveBeenCalled();
+
+    await act(async () => root.render(createElement(WorkspaceTerminalPanels, {
+      ...props,
+      effectiveActiveTabId: terminal.id,
+    })));
+
+    expect(xtermMockState.fits).toHaveBeenCalledOnce();
+    expect(xtermMockState.fits).toHaveBeenCalledWith('tmux-1', 1189);
+    expect(xtermMockState.lastFitHeight).toBe(1189);
   });
 
   it('closes an automatic outside-worker host after its last durable leaf retires', async () => {

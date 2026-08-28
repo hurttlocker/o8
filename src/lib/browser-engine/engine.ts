@@ -298,6 +298,10 @@ class BrowserEngine {
     session.lastUsedAt = Date.now();
     const result = (await session.page.evaluate(grabScript(selector))) as { ok: boolean; element?: GrabbedElement; error?: string };
     if (!result.ok) return { ok: false, error: result.error ?? 'grab failed', surface: 'engine', url: session.page.url() };
+    if (result.element) {
+      const shot = await session.page.locator(selector).first().screenshot({ type: 'png' }).catch(() => null);
+      if (shot) result.element.screenshot = `data:image/png;base64,${shot.toString('base64')}`;
+    }
     return { ok: true, surface: 'engine', url: session.page.url(), element: result.element };
   }
 

@@ -184,7 +184,7 @@ export const O8_WEBVIEW_BROWSER_TOOLS: McpTool[] = [
   },
   {
     name: 'o8_browser_grab',
-    description: "Design-Mode grab — capture ONE element INSIDE o8's embedded browser by CSS selector and return its rich payload: { tagName, cssSelector, computedStyles (color/type/box/layout), accessibility (role/name/aria-*), attributes, innerHTML, outerHTML, parentChain, boundingRect }. Use to hand the agent exactly what a UI element looks like — the structure + design tokens — instead of a screenshot guess. Localhost pages (embedded) or the headless engine (external URLs).",
+    description: "Design-Mode grab — capture ONE element INSIDE o8's embedded browser by CSS selector and return its rich payload: { tagName, cssSelector, computedStyles (color/type/box/layout), accessibility (role/name/aria-*), domSummary (role/name/ancestor chain/rect/landmark), attributes, innerHTML, outerHTML, parentChain, boundingRect, screenshot? }. The engine tier includes an element screenshot data URL; synchronous embedded/native grabs return DOM context without pixels. Localhost pages (embedded) or the headless engine (external URLs).",
     inputSchema: {
       type: 'object',
       properties: {

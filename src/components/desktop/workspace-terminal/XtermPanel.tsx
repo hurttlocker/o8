@@ -1,7 +1,7 @@
 'use client';
 /* eslint-disable @next/next/no-img-element -- terminal image previews intentionally use raw panel-served URLs */
 
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { useTheme } from '@/lib/theme/context';
 import { buildXtermTheme } from '@/components/desktop/workspace-terminal/constants';
 import { startSpawnReveal } from '@/components/desktop/workspace-terminal/spawn-reveal';
@@ -52,6 +52,7 @@ export interface XtermPanelProps {
 }
 
 export interface XtermPanelHandle {
+  fit: () => void;
   focus: () => void;
   writeData: (data: string) => void;
   writeRaw: (data: string) => void;
@@ -93,7 +94,20 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
   const [inlineImages, setInlineImages] = useState<InlineImage[]>([]);
   const imageCountRef = useRef(0);
 
+  const fitTerminal = useCallback(() => {
+    const fitAddon = fitAddonRef.current;
+    const term = termRef.current;
+    if (!fitAddon || !term) return;
+    try {
+      fitAddon.fit();
+      sendTerminalResize(tmuxSession, term.cols, term.rows);
+    } catch {
+      // The terminal may be disposed while a queued fit is running.
+    }
+  }, [sendTerminalResize, tmuxSession]);
+
   useImperativeHandle(ref, () => ({
+    fit: fitTerminal,
     focus: () => termRef.current?.focus(),
     writeData: (data: string) => {
       if (!termRef.current) return;
@@ -153,24 +167,15 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
     },
     setError: (nextError: string) => setError(nextError),
     setExited: () => setExited(true),
-  }), []);
+  }), [fitTerminal]);
 
   useEffect(() => {
-    if (visible && fitAddonRef.current) {
-      const timer = setTimeout(() => {
-        try {
-          fitAddonRef.current?.fit();
-          if (termRef.current) {
-            sendTerminalResize(tmuxSession, termRef.current.cols, termRef.current.rows);
-          }
-        } catch {
-          return;
-        }
-      }, 50);
+    if (visible) {
+      const timer = setTimeout(fitTerminal, 50);
       return () => clearTimeout(timer);
     }
     return undefined;
-  }, [visible, tmuxSession, sendTerminalResize]);
+  }, [fitTerminal, visible]);
 
   useEffect(() => {
     if (!containerRef.current) return undefined;
@@ -250,13 +255,8 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
         });
 
         observerRef.current = new ResizeObserver(() => {
-          if (disposed || !visibleRef.current || !fitAddonRef.current) return;
-          try {
-            fitAddonRef.current.fit();
-            sendTerminalResize(tmuxSession, termRef.current.cols, termRef.current.rows);
-          } catch {
-            return;
-          }
+          if (disposed || !visibleRef.current) return;
+          fitTerminal();
         });
         if (containerRef.current) observerRef.current.observe(containerRef.current);
 
@@ -331,7 +331,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
       fitAddonRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- cancelReveal only touches refs
-  }, [tmuxSession, sendTerminalAttach, sendTerminalDetach, sendTerminalInput, sendTerminalResize, transparent, fontSize, lineHeight, spawnReveal, revealMinPlay]);
+  }, [tmuxSession, sendTerminalAttach, sendTerminalDetach, sendTerminalInput, fitTerminal, transparent, fontSize, lineHeight, spawnReveal, revealMinPlay]);
 
   // Re-attach after a transport (re)connect. The init effect's attach is
   // dropped silently if the socket isn't open yet, and the server never
