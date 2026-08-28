@@ -9,6 +9,7 @@ import {
 } from '@/lib/o8md/rfm';
 import { cleanupOrphanedRoughdraftAnnotations } from '@/lib/o8md/cleanup';
 import { appendComment, applySuggestion, insertSuggestion, type SuggestionKind } from '@/lib/o8md/mutate';
+import { contentHash } from '@/lib/markdown/transport';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -71,7 +72,13 @@ export async function GET(request: NextRequest) {
   if (view === 'validate') {
     return NextResponse.json({ ok: true, validation: validateRoughdraftMarkdown(content), exists, path: specPath });
   }
-  return NextResponse.json({ ok: true, content, exists, path: specPath });
+  return NextResponse.json({
+    ok: true,
+    content,
+    contentHash: await contentHash(content),
+    exists,
+    path: specPath,
+  });
 }
 
 export async function PUT(request: NextRequest) {
@@ -80,7 +87,11 @@ export async function PUT(request: NextRequest) {
   if (!specPath) {
     return NextResponse.json({ ok: false, error: 'repoPath invalid' }, { status: 400 });
   }
-  const body = await request.json().catch(() => null) as { content?: unknown } | null;
+  const body = await request.json().catch(() => null) as {
+    content?: unknown;
+    expectedHash?: unknown;
+    force?: unknown;
+  } | null;
   const content = typeof body?.content === 'string' ? body.content : null;
   if (content === null) {
     return NextResponse.json({ ok: false, error: 'content must be a string' }, { status: 400 });
@@ -89,6 +100,18 @@ export async function PUT(request: NextRequest) {
   if (Buffer.byteLength(cleanup.content, 'utf-8') > MAX_BYTES) {
     return NextResponse.json({ ok: false, error: `content exceeds ${MAX_BYTES} bytes` }, { status: 400 });
   }
+  const expectedHash = typeof body?.expectedHash === 'string' ? body.expectedHash : undefined;
+  if (expectedHash !== undefined && body?.force !== true) {
+    const currentContent = existsSync(specPath) ? readFileSync(specPath, 'utf-8') : null;
+    const currentHash = currentContent === null ? null : await contentHash(currentContent);
+    if (currentHash !== expectedHash) {
+      return NextResponse.json({
+        error: 'changed-on-disk',
+        contentHash: currentHash,
+        content: currentContent,
+      }, { status: 409 });
+    }
+  }
   mkdirSync(dirname(specPath), { recursive: true });
   writeFileSync(specPath, cleanup.content, 'utf-8');
   return NextResponse.json({
@@ -96,6 +119,7 @@ export async function PUT(request: NextRequest) {
     path: specPath,
     bytes: Buffer.byteLength(cleanup.content, 'utf-8'),
     content: cleanup.content,
+    contentHash: await contentHash(cleanup.content),
     orphanedAnnotationsRemoved: cleanup.removedAnnotations,
   });
 }

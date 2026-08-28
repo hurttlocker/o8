@@ -7,6 +7,7 @@ import { cleanupOrphanedRoughdraftAnnotations } from '@/lib/o8md/cleanup';
 import { O8SpecEditor } from './O8SpecEditor';
 import { O8SpecTargetPicker, useO8SpecTarget } from './O8SpecTargetPicker';
 import { TitleBarButton } from '../title-bar/TitleBarButton';
+import { SaveConflictStrip, type SaveConflict } from '../SaveConflictStrip';
 
 interface O8SpecPaneProps {
   repoPath?: string | null;
@@ -95,6 +96,7 @@ export function O8SpecPane({ repoPath: defaultRepoPath, toolbarSlot, embedded, a
   const [savePending, setSavePending] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [saveConflict, setSaveConflict] = useState<SaveConflict | null>(null);
   const [now, setNow] = useState(0);
   // Per-user note styling for the o8.md rail. customColor=null → brand orange;
   // else any CSS color string (a rainbow hue OR a neutral swatch incl. black).
@@ -114,6 +116,7 @@ export function O8SpecPane({ repoPath: defaultRepoPath, toolbarSlot, embedded, a
   // orchestrator's annotations without a manual reload — and never clobber the
   // operator's unsaved edits (we only swap when local === last-saved).
   const serverContentRef = useRef('');
+  const contentHashRef = useRef<string | null>(null);
   const prewarmedReposRef = useRef(new Set<string>());
 
   // Sparkle → headless one-shot review. An LLM turn server-side annotates o8.md
@@ -140,6 +143,9 @@ export function O8SpecPane({ repoPath: defaultRepoPath, toolbarSlot, embedded, a
       const fresh = await fetch(`/api/repo-spec?repoPath=${encodeURIComponent(repoPath)}`).then((r) => r.json()).catch(() => null);
       if (fresh?.ok && typeof fresh.content === 'string' && content === serverContentRef.current) {
         serverContentRef.current = fresh.content;
+        contentHashRef.current = fresh.exists !== false && typeof fresh.contentHash === 'string'
+          ? fresh.contentHash
+          : null;
         setContent(fresh.content);
         setLoadedContent(fresh.content);
       }
@@ -192,12 +198,16 @@ export function O8SpecPane({ repoPath: defaultRepoPath, toolbarSlot, embedded, a
       setLoadedContent('');
       setLoading(false);
       setSavePending(false);
+      setSaveConflict(null);
+      contentHashRef.current = null;
       setError('Select a repo to edit o8.md.');
       return;
     }
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setSaveConflict(null);
+    contentHashRef.current = null;
     setSavedAt(null);
     fetch(`/api/repo-spec?repoPath=${encodeURIComponent(repoPath)}`)
       .then((res) => res.json())
@@ -207,6 +217,9 @@ export function O8SpecPane({ repoPath: defaultRepoPath, toolbarSlot, embedded, a
           setContent(data.content);
           setLoadedContent(data.content);
           serverContentRef.current = data.content;
+          contentHashRef.current = data.exists !== false && typeof data.contentHash === 'string'
+            ? data.contentHash
+            : null;
         } else {
           setLoadedContent('');
           setError(data?.error || 'Failed to load notes');
@@ -221,22 +234,37 @@ export function O8SpecPane({ repoPath: defaultRepoPath, toolbarSlot, embedded, a
     return () => { cancelled = true; };
   }, [repoPath]);
 
-  const persist = useCallback((next: string) => {
-    if (!repoPath) return;
+  const persist = useCallback((next: string, force = false) => {
+    if (!repoPath || (saveConflict && !force)) return;
     setSavePending(true);
     setError(null);
     fetch(`/api/repo-spec?repoPath=${encodeURIComponent(repoPath)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: next }),
+      body: JSON.stringify({
+        content: next,
+        ...(contentHashRef.current ? { expectedHash: contentHashRef.current } : {}),
+        ...(force ? { force: true } : {}),
+      }),
     })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data?.ok) {
+      .then(async (res) => ({ res, data: await res.json().catch(() => ({})) }))
+      .then(({ res, data }) => {
+        if (res.ok && data?.ok) {
           const saved = typeof data.content === 'string' ? data.content : next;
           setSavedAt(Date.now());
           serverContentRef.current = saved;
+          contentHashRef.current = typeof data.contentHash === 'string' ? data.contentHash : null;
+          setSaveConflict(null);
           if (saved !== next) setContent(saved);
+        } else if (res.status === 409 && data?.error === 'changed-on-disk') {
+          if (debounceRef.current) {
+            window.clearTimeout(debounceRef.current);
+            debounceRef.current = null;
+          }
+          setSaveConflict({
+            content: typeof data.content === 'string' ? data.content : null,
+            contentHash: typeof data.contentHash === 'string' ? data.contentHash : null,
+          });
         } else setError(data?.error || 'Save failed');
       })
       .catch((err) => {
@@ -245,17 +273,42 @@ export function O8SpecPane({ repoPath: defaultRepoPath, toolbarSlot, embedded, a
       .finally(() => {
         setSavePending(false);
       });
-  }, [repoPath]);
+  }, [repoPath, saveConflict]);
 
   const handleChange = useCallback((next: string) => {
     const cleaned = cleanupOrphanedRoughdraftAnnotations(next).content;
     setContent(cleaned);
+    if (saveConflict) {
+      setSavePending(false);
+      if (debounceRef.current) {
+        window.clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+      }
+      return;
+    }
     setSavePending(true);
     if (debounceRef.current) window.clearTimeout(debounceRef.current);
     debounceRef.current = window.setTimeout(() => {
       persist(cleaned);
     }, SAVE_DEBOUNCE_MS) as unknown as number;
-  }, [persist]);
+  }, [persist, saveConflict]);
+
+  const reloadConflict = useCallback(() => {
+    if (!saveConflict) return;
+    if (debounceRef.current) {
+      window.clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+    const diskContent = saveConflict.content ?? '';
+    serverContentRef.current = diskContent;
+    contentHashRef.current = saveConflict.contentHash;
+    setContent(diskContent);
+    setLoadedContent(diskContent);
+    setSaveConflict(null);
+    setSavePending(false);
+    setSavedAt(null);
+    setError(null);
+  }, [saveConflict]);
 
   // Per-note server actions write immediately. Adopt their authoritative
   // content without scheduling a second autosave or leaving the poller's
@@ -271,7 +324,20 @@ export function O8SpecPane({ repoPath: defaultRepoPath, toolbarSlot, embedded, a
     setSavePending(false);
     setSavedAt(Date.now());
     setError(null);
-  }, []);
+    setSaveConflict(null);
+    if (repoPath) {
+      void fetch(`/api/repo-spec?repoPath=${encodeURIComponent(repoPath)}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data?.ok && data.content === next) {
+            contentHashRef.current = data.exists !== false && typeof data.contentHash === 'string'
+              ? data.contentHash
+              : null;
+          }
+        })
+        .catch(() => { /* the next guarded save will detect drift */ });
+    }
+  }, [repoPath]);
 
   // Adopt external writes to o8.md (the orchestrator's annotations) without a
   // manual reload. Read-only against the server — never writes back — and only
@@ -292,10 +358,19 @@ export function O8SpecPane({ repoPath: defaultRepoPath, toolbarSlot, embedded, a
       .then((res) => res.json())
       .then((data) => {
         const next = data?.ok && typeof data.content === 'string' ? data.content : null;
-        if (next == null || next === serverContentRef.current) return;
+        if (next == null) return;
+        if (next === serverContentRef.current) {
+          contentHashRef.current = data.exists !== false && typeof data.contentHash === 'string'
+            ? data.contentHash
+            : null;
+          return;
+        }
         const cur = pollStateRef.current;
         if (cur.savePending || cur.content !== serverContentRef.current) return; // raced a local edit
         serverContentRef.current = next;
+        contentHashRef.current = data.exists !== false && typeof data.contentHash === 'string'
+          ? data.contentHash
+          : null;
         setContent(next);
         setLoadedContent(next);
       })
@@ -535,6 +610,13 @@ export function O8SpecPane({ repoPath: defaultRepoPath, toolbarSlot, embedded, a
           ) : null}
         </div>
       </div>
+      {saveConflict ? (
+        <SaveConflictStrip
+          busy={savePending}
+          onReload={reloadConflict}
+          onOverwrite={() => persist(content, true)}
+        />
+      ) : null}
       <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden', paddingTop: embedded ? 0 : 14, paddingRight: embedded ? 0 : 14, paddingBottom: embedded ? 0 : 14, paddingLeft: embedded ? 0 : 14 }}>
         <div style={{
           display: 'flex',
