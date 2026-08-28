@@ -706,7 +706,7 @@ pub(crate) fn term_then_kill(pid: u32) {
 /// the port became free within the timeout, false if the socket is still
 /// held (caller should log + continue — launching anyway is worse than
 /// trying to bind a free port higher up the range).
-#[cfg(target_os = "macos")]
+#[cfg(unix)]
 pub(crate) fn kill_orphan_and_wait(pid: u32, port: u16) -> bool {
     log::info!("[orphan-check] Killing orphan pid={} on :{}", pid, port);
     let out = Command::new("kill").args(["-9", &pid.to_string()]).output();
@@ -725,8 +725,7 @@ pub(crate) fn kill_orphan_and_wait(pid: u32, port: u16) -> bool {
     }
 
     // Poll the port for up to 3s. TcpListener::bind is the authoritative
-    // signal because SO_REUSEADDR semantics on macOS mean a TIME_WAIT
-    // socket still refuses new binds even after the process is gone.
+    // signal that the port is free on Unix, even after the process is gone.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
     while std::time::Instant::now() < deadline {
         if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
@@ -743,7 +742,7 @@ pub(crate) fn kill_orphan_and_wait(pid: u32, port: u16) -> bool {
     false
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(unix))]
 pub(crate) fn kill_orphan_and_wait(_pid: u32, _port: u16) -> bool {
     false
 }
@@ -791,6 +790,67 @@ fn clean_stale_tauri_mcp_socket() {
 #[cfg(test)]
 mod tests {
     use super::taskkill_tree_args;
+
+    #[cfg(unix)]
+    const TEST_LISTENER_PORT_ENV: &str = "O8_TEST_LISTENER_PORT";
+
+    #[cfg(unix)]
+    #[test]
+    fn orphan_listener_child_process() {
+        let Ok(port) = std::env::var(TEST_LISTENER_PORT_ENV) else {
+            return;
+        };
+        let port = port.parse::<u16>().expect("parse listener port");
+        let listener =
+            std::net::TcpListener::bind(("127.0.0.1", port)).expect("bind child listener port");
+        std::thread::sleep(std::time::Duration::from_secs(30));
+        drop(listener);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kill_orphan_and_wait_releases_listener_port() {
+        let probe =
+            std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind ephemeral listener port");
+        let port = probe.local_addr().expect("read listener address").port();
+        drop(probe);
+
+        let mut child = std::process::Command::new(
+            std::env::current_exe().expect("resolve current test executable"),
+        )
+        .args([
+            "--exact",
+            "sidecar_lifecycle::tests::orphan_listener_child_process",
+            "--nocapture",
+        ])
+        .env(TEST_LISTENER_PORT_ENV, port.to_string())
+        .spawn()
+        .expect("spawn child listener process");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        let listener_ready = loop {
+            if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                break true;
+            }
+            if std::time::Instant::now() >= deadline {
+                break false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        if !listener_ready {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("child listener did not bind port {port}");
+        }
+
+        let reclaimed = super::kill_orphan_and_wait(child.id(), port);
+        let rebound = std::net::TcpListener::bind(("127.0.0.1", port));
+        let wait_result = child.wait();
+
+        assert!(reclaimed, "orphan listener port was not reclaimed");
+        assert!(rebound.is_ok(), "reclaimed listener port did not rebind");
+        wait_result.expect("reap child listener process");
+    }
 
     #[test]
     fn taskkill_tree_args_force_kills_pid_and_tree() {
