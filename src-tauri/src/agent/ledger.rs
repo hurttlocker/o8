@@ -117,6 +117,7 @@ fn args_summary(tool: &str, args: &Value) -> Value {
             &["title", "calendar_name", "repeat"]
         }
         "mac_notes_create" | "mac_notes_append" => &["title", "folder"],
+        "mac_messages_send" => &["recipient"],
         "mac_reminders_create" | "mac_reminders_complete" | "mac_reminders_update" => {
             &["title", "list_name"]
         }
@@ -150,6 +151,7 @@ fn action_summary(tool: &str, args: &Value, outcome: &str) -> String {
         "mac_calendar_update_event" => format!("updated calendar event '{}'", string("title")),
         "mac_notes_create" => format!("created note '{}'", string("title")),
         "mac_notes_append" => format!("appended to note '{}'", string("title")),
+        "mac_messages_send" => format!("sent a message to '{}'", string("recipient")),
         "fs_write_text" => format!("wrote file '{}'", string("path")),
         "csv_write" => format!("wrote CSV '{}'", string("filename")),
         "apply_text_edit" => "edited the focused text".to_string(),

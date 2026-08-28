@@ -265,6 +265,10 @@ fn redacted_step_summary(tool: &str, args: &Value, schema: &Value) -> String {
             format!("Append to note{}", quoted("title").unwrap_or_default())
         }
         "mac_contacts_search" => "Search contacts".to_string(),
+        "mac_messages_send" => format!(
+            "Send a message to{}",
+            quoted("recipient").unwrap_or_else(|| " the confirmed recipient".to_string())
+        ),
         "mac_mail_search" => "Search mail".to_string(),
         "mac_mail_read" => "Read the selected email".to_string(),
         "mac_mail_draft" => {
@@ -434,6 +438,7 @@ mod tests {
                 json!({ "tool": "term_send", "args": { "id": "t:1", "command": "secret command", "title": "shell" } }),
                 json!({ "tool": "agent_turn", "args": { "id": "t:2", "title": "Claude", "prompt": "secret agent prompt" } }),
                 json!({ "tool": "gh_comment", "args": { "repo": "o8", "kind": "issue", "number": 52, "body": "secret GitHub body" } }),
+                json!({ "tool": "mac_messages_send", "args": { "recipient": "+12155550100", "message": "secret message body" } }),
             ]),
             PlanSurface::Cascaded,
         )
@@ -443,7 +448,9 @@ mod tests {
         assert!(!readback.contains("secret command"));
         assert!(!readback.contains("secret agent prompt"));
         assert!(!readback.contains("secret GitHub body"));
+        assert!(!readback.contains("secret message body"));
         assert!(readback.contains("Draft email “Hello”"));
         assert!(readback.contains("Comment on GitHub issue #52 in “o8”"));
+        assert!(readback.contains("Send a message to “+12155550100”"));
     }
 }

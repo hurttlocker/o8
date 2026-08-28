@@ -316,6 +316,66 @@ mod tests {
     }
 
     #[test]
+    fn realtime_messages_send_stops_at_confirmation_and_persists_the_receipt() {
+        let data_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join(format!("realtime-messages-seam-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&data_dir);
+        std::fs::create_dir_all(&data_dir).unwrap();
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let result = super::super::store::with_test_data_dir(data_dir.clone(), || {
+            runtime
+                .block_on(realtime_invoke_tool_inner(
+                    None,
+                    "mac_messages_send".to_string(),
+                    json!({
+                        "recipient": "contact@example.com",
+                        "message": "Private message body",
+                    }),
+                    Some("phone-messages-seam".to_string()),
+                    Some("phone-call-messages-seam".to_string()),
+                    Some("send the message".to_string()),
+                    None,
+                ))
+                .unwrap()
+        });
+
+        assert_eq!(result["declined_by_user"], true);
+        assert_eq!(result["confirmation_outcome"], "rejected");
+
+        let conn = rusqlite::Connection::open(data_dir.join("agent.db")).unwrap();
+        let persisted = conn
+            .query_row(
+                "SELECT phase, outcome, confirmation_outcome, args_summary
+                 FROM agent_action_events
+                 WHERE tool = 'mac_messages_send'
+                 ORDER BY seq DESC LIMIT 1",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(persisted.0, "terminal");
+        assert_eq!(persisted.1, "failed");
+        assert_eq!(persisted.2, "rejected");
+        assert!(persisted.3.contains("contact@example.com"));
+        assert!(!persisted.3.contains("Private message body"));
+
+        drop(conn);
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
     fn realtime_command_persists_phone_utterance_and_session() {
         let data_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("target")
