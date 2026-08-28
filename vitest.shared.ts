@@ -11,7 +11,12 @@ export const sharedVitestConfig = {
     environment: 'node',
     globalSetup: ['tests/global-test-data-dir.ts'],
     setupFiles: ['tests/setup-isolated-data-dir.ts'],
-    include: ['src/**/*.test.ts', 'tests/**/*.test.ts', 'cli/**/*.test.ts'],
+    include: [
+      'src/**/*.test.ts',
+      'src/components/desktop/file-viewer/RichMarkdownEditor.test.tsx',
+      'tests/**/*.test.ts',
+      'cli/**/*.test.ts',
+    ],
     globals: false,
     testTimeout: 30_000,
     hookTimeout: 30_000,

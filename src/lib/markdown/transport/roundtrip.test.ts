@@ -3,9 +3,11 @@ import { join, relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   contentHash,
+  insertBlock,
   type MarkdownBlockNode,
   parseDocument,
   replaceBlock,
+  removeBlock,
   serializeDocument,
   updateBlockNode,
 } from './index';
@@ -142,5 +144,24 @@ describe('Markdown source transport behavior', () => {
     await expect(contentHash('abc')).resolves.toBe(
       'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
     );
+  });
+
+  it('inserts and removes blocks without changing surviving source slices', () => {
+    const source = '# One\n\nTwo.\n\nThree.\n';
+    const doc = parseDocument(source);
+    const inserted = insertBlock(doc, 1, {
+      type: 'paragraph',
+      children: [{ type: 'text', value: 'Inserted.' }],
+    });
+
+    expect(inserted.blocks[0]).toBe(doc.blocks[0]);
+    expect(inserted.blocks[2]).toBe(doc.blocks[1]);
+    expect(inserted.blocks[3]).toBe(doc.blocks[2]);
+    expect(serializeDocument(inserted)).toBe('# One\n\nInserted.\n\nTwo.\n\nThree.\n');
+
+    const removed = removeBlock(inserted, 3);
+    expect(removed.blocks[0]).toBe(doc.blocks[0]);
+    expect(removed.blocks[2]).toBe(doc.blocks[1]);
+    expect(serializeDocument(removed)).toBe('# One\n\nInserted.\n\nTwo.\n\n');
   });
 });
