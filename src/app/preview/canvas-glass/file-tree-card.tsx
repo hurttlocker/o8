@@ -130,7 +130,7 @@ export const FileTreeGlassCard = memo(function FileTreeGlassCard({
   fetchImpl,
 }: {
   card: FileTreeCard;
-  spawnFileCard: (path: string, at?: SnapGeometry) => void;
+  spawnFileCard: (path: string, at?: SnapGeometry, repoPath?: string) => void;
   onMove: (id: number, x: number, y: number) => void;
   onResize: (id: number, w: number, h: number) => void;
   onFocus: (id: number) => void;
@@ -193,7 +193,7 @@ export const FileTreeGlassCard = memo(function FileTreeGlassCard({
       y: card.y,
       w: 620,
       h: 420,
-    });
+    }, card.repoPath);
   }, [card.repoPath, card.w, card.x, card.y, spawnFileCard]);
 
   const repoName = card.repoPath.split('/').filter(Boolean).pop() ?? card.repoPath;
@@ -264,7 +264,7 @@ export const FileTreeCardLayer = memo(function FileTreeCardLayer({
   onClose,
 }: {
   cards: FileTreeCard[];
-  spawnFileCard: (path: string, at?: SnapGeometry) => void;
+  spawnFileCard: (path: string, at?: SnapGeometry, repoPath?: string) => void;
   onMove: (id: number, x: number, y: number) => void;
   onResize: (id: number, w: number, h: number) => void;
   onFocus: (id: number) => void;

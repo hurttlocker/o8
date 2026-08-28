@@ -23,6 +23,7 @@ export interface CanvasCardPerfFixture {
 
 export interface CanvasCardPerfHandle {
   moveFirstCard: (frame: number) => void;
+  updateFirstDiffCard: () => void;
 }
 
 const FIXED_MARKDOWN = [
@@ -154,7 +155,7 @@ export const CanvasCardPerfHarness = forwardRef<CanvasCardPerfHandle>(function C
   const [fixture] = useState(createCanvasCardPerfFixture);
   const [termCards, setTermCards] = useState(fixture.termCards);
   const [fileCards] = useState(fixture.fileCards);
-  const [diffCards] = useState(fixture.diffCards);
+  const [diffCards, setDiffCards] = useState(fixture.diffCards);
   const [markdownCards] = useState(fixture.markdownCards);
   const [imageCards] = useState(fixture.imageCards);
 
@@ -165,6 +166,9 @@ export const CanvasCardPerfHarness = forwardRef<CanvasCardPerfHandle>(function C
   useImperativeHandle(ref, () => ({
     moveFirstCard(frame) {
       moveTermCard(termCards[0]!.id, 40 + frame * 3, 60 + frame * 2);
+    },
+    updateFirstDiffCard() {
+      setDiffCards((previous) => previous.map((card, index) => index === 0 ? { ...card, stat: '2 files changed' } : card));
     },
   }), [moveTermCard, termCards]);
 
@@ -192,7 +196,7 @@ export const CanvasCardPerfHarness = forwardRef<CanvasCardPerfHandle>(function C
         <FileGlassCard key={`file:${card.id}`} card={card} termVeil={0.52} onMove={ignore} onResize={ignore} onFocus={ignore} onClose={ignore} />
       ))}
       {diffCards.map((card) => (
-        <DiffGlassCard key={`diff:${card.id}`} card={card} onMove={ignore} onResize={ignore} onFocus={ignore} onClose={ignore} onRequestChanges={ignore} />
+        <DiffGlassCard key={`diff:${card.id}`} card={card} onMove={ignore} onResize={ignore} onFocus={ignore} onClose={ignore} onRequestChanges={ignore} onRefresh={ignore} onChanged={ignore} />
       ))}
       {markdownCards.map((card) => (
         <MarkdownGlassCard key={`markdown:${card.id}`} card={card} onMove={ignore} onResize={ignore} onFocus={ignore} onClose={ignore} />

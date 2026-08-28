@@ -96,6 +96,6 @@ describe('FileTreeGlassCard', () => {
       y: 80,
       w: 620,
       h: 420,
-    });
+    }, '/repo');
   });
 });

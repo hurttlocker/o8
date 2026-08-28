@@ -24,6 +24,7 @@ import { CanvasMarkdown } from './dock';
 import { CHROME, FONT, TERM_MIN_H, TERM_MIN_W } from './ui';
 import { GlassCardShell, ShellAction } from './card-shell';
 import { useCanvasRenderProbe } from './perf/render-probe';
+import { dispatchWorktreeChanged } from './worktree-diff';
 
 // NOTE: component (+ types) exports only — runtime const exports here would
 // break the Fast Refresh boundary and remount live cards on every edit.
@@ -32,6 +33,7 @@ export interface FileCard {
   id: number;
   path: string;
   name: string;
+  repoPath?: string | null;
   x: number;
   y: number;
   w: number;
@@ -211,6 +213,7 @@ export const FileGlassCard = memo(function FileGlassCard({
       mtimeRef.current = typeof data.mtimeMs === 'number' ? data.mtimeMs : mtimeRef.current;
       setSavedContent(content);
       setConflict(false);
+      if (card.repoPath) dispatchWorktreeChanged(card.repoPath);
     } catch {
       setConflict(false);
       setError('Could not reach the file API');
@@ -218,7 +221,7 @@ export const FileGlassCard = memo(function FileGlassCard({
     } finally {
       setSaving(false);
     }
-  }, [card.path, conflict, content, saving, status]);
+  }, [card.path, card.repoPath, conflict, content, saving, status]);
 
   const applyEditorValue = useCallback((next: string, selectionStart?: number, selectionEnd?: number) => {
     setContent(next);

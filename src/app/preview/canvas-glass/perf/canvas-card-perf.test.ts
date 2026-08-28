@@ -106,4 +106,25 @@ describe('canvas card performance fixture', () => {
     const result = await measureCanvasCardPerf();
     expect(result.maxCardsRenderedPerFrame).toBeLessThanOrEqual(2);
   });
+
+  it('does not re-render sibling diff cards when one diff changes', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const handle = createRef<CanvasCardPerfHandle>();
+    const renders: string[] = [];
+    const previousProbe = setCanvasRenderProbe((id) => renders.push(id));
+    const firstDiffId = createCanvasCardPerfFixture().diffCards[0]!.id;
+    try {
+      act(() => root.render(createElement(CanvasCardPerfHarness, { ref: handle })));
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      renders.length = 0;
+      act(() => handle.current?.updateFirstDiffCard());
+      expect(renders.filter((id) => id.startsWith('diff:'))).toEqual([`diff:${firstDiffId}`]);
+    } finally {
+      setCanvasRenderProbe(previousProbe);
+      act(() => root.unmount());
+      container.remove();
+    }
+  });
 });

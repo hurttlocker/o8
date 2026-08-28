@@ -8,12 +8,13 @@
  * /api/orchestrator/merge (the identical path approve_and_merge uses).
  */
 
-import { memo, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { actionReceiptIsInProgress, correlatedActionIsUnsettled, fetchCorrelatedActionReceipt } from '@/lib/orchestrator/action-receipt';
 import { CHROME, FONT, scrollFadeY } from './ui';
 import { GlassCardShell } from './card-shell';
 import { useCanvasRenderProbe } from './perf/render-probe';
 import { useScrollBlurFade } from './use-scroll-blur-fade';
+import { dispatchWorktreeChanged, useWorktreeDiffRefresh, worktreeRepoPath } from './worktree-diff';
 
 const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 export const DIFF_MIN_W = 380;
@@ -41,6 +42,57 @@ type MergeState =
   | { kind: 'merged' }
   | { kind: 'blocked'; note: string };
 
+type CommitState =
+  | { kind: 'closed' }
+  | { kind: 'editing'; note?: string }
+  | { kind: 'committing' }
+  | { kind: 'committed'; hash: string };
+
+function DiffActionButton({
+  label,
+  onClick,
+  disabled = false,
+  primary = false,
+  type = 'button',
+}: {
+  label: string;
+  onClick?: () => void;
+  disabled?: boolean;
+  primary?: boolean;
+  type?: 'button' | 'submit';
+}) {
+  return (
+    <button
+      type={type}
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        minHeight: 44,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderColor: primary ? 'var(--cnv-ink-muted)' : 'var(--cnv-edge)',
+        background: primary ? 'var(--cnv-tint)' : 'transparent',
+        borderRadius: 999,
+        paddingTop: 0,
+        paddingBottom: 0,
+        paddingLeft: 13,
+        paddingRight: 13,
+        fontSize: 10.5,
+        fontWeight: primary ? 500 : 300,
+        color: primary ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
+        cursor: disabled ? 'default' : 'pointer',
+        fontFamily: FONT,
+        opacity: disabled ? 0.6 : 1,
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
 /** One diff line — the default-side read, in glass tones. */
 function diffLineStyle(line: string): React.CSSProperties {
   if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('diff --git')) {
@@ -59,6 +111,8 @@ export const DiffGlassCard = memo(function DiffGlassCard({
   onFocus,
   onClose,
   onRequestChanges,
+  onRefresh,
+  onChanged,
 }: {
   card: DiffCard;
   onMove: (id: number, x: number, y: number) => void;
@@ -67,11 +121,22 @@ export const DiffGlassCard = memo(function DiffGlassCard({
   onClose: (id: number) => void;
   /** Hands the operator's words back to the composer, prefilled. */
   onRequestChanges: (card: DiffCard) => void;
+  onRefresh: (cardId: number) => void | Promise<void>;
+  onChanged: (cardId: number) => void | Promise<void>;
 }) {
   useCanvasRenderProbe('diff', card.id);
   const [merge, setMerge] = useState<MergeState>({ kind: 'idle' });
+  const [commit, setCommit] = useState<CommitState>({ kind: 'closed' });
+  const [commitMessage, setCommitMessage] = useState('');
   const diffScrollRef = useRef<HTMLDivElement | null>(null);
+  const commitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const repoPath = worktreeRepoPath(card.laneId);
   useScrollBlurFade(diffScrollRef);
+  useWorktreeDiffRefresh({ cardId: card.id, repoPath, onRefresh });
+
+  useEffect(() => () => {
+    if (commitTimerRef.current) clearTimeout(commitTimerRef.current);
+  }, []);
 
   const approve = async () => {
     if (merge.kind === 'merging' || merge.kind === 'merged') return;
@@ -121,6 +186,48 @@ export const DiffGlassCard = memo(function DiffGlassCard({
     }
   };
 
+  const closeCommitStrip = () => {
+    if (commit.kind === 'committing') return;
+    if (commitTimerRef.current) clearTimeout(commitTimerRef.current);
+    commitTimerRef.current = null;
+    setCommitMessage('');
+    setCommit({ kind: 'closed' });
+  };
+
+  const commitChanges = async () => {
+    const message = commitMessage.trim();
+    if (!repoPath || !message || commit.kind === 'committing') return;
+    setCommit({ kind: 'committing' });
+    try {
+      const { response, payload: data } = await fetchCorrelatedActionReceipt<{
+        ok?: boolean;
+        hash?: string;
+        message?: string;
+        error?: { message?: string } | string;
+      }>('/api/review/commit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message, workspace: repoPath }),
+      });
+      if (response.ok && data?.ok && typeof data.hash === 'string') {
+        setCommit({ kind: 'committed', hash: data.hash.slice(0, 8) });
+        dispatchWorktreeChanged(repoPath);
+        void onChanged(card.id);
+        commitTimerRef.current = setTimeout(closeCommitStrip, 2000);
+        return;
+      }
+      const errorMessage = typeof data?.error === 'string' ? data.error : data?.error?.message;
+      setCommit({ kind: 'editing', note: errorMessage || `Commit failed (${response.status}).` });
+    } catch (error) {
+      setCommit({
+        kind: 'editing',
+        note: correlatedActionIsUnsettled(error)
+          ? 'Commit is still running. Refresh before retrying.'
+          : 'Commit request failed. Check the repository and try again.',
+      });
+    }
+  };
+
   return (
     <GlassCardShell
       card={card}
@@ -146,7 +253,7 @@ export const DiffGlassCard = memo(function DiffGlassCard({
         <div ref={diffScrollRef} style={{ ...scrollFadeY, height: card.h, overflowY: 'auto', overflowX: 'hidden', paddingTop: 2, paddingBottom: 8, paddingLeft: 16, paddingRight: 16, scrollbarWidth: 'thin' } as React.CSSProperties}>
           {card.diff.trim() === '' ? (
             <span style={{ fontSize: CHROME.bodySize, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT }}>
-              Clean worktree — nothing to review on this lane.
+              {repoPath ? 'No uncommitted changes' : 'No diff is available for this lane.'}
             </span>
           ) : (
             card.diff.split('\n').map((line, index) => (
@@ -157,73 +264,61 @@ export const DiffGlassCard = memo(function DiffGlassCard({
           )}
         </div>
 
-        {/* Governance row — approve or push back, right here. A worktree
-            diff is YOUR uncommitted work, not a lane — no merge actions. */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 6, paddingBottom: 14, paddingLeft: 16, paddingRight: 16, flexShrink: 0 }}>
-          {card.laneId.startsWith('worktree:') ? (
-            <span style={{ fontSize: CHROME.bodySize, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT }}>
-              Your uncommitted changes — commit from a terminal or the dashboard.
-            </span>
-          ) : merge.kind === 'merged' ? (
-            <span style={{ fontSize: CHROME.bodySize, fontWeight: 400, color: '#a78bfa', fontFamily: FONT }}>Merged — the lane is on main.</span>
-          ) : (
-            <>
-              <button
-                type="button"
-                onClick={() => { void approve(); }}
-                disabled={merge.kind === 'merging'}
-                style={{
-                  borderWidth: 1,
-                  borderStyle: 'solid',
-                  borderColor: 'var(--cnv-ink-muted)',
-                  background: 'rgba(255,255,255,0.1)',
-                  borderRadius: 999,
-                  paddingTop: 4,
-                  paddingBottom: 4,
-                  paddingLeft: 13,
-                  paddingRight: 13,
-                  fontSize: 10.5,
-                  fontWeight: 500,
-                  color: 'var(--cnv-ink)',
-                  cursor: merge.kind === 'merging' ? 'default' : 'pointer',
-                  fontFamily: FONT,
-                  opacity: merge.kind === 'merging' ? 0.6 : 1,
-                }}
-              >
-                {merge.kind === 'merging' ? 'Merging…' : 'Approve & merge'}
-              </button>
-              <button
-                type="button"
-                onClick={() => onRequestChanges(card)}
-                style={{
-                  borderWidth: 1,
-                  borderStyle: 'solid',
-                  borderColor: 'var(--cnv-edge)',
-                  background: 'transparent',
-                  borderRadius: 999,
-                  paddingTop: 4,
-                  paddingBottom: 4,
-                  paddingLeft: 13,
-                  paddingRight: 13,
-                  fontSize: 10.5,
-                  fontWeight: 300,
-                  color: 'var(--cnv-ink-muted)',
-                  cursor: 'pointer',
-                  fontFamily: FONT,
-                }}
-                onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
-                onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
-              >
-                Request changes
-              </button>
-            </>
-          )}
-          {merge.kind === 'blocked' ? (
-            <span style={{ flex: 1, fontSize: CHROME.captionSize, fontWeight: 300, color: '#f8a5a5', fontFamily: FONT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={merge.note}>
-              {merge.note}
-            </span>
-          ) : null}
-        </div>
+        {repoPath && commit.kind === 'closed' ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 6, paddingBottom: 14, paddingLeft: 16, paddingRight: 16, flexShrink: 0 }}>
+            <DiffActionButton label="Commit" primary onClick={() => setCommit({ kind: 'editing' })} />
+          </div>
+        ) : null}
+        {repoPath && commit.kind !== 'closed' ? (
+          <form
+            onSubmit={(event) => { event.preventDefault(); void commitChanges(); }}
+            style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, paddingTop: 8, paddingBottom: 14, paddingLeft: 16, paddingRight: 16, borderTopWidth: 1, borderTopStyle: 'solid', borderTopColor: 'var(--cnv-edge)', flexShrink: 0 }}
+          >
+            {commit.kind === 'committed' ? (
+              <span role="status" style={{ minHeight: 44, display: 'inline-flex', alignItems: 'center', fontSize: CHROME.bodySize, fontWeight: 400, color: 'var(--cnv-ink)', fontFamily: FONT }}>
+                Committed {commit.hash}
+              </span>
+            ) : (
+              <>
+                <input
+                  aria-label="Commit message"
+                  autoFocus
+                  type="text"
+                  maxLength={500}
+                  value={commitMessage}
+                  disabled={commit.kind === 'committing'}
+                  onChange={(event) => setCommitMessage(event.target.value)}
+                  placeholder="Commit message"
+                  style={{ flex: 1, minWidth: 140, height: 44, boxSizing: 'border-box', borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--cnv-edge)', borderRadius: 10, outline: 'none', background: 'var(--cnv-tint)', color: 'var(--cnv-ink)', paddingTop: 0, paddingBottom: 0, paddingLeft: 12, paddingRight: 12, fontSize: CHROME.bodySize, fontWeight: 300, fontFamily: FONT, opacity: commit.kind === 'committing' ? 0.6 : 1 }}
+                />
+                <DiffActionButton label={commit.kind === 'committing' ? 'Committing…' : 'Commit'} primary type="submit" disabled={!commitMessage.trim() || commit.kind === 'committing'} />
+                <DiffActionButton label="Cancel" disabled={commit.kind === 'committing'} onClick={closeCommitStrip} />
+                {commit.kind === 'editing' && commit.note ? (
+                  <span role="alert" style={{ flexBasis: '100%', fontSize: CHROME.captionSize, fontWeight: 300, color: 'var(--t-danger)', fontFamily: FONT }}>
+                    {commit.note}
+                  </span>
+                ) : null}
+              </>
+            )}
+          </form>
+        ) : null}
+        {!repoPath ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 6, paddingBottom: 14, paddingLeft: 16, paddingRight: 16, flexShrink: 0 }}>
+            {merge.kind === 'merged' ? (
+              <span style={{ fontSize: CHROME.bodySize, fontWeight: 400, color: '#a78bfa', fontFamily: FONT }}>Merged — the lane is on main.</span>
+            ) : (
+              <>
+                <DiffActionButton label={merge.kind === 'merging' ? 'Merging…' : 'Approve & merge'} primary disabled={merge.kind === 'merging'} onClick={() => { void approve(); }} />
+                <DiffActionButton label="Request changes" onClick={() => onRequestChanges(card)} />
+              </>
+            )}
+            {merge.kind === 'blocked' ? (
+              <span style={{ flex: 1, fontSize: CHROME.captionSize, fontWeight: 300, color: '#f8a5a5', fontFamily: FONT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={merge.note}>
+                {merge.note}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
     </GlassCardShell>
   );
 });
