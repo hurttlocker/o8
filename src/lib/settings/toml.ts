@@ -21,6 +21,7 @@ import {
   isPrLinkDestination,
   isReviewerBackendSetting,
   isWorkersUseBrain,
+  isWorkspaceManifestPolicy,
   sanitizeBranchPrefix,
 } from '@/lib/operator/defaults-env';
 import { isSubscriptionProfile } from '@/lib/operator/subscription-profile';
@@ -236,6 +237,7 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   inAppOrchestratorEnabled: booleanField('orchestrator', 'legacy_claude_enabled'),
   brainUseClaudeCli: booleanField('brain', 'use_claude_cli'),
   workersUseBrain: enumField('brain', 'workers_use_brain', 'one of "off", "auto", or "all"', isWorkersUseBrain),
+  workspaceManifestPolicy: enumField('operator', 'workspace_manifest_policy', 'one of "disabled", "one-approval", or "auto"', isWorkspaceManifestPolicy),
   crossHouseWorkerFallback: booleanField('models', 'cross_house_worker_fallback'),
   orchestratorBackend: enumField('orchestrator', 'backend', 'a supported orchestrator backend', isOrchestratorBackendSetting),
   reviewerBackend: enumField('review', 'backend', 'one of "follow", "codex", or "claude"', isReviewerBackendSetting),

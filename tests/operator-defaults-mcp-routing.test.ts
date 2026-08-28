@@ -313,6 +313,9 @@ describe('MCP operator defaults and dispatch routing', () => {
       meteredPacketCostCapUsd: expect.any(Object),
       meteredPacketInputTokenCap: expect.any(Object),
       workersUseBrain: expect.any(Object),
+      workspaceManifestPolicy: expect.objectContaining({
+        enum: ['disabled', 'one-approval', 'auto'],
+      }),
       crossHouseWorkerFallback: expect.any(Object),
       requireApproval: expect.objectContaining({
         enum: ['high-risk', 'surface', 'always', 'never'],

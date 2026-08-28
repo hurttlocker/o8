@@ -2,6 +2,18 @@
 
 `o8.workspace.json` is a versioned repository workspace declaration. Keep it at the repository root, next to `o8.md`, and check it into the repository so clones receive the same contract. `~/.o8/repos.json` can cache the manifest version, path, service names, or a validation error, but the checked-in file is the source of truth.
 
+## Execution policy
+
+The operator setting `workspaceManifestPolicy` controls whether a packet launch may execute a checked-in manifest. The default is `disabled`, so a fresh installation does not run repository-declared commands.
+
+- `disabled` skips the manifest before allocating ports or running setup.
+- `one-approval` creates one operator approval for the repository path and the SHA-256 hash of the manifest bytes. Approval covers that exact manifest hash for later packet launches. Rejection keeps that hash blocked. Editing any manifest byte requires a new decision.
+- `auto` applies the manifest without a per-hash approval.
+
+The approval card lists the manifest commands verbatim and uses the existing operator inbox flow. An approval records the decision only. It does not apply the manifest to the packet that raised the card. A later packet launch reads the decision and applies the manifest through the normal launch path.
+
+Skipped launches record `workspace_manifest_skipped` with the policy and manifest hash. A pending or rejected one-approval decision also carries the approval ID. Policy evaluation completes before port leases, setup commands, service receipts, health probes, or preview resolution.
+
 ## Version 1 schema
 
 ```ts

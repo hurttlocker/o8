@@ -114,6 +114,7 @@ describe.sequential('workspace manifest packet launch real path', () => {
       productTelemetryEnabled: false,
       storageReserveRatio: 0.0001,
       storageReserveFloorGb: 0.001,
+      workspaceManifestPolicy: 'auto',
     });
   });
 

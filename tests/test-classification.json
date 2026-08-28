@@ -2333,6 +2333,15 @@
       ]
     },
     {
+      "path": "tests/workspace-manifest-policy-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/workspace-manifest-registry-real-path.test.ts",
       "reasons": [
         "child-process",

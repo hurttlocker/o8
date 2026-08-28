@@ -5,8 +5,13 @@ import { connect } from 'node:net';
 import path from 'node:path';
 
 import { recordLaneEvent } from '@/lib/lane/events';
+import { getOperatorDefaults } from '@/lib/operator/defaults';
 import { runRepoSetupCommand } from '@/lib/workspace/repo-setup';
-import { loadWorkspaceManifest } from './loader';
+import { loadWorkspaceManifestSource } from './loader';
+import {
+  findWorkspaceManifestApproval,
+  resolveWorkspaceManifestExecution,
+} from './policy';
 import { allocateWorkspaceServicePorts } from './port-leases';
 import type {
   WorkspaceManifest,
@@ -52,7 +57,7 @@ export interface WorkspaceManifestApplyResult {
   };
 }
 
-type ApplyStep = 'load' | 'ports' | 'preview' | `setup:${number}`;
+type ApplyStep = 'load' | 'policy' | 'ports' | 'preview' | `setup:${number}`;
 
 function commandId(command: string): string {
   return createHash('sha256').update(command).digest('hex');
@@ -262,7 +267,7 @@ async function applyLoadedManifest(input: {
 
 function recordEventSafely(
   laneId: string,
-  verb: 'workspace_manifest_applied' | 'workspace_manifest_failed',
+  verb: 'workspace_manifest_applied' | 'workspace_manifest_failed' | 'workspace_manifest_skipped',
   payload: Record<string, unknown>,
 ): void {
   try {
@@ -281,10 +286,29 @@ export async function applyWorkspaceManifest(input: {
   const startedAt = Date.now();
   let step: ApplyStep = 'load';
   try {
-    const manifest = await loadWorkspaceManifest(input.worktreePath);
-    if (!manifest) return null;
+    const loaded = await loadWorkspaceManifestSource(input.worktreePath);
+    if (!loaded) return null;
+    step = 'policy';
+    const policy = (await getOperatorDefaults()).values.workspaceManifestPolicy;
+    const decision = await resolveWorkspaceManifestExecution({
+      repoPath: input.repoPath,
+      manifestSource: loaded.source,
+      policy,
+    });
+    if (!decision.allowed) {
+      const approval = decision.reason === 'awaiting_approval' || decision.reason === 'rejected'
+        ? findWorkspaceManifestApproval(input.repoPath, decision.manifestHash)
+        : null;
+      recordEventSafely(input.laneId, 'workspace_manifest_skipped', {
+        policy,
+        manifestHash: decision.manifestHash,
+        ...(approval ? { approvalId: approval.id } : {}),
+        ...(decision.reason === 'rejected' ? { reason: 'rejected' } : {}),
+      });
+      return null;
+    }
     const result = await applyLoadedManifest({
-      manifest,
+      manifest: loaded.manifest,
       worktreePath: path.resolve(input.worktreePath),
       packetId: input.packetId,
       laneId: input.laneId,

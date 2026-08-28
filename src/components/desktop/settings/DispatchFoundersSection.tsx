@@ -32,6 +32,7 @@ import {
   type OperatorDefaultSources,
   type ThinkingEffort,
   type WorkersUseBrain,
+  type WorkspaceManifestPolicy,
 } from './dispatch-shared';
 
 // ── Minimal raw-SVG glyphs for row icon tiles ──
@@ -368,6 +369,23 @@ export function DispatchFoundersSection({
                   { value: 'off', label: 'Off' },
                   { value: 'auto', label: 'Auto' },
                   { value: 'all', label: 'All' },
+                ]}
+              />
+            }
+            divider
+          />
+          <SettingsRow
+            icon={<TargetIcon />}
+            label="Workspace manifest execution"
+            subtitle={lockedSub('workspaceManifestPolicy', 'Gate checked-in setup commands before packet launch')}
+            accessory={
+              <SettingsSegmented
+                value={values.workspaceManifestPolicy}
+                onChange={(next) => { updateField('workspaceManifestPolicy', next as WorkspaceManifestPolicy); }}
+                options={[
+                  { value: 'disabled', label: 'Disabled' },
+                  { value: 'one-approval', label: 'Approve once' },
+                  { value: 'auto', label: 'Auto' },
                 ]}
               />
             }

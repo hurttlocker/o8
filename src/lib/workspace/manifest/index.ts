@@ -1,5 +1,15 @@
-export { loadWorkspaceManifest, workspaceManifestPath } from './loader';
+export {
+  loadWorkspaceManifest,
+  loadWorkspaceManifestSource,
+  workspaceManifestPath,
+  type WorkspaceManifestSource,
+} from './loader';
 export { applyWorkspaceManifest } from './apply';
+export {
+  findWorkspaceManifestApproval,
+  resolveWorkspaceManifestExecution,
+  type WorkspaceManifestExecutionDecision,
+} from './policy';
 export {
   allocateWorkspaceServicePorts,
   readWorkspacePortLeases,

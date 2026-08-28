@@ -140,6 +140,7 @@ export const SETTINGS_SEARCH_REGISTRY: SettingsSearchEntry[] = [
   { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Brain routing", label: "Legacy orchestrator toggle", description: "What backend Auto follows: on = Claude REPL, off = Codex" },
   { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Brain routing", label: "Q&A composer", description: "Class A composer for Brain answers" },
   { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Brain routing", label: "Workers use the Brain", description: "Teach dispatched workers o8 ask for cited repo answers" },
+  { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Brain routing", label: "Workspace manifest execution", description: "Gate checked-in setup commands before packet launch", keywords: ['manifest', 'approval', 'setup', 'workspace'] },
   { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Dispatch runtime", label: "Claude worker effort", description: "Fallback effort for spawned Claude Code workers" },
   { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Dispatch runtime", label: "Codex worker effort", description: "Fallback effort for spawned Codex workers" },
   { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Dispatch runtime", label: "Default worker", description: "Codex by default \u2014 pick any installed dispatchable runtime to override (may be profile-pinned)" },
