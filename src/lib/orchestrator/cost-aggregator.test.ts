@@ -84,4 +84,87 @@ describe('aggregateMissionCost', () => {
     });
     expect(result.totalCostUsd).toBe(0);
   });
+
+  it('uses newer live totals while retaining persisted per-role subtotals', async () => {
+    const sessionKey = 'codex:live-over-persisted';
+    const packet = stubPacket({
+      lane: {
+        tileId: 'live-tile',
+        tabId: 'live-tab',
+        repoPath: null,
+        runtime: 'codex',
+        sessionKey,
+      },
+    });
+    const [{ getRuntime }, { registerRuntime }, { logUsage }] = await Promise.all([
+      import('@/lib/runtimes'),
+      import('@/lib/runtimes/registry'),
+      import('@/lib/db/usage'),
+    ]);
+    const originalRuntime = getRuntime('codex');
+    logUsage({
+      userId: null,
+      model: 'persisted-model',
+      provider: 'openai',
+      inputTokens: 100,
+      outputTokens: 20,
+      costUsd: 0.1,
+      sessionKey,
+      packetId: packet.id,
+      role: 'worker',
+      attempt: 1,
+    });
+    logUsage({
+      userId: null,
+      model: 'persisted-model',
+      provider: 'openai',
+      inputTokens: 40,
+      outputTokens: 10,
+      costUsd: 0.05,
+      sessionKey,
+      packetId: packet.id,
+      role: 'reviewer',
+      attempt: 2,
+    });
+    registerRuntime({
+      ...originalRuntime!,
+      capabilities: { ...originalRuntime!.capabilities, costTelemetry: true },
+      getTelemetry: async () => ({
+        inputTokens: 500,
+        outputTokens: 100,
+        estimatedCostUsd: 1.5,
+        model: 'live-model',
+        costSource: 'gateway',
+      }),
+    });
+
+    try {
+      const result = await aggregateMissionCost(stubState(packet));
+
+      expect(result).toMatchObject({
+        totalCostUsd: 1.5,
+        packetCosts: [{
+          inputTokens: 500,
+          outputTokens: 100,
+          totalCostUsd: 1.5,
+          model: 'live-model',
+          costSource: 'gateway',
+        }],
+      });
+      expect(result.costByRole.worker).toEqual({
+        inputTokens: 100,
+        outputTokens: 20,
+        totalCostUsd: 0.1,
+        requestCount: 1,
+      });
+      expect(result.costByRole.reviewer).toEqual({
+        inputTokens: 40,
+        outputTokens: 10,
+        totalCostUsd: 0.05,
+        requestCount: 1,
+      });
+    } finally {
+      if (originalRuntime) registerRuntime(originalRuntime);
+    }
+  });
 });

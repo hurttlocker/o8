@@ -18,6 +18,8 @@
  */
 
 import 'server-only';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import type { UsageRole } from '@/lib/db/usage';
 
 /** USD per token (input, output) for the models in our OpenRouter chain. */
 const MODEL_PRICING_PER_TOKEN: Record<string, { input: number; output: number }> = {
@@ -47,6 +49,20 @@ export interface OpenRouterUsage {
 
 type BrainSpendProvider = 'google' | 'openrouter';
 
+type BrainAskMeter = { paidCallRecorded: boolean };
+const brainAskMeter = new AsyncLocalStorage<BrainAskMeter>();
+
+export interface BrainRetrievalUsageContext {
+  repoPath?: string | null;
+  laneId?: string | null;
+  packetId?: string | null;
+  missionId?: string | null;
+}
+
+export function estimateBrainTokenCount(...values: string[]): number {
+  return values.reduce((sum, value) => sum + Math.max(0, Math.ceil(value.length / 4)), 0);
+}
+
 export function estimateCostUsd(model: string, usage: OpenRouterUsage): number {
   if (typeof usage.cost === 'number' && usage.cost >= 0) return usage.cost;
   const pricing = MODEL_PRICING_PER_TOKEN[model] ?? WORST_CASE_PRICING;
@@ -63,6 +79,8 @@ function recordBrainSpend(
   usage: OpenRouterUsage,
   requestType: 'chat' | 'embedding',
 ): void {
+  const activeMeter = brainAskMeter.getStore();
+  if (activeMeter) activeMeter.paidCallRecorded = true;
   // Invalidate the cap memo SYNCHRONOUSLY, before the async ledger write —
   // resetting it inside the async block left a window where every concurrent
   // ask kept reading the stale (lower) memo and sailed past the cap check
@@ -81,11 +99,58 @@ function recordBrainSpend(
         costUsd: estimateCostUsd(model, usage),
         agentName: BRAIN_AGENT_NAME,
         requestType,
+        role: 'retrieval' satisfies UsageRole,
       });
     } catch (err) {
       console.warn('[qa][brain-spend] ledger write failed:', err instanceof Error ? err.message : err);
     }
   })();
+}
+
+/**
+ * Meter one complete Brain ask. Direct paid calls keep their provider receipt;
+ * subscription, proxy, local, heuristic, and cache paths receive one zero-dollar
+ * retrieval receipt with an explicit token estimate.
+ */
+export async function withBrainRetrievalUsage<T>(
+  inputText: string,
+  context: BrainRetrievalUsageContext,
+  run: () => Promise<T>,
+  outputText: (result: T) => string,
+): Promise<T> {
+  const startedAt = Date.now();
+  const meter: BrainAskMeter = { paidCallRecorded: false };
+  const result = await brainAskMeter.run(meter, run);
+  if (!meter.paidCallRecorded) {
+    try {
+      const output = outputText(result);
+      const { logUsage } = await import('@/lib/db/usage');
+      logUsage({
+        userId: null,
+        model: 'cortex-qa-request',
+        provider: 'runtime',
+        inputTokens: estimateBrainTokenCount(inputText),
+        outputTokens: estimateBrainTokenCount(output),
+        costUsd: 0,
+        sessionKey: `retrieval:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`,
+        repoPath: context.repoPath ?? null,
+        laneId: context.laneId ?? null,
+        packetId: context.packetId ?? null,
+        missionId: context.missionId ?? null,
+        role: 'retrieval',
+        agentName: BRAIN_AGENT_NAME,
+        requestType: 'completion',
+        metadata: {
+          estimated: true,
+          source: 'chars_per_four',
+          latencyMs: Math.max(0, Date.now() - startedAt),
+        },
+      });
+    } catch (err) {
+      console.warn('[qa][brain-spend] retrieval ledger write failed:', err instanceof Error ? err.message : err);
+    }
+  }
+  return result;
 }
 
 export function recordBrainOpenRouterSpend(model: string, usage: OpenRouterUsage): void {

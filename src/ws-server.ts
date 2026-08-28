@@ -8831,6 +8831,8 @@ async function bootstrapWsServer() {
               sessionKey: surfaceId,
               runtime: lane.runtime,
               repoPath: completionCwd,
+              laneId: lane.id,
+              packetId: lane.packetId,
             });
           } catch (error) {
             console.error('[cost-persistence] Failed to persist lane session cost:', error);

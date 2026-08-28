@@ -28,6 +28,10 @@ import { buildGrepArmTopRows } from '@/lib/cortex/qa/grep-arm';
 import { embedQuestion } from '@/lib/cortex/qa/llm/gemini-embed';
 import { prewarmHaiku } from '@/lib/cortex/qa/llm/haiku-adapter';
 import { prewarmSonnetCli } from '@/lib/cortex/qa/llm/sonnet-adapter';
+import {
+  withBrainRetrievalUsage,
+  type BrainRetrievalUsageContext,
+} from '@/lib/cortex/qa/llm/brain-spend';
 import { detectLiteralLookup } from '@/lib/cortex/qa/literal-lookup';
 import { retrieveAll, unionMerge } from '@/lib/cortex/qa/retrieve';
 import {
@@ -227,7 +231,29 @@ function buildSourcesPayload(topRows: TypedRow[], retrievalMs: number): {
 export async function askCortex(
   question: string,
   repoPath: string | undefined,
-  options: { bypassCache?: boolean; projectId?: string | null; terse?: boolean } = {},
+  options: {
+    bypassCache?: boolean;
+    projectId?: string | null;
+    terse?: boolean;
+    usageContext?: BrainRetrievalUsageContext;
+  } = {},
+): Promise<AskCortexResult> {
+  return withBrainRetrievalUsage(
+    question,
+    { repoPath, ...options.usageContext },
+    () => askCortexUnmetered(question, repoPath, options),
+    (result) => result.answer,
+  );
+}
+
+async function askCortexUnmetered(
+  question: string,
+  repoPath: string | undefined,
+  options: {
+    bypassCache?: boolean;
+    projectId?: string | null;
+    terse?: boolean;
+  },
 ): Promise<AskCortexResult> {
   const { bypassCache = false, terse = false } = options;
   const projectId = options.projectId?.trim()

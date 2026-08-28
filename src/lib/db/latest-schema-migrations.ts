@@ -20,6 +20,7 @@ import { ensureV53PromptLibrarySchema } from '@/lib/db/v53-prompt-library-migrat
 import { ensureV54WorkerMcpInjectionSchema } from '@/lib/db/v54-worker-mcp-injection-migration';
 import { ensureV55OutsiderAttentionSchema } from '@/lib/db/v55-outsider-attention-migration';
 import { ensureV56ManagedSymonMessagesSchema } from '@/lib/db/v56-managed-symon-messages-migration';
+import { ensureV57CostLedgerAttributionSchema } from '@/lib/db/v57-cost-ledger-attribution-migration';
 
 /**
  * Keep the current additive migrations behind one boot hook. `db/index.ts` is
@@ -51,4 +52,5 @@ export function ensurePostAutomationSchemas(sqlite: Database.Database): void {
   ensureV54WorkerMcpInjectionSchema(sqlite);
   ensureV55OutsiderAttentionSchema(sqlite);
   ensureV56ManagedSymonMessagesSchema(sqlite);
+  ensureV57CostLedgerAttributionSchema(sqlite);
 }

@@ -8,6 +8,7 @@ import { MODEL_IDS } from '@/lib/models';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { getCanonicalChatHistoryPath, persistCanonicalChatHistoryRecord } from '@/lib/llm/chat-history-store';
+import { logUsage } from '@/lib/db/usage';
 const HISTORY_DIR = path.join(getDataDir(), 'chat-history');
 const ARCHIVE_DIR = path.join(getDataDir(), 'orchestrator-archives');
 const inFlight = new Map<string, Promise<AutoCompactResult>>();
@@ -147,7 +148,14 @@ function splitCompactionWindow(transcript: MobileTranscriptEntry[], compactedCou
  * `--skip-git-repo-check` so codex doesn't refuse on untrusted repos (the
  * summary doesn't need git context at all).
  */
-async function summarizeWithCodex(repoPath: string, prompt: string) {
+type CodexSummaryResult = {
+  text: string;
+  inputTokens: number;
+  outputTokens: number;
+  estimated: boolean;
+};
+
+async function summarizeWithCodex(repoPath: string, prompt: string): Promise<CodexSummaryResult> {
   const { resolveCli } = await import('@/lib/runtimes/shared/cli-resolver');
   const codexBin = (await resolveCli({
     runtimeId: 'codex',
@@ -162,7 +170,7 @@ async function summarizeWithCodex(repoPath: string, prompt: string) {
   // injection surface. Send it on stdin there instead — the same way the Brain's
   // codex adapter has always fed `codex exec`. POSIX keeps argv unchanged.
   const promptOnStdin = process.platform === 'win32';
-  return await new Promise<string>((resolve, reject) => {
+  return await new Promise<CodexSummaryResult>((resolve, reject) => {
     const launch = cliInvocation(codexBin, [
       'exec',
       '--json',
@@ -194,6 +202,8 @@ async function summarizeWithCodex(repoPath: string, prompt: string) {
     let buffer = '';
     let stderr = '';
     let result = '';
+    let inputTokens: number | null = null;
+    let outputTokens: number | null = null;
     // stdio[1]/stdio[2] are always 'pipe' above; only stdin varies by platform,
     // which is enough to cost the tuple its literal type.
     child.stdout!.on('data', (chunk: Buffer) => {
@@ -211,6 +221,10 @@ async function summarizeWithCodex(repoPath: string, prompt: string) {
           const item = parsed.item as Record<string, unknown> | undefined;
           if (parsed.type === 'item.completed' && item?.type === 'agent_message' && typeof item.text === 'string') {
             result = item.text;
+          } else if (parsed.type === 'turn.completed') {
+            const usage = parsed.usage as Record<string, unknown> | undefined;
+            if (typeof usage?.input_tokens === 'number') inputTokens = usage.input_tokens;
+            if (typeof usage?.output_tokens === 'number') outputTokens = usage.output_tokens;
           } else if (parsed.type === 'event_msg') {
             const payload = parsed.payload as Record<string, unknown> | undefined;
             if (payload?.type === 'agent_message' && typeof payload.message === 'string') {
@@ -226,10 +240,44 @@ async function summarizeWithCodex(repoPath: string, prompt: string) {
     child.once('error', reject);
     child.once('close', (code) => {
       const text = result.trim();
-      if (code === 0 && text) resolve(text);
+      if (code === 0 && text) resolve({
+        text,
+        inputTokens: inputTokens ?? approxTokens(prompt),
+        outputTokens: outputTokens ?? approxTokens(text),
+        estimated: inputTokens === null || outputTokens === null,
+      });
       else reject(new Error(stderr.trim() || `Codex compaction failed (${code ?? 'unknown'})`));
     });
   });
+}
+
+function recordCompactionUsage(
+  repoPath: string,
+  threadId: string | null,
+  result: CodexSummaryResult,
+  compactedAt: Date,
+): void {
+  try {
+    logUsage({
+      userId: null,
+      model: ORCHESTRATOR_COMPACTION_PROVENANCE.model,
+      provider: 'openai',
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
+      costUsd: 0,
+      sessionKey: `compaction:${threadId ?? 'orchestrator'}:${compactedAt.getTime()}`,
+      repoPath,
+      agentName: 'orchestrator-compaction',
+      requestType: 'completion',
+      role: 'compaction',
+      metadata: {
+        estimated: result.estimated,
+        source: result.estimated ? 'chars_per_four' : 'codex_turn_completed',
+      },
+    });
+  } catch (error) {
+    console.warn('[auto-compact] usage ledger write failed:', error);
+  }
 }
 // ── digest() — Fable Slice 5 (2026-07-02) ────────────────────────────────────
 
@@ -260,7 +308,7 @@ export async function digest(text: string, repoPath: string): Promise<DigestResu
   const capped = truncatedInput
     ? `${trimmed.slice(0, DIGEST_INPUT_CHAR_CAP)}\n[... input truncated at ${DIGEST_INPUT_CHAR_CAP} chars ...]`
     : trimmed;
-  const summary = await summarizeWithCodex(repoPath, [
+  const summaryResult = await summarizeWithCodex(repoPath, [
     'Digest the following material into the smallest faithful summary a decision-maker can act on. Use exactly these sections with terse bullets:',
     'What this is',
     'Key facts / findings',
@@ -270,6 +318,7 @@ export async function digest(text: string, repoPath: string): Promise<DigestResu
     '',
     capped,
   ].join('\n'));
+  const summary = summaryResult.text;
   return {
     digest: summary,
     approxInputTokens: approxTokens(capped),
@@ -323,7 +372,9 @@ export async function autoCompactOrchestratorThread(input: {
     }
     const compactedAt = new Date();
     const compactedStamp = fmtStamp(compactedAt);
-    const summary = await summarizeWithCodex(repoPath, ['Summarize this orchestrator thread segment using exactly these sections and terse bullets:', 'Decisions made', 'Files touched', 'Open questions', 'Current mission state', 'Use file paths verbatim. If a section is empty, write "- None."', '', buildExcerpt(compactedTurns, 90_000)].join('\n'));
+    const summaryResult = await summarizeWithCodex(repoPath, ['Summarize this orchestrator thread segment using exactly these sections and terse bullets:', 'Decisions made', 'Files touched', 'Open questions', 'Current mission state', 'Use file paths verbatim. If a section is empty, write "- None."', '', buildExcerpt(compactedTurns, 90_000)].join('\n'));
+    const summary = summaryResult.text;
+    recordCompactionUsage(repoPath, thread?.tabId ?? input.threadId?.trim() ?? null, summaryResult, compactedAt);
     const displaySummary = `<compacted_context turns="${compactedTurns.length}" at="${compactedStamp}">\n${summary}\n</compacted_context>`;
     const compactionEntry: MobileTranscriptEntry = {
       id: `orch-compaction-${compactedAt.getTime()}`,

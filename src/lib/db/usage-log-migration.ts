@@ -44,6 +44,13 @@ export function ensureUsageLogSchema(sqlite: Database.Database): void {
           cache_write_tokens INTEGER DEFAULT 0,
           cost_usd REAL NOT NULL DEFAULT 0,
           session_key TEXT,
+          lane_id TEXT,
+          packet_id TEXT,
+          mission_id TEXT,
+          role TEXT,
+          attempt INTEGER NOT NULL DEFAULT 1,
+          run_id TEXT,
+          metadata_json TEXT,
           repo_path TEXT,
           agent_name TEXT,
           request_type TEXT DEFAULT 'chat',
@@ -104,5 +111,6 @@ export function ensureUsageLogIndexes(sqlite: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_usage_logs_user_period ON usage_logs(user_id, billing_period);
     CREATE INDEX IF NOT EXISTS idx_usage_logs_created ON usage_logs(created_at);
     CREATE INDEX IF NOT EXISTS idx_usage_logs_session_key ON usage_logs(session_key);
+    CREATE INDEX IF NOT EXISTS idx_usage_logs_packet_attempt ON usage_logs(packet_id, attempt);
   `);
 }

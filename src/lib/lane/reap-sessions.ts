@@ -267,6 +267,8 @@ export async function archiveLaneSessions(lanes: Lane[]): Promise<LaneSessionArc
         repoPath: lanes.find((lane) => lane.id === target.laneId)?.worktreePath
           ?? lanes.find((lane) => lane.id === target.laneId)?.repoPath
           ?? process.cwd(),
+        laneId: target.laneId,
+        packetId: lanes.find((lane) => lane.id === target.laneId)?.packetId ?? null,
       });
       let result: { archived?: boolean } | null = null;
       const registeredLifecycle = getOwnedSessionLifecycle(target.sessionKey);

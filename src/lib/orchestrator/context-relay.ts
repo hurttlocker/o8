@@ -1,7 +1,7 @@
 import { asc, eq, or } from 'drizzle-orm';
 import { listApprovalsForContext } from '@/lib/approvals/store';
 import type { ApprovalAuditEvent, OrchestratorReviewFinding } from '@/lib/approvals/types';
-import { getDb, laneEvents, sessionOutcomes } from '@/lib/db';
+import { getDb, laneEvents, sessionOutcomes, usageLogs } from '@/lib/db';
 import { getLaneSpokenDiffFacts } from '@/lib/lane/lane-diff-facts';
 import { findLaneByPacket } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
@@ -33,6 +33,11 @@ import type { RuntimeId, RuntimeTranscriptEntry } from '@/lib/runtimes/types';
 import { getActiveProjectScopeForRepoSync } from '@/lib/repos/projects';
 import { truncateText } from '@/lib/util/text';
 import { syncTranscriptSearchDocument } from '@/lib/search/transcripts';
+import { derivePacketAttemptIndex } from '@/lib/orchestrator/cost-attribution';
+import {
+  isReviewFinding,
+  readLatestPersistedReview,
+} from '@/lib/orchestrator/context-relay-review';
 
 const TRANSCRIPT_CAPTURE_LIMIT = 5_000;
 const SUMMARY_LIMIT = 1_200;
@@ -220,20 +225,6 @@ function buildPacketSummary(input: {
 async function findAgentSummary(sessionKey: string): Promise<AgentSummary | null> {
   const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
   return snapshot.agents.find((agent) => agent.sessionKey === sessionKey) ?? null;
-}
-
-function isReviewFinding(value: unknown): value is OrchestratorReviewFinding {
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-
-  const candidate = value as Record<string, unknown>;
-  return typeof candidate.file === 'string'
-    && typeof candidate.description === 'string'
-    && (candidate.line === undefined || (typeof candidate.line === 'number' && Number.isFinite(candidate.line)))
-    && (candidate.severity === 'bug' || candidate.severity === 'rule_violation' || candidate.severity === 'note')
-    && (candidate.resolution === 'fixed' || candidate.resolution === 'accepted' || candidate.resolution === 'deferred')
-    && (candidate.fixSuggestion === undefined || typeof candidate.fixSuggestion === 'string');
 }
 
 function toPacketReviewContext(review: {
@@ -645,6 +636,18 @@ async function persistSessionOutcome(
   // Outcome derivation remains coarse at capture time, but a present failed
   // receipt must not be promoted to success. Merge later stamps mergedClean.
   const outcome = outcomeFromPacketSelfReview(context.selfReview);
+  const usage = db.select({
+    inputTokens: usageLogs.inputTokens,
+    outputTokens: usageLogs.outputTokens,
+    costUsd: usageLogs.costUsd,
+  }).from(usageLogs).where(eq(usageLogs.packetId, context.packetId)).all();
+  const totalTokens = usage.reduce(
+    (sum, row) => sum + Math.max(0, row.inputTokens) + Math.max(0, row.outputTokens),
+    0,
+  );
+  const costUsd = Number(usage.reduce((sum, row) => sum + Math.max(0, row.costUsd), 0).toFixed(6));
+  const attempts = derivePacketAttemptIndex({ packetId: context.packetId, laneId: lane.id });
+  const latestReview = readLatestPersistedReview(context, lane) ?? context.review;
 
   try {
     await db.insert(sessionOutcomes).values({
@@ -663,10 +666,13 @@ async function persistSessionOutcome(
       startedAt: start.startedAt,
       completedAt,
       durationMs: start.durationMs,
-      // mergedClean / reviewApproved / reviewFindingsCount left at defaults;
-      // the merge handler stamps mergedClean via markOutcomeMerged() below
-      // when the packet's branch actually lands on main. Without that hop the
-      // routing recommender (#747) never sees a scoreable signal.
+      totalTokens,
+      costUsd,
+      attempts,
+      reviewApproved: latestReview?.approved ?? false,
+      reviewFindingsCount: latestReview?.findings.length ?? 0,
+      // mergedClean stays NULL until the merge handler stamps it via
+      // markOutcomeMerged() below when the packet branch lands on main.
     }).onConflictDoNothing();
     // New ledger row — cached "what shipped"-style Q&A answers are now stale.
     // Lazy import keeps the qa module out of this file's cold-start graph.

@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
 const askCortexMock = vi.hoisted(() => vi.fn());
+const findLatestLaneByPacketMock = vi.hoisted(() => vi.fn());
+const findMissionRegistryEntryByPacketIdMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/cortex/qa/ask', () => ({
   askCortex: askCortexMock,
@@ -12,7 +14,11 @@ vi.mock('@/lib/lane/events', () => ({
 }));
 
 vi.mock('@/lib/lane/registry', () => ({
-  findLatestLaneByPacket: vi.fn(),
+  findLatestLaneByPacket: findLatestLaneByPacketMock,
+}));
+
+vi.mock('@/lib/orchestrator/mission-registry', () => ({
+  findMissionRegistryEntryByPacketId: findMissionRegistryEntryByPacketIdMock,
 }));
 
 const { POST } = await import('@/app/api/cortex/ask/answer/route');
@@ -28,6 +34,8 @@ function request(body: unknown): NextRequest {
 describe('/api/cortex/ask/answer terse flag', () => {
   beforeEach(() => {
     askCortexMock.mockReset();
+    findLatestLaneByPacketMock.mockReset();
+    findMissionRegistryEntryByPacketIdMock.mockReset();
     askCortexMock.mockResolvedValue({
       answer: 'Use the packet guide. [CITATION:directive-seed]',
       citations: [{ kind: 'directive', rowId: 'directive-seed', table: 'directives' }],
@@ -64,6 +72,28 @@ describe('/api/cortex/ask/answer terse flag', () => {
       bypassCache: false,
       projectId: null,
       terse: false,
+    });
+  });
+
+  it('passes usage attribution when the caller supplies a packet', async () => {
+    findLatestLaneByPacketMock.mockReturnValue({ id: 'lane-cost', repoPath: '/repo/o8' });
+    findMissionRegistryEntryByPacketIdMock.mockReturnValue({ id: 'mission-cost' });
+
+    const res = await POST(request({
+      question: 'What is the packet rule?',
+      packetId: 'packet-cost',
+    }));
+
+    expect(res.status).toBe(200);
+    expect(askCortexMock).toHaveBeenCalledWith('What is the packet rule?', '/repo/o8', {
+      bypassCache: false,
+      projectId: null,
+      terse: false,
+      usageContext: {
+        laneId: 'lane-cost',
+        packetId: 'packet-cost',
+        missionId: 'mission-cost',
+      },
     });
   });
 });

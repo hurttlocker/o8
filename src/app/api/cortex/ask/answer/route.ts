@@ -23,6 +23,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { performance } from 'node:perf_hooks';
 
 import { askCortex, type AskCortexResult } from '@/lib/cortex/qa/ask';
+import { estimateBrainTokenCount } from '@/lib/cortex/qa/llm/brain-spend';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { findLatestLaneByPacket } from '@/lib/lane/registry';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
@@ -36,7 +37,13 @@ interface AskAnswerBody {
   packetId?: unknown;
 }
 
-function recordBrainConsulted(packetId: string, laneId: string, question: string, result: AskCortexResult) {
+function recordBrainConsulted(
+  packetId: string,
+  laneId: string,
+  question: string,
+  result: AskCortexResult,
+  latencyMs: number,
+) {
   try {
     recordLaneEvent(laneId, 'brain_consulted', 'system', {
       packetId,
@@ -46,6 +53,8 @@ function recordBrainConsulted(packetId: string, laneId: string, question: string
       sourcesConsidered: result.sourcesConsidered,
       citedCount: result.citations.length,
       topTitles: result.citations.slice(0, 3).map((c) => c.title ?? c.excerpt?.slice(0, 80) ?? c.kind),
+      tokens: estimateBrainTokenCount(question, result.answer),
+      latencyMs,
     });
   } catch (err) {
     // The audit trail must never fail the ask itself.
@@ -94,8 +103,22 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const result = await askCortex(question, repoPath, { bypassCache, projectId, terse });
-    if (packetId && laneId) recordBrainConsulted(packetId, laneId, question, result);
+    let missionId: string | null = null;
+    if (packetId) {
+      const { findMissionRegistryEntryByPacketId } = await import('@/lib/orchestrator/mission-registry');
+      missionId = findMissionRegistryEntryByPacketId(packetId, { includeArchived: true })?.id ?? null;
+    }
+    const usageContext = laneId || packetId || missionId
+      ? { laneId, packetId, missionId }
+      : undefined;
+    const result = await askCortex(question, repoPath, {
+      bypassCache,
+      projectId,
+      terse,
+      ...(usageContext ? { usageContext } : {}),
+    });
+    const latencyMs = Math.max(0, performance.now() - startedAt);
+    if (packetId && laneId) recordBrainConsulted(packetId, laneId, question, result, latencyMs);
     return NextResponse.json({
       ok: true,
       answer: result.answer,
