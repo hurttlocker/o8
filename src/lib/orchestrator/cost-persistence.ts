@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { and, asc, eq } from 'drizzle-orm';
+import { modelRateTable } from '@/lib/cost/rate-table';
 import { getDb, getSqlite, usageLogs } from '@/lib/db';
 import type { UsageRole } from '@/lib/db/usage';
 import { getRuntime } from '@/lib/runtimes';
@@ -59,6 +60,24 @@ function normalizeTokenCount(value: unknown) {
 
 function normalizeUsd(value: number) {
   return Number(finiteNumber(value).toFixed(6));
+}
+
+function metadataJsonForCostSource(
+  metadata: Record<string, unknown> | null | undefined,
+  costSource: PersistSessionCostInput['costSource'],
+): string | null {
+  const normalized = { ...(metadata ?? {}) };
+  if (costSource === 'gateway') {
+    normalized.costSource = 'gateway';
+    delete normalized.rateTableVersion;
+  } else if (costSource === 'estimate') {
+    normalized.costSource = 'estimate';
+    normalized.rateTableVersion = modelRateTable.rateTableVersion;
+  } else if (costSource === 'unknown') {
+    normalized.costSource = 'unknown';
+    delete normalized.rateTableVersion;
+  }
+  return Object.keys(normalized).length > 0 ? JSON.stringify(normalized) : null;
 }
 
 export function readPersistedSessionCosts(sessionKey: string): PersistedSessionCost[] {
@@ -237,10 +256,12 @@ export async function persistSessionCost(input: PersistSessionCostInput): Promis
     missionId: context.missionId,
     role: context.role,
     runId: context.runId,
-    metadataJson: input.metadata ? JSON.stringify(input.metadata) : null,
   };
 
   if (existing) {
+    const effectiveCostSource = existing.provider === 'openrouter' && input.costSource !== 'gateway'
+      ? 'gateway'
+      : input.costSource;
     db.update(usageLogs).set({
       model: input.model?.trim() || input.runtime,
       provider: existing.provider === 'openrouter' && input.costSource !== 'gateway' ? 'openrouter' : provider,
@@ -257,6 +278,7 @@ export async function persistSessionCost(input: PersistSessionCostInput): Promis
       agentName: agentNameForRuntime(input.runtime),
       billingPeriod: billingPeriodFor(),
       ...attribution,
+      metadataJson: metadataJsonForCostSource(input.metadata, effectiveCostSource),
     }).where(and(eq(usageLogs.sessionKey, sessionKey), eq(usageLogs.attempt, context.attempt))).run();
     return true;
   }
@@ -278,6 +300,7 @@ export async function persistSessionCost(input: PersistSessionCostInput): Promis
     requestType: 'completion',
     billingPeriod: billingPeriodFor(),
     ...attribution,
+    metadataJson: metadataJsonForCostSource(input.metadata, input.costSource),
   }).run();
 
   console.log(`${LOG_PREFIX} Persisted ${sessionKey} attempt ${context.attempt}.`);
@@ -323,6 +346,13 @@ export async function persistRuntimeSessionCost(input: {
       missionId: input.missionId,
       role: input.role ?? 'worker',
       runId: input.runId,
+      metadata: telemetry.costSource === 'gateway'
+        ? { costSource: 'gateway' }
+        : telemetry.costSource === 'estimate'
+          ? { costSource: 'estimate', rateTableVersion: modelRateTable.rateTableVersion }
+          : telemetry.costSource === 'unknown'
+            ? { costSource: 'unknown' }
+            : undefined,
     });
     if (persisted) {
       const { getLaneEvents, listLanes } = await import('@/lib/lane/registry');

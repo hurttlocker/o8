@@ -47,6 +47,7 @@ describe('OpenCode 2 cost parser', () => {
       cacheWriteTokens: 10,
       totalCostUsd: 0.0035,
       model: 'opencode/deepseek-v4-flash-free',
+      costSource: 'gateway',
     });
   });
 
@@ -73,6 +74,7 @@ describe('OpenCode 2 cost parser', () => {
       cacheWriteTokens: 1,
       totalCostUsd: 0.00001,
       model: 'opencode/gpt-5-nano',
+      costSource: 'gateway',
     });
   });
 });

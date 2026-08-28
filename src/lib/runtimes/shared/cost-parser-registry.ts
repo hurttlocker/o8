@@ -17,6 +17,7 @@ export interface SessionCostData {
   cacheWriteTokens: number;
   totalCostUsd: number;
   model: string | null;
+  costSource?: 'gateway' | 'estimate' | 'unknown';
 }
 
 export interface CostParser {

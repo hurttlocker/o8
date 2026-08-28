@@ -232,6 +232,7 @@ export const cursorRuntime: AgentRuntime = {
       outputTokens: sessionCost.outputTokens,
       cacheReadTokens: sessionCost.cacheReadTokens,
       cacheWriteTokens: sessionCost.cacheWriteTokens,
+      costSource: sessionCost.costSource ?? 'unknown',
       model: sessionCost.model ?? undefined,
     };
   },

@@ -3,6 +3,7 @@ import { access, readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
+import { resolveRate, type ResolvedRate } from '@/lib/cost/rate-table';
 import type { SessionCostData } from '@/lib/runtimes/shared/cost-parser-registry';
 import { registerCostParser } from '@/lib/runtimes/shared/cost-parser-registry';
 export type { SessionCostData } from '@/lib/runtimes/shared/cost-parser-registry';
@@ -14,13 +15,7 @@ const LONG_CONTEXT_OUTPUT_MULTIPLIER = 1.5;
 const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
 const CODEX_CONFIG_PATH = path.join(CODEX_HOME, 'config.toml');
 
-type CodexPricingModel = {
-  canonicalModel: string;
-  inputUsdPerMillion: number;
-  cachedInputUsdPerMillion: number;
-  outputUsdPerMillion: number;
-  longContextEligible?: boolean;
-};
+type CodexPricingModel = ResolvedRate & { longContextEligible: boolean };
 
 type NormalizedUsage = {
   inputTokens: number;
@@ -96,112 +91,20 @@ function diffUsage(next: NormalizedUsage, previous: NormalizedUsage | null): Nor
 }
 
 function detectPricingModel(rawModel: string | null | undefined): CodexPricingModel | null {
-  const normalizedModel = rawModel?.trim().toLowerCase();
-  if (!normalizedModel) {
-    return null;
-  }
-
-  // GPT-5.6 generation (per xAI/OpenAI pricing 2026-07-09, cache reads -90%).
-  if (normalizedModel.includes('gpt-5.6-sol')) {
-    return {
-      canonicalModel: 'gpt-5.6-sol',
-      inputUsdPerMillion: 5,
-      cachedInputUsdPerMillion: 0.5,
-      outputUsdPerMillion: 30,
-      longContextEligible: true,
-    };
-  }
-
-  if (normalizedModel.includes('gpt-5.6-terra')) {
-    return {
-      canonicalModel: 'gpt-5.6-terra',
-      inputUsdPerMillion: 2.5,
-      cachedInputUsdPerMillion: 0.25,
-      outputUsdPerMillion: 15,
-      longContextEligible: true,
-    };
-  }
-
-  if (normalizedModel.includes('gpt-5.6-luna')) {
-    return {
-      canonicalModel: 'gpt-5.6-luna',
-      inputUsdPerMillion: 1,
-      cachedInputUsdPerMillion: 0.1,
-      outputUsdPerMillion: 6,
-    };
-  }
-
-  if (normalizedModel.includes('gpt-5.5')) {
-    return {
-      canonicalModel: 'gpt-5.5',
-      inputUsdPerMillion: 2.5,
-      cachedInputUsdPerMillion: 0.25,
-      outputUsdPerMillion: 15,
-      longContextEligible: true,
-    };
-  }
-
-  if (normalizedModel.includes('gpt-5.4-mini')) {
-    return {
-      canonicalModel: 'gpt-5.4-mini',
-      inputUsdPerMillion: 0.75,
-      cachedInputUsdPerMillion: 0.075,
-      outputUsdPerMillion: 4.5,
-    };
-  }
-
-  if (normalizedModel.includes('gpt-5.4-nano')) {
-    return {
-      canonicalModel: 'gpt-5.4-nano',
-      inputUsdPerMillion: 0.2,
-      cachedInputUsdPerMillion: 0.02,
-      outputUsdPerMillion: 1.25,
-    };
-  }
-
-  if (normalizedModel.includes('gpt-5.4')) {
-    return {
-      canonicalModel: 'gpt-5.4',
-      inputUsdPerMillion: 2.5,
-      cachedInputUsdPerMillion: 0.25,
-      outputUsdPerMillion: 15,
-      longContextEligible: true,
-    };
-  }
-
-  if (normalizedModel.includes('gpt-5.2-pro')) {
-    return {
-      canonicalModel: 'gpt-5.2-pro',
-      inputUsdPerMillion: 21,
-      cachedInputUsdPerMillion: 2.1,
-      outputUsdPerMillion: 168,
-    };
-  }
-
-  if (normalizedModel.includes('gpt-5.2-codex')) {
-    return {
-      canonicalModel: 'gpt-5.2-codex',
-      inputUsdPerMillion: 1.5,
-      cachedInputUsdPerMillion: 0.15,
-      outputUsdPerMillion: 6,
-    };
-  }
-
-  if (normalizedModel.includes('gpt-5.2')) {
-    return {
-      canonicalModel: 'gpt-5.2',
-      inputUsdPerMillion: 2,
-      cachedInputUsdPerMillion: 0.2,
-      outputUsdPerMillion: 8,
-    };
-  }
-
-  return null;
+  const rate = resolveRate('codex', rawModel);
+  if (!rate) return null;
+  return {
+    ...rate,
+    longContextEligible: rate.modelKey === 'gpt-5.6-sol'
+      || rate.modelKey === 'gpt-5.6-terra'
+      || rate.modelKey === 'gpt-5.5'
+      || rate.modelKey === 'gpt-5.4',
+  };
 }
 
 function buildParsedUsageEntry(usage: NormalizedUsage, rawModel: string | null | undefined): ParsedUsageEntry {
   const pricing = detectPricingModel(rawModel);
-  const model = pricing?.canonicalModel ?? rawModel?.trim() ?? null;
+  const model = pricing?.modelKey ?? rawModel?.trim() ?? null;
   const uncachedInputTokens = Math.max(0, usage.inputTokens - usage.cachedInputTokens);
   const inputMultiplier = pricing?.longContextEligible && usage.inputTokens > LONG_CONTEXT_THRESHOLD
     ? LONG_CONTEXT_INPUT_MULTIPLIER
@@ -212,7 +115,7 @@ function buildParsedUsageEntry(usage: NormalizedUsage, rawModel: string | null |
   const totalCostUsd = pricing
     ? (
       (uncachedInputTokens * pricing.inputUsdPerMillion * inputMultiplier)
-      + (usage.cachedInputTokens * pricing.cachedInputUsdPerMillion * inputMultiplier)
+      + (usage.cachedInputTokens * (pricing.cacheReadUsdPerMillion ?? 0) * inputMultiplier)
       + (usage.outputTokens * pricing.outputUsdPerMillion * outputMultiplier)
     ) / TOKENS_PER_MILLION
     : 0;
@@ -373,6 +276,7 @@ export async function parseCodexSessionCost(
 
   totals.totalCostUsd = Number(totals.totalCostUsd.toFixed(6));
   totals.model = models.size === 1 ? [...models][0] : models.size > 1 ? 'mixed' : fallbackModel;
+  if (totals.totalCostUsd > 0) totals.costSource = 'estimate';
 
   return totals;
 }

@@ -89,5 +89,6 @@ describe('runtime cost persistence', () => {
 
     const row = getDb()?.select().from(usageLogs).all().find((entry) => entry.sessionKey === base.sessionKey);
     expect(row).toMatchObject({ provider: 'openrouter', costUsd: 0.09 });
+    expect(JSON.parse(row?.metadataJson ?? '{}')).toEqual({ costSource: 'gateway' });
   });
 });
