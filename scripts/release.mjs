@@ -29,6 +29,7 @@ import { publishFixed } from './publish-fixed.mjs';
 import { syncReports } from './sync-reports.mjs';
 import { verifyNativeBundle } from './native-bundle.mjs';
 import { runShipWorkflow } from './lib/ship-broadcast.mjs';
+import { buildReleaseManifest } from './lib/release-manifest.mjs';
 
 const REPO = 'hurttlocker/o8';
 const PUBLIC_MIRROR = 'hurttlocker/o8-releases';
@@ -187,23 +188,18 @@ const latestNotes = gateReleaseNote ? `o8 ${tag} — ${gateReleaseNote}` : `o8 $
 // Same signed binary works on x86_64 natively and aarch64 under Rosetta, so
 // point both platforms at the same artifact until a native arm64 runner
 // exists. Still signed with the same minisign key the installed app trusts.
-const latestJson = {
+const latestJsonPath = join(BUNDLE, 'macos', 'latest.json');
+const fixedJsonPath = join(BUNDLE, 'macos', 'fixed.json');
+const { latestJson, uploadArgs } = buildReleaseManifest({
+  bundleDir: BUNDLE,
   version,
   notes: latestNotes,
-  pub_date: pubDate,
-  platforms: {
-    'darwin-x86_64': {
-      signature,
-      url: `${downloadBase}/o8.app.tar.gz`,
-    },
-    'darwin-aarch64': {
-      signature,
-      url: `${downloadBase}/o8.app.tar.gz`,
-    },
-  },
-};
-
-const latestJsonPath = join(BUNDLE, 'macos', 'latest.json');
+  pubDate,
+  downloadBase,
+  darwinSignature: signature,
+  baseUploadAssets: [DMG, APP_TAR, APP_SIG],
+  trailingUploadAssets: [latestJsonPath, fixedJsonPath],
+});
 writeFileSync(latestJsonPath, JSON.stringify(latestJson, null, 2));
 console.log(`[release] wrote ${latestJsonPath}`);
 
@@ -231,7 +227,6 @@ try {
 }
 const { entries: pendingFixes, missing: unknownFixes } = resolveNewFixes(releaseRange(tag), version);
 const fixedManifest = buildManifest([...readPublished(), ...pendingFixes], pubDate);
-const fixedJsonPath = join(BUNDLE, 'macos', 'fixed.json');
 writeFileSync(fixedJsonPath, JSON.stringify(fixedManifest, null, 2));
 console.log(`[release] wrote ${fixedJsonPath} (${fixedManifest.fixed.length} fixed report${fixedManifest.fixed.length === 1 ? '' : 's'}, ${pendingFixes.length} new this release)`);
 if (unknownFixes.length > 0) {
@@ -253,8 +248,6 @@ try {
   execFileSync('gh', ['release', 'view', tag, '-R', REPO], { stdio: 'pipe' });
   releaseExists = true;
 } catch {}
-
-const uploadArgs = [DMG, APP_TAR, APP_SIG, latestJsonPath, fixedJsonPath];
 
 // #1486 — an existing release for the CURRENT version almost always means the
 // operator forgot `npm version patch`: silently replacing the published

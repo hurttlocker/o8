@@ -6,6 +6,7 @@ import {
   verifyReleaseArtifactManifest,
   writeReleaseArtifactManifest,
 } from '../scripts/lib/release-artifacts.mjs';
+import { buildReleaseManifest } from '../scripts/lib/release-manifest.mjs';
 
 const roots: string[] = [];
 
@@ -58,5 +59,89 @@ describe('release artifact provenance', () => {
       reusable: false,
       reason: 'output_set_mismatch',
     });
+  });
+});
+
+function makeReleaseBundle(includeLinux: boolean) {
+  const bundleDir = mkdtempSync(join(tmpdir(), 'o8-release-bundle-'));
+  roots.push(bundleDir);
+  const macosDir = join(bundleDir, 'macos');
+  const dmgDir = join(bundleDir, 'dmg');
+  mkdirSync(macosDir, { recursive: true });
+  mkdirSync(dmgDir, { recursive: true });
+  const macosAssets = [
+    join(dmgDir, 'o8_0.1.999_x64.dmg'),
+    join(macosDir, 'o8.app.tar.gz'),
+    join(macosDir, 'o8.app.tar.gz.sig'),
+  ];
+  const trailingAssets = [
+    join(macosDir, 'latest.json'),
+    join(macosDir, 'fixed.json'),
+  ];
+  for (const path of macosAssets) writeFileSync(path, 'fixture');
+
+  const linuxAssets: string[] = [];
+  if (includeLinux) {
+    const appImageDir = join(bundleDir, 'appimage');
+    const debDir = join(bundleDir, 'deb');
+    mkdirSync(appImageDir, { recursive: true });
+    mkdirSync(debDir, { recursive: true });
+    linuxAssets.push(
+      join(appImageDir, 'o8_0.1.999_amd64.AppImage'),
+      join(appImageDir, 'o8_0.1.999_amd64.AppImage.sig'),
+      join(debDir, 'o8_0.1.999_amd64.deb'),
+    );
+    writeFileSync(linuxAssets[0], 'appimage');
+    writeFileSync(linuxAssets[1], 'linux-fixture-signature\n');
+    writeFileSync(linuxAssets[2], 'deb');
+  }
+
+  return { bundleDir, macosAssets, trailingAssets, linuxAssets };
+}
+
+function releasePlan(bundle: ReturnType<typeof makeReleaseBundle>) {
+  return buildReleaseManifest({
+    bundleDir: bundle.bundleDir,
+    version: '0.1.999',
+    notes: 'o8 v0.1.999',
+    pubDate: '2026-08-27T12:00:00.000Z',
+    downloadBase: 'https://github.com/example/releases/download/v0.1.999',
+    darwinSignature: 'darwin-fixture-signature',
+    baseUploadAssets: bundle.macosAssets,
+    trailingUploadAssets: bundle.trailingAssets,
+  });
+}
+
+describe('release updater manifest', () => {
+  it('keeps the macOS-only platforms and upload list unchanged', () => {
+    const bundle = makeReleaseBundle(false);
+    const plan = releasePlan(bundle);
+
+    expect(plan.latestJson.platforms).toEqual({
+      'darwin-x86_64': {
+        signature: 'darwin-fixture-signature',
+        url: 'https://github.com/example/releases/download/v0.1.999/o8.app.tar.gz',
+      },
+      'darwin-aarch64': {
+        signature: 'darwin-fixture-signature',
+        url: 'https://github.com/example/releases/download/v0.1.999/o8.app.tar.gz',
+      },
+    });
+    expect(plan.uploadArgs).toEqual([...bundle.macosAssets, ...bundle.trailingAssets]);
+  });
+
+  it('adds signed Linux artifacts to the updater manifest and upload list', () => {
+    const bundle = makeReleaseBundle(true);
+    const plan = releasePlan(bundle);
+
+    expect(plan.latestJson.platforms['linux-x86_64']).toEqual({
+      signature: 'linux-fixture-signature',
+      url: 'https://github.com/example/releases/download/v0.1.999/o8_0.1.999_amd64.AppImage',
+    });
+    expect(plan.uploadArgs).toEqual([
+      ...bundle.macosAssets,
+      ...bundle.linuxAssets,
+      ...bundle.trailingAssets,
+    ]);
   });
 });
