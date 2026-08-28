@@ -10,6 +10,7 @@ import { archiveResetLaneSessions, confirmedKilledLaneIds } from './reset-lifecy
 import { log } from './shared';
 import type { ResetPacketInput } from './types';
 import { storageOwnerGenerationForLane } from '@/lib/orchestrator/terminal-storage-release';
+import { archiveWorkspaceManifestRunForReset } from '@/lib/workspace/manifest/lifecycle';
 
 export interface ResetAuthoritativeBinding {
   packet: OrchestratorPacket;
@@ -40,6 +41,11 @@ export async function resetPacketViaLaneFallback(
 
   const bound: typeof allBound = [];
   for (const lane of allBound) {
+    await archiveWorkspaceManifestRunForReset({
+      worktreePath: lane.worktreePath,
+      packetId: input.packetId,
+      laneId: lane.id,
+    });
     if (lane.status !== 'archived' && lane.status !== 'completed') {
       bound.push(lane);
       continue;

@@ -170,7 +170,7 @@ async function ensureSafetyHookGitExclusion(
     gitAdmin.commonPath,
     gitAdmin.commonIdentity,
     excludeName,
-    `${MANAGED_WORKSPACE_SAFETY_SETTINGS}\n`,
+    `${MANAGED_WORKSPACE_SAFETY_SETTINGS}\n.o8/\n`,
   );
   await withWorktreeMaterializationExecution(
     gitAdmin.commonPath,

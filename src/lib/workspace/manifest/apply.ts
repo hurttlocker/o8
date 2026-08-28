@@ -7,6 +7,17 @@ import path from 'node:path';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { getOperatorDefaults } from '@/lib/operator/defaults';
 import { runRepoSetupCommand } from '@/lib/workspace/repo-setup';
+import {
+  beginWorkspaceManifestRun,
+  finishWorkspaceManifestRun,
+  settleWorkspaceManifestRun,
+  updateWorkspaceManifestRun,
+  type WorkspaceManifestHealthReceipt,
+  type WorkspaceManifestLifecycleRun,
+  type WorkspaceManifestServiceReceipt,
+  type WorkspaceManifestSetupReceipt,
+  type WorkspaceManifestState,
+} from './lifecycle';
 import { loadWorkspaceManifestSource } from './loader';
 import {
   findWorkspaceManifestApproval,
@@ -19,33 +30,15 @@ import type {
   WorkspaceManifestServiceHealth,
 } from './types';
 
-const SETUP_TIMEOUT_MS = 45 * 60_000;
+const DEFAULT_SETUP_TIMEOUT_MS = 45 * 60_000;
 const DEFAULT_HEALTH_TIMEOUT_MS = 5_000;
+let setupTimeoutOverrideForTest: number | null = null;
 
-export interface WorkspaceManifestHealthReceipt {
-  kind: 'http' | 'tcp';
-  target: string;
-  ok: boolean;
-  durationMs: number;
-  checkedAt: string;
-  error?: string;
-}
-
-export interface WorkspaceManifestSetupReceipt {
-  index: number;
-  commandId: string;
-  durationMs: number;
-  completedAt: string;
-}
-
-export interface WorkspaceManifestServiceReceipt {
-  name: string;
-  commandId: string;
-  cwd: string;
-  port: number | null;
-  environment: NodeJS.ProcessEnv;
-  health: WorkspaceManifestHealthReceipt | null;
-}
+export type {
+  WorkspaceManifestHealthReceipt,
+  WorkspaceManifestServiceReceipt,
+  WorkspaceManifestSetupReceipt,
+} from './lifecycle';
 
 export interface WorkspaceManifestApplyResult {
   ports: Record<string, number>;
@@ -57,7 +50,32 @@ export interface WorkspaceManifestApplyResult {
   };
 }
 
-type ApplyStep = 'load' | 'policy' | 'ports' | 'preview' | `setup:${number}`;
+type ApplyStep = 'load' | 'policy' | 'ports' | 'services' | 'preview' | `setup:${number}`;
+
+class WorkspaceManifestSetupTimeoutError extends Error {
+  constructor(
+    readonly step: `setup:${number}`,
+    readonly commandId: string,
+    timeoutMs: number,
+  ) {
+    super(`Workspace manifest ${step} (${commandId}) timed out after ${timeoutMs}ms.`);
+    this.name = 'WorkspaceManifestSetupTimeoutError';
+  }
+}
+
+class WorkspaceManifestCancelledError extends Error {
+  constructor() {
+    super('Workspace manifest cancelled because its lane became terminal.');
+    this.name = 'WorkspaceManifestCancelledError';
+  }
+}
+
+export function setWorkspaceManifestSetupTimeoutForTest(timeoutMs: number | null): void {
+  if (timeoutMs !== null && (!Number.isFinite(timeoutMs) || timeoutMs <= 0)) {
+    throw new Error('Workspace manifest setup timeout must be a positive number.');
+  }
+  setupTimeoutOverrideForTest = timeoutMs;
+}
 
 function commandId(command: string): string {
   return createHash('sha256').update(command).digest('hex');
@@ -200,9 +218,11 @@ async function applyLoadedManifest(input: {
   worktreePath: string;
   packetId: string;
   laneId: string;
-  setStep: (step: ApplyStep) => void;
+  lifecycle: WorkspaceManifestLifecycleRun;
+  setupTimeoutMs: number;
+  setStep: (step: ApplyStep, commandId?: string) => Promise<void>;
 }): Promise<WorkspaceManifestApplyResult> {
-  input.setStep('ports');
+  await input.setStep('ports');
   const services = input.manifest.services ?? [];
   const ports = await allocateWorkspaceServicePorts({
     packetId: input.packetId,
@@ -211,28 +231,57 @@ async function applyLoadedManifest(input: {
       ? [{ name: service.name, preferred: service.port.preferred }]
       : []),
   });
+  await updateWorkspaceManifestRun(input.lifecycle, (receipt) => ({ ...receipt, ports }));
   const allocatedEnvironment = portEnvironment(input.manifest, ports);
   const setupEnvironment = { ...process.env, ...allocatedEnvironment };
   const setupReceipts: WorkspaceManifestSetupReceipt[] = [];
   for (const [index, setupCommand] of (input.manifest.setup ?? []).entries()) {
-    input.setStep(`setup:${index + 1}`);
+    const step = `setup:${index + 1}` as const;
+    const setupCommandId = commandId(setupCommand);
+    await input.setStep(step, setupCommandId);
     const startedAt = Date.now();
     const shell = setupShell(setupCommand);
-    await runRepoSetupCommand({
-      ...shell,
-      cwd: input.worktreePath,
-      timeoutMs: SETUP_TIMEOUT_MS,
-      env: setupEnvironment,
-    });
-    setupReceipts.push({
+    const timeoutController = new AbortController();
+    const timeoutError = new WorkspaceManifestSetupTimeoutError(
+      step,
+      setupCommandId,
+      input.setupTimeoutMs,
+    );
+    const timer = setTimeout(() => timeoutController.abort(timeoutError), input.setupTimeoutMs);
+    timer.unref?.();
+    try {
+      await runRepoSetupCommand({
+        ...shell,
+        cwd: input.worktreePath,
+        timeoutMs: input.setupTimeoutMs,
+        env: setupEnvironment,
+        signal: AbortSignal.any([input.lifecycle.signal, timeoutController.signal]),
+      });
+    } catch (error) {
+      if (input.lifecycle.signal.aborted) throw new WorkspaceManifestCancelledError();
+      if (timeoutController.signal.aborted) throw timeoutError;
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+    if (input.lifecycle.signal.aborted) throw new WorkspaceManifestCancelledError();
+    const setupReceipt: WorkspaceManifestSetupReceipt = {
       index,
-      commandId: commandId(setupCommand),
+      commandId: setupCommandId,
       durationMs: Date.now() - startedAt,
       completedAt: new Date().toISOString(),
+    };
+    setupReceipts.push(setupReceipt);
+    await updateWorkspaceManifestRun(input.lifecycle, (receipt) => {
+      const next = { ...receipt, setup: [...receipt.setup, setupReceipt] };
+      delete next.commandId;
+      return next;
     });
   }
   const serviceReceipts: WorkspaceManifestServiceReceipt[] = [];
+  await input.setStep('services');
   for (const service of services) {
+    if (input.lifecycle.signal.aborted) throw new WorkspaceManifestCancelledError();
     const cwd = path.resolve(input.worktreePath, service.cwd ?? '.');
     if (!pathInside(cwd, input.worktreePath)) {
       throw new Error(`Service ${service.name} cwd escapes the packet worktree.`);
@@ -240,16 +289,21 @@ async function applyLoadedManifest(input: {
     const health = service.health
       ? await probeHealth({ health: service.health, service, ports })
       : null;
-    serviceReceipts.push({
+    const serviceReceipt: WorkspaceManifestServiceReceipt = {
       name: service.name,
       commandId: commandId(service.command),
       cwd,
       port: ports[service.name] ?? null,
       environment: { ...service.env, ...allocatedEnvironment },
       health,
-    });
+    };
+    serviceReceipts.push(serviceReceipt);
+    await updateWorkspaceManifestRun(input.lifecycle, (receipt) => ({
+      ...receipt,
+      services: [...receipt.services, serviceReceipt],
+    }));
   }
-  input.setStep('preview');
+  await input.setStep('preview');
   const firstPort = services.map((service) => ports[service.name]).find((port) => port !== undefined);
   const preview = input.manifest.preview
     ? resolveTemplate(input.manifest.preview.url, ports, firstPort)
@@ -285,6 +339,7 @@ export async function applyWorkspaceManifest(input: {
 }): Promise<WorkspaceManifestApplyResult | null> {
   const startedAt = Date.now();
   let step: ApplyStep = 'load';
+  let lifecycle: WorkspaceManifestLifecycleRun | null = null;
   try {
     const loaded = await loadWorkspaceManifestSource(input.worktreePath);
     if (!loaded) return null;
@@ -307,25 +362,68 @@ export async function applyWorkspaceManifest(input: {
       });
       return null;
     }
+    lifecycle = await beginWorkspaceManifestRun({
+      worktreePath: path.resolve(input.worktreePath),
+      packetId: input.packetId,
+      laneId: input.laneId,
+      manifestHash: decision.manifestHash,
+    });
     const result = await applyLoadedManifest({
       manifest: loaded.manifest,
       worktreePath: path.resolve(input.worktreePath),
       packetId: input.packetId,
       laneId: input.laneId,
-      setStep: (next) => { step = next; },
+      lifecycle,
+      setupTimeoutMs: setupTimeoutOverrideForTest ?? DEFAULT_SETUP_TIMEOUT_MS,
+      setStep: async (next, setupCommandId) => {
+        step = next;
+        await updateWorkspaceManifestRun(lifecycle!, (receipt) => {
+          const updated = { ...receipt, step: next };
+          if (setupCommandId) updated.commandId = setupCommandId;
+          else delete updated.commandId;
+          return updated;
+        });
+      },
     });
-    recordEventSafely(input.laneId, 'workspace_manifest_applied', {
-      services: Object.entries(result.ports).map(([name, port]) => ({ name, port })),
-      ...(result.preview ? { preview: result.preview } : {}),
-      durationMs: Date.now() - startedAt,
-    });
-    return result;
+    if (lifecycle.signal.aborted) throw new WorkspaceManifestCancelledError();
+    const settlement = await settleWorkspaceManifestRun(lifecycle, { state: 'completed' });
+    if (settlement.changed) {
+      recordEventSafely(input.laneId, 'workspace_manifest_applied', {
+        services: Object.entries(result.ports).map(([name, port]) => ({ name, port })),
+        ...(result.preview ? { preview: result.preview } : {}),
+        durationMs: Date.now() - startedAt,
+        state: 'completed',
+      });
+      return result;
+    }
+    return null;
   } catch (error) {
     const message = formatError(error);
+    const state: Exclude<WorkspaceManifestState, 'running' | 'completed' | 'crashed'> =
+      error instanceof WorkspaceManifestSetupTimeoutError
+        ? 'timed_out'
+        : error instanceof WorkspaceManifestCancelledError || lifecycle?.signal.aborted
+          ? 'cancelled'
+          : 'failed';
+    const commandId = error instanceof WorkspaceManifestSetupTimeoutError
+      ? error.commandId
+      : undefined;
     console.warn(
       `[workspace-manifest] Apply failed for packet ${input.packetId} in ${path.resolve(input.repoPath)} at ${step}: ${message}`,
     );
-    recordEventSafely(input.laneId, 'workspace_manifest_failed', { step, error: message });
+    const settlement = lifecycle
+      ? await settleWorkspaceManifestRun(lifecycle, { state, step, commandId, error: message })
+      : { receipt: null, changed: true };
+    if (settlement.changed) {
+      recordEventSafely(input.laneId, 'workspace_manifest_failed', {
+        step,
+        ...(commandId ? { commandId } : {}),
+        error: message,
+        state,
+      });
+    }
     return null;
+  } finally {
+    if (lifecycle) finishWorkspaceManifestRun(lifecycle);
   }
 }

@@ -37,6 +37,7 @@ export async function runRepoSetupCommand(
     maxBuffer: 8 * 1024 * 1024,
     windowsHide: true,
     env: invocation.env,
+    signal: invocation.signal,
   });
 }
 

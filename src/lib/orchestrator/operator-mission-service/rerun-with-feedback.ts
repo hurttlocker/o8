@@ -22,6 +22,7 @@ import { collectPacketLifecycleLanes } from '@/lib/orchestrator/packet-lifecycle
 import { cleanupResetPacketTargets, type ResetCleanupTarget } from './reset-cleanup';
 import { unregisterWatchedAgent } from '@/lib/supervisor/agent-supervisor';
 import { storageOwnerGenerationForLane } from '@/lib/orchestrator/terminal-storage-release';
+import { archiveWorkspaceManifestRunForReset } from '@/lib/workspace/manifest/lifecycle';
 
 /**
  * #662 — One-click rerun-with-feedback.
@@ -196,6 +197,11 @@ async function retireRerunGeneration(guard: PacketLifecycleGuard): Promise<boole
 
   for (const target of targets) {
     if (target.sessionKey?.trim()) unregisterWatchedAgent(target.sessionKey.trim());
+    await archiveWorkspaceManifestRunForReset({
+      worktreePath: target.worktreePath,
+      packetId: guard.packetId,
+      laneId: target.id,
+    });
   }
   const confirmedKills = new Set(kills
     .filter((outcome) => outcome.confirmed || outcome.alreadyDead)

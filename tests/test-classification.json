@@ -2339,6 +2339,15 @@
       ]
     },
     {
+      "path": "tests/workspace-manifest-lifecycle-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/workspace-manifest-policy-real-path.test.ts",
       "reasons": [
         "child-process",

@@ -317,13 +317,13 @@ export type LaneEventVerb =
   | 'worktree_refresh_failed'
   // A checked-in workspace manifest allocated service ports and completed its
   // setup and one-shot health probes. Payload:
-  // { services: [{ name, port }], preview?, durationMs }
+  // { services: [{ name, port }], preview?, durationMs, state: 'completed' }
   | 'workspace_manifest_applied'
   // Operator policy prevented a checked-in manifest from executing. Payload:
   // { policy, manifestHash, approvalId?, reason? }
   | 'workspace_manifest_skipped'
   // Workspace manifest application failed without blocking packet launch.
-  // Payload: { step, error }
+  // Payload: { step, commandId?, error, state }
   | 'workspace_manifest_failed'
   // Discard could not prove its preserved branch exists. Payload:
   // { code, reason, packetId, branch, ref, note, gcRisk }

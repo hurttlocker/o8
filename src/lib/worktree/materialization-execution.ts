@@ -1,4 +1,4 @@
-import { execFile, type ExecFileOptions } from 'node:child_process';
+import { execFile, type ChildProcess, type ExecFileOptions } from 'node:child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import path from 'node:path';
 
@@ -71,7 +71,24 @@ export function materializationAwareExecFile(
   const identity = cwd ? materializationContext.getStore()?.get(cwd) ?? null : null;
   const invocation = guardedWorkspaceInvocation(command, [...args], identity);
   return new Promise((resolve, reject) => {
-    execFile(invocation.command, invocation.args, options, (error, stdout, stderr) => {
+    const { signal, ...execOptions } = options;
+    let child: ChildProcess | null = null;
+    let settled = false;
+    const cleanup = () => signal?.removeEventListener('abort', abort);
+    const abort = () => {
+      if (settled) return;
+      child?.kill();
+      settled = true;
+      cleanup();
+      const error = new Error('The operation was aborted.', { cause: signal?.reason });
+      error.name = 'AbortError';
+      Object.assign(error, { code: 'ABORT_ERR' });
+      reject(error);
+    };
+    child = execFile(invocation.command, invocation.args, execOptions, (error, stdout, stderr) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
       const stdoutText = Buffer.isBuffer(stdout) ? stdout.toString('utf8') : stdout;
       const stderrText = Buffer.isBuffer(stderr) ? stderr.toString('utf8') : stderr;
       if (error) {
@@ -81,5 +98,7 @@ export function materializationAwareExecFile(
         resolve({ stdout: stdoutText, stderr: stderrText });
       }
     });
+    if (signal?.aborted) abort();
+    else signal?.addEventListener('abort', abort, { once: true });
   });
 }
