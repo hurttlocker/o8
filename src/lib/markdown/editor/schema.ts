@@ -80,10 +80,54 @@ const nodes: Record<string, NodeSpec> = {
     ],
   },
   list_item: {
+    attrs: { checked: { default: null } },
     content: 'paragraph block*',
     defining: true,
-    parseDOM: [{ tag: 'li' }],
-    toDOM: () => ['li', { style: 'margin:0 0 3px 0' }, 0],
+    parseDOM: [{
+      tag: 'li',
+      getAttrs: (dom) => {
+        const checked = (dom as HTMLElement).getAttribute('data-task-checked');
+        return { checked: checked === null ? null : checked === 'true' };
+      },
+    }],
+    toDOM: (node) => {
+      const checked = typeof node.attrs.checked === 'boolean' ? node.attrs.checked : null;
+      if (checked === null) return ['li', { style: 'margin:0 0 3px 0' }, 0];
+      return [
+        'li',
+        {
+          'data-task-checked': String(checked),
+          style: [
+            'display:flex',
+            'align-items:flex-start',
+            'gap:7px',
+            'margin-top:0',
+            'margin-right:0',
+            'margin-bottom:3px',
+            'margin-left:0',
+          ].join(';'),
+        },
+        ['input', {
+          type: 'checkbox',
+          checked: checked ? 'checked' : undefined,
+          'data-task-checkbox': 'true',
+          'aria-label': checked ? 'Mark task incomplete' : 'Mark task complete',
+          contenteditable: 'false',
+          style: [
+            'flex:none',
+            'width:14px',
+            'height:14px',
+            'margin-top:3px',
+            'margin-right:0',
+            'margin-bottom:0',
+            'margin-left:0',
+            'accent-color:var(--t-accent)',
+            'cursor:pointer',
+          ].join(';'),
+        }],
+        ['div', { style: 'min-width:0;flex:1' }, 0],
+      ];
+    },
   },
   code_block: {
     attrs: {
@@ -126,6 +170,36 @@ const nodes: Record<string, NodeSpec> = {
         'color:var(--t-text-muted)',
       ].join(';'),
     }, 0],
+  },
+  opaque_block: {
+    attrs: {
+      construct: {},
+      source: {},
+      blockIndex: {},
+    },
+    group: 'block',
+    atom: true,
+    selectable: true,
+    draggable: false,
+    toDOM: (node) => ['div', {
+      'data-opaque-construct': String(node.attrs.construct),
+      contenteditable: 'false',
+    }, String(node.attrs.source)],
+  },
+  opaque_inline: {
+    attrs: {
+      construct: {},
+      source: {},
+    },
+    inline: true,
+    group: 'inline',
+    atom: true,
+    selectable: true,
+    toDOM: (node) => ['span', {
+      'data-opaque-inline-construct': String(node.attrs.construct),
+      contenteditable: 'false',
+      style: monoStyle,
+    }, String(node.attrs.source)],
   },
   hard_break: {
     inline: true,
