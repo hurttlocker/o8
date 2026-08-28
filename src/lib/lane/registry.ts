@@ -12,11 +12,10 @@ import { reportMissingArchiveEnding, resolveArchiveEnding, type ArchiveEndingOve
 import { publishPacketTailEvent } from './packet-tail';
 import { publishLaneLifecycleEvent } from './lifecycle';
 import { extractLaneReviewScreenshot } from './review-screenshot';
-import { isRefusedTerminalTransition, isWorkerTerminal } from './terminal-states';
-import type {
-  Lane, LaneEvent, LaneEventActor, LaneEventVerb, LaneOwnership, LaneRuntime, LaneStatus,
-} from './types';
+import { isLaneTerminal, isRefusedTerminalTransition, isWorkerTerminal } from './terminal-states';
+import type { Lane, LaneEvent, LaneEventActor, LaneEventVerb, LaneOwnership, LaneRuntime, LaneStatus } from './types';
 import { scheduleTerminalLaneCleanup } from './terminal-lane-cleanup';
+import { settleWorkspaceManifestOnTerminal } from '@/lib/workspace/manifest/terminal-release';
 import { captureLaneStorageCleanup, laneOwnsWorktree, settleLaneStorageOnAssociationLoss, worktreeIsConfirmedAbsent } from './lane-storage-release';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { resolveLaneCreationBaseCommit } from './creation-base';
@@ -58,9 +57,7 @@ const REVIEW_SCREENSHOT_DIR = join(
 );
 let reviewScreenshotClient: O8WebviewClient | null = null;
 
-function isWorktreeCleanupTerminalStatus(status: LaneStatus) {
-  return status === 'completed' || status === 'archived';
-}
+function isWorktreeCleanupTerminalStatus(status: LaneStatus) { return status === 'completed' || status === 'archived'; }
 
 function getLaneDb() {
   const db = getDb();
@@ -488,6 +485,8 @@ export function updateLane(
   if (statusChanged && previousStatus) {
     publishLaneLifecycleEvent(resolvedLane, previousStatus, lifecycleTimestamp ?? nowIso());
   }
+
+  if (statusChanged && isLaneTerminal(resolvedLane.status)) settleWorkspaceManifestOnTerminal(resolvedLane);
 
   if (
     statusChanged

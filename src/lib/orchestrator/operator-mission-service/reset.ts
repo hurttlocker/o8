@@ -25,6 +25,7 @@ import {
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { advancePacketStorageAdmissionEpoch } from '@/lib/orchestrator/packet-storage-admission-normalize';
 import { managedPacketWorktreeId, resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
+import { archiveWorkspaceManifestRunForReset } from '@/lib/workspace/manifest/lifecycle';
 import { supersedeDurableApprovedReviews } from '@/lib/lane/durable-review-approval';
 import {
   withMissionHandoffBarrier,
@@ -436,6 +437,11 @@ async function resetPacketUnlocked(input: ResetPacketInput) {
       if (lane.sessionKey?.trim()) unregisterWatchedAgent(lane.sessionKey.trim());
     }
     for (const lane of bound) {
+      await archiveWorkspaceManifestRunForReset({
+        worktreePath: lane.worktreePath,
+        packetId: packet.id,
+        laneId: lane.id,
+      });
       // #1215 — terminal lanes get unbound below like the rest but are never
       // re-archived and never donate a worktreePath (mirrors
       // archiveLanesForPacket, #1214).

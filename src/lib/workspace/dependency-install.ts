@@ -38,6 +38,7 @@ export interface DependencyInstallInvocation {
   cwd: string;
   timeoutMs: number;
   env: NodeJS.ProcessEnv;
+  signal?: AbortSignal;
 }
 
 export interface DependencyInstallRecipe {

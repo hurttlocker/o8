@@ -6,6 +6,14 @@ export {
 } from './loader';
 export { applyWorkspaceManifest } from './apply';
 export {
+  readWorkspaceManifestReceipt,
+  workspaceManifestReceiptPath,
+} from './lifecycle';
+export type {
+  WorkspaceManifestReceipt,
+  WorkspaceManifestState,
+} from './lifecycle';
+export {
   findWorkspaceManifestApproval,
   resolveWorkspaceManifestExecution,
   type WorkspaceManifestExecutionDecision,
