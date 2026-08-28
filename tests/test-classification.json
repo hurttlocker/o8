@@ -1301,6 +1301,12 @@
       ]
     },
     {
+      "path": "tests/file-save-conflict-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/fixed-reports-range.test.ts",
       "reasons": [
         "child-process",

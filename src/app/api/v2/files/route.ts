@@ -21,6 +21,7 @@ import {
   resolveAllowedOperatorConfigPath,
   resolveRepoRelativeFilePath,
 } from '@/lib/files/operator-config-docs';
+import { contentHash } from '@/lib/markdown/transport';
 
 async function resolveRoot(workspace?: string | null) {
   if (!workspace) return getDefaultLlmRepoRoot();
@@ -89,7 +90,7 @@ export async function GET(request: NextRequest) {
   try {
     const opened = await readWorkspaceFile(target.root, target.relativePath);
     const content = opened.bytes.toString('utf-8');
-    return NextResponse.json({ content, path, exists: true });
+    return NextResponse.json({ content, contentHash: await contentHash(content), path, exists: true });
   } catch (err) {
     if (isWorkspaceFileError(err) && err.code === 'workspace_file_not_found') {
       return NextResponse.json({ error: 'File not found', code: err.code, exists: false }, { status: 404 });
@@ -104,6 +105,8 @@ export async function POST(request: NextRequest) {
     const path = typeof body?.path === 'string' ? body.path : '';
     const content = typeof body?.content === 'string' ? body.content : undefined;
     const workspace = typeof body?.workspace === 'string' ? body.workspace : undefined;
+    const expectedHash = typeof body?.expectedHash === 'string' ? body.expectedHash : undefined;
+    const force = body?.force === true;
 
     if (!path || content === undefined) {
       return NextResponse.json({ error: 'path and content required' }, { status: 400 });
@@ -114,6 +117,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: target.error, code: target.code }, { status: target.status });
     }
 
+    if (expectedHash !== undefined && !force) {
+      let currentContent: string | null = null;
+      try {
+        const current = await readWorkspaceFile(target.root, target.relativePath);
+        currentContent = current.bytes.toString('utf-8');
+      } catch (err) {
+        if (!isWorkspaceFileError(err) || err.code !== 'workspace_file_not_found') throw err;
+      }
+      const currentHash = currentContent === null ? null : await contentHash(currentContent);
+      if (currentHash !== expectedHash) {
+        return NextResponse.json({
+          error: 'changed-on-disk',
+          contentHash: currentHash,
+          content: currentContent,
+        }, { status: 409 });
+      }
+    }
+
     const result = await writeWorkspaceFile(target.root, target.relativePath, content);
     const oldContent = result.previousBytes?.toString('utf-8') ?? null;
 
@@ -122,6 +143,7 @@ export async function POST(request: NextRequest) {
       path,
       isNew: result.created,
       oldContent,
+      contentHash: await contentHash(content),
     });
   } catch (err) {
     return fileError(err);
