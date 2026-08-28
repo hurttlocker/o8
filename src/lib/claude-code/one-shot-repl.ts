@@ -28,8 +28,6 @@ import 'server-only';
 import { resolveClaudeBinary } from '@/lib/runtimes/shared/cli-locate';
 
 import { spawn } from 'node:child_process';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import os from 'node:os';
 
 import {

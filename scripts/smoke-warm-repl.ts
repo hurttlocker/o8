@@ -1,5 +1,5 @@
 /** Live smoke for the warm REPL pool — cold vs warm timing + streaming. */
-import { askClaudeWarm, prewarmClaudeRepl, resetWarmReplPool } from '../src/lib/claude-code/warm-repl-pool';
+import { askClaudeWarm, resetWarmReplPool } from '../src/lib/claude-code/warm-repl-pool';
 import { REPL_HEALTH_PROMPTS_V1 } from '../src/lib/prompts/v1/health';
 
 const BIN = process.env.CLAUDE_BIN || `${process.env.HOME}/.claude/local/claude`;

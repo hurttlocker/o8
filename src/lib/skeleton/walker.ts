@@ -7,7 +7,7 @@
 
 import { execSync } from 'node:child_process';
 import { statSync } from 'node:fs';
-import { join, extname, basename } from 'node:path';
+import { join, extname } from 'node:path';
 import type { ScanOptions, SupportedLanguage } from './types';
 
 export interface WalkedFile {

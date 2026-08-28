@@ -49,7 +49,7 @@ export function BlueGlassHoverCard({
   onMouseEnter?: () => void;
   onMouseLeave?: () => void;
 }) {
-  const [inTauri, setInTauri] = useState(false);
+  const [, setInTauri] = useState(false);
   useEffect(() => { setInTauri(isTauri()); }, []);
 
   const content = (

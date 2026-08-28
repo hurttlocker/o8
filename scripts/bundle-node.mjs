@@ -13,7 +13,6 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
 import { pipeline } from 'stream/promises';
-import { createGunzip } from 'zlib';
 import { Readable } from 'stream';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

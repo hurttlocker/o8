@@ -47,13 +47,6 @@ export const STATUS_COLORS: Record<VisualStatus, string> = {
   error: '#ef4444',
 };
 
-const STATUS_LABELS: Record<VisualStatus, string> = {
-  running: 'Running',
-  waiting: 'Waiting',
-  idle: 'Idle',
-  error: 'Error',
-};
-
 export function classifyStatus(rawStatus: string | undefined): VisualStatus {
   const value = (rawStatus ?? '').toLowerCase();
   if (value.includes('error') || value.includes('fail')) return 'error';

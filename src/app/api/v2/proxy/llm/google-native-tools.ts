@@ -372,7 +372,6 @@ export async function createGoogleToolResponseStream(options: GoogleStreamOption
   const encoder = new TextEncoder();
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
-  let fullResponseText = '';
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -400,7 +399,6 @@ export async function createGoogleToolResponseStream(options: GoogleStreamOption
               enqueue({ type: 'thinking', text: event.text });
               return;
             }
-            fullResponseText += event.text;
             enqueue({ type: 'content', text: event.text });
           });
 

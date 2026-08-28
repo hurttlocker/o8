@@ -7,8 +7,6 @@ import {
 import { MODEL_IDS } from '@/lib/models';
 import { readIdeSurfaceState } from '@/lib/runtime/ide-surface-state';
 
-const DEFAULT_MOBILE_GEMINI_MODEL = MODEL_IDS.mobileGeminiDefault;
-const DEFAULT_MOBILE_OPENAI_MODEL = MODEL_IDS.mobileOpenAiDefault;
 const DEFAULT_MOBILE_CLI_MODEL = MODEL_IDS.mobileCliDefault;
 const DEFAULT_MOBILE_CHAT_TITLE = 'Assistant';
 

@@ -64,7 +64,6 @@ function DesktopStatusBarBase({
   leftColumnWidth,
   rightColumnWidth,
   compact = false,
-  glassSurface = false,
   parkedLanes = [],
   onOpenReviewLane,
   onOpenAwaitingMerge,

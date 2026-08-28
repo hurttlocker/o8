@@ -281,7 +281,7 @@ function Flight({ point, screenW, screenH }: { point: OverlayPoint; screenW: num
  * dot's glass+orange vocabulary, that "draw on" — the stroke reveals along its
  * own path, then the arrowhead/label settles. Coords arrive window-local (Rust
  * owns the screenshot→screen transform, same as points). */
-function DrawShape({ point, screenH }: { point: OverlayPoint; screenH: number }) {
+function DrawShape({ point }: { point: OverlayPoint; screenH: number }) {
   const [drawn, setDrawn] = useState(false);
   useEffect(() => {
     // Double-rAF so the dash-offset start commits before the transition runs.

@@ -18,7 +18,6 @@
 
 import { execFile } from 'node:child_process';
 import os from 'node:os';
-import path from 'node:path';
 import { promisify } from 'node:util';
 import { listActiveOrchestratorTurns } from '@/lib/lane/orchestrator-crash-survival';
 import { listActiveLanesWithSessions } from '@/lib/lane/registry';

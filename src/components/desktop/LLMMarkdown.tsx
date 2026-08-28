@@ -8,7 +8,7 @@
  * images, mermaid diagrams, horizontal rules, and strikethrough.
  */
 
-import React, { useState, useCallback, useEffect, useRef, useMemo, memo } from 'react';
+import React, { useState, useCallback, useEffect, useRef, memo } from 'react';
 import { Copy, Check, ChevronDown, ChevronRight, FileCode, PanelRight, Play } from './lucide-shims';
 import { DiffCard } from './DiffCard';
 import { sanitizeAgentHtml } from '@/lib/render/sanitize-html';

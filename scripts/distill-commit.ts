@@ -26,7 +26,7 @@ import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { buildCommitFactExtractionPromptV1 } from '../src/lib/prompts/v1/fact-extraction';
 
@@ -101,36 +101,6 @@ async function resolveCodexBin(): Promise<string | null> {
     }
   }
   return null;
-}
-
-/**
- * Extract the final assistant text from a codex `exec --json` stream. Codex
- * emits the reply as either `item.completed` with `item.type='agent_message'`
- * and `item.text` (codex-cli 0.130.0+), or `event_msg` with
- * `payload.type='agent_message'` and `payload.message` (legacy). Both shapes
- * accepted — mirrors the parser in src/lib/lane/codex-orchestrator-session.ts.
- */
-function extractResultText(output: string): string {
-  const lines = output.split('\n').filter(Boolean);
-  let last = '';
-  for (const line of lines) {
-    try {
-      const evt = JSON.parse(line) as Record<string, unknown>;
-      const item = evt.item as Record<string, unknown> | undefined;
-      if (evt.type === 'item.completed' && item?.type === 'agent_message' && typeof item.text === 'string') {
-        last = item.text;
-        continue;
-      }
-      const payload = evt.payload as Record<string, unknown> | undefined;
-      if (evt.type === 'event_msg' && payload?.type === 'agent_message' && typeof payload.message === 'string') {
-        last = payload.message;
-        continue;
-      }
-    } catch {
-      // not JSON / partial line
-    }
-  }
-  return last;
 }
 
 async function callCodexCli(codexBin: string, prompt: string): Promise<string> {

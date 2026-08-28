@@ -6,7 +6,7 @@
  * Middleware checks session exists before accepting a JWT.
  */
 
-import { eq, and, lt } from 'drizzle-orm';
+import { eq, lt } from 'drizzle-orm';
 import { getDb, sessions } from './index';
 import { randomUUID } from 'node:crypto';
 import { createHash } from 'node:crypto';

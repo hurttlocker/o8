@@ -325,7 +325,6 @@ export function SidebarSection({
 export function ActivityDock({
   title,
   count,
-  summary,
   open,
   onToggle,
   children,

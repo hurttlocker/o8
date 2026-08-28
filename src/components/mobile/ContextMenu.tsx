@@ -6,7 +6,7 @@
  * Used on agent cards, notifications, PR cards.
  */
 
-import { useState, useEffect, useRef, memo, useCallback } from 'react';
+import { useEffect, useRef, memo, useCallback } from 'react';
 import { triggerHaptic } from '@/lib/mobile/haptic';
 
 export interface ContextMenuItem {

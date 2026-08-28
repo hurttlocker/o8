@@ -39,7 +39,7 @@ import {
   timelinePrimarySession,
 } from './timeline/helpers';
 import { useTimelineData, useTimelineSessions } from './timeline/hooks';
-import { PlayIcon, ExpandIcon } from './timeline/icons';
+import { ExpandIcon } from './timeline/icons';
 import { TimelineButton } from './timeline/TimelineButton';
 import { TimelineEmptyState } from './timeline/TimelineEmptyState';
 

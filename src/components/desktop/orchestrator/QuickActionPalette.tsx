@@ -20,7 +20,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
-import { QUICK_ACTIONS, filterQuickActions, type QuickAction } from '@/lib/orchestrator/quick-actions';
+import { filterQuickActions, type QuickAction } from '@/lib/orchestrator/quick-actions';
 
 interface QuickActionPaletteProps {
   open: boolean;

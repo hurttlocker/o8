@@ -3,11 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
-  CheckCircle2,
-  Clock,
   RefreshCw,
   ShieldCheck,
-  XCircle,
 } from './lucide-shims';
 import type { ApprovalAuditEvent, ApprovalRecord, ApprovalRisk, OrchestratorReviewFinding } from '@/lib/approvals/types';
 
@@ -211,21 +208,6 @@ function formatRelativeAge(timestamp: number) {
 
 function filterWindowForRange(range: TimeRangeOption) {
   return TIME_RANGE_WINDOWS[range];
-}
-
-function iconForEventType(type: ApprovalAuditEvent['type']) {
-  switch (type) {
-    case 'orchestrator_review':
-      return ShieldCheck;
-    case 'approved':
-    case 'resumed':
-      return CheckCircle2;
-    case 'rejected':
-    case 'resume_failed':
-      return XCircle;
-    default:
-      return Clock;
-  }
 }
 
 function formatFindingSeverity(severity: OrchestratorReviewFinding['severity']) {
@@ -830,7 +812,6 @@ export function AuditLogPanel() {
             {filteredTimeline.map((item, itemIndex) => {
               const eventTone = EVENT_TONES[item.type];
               const riskTone = RISK_TONES[item.risk];
-              const EventIcon = iconForEventType(item.type);
               const reviewVerdictTone = typeof item.approved === 'boolean'
                 ? item.approved
                   ? EVENT_TONES.approved

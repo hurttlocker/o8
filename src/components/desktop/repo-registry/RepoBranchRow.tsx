@@ -13,8 +13,6 @@ import {
   THEME_ACCENT_BORDER,
   THEME_ACCENT_SOFT,
   THEME_SUCCESS_TEXT,
-  THEME_WORKTREE_BORDER,
-  THEME_WORKTREE_SOFT,
   THEME_WORKTREE_TEXT,
   Trash2,
   branchSessionLabel,
@@ -128,8 +126,6 @@ function RepoBranchRowBase({
   branchAgents,
   orchestratorPackets,
   allPacketBoundSessionKeys,
-  sessionDisclosureByBranch,
-  setSessionDisclosureByBranch,
   worktree,
   activeSessionKey = null,
   activeWorkspacePath = null,
@@ -253,7 +249,6 @@ function RepoBranchRowBase({
       return true;
     })
     .sort(compareBranchAgents);
-  const sessionsExpanded = sessionDisclosureByBranch[branch.name] ?? true;
   const isActiveWorktree = Boolean(activeWorkspacePath && worktree?.path === activeWorkspacePath);
   const isActiveRootBranch = Boolean(!branch.isWorktree && branch.current && activeWorkspacePath === repo.localPath);
   const isActiveScope = isActiveWorktree || isActiveRootBranch;
@@ -266,11 +261,6 @@ function RepoBranchRowBase({
     && branch.name !== repo.defaultBranch
     && branch.ahead > 0,
   );
-  const branchAgentLabel = branchAgents.length === 1
-    ? branchAgents[0]?.name ?? null
-    : branchAgents.length > 1
-      ? `${branchAgents.length} agents`
-      : null;
   const branchDiffAgent = branchAgents.find((agent) => ((agent.additions ?? 0) > 0 || (agent.deletions ?? 0) > 0)) ?? null;
   const branchBaseBackground = isActiveScope ? 'rgba(37, 99, 235, 0.08)' : 'transparent';
   const branchHoverBackground = 'var(--t-panel-hover)';

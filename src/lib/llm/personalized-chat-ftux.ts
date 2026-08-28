@@ -13,11 +13,6 @@ const FTUX_CACHE_TTL_MS = 20_000;
 
 type PromptIconKey = 'tree' | 'search' | 'file' | 'diff' | 'rocket';
 
-interface TopicMatcher {
-  label: string;
-  patterns: RegExp[];
-}
-
 interface BaseRepoContext {
   name: string;
   localPath: string;
@@ -59,22 +54,6 @@ export interface PersonalizedChatFtuxPayload {
   profile: PersonalizedChatFtuxProfile;
   systemContext: string;
 }
-
-const TOPIC_MATCHERS: TopicMatcher[] = [
-  { label: 'React', patterns: [/\breact\b/i] },
-  { label: 'Next.js', patterns: [/\bnext(?:\.js)?\b/i, /\bapp router\b/i] },
-  { label: 'TypeScript', patterns: [/\btypescript\b/i, /\btype-safe\b/i] },
-  { label: 'Python', patterns: [/\bpython\b/i] },
-  { label: 'Go', patterns: [/\bgolang\b/i, /\bgo\.mod\b/i, /\bgo install\b/i] },
-  { label: 'Rust', patterns: [/\brust\b/i, /\bcargo\b/i] },
-  { label: 'Auth systems', patterns: [/\bauth(?:entication|orization)?\b/i, /\boauth\b/i, /\bsession\b/i, /\blogin\b/i] },
-  { label: 'UI systems', patterns: [/\bfrontend\b/i, /\bui\b/i, /\bux\b/i, /\bdesign system\b/i] },
-  { label: 'GitHub workflows', patterns: [/\bgithub\b/i, /\bpull request\b/i, /\bissue(?:s)?\b/i, /\bactions\b/i] },
-  { label: 'APIs', patterns: [/\bgraphql\b/i, /\brest\b/i, /\bapi(?:s)?\b/i, /\bendpoint(?:s)?\b/i] },
-  { label: 'Performance', patterns: [/\bperformance\b/i, /\boptimi(?:s|z)/i, /\blatency\b/i] },
-  { label: 'Testing', patterns: [/\btest(?:s|ing)?\b/i, /\bplaywright\b/i, /\bjest\b/i, /\bcypress\b/i] },
-  { label: 'Mobile', patterns: [/\bmobile\b/i, /\bios\b/i, /\bandroid\b/i] },
-];
 
 const RUNTIME_BINARIES = [
   { bin: 'codex', label: 'Codex' },
@@ -160,28 +139,6 @@ function resolveHeadline(name: string | null, now: Date) {
   const salutation = salutationForDate(now);
   const shortName = greetingName(name);
   return shortName ? `${salutation}, ${shortName}.` : `${salutation}.`;
-}
-
-function scoreTopics(corpus: string[]) {
-  const scores = new Map<string, number>();
-
-  for (const text of corpus) {
-    for (const matcher of TOPIC_MATCHERS) {
-      const hits = matcher.patterns.reduce((count, pattern) => (
-        count + (pattern.test(text) ? 1 : 0)
-      ), 0);
-      if (hits === 0) continue;
-      scores.set(matcher.label, (scores.get(matcher.label) ?? 0) + hits);
-    }
-  }
-
-  return [...scores.entries()]
-    .sort((left, right) => {
-      if (right[1] !== left[1]) return right[1] - left[1];
-      return left[0].localeCompare(right[0]);
-    })
-    .map(([label]) => label)
-    .slice(0, 3);
 }
 
 async function inferTopicsFromCortex() {

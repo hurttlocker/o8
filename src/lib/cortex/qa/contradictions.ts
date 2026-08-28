@@ -73,8 +73,6 @@ function buildCandidatePairs(rows: TypedRow[]): CandidatePair[] {
       const oOutcome = typeof oFields.outcome === 'string' ? oFields.outcome : '';
       const oSummary = typeof oFields.summary === 'string' ? oFields.summary : '';
       const oPlanText = typeof oFields.planText === 'string' ? oFields.planText : '';
-      const oPrNumber = typeof oFields.prNumber === 'number' ? oFields.prNumber : undefined;
-
       // Scope filter: directive must be scoped to the same repo as the outcome,
       // OR have no scope (global directive — applies everywhere).
       if (dScope && oRepoPath && !oRepoPath.includes(dScope) && !dScope.includes(oRepoPath)) {

@@ -30,7 +30,7 @@ export default function NavigationBridge() {
       // to a full navigation as a safety net.
       try {
         router.push(path);
-      } catch (_err) {
+      } catch {
         window.location.assign(path);
       }
     };
