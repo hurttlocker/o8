@@ -165,6 +165,7 @@ export const primeAgentRuntime: AgentRuntime = {
       outputTokens: sessionCost.outputTokens,
       cacheReadTokens: sessionCost.cacheReadTokens,
       cacheWriteTokens: sessionCost.cacheWriteTokens,
+      costSource: sessionCost.totalCostUsd > 0 ? 'gateway' : 'unknown',
       model: sessionCost.model ?? undefined,
     };
   },

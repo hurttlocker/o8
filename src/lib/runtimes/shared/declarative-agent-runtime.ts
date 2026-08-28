@@ -153,6 +153,7 @@ export function createDeclarativeAgentRuntime(
         outputTokens: cost.outputTokens,
         cacheReadTokens: cost.cacheReadTokens,
         cacheWriteTokens: cost.cacheWriteTokens,
+        costSource: cost.costSource ?? 'unknown',
         model: cost.model ?? undefined,
       };
     };

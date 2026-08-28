@@ -163,6 +163,7 @@ export const piRuntime: AgentRuntime = {
       outputTokens: cost.outputTokens,
       cacheReadTokens: cost.cacheReadTokens,
       cacheWriteTokens: cost.cacheWriteTokens,
+      costSource: cost.totalCostUsd > 0 ? 'gateway' : 'unknown',
       model: cost.model ?? undefined,
     };
   },

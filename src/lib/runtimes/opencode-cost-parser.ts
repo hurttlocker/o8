@@ -7,57 +7,27 @@
  *   {"type":"step_finish","part":{"cost":X,"tokens":{"input":N,"output":N,"cache":{"read":N,"write":N}}}}
  *
  * When `totalCostUsd` is not present (e.g. offline models or older builds),
- * we fall back to a static per-model price table.  We prefer returning 0
- * cost to throwing — opencode's multi-provider surface makes a complete
- * pricing table impractical.
- *
- * TODO(pricing): Verify rates against openrouter.ai/models as models ship.
+ * we fall back to the dated per-model rate table. We prefer returning 0
+ * cost to throwing because the multi-provider surface cannot safely infer
+ * an unknown model's rate.
  */
 
 import { createReadStream } from 'node:fs';
 import { access } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
+import { resolveRate } from '@/lib/cost/rate-table';
 import { registerCostParser } from '@/lib/runtimes/shared/cost-parser-registry';
 import type { SessionCostData } from '@/lib/runtimes/shared/cost-parser-registry';
 
-// ── Static price table ────────────────────────────────────────────────────────
-
-/**
- * Fallback price table keyed by model string (as returned by the session record).
- * All rates are $/1M tokens.
- */
-const OPENCODE_PRICING: Record<string, { input: number; output: number }> = {
-  // opencode built-in / proxied models
-  'opencode/gpt-5-nano': { input: 0.05, output: 0.20 },     // TODO(pricing): verify
-  'opencode/gpt-5-mini': { input: 0.15, output: 0.60 },     // TODO(pricing): verify
-  'opencode/gpt-5': { input: 1.0, output: 4.0 },             // TODO(pricing): verify
-
-  // Anthropic via openrouter
-  'anthropic/claude-sonnet-4-20250514': { input: 3, output: 15 },
-  'anthropic/claude-haiku-4-20250514': { input: 0.8, output: 4 },
-  'anthropic/claude-opus-4-20250514': { input: 15, output: 75 },
-
-  // Google via openrouter
-  'google/gemini-2.5-pro': { input: 1.25, output: 10 },
-  'google/gemini-2.5-flash': { input: 0.075, output: 0.30 },
-
-  // OpenAI via openrouter
-  'openai/gpt-4o': { input: 2.5, output: 10 },
-  'openai/gpt-4o-mini': { input: 0.15, output: 0.60 },
-  'openai/gpt-5-nano': { input: 0.05, output: 0.20 },       // TODO(pricing): verify
-
-  // OpenRouter generic passthrough
-  'openrouter/anthropic/claude-haiku': { input: 0.8, output: 4 },
-  'openrouter/anthropic/claude-sonnet': { input: 3, output: 15 },
-};
-
 const TOKENS_PER_MILLION = 1_000_000;
 
-function staticCost(inputTokens: number, outputTokens: number, model: string | null): number {
-  if (!model) return 0;
-  const pricing = OPENCODE_PRICING[model];
-  if (!pricing) return 0;
-  return (inputTokens * pricing.input + outputTokens * pricing.output) / TOKENS_PER_MILLION;
+function staticCost(inputTokens: number, outputTokens: number, model: string | null): { costUsd: number; priced: boolean } {
+  const rate = resolveRate('opencode', model);
+  if (!rate) return { costUsd: 0, priced: false };
+  return {
+    costUsd: (inputTokens * rate.inputUsdPerMillion + outputTokens * rate.outputUsdPerMillion) / TOKENS_PER_MILLION,
+    priced: true,
+  };
 }
 
 // ── JSONL parser ──────────────────────────────────────────────────────────────
@@ -195,6 +165,8 @@ export async function parseOpencodeSessionCost(
   };
   const models = new Set<string>();
   let fallbackModel = opts?.fallbackModel ?? null;
+  let usedEstimate = false;
+  let usedGateway = false;
 
   for (const filePath of paths) {
     const { results, detectedModel } = await parseOpencodeJSONLFile(filePath);
@@ -208,11 +180,14 @@ export async function parseOpencodeSessionCost(
       totals.cacheReadTokens += r.cacheReadTokens;
       totals.cacheWriteTokens += r.cacheWriteTokens;
 
-      // Use embedded cost if available; otherwise compute from static table.
+      // Use embedded cost if available; otherwise resolve the dated table.
       if (r.costUsd !== null) {
         totals.totalCostUsd += r.costUsd;
+        usedGateway = true;
       } else {
-        totals.totalCostUsd += staticCost(r.inputTokens, r.outputTokens, r.model ?? fallbackModel);
+        const estimated = staticCost(r.inputTokens, r.outputTokens, r.model ?? fallbackModel);
+        totals.totalCostUsd += estimated.costUsd;
+        usedEstimate ||= estimated.priced;
       }
 
       if (r.model) models.add(r.model);
@@ -225,6 +200,7 @@ export async function parseOpencodeSessionCost(
     : models.size > 1
       ? 'mixed'
       : fallbackModel;
+  totals.costSource = usedEstimate ? 'estimate' : usedGateway ? 'gateway' : 'unknown';
 
   return totals;
 }

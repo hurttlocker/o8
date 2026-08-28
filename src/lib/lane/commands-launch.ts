@@ -6,6 +6,7 @@ import { getLanePolicy } from '@/lib/lane/policy';
 import { appendEvent, attachSession, getLane, getLaneEvents, setLaneStatus, updateLane } from '@/lib/lane/registry';
 import { resolvePortInfo } from '@/lib/panel/api-port';
 import { getRuntimeCapability, listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
+import { capturePacketCapacitySnapshot } from '@/lib/orchestrator/capacity-snapshots';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 import type { LaneCommand, LaneCommandResult, LaneEventActor, LaneRuntime } from '@/lib/lane/types';
 import { scanForBinary } from '@/lib/runtimes/shared/cli-locate';
@@ -110,6 +111,8 @@ export async function launchSession(
       updateLane(command.laneId, { model: resolvedLaunchModel(command, lane.runtime) }, 'system');
       attachSession(command.laneId, recovered.surfaceId, actor);
       setLaneStatus(command.laneId, 'running', actor, 'session_launch_recovered');
+      const recoveredLane = getLane(command.laneId);
+      if (recoveredLane) await capturePacketCapacitySnapshot(recoveredLane, 'start');
       return {
         ok: true,
         laneId: command.laneId,
@@ -234,6 +237,8 @@ export async function launchSession(
       }
     }
 
+    const launchedLane = getLane(command.laneId);
+    if (launchedLane) await capturePacketCapacitySnapshot(launchedLane, 'start');
     const updated = getLane(command.laneId);
     return {
       ok: true,

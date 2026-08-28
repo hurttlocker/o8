@@ -3,7 +3,24 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import type { AgentRuntime, RuntimeTranscriptEntry } from '@/lib/runtimes/types';
+import type { AgentRuntime, RuntimeCapacitySnapshot, RuntimeTranscriptEntry } from '@/lib/runtimes/types';
+
+const launchRuntimeSurface = vi.hoisted(() => vi.fn(async (input: {
+  runtime: string;
+  existingLaneId?: string;
+  repoPath?: string;
+}) => ({
+  ok: true as const,
+  runtime: input.runtime,
+  surfaceId: `codex-owned:${input.existingLaneId ?? 'capacity-snapshot'}`,
+  note: 'launched capacity snapshot fixture',
+  cwd: input.repoPath ?? process.cwd(),
+  repoPath: input.repoPath ?? process.cwd(),
+  worktree: null,
+  laneId: input.existingLaneId ?? null,
+})));
+
+vi.mock('@/lib/runtime/actions', () => ({ launchRuntimeSurface }));
 
 const cacheRoot = join(process.cwd(), 'node_modules', '.cache');
 mkdirSync(cacheRoot, { recursive: true });
@@ -11,6 +28,9 @@ const dataDir = mkdtempSync(join(cacheRoot, 'o8-cost-ledger-real-path-'));
 const repoPath = join(dataDir, 'repo');
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.O8_DATA_DIR = dataDir;
+
+let testRuntime: AgentRuntime;
+let capacityObservation: RuntimeCapacitySnapshot;
 
 vi.mock('@/lib/panel/auth', () => ({ requirePanelAuth: () => null }));
 vi.mock('@/lib/runtime/inventory', () => ({ getRuntimeInventorySnapshot: async () => ({ agents: [] }) }));
@@ -40,7 +60,26 @@ beforeAll(async () => {
   git('add', 'README.md');
   git('-c', 'user.email=test@o8.test', '-c', 'user.name=o8-test', 'commit', '-m', 'init');
 
-  const runtime: AgentRuntime = {
+  capacityObservation = {
+    runtime: 'codex',
+    identityId: null,
+    status: 'available',
+    reason: null,
+    observedAt: '2026-08-28T16:00:00.000Z',
+    source: 'local-state',
+    confidence: 'exact',
+    buckets: [{
+      id: 'weekly',
+      label: 'Weekly',
+      usedRatio: null,
+      used: null,
+      unit: null,
+      remaining: null,
+      resetsAt: null,
+      expiresAt: null,
+    }],
+  };
+  testRuntime = {
     id: 'codex',
     displayName: 'Cost ledger test runtime',
     capabilities: {
@@ -52,6 +91,7 @@ beforeAll(async () => {
       reviewDiffs: true,
       costTelemetry: false,
       streaming: false,
+      capacity: { observe: true, identitySelection: false },
     },
     discoverSessions: async () => [],
     readTranscript: async () => transcript(),
@@ -59,9 +99,12 @@ beforeAll(async () => {
     resume: async () => ({ ok: false, note: 'not supported' }),
     interrupt: async () => ({ ok: false, note: 'not supported' }),
     getChangedFiles: async () => [],
+    getCapacity: async () => capacityObservation,
   };
-  const { registerRuntime } = await import('@/lib/runtimes/registry');
-  registerRuntime(runtime);
+  // Load the auto-registration barrel before installing the deterministic
+  // fixture so a later capacity-service import cannot overwrite it.
+  const { registerRuntime } = await import('@/lib/runtimes');
+  registerRuntime(testRuntime);
 });
 
 afterAll(() => {
@@ -69,6 +112,130 @@ afterAll(() => {
 });
 
 describe('cost ledger persisted real path', () => {
+  it('stamps table estimates and captures launch/completion capacity with explicit unavailable fallback', async () => {
+    const { modelRateTable, resolveRate } = await import('@/lib/cost/rate-table');
+    const rate = resolveRate('codex', 'gpt-5.5')!;
+    const sessionKey = 'codex-owned:rate-version-persistence';
+    const { createLane, getLaneEvents } = await import('@/lib/lane/registry');
+    const estimatedLane = createLane({
+      repoPath,
+      worktreePath: repoPath,
+      branch: 'fix/rate-version-persistence',
+      runtime: 'codex',
+      packetId: 'packet-rate-version-persistence',
+      sessionKey,
+    });
+    const { persistSessionCost } = await import('@/lib/orchestrator/cost-persistence');
+    await persistSessionCost({
+      sessionKey,
+      runtime: 'codex',
+      model: 'gpt-5.5',
+      inputTokens: 100_000,
+      outputTokens: 10_000,
+      costUsd: (100_000 * rate.inputUsdPerMillion + 10_000 * rate.outputUsdPerMillion) / 1_000_000,
+      repoPath,
+      laneId: estimatedLane.id,
+      packetId: estimatedLane.packetId,
+      costSource: 'estimate',
+    });
+    const { getSqlite } = await import('@/lib/db');
+    const estimatedRow = getSqlite().prepare(`
+      SELECT metadata_json FROM usage_logs WHERE session_key = ?
+    `).get(sessionKey) as { metadata_json: string };
+    expect(JSON.parse(estimatedRow.metadata_json)).toEqual({
+      costSource: 'estimate',
+      rateTableVersion: modelRateTable.rateTableVersion,
+    });
+
+    const { createMission } = await import('@/lib/orchestrator/operator-mission-service');
+    const mission = await createMission({
+      issues: [{
+        number: 1_974_001,
+        title: 'inline: verify packet capacity snapshots',
+        body: 'Launch and complete one packet through the lifecycle seams.',
+        url: '',
+      }],
+      repoPath,
+      runtime: 'codex',
+      constraints: 'Real-path capacity snapshot regression.',
+      taskContract: 'off',
+    });
+    const packetId = mission.packets[0]!.id;
+    const lane = createLane({
+      repoPath,
+      worktreePath: repoPath,
+      branch: 'fix/capacity-snapshot-real-path',
+      runtime: 'codex',
+      packetId,
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => new Response(null, { status: 200 })) as typeof fetch;
+    try {
+      const { dispatch } = await import('@/lib/lane/commands');
+      await expect(dispatch({
+        verb: 'launch_session',
+        laneId: lane.id,
+        prompt: 'Capture packet capacity.',
+        actor: 'orchestrator',
+      })).resolves.toMatchObject({ ok: true });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    const startEvent = getLaneEvents(lane.id, 100).find((event) => (
+      event.verb === 'capacity_snapshot' && event.payload.phase === 'start'
+    ));
+    expect(startEvent?.payload).toMatchObject({
+      phase: 'start',
+      packetId,
+      runtime: 'codex',
+      status: 'available',
+      identityId: null,
+      reason: null,
+      source: 'local-state',
+      confidence: 'exact',
+      buckets: [expect.objectContaining({
+        id: 'weekly',
+        usedRatio: null,
+        used: null,
+        unit: null,
+        remaining: null,
+        resetsAt: null,
+        expiresAt: null,
+      })],
+    });
+    expect(startEvent?.payload.capturedAt).toEqual(expect.any(String));
+
+    testRuntime.capabilities.capacity = undefined;
+    testRuntime.getCapacity = undefined;
+    const launchedSessionKey = `codex-owned:${lane.id}`;
+    const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');
+    try {
+      await capturePacketCompletionContext(packetId, launchedSessionKey);
+      await vi.waitFor(() => {
+        const capacityEvents = getLaneEvents(lane.id, 100).filter((event) => event.verb === 'capacity_snapshot');
+        expect(capacityEvents).toHaveLength(2);
+        expect(capacityEvents[1]?.payload).toMatchObject({
+          phase: 'end',
+          packetId,
+          sessionKey: launchedSessionKey,
+          runtime: 'codex',
+          status: 'unavailable',
+          reason: 'adapter_observation_unavailable',
+          identityId: null,
+          observedAt: null,
+          source: null,
+          confidence: null,
+          buckets: [],
+        });
+        expect(capacityEvents[1]?.payload.capturedAt).toEqual(expect.any(String));
+      });
+    } finally {
+      testRuntime.capabilities.capacity = { observe: true, identitySelection: false };
+      testRuntime.getCapacity = async () => capacityObservation;
+    }
+  });
+
   it('keeps retry attempts distinct and carries the same totals through outcomes and status', async () => {
     const { getSqlite } = await import('@/lib/db');
     const columns = getSqlite().prepare('PRAGMA table_info(usage_logs)').all() as Array<{ name: string }>;

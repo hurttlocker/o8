@@ -17,70 +17,16 @@ import { access, readdir, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
+import { resolveRate, type ResolvedRate } from '@/lib/cost/rate-table';
 import type { SessionCostData } from '@/lib/runtimes/shared/cost-parser-registry';
 import { registerCostParser } from '@/lib/runtimes/shared/cost-parser-registry';
 export type { SessionCostData } from '@/lib/runtimes/shared/cost-parser-registry';
 
 const TOKENS_PER_MILLION = 1_000_000;
 
-// Pricing snapshot for Gemini models (USD per 1M tokens).
-// TODO(pricing): verify against https://ai.google.dev/pricing at build time.
-// The shape mirrors codex-cost-parser.ts — per-model inline, no remote fetch.
-interface GeminiPricing {
-  canonicalModel: string;
-  inputUsdPerMillion: number;
-  outputUsdPerMillion: number;
-  cacheReadUsdPerMillion: number;
-}
-
-const GEMINI_PRICING: Array<{ match: RegExp; pricing: GeminiPricing }> = [
-  {
-    match: /gemini-3(?:[.-]\d+)?-pro/i,
-    pricing: {
-      canonicalModel: 'gemini-3-pro',
-      inputUsdPerMillion: 1.25,
-      outputUsdPerMillion: 10,
-      cacheReadUsdPerMillion: 0.3125,
-    },
-  },
-  {
-    match: /gemini-2[.-]5-pro/i,
-    pricing: {
-      canonicalModel: 'gemini-2-5-pro',
-      inputUsdPerMillion: 1.25,
-      outputUsdPerMillion: 10,
-      cacheReadUsdPerMillion: 0.3125,
-    },
-  },
-  {
-    match: /gemini-2[.-]5-flash/i,
-    pricing: {
-      canonicalModel: 'gemini-2-5-flash',
-      inputUsdPerMillion: 0.075,
-      outputUsdPerMillion: 0.30,
-      cacheReadUsdPerMillion: 0.019,
-    },
-  },
-  {
-    match: /gemini-1[.-]5-flash/i,
-    pricing: {
-      canonicalModel: 'gemini-1-5-flash',
-      inputUsdPerMillion: 0.075,
-      outputUsdPerMillion: 0.30,
-      cacheReadUsdPerMillion: 0.019,
-    },
-  },
-];
-
 // Fallback when the stream mentions a model we don't have pricing for — treat
 // it as Gemini 3 Pro. Pessimistic direction: slightly overestimates for flash
 // models, but only fires when model name is unknown, which should be rare.
-const DEFAULT_PRICING: GeminiPricing = {
-  canonicalModel: 'gemini-3-pro',
-  inputUsdPerMillion: 1.25,
-  outputUsdPerMillion: 10,
-  cacheReadUsdPerMillion: 0.3125,
-};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -92,13 +38,8 @@ function toTokenCount(value: unknown): number {
     : 0;
 }
 
-function detectPricing(rawModel: string | null | undefined): GeminiPricing {
-  const normalized = (rawModel ?? '').trim().toLowerCase();
-  if (!normalized) return DEFAULT_PRICING;
-  for (const entry of GEMINI_PRICING) {
-    if (entry.match.test(normalized)) return entry.pricing;
-  }
-  return DEFAULT_PRICING;
+function detectPricing(rawModel: string | null | undefined): ResolvedRate {
+  return resolveRate('gemini', rawModel)!;
 }
 
 interface AccumulatedUsage {
@@ -316,12 +257,13 @@ export async function parseGeminiSessionCost(
   totals.totalCostUsd = Number(
     (
       (uncachedInput * pricing.inputUsdPerMillion)
-      + (totals.cacheReadTokens * pricing.cacheReadUsdPerMillion)
+      + (totals.cacheReadTokens * (pricing.cacheReadUsdPerMillion ?? 0))
       + (totals.outputTokens * pricing.outputUsdPerMillion)
     ) / TOKENS_PER_MILLION,
   );
   totals.totalCostUsd = Number(totals.totalCostUsd.toFixed(6));
-  totals.model = resolvedModel ?? pricing.canonicalModel;
+  totals.model = resolvedModel ?? pricing.modelKey;
+  if (totals.totalCostUsd > 0) totals.costSource = 'estimate';
 
   return totals;
 }

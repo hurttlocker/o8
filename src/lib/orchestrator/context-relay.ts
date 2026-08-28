@@ -34,6 +34,7 @@ import { getActiveProjectScopeForRepoSync } from '@/lib/repos/projects';
 import { truncateText } from '@/lib/util/text';
 import { syncTranscriptSearchDocument } from '@/lib/search/transcripts';
 import { derivePacketAttemptIndex } from '@/lib/orchestrator/cost-attribution';
+import { capturePacketCapacitySnapshot } from '@/lib/orchestrator/capacity-snapshots';
 import {
   isReviewFinding,
   readLatestPersistedReview,
@@ -620,6 +621,7 @@ async function persistSessionOutcome(
   // runs, customer runtimes) weren't going to feed any downstream brain
   // consumer anyway.
   if (!isLedgerRuntime(runtimeId) || !lane?.repoPath) return;
+  await capturePacketCapacitySnapshot(lane, 'end');
   const db = getDb();
   if (!db) return;
 

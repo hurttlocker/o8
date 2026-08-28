@@ -2,15 +2,13 @@ import { createReadStream } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
+import { resolveRate, type ResolvedRate } from '@/lib/cost/rate-table';
 import { registerCostParser } from './shared/cost-parser-registry';
 
 export type { SessionCostData } from './shared/cost-parser-registry';
 import type { SessionCostData } from './shared/cost-parser-registry';
 
 const TOKENS_PER_MILLION = 1_000_000;
-const CACHE_READ_MULTIPLIER = 0.1;
-const CACHE_WRITE_5M_MULTIPLIER = 1.25;
-const CACHE_WRITE_1H_MULTIPLIER = 2;
 
 interface ClaudeUsagePayload {
   input_tokens?: number;
@@ -37,12 +35,6 @@ interface ClaudeJsonlEntry {
   };
 }
 
-interface PricingModel {
-  canonicalModel: string;
-  inputUsdPerMillion: number;
-  outputUsdPerMillion: number;
-}
-
 interface ParsedUsageEntry {
   cacheReadTokens: number;
   cacheWrite1hTokens: number;
@@ -60,7 +52,7 @@ function toTokenCount(value: unknown): number {
     : 0;
 }
 
-function detectPricingModel(rawModel: string | null | undefined, usage: ClaudeUsagePayload): PricingModel | null {
+function detectPricingModel(rawModel: string | null | undefined, usage: ClaudeUsagePayload): ResolvedRate | null {
   const normalizedModel = rawModel?.trim().toLowerCase();
   if (!normalizedModel || normalizedModel === '<synthetic>') {
     return null;
@@ -72,64 +64,10 @@ function detectPricingModel(rawModel: string | null | undefined, usage: ClaudeUs
     || normalizedTier === 'priority'
     || normalizedSpeed === 'fast'
     || normalizedModel.includes('fast');
-
-  if (normalizedModel.includes('opus-4-8')) {
-    return {
-      canonicalModel: isFastTier ? 'claude-opus-4-8-fast' : 'claude-opus-4-8',
-      inputUsdPerMillion: isFastTier ? 30 : 5,
-      outputUsdPerMillion: isFastTier ? 150 : 25,
-    };
-  }
-
-  if (normalizedModel.includes('opus-4-7')) {
-    return {
-      canonicalModel: isFastTier ? 'claude-opus-4-7-fast' : 'claude-opus-4-7',
-      inputUsdPerMillion: isFastTier ? 30 : 5,
-      outputUsdPerMillion: isFastTier ? 150 : 25,
-    };
-  }
-
-  if (normalizedModel.includes('opus-4-6')) {
-    return {
-      canonicalModel: isFastTier ? 'claude-opus-4-6-fast' : 'claude-opus-4-6',
-      inputUsdPerMillion: isFastTier ? 30 : 5,
-      outputUsdPerMillion: isFastTier ? 150 : 25,
-    };
-  }
-
-  if (normalizedModel.includes('sonnet-5')) {
-    return {
-      canonicalModel: 'claude-sonnet-5',
-      inputUsdPerMillion: 3,
-      outputUsdPerMillion: 15,
-    };
-  }
-
-  if (normalizedModel.includes('sonnet-4-6')) {
-    return {
-      canonicalModel: 'claude-sonnet-4-6',
-      inputUsdPerMillion: 3,
-      outputUsdPerMillion: 15,
-    };
-  }
-
-  if (normalizedModel.includes('sonnet-4-5') || normalizedModel.includes('sonnet-4')) {
-    return {
-      canonicalModel: 'claude-sonnet-4-5',
-      inputUsdPerMillion: 3,
-      outputUsdPerMillion: 15,
-    };
-  }
-
-  if (normalizedModel.includes('haiku-4-5') || normalizedModel.includes('haiku')) {
-    return {
-      canonicalModel: 'claude-haiku-4-5',
-      inputUsdPerMillion: 0.8,
-      outputUsdPerMillion: 4,
-    };
-  }
-
-  return null;
+  const lookupModel = isFastTier && !normalizedModel.includes('fast')
+    ? `${normalizedModel}-fast`
+    : normalizedModel;
+  return resolveRate('anthropic', lookupModel);
 }
 
 function buildParsedUsageEntry(
@@ -149,16 +87,14 @@ function buildParsedUsageEntry(
   const cacheWriteRemainder = Math.max(0, cacheWriteTokens - cacheWrite5mTokens - cacheWrite1hTokens);
   const normalizedCacheWrite5mTokens = cacheWrite5mTokens + cacheWriteRemainder;
   const pricing = detectPricingModel(rawModel, usage);
-  const model = pricing?.canonicalModel ?? fallbackModel ?? rawModel?.trim() ?? null;
-  const inputRate = pricing?.inputUsdPerMillion ?? 0;
-  const outputRate = pricing?.outputUsdPerMillion ?? 0;
+  const model = pricing?.modelKey ?? fallbackModel ?? rawModel?.trim() ?? null;
 
   const totalCostUsd = (
-    (inputTokens * inputRate)
-    + (outputTokens * outputRate)
-    + (cacheReadTokens * inputRate * CACHE_READ_MULTIPLIER)
-    + (normalizedCacheWrite5mTokens * inputRate * CACHE_WRITE_5M_MULTIPLIER)
-    + (cacheWrite1hTokens * inputRate * CACHE_WRITE_1H_MULTIPLIER)
+    (inputTokens * (pricing?.inputUsdPerMillion ?? 0))
+    + (outputTokens * (pricing?.outputUsdPerMillion ?? 0))
+    + (cacheReadTokens * (pricing?.cacheReadUsdPerMillion ?? 0))
+    + (normalizedCacheWrite5mTokens * (pricing?.cacheWriteUsdPerMillion ?? 0))
+    + (cacheWrite1hTokens * (pricing?.cacheWrite1hUsdPerMillion ?? 0))
   ) / TOKENS_PER_MILLION;
 
   return {
@@ -311,6 +247,7 @@ export async function parseSessionCost(
 
   totals.totalCostUsd = Number(totals.totalCostUsd.toFixed(6));
   totals.model = models.size === 1 ? [...models][0] : models.size > 1 ? 'mixed' : fallbackModel;
+  if (totals.totalCostUsd > 0) totals.costSource = 'estimate';
 
   return totals;
 }

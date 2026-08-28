@@ -19,21 +19,12 @@
 
 import 'server-only';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { modelRateTable, resolveRate } from '@/lib/cost/rate-table';
 import type { UsageRole } from '@/lib/db/usage';
-
-/** USD per token (input, output) for the models in our OpenRouter chain. */
-const MODEL_PRICING_PER_TOKEN: Record<string, { input: number; output: number }> = {
-  'google/gemini-2.5-flash-lite': { input: 0.10e-6, output: 0.40e-6 },
-  'openai/gpt-5.4-nano': { input: 0.20e-6, output: 1.25e-6 },
-  'x-ai/grok-4.3': { input: 1.25e-6, output: 2.50e-6 },
-};
-
-/** Fallback pricing when the served model isn't in the table — assume the
- * priciest entry so the cap errs toward under-spend. */
-const WORST_CASE_PRICING = { input: 1.25e-6, output: 2.50e-6 };
 
 const BRAIN_AGENT_NAME = 'cortex-qa';
 const DEFAULT_DAILY_CAP_USD = 0.5;
+const TOKENS_PER_MILLION = 1_000_000;
 
 function dailyCapUsd(): number {
   const raw = Number(process.env.O8_QA_OPENROUTER_DAILY_CAP_USD);
@@ -65,8 +56,11 @@ export function estimateBrainTokenCount(...values: string[]): number {
 
 export function estimateCostUsd(model: string, usage: OpenRouterUsage): number {
   if (typeof usage.cost === 'number' && usage.cost >= 0) return usage.cost;
-  const pricing = MODEL_PRICING_PER_TOKEN[model] ?? WORST_CASE_PRICING;
-  return (usage.prompt_tokens ?? 0) * pricing.input + (usage.completion_tokens ?? 0) * pricing.output;
+  const rate = resolveRate('brain', model)!;
+  return (
+    (usage.prompt_tokens ?? 0) * rate.inputUsdPerMillion
+    + (usage.completion_tokens ?? 0) * rate.outputUsdPerMillion
+  ) / TOKENS_PER_MILLION;
 }
 
 /**
@@ -90,6 +84,7 @@ function recordBrainSpend(
   void (async () => {
     try {
       const { logUsage } = await import('@/lib/db/usage');
+      const gatewayCost = typeof usage.cost === 'number' && usage.cost >= 0;
       logUsage({
         userId: null,
         model,
@@ -100,6 +95,9 @@ function recordBrainSpend(
         agentName: BRAIN_AGENT_NAME,
         requestType,
         role: 'retrieval' satisfies UsageRole,
+        metadata: gatewayCost
+          ? { costSource: 'gateway' }
+          : { costSource: 'estimate', rateTableVersion: modelRateTable.rateTableVersion },
       });
     } catch (err) {
       console.warn('[qa][brain-spend] ledger write failed:', err instanceof Error ? err.message : err);

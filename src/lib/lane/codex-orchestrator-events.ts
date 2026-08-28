@@ -1,3 +1,4 @@
+import { resolveRate } from '@/lib/cost/rate-table';
 import type { OrchestratorEvent, OrchestratorTurnUsage } from './orchestrator-stream-events';
 import { planFromCodexTodoList, planFromToolInput, type OrchestratorPlanSnapshot } from './orchestrator-plan';
 
@@ -22,10 +23,6 @@ export interface CodexLineHandlerState {
   lastPlanJson?: string;
 }
 
-const GPT_5_5_INPUT_USD_PER_MILLION = 2.5;
-const GPT_5_5_CACHED_INPUT_USD_PER_MILLION = 0.25;
-const GPT_5_5_OUTPUT_USD_PER_MILLION = 15;
-
 function safeObject(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -46,13 +43,14 @@ function emitPlanOnce(
 
 function computeUsdCost(usage: ParsedCodexLine['usage']): number | null {
   if (!usage) return null;
+  const rate = resolveRate('codex', 'gpt-5.5')!;
   const inputTokens = Math.max(0, (usage.input_tokens ?? 0) - (usage.cached_input_tokens ?? 0));
   const cachedTokens = usage.cached_input_tokens ?? 0;
   const outputTokens = usage.output_tokens ?? 0;
   const total =
-    (inputTokens / 1_000_000) * GPT_5_5_INPUT_USD_PER_MILLION
-    + (cachedTokens / 1_000_000) * GPT_5_5_CACHED_INPUT_USD_PER_MILLION
-    + (outputTokens / 1_000_000) * GPT_5_5_OUTPUT_USD_PER_MILLION;
+    (inputTokens / 1_000_000) * rate.inputUsdPerMillion
+    + (cachedTokens / 1_000_000) * (rate.cacheReadUsdPerMillion ?? 0)
+    + (outputTokens / 1_000_000) * rate.outputUsdPerMillion;
   return Number.isFinite(total) && total > 0 ? total : null;
 }
 

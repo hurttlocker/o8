@@ -286,6 +286,7 @@ export type LaneEventVerb =
   | 'explainer_completed'
   | 'explainer_failed'
   | 'runtime_drift'
+  | 'capacity_snapshot'
   | 'pr_merged_reconciled'
   | 'merged_by_ancestry_reconciled'
   // The ancestry sweep proved a merge, then found the branch had advanced past

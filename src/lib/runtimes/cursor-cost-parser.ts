@@ -1,13 +1,12 @@
 import { createReadStream } from 'node:fs';
 import { access } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
+import { resolveRate } from '@/lib/cost/rate-table';
 import { registerCostParser } from '@/lib/runtimes/shared/cost-parser-registry';
 import type { SessionCostData } from '@/lib/runtimes/shared/cost-parser-registry';
 
 const TOKENS_PER_MILLION = 1_000_000;
 const DEFAULT_MODEL = 'cursor-agent';
-const DEFAULT_INPUT_USD_PER_MILLION = 1.25;
-const DEFAULT_OUTPUT_USD_PER_MILLION = 10;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -41,8 +40,12 @@ function extractUsage(parsed: Record<string, unknown>): SessionCostData | null {
   const cacheWriteTokens = toNumber(source.cache_write_tokens ?? source.cacheWriteTokens);
   if (inputTokens === 0 && outputTokens === 0 && cacheReadTokens === 0 && cacheWriteTokens === 0) return null;
   const embeddedCost = toNumber(source.total_cost_usd ?? source.totalCostUsd ?? source.cost_usd ?? source.costUsd);
-  const computedCost = ((inputTokens + cacheWriteTokens) * DEFAULT_INPUT_USD_PER_MILLION
-    + outputTokens * DEFAULT_OUTPUT_USD_PER_MILLION) / TOKENS_PER_MILLION;
+  const rate = resolveRate('cursor', readModel(parsed, usage));
+  const computedCost = (
+    (inputTokens * (rate?.inputUsdPerMillion ?? 0))
+    + (cacheWriteTokens * (rate?.cacheWriteUsdPerMillion ?? 0))
+    + (outputTokens * (rate?.outputUsdPerMillion ?? 0))
+  ) / TOKENS_PER_MILLION;
   return {
     inputTokens,
     outputTokens,
@@ -50,6 +53,7 @@ function extractUsage(parsed: Record<string, unknown>): SessionCostData | null {
     cacheWriteTokens,
     totalCostUsd: Number((embeddedCost || computedCost).toFixed(6)),
     model: readModel(parsed, usage) ?? DEFAULT_MODEL,
+    costSource: embeddedCost > 0 ? 'gateway' : 'estimate',
   };
 }
 
@@ -83,6 +87,8 @@ export async function parseCursorSessionCost(paths: string[]): Promise<SessionCo
     model: null,
   };
   const models = new Set<string>();
+  let usedEstimate = false;
+  let usedGateway = false;
   for (const filePath of paths) {
     const parsed = await parseCursorCostFile(filePath);
     if (!parsed) continue;
@@ -91,10 +97,13 @@ export async function parseCursorSessionCost(paths: string[]): Promise<SessionCo
     totals.cacheReadTokens += parsed.cacheReadTokens;
     totals.cacheWriteTokens += parsed.cacheWriteTokens;
     totals.totalCostUsd += parsed.totalCostUsd;
+    usedEstimate ||= parsed.costSource === 'estimate';
+    usedGateway ||= parsed.costSource === 'gateway';
     if (parsed.model) models.add(parsed.model);
   }
   totals.totalCostUsd = Number(totals.totalCostUsd.toFixed(6));
   totals.model = models.size === 1 ? [...models][0] : models.size > 1 ? 'mixed' : DEFAULT_MODEL;
+  totals.costSource = usedEstimate ? 'estimate' : usedGateway ? 'gateway' : 'unknown';
   return totals;
 }
 
