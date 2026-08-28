@@ -63,6 +63,7 @@ import { BrainGlassCard, type BrainCard } from './brain-card';
 import { MarkdownGlassCard, type MarkdownCard } from './markdown-card';
 import { loadCanvasSnapshot, saveCanvasSnapshot, type SnapGeometry } from './canvas-persistence';
 import { DiffGlassCard, type DiffCard } from './diff-card';
+import { fetchWorktreeDiff, findFileRepoPath, worktreeDiffCardFromData, worktreeRepoPath } from './worktree-diff';
 import { AgentGlassCard, AGENT_FULL_W, AGENT_FULL_H, AGENT_COMPACT_W, AGENT_COMPACT_H, type AgentCard } from './agent-card';
 import { codename } from '@/lib/agents/codename';
 import { ChatGlassCard, type ChatCard } from './chat-card';
@@ -2119,17 +2120,13 @@ export default function CanvasGlassPreviewPage() {
     if (lane) void spawnDiffCard(lane);
   }, [activeLanes, spawnDiffCard]);
 
-  /** "What have I changed" — the active repo's WORKING-TREE diff in the
-   *  same card the lane diffs use. laneId carries a worktree: prefix so
-   *  the restore path knows which fetch to replay. */
+  /** Active-repo working-tree diff; the worktree: prefix also drives restore. */
   const spawnWorktreeDiffCard = useCallback((at?: SnapGeometry, repoOverride?: string) => {
     const repoPath = repoOverride ?? activeRepoPath;
     if (!repoPath) return Promise.resolve();
-    const repoTail = repoPath.split('/').filter(Boolean).pop() ?? repoPath;
-    return fetch(`/api/panel/worktree-diff?workspace=${encodeURIComponent(repoPath)}&maxBytes=131072`)
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data: { ok?: boolean; branch?: string | null; stat?: string; diff?: string; truncated?: boolean } | null) => {
-        if (!data?.ok) return;
+    return fetchWorktreeDiff(repoPath)
+      .then((data) => {
+        if (!data) return;
         const id = nextIdRef.current;
         nextIdRef.current += 1;
         zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
@@ -2138,25 +2135,24 @@ export default function CanvasGlassPreviewPage() {
           // One working-tree card per repo — auto-show + the picker row both
           // route here, so a re-trigger must never stack a duplicate.
           if (previous.some((card) => card.laneId === `worktree:${repoPath}`)) return previous;
-          return [...previous, {
-            id,
-            x: spot.x,
-            y: spot.y,
-            z: zPeakRef.current,
-            w: at?.w ?? 560,
-            h: at?.h ?? 320,
-            laneId: `worktree:${repoPath}`,
-            packetId: null,
-            title: `Your changes — ${repoTail}`,
-            branch: data.branch ?? null,
-            stat: data.stat ?? '',
-            diff: data.diff?.trim() ? data.diff : 'Working tree clean — nothing uncommitted.',
-            truncated: Boolean(data.truncated),
-          }];
+          return [...previous, worktreeDiffCardFromData({ id, z: zPeakRef.current, spot, saved: at, repoPath, data })];
         });
       })
       .catch(() => {});
   }, [activeRepoPath, findFreeSpot]);
+
+  const refreshWorktreeDiffCard = useCallback((cardId: number): Promise<void> => {
+    const repoPath = worktreeRepoPath(canvasCardsRef.current.diff.find((card) => card.id === cardId)?.laneId ?? '');
+    if (!repoPath) return Promise.resolve();
+    return fetchWorktreeDiff(repoPath).then((data) => {
+      if (!data) return;
+      setDiffCards((previous) => previous.map((card) => (
+        card.id === cardId && worktreeRepoPath(card.laneId) === repoPath
+          ? { ...card, stat: data.stat, diff: data.diff, truncated: data.truncated }
+          : card
+      )));
+    }).catch(() => {});
+  }, []);
 
   /** The active review's PR diff as a glass card — what the Alerts
    *  "Review ready · PR #N" row resolves to. Distinct from the working-tree
@@ -2390,23 +2386,25 @@ export default function CanvasGlassPreviewPage() {
   }, []);
 
   /** Open ANY file on the machine as a glass card — view, edit, ⌘S. */
-  const spawnFileCard = useCallback((path: string, at?: SnapGeometry) => {
+  const spawnFileCard = useCallback((path: string, at?: SnapGeometry, repoOverride?: string) => {
     const id = nextIdRef.current;
     nextIdRef.current += 1;
     zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
     const z = zPeakRef.current;
     const spot = at ?? findFreeSpot(620, 456);
+    const repoPath = findFileRepoPath(path, [repoOverride, activeRepoPath, ...(repos ?? []).map((repo) => repo.path)]);
     setFileCards((previous) => spawnCanvasCard(previous, {
       id,
       path,
       name: path.split('/').pop() || path,
+      repoPath,
       x: spot.x,
       y: spot.y,
       w: at?.w ?? 620,
       h: at?.h ?? 420,
       z,
     }));
-  }, [findFreeSpot]);
+  }, [activeRepoPath, findFreeSpot, repos]);
 
   const spawnFileTreeCard = useCallback((repoPath: string, at?: SnapGeometry) => {
     const id = nextIdRef.current;
@@ -2510,7 +2508,7 @@ export default function CanvasGlassPreviewPage() {
         return { id, x: saved.x, y: saved.y, z: zPeakRef.current, w: saved.w, h: saved.h, title: saved.title, markdown: saved.markdown };
       })]);
     }
-    snap.file.forEach((saved) => spawnFileCard(saved.path, saved));
+    snap.file.forEach((saved) => spawnFileCard(saved.path, saved, saved.repoPath ?? snap.activeRepoPath ?? undefined));
     snap.tree?.forEach((saved) => spawnFileTreeCard(saved.repoPath, saved));
     const videoRestores = (snap.video ?? []).map(async (saved) => {
       const blob = await getMedia(saved.mediaId);
@@ -2562,7 +2560,7 @@ export default function CanvasGlassPreviewPage() {
     activeRepoPath,
     dockOpen,
     term: termCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, cwd: card.cwd, cwdLabel: card.cwdLabel, sessionName: card.sessionName })),
-    file: fileCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, path: card.path })),
+    file: fileCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, path: card.path, repoPath: card.repoPath })),
     tree: treeCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, repoPath: card.repoPath })),
     image: imageCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, aspect: card.aspect, items: card.items })),
     video: videoCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, aspect: card.aspect, mediaId: card.mediaId, name: card.name })),
@@ -3715,6 +3713,8 @@ export default function CanvasGlassPreviewPage() {
             onFocus={focusDiffCard}
             onClose={closeDiffCard}
             onRequestChanges={requestDiffCardChanges}
+            onRefresh={refreshWorktreeDiffCard}
+            onChanged={refreshWorktreeDiffCard}
           />
         ))}
       </AnimatePresence>

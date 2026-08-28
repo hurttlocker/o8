@@ -34,7 +34,7 @@ export interface CanvasSnapshotV1 {
   /** `sessionName` (#6) lets a surviving tmux-backed shell re-attach on restore
    *  instead of respawning fresh; absent on older snapshots / dead sessions. */
   term: Array<SnapGeometry & { cwd: string | null; cwdLabel: string | null; sessionName?: string | null }>;
-  file: Array<SnapGeometry & { path: string }>;
+  file: Array<SnapGeometry & { path: string; repoPath?: string | null }>;
   /** Optional — file tree cards arrived after v1 snapshots existed. */
   tree?: Array<SnapGeometry & { repoPath: string }>;
   image: Array<SnapGeometry & { aspect: number; items: Array<{ src: string; name: string }> }>;
