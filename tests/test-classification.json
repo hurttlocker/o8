@@ -1357,6 +1357,12 @@
       ]
     },
     {
+      "path": "tests/github-broker-supervisor-sync-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/github-device-consolidation.test.ts",
       "reasons": [
         "child-process"

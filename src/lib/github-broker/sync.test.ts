@@ -28,6 +28,7 @@ const {
 } = await import('@/lib/supervisor/inbox');
 const {
   invalidateGitHubSync,
+  updateGitHubThreadAttention,
   upsertGitHubIssue,
   upsertGitHubPullRequest,
 } = await import('./store');
@@ -120,8 +121,12 @@ function pullRequestSnapshot(
   };
 }
 
-function pullRequestPayload(number: number) {
-  const snapshot = pullRequestSnapshot(number, 'open', null);
+function pullRequestPayload(
+  number: number,
+  state: 'open' | 'closed' = 'open',
+  closedAt: string | null = null,
+) {
+  const snapshot = pullRequestSnapshot(number, state, closedAt);
   return {
     id: snapshot.pullRequestId,
     number,
@@ -273,6 +278,111 @@ describe('GitHub outsider attention sync', () => {
     expect(warning).toHaveBeenCalledWith(expect.stringContaining(
       '[github-broker] Attention sync skipped for example/widgets#52: attention request unavailable',
     ));
+  });
+
+  it('backfills matching issues with null attention without refetching assessed rows', async () => {
+    upsertGitHubIssue(issueSnapshot(61, 'open', null));
+    upsertGitHubIssue(issueSnapshot(62, 'open', null));
+    updateGitHubThreadAttention({
+      repoFullName: 'example/widgets',
+      kind: 'issue',
+      number: 62,
+      lastHumanCommentAuthorLogin: 'already-assessed',
+      lastHumanCommentAuthorAssociation: 'CONTRIBUTOR',
+      lastHumanCommentAt: '2026-08-26T11:00:00.000Z',
+      lastInsiderCommentAt: null,
+    });
+
+    installationFetchMock.mockImplementation(async (_repo: string, path: string) => {
+      if (path.includes('/issues?state=open')) {
+        return fetched([openIssue(61, 1), openIssue(62, 1)]);
+      }
+      if (path.includes('/issues?state=closed')) return fetched([]);
+      if (path.includes('/issues/61/comments?')) {
+        return fetched([{
+          user: { login: 'backfilled-contributor', type: 'User' },
+          author_association: 'CONTRIBUTOR',
+          created_at: '2026-08-27T12:00:00.000Z',
+        }]);
+      }
+      throw new Error(`Unexpected GitHub path: ${path}`);
+    });
+
+    await expect(ensureGitHubIssues('example/widgets', { fresh: true })).resolves.toMatchObject({
+      error: null,
+      stale: false,
+    });
+
+    expect(installationFetchMock.mock.calls
+      .map((call) => String(call[1]))
+      .filter((path) => path.includes('/comments?'))).toEqual([
+      '/repos/example/widgets/issues/61/comments?per_page=100&page=1',
+    ]);
+    expect(getSqlite().prepare(`
+      SELECT number, last_human_comment_author_login as login
+      FROM github_issues
+      WHERE repo_full_name = 'example/widgets' AND number IN (61, 62)
+      ORDER BY number
+    `).all()).toEqual([
+      { number: 61, login: 'backfilled-contributor' },
+      { number: 62, login: 'already-assessed' },
+    ]);
+  });
+
+  it('backfills matching recently closed pull requests with null attention only', async () => {
+    const closedAt = '2026-08-26T15:00:00.000Z';
+    const unassessed = { ...pullRequestPayload(211, 'closed', closedAt), comments: 1 };
+    const assessed = { ...pullRequestPayload(212, 'closed', closedAt), comments: 1 };
+    upsertGitHubPullRequest(pullRequestSnapshot(211, 'closed', closedAt));
+    upsertGitHubPullRequest(pullRequestSnapshot(212, 'closed', closedAt));
+    updateGitHubThreadAttention({
+      repoFullName: 'example/widgets',
+      kind: 'pr',
+      number: 212,
+      lastHumanCommentAuthorLogin: 'already-assessed',
+      lastHumanCommentAuthorAssociation: 'CONTRIBUTOR',
+      lastHumanCommentAt: '2026-08-26T14:00:00.000Z',
+      lastInsiderCommentAt: null,
+    });
+
+    installationFetchMock.mockImplementation(async (_repo: string, path: string) => {
+      if (path.includes('/pulls?state=open')) return fetched([]);
+      if (path.includes('/pulls?state=closed')) return fetched([unassessed, assessed]);
+      if (path.endsWith('/pulls/211')) return fetched(unassessed);
+      if (path.includes('/issues/211/comments?')) {
+        return fetched([{
+          user: { login: 'backfilled-contributor', type: 'User' },
+          author_association: 'CONTRIBUTOR',
+          created_at: '2026-08-26T14:30:00.000Z',
+        }]);
+      }
+      throw new Error(`Unexpected GitHub path: ${path}`);
+    });
+
+    await expect(ensureGitHubPullRequests('example/widgets')).resolves.toMatchObject({
+      error: null,
+      stale: false,
+    });
+
+    expect(installationFetchMock.mock.calls
+      .map((call) => String(call[1]))
+      .filter((path) => /\/pulls\/\d+$/.test(path))).toEqual([
+      '/repos/example/widgets/pulls/211',
+    ]);
+    expect(installationFetchMock.mock.calls
+      .map((call) => String(call[1]))
+      .filter((path) => path.includes('/comments?'))).toEqual([
+      '/repos/example/widgets/issues/211/comments?per_page=100&page=1',
+    ]);
+    expect(getSqlite().prepare(`
+      SELECT number, last_human_comment_author_login as login
+      FROM github_pull_requests
+      WHERE repo_full_name = 'example/widgets' AND number IN (211, 212)
+      ORDER BY number
+    `).all()).toEqual([
+      { number: 211, login: 'backfilled-contributor' },
+      { number: 212, login: 'already-assessed' },
+    ]);
   });
 
   it('prunes expired closed issues after their active waiting card resolves', async () => {
