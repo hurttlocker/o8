@@ -47,6 +47,8 @@ function fullPacketFixture() {
     lastRecoveryAt: '2026-01-01T00:02:00.000Z',
     typecheckAutoRetries: 1,
     leaseWaitAutoRetries: 1,
+    uiLoopIterations: 3,
+    uiLoopStartedAt: '2026-01-01T00:00:00.000Z',
     stallRetries: 2,
     launchAttempts: 3,
     operatorStopped: true,

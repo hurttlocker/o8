@@ -440,6 +440,11 @@ export type LaneEventVerb =
   | 'steered_packet'
   // Design Mode follow-up reused the packet's warm lane. Payload: { packetId, elementSummary }
   | 'ui_loop_steered'
+  // Design Mode steer did not settle before its writer deadline. Payload: { packetId, laneId, waitedMs }
+  | 'ui_loop_turn_unsettled'
+  // Design Mode packet reached an operator-configured iteration/time/diff bound.
+  // Payload: { reason, iterations, elapsedMs, diffBytes, diffFiles }
+  | 'ui_loop_budget_exhausted'
   // Packet steer failed before a worker turn could start. Payload: { packetId, source, message, note, stderrHead? }
   | 'steer_failed'
   // Operator stop could not kill the live worker. Payload: { packetId?, sessionKey, note, pid?, tmuxSession?, steps }

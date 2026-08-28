@@ -80,6 +80,7 @@ import {
 import { applyStorageReserveUpdate, resolveStorageReserveSettings, resolveStoredStorageReserve, STORAGE_RESERVE_FALLBACK, type StorageReserveDefaults } from './storage-reserve-defaults';
 import { applyWorkspaceParkingUpdate, resolveStoredWorkspaceParking, resolveWorkspaceParkingSettings, WORKSPACE_PARKING_FALLBACK, type WorkspaceParkingDefaults } from './workspace-parking-defaults';
 import { applyMeteredPacketCapUpdate, METERED_PACKET_CAP_FALLBACK, resolveMeteredPacketCapSettings, resolveStoredMeteredPacketCap, type MeteredPacketCapDefaults } from './metered-packet-cap-defaults';
+import { applyUiLoopUpdate, resolveStoredUiLoopDefaults, resolveUiLoopSettings, UI_LOOP_FALLBACK, type UiLoopDefaults } from './ui-loop-defaults';
 import { applyBroadcastCommentaryUpdate, BROADCAST_COMMENTARY_FALLBACK, broadcastCommentarySettingSources, resolveBroadcastCommentaryDefaults, resolveStoredBroadcastCommentary, type BroadcastCommentaryDefaults } from './broadcast-commentary-defaults';
 import { applyReviewContinuationUpdate, REVIEW_CONTINUATION_FALLBACK, resolveStoredReviewContinuation, type ReviewContinuationDefault } from './review-continuation-default';
 import { applyWorkspaceManifestPolicyUpdate, resolveStoredWorkspaceManifestPolicy, resolveWorkspaceManifestPolicySettings, WORKSPACE_MANIFEST_POLICY_FALLBACK, type WorkspaceManifestPolicyDefault } from './workspace-manifest-policy-default';
@@ -123,7 +124,7 @@ export type RequireApproval = 'high-risk' | 'surface' | 'always' | 'never';
 
 export function isRequireApproval(value: unknown): value is RequireApproval { return value === 'high-risk' || value === 'surface' || value === 'always' || value === 'never'; }
 
-export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParkingDefaults, ApfsDependencyImagesDefaults, MeteredPacketCapDefaults, BroadcastCommentaryDefaults, ReviewContinuationDefault, WorkspaceManifestPolicyDefault {
+export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParkingDefaults, ApfsDependencyImagesDefaults, MeteredPacketCapDefaults, UiLoopDefaults, BroadcastCommentaryDefaults, ReviewContinuationDefault, WorkspaceManifestPolicyDefault {
   subscriptionProfile: SubscriptionProfile;
   parallelCap: number;
   overlapGate: OverlapGateMode;
@@ -393,11 +394,9 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   prLinkDestination: 'in-app',
   worktreeMaxCount: 20,
   worktreeMaxTotalGb: 20,
-  ...STORAGE_RESERVE_FALLBACK,
-  ...WORKSPACE_PARKING_FALLBACK,
-  ...METERED_PACKET_CAP_FALLBACK,
+  ...STORAGE_RESERVE_FALLBACK, ...WORKSPACE_PARKING_FALLBACK, ...METERED_PACKET_CAP_FALLBACK, ...UI_LOOP_FALLBACK,
 };
-interface StoredOperatorDefaults extends Partial<StorageReserveDefaults>, Partial<WorkspaceParkingDefaults>, Partial<ApfsDependencyImagesDefaults>, Partial<MeteredPacketCapDefaults>, Partial<BroadcastCommentaryDefaults>, Partial<ReviewContinuationDefault>, Partial<WorkspaceManifestPolicyDefault> {
+interface StoredOperatorDefaults extends Partial<StorageReserveDefaults>, Partial<WorkspaceParkingDefaults>, Partial<ApfsDependencyImagesDefaults>, Partial<MeteredPacketCapDefaults>, Partial<UiLoopDefaults>, Partial<BroadcastCommentaryDefaults>, Partial<ReviewContinuationDefault>, Partial<WorkspaceManifestPolicyDefault> {
   subscriptionProfile?: SubscriptionProfile;
   parallelCap?: number;
   overlapGate?: OverlapGateMode;
@@ -461,7 +460,7 @@ type FileOperatorDefaults = Partial<OperatorDefaults> & {
 const parseStoredDefaults = (raw: string): StoredOperatorDefaults => parseStoredJson<StoredOperatorDefaults>(raw);
 
 function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
-  const result: FileOperatorDefaults = {};
+  const result: FileOperatorDefaults = {}; Object.assign(result, resolveStoredUiLoopDefaults(stored));
   if (isSubscriptionProfile(stored.subscriptionProfile)) {
     result.subscriptionProfile = stored.subscriptionProfile;
   }
@@ -626,7 +625,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
 // ── Resolution ──
 
 function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWithSources {
-  const meteredPacketCap = resolveMeteredPacketCapSettings(fileValues);
+  const meteredPacketCap = resolveMeteredPacketCapSettings(fileValues); const uiLoop = resolveUiLoopSettings(fileValues);
   const envProfile = envSubscriptionProfile();
   const envCap = envParallelCap();
   const envGate = envOverlapGate();
@@ -756,7 +755,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     worktreeMaxTotalGb: envWtSize ?? fileValues.worktreeMaxTotalGb ?? OPERATOR_DEFAULTS_FALLBACK.worktreeMaxTotalGb,
     ...storageReserve.values,
     ...workspaceParking.values,
-    ...meteredPacketCap.values,
+    ...meteredPacketCap.values, ...uiLoop.values,
   };
 
   const sources: Record<keyof OperatorDefaults, SettingSource> = {
@@ -824,7 +823,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     worktreeMaxTotalGb: envWtSize !== null ? 'env' : fileValues.worktreeMaxTotalGb !== undefined ? 'file' : 'default',
     ...storageReserve.sources,
     ...workspaceParking.sources,
-    ...meteredPacketCap.sources,
+    ...meteredPacketCap.sources, ...uiLoop.sources,
   };
 
   return { values: resolved, sources };
@@ -1100,7 +1099,7 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>): Pr
   }
   applyStorageReserveUpdate(stored, update);
   applyWorkspaceParkingUpdate(stored, update);
-  applyMeteredPacketCapUpdate(stored, update);
+  applyMeteredPacketCapUpdate(stored, update); applyUiLoopUpdate(stored, update);
   if (update.targetingTriage !== undefined) {
     if (!isTargetingTier(update.targetingTriage)) {
       throw new Error('targetingTriage must be { runtime: dispatch-runtime, model: string, effort: thinking-effort }.');

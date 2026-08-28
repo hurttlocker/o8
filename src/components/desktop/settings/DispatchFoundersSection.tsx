@@ -116,6 +116,37 @@ interface FoundersSectionProps {
   showExperimental: boolean;
 }
 
+type UiLoopBudgetField =
+  | 'uiLoopMaxIterations'
+  | 'uiLoopMaxMinutes'
+  | 'uiLoopMaxDiffBytes'
+  | 'uiLoopMaxDiffFiles';
+
+function UiLoopBudgetInput({
+  field,
+  value,
+  busyField,
+  updateField,
+}: {
+  field: UiLoopBudgetField;
+  value: number;
+  busyField: keyof OperatorDefaults | null;
+  updateField: FoundersSectionProps['updateField'];
+}) {
+  return (
+    <input
+      key={value}
+      type="number"
+      min="1"
+      step="1"
+      defaultValue={value}
+      disabled={busyField === field}
+      onBlur={(event) => { updateField(field, Number(event.currentTarget.value)); }}
+      style={{ width: 86, minHeight: 30, borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--t-input-border)', borderRadius: 8, background: 'var(--t-input-bg)', color: 'var(--t-text)', paddingLeft: 9, paddingRight: 9, fontFamily: MONO_FONT_STACK, fontSize: 11 }}
+    />
+  );
+}
+
 function envLocked(sources: FoundersSectionProps['sources'], field: keyof OperatorDefaults): boolean {
   return sources[field] === 'env';
 }
@@ -372,6 +403,34 @@ export function DispatchFoundersSection({
                 ]}
               />
             }
+            divider
+          />
+          <SettingsRow
+            icon={<GaugeIcon />}
+            label="UI loop iterations"
+            subtitle="Follow-up steers allowed per Design Mode packet"
+            accessory={<UiLoopBudgetInput field="uiLoopMaxIterations" value={values.uiLoopMaxIterations} busyField={busyField} updateField={updateField} />}
+            divider
+          />
+          <SettingsRow
+            icon={<GaugeIcon />}
+            label="UI loop minutes"
+            subtitle="Wall-time budget from the first Design Mode turn"
+            accessory={<UiLoopBudgetInput field="uiLoopMaxMinutes" value={values.uiLoopMaxMinutes} busyField={busyField} updateField={updateField} />}
+            divider
+          />
+          <SettingsRow
+            icon={<GaugeIcon />}
+            label="UI loop diff bytes"
+            subtitle="Maximum current packet diff size"
+            accessory={<UiLoopBudgetInput field="uiLoopMaxDiffBytes" value={values.uiLoopMaxDiffBytes} busyField={busyField} updateField={updateField} />}
+            divider
+          />
+          <SettingsRow
+            icon={<GaugeIcon />}
+            label="UI loop diff files"
+            subtitle="Maximum files in the current packet diff"
+            accessory={<UiLoopBudgetInput field="uiLoopMaxDiffFiles" value={values.uiLoopMaxDiffFiles} busyField={busyField} updateField={updateField} />}
             divider
           />
           <SettingsRow

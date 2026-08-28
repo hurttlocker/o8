@@ -357,7 +357,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     // have event fallbacks, but persistence keeps the packet lifecycle honest;
     // stallRetries/operatorStopped live only here; dropping them resets their guards.
     typecheckAutoRetries: normalizeAttemptCount(packet.typecheckAutoRetries),
-    leaseWaitAutoRetries: normalizeAttemptCount(packet.leaseWaitAutoRetries),
+    leaseWaitAutoRetries: normalizeAttemptCount(packet.leaseWaitAutoRetries), uiLoopIterations: normalizeAttemptCount(packet.uiLoopIterations), uiLoopStartedAt: typeof packet.uiLoopStartedAt === 'string' && Number.isFinite(Date.parse(packet.uiLoopStartedAt)) ? packet.uiLoopStartedAt : undefined,
     stallRetries: normalizeAttemptCount(packet.stallRetries),
     launchAttempts: normalizeAttemptCount(packet.launchAttempts),
     operatorStopped: packet.operatorStopped === true ? true : undefined,

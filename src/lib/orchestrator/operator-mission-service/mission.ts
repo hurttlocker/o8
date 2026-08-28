@@ -214,7 +214,9 @@ export async function createMission(input: CreateMissionInput) {
       referenceLabel: referenceLabels[index]!,
       title: issue.title,
       summary: packetSummary,
-      ...(input.origin === 'design-mode' ? { origin: input.origin } : {}),
+      ...(input.origin === 'design-mode'
+        ? { origin: input.origin, uiLoopIterations: 0, uiLoopStartedAt: new Date().toISOString() }
+        : {}),
       workspaceTargetPath: repoPath,
       branchTarget,
       runtime: packetRouting.selectedRuntime,

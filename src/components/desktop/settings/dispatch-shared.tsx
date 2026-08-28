@@ -60,6 +60,10 @@ export interface OperatorDefaults {
   parallelCap: number;
   meteredPacketCostCapUsd: number;
   meteredPacketInputTokenCap: number;
+  uiLoopMaxIterations: number;
+  uiLoopMaxMinutes: number;
+  uiLoopMaxDiffBytes: number;
+  uiLoopMaxDiffFiles: number;
   overlapGate: OverlapGateMode;
   healBotEnabled: boolean;
   supervisorAutoEscalate: boolean;

@@ -147,6 +147,20 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update[field] = field === 'meteredPacketInputTokenCap' ? Math.round(parsed) : parsed;
   }
 
+  for (const field of [
+    'uiLoopMaxIterations',
+    'uiLoopMaxMinutes',
+    'uiLoopMaxDiffBytes',
+    'uiLoopMaxDiffFiles',
+  ] as const) {
+    if (body[field] === undefined) continue;
+    const parsed = typeof body[field] === 'number' ? body[field] : Number(body[field]);
+    if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+      throw new Error(`${field} must be a positive integer.`);
+    }
+    update[field] = parsed;
+  }
+
   if (body.overlapGate !== undefined) {
     if (body.overlapGate !== 'advisory' && body.overlapGate !== 'strict') {
       throw new Error('overlapGate must be "advisory" or "strict".');

@@ -15,6 +15,12 @@ interface O8ElementPanelProps {
   onFocusPacket?: (packet: WarmUiLoopPacket) => void;
 }
 
+interface UiLoopReceipt {
+  packet: WarmUiLoopPacket;
+  message: string;
+  warning: boolean;
+}
+
 type DescriptorPart = {
   color: string;
   text: string;
@@ -86,7 +92,7 @@ export function O8ElementPanel({ element, onClose, onEditWithAI, onFocusPacket }
   const [draftText, setDraftText] = useState(element.textContent);
   const [isVisible, setIsVisible] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [receipt, setReceipt] = useState<WarmUiLoopPacket | null>(null);
+  const [receipt, setReceipt] = useState<UiLoopReceipt | null>(null);
   const [error, setError] = useState<string | null>(null);
   const descriptorParts = truncateDescriptorParts(buildDescriptorParts(element), 60);
   const descriptorTitle = buildPlainDescriptor(element);
@@ -109,7 +115,16 @@ export function O8ElementPanel({ element, onClose, onEditWithAI, onFocusPacket }
     setError(null);
     try {
       const outcome = await onEditWithAI(context, { forceFresh });
-      if (outcome?.kind === 'steered') setReceipt(outcome.packet);
+      if (outcome?.kind === 'steered') {
+        setReceipt({ packet: outcome.packet, message: 'Steered the running packet', warning: false });
+      }
+      if (outcome?.kind === 'queued') {
+        setReceipt({ packet: outcome.packet, message: `Queued behind the active edit · position ${outcome.position}`, warning: false });
+      }
+      if (outcome?.kind === 'blocked') {
+        setReceipt({ packet: outcome.packet, message: `UI loop hit its ${outcome.reason} budget`, warning: true });
+      }
+      if (outcome?.kind === 'rejected') setError('The UI loop edit queue is full. Open the packet before retrying.');
       if (outcome?.kind === 'error') setError(outcome.message);
     } finally {
       setBusy(false);
@@ -307,9 +322,9 @@ export function O8ElementPanel({ element, onClose, onEditWithAI, onFocusPacket }
               paddingRight: 10,
               paddingBottom: 0,
               paddingLeft: 12,
-              border: '1px solid var(--t-success-border)',
+              border: `1px solid ${receipt.warning ? 'var(--t-warning-border)' : 'var(--t-success-border)'}`,
               borderRadius: 10,
-              background: 'var(--t-success-soft)',
+              background: receipt.warning ? 'var(--t-warning-soft)' : 'var(--t-success-soft)',
               color: 'var(--t-text)',
               fontFamily: 'var(--font-sans-system)',
               fontSize: 11,
@@ -317,10 +332,10 @@ export function O8ElementPanel({ element, onClose, onEditWithAI, onFocusPacket }
               letterSpacing: '-0.1px',
             }}
           >
-            <span>Steered the running packet ·</span>
+            <span>{receipt.message} ·</span>
             <button
               type="button"
-              onClick={() => onFocusPacket?.(receipt)}
+              onClick={() => onFocusPacket?.(receipt.packet)}
               style={{
                 minHeight: 44,
                 border: 'none',
@@ -338,7 +353,7 @@ export function O8ElementPanel({ element, onClose, onEditWithAI, onFocusPacket }
                 cursor: onFocusPacket ? 'pointer' : 'default',
               }}
             >
-              {receipt.label}
+              Open {receipt.packet.label}
             </button>
           </div>
         ) : error ? (

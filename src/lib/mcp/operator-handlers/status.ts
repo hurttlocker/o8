@@ -248,6 +248,22 @@ export const STATUS_TOOLS: McpTool[] = [
           type: 'number',
           description: 'Fallback input-token cap when a metered gateway does not report cost. Default 500000.',
         },
+        uiLoopMaxIterations: {
+          type: 'number',
+          description: 'Maximum follow-up Design Mode steers per packet. Default 8.',
+        },
+        uiLoopMaxMinutes: {
+          type: 'number',
+          description: 'Maximum wall minutes from the first Design Mode turn. Default 30.',
+        },
+        uiLoopMaxDiffBytes: {
+          type: 'number',
+          description: 'Maximum current packet diff bytes before the UI loop parks. Default 65536.',
+        },
+        uiLoopMaxDiffFiles: {
+          type: 'number',
+          description: 'Maximum current packet diff files before the UI loop parks. Default 12.',
+        },
         defaultDispatchRuntime: {
           type: 'string',
           enum: listDispatchableRuntimes(),
@@ -325,6 +341,10 @@ const OPERATOR_DEFAULTS_KEYS = [
   'parallelCap',
   'meteredPacketCostCapUsd',
   'meteredPacketInputTokenCap',
+  'uiLoopMaxIterations',
+  'uiLoopMaxMinutes',
+  'uiLoopMaxDiffBytes',
+  'uiLoopMaxDiffFiles',
   'defaultDispatchRuntime',
   'defaultDispatchModel',
   'opencodeOrchestratorModel',
