@@ -264,6 +264,10 @@ export const STATUS_TOOLS: McpTool[] = [
           type: 'number',
           description: 'Maximum current packet diff files before the UI loop parks. Default 12.',
         },
+        uiLoopPreviewTimeoutMs: {
+          type: 'number',
+          description: 'Preview-ready wait timeout in milliseconds. Default 20000.',
+        },
         defaultDispatchRuntime: {
           type: 'string',
           enum: listDispatchableRuntimes(),
@@ -345,6 +349,7 @@ const OPERATOR_DEFAULTS_KEYS = [
   'uiLoopMaxMinutes',
   'uiLoopMaxDiffBytes',
   'uiLoopMaxDiffFiles',
+  'uiLoopPreviewTimeoutMs',
   'defaultDispatchRuntime',
   'defaultDispatchModel',
   'opencodeOrchestratorModel',

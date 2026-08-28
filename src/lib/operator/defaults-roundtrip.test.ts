@@ -56,6 +56,7 @@ const NON_DEFAULT_UPDATE = {
   uiLoopMaxMinutes: 24,
   uiLoopMaxDiffBytes: 48_000,
   uiLoopMaxDiffFiles: 9,
+  uiLoopPreviewTimeoutMs: 18_000,
   workspaceManifestPolicy: 'auto',
   crossHouseWorkerFallback: true,
   orchestratorBackend: 'collide',

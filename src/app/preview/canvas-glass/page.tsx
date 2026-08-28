@@ -100,17 +100,15 @@ import { clearCanvasTurnAccumulators, removeCanvasConversations, setCanvasConver
 import { CanvasSearchOverlay } from './canvas-search';
 import { CanvasCommandPalette } from './canvas-command-palette';
 import {
-  CANVAS_CARD_KINDS,
-  CANVAS_FIT_ZOOM,
-  CANVAS_ZOOM_STEPS as ZOOM_STEPS,
+  CANVAS_CARD_KINDS, CANVAS_FIT_ZOOM, CANVAS_ZOOM_STEPS as ZOOM_STEPS,
   closeActiveCanvasCard,
   selectCanvasMedia,
   stepCanvasZoom,
   useCanvasZoomHotkeys,
-  type CanvasCardKind,
-  type CanvasCommands,
+  type CanvasCardKind, type CanvasCommands,
 } from './canvas-commands';
 import { capCanvasReadContent, canvasCardTitle, dockEntryReadLine, type CanvasCardLite } from './canvas-card-intents';
+import { useUiLoopProofCardSpawner } from './proof-card';
 import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
 /** Live rows for the wired chrome — inbox items, active lanes, commits. */
 interface InboxRow {
@@ -2927,6 +2925,7 @@ export default function CanvasGlassPreviewPage() {
       chat: chatCards, diff: diffCards, spec: specCards, brain: brainCards, markdown: markdownCards, agent: agentCards,
     };
   }, [termCards, fileCards, treeCards, imageCards, videoCards, browserCards, chatCards, diffCards, specCards, brainCards, markdownCards, agentCards]);
+  const spawnUiLoopProofCard = useUiLoopProofCardSpawner(canvasCardsRef, nextIdRef, zPeakRef, setImageCards, findFreeSpot);
 
   const findCanvasCard = useCallback((kind: CanvasCardKind, id: number) => {
     return canvasCardsRef.current[kind].find((card) => card.id === id) ?? null;
@@ -3385,6 +3384,7 @@ export default function CanvasGlassPreviewPage() {
             note = `adding image ${name}`;
             break;
           }
+          case 'ui-loop-proof': spawnUiLoopProofCard(args); note = 'showing UI-loop proof'; break;
           case 'stack': {
             // Group image cards into one deck (the agent twin of drag-together).
             const ids: number[] = Array.isArray(args.ids)
@@ -3493,7 +3493,7 @@ export default function CanvasGlassPreviewPage() {
       window.removeEventListener('o8:canvas-intent', onIntent);
       (window as unknown as Record<string, unknown>).__o8CanvasIntentReady = false;
     };
-  }, [activeRepoPath, animatePanTo, canvasEnabled, canvasViewport, canvasZoomLevel, dockOpen, findCanvasCard, gridMode, pan.x, pan.y, readCanvasCard, repos, sendPrompt, spawnAgents, spawnBrainCard, spawnMarkdownCard, spawnSpecCard, spawnTerminal, spawnFileCard, spawnFileTreeCard, spawnWorktreeDiffCard, spawnVideoCard, pickThread, cycleImageCard, spreadImageCard, patchCanvasCardGeom, dismissCanvasCard, focusCard, winSize.h, winSize.w]);
+  }, [activeRepoPath, animatePanTo, canvasEnabled, canvasViewport, canvasZoomLevel, dockOpen, findCanvasCard, gridMode, pan.x, pan.y, readCanvasCard, repos, sendPrompt, spawnAgents, spawnBrainCard, spawnMarkdownCard, spawnSpecCard, spawnTerminal, spawnFileCard, spawnFileTreeCard, spawnUiLoopProofCard, spawnWorktreeDiffCard, spawnVideoCard, pickThread, cycleImageCard, spreadImageCard, patchCanvasCardGeom, dismissCanvasCard, focusCard, winSize.h, winSize.w]);
 
   if (!canvasEnabled) {
     return (

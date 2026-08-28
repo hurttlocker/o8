@@ -3,6 +3,7 @@ export interface UiLoopDefaults {
   uiLoopMaxMinutes: number;
   uiLoopMaxDiffBytes: number;
   uiLoopMaxDiffFiles: number;
+  uiLoopPreviewTimeoutMs: number;
 }
 
 export const UI_LOOP_FALLBACK: UiLoopDefaults = {
@@ -10,6 +11,7 @@ export const UI_LOOP_FALLBACK: UiLoopDefaults = {
   uiLoopMaxMinutes: 30,
   uiLoopMaxDiffBytes: 65_536,
   uiLoopMaxDiffFiles: 12,
+  uiLoopPreviewTimeoutMs: 20_000,
 };
 
 function positiveInteger(value: unknown): number | undefined {
@@ -33,12 +35,14 @@ export function resolveUiLoopSettings(file: Partial<UiLoopDefaults>) {
       uiLoopMaxMinutes: stored.uiLoopMaxMinutes ?? UI_LOOP_FALLBACK.uiLoopMaxMinutes,
       uiLoopMaxDiffBytes: stored.uiLoopMaxDiffBytes ?? UI_LOOP_FALLBACK.uiLoopMaxDiffBytes,
       uiLoopMaxDiffFiles: stored.uiLoopMaxDiffFiles ?? UI_LOOP_FALLBACK.uiLoopMaxDiffFiles,
+      uiLoopPreviewTimeoutMs: stored.uiLoopPreviewTimeoutMs ?? UI_LOOP_FALLBACK.uiLoopPreviewTimeoutMs,
     },
     sources: {
       uiLoopMaxIterations: stored.uiLoopMaxIterations === undefined ? 'default' as const : 'file' as const,
       uiLoopMaxMinutes: stored.uiLoopMaxMinutes === undefined ? 'default' as const : 'file' as const,
       uiLoopMaxDiffBytes: stored.uiLoopMaxDiffBytes === undefined ? 'default' as const : 'file' as const,
       uiLoopMaxDiffFiles: stored.uiLoopMaxDiffFiles === undefined ? 'default' as const : 'file' as const,
+      uiLoopPreviewTimeoutMs: stored.uiLoopPreviewTimeoutMs === undefined ? 'default' as const : 'file' as const,
     },
   };
 }

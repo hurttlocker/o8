@@ -27,6 +27,14 @@ import {
 import { currentMissionState } from '@/lib/orchestrator/operator-mission-service/shared';
 import { summarizeLaneReviewDiff } from '@/lib/review/lane-diff';
 import { enqueueInboxItem } from '@/lib/supervisor/inbox';
+import { waitForPreviewReady } from '@/lib/orchestrator/ui-loop-preview';
+import {
+  captureUiLoopAfterScreenshot,
+  persistUiLoopBeforeScreenshot,
+  recordUiLoopProof,
+  type UiLoopProofCaptureContext,
+} from '@/lib/orchestrator/ui-loop-proof';
+import type { LaneReviewScreenshotReference } from '@/lib/lane/review-screenshot';
 
 const MAX_UI_LOOP_QUEUE_SIZE = 3;
 const UI_LOOP_LEASE_POLL_MS = 100;
@@ -94,6 +102,12 @@ interface UiLoopSteerInput {
   repoPath: string;
   text: string;
   previewImageDataUri?: string;
+  previewUrl?: string;
+  readySelector?: string;
+  readyText?: string;
+  element?: string;
+  elementRect?: { top: number; left: number; width: number; height: number };
+  elementFilePath?: string;
 }
 
 interface WarmUiLoopCandidate {
@@ -457,6 +471,14 @@ async function releaseAfterTurnSettle(
   packetId: string,
   startedAt: number,
   deadlineAt: number,
+  preview: {
+    proofId: string;
+    url?: string;
+    readySelector?: string;
+    readyText?: string;
+    before: LaneReviewScreenshotReference | null;
+    capture: UiLoopProofCaptureContext | null;
+  },
 ): Promise<void> {
   try {
     const result = await waitForTurnSettle(laneId, packetId, startedAt, deadlineAt);
@@ -466,6 +488,30 @@ async function releaseAfterTurnSettle(
         laneId,
         waitedMs: result.waitedMs,
       });
+    } else {
+      const readiness = await waitForPreviewReady({
+        packetId,
+        laneId,
+        url: preview.url,
+        readySelector: preview.readySelector,
+        readyText: preview.readyText,
+        timeoutMs: getOperatorDefaultsSync().values.uiLoopPreviewTimeoutMs,
+      });
+      if (readiness.state === 'ready' && readiness.previewUrl && preview.before && preview.capture) {
+        const after = await captureUiLoopAfterScreenshot({ laneId, proofId: preview.proofId, capture: preview.capture });
+        if (after) {
+          recordUiLoopProof({
+            packetId,
+            laneId,
+            proofId: preview.proofId,
+            before: preview.before,
+            after,
+            previewUrl: readiness.previewUrl,
+            elapsedMs: readiness.elapsedMs,
+            capture: preview.capture,
+          });
+        }
+      }
     }
   } finally {
     await releaseLeaseAndDrain(repoKey, resource, participant);
@@ -493,6 +539,21 @@ async function steerWithLease(
       ? `${text}\n\nScreenshot note: warm-session steer cannot attach the element crop, so use the element, selector, accessibility, and style context above.`
       : text;
     const turnStartedAt = Date.now();
+    const proofId = `${candidate.lane.id}:${turnStartedAt}`;
+    const capture = input.readySelector && input.element
+      ? {
+          selector: input.readySelector,
+          element: input.element,
+          ...(input.elementRect ? { rect: input.elementRect } : {}),
+          ...(input.elementFilePath ? { filePath: input.elementFilePath } : {}),
+        }
+      : null;
+    const before = await persistUiLoopBeforeScreenshot({
+      laneId: candidate.lane.id,
+      proofId,
+      dataUri: input.previewImageDataUri,
+      rect: input.elementRect,
+    });
     const settleDeadlineAt = Math.min(
       budget.timeDeadlineAt,
       turnStartedAt + (uiLoopSettleTimeoutOverrideForTest ?? UI_LOOP_SETTLE_TIMEOUT_MS),
@@ -522,6 +583,14 @@ async function steerWithLease(
         result.packetId,
         turnStartedAt,
         settleDeadlineAt,
+        {
+          proofId,
+          url: input.previewUrl,
+          readySelector: input.readySelector,
+          readyText: input.readyText,
+          before,
+          capture,
+        },
       ).catch((error) => {
         console.error('[ui-loop] failed to release settled writer lease:', error);
       });

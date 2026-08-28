@@ -30,7 +30,7 @@ describe('buildEditContext', () => {
   it('preserves the previous text context when the new capture fields are absent', () => {
     const context = buildEditContext(grabbedElement(), 'Save');
 
-    expect(context).toEqual({
+    expect(context).toMatchObject({
       text: [
         'Edit the selected browser element.',
         'Element: <button.primary.wide#save>',
@@ -38,6 +38,10 @@ describe('buildEditContext', () => {
         'Text: "Save"',
         'Styles: color rgb(255, 255, 255); background rgb(0, 102, 204); font-size 14px; padding 8px 12px; margin 0px; display inline-flex',
       ].join('\n'),
+      readySelector: '#save',
+      readyText: 'Save',
+      element: '<button.primary.wide#save>',
+      elementRect: { top: 20, left: 40, width: 120, height: 36 },
     });
   });
 

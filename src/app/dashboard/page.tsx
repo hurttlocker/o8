@@ -149,7 +149,7 @@ import { handleRepoWorkspaceFocusEvent } from './hooks/focusRepoWorkspace';
 import { useDesignMode } from '@/hooks/useDesignMode';
 import type { GrabbedElement } from '@/lib/browser/grab';
 import { cropRegionBase64 } from '@/lib/browser/region-crop';
-import { routeUiLoopEdit } from '@/components/desktop/design-mode/ui-loop-edit';
+import { routeUiLoopEdit, showUiLoopProof } from '@/components/desktop/design-mode/ui-loop-edit';
 import { createTileRegistry } from './tileRegistry';
 import type { TerminalTabHandle } from '@/components/desktop/workspace-terminal/types';
 import type { SavedChatRepoContext } from '@/lib/llm/chat-history';
@@ -4886,7 +4886,7 @@ function DashboardInner() {
               onEditWithAI={async (context, { forceFresh }) => {
                 const outcome = await routeUiLoopEdit({
                   repoPath: globalRepoEntry?.localPath,
-                  context,
+                  context: { ...context, ...(o8BrowserHoverUrl ? { previewUrl: o8BrowserHoverUrl } : {}) },
                   forceFresh,
                   injectFallback: () => injectPayloadIntoRepoChat({
                     reason: 'element-edit',
@@ -4898,6 +4898,7 @@ function DashboardInner() {
                 return outcome;
               }}
               onFocusPacket={(packet) => handlePaletteSelectPacket(packet.packetId, packet.laneId, undefined, packet.label)}
+              onShowProof={showUiLoopProof}
             />
           </Suspense>
         </div>

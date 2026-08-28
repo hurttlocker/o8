@@ -154,6 +154,7 @@ beforeEach(async () => {
     uiLoopMaxMinutes: 30,
     uiLoopMaxDiffBytes: 65_536,
     uiLoopMaxDiffFiles: 12,
+    uiLoopPreviewTimeoutMs: 20_000,
   });
 });
 
