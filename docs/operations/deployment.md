@@ -46,3 +46,5 @@ External report reconciliation has its own [configuration and recovery runbook](
 ## Release boundary
 
 A local build or commit is not a release. Publishing uses the repository’s guarded ship workflow and requires explicit operator authorization in the current session. Keep signing material out of the repository, never run concurrent ship processes, and verify the published version and installer after notarization completes.
+
+Linux release artifacts are produced on a Linux build host. Before `npm run ship`, copy the resulting `bundle/appimage/*.AppImage`, matching `.sig`, and any `bundle/deb/*.deb` files into the corresponding directories under `src-tauri/target/release/bundle/` on the release host. The release script detects them automatically, uploads them with the macOS assets, and adds the signed AppImage to the `linux-x86_64` updater entry.
