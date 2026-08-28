@@ -4904,7 +4904,11 @@ function DashboardInner() {
               element={grabbedElement}
               onClose={() => setGrabbedElement(null)}
               onEditWithAI={(context) => {
-                injectPayloadIntoRepoChat({ reason: 'element-edit', text: context }, null);
+                injectPayloadIntoRepoChat({
+                  reason: 'element-edit',
+                  text: context.text,
+                  previewImageDataUri: context.previewImageDataUri,
+                }, null);
                 setGrabbedElement(null);
               }}
             />
