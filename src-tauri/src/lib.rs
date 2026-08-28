@@ -5040,6 +5040,50 @@ fn voice_prefs_set(key: String, value: serde_json::Value) -> Result<(), String> 
     Ok(())
 }
 
+/// Operator-facing personal memory controls. These commands use the same
+/// `agent.db` rows and validation as Symon's voice tools, so the Settings panel
+/// cannot create a second memory truth.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn symon_memory_get() -> Result<crate::agent::memory::MemorySnapshot, String> {
+    crate::agent::memory::snapshot()
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn symon_memory_add(fact: String) -> Result<crate::agent::memory::MemoryEntry, String> {
+    crate::agent::memory::remember(&fact, "settings")
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn symon_memory_update(
+    id: i64,
+    fact: String,
+) -> Result<crate::agent::memory::MemoryEntry, String> {
+    crate::agent::memory::update(id, &fact)
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn symon_memory_forget(id: i64) -> Result<(), String> {
+    crate::agent::memory::forget(id)
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn symon_memory_accept_suggestion(
+    id: i64,
+) -> Result<crate::agent::memory::MemoryEntry, String> {
+    crate::agent::memory::accept_suggestion(id)
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn symon_memory_dismiss_suggestion(id: i64) -> Result<(), String> {
+    crate::agent::memory::dismiss_suggestion(id)
+}
+
 /// Recent dictation history (newest first) for the settings History panel — the
 /// safety net to retrieve what you said when a paste went to the wrong place.
 #[tauri::command]
@@ -7175,6 +7219,18 @@ pub fn run() {
             voice_prefs_get,
             #[cfg(target_os = "macos")]
             voice_prefs_set,
+            #[cfg(target_os = "macos")]
+            symon_memory_get,
+            #[cfg(target_os = "macos")]
+            symon_memory_add,
+            #[cfg(target_os = "macos")]
+            symon_memory_update,
+            #[cfg(target_os = "macos")]
+            symon_memory_forget,
+            #[cfg(target_os = "macos")]
+            symon_memory_accept_suggestion,
+            #[cfg(target_os = "macos")]
+            symon_memory_dismiss_suggestion,
             dictation_history_get,
             dictation_history_clear,
             dictation_history_delete,

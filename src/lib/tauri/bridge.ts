@@ -494,6 +494,50 @@ export async function voicePrefsSet(key: string, value: unknown): Promise<void> 
   await invoke('voice_prefs_set', { key, value });
 }
 
+export interface SymonMemoryEntry {
+  id: number;
+  fact: string;
+  state: 'active' | 'pending';
+  source: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface SymonMemorySnapshot {
+  facts: SymonMemoryEntry[];
+  suggestions: SymonMemoryEntry[];
+}
+
+export async function symonMemoryGet(): Promise<SymonMemorySnapshot> {
+  return (await invoke<SymonMemorySnapshot>('symon_memory_get')) ?? { facts: [], suggestions: [] };
+}
+
+export async function symonMemoryAdd(fact: string): Promise<SymonMemoryEntry> {
+  const entry = await invoke<SymonMemoryEntry>('symon_memory_add', { fact });
+  if (!entry) throw new Error('Symon memory did not return the saved fact.');
+  return entry;
+}
+
+export async function symonMemoryUpdate(id: number, fact: string): Promise<SymonMemoryEntry> {
+  const entry = await invoke<SymonMemoryEntry>('symon_memory_update', { id, fact });
+  if (!entry) throw new Error('Symon memory did not return the edited fact.');
+  return entry;
+}
+
+export async function symonMemoryForget(id: number): Promise<void> {
+  await invoke('symon_memory_forget', { id });
+}
+
+export async function symonMemoryAcceptSuggestion(id: number): Promise<SymonMemoryEntry> {
+  const entry = await invoke<SymonMemoryEntry>('symon_memory_accept_suggestion', { id });
+  if (!entry) throw new Error('Symon memory did not return the approved suggestion.');
+  return entry;
+}
+
+export async function symonMemoryDismissSuggestion(id: number): Promise<void> {
+  await invoke('symon_memory_dismiss_suggestion', { id });
+}
+
 /** Two-tier brain escalation policy ("off" | "auto" | "deep"), persisted in
  * ~/.o8/agent_models.json via the agent router. Controls whether/when the front
  * voice brain hands heavy tasks to the background Claude brain. macOS + Tauri. */

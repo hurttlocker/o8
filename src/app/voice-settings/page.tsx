@@ -30,13 +30,15 @@ import FounderTab from './tabs/FounderTab';
 import AgentTab from './tabs/AgentTab';
 import ThemeTab from './tabs/ThemeTab';
 import { PolishTab } from './tabs/DataTabs';
+import MemoryTab from './tabs/MemoryTab';
 
 export const dynamic = 'force-dynamic';
 
-type TabId = 'settings' | 'polish' | 'theme' | 'history' | 'stats' | 'account' | 'founder' | 'agent' | 'report';
+type TabId = 'settings' | 'polish' | 'memory' | 'theme' | 'history' | 'stats' | 'account' | 'founder' | 'agent' | 'report';
 const TABS: { id: TabId; label: string; icon: IconComp }[] = [
   { id: 'settings', label: 'Settings', icon: ICONS.gear },
   { id: 'polish', label: 'Polish', icon: ICONS.sparkle },
+  { id: 'memory', label: 'Memory', icon: ICONS.bookOpen },
   { id: 'theme', label: 'Theme', icon: ICONS.droplet },
   { id: 'history', label: 'History', icon: ICONS.clock },
   { id: 'stats', label: 'Stats', icon: ICONS.chartBar },
@@ -346,6 +348,7 @@ export default function VoiceSettingsWindow() {
           <div style={{ height: 46, cursor: 'grab' }} aria-hidden />
           {tab === 'settings' ? <SettingsTab prefs={prefs} setPref={setPref} /> : null}
           {tab === 'polish' ? <PolishTab prefs={prefs} setPref={setPref} /> : null}
+          {tab === 'memory' ? <MemoryTab /> : null}
           {tab === 'theme' ? <ThemeTab controls={glass} onChange={updateGlass} /> : null}
           {tab === 'history' ? <HistoryTab /> : null}
           {tab === 'stats' ? <StatsTab /> : null}

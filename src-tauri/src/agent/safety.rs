@@ -215,6 +215,12 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         // Reading the ledger is observational. Its undo executes a persisted
         // inverse and always receives a fresh confirmation card.
         "symon_capabilities" => SafetyClass::ReadOnly,
+        "symon_memory_list" => SafetyClass::ReadOnly,
+        "symon_memory_remember" | "symon_memory_forget" => SafetyClass::Reversible,
+        // A suggestion writes a local, inactive proposal but cannot influence
+        // Symon's prompt or actions until the operator accepts it in Settings.
+        // Let it surface without an interrupting card; the review is the gate.
+        "symon_memory_suggest" => SafetyClass::ReadOnly,
         "symon_ledger_recent" => SafetyClass::ReadOnly,
         "symon_ledger_undo" => SafetyClass::Reversible,
         "symon_machine_list" => SafetyClass::ReadOnly,

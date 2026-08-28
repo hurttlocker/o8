@@ -51,6 +51,47 @@ pub fn all_tools() -> Vec<Value> {
             "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
         }),
         json!({
+            "name": "symon_memory_list",
+            "description": "List the operator-approved personal facts Symon may use and any inactive suggestions awaiting review. Call this before 'what do you know about me?' and before forgetting a fact so you use its exact numeric id.",
+            "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
+        }),
+        json!({
+            "name": "symon_memory_remember",
+            "description": "Save one durable personal fact only when the user explicitly asks Symon to remember it. The exact fact receives a confirmation card before becoming active.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "fact": { "type": "string", "description": "One concise, self-contained fact in the user's wording." }
+                },
+                "required": ["fact"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "symon_memory_suggest",
+            "description": "Propose one stable personal preference or relationship the user volunteered without asking Symon to remember it. The proposal remains inactive and never enters Symon's context until the operator approves it in Voice settings. Do not use for transient plans, secrets, credentials, medical details, financial details, or guesses.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "fact": { "type": "string", "description": "One concise, self-contained candidate fact stated by the user." }
+                },
+                "required": ["fact"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "symon_memory_forget",
+            "description": "Permanently forget one approved personal fact. Call symon_memory_list first and pass the exact numeric id. The deletion receives a confirmation card.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "integer", "description": "Exact approved fact id returned by symon_memory_list." }
+                },
+                "required": ["id"],
+                "additionalProperties": false
+            }
+        }),
+        json!({
             "name": "symon_machine_list",
             "description": "List the known machines Symon can control. The session has exactly one active machine at a time.",
             "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
@@ -1234,6 +1275,10 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
 
     match name {
         "symon_capabilities" => Ok(crate::agent::capabilities::catalog_json()),
+        "symon_memory_list" => crate::agent::memory::tool_list(),
+        "symon_memory_remember" => crate::agent::memory::tool_remember(&args),
+        "symon_memory_suggest" => crate::agent::memory::tool_suggest(&args),
+        "symon_memory_forget" => crate::agent::memory::tool_forget(&args),
         "symon_machine_list" | "symon_machine_switch" => {
             Err("Symon machine controls must run through the machine router".to_string())
         }
@@ -1591,6 +1636,34 @@ mod escalation_tests {
         assert!(enabled_tools().iter().any(|candidate| {
             candidate.get("name").and_then(Value::as_str) == Some("mac_messages_send")
         }));
+    }
+
+    #[test]
+    fn personal_memory_tools_are_strict_and_keep_mutations_carded() {
+        let list = schema("symon_memory_list");
+        assert_eq!(list["parameters"]["additionalProperties"], false);
+        assert_eq!(list["parameters"]["required"], json!([]));
+
+        for name in ["symon_memory_remember", "symon_memory_suggest"] {
+            let tool = schema(name);
+            assert_eq!(tool["parameters"]["required"], json!(["fact"]));
+            assert_eq!(tool["parameters"]["additionalProperties"], false);
+        }
+        let forget = schema("symon_memory_forget");
+        assert_eq!(forget["parameters"]["required"], json!(["id"]));
+        assert_eq!(forget["parameters"]["properties"]["id"]["type"], "integer");
+        assert_eq!(
+            safety::tool_safety_class("symon_memory_remember"),
+            safety::SafetyClass::Reversible
+        );
+        assert_eq!(
+            safety::tool_safety_class("symon_memory_forget"),
+            safety::SafetyClass::Reversible
+        );
+        assert_eq!(
+            safety::tool_safety_class("symon_memory_suggest"),
+            safety::SafetyClass::ReadOnly
+        );
     }
 
     fn schema(name: &str) -> Value {

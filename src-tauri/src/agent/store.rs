@@ -130,7 +130,19 @@ pub(crate) fn migrate_connection(conn: &Connection) -> Result<(), String> {
             claimed_at INTEGER,
             consumed_at INTEGER,
             invalidated_at INTEGER
-        );",
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_personal_memory (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fact TEXT NOT NULL,
+            normalized_fact TEXT NOT NULL UNIQUE,
+            state TEXT NOT NULL CHECK (state IN ('active', 'pending')),
+            source TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_personal_memory_state_updated
+            ON agent_personal_memory (state, updated_at DESC, id DESC);",
     )
     .map_err(|e| format!("agent.db migrate failed: {e}"))?;
 

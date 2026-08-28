@@ -161,6 +161,23 @@ const SPECS: &[CapabilitySpec] = &[
         requires_screen_recording: false,
     },
     CapabilitySpec {
+        id: "personal_memory",
+        category: "Customize",
+        title: "Remember what you choose",
+        summary: "Save, inspect, edit, or forget local personal facts under operator control.",
+        examples: &[
+            "Remember that I prefer aisle seats.",
+            "What do you know about me?",
+            "Forget my seat preference.",
+        ],
+        tool_names: &[
+            "symon_memory_list",
+            "symon_memory_remember",
+            "symon_memory_forget",
+        ],
+        requires_screen_recording: false,
+    },
+    CapabilitySpec {
         id: "multi_step_plans",
         category: "Tools",
         title: "Handle a reviewed sequence",

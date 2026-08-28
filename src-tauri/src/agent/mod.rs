@@ -25,6 +25,7 @@ mod execution;
 pub mod gemini;
 pub mod ledger;
 pub mod machine;
+pub mod memory;
 pub mod o8_http;
 pub mod openrouter;
 mod plan;
@@ -145,6 +146,10 @@ pub(crate) fn system_prompt() -> String {
     if let Some(skill_prompt) = skills::active_prompt() {
         prompt.push_str("\n\n");
         prompt.push_str(&skill_prompt);
+    }
+    if let Some(memory_prompt) = memory::prompt_context() {
+        prompt.push_str("\n\n");
+        prompt.push_str(&memory_prompt);
     }
     prompt
 }
@@ -1320,6 +1325,13 @@ fn confirm_summary(tool_name: &str, args: &Value, ledger_session_id: Option<&str
             s("recipient"),
             s("message")
         ),
+        "symon_memory_remember" => format!("Remember “{}”", s("fact")),
+        "symon_memory_forget" => {
+            let id = args.get("id").and_then(Value::as_i64).unwrap_or(0);
+            memory::describe(id)
+                .map(|fact| format!("Forget “{fact}”"))
+                .unwrap_or_else(|| format!("Forget personal memory #{id}"))
+        }
         "csv_write" => format!("Write the CSV “{}”", s("filename")),
         "symon_ledger_undo" => ledger::describe_action(&s("action_id"), ledger_session_id)
             .map(|summary| format!("Undo the action that {summary}"))
