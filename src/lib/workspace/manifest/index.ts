@@ -1,4 +1,10 @@
 export { loadWorkspaceManifest, workspaceManifestPath } from './loader';
+export { applyWorkspaceManifest } from './apply';
+export {
+  allocateWorkspaceServicePorts,
+  readWorkspacePortLeases,
+  releaseWorkspacePortLeases,
+} from './port-leases';
 export {
   migrateManifest,
   parseWorkspaceManifest,

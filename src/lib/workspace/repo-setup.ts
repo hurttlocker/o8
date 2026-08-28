@@ -8,6 +8,7 @@ import {
   assertWorktreeMaterializationIdentity,
   type WorktreeMaterializationIdentity,
 } from '@/lib/worktree/materialization-identity';
+import { materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
 import {
   captureWorkspaceRegularFileIdentity,
   type WorkspaceCopyBindingRequirement,
@@ -26,6 +27,18 @@ import {
 } from './dependency-materializer';
 
 export type RepoSetupCommandInvocation = DependencyInstallInvocation;
+
+export async function runRepoSetupCommand(
+  invocation: RepoSetupCommandInvocation,
+): Promise<void> {
+  await materializationAwareExecFile(invocation.command, invocation.args, {
+    cwd: invocation.cwd,
+    timeout: invocation.timeoutMs,
+    maxBuffer: 8 * 1024 * 1024,
+    windowsHide: true,
+    env: invocation.env,
+  });
+}
 
 export const REPO_SETUP_POLICY_IDENTITY_KIND = 'repo-setup-policy';
 

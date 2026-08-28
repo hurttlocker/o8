@@ -109,6 +109,8 @@ export interface CreateWorktreeOptions {
    * session detection stays in sync.
    */
   packetId?: string;
+  /** Existing lane that owns this packet launch and its workspace receipts. */
+  laneId?: string;
   /** Scheduler-owned reservation reused by the manager admission boundary. */
   storageAdmissionReservationId?: string;
 }

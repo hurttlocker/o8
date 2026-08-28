@@ -231,6 +231,7 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
         repoSetup: repoEntry?.setup,
         isolationPreference: repoEntry?.setup.workspaceIsolationPreference,
         packetId: payload.packetId,
+        laneId: payload.existingLaneId,
         storageAdmissionReservationId: payload.storageAdmissionReservationId,
       });
       if (launchWorktree?.worktree) {

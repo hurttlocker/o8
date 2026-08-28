@@ -90,6 +90,8 @@ export interface WorktreeLaunchOptions {
    * own clone instead of colliding on a taskName-derived slot.
    */
   packetId?: string;
+  /** Existing lane that owns this packet launch and its workspace receipts. */
+  laneId?: string;
   /** Scheduler-owned reservation reused at the materialization boundary. */
   storageAdmissionReservationId?: string;
 }
@@ -147,6 +149,7 @@ export async function prepareLaunchWorktree(
     repoSetup: opts.repoSetup,
     isolationPreference: opts.isolationPreference,
     packetId: opts.packetId,
+    laneId: opts.laneId,
     storageAdmissionReservationId: opts.storageAdmissionReservationId,
     managed: opts.agentType === 'claude-code' ? true : undefined,
   });
