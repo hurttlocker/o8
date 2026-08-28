@@ -22,7 +22,11 @@ import {
   type OperatorDefaults,
   type OverlapGateMode,
 } from '@/lib/operator/defaults';
-import { isBroadcastCommentaryMode } from '@/lib/operator/broadcast-commentary-defaults';
+import {
+  isBroadcastCommentaryMode,
+  isBroadcastVoiceClockTime,
+  isBroadcastVoiceQuietHoursMode,
+} from '@/lib/operator/broadcast-commentary-defaults';
 import { isDispatchRuntime } from '@/lib/operator/defaults-env';
 import { isWorkerStartMode } from '@/lib/operator/worker-start-mode';
 import { projectAgentRoleRoutes } from '@/lib/operator/role-routing';
@@ -204,11 +208,41 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.broadcastVoice = body.broadcastVoice;
   }
 
+  if (body.broadcastVoiceQuietHours !== undefined) {
+    if (!isBroadcastVoiceQuietHoursMode(body.broadcastVoiceQuietHours)) {
+      throw new Error('broadcastVoiceQuietHours must be "off" or "on".');
+    }
+    update.broadcastVoiceQuietHours = body.broadcastVoiceQuietHours;
+  }
+
+  for (const field of ['broadcastVoiceQuietStart', 'broadcastVoiceQuietEnd'] as const) {
+    if (body[field] === undefined) continue;
+    if (!isBroadcastVoiceClockTime(body[field])) {
+      throw new Error(`${field} must be a local time in HH:MM format.`);
+    }
+    update[field] = body[field];
+  }
+
+  for (const field of [
+    'broadcastVoiceAttention',
+    'broadcastVoiceApprovals',
+    'broadcastVoiceReviews',
+    'broadcastVoiceFailures',
+    'broadcastVoiceCompletions',
+    'broadcastVoiceCalendar',
+    'broadcastVoiceTimeCheckins',
+  ] as const) {
+    if (body[field] === undefined) continue;
+    if (typeof body[field] !== 'boolean') throw new Error(`${field} must be boolean.`);
+    update[field] = body[field];
+  }
+
   for (const [field, maximum] of [
     ['broadcastCommentaryIntervalMinutes', 1_440],
     ['broadcastCommentaryMinNewEvents', 100],
     ['broadcastCommentaryMaxPerHour', 60],
     ['broadcastVoiceLullMinutes', 1_440],
+    ['broadcastVoiceCalendarLeadMinutes', 1_440],
   ] as const) {
     if (body[field] === undefined) continue;
     const value = body[field];

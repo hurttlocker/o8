@@ -27,6 +27,7 @@ pub async fn list_events(args: Value) -> Result<Value, String> {
         .iter()
         .map(|r| {
             json!({
+                "id": r.id,
                 "title": r.title,
                 "start": r.start_local,
                 "end": r.end_local,

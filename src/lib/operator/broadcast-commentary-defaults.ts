@@ -1,4 +1,5 @@
 export type BroadcastCommentaryMode = 'off' | 'interval';
+export type BroadcastVoiceQuietHoursMode = 'off' | 'on';
 
 export interface BroadcastCommentaryDefaults {
   broadcastCommentary: BroadcastCommentaryMode;
@@ -7,6 +8,17 @@ export interface BroadcastCommentaryDefaults {
   broadcastCommentaryMaxPerHour: number;
   broadcastVoice: 'off' | 'on';
   broadcastVoiceLullMinutes: number;
+  broadcastVoiceQuietHours: BroadcastVoiceQuietHoursMode;
+  broadcastVoiceQuietStart: string;
+  broadcastVoiceQuietEnd: string;
+  broadcastVoiceAttention: boolean;
+  broadcastVoiceApprovals: boolean;
+  broadcastVoiceReviews: boolean;
+  broadcastVoiceFailures: boolean;
+  broadcastVoiceCompletions: boolean;
+  broadcastVoiceCalendar: boolean;
+  broadcastVoiceCalendarLeadMinutes: number;
+  broadcastVoiceTimeCheckins: boolean;
 }
 
 export const BROADCAST_COMMENTARY_FALLBACK: BroadcastCommentaryDefaults = {
@@ -16,10 +28,31 @@ export const BROADCAST_COMMENTARY_FALLBACK: BroadcastCommentaryDefaults = {
   broadcastCommentaryMaxPerHour: 12,
   broadcastVoice: 'off',
   broadcastVoiceLullMinutes: 6,
+  broadcastVoiceQuietHours: 'on',
+  broadcastVoiceQuietStart: '22:00',
+  broadcastVoiceQuietEnd: '08:00',
+  broadcastVoiceAttention: true,
+  broadcastVoiceApprovals: true,
+  broadcastVoiceReviews: true,
+  broadcastVoiceFailures: true,
+  broadcastVoiceCompletions: true,
+  broadcastVoiceCalendar: true,
+  broadcastVoiceCalendarLeadMinutes: 15,
+  broadcastVoiceTimeCheckins: true,
 };
 
 export function isBroadcastCommentaryMode(value: unknown): value is BroadcastCommentaryMode {
   return value === 'off' || value === 'interval';
+}
+
+export function isBroadcastVoiceQuietHoursMode(value: unknown): value is BroadcastVoiceQuietHoursMode {
+  return value === 'off' || value === 'on';
+}
+
+export function isBroadcastVoiceClockTime(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{2}:\d{2}$/.test(value)) return false;
+  const [hours, minutes] = value.split(':').map(Number);
+  return hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59;
 }
 
 export function resolveStoredBroadcastCommentary(
@@ -32,11 +65,32 @@ export function resolveStoredBroadcastCommentary(
   if (stored.broadcastVoice === 'off' || stored.broadcastVoice === 'on') {
     result.broadcastVoice = stored.broadcastVoice;
   }
+  if (isBroadcastVoiceQuietHoursMode(stored.broadcastVoiceQuietHours)) {
+    result.broadcastVoiceQuietHours = stored.broadcastVoiceQuietHours;
+  }
+  if (isBroadcastVoiceClockTime(stored.broadcastVoiceQuietStart)) {
+    result.broadcastVoiceQuietStart = stored.broadcastVoiceQuietStart;
+  }
+  if (isBroadcastVoiceClockTime(stored.broadcastVoiceQuietEnd)) {
+    result.broadcastVoiceQuietEnd = stored.broadcastVoiceQuietEnd;
+  }
+  for (const field of [
+    'broadcastVoiceAttention',
+    'broadcastVoiceApprovals',
+    'broadcastVoiceReviews',
+    'broadcastVoiceFailures',
+    'broadcastVoiceCompletions',
+    'broadcastVoiceCalendar',
+    'broadcastVoiceTimeCheckins',
+  ] as const) {
+    if (typeof stored[field] === 'boolean') result[field] = stored[field];
+  }
   for (const [field, maximum] of [
     ['broadcastCommentaryIntervalMinutes', 1_440],
     ['broadcastCommentaryMinNewEvents', 100],
     ['broadcastCommentaryMaxPerHour', 60],
     ['broadcastVoiceLullMinutes', 1_440],
+    ['broadcastVoiceCalendarLeadMinutes', 1_440],
   ] as const) {
     const value = stored[field];
     if (Number.isSafeInteger(value) && Number(value) >= 1) {
@@ -65,6 +119,17 @@ export function broadcastCommentarySettingSources(
     broadcastCommentaryMaxPerHour: stored.broadcastCommentaryMaxPerHour !== undefined ? 'file' : 'default',
     broadcastVoice: stored.broadcastVoice !== undefined ? 'file' : 'default',
     broadcastVoiceLullMinutes: stored.broadcastVoiceLullMinutes !== undefined ? 'file' : 'default',
+    broadcastVoiceQuietHours: stored.broadcastVoiceQuietHours !== undefined ? 'file' : 'default',
+    broadcastVoiceQuietStart: stored.broadcastVoiceQuietStart !== undefined ? 'file' : 'default',
+    broadcastVoiceQuietEnd: stored.broadcastVoiceQuietEnd !== undefined ? 'file' : 'default',
+    broadcastVoiceAttention: stored.broadcastVoiceAttention !== undefined ? 'file' : 'default',
+    broadcastVoiceApprovals: stored.broadcastVoiceApprovals !== undefined ? 'file' : 'default',
+    broadcastVoiceReviews: stored.broadcastVoiceReviews !== undefined ? 'file' : 'default',
+    broadcastVoiceFailures: stored.broadcastVoiceFailures !== undefined ? 'file' : 'default',
+    broadcastVoiceCompletions: stored.broadcastVoiceCompletions !== undefined ? 'file' : 'default',
+    broadcastVoiceCalendar: stored.broadcastVoiceCalendar !== undefined ? 'file' : 'default',
+    broadcastVoiceCalendarLeadMinutes: stored.broadcastVoiceCalendarLeadMinutes !== undefined ? 'file' : 'default',
+    broadcastVoiceTimeCheckins: stored.broadcastVoiceTimeCheckins !== undefined ? 'file' : 'default',
   };
 }
 
@@ -84,11 +149,40 @@ export function applyBroadcastCommentaryUpdate(
     }
     stored.broadcastVoice = update.broadcastVoice;
   }
+  if (update.broadcastVoiceQuietHours !== undefined) {
+    if (!isBroadcastVoiceQuietHoursMode(update.broadcastVoiceQuietHours)) {
+      throw new Error('broadcastVoiceQuietHours must be "off" or "on".');
+    }
+    stored.broadcastVoiceQuietHours = update.broadcastVoiceQuietHours;
+  }
+  for (const field of ['broadcastVoiceQuietStart', 'broadcastVoiceQuietEnd'] as const) {
+    const value = update[field];
+    if (value === undefined) continue;
+    if (!isBroadcastVoiceClockTime(value)) {
+      throw new Error(`${field} must be a local time in HH:MM format.`);
+    }
+    stored[field] = value;
+  }
+  for (const field of [
+    'broadcastVoiceAttention',
+    'broadcastVoiceApprovals',
+    'broadcastVoiceReviews',
+    'broadcastVoiceFailures',
+    'broadcastVoiceCompletions',
+    'broadcastVoiceCalendar',
+    'broadcastVoiceTimeCheckins',
+  ] as const) {
+    const value = update[field];
+    if (value === undefined) continue;
+    if (typeof value !== 'boolean') throw new Error(`${field} must be boolean.`);
+    stored[field] = value;
+  }
   for (const [field, maximum] of [
     ['broadcastCommentaryIntervalMinutes', 1_440],
     ['broadcastCommentaryMinNewEvents', 100],
     ['broadcastCommentaryMaxPerHour', 60],
     ['broadcastVoiceLullMinutes', 1_440],
+    ['broadcastVoiceCalendarLeadMinutes', 1_440],
   ] as const) {
     const value = update[field];
     if (value === undefined) continue;

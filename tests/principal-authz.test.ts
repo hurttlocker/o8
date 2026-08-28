@@ -76,6 +76,9 @@ const broadcastEvents = await import('@/app/api/broadcast/events/route');
 const broadcastCommentary = await import('@/app/api/broadcast/commentary/route');
 const broadcastPost = await import('@/app/api/broadcast/post/route');
 const broadcastSay = await import('@/app/api/broadcast/say/route');
+const broadcastCalendar = await import('@/app/api/broadcast/calendar/route');
+const broadcastAutomationSay = await import('@/app/api/broadcast/automation-say/route');
+const broadcastWhy = await import('@/app/api/broadcast/why/route');
 const broadcastSnapshot = await import('@/app/api/broadcast/snapshot/route');
 const broadcastTokens = await import('@/app/api/broadcast/tokens/route');
 const { createTestApproval, getApproval } = await import('@/lib/approvals/store');
@@ -262,6 +265,71 @@ describe('principal-authz — Broadcast spectator is read-only through the real 
     });
     expect(panelGateMiddleware(spectatorRequest).status).toBe(403);
     expect((await broadcastSay.POST(spectatorRequest)).status).toBe(403);
+  });
+
+  it('keeps Calendar ingestion and attention provenance operator-only', async () => {
+    const event = {
+      eventId: 'calendar-authz-event',
+      title: 'Private appointment',
+      calendar: 'Personal',
+      startLocal: '2026-08-28T10:00:00',
+      endLocal: '2026-08-28T10:30:00',
+      startEpochMs: Date.now() + 10 * 60_000,
+      endEpochMs: Date.now() + 40 * 60_000,
+      allDay: false,
+    };
+    const operator = req('http://localhost:3001/api/broadcast/calendar', {
+      principal: 'operator',
+      body: event,
+    });
+    expect(panelGateMiddleware(operator).status).toBe(200);
+    expect((await broadcastCalendar.POST(operator)).status).toBe(200);
+
+    for (const principal of ['worker', 'spectator'] as const) {
+      const calendarRequest = req('http://localhost:3001/api/broadcast/calendar', {
+        principal,
+        body: event,
+      });
+      expect(panelGateMiddleware(calendarRequest).status).toBe(403);
+      expect((await broadcastCalendar.POST(calendarRequest)).status).toBe(403);
+      const whyRequest = req('http://localhost:3001/api/broadcast/why', {
+        principal,
+        method: 'GET',
+      });
+      expect(panelGateMiddleware(whyRequest).status).toBe(403);
+      expect(broadcastWhy.GET(whyRequest).status).toBe(403);
+    }
+    expect(broadcastWhy.GET(req('http://localhost:3001/api/broadcast/why', {
+      principal: 'operator',
+      method: 'GET',
+    })).status).toBe(200);
+  });
+
+  it('admits scheduled speech only from a packet-bound automation lane', async () => {
+    const { createLane } = await import('@/lib/lane/registry');
+    const packetId = `packet-automation-attention-${Date.now()}`;
+    createLane({
+      label: '[automation] Morning operator check-in',
+      repoPath: '/tmp/automation-attention-authz',
+      branch: `automation/attention-${Date.now()}`,
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId,
+    });
+    const workerToken = mintPacketWorkerToken(packetId);
+    const workerRequest = req('http://localhost:3001/api/broadcast/automation-say', {
+      principal: 'worker',
+      workerToken,
+      body: { text: 'Two approvals need you.' },
+    });
+    expect(panelGateMiddleware(workerRequest).status).toBe(200);
+    expect((await broadcastAutomationSay.POST(workerRequest)).status).toBe(200);
+
+    const operatorRequest = req('http://localhost:3001/api/broadcast/automation-say', {
+      principal: 'operator',
+      body: { text: 'Operator cannot impersonate an automation packet.' },
+    });
+    expect((await broadcastAutomationSay.POST(operatorRequest)).status).toBe(403);
   });
 
   it('long-polls the real feed route until a new ledger event arrives', async () => {

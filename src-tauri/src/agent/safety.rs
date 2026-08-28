@@ -86,6 +86,7 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         // worker spawn must never go silent.
         "o8_status" => SafetyClass::ReadOnly,
         "o8_needs_me" => SafetyClass::ReadOnly,
+        "o8_attention_why" => SafetyClass::ReadOnly,
         "o8_ask" => SafetyClass::ReadOnly,
         // o8 team peer messaging — relaying a note to a running agent (same
         // posture as o8_delegate: hands a message to a live agent, no repo

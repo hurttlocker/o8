@@ -5,6 +5,12 @@ import type Database from 'better-sqlite3';
 import { getSqlite } from '@/lib/db';
 import { apiFetch } from '@/lib/mcp/operator-handlers/shared';
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
+import {
+  attentionEventIsCurrent,
+  attentionSubscriptionEnabled,
+  isBroadcastQuietTime,
+  type BroadcastAttentionPolicySettings,
+} from './attention-policy';
 import { broadcastEventSpecifics } from './commentary-prompt';
 import { buildBroadcastSnapshot } from './snapshot';
 import { claimBroadcastLineSlot } from './hourly-cap';
@@ -34,7 +40,7 @@ const SUBJECT_MAX_LENGTH = 64;
 const DETAIL_MAX_LENGTH = 88;
 const MAX_DEFERRED_MOMENTS = 6;
 
-export interface BroadcastVoiceSettings {
+export interface BroadcastVoiceSettings extends BroadcastAttentionPolicySettings {
   broadcastVoice: 'off' | 'on';
   lullMinutes: number;
   maxPerHour: number;
@@ -80,6 +86,16 @@ function voiceSettings(): BroadcastVoiceSettings {
     broadcastVoice: values.broadcastVoice,
     lullMinutes: values.broadcastVoiceLullMinutes,
     maxPerHour: values.broadcastCommentaryMaxPerHour,
+    quietHours: values.broadcastVoiceQuietHours,
+    quietStart: values.broadcastVoiceQuietStart,
+    quietEnd: values.broadcastVoiceQuietEnd,
+    attention: values.broadcastVoiceAttention,
+    approvals: values.broadcastVoiceApprovals,
+    reviews: values.broadcastVoiceReviews,
+    failures: values.broadcastVoiceFailures,
+    completions: values.broadcastVoiceCompletions,
+    calendar: values.broadcastVoiceCalendar,
+    timeCheckins: values.broadcastVoiceTimeCheckins,
   };
 }
 
@@ -203,25 +219,61 @@ function leaseTimeoutSentence(event: BroadcastEvent, specifics: Record<string, u
     : `${label} timed out waiting on a lease.`;
 }
 
+function attentionSentence(event: BroadcastEvent, specifics: Record<string, unknown>): string {
+  const label = packetLabel(event, specifics);
+  const reason = event.detail || payloadText(event, 'question', 'reason', 'message');
+  return reason
+    ? `${label} needs you: ${firstSentence(reason, DETAIL_MAX_LENGTH)}.`
+    : `${label} needs your attention.`;
+}
+
+function completionSentence(event: BroadcastEvent, specifics: Record<string, unknown>): string {
+  const label = packetLabel(event, specifics);
+  return `${label} finished.`;
+}
+
+function calendarSentence(event: BroadcastEvent): string {
+  const title = payloadText(event, 'calendarTitle') || event.detail || 'Your next calendar event';
+  const startLocal = payloadText(event, 'startLocal');
+  const minutesUntilStart = numberSpecific(event.payload, 'minutesUntilStart');
+  const timing = minutesUntilStart !== null
+    ? ` in ${countPhrase(minutesUntilStart, 'minute')}`
+    : startLocal ? ` at ${clipPhrase(startLocal, 32)}` : '';
+  return `Calendar${timing}: ${clipPhrase(title, DETAIL_MAX_LENGTH)}.`;
+}
+
+function scheduledAttentionSentence(event: BroadcastEvent): string | null {
+  const text = payloadText(event, 'automationText') || event.detail;
+  return text ? speakableText(text) : null;
+}
+
 function momentSentence(event: BroadcastEvent, isRevisit = false): string | null {
   const specifics = broadcastEventSpecifics(event, null);
   if (event.kind === 'packet_failed') return failureSentence(event, specifics);
+  if (event.kind === 'operator_attention') return attentionSentence(event, specifics);
+  if (event.kind === 'calendar_imminent') return calendarSentence(event);
+  if (event.kind === 'scheduled_attention') return scheduledAttentionSentence(event);
   if (event.kind === 'review_verdict') return reviewSentence(event, specifics, isRevisit);
   if (event.kind === 'merge') return mergeSentence(event, specifics);
   if (event.kind === 'approval') return approvalSentence(event, specifics, isRevisit);
   if (event.kind === 'spend_cap') return spendSentence(event, specifics);
   if (event.kind === 'lease_timeout') return leaseTimeoutSentence(event, specifics);
+  if (event.kind === 'agent_completed') return completionSentence(event, specifics);
   return null;
 }
 
 /** Highest-signal first — a burst that overflows defers the tail, it never truncates it. */
 const MOMENT_ORDER: BroadcastEvent['kind'][] = [
   'packet_failed',
+  'operator_attention',
+  'calendar_imminent',
+  'scheduled_attention',
   'review_verdict',
   'merge',
   'approval',
   'spend_cap',
   'lease_timeout',
+  'agent_completed',
 ];
 
 export interface ComposedMomentLine {
@@ -418,7 +470,7 @@ export class BroadcastSpeaker {
     ));
   }
 
-  private startDrain(): void {
+  private startDrain(sqlite: Database.Database): void {
     if (this.drainPromise || this.queue.length === 0) return;
     const speak = this.options.speak ?? speakBroadcastWithNativeTts;
     this.drainPromise = (async () => {
@@ -430,25 +482,34 @@ export class BroadcastSpeaker {
           for (const text of line.representedTexts) this.recentTexts.set(this.textKey(text), spokenAt);
           for (const fact of line.factKeys ?? []) this.recentFacts.set(fact, spokenAt);
           await speak(line.text);
+          if (line.id.startsWith('broadcast:')) {
+            const heardAt = new Date().toISOString();
+            sqlite.prepare(`
+              UPDATE broadcast_events
+              SET metadata_json = json_set(metadata_json, '$.speechHeardAt', ?)
+              WHERE id = ?
+            `).run(heardAt, line.id.slice('broadcast:'.length));
+          }
         } catch (error) {
           console.warn(`[broadcast-speaker] ${error instanceof Error ? error.message : String(error)}`);
         }
       }
     })().finally(() => {
       this.drainPromise = null;
-      if (this.queue.length > 0) this.startDrain();
+      if (this.queue.length > 0) this.startDrain(sqlite);
     });
   }
 
   private generatedLine(
     text: string,
     trigger: 'lull' | 'moment',
-    sourceEventIds: string[],
+    sourceEvents: BroadcastEvent[],
     now: Date,
     sqlite: Database.Database,
     factKeys: string[] = [],
     maxPerHour: number,
   ): BroadcastSpeechLine | null {
+    const scheduled = sourceEvents.find((event) => event.kind === 'scheduled_attention');
     // The cap is claimed in the same transaction as the insert, so the
     // director cannot append between this speaker's check and its write (#1840).
     const event = claimBroadcastLineSlot(sqlite, now, maxPerHour, () => appendBroadcastEvent(
@@ -458,9 +519,26 @@ export class BroadcastSpeaker {
         now,
         metadata: {
           voiceTrigger: trigger,
-          sourceEventId: sourceEventIds[0] ?? null,
-          sourceEventIds,
+          sourceEventId: sourceEvents[0]?.id ?? null,
+          sourceEventIds: sourceEvents.map((event) => event.id),
           hourlyCapped: true,
+          provenance: {
+            rule: scheduled ? 'scheduled-automation' : trigger === 'moment' ? 'subscribed-current-event' : 'time-checkin',
+            reason: scheduled
+              ? 'A durable o8 automation produced a subscribed read-only Symon check-in.'
+              : trigger === 'moment'
+                ? 'An enabled attention subscription matched a current durable event.'
+              : 'The configured quiet-work interval elapsed while an operator focus remained active.',
+            sources: sourceEvents.map((event) => ({
+              id: event.id,
+              kind: event.kind,
+              title: event.title,
+              detail: event.detail,
+              timestamp: event.timestamp,
+              laneId: event.laneId,
+              packetId: event.packetId,
+            })),
+          },
           ...(factKeys.length > 0 ? { factKeys } : {}),
         },
       },
@@ -484,6 +562,7 @@ export class BroadcastSpeaker {
     const sqlite = this.options.sqlite ?? getSqlite();
     const now = options.now ?? new Date();
     const settings = options.settings ?? voiceSettings();
+    const quiet = isBroadcastQuietTime(now, settings);
     const generated: string[] = [];
     try {
       const loader = this.options.loadCommentary ?? loadCommentary;
@@ -495,6 +574,7 @@ export class BroadcastSpeaker {
         hasMore = page.hasMore;
         for (const line of page.commentary) {
           const normalSpeechEnabled = settings.broadcastVoice === 'on'
+            && !quiet
             && (!initialPoll || this.options.includeExisting === true);
           if (normalSpeechEnabled || line.priority) this.enqueue(line, sqlite, now.getTime());
         }
@@ -523,11 +603,19 @@ export class BroadcastSpeaker {
         this.lastFeedEventAt = now.getTime();
       }
 
-      if (settings.broadcastVoice === 'on') {
+      if (settings.broadcastVoice === 'on' && !quiet) {
         const momentEvents = (initialEventPoll && this.options.includeExisting !== true ? [] : feedEvents)
-          .filter(isMomentEvent);
+          .filter(isMomentEvent)
+          .filter((event) => attentionSubscriptionEnabled(event, settings))
+          .filter((event) => attentionEventIsCurrent(event, sqlite, now.getTime()));
         const pendingIds = new Set(this.pendingMoments.map((event) => event.id));
         this.pendingMoments.push(...momentEvents.filter((event) => !pendingIds.has(event.id)));
+        // Waiting and approval state can resolve during the coalescing window.
+        // Re-check immediately before composition so Symon never announces a
+        // request that stopped being true after it entered the pending burst.
+        this.pendingMoments = this.pendingMoments
+          .filter((event) => attentionSubscriptionEnabled(event, settings))
+          .filter((event) => attentionEventIsCurrent(event, sqlite, now.getTime()));
         const firstMomentAt = this.pendingMoments.length > 0 ? Date.parse(this.pendingMoments[0].timestamp) : Number.NaN;
         if (this.pendingMoments.length > 0 && (!Number.isFinite(firstMomentAt) || now.getTime() - firstMomentAt >= MOMENT_COALESCE_MS)) {
           this.pruneRecent(now.getTime());
@@ -554,7 +642,7 @@ export class BroadcastSpeaker {
             const line = this.generatedLine(
               composed.text,
               'moment',
-              composed.spokenEvents.map((event) => event.id),
+              composed.spokenEvents,
               now,
               sqlite,
               spokenFacts,
@@ -571,7 +659,7 @@ export class BroadcastSpeaker {
         }
 
         const lullAt = (this.lastFeedEventAt ?? now.getTime()) + settings.lullMinutes * 60_000;
-        if (!this.lullAnnounced && now.getTime() >= lullAt) {
+        if (settings.timeCheckins && !this.lullAnnounced && now.getTime() >= lullAt) {
           const text = lullLine(sqlite);
           if (text) {
             const line = this.generatedLine(text, 'lull', [], now, sqlite, [], settings.maxPerHour);
@@ -582,8 +670,12 @@ export class BroadcastSpeaker {
             }
           }
         }
+      } else if (quiet) {
+        // Quiet hours advance every durable cursor but never build a morning
+        // backlog of stale nighttime interruptions.
+        this.pendingMoments = [];
       }
-      this.startDrain();
+      this.startDrain(sqlite);
       return { status: 'processed', reason: 'processed', cursor: this.cursor, queued: this.queue.length, generated };
     } finally {
       this.tickInFlight = false;

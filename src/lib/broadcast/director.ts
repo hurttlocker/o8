@@ -142,6 +142,20 @@ export async function runBroadcastDirectorOnce(options: {
         reasoningEffort: route.reasoningEffort ?? null,
         feedEventCount: newEvents.length,
         factKeys: [...new Set(newEvents.filter(isMomentEvent).map(momentFactKey))],
+        sourceEventIds: newEvents.map((event) => event.id),
+        provenance: {
+          rule: 'interval-commentary',
+          reason: 'The configured commentary interval elapsed with enough new durable events.',
+          sources: newEvents.map((event) => ({
+            id: event.id,
+            kind: event.kind,
+            title: event.title,
+            detail: event.detail,
+            timestamp: event.timestamp,
+            laneId: event.laneId,
+            packetId: event.packetId,
+          })),
+        },
       },
     }));
     if (!event) {

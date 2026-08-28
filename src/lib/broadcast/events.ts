@@ -326,6 +326,8 @@ function advanceCursor(cursor: BroadcastCursor, row: RawBroadcastRow): Broadcast
 
 function eventKind(row: RawBroadcastRow, payload: Record<string, unknown>): BroadcastEventKind | null {
   if (row.source === 'broadcast') {
+    if (payload.attentionKind === 'calendar_imminent') return 'calendar_imminent';
+    if (payload.attentionKind === 'scheduled_attention') return 'scheduled_attention';
     if (
       row.source_kind === 'commentary'
       || row.source_kind === 'conversation'
@@ -348,10 +350,13 @@ function eventKind(row: RawBroadcastRow, payload: Record<string, unknown>): Broa
   if (row.source_kind === 'brain_consulted') return 'brain_consulted';
   if (row.source_kind === 'lease_wait_timeout') return 'lease_timeout';
   if (row.source_kind === 'review_recorded') return 'review_verdict';
+  if (row.source_kind === 'typecheck_escalation') return 'packet_failed';
   if (row.source_kind === 'spend_cap_hit') return 'spend_cap';
   if (row.source_kind === 'merge' || row.source_kind === 'pr_merged_reconciled' || row.source_kind === 'merged_by_ancestry_reconciled') return 'merge';
   if (row.source_kind === 'message') return 'message';
   if (row.source_kind === 'agent_report') {
+    const report = typeof payload.event === 'string' ? payload.event : '';
+    if (report === 'blocked' || report === 'question') return 'operator_attention';
     return 'progress';
   }
   if (row.source_kind === 'status_change') {
@@ -359,6 +364,9 @@ function eventKind(row: RawBroadcastRow, payload: Record<string, unknown>): Broa
     if (label === 'session_launched' || label === 'session_launch_recovered') return 'session_launched';
     if (label === 'agent_completed' || label === 'completed') return 'agent_completed';
     if (label === 'merged' || label === 'merged_pushed') return 'merge';
+    if (payload.status === 'awaiting_human' || payload.status === 'awaiting_input') {
+      return 'operator_attention';
+    }
     if (payload.status === 'failed' || label === 'failed' || label === 'agent_failed') return 'packet_failed';
   }
   return null;
@@ -381,6 +389,19 @@ function detailFor(kind: BroadcastEventKind, row: RawBroadcastRow, payload: Reco
       : typeof payload.title === 'string' ? payload.title : null;
   }
   if (kind === 'progress') return typeof payload.message === 'string' ? payload.message : null;
+  if (kind === 'operator_attention') {
+    return typeof payload.message === 'string'
+      ? payload.message
+      : typeof payload.reason === 'string'
+        ? payload.reason
+        : typeof payload.question === 'string' ? payload.question : null;
+  }
+  if (kind === 'calendar_imminent') {
+    return typeof payload.calendarTitle === 'string' ? payload.calendarTitle : null;
+  }
+  if (kind === 'scheduled_attention') {
+    return typeof payload.automationText === 'string' ? payload.automationText : null;
+  }
   if (kind === 'brain_consulted') return typeof payload.question === 'string' ? payload.question : null;
   if (kind === 'lease_timeout') return typeof payload.resource === 'string' ? payload.resource : null;
   if (kind === 'review_verdict') {
@@ -410,6 +431,11 @@ function titleFor(
     lease_acquired: 'Lease acquired',
     lease_released: 'Lease released',
     lease_timeout: 'Lease wait timed out',
+    operator_attention: 'Operator attention needed',
+    calendar_imminent: 'Calendar event imminent',
+    scheduled_attention: typeof payload.automationLabel === 'string'
+      ? `Scheduled attention · ${payload.automationLabel}`
+      : 'Scheduled attention',
     review_verdict: 'Review verdict',
     merge: 'Change merged',
     approval: 'Approval activity',

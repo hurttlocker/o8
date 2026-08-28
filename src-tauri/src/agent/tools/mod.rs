@@ -520,6 +520,16 @@ pub fn all_tools() -> Vec<Value> {
             }
         }),
         json!({
+            "name": "o8_attention_why",
+            "description": "Explain the most recent proactive Symon voice update from its durable attention receipt: what was said, which subscribed policy triggered it, and the exact source events. Use for 'why did you tell me that?' or 'what triggered that alert?'.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+            }
+        }),
+        json!({
             "name": "o8_approve_item",
             "description": "Approve ONE pending o8 approval by exact approvalId. Packet approvals require the reviewReceipt returned by o8_review_diff for this exact approval and packet HEAD. Speak that tool's spokenSummary first, then pass its receipt here. Never identify approvals by title. The native confirmation card repeats the bounded review before execution.",
             "parameters": {
@@ -1326,6 +1336,7 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
         "o8_team_tell" => o8_bridge::team_tell(args).await,
         "o8_team_inbox" => o8_bridge::team_inbox(args).await,
         "o8_needs_me" => o8_bridge::needs_me(args).await,
+        "o8_attention_why" => o8_bridge::attention_why(args).await,
         "o8_approve_item" => o8_bridge::approve_item(args).await,
         "o8_reject_item" => o8_bridge::reject_item(args).await,
         "o8_ask" => o8_bridge::ask(args).await,

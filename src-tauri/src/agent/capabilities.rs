@@ -69,7 +69,7 @@ const SPECS: &[CapabilitySpec] = &[
         title: "Tell you what needs attention",
         summary: "Read the live fleet, approval queue, and work waiting on an operator decision.",
         examples: &["What needs me right now?", "What is shipping?"],
-        tool_names: &["o8_needs_me", "o8_status"],
+        tool_names: &["o8_needs_me", "o8_attention_why", "o8_status"],
         requires_screen_recording: false,
     },
     CapabilitySpec {

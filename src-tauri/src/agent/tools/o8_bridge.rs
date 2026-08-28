@@ -1212,6 +1212,13 @@ pub async fn recap(args: Value) -> Result<Value, String> {
     Ok(out)
 }
 
+/// `o8_attention_why` — the latest successfully heard proactive update plus
+/// its persisted policy/source receipt. The server returns only operator-owned
+/// local data and performs the principal check at the route boundary.
+pub async fn attention_why(_args: Value) -> Result<Value, String> {
+    o8_http::get_json("/api/broadcast/why").await
+}
+
 /// `o8_usage` — how much CLI quota is left (Claude / Codex rate windows), from
 /// the same snapshot the desktop settings drawer shows.
 pub async fn usage(_args: Value) -> Result<Value, String> {

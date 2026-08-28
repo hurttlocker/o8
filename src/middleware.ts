@@ -158,6 +158,10 @@ const WORKER_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }>
   { methods: new Set(['POST']), path: /^\/api\/(?:browser\/agent|cortex\/ask\/answer)\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/cortex\/proposals\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/broadcast\/post\/?$/ },
+  // A packet-bound worker reaches this only from a lane whose durable label
+  // proves it was launched by the Automation scheduler. The handler rechecks
+  // that provenance and deduplicates by packet; the shared speaker applies policy and the speech cap.
+  { methods: new Set(['POST']), path: /^\/api\/broadcast\/automation-say\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/agents\/message\/?$/ },
   { methods: new Set(['GET']), path: /^\/api\/agents\/(?:inbox|presence)\/?$/ },
   { methods: new Set(['GET', 'POST', 'PATCH', 'DELETE']), path: /^\/api\/repo-spec(?:\/|$)/ },

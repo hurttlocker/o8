@@ -1416,7 +1416,10 @@ fn prewarm_bundled_next_server(app: AppHandle, api_port: u16) {
         // Fleet visibility in the dock — the worker-pulse poller drives the
         // idle sliver's orbiting dot + count while packets are in flight.
         #[cfg(target_os = "macos")]
-        agent::worker_pulse::spawn(app.clone());
+        {
+            agent::worker_pulse::spawn(app.clone());
+            agent::calendar_attention::spawn();
+        }
     });
 }
 

@@ -20,6 +20,16 @@ const voiceOn = {
   broadcastVoice: 'on' as const,
   lullMinutes: 600,
   maxPerHour: 60,
+  quietHours: 'off' as const,
+  quietStart: '22:00',
+  quietEnd: '08:00',
+  attention: true,
+  approvals: true,
+  reviews: true,
+  failures: true,
+  completions: true,
+  calendar: true,
+  timeCheckins: true,
 };
 
 const directorSettings = {

@@ -301,6 +301,11 @@ export function AutomationEditor({
                 resize: 'vertical',
               }}
             />
+            <span style={{ color: 'var(--t-text-muted)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', lineHeight: 1.35 }}>
+              For a scheduled read-only Symon check-in, have the automation finish by running{' '}
+              <code style={{ fontFamily: MONO_FONT }}>o8 broadcast automation-say &quot;&lt;concise summary&gt;&quot;</code>.
+              Quiet hours, subscriptions, deduplication, and the hourly budget still apply.
+            </span>
           </Field>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <Field label="Runtime">

@@ -15,6 +15,7 @@
 
 pub mod agent_turn;
 pub mod capabilities;
+pub mod calendar_attention;
 pub mod claude;
 pub mod claude_pool;
 pub mod codex;

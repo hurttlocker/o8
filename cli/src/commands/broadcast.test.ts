@@ -41,6 +41,29 @@ describe('Broadcast CLI commands', () => {
     expect(JSON.parse(String(init?.body))).toEqual({ text: 'We are live.' });
   });
 
+  it('posts a scheduled line through the packet-bound automation endpoint', async () => {
+    process.env.O8_API_PORT = '40123';
+    delete process.env.O8_API_TOKEN;
+    process.env.O8_WORKER_TOKEN = 'packet-worker-token';
+    process.env.O8_WORKER_PACKET_ID = 'packet-automation-one';
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      schema: 'o8/broadcast.automation-say/v1',
+      ok: true,
+      result: { status: 'recorded', eventId: 'automation-attention-one', reason: null },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    await expect(runBroadcast(
+      { human: false, verbose: false },
+      'automation-say',
+      ['Three approvals need you.'],
+    )).resolves.toBe(0);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe('http://127.0.0.1:40123/api/broadcast/automation-say');
+    expect(init?.headers).toMatchObject({ Authorization: 'Bearer packet-worker-token' });
+    expect(JSON.parse(String(init?.body))).toEqual({ text: 'Three approvals need you.' });
+  });
+
   it('sets and clears focus through the aligned post endpoint', async () => {
     process.env.O8_API_PORT = '40123';
     process.env.O8_API_TOKEN = 'operator-token';

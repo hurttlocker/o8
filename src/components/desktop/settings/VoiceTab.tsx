@@ -46,6 +46,7 @@ import {
   type DictationInputMode,
 } from '@/lib/appearance/dictation-input-mode';
 import { useSyncExternalStore } from 'react';
+import { SymonAttentionSettingsSection } from './SymonAttentionSettingsSection';
 
 // macOS System Settings deep-links.
 const URL_ACCESSIBILITY = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility';
@@ -489,6 +490,8 @@ export function VoiceTab() {
               />
             </SettingsGroup>
           </section>
+
+          <SymonAttentionSettingsSection />
 
           <section style={{ marginTop: 28 }}>
             <SettingsGroup>

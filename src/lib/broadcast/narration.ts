@@ -28,10 +28,14 @@ const SHA_TOKEN_PATTERN = /\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b/g
 export function isMomentEvent(event: BroadcastEvent): boolean {
   return event.kind === 'merge'
     || (event.kind === 'approval' && event.payload.status === 'pending')
+    || event.kind === 'operator_attention'
+    || event.kind === 'calendar_imminent'
+    || event.kind === 'scheduled_attention'
     || event.kind === 'review_verdict'
     || event.kind === 'packet_failed'
     || event.kind === 'spend_cap'
-    || event.kind === 'lease_timeout';
+    || event.kind === 'lease_timeout'
+    || event.kind === 'agent_completed';
 }
 
 /**

@@ -294,7 +294,15 @@ export function handleBroadcastSay(
     text: body.text as string,
   }, {
     sqlite,
-    metadata: { speechPriority: true, onDemand: true },
+    metadata: {
+      speechPriority: true,
+      onDemand: true,
+      provenance: {
+        rule: 'operator-requested',
+        reason: 'The operator explicitly requested this spoken line.',
+        sources: [],
+      },
+    },
   }) as PostedBroadcastFeedEvent;
 }
 

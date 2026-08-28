@@ -17,11 +17,14 @@ process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
 const { getSqlite } = await import('@/lib/db');
 const { appendBroadcastEvent } = await import('@/lib/broadcast/post');
+const { recordCalendarAttention } = await import('@/lib/broadcast/calendar-attention');
+const { recordAutomationAttention } = await import('@/lib/broadcast/automation-attention');
 const { BroadcastSpeaker } = await import('@/lib/broadcast/speaker');
 const { appendEvent, createLane, setLaneStatus } = await import('@/lib/lane/registry');
 const { createApproval, recordOrchestratorReview } = await import('@/lib/approvals/store');
 const commentaryRoute = await import('@/app/api/broadcast/commentary/route');
 const sayRoute = await import('@/app/api/broadcast/say/route');
+const whyRoute = await import('@/app/api/broadcast/why/route');
 
 function operatorRequest(url: string, body?: unknown): NextRequest {
   return new NextRequest(url, {
@@ -49,6 +52,16 @@ const voiceOn = {
   broadcastVoice: 'on' as const,
   lullMinutes: 60,
   maxPerHour: 20,
+  quietHours: 'off' as const,
+  quietStart: '22:00',
+  quietEnd: '08:00',
+  attention: true,
+  approvals: true,
+  reviews: true,
+  failures: true,
+  completions: true,
+  calendar: true,
+  timeCheckins: true,
 };
 
 async function emptyCommentary() {
@@ -290,5 +303,167 @@ describe('Broadcast speaker real path', () => {
     expect(lullRows[0].text).toContain('The goal is Keep every spoken update specific and uninterrupted.');
     expect(spoken).toEqual([lullRows[0].text]);
 
+  });
+
+  it('drops stale waiting states, keeps quiet-hour events from backlogging, and still honors an explicit say', async () => {
+    const spoken: string[] = [];
+    const speaker = new BroadcastSpeaker({
+      sqlite: getSqlite(),
+      speak: async (text) => { spoken.push(text); },
+      loadCommentary,
+    });
+    await speaker.tick({ settings: voiceOn });
+    await speaker.flush();
+    // A priority line from the earlier route-path case is intentionally
+    // restart-safe. This case begins after that durable delivery completes.
+    spoken.length = 0;
+
+    const suffix = Date.now();
+    const lane = createLane({
+      label: 'Current-state voice packet',
+      repoPath: '/tmp/broadcast-speaker-current-state',
+      branch: `issue/broadcast-speaker-current-${suffix}`,
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId: `packet-broadcast-current-${suffix}`,
+    });
+    setLaneStatus(lane.id, 'awaiting_human', 'system', 'Choose whether to rerun.');
+    setLaneStatus(lane.id, 'running', 'system', 'Rerun already started.');
+    await speaker.tick({ settings: voiceOn });
+    await speaker.tick({ now: new Date(Date.now() + 1_500), settings: voiceOn });
+    expect(spoken).toEqual([]);
+
+    const approvalLane = createLane({
+      label: 'Quiet approval packet',
+      repoPath: '/tmp/broadcast-speaker-current-state',
+      branch: `issue/broadcast-speaker-quiet-${suffix}`,
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId: `packet-broadcast-quiet-${suffix}`,
+    });
+    createApproval({
+      source: 'runtime',
+      runtime: 'codex',
+      agent: 'worker',
+      sessionKey: `lane:${approvalLane.id}`,
+      title: 'Approve quiet-hours proof',
+      description: 'This pending approval lands during quiet hours.',
+      summary: 'Quiet-hours proof',
+      risk: 'low',
+      metadata: { Lane: approvalLane.id, Packet: approvalLane.packetId! },
+    });
+    const allDayQuiet = { ...voiceOn, quietHours: 'on' as const, quietStart: '08:00', quietEnd: '08:00' };
+    await speaker.tick({ settings: allDayQuiet });
+    await speaker.tick({ now: new Date(Date.now() + 1_500), settings: allDayQuiet });
+    await speaker.tick({ now: new Date(Date.now() + 3_000), settings: voiceOn });
+    expect(spoken).toEqual([]);
+
+    const sayResponse = await sayRoute.POST(operatorRequest(
+      'http://localhost:3001/api/broadcast/say',
+      { text: 'Read this now.' },
+    ));
+    expect(sayResponse.status).toBe(200);
+    await speaker.tick({ settings: allDayQuiet });
+    await speaker.flush();
+    expect(spoken).toEqual(['Read this now.']);
+  });
+
+  it('deduplicates an imminent Calendar event and preserves its spoken why receipt', async () => {
+    const spoken: string[] = [];
+    const speaker = new BroadcastSpeaker({
+      sqlite: getSqlite(),
+      speak: async (text) => { spoken.push(text); },
+      loadCommentary: emptyCommentary,
+    });
+    const base = Date.now() + 5_000;
+    await speaker.tick({ now: new Date(base), settings: voiceOn });
+    const calendarInput = {
+      eventId: `calendar-real-path-${base}`,
+      title: 'Design review',
+      calendar: 'Work',
+      startLocal: '2026-08-28T14:00:00',
+      endLocal: '2026-08-28T14:30:00',
+      startEpochMs: base + 10 * 60_000,
+      endEpochMs: base + 40 * 60_000,
+      allDay: false,
+    };
+    const policy = {
+      broadcastVoice: 'on' as const,
+      broadcastVoiceCalendar: true,
+      broadcastVoiceCalendarLeadMinutes: 15,
+    };
+    expect(recordCalendarAttention(calendarInput, { role: 'operator' }, {
+      sqlite: getSqlite(), nowMs: base, policy,
+    }).status).toBe('recorded');
+    expect(recordCalendarAttention(calendarInput, { role: 'operator' }, {
+      sqlite: getSqlite(), nowMs: base + 100, policy,
+    }).status).toBe('duplicate');
+
+    await speaker.tick({ now: new Date(base + 500), settings: voiceOn });
+    await speaker.tick({ now: new Date(base + 1_500), settings: voiceOn });
+    await speaker.flush();
+    expect(spoken).toEqual(['Calendar in 10 minutes: Design review.']);
+
+    const whyResponse = whyRoute.GET(operatorRequest('http://localhost:3001/api/broadcast/why'));
+    expect(whyResponse.status).toBe(200);
+    await expect(whyResponse.json()).resolves.toMatchObject({
+      receipt: {
+        utterance: 'Calendar in 10 minutes: Design review.',
+        trigger: 'moment',
+        reason: expect.stringContaining('enabled attention subscription'),
+        sources: [{ kind: 'calendar_imminent', detail: 'Design review' }],
+      },
+    });
+  });
+
+  it('speaks a durable automation check-in through the shared policy and why ledger', async () => {
+    const spoken: string[] = [];
+    const speaker = new BroadcastSpeaker({
+      sqlite: getSqlite(),
+      speak: async (text) => { spoken.push(text); },
+      loadCommentary: emptyCommentary,
+    });
+    const base = Date.now() + 10_000;
+    await speaker.tick({ now: new Date(base), settings: voiceOn });
+    const packetId = `packet-scheduled-attention-${base}`;
+    createLane({
+      label: '[automation] Morning operator check-in',
+      repoPath: '/tmp/broadcast-scheduled-attention',
+      branch: `automation/attention-${base}`,
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId,
+    });
+    expect(recordAutomationAttention(
+      { text: 'Two approvals need you before work can continue.' },
+      {
+        role: 'worker',
+        packetId,
+        tokenId: 'scheduled-attention-token',
+        leaseProcessMarker: null,
+        leaseProcessPid: null,
+        leaseProcessGroupId: null,
+      },
+      {
+        sqlite: getSqlite(),
+        now: new Date(base + 100),
+        policy: { broadcastVoice: 'on', broadcastVoiceTimeCheckins: true },
+      },
+    ).status).toBe('recorded');
+
+    await speaker.tick({ now: new Date(base + 500), settings: voiceOn });
+    await speaker.tick({ now: new Date(base + 1_500), settings: voiceOn });
+    await speaker.flush();
+    expect(spoken).toEqual(['Two approvals need you before work can continue.']);
+    const why = await whyRoute.GET(operatorRequest('http://localhost:3001/api/broadcast/why')).json() as {
+      receipt: { reason: string; sources: Array<{ kind: string; detail: string }> };
+    };
+    expect(why.receipt.reason).toContain('durable o8 automation');
+    expect(why.receipt.sources).toEqual([
+      expect.objectContaining({
+        kind: 'scheduled_attention',
+        detail: 'Two approvals need you before work can continue.',
+      }),
+    ]);
   });
 });

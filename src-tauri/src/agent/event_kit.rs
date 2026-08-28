@@ -17,9 +17,12 @@ use objc2_foundation::{NSDate, NSError};
 use std::sync::mpsc;
 
 pub struct EventRow {
+    pub id: String,
     pub title: String,
     pub start_local: String,
     pub end_local: String,
+    pub start_epoch_ms: i64,
+    pub end_epoch_ms: i64,
     pub calendar: String,
     pub all_day: bool,
 }
@@ -55,18 +58,25 @@ fn request_full_access(store: &EKEventStore) -> Result<bool, String> {
 
 /// Upcoming events in the next `days` days, soonest first, capped at 20.
 /// `calendar_filter` (case-insensitive calendar name) narrows when non-empty.
-pub fn list_events(days: i64, calendar_filter: &str) -> Result<Vec<EventRow>, String> {
+fn list_events_inner(
+    days: i64,
+    calendar_filter: &str,
+    request_access: bool,
+) -> Result<Option<Vec<EventRow>>, String> {
     unsafe {
         let store = EKEventStore::new();
         let status = EKEventStore::authorizationStatusForEntityType(EKEntityType::Event);
         let authorized = match status {
             EKAuthorizationStatus::FullAccess => true,
             EKAuthorizationStatus::NotDetermined | EKAuthorizationStatus::WriteOnly => {
-                request_full_access(&store)?
+                request_access && request_full_access(&store)?
             }
             _ => false,
         };
         if !authorized {
+            if !request_access {
+                return Ok(None);
+            }
             return Err(
                 "o8 doesn't have Calendar access — System Settings, Privacy and Security, \
                  Calendars, allow o8 full access, then ask again."
@@ -93,15 +103,36 @@ pub fn list_events(days: i64, calendar_filter: &str) -> Result<Vec<EventRow>, St
             let start_ts = event.startDate().timeIntervalSince1970();
             let end_ts = event.endDate().timeIntervalSince1970();
             rows.push(EventRow {
+                id: event
+                    .eventIdentifier()
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| event.calendarItemIdentifier().to_string()),
                 title: event.title().to_string(),
                 start_local: local_iso(start_ts),
                 end_local: local_iso(end_ts),
+                start_epoch_ms: (start_ts * 1_000.0) as i64,
+                end_epoch_ms: (end_ts * 1_000.0) as i64,
                 calendar,
                 all_day: event.isAllDay(),
             });
         }
         rows.sort_by(|a, b| a.start_local.cmp(&b.start_local));
         rows.truncate(20);
-        Ok(rows)
+        Ok(Some(rows))
     }
+}
+
+pub fn list_events(days: i64, calendar_filter: &str) -> Result<Vec<EventRow>, String> {
+    list_events_inner(days, calendar_filter, true)?.ok_or_else(|| {
+        "o8 doesn't have Calendar access — allow full access, then ask again.".to_string()
+    })
+}
+
+/// Background attention checks must never manufacture a permission prompt.
+/// `None` means Calendar read access is not already granted.
+pub fn list_events_if_authorized(
+    days: i64,
+    calendar_filter: &str,
+) -> Result<Option<Vec<EventRow>>, String> {
+    list_events_inner(days, calendar_filter, false)
 }

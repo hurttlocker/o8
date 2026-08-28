@@ -13,6 +13,7 @@ import {
   SUPPORTED_MODEL_IDS,
 } from '@/lib/models';
 import type { OperatorDefaults } from '@/lib/operator/defaults';
+import { isBroadcastVoiceClockTime } from '@/lib/operator/broadcast-commentary-defaults';
 import {
   isClassAComposer,
   isCollideAggregator,
@@ -64,6 +65,15 @@ function stringField(section: string, key: string, options: { nonEmpty?: boolean
       if (options.nonEmpty && !trimmed) return invalid(tomlKey, 'a non-empty string');
       return trimmed;
     },
+  };
+}
+
+function clockTimeField(section: string, key: string): TomlField<string> {
+  return {
+    path: [section, key],
+    parse: (value, tomlKey) => isBroadcastVoiceClockTime(value)
+      ? value
+      : invalid(tomlKey, 'a local time in HH:MM format'),
   };
 }
 
@@ -214,6 +224,17 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   broadcastCommentaryMaxPerHour: numberField('broadcast', 'max_per_hour', 'an integer from 1 through 60', (value) => Number.isInteger(value) && value >= 1 && value <= 60),
   broadcastVoice: enumField('broadcast', 'voice', '"off" or "on"', (value): value is OperatorDefaults['broadcastVoice'] => value === 'off' || value === 'on'),
   broadcastVoiceLullMinutes: numberField('broadcast', 'voice_lull_minutes', 'an integer from 1 through 1440', (value) => Number.isInteger(value) && value >= 1 && value <= 1_440),
+  broadcastVoiceQuietHours: enumField('broadcast', 'voice_quiet_hours', '"off" or "on"', (value): value is OperatorDefaults['broadcastVoiceQuietHours'] => value === 'off' || value === 'on'),
+  broadcastVoiceQuietStart: clockTimeField('broadcast', 'voice_quiet_start'),
+  broadcastVoiceQuietEnd: clockTimeField('broadcast', 'voice_quiet_end'),
+  broadcastVoiceAttention: booleanField('broadcast', 'voice_attention'),
+  broadcastVoiceApprovals: booleanField('broadcast', 'voice_approvals'),
+  broadcastVoiceReviews: booleanField('broadcast', 'voice_reviews'),
+  broadcastVoiceFailures: booleanField('broadcast', 'voice_failures'),
+  broadcastVoiceCompletions: booleanField('broadcast', 'voice_completions'),
+  broadcastVoiceCalendar: booleanField('broadcast', 'voice_calendar'),
+  broadcastVoiceCalendarLeadMinutes: numberField('broadcast', 'voice_calendar_lead_minutes', 'an integer from 1 through 1440', (value) => Number.isInteger(value) && value >= 1 && value <= 1_440),
+  broadcastVoiceTimeCheckins: booleanField('broadcast', 'voice_time_checkins'),
   apfsDependencyImages: booleanField('git', 'apfs_dependency_images'),
   thinkingEffort: enumField('models', 'thinking_effort', 'a valid thinking effort', isThinkingEffort),
   promptCachingEnabled: booleanField('models', 'prompt_caching_enabled'),

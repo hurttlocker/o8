@@ -498,6 +498,12 @@ describe('panelGateMiddleware — worker capability scope', () => {
     expect(workerRequest('/api/orchestrator/merge', 'POST').status).toBe(403);
     expect(workerRequest('/api/broadcast/say', 'POST').status).toBe(403);
   });
+
+  it('admits only the bounded scheduled-speech route for handler-level automation proof', () => {
+    expect(workerRequest('/api/broadcast/automation-say', 'POST').status).toBe(200);
+    expect(workerRequest('/api/broadcast/automation-say', 'GET').status).toBe(403);
+    expect(workerRequest('/api/broadcast/calendar', 'POST').status).toBe(403);
+  });
 });
 
 describe('panelGateMiddleware — per-device capability scope', () => {
