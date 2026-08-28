@@ -206,6 +206,38 @@ describe('entitlement sync route', () => {
   describe('managed GitHub App token binding', () => {
     const flush = () => new Promise((r) => setTimeout(r, 0));
 
+    it('clears a cached managed token when the hosted service rejects Free access', async () => {
+      const {
+        readManagedGithubState,
+        writeActiveIdentity,
+        writeManagedGithubState,
+      } = await import('@/lib/github-broker/managed');
+      writeManagedGithubState({
+        installed: true,
+        token: 'ghs_previous_paid_token',
+        expiresAt: new Date(Date.now() + 55 * 60 * 1000).toISOString(),
+        installationId: 88,
+        accountLogin: 'paid-before',
+        ownerClerkUserId: 'user_free',
+      });
+      writeActiveIdentity('user_free');
+
+      globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/github/app/token')) {
+          return Response.json({ error: 'paid_entitlement_required' }, { status: 403 });
+        }
+        if (url.endsWith('/account/link-install')) return new Response('{}', { status: 200 });
+        return new Response('{}', { status: 404 });
+      }) as unknown as typeof fetch;
+
+      await post({ clerkUserId: 'user_free' });
+      await flush();
+      await flush();
+
+      expect(readManagedGithubState()).toBeNull();
+    });
+
     it('drops user B\'s delayed refresh that completes AFTER user A signs in', async () => {
       const { readManagedGithubState } = await import('@/lib/github-broker/managed');
 

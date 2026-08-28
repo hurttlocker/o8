@@ -1,5 +1,11 @@
 import type { EntitlementFlags, Plan } from './types';
 
+/** Pro, Team, and Founder are the paid tiers. Keep paid-feature checks on this
+ * predicate so a new caller cannot accidentally treat "signed in" as paid. */
+export function isPaidPlan(plan: Plan): boolean {
+  return plan === 'pro' || plan === 'team' || plan === 'founder';
+}
+
 /**
  * The SINGLE source of truth for the per-plan cost/reach levers.
  *
@@ -34,7 +40,7 @@ import type { EntitlementFlags, Plan } from './types';
  * cloud.runners isn't built yet → false for every plan until that lever ships.
  */
 export function resolveFlags(plan: Plan): EntitlementFlags {
-  const proxy = plan === 'pro' || plan === 'team' || plan === 'founder';
+  const proxy = isPaidPlan(plan);
   const team = plan === 'team';
   return {
     'proxy.inference': proxy,

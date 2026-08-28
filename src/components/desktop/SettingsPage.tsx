@@ -18,6 +18,7 @@ import type {
 } from './settings/shared';
 import { searchSettings, SETTINGS_SEARCH_REGISTRY } from './settings/settings-search';
 import { useEntitlement } from '@/lib/entitlement/context';
+import { isPaidPlan } from '@/lib/entitlement/flags';
 import {
   APP_FONT_STACK,
   MONO_FONT_STACK,
@@ -110,7 +111,7 @@ function SearchNavIcon({ size = 13 }: { size?: number }) {
 export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?: SettingsTab; onClose?: () => void }) {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [searchQuery, setSearchQuery] = useState('');
-  const { founder } = useEntitlement();
+  const { founder, plan } = useEntitlement();
   const auth = useO8Auth();
   const searchMatches = useMemo(
     () => searchSettings(SETTINGS_SEARCH_REGISTRY, searchQuery, { founder: Boolean(founder) }),
@@ -307,6 +308,7 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
 
   const githubConnection: GitHubConnectionProps = {
     auth,
+    managedAppEntitled: isPaidPlan(plan),
     accounts,
     repoCount,
     broker: brokerStatus,

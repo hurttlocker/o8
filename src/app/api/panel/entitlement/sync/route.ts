@@ -49,8 +49,9 @@ interface SyncBody {
 /**
  * Refresh the managed GitHub App installation token from the license server.
  * 200 installed:true → persist token; 200 installed:false → persist the
- * install-CTA marker; 503 (feature off server-side) → clear. Network errors
- * leave existing state alone — a stale token self-expires within the hour.
+ * install-CTA marker; 403 (paid entitlement absent) and 503 (feature off
+ * server-side) → clear. Network errors leave existing state alone — a stale
+ * token self-expires within the hour.
  *
  * Identity is the SERVER-VERIFIED subject (`ownerClerkUserId`) — never the
  * client's claim (audit #2). That value:
@@ -73,7 +74,7 @@ async function syncManagedGithubApp(sessionToken: string): Promise<void> {
       method: 'POST',
       headers: { Authorization: `Bearer ${sessionToken}` },
     });
-    if (res.status === 503) {
+    if (res.status === 403 || res.status === 503) {
       if (readSignInEpoch() === epochAtStart) clearManagedGithubState();
       return;
     }
