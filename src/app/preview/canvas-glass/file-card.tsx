@@ -18,11 +18,12 @@
  * agent-surfaced files) rides the regular-UI issue.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { CanvasMarkdown } from './dock';
 import { CHROME, FONT, TERM_MIN_H, TERM_MIN_W } from './ui';
 import { GlassCardShell, ShellAction } from './card-shell';
+import { useCanvasRenderProbe } from './perf/render-probe';
 
 // NOTE: component (+ types) exports only — runtime const exports here would
 // break the Fast Refresh boundary and remount live cards on every edit.
@@ -106,7 +107,7 @@ function outdentSelection(value: string, start: number, end: number): { value: s
   };
 }
 
-export function FileGlassCard({
+export const FileGlassCard = memo(function FileGlassCard({
   card,
   termVeil,
   onMove,
@@ -122,6 +123,7 @@ export function FileGlassCard({
   onFocus: (id: number) => void;
   onClose: (id: number) => void;
 }) {
+  useCanvasRenderProbe('file', card.id);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [content, setContent] = useState('');
   const [savedContent, setSavedContent] = useState('');
@@ -452,4 +454,4 @@ export function FileGlassCard({
       </div>
     </GlassCardShell>
   );
-}
+});

@@ -17,7 +17,7 @@
  * locked CHROME vocabulary via GlassCardShell — never hand-rolled.
  */
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react';
 import { CHROME, FONT, chatVocabularyRebind, scrollFadeY } from './ui';
 import { GlassCardShell, ShellAction } from './card-shell';
 import { runtimeColor } from '@/lib/agents/codename';
@@ -183,7 +183,7 @@ function SentLine({ message }: { message: SentMessage }) {
   );
 }
 
-export function AgentGlassCard({
+export const AgentGlassCard = memo(function AgentGlassCard({
   card,
   lane,
   onMove,
@@ -543,4 +543,4 @@ export function AgentGlassCard({
       )}
     </GlassCardShell>
   );
-}
+});

@@ -12,6 +12,7 @@
  * operator's saved palette either way.
  */
 
+import { memo } from 'react';
 import { ThemeProvider } from '@/lib/theme/context';
 import { O8SpecPane } from '@/components/desktop/o8-panel/O8SpecPane';
 import { CHROME } from './ui';
@@ -44,7 +45,7 @@ const SPEC_PANE_BASE_PX = 13.5;
 // notes keep their own knob (--o8ed-note-scale in O8SpecPane).
 export const SPEC_TEXT_BOOST = CHROME.bodySize / SPEC_PANE_BASE_PX;
 
-export function SpecGlassCard({
+export const SpecGlassCard = memo(function SpecGlassCard({
   card,
   onMove,
   onResize,
@@ -128,4 +129,4 @@ export function SpecGlassCard({
       </div>
     </GlassCardShell>
   );
-}
+});

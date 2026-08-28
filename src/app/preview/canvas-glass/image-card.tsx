@@ -12,12 +12,13 @@
  * the bottom mask makes the lower corners moot.
  */
 
-import { useRef, useState, type CSSProperties } from 'react';
+import { memo, useRef, useState, type CSSProperties } from 'react';
 import { motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
 import { canvasZoom, CHROME, chromeFloorScale, FONT, IMG_MIN_W, MEDIA_HEADER_H, MEDIA_RIM, glassMedia } from './ui';
 import { dragBounds, resistAxis, settleInBounds } from './canvas-drag';
 import { CornerResize } from './corner-resize';
+import { useCanvasRenderProbe } from './perf/render-probe';
 
 export interface ImageItem {
   src: string;
@@ -62,7 +63,7 @@ function navArrowStyle(side: 'left' | 'right'): CSSProperties {
   } as CSSProperties;
 }
 
-export function ImageGlassCard({
+export const ImageGlassCard = memo(function ImageGlassCard({
   card,
   isDropTarget,
   onMove,
@@ -93,6 +94,7 @@ export function ImageGlassCard({
   onSpread: (id: number) => void;
   onClose: (id: number) => void;
 }) {
+  useCanvasRenderProbe('image', card.id);
   const dragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number; moved: boolean; lastX: number; lastY: number } | null>(null);
   const settleRef = useRef<{ stop: () => void } | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -292,4 +294,4 @@ export function ImageGlassCard({
       <CornerResize card={card} minW={IMG_MIN_W} minH={90} aspect={card.aspect} edges={false} onMove={onMove} onResize={onResize} onResizingChange={setResizing} />
     </motion.div>
   );
-}
+});

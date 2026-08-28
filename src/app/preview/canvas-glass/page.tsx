@@ -51,6 +51,7 @@ import type { XtermPanelHandle } from '@/components/desktop/workspace-terminal/X
 import { DEFAULT_ORCHESTRATOR_MODEL } from '@/components/desktop/thoughts/use-orchestrator-stream/shared';
 import { THINKING_EFFORTS, isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { usableCanvasArea } from './canvas-drag';
+import { moveCanvasCard, spawnCanvasCard } from './canvas-card-state';
 import { carveChrome, chromeRectsCanvas } from './chrome-rects';
 import { computeGrid, slotToCardGeom, type GridItem, type Slot } from './form-fit';
 import { NavigatorLoupe, type MinimapCard } from './navigator-loupe';
@@ -371,6 +372,7 @@ export default function CanvasGlassPreviewPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [browserCards, setBrowserCards] = useState<BrowserCard[]>([]);
   const [chatCards, setChatCards] = useState<ChatCard[]>([]);
+  const chatSendDefaults = useMemo(() => ({ model: orchModel, thinkingEffort: orchEffort }), [orchEffort, orchModel]);
   const [topMenu, setTopMenu] = useState<'alerts' | 'agents' | 'profile' | null>(null);
   const [inboxItems, setInboxItems] = useState<InboxRow[]>([]);
   // Which alerts the operator has already clicked — dims the row + drops it
@@ -1749,7 +1751,7 @@ export default function CanvasGlassPreviewPage() {
     zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
     const z = zPeakRef.current;
     const spot = at ?? findFreeSpot(560, 336);
-    setTermCards((previous) => [...previous, {
+    setTermCards((previous) => spawnCanvasCard(previous, {
       id,
       requestId,
       sessionName: null,
@@ -1764,7 +1766,7 @@ export default function CanvasGlassPreviewPage() {
       cwd,
       cwdLabel,
       agentCli: opts?.agentCli,
-    }]);
+    }));
     sendTerminalCreate(120, 30, requestId, cwd ?? undefined);
   }, [findFreeSpot, sendTerminalCreate]);
 
@@ -1811,42 +1813,23 @@ export default function CanvasGlassPreviewPage() {
   /** Clicked card comes forward. Terminals + files + images + browsers +
    *  chats share the 10–39 band — above mock cards (3), below chrome (40+). */
   const focusCard = useCallback((kind: 'term' | 'file' | 'image' | 'video' | 'browser' | 'chat' | 'diff' | 'spec' | 'brain' | 'markdown' | 'agent', id: number) => {
-    const current = kind === 'term'
-      ? termCards.find((card) => card.id === id)
-      : kind === 'file'
-        ? fileCards.find((card) => card.id === id)
-        : kind === 'image'
-          ? imageCards.find((card) => card.id === id)
-          : kind === 'video'
-            ? videoCards.find((card) => card.id === id)
-            : kind === 'browser'
-              ? browserCards.find((card) => card.id === id)
-              : kind === 'chat'
-                ? chatCards.find((card) => card.id === id)
-                : kind === 'diff'
-                  ? diffCards.find((card) => card.id === id)
-                  : kind === 'spec'
-                    ? specCards.find((card) => card.id === id)
-                    : kind === 'brain'
-                      ? brainCards.find((card) => card.id === id)
-                      : kind === 'markdown'
-                        ? markdownCards.find((card) => card.id === id)
-                        : agentCards.find((card) => card.id === id);
+    const canvasCards = canvasCardsRef.current;
+    const current = canvasCards[kind].find((card) => card.id === id);
     if (!current || current.z === zPeakRef.current) return;
     if (zPeakRef.current + 1 > 38) {
       // Renormalize the whole band, keeping order, with the target on top.
       const combined = [
-        ...termCards.map((card) => ({ kind: 'term' as const, id: card.id, z: card.z })),
-        ...fileCards.map((card) => ({ kind: 'file' as const, id: card.id, z: card.z })),
-        ...imageCards.map((card) => ({ kind: 'image' as const, id: card.id, z: card.z })),
-        ...videoCards.map((card) => ({ kind: 'video' as const, id: card.id, z: card.z })),
-        ...browserCards.map((card) => ({ kind: 'browser' as const, id: card.id, z: card.z })),
-        ...chatCards.map((card) => ({ kind: 'chat' as const, id: card.id, z: card.z })),
-        ...diffCards.map((card) => ({ kind: 'diff' as const, id: card.id, z: card.z })),
-        ...specCards.map((card) => ({ kind: 'spec' as const, id: card.id, z: card.z })),
-        ...brainCards.map((card) => ({ kind: 'brain' as const, id: card.id, z: card.z })),
-        ...markdownCards.map((card) => ({ kind: 'markdown' as const, id: card.id, z: card.z })),
-        ...agentCards.map((card) => ({ kind: 'agent' as const, id: card.id, z: card.z })),
+        ...canvasCards.term.map((card) => ({ kind: 'term' as const, id: card.id, z: card.z })),
+        ...canvasCards.file.map((card) => ({ kind: 'file' as const, id: card.id, z: card.z })),
+        ...canvasCards.image.map((card) => ({ kind: 'image' as const, id: card.id, z: card.z })),
+        ...canvasCards.video.map((card) => ({ kind: 'video' as const, id: card.id, z: card.z })),
+        ...canvasCards.browser.map((card) => ({ kind: 'browser' as const, id: card.id, z: card.z })),
+        ...canvasCards.chat.map((card) => ({ kind: 'chat' as const, id: card.id, z: card.z })),
+        ...canvasCards.diff.map((card) => ({ kind: 'diff' as const, id: card.id, z: card.z })),
+        ...canvasCards.spec.map((card) => ({ kind: 'spec' as const, id: card.id, z: card.z })),
+        ...canvasCards.brain.map((card) => ({ kind: 'brain' as const, id: card.id, z: card.z })),
+        ...canvasCards.markdown.map((card) => ({ kind: 'markdown' as const, id: card.id, z: card.z })),
+        ...canvasCards.agent.map((card) => ({ kind: 'agent' as const, id: card.id, z: card.z })),
       ].sort((a, b) => a.z - b.z);
       const remap = new Map(combined.map((entry, index) => [`${entry.kind}:${entry.id}`, 10 + index]));
       const top = 10 + combined.length;
@@ -1889,7 +1872,7 @@ export default function CanvasGlassPreviewPage() {
     } else {
       setAgentCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
     }
-  }, [agentCards, brainCards, markdownCards, browserCards, chatCards, diffCards, fileCards, imageCards, videoCards, specCards, termCards]);
+  }, []);
 
   const focusTermCard = useCallback((id: number) => focusCard('term', id), [focusCard]);
   const focusFileCard = useCallback((id: number) => focusCard('file', id), [focusCard]);
@@ -1902,6 +1885,26 @@ export default function CanvasGlassPreviewPage() {
   const focusBrainCard = useCallback((id: number) => focusCard('brain', id), [focusCard]);
   const focusMarkdownCard = useCallback((id: number) => focusCard('markdown', id), [focusCard]);
   const focusAgentCard = useCallback((id: number) => focusCard('agent', id), [focusCard]);
+  const moveDiffCard = useCallback((id: number, x: number, y: number) => setDiffCards((previous) => moveCanvasCard(previous, id, x, y)), []);
+  const resizeDiffCard = useCallback((id: number, w: number, h: number) => setDiffCards((previous) => previous.map((card) => (card.id === id ? { ...card, w, h } : card))), []);
+  const closeDiffCard = useCallback((id: number) => setDiffCards((previous) => previous.filter((card) => card.id !== id)), []);
+  const requestDiffCardChanges = useCallback((card: DiffCard) => {
+    setComposerValue(`Request changes on ${card.title}${card.branch ? ` (${card.branch})` : ''}: `);
+    composerInputRef.current?.focus();
+  }, []);
+  const moveAgentCard = useCallback((id: number, x: number, y: number) => setAgentCards((previous) => moveCanvasCard(previous, id, x, y)), []);
+  const resizeAgentCard = useCallback((id: number, w: number, h: number) => setAgentCards((previous) => previous.map((card) => (card.id === id ? { ...card, w, h } : card))), []);
+  const closeAgentCard = useCallback((id: number) => setAgentCards((previous) => previous.filter((card) => card.id !== id)), []);
+  const moveBrainCard = useCallback((id: number, x: number, y: number) => setBrainCards((previous) => moveCanvasCard(previous, id, x, y)), []);
+  const resizeBrainCard = useCallback((id: number, w: number, h: number) => setBrainCards((previous) => previous.map((card) => (card.id === id ? { ...card, w, h } : card))), []);
+  const closeBrainCard = useCallback((id: number) => setBrainCards((previous) => previous.filter((card) => card.id !== id)), []);
+  const moveMarkdownCard = useCallback((id: number, x: number, y: number) => setMarkdownCards((previous) => moveCanvasCard(previous, id, x, y)), []);
+  const resizeMarkdownCard = useCallback((id: number, w: number, h: number) => setMarkdownCards((previous) => previous.map((card) => (card.id === id ? { ...card, w, h } : card))), []);
+  const closeMarkdownCard = useCallback((id: number) => setMarkdownCards((previous) => previous.filter((card) => card.id !== id)), []);
+  const moveSpecCard = useCallback((id: number, x: number, y: number) => setSpecCards((previous) => moveCanvasCard(previous, id, x, y)), []);
+  const resizeSpecCard = useCallback((id: number, w: number, h: number) => setSpecCards((previous) => previous.map((card) => (card.id === id ? { ...card, w, h } : card))), []);
+  const closeSpecCard = useCallback((id: number) => setSpecCards((previous) => previous.filter((card) => card.id !== id)), []);
+  const specScreenMap = useMemo(() => ({ zoom: canvasZoomLevel, panX: pan.x, panY: pan.y }), [canvasZoomLevel, pan.x, pan.y]);
   /** Toggle an agent card compact ↔ full — snaps to that mode's preset size so
    *  the transcript+composer get room in full and the status tile stays tight in
    *  compact. The o8_canvas resize verb still resizes either mode afterward. */
@@ -2101,7 +2104,7 @@ export default function CanvasGlassPreviewPage() {
         nextIdRef.current += 1;
         zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
         const spot = at ?? findFreeSpot(560, 356);
-        setDiffCards((previous) => [...previous, {
+        setDiffCards((previous) => spawnCanvasCard(previous, {
           id,
           x: spot.x,
           y: spot.y,
@@ -2115,10 +2118,15 @@ export default function CanvasGlassPreviewPage() {
           stat: data.stat ?? '',
           diff: data.diff ?? '',
           truncated: Boolean(data.truncated),
-        }]);
+        }));
       })
       .catch(() => {});
   }, [findFreeSpot]);
+
+  const reviewAgentCard = useCallback((laneId: string) => {
+    const lane = activeLanes.find((row) => row.id === laneId);
+    if (lane) void spawnDiffCard(lane);
+  }, [activeLanes, spawnDiffCard]);
 
   /** "What have I changed" — the active repo's WORKING-TREE diff in the
    *  same card the lane diffs use. laneId carries a worktree: prefix so
@@ -2307,7 +2315,7 @@ export default function CanvasGlassPreviewPage() {
     nextIdRef.current += 1;
     zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
     const spot = findFreeSpot(380, 460);
-    setMarkdownCards((previous) => [...previous, {
+    setMarkdownCards((previous) => spawnCanvasCard(previous, {
       id,
       x: spot.x,
       y: spot.y,
@@ -2316,7 +2324,7 @@ export default function CanvasGlassPreviewPage() {
       h: 360,
       title: title.trim() || 'Note',
       markdown,
-    }]);
+    }));
   }, [findFreeSpot]);
 
   /** A REAL browser pane — defaults to the app's own dashboard. */
@@ -2397,7 +2405,7 @@ export default function CanvasGlassPreviewPage() {
     zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
     const z = zPeakRef.current;
     const spot = at ?? findFreeSpot(620, 456);
-    setFileCards((previous) => [...previous, {
+    setFileCards((previous) => spawnCanvasCard(previous, {
       id,
       path,
       name: path.split('/').pop() || path,
@@ -2406,7 +2414,7 @@ export default function CanvasGlassPreviewPage() {
       w: at?.w ?? 620,
       h: at?.h ?? 420,
       z,
-    }]);
+    }));
   }, [findFreeSpot]);
 
   const showCanvasToast = useCallback((message: string, tone: CanvasToast['tone'] = 'error') => {
@@ -2893,9 +2901,7 @@ export default function CanvasGlassPreviewPage() {
   // ── Canvas control surface (agent parity) ────────────────────────────────
   // The intent bus's card verbs let an agent drive the canvas the way a human
   // can: SEE every card (list), then move / resize / focus / close one by id.
-  // focusCard + the per-kind close handlers (which own teardown — closeTerminal
-  // kills the PTY, closeImageCard revokes the object URL) already exist; these
-  // route to them so an agent's close behaves exactly like clicking the ✕.
+  // Existing focus/close handlers preserve each kind's teardown semantics.
   //
   // canvasCardsRef holds the latest card arrays so `list` + verb existence
   // checks read fresh state WITHOUT re-subscribing the intent listener on every
@@ -3390,7 +3396,7 @@ export default function CanvasGlassPreviewPage() {
               const id = nextIdRef.current;
               nextIdRef.current += 1;
               zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
-              setImageCards((prev) => [...prev, { id, x: ax, y: ay, z: zPeakRef.current, w, h, aspect, items: [{ src, name }] }]);
+              setImageCards((prev) => spawnCanvasCard(prev, { id, x: ax, y: ay, z: zPeakRef.current, w, h, aspect, items: [{ src, name }] }));
             };
             probe.src = src;
             note = `adding image ${name}`;
@@ -3706,14 +3712,11 @@ export default function CanvasGlassPreviewPage() {
           <DiffGlassCard
             key={card.id}
             card={card}
-            onMove={(id, x, y) => setDiffCards((previous) => previous.map((c) => (c.id === id ? { ...c, x, y } : c)))}
-            onResize={(id, w, h) => setDiffCards((previous) => previous.map((c) => (c.id === id ? { ...c, w, h } : c)))}
+            onMove={moveDiffCard}
+            onResize={resizeDiffCard}
             onFocus={focusDiffCard}
-            onClose={(id) => setDiffCards((previous) => previous.filter((c) => c.id !== id))}
-            onRequestChanges={(diffCard) => {
-              setComposerValue(`Request changes on ${diffCard.title}${diffCard.branch ? ` (${diffCard.branch})` : ''}: `);
-              composerInputRef.current?.focus();
-            }}
+            onClose={closeDiffCard}
+            onRequestChanges={requestDiffCardChanges}
           />
         ))}
       </AnimatePresence>
@@ -3725,14 +3728,11 @@ export default function CanvasGlassPreviewPage() {
             key={card.id}
             card={card}
             lane={activeLanes.find((lane) => lane.id === card.laneId) ?? null}
-            onMove={(id, x, y) => setAgentCards((previous) => previous.map((c) => (c.id === id ? { ...c, x, y } : c)))}
-            onResize={(id, w, h) => setAgentCards((previous) => previous.map((c) => (c.id === id ? { ...c, w, h } : c)))}
+            onMove={moveAgentCard}
+            onResize={resizeAgentCard}
             onFocus={focusAgentCard}
-            onClose={(id) => setAgentCards((previous) => previous.filter((c) => c.id !== id))}
-            onReview={(laneId) => {
-              const lane = activeLanes.find((row) => row.id === laneId);
-              if (lane) void spawnDiffCard(lane);
-            }}
+            onClose={closeAgentCard}
+            onReview={reviewAgentCard}
             onToggleExpand={toggleAgentCardExpand}
           />
         ))}
@@ -3748,10 +3748,10 @@ export default function CanvasGlassPreviewPage() {
           <BrainGlassCard
             key={card.id}
             card={card}
-            onMove={(id, x, y) => setBrainCards((previous) => previous.map((c) => (c.id === id ? { ...c, x, y } : c)))}
-            onResize={(id, w, h) => setBrainCards((previous) => previous.map((c) => (c.id === id ? { ...c, w, h } : c)))}
+            onMove={moveBrainCard}
+            onResize={resizeBrainCard}
             onFocus={focusBrainCard}
-            onClose={(id) => setBrainCards((previous) => previous.filter((c) => c.id !== id))}
+            onClose={closeBrainCard}
           />
         ))}
       </AnimatePresence>
@@ -3762,10 +3762,10 @@ export default function CanvasGlassPreviewPage() {
           <MarkdownGlassCard
             key={card.id}
             card={card}
-            onMove={(id, x, y) => setMarkdownCards((previous) => previous.map((c) => (c.id === id ? { ...c, x, y } : c)))}
-            onResize={(id, w, h) => setMarkdownCards((previous) => previous.map((c) => (c.id === id ? { ...c, w, h } : c)))}
+            onMove={moveMarkdownCard}
+            onResize={resizeMarkdownCard}
             onFocus={focusMarkdownCard}
-            onClose={(id) => setMarkdownCards((previous) => previous.filter((c) => c.id !== id))}
+            onClose={closeMarkdownCard}
           />
         ))}
       </AnimatePresence>
@@ -3777,7 +3777,7 @@ export default function CanvasGlassPreviewPage() {
             key={card.id}
             card={card}
             liveEntries={convos[`thread:${card.threadId}`] ?? null}
-            sendDefaults={{ model: orchModel, thinkingEffort: orchEffort }}
+            sendDefaults={chatSendDefaults}
             onLiveEvent={handleOrchEvent}
             onUserSend={noteCardSend}
             onTruncate={truncateLane}
@@ -3807,11 +3807,11 @@ export default function CanvasGlassPreviewPage() {
             <SpecGlassCard
               key={card.id}
               card={card}
-              screenMap={{ zoom: canvasZoomLevel, panX: pan.x, panY: pan.y }}
-              onMove={(id, x, y) => setSpecCards((previous) => previous.map((c) => (c.id === id ? { ...c, x, y } : c)))}
-              onResize={(id, w, h) => setSpecCards((previous) => previous.map((c) => (c.id === id ? { ...c, w, h } : c)))}
+              screenMap={specScreenMap}
+              onMove={moveSpecCard}
+              onResize={resizeSpecCard}
               onFocus={focusSpecCard}
-              onClose={(id) => setSpecCards((previous) => previous.filter((c) => c.id !== id))}
+              onClose={closeSpecCard}
             />
           ))}
         </AnimatePresence>

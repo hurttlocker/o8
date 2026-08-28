@@ -8,7 +8,7 @@
  * the thread — the next message continues that conversation).
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
 import { DockEntryView, DockTab } from './dock';
@@ -45,7 +45,7 @@ const CHAT_MIN_H = 140;
  *  bottom drag boundary clears the composer by the card's TRUE height. */
 const CHAT_CHROME_H = 63;
 
-export function ChatGlassCard({
+export const ChatGlassCard = memo(function ChatGlassCard({
   card,
   liveEntries,
   sendDefaults,
@@ -328,4 +328,4 @@ export function ChatGlassCard({
       <CornerResize card={card} minW={CHAT_MIN_W} minH={CHAT_MIN_H} onMove={onMove} onResize={onResize} onResizingChange={setResizing} />
     </motion.div>
   );
-}
+});
