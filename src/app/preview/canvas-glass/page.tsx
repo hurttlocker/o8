@@ -57,16 +57,14 @@ import { computeGrid, slotToCardGeom, type GridItem, type Slot } from './form-fi
 import { NavigatorLoupe, type MinimapCard } from './navigator-loupe';
 import { ORB_DEFAULTS, readOrbSettings, writeOrbSettings, type OrbSettings } from './orb-settings';
 import { CanvasBackdropLayer } from './backdrops';
-import { BrowserGlassCard, type BrowserCard, type BrowserTab } from './browser-card';
-import { SpecGlassCard, type SpecCard } from './spec-card';
-import { BrainGlassCard, type BrainCard } from './brain-card';
-import { MarkdownGlassCard, type MarkdownCard } from './markdown-card';
+import type { BrowserCard } from './browser-card';
+import type { SpecCard } from './spec-card';
+import type { BrainCard } from './brain-card';
+import type { MarkdownCard } from './markdown-card';
 import { loadCanvasSnapshot, saveCanvasSnapshot, type SnapGeometry } from './canvas-persistence';
-import { DiffGlassCard, type DiffCard } from './diff-card';
-import { fetchWorktreeDiff, findFileRepoPath, worktreeDiffCardFromData, worktreeRepoPath } from './worktree-diff';
-import { AgentGlassCard, AGENT_FULL_W, AGENT_FULL_H, AGENT_COMPACT_W, AGENT_COMPACT_H, type AgentCard } from './agent-card';
-import { codename } from '@/lib/agents/codename';
-import { ChatGlassCard, type ChatCard } from './chat-card';
+import type { DiffCard } from './diff-card';
+import { AGENT_FULL_W, AGENT_FULL_H, AGENT_COMPACT_W, AGENT_COMPACT_H, type AgentCard } from './agent-card';
+import type { ChatCard } from './chat-card';
 import { CanvasCard } from './cards';
 import { DiffusionBackdrop, DockGlyphButton, EdgeRail, SpawnGlyphButton } from './chrome';
 import { CanvasFeedbackButton } from './canvas-feedback';
@@ -76,14 +74,13 @@ import { AnticipationRing } from './anticipation-ring';
 import { ComposerPartialsFill, useAgentPartialsMorph } from './agent-partials-morph';
 import { OrchestratorDock } from './dock';
 import type { SwarmScoutView } from '@/components/desktop/thoughts/chat-panel/SwarmStatusCard';
-import { FileGlassCard, type FileCard } from './file-card';
-import { FileTreeCardLayer, type FileTreeCard } from './file-tree-card';
-import { ImageGlassCard, type ImageCard } from './image-card';
-import { VideoGlassCard, type VideoCard } from './video-card';
-import { putMedia, getMedia, deleteMedia } from './canvas-media-store';
-import { spawnCanvasAgents } from './spawn-prompt-client';
+import type { FileCard } from './file-card';
+import type { FileTreeCard } from './file-tree-card';
+import type { ImageCard } from './image-card';
+import type { VideoCard } from './video-card';
+import { getMedia } from './canvas-media-store';
 import { useO8Auth } from '@/components/auth/O8AuthProvider';
-import { TerminalGlassCard, type TermCard } from './terminal-card';
+import type { TermCard } from './terminal-card';
 import { TunerPanel } from './tuner';
 import { WelcomeModal } from './welcome-modal';
 import { ShareBetaModal } from './share-beta';
@@ -96,6 +93,9 @@ import { CARD_ENTRANCE, FONT, IMG_MAX_SPAWN_EDGE, TONE_DOT, canvasZoom, glass, g
 import { SymonVoicePresencePill } from './symon-voice-presence';
 import { useCanvasQuickActions } from './use-canvas-quick-actions';
 import { useCanvasMediaLifecycle } from './use-canvas-media-lifecycle';
+import { CanvasCardLayers } from './canvas-card-layers';
+import { useCanvasMediaSpawners } from './use-canvas-media-spawners';
+import { useCanvasSpawners, type LaneRow, type SpawnChoreography, type SpawnReservation } from './use-canvas-spawners';
 import { clearCanvasTurnAccumulators, removeCanvasConversations, setCanvasConversation, updateCanvasConversation } from './canvas-conversation-retention';
 import { CanvasSearchOverlay } from './canvas-search';
 import { CanvasCommandPalette } from './canvas-command-palette';
@@ -117,22 +117,6 @@ interface InboxRow {
   detail?: string | null;
   severity?: string | null;
   kind?: string | null;
-}
-interface LaneRow {
-  id: string;
-  packetId?: string | null;
-  /** Warm-session key — the transcript fallback when packetId can't resolve. */
-  sessionKey?: string | null;
-  label?: string | null;
-  repoPath?: string | null;
-  status?: string | null;
-  runtime?: string | null;
-  /** Lane creation (ISO) — the agent card's elapsed-timer origin. */
-  createdAt?: string | null;
-  /** Last write (ISO) — freeze point for a settled agent card's ran-duration. */
-  updatedAt?: string | null;
-  /** Last event (ISO) — preferred freeze point (the moment work last moved). */
-  lastEventAt?: string | null;
 }
 interface CommitRow {
   hash: string;
@@ -179,9 +163,6 @@ const LOUPE_SIZE_RANGE = { min: 120, max: 240, step: 4 };
 // agent drive the canvas the way a human can: SEE every card (list), then move
 // / resize / focus / close one by (kind, id).
 const CANVAS_GEOM_FLOOR = 140;
-const SPAWN_CHOREOGRAPHY_TTL_MS = 20_000;
-type SpawnChoreography = { repoPath: string; origin: { x: number; y: number }; delayMs: number; expiresAt: number };
-type SpawnReservation = { id: number; x: number; y: number; w: number; h: number };
 type CanvasToast = { id: number; message: string; tone: 'error' | 'info' | 'success' };
 
 // Account dossier (the Clerk sign-in popover) — one row vocabulary shared by
@@ -1908,6 +1889,16 @@ export default function CanvasGlassPreviewPage() {
     )));
   }, []);
 
+  const showCanvasToast = useCallback((message: string, tone: CanvasToast['tone'] = 'error') => {
+    const id = Date.now();
+    setCanvasToast({ id, message, tone });
+    if (canvasToastTimerRef.current) clearTimeout(canvasToastTimerRef.current);
+    canvasToastTimerRef.current = setTimeout(() => {
+      setCanvasToast((current) => (current?.id === id ? null : current));
+      canvasToastTimerRef.current = null;
+    }, 3600);
+  }, []);
+
   const reducedMotion = useCallback(() => (
     typeof window !== 'undefined'
     && typeof window.matchMedia === 'function'
@@ -1931,85 +1922,58 @@ export default function CanvasGlassPreviewPage() {
     return entry ?? null;
   }, []);
 
-  /** Bloom an agent card for a freshly-live lane — the spawn → card-appears
-   *  moment. Deduped by laneId so a lane is only ever carded once; the card then
-   *  tracks that lane's phase live from activeLanes. */
-  const bloomAgentCard = useCallback((lane: LaneRow) => {
-    const id = nextIdRef.current;
-    nextIdRef.current += 1;
-    // Cluster near siblings — the last card in this repo, else the last agent
-    // card overall (same spawn burst). findFreeSpot returns the nearest FREE
-    // cell to the anchor, so a fleet reads as a group.
-    const anchor = (lane.repoPath ? agentAnchorsRef.current.byRepo.get(lane.repoPath) : null) ?? agentAnchorsRef.current.last;
-    const target = findFreeSpot(AGENT_FULL_W, AGENT_FULL_H, anchor);
-    agentAnchorsRef.current.last = target;
-    if (lane.repoPath) agentAnchorsRef.current.byRepo.set(lane.repoPath, target);
-    const choreography = reducedMotion() ? null : takeSpawnChoreography();
-    const start = choreography?.origin ?? target;
-    // Always reserve the target — cardRectsRef only picks up the real rect on the
-    // next commit's effect, so a synchronous burst (entering the canvas over a
-    // running fleet) would otherwise read a stale field and stack every card on
-    // the same spot. Released once the card's rect takes over collision duty.
-    const reservation = { id, x: target.x, y: target.y, w: AGENT_FULL_W, h: AGENT_FULL_H };
-    spawnReservationsRef.current.push(reservation);
-    setAgentCards((previous) => {
-      if (previous.some((card) => card.laneId === lane.id)) {
-        spawnReservationsRef.current = spawnReservationsRef.current.filter((entry) => entry !== reservation);
-        return previous;
-      }
-      zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
-      const number = agentNumberRef.current;
-      agentNumberRef.current += 1;
-      const repoTail = lane.repoPath?.split('/').filter(Boolean).pop() ?? null;
-      const symonOrigin = Boolean(
-        (lane.packetId && symonSpawnPacketIdsRef.current.has(lane.packetId))
-        || symonSpawnPacketIdsRef.current.has(lane.id)
-        || Date.now() < symonSpawnWindowUntilRef.current,
-      );
-      return [...previous, {
-        id,
-        x: start.x,
-        y: start.y,
-        z: zPeakRef.current,
-        w: AGENT_FULL_W,
-        h: AGENT_FULL_H,
-        laneId: lane.id,
-        packetId: lane.packetId ?? null,
-        sessionKey: lane.sessionKey ?? null,
-        repoPath: lane.repoPath ?? null,
-        startedAt: lane.createdAt ?? null,
-        expanded: true,
-        number,
-        codename: codename(lane.id),
-        title: lane.label?.trim() || repoTail || lane.id,
-        runtime: lane.runtime ?? null,
-        ...(symonOrigin ? { symonOrigin: true } : {}),
-      }];
-    });
-    if (choreography) {
-      timersRef.current.push(setTimeout(() => {
-        animate(0, 1, {
-          duration: CARD_ENTRANCE.sweepMs / 1000,
-          ease: [0.22, 0.61, 0.36, 1],
-          onUpdate: (t) => {
-            setAgentCards((cards) => cards.map((card) => (
-              card.id === id ? { ...card, x: start.x + (target.x - start.x) * t, y: start.y + (target.y - start.y) * t } : card
-            )));
-          },
-          onComplete: () => {
-            spawnReservationsRef.current = spawnReservationsRef.current.filter((entry) => entry !== reservation);
-          },
-        });
-      }, choreography.delayMs));
-    } else {
-      // Static bloom (entry burst / single new lane): hold the reservation just
-      // long enough for the next commit's cardRects effect to pick up the real
-      // card rect, then release so it doesn't over-reserve the field.
-      timersRef.current.push(setTimeout(() => {
-        spawnReservationsRef.current = spawnReservationsRef.current.filter((entry) => entry !== reservation);
-      }, 400));
-    }
-  }, [findFreeSpot, reducedMotion, takeSpawnChoreography]);
+  const {
+    bloomAgentCard,
+    spawnAgents,
+    spawnDiffCard,
+    spawnWorktreeDiffCard,
+    refreshWorktreeDiffCard,
+    spawnReviewDiffCard,
+    spawnSpecCard,
+    spawnBrainCard,
+    spawnMarkdownCard,
+    spawnBrowserCard,
+    moveBrowserCard,
+    resizeBrowserCard,
+    changeBrowserTabs,
+    closeBrowserCard,
+    spawnFileCard,
+    spawnFileTreeCard,
+    openPathAsFileCard,
+  } = useCanvasSpawners({
+    activeRepoPath,
+    repos,
+    specCards,
+    brainCards,
+    nextIdRef,
+    zPeakRef,
+    timersRef,
+    symonSpawnPacketIdsRef,
+    symonSpawnWindowUntilRef,
+    agentNumberRef,
+    agentAnchorsRef,
+    spawnChoreographyRef,
+    spawnReservationsRef,
+    setAgentCards,
+    setDiffCards,
+    setSpecCards,
+    setBrainCards,
+    setMarkdownCards,
+    setBrowserCards,
+    setFileCards,
+    setTreeCards,
+    setFilePathPickerOpen,
+    setFilePathInput,
+    findFreeSpot,
+    reducedMotion,
+    takeSpawnChoreography,
+    viewportSpawnOrigin,
+    refreshLanes,
+    focusSpecCard,
+    focusBrainCard,
+    showCanvasToast,
+    getCanvasDiffCards: () => canvasCardsRef.current.diff,
+  });
 
   /** Watch live lanes: bloom a card for every lane not yet carded — including the
    *  fleet already running when the canvas opens (dispatched from the IDE/MCP
@@ -2024,45 +1988,6 @@ export default function CanvasGlassPreviewPage() {
       bloomAgentCard(lane);
     }
   }, [activeLanes, bloomAgentCard, canvasEnabled]);
-
-  /** Voice/canvas "spawn N agents on <task>" — the gateless worktree spawn. Hits
-   *  the governed create+dispatch seam (/api/orchestrator/spawn-prompt); the new
-   *  lanes go live and bloom as cards via the watcher above. Returns an ack note
-   *  on a synchronous validation failure, else null (ok). */
-  const spawnAgents = useCallback((task: string, count: number, repoOverride?: string | null, origin?: string | null): string | null => {
-    const repoPath = repoOverride ?? activeRepoPath;
-    if (!task.trim()) return 'spawn-agents needs args.task';
-    if (!repoPath) return 'no repo scoped — pick a repo first';
-    const n = Math.max(1, Math.min(5, Math.floor(count) || 1));
-    if (origin === 'symon') symonSpawnWindowUntilRef.current = Date.now() + 20_000;
-    if (n > 1 && !reducedMotion()) {
-      const spawnOrigin = viewportSpawnOrigin();
-      const expiresAt = Date.now() + SPAWN_CHOREOGRAPHY_TTL_MS;
-      spawnChoreographyRef.current.push(...Array.from({ length: n }, (_, index) => ({
-        repoPath,
-        origin: spawnOrigin,
-        delayMs: index * CARD_ENTRANCE.staggerMs,
-        expiresAt,
-      })));
-    }
-    spawnCanvasAgents({ repoPath, task: task.trim(), count: n, origin })
-      .then((ids) => {
-        if (origin === 'symon') {
-          for (const id of ids) {
-            symonSpawnPacketIdsRef.current.add(id);
-          }
-        }
-        // The lane-lifecycle push usually beats these, but a couple of nudges
-        // catch the lanes as the worktrees + sessions come up (~1–3s).
-        refreshLanes();
-        timersRef.current.push(setTimeout(refreshLanes, 1200));
-        timersRef.current.push(setTimeout(refreshLanes, 3000));
-      })
-      .catch(() => {
-        if (origin === 'symon') symonSpawnWindowUntilRef.current = 0;
-      });
-    return null;
-  }, [activeRepoPath, reducedMotion, refreshLanes, viewportSpawnOrigin]);
 
   useEffect(() => {
     if (!canvasEnabled || !inTauri) return;
@@ -2083,123 +2008,10 @@ export default function CanvasGlassPreviewPage() {
     }
   }, [activeLanes, agentCards, canvasEnabled, inTauri]);
 
-  /** A lane's review diff lands as a glass card — the governance moat
-   *  as a canvas object. */
-  const spawnDiffCard = useCallback((lane: LaneRow, at?: SnapGeometry) => {
-    return fetch(`/api/lanes/${encodeURIComponent(lane.id)}/diff?maxBytes=131072`)
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data: { ok?: boolean; packetId?: string | null; branch?: string | null; stat?: string; diff?: string; truncated?: boolean } | null) => {
-        if (!data?.ok) return;
-        const id = nextIdRef.current;
-        nextIdRef.current += 1;
-        zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
-        const spot = at ?? findFreeSpot(560, 356);
-        setDiffCards((previous) => spawnCanvasCard(previous, {
-          id,
-          x: spot.x,
-          y: spot.y,
-          z: zPeakRef.current,
-          w: at?.w ?? 560,
-          h: at?.h ?? 320,
-          laneId: lane.id,
-          packetId: data.packetId ?? null,
-          title: lane.label?.trim() || lane.id,
-          branch: data.branch ?? null,
-          stat: data.stat ?? '',
-          diff: data.diff ?? '',
-          truncated: Boolean(data.truncated),
-        }));
-      })
-      .catch(() => {});
-  }, [findFreeSpot]);
-
   const reviewAgentCard = useCallback((laneId: string) => {
     const lane = activeLanes.find((row) => row.id === laneId);
     if (lane) void spawnDiffCard(lane);
   }, [activeLanes, spawnDiffCard]);
-
-  /** Active-repo working-tree diff; the worktree: prefix also drives restore. */
-  const spawnWorktreeDiffCard = useCallback((at?: SnapGeometry, repoOverride?: string) => {
-    const repoPath = repoOverride ?? activeRepoPath;
-    if (!repoPath) return Promise.resolve();
-    return fetchWorktreeDiff(repoPath)
-      .then((data) => {
-        if (!data) return;
-        const id = nextIdRef.current;
-        nextIdRef.current += 1;
-        zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
-        const spot = at ?? findFreeSpot(560, 356);
-        setDiffCards((previous) => {
-          // One working-tree card per repo — auto-show + the picker row both
-          // route here, so a re-trigger must never stack a duplicate.
-          if (previous.some((card) => card.laneId === `worktree:${repoPath}`)) return previous;
-          return [...previous, worktreeDiffCardFromData({ id, z: zPeakRef.current, spot, saved: at, repoPath, data })];
-        });
-      })
-      .catch(() => {});
-  }, [activeRepoPath, findFreeSpot]);
-
-  const refreshWorktreeDiffCard = useCallback((cardId: number): Promise<void> => {
-    const repoPath = worktreeRepoPath(canvasCardsRef.current.diff.find((card) => card.id === cardId)?.laneId ?? '');
-    if (!repoPath) return Promise.resolve();
-    return fetchWorktreeDiff(repoPath).then((data) => {
-      if (!data) return;
-      setDiffCards((previous) => previous.map((card) => (
-        card.id === cardId && worktreeRepoPath(card.laneId) === repoPath
-          ? { ...card, stat: data.stat, diff: data.diff, truncated: data.truncated }
-          : card
-      )));
-    }).catch(() => {});
-  }, []);
-
-  /** The active review's PR diff as a glass card — what the Alerts
-   *  "Review ready · PR #N" row resolves to. Distinct from the working-tree
-   *  card: this is the review branch vs its base (the PR itself), NOT your
-   *  uncommitted edits in whatever repo the canvas happens to point at —
-   *  that mismatch was the bug this replaced. laneId carries a review:
-   *  prefix so the restore path and dedupe both recognise it. */
-  const spawnReviewDiffCard = useCallback((at?: SnapGeometry) => {
-    // No workspace param — match the inbox alert, which is built from the
-    // GLOBAL review snapshot (not the canvas's active repo). Passing the active
-    // repo here would re-introduce the very mismatch this card fixes.
-    return fetch('/api/review/diff')
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data: { ok?: boolean; branch?: string | null; stat?: string; diff?: string; truncated?: boolean; prNumber?: number | null; prTitle?: string | null } | null) => {
-        const id = nextIdRef.current;
-        nextIdRef.current += 1;
-        zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
-        const spot = at ?? findFreeSpot(560, 356);
-        const pr = data?.ok ? data.prNumber ?? null : null;
-        const title = pr
-          ? `PR #${pr}${data?.prTitle ? ` · ${data.prTitle}` : ''}`
-          : data?.ok
-            ? `Review · ${data.branch ?? 'changes'}`
-            : 'Review';
-        const body = data?.ok
-          ? (data.diff?.trim() ? data.diff : 'No diff is available for this review yet.')
-          : 'No active review workspace is configured.';
-        setDiffCards((previous) => {
-          // One review card at a time — the PR alert always resolves here.
-          if (previous.some((card) => card.laneId.startsWith('review:'))) return previous;
-          return [...previous, {
-            id,
-            x: spot.x,
-            y: spot.y,
-            z: zPeakRef.current,
-            w: at?.w ?? 560,
-            h: at?.h ?? 320,
-            laneId: `review:${pr ?? data?.branch ?? 'active'}`,
-            packetId: null,
-            title,
-            branch: data?.ok ? data.branch ?? null : null,
-            stat: data?.ok ? data.stat ?? '' : '',
-            diff: body,
-            truncated: Boolean(data?.ok && data.truncated),
-          }];
-        });
-      })
-      .catch(() => {});
-  }, [findFreeSpot]);
 
   // Auto-show YOUR working tree the moment the Review picker opens — no
   // hunting for the row. spawnWorktreeDiffCard dedupes, so this never stacks.
@@ -2236,100 +2048,6 @@ export default function CanvasGlassPreviewPage() {
     setDockOpen(true);
   }, [acknowledgeAlert, diffCards, focusDiffCard, spawnReviewDiffCard]);
 
-  /** The operator's o8.md notes — the REAL spec pane in a glass card.
-   *  One card per repo: a second click focuses the open one instead of
-   *  spawning a duplicate editor against the same file. */
-  const spawnSpecCard = useCallback(() => {
-    const repoPath = activeRepoPath ?? null;
-    const open = specCards.find((card) => card.repoPath === repoPath);
-    if (open) {
-      focusSpecCard(open.id);
-      return;
-    }
-    const id = nextIdRef.current;
-    nextIdRef.current += 1;
-    zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
-    const spot = findFreeSpot(760, 540);
-    setSpecCards((previous) => [...previous, {
-      id,
-      x: spot.x,
-      y: spot.y,
-      z: zPeakRef.current,
-      w: 760,
-      h: 540,
-      repoPath,
-    }]);
-  }, [activeRepoPath, findFreeSpot, focusSpecCard, specCards]);
-
-  /** The Engineering Brain as a card — one per repo, like the o8.md card;
-   *  a second click focuses the open one. An intent-bus question rides in as
-   *  a one-shot `initialQuestion` the card asks itself. */
-  const spawnBrainCard = useCallback((question?: string) => {
-    const repoPath = activeRepoPath ?? null;
-    const open = brainCards.find((card) => card.repoPath === repoPath);
-    if (open) {
-      focusBrainCard(open.id);
-      if (question?.trim()) {
-        setBrainCards((previous) => previous.map((card) => (
-          card.id === open.id ? { ...card, initialQuestion: question.trim() } : card
-        )));
-      }
-      return;
-    }
-    const id = nextIdRef.current;
-    nextIdRef.current += 1;
-    zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
-    const spot = findFreeSpot(360, 460);
-    setBrainCards((previous) => [...previous, {
-      id,
-      x: spot.x,
-      y: spot.y,
-      z: zPeakRef.current,
-      w: 360,
-      h: 380,
-      repoPath,
-      ...(question?.trim() ? { initialQuestion: question.trim() } : {}),
-    }]);
-  }, [activeRepoPath, brainCards, findFreeSpot, focusBrainCard]);
-
-  /** Render-on-screen (#1270) — bloom a markdown explainer the orchestrator
-   *  authored. Each call is a fresh card (you can show several), sized for a
-   *  comfortable read; the content is static + ephemeral. */
-  const spawnMarkdownCard = useCallback((title: string, markdown: string) => {
-    const id = nextIdRef.current;
-    nextIdRef.current += 1;
-    zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
-    const spot = findFreeSpot(380, 460);
-    setMarkdownCards((previous) => spawnCanvasCard(previous, {
-      id,
-      x: spot.x,
-      y: spot.y,
-      z: zPeakRef.current,
-      w: 380,
-      h: 360,
-      title: title.trim() || 'Note',
-      markdown,
-    }));
-  }, [findFreeSpot]);
-
-  /** A REAL browser pane — defaults to the app's own dashboard. */
-  const spawnBrowserCard = useCallback(() => {
-    const id = nextIdRef.current;
-    nextIdRef.current += 1;
-    zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
-    const spot = findFreeSpot(640, 492);
-    setBrowserCards((previous) => [...previous, {
-      id,
-      x: spot.x,
-      y: spot.y,
-      z: zPeakRef.current,
-      w: 640,
-      h: 400,
-      tabs: [{ id: 1, url: `${window.location.origin}/dashboard` }],
-      activeTabId: 1,
-    }]);
-  }, [findFreeSpot]);
-
   // Agents reach this browser too — o8_view_open_browser (operator MCP)
   // dispatches this same event for the default side; on canvas it lands as
   // a browser card. New tab per URL, reusing an existing tab on a match.
@@ -2358,22 +2076,6 @@ export default function CanvasGlassPreviewPage() {
     return () => window.removeEventListener('o8:open-browser', onOpenBrowser);
   }, [findFreeSpot]);
 
-  const moveBrowserCard = useCallback((id: number, x: number, y: number) => {
-    setBrowserCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
-  }, []);
-
-  const resizeBrowserCard = useCallback((id: number, w: number, h: number) => {
-    setBrowserCards((previous) => previous.map((card) => (card.id === id ? { ...card, w, h } : card)));
-  }, []);
-
-  const changeBrowserTabs = useCallback((id: number, tabs: BrowserTab[], activeTabId: number) => {
-    setBrowserCards((previous) => previous.map((card) => (card.id === id ? { ...card, tabs, activeTabId } : card)));
-  }, []);
-
-  const closeBrowserCard = useCallback((id: number) => {
-    setBrowserCards((previous) => previous.filter((card) => card.id !== id));
-  }, []);
-
   const changeTermVeil = useCallback((value: number) => {
     setTermVeil(value);
     try {
@@ -2382,70 +2084,6 @@ export default function CanvasGlassPreviewPage() {
       // non-critical — the dialed value just won't survive reload
     }
   }, []);
-
-  /** Open ANY file on the machine as a glass card — view, edit, ⌘S. */
-  const spawnFileCard = useCallback((path: string, at?: SnapGeometry, repoOverride?: string) => {
-    const id = nextIdRef.current;
-    nextIdRef.current += 1;
-    zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
-    const z = zPeakRef.current;
-    const spot = at ?? findFreeSpot(620, 456);
-    const repoPath = findFileRepoPath(path, [repoOverride, activeRepoPath, ...(repos ?? []).map((repo) => repo.path)]);
-    setFileCards((previous) => spawnCanvasCard(previous, {
-      id,
-      path,
-      name: path.split('/').pop() || path,
-      repoPath,
-      x: spot.x,
-      y: spot.y,
-      w: at?.w ?? 620,
-      h: at?.h ?? 420,
-      z,
-    }));
-  }, [activeRepoPath, findFreeSpot, repos]);
-
-  const spawnFileTreeCard = useCallback((repoPath: string, at?: SnapGeometry) => {
-    const id = nextIdRef.current;
-    nextIdRef.current += 1;
-    zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
-    const spot = at ?? findFreeSpot(380, 523);
-    setTreeCards((previous) => spawnCanvasCard(previous, {
-      id,
-      repoPath,
-      x: spot.x,
-      y: spot.y,
-      w: at?.w ?? 380,
-      h: at?.h ?? 460,
-      z: zPeakRef.current,
-    }));
-  }, [findFreeSpot]);
-
-  const showCanvasToast = useCallback((message: string, tone: CanvasToast['tone'] = 'error') => {
-    const id = Date.now();
-    setCanvasToast({ id, message, tone });
-    if (canvasToastTimerRef.current) clearTimeout(canvasToastTimerRef.current);
-    canvasToastTimerRef.current = setTimeout(() => {
-      setCanvasToast((current) => (current?.id === id ? null : current));
-      canvasToastTimerRef.current = null;
-    }, 3600);
-  }, []);
-
-  const openPathAsFileCard = useCallback((rawPath: string): boolean => {
-    const path = rawPath.trim();
-    if (!path) {
-      showCanvasToast('Enter an absolute file path.', 'error');
-      return false;
-    }
-    if (!path.startsWith('/')) {
-      showCanvasToast('Open file needs an absolute path.', 'error');
-      return false;
-    }
-    spawnFileCard(path);
-    setFilePathPickerOpen(false);
-    setFilePathInput('');
-    showCanvasToast('File card opened.', 'success');
-    return true;
-  }, [showCanvasToast, spawnFileCard]);
 
   // ── Canvas persistence — the canvas is a place, not a session. ──────
   // Restore once on mount: pure-state kinds land directly, live kinds go
@@ -2694,218 +2332,29 @@ export default function CanvasGlassPreviewPage() {
     };
   }, [sendTerminalDetach, sendTerminalInput]);
 
-  /** Drop a photo anywhere — it surfaces reference-style: filename pill,
-   *  bottom edge dissolving into the canvas, aspect-locked resize.
-   *  dataURI, not an object URL — the persistence snapshot stores items
-   *  verbatim, and a blob: src is dead on the next reload. */
-  const spawnImageCard = useCallback((file: File, at: { x: number; y: number }) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const src = typeof reader.result === 'string' ? reader.result : null;
-      if (!src) return;
-      const probe = new Image();
-      probe.onload = () => {
-        const natW = probe.naturalWidth || 1;
-        const natH = probe.naturalHeight || 1;
-        const aspect = natW / natH;
-        const w = natW >= natH ? IMG_MAX_SPAWN_EDGE : Math.round(IMG_MAX_SPAWN_EDGE * aspect);
-        const h = Math.round(w / aspect);
-        const id = nextIdRef.current;
-        nextIdRef.current += 1;
-        zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
-        const z = zPeakRef.current;
-        setImageCards((previous) => [...previous, {
-          id,
-          x: Math.max(8, at.x - w / 2),
-          y: Math.max(48, at.y - h / 2),
-          z,
-          w,
-          h,
-          aspect,
-          items: [{ src, name: file.name }],
-        }]);
-      };
-      probe.src = src;
-    };
-    reader.readAsDataURL(file);
-  }, []);
-
-  const moveImageCard = useCallback((id: number, x: number, y: number) => {
-    setImageCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
-    // Live hit-test while dragging: highlight the photo we'd stack onto (the
-    // topmost OTHER card whose bounds contain the dragged card's center).
-    const cards = imageCardsRef.current;
-    const dragged = cards.find((c) => c.id === id);
-    if (!dragged) return;
-    const cx = x + dragged.w / 2;
-    const cy = y + dragged.h / 2;
-    let tgt: number | null = null;
-    for (const c of cards) {
-      if (c.id === id) continue;
-      if (cx >= c.x && cx <= c.x + c.w && cy >= c.y && cy <= c.y + c.h) tgt = c.id;
-    }
-    setDropTargetId(tgt);
-  }, []);
-
-  const resizeImageCard = useCallback((id: number, w: number, h: number) => {
-    setImageCards((previous) => previous.map((card) => (
-      card.id === id ? { ...card, w, h } : card
-    )));
-  }, []);
-
-  const closeImageCard = useCallback((id: number) => {
-    setImageCards((previous) => {
-      const target = previous.find((card) => card.id === id);
-      target?.items.forEach((item) => URL.revokeObjectURL(item.src));
-      return previous.filter((card) => card.id !== id);
-    });
-  }, []);
-
-  /** Dropped onto another photo → the two collapse into a stack (deck). */
-  const dropImageCard = useCallback((id: number) => {
-    setDropTargetId(null);
-    setImageCards((previous) => {
-      const dragged = previous.find((card) => card.id === id);
-      if (!dragged) return previous;
-      // Hit-test in CANVAS coords from the dragged card's own geometry — the
-      // SAME basis moveImageCard's live highlight uses. The drop once trusted
-      // the pointer's SCREEN clientX/Y, which only matched canvas space at
-      // zoom=1 / no pan and silently mis-targeted (or missed) the stack under
-      // zoom or pan (#agent-surface-ergonomics coord smell).
-      const centerX = dragged.x + dragged.w / 2;
-      const centerY = dragged.y + dragged.h / 2;
-      const target = previous.find((card) => (
-        card.id !== id
-        && centerX >= card.x && centerX <= card.x + card.w
-        && centerY >= card.y && centerY <= card.y + card.h
-      ));
-      if (!target) return previous;
-      return previous
-        .filter((card) => card.id !== id)
-        .map((card) => (card.id === target.id ? { ...card, items: [...card.items, ...dragged.items] } : card));
-    });
-  }, []);
-
-  /** Flip a deck to the next (dir≥0) or previous (dir<0) photo, rotating the
-   *  stack in place — tap and the ‹ › arrows both route here. items[0] is the
-   *  visible top photo. */
-  const cycleImageCard = useCallback((id: number, dir = 1) => {
-    setImageCards((previous) => previous.map((card) => {
-      if (card.id !== id || card.items.length < 2) return card;
-      if (dir >= 0) {
-        const [first, ...rest] = card.items;
-        return { ...card, items: [...rest, first] };
-      }
-      const last = card.items[card.items.length - 1]!;
-      return { ...card, items: [last, ...card.items.slice(0, -1)] };
-    }));
-  }, []);
-
-  /** Separate a deck → spread its photos back into individual cards (the
-   *  explicit un-stack control on a hovered deck). */
-  const spreadImageCard = useCallback((id: number) => {
-    setImageCards((previous) => {
-      const stackCard = previous.find((card) => card.id === id);
-      if (!stackCard || stackCard.items.length < 2) return previous;
-      const spread: ImageCard[] = stackCard.items.slice(1).map((item, index) => {
-        const spreadId = nextIdRef.current;
-        nextIdRef.current += 1;
-        zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
-        return {
-          id: spreadId,
-          x: stackCard.x + 30 * (index + 1),
-          y: stackCard.y + 22 * (index + 1),
-          z: zPeakRef.current,
-          w: stackCard.w,
-          h: stackCard.h,
-          aspect: stackCard.aspect,
-          items: [item],
-        };
-      });
-      return [
-        ...previous.map((card) => (card.id === id ? { ...card, items: [stackCard.items[0]!] } : card)),
-        ...spread,
-      ];
-    });
-  }, []);
-
-  /** Drop a video clip onto the canvas. IndexedDB stores the bytes, the card
-   *  renders an object URL, and the snapshot keeps only the media id. */
-  const spawnVideoCard = useCallback((file: File, at: { x: number; y: number }) => {
-    const src = URL.createObjectURL(file);
-    const mediaId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `vid-${Date.now()}-${nextIdRef.current}`;
-    const probe = document.createElement('video');
-    probe.preload = 'metadata';
-    probe.onloadedmetadata = () => {
-      if (!canvasMedia.retainObjectURL(src)) return;
-      const natW = probe.videoWidth || 16;
-      const natH = probe.videoHeight || 9;
-      const aspect = natW / natH;
-      const w = natW >= natH ? IMG_MAX_SPAWN_EDGE : Math.round(IMG_MAX_SPAWN_EDGE * aspect);
-      const h = Math.round(w / aspect);
-      const id = nextIdRef.current;
-      nextIdRef.current += 1;
-      zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
-      const z = zPeakRef.current;
-      setVideoCards((previous) => [...previous, {
-        id,
-        x: Math.max(8, at.x - w / 2),
-        y: Math.max(48, at.y - h / 2),
-        z,
-        w,
-        h,
-        aspect,
-        src,
-        name: file.name,
-        mediaId,
-      }]);
-      void putMedia(mediaId, file);
-    };
-    probe.onerror = () => { URL.revokeObjectURL(src); };
-    probe.src = src;
-  }, [canvasMedia]);
-
-  const moveVideoCard = useCallback((id: number, x: number, y: number) => {
-    setVideoCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
-  }, []);
-
-  const resizeVideoCard = useCallback((id: number, w: number, h: number) => {
-    setVideoCards((previous) => previous.map((card) => (
-      card.id === id ? { ...card, w, h } : card
-    )));
-  }, []);
-
-  // First-frame thumbnail from the card → stored on the card so the minimap can
-  // render the video as a still (it can't decode the blob video URL as an image).
-  const setVideoPoster = useCallback((id: number, poster: string) => {
-    setVideoCards((previous) => previous.map((card) => (card.id === id ? { ...card, poster } : card)));
-  }, []);
-
-  const closeVideoCard = useCallback((id: number) => {
-    setVideoCards((previous) => {
-      const target = previous.find((card) => card.id === id);
-      if (target) {
-        URL.revokeObjectURL(target.src);
-        void deleteMedia(target.mediaId);
-      }
-      return previous.filter((card) => card.id !== id);
-    });
-  }, []);
-
-  const dropImages = useCallback((event: React.DragEvent) => {
-    event.preventDefault();
-    const all = Array.from(event.dataTransfer?.files ?? []);
-    const videos = all.filter((file) => file.type.startsWith('video/'));
-    const files = all.filter((file) => file.type.startsWith('image/'));
-    // Drop point arrives in visual px — the card layer is zoomed.
-    const z = canvasZoom();
-    files.forEach((file, index) => {
-      spawnImageCard(file, { x: event.clientX / z + index * 30, y: event.clientY / z + index * 24 });
-    });
-    videos.forEach((file, index) => {
-      spawnVideoCard(file, { x: event.clientX / z + (files.length + index) * 30, y: event.clientY / z + (files.length + index) * 24 });
-    });
-  }, [spawnImageCard, spawnVideoCard]);
+  const {
+    spawnImageCard,
+    moveImageCard,
+    resizeImageCard,
+    closeImageCard,
+    dropImageCard,
+    cycleImageCard,
+    spreadImageCard,
+    spawnVideoCard,
+    moveVideoCard,
+    resizeVideoCard,
+    setVideoPoster,
+    closeVideoCard,
+    dropImages,
+  } = useCanvasMediaSpawners({
+    nextIdRef,
+    zPeakRef,
+    imageCardsRef,
+    canvasMedia,
+    setImageCards,
+    setVideoCards,
+    setDropTargetId,
+  });
 
   // ── Canvas control surface (agent parity) ────────────────────────────────
   // The intent bus's card verbs let an agent drive the canvas the way a human
@@ -3582,8 +3031,51 @@ export default function CanvasGlassPreviewPage() {
             rails, composer, drawers) stays at 1:1; only the workspace
             scales, buying breathing room around the cards. Drag/resize
             handlers divide pointer deltas by the zoom (canvasZoom()). */}
-      <div data-canvas-layer style={{ position: 'absolute', inset: 0, zIndex: 2, zoom: canvasZoomLevel, transform: `translate(${pan.x}px, ${pan.y}px)`, willChange: 'transform' } as React.CSSProperties}>
-
+      <CanvasCardLayers
+        canvasZoomLevel={canvasZoomLevel}
+        pan={pan}
+        termCards={termCards}
+        fileCards={fileCards}
+        treeCards={treeCards}
+        imageCards={imageCards}
+        videoCards={videoCards}
+        browserCards={browserCards}
+        diffCards={diffCards}
+        agentCards={agentCards}
+        brainCards={brainCards}
+        markdownCards={markdownCards}
+        chatCards={chatCards}
+        specCards={specCards}
+        activeLanes={activeLanes}
+        convos={convos}
+        dropTargetId={dropTargetId}
+        specScreenMap={specScreenMap}
+        terminal={{
+          termVeil,
+          connectionEpoch: wsEpoch,
+          onMove: moveTermCard,
+          onResize: resizeTermCard,
+          onFocus: focusTermCard,
+          onClose: closeTerminal,
+          onTermVeilChange: changeTermVeil,
+          registerHandle: registerXtermHandle,
+          sendTerminalAttach,
+          sendTerminalInput,
+          sendTerminalResize,
+          sendTerminalDetach,
+        }}
+        file={{ termVeil, onMove: moveFileCard, onResize: resizeFileCard, onFocus: focusFileCard, onClose: closeFileCard }}
+        tree={{ spawnFileCard, onMove: moveTreeCard, onResize: resizeTreeCard, onFocus: focusTreeCard, onClose: closeTreeCard }}
+        image={{ onMove: moveImageCard, onResize: resizeImageCard, onFocus: focusImageCard, onDrop: dropImageCard, cycleImageCard, onSpread: spreadImageCard, onClose: closeImageCard }}
+        video={{ onMove: moveVideoCard, onResize: resizeVideoCard, onFocus: focusVideoCard, onClose: closeVideoCard, onPoster: setVideoPoster }}
+        browser={{ onMove: moveBrowserCard, onResize: resizeBrowserCard, onFocus: focusBrowserCard, onTabsChange: changeBrowserTabs, onClose: closeBrowserCard }}
+        diff={{ onMove: moveDiffCard, onResize: resizeDiffCard, onFocus: focusDiffCard, onClose: closeDiffCard, onRequestChanges: requestDiffCardChanges, onRefresh: refreshWorktreeDiffCard }}
+        agent={{ onMove: moveAgentCard, onResize: resizeAgentCard, onFocus: focusAgentCard, onClose: closeAgentCard, onReview: reviewAgentCard, onToggleExpand: toggleAgentCardExpand }}
+        brain={{ onMove: moveBrainCard, onResize: resizeBrainCard, onFocus: focusBrainCard, onClose: closeBrainCard }}
+        markdown={{ onMove: moveMarkdownCard, onResize: resizeMarkdownCard, onFocus: focusMarkdownCard, onClose: closeMarkdownCard }}
+        chat={{ sendDefaults: chatSendDefaults, onLiveEvent: handleOrchEvent, onUserSend: noteCardSend, onTruncate: truncateLane, onMove: moveChatCard, onResize: resizeChatCard, onFocus: focusChatCard, onDock: dockChatCard, onClose: closeChatCard }}
+        spec={{ onMove: moveSpecCard, onResize: resizeSpecCard, onFocus: focusSpecCard, onClose: closeSpecCard }}
+      >
       {/* ── Grid drag placeholder — the ghost slot the lifted card will land in.
             Sits behind the cards in the hole they reflow open; glides between
             slots as the target changes. ─────────────────────────────────── */}
@@ -3611,209 +3103,7 @@ export default function CanvasGlassPreviewPage() {
       {cards.map((card) => (
         <CanvasCard key={card.id} card={card} selected={selectedCardId === card.id} onMove={moveCard} onSelect={setSelectedCardId} />
       ))}
-
-      {/* ── Real terminals (production transport, canvas treatment) ── */}
-      <AnimatePresence>
-        {termCards.map((card) => (
-          <TerminalGlassCard
-            key={card.id}
-            card={card}
-            termVeil={termVeil}
-            connectionEpoch={wsEpoch}
-            onMove={moveTermCard}
-            onResize={resizeTermCard}
-            onFocus={focusTermCard}
-            onClose={closeTerminal}
-            onTermVeilChange={changeTermVeil}
-            registerHandle={registerXtermHandle}
-            sendTerminalAttach={sendTerminalAttach}
-            sendTerminalInput={sendTerminalInput}
-            sendTerminalResize={sendTerminalResize}
-            sendTerminalDetach={sendTerminalDetach}
-          />
-        ))}
-      </AnimatePresence>
-
-      {/* ── File cards — any file on the machine, view/edit/save ──── */}
-      <AnimatePresence>
-        {fileCards.map((card) => (
-          <FileGlassCard
-            key={card.id}
-            card={card}
-            termVeil={termVeil}
-            onMove={moveFileCard}
-            onResize={resizeFileCard}
-            onFocus={focusFileCard}
-            onClose={closeFileCard}
-          />
-        ))}
-      </AnimatePresence>
-
-      <FileTreeCardLayer cards={treeCards} spawnFileCard={spawnFileCard} onMove={moveTreeCard}
-        onResize={resizeTreeCard} onFocus={focusTreeCard} onClose={closeTreeCard} />
-
-      {/* ── Image cards — photos dissolve into the canvas; drag together
-            to stack, tap a deck to flip through ─────────────────────── */}
-      <AnimatePresence>
-        {imageCards.map((card) => (
-          <ImageGlassCard
-            key={card.id}
-            card={card}
-            isDropTarget={card.id === dropTargetId}
-            onMove={moveImageCard}
-            onResize={resizeImageCard}
-            onFocus={focusImageCard}
-            onDrop={dropImageCard}
-            onTap={cycleImageCard}
-            onCycle={cycleImageCard}
-            onSpread={spreadImageCard}
-            onClose={closeImageCard}
-          />
-        ))}
-      </AnimatePresence>
-
-      {/* ── Video cards — UI clips that sit on the canvas for reference ── */}
-      <AnimatePresence>
-        {videoCards.map((card) => (
-          <VideoGlassCard
-            key={card.id}
-            card={card}
-            onMove={moveVideoCard}
-            onResize={resizeVideoCard}
-            onFocus={focusVideoCard}
-            onClose={closeVideoCard}
-            onPoster={setVideoPoster}
-          />
-        ))}
-      </AnimatePresence>
-
-      {/* ── Browser cards — a real page in glass ─────────────────── */}
-      <AnimatePresence>
-        {browserCards.map((card) => (
-          <BrowserGlassCard
-            key={card.id}
-            card={card}
-            onMove={moveBrowserCard}
-            onResize={resizeBrowserCard}
-            onFocus={focusBrowserCard}
-            onTabsChange={changeBrowserTabs}
-            onClose={closeBrowserCard}
-          />
-        ))}
-      </AnimatePresence>
-
-      {/* ── Diff cards — the governance moat as canvas objects ────── */}
-      <AnimatePresence>
-        {diffCards.map((card) => (
-          <DiffGlassCard
-            key={card.id}
-            card={card}
-            onMove={moveDiffCard}
-            onResize={resizeDiffCard}
-            onFocus={focusDiffCard}
-            onClose={closeDiffCard}
-            onRequestChanges={requestDiffCardChanges}
-            onRefresh={refreshWorktreeDiffCard}
-            onChanged={refreshWorktreeDiffCard}
-          />
-        ))}
-      </AnimatePresence>
-
-      {/* ── Agent cards — dispatched workers as canvas objects (voice spawn) ─ */}
-      <AnimatePresence>
-        {agentCards.map((card) => (
-          <AgentGlassCard
-            key={card.id}
-            card={card}
-            lane={activeLanes.find((lane) => lane.id === card.laneId) ?? null}
-            onMove={moveAgentCard}
-            onResize={resizeAgentCard}
-            onFocus={focusAgentCard}
-            onClose={closeAgentCard}
-            onReview={reviewAgentCard}
-            onToggleExpand={toggleAgentCardExpand}
-          />
-        ))}
-      </AnimatePresence>
-
-      {/* o8.md cards render in a SEPARATE overlay OUTSIDE this zoom layer (just
-          after it) — CodeMirror caret hit-testing breaks under any CSS scale, so
-          they render at true device-1:1 and scale numerically instead (#1241). */}
-
-      {/* ── Brain cards — instant cited repo answers, on the canvas ── */}
-      <AnimatePresence>
-        {brainCards.map((card) => (
-          <BrainGlassCard
-            key={card.id}
-            card={card}
-            onMove={moveBrainCard}
-            onResize={resizeBrainCard}
-            onFocus={focusBrainCard}
-            onClose={closeBrainCard}
-          />
-        ))}
-      </AnimatePresence>
-
-      {/* ── Markdown cards — orchestrator-rendered explainers (#1270) ── */}
-      <AnimatePresence>
-        {markdownCards.map((card) => (
-          <MarkdownGlassCard
-            key={card.id}
-            card={card}
-            onMove={moveMarkdownCard}
-            onResize={resizeMarkdownCard}
-            onFocus={focusMarkdownCard}
-            onClose={closeMarkdownCard}
-          />
-        ))}
-      </AnimatePresence>
-
-      {/* ── Chat cards — past sessions as their own glass boxes ───── */}
-      <AnimatePresence>
-        {chatCards.map((card) => (
-          <ChatGlassCard
-            key={card.id}
-            card={card}
-            liveEntries={convos[`thread:${card.threadId}`] ?? null}
-            sendDefaults={chatSendDefaults}
-            onLiveEvent={handleOrchEvent}
-            onUserSend={noteCardSend}
-            onTruncate={truncateLane}
-            onMove={moveChatCard}
-            onResize={resizeChatCard}
-            onFocus={focusChatCard}
-            onDock={dockChatCard}
-            onClose={closeChatCard}
-          />
-        ))}
-      </AnimatePresence>
-
-      </div>
-
-      {/* ── o8.md overlay — OUTSIDE the zoom layer so CodeMirror renders at true
-            device-1:1 (WebKit caret hit-testing breaks under ANY CSS scale in
-            the ancestry — even a nested counter-scale to net-1.0; proven). Each
-            card maps its layer-local x/y to screen via screenMap = zoom·(coord+
-            pan) and scales its own size + chrome + editor NUMERICALLY by the
-            zoom, so it looks identical to an in-layer card but the caret works
-            everywhere (#1241). Container is pointerEvents:none (empty canvas
-            stays clickable); each card opts back in. zIndex 3 = above the canvas
-            layer (2), below the chrome (40+). */}
-      <div style={{ position: 'absolute', inset: 0, zIndex: 3, pointerEvents: 'none' } as React.CSSProperties}>
-        <AnimatePresence>
-          {specCards.map((card) => (
-            <SpecGlassCard
-              key={card.id}
-              card={card}
-              screenMap={specScreenMap}
-              onMove={moveSpecCard}
-              onResize={resizeSpecCard}
-              onFocus={focusSpecCard}
-              onClose={closeSpecCard}
-            />
-          ))}
-        </AnimatePresence>
-      </div>
+      </CanvasCardLayers>
 
       {/* ── Top dock — the important header controls ─────────────── */}
       <div
