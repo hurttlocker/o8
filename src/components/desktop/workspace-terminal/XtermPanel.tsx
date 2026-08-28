@@ -7,6 +7,26 @@ import { buildXtermTheme } from '@/components/desktop/workspace-terminal/constan
 import { startSpawnReveal } from '@/components/desktop/workspace-terminal/spawn-reveal';
 import { recordXtermSelectionSnapshot, registerXtermSelectionSource } from '@/components/desktop/workspace-terminal/xterm-selection-registry';
 import { retainInlineTerminalImages, TERMINAL_SCROLLBACK_LINES } from '@/lib/terminal/client-retention';
+import {
+  recordTerminalBenchRender,
+  recordTerminalBenchVisibility,
+  recordTerminalBenchWrite,
+  recordTerminalBenchWriteCompletion,
+  registerTerminalBenchPanel,
+  terminalBenchEnabled,
+} from '@/components/desktop/workspace-terminal/terminal-bench-instrumentation';
+
+function readTerminalText(term: { buffer?: { active?: { length?: number; getLine: (index: number) => { translateToString: (trimRight: boolean) => string } | undefined } } } | null, lines = 40): string {
+  if (!term?.buffer?.active) return '';
+  const active = term.buffer.active;
+  const length = active.length ?? 0;
+  const start = Math.max(0, length - Math.max(1, Math.floor(lines)));
+  const out: string[] = [];
+  for (let index = start; index < length; index += 1) {
+    out.push(active.getLine(index)?.translateToString(true) ?? '');
+  }
+  return out.join('\n').replace(/\s+$/g, '');
+}
 
 export interface InlineImage {
   id: string;
@@ -73,6 +93,8 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fitAddonRef = useRef<any>(null);
   const observerRef = useRef<ResizeObserver | null>(null);
+  const tmuxSessionRef = useRef(tmuxSession);
+  tmuxSessionRef.current = tmuxSession;
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
   const revealCancelRef = useRef<((resetTerm: boolean) => void) | null>(null);
@@ -118,8 +140,31 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
       }
       cancelReveal(true);
       try {
+        if (!terminalBenchEnabled()) {
+          const bytes = Uint8Array.from(atob(data), (char) => char.charCodeAt(0));
+          termRef.current.write(bytes);
+          return;
+        }
+        const decodeStartedAt = performance.now();
         const bytes = Uint8Array.from(atob(data), (char) => char.charCodeAt(0));
-        termRef.current.write(bytes);
+        const decodeMs = performance.now() - decodeStartedAt;
+        const visibleAtWrite = visibleRef.current;
+        const sessionNameAtWrite = tmuxSessionRef.current;
+        const completionStartedAt = performance.now();
+        const writeStartedAt = performance.now();
+        termRef.current.write(bytes, () => {
+          recordTerminalBenchWriteCompletion(
+            sessionNameAtWrite,
+            visibleAtWrite,
+            performance.now() - completionStartedAt,
+          );
+        });
+        recordTerminalBenchWrite(sessionNameAtWrite, visibleAtWrite, {
+          encodedBytes: data.length,
+          decodedBytes: bytes.byteLength,
+          decodeMs,
+          writeCallMs: performance.now() - writeStartedAt,
+        });
       } catch {
         return;
       }
@@ -154,20 +199,23 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
       }
     },
     readText: (lines = 40) => {
-      const term = termRef.current;
-      if (!term?.buffer?.active) return '';
-      const active = term.buffer.active;
-      const length = active.length ?? 0;
-      const start = Math.max(0, length - Math.max(1, Math.floor(lines)));
-      const out: string[] = [];
-      for (let index = start; index < length; index += 1) {
-        out.push(active.getLine(index)?.translateToString(true) ?? '');
-      }
-      return out.join('\n').replace(/\s+$/g, '');
+      return readTerminalText(termRef.current, lines);
     },
     setError: (nextError: string) => setError(nextError),
     setExited: () => setExited(true),
   }), [fitTerminal]);
+
+  useEffect(() => (
+    registerTerminalBenchPanel(
+      tmuxSession,
+      visibleRef.current,
+      (lines) => readTerminalText(termRef.current, lines),
+    ) ?? undefined
+  ), [tmuxSession]);
+
+  useEffect(() => {
+    recordTerminalBenchVisibility(tmuxSession, visible);
+  }, [tmuxSession, visible]);
 
   useEffect(() => {
     if (visible) {
@@ -245,6 +293,11 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
         term.open(containerRef.current);
         termRef.current = term;
         fitAddonRef.current = fitAddon;
+        const renderDisposable = terminalBenchEnabled()
+          ? term.onRender(({ start, end }: { start: number; end: number }) => {
+            recordTerminalBenchRender(tmuxSession, visibleRef.current, start, end);
+          })
+          : null;
         term.onData((data) => {
           sendTerminalInput(tmuxSession, data);
         });
@@ -296,6 +349,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
           sendTerminalAttach(tmuxSession, liveTerm.cols, liveTerm.rows);
         }));
         return () => {
+          renderDisposable?.dispose();
           observerRef.current?.disconnect();
           observerRef.current = null;
         };
@@ -406,6 +460,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
 
   return (
     <div
+      data-o8-term-panel={tmuxSession}
       style={{
         flex: 1,
         width: '100%',

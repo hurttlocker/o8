@@ -36,6 +36,7 @@ export function parseProcessTable(output: string): Map<number, FootprintProcess>
 export function snapshotProcesses(run?: typeof import('node:child_process').execFileSync): Map<number, FootprintProcess>;
 export function descendantPids(processes: Map<number, FootprintProcess>, rootPid: number): Set<number>;
 export function webkitPids(processes: Map<number, FootprintProcess>): Set<number>;
+export function measureProcessPhysicalBytes(pid: number, run?: typeof import('node:child_process').execFileSync): number;
 export function evaluateFootprintBudget(metrics: FootprintMetrics, budget?: typeof FOOTPRINT_BUDGET): {
   pass: boolean;
   checks: Array<{ metric: string; actual: number; ceiling: number; pass: boolean }>;

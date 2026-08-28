@@ -51,6 +51,7 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { homedir } from 'node:os';
 import { promisify } from 'node:util';
 import { getDataDir, migrateDataDirOnce } from '@/lib/data-dir-migration';
+import { TerminalWorkloadStats } from '@/lib/ws-server/terminal-workload-stats';
 
 migrateDataDirOnce();
 
@@ -1037,6 +1038,9 @@ interface InternalTerminalSignalPayload {
 }
 
 const terminalAttachments = new Map<string, TerminalAttachment>();
+const terminalWorkloadStats = process.env.O8_TERMINAL_BENCH === '1'
+  ? new TerminalWorkloadStats()
+  : null;
 const TERMINAL_BATCH_MS = 16; // batch PTY output every 16ms (60fps)
 const DASH_SESSION_ORPHAN_TTL_MS = 30 * 60 * 1000;
 const TERMINAL_SCROLLBACK_MAX_BYTES = 512 * 1024;
@@ -1716,21 +1720,26 @@ function spawnManagedCommandPty(
 function trimScrollback(att: TerminalAttachment) {
   while (att.scrollbackBytes > TERMINAL_SCROLLBACK_MAX_BYTES && att.scrollbackChunks.length > 0) {
     const removed = att.scrollbackChunks.shift() ?? '';
-    att.scrollbackBytes -= Buffer.byteLength(removed, 'utf-8');
+    const removedBytes = Buffer.byteLength(removed, 'utf-8');
+    att.scrollbackBytes -= removedBytes;
+    terminalWorkloadStats?.recordOverflow(att.sessionName, removedBytes);
   }
 }
 
 function appendScrollback(att: TerminalAttachment, data: string) {
   if (!data) return;
   att.scrollbackChunks.push(data);
-  att.scrollbackBytes += Buffer.byteLength(data, 'utf-8');
+  const appendedBytes = Buffer.byteLength(data, 'utf-8');
+  att.scrollbackBytes += appendedBytes;
   trimScrollback(att);
+  terminalWorkloadStats?.recordBuffer(att.sessionName, appendedBytes, att.scrollbackBytes);
 }
 
 function sendTerminalScrollback(client: ClientState, attachment: TerminalAttachment) {
   if (attachment.scrollbackChunks.length === 0) return;
   const scrollback = attachment.scrollbackChunks.join('');
   if (!scrollback) return;
+  terminalWorkloadStats?.recordReplay(attachment.sessionName, Buffer.byteLength(scrollback, 'utf8'));
   const encoded = Buffer.from(scrollback, 'utf-8').toString('base64');
   sendRaw(client, JSON.stringify({
     channel: 'terminal',
@@ -1742,11 +1751,16 @@ function sendTerminalScrollback(client: ClientState, attachment: TerminalAttachm
 function registerTerminalAttachment(attachment: TerminalAttachment) {
   const { sessionName, ptyProcess } = attachment;
 
+  for (const clientId of attachment.clientIds) {
+    terminalWorkloadStats?.recordAttach(sessionName, clientId);
+  }
+
   ptyProcess.onData((data: string) => {
     const att = terminalAttachments.get(sessionName);
     if (!att) return;
 
     att.lastOutputAt = Date.now();
+    terminalWorkloadStats?.recordPty(sessionName, data);
     appendScrollback(att, data);
     att.batchBuffer += data;
 
@@ -1765,10 +1779,19 @@ function registerTerminalAttachment(attachment: TerminalAttachment) {
           data: { sessionName, data: encoded },
         });
 
+        let clientDeliveries = 0;
         for (const cid of att.clientIds) {
           const c = clients.get(cid);
-          if (c) sendRaw(c, msg);
+          if (c) {
+            clientDeliveries += 1;
+            sendRaw(c, msg);
+          }
         }
+        terminalWorkloadStats?.recordFanout(
+          sessionName,
+          Buffer.byteLength(buffered, 'utf8'),
+          clientDeliveries,
+        );
       }, TERMINAL_BATCH_MS);
     }
   });
@@ -2065,7 +2088,10 @@ function sendRaw(client: ClientState, preStringified: string) {
   // per-client encrypted frame for an E2EE client, or the plaintext otherwise.
   const wire = wireForClient(client, preStringified);
   if (client.ws.bufferedAmount > BACKPRESSURE_LIMIT) {
-    if (isLossyMessage(preStringified)) return; // safe to drop
+    if (isLossyMessage(preStringified)) {
+      recordTerminalBenchDrop(preStringified);
+      return;
+    }
     if (client.backpressureQueue.length >= BACKPRESSURE_QUEUE_LIMIT) {
       client.backpressureQueue.shift();
     }
@@ -2076,7 +2102,10 @@ function sendRaw(client: ClientState, preStringified: string) {
   if (client.backpressureQueue.length > 0) {
     flushBackpressureQueue(client);
     if (client.backpressureQueue.length > 0) {
-      if (isLossyMessage(preStringified)) return;
+      if (isLossyMessage(preStringified)) {
+        recordTerminalBenchDrop(preStringified);
+        return;
+      }
       if (client.backpressureQueue.length >= BACKPRESSURE_QUEUE_LIMIT) {
         client.backpressureQueue.shift();
       }
@@ -2086,6 +2115,24 @@ function sendRaw(client: ClientState, preStringified: string) {
     }
   }
   client.ws.send(wire);
+}
+
+function recordTerminalBenchDrop(preStringified: string) {
+  if (!terminalWorkloadStats || !preStringified.includes('"channel":"terminal"')) return;
+  try {
+    const message = JSON.parse(preStringified) as {
+      channel?: string;
+      event?: string;
+      data?: { sessionName?: string; data?: string };
+    };
+    if (message.channel !== 'terminal' || message.event !== 'data') return;
+    const sessionName = message.data?.sessionName;
+    const encoded = message.data?.data;
+    if (!sessionName || !encoded) return;
+    terminalWorkloadStats.recordBackpressureDrop(sessionName, Buffer.from(encoded, 'base64').byteLength);
+  } catch {
+    // Bench diagnostics never affect delivery.
+  }
 }
 
 function broadcast(msg: Record<string, unknown>, filter?: (c: ClientState) => boolean) {
@@ -3487,6 +3534,15 @@ function handleClientMessage(client: ClientState, raw: string) {
     }
 
     // ── Terminal commands ──
+    case 'terminal-bench-reset':
+      handleTerminalBenchReset(client, msg);
+      break;
+    case 'terminal-bench-visibility':
+      handleTerminalBenchVisibility(client, msg);
+      break;
+    case 'terminal-bench-stats':
+      handleTerminalBenchStats(client, msg);
+      break;
     case 'terminal-create':
       handleTerminalCreate(client, msg);
       break;
@@ -6146,6 +6202,52 @@ function sendTerminal(client: ClientState, event: string, payload: Record<string
   send(client, { channel: 'terminal', event, data: payload });
 }
 
+function sendTerminalBench(
+  client: ClientState,
+  event: string,
+  requestId: unknown,
+) {
+  if (!terminalWorkloadStats) return;
+  for (const attachment of terminalAttachments.values()) {
+    terminalWorkloadStats.recordRetainedEscapeState(
+      attachment.sessionName,
+      attachment.scrollbackChunks.join(''),
+    );
+  }
+  send(client, {
+    channel: 'terminal-bench',
+    event,
+    data: {
+      requestId: typeof requestId === 'string' ? requestId : null,
+      snapshot: terminalWorkloadStats.snapshot(),
+    },
+  });
+}
+
+function handleTerminalBenchReset(client: ClientState, msg: Record<string, unknown>) {
+  if (!terminalWorkloadStats) return;
+  terminalWorkloadStats.reset(terminalAttachments.values());
+  sendTerminalBench(client, 'reset', msg.requestId);
+}
+
+function handleTerminalBenchVisibility(client: ClientState, msg: Record<string, unknown>) {
+  if (!terminalWorkloadStats) return;
+  const sessions = Array.isArray(msg.sessions) ? msg.sessions : [];
+  for (const entry of sessions) {
+    if (!entry || typeof entry !== 'object') continue;
+    const sessionName = (entry as { sessionName?: unknown }).sessionName;
+    const visible = (entry as { visible?: unknown }).visible;
+    if (typeof sessionName === 'string' && typeof visible === 'boolean') {
+      terminalWorkloadStats.setVisibility(sessionName, visible);
+    }
+  }
+  sendTerminalBench(client, 'visibility', msg.requestId);
+}
+
+function handleTerminalBenchStats(client: ClientState, msg: Record<string, unknown>) {
+  sendTerminalBench(client, 'stats', msg.requestId);
+}
+
 function materializePendingDashSession(
   client: ClientState,
   sessionName: string,
@@ -6280,6 +6382,7 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
       attachment.orphanTimer = null;
     }
     attachment.clientIds.add(client.id);
+    terminalWorkloadStats?.recordAttach(sessionName, client.id);
     client.terminalSessions.add(sessionName);
     sendTerminal(client, 'attached', { sessionName });
     if (attachment.kind === 'dash-shell') {
@@ -6512,6 +6615,7 @@ function removeClientFromTerminal(clientId: string, sessionName: string) {
   if (!attachment) return;
 
   attachment.clientIds.delete(clientId);
+  terminalWorkloadStats?.recordDetach(sessionName, clientId);
   const c = clients.get(clientId);
   if (c) c.terminalSessions.delete(sessionName);
 

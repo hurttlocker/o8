@@ -530,6 +530,7 @@ function HeaderPill({
   return (
     <div
       data-no-drag
+      data-o8-workspace-tab={tab.id}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onContextMenu={(event) => {

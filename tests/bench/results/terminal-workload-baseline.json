@@ -1,0 +1,2210 @@
+{
+  "schema": "o8/terminal-workload/v1",
+  "generatedAt": "2026-08-28T18:35:21.976Z",
+  "commit": "0609729bd5e286e1aa2ac33a0fde89486d0b9e6b",
+  "dirty": true,
+  "treeFingerprint": "7298ad7fa5f1b9cf47152ad4fdb861bb22a1a018ef25e08760e26c878dbfebd0",
+  "buildMode": "production",
+  "devModeCpuWarning": false,
+  "hardware": {
+    "arch": "x64",
+    "cpuModel": "Intel(R) Core(TM) i7-10700K CPU @ 3.80GHz",
+    "logicalCpuCount": 16,
+    "totalMemoryBytes": 68719476736
+  },
+  "os": {
+    "platform": "darwin",
+    "release": "25.6.0"
+  },
+  "fixture": {
+    "id": "terminal-ansi-alt-screen-v1",
+    "sessionCounts": [
+      1,
+      4,
+      12
+    ],
+    "samplesPerSessionCount": 3,
+    "bytesPerSecondPerSession": 81920,
+    "durationMs": 10000,
+    "chunkMs": 32,
+    "seed": 1721,
+    "alternateScreen": {
+      "enterAtFraction": 0.25,
+      "exitAtFraction": 0.8,
+      "decset": 1049
+    }
+  },
+  "sampleCount": 9,
+  "rawArtifactDirectory": "tests/bench/latest/terminal-workload-2026-08-28",
+  "summary": {
+    "1": {
+      "sampleCount": 3,
+      "mountedTerminalPanels": {
+        "samples": 3,
+        "min": 1,
+        "p50": 1,
+        "p95": 1,
+        "max": 1
+      },
+      "visibleTerminalPanels": {
+        "samples": 3,
+        "min": 1,
+        "p50": 1,
+        "p95": 1,
+        "max": 1
+      },
+      "ptyCount": {
+        "samples": 3,
+        "min": 1,
+        "p50": 1,
+        "p95": 1,
+        "max": 1
+      },
+      "hiddenWriteBytesPerSecondPerPanel": {
+        "samples": 3,
+        "min": 0,
+        "p50": 0,
+        "p95": 0,
+        "max": 0
+      },
+      "hiddenWriteCallsPerSecondPerPanel": {
+        "samples": 3,
+        "min": 0,
+        "p50": 0,
+        "p95": 0,
+        "max": 0
+      },
+      "longTaskMsPerMinute": {
+        "samples": 3,
+        "min": 0,
+        "p50": 0,
+        "p95": 0,
+        "max": 0
+      },
+      "revealMs": {
+        "samples": 0,
+        "min": null,
+        "p50": null,
+        "p95": null,
+        "max": null
+      },
+      "firstCorrectFrameMs": {
+        "samples": 0,
+        "min": null,
+        "p50": null,
+        "p95": null,
+        "max": null
+      },
+      "keystrokeToPaintMs": {
+        "samples": 9,
+        "min": 41.4,
+        "p50": 43.1,
+        "p95": 56.4,
+        "max": 56.4
+      },
+      "keystrokeToPaintTimeouts": 0,
+      "processCpuPercent": {
+        "applicationServer": {
+          "samples": 3,
+          "min": 12.38,
+          "p50": 15.03,
+          "p95": 17.18,
+          "max": 17.18
+        },
+        "realtimeServer": {
+          "samples": 3,
+          "min": 6.05,
+          "p50": 7.22,
+          "p95": 7.52,
+          "max": 7.52
+        },
+        "chromiumRenderer": {
+          "samples": 3,
+          "min": 18.35,
+          "p50": 19.16,
+          "p95": 20.74,
+          "max": 20.74
+        }
+      },
+      "processPhysicalBytes": {
+        "applicationServer": {
+          "samples": 3,
+          "min": 242221056,
+          "p50": 246415360,
+          "p95": 279969792,
+          "max": 279969792
+        },
+        "realtimeServer": {
+          "samples": 3,
+          "min": 140754944,
+          "p50": 144924672,
+          "p95": 161669120,
+          "max": 161669120
+        },
+        "chromiumRenderer": {
+          "samples": 3,
+          "min": 182452224,
+          "p50": 182452224,
+          "p95": 185597952,
+          "max": 185597952
+        }
+      },
+      "attachedClientsPerSession": [
+        {
+          "cortex-dash-2224e39f7de5c59cc602d323d668d0a2": 1
+        },
+        {
+          "cortex-dash-8cb524ebd991386d90859eb9142055e6": 1
+        },
+        {
+          "cortex-dash-aecb6fa7024ff6d8eb8f02a5f82a5b79": 1
+        }
+      ],
+      "initiallyUnmountedBrowserWriteBytes": {
+        "samples": 3,
+        "min": 0,
+        "p50": 0,
+        "p95": 0,
+        "max": 0
+      },
+      "residencyChurnCount": {
+        "samples": 3,
+        "min": 0,
+        "p50": 0,
+        "p95": 0,
+        "max": 0
+      },
+      "neverMountedSessionCount": {
+        "samples": 3,
+        "min": 0,
+        "p50": 0,
+        "p95": 0,
+        "max": 0
+      },
+      "unmountedBrowserWriteBytes": {
+        "samples": 3,
+        "min": 0,
+        "p50": 0,
+        "p95": 0,
+        "max": 0
+      },
+      "unmountedServerHiddenBytes": {
+        "samples": 3,
+        "min": 0,
+        "p50": 0,
+        "p95": 0,
+        "max": 0
+      },
+      "attribution": {
+        "transportJsonParseMs": {
+          "samples": 3,
+          "min": 4.2,
+          "p50": 4.4,
+          "p95": 4.8,
+          "max": 4.8
+        },
+        "base64DecodeMs": {
+          "samples": 3,
+          "min": 66.8,
+          "p50": 69.8,
+          "p95": 70.8,
+          "max": 70.8
+        },
+        "termWriteCallMs": {
+          "samples": 3,
+          "min": 4.2,
+          "p50": 6,
+          "p95": 6.4,
+          "max": 6.4
+        },
+        "termWriteCompletionMs": {
+          "samples": 3,
+          "min": 152.2,
+          "p50": 152.5,
+          "p95": 170.8,
+          "max": 170.8
+        },
+        "renderEvents": {
+          "samples": 3,
+          "min": 280,
+          "p50": 319,
+          "p95": 320,
+          "max": 320
+        },
+        "fanoutClientDeliveries": {
+          "samples": 3,
+          "min": 595,
+          "p50": 635,
+          "p95": 635,
+          "max": 635
+        }
+      },
+      "overflowEvents": {
+        "samples": 3,
+        "min": 595,
+        "p50": 661,
+        "p95": 705,
+        "max": 705
+      },
+      "backpressureDropEvents": {
+        "samples": 3,
+        "min": 0,
+        "p50": 0,
+        "p95": 0,
+        "max": 0
+      }
+    },
+    "4": {
+      "sampleCount": 3,
+      "mountedTerminalPanels": {
+        "samples": 3,
+        "min": 2,
+        "p50": 3,
+        "p95": 3,
+        "max": 3
+      },
+      "visibleTerminalPanels": {
+        "samples": 3,
+        "min": 1,
+        "p50": 1,
+        "p95": 1,
+        "max": 1
+      },
+      "ptyCount": {
+        "samples": 3,
+        "min": 4,
+        "p50": 4,
+        "p95": 4,
+        "max": 4
+      },
+      "hiddenWriteBytesPerSecondPerPanel": {
+        "samples": 3,
+        "min": 54155.24,
+        "p50": 55341.11,
+        "p95": 129319.32,
+        "max": 129319.32
+      },
+      "hiddenWriteCallsPerSecondPerPanel": {
+        "samples": 3,
+        "min": 20.36,
+        "p50": 20.8,
+        "p95": 25.38,
+        "max": 25.38
+      },
+      "longTaskMsPerMinute": {
+        "samples": 3,
+        "min": 373.93,
+        "p50": 482.19,
+        "p95": 1379.06,
+        "max": 1379.06
+      },
+      "revealMs": {
+        "samples": 3,
+        "min": 46.1,
+        "p50": 51.6,
+        "p95": 96.3,
+        "max": 96.3
+      },
+      "firstCorrectFrameMs": {
+        "samples": 3,
+        "min": 47.7,
+        "p50": 134.8,
+        "p95": 204.1,
+        "max": 204.1
+      },
+      "keystrokeToPaintMs": {
+        "samples": 9,
+        "min": 33.8,
+        "p50": 43.6,
+        "p95": 62,
+        "max": 62
+      },
+      "keystrokeToPaintTimeouts": 0,
+      "processCpuPercent": {
+        "applicationServer": {
+          "samples": 3,
+          "min": 14.19,
+          "p50": 18.24,
+          "p95": 23.74,
+          "max": 23.74
+        },
+        "realtimeServer": {
+          "samples": 3,
+          "min": 11.64,
+          "p50": 13.74,
+          "p95": 14.61,
+          "max": 14.61
+        },
+        "chromiumRenderer": {
+          "samples": 3,
+          "min": 24.2,
+          "p50": 27.67,
+          "p95": 31.33,
+          "max": 31.33
+        }
+      },
+      "processPhysicalBytes": {
+        "applicationServer": {
+          "samples": 3,
+          "min": 256901120,
+          "p50": 268435456,
+          "p95": 385875968,
+          "max": 385875968
+        },
+        "realtimeServer": {
+          "samples": 3,
+          "min": 148701184,
+          "p50": 159215616,
+          "p95": 179625984,
+          "max": 179625984
+        },
+        "chromiumRenderer": {
+          "samples": 3,
+          "min": 219152384,
+          "p50": 224395264,
+          "p95": 261095424,
+          "max": 261095424
+        }
+      },
+      "attachedClientsPerSession": [
+        {
+          "cortex-dash-26bea426ac404df4056c576268434e90": 2,
+          "cortex-dash-e562a83579f842da417f5b12f72a3d7b": 1,
+          "cortex-dash-1b36310fa314d8afe587a6dd9c583352": 2,
+          "cortex-dash-8ce6ae3eba45faa48f2923aa982ca506": 2
+        },
+        {
+          "cortex-dash-5f85079d2f8dcc286718f8638162af69": 2,
+          "cortex-dash-4e649ff503510bcab0a5e834b08a5298": 1,
+          "cortex-dash-0c97ec3fa0fa5570690fb4e58b1f0ca8": 2,
+          "cortex-dash-2d78a91a64ba30d3a921c49c0c46d72a": 2
+        },
+        {
+          "cortex-dash-d238ddea12d0f249293f29d7fcda26a0": 1,
+          "cortex-dash-220e4af968ca80152e18f5409c4201be": 1,
+          "cortex-dash-e2c8161ceddedf6b531dfa0a7f2da244": 1,
+          "cortex-dash-27884eb6692cf7f41962b355d06d0ae7": 1
+        }
+      ],
+      "initiallyUnmountedBrowserWriteBytes": {
+        "samples": 3,
+        "min": 79440,
+        "p50": 886924,
+        "p95": 889731,
+        "max": 889731
+      },
+      "residencyChurnCount": {
+        "samples": 3,
+        "min": 1,
+        "p50": 1,
+        "p95": 1,
+        "max": 1
+      },
+      "neverMountedSessionCount": {
+        "samples": 3,
+        "min": 0,
+        "p50": 0,
+        "p95": 1,
+        "max": 1
+      },
+      "unmountedBrowserWriteBytes": {
+        "samples": 3,
+        "min": 0,
+        "p50": 0,
+        "p95": 0,
+        "max": 0
+      },
+      "unmountedServerHiddenBytes": {
+        "samples": 3,
+        "min": 0,
+        "p50": 0,
+        "p95": 844284,
+        "max": 844284
+      },
+      "attribution": {
+        "transportJsonParseMs": {
+          "samples": 3,
+          "min": 6.5,
+          "p50": 9.9,
+          "p95": 9.9,
+          "max": 9.9
+        },
+        "base64DecodeMs": {
+          "samples": 3,
+          "min": 177.8,
+          "p50": 190.1,
+          "p95": 224.9,
+          "max": 224.9
+        },
+        "termWriteCallMs": {
+          "samples": 3,
+          "min": 6.1,
+          "p50": 9.5,
+          "p95": 12.3,
+          "max": 12.3
+        },
+        "termWriteCompletionMs": {
+          "samples": 3,
+          "min": 432.5,
+          "p50": 497.1,
+          "p95": 556.7,
+          "max": 556.7
+        },
+        "renderEvents": {
+          "samples": 3,
+          "min": 182,
+          "p50": 307,
+          "p95": 308,
+          "max": 308
+        },
+        "fanoutClientDeliveries": {
+          "samples": 3,
+          "min": 1779,
+          "p50": 2047,
+          "p95": 2051,
+          "max": 2051
+        }
+      },
+      "overflowEvents": {
+        "samples": 3,
+        "min": 2095,
+        "p50": 2241,
+        "p95": 2307,
+        "max": 2307
+      },
+      "backpressureDropEvents": {
+        "samples": 3,
+        "min": 1,
+        "p50": 2,
+        "p95": 4,
+        "max": 4
+      }
+    },
+    "12": {
+      "sampleCount": 3,
+      "mountedTerminalPanels": {
+        "samples": 3,
+        "min": 3,
+        "p50": 3,
+        "p95": 3,
+        "max": 3
+      },
+      "visibleTerminalPanels": {
+        "samples": 3,
+        "min": 1,
+        "p50": 1,
+        "p95": 1,
+        "max": 1
+      },
+      "ptyCount": {
+        "samples": 3,
+        "min": 12,
+        "p50": 12,
+        "p95": 12,
+        "max": 12
+      },
+      "hiddenWriteBytesPerSecondPerPanel": {
+        "samples": 3,
+        "min": 53080.62,
+        "p50": 53452.84,
+        "p95": 71365.91,
+        "max": 71365.91
+      },
+      "hiddenWriteCallsPerSecondPerPanel": {
+        "samples": 3,
+        "min": 18.69,
+        "p50": 19.98,
+        "p95": 20.08,
+        "max": 20.08
+      },
+      "longTaskMsPerMinute": {
+        "samples": 3,
+        "min": 360.89,
+        "p50": 362,
+        "p95": 1299.85,
+        "max": 1299.85
+      },
+      "revealMs": {
+        "samples": 3,
+        "min": 106.8,
+        "p50": 165.5,
+        "p95": 195.9,
+        "max": 195.9
+      },
+      "firstCorrectFrameMs": {
+        "samples": 3,
+        "min": 159.1,
+        "p50": 263.4,
+        "p95": 290.2,
+        "max": 290.2
+      },
+      "keystrokeToPaintMs": {
+        "samples": 9,
+        "min": 39.2,
+        "p50": 54.2,
+        "p95": 138.2,
+        "max": 138.2
+      },
+      "keystrokeToPaintTimeouts": 0,
+      "processCpuPercent": {
+        "applicationServer": {
+          "samples": 3,
+          "min": 7.83,
+          "p50": 9.96,
+          "p95": 18.04,
+          "max": 18.04
+        },
+        "realtimeServer": {
+          "samples": 3,
+          "min": 23.14,
+          "p50": 25.23,
+          "p95": 38.11,
+          "max": 38.11
+        },
+        "chromiumRenderer": {
+          "samples": 3,
+          "min": 27.83,
+          "p50": 33.86,
+          "p95": 41.12,
+          "max": 41.12
+        }
+      },
+      "processPhysicalBytes": {
+        "applicationServer": {
+          "samples": 3,
+          "min": 277872640,
+          "p50": 459276288,
+          "p95": 461373440,
+          "max": 461373440
+        },
+        "realtimeServer": {
+          "samples": 3,
+          "min": 199946240,
+          "p50": 200200192,
+          "p95": 202252288,
+          "max": 202252288
+        },
+        "chromiumRenderer": {
+          "samples": 3,
+          "min": 240123904,
+          "p50": 271581184,
+          "p95": 273678336,
+          "max": 273678336
+        }
+      },
+      "attachedClientsPerSession": [
+        {
+          "cortex-dash-5cbacb7becbbc7aa48abb0202cc727e7": 1,
+          "cortex-dash-cc0db5ce485c5b75d01e596f2cac4c25": 2,
+          "cortex-dash-c75696b3f2b02ff0ba17ffd40aa214ff": 1,
+          "cortex-dash-b4ea18d2954e916c9d823374485b29d2": 1,
+          "cortex-dash-a42e86836d1301e3ade778d8a69bf4f5": 1,
+          "cortex-dash-085b51301ec0a3c83be2bd21f169d496": 1,
+          "cortex-dash-e3d036ed499c7562913c838815aa92e5": 1,
+          "cortex-dash-2ac285cb69116c07db886278b6a45695": 1,
+          "cortex-dash-f21a0f3fe64785f43193123249dfb85b": 1,
+          "cortex-dash-0440c3abace6f3a9299387e91e3c43d8": 1,
+          "cortex-dash-fa3beeeef4a8eed57f19864d81d226bc": 1,
+          "cortex-dash-ec86f63511fc6628d146bbfd77eed49e": 1
+        },
+        {
+          "cortex-dash-cfc79ba84319f459ea64e6a1dad3de3c": 1,
+          "cortex-dash-bac9806ec054f95837869a82fdf27c1f": 1,
+          "cortex-dash-a4ca531e12807707e88b8d6bfe2a537d": 1,
+          "cortex-dash-0f8f92b133c934c988577ac119277e36": 1,
+          "cortex-dash-b9d34fd562b407fca893f45297172349": 1,
+          "cortex-dash-231fb987cf01198f57d25453e17ef220": 1,
+          "cortex-dash-a0e24d62a2e930db4b0e4b277fedbf37": 1,
+          "cortex-dash-e3faaa7cbec585a11b8fb179b52f865f": 1,
+          "cortex-dash-9df1a366784053fd1fd65b9aa2dae2ec": 1,
+          "cortex-dash-c14676124c6d115733b503606952e8aa": 1,
+          "cortex-dash-f2dd6dd09f2ba982f97cb39bbf3d5521": 1,
+          "cortex-dash-ca585d1b88b5f24eff1a6545fbae9c19": 1
+        },
+        {
+          "cortex-dash-6b2ed455b841c1e5879b7f37b057c624": 2,
+          "cortex-dash-6e9ae50061caae2fd3d548a4d4c8cf24": 2,
+          "cortex-dash-5be5e2c0cc1b630fe594ad85e92802a6": 1,
+          "cortex-dash-87644e58c07343ee15831526813f5cc2": 1,
+          "cortex-dash-a6495330ac0f5211bd11d23e18b44697": 1,
+          "cortex-dash-76adfa16607292a4cd55280c4d4c35f9": 1,
+          "cortex-dash-726092e92fea636dbdd99b2827023d96": 1,
+          "cortex-dash-0fb35985c079ab378efe6b9fc2e0b697": 1,
+          "cortex-dash-5e95f53cc126f454abbcfb40323e41ff": 1,
+          "cortex-dash-f89c07d59d25ef8b0acc34914de5034b": 2,
+          "cortex-dash-cf1381a6bbddcd488485c2a2f2f4f0e2": 2,
+          "cortex-dash-116b1476efe9f420e3d467e98aab72ed": 1
+        }
+      ],
+      "initiallyUnmountedBrowserWriteBytes": {
+        "samples": 3,
+        "min": 450851,
+        "p50": 869110,
+        "p95": 1264869,
+        "max": 1264869
+      },
+      "residencyChurnCount": {
+        "samples": 3,
+        "min": 2,
+        "p50": 2,
+        "p95": 3,
+        "max": 3
+      },
+      "neverMountedSessionCount": {
+        "samples": 3,
+        "min": 6,
+        "p50": 7,
+        "p95": 7,
+        "max": 7
+      },
+      "unmountedBrowserWriteBytes": {
+        "samples": 3,
+        "min": 0,
+        "p50": 0,
+        "p95": 0,
+        "max": 0
+      },
+      "unmountedServerHiddenBytes": {
+        "samples": 3,
+        "min": 5069660,
+        "p50": 5908069,
+        "p95": 5908168,
+        "max": 5908168
+      },
+      "attribution": {
+        "transportJsonParseMs": {
+          "samples": 3,
+          "min": 14.1,
+          "p50": 15,
+          "p95": 32.6,
+          "max": 32.6
+        },
+        "base64DecodeMs": {
+          "samples": 3,
+          "min": 206.8,
+          "p50": 223.8,
+          "p95": 253.7,
+          "max": 253.7
+        },
+        "termWriteCallMs": {
+          "samples": 3,
+          "min": 11.5,
+          "p50": 11.9,
+          "p95": 14.3,
+          "max": 14.3
+        },
+        "termWriteCompletionMs": {
+          "samples": 3,
+          "min": 478.8,
+          "p50": 547.6,
+          "p95": 898.8,
+          "max": 898.8
+        },
+        "renderEvents": {
+          "samples": 3,
+          "min": 305,
+          "p50": 308,
+          "p95": 312,
+          "max": 312
+        },
+        "fanoutClientDeliveries": {
+          "samples": 3,
+          "min": 4894,
+          "p50": 5066,
+          "p95": 6640,
+          "max": 6640
+        }
+      },
+      "overflowEvents": {
+        "samples": 3,
+        "min": 5746,
+        "p50": 7689,
+        "p95": 7859,
+        "max": 7859
+      },
+      "backpressureDropEvents": {
+        "samples": 3,
+        "min": 2,
+        "p50": 4,
+        "p95": 15,
+        "max": 15
+      }
+    }
+  },
+  "samples": [
+    {
+      "schema": "o8/terminal-workload-sample/v1",
+      "sessionCount": 1,
+      "sampleIndex": 1,
+      "seed": 1822,
+      "buildMode": "production",
+      "devModeCpuWarning": false,
+      "observationMs": 10909,
+      "inventory": {
+        "terminalChipCount": 1,
+        "orchestratorChipCount": 1,
+        "activeTabId": "term-twmtdag2lwn1s1-1",
+        "ptyCount": 1,
+        "ptySessions": [
+          "cortex-dash-2224e39f7de5c59cc602d323d668d0a2"
+        ],
+        "mountedTerminalPanelCount": 1,
+        "visibleTerminalPanelCount": 1,
+        "mountedSessionNames": [
+          "cortex-dash-2224e39f7de5c59cc602d323d668d0a2"
+        ],
+        "attachedClientsPerSession": {
+          "cortex-dash-2224e39f7de5c59cc602d323d668d0a2": 1
+        }
+      },
+      "latency": {
+        "revealAvailability": "not-applicable-single-terminal",
+        "revealMs": [],
+        "firstCorrectFrameMs": [],
+        "keystrokeToPaintMs": [
+          45.7,
+          43.1,
+          43.3
+        ],
+        "keystrokeToPaintTimedOut": [
+          false,
+          false,
+          false
+        ],
+        "keystrokeToPaintTimeoutMs": 10000
+      },
+      "browser": {
+        "hiddenWriteBytesPerSecondPerPanel": 0,
+        "hiddenWriteCallsPerSecondPerPanel": 0,
+        "totalVisibleWriteBytes": 850845,
+        "totalHiddenWriteBytes": 0,
+        "totalWriteCalls": 318,
+        "totalDecodeMs": 66.8,
+        "totalWriteCallMs": 6.4,
+        "totalWriteCompletionMs": 152.2,
+        "totalRenderEvents": 319,
+        "totalRenderRows": 7570,
+        "initiallyUnmountedSessionNames": [],
+        "neverMountedSessionNames": [],
+        "residencyChurnSessionNames": [],
+        "endMountedSessionNames": [
+          "cortex-dash-2224e39f7de5c59cc602d323d668d0a2"
+        ],
+        "initiallyUnmountedWriteBytes": 0,
+        "unmountedWriteBytes": 0,
+        "transport": {
+          "terminalMessages": 318,
+          "rawBytes": 1172262,
+          "encodedBytes": 1135056,
+          "jsonParseMs": 4.199997901916504
+        }
+      },
+      "server": {
+        "visiblePtyChunks": 1380,
+        "visiblePtyBytes": 848359,
+        "hiddenPtyChunks": 0,
+        "hiddenPtyBytes": 0,
+        "attachEvents": 1,
+        "detachEvents": 1,
+        "bufferEvents": 1380,
+        "replayEvents": 1,
+        "overflowEvents": 661,
+        "overflowBytes": 326015,
+        "backpressureDropEvents": 0,
+        "backpressureDropBytes": 0,
+        "fanoutClientDeliveries": 635,
+        "unmountedHiddenBytes": 0
+      },
+      "performance": {
+        "longTaskSupported": true,
+        "longTaskCount": 0,
+        "longTaskMs": 0,
+        "longTaskMsPerMinute": 0,
+        "frameCount": 715,
+        "framesPerSecond": 65.54,
+        "longTasks": []
+      },
+      "processes": {
+        "applicationServer": {
+          "processCount": 2,
+          "cpuPercent": 15.03,
+          "physicalBytes": 246415360,
+          "physicalUnavailable": []
+        },
+        "realtimeServer": {
+          "processCount": 3,
+          "cpuPercent": 7.52,
+          "physicalBytes": 144924672,
+          "physicalUnavailable": []
+        },
+        "chromiumRenderer": {
+          "processCount": 3,
+          "cpuPercent": 19.16,
+          "physicalBytes": 182452224,
+          "physicalUnavailable": []
+        }
+      },
+      "replayRisk": {
+        "sessionsWithObservedAltScreen": [
+          "cortex-dash-2224e39f7de5c59cc602d323d668d0a2"
+        ],
+        "sessionsMissingRetainedAltEnter": [
+          "cortex-dash-2224e39f7de5c59cc602d323d668d0a2"
+        ],
+        "sessionsWithRetainedAltExit": [
+          "cortex-dash-2224e39f7de5c59cc602d323d668d0a2"
+        ]
+      },
+      "artifact": "tests/bench/latest/terminal-workload-2026-08-28/n1-sample-1.json"
+    },
+    {
+      "schema": "o8/terminal-workload-sample/v1",
+      "sessionCount": 1,
+      "sampleIndex": 2,
+      "seed": 1823,
+      "buildMode": "production",
+      "devModeCpuWarning": false,
+      "observationMs": 10902,
+      "inventory": {
+        "terminalChipCount": 1,
+        "orchestratorChipCount": 1,
+        "activeTabId": "term-twmtdagkmon1s2-1",
+        "ptyCount": 1,
+        "ptySessions": [
+          "cortex-dash-8cb524ebd991386d90859eb9142055e6"
+        ],
+        "mountedTerminalPanelCount": 1,
+        "visibleTerminalPanelCount": 1,
+        "mountedSessionNames": [
+          "cortex-dash-8cb524ebd991386d90859eb9142055e6"
+        ],
+        "attachedClientsPerSession": {
+          "cortex-dash-8cb524ebd991386d90859eb9142055e6": 1
+        }
+      },
+      "latency": {
+        "revealAvailability": "not-applicable-single-terminal",
+        "revealMs": [],
+        "firstCorrectFrameMs": [],
+        "keystrokeToPaintMs": [
+          56.4,
+          42.4,
+          42.6
+        ],
+        "keystrokeToPaintTimedOut": [
+          false,
+          false,
+          false
+        ],
+        "keystrokeToPaintTimeoutMs": 10000
+      },
+      "browser": {
+        "hiddenWriteBytesPerSecondPerPanel": 0,
+        "hiddenWriteCallsPerSecondPerPanel": 0,
+        "totalVisibleWriteBytes": 857237,
+        "totalHiddenWriteBytes": 0,
+        "totalWriteCalls": 279,
+        "totalDecodeMs": 70.8,
+        "totalWriteCallMs": 6,
+        "totalWriteCompletionMs": 170.8,
+        "totalRenderEvents": 280,
+        "totalRenderRows": 6697,
+        "initiallyUnmountedSessionNames": [],
+        "neverMountedSessionNames": [],
+        "residencyChurnSessionNames": [],
+        "endMountedSessionNames": [
+          "cortex-dash-8cb524ebd991386d90859eb9142055e6"
+        ],
+        "initiallyUnmountedWriteBytes": 0,
+        "unmountedWriteBytes": 0,
+        "transport": {
+          "terminalMessages": 279,
+          "rawBytes": 1176123,
+          "encodedBytes": 1143480,
+          "jsonParseMs": 4.399999141693115
+        }
+      },
+      "server": {
+        "visiblePtyChunks": 1427,
+        "visiblePtyBytes": 852820,
+        "hiddenPtyChunks": 0,
+        "hiddenPtyBytes": 0,
+        "attachEvents": 1,
+        "detachEvents": 1,
+        "bufferEvents": 1427,
+        "replayEvents": 1,
+        "overflowEvents": 705,
+        "overflowBytes": 330458,
+        "backpressureDropEvents": 0,
+        "backpressureDropBytes": 0,
+        "fanoutClientDeliveries": 595,
+        "unmountedHiddenBytes": 0
+      },
+      "performance": {
+        "longTaskSupported": true,
+        "longTaskCount": 0,
+        "longTaskMs": 0,
+        "longTaskMsPerMinute": 0,
+        "frameCount": 714,
+        "framesPerSecond": 65.49,
+        "longTasks": []
+      },
+      "processes": {
+        "applicationServer": {
+          "processCount": 2,
+          "cpuPercent": 12.38,
+          "physicalBytes": 242221056,
+          "physicalUnavailable": []
+        },
+        "realtimeServer": {
+          "processCount": 3,
+          "cpuPercent": 6.05,
+          "physicalBytes": 161669120,
+          "physicalUnavailable": []
+        },
+        "chromiumRenderer": {
+          "processCount": 3,
+          "cpuPercent": 18.35,
+          "physicalBytes": 185597952,
+          "physicalUnavailable": []
+        }
+      },
+      "replayRisk": {
+        "sessionsWithObservedAltScreen": [
+          "cortex-dash-8cb524ebd991386d90859eb9142055e6"
+        ],
+        "sessionsMissingRetainedAltEnter": [
+          "cortex-dash-8cb524ebd991386d90859eb9142055e6"
+        ],
+        "sessionsWithRetainedAltExit": [
+          "cortex-dash-8cb524ebd991386d90859eb9142055e6"
+        ]
+      },
+      "artifact": "tests/bench/latest/terminal-workload-2026-08-28/n1-sample-2.json"
+    },
+    {
+      "schema": "o8/terminal-workload-sample/v1",
+      "sessionCount": 1,
+      "sampleIndex": 3,
+      "seed": 1824,
+      "buildMode": "production",
+      "devModeCpuWarning": false,
+      "observationMs": 10945,
+      "inventory": {
+        "terminalChipCount": 1,
+        "orchestratorChipCount": 1,
+        "activeTabId": "term-twmtdah1z4n1s3-1",
+        "ptyCount": 1,
+        "ptySessions": [
+          "cortex-dash-aecb6fa7024ff6d8eb8f02a5f82a5b79"
+        ],
+        "mountedTerminalPanelCount": 1,
+        "visibleTerminalPanelCount": 1,
+        "mountedSessionNames": [
+          "cortex-dash-aecb6fa7024ff6d8eb8f02a5f82a5b79"
+        ],
+        "attachedClientsPerSession": {
+          "cortex-dash-aecb6fa7024ff6d8eb8f02a5f82a5b79": 1
+        }
+      },
+      "latency": {
+        "revealAvailability": "not-applicable-single-terminal",
+        "revealMs": [],
+        "firstCorrectFrameMs": [],
+        "keystrokeToPaintMs": [
+          48.9,
+          41.4,
+          41.5
+        ],
+        "keystrokeToPaintTimedOut": [
+          false,
+          false,
+          false
+        ],
+        "keystrokeToPaintTimeoutMs": 10000
+      },
+      "browser": {
+        "hiddenWriteBytesPerSecondPerPanel": 0,
+        "hiddenWriteCallsPerSecondPerPanel": 0,
+        "totalVisibleWriteBytes": 850076,
+        "totalHiddenWriteBytes": 0,
+        "totalWriteCalls": 318,
+        "totalDecodeMs": 69.8,
+        "totalWriteCallMs": 4.2,
+        "totalWriteCompletionMs": 152.5,
+        "totalRenderEvents": 320,
+        "totalRenderRows": 7594,
+        "initiallyUnmountedSessionNames": [],
+        "neverMountedSessionNames": [],
+        "residencyChurnSessionNames": [],
+        "endMountedSessionNames": [
+          "cortex-dash-aecb6fa7024ff6d8eb8f02a5f82a5b79"
+        ],
+        "initiallyUnmountedWriteBytes": 0,
+        "unmountedWriteBytes": 0,
+        "transport": {
+          "terminalMessages": 318,
+          "rawBytes": 1171234,
+          "encodedBytes": 1134028,
+          "jsonParseMs": 4.8000006675720215
+        }
+      },
+      "server": {
+        "visiblePtyChunks": 1320,
+        "visiblePtyBytes": 848368,
+        "hiddenPtyChunks": 0,
+        "hiddenPtyBytes": 0,
+        "attachEvents": 1,
+        "detachEvents": 1,
+        "bufferEvents": 1320,
+        "replayEvents": 1,
+        "overflowEvents": 595,
+        "overflowBytes": 326002,
+        "backpressureDropEvents": 0,
+        "backpressureDropBytes": 0,
+        "fanoutClientDeliveries": 635,
+        "unmountedHiddenBytes": 0
+      },
+      "performance": {
+        "longTaskSupported": true,
+        "longTaskCount": 0,
+        "longTaskMs": 0,
+        "longTaskMsPerMinute": 0,
+        "frameCount": 733,
+        "framesPerSecond": 66.97,
+        "longTasks": []
+      },
+      "processes": {
+        "applicationServer": {
+          "processCount": 2,
+          "cpuPercent": 17.18,
+          "physicalBytes": 279969792,
+          "physicalUnavailable": []
+        },
+        "realtimeServer": {
+          "processCount": 3,
+          "cpuPercent": 7.22,
+          "physicalBytes": 140754944,
+          "physicalUnavailable": []
+        },
+        "chromiumRenderer": {
+          "processCount": 3,
+          "cpuPercent": 20.74,
+          "physicalBytes": 182452224,
+          "physicalUnavailable": []
+        }
+      },
+      "replayRisk": {
+        "sessionsWithObservedAltScreen": [
+          "cortex-dash-aecb6fa7024ff6d8eb8f02a5f82a5b79"
+        ],
+        "sessionsMissingRetainedAltEnter": [
+          "cortex-dash-aecb6fa7024ff6d8eb8f02a5f82a5b79"
+        ],
+        "sessionsWithRetainedAltExit": [
+          "cortex-dash-aecb6fa7024ff6d8eb8f02a5f82a5b79"
+        ]
+      },
+      "artifact": "tests/bench/latest/terminal-workload-2026-08-28/n1-sample-3.json"
+    },
+    {
+      "schema": "o8/terminal-workload-sample/v1",
+      "sessionCount": 4,
+      "sampleIndex": 1,
+      "seed": 2122,
+      "buildMode": "production",
+      "devModeCpuWarning": false,
+      "observationMs": 10911,
+      "inventory": {
+        "terminalChipCount": 4,
+        "orchestratorChipCount": 1,
+        "activeTabId": "term-twmtdahkv5n4s1-1",
+        "ptyCount": 4,
+        "ptySessions": [
+          "cortex-dash-26bea426ac404df4056c576268434e90",
+          "cortex-dash-e562a83579f842da417f5b12f72a3d7b",
+          "cortex-dash-1b36310fa314d8afe587a6dd9c583352",
+          "cortex-dash-8ce6ae3eba45faa48f2923aa982ca506"
+        ],
+        "mountedTerminalPanelCount": 3,
+        "visibleTerminalPanelCount": 1,
+        "mountedSessionNames": [
+          "cortex-dash-26bea426ac404df4056c576268434e90",
+          "cortex-dash-1b36310fa314d8afe587a6dd9c583352",
+          "cortex-dash-8ce6ae3eba45faa48f2923aa982ca506"
+        ],
+        "attachedClientsPerSession": {
+          "cortex-dash-26bea426ac404df4056c576268434e90": 2,
+          "cortex-dash-e562a83579f842da417f5b12f72a3d7b": 1,
+          "cortex-dash-1b36310fa314d8afe587a6dd9c583352": 2,
+          "cortex-dash-8ce6ae3eba45faa48f2923aa982ca506": 2
+        }
+      },
+      "latency": {
+        "revealAvailability": "hidden-mounted-terminal",
+        "revealMs": [
+          46.1
+        ],
+        "firstCorrectFrameMs": [
+          47.7
+        ],
+        "keystrokeToPaintMs": [
+          40.7,
+          33.8,
+          43.6
+        ],
+        "keystrokeToPaintTimedOut": [
+          false,
+          false,
+          false
+        ],
+        "keystrokeToPaintTimeoutMs": 10000
+      },
+      "browser": {
+        "hiddenWriteBytesPerSecondPerPanel": 55341.11,
+        "hiddenWriteCallsPerSecondPerPanel": 20.8,
+        "totalVisibleWriteBytes": 823043,
+        "totalHiddenWriteBytes": 1760765,
+        "totalWriteCalls": 784,
+        "totalDecodeMs": 190.1,
+        "totalWriteCallMs": 9.5,
+        "totalWriteCompletionMs": 432.5,
+        "totalRenderEvents": 307,
+        "totalRenderRows": 7305,
+        "initiallyUnmountedSessionNames": [
+          "cortex-dash-e562a83579f842da417f5b12f72a3d7b"
+        ],
+        "neverMountedSessionNames": [],
+        "residencyChurnSessionNames": [
+          "cortex-dash-e562a83579f842da417f5b12f72a3d7b"
+        ],
+        "endMountedSessionNames": [
+          "cortex-dash-e562a83579f842da417f5b12f72a3d7b",
+          "cortex-dash-1b36310fa314d8afe587a6dd9c583352"
+        ],
+        "initiallyUnmountedWriteBytes": 889731,
+        "unmountedWriteBytes": 0,
+        "transport": {
+          "terminalMessages": 787,
+          "rawBytes": 3549475,
+          "encodedBytes": 3457396,
+          "jsonParseMs": 9.900002002716064
+        }
+      },
+      "server": {
+        "visiblePtyChunks": 1256,
+        "visiblePtyBytes": 824137,
+        "hiddenPtyChunks": 3884,
+        "hiddenPtyBytes": 2604854,
+        "attachEvents": 1,
+        "detachEvents": 4,
+        "bufferEvents": 5140,
+        "replayEvents": 1,
+        "overflowEvents": 2241,
+        "overflowBytes": 1344524,
+        "backpressureDropEvents": 1,
+        "backpressureDropBytes": 1094,
+        "fanoutClientDeliveries": 2051,
+        "unmountedHiddenBytes": 0
+      },
+      "performance": {
+        "longTaskSupported": true,
+        "longTaskCount": 1,
+        "longTaskMs": 68,
+        "longTaskMsPerMinute": 373.93,
+        "frameCount": 733,
+        "framesPerSecond": 67.18,
+        "longTasks": [
+          {
+            "startTime": 14805.800000190735,
+            "duration": 68
+          }
+        ]
+      },
+      "processes": {
+        "applicationServer": {
+          "processCount": 2,
+          "cpuPercent": 18.24,
+          "physicalBytes": 268435456,
+          "physicalUnavailable": []
+        },
+        "realtimeServer": {
+          "processCount": 6,
+          "cpuPercent": 11.64,
+          "physicalBytes": 159215616,
+          "physicalUnavailable": []
+        },
+        "chromiumRenderer": {
+          "processCount": 3,
+          "cpuPercent": 24.2,
+          "physicalBytes": 224395264,
+          "physicalUnavailable": []
+        }
+      },
+      "replayRisk": {
+        "sessionsWithObservedAltScreen": [
+          "cortex-dash-26bea426ac404df4056c576268434e90",
+          "cortex-dash-e562a83579f842da417f5b12f72a3d7b",
+          "cortex-dash-1b36310fa314d8afe587a6dd9c583352",
+          "cortex-dash-8ce6ae3eba45faa48f2923aa982ca506"
+        ],
+        "sessionsMissingRetainedAltEnter": [
+          "cortex-dash-26bea426ac404df4056c576268434e90",
+          "cortex-dash-e562a83579f842da417f5b12f72a3d7b",
+          "cortex-dash-1b36310fa314d8afe587a6dd9c583352",
+          "cortex-dash-8ce6ae3eba45faa48f2923aa982ca506"
+        ],
+        "sessionsWithRetainedAltExit": [
+          "cortex-dash-26bea426ac404df4056c576268434e90",
+          "cortex-dash-e562a83579f842da417f5b12f72a3d7b",
+          "cortex-dash-1b36310fa314d8afe587a6dd9c583352",
+          "cortex-dash-8ce6ae3eba45faa48f2923aa982ca506"
+        ]
+      },
+      "artifact": "tests/bench/latest/terminal-workload-2026-08-28/n4-sample-1.json"
+    },
+    {
+      "schema": "o8/terminal-workload-sample/v1",
+      "sessionCount": 4,
+      "sampleIndex": 2,
+      "seed": 2123,
+      "buildMode": "production",
+      "devModeCpuWarning": false,
+      "observationMs": 10950,
+      "inventory": {
+        "terminalChipCount": 4,
+        "orchestratorChipCount": 1,
+        "activeTabId": "term-twmtdai42cn4s2-1",
+        "ptyCount": 4,
+        "ptySessions": [
+          "cortex-dash-5f85079d2f8dcc286718f8638162af69",
+          "cortex-dash-4e649ff503510bcab0a5e834b08a5298",
+          "cortex-dash-0c97ec3fa0fa5570690fb4e58b1f0ca8",
+          "cortex-dash-2d78a91a64ba30d3a921c49c0c46d72a"
+        ],
+        "mountedTerminalPanelCount": 3,
+        "visibleTerminalPanelCount": 1,
+        "mountedSessionNames": [
+          "cortex-dash-5f85079d2f8dcc286718f8638162af69",
+          "cortex-dash-0c97ec3fa0fa5570690fb4e58b1f0ca8",
+          "cortex-dash-2d78a91a64ba30d3a921c49c0c46d72a"
+        ],
+        "attachedClientsPerSession": {
+          "cortex-dash-5f85079d2f8dcc286718f8638162af69": 2,
+          "cortex-dash-4e649ff503510bcab0a5e834b08a5298": 1,
+          "cortex-dash-0c97ec3fa0fa5570690fb4e58b1f0ca8": 2,
+          "cortex-dash-2d78a91a64ba30d3a921c49c0c46d72a": 2
+        }
+      },
+      "latency": {
+        "revealAvailability": "hidden-mounted-terminal",
+        "revealMs": [
+          51.6
+        ],
+        "firstCorrectFrameMs": [
+          134.8
+        ],
+        "keystrokeToPaintMs": [
+          40.8,
+          49.3,
+          41.2
+        ],
+        "keystrokeToPaintTimedOut": [
+          false,
+          false,
+          false
+        ],
+        "keystrokeToPaintTimeoutMs": 10000
+      },
+      "browser": {
+        "hiddenWriteBytesPerSecondPerPanel": 54155.24,
+        "hiddenWriteCallsPerSecondPerPanel": 20.36,
+        "totalVisibleWriteBytes": 831953,
+        "totalHiddenWriteBytes": 1749852,
+        "totalWriteCalls": 781,
+        "totalDecodeMs": 224.9,
+        "totalWriteCallMs": 12.3,
+        "totalWriteCompletionMs": 497.1,
+        "totalRenderEvents": 308,
+        "totalRenderRows": 7306,
+        "initiallyUnmountedSessionNames": [
+          "cortex-dash-4e649ff503510bcab0a5e834b08a5298"
+        ],
+        "neverMountedSessionNames": [],
+        "residencyChurnSessionNames": [
+          "cortex-dash-4e649ff503510bcab0a5e834b08a5298"
+        ],
+        "endMountedSessionNames": [
+          "cortex-dash-4e649ff503510bcab0a5e834b08a5298",
+          "cortex-dash-0c97ec3fa0fa5570690fb4e58b1f0ca8"
+        ],
+        "initiallyUnmountedWriteBytes": 886924,
+        "unmountedWriteBytes": 0,
+        "transport": {
+          "terminalMessages": 785,
+          "rawBytes": 3550145,
+          "encodedBytes": 3458300,
+          "jsonParseMs": 9.900002002716064
+        }
+      },
+      "server": {
+        "visiblePtyChunks": 1482,
+        "visiblePtyBytes": 837879,
+        "hiddenPtyChunks": 3752,
+        "hiddenPtyBytes": 2596148,
+        "attachEvents": 1,
+        "detachEvents": 4,
+        "bufferEvents": 5234,
+        "replayEvents": 1,
+        "overflowEvents": 2307,
+        "overflowBytes": 1350877,
+        "backpressureDropEvents": 2,
+        "backpressureDropBytes": 2718,
+        "fanoutClientDeliveries": 2047,
+        "unmountedHiddenBytes": 0
+      },
+      "performance": {
+        "longTaskSupported": true,
+        "longTaskCount": 1,
+        "longTaskMs": 88,
+        "longTaskMsPerMinute": 482.19,
+        "frameCount": 737,
+        "framesPerSecond": 67.31,
+        "longTasks": [
+          {
+            "startTime": 15514.199999809265,
+            "duration": 88
+          }
+        ]
+      },
+      "processes": {
+        "applicationServer": {
+          "processCount": 2,
+          "cpuPercent": 23.74,
+          "physicalBytes": 256901120,
+          "physicalUnavailable": []
+        },
+        "realtimeServer": {
+          "processCount": 6,
+          "cpuPercent": 14.61,
+          "physicalBytes": 148701184,
+          "physicalUnavailable": []
+        },
+        "chromiumRenderer": {
+          "processCount": 3,
+          "cpuPercent": 27.67,
+          "physicalBytes": 219152384,
+          "physicalUnavailable": []
+        }
+      },
+      "replayRisk": {
+        "sessionsWithObservedAltScreen": [
+          "cortex-dash-5f85079d2f8dcc286718f8638162af69",
+          "cortex-dash-0c97ec3fa0fa5570690fb4e58b1f0ca8",
+          "cortex-dash-2d78a91a64ba30d3a921c49c0c46d72a"
+        ],
+        "sessionsMissingRetainedAltEnter": [
+          "cortex-dash-5f85079d2f8dcc286718f8638162af69",
+          "cortex-dash-0c97ec3fa0fa5570690fb4e58b1f0ca8",
+          "cortex-dash-2d78a91a64ba30d3a921c49c0c46d72a"
+        ],
+        "sessionsWithRetainedAltExit": [
+          "cortex-dash-5f85079d2f8dcc286718f8638162af69",
+          "cortex-dash-4e649ff503510bcab0a5e834b08a5298",
+          "cortex-dash-0c97ec3fa0fa5570690fb4e58b1f0ca8",
+          "cortex-dash-2d78a91a64ba30d3a921c49c0c46d72a"
+        ]
+      },
+      "artifact": "tests/bench/latest/terminal-workload-2026-08-28/n4-sample-2.json"
+    },
+    {
+      "schema": "o8/terminal-workload-sample/v1",
+      "sessionCount": 4,
+      "sampleIndex": 3,
+      "seed": 2124,
+      "buildMode": "production",
+      "devModeCpuWarning": false,
+      "observationMs": 11138,
+      "inventory": {
+        "terminalChipCount": 4,
+        "orchestratorChipCount": 1,
+        "activeTabId": "term-twmtdainupn4s3-1",
+        "ptyCount": 4,
+        "ptySessions": [
+          "cortex-dash-d238ddea12d0f249293f29d7fcda26a0",
+          "cortex-dash-220e4af968ca80152e18f5409c4201be",
+          "cortex-dash-e2c8161ceddedf6b531dfa0a7f2da244",
+          "cortex-dash-27884eb6692cf7f41962b355d06d0ae7"
+        ],
+        "mountedTerminalPanelCount": 2,
+        "visibleTerminalPanelCount": 1,
+        "mountedSessionNames": [
+          "cortex-dash-d238ddea12d0f249293f29d7fcda26a0",
+          "cortex-dash-27884eb6692cf7f41962b355d06d0ae7"
+        ],
+        "attachedClientsPerSession": {
+          "cortex-dash-d238ddea12d0f249293f29d7fcda26a0": 1,
+          "cortex-dash-220e4af968ca80152e18f5409c4201be": 1,
+          "cortex-dash-e2c8161ceddedf6b531dfa0a7f2da244": 1,
+          "cortex-dash-27884eb6692cf7f41962b355d06d0ae7": 1
+        }
+      },
+      "latency": {
+        "revealAvailability": "hidden-mounted-terminal",
+        "revealMs": [
+          96.3
+        ],
+        "firstCorrectFrameMs": [
+          204.1
+        ],
+        "keystrokeToPaintMs": [
+          62,
+          61.7,
+          51.4
+        ],
+        "keystrokeToPaintTimedOut": [
+          false,
+          false,
+          false
+        ],
+        "keystrokeToPaintTimeoutMs": 10000
+      },
+      "browser": {
+        "hiddenWriteBytesPerSecondPerPanel": 129319.32,
+        "hiddenWriteCallsPerSecondPerPanel": 25.38,
+        "totalVisibleWriteBytes": 1242339,
+        "totalHiddenWriteBytes": 930193,
+        "totalWriteCalls": 376,
+        "totalDecodeMs": 177.8,
+        "totalWriteCallMs": 6.1,
+        "totalWriteCompletionMs": 556.7,
+        "totalRenderEvents": 182,
+        "totalRenderRows": 4322,
+        "initiallyUnmountedSessionNames": [
+          "cortex-dash-220e4af968ca80152e18f5409c4201be",
+          "cortex-dash-e2c8161ceddedf6b531dfa0a7f2da244"
+        ],
+        "neverMountedSessionNames": [
+          "cortex-dash-e2c8161ceddedf6b531dfa0a7f2da244"
+        ],
+        "residencyChurnSessionNames": [
+          "cortex-dash-220e4af968ca80152e18f5409c4201be"
+        ],
+        "endMountedSessionNames": [
+          "cortex-dash-d238ddea12d0f249293f29d7fcda26a0",
+          "cortex-dash-27884eb6692cf7f41962b355d06d0ae7"
+        ],
+        "initiallyUnmountedWriteBytes": 79440,
+        "unmountedWriteBytes": 0,
+        "transport": {
+          "terminalMessages": 505,
+          "rawBytes": 3419545,
+          "encodedBytes": 3360460,
+          "jsonParseMs": 6.499999523162842
+        }
+      },
+      "server": {
+        "visiblePtyChunks": 1256,
+        "visiblePtyBytes": 833359,
+        "hiddenPtyChunks": 3584,
+        "hiddenPtyBytes": 2553174,
+        "attachEvents": 6,
+        "detachEvents": 6,
+        "bufferEvents": 4840,
+        "replayEvents": 7,
+        "overflowEvents": 2095,
+        "overflowBytes": 1295604,
+        "backpressureDropEvents": 4,
+        "backpressureDropBytes": 360872,
+        "fanoutClientDeliveries": 1779,
+        "unmountedHiddenBytes": 844284
+      },
+      "performance": {
+        "longTaskSupported": true,
+        "longTaskCount": 4,
+        "longTaskMs": 256,
+        "longTaskMsPerMinute": 1379.06,
+        "frameCount": 729,
+        "framesPerSecond": 65.45,
+        "longTasks": [
+          {
+            "startTime": 9949.099999904633,
+            "duration": 53
+          },
+          {
+            "startTime": 10052.099999904633,
+            "duration": 65
+          },
+          {
+            "startTime": 11051.799999713898,
+            "duration": 71
+          },
+          {
+            "startTime": 11162.299999713898,
+            "duration": 67
+          }
+        ]
+      },
+      "processes": {
+        "applicationServer": {
+          "processCount": 2,
+          "cpuPercent": 14.19,
+          "physicalBytes": 385875968,
+          "physicalUnavailable": []
+        },
+        "realtimeServer": {
+          "processCount": 6,
+          "cpuPercent": 13.74,
+          "physicalBytes": 179625984,
+          "physicalUnavailable": []
+        },
+        "chromiumRenderer": {
+          "processCount": 3,
+          "cpuPercent": 31.33,
+          "physicalBytes": 261095424,
+          "physicalUnavailable": []
+        }
+      },
+      "replayRisk": {
+        "sessionsWithObservedAltScreen": [
+          "cortex-dash-d238ddea12d0f249293f29d7fcda26a0",
+          "cortex-dash-220e4af968ca80152e18f5409c4201be",
+          "cortex-dash-e2c8161ceddedf6b531dfa0a7f2da244",
+          "cortex-dash-27884eb6692cf7f41962b355d06d0ae7"
+        ],
+        "sessionsMissingRetainedAltEnter": [
+          "cortex-dash-d238ddea12d0f249293f29d7fcda26a0",
+          "cortex-dash-220e4af968ca80152e18f5409c4201be",
+          "cortex-dash-e2c8161ceddedf6b531dfa0a7f2da244",
+          "cortex-dash-27884eb6692cf7f41962b355d06d0ae7"
+        ],
+        "sessionsWithRetainedAltExit": [
+          "cortex-dash-d238ddea12d0f249293f29d7fcda26a0",
+          "cortex-dash-220e4af968ca80152e18f5409c4201be",
+          "cortex-dash-e2c8161ceddedf6b531dfa0a7f2da244",
+          "cortex-dash-27884eb6692cf7f41962b355d06d0ae7"
+        ]
+      },
+      "artifact": "tests/bench/latest/terminal-workload-2026-08-28/n4-sample-3.json"
+    },
+    {
+      "schema": "o8/terminal-workload-sample/v1",
+      "sessionCount": 12,
+      "sampleIndex": 1,
+      "seed": 2922,
+      "buildMode": "production",
+      "devModeCpuWarning": false,
+      "observationMs": 11105,
+      "inventory": {
+        "terminalChipCount": 12,
+        "orchestratorChipCount": 1,
+        "activeTabId": "term-twmtdaj42ln12s1-1",
+        "ptyCount": 12,
+        "ptySessions": [
+          "cortex-dash-5cbacb7becbbc7aa48abb0202cc727e7",
+          "cortex-dash-cc0db5ce485c5b75d01e596f2cac4c25",
+          "cortex-dash-c75696b3f2b02ff0ba17ffd40aa214ff",
+          "cortex-dash-a42e86836d1301e3ade778d8a69bf4f5",
+          "cortex-dash-b4ea18d2954e916c9d823374485b29d2",
+          "cortex-dash-085b51301ec0a3c83be2bd21f169d496",
+          "cortex-dash-e3d036ed499c7562913c838815aa92e5",
+          "cortex-dash-2ac285cb69116c07db886278b6a45695",
+          "cortex-dash-f21a0f3fe64785f43193123249dfb85b",
+          "cortex-dash-0440c3abace6f3a9299387e91e3c43d8",
+          "cortex-dash-fa3beeeef4a8eed57f19864d81d226bc",
+          "cortex-dash-ec86f63511fc6628d146bbfd77eed49e"
+        ],
+        "mountedTerminalPanelCount": 3,
+        "visibleTerminalPanelCount": 1,
+        "mountedSessionNames": [
+          "cortex-dash-5cbacb7becbbc7aa48abb0202cc727e7",
+          "cortex-dash-f21a0f3fe64785f43193123249dfb85b",
+          "cortex-dash-ec86f63511fc6628d146bbfd77eed49e"
+        ],
+        "attachedClientsPerSession": {
+          "cortex-dash-5cbacb7becbbc7aa48abb0202cc727e7": 1,
+          "cortex-dash-cc0db5ce485c5b75d01e596f2cac4c25": 2,
+          "cortex-dash-c75696b3f2b02ff0ba17ffd40aa214ff": 1,
+          "cortex-dash-b4ea18d2954e916c9d823374485b29d2": 1,
+          "cortex-dash-a42e86836d1301e3ade778d8a69bf4f5": 1,
+          "cortex-dash-085b51301ec0a3c83be2bd21f169d496": 1,
+          "cortex-dash-e3d036ed499c7562913c838815aa92e5": 1,
+          "cortex-dash-2ac285cb69116c07db886278b6a45695": 1,
+          "cortex-dash-f21a0f3fe64785f43193123249dfb85b": 1,
+          "cortex-dash-0440c3abace6f3a9299387e91e3c43d8": 1,
+          "cortex-dash-fa3beeeef4a8eed57f19864d81d226bc": 1,
+          "cortex-dash-ec86f63511fc6628d146bbfd77eed49e": 1
+        }
+      },
+      "latency": {
+        "revealAvailability": "hidden-mounted-terminal",
+        "revealMs": [
+          106.8
+        ],
+        "firstCorrectFrameMs": [
+          159.1
+        ],
+        "keystrokeToPaintMs": [
+          58.1,
+          42.4,
+          42.1
+        ],
+        "keystrokeToPaintTimedOut": [
+          false,
+          false,
+          false
+        ],
+        "keystrokeToPaintTimeoutMs": 10000
+      },
+      "browser": {
+        "hiddenWriteBytesPerSecondPerPanel": 53080.62,
+        "hiddenWriteCallsPerSecondPerPanel": 20.08,
+        "totalVisibleWriteBytes": 815997,
+        "totalHiddenWriteBytes": 2116912,
+        "totalWriteCalls": 930,
+        "totalDecodeMs": 223.8,
+        "totalWriteCallMs": 11.9,
+        "totalWriteCompletionMs": 547.6,
+        "totalRenderEvents": 308,
+        "totalRenderRows": 7306,
+        "initiallyUnmountedSessionNames": [
+          "cortex-dash-cc0db5ce485c5b75d01e596f2cac4c25",
+          "cortex-dash-c75696b3f2b02ff0ba17ffd40aa214ff",
+          "cortex-dash-b4ea18d2954e916c9d823374485b29d2",
+          "cortex-dash-a42e86836d1301e3ade778d8a69bf4f5",
+          "cortex-dash-085b51301ec0a3c83be2bd21f169d496",
+          "cortex-dash-e3d036ed499c7562913c838815aa92e5",
+          "cortex-dash-2ac285cb69116c07db886278b6a45695",
+          "cortex-dash-0440c3abace6f3a9299387e91e3c43d8",
+          "cortex-dash-fa3beeeef4a8eed57f19864d81d226bc"
+        ],
+        "neverMountedSessionNames": [
+          "cortex-dash-cc0db5ce485c5b75d01e596f2cac4c25",
+          "cortex-dash-c75696b3f2b02ff0ba17ffd40aa214ff",
+          "cortex-dash-b4ea18d2954e916c9d823374485b29d2",
+          "cortex-dash-a42e86836d1301e3ade778d8a69bf4f5",
+          "cortex-dash-085b51301ec0a3c83be2bd21f169d496",
+          "cortex-dash-e3d036ed499c7562913c838815aa92e5"
+        ],
+        "residencyChurnSessionNames": [
+          "cortex-dash-2ac285cb69116c07db886278b6a45695",
+          "cortex-dash-0440c3abace6f3a9299387e91e3c43d8",
+          "cortex-dash-fa3beeeef4a8eed57f19864d81d226bc"
+        ],
+        "endMountedSessionNames": [
+          "cortex-dash-f21a0f3fe64785f43193123249dfb85b",
+          "cortex-dash-0440c3abace6f3a9299387e91e3c43d8",
+          "cortex-dash-fa3beeeef4a8eed57f19864d81d226bc"
+        ],
+        "initiallyUnmountedWriteBytes": 1264869,
+        "unmountedWriteBytes": 0,
+        "transport": {
+          "terminalMessages": 1247,
+          "rawBytes": 5767979,
+          "encodedBytes": 5622080,
+          "jsonParseMs": 15.000001430511475
+        }
+      },
+      "server": {
+        "visiblePtyChunks": 1245,
+        "visiblePtyBytes": 828674,
+        "hiddenPtyChunks": 12659,
+        "hiddenPtyBytes": 9336234,
+        "attachEvents": 6,
+        "detachEvents": 7,
+        "bufferEvents": 13904,
+        "replayEvents": 6,
+        "overflowEvents": 5746,
+        "overflowBytes": 3900604,
+        "backpressureDropEvents": 4,
+        "backpressureDropBytes": 447327,
+        "fanoutClientDeliveries": 5066,
+        "unmountedHiddenBytes": 5069660
+      },
+      "performance": {
+        "longTaskSupported": true,
+        "longTaskCount": 1,
+        "longTaskMs": 67,
+        "longTaskMsPerMinute": 362,
+        "frameCount": 761,
+        "framesPerSecond": 68.53,
+        "longTasks": [
+          {
+            "startTime": 15519.60000038147,
+            "duration": 67
+          }
+        ]
+      },
+      "processes": {
+        "applicationServer": {
+          "processCount": 2,
+          "cpuPercent": 7.83,
+          "physicalBytes": 459276288,
+          "physicalUnavailable": []
+        },
+        "realtimeServer": {
+          "processCount": 14,
+          "cpuPercent": 23.14,
+          "physicalBytes": 199946240,
+          "physicalUnavailable": []
+        },
+        "chromiumRenderer": {
+          "processCount": 3,
+          "cpuPercent": 33.86,
+          "physicalBytes": 273678336,
+          "physicalUnavailable": []
+        }
+      },
+      "replayRisk": {
+        "sessionsWithObservedAltScreen": [
+          "cortex-dash-5cbacb7becbbc7aa48abb0202cc727e7",
+          "cortex-dash-cc0db5ce485c5b75d01e596f2cac4c25",
+          "cortex-dash-c75696b3f2b02ff0ba17ffd40aa214ff",
+          "cortex-dash-b4ea18d2954e916c9d823374485b29d2",
+          "cortex-dash-a42e86836d1301e3ade778d8a69bf4f5",
+          "cortex-dash-e3d036ed499c7562913c838815aa92e5",
+          "cortex-dash-2ac285cb69116c07db886278b6a45695",
+          "cortex-dash-0440c3abace6f3a9299387e91e3c43d8",
+          "cortex-dash-fa3beeeef4a8eed57f19864d81d226bc"
+        ],
+        "sessionsMissingRetainedAltEnter": [
+          "cortex-dash-5cbacb7becbbc7aa48abb0202cc727e7",
+          "cortex-dash-cc0db5ce485c5b75d01e596f2cac4c25",
+          "cortex-dash-c75696b3f2b02ff0ba17ffd40aa214ff",
+          "cortex-dash-b4ea18d2954e916c9d823374485b29d2",
+          "cortex-dash-a42e86836d1301e3ade778d8a69bf4f5",
+          "cortex-dash-e3d036ed499c7562913c838815aa92e5",
+          "cortex-dash-2ac285cb69116c07db886278b6a45695",
+          "cortex-dash-0440c3abace6f3a9299387e91e3c43d8",
+          "cortex-dash-fa3beeeef4a8eed57f19864d81d226bc"
+        ],
+        "sessionsWithRetainedAltExit": [
+          "cortex-dash-5cbacb7becbbc7aa48abb0202cc727e7",
+          "cortex-dash-cc0db5ce485c5b75d01e596f2cac4c25",
+          "cortex-dash-c75696b3f2b02ff0ba17ffd40aa214ff",
+          "cortex-dash-b4ea18d2954e916c9d823374485b29d2",
+          "cortex-dash-a42e86836d1301e3ade778d8a69bf4f5",
+          "cortex-dash-085b51301ec0a3c83be2bd21f169d496",
+          "cortex-dash-e3d036ed499c7562913c838815aa92e5",
+          "cortex-dash-2ac285cb69116c07db886278b6a45695",
+          "cortex-dash-0440c3abace6f3a9299387e91e3c43d8",
+          "cortex-dash-fa3beeeef4a8eed57f19864d81d226bc",
+          "cortex-dash-ec86f63511fc6628d146bbfd77eed49e"
+        ]
+      },
+      "artifact": "tests/bench/latest/terminal-workload-2026-08-28/n12-sample-1.json"
+    },
+    {
+      "schema": "o8/terminal-workload-sample/v1",
+      "sessionCount": 12,
+      "sampleIndex": 2,
+      "seed": 2923,
+      "buildMode": "production",
+      "devModeCpuWarning": false,
+      "observationMs": 11309,
+      "inventory": {
+        "terminalChipCount": 12,
+        "orchestratorChipCount": 1,
+        "activeTabId": "term-twmtdajnysn12s2-1",
+        "ptyCount": 12,
+        "ptySessions": [
+          "cortex-dash-cfc79ba84319f459ea64e6a1dad3de3c",
+          "cortex-dash-a4ca531e12807707e88b8d6bfe2a537d",
+          "cortex-dash-0f8f92b133c934c988577ac119277e36",
+          "cortex-dash-bac9806ec054f95837869a82fdf27c1f",
+          "cortex-dash-b9d34fd562b407fca893f45297172349",
+          "cortex-dash-e3faaa7cbec585a11b8fb179b52f865f",
+          "cortex-dash-231fb987cf01198f57d25453e17ef220",
+          "cortex-dash-a0e24d62a2e930db4b0e4b277fedbf37",
+          "cortex-dash-9df1a366784053fd1fd65b9aa2dae2ec",
+          "cortex-dash-c14676124c6d115733b503606952e8aa",
+          "cortex-dash-f2dd6dd09f2ba982f97cb39bbf3d5521",
+          "cortex-dash-ca585d1b88b5f24eff1a6545fbae9c19"
+        ],
+        "mountedTerminalPanelCount": 3,
+        "visibleTerminalPanelCount": 1,
+        "mountedSessionNames": [
+          "cortex-dash-cfc79ba84319f459ea64e6a1dad3de3c",
+          "cortex-dash-f2dd6dd09f2ba982f97cb39bbf3d5521",
+          "cortex-dash-ca585d1b88b5f24eff1a6545fbae9c19"
+        ],
+        "attachedClientsPerSession": {
+          "cortex-dash-cfc79ba84319f459ea64e6a1dad3de3c": 1,
+          "cortex-dash-bac9806ec054f95837869a82fdf27c1f": 1,
+          "cortex-dash-a4ca531e12807707e88b8d6bfe2a537d": 1,
+          "cortex-dash-0f8f92b133c934c988577ac119277e36": 1,
+          "cortex-dash-b9d34fd562b407fca893f45297172349": 1,
+          "cortex-dash-231fb987cf01198f57d25453e17ef220": 1,
+          "cortex-dash-a0e24d62a2e930db4b0e4b277fedbf37": 1,
+          "cortex-dash-e3faaa7cbec585a11b8fb179b52f865f": 1,
+          "cortex-dash-9df1a366784053fd1fd65b9aa2dae2ec": 1,
+          "cortex-dash-c14676124c6d115733b503606952e8aa": 1,
+          "cortex-dash-f2dd6dd09f2ba982f97cb39bbf3d5521": 1,
+          "cortex-dash-ca585d1b88b5f24eff1a6545fbae9c19": 1
+        }
+      },
+      "latency": {
+        "revealAvailability": "hidden-mounted-terminal",
+        "revealMs": [
+          195.9
+        ],
+        "firstCorrectFrameMs": [
+          263.4
+        ],
+        "keystrokeToPaintMs": [
+          58.6,
+          138.2,
+          54.2
+        ],
+        "keystrokeToPaintTimedOut": [
+          false,
+          false,
+          false
+        ],
+        "keystrokeToPaintTimeoutMs": 10000
+      },
+      "browser": {
+        "hiddenWriteBytesPerSecondPerPanel": 71365.91,
+        "hiddenWriteCallsPerSecondPerPanel": 18.69,
+        "totalVisibleWriteBytes": 848120,
+        "totalHiddenWriteBytes": 1786104,
+        "totalWriteCalls": 762,
+        "totalDecodeMs": 253.7,
+        "totalWriteCallMs": 14.3,
+        "totalWriteCompletionMs": 898.8,
+        "totalRenderEvents": 305,
+        "totalRenderRows": 7274,
+        "initiallyUnmountedSessionNames": [
+          "cortex-dash-bac9806ec054f95837869a82fdf27c1f",
+          "cortex-dash-a4ca531e12807707e88b8d6bfe2a537d",
+          "cortex-dash-0f8f92b133c934c988577ac119277e36",
+          "cortex-dash-b9d34fd562b407fca893f45297172349",
+          "cortex-dash-231fb987cf01198f57d25453e17ef220",
+          "cortex-dash-a0e24d62a2e930db4b0e4b277fedbf37",
+          "cortex-dash-e3faaa7cbec585a11b8fb179b52f865f",
+          "cortex-dash-9df1a366784053fd1fd65b9aa2dae2ec",
+          "cortex-dash-c14676124c6d115733b503606952e8aa"
+        ],
+        "neverMountedSessionNames": [
+          "cortex-dash-bac9806ec054f95837869a82fdf27c1f",
+          "cortex-dash-a4ca531e12807707e88b8d6bfe2a537d",
+          "cortex-dash-0f8f92b133c934c988577ac119277e36",
+          "cortex-dash-b9d34fd562b407fca893f45297172349",
+          "cortex-dash-231fb987cf01198f57d25453e17ef220",
+          "cortex-dash-a0e24d62a2e930db4b0e4b277fedbf37",
+          "cortex-dash-e3faaa7cbec585a11b8fb179b52f865f"
+        ],
+        "residencyChurnSessionNames": [
+          "cortex-dash-9df1a366784053fd1fd65b9aa2dae2ec",
+          "cortex-dash-c14676124c6d115733b503606952e8aa"
+        ],
+        "endMountedSessionNames": [
+          "cortex-dash-f2dd6dd09f2ba982f97cb39bbf3d5521",
+          "cortex-dash-ca585d1b88b5f24eff1a6545fbae9c19"
+        ],
+        "initiallyUnmountedWriteBytes": 450851,
+        "unmountedWriteBytes": 0,
+        "transport": {
+          "terminalMessages": 2815,
+          "rawBytes": 11674091,
+          "encodedBytes": 11344736,
+          "jsonParseMs": 32.60000038146973
+        }
+      },
+      "server": {
+        "visiblePtyChunks": 3232,
+        "visiblePtyBytes": 851631,
+        "hiddenPtyChunks": 12821,
+        "hiddenPtyBytes": 9441300,
+        "attachEvents": 14,
+        "detachEvents": 14,
+        "bufferEvents": 16053,
+        "replayEvents": 16,
+        "overflowEvents": 7859,
+        "overflowBytes": 4030645,
+        "backpressureDropEvents": 15,
+        "backpressureDropBytes": 79983,
+        "fanoutClientDeliveries": 6640,
+        "unmountedHiddenBytes": 5908168
+      },
+      "performance": {
+        "longTaskSupported": true,
+        "longTaskCount": 3,
+        "longTaskMs": 245,
+        "longTaskMsPerMinute": 1299.85,
+        "frameCount": 789,
+        "framesPerSecond": 69.77,
+        "longTasks": [
+          {
+            "startTime": 6570.5,
+            "duration": 80
+          },
+          {
+            "startTime": 6654.099999904633,
+            "duration": 78
+          },
+          {
+            "startTime": 11999.200000286102,
+            "duration": 87
+          }
+        ]
+      },
+      "processes": {
+        "applicationServer": {
+          "processCount": 2,
+          "cpuPercent": 18.04,
+          "physicalBytes": 277872640,
+          "physicalUnavailable": []
+        },
+        "realtimeServer": {
+          "processCount": 14,
+          "cpuPercent": 38.11,
+          "physicalBytes": 200200192,
+          "physicalUnavailable": []
+        },
+        "chromiumRenderer": {
+          "processCount": 3,
+          "cpuPercent": 41.12,
+          "physicalBytes": 271581184,
+          "physicalUnavailable": []
+        }
+      },
+      "replayRisk": {
+        "sessionsWithObservedAltScreen": [
+          "cortex-dash-bac9806ec054f95837869a82fdf27c1f",
+          "cortex-dash-a4ca531e12807707e88b8d6bfe2a537d",
+          "cortex-dash-a0e24d62a2e930db4b0e4b277fedbf37",
+          "cortex-dash-e3faaa7cbec585a11b8fb179b52f865f"
+        ],
+        "sessionsMissingRetainedAltEnter": [
+          "cortex-dash-bac9806ec054f95837869a82fdf27c1f",
+          "cortex-dash-a4ca531e12807707e88b8d6bfe2a537d",
+          "cortex-dash-a0e24d62a2e930db4b0e4b277fedbf37",
+          "cortex-dash-e3faaa7cbec585a11b8fb179b52f865f"
+        ],
+        "sessionsWithRetainedAltExit": [
+          "cortex-dash-cfc79ba84319f459ea64e6a1dad3de3c",
+          "cortex-dash-bac9806ec054f95837869a82fdf27c1f",
+          "cortex-dash-a4ca531e12807707e88b8d6bfe2a537d",
+          "cortex-dash-0f8f92b133c934c988577ac119277e36",
+          "cortex-dash-b9d34fd562b407fca893f45297172349",
+          "cortex-dash-231fb987cf01198f57d25453e17ef220",
+          "cortex-dash-a0e24d62a2e930db4b0e4b277fedbf37",
+          "cortex-dash-e3faaa7cbec585a11b8fb179b52f865f",
+          "cortex-dash-9df1a366784053fd1fd65b9aa2dae2ec",
+          "cortex-dash-c14676124c6d115733b503606952e8aa",
+          "cortex-dash-f2dd6dd09f2ba982f97cb39bbf3d5521",
+          "cortex-dash-ca585d1b88b5f24eff1a6545fbae9c19"
+        ]
+      },
+      "artifact": "tests/bench/latest/terminal-workload-2026-08-28/n12-sample-2.json"
+    },
+    {
+      "schema": "o8/terminal-workload-sample/v1",
+      "sessionCount": 12,
+      "sampleIndex": 3,
+      "seed": 2924,
+      "buildMode": "production",
+      "devModeCpuWarning": false,
+      "observationMs": 11139,
+      "inventory": {
+        "terminalChipCount": 12,
+        "orchestratorChipCount": 1,
+        "activeTabId": "term-twmtdak5zun12s3-1",
+        "ptyCount": 12,
+        "ptySessions": [
+          "cortex-dash-6b2ed455b841c1e5879b7f37b057c624",
+          "cortex-dash-6e9ae50061caae2fd3d548a4d4c8cf24",
+          "cortex-dash-f89c07d59d25ef8b0acc34914de5034b",
+          "cortex-dash-cf1381a6bbddcd488485c2a2f2f4f0e2",
+          "cortex-dash-87644e58c07343ee15831526813f5cc2",
+          "cortex-dash-5be5e2c0cc1b630fe594ad85e92802a6",
+          "cortex-dash-726092e92fea636dbdd99b2827023d96",
+          "cortex-dash-76adfa16607292a4cd55280c4d4c35f9",
+          "cortex-dash-a6495330ac0f5211bd11d23e18b44697",
+          "cortex-dash-0fb35985c079ab378efe6b9fc2e0b697",
+          "cortex-dash-5e95f53cc126f454abbcfb40323e41ff",
+          "cortex-dash-116b1476efe9f420e3d467e98aab72ed"
+        ],
+        "mountedTerminalPanelCount": 3,
+        "visibleTerminalPanelCount": 1,
+        "mountedSessionNames": [
+          "cortex-dash-6b2ed455b841c1e5879b7f37b057c624",
+          "cortex-dash-f89c07d59d25ef8b0acc34914de5034b",
+          "cortex-dash-cf1381a6bbddcd488485c2a2f2f4f0e2"
+        ],
+        "attachedClientsPerSession": {
+          "cortex-dash-6b2ed455b841c1e5879b7f37b057c624": 2,
+          "cortex-dash-6e9ae50061caae2fd3d548a4d4c8cf24": 2,
+          "cortex-dash-5be5e2c0cc1b630fe594ad85e92802a6": 1,
+          "cortex-dash-87644e58c07343ee15831526813f5cc2": 1,
+          "cortex-dash-a6495330ac0f5211bd11d23e18b44697": 1,
+          "cortex-dash-76adfa16607292a4cd55280c4d4c35f9": 1,
+          "cortex-dash-726092e92fea636dbdd99b2827023d96": 1,
+          "cortex-dash-0fb35985c079ab378efe6b9fc2e0b697": 1,
+          "cortex-dash-5e95f53cc126f454abbcfb40323e41ff": 1,
+          "cortex-dash-f89c07d59d25ef8b0acc34914de5034b": 2,
+          "cortex-dash-cf1381a6bbddcd488485c2a2f2f4f0e2": 2,
+          "cortex-dash-116b1476efe9f420e3d467e98aab72ed": 1
+        }
+      },
+      "latency": {
+        "revealAvailability": "hidden-mounted-terminal",
+        "revealMs": [
+          165.5
+        ],
+        "firstCorrectFrameMs": [
+          290.2
+        ],
+        "keystrokeToPaintMs": [
+          128.4,
+          43.5,
+          39.2
+        ],
+        "keystrokeToPaintTimedOut": [
+          false,
+          false,
+          false
+        ],
+        "keystrokeToPaintTimeoutMs": 10000
+      },
+      "browser": {
+        "hiddenWriteBytesPerSecondPerPanel": 53452.84,
+        "hiddenWriteCallsPerSecondPerPanel": 19.98,
+        "totalVisibleWriteBytes": 837754,
+        "totalHiddenWriteBytes": 1730193,
+        "totalWriteCalls": 783,
+        "totalDecodeMs": 206.8,
+        "totalWriteCallMs": 11.5,
+        "totalWriteCompletionMs": 478.8,
+        "totalRenderEvents": 312,
+        "totalRenderRows": 7402,
+        "initiallyUnmountedSessionNames": [
+          "cortex-dash-6e9ae50061caae2fd3d548a4d4c8cf24",
+          "cortex-dash-5be5e2c0cc1b630fe594ad85e92802a6",
+          "cortex-dash-87644e58c07343ee15831526813f5cc2",
+          "cortex-dash-a6495330ac0f5211bd11d23e18b44697",
+          "cortex-dash-76adfa16607292a4cd55280c4d4c35f9",
+          "cortex-dash-726092e92fea636dbdd99b2827023d96",
+          "cortex-dash-0fb35985c079ab378efe6b9fc2e0b697",
+          "cortex-dash-5e95f53cc126f454abbcfb40323e41ff",
+          "cortex-dash-116b1476efe9f420e3d467e98aab72ed"
+        ],
+        "neverMountedSessionNames": [
+          "cortex-dash-6e9ae50061caae2fd3d548a4d4c8cf24",
+          "cortex-dash-5be5e2c0cc1b630fe594ad85e92802a6",
+          "cortex-dash-87644e58c07343ee15831526813f5cc2",
+          "cortex-dash-a6495330ac0f5211bd11d23e18b44697",
+          "cortex-dash-76adfa16607292a4cd55280c4d4c35f9",
+          "cortex-dash-726092e92fea636dbdd99b2827023d96",
+          "cortex-dash-0fb35985c079ab378efe6b9fc2e0b697"
+        ],
+        "residencyChurnSessionNames": [
+          "cortex-dash-5e95f53cc126f454abbcfb40323e41ff",
+          "cortex-dash-116b1476efe9f420e3d467e98aab72ed"
+        ],
+        "endMountedSessionNames": [
+          "cortex-dash-f89c07d59d25ef8b0acc34914de5034b",
+          "cortex-dash-116b1476efe9f420e3d467e98aab72ed"
+        ],
+        "initiallyUnmountedWriteBytes": 869110,
+        "unmountedWriteBytes": 0,
+        "transport": {
+          "terminalMessages": 1101,
+          "rawBytes": 5268801,
+          "encodedBytes": 5139984,
+          "jsonParseMs": 14.099998950958252
+        }
+      },
+      "server": {
+        "visiblePtyChunks": 3222,
+        "visiblePtyBytes": 856945,
+        "hiddenPtyChunks": 12625,
+        "hiddenPtyBytes": 9334502,
+        "attachEvents": 2,
+        "detachEvents": 6,
+        "bufferEvents": 15847,
+        "replayEvents": 2,
+        "overflowEvents": 7689,
+        "overflowBytes": 3930373,
+        "backpressureDropEvents": 2,
+        "backpressureDropBytes": 5296,
+        "fanoutClientDeliveries": 4894,
+        "unmountedHiddenBytes": 5908069
+      },
+      "performance": {
+        "longTaskSupported": true,
+        "longTaskCount": 1,
+        "longTaskMs": 67,
+        "longTaskMsPerMinute": 360.89,
+        "frameCount": 804,
+        "framesPerSecond": 72.18,
+        "longTasks": [
+          {
+            "startTime": 14304.199999809265,
+            "duration": 67
+          }
+        ]
+      },
+      "processes": {
+        "applicationServer": {
+          "processCount": 2,
+          "cpuPercent": 9.96,
+          "physicalBytes": 461373440,
+          "physicalUnavailable": []
+        },
+        "realtimeServer": {
+          "processCount": 14,
+          "cpuPercent": 25.23,
+          "physicalBytes": 202252288,
+          "physicalUnavailable": []
+        },
+        "chromiumRenderer": {
+          "processCount": 3,
+          "cpuPercent": 27.83,
+          "physicalBytes": 240123904,
+          "physicalUnavailable": []
+        }
+      },
+      "replayRisk": {
+        "sessionsWithObservedAltScreen": [
+          "cortex-dash-6b2ed455b841c1e5879b7f37b057c624",
+          "cortex-dash-5be5e2c0cc1b630fe594ad85e92802a6",
+          "cortex-dash-87644e58c07343ee15831526813f5cc2",
+          "cortex-dash-a6495330ac0f5211bd11d23e18b44697",
+          "cortex-dash-726092e92fea636dbdd99b2827023d96",
+          "cortex-dash-0fb35985c079ab378efe6b9fc2e0b697",
+          "cortex-dash-5e95f53cc126f454abbcfb40323e41ff",
+          "cortex-dash-f89c07d59d25ef8b0acc34914de5034b",
+          "cortex-dash-cf1381a6bbddcd488485c2a2f2f4f0e2"
+        ],
+        "sessionsMissingRetainedAltEnter": [
+          "cortex-dash-6b2ed455b841c1e5879b7f37b057c624",
+          "cortex-dash-5be5e2c0cc1b630fe594ad85e92802a6",
+          "cortex-dash-87644e58c07343ee15831526813f5cc2",
+          "cortex-dash-a6495330ac0f5211bd11d23e18b44697",
+          "cortex-dash-726092e92fea636dbdd99b2827023d96",
+          "cortex-dash-0fb35985c079ab378efe6b9fc2e0b697",
+          "cortex-dash-5e95f53cc126f454abbcfb40323e41ff",
+          "cortex-dash-f89c07d59d25ef8b0acc34914de5034b",
+          "cortex-dash-cf1381a6bbddcd488485c2a2f2f4f0e2"
+        ],
+        "sessionsWithRetainedAltExit": [
+          "cortex-dash-6b2ed455b841c1e5879b7f37b057c624",
+          "cortex-dash-6e9ae50061caae2fd3d548a4d4c8cf24",
+          "cortex-dash-5be5e2c0cc1b630fe594ad85e92802a6",
+          "cortex-dash-87644e58c07343ee15831526813f5cc2",
+          "cortex-dash-a6495330ac0f5211bd11d23e18b44697",
+          "cortex-dash-76adfa16607292a4cd55280c4d4c35f9",
+          "cortex-dash-726092e92fea636dbdd99b2827023d96",
+          "cortex-dash-0fb35985c079ab378efe6b9fc2e0b697",
+          "cortex-dash-5e95f53cc126f454abbcfb40323e41ff",
+          "cortex-dash-f89c07d59d25ef8b0acc34914de5034b",
+          "cortex-dash-cf1381a6bbddcd488485c2a2f2f4f0e2",
+          "cortex-dash-116b1476efe9f420e3d467e98aab72ed"
+        ]
+      },
+      "artifact": "tests/bench/latest/terminal-workload-2026-08-28/n12-sample-3.json"
+    }
+  ]
+}
