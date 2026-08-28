@@ -4,13 +4,14 @@ import { useEffect, type Dispatch, type SetStateAction } from 'react';
 
 export function useCommandPaletteHotkey(
   setOpen: Dispatch<SetStateAction<boolean>>,
+  shortcutKey = 'k',
 ): void {
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       const isPaletteShortcut = (event.metaKey || event.ctrlKey)
         && !event.altKey
         && !event.shiftKey
-        && event.key.toLowerCase() === 'k';
+        && event.key.toLowerCase() === shortcutKey;
       if (!isPaletteShortcut) return;
 
       const target = event.target;
@@ -24,5 +25,5 @@ export function useCommandPaletteHotkey(
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [setOpen]);
+  }, [setOpen, shortcutKey]);
 }

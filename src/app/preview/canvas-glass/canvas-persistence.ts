@@ -35,6 +35,8 @@ export interface CanvasSnapshotV1 {
    *  instead of respawning fresh; absent on older snapshots / dead sessions. */
   term: Array<SnapGeometry & { cwd: string | null; cwdLabel: string | null; sessionName?: string | null }>;
   file: Array<SnapGeometry & { path: string }>;
+  /** Optional — file tree cards arrived after v1 snapshots existed. */
+  tree?: Array<SnapGeometry & { repoPath: string }>;
   image: Array<SnapGeometry & { aspect: number; items: Array<{ src: string; name: string }> }>;
   browser: Array<SnapGeometry & { tabs: BrowserTab[]; activeTabId: number }>;
   chat: Array<SnapGeometry & { threadId: string; repoPath: string | null; repoName: string | null; title: string }>;

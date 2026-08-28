@@ -76,6 +76,7 @@ import { ComposerPartialsFill, useAgentPartialsMorph } from './agent-partials-mo
 import { OrchestratorDock } from './dock';
 import type { SwarmScoutView } from '@/components/desktop/thoughts/chat-panel/SwarmStatusCard';
 import { FileGlassCard, type FileCard } from './file-card';
+import { FileTreeCardLayer, type FileTreeCard } from './file-tree-card';
 import { ImageGlassCard, type ImageCard } from './image-card';
 import { VideoGlassCard, type VideoCard } from './video-card';
 import { putMedia, getMedia, deleteMedia } from './canvas-media-store';
@@ -108,6 +109,7 @@ import {
   type CanvasCardKind,
   type CanvasCommands,
 } from './canvas-commands';
+import { capCanvasReadContent, canvasCardTitle, dockEntryReadLine, type CanvasCardLite } from './canvas-card-intents';
 import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
 /** Live rows for the wired chrome — inbox items, active lanes, commits. */
 interface InboxRow {
@@ -179,17 +181,6 @@ const LOUPE_SIZE_RANGE = { min: 120, max: 240, step: 4 };
 // / resize / focus / close one by (kind, id).
 const CANVAS_GEOM_FLOOR = 140;
 const SPAWN_CHOREOGRAPHY_TTL_MS = 20_000;
-// Broad lite shape every card satisfies — enough to list + title + resize
-// without reaching for the 11 concrete card types.
-type CanvasCardLite = {
-  id: number; x: number; y: number; z: number; w: number; h: number;
-  sessionName?: string | null; cwd?: string | null; name?: string; path?: string;
-  items?: unknown[]; tabs?: Array<{ id: number; url?: string; title?: string }>; activeTabId?: number;
-  title?: string; repoPath?: string | null; initialQuestion?: string; codename?: string; number?: number; aspect?: number;
-  markdown?: string; diff?: string; truncated?: boolean; threadId?: string; entries?: DockEntry[]; laneId?: string; runtime?: string | null;
-  src?: string; mediaId?: string; poster?: string; branch?: string | null; stat?: string; packetId?: string | null;
-};
-const CANVAS_READ_CAP = 4096;
 type SpawnChoreography = { repoPath: string; origin: { x: number; y: number }; delayMs: number; expiresAt: number };
 type SpawnReservation = { id: number; x: number; y: number; w: number; h: number };
 type CanvasToast = { id: number; message: string; tone: 'error' | 'info' | 'success' };
@@ -342,6 +333,7 @@ export default function CanvasGlassPreviewPage() {
   const [liveScouts, setLiveScouts] = useState<Record<string, SwarmScoutView[]>>({});
   const [termCards, setTermCards] = useState<TermCard[]>([]);
   const [fileCards, setFileCards] = useState<FileCard[]>([]);
+  const [treeCards, setTreeCards] = useState<FileTreeCard[]>([]);
   const [imageCards, setImageCards] = useState<ImageCard[]>([]);
   // Which card the dragged photo is currently hovering over (→ would stack).
   // Drives the "Drop to stack" highlight. A ref mirror of imageCards lets the
@@ -1169,6 +1161,7 @@ export default function CanvasGlassPreviewPage() {
       ...cards.map((card) => card.id),
       ...termCards.map((card) => card.id),
       ...fileCards.map((card) => card.id),
+      ...treeCards.map((card) => card.id),
       ...imageCards.map((card) => card.id),
       ...videoCards.map((card) => card.id),
       ...browserCards.map((card) => card.id),
@@ -1203,12 +1196,13 @@ export default function CanvasGlassPreviewPage() {
         }, reduce ? CARD_ENTRANCE.reducedMs + 20 : CARD_ENTRANCE.borderMs + 20);
       });
     }
-  }, [agentCards, brainCards, browserCards, cards, chatCards, diffCards, fileCards, imageCards, markdownCards, specCards, termCards, videoCards]);
+  }, [agentCards, brainCards, browserCards, cards, chatCards, diffCards, fileCards, imageCards, markdownCards, specCards, termCards, treeCards, videoCards]);
 
   useEffect(() => {
     cardRectsRef.current = [
       ...termCards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h + 36 })),
       ...fileCards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h + 36 })),
+      ...treeCards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h + 63 })),
       ...imageCards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h + 28 })),
       ...browserCards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h + 92 })),
       ...chatCards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h })),
@@ -1218,7 +1212,7 @@ export default function CanvasGlassPreviewPage() {
       ...markdownCards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h + 36 })),
       ...agentCards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h + 36 })),
     ];
-  }, [termCards, fileCards, imageCards, browserCards, chatCards, diffCards, specCards, brainCards, markdownCards, agentCards]);
+  }, [termCards, fileCards, treeCards, imageCards, browserCards, chatCards, diffCards, specCards, brainCards, markdownCards, agentCards]);
 
   /** Nearest clear spot to an anchor (the viewport centre by default, or a caller
    *  -supplied cluster origin) inside the VISIBLE viewport — least-covered cell
@@ -1427,6 +1421,7 @@ export default function CanvasGlassPreviewPage() {
     gridItemsRef.current = [
       ...termCards.map((c) => ({ kind: 'term', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
       ...fileCards.map((c) => ({ kind: 'file', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
+      ...treeCards.map((c) => ({ kind: 'tree', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
       ...imageCards.map((c) => ({ kind: 'image', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
       ...browserCards.map((c) => ({ kind: 'browser', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
       ...chatCards.map((c) => ({ kind: 'chat', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
@@ -1436,7 +1431,7 @@ export default function CanvasGlassPreviewPage() {
       ...markdownCards.map((c) => ({ kind: 'markdown', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
       ...agentCards.map((c) => ({ kind: 'agent', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
     ];
-  }, [termCards, fileCards, imageCards, browserCards, chatCards, diffCards, specCards, brainCards, markdownCards, agentCards]);
+  }, [termCards, fileCards, treeCards, imageCards, browserCards, chatCards, diffCards, specCards, brainCards, markdownCards, agentCards]);
 
   const gridAnimRef = useRef<{ stop: () => void } | null>(null);
   const [gridPlaceholder, setGridPlaceholder] = useState<Slot | null>(null);
@@ -1460,6 +1455,7 @@ export default function CanvasGlassPreviewPage() {
     const writeAll = (t: number) => {
       setTermCards((p) => p.map((c) => lerp(c, t)));
       setFileCards((p) => p.map((c) => lerp(c, t)));
+      setTreeCards((p) => p.map((c) => lerp(c, t)));
       setImageCards((p) => p.map((c) => lerp(c, t)));
       setBrowserCards((p) => p.map((c) => lerp(c, t)));
       setChatCards((p) => p.map((c) => lerp(c, t)));
@@ -1562,7 +1558,7 @@ export default function CanvasGlassPreviewPage() {
   // re-trigger. dockOpen's --cnv-dock-reserve stamp effect is declared earlier, so
   // it lands before this reads usableCanvasArea().
   const gridCardCount =
-    termCards.length + fileCards.length + imageCards.length + browserCards.length +
+    termCards.length + fileCards.length + treeCards.length + imageCards.length + browserCards.length +
     chatCards.length + diffCards.length + specCards.length + brainCards.length + markdownCards.length +
     agentCards.length;
 
@@ -1571,6 +1567,7 @@ export default function CanvasGlassPreviewPage() {
   const minimapCards = useMemo<MinimapCard[]>(() => [
     ...termCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'term' })),
     ...fileCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'file' })),
+    ...treeCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'tree' })),
     ...imageCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'image', src: c.items[0]?.src })),
     ...videoCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'video', src: c.poster })),
     ...browserCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'browser' })),
@@ -1579,7 +1576,7 @@ export default function CanvasGlassPreviewPage() {
     ...specCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'spec' })),
     ...brainCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'brain' })),
     ...markdownCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'markdown' })),
-  ], [termCards, fileCards, imageCards, videoCards, browserCards, chatCards, diffCards, specCards, brainCards, markdownCards]);
+  ], [termCards, fileCards, treeCards, imageCards, videoCards, browserCards, chatCards, diffCards, specCards, brainCards, markdownCards]);
   // The navigator frames a region ~1.25× the viewport, CENTERED on where you're
   // looking (pan). Framing a bit MORE than the viewport keeps each card a small
   // tile (several tiling the sphere, reference-style) rather than 2-3 big cards
@@ -1812,29 +1809,20 @@ export default function CanvasGlassPreviewPage() {
 
   /** Clicked card comes forward. Terminals + files + images + browsers +
    *  chats share the 10–39 band — above mock cards (3), below chrome (40+). */
-  const focusCard = useCallback((kind: 'term' | 'file' | 'image' | 'video' | 'browser' | 'chat' | 'diff' | 'spec' | 'brain' | 'markdown' | 'agent', id: number) => {
+  const focusCard = useCallback((kind: CanvasCardKind, id: number) => {
     const canvasCards = canvasCardsRef.current;
     const current = canvasCards[kind].find((card) => card.id === id);
     if (!current || current.z === zPeakRef.current) return;
     if (zPeakRef.current + 1 > 38) {
       // Renormalize the whole band, keeping order, with the target on top.
-      const combined = [
-        ...canvasCards.term.map((card) => ({ kind: 'term' as const, id: card.id, z: card.z })),
-        ...canvasCards.file.map((card) => ({ kind: 'file' as const, id: card.id, z: card.z })),
-        ...canvasCards.image.map((card) => ({ kind: 'image' as const, id: card.id, z: card.z })),
-        ...canvasCards.video.map((card) => ({ kind: 'video' as const, id: card.id, z: card.z })),
-        ...canvasCards.browser.map((card) => ({ kind: 'browser' as const, id: card.id, z: card.z })),
-        ...canvasCards.chat.map((card) => ({ kind: 'chat' as const, id: card.id, z: card.z })),
-        ...canvasCards.diff.map((card) => ({ kind: 'diff' as const, id: card.id, z: card.z })),
-        ...canvasCards.spec.map((card) => ({ kind: 'spec' as const, id: card.id, z: card.z })),
-        ...canvasCards.brain.map((card) => ({ kind: 'brain' as const, id: card.id, z: card.z })),
-        ...canvasCards.markdown.map((card) => ({ kind: 'markdown' as const, id: card.id, z: card.z })),
-        ...canvasCards.agent.map((card) => ({ kind: 'agent' as const, id: card.id, z: card.z })),
-      ].sort((a, b) => a.z - b.z);
+      const combined = CANVAS_CARD_KINDS.flatMap((cardKind) => (
+        canvasCards[cardKind].map((card) => ({ kind: cardKind, id: card.id, z: card.z }))
+      )).sort((a, b) => a.z - b.z);
       const remap = new Map(combined.map((entry, index) => [`${entry.kind}:${entry.id}`, 10 + index]));
       const top = 10 + combined.length;
       setTermCards((previous) => previous.map((card) => ({ ...card, z: kind === 'term' && card.id === id ? top : remap.get(`term:${card.id}`) ?? card.z })));
       setFileCards((previous) => previous.map((card) => ({ ...card, z: kind === 'file' && card.id === id ? top : remap.get(`file:${card.id}`) ?? card.z })));
+      setTreeCards((previous) => previous.map((card) => ({ ...card, z: kind === 'tree' && card.id === id ? top : remap.get(`tree:${card.id}`) ?? card.z })));
       setImageCards((previous) => previous.map((card) => ({ ...card, z: kind === 'image' && card.id === id ? top : remap.get(`image:${card.id}`) ?? card.z })));
       setVideoCards((previous) => previous.map((card) => ({ ...card, z: kind === 'video' && card.id === id ? top : remap.get(`video:${card.id}`) ?? card.z })));
       setBrowserCards((previous) => previous.map((card) => ({ ...card, z: kind === 'browser' && card.id === id ? top : remap.get(`browser:${card.id}`) ?? card.z })));
@@ -1853,6 +1841,8 @@ export default function CanvasGlassPreviewPage() {
       setTermCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
     } else if (kind === 'file') {
       setFileCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
+    } else if (kind === 'tree') {
+      setTreeCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
     } else if (kind === 'image') {
       setImageCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
     } else if (kind === 'video') {
@@ -1876,6 +1866,7 @@ export default function CanvasGlassPreviewPage() {
 
   const focusTermCard = useCallback((id: number) => focusCard('term', id), [focusCard]);
   const focusFileCard = useCallback((id: number) => focusCard('file', id), [focusCard]);
+  const focusTreeCard = useCallback((id: number) => focusCard('tree', id), [focusCard]);
   const focusImageCard = useCallback((id: number) => focusCard('image', id), [focusCard]);
   const focusVideoCard = useCallback((id: number) => focusCard('video', id), [focusCard]);
   const focusBrowserCard = useCallback((id: number) => focusCard('browser', id), [focusCard]);
@@ -2417,6 +2408,22 @@ export default function CanvasGlassPreviewPage() {
     }));
   }, [findFreeSpot]);
 
+  const spawnFileTreeCard = useCallback((repoPath: string, at?: SnapGeometry) => {
+    const id = nextIdRef.current;
+    nextIdRef.current += 1;
+    zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
+    const spot = at ?? findFreeSpot(380, 523);
+    setTreeCards((previous) => spawnCanvasCard(previous, {
+      id,
+      repoPath,
+      x: spot.x,
+      y: spot.y,
+      w: at?.w ?? 380,
+      h: at?.h ?? 460,
+      z: zPeakRef.current,
+    }));
+  }, [findFreeSpot]);
+
   const showCanvasToast = useCallback((message: string, tone: CanvasToast['tone'] = 'error') => {
     const id = Date.now();
     setCanvasToast({ id, message, tone });
@@ -2504,6 +2511,7 @@ export default function CanvasGlassPreviewPage() {
       })]);
     }
     snap.file.forEach((saved) => spawnFileCard(saved.path, saved));
+    snap.tree?.forEach((saved) => spawnFileTreeCard(saved.repoPath, saved));
     const videoRestores = (snap.video ?? []).map(async (saved) => {
       const blob = await getMedia(saved.mediaId);
       if (!blob) return;
@@ -2545,7 +2553,7 @@ export default function CanvasGlassPreviewPage() {
       // guard, padded past the terminal respawn timer.
       persistArmedAtRef.current = Math.min(persistArmedAtRef.current, Date.now() + 2000);
     });
-  }, [canvasMedia, pickThread, spawnDiffCard, spawnFileCard, spawnTerminal, reattachTerminal, spawnWorktreeDiffCard]);
+  }, [canvasMedia, pickThread, spawnDiffCard, spawnFileCard, spawnFileTreeCard, spawnTerminal, reattachTerminal, spawnWorktreeDiffCard]);
 
   // Build the snapshot only when the debounce fires. Dragging used to stringify
   // every card on every pointer move even though localStorage writes were delayed.
@@ -2555,6 +2563,7 @@ export default function CanvasGlassPreviewPage() {
     dockOpen,
     term: termCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, cwd: card.cwd, cwdLabel: card.cwdLabel, sessionName: card.sessionName })),
     file: fileCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, path: card.path })),
+    tree: treeCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, repoPath: card.repoPath })),
     image: imageCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, aspect: card.aspect, items: card.items })),
     video: videoCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, aspect: card.aspect, mediaId: card.mediaId, name: card.name })),
     browser: browserCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, tabs: card.tabs, activeTabId: card.activeTabId })),
@@ -2563,7 +2572,7 @@ export default function CanvasGlassPreviewPage() {
     spec: specCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, repoPath: card.repoPath })),
     markdown: markdownCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, title: card.title, markdown: card.markdown })),
     brain: brainCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, repoPath: card.repoPath })),
-  }), [activeRepoPath, dockOpen, termCards, fileCards, imageCards, videoCards, browserCards, chatCards, diffCards, specCards, markdownCards, brainCards]);
+  }), [activeRepoPath, dockOpen, termCards, fileCards, treeCards, imageCards, videoCards, browserCards, chatCards, diffCards, specCards, markdownCards, brainCards]);
   const flushCanvasSnapshot = useCallback((force = false) => {
     if (!restoredRef.current || (!force && Date.now() < persistArmedAtRef.current)) return;
     saveCanvasSnapshot(buildCanvasSnapshot());
@@ -2599,6 +2608,10 @@ export default function CanvasGlassPreviewPage() {
   const closeFileCard = useCallback((id: number) => {
     setFileCards((previous) => previous.filter((card) => card.id !== id));
   }, []);
+
+  const moveTreeCard = useCallback((id: number, x: number, y: number) => setTreeCards((previous) => moveCanvasCard(previous, id, x, y)), []);
+  const resizeTreeCard = useCallback((id: number, w: number, h: number) => setTreeCards((previous) => previous.map((card) => (card.id === id ? { ...card, w, h } : card))), []);
+  const closeTreeCard = useCallback((id: number) => setTreeCards((previous) => previous.filter((card) => card.id !== id)), []);
 
   // Finder "Open With → o8" / dock drop — drain the OS-handed paths into
   // file cards, both at mount (cold launch routed here by FileOpenBridge)
@@ -2908,34 +2921,14 @@ export default function CanvasGlassPreviewPage() {
   // card change. Synced in an effect (not during render) — intents fire from
   // event handlers, long after commit, so one-tick lag never bites.
   const canvasCardsRef = useRef<Record<CanvasCardKind, CanvasCardLite[]>>({
-    term: [], file: [], image: [], video: [], browser: [], chat: [], diff: [], spec: [], brain: [], markdown: [], agent: [],
+    term: [], file: [], tree: [], image: [], video: [], browser: [], chat: [], diff: [], spec: [], brain: [], markdown: [], agent: [],
   });
   useEffect(() => {
     canvasCardsRef.current = {
-      term: termCards, file: fileCards, image: imageCards, video: videoCards, browser: browserCards,
+      term: termCards, file: fileCards, tree: treeCards, image: imageCards, video: videoCards, browser: browserCards,
       chat: chatCards, diff: diffCards, spec: specCards, brain: brainCards, markdown: markdownCards, agent: agentCards,
     };
-  }, [termCards, fileCards, imageCards, videoCards, browserCards, chatCards, diffCards, specCards, brainCards, markdownCards, agentCards]);
-
-  const canvasCardTitle = useCallback((kind: CanvasCardKind, card: CanvasCardLite): string => {
-    switch (kind) {
-      case 'term': return card.sessionName || (card.cwd ? `terminal · ${card.cwd}` : 'terminal');
-      case 'file': return card.name || card.path || 'file';
-      case 'image': return `${card.items?.length ?? 1} image${(card.items?.length ?? 1) === 1 ? '' : 's'}`;
-      case 'video': return card.name || 'video';
-      case 'browser': {
-        const active = card.tabs?.find((t) => t.id === card.activeTabId) ?? card.tabs?.[0];
-        return active?.title || active?.url || 'browser';
-      }
-      case 'chat': return card.title || 'session';
-      case 'diff': return card.title || 'diff';
-      case 'spec': return card.repoPath ? `spec · ${String(card.repoPath).split('/').pop()}` : 'o8.md';
-      case 'brain': return card.initialQuestion || 'brain';
-      case 'markdown': return card.title || 'note';
-      case 'agent': return card.codename || card.title || `agent #${card.number ?? '?'}`;
-      default: return kind;
-    }
-  }, []);
+  }, [termCards, fileCards, treeCards, imageCards, videoCards, browserCards, chatCards, diffCards, specCards, brainCards, markdownCards, agentCards]);
 
   const findCanvasCard = useCallback((kind: CanvasCardKind, id: number) => {
     return canvasCardsRef.current[kind].find((card) => card.id === id) ?? null;
@@ -2970,29 +2963,12 @@ export default function CanvasGlassPreviewPage() {
     panTweenRef.current = requestAnimationFrame(tick);
   }, [pan]);
 
-  const capReadContent = useCallback((content: string) => {
-    if (content.length <= CANVAS_READ_CAP) return { content, truncated: false };
-    const head = content.slice(0, Math.floor(CANVAS_READ_CAP / 2));
-    const tail = content.slice(content.length - Math.ceil(CANVAS_READ_CAP / 2));
-    return { content: `${head}\n...\n${tail}`.slice(0, CANVAS_READ_CAP), truncated: true };
-  }, []);
-
   const cardDomText = useCallback((id: number) => {
     const node = document.querySelector(`[data-card-id="${id}"]`) as HTMLElement | null;
     if (!node) return '';
     const textarea = node.querySelector('textarea') as HTMLTextAreaElement | null;
     if (textarea) return textarea.value;
     return node.innerText.trim();
-  }, []);
-
-  const dockEntryReadLine = useCallback((entry: DockEntry) => {
-    if (entry.role === 'user') return `user: ${entry.text}`;
-    if (entry.role === 'text') return `assistant: ${entry.text}`;
-    if (entry.role === 'thinking') return `thinking: ${entry.text}`;
-    if (entry.role === 'status') return `status: ${entry.text}`;
-    if (entry.role === 'playback') return `playback: ${entry.text}`;
-    if (entry.role === 'result') return `result: ${entry.title}${entry.body ? `\n${entry.body}` : ''}`;
-    return '';
   }, []);
 
   const readCanvasCard = useCallback((kind: CanvasCardKind, card: CanvasCardLite, lines: number) => {
@@ -3021,6 +2997,9 @@ export default function CanvasGlassPreviewPage() {
       content = card.diff ?? '';
       truncated = Boolean(card.truncated);
     } else if (kind === 'file') {
+      content = cardDomText(card.id);
+      if (!content) return { ok: false, error: 'content-unavailable' };
+    } else if (kind === 'tree') {
       content = cardDomText(card.id);
       if (!content) return { ok: false, error: 'content-unavailable' };
     } else if (kind === 'brain') {
@@ -3052,14 +3031,15 @@ export default function CanvasGlassPreviewPage() {
     } else {
       return { ok: false, error: 'unsupported-kind' };
     }
-    const capped = capReadContent(content);
+    const capped = capCanvasReadContent(content);
     return { ok: true, content: capped.content, truncated: truncated || capped.truncated };
-  }, [activeLanes, canvasCardTitle, capReadContent, cardDomText, convos, dockEntryReadLine]);
+  }, [activeLanes, cardDomText, convos]);
 
   const patchCanvasCardGeom = useCallback((kind: CanvasCardKind, id: number, patch: { x?: number; y?: number; w?: number; h?: number }) => {
     switch (kind) {
       case 'term': setTermCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
       case 'file': setFileCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
+      case 'tree': setTreeCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
       case 'image': setImageCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
       case 'video': setVideoCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
       case 'browser': setBrowserCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
@@ -3080,6 +3060,7 @@ export default function CanvasGlassPreviewPage() {
         break;
       }
       case 'file': closeFileCard(id); break;
+      case 'tree': closeTreeCard(id); break;
       case 'image': closeImageCard(id); break;
       case 'video': closeVideoCard(id); break;
       case 'browser': closeBrowserCard(id); break;
@@ -3090,7 +3071,7 @@ export default function CanvasGlassPreviewPage() {
       case 'markdown': setMarkdownCards((p) => p.filter((c) => c.id !== id)); break;
       case 'agent': setAgentCards((p) => p.filter((c) => c.id !== id)); break;
     }
-  }, [closeTerminal, closeFileCard, closeImageCard, closeVideoCard, closeBrowserCard, closeChatCard]);
+  }, [closeTerminal, closeFileCard, closeTreeCard, closeImageCard, closeVideoCard, closeBrowserCard, closeChatCard]);
 
   const commandPaletteCommands = useMemo<CanvasCommands>(() => ({
     spawnTerminal: () => {
@@ -3100,6 +3081,10 @@ export default function CanvasGlassPreviewPage() {
     spawnFile: (filePath) => {
       if (filePath) spawnFileCard(filePath);
       else openFilePicker();
+    },
+    spawnTree: () => {
+      if (activeRepoPath) spawnFileTreeCard(activeRepoPath);
+      else showCanvasToast('Select a repository to open its file tree.', 'info');
     },
     spawnImage: () => selectCanvasMedia('image', (file) => {
       const origin = viewportSpawnOrigin();
@@ -3130,7 +3115,7 @@ export default function CanvasGlassPreviewPage() {
     zoomIn: () => setCanvasZoomLevel((current) => stepCanvasZoom(current, 'in')),
     zoomToFit: () => setCanvasZoomLevel(CANVAS_FIT_ZOOM),
     zoomOut: () => setCanvasZoomLevel((current) => stepCanvasZoom(current, 'out')),
-  }), [activeRepoPath, convos, dismissCanvasCard, openFilePicker, pickThread, redockActiveLane, repos, spawnBrainCard, spawnBrowserCard, spawnFileCard, spawnImageCard, spawnMarkdownCard, spawnSpecCard, spawnTerminal, spawnVideoCard, spawnWorktreeDiffCard, viewportSpawnOrigin]);
+  }), [activeRepoPath, convos, dismissCanvasCard, openFilePicker, pickThread, redockActiveLane, repos, showCanvasToast, spawnBrainCard, spawnBrowserCard, spawnFileCard, spawnFileTreeCard, spawnImageCard, spawnMarkdownCard, spawnSpecCard, spawnTerminal, spawnVideoCard, spawnWorktreeDiffCard, viewportSpawnOrigin]);
 
   // Canvas intent bus (#1232 phase 2) — Symon and the gated /api/canvas/intent
   // route drive the canvas through the SAME handlers the rail buttons call.
@@ -3449,6 +3434,16 @@ export default function CanvasGlassPreviewPage() {
             note = `added file ${path.split('/').pop() || path}`;
             break;
           }
+          case 'add-tree': {
+            const repo = typeof args.repo === 'string' ? args.repo.trim() : (activeRepoPath ?? '');
+            if (!repo) { ok = false; note = 'add-tree needs args.repo when no repository is active'; break; }
+            const at = typeof args.x === 'number' && typeof args.y === 'number'
+              ? { x: args.x, y: args.y, w: 380, h: 460 }
+              : undefined;
+            spawnFileTreeCard(repo, at);
+            note = `added file tree for ${repo.split('/').filter(Boolean).pop() ?? repo}`;
+            break;
+          }
           case 'open-diff': {
             // The active repo's working-tree diff ("what have I changed") — the
             // fixture-free diff an agent can always show. Lane diffs go through
@@ -3500,7 +3495,7 @@ export default function CanvasGlassPreviewPage() {
       window.removeEventListener('o8:canvas-intent', onIntent);
       (window as unknown as Record<string, unknown>).__o8CanvasIntentReady = false;
     };
-  }, [activeRepoPath, animatePanTo, canvasEnabled, canvasViewport, canvasZoomLevel, dockOpen, findCanvasCard, gridMode, pan.x, pan.y, readCanvasCard, repos, sendPrompt, spawnAgents, spawnBrainCard, spawnMarkdownCard, spawnSpecCard, spawnTerminal, spawnFileCard, spawnWorktreeDiffCard, spawnVideoCard, pickThread, cycleImageCard, spreadImageCard, canvasCardTitle, patchCanvasCardGeom, dismissCanvasCard, focusCard, winSize.h, winSize.w]);
+  }, [activeRepoPath, animatePanTo, canvasEnabled, canvasViewport, canvasZoomLevel, dockOpen, findCanvasCard, gridMode, pan.x, pan.y, readCanvasCard, repos, sendPrompt, spawnAgents, spawnBrainCard, spawnMarkdownCard, spawnSpecCard, spawnTerminal, spawnFileCard, spawnFileTreeCard, spawnWorktreeDiffCard, spawnVideoCard, pickThread, cycleImageCard, spreadImageCard, patchCanvasCardGeom, dismissCanvasCard, focusCard, winSize.h, winSize.w]);
 
   if (!canvasEnabled) {
     return (
@@ -3655,6 +3650,9 @@ export default function CanvasGlassPreviewPage() {
           />
         ))}
       </AnimatePresence>
+
+      <FileTreeCardLayer cards={treeCards} spawnFileCard={spawnFileCard} onMove={moveTreeCard}
+        onResize={resizeTreeCard} onFocus={focusTreeCard} onClose={closeTreeCard} />
 
       {/* ── Image cards — photos dissolve into the canvas; drag together
             to stack, tap a deck to flip through ─────────────────────── */}

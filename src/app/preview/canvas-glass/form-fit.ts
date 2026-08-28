@@ -25,6 +25,7 @@ export interface Slot {
 export const CARD_CHROME: Record<string, number> = {
   term: 36,
   file: 36,
+  tree: 63,
   image: 28,
   browser: 92,
   chat: 63,
@@ -90,6 +91,7 @@ export function columnsFor(count: number, areaW: number, areaH: number, gap = DE
 export const KIND_ASPECT: Record<string, number> = {
   term: 1.62,
   file: 1.5,
+  tree: 1.08,
   diff: 1.46,
   browser: 1.5,
   spec: 1.42,
