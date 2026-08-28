@@ -103,6 +103,7 @@ export const SETTINGS_SEARCH_REGISTRY: SettingsSearchEntry[] = [
   { tab: 'billing', tabLabel: 'Plan & Billing', group: "What's included", label: "Voice & dictation", description: "Local Symon dictation and read-aloud \u2014 free forever." },
   { tab: 'connections', tabLabel: 'Mobile', group: "Paired devices", label: "Refresh" },
   { tab: 'connections', tabLabel: 'Mobile', group: "Remote access", label: "Connect this Mac", description: "Keep an authenticated outbound connection to the o8 relay", keywords: ['connect', 'relay', 'remote', 'web', 'machine'] },
+  { tab: 'connections', tabLabel: 'Mobile', group: "Symon Messages", label: "Text Symon", description: "Managed number, durable history, and CLI-backed replies", keywords: ['messages', 'text', 'sms', 'symon', 'cli', 'phone'] },
   { tab: 'connections', tabLabel: 'Mobile', group: "Pairing", label: "Show pairing QR", description: "button dispatching the mobile pairing QR fullscreen view" },
   { tab: 'git-prs', tabLabel: 'Git & PRs', group: "GitHub", label: "Repository & CLI access", description: "Connect GitHub through device flow or an access token" },
   { tab: 'git-prs', tabLabel: 'Git & PRs', group: "GitHub", label: "Automation app", description: "Install or manage the o8 GitHub App" },

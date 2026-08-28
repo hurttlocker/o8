@@ -4,58 +4,24 @@ export const runtime = 'nodejs';
 import { NextResponse, type NextRequest } from 'next/server';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { resolveDeviceByToken } from '@/lib/mobile/device-registry';
-import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
 import {
   normalizeMobileAskModelId,
   resolveMobileAskRoute,
 } from '@/lib/mobile/ask-model-routing';
 import { readSymonAgentContext, resolveSymonAgentScope } from '@/lib/mobile/symon-agent-context';
 import {
-  buildSymonTextPlannerInfoEval,
   type SymonTextPlannerSelection,
 } from '@/lib/mobile/symon-text-eval';
 import { createSymonTextSession } from '@/lib/mobile/symon-text-session-store';
+import {
+  readSymonTextPlannerInfo,
+  type SymonTextPlannerInfo,
+} from '@/lib/mobile/symon-text-bridge-client';
 import { getRuntimeAuthSnapshot } from '@/lib/runtimes/shared/auth-detect';
-
-const POLL_INTERVAL_MS = 100;
-const BRIDGE_TIMEOUT_MS = 5_000;
 
 function requestBearer(request: NextRequest): string {
   const auth = request.headers.get('authorization');
   return auth?.startsWith('Bearer ') ? auth.slice(7).trim() : '';
-}
-
-function webviewClient(): O8WebviewClient {
-  const global = globalThis as { __o8SymonTextClient?: O8WebviewClient };
-  global.__o8SymonTextClient ??= new O8WebviewClient();
-  return global.__o8SymonTextClient;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-interface PlannerInfo {
-  available?: boolean;
-  engine?: 'claude' | 'codex';
-  model?: string;
-  effort?: string;
-  tools?: Array<Record<string, unknown>>;
-  detail?: string;
-}
-
-async function readPlannerInfo(selection?: SymonTextPlannerSelection): Promise<PlannerInfo> {
-  const code = buildSymonTextPlannerInfoEval(selection);
-  const deadline = Date.now() + BRIDGE_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    const { result } = await webviewClient().evalJs(code);
-    const parsed = JSON.parse(result) as { state?: string; info?: PlannerInfo; detail?: string };
-    if (parsed.state === 'no_bridge') throw new Error('Symon text planner bridge is not mounted.');
-    if (parsed.state === 'error') throw new Error(parsed.detail || 'Symon text planner bridge failed.');
-    if (parsed.state === 'done' && parsed.info) return parsed.info;
-    await sleep(POLL_INTERVAL_MS);
-  }
-  throw new Error('Symon text planner bridge timed out.');
 }
 
 async function resolveRequestedPlanner(value: unknown): Promise<SymonTextPlannerSelection | null> {
@@ -112,11 +78,11 @@ export async function POST(request: NextRequest) {
   }
 
   const requestedPlanner = await resolveRequestedPlanner(context.model);
-  let info: PlannerInfo;
+  let info: SymonTextPlannerInfo;
   try {
-    info = await readPlannerInfo(requestedPlanner ?? undefined);
+    info = await readSymonTextPlannerInfo(requestedPlanner ?? undefined);
     if (requestedPlanner && !info.available) {
-      info = await readPlannerInfo();
+      info = await readSymonTextPlannerInfo();
     }
   } catch (error) {
     return NextResponse.json(

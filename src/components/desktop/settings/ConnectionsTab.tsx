@@ -27,15 +27,54 @@ type AttachSettingResponse = {
   error?: { message?: string };
 };
 
+type ManagedMessagesResponse = {
+  ok: boolean;
+  enabled?: boolean;
+  phoneNumber?: string | null;
+  connected?: boolean;
+  allowedSenderHandle?: string | null;
+  message?: string;
+};
+
 export function ConnectionsTab() {
   const [connectEnabled, setConnectEnabled] = useState(false);
   const [connectLocked, setConnectLocked] = useState(false);
   const [connectLoading, setConnectLoading] = useState(true);
   const [connectSaving, setConnectSaving] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
+  const [messagesEnabled, setMessagesEnabled] = useState(false);
+  const [messagesNumber, setMessagesNumber] = useState<string | null>(null);
+  const [messagesConnected, setMessagesConnected] = useState(false);
+  const [messagesSender, setMessagesSender] = useState('');
+  const [messagesLoading, setMessagesLoading] = useState(true);
+  const [messagesSaving, setMessagesSaving] = useState(false);
+  const [messagesError, setMessagesError] = useState<string | null>(null);
 
   const showPairingQr = useCallback(() => {
     window.dispatchEvent(new CustomEvent(OPEN_MOBILE_PAIRING_EVENT));
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch('/api/panel/symon/managed-messages', { cache: 'no-store' })
+      .then(async (response) => {
+        const data = await response.json() as ManagedMessagesResponse;
+        if (!response.ok || !data.ok || typeof data.enabled !== 'boolean') {
+          throw new Error(data.message ?? 'Could not read managed Messages status.');
+        }
+        if (cancelled) return;
+        setMessagesEnabled(data.enabled);
+        setMessagesNumber(data.phoneNumber ?? null);
+        setMessagesConnected(data.connected === true);
+        setMessagesSender(data.allowedSenderHandle ?? '');
+      })
+      .catch((error) => {
+        if (!cancelled) setMessagesError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        if (!cancelled) setMessagesLoading(false);
+      });
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -89,6 +128,33 @@ export function ConnectionsTab() {
     }
   }, [connectEnabled]);
 
+  const toggleManagedMessages = useCallback(async (enabled: boolean) => {
+    const previous = messagesEnabled;
+    setMessagesEnabled(enabled);
+    setMessagesSaving(true);
+    setMessagesError(null);
+    try {
+      const response = await fetch('/api/panel/symon/managed-messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled, allowedSenderHandle: messagesSender }),
+      });
+      const data = await response.json() as ManagedMessagesResponse;
+      if (!response.ok || !data.ok || typeof data.enabled !== 'boolean') {
+        throw new Error(data.message ?? 'Could not update managed Messages.');
+      }
+      setMessagesEnabled(data.enabled);
+      setMessagesNumber(data.phoneNumber ?? null);
+      setMessagesConnected(data.connected === true);
+      if (enabled) setConnectEnabled(true);
+    } catch (error) {
+      setMessagesEnabled(previous);
+      setMessagesError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setMessagesSaving(false);
+    }
+  }, [messagesEnabled, messagesSender]);
+
   return (
     <div style={{
       paddingTop: 8,
@@ -119,6 +185,74 @@ export function ConnectionsTab() {
             onToggle={toggleConnect}
             disabled={connectLoading || connectSaving || connectLocked}
           />
+        </SettingsGroup>
+      </section>
+
+      <section style={{ marginTop: 28 }}>
+        <SettingsGroup
+          header="Symon Messages"
+          footnote={messagesError
+            ?? (messagesEnabled && messagesNumber
+              ? `Text ${messagesNumber}. This Mac must be online; tool approvals still happen inside o8.`
+              : messagesConnected
+                ? 'Give Symon a managed number for CLI-backed conversations. Voice stays inside the o8 app.'
+                : 'Connect this Mac first. Managed Messages uses its authenticated outbound connection.')}
+        >
+          <SettingsRow
+            icon={<Smartphone size={14} />}
+            label="Text Symon"
+            subtitle={messagesNumber ?? 'Managed number, durable history, and CLI-backed replies'}
+            checked={messagesEnabled}
+            onToggle={toggleManagedMessages}
+            disabled={messagesLoading || messagesSaving}
+          />
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              minHeight: 44,
+              paddingTop: 8,
+              paddingRight: 14,
+              paddingBottom: 8,
+              paddingLeft: 14,
+              borderTopWidth: 1,
+              borderTopStyle: 'solid',
+              borderTopColor: 'var(--t-divider-subtle)',
+              color: 'var(--t-text-muted)',
+              fontSize: 12,
+            }}
+          >
+            <span style={{ minWidth: 112 }}>Your phone number</span>
+            <input
+              aria-label="Phone number allowed to text Symon"
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
+              value={messagesSender}
+              disabled={messagesSaving}
+              placeholder="+1 267 555 0123"
+              onChange={(event) => setMessagesSender(event.target.value)}
+              style={{
+                flex: 1,
+                minWidth: 0,
+                height: 32,
+                paddingTop: 0,
+                paddingRight: 10,
+                paddingBottom: 0,
+                paddingLeft: 10,
+                borderWidth: 1,
+                borderStyle: 'solid',
+                borderColor: 'var(--t-divider)',
+                borderRadius: 7,
+                background: 'var(--t-bg-card)',
+                color: 'var(--t-text)',
+                fontFamily: APP_FONT_STACK,
+                fontSize: 12,
+                outline: 'none',
+              }}
+            />
+          </label>
         </SettingsGroup>
       </section>
 

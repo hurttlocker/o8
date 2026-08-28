@@ -3,36 +3,13 @@ export const runtime = 'nodejs';
 
 import { NextResponse, type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
-import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
+import { type SymonTextPlannerSelection } from '@/lib/mobile/symon-text-eval';
 import {
-  buildSymonTextInterruptEval,
-  buildSymonTextTurnEval,
-  type SymonTextPlannerSelection,
-} from '@/lib/mobile/symon-text-eval';
+  pollSymonTextInterrupt,
+  pollSymonTextTurn,
+} from '@/lib/mobile/symon-text-bridge-client';
 
-const POLL_INTERVAL_MS = 150;
 const POLL_WINDOW_MS = 3_000;
-
-function webviewClient(): O8WebviewClient {
-  const global = globalThis as { __o8SymonTextClient?: O8WebviewClient };
-  global.__o8SymonTextClient ??= new O8WebviewClient();
-  return global.__o8SymonTextClient;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function pollEval(code: string): Promise<Record<string, unknown>> {
-  const deadline = Date.now() + POLL_WINDOW_MS;
-  while (Date.now() < deadline) {
-    const { result } = await webviewClient().evalJs(code);
-    const parsed = JSON.parse(result) as Record<string, unknown>;
-    if (parsed.state !== 'pending') return parsed;
-    await sleep(POLL_INTERVAL_MS);
-  }
-  return { state: 'pending' };
-}
 
 export async function POST(request: NextRequest) {
   const denied = requirePanelAuth(request);
@@ -54,7 +31,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, state: 'error', error: 'bad_request' }, { status: 400 });
   }
   try {
-    const result = await pollEval(buildSymonTextTurnEval(sessionId, turnId, prompt, selection));
+    const result = await pollSymonTextTurn({
+      sessionId,
+      turnId,
+      prompt,
+      planner: selection,
+    }, POLL_WINDOW_MS);
     return NextResponse.json({ ok: result.state !== 'error', ...result });
   } catch (error) {
     return NextResponse.json({
@@ -76,7 +58,7 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ ok: false, error: 'bad_request' }, { status: 400 });
   }
   try {
-    const result = await pollEval(buildSymonTextInterruptEval(sessionId, turnId));
+    const result = await pollSymonTextInterrupt(sessionId, turnId, POLL_WINDOW_MS);
     return NextResponse.json({ ok: result.state === 'done', ...result });
   } catch (error) {
     return NextResponse.json({

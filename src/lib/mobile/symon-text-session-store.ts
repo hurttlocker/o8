@@ -73,6 +73,23 @@ export function createSymonTextSession(
   return record;
 }
 
+export function createSymonTextSessionFromTranscript(
+  input: Omit<SymonTextSessionRecord, 'sessionId' | 'createdAt' | 'lastActivityAt' | 'transcript' | 'activeMachine'>,
+  transcript: SymonTextTranscriptEntry[],
+  now: number = Date.now(),
+): SymonTextSessionRecord {
+  const record: SymonTextSessionRecord = {
+    ...input,
+    sessionId: randomUUID(),
+    createdAt: now,
+    lastActivityAt: now,
+    transcript: capTranscript(transcript),
+    activeMachine: DEFAULT_SYMON_MACHINE,
+  };
+  persist([record, ...active(loadAll(), now)].slice(0, MAX_SESSIONS));
+  return record;
+}
+
 export function updateSymonTextMachine(
   sessionId: string,
   activeMachine: SymonMachineIdentity,
