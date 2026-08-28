@@ -891,7 +891,10 @@ fn requires_confirmation_for_call(
     class: safety::SafetyClass,
     reversible_silent_consent: bool,
 ) -> bool {
-    matches!(tool_name, "symon_ledger_undo" | "gh_issue_create" | "gh_comment")
+    matches!(
+        tool_name,
+        "symon_ledger_undo" | "gh_issue_create" | "gh_comment" | "mac_messages_send"
+    )
         || safety::requires_confirmation(class, reversible_silent_consent)
 }
 
@@ -1312,6 +1315,11 @@ fn confirm_summary(tool_name: &str, args: &Value, ledger_session_id: Option<&str
             }
         }
         "mac_mail_send_draft" => format!("Send the draft email “{}”", s("subject")),
+        "mac_messages_send" => format!(
+            "Send this message to {}:\n\n{}",
+            s("recipient"),
+            s("message")
+        ),
         "csv_write" => format!("Write the CSV “{}”", s("filename")),
         "symon_ledger_undo" => ledger::describe_action(&s("action_id"), ledger_session_id)
             .map(|summary| format!("Undo the action that {summary}"))
@@ -1343,6 +1351,15 @@ fn confirm_spoken(tool_name: &str, args: &Value, ledger_session_id: Option<&str>
             .and_then(Value::as_str)
             .unwrap_or("I couldn't read this plan back safely, so I won't run it.")
             .to_string();
+    }
+    if tool_name == "mac_messages_send" {
+        let recipient = args
+            .get("recipient")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        return format!(
+            "I'm about to send the exact message shown on screen to {recipient}. Say yes, or cancel."
+        );
     }
     let summary = confirm_summary(tool_name, args, ledger_session_id);
     let mut chars = summary.chars();
@@ -2201,6 +2218,33 @@ mod confirm_registry_tests {
             safety::SafetyClass::Reversible,
             true,
         ));
+        assert!(requires_confirmation_for_call(
+            "mac_messages_send",
+            safety::SafetyClass::Reversible,
+            true,
+        ));
+        assert_eq!(
+            confirm_summary(
+                "mac_messages_send",
+                &json!({
+                    "recipient": "+1 (215) 555-0100",
+                    "message": "First line\nSecond line",
+                }),
+                None,
+            ),
+            "Send this message to +1 (215) 555-0100:\n\nFirst line\nSecond line"
+        );
+        assert_eq!(
+            confirm_spoken(
+                "mac_messages_send",
+                &json!({
+                    "recipient": "+1 (215) 555-0100",
+                    "message": "Private text that should not be spoken",
+                }),
+                None,
+            ),
+            "I'm about to send the exact message shown on screen to +1 (215) 555-0100. Say yes, or cancel."
+        );
         let comment_summary = confirm_summary(
             "gh_comment",
             &json!({
