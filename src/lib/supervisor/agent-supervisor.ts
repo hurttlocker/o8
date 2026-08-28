@@ -1108,10 +1108,6 @@ function applyTranscriptStatusSnapshot(
   watched.lastTranscriptMtimeMs = transcriptStatus.mtimeMs;
 }
 
-function dedupeStrings(values: string[]): string[] {
-  return [...new Set(values.filter(Boolean))];
-}
-
 // ── Helpers ──
 
 function formatDuration(seconds: number): string {

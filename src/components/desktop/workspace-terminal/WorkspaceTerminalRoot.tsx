@@ -2,7 +2,6 @@
 
 
 import { forwardRef, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { motion } from 'framer-motion';
 // RotateCcw shim removed with the in-workspace reconnect banner —
 // recovery now lives in the AgentPanel ConnectionPill.
 import { PreviewPane } from '@/components/desktop/workspace-terminal/PreviewPane';

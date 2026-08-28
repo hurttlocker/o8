@@ -49,13 +49,6 @@ function describeSilentExit(input: {
   return input.stderrTail.trim() ? `${head}\n${input.stderrTail.trim()}` : head;
 }
 
-/** Map CLI model id suffix to the --model flag value */
-const CLAUDE_MODEL_MAP: Record<string, string> = {
-  opus: 'opus',
-  sonnet: 'sonnet',
-  haiku: 'haiku',
-};
-
 const CODEX_MODEL_MAP: Record<string, string> = {
   'gpt-5.6-sol': 'gpt-5.6-sol',
   'gpt-5.6-terra': 'gpt-5.6-terra',
@@ -70,8 +63,6 @@ const GEMINI_MODEL_MAP: Record<string, string> = {
   'gemini-2.5-pro': 'gemini-2.5-pro',
   'gemini-2.5-flash': 'gemini-2.5-flash',
 };
-
-const VALID_EFFORTS = new Set<string>(['low', 'medium', 'high', 'max']);
 
 function extractModelKey(cliModelId: string): string {
   // cli:claude-code:opus → opus
@@ -112,7 +103,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'runtime, model, and messages are required' }, { status: 400 });
     }
 
-    const { runtime, model, messages, effort, repoPath } = body;
+    const { runtime, model, messages, repoPath } = body;
     const modelKey = extractModelKey(model);
     const prompt = buildPrompt(messages);
     if (!prompt) {

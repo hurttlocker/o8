@@ -24,8 +24,6 @@ const branchCache = new Map<string, { branch: string; ts: number }>();
 const BRANCH_CACHE_TTL = 10_000;
 const diffCache = new Map<string, { data: { additions: number; deletions: number; changedFiles: number } | null; ts: number }>();
 const DIFF_CACHE_TTL = 30_000;
-const STALE_WORKSPACE_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
-
 interface PRData {
   number: number;
   title: string;
@@ -477,7 +475,7 @@ async function collectWorkspaceLifecycle() {
   };
 }
 
-export async function GET(req: Request) {
+export async function GET() {
   try {
     const result = await collectWorkspaceLifecycle();
     return NextResponse.json(result);

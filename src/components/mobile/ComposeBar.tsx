@@ -84,7 +84,6 @@ function CloseIcon({ size = 14, strokeWidth = 2.2 }: { size?: number; strokeWidt
 export const ComposeBar = memo(function ComposeBar(props: ComposeBarProps) {
   const { colors } = useTheme();
   const {
-    session,
     sessionKey,
     draft,
     attachments,
@@ -97,7 +96,6 @@ export const ComposeBar = memo(function ComposeBar(props: ComposeBarProps) {
     ownedReviewDisposition,
     ownedQueuedTurn,
     actionNote,
-    agentDisplayName,
     composeRef,
     fileInputRef,
     handlers,
@@ -296,13 +294,6 @@ export const ComposeBar = memo(function ComposeBar(props: ComposeBarProps) {
     fontFamily: SYSTEM_FONT,
     fontSize: 13,
     lineHeight: '18px',
-  };
-
-  const handleCommandShortcut = () => {
-    if (!draft.trim()) {
-      handlers.onDraftChange('/');
-    }
-    composeRef.current?.focus();
   };
 
   const renderSlashSuggestions = () => (

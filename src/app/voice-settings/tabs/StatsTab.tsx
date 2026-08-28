@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { dictationHistoryGet, type DictationHistoryEntry } from '@/lib/tauri/bridge';
 import {
-  TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY, ACCENT_LIGHT, SECTION_BG, SECTION_BORDER,
+  TEXT_PRIMARY, TEXT_TERTIARY, ACCENT_LIGHT, SECTION_BG, SECTION_BORDER,
   INK_ON_GLASS_1, INK_ON_GLASS_2, INK_ON_GLASS_3,
 } from '../tokens';
 import { ICONS } from '../tokens';

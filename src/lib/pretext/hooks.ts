@@ -12,9 +12,6 @@ import {
   measureHeight,
   measureLayout,
   getLines,
-  prepareText,
-  prepareTextWithSegments,
-  FONTS,
   LINE_HEIGHTS,
   type FontKey,
   type LayoutResult,
@@ -172,10 +169,6 @@ export function usePretextTruncation(
 
     const result = getLines(text, font, maxWidth, lineHeight);
     if (result.lines.length <= maxLines) return { truncated: text, isTruncated: false };
-
-    // Get the text up to the end of the last visible line
-    const lastLine = result.lines[maxLines - 1];
-    const truncatedText = lastLine.text;
 
     // Build the full truncated string from all visible lines
     const visibleText = result.lines

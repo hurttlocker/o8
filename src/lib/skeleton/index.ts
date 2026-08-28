@@ -8,7 +8,7 @@ import { basename } from 'node:path';
 import { hashFile } from './parser';
 import { parseFile } from './parser';
 import { renderSkeleton } from './renderer';
-import { getAllCached, getChunkStats, isCacheValid, isChunkCacheValid, pruneStale, pruneStaleChunks, upsert, upsertBatch, upsertChunks } from './store';
+import { getAllCached, getChunkStats, isCacheValid, isChunkCacheValid, pruneStale, pruneStaleChunks, upsertBatch, upsertChunks } from './store';
 import { walkRepo } from './walker';
 import type { FileSkeleton, RenderOptions, RenderedSkeleton, ScanOptions, SkeletonMap } from './types';
 
@@ -94,10 +94,9 @@ export async function scanRepo(options: ScanOptions): Promise<SkeletonMap> {
   }
 
   // Chunk uncached TS/TSX files (bodies — TS Compiler API)
-  let chunkedCount = 0;
   if (enableChunks && toChunk.length > 0) {
     try {
-      const { chunkFileAsync } = await import('./chunker');
+      await import('./chunker');
       // Warmup TS compiler on first chunk
       if (toChunk.length > 0) {
         const { warmup } = await import('./chunker');
@@ -110,7 +109,6 @@ export async function scanRepo(options: ScanOptions): Promise<SkeletonMap> {
           const fileChunks = chunkFile(wf.absolutePath, wf.relativePath, wf.language);
           if (fileChunks && fileChunks.chunks.length > 0) {
             upsertChunks(repoPath, fileChunks);
-            chunkedCount++;
           }
         } catch (err) {
           console.warn(`[skeleton] Failed to chunk ${wf.relativePath}:`, err);

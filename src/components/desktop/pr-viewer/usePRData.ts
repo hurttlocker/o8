@@ -3,9 +3,7 @@ import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 import {
   formatCiCheckInjection,
-  formatCiCheckBatchInjection,
   formatReviewCommentInjection,
-  formatReviewCommentBatchInjection,
   formatReviewThreadInjection,
 } from '@/lib/chat/injection';
 import type { RepoRegistryEntry } from '@/lib/repos/types';

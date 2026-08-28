@@ -10,7 +10,7 @@
  * the dashboard gate compact mode / sidebar-collapsed state from the call site.
  */
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ColumnHeaderStrip } from './ColumnHeaderStrip';
 import { SidebarTogglePill } from './SidebarTogglePill';
@@ -50,7 +50,6 @@ export function WorkspaceHeaderStrip({
   onToggleSidebar,
   onSidebarHoverEnter,
   onSidebarHoverLeave,
-  bottomPanelVisible = true,
   onToggleBottomPanel,
   onSplitWorkspacePanel,
   rightPanelOpen = false,
@@ -63,14 +62,10 @@ export function WorkspaceHeaderStrip({
   terminalModeActive = false,
   headerActiveTabId,
   finishedTabCount = 0,
-  projectContextRailAvailable = false,
-  projectContextRailVisible = true,
-  onToggleProjectContextRail,
   splitHeaderWorkspaces,
 }: WorkspaceHeaderStripProps) {
   const showRightPanelFallbackToggle = !rightPanelOpen && Boolean(onToggleRightPanel);
   const showApprovalBadge = approvalCount > 0 && Boolean(onOpenInbox);
-  const showProjectContextToggle = projectContextRailAvailable && Boolean(onToggleProjectContextRail);
   const tabs = headerTabs ?? [];
   const isSplit = Boolean(splitHeaderWorkspaces && splitHeaderWorkspaces.length >= 2);
   // Split mode → side-by-side pill strips. Single 2+ tabs → pill strip.

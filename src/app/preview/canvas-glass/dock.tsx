@@ -39,7 +39,6 @@ export function OrchestratorDock({
   entries,
   activeLane,
   activeLabel,
-  activeTone,
   onSelectLane,
   onSend,
   busy,
@@ -750,4 +749,3 @@ export function CanvasMarkdown({ text }: { text: string }) {
     </div>
   );
 }
-

@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { execSync } from 'child_process';
 import os from 'node:os';
 import { listRepos } from '@/lib/repos/registry';
@@ -272,47 +272,6 @@ async function collectTimelineMilestones(todayStart: Date, windowMinutes: number
     .slice(-12);
 }
 
-/** Classify chat-style JSONL messages */
-function classifyMessage(role: string, content: string, type: string): SegmentKind {
-  const lc = content.toLowerCase();
-
-  // Tool results are direct evidence of coding activity
-  if (role === 'toolResult' || role === 'tool') {
-    if (looksLikeRealError(content)) {
-      return 'error';
-    }
-    if (looksLikeTesting(content)) {
-      return 'testing';
-    }
-    // All other tool results = coding
-    return 'coding';
-  }
-
-  // Assistant messages with tool calls = coding
-  if (role === 'assistant') {
-    // Look for coding indicators in the message
-    if (lc.includes('commit') || lc.includes('shipped') || lc.includes('pushed') || lc.includes('git push') ||
-        lc.includes('let me fix') || lc.includes('let me build') || lc.includes('let me add') || lc.includes('let me create') ||
-        lc.includes('let me rewrite') || lc.includes('let me update') || lc.includes('now wire') || lc.includes('now add') ||
-        lc.includes('successfully replaced') || lc.includes('successfully wrote') || lc.includes('i need to check') ||
-        lc.includes('the fix is') || lc.includes('two fixes') || lc.includes('three things')) {
-      return 'coding';
-    }
-    // Short assistant messages between tool calls = still coding (narration)
-    if (content.length < 150) return 'coding';
-    // Longer messages = thinking/planning
-    return 'thinking';
-  }
-
-  // User messages = thinking (giving direction)
-  if (role === 'user') return 'thinking';
-
-  // Compaction / custom events
-  if (type === 'compaction') return 'idle';
-
-  return 'thinking';
-}
-
 /** Classify Claude Code JSONL messages — content blocks include tool_use / tool_result */
 function classifyClaudeCode(entry: any): SegmentKind {
   const type = entry.type || '';
@@ -487,7 +446,7 @@ function accumulateSegments(
   return segments;
 }
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   try {
     const now = new Date();
     // True 24h rolling window: right edge = now, left edge = now − 24h.

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, type MutableRefObject } from 'react';
+import { useEffect, type MutableRefObject } from 'react';
 
 // Shared ASCII-field engine. Handles the canvas, DPR, resize, RAF loop, cursor
 // tracking, and the density→glyph render. An effect only supplies an `update`

@@ -1141,51 +1141,6 @@ function MockMissionCard() {
   );
 }
 
-function MockStatusBar() {
-  return (
-    <div
-      style={{
-        width: '100%',
-        maxWidth: 280,
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        paddingTop: 5,
-        paddingBottom: 5,
-        paddingLeft: 12,
-        paddingRight: 10,
-        background: 'var(--t-panel, #ffffff)',
-        border: '1px solid var(--t-divider, #e5e7eb)',
-        borderRadius: 6,
-        fontFamily: FONT,
-      }}
-    >
-      <PulsingInfinityGlyph />
-      <span
-        style={{
-          fontSize: 11,
-          fontWeight: 300,
-          letterSpacing: '-0.1px',
-          color: 'var(--t-text-muted)',
-        }}
-      >
-        o8 v0.1.165
-      </span>
-      <span style={{ flex: 1 }} />
-      <span
-        style={{
-          fontSize: 9.5,
-          fontWeight: 260,
-          letterSpacing: '-0.4px',
-          color: 'var(--t-text-faint)',
-        }}
-      >
-        14 chats · 8 agents
-      </span>
-    </div>
-  );
-}
-
 // ── Pulse + ∞ variants ──────────────────────────────────────────────
 
 function O8DualPulse() {

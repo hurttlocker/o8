@@ -19,11 +19,9 @@ import {
   CANVAS_GLASS_MATERIALS,
   CANVAS_GLASS_PRESETS,
   CANVAS_GLASS_RANGES,
-  CANVAS_GLASS_TONES,
   canvasFreeLook,
   canvasFreeLookIdFor,
   CANVAS_FREE_LOOKS,
-  defaultTextShadeForTone,
   type CanvasGlassSettings,
 } from '@/lib/canvas-mode/glass-settings';
 import { FONT, glass } from './ui';

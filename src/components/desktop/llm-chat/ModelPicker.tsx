@@ -2,7 +2,7 @@ import { memo, useEffect, useRef, useState } from 'react';
 import { Check, ChevronDown } from '../lucide-shims';
 import { createPortal } from 'react-dom';
 
-import { THEME_ACCENT, THEME_ACCENT_SOFT, THEME_PANEL_GLASS, type ModelOption } from './shared';
+import { THEME_ACCENT, THEME_ACCENT_SOFT, type ModelOption } from './shared';
 
 const RUNTIME_META: Record<string, { label: string; logo?: string; color: string }> = {
   'claude-code': { label: 'Claude Code', logo: '/logos/claude.png', color: '#e07a3a' },

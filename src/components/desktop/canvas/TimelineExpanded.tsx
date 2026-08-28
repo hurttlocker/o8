@@ -8,8 +8,6 @@ import { formatAge } from '@/components/desktop/canvas-utils';
 import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 type ReplaySegment = { kind: string; startMin: number; durationMin: number; label?: string; agent?: string };
 const THEME_ACCENT = 'var(--t-accent, #2563eb)';
-const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
-const THEME_ACCENT_BORDER = 'var(--t-accent-border, rgba(37, 99, 235, 0.22))';
 const REPLAY_CARD_BACKGROUND = 'linear-gradient(180deg, var(--t-panel-translucent) 0%, var(--t-bg-card, rgba(148, 163, 184, 0.08)) 100%)';
 function sessionReplayRuntimePalette(runtime?: string) {
   switch (runtime) {
@@ -256,11 +254,6 @@ export function TimelineExpanded() {
   const sectionPadding = isCompact ? 14 : isTight ? 16 : 20;
   const sectionRadius = isCompact ? 16 : 18;
   const titleSize = isCompact ? 18 : 20;
-  const introSize = isCompact ? 11 : 12;
-  const metricPillPaddingTop = isCompact ? 5 : 6;
-  const metricPillPaddingRight = isCompact ? 8 : 10;
-  const metricPillPaddingBottom = isCompact ? 5 : 6;
-  const metricPillPaddingLeft = isCompact ? 8 : 10;
   const summaryBarHeight = isCompact ? 32 : 40;
   const contentColumns = isTight ? '1fr' : '1.15fr 0.85fr';
 

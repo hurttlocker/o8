@@ -43,8 +43,7 @@ interface SidebarTogglePillProps {
   onHoverLeave?: () => void;
 }
 
-export function SidebarTogglePill({ sidebarVisible = true, onClick, yNudge = 3.3, onHoverEnter, onHoverLeave }: SidebarTogglePillProps) {
-  const active = sidebarVisible;
+export function SidebarTogglePill({ onClick, yNudge = 3.3, onHoverEnter, onHoverLeave }: SidebarTogglePillProps) {
   return (
     <motion.button
       type="button"

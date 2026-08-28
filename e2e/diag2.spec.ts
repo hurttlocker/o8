@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test } from '@playwright/test';
 
 test('diagnostic: click split button and trace', async ({ page }) => {
   await page.addInitScript(() => {

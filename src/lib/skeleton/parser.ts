@@ -82,7 +82,7 @@ function truncateSignature(line: string): string {
   return sig;
 }
 
-function parseTypeScript(content: string, relativePath: string): { symbols: SkeletonSymbol[]; imports: string[] } {
+function parseTypeScript(content: string): { symbols: SkeletonSymbol[]; imports: string[] } {
   const lines = content.split('\n');
   const symbols: SkeletonSymbol[] = [];
   const imports: string[] = [];
@@ -303,7 +303,7 @@ export function parseFile(absolutePath: string, relativePath: string, language: 
   switch (language) {
     case 'typescript':
     case 'tsx':
-      result = parseTypeScript(content, relativePath);
+      result = parseTypeScript(content);
       break;
     case 'rust':
       result = parseRust(content);

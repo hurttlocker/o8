@@ -7,7 +7,7 @@
  * All toggles persist via voice_prefs_set.
  */
 import {
-  ICONS, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY, GLASS_BORDER_SUBTLE, WARN_AMBER, SECTION_BG, SECTION_BORDER,
+  ICONS, TEXT_SECONDARY, GLASS_BORDER_SUBTLE, WARN_AMBER,
   INK_ON_GLASS_1, INK_ON_GLASS_3,
 } from '../tokens';
 import { SectionCard, SectionTitle, SectionHint, ToggleRow, Icon, PageHeader, ProPill } from '../primitives';

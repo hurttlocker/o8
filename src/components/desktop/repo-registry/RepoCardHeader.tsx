@@ -41,11 +41,6 @@ interface RepoCardHeaderProps {
 function RepoCardHeaderBase({
   repo,
   agentsByBranch,
-  // activePorts, onSelectPR, and onReviewPR are intentionally unused here —
-  // the new repo hover no longer surfaces port pills or PR action buttons.
-  // We keep them on the prop type so parent components can pass them without
-  // churn when the card body is extended later.
-  activePorts: _activePorts,
   isActive,
   expanded = false,
   activeWorkspacePath = null,
@@ -53,8 +48,6 @@ function RepoCardHeaderBase({
   onSelectRepo,
   onLocate,
   onRemove,
-  onSelectPR: _onSelectPR,
-  onReviewPR: _onReviewPR,
   model,
 }: RepoCardHeaderProps) {
   const {
