@@ -211,6 +211,7 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         "gh_triage" => SafetyClass::ReadOnly,
         // Reading the ledger is observational. Its undo executes a persisted
         // inverse and always receives a fresh confirmation card.
+        "symon_capabilities" => SafetyClass::ReadOnly,
         "symon_ledger_recent" => SafetyClass::ReadOnly,
         "symon_ledger_undo" => SafetyClass::Reversible,
         "symon_machine_list" => SafetyClass::ReadOnly,

@@ -4,11 +4,13 @@ Scope: greenfield Linux blockers and structural seams in the current o8 implemen
 
 ## Executive Top 10 Greenfield Findings
 
-1. **BLOCKER — Linux Tauri builds can fail before launch because macOS voice sidecars are bundled unconditionally.** Evidence: `src-tauri/tauri.conf.json:47`, `src-tauri/build.rs:80`, `scripts/build-speech-local.mjs:27`. Blocks: desktop client.
-2. **BLOCKER — The ship/updater pipeline publishes only macOS artifacts and Darwin `latest.json` platforms.** Evidence: `scripts/release.mjs:49`, `scripts/release.mjs:105`, `scripts/release.mjs:139`, `src/lib/app-update/client-restart.ts:49`. Blocks: desktop client.
-3. **STRUCTURAL — Native Node addons are copied from the build host, so Linux needs a Linux-built server bundle for `better-sqlite3` and `node-pty`.** Evidence: `scripts/tauri-export.mjs:403`, `scripts/tauri-export.mjs:425`, `scripts/tauri-export.mjs:500`, `package.json:105`. Blocks: desktop client and headless node.
-4. **BLOCKER — `o8://` auth deep links are macOS-plist/runtime only; Linux has no `.desktop`/MIME scheme registration.** Evidence: `src-tauri/Info.plist:74`, `src-tauri/src/lib.rs:4568`, `src-tauri/src/lib.rs:5624`, `src-tauri/tauri.conf.json:61`. Blocks: desktop client.
-5. **STRUCTURAL — Stale-listener cleanup calls a macOS-only kill-and-wait helper; Linux returns `false` on reachable startup paths.** Evidence: `src-tauri/src/lib.rs:809`, `src-tauri/src/lib.rs:5330`, `src-tauri/src/sidecar_lifecycle.rs:445`, `src-tauri/src/sidecar_lifecycle.rs:482`. Blocks: desktop client.
+The remaining open Linux blockers are release artifacts ([#1898](https://github.com/hurttlocker/o8/issues/1898)), installed deep-link and bundle registration ([#1899](https://github.com/hurttlocker/o8/issues/1899)), and stale-listener reclaim ([#1926](https://github.com/hurttlocker/o8/issues/1926)).
+
+1. **FIXED — Linux Tauri builds could fail before launch because macOS voice sidecars were bundled unconditionally.** Fixed by commit `0436a4845f`: `src-tauri/tauri.macos.conf.json:3-7` now scopes the sidecars to the macOS bundle, and `src-tauri/build.rs:163` gates the recognizer build to macOS. Blocks: none from this finding.
+2. **BLOCKER — The ship/updater pipeline publishes only macOS artifacts and Darwin `latest.json` platforms.** Evidence: `scripts/release.mjs:93`, `scripts/release.mjs:194-203`. Follow-up: [#1898](https://github.com/hurttlocker/o8/issues/1898). Blocks: desktop client.
+3. **FIXED — Native Node addons were copied from the build host and then forced through a macOS-only multi-ABI bundle path.** Fixed by commit `739748f267`: `scripts/tauri-export.mjs:527-558` keeps the host-compiled modules for non-Darwin builds and runs the multi-ABI selector only on Darwin. Blocks: none from this finding.
+4. **BLOCKER — Linux runtime deep-link delivery exists, but installed `.desktop`/MIME registration and Linux bundle targets remain unverified.** Evidence: `src-tauri/tauri.linux.conf.json:20-23`, `src-tauri/src/lib.rs:6981-6991`, `src-tauri/src/lib.rs:7262-7324`. Follow-up: [#1899](https://github.com/hurttlocker/o8/issues/1899). Blocks: desktop client.
+5. **BLOCKER (PARTIALLY FIXED) — Tracked-child shutdown now splits Unix and Windows process killing, but stale-listener reclaim remains macOS-only.** Fixed slice: commit `62e7bbb977`, `src-tauri/src/sidecar_lifecycle.rs:241-278`. Open slice: `src-tauri/src/sidecar_lifecycle.rs:746-748` returns `false` off macOS from Linux-reachable callers at `src-tauri/src/lib.rs:925`, `src-tauri/src/lib.rs:7656`, and `src-tauri/src/lib.rs:7675`. Follow-up: [#1926](https://github.com/hurttlocker/o8/issues/1926). Blocks: desktop client.
 6. **STRUCTURAL — Headless live-session/orphan logic depends on optional `lsof`, `pgrep`, and GNU/BSD `ps` shapes.** Evidence: `src-tauri/src/sidecar_lifecycle.rs:219`, `src-tauri/src/sidecar_lifecycle.rs:319`, `src/lib/runtimes/claude-code.ts:721`, `src/lib/runtimes/shared/codex-process-cwd.ts:37`. Blocks: headless node.
 7. **STRUCTURAL — Native Browser Pane / agent-grab is compiled as macOS-only and silently no-ops on Linux.** Evidence: `src-tauri/src/browser_view.rs:60`, `src-tauri/src/browser_view.rs:90`, `src-tauri/src/browser_view.rs:333`, `src-tauri/src/browser_view.rs:353`. Blocks: desktop client.
 8. **STRUCTURAL — Repo/file picker API routes shell out to `osascript`, so Linux desktop chooser flows return null.** Evidence: `src/app/api/panel/browse-folder/route.ts:7`, `src/app/api/panel/browse-folder/route.ts:21`, `src/app/api/panel/file-io/route.ts:133`, `src/app/api/panel/file-io/route.ts:150`. Blocks: desktop client.
@@ -19,46 +21,44 @@ Scope: greenfield Linux blockers and structural seams in the current o8 implemen
 
 ### Packaging, Build, and Distribution
 
-#### Unconditional macOS sidecars in Linux Tauri bundle
+#### Unconditional macOS sidecars in Linux Tauri bundle (fixed)
 
-- Severity: BLOCKER
-- Blocks: desktop client only
+- Severity: FIXED (was BLOCKER)
+- Blocks: none from this finding
 - Known vs greenfield: GREENFIELD. The inception docs say the voice/Symon stack is Mac-only; they do not call out that sidecar packaging can break a Linux build even when voice is out of scope.
+- Status: FIXED by commit `0436a4845f`.
 - Evidence:
-  - `src-tauri/tauri.conf.json:47` declares `externalBin` entries for `helpers/speech_recognizer` and `helpers/speech-local`.
-  - `src-tauri/build.rs:80` says the Swift recognizer build is a no-op on non-macOS.
-  - `scripts/build-speech-local.mjs:27` exits early on non-Darwin.
-  - `src-tauri/src/stt/mod.rs:232` and `src-tauri/src/stt/whisper.rs:133` look for `*-apple-darwin` suffixed sidecars.
-- Why it breaks on Linux: Tauri validates declared sidecars during build, but the current generators only create Darwin-named binaries. Linux bundling needs either conditional sidecars or Linux target sidecar names.
-- Suggested direction: split voice sidecars behind target-specific bundle config or generate harmless Linux stubs only when the desktop build still declares them. Prefer not declaring these `externalBin` entries for Linux.
+  - Original finding: the base bundle declared `helpers/speech_recognizer` and `helpers/speech-local`, while their generators produced only Darwin binaries.
+  - `src-tauri/tauri.macos.conf.json:3-7` now declares both sidecars only in the macOS bundle patch.
+  - `src-tauri/build.rs:163` gates the recognizer build behind `#[cfg(target_os = "macos")]`.
+- Why it broke on Linux: the bundle validator required Darwin-only sidecars before launch even though voice was out of scope.
+- Resolution: non-Darwin targets no longer declare the voice sidecars, so their host builds do not require Darwin binaries.
 
 #### Mac-only release and updater artifacts
 
 - Severity: BLOCKER
 - Blocks: desktop client only
 - Known vs greenfield: GREENFIELD.
+- Status: OPEN. Tracked by [#1898](https://github.com/hurttlocker/o8/issues/1898).
 - Evidence:
-  - `scripts/release.mjs:49` expects a DMG path.
-  - `scripts/release.mjs:50` and `scripts/release.mjs:51` expect `o8.app.tar.gz` and its signature.
-  - `scripts/release.mjs:105` emits only `darwin-x86_64` and `darwin-aarch64` updater platforms.
-  - `scripts/release.mjs:139` uploads only the macOS asset set.
+  - `scripts/release.mjs:93` still gates a release preparation step on Darwin.
+  - `scripts/release.mjs:194-203` emits only `darwin-x86_64` and `darwin-aarch64` updater platforms.
   - `src/lib/app-update/client-restart.ts:49` uses the Tauri updater uniformly from the client.
 - Why it breaks on Linux: Linux installs will never see a matching updater platform in `latest.json`. `UpdateCard` can keep checking and attempting install semantics that only make sense for the Darwin asset set.
 - Suggested direction: decide the Linux distribution floor and package channels first. If AppImage is the only auto-updatable Linux channel, gate the silent/idle update UX by package type and send deb/rpm users to manual download or distro repository instructions.
 
-#### Native Node addon ABI/OS coupling
+#### Native Node addon ABI/OS coupling (fixed)
 
-- Severity: STRUCTURAL
-- Blocks: desktop client and headless node
+- Severity: FIXED (was STRUCTURAL)
+- Blocks: none from this finding
 - Known vs greenfield: GREENFIELD.
+- Status: FIXED by commit `739748f267`.
 - Evidence:
-  - `scripts/tauri-export.mjs:403` copies the Next standalone `node_modules`.
-  - `scripts/tauri-export.mjs:425` explicitly copies `better-sqlite3` and `node-pty`.
-  - `scripts/tauri-export.mjs:500` marks native addons external because `.node` addons cannot be bundled.
-  - `scripts/release.mjs:32` guards Node ABI but only for the build machine's Node major.
-  - `package.json:105` depends on `better-sqlite3`; `package.json:106` depends on `node-pty`.
-- Why it breaks on Linux: native addons are OS/libc/arch-specific. A macOS-built `out/server/node_modules` cannot run on Linux, and a Linux headless node cannot consume a Darwin Tauri export.
-- Suggested direction: build the headless node artifact on Linux with Node 22 and the intended libc floor. For desktop, produce per-OS server bundles, not one copied native tree.
+  - Original finding: the export copied host-native modules and then unconditionally ran the Darwin multi-ABI and signing path.
+  - `scripts/tauri-export.mjs:527-535` copies the host-compiled native modules into the server bundle.
+  - `scripts/tauri-export.mjs:538-558` runs multi-ABI selection and signing only on Darwin; non-Darwin builds keep the host-compiled modules.
+- Why it broke on Linux: the export path treated Darwin's two-architecture artifact as a requirement for every host.
+- Resolution: Linux exports retain native modules compiled on the Linux build host and skip Darwin-only selection and signing.
 
 #### WebKitGTK floor is implicit
 
@@ -74,28 +74,30 @@ Scope: greenfield Linux blockers and structural seams in the current o8 implemen
 
 ### Tauri Desktop Shell
 
-#### Deep link registration is macOS-only
+#### Linux installed deep-link and bundle registration remains open
 
 - Severity: BLOCKER
 - Blocks: desktop client only
 - Known vs greenfield: GREENFIELD.
+- Status: OPEN. Runtime delivery and scheme configuration exist, but installed `.desktop`/MIME registration and Linux bundle proof remain in [#1899](https://github.com/hurttlocker/o8/issues/1899).
 - Evidence:
-  - `src-tauri/Info.plist:74` declares the `o8://` URL scheme for macOS.
-  - `src-tauri/src/lib.rs:4568` buffers auth deep links.
-  - `src-tauri/src/lib.rs:5624` handles `RunEvent::Opened` only under `#[cfg(target_os = "macos")]`.
-  - `src-tauri/tauri.conf.json:61` has a `macOS` bundle block but no Linux `.desktop` protocol registration.
-- Why it breaks on Linux: Clerk desktop sign-in depends on `o8://auth/callback`, but Linux needs a `x-scheme-handler/o8` entry in the `.desktop` file plus runtime handling outside the macOS `Opened` branch.
-- Suggested direction: add a Tauri deep-link strategy that works cross-platform and validate the Linux `.desktop` registration from an installed package.
+  - Original finding: only the macOS plist and `RunEvent::Opened` path handled the URL scheme.
+  - `src-tauri/tauri.linux.conf.json:20-23` now configures the `o8` scheme for Linux.
+  - `src-tauri/src/lib.rs:6981-6991` and `src-tauri/src/lib.rs:7262-7324` now provide Linux runtime delivery and registration.
+  - The repository still has no tracked `.desktop` entry that proves the installed MIME handler, and the Linux package targets have not been verified.
+- Why it remains open on Linux: runtime handling does not prove that an installed package registers `x-scheme-handler/o8` or emits the intended Linux bundle targets.
+- Suggested direction: generate and inspect the installed `.desktop` entry and validate each supported Linux bundle target.
 
-#### Stale-listener kill path is compiled out on Linux
+#### Stale-listener kill path remains compiled out on Linux
 
-- Severity: STRUCTURAL
+- Severity: BLOCKER (tracked-child shutdown slice fixed)
 - Blocks: desktop client only
 - Known vs greenfield: GREENFIELD.
+- Status: OPEN. Tracked by [#1926](https://github.com/hurttlocker/o8/issues/1926).
 - Evidence:
-  - `src-tauri/src/lib.rs:809`, `src-tauri/src/lib.rs:5330`, and `src-tauri/src/lib.rs:5349` call `kill_orphan_and_wait`.
-  - `src-tauri/src/sidecar_lifecycle.rs:445` implements it only for macOS.
-  - `src-tauri/src/sidecar_lifecycle.rs:482` makes non-macOS return `false`.
+  - Fixed by commit `62e7bbb977`: `src-tauri/src/sidecar_lifecycle.rs:241-278` splits tracked-child shutdown into Unix and Windows implementations.
+  - `src-tauri/src/lib.rs:925`, `src-tauri/src/lib.rs:7656`, and `src-tauri/src/lib.rs:7675` still call `kill_orphan_and_wait` on Linux-reachable stale-listener paths.
+  - `src-tauri/src/sidecar_lifecycle.rs:709-748` implements `kill_orphan_and_wait` only for macOS and returns `false` off macOS.
 - Why it breaks on Linux: the identity-gated port allocator can identify a stale o8 listener, call the helper, and still fail to reclaim the port because the Linux branch is a no-op.
 - Suggested direction: promote the Unix `term_then_kill` and bind-poll logic into a Linux-capable helper. Avoid relying on `lsof` where `/proc/<pid>` is available.
 

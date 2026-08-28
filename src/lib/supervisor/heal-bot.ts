@@ -7,10 +7,9 @@ import { getSqlite } from '@/lib/db';
 import { markRepoOriginConfigured } from '@/lib/repos/origin-readiness';
 import { DEFAULT_PROJECT_ID } from '@/lib/repos/projects';
 import { runAwaitingReviewAutoReleaseSweep } from '@/lib/supervisor/heal-bot-auto-release';
+import { runGitHubBrokerSyncSweep } from '@/lib/supervisor/github-broker-sync';
 import { enqueueInboxItem, runRetentionSweep, selfHealActiveByKindAndRepo } from '@/lib/supervisor/inbox';
-
 export { runAwaitingReviewAutoReleaseSweep } from '@/lib/supervisor/heal-bot-auto-release';
-
 const execFileAsync = promisify(execFile);
 
 const HEAL_BOT_TICK_MS = 60_000;
@@ -724,6 +723,7 @@ async function runHealBotMaintenance(): Promise<void> {
     console.log(`[heal-bot] Retention sweep dismissed ${dismissed} stale inbox item(s)`);
   }
   await import('@/lib/problems/service').then(({ reconcileProblemDossiers }) => reconcileProblemDossiers()).catch((error) => console.warn('[heal-bot] Problem dossier reconciliation failed:', error));
+  await runGitHubBrokerSyncSweep();
   await runFetchUnreachableSweep();
   await runAwaitingReviewAutoReleaseSweep();
   const resolved = await runLivenessProbeSweep();

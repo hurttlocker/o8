@@ -14,6 +14,7 @@
 //! the loop's `await` from a different thread.
 
 pub mod agent_turn;
+pub mod capabilities;
 pub mod claude;
 pub mod claude_pool;
 pub mod codex;
