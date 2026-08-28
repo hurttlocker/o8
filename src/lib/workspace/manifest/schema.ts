@@ -1,9 +1,5 @@
 import {
-  DEV_API_PORT_BLOCK,
-  DEV_WS_PORT_BLOCK,
-  PROD_API_PORT_BLOCK,
-  PROD_WS_PORT_BLOCK,
-  RESERVED_PORT_BLOCK,
+  O8_RESERVED_PORTS,
 } from '@/lib/panel/port-constants';
 
 import {
@@ -15,14 +11,6 @@ import {
 } from './types';
 
 type JsonObject = Record<string, unknown>;
-
-const O8_RESERVED_PORTS = new Set<number>([
-  ...PROD_API_PORT_BLOCK,
-  ...PROD_WS_PORT_BLOCK,
-  ...RESERVED_PORT_BLOCK,
-  ...DEV_API_PORT_BLOCK,
-  ...DEV_WS_PORT_BLOCK,
-]);
 
 export class WorkspaceManifestValidationError extends Error {
   constructor(

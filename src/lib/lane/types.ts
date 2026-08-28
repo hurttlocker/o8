@@ -315,6 +315,13 @@ export type LaneEventVerb =
   // base snapshot). Payload: { packetId, baseBranch, note }
   | 'worktree_refreshed'
   | 'worktree_refresh_failed'
+  // A checked-in workspace manifest allocated service ports and completed its
+  // setup and one-shot health probes. Payload:
+  // { services: [{ name, port }], preview?, durationMs }
+  | 'workspace_manifest_applied'
+  // Workspace manifest application failed without blocking packet launch.
+  // Payload: { step, error }
+  | 'workspace_manifest_failed'
   // Discard could not prove its preserved branch exists. Payload:
   // { code, reason, packetId, branch, ref, note, gcRisk }
   | 'branch_preservation_failed'

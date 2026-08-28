@@ -4,6 +4,14 @@ export const RESERVED_PORT_BLOCK = [47110, 47111] as const;
 export const DEV_API_PORT_BLOCK = [47120, 47121, 47122, 47123, 47124] as const;
 export const DEV_WS_PORT_BLOCK = [47125, 47126, 47127, 47128, 47129] as const;
 
+export const O8_RESERVED_PORTS: ReadonlySet<number> = new Set([
+  ...PROD_API_PORT_BLOCK,
+  ...PROD_WS_PORT_BLOCK,
+  ...RESERVED_PORT_BLOCK,
+  ...DEV_API_PORT_BLOCK,
+  ...DEV_WS_PORT_BLOCK,
+]);
+
 export const DEFAULT_API_PORT = PROD_API_PORT_BLOCK[0];
 export const DEFAULT_WS_PORT = PROD_WS_PORT_BLOCK[0];
 export const DEFAULT_DEV_API_PORT = DEV_API_PORT_BLOCK[0];

@@ -1,6 +1,7 @@
 import type { Lane } from './types';
 import { cleanupLaneWorktree } from './worktree-cleanup';
 import { releaseTerminalPacketStorageReservations } from '@/lib/orchestrator/terminal-storage-release';
+import { scheduleWorkspaceManifestLeaseRelease } from '@/lib/workspace/manifest/terminal-release';
 import { laneOwnsWorktree } from './lane-storage-release';
 
 type TerminalCleanupLane = Pick<Lane, 'id' | 'repoPath' | 'worktreePath' | 'packetId'>
@@ -22,6 +23,7 @@ function releaseWithoutWorktree(lane: TerminalCleanupLane): void {
 }
 
 export function scheduleTerminalLaneCleanup(lane: TerminalCleanupLane): void {
+  scheduleWorkspaceManifestLeaseRelease({ packetId: lane.packetId, laneId: lane.id });
   if (!lane.worktreePath || !laneOwnsWorktree(lane)) {
     releaseWithoutWorktree(lane);
     if (lane.worktreePath) {

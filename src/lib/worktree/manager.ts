@@ -87,6 +87,7 @@ import {
   queueDependencyImagePublication,
   type DependencyMaterializationReceipt,
 } from '@/lib/workspace/dependency-materializer';
+import { applyWorkspaceManifest } from '@/lib/workspace/manifest/apply';
 import {
   probeMetadataLockProcessIdentity,
   sameMetadataLockProcessIdentity,
@@ -578,14 +579,14 @@ export class WorktreeManager {
     await this.bootstrapEnvFiles(worktreePath, createdExecutionIdentity, opts);
     await this.injectSafetyHooks(worktreePath, createdExecutionIdentity);
 
-    // Run project setup unless skipped
-    if (!opts.skipSetup) {
+    if (!opts.skipSetup || (opts.packetId && opts.laneId)) {
       info.status = 'setup';
       await this.updateMetaStatus(taskId, 'setup');
       const dependencyMaterialization = await this.runSetupWithMaterialization(
         worktreePath,
         createdExecutionIdentity,
         opts.repoSetup,
+        opts,
       );
       if (dependencyMaterialization) {
         info.dependencyRecipeKey = dependencyMaterialization.recipeKey;
@@ -817,13 +818,14 @@ export class WorktreeManager {
       await this.bootstrapEnvFiles(worktreePath, capturedExecutionIdentity, opts);
       await this.injectSafetyHooks(worktreePath, capturedExecutionIdentity);
 
-      if (!opts.skipSetup) {
+      if (!opts.skipSetup || (opts.packetId && opts.laneId)) {
         info.status = 'setup';
         await this.updateMetaStatus(taskId, 'setup');
         const dependencyMaterialization = await this.runSetupWithMaterialization(
           worktreePath,
           capturedExecutionIdentity,
           opts.repoSetup,
+          opts,
         );
         if (dependencyMaterialization) {
           info.dependencyRecipeKey = dependencyMaterialization.recipeKey;
@@ -1223,64 +1225,62 @@ export class WorktreeManager {
     worktreePath: string,
     identity?: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>>,
     repoSetup?: CreateWorktreeOptions['repoSetup'],
+    launch?: Pick<CreateWorktreeOptions, 'laneId' | 'packetId' | 'skipSetup'>,
   ): Promise<DependencyMaterializationReceipt | null> {
-    const hasPackageJson = await this.pathExists(path.join(worktreePath, 'package.json'));
     let dependencyMaterialization: DependencyMaterializationReceipt | null = null;
-    const installCommand = repoSetup
-      ? repoSetup.installOnCreateWorkspace
-        ? repoSetup.installCommand?.trim() || null
-        : null
-      : hasPackageJson
-        ? await detectDependencyInstallCommand(worktreePath)
-        : null;
-    if (repoSetup?.installOnCreateWorkspace && !installCommand) {
-      throw new Error('The registered repo requires install-on-create but has no install command.');
+    if (!launch?.skipSetup) {
+      const hasPackageJson = await this.pathExists(path.join(worktreePath, 'package.json'));
+      const installCommand = repoSetup
+        ? repoSetup.installOnCreateWorkspace
+          ? repoSetup.installCommand?.trim() || null
+          : null
+        : hasPackageJson
+          ? await detectDependencyInstallCommand(worktreePath)
+          : null;
+      if (repoSetup?.installOnCreateWorkspace && !installCommand) {
+        throw new Error('The registered repo requires install-on-create but has no install command.');
+      }
+      if (hasPackageJson) {
+        await this.assertInstallableLocalNodeModules(worktreePath, identity);
+      }
+      if (installCommand) {
+        const result = await materializeDependencyInstall(worktreePath, installCommand, {
+          materializationIdentity: identity,
+          persistReceipt: (receipt) => (
+            receipt
+              ? this.recordDependencyMaterialization(path.basename(worktreePath), receipt)
+              : this.clearDependencyMaterialization(path.basename(worktreePath))
+          ),
+        });
+        dependencyMaterialization = result.receipt;
+      }
+      if (await this.pathExists(path.join(worktreePath, 'requirements.txt'))) {
+        await execFileAsync('pip', ['install', '-r', 'requirements.txt'], {
+          windowsHide: true,
+          cwd: worktreePath,
+          timeout: 120_000,
+        }).catch(() => { /* pip may not be available */ });
+      }
+      if (await this.pathExists(path.join(worktreePath, 'go.mod'))) {
+        await execFileAsync('go', ['mod', 'download'], {
+          windowsHide: true,
+          cwd: worktreePath,
+          timeout: 60_000,
+        }).catch(() => { /* go may not be available */ });
+      }
+      if (await this.pathExists(path.join(worktreePath, 'Cargo.toml'))) {
+        await execFileAsync('cargo', ['fetch'], {
+          windowsHide: true,
+          cwd: worktreePath,
+          timeout: 120_000,
+        }).catch(() => { /* cargo may not be available */ });
+      }
     }
-    // A legacy link is retired whenever the workspace has Node dependencies at
-    // all, not only when an install command was detected. A repository with no
-    // lockfile and no packageManager declaration installs nothing here, and
-    // leaving the link in place would hand the packet's own `npm ci` a path
-    // straight into the operator's checkout.
-    if (hasPackageJson) {
-      await this.assertInstallableLocalNodeModules(worktreePath, identity);
-    }
-    if (installCommand) {
-      const result = await materializeDependencyInstall(worktreePath, installCommand, {
-        materializationIdentity: identity,
-        persistReceipt: (receipt) => (
-          receipt
-            ? this.recordDependencyMaterialization(path.basename(worktreePath), receipt)
-            : this.clearDependencyMaterialization(path.basename(worktreePath))
-        ),
+    if (launch?.packetId && launch.laneId) {
+      await applyWorkspaceManifest({
+        repoPath: this.repoRoot, worktreePath,
+        packetId: launch.packetId, laneId: launch.laneId,
       });
-      dependencyMaterialization = result.receipt;
-    }
-
-    // Python
-    if (await this.pathExists(path.join(worktreePath, 'requirements.txt'))) {
-      await execFileAsync('pip', ['install', '-r', 'requirements.txt'], {
-        windowsHide: true,
-        cwd: worktreePath,
-        timeout: 120_000,
-      }).catch(() => { /* pip may not be available */ });
-    }
-
-    // Go
-    if (await this.pathExists(path.join(worktreePath, 'go.mod'))) {
-      await execFileAsync('go', ['mod', 'download'], {
-        windowsHide: true,
-        cwd: worktreePath,
-        timeout: 60_000,
-      }).catch(() => { /* go may not be available */ });
-    }
-
-    // Rust
-    if (await this.pathExists(path.join(worktreePath, 'Cargo.toml'))) {
-      await execFileAsync('cargo', ['fetch'], {
-        windowsHide: true,
-        cwd: worktreePath,
-        timeout: 120_000,
-      }).catch(() => { /* cargo may not be available */ });
     }
     return dependencyMaterialization;
   }
