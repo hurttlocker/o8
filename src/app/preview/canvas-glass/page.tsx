@@ -94,6 +94,7 @@ import { SymonVoicePresencePill } from './symon-voice-presence';
 import { useCanvasQuickActions } from './use-canvas-quick-actions';
 import { useCanvasMediaLifecycle } from './use-canvas-media-lifecycle';
 import { clearCanvasTurnAccumulators, removeCanvasConversations, setCanvasConversation, updateCanvasConversation } from './canvas-conversation-retention';
+import { CanvasSearchOverlay } from './canvas-search';
 import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
 /** Live rows for the wired chrome — inbox items, active lanes, commits. */
 interface InboxRow {
@@ -228,12 +229,6 @@ const DOSSIER_TILE: React.CSSProperties = {
   justifyContent: 'center',
   color: 'var(--cnv-ink-muted)',
 };
-
-/** One row in the canvas search dropdown — a card to bring forward, or a
- *  past session to spawn onto the canvas. */
-type SearchHit =
-  | { kind: 'card'; cardKind: 'term' | 'file' | 'image' | 'browser' | 'chat' | 'diff' | 'spec' | 'brain'; id: number; title: string; meta: string }
-  | { kind: 'thread'; threadId: string; repoPath: string | null; repoName: string | null; title: string; meta: string };
 
 // Mirrors COMPOSER_MODEL_OPTIONS in thoughts/InputButtons.tsx (not exported).
 const CANVAS_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
@@ -2932,68 +2927,6 @@ export default function CanvasGlassPreviewPage() {
     });
   }, [spawnImageCard, spawnVideoCard]);
 
-  /** Top-right search — first matching card on the canvas comes forward. */
-  /** Search reaches EVERYTHING — every card kind on the canvas plus past
-   *  sessions. Card hits come forward; session hits spawn as chat cards. */
-  const searchHits = useMemo((): SearchHit[] => {
-    const query = searchQuery.trim().toLowerCase();
-    if (!query) return [];
-    const matches = (value: string | null | undefined) => (value ?? '').toLowerCase().includes(query);
-    const hits: SearchHit[] = [];
-    termCards.forEach((card) => {
-      if (matches(card.cwdLabel) || matches(card.sessionName)) hits.push({ kind: 'card', cardKind: 'term', id: card.id, title: card.cwdLabel ?? 'Terminal', meta: 'terminal · on the canvas' });
-    });
-    fileCards.forEach((card) => {
-      if (matches(card.name) || matches(card.path)) hits.push({ kind: 'card', cardKind: 'file', id: card.id, title: card.name, meta: 'file · on the canvas' });
-    });
-    imageCards.forEach((card) => {
-      const item = card.items.find((entry) => matches(entry.name));
-      if (item) hits.push({ kind: 'card', cardKind: 'image', id: card.id, title: item.name, meta: 'image · on the canvas' });
-    });
-    browserCards.forEach((card) => {
-      const tab = card.tabs.find((entry) => matches(entry.url));
-      if (tab) hits.push({ kind: 'card', cardKind: 'browser', id: card.id, title: tab.url.replace(/^https?:\/\//i, ''), meta: 'browser tab · on the canvas' });
-    });
-    chatCards.forEach((card) => {
-      if (matches(card.title) || matches(card.repoName)) hits.push({ kind: 'card', cardKind: 'chat', id: card.id, title: card.title, meta: `${card.repoName ?? 'chat'} · on the canvas` });
-    });
-    diffCards.forEach((card) => {
-      if (matches(card.title) || matches(card.branch)) hits.push({ kind: 'card', cardKind: 'diff', id: card.id, title: card.title, meta: 'diff · on the canvas' });
-    });
-    specCards.forEach((card) => {
-      const repoTail = card.repoPath?.split('/').pop() ?? null;
-      if (matches('o8.md') || matches(repoTail)) hits.push({ kind: 'card', cardKind: 'spec', id: card.id, title: `o8.md${repoTail ? ` — ${repoTail}` : ''}`, meta: 'notes · on the canvas' });
-    });
-    brainCards.forEach((card) => {
-      const repoTail = card.repoPath?.split('/').pop() ?? null;
-      if (matches('brain') || matches(repoTail)) hits.push({ kind: 'card', cardKind: 'brain', id: card.id, title: `Brain${repoTail ? ` — ${repoTail}` : ''}`, meta: 'engineering brain · on the canvas' });
-    });
-    const openThreadIds = new Set(chatCards.map((card) => card.threadId));
-    let threadHits = 0;
-    for (const thread of recentThreads) {
-      if (threadHits >= 8) break;
-      if (openThreadIds.has(thread.id)) continue;
-      if (!matches(thread.title) && !matches(thread.repoName)) continue;
-      threadHits += 1;
-      hits.push({
-        kind: 'thread',
-        threadId: thread.id,
-        repoPath: thread.repoPath,
-        repoName: thread.repoName,
-        title: thread.title?.trim() || 'Untitled session',
-        meta: [thread.repoName, relAge(thread.lastMessageAt)].filter(Boolean).join(' · ') || 'past session',
-      });
-    }
-    return hits;
-  }, [brainCards, browserCards, chatCards, diffCards, fileCards, imageCards, recentThreads, searchQuery, specCards, termCards]);
-
-  const applySearchHit = useCallback((hit: SearchHit) => {
-    if (hit.kind === 'card') focusCard(hit.cardKind, hit.id);
-    else void pickThread(hit.threadId, hit.repoPath, { title: hit.title, repoName: hit.repoName });
-    setSearchOpen(false);
-    setSearchQuery('');
-  }, [focusCard, pickThread]);
-
   // ── Canvas control surface (agent parity) ────────────────────────────────
   // The intent bus's card verbs let an agent drive the canvas the way a human
   // can: SEE every card (list), then move / resize / focus / close one by id.
@@ -4332,76 +4265,24 @@ export default function CanvasGlassPreviewPage() {
       {/* Search popover — Enter brings the first matching card forward. */}
       <AnimatePresence>
         {searchOpen ? (
-          <motion.div
-            initial={{ opacity: 0, y: -6, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -6, scale: 0.98 }}
-            transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-            style={{
-              position: 'absolute',
-              top: 64,
-              right: 24,
-              width: 300,
-              display: 'flex',
-              flexDirection: 'column',
-              borderRadius: 16,
-              zIndex: 41,
-              overflow: 'hidden',
-              ...glassPop(),
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 36, paddingLeft: 12, paddingRight: 12 }}>
-              <input
-                autoFocus
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' && searchHits.length > 0) applySearchHit(searchHits[0]);
-                  if (event.key === 'Escape') setSearchOpen(false);
-                }}
-                placeholder="Cards on the canvas + past sessions"
-                aria-label="Search the canvas"
-                style={{
-                  flex: 1,
-                  borderWidth: 0,
-                  outline: 'none',
-                  background: 'transparent',
-                  color: 'var(--cnv-ink)',
-                  fontSize: 11.5,
-                  fontWeight: 300,
-                  letterSpacing: '-0.1px',
-                  fontFamily: FONT,
-                }}
-              />
-            </div>
-            {searchQuery.trim() ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingTop: 6, paddingBottom: 8, paddingLeft: 6, paddingRight: 6, borderTop: '1px solid var(--cnv-edge)', maxHeight: 300, overflowY: 'auto', scrollbarWidth: 'none' } as React.CSSProperties}>
-                {searchHits.length === 0 ? (
-                  <span style={{ fontSize: 10.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingTop: 4, paddingBottom: 4, paddingLeft: 8 }}>
-                    No matches — cards or past sessions.
-                  </span>
-                ) : (
-                  searchHits.slice(0, 12).map((hit) => (
-                    <button
-                      key={hit.kind === 'card' ? `card:${hit.cardKind}:${hit.id}` : `thread:${hit.threadId}`}
-                      type="button"
-                      onClick={() => applySearchHit(hit)}
-                      style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1, paddingTop: 6, paddingBottom: 6, paddingLeft: 8, paddingRight: 8, borderRadius: 9, borderWidth: 0, background: 'transparent', cursor: 'pointer', fontFamily: FONT, textAlign: 'left', width: '100%' }}
-                      onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
-                      onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
-                    >
-                      <span style={{ fontSize: 11.5, fontWeight: 300, color: 'var(--cnv-ink)', letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>
-                        {hit.title}
-                      </span>
-                      <span style={{ fontSize: 9.5, fontWeight: 260, color: 'var(--cnv-ink-muted)' }}>
-                        {hit.meta}
-                      </span>
-                    </button>
-                  ))
-                )}
-              </div>
-            ) : null}
-          </motion.div>
+          <CanvasSearchOverlay
+            query={searchQuery}
+            activeRepoPath={activeRepoPath}
+            onQueryChange={setSearchQuery}
+            onClose={() => setSearchOpen(false)}
+            onFocusCard={focusCard}
+            onPickThread={pickThread}
+            spawnFileCard={spawnFileCard}
+            termCards={termCards}
+            fileCards={fileCards}
+            imageCards={imageCards}
+            browserCards={browserCards}
+            chatCards={chatCards}
+            diffCards={diffCards}
+            specCards={specCards}
+            brainCards={brainCards}
+            recentThreads={recentThreads}
+          />
         ) : null}
       </AnimatePresence>
 
