@@ -51,19 +51,14 @@ import type { XtermPanelHandle } from '@/components/desktop/workspace-terminal/X
 import { DEFAULT_ORCHESTRATOR_MODEL } from '@/components/desktop/thoughts/use-orchestrator-stream/shared';
 import { THINKING_EFFORTS, isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { usableCanvasArea } from './canvas-drag';
-import { moveCanvasCard, spawnCanvasCard } from './canvas-card-state';
+import { spawnCanvasCard } from './canvas-card-state';
 import { carveChrome, chromeRectsCanvas } from './chrome-rects';
 import { computeGrid, slotToCardGeom, type GridItem, type Slot } from './form-fit';
 import { NavigatorLoupe, type MinimapCard } from './navigator-loupe';
 import { ORB_DEFAULTS, readOrbSettings, writeOrbSettings, type OrbSettings } from './orb-settings';
 import { CanvasBackdropLayer } from './backdrops';
-import type { BrowserCard } from './browser-card';
-import type { SpecCard } from './spec-card';
-import type { BrainCard } from './brain-card';
-import type { MarkdownCard } from './markdown-card';
-import { loadCanvasSnapshot, saveCanvasSnapshot, type SnapGeometry } from './canvas-persistence';
+import type { SnapGeometry } from './canvas-persistence';
 import type { DiffCard } from './diff-card';
-import { AGENT_FULL_W, AGENT_FULL_H, AGENT_COMPACT_W, AGENT_COMPACT_H, type AgentCard } from './agent-card';
 import type { ChatCard } from './chat-card';
 import { CanvasCard } from './cards';
 import { DiffusionBackdrop, DockGlyphButton, EdgeRail, SpawnGlyphButton } from './chrome';
@@ -74,10 +69,7 @@ import { AnticipationRing } from './anticipation-ring';
 import { ComposerPartialsFill, useAgentPartialsMorph } from './agent-partials-morph';
 import { OrchestratorDock } from './dock';
 import type { SwarmScoutView } from '@/components/desktop/thoughts/chat-panel/SwarmStatusCard';
-import type { FileCard } from './file-card';
-import type { FileTreeCard } from './file-tree-card';
 import type { ImageCard } from './image-card';
-import type { VideoCard } from './video-card';
 import { getMedia } from './canvas-media-store';
 import { useO8Auth } from '@/components/auth/O8AuthProvider';
 import type { TermCard } from './terminal-card';
@@ -96,6 +88,8 @@ import { useCanvasMediaLifecycle } from './use-canvas-media-lifecycle';
 import { CanvasCardLayers } from './canvas-card-layers';
 import { useCanvasMediaSpawners } from './use-canvas-media-spawners';
 import { useCanvasSpawners, type LaneRow, type SpawnChoreography, type SpawnReservation } from './use-canvas-spawners';
+import { useCanvasCards } from './use-canvas-cards';
+import { useCanvasSnapshot } from './use-canvas-snapshot';
 import { clearCanvasTurnAccumulators, removeCanvasConversations, setCanvasConversation, updateCanvasConversation } from './canvas-conversation-retention';
 import { CanvasSearchOverlay } from './canvas-search';
 import { CanvasCommandPalette } from './canvas-command-palette';
@@ -311,17 +305,27 @@ export default function CanvasGlassPreviewPage() {
   // dock's crew card while the turn runs, cleared when it settles. Without this
   // the scouts vanish into the collapsed "N actions" tool cluster.
   const [liveScouts, setLiveScouts] = useState<Record<string, SwarmScoutView[]>>({});
-  const [termCards, setTermCards] = useState<TermCard[]>([]);
-  const [fileCards, setFileCards] = useState<FileCard[]>([]);
-  const [treeCards, setTreeCards] = useState<FileTreeCard[]>([]);
-  const [imageCards, setImageCards] = useState<ImageCard[]>([]);
+  const {
+    termCards, setTermCards, fileCards, setFileCards, treeCards, setTreeCards,
+    imageCards, setImageCards, imageCardsRef, videoCards, setVideoCards,
+    diffCards, setDiffCards, specCards, setSpecCards, brainCards, setBrainCards,
+    markdownCards, setMarkdownCards, agentCards, setAgentCards,
+    browserCards, setBrowserCards, chatCards, setChatCards,
+    zPeakRef, canvasCardsRef, findCanvasCard, focusCard,
+    focusTermCard, focusFileCard, focusTreeCard, focusImageCard, focusVideoCard,
+    focusBrowserCard, focusChatCard, focusDiffCard, focusSpecCard, focusBrainCard,
+    focusMarkdownCard, focusAgentCard, moveTermCard, resizeTermCard,
+    moveFileCard, resizeFileCard, closeFileCard, moveTreeCard, resizeTreeCard,
+    closeTreeCard, moveDiffCard, resizeDiffCard, closeDiffCard,
+    moveAgentCard, resizeAgentCard, closeAgentCard,
+    moveBrainCard, resizeBrainCard, closeBrainCard,
+    moveMarkdownCard, resizeMarkdownCard, closeMarkdownCard,
+    moveSpecCard, resizeSpecCard, closeSpecCard, toggleAgentCardExpand,
+  } = useCanvasCards();
   // Which card the dragged photo is currently hovering over (→ would stack).
   // Drives the "Drop to stack" highlight. A ref mirror of imageCards lets the
   // move handler hit-test against the other cards without a stale closure.
   const [dropTargetId, setDropTargetId] = useState<number | null>(null);
-  const imageCardsRef = useRef<ImageCard[]>([]);
-  imageCardsRef.current = imageCards;
-  const [videoCards, setVideoCards] = useState<VideoCard[]>([]);
   const canvasMedia = useCanvasMediaLifecycle(videoCards);
   const [termVeil, setTermVeil] = useState(TERM_VEIL_DEFAULT);
   const [termPickerOpen, setTermPickerOpen] = useState(false);
@@ -332,18 +336,11 @@ export default function CanvasGlassPreviewPage() {
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const [sessionsRepoFilter, setSessionsRepoFilter] = useState<string | null>(null);
   const [composerImages, setComposerImages] = useState<Array<{ name: string; dataUri: string }>>([]);
-  const [diffCards, setDiffCards] = useState<DiffCard[]>([]);
-  const [specCards, setSpecCards] = useState<SpecCard[]>([]);
-  const [brainCards, setBrainCards] = useState<BrainCard[]>([]);
   // Render-on-screen (#1270) — markdown explainer cards the orchestrator paints
   // via the `render` intent. Content IS the card, so snapshot it with geometry.
-  const [markdownCards, setMarkdownCards] = useState<MarkdownCard[]>([]);
-  const [agentCards, setAgentCards] = useState<AgentCard[]>([]);
   const [reviewPickerOpen, setReviewPickerOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [browserCards, setBrowserCards] = useState<BrowserCard[]>([]);
-  const [chatCards, setChatCards] = useState<ChatCard[]>([]);
   const chatSendDefaults = useMemo(() => ({ model: orchModel, thinkingEffort: orchEffort }), [orchEffort, orchModel]);
   const [topMenu, setTopMenu] = useState<'alerts' | 'agents' | 'profile' | null>(null);
   const [inboxItems, setInboxItems] = useState<InboxRow[]>([]);
@@ -411,9 +408,6 @@ export default function CanvasGlassPreviewPage() {
   // First spawn of the visit gets the full reveal (min-play); the rest
   // bail the instant the shell answers — speed stays the default.
   const firstSpawnRef = useRef(true);
-  // Terminals + file cards share one z band (10–39, chrome at 40+) so
-  // clicking ANY card brings it above every other card kind.
-  const zPeakRef = useRef(9);
   // Agent-card bloom: lanes already carded (so a lane blooms exactly once), the
   // monotonic address number ("agent two"). Dedupe-by-laneId: a lane is only ever
   // carded once. Entering the canvas cards ALL currently-running lanes (fleet
@@ -1019,7 +1013,7 @@ export default function CanvasGlassPreviewPage() {
     appendEntries(lane, [userEntry, { role: 'status', text: 'Thinking', pending: true }]);
     setDockOpen(true);
     return { lane, fromEntryId };
-  }, [activeRepoPath, appendEntries, orch, orchEffort, orchModel, orchMode]);
+  }, [activeRepoPath, appendEntries, orch, orchEffort, orchModel, orchMode, setChatCards]);
 
   // Mistake-proofing for the main conversation (bottom pill + dock): undo-send
   // grace buffer + queue-when-busy. Both composers route through `mainSend`.
@@ -1286,7 +1280,7 @@ export default function CanvasGlassPreviewPage() {
         }]);
       })
       .catch(() => {});
-  }, [findFreeSpot]);
+  }, [findFreeSpot, setChatCards, zPeakRef]);
 
   /** A chat card's own composer went out — append the turn to its lane.
    *  Mirrors sendPrompt's entry shapes; the card already did the ws send. */
@@ -1302,11 +1296,11 @@ export default function CanvasGlassPreviewPage() {
 
   const moveChatCard = useCallback((id: number, x: number, y: number) => {
     setChatCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
-  }, []);
+  }, [setChatCards]);
 
   const resizeChatCard = useCallback((id: number, w: number, h: number) => {
     setChatCards((previous) => previous.map((card) => (card.id === id ? { ...card, w, h } : card)));
-  }, []);
+  }, [setChatCards]);
 
   const closeChatCard = useCallback((id: number) => {
     const target = chatCards.find((card) => card.id === id);
@@ -1317,7 +1311,7 @@ export default function CanvasGlassPreviewPage() {
     setConvos((previous) => removeCanvasConversations(previous, lanes));
     firstOutputRef.current.delete(lanes[0]!);
     clearCanvasTurnAccumulators(lanes[0]!, turnTextRef.current, turnToolsRef.current);
-  }, [chatCards, orch]);
+  }, [chatCards, orch, setChatCards]);
 
   /** Promote a chat card into the dock — adopt its thread on the live
    *  socket; the next composer message continues that conversation. */
@@ -1329,7 +1323,7 @@ export default function CanvasGlassPreviewPage() {
     setConvos((previous) => setCanvasConversation(previous, repo, previous[`thread:${card.threadId}`] ?? card.entries));
     setChatCards((previous) => previous.filter((existing) => existing.id !== card.id));
     setDockOpen(true);
-  }, [activeRepoPath, orch]);
+  }, [activeRepoPath, orch, setChatCards]);
 
   /** Undock the live orchestrator back onto the canvas as a floating chat card
    *  — the exact inverse of dockChatCard. The conversation KEEPS rendering
@@ -1373,7 +1367,7 @@ export default function CanvasGlassPreviewPage() {
       entries,
     }]);
     setDockOpen(false);
-  }, [activeRepoPath, convos, orch, repos, chatCards, findFreeSpot]);
+  }, [activeRepoPath, convos, orch, repos, chatCards, findFreeSpot, setChatCards, zPeakRef]);
 
   /** Re-dock the active lane — if it's floating as a card, fold that exact card
    *  back in via dockChatCard (which adopts the card's thread lane, the complete
@@ -1446,7 +1440,7 @@ export default function CanvasGlassPreviewPage() {
       setAgentCards((p) => p.map((c) => lerp(c, t)));
     };
     gridAnimRef.current = animate(0, 1, { duration: 0.18, ease: [0.22, 0.61, 0.36, 1], onUpdate: writeAll });
-  }, []);
+  }, [setAgentCards, setBrainCards, setBrowserCards, setChatCards, setDiffCards, setFileCards, setImageCards, setMarkdownCards, setSpecCards, setTermCards, setTreeCards]);
 
   // Core form-fit layout — pack `order` (card ids) into grid slots filling the
   // usable area minus a gap-margin (so the grid sits off the dock/rails/composer),
@@ -1745,7 +1739,7 @@ export default function CanvasGlassPreviewPage() {
       agentCli: opts?.agentCli,
     }));
     sendTerminalCreate(120, 30, requestId, cwd ?? undefined);
-  }, [findFreeSpot, sendTerminalCreate]);
+  }, [findFreeSpot, sendTerminalCreate, setTermCards, zPeakRef]);
 
   // #6 persistent terminals — re-attach a canvas shell whose tmux session
   // survived a restart/crash instead of respawning fresh. The card is created
@@ -1777,118 +1771,13 @@ export default function CanvasGlassPreviewPage() {
       cwd,
       cwdLabel,
     }]);
-  }, [findFreeSpot]);
+  }, [findFreeSpot, setTermCards, zPeakRef]);
 
-  const moveTermCard = useCallback((id: number, x: number, y: number) => {
-    setTermCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
-  }, []);
-
-  const resizeTermCard = useCallback((id: number, w: number, h: number) => {
-    setTermCards((previous) => previous.map((card) => (card.id === id ? { ...card, w, h } : card)));
-  }, []);
-
-  /** Clicked card comes forward. Terminals + files + images + browsers +
-   *  chats share the 10–39 band — above mock cards (3), below chrome (40+). */
-  const focusCard = useCallback((kind: CanvasCardKind, id: number) => {
-    const canvasCards = canvasCardsRef.current;
-    const current = canvasCards[kind].find((card) => card.id === id);
-    if (!current || current.z === zPeakRef.current) return;
-    if (zPeakRef.current + 1 > 38) {
-      // Renormalize the whole band, keeping order, with the target on top.
-      const combined = CANVAS_CARD_KINDS.flatMap((cardKind) => (
-        canvasCards[cardKind].map((card) => ({ kind: cardKind, id: card.id, z: card.z }))
-      )).sort((a, b) => a.z - b.z);
-      const remap = new Map(combined.map((entry, index) => [`${entry.kind}:${entry.id}`, 10 + index]));
-      const top = 10 + combined.length;
-      setTermCards((previous) => previous.map((card) => ({ ...card, z: kind === 'term' && card.id === id ? top : remap.get(`term:${card.id}`) ?? card.z })));
-      setFileCards((previous) => previous.map((card) => ({ ...card, z: kind === 'file' && card.id === id ? top : remap.get(`file:${card.id}`) ?? card.z })));
-      setTreeCards((previous) => previous.map((card) => ({ ...card, z: kind === 'tree' && card.id === id ? top : remap.get(`tree:${card.id}`) ?? card.z })));
-      setImageCards((previous) => previous.map((card) => ({ ...card, z: kind === 'image' && card.id === id ? top : remap.get(`image:${card.id}`) ?? card.z })));
-      setVideoCards((previous) => previous.map((card) => ({ ...card, z: kind === 'video' && card.id === id ? top : remap.get(`video:${card.id}`) ?? card.z })));
-      setBrowserCards((previous) => previous.map((card) => ({ ...card, z: kind === 'browser' && card.id === id ? top : remap.get(`browser:${card.id}`) ?? card.z })));
-      setChatCards((previous) => previous.map((card) => ({ ...card, z: kind === 'chat' && card.id === id ? top : remap.get(`chat:${card.id}`) ?? card.z })));
-      setDiffCards((previous) => previous.map((card) => ({ ...card, z: kind === 'diff' && card.id === id ? top : remap.get(`diff:${card.id}`) ?? card.z })));
-      setSpecCards((previous) => previous.map((card) => ({ ...card, z: kind === 'spec' && card.id === id ? top : remap.get(`spec:${card.id}`) ?? card.z })));
-      setBrainCards((previous) => previous.map((card) => ({ ...card, z: kind === 'brain' && card.id === id ? top : remap.get(`brain:${card.id}`) ?? card.z })));
-      setMarkdownCards((previous) => previous.map((card) => ({ ...card, z: kind === 'markdown' && card.id === id ? top : remap.get(`markdown:${card.id}`) ?? card.z })));
-      setAgentCards((previous) => previous.map((card) => ({ ...card, z: kind === 'agent' && card.id === id ? top : remap.get(`agent:${card.id}`) ?? card.z })));
-      zPeakRef.current = top;
-      return;
-    }
-    zPeakRef.current += 1;
-    const z = zPeakRef.current;
-    if (kind === 'term') {
-      setTermCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
-    } else if (kind === 'file') {
-      setFileCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
-    } else if (kind === 'tree') {
-      setTreeCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
-    } else if (kind === 'image') {
-      setImageCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
-    } else if (kind === 'video') {
-      setVideoCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
-    } else if (kind === 'browser') {
-      setBrowserCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
-    } else if (kind === 'chat') {
-      setChatCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
-    } else if (kind === 'diff') {
-      setDiffCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
-    } else if (kind === 'spec') {
-      setSpecCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
-    } else if (kind === 'brain') {
-      setBrainCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
-    } else if (kind === 'markdown') {
-      setMarkdownCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
-    } else {
-      setAgentCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
-    }
-  }, []);
-
-  const focusTermCard = useCallback((id: number) => focusCard('term', id), [focusCard]);
-  const focusFileCard = useCallback((id: number) => focusCard('file', id), [focusCard]);
-  const focusTreeCard = useCallback((id: number) => focusCard('tree', id), [focusCard]);
-  const focusImageCard = useCallback((id: number) => focusCard('image', id), [focusCard]);
-  const focusVideoCard = useCallback((id: number) => focusCard('video', id), [focusCard]);
-  const focusBrowserCard = useCallback((id: number) => focusCard('browser', id), [focusCard]);
-  const focusChatCard = useCallback((id: number) => focusCard('chat', id), [focusCard]);
-  const focusDiffCard = useCallback((id: number) => focusCard('diff', id), [focusCard]);
-  const focusSpecCard = useCallback((id: number) => focusCard('spec', id), [focusCard]);
-  const focusBrainCard = useCallback((id: number) => focusCard('brain', id), [focusCard]);
-  const focusMarkdownCard = useCallback((id: number) => focusCard('markdown', id), [focusCard]);
-  const focusAgentCard = useCallback((id: number) => focusCard('agent', id), [focusCard]);
-  const moveDiffCard = useCallback((id: number, x: number, y: number) => setDiffCards((previous) => moveCanvasCard(previous, id, x, y)), []);
-  const resizeDiffCard = useCallback((id: number, w: number, h: number) => setDiffCards((previous) => previous.map((card) => (card.id === id ? { ...card, w, h } : card))), []);
-  const closeDiffCard = useCallback((id: number) => setDiffCards((previous) => previous.filter((card) => card.id !== id)), []);
   const requestDiffCardChanges = useCallback((card: DiffCard) => {
     setComposerValue(`Request changes on ${card.title}${card.branch ? ` (${card.branch})` : ''}: `);
     composerInputRef.current?.focus();
   }, []);
-  const moveAgentCard = useCallback((id: number, x: number, y: number) => setAgentCards((previous) => moveCanvasCard(previous, id, x, y)), []);
-  const resizeAgentCard = useCallback((id: number, w: number, h: number) => setAgentCards((previous) => previous.map((card) => (card.id === id ? { ...card, w, h } : card))), []);
-  const closeAgentCard = useCallback((id: number) => setAgentCards((previous) => previous.filter((card) => card.id !== id)), []);
-  const moveBrainCard = useCallback((id: number, x: number, y: number) => setBrainCards((previous) => moveCanvasCard(previous, id, x, y)), []);
-  const resizeBrainCard = useCallback((id: number, w: number, h: number) => setBrainCards((previous) => previous.map((card) => (card.id === id ? { ...card, w, h } : card))), []);
-  const closeBrainCard = useCallback((id: number) => setBrainCards((previous) => previous.filter((card) => card.id !== id)), []);
-  const moveMarkdownCard = useCallback((id: number, x: number, y: number) => setMarkdownCards((previous) => moveCanvasCard(previous, id, x, y)), []);
-  const resizeMarkdownCard = useCallback((id: number, w: number, h: number) => setMarkdownCards((previous) => previous.map((card) => (card.id === id ? { ...card, w, h } : card))), []);
-  const closeMarkdownCard = useCallback((id: number) => setMarkdownCards((previous) => previous.filter((card) => card.id !== id)), []);
-  const moveSpecCard = useCallback((id: number, x: number, y: number) => setSpecCards((previous) => moveCanvasCard(previous, id, x, y)), []);
-  const resizeSpecCard = useCallback((id: number, w: number, h: number) => setSpecCards((previous) => previous.map((card) => (card.id === id ? { ...card, w, h } : card))), []);
-  const closeSpecCard = useCallback((id: number) => setSpecCards((previous) => previous.filter((card) => card.id !== id)), []);
   const specScreenMap = useMemo(() => ({ zoom: canvasZoomLevel, panX: pan.x, panY: pan.y }), [canvasZoomLevel, pan.x, pan.y]);
-  /** Toggle an agent card compact ↔ full — snaps to that mode's preset size so
-   *  the transcript+composer get room in full and the status tile stays tight in
-   *  compact. The o8_canvas resize verb still resizes either mode afterward. */
-  const toggleAgentCardExpand = useCallback((id: number) => {
-    setAgentCards((previous) => previous.map((card) => (
-      card.id === id
-        ? card.expanded
-          ? { ...card, expanded: false, w: AGENT_COMPACT_W, h: AGENT_COMPACT_H }
-          : { ...card, expanded: true, w: AGENT_FULL_W, h: AGENT_FULL_H }
-        : card
-    )));
-  }, []);
-
   const showCanvasToast = useCallback((message: string, tone: CanvasToast['tone'] = 'error') => {
     const id = Date.now();
     setCanvasToast({ id, message, tone });
@@ -2074,7 +1963,7 @@ export default function CanvasGlassPreviewPage() {
     };
     window.addEventListener('o8:open-browser', onOpenBrowser);
     return () => window.removeEventListener('o8:open-browser', onOpenBrowser);
-  }, [findFreeSpot]);
+  }, [findFreeSpot, setBrowserCards, zPeakRef]);
 
   const changeTermVeil = useCallback((value: number) => {
     setTermVeil(value);
@@ -2085,167 +1974,14 @@ export default function CanvasGlassPreviewPage() {
     }
   }, []);
 
-  // ── Canvas persistence — the canvas is a place, not a session. ──────
-  // Restore once on mount: pure-state kinds land directly, live kinds go
-  // back through their real spawn paths (terminals respawn shells in the
-  // saved cwd, chat cards refetch their thread, diff cards refetch the
-  // lane and silently drop if it's gone).
-  const restoredRef = useRef(false);
-  const persistArmedAtRef = useRef(0);
-  useEffect(() => {
-    if (restoredRef.current) return;
-    restoredRef.current = true;
-    const snap = loadCanvasSnapshot();
-    if (!snap) return;
-    // Ceiling, not the arm point — the async restores release it early
-    // below. A dev-server cold compile can hold a thread fetch past any
-    // fixed short window, and a save in that gap loses the unfetched cards.
-    persistArmedAtRef.current = Date.now() + 12000;
-    if (snap.activeRepoPath) setActiveRepoPath((current) => current ?? snap.activeRepoPath);
-    if (snap.dockOpen) setDockOpen(true);
-
-    if (snap.browser.length) {
-      setBrowserCards((previous) => [...previous, ...snap.browser.map((saved) => {
-        const id = nextIdRef.current;
-        nextIdRef.current += 1;
-        zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
-        return { id, x: saved.x, y: saved.y, z: zPeakRef.current, w: saved.w, h: saved.h, tabs: saved.tabs, activeTabId: saved.activeTabId };
-      })]);
-    }
-    if (snap.spec.length) {
-      setSpecCards((previous) => [...previous, ...snap.spec.map((saved) => {
-        const id = nextIdRef.current;
-        nextIdRef.current += 1;
-        zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
-        return { id, x: saved.x, y: saved.y, z: zPeakRef.current, w: saved.w, h: saved.h, repoPath: saved.repoPath };
-      })]);
-    }
-    if (snap.brain?.length) {
-      setBrainCards((previous) => [...previous, ...(snap.brain ?? []).map((saved) => {
-        const id = nextIdRef.current;
-        nextIdRef.current += 1;
-        zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
-        return { id, x: saved.x, y: saved.y, z: zPeakRef.current, w: saved.w, h: saved.h, repoPath: saved.repoPath };
-      })]);
-    }
-    if (snap.image.length) {
-      setImageCards((previous) => [...previous, ...snap.image.map((saved) => {
-        const id = nextIdRef.current;
-        nextIdRef.current += 1;
-        zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
-        return { id, x: saved.x, y: saved.y, z: zPeakRef.current, w: saved.w, h: saved.h, aspect: saved.aspect, items: saved.items };
-      })]);
-    }
-    if (snap.markdown?.length) {
-      setMarkdownCards((previous) => [...previous, ...(snap.markdown ?? []).map((saved) => {
-        const id = nextIdRef.current;
-        nextIdRef.current += 1;
-        zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
-        return { id, x: saved.x, y: saved.y, z: zPeakRef.current, w: saved.w, h: saved.h, title: saved.title, markdown: saved.markdown };
-      })]);
-    }
-    snap.file.forEach((saved) => spawnFileCard(saved.path, saved, saved.repoPath ?? snap.activeRepoPath ?? undefined));
-    snap.tree?.forEach((saved) => spawnFileTreeCard(saved.repoPath, saved));
-    const videoRestores = (snap.video ?? []).map(async (saved) => {
-      const blob = await getMedia(saved.mediaId);
-      if (!blob) return;
-      const src = canvasMedia.createObjectURL(blob);
-      if (!src) return;
-      const id = nextIdRef.current;
-      nextIdRef.current += 1;
-      zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
-      setVideoCards((previous) => [...previous, { id, x: saved.x, y: saved.y, z: zPeakRef.current, w: saved.w, h: saved.h, aspect: saved.aspect, src, name: saved.name, mediaId: saved.mediaId }]);
-    });
-    const settles: Array<Promise<unknown>> = [
-      ...videoRestores,
-      ...snap.chat.map((saved) => pickThread(saved.threadId, saved.repoPath, { title: saved.title, repoName: saved.repoName }, saved)),
-      ...snap.diff.map((saved) => (saved.laneId.startsWith('worktree:')
-        ? spawnWorktreeDiffCard(saved, saved.laneId.slice('worktree:'.length)) ?? Promise.resolve()
-        : spawnDiffCard({ id: saved.laneId, label: saved.title }, saved))),
-    ];
-    if (snap.term.length) {
-      // The terminal ws needs a beat to connect before create requests land.
-      // #6 persistent terminals — re-attach saved shells whose tmux session
-      // survived (checkAliveSessions unions live tmux sessions under the flag);
-      // respawn the rest fresh, exactly as before.
-      setTimeout(() => {
-        void (async () => {
-          const names = snap.term.map((saved) => saved.sessionName).filter((name): name is string => Boolean(name));
-          const alive = names.length ? await checkAliveSessions(names) : new Set<string>();
-          snap.term.forEach((saved) => {
-            if (saved.sessionName && alive.has(saved.sessionName)) {
-              reattachTerminal(saved.sessionName, saved.cwd, saved.cwdLabel, saved);
-            } else {
-              spawnTerminal(saved.cwd, saved.cwdLabel, saved);
-            }
-          });
-        })();
-      }, 1200);
-    }
-    void Promise.allSettled(settles).then(() => {
-      // Every fetch-backed card has landed (or dropped) — release the save
-      // guard, padded past the terminal respawn timer.
-      persistArmedAtRef.current = Math.min(persistArmedAtRef.current, Date.now() + 2000);
-    });
-  }, [canvasMedia, pickThread, spawnDiffCard, spawnFileCard, spawnFileTreeCard, spawnTerminal, reattachTerminal, spawnWorktreeDiffCard]);
-
-  // Build the snapshot only when the debounce fires. Dragging used to stringify
-  // every card on every pointer move even though localStorage writes were delayed.
-  const buildCanvasSnapshot = useCallback(() => ({
-    v: 1 as const,
-    activeRepoPath,
-    dockOpen,
-    term: termCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, cwd: card.cwd, cwdLabel: card.cwdLabel, sessionName: card.sessionName })),
-    file: fileCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, path: card.path, repoPath: card.repoPath })),
-    tree: treeCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, repoPath: card.repoPath })),
-    image: imageCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, aspect: card.aspect, items: card.items })),
-    video: videoCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, aspect: card.aspect, mediaId: card.mediaId, name: card.name })),
-    browser: browserCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, tabs: card.tabs, activeTabId: card.activeTabId })),
-    chat: chatCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, threadId: card.threadId, repoPath: card.repoPath, repoName: card.repoName, title: card.title })),
-    diff: diffCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, laneId: card.laneId, title: card.title })),
-    spec: specCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, repoPath: card.repoPath })),
-    markdown: markdownCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, title: card.title, markdown: card.markdown })),
-    brain: brainCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, repoPath: card.repoPath })),
-  }), [activeRepoPath, dockOpen, termCards, fileCards, treeCards, imageCards, videoCards, browserCards, chatCards, diffCards, specCards, markdownCards, brainCards]);
-  const flushCanvasSnapshot = useCallback((force = false) => {
-    if (!restoredRef.current || (!force && Date.now() < persistArmedAtRef.current)) return;
-    saveCanvasSnapshot(buildCanvasSnapshot());
-  }, [buildCanvasSnapshot]);
-
-  useEffect(() => {
-    const target = window as unknown as Record<string, unknown>;
-    const forceFlush = () => flushCanvasSnapshot(true);
-    target.__o8CanvasFlushSnapshot = forceFlush;
-    window.addEventListener('beforeunload', forceFlush);
-    return () => {
-      if (target.__o8CanvasFlushSnapshot === forceFlush) delete target.__o8CanvasFlushSnapshot;
-      window.removeEventListener('beforeunload', forceFlush);
-    };
-  }, [flushCanvasSnapshot]);
-
-  useEffect(() => {
-    // Hold fire until restore's async spawns settle — an instant save of
-    // the half-restored canvas would overwrite the snapshot.
-    if (!restoredRef.current || Date.now() < persistArmedAtRef.current) return;
-    const timer = setTimeout(flushCanvasSnapshot, 700);
-    return () => clearTimeout(timer);
-  }, [flushCanvasSnapshot]);
-
-  const moveFileCard = useCallback((id: number, x: number, y: number) => {
-    setFileCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
-  }, []);
-
-  const resizeFileCard = useCallback((id: number, w: number, h: number) => {
-    setFileCards((previous) => previous.map((card) => (card.id === id ? { ...card, w, h } : card)));
-  }, []);
-
-  const closeFileCard = useCallback((id: number) => {
-    setFileCards((previous) => previous.filter((card) => card.id !== id));
-  }, []);
-
-  const moveTreeCard = useCallback((id: number, x: number, y: number) => setTreeCards((previous) => moveCanvasCard(previous, id, x, y)), []);
-  const resizeTreeCard = useCallback((id: number, w: number, h: number) => setTreeCards((previous) => previous.map((card) => (card.id === id ? { ...card, w, h } : card))), []);
-  const closeTreeCard = useCallback((id: number) => setTreeCards((previous) => previous.filter((card) => card.id !== id)), []);
+  useCanvasSnapshot({
+    activeRepoPath, dockOpen, termCards, fileCards, treeCards, imageCards, videoCards,
+    browserCards, chatCards, diffCards, specCards, markdownCards, brainCards,
+    setActiveRepoPath, setDockOpen, setBrowserCards, setSpecCards, setBrainCards,
+    setImageCards, setMarkdownCards, setVideoCards, nextIdRef, zPeakRef, canvasMedia,
+    getMedia, checkAliveSessions, spawnFileCard, spawnFileTreeCard, pickThread,
+    spawnDiffCard, spawnWorktreeDiffCard, spawnTerminal, reattachTerminal,
+  });
 
   // Finder "Open With → o8" / dock drop — drain the OS-handed paths into
   // file cards, both at mount (cold launch routed here by FileOpenBridge)
@@ -2311,7 +2047,7 @@ export default function CanvasGlassPreviewPage() {
       xtermHandlesRef.current.delete(card.sessionName);
     }
     setTermCards((previous) => previous.filter((existing) => existing.id !== card.id));
-  }, [sendTerminalDetach, sendTerminalInput]);
+  }, [sendTerminalDetach, sendTerminalInput, setTermCards]);
 
   const registerXtermHandle = useCallback((sessionName: string, handle: XtermPanelHandle | null) => {
     if (handle) xtermHandlesRef.current.set(sessionName, handle);
@@ -2356,29 +2092,7 @@ export default function CanvasGlassPreviewPage() {
     setDropTargetId,
   });
 
-  // ── Canvas control surface (agent parity) ────────────────────────────────
-  // The intent bus's card verbs let an agent drive the canvas the way a human
-  // can: SEE every card (list), then move / resize / focus / close one by id.
-  // Existing focus/close handlers preserve each kind's teardown semantics.
-  //
-  // canvasCardsRef holds the latest card arrays so `list` + verb existence
-  // checks read fresh state WITHOUT re-subscribing the intent listener on every
-  // card change. Synced in an effect (not during render) — intents fire from
-  // event handlers, long after commit, so one-tick lag never bites.
-  const canvasCardsRef = useRef<Record<CanvasCardKind, CanvasCardLite[]>>({
-    term: [], file: [], tree: [], image: [], video: [], browser: [], chat: [], diff: [], spec: [], brain: [], markdown: [], agent: [],
-  });
-  useEffect(() => {
-    canvasCardsRef.current = {
-      term: termCards, file: fileCards, tree: treeCards, image: imageCards, video: videoCards, browser: browserCards,
-      chat: chatCards, diff: diffCards, spec: specCards, brain: brainCards, markdown: markdownCards, agent: agentCards,
-    };
-  }, [termCards, fileCards, treeCards, imageCards, videoCards, browserCards, chatCards, diffCards, specCards, brainCards, markdownCards, agentCards]);
   const spawnUiLoopProofCard = useUiLoopProofCardSpawner(canvasCardsRef, nextIdRef, zPeakRef, setImageCards, findFreeSpot);
-
-  const findCanvasCard = useCallback((kind: CanvasCardKind, id: number) => {
-    return canvasCardsRef.current[kind].find((card) => card.id === id) ?? null;
-  }, []);
 
   const canvasViewport = useCallback((nextZoom = canvasZoomLevel, nextPan?: { x: number; y: number }) => {
     const p = nextPan ?? pan;
@@ -2496,7 +2210,7 @@ export default function CanvasGlassPreviewPage() {
       case 'markdown': setMarkdownCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
       case 'agent': setAgentCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
     }
-  }, []);
+  }, [setAgentCards, setBrainCards, setBrowserCards, setChatCards, setDiffCards, setFileCards, setImageCards, setMarkdownCards, setSpecCards, setTermCards, setTreeCards, setVideoCards]);
 
   const dismissCanvasCard = useCallback((kind: CanvasCardKind, id: number) => {
     switch (kind) {
@@ -2517,7 +2231,7 @@ export default function CanvasGlassPreviewPage() {
       case 'markdown': setMarkdownCards((p) => p.filter((c) => c.id !== id)); break;
       case 'agent': setAgentCards((p) => p.filter((c) => c.id !== id)); break;
     }
-  }, [closeTerminal, closeFileCard, closeTreeCard, closeImageCard, closeVideoCard, closeBrowserCard, closeChatCard]);
+  }, [canvasCardsRef, closeTerminal, closeFileCard, closeTreeCard, closeImageCard, closeVideoCard, closeBrowserCard, closeChatCard, setAgentCards, setBrainCards, setDiffCards, setMarkdownCards, setSpecCards]);
 
   const commandPaletteCommands = useMemo<CanvasCommands>(() => ({
     spawnTerminal: () => {
@@ -2561,7 +2275,7 @@ export default function CanvasGlassPreviewPage() {
     zoomIn: () => setCanvasZoomLevel((current) => stepCanvasZoom(current, 'in')),
     zoomToFit: () => setCanvasZoomLevel(CANVAS_FIT_ZOOM),
     zoomOut: () => setCanvasZoomLevel((current) => stepCanvasZoom(current, 'out')),
-  }), [activeRepoPath, convos, dismissCanvasCard, openFilePicker, pickThread, redockActiveLane, repos, showCanvasToast, spawnBrainCard, spawnBrowserCard, spawnFileCard, spawnFileTreeCard, spawnImageCard, spawnMarkdownCard, spawnSpecCard, spawnTerminal, spawnVideoCard, spawnWorktreeDiffCard, viewportSpawnOrigin]);
+  }), [activeRepoPath, canvasCardsRef, convos, dismissCanvasCard, openFilePicker, pickThread, redockActiveLane, repos, showCanvasToast, spawnBrainCard, spawnBrowserCard, spawnFileCard, spawnFileTreeCard, spawnImageCard, spawnMarkdownCard, spawnSpecCard, spawnTerminal, spawnVideoCard, spawnWorktreeDiffCard, viewportSpawnOrigin]);
 
   // Canvas intent bus (#1232 phase 2) — Symon and the gated /api/canvas/intent
   // route drive the canvas through the SAME handlers the rail buttons call.
@@ -2942,7 +2656,7 @@ export default function CanvasGlassPreviewPage() {
       window.removeEventListener('o8:canvas-intent', onIntent);
       (window as unknown as Record<string, unknown>).__o8CanvasIntentReady = false;
     };
-  }, [activeRepoPath, animatePanTo, canvasEnabled, canvasViewport, canvasZoomLevel, dockOpen, findCanvasCard, gridMode, pan.x, pan.y, readCanvasCard, repos, sendPrompt, spawnAgents, spawnBrainCard, spawnMarkdownCard, spawnSpecCard, spawnTerminal, spawnFileCard, spawnFileTreeCard, spawnUiLoopProofCard, spawnWorktreeDiffCard, spawnVideoCard, pickThread, cycleImageCard, spreadImageCard, patchCanvasCardGeom, dismissCanvasCard, focusCard, winSize.h, winSize.w]);
+  }, [activeRepoPath, animatePanTo, canvasCardsRef, canvasEnabled, canvasViewport, canvasZoomLevel, dockOpen, findCanvasCard, gridMode, imageCardsRef, pan.x, pan.y, readCanvasCard, repos, sendPrompt, setImageCards, spawnAgents, spawnBrainCard, spawnMarkdownCard, spawnSpecCard, spawnTerminal, spawnFileCard, spawnFileTreeCard, spawnUiLoopProofCard, spawnWorktreeDiffCard, spawnVideoCard, pickThread, cycleImageCard, spreadImageCard, patchCanvasCardGeom, dismissCanvasCard, focusCard, winSize.h, winSize.w, zPeakRef]);
 
   if (!canvasEnabled) {
     return (
