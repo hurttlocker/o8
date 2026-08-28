@@ -39,6 +39,7 @@ import { DesktopStatusBar } from '@/components/desktop/DesktopStatusBar';
 import { DesktopCloseCoordinator } from '@/components/desktop/DesktopCloseCoordinator';
 import { useProjects, type ProjectRecord } from '@/components/desktop/repo-registry/useProjects';
 import type { CommandPaletteActionItem } from '@/components/desktop/CommandPalette';
+import { useCommandPaletteHotkey } from '@/components/desktop/use-command-palette-hotkey';
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
 import { DictationHost } from '@/components/desktop/dictation/DictationHost';
 import { BrowserPipCard, BROWSER_PIP_EVENT } from '@/components/desktop/BrowserPipCard';
@@ -1392,6 +1393,7 @@ function DashboardInner() {
   // listener below yields only to terminal surfaces; composer focus still
   // opens the palette.
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  useCommandPaletteHotkey(setCommandPaletteOpen);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const dashboardProjects = useProjects();
 
@@ -1890,29 +1892,6 @@ function DashboardInner() {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [activeTileId, workspaceTerminalHandlesRef]);
-
-  // ── Cmd+K command palette hotkey (#661) ──
-  // Toggles the full-screen palette overlay from anywhere except xterm.
-  // Esc closes the overlay inside CommandPalette.
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      const isPaletteShortcut = (event.metaKey || event.ctrlKey)
-        && !event.altKey
-        && !event.shiftKey
-        && event.key.toLowerCase() === 'k';
-      if (!isPaletteShortcut) return;
-
-      const target = event.target as HTMLElement | null;
-      const insideTerminal = Boolean(target?.closest('.xterm, .cortex-terminal-fade'));
-      if (insideTerminal) return;
-
-      event.preventDefault();
-      event.stopPropagation();
-      setCommandPaletteOpen((current) => !current);
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, []);
 
   // ── ⌘/ (and bare `?`) opens the keyboard-shortcuts reference overlay ──
   // ⌘/ is the macOS-convention "show shortcuts" binding; `?` is a fallback

@@ -95,6 +95,18 @@ import { useCanvasQuickActions } from './use-canvas-quick-actions';
 import { useCanvasMediaLifecycle } from './use-canvas-media-lifecycle';
 import { clearCanvasTurnAccumulators, removeCanvasConversations, setCanvasConversation, updateCanvasConversation } from './canvas-conversation-retention';
 import { CanvasSearchOverlay } from './canvas-search';
+import { CanvasCommandPalette } from './canvas-command-palette';
+import {
+  CANVAS_CARD_KINDS,
+  CANVAS_FIT_ZOOM,
+  CANVAS_ZOOM_STEPS as ZOOM_STEPS,
+  closeActiveCanvasCard,
+  selectCanvasMedia,
+  stepCanvasZoom,
+  useCanvasZoomHotkeys,
+  type CanvasCardKind,
+  type CanvasCommands,
+} from './canvas-commands';
 import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
 /** Live rows for the wired chrome — inbox items, active lanes, commits. */
 interface InboxRow {
@@ -161,24 +173,9 @@ const GRID_MODE_KEY = 'o8:canvas-grid-mode';
 const LOUPE_SIZE_KEY = 'o8:canvas-loupe-size';
 const LOUPE_SIZE_DEFAULT = 160;
 const LOUPE_SIZE_RANGE = { min: 120, max: 240, step: 4 };
-// Ordered most-zoomed-IN (index 0) → most-out. "100%" is the home/fit anchor
-// (0.7 actual — cards fit comfortably); 115/130 let the operator zoom IN and
-// make cards + text bigger (the loupe could previously only go smaller). The
-// default + the loupe "Fit" both resolve the label===100 step, NOT index 0.
-const ZOOM_STEPS = [
-  { label: 130, value: 0.91 },
-  { label: 115, value: 0.805 },
-  { label: 100, value: 0.7 },
-  { label: 85, value: 0.595 },
-  { label: 70, value: 0.49 },
-] as const;
-
-// ── Canvas control surface (agent parity) ──────────────────────────────────
 // Module-scope so the intent listener's deps stay stable. The card verbs let an
 // agent drive the canvas the way a human can: SEE every card (list), then move
 // / resize / focus / close one by (kind, id).
-type CanvasCardKind = 'term' | 'file' | 'image' | 'video' | 'browser' | 'chat' | 'diff' | 'spec' | 'brain' | 'markdown' | 'agent';
-const CANVAS_CARD_KINDS: CanvasCardKind[] = ['term', 'file', 'image', 'video', 'browser', 'chat', 'diff', 'spec', 'brain', 'markdown', 'agent'];
 const CANVAS_GEOM_FLOOR = 140;
 const SPAWN_CHOREOGRAPHY_TTL_MS = 20_000;
 // Broad lite shape every card satisfies — enough to list + title + resize
@@ -324,7 +321,8 @@ export default function CanvasGlassPreviewPage() {
   const [dockTrayExpanded, setDockTrayExpanded] = useState(false);
   const [tunerOpen, setTunerOpen] = useState(false);
   const [orbSettings, setOrbSettings] = useState<OrbSettings>(ORB_DEFAULTS);
-  const [canvasZoomLevel, setCanvasZoomLevel] = useState<number>(ZOOM_STEPS.find((step) => step.label === 100)?.value ?? 0.7);
+  const [canvasZoomLevel, setCanvasZoomLevel] = useState<number>(CANVAS_FIT_ZOOM);
+  useCanvasZoomHotkeys(setCanvasZoomLevel);
   const [loupeSize, setLoupeSize] = useState<number>(LOUPE_SIZE_DEFAULT);
   const [personalDefault, setPersonalDefault] = useState<CanvasGlassSettings | null>(null);
   const [activeRepoPath, setActiveRepoPath] = useState<string | null>(null);
@@ -619,41 +617,6 @@ export default function CanvasGlassPreviewPage() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
-
-  // ⌘= / ⌘+ zoom IN · ⌘- / ⌘_ zoom OUT · ⌘0 reset to 100% — the keyboard peer of
-  // the loupe's −/fit/+ cluster. Steps the SAME ZOOM_STEPS array through the same
-  // setCanvasZoomLevel the loupe's onZoomChange drives (index −1 = more zoomed in
-  // = bigger cards + text, +1 = more out), so every path lands on the identical
-  // discrete rungs. preventDefault stops WebKit's native page zoom, which would
-  // scale the whole chrome instead of only the canvas layer. Never fires while
-  // typing — a focused input / textarea / CodeMirror editor keeps ⌘-/⌘= for
-  // itself so the file-card editor is untouched.
-  useEffect(() => {
-    const onZoomKey = (event: KeyboardEvent) => {
-      if (!event.metaKey || event.ctrlKey || event.altKey) return;
-      const target = event.target;
-      if (target instanceof Element && target.closest('input, textarea, [contenteditable=""], [contenteditable="true"]')) return;
-      const stepZoom = (delta: number) => {
-        setCanvasZoomLevel((current) => {
-          const idx = Math.max(0, ZOOM_STEPS.findIndex((step) => step.value === current));
-          const next = ZOOM_STEPS[Math.min(ZOOM_STEPS.length - 1, Math.max(0, idx + delta))];
-          return next ? next.value : current;
-        });
-      };
-      if (event.key === '=' || event.key === '+') {
-        event.preventDefault();
-        stepZoom(-1);
-      } else if (event.key === '-' || event.key === '_') {
-        event.preventDefault();
-        stepZoom(1);
-      } else if (event.key === '0') {
-        event.preventDefault();
-        setCanvasZoomLevel(ZOOM_STEPS.find((step) => step.label === 100)?.value ?? 0.7);
-      }
-    };
-    window.addEventListener('keydown', onZoomKey);
-    return () => window.removeEventListener('keydown', onZoomKey);
   }, []);
 
   // Repos load at mount — the composer is scoped to a repo from the first
@@ -3123,6 +3086,46 @@ export default function CanvasGlassPreviewPage() {
     }
   }, [closeTerminal, closeFileCard, closeImageCard, closeVideoCard, closeBrowserCard, closeChatCard]);
 
+  const commandPaletteCommands = useMemo<CanvasCommands>(() => ({
+    spawnTerminal: () => {
+      const path = activeRepoPath ?? null;
+      spawnTerminal(path, path ? repos?.find((repo) => repo.path === path)?.name ?? null : null);
+    },
+    spawnFile: (filePath) => {
+      if (filePath) spawnFileCard(filePath);
+      else openFilePicker();
+    },
+    spawnImage: () => selectCanvasMedia('image', (file) => {
+      const origin = viewportSpawnOrigin();
+      spawnImageCard(file, { x: origin.x + 140, y: origin.y + 64 });
+    }),
+    spawnVideo: () => selectCanvasMedia('video', (file) => {
+      const origin = viewportSpawnOrigin();
+      spawnVideoCard(file, { x: origin.x + 140, y: origin.y + 64 });
+    }),
+    spawnBrowser: spawnBrowserCard,
+    spawnChat: (threadId) => {
+      if (threadId) void pickThread(threadId, activeRepoPath);
+      else setSessionsOpen(true);
+    },
+    spawnDiff: () => { void spawnWorktreeDiffCard(); },
+    spawnSpec: spawnSpecCard,
+    spawnBrain: () => spawnBrainCard(),
+    spawnMarkdown: () => spawnMarkdownCard('Note', '# New note'),
+    spawnAgent: () => {
+      if ((convos[activeRepoPath ?? '']?.length ?? 0) > 0) redockActiveLane();
+      composerInputRef.current?.focus();
+    },
+    openSearch: () => {
+      setSearchQuery('');
+      setSearchOpen(true);
+    },
+    closeActiveCard: () => { closeActiveCanvasCard(canvasCardsRef.current, dismissCanvasCard); },
+    zoomIn: () => setCanvasZoomLevel((current) => stepCanvasZoom(current, 'in')),
+    zoomToFit: () => setCanvasZoomLevel(CANVAS_FIT_ZOOM),
+    zoomOut: () => setCanvasZoomLevel((current) => stepCanvasZoom(current, 'out')),
+  }), [activeRepoPath, convos, dismissCanvasCard, openFilePicker, pickThread, redockActiveLane, repos, spawnBrainCard, spawnBrowserCard, spawnFileCard, spawnImageCard, spawnMarkdownCard, spawnSpecCard, spawnTerminal, spawnVideoCard, spawnWorktreeDiffCard, viewportSpawnOrigin]);
+
   // Canvas intent bus (#1232 phase 2) — Symon and the gated /api/canvas/intent
   // route drive the canvas through the SAME handlers the rail buttons call.
   // Listeners run synchronously on dispatchEvent, so the ack stamped on
@@ -3176,11 +3179,7 @@ export default function CanvasGlassPreviewPage() {
             if (ZOOM_STEPS.some((step) => step.value === level)) {
               setCanvasZoomLevel(level);
             } else if (args.direction === 'in' || args.direction === 'out') {
-              setCanvasZoomLevel((previous) => {
-                const index = ZOOM_STEPS.findIndex((step) => step.value === previous);
-                const next = args.direction === 'out' ? index + 1 : index - 1;
-                return ZOOM_STEPS[Math.max(0, Math.min(ZOOM_STEPS.length - 1, next))].value;
-              });
+              setCanvasZoomLevel((previous) => stepCanvasZoom(previous, args.direction as 'in' | 'out'));
             } else {
               ok = false;
               note = `zoom needs level (${ZOOM_STEPS.map((step) => step.value).join(', ')}) or direction in|out`;
@@ -3543,6 +3542,7 @@ export default function CanvasGlassPreviewPage() {
           instead of going silent. Renders only its own fixed pill. */}
       <RealtimeVoiceHost />
       <SymonVoicePresencePill />
+      <CanvasCommandPalette commands={commandPaletteCommands} repo={activeRepoPath} />
 
       {/* In the app the desktop IS the backdrop (native material). The
           diffusion only stands in where there is no desktop to show. */}
