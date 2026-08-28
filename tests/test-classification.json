@@ -30,6 +30,13 @@
       ]
     },
     {
+      "path": "src/app/api/panel/universal-search/route.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
       "path": "src/app/api/setup/detect/route.test.ts",
       "reasons": [
         "child-process"
