@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
+import { collectReleaseBuildCacheIdentity } from './release-build-cache.mjs';
 
 export const RELEASE_ARTIFACT_MANIFEST = 'out/.o8-release-artifact-manifest.json';
 
@@ -99,7 +100,7 @@ function checksumOutput(root, path) {
   };
 }
 
-export function collectReleaseArtifactRecipe(root, version) {
+export function collectReleaseArtifactRecipe(root, version, options = {}) {
   const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
   const dirtyEntries = execFileSync(
     'git',
@@ -117,6 +118,13 @@ export function collectReleaseArtifactRecipe(root, version) {
       sha256: existsSync(absolute) ? sha256File(absolute) : 'missing',
     };
   });
+  // A verified artifact is only reusable under the exact web-build
+  // environment that produced it. Without this, a release built without a
+  // public client value can be reused after the value is configured, silently
+  // compiling the corresponding UI path out of later signed builds.
+  const webBuildCompatibilitySha256 = collectReleaseBuildCacheIdentity(root, 'web', {
+    env: options.env ?? process.env,
+  }).compatibilitySha256;
   const recipe = {
     schema: 'o8/release-artifact-recipe/v1',
     head,
@@ -137,6 +145,7 @@ export function collectReleaseArtifactRecipe(root, version) {
       swift: process.platform === 'darwin' ? commandVersion(root, 'swift', ['--version']) : 'not-applicable',
     },
     inputs,
+    webBuildCompatibilitySha256,
   };
   return {
     ...recipe,

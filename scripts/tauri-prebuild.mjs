@@ -18,9 +18,11 @@ import {
   restoreReleaseBuildCache,
   writeReleaseBuildCachePhaseReceipt,
 } from './lib/release-build-cache.mjs';
+import { resolveReleaseConfig } from './lib/release-config.mjs';
 
 const root = process.cwd();
 const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
+const releaseConfig = resolveReleaseConfig(root);
 const ownedDataDir = !process.env.O8_DATA_DIR || !process.env.CORTEX_IDE_DATA_DIR
   ? mkdtempSync(join(tmpdir(), 'o8-tauri-build-data-'))
   : null;
@@ -29,6 +31,10 @@ const env = {
   O8_DATA_DIR: process.env.O8_DATA_DIR || ownedDataDir,
   CORTEX_IDE_DATA_DIR: process.env.CORTEX_IDE_DATA_DIR || ownedDataDir,
 };
+if (!env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && releaseConfig.clerkPublishableKey) {
+  env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = releaseConfig.clerkPublishableKey;
+  console.log('[tauri-prebuild] Clerk publishable key loaded from release config');
+}
 const cacheRoot = resolveReleaseBuildCacheRoot(env);
 const cacheRunId = env.O8_RELEASE_CACHE_RUN_ID || createReleaseBuildCacheRunId();
 const ownsCacheRun = !env.O8_RELEASE_CACHE_RUN_ID;
@@ -48,10 +54,11 @@ function phase(label, command, args) {
 }
 
 async function cachedPhase(cachePhase, label, command, args) {
+  const identityOptions = cachePhase === 'web' ? { env } : {};
   let identity;
   let restore;
   try {
-    identity = collectReleaseBuildCacheIdentity(root, cachePhase);
+    identity = collectReleaseBuildCacheIdentity(root, cachePhase, identityOptions);
     cacheSource = identity.source;
     restore = await restoreReleaseBuildCache(root, cachePhase, { cacheRoot, identity });
   } catch (error) {
@@ -70,7 +77,7 @@ async function cachedPhase(cachePhase, label, command, args) {
   const buildDurationMs = phase(label, command, args);
   let capture;
   try {
-    identity = identity ?? collectReleaseBuildCacheIdentity(root, cachePhase);
+    identity = identity ?? collectReleaseBuildCacheIdentity(root, cachePhase, identityOptions);
     capture = await captureReleaseBuildCache(root, cachePhase, {
       cacheRoot,
       identity,
@@ -99,7 +106,7 @@ async function cachedPhase(cachePhase, label, command, args) {
 
 try {
   phase('stale-build preflight', process.execPath, ['scripts/preship-cleanup.mjs']);
-  const recipe = collectReleaseArtifactRecipe(root, version);
+  const recipe = collectReleaseArtifactRecipe(root, version, { env });
   cacheSource = { head: recipe.head };
   const verification = verifyReleaseArtifactManifest(root, recipe);
   if (verification.reusable) {

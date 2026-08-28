@@ -9,6 +9,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { prepareNativeBundle } from './native-bundle.mjs';
 import { exportTauriSafetyHookResources } from './tauri-hook-resources.mjs';
+import { resolveReleaseConfig } from './lib/release-config.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
@@ -273,40 +274,7 @@ console.log('📦 Created frontend loader (port-probing)');
 // builds). Source priority: build env var wins, else o8.release.json at the
 // repo root (gitignored, deployment-specific — see o8.release.example.json).
 // Absent → nothing is stamped and the packaged build behaves exactly as today.
-function resolveReleaseConfig() {
-  const cfg = { githubOAuthClientId: '', sentryDsn: '' };
-  const cfgPath = join(root, 'o8.release.json');
-  if (existsSync(cfgPath)) {
-    try {
-      const parsed = JSON.parse(readFileSync(cfgPath, 'utf-8'));
-      if (typeof parsed.githubOAuthClientId === 'string') {
-        cfg.githubOAuthClientId = parsed.githubOAuthClientId.trim();
-      }
-      // Sentry crash/error reporting DSN (telemetry ruling). Bound to the exact
-      // `sentryDsn` key the operator pastes into o8.release.json. Absent → the
-      // packaged build stays fully dormant (no Sentry init, no network).
-      if (typeof parsed.sentryDsn === 'string') {
-        cfg.sentryDsn = parsed.sentryDsn.trim();
-      }
-      // Private feedback-intake webhook. This one IS a secret (anyone holding it
-      // can post as us into the ops channel), which is why it lives here and not
-      // in source — the previous hardcoded one had to be revoked.
-      if (typeof parsed.feedbackWebhookUrl === 'string') {
-        cfg.feedbackWebhookUrl = parsed.feedbackWebhookUrl.trim();
-      }
-    } catch (e) {
-      console.warn('⚠️  o8.release.json parse failed — ignoring:', e.message);
-    }
-  }
-  const fromEnv = process.env.GITHUB_OAUTH_CLIENT_ID?.trim();
-  if (fromEnv) cfg.githubOAuthClientId = fromEnv;
-  const sentryFromEnv = process.env.SENTRY_DSN?.trim();
-  if (sentryFromEnv) cfg.sentryDsn = sentryFromEnv;
-  const feedbackFromEnv = process.env.O8_FEEDBACK_WEBHOOK_URL?.trim();
-  if (feedbackFromEnv) cfg.feedbackWebhookUrl = feedbackFromEnv;
-  return cfg;
-}
-const releaseConfig = resolveReleaseConfig();
+const releaseConfig = resolveReleaseConfig(root);
 
 // Stanza spliced into the server.js wrapper (same process as server-impl.js, so
 // setting process.env here is visible to the Next route handlers). The `if

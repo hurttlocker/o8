@@ -57,6 +57,7 @@ const PHASE_CONFIG = Object.freeze({
       'scripts/bust-stale-patch-cache.mjs',
       'scripts/tauri-export.mjs',
       'scripts/tauri-prebuild.mjs',
+      'scripts/lib/release-config.mjs',
       'scripts/lib/release-build-cache.mjs',
       'patches',
     ],

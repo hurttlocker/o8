@@ -20,7 +20,11 @@ export interface ReleaseArtifactManifest {
   outputs: ReleaseArtifactOutput[];
 }
 
-export function collectReleaseArtifactRecipe(root: string, version: string): ReleaseArtifactRecipe;
+export function collectReleaseArtifactRecipe(
+  root: string,
+  version: string,
+  options?: { env?: NodeJS.ProcessEnv },
+): ReleaseArtifactRecipe;
 export function writeReleaseArtifactManifest(
   root: string,
   recipe: ReleaseArtifactRecipe,

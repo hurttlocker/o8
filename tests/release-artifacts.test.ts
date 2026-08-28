@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  collectReleaseArtifactRecipe,
   verifyReleaseArtifactManifest,
   writeReleaseArtifactManifest,
 } from '../scripts/lib/release-artifacts.mjs';
@@ -31,6 +32,19 @@ function makeArtifact() {
 }
 
 describe('release artifact provenance', () => {
+  it('invalidates artifact reuse when the public web-build environment changes', () => {
+    const version = '0.1.999';
+    const first = collectReleaseArtifactRecipe(process.cwd(), version, {
+      env: { ...process.env, NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_test_release_one' },
+    });
+    const second = collectReleaseArtifactRecipe(process.cwd(), version, {
+      env: { ...process.env, NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_test_release_two' },
+    });
+
+    expect(first.recipeSha256).not.toBe(second.recipeSha256);
+    expect(JSON.stringify(first)).not.toContain('pk_test_release_one');
+  });
+
   it('reuses only an exact recipe with the exact output set and checksums', () => {
     const root = makeArtifact();
     const recipe = { recipeSha256: 'recipe-a', head: 'head-a', version: '0.1.999' };

@@ -20,6 +20,7 @@
 
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { resolveReleaseConfig } from './lib/release-config.mjs';
 
 const require = createRequire(import.meta.url);
 const root = process.cwd();
@@ -34,6 +35,11 @@ if (bust.error) throw bust.error;
 if (bust.status !== 0) process.exit(bust.status ?? 1);
 
 const env = { ...process.env };
+const releaseConfig = resolveReleaseConfig(root, env);
+if (!env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && releaseConfig.clerkPublishableKey) {
+  env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = releaseConfig.clerkPublishableKey;
+  console.log('[build] Clerk publishable key loaded from release config');
+}
 // `env -u ...`: a stale TURBOPACK or inherited __NEXT_PRIVATE_* from a running
 // dev server silently changes what `next build` produces.
 for (const key of [
