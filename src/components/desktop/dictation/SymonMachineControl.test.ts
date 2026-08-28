@@ -5,6 +5,22 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const invoke = vi.fn(async (command: string) => {
+  if (command === 'realtime_invoke_tool') {
+    return { capabilities: [
+      {
+        id: 'operator_attention', category: 'o8 work', title: 'Tell you what needs attention',
+        summary: 'Read the live fleet.', examples: ['What needs me right now?'],
+        toolNames: ['o8_needs_me'], availability: 'ready', approval: 'read_only',
+      },
+      {
+        id: 'screen_guidance', category: 'This screen', title: 'Understand your screen',
+        summary: 'Read the current screen.', examples: ['What am I looking at?'],
+        toolNames: ['read_screen'], availability: 'setup_required',
+        availabilityDetail: 'Allow Screen Recording in System Settings to use this capability.',
+        approval: 'read_only',
+      },
+    ] };
+  }
   if (command === 'symon_machine_list') {
     return { machines: [
       { id: 'local', displayName: 'This Mac', available: true },
@@ -24,6 +40,7 @@ vi.mock('framer-motion', () => ({
 }));
 
 import { SymonMachineControl, SymonOrbStatusLine, setSymonOrbMinimized } from './SymonMachineControl';
+import { capabilitiesFromToolResult } from './SymonCapabilitiesPanel';
 
 const ACT_ENV = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
 ACT_ENV.IS_REACT_ACT_ENVIRONMENT = true;
@@ -60,6 +77,48 @@ describe('SymonMachineControl', () => {
     await act(async () => trigger?.click());
     expect(container.querySelector('select[aria-label="Active Symon machine"]')).not.toBeNull();
     expect(container.textContent).toContain('Symon on');
+  });
+
+  it('opens the truthful capability catalog and starts a selected prompt', async () => {
+    await act(async () => root.render(createElement(SymonMachineControl)));
+    await act(async () => {});
+
+    const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Symon machine: This Mac"]');
+    await act(async () => trigger?.click());
+    const discover = container.querySelector<HTMLButtonElement>('button[aria-label="What Symon can do"]');
+    expect(discover).not.toBeNull();
+
+    await act(async () => discover?.click());
+    await act(async () => {});
+    expect(invoke).toHaveBeenCalledWith('realtime_invoke_tool', {
+      name: 'symon_capabilities',
+      args: {},
+      sessionId: 'desktop',
+      utterance: 'Show Symon capabilities',
+    });
+    expect(container.textContent).toContain('Tell you what needs attention');
+    expect(container.textContent).toContain('Setup needed');
+
+    const starter = Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => button.textContent?.includes('What needs me right now?'));
+    expect(starter).not.toBeUndefined();
+    await act(async () => starter?.click());
+    expect(invoke).toHaveBeenCalledWith('agent_run', { prompt: 'What needs me right now?' });
+    expect(container.querySelector('[aria-label="Symon capabilities"]')).toBeNull();
+  });
+
+  it('unwraps the catalog returned by an active remote machine', () => {
+    const capabilities = capabilitiesFromToolResult({
+      source: 'symon_remote_machine_tool',
+      observedData: {
+        capabilities: [{
+          id: 'remote_screen', category: 'This screen', title: 'Read the remote screen',
+          summary: 'Remote capability.', examples: ['What is on that screen?'],
+          toolNames: ['read_screen'], availability: 'ready', approval: 'read_only',
+        }],
+      },
+    });
+    expect(capabilities[0]?.id).toBe('remote_screen');
   });
 
   it('anchors to the center pane right edge when the workspace element exists', async () => {

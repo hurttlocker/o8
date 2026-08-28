@@ -54,8 +54,6 @@ interface CodexSessionsPruneResult {
   skipped: number;
 }
 
-const HIDDEN_DIAGNOSTIC_TOOL_IDS = new Set(['ollama']);
-
 function formatToolLabel(id: string): string {
   if (id === 'opencode') return 'OpenCode 2';
   if (id === 'api-keys') return 'API keys';
@@ -97,7 +95,7 @@ export function DiagnosticsTab() {
       const res = await fetch('/api/setup/detect');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as { tools?: DiagnosticTool[] };
-      setTools((data.tools ?? []).filter((tool) => !HIDDEN_DIAGNOSTIC_TOOL_IDS.has(tool.id)));
+      setTools(data.tools ?? []);
       setLastChecked(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to run diagnostics');
