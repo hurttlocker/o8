@@ -14,10 +14,11 @@
  * themed via the host's --cnv-* vars.
  */
 
-import { useRef, type ReactNode } from 'react';
+import { memo, useRef, type ReactNode } from 'react';
 import { CHROME, FONT, scrollFadeY } from './ui';
 import { InlineMarkdown } from './response-blocks';
 import { GlassCardShell } from './card-shell';
+import { useCanvasRenderProbe } from './perf/render-probe';
 import { useScrollBlurFade } from './use-scroll-blur-fade';
 
 export interface MarkdownCard {
@@ -147,7 +148,7 @@ function MarkdownBody({ md }: { md: string }) {
   return <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>{blocks}</div>;
 }
 
-export function MarkdownGlassCard({
+export const MarkdownGlassCard = memo(function MarkdownGlassCard({
   card,
   onMove,
   onResize,
@@ -160,6 +161,7 @@ export function MarkdownGlassCard({
   onFocus: (id: number) => void;
   onClose: (id: number) => void;
 }) {
+  useCanvasRenderProbe('markdown', card.id);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   useScrollBlurFade(scrollRef);
 
@@ -195,4 +197,4 @@ export function MarkdownGlassCard({
       </div>
     </GlassCardShell>
   );
-}
+});

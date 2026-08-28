@@ -13,12 +13,13 @@
  * so the session dies instead of leaking into the dashboard's session list).
  */
 
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { XtermPanel, type XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
 import { CANVAS_GLASS_CHANGED_EVENT } from '@/lib/canvas-mode/glass-settings';
 import { CHROME, DEV_TERM_GLASS_TUNER, FONT, TERM_FONT_PX, TERM_MIN_H, TERM_MIN_W } from './ui';
 import { GlassCardShell } from './card-shell';
+import { useCanvasRenderProbe } from './perf/render-probe';
 
 // NOTE: this module must export ONLY the component (+ types) — runtime
 // const exports here would break the Fast Refresh boundary and remount
@@ -96,7 +97,7 @@ function ConnectingVerb() {
   );
 }
 
-export function TerminalGlassCard({
+export const TerminalGlassCard = memo(function TerminalGlassCard({
   card,
   termVeil,
   connectionEpoch,
@@ -127,6 +128,7 @@ export function TerminalGlassCard({
   sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;
   sendTerminalDetach: (sessionName: string) => void;
 }) {
+  useCanvasRenderProbe('term', card.id);
   // The shell inks with the CANVAS vocabulary — one text color across the
   // whole theme (Q, 2026-06-12). buildXtermTheme reads --t-terminal-* off
   // the root, which the o8.md card's ThemeProvider stamps with dashboard
@@ -248,4 +250,4 @@ export function TerminalGlassCard({
       </div>
     </GlassCardShell>
   );
-}
+});

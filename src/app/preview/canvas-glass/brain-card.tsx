@@ -13,7 +13,7 @@
  * geometry persists, the transcript doesn't.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { CHROME, FONT, scrollFadeY } from './ui';
 import { Citations, InlineMarkdown, SourcesLine } from './response-blocks';
 import { CardComposer } from './card-composer';
@@ -273,7 +273,7 @@ export function BrainConversation({
   );
 }
 
-export function BrainGlassCard({
+export const BrainGlassCard = memo(function BrainGlassCard({
   card,
   onMove,
   onResize,
@@ -307,4 +307,4 @@ export function BrainGlassCard({
       </div>
     </GlassCardShell>
   );
-}
+});

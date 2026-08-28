@@ -7,7 +7,7 @@
  * dragging, and a selection ring on click.
  */
 
-import { useRef, useState } from 'react';
+import { memo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { canvasZoom, CARD_WIDTH, FONT, TONE_DOT, glass, type MockCard } from './ui';
 import { dragBounds, resistAxis, settleInBounds } from './canvas-drag';
@@ -16,7 +16,7 @@ import { dragBounds, resistAxis, settleInBounds } from './canvas-drag';
  *  bottom drag boundary so they don't bury under the composer. */
 const CARD_NOMINAL_H = 130;
 
-export function CanvasCard({
+export const CanvasCard = memo(function CanvasCard({
   card,
   selected,
   onMove,
@@ -117,7 +117,7 @@ export function CanvasCard({
       </motion.div>
     </motion.div>
   );
-}
+});
 
 function CardTitleBar({ card }: { card: MockCard }) {
   return (

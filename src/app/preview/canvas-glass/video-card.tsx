@@ -13,7 +13,7 @@
  * page minted for it.
  */
 
-import { useRef, useState } from 'react';
+import { memo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
 import { canvasZoom, CHROME, chromeFloorScale, FONT, IMG_MIN_W, MEDIA_HEADER_H, MEDIA_RIM, glassMedia } from './ui';
@@ -40,7 +40,7 @@ export interface VideoCard {
 
 const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 
-export function VideoGlassCard({
+export const VideoGlassCard = memo(function VideoGlassCard({
   card,
   onMove,
   onResize,
@@ -213,4 +213,4 @@ export function VideoGlassCard({
       <CornerResize card={card} minW={IMG_MIN_W} minH={90} aspect={card.aspect} edges={false} onMove={onMove} onResize={onResize} onResizingChange={setResizing} />
     </motion.div>
   );
-}
+});

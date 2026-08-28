@@ -8,10 +8,11 @@
  * /api/orchestrator/merge (the identical path approve_and_merge uses).
  */
 
-import { useRef, useState } from 'react';
+import { memo, useRef, useState } from 'react';
 import { actionReceiptIsInProgress, correlatedActionIsUnsettled, fetchCorrelatedActionReceipt } from '@/lib/orchestrator/action-receipt';
 import { CHROME, FONT, scrollFadeY } from './ui';
 import { GlassCardShell } from './card-shell';
+import { useCanvasRenderProbe } from './perf/render-probe';
 import { useScrollBlurFade } from './use-scroll-blur-fade';
 
 const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
@@ -51,7 +52,7 @@ function diffLineStyle(line: string): React.CSSProperties {
   return { color: 'var(--cnv-ink-muted)' };
 }
 
-export function DiffGlassCard({
+export const DiffGlassCard = memo(function DiffGlassCard({
   card,
   onMove,
   onResize,
@@ -67,6 +68,7 @@ export function DiffGlassCard({
   /** Hands the operator's words back to the composer, prefilled. */
   onRequestChanges: (card: DiffCard) => void;
 }) {
+  useCanvasRenderProbe('diff', card.id);
   const [merge, setMerge] = useState<MergeState>({ kind: 'idle' });
   const diffScrollRef = useRef<HTMLDivElement | null>(null);
   useScrollBlurFade(diffScrollRef);
@@ -224,4 +226,4 @@ export function DiffGlassCard({
         </div>
     </GlassCardShell>
   );
-}
+});
