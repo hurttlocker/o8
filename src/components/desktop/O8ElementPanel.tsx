@@ -1,12 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { buildEditContext, buildTextEditContext, type ElementEditContext } from '@/lib/browser/edit-context';
 import type { GrabbedElement } from '@/lib/browser/grab';
 
 interface O8ElementPanelProps {
   element: GrabbedElement;
   onClose: () => void;
-  onEditWithAI?: (context: string) => void;
+  onEditWithAI?: (context: ElementEditContext) => void;
 }
 
 type DescriptorPart = {
@@ -70,28 +71,6 @@ function truncateDescriptorParts(parts: DescriptorPart[], maxLength: number): De
 
 function buildPlainDescriptor(element: GrabbedElement): string {
   return buildDescriptorParts(element).map((part) => part.text).join('');
-}
-
-function buildTextTarget(element: GrabbedElement): string {
-  const classSuffix = element.classList.length > 0 ? `.${element.classList.join('.')}` : '';
-  return `<${element.tagName.toLowerCase()}${classSuffix}>`;
-}
-
-function buildTextEditContext(element: GrabbedElement, nextText: string): string {
-  return `Change the text of ${buildTextTarget(element)} from ${JSON.stringify(element.textContent)} to ${JSON.stringify(nextText)}`;
-}
-
-function buildEditContext(element: GrabbedElement, draftText: string): string {
-  const details = [
-    `Edit the selected browser element.`,
-    `Element: ${buildPlainDescriptor(element)}`,
-    `Selector: ${element.cssSelector}`,
-    element.textContent ? `Text: ${JSON.stringify(element.textContent)}` : '',
-    draftText.trim() && draftText !== element.textContent ? `Requested text: ${JSON.stringify(draftText)}` : '',
-    `Styles: color ${element.computedStyles.color}; background ${element.computedStyles.backgroundColor}; font-size ${element.computedStyles.fontSize}; padding ${element.computedStyles.padding}; margin ${element.computedStyles.margin}; display ${element.computedStyles.display}`,
-  ].filter(Boolean);
-
-  return details.join('\n');
 }
 
 function isInteractiveValue(value: string) {

@@ -45,6 +45,13 @@ describe('buildGrabbedElement', () => {
     expect(grabbed.accessibility.role).toBe('button');
     expect(grabbed.accessibility.name).toBe('Go');
     expect(grabbed.accessibility.ariaAttributes['aria-label']).toBe('Go');
+    expect(grabbed.domSummary).toEqual({
+      role: 'button',
+      accessibleName: 'Go',
+      ancestorChain: [],
+      boundingRect: { top: 10, left: 20, width: 100, height: 40 },
+      nearestLandmark: '',
+    });
   });
 
   it('GRAB_PAYLOAD_SOURCE reconstructs to a function with identical output', () => {
