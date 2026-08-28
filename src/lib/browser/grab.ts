@@ -14,6 +14,14 @@
  * no-drift invariant.
  */
 
+export interface GrabbedElementDomSummary {
+  role: string;
+  accessibleName: string;
+  ancestorChain: string[];
+  boundingRect: { top: number; left: number; width: number; height: number };
+  nearestLandmark: string;
+}
+
 export interface GrabbedElement {
   tagName: string;
   id: string;
@@ -28,7 +36,10 @@ export interface GrabbedElement {
   innerHTML: string;
   outerHTML: string;
   parentChain: string[];
-  /** Optional — filled by the caller (a crop of a webview/engine screenshot).
+  /** Compact prompt-ready DOM and accessibility context. Optional so saved or
+   *  externally supplied payloads from before this field remain valid. */
+  domSummary?: GrabbedElementDomSummary;
+  /** Optional data URL filled by the caller (a crop of a webview/engine screenshot).
    *  The in-page verbs can't capture pixels synchronously, but boundingRect
    *  lets the caller crop one after the fact. */
   screenshot?: string;
@@ -55,10 +66,42 @@ export function buildGrabbedElement(el: Element, cssSelector: string): GrabbedEl
   };
   const describe = (node: Element) => {
     let out = node.tagName.toLowerCase();
-    if (node.id) return `${out}#${node.id}`;
+    if (node.id) out += `#${node.id}`;
     const classes = Array.from(node.classList).slice(0, 2);
     if (classes.length) out += `.${classes.join('.')}`;
     return out;
+  };
+  const roleFor = (node: Element) => {
+    const explicit = node.getAttribute('role');
+    if (explicit) return explicit;
+    const tag = node.tagName.toLowerCase();
+    if (tag === 'a' && node.getAttribute('href')) return 'link';
+    if (tag === 'input') {
+      const type = (node.getAttribute('type') || 'text').toLowerCase();
+      if (type === 'button' || type === 'submit' || type === 'reset' || type === 'image') return 'button';
+      if (type === 'checkbox') return 'checkbox';
+      if (type === 'radio') return 'radio';
+      if (type === 'range') return 'slider';
+      if (type === 'number') return 'spinbutton';
+      return 'textbox';
+    }
+    const roles: Record<string, string> = {
+      aside: 'complementary',
+      button: 'button',
+      footer: 'contentinfo',
+      form: 'form',
+      header: 'banner',
+      img: 'img',
+      li: 'listitem',
+      main: 'main',
+      nav: 'navigation',
+      ol: 'list',
+      select: 'combobox',
+      table: 'table',
+      textarea: 'textbox',
+      ul: 'list',
+    };
+    return roles[tag] || '';
   };
   const attributes: Record<string, string> = {};
   const ariaAttributes: Record<string, string> = {};
@@ -94,19 +137,39 @@ export function buildGrabbedElement(el: Element, cssSelector: string): GrabbedEl
     if (parent === el.ownerDocument.body) break;
     parent = parent.parentElement;
   }
+  const ancestorChain: string[] = [];
+  let ancestor = el.parentElement;
+  while (ancestor && ancestorChain.length < 4) {
+    ancestorChain.unshift(describe(ancestor));
+    ancestor = ancestor.parentElement;
+  }
+  const landmarkRoles = new Set(['banner', 'complementary', 'contentinfo', 'form', 'main', 'navigation', 'region', 'search']);
+  let landmark: Element | null = el;
+  let nearestLandmark = '';
+  while (landmark) {
+    if (landmarkRoles.has(roleFor(landmark))) {
+      nearestLandmark = describe(landmark);
+      break;
+    }
+    landmark = landmark.parentElement;
+  }
+  const role = roleFor(el);
+  const name = accessibleName();
+  const boundingRect = { top: rect.top, left: rect.left, width: rect.width, height: rect.height };
   return {
     tagName: el.tagName.toLowerCase(),
     id: el.id || '',
     classList: Array.from(el.classList),
     textContent: trim(el.textContent || '', 200),
     attributes,
-    boundingRect: { top: rect.top, left: rect.left, width: rect.width, height: rect.height },
+    boundingRect,
     cssSelector,
     computedStyles,
-    accessibility: { role: el.getAttribute('role') || '', name: accessibleName(), ariaAttributes },
+    accessibility: { role, name, ariaAttributes },
     innerHTML: trim(el.innerHTML || '', 500),
     outerHTML: trim(el.outerHTML || '', 600),
     parentChain,
+    domSummary: { role, accessibleName: name, ancestorChain, boundingRect, nearestLandmark },
   };
 }
 
