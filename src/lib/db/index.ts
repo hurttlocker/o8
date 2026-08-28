@@ -19,7 +19,7 @@ import * as schema from './schema';
 import { migrateLegacyApprovalStoreIfNeeded } from '@/lib/approvals/storage-migration';
 import { migrateLegacyLaneStoreIfNeeded } from '@/lib/lane/storage-migration';
 import { ensureUsageLogIndexes, ensureUsageLogSchema } from '@/lib/db/usage-log-migration';
-import { ensureSessionOutcomeRoutingColumns } from '@/lib/db/session-outcome-routing-migration';
+import { ensureSessionOutcomeColumns } from '@/lib/db/session-outcome-migration';
 import { ensureWorkerTokenStorage } from '@/lib/db/worker-token-migration';
 import { ensureV14Fts5Schema } from '@/lib/db/v14-fts5-migration';
 import { ensureV15CommentsFtsSchema } from '@/lib/db/v15-comments-fts-migration';
@@ -29,6 +29,7 @@ import { ensureV18FactsSourceAuthoritySchema } from '@/lib/db/v18-facts-source-a
 import { ensureV19DocDistillStateSchema } from '@/lib/db/v19-doc-distill-state-migration';
 import { ensureV20FactsEmbeddingSchema } from '@/lib/db/v20-facts-embedding-migration';
 import { ensureV35UnifiedSearchSchema } from '@/lib/db/v35-unified-search-migration';
+import { ensureV57CostLedgerAttributionSchema } from '@/lib/db/v57-cost-ledger-attribution-migration';
 import { ensureLatestSchemas, ensurePostAutomationSchemas } from '@/lib/db/latest-schema-migrations';
 import { quarantineDeadIdempotencyReservations } from '@/lib/db/idempotency-reservation-recovery';
 import { DEFAULT_PROJECT_ID } from '@/lib/repos/projects';
@@ -63,7 +64,7 @@ export function getDb(): BetterSQLite3Database<typeof schema> | null {
   if (!Database || !drizzle) return null;
 
   const dbFilePreviouslyExisted = existsSync(DB_PATH);
-  _sqlite = new Database(DB_PATH);
+  const sqlite = new Database(DB_PATH);
 
   // Tighten permissions: the DB holds encrypted api_keys plus PLAINTEXT
   // chat_history / lanes / approvals. Keep it owner-only so another local user
@@ -77,37 +78,54 @@ export function getDb(): BetterSQLite3Database<typeof schema> | null {
   } catch { /* chmod is best-effort — never block DB init on it */ }
 
   // SQLite performance pragmas
-  _sqlite.pragma('journal_mode = WAL');      // Write-ahead logging (concurrent reads)
-  _sqlite.pragma('synchronous = NORMAL');    // Faster writes, still crash-safe with WAL
-  _sqlite.pragma('busy_timeout = 5000');     // Wait 5s instead of failing on lock
-  _sqlite.pragma('cache_size = -20000');     // 20MB page cache
-  _sqlite.pragma('foreign_keys = ON');       // Enforce FK constraints
+  sqlite.pragma('journal_mode = WAL');      // Write-ahead logging (concurrent reads)
+  sqlite.pragma('synchronous = NORMAL');    // Faster writes, still crash-safe with WAL
+  sqlite.pragma('busy_timeout = 5000');     // Wait 5s instead of failing on lock
+  sqlite.pragma('cache_size = -20000');     // 20MB page cache
+  sqlite.pragma('foreign_keys = ON');       // Enforce FK constraints
 
-  _db = drizzle!(_sqlite, { schema });
+  const db = drizzle!(sqlite, { schema });
 
   // #859 — the old gate skipped `ensureIdempotentColumnAdds` whenever the
   // top-version marker was missing, leaving installs that landed before v4
   // pinned at v3 forever and silently skipping the per-boot column-add +
   // backfill helpers. New behaviour:
-  //   1. Run `ensureTables` (which uses CREATE TABLE IF NOT EXISTS) when the
-  //      DB file is new OR the top-version marker is missing — this is also
-  //      what the old `shouldEnsureTables` gate did, except now it serves as
-  //      a safety net before the always-on idempotent path.
-  //   2. ALWAYS run `ensureIdempotentColumnAdds` so column-add + backfill
+  //   1. Existing DBs missing the top-version marker run the narrow migrations
+  //      for columns referenced by base-schema indexes before `ensureTables`.
+  //   2. Run `ensureTables` (CREATE TABLE IF NOT EXISTS) for new or upgrading
+  //      DBs, then ALWAYS repeat `ensureIdempotentColumnAdds` so column-add + backfill
   //      helpers can never be silently skipped for existing installs whose
   //      marker drifted out of sync with DB_SCHEMA_VERSION.
   //   3. Backfill any missing v1..v12 markers in order so installs upgraded
   //      from older schemas show the full migration history on disk and
   //      brand-new installs don't appear to have skipped versions.
-  const topMarkerExists = existsSync(migrationMarkerPath(DB_SCHEMA_VERSION));
-  if (!dbFilePreviouslyExisted || !topMarkerExists) {
-    ensureTables(_sqlite);
+  try {
+    const topMarkerExists = existsSync(migrationMarkerPath(DB_SCHEMA_VERSION));
+    // Upgrade only columns referenced by current base-schema indexes here.
+    // The full idempotent migration path expects the base tables to exist and
+    // therefore runs after ensureTables below.
+    if (dbFilePreviouslyExisted && !topMarkerExists) {
+      ensureSessionOutcomeColumns(sqlite);
+      ensureV57CostLedgerAttributionSchema(sqlite);
+    }
+    if (!dbFilePreviouslyExisted || !topMarkerExists) {
+      ensureTables(sqlite);
+    }
+    ensureIdempotentColumnAdds(sqlite);
+    writeAllMissingMigrationMarkers();
+  } catch (error) {
+    // Never publish a half-initialized singleton. A later request must retry
+    // the complete migration path rather than receiving a Drizzle handle whose
+    // schema setup failed partway through.
+    try { sqlite.close(); } catch { /* best effort */ }
+    throw error;
   }
-  ensureIdempotentColumnAdds(_sqlite);
-  writeAllMissingMigrationMarkers();
+
+  _sqlite = sqlite;
+  _db = db;
 
   console.log(`[db] Connected to ${DB_PATH}`);
-  return _db;
+  return db;
 }
 
 function ensureIdempotentColumnAdds(sqlite: Database.Database): void {
@@ -1128,30 +1146,6 @@ function ensureMissionStateColumn(sqlite: Database.Database): void {
   if (!tableColumnExists(sqlite, 'missions', 'mission_state_json')) {
     addColumnTolerant(sqlite, 'ALTER TABLE missions ADD COLUMN mission_state_json TEXT');
   }
-}
-
-function ensureSessionOutcomeColumns(sqlite: Database.Database): void {
-  if (!tableColumnExists(sqlite, 'session_outcomes', 'plan_text')) {
-    addColumnTolerant(sqlite, 'ALTER TABLE session_outcomes ADD COLUMN plan_text TEXT');
-  }
-  // #745 — Temporal validity windows. SQLite ALTER TABLE ADD COLUMN rejects
-  // any non-literal DEFAULT (even CURRENT_TIMESTAMP) on the bundled
-  // better-sqlite3 build, so add the column as nullable, backfill historical
-  // rows from `completed_at`, and let Drizzle's schema-level default supply
-  // `datetime('now')` for fresh inserts. Fresh DBs get the NOT NULL DEFAULT
-  // (datetime('now')) shape via the CREATE TABLE in ensureTables() above.
-  if (!tableColumnExists(sqlite, 'session_outcomes', 'valid_from')) {
-    addColumnTolerant(sqlite, 'ALTER TABLE session_outcomes ADD COLUMN valid_from TEXT');
-    sqlite.exec(
-      "UPDATE session_outcomes SET valid_from = COALESCE(completed_at, created_at, datetime('now')) WHERE valid_from IS NULL OR valid_from = ''",
-    );
-  }
-  if (!tableColumnExists(sqlite, 'session_outcomes', 'valid_to')) {
-    addColumnTolerant(sqlite, 'ALTER TABLE session_outcomes ADD COLUMN valid_to TEXT');
-  }
-  // Index on valid_to to keep "live entries only" recall queries cheap.
-  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_so_valid_to ON session_outcomes(valid_to)');
-  ensureSessionOutcomeRoutingColumns(sqlite); // #747
 }
 
 function backfillSessionOutcomeValidFrom(sqlite: Database.Database): void {
