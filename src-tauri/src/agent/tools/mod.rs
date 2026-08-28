@@ -19,6 +19,7 @@ mod git_github_triage;
 pub mod mac_calendar;
 pub mod mac_contacts;
 pub mod mac_mail;
+pub mod mac_messages;
 pub mod mac_notes;
 pub mod mac_reminders;
 pub mod mac_music;
@@ -266,6 +267,19 @@ pub fn all_tools() -> Vec<Value> {
                     "limit": { "type": "integer", "description": "Max contacts to return. Default 5." }
                 },
                 "required": ["query"]
+            }
+        }),
+        json!({
+            "name": "mac_messages_send",
+            "description": "Send one exact text through Messages after a dedicated approval card shows the complete recipient and message. Send-only: never use this to claim Messages can be read. When the user names a person instead of providing a phone number or email, call mac_contacts_search first and use one exact returned handle.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "recipient": { "type": "string", "description": "One exact phone number or email address. Never pass a contact name." },
+                    "message": { "type": "string", "description": "The exact text to send, preserving wording and line breaks." }
+                },
+                "required": ["recipient", "message"],
+                "additionalProperties": false
             }
         }),
         json!({
@@ -1240,6 +1254,7 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
         "mac_notes_append" => mac_notes::append(args).await,
         "mac_calendar_delete_event" => mac_calendar::delete_event(args).await,
         "mac_contacts_search" => mac_contacts::search(args).await,
+        "mac_messages_send" => mac_messages::send(args).await,
         "mac_mail_search" => mac_mail::search(args).await,
         "mac_mail_read" => mac_mail::read(args).await,
         "mac_mail_draft" => mac_mail::draft(args).await,
@@ -1556,6 +1571,26 @@ mod escalation_tests {
             safety::tool_safety_class("symon_ledger_undo"),
             safety::SafetyClass::Reversible
         );
+    }
+
+    #[test]
+    fn messages_send_is_reachable_only_with_exact_strict_arguments() {
+        let tool = schema("mac_messages_send");
+        let parameters = &tool["parameters"];
+        assert_eq!(parameters["type"], "object");
+        assert_eq!(parameters["required"], json!(["recipient", "message"]));
+        assert_eq!(parameters["additionalProperties"], false);
+        let properties = parameters["properties"].as_object().expect("properties");
+        assert_eq!(properties.len(), 2);
+        assert!(properties.contains_key("recipient"));
+        assert!(properties.contains_key("message"));
+        assert_eq!(
+            safety::tool_safety_class("mac_messages_send"),
+            safety::SafetyClass::Reversible
+        );
+        assert!(enabled_tools().iter().any(|candidate| {
+            candidate.get("name").and_then(Value::as_str) == Some("mac_messages_send")
+        }));
     }
 
     fn schema(name: &str) -> Value {

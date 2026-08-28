@@ -49,6 +49,9 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         "mac_calendar_delete_event" => SafetyClass::Destructive,
         // Contacts
         "mac_contacts_search" => SafetyClass::ReadOnly,
+        // Messages remains model-reachable, while the confirmation registries
+        // pin every send to one individual exact-text card.
+        "mac_messages_send" => SafetyClass::Reversible,
         // Mail
         "mac_mail_search" => SafetyClass::ReadOnly,
         "mac_mail_read" => SafetyClass::ReadOnly,
@@ -273,6 +276,7 @@ pub fn requires_individual_plan_confirmation(tool_name: &str) -> bool {
                 | "term_new"
                 | "gh_issue_create"
                 | "gh_comment"
+                | "mac_messages_send"
         )
 }
 
@@ -314,6 +318,7 @@ mod tests {
         assert!(requires_individual_plan_confirmation("o8_browser_act"));
         assert!(requires_individual_plan_confirmation("gh_issue_create"));
         assert!(requires_individual_plan_confirmation("gh_comment"));
+        assert!(requires_individual_plan_confirmation("mac_messages_send"));
         assert!(requires_individual_plan_confirmation("mac_shortcuts_run"));
         assert!(!requires_individual_plan_confirmation("mac_reminders_create"));
     }
