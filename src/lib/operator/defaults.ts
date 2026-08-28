@@ -82,6 +82,7 @@ import { applyWorkspaceParkingUpdate, resolveStoredWorkspaceParking, resolveWork
 import { applyMeteredPacketCapUpdate, METERED_PACKET_CAP_FALLBACK, resolveMeteredPacketCapSettings, resolveStoredMeteredPacketCap, type MeteredPacketCapDefaults } from './metered-packet-cap-defaults';
 import { applyBroadcastCommentaryUpdate, BROADCAST_COMMENTARY_FALLBACK, broadcastCommentarySettingSources, resolveBroadcastCommentaryDefaults, resolveStoredBroadcastCommentary, type BroadcastCommentaryDefaults } from './broadcast-commentary-defaults';
 import { applyReviewContinuationUpdate, REVIEW_CONTINUATION_FALLBACK, resolveStoredReviewContinuation, type ReviewContinuationDefault } from './review-continuation-default';
+import { applyWorkspaceManifestPolicyUpdate, resolveStoredWorkspaceManifestPolicy, resolveWorkspaceManifestPolicySettings, WORKSPACE_MANIFEST_POLICY_FALLBACK, type WorkspaceManifestPolicyDefault } from './workspace-manifest-policy-default';
 import {
   applyOperatorDefaultsTomlWithLock,
   getOperatorDefaultsTomlState as readOperatorDefaultsTomlState,
@@ -94,16 +95,8 @@ import {
   type OperatorDefaultsTomlState,
 } from '@/lib/settings/operator-defaults-store';
 export { getOperatorDefaultsTomlPath } from '@/lib/settings/operator-defaults-store';
-export { isOrchestratorBackendSetting, isReviewerBackendSetting, isCollideAggregator, isPrLinkDestination } from './defaults-env';
-export type {
-  OverlapGateMode,
-  ClassAComposer,
-  WorkersUseBrain,
-  OrchestratorBackendSetting,
-  ReviewerBackendSetting,
-  CollideAggregator,
-  PrLinkDestination,
-} from './defaults-env';
+export { isOrchestratorBackendSetting, isReviewerBackendSetting, isCollideAggregator, isPrLinkDestination, isWorkspaceManifestPolicy } from './defaults-env';
+export type { OverlapGateMode, ClassAComposer, WorkersUseBrain, WorkspaceManifestPolicy, OrchestratorBackendSetting, ReviewerBackendSetting, CollideAggregator, PrLinkDestination } from './defaults-env';
 export { coerceStoredTier, isTargetingTier, mergeTier } from './targeting-tier';
 export type { TargetingTier } from './targeting-tier';
 export {
@@ -130,7 +123,7 @@ export type RequireApproval = 'high-risk' | 'surface' | 'always' | 'never';
 
 export function isRequireApproval(value: unknown): value is RequireApproval { return value === 'high-risk' || value === 'surface' || value === 'always' || value === 'never'; }
 
-export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParkingDefaults, ApfsDependencyImagesDefaults, MeteredPacketCapDefaults, BroadcastCommentaryDefaults, ReviewContinuationDefault {
+export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParkingDefaults, ApfsDependencyImagesDefaults, MeteredPacketCapDefaults, BroadcastCommentaryDefaults, ReviewContinuationDefault, WorkspaceManifestPolicyDefault {
   subscriptionProfile: SubscriptionProfile;
   parallelCap: number;
   overlapGate: OverlapGateMode;
@@ -369,6 +362,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   // anyone with a Claude sub. Independent of the orchestrator toggle (2026-06-22).
   brainUseClaudeCli: true,
   workersUseBrain: 'auto',
+  ...WORKSPACE_MANIFEST_POLICY_FALLBACK,
   crossHouseWorkerFallback: false,
   // 'auto' → defer to inAppOrchestratorEnabled (legacy claude/codex derivation),
   // so the default is byte-identical to pre-setting behavior.
@@ -403,7 +397,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   ...WORKSPACE_PARKING_FALLBACK,
   ...METERED_PACKET_CAP_FALLBACK,
 };
-interface StoredOperatorDefaults extends Partial<StorageReserveDefaults>, Partial<WorkspaceParkingDefaults>, Partial<ApfsDependencyImagesDefaults>, Partial<MeteredPacketCapDefaults>, Partial<BroadcastCommentaryDefaults>, Partial<ReviewContinuationDefault> {
+interface StoredOperatorDefaults extends Partial<StorageReserveDefaults>, Partial<WorkspaceParkingDefaults>, Partial<ApfsDependencyImagesDefaults>, Partial<MeteredPacketCapDefaults>, Partial<BroadcastCommentaryDefaults>, Partial<ReviewContinuationDefault>, Partial<WorkspaceManifestPolicyDefault> {
   subscriptionProfile?: SubscriptionProfile;
   parallelCap?: number;
   overlapGate?: OverlapGateMode;
@@ -568,6 +562,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (isWorkersUseBrain(stored.workersUseBrain)) {
     result.workersUseBrain = stored.workersUseBrain;
   }
+  Object.assign(result, resolveStoredWorkspaceManifestPolicy(stored));
   if (typeof stored.crossHouseWorkerFallback === 'boolean') {
     result.crossHouseWorkerFallback = stored.crossHouseWorkerFallback;
   }
@@ -656,6 +651,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
   const envInApp = envInAppOrchestratorEnabled();
   const envBrainCli = envBrainUseClaudeCli();
   const envBrain = envWorkersUseBrain();
+  const workspaceManifestPolicy = resolveWorkspaceManifestPolicySettings(fileValues);
   const envOrchBackend = envOrchestratorBackend();
   const envRevBackend = envReviewerBackend();
   const envExplainer = envPacketExplainerEnabled();
@@ -733,6 +729,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     brainUseClaudeCli:
       envBrainCli ?? fileValues.brainUseClaudeCli ?? OPERATOR_DEFAULTS_FALLBACK.brainUseClaudeCli,
     workersUseBrain: envBrain ?? fileValues.workersUseBrain ?? OPERATOR_DEFAULTS_FALLBACK.workersUseBrain,
+    ...workspaceManifestPolicy.values,
     crossHouseWorkerFallback:
       fileValues.crossHouseWorkerFallback ?? OPERATOR_DEFAULTS_FALLBACK.crossHouseWorkerFallback,
     orchestratorBackend,
@@ -804,6 +801,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     brainUseClaudeCli:
       envBrainCli !== null ? 'env' : fileValues.brainUseClaudeCli !== undefined ? 'file' : 'default',
     workersUseBrain: envBrain !== null ? 'env' : fileValues.workersUseBrain !== undefined ? 'file' : 'default',
+    ...workspaceManifestPolicy.sources,
     crossHouseWorkerFallback: fileValues.crossHouseWorkerFallback !== undefined ? 'file' : 'default',
     orchestratorBackend: profileDefaults ? 'profile' : envOrchBackend !== null ? 'env' : fileValues.orchestratorBackend !== undefined ? 'file' : 'default',
     reviewerBackend: profileDefaults ? 'profile' : envRevBackend !== null ? 'env' : fileValues.reviewerBackend !== undefined ? 'file' : 'default',
@@ -1024,6 +1022,7 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>): Pr
     }
     stored.workersUseBrain = update.workersUseBrain;
   }
+  applyWorkspaceManifestPolicyUpdate(stored, update);
   if (update.crossHouseWorkerFallback !== undefined) {
     stored.crossHouseWorkerFallback = Boolean(update.crossHouseWorkerFallback);
   }

@@ -16,6 +16,7 @@ import {
   isRequireApproval,
   isReviewerBackendSetting,
   isSubscriptionProfile,
+  isWorkspaceManifestPolicy,
   OPERATOR_DEFAULTS_FALLBACK,
   updateOperatorDefaults,
   type OperatorDefaults,
@@ -387,6 +388,13 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
       throw new Error('workersUseBrain must be one of "off", "auto", "all".');
     }
     update.workersUseBrain = raw;
+  }
+
+  if (body.workspaceManifestPolicy !== undefined) {
+    if (!isWorkspaceManifestPolicy(body.workspaceManifestPolicy)) {
+      throw new Error('workspaceManifestPolicy must be one of "disabled", "one-approval", "auto".');
+    }
+    update.workspaceManifestPolicy = body.workspaceManifestPolicy;
   }
 
   if (body.crossHouseWorkerFallback !== undefined) {

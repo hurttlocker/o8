@@ -270,6 +270,11 @@ export const STATUS_TOOLS: McpTool[] = [
           enum: ['off', 'auto', 'all'],
           description: 'Whether packet workers are taught to consult the Engineering Brain.',
         },
+        workspaceManifestPolicy: {
+          type: 'string',
+          enum: ['disabled', 'one-approval', 'auto'],
+          description: 'Whether checked-in workspace manifest commands are disabled, approved once per hash, or automatic.',
+        },
         brainUseClaudeCli: {
           type: 'boolean',
           description: 'Allow Engineering Brain to use the Claude subscription when the subscription profile permits it.',
@@ -325,6 +330,7 @@ const OPERATOR_DEFAULTS_KEYS = [
   'opencodeOrchestratorModel',
   'opencodeWorkerModel',
   'workersUseBrain',
+  'workspaceManifestPolicy',
   'brainUseClaudeCli',
   'crossHouseWorkerFallback',
   'healBotEnabled',

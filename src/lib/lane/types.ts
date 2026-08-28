@@ -319,6 +319,9 @@ export type LaneEventVerb =
   // setup and one-shot health probes. Payload:
   // { services: [{ name, port }], preview?, durationMs }
   | 'workspace_manifest_applied'
+  // Operator policy prevented a checked-in manifest from executing. Payload:
+  // { policy, manifestHash, approvalId?, reason? }
+  | 'workspace_manifest_skipped'
   // Workspace manifest application failed without blocking packet launch.
   // Payload: { step, error }
   | 'workspace_manifest_failed'

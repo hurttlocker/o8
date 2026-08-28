@@ -51,6 +51,13 @@ export function isWorkersUseBrain(value: unknown): value is WorkersUseBrain {
   return value === 'off' || value === 'auto' || value === 'all';
 }
 
+/** Whether checked-in workspace manifest commands may run during packet launch. */
+export type WorkspaceManifestPolicy = 'disabled' | 'one-approval' | 'auto';
+
+export function isWorkspaceManifestPolicy(value: unknown): value is WorkspaceManifestPolicy {
+  return value === 'disabled' || value === 'one-approval' || value === 'auto';
+}
+
 /** Which backend drives the in-app Orchestrator. 'auto' = the legacy
  *  inAppOrchestratorEnabled derivation; a specific id forces that backend. */
 // Single source: the pure leaf, so client surfaces can share it without
@@ -260,6 +267,12 @@ export function envBrainUseClaudeCli(): boolean | null {
 export function envWorkersUseBrain(): WorkersUseBrain | null {
   const raw = process.env.O8_WORKERS_USE_BRAIN?.trim();
   if (raw && isWorkersUseBrain(raw)) return raw;
+  return null;
+}
+
+export function envWorkspaceManifestPolicy(): WorkspaceManifestPolicy | null {
+  const raw = process.env.O8_WORKSPACE_MANIFEST_POLICY?.trim();
+  if (raw && isWorkspaceManifestPolicy(raw)) return raw;
   return null;
 }
 

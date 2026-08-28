@@ -37,6 +37,7 @@ export type SubscriptionProfile = 'both' | 'claude-only' | 'codex-only';
 export type DispatchRuntime = OrchestratorRuntime;
 export type ClassAComposer = 'auto' | 'haiku-cli' | 'sonnet-cli' | 'fastest';
 export type WorkersUseBrain = 'off' | 'auto' | 'all';
+export type WorkspaceManifestPolicy = 'disabled' | 'one-approval' | 'auto';
 // Was a hand-maintained copy that had drifted three backends behind
 // (missing fable, o8, opencode) — see lib/operator/backend-setting.ts.
 import type { OrchestratorBackendSetting } from '@/lib/operator/backend-setting';
@@ -94,6 +95,7 @@ export interface OperatorDefaults {
   inAppOrchestratorEnabled: boolean;
   brainUseClaudeCli: boolean;
   workersUseBrain: WorkersUseBrain;
+  workspaceManifestPolicy: WorkspaceManifestPolicy;
   crossHouseWorkerFallback: boolean;
   orchestratorBackend: OrchestratorBackendSetting;
   reviewerBackend: ReviewerBackendSetting;
