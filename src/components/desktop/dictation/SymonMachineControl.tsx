@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { isTauri } from '@/lib/tauri/bridge';
 import {
@@ -8,6 +8,7 @@ import {
   parseSymonMachineIdentity,
   type SymonMachineIdentity,
 } from '@/lib/symon/machine-registry';
+import { SymonCapabilitiesPanel } from './SymonCapabilitiesPanel';
 
 interface ListedMachine extends SymonMachineIdentity {
   available: boolean;
@@ -34,17 +35,14 @@ export function setSymonOrbMinimized(minimized: boolean): void {
 }
 
 export function useSymonOrbMinimized(): boolean {
-  const [minimized, setMinimized] = useState(false);
-  useEffect(() => {
-    setMinimized(isSymonOrbMinimized());
-    const onChange = (event: Event) => {
-      const detail = (event as CustomEvent<{ minimized?: boolean }>).detail;
-      setMinimized(detail?.minimized === true);
-    };
-    window.addEventListener(ORB_MINIMIZED_EVENT, onChange);
-    return () => window.removeEventListener(ORB_MINIMIZED_EVENT, onChange);
-  }, []);
-  return minimized;
+  return useSyncExternalStore(
+    (onStoreChange) => {
+      window.addEventListener(ORB_MINIMIZED_EVENT, onStoreChange);
+      return () => window.removeEventListener(ORB_MINIMIZED_EVENT, onStoreChange);
+    },
+    isSymonOrbMinimized,
+    () => false,
+  );
 }
 
 /**
@@ -103,6 +101,7 @@ export function SymonMachineControl() {
   const [switching, setSwitching] = useState(false);
   const [error, setError] = useState('');
   const [open, setOpen] = useState(false);
+  const [view, setView] = useState<'machine' | 'capabilities'>('machine');
   const [rightOffset, setRightOffset] = useState(16);
   const minimized = useSymonOrbMinimized();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -174,10 +173,16 @@ export function SymonMachineControl() {
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+        setView('machine');
+      }
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
+      if (event.key === 'Escape') {
+        setOpen(false);
+        setView('machine');
+      }
     };
     document.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('keydown', onKeyDown);
@@ -209,7 +214,7 @@ export function SymonMachineControl() {
         {open ? (
           <motion.div
             role="dialog"
-            aria-label="Symon machine control"
+            aria-label={view === 'capabilities' ? 'Symon capabilities' : 'Symon machine control'}
             initial={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: 8, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: 6, scale: 0.97 }}
@@ -218,7 +223,7 @@ export function SymonMachineControl() {
               position: 'absolute',
               right: 0,
               bottom: 44,
-              width: 188,
+              width: view === 'capabilities' ? 360 : 220,
               paddingTop: 10,
               paddingRight: 11,
               paddingBottom: 10,
@@ -234,80 +239,122 @@ export function SymonMachineControl() {
               fontFamily: 'var(--font-sans-system)',
             }}
           >
-            <div style={{ color: error ? 'var(--t-danger)' : 'var(--t-text-muted)', fontSize: 10, lineHeight: 1.2, marginBottom: 5 }}>
-              {error || 'Symon on'}
-            </div>
-            <select
-              aria-label="Active Symon machine"
-              value={active.id}
-              disabled={switching}
-              onChange={(event) => {
-                const machineId = event.target.value;
-                setSwitching(true);
-                setError('');
-                void import('@tauri-apps/api/core')
-                  .then(({ invoke }) => invoke<unknown>('symon_machine_switch', {
-                    sessionId: 'desktop',
-                    machineId,
-                  }))
-                  .then((value) => {
-                    const identity = parseSymonMachineIdentity(value);
-                    if (identity) setActive(identity);
-                  })
-                  .catch((reason) => setError(reason instanceof Error ? reason.message : 'Machine switch refused'))
-                  .finally(() => setSwitching(false));
-              }}
-              style={{
-                width: '100%',
-                borderWidth: 0,
-                outline: 0,
-                background: 'transparent',
-                color: 'var(--t-text)',
-                font: 'inherit',
-                fontSize: 12,
-                fontWeight: 600,
-                cursor: switching ? 'wait' : 'pointer',
-              }}
-            >
-              {machines.map((machine) => (
-                <option key={machine.id} value={machine.id} disabled={!machine.available && machine.id !== active.id}>
-                  {machine.displayName}{machine.available ? '' : ' (offline)'}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              aria-label="Minimize Symon to the status bar"
-              onClick={() => { setOpen(false); setSymonOrbMinimized(true); }}
-              onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover)'; event.currentTarget.style.color = 'var(--t-text)'; }}
-              onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; event.currentTarget.style.color = 'var(--t-text-muted)'; }}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 7,
-                width: '100%',
-                minHeight: 24,
-                marginTop: 7,
-                paddingTop: 0,
-                paddingRight: 6,
-                paddingBottom: 0,
-                paddingLeft: 6,
-                borderRadius: 7,
-                borderWidth: 0,
-                background: 'transparent',
-                color: 'var(--t-text-muted)',
-                cursor: 'pointer',
-                textAlign: 'left',
-                fontFamily: 'var(--font-sans-system)',
-                fontSize: 11.5,
-                fontWeight: 400,
-                letterSpacing: '-0.1px',
-                transition: 'background 120ms ease, color 120ms ease',
-              }}
-            >
-              <span aria-hidden style={{ display: 'inline-flex', width: 12, height: 2.5, borderRadius: 999, background: 'currentColor', opacity: 0.7, flexShrink: 0 }} />
-              Minimize to status bar
-            </button>
+            {view === 'capabilities' ? (
+              <SymonCapabilitiesPanel
+                machineDisplayName={active.displayName}
+                onBack={() => setView('machine')}
+                onStarted={() => { setOpen(false); setView('machine'); }}
+              />
+            ) : (
+              <>
+                <div style={{ color: error ? 'var(--t-danger)' : 'var(--t-text-muted)', fontSize: 10, lineHeight: 1.2, marginBottom: 5 }}>
+                  {error || 'Symon on'}
+                </div>
+                <select
+                  aria-label="Active Symon machine"
+                  value={active.id}
+                  disabled={switching}
+                  onChange={(event) => {
+                    const machineId = event.target.value;
+                    setSwitching(true);
+                    setError('');
+                    void import('@tauri-apps/api/core')
+                      .then(({ invoke }) => invoke<unknown>('symon_machine_switch', {
+                        sessionId: 'desktop',
+                        machineId,
+                      }))
+                      .then((value) => {
+                        const identity = parseSymonMachineIdentity(value);
+                        if (identity) setActive(identity);
+                      })
+                      .catch((reason) => setError(reason instanceof Error ? reason.message : 'Machine switch refused'))
+                      .finally(() => setSwitching(false));
+                  }}
+                  style={{
+                    width: '100%',
+                    borderWidth: 0,
+                    outline: 0,
+                    background: 'transparent',
+                    color: 'var(--t-text)',
+                    font: 'inherit',
+                    fontSize: 12,
+                    fontWeight: 300,
+                    cursor: switching ? 'wait' : 'pointer',
+                  }}
+                >
+                  {machines.map((machine) => (
+                    <option key={machine.id} value={machine.id} disabled={!machine.available && machine.id !== active.id}>
+                      {machine.displayName}{machine.available ? '' : ' (offline)'}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  aria-label="What Symon can do"
+                  onClick={() => setView('capabilities')}
+                  onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover)'; event.currentTarget.style.color = 'var(--t-text)'; }}
+                  onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; event.currentTarget.style.color = 'var(--t-text-muted)'; }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    width: '100%',
+                    minHeight: 44,
+                    marginTop: 7,
+                    paddingTop: 0,
+                    paddingRight: 8,
+                    paddingBottom: 0,
+                    paddingLeft: 8,
+                    borderRadius: 7,
+                    borderWidth: 0,
+                    background: 'transparent',
+                    color: 'var(--t-text-muted)',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    fontFamily: 'var(--font-sans-system)',
+                    fontSize: 11.5,
+                    fontWeight: 300,
+                    letterSpacing: '-0.1px',
+                    transition: 'background 120ms ease, color 120ms ease',
+                  }}
+                >
+                  What Symon can do
+                  <span aria-hidden style={{ marginLeft: 'auto', color: 'var(--t-text-faint)', fontSize: 16 }}>›</span>
+                </button>
+                <button
+                  type="button"
+                  aria-label="Minimize Symon to the status bar"
+                  onClick={() => { setOpen(false); setSymonOrbMinimized(true); }}
+                  onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover)'; event.currentTarget.style.color = 'var(--t-text)'; }}
+                  onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; event.currentTarget.style.color = 'var(--t-text-muted)'; }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 7,
+                    width: '100%',
+                    minHeight: 24,
+                    marginTop: 7,
+                    paddingTop: 0,
+                    paddingRight: 6,
+                    paddingBottom: 0,
+                    paddingLeft: 6,
+                    borderRadius: 7,
+                    borderWidth: 0,
+                    background: 'transparent',
+                    color: 'var(--t-text-muted)',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    fontFamily: 'var(--font-sans-system)',
+                    fontSize: 11.5,
+                    fontWeight: 300,
+                    letterSpacing: '-0.1px',
+                    transition: 'background 120ms ease, color 120ms ease',
+                  }}
+                >
+                  <span aria-hidden style={{ display: 'inline-flex', width: 12, height: 2.5, borderRadius: 999, background: 'currentColor', opacity: 0.7, flexShrink: 0 }} />
+                  Minimize to status bar
+                </button>
+              </>
+            )}
           </motion.div>
         ) : null}
       </AnimatePresence>

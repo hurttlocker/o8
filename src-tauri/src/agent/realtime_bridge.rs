@@ -279,6 +279,43 @@ mod tests {
     use super::*;
 
     #[test]
+    fn realtime_command_reaches_the_symon_capabilities_catalog() {
+        let data_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join(format!("realtime-capabilities-seam-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&data_dir);
+        std::fs::create_dir_all(&data_dir).unwrap();
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let result = super::super::store::with_test_data_dir(data_dir.clone(), || {
+            runtime
+                .block_on(realtime_invoke_tool_inner(
+                    None,
+                    "symon_capabilities".to_string(),
+                    json!({}),
+                    Some("desktop".to_string()),
+                    None,
+                    Some("Show Symon capabilities".to_string()),
+                    None,
+                ))
+                .unwrap()
+        });
+
+        let capabilities = result["capabilities"]
+            .as_array()
+            .expect("capability catalog through realtime command");
+        assert!(capabilities.iter().any(|capability| {
+            capability["id"] == "operator_attention"
+                && capability["availability"] == "ready"
+        }));
+
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
     fn realtime_command_persists_phone_utterance_and_session() {
         let data_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("target")
