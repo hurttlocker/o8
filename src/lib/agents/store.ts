@@ -15,6 +15,23 @@ export const AGENT_MESSAGE_TEXT_MAX_LENGTH = 4_000;
 export const AGENT_PRESENCE_TTL_MS = 6 * 60_000;
 export const AGENT_NATIVE_WAKE_TTL_MS = 15 * 60_000;
 
+export type AgentPresenceWriteResult = AgentPresence & {
+  adoptedLegacy?: true;
+  tookOverStale?: true;
+};
+
+export class AgentPresenceWriteConflictError extends Error {
+  readonly code = 'foreign_identity';
+  readonly status = 409;
+
+  constructor(readonly owner: AgentPresence, attemptedSessionKey: string | null) {
+    super(
+      `This status line is owned by @${owner.name} (${owner.sessionKey}); your session is ${attemptedSessionKey}.`,
+    );
+    this.name = 'AgentPresenceWriteConflictError';
+  }
+}
+
 interface PresenceRow {
   agent_id: string;
   name: string;
@@ -175,34 +192,55 @@ function mapMessage(row: MessageRow): AgentMessage {
 export function upsertAgentPresence(
   input: Omit<AgentPresence, 'repo'> & { repo: string },
   sqlite: Database.Database = getSqlite(),
-): AgentPresence {
+): AgentPresenceWriteResult {
   ensureAgentBusSchema(sqlite);
   const repo = normalizeRepoPath(input.repo);
-  sqlite.prepare(`
-    INSERT INTO agent_presence
-      (agent_id, name, repo_path, worktree_path, runtime, session_key, lane_id, packet_id, last_seen)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(agent_id) DO UPDATE SET
-      name = excluded.name,
-      repo_path = excluded.repo_path,
-      worktree_path = excluded.worktree_path,
-      runtime = excluded.runtime,
-      session_key = excluded.session_key,
-      lane_id = excluded.lane_id,
-      packet_id = excluded.packet_id,
-      last_seen = excluded.last_seen
-  `).run(
-    input.agentId,
-    input.name,
+  let adoptedLegacy = false;
+  let tookOverStale = false;
+  sqlite.transaction(() => {
+    const existing = sqlite.prepare('SELECT * FROM agent_presence WHERE agent_id = ?')
+      .get(input.agentId) as PresenceRow | undefined;
+    if (existing && existing.session_key !== input.sessionKey) {
+      const owner = mapPresence(existing);
+      if (existing.session_key === null) {
+        adoptedLegacy = true;
+      } else if (!isPresenceLive(owner)) {
+        tookOverStale = true;
+      } else {
+        throw new AgentPresenceWriteConflictError(owner, input.sessionKey);
+      }
+    }
+    sqlite.prepare(`
+      INSERT INTO agent_presence
+        (agent_id, name, repo_path, worktree_path, runtime, session_key, lane_id, packet_id, last_seen)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(agent_id) DO UPDATE SET
+        name = excluded.name,
+        repo_path = excluded.repo_path,
+        worktree_path = excluded.worktree_path,
+        runtime = excluded.runtime,
+        session_key = excluded.session_key,
+        lane_id = excluded.lane_id,
+        packet_id = excluded.packet_id,
+        last_seen = excluded.last_seen
+    `).run(
+      input.agentId,
+      input.name,
+      repo,
+      input.worktreePath,
+      input.runtime,
+      input.sessionKey,
+      input.laneId,
+      input.packetId,
+      input.lastSeen,
+    );
+  })();
+  return {
+    ...input,
     repo,
-    input.worktreePath,
-    input.runtime,
-    input.sessionKey,
-    input.laneId,
-    input.packetId,
-    input.lastSeen,
-  );
-  return { ...input, repo };
+    ...(adoptedLegacy ? { adoptedLegacy: true as const } : {}),
+    ...(tookOverStale ? { tookOverStale: true as const } : {}),
+  };
 }
 
 export function findAgentPresence(

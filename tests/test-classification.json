@@ -3,6 +3,13 @@
   "generatedBy": "node scripts/classify-tests.mjs --write",
   "resourceOwning": [
     {
+      "path": "cli/src/commands/team.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
       "path": "src/app/api/leases/route.test.ts",
       "reasons": [
         "apfs-tool",
@@ -863,6 +870,12 @@
     },
     {
       "path": "tests/agent-message-bus-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/agents-presence-foreign-write-real-path.test.ts",
       "reasons": [
         "real-path"
       ]

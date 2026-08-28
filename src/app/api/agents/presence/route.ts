@@ -42,8 +42,9 @@ export async function POST(request: Request): Promise<Response> {
   try {
     const body = await request.json().catch(() => null);
     const agent = joinAgentPresence(body, resolveRequestPrincipalContext(request));
-    return Response.json({ schema: 'o8/agents.presence.join/v1', ok: true, agent }, {
-      status: 201,
+    const { adoptedLegacy, ...responseAgent } = agent;
+    return Response.json({ schema: 'o8/agents.presence.join/v1', ok: true, agent: responseAgent }, {
+      status: adoptedLegacy || agent.tookOverStale ? 200 : 201,
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
   } catch (error) {
