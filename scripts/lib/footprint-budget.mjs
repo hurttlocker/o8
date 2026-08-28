@@ -130,7 +130,7 @@ function measureDiskBytes(target, run = execFileSync) {
   return kib * 1024;
 }
 
-function measurePhysicalBytes(pid, run = execFileSync) {
+export function measureProcessPhysicalBytes(pid, run = execFileSync) {
   const output = run('footprint', ['-p', String(pid)], { encoding: 'utf8' });
   return parseFootprintBytes(output);
 }
@@ -223,7 +223,7 @@ export function collectFootprintReceipt({
     const process = after.get(pid);
     if (!process) continue;
     const key = classifyProcess(process, rootPid);
-    const bytes = measurePhysicalBytes(pid, run);
+    const bytes = measureProcessPhysicalBytes(pid, run);
     const component = components[key] ?? {
       processCount: 0,
       bytes: 0,

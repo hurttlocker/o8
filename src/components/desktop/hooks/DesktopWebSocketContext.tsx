@@ -31,6 +31,10 @@ import type {
 import { getBrowserWsPort } from '@/lib/panel/ws-port-client';
 import { openSurfaceWebSocket } from '@/lib/connect/open-surface-websocket';
 import { TranscriptSessionSubscriptionProvider } from '@/lib/transcripts/useTranscript';
+import {
+  recordTerminalBenchTransport,
+  terminalBenchEnabled,
+} from '@/components/desktop/workspace-terminal/terminal-bench-instrumentation';
 
 export type WsConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
@@ -286,7 +290,24 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
 
     function handleMessage(event: MessageEvent) {
       let msg: Record<string, unknown>;
-      try { msg = JSON.parse(typeof event.data === 'string' ? event.data : ''); } catch { return; }
+      if (terminalBenchEnabled()) {
+        const raw = typeof event.data === 'string' ? event.data : '';
+        const parseStartedAt = performance.now();
+        try { msg = JSON.parse(raw); } catch { return; }
+
+        const channel = msg.channel as string;
+        const eventType = msg.event as string;
+        const data = msg.data as Record<string, unknown> | undefined;
+        if (channel === 'terminal' && eventType === 'data' && typeof data?.data === 'string') {
+          recordTerminalBenchTransport({
+            rawBytes: raw.length,
+            encodedBytes: data.data.length,
+            jsonParseMs: performance.now() - parseStartedAt,
+          });
+        }
+      } else {
+        try { msg = JSON.parse(typeof event.data === 'string' ? event.data : ''); } catch { return; }
+      }
 
       const channel = msg.channel as string;
       const eventType = msg.event as string;

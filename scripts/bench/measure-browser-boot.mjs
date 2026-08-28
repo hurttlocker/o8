@@ -30,7 +30,7 @@ function readPort() {
   }
 }
 
-function browserCandidates() {
+export function browserCandidates() {
   return [
     process.env.O8_BENCH_BROWSER_PATH,
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -48,7 +48,7 @@ function browserCandidates() {
   ].filter(Boolean);
 }
 
-function resolveBrowserPath() {
+export function resolveBrowserPath() {
   return browserCandidates().find((candidate) => fs.existsSync(candidate)) ?? null;
 }
 
