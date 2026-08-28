@@ -64,6 +64,7 @@ export interface OperatorDefaults {
   uiLoopMaxMinutes: number;
   uiLoopMaxDiffBytes: number;
   uiLoopMaxDiffFiles: number;
+  uiLoopPreviewTimeoutMs: number;
   overlapGate: OverlapGateMode;
   healBotEnabled: boolean;
   supervisorAutoEscalate: boolean;

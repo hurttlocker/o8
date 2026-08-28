@@ -252,7 +252,7 @@ export function createO8WebviewBrowserHandlers(): Record<string, ToolHandler> {
       const agentArgs: Record<string, unknown> = { selector: requiredString(args, 'selector') };
       if (typeof args.text === 'string' && args.text) agentArgs.text = args.text;
       if (args.surface === 'canvas' || args.surface === 'panel' || args.surface === 'engine') agentArgs.surface = args.surface;
-      const timeoutMs = Math.min(25_000, Math.max(500, parseOptionalNumber(args.timeoutMs) ?? 10_000));
+      const timeoutMs = Math.min(25_000, Math.max(1, parseOptionalNumber(args.timeoutMs) ?? 10_000));
       const deadline = Date.now() + timeoutMs;
       let last: unknown = { ok: false, error: 'never probed' };
       while (Date.now() < deadline) {
@@ -267,7 +267,10 @@ export function createO8WebviewBrowserHandlers(): Record<string, ToolHandler> {
         } catch {
           // Unparseable responses may be a transient transport result.
         }
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        const remainingMs = deadline - Date.now();
+        if (remainingMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, Math.min(250, remainingMs)));
+        }
       }
       return jsonResult({ ok: false, timedOut: true, timeoutMs, last });
     }),

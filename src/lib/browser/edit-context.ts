@@ -3,6 +3,12 @@ import type { GrabbedElement } from './grab';
 export interface ElementEditContext {
   text: string;
   previewImageDataUri?: string;
+  previewUrl?: string;
+  readySelector?: string;
+  readyText?: string;
+  element?: string;
+  elementRect?: { top: number; left: number; width: number; height: number };
+  elementFilePath?: string;
 }
 
 function buildPlainDescriptor(element: GrabbedElement): string {
@@ -19,6 +25,11 @@ function buildTextTarget(element: GrabbedElement): string {
 export function buildTextEditContext(element: GrabbedElement, nextText: string): ElementEditContext {
   return {
     text: `Change the text of ${buildTextTarget(element)} from ${JSON.stringify(element.textContent)} to ${JSON.stringify(nextText)}`,
+    readySelector: element.cssSelector,
+    readyText: nextText,
+    element: buildPlainDescriptor(element),
+    elementRect: element.boundingRect,
+    ...(element.screenshot ? { previewImageDataUri: element.screenshot } : {}),
   };
 }
 
@@ -45,6 +56,15 @@ export function buildEditContext(element: GrabbedElement, draftText: string): El
 
   return {
     text: details.join('\n'),
+    readySelector: element.cssSelector,
+    ...(draftText.trim() ? { readyText: draftText.trim() } : {}),
+    element: buildPlainDescriptor(element),
+    elementRect: element.boundingRect,
+    ...(
+      element.attributes['data-source-file'] || element.attributes['data-file-path']
+        ? { elementFilePath: element.attributes['data-source-file'] || element.attributes['data-file-path'] }
+        : {}
+    ),
     ...(element.screenshot ? { previewImageDataUri: element.screenshot } : {}),
   };
 }

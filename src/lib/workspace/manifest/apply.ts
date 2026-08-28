@@ -181,6 +181,22 @@ async function httpHealth(
   }
 }
 
+export async function probeHttpHealth(
+  url: string,
+  timeoutMs: number = DEFAULT_HEALTH_TIMEOUT_MS,
+): Promise<WorkspaceManifestHealthReceipt> {
+  const startedAt = Date.now();
+  const result = await httpHealth(url, timeoutMs);
+  return {
+    kind: 'http',
+    target: url,
+    ok: result.ok,
+    durationMs: Date.now() - startedAt,
+    checkedAt: new Date().toISOString(),
+    ...(result.error ? { error: result.error } : {}),
+  };
+}
+
 async function probeHealth(input: {
   health: WorkspaceManifestServiceHealth;
   service: WorkspaceManifestService;
@@ -195,7 +211,7 @@ async function probeHealth(input: {
   if (input.health.http !== undefined) {
     kind = 'http';
     target = resolveTemplate(input.health.http, input.ports, port);
-    result = await httpHealth(target, timeoutMs);
+    return probeHttpHealth(target, timeoutMs);
   } else {
     kind = 'tcp';
     target = port === undefined ? '127.0.0.1:(unallocated)' : `127.0.0.1:${port}`;

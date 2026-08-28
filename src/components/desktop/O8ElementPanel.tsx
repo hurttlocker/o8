@@ -13,6 +13,7 @@ interface O8ElementPanelProps {
     options: { forceFresh: boolean },
   ) => UiLoopEditOutcome | Promise<UiLoopEditOutcome> | void;
   onFocusPacket?: (packet: WarmUiLoopPacket) => void;
+  onShowProof?: (packet: WarmUiLoopPacket) => void | Promise<void>;
 }
 
 interface UiLoopReceipt {
@@ -88,7 +89,7 @@ function isInteractiveValue(value: string) {
   return value && value !== 'transparent' && value !== 'rgba(0, 0, 0, 0)';
 }
 
-export function O8ElementPanel({ element, onClose, onEditWithAI, onFocusPacket }: O8ElementPanelProps) {
+export function O8ElementPanel({ element, onClose, onEditWithAI, onFocusPacket, onShowProof }: O8ElementPanelProps) {
   const [draftText, setDraftText] = useState(element.textContent);
   const [isVisible, setIsVisible] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -354,6 +355,32 @@ export function O8ElementPanel({ element, onClose, onEditWithAI, onFocusPacket }
               }}
             >
               Open {receipt.packet.label}
+            </button>
+            <span>·</span>
+            <button
+              type="button"
+              onClick={() => void Promise.resolve(onShowProof?.(receipt.packet)).catch((cause) => {
+                setReceipt(null);
+                setError(cause instanceof Error ? cause.message : 'The proof card could not open.');
+              })}
+              style={{
+                minHeight: 44,
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--t-accent)',
+                paddingTop: 0,
+                paddingRight: 2,
+                paddingBottom: 0,
+                paddingLeft: 2,
+                fontFamily: 'var(--font-sans-system)',
+                fontSize: 11,
+                fontWeight: 300,
+                textDecoration: 'underline',
+                textUnderlineOffset: 2,
+                cursor: onShowProof ? 'pointer' : 'default',
+              }}
+            >
+              Show proof
             </button>
           </div>
         ) : error ? (

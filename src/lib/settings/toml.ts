@@ -203,6 +203,7 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   uiLoopMaxMinutes: numberField('uiLoop', 'max_minutes', 'an integer greater than 0', (value) => Number.isSafeInteger(value) && value > 0),
   uiLoopMaxDiffBytes: numberField('uiLoop', 'max_diff_bytes', 'an integer greater than 0', (value) => Number.isSafeInteger(value) && value > 0),
   uiLoopMaxDiffFiles: numberField('uiLoop', 'max_diff_files', 'an integer greater than 0', (value) => Number.isSafeInteger(value) && value > 0),
+  uiLoopPreviewTimeoutMs: numberField('uiLoop', 'preview_timeout_ms', 'an integer greater than 0', (value) => Number.isSafeInteger(value) && value > 0),
   overlapGate: enumField('operator', 'overlap_gate', '"advisory" or "strict"', (value): value is OperatorDefaults['overlapGate'] => value === 'advisory' || value === 'strict'),
   healBotEnabled: booleanField('operator', 'heal_bot_enabled'),
   supervisorAutoEscalate: booleanField('operator', 'supervisor_auto_escalate'),

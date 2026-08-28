@@ -64,6 +64,12 @@ export async function routeUiLoopEdit(input: {
         repo: repoPath,
         text: input.context.text,
         previewImageDataUri: input.context.previewImageDataUri,
+        previewUrl: input.context.previewUrl,
+        readySelector: input.context.readySelector,
+        readyText: input.context.readyText,
+        element: input.context.element,
+        elementRect: input.context.elementRect,
+        elementFilePath: input.context.elementFilePath,
       }),
     });
   } catch {
@@ -97,4 +103,27 @@ export async function routeUiLoopEdit(input: {
     return { kind: 'rejected', reason: 'queue_full' };
   }
   return { kind: 'error', message: errorMessage(payload) };
+}
+
+export async function showUiLoopProof(packet: WarmUiLoopPacket): Promise<void> {
+  const laneResponse = await fetch(`/api/lanes/${encodeURIComponent(packet.laneId)}?events=500`);
+  const lanePayload = await laneResponse.json().catch(() => null) as {
+    events?: Array<{ id?: string; verb?: string; payload?: Record<string, unknown> }>;
+  } | null;
+  const proof = [...(lanePayload?.events ?? [])].reverse().find((event) => event.verb === 'ui_loop_proof');
+  if (!laneResponse.ok || !proof?.payload) throw new Error('Proof is not ready yet.');
+  const proofId = typeof proof.payload.proofId === 'string' && proof.payload.proofId.trim()
+    ? proof.payload.proofId.trim()
+    : proof.id ?? `${packet.laneId}:latest`;
+  const response = await fetch('/api/canvas/intent', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      verb: 'ui-loop-proof',
+      args: { ...proof.payload, proofId },
+      ensure: true,
+    }),
+  });
+  const payload = await response.json().catch(() => null) as { ok?: boolean; error?: string } | null;
+  if (!response.ok || payload?.ok === false) throw new Error(payload?.error ?? 'The proof card could not open.');
 }

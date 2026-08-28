@@ -325,6 +325,9 @@ export type LaneEventVerb =
   // Workspace manifest application failed without blocking packet launch.
   // Payload: { step, commandId?, error, state }
   | 'workspace_manifest_failed'
+  | 'ui_loop_preview_ready'
+  | 'ui_loop_preview_failed'
+  | 'ui_loop_proof'
   // Discard could not prove its preserved branch exists. Payload:
   // { code, reason, packetId, branch, ref, note, gcRisk }
   | 'branch_preservation_failed'

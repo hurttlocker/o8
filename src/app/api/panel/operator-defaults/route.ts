@@ -152,6 +152,7 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     'uiLoopMaxMinutes',
     'uiLoopMaxDiffBytes',
     'uiLoopMaxDiffFiles',
+    'uiLoopPreviewTimeoutMs',
   ] as const) {
     if (body[field] === undefined) continue;
     const parsed = typeof body[field] === 'number' ? body[field] : Number(body[field]);

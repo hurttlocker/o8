@@ -19,9 +19,29 @@ export async function POST(request: NextRequest) {
   const previewImageDataUri = typeof record.previewImageDataUri === 'string'
     ? record.previewImageDataUri
     : undefined;
+  const previewUrl = typeof record.previewUrl === 'string' ? record.previewUrl.trim() : undefined;
+  const readySelector = typeof record.readySelector === 'string' ? record.readySelector.trim() : undefined;
+  const readyText = typeof record.readyText === 'string' ? record.readyText : undefined;
+  const element = typeof record.element === 'string' ? record.element.trim() : undefined;
+  const elementFilePath = typeof record.elementFilePath === 'string' ? record.elementFilePath.trim() : undefined;
+  const rect = asRecord(record.elementRect);
+  const elementRect = rect
+    && ['top', 'left', 'width', 'height'].every((key) => typeof rect[key] === 'number' && Number.isFinite(rect[key]))
+    ? rect as unknown as { top: number; left: number; width: number; height: number }
+    : undefined;
 
   try {
-    return operatorSuccess(await steerWarmUiLoop({ repoPath, text, previewImageDataUri }));
+    return operatorSuccess(await steerWarmUiLoop({
+      repoPath,
+      text,
+      previewImageDataUri,
+      previewUrl,
+      readySelector,
+      readyText,
+      element,
+      elementRect,
+      elementFilePath,
+    }));
   } catch (error) {
     return operatorError(
       'ui_loop_steer_failed',

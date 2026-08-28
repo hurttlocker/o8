@@ -120,7 +120,8 @@ type UiLoopBudgetField =
   | 'uiLoopMaxIterations'
   | 'uiLoopMaxMinutes'
   | 'uiLoopMaxDiffBytes'
-  | 'uiLoopMaxDiffFiles';
+  | 'uiLoopMaxDiffFiles'
+  | 'uiLoopPreviewTimeoutMs';
 
 function UiLoopBudgetInput({
   field,
@@ -431,6 +432,13 @@ export function DispatchFoundersSection({
             label="UI loop diff files"
             subtitle="Maximum files in the current packet diff"
             accessory={<UiLoopBudgetInput field="uiLoopMaxDiffFiles" value={values.uiLoopMaxDiffFiles} busyField={busyField} updateField={updateField} />}
+            divider
+          />
+          <SettingsRow
+            icon={<GaugeIcon />}
+            label="UI loop preview timeout"
+            subtitle="Milliseconds to wait for a preview to become ready"
+            accessory={<UiLoopBudgetInput field="uiLoopPreviewTimeoutMs" value={values.uiLoopPreviewTimeoutMs} busyField={busyField} updateField={updateField} />}
             divider
           />
           <SettingsRow
