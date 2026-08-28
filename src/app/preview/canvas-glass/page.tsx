@@ -29,7 +29,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AnimatePresence, animate, motion, useReducedMotion } from 'framer-motion';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
 import {
   CANVAS_GLASS_DEFAULTS,
@@ -50,16 +50,14 @@ import { MicButton } from '@/components/desktop/thoughts/MicButton';
 import type { XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
 import { DEFAULT_ORCHESTRATOR_MODEL } from '@/components/desktop/thoughts/use-orchestrator-stream/shared';
 import { THINKING_EFFORTS, isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
-import { usableCanvasArea } from './canvas-drag';
 import { spawnCanvasCard } from './canvas-card-state';
-import { carveChrome, chromeRectsCanvas } from './chrome-rects';
-import { computeGrid, slotToCardGeom, type GridItem, type Slot } from './form-fit';
-import { NavigatorLoupe, type MinimapCard } from './navigator-loupe';
+import { chromeRectsCanvas } from './chrome-rects';
+import type { GridItem, Slot } from './form-fit';
+import { NavigatorLoupe } from './navigator-loupe';
 import { ORB_DEFAULTS, readOrbSettings, writeOrbSettings, type OrbSettings } from './orb-settings';
 import { CanvasBackdropLayer } from './backdrops';
 import type { SnapGeometry } from './canvas-persistence';
 import type { DiffCard } from './diff-card';
-import type { ChatCard } from './chat-card';
 import { CanvasCard } from './cards';
 import { DiffusionBackdrop, DockGlyphButton, EdgeRail, SpawnGlyphButton } from './chrome';
 import { CanvasFeedbackButton } from './canvas-feedback';
@@ -69,7 +67,6 @@ import { AnticipationRing } from './anticipation-ring';
 import { ComposerPartialsFill, useAgentPartialsMorph } from './agent-partials-morph';
 import { OrchestratorDock } from './dock';
 import type { SwarmScoutView } from '@/components/desktop/thoughts/chat-panel/SwarmStatusCard';
-import type { ImageCard } from './image-card';
 import { getMedia } from './canvas-media-store';
 import { useO8Auth } from '@/components/auth/O8AuthProvider';
 import type { TermCard } from './terminal-card';
@@ -81,7 +78,7 @@ import { useCanvasOrchestrator, type CanvasThreadEvent } from './use-canvas-orch
 import { useSendBuffer, UndoSendPill, QueuedSends, SEND_UNDO_GRACE_MS, type ComposerImage } from './use-send-buffer';
 import { DispatchDock, phaseFor, type DispatchLane } from './dispatch-dock';
 import { emptyTurnTools, recordTool, recordToolResult, synthesizeResultEntries, type TurnTools } from './result-cards';
-import { CARD_ENTRANCE, FONT, IMG_MAX_SPAWN_EDGE, TONE_DOT, canvasZoom, glass, glassPop, relAge, type DockEntry, type MockCard, type NewDockEntry, type CanvasThreadRow, type OrchestratorLane } from './ui';
+import { CARD_ENTRANCE, FONT, TONE_DOT, canvasZoom, glass, glassPop, relAge, type DockEntry, type MockCard, type NewDockEntry, type CanvasThreadRow, type OrchestratorLane } from './ui';
 import { SymonVoicePresencePill } from './symon-voice-presence';
 import { useCanvasQuickActions } from './use-canvas-quick-actions';
 import { useCanvasMediaLifecycle } from './use-canvas-media-lifecycle';
@@ -90,16 +87,17 @@ import { useCanvasMediaSpawners } from './use-canvas-media-spawners';
 import { useCanvasSpawners, type LaneRow, type SpawnChoreography, type SpawnReservation } from './use-canvas-spawners';
 import { useCanvasCards } from './use-canvas-cards';
 import { useCanvasSnapshot } from './use-canvas-snapshot';
-import { clearCanvasTurnAccumulators, removeCanvasConversations, setCanvasConversation, updateCanvasConversation } from './canvas-conversation-retention';
+import { useCanvasChatCards } from './use-canvas-chat-cards';
+import { useCanvasGrid } from './use-canvas-grid';
+import { useCanvasIntentBus } from './use-canvas-intent-bus';
+import { ChipButton, DrawerLabel, ModeGlyph, ModeRow, PickerRow } from './canvas-composer-controls';
+import { clearCanvasTurnAccumulators, setCanvasConversation, updateCanvasConversation } from './canvas-conversation-retention';
 import { CanvasSearchOverlay } from './canvas-search';
 import { CanvasCommandPalette } from './canvas-command-palette';
 import {
-  CANVAS_CARD_KINDS, CANVAS_FIT_ZOOM, CANVAS_ZOOM_STEPS as ZOOM_STEPS,
-  closeActiveCanvasCard,
-  selectCanvasMedia,
-  stepCanvasZoom,
+  CANVAS_FIT_ZOOM, CANVAS_ZOOM_STEPS as ZOOM_STEPS,
   useCanvasZoomHotkeys,
-  type CanvasCardKind, type CanvasCommands,
+  type CanvasCardKind,
 } from './canvas-commands';
 import { capCanvasReadContent, canvasCardTitle, dockEntryReadLine, type CanvasCardLite } from './canvas-card-intents';
 import { useUiLoopProofCardSpawner } from './proof-card';
@@ -146,7 +144,6 @@ interface RepoPickerRowData {
  *  `value` is what `--cnv-zoom` carries for the pointer math. Persisted. */
 const ZOOM_KEY = 'o8:canvas-zoom';
 /** Canvas layout mode — 'grid' = form-fit hard placement (#1239), else free-flow. */
-const GRID_MODE_KEY = 'o8:canvas-grid-mode';
 /** Navigator loupe size (#1281) — operator-adjustable via the canvas tuner.
  *  A standalone pref (mirrors ZOOM_KEY/GRID_MODE_KEY) so glass presets don't
  *  resize it. The old hardcoded value was 160. */
@@ -156,7 +153,6 @@ const LOUPE_SIZE_RANGE = { min: 120, max: 240, step: 4 };
 // Module-scope so the intent listener's deps stay stable. The card verbs let an
 // agent drive the canvas the way a human can: SEE every card (list), then move
 // / resize / focus / close one by (kind, id).
-const CANVAS_GEOM_FLOOR = 140;
 type CanvasToast = { id: number; message: string; tone: 'error' | 'info' | 'success' };
 
 // Account dossier (the Clerk sign-in popover) — one row vocabulary shared by
@@ -1244,145 +1240,34 @@ export default function CanvasGlassPreviewPage() {
     return free ?? best;
   }, []);
 
-  const pickThread = useCallback((threadId: string, repoPath: string | null, meta?: { title?: string | null; repoName?: string | null }, at?: SnapGeometry) => {
-    return fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(threadId)}`)
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data: { messages?: Array<{ role?: string; content?: string }>; title?: string | null; repoName?: string | null; repoPath?: string | null } | null) => {
-        const messages = Array.isArray(data?.messages) ? data.messages : [];
-        const entries: DockEntry[] = [];
-        for (const message of messages) {
-          const text = typeof message.content === 'string' ? message.content.trim() : '';
-          if (!text) continue;
-          const id = entryIdRef.current;
-          entryIdRef.current += 1;
-          entries.push(message.role === 'user' ? { role: 'user', text, id } : { role: 'text', text, id });
-        }
-        const id = nextIdRef.current;
-        nextIdRef.current += 1;
-        zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
-        const firstUser = messages.find((message) => message.role === 'user');
-        const spot = at ?? findFreeSpot(380, 400);
-        // The card's live convo lane starts from the history transcript —
-        // its in-card composer streams onto the same lane from there.
-        setConvos((previous) => setCanvasConversation(previous, `thread:${threadId}`, entries));
-        setChatCards((previous) => [...previous, {
-          id,
-          threadId,
-          repoPath: repoPath ?? data?.repoPath ?? null,
-          repoName: meta?.repoName ?? data?.repoName ?? null,
-          title: meta?.title?.trim() || data?.title?.trim() || (typeof firstUser?.content === 'string' ? firstUser.content.slice(0, 60) : 'Past session'),
-          x: spot.x,
-          y: spot.y,
-          z: zPeakRef.current,
-          w: at?.w ?? 380,
-          h: at?.h ?? 400,
-          entries,
-        }]);
-      })
-      .catch(() => {});
-  }, [findFreeSpot, setChatCards, zPeakRef]);
-
-  /** A chat card's own composer went out — append the turn to its lane.
-   *  Mirrors sendPrompt's entry shapes; the card already did the ws send. */
-  const noteCardSend = useCallback((card: ChatCard, text: string, sent: boolean): number => {
-    const lane = `thread:${card.threadId}`;
-    firstOutputRef.current.delete(lane);
-    const fromEntryId = entryIdRef.current;
-    appendEntries(lane, sent
-      ? [{ role: 'user', text }, { role: 'status', text: 'Thinking', pending: true }]
-      : [{ role: 'user', text }, { role: 'status', text: 'Not connected yet — try again in a second', pending: false }]);
-    return fromEntryId;
-  }, [appendEntries]);
-
-  const moveChatCard = useCallback((id: number, x: number, y: number) => {
-    setChatCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
-  }, [setChatCards]);
-
-  const resizeChatCard = useCallback((id: number, w: number, h: number) => {
-    setChatCards((previous) => previous.map((card) => (card.id === id ? { ...card, w, h } : card)));
-  }, [setChatCards]);
-
-  const closeChatCard = useCallback((id: number) => {
-    const target = chatCards.find((card) => card.id === id);
-    setChatCards((previous) => previous.filter((card) => card.id !== id));
-    if (!target) return;
-    const lanes = [`thread:${target.threadId}`];
-    if (target.repoPath && orch.threadIdFor(target.repoPath) === target.threadId) lanes.push(target.repoPath);
-    setConvos((previous) => removeCanvasConversations(previous, lanes));
-    firstOutputRef.current.delete(lanes[0]!);
-    clearCanvasTurnAccumulators(lanes[0]!, turnTextRef.current, turnToolsRef.current);
-  }, [chatCards, orch, setChatCards]);
-
-  /** Promote a chat card into the dock — adopt its thread on the live
-   *  socket; the next composer message continues that conversation. */
-  const dockChatCard = useCallback((card: ChatCard) => {
-    const repo = card.repoPath ?? activeRepoPath;
-    if (!repo) return;
-    setActiveRepoPath(repo);
-    orch.adoptThread(repo, card.threadId);
-    setConvos((previous) => setCanvasConversation(previous, repo, previous[`thread:${card.threadId}`] ?? card.entries));
-    setChatCards((previous) => previous.filter((existing) => existing.id !== card.id));
-    setDockOpen(true);
-  }, [activeRepoPath, orch, setChatCards]);
-
-  /** Undock the live orchestrator back onto the canvas as a floating chat card
-   *  — the exact inverse of dockChatCard. The conversation KEEPS rendering
-   *  (the bug was that undock hid the transcript entirely: dockOpen=false with
-   *  nothing below it). The lane stays live the whole time — the `orch` socket
-   *  never unsubscribes from activeRepoPath — so convos[repo] is the source and
-   *  the card's own thread socket picks up exactly where the dock left off. The
-   *  same dock button folds it back in via redockActiveLane. */
-  const undockToCard = useCallback(() => {
-    const repo = activeRepoPath;
-    if (!repo) { setDockOpen(false); return; }
-    const threadId = orch.threadIdFor(repo);
-    const entries = convos[repo] ?? [];
-    // No thread yet / empty lane — nothing conversable to float; just hide.
-    if (!threadId || entries.length === 0) { setDockOpen(false); return; }
-    // Already on the canvas as a card — don't spawn a duplicate, just hide.
-    if (chatCards.some((card) => card.threadId === threadId)) { setDockOpen(false); return; }
-    const name = repos?.find((r) => r.path === repo)?.name ?? null;
-    const firstUser = entries.find((entry) => entry.role === 'user');
-    const title = firstUser && firstUser.role === 'user' && firstUser.text.trim()
-      ? firstUser.text.trim().slice(0, 60)
-      : (name ?? 'Orchestrator');
-    const id = nextIdRef.current;
-    nextIdRef.current += 1;
-    zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
-    const spot = findFreeSpot(380, 400);
-    // Seed the card's live lane from the dock lane so its transcript is there
-    // on first paint and its socket streams onto the same conversation.
-    setConvos((previous) => setCanvasConversation(previous, `thread:${threadId}`, previous[repo] ?? entries));
-    setChatCards((previous) => [...previous, {
-      id,
-      threadId,
-      repoPath: repo,
-      repoName: name,
-      title,
-      x: spot.x,
-      y: spot.y,
-      z: zPeakRef.current,
-      w: 380,
-      h: 400,
-      entries,
-    }]);
-    setDockOpen(false);
-  }, [activeRepoPath, convos, orch, repos, chatCards, findFreeSpot, setChatCards, zPeakRef]);
-
-  /** Re-dock the active lane — if it's floating as a card, fold that exact card
-   *  back in via dockChatCard (which adopts the card's thread lane, the complete
-   *  record incl. anything typed in the card, back onto the dock). Otherwise
-   *  just open the dock on the active lane. */
-  const redockActiveLane = useCallback(() => {
-    const repo = activeRepoPath;
-    const threadId = repo ? orch.threadIdFor(repo) : null;
-    if (repo && threadId) {
-      const card = chatCards.find((existing) => existing.threadId === threadId);
-      if (card) { dockChatCard(card); return; }
-    }
-    setDockOpen(true);
-  }, [activeRepoPath, orch, chatCards, dockChatCard]);
-
+  const {
+    pickThread,
+    noteCardSend,
+    moveChatCard,
+    resizeChatCard,
+    closeChatCard,
+    dockChatCard,
+    undockToCard,
+    redockActiveLane,
+  } = useCanvasChatCards({
+    activeRepoPath,
+    convos,
+    repos,
+    orch,
+    nextIdRef,
+    entryIdRef,
+    firstOutputRef,
+    turnTextRef,
+    turnToolsRef,
+    chatCards,
+    setChatCards,
+    zPeakRef,
+    setConvos,
+    setDockOpen,
+    setActiveRepoPath,
+    findFreeSpot,
+    appendEntries,
+  });
   const moveCard = useCallback((id: number, x: number, y: number) => {
     setCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
   }, []);
@@ -1391,326 +1276,9 @@ export default function CanvasGlassPreviewPage() {
   // A ref mirror of all card geometry keeps applyGridLayout's identity stable so
   // the trigger effect below never loops on the layout's own per-frame writes.
   const gridItemsRef = useRef<Array<GridItem & { x: number; y: number; w: number; h: number }>>([]);
-  useEffect(() => {
-    gridItemsRef.current = [
-      ...termCards.map((c) => ({ kind: 'term', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
-      ...fileCards.map((c) => ({ kind: 'file', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
-      ...treeCards.map((c) => ({ kind: 'tree', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
-      ...imageCards.map((c) => ({ kind: 'image', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
-      ...browserCards.map((c) => ({ kind: 'browser', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
-      ...chatCards.map((c) => ({ kind: 'chat', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
-      ...diffCards.map((c) => ({ kind: 'diff', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
-      ...specCards.map((c) => ({ kind: 'spec', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
-      ...brainCards.map((c) => ({ kind: 'brain', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
-      ...markdownCards.map((c) => ({ kind: 'markdown', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
-      ...agentCards.map((c) => ({ kind: 'agent', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
-    ];
-  }, [termCards, fileCards, treeCards, imageCards, browserCards, chatCards, diffCards, specCards, brainCards, markdownCards, agentCards]);
 
   const gridAnimRef = useRef<{ stop: () => void } | null>(null);
   const [gridPlaceholder, setGridPlaceholder] = useState<Slot | null>(null);
-
-  // Animate id→geom across all 8 card arrays with the ~180ms ease-out settle.
-  const writeGridTargets = useCallback((targets: Map<number, { x: number; y: number; w: number; h: number }>) => {
-    gridAnimRef.current?.stop();
-    const starts = new Map(gridItemsRef.current.map((it) => [it.id, { x: it.x, y: it.y, w: it.w, h: it.h }]));
-    const lerp = <T extends { id: number; x: number; y: number; w: number; h: number }>(card: T, t: number): T => {
-      const s = starts.get(card.id);
-      const e = targets.get(card.id);
-      if (!s || !e) return card;
-      // Only touch a dimension that actually changes — a pure reorder keeps the
-      // cell size, so rewriting w/h every frame would needlessly churn the card
-      // bodies (terminals re-fit on size change → render storms).
-      const next = { ...card, x: s.x + (e.x - s.x) * t, y: s.y + (e.y - s.y) * t };
-      if (Math.abs(e.w - s.w) > 1) next.w = Math.round(s.w + (e.w - s.w) * t);
-      if (Math.abs(e.h - s.h) > 1) next.h = Math.round(s.h + (e.h - s.h) * t);
-      return next;
-    };
-    const writeAll = (t: number) => {
-      setTermCards((p) => p.map((c) => lerp(c, t)));
-      setFileCards((p) => p.map((c) => lerp(c, t)));
-      setTreeCards((p) => p.map((c) => lerp(c, t)));
-      setImageCards((p) => p.map((c) => lerp(c, t)));
-      setBrowserCards((p) => p.map((c) => lerp(c, t)));
-      setChatCards((p) => p.map((c) => lerp(c, t)));
-      setDiffCards((p) => p.map((c) => lerp(c, t)));
-      setSpecCards((p) => p.map((c) => lerp(c, t)));
-      setBrainCards((p) => p.map((c) => lerp(c, t)));
-      setMarkdownCards((p) => p.map((c) => lerp(c, t)));
-      setAgentCards((p) => p.map((c) => lerp(c, t)));
-    };
-    gridAnimRef.current = animate(0, 1, { duration: 0.18, ease: [0.22, 0.61, 0.36, 1], onUpdate: writeAll });
-  }, [setAgentCards, setBrainCards, setBrowserCards, setChatCards, setDiffCards, setFileCards, setImageCards, setMarkdownCards, setSpecCards, setTermCards, setTreeCards]);
-
-  // Core form-fit layout — pack `order` (card ids) into grid slots filling the
-  // usable area minus a gap-margin (so the grid sits off the dock/rails/composer),
-  // then animate everyone into place. Real chrome is measured per card so TOTAL
-  // heights match the slot (no overlap, symmetric rows).
-  const layoutGrid = useCallback((order: number[]) => {
-    if (order.length === 0) return;
-    const zoom = canvasZoom();
-    const gap = 26 / zoom;
-    const raw = usableCanvasArea();
-    // Half-gap margin (the static insets already clear the rails/composer/dock) —
-    // fills the field more generously so grid cells read bigger by default.
-    const inset = { x: raw.x + gap / 2, y: raw.y + gap / 2, w: raw.w - gap, h: raw.h - gap };
-    // Carve any FLOATING chrome the insets don't cover (the review picker) so
-    // tiles never pack under it. Grid mode pins pan at origin, so panRef is (0,0).
-    const area = carveChrome(inset, chromeRectsCanvas(panRef.current, zoom));
-    if (area.w < 120 || area.h < 120) return;
-    const byId = new Map(gridItemsRef.current.map((it) => [it.id, it]));
-    // Pack with the REAL card kinds (index-keyed to `order`) so each tile takes
-    // its kind's aspect — terminals land wider than agent tiles.
-    const slotMap = computeGrid(order.map((id, i) => ({ id: i, kind: byId.get(id)?.kind ?? 'x' })), area, gap);
-    const chromeOf = (id: number): number | undefined => {
-      const it = byId.get(id);
-      const el = typeof document !== 'undefined' ? document.querySelector(`[data-card-id="${id}"]`) : null;
-      if (el instanceof HTMLElement && it) {
-        // Chrome = rendered total − stored body `it.h`, measured with
-        // `offsetHeight` (NOT getBoundingClientRect). Two reasons:
-        //  1. A freshly-spawned card mounts under a motion spring
-        //     (transform: scale .7→1); bcr reflects that transient scale, so
-        //     measuring mid-mount handed back a shrunk height → bogus chrome →
-        //     the card landed at the wrong size ("glitchy most times").
-        //     offsetHeight is pure LAYOUT and ignores the transform.
-        //  2. offsetHeight is already in LAYOUT px (CSS `zoom` isn't applied by
-        //     this WebKit), the same space as the stored body `it.h`.
-        // Accept chrome === 0 (>= 0): image/video cards bind height on the root
-        // (root === body), so their chrome is genuinely 0. The old `c > 0` test
-        // rejected that and fell through to the per-kind estimate (image: 28),
-        // leaving photo/video cards a chrome-height SHORT of their cell — the
-        // dead gap + outlined "wonky" tiles the operator saw. Now they fill the
-        // full grid cell like every borderless shell card.
-        //
-        // Coordinate space: `it.h` and the slot are LAYER units. In-layer cards
-        // sit under the canvas CSS-zoom layer, whose zoom this WebKit does NOT
-        // fold into offsetHeight, so their offsetHeight is already layer units.
-        // The o8.md spec card is the one card rendered OUT of that layer
-        // (screenMap, so CodeMirror's caret hit-tests at device 1:1), so ITS
-        // offsetHeight is real screen px = layerHeight × zoom. Difference the two
-        // spaces and the chrome comes out garbage at any zoom ≠ 1 (negative →
-        // wrong fallback, or wildly inflated → the card mis-sizes past its slot).
-        // Divide the out-of-layer card back to layer units first.
-        const layerHeight = it.kind === 'spec' ? el.offsetHeight / zoom : el.offsetHeight;
-        const c = layerHeight - it.h;
-        if (c >= 0 && c < 400) return c;
-      }
-      return undefined;
-    };
-    const targets = new Map<number, { x: number; y: number; w: number; h: number }>();
-    order.forEach((id, i) => {
-      const slot = slotMap.get(i);
-      if (!slot) return;
-      targets.set(id, slotToCardGeom(slot, byId.get(id)?.kind ?? 'x', chromeOf(id)));
-    });
-    writeGridTargets(targets);
-  }, [writeGridTargets]);
-
-  // Reading order (top→bottom, left→right) keeps the grid near each card's
-  // current spot, so a reflow reads as "tidy", not "shuffle".
-  const applyGridLayout = useCallback(() => {
-    const order = [...gridItemsRef.current].sort((a, b) => a.y - b.y || a.x - b.x).map((c) => c.id);
-    layoutGrid(order);
-  }, [layoutGrid]);
-
-  // Restore the persisted mode + track window size for grid re-fits.
-  useEffect(() => {
-    try {
-      if (window.localStorage.getItem(GRID_MODE_KEY) === '1') setGridMode(true);
-    } catch {
-      // non-critical
-    }
-    const onResize = () => setWinSize({ w: window.innerWidth, h: window.innerHeight });
-    onResize();
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
-
-  // Re-grid on: entering grid mode, card add/remove, resize, zoom, dock open/close
-  // (the dock reserves right-side space, so the grid must re-pack clear of it).
-  // Keyed on a COUNT signature (not the arrays) so the layout's own writes don't
-  // re-trigger. dockOpen's --cnv-dock-reserve stamp effect is declared earlier, so
-  // it lands before this reads usableCanvasArea().
-  const gridCardCount =
-    termCards.length + fileCards.length + treeCards.length + imageCards.length + browserCards.length +
-    chatCards.length + diffCards.length + specCards.length + brainCards.length + markdownCards.length +
-    agentCards.length;
-
-  // Navigator loupe minimap (#1239) — every card as a scaled rect; image cards
-  // carry their thumbnail. The usable area is the minimap's stable frame.
-  const minimapCards = useMemo<MinimapCard[]>(() => [
-    ...termCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'term' })),
-    ...fileCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'file' })),
-    ...treeCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'tree' })),
-    ...imageCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'image', src: c.items[0]?.src })),
-    ...videoCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'video', src: c.poster })),
-    ...browserCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'browser' })),
-    ...chatCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'chat' })),
-    ...diffCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'diff' })),
-    ...specCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'spec' })),
-    ...brainCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'brain' })),
-    ...markdownCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'markdown' })),
-  ], [termCards, fileCards, treeCards, imageCards, videoCards, browserCards, chatCards, diffCards, specCards, brainCards, markdownCards]);
-  // The navigator frames a region ~1.25× the viewport, CENTERED on where you're
-  // looking (pan). Framing a bit MORE than the viewport keeps each card a small
-  // tile (several tiling the sphere, reference-style) rather than 2-3 big cards
-  // filling it. Uses canvasZoomLevel directly (not the lagged stamp).
-  const loupeArea = useMemo(() => {
-    const zoom = canvasZoomLevel || 1;
-    const vw = winSize.w;
-    const vh = winSize.h;
-    const viewCenterX = (vw / 2 - pan.x) / zoom;
-    const viewCenterY = (vh / 2 - pan.y) / zoom;
-    const regionW = (vw / zoom) * 1.25;
-    const regionH = (vh / zoom) * 1.25;
-    return { x: viewCenterX - regionW / 2, y: viewCenterY - regionH / 2, w: regionW, h: regionH };
-  }, [winSize.w, winSize.h, canvasZoomLevel, pan.x, pan.y]);
-
-  useEffect(() => {
-    if (!gridMode) return;
-    // Defer past the commit + debounce rapid re-triggers: snapshot restore mounts
-    // the cards across several renders, and applyGridLayout's per-frame animation
-    // setState must never re-enter this effect synchronously (→ "maximum update
-    // depth"). One rAF after the render storm settles applies the layout once.
-    const raf = requestAnimationFrame(() => applyGridLayout());
-    // The bottom DispatchDock tray appears + expands/collapses with a ~220ms
-    // height animation; the rAF above would measure it mid-flight and under-
-    // reserve. Re-pack once more after it settles so the grid ends above the tray
-    // at its FINAL height. Cheap (layout is fast); harmless for the other triggers.
-    const settle = window.setTimeout(() => applyGridLayout(), 260);
-    return () => { cancelAnimationFrame(raf); window.clearTimeout(settle); };
-    // activeLanes.length = tray visibility, dockTrayExpanded = its expanded state
-    // (both change the reserved bottom stack height, same role as dockOpen).
-  }, [gridMode, gridCardCount, winSize.w, winSize.h, canvasZoomLevel, dockOpen, activeLanes.length, dockTrayExpanded, applyGridLayout]);
-
-  // Grid mode packs to the viewport — snap the pan back to origin so the grid
-  // lands centered, not wherever you'd roamed.
-  useEffect(() => {
-    if (gridMode) setPan({ x: 0, y: 0 });
-  }, [gridMode]);
-
-  // Two-finger scroll pans the infinite canvas (free mode only), over the canvas
-  // background — cards keep their own content scroll, chrome is untouched. Window
-  // listener (not onWheel) so it fires reliably + can preventDefault. `pan` is a
-  // SCREEN-px offset (WebKit `transform: translate` on a `zoom` layer is NOT
-  // scaled by the zoom), so the scroll delta maps 1:1.
-  useEffect(() => {
-    if (gridMode) return;
-    const onWheel = (event: WheelEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (!target?.closest?.('[data-canvas-layer]')) return;
-      if (target.closest('[data-card-id]')) return;
-      event.preventDefault();
-      setPan((prev) => ({ x: prev.x - event.deltaX, y: prev.y - event.deltaY }));
-    };
-    window.addEventListener('wheel', onWheel, { passive: false });
-    return () => window.removeEventListener('wheel', onWheel);
-  }, [gridMode]);
-
-  useEffect(() => {
-    // Stamp the mode so canvas-drag's dragBounds knows whether to fence (grid) or
-    // roam (free / infinite canvas).
-    document.documentElement.style.setProperty('--cnv-grid', gridMode ? '1' : '0');
-    try {
-      window.localStorage.setItem(GRID_MODE_KEY, gridMode ? '1' : '0');
-    } catch {
-      // non-critical
-    }
-  }, [gridMode]);
-
-  // Grid drag-to-reorder with LIVE placeholder (the reference feel): pick a card
-  // up (it floats free via its own drag), the others reflow INSTANTLY to open a
-  // hole where it will land, a ghost slot marks the spot, and on drop everyone
-  // settles with the ease. No per-card wiring — the lifted card is identified by
-  // its data-card-id under the pointer; its live center picks the target slot.
-  useEffect(() => {
-    if (!gridMode) return;
-    let drag: { id: number; order: number[]; lastIndex: number; placed: boolean } | null = null;
-    // Coalesce the reflow to one per animation frame: pointermove fires far faster
-    // than we want to re-pack, and deferring the setState to rAF keeps it off the
-    // render/commit path (no "maximum update depth" under a fast drag).
-    let reflowRaf = 0;
-
-    const onDown = (event: PointerEvent) => {
-      if (event.button !== 0) { drag = null; return; }
-      const el = (event.target as HTMLElement | null)?.closest?.('[data-card-id]');
-      if (!el) { drag = null; return; }
-      const id = Number(el.getAttribute('data-card-id'));
-      const order = [...gridItemsRef.current].sort((a, b) => a.y - b.y || a.x - b.x).map((c) => c.id);
-      const idx = order.indexOf(id);
-      if (idx < 0) { drag = null; return; }
-      drag = { id, order, lastIndex: idx, placed: false };
-    };
-
-    const onMove = () => {
-      if (!drag || reflowRaf) return;
-      reflowRaf = requestAnimationFrame(() => {
-        reflowRaf = 0;
-        if (!drag) return;
-        const liftedEl = document.querySelector(`[data-card-id="${drag.id}"]`);
-        if (!liftedEl) return;
-        const zoom = canvasZoom();
-        const r = liftedEl.getBoundingClientRect();
-        const cx = (r.left + r.width / 2) / zoom;
-        const cy = (r.top + r.height / 2) / zoom;
-        const gap = 26 / zoom;
-        const raw = usableCanvasArea();
-        // Same packing area as layoutGrid — half-gap inset, then carve floating
-        // chrome — so the drag placeholder lands exactly where the drop will.
-        const inset = { x: raw.x + gap / 2, y: raw.y + gap / 2, w: raw.w - gap, h: raw.h - gap };
-        const area = carveChrome(inset, chromeRectsCanvas(panRef.current, zoom));
-        const kindOf = new Map(gridItemsRef.current.map((it) => [it.id, it.kind]));
-        const slotMap = computeGrid(drag.order.map((id, i) => ({ id: i, kind: kindOf.get(id) ?? 'x' })), area, gap);
-        let targetIndex = drag.lastIndex;
-        let best = Infinity;
-        for (let i = 0; i < drag.order.length; i += 1) {
-          const s = slotMap.get(i);
-          if (!s) continue;
-          const dx = s.x + s.w / 2 - cx;
-          const dy = s.y + s.h / 2 - cy;
-          const d = dx * dx + dy * dy;
-          if (d < best) { best = d; targetIndex = i; }
-        }
-        if (drag.placed && targetIndex === drag.lastIndex) return; // ghost already here
-        drag.lastIndex = targetIndex;
-        drag.placed = true;
-        // Show the ghost where the card will land — but DON'T reflow the other cards
-        // mid-drag. Re-rendering the heavy card bodies (terminals/chats) every reflow
-        // frame trips their own effects' update-depth guard under StrictMode. Only
-        // the lightweight placeholder updates here (the others keep unchanged props,
-        // so React skips re-rendering them); everything re-packs on drop.
-        const slotArr: Slot[] = [];
-        for (let i = 0; i < drag.order.length; i += 1) {
-          const s = slotMap.get(i);
-          if (s) slotArr.push(s);
-        }
-        setGridPlaceholder(slotArr[targetIndex] ?? null);
-      });
-    };
-
-    const onUp = () => {
-      if (reflowRaf) { cancelAnimationFrame(reflowRaf); reflowRaf = 0; }
-      if (drag && drag.placed) {
-        const others = drag.order.filter((other) => other !== drag!.id);
-        const finalOrder = [...others];
-        finalOrder.splice(drag.lastIndex, 0, drag.id); // lifted lands at the placeholder
-        layoutGrid(finalOrder);
-      }
-      setGridPlaceholder(null);
-      drag = null;
-    };
-
-    window.addEventListener('pointerdown', onDown, true);
-    window.addEventListener('pointermove', onMove, true);
-    window.addEventListener('pointerup', onUp);
-    return () => {
-      window.removeEventListener('pointerdown', onDown, true);
-      window.removeEventListener('pointermove', onMove, true);
-      window.removeEventListener('pointerup', onUp);
-      if (reflowRaf) cancelAnimationFrame(reflowRaf);
-      setGridPlaceholder(null);
-    };
-  }, [gridMode, layoutGrid]);
 
   /** Spawn a REAL shell — production transport, canvas treatment. */
   const spawnTerminal = useCallback((cwd: string | null, cwdLabel: string | null, at?: SnapGeometry, opts?: { agentCli?: string }) => {
@@ -2195,468 +1763,110 @@ export default function CanvasGlassPreviewPage() {
     return { ok: true, content: capped.content, truncated: truncated || capped.truncated };
   }, [activeLanes, cardDomText, convos]);
 
-  const patchCanvasCardGeom = useCallback((kind: CanvasCardKind, id: number, patch: { x?: number; y?: number; w?: number; h?: number }) => {
-    switch (kind) {
-      case 'term': setTermCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
-      case 'file': setFileCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
-      case 'tree': setTreeCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
-      case 'image': setImageCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
-      case 'video': setVideoCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
-      case 'browser': setBrowserCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
-      case 'chat': setChatCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
-      case 'diff': setDiffCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
-      case 'spec': setSpecCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
-      case 'brain': setBrainCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
-      case 'markdown': setMarkdownCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
-      case 'agent': setAgentCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
-    }
-  }, [setAgentCards, setBrainCards, setBrowserCards, setChatCards, setDiffCards, setFileCards, setImageCards, setMarkdownCards, setSpecCards, setTermCards, setTreeCards, setVideoCards]);
+  const {
+    minimapCards,
+    loupeArea,
+    patchCanvasCardGeom,
+    dismissCanvasCard,
+  } = useCanvasGrid({
+    termCards,
+    setTermCards,
+    fileCards,
+    setFileCards,
+    treeCards,
+    setTreeCards,
+    imageCards,
+    setImageCards,
+    videoCards,
+    setVideoCards,
+    browserCards,
+    setBrowserCards,
+    chatCards,
+    setChatCards,
+    diffCards,
+    setDiffCards,
+    specCards,
+    setSpecCards,
+    brainCards,
+    setBrainCards,
+    markdownCards,
+    setMarkdownCards,
+    agentCards,
+    setAgentCards,
+    canvasCardsRef,
+    gridMode,
+    setGridMode,
+    winSize,
+    setWinSize,
+    pan,
+    setPan,
+    panRef,
+    canvasZoomLevel,
+    dockOpen,
+    activeLanes,
+    dockTrayExpanded,
+    gridItemsRef,
+    gridAnimRef,
+    setGridPlaceholder,
+    closeTerminal,
+    closeFileCard,
+    closeTreeCard,
+    closeImageCard,
+    closeVideoCard,
+    closeBrowserCard,
+    closeChatCard,
+  });
 
-  const dismissCanvasCard = useCallback((kind: CanvasCardKind, id: number) => {
-    switch (kind) {
-      case 'term': {
-        const card = canvasCardsRef.current.term.find((c) => c.id === id);
-        if (card) closeTerminal(card as unknown as TermCard);
-        break;
-      }
-      case 'file': closeFileCard(id); break;
-      case 'tree': closeTreeCard(id); break;
-      case 'image': closeImageCard(id); break;
-      case 'video': closeVideoCard(id); break;
-      case 'browser': closeBrowserCard(id); break;
-      case 'chat': closeChatCard(id); break;
-      case 'diff': setDiffCards((p) => p.filter((c) => c.id !== id)); break;
-      case 'spec': setSpecCards((p) => p.filter((c) => c.id !== id)); break;
-      case 'brain': setBrainCards((p) => p.filter((c) => c.id !== id)); break;
-      case 'markdown': setMarkdownCards((p) => p.filter((c) => c.id !== id)); break;
-      case 'agent': setAgentCards((p) => p.filter((c) => c.id !== id)); break;
-    }
-  }, [canvasCardsRef, closeTerminal, closeFileCard, closeTreeCard, closeImageCard, closeVideoCard, closeBrowserCard, closeChatCard, setAgentCards, setBrainCards, setDiffCards, setMarkdownCards, setSpecCards]);
-
-  const commandPaletteCommands = useMemo<CanvasCommands>(() => ({
-    spawnTerminal: () => {
-      const path = activeRepoPath ?? null;
-      spawnTerminal(path, path ? repos?.find((repo) => repo.path === path)?.name ?? null : null);
-    },
-    spawnFile: (filePath) => {
-      if (filePath) spawnFileCard(filePath);
-      else openFilePicker();
-    },
-    spawnTree: () => {
-      if (activeRepoPath) spawnFileTreeCard(activeRepoPath);
-      else showCanvasToast('Select a repository to open its file tree.', 'info');
-    },
-    spawnImage: () => selectCanvasMedia('image', (file) => {
-      const origin = viewportSpawnOrigin();
-      spawnImageCard(file, { x: origin.x + 140, y: origin.y + 64 });
-    }),
-    spawnVideo: () => selectCanvasMedia('video', (file) => {
-      const origin = viewportSpawnOrigin();
-      spawnVideoCard(file, { x: origin.x + 140, y: origin.y + 64 });
-    }),
-    spawnBrowser: spawnBrowserCard,
-    spawnChat: (threadId) => {
-      if (threadId) void pickThread(threadId, activeRepoPath);
-      else setSessionsOpen(true);
-    },
-    spawnDiff: () => { void spawnWorktreeDiffCard(); },
-    spawnSpec: spawnSpecCard,
-    spawnBrain: () => spawnBrainCard(),
-    spawnMarkdown: () => spawnMarkdownCard('Note', '# New note'),
-    spawnAgent: () => {
-      if ((convos[activeRepoPath ?? '']?.length ?? 0) > 0) redockActiveLane();
-      composerInputRef.current?.focus();
-    },
-    openSearch: () => {
-      setSearchQuery('');
-      setSearchOpen(true);
-    },
-    closeActiveCard: () => { closeActiveCanvasCard(canvasCardsRef.current, dismissCanvasCard); },
-    zoomIn: () => setCanvasZoomLevel((current) => stepCanvasZoom(current, 'in')),
-    zoomToFit: () => setCanvasZoomLevel(CANVAS_FIT_ZOOM),
-    zoomOut: () => setCanvasZoomLevel((current) => stepCanvasZoom(current, 'out')),
-  }), [activeRepoPath, canvasCardsRef, convos, dismissCanvasCard, openFilePicker, pickThread, redockActiveLane, repos, showCanvasToast, spawnBrainCard, spawnBrowserCard, spawnFileCard, spawnFileTreeCard, spawnImageCard, spawnMarkdownCard, spawnSpecCard, spawnTerminal, spawnVideoCard, spawnWorktreeDiffCard, viewportSpawnOrigin]);
-
-  // Canvas intent bus (#1232 phase 2) — Symon and the gated /api/canvas/intent
-  // route drive the canvas through the SAME handlers the rail buttons call.
-  // Listeners run synchronously on dispatchEvent, so the ack stamped on
-  // window.__o8CanvasIntentLast is readable right after dispatch.
-  useEffect(() => {
-    if (!canvasEnabled) return;
-    const onIntent = (event: Event) => {
-      const detail = (event as CustomEvent<{ verb?: string; args?: Record<string, unknown>; origin?: string | null }>).detail ?? {};
-      const args = (detail.args && typeof detail.args === 'object' ? detail.args : {}) as Record<string, unknown>;
-      const origin = detail.origin === 'symon' ? 'symon' : null;
-      let ok = true;
-      let note: string | null = null;
-      let error: string | null = null;
-      let data: unknown = undefined;
-      try {
-        switch (detail.verb) {
-          case 'open-browser':
-            window.dispatchEvent(new CustomEvent('o8:open-browser', { detail: { url: typeof args.url === 'string' ? args.url : null } }));
-            break;
-          case 'ask-brain':
-            spawnBrainCard(typeof args.question === 'string' ? args.question : undefined);
-            break;
-          case 'render': {
-            // Render-on-screen (#1270) — the orchestrator paints a markdown
-            // explainer onto the canvas ("explain X on my screen").
-            const title = typeof args.title === 'string' ? args.title.trim() : '';
-            const markdown = typeof args.markdown === 'string' ? args.markdown : '';
-            if (!markdown.trim()) {
-              ok = false;
-              note = 'render needs args.markdown';
-            } else {
-              spawnMarkdownCard(title, markdown);
-              note = title ? `rendered "${title}"` : 'rendered note';
-            }
-            break;
-          }
-          case 'open-spec':
-            spawnSpecCard();
-            break;
-          case 'spawn-terminal': {
-            const path = activeRepoPath ?? null;
-            spawnTerminal(path, path ? repos?.find((repo) => repo.path === path)?.name ?? null : null);
-            break;
-          }
-          case 'search':
-            setSearchOpen(true);
-            if (typeof args.query === 'string') setSearchQuery(args.query);
-            break;
-          case 'zoom': {
-            const level = typeof args.level === 'number' ? args.level : NaN;
-            if (ZOOM_STEPS.some((step) => step.value === level)) {
-              setCanvasZoomLevel(level);
-            } else if (args.direction === 'in' || args.direction === 'out') {
-              setCanvasZoomLevel((previous) => stepCanvasZoom(previous, args.direction as 'in' | 'out'));
-            } else {
-              ok = false;
-              note = `zoom needs level (${ZOOM_STEPS.map((step) => step.value).join(', ')}) or direction in|out`;
-            }
-            break;
-          }
-          case 'enter':
-            // "open / enter / show the canvas" — the route's ensure:true already
-            // navigated here before dispatching, so the Canvas is up. Nothing
-            // else to do; ack ok so Symon can confirm "the canvas is up".
-            break;
-          case 'dock':
-            if (typeof args.open === 'boolean') setDockOpen(args.open);
-            else setDockOpen((previous) => !previous);
-            break;
-          case 'send-prompt': {
-            const text = typeof args.text === 'string' ? args.text.trim() : '';
-            if (!text) {
-              ok = false;
-              note = 'send-prompt needs args.text';
-            } else if (!sendPrompt(text)) {
-              ok = false;
-              note = 'orchestrator not ready — no repo scoped, busy, or not connected';
-            }
-            break;
-          }
-          case 'spawn-agents': {
-            // Gateless worktree spawn — "spawn two agents on the auth refactor".
-            // The created lanes bloom as numbered cards via the lane watcher.
-            const task = typeof args.task === 'string' ? args.task : (typeof args.text === 'string' ? args.text : '');
-            const count = typeof args.count === 'number' ? args.count : 1;
-            const repo = typeof args.repo === 'string' ? args.repo : null;
-            const failure = spawnAgents(task, count, repo, origin);
-            if (failure) {
-              ok = false;
-              note = failure;
-            } else {
-              const n = Math.max(1, Math.min(5, Math.floor(count) || 1));
-              note = `spawning ${n} agent${n === 1 ? '' : 's'}`;
-            }
-            break;
-          }
-          case 'grid': {
-            // "grid mode" / "tile the agents" — form-fit every canvas card into a
-            // grid (the demo's auto-arrange). `on` boolean sets it; omit to toggle.
-            // The ack note reflects the RESULTING state (read from the closure) so
-            // a spoken toggle never reports the wrong mode back to the operator.
-            const explicit = typeof args.on === 'boolean' ? args.on
-              : typeof args.enabled === 'boolean' ? args.enabled
-              : null;
-            const next = explicit === null ? !gridMode : explicit;
-            setGridMode(next);
-            note = next ? 'grid mode' : 'free canvas';
-            break;
-          }
-          case 'list': {
-            // Sight — the canvas card inventory so an agent can act on ids, not
-            // pixels. Read from the ref (latest arrays) so this never goes stale.
-            const cards: Array<Record<string, unknown>> = [];
-            for (const k of CANVAS_CARD_KINDS) {
-              for (const c of canvasCardsRef.current[k]) {
-                cards.push({ kind: k, id: c.id, x: Math.round(c.x), y: Math.round(c.y), z: c.z, w: Math.round(c.w), h: Math.round(c.h), title: canvasCardTitle(k, c) });
-              }
-            }
-            data = { cards, count: cards.length, zoom: canvasZoomLevel, grid: gridMode, dock: dockOpen, activeRepo: activeRepoPath ?? null, viewport: canvasViewport() };
-            note = `${cards.length} card${cards.length === 1 ? '' : 's'} on canvas`;
-            break;
-          }
-          case 'center-on-card':
-          case 'read-card': {
-            const kind = (typeof args.kind === 'string' ? args.kind : '') as CanvasCardKind;
-            const rawId = args.id;
-            const id = typeof rawId === 'number' ? rawId : (typeof rawId === 'string' && rawId.trim() ? Number(rawId) : NaN);
-            if (!CANVAS_CARD_KINDS.includes(kind) || !Number.isFinite(id)) {
-              ok = false;
-              error = 'invalid-args';
-              note = `${detail.verb} needs args.kind (one of ${CANVAS_CARD_KINDS.join(', ')}) and a numeric args.id — call list first`;
-              break;
-            }
-            const card = findCanvasCard(kind, id);
-            if (!card) {
-              ok = false;
-              error = 'not-found';
-              note = 'not-found';
-              data = { ok: false, error: 'not-found' };
-              break;
-            }
-            if (detail.verb === 'center-on-card') {
-              let nextZoom = canvasZoomLevel;
-              const zoomArg = typeof args.zoom === 'number' && Number.isFinite(args.zoom) ? args.zoom : null;
-              if (zoomArg !== null) {
-                nextZoom = ZOOM_STEPS.reduce((best, step) => (
-                  Math.abs(step.value - zoomArg) < Math.abs(best.value - zoomArg) ? step : best
-                ), ZOOM_STEPS[0]).value;
-                setCanvasZoomLevel(nextZoom);
-              }
-              animatePanTo({
-                x: winSize.w / 2 - (card.x + card.w / 2) * nextZoom,
-                y: winSize.h / 2 - (card.y + card.h / 2) * nextZoom,
-              });
-              data = { ok: true, centered: { kind, id } };
-              note = `centered ${kind} ${id}`;
-            } else {
-              const lines = typeof args.lines === 'number' && Number.isFinite(args.lines) ? Math.max(1, Math.floor(args.lines)) : 40;
-              const read = readCanvasCard(kind, card, lines);
-              ok = read.ok;
-              error = read.ok ? null : (read.error ?? 'read-card-failed');
-              data = read.ok
-                ? { ok: true, kind, id, title: canvasCardTitle(kind, card), content: read.content, truncated: read.truncated }
-                : { ok: false, kind, id, error: read.error };
-              note = read.ok ? `read ${kind} ${id}` : (read.error ?? 'read-card failed');
-            }
-            break;
-          }
-          case 'pan': {
-            const dx = typeof args.dx === 'number' ? args.dx : null;
-            const dy = typeof args.dy === 'number' ? args.dy : null;
-            const x = typeof args.x === 'number' ? args.x : null;
-            const y = typeof args.y === 'number' ? args.y : null;
-            if (dx !== null && dy !== null) {
-              const target = { x: pan.x + dx, y: pan.y + dy };
-              animatePanTo(target);
-              data = { ok: true, viewport: canvasViewport(canvasZoomLevel, target) };
-              note = 'panned canvas';
-            } else if (x !== null && y !== null) {
-              const target = { x, y };
-              animatePanTo(target);
-              data = { ok: true, viewport: canvasViewport(canvasZoomLevel, target) };
-              note = 'panned canvas';
-            } else {
-              ok = false;
-              error = 'invalid-args';
-              note = 'pan needs numeric args.dx/dy or numeric args.x/y';
-            }
-            break;
-          }
-          case 'move-card':
-          case 'resize-card':
-          case 'focus-card':
-          case 'close-card': {
-            // Address a card by (kind, id) — ids come from `list`. Every verb
-            // validates the card exists first so an agent gets a clear miss note
-            // instead of a silent no-op.
-            const kind = (typeof args.kind === 'string' ? args.kind : '') as CanvasCardKind;
-            const id = typeof args.id === 'number' ? args.id : Number(args.id);
-            if (!CANVAS_CARD_KINDS.includes(kind) || !Number.isFinite(id)) {
-              ok = false;
-              note = `${detail.verb} needs args.kind (one of ${CANVAS_CARD_KINDS.join(', ')}) and a numeric args.id — call list first`;
-              break;
-            }
-            const card = canvasCardsRef.current[kind].find((c) => c.id === id);
-            if (!card) {
-              ok = false;
-              note = `no ${kind} card with id ${id} on the canvas (call list to see current ids)`;
-              break;
-            }
-            if (detail.verb === 'move-card') {
-              const x = Number(args.x);
-              const y = Number(args.y);
-              if (!Number.isFinite(x) || !Number.isFinite(y)) {
-                ok = false;
-                note = 'move-card needs numeric args.x and args.y (canvas-layer coordinates)';
-                break;
-              }
-              patchCanvasCardGeom(kind, id, { x, y });
-              note = `moved ${kind} ${id} to (${Math.round(x)}, ${Math.round(y)})`;
-            } else if (detail.verb === 'resize-card') {
-              const w = Number(args.w);
-              const h = Number(args.h);
-              if (!Number.isFinite(w) || !Number.isFinite(h)) {
-                ok = false;
-                note = 'resize-card needs numeric args.w and args.h';
-                break;
-              }
-              if ((kind === 'image' || kind === 'video') && card.aspect) {
-                // Photos + video stay aspect-locked (like the human resize); honor
-                // width and derive height so the agent can't distort the media.
-                const nw = Math.max(CANVAS_GEOM_FLOOR, w);
-                patchCanvasCardGeom(kind, id, { w: nw, h: Math.round(nw / card.aspect) });
-              } else {
-                patchCanvasCardGeom(kind, id, { w: Math.max(CANVAS_GEOM_FLOOR, w), h: Math.max(CANVAS_GEOM_FLOOR, h) });
-              }
-              note = `resized ${kind} ${id}`;
-            } else if (detail.verb === 'focus-card') {
-              focusCard(kind, id);
-              note = `focused ${kind} ${id}`;
-            } else {
-              dismissCanvasCard(kind, id);
-              note = `closed ${kind} ${id}`;
-            }
-            break;
-          }
-          case 'add-image': {
-            // Put a photo on the canvas from a URL/served path — the verb a voice
-            // or agent operator needs (humans drag a File; agents pass a src).
-            const src = typeof args.src === 'string' ? args.src : typeof args.url === 'string' ? args.url : '';
-            if (!src) { ok = false; note = 'add-image needs args.src (a URL or /served path the canvas can load)'; break; }
-            const name = typeof args.name === 'string' ? args.name : (src.split('/').pop() || 'image');
-            const ax = typeof args.x === 'number' ? args.x : 80;
-            const ay = typeof args.y === 'number' ? args.y : 80;
-            const probe = new Image();
-            probe.onload = () => {
-              const natW = probe.naturalWidth || 1;
-              const natH = probe.naturalHeight || 1;
-              const aspect = natW / natH;
-              const w = natW >= natH ? IMG_MAX_SPAWN_EDGE : Math.round(IMG_MAX_SPAWN_EDGE * aspect);
-              const h = Math.round(w / aspect);
-              const id = nextIdRef.current;
-              nextIdRef.current += 1;
-              zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
-              setImageCards((prev) => spawnCanvasCard(prev, { id, x: ax, y: ay, z: zPeakRef.current, w, h, aspect, items: [{ src, name }] }));
-            };
-            probe.src = src;
-            note = `adding image ${name}`;
-            break;
-          }
-          case 'ui-loop-proof': spawnUiLoopProofCard(args); note = 'showing UI-loop proof'; break;
-          case 'stack': {
-            // Group image cards into one deck (the agent twin of drag-together).
-            const ids: number[] = Array.isArray(args.ids)
-              ? (args.ids as unknown[]).map(Number).filter((n) => Number.isFinite(n))
-              : [args.id, args.ontoId].map(Number).filter((n) => Number.isFinite(n));
-            const present = ids.filter((id) => imageCardsRef.current.some((c) => c.id === id));
-            if (present.length < 2) { ok = false; note = 'stack needs ≥2 existing image ids (args.ids or args.id + args.ontoId — call list for ids)'; break; }
-            setImageCards((prev) => {
-              const base = prev.find((c) => c.id === present[0]);
-              if (!base) return prev;
-              const items = present.map((id) => prev.find((c) => c.id === id)).filter((c): c is ImageCard => Boolean(c)).flatMap((c) => c.items);
-              const drop = new Set(present.slice(1));
-              return prev.filter((c) => !drop.has(c.id)).map((c) => (c.id === base.id ? { ...c, items } : c));
-            });
-            note = `stacked ${present.length} images`;
-            break;
-          }
-          case 'flip': {
-            const id = Number(args.id);
-            const deck = imageCardsRef.current.find((c) => c.id === id);
-            if (!deck) { ok = false; note = `no image card with id ${id} (call list for ids)`; break; }
-            if (deck.items.length < 2) { ok = false; note = `image ${id} isn't a deck (only ${deck.items.length} photo)`; break; }
-            const dir = Number(args.dir) < 0 ? -1 : 1;
-            cycleImageCard(id, dir);
-            note = `flipped deck ${id} to ${dir < 0 ? 'previous' : 'next'}`;
-            break;
-          }
-          case 'separate': {
-            const id = Number(args.id);
-            const deck = imageCardsRef.current.find((c) => c.id === id);
-            if (!deck) { ok = false; note = `no image card with id ${id} (call list for ids)`; break; }
-            if (deck.items.length < 2) { ok = false; note = `image ${id} isn't a deck — nothing to separate`; break; }
-            spreadImageCard(id);
-            note = `separated deck ${id} into ${deck.items.length} cards`;
-            break;
-          }
-          case 'add-file': {
-            // Put a repo file on the canvas (CodeMirror editor card). file-io
-            // needs an ABSOLUTE path, so reject relative ones with a clear note.
-            const path = typeof args.path === 'string' ? args.path.trim() : '';
-            if (!path) { ok = false; note = 'add-file needs args.path (an absolute file path)'; break; }
-            if (!path.startsWith('/')) { ok = false; note = 'add-file path must be absolute (start with /)'; break; }
-            const at = (typeof args.x === 'number' && typeof args.y === 'number') ? { x: args.x, y: args.y, w: 620, h: 420 } : undefined;
-            spawnFileCard(path, at);
-            note = `added file ${path.split('/').pop() || path}`;
-            break;
-          }
-          case 'add-tree': {
-            const repo = typeof args.repo === 'string' ? args.repo.trim() : (activeRepoPath ?? '');
-            if (!repo) { ok = false; note = 'add-tree needs args.repo when no repository is active'; break; }
-            const at = typeof args.x === 'number' && typeof args.y === 'number'
-              ? { x: args.x, y: args.y, w: 380, h: 460 }
-              : undefined;
-            spawnFileTreeCard(repo, at);
-            note = `added file tree for ${repo.split('/').filter(Boolean).pop() ?? repo}`;
-            break;
-          }
-          case 'open-diff': {
-            // The active repo's working-tree diff ("what have I changed") — the
-            // fixture-free diff an agent can always show. Lane diffs go through
-            // o8_packet_diff, not here.
-            const repo = typeof args.repo === 'string' ? args.repo : (activeRepoPath ?? '');
-            if (!repo) { ok = false; note = 'open-diff needs a repo (no active repo scoped — pass args.repo)'; break; }
-            void spawnWorktreeDiffCard(undefined, repo);
-            note = `opened working-tree diff for ${repo.split('/').filter(Boolean).pop() ?? repo}`;
-            break;
-          }
-          case 'open-chat': {
-            // Reopen a past orchestrator thread as a chat card (replays history).
-            const threadId = typeof args.threadId === 'string' ? args.threadId.trim() : '';
-            if (!threadId) { ok = false; note = 'open-chat needs args.threadId (a past thread id)'; break; }
-            const repo = typeof args.repo === 'string' ? args.repo : (activeRepoPath ?? null);
-            void pickThread(threadId, repo);
-            note = `opened chat thread ${threadId}`;
-            break;
-          }
-          case 'add-video': {
-            // Put a video on the canvas from a URL/served path — fetched into a
-            // File so it rides the same IndexedDB-backed path as a human drop.
-            const src = typeof args.src === 'string' ? args.src.trim() : '';
-            if (!src) { ok = false; note = 'add-video needs args.src (a video URL/served path)'; break; }
-            const vname = typeof args.name === 'string' ? args.name : (src.split('/').pop() || 'video');
-            const vx = typeof args.x === 'number' ? args.x : 320;
-            const vy = typeof args.y === 'number' ? args.y : 260;
-            void fetch(src)
-              .then((r) => (r.ok ? r.blob() : Promise.reject(new Error('fetch failed'))))
-              .then((blob) => spawnVideoCard(new File([blob], vname, { type: blob.type || 'video/mp4' }), { x: vx, y: vy }))
-              .catch(() => {});
-            note = `adding video ${vname}`;
-            break;
-          }
-          default:
-            ok = false;
-            note = `unknown intent verb: ${String(detail.verb)}`;
-        }
-      } catch (caught) {
-        ok = false;
-        error = 'exception';
-        note = caught instanceof Error ? caught.message : String(caught);
-      }
-      (window as unknown as Record<string, unknown>).__o8CanvasIntentLast = { verb: detail.verb ?? null, ok, note, ...(error ? { error } : {}), ...(data !== undefined ? { data } : {}), at: Date.now() };
-    };
-    window.addEventListener('o8:canvas-intent', onIntent);
-    (window as unknown as Record<string, unknown>).__o8CanvasIntentReady = true;
-    return () => {
-      window.removeEventListener('o8:canvas-intent', onIntent);
-      (window as unknown as Record<string, unknown>).__o8CanvasIntentReady = false;
-    };
-  }, [activeRepoPath, animatePanTo, canvasCardsRef, canvasEnabled, canvasViewport, canvasZoomLevel, dockOpen, findCanvasCard, gridMode, imageCardsRef, pan.x, pan.y, readCanvasCard, repos, sendPrompt, setImageCards, spawnAgents, spawnBrainCard, spawnMarkdownCard, spawnSpecCard, spawnTerminal, spawnFileCard, spawnFileTreeCard, spawnUiLoopProofCard, spawnWorktreeDiffCard, spawnVideoCard, pickThread, cycleImageCard, spreadImageCard, patchCanvasCardGeom, dismissCanvasCard, focusCard, winSize.h, winSize.w, zPeakRef]);
+  const commandPaletteCommands = useCanvasIntentBus({
+    activeRepoPath,
+    repos,
+    convos,
+    canvasEnabled,
+    canvasZoomLevel,
+    dockOpen,
+    gridMode,
+    pan,
+    winSize,
+    nextIdRef,
+    composerInputRef,
+    canvasCardsRef,
+    findCanvasCard,
+    focusCard,
+    imageCardsRef,
+    setImageCards,
+    zPeakRef,
+    pickThread,
+    redockActiveLane,
+    patchCanvasCardGeom,
+    dismissCanvasCard,
+    cycleImageCard,
+    spreadImageCard,
+    spawnImageCard,
+    spawnVideoCard,
+    spawnAgents,
+    spawnBrainCard,
+    spawnBrowserCard,
+    spawnFileCard,
+    spawnFileTreeCard,
+    spawnMarkdownCard,
+    spawnSpecCard,
+    spawnWorktreeDiffCard,
+    setSessionsOpen,
+    setSearchQuery,
+    setSearchOpen,
+    setCanvasZoomLevel,
+    setDockOpen,
+    setGridMode,
+    openFilePicker,
+    showCanvasToast,
+    viewportSpawnOrigin,
+    spawnTerminal,
+    sendPrompt,
+    spawnUiLoopProofCard,
+    canvasViewport,
+    animatePanTo,
+    readCanvasCard,
+  });
 
   if (!canvasEnabled) {
     return (
@@ -4299,169 +3509,5 @@ export default function CanvasGlassPreviewPage() {
       <ShareBetaModal open={shareBetaOpen} onClose={() => setShareBetaOpen(false)} tone={settings.tone} />
       <CanvasTour open={tourOpen} onClose={closeTour} onComplete={() => setShareBetaOpen(true)} />
     </SmoothCorners>
-  );
-}
-
-/** Section label inside the composer drawer (uppercase, muted). */
-function DrawerLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingLeft: 8, paddingBottom: 5 }}>
-      {children}
-    </span>
-  );
-}
-
-function PickerRow({ name, path, active, onClick }: { name: string; path?: string; active?: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        display: 'flex',
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-        borderWidth: 0,
-        background: 'transparent',
-        borderRadius: 9,
-        paddingTop: 6,
-        paddingBottom: 6,
-        paddingLeft: 8,
-        paddingRight: 8,
-        cursor: 'pointer',
-        textAlign: 'left',
-        fontFamily: FONT,
-        width: '100%',
-      }}
-      onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
-      onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
-    >
-      <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1, flex: 1, minWidth: 0 }}>
-        <span style={{ fontSize: 11.5, fontWeight: active ? 500 : 400, letterSpacing: '-0.1px', color: 'var(--cnv-ink)' }}>{name}</span>
-        {path ? (
-          <span style={{ fontSize: 9.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>{path}</span>
-        ) : null}
-      </span>
-      {active ? (
-        <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="var(--cnv-ink)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ flexShrink: 0 }}>
-          <path d="M20 6 9 17l-5-5" />
-        </svg>
-      ) : null}
-    </button>
-  );
-}
-
-/** Small pill control in the composer — repo scope + model (with a muted
- *  thinking-effort suffix via `sub`). */
-function ChipButton({ label, sub, active, onClick }: { label: string; sub?: string; active: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        height: 24,
-        paddingLeft: 10,
-        paddingRight: 10,
-        borderRadius: 999,
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor: 'var(--cnv-edge)',
-        background: active ? 'var(--cnv-tint)' : 'transparent',
-        color: active ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
-        fontSize: 9.5,
-        fontWeight: 400,
-        letterSpacing: '0.02em',
-        cursor: 'pointer',
-        fontFamily: FONT,
-        flexShrink: 0,
-        whiteSpace: 'nowrap',
-      }}
-      onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
-      onMouseLeave={(event) => { if (!active) event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
-    >
-      {label}
-      {sub ? <span style={{ marginLeft: 5, fontWeight: 300, opacity: 0.55 }}>{sub}</span> : null}
-    </button>
-  );
-}
-
-/** Glyph for an orchestration mode — fleet fan-out, single node, fusion
- *  sparkle. Shared by the composer's mode trigger and the MODE popover rows so
- *  the chip always shows the live mode's mark. */
-function ModeGlyph({ mode, size = 13 }: { mode: CanvasMode; size?: number }) {
-  if (mode === 'single') {
-    // One node inside a ring — the visual opposite of fleet's three-node fan-out.
-    return (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ display: 'block' }}>
-        <circle cx="12" cy="12" r="3" />
-        <circle cx="12" cy="12" r="8" />
-      </svg>
-    );
-  }
-  if (mode === 'fusion') {
-    // Sparkle — reads as the "deeper / more" pass beside the fleet fan-out.
-    return (
-      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ display: 'block' }}>
-        <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z" />
-      </svg>
-    );
-  }
-  // fleet — three nodes fanning out (matches the default composer's FleetGlyph).
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ display: 'block' }}>
-      <circle cx="12" cy="6" r="2" />
-      <circle cx="6" cy="18" r="2" />
-      <circle cx="18" cy="18" r="2" />
-      <path d="M12 8v4" />
-      <path d="m12 12-6 4" />
-      <path d="m12 12 6 4" />
-    </svg>
-  );
-}
-
-/** One row in the composer's MODE popover — glyph + title + detail, orange
- *  check on the live mode. Canvas-token twin of the default composer's
- *  PopoverRow (richer than PickerRow, which is title-only). */
-function ModeRow({ mode, title, detail, active, onClick }: { mode: CanvasMode; title: string; detail: string; active: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      role="menuitem"
-      style={{
-        display: 'grid',
-        gridTemplateColumns: '18px minmax(0, 1fr) 14px',
-        alignItems: 'center',
-        gap: 9,
-        width: '100%',
-        borderWidth: 0,
-        background: active ? 'var(--cnv-tint)' : 'transparent',
-        borderRadius: 9,
-        paddingTop: 7,
-        paddingBottom: 7,
-        paddingLeft: 8,
-        paddingRight: 8,
-        cursor: 'pointer',
-        textAlign: 'left',
-        fontFamily: FONT,
-      }}
-      onMouseEnter={(event) => { if (!active) event.currentTarget.style.background = 'var(--cnv-tint)'; }}
-      onMouseLeave={(event) => { if (!active) event.currentTarget.style.background = 'transparent'; }}
-    >
-      <span aria-hidden style={{ display: 'inline-flex', color: active ? 'var(--t-brand-orange, #FF5A1F)' : 'var(--cnv-ink-muted)' }}>
-        <ModeGlyph mode={mode} size={13} />
-      </span>
-      <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-        <span style={{ fontSize: 12.5, fontWeight: 400, color: 'var(--cnv-ink)', letterSpacing: '-0.1px', lineHeight: 1.25 }}>{title}</span>
-        <span style={{ fontSize: 9.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', letterSpacing: '-0.05px', lineHeight: 1.3 }}>{detail}</span>
-      </span>
-      <span aria-hidden style={{ display: 'inline-flex', opacity: active ? 1 : 0, color: 'var(--t-brand-orange, #FF5A1F)' }}>
-        <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-          <path d="m5 12 4 4 10-10" />
-        </svg>
-      </span>
-    </button>
   );
 }
