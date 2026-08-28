@@ -1972,6 +1972,12 @@
       ]
     },
     {
+      "path": "tests/release-native-module-check.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "tests/release-preflight.test.ts",
       "reasons": [
         "git-cli",
