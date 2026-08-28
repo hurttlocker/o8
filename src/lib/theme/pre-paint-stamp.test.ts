@@ -11,7 +11,6 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { PRE_PAINT_THEME_STAMP } from './pre-paint-stamp';
 
 function runStamp(): void {
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval
   new Function(PRE_PAINT_THEME_STAMP)();
 }
 
