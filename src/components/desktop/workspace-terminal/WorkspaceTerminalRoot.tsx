@@ -16,7 +16,10 @@ import type { TerminalTab, TerminalTabHandle, WorkspaceTerminalProps } from '@/c
 
 export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerminalProps>(
   function WorkspaceTerminalRoot(props, ref) {
-    const controller = useWorkspaceTerminalController(props, ref);
+    const {
+      activeRepo: controllerActiveRepo, activeTab: controllerActiveTab, attachWorkspaceTerminalSession, cleanupFinishedTabs: controllerCleanupFinishedTabs, containerDivRef, effectiveActiveTabId, finishedTabCount, handleClosePreview, handleCloseTab: controllerHandleCloseTab, handleConsumeChatDraftInjection, handleDragStart, handleNewLLMChatTab: controllerHandleNewLLMChatTab, handleNewTab: controllerHandleNewTab, handleOpenWorkspaceCommitTab, handleRestoreLatestCheckpoint, handleRunCommandInTerminal, handleSaveCheckpoint, handleSelectTab: controllerHandleSelectTab, handleUpdateChatMessages, handleUpdateChatModel, handleUpdateChatSessionKey, handleUpdateLinkedIssue, handleUpdateLlmSummary, handleUpdateTabLabel: controllerHandleUpdateTabLabel, handleUpdateTabMode, isDragging, panelRefs, previewHeight, previews, primaryRestoreSettled, spawnChatTab, spawnFleetCanvasTab: controllerSpawnFleetCanvasTab, spawnOrchestratorTab: controllerSpawnOrchestratorTab, spawnSingleRuntimeTab, tabs, termWsConnected, undoCleanup: controllerUndoCleanup, visibleTabs,
+    } = useWorkspaceTerminalController(props, ref);
+    const controller = { activeRepo: controllerActiveRepo, activeTab: controllerActiveTab, attachWorkspaceTerminalSession, cleanupFinishedTabs: controllerCleanupFinishedTabs, effectiveActiveTabId, finishedTabCount, handleClosePreview, handleCloseTab: controllerHandleCloseTab, handleConsumeChatDraftInjection, handleDragStart, handleNewLLMChatTab: controllerHandleNewLLMChatTab, handleNewTab: controllerHandleNewTab, handleOpenWorkspaceCommitTab, handleRestoreLatestCheckpoint, handleRunCommandInTerminal, handleSaveCheckpoint, handleSelectTab: controllerHandleSelectTab, handleUpdateChatMessages, handleUpdateChatModel, handleUpdateChatSessionKey, handleUpdateLinkedIssue, handleUpdateLlmSummary, handleUpdateTabLabel: controllerHandleUpdateTabLabel, handleUpdateTabMode, isDragging, previewHeight, previews, primaryRestoreSettled, spawnChatTab, spawnFleetCanvasTab: controllerSpawnFleetCanvasTab, spawnOrchestratorTab: controllerSpawnOrchestratorTab, spawnSingleRuntimeTab, tabs, termWsConnected, undoCleanup: controllerUndoCleanup, visibleTabs };
     const workspaceInstanceId = useId();
     const handleNewTab = controller.handleNewTab;
     const createTerminalModeShellTab = useCallback(
@@ -30,7 +33,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
       canCloseTile: props.canCloseTile === true,
       createShellTab: createTerminalModeShellTab,
       attachTerminalSession: controller.attachWorkspaceTerminalSession,
-      panelRefs: controller.panelRefs,
+      panelRefs,
       preferredRepo: props.preferredRepo ?? null,
       selectTab: controller.handleSelectTab,
       tabs: controller.visibleTabs,
@@ -160,7 +163,9 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
     // ("Maximum update depth exceeded" on /dashboard, 2026-06-12).
     const tabsBroadcastSignature = JSON.stringify(tabsForBroadcast);
     const tabsForBroadcastRef = useRef(tabsForBroadcast);
-    tabsForBroadcastRef.current = tabsForBroadcast;
+    useEffect(() => {
+      tabsForBroadcastRef.current = tabsForBroadcast;
+    });
 
     useEffect(() => {
       if (typeof window === 'undefined') return;
@@ -287,7 +292,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
     return (
       <WorkspaceSpawnProvider value={spawnHandlers}>
       <div
-        ref={controller.containerDivRef}
+        ref={containerDivRef}
         data-vibrancy-passthrough=""
         style={{
           flex: 1,
@@ -359,7 +364,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           restoreSettled={controller.primaryRestoreSettled}
           effectiveActiveTabId={terminalMode.effectiveActiveTabId}
           termWsConnected={controller.termWsConnected}
-          panelRefs={controller.panelRefs}
+          panelRefs={panelRefs}
           onCloseTab={controller.handleCloseTab}
           onRunInTerminal={controller.handleRunCommandInTerminal}
           onOpenWorkspaceCommitTab={controller.handleOpenWorkspaceCommitTab}
