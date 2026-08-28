@@ -22,8 +22,10 @@ import {
 } from './live-presence';
 import {
   AGENT_MESSAGE_TEXT_MAX_LENGTH,
+  AgentPresenceWriteConflictError,
   type AgentMessageRefs,
   type AgentPresence,
+  type AgentPresenceWriteResult,
   acknowledgeAgentInbox,
   claimAgentInboxWake,
   findAgentPresence,
@@ -265,7 +267,7 @@ export function joinAgentPresence(
   input: unknown,
   principal: RequestPrincipalContext,
   sqlite: Database.Database = getSqlite(),
-): AgentPresence {
+): AgentPresenceWriteResult {
   if (principal.role !== 'operator') {
     throw new AgentBusError('Presence join requires an operator credential.', 'agent_presence_join_forbidden', 403);
   }
@@ -276,17 +278,24 @@ export function joinAgentPresence(
   const name = automatic
     ? optionalString(body.name, 'name') ?? availableAutomaticAgentName(agentId, resolve(repo), sqlite)
     : requiredString(body.name, 'name');
-  return upsertAgentPresence({
-    agentId,
-    name,
-    repo,
-    worktreePath: optionalString(body.worktreePath, 'worktreePath', 2_000),
-    runtime: requiredString(body.runtime, 'runtime'),
-    sessionKey: optionalString(body.sessionKey, 'sessionKey', 500),
-    laneId: null,
-    packetId: null,
-    lastSeen: new Date().toISOString(),
-  }, sqlite);
+  try {
+    return upsertAgentPresence({
+      agentId,
+      name,
+      repo,
+      worktreePath: optionalString(body.worktreePath, 'worktreePath', 2_000),
+      runtime: requiredString(body.runtime, 'runtime'),
+      sessionKey: optionalString(body.sessionKey, 'sessionKey', 500),
+      laneId: null,
+      packetId: null,
+      lastSeen: new Date().toISOString(),
+    }, sqlite);
+  } catch (error) {
+    if (error instanceof AgentPresenceWriteConflictError) {
+      throw new AgentBusError(error.message, error.code, error.status);
+    }
+    throw error;
+  }
 }
 
 export async function readAgentPresence(

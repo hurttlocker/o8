@@ -18,8 +18,9 @@
  *                                       commands unless you hold the `ship` lease
  *   o8 team init                     — install the guard hook into .claude/settings.json
  *
- * Identity = CLAUDE_CODE_SESSION_ID (stable per session). Open-source extraction
- * tracked separately; this is the in-o8 build (`o8 team`).
+ * Identity comes from an explicit runtime/session binding or stable process
+ * ancestry. Open-source extraction tracked separately; this is the in-o8 build
+ * (`o8 team`).
  */
 
 import { execFileSync } from 'node:child_process';
@@ -29,6 +30,7 @@ import path from 'node:path';
 import { CliError, EXIT } from '../api.js';
 import { resolveCliDataDir } from '../config.js';
 import { printJson, type OutputMode } from '../output.js';
+import { resolveLeaseOwnerPid } from './lease.js';
 // PARITY: an agent's o8 team handle is the SAME canonical codename Symon speaks
 // (via o8_status) and the dashboard shows (SessionVisualizer / agent cards) —
 // one voice-friendly name follows the agent across every surface. Import the
@@ -47,6 +49,7 @@ const SHIP_COMMAND_PATTERNS = [
 ];
 interface Presence {
   agentId: string;
+  sessionKey?: string;
   handle: string;
   runtime: string;
   pid: number;
@@ -65,6 +68,22 @@ interface Lease {
   expiresAt: string;
 }
 
+interface AgentProcessRow {
+  pid: number;
+  ppid: number;
+  command: string;
+}
+
+export interface ResolveAgentIdentityOptions {
+  env?: NodeJS.ProcessEnv;
+  ppid?: number;
+  readProcess?: (pid: number) => AgentProcessRow | null;
+}
+
+interface TeamCommandOptions extends ResolveAgentIdentityOptions {
+  cwd?: string;
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -77,9 +96,10 @@ function isFresh(iso: string | undefined, ttl = LIVE_TTL_MS): boolean {
 
 /** The shared room — the git common dir is the same for every worktree of a repo,
  *  and everything under it is git-ignored, so it never touches the tree. */
-function roomDir(): string {
+function roomDir(cwd = process.cwd()): string {
   try {
     const gitDir = execFileSync('git', ['rev-parse', '--absolute-git-dir'], {
+      cwd,
       windowsHide: true,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
@@ -91,8 +111,8 @@ function roomDir(): string {
   return path.join(resolveCliDataDir(), 'team', 'default');
 }
 
-function ensureRoom(): { room: string; presence: string; leases: string; mailbox: string } {
-  const room = roomDir();
+function ensureRoom(options: TeamCommandOptions = {}): { room: string; presence: string; leases: string; mailbox: string } {
+  const room = roomDir(options.cwd);
   const presence = path.join(room, 'presence');
   const leases = path.join(room, 'leases');
   const mailbox = path.join(room, 'mailbox');
@@ -146,11 +166,24 @@ function markRead(mailboxDir: string, handle: string, count: number): void {
   }
 }
 
-function agentId(): string {
-  return (
-    process.env.CLAUDE_CODE_SESSION_ID
-    || process.env.TERM_SESSION_ID
-    || `pid-${process.ppid || process.pid}`
+export function resolveAgentIdentity(options: ResolveAgentIdentityOptions = {}): string {
+  const env = options.env ?? process.env;
+  const explicit = env.O8_AGENT_ID?.trim();
+  if (explicit) return explicit;
+  const packetId = env.O8_WORKER_PACKET_ID?.trim();
+  if (packetId) return packetId;
+  const claudeSessionId = env.CLAUDE_CODE_SESSION_ID?.trim();
+  if (claudeSessionId) return claudeSessionId;
+  const ownerPid = resolveLeaseOwnerPid({
+    env,
+    ppid: options.ppid,
+    readProcess: options.readProcess,
+  });
+  if (ownerPid !== null) return `pid-${ownerPid}`;
+  throw new CliError(
+    'identity_unresolved',
+    'Unable to resolve a stable agent session identity. Set O8_AGENT_ID to a unique value for this session and retry.',
+    EXIT.CONFLICT,
   );
 }
 
@@ -192,10 +225,26 @@ function livePresences(presenceDir: string): Presence[] {
 }
 
 /** Touch my presence (heartbeat). Auto-assigns a friendly handle on first sight. */
-function touchPresence(presenceDir: string, status?: string): Presence {
-  const id = agentId();
+function touchPresence(
+  presenceDir: string,
+  status?: string,
+  options: TeamCommandOptions = {},
+  beforeWrite?: (presence: Presence) => void,
+): Presence {
+  const id = resolveAgentIdentity(options);
   const file = path.join(presenceDir, `${encodeURIComponent(id)}.json`);
   const existing = readJson<Presence>(file);
+  if (existing) {
+    const ownerSessionKey = existing.sessionKey ?? existing.agentId;
+    const canAdoptLegacy = existing.sessionKey === undefined && existing.agentId === id;
+    if (!canAdoptLegacy && ownerSessionKey !== id) {
+      throw new CliError(
+        'foreign_identity',
+        `This status line is owned by @${existing.handle} (${ownerSessionKey}); your session is ${id}.`,
+        EXIT.CONFLICT,
+      );
+    }
+  }
   let handle = existing?.handle;
   if (!handle) {
     // The canonical codename for this agent (parity with Symon + the UI). Suffix
@@ -212,14 +261,16 @@ function touchPresence(presenceDir: string, status?: string): Presence {
   }
   const presence: Presence = {
     agentId: id,
+    sessionKey: id,
     handle,
     runtime: existing?.runtime || runtimeLabel(),
-    pid: process.ppid || process.pid,
-    cwd: process.cwd(),
+    pid: options.ppid ?? (process.ppid || process.pid),
+    cwd: options.cwd ?? process.cwd(),
     status: status ?? existing?.status ?? 'working',
     startedAt: existing?.startedAt || nowIso(),
     lastSeen: nowIso(),
   };
+  beforeWrite?.(presence);
   writeJsonAtomic(file, presence);
   return presence;
 }
@@ -251,9 +302,9 @@ function leaseFor(leasesDir: string, name: string): Lease | null {
 
 // ── subcommands ─────────────────────────────────────────────────────────
 
-function cmdWho(mode: OutputMode): number {
-  const { presence, leases } = ensureRoom();
-  const me = touchPresence(presence);
+function cmdWho(mode: OutputMode, options: TeamCommandOptions): number {
+  const { presence, leases } = ensureRoom(options);
+  const me = touchPresence(presence, undefined, options);
   const peers = livePresences(presence);
   const held = liveLeases(leases);
   if (mode.human) {
@@ -272,13 +323,15 @@ function cmdWho(mode: OutputMode): number {
   return EXIT.OK;
 }
 
-function cmdStatus(mode: OutputMode, rest: string[]): number {
+function cmdStatus(mode: OutputMode, rest: string[], options: TeamCommandOptions): number {
   const text = rest.join(' ').trim();
   if (!text) throw new CliError('invalid_args', 'o8 team status requires text.', EXIT.INVALID_ARGS, 'Example: o8 team status "shipping 0.1.448"');
-  const { presence } = ensureRoom();
-  const me = touchPresence(presence, text);
+  const { presence } = ensureRoom(options);
+  const me = touchPresence(presence, text, options, (next) => {
+    process.stderr.write(`as @${next.handle} · ${next.sessionKey}\n`);
+  });
   if (mode.human) process.stdout.write(`@${me.handle}: ${me.status}\n`);
-  else printJson({ schema: 'o8/team.status/v1', handle: me.handle, status: me.status });
+  else printJson({ schema: 'o8/team.status/v1', handle: me.handle, sessionKey: me.sessionKey, status: me.status });
   return EXIT.OK;
 }
 
@@ -289,9 +342,9 @@ function flag(rest: string[], name: string): string | null {
   return eq ? eq.slice(name.length + 3) : null;
 }
 
-function cmdLease(mode: OutputMode, action: string | undefined, rest: string[]): number {
-  const { presence, leases } = ensureRoom();
-  const me = touchPresence(presence);
+function cmdLease(mode: OutputMode, action: string | undefined, rest: string[], options: TeamCommandOptions): number {
+  const { presence, leases } = ensureRoom(options);
+  const me = touchPresence(presence, undefined, options);
   if (action === 'list' || !action) {
     const held = liveLeases(leases);
     if (mode.human) {
@@ -339,9 +392,9 @@ function cmdLease(mode: OutputMode, action: string | undefined, rest: string[]):
   throw new CliError('invalid_args', `Unknown lease action: ${action}`, EXIT.INVALID_ARGS, 'Use: acquire | release | list');
 }
 
-function cmdTell(mode: OutputMode, rest: string[]): number {
-  const { presence, mailbox } = ensureRoom();
-  const me = touchPresence(presence);
+function cmdTell(mode: OutputMode, rest: string[], options: TeamCommandOptions): number {
+  const { presence, mailbox } = ensureRoom(options);
+  const me = touchPresence(presence, undefined, options);
   const target = rest.find((t) => t.startsWith('@'));
   if (!target) throw new CliError('invalid_args', 'o8 team tell requires a @handle.', EXIT.INVALID_ARGS, 'Example: o8 team tell @nova "hold your bump, I am mid-ship"');
   const toHandle = target.slice(1);
@@ -354,9 +407,9 @@ function cmdTell(mode: OutputMode, rest: string[]): number {
   return EXIT.OK;
 }
 
-function cmdInbox(mode: OutputMode, rest: string[]): number {
-  const { presence, mailbox } = ensureRoom();
-  const me = touchPresence(presence);
+function cmdInbox(mode: OutputMode, rest: string[], options: TeamCommandOptions): number {
+  const { presence, mailbox } = ensureRoom(options);
+  const me = touchPresence(presence, undefined, options);
   const box = readMailbox(mailbox, me.handle);
   const msgs = rest.includes('--all') ? box.all : box.all.slice(box.readCount);
   if (mode.human) {
@@ -370,9 +423,9 @@ function cmdInbox(mode: OutputMode, rest: string[]): number {
 /** PreToolUse hook: stamp heartbeat, surface unread peer messages as context,
  *  and block a ship/bump when the `ship` lease is held by another live agent.
  *  Reads Claude Code's hook JSON on stdin; exit 2 blocks + feeds stderr back. */
-function cmdGuard(): number {
-  const { presence, leases, mailbox } = ensureRoom();
-  const me = touchPresence(presence);
+function cmdGuard(options: TeamCommandOptions): number {
+  const { presence, leases, mailbox } = ensureRoom(options);
+  const me = touchPresence(presence, undefined, options);
   const box = readMailbox(mailbox, me.handle);
   const unread = box.all.slice(box.readCount);
 
@@ -415,8 +468,8 @@ const GUARD_HOOK = {
   hooks: [{ type: 'command', command: 'o8 team guard' }],
 };
 
-function cmdInit(mode: OutputMode): number {
-  const settingsPath = path.join(process.cwd(), '.claude', 'settings.json');
+function cmdInit(mode: OutputMode, options: TeamCommandOptions): number {
+  const settingsPath = path.join(options.cwd ?? process.cwd(), '.claude', 'settings.json');
   mkdirSync(path.dirname(settingsPath), { recursive: true });
   const settings = (readJson<Record<string, unknown>>(settingsPath)) ?? {};
   const hooks = (settings.hooks as Record<string, unknown>) ?? {};
@@ -425,8 +478,8 @@ function cmdInit(mode: OutputMode): number {
   if (!already) preToolUse.push(GUARD_HOOK);
   settings.hooks = { ...hooks, PreToolUse: preToolUse };
   writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-  const { presence } = ensureRoom();
-  const me = touchPresence(presence);
+  const { presence } = ensureRoom(options);
+  const me = touchPresence(presence, undefined, options);
   if (mode.human) {
     process.stdout.write(`o8 team installed (you are @${me.handle}).\n`);
     process.stdout.write(`Guard hook ${already ? 'already present' : 'added'} in ${settingsPath}.\n`);
@@ -435,15 +488,20 @@ function cmdInit(mode: OutputMode): number {
   return EXIT.OK;
 }
 
-export function runTeam(mode: OutputMode, sub: string | undefined, rest: string[]): number {
+export function runTeam(
+  mode: OutputMode,
+  sub: string | undefined,
+  rest: string[],
+  options: TeamCommandOptions = {},
+): number {
   switch (sub) {
-    case 'who': return cmdWho(mode);
-    case 'status': return cmdStatus(mode, rest);
-    case 'lease': return cmdLease(mode, rest[0], rest.slice(1));
-    case 'tell': return cmdTell(mode, rest);
-    case 'inbox': return cmdInbox(mode, rest);
-    case 'guard': return cmdGuard();
-    case 'init': return cmdInit(mode);
+    case 'who': return cmdWho(mode, options);
+    case 'status': return cmdStatus(mode, rest, options);
+    case 'lease': return cmdLease(mode, rest[0], rest.slice(1), options);
+    case 'tell': return cmdTell(mode, rest, options);
+    case 'inbox': return cmdInbox(mode, rest, options);
+    case 'guard': return cmdGuard(options);
+    case 'init': return cmdInit(mode, options);
     default:
       throw new CliError(
         'unknown_team_subcommand',
