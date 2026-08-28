@@ -11,6 +11,9 @@ export interface WarmUiLoopPacket {
 
 export type UiLoopEditOutcome =
   | { kind: 'steered'; packet: WarmUiLoopPacket }
+  | { kind: 'queued'; packet: WarmUiLoopPacket; position: number }
+  | { kind: 'blocked'; packet: WarmUiLoopPacket; reason: string }
+  | { kind: 'rejected'; reason: 'queue_full' }
   | { kind: 'fallback'; reason: string }
   | { kind: 'error'; message: string };
 
@@ -70,12 +73,28 @@ export async function routeUiLoopEdit(input: {
     kind?: string;
     packet?: WarmUiLoopPacket;
     reason?: string;
+    queued?: boolean;
+    position?: number;
+    blocked?: string;
+    rejected?: string;
   }> | null;
   if (steerResponse.ok && payload?.result?.kind === 'steered' && payload.result.packet) {
     return { kind: 'steered', packet: payload.result.packet };
   }
   if (steerResponse.ok && payload?.result?.kind === 'fallback') {
     return fallback(payload.result.reason ?? 'NO_STEERABLE_SESSION', input.injectFallback);
+  }
+  if (steerResponse.ok
+    && payload?.result?.queued === true
+    && payload.result.packet
+    && typeof payload.result.position === 'number') {
+    return { kind: 'queued', packet: payload.result.packet, position: payload.result.position };
+  }
+  if (steerResponse.ok && payload?.result?.blocked && payload.result.packet) {
+    return { kind: 'blocked', packet: payload.result.packet, reason: payload.result.blocked };
+  }
+  if (steerResponse.ok && payload?.result?.rejected === 'queue_full') {
+    return { kind: 'rejected', reason: 'queue_full' };
   }
   return { kind: 'error', message: errorMessage(payload) };
 }

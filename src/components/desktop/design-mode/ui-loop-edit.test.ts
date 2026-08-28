@@ -109,4 +109,32 @@ describe('routeUiLoopEdit', () => {
     });
     expect(injectFallback).not.toHaveBeenCalled();
   });
+
+  it('returns blocked budget details with the packet needed by Open packet', async () => {
+    const injectFallback = vi.fn();
+    const packet = {
+      packetId: 'pkt-warm',
+      laneId: 'lane-warm',
+      lastActivityAt: '2026-08-28T08:00:00.000Z',
+      label: '#1905',
+    };
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: true, result: packet }))
+      .mockResolvedValueOnce(Response.json({
+        ok: true,
+        result: {
+          blocked: 'iterations',
+          values: { iterations: 8 },
+          packet,
+        },
+      })));
+
+    await expect(routeUiLoopEdit({
+      repoPath: '/repo/o8',
+      context,
+      forceFresh: false,
+      injectFallback,
+    })).resolves.toEqual({ kind: 'blocked', packet, reason: 'iterations' });
+    expect(injectFallback).not.toHaveBeenCalled();
+  });
 });

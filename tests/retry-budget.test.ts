@@ -32,6 +32,8 @@ function packetFixture(overrides: Partial<OrchestratorPacket> = {}): Orchestrato
     lastRecoveryAt: '2026-06-09T00:00:00.000Z',
     typecheckAutoRetries: 1,
     leaseWaitAutoRetries: 1,
+    uiLoopIterations: 4,
+    uiLoopStartedAt: '2026-08-28T08:00:00.000Z',
     ...overrides,
   } as OrchestratorPacket;
 }
@@ -42,6 +44,8 @@ describe('resetPacketFields (rerun_with_feedback)', () => {
     resetPacketFields(packet);
     expect(packet.typecheckAutoRetries).toBe(1);
     expect(packet.leaseWaitAutoRetries).toBe(1);
+    expect(packet.uiLoopIterations).toBe(4);
+    expect(packet.uiLoopStartedAt).toBe('2026-08-28T08:00:00.000Z');
   });
 
   it('preserves the spent budget across repeated rerun field resets', () => {
@@ -53,6 +57,8 @@ describe('resetPacketFields (rerun_with_feedback)', () => {
     resetPacketFields(packet);
     expect(packet.typecheckAutoRetries).toBe(1);
     expect(packet.leaseWaitAutoRetries).toBe(1);
+    expect(packet.uiLoopIterations).toBe(4);
+    expect(packet.uiLoopStartedAt).toBe('2026-08-28T08:00:00.000Z');
     expect(packet.recoveryCount).toBe(0);
   });
 

@@ -299,6 +299,10 @@ export interface OrchestratorPacket {
    * zeroed only by operator reset_packet, matching typecheckAutoRetries.
    */
   leaseWaitAutoRetries?: number;
+  /** Follow-up Design Mode steers already accepted for this packet. */
+  uiLoopIterations?: number;
+  /** Wall-clock origin for this packet's Design Mode budget. */
+  uiLoopStartedAt?: string;
   /**
    * Self-review-stall auto-retry budget spent (loop bound, 2026-06-22). Same
    * lifecycle as {@link typecheckAutoRetries} — lives ON the packet because a
