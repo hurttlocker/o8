@@ -3,11 +3,12 @@
 import { useEffect, type Dispatch, type SetStateAction } from 'react';
 import type { CommandPaletteActionItem } from '@/components/desktop/CommandPalette';
 
-export type CanvasCardKind = 'term' | 'file' | 'image' | 'video' | 'browser' | 'chat' | 'diff' | 'spec' | 'brain' | 'markdown' | 'agent';
+export type CanvasCardKind = 'term' | 'file' | 'tree' | 'image' | 'video' | 'browser' | 'chat' | 'diff' | 'spec' | 'brain' | 'markdown' | 'agent';
 
 export const CANVAS_CARD_KINDS: CanvasCardKind[] = [
   'term',
   'file',
+  'tree',
   'image',
   'video',
   'browser',
@@ -97,6 +98,7 @@ export function selectCanvasMedia(
 export interface CanvasCommands {
   spawnTerminal: () => void;
   spawnFile: (filePath?: string) => void;
+  spawnTree: () => void;
   spawnImage: () => void;
   spawnVideo: () => void;
   spawnBrowser: () => void;
@@ -118,6 +120,7 @@ export function canvasCommandActionItems(commands: CanvasCommands): CommandPalet
     { id: 'canvas:search', title: 'Search the canvas', detail: 'Find cards, files, repositories, and sessions', onActivate: commands.openSearch },
     { id: 'canvas:new-terminal', title: 'New terminal card', detail: 'Open a shell in the active repository', onActivate: commands.spawnTerminal },
     { id: 'canvas:new-file', title: 'New file card', detail: 'Choose a file to open on the canvas', onActivate: () => commands.spawnFile() },
+    { id: 'canvas:new-tree', title: 'New file tree', detail: 'Browse the active repository on the canvas', onActivate: commands.spawnTree },
     { id: 'canvas:new-image', title: 'New image card', detail: 'Choose an image from this device', onActivate: commands.spawnImage },
     { id: 'canvas:new-video', title: 'New video card', detail: 'Choose a video from this device', onActivate: commands.spawnVideo },
     { id: 'canvas:new-browser', title: 'New browser card', detail: 'Open the dashboard in a browser card', onActivate: commands.spawnBrowser },

@@ -3,7 +3,7 @@
 import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CommandPaletteActionItem } from '@/components/desktop/CommandPalette';
+import type { CommandPaletteActionItem, CommandPaletteFileItem } from '@/components/desktop/CommandPalette';
 import type { CanvasCommands } from './canvas-commands';
 import { CanvasCommandPalette } from './canvas-command-palette';
 
@@ -12,15 +12,21 @@ vi.mock('@/components/desktop/CommandPalette', () => ({
     open,
     onClose,
     actionItems,
+    initialScope,
+    fileItems,
+    onSelectFile,
   }: {
     open: boolean;
     onClose: () => void;
     actionItems: CommandPaletteActionItem[];
+    initialScope?: 'all' | 'file';
+    fileItems?: CommandPaletteFileItem[];
+    onSelectFile: (path: string) => void;
   }): ReactNode => {
     if (!open) return null;
     return createElement(
       'div',
-      { 'data-canvas-palette': 'open' },
+      { 'data-canvas-palette': 'open', 'data-palette-scope': initialScope },
       ...actionItems.map((item) => createElement(
         'button',
         {
@@ -33,6 +39,11 @@ vi.mock('@/components/desktop/CommandPalette', () => ({
         },
         item.title,
       )),
+      ...(fileItems ?? []).map((item) => createElement(
+        'button',
+        { key: item.path, type: 'button', onClick: () => { onSelectFile(item.path); onClose(); } },
+        item.title ?? item.path,
+      )),
     );
   },
 }));
@@ -44,6 +55,7 @@ function createCommands(spawnFile: CanvasCommands['spawnFile']): CanvasCommands 
   return {
     spawnTerminal: vi.fn(),
     spawnFile,
+    spawnTree: vi.fn(),
     spawnImage: vi.fn(),
     spawnVideo: vi.fn(),
     spawnBrowser: vi.fn(),
@@ -90,6 +102,7 @@ describe('CanvasCommandPalette', () => {
       await Promise.resolve();
     });
     expect(container.querySelector('[data-canvas-palette="open"]')).not.toBeNull();
+    expect(container.querySelector('[data-palette-scope="all"]')).not.toBeNull();
 
     const button = Array.from(container.querySelectorAll('button')).find((entry) => entry.textContent === 'New file card');
     expect(button).toBeDefined();
@@ -97,5 +110,38 @@ describe('CanvasCommandPalette', () => {
 
     expect(spawnFile).toHaveBeenCalledOnce();
     expect(container.querySelector('[data-canvas-palette="open"]')).toBeNull();
+  });
+
+  it('opens file mode on Command-P, refreshes the active repo, and opens one listed file', async () => {
+    const spawnFile = vi.fn();
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      entries: [{ name: 'page.tsx', path: 'src/app/page.tsx', kind: 'file' }],
+      root: '/repo',
+    }), { status: 200 }));
+    act(() => root.render(createElement(CanvasCommandPalette, {
+      commands: createCommands(spawnFile),
+      repo: '/repo',
+      fetchImpl,
+    })));
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'p',
+        metaKey: true,
+        bubbles: true,
+        cancelable: true,
+      }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('[data-palette-scope="file"]')).not.toBeNull();
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    const button = Array.from(container.querySelectorAll('button')).find((entry) => entry.textContent === 'page.tsx');
+    expect(button).toBeDefined();
+    act(() => button?.click());
+
+    expect(spawnFile).toHaveBeenCalledOnce();
+    expect(spawnFile).toHaveBeenCalledWith('/repo/src/app/page.tsx');
   });
 });

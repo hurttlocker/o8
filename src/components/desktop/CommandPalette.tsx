@@ -34,6 +34,8 @@ import {
 } from './command-palette-styles';
 import { shouldRequestRecall } from '@/lib/search/recall-trigger';
 
+const SUPPLIED_FILE_RESULT_LIMIT = 100;
+
 export type CommandPaletteSearchKind =
   | 'issue'
   | 'file'
@@ -91,12 +93,20 @@ export interface CommandPaletteActionItem {
   onActivate: () => void;
 }
 
+export interface CommandPaletteFileItem {
+  path: string;
+  title?: string;
+  detail?: string;
+}
+
 export interface CommandPaletteProps {
   open: boolean;
   onClose: () => void;
   workspace?: string | null;
   repo?: string | null;
   actionItems?: CommandPaletteActionItem[];
+  initialScope?: 'all' | 'file';
+  fileItems?: CommandPaletteFileItem[];
   onSelectIssue: (issueNumber: number, repo?: string) => void;
   onSelectFile: (filePath: string, line?: number) => void;
   onSelectAgent: (sessionKey: string) => void;
@@ -271,6 +281,8 @@ export const CommandPalette = memo(function CommandPalette({
   workspace,
   repo,
   actionItems,
+  initialScope = 'all',
+  fileItems,
   onSelectIssue,
   onSelectFile,
   onSelectAgent,
@@ -297,11 +309,21 @@ export const CommandPalette = memo(function CommandPalette({
   const lastRecallKeyRef = useRef('');
   const listRef = useRef<HTMLDivElement>(null);
   const selectedIndexRef = useRef(0);
+  const seededFileResults = useMemo<CommandPaletteSearchResult[]>(() => (
+    (fileItems ?? []).map((item, index) => ({
+      kind: 'file',
+      id: `file:${item.path}:${index}`,
+      title: item.title ?? item.path.split('/').pop() ?? item.path,
+      detail: item.detail ?? item.path,
+      target: { filePath: item.path },
+      score: 100 - index,
+    }))
+  ), [fileItems]);
 
   useEffect(() => {
     if (!open) return;
     setQuery('');
-    setScope('all');
+    setScope(initialScope);
     setGroups(EMPTY_GROUPS);
     setRecallResults([]);
     setRecallCandidate(null);
@@ -312,7 +334,7 @@ export const CommandPalette = memo(function CommandPalette({
     setSelectedIndex(0);
     const focusId = window.setTimeout(() => inputRef.current?.focus(), 0);
     return () => window.clearTimeout(focusId);
-  }, [open]);
+  }, [initialScope, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -336,6 +358,19 @@ export const CommandPalette = memo(function CommandPalette({
     setRecallCandidate(null);
 
     const trimmed = query.trim();
+    if (scope === 'file' && fileItems !== undefined) {
+      const normalized = trimmed.toLowerCase();
+      const matches = normalized
+        ? seededFileResults.filter((result) => (
+            result.title.toLowerCase().includes(normalized)
+            || result.detail.toLowerCase().includes(normalized)
+          ))
+        : seededFileResults;
+      setGroups({ ...EMPTY_GROUPS, file: matches.slice(0, SUPPLIED_FILE_RESULT_LIMIT) });
+      setError(null);
+      setLoading(false);
+      return;
+    }
     const browseScope = scope === 'agent'
       || scope === 'file'
       || scope === 'issue'
@@ -392,7 +427,7 @@ export const CommandPalette = memo(function CommandPalette({
       if (debounceRef.current) clearTimeout(debounceRef.current);
       if (abortRef.current) abortRef.current.abort();
     };
-  }, [open, query, repo, scope, workspace]);
+  }, [fileItems, open, query, repo, scope, seededFileResults, workspace]);
 
   useEffect(() => {
     if (!open || !recallCandidate || scope !== 'all') return;
@@ -640,7 +675,7 @@ export const CommandPalette = memo(function CommandPalette({
                 setQuery(event.target.value);
                 setSelectedIndex(0);
               }}
-              placeholder="Search agents, files, actions..."
+              placeholder={scope === 'file' ? 'Search files by name...' : 'Search agents, files, actions...'}
               spellCheck={false}
               autoComplete="off"
               style={inputStyle}
