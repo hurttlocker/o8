@@ -571,17 +571,30 @@ export function getGitHubPullRequestByHead(repoFullName: string, headRefName: st
   return row ? mapPullRequestRow(row) : null;
 }
 
-export function readGitHubThreadUpdatedAt(
+export interface GitHubThreadSyncState {
+  updatedAt: string | null;
+  attentionAssessed: boolean;
+}
+
+export function readGitHubThreadSyncState(
   repoFullName: string,
   kind: OutsiderAttentionThreadKind,
-): Map<number, string | null> {
+): Map<number, GitHubThreadSyncState> {
   const table = kind === 'issue' ? 'github_issues' : 'github_pull_requests';
   const rows = getSqlite().prepare(`
-    SELECT number, updated_at as updatedAt
+    SELECT number, updated_at as updatedAt,
+           last_human_comment_at IS NOT NULL as attentionAssessed
     FROM ${table}
     WHERE repo_full_name = ?
-  `).all(repoFullName) as Array<{ number: number; updatedAt: string | null }>;
-  return new Map(rows.map((row) => [row.number, row.updatedAt]));
+  `).all(repoFullName) as Array<{
+    number: number;
+    updatedAt: string | null;
+    attentionAssessed: number;
+  }>;
+  return new Map(rows.map((row) => [row.number, {
+    updatedAt: row.updatedAt,
+    attentionAssessed: Boolean(row.attentionAssessed),
+  }]));
 }
 
 export function updateGitHubThreadAttention(attention: GitHubThreadAttentionSnapshot): boolean {
