@@ -1,5 +1,6 @@
 import { getRuntime } from '@/lib/runtimes';
-import { readPersistedSessionCost } from '@/lib/orchestrator/cost-persistence';
+import { readPersistedSessionCosts } from '@/lib/orchestrator/cost-persistence';
+import type { UsageRole } from '@/lib/db/usage';
 import { resolveRuntimeSessionIdentityId } from '@/lib/runtime/session-identity';
 import { runtimeIdFromSessionKey } from '@/lib/runtime/transcript';
 import { isOrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
@@ -26,10 +27,18 @@ export interface RuntimeTokenSummary {
   packetCount: number;
 }
 
+export interface RoleCostSummary {
+  inputTokens: number;
+  outputTokens: number;
+  totalCostUsd: number;
+  requestCount: number;
+}
+
 export interface MissionCostSummary {
   totalCostUsd: number;
   packetCosts: PacketCostSummary[];
   tokensByRuntime: Record<OrchestratorRuntime, RuntimeTokenSummary>;
+  costByRole: Record<UsageRole, RoleCostSummary>;
   /** Usage from a session shared by multiple packets; never guessed onto one packet. */
   unattributed: {
     sessionCount: number;
@@ -64,6 +73,9 @@ type CachedTelemetrySummary = {
   model: string | null;
   hasTelemetry: boolean;
   costSource: PacketCostSource;
+  /** undefined means live telemetry may inherit packet context; null means a persisted row is explicitly unattributed. */
+  persistedPacketId?: string | null;
+  costByRole: Record<UsageRole, RoleCostSummary>;
 };
 
 type AttributedSessionCost = CachedTelemetrySummary & {
@@ -86,6 +98,21 @@ function emptyRuntimeTokenSummary(): RuntimeTokenSummary {
     outputTokens: 0,
     totalCostUsd: 0,
     packetCount: 0,
+  };
+}
+
+function emptyRoleCostSummary(): RoleCostSummary {
+  return { inputTokens: 0, outputTokens: 0, totalCostUsd: 0, requestCount: 0 };
+}
+
+function emptyCostByRole(): Record<UsageRole, RoleCostSummary> {
+  return {
+    orchestrator: emptyRoleCostSummary(),
+    worker: emptyRoleCostSummary(),
+    reviewer: emptyRoleCostSummary(),
+    compaction: emptyRoleCostSummary(),
+    retrieval: emptyRoleCostSummary(),
+    other: emptyRoleCostSummary(),
   };
 }
 
@@ -194,6 +221,15 @@ async function resolveSessionTelemetry(
           model: telemetry.model?.trim() || null,
           hasTelemetry: true,
           costSource: telemetry.costSource ?? 'estimate',
+          costByRole: {
+            ...emptyCostByRole(),
+            worker: {
+              inputTokens: toFiniteNumber(telemetry.inputTokens),
+              outputTokens: toFiniteNumber(telemetry.outputTokens),
+              totalCostUsd: roundUsd(toFiniteNumber(telemetry.estimatedCostUsd)),
+              requestCount: 1,
+            },
+          },
         };
       }
     } catch (error) {
@@ -201,10 +237,38 @@ async function resolveSessionTelemetry(
     }
   }
 
-  const persisted = resolved ? null : readPersistedSessionCost(sessionKey);
-  const next = resolved ?? (persisted
-    ? { ...persisted, identityId, hasTelemetry: true }
-    : {
+  const persistedRows = readPersistedSessionCosts(sessionKey);
+  if (persistedRows.length > 0) {
+    const costByRole = emptyCostByRole();
+    for (const row of persistedRows) {
+      const role = row.role ?? 'other';
+      const subtotal = costByRole[role];
+      subtotal.inputTokens += row.inputTokens;
+      subtotal.outputTokens += row.outputTokens;
+      subtotal.totalCostUsd = roundUsd(subtotal.totalCostUsd + row.totalCostUsd);
+      subtotal.requestCount += 1;
+    }
+    const packetIds = new Set(persistedRows.map((row) => row.packetId));
+    const persistedPacketId = packetIds.size === 1 ? [...packetIds][0] : null;
+    if (resolved) {
+      resolved = { ...resolved, persistedPacketId, costByRole };
+    } else {
+      const models = new Set(persistedRows.map((row) => row.model).filter((model): model is string => Boolean(model)));
+      resolved = {
+        identityId,
+        inputTokens: persistedRows.reduce((sum, row) => sum + row.inputTokens, 0),
+        outputTokens: persistedRows.reduce((sum, row) => sum + row.outputTokens, 0),
+        totalCostUsd: roundUsd(persistedRows.reduce((sum, row) => sum + row.totalCostUsd, 0)),
+        model: models.size === 1 ? [...models][0] : models.size > 1 ? 'mixed' : null,
+        hasTelemetry: true,
+        costSource: persistedRows.some((row) => row.costSource === 'gateway') ? 'gateway' : 'estimate',
+        persistedPacketId,
+        costByRole,
+      };
+    }
+  }
+
+  const next = resolved ?? {
         identityId,
         inputTokens: 0,
         outputTokens: 0,
@@ -212,7 +276,8 @@ async function resolveSessionTelemetry(
         model: null,
         hasTelemetry: false,
         costSource: 'unknown',
-      });
+        costByRole: emptyCostByRole(),
+      };
   cache.set(sessionKey, next);
   return next;
 }
@@ -257,7 +322,11 @@ async function resolvePacketTelemetry(
     claimedSessionKeys.add(sessionKey);
     const runtime = runtimeFromSessionKey(sessionKey) ?? candidate.runtime;
     const telemetry = await resolveSessionTelemetry(sessionKey, runtime, cache);
-    sessionCosts.push({ ...telemetry, packetId: packet.id, sessionKey, runtime });
+    const resolvedPacketId = telemetry.persistedPacketId === undefined
+      ? packet.id
+      : telemetry.persistedPacketId;
+    sessionCosts.push({ ...telemetry, packetId: resolvedPacketId, sessionKey, runtime });
+    if (resolvedPacketId !== packet.id) continue;
     inputTokens += telemetry.inputTokens;
     outputTokens += telemetry.outputTokens;
     totalCostUsd += telemetry.totalCostUsd;
@@ -334,6 +403,7 @@ export async function aggregateMissionCost(
         model: null,
         hasTelemetry: false,
         costSource: 'unknown',
+        costByRole: emptyCostByRole(),
         packetId: null,
         sessionKey,
         runtime,
@@ -373,10 +443,18 @@ export async function aggregateMissionCost(
     outputTokens: 0,
     totalCostUsd: 0,
   };
+  const costByRole = emptyCostByRole();
   const countedPacketRuntimes = new Set<string>();
 
   for (const sessionCost of attributedSessionCosts) {
     totalCostUsd += sessionCost.totalCostUsd;
+    for (const [role, subtotal] of Object.entries(sessionCost.costByRole) as Array<[UsageRole, RoleCostSummary]>) {
+      const roleTotal = costByRole[role];
+      roleTotal.inputTokens += subtotal.inputTokens;
+      roleTotal.outputTokens += subtotal.outputTokens;
+      roleTotal.totalCostUsd = roundUsd(roleTotal.totalCostUsd + subtotal.totalCostUsd);
+      roleTotal.requestCount += subtotal.requestCount;
+    }
 
     if (sessionCost.packetId === null) {
       unattributed.sessionCount += 1;
@@ -407,6 +485,7 @@ export async function aggregateMissionCost(
     totalCostUsd: roundUsd(totalCostUsd),
     packetCosts,
     tokensByRuntime,
+    costByRole,
     unattributed,
   };
 }

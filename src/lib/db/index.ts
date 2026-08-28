@@ -39,11 +39,10 @@ const DATA_DIR = getDataDir();
 // copy still points at the right file. Renaming the file would require a
 // second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
-const DB_SCHEMA_VERSION = 53;
+const DB_SCHEMA_VERSION = 57;
 function migrationMarkerPath(version: number): string {
   return path.join(DATA_DIR, `.db-migrated-v${version}`);
 }
-
 // Ensure data directory exists
 if (!existsSync(DATA_DIR)) {
   mkdirSync(DATA_DIR, { recursive: true });
@@ -536,6 +535,7 @@ function ensureTables(sqlite: Database.Database): void {
       cache_write_tokens INTEGER DEFAULT 0,
       cost_usd REAL NOT NULL DEFAULT 0,
       session_key TEXT,
+      lane_id TEXT, packet_id TEXT, mission_id TEXT, role TEXT, attempt INTEGER NOT NULL DEFAULT 1, run_id TEXT, metadata_json TEXT,
       repo_path TEXT,
       agent_name TEXT,
       request_type TEXT DEFAULT 'chat',

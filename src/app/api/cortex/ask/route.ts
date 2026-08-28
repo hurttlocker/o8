@@ -30,6 +30,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest } from 'next/server';
 
 import { runAskPipeline } from '@/lib/cortex/qa/ask';
+import { withBrainRetrievalUsage } from '@/lib/cortex/qa/llm/brain-spend';
 
 interface AskBody {
   question?: unknown;
@@ -80,7 +81,17 @@ export async function POST(request: NextRequest) {
 
       try {
         emit('open', { ok: true });
-        await runAskPipeline(question, repoPath, emit, force, projectId, { terse });
+        let meteredAnswer = '';
+        const meteredEmit = (name: string, payload: unknown) => {
+          if (name === 'token') meteredAnswer += (payload as { text?: string }).text ?? '';
+          emit(name, payload);
+        };
+        await withBrainRetrievalUsage(
+          question,
+          { repoPath },
+          () => runAskPipeline(question, repoPath, meteredEmit, force, projectId, { terse }),
+          () => meteredAnswer,
+        );
       } catch (err) {
         const message = err instanceof Error ? err.message : 'pipeline error';
         console.error('[qa][ask-route] pipeline error:', message);

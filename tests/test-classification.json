@@ -335,6 +335,12 @@
       ]
     },
     {
+      "path": "src/lib/orchestrator/auto-compact.test.ts",
+      "reasons": [
+        "executable-fixture"
+      ]
+    },
+    {
       "path": "src/lib/orchestrator/backend-switch-carry.test.ts",
       "reasons": [
         "child-process",
@@ -1213,6 +1219,14 @@
     {
       "path": "tests/cortex-observation-worker-authz-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/cost-ledger-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
         "real-path"
       ]
     },

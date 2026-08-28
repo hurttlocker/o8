@@ -100,6 +100,18 @@ export const usageLogs = sqliteTable('usage_logs', {
   costUsd: real('cost_usd').notNull().default(0),
   /** Associated agent session key */
   sessionKey: text('session_key'),
+  /** Durable orchestration context. Nullable for legacy and global rows. */
+  laneId: text('lane_id'),
+  packetId: text('packet_id'),
+  missionId: text('mission_id'),
+  /** Role played by this model call inside the orchestration pipeline. */
+  role: text('role', { enum: ['orchestrator', 'worker', 'reviewer', 'compaction', 'retrieval', 'other'] }),
+  /** One-based packet attempt index. */
+  attempt: integer('attempt').notNull().default(1),
+  /** Runtime-owned execution receipt when one exists. */
+  runId: text('run_id'),
+  /** Optional metering provenance, including whether token counts are estimated. */
+  metadataJson: text('metadata_json'),
   /** Repository where the session ran */
   repoPath: text('repo_path'),
   /** Agent name (for breakdown) */
@@ -110,7 +122,9 @@ export const usageLogs = sqliteTable('usage_logs', {
   billingPeriod: text('billing_period').notNull(),
   /** Timestamp */
   createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
-});
+}, (table) => ({
+  packetAttemptIdx: index('idx_usage_logs_packet_attempt').on(table.packetId, table.attempt),
+}));
 
 // ══════════════════════════════════════════════════════════════════
 //  Subscriptions — Stripe billing link

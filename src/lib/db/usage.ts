@@ -11,7 +11,8 @@ import { randomUUID } from 'node:crypto';
 
 // ── Types ──
 
-export type Provider = 'anthropic' | 'openai' | 'google' | 'openrouter';
+export type Provider = 'anthropic' | 'openai' | 'google' | 'openrouter' | 'opencode' | 'runtime';
+export type UsageRole = 'orchestrator' | 'worker' | 'reviewer' | 'compaction' | 'retrieval' | 'other';
 
 export interface LogUsageInput {
   /** Null for operator-level local spend (house convention: such rows are
@@ -25,6 +26,14 @@ export interface LogUsageInput {
   cacheWriteTokens?: number;
   costUsd: number;
   sessionKey?: string;
+  repoPath?: string | null;
+  laneId?: string | null;
+  packetId?: string | null;
+  missionId?: string | null;
+  role?: UsageRole | null;
+  attempt?: number;
+  runId?: string | null;
+  metadata?: Record<string, unknown> | null;
   agentName?: string;
   requestType?: 'chat' | 'completion' | 'embedding';
 }
@@ -63,6 +72,14 @@ export function logUsage(input: LogUsageInput): void {
     cacheWriteTokens: input.cacheWriteTokens ?? 0,
     costUsd: input.costUsd,
     sessionKey: input.sessionKey ?? null,
+    repoPath: input.repoPath ?? null,
+    laneId: input.laneId ?? null,
+    packetId: input.packetId ?? null,
+    missionId: input.missionId ?? null,
+    role: input.role ?? null,
+    attempt: Math.max(1, Math.round(input.attempt ?? 1)),
+    runId: input.runId ?? null,
+    metadataJson: input.metadata ? JSON.stringify(input.metadata) : null,
     agentName: input.agentName ?? null,
     requestType: input.requestType ?? 'chat',
     billingPeriod: currentBillingPeriod(),
