@@ -26,6 +26,7 @@ function fullPacketFixture() {
     referenceLabel: 'P1',
     title: 'Control-field packet',
     summary: 'Full normalize fixture',
+    origin: 'design-mode',
     workspaceTargetPath: '/repo/o8',
     branchTarget: 'inline/full-normalize',
     runtime: 'codex',

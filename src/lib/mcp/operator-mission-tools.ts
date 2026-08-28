@@ -105,6 +105,7 @@ interface CreateMissionInput {
   issues: string[];
   repoPath: string;
   runtime: OrchestratorRuntime;
+  origin?: 'design-mode';
   workerIntent?: WorkerIntent;
   requestedProvider?: WorkerProvider | null;
   requestedRuntime?: OrchestratorRuntime | null;
@@ -136,6 +137,7 @@ interface CreateMissionInlineInput {
   issues_inline: InlineIssue[];
   repoPath: string;
   runtime: OrchestratorRuntime;
+  origin?: 'design-mode';
   workerIntent?: WorkerIntent;
   requestedProvider?: WorkerProvider | null;
   requestedRuntime?: OrchestratorRuntime | null;
@@ -395,6 +397,7 @@ export async function createMission(input: CreateMissionInput) {
           issues: loadedIssues,
           repoPath,
           runtime: input.runtime,
+          origin: input.origin,
           workerIntent: input.workerIntent,
           requestedProvider: input.requestedProvider,
           requestedRuntime: input.requestedRuntime,
@@ -442,6 +445,7 @@ export async function createMissionInline(input: CreateMissionInlineInput) {
           issues: loadedIssues,
           repoPath,
           runtime: input.runtime,
+          origin: input.origin,
           workerIntent: input.workerIntent,
           requestedProvider: input.requestedProvider,
           requestedRuntime: input.requestedRuntime,

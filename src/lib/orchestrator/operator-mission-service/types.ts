@@ -31,6 +31,8 @@ export interface CreateMissionInput {
   issues: LoadedIssue[];
   repoPath: string;
   runtime: OrchestratorRuntime;
+  /** Durable packet origin for Design Mode follow-up routing. */
+  origin?: 'design-mode';
   workerIntent?: WorkerIntent;
   requestedProvider?: WorkerProvider | null;
   requestedRuntime?: OrchestratorRuntime | null;

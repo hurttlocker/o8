@@ -71,10 +71,8 @@ export const MISSION_TOOLS: McpTool[] = [
           },
           description: 'Ad-hoc inline tasks — no GitHub issue required. Each becomes its own packet.',
         },
-        repoPath: {
-          type: 'string',
-          description: 'Absolute local path to the repository.',
-        },
+        repoPath: { type: 'string', description: 'Absolute local path to the repository.' },
+        origin: { type: 'string', enum: ['design-mode'], description: 'Set to design-mode when the mission comes from an element-edit payload so follow-up edits can reuse its warm packet lane.' },
         runtime: {
           type: 'string',
           enum: listDispatchableRuntimes(),
@@ -800,6 +798,8 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
     }
     const shouldDispatch = args.dispatch !== false;
     const sequential = args.sequential === true;
+    if (args.origin !== undefined && args.origin !== 'design-mode') return textResult('origin must be `design-mode` when provided.', true);
+    const origin = args.origin === 'design-mode' ? 'design-mode' as const : undefined;
     const existingBranchPolicy = parseExistingBranchPolicy(args.existingBranchPolicy);
     const useBrain = typeof args.useBrain === 'boolean' ? args.useBrain : undefined;
     const huddle = typeof args.huddle === 'boolean' ? args.huddle : undefined;
@@ -825,7 +825,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
       const createResult = await createMissionInline({
         issues_inline: parsed,
         repoPath,
-        runtime,
+        runtime, origin,
         workerIntent,
         requestedProvider,
         requestedRuntime: runtime,
@@ -860,7 +860,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
     const createResult = await createMission({
       issues: parseIssueList(args.issues),
       repoPath,
-      runtime,
+      runtime, origin,
       workerIntent,
       requestedProvider,
       requestedRuntime: runtime,
