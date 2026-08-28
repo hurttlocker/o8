@@ -60,7 +60,7 @@ function WorkspaceChatPaneBase({
   onSaveCheckpoint,
   onRestoreLatestCheckpoint,
 }: WorkspaceChatPaneProps) {
-  const chat = useWorkspaceChatPane({
+  const { composeRef, scrollRef, ...chat } = useWorkspaceChatPane({
     tab,
     active,
     onUpdateMessages,
@@ -104,11 +104,12 @@ function WorkspaceChatPaneBase({
 
   const [streamingTimestamp, setStreamingTimestamp] = useState<number | null>(null);
   useEffect(() => {
-    if (!chat.agentRunning) {
-      setStreamingTimestamp(null);
-      return;
-    }
-    setStreamingTimestamp(Date.now());
+    const nextTimestamp = chat.agentRunning ? Date.now() : null;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) setStreamingTimestamp(nextTimestamp);
+    });
+    return () => { cancelled = true; };
   }, [chat.agentRunning, chat.tabId]);
 
   const streamingEntry = useMemo<MobileTranscriptEntry>(() => ({
@@ -195,7 +196,7 @@ function WorkspaceChatPaneBase({
         </div>
       ) : null}
       <div
-        ref={chat.scrollRef}
+        ref={scrollRef}
         onScroll={chat.handleScroll}
         className="cortex-scroll-fade-y cortex-themed-scroll"
         style={{
@@ -516,7 +517,7 @@ function WorkspaceChatPaneBase({
                     type="button"
                     onClick={() => {
                       chat.setDraft(prompt.text);
-                      setTimeout(() => chat.composeRef.current?.focus(), 50);
+                      setTimeout(() => composeRef.current?.focus(), 50);
                     }}
                     style={{
                       display: 'flex',
@@ -703,7 +704,7 @@ function WorkspaceChatPaneBase({
 
       <WorkspaceChatComposer
         active={active}
-        chat={chat}
+        chat={{ ...chat, composeRef, scrollRef }}
         tab={tab}
         isLaneArchived={laneRetired}
         onSaveCheckpoint={onSaveCheckpoint}
