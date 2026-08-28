@@ -31,6 +31,7 @@ For contributors who are reading the code, extending o8, or maintaining a cross-
 | [Loopback API security](internals/loopback-api.md) | How socket identity, bearer tokens, origins, and public-route exceptions are enforced. |
 | [Connect contract](internals/connect-contract.md) | The desktop-to-relay wire protocol, ownership rules, and web-surface behavior. |
 | [Runtime adapter contract](internals/runtime-adapter-contract.md) | The supported runtime model and the recipe for adding another agent CLI. |
+| [Local-model coverage](internals/local-model-coverage.md) | Which orchestrators, workers, and support surfaces can use local inference today. |
 | [Task-pool control plane](internals/agent-task-pool-control-plane.md) | How tasks project onto packets, lanes, locks, CLI commands, and MCP tools. |
 | [Fleet state model](internals/fleet-state-model.md) | The canonical status vocabulary for agents, packets, squads, and review. |
 | [Cortex memory integration](internals/cortex-memory-integration.md) | How session outcomes become searchable organizational memory. |
