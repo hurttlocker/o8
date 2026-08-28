@@ -128,6 +128,9 @@ export async function POST(request: NextRequest) {
   if (!repoPath) {
     return operatorError('invalid_request', 'repoPath is required.', 400);
   }
+  if (record.origin !== undefined && record.origin !== 'design-mode') {
+    return operatorError('invalid_request', 'origin must be "design-mode" when provided.', 400);
+  }
   const launchContext = normalizeWorkerLaunchContext(record.launchContext);
   if (record.launchContext !== undefined && !launchContext) {
     return operatorError('invalid_request', 'launchContext must name a valid source, presentation, and repoContext.', 400);
@@ -262,6 +265,7 @@ export async function POST(request: NextRequest) {
   if (qualitySearch && taskContract === 'off') {
     return operatorError('invalid_request', 'qualitySearch already uses a sealed contract and cannot be combined with taskContract: "off".', 400);
   }
+  const origin = record.origin === 'design-mode' ? 'design-mode' as const : undefined;
 
   const createInput = {
       issues,
@@ -275,6 +279,7 @@ export async function POST(request: NextRequest) {
       ...(hasClaudeCodePacket && claudeCodeCarrier ? { claudeCodeCarrier } : {}),
       requestedEffort,
       constraints: typeof record.constraints === 'string' ? record.constraints : '',
+      ...(origin ? { origin } : {}),
       sequential: record.sequential === true,
       existingBranchPolicy,
       ...(typeof record.useBrain === 'boolean' ? { useBrain: record.useBrain } : {}),

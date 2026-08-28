@@ -438,6 +438,8 @@ export type LaneEventVerb =
   | 'rules_applied'
   // Packet steer injected into an existing warm session. Payload: { packetId, source, message }
   | 'steered_packet'
+  // Design Mode follow-up reused the packet's warm lane. Payload: { packetId, elementSummary }
+  | 'ui_loop_steered'
   // Packet steer failed before a worker turn could start. Payload: { packetId, source, message, note, stderrHead? }
   | 'steer_failed'
   // Operator stop could not kill the live worker. Payload: { packetId?, sessionKey, note, pid?, tmuxSession?, steps }

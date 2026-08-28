@@ -55,6 +55,7 @@ function stubRealMissionService() {
 
 async function createPacket(input: {
   runtime: OrchestratorRuntime;
+  origin?: 'design-mode';
   taskContract?: 'off';
   qualitySearch?: { taskContract: PacketTaskContract };
 }) {
@@ -63,6 +64,7 @@ async function createPacket(input: {
     repoPath,
     issues_inline: [{ title: `${input.runtime} contract ${Date.now()}` }],
     runtime: input.runtime,
+    origin: input.origin,
     taskContract: input.taskContract,
     qualitySearch: input.qualitySearch,
     dispatch: false,
@@ -80,6 +82,7 @@ describe('create_mission task contract default', () => {
     expect(schema).toMatchObject({
       type: 'object',
       properties: {
+        origin: { type: 'string', enum: ['design-mode'] },
         taskContract: { type: 'string', enum: ['off'] },
       },
       required: ['repoPath'],
@@ -87,6 +90,12 @@ describe('create_mission task contract default', () => {
     expect(schema).not.toHaveProperty('oneOf');
     expect(schema).not.toHaveProperty('anyOf');
     expect(schema).not.toHaveProperty('allOf');
+  });
+
+  it('stamps the Design Mode origin through the real MCP handler onto the persisted packet', async () => {
+    expect(await createPacket({ runtime: 'codex', origin: 'design-mode' })).toMatchObject({
+      origin: 'design-mode',
+    });
   });
 
   it.each(['claude-code', 'codex'] as const)('arms %s through the real handler and persisted packet', async (runtime) => {

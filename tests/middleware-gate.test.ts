@@ -255,6 +255,19 @@ describe('panelGateMiddleware — loopback trust', () => {
     expect(res.status).toBe(401);
   });
 
+  it.each([
+    ['/api/orchestrator/ui-loop', 'GET'],
+    ['/api/orchestrator/ui-loop/steer', 'POST'],
+  ])('gates the Design Mode warm-loop route against LAN: %s', (pathname, method) => {
+    const res = panelGateMiddleware(
+      gatedRequest(`http://192.168.1.50:3001${pathname}`, {
+        method,
+        headers: { host: '192.168.1.50:3001' },
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
+
   it('gates /api/voice/realtime/session (mints OpenAI realtime tokens on the operator key) against LAN', () => {
     const res = panelGateMiddleware(
       gatedRequest('http://192.168.1.50:3001/api/voice/realtime/session', {

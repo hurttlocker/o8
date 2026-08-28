@@ -15,6 +15,7 @@
  */
 
 import { findLaneByPacket, setLaneStatus } from '@/lib/lane/registry';
+import type { Lane } from '@/lib/lane/types';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { rebindLaneSessionIfChanged } from '@/lib/lane/session-rebind';
 import { findMissionRegistryEntryByPacketId } from '@/lib/orchestrator/mission-registry';
@@ -35,7 +36,7 @@ export interface SteerPacketResult {
   note: string;
 }
 
-const NO_STEERABLE_SESSION = 'Packet has no steerable session — use rerun_with_feedback instead.';
+export const NO_STEERABLE_SESSION = 'Packet has no steerable session — use rerun_with_feedback instead.';
 const STARTUP_FAILURE_PROBE_MS = 2_000;
 
 export type SteerPacketFailurePhase = 'pre_effect' | 'terminal' | 'outcome_unknown';
@@ -53,6 +54,15 @@ export class SteerPacketUnavailableError extends Error {
 
 export function isPostEffectSteerFailure(error: unknown): error is SteerPacketUnavailableError {
   return error instanceof SteerPacketUnavailableError && error.phase !== 'pre_effect';
+}
+
+export function findSteerablePacketLane(packetId: string): (Lane & { sessionKey: string }) | null {
+  const lane = findLaneByPacket(packetId);
+  return lane?.sessionKey ? lane as Lane & { sessionKey: string } : null;
+}
+
+export function isNoSteerableSessionError(error: unknown): boolean {
+  return error instanceof SteerPacketUnavailableError && error.message === NO_STEERABLE_SESSION;
 }
 
 function outcomeUnknownSteerError(error: unknown): SteerPacketUnavailableError {
@@ -122,8 +132,8 @@ export async function steerPacket({
   source,
   clientMutationId,
 }: SteerPacketInput): Promise<SteerPacketResult> {
-  const lane = findLaneByPacket(packetId);
-  if (!lane?.sessionKey) {
+  const lane = findSteerablePacketLane(packetId);
+  if (!lane) {
     const current = currentMissionState();
     const packetExists = current.packets.some((packet) => packet.id === packetId)
       || Boolean(findMissionRegistryEntryByPacketId(packetId, {

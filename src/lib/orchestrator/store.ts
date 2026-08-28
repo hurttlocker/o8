@@ -321,7 +321,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     id: typeof packet.id === 'string' && packet.id.trim() ? packet.id.trim() : `pkt-${Date.now()}-${index + 1}`,
     referenceLabel,
     title: typeof packet.title === 'string' && packet.title.trim() ? packet.title : `Packet ${index + 1}`,
-    summary: typeof packet.summary === 'string' ? packet.summary : '',
+    summary: typeof packet.summary === 'string' ? packet.summary : '', origin: packet.origin === 'design-mode' ? 'design-mode' : undefined,
     workspaceTargetPath: typeof packet.workspaceTargetPath === 'string' && packet.workspaceTargetPath.trim() ? packet.workspaceTargetPath : null,
     branchTarget: branchTarget || (queueState === 'draft' ? '' : 'main'),
     runtime: workerRouting.selectedRuntime, model: typeof packet.model === 'string' && packet.model.trim() ? packet.model.trim() : null,

@@ -3,11 +3,16 @@
 import { useEffect, useState } from 'react';
 import { buildEditContext, buildTextEditContext, type ElementEditContext } from '@/lib/browser/edit-context';
 import type { GrabbedElement } from '@/lib/browser/grab';
+import type { UiLoopEditOutcome, WarmUiLoopPacket } from './design-mode/ui-loop-edit';
 
 interface O8ElementPanelProps {
   element: GrabbedElement;
   onClose: () => void;
-  onEditWithAI?: (context: ElementEditContext) => void;
+  onEditWithAI?: (
+    context: ElementEditContext,
+    options: { forceFresh: boolean },
+  ) => UiLoopEditOutcome | Promise<UiLoopEditOutcome> | void;
+  onFocusPacket?: (packet: WarmUiLoopPacket) => void;
 }
 
 type DescriptorPart = {
@@ -77,14 +82,19 @@ function isInteractiveValue(value: string) {
   return value && value !== 'transparent' && value !== 'rgba(0, 0, 0, 0)';
 }
 
-export function O8ElementPanel({ element, onClose, onEditWithAI }: O8ElementPanelProps) {
+export function O8ElementPanel({ element, onClose, onEditWithAI, onFocusPacket }: O8ElementPanelProps) {
   const [draftText, setDraftText] = useState(element.textContent);
   const [isVisible, setIsVisible] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [receipt, setReceipt] = useState<WarmUiLoopPacket | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const descriptorParts = truncateDescriptorParts(buildDescriptorParts(element), 60);
   const descriptorTitle = buildPlainDescriptor(element);
 
   useEffect(() => {
     setDraftText(element.textContent);
+    setReceipt(null);
+    setError(null);
   }, [element]);
 
   useEffect(() => {
@@ -93,12 +103,20 @@ export function O8ElementPanel({ element, onClose, onEditWithAI }: O8ElementPane
     return () => cancelAnimationFrame(frame);
   }, [element]);
 
-  const handleTextSubmit = () => {
-    if (!onEditWithAI) {
-      return;
+  const submitEdit = async (context: ElementEditContext, forceFresh: boolean) => {
+    if (!onEditWithAI || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const outcome = await onEditWithAI(context, { forceFresh });
+      if (outcome?.kind === 'steered') setReceipt(outcome.packet);
+      if (outcome?.kind === 'error') setError(outcome.message);
+    } finally {
+      setBusy(false);
     }
-    onEditWithAI(buildTextEditContext(element, draftText));
   };
+
+  const handleTextSubmit = () => void submitEdit(buildTextEditContext(element, draftText), false);
 
   return (
     <div
@@ -277,23 +295,97 @@ export function O8ElementPanel({ element, onClose, onEditWithAI }: O8ElementPane
           </div>
         </div>
 
+        {receipt ? (
+          <div
+            role="status"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              minHeight: 44,
+              paddingTop: 0,
+              paddingRight: 10,
+              paddingBottom: 0,
+              paddingLeft: 12,
+              border: '1px solid var(--t-success-border)',
+              borderRadius: 10,
+              background: 'var(--t-success-soft)',
+              color: 'var(--t-text)',
+              fontFamily: 'var(--font-sans-system)',
+              fontSize: 11,
+              fontWeight: 300,
+              letterSpacing: '-0.1px',
+            }}
+          >
+            <span>Steered the running packet ·</span>
+            <button
+              type="button"
+              onClick={() => onFocusPacket?.(receipt)}
+              style={{
+                minHeight: 44,
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--t-accent)',
+                paddingTop: 0,
+                paddingRight: 2,
+                paddingBottom: 0,
+                paddingLeft: 2,
+                fontFamily: 'var(--font-sans-system)',
+                fontSize: 11,
+                fontWeight: 300,
+                textDecoration: 'underline',
+                textUnderlineOffset: 2,
+                cursor: onFocusPacket ? 'pointer' : 'default',
+              }}
+            >
+              {receipt.label}
+            </button>
+          </div>
+        ) : error ? (
+          <div
+            role="alert"
+            style={{
+              paddingTop: 10,
+              paddingRight: 12,
+              paddingBottom: 10,
+              paddingLeft: 12,
+              border: '1px solid var(--t-danger-border)',
+              borderRadius: 10,
+              background: 'var(--t-danger-soft)',
+              color: 'var(--t-text)',
+              fontFamily: 'var(--font-sans-system)',
+              fontSize: 11,
+              fontWeight: 300,
+              lineHeight: 1.35,
+            }}
+          >
+            {error}
+          </div>
+        ) : null}
+
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <button
             type="button"
-            onClick={() => onEditWithAI?.(buildEditContext(element, draftText))}
+            disabled={!onEditWithAI || busy}
+            title="Steer the warm Design Mode packet. Hold ⌥ while clicking to start a new orchestrator turn."
+            onClick={(event) => void submitEdit(buildEditContext(element, draftText), event.altKey)}
             style={{
-              height: 28,
+              minHeight: 44,
               border: 'none',
               borderRadius: 8,
               background: 'var(--t-accent)',
               color: '#ffffff',
-              padding: '0 12px',
+              paddingTop: 0,
+              paddingRight: 12,
+              paddingBottom: 0,
+              paddingLeft: 12,
               fontSize: 12,
-              fontWeight: 600,
-              cursor: onEditWithAI ? 'pointer' : 'default',
+              fontWeight: 300,
+              cursor: onEditWithAI && !busy ? 'pointer' : 'default',
+              opacity: busy ? 0.7 : 1,
             }}
           >
-            Edit with AI
+            {busy ? 'Steering packet…' : 'Edit with AI'}
           </button>
         </div>
       </div>

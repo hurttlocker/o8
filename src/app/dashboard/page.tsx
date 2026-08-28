@@ -149,6 +149,7 @@ import { handleRepoWorkspaceFocusEvent } from './hooks/focusRepoWorkspace';
 import { useDesignMode } from '@/hooks/useDesignMode';
 import type { GrabbedElement } from '@/lib/browser/grab';
 import { cropRegionBase64 } from '@/lib/browser/region-crop';
+import { routeUiLoopEdit } from '@/components/desktop/design-mode/ui-loop-edit';
 import { createTileRegistry } from './tileRegistry';
 import type { TerminalTabHandle } from '@/components/desktop/workspace-terminal/types';
 import type { SavedChatRepoContext } from '@/lib/llm/chat-history';
@@ -4882,14 +4883,21 @@ function DashboardInner() {
             <LazyO8ElementPanel
               element={grabbedElement}
               onClose={() => setGrabbedElement(null)}
-              onEditWithAI={(context) => {
-                injectPayloadIntoRepoChat({
-                  reason: 'element-edit',
-                  text: context.text,
-                  previewImageDataUri: context.previewImageDataUri,
-                }, null);
-                setGrabbedElement(null);
+              onEditWithAI={async (context, { forceFresh }) => {
+                const outcome = await routeUiLoopEdit({
+                  repoPath: globalRepoEntry?.localPath,
+                  context,
+                  forceFresh,
+                  injectFallback: () => injectPayloadIntoRepoChat({
+                    reason: 'element-edit',
+                    text: context.text,
+                    previewImageDataUri: context.previewImageDataUri,
+                  }, null),
+                });
+                if (outcome.kind === 'fallback') setGrabbedElement(null);
+                return outcome;
               }}
+              onFocusPacket={(packet) => handlePaletteSelectPacket(packet.packetId, packet.laneId, undefined, packet.label)}
             />
           </Suspense>
         </div>

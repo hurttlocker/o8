@@ -270,6 +270,8 @@ export interface OrchestratorPacket {
   referenceLabel: string;
   title: string;
   summary: string;
+  /** Packet was created from the Design Mode element-edit loop. */
+  origin?: 'design-mode';
   workspaceTargetPath: string | null;
   branchTarget: string;
   runtime: OrchestratorRuntime;
