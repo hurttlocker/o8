@@ -42,6 +42,10 @@ export interface RepoSetupConfig {
   workspaceIsolationPreference: RepoWorkspaceIsolationPreference;
 }
 
+export type RepoWorkspaceManifestCache =
+  | { version: 1; path: string; serviceNames: string[] }
+  | { error: string };
+
 export interface RepoRegistryEntry {
   id: string;
   name: string;
@@ -54,6 +58,7 @@ export interface RepoRegistryEntry {
   /** Durable opt-out from global storage-pressure parking. Missing legacy values normalize to false. */
   storagePressureParkingDisabled: boolean;
   setup: RepoSetupConfig;
+  manifest?: RepoWorkspaceManifestCache;
   readiness?: RepoReadiness;
 }
 

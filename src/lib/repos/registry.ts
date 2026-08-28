@@ -13,12 +13,14 @@ import type {
   RepoRegistryEntry,
   RepoRegistryStore,
   RepoSetupConfig,
+  RepoWorkspaceManifestCache,
   ValidatedRepoCandidate,
 } from './types';
 import { isRepoWorkspaceIsolationPreference } from './types';
 import { emitProductEvent } from '@/lib/analytics/server';
 import { withStoragePressurePolicyLock } from '@/lib/orchestrator/storage-pressure-policy-lock';
 import { dependencyInstallCommandForManager } from '@/lib/workspace/dependency-manager-contract';
+import { loadWorkspaceManifest, workspaceManifestPath } from '@/lib/workspace/manifest';
 
 const execFileAsync = promisify(execFile);
 
@@ -88,6 +90,22 @@ async function pathExists(target: string) {
     return true;
   } catch {
     return false;
+  }
+}
+
+async function loadWorkspaceManifestCache(
+  repoRoot: string,
+): Promise<RepoWorkspaceManifestCache | undefined> {
+  try {
+    const manifest = await loadWorkspaceManifest(repoRoot);
+    if (!manifest) return undefined;
+    return {
+      version: manifest.version,
+      path: workspaceManifestPath(repoRoot),
+      serviceNames: manifest.services?.map((service) => service.name) ?? [],
+    };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -463,6 +481,7 @@ export async function validateRepo(localPath: string) {
 
 export async function addRepo(localPath: string) {
   const candidate = await inspectLocalRepo(localPath);
+  const manifest = await loadWorkspaceManifestCache(candidate.localPath);
   const { entry, created } = await withRegistryMutation(async () => {
     const store = await readStoreFresh();
     const now = nowIso();
@@ -476,6 +495,7 @@ export async function addRepo(localPath: string) {
         defaultBranch: candidate.defaultBranch,
         isGitRepo: candidate.isGitRepo ?? true,
         setup: reconcileDetectedSetup(existing.setup, candidate.setup),
+        manifest,
         lastOpenedAt: now,
       };
       const repos = store.repos.map((repo) => (repo.id === existing.id ? updated : repo));
@@ -494,6 +514,7 @@ export async function addRepo(localPath: string) {
       lastOpenedAt: now,
       storagePressureParkingDisabled: false,
       setup: candidate.setup,
+      manifest,
     };
     await writeStore({ version: 1, repos: [...store.repos, added] });
     return { entry: added, created: true };
@@ -563,6 +584,7 @@ export async function updateRepo(
   },
 ) {
   const candidate = updates.localPath === undefined ? null : await inspectLocalRepo(updates.localPath);
+  const manifest = candidate ? await loadWorkspaceManifestCache(candidate.localPath) : undefined;
   const next = await withRegistryMutation(async () => {
     const store = await readStoreFresh();
     const existing = store.repos.find((repo) => repo.id === id);
@@ -578,6 +600,7 @@ export async function updateRepo(
         remoteUrl: candidate.remoteUrl,
         defaultBranch: candidate.defaultBranch,
         isGitRepo: candidate.isGitRepo,
+        manifest,
       } : {}),
       setup: normalizeSetupConfig(updates.setup ?? existing.setup),
       lastOpenedAt: updates.lastOpenedAt === undefined ? existing.lastOpenedAt : updates.lastOpenedAt,

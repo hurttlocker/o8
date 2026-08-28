@@ -2318,6 +2318,14 @@
       ]
     },
     {
+      "path": "tests/workspace-manifest-registry-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/workspace-park-real-path.test.ts",
       "reasons": [
         "child-process",
