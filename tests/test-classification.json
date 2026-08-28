@@ -92,6 +92,12 @@
       ]
     },
     {
+      "path": "src/components/desktop/workspace-terminal/use-terminal-mode.test.ts",
+      "reasons": [
+        "terminal-tool"
+      ]
+    },
+    {
       "path": "src/lib/broadcast/hourly-cap.integration.test.ts",
       "reasons": [
         "child-process",
@@ -1354,6 +1360,12 @@
       "path": "tests/fixtures/worktree-side-merge-child.test.ts",
       "reasons": [
         "worktree"
+      ]
+    },
+    {
+      "path": "tests/github-broker-supervisor-sync-real-path.test.ts",
+      "reasons": [
+        "real-path"
       ]
     },
     {

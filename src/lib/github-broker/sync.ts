@@ -11,7 +11,7 @@ import {
   readGitHubSyncState,
   replaceGitHubIssues,
   replaceGitHubPullRequests,
-  readGitHubThreadUpdatedAt,
+  readGitHubThreadSyncState,
   updateGitHubThreadAttention,
   upsertGitHubIssue,
   upsertGitHubPullRequest,
@@ -19,6 +19,7 @@ import {
   type GitHubIssueSnapshot,
   type GitHubPullRequestSnapshot,
   type GitHubSyncResource,
+  type GitHubThreadSyncState,
   type GitHubThreadAttentionSnapshot,
 } from './store';
 import { githubInstallationFetch } from './auth';
@@ -203,11 +204,12 @@ async function fetchThreadAttention(source: AttentionSyncSource): Promise<GitHub
 
 async function fetchMovedThreadAttention(
   sources: AttentionSyncSource[],
-  previousUpdatedAt: Map<number, string | null>,
+  previousState: Map<number, GitHubThreadSyncState>,
 ): Promise<GitHubThreadAttentionSnapshot[]> {
   const attention: GitHubThreadAttentionSnapshot[] = [];
   for (const source of sources) {
-    if (previousUpdatedAt.get(source.number) === source.updatedAt) continue;
+    const stored = previousState.get(source.number);
+    if (stored?.updatedAt === source.updatedAt && stored.attentionAssessed) continue;
     try {
       attention.push(await fetchThreadAttention(source));
     } catch (error) {
@@ -371,7 +373,7 @@ function applyThreadAttention(attention: GitHubThreadAttentionSnapshot[]): void 
 async function syncIssues(repoFullName: string) {
   const syncState = readGitHubSyncState(repoFullName, 'issues');
   const etag = syncState?.etag ?? null;
-  const previousUpdatedAt = readGitHubThreadUpdatedAt(repoFullName, 'issue');
+  const previousState = readGitHubThreadSyncState(repoFullName, 'issue');
   const cutoffMs = Date.now() - OUTSIDER_ATTENTION_RECENTLY_CLOSED_MS;
   const cutoffIso = new Date(cutoffMs).toISOString();
   // Skip ETag when TTL has expired — forces a fresh fetch so pagination runs
@@ -424,7 +426,7 @@ async function syncIssues(repoFullName: string) {
   ];
   const attention = await fetchMovedThreadAttention(
     threadItems.map((item) => attentionSource(repoFullName, 'issue', item, item.comments ?? 0)),
-    previousUpdatedAt,
+    previousState,
   );
   const closedIssues = closedItems.map((issue) => mapIssueSnapshot(repoFullName, issue));
 
@@ -449,7 +451,7 @@ async function syncIssues(repoFullName: string) {
 async function syncPullRequests(repoFullName: string) {
   const syncState = readGitHubSyncState(repoFullName, 'pull_requests');
   const etag = syncState?.etag ?? null;
-  const previousUpdatedAt = readGitHubThreadUpdatedAt(repoFullName, 'pr');
+  const previousState = readGitHubThreadSyncState(repoFullName, 'pr');
   const cutoffMs = Date.now() - OUTSIDER_ATTENTION_RECENTLY_CLOSED_MS;
   const cutoffIso = new Date(cutoffMs).toISOString();
   const useEtag = etag && isFresh(syncState?.lastSuccessfulAt);
@@ -479,7 +481,11 @@ async function syncPullRequests(repoFullName: string) {
   const closedItems = await fetchRecentlyClosedPullRequests(repoFullName, cutoffIso, cutoffMs);
   const closedPairs: Array<{ item: GitHubPullRequestPayload; detail: GitHubPullRequestPayload }> = [];
   for (const item of closedItems) {
-    if (previousUpdatedAt.get(item.number) === (item.updated_at ?? item.created_at ?? '')) continue;
+    const stored = previousState.get(item.number);
+    if (
+      stored?.updatedAt === (item.updated_at ?? item.created_at ?? '')
+      && stored.attentionAssessed
+    ) continue;
     try {
       closedPairs.push({ item, detail: await fetchPullRequestDetail(repoFullName, item) });
     } catch (error) {
@@ -497,7 +503,7 @@ async function syncPullRequests(repoFullName: string) {
       detail,
       detail.comments ?? 0,
     )),
-    previousUpdatedAt,
+    previousState,
   );
   const closedPulls = closedPairs.map(({ item, detail }) => mapPullRequestSnapshot(repoFullName, item, detail));
 

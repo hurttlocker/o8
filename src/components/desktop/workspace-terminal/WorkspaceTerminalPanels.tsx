@@ -113,6 +113,16 @@ function WorkspaceTerminalPanelsBase({
     )),
     [effectiveActiveTabId, residentTabIds, visibleTabIdsKey],
   );
+  const effectiveActiveTerminalSession = visibleTabs.find((tab) => (
+    tab.id === effectiveActiveTabId && tab.kind === 'terminal'
+  ))?.tmuxSession ?? null;
+  useEffect(() => {
+    if (!effectiveActiveTerminalSession) return;
+    const frame = window.requestAnimationFrame(() => {
+      panelRefs.current.get(effectiveActiveTerminalSession)?.fit();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [effectiveActiveTabId, effectiveActiveTerminalSession, panelRefs]);
   // Boot claim while the tab restore is UNSETTLED — even when default tabs
   // already render. The boot restore re-runs when the repo registry hydrates
   // late (restoreKey flips 'no-repo' → repo), and without this hold the
