@@ -15,13 +15,21 @@ import path from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import type { PacketTaskContract } from '@/lib/orchestrator/types';
+import type { OrchestratorPacket, PacketTaskContract, PacketTaskContractSource } from '@/lib/orchestrator/types';
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'o8-coverage-realpath-'));
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.O8_DATA_DIR = dataDir;
 
 const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'o8-coverage-repo-'));
+const reviewRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'o8-coverage-review-repo-'));
+
+const { recordOrchestratorReview } = await import('@/lib/approvals/store');
+const { assessDurableApprovedReview } = await import('@/lib/lane/durable-review-approval');
+const { createLane, getLaneEvents } = await import('@/lib/lane/registry');
+const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } =
+  await import('@/lib/orchestrator/control-plane');
+const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 
 function git(args: string[], cwd = repo): string {
   return execFileSync('git', args, { cwd, encoding: 'utf-8' }).trim();
@@ -50,6 +58,7 @@ const contract: PacketTaskContract = {
 };
 
 let headSha = '';
+let reviewHeadSha = '';
 
 beforeAll(() => {
   git(['init', '-q', '--initial-branch=main']);
@@ -69,12 +78,106 @@ beforeAll(() => {
   git(['add', '-A']);
   git(['commit', '-q', '-m', 'second packet commit']);
   headSha = git(['rev-parse', 'HEAD']);
+
+  git(['init', '-q', '--initial-branch=main'], reviewRepo);
+  git(['config', 'user.email', 'review@example.invalid'], reviewRepo);
+  git(['config', 'user.name', 'review'], reviewRepo);
+  fs.writeFileSync(path.join(reviewRepo, 'file.txt'), 'base\n');
+  git(['add', '-A'], reviewRepo);
+  git(['commit', '-q', '-m', 'base'], reviewRepo);
+  git(['checkout', '-q', '-b', 'inline/contract-review'], reviewRepo);
+  fs.writeFileSync(path.join(reviewRepo, 'file.txt'), 'base\npacket change\n');
+  git(['add', '-A'], reviewRepo);
+  git(['commit', '-q', '-m', 'packet change'], reviewRepo);
+  reviewHeadSha = git(['rev-parse', 'HEAD'], reviewRepo);
 });
 
 afterAll(() => {
   fs.rmSync(repo, { recursive: true, force: true });
+  fs.rmSync(reviewRepo, { recursive: true, force: true });
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
+
+const capturedContract: PacketTaskContract = {
+  version: 1,
+  requirements: [{
+    id: 'R1',
+    source: 'Enforce a captured default contract.',
+    expectedBehavior: 'The durable approval path requires coverage evidence.',
+    productionPath: 'file.txt',
+    verification: 'real durable approval test',
+  }],
+  smallestRoute: [{
+    path: 'file.txt',
+    requirements: ['R1'],
+    reason: 'The packet changes one file.',
+  }],
+  exclusions: [],
+};
+
+async function assessPersistedContractPacket(input: {
+  source: PacketTaskContractSource;
+  taskContract?: PacketTaskContract;
+}) {
+  const packetId = `pkt-contract-review-${input.source}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const lane = createLane({
+    repoPath: reviewRepo,
+    worktreePath: reviewRepo,
+    branch: 'inline/contract-review',
+    baseBranch: 'main',
+    runtime: 'codex',
+    packetId,
+    sessionKey: `codex:${packetId}`,
+  });
+  const packet: OrchestratorPacket = {
+    id: packetId,
+    referenceLabel: 'P1',
+    title: 'Contract review',
+    summary: 'Contract review',
+    workspaceTargetPath: reviewRepo,
+    branchTarget: 'inline/contract-review',
+    runtime: 'codex',
+    dependencyLabels: [],
+    dependencyPacketIds: [],
+    queueState: 'queued',
+    releaseState: 'pending',
+    status: 'awaiting_review',
+    blockedReason: null,
+    lastEventAt: null,
+    lastEventLabel: null,
+    archivedAt: null,
+    review: null,
+    lane: null,
+    taskContractRequired: true,
+    taskContractSource: input.source,
+    taskContract: input.taskContract ?? null,
+  };
+  writeOrchestratorControlPlaneState({
+    ...createEmptyOrchestratorMissionState(),
+    missionId: `mission-${packetId}`,
+    prompt: 'Contract review',
+    summary: 'Contract review',
+    repoPath: reviewRepo,
+    packets: [packet],
+  });
+  expect(readOrchestratorControlPlaneState().packets[0]).toMatchObject({
+    id: packetId,
+    taskContractRequired: true,
+    taskContractSource: input.source,
+  });
+  recordOrchestratorReview(packetId, {
+    approved: true,
+    findings: [],
+    reviewer: 'codex',
+    reviewedHeadSha: reviewHeadSha,
+    requiresSecondPass: false,
+  });
+
+  return {
+    lane,
+    assessment: await assessDurableApprovedReview(lane),
+  };
+}
 
 describe('durable approval enforces contract coverage on the real path', () => {
   it('rejects an approved review that carries no coverage evidence', async () => {
@@ -178,23 +281,19 @@ describe('durable approval enforces contract coverage on the real path', () => {
   });
 });
 
-describe('contract-first is opt-in, so ordinary dispatch cannot be blocked by it', () => {
-  it('leaves an ordinary packet legacy, and arms only the quality-search path', async () => {
+describe('legacy packets remain outside the contract gate', () => {
+  it('leaves an unstamped packet legacy while enforcing an explicitly armed packet', async () => {
     const { evaluateContractCoverage } = await import('@/lib/orchestrator/task-contract-coverage');
 
-    // An ordinary packet: no quality-search, so no contract requirement. If this
-    // ever flips to `true` without a contract, every normal dispatch becomes
-    // unmergeable through the durable-approval path.
-    const ordinary = evaluateContractCoverage({
+    const legacy = evaluateContractCoverage({
       contract: null,
       contractRequired: undefined,
       evidence: null,
       reviewedHeadSha: headSha,
       changedPaths: ['src/publish.ts'],
     });
-    expect(ordinary.status).toBe('not-applicable');
+    expect(legacy.status).toBe('not-applicable');
 
-    // The quality-search path arms the gate and is judged strictly.
     const armed = evaluateContractCoverage({
       contract,
       contractRequired: true,
@@ -203,5 +302,43 @@ describe('contract-first is opt-in, so ordinary dispatch cannot be blocked by it
       changedPaths: ['src/publish.ts'],
     });
     expect(armed.status).toBe('failed');
+  });
+});
+
+describe('default-armed contract capture fails soft on the durable approval path', () => {
+  it('lets a default-armed packet without a captured contract proceed and records the missing event', async () => {
+    const { lane, assessment } = await assessPersistedContractPacket({ source: 'default' });
+
+    expect(assessment).toMatchObject({ approved: true, contractCoverage: null });
+    const missingEvents = getLaneEvents(lane.id)
+      .filter((event) => event.verb === 'task_contract_missing');
+    expect(missingEvents).toHaveLength(1);
+    expect(missingEvents[0]?.payload).toMatchObject({
+      runtime: 'codex',
+      reason: expect.any(String),
+    });
+  });
+
+  it('enforces coverage for a default-armed packet when the contract was captured', async () => {
+    const { lane, assessment } = await assessPersistedContractPacket({
+      source: 'default',
+      taskContract: capturedContract,
+    });
+
+    expect(assessment).toMatchObject({
+      approved: false,
+      contractCoverage: { status: 'failed', missingRequirementIds: ['R1'] },
+    });
+    expect(getLaneEvents(lane.id).some((event) => event.verb === 'task_contract_missing')).toBe(false);
+  });
+
+  it('keeps an explicitly armed packet without a captured contract blocked', async () => {
+    const { lane, assessment } = await assessPersistedContractPacket({ source: 'explicit' });
+
+    expect(assessment).toMatchObject({
+      approved: false,
+      contractCoverage: { status: 'failed' },
+    });
+    expect(getLaneEvents(lane.id).some((event) => event.verb === 'task_contract_missing')).toBe(false);
   });
 });
