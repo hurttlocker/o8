@@ -45,6 +45,11 @@ pub(crate) use safe_file::{
 pub fn all_tools() -> Vec<Value> {
     vec![
         json!({
+            "name": "symon_capabilities",
+            "description": "Return Symon's truthful user-facing capability catalog. Use whenever the user asks what Symon can do, asks for examples, or wants to discover available actions. Summarize the ready capabilities and use their exact starter prompts as examples. Mention setup-required capabilities only with their availability detail.",
+            "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
+        }),
+        json!({
             "name": "symon_machine_list",
             "description": "List the known machines Symon can control. The session has exactly one active machine at a time.",
             "parameters": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
@@ -1214,6 +1219,7 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
     }
 
     match name {
+        "symon_capabilities" => Ok(crate::agent::capabilities::catalog_json()),
         "symon_machine_list" | "symon_machine_switch" => {
             Err("Symon machine controls must run through the machine router".to_string())
         }
