@@ -9,13 +9,14 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, dirname, join, normalize, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
 
 export const RELEASE_BUILD_CACHE_SCHEMA = 'o8/release-build-cache-entry/v1';
 export const RELEASE_BUILD_CACHE_RECEIPT_SCHEMA = 'o8/release-build-cache-receipt/v1';
@@ -24,6 +25,7 @@ export const RELEASE_BUILD_CACHE_PHASES = Object.freeze(['web', 'speech', 'nativ
 const CACHE_VERSION_DIR = 'release-v1';
 const ENTRY_LIMIT = 1;
 const COMPATIBILITY_LIMIT = 2;
+const UNSAFE_PATH_ERROR_CODE = 'O8_RELEASE_CACHE_UNSAFE_PATH';
 const WEB_ENVIRONMENT_PATTERNS = [
   /^NEXT_PUBLIC_/,
   /^CLERK_PUBLISHABLE_KEY$/,
@@ -250,6 +252,55 @@ function pathInside(candidate, root) {
   return candidate === root || candidate.startsWith(`${root}/`);
 }
 
+function realpathWithMissingSegments(path) {
+  const segments = [];
+  let existing = resolve(path);
+  while (!existsSync(existing)) {
+    const parent = dirname(existing);
+    if (parent === existing) return resolve(path);
+    segments.unshift(basename(existing));
+    existing = parent;
+  }
+  return resolve(realpathSync(existing), ...segments);
+}
+
+function resolvedPathInside(candidate, boundary) {
+  const remainder = relative(boundary, candidate);
+  return remainder === ''
+    || (remainder !== '..' && !remainder.startsWith(`..${sep}`) && !isAbsolute(remainder));
+}
+
+function assertOutsideProjectNodeModules(target, projectRoot) {
+  const absoluteTarget = resolve(target);
+  const resolvedTarget = realpathWithMissingSegments(absoluteTarget);
+  const resolvedProjectRoot = realpathWithMissingSegments(projectRoot);
+  const resolvedNodeModules = realpathWithMissingSegments(join(projectRoot, 'node_modules'));
+  if (resolvedTarget !== resolvedProjectRoot
+    && !resolvedPathInside(resolvedTarget, resolvedNodeModules)) return;
+
+  const error = new Error(
+    `release cache refused unsafe destructive path: ${absoluteTarget}`
+    + ` (resolved to ${resolvedTarget}; project node_modules: ${resolvedNodeModules})`,
+  );
+  error.code = UNSAFE_PATH_ERROR_CODE;
+  throw error;
+}
+
+function removeCachePath(target, options, projectRoot) {
+  assertOutsideProjectNodeModules(target, projectRoot);
+  rmSync(target, options);
+}
+
+function renameCachePath(source, destination, projectRoot) {
+  assertOutsideProjectNodeModules(source, projectRoot);
+  assertOutsideProjectNodeModules(destination, projectRoot);
+  renameSync(source, destination);
+}
+
+export function isReleaseBuildCacheSafetyError(error) {
+  return error?.code === UNSAFE_PATH_ERROR_CODE;
+}
+
 function pathAllowed(candidate, targets, excludes) {
   return targets.some((target) => pathInside(candidate, target))
     && !excludes.some((excluded) => pathInside(candidate, excluded));
@@ -350,6 +401,7 @@ export async function restoreReleaseBuildCache(root, phase, options = {}) {
       lastReason = verified.reason;
       continue;
     }
+    assertOutsideProjectNodeModules(cacheRoot, root);
     const restoreRoot = mkdtempSync(join(cacheRoot, '.restore-'));
     try {
       execFileSync('tar', ['-xf', verified.archivePath, '-C', restoreRoot], {
@@ -365,9 +417,9 @@ export async function restoreReleaseBuildCache(root, phase, options = {}) {
       for (const target of verified.manifest.targets) {
         const extracted = join(restoreRoot, target);
         const destination = join(root, target);
-        rmSync(destination, { recursive: true, force: true });
+        removeCachePath(destination, { recursive: true, force: true }, root);
         mkdirSync(dirname(destination), { recursive: true });
-        renameSync(extracted, destination);
+        renameCachePath(extracted, destination, root);
       }
       return {
         phase,
@@ -380,9 +432,10 @@ export async function restoreReleaseBuildCache(root, phase, options = {}) {
         durationMs: Date.now() - started,
       };
     } catch (error) {
+      if (isReleaseBuildCacheSafetyError(error)) throw error;
       lastReason = `restore_failed:${error instanceof Error ? error.message : String(error)}`;
     } finally {
-      rmSync(restoreRoot, { recursive: true, force: true });
+      removeCachePath(restoreRoot, { recursive: true, force: true }, root);
     }
   }
   return { phase, status: 'miss', reason: lastReason, durationMs: Date.now() - started };
@@ -395,7 +448,8 @@ function tarArguments(root, config, archivePath) {
   return args;
 }
 
-function pruneEntries(directory, keepEntry) {
+function pruneEntries(directory, keepEntry, projectRoot) {
+  assertOutsideProjectNodeModules(directory, projectRoot);
   const manifests = readdirSync(directory)
     .filter((name) => name.endsWith('.json'))
     .map((name) => ({ name, mtimeMs: statSync(join(directory, name)).mtimeMs }))
@@ -410,14 +464,15 @@ function pruneEntries(directory, keepEntry) {
   for (const { name } of manifests) {
     const entry = basename(name, '.json');
     if (keep.has(entry)) continue;
-    rmSync(join(directory, name), { force: true });
-    rmSync(archivePathFor(directory, entry), { force: true });
+    removeCachePath(join(directory, name), { force: true }, projectRoot);
+    removeCachePath(archivePathFor(directory, entry), { force: true }, projectRoot);
   }
 }
 
-function pruneCompatibilityDirectories(cacheRoot, phase, keepCompatibility) {
+function pruneCompatibilityDirectories(cacheRoot, phase, keepCompatibility, projectRoot) {
   const phaseRoot = join(cacheRoot, 'entries', phase);
   if (!existsSync(phaseRoot)) return;
+  assertOutsideProjectNodeModules(phaseRoot, projectRoot);
   const directories = readdirSync(phaseRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => ({
@@ -431,7 +486,9 @@ function pruneCompatibilityDirectories(cacheRoot, phase, keepCompatibility) {
   ];
   const keep = new Set(ordered.slice(0, COMPATIBILITY_LIMIT));
   for (const { name } of directories) {
-    if (!keep.has(name)) rmSync(join(phaseRoot, name), { recursive: true, force: true });
+    if (!keep.has(name)) {
+      removeCachePath(join(phaseRoot, name), { recursive: true, force: true }, projectRoot);
+    }
   }
 }
 
@@ -452,6 +509,7 @@ export async function captureReleaseBuildCache(root, phase, options = {}) {
   }
   for (const target of config.targets) assertTreeHasNoLinks(join(root, target));
   const directory = entriesDirectory(cacheRoot, identity);
+  assertOutsideProjectNodeModules(directory, root);
   ensurePrivateDirectory(directory);
   const finalManifestPath = manifestPathFor(directory, identity.entrySha256);
   const finalArchivePath = archivePathFor(directory, identity.entrySha256);
@@ -497,10 +555,10 @@ export async function captureReleaseBuildCache(root, phase, options = {}) {
       archive,
     };
     writeFileSync(temporaryManifest, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
-    renameSync(temporaryArchive, finalArchivePath);
-    renameSync(temporaryManifest, finalManifestPath);
-    pruneEntries(directory, identity.entrySha256);
-    pruneCompatibilityDirectories(cacheRoot, phase, identity.compatibilitySha256);
+    renameCachePath(temporaryArchive, finalArchivePath, root);
+    renameCachePath(temporaryManifest, finalManifestPath, root);
+    pruneEntries(directory, identity.entrySha256, root);
+    pruneCompatibilityDirectories(cacheRoot, phase, identity.compatibilitySha256, root);
     return {
       phase,
       status: 'captured',
@@ -510,8 +568,8 @@ export async function captureReleaseBuildCache(root, phase, options = {}) {
       durationMs: Date.now() - started,
     };
   } finally {
-    rmSync(temporaryArchive, { force: true });
-    rmSync(temporaryManifest, { force: true });
+    removeCachePath(temporaryArchive, { force: true }, root);
+    removeCachePath(temporaryManifest, { force: true }, root);
   }
 }
 
@@ -529,7 +587,8 @@ export function writeReleaseBuildCachePhaseReceipt(cacheRoot, runId, receipt) {
   writeFileSync(join(directory, `${receipt.phase}.json`), `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 });
 }
 
-export function finalizeReleaseBuildCacheReceipt(cacheRoot, runId, summary) {
+export function finalizeReleaseBuildCacheReceipt(cacheRoot, runId, summary, options = {}) {
+  const projectRoot = options.projectRoot ?? process.cwd();
   const directory = runDirectory(cacheRoot, runId);
   const phases = {};
   if (existsSync(directory)) {
@@ -560,12 +619,13 @@ export function finalizeReleaseBuildCacheReceipt(cacheRoot, runId, summary) {
   ensurePrivateDirectory(receiptsDirectory);
   const receiptPath = join(receiptsDirectory, `${runId}.json`);
   writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 });
-  rmSync(directory, { recursive: true, force: true });
+  removeCachePath(directory, { recursive: true, force: true }, projectRoot);
   return { receipt, receiptPath };
 }
 
 export const releaseBuildCacheInternals = {
   PHASE_CONFIG,
+  assertOutsideProjectNodeModules,
   collectWebEnvironmentFiles,
   normalizeArchivePath,
   pathAllowed,

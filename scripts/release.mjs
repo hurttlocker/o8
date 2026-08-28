@@ -43,7 +43,26 @@ const PING_MIN_BULLETS = Number(process.env.O8_PING_MIN_BULLETS || 4);
 // A release nobody can skip pings regardless of size: security, a forced/breaking update, data loss.
 const PING_ALWAYS_RE = /\b(security|vulnerabilit|CVE|breaking change|breaking:|data loss|corrupt|hotfix|urgent|must update|required update)\b/i;
 const LSREGISTER = '/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister';
+const CHECKOUT_NATIVE_MODULES = ['better-sqlite3', 'node-pty'];
 const root = process.cwd();
+
+function runCheckoutNativeModuleGate(checkoutRoot) {
+  const script = `
+for (const moduleName of process.argv.slice(1)) {
+  try {
+    const resolved = require.resolve(moduleName);
+    require(moduleName);
+    console.log('[release] checkout native module ' + moduleName + ' resolved to ' + resolved);
+  } catch (error) {
+    console.error('[release] FATAL: checkout native module ' + moduleName + ' failed to resolve or load: ' + error.message);
+    process.exitCode = 1;
+  }
+}`;
+  execFileSync(process.execPath, ['-e', script, ...CHECKOUT_NATIVE_MODULES], {
+    cwd: checkoutRoot,
+    stdio: 'inherit',
+  });
+}
 
 function runNativeGate(serverRoot) {
   verifyNativeBundle(serverRoot);
@@ -61,6 +80,17 @@ if (process.argv[2] === '--verify-native-bundle') {
     process.exit(0);
   } catch (error) {
     console.error(`[release] FATAL: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+if (process.argv[2] === '--verify-checkout-native-modules') {
+  const target = resolve(process.argv[3] || root);
+  try {
+    runCheckoutNativeModuleGate(target);
+    process.exit(0);
+  } catch {
+    console.error(`[release] FATAL: checkout native module verification failed in ${target}`);
     process.exit(1);
   }
 }
@@ -142,6 +172,14 @@ try {
 } catch (error) {
   console.error(`[release] FATAL: ${error.message}`);
   console.error('[release] Refusing to publish without Node 22 + 24, x64 + arm64 prebuilds for both native addons.');
+  process.exit(1);
+}
+
+try {
+  runCheckoutNativeModuleGate(root);
+} catch {
+  console.error(`[release] FATAL: checkout native module verification failed in ${root}`);
+  console.error('[release] Refusing to publish because the local ship changed the checkout dependency state.');
   process.exit(1);
 }
 

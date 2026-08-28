@@ -13,6 +13,7 @@ import {
   collectReleaseBuildCacheIdentity,
   createReleaseBuildCacheRunId,
   finalizeReleaseBuildCacheReceipt,
+  isReleaseBuildCacheSafetyError,
   resolveReleaseBuildCacheRoot,
   restoreReleaseBuildCache,
   writeReleaseBuildCachePhaseReceipt,
@@ -54,6 +55,7 @@ async function cachedPhase(cachePhase, label, command, args) {
     cacheSource = identity.source;
     restore = await restoreReleaseBuildCache(root, cachePhase, { cacheRoot, identity });
   } catch (error) {
+    if (isReleaseBuildCacheSafetyError(error)) throw error;
     restore = {
       phase: cachePhase,
       status: 'miss',
@@ -75,6 +77,7 @@ async function cachedPhase(cachePhase, label, command, args) {
       buildDurationMs,
     });
   } catch (error) {
+    if (isReleaseBuildCacheSafetyError(error)) throw error;
     capture = {
       phase: cachePhase,
       status: 'miss',
@@ -128,9 +131,10 @@ try {
         outcome: cacheOutcome,
         source: cacheSource,
         buildDurationMs: Date.now() - prebuildStartedAt,
-      });
+      }, { projectRoot: root });
       console.log(`[release-cache] receipt ${finalized.receiptPath}`);
     } catch (error) {
+      if (isReleaseBuildCacheSafetyError(error)) throw error;
       console.warn(`[release-cache] receipt unavailable: ${error instanceof Error ? error.message : String(error)}`);
     }
   }

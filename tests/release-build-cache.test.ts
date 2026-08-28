@@ -1,4 +1,13 @@
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -100,6 +109,89 @@ describe('shared release build cache', () => {
     });
     expect(readFileSync(join(root, '.next', 'cache', 'webpack', 'entry.bin'), 'utf8'))
       .toBe('compiled-source-a');
+  });
+
+  it('restores and prunes normal compiler output without touching project node_modules', async () => {
+    const { root, cacheRoot } = fixture();
+    const nativeModuleRoot = join(root, 'node_modules', 'better-sqlite3');
+    const nativeModuleMarker = join(nativeModuleRoot, 'binding.node');
+    mkdirSync(nativeModuleRoot, { recursive: true });
+    writeFileSync(nativeModuleMarker, 'must-survive');
+
+    expect(await captureReleaseBuildCache(root, 'web', {
+      cacheRoot,
+      identity: identity('a'),
+    })).toMatchObject({ status: 'captured' });
+    writeFileSync(join(root, '.next', 'cache', 'webpack', 'entry.bin'), 'compiled-source-b');
+    expect(await captureReleaseBuildCache(root, 'web', {
+      cacheRoot,
+      identity: identity('b'),
+    })).toMatchObject({ status: 'captured' });
+
+    const entryDirectory = join(cacheRoot, 'entries', 'web', 'compatibility-a');
+    expect(readdirSync(entryDirectory).sort()).toEqual(['entry-b.json', 'entry-b.tar']);
+    writeFileSync(join(root, '.next', 'cache', 'webpack', 'entry.bin'), 'stale-local-output');
+    expect(await restoreReleaseBuildCache(root, 'web', {
+      cacheRoot,
+      identity: identity('c'),
+    })).toMatchObject({ status: 'hit_compatible', producerSourceSha256: 'source-b' });
+    expect(readFileSync(join(root, '.next', 'cache', 'webpack', 'entry.bin'), 'utf8'))
+      .toBe('compiled-source-b');
+    expect(readFileSync(nativeModuleMarker, 'utf8')).toBe('must-survive');
+  });
+
+  it('refuses cache mutations inside project node_modules without removing anything', async () => {
+    const { root } = fixture();
+    const nativeModuleRoot = join(root, 'node_modules', 'better-sqlite3');
+    const nativeModuleMarker = join(nativeModuleRoot, 'binding.node');
+    const unsafeCacheRoot = join(nativeModuleRoot, 'release-cache');
+    mkdirSync(nativeModuleRoot, { recursive: true });
+    writeFileSync(nativeModuleMarker, 'must-survive');
+
+    await expect(captureReleaseBuildCache(root, 'web', {
+      cacheRoot: unsafeCacheRoot,
+      identity: identity('a'),
+    })).rejects.toThrow(join(root, 'node_modules', 'better-sqlite3'));
+    expect(readFileSync(nativeModuleMarker, 'utf8')).toBe('must-survive');
+    expect(existsSync(unsafeCacheRoot)).toBe(false);
+  });
+
+  it('refuses a restore destination redirected into project node_modules', async () => {
+    const { root, cacheRoot } = fixture();
+    expect(await captureReleaseBuildCache(root, 'web', {
+      cacheRoot,
+      identity: identity('a'),
+    })).toMatchObject({ status: 'captured' });
+
+    rmSync(join(root, '.next'), { recursive: true, force: true });
+    const redirectedDestination = join(root, 'node_modules', 'cache');
+    mkdirSync(redirectedDestination, { recursive: true });
+    const destinationMarker = join(redirectedDestination, 'must-survive.txt');
+    writeFileSync(destinationMarker, 'must-survive');
+    symlinkSync(join(root, 'node_modules'), join(root, '.next'), 'dir');
+
+    await expect(restoreReleaseBuildCache(root, 'web', {
+      cacheRoot,
+      identity: identity('b'),
+    })).rejects.toThrow(join(root, '.next', 'cache'));
+    expect(readFileSync(destinationMarker, 'utf8')).toBe('must-survive');
+  });
+
+  it('refuses project node_modules symlinked outside the checkout', async () => {
+    const { root } = fixture();
+    const externalNodeModules = mkdtempSync(join(tmpdir(), 'o8-release-cache-node-modules-'));
+    roots.push(externalNodeModules);
+    const nativeModuleRoot = join(externalNodeModules, 'better-sqlite3');
+    const nativeModuleMarker = join(nativeModuleRoot, 'binding.node');
+    mkdirSync(nativeModuleRoot, { recursive: true });
+    writeFileSync(nativeModuleMarker, 'must-survive');
+    symlinkSync(externalNodeModules, join(root, 'node_modules'), 'dir');
+
+    await expect(captureReleaseBuildCache(root, 'web', {
+      cacheRoot: join(root, 'node_modules', 'better-sqlite3', 'release-cache'),
+      identity: identity('a'),
+    })).rejects.toThrow(join(root, 'node_modules', 'better-sqlite3'));
+    expect(readFileSync(nativeModuleMarker, 'utf8')).toBe('must-survive');
   });
 
   it('rejects a corrupt cache without touching the cold-build destination', async () => {

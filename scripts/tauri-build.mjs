@@ -8,6 +8,7 @@ import {
   collectReleaseBuildCacheIdentity,
   createReleaseBuildCacheRunId,
   finalizeReleaseBuildCacheReceipt,
+  isReleaseBuildCacheSafetyError,
   resolveReleaseBuildCacheRoot,
   restoreReleaseBuildCache,
   writeReleaseBuildCachePhaseReceipt,
@@ -31,6 +32,7 @@ try {
     buildOptions: nativeBuildOptions,
   });
 } catch (error) {
+  if (isReleaseBuildCacheSafetyError(error)) throw error;
   nativeRestore = {
     phase: 'native',
     status: 'miss',
@@ -73,6 +75,7 @@ if (!build.error && build.status === 0) {
       buildOptions: nativeBuildOptions,
     });
   } catch (error) {
+    if (isReleaseBuildCacheSafetyError(error)) throw error;
     nativeCapture = {
       phase: 'native',
       status: 'miss',
@@ -98,7 +101,7 @@ try {
     outcome: !build.error && build.status === 0 ? 'PASS' : 'FAIL',
     source: nativeIdentity?.source ?? { head: 'unavailable' },
     buildDurationMs,
-  });
+  }, { projectRoot: root });
   const totals = finalized.receipt.totals ?? {};
   console.log(
     `[release-cache] receipt ${finalized.receiptPath}`
@@ -106,6 +109,7 @@ try {
     + ` restored=${totals.archiveBytesRestored ?? 0} estimated-saved=${totals.estimatedSavedMs ?? 0}ms`,
   );
 } catch (error) {
+  if (isReleaseBuildCacheSafetyError(error)) throw error;
   console.warn(`[release-cache] receipt unavailable: ${error instanceof Error ? error.message : String(error)}`);
 }
 

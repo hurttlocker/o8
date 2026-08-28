@@ -25,6 +25,7 @@ export interface ReleaseBuildCacheAction {
 }
 
 export function resolveReleaseBuildCacheRoot(env?: NodeJS.ProcessEnv): string;
+export function isReleaseBuildCacheSafetyError(error: unknown): boolean;
 export function collectReleaseBuildCacheIdentity(
   root: string,
   phase: ReleaseBuildCachePhase,
@@ -65,9 +66,11 @@ export function finalizeReleaseBuildCacheReceipt(
     source: Record<string, unknown>;
     buildDurationMs: number;
   },
+  options?: { projectRoot?: string },
 ): { receipt: Record<string, unknown>; receiptPath: string };
 export const releaseBuildCacheInternals: {
   PHASE_CONFIG: Record<ReleaseBuildCachePhase, unknown>;
+  assertOutsideProjectNodeModules(target: string, projectRoot: string): void;
   collectWebEnvironmentFiles(root: string): Array<{ path: string; sha256: string }>;
   normalizeArchivePath(value: string): string | null;
   pathAllowed(candidate: string, targets: string[], excludes: string[]): boolean;
