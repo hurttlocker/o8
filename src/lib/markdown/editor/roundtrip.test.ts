@@ -186,23 +186,15 @@ describe('rich Markdown source contract', () => {
 });
 
 describe('unsupported rich Markdown constructs', () => {
-  it.each([
-    ['unsupported-html.md', 'html', 3],
-    ['unsupported-table.md', 'table', 3],
-    ['unsupported-frontmatter.md', 'frontmatter', 1],
-    ['unsupported-image.md', 'image', 3],
-    ['unsupported-task-item.md', 'task item', 3],
-    ['unsupported-math.md', 'math', 3],
-    ['unsupported-footnote.md', 'footnote', 1],
-  ] as const)('rejects %s as %s at line %i', (name, construct, line) => {
+  it('rejects paragraph images with their exact line', () => {
     let thrown: unknown;
     try {
-      openRichDocument(fixture(name));
+      openRichDocument(fixture('unsupported-image.md'));
     } catch (error) {
       thrown = error;
     }
 
     expect(thrown).toBeInstanceOf(UnsupportedMarkdownError);
-    expect(thrown).toMatchObject({ construct, line });
+    expect(thrown).toMatchObject({ construct: 'image', line: 3 });
   });
 });

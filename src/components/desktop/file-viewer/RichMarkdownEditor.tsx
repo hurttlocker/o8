@@ -32,6 +32,7 @@ import {
 } from '@/lib/markdown/editor';
 import type { OpenRichDocumentResult } from '@/lib/markdown/editor/document';
 import { serializeDocument } from '@/lib/markdown/transport';
+import { richMarkdownNodeViews } from './rich-node-views';
 
 const MonacoEditor = dynamic(() => import('@/lib/monaco-polyfills').then(() =>
   import('@monaco-editor/react').then((mod) => mod.default)
@@ -269,6 +270,27 @@ function hardBreakCommand(): Command {
   };
 }
 
+function toggleTaskCheckbox(view: EditorView, event: Event): boolean {
+  const target = event.target;
+  if (!(target instanceof Element)) return false;
+  const checkbox = target.closest<HTMLInputElement>('input[data-task-checkbox="true"]');
+  const itemDom = checkbox?.closest<HTMLElement>('li[data-task-checked]');
+  if (!checkbox || !itemDom) return false;
+
+  const $position = view.state.doc.resolve(view.posAtDOM(itemDom, 0));
+  for (let depth = $position.depth; depth > 0; depth -= 1) {
+    const node = $position.node(depth);
+    if (node.type !== richMarkdownSchema.nodes.list_item) continue;
+    event.preventDefault();
+    view.dispatch(view.state.tr.setNodeMarkup($position.before(depth), undefined, {
+      ...node.attrs,
+      checked: !node.attrs.checked,
+    }));
+    return true;
+  }
+  return false;
+}
+
 function editorPlugins(openLinkPopover: (view: EditorView) => boolean) {
   const { nodes, marks } = richMarkdownSchema;
   return [
@@ -386,6 +408,10 @@ function RichMarkdownEditor({
         transport = applyRichDocument(transport, nextState.doc);
         onSourceChangeRef.current(serializeDocument(transport));
         view.sourceChangeCount += 1;
+      },
+      nodeViews: richMarkdownNodeViews,
+      handleDOMEvents: {
+        click: toggleTaskCheckbox,
       },
     }) as TestableEditorView;
     view.sourceChangeCount = 0;

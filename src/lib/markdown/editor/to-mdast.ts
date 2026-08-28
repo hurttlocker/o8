@@ -72,6 +72,11 @@ function inlineToMdast(node: ProseMirrorNode): MdastNode[] {
       containers[containers.length - 1].push(codeMark
         ? { type: 'inlineCode', value: child.text ?? '' }
         : { type: 'text', value: child.text ?? '' });
+    } else if (child.type.name === 'opaque_inline') {
+      containers[containers.length - 1].push({
+        type: 'html',
+        value: String(child.attrs.source),
+      });
     } else if (child.type.name === 'hard_break') {
       containers[containers.length - 1].push({ type: 'break' });
     } else {
@@ -85,7 +90,7 @@ function inlineToMdast(node: ProseMirrorNode): MdastNode[] {
 function listItemToMdast(node: ProseMirrorNode): MdastNode {
   return {
     type: 'listItem',
-    checked: null,
+    checked: typeof node.attrs.checked === 'boolean' ? node.attrs.checked : null,
     spread: false,
     children: Array.from({ length: node.childCount }, (_value, index) => (
       pmNodeToBlock(node.child(index)) as unknown as MdastNode

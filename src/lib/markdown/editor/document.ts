@@ -4,8 +4,13 @@ import {
   type MarkdownBlock,
   type MarkdownTransportDocument,
   parseDocument,
+  removeBlock,
 } from '@/lib/markdown/transport';
-import { blockToPmNode, UnsupportedMarkdownError } from './from-mdast';
+import {
+  blockToPmNode,
+  type OpaqueInlineRange,
+  UnsupportedMarkdownError,
+} from './from-mdast';
 import { richMarkdownSchema } from './schema';
 import { pmNodeToBlock } from './to-mdast';
 
@@ -28,12 +33,16 @@ interface RichDocumentState {
 
 const richDocumentStates = new WeakMap<MarkdownTransportDocument, RichDocumentState>();
 
+const inlineMathPattern = /(?<![\\$])\$(?![\s$])(?:\\.|[^$\r\n])*?(?<![\s\\$])\$(?!\$)/g;
+
 const unparsedConstructPatterns = [
   { construct: 'footnote', pattern: /\[\^[^\]\r\n]+\](?::)?/g },
   { construct: 'math', pattern: /(?<!\\)\$\$[\s\S]*?(?<!\\)\$\$/g },
-  { construct: 'math', pattern: /(?<!\\)\$(?![\s$])(?:\\.|[^$\r\n])*?(?<![\s\\])\$/g },
+  { construct: 'math', pattern: inlineMathPattern },
   { construct: 'math', pattern: /\\\([\s\S]*?\\\)|\\\[[\s\S]*?\\\]/g },
 ] as const;
+
+const blockMathPattern = /^[ \t]*\$\$(?:[^\r\n]*\$\$|[ \t]*(?:\r\n|\r|\n)[\s\S]*(?:\r\n|\r|\n)[ \t]*\$\$)[ \t]*$/;
 
 function lineAtOffset(source: string, offset: number): number {
   let line = 1;
@@ -67,13 +76,67 @@ function protectedInlineRanges(node: unknown): Array<{ start: number; end: numbe
     : [];
 }
 
+function positionedRange(node: unknown): { start: number; end: number } | null {
+  if (!node || typeof node !== 'object') return null;
+  const position = (node as {
+    position?: { start?: { offset?: number }; end?: { offset?: number } };
+  }).position;
+  const start = position?.start?.offset;
+  const end = position?.end?.offset;
+  return start === undefined || end === undefined ? null : { start, end };
+}
+
+function opaqueInlineRanges(node: unknown, source: string): OpaqueInlineRange[] {
+  if (!node || typeof node !== 'object') return [];
+  const candidate = node as { type?: unknown; children?: unknown };
+  const range = positionedRange(candidate);
+  if (candidate.type === 'footnoteReference' && range) {
+    return [{
+      construct: 'footnote-reference',
+      ...range,
+      source: source.slice(range.start, range.end),
+    }];
+  }
+  if (candidate.type === 'inlineMath' && range) {
+    return [{
+      construct: 'math',
+      ...range,
+      source: source.slice(range.start, range.end),
+    }];
+  }
+  if (candidate.type === 'text' && range) {
+    const value = source.slice(range.start, range.end);
+    const ranges: OpaqueInlineRange[] = [];
+    inlineMathPattern.lastIndex = 0;
+    for (let match = inlineMathPattern.exec(value); match; match = inlineMathPattern.exec(value)) {
+      ranges.push({
+        construct: 'math',
+        start: range.start + match.index,
+        end: range.start + match.index + match[0].length,
+        source: match[0],
+      });
+    }
+    return ranges;
+  }
+  if (candidate.type === 'inlineCode') return [];
+  return Array.isArray(candidate.children)
+    ? candidate.children.flatMap((child) => opaqueInlineRanges(child, source))
+    : [];
+}
+
+function isBlockMath(transport: MarkdownTransportDocument, block: MarkdownBlock): boolean {
+  if (block.node.type !== 'paragraph') return false;
+  return blockMathPattern.test(transport.source.slice(block.nodeStart, block.nodeEnd));
+}
+
 function firstUnparsedConstruct(
   transport: MarkdownTransportDocument,
   block: MarkdownBlock,
+  opaqueRanges: readonly OpaqueInlineRange[],
 ): UnsupportedMarkdownError | null {
   if (block.node.type === 'code') return null;
   const nodeSource = transport.source.slice(block.nodeStart, block.nodeEnd);
-  const protectedRanges = protectedInlineRanges(block.node);
+  const protectedRanges = [...protectedInlineRanges(block.node), ...opaqueRanges];
   let first: { construct: string; offset: number } | null = null;
 
   for (const { construct, pattern } of unparsedConstructPatterns) {
@@ -101,10 +164,20 @@ function firstUnparsedConstruct(
 function mappedBlock(
   transport: MarkdownTransportDocument,
   block: MarkdownBlock,
+  blockIndex: number,
 ): ProseMirrorNode {
-  const unparsed = firstUnparsedConstruct(transport, block);
+  const inlineRanges = opaqueInlineRanges(block.node, transport.source);
+  const forceOpaqueConstruct = isBlockMath(transport, block) ? 'math' : undefined;
+  const unparsed = firstUnparsedConstruct(transport, block, inlineRanges);
   try {
-    const mapped = blockToPmNode(block.node, richMarkdownSchema);
+    const mapped = blockToPmNode(block.node, richMarkdownSchema, {
+      source: transport.source,
+      blockSource: block.source,
+      blockIndex,
+      forceOpaqueConstruct,
+      opaqueInlineRanges: inlineRanges,
+    });
+    if (mapped.type === richMarkdownSchema.nodes.opaque_block) return mapped;
     if (unparsed) throw unparsed;
     return mapped;
   } catch (error) {
@@ -204,7 +277,7 @@ function stateFor(
 ): RichDocumentState {
   const existing = richDocumentStates.get(transport);
   if (existing) return existing;
-  const currentNodes = transport.blocks.map((block) => mappedBlock(transport, block));
+  const currentNodes = transport.blocks.map((block, index) => mappedBlock(transport, block, index));
   const state = {
     entries: transport.blocks.map((block, index) => ({
       sourceBlock: block,
@@ -219,7 +292,7 @@ function stateFor(
 
 export function openRichDocument(source: string): OpenRichDocumentResult {
   const transport = parseDocument(source);
-  const mappedNodes = transport.blocks.map((block) => mappedBlock(transport, block));
+  const mappedNodes = transport.blocks.map((block, index) => mappedBlock(transport, block, index));
   const pmNodes = mappedNodes.length > 0
     ? mappedNodes
     : [richMarkdownSchema.nodes.paragraph.create()];
@@ -247,20 +320,37 @@ export function applyRichDocument(
     && entry.originNode !== null
     && nextNodes[index].eq(entry.originNode)
   ));
+  const preservesOpaqueSource = (entry: OriginEntry, node: ProseMirrorNode): boolean => {
+    if (entry.originNode?.type !== richMarkdownSchema.nodes.opaque_block) return false;
+    if (node.type !== richMarkdownSchema.nodes.opaque_block) return false;
+    if (node.attrs.source !== entry.originNode.attrs.source) {
+      throw new Error('Opaque block source cannot be changed in Rich mode.');
+    }
+    return true;
+  };
   const originalBlocks = entries.flatMap((entry, index) => {
     if (!entry.sourceBlock || !entry.originNode) return [];
     const node = nextNodes[index];
+    const unchanged = node.eq(entry.originNode) || preservesOpaqueSource(entry, node);
     return [{
       ...entry.sourceBlock,
-      node: node.eq(entry.originNode) ? entry.sourceBlock.node : pmNodeToBlock(node),
-      edited: !node.eq(entry.originNode),
+      node: unchanged ? entry.sourceBlock.node : pmNodeToBlock(node),
+      edited: !unchanged,
     }];
   });
+
+  const survivingBlocks = new Set(entries.flatMap((entry) => (
+    entry.sourceBlock ? [entry.sourceBlock] : []
+  )));
+  let preservedTransport = state.originTransport;
+  for (let index = preservedTransport.blocks.length - 1; index >= 0; index -= 1) {
+    if (!survivingBlocks.has(state.originTransport.blocks[index])) {
+      preservedTransport = removeBlock(preservedTransport, index);
+    }
+  }
   let nextTransport: MarkdownTransportDocument = {
-    ...state.originTransport,
-    source: originalBlocks.length === 0 && !hasUnchangedVirtualBlock
-      ? ''
-      : state.originTransport.source,
+    ...preservedTransport,
+    source: hasUnchangedVirtualBlock ? state.originTransport.source : preservedTransport.source,
     blocks: originalBlocks,
   };
 

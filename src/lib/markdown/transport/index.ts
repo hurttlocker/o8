@@ -46,9 +46,10 @@ const CRITIC_MARKUP_PATTERN = /\{(?:~~[\s\S]*?~>[\s\S]*?~~|==[\s\S]*?==|>>[\s\S]
 const PRIVATE_USE_START = 0xe000;
 const PRIVATE_USE_END = 0xf8ff;
 
-const parseExtensions = [gfm(), frontmatter(['yaml'])];
-const mdastExtensions = [gfmFromMarkdown(), frontmatterFromMarkdown(['yaml'])];
-const serializeExtensions = [gfmToMarkdown(), frontmatterToMarkdown(['yaml'])];
+const frontmatterKinds: Array<'yaml' | 'toml'> = ['yaml', 'toml'];
+const parseExtensions = [gfm(), frontmatter(frontmatterKinds)];
+const mdastExtensions = [gfmFromMarkdown(), frontmatterFromMarkdown(frontmatterKinds)];
+const serializeExtensions = [gfmToMarkdown(), frontmatterToMarkdown(frontmatterKinds)];
 
 function nextPrivateUseToken(value: string, used: Set<string>, cursor: number): string {
   for (let code = cursor; code <= PRIVATE_USE_END; code += 1) {
@@ -180,6 +181,7 @@ function serializeNode(node: MarkdownBlockNode, lineEnding: Exclude<MarkdownLine
     { type: 'root', children: [node] },
     {
       extensions: serializeExtensions,
+      bullet: '-',
       emphasis: '*',
       fence: '`',
       fences: true,
