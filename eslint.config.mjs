@@ -28,6 +28,11 @@ const config = [
     ],
   },
   {
+    linterOptions: {
+      reportUnusedDisableDirectives: 'error',
+    },
+  },
+  {
     files: ['**/*.cjs'],
     plugins: { 'react-hooks': reactHooks },
     rules: {
