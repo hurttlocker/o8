@@ -180,6 +180,9 @@ function serializeNode(node: MarkdownBlockNode, lineEnding: Exclude<MarkdownLine
     { type: 'root', children: [node] },
     {
       extensions: serializeExtensions,
+      emphasis: '*',
+      fence: '`',
+      fences: true,
       handlers: {
         text(textNode, _parent, state, info) {
           const protectedText = protectCriticMarkup(textNode.value);
@@ -243,6 +246,70 @@ export function replaceBlock(
     throw new Error(`A Markdown block replacement must parse to one top-level node; received ${replacement.children.length}.`);
   }
   return updateBlockNode(doc, index, replacement.children[0]);
+}
+
+function insertedBlock(
+  doc: MarkdownTransportDocument,
+  index: number,
+  node: MarkdownBlockNode,
+): MarkdownBlock {
+  const lineEnding = doc.lineEnding ?? '\n';
+  const serialized = serializeNode(node, lineEnding);
+  let prefix = '';
+  let suffix = '';
+
+  if (doc.blocks.length === 0) {
+    suffix = doc.source;
+  } else if (index < doc.blocks.length) {
+    suffix = `${lineEnding}${lineEnding}`;
+  } else {
+    const current = serializeDocument(doc);
+    if (!current.endsWith(`${lineEnding}${lineEnding}`)) {
+      prefix = current.endsWith(lineEnding) ? lineEnding : `${lineEnding}${lineEnding}`;
+    }
+  }
+
+  return {
+    start: 0,
+    end: prefix.length + serialized.length + suffix.length,
+    nodeStart: prefix.length,
+    nodeEnd: prefix.length + serialized.length,
+    source: `${prefix}${serialized}${suffix}`,
+    node,
+    edited: true,
+  };
+}
+
+export function insertBlock(
+  doc: MarkdownTransportDocument,
+  index: number,
+  node: MarkdownBlockNode,
+): MarkdownTransportDocument {
+  if (!Number.isInteger(index) || index < 0 || index > doc.blocks.length) {
+    throw new RangeError(`Markdown block insertion index is out of range: ${index}`);
+  }
+  const block = insertedBlock(doc, index, node);
+  return {
+    ...doc,
+    blocks: [
+      ...doc.blocks.slice(0, index),
+      block,
+      ...doc.blocks.slice(index),
+    ],
+  };
+}
+
+export function removeBlock(
+  doc: MarkdownTransportDocument,
+  index: number,
+): MarkdownTransportDocument {
+  assertBlockIndex(doc, index);
+  const blocks = doc.blocks.filter((_block, blockIndex) => blockIndex !== index);
+  return {
+    ...doc,
+    source: blocks.length === 0 ? '' : doc.source,
+    blocks,
+  };
 }
 
 export async function contentHash(source: string): Promise<string> {

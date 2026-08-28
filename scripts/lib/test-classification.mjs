@@ -5,6 +5,9 @@ import { join, relative, sep } from 'node:path';
 // extensions are helpers, not independently scheduled tests.
 const TEST_FILE_RE = /\.test\.ts$/;
 const TEST_ROOTS = ['src', 'tests', 'cli'];
+const EXTRA_TEST_FILES = new Set([
+  'src/components/desktop/file-viewer/RichMarkdownEditor.test.tsx',
+]);
 
 const PATH_RULES = [
   ['real-path', /(?:^|[-/])real-path(?:[-.]|$)/i],
@@ -33,8 +36,9 @@ function walkTestFiles(root, directory, results) {
     if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === '.next') continue;
     const absolute = join(directory, entry.name);
     if (entry.isDirectory()) walkTestFiles(root, absolute, results);
-    else if (entry.isFile() && TEST_FILE_RE.test(entry.name)) {
-      results.push(relative(root, absolute).split(sep).join('/'));
+    else if (entry.isFile()) {
+      const path = relative(root, absolute).split(sep).join('/');
+      if (TEST_FILE_RE.test(entry.name) || EXTRA_TEST_FILES.has(path)) results.push(path);
     }
   }
 }

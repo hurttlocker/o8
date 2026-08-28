@@ -4,22 +4,20 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { FileText } from './lucide-shims';
-import dynamic from 'next/dynamic';
 import { loader } from '@monaco-editor/react';
 import { useTheme } from '@/lib/theme/context';
 import { renderDiffLines } from './diff-utils';
 import { MODEL_IDS } from '@/lib/models';
 import { SaveConflictStrip, type SaveConflict } from './SaveConflictStrip';
 import { defineCortexMonacoThemes, getMonacoLanguage } from './file-viewer-monaco';
+import {
+  MarkdownEditorMount,
+  MarkdownModeToggle,
+  RichModeUnavailableStrip,
+  useRichMarkdownEditor,
+} from './file-viewer/RichMarkdownEditor';
 
 export { defineCortexMonacoThemes, getMonacoLanguage };
-
-const MonacoEditor = dynamic(() => import('@/lib/monaco-polyfills').then(() =>
-  import('@monaco-editor/react').then((mod) => mod.default)
-), {
-  ssr: false,
-  loading: () => <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>Loading editor…</div>,
-});
 
 // ── File Viewer ──
 
@@ -39,6 +37,12 @@ export const FileViewer = memo(function FileViewer({ filePath, workspace }: { fi
   const [editing, setEditing] = useState(true); // Always editable — click in, start typing
   const editorRef = useRef<unknown>(null);
 
+  const handleEditContentChange = useCallback((value: string) => {
+    setEditContent(value);
+    setDirty(value !== content);
+  }, [content]);
+  const richMarkdown = useRichMarkdownEditor(filePath, editContent);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -56,9 +60,11 @@ export const FileViewer = memo(function FileViewer({ filePath, workspace }: { fi
         .then(r => r.json()).catch(() => ({ diff: '', hasDiff: false })),
     ]).then(([contentData, diffData]) => {
       if (!cancelled) {
+        const loadedContent = contentData.content ?? '';
         setContent(contentData.content ?? null);
-        setEditContent(contentData.content ?? '');
+        setEditContent(loadedContent);
         setFileHash(typeof contentData.contentHash === 'string' ? contentData.contentHash : null);
+        richMarkdown.loadSource(`${workspace ?? ''}\u0000${filePath}`, loadedContent);
         setDiff(diffData.diff ?? '');
         setHasDiff(diffData.hasDiff ?? false);
         if (diffData.hasDiff) setActiveView('diff');
@@ -115,13 +121,15 @@ export const FileViewer = memo(function FileViewer({ filePath, workspace }: { fi
 
   const reloadConflict = useCallback(() => {
     if (!saveConflict) return;
+    const nextContent = saveConflict.content ?? '';
     setContent(saveConflict.content);
-    setEditContent(saveConflict.content ?? '');
+    setEditContent(nextContent);
     setFileHash(saveConflict.contentHash);
     setSaveConflict(null);
     setDirty(false);
     setSaveNote(null);
-  }, [saveConflict]);
+    richMarkdown.reloadSource(nextContent);
+  }, [richMarkdown, saveConflict]);
 
   // Cmd+S keyboard shortcut
   useEffect(() => {
@@ -391,6 +399,13 @@ export const FileViewer = memo(function FileViewer({ filePath, workspace }: { fi
         <span style={{ fontSize: 11, color: 'var(--t-text-muted)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>{filePath}</span>
         <span style={{ fontSize: 10, color: 'var(--t-text-muted)', opacity: 0.7 }}>{lineCount} lines · {fileSizeLabel}</span>
 
+        {richMarkdown.supported ? (
+          <MarkdownModeToggle
+            mode={richMarkdown.mode}
+            onChange={richMarkdown.selectMode}
+          />
+        ) : null}
+
         {saveNote ? (
           <span style={{
             fontSize: 11,
@@ -447,6 +462,10 @@ export const FileViewer = memo(function FileViewer({ filePath, workspace }: { fi
           onReload={reloadConflict}
           onOverwrite={() => { void handleSave(true); }}
         />
+      ) : null}
+
+      {richMarkdown.unavailable ? (
+        <RichModeUnavailableStrip error={richMarkdown.unavailable} />
       ) : null}
 
       {/* Inline Edit Widget — renders into Monaco content widget via portal */}
@@ -689,58 +708,14 @@ export const FileViewer = memo(function FileViewer({ filePath, workspace }: { fi
             </pre>
           </div>
         ) : content !== null ? (
-          <MonacoEditor
-            height="100%"
+          <MarkdownEditorMount
+            controller={richMarkdown}
             language={getMonacoLanguage(filePath)}
             value={editContent}
-            theme={themeId === 'light' ? 'cortex-frost' : 'cortex-graphite'}
-            onChange={(value) => {
-              if (editing && value !== undefined) {
-                setEditContent(value);
-                setDirty(value !== content);
-              }
-            }}
-            onMount={handleEditorMount}
-            beforeMount={defineCortexMonacoThemes}
-            options={{
-              readOnly: false,
-              fontSize: 13,
-              fontFamily: '"SF Mono", "Menlo", "Monaco", "Cascadia Code", ui-monospace, monospace',
-              lineHeight: 20,
-              tabSize: 2,
-              insertSpaces: true,
-              minimap: { enabled: true, maxColumn: 80, scale: 2 },
-              scrollBeyondLastLine: false,
-              wordWrap: 'on',
-              lineNumbers: 'on',
-              glyphMargin: false,
-              folding: true,
-              bracketPairColorization: { enabled: true },
-              renderLineHighlight: 'line',
-              occurrencesHighlight: 'singleFile',
-              matchBrackets: 'always',
-              smoothScrolling: true,
-              cursorBlinking: 'smooth',
-              cursorSmoothCaretAnimation: 'on',
-              padding: { top: 12, bottom: 12 },
-              overviewRulerLanes: 0,
-              hideCursorInOverviewRuler: true,
-              overviewRulerBorder: false,
-              scrollbar: {
-                vertical: 'hidden',
-                horizontal: 'auto',
-                verticalScrollbarSize: 0,
-                horizontalScrollbarSize: 8,
-                useShadows: false,
-              },
-              contextmenu: true,
-              quickSuggestions: false,
-              suggestOnTriggerCharacters: false,
-              parameterHints: { enabled: false },
-              inlineSuggest: { enabled: false }, // re-enable when tab autocomplete is stabilized
-              renderWhitespace: 'selection',
-              guides: { bracketPairs: true, indentation: true },
-            }}
+            themeId={themeId}
+            onSourceChange={handleEditContentChange}
+            onMonacoMount={handleEditorMount}
+            beforeMonacoMount={defineCortexMonacoThemes}
           />
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>
