@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url';
 import {
   descendantPids,
   measureProcessPhysicalBytes,
+  snapshotProcesses,
 } from '../../lib/footprint-budget.mjs';
 
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -116,7 +117,7 @@ function processLog(child) {
   let output = '';
   for (const stream of [child.stdout, child.stderr]) {
     stream?.setEncoding('utf8');
-    stream?.on('data', (chunk) => { output = `${output}${chunk}`.slice(-30000); });
+    stream?.on('data', (chunk) => { output = `${output}${chunk}`.slice(-500000); });
   }
   return () => output;
 }
@@ -232,27 +233,88 @@ export function resolveProcessGroups(processes, stack, browserPid) {
   };
 }
 
-export function measureProcessGroups(before, after, groups, observationMs) {
+function processLabel(command) {
+  if (command.includes('--type=renderer')) return 'chromium-renderer';
+  if (command.includes('ws-server.ts')) return 'ws-server';
+  if (command.includes('next-server')) return 'next-server';
+  if (command.includes('next/dist/bin/next')) return 'next-launcher';
+  const executable = command.trim().split(/\s+/u)[0] ?? 'unknown';
+  return path.basename(executable);
+}
+
+function sameProcess(left, right) {
+  return left?.pid === right?.pid
+    && left?.ppid === right?.ppid
+    && left?.command === right?.command;
+}
+
+export function describeProcessPidTree(processes, groups) {
+  return Object.fromEntries(Object.entries(groups).map(([name, pids]) => [
+    name,
+    pids.flatMap((pid) => {
+      const entry = processes.get(pid);
+      return entry ? [{ pid, ppid: entry.ppid, process: processLabel(entry.command) }] : [];
+    }),
+  ]));
+}
+
+export function measureProcessGroupMemory(processes, groups) {
+  return Object.fromEntries(Object.entries(groups).map(([name, pids]) => {
+    let physicalBytes = 0;
+    const unavailable = [];
+    for (const pid of pids) {
+      const expected = processes.get(pid);
+      const beforeProbe = snapshotProcesses().get(pid);
+      if (!sameProcess(expected, beforeProbe)) {
+        unavailable.push({ pid, reason: 'process identity changed before physical-memory probe' });
+        continue;
+      }
+      try {
+        const measuredBytes = measureProcessPhysicalBytes(pid);
+        const afterProbe = snapshotProcesses().get(pid);
+        if (!sameProcess(beforeProbe, afterProbe)) {
+          unavailable.push({ pid, reason: 'process identity changed during physical-memory probe' });
+          continue;
+        }
+        physicalBytes += measuredBytes;
+      } catch (error) {
+        let stillRunning = true;
+        try { process.kill(pid, 0); } catch { stillRunning = false; }
+        if (stillRunning) unavailable.push({ pid, reason: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    return [name, unavailable.length === 0 ? physicalBytes : null];
+  }));
+}
+
+export function measureProcessGroups(
+  before,
+  after,
+  groups,
+  observationMs,
+  physicalBytesStart = {},
+  physicalBytesEnd = {},
+) {
   const seconds = observationMs / 1000;
   return Object.fromEntries(Object.entries(groups).map(([name, pids]) => {
     let cpuSeconds = 0;
-    let physicalBytes = 0;
-    const physicalUnavailable = [];
     for (const pid of pids) {
       const beforeProcess = before.get(pid);
       const afterProcess = after.get(pid);
       if (beforeProcess && afterProcess) {
         cpuSeconds += Math.max(0, afterProcess.cpuTimeSeconds - beforeProcess.cpuTimeSeconds);
       }
-      if (!afterProcess) continue;
-      try { physicalBytes += measureProcessPhysicalBytes(pid); }
-      catch (error) { physicalUnavailable.push({ pid, reason: error instanceof Error ? error.message : String(error) }); }
     }
+    const physicalBytes = physicalBytesEnd[name] ?? null;
     return [name, {
       processCount: pids.filter((pid) => after.has(pid)).length,
       cpuPercent: seconds > 0 ? Number(((cpuSeconds / seconds) * 100).toFixed(2)) : null,
-      physicalBytes: physicalUnavailable.length === 0 ? physicalBytes : null,
-      physicalUnavailable,
+      physicalBytes,
+      physicalBytesStart: physicalBytesStart[name] ?? null,
+      physicalBytesGrowth: physicalBytes != null && physicalBytesStart[name] != null
+        ? physicalBytes - physicalBytesStart[name]
+        : null,
+      physicalUnavailable: [],
     }];
   }));
 }

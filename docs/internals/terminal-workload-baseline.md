@@ -107,12 +107,16 @@ alternate-screen asymmetry make server-scrollback-only reconstruction unsafe
 without a full terminal snapshot/recovery protocol. No intervention is included
 in Phase 1.
 
-## Proposed budgets
+## Locked Phase 2 budgets
 
-These thresholds are proposals derived from the baseline and include rounded
-headroom. They are deliberately not locked by this change.
+The operator locked the Phase 2 thresholds after this baseline landed. The
+single executable source is
+`scripts/bench/terminal-workload/budgets.mjs`; `npm run bench:terminal:check`
+reads the versioned receipt and fails any locked ceiling. The table below is
+the Phase 1 derivation record. The locked gate also requires N=12 realtime-
+server CPU p50 to remain strictly below the 25% baseline.
 
-| Acceptance line | **PROPOSED** gate | Baseline used |
+| Acceptance line | Locked gate | Baseline used |
 | --- | --- | --- |
 | Hidden-session CPU | At N=12, browser-renderer p95 ≤35% and its p95 increase over N=1 ≤15 percentage points; realtime-server p95 ≤42% as a non-regression guard; main-thread long tasks p95 ≤750 ms/min. | Renderer p95 41.12%, +20.38 points over N=1; realtime p95 38.11%; long tasks p95 1,300 ms/min. The renderer and long-task targets require a material Phase 2 reduction. |
 | Memory | At N=12, p95 app server ≤512 MiB, realtime server ≤224 MiB, renderer ≤288 MiB, and renderer growth over N=1 ≤112 MiB. | p95 values are 440, 193, and 261 MiB; renderer growth is 84 MiB. |
@@ -120,7 +124,7 @@ headroom. They are deliberately not locked by this change.
 | Visible input | N=12 keystroke-to-paint p50 ≤75 ms and p95 ≤175 ms, with zero 10-second censored timeouts. | N=12 p50/p95 are 54.2/138.2 ms with zero timeouts. |
 
 For the separate “no proportional hidden rendering” acceptance line, the
-proposed diagnostic guard is N=12 xterm render events no more than 1.25× N=1.
+locked guard is N=12 xterm render events no more than 1.25× N=1.
 The baseline already meets it (308 versus 319); the CPU and long-task gates are
 what prevent a no-op result from passing Phase 2.
 

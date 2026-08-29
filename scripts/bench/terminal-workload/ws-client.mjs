@@ -8,6 +8,7 @@ export class TerminalWorkloadClient {
     this.socket = null;
     this.frames = [];
     this.textBySession = new Map();
+    this.deliveryBySession = new Map();
   }
 
   async connect() {
@@ -21,7 +22,12 @@ export class TerminalWorkloadClient {
         const sessionName = frame.data?.sessionName;
         const encoded = frame.data?.data;
         if (typeof sessionName === 'string' && typeof encoded === 'string') {
-          const next = `${this.textBySession.get(sessionName) ?? ''}${Buffer.from(encoded, 'base64').toString('utf8')}`;
+          const decoded = Buffer.from(encoded, 'base64');
+          const delivery = this.deliveryBySession.get(sessionName) ?? { frames: 0, bytes: 0 };
+          delivery.frames += 1;
+          delivery.bytes += decoded.byteLength;
+          this.deliveryBySession.set(sessionName, delivery);
+          const next = `${this.textBySession.get(sessionName) ?? ''}${decoded.toString('utf8')}`;
           this.textBySession.set(sessionName, next.slice(-131072));
         }
       }
@@ -32,6 +38,10 @@ export class TerminalWorkloadClient {
     });
     await this.waitForFrame((frame) => frame.channel === 'system' && frame.event === 'connected', 10000);
     return this;
+  }
+
+  terminalDelivery(sessionName) {
+    return { ...(this.deliveryBySession.get(sessionName) ?? { frames: 0, bytes: 0 }) };
   }
 
   send(message) {
@@ -61,9 +71,9 @@ export class TerminalWorkloadClient {
     );
   }
 
-  async createAndAttach({ ownerKey, requestId, sessionName, cwd }) {
+  async createAndAttach({ ownerKey, requestId, sessionName, cwd, cols = 120, rows = 30, visible = false }) {
     let startIndex = this.frames.length;
-    this.send({ type: 'terminal-create', ownerKey, requestId, cwd, cols: 120, rows: 30 });
+    this.send({ type: 'terminal-create', ownerKey, requestId, cwd, cols, rows });
     const created = await this.waitForFrame(
       (frame) => frame.channel === 'terminal' && frame.event === 'created' && frame.data?.requestId === requestId,
       15000,
@@ -73,12 +83,13 @@ export class TerminalWorkloadClient {
       throw new Error(`owner key resolved to ${created.data?.sessionName ?? 'no session'}, expected ${sessionName}`);
     }
     startIndex = this.frames.length;
-    this.send({ type: 'terminal-attach', sessionName, cols: 120, rows: 30 });
+    this.send({ type: 'terminal-attach', sessionName, cols, rows });
     await this.waitForFrame(
       (frame) => frame.channel === 'terminal' && frame.event === 'attached' && frame.data?.sessionName === sessionName,
       15000,
       startIndex,
     );
+    this.send({ type: 'terminal-visibility', sessionName, visible, epoch: 1 });
   }
 
   async waitForText(sessionName, marker, timeoutMs = 30000) {
@@ -88,6 +99,16 @@ export class TerminalWorkloadClient {
       await sleep(20);
     }
     throw new Error(`timed out waiting for ${marker} on ${sessionName}`);
+  }
+
+  async waitForServerText(sessionName, marker, timeoutMs = 30000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const snapshot = (await this.request('terminal-bench-stats')).data?.snapshot;
+      if (snapshot?.sessions?.[sessionName]?.lastOutputTail?.includes(marker)) return;
+      await sleep(50);
+    }
+    throw new Error(`timed out waiting for server output ${marker} on ${sessionName}`);
   }
 
   async close() {
