@@ -34,7 +34,7 @@ This audit covers the registered orchestrator backends, every dispatchable worke
 | Brain: compose | Partial | Same local settings/env; `classAComposer=fastest` reaches the HTTP route before CLI tiers | `src/lib/cortex/qa/compose-class-a.ts:219` | Default composition can try subscription CLIs first; local is not enforceable. |
 | Dictation polish | Partial | Same local endpoint/chat-model settings or env | `src/app/api/dictation/polish/route.ts:61` | Managed entitlement wins before local; failure can return unpolished text or use network fallbacks. |
 | TTS | Partial | Automatic network synthesis, then OS/browser speech fallback | `src/lib/tts/engine.ts:259`; `src-tauri/src/tts/native_say.rs:52` | Offline speech exists only as a fallback and cannot be selected as primary. |
-| Settings / Diagnostics detection | Partial | Persisted local settings or env; configured-endpoint probe plus fixed default-runtime probe | `src/lib/cortex/qa/llm/inference-route.ts:140`; `src/app/api/setup/detect/route.ts:443` | Model discovery probes only `/api/tags`; Diagnostics does not show effective per-surface routes. |
+| Settings / Diagnostics detection | Partial | Persisted local settings or env; configured-endpoint probe plus fixed default-runtime probe | `src/lib/cortex/qa/llm/inference-route.ts:140`; `src/app/api/setup/detect/route.ts:443` | Model discovery tries `/api/tags` first, then `/v1/models`; Diagnostics does not show effective per-surface routes. |
 
 ## Issue-worthy gaps
 
@@ -44,5 +44,4 @@ This audit covers the registered orchestrator backends, every dispatchable worke
 - Expose verified local-provider controls for runtime-configured backends and workers [L]
 - Add local launch contracts to cloud-bound dispatch runtimes [L]
 - Make offline TTS selectable as the primary provider [M]
-- Probe configured local endpoints through both supported model-list protocols [S]
 - Give the magnitude runtime a dispatch contract once its headless/RPC surface stabilizes [M]
