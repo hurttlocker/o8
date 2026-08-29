@@ -561,36 +561,16 @@ async function dispatchPacketMerge(
   // merge; the packet carries a generating→ready|failed status and the released
   // card only surfaces a link when ready. Off by default (operator opt-in).
   if (result.ok) {
-    try {
-      const { resolveBuyinDocEnabledSync } = await import('@/lib/operator/defaults');
-      const { shouldGenerateBuyinDoc, generateBuyinDoc } = await import('@/lib/lane/buyin-doc');
-      if (shouldGenerateBuyinDoc({ enabled: resolveBuyinDocEnabledSync(), mergeOk: result.ok, packetId: packet.id })) {
-        const { listArtifacts, artifactAbsPath } = await import('@/lib/artifacts/store');
-        const demoArtifacts = listArtifacts({ packetId: packet.id })
-          .filter((a) => a.kind === 'screenshot' || a.kind === 'video')
-          .map((a) => ({
-            absPath: artifactAbsPath(a.relPath),
-            label: a.label,
-            phase: a.phase,
-            kind: a.kind,
-            mimeType: a.mimeType,
-          }));
-        void generateBuyinDoc({
-          repoPath: lane.repoPath,
-          laneId: lane.id,
-          packetId: packet.id,
-          packetTitle: packet.title,
-          packetSummary: packet.summary ?? '',
-          mergeSha: result.mergeSha ?? null,
-          deviationsRaw: packet.deviations?.raw ?? null,
-          demoArtifacts,
-        }).catch((error) => {
-          console.warn(`[buyin-doc] Generation threw for packet ${packet.id}:`, error);
-        });
-      }
-    } catch (error) {
-      console.warn(`[buyin-doc] Failed to launch generation for packet ${packet.id}:`, error);
-    }
+    const { launchPostMergeBuyin } = await import('./post-merge-buyin');
+    await launchPostMergeBuyin({
+      repoPath: lane.repoPath,
+      laneId: lane.id,
+      packetId: packet.id,
+      packetTitle: packet.title,
+      packetSummary: packet.summary ?? '',
+      mergeSha: result.mergeSha ?? null,
+      deviationsRaw: packet.deviations?.raw ?? null,
+    });
   }
 
   log(`Merge command finished for packet ${packet.id}.`, {
