@@ -275,6 +275,10 @@ async function prepareShell(client, observer, sessionName, seed) {
   }
 }
 
+function serverMarkers(tabs, markerForTab) {
+  return tabs.map((tab) => ({ sessionName: tab.sessionName, marker: markerForTab(tab) }));
+}
+
 async function resetPageMeasurement(page) {
   await page.evaluate(() => {
     window.__o8TerminalWriteStats?.reset();
@@ -710,11 +714,10 @@ async function runRapidSwitch(page, seeded, clients, rapidGeneratorPath, runDire
       data: `${shellQuote(process.execPath)} ${shellQuote(rapidGeneratorPath)} --session ${shellQuote(tab.sessionName)} --duration-ms ${durationMs} --interval-ms ${intervalMs} --log ${shellQuote(logPaths[tab.sessionName])}\r`,
     });
   }
-  await Promise.all(seeded.tabs.map((tab) => clients[0].waitForServerText(
-    tab.sessionName,
-    `O8_RAPID_READY_${tab.sessionName}`,
-    15000,
-  )));
+  await clients[0].waitForServerTexts(serverMarkers(
+    seeded.tabs,
+    (tab) => `O8_RAPID_READY_${tab.sessionName}`,
+  ), 15000);
 
   const rapidStartSnapshot = (await clients[0].request('terminal-bench-stats')).data.snapshot;
   const startedAt = Date.now();
@@ -734,12 +737,16 @@ async function runRapidSwitch(page, seeded, clients, rapidGeneratorPath, runDire
     const remaining = 200 - ((Date.now() - startedAt) % 200);
     if (remaining > 0 && remaining < 200) await sleep(remaining);
   }
-  const doneResults = await Promise.allSettled(seeded.tabs.map((tab) => clients[0].waitForServerText(
-    tab.sessionName,
-    `O8_RAPID_DONE_${tab.sessionName}_${expectedSequenceCount}`,
-    15000,
-  )));
-  const failedTabs = seeded.tabs.filter((_, index) => doneResults[index].status === 'rejected');
+  let failedTabs = [];
+  try {
+    await clients[0].waitForServerTexts(serverMarkers(
+      seeded.tabs,
+      (tab) => `O8_RAPID_DONE_${tab.sessionName}_${expectedSequenceCount}`,
+    ), 15000);
+  } catch (error) {
+    const failedSessions = new Set(error?.pendingServerMarkers?.map(({ sessionName }) => sessionName));
+    failedTabs = seeded.tabs.filter((tab) => failedSessions.size === 0 || failedSessions.has(tab.sessionName));
+  }
   if (failedTabs.length > 0) {
     const failures = [];
     for (const tab of failedTabs) {
@@ -934,11 +941,10 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
         data: `${generatorCommand(generatorPath, tab.sessionName, runConfig, sampleSeed)}\r`,
       });
     }
-    await Promise.all(seeded.tabs.map((tab) => clients[0].waitForServerText(
-      tab.sessionName,
-      `O8_WORKLOAD_READY_${tab.sessionName}_${sampleSeed}`,
-      30000,
-    )));
+    await clients[0].waitForServerTexts(serverMarkers(
+      seeded.tabs,
+      (tab) => `O8_WORKLOAD_READY_${tab.sessionName}_${sampleSeed}`,
+    ), 30000);
     await resetPageMeasurement(page);
     const deliveryStarts = seeded.tabs.map((tab, index) => clients[index].terminalDelivery(tab.sessionName));
 
@@ -1012,11 +1018,10 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
       clients[targetIndex].send({ type: 'terminal-input', sessionName: revealTarget.sessionName, data: 'O8_BENCH_RESUME\r' });
     }
 
-    await Promise.all(seeded.tabs.map((tab) => clients[0].waitForServerText(
-      tab.sessionName,
-      `O8_WORKLOAD_DONE_${tab.sessionName}_${sampleSeed}`,
-      runConfig.durationMs + 30000,
-    )));
+    await clients[0].waitForServerTexts(serverMarkers(
+      seeded.tabs,
+      (tab) => `O8_WORKLOAD_DONE_${tab.sessionName}_${sampleSeed}`,
+    ), runConfig.durationMs + 30000);
     const observationMs = Date.now() - observationStartedAt;
     const after = snapshotProcesses();
     const groupsAfter = resolveProcessGroups(after, stack, browserPid);
@@ -1057,6 +1062,7 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
     const browserSummary = deriveBrowser(rawBrowser, seeded.tabs, panelInventory.mountedSessionNames);
     browserSummary.xtermImportMs = xtermImportDuration(browserConsole);
     const serverSummary = deriveServer(rawServer, seeded.tabs, browserSummary.neverMountedSessionNames);
+    serverSummary.benchStatsRequests = clients.reduce((total, client) => total + client.benchStatsRequests, 0);
     serverSummary.hiddenDeliveredBytesPerHiddenClient = hiddenDeliveredBytesPerHiddenClient;
     serverSummary.hiddenDeliveriesPerHiddenClient = hiddenDeliveriesPerHiddenClient;
     const replayRisk = {
