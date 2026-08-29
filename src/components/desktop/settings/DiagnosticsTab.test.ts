@@ -29,6 +29,11 @@ const ollamaPayload = {
   models: ['qwen2.5-coder:7b'],
 };
 
+const openAiOnlyProbePayload = {
+  running: true,
+  models: ['lmstudio-qwen'],
+};
+
 async function settle(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
@@ -101,5 +106,35 @@ describe('DiagnosticsTab Ollama visibility', () => {
     expect(diagnosticsShowsOllama).toBe(localModelsShowsOllama);
     expect(diagnosticsShowsHealthyOllama).toBe(true);
     expect(diagnosticsShowsHealthyOllama).toBe(localModelsShowsHealthyOllama);
+  });
+
+  it('shows an OpenAI-only endpoint as running in Local Models', async () => {
+    const fetchMock = vi.fn(async () => Response.json(openAiOnlyProbePayload));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await act(async () => {
+      localModelsRoot.render(createElement(LocalModelsSection, {
+        values: {
+          defaultDispatchModel: 'lmstudio:lmstudio-qwen',
+          localInferenceBaseUrl: 'http://localhost:1234/v1',
+          localEmbedModel: 'nomic-embed-text',
+          localChatModel: 'lmstudio-qwen',
+        },
+        sources: {
+          defaultDispatchModel: 'file',
+          localInferenceBaseUrl: 'file',
+          localEmbedModel: 'file',
+          localChatModel: 'file',
+        },
+        busyField: null,
+        envDisabledReason: '',
+        onCommit: vi.fn(),
+      }));
+      await settle();
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/setup/local-inference/probe', { cache: 'no-store' });
+    expect(localModelsContainer.textContent).toContain('running / 1 models');
+    expect(localModelsContainer.textContent).not.toContain('offline');
   });
 });

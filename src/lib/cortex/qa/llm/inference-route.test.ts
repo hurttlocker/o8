@@ -29,6 +29,7 @@ import { resolveFlags } from '@/lib/entitlement/flags';
 import type { Plan } from '@/lib/entitlement/types';
 import { DEFAULT_O8_API_BASE_URL } from '@/lib/hosted-service';
 import {
+  probeLocalInference,
   resetLocalInferenceProbeCacheForTests,
   resolveEmbedRoute,
   resolveOpenRouterRoute,
@@ -88,6 +89,105 @@ describe('inference-route', () => {
     // Default: free / no token. planToken() reads getEntitlementSync(), which
     // runs before the BYO-key fallback, so every test needs a resolved state.
     setEnt(null);
+  });
+
+  describe('probeLocalInference', () => {
+    it('uses the Ollama tags response without probing OpenAI models', async () => {
+      const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, {
+        models: [{ name: 'qwen2.5-coder:7b' }],
+      }));
+      vi.stubGlobal('fetch', fetchMock);
+
+      await expect(probeLocalInference('http://localhost:11434')).resolves.toEqual({
+        running: true,
+        models: ['qwen2.5-coder:7b'],
+      });
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://localhost:11434/api/tags',
+        expect.objectContaining({ method: 'GET' }),
+      );
+    });
+
+    it('falls back to OpenAI models when the tags endpoint fails', async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(jsonResponse(404, { error: 'not found' }))
+        .mockResolvedValueOnce(jsonResponse(200, {
+          data: [{ id: 'lmstudio-qwen' }, { id: 'lmstudio-qwen' }, { id: '  embed-model  ' }],
+        }));
+      vi.stubGlobal('fetch', fetchMock);
+
+      await expect(probeLocalInference('http://localhost:1234/v1')).resolves.toEqual({
+        running: true,
+        models: ['lmstudio-qwen', 'embed-model'],
+      });
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        1,
+        'http://localhost:1234/api/tags',
+        expect.objectContaining({ method: 'GET' }),
+      );
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        2,
+        'http://localhost:1234/v1/models',
+        expect.objectContaining({ method: 'GET' }),
+      );
+    });
+
+    it('falls back to OpenAI models when the tags request rejects', async () => {
+      const fetchMock = vi.fn()
+        .mockRejectedValueOnce(new Error('ECONNREFUSED'))
+        .mockResolvedValueOnce(jsonResponse(200, { data: [{ id: 'lmstudio-qwen' }] }));
+      vi.stubGlobal('fetch', fetchMock);
+
+      await expect(probeLocalInference('http://localhost:1234')).resolves.toEqual({
+        running: true,
+        models: ['lmstudio-qwen'],
+      });
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        2,
+        'http://localhost:1234/v1/models',
+        expect.objectContaining({ method: 'GET' }),
+      );
+    });
+
+    it('reports the endpoint as offline when neither model-list protocol responds', async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(jsonResponse(503, { error: 'unavailable' }))
+        .mockRejectedValueOnce(new Error('ECONNREFUSED'));
+      vi.stubGlobal('fetch', fetchMock);
+
+      await expect(probeLocalInference('http://localhost:1234')).resolves.toEqual({
+        running: false,
+        models: [],
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('prefers Ollama tags when both model-list protocols respond', async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(jsonResponse(200, { models: [{ name: 'ollama-model' }] }))
+        .mockResolvedValueOnce(jsonResponse(200, { data: [{ id: 'openai-model' }] }));
+      vi.stubGlobal('fetch', fetchMock);
+
+      await expect(probeLocalInference('http://localhost:11434')).resolves.toEqual({
+        running: true,
+        models: ['ollama-model'],
+      });
+      expect(fetchMock).toHaveBeenCalledOnce();
+    });
+
+    it('caches a fallback result by normalized base URL', async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(jsonResponse(404, { error: 'not found' }))
+        .mockResolvedValueOnce(jsonResponse(200, { data: [{ id: 'lmstudio-qwen' }] }));
+      vi.stubGlobal('fetch', fetchMock);
+
+      const first = await probeLocalInference('http://localhost:1234/v1');
+      const second = await probeLocalInference('http://localhost:1234/');
+
+      expect(second).toEqual(first);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe('resolveOpenRouterRoute', () => {
