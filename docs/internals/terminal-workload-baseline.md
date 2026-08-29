@@ -73,6 +73,10 @@ the cleaner workload-scaling signals.
 The committed receipt is 68,622 bytes. Full per-session counters remain in the
 ignored raw directory; each raw sample is below 200 KiB.
 
+### Fixture notes
+
+Terminal-grid setup waits are bounded at 30 seconds and excluded from every measured latency.
+
 ### Attribution
 
 These p50 totals cover one approximately 11-second observation. Write-completion

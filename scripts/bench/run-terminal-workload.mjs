@@ -380,7 +380,7 @@ async function browserTerminalSizeDiagnostic(page, sessionName) {
   }, sessionName);
 }
 
-async function waitForBrowserTerminalSize(page, sessionName, timeoutMs = 5000) {
+async function waitForBrowserTerminalSize(page, sessionName, timeoutMs = 30000) {
   const deadline = Date.now() + timeoutMs;
   let size = { cols: 0, rows: 0 };
   while (Date.now() < deadline) {
@@ -391,6 +391,21 @@ async function waitForBrowserTerminalSize(page, sessionName, timeoutMs = 5000) {
   const error = new Error(`browser terminal grid unavailable for ${sessionName}: ${size.cols}x${size.rows}`);
   error.terminalSizeFailure = await browserTerminalSizeDiagnostic(page, sessionName);
   throw error;
+}
+
+function xtermImportDuration(browserConsole) {
+  const durations = browserConsole.flatMap(({ text }) => {
+    if (!text.startsWith('[workspace-terminal:bench] ')) return [];
+    try {
+      const event = JSON.parse(text.slice('[workspace-terminal:bench] '.length));
+      return event.event === 'xterm-imports-resolved' && Number.isFinite(event.ms)
+        ? [event.ms]
+        : [];
+    } catch {
+      return [];
+    }
+  });
+  return durations.length > 0 ? round(Math.max(...durations)) : null;
 }
 
 async function waitForSharedTerminalGrid(page, sessionName, timeoutMs = 3000) {
@@ -972,6 +987,7 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
     context = null;
     await sleep(200);
     const browserSummary = deriveBrowser(rawBrowser, seeded.tabs, panelInventory.mountedSessionNames);
+    browserSummary.xtermImportMs = xtermImportDuration(browserConsole);
     const serverSummary = deriveServer(rawServer, seeded.tabs, browserSummary.neverMountedSessionNames);
     serverSummary.hiddenDeliveredBytesPerHiddenClient = hiddenDeliveredBytesPerHiddenClient;
     serverSummary.hiddenDeliveriesPerHiddenClient = hiddenDeliveriesPerHiddenClient;
