@@ -1,11 +1,13 @@
 import type { RegisteredRepo, TerminalTab } from '@/components/desktop/workspace-terminal/types';
 import { normalizeWorkspaceChatSessionKey } from '@/components/desktop/workspace-terminal/utils';
+import type { TerminalStatusEvidence } from '@/lib/terminal-status/resolve';
 
 export interface WorkspaceAttachedTerminalSession {
   sessionKey: string;
   tmuxSession: string;
   label?: string;
   repo?: RegisteredRepo;
+  statusEvidence?: TerminalStatusEvidence;
 }
 
 export interface TerminalModeSnapshot {
@@ -18,13 +20,19 @@ export interface TerminalModePresentation {
   terminalTabId: string;
   tmuxSession: string | null;
   snapshot: TerminalModeSnapshot;
+  statusEvidence?: TerminalStatusEvidence;
 }
 
 export type TerminalModesByWorkspace = ReadonlyMap<string, TerminalModePresentation>;
 
 export type TerminalModeEntryResolution =
   | { kind: 'attached-session'; session: WorkspaceAttachedTerminalSession; repo: RegisteredRepo | null }
-  | { kind: 'existing-terminal'; tabId: string; tmuxSession: string | null }
+  | {
+      kind: 'existing-terminal';
+      tabId: string;
+      tmuxSession: string | null;
+      session?: WorkspaceAttachedTerminalSession;
+    }
   | { kind: 'new-shell'; repo: RegisteredRepo | null };
 
 export function captureTerminalModeSnapshot(
@@ -63,7 +71,12 @@ export function resolveTerminalModeEntry({
       tab.kind === 'terminal' && tab.tmuxSession === attachedSession.tmuxSession
     ));
     if (existing) {
-      return { kind: 'existing-terminal', tabId: existing.id, tmuxSession: existing.tmuxSession };
+      return {
+        kind: 'existing-terminal',
+        tabId: existing.id,
+        tmuxSession: existing.tmuxSession,
+        session: attachedSession,
+      };
     }
     return {
       kind: 'attached-session',

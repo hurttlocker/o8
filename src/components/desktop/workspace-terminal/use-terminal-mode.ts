@@ -64,12 +64,15 @@ export function useTerminalMode({
     const resolution = resolveTerminalModeEntry({ activeTab, attachedSessions, preferredRepo, tabs: tabsRef.current });
     let terminalTabId: string;
     let tmuxSession: string | null;
+    let statusEvidence: WorkspaceAttachedTerminalSession['statusEvidence'];
     if (resolution.kind === 'attached-session') {
       terminalTabId = attachTerminalSession(resolution.session, resolution.repo);
       tmuxSession = resolution.session.tmuxSession;
+      statusEvidence = resolution.session.statusEvidence;
     } else if (resolution.kind === 'existing-terminal') {
       terminalTabId = resolution.tabId;
       tmuxSession = resolution.tmuxSession;
+      statusEvidence = resolution.session?.statusEvidence;
     } else {
       terminalTabId = createShellTab(resolution.repo ?? undefined);
       tmuxSession = null;
@@ -80,6 +83,7 @@ export function useTerminalMode({
       terminalTabId,
       tmuxSession,
       snapshot,
+      statusEvidence,
     }));
   }, [activeTab, activeTabId, attachTerminalSession, attachedSessions, createShellTab, preferredRepo, workspaceId]);
 
@@ -103,6 +107,9 @@ export function useTerminalMode({
     [mode, tabs],
   );
   const terminalSession = terminalTab?.tmuxSession ?? mode?.tmuxSession ?? null;
+  const statusEvidence = attachedSessions.find((session) => (
+    terminalSession && session.tmuxSession === terminalSession
+  ))?.statusEvidence ?? mode?.statusEvidence;
   useEffect(() => {
     if (!mode || !terminalSession) return;
     const frame = window.requestAnimationFrame(() => {
@@ -128,6 +135,7 @@ export function useTerminalMode({
     active: Boolean(mode),
     effectiveActiveTabId: mode?.terminalTabId ?? activeTabId,
     terminalTab,
+    statusEvidence,
     toggle,
   };
 }

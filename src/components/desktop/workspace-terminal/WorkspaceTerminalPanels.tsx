@@ -3,6 +3,8 @@
 import { MutableRefObject, Suspense, memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Terminal as TerminalIcon } from '../lucide-shims';
 import type { CanvasTab } from '@/components/desktop/Canvas';
+import { TerminalStatusEvidenceDisclosure } from '@/components/desktop/TerminalStatusEvidenceRows';
+import type { WorkspaceAttachedTerminalSession } from '@/components/desktop/workspace-terminal/terminal-mode';
 import { WorkspaceChatPane } from '@/components/desktop/workspace-terminal/WorkspaceChatPane';
 import type { RegisteredRepo, TerminalTab } from '@/components/desktop/workspace-terminal/types';
 import { repoSlugFromRemote, shortenPath } from '@/components/desktop/workspace-terminal/utils';
@@ -11,6 +13,7 @@ import { WorkspaceBootLoaderClaim } from '@/components/desktop/workspace-termina
 import { updateResidentTabIds } from '@/components/desktop/workspace-terminal/resident-tabs';
 import { retryingLazy } from '@/lib/react/retrying-lazy';
 import { OUTSIDE_WORKER_HOST_EMPTY_EVENT } from './use-session-tiles';
+import type { TerminalStatusEvidence } from '@/lib/terminal-status/resolve';
 
 // LazyLLMChat used to render the Assistant tab (kind='llm-chat'). The
 // chooser-spawn rewrite routes both orchestrator and llm-chat tabs
@@ -29,6 +32,8 @@ interface WorkspaceTerminalPanelsProps {
    *  would clobber (GQXEZD). */
   restoreSettled: boolean;
   effectiveActiveTabId: string;
+  attachedTerminalSessions?: WorkspaceAttachedTerminalSession[];
+  terminalModeStatusEvidence?: TerminalStatusEvidence;
   termWsConnected: boolean;
   panelRefs: MutableRefObject<Map<string, XtermPanelHandle>>;
   onCloseTab: (tabId: string) => void;
@@ -57,6 +62,8 @@ function WorkspaceTerminalPanelsBase({
   workspaceId,
   visibleTabs,
   effectiveActiveTabId,
+  attachedTerminalSessions = [],
+  terminalModeStatusEvidence,
   termWsConnected,
   panelRefs,
   onCloseTab,
@@ -115,6 +122,11 @@ function WorkspaceTerminalPanelsBase({
     )),
     [effectiveActiveTabId, residentTabIds, visibleTabIdsKey],
   );
+  const statusEvidenceByTmuxSession = useMemo(() => new Map(
+    attachedTerminalSessions.flatMap((session) => (
+      session.statusEvidence ? [[session.tmuxSession, session.statusEvidence] as const] : []
+    )),
+  ), [attachedTerminalSessions]);
   const effectiveActiveTerminalSession = visibleTabs.find((tab) => (
     tab.id === effectiveActiveTabId && tab.kind === 'terminal'
   ))?.tmuxSession ?? null;
@@ -210,6 +222,9 @@ function WorkspaceTerminalPanelsBase({
             sendTerminalResize={sendTerminalResize}
             sendTerminalVisibility={sendTerminalVisibility}
             sendTerminalDetach={sendTerminalDetach}
+            statusEvidence={tab.id === effectiveActiveTabId
+              ? terminalModeStatusEvidence ?? statusEvidenceByTmuxSession.get(tab.tmuxSession)
+              : statusEvidenceByTmuxSession.get(tab.tmuxSession)}
             active={tab.id === effectiveActiveTabId}
           />
         ) : (
@@ -474,6 +489,7 @@ const TerminalResidentPanel = memo(function TerminalResidentPanel({
   sendTerminalResize,
   sendTerminalVisibility,
   sendTerminalDetach,
+  statusEvidence,
   active,
 }: {
   tabId: string;
@@ -484,6 +500,7 @@ const TerminalResidentPanel = memo(function TerminalResidentPanel({
   sendTerminalResize: WorkspaceTerminalPanelsProps['sendTerminalResize'];
   sendTerminalVisibility: WorkspaceTerminalPanelsProps['sendTerminalVisibility'];
   sendTerminalDetach: WorkspaceTerminalPanelsProps['sendTerminalDetach'];
+  statusEvidence?: TerminalStatusEvidence;
   active: boolean;
 }) {
   useEffect(() => {
@@ -504,19 +521,37 @@ const TerminalResidentPanel = memo(function TerminalResidentPanel({
     };
   }, [tabId, tmuxSession]);
   return (
-    <XtermPanel
-      ref={(handle) => {
-        if (handle) panelRefs.current.set(tmuxSession, handle);
-        else panelRefs.current.delete(tmuxSession);
+    <div
+      style={{
+        position: 'absolute',
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0,
+        display: active ? 'flex' : 'none',
+        flexDirection: 'column',
+        minWidth: 0,
+        minHeight: 0,
+        background: 'var(--t-terminal-bg)',
       }}
-      tmuxSession={tmuxSession}
-      sendTerminalAttach={sendTerminalAttach}
-      sendTerminalInput={sendTerminalInput}
-      sendTerminalResize={sendTerminalResize}
-      sendTerminalVisibility={sendTerminalVisibility}
-      sendTerminalDetach={sendTerminalDetach}
-      visible={active}
-    />
+    >
+      {statusEvidence ? <TerminalStatusEvidenceDisclosure evidence={statusEvidence} /> : null}
+      <div style={{ flex: 1, minWidth: 0, minHeight: 0, position: 'relative' }}>
+        <XtermPanel
+          ref={(handle) => {
+            if (handle) panelRefs.current.set(tmuxSession, handle);
+            else panelRefs.current.delete(tmuxSession);
+          }}
+          tmuxSession={tmuxSession}
+          sendTerminalAttach={sendTerminalAttach}
+          sendTerminalInput={sendTerminalInput}
+          sendTerminalResize={sendTerminalResize}
+          sendTerminalVisibility={sendTerminalVisibility}
+          sendTerminalDetach={sendTerminalDetach}
+          visible={active}
+        />
+      </div>
+    </div>
   );
 });
 

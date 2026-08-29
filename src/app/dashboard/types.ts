@@ -5,6 +5,7 @@ import type { RepoReadiness } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import type { WorkspaceLifecycleRecordView, WorkspaceLifecycleSummaryView } from '@/lib/workspace/lifecycle-types';
 import type { WorkflowStageBadge } from '@/lib/workflows/status';
+import type { TerminalStatusEvidence } from '@/lib/terminal-status/resolve';
 
 // Retired NavRail's `NavSection` type — kept here so the dashboard hooks
 // that flip the section (useUIChrome, useGlobalRepoState,
@@ -56,6 +57,7 @@ export interface PaletteAgentSummary {
   lifecycleState?: string;
   workflowStage?: WorkflowStageBadge | null;
   runtime?: string;
+  statusEvidence?: TerminalStatusEvidence;
   localDiff?: {
     changedFiles?: number;
     additions?: number;

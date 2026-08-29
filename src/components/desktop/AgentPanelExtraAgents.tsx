@@ -41,6 +41,7 @@ import { SpawnedAgentHoverCard } from './SpawnedAgentHoverCard';
 import { callRetryPacket } from '@/lib/orchestrator/packet-actions';
 import { runtimeModelDisplayLabel } from '@/lib/orchestrator/display';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import type { AgentSummary } from '@/lib/fleet/types';
 import { archiveRuntimeTarget } from '@/lib/runtime/archive-client';
 import { SectionLabel } from './repo-focus/tabs/chats/shared';
 import {
@@ -73,20 +74,6 @@ export interface LaneSummary {
   lastEventAt: string | null;
   lastEventLabel: string | null;
   prNumber?: number | null;
-}
-
-type AgentStatus = 'idle' | 'running' | 'blocked' | 'waiting' | 'reviewing' | 'failed' | 'completed';
-
-export interface AgentSummary {
-  id: string;
-  name: string;
-  runtime: string;
-  status: AgentStatus;
-  sessionKey: string;
-  lastEventAt: string;
-  currentTask?: string;
-  model?: string;
-  workspace?: string;
 }
 
 export interface AgentPanelExtraAgentsProps {
@@ -140,6 +127,7 @@ function buildRows(
 ): ExtraAgentRow[] {
   const rows: ExtraAgentRow[] = [];
   const seenSessionKeys = new Set<string>();
+  const agentsBySessionKey = new Map(agents.map((agent) => [agent.sessionKey, agent]));
 
   for (const lane of lanes) {
     const origin = classifyOrigin(lane.runtime, lane.ownership);
@@ -149,6 +137,7 @@ function buildRows(
     // sitting in reviewing / awaiting_input, leaving the operator with
     // no way to see what got spawned. Surface them here too.
     const status = classifyStatus(lane.status);
+    const matchingAgent = lane.sessionKey ? agentsBySessionKey.get(lane.sessionKey) : undefined;
     if (lane.sessionKey) seenSessionKeys.add(lane.sessionKey);
     rows.push({
       key: `lane:${lane.id}`,
@@ -167,6 +156,7 @@ function buildRows(
       outcome: lane.outcome ?? null,
       outcomeNote: lane.outcomeNote ?? null,
       lastEventLabel: lane.lastEventLabel,
+      statusEvidence: matchingAgent?.statusEvidence,
       prNumber: lane.prNumber ?? null,
       rejected: lane.packetId ? rejectedPacketIds.has(lane.packetId) : false,
     });
@@ -194,6 +184,7 @@ function buildRows(
       outcome: null,
       outcomeNote: null,
       lastEventLabel: null,
+      statusEvidence: agent.statusEvidence,
     });
   }
 
@@ -364,8 +355,11 @@ function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession }: AgentP
         setRejectedPacketIds(new Set(rejected.map((entry) => entry.packetId)));
       }
       if (snapshotRes.status === 'fulfilled' && snapshotRes.value.ok) {
-        const json = await snapshotRes.value.json() as { agents?: AgentSummary[] };
-        setAgents(json.agents ?? []);
+        const json = await snapshotRes.value.json() as {
+          agents?: AgentSummary[];
+          fleet?: { agents?: AgentSummary[] };
+        };
+        setAgents(json.fleet?.agents ?? json.agents ?? []);
       }
     } catch {
       // AbortError on teardown — silently ignore.

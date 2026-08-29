@@ -1,4 +1,5 @@
 import type { RuntimeSurfaceSummary } from '@/lib/fleet/types';
+import type { TerminalStatusEvidence } from '@/lib/terminal-status/resolve';
 import type { SavedChatRepoContext } from '@/lib/llm/chat-history';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import type { OrchestratorMissionState, OrchestratorPacket, OrchestratorRuntime } from '@/lib/orchestrator/types';
@@ -45,6 +46,7 @@ export interface AgentDetail {
   lifecycleState?: 'active' | 'completed' | 'failed' | 'killed' | 'stalled';
   exitCode?: number;
   lifecycleTs?: number;
+  statusEvidence?: TerminalStatusEvidence;
   repoReadiness?: RepoReadiness;
 }
 

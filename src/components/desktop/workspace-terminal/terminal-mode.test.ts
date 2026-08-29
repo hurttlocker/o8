@@ -50,6 +50,43 @@ describe('Terminal Mode state and resolution', () => {
     });
   });
 
+  it('preserves status evidence while resolving an attached coding session', () => {
+    const repo = { name: 'repo', localPath: '/repo' };
+    const activeTab = tab({
+      id: 'coding',
+      kind: 'chat',
+      chatRuntime: 'codex',
+      chatSessionKey: 'codex-owned:evidence',
+      repo,
+    });
+    const statusEvidence = {
+      sessionId: 'codex-owned:evidence',
+      runtime: 'codex' as const,
+      state: 'blocked' as const,
+      authority: 'lane-state' as const,
+      observedAt: '2026-08-29T12:00:00.000Z',
+      summary: 'Lane is waiting for approval.',
+      evidence: [{ source: 'lane:lane-evidence.status', value: 'awaiting_human' }],
+    };
+
+    const resolution = resolveTerminalModeEntry({
+      activeTab,
+      attachedSessions: [{
+        sessionKey: statusEvidence.sessionId,
+        tmuxSession: 'agent-session',
+        repo,
+        statusEvidence,
+      }],
+      preferredRepo: repo,
+      tabs: [activeTab],
+    });
+
+    expect(resolution).toMatchObject({
+      kind: 'attached-session',
+      session: { statusEvidence },
+    });
+  });
+
   it('uses an existing terminal tab for the active repo when no coding session is attached', () => {
     const repo = { name: 'repo', localPath: '/repo' };
     const shell = tab({ id: 'shell', kind: 'terminal', tmuxSession: 'shell-session', repo });

@@ -36,10 +36,13 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { basename, join } from 'node:path';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
+import { TerminalStatusEvidenceDisclosure } from '@/components/desktop/TerminalStatusEvidenceRows';
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { TypedRow } from '@/lib/cortex/qa/types';
 
@@ -758,7 +761,7 @@ describe('seam E — review-ready projection is suppressed while owned Codex is 
 describe('seam E — orchestrator state projects one terminal status authority', () => {
   const url = 'http://localhost:3001/api/orchestrator/state';
 
-  it('real state GET resolves fabricated inventory against a persisted lane through TerminalStatusEvidence', async () => {
+  it('real state GET carries resolved evidence from fabricated inventory to the desktop status rows', async () => {
     const packetId = 'pkt-seam-E-status-evidence';
     const surfaceId = 'codex-owned:seam-E-status-evidence';
     const repoPath = mkdtempSync(join(os.tmpdir(), 'o8-seam-E-status-repo-'));
@@ -804,6 +807,12 @@ describe('seam E — orchestrator state projects one terminal status authority',
       source: `lane:${persistedLane.id}.status`,
       value: 'running',
     });
+    const desktopMarkup = renderToStaticMarkup(createElement(TerminalStatusEvidenceDisclosure, {
+      evidence: agent.statusEvidence,
+      defaultExpanded: true,
+    }));
+    expect(desktopMarkup).toContain('failed · runtime');
+    expect(desktopMarkup).toContain(`lane:${persistedLane.id}.status`);
     expect(runtimeInventoryMock.requests.at(-1)).toEqual({ fresh: false });
   });
 

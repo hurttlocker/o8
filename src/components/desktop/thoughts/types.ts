@@ -1,4 +1,5 @@
 import type { ApprovalRecord } from '@/lib/approvals/types';
+import type { TerminalStatusEvidence } from '@/lib/terminal-status/resolve';
 import type {
   OrchestratorLaneBinding,
   OrchestratorMissionState,
@@ -24,6 +25,7 @@ export interface FleetAgent {
   runtime?: string;
   isCurrentSession?: boolean;
   workspace?: string;
+  statusEvidence?: TerminalStatusEvidence;
 }
 
 export interface AgentTarget {
