@@ -25,7 +25,7 @@ export interface ResolvedConfig {
   workerPacketId: string | null;
   source: {
     port: 'env' | 'data-dir' | 'o8-dir' | 'cortex-ide-dir' | 'default';
-    token: 'worker' | 'env' | 'data-dir' | 'o8-dir' | 'cortex-ide-dir' | 'none';
+    token: 'spectator' | 'worker' | 'env' | 'data-dir' | 'o8-dir' | 'cortex-ide-dir' | 'none';
   };
   dataDir: string | null;
 }
@@ -167,5 +167,22 @@ export function resolveConfig(): ResolvedConfig {
     workerPacketId,
     source: { port: portSource, token: tokenSource },
     dataDir,
+  };
+}
+
+/**
+ * Truth is the one CLI surface intended for a scoped spectator credential.
+ * Keep the normal operator/worker resolution untouched for every other verb,
+ * but prefer the explicit spectator token when truth is invoked.
+ */
+export function resolveTruthConfig(): ResolvedConfig {
+  const resolved = resolveConfig();
+  const spectatorToken = process.env.O8_SPECTATOR_TOKEN?.trim() || null;
+  if (!spectatorToken) return resolved;
+  return {
+    ...resolved,
+    token: spectatorToken,
+    workerPacketId: null,
+    source: { ...resolved.source, token: 'spectator' },
   };
 }

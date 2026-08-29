@@ -308,11 +308,18 @@ export async function apiFetch<T = unknown>(
   }
 
   if (res.status === 401 || res.status === 403) {
+    const json = parseResponseJson(responseText);
+    const error = asErrorRecord(json?.error);
+    const detail = typeof error?.message === 'string' ? error.message : '';
+    const typedCode = typeof error?.code === 'string' ? error.code : '';
+    const spectatorDenied = typedCode.startsWith('spectator_');
     throw new CliError(
       'unauthorized',
-      `Server rejected the bearer token (${res.status}).`,
+      `Server rejected the bearer token (${res.status})${detail ? `: ${detail}` : '.'}`,
       EXIT.UNAUTHORIZED,
-      cfg.token
+      spectatorDenied || cfg.source.token === 'spectator'
+        ? 'Check O8_SPECTATOR_TOKEN and the repository grants attached to that bearer.'
+        : cfg.token
         ? 'Token did not match ~/.o8/ws-token on the server. Refresh O8_API_TOKEN or rerun from a loopback host.'
         : 'Set O8_API_TOKEN or ensure ~/.o8/ws-token is readable; cross-origin callers require the bearer token.',
     );

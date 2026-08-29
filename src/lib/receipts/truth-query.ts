@@ -43,6 +43,8 @@ export interface TruthAnswer {
   summary: string;
   /** The object parsed once from the stored receipt artifact. */
   receipt: PacketReceipt;
+  /** Exact UTF-8 text read from the stored receipt artifact. */
+  rawReceiptJson: string;
   artifactId: string;
 }
 
@@ -305,6 +307,7 @@ export function resolveTruthQuery(
     answers: page.map((stored) => ({
       summary: summary(stored.receipt),
       receipt: stored.receipt,
+      rawReceiptJson: stored.rawReceiptJson,
       artifactId: stored.artifact.id,
     })),
     asOf: stores.now().toISOString(),

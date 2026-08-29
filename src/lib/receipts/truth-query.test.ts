@@ -123,6 +123,7 @@ describe('resolveTruthQuery', () => {
     }, {}, stores);
     expect(pageOne.answers).toHaveLength(1);
     expect(pageOne.answers[0]!.receipt).toBe(first.receipt);
+    expect(pageOne.answers[0]!.rawReceiptJson).toBe(first.rawReceiptJson);
     expect(pageOne.nextCursor).toEqual(expect.any(String));
 
     const pageTwo = resolveTruthQuery({

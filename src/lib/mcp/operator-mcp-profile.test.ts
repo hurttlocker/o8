@@ -47,6 +47,8 @@ describe('operator MCP process profiles', () => {
     expect(fullNames).toContain('o8_update_apply');
     expect(fullNames).toContain('o8_problem_list');
     expect(fullNames).toContain('o8_problem_get');
+    expect(fullNames).toContain('o8_truth_query');
+    expect(operatorToolsForProfile('dogfood').map((tool) => tool.name)).not.toContain('o8_truth_query');
     expect(operatorToolsForProfile('misspelled-dogfood')).toEqual([]);
   });
 

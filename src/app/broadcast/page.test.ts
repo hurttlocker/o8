@@ -99,9 +99,17 @@ describe('Broadcast spectator page', () => {
   let container: HTMLDivElement;
   let root: Root;
   let snapshotPayload: BroadcastSnapshot = snapshot;
+  let truthErrorMessage: string | null = null;
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     if (String(input).includes('/api/broadcast/snapshot')) {
       return Promise.resolve(Response.json(snapshotPayload));
+    }
+    if (String(input).includes('/api/orchestrator/truth') && truthErrorMessage) {
+      return Promise.resolve(Response.json({
+        schema: 'o8/truth.error/v1',
+        ok: false,
+        error: { code: 'spectator_repo_forbidden', message: truthErrorMessage },
+      }, { status: 403 }));
     }
     return new Promise<Response>((_resolve, reject) => {
       const abort = () => reject(new DOMException('Aborted', 'AbortError'));
@@ -123,6 +131,7 @@ describe('Broadcast spectator page', () => {
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: 1_080, writable: true });
     motionState.reduced = false;
     snapshotPayload = snapshot;
+    truthErrorMessage = null;
     setVisibility('visible');
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -167,6 +176,35 @@ describe('Broadcast spectator page', () => {
     });
     expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/snapshot'))).toHaveLength(3);
     expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/events'))).toHaveLength(2);
+  });
+
+  it('renders the truth route scope error instead of an empty answer list', async () => {
+    truthErrorMessage = 'The spectator credential is not granted to the requested repository.';
+    await act(async () => { root.render(createElement(BroadcastPage)); });
+    await act(async () => { await Promise.resolve(); });
+
+    const packetInput = container.querySelector<HTMLInputElement>('[aria-label="Packet or issue"]');
+    const packetForm = container.querySelector<HTMLFormElement>('[aria-label="Packet truth query"]');
+    expect(packetInput).not.toBeNull();
+    expect(packetForm).not.toBeNull();
+    await act(async () => {
+      const inputSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        'value',
+      )?.set;
+      inputSetter?.call(packetInput, 'packet-repo-b');
+      packetInput?.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      packetForm?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(truthErrorMessage);
+    expect(container.textContent).not.toContain('No signed receipts matched this query.');
+    const truthCall = fetchMock.mock.calls.find(([url]) => String(url).includes('/api/orchestrator/truth'));
+    expect(truthCall?.[1]?.headers).toEqual({ Authorization: 'Bearer spectator-test-token' });
   });
 
   it('paints the first snapshot even when it loads hidden, without polling', async () => {

@@ -13,6 +13,7 @@ import {
   isBroadcastFeedActive,
   StatusDot,
 } from './BroadcastStage';
+import { TruthPanel } from './TruthPanel';
 
 const TOKEN_STORAGE_KEY = 'o8.broadcast.spectator-token';
 const SNAPSHOT_REFRESH_MS = 10_000;
@@ -433,6 +434,7 @@ function BroadcastSurface() {
             reduceMotion={reduceMotion}
           />
         </div>
+        {compact ? null : <TruthPanel token={token} />}
       </div>
     </main>
   );
