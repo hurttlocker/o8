@@ -2,7 +2,7 @@
 import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { AgentRuntime, RuntimeSession } from '@/lib/runtimes/types';
+import type { AgentRuntime, RuntimeSession, RuntimeSessionStatus } from '@/lib/runtimes/types';
 import type { AgentSummary, EventItem, FleetSnapshot, SquadSummary } from '@/lib/fleet/types';
 import { getAllRuntimes } from '@/lib/runtimes';
 import { listCurrentIdeRepoPaths } from '@/lib/runtime/ide-terminal-state';
@@ -270,22 +270,65 @@ function mapRuntimeSessionToAgent(
   };
 }
 
+function ideRuntimeSessionStatus(status: string | null | undefined): RuntimeSessionStatus | null {
+  switch (status?.trim().toLowerCase()) {
+    case 'launched':
+    case 'launching':
+    case 'retrying':
+    case 'running':
+    case 'recovering':
+    case 'merging':
+      return 'running';
+    case 'waiting':
+    case 'blocked':
+    case 'stuck':
+    case 'interrupted':
+    case 'awaiting_input':
+    case 'awaiting_orchestrator':
+    case 'awaiting_human':
+      return 'waiting';
+    case 'reviewing':
+    case 'awaiting_review':
+      return 'reviewing';
+    case 'failed':
+      return 'failed';
+    case 'completed':
+    case 'archived':
+      return 'completed';
+    case 'idle':
+    case 'paused':
+      return 'idle';
+    default:
+      return null;
+  }
+}
+
 function mapIdeGhostRuntimeTabToAgent(session: IdeRuntimeSessionDescriptor): AgentSummary {
   const workspace = shortenHomePath(session.repoPath ?? '~');
   const runtimeName = defaultRuntimeDisplayName(session.runtimeId);
+  const status = ideRuntimeSessionStatus(session.supervisorStatus);
   const currentTask = session.liveSessionKey
     ? 'Reconnecting\u2026'
     : 'Idle';
   const parsedLastActivity = new Date(session.savedAt ?? Date.now()).getTime();
   const observedAt = new Date(Number.isNaN(parsedLastActivity) ? Date.now() : parsedLastActivity).toISOString();
-  const statusEvidence = resolveTerminalStatusEvidence({
-    rawLifecycle: {
-      sessionId: session.sessionKey,
-      runtime: session.runtimeId,
-      state: session.liveSessionKey ? 'unknown' : 'idle',
-      observedAt,
-    },
-  });
+  const statusEvidence = status
+    ? resolveTerminalStatusEvidence({
+        runtimeSession: {
+          sessionKey: session.sessionKey,
+          runtimeId: session.runtimeId,
+          status,
+          observedAt,
+        },
+      })
+    : resolveTerminalStatusEvidence({
+        rawLifecycle: {
+          sessionId: session.sessionKey,
+          runtime: session.runtimeId,
+          state: session.liveSessionKey ? 'unknown' : 'idle',
+          observedAt,
+        },
+      });
 
   return {
     id: session.sessionKey,
@@ -294,7 +337,7 @@ function mapIdeGhostRuntimeTabToAgent(session: IdeRuntimeSessionDescriptor): Age
     runtime: session.runtimeId,
     model: session.model || runtimeName,
     primaryModel: session.model || runtimeName,
-    status: 'idle',
+    status: status ?? 'idle',
     statusEvidence,
     currentTask,
     workspace,

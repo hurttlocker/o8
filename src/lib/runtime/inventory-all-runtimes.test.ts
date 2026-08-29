@@ -7,9 +7,15 @@ import type {
   RuntimeId,
   RuntimeSession,
 } from '@/lib/runtimes/types';
+import type { IdeRuntimeSessionDescriptor } from '@/lib/runtime/ide-session-registry';
 
 const registryFixture = vi.hoisted(() => ({
   runtimes: [] as AgentRuntime[],
+}));
+
+const ideRegistryFixture = vi.hoisted(() => ({
+  sessions: [] as IdeRuntimeSessionDescriptor[],
+  tabs: [] as IdeRuntimeSessionDescriptor[],
 }));
 
 vi.mock('@/lib/runtimes', () => ({
@@ -21,8 +27,8 @@ vi.mock('@/lib/runtime/ide-terminal-state', () => ({
 }));
 
 vi.mock('@/lib/runtime/ide-session-registry', () => ({
-  listIdeRuntimeSessions: () => [],
-  listIdeRuntimeTabs: () => [],
+  listIdeRuntimeSessions: () => ideRegistryFixture.sessions,
+  listIdeRuntimeTabs: () => ideRegistryFixture.tabs,
 }));
 
 vi.mock('@/lib/runtime/terminal-session-registry', () => ({
@@ -103,6 +109,8 @@ function runtime(id: RuntimeId): AgentRuntime {
 describe('canonical runtime inventory discovery', () => {
   beforeEach(() => {
     registryFixture.runtimes = [];
+    ideRegistryFixture.sessions = [];
+    ideRegistryFixture.tabs = [];
     invalidateRuntimeInventoryCache();
   });
 
@@ -183,5 +191,39 @@ describe('canonical runtime inventory discovery', () => {
     } finally {
       warn.mockRestore();
     }
+  });
+
+  it('uses an owned IDE session status as runtime evidence', async () => {
+    const descriptor: IdeRuntimeSessionDescriptor = {
+      tabId: 'claude-reviewing-tab',
+      runtimeId: 'claude-code',
+      sessionKey: 'claude-code-owned:reviewing-session',
+      liveSessionKey: 'claude-code-owned:reviewing-session',
+      label: 'Reviewing worker',
+      repoPath: testRoot,
+      scope: 'tile-root',
+      savedAt: '2026-08-29T12:00:00.000Z',
+      supervisorStatus: 'reviewing',
+      isCurrentSession: true,
+    };
+    ideRegistryFixture.sessions = [descriptor];
+    ideRegistryFixture.tabs = [descriptor];
+    invalidateRuntimeInventoryCache();
+
+    const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
+
+    expect(snapshot.agents).toHaveLength(1);
+    expect(snapshot.agents[0]).toMatchObject({
+      sessionKey: descriptor.sessionKey,
+      runtime: 'claude-code',
+      status: 'reviewing',
+      statusEvidence: {
+        sessionId: descriptor.sessionKey,
+        runtime: 'claude-code',
+        state: 'review-ready',
+        authority: 'runtime-event',
+        summary: 'claude-code runtime reports this session as review-ready.',
+      },
+    });
   });
 });

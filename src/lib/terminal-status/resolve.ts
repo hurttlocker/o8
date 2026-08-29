@@ -416,9 +416,15 @@ export function resolveTerminalStatusEvidence(
     }
   }
 
-  const selected = selectNewest(runtimeCandidates)
-    ?? selectNewest(laneCandidates)
-    ?? selectNewest(rawCandidates);
+  const selectedRuntime = selectNewest(runtimeCandidates);
+  const selectedGovernanceLane = selectNewest(laneCandidates.filter((candidate) => (
+    candidate.state === 'review-ready' || candidate.state === 'blocked'
+  )));
+  const governanceLaneOutranksFinishedRuntime = selectedRuntime?.state === 'complete'
+    && Boolean(selectedGovernanceLane);
+  const selected = governanceLaneOutranksFinishedRuntime
+    ? selectedGovernanceLane
+    : selectedRuntime ?? selectNewest(laneCandidates) ?? selectNewest(rawCandidates);
   if (!selected) {
     return unknownTerminalStatusEvidence({
       sessionId,
@@ -441,12 +447,14 @@ export function resolveTerminalStatusEvidence(
     observedAt: selected.observedAt,
     summary: oneLine(selected.summary),
     evidence: candidateEvidence(allCandidates),
-    fallbackReason: fallbackReason(
-      selected.authority,
-      staleRuntimeCandidates.length > 0,
-      Boolean(runtimeSession || ownedRun),
-      laneCandidates.length > 0,
-    ),
+    fallbackReason: governanceLaneOutranksFinishedRuntime
+      ? undefined
+      : fallbackReason(
+          selected.authority,
+          staleRuntimeCandidates.length > 0,
+          Boolean(runtimeSession || ownedRun),
+          laneCandidates.length > 0,
+        ),
   };
 }
 

@@ -57,11 +57,17 @@ function runtimeStatusFromAgent(status: AgentStatus): RuntimeSessionStatus {
 }
 
 function observedAtForAgent(agent: AgentSummary, lane: Lane | undefined): string {
-  if (agent.statusEvidence?.observedAt) return agent.statusEvidence.observedAt;
   if (typeof agent.lastActivityAt === 'number' && Number.isFinite(agent.lastActivityAt)) {
     return new Date(agent.lastActivityAt).toISOString();
   }
-  return agent.lastEventAt || lane?.lastEventAt || lane?.updatedAt || '';
+  for (const value of [agent.lastEventAt, lane?.lastEventAt, lane?.updatedAt]) {
+    if (value && Number.isFinite(Date.parse(value))) return new Date(value).toISOString();
+  }
+  return agent.statusEvidence?.observedAt
+    || agent.lastEventAt
+    || lane?.lastEventAt
+    || lane?.updatedAt
+    || '';
 }
 
 function approvalMatchesAgent(approval: ApprovalRecord, agent: AgentSummary, lane: Lane | undefined): boolean {
@@ -83,9 +89,6 @@ function mergeEvidence(
     seen.add(key);
     return true;
   });
-  if (resolved.authority === 'runtime-event' && previous.authority === 'runtime-event') {
-    return { ...resolved, observedAt: previous.observedAt, summary: previous.summary, evidence };
-  }
   return { ...resolved, evidence };
 }
 

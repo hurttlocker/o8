@@ -93,6 +93,34 @@ describe('operator status model', () => {
     expect(summary).toContain('Last: packet worker failed');
   });
 
+  it('keeps the selected runtime state, summary, and observation time coherent', () => {
+    const currentObservedAt = '2026-08-29T12:05:00.000Z';
+    const [resolved] = resolveAgentSummaryStatuses([agent({
+      status: 'completed',
+      lastActivityAt: Date.parse(currentObservedAt),
+      statusEvidence: {
+        sessionId: 'codex-owned:1',
+        runtime: 'codex',
+        state: 'review-ready',
+        authority: 'runtime-event',
+        observedAt: '2026-08-29T12:00:00.000Z',
+        summary: 'codex runtime reports this session as review-ready.',
+        evidence: [{ source: 'runtime-session.status', value: 'reviewing' }],
+      },
+    })], []);
+
+    expect(resolved.statusEvidence).toMatchObject({
+      state: 'complete',
+      authority: 'runtime-event',
+      observedAt: currentObservedAt,
+      summary: 'codex runtime reports this session as complete.',
+    });
+    expect(resolved.statusEvidence?.evidence).toEqual(expect.arrayContaining([
+      { source: 'runtime-session.status', value: 'reviewing' },
+      { source: 'runtime-session.status', value: 'completed' },
+    ]));
+  });
+
   it('does not let a lower lane review state override a current runtime event', () => {
     const agents = buildOperatorStatusAgents([agent({ status: 'running' })], [lane({ status: 'reviewing' })]);
     const summary = summarizeOperatorStatus({ agents, approvalCount: 0 });

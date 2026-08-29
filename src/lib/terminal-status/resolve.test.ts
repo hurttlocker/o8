@@ -213,6 +213,31 @@ describe('resolveTerminalStatusEvidence', () => {
     expect(resolved.fallbackReason).toBeUndefined();
   });
 
+  it.each([
+    ['reviewing', 'review-ready'],
+    ['awaiting_human', 'blocked'],
+  ] as const)(
+    'lets lane governance state %s outrank a finished runtime as %s',
+    (laneStatus, state) => {
+      const resolved = resolveTerminalStatusEvidence({
+        runtimeSession: {
+          sessionKey: 'codex-owned:status-evidence',
+          runtimeId: 'codex',
+          status: 'completed',
+          observedAt,
+        },
+        lane: lane(laneStatus, '2026-08-29T12:01:00.000Z'),
+      });
+
+      expect(resolved).toMatchObject({ authority: 'lane-state', state });
+      expect(resolved.evidence).toContainEqual({
+        source: 'runtime-session.status',
+        value: 'completed',
+      });
+      expect(resolved.fallbackReason).toBeUndefined();
+    },
+  );
+
   it('keeps runtime evidence above raw terminal disagreement', () => {
     const resolved = resolveTerminalStatusEvidence({
       runtimeSession: {

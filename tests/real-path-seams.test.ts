@@ -57,7 +57,11 @@ const runtimeInventoryMock = vi.hoisted(() => ({
     runtimeSurface?: {
       ownership?: 'provider' | 'discovered' | 'owned';
       capabilities?: { sendInput?: boolean; interrupt?: boolean };
-      lifecycle?: { availability?: 'awaiting-thread' | 'running' | 'ready-for-resume' };
+      lifecycle?: {
+        availability?: 'awaiting-thread' | 'running' | 'ready-for-resume';
+        lastOutcome?: 'finished' | 'interrupted' | 'failed';
+        lastRunFinishedAt?: string;
+      };
     };
   }>,
   requests: [] as Array<{ fresh?: boolean } | undefined>,
@@ -757,6 +761,71 @@ describe('seam E — review-ready projection is suppressed while owned Codex is 
     expect(packet).toBeTruthy();
     expect(packet.status).toBe('running');
     expect(packet.status).not.toBe('awaiting_review');
+  });
+
+  it('real state GET keeps lane review-ready authoritative after the owned run finishes', async () => {
+    const packetId = 'pkt-seam-E-finished-reviewing';
+    const surfaceId = 'codex-owned:seam-E-finished';
+    const repoPath = mkdtempSync(join(os.tmpdir(), 'o8-seam-E-finished-repo-'));
+    const finishedAt = '2026-08-29T12:10:00.000Z';
+    tempDirs.push(repoPath);
+
+    const lane = createLane({
+      repoPath,
+      worktreePath: repoPath,
+      branch: 'inline/seam-e-finished',
+      runtime: 'codex',
+      packetId,
+      sessionKey: surfaceId,
+    });
+    setLaneStatus(lane.id, 'reviewing', 'system', 'review_ready');
+
+    runtimeInventoryMock.agents = [{
+      sessionKey: surfaceId,
+      runtime: 'codex',
+      status: 'completed',
+      currentTask: 'Worker finished and awaits review',
+      lastEventAt: finishedAt,
+      runtimeSurface: {
+        ownership: 'owned',
+        capabilities: { sendInput: false, interrupt: false },
+        lifecycle: {
+          availability: 'ready-for-resume',
+          lastOutcome: 'finished',
+          lastRunFinishedAt: finishedAt,
+        },
+      },
+    }];
+
+    const seed = await (await stateRoute.GET(operatorGet(url))).json();
+    const current: OrchestratorMissionState = seed.mission ?? createEmptyOrchestratorMissionState();
+    const mission: OrchestratorMissionState = {
+      ...current,
+      packets: [
+        ...current.packets,
+        packetFixture({ id: packetId, status: 'awaiting_review', lane: null }),
+      ],
+    };
+    const postRes = await stateRoute.POST(operatorReq(url, { mission }));
+    expect(postRes.status).toBe(200);
+
+    const getRes = await stateRoute.GET(operatorGet(url));
+    expect(getRes.status).toBe(200);
+    const json = await getRes.json();
+    const packet = json.mission.packets.find((candidate: OrchestratorPacket) => candidate.id === packetId);
+    const agent = json.agents.find((candidate: { sessionKey: string }) => candidate.sessionKey === surfaceId);
+
+    expect(packet.status).toBe('awaiting_review');
+    expect(agent.status).toBe('reviewing');
+    expect(agent.statusEvidence).toMatchObject({
+      state: 'review-ready',
+      authority: 'lane-state',
+    });
+    expect(agent.statusEvidence).not.toHaveProperty('fallbackReason');
+    expect(agent.statusEvidence.evidence).toContainEqual({
+      source: 'runtime-session.status',
+      value: 'completed',
+    });
   });
 });
 
