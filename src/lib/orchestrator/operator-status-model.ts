@@ -1,6 +1,15 @@
-import { packetStatusFromLaneStatus } from '@/lib/orchestrator/packet-state';
-import type { AgentSummary } from '@/lib/fleet/types';
-import type { Lane } from '@/lib/lane/types';
+import type { ApprovalRecord } from '@/lib/approvals/types';
+import type { AgentStatus, AgentSummary } from '@/lib/fleet/types';
+import type { Lane, LaneEvent } from '@/lib/lane/types';
+import { isOrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
+import type { RuntimeSessionStatus } from '@/lib/runtimes/types';
+import {
+  agentStatusFromTerminalState,
+  resolveTerminalStatusEvidence,
+  type TerminalReviewQueueEvidence,
+  type TerminalStatusEvidence,
+  type TerminalStatusState,
+} from '@/lib/terminal-status/resolve';
 
 export interface OperatorStatusAgent {
   name: string;
@@ -12,25 +21,167 @@ export interface OperatorStatusAgent {
   elapsed: string;
   sessionKey: string;
   task: string | null;
+  authority: TerminalStatusEvidence['authority'];
+  summary: string;
+  observedAt: string;
+  statusEvidence: TerminalStatusEvidence;
+}
+
+export interface OperatorStatusEvidenceContext {
+  laneEventsByLaneId?: ReadonlyMap<string, LaneEvent[]>;
+  approvals?: ApprovalRecord[];
+  reviewQueue?: TerminalReviewQueueEvidence[];
 }
 
 function repoFromWorkspace(workspace: string | undefined) {
   return workspace?.split('/').filter(Boolean).pop() || 'unknown';
 }
 
-function canonicalAgentStatus(agent: AgentSummary, lane: Lane | undefined): string {
-  const laneStatus = packetStatusFromLaneStatus(lane?.status);
-  if (!laneStatus) return agent.status || 'idle';
+function runtimeStatusFromAgent(status: AgentStatus): RuntimeSessionStatus {
+  switch (status) {
+    case 'running':
+    case 'huddling':
+      return 'running';
+    case 'blocked':
+    case 'waiting':
+      return 'waiting';
+    case 'reviewing':
+      return 'reviewing';
+    case 'failed':
+      return 'failed';
+    case 'completed':
+      return 'completed';
+    case 'idle':
+      return 'idle';
+  }
+}
 
-  // A live lane is the canonical packet truth. This masks transient runtime
-  // discovery failures while the owned session is still progressing.
-  return laneStatus;
+function observedAtForAgent(agent: AgentSummary, lane: Lane | undefined): string {
+  if (agent.statusEvidence?.observedAt) return agent.statusEvidence.observedAt;
+  if (typeof agent.lastActivityAt === 'number' && Number.isFinite(agent.lastActivityAt)) {
+    return new Date(agent.lastActivityAt).toISOString();
+  }
+  for (const value of [agent.lastEventAt, lane?.lastEventAt, lane?.updatedAt]) {
+    if (value && Number.isFinite(Date.parse(value))) return new Date(value).toISOString();
+  }
+  return new Date(0).toISOString();
+}
+
+function approvalMatchesAgent(approval: ApprovalRecord, agent: AgentSummary, lane: Lane | undefined): boolean {
+  if (approval.sessionKey === agent.sessionKey) return true;
+  if (!lane) return false;
+  if (approval.continuation?.kind === 'lane' && approval.continuation.laneId === lane.id) return true;
+  return approval.metadata?.laneId === lane.id || approval.metadata?.LaneId === lane.id;
+}
+
+function mergeEvidence(
+  resolved: TerminalStatusEvidence,
+  previous: TerminalStatusEvidence | undefined,
+): TerminalStatusEvidence {
+  if (!previous) return resolved;
+  const seen = new Set<string>();
+  const evidence = [...previous.evidence, ...resolved.evidence].filter((item) => {
+    const key = `${item.source}\u0000${item.value}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (resolved.authority === 'runtime-event' && previous.authority === 'runtime-event') {
+    return { ...resolved, observedAt: previous.observedAt, summary: previous.summary, evidence };
+  }
+  return { ...resolved, evidence };
+}
+
+export function resolveAgentSummaryStatusEvidence(
+  agent: AgentSummary,
+  lane: Lane | undefined,
+  context: OperatorStatusEvidenceContext = {},
+): TerminalStatusEvidence | undefined {
+  if (!isOrchestratorRuntime(agent.runtime)) return undefined;
+  const previous = agent.statusEvidence;
+  const observedAt = observedAtForAgent(agent, lane);
+  const laneEvents = lane ? context.laneEventsByLaneId?.get(lane.id) ?? [] : [];
+  const approvals = (context.approvals ?? []).filter((approval) => (
+    approval.status === 'pending' && approvalMatchesAgent(approval, agent, lane)
+  ));
+  const reviewQueue = lane
+    ? (context.reviewQueue ?? []).filter((review) => review.laneId === lane.id)
+    : [];
+  const rawLifecycle = previous?.authority === 'raw-terminal'
+    ? {
+        sessionId: agent.sessionKey,
+        runtime: agent.runtime,
+        state: previous.state,
+        observedAt: previous.observedAt,
+      }
+    : undefined;
+  const runtimeSession = previous?.authority === 'raw-terminal'
+    || previous?.authority === 'lane-state'
+    || previous?.authority === 'known-screen-adapter'
+    ? undefined
+    : {
+        sessionKey: agent.sessionKey,
+        runtimeId: agent.runtime,
+        status: runtimeStatusFromAgent(agent.status),
+        observedAt,
+        lifecycle: agent.runtimeSurface?.lifecycle,
+      };
+  const evidence = resolveTerminalStatusEvidence({
+    runtimeSession,
+    lane,
+    laneEvents,
+    approvals,
+    reviewQueue,
+    rawLifecycle,
+  });
+  return mergeEvidence(evidence, previous);
+}
+
+export function resolveAgentSummaryStatuses(
+  sessions: AgentSummary[],
+  lanes: Lane[],
+  context: OperatorStatusEvidenceContext = {},
+): AgentSummary[] {
+  const laneBySession = new Map(
+    lanes
+      .filter((lane) => lane.sessionKey)
+      .map((lane) => [lane.sessionKey as string, lane]),
+  );
+  return sessions.map((agent) => {
+    const statusEvidence = resolveAgentSummaryStatusEvidence(
+      agent,
+      laneBySession.get(agent.sessionKey),
+      context,
+    );
+    if (!statusEvidence) return agent;
+    return {
+      ...agent,
+      status: agentStatusFromTerminalState(statusEvidence.state, agent.status),
+      statusEvidence,
+    };
+  });
+}
+
+function operatorStatusFromTerminalState(state: TerminalStatusState, fallback: string): string {
+  if (state === 'review-ready') return 'awaiting_review';
+  if (state === 'working') return 'running';
+  if (state === 'complete') return 'completed';
+  return state === 'unknown' ? fallback : state;
+}
+
+function canonicalAgentStatus(
+  agent: AgentSummary,
+  statusEvidence: TerminalStatusEvidence,
+): string {
+  // resolveTerminalStatusEvidence is the single source for status precedence.
+  return operatorStatusFromTerminalState(statusEvidence.state, agent.status || 'idle');
 }
 
 export function buildOperatorStatusAgents(
   sessions: AgentSummary[],
   lanes: Lane[],
   sessionKeyFilter?: string,
+  context: OperatorStatusEvidenceContext = {},
 ): OperatorStatusAgent[] {
   const laneBySession = new Map(
     lanes
@@ -42,19 +193,25 @@ export function buildOperatorStatusAgents(
     ? sessions.filter((session) => session.sessionKey === sessionKeyFilter)
     : sessions;
 
-  return filtered.map((session) => {
+  return filtered.flatMap((session) => {
     const lane = laneBySession.get(session.sessionKey);
-    return {
+    const statusEvidence = resolveAgentSummaryStatusEvidence(session, lane, context);
+    if (!statusEvidence) return [];
+    return [{
       name: session.name || session.sessionKey,
       repo: repoFromWorkspace(lane?.repoPath || session.workspace),
       runtime: session.runtime || 'unknown',
       model: lane?.model ?? session.model ?? null,
-      status: canonicalAgentStatus(session, lane),
+      status: canonicalAgentStatus(session, statusEvidence),
       branch: lane?.branch || session.branch || 'main',
       elapsed: session.lastEventAt || '',
       sessionKey: session.sessionKey,
       task: session.currentTask || lane?.lastEventLabel || null,
-    };
+      authority: statusEvidence.authority,
+      summary: statusEvidence.summary,
+      observedAt: statusEvidence.observedAt,
+      statusEvidence,
+    }];
   });
 }
 

@@ -3,6 +3,7 @@ import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { listApprovals, listUnsettledApprovalContinuations } from '@/lib/approvals/store';
 import { getLaneEvents, listLanes } from '@/lib/lane/registry';
 import { buildOperatorStatusAgents, summarizeOperatorStatus } from '@/lib/orchestrator/operator-status-model';
+import { listTerminalReviewQueueEvidence } from '@/lib/terminal-status/store';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -11,18 +12,24 @@ export async function GET(request: NextRequest) {
   try {
     const sessionKeyFilter = request.nextUrl.searchParams.get('sessionKey') || undefined;
 
-    const [snapshot, pendingAll] = await Promise.all([
-      getRuntimeInventorySnapshot({ fresh: true }),
-      [
-        ...listApprovals({ status: 'pending' }),
-        ...listUnsettledApprovalContinuations(),
-      ],
-    ]);
+    const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
+    const pendingApprovals = listApprovals({ status: 'pending' });
+    const pendingAll = [
+      ...pendingApprovals,
+      ...listUnsettledApprovalContinuations(),
+    ];
 
     // ── Agents ──
     const sessions = snapshot.agents ?? [];
     const lanes = listLanes();
-    const agents = buildOperatorStatusAgents(sessions, lanes, sessionKeyFilter);
+    const laneEventsByLaneId = new Map(
+      lanes.map((lane) => [lane.id, getLaneEvents(lane.id, 200)]),
+    );
+    const agents = buildOperatorStatusAgents(sessions, lanes, sessionKeyFilter, {
+      laneEventsByLaneId,
+      approvals: pendingApprovals,
+      reviewQueue: listTerminalReviewQueueEvidence(),
+    });
     const spendCapHits = lanes.flatMap((lane) => getLaneEvents(lane.id, 200)
       .filter((event) => event.verb === 'spend_cap_hit')
       .map((event) => ({

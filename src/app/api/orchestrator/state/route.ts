@@ -7,9 +7,13 @@ import {
 } from '@/lib/orchestrator/control-plane';
 import { buildDagMetadata } from '@/lib/orchestrator/dag';
 import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
-import { findLaneByPacket } from '@/lib/lane/registry';
+import { getLaneEvents, findLaneByPacket, listLanes } from '@/lib/lane/registry';
+import { listApprovals } from '@/lib/approvals/store';
+import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
+import { resolveAgentSummaryStatuses } from '@/lib/orchestrator/operator-status-model';
 import { packetStatusWriteRejection } from '@/lib/orchestrator/packet-patch-policy';
 import { autoResolveMergedPacketVerificationIncidents } from '@/lib/supervisor/merged-incident-resolution';
+import { listTerminalReviewQueueEvidence } from '@/lib/terminal-status/store';
 import type {
   OrchestratorMissionState,
   OrchestratorPacket,
@@ -59,11 +63,25 @@ function enrichMissionWithLanes(mission: OrchestratorMissionState): Orchestrator
   return { ...mission, packets };
 }
 
-function buildStateResponse(mission: OrchestratorMissionState): OrchestratorStateApiResponse {
+async function buildStateResponse(mission: OrchestratorMissionState): Promise<OrchestratorStateApiResponse> {
   const enriched = enrichMissionWithLanes(mission);
+  const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
+  const lanes = listLanes();
+  const inventorySessionKeys = new Set((snapshot.agents ?? []).map((agent) => agent.sessionKey));
+  const laneEventsByLaneId = new Map(
+    lanes
+      .filter((lane) => lane.sessionKey && inventorySessionKeys.has(lane.sessionKey))
+      .map((lane) => [lane.id, getLaneEvents(lane.id, 200)]),
+  );
+  const agents = resolveAgentSummaryStatuses(snapshot.agents ?? [], lanes, {
+    laneEventsByLaneId,
+    approvals: listApprovals({ status: 'pending' }),
+    reviewQueue: listTerminalReviewQueueEvidence(),
+  });
   return {
     mission: enriched,
     dag: buildDagMetadata(enriched.packets),
+    agents,
   };
 }
 
@@ -92,7 +110,7 @@ export async function GET(req: NextRequest) {
     // between our read and the lock acquisition. undefined → reconcile reads
     // fresh state inside the lock.
     const mission = await syncOrchestratorControlPlaneState();
-    return NextResponse.json(buildStateResponse(mission), {
+    return NextResponse.json(await buildStateResponse(mission), {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
   } catch (error) {
@@ -165,7 +183,7 @@ export async function POST(req: NextRequest) {
     if (!incoming) {
       // No payload — fall back to the existing "reconcile current" behavior.
       const mission = await syncOrchestratorControlPlaneState();
-      return NextResponse.json(buildStateResponse(mission), {
+      return NextResponse.json(await buildStateResponse(mission), {
         headers: { 'Cache-Control': 'no-store, max-age=0' },
       });
     }
@@ -185,7 +203,7 @@ export async function POST(req: NextRequest) {
       return { dropped: false } as const;
     });
 
-    return NextResponse.json(buildStateResponse(mission), {
+    return NextResponse.json(await buildStateResponse(mission), {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
   } catch (error) {
@@ -249,7 +267,7 @@ export async function PATCH(req: NextRequest) {
       autoResolveMergedPacketVerificationIncidents({ packetId, event: 'packet_archived' });
     }
 
-    return NextResponse.json(buildStateResponse(mission), {
+    return NextResponse.json(await buildStateResponse(mission), {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
   } catch (error) {

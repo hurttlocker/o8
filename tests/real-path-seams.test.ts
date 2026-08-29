@@ -33,7 +33,7 @@
  *      operator-defaults resolution, not resolveBrainEnabledWith in isolation.
  */
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { basename, join } from 'node:path';
 
@@ -747,6 +747,74 @@ describe('seam E — review-ready projection is suppressed while owned Codex is 
     expect(packet).toBeTruthy();
     expect(packet.status).toBe('running');
     expect(packet.status).not.toBe('awaiting_review');
+  });
+});
+
+describe('seam E — orchestrator state projects one terminal status authority', () => {
+  const url = 'http://localhost:3001/api/orchestrator/state';
+
+  it('real state GET resolves fabricated inventory against a persisted lane through TerminalStatusEvidence', async () => {
+    const packetId = 'pkt-seam-E-status-evidence';
+    const surfaceId = 'codex-owned:seam-E-status-evidence';
+    const repoPath = mkdtempSync(join(os.tmpdir(), 'o8-seam-E-status-repo-'));
+    tempDirs.push(repoPath);
+
+    const persistedLane = createLane({
+      repoPath,
+      worktreePath: repoPath,
+      branch: 'inline/seam-e-status',
+      runtime: 'codex',
+      packetId,
+      sessionKey: surfaceId,
+    });
+    setLaneStatus(persistedLane.id, 'running', 'system', 'session_running');
+
+    runtimeInventoryMock.agents = [{
+      sessionKey: surfaceId,
+      runtime: 'codex',
+      status: 'failed',
+      currentTask: 'Runtime exited while lane remained active',
+      lastEventAt: '2026-08-29T12:00:00.000Z',
+      runtimeSurface: {
+        ownership: 'owned',
+        capabilities: { sendInput: false, interrupt: false },
+        lifecycle: { availability: 'ready-for-resume' },
+      },
+    }];
+
+    const response = await stateRoute.GET(operatorGet(url));
+    expect(response.status).toBe(200);
+    const json = await response.json();
+    const agent = json.agents.find((candidate: { sessionKey: string }) => candidate.sessionKey === surfaceId);
+
+    expect(agent.status).toBe('failed');
+    expect(agent.statusEvidence).toMatchObject({
+      sessionId: surfaceId,
+      runtime: 'codex',
+      state: 'failed',
+      authority: 'runtime-event',
+      observedAt: '2026-08-29T12:00:00.000Z',
+    });
+    expect(agent.statusEvidence.evidence).toContainEqual({
+      source: `lane:${persistedLane.id}.status`,
+      value: 'running',
+    });
+  });
+
+  it('keeps precedence code in the terminal status resolver instead of the old call sites', () => {
+    const inventorySource = readFileSync(
+      join(process.cwd(), 'src/lib/runtime/inventory.ts'),
+      'utf-8',
+    );
+    const operatorStatusSource = readFileSync(
+      join(process.cwd(), 'src/lib/orchestrator/operator-status-model.ts'),
+      'utf-8',
+    );
+
+    expect(inventorySource).not.toContain('const statusWeight');
+    expect(operatorStatusSource).not.toContain('packetStatusFromLaneStatus');
+    expect(inventorySource).toContain('resolveTerminalStatusEvidence');
+    expect(operatorStatusSource).toContain('resolveTerminalStatusEvidence');
   });
 });
 

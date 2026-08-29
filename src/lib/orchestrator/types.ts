@@ -7,6 +7,7 @@ import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorRuntime, RuntimeWorkerProvider } from '@/lib/orchestrator/runtime-capabilities';
 import type { PacketSpendCap, PacketSpendTelemetry } from '@/lib/orchestrator/metered-spend';
 import type { PacketContextTelemetry } from '@/lib/orchestrator/packet-context-telemetry';
+import type { AgentSummary } from '@/lib/fleet/types';
 
 export type { OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 export type OrchestratorExecutionMode = 'fleet' | 'single' | 'fusion';
@@ -654,6 +655,7 @@ export interface OrchestratorDagMetadata {
 export interface OrchestratorStateApiResponse {
   mission: OrchestratorMissionState;
   dag: OrchestratorDagMetadata;
+  agents: AgentSummary[];
 }
 
 export interface OrchestratorStateApiErrorResponse {

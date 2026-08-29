@@ -65,12 +65,18 @@ function lane(overrides: Partial<Lane>): Lane {
 }
 
 describe('operator status model', () => {
-  it('uses lane truth to mask transient failed runtime status for active packets', () => {
+  it('keeps runtime failure authoritative when the lane still says running', () => {
     const agents = buildOperatorStatusAgents([agent({ status: 'failed' })], [lane({ status: 'running' })]);
 
     expect(agents).toHaveLength(1);
-    expect(agents[0].status).toBe('running');
-    expect(summarizeOperatorStatus({ agents, approvalCount: 0 })).toContain('1 agent running');
+    expect(agents[0].status).toBe('failed');
+    expect(agents[0].authority).toBe('runtime-event');
+    expect(agents[0].summary).toBe('codex runtime reports this session as failed.');
+    expect(agents[0].observedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(agents[0].statusEvidence.evidence).toContainEqual({
+      source: 'lane:lane-1.status',
+      value: 'running',
+    });
   });
 
   it('keeps summary honest when the returned agents include a real terminal failure', () => {
@@ -83,11 +89,12 @@ describe('operator status model', () => {
     expect(summary).toContain('Last: packet worker failed');
   });
 
-  it('surfaces reviewable lane status in the same array the summary counts', () => {
+  it('does not let a lower lane review state override a current runtime event', () => {
     const agents = buildOperatorStatusAgents([agent({ status: 'running' })], [lane({ status: 'reviewing' })]);
     const summary = summarizeOperatorStatus({ agents, approvalCount: 0 });
 
-    expect(agents[0].status).toBe('awaiting_review');
-    expect(summary).toContain('1 awaiting review');
+    expect(agents[0].status).toBe('running');
+    expect(agents[0].authority).toBe('runtime-event');
+    expect(summary).toContain('1 agent running');
   });
 });
