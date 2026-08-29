@@ -362,6 +362,7 @@ function selectRepoFallbackAgents(agents: AgentSummary[], existingSessionKeys: S
 
   for (const agent of agents) {
     if (existingSessionKeys.has(agent.sessionKey)) continue;
+    if (!isDispatchableRuntime(agent.runtime)) continue;
     if (!['running', 'reviewing', 'waiting'].includes(agent.status)) continue;
     // Only include IDE-owned sessions as fallbacks — discovered user-terminal
     // sessions shouldn't appear as phantom agents when the runtime restarts.
@@ -381,7 +382,7 @@ function selectRepoFallbackAgents(agents: AgentSummary[], existingSessionKeys: S
 
 async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
   const runtimes: AgentRuntime[] = getAllRuntimes()
-    .filter((runtime) => runtime.capabilities.discover);
+    .filter((runtime) => runtime.capabilities.discover && isDispatchableRuntime(runtime.id));
   const ideSessions = listIdeRuntimeSessions();
   const ideTabs = listIdeRuntimeTabs();
   const ideSessionByKey = new Map(ideSessions.map((session) => [session.liveSessionKey ?? session.sessionKey, session]));
@@ -507,7 +508,7 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
     // they're not in the IDE registry (orchestrator dispatch doesn't touch
     // the IDE workspace tabs) and not in the terminal-session registry
     // (orchestrator goes through the bridge terminal, not user PTY).
-    || session.ownership === 'owned'
+    || (session.ownership === 'owned' && isDispatchableRuntime(session.runtimeId))
   ));
 
   const agents = discovered.map(({ runtime, session, statusEvidence }) => (
@@ -601,7 +602,7 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
       gatewayReachable: true,
       mirrorMode: 'current-session-first',
       observablePending: false,
-      note: 'Showing every discovered registered runtime surface.',
+      note: 'Showing every discovered dispatchable runtime surface.',
       primarySessionKey,
     },
     squads,

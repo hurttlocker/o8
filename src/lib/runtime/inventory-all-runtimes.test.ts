@@ -102,60 +102,53 @@ function runtime(id: RuntimeId): AgentRuntime {
 
 describe('canonical runtime inventory discovery', () => {
   beforeEach(() => {
-    registryFixture.runtimes = [
-      runtime('gemini'),
-      runtime('aider'),
-      runtime('cloud'),
-      runtime('remote-customer'),
-    ];
+    registryFixture.runtimes = [];
     invalidateRuntimeInventoryCache();
   });
 
-  it('discovers owned sessions from every discoverable registered adapter', async () => {
+  it('matches main policy by never discovering non-dispatchable registered adapters', async () => {
+    const geminiRuntime = runtime('gemini');
+    const aiderRuntime = runtime('aider');
+    const cloudRuntime = runtime('cloud');
+    const remoteCustomerRuntime = runtime('remote-customer');
+    const cloudDiscovery = vi.spyOn(cloudRuntime, 'discoverSessions');
+    const remoteCustomerDiscovery = vi.spyOn(remoteCustomerRuntime, 'discoverSessions');
+    registryFixture.runtimes = [
+      geminiRuntime,
+      aiderRuntime,
+      cloudRuntime,
+      remoteCustomerRuntime,
+    ];
+    invalidateRuntimeInventoryCache();
+
     const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
 
-    expect(snapshot.agents.map((agent) => agent.runtime)).toEqual([
-      'gemini',
-      'aider',
-      'cloud',
-      'remote-customer',
-    ]);
+    expect(cloudDiscovery).not.toHaveBeenCalled();
+    expect(remoteCustomerDiscovery).not.toHaveBeenCalled();
+    expect(snapshot.agents.map((agent) => agent.runtime)).toEqual(['gemini', 'aider']);
     expect(snapshot.agents.map((agent) => agent.identityId)).toEqual([
       'gemini-identity',
       'aider-identity',
-      'cloud-identity',
-      'remote-customer-identity',
     ]);
-    for (const runtimeId of ['cloud', 'remote-customer'] as const) {
-      expect(snapshot.agents.find((agent) => agent.runtime === runtimeId)?.statusEvidence).toMatchObject({
-        runtime: runtimeId,
-        authority: 'runtime-event',
-        state: 'working',
-      });
-    }
-    expect(snapshot.meta.note).toBe('Showing every discovered registered runtime surface.');
+    expect(snapshot.meta.note).toBe('Showing every discovered dispatchable runtime surface.');
   });
 
   it('uses total unknown evidence for an invalid observation without dropping healthy sessions', async () => {
-    const malformedRuntime = runtime('custom-malformed');
+    const malformedRuntime = runtime('aider');
     const discoverSessions = malformedRuntime.discoverSessions;
     malformedRuntime.discoverSessions = async () => {
       const sessions = await discoverSessions();
       return sessions.map((session) => ({ ...session, lastActivityAt: new Date('not-a-time') }));
     };
-    registryFixture.runtimes = [runtime('cloud'), runtime('remote-customer'), malformedRuntime];
+    registryFixture.runtimes = [runtime('gemini'), malformedRuntime];
     invalidateRuntimeInventoryCache();
 
     const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
 
-    expect(snapshot.agents.map((agent) => agent.runtime)).toEqual([
-      'cloud',
-      'remote-customer',
-      'custom-malformed',
-    ]);
-    expect(snapshot.agents.find((agent) => agent.runtime === 'custom-malformed')?.statusEvidence)
+    expect(snapshot.agents.map((agent) => agent.runtime)).toEqual(['gemini', 'aider']);
+    expect(snapshot.agents.find((agent) => agent.runtime === 'aider')?.statusEvidence)
       .toMatchObject({
-        runtime: 'custom-malformed',
+        runtime: 'aider',
         state: 'unknown',
         authority: 'raw-terminal',
         summary: 'No observation with a valid time was available.',
@@ -164,13 +157,13 @@ describe('canonical runtime inventory discovery', () => {
   });
 
   it('contains a missing session identity and warns without dropping peers', async () => {
-    const malformedRuntime = runtime('custom-missing-id');
+    const malformedRuntime = runtime('aider');
     const discoverSessions = malformedRuntime.discoverSessions;
     malformedRuntime.discoverSessions = async () => {
       const sessions = await discoverSessions();
       return sessions.map((session) => ({ ...session, sessionKey: '' }));
     };
-    registryFixture.runtimes = [runtime('cloud'), malformedRuntime];
+    registryFixture.runtimes = [runtime('gemini'), malformedRuntime];
     invalidateRuntimeInventoryCache();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
@@ -178,10 +171,10 @@ describe('canonical runtime inventory discovery', () => {
       const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
 
       expect(snapshot.agents).toHaveLength(2);
-      expect(snapshot.agents.map((agent) => agent.runtime)).toEqual(['cloud', 'custom-missing-id']);
+      expect(snapshot.agents.map((agent) => agent.runtime)).toEqual(['gemini', 'aider']);
       expect(snapshot.agents[1].statusEvidence).toMatchObject({
-        sessionId: 'custom-missing-id',
-        runtime: 'custom-missing-id',
+        sessionId: 'aider',
+        runtime: 'aider',
         state: 'unknown',
         authority: 'raw-terminal',
         evidence: [],
