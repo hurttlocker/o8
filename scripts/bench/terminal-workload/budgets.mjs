@@ -15,7 +15,10 @@ export const LOCKED_TERMINAL_WORKLOAD_BUDGETS = Object.freeze({
   },
   rendererPhysicalBytesGrowthP95Max: 112 * 1024 * 1024,
   revealMsP95Max: 225,
-  firstCorrectFrameMsP95Max: 350,
+  // Operator-authorized on 2026-08-29: the original 350 ms lock starts after
+  // grid match; the fit-and-resize-inclusive click metric has a 400 ms ceiling.
+  firstCorrectFrameAfterGridMsP95Max: 350,
+  firstCorrectFrameMsP95Max: 400,
   keystrokeToPaintMsP50Max: 75,
   keystrokeToPaintMsP95Max: 175,
   renderEventsN12ToN1MaxRatio: 1.25,
@@ -66,7 +69,16 @@ export function checkTerminalWorkloadBudgets(receipt) {
     budget.rendererPhysicalBytesGrowthP95Max,
   );
   assertMax('reveal p95', n12.revealMs?.p95, budget.revealMsP95Max);
-  assertMax('first-correct-frame p95', n12.firstCorrectFrameMs?.p95, budget.firstCorrectFrameMsP95Max);
+  assertMax(
+    'first-correct-frame-after-grid p95',
+    n12.firstCorrectFrameAfterGridMs?.p95,
+    budget.firstCorrectFrameAfterGridMsP95Max,
+  );
+  assertMax(
+    'first-correct-frame including grid p95',
+    n12.firstCorrectFrameMs?.p95,
+    budget.firstCorrectFrameMsP95Max,
+  );
   assertMax('keystroke-to-paint p50', n12.keystrokeToPaintMs?.p50, budget.keystrokeToPaintMsP50Max);
   assertMax('keystroke-to-paint p95', n12.keystrokeToPaintMs?.p95, budget.keystrokeToPaintMsP95Max);
   if ((n12.keystrokeToPaintTimeouts ?? 0) !== 0) {

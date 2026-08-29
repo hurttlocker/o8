@@ -25,6 +25,7 @@ function receipt() {
     longTaskMsPerMinute: distribution(100),
     revealMs: distribution(80, 120),
     firstCorrectFrameMs: distribution(120, 180),
+    firstCorrectFrameAfterGridMs: distribution(40, 60),
     keystrokeToPaintMs: distribution(40, 70),
     keystrokeToPaintTimeouts: 0,
     attribution: { renderEvents: distribution(100) },
@@ -53,6 +54,16 @@ describe('terminal workload locked budgets', () => {
     expect(checkTerminalWorkloadBudgets(candidate)).toContain(
       'realtime-server CPU p50 25 must be below 25',
     );
+  });
+
+  it('enforces both authorized first-correct-frame definitions', () => {
+    const candidate = receipt();
+    candidate.summary[12].firstCorrectFrameAfterGridMs = distribution(200, 351);
+    candidate.summary[12].firstCorrectFrameMs = distribution(300, 401);
+    expect(checkTerminalWorkloadBudgets(candidate)).toEqual(expect.arrayContaining([
+      'first-correct-frame-after-grid p95 351 exceeds 350',
+      'first-correct-frame including grid p95 401 exceeds 400',
+    ]));
   });
 
   it('rejects any sample with a resync barrier diagnostic', () => {

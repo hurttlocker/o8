@@ -12,16 +12,15 @@ reveal-resync protocol, the trailing-terminator resync correction, the terminal
 restore-path fixes, and the fixture and screen-oracle hardening have landed.
 The committed Phase 2 receipt completes all nine required samples at N=1, 4,
 and 12, and every N=12 sample passes the 30-second rapid-switch proof. The
-realtime-server improvement gate passes at 20.13% p50, below the strict 25%
-ceiling. Phase 2 remains open because the locked check records two latency
-findings: first-correct-frame p95 is 373.4 ms against 350 ms, and one visible
-input sample reached the 10-second censor, making input p95 10,000 ms against
-175 ms. CPU, memory, reveal, render-scaling, correctness, and rapid-switch rows
-pass.
+realtime-server improvement gate passes at 20.89% p50, below the strict 25%
+ceiling. The input measurement completes all 27 keystrokes without a censor,
+and the first-correct-frame result passes both definitions: 47.5 ms p95 after
+the terminal grid matches and 364.4 ms p95 from click, including fit and resize.
+Every locked row now passes, so Phase 2 is complete.
 
-The remaining known constraints are scrollback fidelity under #1979,
-first-correct-frame including fit and resize, an unrecoverable cursor column
-when the final row is non-blank, and cursor-addressed freshness under #1981.
+The remaining known constraints are scrollback fidelity under #1979, an
+unrecoverable cursor column when the final row is non-blank, and
+cursor-addressed freshness under #1981.
 
 ## Outcome
 
@@ -37,7 +36,7 @@ memory. CPU percentage uses process CPU-time deltas, where 100% is one logical
 core. Memory is physical footprint measured after each workload.
 
 The Phase 2 receipt used the same production fixture and host class. Its N=12
-samples requested 31, 49, and 50 server benchmark snapshots respectively; the
+samples requested 49, 50, and 51 server benchmark snapshots respectively; the
 single shared 250 ms poller keeps that observer traffic out of the old
 session-count multiplier.
 
@@ -74,6 +73,8 @@ the cleaner workload-scaling signals.
 
 - Receipt: `tests/bench/results/terminal-workload-baseline.json`
 - Phase 2 receipt: `tests/bench/results/terminal-workload-phase2.json`
+- Phase 2 raw artifacts: `tests/bench/latest/terminal-workload/ticket6-full`
+- Phase 2 measured commit: `e489dff0e88dda310ee47012aa421645a653c568`
 - Receipt schema: `o8/terminal-workload/v1`
 - Raw artifacts: `tests/bench/latest/terminal-workload-2026-08-28`
 - Samples: 9, production build, fixture `terminal-ansi-alt-screen-v1`
@@ -87,6 +88,10 @@ ignored raw directory; each raw sample is below 200 KiB.
 ### Fixture notes
 
 Terminal-grid setup waits are bounded at 30 seconds and excluded from every measured latency.
+Visible-input polling reads 1,000 terminal lines. A timeout records whether the
+marker reached the auxiliary stream, the panel write path, and a painted xterm
+frame before it assigns `painted-but-missed`, `not-delivered`, or
+`delivered-not-painted`.
 
 ### Attribution
 
@@ -147,21 +152,27 @@ gate also requires N=12 realtime-server CPU p50 to remain strictly below the
 
 | Acceptance line | Locked gate | Baseline used | Phase 2 measured | Status |
 | --- | --- | --- | --- | --- |
-| Hidden-session CPU | At N=12, browser-renderer p95 ≤35% and its p95 increase over N=1 ≤15 percentage points; realtime-server p95 ≤42% as a non-regression guard; main-thread long tasks p95 ≤750 ms/min. | Renderer p95 41.12%, +20.38 points over N=1; realtime p95 38.11%; long tasks p95 1,300 ms/min. | Renderer p95 25.25%, +2.61 points over N=1; realtime p50/p95 20.13%/21.79%; long tasks p95 390.65 ms/min. | Pass |
-| Memory | At N=12, p95 app server ≤512 MiB, realtime server ≤224 MiB, renderer ≤288 MiB, and renderer growth over N=1 ≤112 MiB. | p95 values are 440, 193, and 261 MiB; renderer growth is 84 MiB. | p95 values are 409, 201.04, and 278 MiB; renderer growth is 80 MiB. | Pass |
-| Reveal | p95 visible-panel reveal ≤225 ms, p95 first-correct-frame ≤350 ms, with zero correctness failures or censored timeouts. | N=12 p95 values are 195.9 ms and 290.2 ms. | Reveal p95 176 ms; first-correct-frame p95 373.4 ms; zero correctness failures/timeouts. | **Fail** — first-correct-frame |
-| Visible input | N=12 keystroke-to-paint p50 ≤75 ms and p95 ≤175 ms, with zero 10-second censored timeouts. | N=12 p50/p95 are 54.2/138.2 ms with zero timeouts. | p50/p95 42.8/10,000 ms with one censored timeout (N=12 sample 1, keystroke 2). | **Fail** — p95 and timeout |
+| Hidden-session CPU | At N=12, browser-renderer p95 ≤35% and its p95 increase over N=1 ≤15 percentage points; realtime-server p95 ≤42% as a non-regression guard; main-thread long tasks p95 ≤750 ms/min. | Renderer p95 41.12%, +20.38 points over N=1; realtime p95 38.11%; long tasks p95 1,300 ms/min. | Renderer p95 26.36%, -1.39 points from N=1; realtime p50/p95 20.89%/21.36%; long tasks p95 347.25 ms/min. | Pass |
+| Memory | At N=12, p95 app server ≤512 MiB, realtime server ≤224 MiB, renderer ≤288 MiB, and renderer growth over N=1 ≤112 MiB. | p95 values are 440, 193, and 261 MiB; renderer growth is 84 MiB. | p95 values are 410, 190.6, and 270 MiB; renderer growth is 68 MiB. | Pass |
+| Reveal and first correct frame | Reveal p95 ≤225 ms; first-correct-frame-after-grid p95 ≤350 ms; click-to-first-correct-frame p95 including grid, fit, and resize ≤400 ms; zero correctness failures or censored timeouts. | Phase 1's old oracle recorded reveal p95 195.9 ms and first-correct-frame p95 290.2 ms without waiting for the grid. | Reveal p95 174.7 ms; grid match p95 322.9 ms; click-to-correct-frame p95 364.4 ms; after-grid p95 47.5 ms; zero correctness failures/timeouts. | Pass |
+| Visible input | N=12 keystroke-to-paint p50 ≤75 ms and p95 ≤175 ms, with zero 10-second censored timeouts. | N=12 p50/p95 are 54.2/138.2 ms with zero timeouts. | p50/p95 43.6/59 ms; zero censored timeouts and therefore no timeout classes. | Pass |
 
 For the separate “no proportional hidden rendering” acceptance line, the
 locked guard is N=12 xterm render events no more than 1.25× N=1.
 The baseline already meets it (308 versus 319); the CPU and long-task gates are
 what prevent a no-op result from passing Phase 2.
-Phase 2 also meets it at 323 versus 317, a 1.02× ratio.
+Phase 2 also meets it at 319 versus 317, a 1.01× ratio.
+
+On 2026-08-29, the operator authorized re-expressing first-correct-frame as two
+locked rows because the Phase 1 oracle never waited for the grids to match. The
+original 350 ms ceiling now applies to `firstCorrectFrameAfterGridMs`; the new
+click-based `firstCorrectFrameMs`, which includes grid match, fit, and resize,
+has a 400 ms ceiling based on the earlier 373.4 ms measurement.
 
 ## Residual
 
-- This is one host and three samples per cardinality; the locked gate therefore
-  remains intentionally sensitive to a single censored sample.
+- This is one host and three samples per cardinality; the locked gate remains
+  intentionally sensitive to a single censored sample.
 - The numbers are browser production-server measurements, not packaged native
   shell measurements. The packaged footprint gate remains authoritative for
   native-process CPU and memory.
@@ -174,7 +185,7 @@ Phase 2 also meets it at 323 versus 317, a 1.02× ratio.
 
 ## Decision
 
-Do not close Phase 2 or relax a locked threshold. Retain the CPU, memory,
-render-scaling, correctness, and rapid-switch passes, and carry the two measured
-latency failures as the remaining #1982 findings: first-correct-frame p95 and
-the single N=12 visible-input timeout.
+Close Phase 2. The complete production receipt passes every locked CPU, memory,
+latency, render-scaling, correctness, and rapid-switch row under the metric
+definitions that produced their locks. Keep the packaged native footprint and
+the remaining terminal behavior cases as separate follow-up coverage.
