@@ -2248,6 +2248,13 @@
       ]
     },
     {
+      "path": "tests/terminal-rapid-generator.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal"
+      ]
+    },
+    {
       "path": "tests/terminal-visibility-real-path.test.ts",
       "reasons": [
         "child-process",

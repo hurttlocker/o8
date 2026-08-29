@@ -10,9 +10,14 @@ are **PROPOSED**, not accepted gates; the operator locks them before Phase 2.
 The server hidden-view buffer and resync barrier, the client visibility and
 reveal-resync protocol, the trailing-terminator resync correction, the terminal
 restore-path fixes, and the fixture and screen-oracle hardening have landed.
-The N=1 and N=4 samples complete, but the N=12 rapid-switch proof still fails
-and is tracked in #1982. The locked N=12 budget table has not been evaluated,
-so Phase 2 remains open.
+The committed Phase 2 receipt completes all nine required samples at N=1, 4,
+and 12, and every N=12 sample passes the 30-second rapid-switch proof. The
+realtime-server improvement gate passes at 20.13% p50, below the strict 25%
+ceiling. Phase 2 remains open because the locked check records two latency
+findings: first-correct-frame p95 is 373.4 ms against 350 ms, and one visible
+input sample reached the 10-second censor, making input p95 10,000 ms against
+175 ms. CPU, memory, reveal, render-scaling, correctness, and rapid-switch rows
+pass.
 
 The remaining known constraints are scrollback fidelity under #1979,
 first-correct-frame including fit and resize, an unrecoverable cursor column
@@ -30,6 +35,11 @@ panel.
 The baseline host was Darwin 25.6.0 on x64 with 16 logical CPUs and 64 GiB of
 memory. CPU percentage uses process CPU-time deltas, where 100% is one logical
 core. Memory is physical footprint measured after each workload.
+
+The Phase 2 receipt used the same production fixture and host class. Its N=12
+samples requested 31, 49, and 50 server benchmark snapshots respectively; the
+single shared 250 ms poller keeps that observer traffic out of the old
+session-count multiplier.
 
 ### Interaction and residency baseline
 
@@ -63,6 +73,7 @@ the cleaner workload-scaling signals.
 ## Evidence
 
 - Receipt: `tests/bench/results/terminal-workload-baseline.json`
+- Phase 2 receipt: `tests/bench/results/terminal-workload-phase2.json`
 - Receipt schema: `o8/terminal-workload/v1`
 - Raw artifacts: `tests/bench/latest/terminal-workload-2026-08-28`
 - Samples: 9, production build, fixture `terminal-ansi-alt-screen-v1`
@@ -129,40 +140,41 @@ in Phase 1.
 The operator locked the Phase 2 thresholds after this baseline landed. The
 single executable source is
 `scripts/bench/terminal-workload/budgets.mjs`; `npm run bench:terminal:check`
-reads the versioned receipt and fails any locked ceiling. The table below is
-the Phase 1 derivation record. The locked gate also requires N=12 realtime-
-server CPU p50 to remain strictly below the 25% baseline.
+reads the versioned receipt and fails any locked ceiling. The table below
+retains the Phase 1 derivation and adds the measured Phase 2 result. The locked
+gate also requires N=12 realtime-server CPU p50 to remain strictly below the
+25% baseline.
 
-| Acceptance line | Locked gate | Baseline used |
-| --- | --- | --- |
-| Hidden-session CPU | At N=12, browser-renderer p95 ≤35% and its p95 increase over N=1 ≤15 percentage points; realtime-server p95 ≤42% as a non-regression guard; main-thread long tasks p95 ≤750 ms/min. | Renderer p95 41.12%, +20.38 points over N=1; realtime p95 38.11%; long tasks p95 1,300 ms/min. The renderer and long-task targets require a material Phase 2 reduction. |
-| Memory | At N=12, p95 app server ≤512 MiB, realtime server ≤224 MiB, renderer ≤288 MiB, and renderer growth over N=1 ≤112 MiB. | p95 values are 440, 193, and 261 MiB; renderer growth is 84 MiB. |
-| Reveal | p95 visible-panel reveal ≤225 ms, p95 first-correct-frame ≤350 ms, with zero correctness failures or censored timeouts. | N=12 p95 values are 195.9 ms and 290.2 ms. |
-| Visible input | N=12 keystroke-to-paint p50 ≤75 ms and p95 ≤175 ms, with zero 10-second censored timeouts. | N=12 p50/p95 are 54.2/138.2 ms with zero timeouts. |
+| Acceptance line | Locked gate | Baseline used | Phase 2 measured | Status |
+| --- | --- | --- | --- | --- |
+| Hidden-session CPU | At N=12, browser-renderer p95 ≤35% and its p95 increase over N=1 ≤15 percentage points; realtime-server p95 ≤42% as a non-regression guard; main-thread long tasks p95 ≤750 ms/min. | Renderer p95 41.12%, +20.38 points over N=1; realtime p95 38.11%; long tasks p95 1,300 ms/min. | Renderer p95 25.25%, +2.61 points over N=1; realtime p50/p95 20.13%/21.79%; long tasks p95 390.65 ms/min. | Pass |
+| Memory | At N=12, p95 app server ≤512 MiB, realtime server ≤224 MiB, renderer ≤288 MiB, and renderer growth over N=1 ≤112 MiB. | p95 values are 440, 193, and 261 MiB; renderer growth is 84 MiB. | p95 values are 409, 201.04, and 278 MiB; renderer growth is 80 MiB. | Pass |
+| Reveal | p95 visible-panel reveal ≤225 ms, p95 first-correct-frame ≤350 ms, with zero correctness failures or censored timeouts. | N=12 p95 values are 195.9 ms and 290.2 ms. | Reveal p95 176 ms; first-correct-frame p95 373.4 ms; zero correctness failures/timeouts. | **Fail** — first-correct-frame |
+| Visible input | N=12 keystroke-to-paint p50 ≤75 ms and p95 ≤175 ms, with zero 10-second censored timeouts. | N=12 p50/p95 are 54.2/138.2 ms with zero timeouts. | p50/p95 42.8/10,000 ms with one censored timeout (N=12 sample 1, keystroke 2). | **Fail** — p95 and timeout |
 
 For the separate “no proportional hidden rendering” acceptance line, the
 locked guard is N=12 xterm render events no more than 1.25× N=1.
 The baseline already meets it (308 versus 319); the CPU and long-task gates are
 what prevent a no-op result from passing Phase 2.
+Phase 2 also meets it at 323 versus 317, a 1.02× ratio.
 
 ## Residual
 
-- This is one host and three samples per cardinality. The proposed budgets need
-  operator lock and a stable machine lane before becoming gates.
+- This is one host and three samples per cardinality; the locked gate therefore
+  remains intentionally sensitive to a single censored sample.
 - The numbers are browser production-server measurements, not packaged native
   shell measurements. The packaged footprint gate remains authoritative for
   native-process CPU and memory.
-- A single reveal is exercised per N>1 sample. Rapid switching among all twelve
-  sessions, full snapshot recovery, and image/link/Unicode/mouse/paste/resize/
-  signal behavior remain Phase 2 acceptance coverage.
+- A single measured reveal is exercised per N>1 sample. The separate N=12
+  rapid-switch proof passes all three samples, but image/link/Unicode/mouse/
+  paste/resize/signal behavior remains outside this receipt.
 - Ring overflow and replay risk are diagnosed but not recovered in Phase 1.
 - The auxiliary clients required by the workload contract contribute to server
   fan-out CPU; browser attribution is separated by process and page counters.
 
 ## Decision
 
-Hold the implementation at measurement only. Ask the operator to lock or amend
-the **PROPOSED** budgets, then pursue bounded hidden-write batching in Phase 2
-unless a full replay snapshot protocol is separately authorized. Keep the
-server behavior unchanged for the batching path and preserve ordered bytes,
-partial escape sequences, and an explicit overflow diagnostic.
+Do not close Phase 2 or relax a locked threshold. Retain the CPU, memory,
+render-scaling, correctness, and rapid-switch passes, and carry the two measured
+latency failures as the remaining #1982 findings: first-correct-frame p95 and
+the single N=12 visible-input timeout.
