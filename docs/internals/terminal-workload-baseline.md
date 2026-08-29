@@ -5,6 +5,19 @@ delivery, attachment, parsing, or rendering behavior. The only runtime changes
 are bench-gated counters and stable read-only selectors. Budgets in this report
 are **PROPOSED**, not accepted gates; the operator locks them before Phase 2.
 
+## Phase 2 status
+
+The server hidden-view buffer and resync barrier, the client visibility and
+reveal-resync protocol, the trailing-terminator resync correction, the terminal
+restore-path fixes, and the fixture and screen-oracle hardening have landed.
+The N=1 and N=4 samples complete, but the N=12 rapid-switch proof still fails
+and is tracked in #1982. The locked N=12 budget table has not been evaluated,
+so Phase 2 remains open.
+
+The remaining known constraints are scrollback fidelity under #1979,
+first-correct-frame including fit and resize, an unrecoverable cursor column
+when the final row is non-blank, and cursor-addressed freshness under #1981.
+
 ## Outcome
 
 The production fixture completed nine samples: three each at 1, 4, and 12 live

@@ -167,14 +167,16 @@ export function useWorkspaceTerminalController(
   const terminalActivity = useMemo(() => createTerminalActivityTracker({ getTabs: () => tabsRef.current, setTabs }), []);
   useEffect(() => () => terminalActivity.dispose(), [terminalActivity]);
   const landTerminalTabs = useCallback((site: string, nextTabs: TerminalTab[]) => {
-    const previousById = new Map(tabsRef.current.map((tab) => [tab.id, tab]));
-    const changed = nextTabs.flatMap((tab) => {
-      if (tab.kind !== 'terminal') return [];
-      const from = previousById.get(tab.id)?.tmuxSession ?? null;
-      const to = tab.tmuxSession;
-      return from === to ? [] : [{ tabId: tab.id, from, to }];
-    });
-    if (changed.length > 0) logTerminalBench('tabs-landed', { site, changed });
+    if (window.__o8TerminalBenchEnabled === true) {
+      const previousById = new Map(tabsRef.current.map((tab) => [tab.id, tab]));
+      const changed = nextTabs.flatMap((tab) => {
+        if (tab.kind !== 'terminal') return [];
+        const from = previousById.get(tab.id)?.tmuxSession ?? null;
+        const to = tab.tmuxSession;
+        return from === to ? [] : [{ tabId: tab.id, from, to }];
+      });
+      if (changed.length > 0) logTerminalBench('tabs-landed', { site, changed });
+    }
     tabsRef.current = nextTabs;
   }, []);
 

@@ -51,7 +51,9 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { homedir } from 'node:os';
 import { promisify } from 'node:util';
 import { getDataDir, migrateDataDirOnce } from '@/lib/data-dir-migration';
+import { TERMINAL_SCROLLBACK_LINES } from '@/lib/terminal/client-retention';
 import { TerminalHiddenBuffer } from '@/lib/ws-server/terminal-hidden-buffer';
+import { resizeTerminalIfChanged } from '@/lib/ws-server/terminal-resize';
 import { waitForTerminalResyncBarrier } from '@/lib/ws-server/terminal-resync-barrier';
 import { TerminalWorkloadStats } from '@/lib/ws-server/terminal-workload-stats';
 
@@ -1030,7 +1032,8 @@ interface TerminalAttachment {
   rows: number;
   batchBuffer: string;
   batchTimer: ReturnType<typeof setTimeout> | null;
-  lastOutputAt: number; // latest PTY output or accepted input that can produce output
+  lastOutputAt: number; // latest PTY output
+  lastInputAt: number;  // latest accepted input, used only by the resync idle barrier
   createdAt: number;    // timestamp of terminal creation
   orphanTimer: ReturnType<typeof setTimeout> | null;
   scrollbackChunks: string[];
@@ -1623,9 +1626,11 @@ function listDashTmuxSessionsWithAge(): DashSessionInfo[] {
 /**
  * #6 persistent terminals — capture a dash session's scrollback history so a
  * re-attach after a restart/crash restores what scrolled off-screen (a bare
- * `tmux attach` only repaints the visible viewport). `-S -` = from the start of
- * history, `-e` = keep colour/style escapes. Bounded to the ring size; empty on
- * any failure. Caller trims the trailing visible rows (the attach repaints them).
+ * `tmux attach` only repaints the visible viewport). Capture at most
+ * TERMINAL_SCROLLBACK_LINES above the screen, matching client retention, and
+ * keep colour/style escapes. The 8 MiB maxBuffer remains a hard byte ceiling.
+ * Empty on any failure. Caller trims the trailing visible rows because the
+ * attach repaints them.
  */
 function captureTmuxPaneResult(sessionName: string): { ok: boolean; data: string } {
   try {
@@ -1633,7 +1638,7 @@ function captureTmuxPaneResult(sessionName: string): { ok: boolean; data: string
       ok: true,
       data: execFileSync(
       resolveTmuxBinary(),
-      ['capture-pane', '-p', '-e', '-S', '-', '-t', sessionName],
+      ['capture-pane', '-p', '-e', '-S', `-${TERMINAL_SCROLLBACK_LINES}`, '-t', sessionName],
       {
         windowsHide: true,
         timeout: 4000,
@@ -6448,7 +6453,7 @@ async function sendTerminalResync(
   view.hiddenBuffer.clear();
 
   const barrier = await waitForTerminalResyncBarrier({
-    getLastOutputAt: () => attachment.lastOutputAt,
+    getLastOutputAt: () => Math.max(attachment.lastOutputAt, attachment.lastInputAt),
     getBatchBuffer: () => attachment.batchBuffer,
     getScrollbackChunks: () => attachment.scrollbackChunks,
     capture: () => attachment.snapshotSource === 'tmux'
@@ -6548,9 +6553,7 @@ function handleTerminalVisibility(client: ClientState, msg: Record<string, unkno
   const rows = typeof msg.rows === 'number' ? msg.rows : null;
   if (cols != null && rows != null) {
     try {
-      attachment.ptyProcess.resize(cols, rows);
-      attachment.cols = cols;
-      attachment.rows = rows;
+      resizeTerminalIfChanged(attachment, cols, rows);
     } catch { /* resize may fail if the PTY exited during reveal */ }
   }
 
@@ -6610,6 +6613,7 @@ function materializePendingDashSession(
     batchBuffer: '',
     batchTimer: null,
     lastOutputAt: now,
+    lastInputAt: now,
     createdAt: now,
     orphanTimer: null,
     scrollbackChunks: [],
@@ -6754,6 +6758,7 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
         batchBuffer: '',
         batchTimer: null,
         lastOutputAt: now,
+        lastInputAt: now,
         createdAt: now,
         orphanTimer: null,
         scrollbackChunks: [],
@@ -6806,6 +6811,7 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
       batchBuffer: '',
       batchTimer: null,
       lastOutputAt: now,
+      lastInputAt: now,
       createdAt: now,
       orphanTimer: null,
       scrollbackChunks: [],
@@ -6855,7 +6861,7 @@ function handleTerminalInput(client: ClientState, msg: Record<string, unknown>) 
     // WebSocket message is handled. Treat accepted input as stream activity so
     // an immediate reveal cannot pass the resync idle barrier on an old output
     // timestamp and snapshot bytes that are still in the PTY kernel buffer.
-    attachment.lastOutputAt = Date.now();
+    attachment.lastInputAt = Date.now();
   } catch { /* PTY may have exited */ }
 }
 
@@ -7247,6 +7253,7 @@ const httpServer = createServer((req, res) => {
           batchBuffer: '',
           batchTimer: null,
           lastOutputAt: now,
+          lastInputAt: now,
           createdAt: now,
           orphanTimer: null,
           scrollbackChunks: [],

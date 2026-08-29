@@ -49,6 +49,25 @@ describe('terminal resync barrier', () => {
     });
   });
 
+  it('holds the idle wait for input-only activity without changing output time', async () => {
+    let now = 1_000;
+    const lastOutputAt = 900;
+    const lastInputAt = 1_000;
+
+    await expect(waitForTerminalResyncBarrier({
+      getLastOutputAt: () => Math.max(lastOutputAt, lastInputAt),
+      getBatchBuffer: () => '',
+      getScrollbackChunks: () => ['READY\r\n'],
+      capture: () => ({ ok: true, data: 'READY\n' }),
+      isCancelled: () => false,
+      now: () => now,
+      wait: async (delayMs) => { now += delayMs; },
+    })).resolves.toMatchObject({
+      status: 'ready', waitedMs: 40, unsettled: false,
+    });
+    expect(lastOutputAt).toBe(900);
+  });
+
   it('captures with an unsettled result after the 500 ms bound', async () => {
     const test = harness({ idleAt: Number.POSITIVE_INFINITY });
 
