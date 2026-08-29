@@ -31,6 +31,18 @@ This verification detects corruption and metadata mismatch. It does not turn an 
 
 Set `O8_RELEASE_BUILD_CACHE_DIR` to isolate a canary or move the cache to another local volume. Set `O8_RELEASE_BUILD_CACHE=off` to bypass restore and capture without changing the build command.
 
+For a macOS external volume, create a private marker at the volume root whose contents are a stable operator-chosen identity, then configure both the cache directory and that identity:
+
+```bash
+export O8_RELEASE_BUILD_CACHE_VOLUME_ID="<stable-volume-identity>"
+printf '%s\n' "$O8_RELEASE_BUILD_CACHE_VOLUME_ID" > "/Volumes/<volume>/.o8-release-cache-volume"
+export O8_RELEASE_BUILD_CACHE_DIR="/Volumes/<volume>/o8/release-cache"
+```
+
+Create the marker while the intended volume is mounted. Do not pre-create `/Volumes/<volume>` when it is absent. Before every restore or capture, the wrapper reads the marker and requires its contents to exactly match `O8_RELEASE_BUILD_CACHE_VOLUME_ID`. A missing marker, missing identity, or changed marker causes one warning and selects the local default instead; the wrapper never creates the configured `/Volumes/...` path in that state. `O8_RELEASE_BUILD_CACHE_LOCAL_DIR` can override the fallback for a hermetic canary.
+
+The cache-entry budget defaults to 4 GiB on the local root and 20 GiB on a validated external root. Set `O8_RELEASE_BUILD_CACHE_MAX_BYTES` to a non-negative integer byte count to override it. Capture prunes whole compatibility entries oldest-first, with relative path as the deterministic tie-breaker. Receipts are outside the budget and are not pruned.
+
 The cache retains one source entry for each compatibility identity and the two newest compatibility identities for each phase. This bounds the large native and web intermediates while preserving the most useful rollback point.
 
 ## Receipts

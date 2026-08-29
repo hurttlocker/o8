@@ -23,6 +23,9 @@ export const RELEASE_BUILD_CACHE_RECEIPT_SCHEMA = 'o8/release-build-cache-receip
 export const RELEASE_BUILD_CACHE_PHASES = Object.freeze(['web', 'speech', 'native']);
 
 const CACHE_VERSION_DIR = 'release-v1';
+const EXTERNAL_VOLUME_MARKER = '.o8-release-cache-volume';
+const LOCAL_CACHE_BUDGET_BYTES = 4 * 1024 * 1024 * 1024;
+const EXTERNAL_CACHE_BUDGET_BYTES = 20 * 1024 * 1024 * 1024;
 const ENTRY_LIMIT = 1;
 const COMPATIBILITY_LIMIT = 2;
 const UNSAFE_PATH_ERROR_CODE = 'O8_RELEASE_CACHE_UNSAFE_PATH';
@@ -172,8 +175,69 @@ function collectWebEnvironmentFiles(root) {
   });
 }
 
-export function resolveReleaseBuildCacheRoot(env = process.env) {
-  return resolve(env.O8_RELEASE_BUILD_CACHE_DIR?.trim() || join(homedir(), '.o8-build-cache', CACHE_VERSION_DIR));
+function localCacheRoot(env) {
+  return resolve(env.O8_RELEASE_BUILD_CACHE_LOCAL_DIR?.trim()
+    || join(homedir(), '.o8-build-cache', CACHE_VERSION_DIR));
+}
+
+function externalVolumeRoot(configuredRoot, env) {
+  const explicit = env.O8_RELEASE_BUILD_CACHE_EXTERNAL_ROOT?.trim();
+  if (explicit) return resolve(explicit);
+  const match = configuredRoot.match(/^\/Volumes\/[^/]+(?:\/|$)/);
+  return match ? match[0].replace(/\/$/, '') : null;
+}
+
+export function resolveReleaseBuildCacheRoot(env = process.env, options = {}) {
+  const configured = env.O8_RELEASE_BUILD_CACHE_DIR?.trim();
+  if (!configured) return localCacheRoot(env);
+  const configuredRoot = resolve(configured);
+  const volumeRoot = externalVolumeRoot(configuredRoot, env);
+  if (!volumeRoot) return configuredRoot;
+  const expectedVolumeId = env.O8_RELEASE_BUILD_CACHE_VOLUME_ID?.trim();
+  const markerPath = join(volumeRoot, EXTERNAL_VOLUME_MARKER);
+  let actualVolumeId = null;
+  try {
+    const markerMetadata = lstatSync(markerPath);
+    if (markerMetadata.isFile() && !markerMetadata.isSymbolicLink()) {
+      actualVolumeId = readFileSync(markerPath, 'utf8').trim();
+    }
+  } catch {}
+  if (expectedVolumeId && actualVolumeId === expectedVolumeId
+    && resolvedPathInside(realpathWithMissingSegments(configuredRoot), realpathWithMissingSegments(volumeRoot))) {
+    return configuredRoot;
+  }
+  const fallback = localCacheRoot(env);
+  const reason = !expectedVolumeId ? 'volume identity is not configured'
+    : actualVolumeId === null ? 'mount marker is missing'
+      : actualVolumeId !== expectedVolumeId ? 'mount identity changed'
+        : 'cache directory is outside the external root';
+  (options.warn ?? console.warn)(
+    `[release-cache] external cache unavailable (${reason}); using local cache`,
+  );
+  return fallback;
+}
+
+function cacheBudgetBytes(env, cacheRoot) {
+  const configured = env.O8_RELEASE_BUILD_CACHE_MAX_BYTES?.trim();
+  if (configured) {
+    const parsed = Number(configured);
+    if (!Number.isSafeInteger(parsed) || parsed < 0) {
+      throw new Error('O8_RELEASE_BUILD_CACHE_MAX_BYTES must be a non-negative integer');
+    }
+    return parsed;
+  }
+  const configuredRoot = env.O8_RELEASE_BUILD_CACHE_DIR?.trim()
+    ? resolve(env.O8_RELEASE_BUILD_CACHE_DIR.trim())
+    : null;
+  return configuredRoot === cacheRoot && externalVolumeRoot(cacheRoot, env)
+    ? EXTERNAL_CACHE_BUDGET_BYTES
+    : LOCAL_CACHE_BUDGET_BYTES;
+}
+
+function operationCacheRoot(options) {
+  const env = options.env ?? process.env;
+  if (env.O8_RELEASE_BUILD_CACHE_DIR?.trim()) return resolveReleaseBuildCacheRoot(env);
+  return options.cacheRoot ?? resolveReleaseBuildCacheRoot(env);
 }
 
 export function collectReleaseBuildCacheIdentity(root, phase, options = {}) {
@@ -386,7 +450,7 @@ export async function restoreReleaseBuildCache(root, phase, options = {}) {
     return { phase, status: 'bypass', reason: 'disabled', durationMs: Date.now() - started };
   }
   const identity = options.identity ?? collectReleaseBuildCacheIdentity(root, phase, options);
-  const cacheRoot = options.cacheRoot ?? resolveReleaseBuildCacheRoot(options.env);
+  const cacheRoot = operationCacheRoot(options);
   if (identity.source.worktreeClean === false) {
     return { phase, status: 'bypass', reason: 'dirty_worktree', durationMs: Date.now() - started };
   }
@@ -493,13 +557,63 @@ function pruneCompatibilityDirectories(cacheRoot, phase, keepCompatibility, proj
   }
 }
 
+function directoryUsage(path, root = path) {
+  const metadata = lstatSync(path);
+  if (metadata.isSymbolicLink()) {
+    throw new Error(`release cache budget refused symbolic link: ${relative(root, path) || '.'}`);
+  }
+  if (metadata.isFile()) return { bytes: metadata.size, oldestMtimeMs: metadata.mtimeMs };
+  if (!metadata.isDirectory()) return { bytes: 0, oldestMtimeMs: metadata.mtimeMs };
+  let bytes = 0;
+  let oldestMtimeMs = metadata.mtimeMs;
+  for (const name of readdirSync(path).sort()) {
+    const usage = directoryUsage(join(path, name), root);
+    bytes += usage.bytes;
+    oldestMtimeMs = Math.min(oldestMtimeMs, usage.oldestMtimeMs);
+  }
+  return { bytes, oldestMtimeMs };
+}
+
+function pruneCacheToBudget(cacheRoot, budgetBytes, projectRoot) {
+  const entriesRoot = join(cacheRoot, 'entries');
+  if (!existsSync(entriesRoot)) return { removedBytes: 0, remainingBytes: 0, removedEntries: 0 };
+  assertOutsideProjectNodeModules(entriesRoot, projectRoot);
+  const candidates = [];
+  for (const phase of readdirSync(entriesRoot).sort()) {
+    const phaseRoot = join(entriesRoot, phase);
+    const phaseMetadata = lstatSync(phaseRoot);
+    if (phaseMetadata.isSymbolicLink()) {
+      throw new Error(`release cache budget refused symbolic link: ${relative(entriesRoot, phaseRoot)}`);
+    }
+    if (!phaseMetadata.isDirectory()) continue;
+    for (const name of readdirSync(phaseRoot).sort()) {
+      const path = join(phaseRoot, name);
+      const usage = directoryUsage(path, entriesRoot);
+      candidates.push({ path, relativePath: relative(entriesRoot, path), ...usage });
+    }
+  }
+  let remainingBytes = candidates.reduce((sum, entry) => sum + entry.bytes, 0);
+  let removedBytes = 0;
+  let removedEntries = 0;
+  candidates.sort((left, right) => left.oldestMtimeMs - right.oldestMtimeMs
+    || left.relativePath.localeCompare(right.relativePath));
+  for (const entry of candidates) {
+    if (remainingBytes <= budgetBytes) break;
+    removeCachePath(entry.path, { recursive: true, force: true }, projectRoot);
+    remainingBytes -= entry.bytes;
+    removedBytes += entry.bytes;
+    removedEntries += 1;
+  }
+  return { removedBytes, remainingBytes, removedEntries };
+}
+
 export async function captureReleaseBuildCache(root, phase, options = {}) {
   const started = Date.now();
   if ((options.env ?? process.env).O8_RELEASE_BUILD_CACHE === 'off') {
     return { phase, status: 'bypass', reason: 'disabled', durationMs: Date.now() - started };
   }
   const identity = options.identity ?? collectReleaseBuildCacheIdentity(root, phase, options);
-  const cacheRoot = options.cacheRoot ?? resolveReleaseBuildCacheRoot(options.env);
+  const cacheRoot = operationCacheRoot(options);
   if (identity.source.worktreeClean === false) {
     return { phase, status: 'bypass', reason: 'dirty_worktree', durationMs: Date.now() - started };
   }
@@ -560,6 +674,14 @@ export async function captureReleaseBuildCache(root, phase, options = {}) {
     renameCachePath(temporaryManifest, finalManifestPath, root);
     pruneEntries(directory, identity.entrySha256, root);
     pruneCompatibilityDirectories(cacheRoot, phase, identity.compatibilitySha256, root);
+    const pruned = pruneCacheToBudget(
+      cacheRoot,
+      cacheBudgetBytes(options.env ?? process.env, cacheRoot),
+      root,
+    );
+    if (pruned.removedEntries > 0) {
+      console.log(`[release-cache] budget pruned=${pruned.removedEntries} bytes=${pruned.removedBytes}`);
+    }
     return {
       phase,
       status: 'captured',
@@ -630,6 +752,7 @@ export const releaseBuildCacheInternals = {
   collectWebEnvironmentFiles,
   normalizeArchivePath,
   pathAllowed,
+  pruneCacheToBudget,
   sha256File,
   stableJson,
 };
