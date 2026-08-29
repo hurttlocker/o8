@@ -23,6 +23,7 @@ import { connectTerminalClients } from './terminal-workload/ws-client.mjs';
 import { summarizeSamples } from './terminal-workload/statistics.mjs';
 import { assertTerminalWorkloadBudgets } from './terminal-workload/budgets.mjs';
 import { ensureVisibleTerminal } from './terminal-workload/browser-state.mjs';
+import { classifyKeystrokeTimeout } from './terminal-workload/keystroke-measurement.mjs';
 
 const ROOT = process.cwd();
 
@@ -333,7 +334,7 @@ async function readPerformance(page, observationMs) {
   }, observationMs);
 }
 
-async function measureKeystrokeToPaint(page, sessionName, marker) {
+async function measureKeystrokeToPaint(page, deliveryClient, sessionName, marker) {
   const input = page.locator(`[data-o8-term-panel="${sessionName}"] .xterm-helper-textarea`);
   await input.focus();
   await page.waitForFunction((expectedSession) => {
@@ -341,20 +342,56 @@ async function measureKeystrokeToPaint(page, sessionName, marker) {
     return panel?.contains(document.activeElement) === true
       && document.activeElement?.classList.contains('xterm-helper-textarea') === true;
   }, sessionName, { timeout: 5000 });
-  const startedAt = await page.evaluate(() => performance.now());
+  deliveryClient.watchTextArrival(sessionName, marker);
+  await page.evaluate(({ targetSession, targetMarker }) => {
+    window.__o8TerminalWriteStats?.sessions[targetSession]?.watchText(targetMarker);
+  }, { targetSession: sessionName, targetMarker: marker });
+  const started = await page.evaluate(() => ({ performanceAt: performance.now(), epochMs: Date.now() }));
   await page.keyboard.type(marker);
   await page.keyboard.press('Enter');
+  let observedAt = null;
+  let timedOut = false;
   try {
     await page.waitForFunction(({ targetSession, targetMarker }) => {
       const session = window.__o8TerminalWriteStats?.sessions[targetSession];
-      return session?.readText(80).includes(targetMarker) === true;
+      return session?.readText(1000).includes(targetMarker) === true;
     }, { targetSession: sessionName, targetMarker: marker }, { polling: 'raf', timeout: 10000 });
-    const paintedAt = await page.evaluate(() => performance.now());
-    return { elapsedMs: paintedAt - startedAt, timedOut: false };
+    observedAt = await page.evaluate(() => performance.now());
   } catch (error) {
     if (!(error instanceof Error) || !error.message.includes('Timeout')) throw error;
-    return { elapsedMs: 10000, timedOut: true };
+    timedOut = true;
   }
+  const classifiedAt = await page.evaluate(() => performance.now());
+  const panelWatch = await page.evaluate(({ targetSession, targetMarker }) => (
+    window.__o8TerminalWriteStats?.sessions[targetSession]?.textWatch(targetMarker) ?? null
+  ), { targetSession: sessionName, targetMarker: marker });
+  const auxWatch = deliveryClient.textArrival(sessionName, marker);
+  const keystrokeTimeoutClass = timedOut
+    ? classifyKeystrokeTimeout({
+      auxDeliveredAt: auxWatch?.receivedAt ?? null,
+      panelDeliveredAt: panelWatch?.deliveredAt ?? null,
+      panelPaintedAt: panelWatch?.paintedAt ?? null,
+    })
+    : null;
+  await page.evaluate(({ targetSession, targetMarker }) => {
+    window.__o8TerminalWriteStats?.sessions[targetSession]?.unwatchText(targetMarker);
+  }, { targetSession: sessionName, targetMarker: marker });
+  deliveryClient.unwatchTextArrival(sessionName, marker);
+  return {
+    marker,
+    elapsedMs: timedOut ? 10000 : observedAt - started.performanceAt,
+    timedOut,
+    keystrokeTimeoutClass,
+    timestamps: {
+      inputAt: round(started.performanceAt),
+      inputEpochMs: started.epochMs,
+      auxDeliveredAtEpochMs: auxWatch?.receivedAt ?? null,
+      panelDeliveredAt: round(panelWatch?.deliveredAt),
+      panelPaintedAt: round(panelWatch?.paintedAt),
+      observedAt: round(observedAt),
+      classifiedAt: round(classifiedAt),
+    },
+  };
 }
 
 async function browserTerminalSize(page, sessionName) {
@@ -507,8 +544,16 @@ async function selectTabAndMeasure(page, tab) {
   }, { sessionName: tab.sessionName, tabId: tab.id }, { polling: 'raf', timeout: 10000 });
   const visibleAt = await page.evaluate(() => performance.now());
   const grid = await waitForSharedTerminalGrid(page, tab.sessionName);
+  const gridMatchedAt = await page.evaluate(() => performance.now());
   const correct = await waitForCorrectTerminalScreen(page, tab.sessionName, grid, startedAt);
-  return { revealMs: visibleAt - startedAt, grid, ...correct };
+  const gridMatchedMs = gridMatchedAt - startedAt;
+  return {
+    revealMs: visibleAt - startedAt,
+    grid,
+    gridMatchedMs,
+    ...correct,
+    firstCorrectFrameAfterGridMs: correct.firstCorrectFrameMs - gridMatchedMs,
+  };
 }
 
 function normalizeTerminalText(value) {
@@ -967,12 +1012,20 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
     for (let index = 0; index < 3; index += 1) {
       visibleTarget = await ensureVisibleTerminal(page, seeded.tabs);
       const marker = `O8K_${sampleSeed}_${index}`;
-      keystrokeToPaint.push(await measureKeystrokeToPaint(page, visibleTarget.tab.sessionName, marker));
+      const targetIndex = seeded.tabs.findIndex((tab) => tab.sessionName === visibleTarget.tab.sessionName);
+      keystrokeToPaint.push(await measureKeystrokeToPaint(
+        page,
+        clients[targetIndex],
+        visibleTarget.tab.sessionName,
+        marker,
+      ));
       await sleep(100);
     }
 
     const revealMs = [];
+    const gridMatchedMs = [];
     const firstCorrectFrameMs = [];
+    const firstCorrectFrameAfterGridMs = [];
     const correctness = { failures: 0, timeouts: 0, alternateScreenOracleMatches: 0 };
     let revealAvailability = 'not-applicable-single-terminal';
     const mountedHidden = seeded.tabs.find((tab) => (
@@ -994,7 +1047,9 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
       }
       const reveal = await selectTabAndMeasure(page, revealTarget);
       revealMs.push(round(reveal.revealMs));
+      gridMatchedMs.push(round(reveal.gridMatchedMs));
       firstCorrectFrameMs.push(round(reveal.firstCorrectFrameMs));
+      firstCorrectFrameAfterGridMs.push(round(reveal.firstCorrectFrameAfterGridMs));
       const postRevealGrid = await waitForSharedTerminalGrid(page, revealTarget.sessionName);
       const tmuxScreen = terminalScreenOracle(captureTmuxText(revealTarget.sessionName));
       const browserText = normalizeTerminalText(await panelText(
@@ -1099,9 +1154,12 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
       latency: {
         revealAvailability,
         revealMs,
+        gridMatchedMs,
         firstCorrectFrameMs,
+        firstCorrectFrameAfterGridMs,
         keystrokeToPaintMs: keystrokeToPaint.map((result) => round(result.elapsedMs)),
         keystrokeToPaintTimedOut: keystrokeToPaint.map((result) => result.timedOut),
+        keystrokeMeasurements: keystrokeToPaint,
         keystrokeToPaintTimeoutMs: 10000,
       },
       browser: browserSummary,

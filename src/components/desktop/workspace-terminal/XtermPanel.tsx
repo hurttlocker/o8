@@ -10,8 +10,10 @@ import { retainInlineTerminalImages, TERMINAL_SCROLLBACK_LINES } from '@/lib/ter
 import { ClientTerminalHiddenBuffer } from '@/components/desktop/workspace-terminal/terminal-hidden-buffer';
 import { recordTerminalDiagnostic } from '@/components/desktop/workspace-terminal/terminal-diagnostics';
 import {
+  recordTerminalBenchDelivery,
   recordTerminalBenchDimensions,
   recordTerminalBenchEvent,
+  recordTerminalBenchPaint,
   recordTerminalBenchRender,
   recordTerminalBenchVisibility,
   recordTerminalBenchWrite,
@@ -249,6 +251,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
         const decodeMs = performance.now() - decodeStartedAt;
         const visibleAtWrite = visibleRef.current;
         const sessionNameAtWrite = tmuxSessionRef.current;
+        recordTerminalBenchDelivery(sessionNameAtWrite, bytes);
         if (!visibleAtWrite || awaitingVisibilityRef.current) {
           queueHiddenBytes(bytes);
           return;
@@ -499,6 +502,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
         const renderDisposable = terminalBenchEnabled()
           ? term.onRender(({ start, end }: { start: number; end: number }) => {
             recordTerminalBenchRender(tmuxSession, visibleRef.current, start, end);
+            recordTerminalBenchPaint(tmuxSession, () => readTerminalText(term, 1000));
           })
           : null;
         term.onData((data) => {

@@ -30,7 +30,11 @@ export function summarizeSamples(samples) {
       hiddenWriteCallsPerSecondPerPanel: distribution(group.map((sample) => sample.browser.hiddenWriteCallsPerSecondPerPanel)),
       longTaskMsPerMinute: distribution(group.map((sample) => sample.performance.longTaskMsPerMinute)),
       revealMs: distribution(group.flatMap((sample) => sample.latency.revealMs)),
+      gridMatchedMs: distribution(group.flatMap((sample) => sample.latency.gridMatchedMs ?? [])),
       firstCorrectFrameMs: distribution(group.flatMap((sample) => sample.latency.firstCorrectFrameMs)),
+      firstCorrectFrameAfterGridMs: distribution(group.flatMap((sample) => (
+        sample.latency.firstCorrectFrameAfterGridMs ?? []
+      ))),
       keystrokeToPaintMs: distribution(group.flatMap((sample) => sample.latency.keystrokeToPaintMs)),
       keystrokeToPaintTimeouts: group.reduce((total, sample) => (
         total + sample.latency.keystrokeToPaintTimedOut.filter(Boolean).length

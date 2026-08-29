@@ -9,6 +9,7 @@ export class TerminalWorkloadClient {
     this.frames = [];
     this.textBySession = new Map();
     this.deliveryBySession = new Map();
+    this.textArrivalWatches = new Map();
     this.benchStatsRequests = 0;
   }
 
@@ -30,6 +31,11 @@ export class TerminalWorkloadClient {
           this.deliveryBySession.set(sessionName, delivery);
           const next = `${this.textBySession.get(sessionName) ?? ''}${decoded.toString('utf8')}`;
           this.textBySession.set(sessionName, next.slice(-131072));
+          for (const watch of this.textArrivalWatches.values()) {
+            if (watch.sessionName === sessionName && watch.receivedAt === null && next.includes(watch.marker)) {
+              watch.receivedAt = Date.now();
+            }
+          }
         }
       }
     });
@@ -43,6 +49,20 @@ export class TerminalWorkloadClient {
 
   terminalDelivery(sessionName) {
     return { ...(this.deliveryBySession.get(sessionName) ?? { frames: 0, bytes: 0 }) };
+  }
+
+  watchTextArrival(sessionName, marker) {
+    const key = `${sessionName}\u0000${marker}`;
+    this.textArrivalWatches.set(key, { sessionName, marker, receivedAt: null });
+  }
+
+  textArrival(sessionName, marker) {
+    const watch = this.textArrivalWatches.get(`${sessionName}\u0000${marker}`);
+    return watch ? { receivedAt: watch.receivedAt } : null;
+  }
+
+  unwatchTextArrival(sessionName, marker) {
+    this.textArrivalWatches.delete(`${sessionName}\u0000${marker}`);
   }
 
   send(message) {
