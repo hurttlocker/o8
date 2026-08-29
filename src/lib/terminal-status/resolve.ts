@@ -1,8 +1,7 @@
 import type { ApprovalRecord } from '@/lib/approvals/types';
 import type { AgentStatus } from '@/lib/fleet/types';
 import type { Lane, LaneEvent, LaneStatus } from '@/lib/lane/types';
-import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
-import type { RuntimeSession, RuntimeSessionStatus } from '@/lib/runtimes/types';
+import type { RuntimeId, RuntimeSession, RuntimeSessionStatus } from '@/lib/runtimes/types';
 import type { OwnedRunRecord, OwnedRunOutcome } from '@/lib/runtimes/shared/owned-session/types';
 
 export type TerminalStatusState =
@@ -27,7 +26,7 @@ export interface TerminalStatusEvidenceItem {
 
 export interface TerminalStatusEvidence {
   sessionId: string;
-  runtime: OrchestratorRuntime;
+  runtime: RuntimeId;
   state: TerminalStatusState;
   authority: TerminalStatusAuthority;
   observedAt: string;
@@ -38,7 +37,7 @@ export interface TerminalStatusEvidence {
 
 export interface TerminalRuntimeSessionEvidence {
   sessionKey: string;
-  runtimeId: OrchestratorRuntime;
+  runtimeId: RuntimeId;
   status: RuntimeSessionStatus;
   observedAt: string;
   lifecycle?: Partial<NonNullable<RuntimeSession['lifecycle']>>;
@@ -59,7 +58,7 @@ export interface TerminalReviewQueueEvidence {
 
 export interface RawTerminalLifecycleEvidence {
   sessionId: string;
-  runtime: OrchestratorRuntime;
+  runtime: RuntimeId;
   state: TerminalStatusState | 'active' | 'completed' | 'killed' | 'stalled';
   observedAt: string;
   exitCode?: number;
@@ -258,7 +257,7 @@ export function resolveTerminalStatusEvidence(
   const sessionId = runtimeSession?.sessionKey ?? lane?.sessionKey ?? rawLifecycle?.sessionId;
   const runtime = runtimeSession?.runtimeId ?? lane?.runtime ?? rawLifecycle?.runtime;
   if (!sessionId || !runtime) {
-    throw new Error('Terminal status evidence requires an existing session id and orchestrator runtime.');
+    throw new Error('Terminal status evidence requires an existing session id and registered runtime.');
   }
 
   const runtimeCandidates: StatusCandidate[] = [];

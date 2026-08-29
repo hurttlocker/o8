@@ -46,7 +46,7 @@ import type { TypedRow } from '@/lib/cortex/qa/types';
 const runtimeInventoryMock = vi.hoisted(() => ({
   agents: [] as Array<{
     sessionKey: string;
-    runtime: 'codex' | 'claude-code';
+    runtime: string;
     status: string;
     currentTask?: string | null;
     lastEventAt?: string | null;
@@ -56,6 +56,7 @@ const runtimeInventoryMock = vi.hoisted(() => ({
       lifecycle?: { availability?: 'awaiting-thread' | 'running' | 'ready-for-resume' };
     };
   }>,
+  requests: [] as Array<{ fresh?: boolean } | undefined>,
 }));
 
 const authDetectMock = vi.hoisted(() => {
@@ -88,7 +89,10 @@ vi.mock('@/lib/realtime/publisher', () => ({
 }));
 
 vi.mock('@/lib/runtime/inventory', () => ({
-  getRuntimeInventorySnapshot: vi.fn(async () => ({ agents: runtimeInventoryMock.agents })),
+  getRuntimeInventorySnapshot: vi.fn(async (options?: { fresh?: boolean }) => {
+    runtimeInventoryMock.requests.push(options);
+    return { agents: runtimeInventoryMock.agents };
+  }),
 }));
 
 vi.mock('@/lib/runtimes/shared/auth-detect', () => ({
@@ -170,6 +174,7 @@ const {
 
 afterEach(() => {
   runtimeInventoryMock.agents = [];
+  runtimeInventoryMock.requests = [];
   authDetectMock.unauthRuntime = null;
   resetRecallCacheForTests();
   rmSync(join(dataDir, 'operator-defaults.json'), { force: true });
@@ -798,6 +803,37 @@ describe('seam E — orchestrator state projects one terminal status authority',
     expect(agent.statusEvidence.evidence).toContainEqual({
       source: `lane:${persistedLane.id}.status`,
       value: 'running',
+    });
+    expect(runtimeInventoryMock.requests.at(-1)).toEqual({ fresh: false });
+  });
+
+  it('real state GET keeps a non-orchestrator cloud session with TerminalStatusEvidence', async () => {
+    const surfaceId = 'cloud-owned:seam-E-status-evidence';
+    runtimeInventoryMock.agents = [{
+      sessionKey: surfaceId,
+      runtime: 'cloud',
+      status: 'running',
+      currentTask: 'Running on registered cloud worker',
+      lastEventAt: '2026-08-29T12:05:00.000Z',
+      runtimeSurface: {
+        ownership: 'owned',
+        capabilities: { sendInput: false, interrupt: true },
+        lifecycle: { availability: 'running' },
+      },
+    }];
+
+    const response = await stateRoute.GET(operatorGet(url));
+    expect(response.status).toBe(200);
+    const json = await response.json();
+    const agent = json.agents.find((candidate: { sessionKey: string }) => candidate.sessionKey === surfaceId);
+
+    expect(agent).toBeTruthy();
+    expect(agent.runtime).toBe('cloud');
+    expect(agent.statusEvidence).toMatchObject({
+      sessionId: surfaceId,
+      runtime: 'cloud',
+      state: 'working',
+      authority: 'runtime-event',
     });
   });
 

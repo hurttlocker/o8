@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   AgentRuntime,
+  RuntimeId,
   RuntimeSession,
 } from '@/lib/runtimes/types';
 
@@ -50,9 +51,16 @@ afterAll(() => {
   rmSync(testRoot, { recursive: true, force: true });
 });
 
-function runtime(id: 'gemini' | 'aider'): AgentRuntime {
+function runtime(id: RuntimeId): AgentRuntime {
   const cwd = join(testRoot, id);
   mkdirSync(cwd, { recursive: true });
+  const lastActivityAt = id === 'gemini'
+    ? '2026-07-24T12:00:02.000Z'
+    : id === 'aider'
+      ? '2026-07-24T12:00:01.000Z'
+      : id === 'cloud'
+        ? '2026-07-24T12:00:00.000Z'
+        : '2026-07-23T12:00:00.000Z';
   const session: RuntimeSession = {
     sessionKey: `${id}-owned:inventory-parity`,
     runtimeId: id,
@@ -67,9 +75,7 @@ function runtime(id: 'gemini' | 'aider'): AgentRuntime {
       canInterrupt: false,
       canReviewDiffs: true,
     },
-    lastActivityAt: new Date(
-      id === 'gemini' ? '2026-07-24T12:00:01.000Z' : '2026-07-24T12:00:00.000Z',
-    ),
+    lastActivityAt: new Date(lastActivityAt),
   };
 
   return {
@@ -96,15 +102,24 @@ function runtime(id: 'gemini' | 'aider'): AgentRuntime {
 
 describe('canonical runtime inventory discovery', () => {
   beforeEach(() => {
-    registryFixture.runtimes = [runtime('gemini'), runtime('aider')];
+    registryFixture.runtimes = [runtime('gemini'), runtime('aider'), runtime('cloud')];
     invalidateRuntimeInventoryCache();
   });
 
   it('discovers owned sessions from every dispatchable registered adapter', async () => {
     const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
 
-    expect(snapshot.agents.map((agent) => agent.runtime)).toEqual(['gemini', 'aider']);
-    expect(snapshot.agents.map((agent) => agent.identityId)).toEqual(['gemini-identity', 'aider-identity']);
+    expect(snapshot.agents.map((agent) => agent.runtime)).toEqual(['gemini', 'aider', 'cloud']);
+    expect(snapshot.agents.map((agent) => agent.identityId)).toEqual([
+      'gemini-identity',
+      'aider-identity',
+      'cloud-identity',
+    ]);
+    expect(snapshot.agents.find((agent) => agent.runtime === 'cloud')?.statusEvidence).toMatchObject({
+      runtime: 'cloud',
+      authority: 'runtime-event',
+      state: 'working',
+    });
     expect(snapshot.meta.note).toBe('Showing every discovered dispatchable runtime surface.');
   });
 });

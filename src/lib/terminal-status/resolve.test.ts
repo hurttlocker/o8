@@ -72,6 +72,24 @@ describe('resolveTerminalStatusEvidence', () => {
     expect(resolved).toMatchObject({ authority: 'runtime-event', state });
   });
 
+  it('accepts a registered non-orchestrator cloud runtime session', () => {
+    const resolved = resolveTerminalStatusEvidence({
+      runtimeSession: {
+        sessionKey: 'cloud-owned:status-evidence',
+        runtimeId: 'cloud',
+        status: 'running',
+        observedAt,
+      },
+    });
+
+    expect(resolved).toMatchObject({
+      sessionId: 'cloud-owned:status-evidence',
+      runtime: 'cloud',
+      authority: 'runtime-event',
+      state: 'working',
+    });
+  });
+
   const laneCases = [
     ['idle', 'idle'],
     ['running', 'working'],

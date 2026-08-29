@@ -1,8 +1,7 @@
 import type { ApprovalRecord } from '@/lib/approvals/types';
 import type { AgentStatus, AgentSummary } from '@/lib/fleet/types';
 import type { Lane, LaneEvent } from '@/lib/lane/types';
-import { isOrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
-import type { RuntimeSessionStatus } from '@/lib/runtimes/types';
+import type { RuntimeId, RuntimeSessionStatus } from '@/lib/runtimes/types';
 import {
   agentStatusFromTerminalState,
   resolveTerminalStatusEvidence,
@@ -96,8 +95,7 @@ export function resolveAgentSummaryStatusEvidence(
   agent: AgentSummary,
   lane: Lane | undefined,
   context: OperatorStatusEvidenceContext = {},
-): TerminalStatusEvidence | undefined {
-  if (!isOrchestratorRuntime(agent.runtime)) return undefined;
+): TerminalStatusEvidence {
   const previous = agent.statusEvidence;
   const observedAt = observedAtForAgent(agent, lane);
   const laneEvents = lane ? context.laneEventsByLaneId?.get(lane.id) ?? [] : [];
@@ -110,7 +108,7 @@ export function resolveAgentSummaryStatusEvidence(
   const rawLifecycle = previous?.authority === 'raw-terminal'
     ? {
         sessionId: agent.sessionKey,
-        runtime: agent.runtime,
+        runtime: agent.runtime as RuntimeId,
         state: previous.state,
         observedAt: previous.observedAt,
       }
@@ -121,7 +119,7 @@ export function resolveAgentSummaryStatusEvidence(
     ? undefined
     : {
         sessionKey: agent.sessionKey,
-        runtimeId: agent.runtime,
+        runtimeId: agent.runtime as RuntimeId,
         status: runtimeStatusFromAgent(agent.status),
         observedAt,
         lifecycle: agent.runtimeSurface?.lifecycle,
@@ -153,7 +151,6 @@ export function resolveAgentSummaryStatuses(
       laneBySession.get(agent.sessionKey),
       context,
     );
-    if (!statusEvidence) return agent;
     return {
       ...agent,
       status: agentStatusFromTerminalState(statusEvidence.state, agent.status),
@@ -193,11 +190,10 @@ export function buildOperatorStatusAgents(
     ? sessions.filter((session) => session.sessionKey === sessionKeyFilter)
     : sessions;
 
-  return filtered.flatMap((session) => {
+  return filtered.map((session) => {
     const lane = laneBySession.get(session.sessionKey);
     const statusEvidence = resolveAgentSummaryStatusEvidence(session, lane, context);
-    if (!statusEvidence) return [];
-    return [{
+    return {
       name: session.name || session.sessionKey,
       repo: repoFromWorkspace(lane?.repoPath || session.workspace),
       runtime: session.runtime || 'unknown',
@@ -211,7 +207,7 @@ export function buildOperatorStatusAgents(
       summary: statusEvidence.summary,
       observedAt: statusEvidence.observedAt,
       statusEvidence,
-    }];
+    };
   });
 }
 

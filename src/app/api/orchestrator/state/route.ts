@@ -65,13 +65,15 @@ function enrichMissionWithLanes(mission: OrchestratorMissionState): Orchestrator
 
 async function buildStateResponse(mission: OrchestratorMissionState): Promise<OrchestratorStateApiResponse> {
   const enriched = enrichMissionWithLanes(mission);
-  const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
+  // Desktop, mobile, MCP, and CLI poll this route; reuse the inventory TTL and
+  // bound lane history to sessions the response actually carries.
+  const snapshot = await getRuntimeInventorySnapshot({ fresh: false });
   const lanes = listLanes();
   const inventorySessionKeys = new Set((snapshot.agents ?? []).map((agent) => agent.sessionKey));
   const laneEventsByLaneId = new Map(
     lanes
       .filter((lane) => lane.sessionKey && inventorySessionKeys.has(lane.sessionKey))
-      .map((lane) => [lane.id, getLaneEvents(lane.id, 200)]),
+      .map((lane) => [lane.id, getLaneEvents(lane.id, 50)]),
   );
   const agents = resolveAgentSummaryStatuses(snapshot.agents ?? [], lanes, {
     laneEventsByLaneId,

@@ -12,7 +12,6 @@ import { readSessionTransformCatalog } from '@/lib/runtime/session-transform-cat
 import { invalidateProcessCwdSnapshot } from '@/lib/runtime/process-cwd-snapshot';
 import {
   isDispatchableRuntime,
-  isOrchestratorRuntime,
   ORCHESTRATOR_RUNTIMES,
 } from '@/lib/orchestrator/runtime-capabilities';
 import { getAllEvents, getLaneEvents, listLanes } from '@/lib/lane/registry';
@@ -278,16 +277,14 @@ function mapIdeGhostRuntimeTabToAgent(session: IdeRuntimeSessionDescriptor): Age
     : 'Idle';
   const parsedLastActivity = new Date(session.savedAt ?? Date.now()).getTime();
   const observedAt = new Date(Number.isNaN(parsedLastActivity) ? Date.now() : parsedLastActivity).toISOString();
-  const statusEvidence = isOrchestratorRuntime(session.runtimeId)
-    ? resolveTerminalStatusEvidence({
-        rawLifecycle: {
-          sessionId: session.sessionKey,
-          runtime: session.runtimeId,
-          state: session.liveSessionKey ? 'unknown' : 'idle',
-          observedAt,
-        },
-      })
-    : undefined;
+  const statusEvidence = resolveTerminalStatusEvidence({
+    rawLifecycle: {
+      sessionId: session.sessionKey,
+      runtime: session.runtimeId,
+      state: session.liveSessionKey ? 'unknown' : 'idle',
+      observedAt,
+    },
+  });
 
   return {
     id: session.sessionKey,
@@ -364,7 +361,6 @@ function selectRepoFallbackAgents(agents: AgentSummary[], existingSessionKeys: S
 
   for (const agent of agents) {
     if (existingSessionKeys.has(agent.sessionKey)) continue;
-    if (!isDispatchableRuntime(agent.runtime)) continue;
     if (!['running', 'reviewing', 'waiting'].includes(agent.status)) continue;
     // Only include IDE-owned sessions as fallbacks — discovered user-terminal
     // sessions shouldn't appear as phantom agents when the runtime restarts.
@@ -384,7 +380,7 @@ function selectRepoFallbackAgents(agents: AgentSummary[], existingSessionKeys: S
 
 async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
   const runtimes: AgentRuntime[] = getAllRuntimes()
-    .filter((runtime) => runtime.capabilities.discover && isDispatchableRuntime(runtime.id));
+    .filter((runtime) => runtime.capabilities.discover);
   const ideSessions = listIdeRuntimeSessions();
   const ideTabs = listIdeRuntimeTabs();
   const ideSessionByKey = new Map(ideSessions.map((session) => [session.liveSessionKey ?? session.sessionKey, session]));
@@ -454,8 +450,7 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
   }
 
   // resolveTerminalStatusEvidence is the single source for status precedence.
-  const resolvedDiscoveredAll = discoveredAll.flatMap(({ runtime, session }) => {
-    if (!isOrchestratorRuntime(runtime.id)) return [];
+  const resolvedDiscoveredAll = discoveredAll.map(({ runtime, session }) => {
     const debouncedStatus = debouncedSessionStatus(
       session.sessionKey,
       session.status,
@@ -469,14 +464,14 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
         lifecycle: session.lifecycle,
       },
     });
-    return [{
+    return {
       runtime,
       session: {
         ...session,
         status: runtimeSessionStatusFromTerminalState(statusEvidence.state, debouncedStatus),
       },
       statusEvidence,
-    }];
+    };
   });
   resolvedDiscoveredAll.sort((left, right) => (
     compareTerminalStatusEvidence(left.statusEvidence, right.statusEvidence)
@@ -494,7 +489,7 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
     // they're not in the IDE registry (orchestrator dispatch doesn't touch
     // the IDE workspace tabs) and not in the terminal-session registry
     // (orchestrator goes through the bridge terminal, not user PTY).
-    || (session.ownership === 'owned' && isDispatchableRuntime(session.runtimeId))
+    || session.ownership === 'owned'
   ));
 
   const agents = discovered.map(({ runtime, session, statusEvidence }) => (
