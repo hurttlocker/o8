@@ -113,10 +113,10 @@ export function normalizeLocalInferenceBaseUrl(raw: string): string {
   return raw.trim().replace(/\/+$/, '').replace(/\/v1$/i, '');
 }
 
-function parseOllamaInferenceModels(payload: unknown): string[] {
-  if (!payload || typeof payload !== 'object') return [];
+function parseOllamaInferenceModels(payload: unknown): string[] | null {
+  if (!payload || typeof payload !== 'object') return null;
   const models = (payload as { models?: unknown }).models;
-  if (!Array.isArray(models)) return [];
+  if (!Array.isArray(models)) return null;
 
   const names = models
     .map((entry) => {
@@ -133,10 +133,10 @@ function parseOllamaInferenceModels(payload: unknown): string[] {
   return Array.from(new Set(names));
 }
 
-function parseOpenAiInferenceModels(payload: unknown): string[] {
-  if (!payload || typeof payload !== 'object') return [];
+function parseOpenAiInferenceModels(payload: unknown): string[] | null {
+  if (!payload || typeof payload !== 'object') return null;
   const data = (payload as { data?: unknown }).data;
-  if (!Array.isArray(data)) return [];
+  if (!Array.isArray(data)) return null;
 
   const ids = data
     .map((entry) => {
@@ -153,7 +153,7 @@ function parseOpenAiInferenceModels(payload: unknown): string[] {
 async function probeLocalInferenceEndpoint(
   base: string,
   path: string,
-  parseModels: (payload: unknown) => string[],
+  parseModels: (payload: unknown) => string[] | null,
 ): Promise<LocalInferenceProbeResult | null> {
   try {
     const response = await fetch(`${base}${path}`, {
@@ -164,7 +164,8 @@ async function probeLocalInferenceEndpoint(
     if (!response.ok) return null;
 
     const payload = await response.json().catch(() => null);
-    return { running: true, models: parseModels(payload) };
+    const models = parseModels(payload);
+    return models === null ? null : { running: true, models };
   } catch {
     return null;
   }

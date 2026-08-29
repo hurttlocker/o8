@@ -150,6 +150,34 @@ describe('inference-route', () => {
       );
     });
 
+    it('falls back to OpenAI models when the tags response has an unrecognized schema', async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(jsonResponse(200, {}))
+        .mockResolvedValueOnce(jsonResponse(200, { data: [{ id: 'lmstudio-qwen' }] }));
+      vi.stubGlobal('fetch', fetchMock);
+
+      await expect(probeLocalInference('http://localhost:1234')).resolves.toEqual({
+        running: true,
+        models: ['lmstudio-qwen'],
+      });
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        2,
+        'http://localhost:1234/v1/models',
+        expect.objectContaining({ method: 'GET' }),
+      );
+    });
+
+    it('treats a valid empty tags list as live without falling back', async () => {
+      const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { models: [] }));
+      vi.stubGlobal('fetch', fetchMock);
+
+      await expect(probeLocalInference('http://localhost:11434')).resolves.toEqual({
+        running: true,
+        models: [],
+      });
+      expect(fetchMock).toHaveBeenCalledOnce();
+    });
+
     it('reports the endpoint as offline when neither model-list protocol responds', async () => {
       const fetchMock = vi.fn()
         .mockResolvedValueOnce(jsonResponse(503, { error: 'unavailable' }))
