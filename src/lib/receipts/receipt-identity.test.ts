@@ -1,4 +1,4 @@
-import { mkdtempSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -48,6 +48,16 @@ describe('receipt identity', () => {
 
     expect(identity.publicKeyB64).toBe(naclUtil.encodeBase64(winner.publicKey));
     expect(loadOrCreateReceiptIdentityAt(file).publicKeyB64).toBe(identity.publicKeyB64);
+  });
+
+  it('refuses to replace a malformed identity that already owns the trust-root path', () => {
+    const file = identityPath();
+    writeFileSync(file, 'malformed-receipt-identity\n', { mode: 0o600 });
+
+    expect(() => loadOrCreateReceiptIdentityAt(file)).toThrow(
+      `receipt identity exists but is unreadable; refusing to replace the trust root: ${file}`,
+    );
+    expect(readFileSync(file, 'utf8')).toBe('malformed-receipt-identity\n');
   });
 
   it('signs and verifies bytes with the receipt identity only', () => {

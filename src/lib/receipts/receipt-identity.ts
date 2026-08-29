@@ -73,9 +73,12 @@ export function loadOrCreateReceiptIdentityAt(
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
       const concurrent = readStoredSecret(identityPath);
       if (concurrent) return identityFromSecret(concurrent);
+      throw new Error(
+        `receipt identity exists but is unreadable; refusing to replace the trust root: ${identityPath}`,
+        { cause: error },
+      );
     }
-    writeFileSync(identityPath, encoded, { mode: 0o600 });
-    return identityFromSecret(keyPair.secretKey);
+    throw error;
   }
 }
 

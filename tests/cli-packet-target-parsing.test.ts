@@ -3,6 +3,8 @@ import { CliError, EXIT } from '../cli/src/api';
 import { parseCaptureArgs, runPacketCapture } from '../cli/src/commands/packet/capture';
 import { parsePacketCommitMessage } from '../cli/src/commands/packet/commit';
 import {
+  OPERATOR_PACKET_COMMAND_LINES,
+  OPERATOR_PACKET_SUBCOMMANDS,
   PACKET_SUBCOMMANDS,
   packetGroupUsage,
   packetSubcommandHint,
@@ -151,19 +153,25 @@ describe('packet CLI target parsing', () => {
 });
 
 describe('packet CLI help', () => {
-  it('prints packet-group help with the complete packet subcommand list', () => {
+  it('keeps operator-only receipt commands out of worker packet-group help', () => {
     const output = packetGroupUsage();
 
     expect(output).toContain('usage: o8 packet <subcommand> [flags]');
     for (const subcommand of PACKET_SUBCOMMANDS) {
       expect(output).toContain(`packet ${subcommand}`);
     }
+    for (const subcommand of OPERATOR_PACKET_SUBCOMMANDS) {
+      expect(output).not.toContain(`packet ${subcommand}`);
+      expect(OPERATOR_PACKET_COMMAND_LINES).toContain(`packet ${subcommand}`);
+    }
+    expect(OPERATOR_PACKET_COMMAND_LINES).toContain('operator only');
     expect(output).not.toContain('CLI version + connected server version');
   });
 
   it('names valid packet subcommands in the unknown-subcommand hint', () => {
     const hint = packetSubcommandHint();
-    expect(hint).toContain('Valid packet subcommands:');
+    expect(hint).toContain('Valid worker packet subcommands:');
+    expect(hint).toContain('Operator-only packet subcommands: receipt, receipts');
     expect(hint).toContain('rerun');
     expect(hint).toContain('steer');
     expect(hint).toContain('merge-preview');

@@ -25,6 +25,7 @@ const receiptPath = path.join(testHome, 'packet-receipt.json');
 const tamperedPath = path.join(testHome, 'packet-receipt-tampered.json');
 const wrongKeyPath = path.join(testHome, 'packet-receipt-wrong-key.json');
 const token = 'packet-receipt-real-path-token';
+const workerToken = 'packet-receipt-worker-token';
 const packetId = 'pkt-receipt-real-path';
 const originalHome = process.env.HOME;
 const originalO8DataDir = process.env.O8_DATA_DIR;
@@ -33,6 +34,7 @@ const originalCortexDataDir = process.env.CORTEX_IDE_DATA_DIR;
 mkdirSync(dataDir, { recursive: true });
 mkdirSync(verifierDataDir, { recursive: true });
 writeFileSync(path.join(dataDir, 'ws-token'), `${token}\n`, 'utf8');
+writeFileSync(path.join(dataDir, 'worker-token'), `${workerToken}\n`, 'utf8');
 process.env.HOME = testHome;
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
@@ -47,12 +49,14 @@ const { canonicalJson } = await import('@/lib/receipts/canonical');
 const {
   loadOrCreateReceiptIdentityAt,
   signReceiptBytes,
+  verifyReceiptBytes,
 } = await import('@/lib/receipts/receipt-identity');
 const { setApiBase } = await import('@/lib/mcp/operator-handlers/shared');
 const { handleOperatorMcpMessage } = await import('@/lib/mcp/operator-mcp-host');
 
 let apiServer: Server | null = null;
 let apiPort = 0;
+let publishedKey: { publicKey: string; keyId: string } | null = null;
 
 function git(args: string[]): string {
   return execFileSync('git', args, {
@@ -92,6 +96,31 @@ function runCli(
   });
 }
 
+function expectNoLocalPaths(serialized: string): void {
+  expect(serialized).not.toContain(testHome);
+  expect(serialized).not.toContain(dataDir);
+  expect(serialized).not.toContain(repoPath);
+}
+
+function receiptRouteRequest(method: 'GET' | 'POST', bearer: string): Promise<Response> {
+  const url = method === 'GET'
+    ? `http://127.0.0.1:${apiPort}/api/orchestrator/receipts?packetId=${packetId}`
+    : `http://127.0.0.1:${apiPort}/api/orchestrator/receipts`;
+  return fetch(url, {
+    method,
+    headers: {
+      authorization: `Bearer ${bearer}`,
+      ...(method === 'POST' ? { 'content-type': 'application/json' } : {}),
+    },
+    body: method === 'POST' ? JSON.stringify({ packetId }) : undefined,
+  });
+}
+
+function requirePublishedKey(): { publicKey: string; keyId: string } {
+  if (!publishedKey) throw new Error('The receipt public key fixture was not created.');
+  return publishedKey;
+}
+
 async function readBody(request: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const chunk of request) chunks.push(Buffer.from(chunk));
@@ -119,6 +148,7 @@ beforeAll(async () => {
   execFileSync('git', ['init', '--initial-branch=main', repoPath], { cwd: testHome, stdio: 'pipe' });
   git(['config', 'user.name', 'o8-test']);
   git(['config', 'user.email', 'o8@example.test']);
+  git(['remote', 'add', 'origin', 'https://fixture-user:fixture-secret@example.test/operator/receipt-fixture.git']);
   writeFileSync(path.join(repoPath, 'receipt.txt'), 'signed packet receipt\n');
   git(['add', 'receipt.txt']);
   git(['commit', '-m', 'receipt fixture']);
@@ -212,8 +242,28 @@ afterAll(async () => {
   else process.env.CORTEX_IDE_DATA_DIR = originalCortexDataDir;
 });
 
-describe('packet receipt CLI real path', () => {
-  it('creates through CLI and MCP, then verifies offline and rejects tampering or a wrong key', async () => {
+describe.sequential('packet receipt CLI real path', () => {
+  it('enforces operator-only routes, omits local paths, and verifies offline', async () => {
+    expect((await receiptRouteRequest('GET', workerToken)).status).toBe(403);
+    expect((await receiptRouteRequest('POST', workerToken)).status).toBe(403);
+
+    const operatorPost = await receiptRouteRequest('POST', token);
+    expect(operatorPost.status).toBe(200);
+    const operatorPostPayload = await operatorPost.json() as {
+      ok: boolean;
+      result: { receipt: PacketReceipt };
+    };
+    expect(operatorPostPayload).toMatchObject({
+      ok: true,
+      result: { receipt: { packetId, disposition: { kind: 'merged' } } },
+    });
+    const operatorGet = await receiptRouteRequest('GET', token);
+    expect(operatorGet.status).toBe(200);
+    expect(await operatorGet.json()).toMatchObject({
+      ok: true,
+      result: { packetId, count: 1 },
+    });
+
     const mcpCreate = await handleOperatorMcpMessage({
       jsonrpc: '2.0',
       id: 1,
@@ -231,11 +281,20 @@ describe('packet receipt CLI real path', () => {
       mergeCommit: git(['rev-parse', 'HEAD']),
       tree: git(['rev-parse', 'HEAD^{tree}']),
     });
+    expect(mcpCreatePayload.result.receipt.repo).toEqual({
+      name: 'repo',
+      remote: 'example.test/operator/receipt-fixture',
+      baseBranch: 'main',
+    });
+    expect('path' in mcpCreatePayload.result.receipt.repo).toBe(false);
+    expectNoLocalPaths(JSON.stringify(mcpCreatePayload.result.receipt));
+    expectNoLocalPaths(readFileSync(path.join(dataDir, mcpCreatePayload.result.relPath), 'utf8'));
     expect(path.isAbsolute(mcpCreatePayload.result.relPath)).toBe(false);
 
     const showKeyOnline = await runCli(['verify', '--show-key']);
     expect(showKeyOnline.exitCode, showKeyOnline.stderr).toBe(0);
     const keyPayload = JSON.parse(showKeyOnline.stdout) as { publicKey: string; keyId: string };
+    publishedKey = keyPayload;
     expect(keyPayload.keyId).toBe(mcpCreatePayload.result.receipt.keyId);
 
     const mcpVerify = await handleOperatorMcpMessage({
@@ -268,6 +327,7 @@ describe('packet receipt CLI real path', () => {
       receipt: { keyId: keyPayload.keyId, disposition: { kind: 'merged' } },
     });
     expect(existsSync(receiptPath)).toBe(true);
+    expectNoLocalPaths(readFileSync(receiptPath, 'utf8'));
 
     const listed = await runCli(['packet', 'receipts', packetId]);
     expect(listed.exitCode, listed.stderr).toBe(0);
@@ -293,6 +353,20 @@ describe('packet receipt CLI real path', () => {
       repository: { checked: true, commitExists: true, treeMatches: true },
     });
 
+    const showKeyOffline = await runCli(
+      ['verify', '--show-key'],
+      { home: verifierHome, data: verifierDataDir },
+    );
+    expect(showKeyOffline.exitCode, showKeyOffline.stderr).toBe(0);
+    expect(JSON.parse(showKeyOffline.stdout)).toEqual({
+      schema: 'o8/cli/receipt.key/v1',
+      keyId: keyPayload.keyId,
+      publicKey: keyPayload.publicKey,
+    });
+  }, 30_000);
+
+  it('rejects a receipt after a signed field is tampered with', async () => {
+    const keyPayload = requirePublishedKey();
     const original = JSON.parse(readFileSync(receiptPath, 'utf8')) as PacketReceipt;
     writeFileSync(tamperedPath, `${JSON.stringify({ ...original, packetTitle: `${original.packetTitle}!` })}\n`);
     const tampered = await runCli(
@@ -305,18 +379,25 @@ describe('packet receipt CLI real path', () => {
       signatureValid: false,
       errors: [expect.stringContaining('signature is invalid')],
     });
+  });
 
+  it('rejects a valid receipt signature from a different trust root', async () => {
+    const keyPayload = requirePublishedKey();
+    const original = JSON.parse(readFileSync(receiptPath, 'utf8')) as PacketReceipt;
     const otherIdentity = loadOrCreateReceiptIdentityAt(path.join(testHome, 'other-receipt.key'));
     const unsigned = { ...original };
     delete (unsigned as { signature?: string }).signature;
     const wrongKeyUnsigned = { ...unsigned, keyId: otherIdentity.keyId };
+    const canonicalBytes = new TextEncoder().encode(canonicalJson(wrongKeyUnsigned));
     const wrongKeyReceipt: PacketReceipt = {
       ...wrongKeyUnsigned,
-      signature: signReceiptBytes(
-        new TextEncoder().encode(canonicalJson(wrongKeyUnsigned)),
-        otherIdentity.secretKey,
-      ),
+      signature: signReceiptBytes(canonicalBytes, otherIdentity.secretKey),
     };
+    expect(verifyReceiptBytes(
+      canonicalBytes,
+      wrongKeyReceipt.signature,
+      otherIdentity.publicKeyB64,
+    )).toBe(true);
     writeFileSync(wrongKeyPath, `${JSON.stringify(wrongKeyReceipt)}\n`);
     const wrongKey = await runCli(
       ['verify', wrongKeyPath, '--key', keyPayload.publicKey],
@@ -325,19 +406,9 @@ describe('packet receipt CLI real path', () => {
     expect(wrongKey.exitCode).toBe(5);
     expect(JSON.parse(wrongKey.stdout)).toMatchObject({
       ok: false,
+      signatureValid: false,
       keyIdMatches: false,
       errors: [expect.stringContaining('does not match receipt keyId')],
     });
-
-    const showKeyOffline = await runCli(
-      ['verify', '--show-key'],
-      { home: verifierHome, data: verifierDataDir },
-    );
-    expect(showKeyOffline.exitCode, showKeyOffline.stderr).toBe(0);
-    expect(JSON.parse(showKeyOffline.stdout)).toEqual({
-      schema: 'o8/cli/receipt.key/v1',
-      keyId: keyPayload.keyId,
-      publicKey: keyPayload.publicKey,
-    });
-  }, 30_000);
+  });
 });

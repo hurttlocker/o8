@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 
 import { listApprovalsForContext } from '@/lib/approvals/store';
 import {
@@ -179,7 +180,7 @@ async function buildPacketReceipt(input: {
     packetTitle: input.packet.title,
     laneId: input.lane.id,
     repo: {
-      path: input.repoPath,
+      name: path.basename(path.resolve(input.repoPath)) || 'repository',
       ...(remote ? { remote } : {}),
       baseBranch: input.lane.baseBranch,
     },

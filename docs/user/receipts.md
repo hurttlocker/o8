@@ -11,8 +11,10 @@ encryption identity and from every release or updater signing key.
 
 ## Create and list receipts
 
-Merged and discarded packets create receipts automatically. To create another
-receipt for a closed packet or write it to a particular path, run:
+Merged and discarded packets create receipts automatically. Receipt creation
+and listing are operator-only governance operations. To create another receipt
+for a closed packet or write it to a particular path, run from an operator
+session:
 
 ```bash
 o8 packet receipt <packet-id> --out ./packet-receipt.json
@@ -86,6 +88,12 @@ signature covers the UTF-8 bytes of the complete receipt except `signature`,
 serialized as compact JSON with object keys sorted recursively. A merged
 disposition records the persisted release evidence plus its Git tree; a
 discarded disposition records the close reason and any preserved branches.
+
+The signed `repo` object contains `name`, optional `remote`, and `baseBranch`.
+The remote is reduced to `host/owner/name`; credentials, URL schemes, and local
+or file remotes are not included. A receipt never stores the local repository
+path. The path supplied through `o8 verify --repo <path>` exists only for that
+verification process and is not written back to the receipt.
 
 The signed review and approval arrays capture the governance record that was
 available when the receipt was created. A later receipt for the same packet is

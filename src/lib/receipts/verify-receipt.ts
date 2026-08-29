@@ -44,7 +44,7 @@ export function parsePacketReceipt(value: unknown): PacketReceipt | null {
 
   const repo = record.repo as Record<string, unknown>;
   if (
-    !nonEmptyString(repo.path)
+    !nonEmptyString(repo.name)
     || !nonEmptyString(repo.baseBranch)
     || (repo.remote !== undefined && typeof repo.remote !== 'string')
   ) return null;
@@ -86,6 +86,32 @@ export function readGitTree(repoPath: string, commit: string): Promise<string | 
   return gitRevParse(repoPath, `${commit}^{tree}`);
 }
 
+function normalizedRemoteHostPath(host: string, rawPath: string): string | null {
+  const segments = rawPath
+    .replace(/^\/+|\/+$/g, '')
+    .split('/')
+    .filter(Boolean);
+  if (!host || segments.length < 2) return null;
+  const owner = segments.at(-2)!;
+  const name = segments.at(-1)!.replace(/\.git$/i, '');
+  return owner && name ? `${host.toLowerCase()}/${owner}/${name}` : null;
+}
+
+export function normalizeGitRemote(remote: string): string | null {
+  const trimmed = remote.trim();
+  if (!trimmed) return null;
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol === 'file:') return null;
+    const normalized = normalizedRemoteHostPath(url.hostname, url.pathname);
+    if (normalized) return normalized;
+  } catch {
+    // Fall through to the SCP-style syntax used by Git SSH remotes.
+  }
+  const scp = /^(?:[^@/\s]+@)?([^:/\s]+):(.+)$/.exec(trimmed);
+  return scp ? normalizedRemoteHostPath(scp[1]!, scp[2]!) : null;
+}
+
 export async function readGitRemote(repoPath: string): Promise<string | null> {
   try {
     const result = await execFileAsync(
@@ -93,7 +119,7 @@ export async function readGitRemote(repoPath: string): Promise<string | null> {
       ['-C', repoPath, 'remote', 'get-url', 'origin'],
       { encoding: 'utf8', maxBuffer: 1024 * 1024 },
     );
-    return result.stdout.trim() || null;
+    return normalizeGitRemote(result.stdout);
   } catch {
     return null;
   }

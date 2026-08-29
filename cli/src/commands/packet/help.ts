@@ -20,10 +20,13 @@ export const PACKET_SUBCOMMANDS = [
   'report',
   'capture',
   'mirror-proof',
-  'receipt',
-  'receipts',
   'log',
   'runtime-drift',
+] as const;
+
+export const OPERATOR_PACKET_SUBCOMMANDS = [
+  'receipt',
+  'receipts',
 ] as const;
 
 export const PACKET_COMMAND_LINES = `  packet info [id]     packet metadata; explicit packet/lane id overrides cwd
@@ -47,15 +50,16 @@ export const PACKET_COMMAND_LINES = `  packet info [id]     packet metadata; exp
   packet report [id]   append an agent_report event for this packet
   packet capture [id]  screenshot the agent's app as visual proof (--url --label --before/--after --clip/--full-page --wait-for --hover/--click)
   packet mirror-proof [id] mirror the packet's before/after proof onto a GitHub PR (--pr <n> [--repo owner/repo])
-  packet receipt [id]  write a signed receipt JSON for a merged or discarded packet (--out <path>)
-  packet receipts [id] list stored signed receipts for a packet
   packet log [id]      read or follow packet lane events (--follow, --since)
   packet runtime-drift [id] detect and warn when a lane's bound runtime drifted`;
+
+export const OPERATOR_PACKET_COMMAND_LINES = `  packet receipt [id]  operator only: write a signed receipt JSON for a closed packet (--out <path>)
+  packet receipts [id] operator only: list stored signed receipts for a packet`;
 
 export function packetGroupUsage(): string {
   return `usage: o8 packet <subcommand> [flags]\n\n${PACKET_COMMAND_LINES}\n\nRun \`o8 --help\` for the full command surface.\n`;
 }
 
 export function packetSubcommandHint(): string {
-  return `Valid packet subcommands: ${PACKET_SUBCOMMANDS.join(', ')}.`;
+  return `Valid worker packet subcommands: ${PACKET_SUBCOMMANDS.join(', ')}. Operator-only packet subcommands: ${OPERATOR_PACKET_SUBCOMMANDS.join(', ')}.`;
 }

@@ -66,6 +66,7 @@ import { runPacketClose } from './commands/packet/close.js';
 import { runPacketWorkspace } from './commands/packet/workspace.js';
 import { runPacketStop } from './commands/packet/stop.js';
 import {
+  OPERATOR_PACKET_COMMAND_LINES,
   PACKET_COMMAND_LINES,
   packetGroupUsage,
   packetSubcommandHint,
@@ -263,6 +264,7 @@ commands:
   inbox list           pending governance approvals (--all includes resolved)
   inbox approve <id>   approve a card → runs the deferred action (e.g. a held merge)
   inbox reject <id>    reject a pending approval
+${OPERATOR_PACKET_COMMAND_LINES}
   session show <key>   provider-native transform capabilities, lineage, and checkpoints
   session import <key> add a discovered provider session without claiming packet ownership
   session checkpoint <key> save a durable provider position for later forks

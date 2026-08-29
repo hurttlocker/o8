@@ -41,7 +41,7 @@ export interface UnsignedPacketReceipt {
   packetTitle: string;
   laneId: string;
   repo: {
-    path: string;
+    name: string;
     remote?: string;
     baseBranch: string;
   };
