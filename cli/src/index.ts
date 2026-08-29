@@ -40,6 +40,7 @@ import { runInbox } from './commands/inbox.js';
 import { runHistory } from './commands/history.js';
 import { runLaneTouches } from './commands/lane.js';
 import { runLease } from './commands/lease.js';
+import { isReceiptVerifyInvocation, runVerifyReceipt } from './commands/verify-receipt.js';
 import { runMission } from './commands/mission.js';
 import { runMcp } from './commands/mcp.js';
 import { runProject, runRepo } from './commands/resources.js';
@@ -54,6 +55,7 @@ import { runPacketLog } from './commands/packet/log.js';
 import { runPacketReport } from './commands/packet/report.js';
 import { runPacketCapture } from './commands/packet/capture.js';
 import { runPacketMirrorProof } from './commands/packet/mirror-proof.js';
+import { runPacketReceipt, runPacketReceipts } from './commands/packet/receipt.js';
 import { runPacketReview } from './commands/packet/review.js';
 import { runPacketScope } from './commands/packet/scope.js';
 import { runPacketExpandScope } from './commands/packet/expand-scope.js';
@@ -216,7 +218,8 @@ commands:
   boot [--task "..."]  session boot envelope: git, instructions, ledger, contract, grounding
   contract ...         propose and accept generator/evaluator contracts
   sprint ...           start or tick a one-feature-at-a-time sprint
-  verify <feature-id>  record computational evidence and optionally tick a sprint
+  verify <receipt.json> verify a signed packet receipt locally (--key, --repo, --show-key)
+  harness verify <feature-id> record computational evidence and optionally tick a sprint
   harness ...          model-keyed lift, lifecycle, and HarnessBundle operations
   capabilities         discover harness artifacts and recommended call order
   evaluate-diff        independent skeptic review of a supplied or git diff
@@ -362,7 +365,9 @@ async function dispatch(args: ParsedArgs): Promise<number> {
     case 'sprint':
       return runSprint(args.mode, secondary, args.rest);
     case 'verify':
-      return runVerify(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
+      return isReceiptVerifyInvocation(singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest))
+        ? runVerifyReceipt(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest))
+        : runVerify(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
     case 'harness':
       return runHarness(args.mode, secondary, args.rest);
     case 'capabilities':
@@ -445,6 +450,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       if (secondary === 'report') return runPacketReport(args.mode, args.rest);
       if (secondary === 'capture') return runPacketCapture(args.mode, args.rest);
       if (secondary === 'mirror-proof') return runPacketMirrorProof(args.mode, args.rest);
+      if (secondary === 'receipt') return runPacketReceipt(args.mode, args.rest);
+      if (secondary === 'receipts') return runPacketReceipts(args.mode, args.rest);
       if (secondary === 'log') return runPacketLog(args.mode, args.rest);
       if (secondary === 'runtime-drift') return runPacketRuntimeDrift(args.mode, args.rest);
       throw unknownSubcommandError('packet', secondary);

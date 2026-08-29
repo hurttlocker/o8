@@ -20,6 +20,8 @@ export const PACKET_SUBCOMMANDS = [
   'report',
   'capture',
   'mirror-proof',
+  'receipt',
+  'receipts',
   'log',
   'runtime-drift',
 ] as const;
@@ -45,6 +47,8 @@ export const PACKET_COMMAND_LINES = `  packet info [id]     packet metadata; exp
   packet report [id]   append an agent_report event for this packet
   packet capture [id]  screenshot the agent's app as visual proof (--url --label --before/--after --clip/--full-page --wait-for --hover/--click)
   packet mirror-proof [id] mirror the packet's before/after proof onto a GitHub PR (--pr <n> [--repo owner/repo])
+  packet receipt [id]  write a signed receipt JSON for a merged or discarded packet (--out <path>)
+  packet receipts [id] list stored signed receipts for a packet
   packet log [id]      read or follow packet lane events (--follow, --since)
   packet runtime-drift [id] detect and warn when a lane's bound runtime drifted`;
 

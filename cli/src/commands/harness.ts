@@ -305,6 +305,7 @@ export async function runVerify(mode: OutputMode, rest: string[]): Promise<numbe
 }
 
 export async function runHarness(mode: OutputMode, subcommand: string | undefined, rest: string[]): Promise<number> {
+  if (subcommand === 'verify') return runVerify(mode, rest);
   const parsed = parseFlags(rest);
   const repoPath = value(parsed, 'repo') ?? process.cwd();
   if (subcommand === 'status') {
@@ -354,7 +355,7 @@ export async function runHarness(mode: OutputMode, subcommand: string | undefine
     }
     return output(mode, 'HarnessBundle imported', await harnessCall('bundle_import', { repoPath, bundle }));
   }
-  throw new CliError('invalid_args', 'usage: o8 harness status|measure|transition|export|import', EXIT.INVALID_ARGS);
+  throw new CliError('invalid_args', 'usage: o8 harness status|measure|transition|verify|export|import', EXIT.INVALID_ARGS);
 }
 
 export async function runCapabilities(mode: OutputMode, rest: string[]): Promise<number> {
