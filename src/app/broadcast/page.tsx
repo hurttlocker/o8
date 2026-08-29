@@ -13,6 +13,7 @@ import {
   isBroadcastFeedActive,
   StatusDot,
 } from './BroadcastStage';
+import { TruthPanel } from './TruthPanel';
 
 const TOKEN_STORAGE_KEY = 'o8.broadcast.spectator-token';
 const SNAPSHOT_REFRESH_MS = 10_000;
@@ -393,7 +394,9 @@ function BroadcastSurface() {
                 paddingBottom: 7,
                 paddingLeft: 11,
                 borderRadius: 14,
-                border: `1px solid ${feedActive ? 'var(--t-accent-border)' : 'var(--t-divider-subtle)'}`,
+                borderWidth: 1,
+                borderStyle: 'solid',
+                borderColor: feedActive ? 'var(--t-accent-border)' : 'var(--t-divider-subtle)',
                 background: feedActive ? 'var(--t-accent-soft-strong)' : 'var(--t-input-bg)',
                 color: feedActive ? 'var(--t-accent)' : 'var(--t-text-faint)',
                 boxShadow: feedActive ? '0 0 18px var(--t-accent-ring)' : 'none',
@@ -433,6 +436,7 @@ function BroadcastSurface() {
             reduceMotion={reduceMotion}
           />
         </div>
+        {compact ? null : <TruthPanel token={token} />}
       </div>
     </main>
   );

@@ -5,7 +5,8 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 
 import { getSqlite } from '@/lib/db';
-import { ensureV44BroadcastSchema } from '@/lib/db/v44-broadcast-migration';
+import { ensureV58SpectatorRepoGrantsSchema } from '@/lib/db/v58-spectator-repo-grants-migration';
+import { normalizeRepoGrants } from './repo-grants';
 import {
   readActiveSpectatorTokenHashes,
   writeActiveSpectatorTokenHashes,
@@ -19,6 +20,7 @@ interface BroadcastTokenRow {
   id: string;
   token_hash: string;
   label: string | null;
+  repo_grants_json: string;
   created_at: string;
   revoked_at: string | null;
 }
@@ -26,6 +28,7 @@ interface BroadcastTokenRow {
 export interface BroadcastTokenRecord {
   id: string;
   label: string | null;
+  repoGrants: string[];
   createdAt: string;
   revokedAt: string | null;
 }
@@ -34,6 +37,11 @@ export interface MintBroadcastTokenResult {
   record: BroadcastTokenRecord;
   /** Returned once. Only its SHA-256 hash is persisted. */
   bearer: string;
+}
+
+export interface MintBroadcastTokenInput {
+  label?: string | null;
+  repoGrants?: readonly string[] | null;
 }
 
 type ProjectionWriter = (hashes: string[]) => void;
@@ -54,9 +62,19 @@ function normalizeLabel(value: string | null | undefined): string | null {
 }
 
 function publicRecord(row: BroadcastTokenRow): BroadcastTokenRecord {
+  let repoGrants: string[] = [];
+  try {
+    const parsed = JSON.parse(row.repo_grants_json) as unknown;
+    if (Array.isArray(parsed) && parsed.every((value) => typeof value === 'string')) {
+      repoGrants = normalizeRepoGrants(parsed);
+    }
+  } catch {
+    repoGrants = [];
+  }
   return {
     id: row.id,
     label: row.label,
+    repoGrants,
     createdAt: row.created_at,
     revokedAt: row.revoked_at,
   };
@@ -68,7 +86,7 @@ export class SpectatorTokenStore {
     private readonly writeProjection: ProjectionWriter = writeActiveSpectatorTokenHashes,
     private readonly readProjection: ProjectionReader = readActiveSpectatorTokenHashes,
   ) {
-    ensureV44BroadcastSchema(sqlite);
+    ensureV58SpectatorRepoGrantsSchema(sqlite);
   }
 
   private activeHashes(): Set<string> {
@@ -87,21 +105,24 @@ export class SpectatorTokenStore {
     return [...this.readProjection()].filter((hash) => active.has(hash)).sort();
   }
 
-  mint(label?: string | null): MintBroadcastTokenResult {
+  mint(input: MintBroadcastTokenInput = {}): MintBroadcastTokenResult {
     const bearer = `${TOKEN_PREFIX}${randomBytes(TOKEN_BYTES).toString('base64url')}`;
+    const repoGrants = normalizeRepoGrants(input.repoGrants);
     const row: BroadcastTokenRow = {
       id: `spectator-${randomUUID()}`,
       token_hash: hashToken(bearer),
-      label: normalizeLabel(label),
+      label: normalizeLabel(input.label),
+      repo_grants_json: JSON.stringify(repoGrants),
       created_at: new Date().toISOString(),
       revoked_at: null,
     };
 
     this.sqlite.transaction(() => {
       this.sqlite.prepare(`
-        INSERT INTO broadcast_tokens (id, token_hash, label, created_at, revoked_at)
-        VALUES (?, ?, ?, ?, NULL)
-      `).run(row.id, row.token_hash, row.label, row.created_at);
+        INSERT INTO broadcast_tokens (
+          id, token_hash, label, repo_grants_json, created_at, revoked_at
+        ) VALUES (?, ?, ?, ?, ?, NULL)
+      `).run(row.id, row.token_hash, row.label, row.repo_grants_json, row.created_at);
     }).immediate();
 
     try {
@@ -116,6 +137,18 @@ export class SpectatorTokenStore {
     }
 
     return { record: publicRecord(row), bearer };
+  }
+
+  resolveBearer(bearer: string): BroadcastTokenRecord | null {
+    const normalized = bearer.trim();
+    if (!normalized) return null;
+    const tokenHash = hashToken(normalized);
+    if (!this.readProjection().has(tokenHash)) return null;
+    const row = this.sqlite.prepare(`
+      SELECT * FROM broadcast_tokens
+      WHERE token_hash = ? AND revoked_at IS NULL
+    `).get(tokenHash) as BroadcastTokenRow | undefined;
+    return row ? publicRecord(row) : null;
   }
 
   revoke(id: string): BroadcastTokenRecord | null {
@@ -146,4 +179,12 @@ let singleton: SpectatorTokenStore | null = null;
 export function getSpectatorTokenStore(): SpectatorTokenStore {
   singleton ??= new SpectatorTokenStore(getSqlite());
   return singleton;
+}
+
+export function resolveSpectatorTokenRecord(bearer: string): BroadcastTokenRecord | null {
+  try {
+    return getSpectatorTokenStore().resolveBearer(bearer);
+  } catch {
+    return null;
+  }
 }

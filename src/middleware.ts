@@ -171,6 +171,7 @@ const WORKER_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }>
 
 const SPECTATOR_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }> = [
   { methods: new Set(['GET', 'HEAD']), path: /^\/api\/broadcast\/(?:commentary|events|snapshot)\/?$/ },
+  { methods: new Set(['GET', 'HEAD']), path: /^\/api\/orchestrator\/truth\/?$/ },
 ];
 
 const LOOPBACK_READ_CAPABILITIES: RegExp[] = [

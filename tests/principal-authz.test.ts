@@ -27,7 +27,6 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
-
 // Realtime publisher fans out over WS + touches the network; stub it so the
 // approvals handler runs its GOVERNANCE logic without side effects.
 vi.mock('@/lib/realtime/publisher', () => ({

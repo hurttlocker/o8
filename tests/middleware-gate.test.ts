@@ -53,8 +53,13 @@ function gatedRequest(
 describe('panelGateMiddleware — Broadcast spectator capability', () => {
   const authorization = `Bearer ${SPECTATOR_TOKEN}`;
 
-  it('allows only the three exact read routes and refuses every write', () => {
-    for (const pathname of ['/api/broadcast/commentary', '/api/broadcast/events', '/api/broadcast/snapshot']) {
+  it('allows only the exact spectator read routes and refuses every write', () => {
+    for (const pathname of [
+      '/api/broadcast/commentary',
+      '/api/broadcast/events',
+      '/api/broadcast/snapshot',
+      '/api/orchestrator/truth',
+    ]) {
       expect(panelGateMiddleware(gatedRequest(`http://localhost:3001${pathname}`, {
         headers: { authorization },
       })).status).toBe(200);

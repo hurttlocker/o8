@@ -2317,6 +2317,21 @@
       ]
     },
     {
+      "path": "tests/truth-cli-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/truth-query-authz-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/tsx-process-linked-worktree-real-path.test.ts",
       "reasons": [
         "child-process",

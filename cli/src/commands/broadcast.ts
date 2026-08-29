@@ -8,6 +8,7 @@ interface MintResponse {
   token: {
     id: string;
     label: string | null;
+    repoGrants: string[];
     createdAt: string;
     revokedAt: string | null;
   };
@@ -56,6 +57,20 @@ function readFlag(rest: string[], name: string): string | null {
     throw new CliError('invalid_args', `${name} requires a value.`, EXIT.INVALID_ARGS);
   }
   return value;
+}
+
+function readFlags(rest: string[], name: string): string[] {
+  const values: string[] = [];
+  for (let index = 0; index < rest.length; index += 1) {
+    if (rest[index] !== name) continue;
+    const value = rest[index + 1];
+    if (!value || value.startsWith('--')) {
+      throw new CliError('invalid_args', `${name} requires a value.`, EXIT.INVALID_ARGS);
+    }
+    values.push(value);
+    index += 1;
+  }
+  return values;
 }
 
 function positional(rest: string[], valueFlags: ReadonlySet<string>): string[] {
@@ -236,16 +251,18 @@ export async function runBroadcast(
       'Use `o8 broadcast say ...`, `o8 broadcast automation-say ...`, `o8 broadcast focus ...`, `o8 broadcast post ...`, or `o8 broadcast token mint|revoke ...`.',
     );
   }
-  const [action, ...args] = positional(rest, new Set(['--label']));
+  const [action, ...args] = positional(rest, new Set(['--label', '--repo']));
   if (action !== 'mint' && action !== 'revoke') {
     throw new CliError(
       'unknown_broadcast_token_action',
       `Unknown broadcast token action: ${action ?? '(none)'}`,
       EXIT.INVALID_ARGS,
-      'Use `o8 broadcast token mint [--label name]` or `o8 broadcast token revoke <id>`.',
+      'Use `o8 broadcast token mint [--label name] [--repo remote|path|name:<repo>]` or `o8 broadcast token revoke <id>`.',
     );
   }
-  const unknownFlag = rest.find((value) => value.startsWith('--') && value !== '--label');
+  const unknownFlag = rest.find((value) => (
+    value.startsWith('--') && value !== '--label' && value !== '--repo'
+  ));
   if (unknownFlag) {
     throw new CliError('unknown_flag', `Unknown broadcast token flag: ${unknownFlag}`, EXIT.INVALID_ARGS);
   }
@@ -254,15 +271,23 @@ export async function runBroadcast(
     if (args.length > 0) {
       throw new CliError('invalid_args', 'Broadcast token mint accepts no positional arguments.', EXIT.INVALID_ARGS);
     }
+    const repoGrants = readFlags(rest, '--repo');
     const response = await apiFetch<MintResponse>(cfg, '/api/broadcast/tokens', {
       method: 'POST',
-      body: { action: 'mint', label: readFlag(rest, '--label') },
+      body: {
+        action: 'mint',
+        label: readFlag(rest, '--label'),
+        ...(repoGrants.length > 0 ? { repoGrants } : {}),
+      },
     });
     if (!response.data) throw new CliError('invalid_response', 'Broadcast token mint returned no data.', EXIT.INVALID_ARGS);
     const payload = {
       schema: 'o8/cli/broadcast.token.mint/v1',
       ok: true,
-      token: response.data.token,
+      token: {
+        ...response.data.token,
+        repoGrants: response.data.token.repoGrants ?? [],
+      },
       bearer: response.data.bearer,
       url: broadcastUrl(cfg.apiBase, response.data.bearer),
     };
@@ -271,6 +296,9 @@ export async function runBroadcast(
       printHumanKv([
         ['id', payload.token.id],
         ['label', payload.token.label ?? '(none)'],
+        ['repository grants', payload.token.repoGrants.length > 0
+          ? payload.token.repoGrants.join(', ')
+          : '(broadcast only)'],
         ['bearer', payload.bearer],
         ['url', payload.url],
       ]);
@@ -282,7 +310,7 @@ export async function runBroadcast(
   }
 
   const id = args[0];
-  if (!id || args.length !== 1 || readFlag(rest, '--label')) {
+  if (!id || args.length !== 1 || readFlag(rest, '--label') || readFlags(rest, '--repo').length > 0) {
     throw new CliError('invalid_args', 'Broadcast token revoke requires exactly one token id.', EXIT.INVALID_ARGS);
   }
   const response = await apiFetch<RevokeResponse>(cfg, '/api/broadcast/tokens', {

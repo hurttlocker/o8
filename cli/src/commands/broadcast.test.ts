@@ -169,6 +169,35 @@ describe('Broadcast CLI commands', () => {
     expect(output).not.toContain('/broadcast?token=');
   });
 
+  it('mints a truth spectator with repeated repository grants', async () => {
+    process.env.O8_API_PORT = '40123';
+    process.env.O8_API_TOKEN = 'operator-token';
+    delete process.env.O8_WORKER_TOKEN;
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      schema: 'o8/broadcast.token.mint/v1',
+      ok: true,
+      token: {
+        id: 'spectator-truth',
+        label: 'truth',
+        repoGrants: ['repo-a', 'example.test/team/repo-b'],
+        createdAt: '2026-08-29T20:00:00.000Z',
+        revokedAt: null,
+      },
+      bearer: 'o8sp_truth_secret',
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    await expect(runBroadcast({ human: false, verbose: false }, 'token', [
+      'mint', '--label', 'truth', '--repo', 'repo-a', '--repo', 'example.test/team/repo-b',
+    ])).resolves.toBe(0);
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      action: 'mint',
+      label: 'truth',
+      repoGrants: ['repo-a', 'example.test/team/repo-b'],
+    });
+  });
+
   it('revokes exactly one durable token id', async () => {
     process.env.O8_API_PORT = '40123';
     process.env.O8_API_TOKEN = 'operator-token';

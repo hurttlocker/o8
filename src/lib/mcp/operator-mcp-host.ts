@@ -108,6 +108,7 @@ import {
   handleTranscript,
 } from '@/lib/mcp/operator-handlers/status';
 import { TARGETING_TOOLS, handleTargets } from '@/lib/mcp/operator-handlers/targeting';
+import { TRUTH_TOOLS, handleTruthQuery } from '@/lib/mcp/operator-handlers/truth';
 import { UPDATE_TOOLS, handleUpdateApply } from '@/lib/mcp/operator-handlers/update';
 import { getDataDir } from '@/lib/data-dir-migration';
 
@@ -281,6 +282,7 @@ const TOOLS: McpTool[] = [
   ...TARGETING_TOOLS,
   ...LEASE_TOOLS,
   ...RECEIPT_TOOLS,
+  ...TRUTH_TOOLS,
   ...AGENT_MESSAGE_TOOLS,
   ...BROADCAST_TOOLS,
   ...UPDATE_TOOLS,
@@ -372,6 +374,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   o8_lease_list: handleLeaseList,
   o8_packet_receipt: handlePacketReceipt,
   o8_verify_receipt: handleVerifyReceipt,
+  o8_truth_query: handleTruthQuery,
   o8_msg_send: handleAgentMessageSend,
   o8_msg_inbox: handleAgentMessageInbox,
   o8_broadcast_post: handleBroadcastPost,

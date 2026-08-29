@@ -169,6 +169,7 @@ export function getArtifact(id: string): ArtifactRecord | null {
 }
 
 export interface ListArtifactsFilter {
+  kind?: ArtifactKind;
   packetId?: string | null;
   prNumber?: number | null;
   laneId?: string | null;
@@ -185,6 +186,7 @@ export function listArtifacts(filter: ListArtifactsFilter): ArtifactRecord[] {
   if (!db) return [];
 
   const clauses = [];
+  if (filter.kind) clauses.push(eq(artifacts.kind, filter.kind));
   if (filter.packetId) clauses.push(eq(artifacts.packetId, filter.packetId));
   if (typeof filter.prNumber === 'number') clauses.push(eq(artifacts.prNumber, filter.prNumber));
   if (filter.laneId) clauses.push(eq(artifacts.laneId, filter.laneId));

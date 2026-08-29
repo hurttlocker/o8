@@ -4,6 +4,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 import { readActiveTokenHashes } from '@/lib/mobile/device-token-file';
 import { readActiveSpectatorTokenHashes } from '@/lib/broadcast/spectator-token-file';
+import { resolveSpectatorTokenRecord } from '@/lib/broadcast/spectator-token-store';
 
 export type RequestPrincipal = 'operator' | 'worker' | 'device' | 'spectator' | 'anonymous';
 
@@ -18,7 +19,7 @@ export type RequestPrincipalContext =
       leaseProcessGroupId: number | null;
     }
   | { role: 'device' }
-  | { role: 'spectator' }
+  | { role: 'spectator'; repoGrants: string[] }
   | { role: 'anonymous' };
 
 export interface WorkerPacketRefusal {
@@ -94,7 +95,10 @@ export function resolveRequestPrincipalContext(req: Request): RequestPrincipalCo
       leaseProcessGroupId: null,
     };
   }
-  if (isSpectatorToken(bearer)) return { role: 'spectator' };
+  if (isSpectatorToken(bearer)) {
+    const spectator = resolveSpectatorTokenRecord(bearer);
+    if (spectator) return { role: 'spectator', repoGrants: spectator.repoGrants };
+  }
   if (bearer && tokenMatches(bearer, getOrCreateWsToken().trim())) return { role: 'operator' };
   if (isDeviceToken(bearer)) return { role: 'device' };
   return { role: 'anonymous' };

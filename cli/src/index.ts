@@ -41,6 +41,7 @@ import { runHistory } from './commands/history.js';
 import { runLaneTouches } from './commands/lane.js';
 import { runLease } from './commands/lease.js';
 import { isReceiptVerifyInvocation, runVerifyReceipt } from './commands/verify-receipt.js';
+import { runTruth } from './commands/truth.js';
 import { runMission } from './commands/mission.js';
 import { runMcp } from './commands/mcp.js';
 import { runProject, runRepo } from './commands/resources.js';
@@ -220,6 +221,7 @@ commands:
   contract ...         propose and accept generator/evaluator contracts
   sprint ...           start or tick a one-feature-at-a-time sprint
   verify <receipt.json> verify a signed packet receipt locally (--key, --repo, --show-key)
+  truth merged|packet|approvals  query signed receipt-backed project history
   harness verify <feature-id> record computational evidence and optionally tick a sprint
   harness ...          model-keyed lift, lifecycle, and HarnessBundle operations
   capabilities         discover harness artifacts and recommended call order
@@ -292,6 +294,7 @@ flags:
 env:
   O8_API_PORT          override port (set by dispatch for worker agents)
   O8_API_TOKEN         override bearer token (set by dispatch)
+  O8_SPECTATOR_TOKEN   scoped spectator bearer preferred by o8 truth
   CORTEX_IDE_DATA_DIR  override data dir (default ~/.o8, legacy ~/.cortex-ide)
 
 exit codes:
@@ -370,6 +373,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return isReceiptVerifyInvocation(singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest))
         ? runVerifyReceipt(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest))
         : runVerify(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
+    case 'truth':
+      return runTruth(args.mode, secondary, args.rest);
     case 'harness':
       return runHarness(args.mode, secondary, args.rest);
     case 'capabilities':

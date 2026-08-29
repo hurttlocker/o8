@@ -34,6 +34,58 @@ directory, so a copied o8 data directory remains readable at its new location.
 The same operations are available to an operator MCP client as
 `o8_packet_receipt` and `o8_verify_receipt`.
 
+## Truth queries
+
+An operator can mint a spectator token that can read signed answers for only
+the named repositories. Repeat `--repo` to grant more than one repository. A
+grant should normally be the receipt's normalized remote or the absolute path
+of a repository registered in o8.
+
+```bash
+o8 broadcast token mint --label "release spectator" \
+  --repo example.com/operator/repository
+```
+
+Save the returned bearer in the spectator environment. `o8 truth` prefers the
+dedicated variable, while `O8_API_TOKEN` remains accepted for operator sessions
+and existing integrations.
+
+```bash
+export O8_SPECTATOR_TOKEN='<returned bearer>'
+```
+
+The three truth queries read the stored receipt ledger:
+
+```bash
+o8 truth merged --repo example.com/operator/repository --since 24h --human
+o8 truth packet packet-123 --human
+o8 truth packet '#1998' --human
+o8 truth approvals packet-123 --human
+```
+
+Use `--json` for the structured route shape. Use `--save-receipts` to write the
+stored receipt text without changing a byte. The human output prints the exact
+verification command for every saved answer.
+
+```bash
+o8 truth merged --repo example.com/operator/repository --since 7d \
+  --save-receipts ./truth-receipts --human
+o8 verify ./truth-receipts/<receipt-id>.json --key ./receipt-public.key
+```
+
+Copy the saved receipt and the separately published public key to another
+machine to verify the answer without access to the o8 server. Repository grants
+are enforced before results leave the server. A spectator with no grants gets a
+403 response, and packet or approval queries omit receipts from ungranted
+repositories.
+
+Prefer remote or absolute-path grants. For a single local repository with no
+remote, use the explicit `name:<repo>` form, such as `--repo name:repository`.
+The name must resolve to exactly one registered repository path, and it covers
+only remote-less receipts whose artifact was recorded for that path. If no
+registered path or more than one registered path has that name, truth queries
+fail with `grant_ambiguous`; a bare repository name does not grant truth access.
+
 ## Publish the public key
 
 On the signing machine, create the dedicated identity if necessary and print
