@@ -408,6 +408,21 @@ function xtermImportDuration(browserConsole) {
   return durations.length > 0 ? round(Math.max(...durations)) : null;
 }
 
+function classifyHiddenOverflow(diagnostics, serverSnapshot, sessionName) {
+  const clientOverflow = diagnostics.some((diagnostic) => (
+    diagnostic.code === 'terminal_client_hidden_overflow'
+    && diagnostic.sessionName === sessionName
+  ));
+  const serverOverflow = diagnostics.some((diagnostic) => (
+    diagnostic.code === 'terminal_hidden_overflow'
+    && diagnostic.sessionName === sessionName
+  )) || (serverSnapshot.sessions[sessionName]?.overflow.events ?? 0) > 0;
+  if (clientOverflow && serverOverflow) return 'both';
+  if (clientOverflow) return 'client';
+  if (serverOverflow) return 'server';
+  return null;
+}
+
 async function waitForSharedTerminalGrid(page, sessionName, timeoutMs = 3000) {
   const deadline = Date.now() + timeoutMs;
   let browserSize = { cols: 0, rows: 0 };
@@ -640,6 +655,46 @@ async function captureRapidFailure({ client, sessionName, marker, logPath, start
   };
 }
 
+async function captureFinalBrowserDoneFailure({ page, client, finalTab, doneMarker }) {
+  let browser = null;
+  let browserError = null;
+  try {
+    browser = await page.evaluate(({ tabId, sessionName }) => {
+      const session = window.__o8TerminalWriteStats?.sessions[sessionName];
+      return {
+        activeTabId: window.__o8TerminalBenchTabs?.tabId ?? null,
+        expectedTabId: tabId,
+        resident: session?.mounted === true,
+        renderedLast30Lines: session?.readText(30) ?? '',
+        diagnostics: [...(window.__o8TerminalDiagnostics ?? [])],
+      };
+    }, { tabId: finalTab.id, sessionName: finalTab.sessionName });
+  } catch (error) {
+    browserError = error instanceof Error ? error.message : String(error);
+  }
+  let snapshot = null;
+  let serverSnapshotError = null;
+  try {
+    snapshot = (await client.request('terminal-bench-stats')).data.snapshot;
+  } catch (error) {
+    serverSnapshotError = error instanceof Error ? error.message : String(error);
+  }
+  return {
+    stage: 'final-browser-done',
+    timeoutMs: 15000,
+    finalTab: {
+      tabId: finalTab.id,
+      sessionName: finalTab.sessionName,
+      doneMarker,
+      ...browser,
+      browserError,
+      serverLastOutputTail: snapshot?.sessions[finalTab.sessionName]?.lastOutputTail ?? null,
+      serverLastOutputTailByteCap: snapshot?.lastOutputTailByteCap ?? null,
+      serverSnapshotError,
+    },
+  };
+}
+
 async function runRapidSwitch(page, seeded, clients, rapidGeneratorPath, runDirectory) {
   const durationMs = 30000;
   const intervalMs = 100;
@@ -703,18 +758,31 @@ async function runRapidSwitch(page, seeded, clients, rapidGeneratorPath, runDire
   }
 
   const finalTab = seeded.tabs.at(-1);
+  const doneMarker = `O8_RAPID_DONE_${finalTab.sessionName}_${expectedSequenceCount}`;
   await page.locator(`[data-o8-workspace-tab="${finalTab.id}"]`).click();
-  await page.waitForFunction(({ tabId, sessionName, doneMarker }) => {
-    const panel = document.querySelector(`[data-o8-term-panel="${CSS.escape(sessionName)}"]`);
-    return window.__o8TerminalBenchTabs?.tabId === tabId
-      && panel != null
-      && getComputedStyle(panel).display !== 'none'
-      && window.__o8TerminalWriteStats?.sessions[sessionName]?.readText(1000).includes(doneMarker) === true;
-  }, {
-    tabId: finalTab.id,
-    sessionName: finalTab.sessionName,
-    doneMarker: `O8_RAPID_DONE_${finalTab.sessionName}_${expectedSequenceCount}`,
-  }, { polling: 'raf', timeout: 15000 });
+  try {
+    await page.waitForFunction(({ tabId, sessionName, doneMarker }) => {
+      const panel = document.querySelector(`[data-o8-term-panel="${CSS.escape(sessionName)}"]`);
+      return window.__o8TerminalBenchTabs?.tabId === tabId
+        && panel != null
+        && getComputedStyle(panel).display !== 'none'
+        && window.__o8TerminalWriteStats?.sessions[sessionName]?.readText(1000).includes(doneMarker) === true;
+    }, {
+      tabId: finalTab.id,
+      sessionName: finalTab.sessionName,
+      doneMarker,
+    }, { polling: 'raf', timeout: 15000 });
+  } catch (error) {
+    if (error instanceof Error) {
+      error.rapidSwitchFailure = await captureFinalBrowserDoneFailure({
+        page,
+        client: clients[0],
+        finalTab,
+        doneMarker,
+      });
+    }
+    throw error;
+  }
   const grid = await waitForSharedTerminalGrid(page, finalTab.sessionName);
   const tmuxScreen = terminalScreenOracle(await captureQuiescentTmuxText(clients[0], finalTab.sessionName));
   const text = normalizeTerminalText(await panelText(page, finalTab.sessionName, grid.rows));
@@ -956,15 +1024,15 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
     const physicalBytesEnd = measureProcessGroupMemory(after, groupsAfter);
     const processes = measureProcessGroups(before, after, groups, observationMs, physicalBytesStart, physicalBytesEnd);
     const rawBrowser = await readPageStats(page);
-    if (mountedHidden && !rawBrowser.diagnostics.some((diagnostic) => (
-      diagnostic.code === 'terminal_client_hidden_overflow'
-      && diagnostic.sessionName === mountedHidden.sessionName
-    ))) {
+    const rawServer = (await clients[0].request('terminal-bench-stats')).data.snapshot;
+    const hiddenOverflowClass = mountedHidden
+      ? classifyHiddenOverflow(rawBrowser.diagnostics, rawServer, mountedHidden.sessionName)
+      : null;
+    if (mountedHidden && hiddenOverflowClass === null) {
       correctness.failures += 1;
       throw new Error(`hidden client buffer did not overflow for ${mountedHidden.sessionName}`);
     }
     const performance = await readPerformance(page, observationMs);
-    const rawServer = (await clients[0].request('terminal-bench-stats')).data.snapshot;
     const resyncUnsettledCount = rawBrowser.diagnostics.filter((diagnostic) => (
       diagnostic.code === 'terminal_resync_unsettled'
     )).length;
@@ -1012,6 +1080,7 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
       devModeCpuWarning: stack.devModeCpuWarning,
       observationMs,
       orchestratorLaunches,
+      hiddenOverflowClass,
       inventory: {
         terminalChipCount: seeded.tabs.length,
         orchestratorChipCount: ui.tabs.filter((tab) => tab.kind === 'orchestrator').length,
