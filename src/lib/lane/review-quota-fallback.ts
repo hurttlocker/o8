@@ -9,7 +9,11 @@ import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 import { createBackendRoleRouteChoice } from '@/lib/operator/role-routing';
 import { recordRoleRoutingReceiptSafely } from '@/lib/operator/role-routing-ledger';
 import { MODEL_IDS } from '@/lib/models';
-import { finishReviewTurn, startReviewTurn } from '@/lib/lane/review-turn-state';
+import {
+  bindReviewTurnAbortController,
+  finishReviewTurn,
+  startReviewTurn,
+} from '@/lib/lane/review-turn-state';
 import type { OrchestratorEvent } from './orchestrator-stream-events';
 import {
   getActiveReviewerBackend,
@@ -76,6 +80,15 @@ async function runAttempt(input: {
     surface: input.surface,
     expectedHeadSha: input.expectedHeadSha,
   });
+  const turnController = new AbortController();
+  const forwardAbort = () => turnController.abort(input.signal?.reason);
+  if (input.signal?.aborted) forwardAbort();
+  else input.signal?.addEventListener('abort', forwardAbort, { once: true });
+  const unbindAbortController = bindReviewTurnAbortController(
+    input.laneId,
+    reviewTurnId,
+    turnController,
+  );
   let text = '';
   let quotaError: string | null = null;
   let unavailableReason: ReviewUnavailableReason | null = null;
@@ -93,7 +106,7 @@ async function runAttempt(input: {
     }, {
       threadId: input.threadId,
       ...(input.model ? { model: input.model } : {}),
-      ...(input.signal ? { signal: input.signal } : {}),
+      signal: turnController.signal,
     });
   } catch (error) {
     if (isRuntimeQuotaLimitError(error)) quotaError = message(error);
@@ -102,6 +115,9 @@ async function runAttempt(input: {
       if (isReviewerSessionBusyMessage(errorMessage)) unavailableReason = 'session_busy';
       errors.push(errorMessage);
     }
+  } finally {
+    unbindAbortController();
+    input.signal?.removeEventListener('abort', forwardAbort);
   }
   // Claude Code can emit a terminal subscription denial as ordinary assistant
   // text and then exit successfully. Treat that observed frame as exhaustion so
@@ -110,7 +126,11 @@ async function runAttempt(input: {
     quotaError = text;
     text = '';
   }
-  const outcome = quotaError ? 'quota_discarded' : errors.length > 0 ? 'failed' : 'completed';
+  const outcome = turnController.signal.aborted
+    ? 'failed'
+    : quotaError
+      ? 'quota_discarded'
+      : errors.length > 0 ? 'failed' : 'completed';
   try {
     finishReviewTurn({ laneId: input.laneId, reviewTurnId, outcome });
   } catch (error) {

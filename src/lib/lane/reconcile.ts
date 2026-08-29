@@ -8,6 +8,7 @@ import type { Lane, LaneRuntime, LaneStatus } from '@/lib/lane/types';
 import { getRuntime } from '@/lib/runtimes';
 import { crashSurvivableWorkersEnabled } from '@/lib/runtimes/shared/owned-session/crash-survival';
 import { listWorkspaceSnapshotsByPacketId } from '@/lib/worktree/snapshot-state';
+import { enqueueInboxItem } from '@/lib/supervisor/inbox';
 
 const execFileAsync = promisify(execFile);
 
@@ -255,6 +256,20 @@ async function runReconcileOrphanedWorktrees(): Promise<number> {
       continue;
     }
     setLaneStatus(lane.id, 'awaiting_orchestrator', 'system', 'worktree_missing_unverified');
+    enqueueInboxItem({
+      repoPath: lane.repoPath,
+      packetId: lane.packetId,
+      kind: 'packet_missing',
+      status: 'human_required',
+      payload: {
+        laneId: lane.id,
+        laneLabel: lane.label,
+        worktreePath: lane.worktreePath,
+        blockedReason: 'worktree_missing_unverified',
+        recoveryAction: 'acknowledge_missing_worktree',
+        summary: 'The packet worktree is missing and merge ancestry could not be verified. Acknowledge the missing path to discard the packet without deleting anything that still exists on disk.',
+      },
+    });
     console.warn(
       `[reconcile] Lane ${lane.id} (${lane.label || lane.branch}) worktree is gone but merge ancestry is unverified — left for operator review`,
     );

@@ -329,31 +329,33 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
 
   const stopPacket = useCallback(async (item: SupervisorInboxItem) => {
     if (!item.packetId || !beginIncidentAction(item.id)) return;
-    setActionNote(item.id, 'Stopping the packet...');
+    const acknowledgeMissing = item.payload.recoveryAction === 'acknowledge_missing_worktree';
+    setActionNote(item.id, acknowledgeMissing ? 'Acknowledging the missing worktree...' : 'Stopping the packet...');
     let inProgress = false;
     try {
+      const endpoint = acknowledgeMissing ? '/api/orchestrator/discard-packet' : '/api/agent-control/action';
+      const requestBody = acknowledgeMissing
+        ? { packetId: item.packetId, disposition: 'wontfix', acknowledgeMissingWorktree: true, clientMutationId: crypto.randomUUID() }
+        : { ref: { kind: 'packet', id: item.packetId }, action: { kind: 'terminate' }, clientMutationId: crypto.randomUUID() };
       const { response, payload } = await fetchCorrelatedActionReceipt<{
         ok?: boolean;
-        error?: string;
+        error?: { message?: string } | string;
         result?: { ok?: boolean; note?: string; inProgress?: boolean; status?: string };
-      }>('/api/agent-control/action', {
+      }>(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ref: { kind: 'packet', id: item.packetId },
-          action: { kind: 'terminate' },
-          clientMutationId: crypto.randomUUID(),
-        }),
+        body: JSON.stringify(requestBody),
       });
+      const errorMessage = typeof payload?.error === 'string' ? payload.error : payload?.error?.message;
       if (!response.ok || payload?.ok === false || payload?.result?.ok === false) {
-        throw new Error(payload?.result?.note ?? payload?.error ?? 'Stop was rejected.');
+        throw new Error(payload?.result?.note ?? errorMessage ?? 'Packet action was rejected.');
       }
       await fetch('/api/panel/supervisor-inbox', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'dismiss', id: item.id }),
       }).catch(() => {});
-      setActionNote(item.id, 'Packet stopped and held.');
+      setActionNote(item.id, acknowledgeMissing ? 'Missing worktree acknowledged; packet discarded.' : 'Packet stopped and held.');
       window.dispatchEvent(new CustomEvent('o8:supervisor-inbox'));
       await refresh();
     } catch (error) {
@@ -481,6 +483,7 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
             const isSelfHealed = item.status === 'self_healed';
             const isResolved = item.status === 'resolved';
             const isOutsideHumanWaiting = item.kind === 'outside_human_waiting';
+            const acknowledgeMissing = item.payload.recoveryAction === 'acknowledge_missing_worktree';
             const threadUrl = typeof item.payload.url === 'string' ? item.payload.url : null;
             const transcriptPreview = expandedTranscriptById[item.id] ?? null;
             const actionNote = actionNoteById[item.id] ?? null;
@@ -606,11 +609,11 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
                         <RetryGlyph />
                       </InboxActionButton>
                       <InboxActionButton
-                        title="Stop packet"
+                        title={acknowledgeMissing ? 'Acknowledge missing worktree and discard packet' : 'Stop packet'}
                         onClick={() => { void stopPacket(item); }}
                         disabled={busyIncidentId !== null}
                       >
-                        <StopGlyph />
+                        {acknowledgeMissing ? <ArchiveGlyph /> : <StopGlyph />}
                       </InboxActionButton>
                     </>
                   ) : null}

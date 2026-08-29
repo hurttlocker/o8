@@ -31,6 +31,10 @@ export const CLOSE_PACKET_TOOLS: McpTool[] = [
           type: 'string',
           description: 'Optional operator context, up to 1,000 characters.',
         },
+        acknowledgeMissingWorktree: {
+          type: 'boolean',
+          description: 'Close when the recorded worktree path is absent even if no clean worker-exit receipt exists. Never bypasses cleanup when the directory still exists.',
+        },
       },
       required: ['packetId', 'disposition'],
     },
@@ -43,12 +47,17 @@ export async function handleClosePacketUnmerged(args: Record<string, unknown>): 
     if (!(CLOSE_UNMERGED_DISPOSITIONS as readonly string[]).includes(disposition)) {
       throw new Error(`disposition must be one of: ${CLOSE_UNMERGED_DISPOSITIONS.join(', ')}.`);
     }
+    if (args.acknowledgeMissingWorktree !== undefined
+      && typeof args.acknowledgeMissingWorktree !== 'boolean') {
+      throw new Error('acknowledgeMissingWorktree must be a boolean.');
+    }
     const result = await apiFetchCorrelatedMutation(
       '/api/orchestrator/discard-packet',
       {
         packetId: requiredString(args, 'packetId'),
         disposition,
         note: optionalString(args, 'note') || undefined,
+        acknowledgeMissingWorktree: args.acknowledgeMissingWorktree === true,
       },
       'clientMutationId',
     );

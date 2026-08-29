@@ -1869,6 +1869,13 @@
       ]
     },
     {
+      "path": "tests/packet-discard-missing-worktree-real-path.test.ts",
+      "reasons": [
+        "real-path",
+        "worktree"
+      ]
+    },
+    {
       "path": "tests/packet-explainer-priority-real-path.test.ts",
       "reasons": [
         "real-path"

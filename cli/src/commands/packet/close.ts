@@ -27,6 +27,7 @@ interface CloseResponse {
     status?: string;
     laneId?: string;
     worktreeRemoved?: boolean;
+    worktreeCleanup?: 'missing' | 'removed' | 'preserved';
     preservedBranch?: string | null;
   };
   error?: { message?: string } | string;
@@ -38,13 +39,21 @@ function errorMessage(response: CloseResponse | null | undefined): string {
   return 'Packet close was rejected.';
 }
 
-export async function runPacketClose(mode: OutputMode, rest: string[]): Promise<number> {
-  const args = parsePacketArguments(rest, { command: 'close', valueFlags: ['reason', 'note', 'idempotency-key'] });
-  const reason = args.values.reason?.trim();
+export async function runPacketClose(
+  mode: OutputMode,
+  rest: string[],
+  command: 'close' | 'discard' = 'close',
+): Promise<number> {
+  const args = parsePacketArguments(rest, {
+    command,
+    valueFlags: ['reason', 'note', 'idempotency-key'],
+    booleanFlags: ['acknowledge-missing-worktree'],
+  });
+  const reason = args.values.reason?.trim() || (command === 'discard' ? 'wontfix' : '');
   if (!reason || !(DISPOSITIONS as readonly string[]).includes(reason)) {
     throw new CliError(
       'invalid_args',
-      'o8 packet close requires --reason adopted_elsewhere|superseded|spec_changed|wontfix.',
+      `o8 packet ${command} requires --reason adopted_elsewhere|superseded|spec_changed|wontfix.`,
       EXIT.INVALID_ARGS,
       'Example: o8 packet close --reason adopted_elsewhere --note "Implemented in o8-mobile."',
     );
@@ -59,6 +68,7 @@ export async function runPacketClose(mode: OutputMode, rest: string[]): Promise<
       packetId,
       disposition: reason,
       note: args.values.note?.trim() || undefined,
+      acknowledgeMissingWorktree: args.booleans.has('acknowledge-missing-worktree'),
       clientMutationId: args.values['idempotency-key']?.trim() || randomUUID(),
     },
     { timeoutMs: SLOW_MUTATION_TIMEOUT_MS },
@@ -69,23 +79,24 @@ export async function runPacketClose(mode: OutputMode, rest: string[]): Promise<
 
   const result = res.data.result;
   const payload = {
-    schema: 'o8/cli/packet.close/v1',
+    schema: `o8/cli/packet.${command}/v1`,
     packet: {
       id: packetId,
       disposition: result.disposition ?? reason,
       laneId: result.laneId ?? null,
       preservedBranch: result.preservedBranch ?? null,
       worktreeRemoved: result.worktreeRemoved === true,
+      worktreeCleanup: result.worktreeCleanup ?? null,
     },
     note: result.note ?? 'Closed unmerged.',
   };
   if (mode.human) {
-    printHumanHeading('packet close');
+    printHumanHeading(`packet ${command}`);
     printHumanKv([
       ['packet', packetId],
       ['disposition', result.disposition ?? reason],
       ['branch', result.preservedBranch ?? '(none)'],
-      ['worktree', result.worktreeRemoved ? 'removed' : 'preserved or already absent'],
+      ['worktree', result.worktreeCleanup ?? (result.worktreeRemoved ? 'removed' : 'preserved')],
       ['note', result.note ?? 'Closed unmerged.'],
     ]);
   } else {

@@ -415,6 +415,10 @@ export type LaneEventVerb =
   | 'task_contract_missing'
   | 'review_turn_started'
   | 'review_turn_finished'
+  | 'review_turn_stopped'
+  // Operator close receipt. Payload includes packetId, worktreeCleanup,
+  // reason, and whether missing-worktree acknowledgement was supplied.
+  | 'packet_discarded'
   | 'worker_quota_exhausted'
   | 'worker_fallback'
   | 'worker_fallback_terminal'
