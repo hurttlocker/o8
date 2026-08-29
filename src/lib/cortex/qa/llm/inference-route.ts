@@ -113,10 +113,10 @@ export function normalizeLocalInferenceBaseUrl(raw: string): string {
   return raw.trim().replace(/\/+$/, '').replace(/\/v1$/i, '');
 }
 
-function parseLocalInferenceModels(payload: unknown): string[] {
-  if (!payload || typeof payload !== 'object') return [];
+function parseOllamaInferenceModels(payload: unknown): string[] | null {
+  if (!payload || typeof payload !== 'object') return null;
   const models = (payload as { models?: unknown }).models;
-  if (!Array.isArray(models)) return [];
+  if (!Array.isArray(models)) return null;
 
   const names = models
     .map((entry) => {
@@ -133,6 +133,44 @@ function parseLocalInferenceModels(payload: unknown): string[] {
   return Array.from(new Set(names));
 }
 
+function parseOpenAiInferenceModels(payload: unknown): string[] | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const data = (payload as { data?: unknown }).data;
+  if (!Array.isArray(data)) return null;
+
+  const ids = data
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return '';
+      const id = (entry as { id?: unknown }).id;
+      return typeof id === 'string' ? id : '';
+    })
+    .map((id) => id.trim())
+    .filter(Boolean);
+
+  return Array.from(new Set(ids));
+}
+
+async function probeLocalInferenceEndpoint(
+  base: string,
+  path: string,
+  parseModels: (payload: unknown) => string[] | null,
+): Promise<LocalInferenceProbeResult | null> {
+  try {
+    const response = await fetch(`${base}${path}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(LOCAL_LIVENESS_TIMEOUT_MS),
+    });
+    if (!response.ok) return null;
+
+    const payload = await response.json().catch(() => null);
+    const models = parseModels(payload);
+    return models === null ? null : { running: true, models };
+  } catch {
+    return null;
+  }
+}
+
 export function resetLocalInferenceProbeCacheForTests(): void {
   localProbeCache.clear();
 }
@@ -146,20 +184,9 @@ export async function probeLocalInference(baseUrl: string): Promise<LocalInferen
     return { running: cached.running, models: cached.models };
   }
 
-  let result: LocalInferenceProbeResult = { running: false, models: [] };
-  try {
-    const response = await fetch(`${base}/api/tags`, {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-      signal: AbortSignal.timeout(LOCAL_LIVENESS_TIMEOUT_MS),
-    });
-    if (response.ok) {
-      const payload = await response.json().catch(() => null);
-      result = { running: true, models: parseLocalInferenceModels(payload) };
-    }
-  } catch {
-    result = { running: false, models: [] };
-  }
+  const result = await probeLocalInferenceEndpoint(base, '/api/tags', parseOllamaInferenceModels)
+    ?? await probeLocalInferenceEndpoint(base, '/v1/models', parseOpenAiInferenceModels)
+    ?? { running: false, models: [] };
 
   localProbeCache.set(base, { ...result, checkedAt: Date.now() });
   return result;
@@ -168,8 +195,9 @@ export async function probeLocalInference(baseUrl: string): Promise<LocalInferen
 /**
  * OpenAI-compatible chat-completions route. Managed plan token wins first
  * (founder/paid users get the managed fast path). Only free users can reach
- * local, and only when the endpoint recently answered `/api/tags`; dead
- * endpoints are skipped so the caller can fall through to BYO-key/free tiers.
+ * local, and only when the endpoint recently answered a supported model-list
+ * protocol; dead endpoints are skipped so the caller can fall through to
+ * BYO-key/free tiers.
  */
 export async function resolveOpenRouterRoute(
   options: ResolveOpenRouterRouteOptions = {},
