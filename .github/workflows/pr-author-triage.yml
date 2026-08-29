@@ -11,7 +11,9 @@ concurrency:
 permissions:
   contents: read
   issues: write
-  pull-requests: read
+  # addLabels/removeLabel on a PR go through the issues endpoint but are
+  # permission-checked against the PR resource.
+  pull-requests: write
 
 jobs:
   label:

@@ -4,6 +4,10 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: pr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 permissions:
   pull-requests: write
   contents: read
@@ -75,13 +79,25 @@ jobs:
 
             body += `---\n*Automated review — [CI workflow](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions)*`;
 
-            // Post comment
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body,
-            });
+            const isFork = context.payload.pull_request.head.repo.full_name !==
+              `${context.repo.owner}/${context.repo.repo}`;
+
+            if (isFork) {
+              await core.summary.addRaw(body).write();
+              core.info('Fork pull request detected; wrote the report to the job summary.');
+            } else {
+              try {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body,
+                });
+              } catch (error) {
+                if (error.status !== 403) throw error;
+                core.warning(`Could not post the PR review comment: ${error.message}`);
+              }
+            }
 
             // Also post inline review comments on large files
             const reviewComments = [];
@@ -93,7 +109,7 @@ jobs:
               });
             }
 
-            if (reviewComments.length > 0) {
+            if (!isFork && reviewComments.length > 0) {
               try {
                 await github.rest.pulls.createReview({
                   owner: context.repo.owner,

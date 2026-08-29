@@ -20,6 +20,8 @@ Open an issue before starting any non-trivial change. An issue is not a promise 
 
 Keep each pull request to one concern. Explain the problem, why the change belongs in o8, and how you verified it. Include before-and-after images for visible UI changes and call out any test or gate you could not run.
 
+Pull requests from forks wait for maintainer approval before CI reports appear. After approval, the review bot writes its report to the workflow run summary instead of posting a pull request comment because fork workflow tokens are read-only.
+
 Before submitting, run:
 
 ```bash
