@@ -36,7 +36,7 @@ import { buildTerminalTabHandle } from '@/components/desktop/workspace-terminal/
 import { createTerminalActivityTracker } from '@/components/desktop/workspace-terminal/terminal-activity';
 import { readLastOrchestratorThreadTitle } from '@/components/desktop/workspace-terminal/orchestrator-thread-restore';
 import { scrubOrphanSessionTileKeys } from '@/components/desktop/workspace-terminal/use-session-tiles';
-import { canPreserveScopedTabs, computeRestoredTabs, loadInitialTabState, mergeUserSpawnedTabs, resetControllerRefs, shouldSkipRestoreKeyChange } from '@/components/desktop/workspace-terminal/terminal-restore';
+import { applyCreatedTerminalSession, canPreserveScopedTabs, computeRestoredTabs, loadInitialTabState, mergeUserSpawnedTabs, reconcileValidatedTabs, resetControllerRefs, shouldSkipRestoreKeyChange } from '@/components/desktop/workspace-terminal/terminal-restore';
 import {
   buildChatSessionSnapshots,
   buildCommitCanvasTab,
@@ -70,6 +70,43 @@ import { useWorkspaceTabLabelUpdater } from '@/components/desktop/workspace-term
 import { recordSpawnEvent, registerIntrospectionContributor } from '@/lib/feedback/workspace-introspect';
 
 type ControllerProps = WorkspaceTerminalProps;
+
+type TerminalBenchTabsState = {
+  pendingSessions?: { size: number; ids: string[] };
+};
+
+type TerminalRequestCaller =
+  | 'restore-optimistic-dead'
+  | 'restore-validated-dead'
+  | 'default-shell'
+  | 'ws-bootstrap'
+  | 'fallback-shell'
+  | 'new-tab'
+  | 'run-command';
+
+function logTerminalBench(event: string, detail: Record<string, unknown>): void {
+  if (typeof window === 'undefined' || window.__o8TerminalBenchEnabled !== true) return;
+  console.warn('[workspace-terminal:bench]', JSON.stringify({
+    at: performance.now(),
+    event,
+    ...detail,
+  }));
+}
+
+function ownerTabIdFromRequest(requestId: string | undefined): string | null {
+  if (!requestId) return null;
+  return /^workspace-(.+)-\d+$/.exec(requestId)?.[1] ?? null;
+}
+
+function exposeTerminalBenchPendingSessions(pendingSessions: ReadonlySet<string>): void {
+  if (typeof window === 'undefined' || window.__o8TerminalBenchEnabled !== true) return;
+  const benchWindow = window as Window & { __o8TerminalBenchTabs?: TerminalBenchTabsState | null };
+  if (!benchWindow.__o8TerminalBenchTabs) return;
+  benchWindow.__o8TerminalBenchTabs.pendingSessions = {
+    size: pendingSessions.size,
+    ids: Array.from(pendingSessions),
+  };
+}
 
 export function useWorkspaceTerminalController(
   {
@@ -129,6 +166,17 @@ export function useWorkspaceTerminalController(
   const reportedActiveChatSessionKeyRef = useRef<string | null>(null);
   const terminalActivity = useMemo(() => createTerminalActivityTracker({ getTabs: () => tabsRef.current, setTabs }), []);
   useEffect(() => () => terminalActivity.dispose(), [terminalActivity]);
+  const landTerminalTabs = useCallback((site: string, nextTabs: TerminalTab[]) => {
+    const previousById = new Map(tabsRef.current.map((tab) => [tab.id, tab]));
+    const changed = nextTabs.flatMap((tab) => {
+      if (tab.kind !== 'terminal') return [];
+      const from = previousById.get(tab.id)?.tmuxSession ?? null;
+      const to = tab.tmuxSession;
+      return from === to ? [] : [{ tabId: tab.id, from, to }];
+    });
+    if (changed.length > 0) logTerminalBench('tabs-landed', { site, changed });
+    tabsRef.current = nextTabs;
+  }, []);
 
   // A monotonic user-navigation version prevents a late restore from
   // replacing a newer tab selection.
@@ -290,8 +338,9 @@ export function useWorkspaceTerminalController(
     resetControllerRefs({
       restoredRef, restoreSettledRef, previousWsConnectedRef, initialTerminalBootstrapRef,
       reportedRepoScopeRef, reportedChatSessionsSignatureRef, reportedActiveChatSessionKeyRef,
-      detectedPortsRef, pendingCliCommands, pendingRequestRef, saveTimerRef,
+      detectedPortsRef, pendingCliCommands, pendingRequestRef, pendingSessionsRef, saveTimerRef,
     });
+    exposeTerminalBenchPendingSessions(pendingSessionsRef.current);
     if (shouldPreserve) {
       restoredRef.current = true;
       restoreSettledRef.current = true;
@@ -330,6 +379,11 @@ export function useWorkspaceTerminalController(
   }, [effectiveActiveTabId, preferredRepo?.branch, preferredRepo?.localPath, stableRepoScope, stateScope, visibleTabs]);
 
   const persistTabsNow = useCallback((currentTabs: TerminalTab[], currentActiveId: string) => {
+    logTerminalBench('persist-tabs', {
+      nullTerminalTabIds: currentTabs
+        .filter((tab) => tab.kind === 'terminal' && tab.tmuxSession === null)
+        .map((tab) => tab.id),
+    });
     const tabsWithActivity = terminalActivity.merge(currentTabs);
     const persisted = buildPersistedState(tabsWithActivity, currentActiveId);
     const persistenceScope = resolvePersistenceScope(tabsWithActivity);
@@ -350,10 +404,17 @@ export function useWorkspaceTerminalController(
     }, 500);
   }, [persistTabsNow]);
 
-  const requestTerminalForTab = useCallback((tabId: string, command?: string) => {
+  const requestTerminalForTab = useCallback((tabId: string, command: string | undefined, caller: TerminalRequestCaller) => {
     const requestId = `workspace-${tabId}-${Date.now()}`;
+    logTerminalBench('terminal-create-requested', {
+      tabId,
+      requestId,
+      wsConnected: termWsConnectedRef.current,
+      caller,
+    });
     pendingRequestRef.current.set(requestId, tabId);
     pendingSessionsRef.current.add(tabId);
+    exposeTerminalBenchPendingSessions(pendingSessionsRef.current);
     if (command) {
       pendingCliCommands.current.set(tabId, command);
     }
@@ -361,7 +422,7 @@ export function useWorkspaceTerminalController(
   }, [sendTerminalCreate]);
 
   useEffect(() => {
-    tabsRef.current = tabs;
+    landTerminalTabs('react-state-sync', tabs);
     if (restoreSettledRef.current) {
       persistTabs(tabs, effectiveActiveTabId);
     }
@@ -371,7 +432,7 @@ export function useWorkspaceTerminalController(
     // change — would otherwise never be re-persisted until the NEXT tab op.
     // Every settle path calls setRestoreCompletedKey, so the gate opening
     // flushes the accumulated state exactly once.
-  }, [effectiveActiveTabId, persistTabs, restoreCompletedKey, tabs]);
+  }, [effectiveActiveTabId, landTerminalTabs, persistTabs, restoreCompletedKey, tabs]);
 
   // Capture each orchestrator tab's chat-history thread id so the exact
   // conversation survives reload. OrchestratorTab broadcasts
@@ -651,7 +712,7 @@ export function useWorkspaceTerminalController(
     if (!result) return false;
 
     const mergedTabs = mergeUserSpawnedTabs(result.tabs, tabsRef.current, preRestoreTabIds);
-    tabsRef.current = mergedTabs;
+    landTerminalTabs('restore-optimistic', mergedTabs);
     setTabs(mergedTabs);
     // Self-guarding: a user spawn during restore bumped the nav version, so
     // the restored active id is dropped and the user's tab keeps focus.
@@ -666,7 +727,7 @@ export function useWorkspaceTerminalController(
       for (const deadTab of result.deadTerminalTabs) {
         if (cancelled?.()) return false;
         const restoreCommand = deadTab.repo?.localPath ? `cd ${shellQuote(deadTab.repo.localPath)}` : undefined;
-        requestTerminalForTab(deadTab.id, restoreCommand);
+        requestTerminalForTab(deadTab.id, restoreCommand, 'restore-optimistic-dead');
       }
     } else {
       initialTerminalBootstrapRef.current = false;
@@ -682,19 +743,30 @@ export function useWorkspaceTerminalController(
     }, () => cancelled?.() || restoreGeneration !== restoreGenerationRef.current, 'validated').then((validated) => {
       if (!validated || cancelled?.() || restoreGeneration !== restoreGenerationRef.current) return;
       const currentById = new Map(tabsRef.current.map((tab) => [tab.id, tab]));
-      const reconciledTabs = mergeUserSpawnedTabs(validated.tabs, tabsRef.current, new Set(result.tabs.map((tab) => tab.id)));
-      tabsRef.current = reconciledTabs;
+      for (const validatedTab of validated.tabs) {
+        const currentTab = currentById.get(validatedTab.id);
+        if (validatedTab.tmuxSession === null && currentTab?.tmuxSession) {
+          logTerminalBench('validated-restore-preserved-session', {
+            tabId: validatedTab.id,
+            sessionName: currentTab.tmuxSession,
+          });
+        }
+      }
+      const validatedTabs = reconcileValidatedTabs(validated.tabs, tabsRef.current);
+      const reconciledTabs = mergeUserSpawnedTabs(validatedTabs, tabsRef.current, new Set(result.tabs.map((tab) => tab.id)));
+      landTerminalTabs('restore-validated', reconciledTabs);
       setTabs(reconciledTabs);
       setActiveTabIdFromRestore(validated.activeTabId, capturedNavVersion);
       if (!termWsConnectedRef.current) return;
       for (const deadTab of validated.deadTerminalTabs) {
-        if (currentById.get(deadTab.id)?.tmuxSession === null) continue;
+        const currentTab = tabsRef.current.find((tab) => tab.id === deadTab.id);
+        if (!currentTab || currentTab.kind !== 'terminal' || currentTab.tmuxSession || pendingSessionsRef.current.has(deadTab.id)) continue;
         const restoreCommand = deadTab.repo?.localPath ? `cd ${shellQuote(deadTab.repo.localPath)}` : undefined;
-        requestTerminalForTab(deadTab.id, restoreCommand);
+        requestTerminalForTab(deadTab.id, restoreCommand, 'restore-validated-dead');
       }
     });
     return result.restoredAny;
-  }, [createDefaultChatTab, defaultTab, requestTerminalForTab, sendTerminalAttach, setActiveTabIdFromRestore]);
+  }, [createDefaultChatTab, defaultTab, landTerminalTabs, requestTerminalForTab, sendTerminalAttach, setActiveTabIdFromRestore]);
 
   useEffect(() => {
     if (restoredRef.current) return;
@@ -743,7 +815,7 @@ export function useWorkspaceTerminalController(
             setActiveTabId(defaultShell.id);
             if (termWsConnectedRef.current) {
               initialTerminalBootstrapRef.current = true;
-              requestTerminalForTab(defaultShell.id);
+              requestTerminalForTab(defaultShell.id, undefined, 'default-shell');
             }
           }
         } else {
@@ -794,7 +866,7 @@ export function useWorkspaceTerminalController(
         continue;
       }
       const restoreCommand = tab.repo?.localPath ? `cd ${shellQuote(tab.repo.localPath)}` : undefined;
-      requestTerminalForTab(tab.id, restoreCommand);
+      requestTerminalForTab(tab.id, restoreCommand, 'ws-bootstrap');
     }
   }, [requestTerminalForTab, sendTerminalAttach, termWsConnected]);
 
@@ -840,7 +912,7 @@ export function useWorkspaceTerminalController(
         setTabs([fallbackShell]);
         setActiveTabIdFromRestore(fallbackShell.id, capturedNavVersion);
         if (termWsConnected) {
-          requestTerminalForTab(fallbackShell.id);
+          requestTerminalForTab(fallbackShell.id, undefined, 'fallback-shell');
         }
       })();
     }, 250);
@@ -899,32 +971,91 @@ export function useWorkspaceTerminalController(
   }, [createDefaultOrchestratorTab, defaultTab, tabs]);
 
   const handleSessionCreated = useCallback((sessionName: string, requestId?: string) => {
+    const ownerTabId = ownerTabIdFromRequest(requestId);
     const directTabId = requestId ? pendingRequestRef.current.get(requestId) : undefined;
     if (requestId && !directTabId) {
-      // The tab was closed before this session arrived — detach the orphan.
-      if (requestId) sendTerminalDetach(sessionName);
+      const ownerTab = ownerTabId
+        ? tabsRef.current.find((tab) => tab.id === ownerTabId && tab.kind === 'terminal')
+        : null;
+      if (ownerTab?.tmuxSession === sessionName) {
+        logTerminalBench('terminal-created', {
+          tabId: ownerTab.id,
+          requestId,
+          sessionName,
+          outcome: 'mapped',
+          duplicate: true,
+        });
+        return true;
+      }
+      logTerminalBench('terminal-created', {
+        tabId: ownerTabId,
+        requestId,
+        sessionName,
+        outcome: 'unknown-request',
+      });
+      console.warn('[workspace-terminal] created ack dropped', {
+        requestId,
+        sessionName,
+        reason: 'unknown-request',
+      });
+      // Only legacy non-owner requests can create an orphan attachment. An
+      // owner-keyed session remains the tab's deterministic live session.
+      if (!ownerTabId) sendTerminalDetach(sessionName);
       return false;
     }
     if (requestId) pendingRequestRef.current.delete(requestId);
-    if (directTabId) pendingSessionsRef.current.delete(directTabId);
+    if (directTabId) {
+      pendingSessionsRef.current.delete(directTabId);
+      exposeTerminalBenchPendingSessions(pendingSessionsRef.current);
+    }
 
     const previous = tabsRef.current;
     const pendingIndex = directTabId
       ? previous.findIndex((tab) => tab.id === directTabId && tab.kind === 'terminal' && tab.tmuxSession === null)
       : previous.findIndex((tab) => tab.kind === 'terminal' && tab.tmuxSession === null);
     if (pendingIndex < 0) {
-      if (requestId && directTabId) sendTerminalDetach(sessionName);
+      const directTab = directTabId
+        ? previous.find((tab) => tab.id === directTabId && tab.kind === 'terminal')
+        : null;
+      if (directTab?.tmuxSession === sessionName) {
+        logTerminalBench('terminal-created', {
+          tabId: directTab.id,
+          requestId: requestId ?? null,
+          sessionName,
+          outcome: 'mapped',
+          duplicate: true,
+        });
+        return true;
+      }
+      logTerminalBench('terminal-created', {
+        tabId: directTabId ?? null,
+        requestId: requestId ?? null,
+        sessionName,
+        outcome: 'no-pending-tab',
+      });
+      console.warn('[workspace-terminal] created ack dropped', {
+        requestId,
+        sessionName,
+        reason: 'no-pending-tab',
+      });
+      if (requestId && directTabId && !ownerTabId) sendTerminalDetach(sessionName);
       return false;
     }
     const updated = [...previous];
     const tab = updated[pendingIndex];
     updated[pendingIndex] = { ...tab, tmuxSession: sessionName };
-    tabsRef.current = updated;
-    setTabs(updated);
+    logTerminalBench('terminal-created', {
+      tabId: tab.id,
+      requestId: requestId ?? null,
+      sessionName,
+      outcome: 'mapped',
+    });
+    landTerminalTabs('created-ack', updated);
+    setTabs((currentTabs) => applyCreatedTerminalSession(currentTabs, tab.id, sessionName));
     // Flush the crash-recovery pointer now, before the 500 ms UI-state debounce.
     persistTabsNow(updated, activeTabId || updated[pendingIndex]?.id || '');
     return true;
-  }, [activeTabId, persistTabsNow, sendTerminalDetach]);
+  }, [activeTabId, landTerminalTabs, persistTabsNow, sendTerminalDetach]);
 
   const openWorkspaceCliChatSession = useCallback((options: Parameters<TerminalTabHandle['openCliChatSession']>[0]) => {
     const result = computeCliChatSession(options, tabsRef.current, activeTabId);
@@ -1007,7 +1138,7 @@ export function useWorkspaceTerminalController(
     tabsRef.current = nextTabs;
     setTabs(nextTabs);
     setActiveTabIdFromUser(result.activeTabId);
-    requestTerminalForTab(result.newTab.id, result.cliCommand ?? undefined);
+    requestTerminalForTab(result.newTab.id, result.cliCommand ?? undefined, 'new-tab');
     return result.activeTabId;
   }, [requestTerminalForTab, setActiveTabIdFromUser]);
 
@@ -1170,7 +1301,7 @@ export function useWorkspaceTerminalController(
     } else {
       setTabs((previous) => [...previous, target.newTab!]);
       setActiveTabIdFromUser(target.newTab!.id);
-      requestTerminalForTab(target.newTab!.id, command);
+      requestTerminalForTab(target.newTab!.id, command, 'run-command');
     }
   }, [requestTerminalForTab, sendTerminalInput, setActiveTabIdFromUser, tabs]);
 

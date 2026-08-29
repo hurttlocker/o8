@@ -202,6 +202,7 @@ function WorkspaceTerminalPanelsBase({
         ) : tab.tmuxSession ? (
           <TerminalResidentPanel
             key={tab.tmuxSession}
+            tabId={tab.id}
             tmuxSession={tab.tmuxSession}
             panelRefs={panelRefs}
             sendTerminalAttach={sendTerminalAttach}
@@ -465,6 +466,7 @@ const FleetCanvasResidentPanel = memo(function FleetCanvasResidentPanel({ active
 });
 
 const TerminalResidentPanel = memo(function TerminalResidentPanel({
+  tabId,
   tmuxSession,
   panelRefs,
   sendTerminalAttach,
@@ -474,6 +476,7 @@ const TerminalResidentPanel = memo(function TerminalResidentPanel({
   sendTerminalDetach,
   active,
 }: {
+  tabId: string;
   tmuxSession: string;
   panelRefs: MutableRefObject<Map<string, XtermPanelHandle>>;
   sendTerminalAttach: WorkspaceTerminalPanelsProps['sendTerminalAttach'];
@@ -483,6 +486,23 @@ const TerminalResidentPanel = memo(function TerminalResidentPanel({
   sendTerminalDetach: WorkspaceTerminalPanelsProps['sendTerminalDetach'];
   active: boolean;
 }) {
+  useEffect(() => {
+    if (window.__o8TerminalBenchEnabled !== true) return;
+    console.warn('[workspace-terminal:bench]', JSON.stringify({
+      at: performance.now(),
+      event: 'terminal-panel-mounted',
+      tabId,
+      sessionName: tmuxSession,
+    }));
+    return () => {
+      console.warn('[workspace-terminal:bench]', JSON.stringify({
+        at: performance.now(),
+        event: 'terminal-panel-unmounted',
+        tabId,
+        sessionName: tmuxSession,
+      }));
+    };
+  }, [tabId, tmuxSession]);
   return (
     <XtermPanel
       ref={(handle) => {

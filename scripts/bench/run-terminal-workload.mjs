@@ -94,7 +94,10 @@ function browserInitScript() {
   window.__o8TerminalPerf = { startedAt: performance.now(), frames: 0, longTasks: [], longTaskSupported: false };
   window.addEventListener('o8:workspace-active-label', (event) => {
     const detail = event.detail;
-    if (detail?.activeWorkspaceSurface && Array.isArray(detail.tabs)) window.__o8TerminalBenchTabs = detail;
+    if (detail?.activeWorkspaceSurface && Array.isArray(detail.tabs)) {
+      const pendingSessions = window.__o8TerminalBenchTabs?.pendingSessions;
+      window.__o8TerminalBenchTabs = { ...detail, ...(pendingSessions ? { pendingSessions } : {}) };
+    }
   });
   window.__o8TerminalPerf.longTaskSupported = PerformanceObserver.supportedEntryTypes?.includes('longtask') ?? false;
   if (window.__o8TerminalPerf.longTaskSupported) {
@@ -128,6 +131,7 @@ async function dashboardDiagnostic(page, seededTabs = []) {
       workspaceCount: document.querySelectorAll('[data-o8-workspace]').length,
       workspaceRect: rect ? { width: rect.width, height: rect.height } : null,
       tabs: window.__o8TerminalBenchTabs?.tabs ?? null,
+      pendingSessions: window.__o8TerminalBenchTabs?.pendingSessions ?? null,
       activeTabId: window.__o8TerminalBenchTabs?.tabId ?? null,
       chipIds: Array.from(document.querySelectorAll('[data-o8-workspace-tab]')).map((element) => element.getAttribute('data-o8-workspace-tab')),
       panelSessions: Array.from(document.querySelectorAll('[data-o8-term-panel]')).map((element) => ({
@@ -662,7 +666,7 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
     page = await context.newPage();
     page.on('console', (message) => {
       browserConsole.push({ type: message.type(), text: message.text() });
-      if (browserConsole.length > 200) browserConsole.shift();
+      if (browserConsole.length > 2000) browserConsole.shift();
     });
     await page.addInitScript(browserInitScript);
     let ui = await waitForSeededDashboard(page, `http://127.0.0.1:${stack.apiPort}`, seeded);
