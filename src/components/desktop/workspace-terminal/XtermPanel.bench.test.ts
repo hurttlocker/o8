@@ -199,7 +199,12 @@ describe('XtermPanel terminal workload instrumentation', () => {
       ref: panelRef,
     })));
     const visibleCall = hiddenProps.sendTerminalVisibility.mock.calls.findLast((call) => call[1] === true);
-    await act(async () => panelRef.current?.visibilityReady?.(visibleCall?.[2]?.epoch ?? -1));
+    await act(async () => panelRef.current?.applyResync?.(
+      btoa('snapshot'),
+      visibleCall?.[2]?.epoch ?? -1,
+      false,
+      'tmux',
+    ));
     await act(async () => panelRef.current?.writeData(btoa('shown')));
 
     const session = window.__o8TerminalWriteStats?.sessions['cortex-dash-bench-fixture'];
@@ -211,11 +216,21 @@ describe('XtermPanel terminal workload instrumentation', () => {
 
   it('flushes hidden bytes once after the visibility acknowledgement', async () => {
     const panelRef = createRef<XtermPanelHandle>();
-    const props = { ...panelProps(false), sendTerminalVisibility: vi.fn() };
+    const props = { ...panelProps(true), sendTerminalVisibility: vi.fn() };
     await act(async () => {
       root.render(createElement(XtermPanel, { ...props, ref: panelRef }));
       await Promise.resolve();
     });
+    const initialCall = props.sendTerminalVisibility.mock.calls.findLast((call) => call[1] === true);
+    await act(async () => panelRef.current?.applyResync?.(
+      btoa('snapshot'),
+      initialCall?.[2]?.epoch ?? -1,
+      false,
+      'tmux',
+    ));
+    xtermMock.writes.length = 0;
+    xtermMock.writeCallbacks.length = 0;
+    await act(async () => root.render(createElement(XtermPanel, { ...props, visible: false, ref: panelRef })));
     await act(async () => panelRef.current?.writeData(btoa('one')));
     await act(async () => panelRef.current?.writeData(btoa('two')));
     expect(xtermMock.writes).toHaveLength(0);
@@ -228,13 +243,41 @@ describe('XtermPanel terminal workload instrumentation', () => {
     expect(new TextDecoder().decode(xtermMock.writes[0])).toBe('onetwo');
   });
 
-  it('requests resync after hidden overflow and queues input until the snapshot paints', async () => {
+  it('requests an initial resync when a freshly mounted hidden panel becomes visible', async () => {
     const panelRef = createRef<XtermPanelHandle>();
     const props = { ...panelProps(false), sendTerminalVisibility: vi.fn() };
     await act(async () => {
       root.render(createElement(XtermPanel, { ...props, ref: panelRef }));
       await Promise.resolve();
     });
+
+    await act(async () => root.render(createElement(XtermPanel, {
+      ...props,
+      visible: true,
+      ref: panelRef,
+    })));
+
+    const visibleCall = props.sendTerminalVisibility.mock.calls.findLast((call) => call[1] === true);
+    expect(visibleCall?.[2]).toMatchObject({ needsResync: true });
+  });
+
+  it('requests resync after hidden overflow and queues input until the snapshot paints', async () => {
+    const panelRef = createRef<XtermPanelHandle>();
+    const props = { ...panelProps(true), sendTerminalVisibility: vi.fn() };
+    await act(async () => {
+      root.render(createElement(XtermPanel, { ...props, ref: panelRef }));
+      await Promise.resolve();
+    });
+    const initialCall = props.sendTerminalVisibility.mock.calls.findLast((call) => call[1] === true);
+    await act(async () => panelRef.current?.applyResync?.(
+      btoa('snapshot'),
+      initialCall?.[2]?.epoch ?? -1,
+      false,
+      'tmux',
+    ));
+    xtermMock.writes.length = 0;
+    xtermMock.writeCallbacks.length = 0;
+    await act(async () => root.render(createElement(XtermPanel, { ...props, visible: false, ref: panelRef })));
     await act(async () => panelRef.current?.writeData(btoa('x'.repeat(256 * 1024 + 16))));
     expect(window.__o8TerminalDiagnostics?.[0]).toMatchObject({
       code: 'terminal_client_hidden_overflow',

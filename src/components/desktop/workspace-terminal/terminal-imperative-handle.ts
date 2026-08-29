@@ -16,6 +16,7 @@ import {
   computeChatRuntimeStatusUpdate,
   detectLocalhostPreviews,
 } from '@/components/desktop/workspace-terminal/terminal-tab-handlers';
+import { recordTerminalBenchEvent } from '@/components/desktop/workspace-terminal/terminal-bench-instrumentation';
 
 export interface ImperativeHandleDeps {
   tabsRef: React.RefObject<TerminalTab[]>;
@@ -74,7 +75,17 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
       deps.panelRefs.current.get(sessionName)?.visibilityReady?.(epoch);
     },
     applyTerminalResync: (sessionName, data, epoch, historyTruncated, source) => {
-      deps.panelRefs.current.get(sessionName)?.applyResync?.(data, epoch, historyTruncated, source);
+      const panel = deps.panelRefs.current.get(sessionName);
+      if (!panel?.applyResync) {
+        recordTerminalBenchEvent('apply-resync-no-panel-ref', {
+          sessionName,
+          epoch,
+          historyTruncated,
+          source,
+        });
+        return;
+      }
+      panel.applyResync(data, epoch, historyTruncated, source);
     },
     recordTerminalDiagnostic: (diagnostic) => {
       const sessionName = typeof diagnostic.sessionName === 'string' ? diagnostic.sessionName : '';
