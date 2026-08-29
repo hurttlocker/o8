@@ -14,7 +14,7 @@ type TruthCliQuery =
 interface TruthAnswerPayload {
   summary: string;
   receipt: PacketReceipt;
-  rawReceiptJson: string;
+  receiptRaw: string;
   artifactId: string;
 }
 
@@ -92,7 +92,7 @@ export function parseTruthArguments(
     if (positionals.length > 0) invalid('o8 truth merged accepts no positional arguments.');
     const repo = values.get('--repo')?.trim() ?? '';
     const since = values.get('--since')?.trim() ?? '';
-    if (!repo || !since) invalid('Use `o8 truth merged --repo <name|remote> --since <iso|duration>`.');
+    if (!repo || !since) invalid('Use `o8 truth merged --repo <name|remote|path> --since <iso|duration>`.');
     return {
       query: { kind: 'merged-since', repo, since: parseTruthSince(since, nowMs) },
       saveReceiptsDir,
@@ -150,7 +150,7 @@ function saveReceipt(answer: TruthAnswerPayload, directory: string): {
   mkdirSync(outputDir, { recursive: true, mode: 0o700 });
   const outputPath = join(outputDir, `${encodeURIComponent(answer.receipt.receiptId)}.json`);
   try {
-    writeFileSync(outputPath, answer.rawReceiptJson, {
+    writeFileSync(outputPath, answer.receiptRaw, {
       encoding: 'utf8',
       flag: 'wx',
       mode: 0o600,

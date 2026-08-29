@@ -211,7 +211,11 @@ beforeAll(async () => {
         authorization: `Bearer ${operatorToken}`,
         'content-type': 'application/json',
       },
-      body: JSON.stringify({ action: 'mint', label: 'truth CLI', repoGrants: ['repo-a'] }),
+      body: JSON.stringify({
+        action: 'mint',
+        label: 'truth CLI',
+        repoGrants: ['example.test/team/repo-a'],
+      }),
     },
   ));
   expect(mintedResponse.status).toBe(200);
@@ -280,7 +284,7 @@ describe.sequential('truth CLI real path', () => {
       schema: string;
       answers: Array<{
         receipt: PacketReceipt;
-        rawReceiptJson: string;
+        receiptRaw: string;
         savedReceiptPath: string;
         verifyCommand: string;
       }>;
@@ -288,8 +292,8 @@ describe.sequential('truth CLI real path', () => {
     expect(payload.schema).toBe('o8/cli/truth.query/v1');
     const answer = payload.answers.find((candidate) => candidate.receipt.receiptId === receiptA.receiptId);
     expect(answer).toBeDefined();
-    expect(answer!.rawReceiptJson).toBe(readFileSync(receiptAPath, 'utf8'));
-    expect(readFileSync(answer!.savedReceiptPath, 'utf8')).toBe(readFileSync(receiptAPath, 'utf8'));
+    expect(answer!.receiptRaw).toBe(readFileSync(receiptAPath, 'utf8'));
+    expect(readFileSync(answer!.savedReceiptPath)).toEqual(readFileSync(receiptAPath));
     expect(answer!.verifyCommand).toBe(`o8 verify ${answer!.savedReceiptPath}`);
 
     const denied = await runCli(['truth', 'merged', '--repo', 'repo-b', '--since', '7d']);

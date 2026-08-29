@@ -257,7 +257,7 @@ export async function runBroadcast(
       'unknown_broadcast_token_action',
       `Unknown broadcast token action: ${action ?? '(none)'}`,
       EXIT.INVALID_ARGS,
-      'Use `o8 broadcast token mint [--label name] [--repo name|remote]` or `o8 broadcast token revoke <id>`.',
+      'Use `o8 broadcast token mint [--label name] [--repo remote|path|name:<repo>]` or `o8 broadcast token revoke <id>`.',
     );
   }
   const unknownFlag = rest.find((value) => (

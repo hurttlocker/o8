@@ -40,7 +40,7 @@ describe('o8 truth MCP handler', () => {
       answers: [{
         summary: 'Packet packet-a merged.',
         receipt: { receiptId: 'receipt-a' },
-        rawReceiptJson: '{"receiptId":"receipt-a"}\n',
+        receiptRaw: '{"receiptId":"receipt-a"}\n',
         artifactId: 'artifact-a',
       }],
       asOf: '2026-08-29T20:00:00.000Z',

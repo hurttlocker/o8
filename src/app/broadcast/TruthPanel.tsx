@@ -9,7 +9,7 @@ type TruthQueryKind = 'merged-since' | 'packet' | 'approvals';
 interface TruthAnswer {
   summary: string;
   receipt: PacketReceipt;
-  rawReceiptJson: string;
+  receiptRaw: string;
   artifactId: string;
 }
 
@@ -124,7 +124,7 @@ function approvers(receipt: PacketReceipt): string {
 }
 
 function downloadReceipt(answer: TruthAnswer): void {
-  const blob = new Blob([answer.rawReceiptJson], { type: 'application/json' });
+  const blob = new Blob([answer.receiptRaw], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;

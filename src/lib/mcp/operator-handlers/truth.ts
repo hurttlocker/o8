@@ -20,7 +20,7 @@ export const TRUTH_TOOLS: McpTool[] = [{
     additionalProperties: false,
     properties: {
       kind: { type: 'string', enum: TRUTH_KINDS },
-      repo: { type: 'string', description: 'Repository name or normalized remote for merged-since.' },
+      repo: { type: 'string', description: 'Repository name, normalized remote, or path for merged-since.' },
       since: { type: 'string', description: 'ISO timestamp for merged-since.' },
       packetId: { type: 'string' },
       issueNumber: { type: 'integer', minimum: 1 },

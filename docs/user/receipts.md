@@ -38,7 +38,8 @@ The same operations are available to an operator MCP client as
 
 An operator can mint a spectator token that can read signed answers for only
 the named repositories. Repeat `--repo` to grant more than one repository. A
-grant can be the receipt's repository name or normalized remote.
+grant should normally be the receipt's normalized remote or the absolute path
+of a repository registered in o8.
 
 ```bash
 o8 broadcast token mint --label "release spectator" \
@@ -77,6 +78,13 @@ machine to verify the answer without access to the o8 server. Repository grants
 are enforced before results leave the server. A spectator with no grants gets a
 403 response, and packet or approval queries omit receipts from ungranted
 repositories.
+
+Prefer remote or absolute-path grants. For a single local repository with no
+remote, use the explicit `name:<repo>` form, such as `--repo name:repository`.
+The name must resolve to exactly one registered repository path, and it covers
+only remote-less receipts whose artifact was recorded for that path. If no
+registered path or more than one registered path has that name, truth queries
+fail with `grant_ambiguous`; a bare repository name does not grant truth access.
 
 ## Publish the public key
 

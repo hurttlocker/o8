@@ -4,6 +4,7 @@ import type { ArtifactRecord } from '@/lib/artifacts/store';
 import type { StoredPacketReceipt } from './packet-receipt';
 import type { PacketReceipt } from './types';
 import {
+  resolveTruthGrantScope,
   resolveTruthQuery,
   type TruthPacketRecord,
   type TruthQueryStores,
@@ -83,6 +84,7 @@ function storesFixture(
       : receipts,
     listPackets: () => packets,
     listMirroredIssues: mirroredIssues,
+    listRegisteredRepos: async () => [],
     now: () => NOW,
   };
 }
@@ -123,7 +125,7 @@ describe('resolveTruthQuery', () => {
     }, {}, stores);
     expect(pageOne.answers).toHaveLength(1);
     expect(pageOne.answers[0]!.receipt).toBe(first.receipt);
-    expect(pageOne.answers[0]!.rawReceiptJson).toBe(first.rawReceiptJson);
+    expect(pageOne.answers[0]!.receiptRaw).toBe(first.rawReceiptJson);
     expect(pageOne.nextCursor).toEqual(expect.any(String));
 
     const pageTwo = resolveTruthQuery({
@@ -207,5 +209,38 @@ describe('resolveTruthQuery', () => {
     expect(result.answers[0]!.receipt).toBe(stored.receipt);
     expect(result.answers[0]!.summary).toContain('operator approved');
     expect(result.asOf).toBe(NOW.toISOString());
+  });
+
+  it('binds an explicit name grant to one registered path and rejects collisions', async () => {
+    const registered = receiptFixture({
+      artifactId: 'artifact-name-registered',
+      packetId: 'packet-name-registered',
+      repoName: 'repo',
+      repoRemote: '',
+      repoPath: '/left/repo',
+      createdAt: '2026-08-29T20:00:00.000Z',
+    });
+    const colliding = receiptFixture({
+      artifactId: 'artifact-name-colliding',
+      packetId: 'packet-name-colliding',
+      repoName: 'repo',
+      repoRemote: '',
+      repoPath: '/right/repo',
+      createdAt: '2026-08-29T20:01:00.000Z',
+    });
+    const stores = storesFixture([registered, colliding]);
+    stores.listRegisteredRepos = async () => [{ name: 'repo', repoPath: '/left/repo' }];
+    const scope = await resolveTruthGrantScope(['name:repo'], stores);
+    expect(scope.receiptCovered(registered)).toBe(true);
+    expect(scope.receiptCovered(colliding)).toBe(false);
+
+    stores.listRegisteredRepos = async () => [
+      { name: 'repo', repoPath: '/left/repo' },
+      { name: 'repo', repoPath: '/right/repo' },
+    ];
+    await expect(resolveTruthGrantScope(['name:repo'], stores)).rejects.toMatchObject({
+      code: 'grant_ambiguous',
+      message: expect.stringContaining('matches 2 registered repository paths'),
+    });
   });
 });

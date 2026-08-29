@@ -1,5 +1,7 @@
 import 'server-only';
 
+import path from 'node:path';
+
 import { listMirroredGitHubIssuesByNumber } from '@/lib/github-broker/store';
 import { listRecentMissions } from '@/lib/db/missions-store';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
@@ -7,7 +9,9 @@ import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import {
   repoGrantMatchesIdentity,
   repoGrantMatchesRequest,
+  repoNameFromGrant,
 } from '@/lib/broadcast/repo-grants';
+import { readRepoPathRegistry } from '@/lib/repos/repo-path-registry';
 import {
   listStoredPacketReceipts,
   type StoredPacketReceipt,
@@ -44,7 +48,7 @@ export interface TruthAnswer {
   /** The object parsed once from the stored receipt artifact. */
   receipt: PacketReceipt;
   /** Exact UTF-8 text read from the stored receipt artifact. */
-  rawReceiptJson: string;
+  receiptRaw: string;
   artifactId: string;
 }
 
@@ -72,6 +76,7 @@ export interface TruthQueryStores {
     title: string;
     url: string;
   }>;
+  listRegisteredRepos: () => Promise<Array<{ name: string; repoPath: string }>>;
   now: () => Date;
 }
 
@@ -81,12 +86,23 @@ export interface ResolveTruthQueryOptions {
 
 export class TruthQueryError extends Error {
   constructor(
-    readonly code: 'invalid_query' | 'invalid_cursor',
+    readonly code: 'invalid_query' | 'invalid_cursor' | 'grant_ambiguous',
     message: string,
   ) {
     super(message);
     this.name = 'TruthQueryError';
   }
+}
+
+async function listRegisteredTruthRepos(): Promise<Array<{ name: string; repoPath: string }>> {
+  const registry = await readRepoPathRegistry();
+  if (!registry.ok) throw new Error(registry.message);
+  return registry.repos.map((repo) => ({
+    name: typeof repo.name === 'string' && repo.name.trim()
+      ? repo.name.trim()
+      : path.basename(repo.path),
+    repoPath: repo.path,
+  }));
 }
 
 function packetRecord(packet: OrchestratorPacket, repoPath: string | null): TruthPacketRecord {
@@ -117,6 +133,7 @@ const DEFAULT_STORES: TruthQueryStores = {
   listReceipts: listStoredPacketReceipts,
   listPackets: listStoredPackets,
   listMirroredIssues: listMirroredGitHubIssuesByNumber,
+  listRegisteredRepos: listRegisteredTruthRepos,
   now: () => new Date(),
 };
 
@@ -166,36 +183,68 @@ function assertDate(value: string, field: string): string {
 }
 
 function receiptMatchesRepo(stored: StoredPacketReceipt, repo: string): boolean {
-  return repoGrantMatchesIdentity({
-    grant: repo,
-    repoName: stored.receipt.repo.name,
-    repoRemote: stored.receipt.repo.remote,
-    repoPath: stored.artifact.repoPath,
-  });
+  const normalizedRepo = repo.trim();
+  if (path.isAbsolute(normalizedRepo)) {
+    return Boolean(stored.artifact.repoPath)
+      && path.resolve(stored.artifact.repoPath!) === path.resolve(normalizedRepo);
+  }
+  const remote = stored.receipt.repo.remote?.trim();
+  return stored.receipt.repo.name.trim().toLowerCase() === normalizedRepo.toLowerCase()
+    || Boolean(remote && repoGrantMatchesIdentity({
+      grant: normalizedRepo,
+      repoName: stored.receipt.repo.name,
+      repoRemote: remote,
+      repoPath: stored.artifact.repoPath,
+    }));
 }
 
-export function receiptCoveredByRepoGrants(
-  stored: StoredPacketReceipt,
-  repoGrants: readonly string[],
-): boolean {
-  return repoGrants.some((grant) => repoGrantMatchesIdentity({
-    grant,
-    repoName: stored.receipt.repo.name,
-    repoRemote: stored.receipt.repo.remote,
-    repoPath: stored.artifact.repoPath,
-  }));
+interface ResolvedRepoGrant {
+  grant: string;
+  registeredRepoPath: string | null;
 }
 
-export function repoGrantsCoverRequestedRepo(
+export interface TruthGrantScope {
+  receiptCovered: (stored: StoredPacketReceipt) => boolean;
+  coversRequestedRepo: (requestedRepo: string) => boolean;
+}
+
+export async function resolveTruthGrantScope(
   repoGrants: readonly string[],
-  requestedRepo: string,
   stores: TruthQueryStores = DEFAULT_STORES,
-): boolean {
-  if (repoGrants.some((grant) => repoGrantMatchesRequest(grant, requestedRepo))) return true;
-  return stores.listReceipts().some((stored) => (
-    receiptMatchesRepo(stored, requestedRepo)
-    && receiptCoveredByRepoGrants(stored, repoGrants)
+): Promise<TruthGrantScope> {
+  const hasNameGrant = repoGrants.some((grant) => repoNameFromGrant(grant) !== null);
+  const registeredRepos = hasNameGrant ? await stores.listRegisteredRepos() : [];
+  const resolved: ResolvedRepoGrant[] = repoGrants.map((grant) => {
+    const repoName = repoNameFromGrant(grant);
+    if (!repoName) return { grant, registeredRepoPath: null };
+    const matches = registeredRepos.filter((repo) => repo.name.trim().toLowerCase() === repoName);
+    if (matches.length !== 1) {
+      throw new TruthQueryError(
+        'grant_ambiguous',
+        `Repository grant "name:${repoName}" matches ${matches.length} registered repository paths. Name grants require exactly one registered local repository; use a normalized remote or absolute path grant.`,
+      );
+    }
+    return { grant, registeredRepoPath: matches[0]!.repoPath };
+  });
+  const receiptCovered = (stored: StoredPacketReceipt) => resolved.some((binding) => (
+    repoGrantMatchesIdentity({
+      grant: binding.grant,
+      repoName: stored.receipt.repo.name,
+      repoRemote: stored.receipt.repo.remote,
+      repoPath: stored.artifact.repoPath,
+      registeredRepoPath: binding.registeredRepoPath,
+    })
   ));
+  return {
+    receiptCovered,
+    coversRequestedRepo: (requestedRepo) => resolved.some((binding) => repoGrantMatchesRequest({
+      grant: binding.grant,
+      requestedRepo,
+      registeredRepoPath: binding.registeredRepoPath,
+    })) || stores.listReceipts().some((stored) => (
+      receiptMatchesRepo(stored, requestedRepo) && receiptCovered(stored)
+    )),
+  };
 }
 
 function receiptMatchesMirror(stored: StoredPacketReceipt, repoFullName: string): boolean {
@@ -307,7 +356,7 @@ export function resolveTruthQuery(
     answers: page.map((stored) => ({
       summary: summary(stored.receipt),
       receipt: stored.receipt,
-      rawReceiptJson: stored.rawReceiptJson,
+      receiptRaw: stored.rawReceiptJson,
       artifactId: stored.artifact.id,
     })),
     asOf: stores.now().toISOString(),

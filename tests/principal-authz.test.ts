@@ -19,7 +19,7 @@
  * The worker-token file + ws-token file are written to a temp data dir BEFORE any
  * import, because worker-token.ts and the DB resolve their dir at module load.
  */
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import os from 'node:os';
 import { join } from 'node:path';
@@ -27,8 +27,6 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
-import type { PacketReceipt, UnsignedPacketReceipt } from '@/lib/receipts/types';
-
 // Realtime publisher fans out over WS + touches the network; stub it so the
 // approvals handler runs its GOVERNANCE logic without side effects.
 vi.mock('@/lib/realtime/publisher', () => ({
@@ -82,7 +80,6 @@ const broadcastAutomationSay = await import('@/app/api/broadcast/automation-say/
 const broadcastWhy = await import('@/app/api/broadcast/why/route');
 const broadcastSnapshot = await import('@/app/api/broadcast/snapshot/route');
 const broadcastTokens = await import('@/app/api/broadcast/tokens/route');
-const truth = await import('@/app/api/orchestrator/truth/route');
 const { createTestApproval, getApproval } = await import('@/lib/approvals/store');
 const { panelGateMiddleware } = await import('@/middleware');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
@@ -106,13 +103,12 @@ type Principal = 'operator' | 'worker' | 'spectator';
  *  CLI actually calls the loopback API. */
 function req(
   url: string,
-  { principal, method = 'POST', body, workerPacketId, workerToken, spectatorToken }: {
+  { principal, method = 'POST', body, workerPacketId, workerToken }: {
     principal: Principal;
     method?: string;
     body?: unknown;
     workerPacketId?: string;
     workerToken?: string;
-    spectatorToken?: string;
   },
 ): NextRequest {
   const headers: Record<string, string> = { host: 'localhost:3001' };
@@ -122,7 +118,7 @@ function req(
   } else if (principal === 'operator') {
     headers.authorization = `Bearer ${WS_TOKEN}`;
   } else {
-    headers.authorization = `Bearer ${spectatorToken ?? SPECTATOR_TOKEN}`;
+    headers.authorization = `Bearer ${SPECTATOR_TOKEN}`;
   }
   return new NextRequest(url, {
     method,
@@ -387,125 +383,6 @@ describe('principal-authz — Broadcast spectator is read-only through the real 
       error: { code: 'broadcast_operator_forbidden' },
     });
   });
-
-  it('answers all three repo-scoped truth queries and preserves signed receipt bytes', async () => {
-    const fixture = await createTruthFixture();
-    const mintedResponse = await broadcastTokens.POST(req('http://localhost:3001/api/broadcast/tokens', {
-      principal: 'operator',
-      body: { action: 'mint', label: 'repo A truth', repoGrants: ['repo-a'] },
-    }));
-    const minted = await mintedResponse.json() as { bearer: string };
-
-    const mergedRequest = req(
-      'http://localhost:3001/api/orchestrator/truth?kind=merged-since&repo=repo-a&since=2026-01-01T00:00:00.000Z',
-      { principal: 'spectator', method: 'GET', spectatorToken: minted.bearer },
-    );
-    expect(panelGateMiddleware(mergedRequest).status).toBe(200);
-    const mergedResponse = await truth.GET(mergedRequest);
-    expect(mergedResponse.status).toBe(200);
-    const mergedPayload = await mergedResponse.json() as { answers: Array<{ receipt: PacketReceipt }> };
-    expect(mergedPayload.answers.map((answer) => answer.receipt.packetId)).toContain(fixture.packetA.id);
-
-    const packetById = await truth.GET(req(
-      `http://localhost:3001/api/orchestrator/truth?kind=packet&packetId=${fixture.packetA.id}`,
-      { principal: 'spectator', method: 'GET', spectatorToken: minted.bearer },
-    ));
-    expect(packetById.status).toBe(200);
-    await expect(packetById.json()).resolves.toMatchObject({
-      answers: [{ receipt: { packetId: fixture.packetA.id } }],
-    });
-
-    const packetByIssue = await truth.GET(req(
-      `http://localhost:3001/api/orchestrator/truth?kind=packet&issueNumber=${fixture.issueA}`,
-      { principal: 'spectator', method: 'GET', spectatorToken: minted.bearer },
-    ));
-    expect(packetByIssue.status).toBe(200);
-    await expect(packetByIssue.json()).resolves.toMatchObject({
-      answers: [{ receipt: { packetId: fixture.packetA.id } }],
-    });
-
-    const approvals = await truth.GET(req(
-      `http://localhost:3001/api/orchestrator/truth?kind=approvals&packetId=${fixture.packetA.id}`,
-      { principal: 'spectator', method: 'GET', spectatorToken: minted.bearer },
-    ));
-    expect(approvals.status).toBe(200);
-    await expect(approvals.json()).resolves.toMatchObject({
-      answers: [{
-        summary: expect.stringContaining('operator approved'),
-        receipt: { packetId: fixture.packetA.id },
-      }],
-    });
-
-    const responseReceipt = mergedPayload.answers.find((answer) => (
-      answer.receipt.packetId === fixture.packetA.id
-    ))!.receipt;
-    const storedReceipt = JSON.parse(readFileSync(fixture.receiptAPath, 'utf8')) as PacketReceipt;
-    const { signature: responseSignature, ...responseUnsigned } = responseReceipt;
-    const { signature: storedSignature, ...storedUnsigned } = storedReceipt;
-    const responseBytes = new TextEncoder().encode(fixture.canonicalJson(responseUnsigned));
-    const storedBytes = new TextEncoder().encode(fixture.canonicalJson(storedUnsigned));
-    expect(responseBytes).toEqual(storedBytes);
-    expect(responseSignature).toBe(storedSignature);
-    expect(fixture.verifyReceiptBytes(
-      responseBytes,
-      responseSignature,
-      fixture.publicKey,
-    )).toBe(true);
-  });
-
-  it('denies repo B and hides repo B packet and issue existence from a repo A spectator', async () => {
-    const fixture = await createTruthFixture();
-    const mintedResponse = await broadcastTokens.POST(req('http://localhost:3001/api/broadcast/tokens', {
-      principal: 'operator',
-      body: { action: 'mint', label: 'repo A denial', repoGrants: ['repo-a'] },
-    }));
-    const minted = await mintedResponse.json() as { bearer: string };
-
-    const repoB = await truth.GET(req(
-      'http://localhost:3001/api/orchestrator/truth?kind=merged-since&repo=repo-b&since=2026-01-01T00:00:00.000Z',
-      { principal: 'spectator', method: 'GET', spectatorToken: minted.bearer },
-    ));
-    expect(repoB.status).toBe(403);
-
-    for (const query of [
-      `kind=packet&packetId=${fixture.packetB.id}`,
-      `kind=packet&issueNumber=${fixture.issueB}`,
-      `kind=approvals&packetId=${fixture.packetB.id}`,
-    ]) {
-      const response = await truth.GET(req(
-        `http://localhost:3001/api/orchestrator/truth?${query}`,
-        { principal: 'spectator', method: 'GET', spectatorToken: minted.bearer },
-      ));
-      expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toMatchObject({ answers: [], nextCursor: null });
-    }
-  });
-
-  it('requires spectator grants, admits the operator across repos, and rejects workers', async () => {
-    const fixture = await createTruthFixture();
-    const query = `kind=packet&packetId=${fixture.packetB.id}`;
-
-    expect((await truth.GET(req(
-      `http://localhost:3001/api/orchestrator/truth?${query}`,
-      { principal: 'spectator', method: 'GET' },
-    ))).status).toBe(403);
-
-    const operatorResponse = await truth.GET(req(
-      `http://localhost:3001/api/orchestrator/truth?${query}`,
-      { principal: 'operator', method: 'GET' },
-    ));
-    expect(operatorResponse.status).toBe(200);
-    await expect(operatorResponse.json()).resolves.toMatchObject({
-      answers: [{ receipt: { packetId: fixture.packetB.id } }],
-    });
-
-    const workerRequest = req(
-      `http://localhost:3001/api/orchestrator/truth?${query}`,
-      { principal: 'worker', method: 'GET' },
-    );
-    expect(panelGateMiddleware(workerRequest).status).toBe(403);
-    expect((await truth.GET(workerRequest)).status).toBe(403);
-  });
 });
 
 function packetFixture(overrides: Partial<OrchestratorPacket> = {}): OrchestratorPacket {
@@ -530,154 +407,6 @@ function packetFixture(overrides: Partial<OrchestratorPacket> = {}): Orchestrato
     lane: null,
     orchestratorThreadId: null,
     ...overrides,
-  };
-}
-
-let truthFixtureSequence = 0;
-
-async function createTruthFixture() {
-  truthFixtureSequence += 1;
-  const suffix = `${Date.now()}-${truthFixtureSequence}`;
-  const repoAPath = `/tmp/o8-truth-repo-a-${suffix}`;
-  const repoBPath = `/tmp/o8-truth-repo-b-${suffix}`;
-  const issueA = 91_000 + truthFixtureSequence * 2;
-  const issueB = issueA + 1;
-  const packetA = packetFixture({
-    id: `packet-truth-a-${suffix}`,
-    referenceLabel: `#${issueA}`,
-    title: `Truth repo A ${suffix}`,
-    workspaceTargetPath: repoAPath,
-    issue: { number: issueA, url: `https://example.test/team/repo-a/issues/${issueA}` },
-  });
-  const packetB = packetFixture({
-    id: `packet-truth-b-${suffix}`,
-    referenceLabel: `#${issueB}`,
-    title: `Truth repo B ${suffix}`,
-    workspaceTargetPath: repoBPath,
-    issue: { number: issueB, url: `https://example.test/team/repo-b/issues/${issueB}` },
-  });
-  const { createLane } = await import('@/lib/lane/registry');
-  const { recordMission } = await import('@/lib/db/missions-store');
-  const {
-    artifactAbsPath,
-    artifactRelPath,
-    ensureArtifactBucket,
-    recordArtifact,
-  } = await import('@/lib/artifacts/store');
-  const { canonicalJson } = await import('@/lib/receipts/canonical');
-  const {
-    getReceiptIdentity,
-    signReceiptBytes,
-    verifyReceiptBytes,
-  } = await import('@/lib/receipts/receipt-identity');
-  const identity = getReceiptIdentity();
-
-  const persist = (packet: OrchestratorPacket, repoPath: string, repoName: string, remote: string) => {
-    const lane = createLane({
-      label: packet.title,
-      repoPath,
-      branch: `inline/${packet.id}`,
-      baseBranch: 'main',
-      runtime: 'codex',
-      packetId: packet.id,
-    });
-    const createdAt = new Date().toISOString();
-    const receiptId = `receipt-${packet.id}`;
-    const unsigned: UnsignedPacketReceipt = {
-      schema: 'o8/packet-receipt/v1',
-      receiptId,
-      packetId: packet.id,
-      packetTitle: packet.title,
-      laneId: lane.id,
-      repo: { name: repoName, remote, baseBranch: 'main' },
-      disposition: {
-        kind: 'merged',
-        mergeCommit: `merge-${packet.id}`,
-        headSha: `head-${packet.id}`,
-        tree: `tree-${packet.id}`,
-        evidenceKind: 'merge_command',
-        releasedAt: createdAt,
-      },
-      reviews: [{
-        turnId: `review-${packet.id}`,
-        backend: 'codex',
-        outcome: 'completed',
-        at: createdAt,
-      }],
-      approvals: [{
-        id: `approval-${packet.id}`,
-        title: 'Merge packet',
-        principal: 'operator',
-        decision: 'approved',
-        at: createdAt,
-      }],
-      runtime: 'codex',
-      model: 'truth-test-model',
-      createdAt,
-      keyId: identity.keyId,
-    };
-    const receipt: PacketReceipt = {
-      ...unsigned,
-      signature: signReceiptBytes(
-        new TextEncoder().encode(canonicalJson(unsigned)),
-        identity.secretKey,
-      ),
-    };
-    ensureArtifactBucket(packet.id);
-    const relPath = artifactRelPath(packet.id, receiptId, 'json');
-    const receiptPath = artifactAbsPath(relPath);
-    const serialized = `${canonicalJson(receipt)}\n`;
-    writeFileSync(receiptPath, serialized, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
-    const artifact = recordArtifact({
-      id: receiptId,
-      kind: 'receipt',
-      source: 'review-boundary',
-      relPath,
-      laneId: lane.id,
-      packetId: packet.id,
-      repoPath,
-      label: 'Signed packet receipt',
-      mimeType: 'application/json',
-      bytes: Buffer.byteLength(serialized),
-    });
-    if (!artifact) throw new Error(`Unable to persist truth fixture receipt ${receiptId}.`);
-    return receiptPath;
-  };
-
-  const recordPacketMission = (packet: OrchestratorPacket, repoPath: string) => {
-    const state: OrchestratorMissionState = {
-      ...createEmptyOrchestratorMissionState(),
-      missionId: `mission-${packet.id}`,
-      repoPath,
-      runtime: 'codex',
-      packets: [packet],
-      updatedAt: new Date().toISOString(),
-    };
-    recordMission({
-      id: state.missionId!,
-      repoPath,
-      runtime: 'codex',
-      prompt: packet.title,
-      summary: packet.summary,
-      constraints: '',
-      packetMeta: [{ id: packet.id, title: packet.title, referenceLabel: packet.referenceLabel }],
-      missionState: state,
-      totalWaves: 1,
-    });
-  };
-  recordPacketMission(packetA, repoAPath);
-  recordPacketMission(packetB, repoBPath);
-  const receiptAPath = persist(packetA, repoAPath, 'repo-a', 'example.test/team/repo-a');
-  persist(packetB, repoBPath, 'repo-b', 'example.test/team/repo-b');
-  return {
-    packetA,
-    packetB,
-    issueA,
-    issueB,
-    receiptAPath,
-    publicKey: identity.publicKeyB64,
-    canonicalJson,
-    verifyReceiptBytes,
   };
 }
 

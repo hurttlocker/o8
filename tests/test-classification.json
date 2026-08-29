@@ -2326,6 +2326,12 @@
       ]
     },
     {
+      "path": "tests/truth-query-authz-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/tsx-process-linked-worktree-real-path.test.ts",
       "reasons": [
         "child-process",

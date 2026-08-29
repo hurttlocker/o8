@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
 import {
-  receiptCoveredByRepoGrants,
-  repoGrantsCoverRequestedRepo,
+  resolveTruthGrantScope,
   resolveTruthQuery,
   TruthQueryError,
   type TruthQuery,
@@ -88,10 +87,13 @@ export async function GET(request: NextRequest) {
 
   try {
     const query = parseQuery(request);
+    const grantScope = principal.role === 'spectator'
+      ? await resolveTruthGrantScope(principal.repoGrants)
+      : null;
     if (
-      principal.role === 'spectator'
+      grantScope
       && query.kind === 'merged-since'
-      && !repoGrantsCoverRequestedRepo(principal.repoGrants, query.repo)
+      && !grantScope.coversRequestedRepo(query.repo)
     ) {
       return truthError(
         'spectator_repo_forbidden',
@@ -99,14 +101,14 @@ export async function GET(request: NextRequest) {
         403,
       );
     }
-    const result = resolveTruthQuery(query, principal.role === 'spectator'
-      ? {
-          receiptFilter: (receipt) => receiptCoveredByRepoGrants(receipt, principal.repoGrants),
-        }
+    const result = resolveTruthQuery(query, grantScope
+      ? { receiptFilter: grantScope.receiptCovered }
       : {});
     return NextResponse.json(result, { headers: JSON_HEADERS });
   } catch (error) {
-    if (error instanceof TruthQueryError) return truthError(error.code, error.message, 400);
+    if (error instanceof TruthQueryError) {
+      return truthError(error.code, error.message, error.code === 'grant_ambiguous' ? 403 : 400);
+    }
     console.error('[truth] Query failed:', error);
     return truthError('truth_query_failed', 'The truth query could not be completed.', 500);
   }
