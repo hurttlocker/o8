@@ -238,8 +238,9 @@ function processLabel(command) {
   if (command.includes('ws-server.ts')) return 'ws-server';
   if (command.includes('next-server')) return 'next-server';
   if (command.includes('next/dist/bin/next')) return 'next-launcher';
-  const executable = command.trim().split(/\s+/u)[0] ?? 'unknown';
-  return path.basename(executable);
+  if (command.includes('terminal-workload/generator.mjs')) return 'terminal-generator';
+  if (command.includes('terminal-workload/rapid-generator.mjs')) return 'rapid-terminal-generator';
+  return 'child-process';
 }
 
 function sameProcess(left, right) {
@@ -259,32 +260,43 @@ export function describeProcessPidTree(processes, groups) {
 }
 
 export function measureProcessGroupMemory(processes, groups) {
-  return Object.fromEntries(Object.entries(groups).map(([name, pids]) => {
+  const unavailableByGroup = {};
+  const physicalBytes = Object.fromEntries(Object.entries(groups).map(([name, pids]) => {
     let physicalBytes = 0;
     const unavailable = [];
     for (const pid of pids) {
       const expected = processes.get(pid);
       const beforeProbe = snapshotProcesses().get(pid);
       if (!sameProcess(expected, beforeProbe)) {
-        unavailable.push({ pid, reason: 'process identity changed before physical-memory probe' });
+        // A short-lived descendant that exited after the process-table sample
+        // contributes no live footprint at probe time. It must not make the
+        // stable launcher + serving-process aggregate unavailable.
         continue;
       }
       try {
         const measuredBytes = measureProcessPhysicalBytes(pid);
         const afterProbe = snapshotProcesses().get(pid);
         if (!sameProcess(beforeProbe, afterProbe)) {
-          unavailable.push({ pid, reason: 'process identity changed during physical-memory probe' });
+          // Do not attribute a footprint to a PID whose identity changed
+          // during measurement, and do not invalidate the stable remainder.
           continue;
         }
         physicalBytes += measuredBytes;
       } catch (error) {
         let stillRunning = true;
         try { process.kill(pid, 0); } catch { stillRunning = false; }
-        if (stillRunning) unavailable.push({ pid, reason: error instanceof Error ? error.message : String(error) });
+        if (stillRunning) unavailable.push({
+          pid,
+          process: processLabel(expected?.command ?? ''),
+          reason: error instanceof Error ? error.message : String(error),
+        });
       }
     }
+    unavailableByGroup[name] = unavailable;
     return [name, unavailable.length === 0 ? physicalBytes : null];
   }));
+  Object.defineProperty(physicalBytes, 'unavailable', { value: unavailableByGroup });
+  return physicalBytes;
 }
 
 export function measureProcessGroups(
@@ -314,7 +326,10 @@ export function measureProcessGroups(
       physicalBytesGrowth: physicalBytes != null && physicalBytesStart[name] != null
         ? physicalBytes - physicalBytesStart[name]
         : null,
-      physicalUnavailable: [],
+      physicalUnavailable: [
+        ...(physicalBytesStart.unavailable?.[name] ?? []).map((entry) => ({ phase: 'start', ...entry })),
+        ...(physicalBytesEnd.unavailable?.[name] ?? []).map((entry) => ({ phase: 'end', ...entry })),
+      ],
     }];
   }));
 }

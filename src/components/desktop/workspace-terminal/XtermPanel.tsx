@@ -10,7 +10,10 @@ import { retainInlineTerminalImages, TERMINAL_SCROLLBACK_LINES } from '@/lib/ter
 import { ClientTerminalHiddenBuffer } from '@/components/desktop/workspace-terminal/terminal-hidden-buffer';
 import { recordTerminalDiagnostic } from '@/components/desktop/workspace-terminal/terminal-diagnostics';
 import {
+  recordTerminalBenchDelivery,
   recordTerminalBenchDimensions,
+  recordTerminalBenchEvent,
+  recordTerminalBenchPaint,
   recordTerminalBenchRender,
   recordTerminalBenchVisibility,
   recordTerminalBenchWrite,
@@ -75,6 +78,32 @@ export interface XtermPanelProps {
   themeOverrides?: Record<string, string>;
 }
 
+type TerminalVisibilityOptions = {
+  epoch?: number;
+  needsResync?: boolean;
+  cols?: number;
+  rows?: number;
+};
+
+function sendBenchTerminalVisibility(
+  sendTerminalVisibility: XtermPanelProps['sendTerminalVisibility'],
+  sessionName: string,
+  visible: boolean,
+  options: TerminalVisibilityOptions,
+  reason: 'effect' | 'init' | 'reconnect',
+): void {
+  recordTerminalBenchEvent('send-terminal-visibility', {
+    sessionName,
+    visible,
+    epoch: options.epoch ?? null,
+    needsResync: options.needsResync ?? false,
+    cols: options.cols ?? null,
+    rows: options.rows ?? null,
+    reason,
+  });
+  sendTerminalVisibility?.(sessionName, visible, options);
+}
+
 export interface XtermPanelHandle {
   fit: () => void;
   focus: () => void;
@@ -100,6 +129,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fitAddonRef = useRef<any>(null);
   const observerRef = useRef<ResizeObserver | null>(null);
+  const initCountRef = useRef(0);
   const tmuxSessionRef = useRef(tmuxSession);
   tmuxSessionRef.current = tmuxSession;
   const visibleRef = useRef(visible);
@@ -110,6 +140,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
   const pendingChunksRef = useRef<string[]>([]);
   const hiddenBufferRef = useRef(new ClientTerminalHiddenBuffer(256 * 1024));
   const hiddenNeedsResyncRef = useRef(false);
+  const initialNeedsResyncRef = useRef(Boolean(sendTerminalVisibility));
   const visibilityEpochRef = useRef(1);
   const awaitingVisibilityRef = useRef(Boolean(sendTerminalVisibility && visible));
   const queuedInputRef = useRef<string[]>([]);
@@ -132,11 +163,30 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
     const fitAddon = fitAddonRef.current;
     const term = termRef.current;
     if (!fitAddon || !term) return;
+    let proposedDimensions = null;
     try {
+      proposedDimensions = fitAddon.proposeDimensions?.() ?? null;
       fitAddon.fit();
+      recordTerminalBenchEvent('xterm-fit', {
+        sessionName: tmuxSession,
+        initCount: initCountRef.current,
+        source: 'resize',
+        cols: term.cols,
+        rows: term.rows,
+        proposedDimensions,
+      });
       recordTerminalBenchDimensions(tmuxSession, term.cols, term.rows);
       sendTerminalResize(tmuxSession, term.cols, term.rows);
-    } catch {
+    } catch (error) {
+      recordTerminalBenchEvent('xterm-fit', {
+        sessionName: tmuxSession,
+        initCount: initCountRef.current,
+        source: 'resize',
+        cols: term.cols,
+        rows: term.rows,
+        proposedDimensions,
+        error: error instanceof Error ? error.message : String(error),
+      });
       // The terminal may be disposed while a queued fit is running.
     }
   }, [sendTerminalResize, tmuxSession]);
@@ -201,6 +251,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
         const decodeMs = performance.now() - decodeStartedAt;
         const visibleAtWrite = visibleRef.current;
         const sessionNameAtWrite = tmuxSessionRef.current;
+        recordTerminalBenchDelivery(sessionNameAtWrite, bytes);
         if (!visibleAtWrite || awaitingVisibilityRef.current) {
           queueHiddenBytes(bytes);
           return;
@@ -257,12 +308,37 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
       return readTerminalText(termRef.current, lines);
     },
     visibilityReady: (epoch: number) => {
-      if (hiddenNeedsResyncRef.current) return;
+      recordTerminalBenchEvent('visibility-ready', {
+        sessionName: tmuxSession,
+        epoch,
+        currentEpoch: visibilityEpochRef.current,
+        visible: visibleRef.current,
+        hasTerminal: Boolean(termRef.current),
+        needsResync: initialNeedsResyncRef.current || hiddenNeedsResyncRef.current,
+      });
+      if (initialNeedsResyncRef.current || hiddenNeedsResyncRef.current) return;
       flushHiddenBytes(epoch);
     },
     applyResync: (data: string, epoch: number) => {
-      if (epoch !== visibilityEpochRef.current || !visibleRef.current || !termRef.current) return;
+      const currentEpoch = visibilityEpochRef.current;
+      const outcome = epoch !== currentEpoch
+        ? `dropped:epoch(${epoch}≠${currentEpoch})`
+        : !visibleRef.current
+          ? 'dropped:not-visible'
+          : !termRef.current
+            ? 'dropped:no-terminal'
+            : 'applied';
+      recordTerminalBenchEvent('apply-resync', {
+        sessionName: tmuxSession,
+        epoch,
+        currentEpoch,
+        visible: visibleRef.current,
+        hasTerminal: Boolean(termRef.current),
+        outcome,
+      });
+      if (outcome !== 'applied') return;
       hiddenBufferRef.current.clear();
+      initialNeedsResyncRef.current = false;
       hiddenNeedsResyncRef.current = false;
       try {
         termRef.current.reset();
@@ -314,18 +390,22 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
     const epoch = visibilityEpochRef.current + 1;
     visibilityEpochRef.current = epoch;
     awaitingVisibilityRef.current = visible;
-    if (!visible) return sendTerminalVisibility(tmuxSession, false, { epoch });
+    if (!visible) {
+      sendBenchTerminalVisibility(sendTerminalVisibility, tmuxSession, false, { epoch }, 'effect');
+      return;
+    }
     const term = termRef.current;
-    if (hiddenNeedsResyncRef.current) {
+    const needsResync = initialNeedsResyncRef.current || hiddenNeedsResyncRef.current;
+    if (needsResync) {
       hiddenBufferRef.current.clear();
       try { term?.reset(); } catch { /* disposed during tab switch */ }
     }
-    sendTerminalVisibility(tmuxSession, true, {
+    sendBenchTerminalVisibility(sendTerminalVisibility, tmuxSession, true, {
       epoch,
-      needsResync: hiddenNeedsResyncRef.current,
+      needsResync,
       cols: term?.cols,
       rows: term?.rows,
-    });
+    }, 'effect');
   }, [sendTerminalVisibility, tmuxSession, visible]);
 
   useEffect(() => {
@@ -339,6 +419,10 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
   useEffect(() => {
     if (!containerRef.current) return undefined;
     let disposed = false;
+    const initCount = initCountRef.current + 1;
+    initCountRef.current = initCount;
+    const importsStartedAt = performance.now();
+    recordTerminalBenchEvent('xterm-init-start', { sessionName: tmuxSession, initCount });
 
     async function init() {
       try {
@@ -350,6 +434,11 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
           import('@xterm/addon-unicode11'),
           import('@xterm/addon-image'),
         ]);
+        recordTerminalBenchEvent('xterm-imports-resolved', {
+          sessionName: tmuxSession,
+          initCount,
+          ms: performance.now() - importsStartedAt,
+        });
         if (disposed) return;
 
         if (!document.getElementById('xterm-css')) {
@@ -404,9 +493,16 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
         term.open(containerRef.current);
         termRef.current = term;
         fitAddonRef.current = fitAddon;
+        recordTerminalBenchEvent('xterm-created', {
+          sessionName: tmuxSession,
+          initCount,
+          cols: term.cols,
+          rows: term.rows,
+        });
         const renderDisposable = terminalBenchEnabled()
           ? term.onRender(({ start, end }: { start: number; end: number }) => {
             recordTerminalBenchRender(tmuxSession, visibleRef.current, start, end);
+            recordTerminalBenchPaint(tmuxSession, () => readTerminalText(term, 1000));
           })
           : null;
         term.onData((data) => {
@@ -439,7 +535,23 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
         requestAnimationFrame(() => requestAnimationFrame(() => {
           const liveTerm = termRef.current;
           if (disposed || !liveTerm || !fitAddonRef.current) return;
-          try { fitAddonRef.current.fit(); } catch { /* disposed mid-fit */ }
+          let proposedDimensions = null;
+          let fitError = null;
+          try {
+            proposedDimensions = fitAddonRef.current.proposeDimensions?.() ?? null;
+            fitAddonRef.current.fit();
+          } catch (error) {
+            fitError = error instanceof Error ? error.message : String(error);
+          }
+          recordTerminalBenchEvent('xterm-fit', {
+            sessionName: tmuxSession,
+            initCount,
+            source: 'initial',
+            cols: liveTerm.cols,
+            rows: liveTerm.rows,
+            proposedDimensions,
+            ...(fitError ? { error: fitError } : {}),
+          });
           recordTerminalBenchDimensions(tmuxSession, liveTerm.cols, liveTerm.rows);
           if (spawnReveal) {
             revealHoldRef.current = revealMinPlay === true;
@@ -462,18 +574,19 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
               },
             });
           }
-          const needsInitialSnapshot = Boolean(sendTerminalVisibility && visibleRef.current);
+          const needsInitialSnapshot = Boolean(sendTerminalVisibility);
           if (needsInitialSnapshot) {
-            hiddenNeedsResyncRef.current = true;
-            awaitingVisibilityRef.current = true;
+            initialNeedsResyncRef.current = true;
+            awaitingVisibilityRef.current = visibleRef.current;
           }
           sendTerminalAttach(tmuxSession, liveTerm.cols, liveTerm.rows);
-          sendTerminalVisibility?.(tmuxSession, visibleRef.current, {
+          sendBenchTerminalVisibility(sendTerminalVisibility, tmuxSession, visibleRef.current, {
             epoch: visibilityEpochRef.current,
-            needsResync: needsInitialSnapshot || hiddenNeedsResyncRef.current,
+            needsResync: visibleRef.current
+              && (initialNeedsResyncRef.current || hiddenNeedsResyncRef.current),
             cols: liveTerm.cols,
             rows: liveTerm.rows,
-          });
+          }, 'init');
         }));
         return () => {
           renderDisposable?.dispose();
@@ -481,6 +594,11 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
           observerRef.current = null;
         };
       } catch (err) {
+        recordTerminalBenchEvent('xterm-init-error', {
+          sessionName: tmuxSession,
+          initCount,
+          error: err instanceof Error ? err.message : String(err),
+        });
         if (!disposed) {
           setError(err instanceof Error ? err.message : 'Failed to load terminal');
         }
@@ -499,6 +617,11 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
 
     return () => {
       disposed = true;
+      recordTerminalBenchEvent('xterm-disposed', {
+        sessionName: tmuxSession,
+        initCount,
+        hadTerminal: Boolean(termRef.current),
+      });
       unregisterSelection();
       cancelReveal(false);
       sendTerminalDetach(tmuxSession);
@@ -532,12 +655,12 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
       hiddenBufferRef.current.clear();
       term.reset();
       sendTerminalAttach(tmuxSession, term.cols, term.rows);
-      sendTerminalVisibility?.(tmuxSession, visibleRef.current, {
+      sendBenchTerminalVisibility(sendTerminalVisibility, tmuxSession, visibleRef.current, {
         epoch,
         needsResync: true,
         cols: term.cols,
         rows: term.rows,
-      });
+      }, 'reconnect');
     } catch {
       // disposed mid-update; the next mount attaches fresh
     }

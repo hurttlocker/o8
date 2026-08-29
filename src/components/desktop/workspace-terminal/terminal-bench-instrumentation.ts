@@ -24,6 +24,19 @@ export type TerminalBenchSessionStats = {
   visibleWork: TerminalBenchVisibilityCounters;
   hiddenWork: TerminalBenchVisibilityCounters;
   readText: (lines?: number) => string;
+  watchText: (marker: string) => void;
+  textWatch: (marker: string) => TerminalBenchTextWatch | null;
+  unwatchText: (marker: string) => void;
+  clearTextWatches: () => void;
+  needsTextDeliveryCheck: () => boolean;
+  needsTextPaintCheck: () => boolean;
+  recordDeliveryText: (text: string) => void;
+  recordPaintedText: (text: string) => void;
+};
+
+export type TerminalBenchTextWatch = {
+  deliveredAt: number | null;
+  paintedAt: number | null;
 };
 
 export type TerminalBenchWriteStats = {
@@ -63,8 +76,59 @@ function emptyCounters(): TerminalBenchVisibilityCounters {
   };
 }
 
+function textWatchMethods(): Pick<
+  TerminalBenchSessionStats,
+  'watchText' | 'textWatch' | 'unwatchText' | 'clearTextWatches' | 'needsTextDeliveryCheck' | 'needsTextPaintCheck' | 'recordDeliveryText' | 'recordPaintedText'
+> {
+  const watches = new Map<string, TerminalBenchTextWatch>();
+  let deliveryTail = '';
+  return {
+    watchText: (marker) => watches.set(marker, { deliveredAt: null, paintedAt: null }),
+    textWatch: (marker) => {
+      const watch = watches.get(marker);
+      return watch ? { ...watch } : null;
+    },
+    unwatchText: (marker) => watches.delete(marker),
+    clearTextWatches: () => {
+      watches.clear();
+      deliveryTail = '';
+    },
+    needsTextDeliveryCheck: () => {
+      for (const watch of watches.values()) {
+        if (watch.deliveredAt === null) return true;
+      }
+      return false;
+    },
+    needsTextPaintCheck: () => {
+      for (const watch of watches.values()) {
+        if (watch.deliveredAt !== null && watch.paintedAt === null) return true;
+      }
+      return false;
+    },
+    recordDeliveryText: (text) => {
+      if (watches.size === 0) return;
+      deliveryTail = `${deliveryTail}${text}`.slice(-2048);
+      const at = now();
+      for (const [marker, watch] of watches) {
+        if (watch.deliveredAt === null && deliveryTail.includes(marker)) watch.deliveredAt = at;
+      }
+    },
+    recordPaintedText: (text) => {
+      const at = now();
+      for (const [marker, watch] of watches) {
+        if (watch.paintedAt === null && text.includes(marker)) watch.paintedAt = at;
+      }
+    },
+  };
+}
+
 export function terminalBenchEnabled(): boolean {
   return typeof window !== 'undefined' && window.__o8TerminalBenchEnabled === true;
+}
+
+export function recordTerminalBenchEvent(event: string, details: Record<string, unknown> = {}): void {
+  if (!terminalBenchEnabled()) return;
+  console.warn('[workspace-terminal:bench]', JSON.stringify({ at: now(), event, ...details }));
 }
 
 function resetStats(stats: TerminalBenchWriteStats): void {
@@ -79,6 +143,7 @@ function resetStats(stats: TerminalBenchWriteStats): void {
     session.visibilityChangedAt = resetAt;
     session.visibleWork = emptyCounters();
     session.hiddenWork = emptyCounters();
+    session.clearTextWatches();
   }
 }
 
@@ -149,6 +214,7 @@ export function registerTerminalBenchPanel(
       visibleWork: emptyCounters(),
       hiddenWork: emptyCounters(),
       readText,
+      ...textWatchMethods(),
     };
   }
   return () => {
@@ -158,6 +224,18 @@ export function registerTerminalBenchPanel(
     session.unmountCount += 1;
     session.mounted = false;
   };
+}
+
+export function recordTerminalBenchDelivery(sessionName: string, bytes: Uint8Array): void {
+  const session = sessionStats(sessionName);
+  if (!session?.needsTextDeliveryCheck()) return;
+  session.recordDeliveryText(new TextDecoder().decode(bytes));
+}
+
+export function recordTerminalBenchPaint(sessionName: string, readText: () => string): void {
+  const session = sessionStats(sessionName);
+  if (!session?.needsTextPaintCheck()) return;
+  session.recordPaintedText(readText());
 }
 
 export function recordTerminalBenchVisibility(sessionName: string, visible: boolean): void {

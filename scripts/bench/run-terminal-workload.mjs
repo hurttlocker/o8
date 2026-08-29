@@ -23,6 +23,7 @@ import { connectTerminalClients } from './terminal-workload/ws-client.mjs';
 import { summarizeSamples } from './terminal-workload/statistics.mjs';
 import { assertTerminalWorkloadBudgets } from './terminal-workload/budgets.mjs';
 import { ensureVisibleTerminal } from './terminal-workload/browser-state.mjs';
+import { classifyKeystrokeTimeout } from './terminal-workload/keystroke-measurement.mjs';
 
 const ROOT = process.cwd();
 
@@ -275,6 +276,10 @@ async function prepareShell(client, observer, sessionName, seed) {
   }
 }
 
+function serverMarkers(tabs, markerForTab) {
+  return tabs.map((tab) => ({ sessionName: tab.sessionName, marker: markerForTab(tab) }));
+}
+
 async function resetPageMeasurement(page) {
   await page.evaluate(() => {
     window.__o8TerminalWriteStats?.reset();
@@ -329,7 +334,7 @@ async function readPerformance(page, observationMs) {
   }, observationMs);
 }
 
-async function measureKeystrokeToPaint(page, sessionName, marker) {
+async function measureKeystrokeToPaint(page, deliveryClient, sessionName, marker) {
   const input = page.locator(`[data-o8-term-panel="${sessionName}"] .xterm-helper-textarea`);
   await input.focus();
   await page.waitForFunction((expectedSession) => {
@@ -337,20 +342,56 @@ async function measureKeystrokeToPaint(page, sessionName, marker) {
     return panel?.contains(document.activeElement) === true
       && document.activeElement?.classList.contains('xterm-helper-textarea') === true;
   }, sessionName, { timeout: 5000 });
-  const startedAt = await page.evaluate(() => performance.now());
+  deliveryClient.watchTextArrival(sessionName, marker);
+  await page.evaluate(({ targetSession, targetMarker }) => {
+    window.__o8TerminalWriteStats?.sessions[targetSession]?.watchText(targetMarker);
+  }, { targetSession: sessionName, targetMarker: marker });
+  const started = await page.evaluate(() => ({ performanceAt: performance.now(), epochMs: Date.now() }));
   await page.keyboard.type(marker);
   await page.keyboard.press('Enter');
+  let observedAt = null;
+  let timedOut = false;
   try {
     await page.waitForFunction(({ targetSession, targetMarker }) => {
       const session = window.__o8TerminalWriteStats?.sessions[targetSession];
-      return session?.readText(80).includes(targetMarker) === true;
+      return session?.readText(1000).includes(targetMarker) === true;
     }, { targetSession: sessionName, targetMarker: marker }, { polling: 'raf', timeout: 10000 });
-    const paintedAt = await page.evaluate(() => performance.now());
-    return { elapsedMs: paintedAt - startedAt, timedOut: false };
+    observedAt = await page.evaluate(() => performance.now());
   } catch (error) {
     if (!(error instanceof Error) || !error.message.includes('Timeout')) throw error;
-    return { elapsedMs: 10000, timedOut: true };
+    timedOut = true;
   }
+  const classifiedAt = await page.evaluate(() => performance.now());
+  const panelWatch = await page.evaluate(({ targetSession, targetMarker }) => (
+    window.__o8TerminalWriteStats?.sessions[targetSession]?.textWatch(targetMarker) ?? null
+  ), { targetSession: sessionName, targetMarker: marker });
+  const auxWatch = deliveryClient.textArrival(sessionName, marker);
+  const keystrokeTimeoutClass = timedOut
+    ? classifyKeystrokeTimeout({
+      auxDeliveredAt: auxWatch?.receivedAt ?? null,
+      panelDeliveredAt: panelWatch?.deliveredAt ?? null,
+      panelPaintedAt: panelWatch?.paintedAt ?? null,
+    })
+    : null;
+  await page.evaluate(({ targetSession, targetMarker }) => {
+    window.__o8TerminalWriteStats?.sessions[targetSession]?.unwatchText(targetMarker);
+  }, { targetSession: sessionName, targetMarker: marker });
+  deliveryClient.unwatchTextArrival(sessionName, marker);
+  return {
+    marker,
+    elapsedMs: timedOut ? 10000 : observedAt - started.performanceAt,
+    timedOut,
+    keystrokeTimeoutClass,
+    timestamps: {
+      inputAt: round(started.performanceAt),
+      inputEpochMs: started.epochMs,
+      auxDeliveredAtEpochMs: auxWatch?.receivedAt ?? null,
+      panelDeliveredAt: round(panelWatch?.deliveredAt),
+      panelPaintedAt: round(panelWatch?.paintedAt),
+      observedAt: round(observedAt),
+      classifiedAt: round(classifiedAt),
+    },
+  };
 }
 
 async function browserTerminalSize(page, sessionName) {
@@ -360,7 +401,27 @@ async function browserTerminalSize(page, sessionName) {
   }, sessionName);
 }
 
-async function waitForBrowserTerminalSize(page, sessionName, timeoutMs = 5000) {
+async function browserTerminalSizeDiagnostic(page, sessionName) {
+  return page.evaluate((targetSession) => {
+    const sessions = window.__o8TerminalWriteStats?.sessions ?? {};
+    const panel = document.querySelector(`[data-o8-term-panel="${CSS.escape(targetSession)}"]`);
+    return {
+      sessionKeys: Object.keys(sessions),
+      sessions: Object.fromEntries(Object.entries(sessions).map(([key, session]) => [key, {
+        cols: session.cols,
+        rows: session.rows,
+        mountCount: session.mountCount,
+        mounted: session.mounted,
+      }])),
+      fontStatus: document.fonts?.status ?? 'unsupported',
+      loadingWorkspacePresent: document.querySelector('[aria-label="Loading workspace"]') !== null,
+      xtermElementCount: panel?.querySelectorAll('.xterm').length ?? 0,
+      performanceNow: performance.now(),
+    };
+  }, sessionName);
+}
+
+async function waitForBrowserTerminalSize(page, sessionName, timeoutMs = 30000) {
   const deadline = Date.now() + timeoutMs;
   let size = { cols: 0, rows: 0 };
   while (Date.now() < deadline) {
@@ -368,7 +429,39 @@ async function waitForBrowserTerminalSize(page, sessionName, timeoutMs = 5000) {
     if (size.cols > 0 && size.rows > 0) return size;
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve())));
   }
-  throw new Error(`browser terminal grid unavailable for ${sessionName}: ${size.cols}x${size.rows}`);
+  const error = new Error(`browser terminal grid unavailable for ${sessionName}: ${size.cols}x${size.rows}`);
+  error.terminalSizeFailure = await browserTerminalSizeDiagnostic(page, sessionName);
+  throw error;
+}
+
+function xtermImportDuration(browserConsole) {
+  const durations = browserConsole.flatMap(({ text }) => {
+    if (!text.startsWith('[workspace-terminal:bench] ')) return [];
+    try {
+      const event = JSON.parse(text.slice('[workspace-terminal:bench] '.length));
+      return event.event === 'xterm-imports-resolved' && Number.isFinite(event.ms)
+        ? [event.ms]
+        : [];
+    } catch {
+      return [];
+    }
+  });
+  return durations.length > 0 ? round(Math.max(...durations)) : null;
+}
+
+function classifyHiddenOverflow(diagnostics, serverSnapshot, sessionName) {
+  const clientOverflow = diagnostics.some((diagnostic) => (
+    diagnostic.code === 'terminal_client_hidden_overflow'
+    && diagnostic.sessionName === sessionName
+  ));
+  const serverOverflow = diagnostics.some((diagnostic) => (
+    diagnostic.code === 'terminal_hidden_overflow'
+    && diagnostic.sessionName === sessionName
+  )) || (serverSnapshot.sessions[sessionName]?.overflow.events ?? 0) > 0;
+  if (clientOverflow && serverOverflow) return 'both';
+  if (clientOverflow) return 'client';
+  if (serverOverflow) return 'server';
+  return null;
 }
 
 async function waitForSharedTerminalGrid(page, sessionName, timeoutMs = 3000) {
@@ -451,8 +544,16 @@ async function selectTabAndMeasure(page, tab) {
   }, { sessionName: tab.sessionName, tabId: tab.id }, { polling: 'raf', timeout: 10000 });
   const visibleAt = await page.evaluate(() => performance.now());
   const grid = await waitForSharedTerminalGrid(page, tab.sessionName);
+  const gridMatchedAt = await page.evaluate(() => performance.now());
   const correct = await waitForCorrectTerminalScreen(page, tab.sessionName, grid, startedAt);
-  return { revealMs: visibleAt - startedAt, grid, ...correct };
+  const gridMatchedMs = gridMatchedAt - startedAt;
+  return {
+    revealMs: visibleAt - startedAt,
+    grid,
+    gridMatchedMs,
+    ...correct,
+    firstCorrectFrameAfterGridMs: correct.firstCorrectFrameMs - gridMatchedMs,
+  };
 }
 
 function normalizeTerminalText(value) {
@@ -511,25 +612,162 @@ async function panelText(page, sessionName, lines = 1000) {
   ), { targetSession: sessionName, lineCount: lines });
 }
 
-async function runRapidSwitch(page, seeded, clients, rapidGeneratorPath) {
+function tmuxLastRows(sessionName, rowCount) {
+  try {
+    const lines = captureTmuxText(sessionName).replace(/\n$/u, '').split('\n');
+    return { output: lines.slice(-rowCount).join('\n'), error: null };
+  } catch (error) {
+    return { output: null, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function tmuxPaneState(sessionName) {
+  try {
+    return {
+      output: execFileSync(
+        'tmux',
+        ['display-message', '-p', '-t', sessionName, '#{pane_dead} #{pane_pid} #{pane_current_command}'],
+        { encoding: 'utf8' },
+      ).trim(),
+      error: null,
+    };
+  } catch (error) {
+    return { output: null, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function generatorPidFromLog(logContents) {
+  for (const line of logContents.split('\n').filter(Boolean)) {
+    try {
+      const entry = JSON.parse(line);
+      if (entry.event === 'start' && Number.isSafeInteger(entry.pid)) return entry.pid;
+    } catch { /* retained verbatim below for diagnosis */ }
+  }
+  return null;
+}
+
+function processIsAlive(pid) {
+  if (!Number.isSafeInteger(pid) || pid < 1) return null;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === 'EPERM';
+  }
+}
+
+async function captureRapidFailure({ client, sessionName, marker, logPath, startSnapshot, revealCount }) {
+  let snapshot = null;
+  let snapshotError = null;
+  try {
+    snapshot = (await client.request('terminal-bench-stats')).data.snapshot;
+  } catch (error) {
+    snapshotError = error instanceof Error ? error.message : String(error);
+  }
+  const session = snapshot?.sessions?.[sessionName] ?? null;
+  const startSession = startSnapshot.sessions?.[sessionName] ?? null;
+  let generatorLogContents = '';
+  let generatorLogError = null;
+  try {
+    generatorLogContents = fs.existsSync(logPath) ? fs.readFileSync(logPath, 'utf8') : '';
+  } catch (error) {
+    generatorLogError = error instanceof Error ? error.message : String(error);
+  }
+  const generatorPid = generatorPidFromLog(generatorLogContents);
+  return {
+    sessionName,
+    marker,
+    lastOutputTail: session?.lastOutputTail ?? null,
+    lastOutputTailBytes: typeof session?.lastOutputTail === 'string'
+      ? Buffer.byteLength(session.lastOutputTail, 'utf8')
+      : null,
+    lastOutputTailByteCap: snapshot?.lastOutputTailByteCap ?? null,
+    serverSnapshotError: snapshotError,
+    tmuxCapturePaneLast12Rows: tmuxLastRows(sessionName, 12),
+    tmuxPaneState: tmuxPaneState(sessionName),
+    generatorLogPath: path.relative(ROOT, logPath).split(path.sep).join('/'),
+    generatorPid,
+    generatorPidAlive: processIsAlive(generatorPid),
+    generatorLogContents,
+    generatorLogError,
+    attachDetachDuringLoop: {
+      attachedClientCountStart: startSession?.attachedClientCount ?? null,
+      attachedClientCountEnd: session?.attachedClientCount ?? null,
+      attachEvents: Number.isFinite(startSession?.attachEvents) && Number.isFinite(session?.attachEvents)
+        ? session.attachEvents - startSession.attachEvents
+        : null,
+      detachEvents: Number.isFinite(startSession?.detachEvents) && Number.isFinite(session?.detachEvents)
+        ? session.detachEvents - startSession.detachEvents
+        : null,
+    },
+    browserRevealCount: revealCount,
+  };
+}
+
+async function captureFinalBrowserDoneFailure({ page, client, finalTab, doneMarker }) {
+  let browser = null;
+  let browserError = null;
+  try {
+    browser = await page.evaluate(({ tabId, sessionName }) => {
+      const session = window.__o8TerminalWriteStats?.sessions[sessionName];
+      return {
+        activeTabId: window.__o8TerminalBenchTabs?.tabId ?? null,
+        expectedTabId: tabId,
+        resident: session?.mounted === true,
+        renderedLast30Lines: session?.readText(30) ?? '',
+        diagnostics: [...(window.__o8TerminalDiagnostics ?? [])],
+      };
+    }, { tabId: finalTab.id, sessionName: finalTab.sessionName });
+  } catch (error) {
+    browserError = error instanceof Error ? error.message : String(error);
+  }
+  let snapshot = null;
+  let serverSnapshotError = null;
+  try {
+    snapshot = (await client.request('terminal-bench-stats')).data.snapshot;
+  } catch (error) {
+    serverSnapshotError = error instanceof Error ? error.message : String(error);
+  }
+  return {
+    stage: 'final-browser-done',
+    timeoutMs: 15000,
+    finalTab: {
+      tabId: finalTab.id,
+      sessionName: finalTab.sessionName,
+      doneMarker,
+      ...browser,
+      browserError,
+      serverLastOutputTail: snapshot?.sessions[finalTab.sessionName]?.lastOutputTail ?? null,
+      serverLastOutputTailByteCap: snapshot?.lastOutputTailByteCap ?? null,
+      serverSnapshotError,
+    },
+  };
+}
+
+async function runRapidSwitch(page, seeded, clients, rapidGeneratorPath, runDirectory) {
   const durationMs = 30000;
   const intervalMs = 100;
   const expectedSequenceCount = Math.ceil(durationMs / intervalMs);
+  const logPaths = Object.fromEntries(seeded.tabs.map((tab) => [
+    tab.sessionName,
+    path.join(runDirectory, `rapid-${tab.sessionName}.log`),
+  ]));
   for (const [index, tab] of seeded.tabs.entries()) {
     clients[index].send({
       type: 'terminal-input',
       sessionName: tab.sessionName,
-      data: `${shellQuote(process.execPath)} ${shellQuote(rapidGeneratorPath)} --session ${shellQuote(tab.sessionName)} --duration-ms ${durationMs} --interval-ms ${intervalMs}\r`,
+      data: `${shellQuote(process.execPath)} ${shellQuote(rapidGeneratorPath)} --session ${shellQuote(tab.sessionName)} --duration-ms ${durationMs} --interval-ms ${intervalMs} --log ${shellQuote(logPaths[tab.sessionName])}\r`,
     });
   }
-  await Promise.all(seeded.tabs.map((tab) => clients[0].waitForServerText(
-    tab.sessionName,
-    `O8_RAPID_READY_${tab.sessionName}`,
-    15000,
-  )));
+  await clients[0].waitForServerTexts(serverMarkers(
+    seeded.tabs,
+    (tab) => `O8_RAPID_READY_${tab.sessionName}`,
+  ), 15000);
 
+  const rapidStartSnapshot = (await clients[0].request('terminal-bench-stats')).data.snapshot;
   const startedAt = Date.now();
   let switchCount = 0;
+  const revealCounts = Object.fromEntries(seeded.tabs.map((tab) => [tab.sessionName, 0]));
   while (Date.now() - startedAt < durationMs) {
     const tab = seeded.tabs[switchCount % seeded.tabs.length];
     await page.locator(`[data-o8-workspace-tab="${tab.id}"]`).click();
@@ -540,28 +778,63 @@ async function runRapidSwitch(page, seeded, clients, rapidGeneratorPath) {
         && getComputedStyle(panel).display !== 'none';
     }, { tabId: tab.id, sessionName: tab.sessionName }, { polling: 'raf', timeout: 10000 });
     switchCount += 1;
+    revealCounts[tab.sessionName] += 1;
     const remaining = 200 - ((Date.now() - startedAt) % 200);
     if (remaining > 0 && remaining < 200) await sleep(remaining);
   }
-  await Promise.all(seeded.tabs.map((tab) => clients[0].waitForServerText(
-    tab.sessionName,
-    `O8_RAPID_DONE_${tab.sessionName}_${expectedSequenceCount}`,
-    15000,
-  )));
+  let failedTabs = [];
+  try {
+    await clients[0].waitForServerTexts(serverMarkers(
+      seeded.tabs,
+      (tab) => `O8_RAPID_DONE_${tab.sessionName}_${expectedSequenceCount}`,
+    ), 15000);
+  } catch (error) {
+    const failedSessions = new Set(error?.pendingServerMarkers?.map(({ sessionName }) => sessionName));
+    failedTabs = seeded.tabs.filter((tab) => failedSessions.size === 0 || failedSessions.has(tab.sessionName));
+  }
+  if (failedTabs.length > 0) {
+    const failures = [];
+    for (const tab of failedTabs) {
+      failures.push(await captureRapidFailure({
+        client: clients[0],
+        sessionName: tab.sessionName,
+        marker: `O8_RAPID_DONE_${tab.sessionName}_${expectedSequenceCount}`,
+        logPath: logPaths[tab.sessionName],
+        startSnapshot: rapidStartSnapshot,
+        revealCount: revealCounts[tab.sessionName],
+      }));
+    }
+    const error = new Error(`rapid-switch DONE wait timed out for ${failedTabs.map((tab) => tab.sessionName).join(', ')}`);
+    error.rapidSwitchFailure = { timeoutMs: 15000, failures };
+    throw error;
+  }
 
   const finalTab = seeded.tabs.at(-1);
+  const doneMarker = `O8_RAPID_DONE_${finalTab.sessionName}_${expectedSequenceCount}`;
   await page.locator(`[data-o8-workspace-tab="${finalTab.id}"]`).click();
-  await page.waitForFunction(({ tabId, sessionName, doneMarker }) => {
-    const panel = document.querySelector(`[data-o8-term-panel="${CSS.escape(sessionName)}"]`);
-    return window.__o8TerminalBenchTabs?.tabId === tabId
-      && panel != null
-      && getComputedStyle(panel).display !== 'none'
-      && window.__o8TerminalWriteStats?.sessions[sessionName]?.readText(1000).includes(doneMarker) === true;
-  }, {
-    tabId: finalTab.id,
-    sessionName: finalTab.sessionName,
-    doneMarker: `O8_RAPID_DONE_${finalTab.sessionName}_${expectedSequenceCount}`,
-  }, { polling: 'raf', timeout: 15000 });
+  try {
+    await page.waitForFunction(({ tabId, sessionName, doneMarker }) => {
+      const panel = document.querySelector(`[data-o8-term-panel="${CSS.escape(sessionName)}"]`);
+      return window.__o8TerminalBenchTabs?.tabId === tabId
+        && panel != null
+        && getComputedStyle(panel).display !== 'none'
+        && window.__o8TerminalWriteStats?.sessions[sessionName]?.readText(1000).includes(doneMarker) === true;
+    }, {
+      tabId: finalTab.id,
+      sessionName: finalTab.sessionName,
+      doneMarker,
+    }, { polling: 'raf', timeout: 15000 });
+  } catch (error) {
+    if (error instanceof Error) {
+      error.rapidSwitchFailure = await captureFinalBrowserDoneFailure({
+        page,
+        client: clients[0],
+        finalTab,
+        doneMarker,
+      });
+    }
+    throw error;
+  }
   const grid = await waitForSharedTerminalGrid(page, finalTab.sessionName);
   const tmuxScreen = terminalScreenOracle(await captureQuiescentTmuxText(clients[0], finalTab.sessionName));
   const text = normalizeTerminalText(await panelText(page, finalTab.sessionName, grid.rows));
@@ -660,6 +933,7 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
   let page;
   let clients = [];
   const browserConsole = [];
+  const httpFailures = [];
   try {
     stack = await startIsolatedStack(ROOT, seeded, runConfig.requestedBuildMode);
     context = await browser.newContext({ viewport: { width: 1000, height: 800 } });
@@ -667,6 +941,10 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
     page.on('console', (message) => {
       browserConsole.push({ type: message.type(), text: message.text() });
       if (browserConsole.length > 2000) browserConsole.shift();
+    });
+    page.on('response', (response) => {
+      if (response.status() < 400 || httpFailures.length >= 200) return;
+      httpFailures.push({ url: response.url(), status: response.status() });
     });
     await page.addInitScript(browserInitScript);
     let ui = await waitForSeededDashboard(page, `http://127.0.0.1:${stack.apiPort}`, seeded);
@@ -708,11 +986,10 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
         data: `${generatorCommand(generatorPath, tab.sessionName, runConfig, sampleSeed)}\r`,
       });
     }
-    await Promise.all(seeded.tabs.map((tab) => clients[0].waitForServerText(
-      tab.sessionName,
-      `O8_WORKLOAD_READY_${tab.sessionName}_${sampleSeed}`,
-      30000,
-    )));
+    await clients[0].waitForServerTexts(serverMarkers(
+      seeded.tabs,
+      (tab) => `O8_WORKLOAD_READY_${tab.sessionName}_${sampleSeed}`,
+    ), 30000);
     await resetPageMeasurement(page);
     const deliveryStarts = seeded.tabs.map((tab, index) => clients[index].terminalDelivery(tab.sessionName));
 
@@ -735,12 +1012,20 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
     for (let index = 0; index < 3; index += 1) {
       visibleTarget = await ensureVisibleTerminal(page, seeded.tabs);
       const marker = `O8K_${sampleSeed}_${index}`;
-      keystrokeToPaint.push(await measureKeystrokeToPaint(page, visibleTarget.tab.sessionName, marker));
+      const targetIndex = seeded.tabs.findIndex((tab) => tab.sessionName === visibleTarget.tab.sessionName);
+      keystrokeToPaint.push(await measureKeystrokeToPaint(
+        page,
+        clients[targetIndex],
+        visibleTarget.tab.sessionName,
+        marker,
+      ));
       await sleep(100);
     }
 
     const revealMs = [];
+    const gridMatchedMs = [];
     const firstCorrectFrameMs = [];
+    const firstCorrectFrameAfterGridMs = [];
     const correctness = { failures: 0, timeouts: 0, alternateScreenOracleMatches: 0 };
     let revealAvailability = 'not-applicable-single-terminal';
     const mountedHidden = seeded.tabs.find((tab) => (
@@ -762,7 +1047,9 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
       }
       const reveal = await selectTabAndMeasure(page, revealTarget);
       revealMs.push(round(reveal.revealMs));
+      gridMatchedMs.push(round(reveal.gridMatchedMs));
       firstCorrectFrameMs.push(round(reveal.firstCorrectFrameMs));
+      firstCorrectFrameAfterGridMs.push(round(reveal.firstCorrectFrameAfterGridMs));
       const postRevealGrid = await waitForSharedTerminalGrid(page, revealTarget.sessionName);
       const tmuxScreen = terminalScreenOracle(captureTmuxText(revealTarget.sessionName));
       const browserText = normalizeTerminalText(await panelText(
@@ -786,11 +1073,10 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
       clients[targetIndex].send({ type: 'terminal-input', sessionName: revealTarget.sessionName, data: 'O8_BENCH_RESUME\r' });
     }
 
-    await Promise.all(seeded.tabs.map((tab) => clients[0].waitForServerText(
-      tab.sessionName,
-      `O8_WORKLOAD_DONE_${tab.sessionName}_${sampleSeed}`,
-      runConfig.durationMs + 30000,
-    )));
+    await clients[0].waitForServerTexts(serverMarkers(
+      seeded.tabs,
+      (tab) => `O8_WORKLOAD_DONE_${tab.sessionName}_${sampleSeed}`,
+    ), runConfig.durationMs + 30000);
     const observationMs = Date.now() - observationStartedAt;
     const after = snapshotProcesses();
     const groupsAfter = resolveProcessGroups(after, stack, browserPid);
@@ -798,15 +1084,15 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
     const physicalBytesEnd = measureProcessGroupMemory(after, groupsAfter);
     const processes = measureProcessGroups(before, after, groups, observationMs, physicalBytesStart, physicalBytesEnd);
     const rawBrowser = await readPageStats(page);
-    if (mountedHidden && !rawBrowser.diagnostics.some((diagnostic) => (
-      diagnostic.code === 'terminal_client_hidden_overflow'
-      && diagnostic.sessionName === mountedHidden.sessionName
-    ))) {
+    const rawServer = (await clients[0].request('terminal-bench-stats')).data.snapshot;
+    const hiddenOverflowClass = mountedHidden
+      ? classifyHiddenOverflow(rawBrowser.diagnostics, rawServer, mountedHidden.sessionName)
+      : null;
+    if (mountedHidden && hiddenOverflowClass === null) {
       correctness.failures += 1;
       throw new Error(`hidden client buffer did not overflow for ${mountedHidden.sessionName}`);
     }
     const performance = await readPerformance(page, observationMs);
-    const rawServer = (await clients[0].request('terminal-bench-stats')).data.snapshot;
     const resyncUnsettledCount = rawBrowser.diagnostics.filter((diagnostic) => (
       diagnostic.code === 'terminal_resync_unsettled'
     )).length;
@@ -822,13 +1108,16 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
         seeded,
         clients,
         path.join(ROOT, 'scripts/bench/terminal-workload/rapid-generator.mjs'),
+        runConfig.rawDir,
       )
       : null;
     await context.close();
     context = null;
     await sleep(200);
     const browserSummary = deriveBrowser(rawBrowser, seeded.tabs, panelInventory.mountedSessionNames);
+    browserSummary.xtermImportMs = xtermImportDuration(browserConsole);
     const serverSummary = deriveServer(rawServer, seeded.tabs, browserSummary.neverMountedSessionNames);
+    serverSummary.benchStatsRequests = clients.reduce((total, client) => total + client.benchStatsRequests, 0);
     serverSummary.hiddenDeliveredBytesPerHiddenClient = hiddenDeliveredBytesPerHiddenClient;
     serverSummary.hiddenDeliveriesPerHiddenClient = hiddenDeliveriesPerHiddenClient;
     const replayRisk = {
@@ -852,6 +1141,7 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
       devModeCpuWarning: stack.devModeCpuWarning,
       observationMs,
       orchestratorLaunches,
+      hiddenOverflowClass,
       inventory: {
         terminalChipCount: seeded.tabs.length,
         orchestratorChipCount: ui.tabs.filter((tab) => tab.kind === 'orchestrator').length,
@@ -864,9 +1154,12 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
       latency: {
         revealAvailability,
         revealMs,
+        gridMatchedMs,
         firstCorrectFrameMs,
+        firstCorrectFrameAfterGridMs,
         keystrokeToPaintMs: keystrokeToPaint.map((result) => round(result.elapsedMs)),
         keystrokeToPaintTimedOut: keystrokeToPaint.map((result) => result.timedOut),
+        keystrokeMeasurements: keystrokeToPaint,
         keystrokeToPaintTimeoutMs: 10000,
       },
       browser: browserSummary,
@@ -891,7 +1184,7 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
       diagnostics: { resyncUnsettledCount, resyncFailedCount },
       rapidSwitch,
       replayRisk,
-      raw: { browser: rawBrowser, server: rawServer, ui },
+      raw: { browser: rawBrowser, server: rawServer, ui, browserConsole, httpFailures },
     };
   } catch (error) {
     const failure = {
@@ -901,8 +1194,11 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
       error: error instanceof Error ? { message: error.message, stack: error.stack } : String(error),
       dashboard: page && !page.isClosed() ? await dashboardDiagnostic(page, seeded.tabs).catch(() => null) : null,
       browserConsole,
+      httpFailures,
+      terminalSizeFailure: error instanceof Error ? error.terminalSizeFailure ?? null : null,
       nextLog: stack?.logs.next() ?? null,
       wsLog: stack?.logs.ws() ?? null,
+      rapidSwitchFailure: error instanceof Error ? error.rapidSwitchFailure ?? null : null,
     };
     fs.mkdirSync(runConfig.rawDir, { recursive: true });
     fs.writeFileSync(path.join(runConfig.rawDir, `failure-n${sessionCount}-sample-${sampleIndex}.json`), JSON.stringify(failure, null, 2));

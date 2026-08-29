@@ -23,6 +23,8 @@ export type TerminalWorkloadSessionSnapshot = {
   lastOutputAt: number;
 };
 
+const LAST_OUTPUT_TAIL_BYTE_CAP = 4096;
+
 type MutableSession = TerminalWorkloadSessionSnapshot & { clients: Set<string>; escapeTail: string };
 
 function emptySession(): MutableSession {
@@ -112,7 +114,7 @@ export class TerminalWorkloadStats {
       session.alternateScreen.observedExit = true;
     }
     session.escapeTail = scanned.slice(-32);
-    session.lastOutputTail = `${session.lastOutputTail}${data}`.slice(-4096);
+    session.lastOutputTail = `${session.lastOutputTail}${data}`.slice(-LAST_OUTPUT_TAIL_BYTE_CAP);
     session.lastOutputAt = lastOutputAt;
   }
 
@@ -154,7 +156,11 @@ export class TerminalWorkloadStats {
     alternate.retainedExit = retained.includes('\x1b[?1049l') || retained.includes('O8_ALT_SCREEN_EXIT_');
   }
 
-  snapshot(): { schema: 'o8/terminal-server-stats/v1'; sessions: Record<string, TerminalWorkloadSessionSnapshot> } {
+  snapshot(): {
+    schema: 'o8/terminal-server-stats/v1';
+    lastOutputTailByteCap: number;
+    sessions: Record<string, TerminalWorkloadSessionSnapshot>;
+  } {
     const sessions: Record<string, TerminalWorkloadSessionSnapshot> = {};
     for (const [sessionName, session] of this.sessions) {
       const { clients: _clients, escapeTail: _escapeTail, ...snapshot } = session;
@@ -162,6 +168,6 @@ export class TerminalWorkloadStats {
       void _escapeTail;
       sessions[sessionName] = structuredClone(snapshot);
     }
-    return { schema: 'o8/terminal-server-stats/v1', sessions };
+    return { schema: 'o8/terminal-server-stats/v1', lastOutputTailByteCap: LAST_OUTPUT_TAIL_BYTE_CAP, sessions };
   }
 }

@@ -9,6 +9,8 @@ export class TerminalWorkloadClient {
     this.frames = [];
     this.textBySession = new Map();
     this.deliveryBySession = new Map();
+    this.textArrivalWatches = new Map();
+    this.benchStatsRequests = 0;
   }
 
   async connect() {
@@ -29,6 +31,11 @@ export class TerminalWorkloadClient {
           this.deliveryBySession.set(sessionName, delivery);
           const next = `${this.textBySession.get(sessionName) ?? ''}${decoded.toString('utf8')}`;
           this.textBySession.set(sessionName, next.slice(-131072));
+          for (const watch of this.textArrivalWatches.values()) {
+            if (watch.sessionName === sessionName && watch.receivedAt === null && next.includes(watch.marker)) {
+              watch.receivedAt = Date.now();
+            }
+          }
         }
       }
     });
@@ -42,6 +49,20 @@ export class TerminalWorkloadClient {
 
   terminalDelivery(sessionName) {
     return { ...(this.deliveryBySession.get(sessionName) ?? { frames: 0, bytes: 0 }) };
+  }
+
+  watchTextArrival(sessionName, marker) {
+    const key = `${sessionName}\u0000${marker}`;
+    this.textArrivalWatches.set(key, { sessionName, marker, receivedAt: null });
+  }
+
+  textArrival(sessionName, marker) {
+    const watch = this.textArrivalWatches.get(`${sessionName}\u0000${marker}`);
+    return watch ? { receivedAt: watch.receivedAt } : null;
+  }
+
+  unwatchTextArrival(sessionName, marker) {
+    this.textArrivalWatches.delete(`${sessionName}\u0000${marker}`);
   }
 
   send(message) {
@@ -63,6 +84,7 @@ export class TerminalWorkloadClient {
   async request(type, message = {}, timeoutMs = 10000) {
     const requestId = `${type}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const startIndex = this.frames.length;
+    if (type === 'terminal-bench-stats') this.benchStatsRequests += 1;
     this.send({ type, requestId, ...message });
     return this.waitForFrame(
       (frame) => frame.channel === 'terminal-bench' && frame.data?.requestId === requestId,
@@ -102,13 +124,24 @@ export class TerminalWorkloadClient {
   }
 
   async waitForServerText(sessionName, marker, timeoutMs = 30000) {
+    await this.waitForServerTexts([{ sessionName, marker }], timeoutMs);
+  }
+
+  async waitForServerTexts(markers, timeoutMs = 30000, pollIntervalMs = 250) {
+    const pending = new Map(markers.map(({ sessionName, marker }) => [sessionName, marker]));
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       const snapshot = (await this.request('terminal-bench-stats')).data?.snapshot;
-      if (snapshot?.sessions?.[sessionName]?.lastOutputTail?.includes(marker)) return;
-      await sleep(50);
+      for (const [sessionName, marker] of pending) {
+        if (snapshot?.sessions?.[sessionName]?.lastOutputTail?.includes(marker)) pending.delete(sessionName);
+      }
+      if (pending.size === 0) return;
+      await sleep(pollIntervalMs);
     }
-    throw new Error(`timed out waiting for server output ${marker} on ${sessionName}`);
+    const pendingMarkers = [...pending].map(([sessionName, marker]) => ({ sessionName, marker }));
+    const error = new Error(`timed out waiting for server output ${pendingMarkers.map(({ marker, sessionName }) => `${marker} on ${sessionName}`).join(', ')}`);
+    error.pendingServerMarkers = pendingMarkers;
+    throw error;
   }
 
   async close() {
