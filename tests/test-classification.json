@@ -1890,6 +1890,15 @@
       ]
     },
     {
+      "path": "tests/packet-receipt-cli-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/panel-repos-clone.test.ts",
       "reasons": [
         "child-process",

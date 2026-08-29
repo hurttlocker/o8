@@ -42,6 +42,10 @@ import {
   type CloseUnmergedResult,
 } from './close-unmerged-shared';
 import { classifyClosePreservation } from './close-unmerged-preservation';
+import {
+  buildDiscardedPacketDisposition,
+  PACKET_DISPOSITION_EVENT_CODE,
+} from '@/lib/receipts/disposition';
 
 // Re-export the shared vocabulary so existing server-side importers of this
 // module keep working unchanged.
@@ -393,6 +397,28 @@ async function closePacketUnmergedUnlocked(input: {
       lane,
       summary: outcomeNote,
     });
+
+    const packetDisposition = buildDiscardedPacketDisposition({
+      disposition: rawDisposition,
+      reason: note,
+      preservedBranches,
+      closedAt,
+    });
+    recordLaneEvent(lane.id, 'update', 'system', {
+      code: PACKET_DISPOSITION_EVENT_CODE,
+      disposition: packetDisposition,
+      preservationReceipts,
+    });
+    void import('@/lib/receipts/packet-receipt')
+      .then(({ createPacketReceiptForClosedPacket }) => createPacketReceiptForClosedPacket({
+        packetId: input.packetId,
+        laneId: lane.id,
+        repoPath: lane.repoPath,
+        disposition: packetDisposition,
+      }))
+      .catch((error) => {
+        console.warn(`[receipts] Discard receipt failed for packet ${input.packetId}:`, error);
+      });
 
     void requestRealtimeRefresh({
       targets: ['global', 'mobileInbox'],

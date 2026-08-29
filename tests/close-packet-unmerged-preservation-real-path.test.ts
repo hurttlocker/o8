@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 
 import { afterAll, describe, expect, it } from 'vitest';
 import { NextRequest } from 'next/server';
@@ -21,6 +21,7 @@ const { closeDb } = await import('@/lib/db');
 const { createLane, getLane, setLaneStatus } = await import('@/lib/lane/registry');
 const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+const { listStoredPacketReceipts } = await import('@/lib/receipts/packet-receipt');
 
 const roots: string[] = [dataDir];
 
@@ -115,6 +116,16 @@ function closeRequest(packetId: string) {
   });
 }
 
+async function waitForPacketReceipt(packetId: string) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const receipt = listStoredPacketReceipts(packetId).at(-1);
+    if (receipt) return receipt;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`Timed out waiting for packet receipt ${packetId}.`);
+}
+
 afterAll(() => {
   closeDb();
   for (const root of roots) rmSync(root, { recursive: true, force: true });
@@ -147,6 +158,18 @@ describe('close_packet_unmerged preservation classification — real route', () 
     });
     expect(getLane(lane.id)?.status).toBe('archived');
     expect(existsSync(worktreePath)).toBe(false);
+    const storedReceipt = await waitForPacketReceipt(packetId);
+    expect(storedReceipt.receipt).toMatchObject({
+      packetId,
+      laneId: lane.id,
+      disposition: {
+        kind: 'discarded',
+        disposition: 'wontfix',
+        preservedBranches: [],
+      },
+    });
+    expect(storedReceipt.artifact.kind).toBe('receipt');
+    expect(isAbsolute(storedReceipt.artifact.relPath)).toBe(false);
   });
 
   it('closes when both the branch and worktree are absent and records branch-absent', async () => {

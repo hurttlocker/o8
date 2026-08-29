@@ -25,6 +25,11 @@ export const PACKET_SUBCOMMANDS = [
   'runtime-drift',
 ] as const;
 
+export const OPERATOR_PACKET_SUBCOMMANDS = [
+  'receipt',
+  'receipts',
+] as const;
+
 export const PACKET_COMMAND_LINES = `  packet info [id]     packet metadata; explicit packet/lane id overrides cwd
   packet scope [id]    one-call worker context (auto-resolves from cwd)
   packet expand-scope [id] request bounded paths (--paths <path[,path]> --reason <text>)
@@ -50,10 +55,13 @@ export const PACKET_COMMAND_LINES = `  packet info [id]     packet metadata; exp
   packet log [id]      read or follow packet lane events (--follow, --since)
   packet runtime-drift [id] detect and warn when a lane's bound runtime drifted`;
 
+export const OPERATOR_PACKET_COMMAND_LINES = `  packet receipt [id]  operator only: write a signed receipt JSON for a closed packet (--out <path>)
+  packet receipts [id] operator only: list stored signed receipts for a packet`;
+
 export function packetGroupUsage(): string {
   return `usage: o8 packet <subcommand> [flags]\n\n${PACKET_COMMAND_LINES}\n\nRun \`o8 --help\` for the full command surface.\n`;
 }
 
 export function packetSubcommandHint(): string {
-  return `Valid packet subcommands: ${PACKET_SUBCOMMANDS.join(', ')}.`;
+  return `Valid worker packet subcommands: ${PACKET_SUBCOMMANDS.join(', ')}. Operator-only packet subcommands: ${OPERATOR_PACKET_SUBCOMMANDS.join(', ')}.`;
 }

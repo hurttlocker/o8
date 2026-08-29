@@ -75,6 +75,11 @@ import {
   handleSetProjectRepos,
 } from '@/lib/mcp/operator-handlers/repo-management';
 import {
+  RECEIPT_TOOLS,
+  handlePacketReceipt,
+  handleVerifyReceipt,
+} from '@/lib/mcp/operator-handlers/receipts';
+import {
   type McpTool,
   type McpToolResult,
   checkApiHealth,
@@ -275,6 +280,7 @@ const TOOLS: McpTool[] = [
   ...SPEC_TOOLS,
   ...TARGETING_TOOLS,
   ...LEASE_TOOLS,
+  ...RECEIPT_TOOLS,
   ...AGENT_MESSAGE_TOOLS,
   ...BROADCAST_TOOLS,
   ...UPDATE_TOOLS,
@@ -364,6 +370,8 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   o8_lease_release: handleLeaseRelease,
   o8_lease_status: handleLeaseStatus,
   o8_lease_list: handleLeaseList,
+  o8_packet_receipt: handlePacketReceipt,
+  o8_verify_receipt: handleVerifyReceipt,
   o8_msg_send: handleAgentMessageSend,
   o8_msg_inbox: handleAgentMessageInbox,
   o8_broadcast_post: handleBroadcastPost,

@@ -164,6 +164,7 @@ const { getMissionStatus, approveAndMergePacket, submitPacketReview } = await im
 const { recordMission } = await import('@/lib/db/missions-store');
 const { getSqlite } = await import('@/lib/db');
 const { mintPacketWorkerToken } = await import('@/lib/auth/packet-worker-token');
+const { listStoredPacketReceipts } = await import('@/lib/receipts/packet-receipt');
 const { syncTranscriptSearchDocument } = await import('@/lib/search/transcripts');
 const { getActiveProjectScopeForRepo } = await import('@/lib/repos/projects');
 const {
@@ -1118,6 +1119,16 @@ function commitMergeFile(cwd: string, file: string, body: string, message: strin
   return gitOut(cwd, ['rev-parse', 'HEAD']);
 }
 
+async function waitForPacketReceipt(packetId: string) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const receipt = listStoredPacketReceipts(packetId).at(-1);
+    if (receipt) return receipt;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`Timed out waiting for packet receipt ${packetId}.`);
+}
+
 async function makeMergeWorktree(repoPath: string, packetId: string, branch: string): Promise<string> {
   const previous = process.env.O8_SKIP_PRELAUNCH_TYPECHECK;
   process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
@@ -1238,6 +1249,17 @@ describe('seam G — merge truth verifies release claims and carries same-patch 
     expect(result.merged).toBe(true);
     expect(result.alreadyReleased).toBeUndefined();
     expect(result.mergeSha).toBe(gitOut(repoPath, ['rev-parse', 'HEAD']));
+    const storedReceipt = await waitForPacketReceipt(packetId);
+    expect(storedReceipt.receipt).toMatchObject({
+      packetId,
+      laneId: lane.id,
+      disposition: {
+        kind: 'merged',
+        mergeCommit: result.mergeSha,
+        tree: gitOut(repoPath, ['rev-parse', 'HEAD^{tree}']),
+      },
+    });
+    expect(storedReceipt.artifact.kind).toBe('receipt');
   }, 20_000);
 
   it('patch-id carry allows unchanged rebased review and still rejects changed content', async () => {
