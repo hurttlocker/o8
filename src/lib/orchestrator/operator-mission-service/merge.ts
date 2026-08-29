@@ -531,6 +531,21 @@ async function dispatchPacketMerge(
     });
   }
 
+  // The receipt signer re-reads the persisted release payload. Launch it only
+  // after withLockedState releases, and never let artifact I/O delay a merge.
+  if (result.ok && result.mergeSha) {
+    void import('@/lib/receipts/packet-receipt')
+      .then(({ createPacketReceiptForClosedPacket }) => createPacketReceiptForClosedPacket({
+        packetId: packet.id,
+        laneId: lane.id,
+        repoPath: lane.repoPath,
+        expectedMergeCommit: result.mergeSha,
+      }))
+      .catch((error) => {
+        console.warn(`[receipts] Merge receipt failed for packet ${packet.id}:`, error);
+      });
+  }
+
   // The dispatch tick stays OUTSIDE the lock (it clones worktrees and spawns
   // sessions); its outcome is merged per changed packet under the lock so a
   // write that landed mid-tick survives.

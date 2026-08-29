@@ -42,8 +42,16 @@ function identityFromSecret(secretKey: Uint8Array): ReceiptIdentity {
   return {
     publicKeyB64: naclUtil.encodeBase64(publicKey),
     secretKey,
-    keyId: createHash('sha256').update(publicKey).digest('hex').slice(0, 16),
+    keyId: receiptKeyIdForPublicKey(publicKey),
   };
+}
+
+export function receiptKeyIdForPublicKey(publicKey: Uint8Array | string): string {
+  const bytes = typeof publicKey === 'string' ? naclUtil.decodeBase64(publicKey) : publicKey;
+  if (bytes.length !== nacl.sign.publicKeyLength) {
+    throw new Error('Receipt public key must be a 32-byte Ed25519 key.');
+  }
+  return createHash('sha256').update(bytes).digest('hex').slice(0, 16);
 }
 
 export function loadOrCreateReceiptIdentityAt(

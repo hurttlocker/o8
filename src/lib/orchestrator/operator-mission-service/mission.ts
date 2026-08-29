@@ -784,7 +784,9 @@ export async function getMissionStatus(input: MissionStatusInput) {
           reviewedHeadSha: packet.review.reviewedHeadSha ?? null,
           auditApprovalId: packet.review.auditApprovalId ?? null,
         } : null,
-        artifacts: listArtifacts({ packetId: packet.id }).map(toArtifactRef),
+        artifacts: listArtifacts({ packetId: packet.id })
+          .filter((artifact) => artifact.kind !== 'receipt')
+          .map(toArtifactRef),
       };
     }),
     agents,

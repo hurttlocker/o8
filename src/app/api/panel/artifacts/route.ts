@@ -97,7 +97,8 @@ export async function GET(request: Request) {
   }
 
   try {
-    const rows = listArtifacts({ packetId, prNumber, laneId, threadId });
+    const rows = listArtifacts({ packetId, prNumber, laneId, threadId })
+      .filter((artifact) => artifact.kind !== 'receipt');
     return NextResponse.json({ artifacts: rows.map(toArtifactView) });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : 'list failed', artifacts: [] }, { status: 500 });

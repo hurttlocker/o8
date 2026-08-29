@@ -19,7 +19,7 @@ import { randomUUID } from 'node:crypto';
 import { getDb, artifacts } from '@/lib/db';
 import { getDataDir } from '@/lib/data-dir-migration';
 
-export type ArtifactKind = 'screenshot' | 'video' | 'report';
+export type ArtifactKind = 'screenshot' | 'video' | 'report' | 'receipt';
 export type ArtifactSource = 'agent-capture' | 'review-boundary' | 'manual';
 export type ArtifactPhase = 'before' | 'after' | null;
 
@@ -73,6 +73,7 @@ const EXT_BY_MIME: Record<string, string> = {
   'video/mp4': 'mp4',
   'video/webm': 'webm',
   'text/html': 'html',
+  'application/json': 'json',
 };
 
 /** Filesystem-safe slug for a path segment (packet ids can contain `/` or `:`). */
