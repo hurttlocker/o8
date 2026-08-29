@@ -291,11 +291,12 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
     packet?.issue?.body ? { id: packet.id, text: packet.issue.body } : null,
   ), [entries, name, packet?.id, packet?.issue?.body]);
   const runtime = useMemo(() => inferRuntime(sessionKey, agent?.runtime), [agent?.runtime, sessionKey]);
+  const statusEvidence = packet?.statusEvidence ?? agent?.statusEvidence;
   const status = useMemo(
-    () => agent?.statusEvidence
-      ? visualStatusFromTerminalState(agent.statusEvidence.state)
+    () => statusEvidence
+      ? visualStatusFromTerminalState(statusEvidence.state)
       : resolveAgentTileStatus(agent?.status, packet?.status, packet?.blockedReason),
-    [agent?.status, agent?.statusEvidence, packet?.blockedReason, packet?.status],
+    [agent?.status, packet?.blockedReason, packet?.status, statusEvidence],
   );
   const canSteer = canSteerAgentState(agent, packet);
   const trimmedDraft = draft.trim();
@@ -467,7 +468,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
           <span
-            title={agent?.statusEvidence?.summary ?? STATUS_META[status].label}
+            title={statusEvidence?.summary ?? STATUS_META[status].label}
             style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--t-text-secondary)', fontSize: 10, fontWeight: 300 }}
           >
             <span
@@ -475,8 +476,8 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
                 width: 5, height: 5, borderRadius: 999, background: STATUS_META[status].color, flexShrink: 0,
               }}
             />
-            {agent?.statusEvidence
-              ? terminalStatusCaption(agent.statusEvidence)
+            {statusEvidence
+              ? terminalStatusCaption(statusEvidence)
               : STATUS_META[status].label}
           </span>
           <SessionTransformMenu runtimeId={runtime} sessionKey={sessionKey} />
@@ -507,8 +508,8 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
         </div>
       </div>
 
-      {agent?.statusEvidence ? (
-        <TerminalStatusEvidenceDisclosure evidence={agent.statusEvidence} />
+      {statusEvidence ? (
+        <TerminalStatusEvidenceDisclosure evidence={statusEvidence} />
       ) : null}
 
       <div

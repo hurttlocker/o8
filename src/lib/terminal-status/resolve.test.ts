@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ApprovalRecord } from '@/lib/approvals/types';
-import type { Lane } from '@/lib/lane/types';
+import type { Lane, LaneEvent } from '@/lib/lane/types';
 import type { OwnedRunRecord } from '@/lib/runtimes/shared/owned-session/types';
 import {
   resolveTerminalStatusEvidence,
@@ -149,6 +149,63 @@ describe('resolveTerminalStatusEvidence', () => {
 
     expect(resolved).toMatchObject({ authority: 'lane-state', state });
     expect(resolved.fallbackReason).toContain('No runtime event evidence');
+  });
+
+  it('uses the lane id and last event label for a sessionless orchestrator blocker', () => {
+    const parkedLane = {
+      ...lane('awaiting_orchestrator'),
+      sessionKey: null,
+      lastEventLabel: 'worktree_missing_unverified',
+    };
+    const resolved = resolveTerminalStatusEvidence({
+      lane: parkedLane,
+      laneEvents: [{
+        id: 'event-worktree-missing',
+        laneId: parkedLane.id,
+        verb: 'status_change',
+        actor: 'system',
+        payload: {
+          status: 'awaiting_orchestrator',
+          eventLabel: 'worktree_missing_unverified',
+        },
+        timestamp: observedAt,
+      }],
+    });
+
+    expect(resolved).toMatchObject({
+      sessionId: parkedLane.id,
+      authority: 'lane-state',
+      state: 'blocked',
+    });
+    expect(resolved.summary).toContain('worktree_missing_unverified');
+    expect(resolved.evidence).toContainEqual({
+      source: 'lane-event:worktree_missing_unverified',
+      value: JSON.stringify({
+        status: 'awaiting_orchestrator',
+        eventLabel: 'worktree_missing_unverified',
+      }),
+    });
+  });
+
+  it('names the latest agent question for an awaiting-input lane', () => {
+    const question = {
+      id: 'event-agent-question',
+      laneId: 'lane-status-evidence',
+      verb: 'agent_report',
+      actor: 'system',
+      payload: { event: 'question', message: 'Which branch should I target?' },
+      timestamp: '2026-08-29T11:59:00.000Z',
+    } satisfies LaneEvent;
+    const resolved = resolveTerminalStatusEvidence({
+      lane: lane('awaiting_input'),
+      laneEvents: [question],
+    });
+
+    expect(resolved.summary).toBe('Agent question: Which branch should I target?');
+    expect(resolved.evidence).toContainEqual({
+      source: 'lane-event:question',
+      value: JSON.stringify(question.payload),
+    });
   });
 
   const rawStates: TerminalStatusState[] = [
@@ -322,11 +379,12 @@ describe('resolveTerminalStatusEvidence', () => {
       updatedAt: Date.parse(observedAt),
     } as ApprovalRecord;
     const resolved = resolveTerminalStatusEvidence({
-      lane: lane('running', '2026-08-29T11:59:00.000Z'),
+      lane: lane('awaiting_human', '2026-08-29T12:01:00.000Z'),
       approvals: [approval],
     });
 
     expect(resolved).toMatchObject({ authority: 'lane-state', state: 'blocked' });
+    expect(resolved.summary).toBe('Approval pending: Allow governed continuation.');
     expect(resolved.evidence).toContainEqual({
       source: 'approval:approval-status-evidence',
       value: 'pending · Operator approval is required.',

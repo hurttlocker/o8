@@ -187,6 +187,26 @@ function laneEventState(event: LaneEvent): TerminalStatusState | null {
     return clean ? 'complete' : 'failed';
   }
   if (event.verb === 'review_queue_blocked' || event.verb === 'spend_cap_hit') return 'blocked';
+  if (event.verb === 'status_change') {
+    switch (event.payload.status) {
+      case 'idle':
+      case 'launching':
+      case 'running':
+      case 'paused':
+      case 'awaiting_input':
+      case 'awaiting_orchestrator':
+      case 'awaiting_human':
+      case 'recovering':
+      case 'reviewing':
+      case 'merging':
+      case 'failed':
+      case 'completed':
+      case 'archived':
+        return laneState(event.payload.status);
+      default:
+        return null;
+    }
+  }
   if (event.verb !== 'agent_report') return null;
   switch (event.payload.event) {
     case 'blocked':
@@ -203,6 +223,48 @@ function laneEventState(event: LaneEvent): TerminalStatusState | null {
     default:
       return null;
   }
+}
+
+function laneEventSource(event: LaneEvent): string {
+  if (event.verb === 'status_change' && typeof event.payload.eventLabel === 'string') {
+    return `lane-event:${oneLine(event.payload.eventLabel)}`;
+  }
+  if (event.verb === 'agent_report' && typeof event.payload.event === 'string') {
+    return `lane-event:${oneLine(event.payload.event)}`;
+  }
+  return `lane-event:${event.verb}`;
+}
+
+function newestAgentQuestion(events: LaneEvent[]): string | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.verb !== 'agent_report' || event.payload.event !== 'question') continue;
+    const message = event.payload.message;
+    if (typeof message === 'string' && oneLine(message)) return oneLine(message);
+  }
+  return null;
+}
+
+function blockedLaneSummary(
+  lane: Lane | null,
+  laneEvents: LaneEvent[],
+  approvals: ApprovalRecord[],
+): string | null {
+  if (!lane) return null;
+  if (lane.status === 'awaiting_orchestrator' && lane.lastEventLabel) {
+    return `Lane ${lane.label} is blocked: ${oneLine(lane.lastEventLabel)}.`;
+  }
+  if (lane.status === 'awaiting_human') {
+    const approval = approvals
+      .filter((candidate) => candidate.status === 'pending')
+      .sort((left, right) => right.updatedAt - left.updatedAt)[0];
+    if (approval) return `Approval pending: ${oneLine(approval.title)}.`;
+  }
+  if (lane.status === 'awaiting_input') {
+    const question = newestAgentQuestion(laneEvents);
+    if (question) return `Agent question: ${question}`;
+  }
+  return null;
 }
 
 function selectNewest(candidates: StatusCandidate[]): StatusCandidate | null {
@@ -273,7 +335,7 @@ export function resolveTerminalStatusEvidence(
   const ownedRun = input.ownedRun ?? null;
   const lane = input.lane ?? null;
   const rawLifecycle = input.rawLifecycle ?? null;
-  const sessionId = runtimeSession?.sessionKey ?? lane?.sessionKey ?? rawLifecycle?.sessionId;
+  const sessionId = runtimeSession?.sessionKey ?? lane?.sessionKey ?? lane?.id ?? rawLifecycle?.sessionId;
   const runtime = runtimeSession?.runtimeId ?? lane?.runtime ?? rawLifecycle?.runtime;
   if (!sessionId || !runtime) {
     throw new Error('Terminal status evidence requires an existing session id and registered runtime.');
@@ -360,7 +422,7 @@ export function resolveTerminalStatusEvidence(
       state,
       observedAt,
       summary: `Lane event ${event.verb} reports ${state}.`,
-      source: `lane-event:${event.verb}`,
+      source: laneEventSource(event),
       value: oneLine(JSON.stringify(event.payload)),
       sourceRank: 2,
     });
@@ -445,7 +507,11 @@ export function resolveTerminalStatusEvidence(
     state: selected.state,
     authority: selected.authority,
     observedAt: selected.observedAt,
-    summary: oneLine(selected.summary),
+    summary: oneLine(
+      selected.authority === 'lane-state' && selected.state === 'blocked'
+        ? blockedLaneSummary(lane, input.laneEvents ?? [], input.approvals ?? []) ?? selected.summary
+        : selected.summary,
+    ),
     evidence: candidateEvidence(allCandidates),
     fallbackReason: governanceLaneOutranksFinishedRuntime
       ? undefined

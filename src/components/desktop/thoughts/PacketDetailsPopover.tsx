@@ -169,10 +169,11 @@ export function PacketDetailsPopover({ packet, anchorRect, onClose }: PacketDeta
   const issueNumber = packet.issue?.number ?? null;
   const hasIssueSection = Boolean(issueBody || issueUrl || issueNumber);
   const statusEvidence = useMemo(() => {
+    if (packet.statusEvidence) return packet.statusEvidence;
     const sessionKey = packet.lane?.sessionKey;
     if (!sessionKey) return undefined;
     return orchestratorData?.agents.find((agent) => agent.sessionKey === sessionKey)?.statusEvidence;
-  }, [orchestratorData?.agents, packet.lane?.sessionKey]);
+  }, [orchestratorData?.agents, packet.lane?.sessionKey, packet.statusEvidence]);
 
   if (!portalHost || !anchorRect || !position) return null;
 

@@ -4,6 +4,7 @@ import { ClaudeIcon, CodexIcon, GeminiIcon, OpenCodeIcon } from '@/components/de
 import { AgentStatusDot, agentStatusToDotState } from '@/components/desktop/AgentStatusDot';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { packetRuntimeModelDisplayLabel } from '@/lib/orchestrator/display';
+import { terminalStatusCaption } from '@/components/desktop/TerminalStatusEvidenceRows';
 import type { IdeWorkspaceSession } from '../types';
 import {
   formatElapsed,
@@ -110,9 +111,11 @@ export function PacketRow({
   onSelectSession?: (sessionKey: string) => void;
 }) {
   const sessionKey = packet.lane?.sessionKey ?? null;
+  const statusEvidence = packet.statusEvidence;
   return (
     <button
       type="button"
+      title={statusEvidence?.summary}
       onClick={() => {
         if (sessionKey) onSelectSession?.(sessionKey);
       }}
@@ -144,7 +147,10 @@ export function PacketRow({
           {packetRuntimeModelDisplayLabel(packet)} · {packetTimeLabel(packet)}
         </span>
       </span>
-      <StatusPill label={packetStatusLabel(packet)} color={packetStatusColor(packet)} />
+      <StatusPill
+        label={statusEvidence ? terminalStatusCaption(statusEvidence) : packetStatusLabel(packet)}
+        color={packetStatusColor(packet)}
+      />
     </button>
   );
 }

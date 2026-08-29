@@ -826,11 +826,68 @@ describe('seam E — review-ready projection is suppressed while owned Codex is 
       source: 'runtime-session.status',
       value: 'completed',
     });
+    expect(packet.statusEvidence).toEqual(agent.statusEvidence);
   });
 });
 
 describe('seam E — orchestrator state projects one terminal status authority', () => {
   const url = 'http://localhost:3001/api/orchestrator/state';
+
+  it('real state GET resolves lane evidence for a parked packet with no inventory agent', async () => {
+    const packetId = 'pkt-seam-E-lane-only-blocked';
+    const surfaceId = 'codex-owned:seam-E-lane-only-blocked';
+    const repoPath = mkdtempSync(join(os.tmpdir(), 'o8-seam-E-lane-only-repo-'));
+    tempDirs.push(repoPath);
+
+    const persistedLane = createLane({
+      repoPath,
+      worktreePath: repoPath,
+      branch: 'inline/seam-e-lane-only',
+      runtime: 'codex',
+      packetId,
+      sessionKey: surfaceId,
+    });
+    setLaneStatus(
+      persistedLane.id,
+      'awaiting_orchestrator',
+      'system',
+      'worktree_missing_unverified',
+    );
+    runtimeInventoryMock.agents = [];
+
+    const seed = await (await stateRoute.GET(operatorGet(url))).json();
+    const current: OrchestratorMissionState = seed.mission ?? createEmptyOrchestratorMissionState();
+    const mission: OrchestratorMissionState = {
+      ...current,
+      packets: [
+        ...current.packets,
+        packetFixture({ id: packetId, status: 'blocked', lane: null }),
+      ],
+    };
+    const postRes = await stateRoute.POST(operatorReq(url, { mission }));
+    expect(postRes.status).toBe(200);
+
+    const response = await stateRoute.GET(operatorGet(url));
+    expect(response.status).toBe(200);
+    const json = await response.json();
+    const packet = json.mission.packets.find((candidate: OrchestratorPacket) => (
+      candidate.id === packetId
+    ));
+
+    expect(json.agents).toEqual([]);
+    expect(packet.statusEvidence).toMatchObject({
+      sessionId: surfaceId,
+      runtime: 'codex',
+      state: 'blocked',
+      authority: 'lane-state',
+    });
+    expect(packet.statusEvidence.summary).toContain('worktree_missing_unverified');
+    expect(packet.statusEvidence.evidence).toContainEqual({
+      source: 'lane-event:worktree_missing_unverified',
+      value: expect.stringContaining('awaiting_orchestrator'),
+    });
+    expect(runtimeInventoryMock.requests.at(-1)).toEqual({ fresh: false });
+  });
 
   it('real state GET carries resolved evidence from fabricated inventory to the desktop status rows', async () => {
     const packetId = 'pkt-seam-E-status-evidence';
