@@ -24,7 +24,10 @@ export interface ReleaseBuildCacheAction {
   estimatedSavedMs?: number | null;
 }
 
-export function resolveReleaseBuildCacheRoot(env?: NodeJS.ProcessEnv): string;
+export function resolveReleaseBuildCacheRoot(
+  env?: NodeJS.ProcessEnv,
+  options?: { warn?: (line: string) => void },
+): string;
 export function isReleaseBuildCacheSafetyError(error: unknown): boolean;
 export function collectReleaseBuildCacheIdentity(
   root: string,
@@ -74,6 +77,11 @@ export const releaseBuildCacheInternals: {
   collectWebEnvironmentFiles(root: string): Array<{ path: string; sha256: string }>;
   normalizeArchivePath(value: string): string | null;
   pathAllowed(candidate: string, targets: string[], excludes: string[]): boolean;
+  pruneCacheToBudget(
+    cacheRoot: string,
+    budgetBytes: number,
+    projectRoot: string,
+  ): { removedBytes: number; remainingBytes: number; removedEntries: number };
   sha256File(path: string): Promise<string>;
   stableJson(value: unknown): string;
 };
