@@ -20,9 +20,14 @@
 
 import { useEffect, useSyncExternalStore } from 'react';
 import { WorkspaceBootLoader } from './WorkspaceBootLoader';
+import { recordTerminalBenchEvent } from './terminal-bench-instrumentation';
 
 let claimCount = 0;
 const listeners = new Set<() => void>();
+
+function recordClaimCount(reason: string): void {
+  recordTerminalBenchEvent('boot-loader-claim-count', { claimCount, reason });
+}
 
 // Synthetic FIRST-PAINT claim (prod boot recording 2026-07-17): real claims
 // only mount in post-hydration effects, so the server-rendered dashboard
@@ -37,12 +42,14 @@ let firstPaintClaimHeld = false;
 if (typeof window !== 'undefined') {
   claimCount = 1;
   firstPaintClaimHeld = true;
+  recordClaimCount('first-paint-acquired');
 }
 
 function releaseFirstPaintClaim() {
   if (!firstPaintClaimHeld) return;
   firstPaintClaimHeld = false;
   claimCount -= 1;
+  recordClaimCount('first-paint-released');
   if (claimCount === 0 && !settleTimer && !bootCompleted) {
     settleTimer = setTimeout(() => {
       settleTimer = null;
@@ -74,12 +81,14 @@ export function claimBootLoader(): () => void {
     settleTimer = null;
   }
   claimCount += 1;
+  recordClaimCount('claim-acquired');
   notify();
   let released = false;
   return () => {
     if (released) return;
     released = true;
     claimCount -= 1;
+    recordClaimCount('claim-released');
     if (claimCount === 0 && !settleTimer) {
       settleTimer = setTimeout(() => {
         settleTimer = null;

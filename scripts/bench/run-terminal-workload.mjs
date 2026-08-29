@@ -360,6 +360,26 @@ async function browserTerminalSize(page, sessionName) {
   }, sessionName);
 }
 
+async function browserTerminalSizeDiagnostic(page, sessionName) {
+  return page.evaluate((targetSession) => {
+    const sessions = window.__o8TerminalWriteStats?.sessions ?? {};
+    const panel = document.querySelector(`[data-o8-term-panel="${CSS.escape(targetSession)}"]`);
+    return {
+      sessionKeys: Object.keys(sessions),
+      sessions: Object.fromEntries(Object.entries(sessions).map(([key, session]) => [key, {
+        cols: session.cols,
+        rows: session.rows,
+        mountCount: session.mountCount,
+        mounted: session.mounted,
+      }])),
+      fontStatus: document.fonts?.status ?? 'unsupported',
+      loadingWorkspacePresent: document.querySelector('[aria-label="Loading workspace"]') !== null,
+      xtermElementCount: panel?.querySelectorAll('.xterm').length ?? 0,
+      performanceNow: performance.now(),
+    };
+  }, sessionName);
+}
+
 async function waitForBrowserTerminalSize(page, sessionName, timeoutMs = 5000) {
   const deadline = Date.now() + timeoutMs;
   let size = { cols: 0, rows: 0 };
@@ -368,7 +388,9 @@ async function waitForBrowserTerminalSize(page, sessionName, timeoutMs = 5000) {
     if (size.cols > 0 && size.rows > 0) return size;
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve())));
   }
-  throw new Error(`browser terminal grid unavailable for ${sessionName}: ${size.cols}x${size.rows}`);
+  const error = new Error(`browser terminal grid unavailable for ${sessionName}: ${size.cols}x${size.rows}`);
+  error.terminalSizeFailure = await browserTerminalSizeDiagnostic(page, sessionName);
+  throw error;
 }
 
 async function waitForSharedTerminalGrid(page, sessionName, timeoutMs = 3000) {
@@ -776,6 +798,7 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
   let page;
   let clients = [];
   const browserConsole = [];
+  const httpFailures = [];
   try {
     stack = await startIsolatedStack(ROOT, seeded, runConfig.requestedBuildMode);
     context = await browser.newContext({ viewport: { width: 1000, height: 800 } });
@@ -783,6 +806,10 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
     page.on('console', (message) => {
       browserConsole.push({ type: message.type(), text: message.text() });
       if (browserConsole.length > 2000) browserConsole.shift();
+    });
+    page.on('response', (response) => {
+      if (response.status() < 400 || httpFailures.length >= 200) return;
+      httpFailures.push({ url: response.url(), status: response.status() });
     });
     await page.addInitScript(browserInitScript);
     let ui = await waitForSeededDashboard(page, `http://127.0.0.1:${stack.apiPort}`, seeded);
@@ -1008,7 +1035,7 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
       diagnostics: { resyncUnsettledCount, resyncFailedCount },
       rapidSwitch,
       replayRisk,
-      raw: { browser: rawBrowser, server: rawServer, ui },
+      raw: { browser: rawBrowser, server: rawServer, ui, browserConsole, httpFailures },
     };
   } catch (error) {
     const failure = {
@@ -1018,6 +1045,8 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
       error: error instanceof Error ? { message: error.message, stack: error.stack } : String(error),
       dashboard: page && !page.isClosed() ? await dashboardDiagnostic(page, seeded.tabs).catch(() => null) : null,
       browserConsole,
+      httpFailures,
+      terminalSizeFailure: error instanceof Error ? error.terminalSizeFailure ?? null : null,
       nextLog: stack?.logs.next() ?? null,
       wsLog: stack?.logs.ws() ?? null,
       rapidSwitchFailure: error instanceof Error ? error.rapidSwitchFailure ?? null : null,

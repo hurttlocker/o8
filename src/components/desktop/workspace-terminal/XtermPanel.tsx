@@ -11,6 +11,7 @@ import { ClientTerminalHiddenBuffer } from '@/components/desktop/workspace-termi
 import { recordTerminalDiagnostic } from '@/components/desktop/workspace-terminal/terminal-diagnostics';
 import {
   recordTerminalBenchDimensions,
+  recordTerminalBenchEvent,
   recordTerminalBenchRender,
   recordTerminalBenchVisibility,
   recordTerminalBenchWrite,
@@ -100,6 +101,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fitAddonRef = useRef<any>(null);
   const observerRef = useRef<ResizeObserver | null>(null);
+  const initCountRef = useRef(0);
   const tmuxSessionRef = useRef(tmuxSession);
   tmuxSessionRef.current = tmuxSession;
   const visibleRef = useRef(visible);
@@ -132,11 +134,30 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
     const fitAddon = fitAddonRef.current;
     const term = termRef.current;
     if (!fitAddon || !term) return;
+    let proposedDimensions = null;
     try {
+      proposedDimensions = fitAddon.proposeDimensions?.() ?? null;
       fitAddon.fit();
+      recordTerminalBenchEvent('xterm-fit', {
+        sessionName: tmuxSession,
+        initCount: initCountRef.current,
+        source: 'resize',
+        cols: term.cols,
+        rows: term.rows,
+        proposedDimensions,
+      });
       recordTerminalBenchDimensions(tmuxSession, term.cols, term.rows);
       sendTerminalResize(tmuxSession, term.cols, term.rows);
-    } catch {
+    } catch (error) {
+      recordTerminalBenchEvent('xterm-fit', {
+        sessionName: tmuxSession,
+        initCount: initCountRef.current,
+        source: 'resize',
+        cols: term.cols,
+        rows: term.rows,
+        proposedDimensions,
+        error: error instanceof Error ? error.message : String(error),
+      });
       // The terminal may be disposed while a queued fit is running.
     }
   }, [sendTerminalResize, tmuxSession]);
@@ -339,6 +360,10 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
   useEffect(() => {
     if (!containerRef.current) return undefined;
     let disposed = false;
+    const initCount = initCountRef.current + 1;
+    initCountRef.current = initCount;
+    const importsStartedAt = performance.now();
+    recordTerminalBenchEvent('xterm-init-start', { sessionName: tmuxSession, initCount });
 
     async function init() {
       try {
@@ -350,6 +375,11 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
           import('@xterm/addon-unicode11'),
           import('@xterm/addon-image'),
         ]);
+        recordTerminalBenchEvent('xterm-imports-resolved', {
+          sessionName: tmuxSession,
+          initCount,
+          ms: performance.now() - importsStartedAt,
+        });
         if (disposed) return;
 
         if (!document.getElementById('xterm-css')) {
@@ -404,6 +434,12 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
         term.open(containerRef.current);
         termRef.current = term;
         fitAddonRef.current = fitAddon;
+        recordTerminalBenchEvent('xterm-created', {
+          sessionName: tmuxSession,
+          initCount,
+          cols: term.cols,
+          rows: term.rows,
+        });
         const renderDisposable = terminalBenchEnabled()
           ? term.onRender(({ start, end }: { start: number; end: number }) => {
             recordTerminalBenchRender(tmuxSession, visibleRef.current, start, end);
@@ -439,7 +475,23 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
         requestAnimationFrame(() => requestAnimationFrame(() => {
           const liveTerm = termRef.current;
           if (disposed || !liveTerm || !fitAddonRef.current) return;
-          try { fitAddonRef.current.fit(); } catch { /* disposed mid-fit */ }
+          let proposedDimensions = null;
+          let fitError = null;
+          try {
+            proposedDimensions = fitAddonRef.current.proposeDimensions?.() ?? null;
+            fitAddonRef.current.fit();
+          } catch (error) {
+            fitError = error instanceof Error ? error.message : String(error);
+          }
+          recordTerminalBenchEvent('xterm-fit', {
+            sessionName: tmuxSession,
+            initCount,
+            source: 'initial',
+            cols: liveTerm.cols,
+            rows: liveTerm.rows,
+            proposedDimensions,
+            ...(fitError ? { error: fitError } : {}),
+          });
           recordTerminalBenchDimensions(tmuxSession, liveTerm.cols, liveTerm.rows);
           if (spawnReveal) {
             revealHoldRef.current = revealMinPlay === true;
@@ -481,6 +533,11 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
           observerRef.current = null;
         };
       } catch (err) {
+        recordTerminalBenchEvent('xterm-init-error', {
+          sessionName: tmuxSession,
+          initCount,
+          error: err instanceof Error ? err.message : String(err),
+        });
         if (!disposed) {
           setError(err instanceof Error ? err.message : 'Failed to load terminal');
         }
@@ -499,6 +556,11 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
 
     return () => {
       disposed = true;
+      recordTerminalBenchEvent('xterm-disposed', {
+        sessionName: tmuxSession,
+        initCount,
+        hadTerminal: Boolean(termRef.current),
+      });
       unregisterSelection();
       cancelReveal(false);
       sendTerminalDetach(tmuxSession);

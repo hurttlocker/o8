@@ -67,6 +67,11 @@ export function terminalBenchEnabled(): boolean {
   return typeof window !== 'undefined' && window.__o8TerminalBenchEnabled === true;
 }
 
+export function recordTerminalBenchEvent(event: string, details: Record<string, unknown> = {}): void {
+  if (!terminalBenchEnabled()) return;
+  console.warn('[workspace-terminal:bench]', JSON.stringify({ at: now(), event, ...details }));
+}
+
 function resetStats(stats: TerminalBenchWriteStats): void {
   const resetAt = now();
   stats.startedAt = resetAt;
