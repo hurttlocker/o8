@@ -70,6 +70,16 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
     writeRaw: (sessionName, data) => {
       deps.panelRefs.current.get(sessionName)?.writeRaw(data);
     },
+    terminalVisibilityReady: (sessionName, epoch) => {
+      deps.panelRefs.current.get(sessionName)?.visibilityReady?.(epoch);
+    },
+    applyTerminalResync: (sessionName, data, epoch, historyTruncated, source) => {
+      deps.panelRefs.current.get(sessionName)?.applyResync?.(data, epoch, historyTruncated, source);
+    },
+    recordTerminalDiagnostic: (diagnostic) => {
+      const sessionName = typeof diagnostic.sessionName === 'string' ? diagnostic.sessionName : '';
+      if (sessionName) deps.panelRefs.current.get(sessionName)?.recordDiagnostic?.(diagnostic);
+    },
     showImage: (sessionName, imageB64, filename) => {
       deps.panelRefs.current.get(sessionName)?.showImage(imageB64, filename);
     },

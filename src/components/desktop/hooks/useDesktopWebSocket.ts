@@ -30,6 +30,9 @@ export interface DesktopWsCallbacks {
   onTerminalCreated?: (sessionName: string, requestId?: string) => void;
   onTerminalData?: (sessionName: string, data: string) => void;
   onTerminalAttached?: (sessionName: string) => void;
+  onTerminalVisibilityReady?: (sessionName: string, epoch: number) => void;
+  onTerminalResync?: (sessionName: string, data: string, epoch: number, historyTruncated: boolean, source: 'tmux' | 'scrollback') => void;
+  onTerminalDiagnostic?: (diagnostic: Record<string, unknown>) => void;
   onTerminalExited?: (sessionName: string, exitCode: number) => void;
   onTerminalError?: (sessionName: string, error: string) => void;
   onTerminalImage?: (sessionName: string, imageB64: string, filename: string) => void;
@@ -46,6 +49,7 @@ interface UseDesktopWebSocketResult {
   sendTerminalAttach: (sessionName: string, cols: number, rows: number) => void;
   sendTerminalInput: (sessionName: string, data: string) => void;
   sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;
+  sendTerminalVisibility: (sessionName: string, visible: boolean, options?: { epoch?: number; needsResync?: boolean; cols?: number; rows?: number }) => void;
   sendTerminalDetach: (sessionName: string) => void;
   sendAgentKill: (sessionName: string, signal?: 'SIGTERM' | 'SIGINT') => void;
 }
@@ -150,6 +154,12 @@ export function useDesktopWebSocket(
     }
   }, []);
 
+  const sendTerminalVisibility = useCallback((sessionName: string, visible: boolean, options?: { epoch?: number; needsResync?: boolean; cols?: number; rows?: number }) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'terminal-visibility', sessionName, visible, ...options }));
+    }
+  }, []);
+
   const sendTerminalDetach = useCallback((sessionName: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'terminal-detach', sessionName }));
@@ -230,6 +240,18 @@ export function useDesktopWebSocket(
             cbRef.current.onTerminalData?.(data.sessionName as string, data.data as string);
           } else if (eventType === 'attached' && data) {
             cbRef.current.onTerminalAttached?.(data.sessionName as string);
+          } else if (eventType === 'visibility-ready' && data) {
+            cbRef.current.onTerminalVisibilityReady?.(data.sessionName as string, data.epoch as number);
+          } else if (eventType === 'resync' && data) {
+            cbRef.current.onTerminalResync?.(
+              data.sessionName as string,
+              data.data as string,
+              data.epoch as number,
+              data.historyTruncated === true,
+              data.source === 'tmux' ? 'tmux' : 'scrollback',
+            );
+          } else if (eventType === 'diagnostic' && data) {
+            cbRef.current.onTerminalDiagnostic?.(data);
           } else if (eventType === 'exited' && data) {
             cbRef.current.onTerminalExited?.(data.sessionName as string, (data.exitCode as number) ?? 0);
           } else if (eventType === 'error' && data) {
@@ -324,6 +346,7 @@ export function useDesktopWebSocket(
     sendTerminalAttach,
     sendTerminalInput,
     sendTerminalResize,
+    sendTerminalVisibility,
     sendTerminalDetach,
     sendAgentKill: useCallback((sessionName: string, signal: 'SIGTERM' | 'SIGINT' = 'SIGTERM') => {
       const ws = wsRef.current;

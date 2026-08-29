@@ -380,6 +380,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           sendTerminalAttach={props.sendTerminalAttach}
           sendTerminalInput={props.sendTerminalInput}
           sendTerminalResize={props.sendTerminalResize}
+          sendTerminalVisibility={props.sendTerminalVisibility}
           sendTerminalDetach={props.sendTerminalDetach}
           onInjectChatContext={props.onInjectChatContext}
           onSelectCommit={props.onSelectCommit}

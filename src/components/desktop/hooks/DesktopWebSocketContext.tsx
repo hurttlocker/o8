@@ -63,6 +63,7 @@ interface SharedWsCommands {
   sendTerminalAttach: (sessionName: string, cols: number, rows: number) => void;
   sendTerminalInput: (sessionName: string, data: string) => void;
   sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;
+  sendTerminalVisibility: (sessionName: string, visible: boolean, options?: { epoch?: number; needsResync?: boolean; cols?: number; rows?: number }) => void;
   sendTerminalDetach: (sessionName: string) => void;
   sendAgentKill: (sessionName: string, signal?: 'SIGTERM' | 'SIGINT') => void;
 }
@@ -263,6 +264,10 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
     wsSend({ type: 'terminal-resize', sessionName, cols, rows });
   }, [wsSend]);
 
+  const sendTerminalVisibility = useCallback((sessionName: string, visible: boolean, options?: { epoch?: number; needsResync?: boolean; cols?: number; rows?: number }) => {
+    wsSend({ type: 'terminal-visibility', sessionName, visible, ...options });
+  }, [wsSend]);
+
   const sendTerminalDetach = useCallback((sessionName: string) => {
     wsSend({ type: 'terminal-detach', sessionName });
   }, [wsSend]);
@@ -398,6 +403,16 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
           if (eventType === 'created' && data) dispatch('onTerminalCreated', data.sessionName as string, data.requestId as string | undefined);
           else if (eventType === 'data' && data) dispatch('onTerminalData', data.sessionName as string, data.data as string);
           else if (eventType === 'attached' && data) dispatch('onTerminalAttached', data.sessionName as string);
+          else if (eventType === 'visibility-ready' && data) dispatch('onTerminalVisibilityReady', data.sessionName as string, data.epoch as number);
+          else if (eventType === 'resync' && data) dispatch(
+            'onTerminalResync',
+            data.sessionName as string,
+            data.data as string,
+            data.epoch as number,
+            data.historyTruncated === true,
+            data.source === 'tmux' ? 'tmux' : 'scrollback',
+          );
+          else if (eventType === 'diagnostic' && data) dispatch('onTerminalDiagnostic', data);
           else if (eventType === 'exited' && data) dispatch('onTerminalExited', data.sessionName as string, (data.exitCode as number) ?? 0);
           else if (eventType === 'error' && data) dispatch('onTerminalError', data.sessionName as string, (data.error as string) ?? 'Unknown error');
           else if (eventType === 'image' && data) dispatch('onTerminalImage', data.sessionName as string, data.imageB64 as string, (data.filename as string) ?? 'image.png');
@@ -495,12 +510,13 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
     sendTerminalAttach,
     sendTerminalInput,
     sendTerminalResize,
+    sendTerminalVisibility,
     sendTerminalDetach,
     sendAgentKill,
   }), [
     connectionState, addListener, addLegacySessionSubscription, addRealtimeSessionSubscription,
     switchSession, sendTerminalCreate, sendTerminalAttach,
-    sendTerminalInput, sendTerminalResize, sendTerminalDetach,
+    sendTerminalInput, sendTerminalResize, sendTerminalVisibility, sendTerminalDetach,
     sendAgentKill,
   ]);
 
@@ -523,6 +539,7 @@ interface UseSharedDesktopWsResult {
   sendTerminalAttach: (sessionName: string, cols: number, rows: number) => void;
   sendTerminalInput: (sessionName: string, data: string) => void;
   sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;
+  sendTerminalVisibility: (sessionName: string, visible: boolean, options?: { epoch?: number; needsResync?: boolean; cols?: number; rows?: number }) => void;
   sendTerminalDetach: (sessionName: string) => void;
   sendAgentKill: (sessionName: string, signal?: 'SIGTERM' | 'SIGINT') => void;
 }
@@ -559,6 +576,9 @@ export function useSharedDesktopWs(
     onTerminalCreated: (...args: Parameters<NonNullable<DesktopWsCallbacks['onTerminalCreated']>>) => cbRef.current.onTerminalCreated?.(...args),
     onTerminalData: (...args: Parameters<NonNullable<DesktopWsCallbacks['onTerminalData']>>) => cbRef.current.onTerminalData?.(...args),
     onTerminalAttached: (...args: Parameters<NonNullable<DesktopWsCallbacks['onTerminalAttached']>>) => cbRef.current.onTerminalAttached?.(...args),
+    onTerminalVisibilityReady: (...args: Parameters<NonNullable<DesktopWsCallbacks['onTerminalVisibilityReady']>>) => cbRef.current.onTerminalVisibilityReady?.(...args),
+    onTerminalResync: (...args: Parameters<NonNullable<DesktopWsCallbacks['onTerminalResync']>>) => cbRef.current.onTerminalResync?.(...args),
+    onTerminalDiagnostic: (...args: Parameters<NonNullable<DesktopWsCallbacks['onTerminalDiagnostic']>>) => cbRef.current.onTerminalDiagnostic?.(...args),
     onTerminalExited: (...args: Parameters<NonNullable<DesktopWsCallbacks['onTerminalExited']>>) => cbRef.current.onTerminalExited?.(...args),
     onTerminalError: (...args: Parameters<NonNullable<DesktopWsCallbacks['onTerminalError']>>) => cbRef.current.onTerminalError?.(...args),
     onTerminalImage: (...args: Parameters<NonNullable<DesktopWsCallbacks['onTerminalImage']>>) => cbRef.current.onTerminalImage?.(...args),
@@ -582,6 +602,7 @@ export function useSharedDesktopWs(
     sendTerminalAttach: ctx.sendTerminalAttach,
     sendTerminalInput: ctx.sendTerminalInput,
     sendTerminalResize: ctx.sendTerminalResize,
+    sendTerminalVisibility: ctx.sendTerminalVisibility,
     sendTerminalDetach: ctx.sendTerminalDetach,
     sendAgentKill: ctx.sendAgentKill,
   };

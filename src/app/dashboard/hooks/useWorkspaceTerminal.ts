@@ -564,6 +564,21 @@ export function useWorkspaceTerminal({
         handle.writeToTerminal(sessionName, data);
       }
     },
+    onTerminalVisibilityReady: (sessionName: string, epoch: number) => {
+      for (const handle of workspaceTerminalHandlesRef.current.values()) {
+        handle.terminalVisibilityReady?.(sessionName, epoch);
+      }
+    },
+    onTerminalResync: (sessionName: string, data: string, epoch: number, historyTruncated: boolean, source: 'tmux' | 'scrollback') => {
+      for (const handle of workspaceTerminalHandlesRef.current.values()) {
+        handle.applyTerminalResync?.(sessionName, data, epoch, historyTruncated, source);
+      }
+    },
+    onTerminalDiagnostic: (diagnostic: Record<string, unknown>) => {
+      for (const handle of workspaceTerminalHandlesRef.current.values()) {
+        handle.recordTerminalDiagnostic?.(diagnostic);
+      }
+    },
     onTerminalError: (sessionName: string, error: string) => {
       terminalRef.current?.setTermError(error);
       for (const handle of workspaceTerminalHandlesRef.current.values()) {
@@ -605,6 +620,7 @@ export function useWorkspaceTerminal({
     sendTerminalAttach,
     sendTerminalInput,
     sendTerminalResize,
+    sendTerminalVisibility,
     sendTerminalDetach,
     sendAgentKill,
   } = useSharedDesktopWs(undefined, terminalWsCallbacks);
@@ -1021,6 +1037,7 @@ export function useWorkspaceTerminal({
     sendTerminalDetach,
     sendTerminalInput,
     sendTerminalResize,
+    sendTerminalVisibility,
     setTerminalTileRepoScope,
     setWorkspaceActiveTabKindByTileId,
     setWorkspaceChatSessionByTileId,

@@ -7,7 +7,10 @@ import { buildXtermTheme } from '@/components/desktop/workspace-terminal/constan
 import { startSpawnReveal } from '@/components/desktop/workspace-terminal/spawn-reveal';
 import { recordXtermSelectionSnapshot, registerXtermSelectionSource } from '@/components/desktop/workspace-terminal/xterm-selection-registry';
 import { retainInlineTerminalImages, TERMINAL_SCROLLBACK_LINES } from '@/lib/terminal/client-retention';
+import { ClientTerminalHiddenBuffer } from '@/components/desktop/workspace-terminal/terminal-hidden-buffer';
+import { recordTerminalDiagnostic } from '@/components/desktop/workspace-terminal/terminal-diagnostics';
 import {
+  recordTerminalBenchDimensions,
   recordTerminalBenchRender,
   recordTerminalBenchVisibility,
   recordTerminalBenchWrite,
@@ -39,6 +42,7 @@ export interface XtermPanelProps {
   sendTerminalAttach: (sessionName: string, cols: number, rows: number) => void;
   sendTerminalInput: (sessionName: string, data: string) => void;
   sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;
+  sendTerminalVisibility?: (sessionName: string, visible: boolean, options?: { epoch?: number; needsResync?: boolean; cols?: number; rows?: number }) => void;
   sendTerminalDetach: (sessionName: string) => void;
   visible: boolean;
   /** Render with no background so the host surface (canvas glass) reads
@@ -77,13 +81,16 @@ export interface XtermPanelHandle {
   writeData: (data: string) => void;
   writeRaw: (data: string) => void;
   readText: (lines?: number) => string;
+  visibilityReady?: (epoch: number) => void;
+  applyResync?: (data: string, epoch: number, historyTruncated: boolean, source: 'tmux' | 'scrollback') => void;
+  recordDiagnostic?: (diagnostic: Record<string, unknown>) => void;
   showImage: (imageB64: string, filename: string) => void;
   setError: (error: string) => void;
   setExited: () => void;
 }
 
 export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermPanel(
-  { tmuxSession, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalDetach, visible, transparent, fontSize, lineHeight, connectionEpoch, spawnReveal, revealMinPlay, themeOverrides },
+  { tmuxSession, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalVisibility, sendTerminalDetach, visible, transparent, fontSize, lineHeight, connectionEpoch, spawnReveal, revealMinPlay, themeOverrides },
   ref,
 ) {
   const { themeId } = useTheme();
@@ -101,6 +108,11 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
   /** While true, incoming PTY chunks queue instead of painting (min-play). */
   const revealHoldRef = useRef(false);
   const pendingChunksRef = useRef<string[]>([]);
+  const hiddenBufferRef = useRef(new ClientTerminalHiddenBuffer(256 * 1024));
+  const hiddenNeedsResyncRef = useRef(false);
+  const visibilityEpochRef = useRef(1);
+  const awaitingVisibilityRef = useRef(Boolean(sendTerminalVisibility && visible));
+  const queuedInputRef = useRef<string[]>([]);
 
   /** Real output is about to paint — kill the reveal, clean slate.
    *  Ref nulls BEFORE invoking so re-entrant calls (the cancel fires the
@@ -122,11 +134,46 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
     if (!fitAddon || !term) return;
     try {
       fitAddon.fit();
+      recordTerminalBenchDimensions(tmuxSession, term.cols, term.rows);
       sendTerminalResize(tmuxSession, term.cols, term.rows);
     } catch {
       // The terminal may be disposed while a queued fit is running.
     }
   }, [sendTerminalResize, tmuxSession]);
+
+  const finishReveal = useCallback((epoch: number) => {
+    if (epoch !== visibilityEpochRef.current || !visibleRef.current) return;
+    awaitingVisibilityRef.current = false;
+    const queuedInput = queuedInputRef.current;
+    queuedInputRef.current = [];
+    for (const data of queuedInput) sendTerminalInput(tmuxSession, data);
+  }, [sendTerminalInput, tmuxSession]);
+
+  const finishRevealAfterPaint = useCallback((epoch: number) => {
+    requestAnimationFrame(() => finishReveal(epoch));
+  }, [finishReveal]);
+
+  const queueHiddenBytes = useCallback((bytes: Uint8Array) => {
+    const result = hiddenBufferRef.current.append(bytes);
+    if (result.droppedBytes === 0 || hiddenNeedsResyncRef.current) return;
+    hiddenNeedsResyncRef.current = true;
+    recordTerminalDiagnostic({
+      code: 'terminal_client_hidden_overflow',
+      sessionName: tmuxSession,
+      bytesDropped: result.droppedBytes,
+      retainedBytes: result.retainedBytes,
+    });
+  }, [tmuxSession]);
+
+  const flushHiddenBytes = useCallback((epoch: number) => {
+    if (epoch !== visibilityEpochRef.current || !visibleRef.current) return;
+    const bytes = hiddenBufferRef.current.drain();
+    if (!termRef.current || bytes.byteLength === 0) {
+      finishRevealAfterPaint(epoch);
+      return;
+    }
+    termRef.current.write(bytes, () => finishRevealAfterPaint(epoch));
+  }, [finishRevealAfterPaint]);
 
   useImperativeHandle(ref, () => ({
     fit: fitTerminal,
@@ -142,6 +189,10 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
       try {
         if (!terminalBenchEnabled()) {
           const bytes = Uint8Array.from(atob(data), (char) => char.charCodeAt(0));
+          if (!visibleRef.current || awaitingVisibilityRef.current) {
+            queueHiddenBytes(bytes);
+            return;
+          }
           termRef.current.write(bytes);
           return;
         }
@@ -150,6 +201,10 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
         const decodeMs = performance.now() - decodeStartedAt;
         const visibleAtWrite = visibleRef.current;
         const sessionNameAtWrite = tmuxSessionRef.current;
+        if (!visibleAtWrite || awaitingVisibilityRef.current) {
+          queueHiddenBytes(bytes);
+          return;
+        }
         const completionStartedAt = performance.now();
         const writeStartedAt = performance.now();
         termRef.current.write(bytes, () => {
@@ -201,9 +256,46 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
     readText: (lines = 40) => {
       return readTerminalText(termRef.current, lines);
     },
+    visibilityReady: (epoch: number) => {
+      if (hiddenNeedsResyncRef.current) return;
+      flushHiddenBytes(epoch);
+    },
+    applyResync: (data: string, epoch: number) => {
+      if (epoch !== visibilityEpochRef.current || !visibleRef.current || !termRef.current) return;
+      hiddenBufferRef.current.clear();
+      hiddenNeedsResyncRef.current = false;
+      try {
+        termRef.current.reset();
+        const bytes = Uint8Array.from(atob(data), (char) => char.charCodeAt(0));
+        if (bytes.byteLength === 0) {
+          flushHiddenBytes(epoch);
+        } else {
+          termRef.current.write(bytes, () => flushHiddenBytes(epoch));
+        }
+      } catch {
+        recordTerminalDiagnostic({ code: 'terminal_resync_failed', sessionName: tmuxSession });
+      }
+    },
+    recordDiagnostic: (diagnostic: Record<string, unknown>) => {
+      const code = diagnostic.code;
+      if (
+        code !== 'terminal_hidden_overflow'
+        && code !== 'terminal_resync_failed'
+        && code !== 'terminal_resync_unsettled'
+      ) return;
+      recordTerminalDiagnostic({
+        code,
+        sessionName: typeof diagnostic.sessionName === 'string' ? diagnostic.sessionName : tmuxSession,
+        clientId: typeof diagnostic.clientId === 'string' ? diagnostic.clientId : undefined,
+        bytesDropped: typeof diagnostic.bytesDropped === 'number' ? diagnostic.bytesDropped : undefined,
+        lastGoodOffset: typeof diagnostic.lastGoodOffset === 'number' ? diagnostic.lastGoodOffset : undefined,
+        reason: typeof diagnostic.reason === 'string' ? diagnostic.reason : undefined,
+        waitedMs: typeof diagnostic.waitedMs === 'number' ? diagnostic.waitedMs : undefined,
+      });
+    },
     setError: (nextError: string) => setError(nextError),
     setExited: () => setExited(true),
-  }), [fitTerminal]);
+  }), [fitTerminal, flushHiddenBytes, queueHiddenBytes, tmuxSession]);
 
   useEffect(() => (
     registerTerminalBenchPanel(
@@ -216,6 +308,25 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
   useEffect(() => {
     recordTerminalBenchVisibility(tmuxSession, visible);
   }, [tmuxSession, visible]);
+
+  useEffect(() => {
+    if (!sendTerminalVisibility) return;
+    const epoch = visibilityEpochRef.current + 1;
+    visibilityEpochRef.current = epoch;
+    awaitingVisibilityRef.current = visible;
+    if (!visible) return sendTerminalVisibility(tmuxSession, false, { epoch });
+    const term = termRef.current;
+    if (hiddenNeedsResyncRef.current) {
+      hiddenBufferRef.current.clear();
+      try { term?.reset(); } catch { /* disposed during tab switch */ }
+    }
+    sendTerminalVisibility(tmuxSession, true, {
+      epoch,
+      needsResync: hiddenNeedsResyncRef.current,
+      cols: term?.cols,
+      rows: term?.rows,
+    });
+  }, [sendTerminalVisibility, tmuxSession, visible]);
 
   useEffect(() => {
     if (visible) {
@@ -299,6 +410,10 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
           })
           : null;
         term.onData((data) => {
+          if (awaitingVisibilityRef.current) {
+            queuedInputRef.current.push(data);
+            return;
+          }
           sendTerminalInput(tmuxSession, data);
         });
         // Snapshot every selection for the speak-selection reader — busy TUIs
@@ -325,6 +440,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
           const liveTerm = termRef.current;
           if (disposed || !liveTerm || !fitAddonRef.current) return;
           try { fitAddonRef.current.fit(); } catch { /* disposed mid-fit */ }
+          recordTerminalBenchDimensions(tmuxSession, liveTerm.cols, liveTerm.rows);
           if (spawnReveal) {
             revealHoldRef.current = revealMinPlay === true;
             revealCancelRef.current = startSpawnReveal(liveTerm, {
@@ -346,7 +462,18 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
               },
             });
           }
+          const needsInitialSnapshot = Boolean(sendTerminalVisibility && visibleRef.current);
+          if (needsInitialSnapshot) {
+            hiddenNeedsResyncRef.current = true;
+            awaitingVisibilityRef.current = true;
+          }
           sendTerminalAttach(tmuxSession, liveTerm.cols, liveTerm.rows);
+          sendTerminalVisibility?.(tmuxSession, visibleRef.current, {
+            epoch: visibilityEpochRef.current,
+            needsResync: needsInitialSnapshot || hiddenNeedsResyncRef.current,
+            cols: liveTerm.cols,
+            rows: liveTerm.rows,
+          });
         }));
         return () => {
           renderDisposable?.dispose();
@@ -385,7 +512,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
       fitAddonRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- cancelReveal only touches refs
-  }, [tmuxSession, sendTerminalAttach, sendTerminalDetach, sendTerminalInput, fitTerminal, transparent, fontSize, lineHeight, spawnReveal, revealMinPlay]);
+  }, [tmuxSession, sendTerminalAttach, sendTerminalDetach, sendTerminalInput, sendTerminalVisibility, fitTerminal, transparent, fontSize, lineHeight, spawnReveal, revealMinPlay]);
 
   // Re-attach after a transport (re)connect. The init effect's attach is
   // dropped silently if the socket isn't open yet, and the server never
@@ -398,13 +525,24 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
     if (!term) return;
     cancelReveal(false);
     try {
+      const epoch = visibilityEpochRef.current + 1;
+      visibilityEpochRef.current = epoch;
+      awaitingVisibilityRef.current = visibleRef.current;
+      hiddenNeedsResyncRef.current = true;
+      hiddenBufferRef.current.clear();
       term.reset();
       sendTerminalAttach(tmuxSession, term.cols, term.rows);
+      sendTerminalVisibility?.(tmuxSession, visibleRef.current, {
+        epoch,
+        needsResync: true,
+        cols: term.cols,
+        rows: term.rows,
+      });
     } catch {
       // disposed mid-update; the next mount attaches fresh
     }
 
-  }, [connectionEpoch, tmuxSession, sendTerminalAttach]);
+  }, [connectionEpoch, tmuxSession, sendTerminalAttach, sendTerminalVisibility]);
 
   // Live-update xterm theme on theme switch without recreating the terminal.
   // The canvas repaints next frame with the new palette, PTY state is preserved.
