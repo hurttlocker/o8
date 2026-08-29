@@ -523,6 +523,23 @@ export function listGitHubIssues(repoFullName: string): GitHubIssueSnapshot[] {
   }));
 }
 
+export interface MirroredGitHubIssueRef {
+  repoFullName: string;
+  number: number;
+  title: string;
+  url: string;
+}
+
+/** Closed and open mirror rows used to resolve historical issue-backed packets. */
+export function listMirroredGitHubIssuesByNumber(issueNumber: number): MirroredGitHubIssueRef[] {
+  return getSqlite().prepare(`
+    SELECT repo_full_name as repoFullName, number, title, url
+    FROM github_issues
+    WHERE number = ?
+    ORDER BY repo_full_name ASC
+  `).all(issueNumber) as MirroredGitHubIssueRef[];
+}
+
 export function listGitHubPullRequests(repoFullName: string): GitHubPullRequestSnapshot[] {
   const sqlite = getSqlite();
   const rows = sqlite.prepare(`

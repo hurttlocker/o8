@@ -43,6 +43,8 @@ import {
 export interface StoredPacketReceipt {
   artifact: ArtifactRecord;
   receipt: PacketReceipt;
+  /** Exact artifact bytes. `receipt` is the result of parsing these bytes once. */
+  rawReceiptJson: string;
 }
 
 function collectReviews(events: LaneEvent[]): PacketReceiptReview[] {
@@ -113,16 +115,16 @@ function readDispositionEvent(events: LaneEvent[]): PacketDisposition | null {
 
 function receiptFromArtifact(artifact: ArtifactRecord): StoredPacketReceipt | null {
   try {
-    const receipt = parsePacketReceipt(JSON.parse(readFileSync(artifactAbsPath(artifact.relPath), 'utf8')) as unknown);
-    return receipt ? { artifact, receipt } : null;
+    const rawReceiptJson = readFileSync(artifactAbsPath(artifact.relPath), 'utf8');
+    const receipt = parsePacketReceipt(JSON.parse(rawReceiptJson) as unknown);
+    return receipt ? { artifact, receipt, rawReceiptJson } : null;
   } catch {
     return null;
   }
 }
 
-export function listStoredPacketReceipts(packetId: string): StoredPacketReceipt[] {
-  return listArtifacts({ packetId })
-    .filter((artifact) => artifact.kind === 'receipt')
+export function listStoredPacketReceipts(packetId?: string | null): StoredPacketReceipt[] {
+  return listArtifacts({ kind: 'receipt', ...(packetId ? { packetId } : {}) })
     .map(receiptFromArtifact)
     .filter((receipt): receipt is StoredPacketReceipt => receipt !== null);
 }
@@ -216,7 +218,7 @@ function storePacketReceipt(
     bytes: Buffer.byteLength(serialized),
   });
   if (!artifact) throw new Error(`Unable to record receipt artifact ${receipt.receiptId}.`);
-  return { artifact, receipt };
+  return { artifact, receipt, rawReceiptJson: serialized };
 }
 
 export async function createPacketReceiptForClosedPacket(input: {

@@ -294,6 +294,7 @@ const SPECTATOR_READ = [
   /^\/api\/broadcast\/events\/?$/,
   /^\/api\/broadcast\/commentary\/?$/,
   /^\/api\/broadcast\/snapshot\/?$/,
+  /^\/api\/orchestrator\/truth\/?$/,
 ];
 
 type Policy = 'self-auth' | 'public-any' | 'public-read' | 'loopback-read' | 'spectator-read' | 'gated';

@@ -10,6 +10,7 @@ interface BroadcastTokenBody {
   action?: unknown;
   id?: unknown;
   label?: unknown;
+  repoGrants?: unknown;
 }
 
 export async function POST(request: NextRequest) {
@@ -39,7 +40,20 @@ export async function POST(request: NextRequest) {
           error: { code: 'invalid_label', message: 'label must be at most 120 characters.' },
         }, 400);
       }
-      const result = getSpectatorTokenStore().mint(body.label);
+      if (
+        body.repoGrants !== undefined
+        && (!Array.isArray(body.repoGrants) || body.repoGrants.some((grant) => typeof grant !== 'string'))
+      ) {
+        return broadcastNoStore({
+          schema: 'o8/broadcast.token.error/v1',
+          ok: false,
+          error: { code: 'invalid_repo_grants', message: 'repoGrants must be an array of strings.' },
+        }, 400);
+      }
+      const result = getSpectatorTokenStore().mint({
+        label: typeof body.label === 'string' ? body.label : null,
+        repoGrants: Array.isArray(body.repoGrants) ? body.repoGrants : [],
+      });
       return broadcastNoStore({
         schema: 'o8/broadcast.token.mint/v1',
         ok: true,

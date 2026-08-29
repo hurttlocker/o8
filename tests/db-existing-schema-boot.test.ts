@@ -50,7 +50,7 @@ describe('existing database boot migration', () => {
       );
     `);
     fixture.close();
-    unlinkSync(join(dataDir, '.db-migrated-v57'));
+    unlinkSync(join(dataDir, '.db-migrated-v58'));
 
     vi.resetModules();
     const upgradedDb = await import('@/lib/db');
@@ -73,7 +73,7 @@ describe('existing database boot migration', () => {
       { name: 'idx_so_packet_id' },
       { name: 'idx_so_valid_to' },
     ]);
-    expect(existsSync(join(dataDir, '.db-migrated-v57'))).toBe(true);
+    expect(existsSync(join(dataDir, '.db-migrated-v58'))).toBe(true);
 
     upgradedDb.closeDb();
   });

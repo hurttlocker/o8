@@ -5,6 +5,7 @@ export const broadcastTokens = sqliteTable('broadcast_tokens', {
   id: text('id').primaryKey(),
   tokenHash: text('token_hash').notNull().unique(),
   label: text('label'),
+  repoGrantsJson: text('repo_grants_json').notNull().default('[]'),
   createdAt: text('created_at').notNull(),
   revokedAt: text('revoked_at'),
 }, (table) => ({
