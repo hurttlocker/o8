@@ -511,15 +511,111 @@ async function panelText(page, sessionName, lines = 1000) {
   ), { targetSession: sessionName, lineCount: lines });
 }
 
-async function runRapidSwitch(page, seeded, clients, rapidGeneratorPath) {
+function tmuxLastRows(sessionName, rowCount) {
+  try {
+    const lines = captureTmuxText(sessionName).replace(/\n$/u, '').split('\n');
+    return { output: lines.slice(-rowCount).join('\n'), error: null };
+  } catch (error) {
+    return { output: null, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function tmuxPaneState(sessionName) {
+  try {
+    return {
+      output: execFileSync(
+        'tmux',
+        ['display-message', '-p', '-t', sessionName, '#{pane_dead} #{pane_pid} #{pane_current_command}'],
+        { encoding: 'utf8' },
+      ).trim(),
+      error: null,
+    };
+  } catch (error) {
+    return { output: null, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function generatorPidFromLog(logContents) {
+  for (const line of logContents.split('\n').filter(Boolean)) {
+    try {
+      const entry = JSON.parse(line);
+      if (entry.event === 'start' && Number.isSafeInteger(entry.pid)) return entry.pid;
+    } catch { /* retained verbatim below for diagnosis */ }
+  }
+  return null;
+}
+
+function processIsAlive(pid) {
+  if (!Number.isSafeInteger(pid) || pid < 1) return null;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === 'EPERM';
+  }
+}
+
+async function captureRapidFailure({ client, sessionName, marker, logPath, startSnapshot, revealCount }) {
+  let snapshot = null;
+  let snapshotError = null;
+  try {
+    snapshot = (await client.request('terminal-bench-stats')).data.snapshot;
+  } catch (error) {
+    snapshotError = error instanceof Error ? error.message : String(error);
+  }
+  const session = snapshot?.sessions?.[sessionName] ?? null;
+  const startSession = startSnapshot.sessions?.[sessionName] ?? null;
+  let generatorLogContents = '';
+  let generatorLogError = null;
+  try {
+    generatorLogContents = fs.existsSync(logPath) ? fs.readFileSync(logPath, 'utf8') : '';
+  } catch (error) {
+    generatorLogError = error instanceof Error ? error.message : String(error);
+  }
+  const generatorPid = generatorPidFromLog(generatorLogContents);
+  return {
+    sessionName,
+    marker,
+    lastOutputTail: session?.lastOutputTail ?? null,
+    lastOutputTailBytes: typeof session?.lastOutputTail === 'string'
+      ? Buffer.byteLength(session.lastOutputTail, 'utf8')
+      : null,
+    lastOutputTailByteCap: snapshot?.lastOutputTailByteCap ?? null,
+    serverSnapshotError: snapshotError,
+    tmuxCapturePaneLast12Rows: tmuxLastRows(sessionName, 12),
+    tmuxPaneState: tmuxPaneState(sessionName),
+    generatorLogPath: path.relative(ROOT, logPath).split(path.sep).join('/'),
+    generatorPid,
+    generatorPidAlive: processIsAlive(generatorPid),
+    generatorLogContents,
+    generatorLogError,
+    attachDetachDuringLoop: {
+      attachedClientCountStart: startSession?.attachedClientCount ?? null,
+      attachedClientCountEnd: session?.attachedClientCount ?? null,
+      attachEvents: Number.isFinite(startSession?.attachEvents) && Number.isFinite(session?.attachEvents)
+        ? session.attachEvents - startSession.attachEvents
+        : null,
+      detachEvents: Number.isFinite(startSession?.detachEvents) && Number.isFinite(session?.detachEvents)
+        ? session.detachEvents - startSession.detachEvents
+        : null,
+    },
+    browserRevealCount: revealCount,
+  };
+}
+
+async function runRapidSwitch(page, seeded, clients, rapidGeneratorPath, runDirectory) {
   const durationMs = 30000;
   const intervalMs = 100;
   const expectedSequenceCount = Math.ceil(durationMs / intervalMs);
+  const logPaths = Object.fromEntries(seeded.tabs.map((tab) => [
+    tab.sessionName,
+    path.join(runDirectory, `rapid-${tab.sessionName}.log`),
+  ]));
   for (const [index, tab] of seeded.tabs.entries()) {
     clients[index].send({
       type: 'terminal-input',
       sessionName: tab.sessionName,
-      data: `${shellQuote(process.execPath)} ${shellQuote(rapidGeneratorPath)} --session ${shellQuote(tab.sessionName)} --duration-ms ${durationMs} --interval-ms ${intervalMs}\r`,
+      data: `${shellQuote(process.execPath)} ${shellQuote(rapidGeneratorPath)} --session ${shellQuote(tab.sessionName)} --duration-ms ${durationMs} --interval-ms ${intervalMs} --log ${shellQuote(logPaths[tab.sessionName])}\r`,
     });
   }
   await Promise.all(seeded.tabs.map((tab) => clients[0].waitForServerText(
@@ -528,8 +624,10 @@ async function runRapidSwitch(page, seeded, clients, rapidGeneratorPath) {
     15000,
   )));
 
+  const rapidStartSnapshot = (await clients[0].request('terminal-bench-stats')).data.snapshot;
   const startedAt = Date.now();
   let switchCount = 0;
+  const revealCounts = Object.fromEntries(seeded.tabs.map((tab) => [tab.sessionName, 0]));
   while (Date.now() - startedAt < durationMs) {
     const tab = seeded.tabs[switchCount % seeded.tabs.length];
     await page.locator(`[data-o8-workspace-tab="${tab.id}"]`).click();
@@ -540,14 +638,32 @@ async function runRapidSwitch(page, seeded, clients, rapidGeneratorPath) {
         && getComputedStyle(panel).display !== 'none';
     }, { tabId: tab.id, sessionName: tab.sessionName }, { polling: 'raf', timeout: 10000 });
     switchCount += 1;
+    revealCounts[tab.sessionName] += 1;
     const remaining = 200 - ((Date.now() - startedAt) % 200);
     if (remaining > 0 && remaining < 200) await sleep(remaining);
   }
-  await Promise.all(seeded.tabs.map((tab) => clients[0].waitForServerText(
+  const doneResults = await Promise.allSettled(seeded.tabs.map((tab) => clients[0].waitForServerText(
     tab.sessionName,
     `O8_RAPID_DONE_${tab.sessionName}_${expectedSequenceCount}`,
     15000,
   )));
+  const failedTabs = seeded.tabs.filter((_, index) => doneResults[index].status === 'rejected');
+  if (failedTabs.length > 0) {
+    const failures = [];
+    for (const tab of failedTabs) {
+      failures.push(await captureRapidFailure({
+        client: clients[0],
+        sessionName: tab.sessionName,
+        marker: `O8_RAPID_DONE_${tab.sessionName}_${expectedSequenceCount}`,
+        logPath: logPaths[tab.sessionName],
+        startSnapshot: rapidStartSnapshot,
+        revealCount: revealCounts[tab.sessionName],
+      }));
+    }
+    const error = new Error(`rapid-switch DONE wait timed out for ${failedTabs.map((tab) => tab.sessionName).join(', ')}`);
+    error.rapidSwitchFailure = { timeoutMs: 15000, failures };
+    throw error;
+  }
 
   const finalTab = seeded.tabs.at(-1);
   await page.locator(`[data-o8-workspace-tab="${finalTab.id}"]`).click();
@@ -822,6 +938,7 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
         seeded,
         clients,
         path.join(ROOT, 'scripts/bench/terminal-workload/rapid-generator.mjs'),
+        runConfig.rawDir,
       )
       : null;
     await context.close();
@@ -903,6 +1020,7 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
       browserConsole,
       nextLog: stack?.logs.next() ?? null,
       wsLog: stack?.logs.ws() ?? null,
+      rapidSwitchFailure: error instanceof Error ? error.rapidSwitchFailure ?? null : null,
     };
     fs.mkdirSync(runConfig.rawDir, { recursive: true });
     fs.writeFileSync(path.join(runConfig.rawDir, `failure-n${sessionCount}-sample-${sampleIndex}.json`), JSON.stringify(failure, null, 2));
