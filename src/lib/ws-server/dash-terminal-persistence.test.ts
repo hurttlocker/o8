@@ -78,14 +78,20 @@ describe('dashboard terminal persistence real fallback path', () => {
       execFileSync: exec,
       recordHealth,
     })).toBe(false);
-    expect(exec.mock.calls[3]?.[1]).toEqual(['kill-session', '-t', 'cortex-dash-test']);
+    expect(exec.mock.calls[3]?.[1]).toEqual([
+      '-L', 'o8-dashboard', 'kill-session', '-t', 'cortex-dash-test',
+    ]);
     expect(recordHealth).toHaveBeenCalledWith('degraded', 'session_create_failed');
   });
 
-  it('receipts a real backing session after all required options land', () => {
+  it('creates dashboard sessions on the isolated tmux server with only indn disabled', () => {
     const recordHealth = vi.fn();
     const exec = vi.fn()
       .mockImplementationOnce(() => { throw new Error('no existing session'); })
+      .mockReturnValueOnce(Buffer.from(''))
+      .mockReturnValueOnce(Buffer.from(''))
+      .mockReturnValueOnce(Buffer.from(''))
+      .mockReturnValueOnce(Buffer.from('xterm*:XT'))
       .mockReturnValue(Buffer.from(''));
     vi.spyOn(console, 'log').mockImplementation(() => {});
 
@@ -94,8 +100,33 @@ describe('dashboard terminal persistence real fallback path', () => {
       execFileSync: exec,
       recordHealth,
     })).toBe(true);
-    expect(exec).toHaveBeenCalledTimes(4);
+    expect(exec.mock.calls.map((call) => call[1])).toEqual([
+      ['-L', 'o8-dashboard', 'has-session', '-t', 'cortex-dash-test'],
+      ['-L', 'o8-dashboard', 'new-session', '-d', '-s', 'cortex-dash-test', '-x', '120', '-y', '30', '/bin/zsh', '-l'],
+      ['-L', 'o8-dashboard', 'set-option', '-t', 'cortex-dash-test', 'history-limit', '50000'],
+      ['-L', 'o8-dashboard', 'set-option', '-t', 'cortex-dash-test', 'status', 'off'],
+      ['-L', 'o8-dashboard', 'show-options', '-gv', 'terminal-overrides'],
+      ['-L', 'o8-dashboard', 'set-option', '-ga', 'terminal-overrides', ',xterm*:indn@'],
+    ]);
     expect(recordHealth).toHaveBeenCalledWith('ready', 'session_created');
+  });
+
+  it('does not grow terminal-overrides when a second dashboard session reuses the server', () => {
+    const recordHealth = vi.fn();
+    const exec = vi.fn()
+      .mockReturnValueOnce(Buffer.from(''))
+      .mockReturnValueOnce(Buffer.from('xterm*:XT,xterm*:indn@'));
+
+    expect(createDashTmuxSessionSync(input(), {
+      resolveTmuxBinary: () => '/usr/bin/tmux',
+      execFileSync: exec,
+      recordHealth,
+    })).toBe(true);
+    expect(exec.mock.calls.map((call) => call[1])).toEqual([
+      ['-L', 'o8-dashboard', 'has-session', '-t', 'cortex-dash-test'],
+      ['-L', 'o8-dashboard', 'show-options', '-gv', 'terminal-overrides'],
+    ]);
+    expect(recordHealth).toHaveBeenCalledWith('ready', 'session_reused');
   });
 });
 

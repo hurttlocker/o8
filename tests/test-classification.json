@@ -1257,6 +1257,23 @@
       ]
     },
     {
+      "path": "tests/dash-terminal-csi-s-scrollback-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path",
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "tests/dash-terminal-indn-isolated-server.test.ts",
+      "reasons": [
+        "child-process",
+        "terminal-tool"
+      ]
+    },
+    {
       "path": "tests/dash-terminal-restart-real-path.test.ts",
       "reasons": [
         "child-process",

@@ -284,6 +284,8 @@ import {
 import {
   createDashTmuxSessionSync,
   dashSessionNameForOwnerKey,
+  dashTmuxArgs,
+  dashTmuxServerName,
 } from './lib/ws-server/dash-terminal-persistence';
 import { parseGitWorktreeList, shortHome } from './lib/ws-server/git-worktrees';
 import {
@@ -1607,7 +1609,7 @@ function listDashTmuxSessionsWithAge(): DashSessionInfo[] {
   try {
     const out = execFileSync(
       resolveTmuxBinary(),
-      ['list-sessions', '-F', '#{session_name} #{session_created}'],
+      dashTmuxArgs('list-sessions', '-F', '#{session_name} #{session_created}'),
       { windowsHide: true, timeout: 4000, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], env: sanitizePtyEnv() as NodeJS.ProcessEnv },
     );
     const rows: DashSessionInfo[] = [];
@@ -1638,7 +1640,7 @@ function captureTmuxPaneResult(sessionName: string): { ok: boolean; data: string
       ok: true,
       data: execFileSync(
       resolveTmuxBinary(),
-      ['capture-pane', '-p', '-e', '-S', `-${TERMINAL_SCROLLBACK_LINES}`, '-t', sessionName],
+      dashTmuxArgs('capture-pane', '-p', '-e', '-S', `-${TERMINAL_SCROLLBACK_LINES}`, '-t', sessionName),
       {
         windowsHide: true,
         timeout: 4000,
@@ -1697,7 +1699,7 @@ function reapOrphanDashSessions() {
       terminalAttachments.delete(name);
     }
     try {
-      execFileSync(tmuxBin, ['kill-session', '-t', name], { windowsHide: true, timeout: 3000, stdio: 'ignore', env: sanitizePtyEnv() as NodeJS.ProcessEnv });
+      execFileSync(tmuxBin, dashTmuxArgs('kill-session', '-t', name), { windowsHide: true, timeout: 3000, stdio: 'ignore', env: sanitizePtyEnv() as NodeJS.ProcessEnv });
     } catch { /* already gone */ }
   }
   console.log(`[ws-server] [persistent-terminals] GC reaped ${toKill.length} orphan dash tmux session(s)`);
@@ -2003,12 +2005,17 @@ function spawnTmuxAttachPty(
   const tmuxBin = resolveTmuxBinary();
   const env = sanitizePtyEnv();
   const cwd = process.env.HOME ?? homedir() ?? '/tmp';
+  const dashboardSession = isDashTerminalSession(sessionName);
+  const attachArgs = dashboardSession
+    ? dashTmuxArgs('attach-session', '-t', sessionName)
+    : ['attach-session', '-t', sessionName];
+  const serverDescription = dashboardSession ? ` -L ${dashTmuxServerName()}` : '';
 
   try {
-    console.log(`[ws-server] Spawning terminal directly: ${tmuxBin} attach-session -t ${sessionName}`);
+    console.log(`[ws-server] Spawning terminal directly: ${tmuxBin}${serverDescription} attach-session -t ${sessionName}`);
     return terminalHost.spawn({
       file: tmuxBin,
-      args: ['attach-session', '-t', sessionName],
+      args: attachArgs,
       name: 'xterm-256color',
       cols,
       rows,
@@ -2017,7 +2024,9 @@ function spawnTmuxAttachPty(
     });
   } catch (directError) {
     const shell = resolvePreferredShell();
-    const shellCmd = `exec "${tmuxBin}" attach-session -t ${sessionName}`;
+    const shellCmd = dashboardSession
+      ? `exec "${tmuxBin}" -L "${dashTmuxServerName()}" attach-session -t "${sessionName}"`
+      : `exec "${tmuxBin}" attach-session -t "${sessionName}"`;
     console.warn(`[ws-server] Direct tmux PTY spawn failed, falling back to shell wrapper: ${directError instanceof Error ? directError.message : String(directError)}`);
     console.log(`[ws-server] Spawning terminal via shell: ${shellCmd}`);
     return terminalHost.spawn({
@@ -6655,7 +6664,7 @@ function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>)
     && (
       pendingDashSessions.has(ownerSessionName)
       || terminalAttachments.has(ownerSessionName)
-      || (dashPersistentTerminalsEnabled() && tmuxSessionExists(ownerSessionName))
+      || (dashPersistentTerminalsEnabled() && tmuxSessionExists(ownerSessionName, dashTmuxArgs()))
     )
   ) {
     console.log(`[ws-server] Reusing owned dashboard PTY session: ${ownerSessionName}`);
@@ -6740,7 +6749,7 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
   if (
     isDashTerminalSession(sessionName)
     && dashPersistentTerminalsEnabled()
-    && tmuxSessionExists(sessionName)
+    && tmuxSessionExists(sessionName, dashTmuxArgs())
   ) {
     try {
       const ptyProcess = spawnTmuxAttachPty(sessionName, cols, rows);
@@ -6775,8 +6784,11 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
       const history = captureTmuxPane(sessionName);
       if (history) {
         const lines = history.replace(/\n+$/, '').split('\n');
-        const keep = lines.length > rows ? lines.slice(0, lines.length - rows).join('\n') : '';
-        if (keep) appendScrollback(attachment, `${keep}\n`);
+        const keep = lines.length > rows ? lines.slice(0, lines.length - rows) : [];
+        // capture-pane is line-oriented (LF), while xterm's production write
+        // path does not enable convertEol. Replay CRLF so each captured row
+        // starts at column zero instead of wrapping away every screenful.
+        if (keep.length > 0) appendScrollback(attachment, `${keep.join('\r\n')}\r\n`);
       }
       sendTerminal(client, 'attached', { sessionName });
       sendTerminalScrollback(client, attachment);
@@ -7121,13 +7133,14 @@ function terminateTerminalSession(sessionName: string, signal: string = 'SIGTERM
   // 2. Try killing tmux session directly (if PTY already detached but tmux lives)
   try {
     const tmuxBin = resolveTmuxBinary();
-    execFileSync(tmuxBin, ['has-session', '-t', sessionName], {
+    const tmuxArgs = isDashTerminalSession(sessionName) ? dashTmuxArgs() : [];
+    execFileSync(tmuxBin, [...tmuxArgs, 'has-session', '-t', sessionName], {
       windowsHide: true,
       timeout: 2000,
       stdio: 'ignore',
       env: sanitizePtyEnv() as NodeJS.ProcessEnv,
     });
-    execFileSync(tmuxBin, ['kill-session', '-t', sessionName], {
+    execFileSync(tmuxBin, [...tmuxArgs, 'kill-session', '-t', sessionName], {
       windowsHide: true,
       timeout: 3000,
       stdio: 'ignore',
