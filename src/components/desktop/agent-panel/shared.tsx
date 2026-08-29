@@ -31,7 +31,10 @@ export function arraysMatchBy<T>(a: T[], b: T[], key: (item: T) => string | numb
 }
 
 export function agentFp(agent: AgentDetail): string {
-  return `${agent.id}|${agent.status}|${agent.currentTask}|${agent.lastEventAt}|${agent.alerts}|${agent.branch ?? ''}|${agent.workspaceStatus ?? ''}|${agent.lifecycleState ?? ''}|${agent.runtimeSurface?.reviewContext?.repoSlug ?? ''}|${agent.runtimeSurface?.cwd ?? ''}`;
+  const statusEvidenceFp = agent.statusEvidence
+    ? `${agent.statusEvidence.state}:${agent.statusEvidence.authority}:${agent.statusEvidence.observedAt}:${agent.statusEvidence.summary}:${agent.statusEvidence.fallbackReason ?? ''}:${agent.statusEvidence.evidence.map((item) => `${item.source}=${item.value}`).join(',')}`
+    : '';
+  return `${agent.id}|${agent.status}|${agent.currentTask}|${agent.lastEventAt}|${agent.alerts}|${agent.branch ?? ''}|${agent.workspaceStatus ?? ''}|${agent.lifecycleState ?? ''}|${agent.runtimeSurface?.reviewContext?.repoSlug ?? ''}|${agent.runtimeSurface?.cwd ?? ''}|${statusEvidenceFp}`;
 }
 
 export function eventFp(event: EventEntry): string {

@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { buildOperatorStatusAgents, summarizeOperatorStatus } from './operator-status-model';
+import {
+  buildOperatorStatusAgents,
+  resolveAgentSummaryStatuses,
+  summarizeOperatorStatus,
+} from './operator-status-model';
 import type { AgentSummary } from '@/lib/fleet/types';
 import type { Lane } from '@/lib/lane/types';
 
@@ -65,12 +69,18 @@ function lane(overrides: Partial<Lane>): Lane {
 }
 
 describe('operator status model', () => {
-  it('uses lane truth to mask transient failed runtime status for active packets', () => {
+  it('keeps runtime failure authoritative when the lane still says running', () => {
     const agents = buildOperatorStatusAgents([agent({ status: 'failed' })], [lane({ status: 'running' })]);
 
     expect(agents).toHaveLength(1);
-    expect(agents[0].status).toBe('running');
-    expect(summarizeOperatorStatus({ agents, approvalCount: 0 })).toContain('1 agent running');
+    expect(agents[0].status).toBe('failed');
+    expect(agents[0].authority).toBe('runtime-event');
+    expect(agents[0].summary).toBe('codex runtime reports this session as failed.');
+    expect(agents[0].observedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(agents[0].statusEvidence.evidence).toContainEqual({
+      source: 'lane:lane-1.status',
+      value: 'running',
+    });
   });
 
   it('keeps summary honest when the returned agents include a real terminal failure', () => {
@@ -83,11 +93,99 @@ describe('operator status model', () => {
     expect(summary).toContain('Last: packet worker failed');
   });
 
-  it('surfaces reviewable lane status in the same array the summary counts', () => {
+  it('keeps the selected runtime state, summary, and observation time coherent', () => {
+    const currentObservedAt = '2026-08-29T12:05:00.000Z';
+    const [resolved] = resolveAgentSummaryStatuses([agent({
+      status: 'completed',
+      lastActivityAt: Date.parse(currentObservedAt),
+      statusEvidence: {
+        sessionId: 'codex-owned:1',
+        runtime: 'codex',
+        state: 'review-ready',
+        authority: 'runtime-event',
+        observedAt: '2026-08-29T12:00:00.000Z',
+        summary: 'codex runtime reports this session as review-ready.',
+        evidence: [{ source: 'runtime-session.status', value: 'reviewing' }],
+      },
+    })], []);
+
+    expect(resolved.statusEvidence).toMatchObject({
+      state: 'complete',
+      authority: 'runtime-event',
+      observedAt: currentObservedAt,
+      summary: 'codex runtime reports this session as complete.',
+    });
+    expect(resolved.statusEvidence?.evidence).toEqual(expect.arrayContaining([
+      { source: 'runtime-session.status', value: 'reviewing' },
+      { source: 'runtime-session.status', value: 'completed' },
+    ]));
+  });
+
+  it('does not let a lower lane review state override a current runtime event', () => {
     const agents = buildOperatorStatusAgents([agent({ status: 'running' })], [lane({ status: 'reviewing' })]);
     const summary = summarizeOperatorStatus({ agents, approvalCount: 0 });
 
-    expect(agents[0].status).toBe('awaiting_review');
-    expect(summary).toContain('1 awaiting review');
+    expect(agents[0].status).toBe('running');
+    expect(agents[0].authority).toBe('runtime-event');
+    expect(summary).toContain('1 agent running');
+  });
+
+  it('emits cloud and remote-customer sessions with status evidence', () => {
+    const sessions = ['cloud', 'remote-customer'].map((runtime) => agent({
+      id: `${runtime}-owned:1`,
+      name: `${runtime} worker`,
+      runtime,
+      sessionKey: `${runtime}-owned:1`,
+      status: 'running',
+    }));
+
+    const agents = buildOperatorStatusAgents(sessions, []);
+
+    expect(agents.map((candidate) => candidate.runtime)).toEqual(['cloud', 'remote-customer']);
+    expect(agents.map((candidate) => candidate.statusEvidence.runtime)).toEqual([
+      'cloud',
+      'remote-customer',
+    ]);
+    expect(agents.every((candidate) => candidate.authority === 'runtime-event')).toBe(true);
+  });
+
+  it('contains a per-session programming error in both status projections', () => {
+    const malformed = agent({
+      id: '',
+      runtime: 'remote-customer',
+      sessionKey: '',
+      lastEventAt: 'not-a-time',
+      lastActivityAt: null,
+    });
+    const healthy = agent({
+      id: 'cloud-owned:healthy',
+      runtime: 'cloud',
+      sessionKey: 'cloud-owned:healthy',
+      status: 'running',
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      const summaries = resolveAgentSummaryStatuses([malformed, healthy], []);
+      const operators = buildOperatorStatusAgents([malformed, healthy], []);
+
+      expect(summaries).toHaveLength(2);
+      expect(operators).toHaveLength(2);
+      expect(summaries[0].statusEvidence).toMatchObject({
+        state: 'unknown',
+        authority: 'raw-terminal',
+        evidence: [],
+      });
+      expect(operators[0].statusEvidence).toMatchObject({
+        state: 'unknown',
+        authority: 'raw-terminal',
+        evidence: [],
+      });
+      expect(summaries[1].statusEvidence?.runtime).toBe('cloud');
+      expect(operators[1].statusEvidence.runtime).toBe('cloud');
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('[terminal-status]'));
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

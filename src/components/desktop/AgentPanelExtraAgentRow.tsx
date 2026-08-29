@@ -5,6 +5,7 @@ import { AgentStatusDot, type AgentDotState } from '@/components/desktop/AgentSt
 import { formatElapsedAgo } from './repo-focus/tabs/chats/helpers';
 import { attentionWashStyle } from './repo-focus/tabs/chats/HistoryRows';
 import { shouldRecede, type AttentionBand } from './repo-focus/tabs/chats/sections';
+import type { TerminalStatusEvidence } from '@/lib/terminal-status/resolve';
 
 export type AgentOrigin = 'CLI' | 'MCP' | 'Mobile' | 'Webhook' | 'Cloud';
 export type VisualStatus = 'running' | 'waiting' | 'idle' | 'error' | 'archived';
@@ -27,6 +28,7 @@ export interface ExtraAgentRow {
   outcome: 'no_changes' | 'merged' | 'discarded' | 'pr_opened' | 'asked' | null;
   outcomeNote: string | null;
   lastEventLabel: string | null;
+  statusEvidence?: TerminalStatusEvidence;
   /** Open PR for this lane, surfaced in the hover card (T3 keeps it in-row —
    *  too cramped; ours lives one hover away). */
   prNumber?: number | null;
@@ -203,7 +205,7 @@ export function ExtraAgentRowView({
         onOpenMenu?.(event, row);
       }}
       aria-current={active ? 'true' : undefined}
-      title={canFocus ? `Focus ${row.name}` : row.name}
+      title={row.statusEvidence?.summary ?? (canFocus ? `Focus ${row.name}` : row.name)}
       style={{
         width: '100%',
         minHeight: 31,

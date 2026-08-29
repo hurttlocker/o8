@@ -4,11 +4,18 @@ import { join } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   AgentRuntime,
+  RuntimeId,
   RuntimeSession,
 } from '@/lib/runtimes/types';
+import type { IdeRuntimeSessionDescriptor } from '@/lib/runtime/ide-session-registry';
 
 const registryFixture = vi.hoisted(() => ({
   runtimes: [] as AgentRuntime[],
+}));
+
+const ideRegistryFixture = vi.hoisted(() => ({
+  sessions: [] as IdeRuntimeSessionDescriptor[],
+  tabs: [] as IdeRuntimeSessionDescriptor[],
 }));
 
 vi.mock('@/lib/runtimes', () => ({
@@ -20,8 +27,8 @@ vi.mock('@/lib/runtime/ide-terminal-state', () => ({
 }));
 
 vi.mock('@/lib/runtime/ide-session-registry', () => ({
-  listIdeRuntimeSessions: () => [],
-  listIdeRuntimeTabs: () => [],
+  listIdeRuntimeSessions: () => ideRegistryFixture.sessions,
+  listIdeRuntimeTabs: () => ideRegistryFixture.tabs,
 }));
 
 vi.mock('@/lib/runtime/terminal-session-registry', () => ({
@@ -50,9 +57,16 @@ afterAll(() => {
   rmSync(testRoot, { recursive: true, force: true });
 });
 
-function runtime(id: 'gemini' | 'aider'): AgentRuntime {
+function runtime(id: RuntimeId): AgentRuntime {
   const cwd = join(testRoot, id);
   mkdirSync(cwd, { recursive: true });
+  const lastActivityAt = id === 'gemini'
+    ? '2026-07-24T12:00:02.000Z'
+    : id === 'aider'
+      ? '2026-07-24T12:00:01.000Z'
+      : id === 'cloud'
+        ? '2026-07-24T12:00:00.000Z'
+        : '2026-07-23T12:00:00.000Z';
   const session: RuntimeSession = {
     sessionKey: `${id}-owned:inventory-parity`,
     runtimeId: id,
@@ -67,9 +81,7 @@ function runtime(id: 'gemini' | 'aider'): AgentRuntime {
       canInterrupt: false,
       canReviewDiffs: true,
     },
-    lastActivityAt: new Date(
-      id === 'gemini' ? '2026-07-24T12:00:01.000Z' : '2026-07-24T12:00:00.000Z',
-    ),
+    lastActivityAt: new Date(lastActivityAt),
   };
 
   return {
@@ -96,15 +108,122 @@ function runtime(id: 'gemini' | 'aider'): AgentRuntime {
 
 describe('canonical runtime inventory discovery', () => {
   beforeEach(() => {
-    registryFixture.runtimes = [runtime('gemini'), runtime('aider')];
+    registryFixture.runtimes = [];
+    ideRegistryFixture.sessions = [];
+    ideRegistryFixture.tabs = [];
     invalidateRuntimeInventoryCache();
   });
 
-  it('discovers owned sessions from every dispatchable registered adapter', async () => {
+  it('matches main policy by never discovering non-dispatchable registered adapters', async () => {
+    const geminiRuntime = runtime('gemini');
+    const aiderRuntime = runtime('aider');
+    const cloudRuntime = runtime('cloud');
+    const remoteCustomerRuntime = runtime('remote-customer');
+    const cloudDiscovery = vi.spyOn(cloudRuntime, 'discoverSessions');
+    const remoteCustomerDiscovery = vi.spyOn(remoteCustomerRuntime, 'discoverSessions');
+    registryFixture.runtimes = [
+      geminiRuntime,
+      aiderRuntime,
+      cloudRuntime,
+      remoteCustomerRuntime,
+    ];
+    invalidateRuntimeInventoryCache();
+
+    const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
+
+    expect(cloudDiscovery).not.toHaveBeenCalled();
+    expect(remoteCustomerDiscovery).not.toHaveBeenCalled();
+    expect(snapshot.agents.map((agent) => agent.runtime)).toEqual(['gemini', 'aider']);
+    expect(snapshot.agents.map((agent) => agent.identityId)).toEqual([
+      'gemini-identity',
+      'aider-identity',
+    ]);
+    expect(snapshot.meta.note).toBe('Showing every discovered dispatchable runtime surface.');
+  });
+
+  it('uses total unknown evidence for an invalid observation without dropping healthy sessions', async () => {
+    const malformedRuntime = runtime('aider');
+    const discoverSessions = malformedRuntime.discoverSessions;
+    malformedRuntime.discoverSessions = async () => {
+      const sessions = await discoverSessions();
+      return sessions.map((session) => ({ ...session, lastActivityAt: new Date('not-a-time') }));
+    };
+    registryFixture.runtimes = [runtime('gemini'), malformedRuntime];
+    invalidateRuntimeInventoryCache();
+
     const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
 
     expect(snapshot.agents.map((agent) => agent.runtime)).toEqual(['gemini', 'aider']);
-    expect(snapshot.agents.map((agent) => agent.identityId)).toEqual(['gemini-identity', 'aider-identity']);
-    expect(snapshot.meta.note).toBe('Showing every discovered dispatchable runtime surface.');
+    expect(snapshot.agents.find((agent) => agent.runtime === 'aider')?.statusEvidence)
+      .toMatchObject({
+        runtime: 'aider',
+        state: 'unknown',
+        authority: 'raw-terminal',
+        summary: 'No observation with a valid time was available.',
+        evidence: [],
+      });
+  });
+
+  it('contains a missing session identity and warns without dropping peers', async () => {
+    const malformedRuntime = runtime('aider');
+    const discoverSessions = malformedRuntime.discoverSessions;
+    malformedRuntime.discoverSessions = async () => {
+      const sessions = await discoverSessions();
+      return sessions.map((session) => ({ ...session, sessionKey: '' }));
+    };
+    registryFixture.runtimes = [runtime('gemini'), malformedRuntime];
+    invalidateRuntimeInventoryCache();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
+
+      expect(snapshot.agents).toHaveLength(2);
+      expect(snapshot.agents.map((agent) => agent.runtime)).toEqual(['gemini', 'aider']);
+      expect(snapshot.agents[1].statusEvidence).toMatchObject({
+        sessionId: 'aider',
+        runtime: 'aider',
+        state: 'unknown',
+        authority: 'raw-terminal',
+        evidence: [],
+      });
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('[terminal-status]'));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('uses an owned IDE session status as runtime evidence', async () => {
+    const descriptor: IdeRuntimeSessionDescriptor = {
+      tabId: 'claude-reviewing-tab',
+      runtimeId: 'claude-code',
+      sessionKey: 'claude-code-owned:reviewing-session',
+      liveSessionKey: 'claude-code-owned:reviewing-session',
+      label: 'Reviewing worker',
+      repoPath: testRoot,
+      scope: 'tile-root',
+      savedAt: '2026-08-29T12:00:00.000Z',
+      supervisorStatus: 'reviewing',
+      isCurrentSession: true,
+    };
+    ideRegistryFixture.sessions = [descriptor];
+    ideRegistryFixture.tabs = [descriptor];
+    invalidateRuntimeInventoryCache();
+
+    const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
+
+    expect(snapshot.agents).toHaveLength(1);
+    expect(snapshot.agents[0]).toMatchObject({
+      sessionKey: descriptor.sessionKey,
+      runtime: 'claude-code',
+      status: 'reviewing',
+      statusEvidence: {
+        sessionId: descriptor.sessionKey,
+        runtime: 'claude-code',
+        state: 'review-ready',
+        authority: 'runtime-event',
+        summary: 'claude-code runtime reports this session as review-ready.',
+      },
+    });
   });
 });

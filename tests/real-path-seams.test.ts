@@ -33,29 +33,38 @@
  *      operator-defaults resolution, not resolveBrainEnabledWith in isolation.
  */
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { basename, join } from 'node:path';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
+import { TerminalStatusEvidenceDisclosure } from '@/components/desktop/TerminalStatusEvidenceRows';
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { TypedRow } from '@/lib/cortex/qa/types';
 
 const runtimeInventoryMock = vi.hoisted(() => ({
   agents: [] as Array<{
     sessionKey: string;
-    runtime: 'codex' | 'claude-code';
+    runtime: string;
     status: string;
     currentTask?: string | null;
     lastEventAt?: string | null;
+    lastActivityAt?: number | null;
     runtimeSurface?: {
       ownership?: 'provider' | 'discovered' | 'owned';
       capabilities?: { sendInput?: boolean; interrupt?: boolean };
-      lifecycle?: { availability?: 'awaiting-thread' | 'running' | 'ready-for-resume' };
+      lifecycle?: {
+        availability?: 'awaiting-thread' | 'running' | 'ready-for-resume';
+        lastOutcome?: 'finished' | 'interrupted' | 'failed';
+        lastRunFinishedAt?: string;
+      };
     };
   }>,
+  requests: [] as Array<{ fresh?: boolean } | undefined>,
 }));
 
 const authDetectMock = vi.hoisted(() => {
@@ -88,7 +97,10 @@ vi.mock('@/lib/realtime/publisher', () => ({
 }));
 
 vi.mock('@/lib/runtime/inventory', () => ({
-  getRuntimeInventorySnapshot: vi.fn(async () => ({ agents: runtimeInventoryMock.agents })),
+  getRuntimeInventorySnapshot: vi.fn(async (options?: { fresh?: boolean }) => {
+    runtimeInventoryMock.requests.push(options);
+    return { agents: runtimeInventoryMock.agents };
+  }),
 }));
 
 vi.mock('@/lib/runtimes/shared/auth-detect', () => ({
@@ -130,13 +142,17 @@ const { addSessionRule } = await import('@/lib/db/session-rules-store');
 const mergeRoute = await import('@/app/api/orchestrator/merge/route');
 const mergePreviewRoute = await import('@/app/api/orchestrator/merge-preview/route');
 const stateRoute = await import('@/app/api/orchestrator/state/route');
+const operatorStatusRoute = await import('@/app/api/operator/status/route');
 const createMissionRoute = await import('@/app/api/orchestrator/create-mission/route');
 const chatHistoryRoute = await import('@/app/api/v2/chat-history/route');
 const searchRoute = await import('@/app/api/panel/search/route');
 const { archiveLane, createLane, findLaneByPacket, getLane, getLaneEvents, setLaneStatus, updateLane } = await import('@/lib/lane/registry');
 const { dispatch } = await import('@/lib/lane/commands');
 const { listApprovalsForContext } = await import('@/lib/approvals/store');
-const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+const {
+  createEmptyOrchestratorMissionState,
+  normalizeOrchestratorMissionState,
+} = await import('@/lib/orchestrator/store');
 const {
   readOrchestratorControlPlaneState,
   withControlPlaneLock,
@@ -170,6 +186,7 @@ const {
 
 afterEach(() => {
   runtimeInventoryMock.agents = [];
+  runtimeInventoryMock.requests = [];
   authDetectMock.unauthRuntime = null;
   resetRecallCacheForTests();
   rmSync(join(dataDir, 'operator-defaults.json'), { force: true });
@@ -747,6 +764,311 @@ describe('seam E — review-ready projection is suppressed while owned Codex is 
     expect(packet).toBeTruthy();
     expect(packet.status).toBe('running');
     expect(packet.status).not.toBe('awaiting_review');
+  });
+
+  it('real state GET keeps lane review-ready authoritative after the owned run finishes', async () => {
+    const packetId = 'pkt-seam-E-finished-reviewing';
+    const surfaceId = 'codex-owned:seam-E-finished';
+    const repoPath = mkdtempSync(join(os.tmpdir(), 'o8-seam-E-finished-repo-'));
+    const finishedAt = '2026-08-29T12:10:00.000Z';
+    tempDirs.push(repoPath);
+
+    const lane = createLane({
+      repoPath,
+      worktreePath: repoPath,
+      branch: 'inline/seam-e-finished',
+      runtime: 'codex',
+      packetId,
+      sessionKey: surfaceId,
+    });
+    setLaneStatus(lane.id, 'reviewing', 'system', 'review_ready');
+
+    runtimeInventoryMock.agents = [{
+      sessionKey: surfaceId,
+      runtime: 'codex',
+      status: 'completed',
+      currentTask: 'Worker finished and awaits review',
+      lastEventAt: finishedAt,
+      runtimeSurface: {
+        ownership: 'owned',
+        capabilities: { sendInput: false, interrupt: false },
+        lifecycle: {
+          availability: 'ready-for-resume',
+          lastOutcome: 'finished',
+          lastRunFinishedAt: finishedAt,
+        },
+      },
+    }];
+
+    const seed = await (await stateRoute.GET(operatorGet(url))).json();
+    const current: OrchestratorMissionState = seed.mission ?? createEmptyOrchestratorMissionState();
+    const mission: OrchestratorMissionState = {
+      ...current,
+      packets: [
+        ...current.packets,
+        packetFixture({ id: packetId, status: 'awaiting_review', lane: null }),
+      ],
+    };
+    const postRes = await stateRoute.POST(operatorReq(url, { mission }));
+    expect(postRes.status).toBe(200);
+
+    const getRes = await stateRoute.GET(operatorGet(url));
+    expect(getRes.status).toBe(200);
+    const json = await getRes.json();
+    const packet = json.mission.packets.find((candidate: OrchestratorPacket) => candidate.id === packetId);
+    const agent = json.agents.find((candidate: { sessionKey: string }) => candidate.sessionKey === surfaceId);
+
+    expect(packet.status).toBe('awaiting_review');
+    expect(agent.status).toBe('reviewing');
+    expect(agent.statusEvidence).toMatchObject({
+      state: 'review-ready',
+      authority: 'lane-state',
+    });
+    expect(agent.statusEvidence).not.toHaveProperty('fallbackReason');
+    expect(agent.statusEvidence.evidence).toContainEqual({
+      source: 'runtime-session.status',
+      value: 'completed',
+    });
+    expect(packet.statusEvidence).toEqual(agent.statusEvidence);
+  });
+});
+
+describe('seam E — orchestrator state projects one terminal status authority', () => {
+  const url = 'http://localhost:3001/api/orchestrator/state';
+
+  it('real state GET carries lane-only evidence through the desktop mission normalizer', async () => {
+    const packetId = 'pkt-seam-E-lane-only-blocked';
+    const surfaceId = 'codex-owned:seam-E-lane-only-blocked';
+    const repoPath = mkdtempSync(join(os.tmpdir(), 'o8-seam-E-lane-only-repo-'));
+    tempDirs.push(repoPath);
+    writeOrchestratorControlPlaneState(createEmptyOrchestratorMissionState());
+
+    const persistedLane = createLane({
+      repoPath,
+      worktreePath: repoPath,
+      branch: 'inline/seam-e-lane-only',
+      runtime: 'codex',
+      packetId,
+      sessionKey: surfaceId,
+    });
+    setLaneStatus(
+      persistedLane.id,
+      'awaiting_orchestrator',
+      'system',
+      'worktree_missing_unverified',
+    );
+    runtimeInventoryMock.agents = [];
+
+    const seed = await (await stateRoute.GET(operatorGet(url))).json();
+    const current: OrchestratorMissionState = seed.mission ?? createEmptyOrchestratorMissionState();
+    const mission: OrchestratorMissionState = {
+      ...current,
+      packets: [
+        ...current.packets,
+        packetFixture({ id: packetId, status: 'blocked', lane: null }),
+      ],
+    };
+    const postRes = await stateRoute.POST(operatorReq(url, { mission }));
+    expect(postRes.status).toBe(200);
+
+    const response = await stateRoute.GET(operatorGet(url));
+    expect(response.status).toBe(200);
+    const json = await response.json();
+    const routePacket = json.mission.packets.find((candidate: OrchestratorPacket) => (
+      candidate.id === packetId
+    ));
+    const desktopMission = normalizeOrchestratorMissionState(json.mission);
+    const packet = desktopMission.packets[0];
+    const statusEvidence = packet.statusEvidence;
+
+    expect(json.agents).toEqual([]);
+    expect(routePacket.statusEvidence).toEqual(statusEvidence);
+    expect(packet.id).toBe(packetId);
+    expect(statusEvidence).toMatchObject({
+      sessionId: surfaceId,
+      runtime: 'codex',
+      state: 'blocked',
+      authority: 'lane-state',
+    });
+    expect(statusEvidence?.summary).toContain('worktree_missing_unverified');
+    expect(statusEvidence?.evidence).toContainEqual({
+      source: 'lane-event:worktree_missing_unverified',
+      value: expect.stringContaining('awaiting_orchestrator'),
+    });
+    expect(readOrchestratorControlPlaneState().packets[0]).not.toHaveProperty('statusEvidence');
+    expect(runtimeInventoryMock.requests.at(-1)).toEqual({ fresh: false });
+  });
+
+  it('real state GET carries resolved evidence from fabricated inventory to the desktop status rows', async () => {
+    const packetId = 'pkt-seam-E-status-evidence';
+    const surfaceId = 'codex-owned:seam-E-status-evidence';
+    const repoPath = mkdtempSync(join(os.tmpdir(), 'o8-seam-E-status-repo-'));
+    tempDirs.push(repoPath);
+
+    const persistedLane = createLane({
+      repoPath,
+      worktreePath: repoPath,
+      branch: 'inline/seam-e-status',
+      runtime: 'codex',
+      packetId,
+      sessionKey: surfaceId,
+    });
+    setLaneStatus(persistedLane.id, 'running', 'system', 'session_running');
+
+    runtimeInventoryMock.agents = [{
+      sessionKey: surfaceId,
+      runtime: 'codex',
+      status: 'failed',
+      currentTask: 'Runtime exited while lane remained active',
+      lastEventAt: '2026-08-29T12:00:00.000Z',
+      runtimeSurface: {
+        ownership: 'owned',
+        capabilities: { sendInput: false, interrupt: false },
+        lifecycle: { availability: 'ready-for-resume' },
+      },
+    }];
+
+    const response = await stateRoute.GET(operatorGet(url));
+    expect(response.status).toBe(200);
+    const json = await response.json();
+    const agent = json.agents.find((candidate: { sessionKey: string }) => candidate.sessionKey === surfaceId);
+
+    expect(agent.status).toBe('failed');
+    expect(agent.statusEvidence).toMatchObject({
+      sessionId: surfaceId,
+      runtime: 'codex',
+      state: 'failed',
+      authority: 'runtime-event',
+      observedAt: '2026-08-29T12:00:00.000Z',
+    });
+    expect(agent.statusEvidence.evidence).toContainEqual({
+      source: `lane:${persistedLane.id}.status`,
+      value: 'running',
+    });
+    const desktopMarkup = renderToStaticMarkup(createElement(TerminalStatusEvidenceDisclosure, {
+      evidence: agent.statusEvidence,
+      defaultExpanded: true,
+    }));
+    expect(desktopMarkup).toContain('failed · runtime');
+    expect(desktopMarkup).toContain(`lane:${persistedLane.id}.status`);
+    expect(runtimeInventoryMock.requests.at(-1)).toEqual({ fresh: false });
+  });
+
+  it('real state GET keeps cloud and remote-customer sessions with TerminalStatusEvidence', async () => {
+    runtimeInventoryMock.agents = ['cloud', 'remote-customer'].map((runtime, index) => ({
+      sessionKey: `${runtime}-owned:seam-E-status-evidence`,
+      runtime,
+      status: 'running',
+      currentTask: `Running on registered ${runtime} worker`,
+      lastEventAt: `2026-08-29T12:0${5 + index}:00.000Z`,
+      runtimeSurface: {
+        ownership: 'owned' as const,
+        capabilities: { sendInput: false, interrupt: true },
+        lifecycle: { availability: 'running' as const },
+      },
+    }));
+
+    const response = await stateRoute.GET(operatorGet(url));
+    expect(response.status).toBe(200);
+    const json = await response.json();
+    for (const runtime of ['cloud', 'remote-customer']) {
+      const sessionId = `${runtime}-owned:seam-E-status-evidence`;
+      const agent = json.agents.find((candidate: { sessionKey: string }) => candidate.sessionKey === sessionId);
+      expect(agent).toBeTruthy();
+      expect(agent.runtime).toBe(runtime);
+      expect(agent.statusEvidence).toMatchObject({
+        sessionId,
+        runtime,
+        state: 'working',
+        authority: 'runtime-event',
+      });
+    }
+  });
+
+  it('real operator status GET keeps cloud and remote-customer sessions', async () => {
+    runtimeInventoryMock.agents = ['cloud', 'remote-customer'].map((runtime) => ({
+      sessionKey: `${runtime}-owned:operator-status`,
+      runtime,
+      status: 'running',
+      currentTask: `Running on registered ${runtime} worker`,
+      lastEventAt: '2026-08-29T12:05:00.000Z',
+      runtimeSurface: {
+        ownership: 'owned' as const,
+        capabilities: { sendInput: false, interrupt: true },
+        lifecycle: { availability: 'running' as const },
+      },
+    }));
+
+    const response = await operatorStatusRoute.GET(operatorGet('http://localhost:3001/api/operator/status'));
+    expect(response.status).toBe(200);
+    const json = await response.json();
+
+    expect(json.agents.map((candidate: { runtime: string }) => candidate.runtime)).toEqual([
+      'cloud',
+      'remote-customer',
+    ]);
+    expect(json.agents.map((candidate: { statusEvidence: { runtime: string } }) => (
+      candidate.statusEvidence.runtime
+    ))).toEqual(['cloud', 'remote-customer']);
+  });
+
+  it('real state GET returns 200 and preserves peers when one observation time is invalid', async () => {
+    const invalidSessionId = 'remote-customer-owned:invalid-time';
+    const healthySessionId = 'cloud-owned:healthy-time';
+    runtimeInventoryMock.agents = [
+      {
+        sessionKey: invalidSessionId,
+        runtime: 'remote-customer',
+        status: 'running',
+        currentTask: 'Waiting for a valid observation',
+        lastEventAt: 'not-a-time',
+        lastActivityAt: null,
+      },
+      {
+        sessionKey: healthySessionId,
+        runtime: 'cloud',
+        status: 'running',
+        currentTask: 'Healthy registered runtime session',
+        lastEventAt: '2026-08-29T12:08:00.000Z',
+      },
+    ];
+
+    const response = await stateRoute.GET(operatorGet(url));
+    expect(response.status).toBe(200);
+    const json = await response.json();
+    const invalid = json.agents.find((candidate: { sessionKey: string }) => (
+      candidate.sessionKey === invalidSessionId
+    ));
+
+    expect(json.agents.map((candidate: { sessionKey: string }) => candidate.sessionKey)).toEqual([
+      invalidSessionId,
+      healthySessionId,
+    ]);
+    expect(invalid.statusEvidence).toMatchObject({
+      sessionId: invalidSessionId,
+      runtime: 'remote-customer',
+      state: 'unknown',
+      authority: 'raw-terminal',
+      summary: 'No observation with a valid time was available.',
+      evidence: [],
+    });
+    expect(Date.parse(invalid.statusEvidence.observedAt)).not.toBeNaN();
+  });
+
+  it('keeps precedence code in the terminal status resolver instead of the old call sites', () => {
+    const inventorySource = readFileSync(
+      join(process.cwd(), 'src/lib/runtime/inventory.ts'),
+      'utf-8',
+    );
+    const operatorStatusSource = readFileSync(
+      join(process.cwd(), 'src/lib/orchestrator/operator-status-model.ts'),
+      'utf-8',
+    );
+
+    expect(inventorySource).not.toContain('const statusWeight');
+    expect(operatorStatusSource).not.toContain('packetStatusFromLaneStatus');
+    expect(inventorySource).toContain('resolveTerminalStatusEvidence');
+    expect(operatorStatusSource).toContain('resolveTerminalStatusEvidence');
   });
 });
 

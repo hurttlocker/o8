@@ -6,6 +6,7 @@ import { deriveSpawnedAgentState, formatSpawnedAgentElapsed } from './spawned-ag
 import type { ExtraAgentRow } from './AgentPanelExtraAgentRow';
 import type { TranscriptEvent } from '@/lib/orchestrator/transcript-normalizer';
 import { runtimeModelDisplayLabel } from '@/lib/orchestrator/display';
+import { TerminalStatusEvidenceDisclosure } from './TerminalStatusEvidenceRows';
 
 interface SpawnedAgentHoverCardProps {
   row: ExtraAgentRow;
@@ -248,8 +249,15 @@ export function SpawnedAgentHoverCard({
           <MetaRow label="Repo" value={row.repoPath.split('/').filter(Boolean).at(-1) ?? row.repoPath} />
         ) : null}
         {row.prNumber ? <MetaRow label="PR" value={`#${row.prNumber}`} /> : null}
+        {row.statusEvidence ? <MetaRow label="Status" value={row.statusEvidence.summary} /> : null}
         {transcript.lastActivity ? <MetaRow label="Activity" value={transcript.lastActivity} /> : null}
       </div>
+
+      {row.statusEvidence ? (
+        <div style={{ marginTop: 12 }}>
+          <TerminalStatusEvidenceDisclosure evidence={row.statusEvidence} />
+        </div>
+      ) : null}
 
       <div
         style={{

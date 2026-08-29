@@ -2,7 +2,7 @@
 import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { AgentRuntime, RuntimeSession } from '@/lib/runtimes/types';
+import type { AgentRuntime, RuntimeSession, RuntimeSessionStatus } from '@/lib/runtimes/types';
 import type { AgentSummary, EventItem, FleetSnapshot, SquadSummary } from '@/lib/fleet/types';
 import { getAllRuntimes } from '@/lib/runtimes';
 import { listCurrentIdeRepoPaths } from '@/lib/runtime/ide-terminal-state';
@@ -16,6 +16,16 @@ import {
 } from '@/lib/orchestrator/runtime-capabilities';
 import { getAllEvents, getLaneEvents, listLanes } from '@/lib/lane/registry';
 import type { Lane, LaneEvent } from '@/lib/lane/types';
+import { debouncedSessionStatus } from '@/lib/terminal-status/debounce';
+import {
+  compareTerminalStatusEvidence,
+  resolveTerminalStatusEvidence,
+  runtimeSessionStatusFromTerminalState,
+  unknownTerminalStatusEvidence,
+  type TerminalStatusEvidence,
+} from '@/lib/terminal-status/resolve';
+
+export { debouncedSessionStatus } from '@/lib/terminal-status/debounce';
 
 const RUNTIME_INVENTORY_TTL_MS = 15_000;
 const RUNTIME_INVENTORY_FRESH_COALESCE_MS = 2_000;
@@ -186,39 +196,10 @@ function runtimeSourceLabel(runtime: AgentRuntime, session: RuntimeSession) {
   return `${runtime.displayName} discovery`;
 }
 
-// #1476 lie 2 — a failed→heal blip on the discovery side surfaced as
-// status:'failed' for a single snapshot while the worker was alive and
-// mid-flow; callers polling in that window read a terminal-looking verdict.
-// Hysteresis: 'failed' must persist for FAILED_CONFIRM_MS before it surfaces;
-// until then the session reports its last known non-failed status. A session
-// whose FIRST observation is failed reports failed immediately (no history to
-// mask with — that's a genuinely dead discovery, not a blip).
-const FAILED_CONFIRM_MS = 90_000;
-const failureDebounceBySession = new Map<string, { lastGood: string; failedSince: number | null }>();
-
-export function debouncedSessionStatus(sessionKey: string, status: string): string {
-  if (failureDebounceBySession.size > 512 && !failureDebounceBySession.has(sessionKey)) {
-    const oldest = failureDebounceBySession.keys().next().value;
-    if (oldest !== undefined) failureDebounceBySession.delete(oldest);
-  }
-  const entry = failureDebounceBySession.get(sessionKey) ?? { lastGood: status, failedSince: null };
-  if (status !== 'failed') {
-    entry.lastGood = status;
-    entry.failedSince = null;
-    failureDebounceBySession.set(sessionKey, entry);
-    return status;
-  }
-  if (entry.failedSince === null) entry.failedSince = Date.now();
-  failureDebounceBySession.set(sessionKey, entry);
-  if (entry.lastGood === 'failed' || Date.now() - entry.failedSince >= FAILED_CONFIRM_MS) {
-    return 'failed';
-  }
-  return entry.lastGood;
-}
-
 function mapRuntimeSessionToAgent(
   runtime: AgentRuntime,
   session: RuntimeSession,
+  statusEvidence: TerminalStatusEvidence,
   overrides?: {
     label?: string;
     model?: string;
@@ -227,8 +208,7 @@ function mapRuntimeSessionToAgent(
 ): AgentSummary {
   const contextUsed = Math.max(0, Math.min(100, session.contextUsedPercent ?? 0));
   const workspace = shortenHomePath(overrides?.repoPath ?? session.cwd);
-  const sessionStatus = debouncedSessionStatus(session.sessionKey, session.status) as typeof session.status;
-  const alerts = Number(sessionStatus === 'failed') + Number(contextUsed >= 75);
+  const alerts = Number(session.status === 'failed') + Number(contextUsed >= 75);
   const rawDisplayName = overrides?.label?.trim() || session.displayName;
   const displayName = decorateRuntimeDisplayName(runtime.id, rawDisplayName, session, workspace);
   const model = overrides?.model || session.model || runtime.displayName;
@@ -240,7 +220,8 @@ function mapRuntimeSessionToAgent(
     runtime: runtime.id,
     model,
     primaryModel: model,
-    status: sessionStatus,
+    status: session.status,
+    statusEvidence,
     currentTask: session.initialTask ?? `${runtime.displayName} session`,
     workspace,
     branch: session.branch ?? 'unknown',
@@ -289,13 +270,65 @@ function mapRuntimeSessionToAgent(
   };
 }
 
+function ideRuntimeSessionStatus(status: string | null | undefined): RuntimeSessionStatus | null {
+  switch (status?.trim().toLowerCase()) {
+    case 'launched':
+    case 'launching':
+    case 'retrying':
+    case 'running':
+    case 'recovering':
+    case 'merging':
+      return 'running';
+    case 'waiting':
+    case 'blocked':
+    case 'stuck':
+    case 'interrupted':
+    case 'awaiting_input':
+    case 'awaiting_orchestrator':
+    case 'awaiting_human':
+      return 'waiting';
+    case 'reviewing':
+    case 'awaiting_review':
+      return 'reviewing';
+    case 'failed':
+      return 'failed';
+    case 'completed':
+    case 'archived':
+      return 'completed';
+    case 'idle':
+    case 'paused':
+      return 'idle';
+    default:
+      return null;
+  }
+}
+
 function mapIdeGhostRuntimeTabToAgent(session: IdeRuntimeSessionDescriptor): AgentSummary {
   const workspace = shortenHomePath(session.repoPath ?? '~');
   const runtimeName = defaultRuntimeDisplayName(session.runtimeId);
+  const status = ideRuntimeSessionStatus(session.supervisorStatus);
   const currentTask = session.liveSessionKey
     ? 'Reconnecting\u2026'
     : 'Idle';
   const parsedLastActivity = new Date(session.savedAt ?? Date.now()).getTime();
+  const observedAt = new Date(Number.isNaN(parsedLastActivity) ? Date.now() : parsedLastActivity).toISOString();
+  const statusEvidence = status
+    ? resolveTerminalStatusEvidence({
+        runtimeSession: {
+          sessionKey: session.sessionKey,
+          runtimeId: session.runtimeId,
+          status,
+          observedAt,
+        },
+      })
+    : resolveTerminalStatusEvidence({
+        rawLifecycle: {
+          sessionId: session.sessionKey,
+          runtime: session.runtimeId,
+          state: session.liveSessionKey ? 'unknown' : 'idle',
+          observedAt,
+        },
+      });
 
   return {
     id: session.sessionKey,
@@ -304,7 +337,8 @@ function mapIdeGhostRuntimeTabToAgent(session: IdeRuntimeSessionDescriptor): Age
     runtime: session.runtimeId,
     model: session.model || runtimeName,
     primaryModel: session.model || runtimeName,
-    status: 'idle',
+    status: status ?? 'idle',
+    statusEvidence,
     currentTask,
     workspace,
     branch: 'unknown',
@@ -460,20 +494,52 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
     discoveredKeys.add(key);
   }
 
-  discoveredAll.sort((left, right) => {
-    const statusWeight = (status: RuntimeSession['status']) => (
-      status === 'running' ? 5
-        : status === 'reviewing' ? 4
-          : status === 'waiting' ? 3
-            : status === 'failed' ? 2
-              : 1
-    );
-    const statusDelta = statusWeight(right.session.status) - statusWeight(left.session.status);
-    if (statusDelta !== 0) return statusDelta;
-    return right.session.lastActivityAt.getTime() - left.session.lastActivityAt.getTime();
+  // resolveTerminalStatusEvidence is the single source for status precedence.
+  const resolvedDiscoveredAll = discoveredAll.map(({ runtime, session }) => {
+    const debouncedStatus = debouncedSessionStatus(
+      session.sessionKey,
+      session.status,
+    ) as RuntimeSession['status'];
+    let statusEvidence: TerminalStatusEvidence;
+    try {
+      statusEvidence = resolveTerminalStatusEvidence({
+        runtimeSession: {
+          sessionKey: session.sessionKey,
+          runtimeId: runtime.id,
+          status: debouncedStatus,
+          observedAt: session.lastActivityAt instanceof Date
+            && Number.isFinite(session.lastActivityAt.getTime())
+            ? session.lastActivityAt.toISOString()
+            : '',
+          lifecycle: session.lifecycle,
+        },
+      });
+    } catch (error) {
+      const sessionId = session.sessionKey || session.displayName || 'unknown-session';
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[terminal-status] Failed to resolve status for ${sessionId}: ${message}`);
+      statusEvidence = unknownTerminalStatusEvidence({
+        sessionId,
+        runtime: runtime.id,
+        observedAt: session.lastActivityAt,
+        summary: 'Terminal status evidence could not be resolved for this session.',
+        fallbackReason: `Status resolution failed for this session: ${message}`,
+      });
+    }
+    return {
+      runtime,
+      session: {
+        ...session,
+        status: runtimeSessionStatusFromTerminalState(statusEvidence.state, debouncedStatus),
+      },
+      statusEvidence,
+    };
   });
+  resolvedDiscoveredAll.sort((left, right) => (
+    compareTerminalStatusEvidence(left.statusEvidence, right.statusEvidence)
+  ));
 
-  const discovered = discoveredAll.filter(({ runtime, session }) => (
+  const discovered = resolvedDiscoveredAll.filter(({ runtime, session }) => (
     session.sessionKey?.startsWith('codex-owned:')
     || ideSessionByKey.has(session.sessionKey)
     || isRegistryBackedRuntimeSession(session.sessionKey)
@@ -488,16 +554,20 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
     || (session.ownership === 'owned' && isDispatchableRuntime(session.runtimeId))
   ));
 
-  const agents = discovered.map(({ runtime, session }) => mapRuntimeSessionToAgent(runtime, session, ideSessionByKey.get(session.sessionKey)));
+  const agents = discovered.map(({ runtime, session, statusEvidence }) => (
+    mapRuntimeSessionToAgent(runtime, session, statusEvidence, ideSessionByKey.get(session.sessionKey))
+  ));
   const fallbackAgents = selectRepoFallbackAgents(
-    discoveredAll.map(({ runtime, session }) => mapRuntimeSessionToAgent(runtime, session, ideSessionByKey.get(session.sessionKey))),
+    resolvedDiscoveredAll.map(({ runtime, session, statusEvidence }) => (
+      mapRuntimeSessionToAgent(runtime, session, statusEvidence, ideSessionByKey.get(session.sessionKey))
+    )),
     new Set(agents.map((agent) => agent.sessionKey)),
   );
   agents.push(...fallbackAgents);
   const visibleAgents = applyHuddleLaneStatus(agents);
 
   const liveSessionKeys = new Set(
-    [...discovered, ...discoveredAll.filter(({ session }) => fallbackAgents.some((agent) => agent.sessionKey === session.sessionKey))]
+    [...discovered, ...resolvedDiscoveredAll.filter(({ session }) => fallbackAgents.some((agent) => agent.sessionKey === session.sessionKey))]
       .map(({ session }) => session.sessionKey),
   );
   // Ghost-agent promotion: tabs whose session isn't in the live set become

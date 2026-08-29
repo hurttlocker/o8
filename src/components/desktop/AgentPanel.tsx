@@ -482,7 +482,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             // Agents stay flat between Chats and Archived, never nested under a chat.
             agentsSection={(
               <>
-                <AgentPanelExtraAgents activeSessionKey={activeSessionKey} onSelectSession={onSelectSession} />
+                <AgentPanelExtraAgents activeSessionKey={activeSessionKey} onSelectSession={onSelectSession} packets={orchestratorMissionState?.packets ?? orchestratorPackets} />
                 <AgentMessageActivity repos={railReposForChats} />
               </>
             )}

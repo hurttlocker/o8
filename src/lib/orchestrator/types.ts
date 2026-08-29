@@ -7,6 +7,8 @@ import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorRuntime, RuntimeWorkerProvider } from '@/lib/orchestrator/runtime-capabilities';
 import type { PacketSpendCap, PacketSpendTelemetry } from '@/lib/orchestrator/metered-spend';
 import type { PacketContextTelemetry } from '@/lib/orchestrator/packet-context-telemetry';
+import type { AgentSummary } from '@/lib/fleet/types';
+import type { TerminalStatusEvidence } from '@/lib/terminal-status/resolve';
 
 export type { OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 export type OrchestratorExecutionMode = 'fleet' | 'single' | 'fusion';
@@ -337,6 +339,8 @@ export interface OrchestratorPacket {
   spendTelemetry?: PacketSpendTelemetry;
   contextTelemetry?: PacketContextTelemetry;
   blockedReason?: string | null;
+  /** Read-time status projection; recomputed from runtime or lane evidence. */
+  statusEvidence?: TerminalStatusEvidence;
   /** Durable dispatch admission decision; reserved bytes are not physical usage. */
   storageAdmission?: OrchestratorPacketStorageAdmission | null;
   /** Durable lifecycle floor incremented by reset/rerun before any fresh dispatch. */
@@ -654,6 +658,7 @@ export interface OrchestratorDagMetadata {
 export interface OrchestratorStateApiResponse {
   mission: OrchestratorMissionState;
   dag: OrchestratorDagMetadata;
+  agents: AgentSummary[];
 }
 
 export interface OrchestratorStateApiErrorResponse {

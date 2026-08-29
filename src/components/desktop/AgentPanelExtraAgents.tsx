@@ -40,7 +40,8 @@ import {
 import { SpawnedAgentHoverCard } from './SpawnedAgentHoverCard';
 import { callRetryPacket } from '@/lib/orchestrator/packet-actions';
 import { runtimeModelDisplayLabel } from '@/lib/orchestrator/display';
-import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import type { OrchestratorPacket, OrchestratorRuntime } from '@/lib/orchestrator/types';
+import type { AgentSummary } from '@/lib/fleet/types';
 import { archiveRuntimeTarget } from '@/lib/runtime/archive-client';
 import { SectionLabel } from './repo-focus/tabs/chats/shared';
 import {
@@ -75,23 +76,10 @@ export interface LaneSummary {
   prNumber?: number | null;
 }
 
-type AgentStatus = 'idle' | 'running' | 'blocked' | 'waiting' | 'reviewing' | 'failed' | 'completed';
-
-export interface AgentSummary {
-  id: string;
-  name: string;
-  runtime: string;
-  status: AgentStatus;
-  sessionKey: string;
-  lastEventAt: string;
-  currentTask?: string;
-  model?: string;
-  workspace?: string;
-}
-
 export interface AgentPanelExtraAgentsProps {
   activeSessionKey?: string | null;
   onSelectSession?: (sessionKey: string) => void;
+  packets?: OrchestratorPacket[];
 }
 
 // ── Constants ──
@@ -136,10 +124,13 @@ function normalizePath(value: string | null | undefined): string | null {
 function buildRows(
   lanes: LaneSummary[],
   agents: AgentSummary[],
+  packets: OrchestratorPacket[],
   rejectedPacketIds: ReadonlySet<string>,
 ): ExtraAgentRow[] {
   const rows: ExtraAgentRow[] = [];
   const seenSessionKeys = new Set<string>();
+  const agentsBySessionKey = new Map(agents.map((agent) => [agent.sessionKey, agent]));
+  const packetsById = new Map(packets.map((packet) => [packet.id, packet]));
 
   for (const lane of lanes) {
     const origin = classifyOrigin(lane.runtime, lane.ownership);
@@ -149,6 +140,8 @@ function buildRows(
     // sitting in reviewing / awaiting_input, leaving the operator with
     // no way to see what got spawned. Surface them here too.
     const status = classifyStatus(lane.status);
+    const matchingAgent = lane.sessionKey ? agentsBySessionKey.get(lane.sessionKey) : undefined;
+    const matchingPacket = lane.packetId ? packetsById.get(lane.packetId) : undefined;
     if (lane.sessionKey) seenSessionKeys.add(lane.sessionKey);
     rows.push({
       key: `lane:${lane.id}`,
@@ -167,6 +160,7 @@ function buildRows(
       outcome: lane.outcome ?? null,
       outcomeNote: lane.outcomeNote ?? null,
       lastEventLabel: lane.lastEventLabel,
+      statusEvidence: matchingPacket?.statusEvidence ?? matchingAgent?.statusEvidence,
       prNumber: lane.prNumber ?? null,
       rejected: lane.packetId ? rejectedPacketIds.has(lane.packetId) : false,
     });
@@ -194,6 +188,7 @@ function buildRows(
       outcome: null,
       outcomeNote: null,
       lastEventLabel: null,
+      statusEvidence: agent.statusEvidence,
     });
   }
 
@@ -211,17 +206,19 @@ function isTerminalRow(row: ExtraAgentRow): boolean {
 export function deriveSpawnedAgentRows({
   lanes,
   agents,
+  packets = [],
   rejectedPacketIds = new Set<string>(),
   archivedSessionKeys = new Set<string>(),
   archivedRowKeys = new Set<string>(),
 }: {
   lanes: LaneSummary[];
   agents: AgentSummary[];
+  packets?: OrchestratorPacket[];
   rejectedPacketIds?: ReadonlySet<string>;
   archivedSessionKeys?: ReadonlySet<string>;
   archivedRowKeys?: ReadonlySet<string>;
 }): ExtraAgentRow[] {
-  const rows = buildRows(lanes, agents, rejectedPacketIds).filter((row) => (
+  const rows = buildRows(lanes, agents, packets, rejectedPacketIds).filter((row) => (
     !archivedRowKeys.has(row.key)
     && !(row.sessionKey && archivedSessionKeys.has(row.sessionKey))
   ));
@@ -237,7 +234,11 @@ export function deriveSpawnedAgentRows({
 
 const COLLAPSED_KEY = 'o8:agent-panel:spawned-agents-collapsed';
 
-function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession }: AgentPanelExtraAgentsProps) {
+function AgentPanelExtraAgentsBase({
+  activeSessionKey,
+  onSelectSession,
+  packets = [],
+}: AgentPanelExtraAgentsProps) {
   const [lanes, setLanes] = useState<LaneSummary[]>([]);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [rejectedPacketIds, setRejectedPacketIds] = useState<Set<string>>(() => new Set());
@@ -364,8 +365,11 @@ function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession }: AgentP
         setRejectedPacketIds(new Set(rejected.map((entry) => entry.packetId)));
       }
       if (snapshotRes.status === 'fulfilled' && snapshotRes.value.ok) {
-        const json = await snapshotRes.value.json() as { agents?: AgentSummary[] };
-        setAgents(json.agents ?? []);
+        const json = await snapshotRes.value.json() as {
+          agents?: AgentSummary[];
+          fleet?: { agents?: AgentSummary[] };
+        };
+        setAgents(json.fleet?.agents ?? json.agents ?? []);
       }
     } catch {
       // AbortError on teardown — silently ignore.
@@ -420,9 +424,10 @@ function AgentPanelExtraAgentsBase({ activeSessionKey, onSelectSession }: AgentP
   const rows = useMemo(() => deriveSpawnedAgentRows({
     lanes,
     agents,
+    packets,
     rejectedPacketIds,
     archivedRowKeys,
-  }), [lanes, agents, rejectedPacketIds, archivedRowKeys]);
+  }), [lanes, agents, packets, rejectedPacketIds, archivedRowKeys]);
   const showRepoSuffix = deriveShowRepoSuffix(rows);
   const rankedRows = useMemo(() => {
     void readStateVersion;

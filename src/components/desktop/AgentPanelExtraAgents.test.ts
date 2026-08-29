@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { AgentSummary } from '@/lib/fleet/types';
 import {
   deriveSpawnedAgentRows,
   type LaneSummary,
@@ -56,6 +57,53 @@ describe('Agents rail derivation', () => {
       agents: [],
       archivedSessionKeys: new Set(['codex-owned:lane-running']),
     })).toEqual([]);
+  });
+
+  it('carries the fleet status evidence onto the matching lane row', () => {
+    const sessionKey = 'codex-owned:lane-evidence';
+    const statusEvidence = {
+      sessionId: sessionKey,
+      runtime: 'codex' as const,
+      state: 'blocked' as const,
+      authority: 'lane-state' as const,
+      observedAt: '2026-08-29T12:00:00.000Z',
+      summary: 'Lane is waiting for approval.',
+      evidence: [{ source: 'lane:lane-evidence.status', value: 'awaiting_human' }],
+    };
+    const lane: LaneSummary = {
+      id: 'lane-evidence',
+      label: 'Evidence worker',
+      repoPath: '/repos/project-repo',
+      branch: 'issue/evidence',
+      runtime: 'codex',
+      sessionKey,
+      packetId: 'pkt-evidence',
+      status: 'awaiting_human',
+      ownership: 'managed',
+      lastEventAt: statusEvidence.observedAt,
+      lastEventLabel: 'approval_requested',
+    };
+    const agent = {
+      id: 'agent-evidence',
+      name: 'Evidence worker',
+      squadId: 'default',
+      sessionKey,
+      runtime: 'codex',
+      model: 'gpt-5',
+      status: 'blocked',
+      currentTask: 'Waiting for approval',
+      workspace: lane.repoPath,
+      branch: lane.branch,
+      approvalStatus: 'pending',
+      lastEventAt: statusEvidence.observedAt,
+      context: { usedPercent: 0, trend: 'stable' },
+      alerts: 0,
+      statusEvidence,
+    } satisfies AgentSummary;
+
+    const [row] = deriveSpawnedAgentRows({ lanes: [lane], agents: [agent] });
+
+    expect(row?.statusEvidence).toEqual(statusEvidence);
   });
 
   it('hides an explicitly archived sessionless lane row', () => {

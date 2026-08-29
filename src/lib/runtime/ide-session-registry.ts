@@ -16,6 +16,7 @@ export interface IdeRuntimeSessionDescriptor {
   model?: string;
   repoName?: string;
   repoPath?: string;
+  supervisorStatus?: string | null;
   scope: string;
   savedAt?: string;
   isCurrentSession: boolean;
@@ -135,6 +136,7 @@ export function listIdeRuntimeTabs(): IdeRuntimeSessionDescriptor[] {
           model: tab.chatModel,
           repoName: tab.repoName,
           repoPath: tab.repoPath,
+          supervisorStatus: tab.supervisorStatus,
           scope,
           savedAt: parsed.savedAt,
           isCurrentSession: parsed.activeTabId === tab.id,

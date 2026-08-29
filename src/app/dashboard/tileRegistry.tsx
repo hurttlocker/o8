@@ -318,6 +318,7 @@ export function createTileRegistry({
                 sessionKey: agent.sessionKey,
                 tmuxSession,
                 label: agent.surfaceLabel ?? agent.name,
+                statusEvidence: agent.statusEvidence,
                 repo: repoPath ? {
                   name: repoPath.split('/').filter(Boolean).pop() ?? repoPath,
                   localPath: repoPath,

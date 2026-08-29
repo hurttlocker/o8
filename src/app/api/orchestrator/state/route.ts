@@ -7,9 +7,16 @@ import {
 } from '@/lib/orchestrator/control-plane';
 import { buildDagMetadata } from '@/lib/orchestrator/dag';
 import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
-import { findLaneByPacket } from '@/lib/lane/registry';
+import { getLaneEvents, findLaneByPacket, listLanes } from '@/lib/lane/registry';
+import { listApprovals } from '@/lib/approvals/store';
+import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
+import { resolveAgentSummaryStatuses } from '@/lib/orchestrator/operator-status-model';
 import { packetStatusWriteRejection } from '@/lib/orchestrator/packet-patch-policy';
 import { autoResolveMergedPacketVerificationIncidents } from '@/lib/supervisor/merged-incident-resolution';
+import { listTerminalReviewQueueEvidence } from '@/lib/terminal-status/store';
+import { resolveTerminalStatusEvidence } from '@/lib/terminal-status/resolve';
+import type { ApprovalRecord } from '@/lib/approvals/types';
+import type { Lane } from '@/lib/lane/types';
 import type {
   OrchestratorMissionState,
   OrchestratorPacket,
@@ -59,11 +66,58 @@ function enrichMissionWithLanes(mission: OrchestratorMissionState): Orchestrator
   return { ...mission, packets };
 }
 
-function buildStateResponse(mission: OrchestratorMissionState): OrchestratorStateApiResponse {
+function approvalMatchesLane(approval: ApprovalRecord, lane: Lane): boolean {
+  if (lane.sessionKey && approval.sessionKey === lane.sessionKey) return true;
+  if (approval.continuation?.kind === 'lane' && approval.continuation.laneId === lane.id) return true;
+  return approval.metadata?.laneId === lane.id || approval.metadata?.LaneId === lane.id;
+}
+
+async function buildStateResponse(mission: OrchestratorMissionState): Promise<OrchestratorStateApiResponse> {
   const enriched = enrichMissionWithLanes(mission);
+  // Desktop, mobile, MCP, and CLI poll this route; reuse the inventory TTL and
+  // read at most 50 events only for agent or packet lanes the response carries.
+  const snapshot = await getRuntimeInventorySnapshot({ fresh: false });
+  const lanes = listLanes();
+  const laneById = new Map(lanes.map((lane) => [lane.id, lane]));
+  const laneByPacketId = new Map(
+    lanes.flatMap((lane) => lane.packetId ? [[lane.packetId, lane] as const] : []),
+  );
+  const inventorySessionKeys = new Set((snapshot.agents ?? []).map((agent) => agent.sessionKey));
+  const responsePacketLaneIds = new Set(
+    enriched.packets.flatMap((packet) => packet.lane?.laneId ? [packet.lane.laneId] : []),
+  );
+  const laneEventsByLaneId = new Map(
+    lanes
+      .filter((lane) => responsePacketLaneIds.has(lane.id)
+        || Boolean(lane.sessionKey && inventorySessionKeys.has(lane.sessionKey)))
+      .map((lane) => [lane.id, getLaneEvents(lane.id, 50)]),
+  );
+  const approvals = listApprovals({ status: 'pending' });
+  const reviewQueue = listTerminalReviewQueueEvidence();
+  const agents = resolveAgentSummaryStatuses(snapshot.agents ?? [], lanes, {
+    laneEventsByLaneId,
+    approvals,
+    reviewQueue,
+  });
+  const evidenceBySessionKey = new Map(agents.map((agent) => [agent.sessionKey, agent.statusEvidence]));
+  const packets = enriched.packets.map((packet) => {
+    const lane = (packet.lane?.laneId ? laneById.get(packet.lane.laneId) : undefined)
+      ?? laneByPacketId.get(packet.id);
+    if (!lane) return packet;
+    const agentEvidence = lane.sessionKey ? evidenceBySessionKey.get(lane.sessionKey) : undefined;
+    const statusEvidence = agentEvidence ?? resolveTerminalStatusEvidence({
+      lane,
+      laneEvents: laneEventsByLaneId.get(lane.id) ?? [],
+      approvals: approvals.filter((approval) => approvalMatchesLane(approval, lane)),
+      reviewQueue: reviewQueue.filter((review) => review.laneId === lane.id),
+    });
+    return { ...packet, statusEvidence };
+  });
+  const projectedMission = { ...enriched, packets };
   return {
-    mission: enriched,
-    dag: buildDagMetadata(enriched.packets),
+    mission: projectedMission,
+    dag: buildDagMetadata(projectedMission.packets),
+    agents,
   };
 }
 
@@ -92,7 +146,7 @@ export async function GET(req: NextRequest) {
     // between our read and the lock acquisition. undefined → reconcile reads
     // fresh state inside the lock.
     const mission = await syncOrchestratorControlPlaneState();
-    return NextResponse.json(buildStateResponse(mission), {
+    return NextResponse.json(await buildStateResponse(mission), {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
   } catch (error) {
@@ -141,7 +195,13 @@ function mergeClientMissionUnderLock(
   // but pin identity fields to the server's values so a client that
   // synthesized partial state can't overwrite them to empty/different
   // strings. Packet-level updates flow through as-is.
-  const packets: OrchestratorPacket[] = Array.isArray(incoming.packets) ? incoming.packets : [];
+  const packets: OrchestratorPacket[] = Array.isArray(incoming.packets)
+    ? incoming.packets.map((packet) => {
+        const persisted = { ...packet };
+        delete persisted.statusEvidence;
+        return persisted;
+      })
+    : [];
   return {
     ...incoming,
     missionId: current.missionId || incoming.missionId,
@@ -165,7 +225,7 @@ export async function POST(req: NextRequest) {
     if (!incoming) {
       // No payload — fall back to the existing "reconcile current" behavior.
       const mission = await syncOrchestratorControlPlaneState();
-      return NextResponse.json(buildStateResponse(mission), {
+      return NextResponse.json(await buildStateResponse(mission), {
         headers: { 'Cache-Control': 'no-store, max-age=0' },
       });
     }
@@ -185,7 +245,7 @@ export async function POST(req: NextRequest) {
       return { dropped: false } as const;
     });
 
-    return NextResponse.json(buildStateResponse(mission), {
+    return NextResponse.json(await buildStateResponse(mission), {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
   } catch (error) {
@@ -249,7 +309,7 @@ export async function PATCH(req: NextRequest) {
       autoResolveMergedPacketVerificationIncidents({ packetId, event: 'packet_archived' });
     }
 
-    return NextResponse.json(buildStateResponse(mission), {
+    return NextResponse.json(await buildStateResponse(mission), {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
   } catch (error) {

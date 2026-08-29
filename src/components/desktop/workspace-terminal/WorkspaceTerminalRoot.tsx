@@ -126,8 +126,8 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
     // header strip (one workspace) or hide it on splits (more than one),
     // surface the multi-tab pill strip when 2+ tabs exist, and drive the
     // `…` / right-click menu actions when applicable.
-    const activeTabId = controller.activeTab?.id ?? null;
-    const activeTabKind = controller.activeTab?.kind ?? null;
+    const activeTabId = activeTab?.id ?? null;
+    const activeTabKind = activeTab?.kind ?? null;
     const projectContextRailAvailable = activeTabKind === 'orchestrator' || activeTabKind === 'llm-chat';
     const [projectContextRailVisible, setProjectContextRailVisible] = useState(true);
     const tabsForBroadcast = useMemo(() => (
@@ -361,6 +361,8 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
         <WorkspaceTerminalPanels
           workspaceId={workspaceInstanceId}
           visibleTabs={controller.visibleTabs}
+          attachedTerminalSessions={props.attachedTerminalSessions}
+          terminalModeStatusEvidence={terminalMode.statusEvidence}
           restoreSettled={controller.primaryRestoreSettled}
           effectiveActiveTabId={terminalMode.effectiveActiveTabId}
           termWsConnected={controller.termWsConnected}

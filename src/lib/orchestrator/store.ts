@@ -8,6 +8,7 @@ import type { DomainLaneSummary } from '@/lib/orchestrator/domain-lane-summary';
 import { normalizeQualitySearchPacketState } from '@/lib/orchestrator/quality-search';
 import { normalizePacketStorageAdmission, normalizePacketStorageAdmissionEpoch } from '@/lib/orchestrator/packet-storage-admission-normalize';
 import { normalizeLaneBinding } from '@/lib/orchestrator/lane-binding';
+import { normalizeTerminalStatusEvidenceField } from '@/lib/terminal-status/normalize';
 import { hydrateOrchestratorTurnPinEntry, installOrchestratorTurnPinFetchPatch, persistOrchestratorTurnPin, readCachedOrchestratorTurnPin, stageOrchestratorTurnPin } from '@/lib/orchestrator/turn-pins';
 import {
   normalizeRequestedRuntime,
@@ -25,8 +26,7 @@ import type {
   OrchestratorQueueState,
   OrchestratorRuntime,
   OrchestratorRuntimeTruth,
-  OrchestratorStateApiResponse,
-  WorkerRouting,
+  OrchestratorStateApiResponse, WorkerRouting,
 } from '@/lib/orchestrator/types';
 import { isDispatchableRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import {
@@ -366,7 +366,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     // Huddle mode (per-mission alignment turn) lives only on the packet — drop
     // it here and a rerun/re-read would silently disarm the huddle.
     huddle: typeof packet.huddle === 'boolean' ? packet.huddle : undefined,
-    blockedReason: typeof packet.blockedReason === 'string' ? packet.blockedReason : null,
+    blockedReason: typeof packet.blockedReason === 'string' ? packet.blockedReason : null, ...normalizeTerminalStatusEvidenceField(packet.statusEvidence),
     storageAdmission: normalizePacketStorageAdmission(packet.storageAdmission), storageAdmissionEpoch: normalizePacketStorageAdmissionEpoch(packet.storageAdmissionEpoch),
     recovery: normalizePacketRecovery(packet.recovery),
     lastEventAt: typeof packet.lastEventAt === 'string' ? packet.lastEventAt : null,

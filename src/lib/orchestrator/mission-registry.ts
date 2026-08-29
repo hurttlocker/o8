@@ -3,6 +3,7 @@ import 'server-only';
 import { getSqlite } from '@/lib/db';
 import { buildDependencyGraph } from '@/lib/orchestrator/dag';
 import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
+import { normalizeOrchestratorMissionStateForPersistence } from '@/lib/orchestrator/persisted-mission';
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
 
 interface MissionStateRow {
@@ -169,7 +170,7 @@ export function hasRegistryPendingHeadlessWork(currentMissionId?: string | null)
 function writeMissionRegistryStateUnlocked(state: OrchestratorMissionState): OrchestratorMissionState | null {
   const missionId = state.missionId?.trim();
   if (!missionId) return null;
-  const normalized = normalizeOrchestratorMissionState(state);
+  const normalized = normalizeOrchestratorMissionStateForPersistence(state);
   const waves = buildDependencyGraph(normalized.packets).map((node) => node.wave);
   const archivedAt = missionIsTerminal(normalized) ? Date.now() : null;
   const version = nextRegistryVersion(missionId);

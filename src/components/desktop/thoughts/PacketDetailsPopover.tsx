@@ -12,6 +12,8 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { TerminalStatusEvidenceDisclosure } from '@/components/desktop/TerminalStatusEvidenceRows';
+import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
 const FONT_BODY = 'var(--font-sans-system)';
@@ -87,6 +89,7 @@ function EmptyValue() {
 }
 
 export function PacketDetailsPopover({ packet, anchorRect, onClose }: PacketDetailsPopoverProps) {
+  const orchestratorData = useOrchestratorData();
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const [position, setPosition] = useState<PopoverPosition | null>(null);
   const [portalHost, setPortalHost] = useState<HTMLElement | null>(null);
@@ -165,6 +168,12 @@ export function PacketDetailsPopover({ packet, anchorRect, onClose }: PacketDeta
   const issueUrl = packet.issue?.url?.trim() ?? null;
   const issueNumber = packet.issue?.number ?? null;
   const hasIssueSection = Boolean(issueBody || issueUrl || issueNumber);
+  const statusEvidence = useMemo(() => {
+    if (packet.statusEvidence) return packet.statusEvidence;
+    const sessionKey = packet.lane?.sessionKey;
+    if (!sessionKey) return undefined;
+    return orchestratorData?.agents.find((agent) => agent.sessionKey === sessionKey)?.statusEvidence;
+  }, [orchestratorData?.agents, packet.lane?.sessionKey, packet.statusEvidence]);
 
   if (!portalHost || !anchorRect || !position) return null;
 
@@ -279,6 +288,12 @@ export function PacketDetailsPopover({ packet, anchorRect, onClose }: PacketDeta
           gap: 14,
         }}
       >
+        {statusEvidence ? (
+          <Section label="Status diagnostics">
+            <TerminalStatusEvidenceDisclosure evidence={statusEvidence} defaultExpanded />
+          </Section>
+        ) : null}
+
         <Section label="Prompt">
           {prompt ? (
             <pre

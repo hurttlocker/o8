@@ -13,6 +13,10 @@ import {
   type UIEvent as ReactUIEvent,
 } from 'react';
 import type { FleetAgent } from '@/components/desktop/thoughts/types';
+import {
+  TerminalStatusEvidenceDisclosure,
+  terminalStatusCaption,
+} from '@/components/desktop/TerminalStatusEvidenceRows';
 import { mergeAdjacentToolOnlyEntries } from '@/components/desktop/thoughts/chat-panel/ToolCallChipCluster';
 import { usePacketTranscriptPoll } from '@/components/desktop/workspace-terminal/use-packet-transcript-poll';
 import { WorkspaceTranscript } from '@/components/desktop/workspace-terminal/WorkspaceTranscript';
@@ -33,6 +37,7 @@ import { bootstrapTranscripts } from '@/lib/transcripts/bootstrap';
 import { transcriptStore } from '@/lib/transcripts/store';
 import { useTranscript } from '@/lib/transcripts/useTranscript';
 import { SessionTransformMenu } from './SessionTransformMenu';
+import type { TerminalStatusState } from '@/lib/terminal-status/resolve';
 
 interface AgentTilePaneProps {
   sessionKey: string;
@@ -82,6 +87,18 @@ export function resolveAgentTileStatus(
   if (states.includes('waiting')) return 'waiting';
   if (states.includes('running')) return 'running';
   return 'idle';
+}
+
+function visualStatusFromTerminalState(state: TerminalStatusState): VisualStatus {
+  switch (state) {
+    case 'working': return 'running';
+    case 'blocked': return 'waiting';
+    case 'review-ready':
+    case 'complete': return 'review';
+    case 'failed': return 'error';
+    case 'idle':
+    case 'unknown': return 'idle';
+  }
 }
 
 function inferRuntime(sessionKey: string, rawRuntime?: string): OrchestratorRuntime {
@@ -274,9 +291,12 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
     packet?.issue?.body ? { id: packet.id, text: packet.issue.body } : null,
   ), [entries, name, packet?.id, packet?.issue?.body]);
   const runtime = useMemo(() => inferRuntime(sessionKey, agent?.runtime), [agent?.runtime, sessionKey]);
+  const statusEvidence = packet?.statusEvidence ?? agent?.statusEvidence;
   const status = useMemo(
-    () => resolveAgentTileStatus(agent?.status, packet?.status, packet?.blockedReason),
-    [agent?.status, packet?.blockedReason, packet?.status],
+    () => statusEvidence
+      ? visualStatusFromTerminalState(statusEvidence.state)
+      : resolveAgentTileStatus(agent?.status, packet?.status, packet?.blockedReason),
+    [agent?.status, packet?.blockedReason, packet?.status, statusEvidence],
   );
   const canSteer = canSteerAgentState(agent, packet);
   const trimmedDraft = draft.trim();
@@ -448,7 +468,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
           <span
-            title={STATUS_META[status].label}
+            title={statusEvidence?.summary ?? STATUS_META[status].label}
             style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--t-text-secondary)', fontSize: 10, fontWeight: 300 }}
           >
             <span
@@ -456,7 +476,9 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
                 width: 5, height: 5, borderRadius: 999, background: STATUS_META[status].color, flexShrink: 0,
               }}
             />
-            {STATUS_META[status].label}
+            {statusEvidence
+              ? terminalStatusCaption(statusEvidence)
+              : STATUS_META[status].label}
           </span>
           <SessionTransformMenu runtimeId={runtime} sessionKey={sessionKey} />
           <button
@@ -485,6 +507,10 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
           </button>
         </div>
       </div>
+
+      {statusEvidence ? (
+        <TerminalStatusEvidenceDisclosure evidence={statusEvidence} />
+      ) : null}
 
       <div
         ref={scrollRef}

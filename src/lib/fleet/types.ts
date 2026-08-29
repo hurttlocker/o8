@@ -1,4 +1,5 @@
 import type { BrowserSurfaceSummary } from '@/lib/browser/types';
+import type { TerminalStatusEvidence } from '@/lib/terminal-status/resolve';
 
 export type AgentStatus =
   | 'idle'
@@ -93,6 +94,8 @@ export interface AgentSummary {
   primaryModel?: string;
   heartbeatModel?: string;
   status: AgentStatus;
+  /** Normalized terminal status explanation for orchestrator runtime sessions. */
+  statusEvidence?: TerminalStatusEvidence;
   currentTask: string;
   /** Worker-posted implementation plan while the lane is huddling. */
   huddlePlan?: string;

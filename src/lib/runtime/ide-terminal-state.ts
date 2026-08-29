@@ -14,6 +14,7 @@ export type PersistedTab = {
   chatModel?: string;
   repoName?: string;
   repoPath?: string;
+  supervisorStatus?: string | null;
 };
 
 export type PersistedTabState = {
