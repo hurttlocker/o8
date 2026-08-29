@@ -48,6 +48,8 @@ export type CloseUnmergedResult =
       laneId: string;
       packetId: string;
       worktreeRemoved: boolean;
+      worktreeCleanup: 'missing' | 'removed' | 'preserved';
+      stoppedReviewTurns: number;
       preservedBranch: string | null;
       preservedBranches: string[];
       preservationReceipts: BranchPreservationReceipt[];

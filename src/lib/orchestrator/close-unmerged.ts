@@ -1,6 +1,13 @@
+import { existsSync } from 'node:fs';
 import { dispatch } from '@/lib/lane/commands';
 import { recordLaneEvent } from '@/lib/lane/events';
-import { findLatestLaneByPacket, listLanes } from '@/lib/lane/registry';
+import { findLatestLaneByPacket, listLanes, updateLane } from '@/lib/lane/registry';
+import { cancelAutoReviewForLane } from '@/lib/lane/review-cancellation';
+import { stopActiveReviewTurn } from '@/lib/lane/review-turn-state';
+import {
+  hasRecordedCleanWorkerExit,
+  liveWorkerSessionLanes,
+} from '@/lib/lane/worker-session-state';
 import {
   archiveLaneSessionsConfirmed,
   killLaneSessionsConfirmed,
@@ -61,7 +68,11 @@ const CLOSEABLE_LANE_STATUSES = new Set([
   'failed',
 ]);
 
-async function markPacketClosed(guard: PacketLifecycleGuard, closedAt: string): Promise<boolean> {
+async function markPacketClosed(
+  guard: PacketLifecycleGuard,
+  closedAt: string,
+  worktreeCleanup: 'missing' | 'removed' | 'preserved',
+): Promise<boolean> {
   const closed = await mutatePacketLifecycleGuard(guard, (packet) => {
     packet.status = 'archived';
     packet.queueState = 'held';
@@ -72,7 +83,9 @@ async function markPacketClosed(guard: PacketLifecycleGuard, closedAt: string): 
     packet.archivedAt = closedAt;
     packet.blockedReason = null;
     packet.lastEventAt = closedAt;
-    packet.lastEventLabel = 'closed_unmerged';
+    packet.lastEventLabel = worktreeCleanup === 'missing'
+      ? 'discarded_worktree_missing'
+      : 'closed_unmerged';
     return true;
   });
   return closed.matched && closed.result === true;
@@ -82,6 +95,7 @@ async function closePacketUnmergedUnlocked(input: {
   packetId: string;
   disposition: unknown;
   note: unknown;
+  acknowledgeMissingWorktree: boolean;
 }): Promise<CloseUnmergedResult> {
   const rawDisposition = input.disposition ?? 'wontfix';
   if (!isCloseUnmergedDisposition(rawDisposition)) {
@@ -158,15 +172,45 @@ async function closePacketUnmergedUnlocked(input: {
     worktreeRefs.set(refKey, target.worktreePath);
   }
 
+  const missingWorktreeBindings = new Set(lanesToClose.flatMap((target) => {
+    const worktreePath = target.worktreePath?.trim();
+    return worktreePath && !existsSync(worktreePath)
+      ? [`${target.id}\0${worktreePath}`]
+      : [];
+  }));
   try {
-    const kills = await killLaneSessionsConfirmed(lanesToClose);
+    const stoppedReviewTurns = [];
+    const reviewedLaneIds = new Set<string>();
+    for (const target of lanesToClose) {
+      if (reviewedLaneIds.has(target.id)) continue;
+      reviewedLaneIds.add(target.id);
+      cancelAutoReviewForLane(target.id, 'packet_discarded');
+      const stopped = stopActiveReviewTurn({ laneId: target.id, reason: 'packet_discarded' });
+      if (stopped) stoppedReviewTurns.push(stopped);
+    }
+
+    const kills = await killLaneSessionsConfirmed(liveWorkerSessionLanes(lanesToClose));
     const survivors = kills.filter((outcome) => !outcome.confirmed && !outcome.alreadyDead);
     if (survivors.length > 0) {
       await markPacketLifecycleFailure(guard, 'kill_unconfirmed');
       return {
         ok: false,
         code: 'kill_unconfirmed',
-        message: 'Close refused because the worker process could not be confirmed stopped. The lane and worktree remain intact.',
+        message: `Close refused because ${survivors.length} worker session class process${survivors.length === 1 ? '' : 'es'} could not be confirmed stopped. The lane and worktree remain intact.`,
+        status: 409,
+      };
+    }
+    const unverifiedMissing = lanesToClose.find((target) => {
+      const worktreePath = target.worktreePath?.trim();
+      if (!worktreePath || !missingWorktreeBindings.has(`${target.id}\0${worktreePath}`)) return false;
+      return !input.acknowledgeMissingWorktree && !hasRecordedCleanWorkerExit(target);
+    });
+    if (unverifiedMissing) {
+      await restorePacketLifecycleGuard(guard);
+      return {
+        ok: false,
+        code: 'worktree_missing_unverified',
+        message: `Close refused because worktree ${unverifiedMissing.worktreePath} is missing without a recorded clean worker exit. Inspect the packet, then acknowledge the missing worktree to discard it without deleting any path that still exists.`,
         status: 409,
       };
     }
@@ -247,6 +291,10 @@ async function closePacketUnmergedUnlocked(input: {
     }
     let worktreeRemoved = false;
     for (const candidate of lanesToClose) {
+      const worktreePath = candidate.worktreePath?.trim();
+      if (worktreePath && missingWorktreeBindings.has(`${candidate.id}\0${worktreePath}`)) {
+        continue;
+      }
       try {
         const cleanupAttempt = await runRuntimeAwareWorktreeCleanup({
           runtime: candidate.runtime,
@@ -276,6 +324,13 @@ async function closePacketUnmergedUnlocked(input: {
         };
       }
     }
+    const primaryWorktreePath = lane.worktreePath?.trim();
+    const worktreeCleanup = primaryWorktreePath
+      && missingWorktreeBindings.has(`${lane.id}\0${primaryWorktreePath}`)
+      ? 'missing' as const
+      : worktreeRemoved
+        ? 'removed' as const
+        : 'preserved' as const;
     const persistedIds = new Set(persistedLanes.map((candidate) => candidate.id));
     for (const candidate of lanesToClose.filter((target) => persistedIds.has(target.id))) {
       const archived = await dispatch({
@@ -294,10 +349,36 @@ async function closePacketUnmergedUnlocked(input: {
           status: 422,
         };
       }
+      const candidateWorktreePath = candidate.worktreePath?.trim();
+      const candidateCleanup = candidateWorktreePath
+        && missingWorktreeBindings.has(`${candidate.id}\0${candidateWorktreePath}`)
+        ? 'missing'
+        : worktreeRemoved ? 'removed' : 'preserved';
+      const eventLabel = candidateCleanup === 'missing'
+        ? 'discarded_worktree_missing'
+        : 'closed_unmerged';
+      updateLane(candidate.id, {
+        lastEventAt: new Date().toISOString(),
+        lastEventLabel: eventLabel,
+      }, 'user', {
+        eventLabel,
+        packetId: input.packetId,
+        worktreeCleanup: candidateCleanup,
+        reason: candidateCleanup === 'missing' ? 'worktree_missing' : 'close_unmerged',
+        acknowledgedMissingWorktree: input.acknowledgeMissingWorktree,
+      });
+      recordLaneEvent(candidate.id, 'packet_discarded', 'user', {
+        packetId: input.packetId,
+        disposition: rawDisposition,
+        worktreeCleanup: candidateCleanup,
+        reason: candidateCleanup === 'missing' ? 'worktree_missing' : 'close_unmerged',
+        acknowledgedMissingWorktree: input.acknowledgeMissingWorktree,
+        stoppedReviewTurns: stoppedReviewTurns.length,
+      });
     }
 
     const closedAt = new Date().toISOString();
-    if (!await markPacketClosed(guard, closedAt)) {
+    if (!await markPacketClosed(guard, closedAt, worktreeCleanup)) {
       return {
         ok: false,
         code: 'close_failed',
@@ -328,11 +409,17 @@ async function closePacketUnmergedUnlocked(input: {
         laneId: lane.id,
         packetId: input.packetId,
         worktreeRemoved,
+        worktreeCleanup,
+        stoppedReviewTurns: stoppedReviewTurns.length,
         preservedBranch,
         preservedBranches,
         preservationReceipts,
         preservationFailure,
-        note: `${outcomeNote}${worktreeRemoved ? ' Worktree removed.' : ''}`,
+        note: `${outcomeNote}${worktreeCleanup === 'missing'
+          ? ' Worktree was already missing; close recorded worktree_missing.'
+          : worktreeRemoved ? ' Worktree removed.' : ''}${stoppedReviewTurns.length > 0
+          ? ` Stopped ${stoppedReviewTurns.length} active review turn${stoppedReviewTurns.length === 1 ? '' : 's'} before close.`
+          : ''}`,
       },
     };
   } catch (error) {
@@ -351,6 +438,7 @@ export function closePacketUnmerged(input: {
   packetId: string;
   disposition: unknown;
   note: unknown;
+  acknowledgeMissingWorktree?: boolean;
 }): Promise<CloseUnmergedResult> {
   return withPacketLifecycleMutationLock(input.packetId, async ({ contended }) => {
     if (contended) {
@@ -361,6 +449,9 @@ export function closePacketUnmerged(input: {
         status: 409,
       };
     }
-    return closePacketUnmergedUnlocked(input);
+    return closePacketUnmergedUnlocked({
+      ...input,
+      acknowledgeMissingWorktree: input.acknowledgeMissingWorktree === true,
+    });
   });
 }

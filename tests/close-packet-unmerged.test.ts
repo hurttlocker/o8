@@ -338,7 +338,10 @@ describe('close_packet_unmerged real path (#1570)', () => {
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toMatchObject({
       ok: false,
-      error: { code: 'kill_unconfirmed' },
+      error: {
+        code: 'kill_unconfirmed',
+        message: expect.stringContaining('worker session class'),
+      },
     });
     expect(getLane(lane.id)).toMatchObject({
       status: 'paused',

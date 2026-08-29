@@ -165,6 +165,7 @@ describe('packet mutation callers preserve one correlation id across transport r
     const request = handleClosePacketUnmerged({
       packetId: 'pkt-mcp-close',
       disposition: 'wontfix',
+      acknowledgeMissingWorktree: true,
     });
     await vi.runAllTimersAsync();
     await request;
@@ -175,6 +176,7 @@ describe('packet mutation callers preserve one correlation id across transport r
     expect(JSON.parse(requestBodies[0])).toMatchObject({
       packetId: 'pkt-mcp-close',
       disposition: 'wontfix',
+      acknowledgeMissingWorktree: true,
       clientMutationId: expect.any(String),
     });
   });

@@ -434,7 +434,9 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       if (secondary === 'park' || secondary === 'restore') {
         return runPacketWorkspace(args.mode, secondary, args.rest);
       }
-      if (secondary === 'close') return runPacketClose(args.mode, args.rest);
+      if (secondary === 'close' || secondary === 'discard') {
+        return runPacketClose(args.mode, args.rest, secondary);
+      }
       if (secondary === 'reset') return runPacketReset(args.mode, args.rest);
       if (secondary === 'stop' || secondary === 'cancel') return runPacketStop(args.mode, args.rest);
       if (secondary === 'retry') return runPacketRetry(args.mode, args.rest);

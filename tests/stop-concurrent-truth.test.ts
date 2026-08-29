@@ -5,6 +5,7 @@ const h = vi.hoisted(() => ({
   kill: vi.fn(),
   archiveSessions: vi.fn(),
   archiveLane: vi.fn(),
+  getLaneEvents: vi.fn(),
   listActiveLanes: vi.fn(),
   listLanes: vi.fn(),
   reset: vi.fn(),
@@ -17,6 +18,7 @@ vi.mock('@/lib/lane/reap-sessions', () => ({
 }));
 vi.mock('@/lib/lane/registry', () => ({
   archiveLane: h.archiveLane,
+  getLaneEvents: h.getLaneEvents,
   listActiveLanes: h.listActiveLanes,
   listLanes: h.listLanes,
 }));
@@ -39,6 +41,7 @@ const stopRoute = await import('@/app/api/orchestrator/stop-packet/route');
 describe('concurrent packet stop truth', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    h.getLaneEvents.mockReturnValue([]);
     h.listActiveLanes.mockReturnValue([]);
     h.listLanes.mockReturnValue([]);
     h.archiveSessions.mockResolvedValue({ targeted: 0, archived: 0, outcomes: [], failures: [] });
@@ -222,7 +225,10 @@ describe('concurrent packet stop truth', () => {
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toMatchObject({
       ok: false,
-      error: { code: 'kill_unconfirmed' },
+      error: {
+        code: 'kill_unconfirmed',
+        message: expect.stringContaining('worker session class'),
+      },
     });
     expect(h.archiveLane).not.toHaveBeenCalled();
   });

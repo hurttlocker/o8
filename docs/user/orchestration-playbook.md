@@ -77,6 +77,8 @@ diagnose before spending a third worker.
 
 ### Verify your own verbs fired
 
+Packet discard has three worktree cases. If the directory still exists, o8 removes it through the normal guarded cleanup and closes only after removal is confirmed. If the directory is already absent and the lane has a clean `runtime_process_exit` receipt for its worker session, o8 stops any active review turn, records `worktree_missing`, and closes without trying to delete the missing path. If the directory is absent without that worker-exit receipt, the lane parks as `worktree_missing_unverified` and the Incident Queue offers an acknowledgement action; use `o8 packet discard --acknowledge-missing-worktree` or pass `acknowledgeMissingWorktree: true` to `close_packet_unmerged` after inspecting the packet. The acknowledgement applies only while the path is absent; a directory that exists still requires confirmed cleanup.
+
 A steer that returns ok can still be a silent no-op (live-hit: every
 steer-resume for hours was exiting code 2 pre-turn; the UI showed nothing).
 After steering, confirm the session actually relaunched (lane event, live

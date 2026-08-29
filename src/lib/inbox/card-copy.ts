@@ -82,6 +82,12 @@ export function composeSupervisorInboxCardCopy(item: SupervisorInboxItem): Inbox
         subline: supervisorMetadata(item, [worktree]),
       };
     case 'packet_missing':
+      if (item.payload.recoveryAction === 'acknowledge_missing_worktree') {
+        return {
+          headline: 'The packet worktree is gone and merge ancestry is unverified; acknowledge the missing path to discard it.',
+          subline: supervisorMetadata(item, [item.errorExcerpt, worktree]),
+        };
+      }
       return {
         headline: 'o8 could not find the packet record; inspect the lane before merging or retrying.',
         subline: supervisorMetadata(item, [worktree]),

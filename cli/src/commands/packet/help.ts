@@ -9,6 +9,7 @@ export const PACKET_SUBCOMMANDS = [
   'park',
   'restore',
   'close',
+  'discard',
   'reset',
   'stop',
   'cancel',
@@ -34,6 +35,7 @@ export const PACKET_COMMAND_LINES = `  packet info [id]     packet metadata; exp
   packet park [id]     remove a verified review-ready workspace while preserving immutable review
   packet restore [id]  restore a parked workspace to its exact reviewed state
   packet close [id]    close without merging (--reason adopted_elsewhere|superseded|spec_changed|wontfix)
+  packet discard [id]  discard without merging (--acknowledge-missing-worktree when the path is gone)
   packet reset [id]    wipe a stuck packet's worktree + lane (then mission dispatch)
   packet stop [id]     interrupt the worker and hold the packet (resume with packet reset/rerun)
   packet cancel [id]   alias for packet stop; interrupt and hold the packet

@@ -34,7 +34,17 @@ export async function POST(request: NextRequest) {
   if (!clientKey) return operatorError('client_mutation_id_required', 'clientMutationId is required.', 400);
   const disposition = record.disposition ?? record.reason;
   const note = record.note;
-  const canonicalBody = JSON.stringify({ packetId, disposition, note });
+  if (record.acknowledgeMissingWorktree !== undefined
+    && typeof record.acknowledgeMissingWorktree !== 'boolean') {
+    return operatorError('invalid_request', 'acknowledgeMissingWorktree must be a boolean.', 400);
+  }
+  const acknowledgeMissingWorktree = record.acknowledgeMissingWorktree === true;
+  const canonicalBody = JSON.stringify({
+    packetId,
+    disposition,
+    note,
+    acknowledgeMissingWorktree,
+  });
   try {
     const binding = bindIdempotencyClientMutation({
       namespace: 'discard_packet',
@@ -51,7 +61,12 @@ export async function POST(request: NextRequest) {
       key: deriveIdempotencyKey({ verb: 'discard_packet', scopeId: packetId, clientKey, body: canonicalBody }),
       verb: 'discard_packet',
       scopeId: packetId,
-    }, async () => closePacketUnmerged({ packetId, disposition, note }));
+    }, async () => closePacketUnmerged({
+      packetId,
+      disposition,
+      note,
+      acknowledgeMissingWorktree,
+    }));
     if (outcome.inProgress) return unresolvedIdempotencyResponse(outcome, 'packet close') ?? operatorSuccess(replayShape(outcome), 202);
     const close = outcome.result;
     if (!close.ok) {

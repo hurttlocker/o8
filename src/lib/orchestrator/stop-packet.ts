@@ -8,6 +8,9 @@
  * adapter), THEN archive — and must NOT relaunch. "Stop" means stop.
  */
 import { archiveLaneSessions, killLaneSessionsConfirmed } from '@/lib/lane/reap-sessions';
+import { cancelAutoReviewForLane } from '@/lib/lane/review-cancellation';
+import { stopActiveReviewTurn } from '@/lib/lane/review-turn-state';
+import { liveWorkerSessionLanes } from '@/lib/lane/worker-session-state';
 import { withPacketLifecycleMutationLock } from '@/lib/orchestrator/lifecycle-mutation-lock';
 import {
   holdPacketLifecycleMutation,
@@ -26,6 +29,7 @@ export interface StopPacketResult {
   worktreePruned: boolean;
   /** #1471 S1 — false when a worker survived even SIGKILL (lane parked kill_unconfirmed). */
   killConfirmed: boolean;
+  stoppedReviewTurns: number;
   /** Set to 'kill_unconfirmed' when the process could not be confirmed dead. */
   blockedReason?: string;
   note: string;
@@ -115,6 +119,7 @@ async function stopPacketInner(
       archivedLanes: 0,
       worktreePruned: false,
       killConfirmed: true,
+      stoppedReviewTurns: 0,
       note: `Nothing to stop — no live lanes and no mission packet for ${packetId}.`,
     };
   }
@@ -124,7 +129,18 @@ async function stopPacketInner(
   // from under a worker that is still churning (the zombie the stop verb exists
   // to prevent). If ANY session survived even SIGKILL, park the packet
   // `kill_unconfirmed` and DO NOT archive/prune — telling the truth beats lying.
-  const kills = await killLaneSessionsConfirmed(lanes);
+  let stoppedReviewTurns = 0;
+  const reviewedLaneIds = new Set<string>();
+  for (const lane of lanes) {
+    if (reviewedLaneIds.has(lane.id)) continue;
+    reviewedLaneIds.add(lane.id);
+    cancelAutoReviewForLane(lane.id, 'packet_stopped');
+    if (stopActiveReviewTurn({ laneId: lane.id, reason: 'packet_stopped' })) {
+      stoppedReviewTurns += 1;
+    }
+  }
+
+  const kills = await killLaneSessionsConfirmed(liveWorkerSessionLanes(lanes));
   const reaped = kills.filter((kill) => kill.confirmed || kill.alreadyDead).length;
   const survivors = kills.filter((kill) => !kill.confirmed && !kill.alreadyDead);
 
@@ -143,8 +159,9 @@ async function stopPacketInner(
       archivedLanes: 0,
       worktreePruned: false,
       killConfirmed: false,
+      stoppedReviewTurns,
       blockedReason: 'kill_unconfirmed',
-      note: `Stop could not confirm ${survivors.length} live worker${survivors.length === 1 ? '' : 's'} exited after SIGKILL. Packet parked kill_unconfirmed; worktree left intact. Reset again or kill the pid manually.`,
+      note: `Stop could not confirm ${survivors.length} worker session class process${survivors.length === 1 ? '' : 'es'} exited after SIGKILL. Packet parked kill_unconfirmed; worktree left intact. Reset again or kill the pid manually.`,
     };
   }
 
@@ -186,7 +203,8 @@ async function stopPacketInner(
     archivedLanes: 0,
     worktreePruned: false,
     killConfirmed: true,
-    note: `Stopped packet ${packetId}: confirmed-killed ${reaped} live session${reaped === 1 ? '' : 's'}; held against relaunch. Archiving ${lanes.length} lane${lanes.length === 1 ? '' : 's'} + pruning the worktree in the background (audit via lane events). Not relaunched.`,
+    stoppedReviewTurns,
+    note: `Stopped packet ${packetId}: confirmed-killed ${reaped} live worker session${reaped === 1 ? '' : 's'}; stopped ${stoppedReviewTurns} review turn${stoppedReviewTurns === 1 ? '' : 's'}; held against relaunch. Archiving ${lanes.length} lane${lanes.length === 1 ? '' : 's'} + pruning the worktree in the background (audit via lane events). Not relaunched.`,
   };
 }
 
@@ -317,6 +335,6 @@ export async function stopAllLanes(opts: { repoPath?: string } = {}): Promise<St
     failedLanes,
     note: ok
       ? `Stopped everything${opts.repoPath ? ' in this repo' : ''}: reaped ${interrupted} live session${interrupted === 1 ? '' : 's'}, archived ${archived} lane${archived === 1 ? '' : 's'} across ${stoppedPackets} packet${stoppedPackets === 1 ? '' : 's'}. Nothing relaunched.`
-      : `Stop-all was incomplete: ${failedPackets} packet${failedPackets === 1 ? '' : 's'} and ${failedLanes} lane${failedLanes === 1 ? '' : 's'} could not be confirmed stopped. Their live bindings were preserved.`,
+      : `Stop-all was incomplete: ${failedPackets} packet${failedPackets === 1 ? '' : 's'} and ${failedLanes} worker session class lane${failedLanes === 1 ? '' : 's'} could not be confirmed stopped. Their live bindings were preserved.`,
   };
 }
