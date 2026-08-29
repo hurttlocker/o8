@@ -555,6 +555,30 @@ export function mergeUserSpawnedTabs(
   return userAdded.length > 0 ? [...restoredTabs, ...userAdded] : restoredTabs;
 }
 
+export function reconcileValidatedTabs(
+  validatedTabs: TerminalTab[],
+  currentTabs: TerminalTab[],
+): TerminalTab[] {
+  const currentById = new Map(currentTabs.map((tab) => [tab.id, tab]));
+  return validatedTabs.map((validatedTab) => {
+    if (validatedTab.kind !== 'terminal' || validatedTab.tmuxSession !== null) return validatedTab;
+    const currentSession = currentById.get(validatedTab.id)?.tmuxSession;
+    return currentSession ? { ...validatedTab, tmuxSession: currentSession } : validatedTab;
+  });
+}
+
+export function applyCreatedTerminalSession(
+  currentTabs: TerminalTab[],
+  tabId: string,
+  sessionName: string,
+): TerminalTab[] {
+  return currentTabs.map((tab) => (
+    tab.id === tabId && tab.kind === 'terminal' && tab.tmuxSession !== sessionName
+      ? { ...tab, tmuxSession: sessionName }
+      : tab
+  ));
+}
+
 /* ------------------------------------------------------------------ */
 /*  resetControllerRefs                                                */
 /* ------------------------------------------------------------------ */
@@ -570,6 +594,7 @@ export function resetControllerRefs(refs: {
   detectedPortsRef: React.MutableRefObject<Set<number>>;
   pendingCliCommands: React.MutableRefObject<Map<string, string>>;
   pendingRequestRef: React.MutableRefObject<Map<string, string>>;
+  pendingSessionsRef: React.MutableRefObject<Set<string>>;
   saveTimerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>;
 }): void {
   refs.restoredRef.current = false;
@@ -582,6 +607,7 @@ export function resetControllerRefs(refs: {
   refs.detectedPortsRef.current.clear();
   refs.pendingCliCommands.current.clear();
   refs.pendingRequestRef.current.clear();
+  refs.pendingSessionsRef.current.clear();
   if (refs.saveTimerRef.current) {
     clearTimeout(refs.saveTimerRef.current);
     refs.saveTimerRef.current = null;

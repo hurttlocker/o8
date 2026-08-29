@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { canPreserveScopedTabs, computeRestoredTabs, mergeUserSpawnedTabs } from './terminal-restore';
+import { applyCreatedTerminalSession, canPreserveScopedTabs, computeRestoredTabs, mergeUserSpawnedTabs, reconcileValidatedTabs, resetControllerRefs } from './terminal-restore';
 import type { TerminalTab } from './types';
 
 function tab(overrides: Partial<TerminalTab>): TerminalTab {
@@ -67,6 +67,63 @@ describe('mergeUserSpawnedTabs — restore landing never eats an in-flight user 
     const restored = [tab({ id: 'a' })];
     const merged = mergeUserSpawnedTabs(restored, [tab({ id: 'a' })], new Set<string>());
     expect(merged.map((t) => t.id)).toEqual(['a']);
+  });
+});
+
+describe('reconcileValidatedTabs', () => {
+  it('keeps a terminal session that arrived while validation was in flight without changing other tabs', () => {
+    const validated = [
+      tab({ id: 'terminal-a', tmuxSession: null, label: 'Validated A' }),
+      tab({ id: 'terminal-b', tmuxSession: null, label: 'Validated B' }),
+    ];
+    const current = [
+      tab({ id: 'terminal-a', tmuxSession: 'cortex-dash-a', label: 'Optimistic A' }),
+      tab({ id: 'terminal-b', tmuxSession: null, label: 'Optimistic B' }),
+    ];
+
+    expect(reconcileValidatedTabs(validated, current)).toEqual([
+      { ...validated[0], tmuxSession: 'cortex-dash-a' },
+      validated[1],
+    ]);
+  });
+});
+
+describe('applyCreatedTerminalSession', () => {
+  it('adds one acknowledgement to the latest React state without dropping an earlier mapping', () => {
+    const current = [
+      tab({ id: 'terminal-a', tmuxSession: 'cortex-dash-a' }),
+      tab({ id: 'terminal-b', tmuxSession: null }),
+    ];
+
+    expect(applyCreatedTerminalSession(current, 'terminal-b', 'cortex-dash-b')).toEqual([
+      current[0],
+      { ...current[1], tmuxSession: 'cortex-dash-b' },
+    ]);
+  });
+});
+
+describe('resetControllerRefs', () => {
+  it('clears both pending request indexes for the next restore generation', () => {
+    const pendingRequestRef = { current: new Map([['request-a', 'terminal-a']]) };
+    const pendingSessionsRef = { current: new Set(['terminal-a']) };
+
+    resetControllerRefs({
+      restoredRef: { current: true },
+      restoreSettledRef: { current: true },
+      previousWsConnectedRef: { current: true },
+      initialTerminalBootstrapRef: { current: true },
+      reportedRepoScopeRef: { current: '/repo' },
+      reportedChatSessionsSignatureRef: { current: 'signature' },
+      reportedActiveChatSessionKeyRef: { current: 'session' },
+      detectedPortsRef: { current: new Set([3000]) },
+      pendingCliCommands: { current: new Map([['terminal-a', 'pwd']]) },
+      pendingRequestRef,
+      pendingSessionsRef,
+      saveTimerRef: { current: null },
+    });
+
+    expect(pendingRequestRef.current.size).toBe(0);
+    expect(pendingSessionsRef.current.size).toBe(0);
   });
 });
 

@@ -12,6 +12,8 @@ export type TerminalBenchVisibilityCounters = {
 };
 
 export type TerminalBenchSessionStats = {
+  cols: number;
+  rows: number;
   mountCount: number;
   unmountCount: number;
   mounted: boolean;
@@ -105,6 +107,13 @@ function sessionStats(sessionName: string): TerminalBenchSessionStats | null {
   return ensureStats()?.sessions[sessionName] ?? null;
 }
 
+export function recordTerminalBenchDimensions(sessionName: string, cols: number, rows: number): void {
+  const session = sessionStats(sessionName);
+  if (!session) return;
+  session.cols = cols;
+  session.rows = rows;
+}
+
 function counters(sessionName: string, visible: boolean): TerminalBenchVisibilityCounters | null {
   const session = sessionStats(sessionName);
   if (!session) return null;
@@ -128,6 +137,8 @@ export function registerTerminalBenchPanel(
     existing.readText = readText;
   } else {
     stats.sessions[sessionName] = {
+      cols: 0,
+      rows: 0,
       mountCount: 1,
       unmountCount: 0,
       mounted: true,

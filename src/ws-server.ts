@@ -51,6 +51,10 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { homedir } from 'node:os';
 import { promisify } from 'node:util';
 import { getDataDir, migrateDataDirOnce } from '@/lib/data-dir-migration';
+import { TERMINAL_SCROLLBACK_LINES } from '@/lib/terminal/client-retention';
+import { TerminalHiddenBuffer } from '@/lib/ws-server/terminal-hidden-buffer';
+import { resizeTerminalIfChanged } from '@/lib/ws-server/terminal-resize';
+import { waitForTerminalResyncBarrier } from '@/lib/ws-server/terminal-resync-barrier';
 import { TerminalWorkloadStats } from '@/lib/ws-server/terminal-workload-stats';
 
 migrateDataDirOnce();
@@ -1003,6 +1007,18 @@ async function getSessionTranscript(
 
 // ── Terminal attachment state ──
 
+interface TerminalClientView {
+  visible: boolean;
+  requestedVisible: boolean;
+  hiddenBuffer: TerminalHiddenBuffer;
+  hiddenTimer: ReturnType<typeof setTimeout> | null;
+  needsResync: boolean;
+  lastGoodOffset: number;
+  hiddenEndOffset: number;
+  visibilityEpoch: number;
+  resyncEpoch: number | null;
+}
+
 interface TerminalAttachment {
   id: string;
   sessionName: string;
@@ -1010,15 +1026,20 @@ interface TerminalAttachment {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ptyProcess: any; // node-pty IPty
   clientIds: Set<string>;
+  clientViews: Map<string, TerminalClientView>;
+  snapshotSource: 'tmux' | 'scrollback';
   cols: number;
   rows: number;
   batchBuffer: string;
   batchTimer: ReturnType<typeof setTimeout> | null;
-  lastOutputAt: number; // timestamp of last PTY output (for stall detection)
+  lastOutputAt: number; // latest PTY output
+  lastInputAt: number;  // latest accepted input, used only by the resync idle barrier
   createdAt: number;    // timestamp of terminal creation
   orphanTimer: ReturnType<typeof setTimeout> | null;
   scrollbackChunks: string[];
   scrollbackBytes: number;
+  scrollbackStartOffset: number;
+  streamEndOffset: number;
   cwd?: string;
   commandHint?: string;
 }
@@ -1042,8 +1063,11 @@ const terminalWorkloadStats = process.env.O8_TERMINAL_BENCH === '1'
   ? new TerminalWorkloadStats()
   : null;
 const TERMINAL_BATCH_MS = 16; // batch PTY output every 16ms (60fps)
+const TERMINAL_HIDDEN_BATCH_MS = 250;
+const TERMINAL_HIDDEN_BUFFER_MAX_BYTES = 64 * 1024;
 const DASH_SESSION_ORPHAN_TTL_MS = 30 * 60 * 1000;
 const TERMINAL_SCROLLBACK_MAX_BYTES = 512 * 1024;
+const TERMINAL_TMUX_SNAPSHOT_MAX_BYTES = 8 * 1024 * 1024;
 const pendingDashSessions = new Map<string, { cols: number; rows: number; cwd?: string }>();
 
 // ── Orchestrator channel state ──
@@ -1602,27 +1626,36 @@ function listDashTmuxSessionsWithAge(): DashSessionInfo[] {
 /**
  * #6 persistent terminals — capture a dash session's scrollback history so a
  * re-attach after a restart/crash restores what scrolled off-screen (a bare
- * `tmux attach` only repaints the visible viewport). `-S -` = from the start of
- * history, `-e` = keep colour/style escapes. Bounded to the ring size; empty on
- * any failure. Caller trims the trailing visible rows (the attach repaints them).
+ * `tmux attach` only repaints the visible viewport). Capture at most
+ * TERMINAL_SCROLLBACK_LINES above the screen, matching client retention, and
+ * keep colour/style escapes. The 8 MiB maxBuffer remains a hard byte ceiling.
+ * Empty on any failure. Caller trims the trailing visible rows because the
+ * attach repaints them.
  */
-function captureTmuxPane(sessionName: string): string {
+function captureTmuxPaneResult(sessionName: string): { ok: boolean; data: string } {
   try {
-    return execFileSync(
+    return {
+      ok: true,
+      data: execFileSync(
       resolveTmuxBinary(),
-      ['capture-pane', '-p', '-e', '-S', '-', '-t', sessionName],
+      ['capture-pane', '-p', '-e', '-S', `-${TERMINAL_SCROLLBACK_LINES}`, '-t', sessionName],
       {
         windowsHide: true,
         timeout: 4000,
         encoding: 'utf-8',
-        maxBuffer: TERMINAL_SCROLLBACK_MAX_BYTES,
+        maxBuffer: TERMINAL_TMUX_SNAPSHOT_MAX_BYTES,
         stdio: ['ignore', 'pipe', 'ignore'],
         env: sanitizePtyEnv() as NodeJS.ProcessEnv,
       },
-    );
+      ),
+    };
   } catch {
-    return '';
+    return { ok: false, data: '' };
   }
+}
+
+function captureTmuxPane(sessionName: string): string {
+  return captureTmuxPaneResult(sessionName).data;
 }
 
 function reapOrphanDashSessions() {
@@ -1722,6 +1755,7 @@ function trimScrollback(att: TerminalAttachment) {
     const removed = att.scrollbackChunks.shift() ?? '';
     const removedBytes = Buffer.byteLength(removed, 'utf-8');
     att.scrollbackBytes -= removedBytes;
+    att.scrollbackStartOffset += removedBytes;
     terminalWorkloadStats?.recordOverflow(att.sessionName, removedBytes);
   }
 }
@@ -1731,8 +1765,150 @@ function appendScrollback(att: TerminalAttachment, data: string) {
   att.scrollbackChunks.push(data);
   const appendedBytes = Buffer.byteLength(data, 'utf-8');
   att.scrollbackBytes += appendedBytes;
+  att.streamEndOffset += appendedBytes;
   trimScrollback(att);
   terminalWorkloadStats?.recordBuffer(att.sessionName, appendedBytes, att.scrollbackBytes);
+}
+
+function ensureTerminalClientView(
+  attachment: TerminalAttachment,
+  clientId: string,
+): TerminalClientView {
+  let view = attachment.clientViews.get(clientId);
+  if (!view) {
+    view = {
+      visible: true,
+      requestedVisible: true,
+      hiddenBuffer: new TerminalHiddenBuffer(TERMINAL_HIDDEN_BUFFER_MAX_BYTES),
+      hiddenTimer: null,
+      needsResync: false,
+      lastGoodOffset: attachment.streamEndOffset,
+      hiddenEndOffset: attachment.streamEndOffset,
+      visibilityEpoch: 0,
+      resyncEpoch: null,
+    };
+    attachment.clientViews.set(clientId, view);
+  }
+  return view;
+}
+
+function sendTerminalData(client: ClientState, sessionName: string, bytes: Buffer): boolean {
+  if (bytes.byteLength === 0) return true;
+  return sendRaw(client, JSON.stringify({
+    channel: 'terminal',
+    event: 'data',
+    data: { sessionName, data: bytes.toString('base64') },
+  }));
+}
+
+function flushHiddenTerminalView(
+  attachment: TerminalAttachment,
+  clientId: string,
+  options: { force?: boolean } = {},
+): boolean {
+  const view = attachment.clientViews.get(clientId);
+  if (!view) return false;
+  if (view.hiddenTimer) {
+    clearTimeout(view.hiddenTimer);
+    view.hiddenTimer = null;
+  }
+  if (view.needsResync && !options.force) return false;
+  const bytes = view.hiddenBuffer.drain();
+  if (bytes.byteLength === 0) return true;
+  const client = clients.get(clientId);
+  if (!client || !sendTerminalData(client, attachment.sessionName, bytes)) {
+    view.needsResync = true;
+    return false;
+  }
+  view.lastGoodOffset = view.hiddenEndOffset;
+  terminalWorkloadStats?.recordFanout(attachment.sessionName, bytes.byteLength, 1);
+  return true;
+}
+
+function recordTerminalHiddenOverflow(
+  attachment: TerminalAttachment,
+  clientId: string,
+  view: TerminalClientView,
+  bytesDropped: number,
+) {
+  const client = clients.get(clientId);
+  if (client) {
+    sendTerminal(client, 'diagnostic', {
+      code: 'terminal_hidden_overflow',
+      sessionName: attachment.sessionName,
+      clientId,
+      bytesDropped,
+      lastGoodOffset: view.lastGoodOffset,
+    });
+  }
+  console.warn('[ws-server] terminal_hidden_overflow', {
+    sessionName: attachment.sessionName,
+    clientId,
+    bytesDropped,
+    lastGoodOffset: view.lastGoodOffset,
+  });
+}
+
+function bufferHiddenTerminalData(
+  attachment: TerminalAttachment,
+  clientId: string,
+  data: string,
+) {
+  const view = ensureTerminalClientView(attachment, clientId);
+  if (view.resyncEpoch != null) {
+    view.hiddenBuffer.clear();
+    view.hiddenEndOffset = attachment.streamEndOffset;
+    return;
+  }
+  const result = view.hiddenBuffer.append(data);
+  view.hiddenEndOffset = attachment.streamEndOffset;
+  if (result.droppedBytes > 0) {
+    view.needsResync = true;
+    if (result.reportOverflow) {
+      recordTerminalHiddenOverflow(attachment, clientId, view, result.droppedBytes);
+    }
+  }
+  if (view.needsResync || view.hiddenTimer) return;
+  if (view.hiddenBuffer.byteLength >= TERMINAL_HIDDEN_BUFFER_MAX_BYTES) {
+    flushHiddenTerminalView(attachment, clientId);
+    return;
+  }
+  view.hiddenTimer = setTimeout(() => {
+    view.hiddenTimer = null;
+    flushHiddenTerminalView(attachment, clientId);
+  }, TERMINAL_HIDDEN_BATCH_MS);
+}
+
+function deliverTerminalBatch(attachment: TerminalAttachment, buffered: string) {
+  if (!buffered || attachment.clientIds.size === 0) return;
+  const encoded = Buffer.from(buffered, 'utf-8').toString('base64');
+  const visibleMessage = JSON.stringify({
+    channel: 'terminal',
+    event: 'data',
+    data: { sessionName: attachment.sessionName, data: encoded },
+  });
+  let visibleDeliveries = 0;
+  for (const clientId of attachment.clientIds) {
+    const view = ensureTerminalClientView(attachment, clientId);
+    if (!view.visible) {
+      bufferHiddenTerminalData(attachment, clientId, buffered);
+      continue;
+    }
+    const client = clients.get(clientId);
+    if (client) {
+      visibleDeliveries += 1;
+      if (sendRaw(client, visibleMessage)) {
+        view.lastGoodOffset = attachment.streamEndOffset;
+      } else {
+        view.needsResync = true;
+      }
+    }
+  }
+  terminalWorkloadStats?.recordFanout(
+    attachment.sessionName,
+    Buffer.byteLength(buffered, 'utf8'),
+    visibleDeliveries,
+  );
 }
 
 function sendTerminalScrollback(client: ClientState, attachment: TerminalAttachment) {
@@ -1746,12 +1922,14 @@ function sendTerminalScrollback(client: ClientState, attachment: TerminalAttachm
     event: 'data',
     data: { sessionName: attachment.sessionName, data: encoded },
   }));
+  ensureTerminalClientView(attachment, client.id).lastGoodOffset = attachment.streamEndOffset;
 }
 
 function registerTerminalAttachment(attachment: TerminalAttachment) {
   const { sessionName, ptyProcess } = attachment;
 
   for (const clientId of attachment.clientIds) {
+    ensureTerminalClientView(attachment, clientId);
     terminalWorkloadStats?.recordAttach(sessionName, clientId);
   }
 
@@ -1760,7 +1938,7 @@ function registerTerminalAttachment(attachment: TerminalAttachment) {
     if (!att) return;
 
     att.lastOutputAt = Date.now();
-    terminalWorkloadStats?.recordPty(sessionName, data);
+    terminalWorkloadStats?.recordPty(sessionName, data, att.lastOutputAt);
     appendScrollback(att, data);
     att.batchBuffer += data;
 
@@ -1770,28 +1948,7 @@ function registerTerminalAttachment(attachment: TerminalAttachment) {
         att.batchBuffer = '';
         att.batchTimer = null;
 
-        if (!buffered || att.clientIds.size === 0) return;
-
-        const encoded = Buffer.from(buffered, 'utf-8').toString('base64');
-        const msg = JSON.stringify({
-          channel: 'terminal',
-          event: 'data',
-          data: { sessionName, data: encoded },
-        });
-
-        let clientDeliveries = 0;
-        for (const cid of att.clientIds) {
-          const c = clients.get(cid);
-          if (c) {
-            clientDeliveries += 1;
-            sendRaw(c, msg);
-          }
-        }
-        terminalWorkloadStats?.recordFanout(
-          sessionName,
-          Buffer.byteLength(buffered, 'utf8'),
-          clientDeliveries,
-        );
+        deliverTerminalBatch(att, buffered);
       }, TERMINAL_BATCH_MS);
     }
   });
@@ -1805,15 +1962,11 @@ function registerTerminalAttachment(attachment: TerminalAttachment) {
     if (att.orphanTimer) clearTimeout(att.orphanTimer);
 
     if (att.batchBuffer) {
-      appendScrollback(att, att.batchBuffer);
-      const encoded = Buffer.from(att.batchBuffer, 'utf-8').toString('base64');
-      const flushMsg = JSON.stringify({
-        channel: 'terminal', event: 'data', data: { sessionName, data: encoded },
-      });
-      for (const cid of att.clientIds) {
-        const c = clients.get(cid);
-        if (c) sendRaw(c, flushMsg);
-      }
+      deliverTerminalBatch(att, att.batchBuffer);
+      att.batchBuffer = '';
+    }
+    for (const clientId of att.clientIds) {
+      flushHiddenTerminalView(att, clientId, { force: true });
     }
 
     const exitMsg = JSON.stringify({
@@ -1825,6 +1978,9 @@ function registerTerminalAttachment(attachment: TerminalAttachment) {
         sendRaw(c, exitMsg);
         c.terminalSessions.delete(sessionName);
       }
+    }
+    for (const view of att.clientViews.values()) {
+      if (view.hiddenTimer) clearTimeout(view.hiddenTimer);
     }
 
     terminalAttachments.delete(sessionName);
@@ -2081,40 +2237,41 @@ function send(client: ClientState, msg: Record<string, unknown>) {
   client.ws.send(json);
 }
 
-function sendRaw(client: ClientState, preStringified: string) {
-  if (client.ws.readyState !== WebSocket.OPEN) return;
-  if (client.e2ee?.state === 'awaiting-init') return; // #5 handshake window — suppress
+function sendRaw(client: ClientState, preStringified: string): boolean {
+  if (client.ws.readyState !== WebSocket.OPEN) return false;
+  if (client.e2ee?.state === 'awaiting-init') return false; // #5 handshake window — suppress
   // Lossy/durable is decided from the PLAINTEXT (the channel); the wire is the
   // per-client encrypted frame for an E2EE client, or the plaintext otherwise.
   const wire = wireForClient(client, preStringified);
   if (client.ws.bufferedAmount > BACKPRESSURE_LIMIT) {
     if (isLossyMessage(preStringified)) {
       recordTerminalBenchDrop(preStringified);
-      return;
+      return false;
     }
     if (client.backpressureQueue.length >= BACKPRESSURE_QUEUE_LIMIT) {
       client.backpressureQueue.shift();
     }
     client.backpressureQueue.push(wire);
     startFlushTimer(client);
-    return;
+    return true;
   }
   if (client.backpressureQueue.length > 0) {
     flushBackpressureQueue(client);
     if (client.backpressureQueue.length > 0) {
       if (isLossyMessage(preStringified)) {
         recordTerminalBenchDrop(preStringified);
-        return;
+        return false;
       }
       if (client.backpressureQueue.length >= BACKPRESSURE_QUEUE_LIMIT) {
         client.backpressureQueue.shift();
       }
       client.backpressureQueue.push(wire);
       startFlushTimer(client);
-      return;
+      return true;
     }
   }
   client.ws.send(wire);
+  return true;
 }
 
 function recordTerminalBenchDrop(preStringified: string) {
@@ -3543,6 +3700,9 @@ function handleClientMessage(client: ClientState, raw: string) {
     case 'terminal-bench-stats':
       handleTerminalBenchStats(client, msg);
       break;
+    case 'terminal-visibility':
+      handleTerminalVisibility(client, msg);
+      break;
     case 'terminal-create':
       handleTerminalCreate(client, msg);
       break;
@@ -4687,6 +4847,21 @@ async function handleOrchestratorSubscribe(client: ClientState, msg: Record<stri
 
   const requestedBackendId = resolveMsgBackendId(msg);
   const threadId = resolveMsgThreadId(msg);
+  if (process.env.O8_TERMINAL_BENCH === '1') {
+    console.log('[ws-server] orchestrator launch suppressed (terminal bench)');
+    send(client, {
+      channel: 'orchestrator',
+      event: 'status',
+      data: {
+        status: 'disabled',
+        snapshot: true,
+        repoPath,
+        threadId,
+        backend: requestedBackendId,
+      },
+    });
+    return;
+  }
   const activeRoute = activeOrchestratorRoutes.resolve({ repoPath, threadId, requestedBackend: requestedBackendId });
   const backend = getOrchestratorBackend(activeRoute?.toBackend ?? requestedBackendId);
   const agentId = activeRoute ? '' : resolveMsgAgentId(msg, backend.id);
@@ -6248,6 +6423,148 @@ function handleTerminalBenchStats(client: ClientState, msg: Record<string, unkno
   sendTerminalBench(client, 'stats', msg.requestId);
 }
 
+const TERMINAL_HISTORY_TRUNCATED_MARKER = '\r\n[terminal history truncated during hidden replay]\r\n';
+const TERMINAL_RESYNC_FAILED_MARKER = '\r\n[terminal snapshot unavailable; replaying retained history]\r\n';
+
+function terminalResyncIsCurrent(
+  client: ClientState,
+  attachment: TerminalAttachment,
+  view: TerminalClientView,
+  epoch: number,
+): boolean {
+  return terminalAttachments.get(attachment.sessionName) === attachment
+    && clients.get(client.id) === client
+    && attachment.clientViews.get(client.id) === view
+    && view.visibilityEpoch === epoch
+    && view.resyncEpoch === epoch
+    && view.requestedVisible;
+}
+
+async function sendTerminalResync(
+  client: ClientState,
+  attachment: TerminalAttachment,
+  view: TerminalClientView,
+  epoch: number,
+) {
+  if (view.hiddenTimer) {
+    clearTimeout(view.hiddenTimer);
+    view.hiddenTimer = null;
+  }
+  view.hiddenBuffer.clear();
+
+  const barrier = await waitForTerminalResyncBarrier({
+    getLastOutputAt: () => Math.max(attachment.lastOutputAt, attachment.lastInputAt),
+    getBatchBuffer: () => attachment.batchBuffer,
+    getScrollbackChunks: () => attachment.scrollbackChunks,
+    capture: () => attachment.snapshotSource === 'tmux'
+      ? captureTmuxPaneResult(attachment.sessionName)
+      : { ok: true, data: attachment.scrollbackChunks.join('') },
+    isCancelled: () => !terminalResyncIsCurrent(client, attachment, view, epoch),
+    onUnsettled: (waitedMs) => {
+      sendTerminal(client, 'diagnostic', {
+        code: 'terminal_resync_unsettled',
+        sessionName: attachment.sessionName,
+        clientId: client.id,
+        waitedMs,
+      });
+    },
+  });
+  if (barrier.status === 'cancelled' || !terminalResyncIsCurrent(client, attachment, view, epoch)) return;
+
+  let snapshotSource: 'tmux' | 'scrollback' = attachment.snapshotSource;
+  let historyTruncated = false;
+  let snapshot = '';
+  if (attachment.snapshotSource === 'tmux') {
+    if (barrier.fallbackReason == null) {
+      // capture-pane separates display rows with LF. xterm's convertEol is
+      // intentionally off for live PTY fidelity, so replay rows need an
+      // explicit carriage return or each row resumes at the prior column.
+      snapshot = barrier.capture.data.replace(/\r?\n$/u, '').replace(/\r?\n/g, '\r\n');
+    } else {
+      snapshotSource = 'scrollback';
+      historyTruncated = true;
+      snapshot = `${TERMINAL_RESYNC_FAILED_MARKER}${attachment.scrollbackChunks.join('')}`;
+      sendTerminal(client, 'diagnostic', {
+        code: 'terminal_resync_failed',
+        sessionName: attachment.sessionName,
+        clientId: client.id,
+        lastGoodOffset: view.lastGoodOffset,
+        reason: barrier.fallbackReason,
+      });
+    }
+  } else {
+    historyTruncated = attachment.scrollbackStartOffset > view.lastGoodOffset;
+    snapshot = `${historyTruncated ? TERMINAL_HISTORY_TRUNCATED_MARKER : ''}${attachment.scrollbackChunks.join('')}`;
+  }
+
+  if (!terminalResyncIsCurrent(client, attachment, view, epoch)) return;
+  const snapshotEndOffset = attachment.streamEndOffset;
+  terminalWorkloadStats?.recordReplay(attachment.sessionName, Buffer.byteLength(snapshot, 'utf8'));
+  sendTerminal(client, 'resync', {
+    sessionName: attachment.sessionName,
+    data: Buffer.from(snapshot, 'utf8').toString('base64'),
+    epoch,
+    source: snapshotSource,
+    historyTruncated,
+  });
+  view.needsResync = false;
+  view.lastGoodOffset = snapshotEndOffset;
+  view.hiddenEndOffset = snapshotEndOffset;
+  view.resyncEpoch = null;
+  view.visible = true;
+  terminalWorkloadStats?.setVisibility(attachment.sessionName, true);
+}
+
+function handleTerminalVisibility(client: ClientState, msg: Record<string, unknown>) {
+  const sessionName = typeof msg.sessionName === 'string' ? msg.sessionName : '';
+  const visible = msg.visible;
+  if (!sessionName || typeof visible !== 'boolean') return;
+  const attachment = terminalAttachments.get(sessionName);
+  if (!attachment || !attachment.clientIds.has(client.id)) return;
+  const view = ensureTerminalClientView(attachment, client.id);
+  const epoch = typeof msg.epoch === 'number' && Number.isSafeInteger(msg.epoch)
+    ? msg.epoch
+    : view.visibilityEpoch;
+  if (epoch < view.visibilityEpoch) return;
+
+  const enteringHidden = view.requestedVisible && !visible;
+  view.visibilityEpoch = epoch;
+  view.requestedVisible = visible;
+  if (!visible) {
+    if (enteringHidden) view.hiddenBuffer.beginHiddenPeriod();
+    view.resyncEpoch = null;
+    view.visible = false;
+    terminalWorkloadStats?.setVisibility(sessionName, false);
+    return;
+  }
+
+  const requiresResync = view.needsResync || msg.needsResync === true;
+  if (requiresResync) {
+    view.needsResync = true;
+    view.resyncEpoch = epoch;
+    view.visible = false;
+    terminalWorkloadStats?.setVisibility(sessionName, false);
+  } else {
+    view.visible = true;
+    terminalWorkloadStats?.setVisibility(sessionName, true);
+  }
+
+  const cols = typeof msg.cols === 'number' ? msg.cols : null;
+  const rows = typeof msg.rows === 'number' ? msg.rows : null;
+  if (cols != null && rows != null) {
+    try {
+      resizeTerminalIfChanged(attachment, cols, rows);
+    } catch { /* resize may fail if the PTY exited during reveal */ }
+  }
+
+  if (requiresResync) {
+    void sendTerminalResync(client, attachment, view, epoch);
+    return;
+  }
+  flushHiddenTerminalView(attachment, client.id);
+  sendTerminal(client, 'visibility-ready', { sessionName, epoch });
+}
+
 function materializePendingDashSession(
   client: ClientState,
   sessionName: string,
@@ -6270,7 +6587,7 @@ function materializePendingDashSession(
   env.CORTEX_TERMINAL_SESSION_NAME = sessionName;
   const cwd = (pending.cwd && existsSync(pending.cwd) ? pending.cwd : undefined)
     ?? process.env.HOME ?? homedir() ?? '/tmp';
-  const ptyProcess = createDashTmuxSessionSync({
+  const tmuxBacked = createDashTmuxSessionSync({
     enabled: dashPersistentTerminalsEnabled(),
     sessionName,
     cols: nextCols,
@@ -6278,7 +6595,8 @@ function materializePendingDashSession(
     cwd,
     shell,
     env,
-  })
+  });
+  const ptyProcess = tmuxBacked
     ? spawnTmuxAttachPty(sessionName, nextCols, nextRows)
     : spawnDashShellPty(sessionName, nextCols, nextRows, pending.cwd);
   const now = Date.now();
@@ -6288,15 +6606,20 @@ function materializePendingDashSession(
     kind: 'dash-shell',
     ptyProcess,
     clientIds: new Set([client.id]),
+    clientViews: new Map(),
+    snapshotSource: tmuxBacked ? 'tmux' : 'scrollback',
     cols: nextCols,
     rows: nextRows,
     batchBuffer: '',
     batchTimer: null,
     lastOutputAt: now,
+    lastInputAt: now,
     createdAt: now,
     orphanTimer: null,
     scrollbackChunks: [],
     scrollbackBytes: 0,
+    scrollbackStartOffset: 0,
+    streamEndOffset: 0,
   };
   terminalAttachments.set(sessionName, attachment);
   client.terminalSessions.add(sessionName);
@@ -6382,6 +6705,7 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
       attachment.orphanTimer = null;
     }
     attachment.clientIds.add(client.id);
+    ensureTerminalClientView(attachment, client.id);
     terminalWorkloadStats?.recordAttach(sessionName, client.id);
     client.terminalSessions.add(sessionName);
     sendTerminal(client, 'attached', { sessionName });
@@ -6427,15 +6751,20 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
         kind: 'dash-shell',
         ptyProcess,
         clientIds: new Set([client.id]),
+        clientViews: new Map(),
+        snapshotSource: 'tmux',
         cols,
         rows,
         batchBuffer: '',
         batchTimer: null,
         lastOutputAt: now,
+        lastInputAt: now,
         createdAt: now,
         orphanTimer: null,
         scrollbackChunks: [],
         scrollbackBytes: 0,
+        scrollbackStartOffset: 0,
+        streamEndOffset: 0,
       };
       terminalAttachments.set(sessionName, attachment);
       client.terminalSessions.add(sessionName);
@@ -6475,15 +6804,20 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
       kind: 'tmux-attach',
       ptyProcess,
       clientIds: new Set([client.id]),
+      clientViews: new Map(),
+      snapshotSource: 'tmux',
       cols,
       rows,
       batchBuffer: '',
       batchTimer: null,
       lastOutputAt: now,
+      lastInputAt: now,
       createdAt: now,
       orphanTimer: null,
       scrollbackChunks: [],
       scrollbackBytes: 0,
+      scrollbackStartOffset: 0,
+      streamEndOffset: 0,
     };
 
     terminalAttachments.set(sessionName, attachment);
@@ -6523,6 +6857,11 @@ function handleTerminalInput(client: ClientState, msg: Record<string, unknown>) 
 
   try {
     attachment.ptyProcess.write(data);
+    // node-pty may not emit the command's first output callback before the next
+    // WebSocket message is handled. Treat accepted input as stream activity so
+    // an immediate reveal cannot pass the resync idle barrier on an old output
+    // timestamp and snapshot bytes that are still in the PTY kernel buffer.
+    attachment.lastInputAt = Date.now();
   } catch { /* PTY may have exited */ }
 }
 
@@ -6615,6 +6954,9 @@ function removeClientFromTerminal(clientId: string, sessionName: string) {
   if (!attachment) return;
 
   attachment.clientIds.delete(clientId);
+  const view = attachment.clientViews.get(clientId);
+  if (view?.hiddenTimer) clearTimeout(view.hiddenTimer);
+  attachment.clientViews.delete(clientId);
   terminalWorkloadStats?.recordDetach(sessionName, clientId);
   const c = clients.get(clientId);
   if (c) c.terminalSessions.delete(sessionName);
@@ -6904,15 +7246,20 @@ const httpServer = createServer((req, res) => {
           kind: 'managed-process',
           ptyProcess,
           clientIds: new Set(),
+          clientViews: new Map(),
+          snapshotSource: 'scrollback',
           cols,
           rows,
           batchBuffer: '',
           batchTimer: null,
           lastOutputAt: now,
+          lastInputAt: now,
           createdAt: now,
           orphanTimer: null,
           scrollbackChunks: [],
           scrollbackBytes: 0,
+          scrollbackStartOffset: 0,
+          streamEndOffset: 0,
           cwd,
           commandHint: shellCommand,
         };

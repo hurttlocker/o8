@@ -46,6 +46,7 @@ interface WorkspaceTerminalPanelsProps {
   sendTerminalAttach: (sessionName: string, cols: number, rows: number) => void;
   sendTerminalInput: (sessionName: string, data: string) => void;
   sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;
+  sendTerminalVisibility: (sessionName: string, visible: boolean, options?: { epoch?: number; needsResync?: boolean; cols?: number; rows?: number }) => void;
   sendTerminalDetach: (sessionName: string) => void;
   onInjectChatContext?: (payload: import('@/lib/chat/injection').AgentPanelChatInjectionPayload) => void;
   onSelectCommit?: (hash: string, meta?: Record<string, string>) => void;
@@ -73,6 +74,7 @@ function WorkspaceTerminalPanelsBase({
   sendTerminalAttach,
   sendTerminalInput,
   sendTerminalResize,
+  sendTerminalVisibility,
   sendTerminalDetach,
   onInjectChatContext,
   onSelectCommit,
@@ -116,6 +118,15 @@ function WorkspaceTerminalPanelsBase({
   const effectiveActiveTerminalSession = visibleTabs.find((tab) => (
     tab.id === effectiveActiveTabId && tab.kind === 'terminal'
   ))?.tmuxSession ?? null;
+  const unmountedTerminalVisibilityKey = visibleTabs
+    .filter((tab) => Boolean(tab.tmuxSession) && !residentTabIdSet.has(tab.id))
+    .map((tab) => tab.tmuxSession)
+    .join('|');
+  useEffect(() => {
+    for (const sessionName of unmountedTerminalVisibilityKey.split('|')) {
+      if (sessionName) sendTerminalVisibility(sessionName, false);
+    }
+  }, [sendTerminalVisibility, unmountedTerminalVisibilityKey]);
   useEffect(() => {
     if (!effectiveActiveTerminalSession) return;
     const frame = window.requestAnimationFrame(() => {
@@ -191,11 +202,13 @@ function WorkspaceTerminalPanelsBase({
         ) : tab.tmuxSession ? (
           <TerminalResidentPanel
             key={tab.tmuxSession}
+            tabId={tab.id}
             tmuxSession={tab.tmuxSession}
             panelRefs={panelRefs}
             sendTerminalAttach={sendTerminalAttach}
             sendTerminalInput={sendTerminalInput}
             sendTerminalResize={sendTerminalResize}
+            sendTerminalVisibility={sendTerminalVisibility}
             sendTerminalDetach={sendTerminalDetach}
             active={tab.id === effectiveActiveTabId}
           />
@@ -453,22 +466,43 @@ const FleetCanvasResidentPanel = memo(function FleetCanvasResidentPanel({ active
 });
 
 const TerminalResidentPanel = memo(function TerminalResidentPanel({
+  tabId,
   tmuxSession,
   panelRefs,
   sendTerminalAttach,
   sendTerminalInput,
   sendTerminalResize,
+  sendTerminalVisibility,
   sendTerminalDetach,
   active,
 }: {
+  tabId: string;
   tmuxSession: string;
   panelRefs: MutableRefObject<Map<string, XtermPanelHandle>>;
   sendTerminalAttach: WorkspaceTerminalPanelsProps['sendTerminalAttach'];
   sendTerminalInput: WorkspaceTerminalPanelsProps['sendTerminalInput'];
   sendTerminalResize: WorkspaceTerminalPanelsProps['sendTerminalResize'];
+  sendTerminalVisibility: WorkspaceTerminalPanelsProps['sendTerminalVisibility'];
   sendTerminalDetach: WorkspaceTerminalPanelsProps['sendTerminalDetach'];
   active: boolean;
 }) {
+  useEffect(() => {
+    if (window.__o8TerminalBenchEnabled !== true) return;
+    console.warn('[workspace-terminal:bench]', JSON.stringify({
+      at: performance.now(),
+      event: 'terminal-panel-mounted',
+      tabId,
+      sessionName: tmuxSession,
+    }));
+    return () => {
+      console.warn('[workspace-terminal:bench]', JSON.stringify({
+        at: performance.now(),
+        event: 'terminal-panel-unmounted',
+        tabId,
+        sessionName: tmuxSession,
+      }));
+    };
+  }, [tabId, tmuxSession]);
   return (
     <XtermPanel
       ref={(handle) => {
@@ -479,6 +513,7 @@ const TerminalResidentPanel = memo(function TerminalResidentPanel({
       sendTerminalAttach={sendTerminalAttach}
       sendTerminalInput={sendTerminalInput}
       sendTerminalResize={sendTerminalResize}
+      sendTerminalVisibility={sendTerminalVisibility}
       sendTerminalDetach={sendTerminalDetach}
       visible={active}
     />
@@ -550,8 +585,11 @@ const PendingTerminalPanel = memo(function PendingTerminalPanel({
   termWsConnected: boolean;
   active: boolean;
 }) {
+  const state = termWsConnected ? 'awaiting-created' : 'ws-disconnected';
   return (
     <div
+      data-o8-term-state={state}
+      data-o8-term-tab={tab.id}
       style={{
         flex: 1,
         display: active ? 'flex' : 'none',

@@ -121,6 +121,7 @@ function panelProps(visibleTabs: TerminalTab[], onCloseTab = vi.fn()) {
     sendTerminalAttach: vi.fn(),
     sendTerminalInput: vi.fn(),
     sendTerminalResize: vi.fn(),
+    sendTerminalVisibility: vi.fn(),
     sendTerminalDetach: vi.fn(),
   };
 }
@@ -152,6 +153,20 @@ describe('WorkspaceTerminalPanels resident surface budget', () => {
 
     expect(container.querySelectorAll('[data-tmux-session]')).toHaveLength(3);
     expect(container.querySelector('[data-tmux-session="tmux-0"]')).not.toBeNull();
+  });
+
+  it('labels a pending terminal with the state the panel can observe', async () => {
+    const pending = { ...terminalTab(0), tmuxSession: null } as unknown as TerminalTab;
+    const props = panelProps([pending]);
+    await act(async () => root.render(createElement(WorkspaceTerminalPanels, props)));
+
+    expect(container.querySelector('[data-o8-term-tab="tab-0"]')?.getAttribute('data-o8-term-state')).toBe('awaiting-created');
+
+    await act(async () => root.render(createElement(WorkspaceTerminalPanels, {
+      ...props,
+      termWsConnected: false,
+    })));
+    expect(container.querySelector('[data-o8-term-tab="tab-0"]')?.getAttribute('data-o8-term-state')).toBe('ws-disconnected');
   });
 
   it('enters and exits Terminal Mode 100 times without replacing the resident XtermPanel', async () => {

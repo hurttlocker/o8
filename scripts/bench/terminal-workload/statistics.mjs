@@ -45,6 +45,11 @@ export function summarizeSamples(samples) {
         realtimeServer: processMetric('realtimeServer', 'physicalBytes'),
         chromiumRenderer: processMetric('chromiumRenderer', 'physicalBytes'),
       },
+      processPhysicalBytesGrowth: {
+        applicationServer: processMetric('applicationServer', 'physicalBytesGrowth'),
+        realtimeServer: processMetric('realtimeServer', 'physicalBytesGrowth'),
+        chromiumRenderer: processMetric('chromiumRenderer', 'physicalBytesGrowth'),
+      },
       attachedClientsPerSession: group.map((sample) => sample.inventory.attachedClientsPerSession),
       initiallyUnmountedBrowserWriteBytes: distribution(group.map((sample) => sample.browser.initiallyUnmountedWriteBytes)),
       residencyChurnCount: distribution(group.map((sample) => sample.browser.residencyChurnSessionNames.length)),
@@ -59,6 +64,16 @@ export function summarizeSamples(samples) {
         renderEvents: distribution(group.map((sample) => sample.browser.totalRenderEvents)),
         fanoutClientDeliveries: distribution(group.map((sample) => sample.server.fanoutClientDeliveries)),
       },
+      hiddenDeliveredBytesPerHiddenClient: distribution(group.flatMap((sample) => sample.server.hiddenDeliveredBytesPerHiddenClient ?? [])),
+      hiddenDeliveriesPerHiddenClient: distribution(group.flatMap((sample) => sample.server.hiddenDeliveriesPerHiddenClient ?? [])),
+      correctnessFailures: group.reduce((total, sample) => total + (sample.correctness?.failures ?? 0), 0),
+      correctnessTimeouts: group.reduce((total, sample) => total + (sample.correctness?.timeouts ?? 0), 0),
+      resyncUnsettledCount: distribution(group.map((sample) => sample.diagnostics?.resyncUnsettledCount ?? 0)),
+      resyncFailedCount: distribution(group.map((sample) => sample.diagnostics?.resyncFailedCount ?? 0)),
+      orchestratorLaunches: distribution(group.map((sample) => sample.orchestratorLaunches ?? 0)),
+      clientHiddenOverflowDiagnostics: distribution(group.map((sample) => (
+        sample.browser.diagnostics?.filter((entry) => entry.code === 'terminal_client_hidden_overflow').length ?? 0
+      ))),
       overflowEvents: distribution(group.map((sample) => sample.server.overflowEvents)),
       backpressureDropEvents: distribution(group.map((sample) => sample.server.backpressureDropEvents)),
     };

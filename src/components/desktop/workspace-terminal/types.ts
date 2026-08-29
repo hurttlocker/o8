@@ -149,6 +149,9 @@ export type WorkspaceChatRuntime = OrchestratorRuntime | 'chat';
 export interface TerminalTabHandle {
   writeToTerminal: (sessionName: string, data: string) => void;
   writeRaw: (sessionName: string, data: string) => void;
+  terminalVisibilityReady?: (sessionName: string, epoch: number) => void;
+  applyTerminalResync?: (sessionName: string, data: string, epoch: number, historyTruncated: boolean, source: 'tmux' | 'scrollback') => void;
+  recordTerminalDiagnostic?: (diagnostic: Record<string, unknown>) => void;
   showImage: (sessionName: string, imageB64: string, filename: string) => void;
   setTermError: (sessionName: string, error: string) => void;
   setTermExited: (sessionName: string) => void;
@@ -288,6 +291,7 @@ export interface WorkspaceTerminalProps {
   sendTerminalAttach: (sessionName: string, cols: number, rows: number) => void;
   sendTerminalInput: (sessionName: string, data: string) => void;
   sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;
+  sendTerminalVisibility: (sessionName: string, visible: boolean, options?: { epoch?: number; needsResync?: boolean; cols?: number; rows?: number }) => void;
   sendTerminalDetach: (sessionName: string) => void;
   termWsConnected: boolean;
   onPreviewDetected?: (preview: DetectedLocalhostPreview) => void;

@@ -9,6 +9,9 @@ const xtermMock = vi.hoisted(() => ({
   writes: [] as Uint8Array[],
   writeCallbacks: [] as Array<(() => void) | undefined>,
   onRenderCalls: 0,
+  resets: 0,
+  onData: null as ((data: string) => void) | null,
+  completeWritesImmediately: true,
 }));
 
 class MockDisposable {
@@ -34,10 +37,13 @@ class MockTerminal {
   loadAddon() {}
   open() {}
   focus() {}
-  reset() {}
+  reset() { xtermMock.resets += 1; }
   dispose() {}
   getSelection() { return ''; }
-  onData() { return new MockDisposable(); }
+  onData(callback: (data: string) => void) {
+    xtermMock.onData = callback;
+    return new MockDisposable();
+  }
   onSelectionChange() { return new MockDisposable(); }
   onRender() {
     xtermMock.onRenderCalls += 1;
@@ -46,7 +52,7 @@ class MockTerminal {
   write(data: Uint8Array | string, callback?: () => void) {
     if (data instanceof Uint8Array) xtermMock.writes.push(data);
     xtermMock.writeCallbacks.push(callback);
-    callback?.();
+    if (xtermMock.completeWritesImmediately) callback?.();
   }
 }
 
@@ -85,8 +91,13 @@ describe('XtermPanel terminal workload instrumentation', () => {
     xtermMock.writes.length = 0;
     xtermMock.writeCallbacks.length = 0;
     xtermMock.onRenderCalls = 0;
+    xtermMock.resets = 0;
+    xtermMock.onData = null;
+    xtermMock.completeWritesImmediately = true;
+    delete window.__o8TerminalDiagnostics;
     delete window.__o8TerminalBenchEnabled;
     delete window.__o8TerminalWriteStats;
+    delete window.__o8TerminalDiagnostics;
     Object.defineProperty(globalThis, 'ResizeObserver', {
       configurable: true,
       value: class ResizeObserver {
@@ -122,14 +133,14 @@ describe('XtermPanel terminal workload instrumentation', () => {
 
     await act(async () => panelRef.current?.writeData(btoa('hidden')));
 
-    expect(xtermMock.writes).toHaveLength(1);
+    expect(xtermMock.writes).toHaveLength(0);
     expect(window.__o8TerminalWriteStats).toBeUndefined();
   });
 
   it('does not install render or write-completion instrumentation when the bench flag is unset', async () => {
     const panelRef = createRef<XtermPanelHandle>();
     await act(async () => {
-      root.render(createElement(XtermPanel, { ...panelProps(false), ref: panelRef }));
+      root.render(createElement(XtermPanel, { ...panelProps(true), ref: panelRef }));
       await Promise.resolve();
     });
 
@@ -175,7 +186,7 @@ describe('XtermPanel terminal workload instrumentation', () => {
   it('counts writes through the real hidden and visible writeData path', async () => {
     window.__o8TerminalBenchEnabled = true;
     const panelRef = createRef<XtermPanelHandle>();
-    const hiddenProps = panelProps(false);
+    const hiddenProps = { ...panelProps(false), sendTerminalVisibility: vi.fn() };
     await act(async () => {
       root.render(createElement(XtermPanel, { ...hiddenProps, ref: panelRef }));
       await Promise.resolve();
@@ -187,11 +198,72 @@ describe('XtermPanel terminal workload instrumentation', () => {
       visible: true,
       ref: panelRef,
     })));
+    const visibleCall = hiddenProps.sendTerminalVisibility.mock.calls.findLast((call) => call[1] === true);
+    await act(async () => panelRef.current?.visibilityReady?.(visibleCall?.[2]?.epoch ?? -1));
     await act(async () => panelRef.current?.writeData(btoa('shown')));
 
     const session = window.__o8TerminalWriteStats?.sessions['cortex-dash-bench-fixture'];
-    expect(session?.hiddenWork).toMatchObject({ calls: 1, decodedBytes: 6 });
+    expect(session).toMatchObject({ cols: 120, rows: 30 });
+    expect(session?.hiddenWork).toMatchObject({ calls: 0, decodedBytes: 0 });
     expect(session?.visibleWork).toMatchObject({ calls: 1, decodedBytes: 5 });
     expect(xtermMock.writes).toHaveLength(2);
+  });
+
+  it('flushes hidden bytes once after the visibility acknowledgement', async () => {
+    const panelRef = createRef<XtermPanelHandle>();
+    const props = { ...panelProps(false), sendTerminalVisibility: vi.fn() };
+    await act(async () => {
+      root.render(createElement(XtermPanel, { ...props, ref: panelRef }));
+      await Promise.resolve();
+    });
+    await act(async () => panelRef.current?.writeData(btoa('one')));
+    await act(async () => panelRef.current?.writeData(btoa('two')));
+    expect(xtermMock.writes).toHaveLength(0);
+
+    await act(async () => root.render(createElement(XtermPanel, { ...props, visible: true, ref: panelRef })));
+    const visibleCall = props.sendTerminalVisibility.mock.calls.findLast((call) => call[1] === true);
+    await act(async () => panelRef.current?.visibilityReady?.(visibleCall?.[2]?.epoch ?? -1));
+
+    expect(xtermMock.writes).toHaveLength(1);
+    expect(new TextDecoder().decode(xtermMock.writes[0])).toBe('onetwo');
+  });
+
+  it('requests resync after hidden overflow and queues input until the snapshot paints', async () => {
+    const panelRef = createRef<XtermPanelHandle>();
+    const props = { ...panelProps(false), sendTerminalVisibility: vi.fn() };
+    await act(async () => {
+      root.render(createElement(XtermPanel, { ...props, ref: panelRef }));
+      await Promise.resolve();
+    });
+    await act(async () => panelRef.current?.writeData(btoa('x'.repeat(256 * 1024 + 16))));
+    expect(window.__o8TerminalDiagnostics?.[0]).toMatchObject({
+      code: 'terminal_client_hidden_overflow',
+      bytesDropped: 16,
+    });
+
+    await act(async () => root.render(createElement(XtermPanel, { ...props, visible: true, ref: panelRef })));
+    const visibleCall = props.sendTerminalVisibility.mock.calls.findLast((call) => call[1] === true);
+    expect(visibleCall?.[2]).toMatchObject({ needsResync: true });
+    xtermMock.onData?.('queued-input');
+    expect(props.sendTerminalInput).not.toHaveBeenCalled();
+
+    xtermMock.completeWritesImmediately = false;
+    await act(async () => panelRef.current?.applyResync?.(
+      btoa('oracle-screen'),
+      visibleCall?.[2]?.epoch ?? -1,
+      false,
+      'tmux',
+    ));
+    await act(async () => panelRef.current?.writeData(btoa('after-snapshot')));
+    expect(xtermMock.resets).toBeGreaterThan(0);
+    expect(new TextDecoder().decode(xtermMock.writes[0])).toBe('oracle-screen');
+    expect(xtermMock.writes).toHaveLength(1);
+    expect(props.sendTerminalInput).not.toHaveBeenCalled();
+
+    await act(async () => xtermMock.writeCallbacks[0]?.());
+    expect(new TextDecoder().decode(xtermMock.writes[1])).toBe('after-snapshot');
+    expect(props.sendTerminalInput).not.toHaveBeenCalled();
+    await act(async () => xtermMock.writeCallbacks[1]?.());
+    expect(props.sendTerminalInput).toHaveBeenCalledWith('cortex-dash-bench-fixture', 'queued-input');
   });
 });

@@ -8,7 +8,7 @@ import { ContextualPanel, type ContextualPanelHandle, type ContextualPanelProps 
 import { LocalhostPreviewTabs } from '@/components/desktop/LocalhostPreviewTabs';
 import type { TileContentRegistry } from '@/components/desktop/TileContainer';
 import type { TerminalTabHandle } from '@/components/desktop/WorkspaceTerminal';
-import type { TerminalTab } from '@/components/desktop/workspace-terminal/types';
+import type { TerminalTab, WorkspaceTerminalProps } from '@/components/desktop/workspace-terminal/types';
 import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import type {
@@ -101,6 +101,7 @@ export interface TileRegistryDeps {
   sendTerminalDetach: ContextualPanelProps['sendTerminalDetach'];
   sendTerminalInput: ContextualPanelProps['sendTerminalInput'];
   sendTerminalResize: ContextualPanelProps['sendTerminalResize'];
+  sendTerminalVisibility: WorkspaceTerminalProps['sendTerminalVisibility'];
   termWsConnected: boolean;
   thoughtsDraftInjection: { id: string; text: string } | null;
   thoughtsMissionState: OrchestratorMissionState;
@@ -153,6 +154,7 @@ export function createTileRegistry({
   sendTerminalDetach,
   sendTerminalInput,
   sendTerminalResize,
+  sendTerminalVisibility,
   termWsConnected,
   thoughtsDraftInjection,
   thoughtsMissionState,
@@ -403,6 +405,7 @@ export function createTileRegistry({
             sendTerminalAttach={sendTerminalAttach}
             sendTerminalInput={sendTerminalInput}
             sendTerminalResize={sendTerminalResize}
+            sendTerminalVisibility={sendTerminalVisibility}
             sendTerminalDetach={sendTerminalDetach}
             termWsConnected={termWsConnected}
             onPreviewDetected={handlePreviewDetected}
