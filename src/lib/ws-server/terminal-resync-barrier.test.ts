@@ -1,0 +1,84 @@
+import { describe, expect, it } from 'vitest';
+import {
+  TERMINAL_RESYNC_MAX_WAIT_MS,
+  terminalResyncFreshnessLine,
+  waitForTerminalResyncBarrier,
+} from './terminal-resync-barrier';
+
+function harness(options: {
+  idleAt?: number;
+  cancelAt?: number;
+  captures?: Array<{ ok: boolean; data: string }>;
+} = {}) {
+  let now = 1_000;
+  let captureCount = 0;
+  const unsettledAt: number[] = [];
+  const idleAt = options.idleAt ?? 0;
+  const captures = options.captures ?? [{ ok: true, data: 'READY\n' }];
+  return {
+    run: () => waitForTerminalResyncBarrier({
+      getLastOutputAt: () => now - (now - 1_000 >= idleAt ? 40 : 0),
+      getBatchBuffer: () => now - 1_000 >= idleAt ? '' : 'pending',
+      getScrollbackChunks: () => ['\x1b[32mREADY\x1b[0m\r\n'],
+      capture: () => captures[Math.min(captureCount++, captures.length - 1)],
+      isCancelled: () => options.cancelAt != null && now - 1_000 >= options.cancelAt,
+      onUnsettled: (waitedMs) => unsettledAt.push(waitedMs),
+      now: () => now,
+      wait: async (delayMs) => { now += delayMs; },
+    }),
+    captureCount: () => captureCount,
+    unsettledAt,
+  };
+}
+
+describe('terminal resync barrier', () => {
+  it('captures immediately when the attachment is already idle', async () => {
+    const test = harness();
+
+    await expect(test.run()).resolves.toMatchObject({
+      status: 'ready', waitedMs: 0, unsettled: false, captureAttempts: 1, fallbackReason: null,
+    });
+    expect(test.captureCount()).toBe(1);
+  });
+
+  it('waits until the attachment becomes idle at 120 ms', async () => {
+    const test = harness({ idleAt: 120 });
+
+    await expect(test.run()).resolves.toMatchObject({
+      status: 'ready', waitedMs: 120, unsettled: false,
+    });
+  });
+
+  it('captures with an unsettled result after the 500 ms bound', async () => {
+    const test = harness({ idleAt: Number.POSITIVE_INFINITY });
+
+    await expect(test.run()).resolves.toMatchObject({
+      status: 'ready', waitedMs: TERMINAL_RESYNC_MAX_WAIT_MS, unsettled: true,
+    });
+    expect(test.unsettledAt).toEqual([TERMINAL_RESYNC_MAX_WAIT_MS]);
+  });
+
+  it('cancels before capture when a newer visibility epoch arrives', async () => {
+    const test = harness({ idleAt: 120, cancelAt: 60 });
+
+    await expect(test.run()).resolves.toMatchObject({ status: 'cancelled', waitedMs: 60 });
+    expect(test.captureCount()).toBe(0);
+  });
+
+  it('retries one stale snapshot and requests scrollback fallback', async () => {
+    const test = harness({ captures: [
+      { ok: true, data: 'older screen\n' },
+      { ok: true, data: 'still older\n' },
+    ] });
+
+    await expect(test.run()).resolves.toMatchObject({
+      status: 'ready', captureAttempts: 2, fallbackReason: 'stale-snapshot', freshnessLine: 'READY',
+    });
+    expect(test.captureCount()).toBe(2);
+  });
+
+  it('extracts the last plain-text line from ANSI scrollback', () => {
+    expect(terminalResyncFreshnessLine(['old\r\n\x1b]0;title\x07\x1b[31m newest line \x1b[0m\r\n']))
+      .toBe('newest line');
+  });
+});

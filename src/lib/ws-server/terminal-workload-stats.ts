@@ -20,6 +20,7 @@ export type TerminalWorkloadSessionSnapshot = {
     retainedExit: boolean;
   };
   lastOutputTail: string;
+  lastOutputAt: number;
 };
 
 type MutableSession = TerminalWorkloadSessionSnapshot & { clients: Set<string>; escapeTail: string };
@@ -42,6 +43,7 @@ function emptySession(): MutableSession {
     fanout: { events: 0, sourceBytes: 0, clientDeliveries: 0 },
     alternateScreen: { observedEnter: false, observedExit: false, retainedEnter: false, retainedExit: false },
     lastOutputTail: '',
+    lastOutputAt: 0,
     clients: new Set(),
     escapeTail: '',
   };
@@ -59,7 +61,12 @@ export class TerminalWorkloadStats {
     return session;
   }
 
-  reset(attachments: Iterable<{ sessionName: string; clientIds: Set<string>; scrollbackBytes: number }>): void {
+  reset(attachments: Iterable<{
+    sessionName: string;
+    clientIds: Set<string>;
+    scrollbackBytes: number;
+    lastOutputAt: number;
+  }>): void {
     this.sessions.clear();
     for (const attachment of attachments) {
       const session = this.session(attachment.sessionName);
@@ -67,6 +74,7 @@ export class TerminalWorkloadStats {
       session.attachedClientCount = session.clients.size;
       session.peakAttachedClientCount = session.clients.size;
       session.buffer.retainedBytes = attachment.scrollbackBytes;
+      session.lastOutputAt = attachment.lastOutputAt;
     }
   }
 
@@ -90,7 +98,7 @@ export class TerminalWorkloadStats {
     session.detachEvents += 1;
   }
 
-  recordPty(sessionName: string, data: string): void {
+  recordPty(sessionName: string, data: string, lastOutputAt = Date.now()): void {
     const session = this.session(sessionName);
     const target = session.visible ? session.pty.visible : session.pty.hidden;
     const bytes = Buffer.byteLength(data, 'utf8');
@@ -105,6 +113,7 @@ export class TerminalWorkloadStats {
     }
     session.escapeTail = scanned.slice(-32);
     session.lastOutputTail = `${session.lastOutputTail}${data}`.slice(-4096);
+    session.lastOutputAt = lastOutputAt;
   }
 
   recordBuffer(sessionName: string, appendedBytes: number, retainedBytes: number): void {
