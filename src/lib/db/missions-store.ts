@@ -16,6 +16,7 @@
 import 'server-only';
 import { getSqlite } from '@/lib/db';
 import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
+import { normalizeOrchestratorMissionStateForPersistence } from '@/lib/orchestrator/persisted-mission';
 import type { OrchestratorMissionState } from '@/lib/orchestrator/types';
 
 export interface MissionPacketMeta {
@@ -139,7 +140,9 @@ export function recordMission(input: RecordMissionInput): void {
     input.summary,
     input.constraints,
     JSON.stringify(input.packetMeta),
-    JSON.stringify(input.missionState ?? null),
+    JSON.stringify(input.missionState
+      ? normalizeOrchestratorMissionStateForPersistence(input.missionState)
+      : null),
     input.totalWaves,
     now,
     now,

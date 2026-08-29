@@ -6,6 +6,7 @@ import { getLaneEvents, listLanes } from '@/lib/lane/registry';
 import { recoveryInfoFromLaneEvents } from '@/lib/lane/recovery-info';
 import type { Lane, LaneEvent } from '@/lib/lane/types';
 import type { DomainLaneSummary } from '@/lib/orchestrator/domain-lane-summary';
+import { normalizeOrchestratorMissionStateForPersistence } from '@/lib/orchestrator/persisted-mission';
 import type { OrchestratorMissionState, OrchestratorRuntimeTruth } from '@/lib/orchestrator/types';
 import { packetContextObservationFromEvent } from '@/lib/orchestrator/packet-context-telemetry';
 import {
@@ -164,7 +165,7 @@ export function writeOrchestratorControlPlaneState(state: OrchestratorMissionSta
   ensureControlPlaneDir();
   const next: OrchestratorControlPlaneFile = {
     version: 1,
-    mission: normalizeOrchestratorMissionState(state),
+    mission: normalizeOrchestratorMissionStateForPersistence(state),
   };
   writeFileSync(ORCHESTRATOR_TMP_PATH, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
   renameSync(ORCHESTRATOR_TMP_PATH, ORCHESTRATOR_PATH);

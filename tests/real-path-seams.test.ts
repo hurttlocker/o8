@@ -149,7 +149,10 @@ const searchRoute = await import('@/app/api/panel/search/route');
 const { archiveLane, createLane, findLaneByPacket, getLane, getLaneEvents, setLaneStatus, updateLane } = await import('@/lib/lane/registry');
 const { dispatch } = await import('@/lib/lane/commands');
 const { listApprovalsForContext } = await import('@/lib/approvals/store');
-const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+const {
+  createEmptyOrchestratorMissionState,
+  normalizeOrchestratorMissionState,
+} = await import('@/lib/orchestrator/store');
 const {
   readOrchestratorControlPlaneState,
   withControlPlaneLock,
@@ -833,11 +836,12 @@ describe('seam E — review-ready projection is suppressed while owned Codex is 
 describe('seam E — orchestrator state projects one terminal status authority', () => {
   const url = 'http://localhost:3001/api/orchestrator/state';
 
-  it('real state GET resolves lane evidence for a parked packet with no inventory agent', async () => {
+  it('real state GET carries lane-only evidence through the desktop mission normalizer', async () => {
     const packetId = 'pkt-seam-E-lane-only-blocked';
     const surfaceId = 'codex-owned:seam-E-lane-only-blocked';
     const repoPath = mkdtempSync(join(os.tmpdir(), 'o8-seam-E-lane-only-repo-'));
     tempDirs.push(repoPath);
+    writeOrchestratorControlPlaneState(createEmptyOrchestratorMissionState());
 
     const persistedLane = createLane({
       repoPath,
@@ -870,22 +874,28 @@ describe('seam E — orchestrator state projects one terminal status authority',
     const response = await stateRoute.GET(operatorGet(url));
     expect(response.status).toBe(200);
     const json = await response.json();
-    const packet = json.mission.packets.find((candidate: OrchestratorPacket) => (
+    const routePacket = json.mission.packets.find((candidate: OrchestratorPacket) => (
       candidate.id === packetId
     ));
+    const desktopMission = normalizeOrchestratorMissionState(json.mission);
+    const packet = desktopMission.packets[0];
+    const statusEvidence = packet.statusEvidence;
 
     expect(json.agents).toEqual([]);
-    expect(packet.statusEvidence).toMatchObject({
+    expect(routePacket.statusEvidence).toEqual(statusEvidence);
+    expect(packet.id).toBe(packetId);
+    expect(statusEvidence).toMatchObject({
       sessionId: surfaceId,
       runtime: 'codex',
       state: 'blocked',
       authority: 'lane-state',
     });
-    expect(packet.statusEvidence.summary).toContain('worktree_missing_unverified');
-    expect(packet.statusEvidence.evidence).toContainEqual({
+    expect(statusEvidence?.summary).toContain('worktree_missing_unverified');
+    expect(statusEvidence?.evidence).toContainEqual({
       source: 'lane-event:worktree_missing_unverified',
       value: expect.stringContaining('awaiting_orchestrator'),
     });
+    expect(readOrchestratorControlPlaneState().packets[0]).not.toHaveProperty('statusEvidence');
     expect(runtimeInventoryMock.requests.at(-1)).toEqual({ fresh: false });
   });
 

@@ -4,9 +4,9 @@
  * normalizePacket() rebuilds every packet from scratch and is the single
  * chokepoint EVERY orchestrator-state read and write funnels through. Any field
  * it forgets to copy is silently dropped on the next round-trip. The fixture
- * below intentionally requires every persisted packet field so adding one
- * forces this test to pin its normalize behavior. statusEvidence is excluded
- * because the state route recomputes that read-time projection on every GET.
+ * below intentionally satisfies Required<OrchestratorPacket> so adding a new
+ * packet field forces this test to pin its normalize behavior. The persistence
+ * assertion separately proves read-time projections do not enter durable state.
  */
 import { describe, expect, it, vi } from 'vitest';
 
@@ -15,6 +15,7 @@ import {
   createEmptyOrchestratorMissionState,
   normalizeOrchestratorMissionState,
 } from '@/lib/orchestrator/store';
+import { normalizeOrchestratorMissionStateForPersistence } from '@/lib/orchestrator/persisted-mission';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
 const NOW = new Date('2026-01-01T00:00:00.000Z');
@@ -71,6 +72,16 @@ function fullPacketFixture() {
       observedAt: '2026-01-01T00:00:30.000Z',
     },
     blockedReason: 'operator_stopped',
+    statusEvidence: {
+      sessionId: 'codex-owned:pkt-control-1',
+      runtime: 'codex',
+      state: 'blocked',
+      authority: 'lane-state',
+      observedAt: '2026-01-01T00:02:30.000Z',
+      summary: 'Lane control-field packet is blocked: operator_stopped.',
+      evidence: [{ source: 'lane:lane-1.status', value: 'awaiting_orchestrator' }],
+      fallbackReason: 'No live runtime event was available.',
+    },
     storageAdmission: {
       schema: 'o8/packet-storage-admission/v1',
       state: 'held',
@@ -223,7 +234,7 @@ function fullPacketFixture() {
       error: null,
     },
     recovery: null,
-  } satisfies Required<Omit<OrchestratorPacket, 'statusEvidence'>>;
+  } satisfies Required<OrchestratorPacket>;
 
   return packet;
 }
@@ -243,6 +254,8 @@ describe('packet fields survive normalize', () => {
       const packet = fullPacketFixture();
       const normalized = normalizeOrchestratorMissionState(stateWithPacket(packet));
       expect(normalized.packets[0]).toEqual(packet);
+      const persisted = normalizeOrchestratorMissionStateForPersistence(normalized);
+      expect(persisted.packets[0]).not.toHaveProperty('statusEvidence');
     } finally {
       vi.useRealTimers();
     }
@@ -258,6 +271,7 @@ describe('packet fields survive normalize', () => {
       taskContractRequired: undefined,
       taskContractSource: undefined,
       storageAdmissionEpoch: undefined,
+      statusEvidence: undefined,
     }));
 
     expect(normalized.packets[0].operatorStopped).toBeUndefined();
@@ -267,6 +281,7 @@ describe('packet fields survive normalize', () => {
     expect(normalized.packets[0].taskContractRequired).toBeUndefined();
     expect(normalized.packets[0].taskContractSource).toBeUndefined();
     expect(normalized.packets[0].storageAdmissionEpoch).toBe(1);
+    expect(normalized.packets[0].statusEvidence).toBeUndefined();
   });
 
   it('preserves an explicit disabled task-contract gate', () => {
