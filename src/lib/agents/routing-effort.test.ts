@@ -18,6 +18,7 @@ describe('resolveWorkerRouting — effort parity (unset)', () => {
     // Untouched: default codex selection, no model.
     expect(r.selectedRuntime).toBe('codex');
     expect(r.selectedModel).toBeNull();
+    expect(r.modelDisposition).toBe('runtime-default');
   });
 
   it("'adaptive' is treated as no explicit effort (runtime default) ⇒ null", () => {
@@ -79,13 +80,19 @@ describe('resolveWorkerRouting — model house', () => {
     expect(routing.selectedRuntime).toBe('claude-code');
     expect(routing.requestedModel).toBe('gpt-5.6-sol');
     expect(routing.selectedModel).toBeNull();
+    expect(routing.modelDisposition).toBe('rejected-incompatible');
+    expect(routing.reason).toContain('gpt-5.6-sol');
+    expect(routing.reason).toContain('claude-code');
+    expect(routing.reason).toContain('runtime default will be used');
   });
 
   it('honors a Claude model hint for a selected Claude runtime', () => {
-    expect(resolveWorkerRouting({
+    const routing = resolveWorkerRouting({
       requestedRuntime: 'claude-code',
       requestedModel: 'claude-opus-5',
-    }).selectedModel).toBe('claude-opus-5');
+    });
+    expect(routing.selectedModel).toBe('claude-opus-5');
+    expect(routing.modelDisposition).toBe('requested');
   });
 
   it('rejects a Claude model for a selected Codex runtime', () => {
@@ -96,9 +103,11 @@ describe('resolveWorkerRouting — model house', () => {
   });
 
   it('preserves provider-qualified models for model-agnostic runtimes', () => {
-    expect(resolveWorkerRouting({
+    const routing = resolveWorkerRouting({
       requestedRuntime: 'opencode',
       requestedModel: 'google/gemini-2.5-flash',
-    }).selectedModel).toBe('google/gemini-2.5-flash');
+    });
+    expect(routing.selectedModel).toBe('google/gemini-2.5-flash');
+    expect(routing.modelDisposition).toBe('requested');
   });
 });
