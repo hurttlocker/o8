@@ -55,6 +55,7 @@ function packetFixture(overrides: Partial<OrchestratorPacket> = {}): Orchestrato
       selectedProvider: 'claude',
       selectedRuntime: 'claude-code',
       selectedModel: 'claude-sonnet-5',
+      modelDisposition: 'requested',
       selectedEffort: null,
       enforcement: 'dispatchable_runtimes',
       confidence: 'medium',

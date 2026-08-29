@@ -153,6 +153,27 @@ afterAll(() => {
 });
 
 describe('worker model routing real path', () => {
+  it('persists an incompatible explicit model disposition on the created packet', async () => {
+    const repoPath = makeRepo();
+    const { createMission } = await import('@/lib/orchestrator/operator-mission-service');
+    await createMission({
+      issues: [{ number: 90_004, title: 'packet 90004', body: 'packet 90004', url: '' }],
+      repoPath,
+      runtime: 'codex',
+      requestedRuntime: 'codex',
+      requestedModel: 'claude-opus-5',
+      constraints: '',
+    });
+    const { currentMissionState } = await import('@/lib/orchestrator/operator-mission-service/shared');
+    expect(currentMissionState().packets[0]?.workerRouting).toMatchObject({
+      requestedModel: 'claude-opus-5',
+      selectedProvider: 'codex',
+      selectedRuntime: 'codex',
+      selectedModel: null,
+      modelDisposition: 'rejected-incompatible',
+    });
+  });
+
   it('keeps worker defaults, packet pins, and Brain routing on their configured values', async () => {
     const { POST } = await import('@/app/api/panel/operator-defaults/route');
     const response = await POST(new Request('http://127.0.0.1/api/panel/operator-defaults', {

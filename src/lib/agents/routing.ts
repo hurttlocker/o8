@@ -140,12 +140,17 @@ function routingConfidence(intent: WorkerIntent): WorkerRoutingConfidence {
 }
 
 function routingReason(input: {
+  requestedModel: string | null;
+  modelTargetsSelected: boolean;
   requestedRuntime: OrchestratorRuntime | null;
   selectedRuntime: OrchestratorRuntime;
   workerIntent: WorkerIntent;
   source?: string;
 }) {
   const source = input.source ? ` from ${input.source}` : '';
+  if (input.requestedModel && !input.modelTargetsSelected) {
+    return `Requested model ${input.requestedModel}${source} is incompatible with selected runtime ${input.selectedRuntime}; the runtime default will be used.`;
+  }
   if (input.requestedRuntime && input.requestedRuntime !== input.selectedRuntime) {
     return `Requested ${input.requestedRuntime}${source} is not currently dispatchable; routed ${input.workerIntent} to ${input.selectedRuntime}.`;
   }
@@ -186,6 +191,17 @@ export function resolveWorkerRouting(input: ResolveWorkerRoutingInput = {}): Wor
   const selectedEffort = requestedEffort && getRuntimeCapability(selectedRuntime).reasoningEffort
     ? requestedEffort
     : null;
+  const modelDisposition = requestedModel
+    ? modelTargetsSelected ? 'requested' : 'rejected-incompatible'
+    : 'runtime-default';
+  const resolvedReason = routingReason({
+    requestedModel,
+    modelTargetsSelected: Boolean(modelTargetsSelected),
+    requestedRuntime,
+    selectedRuntime,
+    workerIntent,
+    source: input.source,
+  });
 
   return {
     workerIntent,
@@ -196,15 +212,11 @@ export function resolveWorkerRouting(input: ResolveWorkerRoutingInput = {}): Wor
     selectedProvider,
     selectedRuntime,
     selectedModel: modelTargetsSelected ? requestedModel : null,
+    modelDisposition,
     selectedEffort,
     enforcement: PRODUCTION_AGENT_ENFORCEMENT,
     confidence: input.confidence ?? routingConfidence(workerIntent),
-    reason: input.reason ?? routingReason({
-      requestedRuntime,
-      selectedRuntime,
-      workerIntent,
-      source: input.source,
-    }),
+    reason: modelDisposition === 'rejected-incompatible' ? resolvedReason : input.reason ?? resolvedReason,
     decidedAt: new Date().toISOString(),
   };
 }

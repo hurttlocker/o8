@@ -15,6 +15,7 @@ export type OrchestratorPacketReviewSeverity = 'info' | 'warning' | 'high';
 export type WorkerIntent = 'light_worker' | 'heavy_worker' | 'reviewer' | 'diagnostic' | 'orchestrator';
 export type WorkerProvider = RuntimeWorkerProvider | 'minimax';
 export type WorkerRoutingConfidence = 'high' | 'medium' | 'low';
+export type WorkerModelDisposition = 'requested' | 'runtime-default' | 'rejected-incompatible';
 
 export type WorkerLaunchSource = 'desktop' | 'cli' | 'mcp' | 'agent';
 export type WorkerLaunchPresentation = 'tab' | 'split';
@@ -49,6 +50,7 @@ export interface WorkerRouting {
   selectedProvider: WorkerProvider;
   selectedRuntime: OrchestratorRuntime;
   selectedModel: string | null;
+  modelDisposition: WorkerModelDisposition;
   /** Effort actually applied — the request when the selected runtime supports a
    *  reasoning-effort surface (codex / claude-code), else null (gemini/opencode
    *  don't, so it's a clean no-op). */
