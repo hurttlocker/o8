@@ -72,22 +72,67 @@ describe('resolveTerminalStatusEvidence', () => {
     expect(resolved).toMatchObject({ authority: 'runtime-event', state });
   });
 
-  it('accepts a registered non-orchestrator cloud runtime session', () => {
+  it.each(['cloud', 'remote-customer'] as const)(
+    'accepts a registered non-orchestrator %s runtime session',
+    (runtime) => {
+      const resolved = resolveTerminalStatusEvidence({
+        runtimeSession: {
+          sessionKey: `${runtime}-owned:status-evidence`,
+          runtimeId: runtime,
+          status: 'running',
+          observedAt,
+        },
+      });
+
+      expect(resolved).toMatchObject({
+        sessionId: `${runtime}-owned:status-evidence`,
+        runtime,
+        authority: 'runtime-event',
+        state: 'working',
+      });
+    },
+  );
+
+  it('returns an unknown record when every observation time is invalid', () => {
+    const before = Date.now();
     const resolved = resolveTerminalStatusEvidence({
       runtimeSession: {
-        sessionKey: 'cloud-owned:status-evidence',
+        sessionKey: 'remote-customer-owned:invalid-observation',
+        runtimeId: 'remote-customer',
+        status: 'running',
+        observedAt: 'not-a-time',
+      },
+      rawLifecycle: {
+        sessionId: 'remote-customer-owned:invalid-observation',
+        runtime: 'remote-customer',
+        state: 'active',
+        observedAt: 'also-not-a-time',
+      },
+    });
+    const after = Date.now();
+
+    expect(resolved).toMatchObject({
+      sessionId: 'remote-customer-owned:invalid-observation',
+      runtime: 'remote-customer',
+      state: 'unknown',
+      authority: 'raw-terminal',
+      summary: 'No observation with a valid time was available.',
+      evidence: [],
+    });
+    expect(resolved.fallbackReason).toContain('invalid observation times');
+    expect(Date.parse(resolved.observedAt)).toBeGreaterThanOrEqual(before);
+    expect(Date.parse(resolved.observedAt)).toBeLessThanOrEqual(after);
+  });
+
+  it('keeps missing session identity or runtime as a programming error', () => {
+    expect(() => resolveTerminalStatusEvidence({
+      runtimeSession: {
+        sessionKey: '',
         runtimeId: 'cloud',
         status: 'running',
         observedAt,
       },
-    });
-
-    expect(resolved).toMatchObject({
-      sessionId: 'cloud-owned:status-evidence',
-      runtime: 'cloud',
-      authority: 'runtime-event',
-      state: 'working',
-    });
+    })).toThrow('requires an existing session id and registered runtime');
   });
 
   const laneCases = [

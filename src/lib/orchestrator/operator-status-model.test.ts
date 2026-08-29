@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { buildOperatorStatusAgents, summarizeOperatorStatus } from './operator-status-model';
+import {
+  buildOperatorStatusAgents,
+  resolveAgentSummaryStatuses,
+  summarizeOperatorStatus,
+} from './operator-status-model';
 import type { AgentSummary } from '@/lib/fleet/types';
 import type { Lane } from '@/lib/lane/types';
 
@@ -96,5 +100,64 @@ describe('operator status model', () => {
     expect(agents[0].status).toBe('running');
     expect(agents[0].authority).toBe('runtime-event');
     expect(summary).toContain('1 agent running');
+  });
+
+  it('emits cloud and remote-customer sessions with status evidence', () => {
+    const sessions = ['cloud', 'remote-customer'].map((runtime) => agent({
+      id: `${runtime}-owned:1`,
+      name: `${runtime} worker`,
+      runtime,
+      sessionKey: `${runtime}-owned:1`,
+      status: 'running',
+    }));
+
+    const agents = buildOperatorStatusAgents(sessions, []);
+
+    expect(agents.map((candidate) => candidate.runtime)).toEqual(['cloud', 'remote-customer']);
+    expect(agents.map((candidate) => candidate.statusEvidence.runtime)).toEqual([
+      'cloud',
+      'remote-customer',
+    ]);
+    expect(agents.every((candidate) => candidate.authority === 'runtime-event')).toBe(true);
+  });
+
+  it('contains a per-session programming error in both status projections', () => {
+    const malformed = agent({
+      id: '',
+      runtime: 'remote-customer',
+      sessionKey: '',
+      lastEventAt: 'not-a-time',
+      lastActivityAt: null,
+    });
+    const healthy = agent({
+      id: 'cloud-owned:healthy',
+      runtime: 'cloud',
+      sessionKey: 'cloud-owned:healthy',
+      status: 'running',
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      const summaries = resolveAgentSummaryStatuses([malformed, healthy], []);
+      const operators = buildOperatorStatusAgents([malformed, healthy], []);
+
+      expect(summaries).toHaveLength(2);
+      expect(operators).toHaveLength(2);
+      expect(summaries[0].statusEvidence).toMatchObject({
+        state: 'unknown',
+        authority: 'raw-terminal',
+        evidence: [],
+      });
+      expect(operators[0].statusEvidence).toMatchObject({
+        state: 'unknown',
+        authority: 'raw-terminal',
+        evidence: [],
+      });
+      expect(summaries[1].statusEvidence?.runtime).toBe('cloud');
+      expect(operators[1].statusEvidence.runtime).toBe('cloud');
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('[terminal-status]'));
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

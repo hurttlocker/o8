@@ -102,24 +102,93 @@ function runtime(id: RuntimeId): AgentRuntime {
 
 describe('canonical runtime inventory discovery', () => {
   beforeEach(() => {
-    registryFixture.runtimes = [runtime('gemini'), runtime('aider'), runtime('cloud')];
+    registryFixture.runtimes = [
+      runtime('gemini'),
+      runtime('aider'),
+      runtime('cloud'),
+      runtime('remote-customer'),
+    ];
     invalidateRuntimeInventoryCache();
   });
 
-  it('discovers owned sessions from every dispatchable registered adapter', async () => {
+  it('discovers owned sessions from every discoverable registered adapter', async () => {
     const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
 
-    expect(snapshot.agents.map((agent) => agent.runtime)).toEqual(['gemini', 'aider', 'cloud']);
+    expect(snapshot.agents.map((agent) => agent.runtime)).toEqual([
+      'gemini',
+      'aider',
+      'cloud',
+      'remote-customer',
+    ]);
     expect(snapshot.agents.map((agent) => agent.identityId)).toEqual([
       'gemini-identity',
       'aider-identity',
       'cloud-identity',
+      'remote-customer-identity',
     ]);
-    expect(snapshot.agents.find((agent) => agent.runtime === 'cloud')?.statusEvidence).toMatchObject({
-      runtime: 'cloud',
-      authority: 'runtime-event',
-      state: 'working',
-    });
-    expect(snapshot.meta.note).toBe('Showing every discovered dispatchable runtime surface.');
+    for (const runtimeId of ['cloud', 'remote-customer'] as const) {
+      expect(snapshot.agents.find((agent) => agent.runtime === runtimeId)?.statusEvidence).toMatchObject({
+        runtime: runtimeId,
+        authority: 'runtime-event',
+        state: 'working',
+      });
+    }
+    expect(snapshot.meta.note).toBe('Showing every discovered registered runtime surface.');
+  });
+
+  it('uses total unknown evidence for an invalid observation without dropping healthy sessions', async () => {
+    const malformedRuntime = runtime('custom-malformed');
+    const discoverSessions = malformedRuntime.discoverSessions;
+    malformedRuntime.discoverSessions = async () => {
+      const sessions = await discoverSessions();
+      return sessions.map((session) => ({ ...session, lastActivityAt: new Date('not-a-time') }));
+    };
+    registryFixture.runtimes = [runtime('cloud'), runtime('remote-customer'), malformedRuntime];
+    invalidateRuntimeInventoryCache();
+
+    const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
+
+    expect(snapshot.agents.map((agent) => agent.runtime)).toEqual([
+      'cloud',
+      'remote-customer',
+      'custom-malformed',
+    ]);
+    expect(snapshot.agents.find((agent) => agent.runtime === 'custom-malformed')?.statusEvidence)
+      .toMatchObject({
+        runtime: 'custom-malformed',
+        state: 'unknown',
+        authority: 'raw-terminal',
+        summary: 'No observation with a valid time was available.',
+        evidence: [],
+      });
+  });
+
+  it('contains a missing session identity and warns without dropping peers', async () => {
+    const malformedRuntime = runtime('custom-missing-id');
+    const discoverSessions = malformedRuntime.discoverSessions;
+    malformedRuntime.discoverSessions = async () => {
+      const sessions = await discoverSessions();
+      return sessions.map((session) => ({ ...session, sessionKey: '' }));
+    };
+    registryFixture.runtimes = [runtime('cloud'), malformedRuntime];
+    invalidateRuntimeInventoryCache();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
+
+      expect(snapshot.agents).toHaveLength(2);
+      expect(snapshot.agents.map((agent) => agent.runtime)).toEqual(['cloud', 'custom-missing-id']);
+      expect(snapshot.agents[1].statusEvidence).toMatchObject({
+        sessionId: 'custom-missing-id',
+        runtime: 'custom-missing-id',
+        state: 'unknown',
+        authority: 'raw-terminal',
+        evidence: [],
+      });
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('[terminal-status]'));
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

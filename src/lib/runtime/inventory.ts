@@ -21,6 +21,7 @@ import {
   compareTerminalStatusEvidence,
   resolveTerminalStatusEvidence,
   runtimeSessionStatusFromTerminalState,
+  unknownTerminalStatusEvidence,
   type TerminalStatusEvidence,
 } from '@/lib/terminal-status/resolve';
 
@@ -455,15 +456,32 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
       session.sessionKey,
       session.status,
     ) as RuntimeSession['status'];
-    const statusEvidence = resolveTerminalStatusEvidence({
-      runtimeSession: {
-        sessionKey: session.sessionKey,
-        runtimeId: runtime.id,
-        status: debouncedStatus,
-        observedAt: session.lastActivityAt.toISOString(),
-        lifecycle: session.lifecycle,
-      },
-    });
+    let statusEvidence: TerminalStatusEvidence;
+    try {
+      statusEvidence = resolveTerminalStatusEvidence({
+        runtimeSession: {
+          sessionKey: session.sessionKey,
+          runtimeId: runtime.id,
+          status: debouncedStatus,
+          observedAt: session.lastActivityAt instanceof Date
+            && Number.isFinite(session.lastActivityAt.getTime())
+            ? session.lastActivityAt.toISOString()
+            : '',
+          lifecycle: session.lifecycle,
+        },
+      });
+    } catch (error) {
+      const sessionId = session.sessionKey || session.displayName || 'unknown-session';
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[terminal-status] Failed to resolve status for ${sessionId}: ${message}`);
+      statusEvidence = unknownTerminalStatusEvidence({
+        sessionId,
+        runtime: runtime.id,
+        observedAt: session.lastActivityAt,
+        summary: 'Terminal status evidence could not be resolved for this session.',
+        fallbackReason: `Status resolution failed for this session: ${message}`,
+      });
+    }
     return {
       runtime,
       session: {
@@ -583,7 +601,7 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
       gatewayReachable: true,
       mirrorMode: 'current-session-first',
       observablePending: false,
-      note: 'Showing every discovered dispatchable runtime surface.',
+      note: 'Showing every discovered registered runtime surface.',
       primarySessionKey,
     },
     squads,

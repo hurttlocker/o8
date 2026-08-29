@@ -5,6 +5,7 @@ import type { RuntimeId, RuntimeSessionStatus } from '@/lib/runtimes/types';
 import {
   agentStatusFromTerminalState,
   resolveTerminalStatusEvidence,
+  unknownTerminalStatusEvidence,
   type TerminalReviewQueueEvidence,
   type TerminalStatusEvidence,
   type TerminalStatusState,
@@ -13,7 +14,7 @@ import {
 export interface OperatorStatusAgent {
   name: string;
   repo: string;
-  runtime: string;
+  runtime: RuntimeId;
   model: string | null;
   status: string;
   branch: string;
@@ -60,10 +61,7 @@ function observedAtForAgent(agent: AgentSummary, lane: Lane | undefined): string
   if (typeof agent.lastActivityAt === 'number' && Number.isFinite(agent.lastActivityAt)) {
     return new Date(agent.lastActivityAt).toISOString();
   }
-  for (const value of [agent.lastEventAt, lane?.lastEventAt, lane?.updatedAt]) {
-    if (value && Number.isFinite(Date.parse(value))) return new Date(value).toISOString();
-  }
-  return new Date(0).toISOString();
+  return agent.lastEventAt || lane?.lastEventAt || lane?.updatedAt || '';
 }
 
 function approvalMatchesAgent(approval: ApprovalRecord, agent: AgentSummary, lane: Lane | undefined): boolean {
@@ -135,6 +133,28 @@ export function resolveAgentSummaryStatusEvidence(
   return mergeEvidence(evidence, previous);
 }
 
+function safeResolveAgentSummaryStatusEvidence(
+  agent: AgentSummary,
+  lane: Lane | undefined,
+  context: OperatorStatusEvidenceContext,
+): TerminalStatusEvidence {
+  try {
+    return resolveAgentSummaryStatusEvidence(agent, lane, context);
+  } catch (error) {
+    const sessionId = agent.sessionKey || agent.id || 'unknown-session';
+    const runtime = agent.runtime || 'unknown';
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[terminal-status] Failed to resolve status for ${sessionId}: ${message}`);
+    return unknownTerminalStatusEvidence({
+      sessionId,
+      runtime,
+      observedAt: agent.lastActivityAt ?? agent.lastEventAt,
+      summary: 'Terminal status evidence could not be resolved for this session.',
+      fallbackReason: `Status resolution failed for this session: ${message}`,
+    });
+  }
+}
+
 export function resolveAgentSummaryStatuses(
   sessions: AgentSummary[],
   lanes: Lane[],
@@ -146,7 +166,7 @@ export function resolveAgentSummaryStatuses(
       .map((lane) => [lane.sessionKey as string, lane]),
   );
   return sessions.map((agent) => {
-    const statusEvidence = resolveAgentSummaryStatusEvidence(
+    const statusEvidence = safeResolveAgentSummaryStatusEvidence(
       agent,
       laneBySession.get(agent.sessionKey),
       context,
@@ -192,7 +212,7 @@ export function buildOperatorStatusAgents(
 
   return filtered.map((session) => {
     const lane = laneBySession.get(session.sessionKey);
-    const statusEvidence = resolveAgentSummaryStatusEvidence(session, lane, context);
+    const statusEvidence = safeResolveAgentSummaryStatusEvidence(session, lane, context);
     return {
       name: session.name || session.sessionKey,
       repo: repoFromWorkspace(lane?.repoPath || session.workspace),

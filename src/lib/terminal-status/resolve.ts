@@ -98,9 +98,9 @@ function oneLine(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
 
-function validIso(value: string | undefined): string | null {
-  if (!value) return null;
-  const timestamp = Date.parse(value);
+function validIso(value: string | number | Date | undefined): string | null {
+  if (value === undefined || value === '') return null;
+  const timestamp = value instanceof Date ? value.getTime() : new Date(value).getTime();
   return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
 }
 
@@ -246,6 +246,25 @@ function fallbackReason(
   return 'No runtime event or lane state evidence was available.';
 }
 
+export function unknownTerminalStatusEvidence(input: {
+  sessionId: string;
+  runtime: RuntimeId;
+  observedAt?: string | number | Date;
+  summary?: string;
+  fallbackReason: string;
+}): TerminalStatusEvidence {
+  return {
+    sessionId: input.sessionId,
+    runtime: input.runtime,
+    state: 'unknown',
+    authority: 'raw-terminal',
+    observedAt: validIso(input.observedAt) ?? new Date().toISOString(),
+    summary: input.summary ?? 'No observation with a valid time was available.',
+    evidence: [],
+    fallbackReason: input.fallbackReason,
+  };
+}
+
 /** Resolve one semantic session state through the shared authority ladder. */
 export function resolveTerminalStatusEvidence(
   input: ResolveTerminalStatusEvidenceInput,
@@ -348,7 +367,7 @@ export function resolveTerminalStatusEvidence(
   }
   for (const approval of input.approvals ?? []) {
     if (approval.status !== 'pending') continue;
-    const observedAt = validIso(new Date(approval.updatedAt).toISOString());
+    const observedAt = validIso(approval.updatedAt);
     if (!observedAt) continue;
     laneCandidates.push({
       authority: 'lane-state',
@@ -401,7 +420,11 @@ export function resolveTerminalStatusEvidence(
     ?? selectNewest(laneCandidates)
     ?? selectNewest(rawCandidates);
   if (!selected) {
-    throw new Error(`Terminal status evidence for ${sessionId} had no valid observation time.`);
+    return unknownTerminalStatusEvidence({
+      sessionId,
+      runtime,
+      fallbackReason: 'Runtime event, lane state, and raw terminal evidence were absent or had invalid observation times.',
+    });
   }
 
   const allCandidates = [

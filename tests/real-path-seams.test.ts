@@ -53,6 +53,7 @@ const runtimeInventoryMock = vi.hoisted(() => ({
     status: string;
     currentTask?: string | null;
     lastEventAt?: string | null;
+    lastActivityAt?: number | null;
     runtimeSurface?: {
       ownership?: 'provider' | 'discovered' | 'owned';
       capabilities?: { sendInput?: boolean; interrupt?: boolean };
@@ -137,6 +138,7 @@ const { addSessionRule } = await import('@/lib/db/session-rules-store');
 const mergeRoute = await import('@/app/api/orchestrator/merge/route');
 const mergePreviewRoute = await import('@/app/api/orchestrator/merge-preview/route');
 const stateRoute = await import('@/app/api/orchestrator/state/route');
+const operatorStatusRoute = await import('@/app/api/operator/status/route');
 const createMissionRoute = await import('@/app/api/orchestrator/create-mission/route');
 const chatHistoryRoute = await import('@/app/api/v2/chat-history/route');
 const searchRoute = await import('@/app/api/panel/search/route');
@@ -816,34 +818,105 @@ describe('seam E — orchestrator state projects one terminal status authority',
     expect(runtimeInventoryMock.requests.at(-1)).toEqual({ fresh: false });
   });
 
-  it('real state GET keeps a non-orchestrator cloud session with TerminalStatusEvidence', async () => {
-    const surfaceId = 'cloud-owned:seam-E-status-evidence';
-    runtimeInventoryMock.agents = [{
-      sessionKey: surfaceId,
-      runtime: 'cloud',
+  it('real state GET keeps cloud and remote-customer sessions with TerminalStatusEvidence', async () => {
+    runtimeInventoryMock.agents = ['cloud', 'remote-customer'].map((runtime, index) => ({
+      sessionKey: `${runtime}-owned:seam-E-status-evidence`,
+      runtime,
       status: 'running',
-      currentTask: 'Running on registered cloud worker',
-      lastEventAt: '2026-08-29T12:05:00.000Z',
+      currentTask: `Running on registered ${runtime} worker`,
+      lastEventAt: `2026-08-29T12:0${5 + index}:00.000Z`,
       runtimeSurface: {
-        ownership: 'owned',
+        ownership: 'owned' as const,
         capabilities: { sendInput: false, interrupt: true },
-        lifecycle: { availability: 'running' },
+        lifecycle: { availability: 'running' as const },
       },
-    }];
+    }));
 
     const response = await stateRoute.GET(operatorGet(url));
     expect(response.status).toBe(200);
     const json = await response.json();
-    const agent = json.agents.find((candidate: { sessionKey: string }) => candidate.sessionKey === surfaceId);
+    for (const runtime of ['cloud', 'remote-customer']) {
+      const sessionId = `${runtime}-owned:seam-E-status-evidence`;
+      const agent = json.agents.find((candidate: { sessionKey: string }) => candidate.sessionKey === sessionId);
+      expect(agent).toBeTruthy();
+      expect(agent.runtime).toBe(runtime);
+      expect(agent.statusEvidence).toMatchObject({
+        sessionId,
+        runtime,
+        state: 'working',
+        authority: 'runtime-event',
+      });
+    }
+  });
 
-    expect(agent).toBeTruthy();
-    expect(agent.runtime).toBe('cloud');
-    expect(agent.statusEvidence).toMatchObject({
-      sessionId: surfaceId,
-      runtime: 'cloud',
-      state: 'working',
-      authority: 'runtime-event',
+  it('real operator status GET keeps cloud and remote-customer sessions', async () => {
+    runtimeInventoryMock.agents = ['cloud', 'remote-customer'].map((runtime) => ({
+      sessionKey: `${runtime}-owned:operator-status`,
+      runtime,
+      status: 'running',
+      currentTask: `Running on registered ${runtime} worker`,
+      lastEventAt: '2026-08-29T12:05:00.000Z',
+      runtimeSurface: {
+        ownership: 'owned' as const,
+        capabilities: { sendInput: false, interrupt: true },
+        lifecycle: { availability: 'running' as const },
+      },
+    }));
+
+    const response = await operatorStatusRoute.GET(operatorGet('http://localhost:3001/api/operator/status'));
+    expect(response.status).toBe(200);
+    const json = await response.json();
+
+    expect(json.agents.map((candidate: { runtime: string }) => candidate.runtime)).toEqual([
+      'cloud',
+      'remote-customer',
+    ]);
+    expect(json.agents.map((candidate: { statusEvidence: { runtime: string } }) => (
+      candidate.statusEvidence.runtime
+    ))).toEqual(['cloud', 'remote-customer']);
+  });
+
+  it('real state GET returns 200 and preserves peers when one observation time is invalid', async () => {
+    const invalidSessionId = 'remote-customer-owned:invalid-time';
+    const healthySessionId = 'cloud-owned:healthy-time';
+    runtimeInventoryMock.agents = [
+      {
+        sessionKey: invalidSessionId,
+        runtime: 'remote-customer',
+        status: 'running',
+        currentTask: 'Waiting for a valid observation',
+        lastEventAt: 'not-a-time',
+        lastActivityAt: null,
+      },
+      {
+        sessionKey: healthySessionId,
+        runtime: 'cloud',
+        status: 'running',
+        currentTask: 'Healthy registered runtime session',
+        lastEventAt: '2026-08-29T12:08:00.000Z',
+      },
+    ];
+
+    const response = await stateRoute.GET(operatorGet(url));
+    expect(response.status).toBe(200);
+    const json = await response.json();
+    const invalid = json.agents.find((candidate: { sessionKey: string }) => (
+      candidate.sessionKey === invalidSessionId
+    ));
+
+    expect(json.agents.map((candidate: { sessionKey: string }) => candidate.sessionKey)).toEqual([
+      invalidSessionId,
+      healthySessionId,
+    ]);
+    expect(invalid.statusEvidence).toMatchObject({
+      sessionId: invalidSessionId,
+      runtime: 'remote-customer',
+      state: 'unknown',
+      authority: 'raw-terminal',
+      summary: 'No observation with a valid time was available.',
+      evidence: [],
     });
+    expect(Date.parse(invalid.statusEvidence.observedAt)).not.toBeNaN();
   });
 
   it('keeps precedence code in the terminal status resolver instead of the old call sites', () => {
