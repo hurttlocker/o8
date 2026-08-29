@@ -28,6 +28,7 @@ import {
   applyRichDocument,
   openRichDocument,
   richMarkdownSchema,
+  richMarkdownSizeUnavailableReason,
   UnsupportedMarkdownError,
 } from '@/lib/markdown/editor';
 import type { OpenRichDocumentResult } from '@/lib/markdown/editor/document';
@@ -59,6 +60,7 @@ export interface RichMarkdownEditorController {
   mode: MarkdownEditorMode;
   document: OpenRichDocumentResult | null;
   unavailable: UnsupportedMarkdownError | null;
+  sizeUnavailableReason: string | null;
   selectMode: (mode: MarkdownEditorMode) => void;
   clearUnavailable: () => void;
   loadSource: (sourceKey: string, source: string) => void;
@@ -79,9 +81,21 @@ export function useRichMarkdownEditor(
   const [mode, setMode] = useState<MarkdownEditorMode>('source');
   const [document, setDocument] = useState<OpenRichDocumentResult | null>(null);
   const [unavailable, setUnavailable] = useState<UnsupportedMarkdownError | null>(null);
+  const [sizeUnavailableReason, setSizeUnavailableReason] = useState<string | null>(null);
   const openedFileRef = useRef<string | null>(null);
 
+  const applySizeGuard = useCallback((nextSource: string): boolean => {
+    const reason = richMarkdownSizeUnavailableReason(nextSource);
+    setSizeUnavailableReason(reason);
+    if (!reason) return false;
+    setDocument(null);
+    setUnavailable(null);
+    setMode('source');
+    return true;
+  }, []);
+
   const openSource = useCallback((nextSource: string): boolean => {
+    if (applySizeGuard(nextSource)) return false;
     try {
       setDocument(openRichDocument(nextSource));
       setUnavailable(null);
@@ -94,7 +108,7 @@ export function useRichMarkdownEditor(
       setMode('source');
       return false;
     }
-  }, []);
+  }, [applySizeGuard]);
 
   const selectMode = useCallback((nextMode: MarkdownEditorMode) => {
     if (!supported) return;
@@ -109,31 +123,34 @@ export function useRichMarkdownEditor(
   }, [openSource, source, supported]);
 
   const reloadSource = useCallback((nextSource: string) => {
-    if (supported && mode === 'rich') {
+    if (applySizeGuard(nextSource)) return;
+    if (supported && sessionMarkdownMode === 'rich') {
       openSource(nextSource);
     } else {
       setDocument(null);
       setUnavailable(null);
     }
-  }, [mode, openSource, supported]);
+  }, [applySizeGuard, openSource, supported]);
 
   const loadSource = useCallback((sourceKey: string, nextSource: string) => {
     if (openedFileRef.current === sourceKey) return;
     openedFileRef.current = sourceKey;
     setUnavailable(null);
     setDocument(null);
+    if (applySizeGuard(nextSource)) return;
     if (!supported || sessionMarkdownMode === 'source') {
       setMode('source');
       return;
     }
     openSource(nextSource);
-  }, [openSource, supported]);
+  }, [applySizeGuard, openSource, supported]);
 
   return {
     supported,
     mode,
     document,
     unavailable,
+    sizeUnavailableReason,
     selectMode,
     clearUnavailable: () => setUnavailable(null),
     loadSource,
@@ -160,9 +177,11 @@ const toggleButtonStyle = {
 export function MarkdownModeToggle({
   mode,
   onChange,
+  richUnavailableReason,
 }: {
   mode: MarkdownEditorMode;
   onChange: (mode: MarkdownEditorMode) => void;
+  richUnavailableReason?: string | null;
 }) {
   return (
     <div
@@ -172,29 +191,58 @@ export function MarkdownModeToggle({
         display: 'flex',
         alignItems: 'center',
         gap: 2,
-        padding: 2,
+        paddingTop: 2,
+        paddingRight: 2,
+        paddingBottom: 2,
+        paddingLeft: 2,
         borderRadius: 9,
         background: 'var(--t-panel)',
       }}
     >
       {(['rich', 'source'] as const).map((candidate) => {
         const active = mode === candidate;
+        const blocked = candidate === 'rich' && Boolean(richUnavailableReason);
         return (
           <button
             key={candidate}
             type="button"
             aria-pressed={active}
-            onClick={() => onChange(candidate)}
+            disabled={blocked}
+            title={blocked ? `Rich mode unavailable: ${richUnavailableReason}` : undefined}
+            onClick={() => {
+              if (!blocked) onChange(candidate);
+            }}
             style={{
               ...toggleButtonStyle,
               color: active ? 'var(--t-text)' : 'var(--t-text-muted)',
               background: active ? 'var(--t-input-bg)' : 'transparent',
+              cursor: blocked ? 'not-allowed' : 'pointer',
+              opacity: blocked ? 0.55 : 1,
             }}
           >
             {candidate === 'rich' ? 'Rich' : 'Source'}
           </button>
         );
       })}
+      {richUnavailableReason ? (
+        <span
+          style={{
+            paddingTop: 0,
+            paddingRight: 8,
+            paddingBottom: 0,
+            paddingLeft: 6,
+            fontFamily: 'var(--font-sans-system)',
+            fontSize: 11,
+            fontWeight: 300,
+            letterSpacing: '-0.1px',
+            lineHeight: 1.25,
+            color: 'var(--t-text-muted)',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          Rich mode unavailable: {richUnavailableReason}
+        </span>
+      ) : null}
     </div>
   );
 }

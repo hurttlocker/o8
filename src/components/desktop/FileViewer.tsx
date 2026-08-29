@@ -403,6 +403,7 @@ export const FileViewer = memo(function FileViewer({ filePath, workspace }: { fi
           <MarkdownModeToggle
             mode={richMarkdown.mode}
             onChange={richMarkdown.selectMode}
+            richUnavailableReason={richMarkdown.sizeUnavailableReason}
           />
         ) : null}
 
