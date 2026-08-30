@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import { isTauri } from '@/lib/tauri/bridge';
 import {
   DEFAULT_SYMON_MACHINE,
@@ -92,7 +92,6 @@ export function SymonOrbStatusLine() {
 }
 
 export function SymonMachineControl() {
-  const prefersReducedMotion = useReducedMotion();
   const [active, setActive] = useState<SymonMachineIdentity>(DEFAULT_SYMON_MACHINE);
   const [machines, setMachines] = useState<ListedMachine[]>([
     { ...DEFAULT_SYMON_MACHINE, available: true },
@@ -198,7 +197,6 @@ export function SymonMachineControl() {
   return (
     <div
       ref={rootRef}
-      title={error || `${active.displayName} has the Symon session`}
       style={{
         position: 'fixed',
         bottom: 120,
@@ -215,9 +213,9 @@ export function SymonMachineControl() {
           <motion.div
             role="dialog"
             aria-label={view === 'capabilities' ? 'Symon capabilities' : 'Symon machine control'}
-            initial={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: 8, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: 6, scale: 0.97 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
             transition={{ type: 'spring', stiffness: 420, damping: 34 }}
             style={{
               position: 'absolute',
@@ -232,10 +230,11 @@ export function SymonMachineControl() {
               borderStyle: 'solid',
               borderColor: error ? 'var(--t-danger)' : 'var(--t-border)',
               borderRadius: 14,
-              background: 'var(--t-bg-card)',
+              background: 'color-mix(in srgb, var(--t-input-bg) 88%, transparent)',
+              backdropFilter: 'blur(28px) saturate(1.2)',
+              WebkitBackdropFilter: 'blur(28px) saturate(1.2)',
               color: 'var(--t-text)',
               boxShadow: '0 12px 34px rgba(0, 0, 0, 0.2)',
-              transformOrigin: 'bottom right',
               fontFamily: 'var(--font-sans-system)',
             }}
           >
@@ -363,6 +362,7 @@ export function SymonMachineControl() {
         aria-label={`Symon machine: ${active.displayName}`}
         aria-expanded={open}
         aria-haspopup="dialog"
+        title={error || `${active.displayName} has the Symon session`}
         onClick={() => setOpen((value) => !value)}
         style={{
           display: 'inline-flex',

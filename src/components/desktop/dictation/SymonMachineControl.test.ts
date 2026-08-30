@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement, type ReactNode } from 'react';
+import { act, createElement, type HTMLAttributes, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -30,12 +30,28 @@ const invoke = vi.fn(async (command: string) => {
   return { id: 'local', displayName: 'This Mac' };
 });
 
+interface MockMotionDivProps extends HTMLAttributes<HTMLDivElement> {
+  initial?: unknown;
+  animate?: unknown;
+  exit?: unknown;
+  transition?: unknown;
+}
+
+const motionState = vi.hoisted(() => ({
+  latest: null as Pick<MockMotionDivProps, 'initial' | 'animate' | 'exit' | 'transition' | 'style'> | null,
+}));
+
 vi.mock('@/lib/tauri/bridge', () => ({ isTauri: () => true }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => {}) }));
 vi.mock('framer-motion', () => ({
   AnimatePresence: ({ children }: { children: ReactNode }) => children,
-  motion: { div: 'div' },
+  motion: {
+    div: ({ children, initial, animate, exit, transition, style, ...props }: MockMotionDivProps) => {
+      motionState.latest = { initial, animate, exit, transition, style };
+      return createElement('div', { ...props, style }, children);
+    },
+  },
   useReducedMotion: () => false,
 }));
 
@@ -50,6 +66,7 @@ describe('SymonMachineControl', () => {
   let root: Root;
 
   beforeEach(() => {
+    motionState.latest = null;
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -102,9 +119,39 @@ describe('SymonMachineControl', () => {
     const starter = Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
       .find((button) => button.textContent?.includes('What needs me right now?'));
     expect(starter).not.toBeUndefined();
+    await act(async () => starter?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
+    expect(starter?.style.background).toBe('var(--t-hover)');
     await act(async () => starter?.click());
     expect(invoke).toHaveBeenCalledWith('agent_run', { prompt: 'What needs me right now?' });
     expect(container.querySelector('[aria-label="Symon capabilities"]')).toBeNull();
+  });
+
+  it('separates the blurred dialog without moving it and keeps the tooltip on the orb', async () => {
+    await act(async () => root.render(createElement(SymonMachineControl)));
+    await act(async () => {});
+
+    const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Symon machine: This Mac"]');
+    expect(trigger?.title).toBe('This Mac has the Symon session');
+    expect(trigger?.parentElement?.hasAttribute('title')).toBe(false);
+
+    await act(async () => trigger?.click());
+    const dialog = container.querySelector<HTMLElement>('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    expect(dialog?.closest('[title]')).toBeNull();
+    expect(dialog?.style.background).toBe('color-mix(in srgb, var(--t-input-bg) 88%, transparent)');
+    expect(dialog?.style.backdropFilter).toBe('blur(28px) saturate(1.2)');
+    expect(motionState.latest?.style).toMatchObject({
+      background: 'color-mix(in srgb, var(--t-input-bg) 88%, transparent)',
+      backdropFilter: 'blur(28px) saturate(1.2)',
+      WebkitBackdropFilter: 'blur(28px) saturate(1.2)',
+    });
+    expect(motionState.latest).toEqual({
+      initial: { opacity: 0 },
+      animate: { opacity: 1 },
+      exit: { opacity: 0 },
+      transition: { type: 'spring', stiffness: 420, damping: 34 },
+      style: expect.any(Object),
+    });
   });
 
   it('unwraps the catalog returned by an active remote machine', () => {
