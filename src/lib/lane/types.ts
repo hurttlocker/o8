@@ -14,6 +14,7 @@
  */
 
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import type { MergeCheckResult } from '@/lib/lane/preview-merge';
 import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 import type { OrchestratorRuntime, WorkerLaunchContext } from '@/lib/orchestrator/types';
 import type { PacketSpendCap } from '@/lib/orchestrator/metered-spend';
@@ -522,6 +523,10 @@ export interface LaneCommandResult {
   currentHeadSha?: string;
   /** Merge-specific structured refusal reason */
   reason?: string;
+  /** Merge-specific verification receipt, including post-rebase checks. */
+  checks?: MergeCheckResult[];
+  /** Merge-specific blocking check names. */
+  blockers?: string[];
 }
 
 // ── Persisted State ──

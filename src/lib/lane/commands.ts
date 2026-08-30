@@ -842,7 +842,11 @@ async function dispatchUnlocked(
         lane,
         command,
         actor,
-        gateResult: { passed: gateResult.passed, violations: gateResult.violations },
+        gateResult: {
+          passed: gateResult.passed,
+          violations: gateResult.violations,
+          diffBase: gateResult.diffBase,
+        },
         createLaneActionApproval,
       });
     }

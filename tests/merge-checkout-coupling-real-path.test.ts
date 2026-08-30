@@ -1,6 +1,13 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 
@@ -33,6 +40,7 @@ vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
 }));
 
 const mergeRoute = await import('@/app/api/orchestrator/merge/route');
+const mergePreviewRoute = await import('@/app/api/orchestrator/merge-preview/route');
 const reviewStateRoute = await import('@/app/api/orchestrator/review-state/route');
 const { recordOrchestratorReview } = await import('@/lib/approvals/store');
 const { createLane } = await import('@/lib/lane/registry');
@@ -63,7 +71,9 @@ function commitAll(cwd: string, message: string): void {
   ]);
 }
 
-async function createFixture(label: string, approved: boolean) {
+type LintFixtureMode = 'error' | 'clean' | 'no-config';
+
+async function createFixture(label: string, approved: boolean, lintMode?: LintFixtureMode) {
   const root = mkdtempSync(join(os.tmpdir(), `o8-merge-checkout-${label}-`));
   const origin = join(root, 'origin.git');
   const repo = join(root, 'operator');
@@ -77,6 +87,23 @@ async function createFixture(label: string, approved: boolean) {
   git(repo, ['config', 'user.name', 'o8-test']);
   git(repo, ['config', 'user.email', 'o8@example.test']);
   writeFileSync(join(repo, 'file.txt'), 'base\n');
+  if (lintMode) {
+    writeFileSync(join(repo, 'package.json'), JSON.stringify({
+      private: true,
+      scripts: { lint: 'eslint .' },
+      devDependencies: { eslint: '^9.39.5' },
+    }, null, 2));
+    writeFileSync(join(repo, '.gitignore'), 'node_modules/\n');
+    if (lintMode !== 'no-config') {
+      writeFileSync(join(repo, 'eslint.config.mjs'), [
+        'export default [{',
+        "  files: ['**/*.js'],",
+        "  linterOptions: { reportUnusedDisableDirectives: 'error' },",
+        '}];',
+        '',
+      ].join('\n'));
+    }
+  }
   commitAll(repo, 'base');
   git(repo, ['push', '-u', 'origin', 'main']);
 
@@ -91,7 +118,18 @@ async function createFixture(label: string, approved: boolean) {
   });
   git(worktree.path, ['config', 'user.name', 'o8-test']);
   git(worktree.path, ['config', 'user.email', 'o8@example.test']);
-  writeFileSync(join(worktree.path, 'file.txt'), 'base\nworker\n');
+  if (lintMode) {
+    symlinkSync(join(process.cwd(), 'node_modules'), join(worktree.path, 'node_modules'), 'junction');
+    mkdirSync(join(worktree.path, 'src'), { recursive: true });
+    writeFileSync(
+      join(worktree.path, 'src', 'packet.js'),
+      lintMode === 'error'
+        ? '/* eslint-disable no-console */\nexport const packetValue = 1;\n'
+        : 'export const packetValue = 1;\n',
+    );
+  } else {
+    writeFileSync(join(worktree.path, 'file.txt'), 'base\nworker\n');
+  }
   commitAll(worktree.path, 'worker change');
   const reviewedHeadSha = git(worktree.path, ['rev-parse', 'HEAD']);
   const lane = createLane({
@@ -138,6 +176,7 @@ async function createFixture(label: string, approved: boolean) {
     } : null,
     workspaceTargetPath: repo,
     branchTarget: branch,
+    typecheckAutoRetries: lintMode === 'error' ? 1 : 0,
   } as OrchestratorPacket;
   const missionState = normalizeOrchestratorMissionState({
     version: 2,
@@ -189,6 +228,18 @@ function reviewStateRequest(packetId: string): NextRequest {
   );
 }
 
+function mergePreviewRequest(packetId: string): NextRequest {
+  return new NextRequest(
+    `http://localhost:3001/api/orchestrator/merge-preview?packetId=${encodeURIComponent(packetId)}`,
+    {
+      headers: {
+        host: 'localhost:3001',
+        authorization: `Bearer ${getOrCreateWsToken()}`,
+      },
+    },
+  );
+}
+
 beforeAll(async () => {
   await updateOperatorDefaults({
     productTelemetryEnabled: false,
@@ -209,6 +260,62 @@ afterAll(() => {
 });
 
 describe('merge checkout coupling through real handlers', () => {
+  it('refuses lint errors and reports the changed-file diagnostic through preview and approve_and_merge', async () => {
+    const fixture = await createFixture('lint-error', true, 'error');
+    const baseHead = git(fixture.repo, ['rev-parse', 'refs/heads/main']);
+
+    const previewResponse = await mergePreviewRoute.GET(mergePreviewRequest(fixture.packetId));
+    const preview = await previewResponse.json();
+    const previewLint = preview.checks.find((check: { name: string }) => check.name === 'lint');
+    const previewTypecheck = preview.checks.find((check: { name: string }) => check.name === 'typecheck');
+
+    expect(previewResponse.status).toBe(200);
+    expect(preview).toMatchObject({ wouldMerge: false, blockers: ['lint'] });
+    expect(previewTypecheck).toMatchObject({ name: 'typecheck', verdict: 'skipped' });
+    expect(previewLint).toMatchObject({ name: 'lint', verdict: 'fail' });
+    expect(previewLint.detail).toContain('src/packet.js:1:unused-disable');
+
+    const mergeResponse = await mergeRoute.POST(mergeRequest(fixture.packetId));
+    const payload = await mergeResponse.json();
+    const lintCheck = payload.result.checks.find((check: { name: string }) => check.name === 'lint');
+
+    expect(mergeResponse.status).toBe(200);
+    expect(payload).toMatchObject({
+      ok: true,
+      result: {
+        merged: false,
+        blockers: ['lint'],
+      },
+    });
+    expect(lintCheck).toMatchObject({ name: 'lint', verdict: 'fail' });
+    expect(lintCheck.detail).toContain('src/packet.js:1:unused-disable');
+    expect(payload.result.note).toContain('src/packet.js:1:unused-disable');
+    expect(git(fixture.repo, ['rev-parse', 'refs/heads/main'])).toBe(baseHead);
+  }, 60_000);
+
+  it('merges a clean linted packet with a passing receipt', async () => {
+    const clean = await createFixture('lint-clean', true, 'clean');
+    const cleanResponse = await mergeRoute.POST(mergeRequest(clean.packetId));
+    const cleanPayload = await cleanResponse.json();
+    const cleanLint = cleanPayload.result.checks.find((check: { name: string }) => check.name === 'lint');
+
+    expect(cleanResponse.status).toBe(200);
+    expect(cleanPayload).toMatchObject({ ok: true, result: { merged: true } });
+    expect(cleanLint).toMatchObject({ name: 'lint', verdict: 'pass' });
+  }, 60_000);
+
+  it('merges with a skipped lint receipt when config is absent', async () => {
+    const noConfig = await createFixture('lint-no-config', true, 'no-config');
+    const noConfigResponse = await mergeRoute.POST(mergeRequest(noConfig.packetId));
+    const noConfigPayload = await noConfigResponse.json();
+    const skippedLint = noConfigPayload.result.checks.find((check: { name: string }) => check.name === 'lint');
+
+    expect(noConfigResponse.status).toBe(200);
+    expect(noConfigPayload).toMatchObject({ ok: true, result: { merged: true } });
+    expect(skippedLint).toMatchObject({ name: 'lint', verdict: 'skipped' });
+    expect(skippedLint.detail).toContain('no ESLint config');
+  }, 60_000);
+
   it('refuses before advancing a base branch held by another worktree', async () => {
     const fixture = await createFixture('base-held-elsewhere', true);
     git(fixture.repo, ['checkout', '-b', 'operator/wip']);

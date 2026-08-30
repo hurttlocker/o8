@@ -6,17 +6,17 @@ import type {
 } from '@/lib/approvals/types';
 import { resolveAttributedCommitMessage } from '@/lib/lane/commit-attribution';
 import { checkExpectedHeadSha, formatHeadShaMismatchNote } from '@/lib/lane/head-sha-lock';
-import { supersedeDurableApprovedReviews } from '@/lib/lane/durable-review-approval';
 import { checkReviewedHeadIntegrity, formatReviewedHeadMismatchNote } from '@/lib/lane/review-head-integrity';
 import { dogfoodPrOnlyActive, DOGFOOD_PR_ONLY_NOTE } from '@/lib/lane/dogfood-guard';
 import {
   appendEvent,
-  countLaneEventsByVerbSinceLastLaunch,
   getLane,
   setLaneStatus,
 } from '@/lib/lane/registry';
 import { runLaneRebaseVerify } from '@/lib/lane/rebase-verify';
+import { buildCheckList } from '@/lib/lane/preview-merge';
 import type { Lane, LaneCommand, LaneCommandResult, LaneEventActor } from '@/lib/lane/types';
+import { handlePostRebaseVerifyFailure } from '@/lib/lane/worktree-side-merge-verify';
 import { settleSuccessfulMergeWorktreeCleanup } from '@/lib/lane/successful-merge-worktree-cleanup';
 import {
   commitSpokenReviewSnapshotWithDriftRecovery,
@@ -199,169 +199,6 @@ function createFetchUnreachableResult(
   };
 }
 
-/**
- * Maximum bytes of tsc output we stuff into event payloads / blockedReason.
- * The head of the diagnostic is what the orchestrator needs to reason about;
- * the full output is still recoverable from the lane_events row.
- */
-const TYPECHECK_FEEDBACK_MAX_BYTES = 4 * 1024;
-
-function truncateForBlocker(output: string): string {
-  if (output.length <= TYPECHECK_FEEDBACK_MAX_BYTES) return output;
-  return `${output.slice(0, TYPECHECK_FEEDBACK_MAX_BYTES)}\n\n[truncated — full output in lane_events]`;
-}
-
-function formatTypecheckFeedback(lane: Lane, output: string): string {
-  return [
-    `Post-rebase typecheck failed after rebasing ${lane.branch} onto ${lane.baseBranch}.`,
-    'Fix the type errors below, then commit so the operator can re-attempt the merge.',
-    '',
-    truncateForBlocker(output),
-  ].join('\n');
-}
-
-/**
- * Read the packet's spent auto-rerun budget from control-plane state.
- * Returns null when the packet can't be found (caller falls back to the
- * per-lane event count, which is the legacy behavior).
- */
-async function readPacketTypecheckRetries(
-  packetId: string | null | undefined,
-): Promise<number | null> {
-  if (!packetId) return null;
-  try {
-    const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
-    const packet = readOrchestratorControlPlaneState().packets.find((p) => p.id === packetId);
-    return packet ? (packet.typecheckAutoRetries ?? 0) : null;
-  } catch {
-    return null;
-  }
-}
-
-async function handlePostRebaseVerifyFailure(
-  input: WorktreeSideMergeInput,
-  failure: { kind: 'typecheck' | 'tests'; output: string },
-): Promise<LaneCommandResult> {
-  const { lane, command, actor } = input;
-  const truncatedOutput = truncateForBlocker(failure.output);
-  // The retry budget lives ON the packet, not the lane: layer-1 auto-rerun
-  // archives this lane and dispatches a brand-new one, so a per-lane count is
-  // always 0 again on the retry's own merge attempt — which silently defeated
-  // the "1 extra worker turn" cost ceiling and let a persistently type-broken
-  // packet loop full workers. Per-lane count remains the fallback for lanes
-  // whose packet isn't in control-plane state.
-  const priorAutoRetries = (await readPacketTypecheckRetries(lane.packetId))
-    ?? countLaneEventsByVerbSinceLastLaunch(command.laneId, 'typecheck_auto_retry');
-
-  // ── Layer 2: escalate to orchestrator ──
-  // Reached when layer 1 already fired during this lane lifecycle (or when we
-  // have no packetId to redispatch against).
-  if (priorAutoRetries >= 1 || !lane.packetId) {
-    const escalationReason = priorAutoRetries >= 1 ? 'retry_exhausted' : 'no_packet';
-    const blockedReason = !lane.packetId
-      ? `${failure.kind === 'tests' ? 'Tests' : 'Typecheck'} failed after rebase onto ${lane.baseBranch}. No packetId on lane, cannot auto-rerun. Orchestrator decision needed (steer / redispatch / abandon).\n\n${truncatedOutput}`
-      : `${failure.kind === 'tests' ? 'Tests' : 'Typecheck'} failed after 1 auto-retry. Orchestrator decision needed (steer / redispatch / abandon).\n\n${truncatedOutput}`;
-    appendEvent(command.laneId, 'typecheck_escalation', 'system', {
-      reason: escalationReason,
-      priorAutoRetries,
-      branch: lane.branch,
-      baseBranch: lane.baseBranch,
-      packetId: lane.packetId,
-      output: truncatedOutput,
-    });
-    // The eventLabel is what the inbox / o8_status surfaces as the lane
-    // headline; keep it short and structured so the orchestrator can scan.
-    setLaneStatus(
-      command.laneId,
-      'awaiting_orchestrator',
-      'system',
-      `typecheck_escalated:${escalationReason}`,
-    );
-    return {
-      ok: false,
-      laneId: command.laneId,
-      note: blockedReason,
-    };
-  }
-
-  // ── Layer 1: auto-rerun (capped at 1) ──
-  // Record the attempt BEFORE dispatching so a crash mid-rerun still counts —
-  // we'd rather escalate on the next attempt than loop forever.
-  appendEvent(command.laneId, 'typecheck_auto_retry', 'system', {
-    branch: lane.branch,
-    baseBranch: lane.baseBranch,
-    packetId: lane.packetId,
-    output: truncatedOutput,
-  });
-  setLaneStatus(command.laneId, 'reviewing', actor, 'typecheck_auto_retry');
-
-  await supersedeDurableApprovedReviews(lane.packetId, 'Superseded by typecheck auto-rerun.');
-
-  // Persist the spent retry on the packet BEFORE dispatching — crash-safe in
-  // the same spirit as the event append above: better to escalate next time
-  // than to loop.
-  try {
-    const { withLockedState } = await import('@/lib/orchestrator/control-plane');
-    await withLockedState((current) => {
-      const packet = current.packets.find((p) => p.id === lane.packetId);
-      if (packet) packet.typecheckAutoRetries = (packet.typecheckAutoRetries ?? 0) + 1;
-    });
-  } catch (error) {
-    console.warn(
-      `[lane-merge] Could not persist typecheck retry budget for packet ${lane.packetId}: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-
-  // Fire-and-forget the redispatch. The operator's merge call returns
-  // immediately; the new lane spins up async. If the call fails outright
-  // we promote to awaiting_orchestrator so nothing silently stalls.
-  const feedback = formatTypecheckFeedback(lane, failure.output);
-  void (async () => {
-    try {
-      // Guard the reset_packet race (#1257): the operator may have held this
-      // packet during the async gap before this rerun launches. A held packet
-      // must never auto-dispatch — re-read the authoritative state and bail
-      // rather than spawn a fresh session that makes reset_packet "not stick".
-      const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
-      const currentPacket = readOrchestratorControlPlaneState().packets.find((p) => p.id === lane.packetId);
-      if (!currentPacket || currentPacket.queueState === 'held') {
-        console.log(
-          `[lane-merge] Skipping auto-rerun for packet ${lane.packetId} — ${currentPacket ? 'packet is held (reset_packet)' : 'packet no longer exists'} (#1257).`,
-        );
-        return;
-      }
-      const { rerunWithFeedback } = await import('@/lib/orchestrator/operator-mission-service');
-      await rerunWithFeedback({ packetId: lane.packetId!, feedback });
-      console.log(
-        `[lane-merge] Auto-rerun dispatched for packet ${lane.packetId} after typecheck failure on lane ${command.laneId}`,
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(
-        `[lane-merge] Auto-rerun failed for packet ${lane.packetId} on lane ${command.laneId}: ${message}`,
-      );
-      // Escalate so the operator/orchestrator sees the stall instead of a silent miss.
-      appendEvent(command.laneId, 'typecheck_escalation', 'system', {
-        reason: 'rerun_dispatch_failed',
-        priorAutoRetries: priorAutoRetries + 1,
-        branch: lane.branch,
-        baseBranch: lane.baseBranch,
-        packetId: lane.packetId,
-        output: truncatedOutput,
-        dispatchError: message,
-      });
-      setLaneStatus(command.laneId, 'awaiting_orchestrator', 'system', 'typecheck_rerun_failed');
-    }
-  })();
-
-  return {
-    ok: false,
-    laneId: command.laneId,
-    note: `Typecheck failed after rebase onto ${lane.baseBranch}. Auto-rerun dispatched with the tsc output as feedback; the packet will retry in a fresh worktree.\n\n${truncatedOutput}`,
-    reason: 'typecheck_auto_retry',
-  };
-}
-
 async function fetchOriginBaseForBaseDriftRetry(
   cwd: string,
   baseBranch: string,
@@ -422,7 +259,12 @@ async function retryBaseAdvancedAfterRebase(
       throw error;
     }
 
-    const verify = await runLaneRebaseVerify({ cwd: opts.worktreePath, actualBranch: opts.actualBranch, logPrefix: 'lane-merge' });
+    const verify = await runLaneRebaseVerify({
+      cwd: opts.worktreePath,
+      baseRef: lane.baseBranch,
+      actualBranch: opts.actualBranch,
+      logPrefix: 'lane-merge',
+    });
     if (!verify.ok) {
       return handlePostRebaseVerifyFailure(input, verify);
     }
@@ -663,6 +505,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
 
     const verify = await runLaneRebaseVerify({
       cwd: mergeWorktreePath,
+      baseRef: lane.baseBranch,
       actualBranch,
       logPrefix: 'lane-merge',
     });
@@ -674,6 +517,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       // by the orchestrator and not handled in this file.
       return handlePostRebaseVerifyFailure(input, verify);
     }
+    const mergeChecks = buildCheckList(input.gateResult, verify.checks);
 
     if (!reviewedHead.reviewedHeadSha) await amendViaO8Suffix(mergeWorktreePath, lane.label);
     const { stdout: rebasedShaOutput } = await git(mergeWorktreePath, ['rev-parse', 'HEAD']);
@@ -786,6 +630,8 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       mergeSha,
       pushedToOrigin,
       pushError,
+      checks: mergeChecks,
+      blockers: [],
     };
   } catch (error) {
     setLaneStatus(command.laneId, 'reviewing', 'system', 'merge_error');

@@ -381,6 +381,7 @@ async function dispatchPacketMerge(
     surfaceDispatcherApproved: input.actor === 'user',
     actor,
   });
+  const { mergePacketResultFromLaneCommand } = await import('@/lib/lane/worktree-side-merge-verify');
 
   if (!result.ok && result.reason === 'head_moved_since_review' && result.reviewedHeadSha && result.currentHeadSha) {
     const { carryReviewAcrossRebaseIfSamePatch } = await loadReviewCarry();
@@ -502,12 +503,7 @@ async function dispatchPacketMerge(
   const failedLane = !result.ok ? findLatestLaneByPacket(packet.id) : null;
   if (!result.ok && (failedLane?.status === 'reviewing' || failedLane?.status === 'awaiting_orchestrator')) {
     log(`Merge command held for packet ${packet.id}.`, { note: result.note, actor });
-    return withGateVerdict(packet.id, {
-      merged: false,
-      note: result.note,
-      approvalId: result.approvalId,
-      reason: result.reason,
-    }, packet.review?.approved === true);
+    return withGateVerdict(packet.id, mergePacketResultFromLaneCommand(result), packet.review?.approved === true);
   }
 
   // Adversarial F3 — the release mutation lands under the lock against a
@@ -579,15 +575,7 @@ async function dispatchPacketMerge(
     actor,
   });
 
-  return withGateVerdict(packet.id, {
-    merged: result.ok,
-    note: result.note,
-    ...(result.mergeSha ? { mergeSha: result.mergeSha } : {}),
-    ...(result.approvalId ? { approvalId: result.approvalId } : {}),
-    ...(result.reason ? { reason: result.reason } : {}),
-    ...(result.reviewedHeadSha ? { reviewedHeadSha: result.reviewedHeadSha } : {}),
-    ...(result.currentHeadSha ? { currentHeadSha: result.currentHeadSha } : {}),
-  }, packet.review?.approved === true);
+  return withGateVerdict(packet.id, mergePacketResultFromLaneCommand(result), packet.review?.approved === true);
 }
 
 async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise<MergePacketResult> {
@@ -741,7 +729,7 @@ export async function approveAndMergePacket(input: ApproveAndMergeInput) {
   }
 
   return {
-    merged: true,
+    ...requestedResult,
     note: mergedPrerequisites.length > 0
       ? `Merged ${mergedPrerequisites.join(', ')} before ${packet.referenceLabel} based on recommended same-wave merge order. ${requestedResult.note}`
       : requestedResult.note,
