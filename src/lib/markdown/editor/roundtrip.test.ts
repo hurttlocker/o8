@@ -4,7 +4,6 @@ import type { Node as ProseMirrorNode } from 'prosemirror-model';
 import { describe, expect, it } from 'vitest';
 import { serializeDocument } from '@/lib/markdown/transport';
 import { applyRichDocument, openRichDocument } from './document';
-import { UnsupportedMarkdownError } from './from-mdast';
 import { richMarkdownSchema } from './schema';
 
 const fixtures = resolve(import.meta.dirname, '../../../../tests/fixtures/markdown/rich-core');
@@ -185,16 +184,23 @@ describe('rich Markdown source contract', () => {
   });
 });
 
-describe('unsupported rich Markdown constructs', () => {
-  it('rejects paragraph images with their exact line', () => {
-    let thrown: unknown;
-    try {
-      openRichDocument(fixture('unsupported-image.md'));
-    } catch (error) {
-      thrown = error;
-    }
+describe('rich Markdown images', () => {
+  it('opens and preserves a paragraph image byte-for-byte', () => {
+    const source = fixture('unsupported-image.md');
+    const opened = openRichDocument(source);
+    const applied = applyRichDocument(opened.transport, opened.pmDoc);
+    let image = null;
+    opened.pmDoc.descendants((node) => {
+      if (node.type === richMarkdownSchema.nodes.image) image = node;
+    });
 
-    expect(thrown).toBeInstanceOf(UnsupportedMarkdownError);
-    expect(thrown).toMatchObject({ construct: 'image', line: 3 });
+    expect(image).toMatchObject({
+      attrs: {
+        src: './image.png',
+        alt: 'Alt text',
+        title: 'Image title',
+      },
+    });
+    expect(serializeDocument(applied)).toBe(source);
   });
 });

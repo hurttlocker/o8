@@ -201,6 +201,37 @@ const nodes: Record<string, NodeSpec> = {
       style: monoStyle,
     }, String(node.attrs.source)],
   },
+  image: {
+    attrs: {
+      src: {},
+      alt: { default: '' },
+      title: { default: null },
+    },
+    inline: true,
+    group: 'inline',
+    atom: true,
+    draggable: true,
+    parseDOM: [{
+      tag: 'img[src]',
+      getAttrs: (dom) => ({
+        src: (dom as HTMLImageElement).getAttribute('src'),
+        alt: (dom as HTMLImageElement).getAttribute('alt') ?? '',
+        title: (dom as HTMLImageElement).getAttribute('title'),
+      }),
+    }],
+    toDOM: (node) => ['img', {
+      src: node.attrs.src,
+      alt: node.attrs.alt,
+      title: node.attrs.title ?? undefined,
+      style: [
+        'display:inline-block',
+        'max-width:100%',
+        'height:auto',
+        'border-radius:8px',
+        'vertical-align:middle',
+      ].join(';'),
+    }],
+  },
   hard_break: {
     inline: true,
     group: 'inline',

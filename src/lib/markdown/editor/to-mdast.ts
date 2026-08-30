@@ -12,6 +12,7 @@ interface MdastNode {
   lang?: string | null;
   meta?: string | null;
   url?: string;
+  alt?: string;
   title?: string | null;
   children?: MdastNode[];
 }
@@ -76,6 +77,13 @@ function inlineToMdast(node: ProseMirrorNode): MdastNode[] {
       containers[containers.length - 1].push({
         type: 'html',
         value: String(child.attrs.source),
+      });
+    } else if (child.type.name === 'image') {
+      containers[containers.length - 1].push({
+        type: 'image',
+        url: String(child.attrs.src ?? ''),
+        alt: String(child.attrs.alt ?? ''),
+        title: typeof child.attrs.title === 'string' ? child.attrs.title : null,
       });
     } else if (child.type.name === 'hard_break') {
       containers[containers.length - 1].push({ type: 'break' });

@@ -11,6 +11,7 @@ interface MdastNode {
   lang?: string | null;
   meta?: string | null;
   url?: string;
+  alt?: string;
   title?: string | null;
   identifier?: string;
   children?: MdastNode[];
@@ -241,6 +242,13 @@ function inlineContent(
           line,
           options,
         ));
+        break;
+      case 'image':
+        output.push(schema.nodes.image.createChecked({
+          src: node.url ?? '',
+          alt: node.alt ?? '',
+          title: node.title ?? null,
+        }, null, marks));
         break;
       case 'break':
         output.push(schema.nodes.hard_break.create(null, null, marks));

@@ -15,102 +15,14 @@
 
 import { EditorView } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
-
-const IMAGE_MIME = /^image\/(png|jpe?g|gif|webp|avif|svg\+xml)$/i;
-
-function isUploadableImage(file: File): boolean {
-  return IMAGE_MIME.test(file.type);
-}
-
-function imageFilesFromList(list: FileList | null | undefined): File[] {
-  if (!list) return [];
-  return Array.from(list).filter(isUploadableImage);
-}
-
-// Paste exposes the image on clipboardData.files in modern Chromium, but fall
-// back to the items[] API for robustness.
-function imageFilesFromClipboard(dt: DataTransfer | null | undefined): File[] {
-  if (!dt) return [];
-  const fromFiles = imageFilesFromList(dt.files);
-  if (fromFiles.length > 0) return fromFiles;
-  const out: File[] = [];
-  for (const item of Array.from(dt.items ?? [])) {
-    if (item.kind === 'file') {
-      const f = item.getAsFile();
-      if (f && isUploadableImage(f)) out.push(f);
-    }
-  }
-  return out;
-}
-
-interface ImageSize {
-  width: number;
-  height: number;
-}
-
-// createImageBitmap is the cheapest path (no DOM, no leak) and works in the
-// Tauri webview. SVGs often report 0×0 — fall back to <img>, then give up (the
-// render widget falls back to a default aspect when WxH is absent).
-async function readImageSize(file: File): Promise<ImageSize | null> {
-  try {
-    const bmp = await createImageBitmap(file);
-    const size = { width: bmp.width, height: bmp.height };
-    bmp.close();
-    if (size.width > 0 && size.height > 0) return size;
-  } catch {
-    /* fall through */
-  }
-  try {
-    const url = URL.createObjectURL(file);
-    const size = await new Promise<ImageSize | null>((res) => {
-      const img = new Image();
-      img.onload = () => res({ width: img.naturalWidth, height: img.naturalHeight });
-      img.onerror = () => res(null);
-      img.src = url;
-    });
-    URL.revokeObjectURL(url);
-    if (size && size.width > 0 && size.height > 0) return size;
-  } catch {
-    /* ignore */
-  }
-  return null;
-}
-
-async function uploadSpecImage(repoPath: string, file: File): Promise<string> {
-  const res = await fetch(`/api/repo-spec/asset?repoPath=${encodeURIComponent(repoPath)}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': file.type,
-      'x-filename': encodeURIComponent(file.name || 'image'),
-    },
-    body: file,
-  });
-  const data = (await res.json().catch(() => null)) as { ok?: boolean; relPath?: unknown; error?: unknown } | null;
-  if (!res.ok || !data?.ok || typeof data.relPath !== 'string') {
-    throw new Error(typeof data?.error === 'string' ? data.error : `upload failed (${res.status})`);
-  }
-  return data.relPath;
-}
-
-function altFromName(name: string): string {
-  return (name.replace(/\.[^.]+$/, '') || 'image').replace(/[\]\r\n"]/g, '').trim().slice(0, 80) || 'image';
-}
-
-function buildImageMarkdown(relPath: string, alt: string, size: ImageSize | null): string {
-  const title = size ? ` "${size.width}x${size.height}"` : '';
-  return `![${alt}](${relPath}${title})`;
-}
-
-let nonceCounter = 0;
-function nextNonce(): string {
-  nonceCounter += 1;
-  return `${Date.now().toString(36)}${nonceCounter.toString(36)}`;
-}
-
-interface PendingInsert {
-  file: File;
-  placeholder: string;
-}
+import {
+  buildImageMarkdown,
+  createImageFileUploads,
+  createImagePathUploads,
+  imageFilesFromClipboard,
+  imageFilesFromList,
+  type PendingMarkdownImageUpload,
+} from '../markdown-image-upload';
 
 // Replace the exact placeholder string wherever it currently sits — robust to
 // the operator editing elsewhere while an upload is in flight (positions move,
@@ -124,12 +36,13 @@ function swapPlaceholder(view: EditorView, placeholder: string, replacement: str
   view.dispatch({ changes: { from: idx, to, insert: replacement } });
 }
 
-function handleImageFiles(view: EditorView, repoPath: string, pos: number, files: File[]): void {
-  const pending: PendingInsert[] = files.map((file) => {
-    const safeName = (file.name || 'image').replace(/[\]\r\n]/g, '').slice(0, 60);
-    return { file, placeholder: `![Uploading ${safeName}…](#o8-upload-${nextNonce()})` };
-  });
-
+function handlePendingUploads(
+  view: EditorView,
+  pos: number,
+  pending: PendingMarkdownImageUpload[],
+  warning: string,
+): void {
+  if (pending.length === 0) return;
   // Insert all placeholders as one consecutive block, each on its own line, with
   // newline boundaries so the refs are pure-image lines (what P2's matcher and
   // gallery grouping key on) without leaving stray blank lines.
@@ -139,20 +52,28 @@ function handleImageFiles(view: EditorView, repoPath: string, pos: number, files
   const after = at < docLen ? view.state.doc.sliceString(at, at + 1) : '\n';
   const lead = before === '\n' ? '' : '\n';
   const trail = after === '\n' ? '' : '\n';
-  const block = lead + pending.map((p) => p.placeholder).join('\n') + trail;
+  const block = lead + pending.map((upload) => buildImageMarkdown(upload.placeholder)).join('\n') + trail;
   view.dispatch({ changes: { from: at, insert: block }, selection: { anchor: at + block.length } });
 
-  for (const p of pending) {
-    void (async () => {
-      try {
-        const [relPath, size] = await Promise.all([uploadSpecImage(repoPath, p.file), readImageSize(p.file)]);
-        swapPlaceholder(view, p.placeholder, buildImageMarkdown(relPath, altFromName(p.file.name), size), false);
-      } catch (err) {
-        console.warn('[o8-spec-image] upload failed', err);
-        swapPlaceholder(view, p.placeholder, '', true);
-      }
-    })();
+  for (const upload of pending) {
+    const placeholder = buildImageMarkdown(upload.placeholder);
+    void upload.result.then(
+      (image) => swapPlaceholder(view, placeholder, buildImageMarkdown(image), false),
+      (error: unknown) => {
+        console.warn(warning, error);
+        swapPlaceholder(view, placeholder, '', true);
+      },
+    );
   }
+}
+
+function handleImageFiles(view: EditorView, repoPath: string, pos: number, files: File[]): void {
+  handlePendingUploads(
+    view,
+    pos,
+    createImageFileUploads(repoPath, files),
+    '[o8-spec-image] upload failed',
+  );
 }
 
 /* ────────────────────────────────────────────────────────────────────── */
@@ -169,55 +90,18 @@ function handleImageFiles(view: EditorView, repoPath: string, pos: number, files
  * upload counterpart that takes those absolute paths and inserts the same
  * `![alt](o8-assets/...)` refs the body-bytes path produces.
  */
-const TAURI_IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.svg']);
-
-async function uploadSpecImageByPath(repoPath: string, srcPath: string): Promise<string> {
-  const url = `/api/repo-spec/asset?repoPath=${encodeURIComponent(repoPath)}&srcPath=${encodeURIComponent(srcPath)}`;
-  const res = await fetch(url, { method: 'POST' });
-  const data = (await res.json().catch(() => null)) as { ok?: boolean; relPath?: unknown; error?: unknown } | null;
-  if (!res.ok || !data?.ok || typeof data.relPath !== 'string') {
-    throw new Error(typeof data?.error === 'string' ? data.error : `upload failed (${res.status})`);
-  }
-  return data.relPath;
-}
-
 export function handleImagePathsViaTauri(
   view: EditorView,
   repoPath: string,
   pos: number,
   paths: string[],
 ): void {
-  const imagePaths = paths.filter((p) => {
-    const dot = p.lastIndexOf('.');
-    return dot >= 0 && TAURI_IMAGE_EXTS.has(p.slice(dot).toLowerCase());
-  });
-  if (imagePaths.length === 0) return;
-
-  const pending = imagePaths.map((srcPath) => {
-    const baseName = (srcPath.split('/').pop() || 'image').replace(/[\]\r\n]/g, '').slice(0, 60);
-    return { srcPath, baseName, placeholder: `![Uploading ${baseName}…](#o8-upload-${nextNonce()})` };
-  });
-
-  const docLen = view.state.doc.length;
-  const at = Math.max(0, Math.min(pos, docLen));
-  const before = at > 0 ? view.state.doc.sliceString(at - 1, at) : '\n';
-  const after = at < docLen ? view.state.doc.sliceString(at, at + 1) : '\n';
-  const lead = before === '\n' ? '' : '\n';
-  const trail = after === '\n' ? '' : '\n';
-  const block = lead + pending.map((p) => p.placeholder).join('\n') + trail;
-  view.dispatch({ changes: { from: at, insert: block }, selection: { anchor: at + block.length } });
-
-  for (const p of pending) {
-    void (async () => {
-      try {
-        const relPath = await uploadSpecImageByPath(repoPath, p.srcPath);
-        swapPlaceholder(view, p.placeholder, buildImageMarkdown(relPath, altFromName(p.baseName), null), false);
-      } catch (err) {
-        console.warn('[o8-spec-image] upload via path failed', err);
-        swapPlaceholder(view, p.placeholder, '', true);
-      }
-    })();
-  }
+  handlePendingUploads(
+    view,
+    pos,
+    createImagePathUploads(repoPath, paths),
+    '[o8-spec-image] upload via path failed',
+  );
 }
 
 /**

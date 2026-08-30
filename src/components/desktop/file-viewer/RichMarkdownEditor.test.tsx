@@ -33,6 +33,10 @@ vi.mock('@/lib/theme/context', () => ({
   useTheme: () => ({ themeId: 'light-solid' }),
 }));
 
+vi.mock('@/lib/hooks/use-tauri-file-drop', () => ({
+  useTauriFileDrop: () => ({ dragOver: false }),
+}));
+
 vi.mock('../lucide-shims', () => ({
   FileText: () => createElement('svg', { 'aria-hidden': 'true' }),
 }));
@@ -292,7 +296,7 @@ describe('FileViewer rich Markdown editor', () => {
       .toBe(table);
   });
 
-  it('stays in Source and explains the first unsupported construct', async () => {
+  it('opens an existing Markdown image in Rich without changing its source', async () => {
     const source = 'Supported paragraph.\n\n![Alt](./image.png)\n';
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
@@ -312,10 +316,132 @@ describe('FileViewer rich Markdown editor', () => {
 
     act(() => button(container, 'Rich').click());
 
-    expect(button(container, 'Source').getAttribute('aria-pressed')).toBe('true');
-    expect(container.textContent).toContain('Rich mode unavailable: image at line 3');
-    expect(container.querySelector('[data-rich-markdown-editor="true"]')).toBeNull();
+    expect(button(container, 'Rich').getAttribute('aria-pressed')).toBe('true');
+    const mount = container.querySelector<HTMLElement>('[data-rich-markdown-editor="true"]');
+    expect(mount).not.toBeNull();
+    const view = getRichMarkdownEditorView(mount!);
+    expect(view?.state.doc.child(1).child(0).attrs).toMatchObject({
+      src: './image.png',
+      alt: 'Alt',
+      title: null,
+    });
+    act(() => button(container, 'Source').click());
     expect(container.querySelector<HTMLTextAreaElement>('[data-testid="monaco-editor"]')?.value).toBe(source);
+  });
+
+  async function mountImageInputFile(source: string) {
+    vi.stubGlobal('createImageBitmap', vi.fn(async () => ({
+      width: 640,
+      height: 480,
+      close: vi.fn(),
+    })));
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/api/panel/file-content')) {
+        return reply({ content: source, contentHash: 'image-input-hash' });
+      }
+      if (url.includes('/api/panel/file-diff')) {
+        return reply({ diff: '', hasDiff: false });
+      }
+      if (url.startsWith('/api/repo-spec/asset?repoPath=%2Frepo')) {
+        return reply({ ok: true, relPath: 'o8-assets/proof-hash.png' });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    }));
+
+    await act(async () => {
+      root.render(createElement(FileViewer, {
+        filePath: '/repo/notes/image-input.md',
+        workspace: '/repo',
+      }));
+    });
+    await settle();
+    act(() => button(container, 'Rich').click());
+    const mount = container.querySelector<HTMLElement>('[data-rich-markdown-editor="true"]')!;
+    const view = getRichMarkdownEditorView(mount)!;
+    act(() => {
+      view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, source.length + 1)));
+    });
+    return view;
+  }
+
+  function imageInputEvent(type: 'paste' | 'drop', file: File): Event {
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    const transfer = {
+      files: [file],
+      items: [],
+      getData: () => '',
+      setData: vi.fn(),
+      clearData: vi.fn(),
+    };
+    Object.defineProperty(event, type === 'paste' ? 'clipboardData' : 'dataTransfer', {
+      configurable: true,
+      value: transfer,
+    });
+    return event;
+  }
+
+  function richImageAttributes(view: NonNullable<ReturnType<typeof getRichMarkdownEditorView>>) {
+    let attributes: Record<string, unknown> | null = null;
+    view.state.doc.descendants((node) => {
+      if (node.type.name === 'image') attributes = { ...node.attrs };
+    });
+    return attributes;
+  }
+
+  it('pastes an image through FileViewer and writes source-mode-identical bytes', async () => {
+    const source = 'Before image';
+    const expected = 'Before image\n![proof](o8-assets/proof-hash.png "640x480")';
+    const view = await mountImageInputFile(source);
+    const event = imageInputEvent(
+      'paste',
+      new File(['image-bytes'], 'proof.png', { type: 'image/png' }),
+    );
+
+    await act(async () => {
+      view.dom.dispatchEvent(event);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await settle();
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(richImageAttributes(view)).toEqual({
+      src: 'o8-assets/proof-hash.png',
+      alt: 'proof',
+      title: '640x480',
+    });
+    act(() => button(container, 'Source').click());
+    expect(container.querySelector<HTMLTextAreaElement>('[data-testid="monaco-editor"]')?.value)
+      .toBe(expected);
+  });
+
+  it('drops an image through FileViewer and writes source-mode-identical bytes', async () => {
+    const source = 'Before image';
+    const expected = 'Before image\n![proof](o8-assets/proof-hash.png "640x480")';
+    const view = await mountImageInputFile(source);
+    vi.spyOn(view, 'posAtCoords').mockReturnValue({ pos: source.length + 1, inside: -1 });
+    const event = imageInputEvent(
+      'drop',
+      new File(['image-bytes'], 'proof.png', { type: 'image/png' }),
+    );
+
+    await act(async () => {
+      view.dom.dispatchEvent(event);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await settle();
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(richImageAttributes(view)).toEqual({
+      src: 'o8-assets/proof-hash.png',
+      alt: 'proof',
+      title: '640x480',
+    });
+    act(() => button(container, 'Source').click());
+    expect(container.querySelector<HTMLTextAreaElement>('[data-testid="monaco-editor"]')?.value)
+      .toBe(expected);
   });
 
   function stubMarkdownFile(source: string): void {
