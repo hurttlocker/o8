@@ -63,6 +63,22 @@ function buildRetrySalvageGuard(
   };
 }
 
+function retrySalvageCandidateForPacket(
+  packet: OrchestratorPacket,
+  packetLanes: Lane[],
+): Lane | null {
+  const boundLaneId = packet.lane?.laneId?.trim();
+  if (boundLaneId) {
+    return packetLanes.find((lane) => lane.id === boundLaneId) ?? null;
+  }
+
+  // An awaiting-input lane can outlive the packet's runtime binding after the
+  // reviewer/session settles. Recover it only when persisted state identifies
+  // one unambiguous lane; never guess between sibling or older packet lanes.
+  const awaitingInputLanes = packetLanes.filter((lane) => lane.status === 'awaiting_input');
+  return awaitingInputLanes.length === 1 ? awaitingInputLanes[0]! : null;
+}
+
 function markPacketRetrySalvageHeld(packet: OrchestratorPacket, guard: RetrySalvageGuard): void {
   packet.status = 'failed';
   packet.queueState = 'held';
@@ -85,15 +101,16 @@ function packetMatchesRetrySalvageGuard(packet: OrchestratorPacket, guard: Retry
 async function holdPacketForRetrySalvageUnlocked(input: ResetPacketInput): Promise<RetrySalvageGuard | null> {
   if (input.clearWorktree || input.scope) return null;
 
-  const { getLane, listLanes } = await import('@/lib/lane/registry');
+  const { listLanes } = await import('@/lib/lane/registry');
   const { withLockedState } = await import('@/lib/orchestrator/control-plane');
   const { result: currentGuard } = await withLockedState((fresh) => {
     const missionId = fresh.missionId?.trim();
     if (!missionId) return null;
     const target = fresh.packets.find((candidate) => candidate.id === input.packetId);
     if (!target) return null;
-    const guardedLane = target.lane?.laneId ? getLane(target.lane.laneId) : null;
-    const laneIds = listLanes().filter((lane) => lane.packetId === target.id).map((lane) => lane.id);
+    const packetLanes = listLanes().filter((lane) => lane.packetId === target.id);
+    const guardedLane = retrySalvageCandidateForPacket(target, packetLanes);
+    const laneIds = packetLanes.map((lane) => lane.id);
     const guard = buildRetrySalvageGuard(target, { store: 'current', missionId }, guardedLane, laneIds);
     markPacketRetrySalvageHeld(target, guard);
     return guard;
@@ -109,8 +126,9 @@ async function holdPacketForRetrySalvageUnlocked(input: ResetPacketInput): Promi
   const { result } = await withMissionRegistryState(registryEntry.id, (fresh) => {
     const target = fresh.packets.find((candidate) => candidate.id === input.packetId);
     if (!target) throw new Error(`Packet ${input.packetId} not found.`);
-    const guardedLane = target.lane?.laneId ? getLane(target.lane.laneId) : null;
-    const laneIds = listLanes().filter((lane) => lane.packetId === target.id).map((lane) => lane.id);
+    const packetLanes = listLanes().filter((lane) => lane.packetId === target.id);
+    const guardedLane = retrySalvageCandidateForPacket(target, packetLanes);
+    const laneIds = packetLanes.map((lane) => lane.id);
     const guard = buildRetrySalvageGuard(target, { store: 'registry', missionId: registryEntry.id }, guardedLane, laneIds);
     markPacketRetrySalvageHeld(target, guard);
     return { state: fresh, result: guard };

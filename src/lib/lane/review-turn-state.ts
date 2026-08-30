@@ -95,7 +95,7 @@ export function bindReviewTurnAbortController(
 
 export function stopActiveReviewTurn(input: {
   laneId: string;
-  reason: 'packet_discarded' | 'packet_stopped';
+  reason: 'packet_discarded' | 'packet_stopped' | 'superseded';
 }): ReviewTurnStopResult | null {
   const active = findActiveReviewTurn(input.laneId);
   if (!active) return null;
