@@ -19,6 +19,7 @@ import { buildLaunchPromptWithProjectBrief, summarizeTaskName } from '@/lib/runt
 import { selfHealActiveByKindAndRepo } from '@/lib/supervisor/inbox';
 import {
   prepareLaunchWorktree,
+  DependencyMaterializationIncompleteError,
   WorktreeFetchUnreachableError,
   WorktreeOriginMissingError,
   WorktreeRebaseConflictError,
@@ -243,6 +244,7 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
         }
       }
     } catch (err) {
+      if (err instanceof DependencyMaterializationIncompleteError) throw err;
       // Known failures keep their existing operator-facing escalation details.
       if (err instanceof WorktreeRebaseConflictError) {
         const baseBranchForInbox = err.baseBranch;

@@ -189,7 +189,7 @@ export async function launchSession(
       effort: command.effort,
       clientMutationId: command.clientMutationId,
       isolate: !lane.worktreePath,
-      skipSetup: true,
+      skipSetup: Boolean(lane.worktreePath),
       existingLaneId: command.laneId,
       packetId: lane.packetId ?? undefined,
       spendCap: command.spendCap,

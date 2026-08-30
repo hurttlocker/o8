@@ -87,6 +87,12 @@ import {
   queueDependencyImagePublication,
   type DependencyMaterializationReceipt,
 } from '@/lib/workspace/dependency-materializer';
+import { retireDependencyImage } from '@/lib/workspace/apfs-dependency-image';
+import {
+  DEPENDENCY_MATERIALIZATION_INCOMPLETE,
+  DependencyMaterializationIncompleteError,
+  verifyDependencyMaterialization,
+} from '@/lib/workspace/dependency-materialization-verification';
 import { applyWorkspaceManifest } from '@/lib/workspace/manifest/apply';
 import {
   probeMetadataLockProcessIdentity,
@@ -1288,6 +1294,58 @@ export class WorktreeManager {
           ),
         });
         dependencyMaterialization = result.receipt;
+        if (launch?.packetId && launch.laneId) {
+          const verification = await verifyDependencyMaterialization(worktreePath);
+          if (verification.missingBinaries.length > 0) {
+            let imageGenerationInvalidated = false;
+            let imageInvalidationError: string | null = null;
+            if (dependencyMaterialization.mode === 'image') {
+              try {
+                await detachDependencyMaterialization(worktreePath, dependencyMaterialization);
+                await this.clearDependencyMaterialization(path.basename(worktreePath));
+                await retireDependencyImage(dependencyMaterialization.recipeKey);
+                imageGenerationInvalidated = true;
+              } catch (error) {
+                imageInvalidationError = error instanceof Error ? error.message : String(error);
+              }
+            }
+            const blocker = new DependencyMaterializationIncompleteError(
+              verification,
+              imageGenerationInvalidated,
+              imageInvalidationError,
+            );
+            const { appendEvent, setLaneStatus } = await import('@/lib/lane/registry');
+            appendEvent(launch.laneId, DEPENDENCY_MATERIALIZATION_INCOMPLETE, 'system', {
+              code: blocker.code,
+              packetId: launch.packetId,
+              mode: dependencyMaterialization.mode,
+              recipeKey: dependencyMaterialization.recipeKey,
+              topLevelEntryCount: verification.topLevelEntryCount,
+              verifiedBinaries: verification.verifiedBinaries,
+              missingBinaries: verification.missingBinaries,
+              scriptBinaries: verification.scriptBinaries,
+              imageGenerationInvalidated,
+              imageInvalidationError,
+            });
+            setLaneStatus(
+              launch.laneId,
+              'failed',
+              'system',
+              DEPENDENCY_MATERIALIZATION_INCOMPLETE,
+            );
+            throw blocker;
+          }
+          const { appendEvent } = await import('@/lib/lane/registry');
+          appendEvent(launch.laneId, 'dependency_materialized', 'system', {
+            packetId: launch.packetId,
+            mode: dependencyMaterialization.mode,
+            recipeKey: dependencyMaterialization.recipeKey,
+            topLevelEntryCount: verification.topLevelEntryCount,
+            verifiedBinaries: verification.verifiedBinaries,
+            missingBinaries: verification.missingBinaries,
+            scriptBinaries: verification.scriptBinaries,
+          });
+        }
       }
       if (await this.pathExists(path.join(worktreePath, 'requirements.txt'))) {
         await execFileAsync('pip', ['install', '-r', 'requirements.txt'], {

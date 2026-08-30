@@ -5,6 +5,7 @@
  */
 
 export { WorktreeManager, WorktreeFetchUnreachableError, WorktreeRebaseConflictError } from './manager';
+export { DependencyMaterializationIncompleteError } from '@/lib/workspace/dependency-materialization-verification';
 export { WorktreeOriginMissingError } from './errors';
 export {
   LEGACY_WORKTREE_DIR_NAME,

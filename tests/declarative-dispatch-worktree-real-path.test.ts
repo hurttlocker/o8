@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -120,6 +121,7 @@ const envKeys = [
   'O8_FAKE_QODER_CAPTURE',
   'O8_CRASH_SURVIVABLE_WORKERS',
   'O8_PACKAGED_APP',
+  'O8_APFS_DEPENDENCY_IMAGES',
   'O8_SKIP_PRELAUNCH_TYPECHECK',
 ] as const;
 
@@ -131,6 +133,7 @@ process.env.O8_QODER_BIN = fakeQoderPath;
 process.env.O8_FAKE_QODER_CAPTURE = capturePath;
 process.env.O8_CRASH_SURVIVABLE_WORKERS = '1';
 process.env.O8_PACKAGED_APP = '0';
+process.env.O8_APFS_DEPENDENCY_IMAGES = '0';
 process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
 
 writeFileSync(
@@ -167,6 +170,50 @@ function createRemoteBackedRepo(): string {
   git(seed, 'checkout', '-b', 'main');
   writeFileSync(join(seed, 'README.md'), 'declarative dispatch test\n', 'utf8');
   git(seed, 'add', 'README.md');
+  git(seed, '-c', 'user.name=o8 test', '-c', 'user.email=o8@test.invalid', 'commit', '-m', 'init');
+  git(seed, 'push', '-u', 'origin', 'main');
+  git(origin, 'symbolic-ref', 'HEAD', 'refs/heads/main');
+  execFileSync('git', ['clone', origin, repo], { stdio: 'pipe' });
+  return repo;
+}
+
+function createDependencyRemoteBackedRepo(removeGateBinary: boolean): string {
+  const suffix = Math.random().toString(36).slice(2, 8);
+  const origin = join(root, `dependency-origin-${suffix}.git`);
+  const seed = join(root, `dependency-seed-${suffix}`);
+  const repo = join(root, `dependency-repo-${suffix}`);
+  const packageRoot = join(seed, 'gate-cli');
+  execFileSync('git', ['init', '--bare', origin], { stdio: 'pipe' });
+  execFileSync('git', ['clone', origin, seed], { stdio: 'pipe' });
+  git(seed, 'checkout', '-b', 'main');
+  mkdirSync(packageRoot, { recursive: true });
+  writeFileSync(join(packageRoot, 'package.json'), JSON.stringify({
+    name: 'gate-cli',
+    version: '1.0.0',
+    bin: { 'gate-check': 'index.js' },
+  }), 'utf8');
+  writeFileSync(join(packageRoot, 'index.js'), '#!/usr/bin/env node\nprocess.exit(0);\n', 'utf8');
+  chmodSync(join(packageRoot, 'index.js'), 0o755);
+  writeFileSync(join(seed, '.gitignore'), 'node_modules/\n', 'utf8');
+  writeFileSync(join(seed, 'package.json'), JSON.stringify({
+    name: 'dependency-dispatch-fixture',
+    version: '1.0.0',
+    private: true,
+    scripts: {
+      lint: 'gate-check',
+      ...(removeGateBinary ? {
+        postinstall: "node -e \"require('node:fs').rmSync('node_modules/.bin/gate-check',{force:true})\"",
+      } : {}),
+    },
+    devDependencies: {
+      'gate-cli': 'file:gate-cli',
+    },
+  }), 'utf8');
+  execFileSync('npm', ['install', '--package-lock-only', '--ignore-scripts'], {
+    cwd: seed,
+    stdio: 'pipe',
+  });
+  git(seed, 'add', '.gitignore', 'package.json', 'package-lock.json', 'gate-cli');
   git(seed, '-c', 'user.name=o8 test', '-c', 'user.email=o8@test.invalid', 'commit', '-m', 'init');
   git(seed, 'push', '-u', 'origin', 'main');
   git(origin, 'symbolic-ref', 'HEAD', 'refs/heads/main');
@@ -310,6 +357,79 @@ describe('declarative packet dispatch worktree reachability', () => {
     const captureAfterFailure = readFileSync(capturePath, 'utf8').trim().split('\n').filter(Boolean);
     expect(captureAfterFailure).toEqual(captureBeforeFailure);
   }, 40_000);
+
+  it('verifies a materialized dev binary and blocks launch when the binary is incomplete', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
+    const [{ runDispatchTick, mergeDispatchTickOutcome }, laneRegistry, repoRegistry, controlPlane] = await Promise.all([
+      import('@/lib/orchestrator/scheduling'),
+      import('@/lib/lane/registry'),
+      import('@/lib/repos/registry'),
+      import('@/lib/orchestrator/control-plane'),
+    ]);
+
+    const completeRepo = createDependencyRemoteBackedRepo(false);
+    const completeRegistration = await repoRegistry.addRepo(completeRepo);
+    expect(completeRegistration.setup).toMatchObject({
+      installCommand: 'npm ci --prefer-offline',
+      installOnCreateWorkspace: true,
+    });
+    const completeId = 'pkt-dependency-materialized';
+    const launched = await runDispatchTick(mission(
+      completeRepo,
+      packet(completeRepo, completeId),
+    ), { launchBudget: { maxLaunches: 1 } });
+    const completeLane = laneRegistry.findLatestLaneByPacket(completeId);
+    expect(launched.packets[0]?.status).toBe('launching');
+    expect(completeLane?.worktreePath).toBeTruthy();
+    expect(existsSync(join(completeLane!.worktreePath!, 'node_modules', '.bin', 'gate-check'))).toBe(true);
+    expect(laneRegistry.getLaneEvents(completeLane!.id, 200)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        verb: 'dependency_materialized',
+        payload: expect.objectContaining({
+          mode: 'native',
+          recipeKey: expect.stringMatching(/^[0-9a-f]{64}$/),
+          topLevelEntryCount: expect.any(Number),
+          verifiedBinaries: ['gate-check'],
+          missingBinaries: [],
+        }),
+      }),
+    ]));
+
+    const incompleteRepo = createDependencyRemoteBackedRepo(true);
+    const incompleteRegistration = await repoRegistry.addRepo(incompleteRepo);
+    expect(incompleteRegistration.setup.installOnCreateWorkspace).toBe(true);
+    const incompleteId = 'pkt-dependency-incomplete';
+    const initial = mission(incompleteRepo, packet(incompleteRepo, incompleteId));
+    controlPlane.writeOrchestratorControlPlaneState(initial);
+    const captureCountBefore = existsSync(capturePath)
+      ? readFileSync(capturePath, 'utf8').trim().split('\n').filter(Boolean).length
+      : 0;
+    const blocked = await runDispatchTick(initial, { launchBudget: { maxLaunches: 1 } });
+    await controlPlane.withLockedState((fresh) => {
+      mergeDispatchTickOutcome(fresh, initial, blocked);
+    });
+    const incompleteLane = laneRegistry.findLatestLaneByPacket(incompleteId);
+    const persistedPacket = controlPlane.readOrchestratorControlPlaneState().packets
+      .find((candidate) => candidate.id === incompleteId);
+    const captureCountAfter = existsSync(capturePath)
+      ? readFileSync(capturePath, 'utf8').trim().split('\n').filter(Boolean).length
+      : 0;
+    expect(blocked.packets[0]?.status).toBe('blocked');
+    expect(persistedPacket?.blockedReason).toContain('dependency_materialization_incomplete');
+    expect(persistedPacket?.blockedReason).toContain('gate-check');
+    expect(incompleteLane?.status).toBe('failed');
+    expect(laneRegistry.getLaneEvents(incompleteLane!.id, 200)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        verb: 'dependency_materialization_incomplete',
+        payload: expect.objectContaining({
+          code: 'dependency_materialization_incomplete',
+          mode: 'native',
+          missingBinaries: ['gate-check'],
+        }),
+      }),
+    ]));
+    expect(captureCountAfter).toBe(captureCountBefore);
+  }, 120_000);
 
   it('keeps a never-launched lane live while slow worktree provisioning fails', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
