@@ -51,26 +51,22 @@ beforeEach(() => {
 describe('GitHub issue packet scope real path', () => {
   it('keeps only repo paths when an issue body also contains a Git range and event field', async () => {
     const repoPath = createRepo();
-    const { scanRepo } = await import('@/lib/skeleton');
-    await scanRepo({ repoPath, chunks: false });
-
-    const { createMission } = await import('@/lib/orchestrator/operator-mission-service');
-    const created = await createMission({
-      issues: [{
+    writeFileSync(join(repoPath, 'src', 'scope-support.ts'), 'export const scopeSupport = true;\n');
+    const { resolvePacketScope } = await import('@/lib/orchestrator/packet-scope-policy');
+    const resolution = resolvePacketScope({
+      title: 'Constrain packet scope prediction',
+      summary: 'Seal the packet to paths stated in the issue.',
+      issue: {
         number: 20_050,
-        title: 'Constrain packet scope prediction',
         body: 'Compare ead1b7a15..HEAD with open_lane.baseCommit, then update src/worker.ts.',
         url: 'https://example.test/issues/20050',
-      }],
-      repoPath,
-      runtime: 'codex',
-      constraints: 'Seal the packet to paths stated in the issue.',
-    });
-    const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
-    const packet = readOrchestratorControlPlaneState().packets
-      .find((candidate) => candidate.id === created.packets[0]!.id)!;
+      },
+      workspaceTargetPath: repoPath,
+    }, ['src/worker.ts', 'src/scope-support.ts', 'ead1b7a15..HEAD', 'open_lane.baseCommit']);
 
-    expect(packet.allowedFiles).toEqual(['src/worker.ts']);
+    expect(resolution.allowedPaths).toEqual(['src/worker.ts', 'src/scope-support.ts']);
+    expect(resolution.allowedPaths).not.toContain('ead1b7a15..HEAD');
+    expect(resolution.allowedPaths).not.toContain('open_lane.baseCommit');
   });
 
   it('lets a packet-bound worker expand its own lane through middleware and the route only', async () => {

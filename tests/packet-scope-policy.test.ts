@@ -12,6 +12,7 @@ function createRepoFixture(): string {
   tempDirs.push(repoPath);
   mkdirSync(join(repoPath, 'src'), { recursive: true });
   writeFileSync(join(repoPath, 'src', 'existing.ts'), 'export const existing = true;\n');
+  writeFileSync(join(repoPath, 'src', 'support.ts'), 'export const support = true;\n');
   return repoPath;
 }
 
@@ -20,17 +21,17 @@ afterAll(() => {
 });
 
 describe('packet scope path scraper', () => {
-  it('drops Git ranges and dotted identifiers while retaining an existing repo path', () => {
+  it('drops Git ranges and dotted identifiers while retaining existing repo paths', () => {
     const repoPath = createRepoFixture();
     const resolution = resolvePacketScope({
       title: 'Repair the scoped file',
-      summary: 'Compare ead1b7a15..HEAD and open_lane.baseCommit before editing src/existing.ts.',
+      summary: 'Compare ead1b7a15..HEAD and open_lane.baseCommit before editing src/existing.ts and src/support.ts.',
       workspaceTargetPath: repoPath,
-      predictedFiles: ['ead1b7a15..HEAD', 'open_lane.baseCommit', 'src/existing.ts'],
+      predictedFiles: ['ead1b7a15..HEAD', 'open_lane.baseCommit', 'src/existing.ts', 'src/support.ts'],
     });
 
-    expect(resolution.predictedPaths).toEqual(['src/existing.ts']);
-    expect(resolution.allowedPaths).toEqual(['src/existing.ts']);
+    expect(resolution.predictedPaths).toEqual(['src/existing.ts', 'src/support.ts']);
+    expect(resolution.allowedPaths).toEqual(['src/existing.ts', 'src/support.ts']);
     expect(resolution.source).toBe('prediction');
   });
 

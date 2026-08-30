@@ -150,13 +150,13 @@ export function resolvePacketScope(
   const predictionTouchesForbidden = predictedPaths.some((path) => isForbidden(path, forbiddenPaths));
   const predictionMatchesTarget = statedTargets.length > 0
     && statedTargets.some((target) => predictedPaths.some((path) => pathOverlaps(path, target)));
-  const fallbackReason = predictedPaths.length === 0 && statedTargets.length === 0
+  const fallbackReason = predictedPaths.length === 0
     ? 'File prediction was empty.'
-    : predictedPaths.length <= TINY_PREDICTION_MAX && statedTargets.length === 0
+    : predictedPaths.length <= TINY_PREDICTION_MAX
       ? 'File prediction was too small to seal safely.'
       : predictionTouchesForbidden
         ? 'File prediction included a path forbidden by the task brief.'
-        : predictedPaths.length > 0 && statedTargets.length > 0 && !predictionMatchesTarget
+        : !predictionMatchesTarget
           ? 'File prediction was not supported by the task brief targets.'
           : null;
 
