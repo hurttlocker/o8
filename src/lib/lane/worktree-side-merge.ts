@@ -6,6 +6,7 @@ import type {
 } from '@/lib/approvals/types';
 import { resolveAttributedCommitMessage } from '@/lib/lane/commit-attribution';
 import { checkExpectedHeadSha, formatHeadShaMismatchNote } from '@/lib/lane/head-sha-lock';
+import { blockIncompleteMergeDependencies } from '@/lib/lane/dependency-materialization-merge-blocker';
 import { checkReviewedHeadIntegrity, formatReviewedHeadMismatchNote } from '@/lib/lane/review-head-integrity';
 import { dogfoodPrOnlyActive, DOGFOOD_PR_ONLY_NOTE } from '@/lib/lane/dogfood-guard';
 import {
@@ -65,7 +66,6 @@ import { fastForwardBaseBranch } from '@/lib/lane/operator-checkout-merge';
 import { canonicalRepoRoot } from '@/lib/worktree/root-layout';
 
 const BASE_ADVANCED_RETRY_LIMIT = 3;
-
 type MergeCommand = Extract<LaneCommand, { verb: 'merge' }>;
 
 type CreateLaneActionApproval = (
@@ -259,6 +259,12 @@ async function retryBaseAdvancedAfterRebase(
       throw error;
     }
 
+    const dependencyBlocker = await blockIncompleteMergeDependencies(
+      input,
+      opts.mgr,
+      opts.worktreePath,
+    );
+    if (dependencyBlocker) return dependencyBlocker;
     const verify = await runLaneRebaseVerify({
       cwd: opts.worktreePath,
       baseRef: lane.baseBranch,
@@ -503,6 +509,8 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       throw error;
     }
 
+    const dependencyBlocker = await blockIncompleteMergeDependencies(input, mgr, mergeWorktreePath);
+    if (dependencyBlocker) return dependencyBlocker;
     const verify = await runLaneRebaseVerify({
       cwd: mergeWorktreePath,
       baseRef: lane.baseBranch,

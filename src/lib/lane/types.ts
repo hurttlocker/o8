@@ -336,6 +336,10 @@ export type LaneEventVerb =
   // Packet dispatch refused to launch without a managed worktree.
   // Payload: { code, runtime, packetId, laneId, repoPath, cause, note }
   | 'worktree_provision_failed'
+  // Dependency setup completed and its package-script binaries were checked
+  // before a worker could start. The incomplete event is a launch blocker.
+  | 'dependency_materialized'
+  | 'dependency_materialization_incomplete'
   // Worker-requested bounded scope expansion. Payload records requested paths,
   // effective allowlist, reason, and whether the request widened the scope.
   | 'scope_expansion_requested'
