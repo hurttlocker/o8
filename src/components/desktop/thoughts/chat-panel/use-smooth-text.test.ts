@@ -1,5 +1,13 @@
+/** @vitest-environment jsdom */
+
+import { act, createElement } from 'react';
+import { createRoot } from 'react-dom/client';
 import { describe, it, expect } from 'vitest';
-import { nextRevealIndex } from './use-smooth-text';
+import { nextRevealIndex, useSmoothText } from './use-smooth-text';
+
+function SmoothTextHarness({ text, streaming }: { text: string; streaming: boolean }) {
+  return createElement('div', null, useSmoothText(text, streaming));
+}
 
 describe('nextRevealIndex (smooth streaming reveal stepping)', () => {
   it('returns the length when already caught up', () => {
@@ -74,5 +82,17 @@ describe('nextRevealIndex (smooth streaming reveal stepping)', () => {
   it('always moves by at least the minimum step on a slow trickle', () => {
     const text = 'abcdefghij';
     expect(nextRevealIndex(0, text)).toBeGreaterThanOrEqual(2);
+  });
+
+  it('shows late text immediately when the message never streamed', () => {
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    const text = 'x'.repeat(200);
+
+    act(() => root.render(createElement(SmoothTextHarness, { text: '', streaming: false })));
+    act(() => root.render(createElement(SmoothTextHarness, { text, streaming: false })));
+
+    expect(container.textContent).toBe(text);
+    act(() => root.unmount());
   });
 });

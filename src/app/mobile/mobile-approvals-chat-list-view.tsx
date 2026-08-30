@@ -201,14 +201,10 @@ export function ChatListView({
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [filter, setFilter] = useState<ChatFilter>('all');
-  const [activitySnapshot, setActivitySnapshot] = useState(Date.now);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const handleRefresh = useCallback(() => {
-    setActivitySnapshot(Date.now());
-    return onRefresh();
-  }, [onRefresh]);
 
   const counts = useMemo(() => {
+    const now = Date.now();
     let active = 0;
     let idle = 0;
     conversations.forEach((conversation) => {
@@ -217,22 +213,23 @@ export function ChatListView({
         idle += 1;
         return;
       }
-      if (activitySnapshot - ts < ACTIVE_THRESHOLD_MS) active += 1;
+      if (now - ts < ACTIVE_THRESHOLD_MS) active += 1;
       else idle += 1;
     });
     return { all: conversations.length, active, idle, errored: 0 };
-  }, [activitySnapshot, conversations]);
+  }, [conversations]);
 
   const filtered = useMemo(() => {
     if (filter === 'all') return conversations;
     if (filter === 'errored') return [];
+    const now = Date.now();
     return conversations.filter((conversation) => {
       const ts = new Date(conversation.updatedAt).getTime();
       if (Number.isNaN(ts)) return filter === 'idle';
-      const recent = activitySnapshot - ts < ACTIVE_THRESHOLD_MS;
+      const recent = now - ts < ACTIVE_THRESHOLD_MS;
       return filter === 'active' ? recent : !recent;
     });
-  }, [activitySnapshot, conversations, filter]);
+  }, [conversations, filter]);
 
   const buckets = useMemo(() => bucketChats(filtered), [filtered]);
 
@@ -267,7 +264,7 @@ export function ChatListView({
   const handleContextAction = useCallback(async (action: 'star' | 'rename' | 'delete', tabId: string) => {
     if (action === 'delete') {
       await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(tabId)}`, { method: 'DELETE' });
-      handleRefresh();
+      onRefresh();
       return;
     }
 
@@ -278,14 +275,14 @@ export function ChatListView({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tabId, starred: !existing?.starred }),
       });
-      handleRefresh();
+      onRefresh();
       return;
     }
 
     const conversation = conversations.find((item) => item.tabId === tabId);
     setRenaming(tabId);
     setRenameValue(conversation?.title ?? '');
-  }, [conversations, handleRefresh]);
+  }, [conversations, onRefresh]);
 
   const handleRenameSubmit = useCallback(async () => {
     if (!renaming || !renameValue.trim()) {
@@ -300,8 +297,8 @@ export function ChatListView({
     });
 
     setRenaming(null);
-    handleRefresh();
-  }, [handleRefresh, renameValue, renaming]);
+    onRefresh();
+  }, [onRefresh, renameValue, renaming]);
 
   return (
     <MobileSurfaceRoot>
@@ -339,7 +336,7 @@ export function ChatListView({
           ...mobileScrollFadeStyle({ top: 16, bottom: 80 }),
         } as CSSProperties}
       >
-       <PullToRefresh onRefresh={handleRefresh}>
+       <PullToRefresh onRefresh={onRefresh}>
         {loading ? (
           <MobileGlassPanel palette={palette} style={{ padding: '28px 20px', textAlign: 'center' }}>
             <div style={{ fontSize: 14, color: palette.subduedText }}>

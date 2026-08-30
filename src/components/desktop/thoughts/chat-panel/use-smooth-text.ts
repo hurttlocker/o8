@@ -52,15 +52,15 @@ function prefersReducedMotion(): boolean {
  */
 export function useSmoothText(text: string, streaming: boolean): string {
   const reduced = prefersReducedMotion();
-  // Keep pacing a streamed message after `streaming` flips false whenever the
-  // reveal index still trails the received text. A never-streamed history
-  // message starts fully revealed, so it still appears all at once.
-  const startsAnimating = streaming && !reduced;
-  const [revealed, setRevealed] = useState(startsAnimating ? 0 : text.length);
-  const visibleReveal = revealed > text.length ? 0 : revealed;
+  // Once a message has streamed, keep pacing its leftover tail after
+  // `streaming` flips false. A never-streamed history message shows in full.
+  const [everStreamed, setEverStreamed] = useState(streaming);
+  if (streaming && !everStreamed) setEverStreamed(true);
+  const animate = (streaming || everStreamed) && !reduced;
+  const [revealed, setRevealed] = useState(animate ? 0 : text.length);
+  const visibleReveal = !animate ? text.length : revealed > text.length ? 0 : revealed;
   if (visibleReveal !== revealed) setRevealed(visibleReveal);
-  const animate = (streaming || visibleReveal < text.length) && !reduced;
-  const idxRef = useRef(startsAnimating ? 0 : text.length);
+  const idxRef = useRef(animate ? 0 : text.length);
   const targetRef = useRef(text);
   const rafRef = useRef<number | null>(null);
   const runningRef = useRef(false);
