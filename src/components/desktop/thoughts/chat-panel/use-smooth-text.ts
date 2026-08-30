@@ -52,24 +52,20 @@ function prefersReducedMotion(): boolean {
  */
 export function useSmoothText(text: string, streaming: boolean): string {
   const reduced = prefersReducedMotion();
-  // Once a message has streamed, keep PACING the leftover tail even after
-  // `streaming` flips false — the orchestrator often ends a turn (status→ready)
-  // while the reveal is still catching up to a big one-shot reply, and snapping
-  // the remainder in a single frame is exactly the end-of-turn burst we're
-  // avoiding. So animate on (streaming OR ever-streamed); the loop drains to the
-  // end and then settles. A never-streamed history message shows full at once.
-  const everStreamedRef = useRef(false);
-  const animate = (streaming || everStreamedRef.current) && !reduced;
-  const [revealed, setRevealed] = useState(animate ? 0 : text.length);
-  const idxRef = useRef(animate ? 0 : text.length);
+  // Keep pacing a streamed message after `streaming` flips false whenever the
+  // reveal index still trails the received text. A never-streamed history
+  // message starts fully revealed, so it still appears all at once.
+  const startsAnimating = streaming && !reduced;
+  const [revealed, setRevealed] = useState(startsAnimating ? 0 : text.length);
+  const animate = (streaming || revealed < text.length) && !reduced;
+  const idxRef = useRef(startsAnimating ? 0 : text.length);
   const targetRef = useRef(text);
-  targetRef.current = text;
   const rafRef = useRef<number | null>(null);
   const runningRef = useRef(false);
 
   useEffect(() => {
-    if (streaming) everStreamedRef.current = true;
-  }, [streaming]);
+    targetRef.current = text;
+  }, [text]);
 
   // Not animating (history / reduced-motion) → show everything now.
   useEffect(() => {
@@ -109,5 +105,5 @@ export function useSmoothText(text: string, streaming: boolean): string {
     runningRef.current = false;
   }, []);
 
-  return animate ? targetRef.current.slice(0, revealed) : text;
+  return animate ? text.slice(0, revealed) : text;
 }

@@ -85,11 +85,11 @@ export default function FounderTab({ prefs, setPref }: TabProps) {
 
   const library = prefVoiceLibrary(prefs, 'voice_library');
 
-  const saveCurrent = () => {
+  const saveCurrent = (createdAt: number) => {
     const name = newName.trim();
     if (!name) return;
     const preset: VoicePreset = {
-      id: `v${Date.now()}`, name, provider, voiceId, modelId, stability, similarity, style, speakerBoost,
+      id: `v${createdAt}`, name, provider, voiceId, modelId, stability, similarity, style, speakerBoost,
     };
     // Replace a same-named preset rather than duplicate.
     const next = [...library.filter((p) => p.name.toLowerCase() !== name.toLowerCase()), preset];
@@ -146,12 +146,12 @@ export default function FounderTab({ prefs, setPref }: TabProps) {
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <input
             value={newName} onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); saveCurrent(); } }}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); saveCurrent(Date.now()); } }}
             onFocus={() => setNameFocus(true)} onBlur={() => setNameFocus(false)}
             placeholder="Name this voice"
             style={{ ...INPUT_BASE, flex: 1, fontFamily: SF, ...focusRing(nameFocus) }}
           />
-          <AccentButton label="Save current" onClick={saveCurrent} />
+          <AccentButton label="Save current" onClick={() => saveCurrent(Date.now())} />
         </div>
       </SectionCard>
 

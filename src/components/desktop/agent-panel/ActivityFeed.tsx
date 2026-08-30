@@ -76,6 +76,7 @@ export const ActivityFeed = memo(function ActivityFeed({
   const hoverCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [prHoverDetails, setPrHoverDetails] = useState<Record<string, PRHoverDetail>>({});
   const [ciHoverDetails, setCiHoverDetails] = useState<Record<string, CIHoverDetail>>({});
+  const [timelineOrigin] = useState(Date.now);
 
   useEffect(() => {
     ipcFetch('/api/panel/repos')
@@ -351,24 +352,24 @@ export const ActivityFeed = memo(function ActivityFeed({
       hash: commit.hash,
       message: commit.message,
       age: commit.age,
-      ts: Date.now() - index,
+      ts: timelineOrigin - index,
       repo: fallbackRepo ?? undefined,
     }));
-  }, [activeAgentRepo, commits, externalPanelRepo, extras.repoCommits.length, repo]);
+  }, [activeAgentRepo, commits, externalPanelRepo, extras.repoCommits.length, repo, timelineOrigin]);
 
   const items = useMemo<ActivityItem[]>(() => {
     const timeline: ActivityItem[] = [];
     timeline.push(...extras.repoCommits, ...fallbackCommitItems);
     if (!repo || isAllRepos) {
       for (const event of visibleAgentEvents) {
-        const ts = event.timestamp ? new Date(event.timestamp).getTime() || Date.now() : Date.now();
+        const ts = event.timestamp ? new Date(event.timestamp).getTime() || timelineOrigin : timelineOrigin;
         timeline.push({ kind: 'event', data: event, ts });
       }
     }
     timeline.push(...extras.issues, ...extras.prs, ...extras.ciRuns);
     timeline.sort((a, b) => b.ts - a.ts);
     return timeline.slice(0, 40);
-  }, [extras, fallbackCommitItems, isAllRepos, repo, visibleAgentEvents]);
+  }, [extras, fallbackCommitItems, isAllRepos, repo, timelineOrigin, visibleAgentEvents]);
 
   const counts = useMemo(() => {
     const nextCounts: Record<FeedFilter, number> = { all: items.length, commit: 0, issue: 0, pr: 0, ci: 0, packet: 0 };
@@ -485,8 +486,8 @@ export const ActivityFeed = memo(function ActivityFeed({
   const grouped = useMemo(() => {
     const groups: Array<{ label: string; items: ActivityItem[] }> = [];
     let currentLabel = '';
-    const today = new Date().toDateString();
-    const yesterday = new Date(Date.now() - 86400000).toDateString();
+    const today = new Date(timelineOrigin).toDateString();
+    const yesterday = new Date(timelineOrigin - 86400000).toDateString();
 
     for (const item of filtered) {
       const dateLabel = new Date(item.ts).toDateString();
@@ -502,7 +503,7 @@ export const ActivityFeed = memo(function ActivityFeed({
       groups[groups.length - 1].items.push(item);
     }
     return groups;
-  }, [filtered]);
+  }, [filtered, timelineOrigin]);
 
   const missingGitHubScope = allRepos.length === 0 && !externalPanelRepo && !activeAgentRepo;
   const openPrItems = extras.prs.filter((item): item is Extract<ActivityItem, { kind: 'pr' }> => item.kind === 'pr' && item.state === 'open');

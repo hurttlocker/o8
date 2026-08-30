@@ -49,9 +49,11 @@ export function CardComposer({
   // (registered once on focus, invoked async when speech lands) appends to the
   // current draft instead of a stale snapshot.
   const valueRef = useRef(value);
-  valueRef.current = value;
   const onChangeRef = useRef(onChange);
-  onChangeRef.current = onChange;
+  useEffect(() => {
+    valueRef.current = value;
+    onChangeRef.current = onChange;
+  }, [onChange, value]);
 
   // Register this composer as the dictation target on focus — speech is
   // transcribed by the shared DictationHost and routed back through `fill`,

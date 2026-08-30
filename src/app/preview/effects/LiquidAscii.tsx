@@ -81,7 +81,9 @@ export function LiquidAscii(props: LiquidAsciiProps) {
   // Live params — read by the RAF loop every frame so slider tweaks apply
   // instantly without rebuilding the fluid.
   const paramsRef = useRef({ ...DEFAULTS, ...stripUndefined(props) });
-  paramsRef.current = { ...DEFAULTS, ...stripUndefined(props) };
+  useEffect(() => {
+    paramsRef.current = { ...DEFAULTS, ...stripUndefined(props) };
+  }, [props]);
 
   // Structural props that require a re-seed of the simulation.
   const cellSize = props.cellSize ?? DEFAULTS.cellSize;

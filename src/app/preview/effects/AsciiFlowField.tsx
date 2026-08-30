@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { AsciiFieldView } from './AsciiFieldView';
 import { clamp, fbm, stripUndefined, type AsciiEngine, type AsciiVisual } from './ascii-field';
 
@@ -59,7 +59,6 @@ const BRIGHTNESS = 0.55;
 export function AsciiFlowField(props: AsciiFlowFieldProps) {
   const p = { ...DEFAULTS, ...stripUndefined(props) };
   const paramsRef = useRef(p);
-  paramsRef.current = p;
 
   const visualRef = useRef<AsciiVisual>({
     cellSize: p.cellSize,
@@ -69,20 +68,23 @@ export function AsciiFlowField(props: AsciiFlowFieldProps) {
     fontFamily: p.fontFamily,
     opacity: p.opacity,
   });
-  visualRef.current = {
-    cellSize: p.cellSize,
-    characters: p.characters,
-    color: p.color,
-    backgroundColor: p.backgroundColor,
-    fontFamily: p.fontFamily,
-    opacity: p.opacity,
-  };
+  useLayoutEffect(() => {
+    const next = { ...DEFAULTS, ...stripUndefined(props) };
+    paramsRef.current = next;
+    visualRef.current = {
+      cellSize: next.cellSize,
+      characters: next.characters,
+      color: next.color,
+      backgroundColor: next.backgroundColor,
+      fontFamily: next.fontFamily,
+      opacity: next.opacity,
+    };
+  }, [props]);
 
-  const engineRef = useRef<AsciiEngine | null>(null);
-  if (!engineRef.current) {
+  const [engine] = useState<AsciiEngine>(() => {
     let particles = new Float32Array(0);
     let n = 0;
-    engineRef.current = {
+    return {
       init(cols, rows) {
         n = Math.min(MAX_PARTICLES, Math.round(cols * rows * clamp(paramsRef.current.density, 0.05, 1)));
         particles = new Float32Array(n * 2);
@@ -142,7 +144,8 @@ export function AsciiFlowField(props: AsciiFlowFieldProps) {
         }
       },
     };
-  }
+  });
+  const engineRef = useRef<AsciiEngine | null>(engine);
 
   return (
     <AsciiFieldView

@@ -52,7 +52,9 @@ function SnakeTrails({ ink }: { ink: string }) {
   // reads colorRef.current, so flipping the canvas tone recolours the
   // trails live (white on the dark slate, black on the light fog).
   const colorRef = useRef(ink);
-  colorRef.current = ink;
+  useEffect(() => {
+    colorRef.current = ink;
+  }, [ink]);
 
   useEffect(() => {
     const canvas = canvasRef.current;

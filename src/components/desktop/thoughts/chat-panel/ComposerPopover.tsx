@@ -45,7 +45,9 @@ export function ComposerPopover({ anchorRef, open, onClose, align = 'end', child
   // Keep onClose out of the effect deps so an inline arrow from the consumer
   // doesn't re-run the whole listener setup on every render.
   const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
+  useLayoutEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
 
   useLayoutEffect(() => {

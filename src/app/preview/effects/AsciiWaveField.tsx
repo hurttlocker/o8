@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { AsciiFieldView } from './AsciiFieldView';
 import { clamp, fbm, stripUndefined, type AsciiEngine, type AsciiVisual } from './ascii-field';
 
@@ -53,28 +53,29 @@ const DEFAULTS = {
 export function AsciiWaveField(props: AsciiWaveFieldProps) {
   const p = { ...DEFAULTS, ...stripUndefined(props) };
   const paramsRef = useRef(p);
-  paramsRef.current = p;
 
   const visualRef = useRef<AsciiVisual>({
-    cellSize: 0,
-    characters: p.characters,
-    color: p.color,
-    backgroundColor: p.backgroundColor,
-    fontFamily: p.fontFamily,
-    opacity: p.opacity,
-  });
-  visualRef.current = {
     cellSize: props.cellSize ?? 13,
     characters: p.characters,
     color: p.color,
     backgroundColor: p.backgroundColor,
     fontFamily: p.fontFamily,
     opacity: p.opacity,
-  };
+  });
+  useLayoutEffect(() => {
+    const next = { ...DEFAULTS, ...stripUndefined(props) };
+    paramsRef.current = next;
+    visualRef.current = {
+      cellSize: props.cellSize ?? 13,
+      characters: next.characters,
+      color: next.color,
+      backgroundColor: next.backgroundColor,
+      fontFamily: next.fontFamily,
+      opacity: next.opacity,
+    };
+  }, [props]);
 
-  const engineRef = useRef<AsciiEngine | null>(null);
-  if (!engineRef.current) {
-    engineRef.current = {
+  const [engine] = useState<AsciiEngine>(() => ({
       update(grid, cols, rows, t, _dt, cursor) {
         const q = paramsRef.current;
         const sp = q.speed;
@@ -114,8 +115,8 @@ export function AsciiWaveField(props: AsciiWaveFieldProps) {
           }
         }
       },
-    };
-  }
+    }));
+  const engineRef = useRef<AsciiEngine | null>(engine);
 
   return (
     <AsciiFieldView

@@ -82,10 +82,10 @@ export function useCanvasOrchestrator(repoPath: string | null, callbacks: Canvas
   // Replay cursor — highest event seq applied for the current session view.
   const lastSeqRef = useRef(0);
   const cbRef = useRef(callbacks);
-  cbRef.current = callbacks;
-  const threadIdsRef = useRef<Map<string, string> | null>(null);
-  if (threadIdsRef.current === null) threadIdsRef.current = loadThreadMap();
-  const threadIds = threadIdsRef.current;
+  useEffect(() => {
+    cbRef.current = callbacks;
+  }, [callbacks]);
+  const [threadIds] = useState(loadThreadMap);
   const backendByThreadRef = useRef(new Map<string, OrchestratorBackendId>());
   const [status, setStatus] = useState<CanvasOrchStatus>('idle');
 
@@ -268,7 +268,9 @@ export function useThreadOrchestrator(
   const lastSeqRef = useRef(0);
   const activeBackendRef = useRef<OrchestratorBackendId | null>(null);
   const onEventRef = useRef(onEvent);
-  onEventRef.current = onEvent;
+  useEffect(() => {
+    onEventRef.current = onEvent;
+  }, [onEvent]);
   const [status, setStatus] = useState<CanvasOrchStatus>('idle');
 
   useEffect(() => {

@@ -174,7 +174,7 @@ export function useWorkspaceTerminal({
   // routes dispatched packet tabs to the ACTIVE workspace without taking
   // activeTileId as a dep and re-creating the callback per tab switch).
   const activeTileIdRef = useRef(activeTileId);
-  activeTileIdRef.current = activeTileId;
+  useEffect(() => { activeTileIdRef.current = activeTileId; }, [activeTileId]);
   const termCreatedRef = useRef(false);
   const terminalRef = useRef<TerminalHandle>(null);
   const workspaceTerminalHandlesRef = useRef<Map<string, TerminalTabHandle>>(new Map());
@@ -248,7 +248,7 @@ export function useWorkspaceTerminal({
   // points. Registered as an introspection contributor; read via
   // collectClientDiagnostics and window.__o8Introspect().
   const introspectionStateRef = useRef({ tileLayout, activeTileId });
-  introspectionStateRef.current = { tileLayout, activeTileId };
+  useEffect(() => { introspectionStateRef.current = { tileLayout, activeTileId }; }, [activeTileId, tileLayout]);
   useEffect(() => registerIntrospectionContributor('layout', () => {
     const { tileLayout: layout, activeTileId: active } = introspectionStateRef.current;
     return {
@@ -366,7 +366,7 @@ export function useWorkspaceTerminal({
   // Live ref so openWorkspaceTabForLane can consult the retired-lane set without
   // taking it as a dep (which would re-create the callback on every view change).
   const archivedLaneViewRef = useRef(archivedLaneView);
-  archivedLaneViewRef.current = archivedLaneView;
+  useEffect(() => { archivedLaneViewRef.current = archivedLaneView; }, [archivedLaneView]);
 
   const refreshAutomationLaneSessions = useCallback(async () => {
     try {

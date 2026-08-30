@@ -1,6 +1,6 @@
 'use client';
 
-import { MutableRefObject, Suspense, memo, useEffect, useMemo, useRef, useState } from 'react';
+import { MutableRefObject, Suspense, memo, useEffect, useMemo, useState } from 'react';
 import { Terminal as TerminalIcon } from '../lucide-shims';
 import type { CanvasTab } from '@/components/desktop/Canvas';
 import { TerminalStatusEvidenceDisclosure } from '@/components/desktop/TerminalStatusEvidenceRows';
@@ -93,10 +93,6 @@ function WorkspaceTerminalPanelsBase({
   // the boot window, NOT a genuinely empty workspace. We only let the
   // "Start a new session" CTA appear once tabs have actually populated and then
   // been closed; during boot we hold the loader so the picker never flickers.
-  const hasEverHadTabsRef = useRef(false);
-  useEffect(() => {
-    if (visibleTabs.length > 0) hasEverHadTabsRef.current = true;
-  }, [visibleTabs.length]);
   useEffect(() => {
     const closeEmptyOutsideWorkerHost = (event: Event) => {
       const tabId = (event as CustomEvent<{ tabId?: string }>).detail?.tabId;
@@ -107,20 +103,25 @@ function WorkspaceTerminalPanelsBase({
     return () => window.removeEventListener(OUTSIDE_WORKER_HOST_EMPTY_EVENT, closeEmptyOutsideWorkerHost);
   }, [onCloseTab, visibleTabs]);
   const visibleTabIdsKey = visibleTabs.map((tab) => tab.id).join('|');
-  const [residentTabIds, setResidentTabIds] = useState<string[]>(() => (
-    updateResidentTabIds([], visibleTabs.map((tab) => tab.id), effectiveActiveTabId)
-  ));
+  const [residentState, setResidentState] = useState(() => ({
+    tabIds: updateResidentTabIds([], visibleTabs.map((tab) => tab.id), effectiveActiveTabId),
+    hasEverHadTabs: visibleTabs.length > 0,
+  }));
   useEffect(() => {
     const visibleTabIds = visibleTabIdsKey ? visibleTabIdsKey.split('|') : [];
-    setResidentTabIds((previous) => updateResidentTabIds(previous, visibleTabIds, effectiveActiveTabId));
+    setResidentState((previous) => ({
+      tabIds: updateResidentTabIds(previous.tabIds, visibleTabIds, effectiveActiveTabId),
+      hasEverHadTabs: previous.hasEverHadTabs || visibleTabIds.length > 0,
+    }));
   }, [effectiveActiveTabId, visibleTabIdsKey]);
+  const hasEverHadTabs = residentState.hasEverHadTabs || visibleTabs.length > 0;
   const residentTabIdSet = useMemo(
     () => new Set(updateResidentTabIds(
-      residentTabIds,
+      residentState.tabIds,
       visibleTabIdsKey ? visibleTabIdsKey.split('|') : [],
       effectiveActiveTabId,
     )),
-    [effectiveActiveTabId, residentTabIds, visibleTabIdsKey],
+    [effectiveActiveTabId, residentState.tabIds, visibleTabIdsKey],
   );
   const statusEvidenceByTmuxSession = useMemo(() => new Map(
     attachedTerminalSessions.flatMap((session) => (
@@ -238,7 +239,7 @@ function WorkspaceTerminalPanelsBase({
       ) : null)}
 
       {visibleTabs.length === 0 ? (
-        <EmptyWorkspaceState hasEverHadTabs={hasEverHadTabsRef.current} restoreSettled={restoreSettled} />
+        <EmptyWorkspaceState hasEverHadTabs={hasEverHadTabs} restoreSettled={restoreSettled} />
       ) : null}
     </div>
   );

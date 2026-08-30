@@ -27,7 +27,6 @@ const REACH = 180; // px — how far out the field starts anticipating
 export function AnticipationRing({ focused, radius = 24 }: { focused: boolean; radius?: number }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const focusedRef = useRef(focused);
-  focusedRef.current = focused;
   const enabledRef = useRef(false);
   const lastRef = useRef<{ x: number; y: number } | null>(null);
   const rafRef = useRef(0);
@@ -70,7 +69,10 @@ export function AnticipationRing({ focused, radius = 24 }: { focused: boolean; r
 
   // Focus/blur re-applies at once (blur uses the last cursor, so it eases
   // to the right anticipation level instead of snapping off).
-  useEffect(() => { apply(); }, [focused, apply]);
+  useEffect(() => {
+    focusedRef.current = focused;
+    apply();
+  }, [focused, apply]);
 
   return (
     <div

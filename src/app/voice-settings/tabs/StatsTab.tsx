@@ -44,8 +44,8 @@ function dayKey(ts: number): string {
   const d = new Date(ts * 1000);
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 }
-function isToday(ts: number): boolean {
-  return dayKey(ts) === dayKey(Math.floor(Date.now() / 1000));
+function isToday(ts: number, nowSec: number): boolean {
+  return dayKey(ts) === dayKey(nowSec);
 }
 function appName(bundleId: string): string {
   if (!bundleId) return '';
@@ -63,16 +63,20 @@ function fmtDuration(min: number): string {
 
 export default function StatsTab() {
   const [history, setHistory] = useState<DictationHistoryEntry[]>([]);
-  const load = useCallback(async () => { setHistory(await dictationHistoryGet()); }, []);
+  const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000));
+  const load = useCallback(async () => {
+    const nextHistory = await dictationHistoryGet();
+    setNowSec(Math.floor(Date.now() / 1000));
+    setHistory(nextHistory);
+  }, []);
   useEffect(() => { void load(); }, [load]);
 
   const totalWords = history.reduce((s, e) => s + wordCount(e.text), 0);
-  const wordsToday = history.filter((e) => isToday(e.ts)).reduce((s, e) => s + wordCount(e.text), 0);
+  const wordsToday = history.filter((e) => isToday(e.ts, nowSec)).reduce((s, e) => s + wordCount(e.text), 0);
   const askCount = history.filter((e) => e.mode === 'ask').length;
   const dictCount = history.length - askCount;
   const avgWords = history.length ? Math.round(totalWords / history.length) : 0;
 
-  const nowSec = Math.floor(Date.now() / 1000);
   const thisWeek = history.filter((e) => e.ts >= nowSec - 7 * 86400).length;
   const activeDays = new Set(history.map((e) => dayKey(e.ts))).size;
 

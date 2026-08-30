@@ -201,10 +201,10 @@ export function ChatListView({
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [filter, setFilter] = useState<ChatFilter>('all');
+  const [activitySnapshot] = useState(Date.now);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const counts = useMemo(() => {
-    const now = Date.now();
     let active = 0;
     let idle = 0;
     conversations.forEach((conversation) => {
@@ -213,23 +213,22 @@ export function ChatListView({
         idle += 1;
         return;
       }
-      if (now - ts < ACTIVE_THRESHOLD_MS) active += 1;
+      if (activitySnapshot - ts < ACTIVE_THRESHOLD_MS) active += 1;
       else idle += 1;
     });
     return { all: conversations.length, active, idle, errored: 0 };
-  }, [conversations]);
+  }, [activitySnapshot, conversations]);
 
   const filtered = useMemo(() => {
     if (filter === 'all') return conversations;
     if (filter === 'errored') return [];
-    const now = Date.now();
     return conversations.filter((conversation) => {
       const ts = new Date(conversation.updatedAt).getTime();
       if (Number.isNaN(ts)) return filter === 'idle';
-      const recent = now - ts < ACTIVE_THRESHOLD_MS;
+      const recent = activitySnapshot - ts < ACTIVE_THRESHOLD_MS;
       return filter === 'active' ? recent : !recent;
     });
-  }, [conversations, filter]);
+  }, [activitySnapshot, conversations, filter]);
 
   const buckets = useMemo(() => bucketChats(filtered), [filtered]);
 

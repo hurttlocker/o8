@@ -25,7 +25,9 @@ export function usePrDetail(prNumber: number | null, repoSlug?: string | null): 
   const [error, setError] = useState<string | null>(null);
   const [reloadNonce, setReloadNonce] = useState(0);
   const detailRef = useRef<PrDetail | null>(null);
-  detailRef.current = detail;
+  useEffect(() => {
+    detailRef.current = detail;
+  }, [detail]);
 
   useEffect(() => {
     if (!prNumber) {

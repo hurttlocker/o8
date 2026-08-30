@@ -152,7 +152,9 @@ export function useLongPress(onLongPress: (x: number, y: number) => void, delay 
   const posRef = useRef({ x: 0, y: 0 });
   const movedRef = useRef(false);
   const callbackRef = useRef(onLongPress);
-  callbackRef.current = onLongPress;
+  useEffect(() => {
+    callbackRef.current = onLongPress;
+  }, [onLongPress]);
 
   const onTouchStart = useCallback((e: React.TouchEvent) => {
     movedRef.current = false;
