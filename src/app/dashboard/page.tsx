@@ -4507,7 +4507,7 @@ function DashboardInner() {
 
   // ── Power-user chrome shortcuts ──
   // macOS / VS Code conventions, each mapped to a real existing action:
-  //   ⌘T new tab · ⌘, settings · ⌘B left sidebar · ⌘⌥B right panel
+  //   ⌘T new orchestrator tab · ⌘, settings · ⌘B left sidebar · ⌘⌥B right panel
   //   ⌘J bottom terminal · ⌘⇧J Terminal Mode
   // Allowed even while typing — these are app-chrome toggles, none emit text,
   // and power users expect them to fire mid-compose (matches VS Code). Placed

@@ -86,7 +86,7 @@ export function HeaderPlayButton({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={menuId}
-        title="New tab (⌘T)"
+        title="New orchestrator tab (⌘T)"
         style={{
           display: 'inline-flex',
           alignItems: 'center',

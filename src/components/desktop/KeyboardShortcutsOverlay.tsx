@@ -41,7 +41,7 @@ interface ShortcutSection {
   rows: ShortcutRow[];
 }
 
-const SECTIONS: ShortcutSection[] = [
+export const KEYBOARD_SHORTCUT_SECTIONS: ShortcutSection[] = [
   {
     title: 'Navigation',
     rows: [
@@ -54,7 +54,7 @@ const SECTIONS: ShortcutSection[] = [
   {
     title: 'Tabs',
     rows: [
-      { label: 'New tab', chords: [['⌘', 'T']] },
+      { label: 'New orchestrator tab', chords: [['⌘', 'T']] },
       { label: 'Close active tab', chords: [['⌘', 'W']] },
     ],
   },
@@ -174,7 +174,7 @@ export function KeyboardShortcutsOverlay({ open, onClose }: KeyboardShortcutsOve
             paddingBottom: 10,
           }}
         >
-          {SECTIONS.map((section) => (
+          {KEYBOARD_SHORTCUT_SECTIONS.map((section) => (
             <div key={section.title}>
               <div style={sectionHeaderStyle}>{section.title}</div>
               {section.rows.map((row) => (
