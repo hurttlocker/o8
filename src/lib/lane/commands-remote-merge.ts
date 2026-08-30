@@ -1,6 +1,8 @@
 import { cleanupRemoteMergeWorktree, fetchWorkerBranch } from '@/lib/lane/remote-fetch';
 import { dogfoodPrOnlyActive, DOGFOOD_PR_ONLY_NOTE } from '@/lib/lane/dogfood-guard';
 import { runLaneRebaseTypecheck } from '@/lib/lane/rebase-typecheck';
+import { resolveAttributedCommitMessage } from '@/lib/lane/commit-attribution';
+import { resolveGovernedMergeHistoryPlan } from '@/lib/lane/governed-merge-history';
 import { getLane, setLaneStatus } from '@/lib/lane/registry';
 import type { Lane, LaneCommand, LaneCommandResult, LaneEventActor } from '@/lib/lane/types';
 import { fetchWorkerRun } from '@/lib/worker/runs';
@@ -50,7 +52,10 @@ export async function performRemoteCustomerMerge(
       maxBuffer: 1024 * 1024,
     })).stdout.trim();
 
-    if (command.commitMessage) {
+    const attributedCommitMessage = command.commitMessage?.trim()
+      ? resolveAttributedCommitMessage(command.commitMessage.trim())
+      : undefined;
+    if (attributedCommitMessage) {
       try {
         await execFileAsync('git', ['add', '-A'], { windowsHide: true, cwd: fetched.tempWorktreePath });
         const { stdout: porcelain } = await execFileAsync(
@@ -58,7 +63,7 @@ export async function performRemoteCustomerMerge(
           { windowsHide: true, cwd: fetched.tempWorktreePath, timeout: 5000 },
         );
         if (porcelain.trim()) {
-          await execFileAsync('git', ['commit', '-m', command.commitMessage], {
+          await execFileAsync('git', ['commit', '-m', attributedCommitMessage], {
             windowsHide: true,
             cwd: fetched.tempWorktreePath,
           });
@@ -112,15 +117,39 @@ export async function performRemoteCustomerMerge(
       };
     }
 
+    const historyPlan = await resolveGovernedMergeHistoryPlan({
+      cwd: fetched.tempWorktreePath,
+      baseRef: lane.baseBranch,
+      candidateRef: actualBranch,
+      commitMessage: command.commitMessage,
+    });
+    if (historyPlan.kind === 'refuse') {
+      setLaneStatus(command.laneId, 'reviewing', 'system', 'wip_commit_requires_message');
+      return { ok: false, laneId: command.laneId, note: historyPlan.note };
+    }
+
     await execFileAsync('git', ['checkout', lane.baseBranch], { windowsHide: true, cwd: lane.repoPath });
+    const preMergeHeadSha = (await execFileAsync('git', ['rev-parse', 'HEAD'], {
+      windowsHide: true,
+      cwd: lane.repoPath,
+      timeout: 5000,
+    })).stdout.trim();
 
     try {
-      const mergeArgs = ['merge', '--no-ff', '-m', `Merge lane ${lane.label} (${actualBranch})`];
+      const mergeArgs = historyPlan.kind === 'squash'
+        ? ['merge', '--squash']
+        : ['merge', '--no-ff', '-m', `Merge lane ${lane.label} (${actualBranch})`];
       if (command.strategy === 'ours' || command.strategy === 'theirs') {
         mergeArgs.push('-X', command.strategy);
       }
       mergeArgs.push(actualBranch);
       await execFileAsync('git', mergeArgs, { windowsHide: true, cwd: lane.repoPath });
+      if (historyPlan.kind === 'squash') {
+        await execFileAsync('git', ['commit', '-m', historyPlan.commitMessage], {
+          windowsHide: true,
+          cwd: lane.repoPath,
+        });
+      }
     } catch (mergeErr) {
       let conflictFiles: string[] = [];
       try {
@@ -133,10 +162,21 @@ export async function performRemoteCustomerMerge(
         // best effort
       }
 
-      try {
-        await execFileAsync('git', ['merge', '--abort'], { windowsHide: true, cwd: lane.repoPath });
-      } catch {
-        // already clean
+      if (historyPlan.kind === 'squash') {
+        try {
+          await execFileAsync('git', ['reset', '--merge'], { windowsHide: true, cwd: lane.repoPath });
+        } catch {
+          await execFileAsync('git', ['reset', '--hard', preMergeHeadSha], {
+            windowsHide: true,
+            cwd: lane.repoPath,
+          });
+        }
+      } else {
+        try {
+          await execFileAsync('git', ['merge', '--abort'], { windowsHide: true, cwd: lane.repoPath });
+        } catch {
+          // already clean
+        }
       }
 
       const mergeMessage = formatLaneCommandError(mergeErr);

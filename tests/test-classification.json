@@ -952,6 +952,15 @@
       ]
     },
     {
+      "path": "tests/approve-and-merge-squash-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/attempt-learnings-respawn.test.ts",
       "reasons": [
         "child-process",
@@ -2040,6 +2049,14 @@
       "reasons": [
         "git-cli",
         "native-build"
+      ]
+    },
+    {
+      "path": "tests/remote-governed-squash-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
       ]
     },
     {

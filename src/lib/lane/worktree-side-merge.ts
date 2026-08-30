@@ -5,6 +5,7 @@ import type {
   MergeStrategy,
 } from '@/lib/approvals/types';
 import { resolveAttributedCommitMessage } from '@/lib/lane/commit-attribution';
+import { resolveGovernedMergeHistoryPlan } from '@/lib/lane/governed-merge-history';
 import { checkExpectedHeadSha, formatHeadShaMismatchNote } from '@/lib/lane/head-sha-lock';
 import { blockIncompleteMergeDependencies } from '@/lib/lane/dependency-materialization-merge-blocker';
 import { checkReviewedHeadIntegrity, formatReviewedHeadMismatchNote } from '@/lib/lane/review-head-integrity';
@@ -88,6 +89,88 @@ type CreateLaneActionApproval = (
     strategy?: MergeStrategy;
   },
 ) => Promise<LaneCommandResult>;
+
+async function resolveSquashBaseSha(input: {
+  repoPath: string;
+  baseBranch: string;
+  candidateRef: string;
+  originBaseRef: string | null;
+}): Promise<string> {
+  const localBaseRef = `refs/heads/${input.baseBranch}`;
+  const { stdout: localBaseOutput } = await git(
+    input.repoPath,
+    ['rev-parse', '--verify', localBaseRef],
+    { timeout: 5000 },
+  );
+  const localBaseSha = localBaseOutput.trim();
+  const localIsAncestor = await isAncestor(input.repoPath, localBaseSha, input.candidateRef);
+  if (!input.originBaseRef) {
+    if (localIsAncestor) return localBaseSha;
+    throw new Error(`${localBaseRef} is not an ancestor of the exact reviewed candidate.`);
+  }
+
+  const { stdout: originBaseOutput } = await git(
+    input.repoPath,
+    ['rev-parse', '--verify', input.originBaseRef],
+    { timeout: 5000 },
+  );
+  const originBaseSha = originBaseOutput.trim();
+  const originIsAncestor = await isAncestor(input.repoPath, originBaseSha, input.candidateRef);
+  if (!localIsAncestor && !originIsAncestor) {
+    throw new Error(`${localBaseRef} and ${input.originBaseRef} are not ancestors of the exact reviewed candidate.`);
+  }
+  if (!localIsAncestor) return originBaseSha;
+  if (!originIsAncestor || localBaseSha === originBaseSha) return localBaseSha;
+  if (await isAncestor(input.repoPath, localBaseSha, originBaseSha)) return originBaseSha;
+  if (await isAncestor(input.repoPath, originBaseSha, localBaseSha)) return localBaseSha;
+  throw new Error(`${localBaseRef} and ${input.originBaseRef} have diverged; a one-parent squash cannot preserve both histories.`);
+}
+
+async function prepareGovernedMergeCandidate(input: {
+  repoPath: string;
+  baseBranch: string;
+  candidateRef: string;
+  candidateSha: string;
+  originBaseRef: string | null;
+  commitMessage?: string;
+}): Promise<
+  | { ok: true; candidateSha: string; squashed: boolean }
+  | { ok: false; note: string }
+> {
+  const plan = await resolveGovernedMergeHistoryPlan({
+    cwd: input.repoPath,
+    baseRef: input.originBaseRef ?? `refs/heads/${input.baseBranch}`,
+    candidateRef: input.candidateRef,
+    commitMessage: input.commitMessage,
+  });
+  if (plan.kind === 'refuse') return { ok: false, note: plan.note };
+  if (plan.kind === 'preserve') {
+    return { ok: true, candidateSha: input.candidateSha, squashed: false };
+  }
+
+  const baseSha = await resolveSquashBaseSha(input);
+  const { stdout: treeOutput } = await git(
+    input.repoPath,
+    ['rev-parse', `${input.candidateRef}^{tree}`],
+    { timeout: 5000 },
+  );
+  const { stdout: squashOutput } = await git(input.repoPath, [
+    'commit-tree',
+    treeOutput.trim(),
+    '-p',
+    baseSha,
+    '-m',
+    plan.commitMessage,
+  ]);
+  const squashSha = squashOutput.trim();
+  await git(input.repoPath, [
+    'update-ref',
+    input.candidateRef,
+    squashSha,
+    input.candidateSha,
+  ], { timeout: 5000 });
+  return { ok: true, candidateSha: squashSha, squashed: true };
+}
 
 export interface WorktreeSideMergeInput {
   lane: Lane;
@@ -542,6 +625,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
     if (publicationGovernanceDrift) return publicationGovernanceDrift;
     const integrationRef = mergeRefForLane(command.laneId);
     let mergeCandidateSha = rebasedSha;
+    let mergedEquivalentHeadSha = spokenEvidence.present ? reviewedSnapshotSha : rebasedSha;
     let expectedRemoteBaseSha: string | undefined;
     try {
       await fetchWorkerHeadIntoMainRepo(lane.repoPath, mergeWorktreePath, rebasedSha, integrationRef);
@@ -561,11 +645,41 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
 
       const integrationSha = (await git(lane.repoPath, ['rev-parse', integrationRef], { timeout: 5000 })).stdout.trim();
       mergeCandidateSha = integrationSha;
+      if (!spokenEvidence.present) mergedEquivalentHeadSha = integrationSha;
       if (integrationSha !== rebasedSha) {
         await pushWorkerBranchLeaseBestEffort(worktreePath, actualBranch, integrationSha, rebasedSha);
       }
-      const pushLease = await exactPushLeaseForCandidate(lane.repoPath, originBaseRef, integrationRef);
+      let pushLease = await exactPushLeaseForCandidate(lane.repoPath, originBaseRef, integrationRef);
       if (!pushLease.safe) return createFastForwardFailureApproval(input, new Error(`${originBaseRef} is no longer an ancestor of the exact reviewed candidate.`));
+
+      let governedCandidate;
+      try {
+        governedCandidate = await prepareGovernedMergeCandidate({
+          repoPath: lane.repoPath,
+          baseBranch: lane.baseBranch,
+          candidateRef: integrationRef,
+          candidateSha: integrationSha,
+          originBaseRef,
+          commitMessage: command.commitMessage,
+        });
+      } catch (error) {
+        return createFastForwardFailureApproval(input, error);
+      }
+      if (!governedCandidate.ok) {
+        setLaneStatus(command.laneId, 'reviewing', 'system', 'wip_commit_requires_message');
+        return { ok: false, laneId: command.laneId, note: governedCandidate.note };
+      }
+      mergeCandidateSha = governedCandidate.candidateSha;
+      if (governedCandidate.squashed) {
+        await pushWorkerBranchLeaseBestEffort(
+          lane.repoPath,
+          actualBranch,
+          mergeCandidateSha,
+          integrationSha,
+        );
+        pushLease = await exactPushLeaseForCandidate(lane.repoPath, originBaseRef, integrationRef);
+        if (!pushLease.safe) return createFastForwardFailureApproval(input, new Error(`${originBaseRef} is no longer an ancestor of the governed squash candidate.`));
+      }
       expectedRemoteBaseSha = pushLease.expectedRemoteSha;
 
       const finalGovernanceDrift = await rejectSpokenReviewGovernanceDrift({
@@ -583,7 +697,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
           repoPath: lane.repoPath,
           baseBranch: lane.baseBranch,
           candidateRef: integrationRef,
-          candidateSha: integrationSha,
+          candidateSha: mergeCandidateSha,
         });
       } catch (error) {
         return createFastForwardFailureApproval(input, error);
@@ -617,7 +731,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       lane,
       worktreeId,
       pushedToOrigin,
-      mergedEquivalentHeadSha: spokenEvidence.present ? reviewedSnapshotSha : undefined,
+      mergedEquivalentHeadSha,
     });
     setLaneStatus(command.laneId, 'completed', actor, pushedToOrigin ? 'merged_pushed' : 'merged');
 
