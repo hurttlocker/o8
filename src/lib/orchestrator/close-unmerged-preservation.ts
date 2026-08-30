@@ -65,8 +65,8 @@ async function deleteRef(repoPath: string, ref: string): Promise<void> {
 /**
  * Classify close preservation against actual Git state. A missing branch and a
  * branch already contained by the base carry no recoverable work. A genuinely
- * unmerged head is banked under preserved/*, but close remains refused so the
- * operator must make an explicit disposition for that work.
+ * unmerged head is banked under preserved/* so the explicit close disposition
+ * can retire the lane without making the commits unreachable.
  */
 export async function classifyClosePreservation(
   packetId: string,
@@ -135,26 +135,29 @@ export async function classifyClosePreservation(
 
   const preservedBranch: `preserved/${string}` = `preserved/packet-${safeRefPart(packetId)}-${safeRefPart(lane.id).slice(0, 12)}`;
   const preservedRef = `refs/heads/${preservedBranch}`;
+  let writeError: unknown = null;
   try {
     await execFileAsync('git', ['update-ref', preservedRef, head], {
       windowsHide: true,
       cwd: lane.repoPath,
       timeout: 10_000,
     });
-    const verified = await readCommit(lane.repoPath, preservedRef);
-    if (verified !== head) {
-      throw new Error(`expected ${head}, read ${verified ?? 'missing'}`);
-    }
   } catch (error) {
+    writeError = error;
+  }
+  const verified = await readCommit(lane.repoPath, preservedRef);
+  if (verified !== head) {
     await deleteRef(lane.repoPath, temporaryRef);
     return {
       receipt: { branch: lane.branch, reason: preservedBranch, ref: preservedRef },
       failure: {
         code: 'branch_preservation_failed',
-        reason: 'ref_verification_failed',
+        reason: writeError ? 'ref_write_failed' : 'ref_verification_failed',
         branch: lane.branch,
         ref: preservedRef,
-        message: errorMessage(error),
+        message: writeError
+          ? errorMessage(writeError)
+          : `expected ${head}, read ${verified ?? 'missing'}`,
       },
     };
   }
@@ -162,12 +165,6 @@ export async function classifyClosePreservation(
 
   return {
     receipt: { branch: lane.branch, reason: preservedBranch, ref: preservedRef },
-    failure: {
-      code: 'unmerged_work_present',
-      reason: 'unmerged_work_present',
-      branch: lane.branch,
-      ref: preservedRef,
-      message: `Branch ${lane.branch} contains commits not in ${lane.baseBranch || 'main'}; work was banked at ${preservedBranch}.`,
-    },
+    failure: null,
   };
 }

@@ -25,8 +25,8 @@ export const CLOSE_UNMERGED_DISPOSITIONS = [
 export type CloseUnmergedDisposition = typeof CLOSE_UNMERGED_DISPOSITIONS[number];
 
 export type BranchPreservationFailure = {
-  code: 'branch_preservation_failed' | 'unmerged_work_present';
-  reason: 'ref_write_failed' | 'ref_verification_failed' | 'unmerged_work_present';
+  code: 'branch_preservation_failed';
+  reason: 'ref_write_failed' | 'ref_verification_failed';
   branch: string;
   ref: string;
   message: string;
@@ -43,6 +43,17 @@ export type CloseUnmergedResult =
     ok: true;
     result: {
       closed: true;
+      alreadyClosed: true;
+      packetId: string;
+      laneId: string | null;
+      note: string;
+    };
+  }
+  | {
+    ok: true;
+    result: {
+      closed: true;
+      alreadyClosed: false;
       discarded: true;
       disposition: CloseUnmergedDisposition;
       laneId: string;
