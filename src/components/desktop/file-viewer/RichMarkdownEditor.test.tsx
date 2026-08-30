@@ -2,6 +2,7 @@
 
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { undo } from 'prosemirror-history';
 import { TextSelection } from 'prosemirror-state';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FileViewer } from '../FileViewer';
@@ -72,6 +73,16 @@ describe('FileViewer rich Markdown editor', () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    Object.defineProperties(Range.prototype, {
+      getClientRects: {
+        configurable: true,
+        value: () => [] as unknown as DOMRectList,
+      },
+      getBoundingClientRect: {
+        configurable: true,
+        value: () => new DOMRect(),
+      },
+    });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -80,6 +91,8 @@ describe('FileViewer rich Markdown editor', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    Reflect.deleteProperty(Range.prototype, 'getClientRects');
+    Reflect.deleteProperty(Range.prototype, 'getBoundingClientRect');
     vi.unstubAllGlobals();
   });
 
@@ -142,6 +155,75 @@ describe('FileViewer rich Markdown editor', () => {
     act(() => button(container, 'Source').click());
     const monaco = container.querySelector<HTMLTextAreaElement>('[data-testid="monaco-editor"]');
     expect(monaco?.value).toBe(expected);
+  });
+
+  it('preserves Rich undo history across an unchanged Source round trip', async () => {
+    const source = '# Original heading\n';
+    const edited = '# Edited heading\n';
+    stubMarkdownFile(source);
+
+    await act(async () => {
+      root.render(createElement(FileViewer, { filePath: '/notes/undo-round-trip.md' }));
+    });
+    await settle();
+
+    act(() => button(container, 'Rich').click());
+    const mount = container.querySelector<HTMLElement>('[data-rich-markdown-editor="true"]');
+    const view = getRichMarkdownEditorView(mount!);
+    expect(view).not.toBeNull();
+
+    act(() => {
+      view!.dispatch(view!.state.tr.insertText('Edited heading', 1, 17));
+    });
+    act(() => button(container, 'Source').click());
+    expect(container.querySelector<HTMLTextAreaElement>('[data-testid="monaco-editor"]')?.value)
+      .toBe(edited);
+    expect(container.textContent).not.toContain('Rich undo history will restart');
+
+    act(() => button(container, 'Rich').click());
+    expect(getRichMarkdownEditorView(mount!)).toBe(view);
+    act(() => {
+      expect(undo(view!.state, view!.dispatch)).toBe(true);
+    });
+
+    act(() => button(container, 'Source').click());
+    expect(container.querySelector<HTMLTextAreaElement>('[data-testid="monaco-editor"]')?.value)
+      .toBe(source);
+  });
+
+  it('warns that a Source edit starts a new Rich undo history', async () => {
+    const source = '# Original heading\n';
+    const sourceEdit = '# Source heading\n';
+    stubMarkdownFile(source);
+
+    await act(async () => {
+      root.render(createElement(FileViewer, { filePath: '/notes/source-history-boundary.md' }));
+    });
+    await settle();
+
+    act(() => button(container, 'Rich').click());
+    const mount = container.querySelector<HTMLElement>('[data-rich-markdown-editor="true"]');
+    const originalView = getRichMarkdownEditorView(mount!);
+    act(() => {
+      originalView!.dispatch(originalView!.state.tr.insertText('Edited heading', 1, 17));
+    });
+    act(() => button(container, 'Source').click());
+
+    const monaco = container.querySelector<HTMLTextAreaElement>('[data-testid="monaco-editor"]')!;
+    act(() => {
+      const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+      valueSetter.call(monaco, sourceEdit);
+      monaco.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(container.textContent).toContain(
+      'Rich undo history will restart because Source mode changed the Markdown.',
+    );
+
+    act(() => button(container, 'Rich').click());
+    const nextView = getRichMarkdownEditorView(mount!);
+    expect(nextView).not.toBe(originalView);
+    expect(undo(nextView!.state, nextView!.dispatch)).toBe(false);
+    expect(nextView!.state.doc.textContent).toBe('Source heading');
   });
 
   it('opens opaque constructs in Rich mode and saves only the paragraph edit', async () => {

@@ -61,6 +61,7 @@ export interface RichMarkdownEditorController {
   document: OpenRichDocumentResult | null;
   unavailable: UnsupportedMarkdownError | null;
   sizeUnavailableReason: string | null;
+  historyBoundaryReason: string | null;
   selectMode: (mode: MarkdownEditorMode) => void;
   clearUnavailable: () => void;
   loadSource: (sourceKey: string, source: string) => void;
@@ -82,12 +83,14 @@ export function useRichMarkdownEditor(
   const [document, setDocument] = useState<OpenRichDocumentResult | null>(null);
   const [unavailable, setUnavailable] = useState<UnsupportedMarkdownError | null>(null);
   const [sizeUnavailableReason, setSizeUnavailableReason] = useState<string | null>(null);
+  const [preservedRichSource, setPreservedRichSource] = useState<string | null>(null);
   const openedFileRef = useRef<string | null>(null);
 
   const applySizeGuard = useCallback((nextSource: string): boolean => {
     const reason = richMarkdownSizeUnavailableReason(nextSource);
     setSizeUnavailableReason(reason);
     if (!reason) return false;
+    setPreservedRichSource(null);
     setDocument(null);
     setUnavailable(null);
     setMode('source');
@@ -98,11 +101,13 @@ export function useRichMarkdownEditor(
     if (applySizeGuard(nextSource)) return false;
     try {
       setDocument(openRichDocument(nextSource));
+      setPreservedRichSource(nextSource);
       setUnavailable(null);
       setMode('rich');
       return true;
     } catch (error) {
       if (!(error instanceof UnsupportedMarkdownError)) throw error;
+      setPreservedRichSource(null);
       setDocument(null);
       setUnavailable(error);
       setMode('source');
@@ -114,19 +119,25 @@ export function useRichMarkdownEditor(
     if (!supported) return;
     if (nextMode === 'source') {
       sessionMarkdownMode = 'source';
+      if (document) setPreservedRichSource(source);
       setMode('source');
-      setDocument(null);
       setUnavailable(null);
       return;
     }
+    if (document && preservedRichSource === source) {
+      sessionMarkdownMode = 'rich';
+      setMode('rich');
+      return;
+    }
     if (openSource(source)) sessionMarkdownMode = 'rich';
-  }, [openSource, source, supported]);
+  }, [document, openSource, preservedRichSource, source, supported]);
 
   const reloadSource = useCallback((nextSource: string) => {
     if (applySizeGuard(nextSource)) return;
     if (supported && sessionMarkdownMode === 'rich') {
       openSource(nextSource);
     } else {
+      setPreservedRichSource(null);
       setDocument(null);
       setUnavailable(null);
     }
@@ -135,6 +146,7 @@ export function useRichMarkdownEditor(
   const loadSource = useCallback((sourceKey: string, nextSource: string) => {
     if (openedFileRef.current === sourceKey) return;
     openedFileRef.current = sourceKey;
+    setPreservedRichSource(null);
     setUnavailable(null);
     setDocument(null);
     if (applySizeGuard(nextSource)) return;
@@ -151,6 +163,11 @@ export function useRichMarkdownEditor(
     document,
     unavailable,
     sizeUnavailableReason,
+    historyBoundaryReason: mode === 'source'
+      && document !== null
+      && preservedRichSource !== source
+      ? 'Rich undo history will restart because Source mode changed the Markdown.'
+      : null,
     selectMode,
     clearUnavailable: () => setUnavailable(null),
     loadSource,
@@ -629,68 +646,103 @@ export function MarkdownEditorMount({
   onMonacoMount: (editor: unknown) => void;
   beforeMonacoMount: (monaco: typeof import('monaco-editor')) => void;
 }) {
-  if (controller.mode === 'rich' && controller.document) {
-    return (
-      <RichMarkdownEditor
-        openDocument={controller.document}
-        onSourceChange={onSourceChange}
-      />
-    );
-  }
-
   return (
-    <MonacoEditor
-      height="100%"
-      language={language}
-      value={value}
-      theme={themeId === 'light' ? 'cortex-frost' : 'cortex-graphite'}
-      onChange={(nextValue) => {
-        if (nextValue !== undefined) {
-          controller.clearUnavailable();
-          onSourceChange(nextValue);
-        }
-      }}
-      onMount={onMonacoMount}
-      beforeMount={beforeMonacoMount}
-      options={{
-        readOnly: false,
-        fontSize: 13,
-        fontFamily: '"SF Mono", "Menlo", "Monaco", "Cascadia Code", ui-monospace, monospace',
-        lineHeight: 20,
-        tabSize: 2,
-        insertSpaces: true,
-        minimap: { enabled: true, maxColumn: 80, scale: 2 },
-        scrollBeyondLastLine: false,
-        wordWrap: 'on',
-        lineNumbers: 'on',
-        glyphMargin: false,
-        folding: true,
-        bracketPairColorization: { enabled: true },
-        renderLineHighlight: 'line',
-        occurrencesHighlight: 'singleFile',
-        matchBrackets: 'always',
-        smoothScrolling: true,
-        cursorBlinking: 'smooth',
-        cursorSmoothCaretAnimation: 'on',
-        padding: { top: 12, bottom: 12 },
-        overviewRulerLanes: 0,
-        hideCursorInOverviewRuler: true,
-        overviewRulerBorder: false,
-        scrollbar: {
-          vertical: 'hidden',
-          horizontal: 'auto',
-          verticalScrollbarSize: 0,
-          horizontalScrollbarSize: 8,
-          useShadows: false,
-        },
-        contextmenu: true,
-        quickSuggestions: false,
-        suggestOnTriggerCharacters: false,
-        parameterHints: { enabled: false },
-        inlineSuggest: { enabled: false },
-        renderWhitespace: 'selection',
-        guides: { bracketPairs: true, indentation: true },
-      }}
-    />
+    <div style={{ height: '100%' }}>
+      {controller.document ? (
+        <div
+          aria-hidden={controller.mode !== 'rich'}
+          style={{
+            display: controller.mode === 'rich' ? 'block' : 'none',
+            height: '100%',
+          }}
+        >
+          <RichMarkdownEditor
+            openDocument={controller.document}
+            onSourceChange={onSourceChange}
+          />
+        </div>
+      ) : null}
+      {controller.mode === 'source' ? (
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+          {controller.historyBoundaryReason ? (
+            <div
+              role="status"
+              style={{
+                flexShrink: 0,
+                paddingTop: 7,
+                paddingRight: 20,
+                paddingBottom: 7,
+                paddingLeft: 20,
+                borderBottom: '1px solid var(--t-divider-subtle)',
+                background: 'var(--t-input-bg)',
+                color: 'var(--t-text-muted)',
+                fontFamily: 'var(--font-sans-system)',
+                fontSize: 11,
+                fontWeight: 300,
+                letterSpacing: '-0.1px',
+                lineHeight: 1.35,
+              }}
+            >
+              {controller.historyBoundaryReason}
+            </div>
+          ) : null}
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <MonacoEditor
+              height="100%"
+              language={language}
+              value={value}
+              theme={themeId === 'light' ? 'cortex-frost' : 'cortex-graphite'}
+              onChange={(nextValue) => {
+                if (nextValue !== undefined) {
+                  controller.clearUnavailable();
+                  onSourceChange(nextValue);
+                }
+              }}
+              onMount={onMonacoMount}
+              beforeMount={beforeMonacoMount}
+              options={{
+                readOnly: false,
+                fontSize: 13,
+                fontFamily: '"SF Mono", "Menlo", "Monaco", "Cascadia Code", ui-monospace, monospace',
+                lineHeight: 20,
+                tabSize: 2,
+                insertSpaces: true,
+                minimap: { enabled: true, maxColumn: 80, scale: 2 },
+                scrollBeyondLastLine: false,
+                wordWrap: 'on',
+                lineNumbers: 'on',
+                glyphMargin: false,
+                folding: true,
+                bracketPairColorization: { enabled: true },
+                renderLineHighlight: 'line',
+                occurrencesHighlight: 'singleFile',
+                matchBrackets: 'always',
+                smoothScrolling: true,
+                cursorBlinking: 'smooth',
+                cursorSmoothCaretAnimation: 'on',
+                padding: { top: 12, bottom: 12 },
+                overviewRulerLanes: 0,
+                hideCursorInOverviewRuler: true,
+                overviewRulerBorder: false,
+                scrollbar: {
+                  vertical: 'hidden',
+                  horizontal: 'auto',
+                  verticalScrollbarSize: 0,
+                  horizontalScrollbarSize: 8,
+                  useShadows: false,
+                },
+                contextmenu: true,
+                quickSuggestions: false,
+                suggestOnTriggerCharacters: false,
+                parameterHints: { enabled: false },
+                inlineSuggest: { enabled: false },
+                renderWhitespace: 'selection',
+                guides: { bracketPairs: true, indentation: true },
+              }}
+            />
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
