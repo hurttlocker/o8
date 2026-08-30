@@ -219,7 +219,7 @@ function governOpenclawAgent(agent: Record<string, unknown>): Record<string, unk
   const { systemPromptOverride: _legacy, ...rest } = agent as Record<string, unknown> & {
     systemPromptOverride?: unknown;
   };
-  void _legacy; return { ...rest, tools };
+  return { ...rest, tools };
 }
 
 /**

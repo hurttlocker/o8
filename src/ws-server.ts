@@ -3069,7 +3069,6 @@ function fingerprintRuntimeSnapshot(fleet: CommandCenterSnapshot['fleet']) {
 function fingerprintReviewSnapshot(review: CommandCenterSnapshot['review'], error: string | null = null) {
   if (!review) return `no-review\x01${error ?? ''}`;
   const { generatedAt: _generatedAt, ...semantic } = review;
-  void _generatedAt;
   return createHash('sha256').update(JSON.stringify({ review: semantic, error })).digest('base64url');
 }
 
@@ -3079,7 +3078,6 @@ function fingerprintBrowserSnapshot(
   error: string | null = null,
 ) {
   const { generatedAt: _generatedAt, ...semanticInventory } = browserInventory;
-  void _generatedAt;
   return createHash('sha256').update(JSON.stringify({ inventory: semanticInventory, attachedBrowser, error })).digest('base64url');
 }
 
@@ -3089,7 +3087,6 @@ function fingerprintInboxSnapshot(inbox: Awaited<ReturnType<typeof getMobileInbo
   // delta even though the JSON sent to the phone had changed. generatedAt is
   // intentionally excluded so an unchanged 30s safety read emits no empty delta.
   const { generatedAt: _generatedAt, ...semanticSnapshot } = inbox;
-  void _generatedAt;
   return createHash('sha256').update(JSON.stringify(semanticSnapshot)).digest('base64url');
 }
 

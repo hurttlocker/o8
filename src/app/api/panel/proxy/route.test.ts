@@ -20,13 +20,9 @@ describe('panel preview proxy confinement', () => {
   });
 
   it('does not forward operator credentials or o8 identity headers to preview servers', async () => {
-    const fetchMock = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) => {
-      void _input;
-      void _init;
-      return new Response('<html><head></head><body>ok</body></html>', {
-        headers: { 'content-type': 'text/html' },
-      });
-    });
+    const fetchMock = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) => new Response('<html><head></head><body>ok</body></html>', {
+      headers: { 'content-type': 'text/html' },
+    }));
     vi.stubGlobal('fetch', fetchMock);
 
     const response = await GET(new NextRequest(
