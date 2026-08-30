@@ -16,7 +16,7 @@ export interface MinimalMissionStatusShape {
 }
 
 // Packets in these states need caller attention unless authoritative lane
-// evidence says a rerun/review is still active.
+// evidence says a rerun is still active.
 const PACKET_ATTENTION_STATUSES = new Set(['awaiting_review', 'released', 'failed', 'archived', 'blocked']);
 
 export function missionPacketSignature(packets: MinimalMissionPacket[] | undefined): string {
@@ -29,8 +29,7 @@ export function missionPacketSignature(packets: MinimalMissionPacket[] | undefin
 
 function packetIsActive(packet: MinimalMissionPacket): boolean {
   return packet.blockedReason === 'rerun_in_progress'
-    || packet.lane?.status === 'running'
-    || packet.lane?.status === 'reviewing';
+    || packet.lane?.status === 'running';
 }
 
 export function findMissionAttentionPacket(

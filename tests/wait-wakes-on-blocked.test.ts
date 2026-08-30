@@ -67,4 +67,25 @@ describe('#1467 — wait_for_mission_ready wakes on blocked packets', () => {
     expect(payload.wakeReason).not.toBe('already-terminal');
     expect(readStatus).toHaveBeenCalledTimes(2);
   });
+
+  it('returns immediately when a reviewing lane is already awaiting review', async () => {
+    const readStatus = vi.fn(async () => ({
+      packets: [{
+        id: 'pkt-review',
+        status: 'awaiting_review',
+        releaseState: 'pending',
+        lane: { status: 'reviewing' },
+      }],
+    }));
+
+    const result = await handleWaitForMissionReady(
+      { packetId: 'pkt-review', timeoutMs: 2_000, pollIntervalMs: 1_000 },
+      readStatus,
+    );
+    const payload = parsePayload(result as { content?: Array<{ type: string; text?: string }> });
+
+    expect(payload.wakeReason).toBe('already-terminal');
+    expect(payload.terminalPacketId).toBe('pkt-review');
+    expect(readStatus).toHaveBeenCalledTimes(1);
+  });
 });
