@@ -119,6 +119,7 @@ export function renderJudgePrompt(input: JudgeInput): string {
  *   - notes: "(stub) judge not wired"
  */
 export async function judgeStub(_input: JudgeInput): Promise<JudgeResult> {
+  void _input;
   return {
     factual_accuracy: 0,
     citation_correctness: 0,

@@ -89,5 +89,6 @@ export function useOrchestratorContextResidency(): OrchestratorContextResidencyV
  * inspector. Safe to remove once that consumer is updated.
  */
 export function useOrchestratorEntryEvicted(_entryId: string): boolean {
+  void _entryId;
   return false;
 }

@@ -55,7 +55,10 @@ function mergeDecisionNotes(...notes: Array<string | null | undefined>) {
  * for it explicitly with `include=diff`.
  */
 function stripDiffPreviews<T extends { diff?: unknown }>(approvals: T[]): T[] {
-  return approvals.map(({ diff: _diff, ...rest }) => rest as T);
+  return approvals.map(({ diff: _diff, ...rest }) => {
+    void _diff;
+    return rest as T;
+  });
 }
 
 /**

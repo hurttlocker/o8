@@ -537,6 +537,8 @@ function hashRest(fp: RepoFingerprint): string {
   // addressed — the same repo state yields the same hash regardless of when
   // the fingerprint was generated.
   const { hash: _h, generatedAt: _g, ...rest } = fp;
+  void _h;
+  void _g;
   return createHash('sha256').update(canonicalize(rest), 'utf-8').digest('hex');
 }
 

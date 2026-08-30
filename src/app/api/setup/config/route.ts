@@ -41,6 +41,8 @@ function writeConfig(config: SetupConfig): void {
 function mergeConfig(current: SetupConfig, patch: Partial<SetupConfig>): SetupConfig {
   const { cortex: _legacyCurrentCortex, ...currentRest } = current as SetupConfig & { cortex?: unknown };
   const { cortex: _legacyPatchCortex, ...patchRest } = patch as Partial<SetupConfig> & { cortex?: unknown };
+  void _legacyCurrentCortex;
+  void _legacyPatchCortex;
   return {
     ...currentRest,
     ...patchRest,

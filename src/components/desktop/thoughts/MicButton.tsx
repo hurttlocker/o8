@@ -32,6 +32,7 @@ function useInputMode(): DictationInputMode {
 }
 
 export function MicButton({ idleColor = 'var(--t-text-muted)' }: { idleColor?: string } = {}) {
+  void idleColor;
   const host = useDictationHostOptional();
   const inputMode = useInputMode();
 

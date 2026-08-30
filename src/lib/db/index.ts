@@ -1297,15 +1297,15 @@ function backfillApprovalEventsFromAuditJson(sqlite: Database.Database): void {
 
       for (const event of events) {
         const eventId = `evt-${row.id}-${event.timestamp ?? Date.now()}-${eventCount}`;
-        const { type: _type, actor: _actor, note: _note, timestamp: _ts, ...rest } = event;
+        const { type, actor, note, timestamp, ...rest } = event;
         insert.run(
           eventId,
           row.id,
-          event.type ?? 'unknown',
-          event.actor ?? 'system',
-          event.note ?? null,
+          type ?? 'unknown',
+          actor ?? 'system',
+          note ?? null,
           JSON.stringify(rest),
-          event.timestamp ?? Date.now(),
+          timestamp ?? Date.now(),
         );
         eventCount += 1;
       }

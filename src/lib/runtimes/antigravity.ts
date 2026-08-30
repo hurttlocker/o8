@@ -57,26 +57,35 @@ export const antigravityRuntime: AgentRuntime = {
   },
 
   async readTranscript(_sessionKey: string, _sinceId?: string, _limit?: number): Promise<RuntimeTranscriptEntry[]> {
+    void _sessionKey;
+    void _sinceId;
+    void _limit;
     return [];
   },
 
   async launch(_opts: LaunchOptions): Promise<RuntimeActionResult> {
+    void _opts;
     return unavailable('launch');
   },
 
   async resume(_sessionKey: string, _message: string): Promise<RuntimeActionResult> {
+    void _sessionKey;
+    void _message;
     return unavailable('resume');
   },
 
   async interrupt(_sessionKey: string): Promise<RuntimeActionResult> {
+    void _sessionKey;
     return unavailable('interrupt');
   },
 
   async getChangedFiles(_sessionKey: string): Promise<RuntimeChangedFile[]> {
+    void _sessionKey;
     return [];
   },
 
   async getTelemetry(_sessionKey: string): Promise<RuntimeTelemetry | undefined> {
+    void _sessionKey;
     return undefined;
   },
 };

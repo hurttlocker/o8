@@ -589,7 +589,7 @@ export function useWorkspaceTerminal({
       }
     },
     onTerminalExited: (sessionName: string, _exitCode: number) => {
-      terminalRef.current?.setTermExited(true);
+      void _exitCode; terminalRef.current?.setTermExited(true);
       for (const handle of workspaceTerminalHandlesRef.current.values()) {
         handle.setTermExited(sessionName);
       }
