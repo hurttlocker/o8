@@ -498,6 +498,13 @@ describe('panelGateMiddleware — worker capability scope', () => {
     expect(workerRequest('/api/cortex/proposals', 'DELETE').status).toBe(403);
   });
 
+  it('admits only POST on the packet scope escape hatch', () => {
+    expect(workerRequest('/api/lanes/lane-owned/scope', 'GET').status).toBe(200);
+    expect(workerRequest('/api/lanes/lane-owned/scope', 'POST').status).toBe(200);
+    expect(workerRequest('/api/lanes/lane-owned/scope', 'DELETE').status).toBe(403);
+    expect(workerRequest('/api/lanes/lane-owned/diff', 'POST').status).toBe(403);
+  });
+
   it('keeps ungranted lease methods and operator mutations closed to workers', () => {
     expect(workerRequest('/api/leases', 'DELETE').status).toBe(403);
     expect(workerRequest('/api/orchestrator/merge', 'POST').status).toBe(403);
