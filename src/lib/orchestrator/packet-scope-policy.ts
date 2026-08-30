@@ -1,8 +1,17 @@
+import { existsSync, realpathSync } from 'node:fs';
+import { dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
 const REPO_WIDE_SCOPE = '**/*';
 const TINY_PREDICTION_MAX = 1;
 const PATH_TOKEN = /(?:^|[\s`'"(])((?:\.\/)?(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+\.[A-Za-z0-9_-]+(?:\/\*\*)?)/g;
+const NEW_FILE_PATH = /^[\w./-]+\.\w+$/;
+const KNOWN_ROOT_FILE_EXTENSIONS = new Set([
+  'c', 'cc', 'cpp', 'css', 'csv', 'env', 'go', 'gql', 'graphql', 'h', 'hpp',
+  'htm', 'html', 'java', 'js', 'json', 'jsx', 'kt', 'kts', 'less', 'lock',
+  'md', 'mjs', 'php', 'proto', 'py', 'rb', 'rs', 'sass', 'scss', 'sh', 'sql',
+  'swift', 'toml', 'ts', 'tsx', 'txt', 'xml', 'yaml', 'yml', 'zsh',
+]);
 const FORBIDDEN_LINE = /\b(?:do not|don't|never|must not)\s+(?:touch|edit|modify|write|change)|\bforbid(?:s|den|ding)?\s+(?:touching|editing|modifying|writing|changing)/i;
 
 export interface PacketScopeResolution {
@@ -22,13 +31,53 @@ function uniquePaths(paths: string[]): string[] {
   return [...new Set(paths.map(normalizePath).filter(Boolean))];
 }
 
-function extractPaths(text: string): string[] {
+function pathIsInside(repoRoot: string, candidate: string): boolean {
+  const rel = relative(repoRoot, candidate);
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+}
+
+function existingAncestor(path: string): string | null {
+  let candidate = path;
+  while (!existsSync(candidate)) {
+    const parent = dirname(candidate);
+    if (parent === candidate) return null;
+    candidate = parent;
+  }
+  return candidate;
+}
+
+function isRepoPathCandidate(repoPath: string | null, value: string): boolean {
+  if (!repoPath) return false;
+  const path = normalizePath(value);
+  if (!path || path.includes('..') || path.endsWith('/**')) return false;
+
+  try {
+    const repoRoot = realpathSync(repoPath);
+    const target = resolve(repoRoot, path);
+    if (!pathIsInside(repoRoot, target)) return false;
+    if (existsSync(target)) return pathIsInside(repoRoot, realpathSync(target));
+    if (!NEW_FILE_PATH.test(path)) return false;
+
+    const extension = extname(path).slice(1).toLowerCase();
+    if (!path.includes('/') && !KNOWN_ROOT_FILE_EXTENSIONS.has(extension)) return false;
+    const ancestor = existingAncestor(dirname(target));
+    return Boolean(ancestor && pathIsInside(repoRoot, realpathSync(ancestor)));
+  } catch {
+    return false;
+  }
+}
+
+function repoPaths(paths: string[], repoPath: string | null): string[] {
+  return uniquePaths(paths).filter((path) => isRepoPathCandidate(repoPath, path));
+}
+
+function extractPaths(text: string, repoPath: string | null): string[] {
   const paths: string[] = [];
   for (const match of text.matchAll(PATH_TOKEN)) {
     const path = normalizePath(match[1] ?? '');
     if (path) paths.push(path);
   }
-  return uniquePaths(paths);
+  return repoPaths(paths, repoPath);
 }
 
 function taskText(packet: Pick<OrchestratorPacket, 'title' | 'summary' | 'issue'>): string {
@@ -37,11 +86,13 @@ function taskText(packet: Pick<OrchestratorPacket, 'title' | 'summary' | 'issue'
     .join('\n');
 }
 
-function forbiddenTaskPaths(packet: Pick<OrchestratorPacket, 'title' | 'summary' | 'issue'>): string[] {
+function forbiddenTaskPaths(
+  packet: Pick<OrchestratorPacket, 'title' | 'summary' | 'issue' | 'workspaceTargetPath'>,
+): string[] {
   return uniquePaths(taskText(packet)
     .split(/\r?\n/)
     .filter((line) => FORBIDDEN_LINE.test(line))
-    .flatMap(extractPaths));
+    .flatMap((line) => extractPaths(line, packet.workspaceTargetPath)));
 }
 
 function pathOverlaps(left: string, right: string): boolean {
@@ -59,10 +110,11 @@ function isForbidden(path: string, forbiddenPaths: string[]): boolean {
 }
 
 export function resolvePacketScope(
-  packet: Pick<OrchestratorPacket, 'title' | 'summary' | 'issue' | 'allowedFiles' | 'predictedFiles'>,
+  packet: Pick<OrchestratorPacket,
+    'title' | 'summary' | 'issue' | 'allowedFiles' | 'predictedFiles' | 'workspaceTargetPath'>,
   predictedFiles: string[] = packet.predictedFiles ?? [],
 ): PacketScopeResolution {
-  const predictedPaths = uniquePaths(predictedFiles);
+  const predictedPaths = repoPaths(predictedFiles, packet.workspaceTargetPath);
   const forbiddenPaths = forbiddenTaskPaths(packet);
   const explicitPaths = uniquePaths(packet.allowedFiles ?? []);
 
@@ -93,17 +145,18 @@ export function resolvePacketScope(
     };
   }
 
-  const statedTargets = extractPaths(taskText(packet)).filter((path) => !isForbidden(path, forbiddenPaths));
+  const statedTargets = extractPaths(taskText(packet), packet.workspaceTargetPath)
+    .filter((path) => !isForbidden(path, forbiddenPaths));
   const predictionTouchesForbidden = predictedPaths.some((path) => isForbidden(path, forbiddenPaths));
   const predictionMatchesTarget = statedTargets.length > 0
     && statedTargets.some((target) => predictedPaths.some((path) => pathOverlaps(path, target)));
-  const fallbackReason = predictedPaths.length === 0
+  const fallbackReason = predictedPaths.length === 0 && statedTargets.length === 0
     ? 'File prediction was empty.'
-    : predictedPaths.length <= TINY_PREDICTION_MAX
+    : predictedPaths.length <= TINY_PREDICTION_MAX && statedTargets.length === 0
       ? 'File prediction was too small to seal safely.'
       : predictionTouchesForbidden
         ? 'File prediction included a path forbidden by the task brief.'
-        : !predictionMatchesTarget
+        : predictedPaths.length > 0 && statedTargets.length > 0 && !predictionMatchesTarget
           ? 'File prediction was not supported by the task brief targets.'
           : null;
 

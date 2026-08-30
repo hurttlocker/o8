@@ -154,6 +154,9 @@ const WORKER_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }>
   // Agents can coordinate named resources but cannot bypass ownership checks in the handler.
   { methods: new Set(['GET', 'POST']), path: /^\/api\/leases\/?$/ },
   { methods: new Set(['GET']), path: /^\/api\/lanes(?:\/[^/]+(?:\/(?:scope|diff))?)?\/?$/ },
+  // Scope expansion is the worker's bounded escape hatch. The handler binds
+  // the bearer to the resolved lane packet before it mutates the allowlist.
+  { methods: new Set(['POST']), path: /^\/api\/lanes\/[^/]+\/scope\/?$/ },
   { methods: new Set(['GET', 'POST']), path: /^\/api\/lanes\/[^/]+\/(?:events|heartbeat)\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/(?:browser\/agent|cortex\/ask\/answer)\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/cortex\/proposals\/?$/ },

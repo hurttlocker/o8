@@ -4,6 +4,7 @@ import os from 'node:os';
 import { join } from 'node:path';
 
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { NextRequest } from 'next/server';
 
 const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-github-scope-data-'));
 process.env.O8_DATA_DIR = dataDir;
@@ -48,6 +49,112 @@ beforeEach(() => {
 });
 
 describe('GitHub issue packet scope real path', () => {
+  it('keeps only repo paths when an issue body also contains a Git range and event field', async () => {
+    const repoPath = createRepo();
+    const { scanRepo } = await import('@/lib/skeleton');
+    await scanRepo({ repoPath, chunks: false });
+
+    const { createMission } = await import('@/lib/orchestrator/operator-mission-service');
+    const created = await createMission({
+      issues: [{
+        number: 20_050,
+        title: 'Constrain packet scope prediction',
+        body: 'Compare ead1b7a15..HEAD with open_lane.baseCommit, then update src/worker.ts.',
+        url: 'https://example.test/issues/20050',
+      }],
+      repoPath,
+      runtime: 'codex',
+      constraints: 'Seal the packet to paths stated in the issue.',
+    });
+    const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+    const packet = readOrchestratorControlPlaneState().packets
+      .find((candidate) => candidate.id === created.packets[0]!.id)!;
+
+    expect(packet.allowedFiles).toEqual(['src/worker.ts']);
+  });
+
+  it('lets a packet-bound worker expand its own lane through middleware and the route only', async () => {
+    const repoPath = createRepo();
+    const packetA = 'pkt-scope-authz-a';
+    const packetB = 'pkt-scope-authz-b';
+    const { createLane } = await import('@/lib/lane/registry');
+    const laneA = createLane({
+      repoPath,
+      worktreePath: repoPath,
+      branch: 'issue/scope-authz-a',
+      runtime: 'codex',
+      packetId: packetA,
+    });
+    const laneB = createLane({
+      repoPath,
+      worktreePath: repoPath,
+      branch: 'issue/scope-authz-b',
+      runtime: 'codex',
+      packetId: packetB,
+    });
+    const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+    const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+    const packet = (id: string, branchTarget: string) => ({
+      id,
+      referenceLabel: id,
+      title: 'Expand bounded scope',
+      summary: 'Edit src/worker.ts.',
+      workspaceTargetPath: repoPath,
+      branchTarget,
+      runtime: 'codex' as const,
+      dependencyLabels: [],
+      dependencyPacketIds: [],
+      queueState: 'queued' as const,
+      releaseState: 'pending' as const,
+      status: 'running' as const,
+      lane: null,
+      predictedFiles: ['src/worker.ts'],
+      allowedFiles: ['src/worker.ts'],
+    });
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      missionId: 'mission-scope-authz',
+      repoPath,
+      packets: [packet(packetA, laneA.branch), packet(packetB, laneB.branch)],
+    });
+
+    const { mintPacketWorkerToken } = await import('@/lib/auth/packet-worker-token');
+    const { panelGateMiddleware } = await import('@/middleware');
+    const scopeRoute = await import('@/app/api/lanes/[id]/scope/route');
+    const bearer = mintPacketWorkerToken(packetA);
+    const scopeRequest = (laneId: string, path: string) => new NextRequest(
+      `http://localhost:3001/api/lanes/${laneId}/scope`,
+      {
+        method: 'POST',
+        headers: { host: 'localhost:3001', authorization: `Bearer ${bearer}` },
+        body: JSON.stringify({ paths: [path], reason: 'Cover the real route regression.' }),
+      },
+    );
+
+    const ownRequest = scopeRequest(laneA.id, 'tests/scope-regression.test.ts');
+    expect(panelGateMiddleware(ownRequest).status).toBe(200);
+    const ownResponse = await scopeRoute.POST(ownRequest, { params: Promise.resolve({ id: laneA.id }) });
+    expect(ownResponse.status).toBe(200);
+    await expect(ownResponse.json()).resolves.toMatchObject({
+      ok: true,
+      expanded: true,
+      allowedPaths: ['src/worker.ts', 'tests/scope-regression.test.ts'],
+    });
+    expect(readOrchestratorControlPlaneState().packets.find((candidate) => candidate.id === packetA)?.allowedFiles)
+      .toEqual(['src/worker.ts', 'tests/scope-regression.test.ts']);
+
+    const otherRequest = scopeRequest(laneB.id, 'tests/other-packet.test.ts');
+    expect(panelGateMiddleware(otherRequest).status).toBe(200);
+    const otherResponse = await scopeRoute.POST(otherRequest, { params: Promise.resolve({ id: laneB.id }) });
+    expect(otherResponse.status).toBe(403);
+    await expect(otherResponse.json()).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'worker_packet_mismatch' },
+    });
+    expect(readOrchestratorControlPlaneState().packets.find((candidate) => candidate.id === packetB)?.allowedFiles)
+      .toEqual(['src/worker.ts']);
+  });
+
   it('never launches a packet whose only predicted file is forbidden by its task brief', async () => {
     const repoPath = createRepo();
     const { scanRepo } = await import('@/lib/skeleton');
