@@ -156,7 +156,8 @@ function ensureIdempotentColumnAdds(sqlite: Database.Database): void {
   ensureV15CommentsFtsSchema(sqlite);
   // #915 path-to-70 phase 1.7 #3 — Schema v16 — `docs` parent table +
   // `docs_fts` FTS5 mirror for repo markdown (CLAUDE.md, README, AGENTS.md,
-  // DESIGN/THEME, docs/**). Same skip-with-warning pattern when FTS5 is off.
+  // docs/design/DESIGN.md, THEME.md, docs/**). Same skip-with-warning pattern
+  // when FTS5 is off.
   ensureV16DocsFtsSchema(sqlite);
   // #915 north star #1 — Schema v17 — Engineering Brain Indexer foundation.
   // `facts` table holds distilled facts with provenance + fingerprint upsert,

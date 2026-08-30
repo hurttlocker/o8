@@ -4,7 +4,8 @@
  *   npx tsx scripts/ingest-repo-docs.ts
  *
  * Walks every repo in `~/.o8/repos.json` and upserts CLAUDE.md / README /
- * AGENTS.md / DESIGN.md / THEME.md / docs/**\/*.md / `*.md` at the repo root
+ * AGENTS.md / THEME.md / docs/**\/*.md (including docs/design/DESIGN.md) /
+ * `*.md` at the repo root
  * into the `docs` table (schema v16). The trigger keeps `docs_fts` in sync.
  *
  * Pretty-prints a per-repo + per-kind summary. Exit code 1 on any repo error

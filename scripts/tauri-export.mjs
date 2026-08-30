@@ -272,7 +272,7 @@ console.log('📦 Created frontend loader (port-probing)');
 // device-flow CTA (deviceFlowEnabled in /api/panel/github-status keys off
 // process.env.GITHUB_OAUTH_CLIENT_ID, which was never present in packaged
 // builds). Source priority: build env var wins, else o8.release.json at the
-// repo root (gitignored, deployment-specific — see o8.release.example.json).
+// repo root (gitignored, deployment-specific — see config/o8.release.example.json).
 // Absent → nothing is stamped and the packaged build behaves exactly as today.
 const releaseConfig = resolveReleaseConfig(root);
 

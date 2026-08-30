@@ -674,7 +674,7 @@
       "repoPath": "/workspace/o8",
       "question": "Do o8-site and the o8 desktop app currently use the same font stack?",
       "expectedAnswer": "No. The ingested o8-site stack specifies Plus Jakarta Sans. The desktop design specification superseded its old Plus Jakarta Sans lock with var(--font-sans-system), using the native system stack; the rollback happened in May 2026 and was re-locked in June.",
-      "sourceOfTruth": "~/.o8/directives/spec-ingest__o8-site__readme__stack.md:11-16; DESIGN.md:108-116,578-584",
+      "sourceOfTruth": "~/.o8/directives/spec-ingest__o8-site__readme__stack.md:11-16; docs/design/DESIGN.md:108-116,578-584",
       "expectedFacts": [
         "States that the font stacks differ",
         "Names Plus Jakarta Sans for o8-site",

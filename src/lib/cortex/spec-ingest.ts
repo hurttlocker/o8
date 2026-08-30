@@ -4,7 +4,8 @@
  * answer design / convention / "how do we do X here" questions.
  *
  * Scope per #1114:
- *   - Root files: README.md, CLAUDE.md, AGENTS.md, DESIGN.md, THEME.md
+ *   - Named files: README.md, CLAUDE.md, AGENTS.md, THEME.md,
+ *     docs/design/DESIGN.md, docs/design/STYLEGUIDE.md
  *   - Directories: docs/** (recursive, *.md only)
  *
  * Chunking (#1120):
@@ -44,7 +45,14 @@ import { refreshDirectiveFts } from '@/lib/db/v14-fts5-migration';
 import { captionImagesInSpec } from '@/lib/cortex/spec-image-captions';
 import { invalidateAnswerCache } from '@/lib/cortex/qa/ask';
 
-const ROOT_SPEC_FILES = ['README.md', 'CLAUDE.md', 'AGENTS.md', 'DESIGN.md', 'THEME.md', 'STYLEGUIDE.md'] as const;
+const ROOT_SPEC_FILES = [
+  'README.md',
+  'CLAUDE.md',
+  'AGENTS.md',
+  'docs/design/DESIGN.md',
+  'THEME.md',
+  'docs/design/STYLEGUIDE.md',
+] as const;
 const SPEC_SUBDIRS = ['docs'] as const;
 const MIN_SECTION_BODY_CHARS = 40;
 const MAX_FRONT_MATTER_TITLE_CHARS = 160;
@@ -52,7 +60,7 @@ const MAX_DIRECTIVE_BODY_CHARS = 16_000;
 const DIRECTIVE_ID_PREFIX = 'spec-ingest';
 
 // H3 split thresholds (#1120). An H2 splits into per-H3 chunks when EITHER
-// is true. Tuned for DESIGN.md §06 Motifs (7 H3 kids, ~4.1 KB body): both
+// is true. Tuned for docs/design/DESIGN.md §06 Motifs (7 H3 kids, ~4.1 KB body): both
 // trigger, so we always split it.
 const H3_SPLIT_MIN_CHILDREN = 3;
 const H3_SPLIT_BODY_CHARS = 4000;
@@ -251,12 +259,12 @@ function chunkMarkdown(md: string): DocSection[] {
 }
 
 function listSpecFiles(repoPath: string): string[] {
-  const found: string[] = [];
+  const found = new Set<string>();
 
   for (const name of ROOT_SPEC_FILES) {
     const candidate = join(repoPath, name);
     try {
-      if (existsSync(candidate) && statSync(candidate).isFile()) found.push(candidate);
+      if (existsSync(candidate) && statSync(candidate).isFile()) found.add(candidate);
     } catch {
       // skip
     }
@@ -285,13 +293,13 @@ function listSpecFiles(repoPath: string): string[] {
         if (entry.isDirectory()) {
           stack.push(full);
         } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.md')) {
-          found.push(full);
+          found.add(full);
         }
       }
     }
   }
 
-  return found;
+  return [...found];
 }
 
 function directiveFilenameFor(id: string): string {

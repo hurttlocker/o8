@@ -18,7 +18,7 @@ const classification = JSON.parse(readFileSync(join(root, 'tests/test-classifica
 const testPlan = process.env.O8_INTEGRATION_TEST_MODE === '1' && process.env.O8_INTEGRATION_TEST_PLAN
   ? JSON.parse(readFileSync(process.env.O8_INTEGRATION_TEST_PLAN, 'utf8'))
   : null;
-const integrationConfig = testPlan?.config ?? 'vitest.integration.config.ts';
+const integrationConfig = testPlan?.config ?? 'config/vitest/vitest.integration.config.ts';
 const allFiles = testPlan?.files ?? classification.resourceOwning.map((entry) => entry.path);
 const filters = process.argv.slice(2).filter((argument) => !argument.startsWith('-'));
 const files = filters.length === 0

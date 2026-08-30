@@ -3,7 +3,7 @@
 **Status:** current surface inventory; verify reachability against the implementation when changing a surface.
 **The test:** a surface is REAL only if the operator can reach it with real clicks/keys on the installed production app (`/Applications/o8.app`). Code that renders nothing a human can reach is listed in "Present but not real" — it must not anchor design decisions.
 
-Related references: [`hurttlocker.md`](../../hurttlocker.md) defines operator-locked geometry, while [`DESIGN.md`](../../DESIGN.md) defines the palette and motifs.
+Related references: [`hurttlocker.md`](../design/hurttlocker.md) defines operator-locked geometry, while [`DESIGN.md`](../design/DESIGN.md) defines the palette and motifs.
 
 ### A. Main window chrome
 
@@ -66,7 +66,7 @@ Do not design around these; do not resurrect without operator sign-off:
 
 ### J. Deliberate "imperfections" — DO NOT FIX
 
-These look like bugs to fresh eyes; they are operator-locked decisions (hurttlocker.md is canonical):
+These look like bugs to fresh eyes; they are operator-locked decisions (`docs/design/hurttlocker.md` is canonical):
 - **Optical centering beats mathematical centering.** Chevrons/FilterList sit at x=235 not x=233 because their visible glyph centers sit left of their SVG bounding box — "don't trust the math, measure the rendered pixel" (hurttlocker §96). 1–2px "off-center" icons are usually centered *to the human eye*. Never "fix" alignment without screenshotting the rendered pixels first.
 - **Font-weight 260–350 on meta lines**, system stack over webfonts, weight bumps above spec when density makes 400 read thin — eye ergonomics over Figma fidelity.
 - **Two icon libraries on purpose** (Lucide default + Tabler/Iconoir overrides where glyph design wins at-size); raw-SVG shims because the Tauri webview can't render the React icon components. No migration to one library is planned.

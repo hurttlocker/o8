@@ -25,7 +25,7 @@ const corpusPaths = [
   ...markdownFilesUnder(join(repoRoot, 'docs')),
   join(repoRoot, 'CLAUDE.md'),
   join(repoRoot, 'AGENTS.md'),
-  join(repoRoot, 'DESIGN.md'),
+  join(repoRoot, 'docs/design/DESIGN.md'),
   ...markdownFilesUnder(join(repoRoot, 'tests/fixtures/markdown')),
 ];
 

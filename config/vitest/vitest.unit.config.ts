@@ -3,7 +3,7 @@ import { defineConfig } from 'vitest/config';
 import { sharedVitestConfig } from './vitest.shared';
 
 const classification = JSON.parse(readFileSync(
-  new URL('./tests/test-classification.json', import.meta.url),
+  new URL('../../tests/test-classification.json', import.meta.url),
   'utf8',
 )) as { resourceOwning: Array<{ path: string }> };
 

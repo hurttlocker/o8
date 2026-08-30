@@ -2,7 +2,8 @@
  * Engineering Brain — Phase 2b: docs distillation (#915 north star follow-up).
  *
  * Walks every repo registered in `~/.o8/repos.json`, selects CLAUDE.md, root
- * README.md, AGENTS.md, DESIGN.md, and markdown at any depth under docs/, then
+ * README.md, AGENTS.md, design references such as docs/design/DESIGN.md, and
+ * markdown at any depth under docs/, then
  * chunks them by heading and batches N chunks per Claude Sonnet call to extract
  * structured facts into the `facts` table.
  *

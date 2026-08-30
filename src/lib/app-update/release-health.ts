@@ -9,7 +9,7 @@
  * briefly unreachable.
  *
  * The manifest lives in the public releases repo and is operator-edited after a
- * bad release ships. Schema (see release-health.example.json):
+ * bad release ships. Schema (see config/release-health.example.json):
  *   { "pulled": ["0.1.567"], "note": "0.1.567 crashes on launch — skipped." }
  *
  * NOTE ON THE FETCH SEAM: the desktop webview CSP does not allow connecting to

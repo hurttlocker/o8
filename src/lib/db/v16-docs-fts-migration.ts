@@ -4,7 +4,7 @@
  *
  * Round-2 brainstormer found cross-repo at 14% (qa-026/27/28/30 all 0.00) is
  * substrate-empty: the questions ask about invariants that live in CLAUDE.md,
- * README.md, AGENTS.md, DESIGN.md, THEME.md, and `docs/**` markdown across
+ * README.md, AGENTS.md, docs/design/DESIGN.md, THEME.md, and `docs/**` markdown across
  * registered repos — files the retriever has never seen. BM25 over those
  * files lets the FTS retriever return real rows, which is what the composer
  * needs before it can stop saying "I don't have that information yet."

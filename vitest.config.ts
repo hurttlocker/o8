@@ -1,5 +1,5 @@
 import { defineConfig } from 'vitest/config';
-import { sharedVitestConfig } from './vitest.shared';
+import { sharedVitestConfig } from './config/vitest/vitest.shared';
 
 export default defineConfig({
   ...sharedVitestConfig,

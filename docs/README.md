@@ -2,6 +2,13 @@
 
 This documentation covers using o8, understanding and extending its architecture, and operating production builds.
 
+## Reference collections
+
+| Collection | What it contains |
+|---|---|
+| [Design](design/) | The visual language, interaction rules, review rules, and operator-locked geometry. |
+| [Agents](agents/) | Guidance for external agents that drive o8 through its supported interfaces. |
+
 ## User
 
 For operators who want to understand the product and run governed agent work without reading implementation details.

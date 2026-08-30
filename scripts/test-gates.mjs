@@ -177,7 +177,7 @@ async function runGate(gate, forwardedArgs) {
 }
 
 const defaultGates = [
-  { id: 'unit', label: 'Hermetic unit gate', config: 'vitest.unit.config.ts' },
+  { id: 'unit', label: 'Hermetic unit gate', config: 'config/vitest/vitest.unit.config.ts' },
   { id: 'integration', label: 'Resource-owning integration gate', runner: 'scripts/integration-test-gate.mjs' },
 ];
 const gates = process.env.O8_TEST_GATE_TEST_MODE === '1' && process.env.O8_TEST_GATE_PLAN

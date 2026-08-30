@@ -18,8 +18,8 @@
   rendering cost requires them.
 - Keep files under the 800-line ceiling unless the repository guide names an
   existing waiver.
-- Match the component vocabulary and geometry in `Hurttlocker.md`, `DESIGN.md`,
-  and `STYLEGUIDE.md`.
+- Match the component vocabulary and geometry in `docs/design/hurttlocker.md`,
+  `docs/design/DESIGN.md`, and `docs/design/STYLEGUIDE.md`.
 
 ## API Routes
 

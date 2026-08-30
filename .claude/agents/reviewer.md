@@ -24,7 +24,7 @@ When reviewing changes:
    - No Material Design patterns
    - Console logging must use [feature-name] prefix
    - No throwing in API routes
-2b. For UI changes, check STYLEGUIDE.md (interaction rules, review-gating):
+2b. For UI changes, check docs/design/STYLEGUIDE.md (interaction rules, review-gating):
    - Feedback timing: every mutating control enters a disabled/busy state on
      press; no spinner under 100ms; named stages (not an endless spinner) past 3s
    - Sibling cohesion: elements in a group (.map rows, button clusters, tabs)

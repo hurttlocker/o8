@@ -32,7 +32,8 @@ const FACTS_PIN_LIMIT = 6;
 
 /**
  * #1119 — spec-ingest directives are sectioned, deterministic prose extracted
- * from the repo's canonical specs (CLAUDE.md / AGENTS.md / DESIGN.md / docs/**)
+ * from the repo's canonical specs (CLAUDE.md / AGENTS.md /
+ * docs/design/DESIGN.md / docs/**)
  * by the #1114 ingestion job. They're the highest-authority source for
  * design/convention/architecture questions but lost to the facts pin: short,
  * high-confidence facts about an *older* spec version would crowd out the
@@ -98,7 +99,8 @@ export async function retrieveAll(input: RetrieverInput): Promise<RetrieverResul
  *
  * Pin order (above the RRF pool):
  *   1. Spec-ingest directives (up to SPEC_INGEST_PIN_LIMIT) — #1119. The
- *      #1114 spec-ingest job extracts canonical specs (CLAUDE.md / DESIGN.md /
+ *      #1114 spec-ingest job extracts canonical specs (CLAUDE.md /
+ *      docs/design/DESIGN.md /
  *      AGENTS.md / docs/**) into per-section directives. They're the
  *      highest-authority answer for design/convention/architecture questions
  *      and must outrank facts distilled from older chat/PRs about the same

@@ -8,7 +8,7 @@ tools, task/workflow tools are absent, every descendant Git process blocks pushe
 to `main`, and o8's server-side PR-only wall is active. If any of those statements
 is false, stand down.
 
-Repo: `$HOME/o8`. Read `CLAUDE.md`, `hurttlocker.md`, and
+Repo: `$HOME/o8`. Read `CLAUDE.md`, `docs/design/hurttlocker.md`, and
 `scripts/dogfood/README.md` before working.
 
 ## 0. The gate

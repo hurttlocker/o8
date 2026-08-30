@@ -73,9 +73,9 @@ Runs on push/PR to `main`: TypeCheck → Lint → Unit Tests (`npm test`) → Go
 
 **Karpathy lens (Software 3.0).** Control plane, not an editor. Intent over instruction. Observable agents. Human oversight as a feature, not a bottleneck.
 
-**hurttlocker lens (eye ergonomics).** Tune icons, font weights, stroke widths, and contrast for the human eye — not for the design system's defaults. If the spec says weight 400 but it reads thin and strainy at our actual density, bump it. If a Lucide icon disappears against the chrome, swap libraries (Tabler / Iconoir) until it reads. Sustained, all-day legibility beats spec fidelity. When in doubt, ship what's comfortable to *look at for eight hours*, not what matches a Figma frame. **Locked typography + icon + layout values live in [`hurttlocker.md`](./hurttlocker.md)** — read it before changing any row geometry, font weight, or chrome icon. Symlinked to `~/hurttlocker.md` for cross-project reference.
+**hurttlocker lens (eye ergonomics).** Tune icons, font weights, stroke widths, and contrast for the human eye — not for the design system's defaults. If the spec says weight 400 but it reads thin and strainy at our actual density, bump it. If a Lucide icon disappears against the chrome, swap libraries (Tabler / Iconoir) until it reads. Sustained, all-day legibility beats spec fidelity. When in doubt, ship what's comfortable to *look at for eight hours*, not what matches a Figma frame. **Locked typography + icon + layout values live in [`hurttlocker.md`](./docs/design/hurttlocker.md)** — read it before changing any row geometry, font weight, or chrome icon. Symlinked to `~/hurttlocker.md` for cross-project reference.
 
-**Design language.** See [`DESIGN.md`](./DESIGN.md) for the authoritative palette, typography, layout primitives, and motif vocabulary. Sister spec: `o8-site/THEME.md` for the marketing side. Read DESIGN.md before styling any new surface; read THEME.md before touching the landing.
+**Design language.** See [`DESIGN.md`](./docs/design/DESIGN.md) for the authoritative palette, typography, layout primitives, and motif vocabulary. Sister spec: `o8-site/THEME.md` for the marketing side. Read `docs/design/DESIGN.md` before styling any new surface; read THEME.md before touching the landing.
 
 ## Architecture
 
@@ -228,7 +228,7 @@ The Rust shell runs pre-flight checks before spawning any Node process:
 
 Supporting machinery: `compactor.ts` + `compactor-scheduler.ts` (ledger pruning, weekly digest cron with `--digest-to` markdown output for #970 phase 2), `decay.ts` (relevance decay over time), `embeddings.ts` (Cortex v2 deliberately kills vector search for the directive path but keeps embeddings for the QA cascade), `indexer/`, `ingest/`, `qa/` (Q&A cascade with classifier + composer + haiku-adapter), `spec-ingest.ts` + `ingest/repo-docs.ts` (spec ingestion at repo connect). FTS5 migrations v14–v20 power text search. `session_outcomes` rows now stamp a `mergedClean` boolean when a worktree merge lands without operator edits — distinguishes "agent shipped clean" from "agent shipped but needed touch-up."
 
-**Spec ingestion feedback loop — important.** At repo connect, `spec-ingest.ts` ingests `ROOT_SPEC_FILES = ['README.md', 'CLAUDE.md', 'AGENTS.md', 'DESIGN.md', 'THEME.md']` (plus `docs/**/*.md`) and converts them into directives that the Engineering Brain retrieves against. **This means editing CLAUDE.md immediately changes what the Brain answers about the repo.** When updating this file (or AGENTS.md / DESIGN.md / THEME.md), consider that the change is also a documentation update visible to the Brain's Q&A surface — and to any orchestrator that calls `cortex_ask`. Write for both audiences. **Chunk-size rule:** sections chunk at the H3 level and the composer reads at most ~1,500 chars per row (`rowFullText` cap) — a fact buried past that point in a long H3 is retrievable but unreadable to the composer. Keep H3 sections chunk-sized, or split them (live-hit 2026-06-11: the Brain couldn't answer questions about its own spend cap until the section was split into three H3s).
+**Spec ingestion feedback loop — important.** At repo connect, `spec-ingest.ts` ingests `ROOT_SPEC_FILES = ['README.md', 'CLAUDE.md', 'AGENTS.md', 'docs/design/DESIGN.md', 'THEME.md', 'docs/design/STYLEGUIDE.md']` (plus the rest of `docs/**/*.md`, without duplicates) and converts them into directives that the Engineering Brain retrieves against. **This means editing CLAUDE.md immediately changes what the Brain answers about the repo.** When updating this file (or AGENTS.md / `docs/design/DESIGN.md` / THEME.md), consider that the change is also a documentation update visible to the Brain's Q&A surface — and to any orchestrator that calls `cortex_ask`. Write for both audiences. **Chunk-size rule:** sections chunk at the H3 level and the composer reads at most ~1,500 chars per row (`rowFullText` cap) — a fact buried past that point in a long H3 is retrievable but unreadable to the composer. Keep H3 sections chunk-sized, or split them (live-hit 2026-06-11: the Brain couldn't answer questions about its own spend cap until the section was split into three H3s).
 
 ### Engineering Brain (Q&A surface)
 
@@ -360,7 +360,7 @@ If you're documenting a route here, also confirm it's in `GATED_PREFIXES` (or `A
 - **Never hardcode API/WS ports** — use `getApiBase()` from `@/lib/panel/api-port` (server-side TS) or `resolveApiBase()` helper (standalone MCP node processes). The Tauri sidecar picks ports dynamically from the 47100/47120 blocks and writes them to `~/.o8/{api-port,ws-port}`.
 - **Never hardcode `/Users/example/*` paths** — use `process.cwd()`, `os.homedir()`, `process.env.HOME`, or an explicit env var. The clone-readiness audit found 15+ leaks; they've been fixed but don't reintroduce.
 - **Never bypass the middleware in `src/middleware.ts`** — it gates all dangerous API routes on loopback + ws-token. If you add a new route prefix that touches state, add it to `GATED_PREFIXES`. If you need public GET access, add it to `ALLOWLIST_READ_ONLY`.
-- **Never use emoji** — icon libraries only, as raw SVG. **Both Phosphor and Lucide are in active use across the app** (Lucide via the raw-SVG shim system), with Tabler/Iconoir swaps where eye ergonomics demand (per hurttlocker.md). No standardization on a single library is planned — don't migrate icons between libraries; match whichever the surrounding surface already uses.
+- **Never use emoji** — icon libraries only, as raw SVG. **Both Phosphor and Lucide are in active use across the app** (Lucide via the raw-SVG shim system), with Tabler/Iconoir swaps where eye ergonomics demand (per `docs/design/hurttlocker.md`). No standardization on a single library is planned — don't migrate icons between libraries; match whichever the surrounding surface already uses.
 - **Never use Material Design patterns** — no borderLeft accents, no MD elevation
 - **Never use React icon components in Tauri webview** — neither `@phosphor-icons/react` nor `lucide-react` render correctly. Extract SVG path data from `@phosphor-icons/react/dist/defs/` and use raw `<svg>` elements. For simple actions (plus/minus), prefer HTML entities.
 - **Never use dropdown overflow menus ("...")** — use inline actions with confirmation strips instead
@@ -387,9 +387,9 @@ If you're documenting a route here, also confirm it's in `GATED_PREFIXES` (or `A
 
 **Don't reference a constants block here — the values have changed multiple times and the spec files are the source of truth.** Read in this order:
 
-1. **[`hurttlocker.md`](./hurttlocker.md)** — operator-locked typography, icon vocabulary, layout primitives, hover patterns, row geometry. The locked spec for every list/row/chrome surface.
-2. **[`DESIGN.md`](./DESIGN.md)** — palette, design language, motif vocabulary.
-3. **[`STYLEGUIDE.md`](./STYLEGUIDE.md)** — the interaction half (review-gating): feedback-timing tiers, sibling cohesion, button hierarchy. Read before adding a control, a loading state, or a group of sibling elements.
+1. **[`hurttlocker.md`](./docs/design/hurttlocker.md)** — operator-locked typography, icon vocabulary, layout primitives, hover patterns, row geometry. The locked spec for every list/row/chrome surface.
+2. **[`DESIGN.md`](./docs/design/DESIGN.md)** — palette, design language, motif vocabulary.
+3. **[`STYLEGUIDE.md`](./docs/design/STYLEGUIDE.md)** — the interaction half (review-gating): feedback-timing tiers, sibling cohesion, button hierarchy. Read before adding a control, a loading state, or a group of sibling elements.
 4. **`src/lib/theme/`** — actual `--t-*` token values per palette × surface combination.
 
 Stable invariants that *don't* live in the spec files (because they're framework rules, not design choices):
@@ -462,7 +462,7 @@ GitHub Actions macOS runners failed because of billing, so the normal release ru
 
 ### Release-time build config — device-flow GitHub client id (#1338)
 
-The device-flow "Connect GitHub" CTA only renders when `GITHUB_OAUTH_CLIENT_ID` is present in the packaged server's env. Client IDs are PUBLIC, so `scripts/tauri-export.mjs` bakes it into the generated `out/server/server.js` wrapper at prebuild time, sourced from a `GITHUB_OAUTH_CLIENT_ID` build env var OR `o8.release.json` at the repo root (gitignored — copy `o8.release.example.json` and paste the client id once). Absent → the build behaves exactly as before (device flow disabled). Set it once and every `npm run ship` carries it.
+The device-flow "Connect GitHub" CTA only renders when `GITHUB_OAUTH_CLIENT_ID` is present in the packaged server's env. Client IDs are PUBLIC, so `scripts/tauri-export.mjs` bakes it into the generated `out/server/server.js` wrapper at prebuild time, sourced from a `GITHUB_OAUTH_CLIENT_ID` build env var OR `o8.release.json` at the repo root (gitignored — copy `config/o8.release.example.json` and paste the client id once). Absent → the build behaves exactly as before (device flow disabled). Set it once and every `npm run ship` carries it.
 
 ### o8_view_* webview tools (lets Claude drive the installed app)
 
@@ -492,7 +492,7 @@ Both use **translucent glass chrome over the macOS vibrancy backdrop** (when `su
 
 The installed app has `dev-mcp-plugin` enabled. Use `mcp__o8__o8_view_screenshot` after each tweak. Ship with `npm run ship` after each change — ~2 min to build + upload + auto-update. Don't rely on `cargo tauri dev` — the user daily-drives the prod build, so that's where the feedback loop lives.
 
-For exact token values and row/typography geometry, **always** read [`hurttlocker.md`](./hurttlocker.md) first — it's the operator-locked spec.
+For exact token values and row/typography geometry, **always** read [`hurttlocker.md`](./docs/design/hurttlocker.md) first — it's the operator-locked spec.
 
 ## Orchestrator Model
 

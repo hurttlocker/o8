@@ -171,13 +171,37 @@ A capped **Founders Edition** — supporter badge, a numbered founding serial in
 
 ## Design
 
-o8 is built like every pixel matters, because you stare at a control room all day: native macOS vibrancy glass, a two-axis theme system (light/dark × glass/solid), density with restraint, sustained-legibility typography. The locked spec lives in [`DESIGN.md`](./DESIGN.md) and [`hurttlocker.md`](./hurttlocker.md); read them before styling anything.
+o8 is built like every pixel matters, because you stare at a control room all day: native macOS vibrancy glass, a two-axis theme system (light/dark × glass/solid), density with restraint, sustained-legibility typography. The locked spec lives in [`DESIGN.md`](./docs/design/DESIGN.md) and [`hurttlocker.md`](./docs/design/hurttlocker.md); read them before styling anything.
 
 ## More
 
 - **Documentation:** [`docs/README.md`](./docs/README.md) — user guides, engineering internals, and operating runbooks.
 - [`AGENTS.md`](./AGENTS.md) — the `o8` CLI reference (the same control room, headless).
 - [`CLAUDE.md`](./CLAUDE.md) — the canonical agent/contributor brief: architecture, conventions, critical rules.
+
+## Repository layout
+
+- [`.agents/`](./.agents/) — repository-local agent skills.
+- [`.claude/`](./.claude/) — Claude runtime settings, agents, hooks, and workflows.
+- [`.codex/`](./.codex/) — Codex runtime settings and agent profiles.
+- [`.github/`](./.github/) — CI workflows and GitHub contribution templates.
+- [`assets/`](./assets/) — README and product media.
+- [`brand/`](./brand/) — logo and application icon sources.
+- [`cli/`](./cli/) — the `o8` command-line client.
+- [`config/`](./config/) — checked-in tool configuration and release examples.
+- [`dist/`](./dist/) — compiled hook scripts consumed by agent runtimes.
+- [`docs/`](./docs/) — user guides, design references, internals, and operations runbooks.
+- [`drizzle/`](./drizzle/) — database migration assets.
+- [`examples/`](./examples/) — example directives and configuration patterns.
+- [`licenses/`](./licenses/) — third-party license texts.
+- [`patches/`](./patches/) — package-manager patches applied during install.
+- [`protocol/`](./protocol/) — realtime protocol contracts and generated bindings.
+- [`public/`](./public/) — static assets served by Next.js.
+- [`scripts/`](./scripts/) — development, verification, build, and release tooling.
+- [`src/`](./src/) — the Next.js application and shared TypeScript domain logic.
+- [`src-tauri/`](./src-tauri/) — the Tauri shell and native Rust code.
+- [`tauri-plugin-mcp/`](./tauri-plugin-mcp/) — the bundled Tauri MCP plugin.
+- [`tests/`](./tests/) — cross-cutting Vitest suites, fixtures, and Playwright specs.
 
 ## Contributing
 
