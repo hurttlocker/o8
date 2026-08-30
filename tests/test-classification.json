@@ -263,6 +263,14 @@
       ]
     },
     {
+      "path": "src/lib/lane/rebase-lint.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli"
+      ]
+    },
+    {
       "path": "src/lib/lane/remote-fetch.test.ts",
       "reasons": [
         "executable-fixture",
