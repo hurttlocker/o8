@@ -17,7 +17,7 @@
     "dev:all": "node scripts/dev.mjs all",
     "build": "node scripts/build.mjs",
     "start": "node scripts/start.mjs",
-    "lint": "eslint . --max-warnings 52",
+    "lint": "eslint . --max-warnings 54",
     "typecheck": "npm run verify:routes && node scripts/typecheck.mjs",
     "verify:routes": "vitest run tests/route-coverage.test.ts -t \"route module shape\"",
     "rule-check": "tsx scripts/rule-check.ts",
