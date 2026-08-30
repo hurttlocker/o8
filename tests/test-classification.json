@@ -2162,6 +2162,12 @@
       ]
     },
     {
+      "path": "tests/server-only-stub-node-options.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "tests/session-transform-real-path.test.ts",
       "reasons": [
         "child-process",

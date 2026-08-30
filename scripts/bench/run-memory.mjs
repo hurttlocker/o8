@@ -2,6 +2,7 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { withServerOnlyStubNodeOptions } from '../run-lib.mjs';
 
 const CATEGORIES = [
   'ownership',
@@ -117,7 +118,7 @@ function main() {
       ...process.env,
       O8_EVAL_MODE: '1',
       THREE_WAY_LIMIT: process.env.BENCH_QA_LIMIT ?? undefined,
-      NODE_OPTIONS: '--import=./scripts/register-server-only-stub.mjs',
+      NODE_OPTIONS: withServerOnlyStubNodeOptions(),
     },
   });
 

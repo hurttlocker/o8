@@ -23,6 +23,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import WebSocket from 'ws';
+import { withServerOnlyStubNodeOptions } from './run-lib.mjs';
 
 const WS_TOKEN = 'verify-symon-agent-mode-token-0123456789';
 const WS_PORT = 34000 + Math.floor(Math.random() * 4000);
@@ -101,7 +102,7 @@ async function main() {
       cwd: process.cwd(),
       env: {
         ...process.env,
-        NODE_OPTIONS: '--import=./scripts/register-server-only-stub.mjs',
+        NODE_OPTIONS: withServerOnlyStubNodeOptions(),
         NEXT_ORIGIN: `http://127.0.0.1:${stub.port}`,
         WS_TOKEN,
         WS_PORT: String(WS_PORT),

@@ -9,7 +9,11 @@
  * inline prefix had, minus the requirement for a POSIX shell.
  */
 
-import { parseEnvPrefixArgv, runAndExit } from './run-lib.mjs';
+import {
+  canonicalizeServerOnlyStubNodeOptions,
+  parseEnvPrefixArgv,
+  runAndExit,
+} from './run-lib.mjs';
 
 const { assignments, command, args } = parseEnvPrefixArgv(process.argv.slice(2));
 
@@ -18,4 +22,8 @@ if (!command) {
   process.exit(1);
 }
 
-runAndExit(command, args, { ...process.env, ...assignments });
+const env = { ...process.env, ...assignments };
+if (env.NODE_OPTIONS) {
+  env.NODE_OPTIONS = canonicalizeServerOnlyStubNodeOptions(env.NODE_OPTIONS);
+}
+runAndExit(command, args, env);

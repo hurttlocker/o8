@@ -19,6 +19,37 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
+// NODE_OPTIONS resolves relative imports from each child's cwd, so descendants
+// launched in worktrees need this module-anchored file URL rather than the legacy token.
+const LEGACY_SERVER_ONLY_STUB_NODE_OPTION = '--import=./scripts/register-server-only-stub.mjs';
+export const SERVER_ONLY_STUB_NODE_OPTION = `--import=${new URL('./register-server-only-stub.mjs', import.meta.url).href}`;
+const SERVER_ONLY_STUB_NODE_OPTION_PATTERN = new RegExp(
+  `(^|\\s)(?:${escapeRegExp(LEGACY_SERVER_ONLY_STUB_NODE_OPTION)}|${escapeRegExp(SERVER_ONLY_STUB_NODE_OPTION)})(?=\\s|$)`,
+  'g',
+);
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizeServerOnlyStubNodeOptions(value, appendIfMissing) {
+  let found = false;
+  const normalized = value?.replace(SERVER_ONLY_STUB_NODE_OPTION_PATTERN, (_match, prefix) => {
+    if (found) return '';
+    found = true;
+    return `${prefix}${SERVER_ONLY_STUB_NODE_OPTION}`;
+  });
+  if (found || !appendIfMissing) return normalized;
+  return value ? `${value} ${SERVER_ONLY_STUB_NODE_OPTION}` : SERVER_ONLY_STUB_NODE_OPTION;
+}
+
+export function canonicalizeServerOnlyStubNodeOptions(value) {
+  return normalizeServerOnlyStubNodeOptions(value, false);
+}
+
+export function withServerOnlyStubNodeOptions(value) {
+  return normalizeServerOnlyStubNodeOptions(value, true);
+}
 
 /**
  * CLI name -> the package subpath its `node_modules/.bin` entry points at.
