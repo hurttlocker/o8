@@ -17,6 +17,7 @@ import {
   formatDispatchableRuntimeChoices,
   getRuntimeCapability,
   isOrchestratorRuntime,
+  resolveRuntimePreset,
 } from '@/lib/orchestrator/runtime-capabilities';
 import { assertRuntimeDispatchable, DispatchPreflightError } from '@/lib/runtimes/shared/auth-detect';
 import { ControlPlaneLockTimeoutError } from '@/lib/orchestrator/control-plane';
@@ -131,6 +132,7 @@ export async function POST(request: NextRequest) {
   if (record.origin !== undefined && record.origin !== 'design-mode') {
     return operatorError('invalid_request', 'origin must be "design-mode" when provided.', 400);
   }
+  const origin = record.origin === 'design-mode' ? 'design-mode' as const : undefined;
   const launchContext = normalizeWorkerLaunchContext(record.launchContext);
   if (record.launchContext !== undefined && !launchContext) {
     return operatorError('invalid_request', 'launchContext must name a valid source, presentation, and repoContext.', 400);
@@ -177,6 +179,10 @@ export async function POST(request: NextRequest) {
   if (!profileRouting.ok) {
     return operatorError(profileRouting.code, profileRouting.message, 400);
   }
+  const runtimePreset = origin && !requestedModelText && profileRouting.requestedRuntime
+    ? resolveRuntimePreset('ui-edit-low-latency', profileRouting.requestedRuntime)
+    : null;
+  const effectiveRequestedModel = runtimePreset?.model ?? profileRouting.requestedModel;
   for (const issue of issues) {
     if (!issue.runtime) continue;
     const dispatchError = runtimeDispatchError(issue.runtime);
@@ -195,7 +201,7 @@ export async function POST(request: NextRequest) {
     workerIntent: record.workerIntent,
     requestedProvider: record.requestedProvider,
     requestedRuntime: profileRouting.requestedRuntime,
-    requestedModel: profileRouting.requestedModel,
+    requestedModel: effectiveRequestedModel,
     requestedEffort,
     source: 'create-mission-api',
   });
@@ -265,8 +271,6 @@ export async function POST(request: NextRequest) {
   if (qualitySearch && taskContract === 'off') {
     return operatorError('invalid_request', 'qualitySearch already uses a sealed contract and cannot be combined with taskContract: "off".', 400);
   }
-  const origin = record.origin === 'design-mode' ? 'design-mode' as const : undefined;
-
   const createInput = {
       issues,
       repoPath,

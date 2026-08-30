@@ -423,6 +423,29 @@ export type RuntimeAuthHouse = Exclude<
 >;
 type CatalogRuntimeCapability = OrchestratorRuntimeCapability<RuntimeWorkerProvider, RuntimeAuthHouse>;
 
+export const RUNTIME_PRESETS = {
+  'ui-edit-low-latency': {
+    modelByRuntime: {
+      codex: MODEL_IDS.codexScoutDefault,
+      'claude-code': MODEL_IDS.claudeHaikuQaDefault,
+    },
+  },
+} as const satisfies Record<string, {
+  modelByRuntime: Partial<Record<OrchestratorRuntime, string>>;
+}>;
+
+export type RuntimePresetId = keyof typeof RUNTIME_PRESETS;
+
+/** Resolve a semantic preset through the runtime already selected by operator policy. */
+export function resolveRuntimePreset(
+  presetId: RuntimePresetId,
+  runtime: OrchestratorRuntime,
+): { runtime: OrchestratorRuntime; model: string } | null {
+  const modelByRuntime = RUNTIME_PRESETS[presetId].modelByRuntime as Partial<Record<OrchestratorRuntime, string>>;
+  const model = modelByRuntime[runtime];
+  return model ? { runtime, model } : null;
+}
+
 export const ORCHESTRATOR_RUNTIME_IDS = Object.freeze(
   Object.keys(ORCHESTRATOR_RUNTIMES) as OrchestratorRuntime[],
 );

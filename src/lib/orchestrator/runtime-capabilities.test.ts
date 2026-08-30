@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { MODEL_IDS } from '@/lib/models';
+
 import {
   ORCHESTRATOR_RUNTIMES,
   ORCHESTRATOR_RUNTIME_IDS,
@@ -11,6 +13,7 @@ import {
   listDeclarativeRuntimes,
   listDispatchableRuntimes,
   listDispatchableWorkerProviders,
+  resolveRuntimePreset,
 } from './runtime-capabilities';
 
 describe('runtime capability catalog', () => {
@@ -51,5 +54,17 @@ describe('runtime capability catalog', () => {
     expect(listDispatchableWorkerProviders()).toEqual(expected);
     expect(expected.every((provider) => isRuntimeWorkerProvider(provider))).toBe(true);
     expect(isRuntimeWorkerProvider('made-up-provider')).toBe(false);
+  });
+
+  it('resolves the UI-edit preset through the selected subscription runtime', () => {
+    expect(resolveRuntimePreset('ui-edit-low-latency', 'codex')).toEqual({
+      runtime: 'codex',
+      model: MODEL_IDS.codexScoutDefault,
+    });
+    expect(resolveRuntimePreset('ui-edit-low-latency', 'claude-code')).toEqual({
+      runtime: 'claude-code',
+      model: MODEL_IDS.claudeHaikuQaDefault,
+    });
+    expect(resolveRuntimePreset('ui-edit-low-latency', 'gemini')).toBeNull();
   });
 });
