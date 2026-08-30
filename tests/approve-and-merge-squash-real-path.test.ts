@@ -73,7 +73,14 @@ function commitAll(cwd: string, message: string): string {
   return git(cwd, ['rev-parse', 'HEAD']);
 }
 
-async function createFixture(label: string) {
+async function createFixture(
+  label: string,
+  workingSubjects = [
+    'fix: add first packet change',
+    'wip: preserve intermediate packet state',
+    'fix: finalize packet state',
+  ],
+) {
   const root = mkdtempSync(join(os.tmpdir(), `o8-governed-squash-${label}-`));
   const origin = join(root, 'origin.git');
   const repo = join(root, 'operator');
@@ -101,11 +108,6 @@ async function createFixture(label: string) {
   });
   git(worktree.path, ['config', 'user.name', 'o8-test']);
   git(worktree.path, ['config', 'user.email', 'o8@example.test']);
-  const workingSubjects = [
-    'fix: add first packet change',
-    'wip: preserve intermediate packet state',
-    'fix: finalize packet state',
-  ];
   writeFileSync(join(worktree.path, 'first.txt'), 'first\n');
   commitAll(worktree.path, workingSubjects[0]!);
   writeFileSync(join(worktree.path, 'intermediate.txt'), 'intermediate\n');
@@ -250,5 +252,22 @@ describe('approve_and_merge governed squash through the route handler', () => {
     expect(git(fixture.repo, ['log', '-1', '--format=%s', 'refs/heads/main']))
       .toBe('fix: finalize packet state');
     expect(baseSubjects(fixture.repo)).not.toEqual(expect.arrayContaining(fixture.workingSubjects));
+  }, 60_000);
+
+  it('preserves clean multi-commit history when no message is supplied', async () => {
+    const workingSubjects = [
+      'fix: add preserved packet change',
+      'chore: refine preserved packet change',
+      'fix: finalize preserved packet change',
+    ];
+    const fixture = await createFixture('preserve-history', workingSubjects);
+
+    const response = await mergeRoute.POST(mergeRequest(fixture.packetId));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({ ok: true, result: { merged: true } });
+    expect(git(fixture.repo, ['rev-list', '--count', `${fixture.baseSha}..refs/heads/main`])).toBe('3');
+    expect(baseSubjects(fixture.repo)).toEqual(expect.arrayContaining(workingSubjects));
   }, 60_000);
 });

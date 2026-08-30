@@ -137,10 +137,9 @@ async function prepareGovernedMergeCandidate(input: {
   | { ok: true; candidateSha: string; squashed: boolean }
   | { ok: false; note: string }
 > {
-  const baseSha = await resolveSquashBaseSha(input);
   const plan = await resolveGovernedMergeHistoryPlan({
     cwd: input.repoPath,
-    baseRef: baseSha,
+    baseRef: input.originBaseRef ?? `refs/heads/${input.baseBranch}`,
     candidateRef: input.candidateRef,
     commitMessage: input.commitMessage,
   });
@@ -149,6 +148,7 @@ async function prepareGovernedMergeCandidate(input: {
     return { ok: true, candidateSha: input.candidateSha, squashed: false };
   }
 
+  const baseSha = await resolveSquashBaseSha(input);
   const { stdout: treeOutput } = await git(
     input.repoPath,
     ['rev-parse', `${input.candidateRef}^{tree}`],

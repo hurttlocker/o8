@@ -129,6 +129,11 @@ export async function performRemoteCustomerMerge(
     }
 
     await execFileAsync('git', ['checkout', lane.baseBranch], { windowsHide: true, cwd: lane.repoPath });
+    const preMergeHeadSha = (await execFileAsync('git', ['rev-parse', 'HEAD'], {
+      windowsHide: true,
+      cwd: lane.repoPath,
+      timeout: 5000,
+    })).stdout.trim();
 
     try {
       const mergeArgs = historyPlan.kind === 'squash'
@@ -157,10 +162,21 @@ export async function performRemoteCustomerMerge(
         // best effort
       }
 
-      try {
-        await execFileAsync('git', ['merge', '--abort'], { windowsHide: true, cwd: lane.repoPath });
-      } catch {
-        // already clean
+      if (historyPlan.kind === 'squash') {
+        try {
+          await execFileAsync('git', ['reset', '--merge'], { windowsHide: true, cwd: lane.repoPath });
+        } catch {
+          await execFileAsync('git', ['reset', '--hard', preMergeHeadSha], {
+            windowsHide: true,
+            cwd: lane.repoPath,
+          });
+        }
+      } else {
+        try {
+          await execFileAsync('git', ['merge', '--abort'], { windowsHide: true, cwd: lane.repoPath });
+        } catch {
+          // already clean
+        }
       }
 
       const mergeMessage = formatLaneCommandError(mergeErr);

@@ -2046,6 +2046,14 @@
       ]
     },
     {
+      "path": "tests/remote-governed-squash-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/repo-package-manager-contract-real-path.test.ts",
       "reasons": [
         "child-process",
