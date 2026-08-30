@@ -1514,6 +1514,14 @@
       ]
     },
     {
+      "path": "tests/lane-creation-base-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/lane-lifecycle-1810-real-path.test.ts",
       "reasons": [
         "child-process",
