@@ -13,7 +13,7 @@ import {
   resetPacket,
   submitPacketReview,
 } from '@/lib/mcp/operator-mission-tools';
-import { getPacketScope } from '@/lib/lanes/scope';
+import { getPacketScope, projectPacketScope } from '@/lib/lanes/scope';
 import {
   archiveTask,
   blockTask,
@@ -43,6 +43,11 @@ import {
   textResult,
 } from './shared';
 import type { WorkerIntent } from '@/lib/orchestrator/types';
+import {
+  findMissionAttentionPacket,
+  missionPacketSignature,
+  type MinimalMissionStatusShape,
+} from './mission-wait';
 import { parseMissionCandidateMode, parseTaskContractSetting, QUALITY_SEARCH_INPUT_SCHEMA, TASK_CONTRACT_SETTING_SCHEMA } from './quality-search-input';
 import { MISSION_WORKER_PIN_PROPERTIES, parseMissionWorkerPinInput, parseWorkerProvider, WORKER_PROVIDER_OPTIONS } from './mission-worker-input';
 import { CONTRACT_COVERAGE_EVIDENCE_SCHEMA, parseContractCoverageEvidenceInput } from './review-coverage-input';
@@ -189,7 +194,7 @@ export const MISSION_TOOLS: McpTool[] = [
   {
     name: 'get_packet_scope',
     description:
-      'Return one-call worker context for a packet or lane: project brief, main/current/related repos, active locks, branch, base, head SHA, worktree, file ceiling, allowed/blocked paths, repo-filtered directives, and active related packets with overlapping files. Provide packetId or laneId.',
+      'Return bounded one-call worker context for a packet or lane: project brief, repos, locks, branch, base, head SHA, worktree, path limits, directive count plus id/title references, and related packet overlaps. Directive bodies are omitted by default; pass includeDirectives:true only when their full text is needed. Provide packetId or laneId.',
     inputSchema: {
       // No top-level anyOf — OpenAI strict function-calling rejects oneOf /
       // anyOf / allOf siblings to `type: 'object'`. Handler validates that
@@ -203,6 +208,10 @@ export const MISSION_TOOLS: McpTool[] = [
         laneId: {
           type: 'string',
           description: 'Lane id, for example lane-xyz. Either packetId or laneId is required.',
+        },
+        includeDirectives: {
+          type: 'boolean',
+          description: 'Include full directive metadata and bodies. Default false; the bounded default returns only directive id/title references plus directiveCount.',
         },
       },
     },
@@ -544,7 +553,7 @@ export const MISSION_TOOLS: McpTool[] = [
   {
     name: 'wait_for_mission_ready',
     description:
-      'Long-poll until any packet in the mission transitions to a terminal/review state (awaiting_review, released, failed, archived) or the mission completes. Returns the same payload as get_mission_status plus a `wakeReason` field ("state-change" | "timeout" | "already-terminal"). Use after dispatching to get notified when Codex is done without manually polling. Specify `packetId` to wait for a specific packet only. Default timeout 600000ms (10 min); cap 1800000ms (30 min).',
+      'Long-poll until a packet reaches an attention state or its packet/lane state changes. Reruns and packets with running/reviewing lanes remain active instead of returning already-terminal. Returns the get_mission_status payload plus `wakeReason` ("state-change" | "timeout" | "already-terminal"). Specify packetId to watch one packet. Default timeout 600000ms; cap 1800000ms.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -968,19 +977,7 @@ export async function handleGetPacketScope(args: Record<string, unknown>): Promi
     if (!result) {
       return textResult('Packet scope not found', true);
     }
-    // Bound directive prose so a project with many/long directives doesn't
-    // flood the worker's context — keep every directive, cap each body.
-    const DIRECTIVE_BODY_CAP = 600;
-    const scope = result as unknown as Record<string, unknown>;
-    if (Array.isArray(scope.directives)) {
-      scope.directives = (scope.directives as Array<Record<string, unknown>>).map((directive) => {
-        const body = directive.body;
-        return typeof body === 'string' && body.length > DIRECTIVE_BODY_CAP
-          ? { ...directive, body: `${body.slice(0, DIRECTIVE_BODY_CAP)}…[+${body.length - DIRECTIVE_BODY_CAP} chars truncated]` }
-          : directive;
-      });
-    }
-    return jsonResult(scope);
+    return jsonResult(projectPacketScope(result, args.includeDirectives === true));
   } catch (error) {
     console.error(`${'[mcp-operator]'} get_packet_scope failed: ${errorText(error)}`);
     return textResult(`Failed to read packet scope: ${errorText(error)}`, true);
@@ -1177,52 +1174,15 @@ export async function handleTaskPrune(args: Record<string, unknown>): Promise<Mc
   }
 }
 
-// Packet states that need the caller's attention — the runtime is done working
-// for now and a decision is required. `blocked` belongs here (#1467): it is what
-// awaiting_input / awaiting_orchestrator (huddle, #1495) / awaiting_human lanes
-// and dispatch failures map to, and none of those progress without a decision.
-// Excluding it deadlocked the loop: the orchestrator sat in wait_for_mission_ready
-// while its worker sat in awaiting_orchestrator waiting for the orchestrator.
-// Dependency-held packets stay `queued` (with blockedBy), so they never
-// false-wake this set. `running`, `queued`, `launching` are NOT included.
-const PACKET_ATTENTION_STATUSES = new Set(['awaiting_review', 'released', 'failed', 'archived', 'blocked']);
+type MissionStatusReader = (input: {
+  missionId?: string;
+  includeCost: boolean;
+}) => Promise<MinimalMissionStatusShape | Awaited<ReturnType<typeof getMissionStatus>>>;
 
-interface MinimalMissionPacket {
-  id?: string;
-  status?: string;
-  releaseState?: string;
-  blockedBy?: unknown;
-}
-
-interface MinimalMissionStatusShape {
-  packets?: MinimalMissionPacket[];
-  currentWave?: number;
-  totalWaves?: number;
-}
-
-function packetSignature(packets: MinimalMissionPacket[] | undefined): string {
-  if (!Array.isArray(packets)) return '';
-  return packets
-    .map((p) => `${p.id ?? ''}:${p.status ?? ''}:${p.releaseState ?? ''}`)
-    .sort()
-    .join(',');
-}
-
-function findTerminalPacket(
-  status: MinimalMissionStatusShape,
-  packetIdFilter: string | null,
-): MinimalMissionPacket | null {
-  const packets = status.packets ?? [];
-  for (const p of packets) {
-    if (packetIdFilter && p.id !== packetIdFilter) continue;
-    if (typeof p.status === 'string' && PACKET_ATTENTION_STATUSES.has(p.status)) {
-      return p;
-    }
-  }
-  return null;
-}
-
-export async function handleWaitForMissionReady(args: Record<string, unknown>, readStatus: typeof getMissionStatus = getMissionStatus): Promise<McpToolResult> {
+export async function handleWaitForMissionReady(
+  args: Record<string, unknown>,
+  readStatus: MissionStatusReader = getMissionStatus,
+): Promise<McpToolResult> {
   const TIMEOUT_DEFAULT_MS = 10 * 60 * 1000;
   const TIMEOUT_MAX_MS = 30 * 60 * 1000;
   const POLL_DEFAULT_MS = 3000;
@@ -1240,12 +1200,12 @@ export async function handleWaitForMissionReady(args: Record<string, unknown>, r
 
     // If a terminal state already exists at baseline, return immediately so
     // the caller never blocks unnecessarily.
-    const baselineTerminal = findTerminalPacket(baseline, packetIdFilter);
+    const baselineTerminal = findMissionAttentionPacket(baseline, packetIdFilter);
     if (baselineTerminal) {
       return jsonResult({ ...baseline, wakeReason: 'already-terminal', terminalPacketId: baselineTerminal.id ?? null });
     }
 
-    const baselineSig = packetSignature(baseline.packets);
+    const baselineSig = missionPacketSignature(baseline.packets);
     const deadline = Date.now() + timeoutMs;
 
     while (Date.now() < deadline) {
@@ -1258,11 +1218,11 @@ export async function handleWaitForMissionReady(args: Record<string, unknown>, r
       if (Date.now() >= deadline) break;
 
       const next = (await readStatus({ missionId, includeCost: false })) as MinimalMissionStatusShape;
-      const terminal = findTerminalPacket(next, packetIdFilter);
+      const terminal = findMissionAttentionPacket(next, packetIdFilter);
       if (terminal) {
         return jsonResult({ ...next, wakeReason: 'state-change', terminalPacketId: terminal.id ?? null });
       }
-      if (packetSignature(next.packets) !== baselineSig) {
+      if (missionPacketSignature(next.packets) !== baselineSig) {
         return jsonResult({ ...next, wakeReason: 'state-change', terminalPacketId: null });
       }
     }

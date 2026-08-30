@@ -31,7 +31,7 @@ export const OPERATOR_PACKET_SUBCOMMANDS = [
 ] as const;
 
 export const PACKET_COMMAND_LINES = `  packet info [id]     packet metadata; explicit packet/lane id overrides cwd
-  packet scope [id]    one-call worker context (auto-resolves from cwd)
+  packet scope [id]    bounded worker context (--include-directives for bodies)
   packet expand-scope [id] request bounded paths (--paths <path[,path]> --reason <text>)
   packet diff [id]     the packet's code diff vs base (committed + uncommitted)
   packet commit -m ".." stage + commit the current worktree with an explicit pathspec

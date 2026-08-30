@@ -159,6 +159,7 @@ export function resetPacketFields(packet: OrchestratorPacket) {
   packet.releaseStatePayload = null;
   packet.archivedAt = null;
   packet.blockedReason = null;
+  packet.completionSummary = null;
   packet.recovery = null;
   packet.lane = null;
   packet.review = null;

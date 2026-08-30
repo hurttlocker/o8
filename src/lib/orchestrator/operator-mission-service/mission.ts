@@ -16,10 +16,7 @@ import {
   readMissionRegistryEntry,
   withMissionRegistryState,
 } from '@/lib/orchestrator/mission-registry';
-import {
-  latestTranscriptEventAt,
-  readSessionTranscriptEvents,
-} from '@/lib/orchestrator/packet-transcript';
+import { readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { bindWorkerLaunchParent } from '@/lib/orchestrator/worker-launch-context';
 import { assertQualitySearchMissionCompatibility, resolveTaskContractRequired } from '@/lib/orchestrator/task-contract-required';
@@ -27,6 +24,11 @@ import { withMissionHandoffBarrier } from '@/lib/orchestrator/lifecycle-mutation
 import { releaseAbandonedMissionLifecycleHold } from '@/lib/orchestrator/mission-lifecycle-hold';
 import { getTopRulesForPacket, readRepoScopedRules } from '@/lib/dispatch/rules-store';
 import { prepareMissionBranches, type MissionBranchDecision } from './branch-cleanup';
+import {
+  activityLabel,
+  latestIsoTimestamp,
+  readTranscriptActivityBySession,
+} from './mission-status-transcript';
 import { recordOutgoingMissionSnapshot } from './mission-handoff';
 import { logDispatchRoutingRecommendations } from './mission-routing-log';
 import { preparePacketsForExplicitDispatch, summarizeDispatchMission } from './dispatch-runtime-override';
@@ -442,58 +444,6 @@ export async function dispatchMission(input: DispatchMissionInput) {
   };
 }
 
-interface MissionTranscriptActivity {
-  lastTranscriptAt: string | null;
-  transcriptUnsupportedReason: string | null;
-}
-
-function latestIsoTimestamp(...timestamps: Array<string | null | undefined>): string | null {
-  let latestMs = 0;
-  let latestIso: string | null = null;
-
-  for (const timestamp of timestamps) {
-    if (!timestamp) continue;
-    const parsed = new Date(timestamp).getTime();
-    if (!Number.isFinite(parsed) || parsed <= latestMs) continue;
-    latestMs = parsed;
-    latestIso = new Date(parsed).toISOString();
-  }
-
-  return latestIso;
-}
-
-function activityLabel(
-  lastActivityAt: string | null,
-  lastTranscriptAt: string | null,
-  lastEventLabel: string | null | undefined,
-) {
-  return lastActivityAt && lastTranscriptAt && lastActivityAt === lastTranscriptAt
-    ? 'transcript_activity'
-    : lastEventLabel ?? null;
-}
-
-async function readTranscriptActivityBySession(
-  sessionKeys: string[],
-): Promise<Map<string, MissionTranscriptActivity>> {
-  const uniqueKeys = [...new Set(sessionKeys.map((key) => key.trim()).filter(Boolean))];
-  const pairs = await Promise.all(uniqueKeys.map(async (sessionKey) => {
-    try {
-      const readback = await readSessionTranscriptEvents(sessionKey);
-      return [sessionKey, {
-        lastTranscriptAt: latestTranscriptEventAt(readback.events),
-        transcriptUnsupportedReason: readback.unsupportedReason ?? null,
-      }] as const;
-    } catch {
-      return [sessionKey, {
-        lastTranscriptAt: null,
-        transcriptUnsupportedReason: null,
-      }] as const;
-    }
-  }));
-
-  return new Map(pairs);
-}
-
 /**
  * Build a lite mission status snapshot from the SQLite archive + live lanes.
  *
@@ -554,6 +504,7 @@ function buildHistoricalMissionStatus(record: import('@/lib/db/missions-store').
       releaseState: inferReleaseState(lane),
       blockedBy: [] as string[],
       blockedReason: null,
+      summary: null,
       recovery,
       lane: lane ? {
         laneId: lane.id,
@@ -651,6 +602,9 @@ export async function getMissionStatus(input: MissionStatusInput) {
     return sessionKey ? [sessionKey] : [];
   });
   const transcriptActivityBySession = await readTranscriptActivityBySession(sessionKeys);
+  const completionContextByPacketId = new Map(await Promise.all(state.packets.map(async (packet) => (
+    [packet.id, await readPacketCompletionContext(packet.id)] as const
+  ))));
   const mergePolicy = currentLaneMergePolicy();
 
   const agents = state.packets
@@ -736,6 +690,10 @@ export async function getMissionStatus(input: MissionStatusInput) {
       const lastTranscriptAt = activity?.lastTranscriptAt ?? null;
       const laneLastEventAt = lane?.lastEventAt ?? packet.lane?.lastEventAt ?? null;
       const lastActivityAt = latestIsoTimestamp(laneLastEventAt, lastTranscriptAt);
+      const storedCompletionContext = completionContextByPacketId.get(packet.id);
+      const completionContext = storedCompletionContext?.sessionKey === laneSessionKey
+        ? storedCompletionContext
+        : null;
       return {
         id: packet.id,
         referenceLabel: packet.referenceLabel,
@@ -746,6 +704,10 @@ export async function getMissionStatus(input: MissionStatusInput) {
         releaseState: packet.releaseState,
         blockedBy: node.blockedBy,
         blockedReason: packet.blockedReason ?? null,
+        summary: packet.completionSummary?.trim()
+          || completionContext?.selfReview?.outcome?.trim()
+          || completionContext?.summary?.trim()
+          || null,
         storageAdmission: packet.storageAdmission ?? null,
         spendCap: packet.spendCap ?? null, spendTelemetry: packet.spendTelemetry ?? null,
         recovery,

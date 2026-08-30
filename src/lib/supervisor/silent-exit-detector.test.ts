@@ -22,6 +22,9 @@ import {
 } from './silent-exit-detector';
 
 const { createLane, deleteLane, getLane, getLaneEvents, listActiveLanes, updateLane } = await import('@/lib/lane/registry');
+const { getMissionStatus } = await import('@/lib/orchestrator/operator-mission-service');
+const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 
 let ownedRoot: string | null = null;
 let tempWorktree: string | null = null;
@@ -196,6 +199,29 @@ describe('silent-exit detector policy (wave-1B burial incident)', () => {
     const { clone } = makePacketClone('o8-silent-exit-unmerged');
     const packetId = `pkt-silent-unmerged-${Date.now()}`;
     const lane = createDeadOwnedLane(clone, packetId);
+    const missionId = `mission-silent-unmerged-${Date.now()}`;
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      missionId,
+      prompt: 'Recover committed work after a silent worker exit.',
+      summary: 'Silent-exit completion summary real path.',
+      repoPath: clone,
+      packets: [{
+        id: packetId,
+        referenceLabel: 'silent-1',
+        title: 'Recover silent completion',
+        summary: 'Promote committed work to review with a useful completion summary.',
+        workspaceTargetPath: clone,
+        branchTarget: 'packet',
+        runtime: 'codex',
+        dependencyLabels: [],
+        dependencyPacketIds: [],
+        queueState: 'queued',
+        releaseState: 'pending',
+        status: 'running',
+        lane: null,
+      }],
+    });
 
     await runSilentExitTickForTesting();
 
@@ -206,5 +232,8 @@ describe('silent-exit detector policy (wave-1B burial incident)', () => {
       item.packetId === packetId
       && item.kind === 'silent_exit_but_work_present'
     ))).toBe(true);
+
+    const status = await getMissionStatus({ missionId, includeCost: false });
+    expect(status.packets.find((packet) => packet.id === packetId)?.summary).toBe('packet work');
   }, 20_000);
 });

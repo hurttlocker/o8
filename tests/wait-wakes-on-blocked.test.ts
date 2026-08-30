@@ -45,4 +45,26 @@ describe('#1467 — wait_for_mission_ready wakes on blocked packets', () => {
     // The old set slept to the timeout; the fix answers on the first read.
     expect(Date.now() - started).toBeLessThan(1_500);
   });
+
+  it('long-polls a rerun-in-progress packet while its lane is running', async () => {
+    const readStatus = vi.fn(async () => ({
+      packets: [{
+        id: 'pkt-rerun',
+        status: 'blocked',
+        releaseState: 'pending',
+        blockedReason: 'rerun_in_progress',
+        lane: { status: 'running' },
+      }],
+    }));
+
+    const result = await handleWaitForMissionReady(
+      { packetId: 'pkt-rerun', timeoutMs: 1_000, pollIntervalMs: 1_000 },
+      readStatus,
+    );
+    const payload = parsePayload(result as { content?: Array<{ type: string; text?: string }> });
+
+    expect(payload.wakeReason).toBe('timeout');
+    expect(payload.wakeReason).not.toBe('already-terminal');
+    expect(readStatus).toHaveBeenCalledTimes(2);
+  });
 });
