@@ -65,13 +65,12 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 # RELEASE build baked a DSN (build.rs → cargo:rustc-env=O8_SENTRY_DSN). rustls
 # transport matches the repo's TLS stance; reqwest 0.12 is already in the lock
 # graph, so this adds no new reqwest major. `panic` installs the panic hook.
-sentry = { version = "0.34", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "rustls"] }
+sentry = { version = "0.35", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "rustls"] }
 
 # Native crash capture — the class of crash the `panic` hook above CANNOT see:
 # hardware faults + aborts (SIGSEGV / SIGABRT / SIGBUS / SIGILL / SIGFPE and
-# stack-overflow). Pinned to 0.8 because it is the ONLY release that depends on
-# `sentry ^0.34` (0.9 needs 0.35, 0.16 needs 0.48) — so it composes with the
-# `sentry` pin above without a major bump. It pulls `crash-handler 0.6` +
+# stack-overflow). Version 0.9 is the first release that depends on `sentry
+# ^0.35`, so these two pins advance together. It pulls `crash-handler 0.6` +
 # `minidumper 0.8` via `minidumper-child 0.2`.
 #
 # How it works (see telemetry::init_minidump_handler): `init()` re-execs THIS
@@ -95,7 +94,7 @@ sentry = { version = "0.34", default-features = false, features = ["backtrace", 
 # entitlements, so there is NOTHING extra to sign or notarize. Memory is read
 # via the explicitly-handed Mach port, NOT task_for_pid, so no debugger
 # entitlement (com.apple.security.cs.debugger / get-task-allow) is required.
-sentry-rust-minidump = "0.8"
+sentry-rust-minidump = "0.9"
 
 # Issue #755: runtime-download for codebase-memory-mcp static binary.
 # All three crates are already in the transitive lock graph (reqwest pulled
