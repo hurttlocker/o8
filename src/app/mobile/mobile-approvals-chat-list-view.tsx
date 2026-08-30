@@ -201,8 +201,12 @@ export function ChatListView({
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [filter, setFilter] = useState<ChatFilter>('all');
-  const [activitySnapshot] = useState(Date.now);
+  const [activitySnapshot, setActivitySnapshot] = useState(Date.now);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleRefresh = useCallback(() => {
+    setActivitySnapshot(Date.now());
+    return onRefresh();
+  }, [onRefresh]);
 
   const counts = useMemo(() => {
     let active = 0;
@@ -263,7 +267,7 @@ export function ChatListView({
   const handleContextAction = useCallback(async (action: 'star' | 'rename' | 'delete', tabId: string) => {
     if (action === 'delete') {
       await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(tabId)}`, { method: 'DELETE' });
-      onRefresh();
+      handleRefresh();
       return;
     }
 
@@ -274,14 +278,14 @@ export function ChatListView({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tabId, starred: !existing?.starred }),
       });
-      onRefresh();
+      handleRefresh();
       return;
     }
 
     const conversation = conversations.find((item) => item.tabId === tabId);
     setRenaming(tabId);
     setRenameValue(conversation?.title ?? '');
-  }, [conversations, onRefresh]);
+  }, [conversations, handleRefresh]);
 
   const handleRenameSubmit = useCallback(async () => {
     if (!renaming || !renameValue.trim()) {
@@ -296,8 +300,8 @@ export function ChatListView({
     });
 
     setRenaming(null);
-    onRefresh();
-  }, [onRefresh, renameValue, renaming]);
+    handleRefresh();
+  }, [handleRefresh, renameValue, renaming]);
 
   return (
     <MobileSurfaceRoot>
@@ -335,7 +339,7 @@ export function ChatListView({
           ...mobileScrollFadeStyle({ top: 16, bottom: 80 }),
         } as CSSProperties}
       >
-       <PullToRefresh onRefresh={onRefresh}>
+       <PullToRefresh onRefresh={handleRefresh}>
         {loading ? (
           <MobileGlassPanel palette={palette} style={{ padding: '28px 20px', textAlign: 'center' }}>
             <div style={{ fontSize: 14, color: palette.subduedText }}>

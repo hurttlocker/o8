@@ -68,7 +68,16 @@ export const ActivityFeed = memo(function ActivityFeed({
   const [extras, setExtras] = useState<ActivityExtras>(EMPTY_EXTRAS);
   const [remoteScopeError, setRemoteScopeError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FeedFilter>('all');
-  const [repoOverride, setRepoOverride] = useState<string | null>(null);
+  const [repoOverrideState, setRepoOverrideState] = useState<{
+    activeAgentKey: string | null;
+    value: string | null;
+  }>(() => ({ activeAgentKey: activeAgentKey ?? null, value: null }));
+  const repoOverride = repoOverrideState.activeAgentKey === (activeAgentKey ?? null)
+    ? repoOverrideState.value
+    : null;
+  const setRepoOverride = useCallback((value: string | null) => {
+    setRepoOverrideState({ activeAgentKey: activeAgentKey ?? null, value });
+  }, [activeAgentKey]);
   const [repoPickerOpen, setRepoPickerOpen] = useState(false);
   const [registeredRepos, setRegisteredRepos] = useState<string[]>([]);
   const [hoveredItemKey, setHoveredItemKey] = useState<string | null>(null);
@@ -76,7 +85,7 @@ export const ActivityFeed = memo(function ActivityFeed({
   const hoverCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [prHoverDetails, setPrHoverDetails] = useState<Record<string, PRHoverDetail>>({});
   const [ciHoverDetails, setCiHoverDetails] = useState<Record<string, CIHoverDetail>>({});
-  const [timelineOrigin] = useState(Date.now);
+  const [timelineOrigin, setTimelineOrigin] = useState(Date.now);
 
   useEffect(() => {
     ipcFetch('/api/panel/repos')
@@ -138,10 +147,6 @@ export const ActivityFeed = memo(function ActivityFeed({
     : repo
       ? `Recent pull requests, commits, issues, and checks for ${shortRepoLabel(repo)}.`
       : 'Recent repo work appears here once a GitHub repo is attached.';
-
-  useEffect(() => {
-    setRepoOverride(null);
-  }, [activeAgentKey]);
 
   const agentRepoById = useMemo(
     () => new Map(agents.map((agent) => [agent.id, agentRepoSlug(agent)])),
@@ -319,12 +324,14 @@ export const ActivityFeed = memo(function ActivityFeed({
             merged.repoCommits.push(...result.commits);
             mergedErrors.push(...result.errors);
           }
+          setTimelineOrigin(Date.now());
           setExtras(merged);
           setRemoteScopeError(mergedErrors.length > 0 ? Array.from(new Set(mergedErrors)).join(' | ') : null);
           return;
         }
 
         const result = await fetchForRepo(repo);
+        setTimelineOrigin(Date.now());
         setExtras({ issues: result.issues, prs: result.prs, ciRuns: result.ciRuns, repoCommits: result.commits });
         setRemoteScopeError(result.errors.length > 0 ? result.errors.join(' | ') : null);
       } catch {
@@ -334,10 +341,13 @@ export const ActivityFeed = memo(function ActivityFeed({
 
     void fetchExtras();
     // WS-driven: refresh on agent/lane events instead of 5min-only polling
-    const handler = () => { void fetchExtras(); };
+    const handler = () => {
+      setTimelineOrigin(Date.now());
+      void fetchExtras();
+    };
     const wsEvents = ['o8:lifecycle-reconcile'];
     for (const e of wsEvents) window.addEventListener(e, handler);
-    const fallbackId = setInterval(fetchExtras, 300_000);
+    const fallbackId = setInterval(handler, 300_000);
     return () => {
       clearInterval(fallbackId);
       for (const e of wsEvents) window.removeEventListener(e, handler);

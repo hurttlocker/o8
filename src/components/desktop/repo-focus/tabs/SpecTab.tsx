@@ -23,7 +23,6 @@ export function SpecTab({ repo, onOpenInWorkspace }: SpecTabProps) {
   const [content, setContent] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [savedAt, setSavedAt] = useState<number | null>(null);
-  const [statusAt, setStatusAt] = useState(Date.now);
   const [savePending, setSavePending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Tracks the meaningful prior content length captured when the file
@@ -79,9 +78,7 @@ export function SpecTab({ repo, onOpenInWorkspace }: SpecTabProps) {
       .then((res) => res.json())
       .then((data) => {
         if (data?.ok) {
-          const completedAt = Date.now();
-          setSavedAt(completedAt);
-          setStatusAt(completedAt);
+          setSavedAt(Date.now());
           // After a successful save, the new on-disk length becomes the
           // prior baseline for the next guard decision.
           priorBodyLengthRef.current = nonWhitespaceLength(next);
@@ -104,7 +101,6 @@ export function SpecTab({ repo, onOpenInWorkspace }: SpecTabProps) {
   }, []);
 
   const handleChange = useCallback((next: string) => {
-    setStatusAt(Date.now());
     setContent(next);
     if (debounceRef.current) window.clearTimeout(debounceRef.current);
     debounceRef.current = window.setTimeout(() => {
@@ -119,7 +115,6 @@ export function SpecTab({ repo, onOpenInWorkspace }: SpecTabProps) {
 
   const handleSaveAnyway = useCallback(() => {
     if (guardedDraft === null) return;
-    setStatusAt(Date.now());
     guardOverrideRef.current = true;
     const draft = guardedDraft;
     setGuardedDraft(null);
@@ -137,7 +132,7 @@ export function SpecTab({ repo, onOpenInWorkspace }: SpecTabProps) {
     if (error) return error;
     if (guardedDraft !== null) return 'Save guarded — content much shorter than the saved spec';
     if (savedAt) {
-      const seconds = Math.max(0, Math.floor((statusAt - savedAt) / 1000));
+      const seconds = Math.max(0, Math.floor((Date.now() - savedAt) / 1000));
       if (seconds < 5) return 'Saved';
       if (seconds < 60) return `Saved ${seconds}s ago`;
       return `Saved ${Math.floor(seconds / 60)}m ago`;

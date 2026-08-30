@@ -14,7 +14,7 @@
  * switching repos and back resumes the same conversation.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { getWsUrl } from '@/components/desktop/thoughts/use-orchestrator-stream/shared';
 import { isOrchestratorBackendId, type OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import { skipDuplicateBySeq } from '@/lib/orchestrator/replay-cursor';
@@ -82,12 +82,21 @@ export function useCanvasOrchestrator(repoPath: string | null, callbacks: Canvas
   // Replay cursor — highest event seq applied for the current session view.
   const lastSeqRef = useRef(0);
   const cbRef = useRef(callbacks);
-  useEffect(() => {
+  useLayoutEffect(() => {
     cbRef.current = callbacks;
   }, [callbacks]);
   const [threadIds] = useState(loadThreadMap);
   const backendByThreadRef = useRef(new Map<string, OrchestratorBackendId>());
-  const [status, setStatus] = useState<CanvasOrchStatus>('idle');
+  const [statusState, setStatusState] = useState<{
+    repoPath: string | null;
+    value: CanvasOrchStatus;
+  }>(() => ({ repoPath, value: repoPath ? 'connecting' : 'idle' }));
+  const status = statusState.repoPath === repoPath
+    ? statusState.value
+    : repoPath ? 'connecting' : 'idle';
+  const setStatus = useCallback((value: CanvasOrchStatus) => {
+    setStatusState({ repoPath, value });
+  }, [repoPath]);
 
   useEffect(() => {
     if (!repoPath) return;
@@ -95,8 +104,6 @@ export function useCanvasOrchestrator(repoPath: string | null, callbacks: Canvas
     lastSeqRef.current = 0;
     let disposed = false;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    setStatus('connecting');
-
     const connect = () => {
       if (disposed) return;
       let ws: WebSocket;
@@ -179,9 +186,8 @@ export function useCanvasOrchestrator(repoPath: string | null, callbacks: Canvas
       if (retryTimer) clearTimeout(retryTimer);
       wsRef.current?.close();
       wsRef.current = null;
-      setStatus('idle');
     };
-  }, [repoPath, threadIds]);
+  }, [repoPath, setStatus, threadIds]);
 
   /** Send one user turn. Returns the threadId, or null if the socket
    *  isn't ready (caller surfaces "not connected"). */
@@ -268,10 +274,20 @@ export function useThreadOrchestrator(
   const lastSeqRef = useRef(0);
   const activeBackendRef = useRef<OrchestratorBackendId | null>(null);
   const onEventRef = useRef(onEvent);
-  useEffect(() => {
+  useLayoutEffect(() => {
     onEventRef.current = onEvent;
   }, [onEvent]);
-  const [status, setStatus] = useState<CanvasOrchStatus>('idle');
+  const connectionKey = repoPath && threadId ? `${repoPath}\u0000${threadId}` : null;
+  const [statusState, setStatusState] = useState<{
+    connectionKey: string | null;
+    value: CanvasOrchStatus;
+  }>(() => ({ connectionKey, value: connectionKey ? 'connecting' : 'idle' }));
+  const status = statusState.connectionKey === connectionKey
+    ? statusState.value
+    : connectionKey ? 'connecting' : 'idle';
+  const setStatus = useCallback((value: CanvasOrchStatus) => {
+    setStatusState({ connectionKey, value });
+  }, [connectionKey]);
 
   useEffect(() => {
     if (!repoPath || !threadId) return;
@@ -279,8 +295,6 @@ export function useThreadOrchestrator(
     lastSeqRef.current = 0;
     let disposed = false;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    setStatus('connecting');
-
     const connect = () => {
       if (disposed) return;
       let ws: WebSocket;
@@ -348,9 +362,8 @@ export function useThreadOrchestrator(
       if (retryTimer) clearTimeout(retryTimer);
       wsRef.current?.close();
       wsRef.current = null;
-      setStatus('idle');
     };
-  }, [repoPath, threadId]);
+  }, [repoPath, setStatus, threadId]);
 
   const send = useCallback((message: string, opts?: { model?: string; thinkingEffort?: string }) => {
     if (!repoPath || !threadId) return false;

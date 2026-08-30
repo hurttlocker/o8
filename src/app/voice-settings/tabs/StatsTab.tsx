@@ -62,14 +62,16 @@ function fmtDuration(min: number): string {
 }
 
 export default function StatsTab() {
-  const [history, setHistory] = useState<DictationHistoryEntry[]>([]);
-  const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000));
-  const load = useCallback(async () => {
-    const nextHistory = await dictationHistoryGet();
-    setNowSec(Math.floor(Date.now() / 1000));
-    setHistory(nextHistory);
+  const [{ history, nowSec }, setSnapshot] = useState<{
+    history: DictationHistoryEntry[];
+    nowSec: number;
+  }>(() => ({ history: [], nowSec: Math.floor(Date.now() / 1000) }));
+  const load = useCallback(() => {
+    void dictationHistoryGet().then((history) => {
+      setSnapshot({ history, nowSec: Math.floor(Date.now() / 1000) });
+    });
   }, []);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { load(); }, [load]);
 
   const totalWords = history.reduce((s, e) => s + wordCount(e.text), 0);
   const wordsToday = history.filter((e) => isToday(e.ts, nowSec)).reduce((s, e) => s + wordCount(e.text), 0);
@@ -88,7 +90,7 @@ export default function StatsTab() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <PageHeader icon={ICONS.chartBar} title="Stats" right={<GhostButton label="Refresh" onClick={() => { void load(); }} />} />
+      <PageHeader icon={ICONS.chartBar} title="Stats" right={<GhostButton label="Refresh" onClick={load} />} />
 
       {/* Time-saved hero */}
       <div style={{

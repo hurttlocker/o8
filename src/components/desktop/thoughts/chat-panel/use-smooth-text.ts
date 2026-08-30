@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 /**
  * Advance the reveal index, then extend to the next whitespace so whole WORDS
@@ -57,13 +57,15 @@ export function useSmoothText(text: string, streaming: boolean): string {
   // message starts fully revealed, so it still appears all at once.
   const startsAnimating = streaming && !reduced;
   const [revealed, setRevealed] = useState(startsAnimating ? 0 : text.length);
-  const animate = (streaming || revealed < text.length) && !reduced;
+  const visibleReveal = revealed > text.length ? 0 : revealed;
+  if (visibleReveal !== revealed) setRevealed(visibleReveal);
+  const animate = (streaming || visibleReveal < text.length) && !reduced;
   const idxRef = useRef(startsAnimating ? 0 : text.length);
   const targetRef = useRef(text);
   const rafRef = useRef<number | null>(null);
   const runningRef = useRef(false);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     targetRef.current = text;
   }, [text]);
 
@@ -81,7 +83,7 @@ export function useSmoothText(text: string, streaming: boolean): string {
   // restarts it. Reads target via ref → no stale closure.
   useEffect(() => {
     if (!animate) return;
-    if (idxRef.current > targetRef.current.length) { idxRef.current = 0; setRevealed(0); } // hook reused by a new stream
+    if (idxRef.current > targetRef.current.length) idxRef.current = 0; // hook reused by a new stream
     const tick = () => {
       const next = nextRevealIndex(idxRef.current, targetRef.current);
       idxRef.current = next;
@@ -105,5 +107,5 @@ export function useSmoothText(text: string, streaming: boolean): string {
     runningRef.current = false;
   }, []);
 
-  return animate ? text.slice(0, revealed) : text;
+  return animate ? text.slice(0, visibleReveal) : text;
 }

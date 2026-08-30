@@ -51,10 +51,7 @@ export function ComposerPopover({ anchorRef, open, onClose, align = 'end', child
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
 
   useLayoutEffect(() => {
-    if (!open) {
-      setPos(null);
-      return;
-    }
+    if (!open) return;
     const anchor = anchorRef.current;
     if (!anchor) return;
 

@@ -140,7 +140,6 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   const composerCenterRef = useRef<HTMLDivElement>(null);
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
   const [dismissedSlashInput, setDismissedSlashInput] = useState<string | null>(null);
-  const [staleTurnSnapshot] = useState(Date.now);
   const runningTools = useMemo<MobileTranscriptToolCall[]>(() => {
     if (!isOrchestratorMode) return [];
     // Scan the latest assistant message for any tool calls still marked as
@@ -165,14 +164,14 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
         const STALE_TURN_MS = 30 * 60 * 1000;
         const stale = !displayWaiting
           && typeof msg.timestamp === 'number'
-          && staleTurnSnapshot - msg.timestamp > STALE_TURN_MS;
+          && Date.now() - msg.timestamp > STALE_TURN_MS;
         return stale ? [] : running;
       }
       // Stop at the most recent assistant message — older tool calls are done.
       break;
     }
     return [];
-  }, [chatMessages, displayWaiting, isOrchestratorMode, staleTurnSnapshot]);
+  }, [chatMessages, displayWaiting, isOrchestratorMode]);
   const latestUserEntry = useMemo(() => {
     for (let i = chatMessages.length - 1; i >= 0; i--) {
       if (chatMessages[i].role === 'user') return chatMessages[i];

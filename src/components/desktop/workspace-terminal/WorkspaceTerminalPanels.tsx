@@ -103,26 +103,28 @@ function WorkspaceTerminalPanelsBase({
     return () => window.removeEventListener(OUTSIDE_WORKER_HOST_EMPTY_EVENT, closeEmptyOutsideWorkerHost);
   }, [onCloseTab, visibleTabs]);
   const visibleTabIdsKey = visibleTabs.map((tab) => tab.id).join('|');
+  const residentInputKey = `${visibleTabIdsKey}\u0000${effectiveActiveTabId}`;
   const [residentState, setResidentState] = useState(() => ({
+    inputKey: residentInputKey,
     tabIds: updateResidentTabIds([], visibleTabs.map((tab) => tab.id), effectiveActiveTabId),
     hasEverHadTabs: visibleTabs.length > 0,
   }));
-  useEffect(() => {
-    const visibleTabIds = visibleTabIdsKey ? visibleTabIdsKey.split('|') : [];
-    setResidentState((previous) => ({
-      tabIds: updateResidentTabIds(previous.tabIds, visibleTabIds, effectiveActiveTabId),
-      hasEverHadTabs: previous.hasEverHadTabs || visibleTabIds.length > 0,
-    }));
-  }, [effectiveActiveTabId, visibleTabIdsKey]);
-  const hasEverHadTabs = residentState.hasEverHadTabs || visibleTabs.length > 0;
-  const residentTabIdSet = useMemo(
-    () => new Set(updateResidentTabIds(
-      residentState.tabIds,
-      visibleTabIdsKey ? visibleTabIdsKey.split('|') : [],
-      effectiveActiveTabId,
-    )),
-    [effectiveActiveTabId, residentState.tabIds, visibleTabIdsKey],
+  const visibleTabIds = useMemo(
+    () => visibleTabIdsKey ? visibleTabIdsKey.split('|') : [],
+    [visibleTabIdsKey],
   );
+  const nextResidentState = residentState.inputKey === residentInputKey
+    ? residentState
+    : {
+        inputKey: residentInputKey,
+        tabIds: updateResidentTabIds(residentState.tabIds, visibleTabIds, effectiveActiveTabId),
+        hasEverHadTabs: residentState.hasEverHadTabs || visibleTabIds.length > 0,
+      };
+  if (nextResidentState !== residentState) {
+    setResidentState(nextResidentState);
+  }
+  const hasEverHadTabs = nextResidentState.hasEverHadTabs;
+  const residentTabIdSet = new Set(nextResidentState.tabIds);
   const statusEvidenceByTmuxSession = useMemo(() => new Map(
     attachedTerminalSessions.flatMap((session) => (
       session.statusEvidence ? [[session.tmuxSession, session.statusEvidence] as const] : []
@@ -156,11 +158,25 @@ function WorkspaceTerminalPanelsBase({
   // repo switches never re-summon the splash. Fail-open cap mirrors the
   // EmptyWorkspaceState grace so a restore that never settles can't hold
   // boot hostage.
-  const [restoreHoldExpired, setRestoreHoldExpired] = useState(false);
+  const [restoreHoldState, setRestoreHoldState] = useState(() => ({
+    restoreSettled,
+    expired: false,
+  }));
+  const restoreHoldExpired = restoreHoldState.restoreSettled === restoreSettled
+    ? restoreHoldState.expired
+    : false;
+  if (restoreHoldState.restoreSettled !== restoreSettled) {
+    setRestoreHoldState({ restoreSettled, expired: false });
+  }
   useEffect(() => {
     if (restoreSettled) return;
-    setRestoreHoldExpired(false);
-    const timer = window.setTimeout(() => setRestoreHoldExpired(true), 15000);
+    const timer = window.setTimeout(() => {
+      setRestoreHoldState((current) => (
+        current.restoreSettled === restoreSettled
+          ? { ...current, expired: true }
+          : current
+      ));
+    }, 15000);
     return () => window.clearTimeout(timer);
   }, [restoreSettled]);
   return (

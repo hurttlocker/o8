@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { getSWR, refreshSWR, subscribeSWR } from '@/lib/panel/fetch-cache';
 import type { PrDetail, PrDetailResponse } from './types';
 
@@ -24,17 +24,15 @@ export function usePrDetail(prNumber: number | null, repoSlug?: string | null): 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadNonce, setReloadNonce] = useState(0);
+  const visibleDetail = prNumber ? detail : null;
+  const visibleError = prNumber ? error : null;
   const detailRef = useRef<PrDetail | null>(null);
-  useEffect(() => {
-    detailRef.current = detail;
-  }, [detail]);
+  useLayoutEffect(() => {
+    detailRef.current = visibleDetail;
+  }, [visibleDetail]);
 
   useEffect(() => {
-    if (!prNumber) {
-      setDetail(null);
-      setError(null);
-      return;
-    }
+    if (!prNumber) return;
 
     let active = true;
     const repoQuery = repoSlug ? `?repo=${encodeURIComponent(repoSlug)}` : '';
@@ -91,9 +89,9 @@ export function usePrDetail(prNumber: number | null, repoSlug?: string | null): 
   }, [prNumber, repoSlug, reloadNonce]);
 
   return {
-    detail,
+    detail: visibleDetail,
     loading,
-    error,
+    error: visibleError,
     refresh: () => setReloadNonce((value) => value + 1),
   };
 }
