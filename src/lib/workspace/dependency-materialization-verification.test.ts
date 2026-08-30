@@ -48,9 +48,25 @@ describe('dependency materialization verification', () => {
   it.each([
     ['npx vitest run', 'npx'],
     ['pnpm exec vitest run', 'pnpm exec'],
-    ['yarn vitest run', 'yarn'],
   ])('requires the wrapped binary for %s', async (script) => {
     const result = await verifyDependencyMaterialization(workspace({ test: script }));
+
+    expect(result.requiredBinaries).toEqual(['vitest']);
+    expect(result.missingBinaries).toEqual(['vitest']);
+  });
+
+  it.each(['yarn', 'pnpm'])('resolves %s run through the nested package script', async (runner) => {
+    const result = await verifyDependencyMaterialization(workspace({
+      test: `${runner} run nested`,
+      nested: 'vitest run',
+    }));
+
+    expect(result.requiredBinaries).toEqual(['vitest']);
+    expect(result.missingBinaries).toEqual(['vitest']);
+  });
+
+  it('keeps plain yarn binary resolution local', async () => {
+    const result = await verifyDependencyMaterialization(workspace({ test: 'yarn vitest' }));
 
     expect(result.requiredBinaries).toEqual(['vitest']);
     expect(result.missingBinaries).toEqual(['vitest']);

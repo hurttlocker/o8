@@ -213,13 +213,23 @@ function resolveSegment(
     return localRequirement(firstNonFlag(args)?.token, 'npx');
   }
   if (command === 'pnpm') {
+    const operation = firstNonFlag(args);
+    if (operation?.token === 'run') {
+      const scriptName = firstNonFlag(args, operation.index + 1)?.token;
+      return resolveNestedScript(scriptName, scripts, depth + 1, visited);
+    }
     const execIndex = args.indexOf('exec');
     if (execIndex >= 0) {
       return localRequirement(firstNonFlag(args, execIndex + 1)?.token, 'pnpm exec');
     }
   }
   if (command === 'yarn') {
-    return localRequirement(firstNonFlag(args)?.token, 'yarn');
+    const operation = firstNonFlag(args);
+    if (operation?.token === 'run') {
+      const scriptName = firstNonFlag(args, operation.index + 1)?.token;
+      return resolveNestedScript(scriptName, scripts, depth + 1, visited);
+    }
+    return localRequirement(operation?.token, 'yarn');
   }
   if (command === 'npm') {
     const operation = firstNonFlag(args);
