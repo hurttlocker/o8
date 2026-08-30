@@ -6,6 +6,7 @@ import { isAbsolute, join } from 'node:path';
 
 import { afterAll, describe, expect, it } from 'vitest';
 import { NextRequest } from 'next/server';
+import { eq } from 'drizzle-orm';
 
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
@@ -17,7 +18,8 @@ writeFileSync(join(dataDir, 'ws-token'), `${operatorToken}\n`, 'utf8');
 
 const closeRoute = await import('@/app/api/orchestrator/discard-packet/route');
 const resetRoute = await import('@/app/api/orchestrator/reset-packet/route');
-const { closeDb } = await import('@/lib/db');
+const { closeDb, getDb } = await import('@/lib/db');
+const { sessionOutcomes } = await import('@/lib/db/schema');
 const { createLane, getLane, setLaneStatus } = await import('@/lib/lane/registry');
 const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
@@ -108,11 +110,16 @@ function operatorRequest(pathname: string, body: Record<string, unknown>) {
   });
 }
 
-function closeRequest(packetId: string) {
+function closeRequest(
+  packetId: string,
+  disposition: 'adopted_elsewhere' | 'superseded' | 'spec_changed' | 'wontfix' = 'wontfix',
+  acknowledgeMissingWorktree = false,
+) {
   return operatorRequest('/api/orchestrator/discard-packet', {
     packetId,
     clientMutationId: randomUUID(),
-    disposition: 'wontfix',
+    disposition,
+    acknowledgeMissingWorktree,
   });
 }
 
@@ -179,7 +186,7 @@ describe('close_packet_unmerged preservation classification — real route', () 
     const worktreePath = join(root, 'already-gone');
     const lane = persistPacket({ packetId, repoPath, worktreePath, branch });
 
-    const response = await closeRoute.POST(closeRequest(packetId));
+    const response = await closeRoute.POST(closeRequest(packetId, 'wontfix', true));
     const payload = await response.json();
 
     expect(response.status).toBe(200);
@@ -194,7 +201,7 @@ describe('close_packet_unmerged preservation classification — real route', () 
     expect(getLane(lane.id)?.status).toBe('archived');
   });
 
-  it('refuses a branch with real unmerged commits and names its preserved ref', async () => {
+  it('banks an unmerged branch, closes with its disposition, and is idempotent', async () => {
     const packetId = 'pkt-close-real-unmerged';
     const branch = 'inline/close-real-unmerged';
     const { root, repoPath } = makeRepo('o8-close-real-unmerged');
@@ -203,22 +210,87 @@ describe('close_packet_unmerged preservation classification — real route', () 
     writeFileSync(join(worktreePath, 'unmerged.txt'), 'unmerged\n');
     git(worktreePath, ['add', 'unmerged.txt']);
     git(worktreePath, ['commit', '-m', 'unmerged feature']);
+    const branchHead = git(worktreePath, ['rev-parse', 'HEAD']);
     const lane = persistPacket({ packetId, repoPath, worktreePath, branch });
 
-    const response = await closeRoute.POST(closeRequest(packetId));
+    const response = await closeRoute.POST(closeRequest(packetId, 'adopted_elsewhere'));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({
+      ok: true,
+      result: {
+        closed: true,
+        disposition: 'adopted_elsewhere',
+        preservationFailure: null,
+        note: expect.stringContaining('Work preserved on branch preserved/'),
+      },
+    });
+    const preservedRef = git(repoPath, ['for-each-ref', '--format=%(refname:short)', `refs/heads/preserved/packet-${packetId}-*`]);
+    expect(preservedRef).toMatch(/^preserved\//);
+    expect(git(repoPath, ['rev-parse', preservedRef])).toBe(branchHead);
+    expect(getLane(lane.id)).toMatchObject({
+      status: 'archived',
+      outcome: 'closed_unmerged',
+      outcomeNote: expect.stringContaining(preservedRef),
+    });
+    expect(existsSync(worktreePath)).toBe(false);
+
+    const secondResponse = await closeRoute.POST(closeRequest(packetId, 'adopted_elsewhere'));
+    const secondPayload = await secondResponse.json();
+    expect(secondResponse.status).toBe(200);
+    expect(secondPayload).toMatchObject({
+      ok: true,
+      result: {
+        closed: true,
+        alreadyClosed: true,
+        packetId,
+        laneId: lane.id,
+        note: expect.stringContaining('already closed'),
+      },
+    });
+    expect(getLane(lane.id)?.status).toBe('archived');
+
+    const db = getDb();
+    const outcomes = await db!
+      .select({
+        outcome: sessionOutcomes.outcome,
+        summary: sessionOutcomes.summary,
+        mergedClean: sessionOutcomes.mergedClean,
+      })
+      .from(sessionOutcomes)
+      .where(eq(sessionOutcomes.packetId, packetId));
+    expect(outcomes).toEqual([{
+      outcome: 'adopted_elsewhere',
+      summary: expect.stringContaining(preservedRef),
+      mergedClean: false,
+    }]);
+  });
+
+  it('refuses an unmerged branch when no preserved ref can be created', async () => {
+    const packetId = 'pkt-close-preservation-failed';
+    const branch = 'inline/close-preservation-failed';
+    const { root, repoPath } = makeRepo('o8-close-preservation-failed');
+    const worktreePath = join(root, 'worktree');
+    git(repoPath, ['worktree', 'add', '-b', branch, worktreePath]);
+    writeFileSync(join(worktreePath, 'unmerged.txt'), 'unmerged\n');
+    git(worktreePath, ['add', 'unmerged.txt']);
+    git(worktreePath, ['commit', '-m', 'unmerged feature']);
+    writeFileSync(join(repoPath, '.git', 'refs', 'heads', 'preserved'), 'blocked\n');
+    const lane = persistPacket({ packetId, repoPath, worktreePath, branch });
+
+    const response = await closeRoute.POST(closeRequest(packetId, 'superseded'));
     const payload = await response.json();
 
     expect(response.status).toBe(409);
     expect(payload).toMatchObject({
       ok: false,
       error: {
-        code: 'unmerged_work_present',
-        message: expect.stringContaining('work was banked at preserved/'),
+        code: 'branch_preservation_failed',
+        message: expect.stringContaining(`work on ${branch} could not be preserved`),
       },
     });
-    const preservedRef = git(repoPath, ['for-each-ref', '--format=%(refname:short)', `refs/heads/preserved/packet-${packetId}-*`]);
-    expect(preservedRef).toMatch(/^preserved\//);
-    expect(git(repoPath, ['show', `${preservedRef}:unmerged.txt`])).toBe('unmerged');
+    expect(git(repoPath, ['for-each-ref', '--format=%(refname:short)', `refs/heads/preserved/packet-${packetId}-*`])).toBe('');
     expect(getLane(lane.id)).toMatchObject({ status: 'reviewing', worktreePath });
     expect(existsSync(worktreePath)).toBe(true);
   });

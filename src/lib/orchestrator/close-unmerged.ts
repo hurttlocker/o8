@@ -129,6 +129,27 @@ async function closePacketUnmergedUnlocked(input: {
       status: 404,
     } satisfies CloseUnmergedResult;
   }
+  if (guard.previousPacket.status === 'archived') {
+    const priorLane = findLatestLaneByPacket(input.packetId);
+    if (!await restorePacketLifecycleGuard(guard)) {
+      return {
+        ok: false,
+        code: 'packet_state_changed',
+        message: `Packet ${input.packetId} changed while its closed state was being confirmed.`,
+        status: 409,
+      };
+    }
+    return {
+      ok: true,
+      result: {
+        closed: true,
+        alreadyClosed: true,
+        packetId: input.packetId,
+        laneId: priorLane?.id ?? null,
+        note: `Packet ${input.packetId} is already closed.`,
+      },
+    };
+  }
   const persistedLanes = listLanes().filter((candidate) => (
     candidate.packetId === input.packetId
     && candidate.status !== 'archived'
@@ -234,12 +255,8 @@ async function closePacketUnmergedUnlocked(input: {
       }
       if (preservation.failure) {
         preservationFailure = preservation.failure;
-        const auditNote = preservation.failure.code === 'unmerged_work_present'
-          ? preservation.failure.message
-          : `Preservation FAILED for ${preservation.failure.ref}; the worktree remains intact and close was refused.`;
-        recordLaneEvent(target.id, preservation.failure.code === 'branch_preservation_failed'
-          ? 'branch_preservation_failed'
-          : 'update', 'system', {
+        const auditNote = `Preservation FAILED for ${preservation.failure.ref}; the worktree remains intact and close was refused.`;
+        recordLaneEvent(target.id, 'branch_preservation_failed', 'system', {
           code: preservation.failure.code,
           reason: preservation.failure.reason,
           packetId: input.packetId,
@@ -253,18 +270,11 @@ async function closePacketUnmergedUnlocked(input: {
       }
     }
     if (preservationFailure) {
-      await markPacketLifecycleFailure(
-        guard,
-        preservationFailure.code === 'unmerged_work_present'
-          ? 'branch_preservation_failed'
-          : preservationFailure.code,
-      );
+      await markPacketLifecycleFailure(guard, preservationFailure.code);
       return {
         ok: false,
         code: preservationFailure.code,
-        message: preservationFailure.code === 'unmerged_work_present'
-          ? `Close refused because ${preservationFailure.message} The lane and worktree remain intact.`
-          : `Close refused because work on ${preservationFailure.branch} could not be preserved. The lane and worktree remain intact.`,
+        message: `Close refused because work on ${preservationFailure.branch} could not be preserved. The lane and worktree remain intact.`,
         status: 409,
       };
     }
@@ -430,6 +440,7 @@ async function closePacketUnmergedUnlocked(input: {
       ok: true,
       result: {
         closed: true,
+        alreadyClosed: false,
         discarded: true,
         disposition: rawDisposition,
         laneId: lane.id,
