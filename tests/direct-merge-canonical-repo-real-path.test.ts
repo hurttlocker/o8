@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 
@@ -14,7 +14,7 @@ vi.mock('@/lib/realtime/publisher', () => ({
 process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
 
 const { recordMission } = await import('@/lib/db/missions-store');
-const { createLane, getLane, setLaneStatus } = await import('@/lib/lane/registry');
+const { createLane, getLane, getLaneEvents, setLaneStatus } = await import('@/lib/lane/registry');
 const {
   approveAndMergePacket,
   submitPacketReview,
@@ -67,7 +67,7 @@ function packetFixture(packetId: string, canonicalRepo: string, branch: string):
   } as OrchestratorPacket;
 }
 
-async function createRelocatedCloneMission(label: string) {
+async function createRelocatedCloneMission(label: string, incompleteDependencies = false) {
   const root = mkdtempSync(join(os.tmpdir(), `o8-direct-merge-${label}-`));
   const origin = join(root, 'github-like.git');
   const canonicalRepo = join(root, 'canonical');
@@ -81,6 +81,20 @@ async function createRelocatedCloneMission(label: string) {
   git(canonicalRepo, ['config', 'user.name', 'o8-test']);
   git(canonicalRepo, ['config', 'user.email', 'o8@example.test']);
   writeFileSync(join(canonicalRepo, 'base.txt'), 'base\n');
+  if (incompleteDependencies) {
+    mkdirSync(join(canonicalRepo, 'src'), { recursive: true });
+    writeFileSync(join(canonicalRepo, '.gitignore'), 'node_modules/\n');
+    writeFileSync(join(canonicalRepo, 'package.json'), JSON.stringify({
+      name: 'merge-dependency-fixture',
+      private: true,
+      scripts: { lint: 'gate-check', typecheck: 'tsc --noEmit' },
+    }));
+    writeFileSync(join(canonicalRepo, 'tsconfig.json'), JSON.stringify({
+      compilerOptions: { noEmit: true, strict: true },
+      include: ['src/**/*.ts'],
+    }));
+    writeFileSync(join(canonicalRepo, 'src', 'index.ts'), 'export const ready: string = "yes";\n');
+  }
   const baseSha = commitAll(canonicalRepo, 'base');
   git(canonicalRepo, ['push', '-u', 'origin', 'main']);
 
@@ -98,6 +112,20 @@ async function createRelocatedCloneMission(label: string) {
   git(packetClone, ['config', 'user.email', 'o8@example.test']);
   writeFileSync(join(packetClone, 'feature.txt'), `${label}\n`);
   const packetSha = commitAll(packetClone, `feat: ${label} [via-o8]`);
+  const typecheckMarker = join(root, 'typecheck-ran');
+  if (incompleteDependencies) {
+    const binDir = join(packetClone, 'node_modules', '.bin');
+    mkdirSync(binDir, { recursive: true });
+    const tscPath = join(binDir, 'tsc');
+    writeFileSync(tscPath, [
+      '#!/bin/sh',
+      `touch ${JSON.stringify(typecheckMarker)}`,
+      'echo "src/index.ts(1,1): error TS2307: Cannot find module gate-check"',
+      'exit 2',
+      '',
+    ].join('\n'));
+    chmodSync(tscPath, 0o755);
+  }
 
   await addRepo(canonicalRepo);
   const worktreeId = `packet-${packetId}`;
@@ -153,7 +181,7 @@ async function createRelocatedCloneMission(label: string) {
   });
   writeOrchestratorControlPlaneState(mission);
 
-  return { baseSha, branch, canonicalRepo, lane, packetClone, packetId, packetSha };
+  return { baseSha, branch, canonicalRepo, lane, packetClone, packetId, packetSha, typecheckMarker };
 }
 
 async function reviewAndMerge(fixture: Awaited<ReturnType<typeof createRelocatedCloneMission>>) {
@@ -208,6 +236,40 @@ describe('direct merge publishes through the canonical mission repository', () =
       status: 'blocked',
       blockedReason: 'canonical_merge_ancestry_failed',
     });
+    expect(git(fixture.canonicalRepo, ['rev-parse', 'main'])).toBe(fixture.baseSha);
+  }, 30_000);
+
+  it('blocks an incomplete dependency tree before post-rebase typecheck consumes its retry', async () => {
+    const fixture = await createRelocatedCloneMission('incomplete-dependencies', true);
+
+    const result = await reviewAndMerge(fixture);
+    const packet = readOrchestratorControlPlaneState().packets
+      .find((candidate) => candidate.id === fixture.packetId);
+    const events = getLaneEvents(fixture.lane.id);
+
+    expect(result).toMatchObject({
+      merged: false,
+      reason: 'dependency_materialization_incomplete',
+    });
+    expect(result.note).toContain('gate-check');
+    expect(existsSync(fixture.typecheckMarker)).toBe(false);
+    expect(getLane(fixture.lane.id)).toMatchObject({
+      status: 'awaiting_orchestrator',
+      lastEventLabel: 'dependency_materialization_incomplete',
+    });
+    expect(packet?.typecheckAutoRetries ?? 0).toBe(0);
+    expect(packet?.blockedReason).toContain('dependency_materialization_incomplete');
+    expect(events.some((event) => event.verb === 'typecheck_auto_retry')).toBe(false);
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        verb: 'dependency_materialization_incomplete',
+        payload: expect.objectContaining({
+          phase: 'merge_gate',
+          missingBinaries: ['gate-check'],
+          verifiedBinaries: ['tsc'],
+        }),
+      }),
+    ]));
     expect(git(fixture.canonicalRepo, ['rev-parse', 'main'])).toBe(fixture.baseSha);
   }, 30_000);
 });
