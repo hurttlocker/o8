@@ -6,6 +6,7 @@ import { TextSelection } from 'prosemirror-state';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FileViewer } from '../FileViewer';
 import { getRichMarkdownEditorView } from './RichMarkdownEditor';
+import { RICH_MARKDOWN_MAX_SOURCE_BYTES } from '@/lib/markdown/editor';
 
 vi.mock('next/dynamic', async () => {
   const { createElement: createReactElement } = await import('react');
@@ -233,5 +234,197 @@ describe('FileViewer rich Markdown editor', () => {
     expect(container.textContent).toContain('Rich mode unavailable: image at line 3');
     expect(container.querySelector('[data-rich-markdown-editor="true"]')).toBeNull();
     expect(container.querySelector<HTMLTextAreaElement>('[data-testid="monaco-editor"]')?.value).toBe(source);
+  });
+
+  function stubMarkdownFile(source: string): void {
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/api/panel/file-content')) {
+        return reply({ content: source, contentHash: 'size-hash' });
+      }
+      if (url.includes('/api/panel/file-diff')) {
+        return reply({ diff: '', hasDiff: false });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    }));
+  }
+
+  it('keeps the rich path for a file at the UTF-8 size threshold', async () => {
+    const source = `${'a'.repeat(RICH_MARKDOWN_MAX_SOURCE_BYTES - 1)}\n`;
+    stubMarkdownFile(source);
+
+    await act(async () => {
+      root.render(createElement(FileViewer, { filePath: '/notes/just-under.md' }));
+    });
+    await settle();
+
+    act(() => button(container, 'Rich').click());
+    expect(container.querySelector('[data-rich-markdown-editor="true"]')).not.toBeNull();
+    expect(container.textContent).not.toContain('file is');
+    expect(button(container, 'Rich').disabled).toBe(false);
+  });
+
+  it('opens over-threshold files source-only and explains why in the mode control', async () => {
+    const source = `${'a'.repeat(RICH_MARKDOWN_MAX_SOURCE_BYTES)}\n`;
+    stubMarkdownFile(source);
+
+    await act(async () => {
+      root.render(createElement(FileViewer, { filePath: '/notes/over-size.md' }));
+    });
+    await settle();
+
+    const rich = button(container, 'Rich');
+    expect(rich.disabled).toBe(true);
+    expect(container.textContent).toContain(
+      `file is ${RICH_MARKDOWN_MAX_SOURCE_BYTES + 1} bytes (limit ${RICH_MARKDOWN_MAX_SOURCE_BYTES})`,
+    );
+    act(() => rich.click());
+    expect(button(container, 'Source').getAttribute('aria-pressed')).toBe('true');
+    expect(container.querySelector('[data-rich-markdown-editor="true"]')).toBeNull();
+    expect(container.querySelector<HTMLTextAreaElement>('[data-testid="monaco-editor"]')?.value).toBe(source);
+  });
+
+  it('counts multibyte source through FileViewer and visibly opens it source-only', async () => {
+    const source = `${'a'.repeat(RICH_MARKDOWN_MAX_SOURCE_BYTES - 1)}é`;
+    expect(source.length).toBe(RICH_MARKDOWN_MAX_SOURCE_BYTES);
+    stubMarkdownFile(source);
+
+    await act(async () => {
+      root.render(createElement(FileViewer, { filePath: '/notes/multibyte.md' }));
+    });
+    await settle();
+
+    expect(button(container, 'Rich').disabled).toBe(true);
+    expect(button(container, 'Source').getAttribute('aria-pressed')).toBe('true');
+    expect(container.textContent).toContain(
+      `file is ${RICH_MARKDOWN_MAX_SOURCE_BYTES + 1} bytes (limit ${RICH_MARKDOWN_MAX_SOURCE_BYTES})`,
+    );
+    expect(container.querySelector('[data-rich-markdown-editor="true"]')).toBeNull();
+    expect(container.querySelector<HTMLTextAreaElement>('[data-testid="monaco-editor"]')?.value).toBe(source);
+  });
+
+  it('recomputes rich availability in both directions when the same file is reloaded', async () => {
+    const initial = '# Small\n';
+    const large = `${'a'.repeat(RICH_MARKDOWN_MAX_SOURCE_BYTES)}\n`;
+    const smallAgain = '# Small again\n';
+    let conflictContent = large;
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/panel/file-content')) {
+        return reply({ content: initial, contentHash: 'initial-hash' });
+      }
+      if (url.includes('/api/panel/file-diff')) {
+        return reply({ diff: '', hasDiff: false });
+      }
+      if (url === '/api/v2/files' && init?.method === 'POST') {
+        return reply({
+          error: 'changed-on-disk',
+          content: conflictContent,
+          contentHash: `hash-${conflictContent.length}`,
+        }, 409);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    }));
+
+    await act(async () => {
+      root.render(createElement(FileViewer, { filePath: '/notes/reloaded.md' }));
+    });
+    await settle();
+    act(() => button(container, 'Rich').click());
+    const mount = container.querySelector<HTMLElement>('[data-rich-markdown-editor="true"]');
+    const view = getRichMarkdownEditorView(mount!);
+    act(() => view!.dispatch(view!.state.tr.insertText(' changed', 2)));
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', metaKey: true }));
+      await Promise.resolve();
+    });
+    await settle();
+    act(() => button(container, 'Reload').click());
+
+    expect(button(container, 'Rich').disabled).toBe(true);
+    expect(button(container, 'Source').getAttribute('aria-pressed')).toBe('true');
+    expect(container.textContent).toContain(`limit ${RICH_MARKDOWN_MAX_SOURCE_BYTES}`);
+    expect(container.querySelector<HTMLTextAreaElement>('[data-testid="monaco-editor"]')?.value).toBe(large);
+
+    conflictContent = smallAgain;
+    const monaco = container.querySelector<HTMLTextAreaElement>('[data-testid="monaco-editor"]')!;
+    act(() => {
+      const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+      valueSetter.call(monaco, `${large}changed`);
+      monaco.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', metaKey: true }));
+      await Promise.resolve();
+    });
+    await settle();
+    act(() => button(container, 'Reload').click());
+
+    expect(button(container, 'Rich').disabled).toBe(false);
+    expect(button(container, 'Rich').getAttribute('aria-pressed')).toBe('true');
+    expect(container.textContent).not.toContain(`limit ${RICH_MARKDOWN_MAX_SOURCE_BYTES}`);
+    expect(container.querySelector('[data-rich-markdown-editor="true"]')).not.toBeNull();
+  });
+
+  it('does not keep rich mode after switching to an over-threshold file', async () => {
+    stubMarkdownFile('# Small\n');
+    await act(async () => {
+      root.render(createElement(FileViewer, { filePath: '/notes/small.md' }));
+    });
+    await settle();
+    act(() => button(container, 'Rich').click());
+    expect(container.querySelector('[data-rich-markdown-editor="true"]')).not.toBeNull();
+
+    const large = `${'a'.repeat(RICH_MARKDOWN_MAX_SOURCE_BYTES)}\n`;
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/api/panel/file-content')) {
+        return reply({ content: large, contentHash: 'large-hash' });
+      }
+      if (url.includes('/api/panel/file-diff')) {
+        return reply({ diff: '', hasDiff: false });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    }));
+
+    await act(async () => {
+      root.render(createElement(FileViewer, { filePath: '/notes/large.md' }));
+    });
+    await settle();
+
+    expect(button(container, 'Source').getAttribute('aria-pressed')).toBe('true');
+    expect(container.querySelector('[data-rich-markdown-editor="true"]')).toBeNull();
+    expect(container.textContent).toContain(`limit ${RICH_MARKDOWN_MAX_SOURCE_BYTES}`);
+  });
+
+  it('re-enables rich after switching from an over-threshold file back to a small one', async () => {
+    const large = `${'a'.repeat(RICH_MARKDOWN_MAX_SOURCE_BYTES)}\n`;
+    stubMarkdownFile(large);
+    await act(async () => {
+      root.render(createElement(FileViewer, { filePath: '/notes/large-first.md' }));
+    });
+    await settle();
+    expect(button(container, 'Rich').disabled).toBe(true);
+
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/api/panel/file-content')) {
+        return reply({ content: '# Back\n', contentHash: 'back-hash' });
+      }
+      if (url.includes('/api/panel/file-diff')) {
+        return reply({ diff: '', hasDiff: false });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    }));
+
+    await act(async () => {
+      root.render(createElement(FileViewer, { filePath: '/notes/small-again.md' }));
+    });
+    await settle();
+
+    expect(button(container, 'Rich').disabled).toBe(false);
+    act(() => button(container, 'Rich').click());
+    expect(container.querySelector('[data-rich-markdown-editor="true"]')).not.toBeNull();
+    expect(container.textContent).not.toContain(`limit ${RICH_MARKDOWN_MAX_SOURCE_BYTES}`);
   });
 });
