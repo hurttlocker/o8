@@ -299,7 +299,7 @@ export function RichMarkdownFind({ view }: { view: EditorView | null }) {
           border: '1px solid var(--t-divider-subtle)',
           borderRadius: 9,
           background: 'var(--t-panel-solid)',
-          boxShadow: 'var(--t-shadow-popover)',
+          boxShadow: 'var(--t-panel-shadow)',
           display: 'flex',
           alignItems: 'center',
           gap: 2,
