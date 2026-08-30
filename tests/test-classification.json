@@ -649,6 +649,12 @@
       ]
     },
     {
+      "path": "src/lib/workspace/dependency-materialization-verification.test.ts",
+      "reasons": [
+        "executable-fixture"
+      ]
+    },
+    {
       "path": "src/lib/workspace/dependency-materializer.test.ts",
       "reasons": [
         "child-process",
