@@ -75,7 +75,7 @@ export const APPROVE_TOOLS: McpTool[] = [
   {
     name: 'o8_merge_preview',
     description:
-      'USE THIS BEFORE approve_and_merge — dry-runs the merge gate so you know which governance check (security patterns, diff budget, untracked imports, self-review integrity) might block and can address it cleanly. Returns {packetId, wouldMerge, checks[], blockers[], branch}. Example: o8_merge_preview({packetId: "pkt-abc"}).',
+      'USE THIS BEFORE approve_and_merge — dry-runs the merge gate so you know which governance check (security patterns, diff budget, untracked imports, self-review integrity, lint) might block and can address it cleanly. The typecheck row is marked skipped because it runs after rebase during approval. Returns {packetId, wouldMerge, checks[], blockers[], branch}. Example: o8_merge_preview({packetId: "pkt-abc"}).',
     inputSchema: {
       type: 'object',
       properties: {

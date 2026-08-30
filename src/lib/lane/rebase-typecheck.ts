@@ -18,7 +18,7 @@ interface DiagnosticBlock {
 }
 
 export type LaneRebaseTypecheckResult =
-  | { ok: true }
+  | { ok: true; skipped?: string }
   | { ok: false; output: string };
 
 export async function runLaneRebaseTypecheck(input: {
@@ -32,7 +32,7 @@ export async function runLaneRebaseTypecheck(input: {
       `[${input.logPrefix}] Skipping typecheck for ${input.actualBranch}: ${skip.reason}. ` +
         'Treating as pass so the merge does not loop the layer-1 auto-retry (#1255).',
     );
-    return { ok: true };
+    return { ok: true, skipped: skip.reason };
   }
   try {
     const typecheck = cliInvocation('npx', ['tsc', '--noEmit']);
@@ -54,7 +54,7 @@ export async function runLaneRebaseTypecheck(input: {
       console.warn(
         `[${input.logPrefix}] No local TypeScript compiler in ${input.actualBranch} worktree; skipping typecheck (#1255).`,
       );
-      return { ok: true };
+      return { ok: true, skipped: 'no local TypeScript compiler was found' };
     }
 
     const diagnostics = splitDiagnosticBlocks(output);

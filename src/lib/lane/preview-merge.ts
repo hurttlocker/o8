@@ -1,7 +1,7 @@
 /**
  * Merge preview — read-only wrapper around the merge gate (#623).
  *
- * Runs the same four enforcement checks as `runMergeGate` but returns a
+ * Runs the policy checks plus a changed-file lint preflight and returns a
  * structured `{ checks[], blockers[] }` shape without touching the worktree
  * or issuing a merge commit. Used by the `o8_merge_preview` MCP tool so
  * orchestrator agents can "dry-run" a merge before committing to it.
@@ -19,17 +19,20 @@ import type { Lane } from '@/lib/lane/types';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import type { PacketDiffBaseResolution } from '@/lib/diff/base-resolution';
 import { runMergeGate, type MergeGateResult, type MergeViolation } from './merge-gate';
+import { runLaneRebaseLint, type LaneRebaseLintResult } from './rebase-lint';
 import { immutableSnapshotDiffBase, resolveLaneReviewSource } from './review-source';
 
 // ── Public Types ──
 
-/** One row per enforcement check that ran, in the order listed below. */
+/** One row per enforcement check, in the order listed below. */
 export type MergeCheckName =
   | 'clean-worktree'
   | 'security-patterns'
   | 'diff-budget'
   | 'untracked-imports'
-  | 'self-review-integrity';
+  | 'self-review-integrity'
+  | 'typecheck'
+  | 'lint';
 
 export type MergeCheckVerdict = 'pass' | 'fail' | 'skipped';
 
@@ -74,15 +77,22 @@ const ALL_CHECKS: MergeCheckName[] = [
   'diff-budget',
   'untracked-imports',
   'self-review-integrity',
+  'typecheck',
+  'lint',
 ];
+
+const POST_REBASE_CHECKS = new Set<MergeCheckName>(['typecheck', 'lint']);
 
 // ── Shape translation ──
 
 /**
  * Map a `MergeGateResult` into the structured preview shape.
- * Every check in `ALL_CHECKS` appears in the output with a pass/fail verdict.
+ * Every check in `ALL_CHECKS` appears with a pass, fail, or skipped verdict.
  */
-export function buildCheckList(result: MergeGateResult): MergeCheckResult[] {
+export function buildCheckList(
+  result: MergeGateResult,
+  verificationChecks: MergeCheckResult[] = [],
+): MergeCheckResult[] {
   const firstViolationByCheck = new Map<MergeCheckName, MergeViolation>();
   for (const violation of result.violations) {
     if (violation.severity !== 'block') continue;
@@ -94,7 +104,18 @@ export function buildCheckList(result: MergeGateResult): MergeCheckResult[] {
     }
   }
 
+  const verificationByName = new Map(verificationChecks.map((check) => [check.name, check]));
+
   return ALL_CHECKS.map((name) => {
+    const verification = verificationByName.get(name);
+    if (verification) return verification;
+    if (POST_REBASE_CHECKS.has(name)) {
+      return {
+        name,
+        verdict: 'skipped' as const,
+        detail: 'Runs after rebase during approve_and_merge.',
+      };
+    }
     const violation = firstViolationByCheck.get(name);
     if (violation) {
       return { name, verdict: 'fail' as const, detail: violation.detail };
@@ -118,16 +139,26 @@ function resolveCheckName(violation: MergeViolation): MergeCheckName {
 }
 
 /** Derive a short blocker list from the gate result. Stable order, deduped. */
-export function buildBlockerList(result: MergeGateResult): string[] {
+export function buildBlockerList(
+  result: MergeGateResult,
+  verificationChecks: MergeCheckResult[] = [],
+): string[] {
   const seen = new Set<string>();
   const blockers: string[] = [];
-  for (const check of buildCheckList(result)) {
+  for (const check of buildCheckList(result, verificationChecks)) {
     if (check.verdict !== 'fail') continue;
     if (seen.has(check.name)) continue;
     seen.add(check.name);
     blockers.push(check.name);
   }
   return blockers;
+}
+
+
+function lintPreviewCheck(result: LaneRebaseLintResult): MergeCheckResult {
+  if (!result.ok) return { name: 'lint', verdict: 'fail', detail: result.output };
+  if (result.skipped) return { name: 'lint', verdict: 'skipped', detail: result.skipped };
+  return { name: 'lint', verdict: 'pass', detail: result.detail };
 }
 
 // ── Preview runner ──
@@ -183,8 +214,24 @@ export async function buildPreviewForLane(
     : { ...lane, worktreePath: reviewSource.cwd };
   const orchestratorApproved = options.orchestratorApproved ?? hasApprovedOrchestratorReview(packetId);
   const gateResult = await runMergeGate(resolvedLane, undefined, orchestratorApproved);
-  const checks = buildCheckList(gateResult);
-  const blockers = buildBlockerList(gateResult);
+  const lint = await runLaneRebaseLint({
+    cwd: reviewSource.cwd,
+    baseRef: gateResult.diffBase?.mergeBase
+      ?? gateResult.diffBase?.comparisonRef
+      ?? lane.baseBranch,
+    actualBranch: lane.branch ?? 'packet branch',
+    logPrefix: 'merge-preview',
+  });
+  const verificationChecks: MergeCheckResult[] = [
+    {
+      name: 'typecheck',
+      verdict: 'skipped',
+      detail: 'Runs after rebase during approve_and_merge.',
+    },
+    lintPreviewCheck(lint),
+  ];
+  const checks = buildCheckList(gateResult, verificationChecks);
+  const blockers = buildBlockerList(gateResult, verificationChecks);
   const dirtyDetail = readDirtyWorktreeDetail(reviewSource.cwd);
   if (dirtyDetail) {
     const cleanCheck = checks.find((check) => check.name === 'clean-worktree');
@@ -192,11 +239,11 @@ export async function buildPreviewForLane(
       cleanCheck.verdict = 'fail';
       cleanCheck.detail = dirtyDetail;
     }
-    blockers.unshift('clean-worktree');
+    if (!blockers.includes('clean-worktree')) blockers.unshift('clean-worktree');
   }
   return {
     packetId,
-    wouldMerge: gateResult.passed && !dirtyDetail,
+    wouldMerge: gateResult.passed && lint.ok && !dirtyDetail,
     checks,
     blockers,
     branch: lane.branch ?? null,

@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic';
 /**
  * GET /api/orchestrator/merge-preview?packetId=<id>
  *
- * Dry-runs the 5-layer merge gate for one packet (no worktree mutation) and
+ * Dry-runs the merge gate for one packet (no worktree mutation) and
  * returns `{ packetId, wouldMerge, checks[], blockers[], branch }` — the same
  * MergePreviewResult the `o8_merge_preview` MCP tool surfaces. The N-up compare
  * matrix renders this per column so the operator sees each candidate's GATE
