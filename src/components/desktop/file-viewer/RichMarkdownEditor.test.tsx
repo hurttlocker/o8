@@ -161,6 +161,101 @@ describe('FileViewer rich Markdown editor', () => {
     expect(monaco?.value).toBe(expected);
   });
 
+  it('finds and navigates decorated matches across rich block types through FileViewer', async () => {
+    const source = [
+      '# Needle heading',
+      '',
+      'Needle paragraph.',
+      '',
+      '> Needle quote.',
+      '',
+      '- Needle list.',
+      '',
+      '```text',
+      'Needle code',
+      '```',
+      '',
+    ].join('\n');
+    stubMarkdownFile(source);
+
+    await act(async () => {
+      root.render(createElement(FileViewer, { filePath: '/notes/find.md' }));
+    });
+    await settle();
+    act(() => button(container, 'Rich').click());
+
+    const mount = container.querySelector<HTMLElement>('[data-rich-markdown-editor="true"]')!;
+    const view = getRichMarkdownEditorView(mount)!;
+    const shortcut = new KeyboardEvent('keydown', {
+      key: 'f',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    act(() => view.dom.dispatchEvent(shortcut));
+
+    expect(shortcut.defaultPrevented).toBe(true);
+    const query = container.querySelector<HTMLInputElement>('input[aria-label="Find query"]')!;
+    expect(document.activeElement).toBe(query);
+
+    act(() => {
+      const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+      valueSetter.call(query, 'needle');
+      query.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    expect(container.querySelector('[role="status"]')?.textContent).toBe('1/5');
+    const matches = Array.from(container.querySelectorAll<HTMLElement>('[data-rich-find-match="true"]'));
+    expect(matches).toHaveLength(5);
+    expect(matches.every((match) => match.style.background.includes('var(--t-'))).toBe(true);
+    expect(matches.filter((match) => match.dataset.richFindActive === 'true')).toHaveLength(1);
+    expect(view.state.doc.textBetween(view.state.selection.from, view.state.selection.to)).toBe('Needle');
+
+    act(() => view.focus());
+    const repeatedShortcut = new KeyboardEvent('keydown', {
+      key: 'f',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    act(() => view.dom.dispatchEvent(repeatedShortcut));
+    expect(repeatedShortcut.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(query);
+
+    const firstMatchFrom = view.state.selection.from;
+    act(() => container.querySelector<HTMLButtonElement>('button[aria-label="Next match"]')!.click());
+    expect(view.state.selection.from).toBeGreaterThan(firstMatchFrom);
+    expect(container.querySelector('[role="status"]')?.textContent).toBe('2/5');
+
+    act(() => container.querySelector<HTMLButtonElement>('button[aria-label="Previous match"]')!.click());
+    expect(view.state.selection.from).toBe(firstMatchFrom);
+    act(() => query.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Enter',
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    })));
+    expect(view.state.selection.from).toBeGreaterThan(firstMatchFrom);
+    expect(container.querySelector('[role="status"]')?.textContent).toBe('5/5');
+
+    act(() => query.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Enter',
+      bubbles: true,
+      cancelable: true,
+    })));
+    expect(view.state.selection.from).toBe(firstMatchFrom);
+    expect(container.querySelector('[role="status"]')?.textContent).toBe('1/5');
+
+    act(() => query.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Escape',
+      bubbles: true,
+      cancelable: true,
+    })));
+    expect(container.querySelector('input[aria-label="Find query"]')).toBeNull();
+    expect(container.querySelectorAll('[data-rich-find-match="true"]')).toHaveLength(0);
+    expect(document.activeElement).toBe(view.dom);
+  });
+
   it('preserves Rich undo history across an unchanged Source round trip', async () => {
     const source = '# Original heading\n';
     const edited = '# Edited heading\n';

@@ -34,6 +34,7 @@ import {
 import type { OpenRichDocumentResult } from '@/lib/markdown/editor/document';
 import { serializeDocument } from '@/lib/markdown/transport';
 import { richMarkdownNodeViews } from './rich-node-views';
+import { RichMarkdownFind, richMarkdownFindPlugin } from './rich-markdown-find';
 import { useRichMarkdownImageInput } from './use-rich-markdown-image-input';
 
 const MonacoEditor = dynamic(() => import('@/lib/monaco-polyfills').then(() =>
@@ -376,6 +377,7 @@ function editorPlugins(openLinkPopover: (view: EditorView) => boolean) {
       ],
     }),
     history(),
+    richMarkdownFindPlugin,
     keymap({
       'Mod-b': toggleMark(marks.strong),
       'Mod-i': toggleMark(marks.em),
@@ -406,6 +408,7 @@ function RichMarkdownEditor({
   const mountRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  const [editorView, setEditorView] = useState<EditorView | null>(null);
   const onSourceChangeRef = useRef(onSourceChange);
   const [linkPopover, setLinkPopover] = useState<LinkPopoverState | null>(null);
   const [linkHref, setLinkHref] = useState('');
@@ -488,6 +491,7 @@ function RichMarkdownEditor({
     }) as TestableEditorView;
     view.sourceChangeCount = 0;
     viewRef.current = view;
+    setEditorView(view);
     richEditorViews.set(mount, view);
     view.focus();
 
@@ -551,6 +555,7 @@ function RichMarkdownEditor({
         background: 'var(--t-editor-bg, var(--t-panel))',
       }}
     >
+      <RichMarkdownFind view={editorView} />
       <div ref={mountRef} data-rich-markdown-editor="true" style={{ minHeight: '100%' }} />
       {linkPopover ? (
         <div style={{
