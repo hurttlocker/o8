@@ -28,6 +28,7 @@ import { recordLaneEvent } from './events';
 import { cancelReviewAttempt } from './review-cancellation';
 import { surfaceReviewQueueBlocker } from './review-queue-blocker';
 import { MAX_REVIEW_ATTEMPTS } from './review-queue-settlement';
+import { stopActiveReviewTurn } from './review-turn-state';
 import type { Lane } from './types';
 
 /** How long a claimed attempt may sit untouched before it is reclaimable. */
@@ -136,6 +137,9 @@ export function settleSupersededReviewAttempts(input: {
         previousStatus: row.status,
         reason: input.reason,
       });
+      if (row.status === 'in_progress') {
+        stopActiveReviewTurn({ laneId: input.lane.id, reason: 'superseded' });
+      }
       settled += 1;
     }
   } catch (error) {

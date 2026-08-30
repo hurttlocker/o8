@@ -2116,6 +2116,14 @@
       ]
     },
     {
+      "path": "tests/review-supersede-retry-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/runtime-action-idempotency-real-path.test.ts",
       "reasons": [
         "real-path"
