@@ -35,6 +35,10 @@ import type { OpenRichDocumentResult } from '@/lib/markdown/editor/document';
 import { serializeDocument } from '@/lib/markdown/transport';
 import { richMarkdownNodeViews } from './rich-node-views';
 import { RichMarkdownFind, richMarkdownFindPlugin } from './rich-markdown-find';
+import {
+  RichMarkdownSlashMenu,
+  richMarkdownSlashMenuPlugin,
+} from './rich-markdown-slash-menu';
 import { useRichMarkdownImageInput } from './use-rich-markdown-image-input';
 
 const MonacoEditor = dynamic(() => import('@/lib/monaco-polyfills').then(() =>
@@ -378,6 +382,7 @@ function editorPlugins(openLinkPopover: (view: EditorView) => boolean) {
     }),
     history(),
     richMarkdownFindPlugin,
+    richMarkdownSlashMenuPlugin,
     keymap({
       'Mod-b': toggleMark(marks.strong),
       'Mod-i': toggleMark(marks.em),
@@ -409,10 +414,15 @@ function RichMarkdownEditor({
   const inputRef = useRef<HTMLInputElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const [editorView, setEditorView] = useState<EditorView | null>(null);
+  const [slashMenuContainer, setSlashMenuContainer] = useState<HTMLDivElement | null>(null);
   const onSourceChangeRef = useRef(onSourceChange);
   const [linkPopover, setLinkPopover] = useState<LinkPopoverState | null>(null);
   const [linkHref, setLinkHref] = useState('');
   const imageInput = useRichMarkdownImageInput({ hostRef: containerRef, viewRef, repoPath });
+  const assignContainer = useCallback((node: HTMLDivElement | null) => {
+    containerRef.current = node;
+    setSlashMenuContainer(node);
+  }, []);
 
   useEffect(() => {
     onSourceChangeRef.current = onSourceChange;
@@ -547,7 +557,7 @@ function RichMarkdownEditor({
 
   return (
     <div
-      ref={containerRef}
+      ref={assignContainer}
       style={{
         position: 'relative',
         height: '100%',
@@ -556,6 +566,7 @@ function RichMarkdownEditor({
       }}
     >
       <RichMarkdownFind view={editorView} />
+      <RichMarkdownSlashMenu view={editorView} container={slashMenuContainer} />
       <div ref={mountRef} data-rich-markdown-editor="true" style={{ minHeight: '100%' }} />
       {linkPopover ? (
         <div style={{

@@ -336,6 +336,8 @@ export function blockToPmNode(
           nestedOptions(options),
         )),
       );
+    case 'thematicBreak':
+      return schema.nodes.horizontal_rule.createChecked();
     default:
       unsupported(node);
   }

@@ -185,6 +185,7 @@ function serializeNode(node: MarkdownBlockNode, lineEnding: Exclude<MarkdownLine
       emphasis: '*',
       fence: '`',
       fences: true,
+      rule: '-',
       handlers: {
         text(textNode, _parent, state, info) {
           const protectedText = protectCriticMarkup(textNode.value);

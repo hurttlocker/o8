@@ -171,6 +171,49 @@ const nodes: Record<string, NodeSpec> = {
       ].join(';'),
     }, 0],
   },
+  table: {
+    group: 'block',
+    atom: true,
+    selectable: true,
+    toDOM: () => ['table', {
+      'data-rich-table': 'true',
+      style: [
+        'width:100%',
+        'margin-top:0',
+        'margin-right:0',
+        'margin-bottom:10px',
+        'margin-left:0',
+        'border-collapse:collapse',
+        'table-layout:fixed',
+        'color:var(--t-text)',
+      ].join(';'),
+    },
+    ['thead',
+      ['tr',
+        ['th', {
+          style: 'padding-top:7px;padding-right:9px;padding-bottom:7px;padding-left:9px;border-width:1px;border-style:solid;border-color:var(--t-divider-subtle);background:var(--t-input-bg);text-align:left;font-weight:400',
+        }, 'Column 1'],
+        ['th', {
+          style: 'padding-top:7px;padding-right:9px;padding-bottom:7px;padding-left:9px;border-width:1px;border-style:solid;border-color:var(--t-divider-subtle);background:var(--t-input-bg);text-align:left;font-weight:400',
+        }, 'Column 2'],
+      ],
+    ],
+    ['tbody',
+      ['tr',
+        ['td', { style: 'height:32px;padding-top:7px;padding-right:9px;padding-bottom:7px;padding-left:9px;border-width:1px;border-style:solid;border-color:var(--t-divider-subtle)' }, ''],
+        ['td', { style: 'height:32px;padding-top:7px;padding-right:9px;padding-bottom:7px;padding-left:9px;border-width:1px;border-style:solid;border-color:var(--t-divider-subtle)' }, ''],
+      ],
+    ]],
+  },
+  horizontal_rule: {
+    group: 'block',
+    atom: true,
+    selectable: true,
+    parseDOM: [{ tag: 'hr' }],
+    toDOM: () => ['hr', {
+      style: 'height:1px;margin-top:14px;margin-right:0;margin-bottom:14px;margin-left:0;border:none;background:var(--t-divider-subtle)',
+    }],
+  },
   opaque_block: {
     attrs: {
       construct: {},

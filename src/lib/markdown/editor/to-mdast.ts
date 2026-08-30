@@ -158,6 +158,30 @@ export function pmNodeToBlock(pmNode: ProseMirrorNode): MarkdownBlockNode {
         )),
       };
       break;
+    case 'table':
+      node = {
+        type: 'table',
+        children: [
+          {
+            type: 'tableRow',
+            children: [
+              { type: 'tableCell', children: [{ type: 'text', value: 'Column 1' }] },
+              { type: 'tableCell', children: [{ type: 'text', value: 'Column 2' }] },
+            ],
+          },
+          {
+            type: 'tableRow',
+            children: [
+              { type: 'tableCell', children: [] },
+              { type: 'tableCell', children: [] },
+            ],
+          },
+        ],
+      };
+      break;
+    case 'horizontal_rule':
+      node = { type: 'thematicBreak' };
+      break;
     default:
       throw new Error(`Unsupported top-level ProseMirror node: ${pmNode.type.name}`);
   }
