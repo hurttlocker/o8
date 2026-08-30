@@ -16,12 +16,12 @@ import { parsePacketArguments, resolvePacketTarget } from './target.js';
 interface PacketScopeDirective {
   id: string;
   title: string;
-  scope: string;
-  repoName: string | null;
-  priority: number | null;
-  body: string;
-  projects: string[];
-  recentMerges: string[];
+  scope?: string;
+  repoName?: string | null;
+  priority?: number | null;
+  body?: string;
+  projects?: string[];
+  recentMerges?: string[];
 }
 
 interface RelatedPacketScope {
@@ -91,14 +91,21 @@ interface PacketScope {
   fileLineCeiling: number;
   allowedPaths: string[];
   blockedPaths: string[];
+  directiveCount: number;
   directives: PacketScopeDirective[];
   relatedPackets: RelatedPacketScope[];
   project?: PacketScopeProject;
 }
 
-async function resolveScopeId(rest: string[]): Promise<string> {
-  const args = parsePacketArguments(rest, { command: 'scope' });
-  return (await resolvePacketTarget(args.target)).laneId;
+async function resolveScopeInput(rest: string[]): Promise<{ id: string; includeDirectives: boolean }> {
+  const args = parsePacketArguments(rest, {
+    command: 'scope',
+    booleanFlags: ['include-directives'],
+  });
+  return {
+    id: (await resolvePacketTarget(args.target)).laneId,
+    includeDirectives: args.booleans.has('include-directives'),
+  };
 }
 
 function printHumanScope(scope: PacketScope): void {
@@ -162,13 +169,14 @@ function printHumanScope(scope: PacketScope): void {
   printHumanHeading(`blocked paths (${scope.blockedPaths.length})`);
   process.stdout.write(scope.blockedPaths.map((path) => `  ${path}`).join('\n') + '\n');
 
-  printHumanHeading(`directives (${scope.directives.length})`);
+  printHumanHeading(`directives (${scope.directiveCount})`);
   if (scope.directives.length === 0) {
     process.stdout.write('  (none)\n');
   } else {
     for (const directive of scope.directives) {
-      const priority = directive.priority === null ? '' : ` priority=${directive.priority}`;
-      process.stdout.write(`  ${directive.title} [${directive.scope}]${priority}\n`);
+      const scopeLabel = directive.scope ? ` [${directive.scope}]` : '';
+      const priority = directive.priority === undefined || directive.priority === null ? '' : ` priority=${directive.priority}`;
+      process.stdout.write(`  ${directive.title}${scopeLabel}${priority}\n`);
     }
   }
 
@@ -183,26 +191,11 @@ function printHumanScope(scope: PacketScope): void {
   }
 }
 
-// Agents pipe `o8 packet scope` JSON straight into their context. Keep every
-// directive but cap each body so a directive-heavy project doesn't flood it.
-// (Human output already prints only directive titles.)
-const DIRECTIVE_BODY_CAP = 600;
-function capScopeForJson(scope: PacketScope): PacketScope {
-  if (!Array.isArray(scope.directives) || scope.directives.length === 0) return scope;
-  return {
-    ...scope,
-    directives: scope.directives.map((directive) => (
-      typeof directive.body === 'string' && directive.body.length > DIRECTIVE_BODY_CAP
-        ? { ...directive, body: `${directive.body.slice(0, DIRECTIVE_BODY_CAP)}…[+${directive.body.length - DIRECTIVE_BODY_CAP} chars truncated — read o8.md / directive source for the rest]` }
-        : directive
-    )),
-  };
-}
-
 export async function runPacketScope(mode: OutputMode, rest: string[]): Promise<number> {
-  const id = await resolveScopeId(rest);
+  const { id, includeDirectives } = await resolveScopeInput(rest);
   const cfg = resolveConfig();
-  const res = await apiFetch<PacketScope>(cfg, `/api/lanes/${encodeURIComponent(id)}/scope`);
+  const query = includeDirectives ? '?includeDirectives=true' : '';
+  const res = await apiFetch<PacketScope>(cfg, `/api/lanes/${encodeURIComponent(id)}/scope${query}`);
   if (!res.data) {
     throw new CliError('invalid_response', 'Server returned an empty packet scope.', EXIT.INVALID_ARGS);
   }
@@ -211,7 +204,7 @@ export async function runPacketScope(mode: OutputMode, rest: string[]): Promise<
   if (mode.human) {
     printHumanScope(res.data);
   } else {
-    printJson(capScopeForJson(res.data));
+    printJson(res.data);
   }
   return 0;
 }

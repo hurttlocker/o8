@@ -339,6 +339,8 @@ export interface OrchestratorPacket {
   spendTelemetry?: PacketSpendTelemetry;
   contextTelemetry?: PacketContextTelemetry;
   blockedReason?: string | null;
+  /** Worker-reported or recovered completion text shown by mission status. */
+  completionSummary?: string | null;
   /** Read-time status projection; recomputed from runtime or lane evidence. */
   statusEvidence?: TerminalStatusEvidence;
   /** Durable dispatch admission decision; reserved bytes are not physical usage. */

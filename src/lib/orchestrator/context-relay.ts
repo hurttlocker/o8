@@ -407,7 +407,7 @@ export async function recordPacketReviewContext(
   return nextContext;
 }
 
-export async function capturePacketCompletionContext(packetId: string, sessionKey: string): Promise<PacketContext> {
+export async function capturePacketCompletionContext(packetId: string, sessionKey: string, options: { fallbackSummary?: string } = {}): Promise<PacketContext> {
   const normalizedPacketId = packetId.trim();
   const normalizedSessionKey = sessionKey.trim();
   const runtimeId = inferRuntimeId(normalizedSessionKey);
@@ -433,6 +433,8 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
   const agent = agentResult.status === 'fulfilled' ? agentResult.value : null;
   const telemetry = telemetryResult.status === 'fulfilled' ? telemetryResult.value : undefined;
   const lastAssistantEntry = findLastAssistantEntry(transcript);
+  const assistantSummary = normalizeSummaryText(stripPacketTaskContract(stripPacketSelfReview(lastAssistantEntry?.text ?? '')), SUMMARY_LIMIT);
+  const fallbackSummary = normalizeSummaryText(options.fallbackSummary ?? '', SUMMARY_LIMIT);
   const selfReview = findLatestSelfReview(transcript);
   const taskContractCapture = findFirstTaskContractCapture(transcript);
   const taskContract = taskContractCapture?.contract;
@@ -455,15 +457,14 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
           diffFingerprint: spokenDiffResult.value.fingerprint,
         }
       : {}),
-    summary: buildPacketSummary({
-      lifecycleSummary: normalizeSummaryText(agent?.runtimeSurface?.lifecycle?.summary ?? '', SUMMARY_LIMIT),
-      assistantSummary: normalizeSummaryText(
-        stripPacketTaskContract(stripPacketSelfReview(lastAssistantEntry?.text ?? '')),
-        SUMMARY_LIMIT,
-      ),
-      note: findRecentNote(transcript, lastAssistantEntry?.id ?? null),
-      changedFiles,
-    }),
+    summary: fallbackSummary
+      ? assistantSummary || fallbackSummary
+      : buildPacketSummary({
+          lifecycleSummary: normalizeSummaryText(agent?.runtimeSurface?.lifecycle?.summary ?? '', SUMMARY_LIMIT),
+          assistantSummary,
+          note: findRecentNote(transcript, lastAssistantEntry?.id ?? null),
+          changedFiles,
+        }),
     changedFiles,
     selfReview,
     ...(taskContract ? { taskContract } : {}),

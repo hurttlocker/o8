@@ -34,6 +34,11 @@ export interface PacketScopeDirective {
   recentMerges: string[];
 }
 
+export interface PacketScopeDirectiveReference {
+  id: string;
+  title: string;
+}
+
 export interface RelatedPacketScope {
   packetId: string;
   laneId: string | null;
@@ -104,6 +109,24 @@ export interface PacketScope {
   directives: PacketScopeDirective[];
   relatedPackets: RelatedPacketScope[];
   project: PacketScopeProject;
+}
+
+export type PacketScopeResponse = Omit<PacketScope, 'directives'> & {
+  directiveCount: number;
+  directives: PacketScopeDirective[] | PacketScopeDirectiveReference[];
+};
+
+export function projectPacketScope(
+  scope: PacketScope,
+  includeDirectives = false,
+): PacketScopeResponse {
+  return {
+    ...scope,
+    directiveCount: scope.directives.length,
+    directives: includeDirectives
+      ? scope.directives
+      : scope.directives.map(({ id, title }) => ({ id, title })),
+  };
 }
 
 export interface GetPacketScopeInput {

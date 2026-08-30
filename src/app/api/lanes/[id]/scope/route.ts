@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
-import { getPacketScope } from '@/lib/lanes/scope';
+import { getPacketScope, projectPacketScope } from '@/lib/lanes/scope';
 import { requestPacketScopeExpansion } from '@/lib/orchestrator/packet-scope-expansion';
 
 export const runtime = 'nodejs';
@@ -25,7 +25,10 @@ export async function GET(
     return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
   }
 
-  return NextResponse.json(scope, {
+  return NextResponse.json(projectPacketScope(
+    scope,
+    req.nextUrl.searchParams.get('includeDirectives') === 'true',
+  ), {
     headers: { 'Cache-Control': 'no-store, max-age=0' },
   });
 }

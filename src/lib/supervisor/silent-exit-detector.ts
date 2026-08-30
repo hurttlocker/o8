@@ -168,6 +168,19 @@ async function readLastCommit(cwd: string): Promise<string> {
   }
 }
 
+async function readLastCommitSubject(cwd: string): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['log', '-1', '--format=%s'],
+      { windowsHide: true, cwd, timeout: GIT_COMMAND_TIMEOUT_MS, maxBuffer: GIT_COMMAND_MAX_BUFFER },
+    );
+    return stdout.trim();
+  } catch {
+    return '';
+  }
+}
+
 async function readHeadSha(cwd: string): Promise<string | null> {
   try {
     const { stdout } = await execFileAsync(
@@ -309,6 +322,34 @@ function enqueueSilentExitInbox(
   console.log(`[silent-exit] Enqueued inbox item ${inboxId} for lane ${lane.id} (${kind})`);
 }
 
+async function captureSilentExitCompletionSummary(lane: Lane, cwd: string): Promise<void> {
+  const packetId = lane.packetId?.trim() ?? '';
+  if (!packetId) return;
+
+  const commitSubject = await readLastCommitSubject(cwd);
+  let completionSummary = commitSubject;
+  if (lane.sessionKey) {
+    try {
+      const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');
+      const context = await capturePacketCompletionContext(packetId, lane.sessionKey, {
+        fallbackSummary: commitSubject,
+      });
+      completionSummary = context.selfReview?.outcome?.trim()
+        || context.summary.trim()
+        || commitSubject;
+    } catch (error) {
+      console.warn(`[silent-exit] Failed to capture completion context for lane ${lane.id}:`, error);
+    }
+  }
+  if (!completionSummary) return;
+
+  const { withLockedState } = await import('@/lib/orchestrator/control-plane');
+  await withLockedState((mission) => {
+    const packet = mission.packets.find((candidate) => candidate.id === packetId);
+    if (packet) packet.completionSummary = completionSummary.slice(0, 1_200);
+  });
+}
+
 /**
  * #1500 — a verification-failed silent exit must leave a learning behind, or
  * every respawn goes out with the identical brief and trips the identical
@@ -411,6 +452,7 @@ async function triageSilentExit(lane: Lane): Promise<boolean> {
       return true;
     }
 
+    await captureSilentExitCompletionSummary(lane, cwd);
     setLaneStatus(lane.id, 'reviewing', 'system', 'silent_exit_work_present');
     enqueueSilentExitInbox(
       lane,
@@ -457,6 +499,7 @@ async function triageSilentExit(lane: Lane): Promise<boolean> {
     return true;
   }
 
+  await captureSilentExitCompletionSummary(lane, cwd);
   setLaneStatus(lane.id, 'reviewing', 'system', 'silent_exit_work_present');
   enqueueSilentExitInbox(
     lane,

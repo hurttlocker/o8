@@ -72,6 +72,7 @@ function fullPacketFixture() {
       observedAt: '2026-01-01T00:00:30.000Z',
     },
     blockedReason: 'operator_stopped',
+    completionSummary: 'Recovered completion summary',
     statusEvidence: {
       sessionId: 'codex-owned:pkt-control-1',
       runtime: 'codex',
