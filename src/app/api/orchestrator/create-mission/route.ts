@@ -179,10 +179,19 @@ export async function POST(request: NextRequest) {
   if (!profileRouting.ok) {
     return operatorError(profileRouting.code, profileRouting.message, 400);
   }
-  const runtimePreset = origin && !requestedModelText && profileRouting.requestedRuntime
-    ? resolveRuntimePreset('ui-edit-low-latency', profileRouting.requestedRuntime)
+  const runtimePresetId = origin && !requestedModelText ? 'ui-edit-low-latency' as const : null;
+  const runtimePreset = runtimePresetId
+    && profileRouting.requestedRuntime
+    && !(claudeCodeCarrier && profileRouting.requestedRuntime === 'claude-code')
+    ? resolveRuntimePreset(runtimePresetId, profileRouting.requestedRuntime)
     : null;
-  const effectiveRequestedModel = runtimePreset?.model ?? profileRouting.requestedModel;
+  const carrierOwnsMissionModel = Boolean(
+    claudeCodeCarrier && profileRouting.requestedRuntime === 'claude-code',
+  );
+  const effectiveRequestedModel = carrierOwnsMissionModel
+    ? null
+    : runtimePreset?.model ?? profileRouting.requestedModel;
+  const issueRoutings = [];
   for (const issue of issues) {
     if (!issue.runtime) continue;
     const dispatchError = runtimeDispatchError(issue.runtime);
@@ -196,6 +205,19 @@ export async function POST(request: NextRequest) {
     if (!issueProfileRouting.ok) {
       return operatorError(issueProfileRouting.code, issueProfileRouting.message, 400);
     }
+    const issueRuntime = issueProfileRouting.requestedRuntime ?? issue.runtime;
+    const carrierOwnsIssueModel = Boolean(claudeCodeCarrier && issueRuntime === 'claude-code');
+    const issuePreset = runtimePresetId && !carrierOwnsIssueModel
+      ? resolveRuntimePreset(runtimePresetId, issueProfileRouting.requestedRuntime ?? issue.runtime)
+      : null;
+    issueRoutings.push(resolveWorkerRouting({
+      workerIntent: record.workerIntent,
+      requestedProvider: record.requestedProvider,
+      requestedRuntime: issueRuntime,
+      requestedModel: carrierOwnsIssueModel ? null : issuePreset?.model ?? issueProfileRouting.requestedModel,
+      requestedEffort,
+      source: 'create-mission-api-issue',
+    }));
   }
   const workerRouting = resolveWorkerRouting({
     workerIntent: record.workerIntent,
@@ -223,16 +245,7 @@ export async function POST(request: NextRequest) {
   });
   try {
     await assertRuntimeDispatchable(workerRouting.selectedRuntime, workerRouting.selectedModel, repoPath);
-    for (const issue of issues) {
-      if (!issue.runtime) continue;
-      const issueRouting = resolveWorkerRouting({
-        workerIntent: record.workerIntent,
-        requestedProvider: record.requestedProvider,
-        requestedRuntime: issue.runtime,
-        requestedModel: profileRouting.requestedModel,
-        requestedEffort,
-        source: 'create-mission-api-issue',
-      });
+    for (const issueRouting of issueRoutings) {
       await assertRuntimeDispatchable(issueRouting.selectedRuntime, issueRouting.selectedModel, repoPath);
     }
   } catch (error) {
@@ -279,6 +292,7 @@ export async function POST(request: NextRequest) {
       requestedProvider: workerRouting.requestedProvider,
       requestedRuntime: profileRouting.requestedRuntime,
       requestedModel: workerRouting.requestedModel,
+      ...(runtimePresetId ? { runtimePreset: runtimePresetId } : {}),
       ...(hasClaudeCodePacket && claudeCodeModel ? { claudeCodeModel } : {}),
       ...(hasClaudeCodePacket && claudeCodeCarrier ? { claudeCodeCarrier } : {}),
       requestedEffort,

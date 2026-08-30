@@ -8,6 +8,7 @@ import { MODEL_IDS } from '@/lib/models';
 import type { LaneCommand, LaneCommandResult } from '@/lib/lane/types';
 
 const laneCommandMock = vi.hoisted(() => vi.fn());
+const runtimeDispatchableMock = vi.hoisted(() => vi.fn(async () => undefined));
 
 vi.mock('@/lib/panel/auth', () => ({
   requirePanelAuth: vi.fn(() => null),
@@ -15,7 +16,7 @@ vi.mock('@/lib/panel/auth', () => ({
 
 vi.mock('@/lib/runtimes/shared/auth-detect', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/runtimes/shared/auth-detect')>(),
-  assertRuntimeDispatchable: vi.fn(async () => undefined),
+  assertRuntimeDispatchable: runtimeDispatchableMock,
 }));
 
 vi.mock('@/lib/orchestrator/operator-mission-service/branch-cleanup', async (importOriginal) => ({
@@ -120,11 +121,14 @@ delete process.env.CORTEX_IDE_DB_PATH;
 delete process.env.O8_DEFAULT_DISPATCH_RUNTIME;
 delete process.env.O8_DISPATCH_MODEL;
 delete process.env.O8_SUBSCRIPTION_PROFILE;
-writeFileSync(path.join(dataDir, 'operator-defaults.json'), JSON.stringify({
-  subscriptionProfile: 'both',
-  defaultDispatchRuntime: 'codex',
-  defaultDispatchModel: MODEL_IDS.codexWorkerDefault,
-}));
+function writeTestOperatorDefaults(defaultDispatchModel: string) {
+  writeFileSync(path.join(dataDir, 'operator-defaults.json'), JSON.stringify({
+    subscriptionProfile: 'both',
+    defaultDispatchRuntime: 'codex',
+    defaultDispatchModel,
+  }));
+}
+writeTestOperatorDefaults(MODEL_IDS.codexWorkerDefault);
 
 const { NextRequest } = await import('next/server');
 const { POST } = await import('@/app/api/orchestrator/create-mission/route');
@@ -168,6 +172,47 @@ async function createAndReadPacket(input: {
   return readOrchestratorControlPlaneState().packets.find((packet) => packet.id === packetId);
 }
 
+async function createAndReadMixedRuntimePackets(input: { carrier?: 'openrouter' } = {}) {
+  requestSequence += 1;
+  const issueNumber = 19_040_000 + requestSequence * 10;
+  runtimeDispatchableMock.mockClear();
+  const response = await POST(new NextRequest('http://127.0.0.1:47120/api/orchestrator/create-mission', {
+    method: 'POST',
+    headers: { host: 'localhost:47120', 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      clientMutationId: `ui-edit-runtime-preset-${requestSequence}`,
+      repoPath,
+      ...(input.carrier ? { carrier: input.carrier } : {}),
+      origin: 'design-mode',
+      requestedRuntime: 'codex',
+      issues: [{
+        number: issueNumber,
+        title: 'Codex UI edit runtime preset',
+        body: '',
+        url: '',
+      }, {
+        number: issueNumber + 1,
+        title: 'Claude UI edit runtime preset',
+        body: '',
+        url: '',
+        runtime: 'claude-code',
+      }],
+    }),
+  }));
+  const payload = await response.json() as {
+    ok: boolean;
+    result: { packets: Array<{ id: string }> };
+  };
+  expect(response.status).toBe(201);
+  expect(payload.ok).toBe(true);
+  const packetIds = new Set(payload.result.packets.map((packet) => packet.id));
+  const state = readOrchestratorControlPlaneState();
+  return {
+    missionId: state.missionId,
+    packets: state.packets.filter((packet) => packetIds.has(packet.id)),
+  };
+}
+
 afterAll(async () => {
   const { closeDb } = await import('@/lib/db');
   closeDb();
@@ -188,7 +233,7 @@ afterAll(async () => {
 
 describe('UI edit runtime preset dispatch routing', () => {
   it('selects the low-latency preset unless the operator pins a model', async () => {
-    const { createLane, getLane } = await import('@/lib/lane/registry');
+    const { createLane, getLane, setLaneStatus } = await import('@/lib/lane/registry');
     laneCommandMock.mockImplementation(async (command: LaneCommand): Promise<LaneCommandResult> => {
       if (command.verb === 'open_lane') {
         const lane = createLane({
@@ -277,6 +322,41 @@ describe('UI edit runtime preset dispatch routing', () => {
       },
     });
 
+    laneCommandMock.mockClear();
+    runtimeDispatchableMock.mockClear();
+    writeTestOperatorDefaults(MODEL_IDS.claudeWorkerDefault);
+    const designCarrier = await createAndReadPacket({
+      carrier: 'openrouter',
+      origin: 'design-mode',
+      requestedRuntime: 'claude-code',
+    });
+    expect(designCarrier).toMatchObject({
+      origin: 'design-mode',
+      claudeCodeCarrier: 'openrouter',
+      claudeCodeModel: null,
+      assignedModel: null,
+      workerRouting: {
+        requestedModel: null,
+        selectedRuntime: 'claude-code',
+        selectedModel: null,
+        modelDisposition: 'runtime-default',
+      },
+    });
+    expect(runtimeDispatchableMock).toHaveBeenCalledWith('claude-code', null, repoPath);
+    const carrierDispatch = await dispatchMission({
+      missionId: readOrchestratorControlPlaneState().missionId,
+    });
+    expect(carrierDispatch.dispatched).toBe(1);
+    const carrierLaunch = laneCommandMock.mock.calls
+      .map(([command]) => command as LaneCommand)
+      .find((command) => command.verb === 'launch_session');
+    expect(carrierLaunch).toMatchObject({
+      verb: 'launch_session',
+      claudeCodeCarrier: 'openrouter',
+      claudeCodeModel: undefined,
+    });
+    expect(carrierLaunch?.model).not.toBe(MODEL_IDS.claudeHaikuQaDefault);
+
     const claudeDefault = await createAndReadPacket({
       origin: 'design-mode',
       requestedRuntime: 'claude-code',
@@ -289,5 +369,86 @@ describe('UI edit runtime preset dispatch routing', () => {
         selectedModel: MODEL_IDS.claudeHaikuQaDefault,
       },
     });
+
+    laneCommandMock.mockClear();
+    const mixedRuntime = await createAndReadMixedRuntimePackets();
+    expect(mixedRuntime.packets.map((packet) => ({
+      runtime: packet.runtime,
+      assignedModel: packet.assignedModel,
+      selectedModel: packet.workerRouting?.selectedModel,
+      modelDisposition: packet.workerRouting?.modelDisposition,
+    }))).toEqual(expect.arrayContaining([{
+      runtime: 'codex',
+      assignedModel: MODEL_IDS.codexScoutDefault,
+      selectedModel: MODEL_IDS.codexScoutDefault,
+      modelDisposition: 'requested',
+    }, {
+      runtime: 'claude-code',
+      assignedModel: MODEL_IDS.claudeHaikuQaDefault,
+      selectedModel: MODEL_IDS.claudeHaikuQaDefault,
+      modelDisposition: 'requested',
+    }]));
+    expect(runtimeDispatchableMock).toHaveBeenCalledWith('codex', MODEL_IDS.codexScoutDefault, repoPath);
+    expect(runtimeDispatchableMock).toHaveBeenCalledWith('claude-code', MODEL_IDS.claudeHaikuQaDefault, repoPath);
+
+    const mixedDispatch = await dispatchMission({ missionId: mixedRuntime.missionId });
+    expect(mixedDispatch.dispatched).toBe(2);
+    const mixedLaunchRouting = laneCommandMock.mock.calls
+      .map(([command]) => command as LaneCommand)
+      .filter((command) => command.verb === 'launch_session')
+      .map((command) => ({
+        runtime: getLane(command.laneId)?.runtime,
+        model: command.model,
+      }));
+    expect(mixedLaunchRouting).toEqual(expect.arrayContaining([{
+      runtime: 'codex',
+      model: MODEL_IDS.codexScoutDefault,
+    }, {
+      runtime: 'claude-code',
+      model: MODEL_IDS.claudeHaikuQaDefault,
+    }]));
+
+    laneCommandMock.mockClear();
+    const mixedCarrier = await createAndReadMixedRuntimePackets({ carrier: 'openrouter' });
+    expect(mixedCarrier.packets.map((packet) => ({
+      runtime: packet.runtime,
+      carrier: packet.claudeCodeCarrier,
+      assignedModel: packet.assignedModel,
+      selectedModel: packet.workerRouting?.selectedModel,
+      modelDisposition: packet.workerRouting?.modelDisposition,
+    }))).toEqual(expect.arrayContaining([{
+      runtime: 'codex',
+      carrier: null,
+      assignedModel: MODEL_IDS.codexScoutDefault,
+      selectedModel: MODEL_IDS.codexScoutDefault,
+      modelDisposition: 'requested',
+    }, {
+      runtime: 'claude-code',
+      carrier: 'openrouter',
+      assignedModel: null,
+      selectedModel: null,
+      modelDisposition: 'runtime-default',
+    }]));
+    expect(runtimeDispatchableMock).toHaveBeenCalledWith('codex', MODEL_IDS.codexScoutDefault, repoPath);
+    expect(runtimeDispatchableMock).toHaveBeenCalledWith('claude-code', null, repoPath);
+
+    const mixedCarrierDispatch = await dispatchMission({ missionId: mixedCarrier.missionId });
+    expect(mixedCarrierDispatch.dispatched).toBe(1);
+    const firstMixedCarrierLaunch = laneCommandMock.mock.calls
+      .map(([command]) => command as LaneCommand)
+      .find((command) => command.verb === 'launch_session');
+    expect(firstMixedCarrierLaunch?.model).toBe(MODEL_IDS.codexScoutDefault);
+    setLaneStatus(firstMixedCarrierLaunch!.laneId, 'completed', 'system', 'test-completed');
+    laneCommandMock.mockClear();
+    const deferredCarrierDispatch = await dispatchMission({ missionId: mixedCarrier.missionId });
+    expect(deferredCarrierDispatch.dispatched).toBe(1);
+    const claudeCarrierMissionLaunch = laneCommandMock.mock.calls
+      .map(([command]) => command as LaneCommand)
+      .find((command) => command.verb === 'launch_session');
+    expect(claudeCarrierMissionLaunch).toMatchObject({
+      claudeCodeCarrier: 'openrouter',
+      claudeCodeModel: undefined,
+    });
+    expect(claudeCarrierMissionLaunch?.model).not.toBe(MODEL_IDS.claudeHaikuQaDefault);
   });
 });
