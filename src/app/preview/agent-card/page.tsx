@@ -17,7 +17,7 @@
  * locked treatment into dock.tsx + chat-card.tsx + the shared entry view.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
 import { applyCanvasGlassSettings, CANVAS_GLASS_DEFAULTS } from '@/lib/canvas-mode/glass-settings';
@@ -43,6 +43,9 @@ const ZONES: Array<{ key: Edge; cursor: string; style: React.CSSProperties }> = 
 
 interface Geom { x: number; y: number; w: number; h: number; }
 
+const subscribeToStaticEnvironment = () => () => {};
+const readTauriEnvironment = () => '__TAURI_INTERNALS__' in window;
+
 function resizeGeom(edge: Edge, dx: number, dy: number, start: Geom): Geom {
   let { x, y, w, h } = start;
   if (edge.includes('e')) w = start.w + dx;
@@ -58,12 +61,11 @@ function resizeGeom(edge: Edge, dx: number, dy: number, start: Geom): Geom {
 
 export default function AgentCardBench() {
   const [tab, setTab] = useState<'orchestrator' | 'cortex'>('orchestrator');
-  const [inTauri, setInTauri] = useState(false);
+  const inTauri = useSyncExternalStore(subscribeToStaticEnvironment, readTauriEnvironment, () => false);
   const [working, setWorking] = useState(false);
 
   useEffect(() => {
     applyCanvasGlassSettings(CANVAS_GLASS_DEFAULTS);
-    setInTauri(typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window);
   }, []);
 
   return (

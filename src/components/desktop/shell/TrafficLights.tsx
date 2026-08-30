@@ -24,7 +24,7 @@
  * - window unfocused → all three flatten to a neutral grey
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import { isNonMacShell } from '@/lib/desktop/host-platform';
 
@@ -242,16 +242,12 @@ async function importWindow() {
  * mount is invisible behind the boot loader.
  */
 export function TrafficLightsOrSpacer({ yNudge = 0, leadInPx = 1 }: { yNudge?: number; leadInPx?: number }) {
-  const [mode, setMode] = useState<'spacer' | 'dom' | 'native'>('spacer');
-  useEffect(() => {
-    if (isNonMacShell()) {
-      setMode('native');
-      return;
-    }
-    if ((window as unknown as { __O8_HTML_TRAFFIC_LIGHTS__?: boolean }).__O8_HTML_TRAFFIC_LIGHTS__ === true) {
-      setMode('dom');
-    }
-  }, []);
+  const mode = useSyncExternalStore(() => () => {}, () => {
+    if (isNonMacShell()) return 'native';
+    return (window as unknown as { __O8_HTML_TRAFFIC_LIGHTS__?: boolean }).__O8_HTML_TRAFFIC_LIGHTS__ === true
+      ? 'dom'
+      : 'spacer';
+  }, () => 'spacer');
   if (mode === 'native') return null;
   if (mode === 'spacer') {
     return <div style={{ width: 'calc(64px * var(--zoom-inverse, 1))', flexShrink: 0 }} />;

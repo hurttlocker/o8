@@ -43,12 +43,13 @@ function focusMergeEvent(event: Extract<OrchestratorStatusEventData, { kind: 'me
 
 function useLaneDiffEvidence(event: OrchestratorStatusEventData): PacketDiffEvidence | null {
   const laneId = event.kind === 'merge' ? event.focus?.laneId?.trim() : '';
-  const [evidence, setEvidence] = useState<PacketDiffEvidence | null>(event.kind === 'merge' ? event.diff ?? null : null);
+  const [fetchedEvidence, setFetchedEvidence] = useState<{ laneId: string; value: PacketDiffEvidence } | null>(null);
+  const evidence = event.kind === 'merge'
+    ? event.diff ?? (fetchedEvidence && fetchedEvidence.laneId === laneId ? fetchedEvidence.value : null)
+    : null;
 
   useEffect(() => {
-    if (event.kind !== 'merge') return;
-    setEvidence(event.diff ?? null);
-    if (!laneId || event.diff) return;
+    if (event.kind !== 'merge' || !laneId || event.diff) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -58,10 +59,13 @@ function useLaneDiffEvidence(event: OrchestratorStatusEventData): PacketDiffEvid
         if (!payload.ok || !payload.diff || cancelled) return;
         const summary = summarizeLaneReviewDiff(payload.diff);
         if (!cancelled) {
-          setEvidence({
-            additions: summary.additions,
-            deletions: summary.deletions,
-            fileCount: summary.files.length,
+          setFetchedEvidence({
+            laneId,
+            value: {
+              additions: summary.additions,
+              deletions: summary.deletions,
+              fileCount: summary.files.length,
+            },
           });
         }
       } catch {

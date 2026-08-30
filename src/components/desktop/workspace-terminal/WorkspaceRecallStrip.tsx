@@ -106,15 +106,14 @@ function DirectivePill({ directive }: { directive: DirectiveStub }) {
 }
 
 export function WorkspaceRecallStrip({ repoPath }: WorkspaceRecallStripProps) {
-  const [directives, setDirectives] = useState<DirectiveStub[] | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
+  const requestKey = repoPath ? `${repoPath}:${refreshTick}` : null;
+  const [result, setResult] = useState<{ key: string; directives: DirectiveStub[] } | null>(null);
+  const directives = requestKey && result?.key === requestKey ? result.directives : null;
 
   // Fetch top-3 directives scoped to the active repo path
   useEffect(() => {
-    if (!repoPath) {
-      setDirectives(null);
-      return;
-    }
+    if (!repoPath || !requestKey) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -122,22 +121,22 @@ export function WorkspaceRecallStrip({ repoPath }: WorkspaceRecallStripProps) {
         const response = await fetch(url, { cache: 'no-store' });
         if (cancelled) return;
         if (!response.ok) {
-          setDirectives([]);
+          setResult({ key: requestKey, directives: [] });
           return;
         }
         const payload = (await response.json()) as {
           directives?: { id: string; title: string; scope: string }[];
         };
         if (cancelled) return;
-        setDirectives((payload.directives ?? []).slice(0, 3));
+        setResult({ key: requestKey, directives: (payload.directives ?? []).slice(0, 3) });
       } catch {
-        if (!cancelled) setDirectives([]);
+        if (!cancelled) setResult({ key: requestKey, directives: [] });
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [repoPath, refreshTick]);
+  }, [repoPath, requestKey]);
 
   // Debounced refresh on cortex-changes window event (directive writes after merges)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);

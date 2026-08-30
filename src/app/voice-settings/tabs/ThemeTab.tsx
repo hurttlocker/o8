@@ -6,12 +6,30 @@
  * accessibility surface). The glass tune is finalized in code. Dock matches the
  * pill to the glass or keeps the signature multicolor. Persisted to localStorage.
  */
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 import { ICONS } from '../tokens';
 import { SURFACE_PRESETS, type GlassControls, type VsSurface } from '../tokens';
 import { SectionCard, SectionTitle, SectionHint, Segmented, PageHeader } from '../primitives';
 
 const DOCK_THEME_KEY = 'o8:dock-theme';
+const DOCK_THEME_CHANGE_EVENT = 'o8:dock-theme-change';
+
+function readDockTheme(): 'symon' | 'glass' {
+  try {
+    return localStorage.getItem(DOCK_THEME_KEY) === 'glass' ? 'glass' : 'symon';
+  } catch {
+    return 'symon';
+  }
+}
+
+function subscribeDockTheme(onStoreChange: () => void): () => void {
+  window.addEventListener('storage', onStoreChange);
+  window.addEventListener(DOCK_THEME_CHANGE_EVENT, onStoreChange);
+  return () => {
+    window.removeEventListener('storage', onStoreChange);
+    window.removeEventListener(DOCK_THEME_CHANGE_EVENT, onStoreChange);
+  };
+}
 
 export default function ThemeTab({ controls, onChange }: { controls: GlassControls; onChange: (c: GlassControls) => void }) {
   const setSurface = (s: string) => {
@@ -22,14 +40,13 @@ export default function ThemeTab({ controls, onChange }: { controls: GlassContro
 
   // Dock appearance. Writing localStorage fires `storage` in the dock window
   // (same origin), so it re-themes live.
-  const [dock, setDock] = useState<'symon' | 'glass'>('symon');
-  useEffect(() => {
-    try { setDock(localStorage.getItem(DOCK_THEME_KEY) === 'glass' ? 'glass' : 'symon'); } catch { /* noop */ }
-  }, []);
+  const dock = useSyncExternalStore(subscribeDockTheme, readDockTheme, () => 'symon');
   const setDockTheme = (v: string) => {
     const next = v === 'glass' ? 'glass' : 'symon';
-    setDock(next);
-    try { localStorage.setItem(DOCK_THEME_KEY, next); } catch { /* noop */ }
+    try {
+      localStorage.setItem(DOCK_THEME_KEY, next);
+      window.dispatchEvent(new Event(DOCK_THEME_CHANGE_EVENT));
+    } catch { /* noop */ }
   };
 
   return (

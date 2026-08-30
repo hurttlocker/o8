@@ -18,18 +18,17 @@ export interface MergePreviewState {
 }
 
 const IDLE: MergePreviewState = { loading: false, wouldMerge: null, blockers: [], error: null };
+const LOADING: MergePreviewState = { loading: true, wouldMerge: null, blockers: [], error: null };
 
 export function useMergePreview(packetId: string | null, enabled: boolean): MergePreviewState {
-  const [state, setState] = useState<MergePreviewState>(IDLE);
+  const requestKey = enabled && packetId ? packetId : null;
+  const [result, setResult] = useState<{ key: string; state: MergePreviewState } | null>(null);
+  const state = requestKey === null ? IDLE : result?.key === requestKey ? result.state : LOADING;
 
   useEffect(() => {
-    if (!enabled || !packetId) {
-      setState(IDLE);
-      return;
-    }
+    if (!requestKey) return;
     let cancelled = false;
-    setState({ loading: true, wouldMerge: null, blockers: [], error: null });
-    fetch(`/api/orchestrator/merge-preview?packetId=${encodeURIComponent(packetId)}`)
+    fetch(`/api/orchestrator/merge-preview?packetId=${encodeURIComponent(requestKey)}`)
       .then(async (res) => {
         const data = (await res.json().catch(() => ({}))) as {
           wouldMerge?: boolean;
@@ -38,24 +37,27 @@ export function useMergePreview(packetId: string | null, enabled: boolean): Merg
         };
         if (cancelled) return;
         if (!res.ok || data.error) {
-          setState({ loading: false, wouldMerge: null, blockers: [], error: data.error || `Preview failed (${res.status})` });
+          setResult({ key: requestKey, state: { loading: false, wouldMerge: null, blockers: [], error: data.error || `Preview failed (${res.status})` } });
           return;
         }
-        setState({
-          loading: false,
-          wouldMerge: data.wouldMerge === true,
-          blockers: Array.isArray(data.blockers) ? data.blockers.map((b) => String(b)) : [],
-          error: null,
+        setResult({
+          key: requestKey,
+          state: {
+            loading: false,
+            wouldMerge: data.wouldMerge === true,
+            blockers: Array.isArray(data.blockers) ? data.blockers.map((b) => String(b)) : [],
+            error: null,
+          },
         });
       })
       .catch((err) => {
         if (cancelled) return;
-        setState({ loading: false, wouldMerge: null, blockers: [], error: err instanceof Error ? err.message : 'preview failed' });
+        setResult({ key: requestKey, state: { loading: false, wouldMerge: null, blockers: [], error: err instanceof Error ? err.message : 'preview failed' } });
       });
     return () => {
       cancelled = true;
     };
-  }, [packetId, enabled]);
+  }, [requestKey]);
 
   return state;
 }

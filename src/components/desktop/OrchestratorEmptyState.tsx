@@ -777,9 +777,7 @@ function ProjectChip({
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const searchId = useId();
 
-  useEffect(() => {
-    if (!open) setQuery('');
-  }, [open]);
+  const close = () => { setOpen(false); setQuery(''); };
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -794,12 +792,12 @@ function ProjectChip({
       <ChipShell
         icon={<IconoirFolder width={13} height={13} color="currentColor" strokeWidth={1.6} />}
         label={label}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => { if (open) close(); else setOpen(true); }}
         open={open}
         ariaLabel="Pick project"
         compact={compact}
       />
-      <ChipPopover open={open} onClose={() => setOpen(false)} anchorRef={wrapperRef}>
+      <ChipPopover open={open} onClose={close} anchorRef={wrapperRef}>
         <div
           style={{
             display: 'flex',
@@ -840,7 +838,7 @@ function ProjectChip({
               selected={target.localPath === selectedRepoPath}
               onClick={() => {
                 onSelectProject?.(target);
-                setOpen(false);
+                close();
               }}
             />
           ))}
@@ -893,7 +891,7 @@ function ProjectChip({
                 onClick={() => {
                   onAddProject?.('scratch');
                   setAddOpen(false);
-                  setOpen(false);
+                  close();
                 }}
               />
               <PopoverItem
@@ -902,7 +900,7 @@ function ProjectChip({
                 onClick={() => {
                   onAddProject?.('existing');
                   setAddOpen(false);
-                  setOpen(false);
+                  close();
                 }}
               />
             </div>
@@ -914,7 +912,7 @@ function ProjectChip({
           destructive
           onClick={() => {
             onWorkWithoutProject?.();
-            setOpen(false);
+            close();
           }}
         />
       </ChipPopover>

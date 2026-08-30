@@ -56,7 +56,7 @@ export default function HistoryTab() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const load = useCallback(async () => { setHistory(await dictationHistoryGet()); }, []);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void dictationHistoryGet().then(setHistory); }, []);
   useEffect(() => {
     const onFocus = () => { void load(); };
     window.addEventListener('focus', onFocus);

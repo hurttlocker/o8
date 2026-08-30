@@ -1,12 +1,15 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useTheme } from '@/lib/theme/context';
 import { buildPreviewSrcdoc, type HtmlStylePalette } from '@/lib/spec/html-style-presets';
 import { sanitizeAgentHtml } from '@/lib/render/sanitize-html';
 
 const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
+const subscribeToMountedState = () => () => {};
+const getMountedSnapshot = () => true;
+const getServerMountedSnapshot = () => false;
 
 function inline(text: string): ReactNode[] {
   const nodes: ReactNode[] = [];
@@ -220,8 +223,11 @@ function InlineSvg({ html }: { html: string }) {
   // old "SVG is safe to drop in directly" assumption was a same-origin XSS
   // (SECURITY_AUDIT_2026-07-02 §CRIT-2). Gate behind `mounted` so the server
   // render (empty) matches the first client render — no hydration mismatch.
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const mounted = useSyncExternalStore(
+    subscribeToMountedState,
+    getMountedSnapshot,
+    getServerMountedSnapshot,
+  );
   const safe = useMemo(() => (mounted ? sanitizeAgentHtml(html) : ''), [mounted, html]);
   return (
     <div style={{ marginTop: 10, marginBottom: 10 }} dangerouslySetInnerHTML={{ __html: safe }} />
@@ -234,8 +240,11 @@ function PassthroughIframe({ html }: { html: string }) {
   // (§CRIT-2). The sanitizer strips the <iframe> entirely; use a fenced ```html
   // block (FencedHtmlBlock — fixed sandbox + network-blocking CSP) for
   // intentional HTML preview.
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const mounted = useSyncExternalStore(
+    subscribeToMountedState,
+    getMountedSnapshot,
+    getServerMountedSnapshot,
+  );
   const safe = useMemo(() => (mounted ? sanitizeAgentHtml(html) : ''), [mounted, html]);
   if (!safe) return null;
   return (

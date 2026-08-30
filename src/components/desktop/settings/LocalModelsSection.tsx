@@ -38,6 +38,8 @@ interface LocalModelsSectionProps {
   onCommit: (field: keyof LocalModelsValues, value: string) => void;
 }
 
+const EMPTY_PROBE = { checking: false, running: false, models: [] as string[] };
+
 function sourceLabel(source: SettingSource): string {
   if (source === 'env') return 'env override';
   if (source === 'file') return 'saved';
@@ -222,17 +224,18 @@ export function LocalModelsSection({ values, sources, busyField, envDisabledReas
   const baseUrlEnv = sources.localInferenceBaseUrl === 'env';
   const embedEnv = sources.localEmbedModel === 'env';
   const chatEnv = sources.localChatModel === 'env';
-  const [probe, setProbe] = useState({ checking: false, running: false, models: [] as string[] });
+  const configuredBaseUrl = values.localInferenceBaseUrl.trim();
+  const [probeResult, setProbeResult] = useState<{ baseUrl: string; value: typeof EMPTY_PROBE } | null>(null);
+  const probe = !configuredBaseUrl
+    ? EMPTY_PROBE
+    : probeResult?.baseUrl === configuredBaseUrl
+      ? probeResult.value
+      : { ...(probeResult?.value ?? EMPTY_PROBE), checking: true };
 
   useEffect(() => {
-    const configured = Boolean(values.localInferenceBaseUrl.trim());
-    if (!configured) {
-      setProbe({ checking: false, running: false, models: [] });
-      return;
-    }
+    if (!configuredBaseUrl) return;
 
     let cancelled = false;
-    setProbe((current) => ({ ...current, checking: true }));
     fetch('/api/setup/local-inference/probe', { cache: 'no-store' })
       .then(async (response) => {
         const payload = await response.json().catch(() => ({}));
@@ -240,20 +243,19 @@ export function LocalModelsSection({ values, sources, busyField, envDisabledReas
         const models = Array.isArray(payload.models)
           ? payload.models.filter((item: unknown): item is string => typeof item === 'string')
           : [];
-        setProbe({
-          checking: false,
-          running: response.ok && payload.running === true,
-          models,
+        setProbeResult({
+          baseUrl: configuredBaseUrl,
+          value: { checking: false, running: response.ok && payload.running === true, models },
         });
       })
       .catch(() => {
-        if (!cancelled) setProbe({ checking: false, running: false, models: [] });
+        if (!cancelled) setProbeResult({ baseUrl: configuredBaseUrl, value: EMPTY_PROBE });
       });
 
     return () => {
       cancelled = true;
     };
-  }, [values.localInferenceBaseUrl]);
+  }, [configuredBaseUrl]);
 
   return (
     <section style={{ marginTop: 28 }}>

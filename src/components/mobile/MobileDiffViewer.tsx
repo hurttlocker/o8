@@ -198,25 +198,21 @@ export const MobileDiffViewer = memo(function MobileDiffViewer({
   subtitle,
 }: MobileDiffViewerProps) {
   const { colors } = useTheme();
-  const [payload, setPayload] = useState<MobileDiffPayload | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<{ source: MobileDiffSource; payload: MobileDiffPayload } | null>(null);
+  const activeResult = open && source && result?.source === source ? result : null;
+  const payload = activeResult?.payload ?? null;
+  const loading = Boolean(open && source && !activeResult);
+  const error = activeResult?.payload.error && !activeResult.payload.rawDiff
+    ? activeResult.payload.error
+    : null;
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (!open || !source) {
-      setPayload(null);
-      setError(null);
-      return;
-    }
+    if (!open || !source) return;
     let cancelled = false;
-    setLoading(true);
-    setError(null);
     void fetchMobileDiff(source).then((result) => {
       if (cancelled) return;
-      setPayload(result);
-      if (result.error && !result.rawDiff) setError(result.error);
-      setLoading(false);
+      setResult({ source, payload: result });
     });
     return () => { cancelled = true; };
   }, [open, source]);

@@ -254,7 +254,9 @@ function WorkspaceTerminalPanelsBase({
  *  A long fallback grace covers the rare workspace that truly never spawns a
  *  tab, so we don't sit on the loader forever. */
 function EmptyWorkspaceState({ hasEverHadTabs, restoreSettled }: { hasEverHadTabs: boolean; restoreSettled: boolean }) {
-  const [graceExpired, setGraceExpired] = useState(false);
+  const graceKey = `${hasEverHadTabs}:${restoreSettled}`;
+  const [grace, setGrace] = useState<{ key: string; expired: boolean }>({ key: graceKey, expired: false });
+  const graceExpired = grace.key === graceKey && grace.expired;
   useEffect(() => {
     if (hasEverHadTabs && restoreSettled) return;
     // While a restore is unsettled, a zero-tab workspace is a boot/re-restore
@@ -262,10 +264,12 @@ function EmptyWorkspaceState({ hasEverHadTabs, restoreSettled }: { hasEverHadTab
     // clobbered by the landing restore (GQXEZD, wide on Rosetta). Hold the
     // loader with a long fail-open grace so a restore that never settles
     // still surfaces the CTA eventually instead of a forever-spinner.
-    setGraceExpired(false);
-    const timer = window.setTimeout(() => setGraceExpired(true), restoreSettled ? 4000 : 15000);
+    const timer = window.setTimeout(
+      () => setGrace({ key: graceKey, expired: true }),
+      restoreSettled ? 4000 : 15000,
+    );
     return () => window.clearTimeout(timer);
-  }, [hasEverHadTabs, restoreSettled]);
+  }, [graceKey, hasEverHadTabs, restoreSettled]);
   return ((hasEverHadTabs && restoreSettled) || graceExpired) ? <EmptyWorkspaceCTA /> : <WorkspaceBootLoaderClaim />;
 }
 

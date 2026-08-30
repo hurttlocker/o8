@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { BranchPickerPopover } from '@/components/desktop/thoughts/BranchPickerPopover';
 import { orchestratorRuntimeTone, packetRuntimeModelDisplayLabel } from '@/lib/orchestrator/display';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
@@ -32,7 +32,12 @@ interface RuntimeRecommendationPayload {
   score: number;
   evidence: Partial<Record<OrchestratorRuntime, RuntimeEvidenceRow>>;
 }
-const recommendationCache = new Map<string, { value: RuntimeRecommendationPayload | null; expiresAt: number }>();
+interface RecommendationCacheEntry {
+  value: RuntimeRecommendationPayload | null;
+  expiresAt: number;
+}
+
+const recommendationCache = new Map<string, RecommendationCacheEntry>();
 // #861 — TTL dropped from 30s → 10s so the chip reflects fresh outcomes shortly
 // after a packet completes. The route is cheap aggregation and the cache is
 // per-repoPath, so the extra fetch cost is negligible. Cross-card invalidation
@@ -47,6 +52,27 @@ const RECOMMENDATION_TTL_MS = 10_000;
 // the chip never settles. Sharing a single Promise per repoPath fixes that
 // without touching the per-mount cleanup contract.
 const inFlightByRepo = new Map<string, Promise<RuntimeRecommendationPayload | null>>();
+const getServerRecommendationSnapshot = () => null;
+
+function getRecommendationSnapshot(repoPath: string | null | undefined): RecommendationCacheEntry | null {
+  if (!repoPath) return null;
+  const cached = recommendationCache.get(repoPath);
+  return cached && cached.expiresAt > Date.now() ? cached : null;
+}
+
+function subscribeToRecommendationCache(
+  repoPath: string | null | undefined,
+  onStoreChange: () => void,
+): () => void {
+  if (!repoPath) return () => {};
+  const cached = recommendationCache.get(repoPath);
+  if (!cached) return () => {};
+  const timer = window.setTimeout(
+    onStoreChange,
+    Math.max(0, cached.expiresAt - Date.now()) + 1,
+  );
+  return () => window.clearTimeout(timer);
+}
 
 export function dependencyMaterializationLabel(mode: 'native' | 'image' | null | undefined): string | null {
   if (mode === 'image') return 'Shared APFS image';
@@ -81,33 +107,38 @@ function fetchRecommendationFor(repoPath: string): Promise<RuntimeRecommendation
 }
 
 function useRuntimeRecommendation(repoPath: string | null | undefined): RuntimeRecommendationPayload | null {
-  const [payload, setPayload] = useState<RuntimeRecommendationPayload | null>(() => {
-    if (!repoPath) return null;
-    const cached = recommendationCache.get(repoPath);
-    return cached && cached.expiresAt > Date.now() ? cached.value : null;
-  });
+  const [result, setResult] = useState<{ repoPath: string; value: RuntimeRecommendationPayload | null } | null>(null);
+  const cacheExpiresAt = repoPath ? recommendationCache.get(repoPath)?.expiresAt ?? null : null;
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => {
+      // A new expiry must replace the prior subscription with a fresh timer.
+      void cacheExpiresAt;
+      return subscribeToRecommendationCache(repoPath, onStoreChange);
+    },
+    [cacheExpiresAt, repoPath],
+  );
+  const getSnapshot = useCallback(() => getRecommendationSnapshot(repoPath), [repoPath]);
+  const cachedEntry = useSyncExternalStore(subscribe, getSnapshot, getServerRecommendationSnapshot);
+  const payload = !repoPath
+    ? null
+    : cachedEntry !== null
+      ? cachedEntry.value
+      : result?.repoPath === repoPath ? result.value : null;
   useEffect(() => {
-    if (!repoPath) { setPayload(null); return; }
-    const cached = recommendationCache.get(repoPath);
-    if (cached && cached.expiresAt > Date.now()) {
-      setPayload(cached.value);
-      return;
-    }
+    if (!repoPath) return;
+    if (cachedEntry) return;
     let cancelled = false;
     fetchRecommendationFor(repoPath).then((value) => {
-      if (!cancelled) setPayload(value);
+      if (!cancelled) setResult({ repoPath, value });
     });
     return () => { cancelled = true; };
-  }, [repoPath]);
+  }, [cachedEntry, repoPath]);
   return payload;
 }
 function useExperimentalOpencodeFlag(override?: boolean): boolean {
-  const [flag, setFlag] = useState<boolean>(
-    override !== undefined ? override : (cachedExperimentalOpencode ?? false),
-  );
+  const [flag, setFlag] = useState<boolean>(cachedExperimentalOpencode ?? false);
   useEffect(() => {
-    if (override !== undefined) { setFlag(override); return; }
-    if (cachedExperimentalOpencode !== null) { setFlag(cachedExperimentalOpencode); return; }
+    if (override !== undefined || cachedExperimentalOpencode !== null) return;
     let cancelled = false;
     const controller = new AbortController();
     void fetchThoughtsOperatorDefaults(controller.signal).then((defaults) => {
@@ -117,16 +148,13 @@ function useExperimentalOpencodeFlag(override?: boolean): boolean {
     });
     return () => { cancelled = true; controller.abort(); };
   }, [override]);
-  return flag;
+  return override ?? cachedExperimentalOpencode ?? flag;
 }
 
 function useExperimentalGeminiFlag(override?: boolean): boolean {
-  const [flag, setFlag] = useState<boolean>(
-    override !== undefined ? override : (cachedExperimentalGemini ?? false),
-  );
+  const [flag, setFlag] = useState<boolean>(cachedExperimentalGemini ?? false);
   useEffect(() => {
-    if (override !== undefined) { setFlag(override); return; }
-    if (cachedExperimentalGemini !== null) { setFlag(cachedExperimentalGemini); return; }
+    if (override !== undefined || cachedExperimentalGemini !== null) return;
     let cancelled = false;
     const controller = new AbortController();
     void fetchThoughtsOperatorDefaults(controller.signal).then((defaults) => {
@@ -136,7 +164,7 @@ function useExperimentalGeminiFlag(override?: boolean): boolean {
     });
     return () => { cancelled = true; controller.abort(); };
   }, [override]);
-  return flag;
+  return override ?? cachedExperimentalGemini ?? flag;
 }
 
 interface PacketMetaRowsProps {

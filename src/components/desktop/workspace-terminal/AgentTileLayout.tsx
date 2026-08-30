@@ -98,27 +98,22 @@ export function AgentTileLayout({
 }: AgentTileLayoutProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sessionsHash = useMemo(() => hashSessions(sessions), [sessions]);
-  const [storedWidths, setStoredWidths] = useState<number[]>(() => {
+  const [storedWidths, setStoredWidths] = useState<{ hash: string; widths: number[] }>(() => {
     const persisted = readWidthsForHash(sessionsHash, sessions.length);
-    return persisted ?? evenWidths(sessions.length);
+    return { hash: sessionsHash, widths: persisted ?? evenWidths(sessions.length) };
   });
-  const lastHashRef = useRef<string>(sessionsHash);
   const [focusedSession, setFocusedSession] = useState<string | null>(sessions[0] ?? null);
   const [hoveredDivider, setHoveredDivider] = useState<number | null>(null);
   const [draggingDivider, setDraggingDivider] = useState<number | null>(null);
 
-  // When the session set changes (agent spawn/die), rehydrate widths for the
-  // new hash from localStorage if available, else fall back to even widths.
-  useEffect(() => {
-    if (lastHashRef.current === sessionsHash) return;
-    lastHashRef.current = sessionsHash;
-    const persisted = readWidthsForHash(sessionsHash, sessions.length);
-    setStoredWidths(persisted ?? evenWidths(sessions.length));
-  }, [sessionsHash, sessions.length]);
-
   const widths = useMemo(
-    () => storedWidths.length === sessions.length ? storedWidths : evenWidths(sessions.length),
-    [sessions.length, storedWidths],
+    () => {
+      if (storedWidths.hash === sessionsHash && storedWidths.widths.length === sessions.length) {
+        return storedWidths.widths;
+      }
+      return readWidthsForHash(sessionsHash, sessions.length) ?? evenWidths(sessions.length);
+    },
+    [sessions.length, sessionsHash, storedWidths],
   );
   const activeFocusedSession = useMemo(
     () => focusedSession && sessions.includes(focusedSession) ? focusedSession : (sessions[0] ?? null),
@@ -191,7 +186,7 @@ export function AgentTileLayout({
       nextWidths[dividerIndex] = Number(nextLeft.toFixed(2));
       nextWidths[dividerIndex + 1] = Number(nextRight.toFixed(2));
       latestWidths = nextWidths;
-      setStoredWidths(nextWidths);
+      setStoredWidths({ hash: sessionsHash, widths: nextWidths });
     };
 
     const handleUp = () => {

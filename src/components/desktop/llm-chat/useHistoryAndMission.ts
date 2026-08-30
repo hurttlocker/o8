@@ -33,8 +33,12 @@ export function useHistoryAndMission({
   const [historySearch, setHistorySearch] = useState('');
   const [missionDismissed, setMissionDismissed] = useState(false);
   const [missionDismissalResolved, setMissionDismissalResolved] = useState(false);
-  const [missionContextResolved, setMissionContextResolved] = useState(false);
-  const [missionRepoSummary, setMissionRepoSummary] = useState<MissionRepoSummary | null>(null);
+  const missionContextKey = isEmpty
+    ? JSON.stringify([preferredRepo?.localPath ?? '', preferredRepo?.name ?? '', preferredRepo?.remoteUrl ?? ''])
+    : null;
+  const [missionContext, setMissionContext] = useState<{ key: string; summary: MissionRepoSummary | null } | null>(null);
+  const missionContextResolved = missionContextKey !== null && missionContext?.key === missionContextKey;
+  const missionRepoSummary = missionContextResolved ? missionContext.summary : null;
 
   const loadHistory = useCallback(async (search?: string) => {
     setHistoryLoading(true);
@@ -80,14 +84,9 @@ export function useHistoryAndMission({
   }, []);
 
   useEffect(() => {
+    if (missionContextKey === null) return;
     let active = true;
-    if (!isEmpty) {
-      setMissionContextResolved(false);
-      setMissionRepoSummary(null);
-      return () => { active = false; };
-    }
     void (async () => {
-      setMissionContextResolved(false);
       const [historyResult, reposResult] = await Promise.allSettled([fetch('/api/v2/chat-history/list'), fetch('/api/panel/repos')]);
       let nextHistoryItems: HistoryConversationItem[] = [];
       if (historyResult.status === 'fulfilled' && historyResult.value.ok) {
@@ -129,11 +128,10 @@ export function useHistoryAndMission({
         nextRepoSummary = { ...nextRepoSummary, issueCount, prCount };
       }
       if (!active) return;
-      setMissionRepoSummary(nextRepoSummary);
-      setMissionContextResolved(true);
+      setMissionContext({ key: missionContextKey, summary: nextRepoSummary });
     })();
     return () => { active = false; };
-  }, [isEmpty, preferredRepo?.localPath, preferredRepo?.name, preferredRepo?.remoteUrl]);
+  }, [missionContextKey, preferredRepo?.localPath, preferredRepo?.name, preferredRepo?.remoteUrl]);
 
   const groupedHistory = (() => {
     const groups = new Map<string, HistoryConversationItem[]>();

@@ -21,7 +21,7 @@
  * obeying the inline-styles-only rule (no CSS classes).
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { X } from '../lucide-shims';
@@ -29,6 +29,9 @@ import type { DictationSnapshot, DictationState } from './types';
 
 const UI_FONT = 'var(--font-sans-system)';
 const MONO_STACK = "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace";
+const subscribeToMountedState = () => () => {};
+const getMountedSnapshot = () => true;
+const getServerMountedSnapshot = () => false;
 
 // ── Symon brand gradient (cyan → periwinkle → pink → gold) ──
 // Verbatim from SymonPillWaveform.svelte / SquiggleLoader.svelte.
@@ -654,8 +657,11 @@ export function DictationPill({ snapshot, onCancel, anchorRef, position }: Dicta
   // nothing → hydration mismatch. A mounted flag is false on the server AND
   // the first client render, then flips post-mount. The pill is idle/invisible
   // until a mic click (long after mount), so the one-tick defer is invisible.
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => { setMounted(true); }, []);
+  const mounted = useSyncExternalStore(
+    subscribeToMountedState,
+    getMountedSnapshot,
+    getServerMountedSnapshot,
+  );
 
   // Anchor: above the active composer, else bottom-center (Symon docks the
   // pill at bottom-center of its own window).

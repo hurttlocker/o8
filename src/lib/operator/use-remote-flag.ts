@@ -70,9 +70,7 @@ export function useRetryingRemoteFlag(
     };
 
     // Honor a cached value on mount; otherwise fetch (with retry).
-    if (cache.value !== null) {
-      setFlag(cache.value);
-    } else {
+    if (cache.value === null) {
       run();
     }
 
@@ -93,5 +91,5 @@ export function useRetryingRemoteFlag(
       window.removeEventListener('o8:entitlement-refresh', onRefresh);
     };
   }, [fetchFlag, cache]);
-  return flag;
+  return cache.value ?? flag;
 }

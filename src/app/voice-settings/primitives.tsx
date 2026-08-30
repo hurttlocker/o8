@@ -5,7 +5,7 @@
  * inline-style helpers, tuned to o8's hurttlocker spec: var(--font-sans-system),
  * weight 300 on chrome (never 600+), Iconoir icons. Every page stacks these.
  */
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import { useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import {
   ACCENT, ACCENT_GLOW, ACCENT_LIGHT, GLASS_BG, GLASS_BG_HOVER, GLASS_BORDER,
   GLASS_BORDER_SUBTLE, OK_GREEN, SECTION_BG, SECTION_BORDER, SECTION_SHADOW, SF,
@@ -28,14 +28,13 @@ const ORB_KEYFRAMES = `
 `;
 
 export function BrandGlyph({ size = 36 }: { size?: number }) {
-  const [reduce, setReduce] = useState(false);
-  useEffect(() => {
+  const reduce = useSyncExternalStore((onStoreChange) => {
+    if (typeof window.matchMedia !== 'function') return () => {};
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
-    setReduce(mq.matches);
-    const on = () => setReduce(mq.matches);
+    const on = () => onStoreChange();
     mq.addEventListener?.('change', on);
     return () => mq.removeEventListener?.('change', on);
-  }, []);
+  }, () => typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches, () => false);
   const anim = (a: string): string | undefined => (reduce ? undefined : a);
 
   return (

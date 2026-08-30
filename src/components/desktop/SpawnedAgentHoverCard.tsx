@@ -102,7 +102,17 @@ export function SpawnedAgentHoverCard({
   onMouseLeave,
 }: SpawnedAgentHoverCardProps) {
   const [now, setNow] = useState(() => Date.now());
-  const [transcript, setTranscript] = useState<HoverTranscript>({ status: 'loading', lastMessage: null, lastActivity: null });
+  const query = row.packetId
+    ? `packetId=${encodeURIComponent(row.packetId)}`
+    : row.sessionKey
+      ? `sessionKey=${encodeURIComponent(row.sessionKey)}`
+      : null;
+  const [transcriptResult, setTranscriptResult] = useState<{ query: string; value: HoverTranscript } | null>(null);
+  const transcript = !query
+    ? { status: 'unavailable', lastMessage: null, lastActivity: null } satisfies HoverTranscript
+    : transcriptResult?.query === query
+      ? transcriptResult.value
+      : { status: 'loading', lastMessage: null, lastActivity: null } satisfies HoverTranscript;
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 1000);
@@ -113,16 +123,7 @@ export function SpawnedAgentHoverCard({
     // One tail fetch per hovered row — a hover is transient, so no poll. The
     // sessionKey fallback matters for MCP-dispatched lanes whose packetId the
     // client projection can't resolve (#1389).
-    const query = row.packetId
-      ? `packetId=${encodeURIComponent(row.packetId)}`
-      : row.sessionKey
-        ? `sessionKey=${encodeURIComponent(row.sessionKey)}`
-        : null;
-    if (!query) {
-      setTranscript({ status: 'unavailable', lastMessage: null, lastActivity: null });
-      return;
-    }
-    setTranscript({ status: 'loading', lastMessage: null, lastActivity: null });
+    if (!query) return;
     const controller = new AbortController();
     (async () => {
       try {
@@ -135,18 +136,18 @@ export function SpawnedAgentHoverCard({
           : null;
         if (controller.signal.aborted) return;
         if (!payload || !Array.isArray(payload.events)) {
-          setTranscript({ status: 'unavailable', lastMessage: null, lastActivity: null });
+          setTranscriptResult({ query, value: { status: 'unavailable', lastMessage: null, lastActivity: null } });
           return;
         }
-        setTranscript({ status: 'loaded', ...summarizeTranscriptTail(payload.events) });
+        setTranscriptResult({ query, value: { status: 'loaded', ...summarizeTranscriptTail(payload.events) } });
       } catch {
         if (!controller.signal.aborted) {
-          setTranscript({ status: 'unavailable', lastMessage: null, lastActivity: null });
+          setTranscriptResult({ query, value: { status: 'unavailable', lastMessage: null, lastActivity: null } });
         }
       }
     })();
     return () => controller.abort();
-  }, [row.packetId, row.sessionKey]);
+  }, [query]);
 
   if (!anchorRect || typeof document === 'undefined') return null;
 

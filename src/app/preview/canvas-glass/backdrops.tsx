@@ -13,7 +13,7 @@
  * full-window levers; the library pauses when the document hides.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 import {
   GrainGradient,
   MeshGradient,
@@ -24,6 +24,20 @@ import {
 const FILL = { position: 'absolute' as const, inset: 0, width: '100%', height: '100%' };
 // Tame: slow, full-bleed, no Retina oversampling, pixel-capped.
 const TAME = { speed: 0.12, fit: 'cover' as const, minPixelRatio: 1, maxPixelCount: 1280 * 720, style: FILL };
+const subscribeToStaticEnvironment = () => () => {};
+const getServerWebgl2Snapshot = () => false;
+let cachedWebgl2Support: boolean | undefined;
+
+function getWebgl2Snapshot(): boolean {
+  if (cachedWebgl2Support === undefined) {
+    try {
+      cachedWebgl2Support = Boolean(document.createElement('canvas').getContext('webgl2'));
+    } catch {
+      cachedWebgl2Support = false;
+    }
+  }
+  return cachedWebgl2Support;
+}
 
 /**
  * The Anthropic dot-trail layer — tiny dots lighting along the same 26px
@@ -392,14 +406,11 @@ function OrbitPulse() {
 export function CanvasBackdropLayer({ kind, tone }: { kind: string; tone: 'dark' | 'light' }) {
   // WebGL2 probe — the shader library throws without it. Trails is 2D
   // canvas and exempt.
-  const [webgl, setWebgl] = useState(false);
-  useEffect(() => {
-    try {
-      setWebgl(Boolean(document.createElement('canvas').getContext('webgl2')));
-    } catch {
-      setWebgl(false);
-    }
-  }, []);
+  const webgl = useSyncExternalStore(
+    subscribeToStaticEnvironment,
+    getWebgl2Snapshot,
+    getServerWebgl2Snapshot,
+  );
 
   if (kind === 'none') return null;
 

@@ -51,8 +51,13 @@ export default function SettingsTab({ prefs, setPref }: TabProps) {
 
   useEffect(() => {
     void sttListInputDevices().then(setDevices);
-    void loadPerms();
-  }, [loadPerms]);
+    void Promise.all([
+      accessibilityPermissionGranted(), inputMonitoringGranted(), fnKeyUsageType(),
+      micPermissionGranted(), screenCaptureGranted(),
+    ]).then(([a, i, f, m, s]) => {
+      setAcc(a); setInput(i); setFn(f); setMic(m); setScreen(s);
+    });
+  }, []);
 
   useEffect(() => {
     const onFocus = () => { void loadPerms(); };

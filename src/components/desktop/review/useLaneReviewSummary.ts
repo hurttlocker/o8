@@ -39,11 +39,19 @@ export interface LaneReviewSummaryState {
 }
 
 export function useLaneReviewSummary(laneId?: string | null): LaneReviewSummaryState {
-  const [title, setTitle] = useState<string | null>(null);
-  const [summary, setSummary] = useState<string | null>(null);
-  const [packetId, setPacketId] = useState<string | null>(null);
-  const [laneStatus, setLaneStatus] = useState<string | null>(null);
-  const [loading, setLoading] = useState<boolean>(() => Boolean(laneId));
+  const [result, setResult] = useState<{
+    laneId: string;
+    title: string | null;
+    summary: string | null;
+    packetId: string | null;
+    laneStatus: string | null;
+  } | null>(null);
+  const current = laneId && result?.laneId === laneId ? result : null;
+  const title = current?.title ?? null;
+  const summary = current?.summary ?? null;
+  const packetId = current?.packetId ?? null;
+  const laneStatus = current?.laneStatus ?? null;
+  const loading = Boolean(laneId && !current);
 
   // Cheap status re-read for the merge action's post-approve poll — returns
   // the fresh status so callers can await it without racing setState.
@@ -53,7 +61,13 @@ export function useLaneReviewSummary(laneId?: string | null): LaneReviewSummaryS
       const res = await fetch(`/api/lanes/${encodeURIComponent(laneId)}`, { cache: 'no-store' });
       const data = await res.json().catch(() => null) as LaneRecordResponse | null;
       const status = data?.lane?.status ?? null;
-      setLaneStatus(status);
+      setResult((previous) => ({
+        laneId,
+        title: previous?.laneId === laneId ? previous.title : null,
+        summary: previous?.laneId === laneId ? previous.summary : null,
+        packetId: previous?.laneId === laneId ? previous.packetId : null,
+        laneStatus: status,
+      }));
       return status;
     } catch {
       return null;
@@ -61,17 +75,8 @@ export function useLaneReviewSummary(laneId?: string | null): LaneReviewSummaryS
   }, [laneId]);
 
   useEffect(() => {
-    if (!laneId) {
-      setTitle(null);
-      setSummary(null);
-      setPacketId(null);
-      setLaneStatus(null);
-      setLoading(false);
-      return;
-    }
+    if (!laneId) return;
     let cancelled = false;
-    setLoading(true);
-    setSummary(null);
     (async () => {
       let nextTitle: string | null = null;
       let nextSummary: string | null = null;
@@ -104,11 +109,7 @@ export function useLaneReviewSummary(laneId?: string | null): LaneReviewSummaryS
         // best-effort — header degrades to the file summary alone
       }
       if (!cancelled) {
-        setTitle(nextTitle);
-        setSummary(nextSummary);
-        setPacketId(nextPacketId);
-        setLaneStatus(nextStatus);
-        setLoading(false);
+        setResult({ laneId, title: nextTitle, summary: nextSummary, packetId: nextPacketId, laneStatus: nextStatus });
       }
     })();
     return () => { cancelled = true; };

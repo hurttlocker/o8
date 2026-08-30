@@ -10,7 +10,7 @@
  * pointerdown outside the popover.
  */
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { TerminalStatusEvidenceDisclosure } from '@/components/desktop/TerminalStatusEvidenceRows';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
@@ -91,24 +91,17 @@ function EmptyValue() {
 export function PacketDetailsPopover({ packet, anchorRect, onClose }: PacketDetailsPopoverProps) {
   const orchestratorData = useOrchestratorData();
   const popoverRef = useRef<HTMLDivElement | null>(null);
-  const [position, setPosition] = useState<PopoverPosition | null>(null);
-  const [portalHost, setPortalHost] = useState<HTMLElement | null>(null);
-
-  useEffect(() => {
-    if (typeof document !== 'undefined') {
-      setPortalHost(document.body);
-    }
-  }, []);
-
-  useLayoutEffect(() => {
-    if (!anchorRect) return;
-    setPosition(computePosition(anchorRect));
-  }, [anchorRect]);
+  const [viewportRevision, setViewportRevision] = useState(0);
+  const portalHost = useSyncExternalStore(() => () => {}, () => document.body, () => null);
+  const position = (() => {
+    void viewportRevision;
+    return anchorRect ? computePosition(anchorRect) : null;
+  })();
 
   useEffect(() => {
     if (!anchorRect) return;
     function handleResize() {
-      if (anchorRect) setPosition(computePosition(anchorRect));
+      setViewportRevision((current) => current + 1);
     }
     window.addEventListener('resize', handleResize);
     window.addEventListener('scroll', handleResize, true);

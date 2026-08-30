@@ -30,7 +30,7 @@ async function fetchModel(signal?: AbortSignal): Promise<string> {
 export function useOrchestratorModel(): string {
   const [model, setModel] = useState<string>(cached ?? FALLBACK_MODEL);
   useEffect(() => {
-    if (cached !== null) { setModel(cached); return; }
+    if (cached !== null) return;
     let cancelled = false;
     const controller = new AbortController();
     void fetchModel(controller.signal).then((value) => {
@@ -40,5 +40,5 @@ export function useOrchestratorModel(): string {
     });
     return () => { cancelled = true; controller.abort(); };
   }, []);
-  return model;
+  return cached ?? model;
 }

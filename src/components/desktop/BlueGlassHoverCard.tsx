@@ -1,9 +1,7 @@
 'use client';
 
 import { createPortal } from 'react-dom';
-import { useState, useEffect } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import { isTauri } from '@/lib/tauri/bridge';
 
 function resolveFloatingPosition(anchorRect: DOMRect, width: number) {
   const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1440;
@@ -49,9 +47,6 @@ export function BlueGlassHoverCard({
   onMouseEnter?: () => void;
   onMouseLeave?: () => void;
 }) {
-  const [, setInTauri] = useState(false);
-  useEffect(() => { setInTauri(isTauri()); }, []);
-
   const content = (
     <div
       onMouseEnter={onMouseEnter}

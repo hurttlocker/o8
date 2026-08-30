@@ -18,7 +18,7 @@
  * share it. Keeps the orchestrator UX isolated.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { filterQuickActions, type QuickAction } from '@/lib/orchestrator/quick-actions';
 
@@ -29,18 +29,23 @@ interface QuickActionPaletteProps {
 }
 
 const FONT_STACK = 'var(--font-sans-system)';
+const subscribeToMountedState = () => () => {};
+const getMountedSnapshot = () => true;
+const getServerMountedSnapshot = () => false;
 
 export function QuickActionPalette({ open, onClose, onPick }: QuickActionPaletteProps) {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(
+    subscribeToMountedState,
+    getMountedSnapshot,
+    getServerMountedSnapshot,
+  );
   // Entrance fade — 120ms opacity only, matching the global CommandPalette
   // (Q ruling 2026-07-28: quick fade on both palettes, no scale, no travel).
   const [entered, setEntered] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => setMounted(true), []);
 
   useEffect(() => {
     if (!open) return;

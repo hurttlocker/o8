@@ -19,6 +19,7 @@ const config = [
       'out/**',
       'build/**',
       'dist/**',
+      'cli/dist/**',
       'coverage/**',
       'electron/**',
       'src-tauri/target/**',
