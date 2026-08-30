@@ -275,6 +275,7 @@ export function createLane(opts: {
   sessionKey?: string;
   worktreePath?: string;
   actor?: LaneEventActor;
+  baseCommit?: string;
 }): Lane {
   const db = getSqlite();
   const id = generateLaneId();
@@ -300,7 +301,6 @@ export function createLane(opts: {
     lastEventAt: null,
     lastEventLabel: null,
   };
-
   db.transaction(() => {
     getLaneDb().insert(lanes).values(lane).run();
     appendEvent(id, 'open_lane', opts.actor ?? 'system', {
@@ -308,7 +308,7 @@ export function createLane(opts: {
       repoPath: opts.repoPath,
       branch: opts.branch,
       baseBranch: lane.baseBranch,
-      baseCommit: resolveLaneCreationBaseCommit(lane),
+      baseCommit: resolveLaneCreationBaseCommit({ ...lane, baseCommit: opts.baseCommit }), baseCommitPinned: opts.baseCommit !== undefined,
       runtime: opts.runtime,
       packetId: opts.packetId ?? null,
       sessionKey: opts.sessionKey ?? null,

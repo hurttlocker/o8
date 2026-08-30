@@ -147,11 +147,19 @@ async function dispatchUnlocked(
         return { ok: true, laneId: updatedExisting.id, note: 'Lane already exists for this repo and branch.', lane: updatedExisting };
       }
 
+      const baseBranch = command.baseBranch?.trim() || 'main';
+      const baseCommit = command.packetId
+        ? await import('@/lib/worktree').then(({ getWorktreeManager }) => (
+          getWorktreeManager(command.repoPath).resolveCreationBaseCommit(baseBranch, command.branch)
+        ))
+        : undefined;
+
       const lane = createLane({
         repoPath: command.repoPath,
         projectId: command.projectId,
         branch: command.branch,
-        baseBranch: command.baseBranch,
+        baseBranch,
+        baseCommit,
         runtime: workerRouting.selectedRuntime,
         label: command.label,
         packetId: command.packetId,

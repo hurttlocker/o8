@@ -364,6 +364,11 @@ export class WorktreeManager {
     const baseTaskId = deriveWorktreeId(opts);
     let taskId = baseTaskId;
     const baseBranch = opts.baseBranch ?? await this.getCurrentBranch();
+    const creationBaseCommit = opts.laneId
+      ? await import('@/lib/lane/creation-base').then(({ readPinnedLaneCreationBaseCommit }) => (
+        readPinnedLaneCreationBaseCommit(opts.laneId!)
+      ))
+      : null;
     const now = Date.now();
 
     // Avoid ID collisions — append suffix if already exists in metadata,
@@ -494,6 +499,7 @@ export class WorktreeManager {
         taskId,
         branchName,
         baseBranch,
+        creationBaseCommit,
         worktreePath,
         now,
         baseExecutionIdentity,
@@ -538,7 +544,7 @@ export class WorktreeManager {
         'worktree', 'add',
         taskId,
         '-b', branchName,
-        baseBranch,
+        creationBaseCommit ?? baseBranch,
       ], { windowsHide: true, cwd: this.worktreeBase, timeout: 30_000 })
     ));
     await assertManagedWorktreeCreatedBoundary(
@@ -549,10 +555,8 @@ export class WorktreeManager {
     );
     await this.bindCreatedMaterializationIdentity(taskId, createdExecutionIdentity);
 
-    // Rebase onto origin/<baseBranch> before handing the worktree to an agent.
-    // The worktree was branched from local <baseBranch>, which may be behind
-    // origin after parallel merges. Without this step, the agent's diff against
-    // origin/<baseBranch> would show reverts of already-merged upstream work.
+    // Packet lanes with a pinned creation receipt were cut from the exact
+    // fetched base above. Other callers retain the remote-first rebase path.
     // On conflict we abort + tear down the worktree and throw a typed error so
     // the caller can surface it to the operator instead of spawning codex into
     // a broken tree.
@@ -560,7 +564,9 @@ export class WorktreeManager {
       if (pinnedLaneBranch) {
         await this.assertCreatedWorktreeBranch(worktreePath, pinnedLaneBranch);
       }
-      await this.rebaseOntoBase(worktreePath, baseBranch, branchName);
+      if (!creationBaseCommit) {
+        await this.rebaseOntoBase(worktreePath, baseBranch, branchName);
+      }
 
     const info: WorktreeInfo = {
       id: taskId,
@@ -696,6 +702,7 @@ export class WorktreeManager {
     taskId: string;
     branchName: string;
     baseBranch: string;
+    creationBaseCommit: string | null;
     worktreePath: string;
     now: number;
     baseExecutionIdentity: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>>;
@@ -705,7 +712,7 @@ export class WorktreeManager {
     creationOwner: NonNullable<WorktreeMetaEntry['creationOwner']>;
   }): Promise<WorktreeInfo> {
     const {
-      opts, taskId, branchName, baseBranch, worktreePath, now, baseExecutionIdentity,
+      opts, taskId, branchName, baseBranch, creationBaseCommit, worktreePath, now, baseExecutionIdentity,
       admittedVolumeId, admittedRootIdentity, baseIdentity,
       creationOwner,
     } = params;
@@ -757,7 +764,7 @@ export class WorktreeManager {
         });
       }
 
-      await execFileAsync('git', ['checkout', '-B', branchName, baseBranch], {
+      await execFileAsync('git', ['checkout', '-B', branchName, creationBaseCommit ?? baseBranch], {
         windowsHide: true,
         cwd: worktreePath,
         timeout: 30_000,
@@ -767,10 +774,12 @@ export class WorktreeManager {
         await this.assertCreatedWorktreeBranch(worktreePath, opts.branchName.trim());
       }
 
-      try {
-        await this.rebaseOntoBase(worktreePath, baseBranch, branchName);
-      } catch (err) {
-        throw err;
+      if (!creationBaseCommit) {
+        try {
+          await this.rebaseOntoBase(worktreePath, baseBranch, branchName);
+        } catch (err) {
+          throw err;
+        }
       }
 
       // #1132 — Reset to HEAD so operator WIP can't leak into the agent's
@@ -893,12 +902,23 @@ export class WorktreeManager {
     await this.rebaseOntoBase(worktreePath, baseBranch, branchName, opts.strategy);
   }
 
-  private async rebaseOntoBase(
-    worktreePath: string,
+  /** Resolve the exact fetched base a managed packet branch will start from. */
+  async resolveCreationBaseCommit(baseBranch: string, branchName: string): Promise<string> {
+    const base = baseBranch.trim() || 'main';
+    const { target } = await this.resolveBaseTarget(this.repoRoot, base, branchName);
+    const { stdout } = await execFileAsync('git', ['rev-parse', '--verify', `${target}^{commit}`], {
+      windowsHide: true,
+      cwd: this.repoRoot,
+      timeout: 5_000,
+    });
+    return stdout.trim().toLowerCase();
+  }
+
+  private async resolveBaseTarget(
+    cwd: string,
     baseBranch: string,
     branchName: string,
-    strategy?: WorktreeRebaseStrategy,
-  ): Promise<void> {
+  ): Promise<{ target: string; originMissing: boolean }> {
     // Fetch the latest base ref from origin. Failure is recoverable only if
     // the local base ref is recent — otherwise the agent would branch from a
     // stale base and generate a diff that reverts already-merged upstream
@@ -907,28 +927,28 @@ export class WorktreeManager {
     try {
       await execFileAsync('git', ['fetch', 'origin', baseBranch, '--quiet'], {
         windowsHide: true,
-        cwd: worktreePath,
+        cwd,
         timeout: 60_000,
       });
     } catch (fetchErr) {
       const fetchErrorMessage = gitCommandErrorMessage(fetchErr);
-      if (await shouldClassifyFetchAsOriginMissing(worktreePath, fetchErrorMessage)) {
+      if (await shouldClassifyFetchAsOriginMissing(cwd, fetchErrorMessage)) {
         // Local-only repo with no origin: keep dispatching. The worktree branch
         // already came off local main at checkout time; there's nothing to
         // rebase onto upstream. The operator pushes manually after merge.
         console.warn(
           `[worktree-rebase] origin not configured for ${baseBranch} — skipping rebase (local-only repo).`,
         );
-        return;
+        return { target: baseBranch, originMissing: true };
       }
-      const localRefAgeMs = await this.localBaseRefAgeMs(worktreePath, baseBranch);
+      const localRefAgeMs = await this.localBaseRefAgeMs(cwd, baseBranch);
       if (localRefAgeMs == null || localRefAgeMs > LOCAL_BASE_REF_FRESHNESS_MS) {
         console.warn(
           `[worktree-rebase] fetch origin ${baseBranch} failed (${fetchErrorMessage}) and local ${baseBranch} ref is ${localRefAgeMs == null ? 'missing' : `${Math.round(localRefAgeMs / 60_000)} min old`} — escalating as fetch_unreachable.`,
         );
         throw new WorktreeFetchUnreachableError({
           baseBranch,
-          worktreePath,
+          worktreePath: cwd,
           branch: branchName,
           localRefAgeMs: localRefAgeMs ?? Number.POSITIVE_INFINITY,
           fetchErrorMessage,
@@ -940,11 +960,11 @@ export class WorktreeManager {
     }
 
     // Prefer origin/<baseBranch> if it exists; fall back to the local ref.
-    let rebaseTarget = `origin/${baseBranch}`;
+    let target = `origin/${baseBranch}`;
     try {
-      await execFileAsync('git', ['rev-parse', '--verify', rebaseTarget], {
+      await execFileAsync('git', ['rev-parse', '--verify', target], {
         windowsHide: true,
-        cwd: worktreePath,
+        cwd,
         timeout: 5000,
       });
       // #1469 — when LOCAL base is strictly ahead of origin (unpushed merge
@@ -956,26 +976,41 @@ export class WorktreeManager {
       try {
         const { stdout: aheadRaw } = await execFileAsync(
           'git',
-          ['rev-list', '--count', `${rebaseTarget}..${baseBranch}`],
-          { windowsHide: true, cwd: worktreePath, timeout: 5000 },
+          ['rev-list', '--count', `${target}..${baseBranch}`],
+          { windowsHide: true, cwd, timeout: 5000 },
         );
         const { stdout: behindRaw } = await execFileAsync(
           'git',
-          ['rev-list', '--count', `${baseBranch}..${rebaseTarget}`],
-          { windowsHide: true, cwd: worktreePath, timeout: 5000 },
+          ['rev-list', '--count', `${baseBranch}..${target}`],
+          { windowsHide: true, cwd, timeout: 5000 },
         );
         const ahead = Number.parseInt(aheadRaw.trim(), 10) || 0;
         const behind = Number.parseInt(behindRaw.trim(), 10) || 0;
         if (ahead > 0 && behind === 0) {
           console.log(
-            `[worktree-rebase] local ${baseBranch} is ${ahead} commit(s) ahead of ${rebaseTarget} (not behind) — rebasing onto local ${baseBranch}.`,
+            `[worktree-rebase] local ${baseBranch} is ${ahead} commit(s) ahead of ${target} (not behind) — rebasing onto local ${baseBranch}.`,
           );
-          rebaseTarget = baseBranch;
+          target = baseBranch;
         }
       } catch { /* comparison failed — keep origin target */ }
     } catch {
-      rebaseTarget = baseBranch;
+      target = baseBranch;
     }
+    return { target, originMissing: false };
+  }
+
+  private async rebaseOntoBase(
+    worktreePath: string,
+    baseBranch: string,
+    branchName: string,
+    strategy?: WorktreeRebaseStrategy,
+  ): Promise<void> {
+    const { target: rebaseTarget, originMissing } = await this.resolveBaseTarget(
+      worktreePath,
+      baseBranch,
+      branchName,
+    );
+    if (originMissing) return;
 
     try {
       const rebaseArgs = ['rebase'];
