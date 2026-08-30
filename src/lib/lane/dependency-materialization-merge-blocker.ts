@@ -9,6 +9,7 @@ import { detachDependencyMaterialization } from '@/lib/workspace/dependency-mate
 import {
   DEPENDENCY_MATERIALIZATION_INCOMPLETE,
   DependencyMaterializationIncompleteError,
+  isDependencyMaterializationIncomplete,
   verifyDependencyMaterialization,
 } from '@/lib/workspace/dependency-materialization-verification';
 import type { WorktreeManager } from '@/lib/worktree/manager';
@@ -29,10 +30,16 @@ export async function blockIncompleteMergeDependencies(
 ): Promise<LaneCommandResult | null> {
   if (!(await hasPackageJson(verificationPath))) return null;
   const verification = await verifyDependencyMaterialization(verificationPath);
-  if (verification.missingBinaries.length === 0) return null;
+  if (!isDependencyMaterializationIncomplete(verification)) return null;
 
-  const materializationPath = input.lane.worktreePath ?? verificationPath;
-  const worktree = (await manager.list()).find((candidate) => candidate.path === materializationPath);
+  let materializationPath = verificationPath;
+  let worktree = await manager.getDependencyMaterializationByPath(verificationPath);
+  if (!worktree && input.lane.worktreePath && input.lane.worktreePath !== verificationPath) {
+    // A canonical-repo relocation verifies a temporary merge checkout while its dependency
+    // receipt remains attached to the packet clone, so only that divergence uses the lane path.
+    materializationPath = input.lane.worktreePath;
+    worktree = await manager.getDependencyMaterializationByPath(materializationPath);
+  }
   const materialization = worktree?.dependencyMaterialization ?? null;
   let imageGenerationInvalidated = false;
   let imageInvalidationError: string | null = null;
@@ -61,7 +68,9 @@ export async function blockIncompleteMergeDependencies(
     topLevelEntryCount: verification.topLevelEntryCount,
     verifiedBinaries: verification.verifiedBinaries,
     missingBinaries: verification.missingBinaries,
+    resolutionErrors: verification.resolutionErrors,
     scriptBinaries: verification.scriptBinaries,
+    unreadableFiles: verification.unreadableFiles,
     imageGenerationInvalidated,
     imageInvalidationError,
   });

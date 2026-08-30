@@ -91,6 +91,7 @@ import { retireDependencyImage } from '@/lib/workspace/apfs-dependency-image';
 import {
   DEPENDENCY_MATERIALIZATION_INCOMPLETE,
   DependencyMaterializationIncompleteError,
+  isDependencyMaterializationIncomplete,
   verifyDependencyMaterialization,
 } from '@/lib/workspace/dependency-materialization-verification';
 import { applyWorkspaceManifest } from '@/lib/workspace/manifest/apply';
@@ -1235,6 +1236,29 @@ export class WorktreeManager {
     return all.find((wt) => wt.id === worktreeId) ?? null;
   }
 
+  /**
+   * Read only the dependency receipt for the managed worktree at an exact path.
+   * Unlike get()/list(), this avoids probing git status across the fleet.
+   */
+  async getDependencyMaterializationByPath(worktreePath: string): Promise<{
+    dependencyMaterialization?: DependencyMaterializationReceipt;
+    id: string;
+    path: string;
+  } | null> {
+    const id = path.basename(path.resolve(worktreePath));
+    const entry = (await this.loadAllMeta())[id];
+    if (!entry) return null;
+    const managedPath = entry.claudeManaged
+      ? path.join(this.repoRoot, CLAUDE_WORKTREE_DIR, id)
+      : await this.resolveManagedWorktreePath(id);
+    if (!(await this.samePath(managedPath, worktreePath))) return null;
+    return {
+      dependencyMaterialization: entry.dependencyMaterialization,
+      id,
+      path: managedPath,
+    };
+  }
+
   // ── Setup ──
 
   /**
@@ -1296,7 +1320,7 @@ export class WorktreeManager {
         dependencyMaterialization = result.receipt;
         if (launch?.packetId && launch.laneId) {
           const verification = await verifyDependencyMaterialization(worktreePath);
-          if (verification.missingBinaries.length > 0) {
+          if (isDependencyMaterializationIncomplete(verification)) {
             let imageGenerationInvalidated = false;
             let imageInvalidationError: string | null = null;
             if (dependencyMaterialization.mode === 'image') {
@@ -1323,7 +1347,9 @@ export class WorktreeManager {
               topLevelEntryCount: verification.topLevelEntryCount,
               verifiedBinaries: verification.verifiedBinaries,
               missingBinaries: verification.missingBinaries,
+              resolutionErrors: verification.resolutionErrors,
               scriptBinaries: verification.scriptBinaries,
+              unreadableFiles: verification.unreadableFiles,
               imageGenerationInvalidated,
               imageInvalidationError,
             });
@@ -1343,7 +1369,9 @@ export class WorktreeManager {
             topLevelEntryCount: verification.topLevelEntryCount,
             verifiedBinaries: verification.verifiedBinaries,
             missingBinaries: verification.missingBinaries,
+            resolutionErrors: verification.resolutionErrors,
             scriptBinaries: verification.scriptBinaries,
+            unreadableFiles: verification.unreadableFiles,
           });
         }
       }
