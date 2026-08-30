@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
-import { resolveSpawn } from './run-lib.mjs';
+import { resolveSpawn, withServerOnlyStubNodeOptions } from './run-lib.mjs';
 
 const root = process.cwd();
 const stateDir = join(
@@ -173,9 +173,7 @@ const mode = process.argv[2] || 'all';
 if (mode === 'cleanup') await cleanup();
 else if (mode === 'next') run('dev:next', 'next', ['dev', '-p', env.PORT]);
 else if (mode === 'ws') {
-  env.NODE_OPTIONS = [env.NODE_OPTIONS, '--import=./scripts/register-server-only-stub.mjs']
-    .filter(Boolean)
-    .join(' ');
+  env.NODE_OPTIONS = withServerOnlyStubNodeOptions(env.NODE_OPTIONS);
   run('dev:ws', 'tsx', ['src/ws-server.ts']);
 } else if (mode === 'all') await all();
 else {
