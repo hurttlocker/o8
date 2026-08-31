@@ -17,6 +17,11 @@ import { fileURLToPath } from 'node:url';
 import { CliError, EXIT } from '../api.js';
 import { resolveCliDataDir } from '../config.js';
 import { printHumanKv, printJson, type OutputMode } from '../output.js';
+import {
+  prepareServeLog,
+  runServeAgentCommand,
+  superviseServeDaemon,
+} from './serve-lifecycle.js';
 
 const PROD_API_PORT_BLOCK = [47100, 47101, 47102, 47103, 47104] as const;
 const PROD_WS_PORT_BLOCK = [47105, 47106, 47107, 47108, 47109] as const;
@@ -459,9 +464,7 @@ async function startServe(mode: OutputMode): Promise<number> {
   await assertDataDirAvailableForServe(paths);
 
   const plan = resolveLaunchPlan();
-  const previousLog = `${paths.logFile}.prev`;
-  rmSync(previousLog, { force: true });
-  if (existsSync(paths.logFile)) renameSync(paths.logFile, previousLog);
+  prepareServeLog(paths.logFile);
   const logFd = openSync(paths.logFile, 'a', 0o600);
   const cliEntry = process.argv[1];
   const child = spawn(process.execPath, [cliEntry, 'serve', '__daemon'], {
@@ -496,6 +499,25 @@ async function startServe(mode: OutputMode): Promise<number> {
   const state = await waitForDaemonReady(paths, child.pid);
   outputState(mode, state, true, true);
   return EXIT.OK;
+}
+
+async function runLaunchAgent(): Promise<number> {
+  const paths = servePaths();
+  mkdirSync(paths.dataDir, { recursive: true });
+  cleanStaleOwner(paths);
+  await assertDataDirAvailableForServe(paths);
+  const ownerPid = readOwnerPid(paths);
+  if (ownerPid && processAlive(ownerPid)) {
+    throw new CliError('serve_already_running', `Headless o8 is already running with pid ${ownerPid}.`, EXIT.CONFLICT);
+  }
+  const plan = resolveLaunchPlan();
+  return superviseServeDaemon({
+    cliEntry: process.argv[1],
+    launchMode: plan.mode,
+    logPath: paths.logFile,
+    pidFile: paths.pidFile,
+    workingDirectory: plan.root,
+  });
 }
 
 async function statusServe(mode: OutputMode): Promise<number> {
@@ -735,17 +757,30 @@ export async function runServe(
   subcommand: string | undefined,
   rest: string[],
 ): Promise<number> {
+  if (subcommand === 'agent') {
+    const paths = servePaths();
+    const plan = resolveLaunchPlan();
+    return runServeAgentCommand(mode, rest[0], rest.slice(1), {
+      cliEntry: process.argv[1],
+      dataDir: paths.dataDir,
+      logPath: paths.logFile,
+      nodePath: process.execPath,
+      workingDirectory: plan.root,
+      assertDataDirAvailable: () => assertDataDirAvailableForServe(paths),
+    });
+  }
   if (rest.length > 0) {
     throw new CliError('invalid_serve_args', `Unexpected serve arguments: ${rest.join(' ')}`, EXIT.INVALID_ARGS);
   }
   if (!subcommand) return startServe(mode);
   if (subcommand === 'status') return statusServe(mode);
   if (subcommand === 'stop') return stopServe(mode);
+  if (subcommand === '__launch_agent') return runLaunchAgent();
   if (subcommand === '__daemon') return runDaemon();
   throw new CliError(
     'unknown_serve_subcommand',
     `Unknown serve subcommand: ${subcommand}`,
     EXIT.INVALID_ARGS,
-    'Use `o8 serve`, `o8 serve status`, or `o8 serve stop`.',
+    'Use `o8 serve`, `o8 serve status`, `o8 serve stop`, or `o8 serve agent status`.',
   );
 }

@@ -218,6 +218,9 @@ commands:
   serve                start the headless API, WebSocket layer, and supervisor daemon
   serve status         report the daemon pid, ports, health, and launch mode
   serve stop           stop the daemon and reap its server children
+  serve agent install  install and load the per-user headless service
+  serve agent uninstall  unload and remove the per-user headless service
+  serve agent status   report whether the per-user headless service is loaded
   ask [--terse] "<question>"  ask the Engineering Brain about this repo (answer + cited sources)
   feature list|next|add|verify  durable repo-scoped feature ledger
   ground "<task>"      persist a real-path impact map before execution
