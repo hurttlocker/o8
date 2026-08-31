@@ -1835,6 +1835,17 @@
       ]
     },
     {
+      "path": "tests/o8-serve-governed-loop-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "process-signal",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/o8-serve-real-path.test.ts",
       "reasons": [
         "child-process",
