@@ -1,5 +1,15 @@
 import { execFile, execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer as createHttpServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -8,11 +18,35 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 const root = resolve(import.meta.dirname, '..');
 const cliEntrypoint = join(root, 'cli', 'dist', 'o8.mjs');
 const dataDirs = new Set<string>();
+const tempDirs = new Set<string>();
 
 function makeDataDir(): string {
   const dataDir = mkdtempSync(join(tmpdir(), 'o8-serve-real-path-'));
   dataDirs.add(dataDir);
+  tempDirs.add(dataDir);
   return dataDir;
+}
+
+function makePackagedLayout(): { cliEntrypoint: string; serverRoot: string } {
+  const exportedServer = join(root, 'out', 'server');
+  for (const relativePath of ['server.js', 'ws-server.mjs', join('bin', 'o8.mjs')]) {
+    expect(existsSync(join(exportedServer, relativePath)), `Missing out/server/${relativePath}; run npm run build and node scripts/tauri-export.mjs.`).toBe(true);
+  }
+  const layoutRoot = mkdtempSync(join(tmpdir(), 'o8-packaged-serve-layout-'));
+  tempDirs.add(layoutRoot);
+  const serverRoot = join(layoutRoot, 'o8.app', 'Contents', 'Resources', 'server');
+  mkdirSync(join(serverRoot, 'bin'), { recursive: true });
+  for (const entry of readdirSync(exportedServer, { withFileTypes: true })) {
+    if (entry.name === 'bin') continue;
+    symlinkSync(
+      join(exportedServer, entry.name),
+      join(serverRoot, entry.name),
+      entry.isDirectory() ? 'dir' : 'file',
+    );
+  }
+  const packagedCli = join(serverRoot, 'bin', 'o8.mjs');
+  copyFileSync(join(exportedServer, 'bin', 'o8.mjs'), packagedCli);
+  return { cliEntrypoint: packagedCli, serverRoot };
 }
 
 interface CliResult {
@@ -38,12 +72,12 @@ interface ServeStatus {
   note: string;
 }
 
-function cliEnv(dataDir: string): NodeJS.ProcessEnv {
+function cliEnv(dataDir: string, serveRoot = root): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     O8_DATA_DIR: dataDir,
     CORTEX_IDE_DATA_DIR: dataDir,
-    O8_SERVE_ROOT: root,
+    O8_SERVE_ROOT: serveRoot,
     O8_WORKER_TOKEN: '',
     O8_WORKER_PACKET_ID: '',
   };
@@ -51,11 +85,16 @@ function cliEnv(dataDir: string): NodeJS.ProcessEnv {
   return env;
 }
 
-function runCli(args: string[], dataDir: string, timeout = 75_000): Promise<CliResult> {
+function runCli(
+  args: string[],
+  dataDir: string,
+  timeout = 75_000,
+  options: { cliEntrypoint?: string; cwd?: string; serveRoot?: string } = {},
+): Promise<CliResult> {
   return new Promise((resolveResult) => {
-    execFile(process.execPath, [cliEntrypoint, ...args], {
-      cwd: root,
-      env: cliEnv(dataDir),
+    execFile(process.execPath, [options.cliEntrypoint ?? cliEntrypoint, ...args], {
+      cwd: options.cwd ?? root,
+      env: cliEnv(dataDir, options.serveRoot),
       timeout,
     }, (error, stdout, stderr) => {
       resolveResult({
@@ -124,8 +163,8 @@ describe.sequential('o8 serve real CLI path', () => {
   afterAll(async () => {
     for (const dataDir of dataDirs) {
       await runCli(['serve', 'stop'], dataDir, 15_000);
-      rmSync(dataDir, { recursive: true, force: true });
     }
+    for (const tempDir of tempDirs) rmSync(tempDir, { recursive: true, force: true });
   });
 
   it('starts, authenticates, reports, refuses a second owner, and reaps every child', async () => {
@@ -278,4 +317,50 @@ describe.sequential('o8 serve real CLI path', () => {
       await new Promise<void>((resolveClose) => { server.close(() => resolveClose()); });
     }
   }, 30_000);
+
+  it.runIf(process.env.O8_TEST_PACKAGED_SERVE === '1')(
+    'starts from the packaged resource layout, authenticates, and reaps every child',
+    async () => {
+      const dataDir = makeDataDir();
+      const packaged = makePackagedLayout();
+      const runOptions = {
+        cliEntrypoint: packaged.cliEntrypoint,
+        cwd: packaged.serverRoot,
+        serveRoot: join(packaged.serverRoot, 'missing-source-checkout'),
+      };
+      const started = await runCli(['serve'], dataDir, 75_000, runOptions);
+      expect(started.code, `${started.stderr}\n${readServeLog(dataDir)}`).toBe(0);
+      const status = JSON.parse(started.stdout) as ServeStatus;
+      expect(status).toMatchObject({
+        running: true,
+        healthy: true,
+        mode: 'packaged',
+      });
+
+      const token = readFileSync(join(dataDir, 'ws-token'), 'utf8').trim();
+      const gatedResponse = await fetch(`http://127.0.0.1:${status.apiPort}/api/panel/repos`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(60_000),
+      });
+      expect(gatedResponse.status, await gatedResponse.text()).toBe(200);
+
+      const ownedPids = [status.pid, ...descendantPids(status.pid)];
+      expect(ownedPids.length).toBeGreaterThanOrEqual(3);
+      const statusResult = await runCli(['serve', 'status'], dataDir, 75_000, runOptions);
+      expect(statusResult.code, statusResult.stderr).toBe(0);
+      expect(JSON.parse(statusResult.stdout)).toMatchObject({
+        running: true,
+        healthy: true,
+        mode: 'packaged',
+        pid: status.pid,
+      });
+
+      const stopped = await runCli(['serve', 'stop'], dataDir, 15_000, runOptions);
+      expect(stopped.code, stopped.stderr).toBe(0);
+      expect(JSON.parse(stopped.stdout)).toMatchObject({ stopped: true, pid: status.pid });
+      expect(ownedPids.filter(processAlive)).toEqual([]);
+      expect(existsSync(join(dataDir, 'serve.pid'))).toBe(false);
+    },
+    120_000,
+  );
 });
