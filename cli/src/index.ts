@@ -49,6 +49,7 @@ import { runProblem } from './commands/problem.js';
 import { runStatus } from './commands/status.js';
 import { runSession } from './commands/session.js';
 import { runRun } from './commands/run.js';
+import { runServe } from './commands/serve.js';
 import { runVersion } from './commands/version.js';
 import { runPacketInfo } from './commands/packet/info.js';
 import { runPacketHeartbeat } from './commands/packet/heartbeat.js';
@@ -214,6 +215,9 @@ commands:
   run [--detach] <cmd> run a process in an o8-owned terminal the operator can watch
   run --list           list managed runs (running + recent, with exit codes)
   run stop <runId>     stop a managed run from o8 run --list
+  serve                start the headless API, WebSocket layer, and supervisor daemon
+  serve status         report the daemon pid, ports, health, and launch mode
+  serve stop           stop the daemon and reap its server children
   ask [--terse] "<question>"  ask the Engineering Brain about this repo (answer + cited sources)
   feature list|next|add|verify  durable repo-scoped feature ledger
   ground "<task>"      persist a real-path impact map before execution
@@ -355,6 +359,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runConnect(args.mode, 'disconnect', secondary ? [secondary, ...args.rest] : args.rest);
     case 'run':
       return runRun(args.mode, args.rest);
+    case 'serve':
+      return runServe(args.mode, secondary, args.rest);
     case 'ask':
       // The question lands in `secondary` (first positional) when quoted, or
       // spreads across secondary + rest when unquoted — hand both to the parser.
