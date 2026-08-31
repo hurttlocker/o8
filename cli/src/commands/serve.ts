@@ -16,19 +16,24 @@ import { fileURLToPath } from 'node:url';
 
 import { CliError, EXIT } from '../api.js';
 import { resolveCliDataDir } from '../config.js';
-import { printHumanKv, printJson, type OutputMode } from '../output.js';
+import { type OutputMode } from '../output.js';
 import {
   prepareServeLog,
   runServeAgentCommand,
   superviseServeDaemon,
 } from './serve-lifecycle.js';
+import { CLI_VERSION } from './version.js';
+import {
+  outputServeNotRunning,
+  outputServeState,
+  outputServeStopped,
+} from './serve-output.js';
 
 const PROD_API_PORT_BLOCK = [47100, 47101, 47102, 47103, 47104] as const;
 const PROD_WS_PORT_BLOCK = [47105, 47106, 47107, 47108, 47109] as const;
 const START_TIMEOUT_MS = 60_000;
 const STOP_TIMEOUT_MS = 8_000;
 const POLL_MS = 100;
-const DESKTOP_COEXISTENCE_NOTE = 'The desktop app uses the next available API and WebSocket port block entries, so both can coexist.';
 
 type ServeMode = 'development' | 'packaged';
 type ServeStatus = 'starting' | 'ready' | 'stopping' | 'failed';
@@ -49,6 +54,7 @@ interface ServeState {
   startedAt: string;
   status: ServeStatus;
   children: ServeChildState[];
+  version?: string;
   error?: string;
 }
 
@@ -409,45 +415,6 @@ async function waitForDaemonReady(paths: ServePaths, pid: number): Promise<Serve
   );
 }
 
-function outputState(mode: OutputMode, state: ServeState, running: boolean, healthy: boolean): void {
-  const payload = {
-    schema: 'o8/cli/serve-status/v1',
-    running,
-    healthy,
-    pid: state.pid,
-    pgid: state.pgid,
-    apiPort: state.apiPort,
-    wsPort: state.wsPort,
-    mode: state.mode,
-    status: state.status,
-    children: state.children,
-    startedAt: state.startedAt,
-    note: DESKTOP_COEXISTENCE_NOTE,
-  };
-  if (!mode.human) {
-    printJson(payload);
-    return;
-  }
-  printHumanKv([
-    ['running', String(running)],
-    ['healthy', String(healthy)],
-    ['pid', String(state.pid)],
-    ['pgid', String(state.pgid)],
-    ['api', String(state.apiPort)],
-    ['ws', String(state.wsPort)],
-    ['mode', state.mode],
-    ['status', state.status],
-    ['note', DESKTOP_COEXISTENCE_NOTE],
-  ]);
-}
-
-function outputStopped(mode: OutputMode, pid: number): number {
-  const payload = { schema: 'o8/cli/serve-stop/v1', stopped: true, pid };
-  if (mode.human) printHumanKv([['stopped', 'true'], ['pid', String(pid)]]);
-  else printJson(payload);
-  return EXIT.OK;
-}
-
 async function startServe(mode: OutputMode): Promise<number> {
   const paths = servePaths();
   mkdirSync(dirname(paths.logFile), { recursive: true });
@@ -497,7 +464,7 @@ async function startServe(mode: OutputMode): Promise<number> {
   }
   child.unref();
   const state = await waitForDaemonReady(paths, child.pid);
-  outputState(mode, state, true, true);
+  outputServeState(mode, state, true, true);
   return EXIT.OK;
 }
 
@@ -527,30 +494,16 @@ async function statusServe(mode: OutputMode): Promise<number> {
   if (!pid || !state || state.pid !== pid || !processAlive(pid)) {
     const hasRecoverableChildren = Boolean(state?.children.some((child) => processAlive(child.pid)));
     if (!hasRecoverableChildren) cleanStaleOwner(paths);
-    const payload = {
-      schema: 'o8/cli/serve-status/v1',
-      running: false,
-      healthy: false,
-      note: DESKTOP_COEXISTENCE_NOTE,
-    };
-    if (mode.human) {
-      printHumanKv([
-        ['running', 'false'],
-        ['healthy', 'false'],
-        ['note', DESKTOP_COEXISTENCE_NOTE],
-      ]);
-    }
-    else printJson(payload);
-    return EXIT.OK;
+    return outputServeNotRunning(mode);
   }
   const healthy = state.status === 'ready'
     && await apiIsReady(state.apiPort)
     && await portAcceptsConnections(state.wsPort);
-  outputState(mode, state, true, healthy);
+  outputServeState(mode, state, true, healthy);
   return healthy ? EXIT.OK : EXIT.CONNECTION_REFUSED;
 }
 
-async function stopServe(mode: OutputMode): Promise<number> {
+async function stopServe(mode: OutputMode, report = true): Promise<number> {
   const paths = servePaths();
   const pid = readOwnerPid(paths);
   const state = readState(paths);
@@ -566,7 +519,7 @@ async function stopServe(mode: OutputMode): Promise<number> {
     const stopped = await terminateTrackedPids(childPids, stateMatchesOwner?.pgid, 1_000);
     cleanStaleOwner(paths);
     if (stopped && trackedPids.every((trackedPid) => !processAlive(trackedPid)) && !existsSync(paths.pidFile)) {
-      return outputStopped(mode, leaderPid);
+      return report ? outputServeStopped(mode, leaderPid) : EXIT.OK;
     }
     throw new CliError(
       'serve_stop_failed',
@@ -592,7 +545,7 @@ async function stopServe(mode: OutputMode): Promise<number> {
       && !processGroupAlive(stateMatchesOwner?.pgid)
       && !existsSync(paths.pidFile)
     ) {
-      return outputStopped(mode, leaderPid);
+      return report ? outputServeStopped(mode, leaderPid) : EXIT.OK;
     }
     await wait(POLL_MS);
   }
@@ -603,7 +556,7 @@ async function stopServe(mode: OutputMode): Promise<number> {
     && !processGroupAlive(stateMatchesOwner?.pgid);
   if (allProcessesStopped) cleanStaleOwner(paths);
   if (allProcessesStopped && !existsSync(paths.pidFile)) {
-    return outputStopped(mode, leaderPid);
+    return report ? outputServeStopped(mode, leaderPid) : EXIT.OK;
   }
   throw new CliError(
     'serve_stop_failed',
@@ -611,6 +564,11 @@ async function stopServe(mode: OutputMode): Promise<number> {
     EXIT.CONFLICT,
     `Inspect ${paths.logFile}.`,
   );
+}
+
+async function restartServe(mode: OutputMode): Promise<number> {
+  await stopServe(mode, false);
+  return startServe(mode);
 }
 
 async function runDaemon(): Promise<number> {
@@ -672,6 +630,7 @@ async function runDaemon(): Promise<number> {
     startedAt: new Date().toISOString(),
     status: 'starting',
     children: [],
+    version: CLI_VERSION,
   };
   writeState(paths, state);
 
@@ -775,12 +734,13 @@ export async function runServe(
   if (!subcommand) return startServe(mode);
   if (subcommand === 'status') return statusServe(mode);
   if (subcommand === 'stop') return stopServe(mode);
+  if (subcommand === 'restart') return restartServe(mode);
   if (subcommand === '__launch_agent') return runLaunchAgent();
   if (subcommand === '__daemon') return runDaemon();
   throw new CliError(
     'unknown_serve_subcommand',
     `Unknown serve subcommand: ${subcommand}`,
     EXIT.INVALID_ARGS,
-    'Use `o8 serve`, `o8 serve status`, `o8 serve stop`, or `o8 serve agent status`.',
+    'Use `o8 serve`, `o8 serve status`, `o8 serve stop`, `o8 serve restart`, or `o8 serve agent status`.',
   );
 }

@@ -218,6 +218,7 @@ commands:
   serve                start the headless API, WebSocket layer, and supervisor daemon
   serve status         report the daemon pid, ports, health, and launch mode
   serve stop           stop the daemon and reap its server children
+  serve restart        stop and restart the daemon with the invoking CLI version
   serve agent install  install and load the per-user headless service
   serve agent uninstall  unload and remove the per-user headless service
   serve agent status   report whether the per-user headless service is loaded

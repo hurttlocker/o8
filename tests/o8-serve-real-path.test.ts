@@ -30,6 +30,10 @@ interface ServeStatus {
   apiPort: number;
   wsPort: number;
   mode: 'development' | 'packaged';
+  cliVersion: string;
+  daemonVersion: string | null;
+  versionMismatch: boolean;
+  warning: string | null;
   children: Array<{ role: string; pid: number }>;
   note: string;
 }
@@ -142,6 +146,10 @@ describe.sequential('o8 serve real CLI path', () => {
     expect(startStatus.apiPort).toBeGreaterThan(0);
     expect(startStatus.wsPort).toBeGreaterThan(0);
     expect(startStatus.note).toContain('both can coexist');
+    expect(startStatus.note).toContain('auto-update does not update a running daemon');
+    expect(startStatus.cliVersion).toBe(startStatus.daemonVersion);
+    expect(startStatus.versionMismatch).toBe(false);
+    expect(startStatus.warning).toBeNull();
     expect(existsSync(join(dataDir, 'serve.pid'))).toBe(true);
     expect(readFileSync(join(dataDir, 'instance-id'), 'utf8')).toBe(desktopInstanceId);
     expect(readFileSync(join(dataDir, 'serve-instance-id'), 'utf8').trim()).not.toBe(desktopInstanceId);
@@ -163,8 +171,41 @@ describe.sequential('o8 serve real CLI path', () => {
       wsPort: startStatus.wsPort,
       mode: 'development',
       pgid: startStatus.pid,
+      cliVersion: startStatus.cliVersion,
+      daemonVersion: startStatus.daemonVersion,
+      versionMismatch: false,
+      warning: null,
       note: startStatus.note,
     });
+
+    const statePath = join(dataDir, 'serve-state.json');
+    const persistedState = JSON.parse(readFileSync(statePath, 'utf8')) as Record<string, unknown>;
+    expect(persistedState.version).toBe(startStatus.cliVersion);
+    writeFileSync(statePath, `${JSON.stringify({ ...persistedState, version: '0.0.0-stale' }, null, 2)}\n`, { mode: 0o600 });
+    const mismatchedStatus = await runCli(['serve', 'status'], dataDir);
+    expect(mismatchedStatus.code, mismatchedStatus.stderr).toBe(0);
+    expect(JSON.parse(mismatchedStatus.stdout)).toMatchObject({
+      cliVersion: startStatus.cliVersion,
+      daemonVersion: '0.0.0-stale',
+      versionMismatch: true,
+      warning: expect.stringContaining('o8 serve restart'),
+    });
+
+    const initialOwnedPids = [startStatus.pid, ...descendantPids(startStatus.pid)];
+    const restarted = await runCli(['serve', 'restart'], dataDir);
+    expect(restarted.code, `${restarted.stderr}\n${readServeLog(dataDir)}`).toBe(0);
+    const restartedStatus = JSON.parse(restarted.stdout) as ServeStatus;
+    expect(restartedStatus).toMatchObject({
+      running: true,
+      healthy: true,
+      mode: 'development',
+      cliVersion: startStatus.cliVersion,
+      daemonVersion: startStatus.cliVersion,
+      versionMismatch: false,
+      warning: null,
+    });
+    expect(restartedStatus.pid).not.toBe(startStatus.pid);
+    expect(initialOwnedPids.filter(processAlive)).toEqual([]);
 
     const secondStart = await runCli(['serve'], dataDir);
     expect(secondStart.code).toBe(5);
@@ -172,11 +213,11 @@ describe.sequential('o8 serve real CLI path', () => {
       error: { code: 'serve_already_running', ambiguous: false },
     });
 
-    const ownedPids = [startStatus.pid, ...descendantPids(startStatus.pid)];
+    const ownedPids = [restartedStatus.pid, ...descendantPids(restartedStatus.pid)];
     expect(ownedPids.length).toBeGreaterThanOrEqual(3);
     const stopped = await runCli(['serve', 'stop'], dataDir, 15_000);
     expect(stopped.code, stopped.stderr).toBe(0);
-    expect(JSON.parse(stopped.stdout)).toMatchObject({ stopped: true, pid: startStatus.pid });
+    expect(JSON.parse(stopped.stdout)).toMatchObject({ stopped: true, pid: restartedStatus.pid });
     expect(existsSync(join(dataDir, 'serve.pid'))).toBe(false);
     expect(ownedPids.filter(processAlive)).toEqual([]);
   }, 120_000);
