@@ -252,6 +252,9 @@ fn o8_data_dir() -> String {
     new_dir
 }
 
+#[cfg(test)]
+pub(crate) static DATA_DIR_ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
+
 /// `$HOME`, falling back to `%USERPROFILE%`. Windows sets only the latter, so
 /// the plain `var("HOME")` this replaced resolved to "" there — child logs and
 /// prefs landed at `/.o8/...` (drive root, access denied) and were lost
@@ -883,10 +886,68 @@ struct SetupIdentityResponse {
     boot_id: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DesktopAttachDecision {
+    Attach,
+    Coexist,
+    NormalBoot,
+}
+
+/// Decide whether the desktop shell can attach without reading files, probing
+/// processes, or touching listeners. `None` for `pidfile_alive` means there is
+/// no usable daemon PID file. The other optional inputs are unavailable until
+/// a live PID has a valid serve-state record and an identity response.
+fn decide_desktop_attach(
+    pidfile_alive: Option<bool>,
+    identity_is_o8: Option<bool>,
+    versions_match: Option<bool>,
+) -> DesktopAttachDecision {
+    match pidfile_alive {
+        None | Some(false) => DesktopAttachDecision::NormalBoot,
+        Some(true)
+            if identity_is_o8 == Some(true) && versions_match == Some(true) =>
+        {
+            DesktopAttachDecision::Attach
+        }
+        Some(true) => DesktopAttachDecision::Coexist,
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ServeStateV1 {
+    schema: String,
+    version: String,
+    pid: u32,
+    api_port: u16,
+    ws_port: u16,
+}
+
+#[derive(Clone, Debug)]
+struct DesktopAttachTarget {
+    api_port: u16,
+    ws_port: u16,
+    identity: BootIdentity,
+}
+
+#[derive(Debug)]
+struct DesktopAttachAttempt {
+    decision: DesktopAttachDecision,
+    target: Option<DesktopAttachTarget>,
+    reason: String,
+}
+
+// The probe runs before the first window. A loopback identity response is
+// normally single-digit milliseconds; 75ms leaves scheduler margin while
+// keeping an unhealthy daemon below the common 100ms perception threshold.
+const DESKTOP_ATTACH_IDENTITY_TIMEOUT_MS: u64 = 75;
+
 fn fetch_setup_identity(port: u16) -> Option<SetupIdentityResponse> {
     let url = format!("http://127.0.0.1:{}/api/setup/identity", port);
     let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_millis(450))
+        .timeout(std::time::Duration::from_millis(
+            DESKTOP_ATTACH_IDENTITY_TIMEOUT_MS,
+        ))
         .build()
         .ok()?;
     let response = client.get(url).send().ok()?;
@@ -894,6 +955,443 @@ fn fetch_setup_identity(port: u16) -> Option<SetupIdentityResponse> {
         return None;
     }
     response.json::<SetupIdentityResponse>().ok()
+}
+
+#[cfg(unix)]
+fn daemon_pid_is_alive(pid: u32) -> bool {
+    let Ok(pid) = i32::try_from(pid) else {
+        return false;
+    };
+    let result = unsafe { libc::kill(pid, 0) };
+    result == 0
+        || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(windows)]
+fn daemon_pid_is_alive(pid: u32) -> bool {
+    let output = Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+        .no_window()
+        .output();
+    let Ok(output) = output else {
+        return false;
+    };
+    String::from_utf8_lossy(&output.stdout).lines().any(|line| {
+        line.split(',')
+            .nth(1)
+            .and_then(|value| value.trim().trim_matches('"').parse::<u32>().ok())
+            == Some(pid)
+    })
+}
+
+#[cfg(not(any(unix, windows)))]
+fn daemon_pid_is_alive(_pid: u32) -> bool {
+    false
+}
+
+fn inspect_desktop_attach() -> DesktopAttachAttempt {
+    let data_dir = o8_data_dir();
+    let pid_path = format!("{data_dir}/serve.pid");
+    let state_path = format!("{data_dir}/serve-state.json");
+    let pid_raw = match std::fs::read_to_string(&pid_path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return DesktopAttachAttempt {
+                decision: decide_desktop_attach(None, None, None),
+                target: None,
+                reason: "serve.pid is absent".to_string(),
+            };
+        }
+        Err(error) => {
+            return DesktopAttachAttempt {
+                decision: decide_desktop_attach(None, None, None),
+                target: None,
+                reason: format!("serve.pid could not be read: {error}"),
+            };
+        }
+    };
+    let pid = match pid_raw.trim().parse::<u32>() {
+        Ok(pid) if pid > 0 => pid,
+        _ => {
+            return DesktopAttachAttempt {
+                decision: decide_desktop_attach(None, None, None),
+                target: None,
+                reason: "serve.pid is malformed".to_string(),
+            };
+        }
+    };
+    if !daemon_pid_is_alive(pid) {
+        return DesktopAttachAttempt {
+            decision: decide_desktop_attach(Some(false), None, None),
+            target: None,
+            reason: format!("serve.pid references dead pid {pid}"),
+        };
+    }
+
+    let state_raw = match std::fs::read_to_string(&state_path) {
+        Ok(raw) => raw,
+        Err(error) => {
+            return DesktopAttachAttempt {
+                decision: decide_desktop_attach(Some(true), None, None),
+                target: None,
+                reason: format!("live daemon pid {pid} has no readable serve-state.json: {error}"),
+            };
+        }
+    };
+    let state = match serde_json::from_str::<ServeStateV1>(&state_raw) {
+        Ok(state) => state,
+        Err(error) => {
+            return DesktopAttachAttempt {
+                decision: decide_desktop_attach(Some(true), None, None),
+                target: None,
+                reason: format!("live daemon pid {pid} has malformed serve-state.json: {error}"),
+            };
+        }
+    };
+    if state.schema != "o8/serve-state/v1"
+        || state.pid != pid
+        || state.api_port == 0
+        || state.ws_port == 0
+        || state.version.trim().is_empty()
+    {
+        return DesktopAttachAttempt {
+            decision: decide_desktop_attach(Some(true), None, None),
+            target: None,
+            reason: format!("live daemon pid {pid} has invalid serve-state.json fields"),
+        };
+    }
+
+    let identity = fetch_setup_identity(state.api_port).and_then(|response| {
+        let SetupIdentityResponse {
+            product: Some(product),
+            instance_id: Some(instance_id),
+            boot_id: Some(boot_id),
+        } = response
+        else {
+            return None;
+        };
+        if product != "o8" || instance_id.is_empty() || boot_id.is_empty() {
+            return None;
+        }
+        Some(BootIdentity {
+            boot_id,
+            instance_id,
+        })
+    });
+    let identity_is_o8 = identity.is_some();
+    let app_version = env!("CARGO_PKG_VERSION");
+    let versions_match = state.version == app_version;
+    let decision = decide_desktop_attach(
+        Some(true),
+        Some(identity_is_o8),
+        Some(versions_match),
+    );
+    if decision != DesktopAttachDecision::Attach {
+        let reason = if !identity_is_o8 {
+            format!(
+                "live daemon pid {pid} did not return a complete o8 identity on api port {}",
+                state.api_port
+            )
+        } else {
+            format!(
+                "daemon version {} does not match desktop version {app_version}",
+                state.version
+            )
+        };
+        return DesktopAttachAttempt {
+            decision,
+            target: None,
+            reason,
+        };
+    }
+
+    let Some(identity) = identity else {
+        return DesktopAttachAttempt {
+            decision: DesktopAttachDecision::Coexist,
+            target: None,
+            reason: format!(
+                "live daemon pid {pid} returned an incomplete o8 identity on api port {}",
+                state.api_port
+            ),
+        };
+    };
+    DesktopAttachAttempt {
+        decision,
+        target: Some(DesktopAttachTarget {
+            api_port: state.api_port,
+            ws_port: state.ws_port,
+            identity,
+        }),
+        reason: format!(
+            "healthy daemon pid {pid} matches desktop version {app_version}"
+        ),
+    }
+}
+
+#[cfg(test)]
+mod desktop_attach_tests {
+    use super::{
+        decide_desktop_attach, inspect_desktop_attach, DesktopAttachDecision,
+        DATA_DIR_ENV_TEST_LOCK,
+    };
+    use std::ffi::OsString;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::thread::JoinHandle;
+    use std::time::{Duration, Instant};
+
+    static NEXT_TEST_DIR: AtomicU64 = AtomicU64::new(0);
+
+    struct DataDirFixture {
+        path: PathBuf,
+        previous_o8: Option<OsString>,
+        previous_cortex: Option<OsString>,
+    }
+
+    impl DataDirFixture {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "o8-desktop-attach-{}-{}",
+                std::process::id(),
+                NEXT_TEST_DIR.fetch_add(1, Ordering::Relaxed)
+            ));
+            let _ = std::fs::remove_dir_all(&path);
+            std::fs::create_dir_all(&path).expect("create desktop attach test data dir");
+            let previous_o8 = std::env::var_os("O8_DATA_DIR");
+            let previous_cortex = std::env::var_os("CORTEX_IDE_DATA_DIR");
+            std::env::set_var("O8_DATA_DIR", &path);
+            std::env::remove_var("CORTEX_IDE_DATA_DIR");
+            Self {
+                path,
+                previous_o8,
+                previous_cortex,
+            }
+        }
+    }
+
+    impl Drop for DataDirFixture {
+        fn drop(&mut self) {
+            match self.previous_o8.take() {
+                Some(value) => std::env::set_var("O8_DATA_DIR", value),
+                None => std::env::remove_var("O8_DATA_DIR"),
+            }
+            match self.previous_cortex.take() {
+                Some(value) => std::env::set_var("CORTEX_IDE_DATA_DIR", value),
+                None => std::env::remove_var("CORTEX_IDE_DATA_DIR"),
+            }
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn write_state(data_dir: &Path, pid: u32, api_port: u16, version: &str) {
+        let state = serde_json::json!({
+            "schema": "o8/serve-state/v1",
+            "version": version,
+            "pid": pid,
+            "pgid": pid,
+            "apiPort": api_port,
+            "wsPort": 47105,
+            "mode": "packaged",
+            "root": data_dir,
+            "startedAt": "2026-08-31T00:00:00.000Z",
+            "status": "ready",
+            "children": [],
+        });
+        std::fs::write(data_dir.join("serve-state.json"), state.to_string())
+            .expect("write serve state");
+    }
+
+    fn spawn_identity_stub() -> (u16, JoinHandle<()>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind identity stub");
+        listener
+            .set_nonblocking(true)
+            .expect("set identity stub nonblocking");
+        let port = listener.local_addr().expect("identity stub address").port();
+        let handle = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            loop {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        stream
+                            .set_nonblocking(false)
+                            .expect("set identity stream blocking");
+                        stream
+                            .set_read_timeout(Some(Duration::from_secs(1)))
+                            .expect("set identity stream read timeout");
+                        let mut request = [0_u8; 2048];
+                        let bytes_read = stream.read(&mut request).expect("read identity request");
+                        assert!(
+                            String::from_utf8_lossy(&request[..bytes_read])
+                                .starts_with("GET /api/setup/identity "),
+                            "identity probe must use the setup identity route"
+                        );
+                        let body = r#"{"product":"o8","instanceId":"daemon-instance","bootId":"daemon-boot"}"#;
+                        write!(
+                            stream,
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                            body.len(),
+                            body
+                        )
+                        .expect("write identity response");
+                        return;
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(Instant::now() < deadline, "identity probe never connected");
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(error) => panic!("accept identity probe: {error}"),
+                }
+            }
+        });
+        (port, handle)
+    }
+
+    #[test]
+    fn healthy_matching_daemon_attaches() {
+        assert_eq!(
+            decide_desktop_attach(Some(true), Some(true), Some(true)),
+            DesktopAttachDecision::Attach
+        );
+    }
+
+    #[test]
+    fn version_mismatch_coexists() {
+        assert_eq!(
+            decide_desktop_attach(Some(true), Some(true), Some(false)),
+            DesktopAttachDecision::Coexist
+        );
+    }
+
+    #[test]
+    fn dead_pid_uses_normal_boot() {
+        assert_eq!(
+            decide_desktop_attach(Some(false), None, None),
+            DesktopAttachDecision::NormalBoot
+        );
+    }
+
+    #[test]
+    fn absent_daemon_files_use_normal_boot() {
+        assert_eq!(
+            decide_desktop_attach(None, None, None),
+            DesktopAttachDecision::NormalBoot
+        );
+    }
+
+    #[test]
+    fn real_state_and_identity_probe_attach_to_a_matching_live_daemon() {
+        let _env_lock = DATA_DIR_ENV_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let fixture = DataDirFixture::new();
+        let pid = std::process::id();
+        let (api_port, identity_stub) = spawn_identity_stub();
+        std::fs::write(fixture.path.join("serve.pid"), pid.to_string())
+            .expect("write daemon pid");
+        write_state(&fixture.path, pid, api_port, env!("CARGO_PKG_VERSION"));
+
+        let attempt = inspect_desktop_attach();
+        identity_stub.join().expect("join identity stub");
+
+        assert_eq!(attempt.decision, DesktopAttachDecision::Attach);
+        let target = attempt.target.expect("matching live daemon target");
+        assert_eq!(target.api_port, api_port);
+        assert_eq!(target.ws_port, 47105);
+        assert_eq!(target.identity.instance_id, "daemon-instance");
+        assert_eq!(target.identity.boot_id, "daemon-boot");
+    }
+
+    #[test]
+    fn real_state_version_mismatch_declines_with_a_reason() {
+        let _env_lock = DATA_DIR_ENV_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let fixture = DataDirFixture::new();
+        let pid = std::process::id();
+        let (api_port, identity_stub) = spawn_identity_stub();
+        std::fs::write(fixture.path.join("serve.pid"), pid.to_string())
+            .expect("write daemon pid");
+        write_state(&fixture.path, pid, api_port, "0.0.0-mismatch");
+
+        let attempt = inspect_desktop_attach();
+        identity_stub.join().expect("join identity stub");
+
+        assert_eq!(attempt.decision, DesktopAttachDecision::Coexist);
+        assert!(attempt.target.is_none());
+        assert!(attempt.reason.contains("does not match desktop version"));
+    }
+
+    #[test]
+    fn out_of_range_pid_declines_to_normal_boot_with_a_reason() {
+        let _env_lock = DATA_DIR_ENV_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let fixture = DataDirFixture::new();
+        std::fs::write(fixture.path.join("serve.pid"), u32::MAX.to_string())
+            .expect("write dead daemon pid");
+
+        let attempt = inspect_desktop_attach();
+
+        assert_eq!(attempt.decision, DesktopAttachDecision::NormalBoot);
+        assert!(attempt.target.is_none());
+        assert!(attempt.reason.contains("references dead pid"));
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn real_reaped_child_pid_declines_to_normal_boot_with_a_reason() {
+        let _env_lock = DATA_DIR_ENV_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let fixture = DataDirFixture::new();
+        #[cfg(unix)]
+        let mut child = std::process::Command::new("/usr/bin/true")
+            .spawn()
+            .expect("spawn short-lived child");
+        #[cfg(windows)]
+        let mut child = std::process::Command::new("cmd")
+            .args(["/C", "exit", "0"])
+            .spawn()
+            .expect("spawn short-lived child");
+        let pid = child.id();
+        assert!(child.wait().expect("reap short-lived child").success());
+        std::fs::write(fixture.path.join("serve.pid"), pid.to_string())
+            .expect("write reaped daemon pid");
+
+        let attempt = inspect_desktop_attach();
+
+        assert_eq!(attempt.decision, DesktopAttachDecision::NormalBoot);
+        assert!(attempt.target.is_none());
+        assert!(attempt.reason.contains("references dead pid"));
+    }
+
+    #[test]
+    fn real_half_written_starting_state_declines_without_panicking() {
+        let _env_lock = DATA_DIR_ENV_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let fixture = DataDirFixture::new();
+        let pid = std::process::id();
+        std::fs::write(fixture.path.join("serve.pid"), pid.to_string())
+            .expect("write daemon pid");
+        std::fs::write(
+            fixture.path.join("serve-state.json"),
+            format!(
+                r#"{{"schema":"o8/serve-state/v1","version":"{}","pid":{pid},"apiPort":47100,"wsPort":47105,"status":"starting""#,
+                env!("CARGO_PKG_VERSION")
+            ),
+        )
+        .expect("write truncated daemon state");
+
+        let attempt = std::panic::catch_unwind(inspect_desktop_attach)
+            .expect("half-written state must not panic");
+
+        assert_eq!(attempt.decision, DesktopAttachDecision::Coexist);
+        assert!(attempt.target.is_none());
+        assert!(attempt.reason.contains("malformed serve-state.json"));
+    }
 }
 
 fn listener_is_stale_current_instance(port: u16, identity: &BootIdentity) -> bool {
@@ -6881,10 +7379,42 @@ pub fn run() {
     // unset. Placed AFTER minidump init so the reporter is already listening.
     telemetry::maybe_trigger_crash_test();
 
-    let boot_identity = read_or_create_boot_identity();
-    export_boot_identity(&boot_identity);
-
     let preship_gate = env_flag_enabled("O8_PRESHIP_GATE");
+    let dev_frontend = match dev_frontend::from_env() {
+        Ok(dev_frontend) => dev_frontend,
+        Err(err) => {
+            eprintln!("[dev-frontend] ignoring {}: {}", dev_frontend::ENV_VAR, err);
+            None
+        }
+    };
+    let desktop_attach = if preship_gate {
+        DesktopAttachAttempt {
+            decision: DesktopAttachDecision::NormalBoot,
+            target: None,
+            reason: "pre-ship gate requires isolated sidecars".to_string(),
+        }
+    } else if env_flag_enabled("O8_FORCE_BUNDLED_SERVERS") {
+        DesktopAttachAttempt {
+            decision: DesktopAttachDecision::NormalBoot,
+            target: None,
+            reason: "O8_FORCE_BUNDLED_SERVERS requires app-owned sidecars".to_string(),
+        }
+    } else if dev_frontend.is_some() {
+        DesktopAttachAttempt {
+            decision: DesktopAttachDecision::NormalBoot,
+            target: None,
+            reason: format!("{} owns backend selection", dev_frontend::ENV_VAR),
+        }
+    } else {
+        inspect_desktop_attach()
+    };
+    let desktop_attached = desktop_attach.decision == DesktopAttachDecision::Attach;
+    let boot_identity = desktop_attach
+        .target
+        .as_ref()
+        .map(|target| target.identity.clone())
+        .unwrap_or_else(read_or_create_boot_identity);
+    export_boot_identity(&boot_identity);
 
     if !preship_gate {
         sanitize_window_state();
@@ -6896,7 +7426,9 @@ pub fn run() {
     // The normal Cmd-Q / app.exit() / CloseRequested paths are handled in
     // the RunEvent callback below; this is the belt-and-suspenders layer
     // for ungraceful exits.
-    sidecar_lifecycle::install_shutdown_handlers();
+    if !desktop_attached {
+        sidecar_lifecycle::install_shutdown_handlers();
+    }
 
     // ── Boot-time orphan reaper (issues #728 / #776) ──
     // Reap stale `next-server` / `ws-server` processes from prior crashes
@@ -6919,16 +7451,12 @@ pub fn run() {
     // So the sequence is, and must remain: reap the processes, THEN clean the
     // socket, THEN build. All this change does is overlap the reap with the 1.6s
     // the macro was going to spend anyway.
-    start_orphan_reap();
-    boot_trace("orphan reap STARTED (async, overlaps generate_context!)");
-
-    let dev_frontend = match dev_frontend::from_env() {
-        Ok(dev_frontend) => dev_frontend,
-        Err(err) => {
-            eprintln!("[dev-frontend] ignoring {}: {}", dev_frontend::ENV_VAR, err);
-            None
-        }
-    };
+    if desktop_attached {
+        boot_trace("orphan reap SKIPPED (desktop attached to daemon)");
+    } else {
+        start_orphan_reap();
+        boot_trace("orphan reap STARTED (async, overlaps generate_context!)");
+    }
 
     boot_trace("BEFORE generate_context!");
     let mut context = tauri::generate_context!();
@@ -6941,7 +7469,11 @@ pub fn run() {
     // processes being dead, and tauri-plugin-mcp binds the socket in .build().
     join_orphan_reap();
     sidecar_lifecycle::clean_stale_mcp_socket();
-    boot_trace("orphan reap joined + mcp socket cleaned (pre-builder)");
+    if desktop_attached {
+        boot_trace("mcp socket cleaned (daemon listeners untouched)");
+    } else {
+        boot_trace("orphan reap joined + mcp socket cleaned (pre-builder)");
+    }
     if let Some(dev_frontend) = dev_frontend.as_ref() {
         if !dev_frontend::apply_to_main_window_config(context.config_mut(), dev_frontend) {
             eprintln!(
@@ -7315,6 +7847,23 @@ pub fn run() {
         .setup(move |app| {
             log::info!("[boot] setup() entered at {}ms (Builder + plugins done)", boot_ms());
             boot_trace("setup() entered (plugins INITIALISED)");
+            match desktop_attach.decision {
+                DesktopAttachDecision::Attach => {
+                    log::info!("[desktop-attach] attached: {}", desktop_attach.reason);
+                }
+                DesktopAttachDecision::Coexist => {
+                    log::warn!(
+                        "[desktop-attach] declined; keeping coexistence boot: {}",
+                        desktop_attach.reason
+                    );
+                }
+                DesktopAttachDecision::NormalBoot => {
+                    log::info!(
+                        "[desktop-attach] not selected; keeping normal boot: {}",
+                        desktop_attach.reason
+                    );
+                }
+            }
             #[cfg(target_os = "macos")]
             url_scheme_handler::reassert_o8_scheme_handler();
             // ── Windows/Linux `o8://` (#1742) — the non-macOS half of the above ──
@@ -7682,7 +8231,14 @@ pub fn run() {
             // — we now classify the listener before deferring. An orphan gets
             // killed and we fall through to the bundled-spawn path so the new
             // shell owns both Next and ws-server.
-            let dev_server_running = if env_flag_enabled("O8_FORCE_BUNDLED_SERVERS") {
+            let dev_server_running = if desktop_attach.decision
+                != DesktopAttachDecision::NormalBoot
+            {
+                // A live daemon is either the selected backend or a listener we
+                // must coexist with. Do not run stale-listener classification
+                // against daemon-owned ports in either case.
+                false
+            } else if env_flag_enabled("O8_FORCE_BUNDLED_SERVERS") {
                 false
             } else if dev_frontend.is_some() {
                 // The explicit frontend override owns API selection; probing
@@ -7763,13 +8319,23 @@ pub fn run() {
             // not-yet-listening server by construction — that's the same
             // contract it has always had.
             enum BootMode {
+                Attached,
                 DevFrontend,
                 DevServerRunning,
                 Bundled,
                 NoBundle,
             }
 
-            let boot_mode = if let Some(df) = dev_frontend.as_ref() {
+            let boot_mode = if let Some(target) = desktop_attach.target.as_ref() {
+                api_port = target.api_port;
+                ws_port = target.ws_port;
+                log::info!(
+                    "[desktop-attach] using daemon ports api={} ws={}; bundled sidecars disabled",
+                    api_port,
+                    ws_port
+                );
+                BootMode::Attached
+            } else if let Some(df) = dev_frontend.as_ref() {
                 api_port = df.port();
                 ws_port = allocate_ws_port(api_port);
                 log::info!(
@@ -7870,6 +8436,13 @@ pub fn run() {
                         .build()?;
                 } else {
                     log::warn!("[main-window] config missing; could not create main webview");
+                }
+            }
+            if desktop_attached {
+                if let Some(window) = app.get_webview_window("main") {
+                    if let Err(error) = window.set_title("o8 (attached)") {
+                        log::warn!("[desktop-attach] could not set attached window title: {error}");
+                    }
                 }
             }
             log::info!("[boot] main window created at {}ms — the loader can paint from here", boot_ms());
@@ -8087,6 +8660,7 @@ pub fn run() {
             // the main thread via `run_on_main_thread`, exactly where it ran
             // before, so we introduce no new set_var/getenv race.
             match boot_mode {
+                BootMode::Attached => {}
                 BootMode::Bundled => {
                     let app_handle = app.handle().clone();
                     let server_dir = server_dir.clone();
@@ -8189,7 +8763,7 @@ pub fn run() {
         })
         .build({ boot_trace("builder chain constructed (plugins registered, not yet init)"); context })
         .expect("error while building Cortex IDE")
-        .run(|_app_handle, event| match event {
+        .run(move |_app_handle, event| match event {
             // Finder "Open With → o8" / dock drop (file:// URLs) AND the auth
             // deep-link handoff (o8://auth/callback?...). macOS delivers both
             // through Opened; we partition by scheme. Buffer for cold launch
@@ -8228,13 +8802,19 @@ pub fn run() {
             // exits, but the explicit kill is what catches detached/launchd
             // reparenting.
             RunEvent::ExitRequested { .. } => {
-                sidecar_lifecycle::kill_tracked_children();
+                if desktop_attached {
+                    log::info!("[desktop-attach] app exit leaves daemon children running");
+                } else {
+                    sidecar_lifecycle::kill_tracked_children();
+                }
             }
             // Final event before the loop terminates. Idempotent with the
             // ExitRequested handler — kill_tracked_children() drains the
             // registry on first call.
             RunEvent::Exit => {
-                sidecar_lifecycle::kill_tracked_children();
+                if !desktop_attached {
+                    sidecar_lifecycle::kill_tracked_children();
+                }
             }
             _ => {}
         });
