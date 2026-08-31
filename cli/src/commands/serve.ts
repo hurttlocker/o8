@@ -23,6 +23,7 @@ const PROD_WS_PORT_BLOCK = [47105, 47106, 47107, 47108, 47109] as const;
 const START_TIMEOUT_MS = 60_000;
 const STOP_TIMEOUT_MS = 8_000;
 const POLL_MS = 100;
+const DESKTOP_COEXISTENCE_NOTE = 'The desktop app uses the next available API and WebSocket port block entries, so both can coexist.';
 
 type ServeMode = 'development' | 'packaged';
 type ServeStatus = 'starting' | 'ready' | 'stopping' | 'failed';
@@ -35,6 +36,7 @@ interface ServeChildState {
 interface ServeState {
   schema: 'o8/serve-state/v1';
   pid: number;
+  pgid: number;
   apiPort: number;
   wsPort: number;
   mode: ServeMode;
@@ -97,6 +99,32 @@ function processAlive(pid: number): boolean {
   }
 }
 
+function uniquePids(pids: number[]): number[] {
+  return [...new Set(pids.filter((pid) => Number.isInteger(pid) && pid > 0))];
+}
+
+function signalPids(pids: number[], signal: NodeJS.Signals): void {
+  for (const pid of uniquePids(pids)) {
+    if (!processAlive(pid)) continue;
+    try { process.kill(pid, signal); } catch {}
+  }
+}
+
+function signalProcessGroup(pgid: number | undefined, signal: NodeJS.Signals): void {
+  if (process.platform === 'win32' || !pgid || pgid <= 0) return;
+  try { process.kill(-pgid, signal); } catch {}
+}
+
+function processGroupAlive(pgid: number | undefined): boolean {
+  if (process.platform === 'win32' || !pgid || pgid <= 0) return false;
+  try {
+    process.kill(-pgid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function readState(paths: ServePaths): ServeState | null {
   try {
     const parsed = JSON.parse(readFileSync(paths.stateFile, 'utf8')) as ServeState;
@@ -121,6 +149,30 @@ function cleanStaleOwner(paths: ServePaths): void {
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => { setTimeout(resolve, ms); });
+}
+
+async function waitForPidsToExit(pids: number[], timeoutMs: number): Promise<boolean> {
+  const trackedPids = uniquePids(pids);
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (trackedPids.every((pid) => !processAlive(pid))) return true;
+    await wait(POLL_MS);
+  }
+  return trackedPids.every((pid) => !processAlive(pid));
+}
+
+async function terminateTrackedPids(
+  pids: number[],
+  pgid: number | undefined,
+  termTimeoutMs: number,
+): Promise<boolean> {
+  const trackedPids = uniquePids(pids);
+  signalPids(trackedPids, 'SIGTERM');
+  const trackedExited = await waitForPidsToExit(trackedPids, termTimeoutMs);
+  if (trackedExited && !processGroupAlive(pgid)) return true;
+  signalProcessGroup(pgid, 'SIGKILL');
+  signalPids(trackedPids, 'SIGKILL');
+  return await waitForPidsToExit(trackedPids, 1_000) && !processGroupAlive(pgid);
 }
 
 async function portAcceptsConnections(port: number): Promise<boolean> {
@@ -149,6 +201,27 @@ async function apiIsReady(port: number): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function readPort(path: string): number | null {
+  try {
+    const port = Number.parseInt(readFileSync(path, 'utf8').trim(), 10);
+    return Number.isInteger(port) && port > 0 && port < 65_536 ? port : null;
+  } catch {
+    return null;
+  }
+}
+
+async function assertDataDirAvailableForServe(paths: ServePaths): Promise<void> {
+  if (existsSync(paths.pidFile)) return;
+  const apiPort = readPort(paths.apiPortFile);
+  if (!apiPort || !await apiIsReady(apiPort)) return;
+  throw new CliError(
+    'serve_desktop_owns_data_dir',
+    `The desktop app already owns this data directory through its healthy API on port ${apiPort}.`,
+    EXIT.CONFLICT,
+    'Quit the desktop app or use a different O8_DATA_DIR or CORTEX_IDE_DATA_DIR, then retry.',
+  );
 }
 
 async function takeAvailablePort(candidates: readonly number[], skip?: number): Promise<number> {
@@ -337,12 +410,14 @@ function outputState(mode: OutputMode, state: ServeState, running: boolean, heal
     running,
     healthy,
     pid: state.pid,
+    pgid: state.pgid,
     apiPort: state.apiPort,
     wsPort: state.wsPort,
     mode: state.mode,
     status: state.status,
     children: state.children,
     startedAt: state.startedAt,
+    note: DESKTOP_COEXISTENCE_NOTE,
   };
   if (!mode.human) {
     printJson(payload);
@@ -352,11 +427,20 @@ function outputState(mode: OutputMode, state: ServeState, running: boolean, heal
     ['running', String(running)],
     ['healthy', String(healthy)],
     ['pid', String(state.pid)],
+    ['pgid', String(state.pgid)],
     ['api', String(state.apiPort)],
     ['ws', String(state.wsPort)],
     ['mode', state.mode],
     ['status', state.status],
+    ['note', DESKTOP_COEXISTENCE_NOTE],
   ]);
+}
+
+function outputStopped(mode: OutputMode, pid: number): number {
+  const payload = { schema: 'o8/cli/serve-stop/v1', stopped: true, pid };
+  if (mode.human) printHumanKv([['stopped', 'true'], ['pid', String(pid)]]);
+  else printJson(payload);
+  return EXIT.OK;
 }
 
 async function startServe(mode: OutputMode): Promise<number> {
@@ -372,6 +456,7 @@ async function startServe(mode: OutputMode): Promise<number> {
       'Run `o8 serve status` or `o8 serve stop`.',
     );
   }
+  await assertDataDirAvailableForServe(paths);
 
   const plan = resolveLaunchPlan();
   const previousLog = `${paths.logFile}.prev`;
@@ -418,9 +503,21 @@ async function statusServe(mode: OutputMode): Promise<number> {
   const pid = readOwnerPid(paths);
   const state = readState(paths);
   if (!pid || !state || state.pid !== pid || !processAlive(pid)) {
-    cleanStaleOwner(paths);
-    const payload = { schema: 'o8/cli/serve-status/v1', running: false, healthy: false };
-    if (mode.human) printHumanKv([['running', 'false'], ['healthy', 'false']]);
+    const hasRecoverableChildren = Boolean(state?.children.some((child) => processAlive(child.pid)));
+    if (!hasRecoverableChildren) cleanStaleOwner(paths);
+    const payload = {
+      schema: 'o8/cli/serve-status/v1',
+      running: false,
+      healthy: false,
+      note: DESKTOP_COEXISTENCE_NOTE,
+    };
+    if (mode.human) {
+      printHumanKv([
+        ['running', 'false'],
+        ['healthy', 'false'],
+        ['note', DESKTOP_COEXISTENCE_NOTE],
+      ]);
+    }
     else printJson(payload);
     return EXIT.OK;
   }
@@ -435,27 +532,60 @@ async function stopServe(mode: OutputMode): Promise<number> {
   const paths = servePaths();
   const pid = readOwnerPid(paths);
   const state = readState(paths);
-  if (!pid || !processAlive(pid)) {
+  const stateMatchesOwner = state && (!pid || state.pid === pid) ? state : null;
+  const leaderPid = pid ?? stateMatchesOwner?.pid ?? null;
+  if (!leaderPid) {
     cleanStaleOwner(paths);
     throw new CliError('serve_not_running', 'Headless o8 is not running.', EXIT.NOT_FOUND);
   }
-  const trackedPids = [pid, ...(state?.children.map((child) => child.pid) ?? [])];
+  const childPids = stateMatchesOwner?.children.map((child) => child.pid) ?? [];
+  const trackedPids = uniquePids([leaderPid, ...childPids]);
+  if (!processAlive(leaderPid)) {
+    const stopped = await terminateTrackedPids(childPids, stateMatchesOwner?.pgid, 1_000);
+    cleanStaleOwner(paths);
+    if (stopped && trackedPids.every((trackedPid) => !processAlive(trackedPid)) && !existsSync(paths.pidFile)) {
+      return outputStopped(mode, leaderPid);
+    }
+    throw new CliError(
+      'serve_stop_failed',
+      `Headless o8 pid ${leaderPid} died, but one or more recorded children could not be stopped.`,
+      EXIT.CONFLICT,
+      `Inspect ${paths.logFile}.`,
+    );
+  }
   try {
-    process.kill(pid, 'SIGTERM');
+    process.kill(leaderPid, 'SIGTERM');
   } catch {}
-  const deadline = Date.now() + STOP_TIMEOUT_MS;
+  const startedAt = Date.now();
+  const deadline = startedAt + STOP_TIMEOUT_MS;
+  const escalationAt = startedAt + Math.floor(STOP_TIMEOUT_MS / 2);
+  let childrenSignaled = false;
   while (Date.now() < deadline) {
-    if (trackedPids.every((trackedPid) => !processAlive(trackedPid)) && !existsSync(paths.pidFile)) {
-      const payload = { schema: 'o8/cli/serve-stop/v1', stopped: true, pid };
-      if (mode.human) printHumanKv([['stopped', 'true'], ['pid', String(pid)]]);
-      else printJson(payload);
-      return EXIT.OK;
+    if (!childrenSignaled && Date.now() >= escalationAt) {
+      signalPids(childPids, 'SIGTERM');
+      childrenSignaled = true;
+    }
+    if (
+      trackedPids.every((trackedPid) => !processAlive(trackedPid))
+      && !processGroupAlive(stateMatchesOwner?.pgid)
+      && !existsSync(paths.pidFile)
+    ) {
+      return outputStopped(mode, leaderPid);
     }
     await wait(POLL_MS);
   }
+  signalProcessGroup(stateMatchesOwner?.pgid, 'SIGKILL');
+  signalPids(trackedPids, 'SIGKILL');
+  await waitForPidsToExit(trackedPids, 1_000);
+  const allProcessesStopped = trackedPids.every((trackedPid) => !processAlive(trackedPid))
+    && !processGroupAlive(stateMatchesOwner?.pgid);
+  if (allProcessesStopped) cleanStaleOwner(paths);
+  if (allProcessesStopped && !existsSync(paths.pidFile)) {
+    return outputStopped(mode, leaderPid);
+  }
   throw new CliError(
     'serve_stop_failed',
-    `Headless o8 pid ${pid} did not stop cleanly before the shutdown deadline.`,
+    `Headless o8 pid ${leaderPid} did not stop before the shutdown deadline.`,
     EXIT.CONFLICT,
     `Inspect ${paths.logFile}.`,
   );
@@ -475,7 +605,7 @@ async function runDaemon(): Promise<number> {
   }
   const apiPort = await takeAvailablePort(PROD_API_PORT_BLOCK);
   const wsPort = await takeAvailablePort(PROD_WS_PORT_BLOCK, apiPort);
-  const instanceId = readOrCreateId(join(paths.dataDir, 'instance-id'));
+  const instanceId = readOrCreateId(join(paths.dataDir, 'serve-instance-id'));
   const bootId = randomUUID();
   writeFileSync(join(paths.dataDir, 'boot-id'), bootId, { mode: 0o600 });
   writeFileSync(paths.apiPortFile, String(apiPort), { mode: 0o600 });
@@ -512,6 +642,7 @@ async function runDaemon(): Promise<number> {
   const state: ServeState = {
     schema: 'o8/serve-state/v1',
     pid: process.pid,
+    pgid: process.pid,
     apiPort,
     wsPort,
     mode: plan.mode,
@@ -566,8 +697,17 @@ async function runDaemon(): Promise<number> {
     process.exit(exitCode);
   };
 
+  const fatalShutdown = (kind: string, reason: unknown): void => {
+    const detail = reason instanceof Error ? reason.message : String(reason);
+    void shutdown(EXIT.CONNECTION_REFUSED, `${kind}: ${detail}`).catch(() => {
+      process.exit(EXIT.CONNECTION_REFUSED);
+    });
+  };
+
   process.once('SIGTERM', () => { void shutdown(EXIT.OK); });
   process.once('SIGINT', () => { void shutdown(EXIT.OK); });
+  process.once('uncaughtException', (error) => { fatalShutdown('uncaughtException', error); });
+  process.once('unhandledRejection', (reason) => { fatalShutdown('unhandledRejection', reason); });
   for (const [role, child] of [['api', apiChild], ['ws', wsChild]] as const) {
     child.once('exit', (code, signal) => {
       if (!shuttingDown) {
