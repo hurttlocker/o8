@@ -32,6 +32,7 @@ import {
 import { recordOutgoingMissionSnapshot } from './mission-handoff';
 import { logDispatchRoutingRecommendations } from './mission-routing-log';
 import { preparePacketsForExplicitDispatch, summarizeDispatchMission } from './dispatch-runtime-override';
+import { resolveRuntimePresetModel } from './runtime-preset-routing';
 import {
   buildMissionId,
   buildMissionPrompt,
@@ -136,7 +137,7 @@ export async function createMission(input: CreateMissionInput) {
     workerIntent: input.workerIntent,
     requestedProvider: input.requestedProvider,
     requestedRuntime: input.requestedRuntime ?? input.runtime,
-    requestedModel: input.requestedModel,
+    requestedModel: resolveRuntimePresetModel(input.runtimePreset, input.requestedRuntime ?? input.runtime, input.requestedModel, input.claudeCodeCarrier),
     requestedEffort: input.requestedEffort,
     source: 'mission-create',
   });
@@ -172,7 +173,7 @@ export async function createMission(input: CreateMissionInput) {
           workerIntent: input.workerIntent,
           requestedProvider: input.requestedProvider,
           requestedRuntime: issue.runtime,
-          requestedModel: input.requestedModel,
+          requestedModel: resolveRuntimePresetModel(input.runtimePreset, issue.runtime, input.requestedModel, input.claudeCodeCarrier),
           requestedEffort: input.requestedEffort,
           source: 'mission-create-packet',
         })

@@ -11,6 +11,7 @@ import type {
 } from '@/lib/orchestrator/types';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
+import type { RuntimePresetId } from '@/lib/orchestrator/runtime-capabilities';
 
 export interface LoadedIssue {
   number: number;
@@ -37,6 +38,8 @@ export interface CreateMissionInput {
   requestedProvider?: WorkerProvider | null;
   requestedRuntime?: OrchestratorRuntime | null;
   requestedModel?: string | null;
+  /** Semantic model preset resolved independently for each packet runtime. */
+  runtimePreset?: RuntimePresetId;
   /** Explicit per-packet model pin for Claude Code workers. */
   claudeCodeModel?: string | null;
   /** Explicit per-packet carrier pin for Claude Code workers. */
