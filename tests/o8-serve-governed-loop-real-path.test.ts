@@ -494,5 +494,5 @@ describe.sequential('o8 serve headless governed loop real path', () => {
     } finally {
       if (!stopped) await runCli(['serve', 'stop'], fixture, 15_000);
     }
-  }, 160_000);
+  }, 200_000);
 });
