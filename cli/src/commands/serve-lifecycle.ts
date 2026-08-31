@@ -35,7 +35,7 @@ export interface ServeLaunchAgentPlistOptions {
 }
 
 interface ServeAgentCommandOptions extends ServeLaunchAgentPlistOptions {
-  assertDataDirAvailable: () => Promise<void>;
+  assertInstallAvailable: () => Promise<void>;
 }
 
 interface SuperviseServeDaemonOptions {
@@ -43,7 +43,23 @@ interface SuperviseServeDaemonOptions {
   launchMode: 'development' | 'packaged';
   logPath: string;
   pidFile: string;
+  stateFile: string;
   workingDirectory: string;
+}
+
+interface ServeStateDocument {
+  schema: 'o8/serve-state/v1';
+  supervisorPid?: number;
+  [key: string]: unknown;
+}
+
+interface WaitForSupervisorRestartOptions<T> {
+  supervisorPid: number;
+  timeoutMs: number;
+  pollMs: number;
+  logPath: string;
+  processAlive: (pid: number) => boolean;
+  readReadyState: () => Promise<T | null>;
 }
 
 function escapePlistValue(value: string): string {
@@ -112,6 +128,14 @@ export function decideServeLogRotation(
   };
 }
 
+export function formatServeLogSessionBoundary(
+  startedAt: string,
+  version: string,
+  pid: number,
+): string {
+  return `\n=== o8 serve session ${startedAt} version=${version} pid=${pid} ===\n`;
+}
+
 function fileSize(path: string): number | null {
   try {
     return statSync(path).size;
@@ -129,6 +153,59 @@ export function prepareServeLog(logPath: string): void {
     rmSync(previousLog, { force: true });
     renameSync(logPath, previousLog);
   }
+}
+
+function readServeStateDocument(stateFile: string): ServeStateDocument | null {
+  try {
+    const parsed = JSON.parse(readFileSync(stateFile, 'utf8')) as ServeStateDocument;
+    return parsed?.schema === 'o8/serve-state/v1' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeServeStateDocument(stateFile: string, state: ServeStateDocument): void {
+  const temporary = `${stateFile}.${process.pid}.tmp`;
+  writeFileSync(temporary, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+  renameSync(temporary, stateFile);
+}
+
+function persistSupervisorPid(stateFile: string, reset: boolean): void {
+  const current = reset ? null : readServeStateDocument(stateFile);
+  writeServeStateDocument(stateFile, {
+    ...(current ?? { schema: 'o8/serve-state/v1' }),
+    supervisorPid: process.pid,
+  });
+}
+
+function clearSupervisorPid(stateFile: string): void {
+  const current = readServeStateDocument(stateFile);
+  if (!current || current.supervisorPid !== process.pid) return;
+  const { supervisorPid: _supervisorPid, ...remaining } = current;
+  if (Object.keys(remaining).length === 1) rmSync(stateFile, { force: true });
+  else writeServeStateDocument(stateFile, remaining as ServeStateDocument);
+}
+
+export function readServeSupervisorPid(stateFile: string): number | null {
+  const pid = readServeStateDocument(stateFile)?.supervisorPid;
+  return Number.isInteger(pid) && Number(pid) > 0 ? Number(pid) : null;
+}
+
+export async function waitForSupervisorRestart<T>(
+  options: WaitForSupervisorRestartOptions<T>,
+): Promise<T> {
+  const deadline = Date.now() + options.timeoutMs;
+  while (Date.now() < deadline && options.processAlive(options.supervisorPid)) {
+    const state = await options.readReadyState();
+    if (state) return state;
+    await new Promise((resolve) => { setTimeout(resolve, options.pollMs); });
+  }
+  throw new CliError(
+    'serve_start_failed',
+    'The launch-agent supervisor did not replace the headless daemon before the startup deadline.',
+    EXIT.CONNECTION_REFUSED,
+    `Inspect ${options.logPath}.`,
+  );
 }
 
 function requireLaunchctl(): { domain: string; plistPath: string; target: string } {
@@ -202,9 +279,11 @@ export async function runServeAgentCommand(
   const typedAction = action as 'install' | 'uninstall' | 'status';
   if (typedAction === 'status') return outputAgentStatus(mode, typedAction);
 
+  if (typedAction === 'install') {
+    await options.assertInstallAvailable();
+  }
   const paths = requireLaunchctl();
   if (typedAction === 'install') {
-    await options.assertDataDirAvailable();
     mkdirSync(dirname(paths.plistPath), { recursive: true });
     mkdirSync(dirname(options.logPath), { recursive: true });
     writeFileSync(paths.plistPath, buildServeLaunchAgentPlist(options), { mode: 0o600 });
@@ -218,45 +297,69 @@ export async function runServeAgentCommand(
 }
 
 export async function superviseServeDaemon(options: SuperviseServeDaemonOptions): Promise<number> {
-  prepareServeLog(options.logPath);
-  const logFd = openSync(options.logPath, 'a', 0o600);
-  const child = spawn(process.execPath, [options.cliEntry, 'serve', '__daemon'], {
-    cwd: options.workingDirectory,
-    detached: true,
-    env: {
-      ...process.env,
-      O8_SERVE_ROOT: options.workingDirectory,
-      O8_SERVE_LAUNCH_MODE: options.launchMode,
-    },
-    stdio: ['ignore', logFd, logFd],
-  });
-  closeSync(logFd);
-  if (!child.pid) {
-    throw new CliError('serve_spawn_failed', 'Failed to spawn the headless daemon.', EXIT.CONNECTION_REFUSED);
-  }
-  try {
-    writeFileSync(options.pidFile, String(child.pid), { flag: 'wx', mode: 0o600 });
-  } catch (error) {
-    try { child.kill('SIGTERM'); } catch {}
-    throw error;
-  }
-
+  let child: ReturnType<typeof spawn> | null = null;
   let stopping = false;
-  const stopChild = (): void => {
+  let restartRequested = false;
+  const stopSupervisor = (): void => {
     stopping = true;
-    try { child.kill('SIGTERM'); } catch {}
+    try { child?.kill('SIGTERM'); } catch {}
   };
-  process.once('SIGTERM', stopChild);
-  process.once('SIGINT', stopChild);
-  return await new Promise<number>((resolve) => {
-    child.once('exit', (code, signal) => {
+  const restartChild = (): void => {
+    if (stopping) return;
+    restartRequested = true;
+    try { child?.kill('SIGTERM'); } catch {}
+  };
+  process.once('SIGTERM', stopSupervisor);
+  process.once('SIGINT', stopSupervisor);
+  process.on('SIGHUP', restartChild);
+  persistSupervisorPid(options.stateFile, true);
+
+  try {
+    while (!stopping) {
+      restartRequested = false;
+      persistSupervisorPid(options.stateFile, true);
+      prepareServeLog(options.logPath);
+      const logFd = openSync(options.logPath, 'a', 0o600);
+      child = spawn(process.execPath, [options.cliEntry, 'serve', '__daemon'], {
+        cwd: options.workingDirectory,
+        detached: true,
+        env: {
+          ...process.env,
+          O8_SERVE_ROOT: options.workingDirectory,
+          O8_SERVE_LAUNCH_MODE: options.launchMode,
+          O8_SERVE_SUPERVISOR_PID: String(process.pid),
+        },
+        stdio: ['ignore', logFd, logFd],
+      });
+      closeSync(logFd);
+      if (!child.pid) {
+        throw new CliError('serve_spawn_failed', 'Failed to spawn the headless daemon.', EXIT.CONNECTION_REFUSED);
+      }
       try {
-        if (readFileSync(options.pidFile, 'utf8').trim() === String(child.pid)) {
+        writeFileSync(options.pidFile, String(child.pid), { flag: 'wx', mode: 0o600 });
+      } catch (error) {
+        try { child.kill('SIGTERM'); } catch {}
+        throw error;
+      }
+
+      const leafPid = child.pid;
+      await new Promise<void>((resolve) => { child?.once('exit', () => resolve()); });
+      try {
+        if (readFileSync(options.pidFile, 'utf8').trim() === String(leafPid)) {
           rmSync(options.pidFile, { force: true });
         }
       } catch {}
-      if (stopping) resolve(EXIT.OK);
-      else resolve(code ?? (signal ? EXIT.CONNECTION_REFUSED : EXIT.OK));
-    });
-  });
+      child = null;
+      if (stopping) break;
+      if (!restartRequested && process.platform !== 'win32') {
+        try { process.kill(-leafPid, 'SIGTERM'); } catch {}
+        await new Promise((resolve) => { setTimeout(resolve, 1_000); });
+        try { process.kill(-leafPid, 'SIGKILL'); } catch {}
+      }
+    }
+    return EXIT.OK;
+  } finally {
+    process.removeListener('SIGHUP', restartChild);
+    clearSupervisorPid(options.stateFile);
+  }
 }

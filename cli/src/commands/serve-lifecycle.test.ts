@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildServeLaunchAgentPlist,
   decideServeLogRotation,
+  formatServeLogSessionBoundary,
   SERVE_LAUNCH_AGENT_LABEL,
   SERVE_LOG_ROTATE_BYTES,
   SERVE_PREVIOUS_LOG_TRUNCATE_BYTES,
@@ -42,5 +43,11 @@ describe('serve launch agent lifecycle', () => {
       rotateCurrent: false,
       truncatePrevious: false,
     });
+  });
+
+  it('formats a readable boundary for each daemon session', () => {
+    expect(formatServeLogSessionBoundary('2026-08-31T13:00:00.000Z', '0.1.723', 4242)).toBe(
+      '\n=== o8 serve session 2026-08-31T13:00:00.000Z version=0.1.723 pid=4242 ===\n',
+    );
   });
 });

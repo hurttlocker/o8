@@ -12,6 +12,7 @@ interface ServeOutputState {
   pid: number;
   startedAt: string;
   status: 'starting' | 'ready' | 'stopping' | 'failed';
+  supervisorPid?: number;
   version?: string;
   wsPort: number;
 }
@@ -39,6 +40,7 @@ export function outputServeState(
     status: state.status,
     children: state.children,
     startedAt: state.startedAt,
+    supervisorPid: state.supervisorPid ?? null,
     cliVersion: CLI_VERSION,
     daemonVersion,
     versionMismatch,
@@ -58,6 +60,7 @@ export function outputServeState(
     ['ws', String(state.wsPort)],
     ['mode', state.mode],
     ['status', state.status],
+    ['supervisor pid', state.supervisorPid ? String(state.supervisorPid) : '(none)'],
     ['cli version', CLI_VERSION],
     ['daemon version', daemonVersion ?? '(unknown)'],
     ['version mismatch', String(versionMismatch)],

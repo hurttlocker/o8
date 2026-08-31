@@ -1,4 +1,4 @@
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile, execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import {
   copyFileSync,
   existsSync,
@@ -19,6 +19,12 @@ const root = resolve(import.meta.dirname, '..');
 const cliEntrypoint = join(root, 'cli', 'dist', 'o8.mjs');
 const dataDirs = new Set<string>();
 const tempDirs = new Set<string>();
+const supervisorProcesses = new Set<ChildProcess>();
+const packagedServeEnabled = process.env.O8_TEST_PACKAGED_SERVE === '1';
+
+if (!packagedServeEnabled) {
+  process.stdout.write('[o8-serve-real-path] packaged proof skipped; set O8_TEST_PACKAGED_SERVE=1 to enable\n');
+}
 
 function makeDataDir(): string {
   const dataDir = mkdtempSync(join(tmpdir(), 'o8-serve-real-path-'));
@@ -64,12 +70,18 @@ interface ServeStatus {
   apiPort: number;
   wsPort: number;
   mode: 'development' | 'packaged';
+  supervisorPid: number | null;
   cliVersion: string;
   daemonVersion: string | null;
   versionMismatch: boolean;
   warning: string | null;
   children: Array<{ role: string; pid: number }>;
   note: string;
+}
+
+interface SupervisedProcess {
+  child: ChildProcess;
+  stderr: () => string;
 }
 
 function cliEnv(dataDir: string, serveRoot = root): NodeJS.ProcessEnv {
@@ -104,6 +116,19 @@ function runCli(
       });
     });
   });
+}
+
+function startLaunchAgentSupervisor(dataDir: string): SupervisedProcess {
+  const child = spawn(process.execPath, [cliEntrypoint, 'serve', '__launch_agent'], {
+    cwd: root,
+    env: cliEnv(dataDir),
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
+  supervisorProcesses.add(child);
+  let stderr = '';
+  child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+  child.once('exit', () => { supervisorProcesses.delete(child); });
+  return { child, stderr: () => stderr };
 }
 
 function processAlive(pid: number): boolean {
@@ -146,6 +171,43 @@ async function waitForPidsToExit(pids: number[], timeoutMs: number): Promise<boo
   return pids.every((pid) => !processAlive(pid));
 }
 
+async function waitForProcessExit(
+  child: ChildProcess,
+  timeoutMs: number,
+): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return { code: child.exitCode, signal: child.signalCode };
+  }
+  return await new Promise((resolveExit, rejectExit) => {
+    const timeout = setTimeout(() => { rejectExit(new Error(`Process ${String(child.pid)} did not exit.`)); }, timeoutMs);
+    child.once('exit', (code, signal) => {
+      clearTimeout(timeout);
+      resolveExit({ code, signal });
+    });
+  });
+}
+
+async function waitForHealthyServe(
+  dataDir: string,
+  predicate: (status: ServeStatus) => boolean = () => true,
+  supervisor?: SupervisedProcess,
+): Promise<ServeStatus> {
+  const deadline = Date.now() + 75_000;
+  let lastResult: CliResult | null = null;
+  while (Date.now() < deadline) {
+    if (supervisor?.child.pid && !processAlive(supervisor.child.pid)) {
+      throw new Error(`Launch-agent supervisor exited before readiness.\n${supervisor.stderr()}\n${readServeLog(dataDir)}`);
+    }
+    lastResult = await runCli(['serve', 'status'], dataDir, 15_000);
+    if (lastResult.code === 0) {
+      const status = JSON.parse(lastResult.stdout) as ServeStatus;
+      if (status.running && status.healthy && predicate(status)) return status;
+    }
+    await new Promise((resolveWait) => { setTimeout(resolveWait, 100); });
+  }
+  throw new Error(`Headless serve did not become healthy.\n${lastResult?.stderr ?? ''}\n${readServeLog(dataDir)}`);
+}
+
 function readServeLog(dataDir: string): string {
   const logPath = join(dataDir, 'logs', 'serve.log');
   return existsSync(logPath) ? readFileSync(logPath, 'utf8') : '';
@@ -163,6 +225,9 @@ describe.sequential('o8 serve real CLI path', () => {
   afterAll(async () => {
     for (const dataDir of dataDirs) {
       await runCli(['serve', 'stop'], dataDir, 15_000);
+    }
+    for (const supervisor of supervisorProcesses) {
+      try { supervisor.kill('SIGTERM'); } catch {}
     }
     for (const tempDir of tempDirs) rmSync(tempDir, { recursive: true, force: true });
   });
@@ -251,6 +316,15 @@ describe.sequential('o8 serve real CLI path', () => {
     expect(JSON.parse(secondStart.stderr)).toMatchObject({
       error: { code: 'serve_already_running', ambiguous: false },
     });
+    const installWhileRunning = await runCli(['serve', 'agent', 'install'], dataDir);
+    expect(installWhileRunning.code).toBe(5);
+    expect(JSON.parse(installWhileRunning.stderr)).toMatchObject({
+      error: {
+        code: 'serve_already_running',
+        hint: expect.stringContaining('o8 serve stop'),
+        ambiguous: false,
+      },
+    });
 
     const ownedPids = [restartedStatus.pid, ...descendantPids(restartedStatus.pid)];
     expect(ownedPids.length).toBeGreaterThanOrEqual(3);
@@ -259,6 +333,20 @@ describe.sequential('o8 serve real CLI path', () => {
     expect(JSON.parse(stopped.stdout)).toMatchObject({ stopped: true, pid: restartedStatus.pid });
     expect(existsSync(join(dataDir, 'serve.pid'))).toBe(false);
     expect(ownedPids.filter(processAlive)).toEqual([]);
+
+    const restartedFromStopped = await runCli(['serve', 'restart'], dataDir);
+    expect(restartedFromStopped.code, `${restartedFromStopped.stderr}\n${readServeLog(dataDir)}`).toBe(0);
+    const restartedFromStoppedStatus = JSON.parse(restartedFromStopped.stdout) as ServeStatus;
+    expect(restartedFromStoppedStatus).toMatchObject({
+      running: true,
+      healthy: true,
+      mode: 'development',
+      supervisorPid: null,
+    });
+    expect(readServeLog(dataDir).match(/=== o8 serve session /g)).toHaveLength(3);
+    const stoppedAgain = await runCli(['serve', 'stop'], dataDir, 15_000);
+    expect(stoppedAgain.code, stoppedAgain.stderr).toBe(0);
+    expect(processAlive(restartedFromStoppedStatus.pid)).toBe(false);
   }, 120_000);
 
   it('reaps recorded children and stale ownership after the daemon leader is killed', async () => {
@@ -318,8 +406,44 @@ describe.sequential('o8 serve real CLI path', () => {
     }
   }, 30_000);
 
-  it.runIf(process.env.O8_TEST_PACKAGED_SERVE === '1')(
-    'starts from the packaged resource layout, authenticates, and reaps every child',
+  it('keeps supervisor ownership across restart and crash respawn, then exits cleanly on stop', async () => {
+    const dataDir = makeDataDir();
+    const supervisor = startLaunchAgentSupervisor(dataDir);
+    expect(supervisor.child.pid).toBeGreaterThan(0);
+    const supervisorPid = supervisor.child.pid!;
+    const initialStatus = await waitForHealthyServe(dataDir, undefined, supervisor);
+    expect(initialStatus.supervisorPid).toBe(supervisorPid);
+
+    const restarted = await runCli(['serve', 'restart'], dataDir);
+    expect(restarted.code, `${restarted.stderr}\n${supervisor.stderr()}\n${readServeLog(dataDir)}`).toBe(0);
+    const restartedStatus = JSON.parse(restarted.stdout) as ServeStatus;
+    expect(restartedStatus.supervisorPid).toBe(supervisorPid);
+    expect(restartedStatus.pid).not.toBe(initialStatus.pid);
+    expect(processAlive(supervisorPid)).toBe(true);
+    expect(processAlive(restartedStatus.pid)).toBe(true);
+    expect(processAlive(initialStatus.pid)).toBe(false);
+
+    process.kill(restartedStatus.pid, 'SIGKILL');
+    expect(await waitForPidsToExit([restartedStatus.pid], 5_000)).toBe(true);
+    const respawnedStatus = await waitForHealthyServe(
+      dataDir,
+      (status) => status.pid !== restartedStatus.pid,
+      supervisor,
+    );
+    expect(respawnedStatus.supervisorPid).toBe(supervisorPid);
+    expect(processAlive(respawnedStatus.pid)).toBe(true);
+
+    const stopped = await runCli(['serve', 'stop'], dataDir, 15_000);
+    expect(stopped.code, `${stopped.stderr}\n${supervisor.stderr()}\n${readServeLog(dataDir)}`).toBe(0);
+    expect(JSON.parse(stopped.stdout)).toMatchObject({ stopped: true, pid: respawnedStatus.pid });
+    expect(await waitForProcessExit(supervisor.child, 5_000)).toEqual({ code: 0, signal: null });
+    expect(existsSync(join(dataDir, 'serve.pid'))).toBe(false);
+    expect(existsSync(join(dataDir, 'serve-state.json'))).toBe(false);
+    expect(processAlive(respawnedStatus.pid)).toBe(false);
+  }, 120_000);
+
+  it.skipIf(!packagedServeEnabled)(
+    'starts from the packaged resource layout, authenticates, and reaps every child (set O8_TEST_PACKAGED_SERVE=1 to enable)',
     async () => {
       const dataDir = makeDataDir();
       const packaged = makePackagedLayout();
