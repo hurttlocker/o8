@@ -1,5 +1,6 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import {
+  appendFileSync,
   closeSync,
   existsSync,
   mkdirSync,
@@ -20,10 +21,19 @@ import { printHumanKv, printJson, type OutputMode } from '../output.js';
 export const SERVE_LAUNCH_AGENT_LABEL = 'ai.o8.serve';
 export const SERVE_LOG_ROTATE_BYTES = 20 * 1024 * 1024;
 export const SERVE_PREVIOUS_LOG_TRUNCATE_BYTES = 5 * 1024 * 1024;
+export const SERVE_SUPERVISOR_MAX_FAST_FAILURES = 5;
+export const SERVE_SUPERVISOR_BACKOFF_CAP_MS = 30_000;
+const SERVE_SUPERVISOR_BACKOFF_BASE_MS = 1_000;
+const SERVE_SUPERVISOR_READY_POLL_MS = 100;
 
 export interface ServeLogRotationDecision {
   rotateCurrent: boolean;
   truncatePrevious: boolean;
+}
+
+export interface ServeSupervisorRetryDecision {
+  delayMs: number;
+  exhausted: boolean;
 }
 
 export interface ServeLaunchAgentPlistOptions {
@@ -136,6 +146,20 @@ export function formatServeLogSessionBoundary(
   return `\n=== o8 serve session ${startedAt} version=${version} pid=${pid} ===\n`;
 }
 
+export function decideServeSupervisorRetry(failureCount: number): ServeSupervisorRetryDecision {
+  const exhausted = failureCount >= SERVE_SUPERVISOR_MAX_FAST_FAILURES;
+  return {
+    delayMs: exhausted
+      ? 0
+      : Math.min(SERVE_SUPERVISOR_BACKOFF_BASE_MS * (2 ** Math.max(0, failureCount - 1)), SERVE_SUPERVISOR_BACKOFF_CAP_MS),
+    exhausted,
+  };
+}
+
+export function formatServeSupervisorFailure(timestamp: string, failureCount: number): string {
+  return `=== o8 serve supervisor ${timestamp} exiting after ${failureCount} consecutive daemon failures before ready; launchd will retry ===\n`;
+}
+
 function fileSize(path: string): number | null {
   try {
     return statSync(path).size;
@@ -189,6 +213,33 @@ function clearSupervisorPid(stateFile: string): void {
 export function readServeSupervisorPid(stateFile: string): number | null {
   const pid = readServeStateDocument(stateFile)?.supervisorPid;
   return Number.isInteger(pid) && Number(pid) > 0 ? Number(pid) : null;
+}
+
+function waitForChildExit(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+  return new Promise((resolve) => { child.once('exit', () => resolve()); });
+}
+
+async function daemonReachedReadyBeforeExit(
+  child: ChildProcess,
+  stateFile: string,
+  leafPid: number,
+): Promise<boolean> {
+  const exited = waitForChildExit(child);
+  let reachedReady = false;
+  while (child.exitCode === null && child.signalCode === null) {
+    const state = readServeStateDocument(stateFile);
+    if (state?.pid === leafPid && state.status === 'ready') {
+      reachedReady = true;
+      break;
+    }
+    await Promise.race([
+      exited,
+      new Promise((resolve) => { setTimeout(resolve, SERVE_SUPERVISOR_READY_POLL_MS); }),
+    ]);
+  }
+  await exited;
+  return reachedReady;
 }
 
 export async function waitForSupervisorRestart<T>(
@@ -300,14 +351,30 @@ export async function superviseServeDaemon(options: SuperviseServeDaemonOptions)
   let child: ReturnType<typeof spawn> | null = null;
   let stopping = false;
   let restartRequested = false;
+  let consecutiveFastFailures = 0;
+  let resolveDelay: (() => void) | null = null;
+  const wakeDelay = (): void => { resolveDelay?.(); };
+  const waitForDelay = async (delayMs: number): Promise<void> => {
+    await new Promise<void>((resolve) => {
+      const finish = (): void => {
+        clearTimeout(timer);
+        resolveDelay = null;
+        resolve();
+      };
+      const timer = setTimeout(finish, delayMs);
+      resolveDelay = finish;
+    });
+  };
   const stopSupervisor = (): void => {
     stopping = true;
     try { child?.kill('SIGTERM'); } catch {}
+    wakeDelay();
   };
   const restartChild = (): void => {
     if (stopping) return;
     restartRequested = true;
     try { child?.kill('SIGTERM'); } catch {}
+    wakeDelay();
   };
   process.once('SIGTERM', stopSupervisor);
   process.once('SIGINT', stopSupervisor);
@@ -335,6 +402,13 @@ export async function superviseServeDaemon(options: SuperviseServeDaemonOptions)
       if (!child.pid) {
         throw new CliError('serve_spawn_failed', 'Failed to spawn the headless daemon.', EXIT.CONNECTION_REFUSED);
       }
+      if (stopping) {
+        try { child.kill('SIGTERM'); } catch {}
+        await waitForChildExit(child);
+        child = null;
+        break;
+      }
+      if (restartRequested) restartRequested = false;
       try {
         writeFileSync(options.pidFile, String(child.pid), { flag: 'wx', mode: 0o600 });
       } catch (error) {
@@ -343,22 +417,42 @@ export async function superviseServeDaemon(options: SuperviseServeDaemonOptions)
       }
 
       const leafPid = child.pid;
-      await new Promise<void>((resolve) => { child?.once('exit', () => resolve()); });
+      const reachedReady = await daemonReachedReadyBeforeExit(child, options.stateFile, leafPid);
       try {
         if (readFileSync(options.pidFile, 'utf8').trim() === String(leafPid)) {
           rmSync(options.pidFile, { force: true });
         }
       } catch {}
       child = null;
+      if (reachedReady) consecutiveFastFailures = 0;
       if (stopping) break;
-      if (!restartRequested && process.platform !== 'win32') {
+      if (restartRequested) continue;
+      if (process.platform !== 'win32') {
         try { process.kill(-leafPid, 'SIGTERM'); } catch {}
-        await new Promise((resolve) => { setTimeout(resolve, 1_000); });
+        await waitForDelay(1_000);
         try { process.kill(-leafPid, 'SIGKILL'); } catch {}
       }
+      if (stopping) break;
+      if (restartRequested) continue;
+      if (reachedReady) continue;
+
+      consecutiveFastFailures += 1;
+      const retry = decideServeSupervisorRetry(consecutiveFastFailures);
+      if (retry.exhausted) {
+        appendFileSync(
+          options.logPath,
+          formatServeSupervisorFailure(new Date().toISOString(), consecutiveFastFailures),
+          { mode: 0o600 },
+        );
+        return EXIT.CONNECTION_REFUSED;
+      }
+      await waitForDelay(retry.delayMs);
     }
     return EXIT.OK;
   } finally {
+    wakeDelay();
+    process.removeListener('SIGTERM', stopSupervisor);
+    process.removeListener('SIGINT', stopSupervisor);
     process.removeListener('SIGHUP', restartChild);
     clearSupervisorPid(options.stateFile);
   }

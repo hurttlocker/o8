@@ -55,6 +55,18 @@ function makePackagedLayout(): { cliEntrypoint: string; serverRoot: string } {
   return { cliEntrypoint: packagedCli, serverRoot };
 }
 
+function makeFailingPackagedLayout(): { cliEntrypoint: string; serverRoot: string } {
+  const layoutRoot = mkdtempSync(join(tmpdir(), 'o8-failing-serve-layout-'));
+  tempDirs.add(layoutRoot);
+  const serverRoot = join(layoutRoot, 'o8.app', 'Contents', 'Resources', 'server');
+  mkdirSync(join(serverRoot, 'bin'), { recursive: true });
+  const packagedCli = join(serverRoot, 'bin', 'o8.mjs');
+  copyFileSync(cliEntrypoint, packagedCli);
+  writeFileSync(join(serverRoot, 'server.js'), 'process.exit(2);\n');
+  writeFileSync(join(serverRoot, 'ws-server.mjs'), 'process.exit(2);\n');
+  return { cliEntrypoint: packagedCli, serverRoot };
+}
+
 interface CliResult {
   code: number;
   stdout: string;
@@ -118,10 +130,13 @@ function runCli(
   });
 }
 
-function startLaunchAgentSupervisor(dataDir: string): SupervisedProcess {
-  const child = spawn(process.execPath, [cliEntrypoint, 'serve', '__launch_agent'], {
-    cwd: root,
-    env: cliEnv(dataDir),
+function startLaunchAgentSupervisor(
+  dataDir: string,
+  options: { cliEntrypoint?: string; cwd?: string; serveRoot?: string } = {},
+): SupervisedProcess {
+  const child = spawn(process.execPath, [options.cliEntrypoint ?? cliEntrypoint, 'serve', '__launch_agent'], {
+    cwd: options.cwd ?? root,
+    env: cliEnv(dataDir, options.serveRoot),
     stdio: ['ignore', 'ignore', 'pipe'],
   });
   supervisorProcesses.add(child);
@@ -441,6 +456,22 @@ describe.sequential('o8 serve real CLI path', () => {
     expect(existsSync(join(dataDir, 'serve-state.json'))).toBe(false);
     expect(processAlive(respawnedStatus.pid)).toBe(false);
   }, 120_000);
+
+  it('hands persistent pre-ready failures back to launchd after bounded retries', async () => {
+    const dataDir = makeDataDir();
+    const packaged = makeFailingPackagedLayout();
+    const supervisor = startLaunchAgentSupervisor(dataDir, {
+      cliEntrypoint: packaged.cliEntrypoint,
+      cwd: packaged.serverRoot,
+      serveRoot: join(packaged.serverRoot, 'missing-source-checkout'),
+    });
+    expect(await waitForProcessExit(supervisor.child, 45_000)).toEqual({ code: 2, signal: null });
+    const log = readServeLog(dataDir);
+    expect(log.match(/=== o8 serve session /g)).toHaveLength(5);
+    expect(log).toContain('exiting after 5 consecutive daemon failures before ready; launchd will retry');
+    expect(existsSync(join(dataDir, 'serve.pid'))).toBe(false);
+    expect(existsSync(join(dataDir, 'serve-state.json'))).toBe(false);
+  }, 60_000);
 
   it.skipIf(!packagedServeEnabled)(
     'starts from the packaged resource layout, authenticates, and reaps every child (set O8_TEST_PACKAGED_SERVE=1 to enable)',
