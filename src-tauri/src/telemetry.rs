@@ -312,13 +312,12 @@ mod tests {
     use super::{read_toggle, scrub_paths};
     use std::path::Path;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use std::sync::Mutex;
-
-    static TOGGLE_ENV_LOCK: Mutex<()> = Mutex::new(());
     static NEXT_TEST_DIR: AtomicU64 = AtomicU64::new(0);
 
     fn read_toggle_from(setup: impl FnOnce(&Path)) -> bool {
-        let _lock = TOGGLE_ENV_LOCK.lock().expect("toggle test env lock");
+        let _lock = crate::DATA_DIR_ENV_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let previous_o8 = std::env::var_os("O8_DATA_DIR");
         let previous_cortex = std::env::var_os("CORTEX_IDE_DATA_DIR");
         let test_dir = std::env::temp_dir().join(format!(
