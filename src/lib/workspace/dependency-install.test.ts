@@ -22,6 +22,7 @@ import {
   runDependencyInstall,
   type SupportedPackageManager,
 } from './dependency-install';
+import { digestDependencyTree } from './dependency-image-source-authority';
 
 const roots: string[] = [];
 const versions: Record<SupportedPackageManager, string> = {
@@ -377,22 +378,50 @@ describe('package-manager-native dependency install contract', { timeout: 30_000
     })).rejects.toThrow(/escapes its workspace/);
   });
 
-  it('refuses external links and shared hardlinks in an installed view', async () => {
+  it('allows two installed paths to share one inode inside the private view', async () => {
+    const workspace = fixture('npm');
+    const platformBinary = path.join(workspace, 'node_modules', 'platform', 'bin', 'tool');
+    const wrapperBinary = path.join(workspace, 'node_modules', 'wrapper', 'bin', 'tool');
+    mkdirSync(path.dirname(platformBinary), { recursive: true });
+    mkdirSync(path.dirname(wrapperBinary), { recursive: true });
+    writeFileSync(platformBinary, 'internal hardlink\n');
+    linkSync(platformBinary, wrapperBinary);
+
+    await expect(auditPrivateDependencyView(workspace)).resolves.toBeUndefined();
+    await expect(digestDependencyTree(path.join(workspace, 'node_modules'))).resolves.toMatch(
+      /^[0-9a-f]{64}$/,
+    );
+  });
+
+  it('refuses an installed file with a hardlink outside the private view', async () => {
     const workspace = fixture('npm');
     const external = path.join(path.dirname(workspace), `${path.basename(workspace)}-outside`);
     roots.push(external);
     mkdirSync(external);
     writeFileSync(path.join(external, 'shared.js'), 'shared\n');
     mkdirSync(path.join(workspace, 'node_modules', 'fixture'), { recursive: true });
-    symlinkSync(external, path.join(workspace, 'node_modules', 'external'));
-    await expect(auditPrivateDependencyView(workspace)).rejects.toThrow(/escapes/);
-
-    rmSync(path.join(workspace, 'node_modules', 'external'));
     linkSync(
       path.join(external, 'shared.js'),
       path.join(workspace, 'node_modules', 'fixture', 'shared.js'),
     );
-    await expect(auditPrivateDependencyView(workspace)).rejects.toThrow(/shared hardlink/);
+
+    await expect(auditPrivateDependencyView(workspace)).rejects.toThrow(
+      /shared hardlink: node_modules\/fixture\/shared\.js \(nlink=2, internal=1\)/,
+    );
+    await expect(digestDependencyTree(path.join(workspace, 'node_modules'))).rejects.toThrow(
+      /shared hardlink: fixture\/shared\.js \(nlink=2, internal=1\)/,
+    );
+  });
+
+  it('still refuses a symlink that escapes the private workspace', async () => {
+    const workspace = fixture('npm');
+    const external = path.join(path.dirname(workspace), `${path.basename(workspace)}-outside`);
+    roots.push(external);
+    mkdirSync(external);
+    mkdirSync(path.join(workspace, 'node_modules'), { recursive: true });
+    symlinkSync(external, path.join(workspace, 'node_modules', 'external'));
+
+    await expect(auditPrivateDependencyView(workspace)).rejects.toThrow(/escapes/);
   });
 
   it.each([
