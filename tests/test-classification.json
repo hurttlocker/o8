@@ -1838,6 +1838,7 @@
       "path": "tests/o8-serve-real-path.test.ts",
       "reasons": [
         "child-process",
+        "network-listener",
         "process-signal",
         "real-path"
       ]
