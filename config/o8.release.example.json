@@ -8,6 +8,8 @@
   "sentryDsn": "",
   "//feedbackChannelId": "NON-SECRET private intake channel id used only by maintainer reconciliation scripts. Set O8_FEEDBACK_CHANNEL_ID to override. The desktop does not read this value; it sends authenticated reports to the hosted relay, whose downstream credential remains server-side.",
   "feedbackChannelId": "",
+  "//releasesWebhookUrl": "PUBLIC #releases channel webhook used by scripts/release.mjs only after a release is publicly installable. Set O8_RELEASES_WEBHOOK_URL to override. It is release-operator configuration and is not embedded in the desktop app.",
+  "releasesWebhookUrl": "",
   "//fixedWebhookUrl": "PUBLIC #fixed channel Discord webhook. Only ever carries SHIPPED fixes, credited to the reporter's GitHub handle — never an open problem, because open problems rot and fixed ones never do. Used by scripts/publish-fixed.mjs (npm run publish:fixed) at release time, not by the app at runtime. An O8_FIXED_WEBHOOK_URL env var overrides. Absent → publish:fixed refuses to run.",
   "fixedWebhookUrl": ""
 }
