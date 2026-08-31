@@ -1,14 +1,8 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import {
-  closeSync,
-  existsSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
+  appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync,
+  renameSync, rmSync, writeFileSync,
 } from 'node:fs';
 import { createServer, Socket } from 'node:net';
 import { dirname, join, parse } from 'node:path';
@@ -16,14 +10,23 @@ import { fileURLToPath } from 'node:url';
 
 import { CliError, EXIT } from '../api.js';
 import { resolveCliDataDir } from '../config.js';
-import { printHumanKv, printJson, type OutputMode } from '../output.js';
+import { type OutputMode } from '../output.js';
+import {
+  formatServeLogSessionBoundary,
+  prepareServeLog,
+  readServeSupervisorPid,
+  runServeAgentCommand,
+  superviseServeDaemon,
+  waitForSupervisorRestart,
+} from './serve-lifecycle.js';
+import { CLI_VERSION } from './version.js';
+import { outputServeNotRunning, outputServeState, outputServeStopped } from './serve-output.js';
 
 const PROD_API_PORT_BLOCK = [47100, 47101, 47102, 47103, 47104] as const;
 const PROD_WS_PORT_BLOCK = [47105, 47106, 47107, 47108, 47109] as const;
 const START_TIMEOUT_MS = 60_000;
 const STOP_TIMEOUT_MS = 8_000;
 const POLL_MS = 100;
-const DESKTOP_COEXISTENCE_NOTE = 'The desktop app uses the next available API and WebSocket port block entries, so both can coexist.';
 
 type ServeMode = 'development' | 'packaged';
 type ServeStatus = 'starting' | 'ready' | 'stopping' | 'failed';
@@ -44,6 +47,8 @@ interface ServeState {
   startedAt: string;
   status: ServeStatus;
   children: ServeChildState[];
+  supervisorPid?: number;
+  version?: string;
   error?: string;
 }
 
@@ -141,10 +146,30 @@ function writeState(paths: ServePaths, state: ServeState): void {
 }
 
 function cleanStaleOwner(paths: ServePaths): void {
+  const supervisorPid = readServeSupervisorPid(paths.stateFile);
+  if (supervisorPid && processAlive(supervisorPid)) return;
   const pid = readOwnerPid(paths);
   if (pid && processAlive(pid)) return;
   rmSync(paths.pidFile, { force: true });
   rmSync(paths.stateFile, { force: true });
+}
+
+async function assertServeAgentInstallAvailable(paths: ServePaths): Promise<void> {
+  cleanStaleOwner(paths);
+  const supervisorPid = readServeSupervisorPid(paths.stateFile);
+  const ownerPid = readOwnerPid(paths);
+  const runningPid = supervisorPid && processAlive(supervisorPid)
+    ? supervisorPid
+    : ownerPid && processAlive(ownerPid) ? ownerPid : null;
+  if (runningPid) {
+    throw new CliError(
+      'serve_already_running',
+      `Cannot install the launch agent while headless o8 is already running with pid ${runningPid}.`,
+      EXIT.CONFLICT,
+      'Run `o8 serve stop`, then retry `o8 serve agent install`.',
+    );
+  }
+  await assertDataDirAvailableForServe(paths);
 }
 
 function wait(ms: number): Promise<void> {
@@ -404,54 +429,17 @@ async function waitForDaemonReady(paths: ServePaths, pid: number): Promise<Serve
   );
 }
 
-function outputState(mode: OutputMode, state: ServeState, running: boolean, healthy: boolean): void {
-  const payload = {
-    schema: 'o8/cli/serve-status/v1',
-    running,
-    healthy,
-    pid: state.pid,
-    pgid: state.pgid,
-    apiPort: state.apiPort,
-    wsPort: state.wsPort,
-    mode: state.mode,
-    status: state.status,
-    children: state.children,
-    startedAt: state.startedAt,
-    note: DESKTOP_COEXISTENCE_NOTE,
-  };
-  if (!mode.human) {
-    printJson(payload);
-    return;
-  }
-  printHumanKv([
-    ['running', String(running)],
-    ['healthy', String(healthy)],
-    ['pid', String(state.pid)],
-    ['pgid', String(state.pgid)],
-    ['api', String(state.apiPort)],
-    ['ws', String(state.wsPort)],
-    ['mode', state.mode],
-    ['status', state.status],
-    ['note', DESKTOP_COEXISTENCE_NOTE],
-  ]);
-}
-
-function outputStopped(mode: OutputMode, pid: number): number {
-  const payload = { schema: 'o8/cli/serve-stop/v1', stopped: true, pid };
-  if (mode.human) printHumanKv([['stopped', 'true'], ['pid', String(pid)]]);
-  else printJson(payload);
-  return EXIT.OK;
-}
-
 async function startServe(mode: OutputMode): Promise<number> {
   const paths = servePaths();
   mkdirSync(dirname(paths.logFile), { recursive: true });
   cleanStaleOwner(paths);
   const existingPid = readOwnerPid(paths);
-  if (existingPid && processAlive(existingPid)) {
+  const supervisorPid = readServeSupervisorPid(paths.stateFile);
+  const runningPid = supervisorPid && processAlive(supervisorPid) ? supervisorPid : existingPid;
+  if (runningPid && processAlive(runningPid)) {
     throw new CliError(
       'serve_already_running',
-      `Headless o8 is already running with pid ${existingPid}.`,
+      `Headless o8 is already running with pid ${runningPid}.`,
       EXIT.CONFLICT,
       'Run `o8 serve status` or `o8 serve stop`.',
     );
@@ -459,9 +447,7 @@ async function startServe(mode: OutputMode): Promise<number> {
   await assertDataDirAvailableForServe(paths);
 
   const plan = resolveLaunchPlan();
-  const previousLog = `${paths.logFile}.prev`;
-  rmSync(previousLog, { force: true });
-  if (existsSync(paths.logFile)) renameSync(paths.logFile, previousLog);
+  prepareServeLog(paths.logFile);
   const logFd = openSync(paths.logFile, 'a', 0o600);
   const cliEntry = process.argv[1];
   const child = spawn(process.execPath, [cliEntry, 'serve', '__daemon'], {
@@ -494,8 +480,28 @@ async function startServe(mode: OutputMode): Promise<number> {
   }
   child.unref();
   const state = await waitForDaemonReady(paths, child.pid);
-  outputState(mode, state, true, true);
+  outputServeState(mode, state, true, true);
   return EXIT.OK;
+}
+
+async function runLaunchAgent(): Promise<number> {
+  const paths = servePaths();
+  mkdirSync(paths.dataDir, { recursive: true });
+  cleanStaleOwner(paths);
+  await assertDataDirAvailableForServe(paths);
+  const ownerPid = readOwnerPid(paths);
+  if (ownerPid && processAlive(ownerPid)) {
+    throw new CliError('serve_already_running', `Headless o8 is already running with pid ${ownerPid}.`, EXIT.CONFLICT);
+  }
+  const plan = resolveLaunchPlan();
+  return superviseServeDaemon({
+    cliEntry: process.argv[1],
+    launchMode: plan.mode,
+    logPath: paths.logFile,
+    pidFile: paths.pidFile,
+    stateFile: paths.stateFile,
+    workingDirectory: plan.root,
+  });
 }
 
 async function statusServe(mode: OutputMode): Promise<number> {
@@ -505,64 +511,51 @@ async function statusServe(mode: OutputMode): Promise<number> {
   if (!pid || !state || state.pid !== pid || !processAlive(pid)) {
     const hasRecoverableChildren = Boolean(state?.children.some((child) => processAlive(child.pid)));
     if (!hasRecoverableChildren) cleanStaleOwner(paths);
-    const payload = {
-      schema: 'o8/cli/serve-status/v1',
-      running: false,
-      healthy: false,
-      note: DESKTOP_COEXISTENCE_NOTE,
-    };
-    if (mode.human) {
-      printHumanKv([
-        ['running', 'false'],
-        ['healthy', 'false'],
-        ['note', DESKTOP_COEXISTENCE_NOTE],
-      ]);
-    }
-    else printJson(payload);
-    return EXIT.OK;
+    return outputServeNotRunning(mode);
   }
   const healthy = state.status === 'ready'
     && await apiIsReady(state.apiPort)
     && await portAcceptsConnections(state.wsPort);
-  outputState(mode, state, true, healthy);
+  outputServeState(mode, state, true, healthy);
   return healthy ? EXIT.OK : EXIT.CONNECTION_REFUSED;
 }
 
-async function stopServe(mode: OutputMode): Promise<number> {
+async function stopServe(mode: OutputMode, report = true): Promise<number> {
   const paths = servePaths();
   const pid = readOwnerPid(paths);
   const state = readState(paths);
+  const supervisorPid = readServeSupervisorPid(paths.stateFile);
   const stateMatchesOwner = state && (!pid || state.pid === pid) ? state : null;
   const leaderPid = pid ?? stateMatchesOwner?.pid ?? null;
-  if (!leaderPid) {
+  const liveSupervisorPid = supervisorPid && processAlive(supervisorPid) ? supervisorPid : null;
+  const resultPid = leaderPid ?? liveSupervisorPid;
+  if (!resultPid) {
     cleanStaleOwner(paths);
     throw new CliError('serve_not_running', 'Headless o8 is not running.', EXIT.NOT_FOUND);
   }
   const childPids = stateMatchesOwner?.children.map((child) => child.pid) ?? [];
-  const trackedPids = uniquePids([leaderPid, ...childPids]);
-  if (!processAlive(leaderPid)) {
+  const trackedPids = uniquePids([liveSupervisorPid ?? 0, leaderPid ?? 0, ...childPids]);
+  if (!liveSupervisorPid && (!leaderPid || !processAlive(leaderPid))) {
     const stopped = await terminateTrackedPids(childPids, stateMatchesOwner?.pgid, 1_000);
     cleanStaleOwner(paths);
     if (stopped && trackedPids.every((trackedPid) => !processAlive(trackedPid)) && !existsSync(paths.pidFile)) {
-      return outputStopped(mode, leaderPid);
+      return report ? outputServeStopped(mode, resultPid) : EXIT.OK;
     }
     throw new CliError(
       'serve_stop_failed',
-      `Headless o8 pid ${leaderPid} died, but one or more recorded children could not be stopped.`,
+      `Headless o8 pid ${resultPid} died, but one or more recorded children could not be stopped.`,
       EXIT.CONFLICT,
       `Inspect ${paths.logFile}.`,
     );
   }
-  try {
-    process.kill(leaderPid, 'SIGTERM');
-  } catch {}
+  signalPids([liveSupervisorPid ?? leaderPid ?? 0], 'SIGTERM');
   const startedAt = Date.now();
   const deadline = startedAt + STOP_TIMEOUT_MS;
   const escalationAt = startedAt + Math.floor(STOP_TIMEOUT_MS / 2);
   let childrenSignaled = false;
   while (Date.now() < deadline) {
     if (!childrenSignaled && Date.now() >= escalationAt) {
-      signalPids(childPids, 'SIGTERM');
+      signalPids(trackedPids, 'SIGTERM');
       childrenSignaled = true;
     }
     if (
@@ -570,7 +563,7 @@ async function stopServe(mode: OutputMode): Promise<number> {
       && !processGroupAlive(stateMatchesOwner?.pgid)
       && !existsSync(paths.pidFile)
     ) {
-      return outputStopped(mode, leaderPid);
+      return report ? outputServeStopped(mode, resultPid) : EXIT.OK;
     }
     await wait(POLL_MS);
   }
@@ -581,14 +574,48 @@ async function stopServe(mode: OutputMode): Promise<number> {
     && !processGroupAlive(stateMatchesOwner?.pgid);
   if (allProcessesStopped) cleanStaleOwner(paths);
   if (allProcessesStopped && !existsSync(paths.pidFile)) {
-    return outputStopped(mode, leaderPid);
+    return report ? outputServeStopped(mode, resultPid) : EXIT.OK;
   }
   throw new CliError(
     'serve_stop_failed',
-    `Headless o8 pid ${leaderPid} did not stop before the shutdown deadline.`,
+    `Headless o8 pid ${resultPid} did not stop before the shutdown deadline.`,
     EXIT.CONFLICT,
     `Inspect ${paths.logFile}.`,
   );
+}
+
+async function restartServe(mode: OutputMode): Promise<number> {
+  const paths = servePaths();
+  const state = readState(paths);
+  const supervisorPid = readServeSupervisorPid(paths.stateFile);
+  if (supervisorPid && processAlive(supervisorPid)) {
+    const previousPid = readOwnerPid(paths) ?? state?.pid ?? null;
+    process.kill(supervisorPid, 'SIGHUP');
+    const restarted = await waitForSupervisorRestart({
+      supervisorPid,
+      timeoutMs: START_TIMEOUT_MS,
+      pollMs: POLL_MS,
+      logPath: paths.logFile,
+      processAlive,
+      readReadyState: async () => {
+        const pid = readOwnerPid(paths);
+        const current = readState(paths);
+        if (!pid || pid === previousPid || current?.pid !== pid) return null;
+        if (current.supervisorPid !== supervisorPid || current.status !== 'ready') return null;
+        return await apiIsReady(current.apiPort) && await portAcceptsConnections(current.wsPort) ? current : null;
+      },
+    });
+    outputServeState(mode, restarted, true, true);
+    return EXIT.OK;
+  }
+  const ownerPid = readOwnerPid(paths);
+  const recoverableChildren = state?.children.some((child) => processAlive(child.pid)) ?? false;
+  if ((!ownerPid || !processAlive(ownerPid)) && !recoverableChildren) {
+    cleanStaleOwner(paths);
+    return startServe(mode);
+  }
+  await stopServe(mode, false);
+  return startServe(mode);
 }
 
 async function runDaemon(): Promise<number> {
@@ -597,6 +624,8 @@ async function runDaemon(): Promise<number> {
   const ownerDeadline = Date.now() + 2_000;
   while (readOwnerPid(paths) !== process.pid && Date.now() < ownerDeadline) await wait(10);
   if (readOwnerPid(paths) !== process.pid) return EXIT.CONFLICT;
+  const startedAt = new Date().toISOString();
+  appendFileSync(paths.logFile, formatServeLogSessionBoundary(startedAt, CLI_VERSION, process.pid), { mode: 0o600 });
 
   const plan = resolveLaunchPlan();
   const requestedMode = process.env.O8_SERVE_LAUNCH_MODE;
@@ -611,6 +640,7 @@ async function runDaemon(): Promise<number> {
   writeFileSync(paths.apiPortFile, String(apiPort), { mode: 0o600 });
   writeFileSync(paths.wsPortFile, String(wsPort), { mode: 0o600 });
   const token = getOrCreateToken(paths);
+  const supervisorPid = parsePid(process.env.O8_SERVE_SUPERVISOR_PID ?? '');
 
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -647,9 +677,11 @@ async function runDaemon(): Promise<number> {
     wsPort,
     mode: plan.mode,
     root: plan.root,
-    startedAt: new Date().toISOString(),
+    startedAt,
     status: 'starting',
     children: [],
+    ...(supervisorPid ? { supervisorPid } : {}),
+    version: CLI_VERSION,
   };
   writeState(paths, state);
 
@@ -735,17 +767,31 @@ export async function runServe(
   subcommand: string | undefined,
   rest: string[],
 ): Promise<number> {
+  if (subcommand === 'agent') {
+    const paths = servePaths();
+    const plan = resolveLaunchPlan();
+    return runServeAgentCommand(mode, rest[0], rest.slice(1), {
+      cliEntry: process.argv[1],
+      dataDir: paths.dataDir,
+      logPath: paths.logFile,
+      nodePath: process.execPath,
+      workingDirectory: plan.root,
+      assertInstallAvailable: () => assertServeAgentInstallAvailable(paths),
+    });
+  }
   if (rest.length > 0) {
     throw new CliError('invalid_serve_args', `Unexpected serve arguments: ${rest.join(' ')}`, EXIT.INVALID_ARGS);
   }
   if (!subcommand) return startServe(mode);
   if (subcommand === 'status') return statusServe(mode);
   if (subcommand === 'stop') return stopServe(mode);
+  if (subcommand === 'restart') return restartServe(mode);
+  if (subcommand === '__launch_agent') return runLaunchAgent();
   if (subcommand === '__daemon') return runDaemon();
   throw new CliError(
     'unknown_serve_subcommand',
     `Unknown serve subcommand: ${subcommand}`,
     EXIT.INVALID_ARGS,
-    'Use `o8 serve`, `o8 serve status`, or `o8 serve stop`.',
+    'Use `o8 serve`, `o8 serve status`, `o8 serve stop`, `o8 serve restart`, or `o8 serve agent status`.',
   );
 }

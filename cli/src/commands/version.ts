@@ -15,7 +15,7 @@ import { printHumanKv, printJson, type OutputMode } from '../output.js';
 // Replaced by esbuild --define at build time (cli/esbuild.config.mjs). Falls
 // back to a dev marker when run unbundled (e.g. via tsx during development).
 declare const __O8_CLI_VERSION__: string | undefined;
-const CLI_VERSION = typeof __O8_CLI_VERSION__ !== 'undefined' ? __O8_CLI_VERSION__ : '0.0.0-dev';
+export const CLI_VERSION = typeof __O8_CLI_VERSION__ !== 'undefined' ? __O8_CLI_VERSION__ : '0.0.0-dev';
 
 interface PanelStatus {
   version: string | null;
