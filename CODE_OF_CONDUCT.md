@@ -60,7 +60,7 @@ representative at an online or offline event.
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported to the community leaders through the
-[o8 Discord](https://discord.gg/gH3UbbTJ7k). Ask a moderator for a private
+[o8 Discord](https://o8.run/discord). Ask a moderator for a private
 conversation rather than posting sensitive details in a public channel. All
 complaints will be reviewed and investigated promptly and fairly.
 

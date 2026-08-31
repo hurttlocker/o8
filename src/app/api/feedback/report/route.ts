@@ -8,9 +8,10 @@ import { readIdeSurfaceState } from '@/lib/runtime/ide-surface-state';
 import { collectCrashDigest, type CrashDigest } from '@/lib/telemetry/crash-digest';
 import { REPORT_DATA_SHARING_OFF_ERROR, REPORT_DATA_SHARING_OFF_MESSAGE } from '@/lib/feedback/data-sharing';
 import { newReportId, recordReport, reportTitle } from '@/lib/feedback/report-ledger';
-import { resolveFeedbackWebhook } from '@/lib/feedback/webhooks';
 import { verifyToken } from '@/lib/auth/jwt';
 import { resolveCrashReportsEnabledSync } from '@/lib/operator/defaults';
+import { ensureFreeEntitlement } from '@/lib/entitlement/bootstrap';
+import { configuredLicenseServerBaseUrl, readCachedEntitlement } from '@/lib/entitlement/license';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -419,12 +420,20 @@ function buildEmbed(category: FeedbackCategory, message: string, diagnostics: Re
   };
 }
 
-async function postDiscordReport(category: FeedbackCategory, message: string, diagnostics: ReportDiagnostics, images: ParsedImage[], crashes: CrashDigest, client: ClientDiagnostics | null, report: Report): Promise<{ ok: true } | { ok: false; error: string }> {
-  const webhookUrl = resolveFeedbackWebhook();
-  if (!webhookUrl) {
-    // Fail loudly. Silently dropping a report the operator spent a minute writing
-    // is worse than erroring — they'd walk away believing they were heard.
-    return { ok: false, error: 'Report intake is not configured on this build (no feedback webhook).' };
+async function postHostedReport(category: FeedbackCategory, message: string, diagnostics: ReportDiagnostics, images: ParsedImage[], crashes: CrashDigest, client: ClientDiagnostics | null, report: Report): Promise<{ ok: true } | { ok: false; error: string }> {
+  const relayBaseUrl = configuredLicenseServerBaseUrl();
+  if (!relayBaseUrl) {
+    return { ok: false, error: 'Report intake is disabled because o8 hosted services are off.' };
+  }
+
+  // Every report reaches a hosted endpoint now, so authenticate it with the
+  // same signed, install-scoped entitlement used by other hosted operations.
+  // The downstream private-channel credential stays on the relay and never
+  // enters a packaged desktop build.
+  await ensureFreeEntitlement({ allowPinnedPlan: true });
+  const planToken = readCachedEntitlement()?.licenseKey?.trim();
+  if (!planToken) {
+    return { ok: false, error: 'Could not authenticate this report. Check your connection and try again.' };
   }
 
   const embed = {
@@ -463,24 +472,38 @@ async function postDiscordReport(category: FeedbackCategory, message: string, di
       files.forEach((file, i) => {
         form.append(`files[${i}]`, new Blob([file.bytes], { type: file.mime }), file.filename);
       });
-      response = await fetch(webhookUrl, { method: 'POST', body: form });
-    } else {
-      response = await fetch(webhookUrl, {
+      response = await fetch(`${relayBaseUrl}/v1/feedback`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${planToken}` },
+        body: form,
+        signal: AbortSignal.timeout(15_000),
+      });
+    } else {
+      response = await fetch(`${relayBaseUrl}/v1/feedback`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${planToken}`,
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(15_000),
       });
     }
     if (!response.ok) {
-      const detail = await response.text().catch(() => '');
-      const suffix = detail.trim() ? `: ${truncate(detail.trim(), 180)}` : '';
-      return { ok: false, error: `Discord webhook returned HTTP ${response.status}${suffix}` };
+      if (response.status === 401) return { ok: false, error: 'Report authentication expired. Try again.' };
+      if (response.status === 429) return { ok: false, error: 'Too many reports were sent recently. Try again later.' };
+      if (response.status === 503) return { ok: false, error: 'Report intake is temporarily unavailable.' };
+      return { ok: false, error: `Report relay returned HTTP ${response.status}.` };
+    }
+    const receipt = (await response.json().catch(() => null)) as { ok?: unknown; reportId?: unknown } | null;
+    if (receipt?.ok !== true || receipt.reportId !== report.id) {
+      return { ok: false, error: 'Report relay returned an invalid receipt.' };
     }
     return { ok: true };
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'Discord webhook request failed.',
+      error: error instanceof Error ? error.message : 'Report relay request failed.',
     };
   }
 }
@@ -521,7 +544,7 @@ export async function POST(request: NextRequest) {
     const client = body.includeDiagnostics === true ? parseClientDiagnostics(body.client) : null;
     const report: Report = { id: newReportId(), reporter: await resolveReporter(request) };
 
-    const posted = await postDiscordReport(validated.category, validated.message, diagnostics, parsedImages.images, crashes, client, report);
+    const posted = await postHostedReport(validated.category, validated.message, diagnostics, parsedImages.images, crashes, client, report);
     if (!posted.ok) return jsonError(posted.error, 502);
 
     // Only ledger a report that actually reached Discord — an id we hand back for

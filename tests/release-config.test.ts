@@ -33,4 +33,14 @@ describe('release config', () => {
       clerkPublishableKey: 'pk_test_from_env',
     });
   });
+
+  it('never resolves the retired feedback webhook into packaged build config', () => {
+    const root = fixture({ feedbackWebhookUrl: 'https://private.test/webhook' });
+    const config = resolveReleaseConfig(root, {
+      O8_FEEDBACK_WEBHOOK_URL: 'https://private.test/env-webhook',
+    });
+
+    expect(config).not.toHaveProperty('feedbackWebhookUrl');
+    expect(JSON.stringify(config)).not.toContain('private.test');
+  });
 });

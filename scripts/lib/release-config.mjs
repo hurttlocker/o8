@@ -5,7 +5,6 @@ const FILE_KEYS = Object.freeze([
   'githubOAuthClientId',
   'clerkPublishableKey',
   'sentryDsn',
-  'feedbackWebhookUrl',
 ]);
 
 /**
@@ -31,7 +30,6 @@ export function resolveReleaseConfig(root, env = process.env) {
     githubOAuthClientId: env.GITHUB_OAUTH_CLIENT_ID,
     clerkPublishableKey: env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
     sentryDsn: env.SENTRY_DSN,
-    feedbackWebhookUrl: env.O8_FEEDBACK_WEBHOOK_URL,
   };
   for (const [key, value] of Object.entries(overrides)) {
     if (typeof value === 'string' && value.trim()) config[key] = value.trim();

@@ -110,4 +110,21 @@ describe('entitlement bootstrap default-free path', () => {
       '[entitlement] License server unavailable; using free plan.',
     );
   });
+
+  it('lets a user-initiated hosted operation authenticate even when O8_PLAN owns local plan resolution', async () => {
+    process.env.O8_PLAN = 'founder';
+    vi.resetModules();
+    const fetchMock = vi.fn(async () => {
+      throw new Error('network unavailable');
+    });
+    vi.spyOn(console, 'debug').mockImplementation(() => {});
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { ensureFreeEntitlement } = await import('@/lib/entitlement/bootstrap');
+    await ensureFreeEntitlement();
+    expect(fetchMock, 'the ordinary env-pinned path stays offline').not.toHaveBeenCalled();
+
+    await ensureFreeEntitlement({ allowPinnedPlan: true });
+    expect(fetchMock, 'explicit hosted authentication may provision an install credential').toHaveBeenCalledOnce();
+  });
 });
