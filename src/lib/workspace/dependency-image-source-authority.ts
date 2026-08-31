@@ -59,6 +59,7 @@ export function dependencyPathInside(candidate: string, root: string): boolean {
 export async function digestDependencyTree(root: string): Promise<string> {
   const canonicalRoot = await realpath(root);
   const hash = createHash('sha256');
+  const hardlinks = new Map<string, { path: string; nlink: number; internal: number }>();
   async function walk(candidate: string, relative: string): Promise<void> {
     const entry = await lstat(candidate);
     const normalized = relative.replaceAll(path.sep, '/');
@@ -88,9 +89,6 @@ export async function digestDependencyTree(root: string): Promise<string> {
       return;
     }
     if (entry.isFile()) {
-      if (entry.nlink !== 1) {
-        throw new DependencyImageRefusalError(`Dependency image contains a shared hardlink: ${normalized}`);
-      }
       hash.update('file\0');
       hash.update(await readFile(candidate));
       const after = await lstat(candidate);
@@ -98,6 +96,14 @@ export async function digestDependencyTree(root: string): Promise<string> {
         || after.mode !== entry.mode || after.nlink !== entry.nlink
         || after.mtimeMs !== entry.mtimeMs || after.ctimeMs !== entry.ctimeMs) {
         throw new DependencyImageRefusalError(`Dependency image source changed during validation: ${normalized}`);
+      }
+      const key = `${entry.dev}:${entry.ino}`;
+      const audited = hardlinks.get(key);
+      if (audited) {
+        audited.internal += 1;
+        audited.nlink = Math.max(audited.nlink, entry.nlink);
+      } else {
+        hardlinks.set(key, { path: normalized, nlink: entry.nlink, internal: 1 });
       }
       return;
     }
@@ -118,6 +124,13 @@ export async function digestDependencyTree(root: string): Promise<string> {
     }
   }
   await walk(root, '');
+  for (const audited of hardlinks.values()) {
+    if (audited.nlink > 1 && audited.internal < audited.nlink) {
+      throw new DependencyImageRefusalError(
+        `Dependency image contains a shared hardlink: ${audited.path} (nlink=${audited.nlink}, internal=${audited.internal})`,
+      );
+    }
+  }
   return hash.digest('hex');
 }
 

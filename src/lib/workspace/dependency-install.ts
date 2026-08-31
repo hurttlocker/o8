@@ -667,7 +667,17 @@ async function defaultRun(
   });
 }
 
-async function auditInstalledEntry(workspacePath: string, absolutePath: string): Promise<void> {
+interface InstalledHardlinkAudit {
+  path: string;
+  nlink: number;
+  internal: number;
+}
+
+async function auditInstalledEntry(
+  workspacePath: string,
+  absolutePath: string,
+  hardlinks: Map<string, InstalledHardlinkAudit>,
+): Promise<void> {
   const entry = await lstat(absolutePath);
   if (entry.isSymbolicLink()) {
     const target = await realpath(absolutePath);
@@ -676,13 +686,21 @@ async function auditInstalledEntry(workspacePath: string, absolutePath: string):
     }
     return;
   }
-  if (entry.isFile() && entry.nlink > 1) {
-    throw new Error(`Installed dependency uses a shared hardlink: ${path.relative(workspacePath, absolutePath)}`);
+  if (entry.isFile()) {
+    const key = `${entry.dev}:${entry.ino}`;
+    const audited = hardlinks.get(key);
+    if (audited) {
+      audited.internal += 1;
+      audited.nlink = Math.max(audited.nlink, entry.nlink);
+    } else {
+      hardlinks.set(key, { path: absolutePath, nlink: entry.nlink, internal: 1 });
+    }
+    return;
   }
   if (!entry.isDirectory()) return;
   const children = await readdir(absolutePath);
   for (const child of children) {
-    await auditInstalledEntry(workspacePath, path.join(absolutePath, child));
+    await auditInstalledEntry(workspacePath, path.join(absolutePath, child), hardlinks);
   }
 }
 
@@ -700,7 +718,15 @@ export async function auditPrivateDependencyView(workspacePath: string): Promise
   if (!root.isDirectory() || root.isSymbolicLink() || (root.mode & 0o200) === 0) {
     throw new Error('Installed dependency view is not a private writable directory.');
   }
-  await auditInstalledEntry(workspacePath, nodeModules);
+  const hardlinks = new Map<string, InstalledHardlinkAudit>();
+  await auditInstalledEntry(workspacePath, nodeModules, hardlinks);
+  for (const audited of hardlinks.values()) {
+    if (audited.nlink > 1 && audited.internal < audited.nlink) {
+      throw new Error(
+        `Installed dependency uses a shared hardlink: ${path.relative(workspacePath, audited.path)} (nlink=${audited.nlink}, internal=${audited.internal})`,
+      );
+    }
+  }
 }
 
 export async function runDependencyInstall(
