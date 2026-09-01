@@ -725,8 +725,8 @@ fn ensure_codebase_memory_binary(app: AppHandle) {
 // A packaged Tauri app can't assume the default port is free — another dev tool,
 // a running o8 dev server, or an unrelated service may already own it.
 // `find_free_port(preferred)` probes from the preferred port upward and
-// returns the first one that binds successfully. The result is persisted
-// to `~/.o8/api-port` so downstream consumers (the MCP server,
+// returns the first one that has no reachable listener and binds successfully.
+// The result is persisted to `~/.o8/api-port` so downstream consumers (the MCP server,
 // `/api/setup/mcp-config`, the orchestrator session config writer) all
 // agree on where the backend actually lives.
 
@@ -782,14 +782,25 @@ mod utf8_head_tests {
     }
 }
 
-/// Returns the first port in the range that can be bound to on 127.0.0.1.
+/// A wildcard listener can coexist with a second `127.0.0.1` bind on macOS
+/// even though the bundled Node sidecar cannot subsequently claim that port.
+/// Reject reachable listeners before using the bind probe so desktop/daemon
+/// coexistence always advances to a genuinely unused port.
+fn bundled_sidecar_port_available(port: u16) -> bool {
+    if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+        return false;
+    }
+    std::net::TcpListener::bind(("127.0.0.1", port)).is_ok()
+}
+
+/// Returns the first port in the range that the bundled sidecar can claim.
 /// `skip` lets the caller avoid picking the same port for API and WS.
 fn find_free_port(range: std::ops::Range<u16>, skip: Option<u16>) -> Option<u16> {
     for port in range {
         if Some(port) == skip {
             continue;
         }
-        if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
+        if bundled_sidecar_port_available(port) {
             return Some(port);
         }
     }
@@ -801,13 +812,34 @@ fn bind_ephemeral_port(skip: Option<u16>) -> u16 {
         if let Ok(listener) = std::net::TcpListener::bind(("127.0.0.1", 0)) {
             if let Ok(addr) = listener.local_addr() {
                 let port = addr.port();
-                if Some(port) != skip {
+                drop(listener);
+                if Some(port) != skip && bundled_sidecar_port_available(port) {
                     return port;
                 }
             }
         }
     }
     0
+}
+
+#[cfg(test)]
+mod port_allocation_tests {
+    use super::{bundled_sidecar_port_available, find_free_port};
+    use std::net::TcpListener;
+
+    #[test]
+    fn reachable_wildcard_listener_is_not_available_to_bundled_sidecars() {
+        let listener =
+            TcpListener::bind(("0.0.0.0", 0)).expect("bind wildcard listener");
+        let port = listener
+            .local_addr()
+            .expect("wildcard listener address")
+            .port();
+        let end = port.checked_add(1).expect("ephemeral port has a successor");
+
+        assert!(!bundled_sidecar_port_available(port));
+        assert_eq!(find_free_port(port..end, None), None);
+    }
 }
 
 fn random_uuid_v4() -> String {
@@ -1405,7 +1437,7 @@ fn listener_is_stale_current_instance(port: u16, identity: &BootIdentity) -> boo
 
 fn allocate_identity_gated_api_port(identity: &BootIdentity) -> u16 {
     for port in PROD_API_PORT_RANGE {
-        if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
+        if bundled_sidecar_port_available(port) {
             return port;
         }
         if listener_is_stale_current_instance(port, identity) {
@@ -1421,7 +1453,7 @@ fn allocate_identity_gated_api_port(identity: &BootIdentity) -> u16 {
                         command
                     );
                     sidecar_lifecycle::kill_orphan_and_wait(pid, port);
-                    if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
+                    if bundled_sidecar_port_available(port) {
                         return port;
                     }
                 }
