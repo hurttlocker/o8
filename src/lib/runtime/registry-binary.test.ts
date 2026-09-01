@@ -17,4 +17,9 @@ describe('runtime process command detection', () => {
     expect(runtimeForCommand('/usr/local/bin/magnitude')).toBe('magnitude');
     expect(runtimeForCommand('node /usr/local/bin/magnitude')).toBe('magnitude');
   });
+
+  it('recognizes catalog-driven Copilot CLI and Crush processes', () => {
+    expect(runtimeForCommand('/usr/local/bin/copilot -p task')).toBe('copilot-cli');
+    expect(runtimeForCommand('/usr/local/bin/crush run task')).toBe('crush');
+  });
 });

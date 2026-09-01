@@ -3,7 +3,10 @@ import { readPersistedSessionCosts } from '@/lib/orchestrator/cost-persistence';
 import type { UsageRole } from '@/lib/db/usage';
 import { resolveRuntimeSessionIdentityId } from '@/lib/runtime/session-identity';
 import { runtimeIdFromSessionKey } from '@/lib/runtime/transcript';
-import { isOrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
+import {
+  ORCHESTRATOR_RUNTIME_IDS,
+  isOrchestratorRuntime,
+} from '@/lib/orchestrator/runtime-capabilities';
 import type { OrchestratorMissionState, OrchestratorPacket, OrchestratorRuntime } from '@/lib/orchestrator/types';
 import type { PacketCostSource } from '@/lib/orchestrator/metered-spend';
 
@@ -414,26 +417,9 @@ export async function aggregateMissionCost(
     attributedSessionCosts.push({ ...telemetry, packetId: null, sessionKey, runtime });
   }
 
-  const tokensByRuntime: Record<OrchestratorRuntime, RuntimeTokenSummary> = {
-    codex: emptyRuntimeTokenSummary(),
-    'claude-code': emptyRuntimeTokenSummary(),
-    gemini: emptyRuntimeTokenSummary(),
-    antigravity: emptyRuntimeTokenSummary(),
-    magnitude: emptyRuntimeTokenSummary(),
-    opencode: emptyRuntimeTokenSummary(),
-    openhands: emptyRuntimeTokenSummary(),
-    goose: emptyRuntimeTokenSummary(),
-    qwen: emptyRuntimeTokenSummary(),
-    qoder: emptyRuntimeTokenSummary(),
-    kimi: emptyRuntimeTokenSummary(),
-    aider: emptyRuntimeTokenSummary(),
-    '3code': emptyRuntimeTokenSummary(),
-    cursor: emptyRuntimeTokenSummary(),
-    grok: emptyRuntimeTokenSummary(),
-    pi: emptyRuntimeTokenSummary(),
-    'prime-agent': emptyRuntimeTokenSummary(),
-    'deepseek-harness': emptyRuntimeTokenSummary(),
-  };
+  const tokensByRuntime = Object.fromEntries(
+    ORCHESTRATOR_RUNTIME_IDS.map((runtime) => [runtime, emptyRuntimeTokenSummary()]),
+  ) as Record<OrchestratorRuntime, RuntimeTokenSummary>;
 
   let totalCostUsd = 0;
   const unattributed = {

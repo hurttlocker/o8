@@ -44,6 +44,11 @@ if (process.env.O8_SMOKE_HANG === '1') {
   process.on('SIGINT', () => {});
   setInterval(() => {}, 1000);
 } else
+if (profile === 'copilot-jsonl') {
+  process.stdout.write(JSON.stringify({ type: 'session.start', data: { sessionId: 'thread-' + runtime } }) + '\\n');
+  process.stdout.write(JSON.stringify({ type: 'assistant.message', data: { content: runtime + ' smoke complete' } }) + '\\n');
+  process.stdout.write(JSON.stringify({ type: 'result', data: { usage: { outputTokens: 2 } } }) + '\\n');
+} else
 if (profile === 'openhands-ndjson') {
   process.stdout.write(JSON.stringify({ type: 'conversation_started', conversation_id: 'thread-' + runtime }) + '\\n');
   process.stdout.write(JSON.stringify({ type: 'assistant_message', content: runtime + ' smoke complete' }) + '\\n');
@@ -71,7 +76,7 @@ function setManagedEnv(key: string, value: string): void {
 }
 
 for (const runtimeId of declarativeRuntimeIds) {
-  const token = runtimeId.toUpperCase();
+  const token = runtimeId.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase();
   setManagedEnv(`O8_OWNED_${token}_ROOT`, path.join(tempRoot, 'sessions', runtimeId));
   setManagedEnv(`O8_${token}_BIN`, fixtureBinary);
 }
@@ -88,6 +93,13 @@ const {
 } = await import('./declarative-workers');
 const { createDeclarativeAgentRuntime } = await import('./shared/declarative-agent-runtime');
 const { registerDeclarativeOwnedRuntime } = await import('./shared/owned-session');
+const {
+  discoverAllSessions,
+  getRuntime,
+  registerRuntime,
+} = await import('./registry');
+
+for (const runtime of declarativeWorkerRuntimes) registerRuntime(runtime);
 
 afterAll(() => {
   for (const [key, value] of managedEnv) {
@@ -98,6 +110,24 @@ afterAll(() => {
 });
 
 describe('declarative worker real-process smoke matrix', () => {
+  it('reaches both new workers through the registry and tolerates absent binaries during discovery', async () => {
+    const newRuntimeIds = ['copilot-cli', 'crush'] as const;
+    const overriddenBins = new Map<string, string>();
+    try {
+      for (const runtimeId of newRuntimeIds) {
+        expect(getRuntime(runtimeId)).toBeDefined();
+        const token = runtimeId.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase();
+        const envName = `O8_${token}_BIN`;
+        overriddenBins.set(envName, process.env[envName]!);
+        process.env[envName] = path.join(tempRoot, `missing-${runtimeId}`);
+      }
+
+      await expect(discoverAllSessions()).resolves.toEqual([]);
+    } finally {
+      for (const [envName, value] of overriddenBins) process.env[envName] = value;
+    }
+  });
+
   it.each(DECLARATIVE_WORKER_CONFIGS)(
     '$runtimeId launches, normalizes output, records a clean exit, and reports one-shot resume honestly',
     async (config) => {
@@ -247,7 +277,7 @@ describe('declarative worker real-process smoke matrix', () => {
 });
 
 function runtimeById(runtimeId: string): AgentRuntime {
-  const runtime = declarativeWorkerRuntimes.find((candidate) => candidate.id === runtimeId);
+  const runtime = getRuntime(runtimeId);
   if (!runtime) throw new Error(`missing declarative runtime ${runtimeId}`);
   return runtime;
 }

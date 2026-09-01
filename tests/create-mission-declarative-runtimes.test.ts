@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -62,6 +62,7 @@ vi.mock('@/lib/realtime/publisher', () => ({
 
 const dataDir = mkdtempSync(path.join(os.tmpdir(), 'o8-create-mission-runtimes-'));
 const repoPath = path.join(dataDir, 'repo');
+const fixtureDir = path.join(process.cwd(), 'tests', 'fixtures');
 execFileSync('git', ['init', '-q', repoPath]);
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
@@ -134,6 +135,8 @@ describe('create_mission runtime reachability', () => {
     ['aider', 91_598_015],
     ['qoder', 91_598_016],
     ['3code', 91_598_017],
+    ['copilot-cli', 91_598_018],
+    ['crush', 91_598_019],
   ] as const)('%s remains selected through the real route and persisted mission', async (runtime, issueNumber) => {
     const response = await createMissionRoute.POST(request(runtime, issueNumber));
     expect(response.status).toBe(201);
@@ -239,10 +242,22 @@ describe('create_mission runtime reachability', () => {
         path.join(repoPath, '.owned-session', 'session.3log'),
         'fix the bug',
       ],
+      'copilot-cli': [
+        '-p',
+        'fix the bug',
+        '--allow-all',
+        '--no-ask-user',
+        '--output-format',
+        'json',
+        '--no-color',
+        '--no-auto-update',
+        '--no-remote-export',
+      ],
+      crush: ['run', '--quiet', 'fix the bug'],
     });
   });
 
-  it('normalizes structured and text output without runtime-specific parsers', async () => {
+  it('normalizes structured and text output through declared parser profiles', async () => {
     const run: OwnedRunRecord = {
       id: 'declarative-run-1',
       mode: 'launch',
@@ -268,7 +283,42 @@ describe('create_mission runtime reachability', () => {
     expect(openHands?.entries).toEqual(expect.arrayContaining([expect.objectContaining({ text: 'done' })]));
     expect(qwen?.entries).toEqual(expect.arrayContaining([expect.objectContaining({ text: 'done' })]));
 
+    // SOURCE-DERIVED, NOT LOCALLY CAPTURED: the hermetic test host has no
+    // Copilot account. This fixture follows the public Copilot v1 JSONL event
+    // stream, with identifiers and the model name normalized.
+    const copilotOutput = readFileSync(
+      path.join(fixtureDir, 'copilot-cli-v1.source-derived.jsonl'),
+      'utf8',
+    );
+    const copilot = getDeclarativeOwnedRuntime('copilot-cli')?.adapter.parseRunLog(copilotOutput, run);
+    expect(copilot).toMatchObject({
+      threadId: '0cb916db-26aa-40f2-86b5-1ba81b225fd2',
+      completedTurn: true,
+      outcome: 'finished',
+    });
+    expect(copilot?.entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'message', text: 'VERDICT: APPROVED' }),
+    ]));
+    const copilotCost = await getCostParser('copilot-cli')?.parseLines?.(
+      copilotOutput.split(/\r?\n/),
+    );
+    expect(copilotCost).toMatchObject({
+      inputTokens: 22_344,
+      outputTokens: 12,
+      cacheReadTokens: 0,
+      totalCostUsd: 0,
+    });
+
     const gooseCost = await getCostParser('goose')?.parseLines?.(['plain text output']);
     expect(gooseCost).toMatchObject({ inputTokens: 0, outputTokens: 5, totalCostUsd: 0 });
+
+    // SOURCE-DERIVED, NOT LOCALLY CAPTURED: exact final stdout from the
+    // v0.92.0 non-interactive run-stream regression fixture.
+    const crushOutput = readFileSync(
+      path.join(fixtureDir, 'crush-v0.92.0.source-derived.txt'),
+      'utf8',
+    );
+    const crushCost = await getCostParser('crush')?.parseLines?.(crushOutput.split(/\r?\n/));
+    expect(crushCost).toMatchObject({ inputTokens: 0, outputTokens: 5, totalCostUsd: 0 });
   });
 });

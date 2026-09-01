@@ -5,30 +5,26 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 import type { LaneRuntime } from '@/lib/lane/types';
+import {
+  ORCHESTRATOR_RUNTIME_IDS,
+  getRuntimeCapability,
+} from '@/lib/orchestrator/runtime-capabilities';
 import { readProcessCwdSnapshot } from '@/lib/runtime/process-cwd-snapshot';
 
 const execFileAsync = promisify(execFile);
 
-const RUNTIME_BINARY_NAMES: Record<LaneRuntime, string[]> = {
-  codex: ['codex'],
-  gemini: ['gemini'],
-  antigravity: ['agy', 'antigravity'],
-  magnitude: ['magnitude'],
-  opencode: ['opencode2', 'opencode'],
-  openhands: ['openhands'],
-  goose: ['goose'],
-  qwen: ['qwen'],
-  qoder: ['qodercli'],
-  kimi: ['kimi'],
-  aider: ['aider'],
-  '3code': ['3code'],
-  cursor: ['cursor-agent'],
-  grok: ['grok'],
-  pi: ['pi'],
-  'prime-agent': ['prime-agent'],
-  'deepseek-harness': ['dsh-acp-demo'],
-  'claude-code': ['claude', 'claude-code'],
+const RUNTIME_BINARY_ALIASES: Partial<Record<LaneRuntime, string[]>> = {
+  antigravity: ['antigravity'],
+  opencode: ['opencode'],
+  'claude-code': ['claude-code'],
 };
+
+const RUNTIME_BINARY_NAMES = Object.fromEntries(
+  ORCHESTRATOR_RUNTIME_IDS.map((runtime) => [
+    runtime,
+    [getRuntimeCapability(runtime).binaryName, ...(RUNTIME_BINARY_ALIASES[runtime] ?? [])],
+  ]),
+) as Record<LaneRuntime, string[]>;
 
 const JS_RUNTIME_WRAPPERS = new Set(['env', 'node', 'bun', 'deno', 'npm', 'npx', 'pnpm', 'yarn']);
 
