@@ -304,19 +304,6 @@ if (releaseConfig.sentryDsn) {
   console.log('📦 No sentryDsn configured — Sentry stays dormant in this build');
 }
 
-// Bake the private feedback-intake webhook. Absent → the in-app Report button
-// fails with a clear "not configured" error rather than silently swallowing a
-// report the operator just spent a minute writing.
-const FEEDBACK_ENV_STANZA = releaseConfig.feedbackWebhookUrl
-  ? `\n// Private feedback-intake webhook, baked at release build.\n` +
-    `if (!process.env.O8_FEEDBACK_WEBHOOK_URL) process.env.O8_FEEDBACK_WEBHOOK_URL = ${JSON.stringify(releaseConfig.feedbackWebhookUrl)};\n`
-  : '';
-if (releaseConfig.feedbackWebhookUrl) {
-  console.log('📦 Baking O8_FEEDBACK_WEBHOOK_URL into server.js wrapper (in-app Report enabled)');
-} else {
-  console.log('⚠️  No feedbackWebhookUrl configured — the in-app Report button will error in this build');
-}
-
 // Bake the app version so both the boot crash guard below AND the server's
 // resolveAppVersion() (src/lib/telemetry/crash-store.ts) stamp the real version
 // even when cwd's package.json is the minimal Next standalone one.
@@ -462,7 +449,7 @@ const origHttpsCreate = https.createServer;
 https.createServer = function (...args) {
   return stampClientAddr(origHttpsCreate.apply(this, args));
 };
-${RELEASE_ENV_STANZA}${SENTRY_ENV_STANZA}${FEEDBACK_ENV_STANZA}${APP_VERSION_STANZA}${BOOT_CAPTURE_STANZA}
+${RELEASE_ENV_STANZA}${SENTRY_ENV_STANZA}${APP_VERSION_STANZA}${BOOT_CAPTURE_STANZA}
 process.env.O8_PACKAGED_APP = '1';
 require('./server-impl.js');
 `);

@@ -39,7 +39,7 @@ const RELEASE_URL = 'https://github.com/hurttlocker/o8/releases/latest';
 const DOCS_URL = 'https://o8.run';
 // The canonical community invite — MUST match the README footer + o8.run
 // (the drawer previously carried a different, stale invite).
-const DISCORD_URL = 'https://discord.gg/gH3UbbTJ7k';
+const DISCORD_URL = 'https://o8.run/discord';
 // Paint the panel token directly — NOT through color-mix. In glass mode
 // --t-panel-solid is a linear-gradient (an <image>), and color-mix() only
 // accepts <color> args, so the old color-mix() was invalid CSS → the whole

@@ -55,11 +55,14 @@ export function getOrCreateInstallId(): string {
 let inFlight: Promise<void> | null = null;
 let retryAfterMs = 0;
 
-export async function ensureFreeEntitlement(): Promise<void> {
+export async function ensureFreeEntitlement(options: { allowPinnedPlan?: boolean } = {}): Promise<void> {
   // Already holding a token (free or paid) → nothing to do.
   if (readCachedEntitlement()?.licenseKey) return;
-  // An env-pinned plan (O8_PLAN) owns the entitlement → don't fetch one.
-  if (process.env.O8_PLAN) return;
+  // An env-pinned plan normally owns the entitlement. A user-initiated hosted
+  // operation such as private feedback may still request an install credential
+  // solely for server authentication; the env pin continues to own the local
+  // plan resolution.
+  if (process.env.O8_PLAN && !options.allowPinnedPlan) return;
   const licenseServerBaseUrl = configuredLicenseServerBaseUrl();
   if (!licenseServerBaseUrl) {
     console.debug('[entitlement] License server not configured; using free plan.');

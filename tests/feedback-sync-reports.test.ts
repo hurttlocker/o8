@@ -18,6 +18,8 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import { parseReportEmbed, syncReports } from '../scripts/sync-reports.mjs';
 // @ts-expect-error — plain .mjs build script, no types
 import { inspectIntakeReconciliation } from '../scripts/lib/intake-reconciliation.mjs';
+// @ts-expect-error — plain .mjs build script, no types
+import { resolveFeedbackChannelId } from '../scripts/lib/feedback-channel.mjs';
 
 const roots: string[] = [];
 
@@ -38,6 +40,18 @@ function credentialFixture(content?: string, mode = 0o600) {
 }
 
 describe('external intake reconciliation configuration', () => {
+  it('requires an explicit channel and prefers the environment over file config', () => {
+    const root = credentialFixture();
+    writeFileSync(join(root, 'o8.release.json'), JSON.stringify({ feedbackChannelId: '1543781637546844210' }));
+
+    expect(resolveFeedbackChannelId({ env: {}, root })).toBe('1543781637546844210');
+    expect(resolveFeedbackChannelId({
+      env: { O8_FEEDBACK_CHANNEL_ID: '1543781637546844211' },
+      root,
+    })).toBe('1543781637546844211');
+    expect(resolveFeedbackChannelId({ env: {}, root: join(root, 'missing') })).toBeNull();
+  });
+
   it('reports an injected credential without placing it in the receipt', () => {
     const secret = 'test-secret-that-must-not-leak';
     const receipt = inspectIntakeReconciliation({
@@ -95,13 +109,18 @@ describe('external intake reconciliation configuration', () => {
     });
     const result = await syncReports({
       dryRun: true,
-      env: { ...process.env, O8_DISCORD_BOT_TOKEN: 'test-credential' },
+      env: {
+        ...process.env,
+        O8_DISCORD_BOT_TOKEN: 'test-credential',
+        O8_FEEDBACK_CHANNEL_ID: '1543781637546844210',
+      },
       fetchImpl,
     });
 
     expect(result).toMatchObject({ status: 'configured', scanned: 1, legacy: 0 });
     expect(result.fresh).toHaveLength(1);
     expect(result.fresh[0]).toMatchObject({ id: 'FYPPHK', origin: 'intake-sync' });
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toContain('/channels/1543781637546844210/messages');
   });
 });
 

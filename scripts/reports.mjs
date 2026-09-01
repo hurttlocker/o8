@@ -37,10 +37,9 @@ import {
 } from './lib/fixed-reports.mjs';
 import { syncReports } from './sync-reports.mjs';
 import { resolveIntakeReconciliation } from './lib/intake-reconciliation.mjs';
+import { requireFeedbackChannelId } from './lib/feedback-channel.mjs';
 import { publicTitle } from './lib/sanitize-title.mjs';
 import { appendFileSync } from 'node:fs';
-
-const CHANNEL_ID = process.env.O8_FEEDBACK_CHANNEL_ID?.trim() || '1531943963295219752';
 
 const DIM = '\x1b[2m';
 const BOLD = '\x1b[1m';
@@ -68,6 +67,12 @@ async function mirrorToDiscord(report, { status, note }) {
       : 'no message id (run sync:reports)';
     return { ok: false, why };
   }
+  let channelId;
+  try {
+    channelId = requireFeedbackChannelId();
+  } catch (error) {
+    return { ok: false, why: error instanceof Error ? error.message : 'intake channel unavailable' };
+  }
 
   const headers = { Authorization: `Bot ${credential}`, 'Content-Type': 'application/json' };
   const api = 'https://discord.com/api/v10';
@@ -85,7 +90,7 @@ async function mirrorToDiscord(report, { status, note }) {
   // the mirror forever.
   let threadId = null;
   let anchorDead = false;
-  const existing = await fetch(`${api}/channels/${CHANNEL_ID}/messages/${report.messageId}`, { headers });
+  const existing = await fetch(`${api}/channels/${channelId}/messages/${report.messageId}`, { headers });
   if (existing.ok) {
     const message = await existing.json();
     threadId = message.thread?.id ?? null;
@@ -94,7 +99,7 @@ async function mirrorToDiscord(report, { status, note }) {
   }
 
   if (!threadId && !anchorDead) {
-    const created = await fetch(`${api}/channels/${CHANNEL_ID}/messages/${report.messageId}/threads`, {
+    const created = await fetch(`${api}/channels/${channelId}/messages/${report.messageId}/threads`, {
       method: 'POST',
       headers,
       body: JSON.stringify({ name: `${report.id} · ${report.title}`.slice(0, 100), auto_archive_duration: 10080 }),
@@ -113,7 +118,7 @@ async function mirrorToDiscord(report, { status, note }) {
   }
 
   if (anchorDead) {
-    const posted = await fetch(`${api}/channels/${CHANNEL_ID}/messages`, {
+    const posted = await fetch(`${api}/channels/${channelId}/messages`, {
       method: 'POST',
       headers,
       body: JSON.stringify({ content: `**${report.id} · ${report.title}**`.slice(0, 200) + ` — ${content}`.slice(0, 1700) }),

@@ -36,9 +36,9 @@ import {
   intakeReconciliationDiagnostic,
   resolveIntakeReconciliation,
 } from './lib/intake-reconciliation.mjs';
+import { requireFeedbackChannelId } from './lib/feedback-channel.mjs';
 
 const DRY_RUN = process.argv.includes('--dry-run');
-const CHANNEL_ID = process.env.O8_FEEDBACK_CHANNEL_ID?.trim() || '1531943963295219752';
 const PAGE_LIMIT = 100;
 const MAX_PAGES = 20; // 2000 messages — far past anything we'd need to backfill
 
@@ -93,12 +93,12 @@ export function parseReportEmbed(message) {
   };
 }
 
-async function fetchChannel(token, fetchImpl = fetch) {
+async function fetchChannel(token, channelId, fetchImpl = fetch) {
   const messages = [];
   let before = null;
 
   for (let page = 0; page < MAX_PAGES; page += 1) {
-    const url = new URL(`https://discord.com/api/v10/channels/${CHANNEL_ID}/messages`);
+    const url = new URL(`https://discord.com/api/v10/channels/${channelId}/messages`);
     url.searchParams.set('limit', String(PAGE_LIMIT));
     if (before) url.searchParams.set('before', before);
 
@@ -127,7 +127,8 @@ export async function syncReports({ dryRun = false, env = process.env, fetchImpl
     throw error;
   }
 
-  const messages = await fetchChannel(credential, fetchImpl);
+  const channelId = requireFeedbackChannelId({ env });
+  const messages = await fetchChannel(credential, channelId, fetchImpl);
   const known = readLedger();
 
   const fresh = [];

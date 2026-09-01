@@ -12,7 +12,10 @@ import type { CrashRecord } from '@/lib/telemetry/crash-store';
 const crashRecords = vi.hoisted(() => ({ current: [] as CrashRecord[] }));
 const ledger = vi.hoisted(() => ({ written: [] as unknown[] }));
 const auth = vi.hoisted(() => ({ ghUser: null as string | null }));
-const webhook = vi.hoisted(() => ({ url: 'https://discord.test/webhook' as string | null }));
+const relay = vi.hoisted(() => ({
+  baseUrl: 'https://api.test' as string | null,
+  planToken: 'signed-plan-token' as string | null,
+}));
 const dataSharing = vi.hoisted(() => ({ enabled: true }));
 
 vi.mock('@/lib/telemetry/crash-store', async (importOriginal) => ({
@@ -28,10 +31,13 @@ vi.mock('@/lib/auth/jwt', () => ({
   verifyToken: async (token: string) =>
     (token === 'valid-token' && auth.ghUser ? { uid: 'u1', plan: 'free', ghUser: auth.ghUser } : null),
 }));
-// Pinned, so the suite can never depend on (or post to) the operator's real
-// o8.release.json webhook.
-vi.mock('@/lib/feedback/webhooks', () => ({
-  resolveFeedbackWebhook: () => webhook.url,
+// Pinned, so the suite can never depend on (or post to) the real hosted relay.
+vi.mock('@/lib/entitlement/bootstrap', () => ({
+  ensureFreeEntitlement: async () => {},
+}));
+vi.mock('@/lib/entitlement/license', () => ({
+  configuredLicenseServerBaseUrl: () => relay.baseUrl,
+  readCachedEntitlement: () => relay.planToken ? { licenseKey: relay.planToken } : null,
 }));
 vi.mock('@/lib/repos/registry', () => ({ findRepoByLocalPath: async () => null }));
 vi.mock('@/lib/repos/projects', () => ({
@@ -48,9 +54,21 @@ import { NextRequest } from 'next/server';
 import { POST } from '@/app/api/feedback/report/route';
 
 interface DiscordEmbedField { name: string; value: string; inline?: boolean }
-interface CapturedPost { form: FormData | null; json: unknown; calls: number }
+interface CapturedPost {
+  form: FormData | null;
+  json: unknown;
+  calls: number;
+  url: string | null;
+  headers: Headers;
+}
 
-const captured: CapturedPost = { form: null, json: null, calls: 0 };
+const captured: CapturedPost = {
+  form: null,
+  json: null,
+  calls: 0,
+  url: null,
+  headers: new Headers(),
+};
 
 /**
  * A real NextRequest — not a bare Request. `request.cookies` is a NextRequest
@@ -79,16 +97,25 @@ beforeEach(() => {
   crashRecords.current = [];
   ledger.written = [];
   auth.ghUser = null;
-  webhook.url = 'https://discord.test/webhook';
+  relay.baseUrl = 'https://api.test';
+  relay.planToken = 'signed-plan-token';
   dataSharing.enabled = true;
   captured.form = null;
   captured.json = null;
   captured.calls = 0;
-  vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+  captured.url = null;
+  captured.headers = new Headers();
+  vi.stubGlobal('fetch', async (url: string | URL | Request, init: RequestInit = {}) => {
     captured.calls += 1;
+    captured.url = String(url);
+    captured.headers = new Headers(init.headers);
     if (init.body instanceof FormData) captured.form = init.body;
     else captured.json = JSON.parse(String(init.body));
-    return new Response(null, { status: 204 });
+    const payload = init.body instanceof FormData
+      ? JSON.parse(String(init.body.get('payload_json'))) as { embeds?: Array<{ title?: string }> }
+      : captured.json as { embeds?: Array<{ title?: string }> };
+    const reportId = /^\[(?:BUG|REQUEST)\]\s+([2-9A-HJ-NP-TV-Z]{6})\b/.exec(payload.embeds?.[0]?.title ?? '')?.[1];
+    return Response.json({ ok: true, reportId });
   });
 });
 
@@ -125,12 +152,15 @@ describe('POST /api/feedback/report', () => {
     expect(ledger.written).toHaveLength(0);
   });
 
-  it('keeps the webhook path unchanged when data sharing is on', async () => {
+  it('sends an authenticated report through the hosted relay when data sharing is on', async () => {
     const res = await postReport({ category: 'bug', message: 'sharing is enabled', route: '/dashboard' });
 
     expect(res.status).toBe(200);
     expect(captured.calls).toBe(1);
+    expect(captured.url).toBe('https://api.test/v1/feedback');
+    expect(captured.headers.get('authorization')).toBe('Bearer signed-plan-token');
     expect(captured.json).not.toBeNull();
+    expect(JSON.stringify(captured.json)).not.toContain('signed-plan-token');
     expect(ledger.written).toHaveLength(1);
   });
 
@@ -343,21 +373,42 @@ describe('report id + attribution (the #fixed loop)', () => {
     expect(payload.embeds[0].fields.find((f) => f.name === 'Reported by')?.value).toBe('anonymous');
   });
 
-  it('errors loudly on a build with no webhook, instead of swallowing the report', async () => {
-    webhook.url = null; // the old hardcoded fallback is gone — revoked 2026-07-13
+  it('errors loudly when no signed relay credential is available', async () => {
+    relay.planToken = null;
 
     const res = await postReport({ category: 'bug', message: 'nowhere to send this', route: '/dashboard' });
 
     expect(res.status).toBe(502);
     const body = (await res.json()) as { ok: boolean; error: string };
-    expect(body.error).toContain('not configured');
+    expect(body.error).toContain('authenticate');
     // Silence would let the operator walk away believing they were heard.
     expect(captured.form).toBeNull();
     expect(captured.json).toBeNull();
     expect(ledger.written).toHaveLength(0);
   });
 
-  it('does not ledger a report that never reached Discord', async () => {
+  it('stays offline when hosted services are explicitly disabled', async () => {
+    relay.baseUrl = null;
+
+    const res = await postReport({ category: 'bug', message: 'hosted path is off', route: '/dashboard' });
+
+    expect(res.status).toBe(502);
+    expect(captured.calls).toBe(0);
+    expect(ledger.written).toHaveLength(0);
+  });
+
+  it('does not ledger a report when the relay receipt does not match', async () => {
+    vi.stubGlobal('fetch', async () => Response.json({ ok: true, reportId: 'ZZZZZZ' }));
+
+    const res = await postReport({ category: 'bug', message: 'receipt mismatch', route: '/dashboard' });
+
+    expect(res.status).toBe(502);
+    expect(ledger.written).toHaveLength(0);
+    const body = (await res.json()) as { ok: boolean; error: string };
+    expect(body.error).toContain('invalid receipt');
+  });
+
+  it('does not ledger a report that never reached the hosted relay', async () => {
     vi.stubGlobal('fetch', async () => new Response('rate limited', { status: 429 }));
 
     const res = await postReport({ category: 'bug', message: 'went nowhere', route: '/dashboard' });
