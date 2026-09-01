@@ -320,15 +320,6 @@ export function createStoragePressureAdmissionCoordinator(
       }
 
       const selectedMode = mode();
-      if (selectedMode !== 'pressure') {
-        throw new PacketStorageAdmissionError(
-          held.message,
-          withPressure(held.receipt, pressureReceipt(
-            'manual', 'disabled', packet, held.receipt.ownerGeneration, [], now(),
-          )),
-        );
-      }
-
       let candidates: PressureCandidate[];
       try {
         candidates = await buildCandidates(
@@ -342,7 +333,21 @@ export function createStoragePressureAdmissionCoordinator(
         throw new PacketStorageAdmissionError(
           'Dispatch held because storage-pressure candidate accounting is unknown.',
           withPressure(held.receipt, pressureReceipt(
-            'pressure', 'exhausted', packet, held.receipt.ownerGeneration, [], now(),
+            selectedMode, selectedMode === 'manual' ? 'manual_review' : 'exhausted',
+            packet, held.receipt.ownerGeneration, [], now(),
+          )),
+        );
+      }
+      if (selectedMode === 'manual') {
+        const receipts = candidates.map((candidate) => (
+          candidate.refusal
+            ? candidateReceipt(candidate, 'refused', candidate.refusal)
+            : candidateReceipt(candidate, 'candidate', 'manual_action_required')
+        ));
+        throw new PacketStorageAdmissionError(
+          held.message,
+          withPressure(held.receipt, pressureReceipt(
+            'manual', 'manual_review', packet, held.receipt.ownerGeneration, receipts, now(),
           )),
         );
       }
