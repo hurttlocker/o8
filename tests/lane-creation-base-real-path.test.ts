@@ -33,10 +33,12 @@ vi.mock('@/lib/worktree/safety-hooks', async (importOriginal) => ({
 
 const { closeDb } = await import('@/lib/db');
 const { dispatch } = await import('@/lib/lane/commands');
-const { getLaneEvents, setLaneStatus } = await import('@/lib/lane/registry');
+const { findLaneByPacket, getLaneEvents, setLaneStatus } = await import('@/lib/lane/registry');
 const { getLaneSpokenDiffFacts } = await import('@/lib/lane/lane-diff-facts');
 const { previewPacketMerge } = await import('@/lib/lane/preview-merge');
 const { addRepo } = await import('@/lib/repos/registry');
+const { fetchUnreachableCooldownRetrySeconds } = await import('@/lib/runtime/fetch-unreachable-recovery');
+const { listInboxItems } = await import('@/lib/supervisor/inbox');
 const { prepareLaunchWorktree } = await import('@/lib/worktree/launch');
 
 function git(cwd: string, args: string[]): string {
@@ -47,14 +49,43 @@ function git(cwd: string, args: string[]): string {
   }).trim();
 }
 
-function commitAll(cwd: string, message: string): string {
+function commitAll(
+  cwd: string,
+  message: string,
+  dates?: { author: string; committer: string },
+): string {
   git(cwd, ['add', '-A']);
-  git(cwd, [
+  execFileSync('git', [
     '-c', 'user.name=o8-test',
     '-c', 'user.email=o8@example.test',
     'commit', '-m', message,
-  ]);
+  ], {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: dates ? {
+      ...process.env,
+      GIT_AUTHOR_DATE: dates.author,
+      GIT_COMMITTER_DATE: dates.committer,
+    } : process.env,
+  });
   return git(cwd, ['rev-parse', 'HEAD']);
+}
+
+function createUnreachableRegisteredRepo(): string {
+  const origin = path.join(root, 'unreachable-origin.git');
+  const repo = path.join(root, 'unreachable-registered');
+  execFileSync('git', ['init', '--bare', origin], { stdio: 'pipe' });
+  execFileSync('git', ['clone', origin, repo], { stdio: 'pipe' });
+  git(repo, ['checkout', '-b', 'main']);
+  writeFileSync(path.join(repo, 'README.md'), 'stale base\n');
+  commitAll(repo, 'stale base', {
+    author: '2020-01-01T00:00:00Z',
+    committer: '2020-01-01T00:00:00Z',
+  });
+  git(repo, ['push', '-u', 'origin', 'main']);
+  git(repo, ['remote', 'set-url', 'origin', path.join(root, 'missing-origin.git')]);
+  return repo;
 }
 
 function createStaleRegisteredRepo(): {
@@ -166,5 +197,59 @@ describe('managed lane creation base', () => {
     expect(git(worktree.path, ['diff', '--name-only', `${preview.diffBase!.comparisonRef}...HEAD`]))
       .toBe('packet-only.ts');
     expect(JSON.stringify(preview)).not.toContain('upstream-only.ts');
+  }, 30_000);
+
+  it('records packet-correlated recovery when the base fetch fails before the receipt', async () => {
+    const repo = createUnreachableRegisteredRepo();
+    await addRepo(repo);
+    const packetId = `pkt-fetch-unreachable-${Date.now()}`;
+    const branch = `issue/fetch-unreachable-${Date.now()}`;
+
+    const opened = await dispatch({
+      verb: 'open_lane',
+      repoPath: repo,
+      branch,
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId,
+      actor: 'orchestrator',
+    });
+
+    expect(opened).toMatchObject({
+      ok: false,
+      laneId: '',
+      reason: 'fetch_unreachable',
+    });
+    expect(findLaneByPacket(packetId)).toBeNull();
+    expect(fetchUnreachableCooldownRetrySeconds(repo)).toBeGreaterThan(0);
+
+    const incident = listInboxItems({ includeAllProjects: true })
+      .find((item) => item.kind === 'fetch_unreachable' && item.packetId === packetId);
+    expect(incident).toMatchObject({
+      repoPath: repo,
+      packetId,
+      kind: 'fetch_unreachable',
+      status: 'human_required',
+      payload: {
+        stage: 'pre_lane_receipt',
+        baseBranch: 'main',
+        branch,
+        laneId: null,
+        packetId,
+        runtime: 'codex',
+      },
+    });
+
+    const retry = await dispatch({
+      verb: 'open_lane',
+      repoPath: repo,
+      branch,
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId,
+      actor: 'orchestrator',
+    });
+    expect(retry).toMatchObject({ ok: false, laneId: '', reason: 'fetch_unreachable' });
+    expect(retry.note).toContain('fetch_unreachable cooldown');
   }, 30_000);
 });

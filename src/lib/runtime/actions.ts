@@ -9,14 +9,18 @@ import {
   listDeclarativeRuntimes,
 } from '@/lib/orchestrator/runtime-capabilities';
 import { continueOwnedCodexSession, setOwnedCodexReviewDisposition } from '@/lib/codex/owned';
-import { markRepoOriginConfigured, markRepoOriginMissing } from '@/lib/repos/origin-readiness';
+import { markRepoOriginMissing } from '@/lib/repos/origin-readiness';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { getRuntime, type RuntimeId } from '@/lib/runtimes';
 import { escalateInterruptOwnedSurface } from '@/lib/runtime/interrupt-escalation';
 import { performOwnedActionWithoutInventory } from '@/lib/runtime/owned-actions';
 import { packetRequiresWorktree, packetWorktreeProvisionError } from '@/lib/runtime/packet-worktree-guard';
 import { buildLaunchPromptWithProjectBrief, summarizeTaskName } from '@/lib/runtime/project-launch-brief';
-import { selfHealActiveByKindAndRepo } from '@/lib/supervisor/inbox';
+import {
+  fetchUnreachableCooldownRetrySeconds,
+  recordFetchUnreachableRecoverySuccess,
+  recoverWorktreeFetchUnreachable,
+} from '@/lib/runtime/fetch-unreachable-recovery';
 import {
   prepareLaunchWorktree,
   DependencyMaterializationIncompleteError,
@@ -120,24 +124,7 @@ export interface RuntimeLaunchResult {
   laneId: string | null;
 }
 
-const FETCH_UNREACHABLE_COOLDOWN_MS = 5 * 60_000;
-const fetchUnreachableFailures = new Map<string, number>();
 const loggedOriginMissingRepos = new Set<string>();
-
-function fetchCooldownRetrySeconds(repoPath: string): number | null {
-  const lastFailureMs = fetchUnreachableFailures.get(repoPath);
-  if (!lastFailureMs) return null;
-  const remainingMs = FETCH_UNREACHABLE_COOLDOWN_MS - (Date.now() - lastFailureMs);
-  if (remainingMs <= 0) {
-    fetchUnreachableFailures.delete(repoPath);
-    return null;
-  }
-  return Math.ceil(remainingMs / 1000);
-}
-
-function recordFetchUnreachable(repoPath: string): void {
-  fetchUnreachableFailures.set(repoPath, Date.now());
-}
 
 function auditRuntimeSteer(payload: RuntimeActionRequest, sessionKey: string): void {
   if (payload.auditSteer === false || (payload.action !== 'steer' && payload.action !== 'send_input')) return;
@@ -154,10 +141,6 @@ function auditRuntimeSteer(payload: RuntimeActionRequest, sessionKey: string): v
   } catch {
     // Runtime action delivery should not fail because lane audit storage is temporarily unavailable.
   }
-}
-
-function clearFetchUnreachable(repoPath: string): void {
-  fetchUnreachableFailures.delete(repoPath);
 }
 
 export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promise<RuntimeLaunchResult> {
@@ -207,7 +190,7 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
   // Dispatch can force isolation while still skipping environment setup.
   const shouldCreateWorktree = supportsWorktrees && repoIsGit && (payload.isolate || !payload.skipSetup);
   if (shouldCreateWorktree) {
-    const retryInSeconds = fetchCooldownRetrySeconds(repoPath);
+    const retryInSeconds = fetchUnreachableCooldownRetrySeconds(repoPath);
     if (retryInSeconds != null) {
       const note = `Launch blocked: fetch_unreachable cooldown for ${repoPath}; retry in ${retryInSeconds}s`;
       throw packetWorktreeProvisionError(payload, runtimeId, repoPath, note, note);
@@ -236,12 +219,7 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
         storageAdmissionReservationId: payload.storageAdmissionReservationId,
       });
       if (launchWorktree?.worktree) {
-        clearFetchUnreachable(repoPath);
-        markRepoOriginConfigured(repoPath);
-        const healed = selfHealActiveByKindAndRepo('fetch_unreachable', repoPath);
-        if (healed > 0) {
-          console.log(`[supervisor-inbox] Self-healed ${healed} fetch_unreachable item(s) for ${repoPath} after clean rebase.`);
-        }
+        recordFetchUnreachableRecoverySuccess(repoPath);
       }
     } catch (err) {
       if (err instanceof DependencyMaterializationIncompleteError) throw err;
@@ -312,61 +290,15 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
 
       // Fetch failures preserve the existing inbox escalation.
       if (err instanceof WorktreeFetchUnreachableError) {
-        recordFetchUnreachable(repoPath);
-        markRepoOriginConfigured(repoPath);
-        const baseBranchForInbox = err.baseBranch;
-        const conflictBranch = err.branch;
-        const localRefAgeMinutes = Number.isFinite(err.localRefAgeMs)
-          ? Math.round(err.localRefAgeMs / 60_000)
-          : null;
-
-        if (payload.existingLaneId) {
-          try {
-            const { setLaneStatus } = await import('@/lib/lane/registry');
-            setLaneStatus(payload.existingLaneId, 'awaiting_input', 'system', 'fetch_unreachable');
-          } catch (laneErr) {
-            console.warn(
-              `[worktree-rebase] Failed to mark lane ${payload.existingLaneId} as awaiting_input: ${laneErr instanceof Error ? laneErr.message : laneErr}`,
-            );
-          }
-        } else {
-          console.warn(
-            `[worktree-rebase] Scratch ${runtimeId} launch blocked by fetch_unreachable on origin/${baseBranchForInbox} (no lane to mark, branch ${conflictBranch}).`,
-          );
-        }
-
-        const stalenessLabel = localRefAgeMinutes == null
-          ? 'local ref missing or unreadable'
-          : `local ref is ${localRefAgeMinutes} min old`;
-
-        try {
-          const { enqueueInboxItem } = await import('@/lib/supervisor/inbox');
-          enqueueInboxItem({
-            repoPath,
-            packetId: payload.packetId ?? null,
-            kind: 'fetch_unreachable',
-            payload: {
-              stage: 'pre_launch_fetch',
-              baseBranch: baseBranchForInbox,
-              branch: conflictBranch,
-              laneId: payload.existingLaneId ?? null,
-              packetId: payload.packetId ?? null,
-              runtime: runtimeId,
-              localRefAgeMs: Number.isFinite(err.localRefAgeMs) ? err.localRefAgeMs : null,
-              fetchErrorMessage: err.fetchErrorMessage,
-              errorMessage: err.message,
-              errorExcerpt: `Fetch origin ${baseBranchForInbox} unreachable and ${stalenessLabel}. Reconnect and retry.`,
-            },
-            status: 'human_required',
-          });
-        } catch (inboxErr) {
-          console.warn(
-            `[worktree-rebase] Failed to enqueue fetch_unreachable inbox item: ${inboxErr instanceof Error ? inboxErr.message : inboxErr}`,
-          );
-        }
-
-        const note = `Cannot launch ${runtimeId}: fetch origin ${baseBranchForInbox} failed and ${stalenessLabel}. Reconnect and retry.`;
-        throw packetWorktreeProvisionError(payload, runtimeId, repoPath, err, note, 'awaiting_input');
+        const recovery = recoverWorktreeFetchUnreachable({
+          error: err,
+          repoPath,
+          packetId: payload.packetId ?? null,
+          laneId: payload.existingLaneId ?? null,
+          runtime: runtimeId,
+          stage: 'pre_launch_fetch',
+        });
+        throw packetWorktreeProvisionError(payload, runtimeId, repoPath, err, recovery.note, 'awaiting_input');
       }
 
       const note = err instanceof Error ? err.message : String(err);
