@@ -75,7 +75,7 @@ function normalizePressureReceipt(
   if (
     row.schema !== 'o8/storage-pressure-decision/v1'
     || (row.mode !== 'manual' && row.mode !== 'pressure')
-    || !['disabled', 'admitted_after_parking', 'exhausted'].includes(String(row.status))
+    || !['disabled', 'manual_review', 'admitted_after_parking', 'exhausted'].includes(String(row.status))
     || row.trigger !== 'reserve_breached'
     || !Number.isSafeInteger(row.launchGeneration)
     || !Number.isSafeInteger(row.recordedAt)
@@ -86,7 +86,7 @@ function normalizePressureReceipt(
   return {
     schema: 'o8/storage-pressure-decision/v1',
     mode: row.mode,
-    status: row.status as 'disabled' | 'admitted_after_parking' | 'exhausted',
+    status: row.status as 'disabled' | 'manual_review' | 'admitted_after_parking' | 'exhausted',
     trigger: 'reserve_breached',
     launchGeneration: row.launchGeneration as number,
     candidates: candidates as NonNullable<NonNullable<OrchestratorPacket['storageAdmission']>['pressure']>['candidates'],
@@ -111,7 +111,7 @@ function normalizePressureCandidate(value: unknown) {
     || (row.repositoryUuid !== null && typeof row.repositoryUuid !== 'string')
     || measured === undefined
     || reclaimed === undefined
-    || !['parked', 'already_parked', 'refused'].includes(String(row.outcome))
+    || !['candidate', 'parked', 'already_parked', 'refused'].includes(String(row.outcome))
     || typeof row.reason !== 'string'
   ) return null;
   return {
@@ -121,7 +121,7 @@ function normalizePressureCandidate(value: unknown) {
     operationId: row.operationId,
     measuredAllocatedBytes: measured,
     verifiedReclaimedAvailableBytes: reclaimed,
-    outcome: row.outcome as 'parked' | 'already_parked' | 'refused',
+    outcome: row.outcome as 'candidate' | 'parked' | 'already_parked' | 'refused',
     reason: row.reason,
   };
 }

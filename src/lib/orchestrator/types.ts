@@ -255,14 +255,14 @@ export interface OrchestratorStoragePressureCandidateReceipt {
   operationId: string;
   measuredAllocatedBytes: number | null;
   verifiedReclaimedAvailableBytes: number | null;
-  outcome: 'parked' | 'already_parked' | 'refused';
+  outcome: 'candidate' | 'parked' | 'already_parked' | 'refused';
   reason: string;
 }
 
 export interface OrchestratorStoragePressureReceipt {
   schema: 'o8/storage-pressure-decision/v1';
   mode: 'manual' | 'pressure';
-  status: 'disabled' | 'admitted_after_parking' | 'exhausted';
+  status: 'disabled' | 'manual_review' | 'admitted_after_parking' | 'exhausted';
   trigger: 'reserve_breached';
   launchGeneration: number;
   candidates: OrchestratorStoragePressureCandidateReceipt[];

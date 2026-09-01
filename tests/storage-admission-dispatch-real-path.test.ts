@@ -40,6 +40,9 @@ const {
   createPacketStorageAdmissionCoordinator,
   observeRepoStorageEstimate,
 } = await import('@/lib/orchestrator/storage-admission');
+const { createStoragePressureAdmissionCoordinator } = await import(
+  '@/lib/orchestrator/storage-pressure-policy'
+);
 const { StorageAdmissionStore } = await import('@/lib/workspace/storage-admission');
 const statusRoute = await import('@/app/api/orchestrator/status/route');
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
@@ -58,6 +61,7 @@ beforeAll(() => {
 afterEach(() => {
   vi.useRealTimers();
   launchCalls.length = 0;
+  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
 
@@ -89,6 +93,7 @@ describe('storage admission dispatch real path', () => {
   it('uses timeout fallback, surfaces a capacity hold, and retries it from persisted state', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-08-22T12:00:00.000Z'));
+    vi.stubEnv('O8_WORKSPACE_PARKING_MODE', 'manual');
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
     let availableBytes = 12 * 1024 * 1024 * 1024;
     let refreshCalls = 0;
@@ -117,7 +122,59 @@ describe('storage admission dispatch real path', () => {
         defer: (task) => task(),
       }),
       observeReservationVolume: observeVolume,
-      resolvePolicy: () => ({ reserveRatio: 0.1, absoluteFloorBytes: 1024 * 1024 * 1024 }),
+      resolvePolicy: () => ({
+        reserveRatio: 0.1,
+        absoluteFloorBytes: 10 * 1024 * 1024 * 1024,
+      }),
+    });
+    const park = vi.fn();
+    const pressureAdmission = createStoragePressureAdmissionCoordinator(admission, {
+      listLanes: () => [{
+        id: 'lane-storage-review',
+        projectId: null,
+        label: 'storage review candidate',
+        repoPath,
+        worktreePath: repoPath,
+        branch: 'inline/storage-review-candidate',
+        baseBranch: 'main',
+        runtime: 'codex',
+        sessionKey: 'owned:storage-review-candidate',
+        packetId: 'packet-storage-review-candidate',
+        prNumber: null,
+        status: 'reviewing',
+        ownership: 'managed',
+        writerToken: null,
+        lastHeartbeatAt: null,
+        createdAt: '2026-08-20T12:00:00.000Z',
+        updatedAt: '2026-08-20T12:00:00.000Z',
+        lastEventAt: '2026-08-20T12:00:00.000Z',
+        lastEventLabel: 'review_ready',
+      }],
+      listRepos: async () => [{
+        id: 'repo-storage-review',
+        name: 'storage review repo',
+        localPath: repoPath,
+        remoteUrl: null,
+        defaultBranch: 'main',
+        addedAt: '2026-08-20T12:00:00.000Z',
+        lastOpenedAt: null,
+        storagePressureParkingDisabled: false,
+        setup: {
+          envMode: 'copy',
+          envFiles: [],
+          installCommand: null,
+          installOnCreateWorkspace: false,
+          buildCommand: null,
+          runBuildOnCreateWorkspace: false,
+          devCommand: null,
+          defaultPort: null,
+          workspaceIsolationPreference: 'auto',
+        },
+      }],
+      measureAllocatedBytes: async () => 4 * 1024 * 1024 * 1024,
+      observeVolume,
+      getSnapshot: () => null,
+      parkWorkspace: park,
     });
     const initial = {
       ...createEmptyOrchestratorMissionState(),
@@ -129,7 +186,7 @@ describe('storage admission dispatch real path', () => {
 
     const held = await runDispatchTick(initial, {
       launchBudget: { maxLaunches: 1 },
-      storageAdmission: admission,
+      storageAdmission: pressureAdmission,
     });
     expect(refreshCalls).toBeGreaterThan(0);
     expect(launchCalls).toEqual([]);
@@ -141,8 +198,25 @@ describe('storage admission dispatch real path', () => {
         state: 'held',
         reason: 'reserve_breached',
         estimateBytes: 8 * 1024 * 1024 * 1024,
+        pressure: {
+          mode: 'manual',
+          status: 'manual_review',
+          candidates: [{
+            packetId: 'packet-storage-review-candidate',
+            measuredAllocatedBytes: 4 * 1024 * 1024 * 1024,
+            outcome: 'candidate',
+            reason: 'manual_action_required',
+          }],
+        },
       },
     });
+    expect(held.packets[0]?.blockedReason).toContain(
+      'Storage policy keeps 10% of disk or 10.0 GB, whichever is greater, unallocated.',
+    );
+    expect(held.packets[0]?.blockedReason).toContain(
+      "Free 6.0 GB more to dispatch this packet's 8.0 GB estimate",
+    );
+    expect(park).not.toHaveBeenCalled();
     writeOrchestratorControlPlaneState(held);
 
     const response = await statusRoute.GET(new NextRequest(
@@ -155,12 +229,20 @@ describe('storage admission dispatch real path', () => {
     expect(body.result.packets[0]).toMatchObject({
       status: 'queued',
       blockedReason: expect.stringContaining('reserve_breached'),
-      storageAdmission: { state: 'held', reason: 'reserve_breached' },
+      storageAdmission: {
+        state: 'held',
+        reason: 'reserve_breached',
+        pressure: {
+          mode: 'manual',
+          status: 'manual_review',
+          candidates: [{ outcome: 'candidate' }],
+        },
+      },
     });
 
     const duringBackoff = await runDispatchTick(readOrchestratorControlPlaneState(), {
       launchBudget: { maxLaunches: 1 },
-      storageAdmission: admission,
+      storageAdmission: pressureAdmission,
     });
     expect(duringBackoff.packets[0]?.status).toBe('queued');
     expect(launchCalls).toEqual([]);
@@ -169,7 +251,7 @@ describe('storage admission dispatch real path', () => {
     vi.advanceTimersByTime(10_001);
     const retried = await runDispatchTick(duringBackoff, {
       launchBudget: { maxLaunches: 1 },
-      storageAdmission: admission,
+      storageAdmission: pressureAdmission,
     });
     expect(retried.packets[0]).toMatchObject({
       status: 'launching',

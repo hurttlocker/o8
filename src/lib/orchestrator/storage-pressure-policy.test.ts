@@ -168,14 +168,33 @@ function lane(
 }
 
 describe('storage pressure admission policy', () => {
-  it('keeps the default manual-only and never parks for non-capacity holds', async () => {
+  it('surfaces manual remediation candidates without parking and ignores non-capacity holds', async () => {
     const park = vi.fn();
     const manual = pressureCoordinator(
       baseCoordinator(async () => { throw held('target'); }),
-      { mode: () => 'manual', parkWorkspace: park },
+      {
+        mode: () => 'manual',
+        listLanes: () => [lane('review', '/repos/review', '2026-01-01T00:00:00.000Z')],
+        listRepos: async () => [repo('repo-review', '/repos/review')],
+        measureAllocatedBytes: async () => 400,
+        getSnapshot: () => null,
+        parkWorkspace: park,
+      },
     );
     await expect(manual.reserveForLaunch(packet('target'))).rejects.toMatchObject({
-      receipt: { reason: 'reserve_breached', pressure: { mode: 'manual', status: 'disabled' } },
+      receipt: {
+        reason: 'reserve_breached',
+        pressure: {
+          mode: 'manual',
+          status: 'manual_review',
+          candidates: [{
+            packetId: 'review',
+            measuredAllocatedBytes: 400,
+            outcome: 'candidate',
+            reason: 'manual_action_required',
+          }],
+        },
+      },
     });
 
     const unknown = pressureCoordinator(
