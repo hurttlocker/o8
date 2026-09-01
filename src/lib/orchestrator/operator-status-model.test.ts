@@ -69,6 +69,30 @@ function lane(overrides: Partial<Lane>): Lane {
 }
 
 describe('operator status model', () => {
+  it('uses an active persisted lane when runtime discovery misses its session', () => {
+    const agents = buildOperatorStatusAgents([], [lane({ status: 'running' })]);
+
+    expect(agents).toHaveLength(1);
+    expect(agents[0]).toMatchObject({
+      name: 'packet worker',
+      sessionKey: 'codex-owned:1',
+      status: 'running',
+      authority: 'lane-state',
+      task: 'session_running',
+    });
+    expect(agents[0].statusEvidence).toMatchObject({
+      state: 'working',
+      authority: 'lane-state',
+    });
+  });
+
+  it.each(['idle', 'paused', 'completed', 'archived'] as const)(
+    'does not resurrect a lane-only %s session as an agent',
+    (status) => {
+      expect(buildOperatorStatusAgents([], [lane({ status })])).toEqual([]);
+    },
+  );
+
   it('keeps runtime failure authoritative when the lane still says running', () => {
     const agents = buildOperatorStatusAgents([agent({ status: 'failed' })], [lane({ status: 'running' })]);
 

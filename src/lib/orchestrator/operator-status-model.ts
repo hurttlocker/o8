@@ -72,7 +72,11 @@ function observedAtForAgent(agent: AgentSummary, lane: Lane | undefined): string
 
 function approvalMatchesAgent(approval: ApprovalRecord, agent: AgentSummary, lane: Lane | undefined): boolean {
   if (approval.sessionKey === agent.sessionKey) return true;
-  if (!lane) return false;
+  return Boolean(lane && approvalMatchesLane(approval, lane));
+}
+
+function approvalMatchesLane(approval: ApprovalRecord, lane: Lane): boolean {
+  if (lane.sessionKey && approval.sessionKey === lane.sessionKey) return true;
   if (approval.continuation?.kind === 'lane' && approval.continuation.laneId === lane.id) return true;
   return approval.metadata?.laneId === lane.id || approval.metadata?.LaneId === lane.id;
 }
@@ -197,6 +201,66 @@ function canonicalAgentStatus(
   return operatorStatusFromTerminalState(statusEvidence.state, agent.status || 'idle');
 }
 
+const LANE_ONLY_OPERATOR_STATUSES = new Set<Lane['status']>([
+  'launching',
+  'running',
+  'awaiting_input',
+  'awaiting_orchestrator',
+  'awaiting_human',
+  'recovering',
+  'reviewing',
+  'merging',
+  'failed',
+]);
+
+function safeResolveLaneOnlyStatusEvidence(
+  lane: Lane,
+  context: OperatorStatusEvidenceContext,
+): TerminalStatusEvidence {
+  try {
+    return resolveTerminalStatusEvidence({
+      lane,
+      laneEvents: context.laneEventsByLaneId?.get(lane.id) ?? [],
+      approvals: (context.approvals ?? []).filter((approval) => (
+        approval.status === 'pending' && approvalMatchesLane(approval, lane)
+      )),
+      reviewQueue: (context.reviewQueue ?? []).filter((review) => review.laneId === lane.id),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[terminal-status] Failed to resolve lane-only status for ${lane.id}: ${message}`);
+    return unknownTerminalStatusEvidence({
+      sessionId: lane.sessionKey || lane.id,
+      runtime: lane.runtime,
+      observedAt: lane.lastEventAt ?? lane.updatedAt,
+      summary: 'Terminal status evidence could not be resolved for this lane.',
+      fallbackReason: `Status resolution failed for this lane: ${message}`,
+    });
+  }
+}
+
+function operatorStatusAgentFromLane(
+  lane: Lane & { sessionKey: string },
+  context: OperatorStatusEvidenceContext,
+): OperatorStatusAgent {
+  const statusEvidence = safeResolveLaneOnlyStatusEvidence(lane, context);
+  return {
+    name: lane.label || lane.sessionKey,
+    repo: repoFromWorkspace(lane.worktreePath || lane.repoPath),
+    runtime: lane.runtime,
+    model: lane.model ?? null,
+    status: operatorStatusFromTerminalState(statusEvidence.state, lane.status),
+    branch: lane.branch,
+    elapsed: lane.lastEventAt || lane.updatedAt,
+    sessionKey: lane.sessionKey,
+    task: lane.lastEventLabel,
+    authority: statusEvidence.authority,
+    summary: statusEvidence.summary,
+    observedAt: statusEvidence.observedAt,
+    statusEvidence,
+  };
+}
+
 export function buildOperatorStatusAgents(
   sessions: AgentSummary[],
   lanes: Lane[],
@@ -213,7 +277,7 @@ export function buildOperatorStatusAgents(
     ? sessions.filter((session) => session.sessionKey === sessionKeyFilter)
     : sessions;
 
-  return filtered.map((session) => {
+  const inventoryAgents = filtered.map((session) => {
     const lane = laneBySession.get(session.sessionKey);
     const statusEvidence = safeResolveAgentSummaryStatusEvidence(session, lane, context);
     return {
@@ -232,6 +296,23 @@ export function buildOperatorStatusAgents(
       statusEvidence,
     };
   });
+
+  // Runtime discovery is observational and can briefly return no session while
+  // a warm worker is still advancing. The lane registry is the durable
+  // lifecycle record, so an active lane must remain visible even during that
+  // discovery gap. Only synthesize a lane-backed row when inventory did not
+  // already provide the same session, and never resurrect idle/archived lanes.
+  const representedSessionKeys = new Set(inventoryAgents.map((agent) => agent.sessionKey));
+  const laneOnlyAgents = [...laneBySession.values()]
+    .filter((lane): lane is Lane & { sessionKey: string } => Boolean(
+      lane.sessionKey
+      && LANE_ONLY_OPERATOR_STATUSES.has(lane.status)
+      && !representedSessionKeys.has(lane.sessionKey)
+      && (!sessionKeyFilter || lane.sessionKey === sessionKeyFilter),
+    ))
+    .map((lane) => operatorStatusAgentFromLane(lane, context));
+
+  return [...inventoryAgents, ...laneOnlyAgents];
 }
 
 const ACTIVE_STATUSES = new Set(['launching', 'running', 'working', 'recovering']);

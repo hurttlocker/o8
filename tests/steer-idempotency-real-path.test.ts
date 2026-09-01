@@ -16,6 +16,9 @@ vi.mock('@/lib/runtime/actions', async (importOriginal) => {
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: h.publish }));
 vi.mock('@/lib/command-center/snapshot', () => ({ invalidateCommandCenterSnapshotCaches: vi.fn() }));
 vi.mock('@/lib/mobile/inbox', () => ({ invalidateInboxCache: vi.fn() }));
+vi.mock('@/lib/runtime/inventory', () => ({
+  getRuntimeInventorySnapshot: vi.fn(async () => ({ agents: [] })),
+}));
 
 const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-steer-idempotency-'));
 const operatorToken = 'operator-steer-idempotency-0123456789abcdef';
@@ -24,10 +27,12 @@ process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
 const legacyRoute = await import('@/app/api/orchestrator/steer-packet/route');
+const operatorStatusRoute = await import('@/app/api/operator/status/route');
+const { handleStatus } = await import('@/lib/mcp/operator-handlers/status');
 const agentControlRoute = await import('@/app/api/agent-control/action/route');
 const idempotency = await import('@/lib/orchestrator/idempotency-store');
 const { closeDb, getSqlite } = await import('@/lib/db');
-const { createLane, deleteLane } = await import('@/lib/lane/registry');
+const { createLane, deleteLane, getLane } = await import('@/lib/lane/registry');
 
 const createdLaneIds: string[] = [];
 
@@ -43,13 +48,13 @@ function post(pathname: string, body: unknown) {
   });
 }
 
-function createSteerLane(label: string) {
+function createSteerLane(label: string, sessionKey = `codex-owned:${label}`) {
   const lane = createLane({
     repoPath: dataDir,
     branch: `inline/${label}`,
     runtime: 'codex',
     packetId: `packet-${label}`,
-    sessionKey: `codex-owned:${label}`,
+    sessionKey,
   });
   createdLaneIds.push(lane.id);
   return lane;
@@ -69,6 +74,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const laneId of createdLaneIds.splice(0)) deleteLane(laneId);
 });
 
@@ -78,6 +84,59 @@ afterAll(() => {
 });
 
 describe('packet steer post-effect idempotency through real routes', () => {
+  it('real o8_status keeps a successfully steered lane visible when runtime discovery is empty', async () => {
+    const lane = createSteerLane(
+      'operator-status-lane-truth',
+      'test-runtime:operator-status-lane-truth',
+    );
+    h.perform.mockResolvedValueOnce({
+      ok: true,
+      action: 'steer',
+      surfaceId: lane.sessionKey,
+      sessionKey: lane.sessionKey,
+      runtime: lane.runtime,
+      status: 'sent',
+      note: 'steered',
+    });
+
+    const steer = await legacyRoute.POST(post('/api/orchestrator/steer-packet', {
+      packetId: lane.packetId,
+      message: 'continue the live packet',
+      idempotencyKey: 'operator-status-lane-truth',
+    }));
+    expect(steer.status).toBe(200);
+    expect(getLane(lane.id)?.status).toBe('running');
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const request = new NextRequest(String(input));
+      if (request.nextUrl.pathname === '/api/operator/status') {
+        return operatorStatusRoute.GET(request);
+      }
+      throw new Error(`Unexpected fetch: ${request.nextUrl.pathname}`);
+    });
+
+    const result = await handleStatus({});
+    const text = result.content.find((block) => block.type === 'text')?.text ?? '{}';
+    const payload = JSON.parse(text) as {
+      summary: string;
+      data: {
+        agents: Array<{ sessionKey: string; status: string; authority: string }>;
+        recentActivity: Array<{ action: string; target: string }>;
+      };
+    };
+
+    expect(payload.summary).toContain('1 agent running');
+    expect(payload.data.agents).toContainEqual(expect.objectContaining({
+      sessionKey: lane.sessionKey,
+      status: 'running',
+      authority: 'lane-state',
+    }));
+    expect(payload.data.recentActivity).toContainEqual(expect.objectContaining({
+      action: 'transcript_activity',
+      target: lane.label,
+    }));
+  });
+
   it('legacy steer replays an outcome-unknown throw after the event/send boundary', async () => {
     const lane = createSteerLane('legacy-outcome-unknown');
     h.perform.mockImplementationOnce(async () => {
