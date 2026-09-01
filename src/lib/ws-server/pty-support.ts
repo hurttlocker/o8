@@ -65,12 +65,12 @@ export function resolveTmuxBinary(): string {
   }
 }
 
-export function tmuxSessionExists(sessionName: string): boolean {
+export function tmuxSessionExists(sessionName: string, serverArgs: readonly string[] = []): boolean {
   const target = sessionName.trim();
   if (!target) return false;
 
   try {
-    execFileSync(resolveTmuxBinary(), ['has-session', '-t', target], {
+    execFileSync(resolveTmuxBinary(), [...serverArgs, 'has-session', '-t', target], {
       windowsHide: true,
       timeout: 2000,
       stdio: 'ignore',
