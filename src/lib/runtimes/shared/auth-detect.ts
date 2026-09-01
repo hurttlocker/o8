@@ -196,6 +196,22 @@ async function probeCodexAuth(binaryPath: string): Promise<boolean> {
   }
 }
 
+async function probeClaudeAuth(binaryPath: string): Promise<boolean> {
+  try {
+    const probe = cliInvocation(binaryPath, ['auth', 'status', '--json']);
+    const { stdout } = await execFileAsync(probe.command, probe.args, {
+      windowsHide: true,
+      timeout: PROBE_TIMEOUT_MS,
+      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+      maxBuffer: 64 * 1024,
+    });
+    const parsed = JSON.parse(stdout.trim()) as { loggedIn?: boolean };
+    return parsed.loggedIn === true;
+  } catch {
+    return false;
+  }
+}
+
 async function detectCodex(): Promise<RuntimeAuthStatus> {
   const binaryPath = scanAndLink('codex') ?? undefined;
   if (!binaryPath) {
@@ -236,19 +252,19 @@ async function detectClaude(): Promise<RuntimeAuthStatus> {
     });
   }
 
-  const home = os.homedir();
-  const hasEnvAuth = Boolean(process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_CODE_OAUTH_TOKEN);
-  const settingsExists = await fileExists(path.join(home, '.claude', 'settings.json'));
-  const credentialsExists = await fileExists(path.join(home, '.claude', '.credentials.json'));
-  const projectHistoryExists = await fileExists(path.join(home, '.claude', 'projects'));
-  const authenticated = hasEnvAuth || settingsExists || credentialsExists || projectHistoryExists;
+  const hasEnvAuth = Boolean(
+    process.env.ANTHROPIC_API_KEY?.trim()
+    || process.env.CLAUDE_CODE_OAUTH_TOKEN?.trim(),
+  );
+  const cliSaysLoggedIn = await probeClaudeAuth(binaryPath);
+  const authenticated = hasEnvAuth || cliSaysLoggedIn;
 
   return nowStatus('claude', 'claude-code', {
     installed: true,
     authenticated,
     detail: authenticated
-      ? 'Claude Code CLI is installed and has local sign-in evidence.'
-      : 'Claude Code CLI is installed but no local sign-in evidence was found.',
+      ? 'Claude Code CLI is installed and signed in.'
+      : 'Claude Code CLI is installed but not signed in.',
     binaryPath,
   });
 }

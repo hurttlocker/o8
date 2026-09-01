@@ -395,6 +395,30 @@ describe('Claude Code worker skill isolation real path', () => {
     }
   });
 
+  it('treats empty OAuth token strings as unavailable before writing a worker snapshot', async () => {
+    const emptyConfigDir = path.join(tempRoot, 'operator-empty-credentials');
+    const sessionDir = path.join(tempRoot, 'empty-credential-session');
+    mkdirSync(emptyConfigDir, { recursive: true });
+    writeFileSync(
+      path.join(emptyConfigDir, '.credentials.json'),
+      JSON.stringify({ claudeAiOauth: { accessToken: '', refreshToken: '' } }),
+    );
+    const priorConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = emptyConfigDir;
+
+    try {
+      const { ensureClaudeCodeWorkerConfigDir } = await import('@/lib/claude-code/codex-subscription-proxy');
+      await expect(ensureClaudeCodeWorkerConfigDir(sessionDir, 'native')).rejects.toMatchObject({
+        code: 'worker_not_authenticated',
+        reason: 'No live Claude OAuth credential was available to seed.',
+      });
+      expect(existsSync(path.join(sessionDir, 'claude-code-worker-config', '.credentials.json'))).toBe(false);
+    } finally {
+      if (priorConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = priorConfigDir;
+    }
+  });
+
   it('injects only explicitly allowlisted repository skill instructions', async () => {
     const allowedSkill = path.join(repoPath, '.claude', 'skills', 'review-only');
     const blockedSkill = path.join(repoPath, '.claude', 'skills', 'unlisted');

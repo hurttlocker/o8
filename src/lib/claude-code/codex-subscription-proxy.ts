@@ -380,7 +380,8 @@ async function seedNativeWorkerCredentials(configDir: string): Promise<void> {
 function hasClaudeOAuth(raw: string): boolean {
   try {
     const oauth = (JSON.parse(raw) as { claudeAiOauth?: Record<string, unknown> }).claudeAiOauth;
-    return typeof oauth?.accessToken === 'string' || typeof oauth?.refreshToken === 'string';
+    return (typeof oauth?.accessToken === 'string' && oauth.accessToken.trim().length > 0)
+      || (typeof oauth?.refreshToken === 'string' && oauth.refreshToken.trim().length > 0);
   } catch {
     return false;
   }
