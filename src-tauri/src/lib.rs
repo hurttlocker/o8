@@ -4354,10 +4354,46 @@ mod stt_engine {
         }
     }
 
+    /// Terminal teardown for a named transcription dependency failure. Unlike
+    /// the ordinary provider-failure path, this must not fall back silently or
+    /// claim a paste while managed transcription cannot reach its control plane.
+    fn finalize_bail_error(
+        app: &AppHandle,
+        session_id: u64,
+        audio_file: &str,
+        message: &str,
+        is_agent: bool,
+    ) {
+        if !audio_file.is_empty() {
+            let _ = std::fs::remove_file(audio_file);
+        }
+        let system_origin = crate::fn_hotkey::is_system_origin();
+        crate::live_dictation::cancel_session(session_id);
+        crate::fn_hotkey::set_system_origin(false);
+        #[cfg(target_os = "macos")]
+        crate::spatial_ink_window::disarm(app);
+        let error = serde_json::json!({
+            "type": "error",
+            "origin": if system_origin { "system" } else { "in-window" },
+            "sessionId": session_id,
+            "text": message,
+        });
+        if is_agent {
+            emit_agent_stt(app, error);
+            crate::fn_hotkey::clear_agent_event_session(Some(session_id));
+        } else if system_origin {
+            let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", error.clone());
+            let _ = app.emit("o8:stt-event", error);
+        } else {
+            let _ = app.emit("o8:stt-event", error);
+        }
+    }
+
     /// Run the finalize chain on a background thread: Whisper re-transcribe
     /// (default-on, OpenRouter) → Gemini polish (audio-grounded). The polished
-    /// result is emitted as `o8:stt-event` type `polished`. On any failure we
-    /// fall back to Apple's transcript so the user always gets text.
+    /// result is emitted as `o8:stt-event` type `polished`. Ordinary provider
+    /// failures fall back to Apple's transcript; a managed tier without its
+    /// control plane emits the named terminal error instead.
     fn run_finalize(app: AppHandle, session_id: u64, audio_file: String, apple_text: String) {
         std::thread::spawn(move || {
             // Long-form Escape-cancel: drop THIS session's finalize entirely — no
@@ -4451,16 +4487,36 @@ mod stt_engine {
                 audio_file.as_str(),
             ) {
                 (true, path) if !path.is_empty() => {
-                    match crate::stt::whisper::transcribe_file(path) {
-                        Some(result) => {
-                            log::info!(
-                                "[stt] whisper used (latency={}ms model={})",
-                                result.latency_ms,
-                                result.model
+                    match crate::stt::whisper::finalize_transcription(
+                        path,
+                        &apple_text,
+                        |result| {
+                            if result.whisper_used {
+                                log::info!(
+                                    "[stt] whisper used (latency={}ms model={})",
+                                    result.latency_ms.unwrap_or(0),
+                                    result.model.as_deref().unwrap_or("unknown")
+                                );
+                            } else {
+                                log::warn!(
+                                    "[stt] whisper failed/empty; using Apple transcript"
+                                );
+                            }
+                            (result.text, result.whisper_used)
+                        },
+                    ) {
+                        Ok(delivery) => delivery,
+                        Err(error @ crate::stt::whisper::TranscriptionFailure::ManagedServerUnavailable) => {
+                            finalize_bail_error(
+                                &app,
+                                session_id,
+                                &audio_file,
+                                error.user_message().unwrap_or("Dictation failed."),
+                                is_agent,
                             );
-                            (result.text, true)
+                            return;
                         }
-                        None => {
+                        Err(crate::stt::whisper::TranscriptionFailure::Unavailable) => {
                             log::warn!("[stt] whisper failed/empty; using Apple transcript");
                             (apple_text.clone(), false)
                         }

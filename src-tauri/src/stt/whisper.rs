@@ -16,6 +16,8 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 pub const WHISPER_TURBO_MODEL: &str = "openai/whisper-large-v3-turbo";
+pub const MANAGED_SERVER_UNAVAILABLE: &str =
+    "Managed dictation unavailable: the o8 desktop server isn't running. Open o8 or enable on-device transcription.";
 
 const TIMEOUT_SECS: u64 = 30;
 
@@ -39,6 +41,29 @@ pub struct WhisperTranscription {
     pub latency_ms: u64,
     pub seconds: Option<f64>,
     pub estimated_cost_usd: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TranscriptionFailure {
+    Unavailable,
+    ManagedServerUnavailable,
+}
+
+impl TranscriptionFailure {
+    pub fn user_message(&self) -> Option<&'static str> {
+        match self {
+            Self::Unavailable => None,
+            Self::ManagedServerUnavailable => Some(MANAGED_SERVER_UNAVAILABLE),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeliveryTranscript {
+    pub text: String,
+    pub whisper_used: bool,
+    pub model: Option<String>,
+    pub latency_ms: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -98,8 +123,7 @@ pub fn enabled() -> bool {
 }
 
 pub fn is_available() -> bool {
-    crate::stt::keys::get_groq_key().is_some()
-        || crate::stt::keys::get_openrouter_key().is_some()
+    crate::stt::keys::get_groq_key().is_some() || crate::stt::keys::get_openrouter_key().is_some()
 }
 
 fn language_hint() -> Option<String> {
@@ -124,7 +148,7 @@ fn local_marker_path() -> std::path::PathBuf {
 }
 
 pub fn local_stt_supported() -> bool {
-    std::env::consts::ARCH == "aarch64"
+    cfg!(test) || std::env::consts::ARCH == "aarch64"
 }
 
 fn local_enabled() -> bool {
@@ -139,6 +163,14 @@ fn local_enabled() -> bool {
 /// LiveRecognizer::helper_path — triple-suffixed next to the app binary in a
 /// bundle, `src-tauri/helpers/` in dev).
 fn local_sidecar_path() -> Option<std::path::PathBuf> {
+    #[cfg(test)]
+    if let Ok(path) = std::env::var("O8_TEST_LOCAL_STT_SIDECAR") {
+        let path = std::path::PathBuf::from(path);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             let target = if cfg!(target_arch = "x86_64") {
@@ -219,7 +251,10 @@ fn transcribe_via_local(path: &str) -> Option<WhisperTranscription> {
         return None;
     }
     let latency_ms = parsed.latency_ms.unwrap_or(0);
-    tracing::info!("[stt] local (ANE) transcription ok: {} chars in {latency_ms}ms", text.len());
+    tracing::info!(
+        "[stt] local (ANE) transcription ok: {} chars in {latency_ms}ms",
+        text.len()
+    );
     Some(WhisperTranscription {
         text,
         model: parsed.model.unwrap_or_else(|| "parakeet-local".to_string()),
@@ -343,19 +378,19 @@ fn audio_format(path: &str) -> String {
         .to_ascii_lowercase()
 }
 
-pub fn transcribe_file(path: &str) -> Option<WhisperTranscription> {
+pub fn transcribe_file(path: &str) -> Result<WhisperTranscription, TranscriptionFailure> {
     // Local first — on-device (ANE) beats any network call, costs nothing,
     // and never leaves the machine. Only fires post-warmup on Apple Silicon;
     // any failure falls straight through to the cloud ladder.
     if let Some(result) = transcribe_via_local(path) {
-        return Some(result);
+        return Ok(result);
     }
 
     let audio = match std::fs::read(path) {
         Ok(audio) => audio,
         Err(e) => {
             tracing::warn!("Whisper Turbo STT skipped: failed to read audio file {path}: {e}");
-            return None;
+            return Err(TranscriptionFailure::Unavailable);
         }
     };
 
@@ -364,7 +399,7 @@ pub fn transcribe_file(path: &str) -> Option<WhisperTranscription> {
     if let Some(groq_key) = crate::stt::keys::get_groq_key() {
         if !audio.is_empty() {
             if let Some(result) = transcribe_via_groq(path, audio.clone(), &groq_key) {
-                return Some(result);
+                return Ok(result);
             }
             tracing::warn!("Groq Whisper failed — falling back to OpenRouter/managed route");
         }
@@ -375,13 +410,22 @@ pub fn transcribe_file(path: &str) -> Option<WhisperTranscription> {
         Some(t) => t,
         None => {
             tracing::warn!("Whisper Turbo STT skipped: no OpenRouter key and no active o8 plan");
-            return None;
+            return Err(TranscriptionFailure::Unavailable);
         }
     };
 
+    // Managed transcription still relies on the desktop control plane for
+    // current plan state. Check its narrow identity route before starting the
+    // provider request so a background-only voice process fails in milliseconds
+    // instead of waiting on a request it cannot authorize reliably.
+    if target.managed && crate::fetch_setup_identity(crate::resolve_api_port()).is_none() {
+        tracing::warn!("[stt] {MANAGED_SERVER_UNAVAILABLE}");
+        return Err(TranscriptionFailure::ManagedServerUnavailable);
+    }
+
     if audio.is_empty() {
         tracing::warn!("Whisper Turbo STT skipped: audio file is empty");
-        return None;
+        return Err(TranscriptionFailure::Unavailable);
     }
 
     let request_timeout = request_timeout_for(audio.len());
@@ -419,16 +463,16 @@ pub fn transcribe_file(path: &str) -> Option<WhisperTranscription> {
                             "Whisper Turbo STT API error: {}",
                             error.message.unwrap_or_else(|| "unknown error".to_string())
                         );
-                        return None;
+                        return Err(TranscriptionFailure::Unavailable);
                     }
 
                     let text = parsed.text.unwrap_or_default().trim().to_string();
                     if text.is_empty() {
                         tracing::warn!("Whisper Turbo STT returned an empty transcript");
-                        return None;
+                        return Err(TranscriptionFailure::Unavailable);
                     }
 
-                    Some(WhisperTranscription {
+                    Ok(WhisperTranscription {
                         text,
                         model: parsed
                             .model
@@ -440,7 +484,7 @@ pub fn transcribe_file(path: &str) -> Option<WhisperTranscription> {
                 }
                 Err(e) => {
                     tracing::warn!("Whisper Turbo STT parse error: {e}");
-                    None
+                    Err(TranscriptionFailure::Unavailable)
                 }
             }
         }
@@ -451,11 +495,171 @@ pub fn transcribe_file(path: &str) -> Option<WhisperTranscription> {
                 "Whisper Turbo STT API error ({status}): {}",
                 crate::utf8_head(&body_text, 200)
             );
-            None
+            Err(TranscriptionFailure::Unavailable)
         }
         Err(e) => {
             tracing::warn!("Whisper Turbo STT request failed: {e}");
-            None
+            Err(TranscriptionFailure::Unavailable)
         }
+    }
+}
+
+/// Resolve the transcript handed to the command/polish/paste stages. Ordinary
+/// provider failures retain the Apple fallback; the managed-without-server
+/// state is terminal so callers can surface the named degradation.
+fn transcribe_for_delivery(
+    path: &str,
+    apple_text: &str,
+) -> Result<DeliveryTranscript, TranscriptionFailure> {
+    match transcribe_file(path) {
+        Ok(result) => Ok(DeliveryTranscript {
+            text: result.text,
+            whisper_used: true,
+            model: Some(result.model),
+            latency_ms: Some(result.latency_ms),
+        }),
+        Err(TranscriptionFailure::Unavailable) => Ok(DeliveryTranscript {
+            text: apple_text.to_string(),
+            whisper_used: false,
+            model: None,
+            latency_ms: None,
+        }),
+        Err(error @ TranscriptionFailure::ManagedServerUnavailable) => Err(error),
+    }
+}
+
+/// Production handoff between transcription selection and the remaining
+/// finalize pipeline. The callback is invoked exactly once for a deliverable
+/// transcript and never for a named terminal dependency failure.
+pub fn finalize_transcription<T>(
+    path: &str,
+    apple_text: &str,
+    deliver: impl FnOnce(DeliveryTranscript) -> T,
+) -> Result<T, TranscriptionFailure> {
+    transcribe_for_delivery(path, apple_text).map(deliver)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::{finalize_transcription, TranscriptionFailure, MANAGED_SERVER_UNAVAILABLE};
+    use crate::DATA_DIR_ENV_TEST_LOCK;
+    use std::ffi::OsString;
+    use std::net::TcpListener;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::PathBuf;
+    use std::time::{Duration, Instant};
+
+    struct OfflineFixture {
+        dir: PathBuf,
+        previous: Vec<(&'static str, Option<OsString>)>,
+    }
+
+    impl OfflineFixture {
+        fn new() -> Self {
+            let dir =
+                std::env::temp_dir().join(format!("o8-offline-dictation-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).expect("create offline dictation fixture");
+            let names = [
+                "O8_DATA_DIR",
+                "CORTEX_IDE_DATA_DIR",
+                "O8_API_PORT",
+                "O8_TEST_LOCAL_STT_SIDECAR",
+                "O8_TEST_DISABLE_VOICE_PROVIDER_KEYS",
+                "GROQ_API_KEY",
+                "OPENROUTER_API_KEY",
+            ];
+            let previous = names
+                .into_iter()
+                .map(|name| (name, std::env::var_os(name)))
+                .collect();
+            std::env::set_var("O8_DATA_DIR", &dir);
+            std::env::remove_var("CORTEX_IDE_DATA_DIR");
+            std::env::set_var("O8_TEST_DISABLE_VOICE_PROVIDER_KEYS", "1");
+            std::env::remove_var("GROQ_API_KEY");
+            std::env::remove_var("OPENROUTER_API_KEY");
+            Self { dir, previous }
+        }
+    }
+
+    impl Drop for OfflineFixture {
+        fn drop(&mut self) {
+            for (name, value) in self.previous.drain(..) {
+                match value {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    #[test]
+    fn offline_pipeline_delivers_local_text_and_degrades_managed_tier_immediately() {
+        let _env_lock = DATA_DIR_ENV_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let fixture = OfflineFixture::new();
+        let audio_path = fixture.dir.join("dictation.wav");
+        std::fs::write(&audio_path, b"fake wav bytes").expect("write fixture audio");
+        let closed_port = TcpListener::bind(("127.0.0.1", 0))
+            .expect("reserve closed API port")
+            .local_addr()
+            .expect("read closed API port")
+            .port();
+        std::env::set_var("O8_API_PORT", closed_port.to_string());
+
+        let sidecar = fixture.dir.join("speech-local");
+        std::fs::write(
+            &sidecar,
+            "#!/bin/sh\nprintf '%s\\n' '{\"ok\":true,\"text\":\"offline words delivered\",\"latency_ms\":7,\"model\":\"fixture-local\"}'\n",
+        )
+        .expect("write local STT fixture");
+        std::fs::set_permissions(&sidecar, std::fs::Permissions::from_mode(0o700))
+            .expect("make local STT fixture executable");
+        std::env::set_var("O8_TEST_LOCAL_STT_SIDECAR", &sidecar);
+        std::fs::write(fixture.dir.join("local-stt-ready"), b"ok").expect("mark local model ready");
+        std::fs::write(
+            fixture.dir.join("dictation.json"),
+            r#"{"local_stt_enabled":true}"#,
+        )
+        .expect("write local dictation config");
+
+        let started = Instant::now();
+        let mut delivered = None;
+        finalize_transcription(
+            audio_path.to_str().expect("utf8 audio path"),
+            "apple fallback must not win",
+            |local| {
+                assert!(local.whisper_used);
+                assert_eq!(local.model.as_deref(), Some("fixture-local"));
+                delivered = Some(local.text);
+            },
+        )
+        .expect("local model must reach delivery without the API server");
+        assert_eq!(delivered.as_deref(), Some("offline words delivered"));
+        assert!(started.elapsed() < Duration::from_secs(1));
+
+        std::fs::remove_file(fixture.dir.join("local-stt-ready"))
+            .expect("disable local model for managed case");
+        crate::stt::keys::set_pref("local_stt_enabled", serde_json::Value::Bool(false))
+            .expect("persist managed dictation config");
+        std::fs::write(
+            fixture.dir.join("entitlement.json"),
+            r#"{"plan":"pro","licenseKey":"header.payload.signature"}"#,
+        )
+        .expect("write managed entitlement");
+        let started = Instant::now();
+        let mut managed_delivered = false;
+        let error = finalize_transcription(
+            audio_path.to_str().expect("utf8 audio path"),
+            "must not paste a fallback for managed degradation",
+            |_| managed_delivered = true,
+        )
+        .expect_err("managed dictation must stop when the API server is absent");
+        assert!(!managed_delivered);
+        assert_eq!(error, TranscriptionFailure::ManagedServerUnavailable);
+        assert_eq!(error.user_message(), Some(MANAGED_SERVER_UNAVAILABLE));
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 }

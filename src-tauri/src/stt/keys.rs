@@ -257,6 +257,11 @@ pub fn set_pref(key: &str, value: serde_json::Value) -> Result<(), String> {
 /// Keychain is authoritative. A value left by an older release is migrated on
 /// first use and then removed from the JSON preferences file.
 fn stored_secret(key: &str) -> Option<String> {
+    #[cfg(test)]
+    if std::env::var("O8_TEST_DISABLE_VOICE_PROVIDER_KEYS").as_deref() == Ok("1") {
+        return None;
+    }
+
     #[cfg(target_os = "macos")]
     {
         if let Ok(raw) = security_framework::passwords::get_generic_password(KEYCHAIN_SERVICE, key) {

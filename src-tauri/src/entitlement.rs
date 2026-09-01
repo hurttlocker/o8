@@ -146,6 +146,7 @@ pub fn resolve_gemini(model: &str) -> Option<GeminiTarget> {
 pub struct BearerTarget {
     pub url: String,
     pub bearer: String,
+    pub managed: bool,
 }
 
 /// Resolve the Whisper transcription route: local OpenRouter key → direct; else
@@ -156,11 +157,13 @@ pub fn resolve_transcribe() -> Option<BearerTarget> {
         return Some(BearerTarget {
             url: "https://openrouter.ai/api/v1/audio/transcriptions".to_string(),
             bearer: key,
+            managed: false,
         });
     }
     let token = read_license_token()?;
     Some(BearerTarget {
         url: format!("{}/v1/transcribe", proxy_base_url()),
         bearer: token,
+        managed: true,
     })
 }
