@@ -37,6 +37,51 @@ function textOutput(label: string): DeclarativeRunLogPatterns {
   };
 }
 
+function copilotJsonl(): DeclarativeRunLogPatterns {
+  return {
+    eventTypePaths: ['type'],
+    timestampPaths: ['timestamp'],
+    patterns: [
+      {
+        eventType: /^(session\.start|session\.resume)$/,
+        threadIdPaths: ['data.sessionId'],
+      },
+      {
+        eventType: 'assistant.message',
+        kind: 'message',
+        label: 'Copilot',
+        textPaths: ['data.content'],
+      },
+      {
+        eventType: 'tool.execution_start',
+        kind: 'tool',
+        labelPaths: ['data.toolName'],
+        textPaths: ['data.arguments'],
+      },
+      {
+        eventType: 'tool.execution_complete',
+        kind: 'tool-output',
+        labelPaths: ['data.toolName'],
+        textPaths: ['data.result', 'data.error'],
+      },
+      {
+        eventType: /^(assistant\.turn_end|result|session\.shutdown)$/,
+        kind: 'event',
+        label: 'Run complete',
+        textPaths: ['data.result', 'data.usage', 'data'],
+        completedTurn: true,
+      },
+      {
+        eventType: /^(error|session\.error)$/,
+        kind: 'event',
+        label: 'Error',
+        textPaths: ['data.message', 'data.error', 'message', 'error'],
+      },
+    ],
+    includeUnmatchedJson: true,
+  };
+}
+
 function qwenStreamJson(): DeclarativeRunLogPatterns {
   return {
     patterns: [
@@ -126,6 +171,7 @@ function openHandsNdjson(): DeclarativeRunLogPatterns {
 }
 
 function parserForProfile(profile: DeclarativeParserProfile, label: string): DeclarativeRunLogPatterns {
+  if (profile === 'copilot-jsonl') return copilotJsonl();
   if (profile === 'openhands-ndjson') return openHandsNdjson();
   if (profile === 'qwen-stream-json') return qwenStreamJson();
   return textOutput(label);

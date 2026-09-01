@@ -1,7 +1,11 @@
 // Capability map for orchestrator runtime adapters. See docs/internals/runtime-adapter-contract.md.
 import { MODEL_IDS } from '@/lib/models';
 
-export type DeclarativeParserProfile = 'text' | 'openhands-ndjson' | 'qwen-stream-json';
+export type DeclarativeParserProfile =
+  | 'text'
+  | 'copilot-jsonl'
+  | 'openhands-ndjson'
+  | 'qwen-stream-json';
 
 export interface DeclarativeRuntimeManifest {
   launchArgs: string[];
@@ -185,6 +189,96 @@ export const ORCHESTRATOR_RUNTIMES = {
     reasoningEffort: false,
     tier: 'standard',
     description: 'Multi-provider OpenCode 2 worker via `opencode2 run --format json`; dispatch requires provider credentials or a configured local provider.',
+  },
+  'copilot-cli': {
+    label: 'GitHub Copilot CLI',
+    shortLabel: 'Copilot',
+    dispatchable: true,
+    requiresModel: false,
+    accentColor: '#238636',
+    binaryName: 'copilot',
+    workerProvider: 'copilot-cli',
+    authHouse: 'copilot-cli',
+    reasoningEffort: false,
+    // The CLI can route across model families, so the runtime name alone does
+    // not guarantee a frontier model. Keep Brain auto-assistance enabled.
+    tier: 'standard',
+    description: 'Multi-model Copilot CLI worker via non-interactive JSONL with native session resume.',
+    declarative: {
+      launchArgs: [
+        '-p',
+        '{{prompt}}',
+        '--allow-all',
+        '--no-ask-user',
+        '--output-format',
+        'json',
+        '--no-color',
+        '--no-auto-update',
+        '--no-remote-export',
+      ],
+      resumeArgs: [
+        '-p',
+        '{{prompt}}',
+        '--resume={{threadId}}',
+        '--allow-all',
+        '--no-ask-user',
+        '--output-format',
+        'json',
+        '--no-color',
+        '--no-auto-update',
+        '--no-remote-export',
+      ],
+      parserProfile: 'copilot-jsonl',
+      costFormat: 'structured',
+      authEnvVars: [
+        'COPILOT_GITHUB_TOKEN',
+        'GH_TOKEN',
+        'GITHUB_TOKEN',
+        'COPILOT_PROVIDER_API_KEY',
+        'COPILOT_PROVIDER_BEARER_TOKEN',
+        'COPILOT_PROVIDER_BASE_URL',
+      ],
+      authPaths: ['.copilot/config.json', '.copilot/settings.json'],
+      authFix: 'Install Copilot CLI (`npm i -g @github/copilot`), then run `copilot login` or configure a supported token or model provider.',
+    },
+  },
+  crush: {
+    label: 'Crush',
+    shortLabel: 'Crush',
+    dispatchable: true,
+    requiresModel: false,
+    accentColor: '#ff5f87',
+    binaryName: 'crush',
+    workerProvider: 'crush',
+    authHouse: 'crush',
+    reasoningEffort: false,
+    // Provider and model selection live in Crush configuration, so dispatch
+    // cannot infer frontier capability from the runtime id.
+    tier: 'standard',
+    description: 'Multi-provider Crush worker via its automatic non-interactive one-shot command.',
+    declarative: {
+      launchArgs: ['run', '--quiet', '{{prompt}}'],
+      resumeArgs: null,
+      parserProfile: 'text',
+      costFormat: 'text',
+      authEnvVars: [
+        'HYPER_API_KEY',
+        'ANTHROPIC_API_KEY',
+        'OPENAI_API_KEY',
+        'VERCEL_API_KEY',
+        'GEMINI_API_KEY',
+        'OPENROUTER_API_KEY',
+        'AWS_ACCESS_KEY_ID',
+        'AZURE_OPENAI_API_KEY',
+      ],
+      authPaths: [
+        '.config/crush/crushrc',
+        '.config/crush/crush.json',
+        '.local/share/crush/crush.json',
+        'AppData/Local/crush/crush.json',
+      ],
+      authFix: 'Install Crush (`npm i -g @charmland/crush`), then run `crush` once to configure a provider or set a supported provider API key.',
+    },
   },
   openhands: {
     label: 'OpenHands',
@@ -522,5 +616,5 @@ export function getRuntimeCapability(runtime: OrchestratorRuntime): CatalogRunti
 /** Runtimes that ship in the dispatch picker. Mirrors the canonical capability set. */
 export const V1_DISPATCH_RUNTIMES: OrchestratorRuntime[] = listDispatchableRuntimes();
 
-// Sixteen dispatchable seats at the table. The seventeenth is yours:
+// Eighteen dispatchable seats at the table. The nineteenth is yours:
 // docs/internals/runtime-adapter-contract.md is the chair.

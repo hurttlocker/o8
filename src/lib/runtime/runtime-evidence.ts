@@ -261,6 +261,38 @@ export const RUNTIME_EVIDENCE_DEFINITIONS = {
       },
     ],
   },
+  'copilot-cli': {
+    ...unknownEvidence('copilot-cli', ['jsonl'], 'provider-native'),
+    billingModes: ['subscription-capacity', 'api-token', 'local-inference'],
+    sources: [
+      internalSource('copilot-cli'),
+      {
+        id: 'copilot-cli-programmatic-contract',
+        label: 'Copilot CLI programmatic reference',
+        url: 'https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-programmatic-reference',
+        observedAt: '2026-09-01',
+        maxAgeDays: 30,
+        confidence: 'verified',
+        scope: 'runtime-upstream',
+      },
+    ],
+  },
+  crush: {
+    ...unknownEvidence('crush', ['text'], 'configured-provider'),
+    billingModes: ['api-token', 'subscription-capacity', 'local-inference'],
+    sources: [
+      internalSource('crush'),
+      {
+        id: 'crush-cli-contract',
+        label: 'Crush CLI runtime contract',
+        url: 'https://github.com/charmbracelet/crush',
+        observedAt: '2026-09-01',
+        maxAgeDays: 30,
+        confidence: 'verified',
+        scope: 'runtime-upstream',
+      },
+    ],
+  },
   openhands: unknownEvidence('openhands', ['ndjson'], 'configured-provider'),
   goose: unknownEvidence('goose', ['text'], 'configured-provider'),
   qwen: unknownEvidence('qwen', ['stream-json'], 'provider-native'),
