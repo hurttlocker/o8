@@ -24,6 +24,15 @@ on:
         required: false
         default: false
         type: boolean
+      publish_target:
+        description: 'Build and publish previews for both platforms or one platform only'
+        required: false
+        default: both
+        type: choice
+        options:
+          - both
+          - linux
+          - windows
   schedule:
     - cron: '23 10 * * 2'
 
@@ -40,7 +49,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [windows-latest, ubuntu-latest]
+        platform: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.publish_target == 'linux' && '["ubuntu-latest"]' || github.event_name == 'workflow_dispatch' && inputs.publish_target == 'windows' && '["windows-latest"]' || '["windows-latest","ubuntu-latest"]') }}
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 75
     steps:
@@ -226,7 +235,7 @@ jobs:
           retention-days: 7
 
   publish-preview:
-    name: Publish Windows/Linux previews
+    name: Publish selected previews
     if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
     needs: build
     runs-on: ubuntu-latest
@@ -245,6 +254,7 @@ jobs:
       - name: Validate tag and collect public preview assets
         env:
           GH_TOKEN: ${{ github.token }}
+          PUBLISH_TARGET: ${{ inputs.publish_target }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         shell: bash
         run: |
@@ -283,15 +293,35 @@ jobs:
             cp "${matches[0]}" "release-assets/$destination"
           }
 
-          copy_one "o8_${version}_x64_en-US.msi" "o8_${version}_windows_x64_preview.msi"
-          copy_one "o8_${version}_x64-setup.exe" "o8_${version}_windows_x64_preview.exe"
-          copy_one "o8_${version}_amd64.AppImage" "o8_${version}_linux_amd64_preview.AppImage"
-          copy_one "o8_${version}_amd64.deb" "o8_${version}_linux_amd64_preview.deb"
-          copy_one "o8-${version}-1.x86_64.rpm" "o8_${version}_linux_x86_64_preview.rpm"
+          case "$PUBLISH_TARGET" in
+            both)
+              copy_one "o8_${version}_x64_en-US.msi" "o8_${version}_windows_x64_preview.msi"
+              copy_one "o8_${version}_x64-setup.exe" "o8_${version}_windows_x64_preview.exe"
+              copy_one "o8_${version}_amd64.AppImage" "o8_${version}_linux_amd64_preview.AppImage"
+              copy_one "o8_${version}_amd64.deb" "o8_${version}_linux_amd64_preview.deb"
+              copy_one "o8-${version}-1.x86_64.rpm" "o8_${version}_linux_x86_64_preview.rpm"
+              checksum_file="SHA256SUMS-windows-linux-preview.txt"
+              ;;
+            linux)
+              copy_one "o8_${version}_amd64.AppImage" "o8_${version}_linux_amd64_preview.AppImage"
+              copy_one "o8_${version}_amd64.deb" "o8_${version}_linux_amd64_preview.deb"
+              copy_one "o8-${version}-1.x86_64.rpm" "o8_${version}_linux_x86_64_preview.rpm"
+              checksum_file="SHA256SUMS-linux-preview.txt"
+              ;;
+            windows)
+              copy_one "o8_${version}_x64_en-US.msi" "o8_${version}_windows_x64_preview.msi"
+              copy_one "o8_${version}_x64-setup.exe" "o8_${version}_windows_x64_preview.exe"
+              checksum_file="SHA256SUMS-windows-preview.txt"
+              ;;
+            *)
+              echo "publish_target must be both, linux, or windows" >&2
+              exit 1
+              ;;
+          esac
 
           (
             cd release-assets
-            sha256sum o8_* > SHA256SUMS-windows-linux-preview.txt
+            sha256sum o8_* > "$checksum_file"
           )
       - name: Attest public preview assets
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
