@@ -12,6 +12,9 @@
  *   [•] Update available                 [Restart] [×]
  *       v0.1.172
  *
+ * The action reads [Download] instead on an install that cannot replace
+ * itself (a deb/rpm Linux install — see `isSelfUpdatableInstall`).
+ *
  * Click anywhere on the body to expand. The expanded section calls
  * /api/panel/o8-update-summary (free OpenRouter pool) to render a
  * 1-paragraph professional summary from the actual GitHub release body
@@ -32,6 +35,11 @@ import {
   relaunchInstalledUpdate,
   RELEASE_URL,
 } from '@/lib/app-update/client-restart';
+import {
+  normalizeInstallInfo,
+  resolveUpdateAction,
+  type InstallInfo,
+} from '@/lib/app-update/install-target';
 
 interface UpdateInfo {
   version: string;
@@ -54,6 +62,8 @@ let updateInstallInFlight = false;
 
 interface InstallRequest {
   requireIdle?: boolean;
+  /** True only for the operator pressing the card's action button. */
+  userInitiated?: boolean;
 }
 
 interface UpdateIdleResponse {
@@ -147,7 +157,9 @@ export function UpdateCard() {
   const [blockedNote, setBlockedNote] = useState<string | null>(null);
   const [installError, setInstallError] = useState<string | null>(null);
   const [bundleIntegrity, setBundleIntegrity] = useState<BundleIntegrityStatus | null>(null);
+  const [installInfo, setInstallInfo] = useState<InstallInfo | null>(null);
   const updateRef = useRef<UpdateInfo | null>(null);
+  const installInfoRef = useRef<InstallInfo | null>(null);
   const installingRef = useRef(false);
   const autoApplyingRef = useRef(false);
   const restartDeferredRef = useRef(false);
@@ -159,6 +171,23 @@ export function UpdateCard() {
   useEffect(() => {
     installingRef.current = installing;
   }, [installing]);
+
+  useEffect(() => {
+    installInfoRef.current = installInfo;
+  }, [installInfo]);
+
+  // What the running install is capable of. Only the server can read
+  // process.platform + APPIMAGE; a deb/rpm Linux install can never
+  // restart-to-install, so the card offers the release download instead.
+  useEffect(() => {
+    fetch('/api/panel/app/install-info', { cache: 'no-store' })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const next = normalizeInstallInfo(await response.json());
+        if (next) setInstallInfo(next);
+      })
+      .catch(() => { /* unknown install stays on the existing restart path */ });
+  }, []);
 
   const handleDismiss = useCallback(() => {
     const version = update?.version ?? '';
@@ -328,17 +357,24 @@ export function UpdateCard() {
 
   const handleInstall = useCallback(async (request: InstallRequest = {}) => {
     if (installingRef.current || updateInstallInFlight) return;
+    const action = resolveUpdateAction(installInfoRef.current, updateRef.current?.version ?? null);
+    if (action.kind === 'download' && !request.userInitiated) {
+      // Background applies (idle auto-apply, remote apply mutation) never open
+      // a browser on the operator's behalf.
+      setBlockedNote('This install updates by download. o8 cannot replace a deb or rpm install in place.');
+      return;
+    }
     updateInstallInFlight = true;
     installingRef.current = true;
     try {
       setInstalling(true);
       setBlockedNote(null);
       setInstallError(null);
-      if (request.requireIdle && !(await checkUpdateIdle())) {
+      if (action.kind === 'restart' && request.requireIdle && !(await checkUpdateIdle())) {
         setBlockedNote('Update ready. Restart is waiting for lanes and terminals to become idle.');
         return;
       }
-      if (restartDeferredRef.current) {
+      if (action.kind === 'restart' && restartDeferredRef.current) {
         const restarted = await relaunchInstalledUpdate({
           beforeRestart: request.requireIdle ? checkUpdateIdle : undefined,
         });
@@ -348,9 +384,13 @@ export function UpdateCard() {
         return;
       }
       const outcome = await installUpdateAndRestart(
-        updateRef.current?.releaseUrl ?? RELEASE_URL,
-        { beforeRestart: request.requireIdle ? checkUpdateIdle : undefined },
+        action.kind === 'download' ? action.url : updateRef.current?.releaseUrl ?? RELEASE_URL,
+        {
+          beforeRestart: request.requireIdle ? checkUpdateIdle : undefined,
+          selfUpdatable: action.kind === 'restart',
+        },
       );
+      if (outcome.downloadOpened) return;
       if (outcome.blocked) {
         // Kill-switch: this version was pulled post-release. Surface a quiet
         // note instead of restarting; the operator waits for the next build.
@@ -430,6 +470,11 @@ export function UpdateCard() {
   }
   if (!update) return null;
   if (dismissed && dismissed === update.version) return null;
+
+  // A deb/rpm Linux install cannot replace itself, so the same slot carries a
+  // download link to the release asset instead of restart-to-install.
+  const action = resolveUpdateAction(installInfo, update.version);
+  const actionLabel = action.kind === 'download' ? 'Download' : 'Restart';
 
   const cardStyle: CSSProperties = {
     flexShrink: 0,
@@ -557,12 +602,15 @@ export function UpdateCard() {
           type="button"
           onClick={(e) => {
             e.stopPropagation();
-            void handleInstall();
+            void handleInstall({ userInitiated: true });
           }}
           disabled={installing}
+          aria-label={action.kind === 'download'
+            ? `Download o8 v${update.version}`
+            : `Restart to install o8 v${update.version}`}
           style={restartStyle}
         >
-          {installing ? 'Installing…' : 'Restart'}
+          {installing && action.kind === 'restart' ? 'Installing…' : actionLabel}
         </button>
         <button
           type="button"

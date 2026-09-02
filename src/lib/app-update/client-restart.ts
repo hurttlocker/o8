@@ -12,10 +12,18 @@ export interface InstallUpdateOutcome {
   restartDeferred?: boolean;
   /** Set when the update was skipped because the version is pulled (kill-switch). */
   blocked?: { version: string; note?: string };
+  /** The install cannot self-update, so the release download was opened instead. */
+  downloadOpened?: boolean;
 }
 
 export interface InstallUpdateOptions {
   beforeRestart?: () => Promise<boolean>;
+  /**
+   * False when the running install cannot replace itself (a deb/rpm Linux
+   * install — see `isSelfUpdatableInstall`). Such a call opens the release
+   * download instead of ever reaching restart-to-install.
+   */
+  selfUpdatable?: boolean;
 }
 
 async function releaseCloudJobLeasesForRestart(): Promise<void> {
@@ -73,6 +81,11 @@ export async function installUpdateAndRestart(
   releaseUrl?: string,
   options: InstallUpdateOptions = {},
 ): Promise<InstallUpdateOutcome> {
+  if (options.selfUpdatable === false) {
+    openExternalUrl(releaseUrl ?? RELEASE_URL);
+    return { installed: false, downloadOpened: true };
+  }
+
   if (!isTauri()) {
     openExternalUrl(releaseUrl ?? RELEASE_URL);
     return { installed: false };

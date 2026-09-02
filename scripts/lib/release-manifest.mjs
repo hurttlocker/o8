@@ -17,7 +17,7 @@ function listFiles(directory, suffix) {
 // build's basename.
 const LINUX_APPIMAGE_NAME_PATTERN = /^o8_(.+)_amd64\.AppImage$/;
 
-function publishedLinuxAssetName(version) {
+export function publishedLinuxAssetName(version) {
   return `o8_${version}_linux_amd64_preview.AppImage`;
 }
 
