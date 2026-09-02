@@ -23,6 +23,7 @@ import {
   withMissionRegistryState,
 } from '@/lib/orchestrator/mission-registry';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { resolvePacketAlignment } from '@/lib/orchestrator/alignment-access';
 import { advancePacketStorageAdmissionEpoch } from '@/lib/orchestrator/packet-storage-admission-normalize';
 import { managedPacketWorktreeId, resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
 import { archiveWorkspaceManifestRunForReset } from '@/lib/workspace/manifest/lifecycle';
@@ -93,6 +94,17 @@ function markPacketResetHeld(packet: OrchestratorPacket) {
   packet.launchAttempts = 0;
   packet.operatorStopped = false;
   packet.tierEscalated = undefined;
+  // #2045 — reset CONSUMES a still-armed alignment (stamps `alignmentResolvedAt`)
+  // rather than clearing `huddle`: the operator's reset IS the alignment
+  // decision, and stamping keeps the audit trail that the packet was armed and
+  // when the alignment closed. Without this, reset_packet -> dispatch_mission
+  // re-armed the huddle block in `buildPacketPrompt` (#2044 only consumed it on
+  // steer / rerun_with_feedback), so the fresh worker spent a whole session
+  // planning again and produced no code. Only stamps while armed, so a packet
+  // that already consumed its alignment keeps the original timestamp.
+  if (resolvePacketAlignment(packet).armed) {
+    packet.alignmentResolvedAt = new Date().toISOString();
+  }
 }
 
 function markPacketResetPending(packet: OrchestratorPacket) {
