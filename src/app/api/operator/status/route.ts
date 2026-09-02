@@ -18,6 +18,18 @@ interface OperatorActivityCandidate {
   sessionKey: string;
 }
 
+// Sources are mixed formats — `lane.lastEventAt` (Date#toISOString, always
+// `.mmmZ`) and transcript `lastTranscriptAt` (provider-controlled, may come
+// through as `+00:00`). `localeCompare` on the raw string only agrees with
+// real chronological order when both sides share the same offset/fraction
+// shape, so two entries at the same moment written differently can sort
+// backwards (#2047). Compare parsed epoch milliseconds instead; a timestamp
+// that fails to parse sorts as oldest so a bad value never jumps the queue.
+function timestampEpochOrOldest(timestamp: string): number {
+  const parsed = Date.parse(timestamp);
+  return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;
+}
+
 function relativeActivityAge(timestamp: string): string {
   const parsed = Date.parse(timestamp);
   if (!Number.isFinite(parsed)) return 'just now';
@@ -137,7 +149,7 @@ export async function GET(request: NextRequest) {
     });
     const recentActivity = activityCandidates
       .filter((candidate) => Number.isFinite(Date.parse(candidate.timestamp)))
-      .sort((left, right) => right.timestamp.localeCompare(left.timestamp))
+      .sort((left, right) => timestampEpochOrOldest(right.timestamp) - timestampEpochOrOldest(left.timestamp))
       .slice(0, 5)
       .map((candidate) => ({
         ...candidate,
