@@ -20,6 +20,7 @@ const { createLane, getLane, listLanes } = await import('@/lib/lane/registry');
 const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { buildPacketPrompt } = await import('@/lib/orchestrator/packet-prompt');
 const { steerPacket } = await import('@/lib/orchestrator/operator-mission-service/steer');
+const { resetPacket } = await import('@/lib/orchestrator/operator-mission-service/reset');
 const { getMissionStatus } = await import('@/lib/orchestrator/operator-mission-service');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
@@ -209,6 +210,48 @@ describe('huddle zero-diff classification', () => {
       blockedReason: 'nondeterministic_test',
       lane: { status: 'awaiting_orchestrator', lastEventLabel: 'nondeterministic_test' },
     });
+  });
+
+  it('consumes alignment on reset so the redispatch prompt no longer arms the huddle turn', async () => {
+    const packetId = 'pkt-huddle-consumed-on-reset';
+    const missionId = 'mission-huddle-consumed-on-reset';
+    const worktreePath = makeCleanWorktree();
+    // The documented reset recovery: the worker's session is already gone, so
+    // the lane carries no session key to kill.
+    const lane = createLane({
+      repoPath: worktreePath,
+      worktreePath,
+      branch: 'pkt/huddle-consumed-on-reset',
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId,
+    });
+
+    const armed = packetFor(packetId, worktreePath, lane.id, '');
+    armed.lane!.sessionKey = '';
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      missionId,
+      repoPath: worktreePath,
+      runtime: 'codex',
+      packets: [armed],
+      updatedAt: new Date().toISOString(),
+    });
+
+    const armedPacket = readOrchestratorControlPlaneState().packets
+      .find((candidate) => candidate.id === packetId)!;
+    expect(await buildPacketPrompt(armedPacket, [])).toContain(HUDDLE_PROMPT_SECTION);
+
+    const reset = await resetPacket({ packetId, reason: 'session_lost', clearWorktree: false });
+    expect(reset).toMatchObject({ reset: true, packetId });
+
+    const resetPersisted = readOrchestratorControlPlaneState().packets
+      .find((candidate) => candidate.id === packetId)!;
+    expect(resetPersisted.queueState).toBe('held');
+    expect(resetPersisted.alignmentResolvedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+
+    const redispatchPrompt = await buildPacketPrompt(resetPersisted, []);
+    expect(redispatchPrompt).not.toContain(HUDDLE_PROMPT_SECTION);
   });
 
   it('persists consumed alignment when a steerable packet lives in the mission registry', async () => {
