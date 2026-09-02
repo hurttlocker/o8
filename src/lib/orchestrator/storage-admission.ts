@@ -378,9 +378,12 @@ export function createPacketStorageAdmissionCoordinator(
             recordedAt: decisionClockValid ? decisionAt : replay.recordedAt,
           };
           throw new PacketStorageAdmissionError(
+            // Same policy the first hold explained with, so a replayed hold
+            // reads identically instead of degrading to the vague summary.
             storageAdmissionHeldMessage(
               receipt,
               sqlite,
+              resolvePolicy(),
             ),
             receipt,
           );

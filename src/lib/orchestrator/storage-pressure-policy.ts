@@ -29,6 +29,7 @@ import {
   type PacketStorageAdmissionLease,
   type PacketStorageAdmissionReceipt,
 } from './storage-admission';
+import { storagePressureCandidateSummary } from './storage-admission-held-message';
 import { withStoragePressurePolicyLock } from './storage-pressure-policy-lock';
 
 export interface StoragePressureProjection {
@@ -127,6 +128,7 @@ function candidateReceipt(
     repositoryUuid: candidate.repo?.id ?? null,
     laneId: candidate.lane.id,
     operationId: candidate.operationId,
+    workspacePath: candidate.volumePath,
     measuredAllocatedBytes: candidate.measuredAllocatedBytes,
     verifiedReclaimedAvailableBytes,
     outcome,
@@ -344,11 +346,13 @@ export function createStoragePressureAdmissionCoordinator(
             ? candidateReceipt(candidate, 'refused', candidate.refusal)
             : candidateReceipt(candidate, 'candidate', 'manual_action_required')
         ));
+        const pressure = pressureReceipt(
+          'manual', 'manual_review', packet, held.receipt.ownerGeneration, receipts, now(),
+        );
+        const candidateSummary = storagePressureCandidateSummary(pressure);
         throw new PacketStorageAdmissionError(
-          held.message,
-          withPressure(held.receipt, pressureReceipt(
-            'manual', 'manual_review', packet, held.receipt.ownerGeneration, receipts, now(),
-          )),
+          candidateSummary ? `${held.message} ${candidateSummary}` : held.message,
+          withPressure(held.receipt, pressure),
         );
       }
       const receipts: OrchestratorStoragePressureCandidateReceipt[] = [];

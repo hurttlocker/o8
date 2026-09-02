@@ -5,10 +5,14 @@ import type Database from 'better-sqlite3';
 import { listLanes } from '@/lib/lane/registry';
 import { listMissionRegistryEntries } from '@/lib/orchestrator/mission-registry';
 import { packetTerminalState } from '@/lib/orchestrator/packet-state';
-import type { OrchestratorPacketStorageAdmission } from '@/lib/orchestrator/types';
+import type {
+  OrchestratorPacketStorageAdmission,
+  OrchestratorStoragePressureReceipt,
+} from '@/lib/orchestrator/types';
 import type { StorageAdmissionPolicy } from '@/lib/workspace/storage-admission';
 
 const GIB = 1024 * 1024 * 1024;
+const MAX_LISTED_RECLAIM_CANDIDATES = 3;
 
 interface ReservedOwnerRow {
   owner_id: string;
@@ -82,6 +86,32 @@ function reserveBreachExplanation(
     ? ` The volume is ${formatStorageGigabytes(reserveShortfall)} below that reserve.`
     : '';
   return `${policySummary} This volume requires ${formatStorageGigabytes(requiredReserve)} free; ${formatStorageGigabytes(available)} is available.${reservationSummary}${reserveSummary} Free ${formatStorageGigabytes(dispatchShortfall)} more to dispatch this packet's ${formatStorageGigabytes(receipt.estimateBytes)} estimate while preserving the reserve.`;
+}
+
+/**
+ * Names the workspaces an operator can reclaim, largest estimate first. The
+ * coordinator persists these candidates on every manual-mode hold; without this
+ * sentence the operator only sees a byte shortfall and no place to act on it.
+ */
+export function storagePressureCandidateSummary(
+  pressure: OrchestratorStoragePressureReceipt,
+): string | null {
+  const reclaimable = pressure.candidates
+    .filter((candidate) => candidate.outcome === 'candidate')
+    .sort((left, right) => (
+      (right.measuredAllocatedBytes ?? 0) - (left.measuredAllocatedBytes ?? 0)
+      || left.packetId.localeCompare(right.packetId)
+    ));
+  if (reclaimable.length === 0) return null;
+  const listed = reclaimable.slice(0, MAX_LISTED_RECLAIM_CANDIDATES).map((candidate) => {
+    const label = candidate.workspacePath ?? candidate.packetId;
+    return candidate.measuredAllocatedBytes === null
+      ? `${label} (size unknown)`
+      : `${label} (${formatStorageGigabytes(candidate.measuredAllocatedBytes)})`;
+  });
+  const remaining = reclaimable.length - listed.length;
+  const tail = remaining > 0 ? `, and ${remaining} more` : '';
+  return `Reclaim candidates, largest first: ${listed.join(', ')}${tail}.`;
 }
 
 export function storageAdmissionHeldMessage(

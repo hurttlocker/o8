@@ -62,6 +62,7 @@ describe('mission status storage-pressure projection', () => {
             repositoryUuid: 'repo-status',
             laneId: 'lane-status',
             operationId: 'pressure-operation-status',
+            workspacePath: '/tmp/o8-status-candidate',
             measuredAllocatedBytes: 4_096,
             verifiedReclaimedAvailableBytes: 4_096,
             outcome: 'parked',
