@@ -220,4 +220,58 @@ describe('OpenCode resident service version readiness', () => {
       vi.useRealTimers();
     }
   });
+
+  it('retries a cache-hit OpenCode refresh invalidated while its probe is in flight', async () => {
+    const initialRun = serviceRun(() => '0.0.0-beta-17794');
+    setOpencodeServiceProbeDependenciesForTests({ run: initialRun });
+    invalidateRuntimeAuthCache();
+    await getRuntimeAuthSnapshot();
+
+    let releaseOldProbe!: () => void;
+    let markOldProbeStarted!: () => void;
+    const oldProbeStarted = new Promise<void>((resolve) => { markOldProbeStarted = resolve; });
+    const oldProbeGate = new Promise<void>((resolve) => { releaseOldProbe = resolve; });
+    let apiCalls = 0;
+    const raceRun = vi.fn(async (args: string[]) => {
+      if (args[0] === '--version') {
+        if (raceRun.mock.calls.length === 1) {
+          markOldProbeStarted();
+          await oldProbeGate;
+        }
+        return 'opencode2 v0.0.0-beta-17794\n';
+      }
+      if (args[0] === 'service') return 'http://127.0.0.1:41779\n';
+      if (args[0] === 'api') {
+        apiCalls += 1;
+        return JSON.stringify({
+          healthy: true,
+          version: apiCalls === 1 ? '0.0.0-beta-17793' : '0.0.0-beta-17794',
+          pid: 41779,
+        });
+      }
+      throw new Error(`Unexpected OpenCode probe: ${args.join(' ')}`);
+    });
+    setOpencodeServiceProbeDependenciesForTests({ run: raceRun });
+
+    try {
+      vi.useFakeTimers({ now: Date.now() });
+      await vi.advanceTimersByTimeAsync(10_001);
+      const pending = getRuntimeAuthSnapshot();
+      await oldProbeStarted;
+      invalidateRuntimeAuthCache();
+      releaseOldProbe();
+
+      await expect(pending).resolves.toMatchObject({
+        statuses: {
+          opencode: {
+            ready: true,
+            unavailableReason: null,
+          },
+        },
+      });
+      expect(raceRun).toHaveBeenCalledTimes(6);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

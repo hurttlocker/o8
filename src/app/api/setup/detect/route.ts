@@ -10,6 +10,10 @@ import {
 import { pathLookupProgram, pickLookupResult, scanAndLink } from '@/lib/runtimes/shared/cli-locate';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { detectRuntimeAuthStatus } from '@/lib/runtimes/shared/auth-detect';
+import {
+  CLAUDE_PROBE_TIMEOUT_MS,
+  probeClaudeLoginState,
+} from '@/lib/runtimes/shared/claude-login-probe';
 import { opencodeCredentialProviders } from '@/lib/runtimes/shared/opencode-readiness';
 import { hasLiveClaudeOAuth } from '@/lib/claude-code/oauth-credential';
 import { getDataDir } from '@/lib/data-dir-migration';
@@ -197,7 +201,7 @@ function detectCodex(deadlineAt?: number): DetectedTool {
   };
 }
 
-function detectClaudeCode(deadlineAt?: number): DetectedTool {
+async function detectClaudeCode(deadlineAt?: number): Promise<DetectedTool> {
   const home = homedir();
   const path = locateBin('claude', deadlineAt);
   const detected = !!path;
@@ -208,7 +212,10 @@ function detectClaudeCode(deadlineAt?: number): DetectedTool {
     version = safeExec(path, ['--version'], 2000, deadlineAt);
   }
 
-  const projectsDir = join(home, '.claude', 'projects');
+  // The operator can relocate the whole Claude config with CLAUDE_CONFIG_DIR; reading
+  // ~/.claude unconditionally reports a relocated, signed-in machine as signed out.
+  const configDir = process.env.CLAUDE_CONFIG_DIR?.trim() || join(home, '.claude');
+  const projectsDir = join(configDir, 'projects');
   if (existsSync(projectsDir)) {
     try {
       const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
@@ -231,13 +238,27 @@ function detectClaudeCode(deadlineAt?: number): DetectedTool {
   // with empty token fields after a sign-out. Only live OAuth material counts.
   let storedOauth = '';
   try {
-    storedOauth = readFileSync(join(home, '.claude', '.credentials.json'), 'utf8');
+    storedOauth = readFileSync(join(configDir, '.credentials.json'), 'utf8');
   } catch {
     storedOauth = '';
   }
-  const authPresent = keyPresent(['ANTHROPIC_API_KEY'], loadConfiguredKeyNames())
-    || hasLiveClaudeOAuth(storedOauth)
-    || sessionCount > 0;
+  // Recent transcripts are session history, never authentication: ~/.claude/projects
+  // survives a sign-out intact, so counting it here reported a logged-out machine as
+  // ready. It stays in `details` as context for the operator.
+  const envCredentialPresent = keyPresent(
+    ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'],
+    loadConfiguredKeyNames(),
+  );
+  const probeTimeout = boundedTimeout(CLAUDE_PROBE_TIMEOUT_MS, deadlineAt);
+  const loginState = detected && !envCredentialPresent && probeTimeout > 0
+    ? await probeClaudeLoginState(path, probeTimeout)
+    : 'unknown';
+  // The authoritative CLI status recognizes macOS Keychain-only sessions without
+  // reading Keychain directly. Explicit logged-out status outranks a stale credential
+  // file; only an inconclusive probe falls back to live on-disk OAuth material.
+  const authPresent = envCredentialPresent
+    || loginState === 'logged_in'
+    || (loginState === 'unknown' && hasLiveClaudeOAuth(storedOauth));
   return {
     id: 'claude-code',
     name: 'Claude Code CLI',
@@ -605,7 +626,7 @@ export async function GET() {
       timeoutMs: Math.max(MIN_PROBE_TIMEOUT_MS, boundedTimeout(2_500, deadlineAt)),
     });
   }
-  if (!isPastDeadline(deadlineAt)) tools.push(detectClaudeCode(deadlineAt));
+  if (!isPastDeadline(deadlineAt)) tools.push(await detectClaudeCode(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detectGemini(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detectAntigravity(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(await detectOpenCode(deadlineAt));

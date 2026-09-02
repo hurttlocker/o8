@@ -48,20 +48,24 @@ vi.mock('@/lib/mcp/o8-webview-client', () => ({
   },
 }));
 
-vi.mock('@/lib/runtimes/shared/auth-detect', () => ({
-  getRuntimeAuthSnapshot: async () => ({
+vi.mock('@/lib/runtimes/shared/auth-detect', () => {
+  const getSnapshot = async () => ({
     statuses: {
       claude: {
         installed: testState.claudeInstalled,
-        authenticated: testState.claudeAuthenticated,
+        ready: testState.claudeAuthenticated,
       },
       codex: {
         installed: testState.codexInstalled,
-        authenticated: testState.codexAuthenticated,
+        ready: testState.codexAuthenticated,
       },
     },
-  }),
-}));
+  });
+  return {
+    getRuntimeAuthSnapshot: getSnapshot,
+    getRuntimeAuthSnapshotForClaudeCarrier: getSnapshot,
+  };
+});
 
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-symon-text-wire-'));
 const token = 'symon-text-wire-token';

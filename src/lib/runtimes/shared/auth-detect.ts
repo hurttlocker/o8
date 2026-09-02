@@ -15,6 +15,7 @@ import {
 } from '@/lib/orchestrator/runtime-capabilities';
 import { readClaudeCodeWorkerProfileSync } from '@/lib/claude-code/worker-profile';
 import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
+import { claudeCarrierPresentation } from './claude-carrier-presentation';
 import { scanAndLink } from './cli-locate';
 import {
   hasClaudeEnvCredential,
@@ -40,11 +41,6 @@ import { validateRuntimeModelSelection } from './model-compatibility';
 const execFileAsync = promisify(execFile);
 const CACHE_TTL_MS = 60_000;
 const PROBE_TIMEOUT_MS = 1_500;
-const CLAUDE_CARRIER_LABELS: Record<ClaudeCodeModelSource, string> = {
-  native: 'native Claude Code',
-  openrouter: 'OpenRouter gateway',
-  'codex-subscription': 'Codex subscription',
-};
 const TRUSTED_KEYLESS_OPENCODE_MODELS = new Set([
   'opencode/deepseek-v4-flash-free',
 ]);
@@ -60,6 +56,14 @@ export interface RuntimeAuthStatus {
   ready: boolean;
   /** Credential evidence only; a keyless local runtime can be ready while this is false. */
   authenticated: boolean;
+  /**
+   * Claude Code only: no positive native credential evidence was found. Kept as raw
+   * signal because the snapshot bakes in the stored profile carrier, while a mission
+   * or persisted packet can pin a gateway carrier that does not use native auth.
+   */
+  nativeSignInBlocked?: boolean;
+  /** Claude Code only: bounded CLI probe outcome, retained for safe constant messaging. */
+  nativeLoginState?: ClaudeLoginState;
   unavailableReason: RuntimeUnavailableReason | null;
   detail: string;
   fix: string;
@@ -100,6 +104,7 @@ class DispatchPreflightError extends Error {
 export { DispatchPreflightError };
 
 let cache: { snapshot: RuntimeAuthSnapshot; cachedAt: number } | null = null;
+let cacheGeneration = 0;
 // The OpenCode probe alone spawns 2-3 subprocesses (up to PROBE_TIMEOUT_MS each), so it gets its
 // own short TTL + in-flight coalescing on top of the general CACHE_TTL_MS cache below — otherwise
 // every getRuntimeAuthSnapshot() call inside a fresh main-cache window re-probes it unconditionally.
@@ -284,29 +289,51 @@ async function detectClaude(): Promise<RuntimeAuthStatus> {
 
   const carrier = claudeWorkerCarrier();
   const { authenticated, loginState } = await detectNativeClaudeAuth(binaryPath);
-  // Only an explicit logged-out answer from the CLI blocks dispatch. An inconclusive
-  // probe leaves the authoritative refusal to the launch seam, which asserts the
-  // seeded credential and raises a structured worker_not_authenticated lane event.
-  const nativeBlocked = !authenticated && loginState === 'logged_out';
-  const ready = carrier !== 'native' || !nativeBlocked;
+  // Native launch is fail-closed: an inconclusive probe without an environment or
+  // stored OAuth credential is not positive authentication evidence. Gateway carriers
+  // remain ready because their launch path never consumes the native credential.
+  const nativeSignInBlocked = !authenticated;
 
   return nowStatus('claude', 'claude-code', {
     installed: true,
     authenticated,
-    ready,
+    nativeSignInBlocked,
+    nativeLoginState: loginState,
     // Details are short constants: probe stdout never reaches an operator-facing string.
-    detail: authenticated
-      ? 'Claude Code CLI is installed and signed in.'
-      : nativeBlocked
-        ? carrier === 'native'
-          ? 'Claude Code CLI is installed but not signed in.'
-          : `Claude Code CLI is installed but not signed in; workers use the ${CLAUDE_CARRIER_LABELS[carrier]} carrier.`
-        : 'Claude Code CLI is installed but its sign-in state could not be verified.',
-    fix: !nativeBlocked || carrier !== 'native'
-      ? 'No action needed.'
-      : 'Run `claude` once to sign in.',
+    ...claudeCarrierPresentation(carrier, authenticated, nativeSignInBlocked, loginState),
     binaryPath,
   });
+}
+
+/**
+ * Re-derive the cached Claude status for an effective carrier.
+ *
+ * The snapshot is computed against the *stored* worker profile, but a mission or a
+ * persisted packet can pin `openrouter` / `codex-subscription` for this dispatch only.
+ * Without this, a logged-out native CLI refuses a worker that never touches it.
+ * Only the claude house is touched, and only when the runtime is installed.
+ */
+function claudeSnapshotForCarrier(
+  snapshot: RuntimeAuthSnapshot,
+  carrier: ClaudeCodeModelSource | null | undefined,
+): RuntimeAuthSnapshot {
+  const status = snapshot.statuses.claude;
+  // Deliberately unconditional when a carrier is supplied: comparing against the
+  // stored profile would re-couple this to the cached snapshot's staleness, and the
+  // recompute is pure, so an effective carrier equal to the stored one is a no-op.
+  if (!carrier || !status?.installed) return snapshot;
+  const presentation = claudeCarrierPresentation(
+    carrier,
+    status.authenticated,
+    status.nativeSignInBlocked === true,
+    status.nativeLoginState,
+  );
+  const claude: RuntimeAuthStatus = {
+    ...status,
+    ...presentation,
+    unavailableReason: presentation.ready ? null : 'needs_auth',
+  };
+  return { ...snapshot, statuses: { ...snapshot.statuses, claude } };
 }
 
 async function detectGemini(): Promise<RuntimeAuthStatus> {
@@ -597,8 +624,10 @@ export function detectRuntimeAuthStatus(runtime: OrchestratorRuntime): Promise<R
 }
 
 function suggestProfile(statuses: Record<RuntimeHouse, RuntimeAuthStatus>): MachineAuthProfileSuggestion {
-  const codexReady = statuses.codex.installed && statuses.codex.authenticated;
-  const claudeReady = statuses.claude.installed && statuses.claude.authenticated;
+  // `ready` is the usability verdict; `authenticated` is credential evidence only.
+  // Gateway-backed Claude workers can be ready without native credential evidence.
+  const codexReady = statuses.codex.installed && statuses.codex.ready;
+  const claudeReady = statuses.claude.installed && statuses.claude.ready;
   if (codexReady && !claudeReady) {
     return { profile: 'codex-only', detail: 'Only Codex is signed in on this machine.' };
   }
@@ -609,34 +638,49 @@ function suggestProfile(statuses: Record<RuntimeHouse, RuntimeAuthStatus>): Mach
 }
 
 export function invalidateRuntimeAuthCache(): void {
+  cacheGeneration += 1;
   cache = null;
   opencodeRefresh = null;
 }
 
 export async function getRuntimeAuthSnapshot(): Promise<RuntimeAuthSnapshot> {
-  if (cache && Date.now() - cache.cachedAt < CACHE_TTL_MS) {
-    const opencode = await refreshOpencodeStatus();
-    cache.snapshot = {
-      ...cache.snapshot,
-      statuses: { ...cache.snapshot.statuses, opencode },
-    };
-    return cache.snapshot;
-  }
-  const entries = await Promise.all(listDispatchableRuntimes().map(async (runtime) => {
-    const house = getRuntimeCapability(runtime).authHouse;
-    if (!house) throw new Error(`Dispatchable runtime ${runtime} has no auth house.`);
-    if (runtime === 'opencode') {
-      return [house, await refreshOpencodeStatus()] as const;
+  while (true) {
+    const generation = cacheGeneration;
+    const cached = cache;
+    if (cached && Date.now() - cached.cachedAt < CACHE_TTL_MS) {
+      const opencode = await refreshOpencodeStatus();
+      if (generation !== cacheGeneration || cache !== cached) continue;
+      const snapshot = {
+        ...cached.snapshot,
+        statuses: { ...cached.snapshot.statuses, opencode },
+      };
+      cache = { snapshot, cachedAt: cached.cachedAt };
+      return snapshot;
     }
-    return [house, await detectRuntimeAuthStatus(runtime)] as const;
-  }));
-  const statuses = Object.fromEntries(entries) as Record<RuntimeHouse, RuntimeAuthStatus>;
-  const snapshot = {
-    statuses,
-    suggestedSubscriptionProfile: suggestProfile(statuses),
-  };
-  cache = { snapshot, cachedAt: Date.now() };
-  return snapshot;
+    const entries = await Promise.all(listDispatchableRuntimes().map(async (runtime) => {
+      const house = getRuntimeCapability(runtime).authHouse;
+      if (!house) throw new Error(`Dispatchable runtime ${runtime} has no auth house.`);
+      if (runtime === 'opencode') {
+        return [house, await refreshOpencodeStatus()] as const;
+      }
+      return [house, await detectRuntimeAuthStatus(runtime)] as const;
+    }));
+    if (generation !== cacheGeneration) continue;
+    const statuses = Object.fromEntries(entries) as Record<RuntimeHouse, RuntimeAuthStatus>;
+    const snapshot = {
+      statuses,
+      suggestedSubscriptionProfile: suggestProfile(statuses),
+    };
+    cache = { snapshot, cachedAt: Date.now() };
+    return snapshot;
+  }
+}
+
+/** Re-evaluate Claude readiness for the carrier a concrete surface will launch. */
+export async function getRuntimeAuthSnapshotForClaudeCarrier(
+  carrier: ClaudeCodeModelSource,
+): Promise<RuntimeAuthSnapshot> {
+  return claudeSnapshotForCarrier(await getRuntimeAuthSnapshot(), carrier);
 }
 
 function houseForRuntime(runtime: OrchestratorRuntime): RuntimeHouse | null {
@@ -682,8 +726,18 @@ export async function assertRuntimeDispatchable(
   runtime: OrchestratorRuntime,
   model?: string | null,
   cwd?: string | null,
+  /**
+   * The carrier this specific dispatch will use, when the caller knows it. Missions and
+   * persisted packets pin a carrier that can differ from the stored worker profile; a
+   * caller that does not know one keeps the stored-profile answer.
+   */
+  options?: { claudeCodeCarrier?: ClaudeCodeModelSource | null },
 ): Promise<void> {
-  const snapshot = await getRuntimeAuthSnapshot();
+  const snapshot = runtime === 'claude-code'
+    ? options?.claudeCodeCarrier
+      ? await getRuntimeAuthSnapshotForClaudeCarrier(options.claudeCodeCarrier)
+      : await getRuntimeAuthSnapshot()
+    : await getRuntimeAuthSnapshot();
   const availability = (await getDispatchableRuntimeAvailability(snapshot)).find((entry) => entry.id === runtime);
   const house = houseForRuntime(runtime);
   const status = house ? snapshot.statuses[house] : null;

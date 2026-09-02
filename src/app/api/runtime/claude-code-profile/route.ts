@@ -12,6 +12,7 @@ import {
   normalizeClaudeCodeGatewayModel,
   normalizeClaudeCodeRepoSkillAllowlist,
 } from '@/lib/claude-code/worker-profile-types';
+import { invalidateRuntimeAuthCache } from '@/lib/runtimes/shared/auth-detect';
 import { requirePanelAuth } from '@/lib/panel/auth';
 
 export const runtime = 'nodejs';
@@ -70,6 +71,10 @@ export async function POST(request: NextRequest) {
 
   try {
     await writeClaudeCodeWorkerProfile({ source: body.source, model, codexModel, repoSkillAllowlist });
+    // Claude readiness is derived from the stored carrier and cached for 60s. Without
+    // this drop, switching carriers leaves dispatch judged against the previous one —
+    // a native-to-gateway switch stays refused, and the reverse stays wrongly allowed.
+    invalidateRuntimeAuthCache();
     return NextResponse.json(await responseBody(), {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });

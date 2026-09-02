@@ -18,7 +18,7 @@ import path from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
 import { browserOpenInvocation, findLatestCodexOAuthUrl } from './codex-subscription-oauth';
-import { hasLiveClaudeOAuth } from './oauth-credential';
+import { hasClaudeEnvCredential, hasLiveClaudeOAuth } from './oauth-credential';
 import type { ClaudeCodeModelSource } from './worker-profile-types';
 
 const DEFAULT_PORT = 8317;
@@ -345,8 +345,14 @@ export async function ensureClaudeCodeWorkerConfigDir(
   await chmod(configDir, 0o700);
   await rm(path.join(configDir, 'skills'), { recursive: true, force: true });
   if (source === 'native') {
-    await seedNativeWorkerCredentials(configDir);
-    await assertNativeWorkerAuthenticated(configDir);
+    // A non-empty ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN is decisive for the
+    // native carrier at the readiness seam (detectNativeClaudeAuth skips the CLI probe
+    // for it), and the spawned worker inherits this same environment. Demanding an
+    // OAuth snapshot on top of it would refuse a launch that preflight just approved,
+    // so on that path the snapshot is best-effort and the CLI assertion is skipped.
+    const envCredential = hasClaudeEnvCredential();
+    await seedNativeWorkerCredentials(configDir, { required: !envCredential });
+    if (!envCredential) await assertNativeWorkerAuthenticated(configDir);
   }
   return configDir;
 }
@@ -358,7 +364,10 @@ export async function ensureClaudeCodeWorkerConfigDir(
 // config-dir swap. Other platforms store it at <config dir>/.credentials.json.
 // Snapshot the live credential into the isolated dir for this worker.
 // Never symlink — a symlink would let a worker rewrite the operator's file.
-async function seedNativeWorkerCredentials(configDir: string): Promise<void> {
+async function seedNativeWorkerCredentials(
+  configDir: string,
+  options: { required: boolean },
+): Promise<void> {
   const sourceConfigDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
   const sourceCredentialsPath = path.join(sourceConfigDir, '.credentials.json');
   const keychainCredentials = process.platform === 'darwin'
@@ -371,6 +380,7 @@ async function seedNativeWorkerCredentials(configDir: string): Promise<void> {
     ? keychainCredentials
     : hasLiveClaudeOAuth(fileCredentials) ? fileCredentials : '';
   if (!credentials) {
+    if (!options.required) return;
     throw new ClaudeCodeWorkerAuthenticationError('No live Claude OAuth credential was available to seed.');
   }
   const destCredentialsPath = path.join(configDir, '.credentials.json');

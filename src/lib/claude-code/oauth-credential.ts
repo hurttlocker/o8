@@ -25,3 +25,16 @@ export function hasLiveClaudeOAuth(raw: string): boolean {
     return false;
   }
 }
+
+/**
+ * A non-empty Claude credential in the process environment.
+ *
+ * Decisive for the native carrier at BOTH seams: readiness preflight
+ * (auth-detect) skips the CLI probe when this is true, and the worker config-dir
+ * seam skips the mandatory OAuth snapshot, because the spawned worker inherits
+ * this same environment. Keeping one definition is what stops preflight from
+ * passing a launch that then refuses itself. An empty string is not a credential.
+ */
+export function hasClaudeEnvCredential(env: NodeJS.ProcessEnv = process.env): boolean {
+  return Boolean(env.ANTHROPIC_API_KEY?.trim() || env.CLAUDE_CODE_OAUTH_TOKEN?.trim());
+}

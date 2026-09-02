@@ -143,6 +143,8 @@ export interface OperatorDefaultsResponse {
   cliAuth?: {
     statuses: Record<RuntimeAuthHouse, {
       installed: boolean;
+      /** Usability verdict. `authenticated` below is credential evidence only. */
+      ready: boolean;
       authenticated: boolean;
       detail: string;
       fix: string;

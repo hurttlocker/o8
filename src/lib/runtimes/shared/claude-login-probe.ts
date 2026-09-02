@@ -19,8 +19,8 @@ export const CLAUDE_PROBE_TIMEOUT_MS = 1_500;
  *
  * `unknown` is load-bearing: a timeout, a non-zero exit, a spawn failure, or output
  * that is not the documented `{ "loggedIn": boolean }` shape tells us nothing about
- * the operator's session. Collapsing those into `false` would lock a signed-in
- * operator out of dispatch, so callers must handle `unknown` separately.
+ * the operator's session. Callers may combine it with independent positive credential
+ * evidence, but must not treat the inconclusive probe itself as authentication.
  */
 export type ClaudeLoginState = 'logged_in' | 'logged_out' | 'unknown';
 
@@ -31,13 +31,16 @@ export type ClaudeLoginState = 'logged_in' | 'logged_out' | 'unknown';
  * embedded in a status detail, because an unexpected build could print credential
  * material on that channel.
  */
-export async function probeClaudeLoginState(binaryPath: string): Promise<ClaudeLoginState> {
+export async function probeClaudeLoginState(
+  binaryPath: string,
+  timeoutMs = CLAUDE_PROBE_TIMEOUT_MS,
+): Promise<ClaudeLoginState> {
   let stdout: string;
   try {
     const probe = cliInvocation(binaryPath, ['auth', 'status', '--json']);
     ({ stdout } = await execFileAsync(probe.command, probe.args, {
       windowsHide: true,
-      timeout: CLAUDE_PROBE_TIMEOUT_MS,
+      timeout: Math.max(1, Math.min(timeoutMs, CLAUDE_PROBE_TIMEOUT_MS)),
       env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
       maxBuffer: 64 * 1024,
     }));
@@ -56,13 +59,12 @@ export async function probeClaudeLoginState(binaryPath: string): Promise<ClaudeL
   }
 }
 
-/** Non-empty credential in the environment. An empty string is not a credential. */
-export function hasClaudeEnvCredential(): boolean {
-  return Boolean(
-    process.env.ANTHROPIC_API_KEY?.trim()
-    || process.env.CLAUDE_CODE_OAUTH_TOKEN?.trim(),
-  );
-}
+/**
+ * Non-empty credential in the environment. Re-exported from the shared credential
+ * module so the readiness path and the worker launch seam cannot drift apart on
+ * what counts as a native credential.
+ */
+export { hasClaudeEnvCredential } from '@/lib/claude-code/oauth-credential';
 
 /**
  * On-disk OAuth evidence for the operator's own config dir.

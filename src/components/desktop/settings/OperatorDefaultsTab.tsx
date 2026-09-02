@@ -58,7 +58,11 @@ type CliHouseStatus = NonNullable<OperatorDefaultsResponse['cliAuth']>['statuses
 
 function cliStatusLabel(status: CliHouseStatus | undefined) {
   if (!status?.installed) return 'not installed';
-  if (!status.authenticated) return 'not signed in';
+  // Only a definite refusal reads as "not signed in". A house that is usable without
+  // native credential evidence — inconclusive probe, or a non-native Claude carrier —
+  // is reported as usable rather than accused of being signed out.
+  if (!status.ready) return 'not signed in';
+  if (!status.authenticated) return 'installed + usable';
   return 'installed + signed in';
 }
 

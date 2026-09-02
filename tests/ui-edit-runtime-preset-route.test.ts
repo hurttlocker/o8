@@ -342,7 +342,9 @@ describe('UI edit runtime preset dispatch routing', () => {
         modelDisposition: 'runtime-default',
       },
     });
-    expect(runtimeDispatchableMock).toHaveBeenCalledWith('claude-code', null, repoPath);
+    expect(runtimeDispatchableMock).toHaveBeenCalledWith(
+      'claude-code', null, repoPath, { claudeCodeCarrier: 'openrouter' },
+    );
     const carrierDispatch = await dispatchMission({
       missionId: readOrchestratorControlPlaneState().missionId,
     });
@@ -388,8 +390,12 @@ describe('UI edit runtime preset dispatch routing', () => {
       selectedModel: MODEL_IDS.claudeHaikuQaDefault,
       modelDisposition: 'requested',
     }]));
-    expect(runtimeDispatchableMock).toHaveBeenCalledWith('codex', MODEL_IDS.codexScoutDefault, repoPath);
-    expect(runtimeDispatchableMock).toHaveBeenCalledWith('claude-code', MODEL_IDS.claudeHaikuQaDefault, repoPath);
+    expect(runtimeDispatchableMock).toHaveBeenCalledWith(
+      'codex', MODEL_IDS.codexScoutDefault, repoPath, { claudeCodeCarrier: null },
+    );
+    expect(runtimeDispatchableMock).toHaveBeenCalledWith(
+      'claude-code', MODEL_IDS.claudeHaikuQaDefault, repoPath, { claudeCodeCarrier: null },
+    );
 
     const mixedDispatch = await dispatchMission({ missionId: mixedRuntime.missionId });
     expect(mixedDispatch.dispatched).toBe(2);
@@ -429,8 +435,12 @@ describe('UI edit runtime preset dispatch routing', () => {
       selectedModel: null,
       modelDisposition: 'runtime-default',
     }]));
-    expect(runtimeDispatchableMock).toHaveBeenCalledWith('codex', MODEL_IDS.codexScoutDefault, repoPath);
-    expect(runtimeDispatchableMock).toHaveBeenCalledWith('claude-code', null, repoPath);
+    expect(runtimeDispatchableMock).toHaveBeenCalledWith(
+      'codex', MODEL_IDS.codexScoutDefault, repoPath, { claudeCodeCarrier: 'openrouter' },
+    );
+    expect(runtimeDispatchableMock).toHaveBeenCalledWith(
+      'claude-code', null, repoPath, { claudeCodeCarrier: 'openrouter' },
+    );
 
     const mixedCarrierDispatch = await dispatchMission({ missionId: mixedCarrier.missionId });
     expect(mixedCarrierDispatch.dispatched).toBe(1);

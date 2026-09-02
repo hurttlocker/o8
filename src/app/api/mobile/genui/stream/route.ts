@@ -32,7 +32,7 @@ import {
   type MobileAskReadiness,
 } from '@/lib/mobile/ask-model-routing';
 import { MODEL_IDS } from '@/lib/models';
-import { getRuntimeAuthSnapshot } from '@/lib/runtimes/shared/auth-detect';
+import { getRuntimeAuthSnapshotForClaudeCarrier } from '@/lib/runtimes/shared/auth-detect';
 
 const CLI_TIMEOUT_MS = 120_000;
 // Spend guardrail for the hosted tier: a generated screen is a few hundred
@@ -115,13 +115,18 @@ interface AskRuntimeState {
 
 async function getAskRuntimeState(): Promise<AskRuntimeState> {
   try {
-    const snapshot = await getRuntimeAuthSnapshot();
+    // This surface launches the local CLI directly; a gateway-backed worker profile
+    // cannot make that native process usable when the CLI itself is logged out.
+    const snapshot = await getRuntimeAuthSnapshotForClaudeCarrier('native');
     const claude = snapshot.statuses.claude;
     const codex = snapshot.statuses.codex;
     return {
       readiness: {
-        claude: claude.installed && claude.authenticated,
-        codex: codex.installed && codex.authenticated,
+        // `ready` is the usability verdict; `authenticated` is credential evidence only.
+        // An inconclusive native probe leaves authenticated false while the house stays
+        // dispatchable. This route explicitly derives the native-carrier view above.
+        claude: claude.installed && claude.ready,
+        codex: codex.installed && codex.ready,
       },
       claudeBinary: claude.binaryPath,
       codexBinary: codex.binaryPath,

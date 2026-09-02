@@ -1,12 +1,20 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
-const h = vi.hoisted(() => ({ scanAndLink: vi.fn<(_: string) => string | null>(() => null) }));
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const h = vi.hoisted(() => ({
+  claudeBinary: '',
+  scanAndLink: vi.fn<(_: string) => string | null>(() => null),
+}));
 
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
   return {
     ...actual,
-    execFileSync: () => {
+    execFileSync: (...args: Parameters<typeof actual.execFileSync>) => {
+      if (args[0] === h.claudeBinary) return actual.execFileSync(...args);
       throw new Error('missing cli');
     },
   };
@@ -16,15 +24,36 @@ vi.mock('@/lib/runtimes/shared/cli-locate', () => ({
   scanAndLink: h.scanAndLink,
 }));
 
+const fixtureRoot = mkdtempSync(path.join(os.tmpdir(), 'o8-setup-claude-auth-'));
+const claudeConfigDir = path.join(fixtureRoot, 'claude-config');
+h.claudeBinary = path.join(fixtureRoot, 'claude');
+writeFileSync(h.claudeBinary, [
+  '#!/bin/sh',
+  'if [ "$1" = "--version" ]; then printf \'%s\\n\' \'Claude Code test\'; exit 0; fi',
+  'case "${O8_TEST_SETUP_CLAUDE_MODE:-logged_out}" in',
+  '  logged_in) printf \'%s\\n\' \'{"loggedIn":true}\' ;;',
+  '  logged_out) printf \'%s\\n\' \'{"loggedIn":false}\' ;;',
+  '  malformed) printf \'%s\\n\' \'unexpected probe output setup-probe-secret-marker\' ;;',
+  'esac',
+].join('\n'));
+chmodSync(h.claudeBinary, 0o755);
+
 beforeEach(() => {
   h.scanAndLink.mockReset();
   h.scanAndLink.mockReturnValue(null);
+  vi.stubEnv('CLAUDE_CONFIG_DIR', claudeConfigDir);
+  vi.stubEnv('O8_TEST_SETUP_CLAUDE_MODE', 'logged_out');
+  rmSync(claudeConfigDir, { recursive: true, force: true });
 });
 
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   vi.resetModules();
+});
+
+afterAll(() => {
+  rmSync(fixtureRoot, { recursive: true, force: true });
 });
 
 describe('GET /api/setup/detect', () => {
@@ -81,5 +110,69 @@ describe('GET /api/setup/detect', () => {
       ready: true,
     });
     expect(data.tools.find((tool) => tool.id === 'opencode')?.authHint).toBeUndefined();
+  });
+
+  it('recognizes a Keychain-only Claude session through the bounded CLI status contract', async () => {
+    h.scanAndLink.mockImplementation((binary) => binary === 'claude' ? h.claudeBinary : null);
+    vi.stubEnv('ANTHROPIC_API_KEY', '');
+    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', '');
+    vi.stubEnv('O8_TEST_SETUP_CLAUDE_MODE', 'logged_in');
+    mkdirSync(path.join(claudeConfigDir, 'projects'), { recursive: true });
+    writeFileSync(path.join(claudeConfigDir, 'projects', 'old-session.jsonl'), '{}');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 })));
+
+    const { GET } = await import('./route');
+    const response = await GET();
+    const payload = await response.json() as {
+      tools: Array<{ id: string; ready?: boolean; details?: Record<string, unknown> }>;
+    };
+
+    expect(payload.tools.find((tool) => tool.id === 'claude-code')).toMatchObject({
+      ready: true,
+      details: { authPresent: true, sessionCount: 1 },
+    });
+  });
+
+  it('does not treat stale Claude transcripts or markers as auth after explicit logout', async () => {
+    h.scanAndLink.mockImplementation((binary) => binary === 'claude' ? h.claudeBinary : null);
+    vi.stubEnv('ANTHROPIC_API_KEY', '');
+    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', '');
+    mkdirSync(path.join(claudeConfigDir, 'projects'), { recursive: true });
+    writeFileSync(path.join(claudeConfigDir, 'projects', 'stale-session.jsonl'), '{}');
+    writeFileSync(path.join(claudeConfigDir, 'settings.json'), '{}');
+    writeFileSync(path.join(claudeConfigDir, '.credentials.json'), JSON.stringify({
+      claudeAiOauth: { accessToken: 'stale-but-shaped-token', refreshToken: '' },
+    }));
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 })));
+
+    const { GET } = await import('./route');
+    const response = await GET();
+    const text = await response.text();
+    const payload = JSON.parse(text) as {
+      tools: Array<{ id: string; ready?: boolean; details?: Record<string, unknown> }>;
+    };
+
+    expect(payload.tools.find((tool) => tool.id === 'claude-code')).toMatchObject({
+      ready: false,
+      details: { authPresent: false, sessionCount: 1 },
+    });
+    expect(text).not.toContain('stale-but-shaped-token');
+  });
+
+  it('discards malformed Claude status output without leaking it into setup JSON', async () => {
+    h.scanAndLink.mockImplementation((binary) => binary === 'claude' ? h.claudeBinary : null);
+    vi.stubEnv('ANTHROPIC_API_KEY', '');
+    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', '');
+    vi.stubEnv('O8_TEST_SETUP_CLAUDE_MODE', 'malformed');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 })));
+
+    const { GET } = await import('./route');
+    const response = await GET();
+    const text = await response.text();
+    const payload = JSON.parse(text) as { tools: Array<{ id: string; ready?: boolean }> };
+
+    expect(payload.tools.find((tool) => tool.id === 'claude-code')?.ready).toBe(false);
+    expect(text).not.toContain('setup-probe-secret-marker');
+    expect(text).not.toContain('unexpected probe output');
   });
 });

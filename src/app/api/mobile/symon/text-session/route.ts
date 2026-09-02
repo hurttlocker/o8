@@ -17,7 +17,7 @@ import {
   readSymonTextPlannerInfo,
   type SymonTextPlannerInfo,
 } from '@/lib/mobile/symon-text-bridge-client';
-import { getRuntimeAuthSnapshot } from '@/lib/runtimes/shared/auth-detect';
+import { getRuntimeAuthSnapshotForClaudeCarrier } from '@/lib/runtimes/shared/auth-detect';
 
 function requestBearer(request: NextRequest): string {
   const auth = request.headers.get('authorization');
@@ -26,15 +26,21 @@ function requestBearer(request: NextRequest): string {
 
 async function resolveRequestedPlanner(value: unknown): Promise<SymonTextPlannerSelection | null> {
   const requestedModel = normalizeMobileAskModelId(value);
-  if (requestedModel === 'auto') return null;
   try {
-    const snapshot = await getRuntimeAuthSnapshot();
+    // The Tauri planner launches the native CLI. Stored gateway readiness belongs to
+    // packet workers and must not make this native-only surface selectable.
+    const snapshot = await getRuntimeAuthSnapshotForClaudeCarrier('native');
     const claude = snapshot.statuses.claude;
     const codex = snapshot.statuses.codex;
-    const route = resolveMobileAskRoute(requestedModel, {
-      claude: claude.installed && claude.authenticated,
-      codex: codex.installed && codex.authenticated,
-    });
+    // `ready` is the usability verdict; `authenticated` is credential evidence only.
+    // An inconclusive native probe leaves authenticated false while the house stays
+    // dispatchable. This route explicitly derives the native-carrier view above.
+    const readiness = {
+      claude: claude.installed && claude.ready,
+      codex: codex.installed && codex.ready,
+    };
+    let route = resolveMobileAskRoute(requestedModel, readiness);
+    if (route.kind === 'managed') route = resolveMobileAskRoute('auto', readiness);
     if (route.kind === 'managed') return null;
     return {
       engine: route.kind,
@@ -78,12 +84,15 @@ export async function POST(request: NextRequest) {
   }
 
   const requestedPlanner = await resolveRequestedPlanner(context.model);
+  if (!requestedPlanner) {
+    return NextResponse.json(
+      { ok: false, error: 'no_cli', detail: 'No signed-in native Symon planner CLI is available.' },
+      { status: 501 },
+    );
+  }
   let info: SymonTextPlannerInfo;
   try {
-    info = await readSymonTextPlannerInfo(requestedPlanner ?? undefined);
-    if (requestedPlanner && !info.available) {
-      info = await readSymonTextPlannerInfo();
-    }
+    info = await readSymonTextPlannerInfo(requestedPlanner);
   } catch (error) {
     return NextResponse.json(
       { ok: false, error: 'desktop_unavailable', detail: error instanceof Error ? error.message : 'Desktop bridge unavailable.' },

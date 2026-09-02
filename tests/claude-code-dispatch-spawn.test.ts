@@ -56,6 +56,8 @@ describe('Claude Code dispatch spawn', () => {
   let priorOwnedRoot: string | undefined;
   let priorClaudeBin: string | undefined;
   let priorOpenRouterKey: string | undefined;
+  let priorAnthropicKey: string | undefined;
+  let priorClaudeOauthToken: string | undefined;
 
   beforeEach(() => {
     vi.resetModules();
@@ -65,9 +67,13 @@ describe('Claude Code dispatch spawn', () => {
     priorOwnedRoot = process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT;
     priorClaudeBin = process.env.O8_CLAUDE_CODE_BIN;
     priorOpenRouterKey = process.env.OPENROUTER_API_KEY;
+    priorAnthropicKey = process.env.ANTHROPIC_API_KEY;
+    priorClaudeOauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
     process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT = path.join(tempRoot, 'owned');
     process.env.O8_CLAUDE_CODE_BIN = process.execPath;
     delete process.env.OPENROUTER_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
     spawnMock.mockReturnValue({
       pid: 42,
       stdin: { end: vi.fn() },
@@ -92,6 +98,10 @@ describe('Claude Code dispatch spawn', () => {
     else process.env.O8_CLAUDE_CODE_BIN = priorClaudeBin;
     if (priorOpenRouterKey === undefined) delete process.env.OPENROUTER_API_KEY;
     else process.env.OPENROUTER_API_KEY = priorOpenRouterKey;
+    if (priorAnthropicKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = priorAnthropicKey;
+    if (priorClaudeOauthToken === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    else process.env.CLAUDE_CODE_OAUTH_TOKEN = priorClaudeOauthToken;
     try { unlinkSync(path.join(process.env.CORTEX_IDE_DATA_DIR!, 'claude-code-worker.json')); } catch {}
     rmSync(tempRoot, { recursive: true, force: true });
   });
@@ -132,6 +142,29 @@ describe('Claude Code dispatch spawn', () => {
     expect(spawnMock.mock.results[0]?.value.stdin.end).toHaveBeenCalledWith(
       expect.stringContaining('implement the packet'),
       'utf8',
+    );
+  }, 20_000);
+
+  it('carries a non-empty environment credential through the actual native worker spawn', async () => {
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-native-spawn-test';
+    const { claudeCodeRuntime } = await import('@/lib/runtimes/claude-code');
+    const result = await claudeCodeRuntime.launch({
+      cwd: repoPath,
+      prompt: 'launch with the inherited native credential',
+      laneId: 'lane-native-environment',
+      claudeCodeCarrier: 'native',
+    });
+
+    expect(result.ok, result.note).toBe(true);
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    const [, , options] = spawnMock.mock.calls[0]!;
+    expect(options.env).toMatchObject({
+      ANTHROPIC_API_KEY: 'sk-ant-native-spawn-test',
+      CLAUDE_CONFIG_DIR: expect.stringContaining('claude-code-worker-config'),
+    });
+    expect(ensureClaudeCodeWorkerConfigDirMock).toHaveBeenCalledWith(
+      expect.any(String),
+      'native',
     );
   }, 20_000);
 

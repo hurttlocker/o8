@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -11,6 +11,9 @@ const authFixture = vi.hoisted(() => ({
   claudeBinary: '',
   installed: true,
 }));
+const symonBridgeFixture = vi.hoisted(() => ({
+  selections: [] as Array<{ engine: string; model: string; effort: string } | undefined>,
+}));
 
 vi.mock('node:os', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:os')>();
@@ -20,10 +23,24 @@ vi.mock('node:os', async (importOriginal) => {
   };
 });
 
-vi.mock('./cli-locate', () => ({
+vi.mock('./cli-locate', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./cli-locate')>(),
   scanAndLink: vi.fn((binaryName: string) => (
     binaryName === 'claude' && authFixture.installed ? authFixture.claudeBinary : null
   )),
+}));
+
+vi.mock('@/lib/mobile/symon-text-bridge-client', () => ({
+  readSymonTextPlannerInfo: vi.fn(async (selection?: { engine: string; model: string; effort: string }) => {
+    symonBridgeFixture.selections.push(selection);
+    return {
+      available: true,
+      engine: 'codex',
+      model: 'gpt-5.6-sol',
+      effort: 'xhigh',
+      tools: [],
+    };
+  }),
 }));
 
 authFixture.home = mkdtempSync(path.join(os.tmpdir(), 'o8-claude-auth-'));
@@ -40,6 +57,7 @@ writeFileSync(authFixture.claudeBinary, [
   '  logged_out) printf \'%s\\n\' \'{"loggedIn":false}\' ;;',
   `  malformed) printf '%s\\n' 'Claude Code update available ${MALFORMED_MARKER}' ;;`,
   '  no_field) printf \'%s\\n\' \'{"account":"someone"}\' ;;',
+  '  gate) : > "$O8_TEST_CLAUDE_STARTED"; while [ ! -f "$O8_TEST_CLAUDE_RELEASE" ]; do sleep 0.01; done; printf \'%s\\n\' \'{"loggedIn":false}\' ;;',
   '  hang) sleep 20 ;;',
   '  crash) echo "boom" >&2; exit 3 ;;',
   'esac',
@@ -49,6 +67,7 @@ chmodSync(authFixture.claudeBinary, 0o755);
 
 const dataRoot = mkdtempSync(path.join(os.tmpdir(), 'o8-claude-auth-data-'));
 const repoPath = path.join(dataRoot, 'repo');
+const OPERATOR_TOKEN = 'claude-auth-route-operator-token-0123456789';
 execFileSync('git', ['init', '-q', repoPath]);
 const priorDataEnv = {
   O8_DATA_DIR: process.env.O8_DATA_DIR,
@@ -56,16 +75,23 @@ const priorDataEnv = {
 };
 process.env.O8_DATA_DIR = dataRoot;
 process.env.CORTEX_IDE_DATA_DIR = dataRoot;
+writeFileSync(path.join(dataRoot, 'ws-token'), `${OPERATOR_TOKEN}\n`);
 
 const {
   DispatchPreflightError,
   assertRuntimeDispatchable,
   getDispatchableRuntimeAvailability,
   getRuntimeAuthSnapshot,
+  getRuntimeAuthSnapshotForClaudeCarrier,
   invalidateRuntimeAuthCache,
 } = await import('./auth-detect');
 const { writeClaudeCodeWorkerProfile } = await import('@/lib/claude-code/worker-profile');
 const createMissionRoute = await import('@/app/api/orchestrator/create-mission/route');
+const claudeCodeProfileRoute = await import('@/app/api/runtime/claude-code-profile/route');
+const genUiRoute = await import('@/app/api/mobile/genui/stream/route');
+const symonTextSessionRoute = await import('@/app/api/mobile/symon/text-session/route');
+const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+type ClaudeCodeModelSource = import('@/lib/claude-code/worker-profile-types').ClaudeCodeModelSource;
 
 const claudeConfigDir = path.join(authFixture.home, '.claude');
 
@@ -84,7 +110,10 @@ function writeStaleMarkers(credentials?: unknown) {
   );
 }
 
-function createMissionRequest(issueNumber: number): NextRequest {
+function createMissionRequest(issueNumber: number, overrides: {
+  carrier?: ClaudeCodeModelSource;
+  issueRuntime?: 'claude-code';
+} = {}): NextRequest {
   return new NextRequest('http://localhost:3001/api/orchestrator/create-mission', {
     method: 'POST',
     headers: { host: 'localhost:3001' },
@@ -92,11 +121,13 @@ function createMissionRequest(issueNumber: number): NextRequest {
       clientMutationId: `create-claude-${issueNumber}`,
       repoPath,
       requestedRuntime: 'claude-code',
+      ...(overrides.carrier ? { carrier: overrides.carrier } : {}),
       issues: [{
         number: issueNumber,
         title: 'Claude readiness seam',
         body: 'Prove native sign-in verification through mission creation.',
         url: '',
+        ...(overrides.issueRuntime ? { runtime: overrides.issueRuntime } : {}),
       }],
     }),
   });
@@ -111,6 +142,7 @@ beforeEach(async () => {
   await writeClaudeCodeWorkerProfile({
     source: 'native', model: null, codexModel: null, repoSkillAllowlist: [],
   });
+  symonBridgeFixture.selections.length = 0;
 });
 
 afterEach(() => {
@@ -207,39 +239,62 @@ describe.skipIf(process.platform === 'win32')('Claude Code native sign-in verifi
   }, 20_000);
 
   it.each([
-    { mode: 'malformed', label: 'non-JSON output' },
-    { mode: 'no_field', label: 'JSON without a loggedIn field' },
-    { mode: 'crash', label: 'a non-zero exit' },
-  ])('holds an unknown login state open for $label instead of failing closed', async ({ mode }) => {
+    { mode: 'malformed', label: 'non-JSON output', issueNumber: 91_762_021 },
+    { mode: 'no_field', label: 'JSON without a loggedIn field', issueNumber: 91_762_022 },
+    { mode: 'crash', label: 'a non-zero exit', issueNumber: 91_762_023 },
+  ])('fails native auth closed for $label without positive credential evidence', async ({ mode, issueNumber }) => {
     vi.stubEnv('O8_TEST_CLAUDE_MODE', mode);
     writeStaleMarkers();
+    const before = readOrchestratorControlPlaneState();
 
     const status = await claudeStatus();
     expect(status).toMatchObject({
       installed: true,
-      ready: true,
+      ready: false,
       authenticated: false,
-      unavailableReason: null,
+      unavailableReason: 'needs_auth',
       detail: 'Claude Code CLI is installed but its sign-in state could not be verified.',
     });
     // Probe output must never reach an operator-facing string.
     expect(`${status.detail} ${status.fix}`).not.toContain(MALFORMED_MARKER);
     expect(status.detail.length).toBeLessThan(200);
-    await expect(assertRuntimeDispatchable('claude-code')).resolves.toBeUndefined();
+    await expect(assertRuntimeDispatchable('claude-code')).rejects.toMatchObject({
+      code: 'dispatch_cli_auth_unavailable',
+    });
+
+    const response = await createMissionRoute.POST(createMissionRequest(issueNumber));
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'dispatch_cli_auth_unavailable' },
+    });
+    const after = readOrchestratorControlPlaneState();
+    expect({ missionId: after.missionId, packetIds: after.packets.map((packet) => packet.id) }).toEqual({
+      missionId: before.missionId,
+      packetIds: before.packets.map((packet) => packet.id),
+    });
   });
 
-  it('holds an unknown login state open when the probe times out', async () => {
+  it('fails native auth closed without persistence when the probe times out', async () => {
     vi.stubEnv('O8_TEST_CLAUDE_MODE', 'hang');
     writeStaleMarkers();
+    const before = readOrchestratorControlPlaneState();
 
     const startedAt = Date.now();
     const status = await claudeStatus();
     expect(Date.now() - startedAt).toBeLessThan(10_000);
     expect(status).toMatchObject({
-      ready: true,
+      ready: false,
       authenticated: false,
-      unavailableReason: null,
+      unavailableReason: 'needs_auth',
       detail: 'Claude Code CLI is installed but its sign-in state could not be verified.',
+    });
+    const response = await createMissionRoute.POST(createMissionRequest(91_762_024));
+    expect(response.status).toBe(400);
+    const after = readOrchestratorControlPlaneState();
+    expect({ missionId: after.missionId, packetIds: after.packets.map((packet) => packet.id) }).toEqual({
+      missionId: before.missionId,
+      packetIds: before.packets.map((packet) => packet.id),
     });
   }, 20_000);
 
@@ -292,4 +347,134 @@ describe.skipIf(process.platform === 'win32')('Claude Code native sign-in verifi
       ]),
     );
   });
+
+  it('invalidates the warmed native refusal through the authenticated profile POST route', async () => {
+    writeStaleMarkers();
+    invalidateRuntimeAuthCache();
+    expect((await getRuntimeAuthSnapshot()).statuses.claude).toMatchObject({
+      ready: false,
+      unavailableReason: 'needs_auth',
+    });
+
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-profile-cache-test');
+    const response = await claudeCodeProfileRoute.POST(new NextRequest(
+      'http://localhost:3001/api/runtime/claude-code-profile',
+      {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${OPERATOR_TOKEN}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ source: 'openrouter', model: 'provider/test-model', codexModel: null }),
+      },
+    ));
+    const responseJson = await response.json();
+    expect(response.status, JSON.stringify(responseJson)).toBe(200);
+    expect((await getRuntimeAuthSnapshot()).statuses.claude).toMatchObject({
+      ready: true,
+      authenticated: false,
+      unavailableReason: null,
+      detail: expect.stringContaining('OpenRouter gateway'),
+    });
+  });
+
+  it.each([
+    { source: 'openrouter' as const, issueNumber: 91_762_011 },
+    { source: 'codex-subscription' as const, issueNumber: 91_762_012 },
+  ])('honors a create-mission $source override and persists it on the packet', async ({ source, issueNumber }) => {
+    writeStaleMarkers();
+    invalidateRuntimeAuthCache();
+
+    const response = await createMissionRoute.POST(createMissionRequest(issueNumber, { carrier: source }));
+    expect(response.status).toBe(201);
+    const body = await response.json() as {
+      ok: boolean;
+      result: { packets: Array<{ id: string }> };
+    };
+    expect(body.ok).toBe(true);
+    const packetId = body.result.packets[0]?.id;
+    expect(packetId).toBeTruthy();
+    expect(readOrchestratorControlPlaneState().packets.find((packet) => packet.id === packetId)).toMatchObject({
+      runtime: 'claude-code',
+      claudeCodeCarrier: source,
+    });
+  }, 20_000);
+
+  it.each([
+    { source: 'openrouter' as const },
+    { source: 'codex-subscription' as const },
+  ])('keeps native-only mobile routes unavailable under an unverifiable CLI plus $source profile', async ({ source }) => {
+    vi.stubEnv('O8_TEST_CLAUDE_MODE', 'malformed');
+    writeStaleMarkers();
+    await writeClaudeCodeWorkerProfile({
+      source, model: null, codexModel: null, repoSkillAllowlist: [],
+    });
+    invalidateRuntimeAuthCache();
+
+    expect((await getRuntimeAuthSnapshot()).statuses.claude.ready).toBe(true);
+    expect((await getRuntimeAuthSnapshotForClaudeCarrier('native')).statuses.claude).toMatchObject({
+      ready: false,
+      unavailableReason: 'needs_auth',
+    });
+
+    const catalogResponse = await genUiRoute.GET();
+    const catalog = await catalogResponse.json() as {
+      models: Array<{ id: string; available: boolean }>;
+    };
+    expect(catalog.models.filter((model) => model.id.startsWith('claude-'))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'claude-sonnet', available: false }),
+        expect.objectContaining({ id: 'claude-opus', available: false }),
+      ]),
+    );
+
+    const symonResponse = await symonTextSessionRoute.POST(new NextRequest(
+      'http://localhost:3001/api/mobile/symon/text-session',
+      {
+        method: 'POST',
+        headers: {
+          host: 'localhost:3001',
+          authorization: `Bearer ${OPERATOR_TOKEN}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ workspaceMode: 'o8', currentRoute: '/mobile/ask', model: 'claude-opus' }),
+      },
+    ));
+    expect(symonResponse.status).toBe(501);
+    await expect(symonResponse.json()).resolves.toMatchObject({
+      ok: false,
+      error: 'no_cli',
+    });
+    expect(symonBridgeFixture.selections).toEqual([]);
+  }, 20_000);
+
+  it('restarts a cold detection after invalidation instead of publishing stale carrier state', async () => {
+    const gateDir = mkdtempSync(path.join(authFixture.home, 'claude-probe-gate-'));
+    const startedPath = path.join(gateDir, 'started');
+    const releasePath = path.join(gateDir, 'release');
+    vi.stubEnv('O8_TEST_CLAUDE_MODE', 'gate');
+    vi.stubEnv('O8_TEST_CLAUDE_STARTED', startedPath);
+    vi.stubEnv('O8_TEST_CLAUDE_RELEASE', releasePath);
+    invalidateRuntimeAuthCache();
+
+    const pending = getRuntimeAuthSnapshot();
+    await vi.waitFor(() => expect(existsSync(startedPath)).toBe(true));
+    await writeClaudeCodeWorkerProfile({
+      source: 'openrouter', model: null, codexModel: null, repoSkillAllowlist: [],
+    });
+    invalidateRuntimeAuthCache();
+    writeFileSync(releasePath, 'release');
+
+    await expect(pending).resolves.toMatchObject({
+      statuses: {
+        claude: {
+          ready: true,
+          authenticated: false,
+          unavailableReason: null,
+        },
+      },
+    });
+    expect((await getRuntimeAuthSnapshot()).statuses.claude.detail).toContain('OpenRouter gateway');
+    rmSync(gateDir, { recursive: true, force: true });
+  }, 20_000);
 });

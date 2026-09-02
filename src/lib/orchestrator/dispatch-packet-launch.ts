@@ -174,6 +174,9 @@ export async function launchPacketWithStorageAdmission(input: {
       workerRouting.selectedRuntime,
       workerRouting.selectedModel,
       packet.workspaceTargetPath,
+      // Retry / rerun relaunches a persisted packet, whose pinned carrier can differ
+      // from the stored worker profile the auth snapshot was computed against.
+      { claudeCodeCarrier: packet.claudeCodeCarrier ?? null },
     );
   } catch (error) {
     recordPacketRouting({

@@ -46,7 +46,8 @@
     {
       "path": "src/app/api/setup/detect/route.test.ts",
       "reasons": [
-        "child-process"
+        "child-process",
+        "executable-fixture"
       ]
     },
     {

@@ -8,10 +8,55 @@ import { createOpenCodeServiceFixture } from './helpers/opencode-service-fixture
 
 const h = vi.hoisted(() => ({
   publishRealtimeMutation: vi.fn(async () => true),
+  authPreflights: [] as Array<{
+    runtime: string;
+    cwd?: string | null;
+    options?: { claudeCodeCarrier?: string | null };
+  }>,
+  launches: [] as Array<{ packetId?: string; runtime?: string; repoPath: string }>,
 }));
 
 vi.mock('@/lib/realtime/publisher', () => ({
   publishRealtimeMutation: h.publishRealtimeMutation,
+}));
+
+vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/worktree/storage-telemetry')>(),
+  measureHostVolume: vi.fn(async () => ({
+    accountingStatus: 'observed' as const,
+    probePath: '/',
+    availableBytes: 90_000_000_000,
+    freeBytes: 90_000_000_000,
+    totalBytes: 100_000_000_000,
+    error: null,
+  })),
+}));
+
+vi.mock('@/lib/runtimes/shared/auth-detect', () => ({
+  assertRuntimeDispatchable: vi.fn(async (
+    runtime: string,
+    _model?: string | null,
+    cwd?: string | null,
+    options?: { claudeCodeCarrier?: string | null },
+  ) => {
+    h.authPreflights.push({ runtime, cwd, options });
+  }),
+}));
+
+vi.mock('@/lib/runtime/actions', () => ({
+  launchRuntimeSurface: vi.fn(async (input: {
+    packetId?: string;
+    runtime?: string;
+    repoPath: string;
+  }) => {
+    h.launches.push(input);
+    return {
+      ok: true,
+      surfaceId: `claude-code-owned:${input.packetId}`,
+      note: 'mock lifecycle launch',
+      worktree: { path: input.repoPath },
+    };
+  }),
 }));
 
 vi.mock('@/lib/lane/reap-sessions', async (importOriginal) => {
@@ -40,11 +85,16 @@ process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
 const route = await import('@/app/api/orchestrator/reset-packet/route');
+const rerunRoute = await import('@/app/api/orchestrator/rerun-with-feedback/route');
 const { closeDb } = await import('@/lib/db');
 const { createLane, getLane, setLaneStatus } = await import('@/lib/lane/registry');
+const { createMission } = await import('@/lib/orchestrator/operator-mission-service');
+const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 
 beforeEach(() => {
   h.publishRealtimeMutation.mockClear();
+  h.authPreflights = [];
+  h.launches = [];
 });
 
 afterAll(() => {
@@ -68,7 +118,7 @@ function createLinkedWorktree(prefix: string, branch: string) {
   return { root, repoPath, worktreePath };
 }
 
-describe('reset lifecycle retirement through the operator route', () => {
+describe('packet lifecycle retirement through the operator route', () => {
   it('rejects an uncorrelated reset before touching packet state', async () => {
     const response = await route.POST(new NextRequest('http://localhost:3001/api/orchestrator/reset-packet', {
       method: 'POST',
@@ -142,6 +192,61 @@ describe('reset lifecycle retirement through the operator route', () => {
     });
     expect(h.publishRealtimeMutation).toHaveBeenCalledTimes(1);
   });
+
+  it('preserves a persisted carrier through rerun relaunch preflight', async () => {
+    const { repoPath } = createLinkedWorktree('rerun-carrier-', 'test/rerun-carrier-fixture');
+    const mission = await createMission({
+      issues: [{
+        number: 91_762_101,
+        title: 'Persist carrier through rerun',
+        body: 'Exercise the operator lifecycle route and relaunch preflight.',
+        url: '',
+      }],
+      repoPath,
+      runtime: 'claude-code',
+      claudeCodeCarrier: 'openrouter',
+      constraints: '',
+    });
+    const packetId = mission.packets[0]!.id;
+    expect(readOrchestratorControlPlaneState().packets[0]).toMatchObject({
+      id: packetId,
+      runtime: 'claude-code',
+      claudeCodeCarrier: 'openrouter',
+    });
+    h.authPreflights = [];
+
+    const response = await rerunRoute.POST(new NextRequest(
+      'http://localhost:3001/api/orchestrator/rerun-with-feedback',
+      {
+        method: 'POST',
+        headers: {
+          host: 'localhost:3001',
+          authorization: `Bearer ${operatorToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          packetId,
+          feedback: 'retry through the persisted carrier',
+          idempotencyKey: 'rerun-carrier-preflight-route',
+        }),
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      result: { packetId, dispatched: true },
+    });
+    expect(h.authPreflights).toContainEqual({
+      runtime: 'claude-code',
+      cwd: repoPath,
+      options: { claudeCodeCarrier: 'openrouter' },
+    });
+    expect(h.launches).toEqual([
+      expect.objectContaining({ packetId, runtime: 'claude-code', repoPath }),
+    ]);
+    expect(readOrchestratorControlPlaneState().packets[0]?.claudeCodeCarrier).toBe('openrouter');
+  }, 20_000);
 
   it('releases the OpenCode service location before reset removes the worktree', { timeout: 20_000 }, async () => {
     const packetId = 'packet-reset-opencode-release';

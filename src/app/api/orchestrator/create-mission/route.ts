@@ -258,9 +258,17 @@ export async function POST(request: NextRequest) {
     model: workerRouting.selectedModel,
   });
   try {
-    await assertRuntimeDispatchable(workerRouting.selectedRuntime, workerRouting.selectedModel, repoPath);
+    // Preflight has to judge the carrier this mission will actually launch on, not the
+    // stored worker profile: a mission pinned to openrouter / codex-subscription never
+    // touches the native CLI login, so a logged-out native CLI must not refuse it.
+    const preflightCarrier = { claudeCodeCarrier };
+    await assertRuntimeDispatchable(
+      workerRouting.selectedRuntime, workerRouting.selectedModel, repoPath, preflightCarrier,
+    );
     for (const issueRouting of issueRoutings) {
-      await assertRuntimeDispatchable(issueRouting.selectedRuntime, issueRouting.selectedModel, repoPath);
+      await assertRuntimeDispatchable(
+        issueRouting.selectedRuntime, issueRouting.selectedModel, repoPath, preflightCarrier,
+      );
     }
   } catch (error) {
     if (error instanceof DispatchPreflightError) {

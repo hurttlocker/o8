@@ -18,6 +18,14 @@ const launchMock = vi.hoisted(() => ({
   gate: null as Promise<void> | null,
   dependencyMode: null as 'native' | 'image' | null,
 }));
+const authPreflightMock = vi.hoisted(() => ({
+  calls: [] as Array<{
+    runtime: string;
+    model?: string | null;
+    cwd?: string | null;
+    options?: { claudeCodeCarrier?: string | null };
+  }>,
+}));
 
 vi.mock('@/lib/runtime/actions', () => ({
   launchRuntimeSurface: vi.fn(async (input: {
@@ -52,7 +60,14 @@ vi.mock('@/lib/runtime/actions', () => ({
 }));
 
 vi.mock('@/lib/runtimes/shared/auth-detect', () => ({
-  assertRuntimeDispatchable: vi.fn(async () => undefined),
+  assertRuntimeDispatchable: vi.fn(async (
+    runtime: string,
+    model?: string | null,
+    cwd?: string | null,
+    options?: { claudeCodeCarrier?: string | null },
+  ) => {
+    authPreflightMock.calls.push({ runtime, model, cwd, options });
+  }),
 }));
 
 const {
@@ -88,6 +103,10 @@ import { resetPacketFields } from '@/lib/orchestrator/operator-mission-service/r
 import { StorageAdmissionStore } from '@/lib/workspace/storage-admission';
 import { resolveWorkerRouting } from '@/lib/agents/routing';
 import { launchPacketWithStorageAdmission } from '@/lib/orchestrator/dispatch-packet-launch';
+import {
+  readOrchestratorControlPlaneState,
+  writeOrchestratorControlPlaneState,
+} from '@/lib/orchestrator/control-plane';
 
 function makeRepo(initialBranch = 'main'): string {
   const dir = mkdtempSync(join(tmpdir(), 'o8-scheduling-repo-'));
@@ -235,6 +254,7 @@ describe('dispatch scheduling caps and waves', () => {
     launchMock.outcome = 'success';
     launchMock.gate = null;
     launchMock.dependencyMode = null;
+    authPreflightMock.calls.length = 0;
     setDispatchHaltState(false);
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
   });
@@ -336,6 +356,34 @@ describe('dispatch scheduling caps and waves', () => {
     release();
     await expect(first).resolves.toMatchObject({ laneId: expect.any(String) });
     expect(launchMock.calls.filter((call) => call.packetId === candidate.id)).toHaveLength(1);
+  }, 20_000);
+
+  it('preflights the carrier pinned on the persisted packet through the real launch entry', async () => {
+    const repoPath = makeRepo();
+    writeOrchestratorControlPlaneState(normalizeOrchestratorMissionState(missionFixture(
+      repoPath,
+      [packetFixture(repoPath, 'persisted-carrier-preflight', {
+        runtime: 'claude-code',
+        claudeCodeCarrier: 'openrouter',
+      })],
+    )));
+    const candidate = readOrchestratorControlPlaneState().packets[0]!;
+
+    await launchPacketWithStorageAdmission({
+      packet: candidate,
+      allPackets: [candidate],
+      workerRouting: resolveWorkerRouting({
+        requestedRuntime: 'claude-code',
+        source: 'scheduler-dispatch',
+      }),
+      storageAdmission: injectedAdmission(candidate.id, []),
+    });
+
+    expect(authPreflightMock.calls).toContainEqual(expect.objectContaining({
+      runtime: 'claude-code',
+      cwd: repoPath,
+      options: { claudeCodeCarrier: 'openrouter' },
+    }));
   }, 20_000);
 
   it('uses the durable admission generation for the launch mutation after reset', async () => {
