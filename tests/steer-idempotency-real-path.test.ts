@@ -32,7 +32,7 @@ const { handleStatus } = await import('@/lib/mcp/operator-handlers/status');
 const agentControlRoute = await import('@/app/api/agent-control/action/route');
 const idempotency = await import('@/lib/orchestrator/idempotency-store');
 const { closeDb, getSqlite } = await import('@/lib/db');
-const { createLane, deleteLane, getLane } = await import('@/lib/lane/registry');
+const { createLane, deleteLane, getLane, setLaneStatus, updateLane } = await import('@/lib/lane/registry');
 
 const createdLaneIds: string[] = [];
 
@@ -45,6 +45,16 @@ function post(pathname: string, body: unknown) {
       'content-type': 'application/json',
     },
     body: JSON.stringify(body),
+  });
+}
+
+function get(pathname: string) {
+  return new NextRequest(`http://localhost:3001${pathname}`, {
+    method: 'GET',
+    headers: {
+      host: 'localhost:3001',
+      authorization: `Bearer ${operatorToken}`,
+    },
   });
 }
 
@@ -256,5 +266,60 @@ describe('packet steer post-effect idempotency through real routes', () => {
     ).get() as { count: number };
     expect(executionRows.count).toBe(0);
     expect(h.perform).not.toHaveBeenCalled();
+  });
+
+  it('real o8_status drops a stale failed lane but keeps a fresh one (#2047)', async () => {
+    const staleLane = createSteerLane('failed-lane-stale');
+    setLaneStatus(staleLane.id, 'failed', 'system', 'worker_failed');
+    updateLane(staleLane.id, {
+      lastEventAt: new Date(Date.now() - 60 * 60_000).toISOString(),
+    }, 'system');
+
+    const freshLane = createSteerLane('failed-lane-fresh');
+    setLaneStatus(freshLane.id, 'failed', 'system', 'worker_failed');
+
+    const response = await operatorStatusRoute.GET(get('/api/operator/status'));
+    expect(response.status).toBe(200);
+    const payload = await response.json() as {
+      agents: Array<{ sessionKey: string; status: string }>;
+    };
+
+    expect(payload.agents.some((agent) => agent.sessionKey === staleLane.sessionKey)).toBe(false);
+    expect(payload.agents).toContainEqual(expect.objectContaining({
+      sessionKey: freshLane.sessionKey,
+      status: 'failed',
+    }));
+  });
+
+  it('real o8_status sorts recent activity by parsed epoch, not raw timestamp string', async () => {
+    // Same real instant deliberately written with a fractional-Z suffix vs an
+    // offset suffix, so the earlier suffix character ('.' before Z) would
+    // outrank a later real timestamp under a naive string compare.
+    const olderStringGreaterLane = createSteerLane('sort-z-older');
+    setLaneStatus(olderStringGreaterLane.id, 'running', 'system', 'session_launched');
+    updateLane(olderStringGreaterLane.id, {
+      lastEventAt: '2026-01-01T00:00:00Z',
+    }, 'system');
+
+    const newerStringLesserLane = createSteerLane('sort-offset-newer');
+    setLaneStatus(newerStringLesserLane.id, 'running', 'system', 'session_launched');
+    updateLane(newerStringLesserLane.id, {
+      lastEventAt: '2026-01-01T00:00:00.500+00:00',
+    }, 'system');
+
+    const response = await operatorStatusRoute.GET(get('/api/operator/status'));
+    expect(response.status).toBe(200);
+    const payload = await response.json() as {
+      recentActivity: Array<{ target: string; timestamp: string }>;
+    };
+
+    const targets = new Set([olderStringGreaterLane.label, newerStringLesserLane.label]);
+    const ordered = payload.recentActivity.filter((entry) => targets.has(entry.target));
+    expect(ordered.length).toBeGreaterThanOrEqual(2);
+    const newerIndex = ordered.findIndex((entry) => entry.target === newerStringLesserLane.label);
+    const olderIndex = ordered.findIndex((entry) => entry.target === olderStringGreaterLane.label);
+    expect(newerIndex).toBeGreaterThanOrEqual(0);
+    expect(olderIndex).toBeGreaterThanOrEqual(0);
+    expect(newerIndex).toBeLessThan(olderIndex);
   });
 });

@@ -1004,11 +1004,25 @@ describe('seam E — orchestrator state projects one terminal status authority',
     expect(response.status).toBe(200);
     const json = await response.json();
 
-    expect(json.agents.map((candidate: { runtime: string }) => candidate.runtime)).toEqual([
+    // Real-path lane-only synthesis (#2042) is unscoped by design: an
+    // unarchived active lane (reviewing / awaiting_orchestrator / running)
+    // stays visible in a global /api/operator/status call even without a
+    // matching runtime-inventory session, so an operator does not lose sight
+    // of live work during a brief discovery gap. This file persists real
+    // lanes in one shared in-process DB across every test without deleting
+    // them, so earlier seam tests above legitimately leave their own active
+    // lanes behind — those correctly keep showing up here too; asserting an
+    // exhaustive agent list would make this test depend on unrelated seams'
+    // lane litter rather than on what it actually verifies.
+    // `buildOperatorStatusAgents` always orders inventory-sourced agents
+    // ahead of lane-only fallback rows, so the two mocked sessions are
+    // deterministically the first two entries regardless of what else has
+    // accumulated in the shared DB.
+    expect(json.agents.slice(0, 2).map((candidate: { runtime: string }) => candidate.runtime)).toEqual([
       'cloud',
       'remote-customer',
     ]);
-    expect(json.agents.map((candidate: { statusEvidence: { runtime: string } }) => (
+    expect(json.agents.slice(0, 2).map((candidate: { statusEvidence: { runtime: string } }) => (
       candidate.statusEvidence.runtime
     ))).toEqual(['cloud', 'remote-customer']);
   });

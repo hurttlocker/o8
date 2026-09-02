@@ -1,5 +1,6 @@
 import type { ApprovalRecord } from '@/lib/approvals/types';
 import type { AgentStatus, AgentSummary } from '@/lib/fleet/types';
+import { isLaneTerminal } from '@/lib/lane/terminal-states';
 import type { Lane, LaneEvent } from '@/lib/lane/types';
 import type { RuntimeId, RuntimeSessionStatus } from '@/lib/runtimes/types';
 import {
@@ -213,6 +214,27 @@ const LANE_ONLY_OPERATOR_STATUSES = new Set<Lane['status']>([
   'failed',
 ]);
 
+// A `failed` lane never transitions on its own — only an operator redispatch
+// or archive moves it forward — so keeping it in LANE_ONLY_OPERATOR_STATUSES
+// without a bound means `o8_status` reports an agent for work that ended
+// hours or days ago (#2047). Bound how long a lane-terminal status (today
+// just `failed`; `isLaneTerminal` also covers `completed`/`archived` should
+// either land in the set later) keeps synthesizing an agent row: 30 minutes
+// is long enough for the operator to notice a fresh failure in the status
+// feed during the same session, short enough that a stale failure doesn't
+// linger indefinitely. A lane with no session key carries no live-session
+// evidence at all, so it drops immediately regardless of age.
+const TERMINAL_LANE_ONLY_STALE_WINDOW_MS = 30 * 60_000;
+
+function isStaleTerminalLaneOnlyAgent(lane: Lane, nowMs: number): boolean {
+  if (!isLaneTerminal(lane.status)) return false;
+  if (!lane.sessionKey) return true;
+  const observedAt = lane.lastEventAt || lane.updatedAt;
+  const parsed = observedAt ? Date.parse(observedAt) : NaN;
+  if (!Number.isFinite(parsed)) return true;
+  return nowMs - parsed > TERMINAL_LANE_ONLY_STALE_WINDOW_MS;
+}
+
 function safeResolveLaneOnlyStatusEvidence(
   lane: Lane,
   context: OperatorStatusEvidenceContext,
@@ -303,12 +325,14 @@ export function buildOperatorStatusAgents(
   // discovery gap. Only synthesize a lane-backed row when inventory did not
   // already provide the same session, and never resurrect idle/archived lanes.
   const representedSessionKeys = new Set(inventoryAgents.map((agent) => agent.sessionKey));
+  const nowMs = Date.now();
   const laneOnlyAgents = [...laneBySession.values()]
     .filter((lane): lane is Lane & { sessionKey: string } => Boolean(
       lane.sessionKey
       && LANE_ONLY_OPERATOR_STATUSES.has(lane.status)
       && !representedSessionKeys.has(lane.sessionKey)
-      && (!sessionKeyFilter || lane.sessionKey === sessionKeyFilter),
+      && (!sessionKeyFilter || lane.sessionKey === sessionKeyFilter)
+      && !isStaleTerminalLaneOnlyAgent(lane, nowMs),
     ))
     .map((lane) => operatorStatusAgentFromLane(lane, context));
 
