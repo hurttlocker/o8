@@ -395,6 +395,55 @@ describe('Claude Code worker skill isolation real path', () => {
     }
   });
 
+  it('treats empty OAuth token fields as no credential and writes no worker snapshot', async () => {
+    const emptyConfigDir = path.join(tempRoot, 'operator-empty-credentials');
+    const sessionDir = path.join(tempRoot, 'empty-credential-session');
+    mkdirSync(emptyConfigDir, { recursive: true });
+    writeFileSync(
+      path.join(emptyConfigDir, '.credentials.json'),
+      JSON.stringify({ claudeAiOauth: { accessToken: '', refreshToken: '   ' } }),
+    );
+    const priorConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = emptyConfigDir;
+
+    try {
+      const { ensureClaudeCodeWorkerConfigDir } = await import('@/lib/claude-code/codex-subscription-proxy');
+      await expect(ensureClaudeCodeWorkerConfigDir(sessionDir, 'native')).rejects.toMatchObject({
+        code: 'worker_not_authenticated',
+        reason: 'No live Claude OAuth credential was available to seed.',
+      });
+      expect(existsSync(path.join(sessionDir, 'claude-code-worker-config', '.credentials.json'))).toBe(false);
+    } finally {
+      if (priorConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = priorConfigDir;
+    }
+  });
+
+  it.each([
+    { source: 'openrouter' as const },
+    { source: 'codex-subscription' as const },
+  ])('provisions a $source worker config dir while the native CLI reports logged out', async ({ source }) => {
+    const emptyConfigDir = path.join(tempRoot, `carrier-no-native-credentials-${source}`);
+    const sessionDir = path.join(tempRoot, `carrier-session-${source}`);
+    mkdirSync(emptyConfigDir, { recursive: true });
+    const priorConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = emptyConfigDir;
+    authStatusMock.loggedIn = false;
+
+    try {
+      const { ensureClaudeCodeWorkerConfigDir } = await import('@/lib/claude-code/codex-subscription-proxy');
+      const configDir = await ensureClaudeCodeWorkerConfigDir(sessionDir, source);
+      expect(configDir).toBe(path.join(sessionDir, 'claude-code-worker-config'));
+      expect(existsSync(configDir)).toBe(true);
+      // The native login probe must not gate a carrier that supplies its own credential.
+      expect(existsSync(path.join(configDir, '.credentials.json'))).toBe(false);
+    } finally {
+      authStatusMock.loggedIn = true;
+      if (priorConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = priorConfigDir;
+    }
+  });
+
   it('injects only explicitly allowlisted repository skill instructions', async () => {
     const allowedSkill = path.join(repoPath, '.claude', 'skills', 'review-only');
     const blockedSkill = path.join(repoPath, '.claude', 'skills', 'unlisted');

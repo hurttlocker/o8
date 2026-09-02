@@ -18,6 +18,7 @@ import path from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
 import { browserOpenInvocation, findLatestCodexOAuthUrl } from './codex-subscription-oauth';
+import { hasLiveClaudeOAuth } from './oauth-credential';
 import type { ClaudeCodeModelSource } from './worker-profile-types';
 
 const DEFAULT_PORT = 8317;
@@ -366,24 +367,15 @@ async function seedNativeWorkerCredentials(configDir: string): Promise<void> {
       ]).catch(() => '')
     : '';
   const fileCredentials = await readFile(sourceCredentialsPath, 'utf8').catch(() => '');
-  const credentials = hasClaudeOAuth(keychainCredentials)
+  const credentials = hasLiveClaudeOAuth(keychainCredentials)
     ? keychainCredentials
-    : hasClaudeOAuth(fileCredentials) ? fileCredentials : '';
+    : hasLiveClaudeOAuth(fileCredentials) ? fileCredentials : '';
   if (!credentials) {
     throw new ClaudeCodeWorkerAuthenticationError('No live Claude OAuth credential was available to seed.');
   }
   const destCredentialsPath = path.join(configDir, '.credentials.json');
   await writeFile(destCredentialsPath, credentials, { mode: 0o600 });
   await chmod(destCredentialsPath, 0o600);
-}
-
-function hasClaudeOAuth(raw: string): boolean {
-  try {
-    const oauth = (JSON.parse(raw) as { claudeAiOauth?: Record<string, unknown> }).claudeAiOauth;
-    return typeof oauth?.accessToken === 'string' || typeof oauth?.refreshToken === 'string';
-  } catch {
-    return false;
-  }
 }
 
 async function assertNativeWorkerAuthenticated(configDir: string): Promise<void> {

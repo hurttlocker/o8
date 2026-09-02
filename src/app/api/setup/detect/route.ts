@@ -11,6 +11,7 @@ import { pathLookupProgram, pickLookupResult, scanAndLink } from '@/lib/runtimes
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { detectRuntimeAuthStatus } from '@/lib/runtimes/shared/auth-detect';
 import { opencodeCredentialProviders } from '@/lib/runtimes/shared/opencode-readiness';
+import { hasLiveClaudeOAuth } from '@/lib/claude-code/oauth-credential';
 import { getDataDir } from '@/lib/data-dir-migration';
 
 export const runtime = 'nodejs';
@@ -226,8 +227,16 @@ function detectClaudeCode(deadlineAt?: number): DetectedTool {
     }
   }
 
+  // An existing .credentials.json is not evidence — Claude Code leaves the file behind
+  // with empty token fields after a sign-out. Only live OAuth material counts.
+  let storedOauth = '';
+  try {
+    storedOauth = readFileSync(join(home, '.claude', '.credentials.json'), 'utf8');
+  } catch {
+    storedOauth = '';
+  }
   const authPresent = keyPresent(['ANTHROPIC_API_KEY'], loadConfiguredKeyNames())
-    || existsSync(join(home, '.claude', '.credentials.json'))
+    || hasLiveClaudeOAuth(storedOauth)
     || sessionCount > 0;
   return {
     id: 'claude-code',

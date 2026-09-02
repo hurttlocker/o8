@@ -13,7 +13,15 @@ import {
   listDispatchableRuntimes,
   type RuntimeAuthHouse,
 } from '@/lib/orchestrator/runtime-capabilities';
+import { readClaudeCodeWorkerProfileSync } from '@/lib/claude-code/worker-profile';
+import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 import { scanAndLink } from './cli-locate';
+import {
+  hasClaudeEnvCredential,
+  hasStoredClaudeOAuthCredential,
+  probeClaudeLoginState,
+  type ClaudeLoginState,
+} from './claude-login-probe';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import {
   localProviderIds,
@@ -32,6 +40,11 @@ import { validateRuntimeModelSelection } from './model-compatibility';
 const execFileAsync = promisify(execFile);
 const CACHE_TTL_MS = 60_000;
 const PROBE_TIMEOUT_MS = 1_500;
+const CLAUDE_CARRIER_LABELS: Record<ClaudeCodeModelSource, string> = {
+  native: 'native Claude Code',
+  openrouter: 'OpenRouter gateway',
+  'codex-subscription': 'Codex subscription',
+};
 const TRUSTED_KEYLESS_OPENCODE_MODELS = new Set([
   'opencode/deepseek-v4-flash-free',
 ]);
@@ -225,6 +238,39 @@ async function detectCodex(): Promise<RuntimeAuthStatus> {
   });
 }
 
+/**
+ * Which carrier supplies the Claude Code worker's credential. A worker routed through
+ * the OpenRouter gateway or the Codex subscription proxy does not use the native CLI
+ * login at all, so a logged-out native CLI must never mark the runtime undispatchable.
+ */
+function claudeWorkerCarrier(): ClaudeCodeModelSource {
+  try {
+    return readClaudeCodeWorkerProfileSync().source;
+  } catch {
+    return 'native';
+  }
+}
+
+/**
+ * Native sign-in evidence, in decisiveness order.
+ *
+ * A non-empty env credential is decisive positive evidence and skips the subprocess.
+ * Otherwise the installed CLI is asked directly; only an explicit `loggedIn:false`
+ * is treated as decisive negative. An inconclusive probe falls back to real stored
+ * OAuth material — never to marker files like ~/.claude/settings.json or
+ * ~/.claude/projects, which survive a sign-out and used to fake authentication here.
+ */
+async function detectNativeClaudeAuth(binaryPath: string): Promise<{
+  authenticated: boolean;
+  loginState: ClaudeLoginState;
+}> {
+  if (hasClaudeEnvCredential()) return { authenticated: true, loginState: 'logged_in' };
+  const loginState = await probeClaudeLoginState(binaryPath);
+  if (loginState === 'logged_in') return { authenticated: true, loginState };
+  if (loginState === 'logged_out') return { authenticated: false, loginState };
+  return { authenticated: await hasStoredClaudeOAuthCredential(), loginState };
+}
+
 async function detectClaude(): Promise<RuntimeAuthStatus> {
   const binaryPath = scanAndLink('claude') ?? undefined;
   if (!binaryPath) {
@@ -236,19 +282,29 @@ async function detectClaude(): Promise<RuntimeAuthStatus> {
     });
   }
 
-  const home = os.homedir();
-  const hasEnvAuth = Boolean(process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_CODE_OAUTH_TOKEN);
-  const settingsExists = await fileExists(path.join(home, '.claude', 'settings.json'));
-  const credentialsExists = await fileExists(path.join(home, '.claude', '.credentials.json'));
-  const projectHistoryExists = await fileExists(path.join(home, '.claude', 'projects'));
-  const authenticated = hasEnvAuth || settingsExists || credentialsExists || projectHistoryExists;
+  const carrier = claudeWorkerCarrier();
+  const { authenticated, loginState } = await detectNativeClaudeAuth(binaryPath);
+  // Only an explicit logged-out answer from the CLI blocks dispatch. An inconclusive
+  // probe leaves the authoritative refusal to the launch seam, which asserts the
+  // seeded credential and raises a structured worker_not_authenticated lane event.
+  const nativeBlocked = !authenticated && loginState === 'logged_out';
+  const ready = carrier !== 'native' || !nativeBlocked;
 
   return nowStatus('claude', 'claude-code', {
     installed: true,
     authenticated,
+    ready,
+    // Details are short constants: probe stdout never reaches an operator-facing string.
     detail: authenticated
-      ? 'Claude Code CLI is installed and has local sign-in evidence.'
-      : 'Claude Code CLI is installed but no local sign-in evidence was found.',
+      ? 'Claude Code CLI is installed and signed in.'
+      : nativeBlocked
+        ? carrier === 'native'
+          ? 'Claude Code CLI is installed but not signed in.'
+          : `Claude Code CLI is installed but not signed in; workers use the ${CLAUDE_CARRIER_LABELS[carrier]} carrier.`
+        : 'Claude Code CLI is installed but its sign-in state could not be verified.',
+    fix: !nativeBlocked || carrier !== 'native'
+      ? 'No action needed.'
+      : 'Run `claude` once to sign in.',
     binaryPath,
   });
 }
