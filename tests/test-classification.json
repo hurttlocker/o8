@@ -1171,6 +1171,12 @@
       ]
     },
     {
+      "path": "tests/cli-stop-parsing.test.ts",
+      "reasons": [
+        "terminal-tool"
+      ]
+    },
+    {
       "path": "tests/cli-usage-api-real-path.test.ts",
       "reasons": [
         "real-path"
