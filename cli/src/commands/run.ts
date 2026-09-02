@@ -28,6 +28,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { apiFetch, CliError, EXIT } from '../api.js';
 import { resolveConfig } from '../config.js';
 import { resolveLaneFromCwd } from './packet/worktree-resolve.js';
@@ -47,12 +48,37 @@ const RUN_LEADING_FLAGS = new Set([
 
 /** env vars that must NOT leak into the pane (confuse tmux / cwd). */
 const ENV_DENYLIST = new Set(['_', 'PWD', 'OLDPWD', 'SHLVL', 'TMUX', 'TMUX_PANE']);
+const LEGACY_SERVER_ONLY_STUB_NODE_OPTION = '--import=./scripts/register-server-only-stub.mjs';
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /** single-quote a value for safe interpolation into an `sh -c` string. */
 function sq(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+export function managedRunEnvironmentLines(
+  env: Readonly<Record<string, string | undefined>>,
+  cwd: string,
+): string[] {
+  // A long-lived tmux server retains variables from the process that created it.
+  // Clear the dangerous Node preload first, then restore the caller's value if
+  // one exists. The legacy repo-relative preload must become absolute before a
+  // managed child changes directory.
+  const lines = ['unset NODE_OPTIONS'];
+  for (const [key, rawValue] of Object.entries(env)) {
+    if (rawValue == null) continue;
+    if (ENV_DENYLIST.has(key)) continue;
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
+    const value = key === 'NODE_OPTIONS'
+      ? rawValue.replaceAll(
+        LEGACY_SERVER_ONLY_STUB_NODE_OPTION,
+        `--import=${pathToFileURL(join(cwd, 'scripts', 'register-server-only-stub.mjs')).href}`,
+      )
+      : rawValue;
+    lines.push(`export ${key}=${sq(value)}`);
+  }
+  return lines;
 }
 
 function liveMarkerPids(marker: string): number[] | null {
@@ -310,13 +336,7 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
 
   // Mirror the agent's full env into the pane (the tmux server may have stale
   // env — at minimum PATH would be wrong → "command not found").
-  const envLines: string[] = [];
-  for (const [k, v] of Object.entries(process.env)) {
-    if (v == null) continue;
-    if (ENV_DENYLIST.has(k)) continue;
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) continue;
-    envLines.push(`export ${k}=${sq(v)}`);
-  }
+  const envLines = managedRunEnvironmentLines(process.env, cwd);
   envLines.push(`export O8_MANAGED_RUN_MARKER=${sq(processMarker)}`);
   // Mode 0600 — the env-file mirrors the agent's full environment (incl.
   // O8_API_TOKEN + provider keys) into shared /tmp; never world-readable.

@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { pathToFileURL } from 'node:url';
 import { CliError, EXIT } from '../cli/src/api';
 import { parseMissionStopArgs, runMission } from '../cli/src/commands/mission';
 import { parsePacketStopArgs } from '../cli/src/commands/packet/stop';
-import { parseRunStopArgs } from '../cli/src/commands/run';
+import { managedRunEnvironmentLines, parseRunStopArgs } from '../cli/src/commands/run';
 
 describe('CLI stop command parsing', () => {
   afterEach(() => {
@@ -99,5 +100,22 @@ describe('CLI stop command parsing', () => {
     expect(parseRunStopArgs(['stop', 'abc123'])).toEqual({ runId: 'abc123' });
     expect(() => parseRunStopArgs(['stop'])).toThrow(CliError);
     expect(() => parseRunStopArgs(['stop', 'abc123', 'extra'])).toThrow(CliError);
+  });
+
+  it('clears stale tmux Node options and anchors an inherited legacy preload', () => {
+    const cwd = '/tmp/o8 repo';
+    expect(managedRunEnvironmentLines({ PATH: '/usr/bin' }, cwd)).toEqual([
+      'unset NODE_OPTIONS',
+      "export PATH='/usr/bin'",
+    ]);
+
+    const lines = managedRunEnvironmentLines({
+      NODE_OPTIONS: '--trace-warnings --import=./scripts/register-server-only-stub.mjs',
+    }, cwd);
+    const stubUrl = pathToFileURL(`${cwd}/scripts/register-server-only-stub.mjs`).href;
+    expect(lines).toEqual([
+      'unset NODE_OPTIONS',
+      `export NODE_OPTIONS='--trace-warnings --import=${stubUrl}'`,
+    ]);
   });
 });

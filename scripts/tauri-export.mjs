@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 import { prepareNativeBundle } from './native-bundle.mjs';
 import { exportTauriSafetyHookResources } from './tauri-hook-resources.mjs';
 import { resolveReleaseConfig } from './lib/release-config.mjs';
+import { canonicalizeServerOnlyStubEnv } from './run-lib.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
@@ -514,7 +515,7 @@ if (process.platform === 'darwin') {
 }
 
 // ── Compile WS server ──
-const { execSync } = await import('child_process');
+const { execFileSync, execSync } = await import('child_process');
 
 // Turbopack renames externals with hash suffixes — create symlinks
 const chunksDir = join(server, '.next', 'server', 'chunks');
@@ -695,7 +696,11 @@ const CLI_BIN_DST = join(CLI_BIN_DIR, 'o8');
 const CLI_BUNDLE_DST = join(CLI_BIN_DIR, 'o8.mjs');
 if (existsSync(CLI_BUILD)) {
   console.log('   building cli bundle…');
-  execSync(`node "${CLI_BUILD}"`, { stdio: 'inherit', cwd: join(root, 'cli') });
+  execFileSync(process.execPath, [CLI_BUILD], {
+    stdio: 'inherit',
+    cwd: join(root, 'cli'),
+    env: canonicalizeServerOnlyStubEnv(process.env),
+  });
   if (!existsSync(CLI_OUTPUT)) {
     console.error(`❌ CLI build did not produce ${CLI_OUTPUT}`);
     process.exit(1);

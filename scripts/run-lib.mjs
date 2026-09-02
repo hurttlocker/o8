@@ -47,6 +47,14 @@ export function canonicalizeServerOnlyStubNodeOptions(value) {
   return normalizeServerOnlyStubNodeOptions(value, false);
 }
 
+export function canonicalizeServerOnlyStubEnv(env) {
+  const normalized = { ...env };
+  if (normalized.NODE_OPTIONS) {
+    normalized.NODE_OPTIONS = canonicalizeServerOnlyStubNodeOptions(normalized.NODE_OPTIONS);
+  }
+  return normalized;
+}
+
 export function withServerOnlyStubNodeOptions(value) {
   return normalizeServerOnlyStubNodeOptions(value, true);
 }

@@ -6,6 +6,10 @@ export declare function canonicalizeServerOnlyStubNodeOptions(
   value: string | undefined,
 ): string | undefined;
 
+export declare function canonicalizeServerOnlyStubEnv<T extends Record<string, string | undefined>>(
+  env: T,
+): T;
+
 export declare function withServerOnlyStubNodeOptions(
   value?: string,
 ): string;

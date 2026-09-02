@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import {
+  canonicalizeServerOnlyStubEnv,
   canonicalizeServerOnlyStubNodeOptions,
   SERVER_ONLY_STUB_NODE_OPTION,
   withServerOnlyStubNodeOptions,
@@ -37,5 +38,23 @@ describe('server-only stub node options', () => {
     });
 
     expect(result.status, result.error?.message ?? result.stderr).toBe(0);
+  });
+
+  it('keeps the inherited preload valid after a release child changes into cli', () => {
+    const env = canonicalizeServerOnlyStubEnv({
+      ...process.env,
+      NODE_OPTIONS: legacyServerOnlyStubNodeOption,
+    });
+    const result = spawnSync(process.execPath, [
+      '--eval',
+      "require('server-only')",
+    ], {
+      cwd: fileURLToPath(new URL('../cli', import.meta.url)),
+      env,
+      encoding: 'utf8',
+    });
+
+    expect(result.status, result.error?.message ?? result.stderr).toBe(0);
+    expect(env.NODE_OPTIONS).toBe(SERVER_ONLY_STUB_NODE_OPTION);
   });
 });
