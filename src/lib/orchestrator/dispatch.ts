@@ -21,3 +21,9 @@ export {
   mergeDispatchTickOutcome,
   runDispatchTick,
 } from './scheduling';
+
+export {
+  forgetRecoverySkip,
+  resetRecoverySkipMemo,
+  shouldLogRecoverySkip,
+} from './recovery-skip-log';
