@@ -253,6 +253,8 @@ export interface OrchestratorStoragePressureCandidateReceipt {
   repositoryUuid: string | null;
   laneId: string;
   operationId: string;
+  /** Workspace path the operator would reclaim; null when the lane never proved one. */
+  workspacePath: string | null;
   measuredAllocatedBytes: number | null;
   verifiedReclaimedAvailableBytes: number | null;
   outcome: 'candidate' | 'parked' | 'already_parked' | 'refused';

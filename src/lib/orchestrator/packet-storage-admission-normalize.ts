@@ -104,8 +104,13 @@ function normalizePressureCandidate(value: unknown) {
   );
   const measured = nullableInteger(row.measuredAllocatedBytes);
   const reclaimed = nullableInteger(row.verifiedReclaimedAvailableBytes);
+  // Receipts persisted before the path was recorded stay readable as an unknown path.
+  const workspacePath = row.workspacePath === undefined || row.workspacePath === null
+    ? null
+    : typeof row.workspacePath === 'string' ? row.workspacePath : undefined;
   if (
-    typeof row.packetId !== 'string'
+    workspacePath === undefined
+    || typeof row.packetId !== 'string'
     || typeof row.laneId !== 'string'
     || typeof row.operationId !== 'string'
     || (row.repositoryUuid !== null && typeof row.repositoryUuid !== 'string')
@@ -119,6 +124,7 @@ function normalizePressureCandidate(value: unknown) {
     repositoryUuid: row.repositoryUuid as string | null,
     laneId: row.laneId,
     operationId: row.operationId,
+    workspacePath,
     measuredAllocatedBytes: measured,
     verifiedReclaimedAvailableBytes: reclaimed,
     outcome: row.outcome as 'candidate' | 'parked' | 'already_parked' | 'refused',
