@@ -33,6 +33,11 @@ on:
           - both
           - linux
           - windows
+      publish_to_mirror:
+        description: 'Also mirror the Linux AppImage + .sig to the updater mirror (hurttlocker/o8-releases) for this release_tag; requires the RELEASES_MIRROR_TOKEN secret and an already-signed .sig on the source release (see #2057)'
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: '23 10 * * 2'
 
@@ -342,3 +347,114 @@ jobs:
           fi
           gh release upload "$RELEASE_TAG" release-assets/* \
             --repo "$GITHUB_REPOSITORY" "${upload_args[@]}"
+
+
+  # The updater endpoint (o8.app's UpdateCard) reads latest.json from the
+  # public updater mirror (hurttlocker/o8-releases), which today carries only
+  # macOS assets — github.token cannot write to a repo other than this one,
+  # so mirroring needs its own cross-repo credential. This job copies the
+  # already-published Linux AppImage (and its minisign .sig, when one has
+  # already been uploaded next to it) to the mirror release for the same tag.
+  #
+  # Copying is not advertising: only latest.json advertises a platform to the
+  # updater, and that file is written exclusively by the operator's local
+  # `npm run ship:linux-sig` step (never in CI — the signing key never leaves
+  # the ship machine). That step in turn requires the AppImage to already
+  # exist on the mirror before it will sign and publish. This job is what
+  # gets it there, unsigned if need be, so the two steps aren't stuck waiting
+  # on each other. It never touches latest.json itself.
+  #
+  # See docs/operations/linux-updater-mirror-publish.md.
+  publish-mirror:
+    name: Mirror Linux updater assets
+    if: github.event_name == 'workflow_dispatch' && inputs.release_tag != '' && inputs.publish_to_mirror
+    needs: publish-preview
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      MIRROR_REPO: hurttlocker/o8-releases
+    steps:
+      - name: Validate inputs and required secret
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASES_MIRROR_TOKEN: ${{ secrets.RELEASES_MIRROR_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "release_tag must look like v0.1.662" >&2
+            exit 1
+          fi
+
+          if [[ -z "$RELEASES_MIRROR_TOKEN" ]]; then
+            echo "RELEASES_MIRROR_TOKEN secret is not configured on this repo — add a fine-grained PAT with contents:write on $MIRROR_REPO (see docs/operations/linux-updater-mirror-publish.md)" >&2
+            exit 1
+          fi
+      - name: Download Linux updater assets from the source release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="${RELEASE_TAG#v}"
+          appimage_name="o8_${version}_linux_amd64_preview.AppImage"
+          sig_name="${appimage_name}.sig"
+
+          mkdir -p mirror-assets
+
+          if ! gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --pattern "$appimage_name" --dir mirror-assets; then
+            echo "no $appimage_name asset on $GITHUB_REPOSITORY release $RELEASE_TAG — run this workflow with release_tag set and publish_target including linux first" >&2
+            exit 1
+          fi
+
+          has_sig=false
+          if gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --pattern "$sig_name" --dir mirror-assets; then
+            has_sig=true
+            echo "found $sig_name on the source release — mirroring it alongside the AppImage"
+          else
+            echo "no $sig_name on the source release yet — mirroring the AppImage unsigned. This is expected before the operator's local signing step (npm run ship:linux-sig) runs; that step requires the AppImage on the mirror first and will upload the .sig itself once it does."
+          fi
+
+          {
+            echo "APPIMAGE_NAME=$appimage_name"
+            echo "SIG_NAME=$sig_name"
+            echo "HAS_SIG=$has_sig"
+          } >> "$GITHUB_ENV"
+      - name: Publish assets to the updater mirror release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_MIRROR_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          REPLACE_EXISTING_ASSETS: ${{ inputs.replace_existing_assets }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! gh release view "$RELEASE_TAG" --repo "$MIRROR_REPO" >/dev/null 2>&1; then
+            echo "$MIRROR_REPO has no release for $RELEASE_TAG — the mirror release itself is created by the operator's local ship step (scripts/release.mjs), not this workflow" >&2
+            exit 1
+          fi
+
+          upload_args=("mirror-assets/$APPIMAGE_NAME")
+          if [[ "$HAS_SIG" == "true" ]]; then
+            upload_args+=("mirror-assets/$SIG_NAME")
+          fi
+
+          clobber_args=()
+          if [[ "$REPLACE_EXISTING_ASSETS" == "true" ]]; then
+            clobber_args+=(--clobber)
+          fi
+
+          gh release upload "$RELEASE_TAG" "${upload_args[@]}" \
+            --repo "$MIRROR_REPO" "${clobber_args[@]}"
+
+          if [[ "$HAS_SIG" == "true" ]]; then
+            echo "mirrored $APPIMAGE_NAME + $SIG_NAME to $MIRROR_REPO release $RELEASE_TAG"
+          else
+            echo "mirrored $APPIMAGE_NAME (unsigned) to $MIRROR_REPO release $RELEASE_TAG — latest.json still does not advertise linux-x86_64 until npm run ship:linux-sig signs and publishes it"
+          fi
