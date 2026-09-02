@@ -162,6 +162,53 @@ describe('ship preflight', () => {
     expect(receipt.message).toContain('browser unavailable');
   });
 
+  it('aborts the ship when the test classification manifest is stale, with the same remedy CI prints', () => {
+    const { root, head, env } = fixture();
+    const remedy = '[test-classification] manifest drifted; run npm run test:classify';
+    const calls: string[] = [];
+    const run = (command: string, args: string[]) => {
+      calls.push(`${command} ${args.join(' ')}`);
+      if (command === 'git' && args[0] === 'rev-parse') return { status: 0, stdout: head, stderr: '' };
+      if (command === 'git' && args[0] === 'rev-list') return { status: 0, stdout: head, stderr: '' };
+      if (command === 'git' && args[0] === 'status') return { status: 0, stdout: '', stderr: '' };
+      if (args[0] === 'scripts/classify-tests.mjs') return { status: 1, stdout: '', stderr: `${remedy}\n` };
+      return { status: 0, stdout: `${command} test-version\n`, stderr: '' };
+    };
+
+    expect(() => performShipPreflight({ root, version: '0.1.999', env, run })).toThrow(remedy);
+    expect(calls).toContain(`${process.execPath} scripts/classify-tests.mjs --check`);
+    // No real build ran — the stub above never spawns node/npm/cargo for a build.
+    expect(calls.some((call) => call.includes('build'))).toBe(false);
+  });
+
+  it('passes the ship preflight when the test classification manifest is current', () => {
+    const { root, head, env } = fixture();
+    const calls: string[] = [];
+    const run = (command: string, args: string[]) => {
+      calls.push(`${command} ${args.join(' ')}`);
+      if (command === 'git' && args[0] === 'rev-parse') return { status: 0, stdout: head, stderr: '' };
+      if (command === 'git' && args[0] === 'rev-list') return { status: 0, stdout: head, stderr: '' };
+      if (command === 'git' && args[0] === 'status') return { status: 0, stdout: '', stderr: '' };
+      if (command === 'git' && args[0] === 'remote') {
+        return { status: 0, stdout: 'https://github.com/example/release-repo.git\n', stderr: '' };
+      }
+      if (command === 'git' && args[0] === 'ls-remote') {
+        return { status: 0, stdout: `${head}\trefs/tags/v0.1.999^{}\n`, stderr: '' };
+      }
+      if (command === 'gh' && args[0] === 'release') return { status: 1, stdout: '', stderr: 'not found' };
+      if (args[0] === 'scripts/classify-tests.mjs') {
+        return { status: 0, stdout: '[test-classification] manifest matches resource-owning source markers\n', stderr: '' };
+      }
+      if (command === 'ps') return { status: 0, stdout: '', stderr: '' };
+      return { status: 0, stdout: `${command} test-version\n`, stderr: '' };
+    };
+
+    const receipt = performShipPreflight({ root, version: '0.1.999', env, run });
+
+    expect(receipt.head).toBe(head);
+    expect(calls).toContain(`${process.execPath} scripts/classify-tests.mjs --check`);
+  });
+
   it('keeps an intentionally disabled intake independent from ship readiness', () => {
     const { root, head, env } = fixture();
     env.O8_INTAKE_RECONCILIATION = 'disabled';
