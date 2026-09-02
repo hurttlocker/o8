@@ -76,7 +76,7 @@ describe('release artifact provenance', () => {
   });
 });
 
-function makeReleaseBundle(includeLinux: boolean) {
+function makeReleaseBundle(includeLinux: boolean, linuxAppImageVersion = '0.1.999') {
   const bundleDir = mkdtempSync(join(tmpdir(), 'o8-release-bundle-'));
   roots.push(bundleDir);
   const macosDir = join(bundleDir, 'macos');
@@ -101,8 +101,8 @@ function makeReleaseBundle(includeLinux: boolean) {
     mkdirSync(appImageDir, { recursive: true });
     mkdirSync(debDir, { recursive: true });
     linuxAssets.push(
-      join(appImageDir, 'o8_0.1.999_amd64.AppImage'),
-      join(appImageDir, 'o8_0.1.999_amd64.AppImage.sig'),
+      join(appImageDir, `o8_${linuxAppImageVersion}_amd64.AppImage`),
+      join(appImageDir, `o8_${linuxAppImageVersion}_amd64.AppImage.sig`),
       join(debDir, 'o8_0.1.999_amd64.deb'),
     );
     writeFileSync(linuxAssets[0], 'appimage');
@@ -144,18 +144,48 @@ describe('release updater manifest', () => {
     expect(plan.uploadArgs).toEqual([...bundle.macosAssets, ...bundle.trailingAssets]);
   });
 
-  it('adds signed Linux artifacts to the updater manifest and upload list', () => {
+  it('adds signed Linux artifacts to the updater manifest and upload list, using the published asset name', () => {
     const bundle = makeReleaseBundle(true);
     const plan = releasePlan(bundle);
 
+    // publish-preview (.github/workflows/port-build.yml) re-uploads the local
+    // "o8_<version>_amd64.AppImage" build output under
+    // "o8_<version>_linux_amd64_preview.AppImage" — the manifest url must
+    // match the published name, not the local build's basename, or the
+    // updater 404s.
     expect(plan.latestJson.platforms['linux-x86_64']).toEqual({
       signature: 'linux-fixture-signature',
-      url: 'https://github.com/example/releases/download/v0.1.999/o8_0.1.999_amd64.AppImage',
+      url: 'https://github.com/example/releases/download/v0.1.999/o8_0.1.999_linux_amd64_preview.AppImage',
     });
     expect(plan.uploadArgs).toEqual([
       ...bundle.macosAssets,
       ...bundle.linuxAssets,
       ...bundle.trailingAssets,
     ]);
+  });
+
+  it('throws before upload when the Linux AppImage version does not match the release version', () => {
+    const bundle = makeReleaseBundle(true, '0.1.998');
+    expect(() => releasePlan(bundle)).toThrow(/does not match release version "0\.1\.999"/);
+  });
+
+  it('throws when the Linux AppImage filename does not match the expected naming pattern', () => {
+    const bundleDir = mkdtempSync(join(tmpdir(), 'o8-release-bundle-'));
+    roots.push(bundleDir);
+    const appImageDir = join(bundleDir, 'appimage');
+    mkdirSync(appImageDir, { recursive: true });
+    writeFileSync(join(appImageDir, 'o8-unexpected-name.AppImage'), 'appimage');
+    writeFileSync(join(appImageDir, 'o8-unexpected-name.AppImage.sig'), 'sig\n');
+
+    expect(() =>
+      buildReleaseManifest({
+        bundleDir,
+        version: '0.1.999',
+        notes: 'o8 v0.1.999',
+        pubDate: '2026-08-27T12:00:00.000Z',
+        downloadBase: 'https://github.com/example/releases/download/v0.1.999',
+        darwinSignature: 'darwin-fixture-signature',
+      }),
+    ).toThrow(/does not match the expected "o8_<version>_amd64\.AppImage" naming pattern/);
   });
 });

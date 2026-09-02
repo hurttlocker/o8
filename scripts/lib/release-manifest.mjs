@@ -9,6 +9,34 @@ function listFiles(directory, suffix) {
     .sort();
 }
 
+// The Linux build produces a local AppImage named "o8_<version>_amd64.AppImage"
+// (see tests/release-artifacts.test.ts fixtures), but the publish-preview job
+// in .github/workflows/port-build.yml re-uploads it under a different name:
+// "o8_<version>_linux_amd64_preview.AppImage". The updater manifest url must
+// point at the name the asset is actually published under, not the local
+// build's basename.
+const LINUX_APPIMAGE_NAME_PATTERN = /^o8_(.+)_amd64\.AppImage$/;
+
+function publishedLinuxAssetName(version) {
+  return `o8_${version}_linux_amd64_preview.AppImage`;
+}
+
+function assertLinuxAppImageVersionMatches(artifactPath, version) {
+  const name = basename(artifactPath);
+  const match = name.match(LINUX_APPIMAGE_NAME_PATTERN);
+  if (!match) {
+    throw new Error(
+      `Linux AppImage release artifact "${name}" does not match the expected "o8_<version>_amd64.AppImage" naming pattern`,
+    );
+  }
+  const [, appImageVersion] = match;
+  if (appImageVersion !== version) {
+    throw new Error(
+      `Linux AppImage version "${appImageVersion}" (from "${name}") does not match release version "${version}"`,
+    );
+  }
+}
+
 function discoverLinuxArtifacts(bundleDir) {
   const appImageDir = join(bundleDir, 'appimage');
   const appImages = listFiles(appImageDir, '.AppImage');
@@ -56,9 +84,10 @@ export function buildReleaseManifest({
   };
 
   if (linux.updater) {
+    assertLinuxAppImageVersionMatches(linux.updater.artifactPath, version);
     platforms['linux-x86_64'] = {
       signature: readFileSync(linux.updater.signaturePath, 'utf8').trim(),
-      url: `${downloadBase}/${basename(linux.updater.artifactPath)}`,
+      url: `${downloadBase}/${publishedLinuxAssetName(version)}`,
     };
   }
 
