@@ -14,6 +14,14 @@ export interface ReleaseUpdaterManifest {
   };
 }
 
+export function publishedLinuxAssetName(version: string): string;
+
+export function linuxUpdaterPlatform(options: {
+  version: string;
+  signature: string;
+  downloadBase: string;
+}): ReleaseUpdaterPlatform;
+
 export interface BuildReleaseManifestOptions {
   bundleDir: string;
   version: string;

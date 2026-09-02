@@ -48,3 +48,13 @@ External report reconciliation has its own [configuration and recovery runbook](
 A local build or commit is not a release. Publishing uses the repository’s guarded ship workflow and requires explicit operator authorization in the current session. Keep signing material out of the repository, never run concurrent ship processes, and verify the published version and installer after notarization completes.
 
 Linux release artifacts are produced on a Linux build host. Before `npm run ship`, copy the resulting `bundle/appimage/*.AppImage`, matching `.sig`, and any `bundle/deb/*.deb` files into the corresponding directories under `src-tauri/target/release/bundle/` on the release host. The release script detects them automatically, uploads them with the macOS assets, and adds the signed AppImage to the `linux-x86_64` updater entry.
+
+### Linux signature
+
+When the AppImage was built by the port-build workflow instead, it is published unsigned — that build disables updater artifacts, and the updater signing key never reaches a CI runner. Sign the published asset afterwards, from the release host:
+
+```bash
+npm run ship:linux-sig -- --tag v0.1.724
+```
+
+The step verifies the tag's release is published (never a draft) and holds the expected `o8_<version>_linux_amd64_preview.AppImage` in every target repository, downloads that asset, signs it with the same updater key and invocation the macOS artifact uses, then uploads `<asset>.sig` beside it along with a regenerated `latest.json` that gains exactly one `linux-x86_64` entry. The macOS entries are carried across untouched. Any missing asset, version mismatch, draft release, or absent signing key aborts before anything is published. Repositories default to the source repo and the public updater mirror; override with repeated `--repo owner/name`.

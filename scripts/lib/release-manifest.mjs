@@ -21,6 +21,16 @@ export function publishedLinuxAssetName(version) {
   return `o8_${version}_linux_amd64_preview.AppImage`;
 }
 
+// Single definition of the linux-x86_64 updater entry, shared by the local
+// ship path (which discovers a locally built + signed AppImage) and the
+// operator-invoked signing step for a CI-published AppImage.
+export function linuxUpdaterPlatform({ version, signature, downloadBase }) {
+  return {
+    signature,
+    url: `${downloadBase}/${publishedLinuxAssetName(version)}`,
+  };
+}
+
 function assertLinuxAppImageVersionMatches(artifactPath, version) {
   const name = basename(artifactPath);
   const match = name.match(LINUX_APPIMAGE_NAME_PATTERN);
@@ -85,10 +95,11 @@ export function buildReleaseManifest({
 
   if (linux.updater) {
     assertLinuxAppImageVersionMatches(linux.updater.artifactPath, version);
-    platforms['linux-x86_64'] = {
+    platforms['linux-x86_64'] = linuxUpdaterPlatform({
+      version,
       signature: readFileSync(linux.updater.signaturePath, 'utf8').trim(),
-      url: `${downloadBase}/${publishedLinuxAssetName(version)}`,
-    };
+      downloadBase,
+    });
   }
 
   return {
