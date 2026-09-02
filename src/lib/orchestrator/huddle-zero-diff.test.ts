@@ -57,6 +57,15 @@ function seedHuddleLane(packetId: string, huddle: boolean | undefined, runtime: 
   return getLane(lane.id)!;
 }
 
+function resolveSeededAlignment(packetId: string) {
+  const state = createEmptyOrchestratorMissionState();
+  state.packets = [{
+    ...huddlePacket(packetId, '/tmp/o8-huddle-zero-diff-test-repo', true),
+    alignmentResolvedAt: '2026-09-01T02:00:00.000Z',
+  }];
+  writeOrchestratorControlPlaneState(state);
+}
+
 describe('parkHuddleReadyZeroDiffLane (#1496)', () => {
   it('parks a huddle packet on zero-diff exit WITHOUT any plan/report signal (steer stays reachable)', async () => {
     // No agent_report huddle event and no transcript — the exact #1502/#1496
@@ -82,6 +91,32 @@ describe('parkHuddleReadyZeroDiffLane (#1496)', () => {
     expect(result.parked).toBe(false);
     // Left untouched — the caller falls through to its zero_diff_failed path.
     expect(getLane(lane.id)?.status).toBe('running');
+  });
+
+  it('does NOT classify a later zero-diff exit as huddle after alignment was resolved', async () => {
+    const lane = seedHuddleLane('pkt-huddle-resolved', true);
+    resolveSeededAlignment('pkt-huddle-resolved');
+
+    const result = await parkHuddleReadyZeroDiffLane(lane);
+
+    expect(result.parked).toBe(false);
+    expect(result.operatorBlocked).not.toBe(true);
+    expect(getLane(lane.id)?.status).toBe('running');
+  });
+
+  it('preserves a typed operator blocker instead of relabeling it as huddle-ready', async () => {
+    const lane = seedHuddleLane('pkt-huddle-typed-blocker', true);
+    resolveSeededAlignment('pkt-huddle-typed-blocker');
+    const blocked = setLaneStatus(lane.id, 'awaiting_orchestrator', 'system', 'nondeterministic_test');
+
+    const result = await parkHuddleReadyZeroDiffLane(lane);
+
+    expect(result).toMatchObject({
+      parked: false,
+      operatorBlocked: true,
+      lane: { id: lane.id, status: 'awaiting_orchestrator', lastEventLabel: 'nondeterministic_test' },
+    });
+    expect(getLane(blocked!.id)?.lastEventLabel).toBe('nondeterministic_test');
   });
 
   it('parks an adaptive legacy packet without an explicit huddle choice', async () => {

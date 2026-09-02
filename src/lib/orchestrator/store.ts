@@ -7,6 +7,7 @@ import { normalizePacketContextTelemetry, reconcilePacketContextTelemetry } from
 import type { DomainLaneSummary } from '@/lib/orchestrator/domain-lane-summary';
 import { normalizeQualitySearchPacketState } from '@/lib/orchestrator/quality-search';
 import { normalizePacketStorageAdmission, normalizePacketStorageAdmissionEpoch } from '@/lib/orchestrator/packet-storage-admission-normalize';
+import { normalizePacketAlignmentResolvedAt } from '@/lib/orchestrator/packet-alignment-normalize';
 import { normalizeLaneBinding } from '@/lib/orchestrator/lane-binding';
 import { normalizeTerminalStatusEvidenceField } from '@/lib/terminal-status/normalize';
 import { hydrateOrchestratorTurnPinEntry, installOrchestratorTurnPinFetchPatch, persistOrchestratorTurnPin, readCachedOrchestratorTurnPin, stageOrchestratorTurnPin } from '@/lib/orchestrator/turn-pins';
@@ -363,9 +364,8 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     operatorStopped: packet.operatorStopped === true ? true : undefined,
     spendCap: normalizePacketSpendCap(packet.spendCap), spendTelemetry: normalizePacketSpendTelemetry(packet.spendTelemetry),
     contextTelemetry: normalizePacketContextTelemetry(packet.contextTelemetry),
-    // Huddle mode (per-mission alignment turn) lives only on the packet — drop
-    // it here and a rerun/re-read would silently disarm the huddle.
     huddle: typeof packet.huddle === 'boolean' ? packet.huddle : undefined,
+    alignmentResolvedAt: normalizePacketAlignmentResolvedAt(packet.alignmentResolvedAt),
     blockedReason: typeof packet.blockedReason === 'string' ? packet.blockedReason : null, completionSummary: typeof packet.completionSummary === 'string' && packet.completionSummary.trim() ? packet.completionSummary.trim() : null, ...normalizeTerminalStatusEvidenceField(packet.statusEvidence),
     storageAdmission: normalizePacketStorageAdmission(packet.storageAdmission), storageAdmissionEpoch: normalizePacketStorageAdmissionEpoch(packet.storageAdmissionEpoch),
     recovery: normalizePacketRecovery(packet.recovery),

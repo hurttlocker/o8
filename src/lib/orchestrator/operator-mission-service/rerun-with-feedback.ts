@@ -23,6 +23,7 @@ import { cleanupResetPacketTargets, type ResetCleanupTarget } from './reset-clea
 import { unregisterWatchedAgent } from '@/lib/supervisor/agent-supervisor';
 import { storageOwnerGenerationForLane } from '@/lib/orchestrator/terminal-storage-release';
 import { archiveWorkspaceManifestRunForReset } from '@/lib/workspace/manifest/lifecycle';
+import { resolvePacketAlignment } from '@/lib/orchestrator/alignment-access';
 
 /**
  * #662 — One-click rerun-with-feedback.
@@ -79,6 +80,20 @@ function appendFeedback(base: string, feedback: string) {
   const trimmedFeedback = feedback.trim();
   if (!stripped) return `${FEEDBACK_HEADING}\n${trimmedFeedback}`;
   return `${stripped}\n\n${FEEDBACK_HEADING}\n${trimmedFeedback}`;
+}
+
+const ALIGNMENT_WAIT_LABELS = new Set([
+  'huddle',
+  'huddle_ready',
+  'needs_clarification',
+  'question',
+  'worker_question',
+]);
+
+function packetAwaitsAlignmentFeedback(packet: OrchestratorPacket): boolean {
+  if (!resolvePacketAlignment(packet).armed) return false;
+  return [packet.blockedReason, packet.lastEventLabel, packet.lane?.lastEventLabel]
+    .some((label) => typeof label === 'string' && ALIGNMENT_WAIT_LABELS.has(label));
 }
 
 function buildEscalationSuggestion(packet: OrchestratorPacket, nextAttemptCount: number): RerunEscalationSuggestion | null {
@@ -344,6 +359,7 @@ async function rerunWithFeedbackUnlocked(input: RerunWithFeedbackInput): Promise
 
   const guard = await holdPacketLifecycleMutation({ packetId, kind: 'rerun' });
   if (!guard) throw new Error(`Packet ${packetId} not found.`);
+  const resolvesAlignment = packetAwaitsAlignmentFeedback(guard.previousPacket);
   const worktreePruned = await retireRerunGeneration(guard);
   const originalSummary = guard.previousPacket.summary;
   const originalPrompt = guard.previousPacket.prompt?.trim()
@@ -353,6 +369,9 @@ async function rerunWithFeedbackUnlocked(input: RerunWithFeedbackInput): Promise
   try {
     await supersedeDurableApprovedReviews(packetId, 'Superseded by rerun_with_feedback.');
     relaunched = await mutatePacketLifecycleGuard(guard, async (packet, current) => {
+      if (resolvesAlignment && !packet.alignmentResolvedAt) {
+        packet.alignmentResolvedAt = new Date().toISOString();
+      }
       resetPacketFields(packet);
       const nextAttemptCount = (packet.attemptCount ?? 0) + 1;
       escalationSuggestion = buildEscalationSuggestion(packet, nextAttemptCount);

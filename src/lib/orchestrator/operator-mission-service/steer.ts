@@ -18,7 +18,13 @@ import { findLaneByPacket, setLaneStatus } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { rebindLaneSessionIfChanged } from '@/lib/lane/session-rebind';
-import { findMissionRegistryEntryByPacketId } from '@/lib/orchestrator/mission-registry';
+import {
+  findMissionRegistryEntryByPacketId,
+  withMissionRegistryState,
+} from '@/lib/orchestrator/mission-registry';
+import { resolvePacketAlignment } from '@/lib/orchestrator/alignment-access';
+import { withLockedState } from '@/lib/orchestrator/control-plane';
+import { withMissionHandoffBarrier } from '@/lib/orchestrator/lifecycle-mutation-lock';
 import { performRuntimeAction } from '@/lib/runtime/actions';
 import { currentMissionState } from './shared';
 import { continueOwnedCodexSession, getOwnedCodexRuntimeTail, getOwnedCodexTelemetrySources } from '@/lib/codex/owned';
@@ -126,6 +132,35 @@ async function resumeExitedOwnedCodexSession(surfaceId: string, message: string)
   }
 }
 
+async function markAlignmentResolved(packetId: string): Promise<void> {
+  await withMissionHandoffBarrier(async () => {
+    let currentMissionId = '';
+    const { result: foundCurrent } = await withLockedState((current) => {
+      currentMissionId = current.missionId?.trim() ?? '';
+      const packet = current.packets.find((candidate) => candidate.id === packetId);
+      if (!packet) return false;
+      if (resolvePacketAlignment(packet).armed) {
+        packet.alignmentResolvedAt = new Date().toISOString();
+      }
+      return true;
+    });
+    if (foundCurrent) return;
+
+    const entry = findMissionRegistryEntryByPacketId(packetId, {
+      includeArchived: true,
+      excludeMissionId: currentMissionId || undefined,
+    });
+    if (!entry) return;
+    await withMissionRegistryState(entry.id, (state) => {
+      const packet = state.packets.find((candidate) => candidate.id === packetId);
+      if (packet && resolvePacketAlignment(packet).armed) {
+        packet.alignmentResolvedAt = new Date().toISOString();
+      }
+      return { state, result: undefined };
+    });
+  });
+}
+
 export async function steerPacket({
   packetId,
   message,
@@ -215,6 +250,11 @@ export async function steerPacket({
       });
       throw new SteerPacketUnavailableError(`Steer failed to start: ${startupFailure}`, 'terminal');
     }
+
+    // Huddle/advisor alignment is a one-time turn. Only consume it after the
+    // warm resume (or cold owned-session fallback) has actually started; an
+    // unavailable steer must leave the alignment prompt armed for recovery.
+    await markAlignmentResolved(packetId);
 
     const updated = setLaneStatus(lane.id, 'running', 'orchestrator', 'steered_packet');
     if (!updated || updated.status !== 'running') {

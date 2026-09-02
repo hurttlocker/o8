@@ -406,6 +406,13 @@ export interface OrchestratorPacket {
    */
   huddle?: boolean;
   /**
+   * Timestamp of the first operator response that released this packet from
+   * its one-time alignment turn. The original huddle flag stays intact as
+   * historical intent, while prompt assembly and zero-diff classification use
+   * this marker to avoid re-arming alignment on later generations.
+   */
+  alignmentResolvedAt?: string;
+  /**
    * Provider/runtime routing decision. Production currently enforces Codex as
    * the selected runtime while preserving requested future providers.
    */

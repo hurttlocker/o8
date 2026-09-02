@@ -32,9 +32,12 @@ export interface PacketAlignment {
 }
 
 export type PacketAlignmentInput = HuddleAccessInput
-  & Pick<OrchestratorPacket, 'runtime' | 'assignedModel' | 'workerRouting' | 'huddle'>;
+  & Pick<OrchestratorPacket, 'runtime' | 'assignedModel' | 'workerRouting' | 'huddle' | 'alignmentResolvedAt'>;
 
 export function resolvePacketAlignment(packet: PacketAlignmentInput): PacketAlignment {
+  if (typeof packet.alignmentResolvedAt === 'string' && packet.alignmentResolvedAt.trim()) {
+    return { armed: false, source: null, promptSection: null };
+  }
   if (resolvePacketHuddleEnabled(packet)) {
     return { armed: true, source: 'huddle', promptSection: HUDDLE_PROMPT_SECTION };
   }

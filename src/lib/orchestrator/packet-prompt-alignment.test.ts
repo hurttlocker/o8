@@ -86,6 +86,22 @@ describe('buildPacketPrompt alignment de-dup', () => {
     });
   });
 
+  it('does not re-arm an alignment turn after the operator resolved it', async () => {
+    await withCheapTierProfile(async () => {
+      const prompt = await buildPacketPrompt(
+        minimalPacket({
+          huddle: true,
+          alignmentResolvedAt: '2026-09-01T02:00:00.000Z',
+          runtime: 'claude-code',
+          assignedModel: null,
+        }),
+        [],
+      );
+      expect(prompt).not.toContain(HUDDLE_PROMPT_SECTION);
+      expect(prompt).not.toContain(ADVISOR_PROMPT_SECTION);
+    });
+  });
+
   it('read-only work gets an inspection contract without write, alignment, or commit instructions', async () => {
     await withCheapTierProfile(async () => {
       const prompt = await buildPacketPrompt(
