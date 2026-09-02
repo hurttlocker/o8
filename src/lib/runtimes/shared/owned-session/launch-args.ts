@@ -49,6 +49,7 @@ export async function prepareOwnedLaunchArgs({
         effort: session.effort,
         workerMcpConfigPath: workerMcp.configPath,
         workerMcpServers: workerMcp.servers,
+        runtimeConfig: session.runtimeConfig,
       }),
       stdinPayload: adapter.launchStdin?.({
         cwd: session.repoPath,
@@ -66,6 +67,9 @@ export async function prepareOwnedLaunchArgs({
     prompt,
     model: session.model,
     workerMcpServers: workerMcp.servers,
+    // A resumed read-only packet must stay read-only: the pin lives on the
+    // session, so the mode survives even when the resume caller knows nothing.
+    runtimeConfig: session.runtimeConfig,
   });
   if (!args) {
     throw new Error(`Resume is not supported by the ${humanLabel} runtime adapter.`);

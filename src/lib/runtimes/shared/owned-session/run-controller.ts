@@ -44,6 +44,7 @@ import {
   SandboxUnavailableError,
   workerSandboxEnabled,
 } from './sandbox';
+import { resolveReadOnlySandboxPlan } from './work-mode';
 import type { OwnedSessionIo } from './session-io';
 import type {
   OwnedChildExitOutcome,
@@ -520,7 +521,10 @@ export function createOwnedRunController({
       }
     }
 
-    const sandboxEnabled = workerSandboxEnabled();
+    // A read-only packet FORCES the sandbox: `O8_WORKER_SANDBOX` is an opt-in
+    // for normal packets and defaults off. See resolveReadOnlySandboxPlan.
+    const readOnlySandbox = resolveReadOnlySandboxPlan(session);
+    const sandboxEnabled = workerSandboxEnabled() || readOnlySandbox.enforced;
     const { args, stdinPayload, workerMcp } = await prepareOwnedLaunchArgs({
       adapter,
       session,
@@ -544,6 +548,11 @@ export function createOwnedRunController({
           binary,
           args,
           extraReadPaths: workerMcp.sandboxReadPaths,
+          finalAllowReadPaths: workerMcp.configPath ? [workerMcp.configPath] : undefined,
+          // Read-only: repo stays readable, kernel refuses every write. Deny
+          // paths come from the SAME git probe prepareWorkerSandbox uses to
+          // grant access, and it throws if that probe resolves nothing.
+          enforceReadOnly: readOnlySandbox.enforced,
           finalAllowReadWritePaths: session.identity?.configHomeRef
             ? [session.identity.configHomeRef]
             : undefined,
@@ -565,8 +574,11 @@ export function createOwnedRunController({
         sandboxEnvExtra.O8_API_PORT = String(apiPort);
         sandboxEnvExtra.O8_WS_PORT = String(wsPort);
       } catch (error) {
+        const why = readOnlySandbox.enforced
+          ? 'this is a read-only packet, which requires an OS-enforced sandbox'
+          : 'worker sandbox is enabled (O8_WORKER_SANDBOX)';
         const message = error instanceof SandboxUnavailableError
-          ? `${humanLabel} dispatch refused: worker sandbox is enabled (O8_WORKER_SANDBOX) but could not be provided — ${error.message}`
+          ? `${humanLabel} dispatch refused: ${why} but it could not be provided — ${error.message}`
           : `${humanLabel} dispatch refused: worker sandbox preparation failed — ${(error as Error).message}`;
         console.error(`[owned-session] ${runtimeId} sandbox prep failed (fail-closed):`, error);
         await writeFile(stderrPath, `${message}\n`, 'utf8').catch(() => {});

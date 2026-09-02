@@ -3,7 +3,7 @@ import { recordLaneEvent } from '@/lib/lane/events';
 import { listLanes, updateLane } from '@/lib/lane/registry';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
-import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import type { OrchestratorRuntime, WorkerWorkMode } from '@/lib/orchestrator/types';
 import type { PacketSpendCap } from '@/lib/orchestrator/metered-spend';
 import {
   listDeclarativeRuntimes,
@@ -14,6 +14,7 @@ import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { getRuntime, type RuntimeId } from '@/lib/runtimes';
 import { escalateInterruptOwnedSurface } from '@/lib/runtime/interrupt-escalation';
 import { performOwnedActionWithoutInventory } from '@/lib/runtime/owned-actions';
+import { resolveLaunchWorkMode } from '@/lib/runtime/launch-work-mode';
 import { packetRequiresWorktree, packetWorktreeProvisionError } from '@/lib/runtime/packet-worktree-guard';
 import { buildLaunchPromptWithProjectBrief, summarizeTaskName } from '@/lib/runtime/project-launch-brief';
 import { selfHealActiveByKindAndRepo } from '@/lib/supervisor/inbox';
@@ -102,9 +103,16 @@ export interface RuntimeLaunchRequest {
   // per packet, instead of a shared taskName-derived slot).
   packetId?: string;
   spendCap?: PacketSpendCap;
+  /**
+   * Optional caller hint. The durable packet launch context wins when it is
+   * stricter, so a caller can never widen a read-only packet by omitting it.
+   */
+  workMode?: WorkerWorkMode;
   /** Scheduler-owned storage reservation reused by the managed-worktree boundary. */
   storageAdmissionReservationId?: string;
 }
+
+export { resolveLaunchWorkMode, type LaunchWorkModeResolution } from './launch-work-mode';
 
 export interface RuntimeLaunchResult {
   ok: boolean;
@@ -181,6 +189,25 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
   }
   if (!runtime.capabilities.launch) {
     throw new Error(`Runtime ${runtimeId} does not support launch.`);
+  }
+
+  // Resolve the durable work mode BEFORE any side effect (worktree provisioning,
+  // lane mutation). A refusal here must cost nothing and leave nothing behind.
+  const workModeResolution = resolveLaunchWorkMode(payload);
+  if (!workModeResolution.ok) {
+    console.error(`[runtime-launch] ${workModeResolution.reason}`);
+    return {
+      ok: false,
+      retryable: workModeResolution.retryable,
+      runtime: runtimeId,
+      clientMutationId: payload.clientMutationId,
+      surfaceId: '',
+      note: workModeResolution.reason,
+      cwd: payload.cwd?.trim() || repoPath,
+      repoPath,
+      worktree: null,
+      laneId: payload.existingLaneId ?? null,
+    };
   }
 
   const { prompt: launchPrompt, projectContext } = await buildLaunchPromptWithProjectBrief(payload, prompt, repoPath);
@@ -409,6 +436,7 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
     laneId: payload.existingLaneId ?? undefined,
     packetId: payload.packetId,
     spendCap: payload.spendCap,
+    workMode: workModeResolution.workMode,
   });
 
   return settleRuntimeLaunchGovernance({

@@ -1,6 +1,14 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, rmSync, existsSync, mkdirSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
@@ -11,7 +19,9 @@ import {
   prepareWorkerSandbox,
   SandboxUnavailableError,
   SANDBOX_EXEC_PATH,
+  assertNoRegrantOverlap,
 } from './sandbox';
+import { isReadOnlyRuntimeConfig, resolveReadOnlySandboxPlan } from './work-mode';
 
 const isDarwin = process.platform === 'darwin';
 const tmpRoots: string[] = [];
@@ -243,9 +253,145 @@ describe('prepareWorkerSandbox — the exact wrapper store.ts spawns', () => {
   });
 });
 
+describe('read-only packet runs write-deny the worktree', () => {
+  it('maps a read-only session onto the repo and worktree, and nothing else', () => {
+    expect(isReadOnlyRuntimeConfig({ workMode: 'read-only' })).toBe(true);
+    expect(isReadOnlyRuntimeConfig({ modelSource: 'native' })).toBe(false);
+  });
+
+  it('emits the worktree write denial AFTER the worktree read+write allow', () => {
+    const profile = buildSeatbeltProfile({
+      worktreePath: '/tmp/wt',
+      repoPath: '/tmp/repo',
+      homeDir: '/Users/op',
+      tmpDir: '/tmp/T',
+      readOnlyDenyWritePaths: ['/tmp/repo', '/tmp/wt'],
+    });
+    // The worktree stays READABLE — a read-only packet still has to inspect it.
+    const allowIdx = profile.indexOf(';; --- read+write: packet, Git metadata, TMPDIR, and tool state ---');
+    expect(profile.indexOf('(subpath "/tmp/wt")', allowIdx)).toBeGreaterThan(allowIdx);
+    // …and SBPL is last-match-wins, so the write denial has to come after it.
+    const denyIdx = profile.lastIndexOf('(subpath "/tmp/wt")');
+    expect(profile.lastIndexOf('(deny file-write*', denyIdx)).toBeGreaterThan(allowIdx);
+    expect(denyIdx).toBeGreaterThan(profile.indexOf('(subpath "/tmp/wt")', allowIdx));
+  });
+});
+
 // The reachability proof: the generated policy, run through the REAL
 // sandbox-exec, actually blocks a secret read and permits a worktree read.
 describe('sandbox policy is live-enforced (real sandbox-exec)', () => {
+  it.skipIf(!isDarwin)('REJECTS a read-only packet write to the worktree while reads still work', async () => {
+    const home = tmpRoot('o8-sbx-ro-home-');
+    const worktree = tmpRoot('o8-sbx-ro-wt-');
+    // A real repo: `enforceReadOnly` derives its denials from the git probe and
+    // refuses outright when that probe resolves nothing.
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: worktree });
+    writeFileSync(path.join(worktree, 'code.ts'), 'export const ok = true;');
+    const profileDir = tmpRoot('o8-sbx-ro-prof-');
+
+    const prepared = await prepareWorkerSandbox({
+      runId: 'live-read-only',
+      profileDir,
+      cwd: worktree,
+      repoPath: worktree,
+      binary: '/bin/sh',
+      args: [],
+      homeDir: home,
+      enforceReadOnly: true,
+    });
+    const profileArg = prepared.args[1];
+
+    // ALLOW: inspection is the whole point of a read-only packet.
+    const out = execFileSync(SANDBOX_EXEC_PATH,
+      ['-f', profileArg, '/bin/cat', path.join(worktree, 'code.ts')],
+      { encoding: 'utf8' });
+    expect(out).toContain('export const ok = true;');
+
+    // DENY: the shell write the argv-level tool deny cannot reach is refused.
+    const target = path.join(worktree, 'code.ts');
+    let denied = false;
+    try {
+      execFileSync(SANDBOX_EXEC_PATH,
+        ['-f', profileArg, '/bin/sh', '-c', `echo mutated > ${target}`],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    } catch {
+      denied = true;
+    }
+    expect(denied).toBe(true);
+    expect(readFileSync(target, 'utf8')).toContain('export const ok = true;');
+
+    // DENY: creating a new file in the worktree is refused too.
+    let createDenied = false;
+    try {
+      execFileSync(SANDBOX_EXEC_PATH,
+        ['-f', profileArg, '/bin/sh', '-c', `echo new > ${path.join(worktree, 'added.ts')}`],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    } catch {
+      createDenied = true;
+    }
+    expect(createDenied).toBe(true);
+    expect(existsSync(path.join(worktree, 'added.ts'))).toBe(false);
+  });
+
+  it.skipIf(!isDarwin)('REJECTS git metadata writes for a linked read-only worktree', async () => {
+    const home = tmpRoot('o8-sbx-ro-git-home-');
+    const repo = tmpRoot('o8-sbx-ro-git-repo-');
+    const worktreeParent = tmpRoot('o8-sbx-ro-git-wt-parent-');
+    const worktree = path.join(worktreeParent, 'worktree');
+    const profileDir = tmpRoot('o8-sbx-ro-git-prof-');
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo });
+    execFileSync('git', ['config', 'user.name', 'o8-test'], { cwd: repo });
+    execFileSync('git', ['config', 'user.email', 'test@invalid'], { cwd: repo });
+    writeFileSync(path.join(repo, 'code.ts'), 'export const ok = true;');
+    execFileSync('git', ['add', 'code.ts'], { cwd: repo });
+    execFileSync('git', ['commit', '-qm', 'fixture'], { cwd: repo });
+    execFileSync('git', ['worktree', 'add', '-qb', 'read-only-check', worktree], { cwd: repo });
+    const beforeHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: worktree, encoding: 'utf8' });
+
+    const plan = resolveReadOnlySandboxPlan({ runtimeConfig: { workMode: 'read-only' } });
+    expect(plan.enforced).toBe(true);
+    const prepared = await prepareWorkerSandbox({
+      runId: 'live-read-only-git',
+      profileDir,
+      cwd: worktree,
+      repoPath: worktree,
+      binary: '/usr/bin/git',
+      args: [],
+      homeDir: home,
+      enforceReadOnly: plan.enforced,
+    });
+    // The git metadata dir the sandbox GRANTED is the same one it denied — one
+    // probe, no chance of the grant and the deny disagreeing (blocker #3).
+    expect(prepared.profileText).toContain(realpathSync(path.join(repo, '.git')));
+
+    expect(() => execFileSync(SANDBOX_EXEC_PATH, [
+      '-f', prepared.args[1], '/usr/bin/git', '-C', worktree,
+      'commit', '--allow-empty', '-m', 'must-not-land',
+    ], { stdio: ['ignore', 'pipe', 'ignore'] })).toThrow();
+    expect(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: worktree, encoding: 'utf8' }))
+      .toBe(beforeHead);
+  });
+
+  it.skipIf(!isDarwin)('keeps a normal write packet writable (control)', async () => {
+    const home = tmpRoot('o8-sbx-rw-home-');
+    const worktree = tmpRoot('o8-sbx-rw-wt-');
+    const profileDir = tmpRoot('o8-sbx-rw-prof-');
+
+    const prepared = await prepareWorkerSandbox({
+      runId: 'live-write',
+      profileDir,
+      cwd: worktree,
+      repoPath: worktree,
+      binary: '/bin/sh',
+      args: [],
+      homeDir: home,
+    });
+    execFileSync(SANDBOX_EXEC_PATH,
+      ['-f', prepared.args[1], '/bin/sh', '-c', `echo written > ${path.join(worktree, 'added.ts')}`],
+      { encoding: 'utf8' });
+    expect(readFileSync(path.join(worktree, 'added.ts'), 'utf8')).toContain('written');
+  });
+
   it.skipIf(!isDarwin)('denies ~/.o8-style secret reads, allows the worktree', async () => {
     const home = tmpRoot('o8-sbx-home-');
     const secretDir = path.join(home, '.o8');
@@ -285,6 +431,88 @@ describe('sandbox policy is live-enforced (real sandbox-exec)', () => {
     }
     expect(denied).toBe(true);
   });
+
+  it.skipIf(!isDarwin)(
+    'denies relocated O8 and legacy data roots while keeping the packet worktree readable',
+    async () => {
+      const previousO8DataDir = process.env.O8_DATA_DIR;
+      const previousCortexDataDir = process.env.CORTEX_IDE_DATA_DIR;
+      const root = tmpRoot('o8-sbx-relocated-roots-');
+      const home = path.join(root, 'home');
+      const o8DataDir = path.join(root, 'operator-state');
+      const cortexDataDir = path.join(root, 'legacy-state');
+      const worktree = path.join(o8DataDir, 'worktrees', 'packet-1');
+      const profileDir = path.join(root, 'profiles');
+      const currentSecret = path.join(o8DataDir, 'ws-token');
+      const legacySecret = path.join(cortexDataDir, 'worker-token');
+      mkdirSync(home, { recursive: true });
+      mkdirSync(worktree, { recursive: true });
+      mkdirSync(profileDir, { recursive: true });
+      mkdirSync(cortexDataDir, { recursive: true });
+      execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: worktree });
+      writeFileSync(path.join(worktree, 'code.ts'), 'export const readable = true;\n');
+      writeFileSync(currentSecret, 'CURRENT_SECRET\n');
+      writeFileSync(legacySecret, 'LEGACY_SECRET\n');
+      process.env.O8_DATA_DIR = o8DataDir;
+      process.env.CORTEX_IDE_DATA_DIR = cortexDataDir;
+
+      try {
+        const prepared = await prepareWorkerSandbox({
+          runId: 'relocated-data-roots',
+          profileDir,
+          cwd: worktree,
+          repoPath: worktree,
+          binary: '/bin/cat',
+          args: [],
+          homeDir: home,
+          enforceReadOnly: true,
+        });
+        expect(prepared.profileText).toContain(`(subpath "${o8DataDir}")`);
+        expect(prepared.profileText).toContain(`(subpath "${cortexDataDir}")`);
+
+        const output = execFileSync(SANDBOX_EXEC_PATH, [
+          '-f', prepared.profilePath, '/bin/cat', path.join(worktree, 'code.ts'),
+        ], { encoding: 'utf8' });
+        expect(output).toContain('export const readable = true;');
+
+        for (const secretPath of [currentSecret, legacySecret]) {
+          expect(() => execFileSync(SANDBOX_EXEC_PATH, [
+            '-f', prepared.profilePath, '/bin/cat', secretPath,
+          ], { stdio: ['ignore', 'pipe', 'ignore'] })).toThrow();
+        }
+        expect(() => execFileSync(SANDBOX_EXEC_PATH, [
+          '-f', prepared.profilePath, '/bin/sh', '-c',
+          `printf mutated > ${JSON.stringify(path.join(worktree, 'code.ts'))}`,
+        ], { stdio: ['ignore', 'pipe', 'ignore'] })).toThrow();
+        expect(readFileSync(path.join(worktree, 'code.ts'), 'utf8'))
+          .toBe('export const readable = true;\n');
+
+        const writePrepared = await prepareWorkerSandbox({
+          runId: 'relocated-data-write-control',
+          profileDir,
+          cwd: worktree,
+          repoPath: worktree,
+          binary: '/bin/sh',
+          args: [],
+          homeDir: home,
+        });
+        const writeTarget = path.join(worktree, 'write-control.txt');
+        execFileSync(SANDBOX_EXEC_PATH, [
+          '-f', writePrepared.profilePath, '/bin/sh', '-c',
+          `printf allowed > ${JSON.stringify(writeTarget)}`,
+        ], { stdio: 'ignore' });
+        expect(readFileSync(writeTarget, 'utf8')).toBe('allowed');
+        expect(() => execFileSync(SANDBOX_EXEC_PATH, [
+          '-f', writePrepared.profilePath, '/bin/cat', legacySecret,
+        ], { stdio: ['ignore', 'pipe', 'ignore'] })).toThrow();
+      } finally {
+        if (previousO8DataDir === undefined) delete process.env.O8_DATA_DIR;
+        else process.env.O8_DATA_DIR = previousO8DataDir;
+        if (previousCortexDataDir === undefined) delete process.env.CORTEX_IDE_DATA_DIR;
+        else process.env.CORTEX_IDE_DATA_DIR = previousCortexDataDir;
+      }
+    },
+  );
 
   it.skipIf(!isDarwin)('denies outbound access to pre-existing tmux-shaped sockets', async () => {
     const socketDir = `/tmp/tmux-o8-sandbox-${process.pid}`;
@@ -327,5 +555,98 @@ describe('sandbox policy is live-enforced (real sandbox-exec)', () => {
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+  });
+});
+
+describe('read-only enforcement — single git probe, fail-closed, correct order', () => {
+  it('emits the read-only denial AFTER every allow, including narrow re-opens', () => {
+    // SBPL is last-match-wins. An identity config home passed as
+    // finalAllowReadWritePaths must not be able to REGRANT write access to a
+    // subtree the read-only run denied, so the read-only block lands dead last.
+    const profile = buildSeatbeltProfile({
+      worktreePath: '/tmp/wt',
+      repoPath: '/tmp/wt',
+      homeDir: '/Users/op',
+      tmpDir: '/tmp/T',
+      finalAllowReadWritePaths: ['/tmp/identity-home'],
+      finalAllowExecPaths: ['/tmp/private-codex'],
+      readOnlyDenyWritePaths: ['/tmp/wt'],
+    });
+    const readOnlyIndex = profile.indexOf('read-only packet: repository stays readable');
+    expect(readOnlyIndex).toBeGreaterThan(-1);
+    expect(readOnlyIndex).toBeGreaterThan(profile.indexOf('/tmp/identity-home'));
+    expect(readOnlyIndex).toBeGreaterThan(profile.indexOf('/tmp/private-codex'));
+    // It is the last rule block in the profile.
+    expect(profile.indexOf('(allow', readOnlyIndex)).toBe(-1);
+  });
+
+  it('leaves the existing deny-parent / re-open-child idiom intact', () => {
+    // single-orchestrator-policy denies a broad `.single-turns` root then
+    // re-opens THIS turn's home inside it. That allow must still win.
+    const profile = buildSeatbeltProfile({
+      worktreePath: '/tmp/wt',
+      repoPath: '/tmp/wt',
+      homeDir: '/Users/op',
+      tmpDir: '/tmp/T',
+      finalDenyWritePaths: ['/tmp/turns'],
+      finalAllowReadWritePaths: ['/tmp/turns/active/home'],
+    });
+    expect(profile.indexOf('/tmp/turns/active/home'))
+      .toBeGreaterThan(profile.indexOf('immutable launch policy and guards'));
+  });
+
+  it('refuses a profile whose re-open overlaps a write denial', () => {
+    // Order alone keeps the deny authoritative; an overlap still means the
+    // caller believes a denied subtree is writable, so refuse to build it.
+    expect(() => assertNoRegrantOverlap(['/tmp/wt/state'], ['/tmp/wt']))
+      .toThrow(SandboxUnavailableError);
+    expect(() => assertNoRegrantOverlap(['/tmp/wt'], ['/tmp/wt']))
+      .toThrow(SandboxUnavailableError);
+    // Sibling paths are not an overlap — the common write-packet shape.
+    expect(() => assertNoRegrantOverlap(['/tmp/identity'], ['/tmp/wt'])).not.toThrow();
+    // A shared string prefix that is not a path boundary is not an overlap.
+    expect(() => assertNoRegrantOverlap(['/tmp/wt-other'], ['/tmp/wt'])).not.toThrow();
+  });
+
+  it.skipIf(!isDarwin)('refuses a read-only launch when the git probe resolves nothing', async () => {
+    // A non-git dir cannot resolve git metadata paths. Granting repo access
+    // that cannot be write-denied would silently widen the packet, so the
+    // sandbox refuses instead (blocker #3, fail-closed).
+    const plainDir = tmpRoot('o8-sbx-ro-nogit-');
+    const profileDir = tmpRoot('o8-sbx-ro-nogit-prof-');
+    await expect(prepareWorkerSandbox({
+      runId: 'read-only-no-git',
+      profileDir,
+      cwd: plainDir,
+      repoPath: plainDir,
+      binary: '/bin/sh',
+      args: [],
+      homeDir: tmpRoot('o8-sbx-ro-nogit-home-'),
+      enforceReadOnly: true,
+    })).rejects.toBeInstanceOf(SandboxUnavailableError);
+  });
+
+  it.skipIf(!isDarwin)('leaves a normal write packet unaffected by the probe failure rule', async () => {
+    // Control: the same non-git dir builds a profile fine for a write packet.
+    const plainDir = tmpRoot('o8-sbx-rw-nogit-');
+    const profileDir = tmpRoot('o8-sbx-rw-nogit-prof-');
+    const prepared = await prepareWorkerSandbox({
+      runId: 'write-no-git',
+      profileDir,
+      cwd: plainDir,
+      repoPath: plainDir,
+      binary: '/bin/sh',
+      args: [],
+      homeDir: tmpRoot('o8-sbx-rw-nogit-home-'),
+    });
+    expect(prepared.binary).toBe(SANDBOX_EXEC_PATH);
+    expect(prepared.profileText).not.toContain('read-only packet: repository stays readable');
+  });
+
+  it('treats only a pinned read-only runtimeConfig as enforced', () => {
+    expect(resolveReadOnlySandboxPlan({ runtimeConfig: { workMode: 'read-only' } }).enforced).toBe(true);
+    expect(resolveReadOnlySandboxPlan({ runtimeConfig: { workMode: 'edit' } }).enforced).toBe(false);
+    expect(resolveReadOnlySandboxPlan({}).enforced).toBe(false);
+    expect(isReadOnlyRuntimeConfig(undefined)).toBe(false);
   });
 });

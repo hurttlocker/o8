@@ -4,6 +4,11 @@ import {
   buildClaudeStreamJsonArgs,
   buildClaudeStreamJsonUserPayload,
 } from '@/lib/claude-code/interactive-session';
+import { claudeReadOnlyLockoutArgs } from '@/lib/claude-code/read-only-args';
+import {
+  isReadOnlyRuntimeConfig,
+  workModeRuntimeConfig,
+} from '@/lib/runtimes/shared/owned-session/work-mode';
 import {
   createClaudeCodeStreamJsonParser,
   type ClaudeCodeStreamJsonParserEvent,
@@ -25,6 +30,7 @@ import {
 } from '@/lib/claude-code/worker-profile';
 import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 import type { PacketSpendCap } from '@/lib/orchestrator/metered-spend';
+import type { WorkerWorkMode } from '@/lib/orchestrator/types';
 import { prepareMeteredGatewaySession } from '@/lib/claude-code/metered-gateway';
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 import { recordLaneEvent } from '@/lib/lane/events';
@@ -149,8 +155,12 @@ export const claudeCodeOwnedAdapter: OwnedRuntimeAdapter = {
   squadShortName: 'Claude',
   sessionIdPrefix: 'claude-code-owned-',
   defaultModel: MODEL_IDS.claudeWorkerDefault,
-  launchArgs: ({ model, effort, workerMcpConfigPath }) => [
+  launchArgs: ({ model, effort, workerMcpConfigPath, runtimeConfig }) => [
     ...buildClaudeStreamJsonArgs(model ?? null, 'bypassPermissions', null, effort),
+    // Read-only packets get a CLI-level deny rule for the native write tools.
+    // The deny fires under bypassPermissions, so a read-only worker literally
+    // cannot call Edit/Write/NotebookEdit/Task — see read-only-args.ts.
+    ...claudeReadOnlyLockoutArgs(isReadOnlyRuntimeConfig(runtimeConfig)),
     '--disable-slash-commands',
     ...(workerMcpConfigPath ? ['--mcp-config', workerMcpConfigPath] : []),
   ],
@@ -193,6 +203,8 @@ export async function launchOwnedClaudeCodeSession(request: {
   laneId?: string;
   packetId?: string;
   spendCap?: PacketSpendCap;
+  /** Durable packet work mode; 'read-only' hardens argv and the OS sandbox. */
+  workMode?: WorkerWorkMode;
 }) {
   const selection = resolveClaudeCodeWorkerSelection({
     carrier: request.claudeCodeCarrier,
@@ -241,6 +253,9 @@ export async function launchOwnedClaudeCodeSession(request: {
           spendCapCostUsd: String(spendCap.costUsd),
           spendCapInputTokens: String(spendCap.inputTokens),
         } : {}),
+        // Pinned like the carrier so retry/rerun of a read-only packet keeps
+        // launching read-only even if the caller forgets to re-supply it.
+        ...workModeRuntimeConfig(request.workMode),
       },
     });
   } catch (error) {

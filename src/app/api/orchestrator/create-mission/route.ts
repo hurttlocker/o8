@@ -24,6 +24,7 @@ import { ControlPlaneLockTimeoutError } from '@/lib/orchestrator/control-plane';
 import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
 import type { PacketDispatcherAttribution } from '@/lib/orchestrator/types';
 import { normalizeWorkerLaunchContext } from '@/lib/orchestrator/worker-launch-context';
+import { runtimeSupportsReadOnlyWorkMode } from '@/lib/runtime/launch-work-mode';
 import {
   bindIdempotencyClientMutation,
   deriveIdempotencyKey,
@@ -227,6 +228,19 @@ export async function POST(request: NextRequest) {
     requestedEffort,
     source: 'create-mission-api',
   });
+  if (launchContext?.workMode === 'read-only') {
+    const unsupportedRuntime = [
+      workerRouting.selectedRuntime,
+      ...issueRoutings.map((routing) => routing.selectedRuntime),
+    ].find((runtime) => !runtimeSupportsReadOnlyWorkMode(runtime));
+    if (unsupportedRuntime) {
+      return operatorError(
+        'invalid_request',
+        `runtime ${unsupportedRuntime} cannot enforce read-only worker execution. Use codex or claude-code.`,
+        400,
+      );
+    }
+  }
   const hasClaudeCodePacket = issues.some((issue) => (
     (issue.runtime ?? workerRouting.selectedRuntime) === 'claude-code'
   ));

@@ -96,6 +96,17 @@ function resultJson(result: { content: Array<{ type: 'text'; text: string } | { 
 }
 
 async function createManagedLane(packetId: string, branch: string) {
+  const {
+    readOrchestratorControlPlaneState,
+    writeOrchestratorControlPlaneState,
+  } = await import('@/lib/orchestrator/control-plane');
+  const currentState = readOrchestratorControlPlaneState();
+  if (!currentState.packets.some((candidate) => candidate.id === packetId)) {
+    writeOrchestratorControlPlaneState({
+      ...currentState,
+      packets: [...currentState.packets, packet(packetId, branch)],
+    });
+  }
   const { captureWorktreeMaterializationIdentity } = await import(
     '@/lib/worktree/materialization-identity'
   );

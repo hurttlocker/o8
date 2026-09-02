@@ -3,7 +3,7 @@ import 'server-only';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { listMissionRegistryEntries } from '@/lib/orchestrator/mission-registry';
 import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
-import type { WorkerLaunchContext } from '@/lib/orchestrator/types';
+import type { WorkerLaunchContext, WorkerWorkMode } from '@/lib/orchestrator/types';
 
 export interface ResolvedPacketLaunchContext {
   launchContext: WorkerLaunchContext;
@@ -44,4 +44,36 @@ export function resolvePacketLaunchContexts(
 
 export function resolvePacketLaunchContext(packetId: string): ResolvedPacketLaunchContext | null {
   return resolvePacketLaunchContexts([packetId]).get(packetId.trim()) ?? null;
+}
+
+/**
+ * The durable work mode for a packet, distinguishing "this packet is not in
+ * durable state at all" from "this packet is recorded and carries no launch
+ * context".
+ *
+ * `resolvePacketLaunchContext` conflates those two into `null`, which is fine
+ * for presentation but NOT for an authorization decision. `launchContext` is
+ * optional metadata, so a perfectly normal write packet routinely has none —
+ * refusing those would brick dispatch. An UNKNOWN packet is the dangerous case:
+ * durable state could not confirm the packet is a write packet, so the launch
+ * must refuse rather than default to write access.
+ */
+export type ResolvedPacketWorkMode =
+  | { found: true; workMode: WorkerWorkMode | undefined }
+  | { found: false };
+
+export function resolvePacketWorkMode(packetId: string): ResolvedPacketWorkMode {
+  const wanted = packetId.trim();
+  if (!wanted) return { found: false };
+
+  const current = normalizeOrchestratorMissionState(readOrchestratorControlPlaneState());
+  for (const packet of current.packets) {
+    if (packet.id === wanted) return { found: true, workMode: packet.launchContext?.workMode };
+  }
+  for (const entry of listMissionRegistryEntries({ includeArchived: true })) {
+    for (const packet of entry.mission.packets) {
+      if (packet.id === wanted) return { found: true, workMode: packet.launchContext?.workMode };
+    }
+  }
+  return { found: false };
 }

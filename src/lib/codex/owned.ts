@@ -48,6 +48,9 @@ import { codexModelArgs } from './local-model';
 import { resolveCodexReasoningEffort } from './reasoning-effort';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { codexSandboxLaunchArgs, codexSandboxResumeArgs } from '@/lib/codex/read-only-args';
+import type { WorkerWorkMode } from '@/lib/orchestrator/types';
+import { isReadOnlyRuntimeConfig, workModeRuntimeConfig } from '@/lib/runtimes/shared/owned-session/work-mode';
 
 // Re-export the fleet additions shape under its original Codex name.
 export type { OwnedCodexFleetAdditions } from '@/lib/runtimes/shared/owned-session';
@@ -62,6 +65,8 @@ export type OwnedCodexLaunchRequest = {
   effort?: ThinkingEffort;
   laneId?: string;
   packetId?: string;
+  /** Durable packet work mode; 'read-only' hardens argv and the OS sandbox. */
+  workMode?: WorkerWorkMode;
 };
 
 export type OwnedCodexLaunchResponse = {
@@ -284,13 +289,15 @@ export function codexLaunchArgs(ctx: {
   model?: string;
   effort?: ThinkingEffort;
   workerMcpServers?: ResolvedWorkerMcpServer[];
+  runtimeConfig?: Record<string, string>;
 }): string[] {
   return [
     'exec',
     '--json',
-    '--dangerously-bypass-approvals-and-sandbox',
-    '-s',
-    'danger-full-access',
+    // Read-only -> approvals off + Codex's INNER sandbox off (o8's forced
+    // outer seatbelt is the enforcement; nesting it fails — read-only-args.ts).
+    // A write packet keeps the previous full-access flags, in the same order.
+    ...codexSandboxLaunchArgs(isReadOnlyRuntimeConfig(ctx.runtimeConfig)),
     ...DISABLE_IMAGE_TOOL,
     ...IGNORE_USER_CONFIG,
     ...codexWorkerMcpOverrideArgs(ctx.workerMcpServers ?? []),
@@ -310,6 +317,7 @@ export function codexResumeArgs(ctx: {
   prompt: string;
   model?: string;
   workerMcpServers?: ResolvedWorkerMcpServer[];
+  runtimeConfig?: Record<string, string>;
 }): string[] {
   return [
     'exec',
@@ -319,8 +327,8 @@ export function codexResumeArgs(ctx: {
     // NOTE: `codex exec resume` accepts --dangerously-bypass-approvals-and-sandbox
     // but has NO `-s/--sandbox` flag (unlike `codex exec`) — passing `-s` makes the
     // CLI exit 2 before the turn starts. Live-hit 2026-07-05: every steer-resume
-    // (#1415) failed silently until this was dropped.
-    '--dangerously-bypass-approvals-and-sandbox',
+    // (#1415) failed silently until dropped — so read-only uses `-c` instead.
+    ...codexSandboxResumeArgs(isReadOnlyRuntimeConfig(ctx.runtimeConfig)),
     ...DISABLE_IMAGE_TOOL,
     ...IGNORE_USER_CONFIG,
     ...codexWorkerMcpOverrideArgs(ctx.workerMcpServers ?? []),
@@ -739,7 +747,12 @@ export async function sweepOrphanedCodexSessions(activeSurfaceIds: Set<string>, 
 export async function launchOwnedCodexSession(
   request: OwnedCodexLaunchRequest,
 ): Promise<OwnedCodexLaunchResponse> {
-  const result = await codexStore.launch(request);
+  const result = await codexStore.launch({
+    ...request,
+    // Pinned like the model/carrier pins, so retry/resume/rerun of a read-only
+    // packet stays read-only even if the caller omits the mode.
+    runtimeConfig: workModeRuntimeConfig(request.workMode),
+  });
   return {
     ok: result.ok,
     runtime: 'codex',

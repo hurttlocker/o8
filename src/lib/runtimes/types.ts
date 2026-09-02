@@ -4,6 +4,7 @@ import type { DispatchCapability } from '@/lib/runtimes/shared/turn-dispatcher';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 import type { PacketCostSource, PacketSpendCap } from '@/lib/orchestrator/metered-spend';
+import type { WorkerWorkMode } from '@/lib/orchestrator/types';
 
 /**
  * Universal Agent Runtime Contract
@@ -278,6 +279,12 @@ export interface LaunchOptions {
   laneId?: string;
   packetId?: string;
   spendCap?: PacketSpendCap;
+  /**
+   * Durable packet work mode resolved from the persisted launch context.
+   * 'read-only' means the runtime must launch with enforced read-only
+   * permissions, not merely a read-only prompt.
+   */
+  workMode?: WorkerWorkMode;
 }
 
 // ── Telemetry ──

@@ -34,7 +34,6 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import os from 'node:os';
 import path from 'node:path';
-import { getDataDir } from '@/lib/data-dir-migration';
 
 const execFileAsync = promisify(execFile);
 
@@ -85,6 +84,38 @@ async function safeRealpath(p: string): Promise<string> {
 /** unique, order-preserving. */
 function uniq(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean)));
+}
+
+/** Is `child` the same path as, or nested inside, `parent`? */
+function pathIsWithin(child: string, parent: string): boolean {
+  if (child === parent) return true;
+  const normalizedParent = parent.endsWith(path.sep) ? parent : `${parent}${path.sep}`;
+  return child.startsWith(normalizedParent);
+}
+
+/**
+ * Refuse a profile whose final allow and final deny sets overlap.
+ *
+ * The two blocks are emitted allow-then-deny so last-match-wins keeps the deny
+ * authoritative, but an overlap is still a policy contradiction: it means a
+ * caller believes a subtree is writable while the profile denies it. Failing
+ * closed here surfaces the contradiction at launch instead of at the first
+ * mysterious EPERM inside the worker.
+ */
+export function assertNoRegrantOverlap(
+  finalAllowReadWritePaths: string[],
+  finalDenyWritePaths: string[],
+): void {
+  for (const allowed of finalAllowReadWritePaths) {
+    for (const denied of finalDenyWritePaths) {
+      if (pathIsWithin(allowed, denied) || pathIsWithin(denied, allowed)) {
+        throw new SandboxUnavailableError(
+          `Sandbox policy conflict: '${allowed}' is re-opened for writes while '${denied}' is `
+          + 'write-denied. Refusing to build a profile whose allow and deny sets overlap.',
+        );
+      }
+    }
+  }
 }
 
 function expandHomePath(value: string, home: string): string | null {
@@ -165,6 +196,13 @@ export interface SeatbeltProfileInput {
   finalAllowReadPaths?: string[];
   /** Exact executables re-opened after a parent subtree is exec-denied. */
   finalAllowExecPaths?: string[];
+  /**
+   * Read-only packet write denials, emitted as the FINAL block of the profile.
+   * Separate from {@link finalDenyWritePaths} so it lands after every allow —
+   * including the narrow re-opens — without reordering the existing
+   * deny-parent / re-open-child idiom other callers depend on.
+   */
+  readOnlyDenyWritePaths?: string[];
 }
 
 /**
@@ -237,7 +275,7 @@ export function buildSeatbeltProfile(input: SeatbeltProfileInput): string {
 
   // Secret trees that must be unreachable regardless of anything above.
   const secretRoots = uniq([
-    getDataDir({}, home),
+    path.join(home, '.o8'),
     path.join(home, '.cortex-ide'),
     path.join(home, '.tauri'),
     // gh CLI credential store (~/.config/gh/hosts.yml holds the operator's
@@ -272,6 +310,7 @@ export function buildSeatbeltProfile(input: SeatbeltProfileInput): string {
   ]);
   const finalAllowReadPaths = uniq(input.finalAllowReadPaths ?? []);
   const finalAllowExecPaths = uniq(input.finalAllowExecPaths ?? []);
+  const readOnlyDenyWritePaths = uniq(input.readOnlyDenyWritePaths ?? []);
 
   const lines: string[] = [
     '(version 1)',
@@ -411,6 +450,22 @@ export function buildSeatbeltProfile(input: SeatbeltProfileInput): string {
       ...finalAllowExecPaths.map((p) => `  (literal ${sbplString(p)})`),
       ')',
     ] : []),
+    ...(readOnlyDenyWritePaths.length ? [
+      // DEAD LAST, deliberately. SBPL is last-match-wins, so emitting the
+      // read-only denial after EVERY allow — including the narrow re-opens
+      // above, e.g. an identity config home — means nothing later in the
+      // profile can regrant write access to the repository. The existing
+      // deny-a-parent / re-open-a-narrow-child idiom other callers rely on is
+      // untouched, because this is a separate block rather than a reordering
+      // of theirs.
+      ';; read-only packet: repository stays readable, every write refused',
+      '(deny file-write* file-write-mode file-write-owner file-write-acl file-write-flags file-link file-clone',
+      ...readOnlyDenyWritePaths.flatMap((p) => [
+        `  (literal ${sbplString(p)})`,
+        `  ${subpath(p)}`,
+      ]),
+      ')',
+    ] : []),
     '',
   ];
 
@@ -457,6 +512,19 @@ export interface PrepareWorkerSandboxInput {
   finalImmutableWritePaths?: string[];
   finalAllowReadPaths?: string[];
   finalAllowExecPaths?: string[];
+  /**
+   * Read-only packet enforcement. When true the worktree, backing repo, and the
+   * git metadata dirs this function ALREADY resolved to grant write access are
+   * appended to the final write denials, so the kernel refuses every repository
+   * write.
+   *
+   * The git probe deliberately happens once, here. A caller that ran its own
+   * probe could disagree with the grant (different cwd, different realpath, a
+   * transient failure) and deny a narrower set than it just granted. If the
+   * single probe yields nothing for a read-only run this function throws rather
+   * than granting un-denied git paths — fail-closed, never a silent widening.
+   */
+  enforceReadOnly?: boolean;
 }
 
 /**
@@ -494,7 +562,16 @@ export async function prepareWorkerSandbox(input: PrepareWorkerSandboxInput): Pr
   const binaryPackageRoot = nodePackageRoot(binaryReal);
   const nodeDir = path.dirname(process.execPath);
   const nodeDirReal = await safeRealpath(nodeDir);
+  // ONE probe. Its result both grants git metadata access below and, for a
+  // read-only run, feeds the write denials — the grant and the deny can never
+  // disagree because they are the same array.
   const gitPaths = await resolveGitSandboxPaths(worktreeReal);
+  if (input.enforceReadOnly && gitPaths.length === 0) {
+    throw new SandboxUnavailableError(
+      `Read-only packet requires an enforced sandbox, but git metadata paths could not be resolved `
+      + `for ${worktreeReal}. Refusing to grant repository access that cannot be write-denied.`,
+    );
+  }
 
   const extraRW = uniq([
     input.cwd, worktreeReal,
@@ -513,17 +590,64 @@ export async function prepareWorkerSandbox(input: PrepareWorkerSandboxInput): Pr
     const resolved = await Promise.all(paths.map((value) => safeRealpath(value)));
     return uniq(paths.flatMap((value, index) => [value, resolved[index]]));
   };
-  const extraDeny = await resolveAll(input.extraDenyPaths ?? []);
-  const trustedReadWrite = await resolveAll(input.trustedReadWritePaths ?? []);
+  const configuredDataDirs = uniq([
+    process.env.O8_DATA_DIR?.trim() ?? '',
+    process.env.CORTEX_IDE_DATA_DIR?.trim() ?? '',
+  ]).map((value) => expandHomePath(value, homeReal) ?? path.resolve(value))
+    .filter((value): value is string => Boolean(value));
+  const dataSecretRoots = await resolveAll([
+    path.join(homeReal, '.o8'),
+    path.join(homeReal, '.cortex-ide'),
+    ...configuredDataDirs,
+  ]);
+  const workspacePaths = await resolveAll([
+    input.cwd,
+    worktreeReal,
+    input.repoPath,
+    repoReal,
+    ...gitPaths,
+  ]);
+  const workspaceReopens = workspacePaths.filter((workspacePath) => (
+    dataSecretRoots.some((secretRoot) => pathIsWithin(workspacePath, secretRoot))
+  ));
+  for (const workspacePath of workspaceReopens) {
+    if (dataSecretRoots.includes(workspacePath)) {
+      throw new SandboxUnavailableError(
+        `Worker workspace ${workspacePath} is also a protected data root. Refusing to re-open the entire secret root.`,
+      );
+    }
+  }
+  const extraDeny = await resolveAll([
+    ...configuredDataDirs,
+    ...(input.extraDenyPaths ?? []),
+  ]);
+  const trustedReadWrite = await resolveAll([
+    ...(input.trustedReadWritePaths ?? []),
+    ...workspaceReopens,
+  ]);
   const finalDeny = await resolveAll(input.finalDenyPaths ?? []);
   const finalAllowReadWrite = await resolveAll(input.finalAllowReadWritePaths ?? []);
   const finalDenyExec = await resolveAll(input.finalDenyExecPaths ?? []);
   const finalDenyExecNamePrefixes = uniq(input.finalDenyExecNamePrefixes ?? []);
   const finalDenyReadBasenames = uniq(input.finalDenyReadBasenames ?? []);
   const finalDenyWrite = await resolveAll(input.finalDenyWritePaths ?? []);
+  // Same `gitPaths` array that was granted read+write in `extraRW` above. A
+  // linked worktree keeps its index and refs under the BACKING repo, outside
+  // cwd, so denying only the worktree would still let a read-only worker mutate
+  // the index and commit.
+  const readOnlyDenyWrite = input.enforceReadOnly
+    ? workspacePaths
+    : [];
   const finalImmutableWrite = await resolveAll(input.finalImmutableWritePaths ?? []);
   const finalAllowRead = await resolveAll(input.finalAllowReadPaths ?? []);
   const finalAllowExec = await resolveAll(input.finalAllowExecPaths ?? []);
+
+  // Order alone already keeps the read-only denial authoritative. This refuses
+  // the launch outright when a caller ALSO tries to re-open something inside
+  // it, so a contradictory policy surfaces here instead of as a mysterious
+  // EPERM inside the worker. Scoped to the read-only set: the deny-parent /
+  // re-open-narrow-child idiom on `finalDenyWritePaths` is legitimate.
+  assertNoRegrantOverlap(finalAllowReadWrite, readOnlyDenyWrite);
 
   const profileText = buildSeatbeltProfile({
     worktreePath: worktreeReal,
@@ -544,6 +668,7 @@ export async function prepareWorkerSandbox(input: PrepareWorkerSandboxInput): Pr
     finalImmutableWritePaths: finalImmutableWrite,
     finalAllowReadPaths: finalAllowRead,
     finalAllowExecPaths: finalAllowExec,
+    readOnlyDenyWritePaths: readOnlyDenyWrite,
   });
 
   const profilePath = path.join(input.profileDir, `${input.runId}.sb`);

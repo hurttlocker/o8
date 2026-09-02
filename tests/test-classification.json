@@ -125,6 +125,13 @@
       ]
     },
     {
+      "path": "src/lib/claude-code/read-only-worker-launch.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
       "path": "src/lib/codex/appserver-probe.test.ts",
       "reasons": [
         "executable-fixture"
@@ -141,6 +148,13 @@
       "reasons": [
         "child-process",
         "executable-fixture"
+      ]
+    },
+    {
+      "path": "src/lib/codex/read-only-worker-launch.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
       ]
     },
     {
@@ -493,6 +507,14 @@
         "executable-fixture",
         "git-cli",
         "process-signal"
+      ]
+    },
+    {
+      "path": "src/lib/runtimes/shared/auth-detect-claude.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli"
       ]
     },
     {
@@ -2039,6 +2061,13 @@
         "child-process",
         "git-cli",
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/read-only-worker-enforcement.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
       ]
     },
     {

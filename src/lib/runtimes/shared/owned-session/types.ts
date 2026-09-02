@@ -328,6 +328,8 @@ export interface OwnedRuntimeAdapter {
     effort?: ThinkingEffort;
     workerMcpConfigPath?: string;
     workerMcpServers?: ResolvedWorkerMcpServer[];
+    /** Config pinned when the session was created (carrier, spend cap, work mode). */
+    runtimeConfig?: Record<string, string>;
   }): string[];
 
   /** Optional stdin payload for runtimes launched as interactive stream processors. */
@@ -344,6 +346,8 @@ export interface OwnedRuntimeAdapter {
     prompt: string;
     model?: string;
     workerMcpServers?: ResolvedWorkerMcpServer[];
+    /** Config pinned when the session was created (carrier, spend cap, work mode). */
+    runtimeConfig?: Record<string, string>;
   }): string[] | null;
 
   /** Parse a run's stdout into normalized entries + outcome + discovered thread id. */

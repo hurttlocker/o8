@@ -348,6 +348,9 @@ export const codexRuntime: AgentRuntime = {
       effort,
       laneId: opts.laneId,
       packetId: opts.packetId,
+      // Codex is the DEFAULT worker runtime, so a read-only packet that skipped
+      // this thread was read-only in prompt only for almost every dispatch.
+      workMode: opts.workMode,
     });
     if (result.ok && result.surfaceId) {
       scheduleCodexUsageDispatch(result.surfaceId, startedAtMs, undefined, opts.laneId, model, () =>
