@@ -5,6 +5,8 @@ import path from 'node:path';
 
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
+import type { OrchestratorPacket, OrchestratorRuntime } from '@/lib/orchestrator/types';
+
 const root = mkdtempSync(path.join(os.tmpdir(), 'o8-lane-creation-base-'));
 const dataDir = path.join(root, 'data');
 const worktreeRoot = path.join(root, 'worktrees');
@@ -36,6 +38,10 @@ const { dispatch } = await import('@/lib/lane/commands');
 const { findLaneByPacket, getLaneEvents, listLanes, setLaneStatus } = await import('@/lib/lane/registry');
 const { getLaneSpokenDiffFacts } = await import('@/lib/lane/lane-diff-facts');
 const { previewPacketMerge } = await import('@/lib/lane/preview-merge');
+const {
+  readOrchestratorControlPlaneState,
+  writeOrchestratorControlPlaneState,
+} = await import('@/lib/orchestrator/control-plane');
 const { addRepo } = await import('@/lib/repos/registry');
 const { launchRuntimeSurface } = await import('@/lib/runtime/actions');
 const { fetchUnreachableCooldownRetrySeconds } = await import('@/lib/runtime/fetch-unreachable-recovery');
@@ -88,6 +94,54 @@ function createUnreachableRegisteredRepo(label: string): { origin: string; repo:
   git(repo, ['push', '-u', 'origin', 'main']);
   git(repo, ['remote', 'set-url', 'origin', path.join(root, `${label}-missing-origin.git`)]);
   return { origin, repo };
+}
+
+function persistWritePacket(input: {
+  packetId: string;
+  repoPath: string;
+  branch: string;
+  runtime: OrchestratorRuntime;
+}): void {
+  const current = readOrchestratorControlPlaneState();
+  const createdAt = new Date().toISOString();
+  const packet = {
+    id: input.packetId,
+    referenceLabel: input.packetId,
+    title: input.packetId,
+    summary: 'Exercise the real runtime launch path.',
+    status: 'draft',
+    queueState: 'queued',
+    releaseState: 'pending',
+    blockedReason: null,
+    lane: null,
+    review: null,
+    runtime: input.runtime,
+    workspaceTargetPath: input.repoPath,
+    branchTarget: input.branch,
+    dependencyPacketIds: [],
+    dependencyLabels: [],
+    attemptCount: 0,
+    lastEventAt: createdAt,
+    lastEventLabel: 'created',
+    recoveryCount: 0,
+    typecheckAutoRetries: 0,
+    orchestratorThreadId: null,
+    launchContext: {
+      source: 'agent',
+      presentation: 'split',
+      repoContext: 'registered',
+      workMode: 'edit',
+      caller: 'lane-creation-base-real-path',
+    },
+  } as OrchestratorPacket;
+
+  writeOrchestratorControlPlaneState({
+    ...current,
+    missionId: current.missionId ?? 'mission-lane-creation-base-real-path',
+    repoPath: current.repoPath ?? input.repoPath,
+    runtime: current.runtime ?? input.runtime,
+    packets: [...current.packets.filter((entry) => entry.id !== input.packetId), packet],
+  });
 }
 
 function createStaleRegisteredRepo(): {
@@ -288,6 +342,7 @@ describe('managed lane creation base', () => {
     await addRepo(repo);
     const packetId = `pkt-runtime-fetch-${Date.now()}`;
     const branch = `issue/runtime-fetch-${Date.now()}`;
+    persistWritePacket({ packetId, repoPath: repo, branch, runtime: 'codex' });
     const runtime = getRuntime('codex');
     expect(runtime).toBeDefined();
     const launch = vi.spyOn(runtime!, 'launch').mockResolvedValue({
@@ -347,6 +402,7 @@ describe('managed lane creation base', () => {
     await addRepo(repo);
     const packetId = `pkt-existing-worktree-fetch-${Date.now()}`;
     const branch = `issue/existing-worktree-fetch-${Date.now()}`;
+    persistWritePacket({ packetId, repoPath: repo, branch, runtime: 'codex' });
 
     const opened = await dispatch({
       verb: 'open_lane',
@@ -577,6 +633,7 @@ describe('managed lane creation base', () => {
     const failedAt = Date.now();
     const packetId = `pkt-cross-stage-fetch-${failedAt}`;
     const branch = `issue/cross-stage-fetch-${failedAt}`;
+    persistWritePacket({ packetId, repoPath: repo, branch, runtime: 'codex' });
     const runtime = getRuntime('codex');
     expect(runtime).toBeDefined();
     const launch = vi.spyOn(runtime!, 'launch').mockResolvedValue({

@@ -302,6 +302,10 @@ describe('Claude Code worker skill isolation real path', () => {
     const { buildPacketPrompt } = await import('@/lib/orchestrator/packet-prompt');
     const { createLane, getLane, getLaneEvents } = await import('@/lib/lane/registry');
     const { dispatch: dispatchLaneCommand } = await import('@/lib/lane/commands');
+    const {
+      readOrchestratorControlPlaneState,
+      writeOrchestratorControlPlaneState,
+    } = await import('@/lib/orchestrator/control-plane');
 
     await writeClaudeCodeWorkerProfile({
       source: 'native',
@@ -333,7 +337,22 @@ describe('Claude Code worker skill isolation real path', () => {
       recoveryCount: 0,
       typecheckAutoRetries: 0,
       orchestratorThreadId: null,
+      launchContext: {
+        source: 'agent',
+        presentation: 'split',
+        repoContext: 'registered',
+        workMode: 'edit',
+        caller: 'claude-code-worker-skill-isolation-real-path',
+      },
     } as OrchestratorPacket;
+    const current = readOrchestratorControlPlaneState();
+    writeOrchestratorControlPlaneState({
+      ...current,
+      missionId: current.missionId ?? 'mission-claude-worker-skill-isolation-real-path',
+      repoPath: current.repoPath ?? noCredsRepoPath,
+      runtime: current.runtime ?? 'claude-code',
+      packets: [...current.packets.filter((entry) => entry.id !== packetId), packet],
+    });
     const prompt = await buildPacketPrompt(packet, [], 'main', noCredsRepoPath);
     const lane = createLane({
       repoPath: noCredsRepoPath,
