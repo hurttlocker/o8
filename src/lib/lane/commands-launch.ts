@@ -122,10 +122,6 @@ export async function launchSession(
     }
   }
 
-  if (lane.status !== 'launching') {
-    setLaneStatus(command.laneId, 'launching', actor, 'launching_session');
-  }
-
   const refreshTarget = (() => {
     if (!lane.worktreePath) return null;
     try {
@@ -136,8 +132,28 @@ export async function launchSession(
     }
   })();
   if (refreshTarget) {
+    const [{ getWorktreeManager, WorktreeFetchUnreachableError }, fetchRecovery] = await Promise.all([
+      import('@/lib/worktree'),
+      import('@/lib/runtime/fetch-unreachable-recovery'),
+    ]);
+    const retryInSeconds = fetchRecovery.fetchUnreachableCooldownRetrySeconds(lane.repoPath, {
+      packetId: lane.packetId,
+      stage: 'pre_launch_fetch',
+    });
+    if (retryInSeconds != null) {
+      const note = `Launch blocked: fetch_unreachable cooldown for ${lane.repoPath}; retry in ${retryInSeconds}s`;
+      return {
+        ok: false,
+        laneId: command.laneId,
+        note,
+        reason: 'fetch_unreachable',
+        lane: getLane(command.laneId) ?? undefined,
+      };
+    }
+    if (lane.status !== 'launching') {
+      setLaneStatus(command.laneId, 'launching', actor, 'launching_session');
+    }
     try {
-      const { getWorktreeManager } = await import('@/lib/worktree');
       await getWorktreeManager(lane.repoPath).rebaseOntoMain(refreshTarget, {
         baseBranch: lane.baseBranch,
         branchName: lane.branch,
@@ -147,6 +163,7 @@ export async function launchSession(
         baseBranch: lane.baseBranch,
         note: `Existing worktree rebased onto current origin/${lane.baseBranch} before launch.`,
       });
+      fetchRecovery.recordFetchUnreachableRecoverySuccess(lane.repoPath);
     } catch (err) {
       const note = err instanceof Error ? err.message : String(err);
       appendEvent(command.laneId, 'worktree_refresh_failed', 'system', {
@@ -154,6 +171,23 @@ export async function launchSession(
         baseBranch: lane.baseBranch,
         note,
       });
+      if (err instanceof WorktreeFetchUnreachableError) {
+        const recovery = fetchRecovery.recoverWorktreeFetchUnreachable({
+          error: err,
+          repoPath: lane.repoPath,
+          packetId: lane.packetId,
+          laneId: lane.id,
+          runtime: lane.runtime,
+          stage: 'pre_launch_fetch',
+        });
+        return {
+          ok: false,
+          laneId: command.laneId,
+          note: recovery.note,
+          reason: 'fetch_unreachable',
+          lane: getLane(command.laneId) ?? undefined,
+        };
+      }
       const rebasing = ['rebase-merge', 'rebase-apply'].some((marker) => {
         try {
           return existsSync(join(refreshTarget, '.git', marker));
@@ -172,6 +206,8 @@ export async function launchSession(
       }
       console.warn(`[lane] pre-launch worktree refresh failed for ${command.laneId} — launching on the existing base: ${note}`);
     }
+  } else if (lane.status !== 'launching') {
+    setLaneStatus(command.laneId, 'launching', actor, 'launching_session');
   }
 
   try {

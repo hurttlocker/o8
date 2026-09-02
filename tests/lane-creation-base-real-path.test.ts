@@ -33,10 +33,14 @@ vi.mock('@/lib/worktree/safety-hooks', async (importOriginal) => ({
 
 const { closeDb } = await import('@/lib/db');
 const { dispatch } = await import('@/lib/lane/commands');
-const { getLaneEvents, setLaneStatus } = await import('@/lib/lane/registry');
+const { findLaneByPacket, getLaneEvents, listLanes, setLaneStatus } = await import('@/lib/lane/registry');
 const { getLaneSpokenDiffFacts } = await import('@/lib/lane/lane-diff-facts');
 const { previewPacketMerge } = await import('@/lib/lane/preview-merge');
 const { addRepo } = await import('@/lib/repos/registry');
+const { launchRuntimeSurface } = await import('@/lib/runtime/actions');
+const { fetchUnreachableCooldownRetrySeconds } = await import('@/lib/runtime/fetch-unreachable-recovery');
+const { getRuntime } = await import('@/lib/runtimes');
+const { listInboxItems } = await import('@/lib/supervisor/inbox');
 const { prepareLaunchWorktree } = await import('@/lib/worktree/launch');
 
 function git(cwd: string, args: string[]): string {
@@ -47,14 +51,43 @@ function git(cwd: string, args: string[]): string {
   }).trim();
 }
 
-function commitAll(cwd: string, message: string): string {
+function commitAll(
+  cwd: string,
+  message: string,
+  dates?: { author: string; committer: string },
+): string {
   git(cwd, ['add', '-A']);
-  git(cwd, [
+  execFileSync('git', [
     '-c', 'user.name=o8-test',
     '-c', 'user.email=o8@example.test',
     'commit', '-m', message,
-  ]);
+  ], {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: dates ? {
+      ...process.env,
+      GIT_AUTHOR_DATE: dates.author,
+      GIT_COMMITTER_DATE: dates.committer,
+    } : process.env,
+  });
   return git(cwd, ['rev-parse', 'HEAD']);
+}
+
+function createUnreachableRegisteredRepo(label: string): { origin: string; repo: string } {
+  const origin = path.join(root, `${label}-origin.git`);
+  const repo = path.join(root, `${label}-registered`);
+  execFileSync('git', ['init', '--bare', origin], { stdio: 'pipe' });
+  execFileSync('git', ['clone', origin, repo], { stdio: 'pipe' });
+  git(repo, ['checkout', '-b', 'main']);
+  writeFileSync(path.join(repo, 'README.md'), 'stale base\n');
+  commitAll(repo, 'stale base', {
+    author: '2020-01-01T00:00:00Z',
+    committer: '2020-01-01T00:00:00Z',
+  });
+  git(repo, ['push', '-u', 'origin', 'main']);
+  git(repo, ['remote', 'set-url', 'origin', path.join(root, `${label}-missing-origin.git`)]);
+  return { origin, repo };
 }
 
 function createStaleRegisteredRepo(): {
@@ -166,5 +199,434 @@ describe('managed lane creation base', () => {
     expect(git(worktree.path, ['diff', '--name-only', `${preview.diffBase!.comparisonRef}...HEAD`]))
       .toBe('packet-only.ts');
     expect(JSON.stringify(preview)).not.toContain('upstream-only.ts');
+  }, 30_000);
+
+  it('holds lane creation behind a packet-correlated receipt, cooldown, and self-heal', async () => {
+    const { origin, repo } = createUnreachableRegisteredRepo('lane-recovery');
+    await addRepo(repo);
+    const packetId = `pkt-fetch-unreachable-${Date.now()}`;
+    const branch = `issue/fetch-unreachable-${Date.now()}`;
+    const failedAt = Date.now();
+    const now = vi.spyOn(Date, 'now').mockReturnValue(failedAt);
+
+    try {
+      const opened = await dispatch({
+        verb: 'open_lane',
+        repoPath: repo,
+        branch,
+        baseBranch: 'main',
+        runtime: 'codex',
+        packetId,
+        actor: 'orchestrator',
+      });
+
+      expect(opened).toMatchObject({
+        ok: false,
+        laneId: '',
+        reason: 'fetch_unreachable',
+      });
+      expect(findLaneByPacket(packetId)).toBeNull();
+      expect(fetchUnreachableCooldownRetrySeconds(repo)).toBeGreaterThan(0);
+
+      const incident = listInboxItems({ includeAllProjects: true })
+        .find((item) => item.kind === 'fetch_unreachable' && item.packetId === packetId);
+      expect(incident).toMatchObject({
+        repoPath: repo,
+        packetId,
+        kind: 'fetch_unreachable',
+        repeatCount: 1,
+        status: 'human_required',
+        payload: {
+          stage: 'pre_lane_receipt',
+          baseBranch: 'main',
+          branch,
+          laneId: null,
+          packetId,
+          runtime: 'codex',
+        },
+      });
+
+      const held = await dispatch({
+        verb: 'open_lane',
+        repoPath: repo,
+        branch,
+        baseBranch: 'main',
+        runtime: 'codex',
+        packetId,
+        actor: 'orchestrator',
+      });
+      expect(held).toMatchObject({ ok: false, laneId: '', reason: 'fetch_unreachable' });
+      expect(held.note).toContain('fetch_unreachable cooldown');
+      expect(findLaneByPacket(packetId)).toBeNull();
+      expect(listInboxItems({ includeAllProjects: true }).find((item) => item.id === incident?.id)?.repeatCount)
+        .toBe(1);
+
+      git(repo, ['remote', 'set-url', 'origin', origin]);
+      now.mockReturnValue(failedAt + 5 * 60_000 + 1);
+      const recovered = await dispatch({
+        verb: 'open_lane',
+        repoPath: repo,
+        branch,
+        baseBranch: 'main',
+        runtime: 'codex',
+        packetId,
+        actor: 'orchestrator',
+      });
+
+      expect(recovered.ok).toBe(true);
+      expect(findLaneByPacket(packetId)?.id).toBe(recovered.laneId);
+      expect(fetchUnreachableCooldownRetrySeconds(repo)).toBeNull();
+      expect(listInboxItems({ includeAllProjects: true }).find((item) => item.id === incident?.id)?.status)
+        .toBe('self_healed');
+    } finally {
+      now.mockRestore();
+    }
+  }, 30_000);
+
+  it('applies the same receipt and cooldown policy before a direct runtime launch', async () => {
+    const { repo } = createUnreachableRegisteredRepo('runtime-recovery');
+    await addRepo(repo);
+    const packetId = `pkt-runtime-fetch-${Date.now()}`;
+    const branch = `issue/runtime-fetch-${Date.now()}`;
+    const runtime = getRuntime('codex');
+    expect(runtime).toBeDefined();
+    const launch = vi.spyOn(runtime!, 'launch').mockResolvedValue({
+      ok: true,
+      note: 'launched',
+      sessionKey: 'codex-owned:fetch-recovery-test',
+    });
+
+    const request = {
+      runtime: 'codex' as const,
+      prompt: 'test direct runtime recovery',
+      repoPath: repo,
+      taskName: packetId,
+      branchName: branch,
+      baseBranch: 'main',
+      isolate: true,
+      skipSetup: true,
+      packetId,
+    };
+
+    try {
+      await expect(launchRuntimeSurface(request)).rejects.toThrow('fetch origin main failed');
+      expect(launch).not.toHaveBeenCalled();
+      expect(findLaneByPacket(packetId)).toBeNull();
+      expect(listLanes().some((lane) => lane.repoPath === repo && lane.branch === branch)).toBe(false);
+
+      const incident = listInboxItems({ includeAllProjects: true })
+        .find((item) => item.kind === 'fetch_unreachable' && item.packetId === packetId);
+      expect(incident).toMatchObject({
+        repoPath: repo,
+        packetId,
+        kind: 'fetch_unreachable',
+        repeatCount: 1,
+        status: 'human_required',
+        payload: {
+          stage: 'pre_launch_fetch',
+          baseBranch: 'main',
+          branch,
+          laneId: null,
+          packetId,
+          runtime: 'codex',
+        },
+      });
+
+      await expect(launchRuntimeSurface(request)).rejects.toThrow('fetch_unreachable cooldown');
+      expect(launch).not.toHaveBeenCalled();
+      expect(listInboxItems({ includeAllProjects: true }).find((item) => item.id === incident?.id)?.repeatCount)
+        .toBe(1);
+    } finally {
+      launch.mockRestore();
+    }
+  }, 30_000);
+
+  it('refuses an existing-worktree launch when its pre-launch fetch is unreachable', async () => {
+    const { origin, repo } = createUnreachableRegisteredRepo('existing-worktree-recovery');
+    git(repo, ['remote', 'set-url', 'origin', origin]);
+    await addRepo(repo);
+    const packetId = `pkt-existing-worktree-fetch-${Date.now()}`;
+    const branch = `issue/existing-worktree-fetch-${Date.now()}`;
+
+    const opened = await dispatch({
+      verb: 'open_lane',
+      repoPath: repo,
+      branch,
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId,
+      actor: 'orchestrator',
+    });
+    expect(opened.ok).toBe(true);
+
+    const prepared = await prepareLaunchWorktree({
+      repoRoot: repo,
+      agentType: 'codex',
+      taskName: packetId,
+      branchName: branch,
+      baseBranch: 'main',
+      isolate: true,
+      skipSetup: true,
+      packetId,
+      laneId: opened.laneId,
+      isolationPreference: 'git-worktree',
+    });
+    expect(prepared?.worktree.path).toBeTruthy();
+    const bound = await dispatch({
+      verb: 'bind_worktree',
+      laneId: opened.laneId,
+      worktreePath: prepared!.worktree.path,
+      actor: 'system',
+    });
+    expect(bound.ok).toBe(true);
+
+    git(repo, ['remote', 'set-url', 'origin', path.join(root, 'existing-worktree-missing-origin.git')]);
+    const runtime = getRuntime('codex');
+    expect(runtime).toBeDefined();
+    const launch = vi.spyOn(runtime!, 'launch').mockResolvedValue({
+      ok: true,
+      note: 'must not launch',
+      sessionKey: 'codex-owned:must-not-exist',
+    });
+    let restoreRetryClock = () => {};
+
+    try {
+      const result = await dispatch({
+        verb: 'launch_session',
+        laneId: opened.laneId,
+        prompt: 'do not launch on a stale base',
+        actor: 'orchestrator',
+      });
+
+      expect(result).toMatchObject({
+        ok: false,
+        laneId: opened.laneId,
+        reason: 'fetch_unreachable',
+      });
+      expect(launch).not.toHaveBeenCalled();
+      expect(findLaneByPacket(packetId)).toMatchObject({
+        id: opened.laneId,
+        sessionKey: null,
+        status: 'awaiting_input',
+      });
+      const incident = listInboxItems({ includeAllProjects: true }).find((item) => (
+        item.repoPath === repo
+        && item.packetId === packetId
+        && item.kind === 'fetch_unreachable'
+        && item.payload.stage === 'pre_launch_fetch'
+      ));
+      expect(incident).toMatchObject({
+        repoPath: repo,
+        packetId,
+        kind: 'fetch_unreachable',
+        repeatCount: 1,
+        status: 'human_required',
+        payload: {
+          stage: 'pre_launch_fetch',
+          laneId: opened.laneId,
+          packetId,
+          runtime: 'codex',
+        },
+      });
+
+      const repeated = await dispatch({
+        verb: 'launch_session',
+        laneId: opened.laneId,
+        prompt: 'do not launch on a stale base',
+        actor: 'orchestrator',
+      });
+      expect(repeated.note).toContain('fetch_unreachable cooldown');
+      expect(launch).not.toHaveBeenCalled();
+      expect(listInboxItems({ includeAllProjects: true }).find((item) => item.id === incident?.id)?.repeatCount)
+        .toBe(1);
+
+      git(repo, ['remote', 'set-url', 'origin', origin]);
+      const retryAt = Date.now() + 5 * 60_000 + 1;
+      const retryClock = vi.spyOn(Date, 'now').mockReturnValue(retryAt);
+      restoreRetryClock = () => retryClock.mockRestore();
+      vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
+      launch.mockImplementationOnce(async () => {
+        expect(getLaneEvents(opened.laneId!, 100).some((event) => event.verb === 'worktree_refreshed'))
+          .toBe(true);
+        expect(listInboxItems({ includeAllProjects: true }).find((item) => item.id === incident?.id)?.status)
+          .toBe('self_healed');
+        expect(fetchUnreachableCooldownRetrySeconds(repo)).toBeNull();
+        return {
+          ok: true,
+          note: 'launched after refresh',
+          sessionKey: 'codex-owned:fetch-recovered',
+        };
+      });
+
+      const recovered = await dispatch({
+        verb: 'launch_session',
+        laneId: opened.laneId,
+        prompt: 'launch only after the origin recovers',
+        actor: 'orchestrator',
+      });
+      expect(recovered).toMatchObject({
+        ok: true,
+        laneId: opened.laneId,
+      });
+      expect(launch).toHaveBeenCalledTimes(1);
+      expect(findLaneByPacket(packetId)).toMatchObject({
+        id: opened.laneId,
+        sessionKey: 'codex-owned:fetch-recovered',
+        status: 'running',
+      });
+      expect(listInboxItems({ includeAllProjects: true }).find((item) => item.id === incident?.id)?.status)
+        .toBe('self_healed');
+
+      git(repo, ['remote', 'set-url', 'origin', path.join(root, 'existing-worktree-missing-again.git')]);
+      const laterPacketId = `${packetId}-later`;
+      const later = await dispatch({
+        verb: 'open_lane',
+        repoPath: repo,
+        branch: `${branch}-later`,
+        baseBranch: 'main',
+        runtime: 'codex',
+        packetId: laterPacketId,
+        actor: 'orchestrator',
+      });
+      expect(later).toMatchObject({
+        ok: false,
+        reason: 'fetch_unreachable',
+      });
+      const laterIncident = listInboxItems({ includeAllProjects: true }).find((item) => (
+        item.repoPath === repo
+        && item.packetId === laterPacketId
+        && item.kind === 'fetch_unreachable'
+        && item.payload.stage === 'pre_lane_receipt'
+      ));
+      expect(laterIncident).toMatchObject({
+        repoPath: repo,
+        packetId: laterPacketId,
+        kind: 'fetch_unreachable',
+        repeatCount: 1,
+        status: 'human_required',
+        payload: {
+          stage: 'pre_lane_receipt',
+          laneId: null,
+          packetId: laterPacketId,
+          runtime: 'codex',
+        },
+      });
+      expect(laterIncident?.id).not.toBe(incident?.id);
+    } finally {
+      restoreRetryClock();
+      vi.unstubAllGlobals();
+      launch.mockRestore();
+    }
+  }, 30_000);
+
+  it('records one cooldown-protected receipt for each packet in the same repository', async () => {
+    const { repo } = createUnreachableRegisteredRepo('distinct-packet-recovery');
+    await addRepo(repo);
+    const failedAt = Date.now();
+    const now = vi.spyOn(Date, 'now').mockReturnValue(failedAt);
+    const packetA = `pkt-distinct-fetch-a-${failedAt}`;
+    const packetB = `pkt-distinct-fetch-b-${failedAt}`;
+
+    try {
+      for (const [packetId, branch] of [
+        [packetA, `issue/distinct-fetch-a-${failedAt}`],
+        [packetB, `issue/distinct-fetch-b-${failedAt}`],
+      ] as const) {
+        const result = await dispatch({
+          verb: 'open_lane',
+          repoPath: repo,
+          branch,
+          baseBranch: 'main',
+          runtime: 'codex',
+          packetId,
+          actor: 'orchestrator',
+        });
+        expect(result).toMatchObject({ ok: false, reason: 'fetch_unreachable' });
+      }
+
+      const incidents = listInboxItems({ includeAllProjects: true }).filter((item) => (
+        item.repoPath === repo && item.kind === 'fetch_unreachable'
+      ));
+      expect(incidents).toHaveLength(2);
+      expect(incidents.map((item) => item.packetId).sort()).toEqual([packetA, packetB].sort());
+      expect(incidents.every((item) => (
+        item.repeatCount === 1 && item.payload.stage === 'pre_lane_receipt'
+      ))).toBe(true);
+
+      const repeated = await dispatch({
+        verb: 'open_lane',
+        repoPath: repo,
+        branch: `issue/distinct-fetch-b-${failedAt}`,
+        baseBranch: 'main',
+        runtime: 'codex',
+        packetId: packetB,
+        actor: 'orchestrator',
+      });
+      expect(repeated.note).toContain('fetch_unreachable cooldown');
+      expect(listInboxItems({ includeAllProjects: true }).find((item) => (
+        item.repoPath === repo && item.packetId === packetB && item.payload.stage === 'pre_lane_receipt'
+      ))?.repeatCount).toBe(1);
+    } finally {
+      now.mockRestore();
+    }
+  }, 30_000);
+
+  it('does not let a pre-lane cooldown hide the first pre-launch receipt', async () => {
+    const { repo } = createUnreachableRegisteredRepo('cross-stage-recovery');
+    await addRepo(repo);
+    const failedAt = Date.now();
+    const packetId = `pkt-cross-stage-fetch-${failedAt}`;
+    const branch = `issue/cross-stage-fetch-${failedAt}`;
+    const runtime = getRuntime('codex');
+    expect(runtime).toBeDefined();
+    const launch = vi.spyOn(runtime!, 'launch').mockResolvedValue({
+      ok: true,
+      note: 'must not launch',
+      sessionKey: 'codex-owned:cross-stage-must-not-exist',
+    });
+
+    const request = {
+      runtime: 'codex' as const,
+      prompt: 'exercise the pre-launch recovery stage',
+      repoPath: repo,
+      taskName: packetId,
+      branchName: branch,
+      baseBranch: 'main',
+      isolate: true,
+      skipSetup: true,
+      packetId,
+    };
+
+    try {
+      const opened = await dispatch({
+        verb: 'open_lane',
+        repoPath: repo,
+        branch,
+        baseBranch: 'main',
+        runtime: 'codex',
+        packetId,
+        actor: 'orchestrator',
+      });
+      expect(opened).toMatchObject({ ok: false, reason: 'fetch_unreachable' });
+
+      await expect(launchRuntimeSurface(request)).rejects.toThrow('fetch origin main failed');
+      expect(launch).not.toHaveBeenCalled();
+      const incidents = listInboxItems({ includeAllProjects: true }).filter((item) => (
+        item.repoPath === repo && item.packetId === packetId && item.kind === 'fetch_unreachable'
+      ));
+      expect(incidents).toHaveLength(2);
+      expect(incidents.map((item) => item.payload.stage).sort()).toEqual([
+        'pre_lane_receipt',
+        'pre_launch_fetch',
+      ]);
+      expect(incidents.every((item) => item.repeatCount === 1)).toBe(true);
+
+      await expect(launchRuntimeSurface(request)).rejects.toThrow('fetch_unreachable cooldown');
+      expect(listInboxItems({ includeAllProjects: true }).filter((item) => (
+        item.repoPath === repo && item.packetId === packetId && item.kind === 'fetch_unreachable'
+      )).every((item) => item.repeatCount === 1)).toBe(true);
+    } finally {
+      launch.mockRestore();
+    }
   }, 30_000);
 });
