@@ -113,7 +113,12 @@ async function makeSource(name: string, version: string): Promise<{
   const recipe = await deriveDependencyInstallRecipe(workspace, command, {
     resolveVersion: async () => npmVersion,
   });
-  const receipt = { recipe, privateViewVerified: true, completedAt: 'ignored-by-image-authority' };
+  const receipt = {
+    recipe,
+    packageManagerExecutable: 'npm',
+    privateViewVerified: true,
+    completedAt: 'ignored-by-image-authority',
+  };
   const sourceReceipt = await captureDependencyImageSourceReceipt(workspace, command, receipt, {
     resolveVersion: async () => npmVersion,
   });

@@ -649,6 +649,15 @@
       ]
     },
     {
+      "path": "src/lib/workspace/dependency-manager-pinning-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "src/lib/workspace/dependency-materialization-verification.test.ts",
       "reasons": [
         "executable-fixture"

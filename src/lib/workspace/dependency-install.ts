@@ -26,6 +26,10 @@ import {
   yarnExecutionTargets,
 } from './dependency-manager-config';
 import { dependencyInstallCommandForManager } from './dependency-manager-contract';
+import {
+  resolvePackageManagerExecution,
+  resolveReceiptedPackageManagerExecution,
+} from './dependency-manager-executable';
 import { dependencyCacheRoot } from './dependency-cache-root';
 
 const execFileAsync = promisify(execFile);
@@ -59,6 +63,8 @@ export interface DependencyInstallRecipe {
 
 export interface DependencyInstallReceipt {
   recipe: DependencyInstallRecipe;
+  /** Absolute package-manager binary that produced this view. */
+  packageManagerExecutable: string;
   privateViewVerified: boolean;
   completedAt: string;
 }
@@ -312,19 +318,6 @@ async function localDependencyDigests(
   return result.sort((left, right) => left.identity.localeCompare(right.identity));
 }
 
-async function resolveManagerVersion(manager: SupportedPackageManager): Promise<string> {
-  const { stdout } = await execFileAsync(manager, ['--version'], {
-    encoding: 'utf8',
-    timeout: 15_000,
-    windowsHide: true,
-  });
-  const version = stdout.trim();
-  if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) {
-    throw new Error(`${manager} returned an invalid version.`);
-  }
-  return version;
-}
-
 export async function detectDependencyInstallCommand(workspacePath: string): Promise<string | null> {
   let packageBytes: Buffer;
   try {
@@ -428,7 +421,12 @@ export async function deriveDependencyInstallRecipe(
   for (const input of inputs) assertSafeDependencyManagerConfig(input.path, input.bytes);
   const rootPackage = inputs.find((entry) => entry.path === 'package.json')!;
   const declared = parsePackageManagerDeclaration(packageManagerField(rootPackage.bytes));
-  const version = await (options.resolveVersion ?? resolveManagerVersion)(parsed.manager);
+  const version = options.resolveVersion
+    ? await options.resolveVersion(parsed.manager)
+    : (await resolvePackageManagerExecution(
+        parsed.manager,
+        declared?.version ?? null,
+      )).version;
   if (declared) {
     if (declared.manager !== parsed.manager) {
       throw new Error('Saved install command does not match package.json packageManager.');
@@ -620,6 +618,7 @@ function nativeInvocation(
   recipe: DependencyInstallRecipe,
   authority: RecipeCacheAuthority,
   runtime: InstallRuntimePaths,
+  executable: string,
 ): DependencyInstallInvocation {
   const env = isolatedInstallEnvironment(runtime);
   const args = [...recipe.installArgs];
@@ -641,7 +640,7 @@ function nativeInvocation(
     env.BUN_INSTALL_CACHE_DIR = authority.cache;
   }
   return {
-    command: recipe.packageManager,
+    command: executable,
     args,
     cwd: workspacePath,
     timeoutMs: 45 * 60_000,
@@ -743,16 +742,24 @@ export async function runDependencyInstall(
   }
   const cacheRoot = path.resolve(options.cacheRoot ?? dependencyCacheRoot());
   const authority = await ensureRecipeAuthority(cacheRoot, recipe);
+  const execution = await resolveReceiptedPackageManagerExecution(
+    recipe.packageManager,
+    recipe.packageManagerVersion,
+    Boolean(options.resolveVersion),
+  );
   const materializationIdentity = options.materializationIdentity
     ?? await captureWorktreeMaterializationIdentity(workspacePath);
   const runtime = await createInstallRuntime(workspacePath, materializationIdentity);
   try {
-    const invocation = nativeInvocation(workspacePath, recipe, authority, runtime);
+    const invocation = nativeInvocation(
+      workspacePath, recipe, authority, runtime, execution.executable,
+    );
     if (options.run) await options.run(invocation);
     else await defaultRun(invocation, options.materializationIdentity);
     await auditPrivateDependencyView(workspacePath);
     return {
       recipe,
+      packageManagerExecutable: execution.executable,
       privateViewVerified: true,
       completedAt: (options.now ?? (() => new Date()))().toISOString(),
     };

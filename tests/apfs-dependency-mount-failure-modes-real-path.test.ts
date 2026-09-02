@@ -117,7 +117,12 @@ async function makeSource(name: string, version: string, payloadBytes = 0): Prom
   const recipe = await deriveDependencyInstallRecipe(workspace, command, {
     resolveVersion: async () => npmVersion,
   });
-  const receipt = { recipe, privateViewVerified: true, completedAt: 'ignored-by-image-authority' };
+  const receipt = {
+    recipe,
+    packageManagerExecutable: 'npm',
+    privateViewVerified: true,
+    completedAt: 'ignored-by-image-authority',
+  };
   const sourceReceipt = await captureDependencyImageSourceReceipt(workspace, command, receipt, {
     resolveVersion: async () => npmVersion,
   });
@@ -276,7 +281,12 @@ describe.skipIf(process.platform !== 'darwin')('APFS dependency mount failure mo
     })).rejects.toThrow(/recipe drifted from its install receipt/);
     await expect(captureDependencyImageSourceReceipt(
       source.workspace, command,
-      { recipe: drifted, privateViewVerified: true, completedAt: 'ignored' },
+      {
+        recipe: drifted,
+        packageManagerExecutable: 'npm',
+        privateViewVerified: true,
+        completedAt: 'ignored',
+      },
       { registryRoot, resolveVersion: async () => npmVersion },
     )).rejects.toBeInstanceOf(DependencyImageRefusalError);
 
@@ -342,6 +352,7 @@ describe.skipIf(process.platform !== 'darwin')('APFS dependency mount failure mo
         recipe: await deriveDependencyInstallRecipe(workspace, offlineCommand, {
           resolveVersion: async () => npmVersion,
         }),
+        packageManagerExecutable: 'npm',
         privateViewVerified: true,
         completedAt: 'ignored',
       },

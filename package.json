@@ -9,6 +9,7 @@
   "engines": {
     "node": ">=22.0.0 <23.0.0"
   },
+  "packageManager": "npm@11.8.0",
   "scripts": {
     "predev:cleanup": "node scripts/dev.mjs cleanup",
     "dev": "node scripts/dev.mjs all",
