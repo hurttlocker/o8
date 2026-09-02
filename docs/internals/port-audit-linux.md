@@ -2,6 +2,16 @@
 
 Scope: greenfield Linux blockers and structural seams in the current o8 implementation.
 
+## Linux surface support table
+
+Three surfaces are macOS-native code paths with no Linux implementation. Each has an in-app fallback rather than a crash — the feature reads as unavailable, not broken.
+
+| Surface | Status on Linux | Why | Fallback |
+| --- | --- | --- | --- |
+| Voice dictation (Symon push-to-talk, `Fn`/right-`Option` hotkeys, on-device Apple transcription) | Unsupported | The Symon capture stack is a native macOS Swift binary driven through the Accessibility API; it is not built for Linux at all. The composer's own mic-button dictation path (`useDictation.ts`) additionally depends on WebKitGTK's `MediaRecorder`/`getUserMedia`/`SpeechRecognition` support, which is unverified on this platform (see "Web mic and recorder APIs need Linux WebKitGTK validation" below). | Type directly into the composer; there is no voice input path today on Linux. |
+| Native browser pane (embedded Browser tab / canvas browser cards, agent-grab) | Unsupported | `src-tauri/src/browser_view.rs` builds the pane as a native AppKit child window; the `#[cfg(not(target_os = "macos"))]` stubs for `open`/`eval`/`navigate` compile to no-ops (`open` returns `Ok(())` with no window ever created, `eval` returns `false`, `eval_result` returns the literal error `"native browser-view is macOS-only"`). | The pane's own "Open in Browser tab" / external-open control (`openExternal` in `src/components/desktop/O8BrowserPane.tsx`, backed by `openExternalUrl`) opens the same URL in the system default browser instead of the embedded webview. |
+| Folder/file picker (`osascript`-backed native chooser) | Unsupported | `src/app/api/panel/browse-folder/route.ts` and the `pick` action in `src/app/api/panel/file-io/route.ts` shell out to `osascript`/AppleScript. On Linux `osascript` does not exist, so the `execSync`/`execFileAsync` call throws `ENOENT`; both routes catch that and return `{ path: null }` — the same shape as a user cancelling. | Callers (`pickRepoFolder.ts`, `AddRepoDialog.tsx`, `OnboardingReposStep.tsx`) treat a null path as "no native picker available" and fall through to a manual path-entry prompt (`requestPrompt`) — the operator types the absolute folder/file path directly. |
+
 ## Executive Top 10 Greenfield Findings
 
 The remaining open Linux blockers are release artifacts ([#1898](https://github.com/hurttlocker/o8/issues/1898)), installed deep-link and bundle registration ([#1899](https://github.com/hurttlocker/o8/issues/1899)), and stale-listener reclaim ([#1926](https://github.com/hurttlocker/o8/issues/1926)).

@@ -125,7 +125,7 @@ Free tier uses on-device Apple transcription or your own Whisper key. An optiona
 
 ## Quickstart
 
-macOS has signed releases today. Windows 11 is runtime-verified and produces MSI and NSIS installers. Linux produces deb, rpm, and AppImage packages; public signing, update channels, and Linux desktop verification remain open.
+macOS has signed releases today. Windows 11 is runtime-verified and produces MSI and NSIS installers. Linux produces deb, rpm, and AppImage packages; public signing, update channels, and Linux desktop verification remain open. The deb/rpm packages declare a `nodejs (>= 22)` dependency so a clean install has the system Node the app's sidecar requires; voice dictation, the native browser pane, and the native folder/file picker are macOS-only — see the [Linux surface support table](./docs/internals/port-audit-linux.md#linux-surface-support-table) for the fallback each one uses.
 
 **Easiest:** download the latest signed build from [Releases](https://github.com/hurttlocker/o8/releases) — auto-updates included.
 
