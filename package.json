@@ -61,6 +61,7 @@
     "gate:webview": "node scripts/preship-webview-gate.mjs",
     "release": "node scripts/release.mjs",
     "ship": "node scripts/release.mjs --ship",
+    "ship:linux-sig": "node scripts/sign-linux-appimage.mjs",
     "postinstall": "node scripts/postinstall.mjs",
     "tauri:prebuild": "node scripts/tauri-prebuild.mjs",
     "version": "node scripts/sync-version.mjs",
