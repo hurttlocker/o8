@@ -368,7 +368,7 @@ export async function getPacketScope(input: GetPacketScopeInput): Promise<Packet
   const [directives, headSha, runtimeProcess] = await Promise.all([
     readDirectivesForRepo(lane.repoPath),
     readHeadSha(repoPath),
-    getRuntimeProcessForWorktree(repoPath),
+    getRuntimeProcessForWorktree(lane.worktreePath),
   ]);
   const declaredRuntime = packet?.runtime ?? lane.runtime;
   const actualRuntime = runtimeProcess?.runtime ?? null;

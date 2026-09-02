@@ -135,4 +135,57 @@ describe('get_packet_scope inline packet contract', () => {
     expect(full.directives[0]?.body).toHaveLength(20_000);
     expect(Buffer.byteLength(fullText, 'utf8')).toBeGreaterThan(1_400_000);
   });
+
+  it('does not borrow a shared-checkout runtime after packet cleanup', async () => {
+    const repoPath = mkdtempSync(join(tmpdir(), 'o8-cleaned-packet-scope-repo-'));
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repoPath });
+    const packetId = 'pkt-cleaned-scope-runtime';
+    createLane({
+      repoPath,
+      branch: 'inline/cleaned-scope-runtime',
+      runtime: 'codex',
+      packetId,
+    });
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      missionId: 'mission-cleaned-scope-runtime',
+      repoPath,
+      packets: [{
+        id: packetId,
+        referenceLabel: 'inline-1',
+        title: 'Inspect a cleaned packet',
+        summary: 'Keep runtime attribution bound to the packet worktree.',
+        workspaceTargetPath: repoPath,
+        branchTarget: 'inline/cleaned-scope-runtime',
+        runtime: 'codex',
+        dependencyLabels: [],
+        dependencyPacketIds: [],
+        queueState: 'held',
+        releaseState: 'released',
+        status: 'released',
+        lane: null,
+      }],
+    });
+    const runtimeRegistry = await import('@/lib/runtime/registry');
+    const runtimeLookup = vi.mocked(runtimeRegistry.getRuntimeProcessForWorktree);
+    runtimeLookup.mockImplementation(async (path) => path === repoPath
+      ? {
+        runtime: 'claude-code',
+        pid: 42,
+        cwd: repoPath,
+        binaryPath: '/usr/local/bin/resident-runtime',
+      }
+      : null);
+
+    try {
+      const result = await handleGetPacketScope({ packetId });
+      const text = result.content[0]?.type === 'text' ? result.content[0].text : '{}';
+      const scope = JSON.parse(text) as { actualRuntime: string | null };
+
+      expect(runtimeLookup).toHaveBeenLastCalledWith(null);
+      expect(scope.actualRuntime).toBeNull();
+    } finally {
+      runtimeLookup.mockResolvedValue(null);
+    }
+  });
 });
