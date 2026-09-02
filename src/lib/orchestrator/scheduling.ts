@@ -31,6 +31,7 @@ import {
 } from '@/lib/orchestrator/storage-admission';
 import { getStoragePressureAdmissionCoordinator } from '@/lib/orchestrator/storage-pressure-policy';
 import { isDispatchHalted } from './dispatch-halt';
+import { forgetRecoverySkip, pruneRecoverySkipMemo, shouldLogRecoverySkip } from './recovery-skip-log';
 
 import { computePredictedFiles, filterOverlappingPackets } from './preservation-envelope';
 import { applyPacketScopePolicy, packetScopeDispatchBlocker } from './packet-scope-policy';
@@ -519,24 +520,31 @@ export async function runDispatchTick(
     }
   }
 
+  pruneRecoverySkipMemo(new Set(nextState.packets.map((packet) => packet.id)));
+
   const dispatchablePackets = overlapFiltered
     .map((packet) => ({
       packet,
       recoveryContext: recoveryContextByPacketId.get(packet.id) ?? null,
     }))
     .filter(({ packet, recoveryContext }) => {
+      const pinnedRuntime = recoveryContext?.runtime ?? packet.dispatchRuntimePin ?? null;
       const recoveryBlocker = options.enforceBootRecoveryGuard
         ? getBootRecoveryLaunchBlocker({
             missionArchived: options.missionArchived,
             missionLive: !nextState.packets.every((candidate) => candidate.archivedAt || candidate.releaseState === 'released'),
             packet,
-            pinnedRuntime: recoveryContext?.runtime ?? packet.dispatchRuntimePin ?? null,
+            pinnedRuntime,
           })
         : null;
       if (recoveryBlocker) {
-        console.log(`[recovery] Packet ${packet.id} skipped — ${recoveryBlocker}`);
+        // #2048 — print once per reason+runtime, not once per tick.
+        if (shouldLogRecoverySkip(packet.id, recoveryBlocker, pinnedRuntime)) {
+          console.log(`[recovery] Packet ${packet.id} skipped — ${recoveryBlocker}`);
+        }
         return false;
       }
+      forgetRecoverySkip(packet.id);
       if (getDispatchBlocker(packet, nextState.packets) !== null) {
         return false;
       }

@@ -13,12 +13,21 @@ import { isOrchestratorHomePath } from '@/lib/orchestrator/repo-path';
  * tool-side error mid-turn. Fail with the truth, before any spawn work.
  */
 export function isGitWorkTreeSync(repoPath: string): boolean {
+  // #2048 — probe the path BEFORE spawning git. A packet whose repo folder was
+  // moved or deleted made the headless recovery tick re-run this every tick, and
+  // execFileSync inherits the parent's stderr by default, so each miss printed a
+  // bare `fatal: not a git repository` into serve.log with nothing naming the
+  // caller. The existence check answers the missing-folder case without a spawn;
+  // the explicit `stdio` keeps git's stderr piped (and discarded) for the
+  // folder-exists-but-isn't-a-repo case, which the catch below already handles.
+  if (!repoPath || !existsSync(repoPath)) return false;
   try {
     return execFileSync('git', ['-C', repoPath, 'rev-parse', '--is-inside-work-tree'], {
       windowsHide: true,
       encoding: 'utf-8',
       timeout: 5_000,
       maxBuffer: 128 * 1024,
+      stdio: ['ignore', 'pipe', 'pipe'],
     }).trim() === 'true';
   } catch {
     return false;
