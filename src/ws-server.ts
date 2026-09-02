@@ -9262,6 +9262,16 @@ async function bootstrapWsServer() {
                     detail,
                   };
                 }
+                if (huddlePark.operatorBlocked) {
+                  const blockedLane = huddlePark.lane ?? lane;
+                  const label = packetId ? `Packet ${packetId}` : `Lane ${lane.id}`;
+                  const detail = `${label} stopped for operator input: ${blockedLane.lastEventLabel ?? 'worker_blocked'}.`;
+                  console.warn(`[supervisor] ${detail}`);
+                  return {
+                    block: true,
+                    detail,
+                  };
+                }
                 const failedLane = setLaneStatus(lane.id, 'failed', 'system', 'zero_diff_failed');
 
                 if (packetId) {

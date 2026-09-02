@@ -159,6 +159,7 @@ function fullPacketFixture() {
     workerIntent: 'reviewer',
     useBrain: true,
     huddle: true,
+    alignmentResolvedAt: '2026-01-01T00:07:30.000Z',
     workerRouting: resolveWorkerRouting({
       workerIntent: 'reviewer',
       requestedProvider: 'codex',
@@ -273,6 +274,7 @@ describe('packet fields survive normalize', () => {
       taskContractSource: undefined,
       storageAdmissionEpoch: undefined,
       statusEvidence: undefined,
+      alignmentResolvedAt: undefined,
     }));
 
     expect(normalized.packets[0].operatorStopped).toBeUndefined();
@@ -283,6 +285,7 @@ describe('packet fields survive normalize', () => {
     expect(normalized.packets[0].taskContractSource).toBeUndefined();
     expect(normalized.packets[0].storageAdmissionEpoch).toBe(1);
     expect(normalized.packets[0].statusEvidence).toBeUndefined();
+    expect(normalized.packets[0].alignmentResolvedAt).toBeUndefined();
   });
 
   it('preserves an explicit disabled task-contract gate', () => {

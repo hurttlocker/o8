@@ -477,6 +477,10 @@ async function triageSilentExit(lane: Lane): Promise<boolean> {
       console.log(`[silent-exit] Lane ${lane.id} completed its huddle turn with no changes; parked for orchestrator.`);
       return true;
     }
+    if (huddlePark.operatorBlocked) {
+      console.log(`[silent-exit] Lane ${lane.id} already carries operator blocker ${huddlePark.lane?.lastEventLabel ?? 'worker_blocked'}; preserving it.`);
+      return true;
+    }
     setLaneStatus(lane.id, 'awaiting_input', 'system', 'silent_exit_no_work');
     enqueueSilentExitInbox(
       lane,

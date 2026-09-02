@@ -134,4 +134,30 @@ describe('single-subscription token ladder rerun escalation', () => {
     expect(persisted?.tierEscalated).toBe(true);
     expect(persisted?.workerRouting?.selectedModel).toBe('claude-sonnet-5');
   });
+
+  it('consumes a resolved huddle before a fresh rerun generation is dispatched', async () => {
+    const packet = packetFixture({
+      status: 'blocked',
+      blockedReason: 'huddle_ready',
+      lastEventLabel: 'huddle_ready',
+      huddle: true,
+      alignmentResolvedAt: undefined,
+      attemptCount: 0,
+    });
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      missionId: 'mission-huddle-rerun',
+      packets: [packet],
+    });
+
+    await rerunWithFeedback({
+      packetId: packet.id,
+      feedback: 'The plan is approved. Implement without another alignment turn.',
+    });
+
+    const { currentMissionState } = await import('@/lib/orchestrator/operator-mission-service/shared');
+    const persisted = currentMissionState().packets.find((candidate) => candidate.id === packet.id);
+    expect(persisted?.alignmentResolvedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(persisted?.huddle).toBe(true);
+  });
 });

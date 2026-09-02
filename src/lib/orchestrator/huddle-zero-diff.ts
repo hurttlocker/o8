@@ -1,4 +1,4 @@
-import { getLaneEvents, setLaneStatus } from '@/lib/lane/registry';
+import { getLane, getLaneEvents, setLaneStatus } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
 import { resolvePacketAlignment } from '@/lib/orchestrator/alignment-access';
 import { readOrchestratorControlPlaneState, withLockedState } from '@/lib/orchestrator/control-plane';
@@ -33,13 +33,54 @@ async function transcriptEndsWithPlan(lane: Lane): Promise<boolean> {
   }
 }
 
-export async function parkHuddleReadyZeroDiffLane(lane: Lane): Promise<{ parked: boolean; lane?: Lane }> {
+export interface HuddleZeroDiffResult {
+  parked: boolean;
+  operatorBlocked?: boolean;
+  lane?: Lane;
+}
+
+export async function parkHuddleReadyZeroDiffLane(lane: Lane): Promise<HuddleZeroDiffResult> {
   const packetId = lane.packetId?.trim();
   if (!packetId) return { parked: false };
 
   const state = readOrchestratorControlPlaneState();
   const packet = state.packets.find((candidate) => candidate.id === packetId);
   if (!packet) return { parked: false };
+
+  // A worker can intentionally end an implementation turn with a typed
+  // blocker after restoring a clean tree. That operator-facing reason is more
+  // specific than generic zero-diff classification and must survive process
+  // completion. Read the current lane rather than the supervisor's possibly
+  // stale snapshot; huddle/huddle_ready still flow through the alignment path
+  // below, while every other awaiting-orchestrator report is preserved.
+  const currentLane = getLane(lane.id) ?? lane;
+  const currentLabel = currentLane.lastEventLabel?.trim();
+  if (
+    currentLane.status === 'awaiting_orchestrator'
+    && currentLabel
+    && currentLabel !== 'huddle'
+    && currentLabel !== HUDDLE_READY_EVENT_LABEL
+  ) {
+    const blockedAt = currentLane.lastEventAt ?? new Date().toISOString();
+    await withLockedState((current) => {
+      const currentPacket = current.packets.find((candidate) => candidate.id === packetId);
+      if (!currentPacket) return;
+      currentPacket.status = 'blocked';
+      currentPacket.blockedReason = currentLabel;
+      currentPacket.lastEventAt = blockedAt;
+      currentPacket.lastEventLabel = currentLabel;
+      if (currentPacket.lane) {
+        currentPacket.lane = {
+          ...currentPacket.lane,
+          laneId: currentLane.id,
+          sessionKey: currentLane.sessionKey ?? lane.sessionKey ?? null,
+          lastEventAt: blockedAt,
+          lastEventLabel: currentLabel,
+        };
+      }
+    });
+    return { parked: false, operatorBlocked: true, lane: currentLane };
+  }
 
   // An explicit huddle packet is DESIGNED to produce a zero-diff alignment turn.
   // So is a single-sub cheap-tier worker: it's auto-armed with the SAME

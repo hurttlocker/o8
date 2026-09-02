@@ -453,6 +453,15 @@ async function dispatchUnlocked(
               lane: huddlePark.lane ?? undefined,
             };
           }
+          if (huddlePark.operatorBlocked) {
+            const blockedLane = huddlePark.lane ?? getLane(command.laneId) ?? lane;
+            return {
+              ok: false,
+              laneId: command.laneId,
+              note: blockedLane.lastEventLabel ?? 'worker_blocked',
+              lane: blockedLane,
+            };
+          }
           const { shouldDeferCompletionForLiveRuntime } = await import('@/lib/supervisor/completion-liveness');
           if (await shouldDeferCompletionForLiveRuntime(lane)) {
             console.warn(`[lane] request_review: ${command.laneId} has no diff yet, but its owned runtime is still live. Keeping it running.`);
