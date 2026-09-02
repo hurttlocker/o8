@@ -163,6 +163,23 @@ export function performShipPreflight(options) {
   if (dirty.length > 0) {
     throw new Error(`release worktree contains ${dirty.length} non-operator change${dirty.length === 1 ? '' : 's'}`);
   }
+  // A test file that lands on main without a PR (a direct-pushed release fix)
+  // never runs `npm run test:classification:check` — that gate is PR-CI-only —
+  // so a stale manifest reaches the tag unnoticed and turns every open PR's
+  // Hermetic Unit Tests job red for a reason unrelated to its diff (#2053).
+  // Reuse the exact same script + remedy text CI prints on failure.
+  const classification = run(process.execPath, ['scripts/classify-tests.mjs', '--check'], {
+    cwd: root,
+    env,
+    timeoutMs: 15_000,
+  });
+  if (classification.status !== 0) {
+    throw new Error(
+      classification.stderr.trim()
+        || classification.stdout.trim()
+        || `test classification check exited ${classification.status}`,
+    );
+  }
   const repo = env.O8_RELEASE_REPO?.trim() || repositoryFromRemote(requireSuccess(
     run('git', ['remote', 'get-url', 'origin'], { cwd: root, env }),
     'could not resolve the release repository',
