@@ -123,6 +123,17 @@ function ownedPids(processes, rootPid, webkitBaseline) {
   return new Set([...descendants, ...newWebkit]);
 }
 
+function countProcessesByComponent(pids, processes, rootPid) {
+  const counts = {};
+  for (const pid of pids) {
+    const process = processes.get(pid);
+    if (!process) continue;
+    const key = classifyProcess(process, rootPid);
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  return counts;
+}
+
 function measureDiskBytes(target, run = execFileSync) {
   const output = run('du', ['-sk', target], { encoding: 'utf8' });
   const kib = Number(String(output).trim().split(/\s+/)[0]);
@@ -133,6 +144,26 @@ function measureDiskBytes(target, run = execFileSync) {
 export function measureProcessPhysicalBytes(pid, run = execFileSync) {
   const output = run('footprint', ['-p', String(pid)], { encoding: 'utf8' });
   return parseFootprintBytes(output);
+}
+
+function sameProcessIdentity(left, right) {
+  return left?.pid === right?.pid
+    && left?.ppid === right?.ppid
+    && left?.command === right?.command;
+}
+
+function measureStableProcessPhysicalBytes(expected, run) {
+  const beforeProbe = snapshotProcesses(run).get(expected.pid);
+  if (!sameProcessIdentity(expected, beforeProbe)) return null;
+  try {
+    const bytes = measureProcessPhysicalBytes(expected.pid, run);
+    const afterProbe = snapshotProcesses(run).get(expected.pid);
+    return sameProcessIdentity(beforeProbe, afterProbe) ? bytes : null;
+  } catch (error) {
+    const afterFailure = snapshotProcesses(run).get(expected.pid);
+    if (!sameProcessIdentity(beforeProbe, afterFailure)) return null;
+    throw error;
+  }
 }
 
 function round(value, digits = 2) {
@@ -219,11 +250,16 @@ export function collectFootprintReceipt({
   }
   const observationSeconds = observationMs / 1000;
   const components = {};
+  let physicalMeasurementSkippedProcessCount = 0;
   for (const pid of afterOwned) {
     const process = after.get(pid);
     if (!process) continue;
     const key = classifyProcess(process, rootPid);
-    const bytes = measureProcessPhysicalBytes(pid, run);
+    const bytes = measureStableProcessPhysicalBytes(process, run);
+    if (bytes === null) {
+      physicalMeasurementSkippedProcessCount += 1;
+      continue;
+    }
     const component = components[key] ?? {
       processCount: 0,
       bytes: 0,
@@ -242,6 +278,11 @@ export function collectFootprintReceipt({
     idleProcessChurn,
     idleProcessSpawnsPerMinute: round(spawned.size * (60_000 / observationMs)),
     idleProcessExitsPerMinute: round(exited.size * (60_000 / observationMs)),
+    processChurn: {
+      spawnedByComponent: countProcessesByComponent(spawned, after, rootPid),
+      exitedByComponent: countProcessesByComponent(exited, before, rootPid),
+    },
+    physicalMeasurementSkippedProcessCount,
     appBundleBytes: measureDiskBytes(appPath, run),
     isolatedDataBytes: measureDiskBytes(dataDir, run),
     components,

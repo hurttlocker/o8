@@ -18,6 +18,11 @@ export interface FootprintMetrics {
   idleProcessChurn: number;
   idleProcessSpawnsPerMinute?: number;
   idleProcessExitsPerMinute?: number;
+  processChurn?: {
+    spawnedByComponent: Record<string, number>;
+    exitedByComponent: Record<string, number>;
+  };
+  physicalMeasurementSkippedProcessCount?: number;
   appBundleBytes: number;
   isolatedDataBytes?: number;
   updaterArchiveBytes?: number;

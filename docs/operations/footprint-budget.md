@@ -33,6 +33,8 @@ The hard memory ceiling is deliberately above the product target because long-ru
 - WebKit helpers are reparented by the operating system. The gate snapshots WebKit helper process identities immediately before launch and attributes only helpers created afterward during the isolated run.
 - CPU is the change in process CPU time divided by the fifteen-second wall-clock observation after the main window is hidden and the startup cooldown completes. It is not the lifetime average reported by `ps %cpu`.
 - Process churn is any owned process identity that appears or disappears during the observation. The normalized spawns and exits per minute remain in the receipt.
+- Churn diagnostics report component counts only. They do not copy process commands or local paths into the release receipt.
+- A child that exits between the final process-table snapshot and its `footprint` probe is excluded from the live memory total and increments `physicalMeasurementSkippedProcessCount`. A probe error for a process that remains live still fails the gate.
 - Installed size uses allocated filesystem bytes. The update archive uses its file size.
 - The gate's data-directory number describes a fresh isolated launch. It must not be presented as a long-lived operator-data measurement.
 
