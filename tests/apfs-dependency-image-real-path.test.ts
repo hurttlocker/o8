@@ -43,13 +43,59 @@ let root = '';
 let registryRoot = '';
 let npmVersion = '';
 const spawnedChildren = new Set<ReturnType<typeof spawn>>();
+const childOutput = new WeakMap<ReturnType<typeof spawn>, {
+  stdout: string;
+  stderr: string;
+  error: string | null;
+}>();
+
+function appendTail(current: string, chunk: unknown): string {
+  return `${current}${String(chunk)}`.slice(-8_000);
+}
 
 function trackChild(child: ReturnType<typeof spawn>): ReturnType<typeof spawn> {
   spawnedChildren.add(child);
+  const output = { stdout: '', stderr: '', error: null as string | null };
+  childOutput.set(child, output);
+  child.stdout?.on('data', (chunk) => { output.stdout = appendTail(output.stdout, chunk); });
+  child.stderr?.on('data', (chunk) => { output.stderr = appendTail(output.stderr, chunk); });
+  child.once('error', (error) => { output.error = error.message; });
   const forget = () => spawnedChildren.delete(child);
   child.once('error', forget);
   child.once('exit', forget);
   return child;
+}
+
+function describeChild(child: ReturnType<typeof spawn>): string {
+  const output = childOutput.get(child) ?? { stdout: '', stderr: '', error: null };
+  return [
+    `exitCode=${child.exitCode ?? 'null'} signal=${child.signalCode ?? 'null'} error=${output.error ?? 'null'}`,
+    `stdout-tail:\n${output.stdout || '<empty>'}`,
+    `stderr-tail:\n${output.stderr || '<empty>'}`,
+  ].join('\n');
+}
+
+async function waitForChildBoundary(
+  child: ReturnType<typeof spawn>,
+  boundaryPath: string,
+  label: string,
+  timeoutMs = 30_000,
+  pollMs = 50,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      await lstat(boundaryPath);
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      const stopped = child.exitCode !== null || child.signalCode !== null || childOutput.get(child)?.error;
+      if (stopped || Date.now() >= deadline) {
+        throw new Error(`${label} child did not reach its live staging boundary.\n${describeChild(child)}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+    }
+  }
 }
 
 function waitForChildToStop(
@@ -131,12 +177,26 @@ async function cloneWorkspace(source: string, name: string): Promise<string> {
   return target;
 }
 
-function waitForExit(child: ReturnType<typeof spawn>): Promise<{ code: number | null; stderr: string }> {
+function waitForExit(child: ReturnType<typeof spawn>): Promise<{
+  code: number | null;
+  signal: NodeJS.Signals | null;
+  stdout: string;
+  stderr: string;
+}> {
   return new Promise((resolve, reject) => {
-    const stderr: Buffer[] = [];
-    child.stderr?.on('data', (chunk: Buffer) => stderr.push(chunk));
-    child.once('error', reject);
-    child.once('exit', (code) => resolve({ code, stderr: Buffer.concat(stderr).toString('utf8') }));
+    const priorError = childOutput.get(child)?.error;
+    if (priorError) {
+      reject(new Error(`${priorError}\n${describeChild(child)}`));
+      return;
+    }
+    const finish = () => {
+      const output = childOutput.get(child) ?? { stdout: '', stderr: '', error: null };
+      resolve({ code: child.exitCode, signal: child.signalCode, stdout: output.stdout, stderr: output.stderr });
+    };
+    const fail = (error: Error) => reject(new Error(`${error.message}\n${describeChild(child)}`));
+    child.once('error', fail);
+    child.once('exit', finish);
+    if (child.exitCode !== null || child.signalCode !== null) finish();
   });
 }
 
@@ -336,6 +396,24 @@ describe.skipIf(process.platform !== 'darwin')('APFS dependency image real path'
     expect(readDependencySeedImage(source.receipt.recipe.key)).toBeNull();
   }, 120_000);
 
+  it('reports child output and exit state when a publisher boundary stalls', async () => {
+    const boundaryPath = path.join(root, 'forced-stall-boundary');
+    const child = trackChild(spawn(process.execPath, ['--eval', [
+      'console.log("forced-publisher-stdout")',
+      'console.error("forced-publisher-stderr")',
+      'setInterval(() => {}, 1000)',
+    ].join(';')], { stdio: 'pipe' }));
+    let failure = '';
+    try {
+      await waitForChildBoundary(child, boundaryPath, 'Forced publisher', 200, 20);
+    } catch (error) {
+      failure = error instanceof Error ? error.message : String(error);
+    }
+    expect(failure).toContain('exitCode=null signal=null error=null');
+    expect(failure).toContain('stdout-tail:\nforced-publisher-stdout');
+    expect(failure).toContain('stderr-tail:\nforced-publisher-stderr');
+  });
+
   it('waits for a live concurrent publisher without retiring its staging authority', async () => {
     const source = await makeSource('source-concurrent-publish', '2.2.0');
     const modulePath = path.join(process.cwd(), 'src/lib/workspace/apfs-dependency-image.ts');
@@ -371,16 +449,7 @@ describe.skipIf(process.platform !== 'darwin')('APFS dependency image real path'
     const child = trackChild(spawn(process.execPath, [
       '--import=tsx', '--input-type=module', '--eval', childScript,
     ], { cwd: process.cwd(), env: { ...process.env }, stdio: 'pipe' }));
-    for (let attempt = 0; attempt < 300; attempt += 1) {
-      try {
-        await lstat(startedPath);
-        break;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-        if (attempt === 299) throw new Error('Publisher child did not reach its live staging boundary.');
-        await new Promise((resolve) => setTimeout(resolve, 20));
-      }
-    }
+    await waitForChildBoundary(child, startedPath, 'Publisher');
     let competingSettled = false;
     const competing = publishDependencyImage(source.sourceReceipt, {
       registryRoot,
