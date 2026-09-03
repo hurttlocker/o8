@@ -163,6 +163,20 @@ describe('shared release build cache', () => {
     expect(readFileSync(marker, 'utf8')).toBe('safe');
   });
 
+  it('refuses budget pruning when the entries root is a symlink', () => {
+    const { root, cacheRoot } = fixture();
+    const outside = mkdtempSync(join(tmpdir(), 'o8-release-cache-outside-'));
+    roots.push(outside);
+    const marker = join(outside, 'must-survive');
+    writeFileSync(marker, 'safe');
+    mkdirSync(cacheRoot, { recursive: true });
+    symlinkSync(outside, join(cacheRoot, 'entries'), 'dir');
+
+    expect(() => releaseBuildCacheInternals.pruneCacheToBudget(cacheRoot, 0, root))
+      .toThrow('entries root outside the cache root');
+    expect(readFileSync(marker, 'utf8')).toBe('safe');
+  });
+
   it('hashes local production environment files without recording their values', () => {
     const { root } = fixture();
     writeFileSync(join(root, '.env.local'), 'NEXT_PUBLIC_CACHE_CANARY=secret-one\n');

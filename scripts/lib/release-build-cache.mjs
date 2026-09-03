@@ -577,6 +577,16 @@ function pruneCacheToBudget(cacheRoot, budgetBytes, projectRoot) {
   const entriesRoot = join(cacheRoot, 'entries');
   if (!existsSync(entriesRoot)) return { removedBytes: 0, remainingBytes: 0, removedEntries: 0 };
   assertOutsideProjectNodeModules(entriesRoot, projectRoot);
+  const entriesMetadata = lstatSync(entriesRoot);
+  const resolvedCacheRoot = realpathWithMissingSegments(cacheRoot);
+  const resolvedEntriesRoot = realpathWithMissingSegments(entriesRoot);
+  if (entriesMetadata.isSymbolicLink()
+    || !resolvedPathInside(resolvedEntriesRoot, resolvedCacheRoot)) {
+    throw new Error('release cache budget refused entries root outside the cache root');
+  }
+  if (!entriesMetadata.isDirectory()) {
+    throw new Error('release cache budget refused non-directory entries root');
+  }
   const candidates = [];
   for (const phase of readdirSync(entriesRoot).sort()) {
     const phaseRoot = join(entriesRoot, phase);
