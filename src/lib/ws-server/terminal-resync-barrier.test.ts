@@ -100,4 +100,10 @@ describe('terminal resync barrier', () => {
     expect(terminalResyncFreshnessLine(['old\r\n\x1b]0;title\x07\x1b[31m newest line \x1b[0m\r\n']))
       .toBe('newest line');
   });
+
+  it('extracts the last cursor-addressed row without spanning painted rows', () => {
+    expect(terminalResyncFreshnessLine([
+      '\x1b[2J\x1b[H\x1b[1;1Hfirst painted row\x1b[2Hsecond painted row',
+    ])).toBe('second painted row');
+  });
 });
