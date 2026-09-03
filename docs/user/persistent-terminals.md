@@ -16,6 +16,7 @@ tmux must be available on the host for a terminal to survive the owning process.
 
 - `tmux ls` shows the live terminal sessions independently of the app.
 - `o8 run --list` shows long-running commands launched through the managed-run surface.
+- `o8 run --last` shows the latest command, start time, durable exit receipt, and retained log path.
 - `o8 doctor` checks the local control plane when tabs do not reconnect.
 
 If a restored tab has no live tmux session, o8 treats it as dead and starts a fresh shell only through the normal restore path. It never represents a missing session as recovered.

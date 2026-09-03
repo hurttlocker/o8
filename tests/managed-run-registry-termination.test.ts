@@ -3,11 +3,33 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   killManagedRun,
+  listManagedRuns,
   registerManagedRun,
 } from '@/lib/runtimes/managed-runs/registry';
 import type { ManagedRunTerminationReceipt } from '@/lib/runtimes/managed-runs/types';
 
 describe('managed-run durable termination receipt', () => {
+  it('retains an unknown-signal receipt after a detached wrapper disappears', async () => {
+    const id = `missing${Date.now()}`;
+    const session = `cortex-run-${id}`;
+    registerManagedRun({
+      id,
+      session,
+      command: 'node detached-build.mjs',
+      cwd: process.cwd(),
+      mode: 'detach',
+      startedAt: new Date().toISOString(),
+      status: 'running',
+    });
+
+    const reconciled = (await listManagedRuns()).find((run) => run.id === id);
+    expect(reconciled).toMatchObject({ status: 'gone', exitCode: null });
+    expect(readFileSync(
+      join(process.env.CORTEX_IDE_DATA_DIR!, 'logs', 'run', `${id}.exit`),
+      'utf8',
+    )).toBe('signal:UNKNOWN');
+  });
+
   it('persists exit 130 only with confirmed process-tree settlement evidence', () => {
     const id = `receipt${Date.now()}`;
     const session = `cortex-run-${id}`;

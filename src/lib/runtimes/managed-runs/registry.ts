@@ -12,8 +12,7 @@
  */
 
 import { join } from 'node:path';
-import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
 import { listCortexTmuxSessions } from '@/lib/terminal/tmux';
 import { getDataDir } from '@/lib/data-dir-migration';
 import type {
@@ -92,21 +91,33 @@ function persist(): void {
 }
 
 /**
- * Recover a run's exit code from the pane wrapper's exit-file (written on normal
- * exit). Detached runs leave it in tmpdir; we read it once on reconcile then
- * delete it. Returns null when absent (killed mid-command / never wrote).
+ * Recover a run's exit code from the pane wrapper's durable exit receipt.
+ * Signal receipts map to their conventional shell exit codes. Returns null
+ * while a live run has not written its receipt or for an unknown signal.
  */
 function readExitCode(id: string): number | null {
   try {
-    const path = join(tmpdir(), `o8-run-${id}.exit`);
+    const path = join(getDataDir(), 'logs', 'run', `${id}.exit`);
     if (!existsSync(path)) return null;
     const raw = readFileSync(path, 'utf8').trim();
-    try { rmSync(path, { force: true }); } catch { /* best effort cleanup */ }
-    const code = Number.parseInt(raw, 10);
-    return Number.isNaN(code) ? null : code;
+    if (/^\d+$/.test(raw)) return Number.parseInt(raw, 10);
+    const signal = raw.match(/^signal:(HUP|INT|QUIT|KILL|TERM)$/)?.[1];
+    if (!signal) return null;
+    const number = { HUP: 1, INT: 2, QUIT: 3, KILL: 9, TERM: 15 }[signal];
+    return number === undefined ? null : 128 + number;
   } catch {
     return null;
   }
+}
+
+function retainUnknownExitReceipt(id: string): void {
+  try {
+    const directory = join(getDataDir(), 'logs', 'run');
+    const path = join(directory, `${id}.exit`);
+    if (existsSync(path)) return;
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    writeFileSync(path, 'signal:UNKNOWN', { flag: 'wx', mode: 0o600 });
+  } catch { /* best effort after an untrappable wrapper exit */ }
 }
 
 /** Load persisted records on first module init (per process), validating each. */
@@ -204,6 +215,7 @@ export async function listManagedRuns(): Promise<ManagedRunRecord[]> {
       // own read+delete. A detach run's exit-file (when present) gives the real
       // code → finished; absent (killed mid-command / app was down) → gone.
       const code = rec.mode === 'detach' ? readExitCode(rec.id) : null;
+      if (rec.mode === 'detach' && code === null) retainUnknownExitReceipt(rec.id);
       rec.status = code === null ? 'gone' : 'finished';
       rec.exitCode = code;
       rec.finishedAt = rec.finishedAt ?? now;

@@ -214,6 +214,7 @@ commands:
   disconnect           remove this machine from the operator's connected devices
   run [--detach] <cmd> run a process in an o8-owned terminal the operator can watch
   run --list           list managed runs (running + recent, with exit codes)
+  run --last           show the latest command, start, exit receipt, and retained log
   run stop <runId>     stop a managed run from o8 run --list
   serve                start the headless API, WebSocket layer, and supervisor daemon
   serve status         report the daemon pid, ports, health, and launch mode

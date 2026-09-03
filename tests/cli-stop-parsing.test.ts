@@ -1,14 +1,24 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CliError, EXIT } from '../cli/src/api';
 import { parseMissionStopArgs, runMission } from '../cli/src/commands/mission';
 import { parsePacketStopArgs } from '../cli/src/commands/packet/stop';
 import { managedRunEnvironmentLines, parseRunStopArgs } from '../cli/src/commands/run';
+import {
+  initializeManagedRunReceipt,
+  readLastManagedRunReceipt,
+} from '../cli/src/commands/run-receipts';
+
+const receiptRoots: string[] = [];
 
 describe('CLI stop command parsing', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    while (receiptRoots.length > 0) rmSync(receiptRoots.pop()!, { recursive: true, force: true });
   });
 
   it('packet stop treats positional and --packet ids identically', () => {
@@ -117,5 +127,31 @@ describe('CLI stop command parsing', () => {
       'unset NODE_OPTIONS',
       `export NODE_OPTIONS='--trace-warnings --import=${stubUrl}'`,
     ]);
+  });
+
+  it('retains only the newest 50 completed local run receipts', () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'o8-run-receipts-'));
+    receiptRoots.push(dataDir);
+    for (let index = 0; index <= 50; index += 1) {
+      const id = index.toString(16).padStart(8, '0');
+      const paths = initializeManagedRunReceipt({
+        schema: 'o8/cli/run-receipt/v1',
+        id,
+        session: `cortex-run-${id}`,
+        command: `command-${index}`,
+        cwd: dataDir,
+        startedAt: new Date(index * 1_000).toISOString(),
+        mode: 'stream',
+      }, dataDir);
+      writeFileSync(paths.exitFile, '0');
+    }
+
+    const oldest = join(dataDir, 'logs', 'run', '00000000.json');
+    expect(existsSync(oldest)).toBe(false);
+    expect(readLastManagedRunReceipt(dataDir)).toMatchObject({
+      id: '00000032',
+      command: 'command-50',
+      exitStatus: '0',
+    });
   });
 });
