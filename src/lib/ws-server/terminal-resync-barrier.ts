@@ -56,8 +56,13 @@ function scrollbackTail(chunks: readonly string[], maxBytes: number): string {
   return Buffer.concat(retained.reverse()).toString('utf8');
 }
 
+function splitCursorAddressedRows(value: string): string {
+  return value.replace(/\x1b\[[\d;]*[Hf]/gu, '\n');
+}
+
 export function terminalResyncFreshnessLine(chunks: readonly string[]): string | null {
-  const lines = stripTerminalControlSequences(scrollbackTail(chunks, 512)).split('\n');
+  const tail = splitCursorAddressedRows(scrollbackTail(chunks, 512));
+  const lines = stripTerminalControlSequences(tail).split('\n');
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     const line = lines[index].trim();
     if (line) return line.slice(-80);

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WebSocket } from 'ws';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { dashSessionNameForOwnerKey } from '@/lib/ws-server/dash-terminal-persistence';
+import { dashSessionNameForOwnerKey, dashTmuxArgs } from '@/lib/ws-server/dash-terminal-persistence';
 import { renderTerminalBytes } from './helpers/headless-terminal';
 
 type WireFrame = {
@@ -141,7 +141,7 @@ function terminalText(received: ReceivedFrame[], startIndex = 0, targetSession =
 }
 
 function capturePane(targetSession = sessionName) {
-  return execFileSync('tmux', ['capture-pane', '-p', '-t', targetSession], { encoding: 'utf8' });
+  return execFileSync('tmux', dashTmuxArgs('capture-pane', '-p', '-t', targetSession), { encoding: 'utf8' });
 }
 
 function normalizeTerminalLines(lines: string[]) {
@@ -247,8 +247,8 @@ afterAll(async () => {
   for (const socket of sockets) socket.close();
   await stopWsServer().catch(() => undefined);
   if (apiServer?.listening) await new Promise<void>((resolve) => apiServer.close(() => resolve()));
-  try { execFileSync('tmux', ['kill-session', '-t', sessionName], { stdio: 'ignore' }); } catch { /* not created */ }
-  try { execFileSync('tmux', ['kill-session', '-t', duplicateSessionName], { stdio: 'ignore' }); } catch { /* not created */ }
+  try { execFileSync('tmux', dashTmuxArgs('kill-session', '-t', sessionName), { stdio: 'ignore' }); } catch { /* not created */ }
+  try { execFileSync('tmux', dashTmuxArgs('kill-session', '-t', duplicateSessionName), { stdio: 'ignore' }); } catch { /* not created */ }
   rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -295,7 +295,9 @@ describe.runIf(tmuxAvailable)('terminal visibility through the real WebSocket an
     const paintedRows = Array.from({ length: OVERFLOW_TERMINAL.rows }, (_, index) => (
       `O8_RESYNC_ROW_${String(index).padStart(2, '0')}${index === OVERFLOW_TERMINAL.rows - 1 ? ' O8_OVERFLOW_DONE' : ''}`
     ));
-    const paintedScreen = `${paintedRows.join('\n')}\n`;
+    const paintedScreen = `\x1b[2J\x1b[H${paintedRows
+      .map((line, index) => `\x1b[${index + 1};1H${line}`)
+      .join('')}`;
     const overflowScript = `const line='Z'.repeat(4095)+'\\n';let elapsed=0;const timer=setInterval(()=>{process.stdout.write(line);elapsed+=5;if(elapsed>=400){clearInterval(timer);process.stdout.write(Buffer.from('${Buffer.from(paintedScreen).toString('base64')}','base64'));}},5)`;
     visible.socket.send(JSON.stringify({
       type: 'terminal-input',
