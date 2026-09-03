@@ -1,6 +1,6 @@
 import { spawn, spawnSync, execFileSync, type ChildProcess } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -49,7 +49,42 @@ afterEach(async () => {
 });
 
 describe.skipIf(!tmuxAvailable)('streamed o8 run Ctrl-C real entry point', () => {
-  it('forwards SIGINT, proves the parent and grandchild dead, records exit 130, and cleans temp files', async () => {
+  it('retains the log and numeric exit receipt after a normal command exit', () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'o8-run-cli-normal-'));
+    roots.push(dataDir);
+    const harnessPath = join(dataDir, 'run-harness.mts');
+    const runCommandModule = new URL('../cli/src/commands/run.ts', import.meta.url).href;
+    writeFileSync(harnessPath, `
+import { runRun } from ${JSON.stringify(runCommandModule)};
+const code = await runRun({ human: false, verbose: false }, []);
+process.exit(code);
+`);
+    const result = spawnSync(process.execPath, [
+      '--import', 'tsx',
+      harnessPath,
+      'run', '--', process.execPath, '-e', 'console.log("normal-receipt"); process.exit(7)',
+    ], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        O8_API_PORT: '1',
+        O8_API_TOKEN: 'test-token',
+        CORTEX_IDE_DATA_DIR: dataDir,
+      },
+      encoding: 'utf8',
+    });
+    expect(result.status).toBe(7);
+    expect(result.stdout).toContain('normal-receipt');
+
+    const receiptDir = join(dataDir, 'logs', 'run');
+    const metadataFile = readdirSync(receiptDir).find((name) => name.endsWith('.json'));
+    if (!metadataFile) throw new Error('managed run did not retain metadata');
+    const metadata = JSON.parse(readFileSync(join(receiptDir, metadataFile), 'utf8')) as { id: string };
+    expect(readFileSync(join(receiptDir, `${metadata.id}.exit`), 'utf8')).toBe('7');
+    expect(readFileSync(join(receiptDir, `${metadata.id}.log`), 'utf8')).toContain('normal-receipt');
+  }, 15_000);
+
+  it('forwards SIGINT, proves the process tree dead, and retains the post-mortem receipt', async () => {
     let run: ManagedRunRecord | null = null;
     let killCalls = 0;
     const server = createServer(async (request, response) => {
@@ -153,11 +188,124 @@ process.exit(code);
     expect(markerPids(registered.processMarker!)).toEqual([]);
     expect(() => execFileSync('tmux', ['has-session', '-t', registered.session], { stdio: 'ignore' }))
       .toThrow();
-    const base = join(tmpdir(), `o8-run-${registered.id}`);
-    for (const suffix of ['.log', '.exit', '.go', '.env']) {
-      expect(existsSync(`${base}${suffix}`)).toBe(false);
+    const receiptDir = join(dataDir, 'logs', 'run');
+    expect(readFileSync(join(receiptDir, `${registered.id}.exit`), 'utf8')).toBe('signal:INT');
+    expect(readFileSync(join(receiptDir, `${registered.id}.log`), 'utf8')).toContain('started-at');
+    expect(JSON.parse(readFileSync(join(receiptDir, `${registered.id}.json`), 'utf8')))
+      .toMatchObject({ id: registered.id, command: expect.any(String), mode: 'stream' });
+    const tempBase = join(tmpdir(), `o8-run-${registered.id}`);
+    for (const suffix of ['.go', '.env']) {
+      expect(existsSync(`${tempBase}${suffix}`)).toBe(false);
     }
     sessions.pop();
     children.pop();
+  }, 25_000);
+
+  it('records SIGTERM from the wrapper and exposes it through run --last', async () => {
+    let run: ManagedRunRecord | null = null;
+    const server = createServer(async (request, response) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      const body = chunks.length > 0 ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {};
+      response.setHeader('Content-Type', 'application/json');
+      if (request.url === '/api/panel/managed-runs' && request.method === 'POST' && body.action === 'register') {
+        run = {
+          ...body,
+          status: 'running',
+          finishedAt: null,
+          exitCode: null,
+          termination: null,
+        } as ManagedRunRecord;
+        sessions.push(run.session);
+        response.end(JSON.stringify({ ok: true, run }));
+        return;
+      }
+      response.statusCode = 404;
+      response.end(JSON.stringify({ error: 'not_found' }));
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('fixture server did not bind');
+    const dataDir = mkdtempSync(join(tmpdir(), 'o8-run-cli-sigterm-'));
+    roots.push(dataDir);
+    const harnessPath = join(dataDir, 'run-harness.mts');
+    const runCommandModule = new URL('../cli/src/commands/run.ts', import.meta.url).href;
+    writeFileSync(harnessPath, `
+import { runRun } from ${JSON.stringify(runCommandModule)};
+const code = await runRun({ human: false, verbose: false }, []);
+process.exit(code);
+`);
+    const command = 'process.stdout.write("before-term\\n"); setInterval(() => {}, 1000)';
+    const cli = spawn(process.execPath, [
+      '--import', 'tsx',
+      harnessPath,
+      'run', '--detach', '--', process.execPath, '-e', command,
+    ], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        O8_API_PORT: String(address.port),
+        O8_API_TOKEN: 'test-token',
+        CORTEX_IDE_DATA_DIR: dataDir,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let cliStdout = '';
+    let cliStderr = '';
+    let cliExitState: { code: number | null } | null = null;
+    cli.stdout?.on('data', (chunk) => { cliStdout += String(chunk); });
+    cli.stderr?.on('data', (chunk) => { cliStderr += String(chunk); });
+    cli.once('exit', (code) => { cliExitState = { code }; });
+    children.push(cli);
+    const registered = await waitFor(() => run).catch((error) => {
+      throw new Error(`${error instanceof Error ? error.message : String(error)}\nstdout=${cliStdout}\nstderr=${cliStderr}`);
+    });
+    const cliExit = await waitFor(() => cliExitState);
+    expect(cliExit.code).toBe(0);
+    children.pop();
+
+    const receiptDir = join(dataDir, 'logs', 'run');
+    const logFile = join(receiptDir, `${registered.id}.log`);
+    const exitFile = join(receiptDir, `${registered.id}.exit`);
+    await waitFor(() => existsSync(logFile) && readFileSync(logFile, 'utf8').includes('before-term')
+      ? true
+      : null);
+    if (!registered.panePid) throw new Error('managed run did not register a pane pid');
+    process.kill(registered.panePid, 'SIGTERM');
+
+    const exitReceipt = await waitFor(() => existsSync(exitFile) ? readFileSync(exitFile, 'utf8') : null);
+    expect(exitReceipt).toBe('signal:TERM');
+    await waitFor(() => markerPids(registered.processMarker!).length === 0 ? true : null);
+    await waitFor(() => {
+      try {
+        execFileSync('tmux', ['has-session', '-t', registered.session], { stdio: 'ignore' });
+        return null;
+      } catch {
+        return true;
+      }
+    });
+
+    const last = spawnSync(process.execPath, [
+      '--import', 'tsx',
+      harnessPath,
+      'run', '--last',
+    ], {
+      cwd: process.cwd(),
+      env: { ...process.env, CORTEX_IDE_DATA_DIR: dataDir },
+      encoding: 'utf8',
+    });
+    expect(last.status).toBe(0);
+    expect(JSON.parse(last.stdout)).toMatchObject({
+      schema: 'o8/cli/run.last/v1',
+      run: {
+        id: registered.id,
+        command: expect.stringContaining('before-term'),
+        startedAt: expect.any(String),
+        exitStatus: 'signal:TERM',
+        logPath: logFile,
+      },
+    });
+    sessions.pop();
   }, 25_000);
 });

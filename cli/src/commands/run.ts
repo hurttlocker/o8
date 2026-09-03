@@ -32,12 +32,19 @@ import { pathToFileURL } from 'node:url';
 import { apiFetch, CliError, EXIT } from '../api.js';
 import { resolveConfig } from '../config.js';
 import { resolveLaneFromCwd } from './packet/worktree-resolve.js';
+import {
+  exitCodeFromStatus,
+  initializeManagedRunReceipt,
+  readLastManagedRunReceipt,
+  type ManagedRunReceiptMetadata,
+} from './run-receipts.js';
 import { printJson, printHumanHeading, printHumanKv, type OutputMode } from '../output.js';
 
 /** Flags consumed by `o8 run` itself (everything else is the command). */
 const RUN_LEADING_FLAGS = new Set([
   '--detach',
   '--list',
+  '--last',
   '--human',
   '--json',
   '--verbose',
@@ -182,7 +189,7 @@ async function settleOwnedSessionLocally(
  * arbitrary command — re-parse from process.argv. Supports both
  * `o8 run <cmd...>` and `o8 run [--detach] -- <cmd...>`.
  */
-function extractRunCommand(): { detach: boolean; list: boolean; command: string[] } {
+function extractRunCommand(): { detach: boolean; list: boolean; last: boolean; command: string[] } {
   const argv = process.argv.slice(2);
   const runIdx = argv.indexOf('run');
   const after = runIdx >= 0 ? argv.slice(runIdx + 1) : [];
@@ -202,7 +209,12 @@ function extractRunCommand(): { detach: boolean; list: boolean; command: string[
     }
     command = after.slice(i);
   }
-  return { detach: flags.includes('--detach'), list: flags.includes('--list'), command };
+  return {
+    detach: flags.includes('--detach'),
+    list: flags.includes('--list'),
+    last: flags.includes('--last'),
+    command,
+  };
 }
 
 interface ManagedRunRow {
@@ -260,6 +272,27 @@ async function runRunList(mode: OutputMode): Promise<number> {
   return 0;
 }
 
+function runRunLast(mode: OutputMode): number {
+  const run = readLastManagedRunReceipt();
+  if (mode.human) {
+    printHumanHeading('last o8 run');
+    if (!run) {
+      process.stdout.write('  (no retained runs)\n');
+    } else {
+      printHumanKv([
+        ['id', run.id],
+        ['command', run.command],
+        ['started', run.startedAt],
+        ['exit', run.exitStatus ?? 'running or not yet reconciled'],
+        ['log', run.logPath],
+      ]);
+    }
+  } else {
+    printJson({ schema: 'o8/cli/run.last/v1', run });
+  }
+  return 0;
+}
+
 async function runRunStop(mode: OutputMode, command: string[]): Promise<number> {
   const { runId } = parseRunStopArgs(command);
   const cfg = resolveConfig();
@@ -304,9 +337,10 @@ async function runRunStop(mode: OutputMode, command: string[]): Promise<number> 
 
 export async function runRun(mode: OutputMode, _rest: string[]): Promise<number> {
   void _rest; // the command comes from raw argv, not the dispatcher's parse
-  const { detach, list, command } = extractRunCommand();
+  const { detach, list, last, command } = extractRunCommand();
 
   if (list) return runRunList(mode);
+  if (last) return runRunLast(mode);
   if (command[0] === 'stop') return runRunStop(mode, command);
 
   if (command.length === 0) {
@@ -326,13 +360,32 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
   const processMarker = randomUUID().replace(/-/g, '');
 
   const base = join(tmpdir(), `o8-run-${id}`);
-  const logFile = `${base}.log`;
-  const exitFile = `${base}.exit`;
   const goFile = `${base}.go`;
   const envFile = `${base}.env`;
-  for (const f of [logFile, exitFile, goFile, envFile]) {
+  for (const f of [goFile, envFile]) {
     try { rmSync(f, { force: true }); } catch { /* fresh paths */ }
   }
+  const metadata: ManagedRunReceiptMetadata = {
+    schema: 'o8/cli/run-receipt/v1',
+    id,
+    session,
+    command: cmd,
+    cwd,
+    startedAt,
+    mode: detach ? 'detach' : 'stream',
+  };
+  let receiptPaths: ReturnType<typeof initializeManagedRunReceipt>;
+  try {
+    receiptPaths = initializeManagedRunReceipt(metadata);
+  } catch (error) {
+    throw new CliError(
+      'run_receipt_init_failed',
+      `Could not create the durable run receipt: ${error instanceof Error ? error.message : String(error)}`,
+      EXIT.INVALID_ARGS,
+      'Check write access to the configured o8 data directory.',
+    );
+  }
+  const { logFile, exitFile, metadataFile } = receiptPaths;
 
   // Mirror the agent's full env into the pane (the tmux server may have stale
   // env — at minimum PATH would be wrong → "command not found").
@@ -346,18 +399,28 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
   // so nothing is missed (matters for short commands). The command runs via
   // `"$@"` (tokens passed as positional args) so quoting survives intact — a
   // joined-and-reshelled string would mangle anything with shell metachars.
-  // A `trap ... EXIT` removes the secret-bearing env-file + go-file
-  // unconditionally — even if `cd` fails or the command is killed mid-run.
+  // EXIT removes only the secret-bearing temp files. Signal handlers retain
+  // the log and exit receipt, then forward the signal to the direct child.
   const wrapper = [
-    `trap 'rm -f ${sq(goFile)} ${sq(envFile)}' EXIT`,
+    'umask 077',
+    `__o8_child=''`,
+    `__o8_signal() { __o8_name="$1"; __o8_code="$2"; printf 'signal:%s' "$__o8_name" > ${sq(exitFile)}; if [ -n "$__o8_child" ]; then kill -s "$__o8_name" "$__o8_child" 2>/dev/null || true; fi; exit "$__o8_code"; }`,
+    `__o8_cleanup() { __o8_ec=$?; if [ ! -e ${sq(exitFile)} ]; then printf '%s' "$__o8_ec" > ${sq(exitFile)}; fi; rm -f ${sq(goFile)} ${sq(envFile)}; }`,
+    `trap '__o8_cleanup' EXIT`,
+    `trap '__o8_signal HUP 129' HUP`,
+    `trap '__o8_signal INT 130' INT`,
+    `trap '__o8_signal QUIT 131' QUIT`,
+    `trap '__o8_signal TERM 143' TERM`,
     `cd ${sq(cwd)} || exit 1`,
     `[ -e ${sq(envFile)} ] && . ${sq(envFile)}`,
     `rm -f ${sq(envFile)}`,
-    `printf '$ %s\\nstarted-at %s\\n\\n' "$*" ${sq(startedAt)}`,
     `while [ ! -e ${sq(goFile)} ]; do sleep 0.02; done`,
-    `"$@"`,
+    `printf '$ %s\\nstarted-at %s\\n\\n' "$*" ${sq(startedAt)}`,
+    `"$@" & __o8_child=$!`,
+    `wait "$__o8_child"`,
     `__o8_ec=$?`,
-    `printf '%s' "$__o8_ec" > ${sq(exitFile)}`,
+    `__o8_child=''`,
+    `case "$__o8_ec" in 129) printf 'signal:HUP' > ${sq(exitFile)} ;; 130) printf 'signal:INT' > ${sq(exitFile)} ;; 131) printf 'signal:QUIT' > ${sq(exitFile)} ;; 137) printf 'signal:KILL' > ${sq(exitFile)} ;; 143) printf 'signal:TERM' > ${sq(exitFile)} ;; *) printf '%s' "$__o8_ec" > ${sq(exitFile)} ;; esac`,
     `exit $__o8_ec`,
   ].join('; ');
 
@@ -368,6 +431,9 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
       { windowsHide: true, timeout: 10_000, stdio: 'ignore' },
     );
   } catch (err) {
+    for (const f of [logFile, exitFile, metadataFile, goFile, envFile]) {
+      try { rmSync(f, { force: true }); } catch {}
+    }
     const msg = err instanceof Error ? err.message : String(err);
     throw new CliError(
       'tmux_spawn_failed',
@@ -406,17 +472,30 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
   };
   if (!detach) process.on('SIGINT', onSigint);
 
-  // Only stream mode needs the pane teed to a log file (we tail it to stdout).
-  // Detached runs are watched by attaching the tmux session directly, so piping
-  // would just grow an unbounded /tmp log nobody reads.
-  if (!detach) {
+  // Every run keeps a post-mortem log. The go-gate means the command cannot
+  // emit until pipe-pane is attached successfully.
+  try {
+    execFileSync('tmux', ['pipe-pane', '-o', '-t', session, `cat >> ${sq(logFile)}`], {
+      windowsHide: true,
+      timeout: 5_000,
+      stdio: 'ignore',
+    });
+  } catch (error) {
     try {
-      execFileSync('tmux', ['pipe-pane', '-o', '-t', session, `cat >> ${sq(logFile)}`], {
+      execFileSync('tmux', ['kill-session', '-t', session], {
         windowsHide: true,
         timeout: 5_000,
         stdio: 'ignore',
       });
-    } catch { /* without pipe-pane the operator can still attach live; agent just won't see stream */ }
+    } catch {}
+    for (const f of [logFile, exitFile, metadataFile, goFile, envFile]) {
+      try { rmSync(f, { force: true }); } catch {}
+    }
+    throw new CliError(
+      'run_log_capture_failed',
+      `Could not attach the durable run log: ${error instanceof Error ? error.message : String(error)}`,
+      EXIT.INVALID_ARGS,
+    );
   }
 
   try {
@@ -430,7 +509,7 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
         stdio: 'ignore',
       });
     } catch {}
-    for (const f of [logFile, exitFile, goFile, envFile]) {
+    for (const f of [logFile, exitFile, metadataFile, goFile, envFile]) {
       try { rmSync(f, { force: true }); } catch {}
     }
     throw error;
@@ -614,11 +693,11 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
     if (!interruptRequested) {
       if (exitFound) {
         try {
-          const parsed = Number.parseInt(readFileSync(exitFile, 'utf-8').trim(), 10);
-          exitCode = Number.isNaN(parsed) ? 0 : parsed;
-        } catch { exitCode = 0; }
+          exitCode = exitCodeFromStatus(readFileSync(exitFile, 'utf-8').trim()) ?? 1;
+        } catch { exitCode = 1; }
       } else {
         exitCode = 130; // session killed out from under us
+        try { writeFileSync(exitFile, 'signal:UNKNOWN', { mode: 0o600 }); } catch {}
       }
       try {
         await apiFetch(cfg, '/api/panel/managed-runs', {
@@ -633,7 +712,10 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
   } finally {
     process.off('SIGINT', onSigint);
     if (fd !== null) { try { closeSync(fd); } catch { /* noop */ } }
-    for (const f of [logFile, exitFile, goFile, envFile]) {
+    if (interruptRequested && !existsSync(exitFile)) {
+      try { writeFileSync(exitFile, 'signal:INT', { mode: 0o600 }); } catch {}
+    }
+    for (const f of [goFile, envFile]) {
       try { rmSync(f, { force: true }); } catch { /* noop */ }
     }
   }

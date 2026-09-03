@@ -129,6 +129,7 @@ o8 project delete <id|name>
 o8 run <cmd...>                            # stream in an o8-owned terminal visible to the operator
 o8 run --detach <cmd...>                   # register a server/daemon and return immediately
 o8 run --list                              # managed runs with recent exit codes
+o8 run --last                              # latest command, exit receipt, and retained log
 o8 run stop <run-id>                       # stop a managed run
 o8 run -- <cmd...>                         # use -- when the wrapped command has flags
 
