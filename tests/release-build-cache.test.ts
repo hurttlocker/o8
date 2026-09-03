@@ -6,6 +6,7 @@ import {
   readdirSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -16,6 +17,7 @@ import {
   collectReleaseBuildCacheIdentity,
   finalizeReleaseBuildCacheReceipt,
   releaseBuildCacheInternals,
+  resolveReleaseBuildCacheRoot,
   restoreReleaseBuildCache,
   writeReleaseBuildCachePhaseReceipt,
   type ReleaseBuildCacheIdentity,
@@ -56,6 +58,125 @@ function nativeIdentity(source: string): ReleaseBuildCacheIdentity {
 }
 
 describe('shared release build cache', () => {
+  it('uses a configured external root only while its mount marker identity matches', async () => {
+    const { root } = fixture();
+    const volumeRoot = mkdtempSync(join(tmpdir(), 'o8-release-cache-volume-'));
+    roots.push(volumeRoot);
+    const cacheRoot = join(volumeRoot, 'cache');
+    const marker = join(volumeRoot, '.o8-release-cache-volume');
+    const localRoot = join(root, 'local-fallback');
+    const warnings: string[] = [];
+    const env = {
+      NODE_ENV: 'test' as const,
+      O8_RELEASE_BUILD_CACHE_DIR: cacheRoot,
+      O8_RELEASE_BUILD_CACHE_EXTERNAL_ROOT: volumeRoot,
+      O8_RELEASE_BUILD_CACHE_VOLUME_ID: 'archive-a',
+      O8_RELEASE_BUILD_CACHE_LOCAL_DIR: localRoot,
+    };
+
+    expect(resolveReleaseBuildCacheRoot(env, { warn: (line) => warnings.push(line) })).toBe(localRoot);
+    expect(existsSync(cacheRoot)).toBe(false);
+    expect(warnings).toHaveLength(1);
+
+    writeFileSync(marker, 'archive-a\n');
+    expect(resolveReleaseBuildCacheRoot(env)).toBe(cacheRoot);
+    expect(await captureReleaseBuildCache(root, 'web', { env, identity: identity('a') }))
+      .toMatchObject({ status: 'captured' });
+
+    writeFileSync(marker, 'archive-b\n');
+    expect(resolveReleaseBuildCacheRoot(env, { warn: () => {} })).toBe(localRoot);
+    expect(await captureReleaseBuildCache(root, 'web', { env, identity: identity('b') }))
+      .toMatchObject({ status: 'captured' });
+    expect(existsSync(join(cacheRoot, 'entries', 'web', 'compatibility-a', 'entry-b.tar'))).toBe(false);
+    expect(existsSync(join(localRoot, 'entries', 'web', 'compatibility-a', 'entry-b.tar'))).toBe(true);
+  });
+
+  it('rejects a symlinked external-volume marker', () => {
+    const { root } = fixture();
+    const volumeRoot = mkdtempSync(join(tmpdir(), 'o8-release-cache-volume-'));
+    roots.push(volumeRoot);
+    const identityFile = join(root, 'identity');
+    writeFileSync(identityFile, 'archive-a\n');
+    symlinkSync(identityFile, join(volumeRoot, '.o8-release-cache-volume'));
+
+    expect(resolveReleaseBuildCacheRoot({
+      NODE_ENV: 'test' as const,
+      O8_RELEASE_BUILD_CACHE_DIR: join(volumeRoot, 'cache'),
+      O8_RELEASE_BUILD_CACHE_EXTERNAL_ROOT: volumeRoot,
+      O8_RELEASE_BUILD_CACHE_VOLUME_ID: 'archive-a',
+      O8_RELEASE_BUILD_CACHE_LOCAL_DIR: join(root, 'fallback'),
+    }, { warn: () => {} })).toBe(join(root, 'fallback'));
+    expect(existsSync(join(volumeRoot, 'cache'))).toBe(false);
+  });
+
+  it('prunes oldest cache entries to a deterministic byte budget without touching receipts', async () => {
+    const { root, cacheRoot } = fixture();
+    const entries = join(cacheRoot, 'entries', 'web');
+    const oldEntry = join(entries, 'old', 'old.tar');
+    const tiedEntry = join(entries, 'tied', 'tied.tar');
+    const newEntry = join(entries, 'new', 'new.tar');
+    const receipt = join(cacheRoot, 'receipts', 'keep.json');
+    for (const path of [oldEntry, tiedEntry, newEntry, receipt]) {
+      mkdirSync(join(path, '..'), { recursive: true });
+      writeFileSync(path, '12345');
+    }
+    utimesSync(oldEntry, 1, 1);
+    utimesSync(tiedEntry, 2, 2);
+    utimesSync(newEntry, 2, 2);
+
+    const result = releaseBuildCacheInternals.pruneCacheToBudget(cacheRoot, 5, root);
+    expect(result).toMatchObject({ removedBytes: 10, remainingBytes: 5 });
+    expect(existsSync(oldEntry)).toBe(false);
+    expect(existsSync(newEntry)).toBe(false);
+    expect(existsSync(tiedEntry)).toBe(true);
+    expect(readFileSync(receipt, 'utf8')).toBe('12345');
+  });
+
+  it('enforces the configured budget through capture', async () => {
+    const { root, cacheRoot } = fixture();
+    const receipt = join(cacheRoot, 'receipts', 'keep.json');
+    mkdirSync(join(cacheRoot, 'receipts'), { recursive: true });
+    writeFileSync(receipt, 'keep');
+
+    expect(await captureReleaseBuildCache(root, 'web', {
+      env: {
+        NODE_ENV: 'test' as const,
+        O8_RELEASE_BUILD_CACHE_DIR: cacheRoot,
+        O8_RELEASE_BUILD_CACHE_MAX_BYTES: '0',
+      },
+      identity: identity('budget'),
+    })).toMatchObject({ status: 'captured' });
+    expect(readdirSync(join(cacheRoot, 'entries', 'web'))).toEqual([]);
+    expect(readFileSync(receipt, 'utf8')).toBe('keep');
+  });
+
+  it('refuses budget pruning when entries escape the cache root through a symlink', () => {
+    const { root, cacheRoot } = fixture();
+    const outside = mkdtempSync(join(tmpdir(), 'o8-release-cache-outside-'));
+    roots.push(outside);
+    const marker = join(outside, 'must-survive');
+    writeFileSync(marker, 'safe');
+    mkdirSync(join(cacheRoot, 'entries'), { recursive: true });
+    symlinkSync(outside, join(cacheRoot, 'entries', 'escape'), 'dir');
+
+    expect(() => releaseBuildCacheInternals.pruneCacheToBudget(cacheRoot, 0, root)).toThrow('symbolic link');
+    expect(readFileSync(marker, 'utf8')).toBe('safe');
+  });
+
+  it('refuses budget pruning when the entries root is a symlink', () => {
+    const { root, cacheRoot } = fixture();
+    const outside = mkdtempSync(join(tmpdir(), 'o8-release-cache-outside-'));
+    roots.push(outside);
+    const marker = join(outside, 'must-survive');
+    writeFileSync(marker, 'safe');
+    mkdirSync(cacheRoot, { recursive: true });
+    symlinkSync(outside, join(cacheRoot, 'entries'), 'dir');
+
+    expect(() => releaseBuildCacheInternals.pruneCacheToBudget(cacheRoot, 0, root))
+      .toThrow('entries root outside the cache root');
+    expect(readFileSync(marker, 'utf8')).toBe('safe');
+  });
+
   it('hashes local production environment files without recording their values', () => {
     const { root } = fixture();
     writeFileSync(join(root, '.env.local'), 'NEXT_PUBLIC_CACHE_CANARY=secret-one\n');
