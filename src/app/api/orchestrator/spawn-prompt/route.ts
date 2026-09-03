@@ -15,6 +15,7 @@ import {
   isDispatchableRuntime,
 } from '@/lib/orchestrator/runtime-capabilities';
 import { assertRuntimeDispatchable, DispatchPreflightError } from '@/lib/runtimes/shared/auth-detect';
+import { assertExecutionCarrierDispatchable, ExecutionCarrierPreflightError } from '@/lib/runtimes/shared/execution-carrier-preflight';
 import { findMissionByCreationMutationId } from '@/lib/orchestrator/create-mission-receipt';
 import {
   bindIdempotencyClientMutation,
@@ -100,7 +101,11 @@ export async function POST(request: NextRequest) {
     model: workerRouting.selectedModel,
   });
   try {
-    await assertRuntimeDispatchable(workerRouting.selectedRuntime, workerRouting.selectedModel, repoPath);
+    if (defaults.workerExecutionCarrier) {
+      await assertExecutionCarrierDispatchable(workerRouting.selectedRuntime, defaults.workerExecutionCarrier);
+    } else {
+      await assertRuntimeDispatchable(workerRouting.selectedRuntime, workerRouting.selectedModel, repoPath);
+    }
   } catch (error) {
     if (error instanceof DispatchPreflightError) {
       return operatorError(error.code, `${error.status.detail} ${error.status.fix}`, 400, {
@@ -109,6 +114,12 @@ export async function POST(request: NextRequest) {
         installed: error.status.installed,
         authenticated: error.status.authenticated,
         unavailableReason: error.status.unavailableReason,
+      });
+    }
+    if (error instanceof ExecutionCarrierPreflightError) {
+      return operatorError(error.failure, error.message, 400, {
+        runtime: workerRouting.selectedRuntime,
+        executionCarrier: defaults.workerExecutionCarrier,
       });
     }
     const message = error instanceof Error ? error.message : 'Runtime readiness check failed.';

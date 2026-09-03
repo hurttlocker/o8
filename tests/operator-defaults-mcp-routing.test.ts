@@ -7,6 +7,17 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { MODEL_IDS } from '@/lib/models';
 
 const spawnMock = vi.hoisted(() => vi.fn());
+const nativePreflightMock = vi.hoisted(() => vi.fn(async () => undefined));
+const carrierPreflightMock = vi.hoisted(() => vi.fn(async () => ({
+  runtime: 'codex' as const,
+  runtimeBinaryName: 'codex',
+  runtimeCli: { path: '/test/codex', source: 'path' as const, detectedAt: 1 },
+  executionCarrier: 'ori' as const,
+  carrierBinaryName: 'ori',
+  carrierCli: { path: '/test/ori', source: 'path' as const, detectedAt: 1 },
+  authSource: 'execution-carrier' as const,
+  authenticated: true as const,
+})));
 const ensureDispatchBackendReadyMock = vi.hoisted(() => vi.fn(async () => ({
   ready: true,
   reason: 'http_200',
@@ -91,9 +102,14 @@ vi.mock('@/lib/runtimes/shared/auth-detect', async (importOriginal) => {
       },
       suggestedSubscriptionProfile: { profile: null, detail: null },
     })),
-    assertRuntimeDispatchable: vi.fn(async () => undefined),
+    assertRuntimeDispatchable: nativePreflightMock,
   };
 });
+
+vi.mock('@/lib/runtimes/shared/execution-carrier-preflight', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/runtimes/shared/execution-carrier-preflight')>(),
+  assertExecutionCarrierDispatchable: carrierPreflightMock,
+}));
 
 vi.mock('@/lib/usage-log', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/usage-log')>();
@@ -252,6 +268,8 @@ beforeEach(() => {
   vi.resetModules();
 
   spawnMock.mockReset();
+  nativePreflightMock.mockClear();
+  carrierPreflightMock.mockClear();
   spawnMock.mockReturnValue({
     pid: 987_654,
     stdin: { end: vi.fn() },
@@ -310,6 +328,7 @@ describe('MCP operator defaults and dispatch routing', () => {
       broadcastCommentaryMaxPerHour: expect.any(Object),
       brainUseClaudeCli: expect.any(Object),
       defaultDispatchModel: expect.any(Object),
+      workerExecutionCarrier: expect.objectContaining({ enum: ['ori', ''] }),
       meteredPacketCostCapUsd: expect.any(Object),
       meteredPacketInputTokenCap: expect.any(Object),
       uiLoopMaxIterations: expect.any(Object),
@@ -409,6 +428,19 @@ describe('MCP operator defaults and dispatch routing', () => {
     });
     expect(fetchMock).not.toHaveBeenCalled();
     expect((await getOperatorDefaults()).values.codexWorkerEffort).toBe(before);
+  });
+
+  it.skipIf(process.platform === 'win32')('uses execution-carrier auth instead of native auth at the create-mission route', async () => {
+    const { handleOperatorDefaults } = await import('@/lib/mcp/operator-handlers/status');
+    await handleOperatorDefaults({ defaultDispatchRuntime: 'codex', workerExecutionCarrier: 'ori' });
+
+    await expect(createMissionThroughRoute({
+      repoPath: await createRegisteredTempRepo(),
+      issueNumber: 2037,
+      requestedRuntime: 'codex',
+    })).resolves.toMatchObject({ missionId: expect.any(String) });
+    expect(carrierPreflightMock).toHaveBeenCalledWith('codex', 'ori');
+    expect(nativePreflightMock).not.toHaveBeenCalled();
   });
 
   it('carries defaultDispatchModel through mission creation into the Codex spawn argv', async () => {

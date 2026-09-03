@@ -128,6 +128,20 @@ describe('buildSeatbeltProfile — policy shape', () => {
     expect(profile).toContain('(subpath "/Users/op/.codex")');
   });
 
+  it('can grant Ori state read access without making the credential tree writable', () => {
+    const oriProfile = buildSeatbeltProfile({
+      worktreePath: '/tmp/wt',
+      repoPath: '/tmp/repo',
+      homeDir: '/Users/op',
+      tmpDir: '/tmp/T',
+      extraReadPaths: ['/Users/op/.ori'],
+    });
+    const readAllow = oriProfile.indexOf(';; --- read: system + toolchain roots ---');
+    const writeAllow = oriProfile.indexOf(';; --- read+write: packet, Git metadata, TMPDIR, and tool state ---');
+    expect(oriProfile.indexOf('(subpath "/Users/op/.ori")', readAllow)).toBeGreaterThan(readAllow);
+    expect(oriProfile.indexOf('(subpath "/Users/op/.ori")', writeAllow)).toBe(-1);
+  });
+
   it('can deny protected executable paths and keep launch policy immutable', () => {
     expect(profile).toContain('(deny process-exec\n  (literal "/opt/codex/bin/codex")');
     expect(profile).toContain('(regex #"(^|/)codex(?:$|[-.])")');

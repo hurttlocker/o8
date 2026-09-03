@@ -82,6 +82,7 @@ export interface OperatorDefaults {
   opencodeOrchestratorModel: string | null;
   opencodeWorkerModel: string | null;
   defaultDispatchRuntime: DispatchRuntime;
+  workerExecutionCarrier: 'ori' | null;
   workerRuntimes: DispatchRuntime[];
   codexWorkerEffort: ThinkingEffort;
   claudeWorkerEffort: ThinkingEffort;

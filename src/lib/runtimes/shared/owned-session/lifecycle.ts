@@ -19,6 +19,7 @@ import type {
   OwnedRuntimeAdapter,
   OwnedSessionRecord,
 } from './types';
+import { executionCarrierRuntimeLabel } from '@/lib/runtimes/shared/execution-carrier';
 
 export interface OwnedLifecycleContext {
   adapter: OwnedRuntimeAdapter;
@@ -100,6 +101,7 @@ export function buildRuntimeSurface(
   running: boolean,
 ): RuntimeSurfaceSummary {
   const { adapter, runtimeId } = context;
+  const runtimeLabel = executionCarrierRuntimeLabel(adapter.squadShortName, session.runtimeConfig);
   const lifecycle = deriveLifecycle(context, session);
   const lastOutcomeLabel = lifecycle.lastOutcome ? ` • last ${lifecycle.lastOutcome}` : '';
 
@@ -112,8 +114,8 @@ export function buildRuntimeSurface(
     cwd: shortHome(session.repoPath),
     branch: session.branch,
     sourceLabel: running
-      ? `IDE-owned ${adapter.squadShortName} registry • active pid ${session.activeRun?.pid ?? 'unknown'}${lastOutcomeLabel}`
-      : `IDE-owned ${adapter.squadShortName} registry • ${lifecycleAvailabilityLabel(lifecycle.availability)}${lastOutcomeLabel}`,
+      ? `IDE-owned ${runtimeLabel} registry • active pid ${session.activeRun?.pid ?? 'unknown'}${lastOutcomeLabel}`
+      : `IDE-owned ${runtimeLabel} registry • ${lifecycleAvailabilityLabel(lifecycle.availability)}${lastOutcomeLabel}`,
     tailSourceLabel: `${shortHome(session.sessionDir)}/${RUNS_DIR}/*.jsonl`,
     capabilities: {
       attach: true,
@@ -158,26 +160,27 @@ export function buildCurrentTask(
   running: boolean,
 ) {
   const { adapter } = context;
+  const runtimeLabel = executionCarrierRuntimeLabel(adapter.squadShortName, session.runtimeConfig);
   const lifecycle = deriveLifecycle(context, session);
   if (running) {
-    return `IDE-launched ${adapter.squadShortName} run active. ${session.latestSummary}`;
+    return `IDE-launched ${runtimeLabel} run active. ${session.latestSummary}`;
   }
   if (lifecycle.availability === 'awaiting-thread') {
-    return `IDE-owned ${adapter.squadShortName} session launched and waiting for its first thread id. ${session.latestSummary}`;
+    return `IDE-owned ${runtimeLabel} session launched and waiting for its first thread id. ${session.latestSummary}`;
   }
   if (reviewDisposition(session) === 'resolved') {
     return `Operator marked this owned result resolved. Keep watching only if new evidence appears. ${session.latestSummary}`;
   }
   if (lifecycle.lastOutcome === 'interrupted') {
-    return `IDE-owned ${adapter.squadShortName} session is ready for resume after an interrupted run. ${session.latestSummary}`;
+    return `IDE-owned ${runtimeLabel} session is ready for resume after an interrupted run. ${session.latestSummary}`;
   }
   if (lifecycle.lastOutcome === 'failed') {
-    return `IDE-owned ${adapter.squadShortName} session is ready for a corrective follow-up after a failed run. ${session.latestSummary}`;
+    return `IDE-owned ${runtimeLabel} session is ready for a corrective follow-up after a failed run. ${session.latestSummary}`;
   }
   if (session.threadId) {
-    return `IDE-owned ${adapter.squadShortName} session ready for the next input via resume. ${session.latestSummary}`;
+    return `IDE-owned ${runtimeLabel} session ready for the next input via resume. ${session.latestSummary}`;
   }
-  return `IDE-owned ${adapter.squadShortName} session is idle. ${session.latestSummary}`;
+  return `IDE-owned ${runtimeLabel} session is idle. ${session.latestSummary}`;
 }
 
 export function formatChildExit(outcome: OwnedChildExitOutcome | undefined) {
