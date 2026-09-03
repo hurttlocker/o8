@@ -82,6 +82,7 @@ function main() {
       timestamp: scorecard.timestamp,
       durationMs: Date.now() - startedAt,
       comparedTo: scorecard.comparedTo ?? null,
+      target: scorecard.target ?? null,
       tracks: { speed: scorecard.tracks.speed },
     };
     let resultPath = null;
@@ -98,6 +99,7 @@ function main() {
       durationMs: result.durationMs,
       version,
       gitSha: sha,
+      target: result.target,
       comparedTo: result.comparedTo,
       resultPath: resultPath ? path.relative(ROOT, resultPath).split(path.sep).join('/') : null,
     };

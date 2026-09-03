@@ -22,6 +22,57 @@ function emptyMetrics(note) {
   return Object.fromEntries(METRICS.map((name) => [name, nullMetric(note)]));
 }
 
+function unavailableTarget(note) {
+  return {
+    appVersion: null,
+    buildGitSha: null,
+    buildMode: null,
+    platform: null,
+    unavailableReason: note,
+  };
+}
+
+export function targetFromPanelStatus(payload) {
+  if (!payload || typeof payload !== 'object') return unavailableTarget('panel status response was invalid');
+  const appVersion = typeof payload.version === 'string' && payload.version.trim()
+    ? payload.version.trim()
+    : null;
+  const buildGitSha = typeof payload.buildGitSha === 'string' && /^[0-9a-f]{40}$/i.test(payload.buildGitSha)
+    ? payload.buildGitSha.toLowerCase()
+    : null;
+  const buildMode = ['packaged', 'production', 'development'].includes(payload.buildMode)
+    ? payload.buildMode
+    : null;
+  const platform = typeof payload.platform === 'string' && payload.platform.trim()
+    ? payload.platform.trim()
+    : null;
+  const missing = [
+    !appVersion ? 'app version' : null,
+    !buildGitSha ? 'build Git SHA' : null,
+    !buildMode ? 'build mode' : null,
+  ].filter(Boolean);
+  return {
+    appVersion,
+    buildGitSha,
+    buildMode,
+    platform,
+    unavailableReason: missing.length > 0 ? `${missing.join(', ')} unavailable from running target` : null,
+  };
+}
+
+async function readTarget(baseUrl) {
+  try {
+    const response = await fetch(`${baseUrl}/api/panel/status`, {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!response.ok) return unavailableTarget(`/api/panel/status returned ${response.status}`);
+    return targetFromPanelStatus(await response.json());
+  } catch (error) {
+    return unavailableTarget(`/api/panel/status failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 function readPort() {
   try {
     return fs.readFileSync(path.join(os.homedir(), '.o8/api-port'), 'utf8').trim() || '3001';
@@ -203,13 +254,15 @@ async function measureBrowserBoot() {
 }
 
 async function main() {
+  const baseUrl = (process.env.BASE_URL || `http://127.0.0.1:${readPort()}`).replace(/\/$/, '');
+  const target = await readTarget(baseUrl);
   let metrics;
   try {
     metrics = await measureBrowserBoot();
   } catch (error) {
     metrics = emptyMetrics(`browser boot measurement failed: ${error instanceof Error ? error.message : String(error)}`);
   }
-  console.log(`O8_BROWSER_BOOT_RECEIPT=${JSON.stringify({ metrics })}`);
+  console.log(`O8_BROWSER_BOOT_RECEIPT=${JSON.stringify({ target, metrics })}`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

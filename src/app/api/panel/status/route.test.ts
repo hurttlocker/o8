@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/lib/codebase-memory/indexer', () => ({ ensureCodebaseMemoryBootIndex: vi.fn() }));
 vi.mock('@/lib/cortex/decay', () => ({ ensureDecayBootHook: vi.fn() }));
@@ -40,6 +40,10 @@ vi.mock('@/lib/terminal/persistence-health', () => ({
 
 const { GET } = await import('./route');
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe('GET /api/panel/status', () => {
   it('identifies the unauthenticated liveness responder as o8', async () => {
     const response = await GET();
@@ -61,5 +65,16 @@ describe('GET /api/panel/status', () => {
       },
     });
     expect(ensureShippedDarkAuditBootHookMock).toHaveBeenCalledOnce();
+  });
+
+  it('reports the packaged build identity without reading a source checkout', async () => {
+    vi.stubEnv('O8_BUILD_GIT_SHA', 'ABCDEF0123456789ABCDEF0123456789ABCDEF01');
+    vi.stubEnv('O8_PACKAGED_APP', '1');
+
+    const response = await GET();
+    expect(await response.json()).toMatchObject({
+      buildGitSha: 'abcdef0123456789abcdef0123456789abcdef01',
+      buildMode: 'packaged',
+    });
   });
 });

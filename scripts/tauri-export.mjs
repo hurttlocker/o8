@@ -5,6 +5,7 @@
  *   out/server/    → Tauri bundle resource (Next.js server + Node binary)
  */
 import { cpSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, readdirSync, chmodSync } from 'fs';
+import { execFileSync as runFileSync } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { prepareNativeBundle } from './native-bundle.mjs';
@@ -315,6 +316,16 @@ try {
 const APP_VERSION_STANZA =
   `\nif (!process.env.O8_APP_VERSION) process.env.O8_APP_VERSION = ${JSON.stringify(bakedAppVersion)};\n`;
 
+let bakedBuildGitSha = 'unknown';
+try {
+  bakedBuildGitSha = runFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: root,
+    encoding: 'utf8',
+  }).trim() || 'unknown';
+} catch { /* keep 'unknown' */ }
+const BUILD_GIT_SHA_STANZA =
+  `\nif (!process.env.O8_BUILD_GIT_SHA) process.env.O8_BUILD_GIT_SHA = ${JSON.stringify(bakedBuildGitSha)};\n`;
+
 // Early-boot crash guard (Rock 2): observe crashes that happen BEFORE Next's
 // instrumentation hook installs the full crash capture. Self-contained (no
 // imports of app code), best-effort, never throws. Appends the same JSONL shape
@@ -450,7 +461,7 @@ const origHttpsCreate = https.createServer;
 https.createServer = function (...args) {
   return stampClientAddr(origHttpsCreate.apply(this, args));
 };
-${RELEASE_ENV_STANZA}${SENTRY_ENV_STANZA}${APP_VERSION_STANZA}${BOOT_CAPTURE_STANZA}
+${RELEASE_ENV_STANZA}${SENTRY_ENV_STANZA}${APP_VERSION_STANZA}${BUILD_GIT_SHA_STANZA}${BOOT_CAPTURE_STANZA}
 process.env.O8_PACKAGED_APP = '1';
 require('./server-impl.js');
 `);

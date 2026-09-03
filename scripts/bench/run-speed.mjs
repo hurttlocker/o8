@@ -30,6 +30,16 @@ function emptyMetrics(note) {
   return Object.fromEntries(METRICS.map((name) => [name, nullMetric(note)]));
 }
 
+function unavailableTarget(note) {
+  return {
+    appVersion: null,
+    buildGitSha: null,
+    buildMode: null,
+    platform: null,
+    unavailableReason: note,
+  };
+}
+
 function readPort() {
   try {
     const raw = fs.readFileSync(path.join(os.homedir(), '.o8/api-port'), 'utf8').trim();
@@ -46,10 +56,11 @@ function serverIsRunning(port) {
   return !result.error && result.status === 0;
 }
 
-function writeSpeed(metrics) {
+function writeSpeed(metrics, target = null) {
   fs.mkdirSync(LATEST_DIR, { recursive: true });
   fs.writeFileSync(OUT_PATH, JSON.stringify({
     generatedAt: new Date().toISOString(),
+    target,
     metrics,
   }, null, 2));
 }
@@ -169,7 +180,7 @@ function parseBrowserBoot(stdout, metrics) {
   const receiptLine = stdout.split('\n').find((line) => line.startsWith('O8_BROWSER_BOOT_RECEIPT='));
   if (!receiptLine) {
     markHarnessFailure(metrics, METRICS.slice(0, 6), 'browser boot receipt missing');
-    return;
+    return null;
   }
   try {
     const receipt = JSON.parse(receiptLine.slice('O8_BROWSER_BOOT_RECEIPT='.length));
@@ -179,12 +190,14 @@ function parseBrowserBoot(stdout, metrics) {
         ? value
         : nullMetric('browser boot metric missing');
     }
+    return receipt.target ?? null;
   } catch (error) {
     markHarnessFailure(
       metrics,
       METRICS.slice(0, 6),
       `browser boot receipt invalid: ${error instanceof Error ? error.message : String(error)}`,
     );
+    return null;
   }
 }
 
@@ -208,12 +221,13 @@ function main() {
   const port = readPort();
   if (!serverIsRunning(port)) {
     const metrics = emptyMetrics('server not running');
-    writeSpeed(metrics);
+    writeSpeed(metrics, unavailableTarget('server not running'));
     printSummary(metrics);
     return;
   }
 
   const metrics = emptyMetrics('metric not run');
+  let target = null;
 
   const render = runHarness('measure-render-speed.sh');
   if (render.ok) {
@@ -228,7 +242,7 @@ function main() {
 
   const browserBoot = runNodeHarness('measure-browser-boot.mjs');
   if (browserBoot.ok) {
-    parseBrowserBoot(browserBoot.stdout, metrics);
+    target = parseBrowserBoot(browserBoot.stdout, metrics);
   } else {
     markHarnessFailure(metrics, METRICS.slice(0, 6), browserBoot.note);
   }
@@ -259,7 +273,7 @@ function main() {
     markHarnessFailure(metrics, ['socket_avg_conns'], socket.note);
   }
 
-  writeSpeed(metrics);
+  writeSpeed(metrics, target ?? unavailableTarget('browser boot did not return target identity'));
   printSummary(metrics);
 }
 
@@ -269,7 +283,7 @@ try {
   const note = err instanceof Error ? err.message : String(err);
   try {
     const metrics = emptyMetrics(`run-speed failed: ${note}`);
-    writeSpeed(metrics);
+    writeSpeed(metrics, unavailableTarget(`run-speed failed: ${note}`));
     printSummary(metrics);
   } catch {
     console.error(`run-speed failed: ${note}`);

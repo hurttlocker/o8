@@ -27,6 +27,13 @@ preflight runs the same measurement in an ephemeral directory. A regression or
 missing measurement prints a warning but does not block an otherwise valid
 release.
 
+The receipt keeps benchmark-source identity separate from the running target.
+`version` and `gitSha` identify the checkout that ran the benchmark. `target`
+records the application version, baked build Git SHA, build mode, and platform
+reported by the live server. Older installed builds that predate the baked SHA
+return an explicit null and reason; the benchmark must not substitute the
+checkout SHA for the target build.
+
 Then read:
 
 ```sh

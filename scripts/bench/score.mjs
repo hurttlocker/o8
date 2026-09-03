@@ -416,6 +416,7 @@ function renderMetricRows(trackName, track) {
 
 function renderMarkdown(card, priorSource) {
   const governanceScope = card.tracks.governance.scopeStatement;
+  const target = card.target;
   const lines = [
     '# o8 Benchmark Scorecard',
     '',
@@ -424,6 +425,11 @@ function renderMarkdown(card, priorSource) {
     `Timestamp: ${card.timestamp}`,
     `Node: ${card.node}`,
     `Prior: ${priorSource ?? 'none'}`,
+    `Target version: ${target?.appVersion ?? 'unavailable'}`,
+    `Target Git SHA: ${target?.buildGitSha ?? 'unavailable'}`,
+    `Target build mode: ${target?.buildMode ?? 'unavailable'}`,
+    `Target platform: ${target?.platform ?? 'unavailable'}`,
+    ...(target?.unavailableReason ? [`Target identity note: ${target.unavailableReason}`] : []),
     ...(governanceScope ? [`Governance scope: ${governanceScope}`] : []),
     '',
     renderMetricRows('Speed', card.tracks.speed),
@@ -467,6 +473,7 @@ function main() {
   const card = {
     version,
     gitSha: sha,
+    target: speed?.target ?? null,
     timestamp: new Date().toISOString(),
     node: process.version,
     comparedTo: priorSource,

@@ -31,6 +31,13 @@ export interface QuickBenchmarkPreflightReceipt {
   durationMs?: number;
   version?: string;
   gitSha?: string;
+  target?: {
+    appVersion: string | null;
+    buildGitSha: string | null;
+    buildMode: string | null;
+    platform: string | null;
+    unavailableReason: string | null;
+  } | null;
   comparedTo?: string | null;
   resultPath?: string | null;
 }

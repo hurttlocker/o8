@@ -31,6 +31,16 @@ function readServerVersion(): string | null {
   return cachedVersion || null;
 }
 
+function readBuildGitSha(): string | null {
+  const value = process.env.O8_BUILD_GIT_SHA?.trim() ?? '';
+  return /^[0-9a-f]{40}$/i.test(value) ? value.toLowerCase() : null;
+}
+
+function readBuildMode(): 'packaged' | 'production' | 'development' {
+  if (process.env.O8_PACKAGED_APP === '1') return 'packaged';
+  return process.env.NODE_ENV === 'production' ? 'production' : 'development';
+}
+
 export async function GET() {
   // Tauri shell hits /api/panel/status as a liveness probe right after the
   // bundled Node sidecar boots. Piggyback on that to kick the
@@ -63,6 +73,8 @@ export async function GET() {
     connected: false,
     gatewayUrl: null,
     version: readServerVersion(),
+    buildGitSha: readBuildGitSha(),
+    buildMode: readBuildMode(),
     platform: process.platform,
     nodeVersion: process.version,
     mode: 'local-cli',
