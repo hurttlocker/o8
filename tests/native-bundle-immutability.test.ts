@@ -9,6 +9,7 @@ import * as nativeBundle from '../scripts/native-bundle.mjs';
 const {
   DEFAULT_APPLE_SIGNING_IDENTITY,
   findMachOBinaries,
+  removeIncompatibleMacPrebuilds,
   removePackagedNativeBuildOutputs,
   resolveAppleSigningIdentity,
   signMachOBinaries,
@@ -44,6 +45,42 @@ describe('packaged native addon immutability', () => {
       expect(existsSync(join(serverRoot, 'node_modules', 'node-pty', 'build'))).toBe(false);
       expect(existsSync(join(serverRoot, 'node_modules', 'better-sqlite3', 'prebuilds', 'darwin-arm64', 'better_sqlite3.node'))).toBe(true);
       expect(existsSync(join(serverRoot, 'node_modules', 'node-pty', 'prebuilds', 'darwin-arm64', 'pty.node'))).toBe(true);
+    } finally {
+      rmSync(serverRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('removes non-Mac prebuild payloads while preserving every Mac ABI layout', () => {
+    const serverRoot = mkdtempSync(join(tmpdir(), 'o8-native-prebuild-prune-'));
+    const prebuildRoot = join(serverRoot, 'node_modules', 'node-pty', 'prebuilds');
+    try {
+      for (const relativePath of [
+        'darwin-arm64/pty.node',
+        'darwin-x64/pty.node',
+        'node-v127/darwin-arm64/pty.node',
+        'node-v137/darwin-x64/pty.node',
+        'linux-arm64/pty.node',
+        'linux-x64/pty.node',
+        'win32-arm64/conpty.pdb',
+        'win32-x64/conpty.pdb',
+      ]) {
+        const filePath = join(prebuildRoot, relativePath);
+        mkdirSync(join(filePath, '..'), { recursive: true });
+        writeFileSync(filePath, relativePath);
+      }
+
+      const removed = removeIncompatibleMacPrebuilds(serverRoot);
+
+      expect(removed.map((entry: string) => entry.replace(`${prebuildRoot}/`, '')).sort()).toEqual([
+        'linux-arm64',
+        'linux-x64',
+        'win32-arm64',
+        'win32-x64',
+      ]);
+      expect(existsSync(join(prebuildRoot, 'darwin-arm64', 'pty.node'))).toBe(true);
+      expect(existsSync(join(prebuildRoot, 'darwin-x64', 'pty.node'))).toBe(true);
+      expect(existsSync(join(prebuildRoot, 'node-v127', 'darwin-arm64', 'pty.node'))).toBe(true);
+      expect(existsSync(join(prebuildRoot, 'node-v137', 'darwin-x64', 'pty.node'))).toBe(true);
     } finally {
       rmSync(serverRoot, { recursive: true, force: true });
     }

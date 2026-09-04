@@ -322,6 +322,20 @@ export function removePackagedNativeBuildOutputs(serverRoot) {
   return removed;
 }
 
+export function removeIncompatibleMacPrebuilds(serverRoot) {
+  const prebuildRoot = join(serverRoot, 'node_modules', 'node-pty', 'prebuilds');
+  if (!existsSync(prebuildRoot)) return [];
+
+  const removed = [];
+  for (const entry of readdirSync(prebuildRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory() || (!entry.name.startsWith('linux-') && !entry.name.startsWith('win32-'))) continue;
+    const incompatiblePath = join(prebuildRoot, entry.name);
+    rmSync(incompatiblePath, { recursive: true, force: true });
+    removed.push(incompatiblePath);
+  }
+  return removed;
+}
+
 export async function prepareNativeBundle({ projectRoot, serverRoot, cacheRoot } = {}) {
   const resolvedProjectRoot = resolve(projectRoot ?? process.cwd());
   const resolvedServerRoot = resolve(serverRoot ?? join(resolvedProjectRoot, 'out', 'server'));
@@ -340,6 +354,7 @@ export async function prepareNativeBundle({ projectRoot, serverRoot, cacheRoot }
     nodeAbis,
   });
   removePackagedNativeBuildOutputs(resolvedServerRoot);
+  const prunedPrebuilds = removeIncompatibleMacPrebuilds(resolvedServerRoot);
   const nativeSigning = signMachOBinaries(join(resolvedServerRoot, 'node_modules'));
 
   const manifest = {
@@ -352,7 +367,7 @@ export async function prepareNativeBundle({ projectRoot, serverRoot, cacheRoot }
     },
   };
   writeFileSync(join(resolvedServerRoot, NATIVE_ABI_MANIFEST), `${JSON.stringify(manifest, null, 2)}\n`);
-  return { nodeAbis, nodeIndex, betterSqlite3, nodePty, nativeSigning };
+  return { nodeAbis, nodeIndex, betterSqlite3, nodePty, prunedPrebuilds, nativeSigning };
 }
 
 function readNativeAbiManifest(serverRoot) {
@@ -415,6 +430,12 @@ export function verifyNativeBundle(serverRoot, log = console.log) {
       throw new Error(`[native-gate] FAILED packaged runtime build output must be absent: ${buildPath}`);
     }
   }
+  const nodePtyPrebuildRoot = join(resolvedServerRoot, 'node_modules', 'node-pty', 'prebuilds');
+  for (const entry of readdirSync(nodePtyPrebuildRoot, { withFileTypes: true })) {
+    if (entry.isDirectory() && (entry.name.startsWith('linux-') || entry.name.startsWith('win32-'))) {
+      throw new Error(`[native-gate] FAILED incompatible Mac prebuild must be absent: ${join(nodePtyPrebuildRoot, entry.name)}`);
+    }
+  }
 
   // fsevents is an optional chokidar dependency and its universal Darwin
   // binary registers through Node-API, not NODE_MODULE_VERSION. Chokidar also
@@ -447,6 +468,7 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
         console.log(`[native-export] ${asset.cacheSource === 'cache' ? 'using cache' : 'cached download'} ${asset.cachePath}`);
       }
       console.log(`[native-export] node-pty ${result.nodePty.version} Node-API prebuilds copied for every supported ABI`);
+      console.log(`[native-export] pruned ${result.prunedPrebuilds.length} incompatible Mac prebuild directories`);
       console.log(`[native-export] signed ${result.nativeSigning.binaries.length} nested Mach-O binaries with ${result.nativeSigning.identity}`);
     } else {
       verifyNativeBundle(targetArg);
