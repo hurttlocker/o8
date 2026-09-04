@@ -164,7 +164,7 @@ wait "$child"
     process.env.O8_WORKTREE_ROOT = path.join(testRoot, 'worktrees');
     process.env.O8_APFS_COW_WORKSPACES = '0';
     process.env.O8_APFS_DEPENDENCY_IMAGES = '0';
-    process.env.O8_PACKAGED_APP = '0';
+    delete process.env.O8_PACKAGED_APP;
     delete process.env.O8_DISPATCH_MODEL;
     process.env.O8_STORAGE_RESERVE_RATIO = String(testStorageReserveRatio);
     process.env.O8_STORAGE_RESERVE_FLOOR_GB = String(testStorageReserveFloorGb);
