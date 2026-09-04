@@ -1,4 +1,8 @@
-import type { FootprintSampleAggregate, FootprintSampleInput } from './footprint-budget.d.mts';
+import type {
+  FootprintChurnIdentity,
+  FootprintSampleAggregate,
+  FootprintSampleInput,
+} from './footprint-budget.d.mts';
 
 export const LOAD_SCENARIO_LIMITS: {
   maxLaneCount: number;
@@ -27,6 +31,10 @@ export interface LoadScenarioResiduals {
   counts: LoadScenarioResidualCounts;
   preservedWorktrees: Array<{ digest: string; insideLoadRepo: boolean }>;
   preservedLanes: Array<{ packetDigest: string; status: string }>;
+  preservedChildProcesses: FootprintChurnIdentity[];
+  truncatedChildProcessIdentityCount: number;
+  preservedListeners: Array<{ transport: 'tcp'; state: 'listening' }>;
+  truncatedListenerIdentityCount: number;
 }
 
 export interface LoadScenarioScope {
@@ -66,6 +74,11 @@ export interface LoadScenarioDriver {
   waitForActiveLanes(scope: LoadScenarioScope, deadline?: number): Promise<boolean>;
   releaseScopedLanes(scope: LoadScenarioScope): Promise<LoadScenarioDisposition[]>;
   collectResiduals(baseline: LoadScenarioBaseline, scope: LoadScenarioScope): Promise<LoadScenarioResiduals>;
+  waitForResiduals(
+    baseline: LoadScenarioBaseline,
+    scope: LoadScenarioScope,
+    deadline?: number,
+  ): Promise<LoadScenarioResiduals>;
 }
 
 export type LoadScenarioResult =

@@ -3,6 +3,7 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import {
+  buildChurnIdentities,
   descendantPids,
   redactedDigest,
   snapshotProcesses,
@@ -50,6 +51,8 @@ export const LOAD_RUNTIME_BINARIES = Object.freeze({
 // A lane is finished only in the product's own lane-terminal set; anything else
 // still counts as load. Bound to LANE_TERMINAL_STATUSES by the route-path test.
 export const LOAD_TERMINAL_LANE_STATUSES = Object.freeze(['failed', 'completed', 'archived']);
+
+const RESIDUAL_IDENTITY_LIMIT = 64;
 
 // close-unmerged accepts exactly adopted_elsewhere | superseded | spec_changed |
 // wontfix (src/lib/orchestrator/close-unmerged-shared.ts). Anything else is a
@@ -346,13 +349,60 @@ export function createHttpLoadDriver({
     return new Set(parseWorktreePaths(run('git', ['-C', repoPath, 'worktree', 'list', '--porcelain'], { encoding: 'utf8' })));
   }
 
-  function ownedPids() {
-    return descendantPids(snapshot(run), rootPid);
+  function ownedProcessState() {
+    const processes = snapshot(run);
+    return { processes, pids: descendantPids(processes, rootPid) };
+  }
+
+  async function collectResiduals(baseline, scope) {
+    const { processes, pids } = ownedProcessState();
+    const ports = listeningPortsForPids(pids, run);
+    const survivingPids = new Set([...pids].filter((pid) => !baseline.pids.has(pid)));
+    const survivingPorts = [...ports].filter((port) => !baseline.ports.has(port));
+    const survivingWorktrees = [...worktreePaths()].filter((worktree) => (
+      !baseline.worktrees.has(worktree) && existsSync(worktree)
+    ));
+    const activeScoped = (await scopedAgents(scope.packetIds)).filter((agent) => isActiveLaneStatus(agent?.status));
+    const childIdentities = buildChurnIdentities({
+      spawned: survivingPids,
+      exited: new Set(),
+      before: new Map(),
+      after: processes,
+      beforeOwned: new Set(),
+      afterOwned: pids,
+      rootPid,
+      limit: RESIDUAL_IDENTITY_LIMIT,
+    });
+    return {
+      counts: {
+        lanes: activeScoped.length,
+        childProcesses: survivingPids.size,
+        worktrees: survivingWorktrees.length,
+        listeners: survivingPorts.length,
+      },
+      // Preserved state is REPORTED, never removed. Paths and packet ids use
+      // digests. Processes and listeners use closed descriptors, so raw argv,
+      // ports, machine names, and credentials cannot enter a release receipt.
+      preservedWorktrees: survivingWorktrees.map((worktree) => ({
+        digest: redactedDigest(worktree),
+        insideLoadRepo: path.resolve(worktree).startsWith(`${path.resolve(repoPath)}${path.sep}`),
+      })),
+      preservedLanes: activeScoped.map((agent) => ({
+        packetDigest: redactedDigest(agent?.packetId ?? ''),
+        status: String(agent?.status ?? 'unknown'),
+      })),
+      preservedChildProcesses: childIdentities.identities,
+      truncatedChildProcessIdentityCount: childIdentities.truncatedIdentityCount,
+      preservedListeners: survivingPorts
+        .slice(0, RESIDUAL_IDENTITY_LIMIT)
+        .map(() => ({ transport: 'tcp', state: 'listening' })),
+      truncatedListenerIdentityCount: Math.max(0, survivingPorts.length - RESIDUAL_IDENTITY_LIMIT),
+    };
   }
 
   return {
     async captureBaseline() {
-      const pids = ownedPids();
+      const { pids } = ownedProcessState();
       const response = await fetchImpl(`${apiBase}/api/orchestrator/status`, { headers });
       // Nothing of ours exists yet, so every live lane belongs to someone else.
       const activeLaneCount = response.status === 404
@@ -458,30 +508,15 @@ export function createHttpLoadDriver({
     },
 
     async collectResiduals(baseline, scope) {
-      const pids = ownedPids();
-      const ports = listeningPortsForPids(pids, run);
-      const survivingWorktrees = [...worktreePaths()].filter((worktree) => (
-        !baseline.worktrees.has(worktree) && existsSync(worktree)
-      ));
-      const activeScoped = (await scopedAgents(scope.packetIds)).filter((agent) => isActiveLaneStatus(agent?.status));
-      return {
-        counts: {
-          lanes: activeScoped.length,
-          childProcesses: [...pids].filter((pid) => !baseline.pids.has(pid)).length,
-          worktrees: survivingWorktrees.length,
-          listeners: [...ports].filter((port) => !baseline.ports.has(port)).length,
-        },
-        // Preserved state is REPORTED, never removed. Identities are digests so
-        // a release receipt can name what survived without publishing a path.
-        preservedWorktrees: survivingWorktrees.map((worktree) => ({
-          digest: redactedDigest(worktree),
-          insideLoadRepo: path.resolve(worktree).startsWith(`${path.resolve(repoPath)}${path.sep}`),
-        })),
-        preservedLanes: activeScoped.map((agent) => ({
-          packetDigest: redactedDigest(agent?.packetId ?? ''),
-          status: String(agent?.status ?? 'unknown'),
-        })),
-      };
+      return collectResiduals(baseline, scope);
+    },
+
+    async waitForResiduals(baseline, scope, deadline = now() + limits.drainTimeoutMs) {
+      for (;;) {
+        const residuals = await collectResiduals(baseline, scope);
+        if (residualTotal(residuals) === 0 || now() >= deadline) return residuals;
+        await sleep(limits.pollMs);
+      }
     },
   };
 }
@@ -517,7 +552,7 @@ export async function runLoadScenario({ plan, driver, sample }) {
     }
   } finally {
     dispositions = await driver.releaseScopedLanes(scope);
-    residuals = await driver.collectResiduals(baseline, scope);
+    residuals = await driver.waitForResiduals(baseline, scope);
   }
 
   const teardown = {

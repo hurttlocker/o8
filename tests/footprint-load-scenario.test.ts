@@ -64,7 +64,15 @@ function loadedSample(index: number) {
 }
 
 const CLEAN_COUNTS = { lanes: 0, childProcesses: 0, worktrees: 0, listeners: 0 };
-const CLEAN_RESIDUALS = { counts: CLEAN_COUNTS, preservedWorktrees: [], preservedLanes: [] };
+const CLEAN_RESIDUALS = {
+  counts: CLEAN_COUNTS,
+  preservedWorktrees: [],
+  preservedLanes: [],
+  preservedChildProcesses: [],
+  truncatedChildProcessIdentityCount: 0,
+  preservedListeners: [],
+  truncatedListenerIdentityCount: 0,
+};
 const PLAN = { available: true as const, laneCount: 2, runtime: 'codex', binaryName: 'codex', repoPath: '/tmp/load-repo' };
 
 function fakeDriver(overrides: Record<string, unknown> = {}) {
@@ -94,7 +102,11 @@ function fakeDriver(overrides: Record<string, unknown> = {}) {
     },
     collectResiduals: async () => {
       calls.push('collectResiduals');
-      return { counts: { ...CLEAN_COUNTS }, preservedWorktrees: [], preservedLanes: [] };
+      return { ...CLEAN_RESIDUALS, counts: { ...CLEAN_COUNTS } };
+    },
+    waitForResiduals: async () => {
+      calls.push('waitForResiduals');
+      return { ...CLEAN_RESIDUALS, counts: { ...CLEAN_COUNTS } };
     },
     ...overrides,
   };
@@ -405,7 +417,7 @@ describe('load scenario execution', () => {
       'dispatchScopedLanes',
       'waitForActiveLanes',
       'releaseScopedLanes:p1+p2',
-      'collectResiduals',
+      'waitForResiduals',
     ]);
   });
 
@@ -445,10 +457,15 @@ describe('load scenario execution', () => {
     const residualKeys = ['lanes', 'childProcesses', 'worktrees', 'listeners'] as const;
     for (const residual of residualKeys) {
       const driver = fakeDriver({
-        collectResiduals: async () => ({
+        waitForResiduals: async () => ({
+          ...CLEAN_RESIDUALS,
           counts: { ...CLEAN_COUNTS, [residual]: 1 },
           preservedWorktrees: residual === 'worktrees' ? [{ digest: 'aaaaaaaaaaaa', insideLoadRepo: true }] : [],
           preservedLanes: residual === 'lanes' ? [{ packetDigest: 'bbbbbbbbbbbb', status: 'running' }] : [],
+          preservedChildProcesses: residual === 'childProcesses'
+            ? [{ lifecycle: 'spawned', component: 'otherChild', descriptor: 'unclassified', depthFromRoot: 1, parentComponent: 'nativeHost' }]
+            : [],
+          preservedListeners: residual === 'listeners' ? [{ transport: 'tcp', state: 'listening' }] : [],
         }),
       });
       const result = await runLoadScenario({
@@ -486,7 +503,7 @@ describe('load scenario execution', () => {
       'createScopedLanes:2',
       'dispatchScopedLanes',
       'releaseScopedLanes:p1+p2',
-      'collectResiduals',
+      'waitForResiduals',
     ]);
   });
 });
@@ -505,6 +522,7 @@ describe('load scenario driver', () => {
     post: (route: string, body: Record<string, unknown>) => unknown;
     agents: () => Array<Record<string, unknown>> | null;
     run?: (command: string, args: string[]) => string;
+    snapshot?: () => Map<number, { pid: number; ppid: number; cpuTimeSeconds: number; command: string }>;
   }) {
     const requests: Array<{ route: string; body: Record<string, unknown> }> = [];
     const fetchImpl = (async (url: string, init?: { method?: string; body?: string }) => {
@@ -531,7 +549,8 @@ describe('load scenario driver', () => {
         if (args.includes('-iTCP')) return 'node 100 op 21u TCP 127.0.0.1:3060 (LISTEN)\n';
         return '';
       }),
-      snapshot: () => new Map([[100, { pid: 100, ppid: 1, cpuTimeSeconds: 0, command: '/bundle/o8' }]]),
+      snapshot: handlers.snapshot
+        ?? (() => new Map([[100, { pid: 100, ppid: 1, cpuTimeSeconds: 0, command: '/bundle/o8' }]])),
       limits: { ...LOAD_SCENARIO_LIMITS, activationTimeoutMs: 1_000, drainTimeoutMs: 1_000, pollMs: 1 },
     });
     return { driver, requests };
@@ -661,5 +680,78 @@ describe('load scenario driver', () => {
     } finally {
       rmSync(survivor, { recursive: true, force: true });
     }
+  });
+
+  it('waits for an owned child to finish draining before declaring a residual', async () => {
+    let snapshotIndex = 0;
+    const root = { pid: 100, ppid: 1, cpuTimeSeconds: 0, command: '/bundle/o8' };
+    const child = {
+      pid: 201,
+      ppid: 100,
+      cpuTimeSeconds: 0,
+      command: '/Users/operator/private-worker --token=secret',
+    };
+    const snapshots = [
+      new Map([[100, root]]),
+      new Map([[100, root], [201, child]]),
+      new Map([[100, root]]),
+    ];
+    const { driver } = driverFixture({
+      agents: () => [],
+      post: () => ({}),
+      snapshot: () => snapshots[Math.min(snapshotIndex++, snapshots.length - 1)],
+    });
+    const baseline = await driver.captureBaseline();
+
+    const residuals = await driver.waitForResiduals(
+      baseline,
+      { missionId: 'm-1', packetIds: [] },
+      Date.now() + 100,
+    );
+
+    expect(residuals).toEqual(CLEAN_RESIDUALS);
+    expect(snapshotIndex).toBe(3);
+  });
+
+  it('reports surviving child and listener identities without raw process details', async () => {
+    const root = { pid: 100, ppid: 1, cpuTimeSeconds: 0, command: '/bundle/o8' };
+    const child = {
+      pid: 201,
+      ppid: 100,
+      cpuTimeSeconds: 0,
+      command: '/Users/operator/private-worker --token=secret',
+    };
+    const { driver } = driverFixture({
+      agents: () => [],
+      post: () => ({}),
+      run: (_command, args) => {
+        if (args[3] === 'list') return worktreeOutput;
+        if (args.includes('-iTCP')) return 'private-worker 201 op 21u TCP 127.0.0.1:49153 (LISTEN)\n';
+        return '';
+      },
+      snapshot: () => new Map([[100, root], [201, child]]),
+    });
+    const baseline = {
+      activeLaneCount: 0,
+      worktrees: new Set(parseWorktreePaths(worktreeOutput)),
+      pids: new Set([100]),
+      ports: new Set<number>(),
+    };
+
+    const residuals = await driver.collectResiduals(baseline, { missionId: 'm-1', packetIds: [] });
+
+    expect(residuals.counts).toMatchObject({ childProcesses: 1, listeners: 1 });
+    expect(residuals.preservedChildProcesses).toEqual([{
+      lifecycle: 'spawned',
+      component: 'otherChild',
+      descriptor: 'unclassified',
+      depthFromRoot: 1,
+      parentComponent: 'nativeHost',
+    }]);
+    expect(residuals.preservedListeners).toEqual([{ transport: 'tcp', state: 'listening' }]);
+    const serialized = JSON.stringify(residuals);
+    expect(serialized).not.toContain('/Users/operator');
+    expect(serialized).not.toContain('secret');
+    expect(serialized).not.toContain('49153');
   });
 });
