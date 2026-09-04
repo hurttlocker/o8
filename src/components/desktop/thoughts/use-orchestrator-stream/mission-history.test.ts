@@ -35,6 +35,12 @@ async function archiveAndReadTitle(input: {
     if (url === '/api/v2/chat-history' && init?.method === 'POST') {
       return new Response(JSON.stringify({ ok: true }));
     }
+    if (url.startsWith('/api/v2/chat-history?tabId=')) {
+      // The archiver probes for an existing snapshot before writing one. Answer
+      // the way the real route answers for a tabId it has never written, so the
+      // probe reads "not archived" instead of failing closed on a foreign shape.
+      return new Response(JSON.stringify({ exists: false, messages: [] }));
+    }
     return new Response(JSON.stringify({ ok: true }));
   });
   vi.stubGlobal('fetch', fetchMock);
