@@ -5,8 +5,6 @@ import { useEffect, useState } from 'react';
 import { ActivityIcon } from './shared';
 import { SettingsGroup, SettingsRow, ValuePill } from './grouped';
 
-type ShippedDarkLifecycle = 'promotion-candidate' | 'deliberate-default-off' | 'promoted';
-
 interface ShippedDarkFlagStatus {
   tomlKey: string;
   codeDefault: unknown;
@@ -14,7 +12,7 @@ interface ShippedDarkFlagStatus {
   operatorValueSource: 'env' | 'file' | 'profile' | 'default';
   landedRelease: string | null;
   darkForReleases: number | null;
-  lifecycle: ShippedDarkLifecycle;
+  lifecycle?: string | null;
   lifecycleRationale: string | null;
   needsAttention: boolean;
 }
@@ -29,11 +27,13 @@ interface ShippedDarkAuditStatus {
   flags: ShippedDarkFlagStatus[];
 }
 
-const LIFECYCLE_LABELS: Record<ShippedDarkLifecycle, string> = {
-  'promotion-candidate': 'Awaiting promotion review',
-  'deliberate-default-off': 'Off by design',
-  promoted: 'Promoted',
-};
+function lifecycleLabel(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim()) return 'Lifecycle unknown';
+  if (value === 'promotion-candidate') return 'Awaiting promotion review';
+  if (value === 'deliberate-default-off') return 'Off by design';
+  if (value === 'promoted') return 'Promoted';
+  return `Lifecycle: ${value}`;
+}
 
 function formatValue(value: unknown): string {
   if (typeof value === 'string') return value;
@@ -104,15 +104,16 @@ export function ShippedDarkAuditSection() {
         const age = flag.darkForReleases === null
           ? 'Age unknown'
           : `${flag.darkForReleases} release${flag.darkForReleases === 1 ? '' : 's'}`;
+        const label = lifecycleLabel(flag.lifecycle);
         const disposition = flag.lifecycleRationale
-          ? `${LIFECYCLE_LABELS[flag.lifecycle]} — ${flag.lifecycleRationale}`
-          : LIFECYCLE_LABELS[flag.lifecycle];
+          ? `${label} — ${flag.lifecycleRationale}`
+          : label;
         return (
           <SettingsRow
             key={flag.tomlKey}
             label={flag.tomlKey}
             subtitle={`Default ${formatValue(flag.codeDefault)} · operator ${formatValue(flag.operatorValue)} (${flag.operatorValueSource}) · landed ${flag.landedRelease ?? 'unknown'} · ${age} · ${disposition}`}
-            accessory={<ValuePill tone={flag.needsAttention ? 'destructive' : 'default'}>{flag.needsAttention ? age : LIFECYCLE_LABELS[flag.lifecycle]}</ValuePill>}
+            accessory={<ValuePill tone={flag.needsAttention ? 'destructive' : 'default'}>{flag.needsAttention ? age : label}</ValuePill>}
             divider={index < audit.flags.length - 1}
           />
         );

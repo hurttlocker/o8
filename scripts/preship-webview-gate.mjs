@@ -17,9 +17,7 @@ import {
 import {
   LOAD_UNAVAILABLE_REASONS,
   createHttpLoadDriver,
-  isLiveOperatorPath,
-  planLoadScenario,
-  resolveLoadScenarioRequest,
+  planGateLoadScenario,
   runLoadScenario,
 } from './lib/footprint-budget-load.mjs';
 import { BOOT_PROBE_JS, classifyBootProbe } from './preship-gate-logic.mjs';
@@ -225,20 +223,13 @@ function readGateToken(dataDir) {
   return existsSync(tokenPath) ? readFileSync(tokenPath, 'utf8').trim() : '';
 }
 
-function planGateLoadScenario(dataDir) {
-  const request = resolveLoadScenarioRequest(process.env);
-  return {
-    request,
-    plan: planLoadScenario({
-      request,
-      probes: {
-        pathExists: (target) => existsSync(target),
-        isLiveOperatorPath: (target) => isLiveOperatorPath(target, os.homedir()),
-        binaryAvailable: (binaryName) => commandOnPath(binaryName),
-        apiTokenAvailable: () => readGateToken(dataDir).length > 0,
-      },
-    }),
-  };
+// The OPERATOR's profile, not the isolated child's: the question the probes ask
+// is which repositories hold real work, and that answer lives in the live data
+// dir. Mirrors getDataDir()'s precedence in src/lib/data-dir-migration.ts.
+function operatorDataDir() {
+  return process.env.O8_DATA_DIR?.trim()
+    || process.env.CORTEX_IDE_DATA_DIR?.trim()
+    || path.join(os.homedir(), '.o8');
 }
 
 function clearReleaseNote(appTar) {
@@ -594,7 +585,16 @@ async function main() {
     const idleSamples = await collectFootprintSamples(footprintContext, sampleCount, 'idle-hidden');
 
     signalFailed = 'footprint-load-scenario';
-    const { plan } = planGateLoadScenario(dataDir);
+    const { plan } = planGateLoadScenario({
+      env: process.env,
+      // The release script and packageInfo both require this checkout as cwd.
+      checkoutRoot: process.cwd(),
+      operatorDataDir: operatorDataDir(),
+      homeDir: os.homedir(),
+      binaryAvailable: (binaryName) => commandOnPath(binaryName),
+      // The child's own token comes from the isolated profile provisioned above.
+      apiTokenAvailable: () => readGateToken(dataDir).length > 0,
+    });
     let loadScenario = plan;
     if (plan.available) {
       loadScenario = await runLoadScenario({

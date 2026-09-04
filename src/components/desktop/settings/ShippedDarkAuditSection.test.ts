@@ -140,4 +140,53 @@ describe('ShippedDarkAuditSection', () => {
     expect(container.textContent).toContain('Awaiting promotion review');
     expect(container.textContent).not.toContain('need attention');
   });
+
+  it('renders neutral lifecycle labels for missing and future server values', async () => {
+    stubStatus({
+      schema: 'o8/shipped-dark-audit-status/v2',
+      status: 'current',
+      checkedAt: '2026-08-27T12:05:00.000Z',
+      currentRelease: '0.1.716',
+      thresholdReleases: 3,
+      checkedFlagCount: 2,
+      attentionFlagCount: 0,
+      flags: [{
+        tomlKey: 'experimental.missing_lifecycle',
+        codeDefault: false,
+        operatorValue: false,
+        operatorValueSource: 'default',
+        landedRelease: null,
+        darkForReleases: null,
+        lifecycleRationale: null,
+        needsAttention: false,
+      }, {
+        tomlKey: 'experimental.future_lifecycle',
+        codeDefault: false,
+        operatorValue: false,
+        operatorValueSource: 'default',
+        landedRelease: '0.1.716',
+        darkForReleases: 0,
+        lifecycle: 'review-window',
+        lifecycleRationale: null,
+        needsAttention: false,
+      }, {
+        tomlKey: 'experimental.prototype_named_lifecycle',
+        codeDefault: false,
+        operatorValue: false,
+        operatorValueSource: 'default',
+        landedRelease: '0.1.716',
+        darkForReleases: 0,
+        lifecycle: 'toString',
+        lifecycleRationale: null,
+        needsAttention: false,
+      }],
+    });
+
+    await render();
+
+    expect(container.textContent).toContain('Lifecycle unknown');
+    expect(container.textContent).toContain('Lifecycle: review-window');
+    expect(container.textContent).toContain('Lifecycle: toString');
+    expect(container.textContent).not.toContain('undefined');
+  });
 });

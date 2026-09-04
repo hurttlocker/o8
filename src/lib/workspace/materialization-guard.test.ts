@@ -191,6 +191,42 @@ describe('transient source repo ownership (no-snapshot branch)', () => {
     expect(consulted).toEqual(['/Users/o8/o8', TRANSIENT_REPO]);
   });
 
+  it('accepts the manager collision suffix shape only when its receipt proves ownership', async () => {
+    const consulted: string[] = [];
+    const collisionWorktree = `${WORKTREE}-a1b2`;
+    await expect(inspectOwnedWorkspaceMaterialization(transientInput({
+      binding: { ...transientInput().binding, cwd: collisionWorktree },
+      repoPath: collisionWorktree,
+    }), {
+      listRepos: async () => [],
+      assertManagedWorkspaceMaterialization: async (repoPath: string, workspacePath: string) => {
+        consulted.push(repoPath);
+        if (repoPath !== TRANSIENT_REPO || workspacePath !== collisionWorktree) {
+          throw new Error('Managed workspace metadata is absent or does not own this path.');
+        }
+        return { ...IDENTITY, canonicalPath: collisionWorktree };
+      },
+      findLaneByPacket: () => ({ id: LANE_ID, repoPath: TRANSIENT_REPO }),
+    })).resolves.toMatchObject({ status: 'available', source: 'materialized' });
+    expect(consulted).toEqual([TRANSIENT_REPO]);
+  });
+
+  it('refuses packet-prefix lookalikes outside the manager collision invariant', async () => {
+    for (const suffix of ['retry', 'abc', 'abcde', 'AB12', 'ab_2']) {
+      const consulted: string[] = [];
+      const lookalike = `${WORKTREE}-${suffix}`;
+      await expect(inspectOwnedWorkspaceMaterialization(transientInput({
+        binding: { ...transientInput().binding, cwd: lookalike },
+        repoPath: lookalike,
+      }), {
+        listRepos: async () => [],
+        assertManagedWorkspaceMaterialization: receiptOwnedBy(TRANSIENT_REPO, consulted),
+        findLaneByPacket: () => ({ id: LANE_ID, repoPath: TRANSIENT_REPO }),
+      })).resolves.toMatchObject({ status: 'unknown' });
+      expect(consulted, suffix).toEqual([]);
+    }
+  });
+
   it('never lets the fallback bypass a pinned repository identity', async () => {
     const consulted: string[] = [];
     await expect(inspectOwnedWorkspaceMaterialization(transientInput({

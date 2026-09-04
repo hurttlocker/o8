@@ -2467,6 +2467,14 @@
       ]
     },
     {
+      "path": "tests/transient-materialization-fallback-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/truth-cli-real-path.test.ts",
       "reasons": [
         "child-process",

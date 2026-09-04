@@ -68,6 +68,7 @@ import {
 } from '@/lib/workspace/workspace-materialization-retirement';
 import type { StorageRootIdentity } from '@/lib/workspace/storage-admission';
 import {
+  appendWorktreeCollisionSuffix,
   assertManagedWorktreeCreatedBoundary,
   assertManagedWorktreeMaterializationBoundary,
   managedPacketWorktreeId,
@@ -431,8 +432,7 @@ export class WorktreeManager {
       || hasPendingRetirement(taskId)
       || (!branchPinned && (await branchExists(attemptBranch)));
     while (collided) {
-      const suffix = Math.random().toString(36).slice(2, 6);
-      taskId = `${baseTaskId}-${suffix}`;
+      taskId = appendWorktreeCollisionSuffix(baseTaskId);
       // Only re-suffix the branch when the caller didn't pin one. With a pinned
       // lane.branch we let the collision retry recompute the dir id only — the
       // branch name is the lane's identity and must survive the loop.

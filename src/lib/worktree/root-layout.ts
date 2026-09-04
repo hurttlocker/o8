@@ -12,6 +12,7 @@ import { guardedWorkspaceInvocation } from './materialization-execution';
 
 export const LEGACY_WORKTREE_DIR_NAME = '.cortex-worktrees';
 export const WORKTREE_ROOT_ENV = 'O8_WORKTREE_ROOT';
+const WORKTREE_COLLISION_SUFFIX_RE = /^[a-z0-9]{4}$/;
 
 /** Stable directory prefix shared by materialization, cleanup, and reconciliation. */
 export function managedPacketWorktreeId(packetId: string): string | null {
@@ -23,6 +24,28 @@ export function managedPacketWorktreeId(packetId: string): string | null {
     .replace(/^-|-$/g, '')
     .slice(0, 60);
   return slug ? `packet-${slug}` : null;
+}
+
+/**
+ * Syntactic prefilter for a packet's manager-owned slot. Collision retries add
+ * exactly four lowercase base-36 characters; the metadata identity receipt
+ * must still prove that WorktreeManager created the candidate directory.
+ */
+export function isManagedPacketWorktreeId(candidateId: string, packetId: string): boolean {
+  const baseId = managedPacketWorktreeId(packetId);
+  if (!baseId) return false;
+  if (candidateId === baseId) return true;
+  if (!candidateId.startsWith(`${baseId}-`)) return false;
+  return WORKTREE_COLLISION_SUFFIX_RE.test(candidateId.slice(baseId.length + 1));
+}
+
+/** Keep collision generation and recognition on one naming invariant. */
+export function appendWorktreeCollisionSuffix(baseId: string): string {
+  let suffix = '';
+  while (!WORKTREE_COLLISION_SUFFIX_RE.test(suffix)) {
+    suffix = Math.random().toString(36).slice(2, 6);
+  }
+  return `${baseId}-${suffix}`;
 }
 
 export function canonicalRepoRoot(repoRoot: string): string {

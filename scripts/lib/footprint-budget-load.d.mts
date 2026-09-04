@@ -91,17 +91,53 @@ export function resolveLoadScenarioRequest(
   limits?: typeof LOAD_SCENARIO_LIMITS,
 ): LoadScenarioRequest;
 
+export type RegisteredOperatorRepos =
+  | { readable: true; paths: string[] }
+  | { readable: false; detail?: unknown };
+
+export interface LoadScenarioProbes {
+  pathExists(target: string): boolean;
+  isLiveOperatorPath(target: string): boolean;
+  isReleaseCheckoutPath(target: string): boolean;
+  registeredOperatorRepos(): RegisteredOperatorRepos;
+  binaryAvailable(binaryName: string): boolean;
+  apiTokenAvailable(): boolean;
+}
+
 export function planLoadScenario(input: {
   request: LoadScenarioRequest;
-  probes: {
-    pathExists(target: string): boolean;
-    isLiveOperatorPath(target: string): boolean;
-    binaryAvailable(binaryName: string): boolean;
-    apiTokenAvailable(): boolean;
-  };
+  probes: LoadScenarioProbes;
 }): LoadScenarioPlan;
 
 export function isLiveOperatorPath(target: string, homeDir: string): boolean;
+export function pathsOverlap(left: string, right: string): boolean;
+export function isReleaseCheckoutPath(target: string, checkoutRoot: string): boolean;
+export function findRegisteredOperatorRepo(target: string, registeredPaths: string[]): string | null;
+export function readRegisteredOperatorRepoPaths(
+  dataDir: string,
+  io?: {
+    readFileSync(target: string, encoding: 'utf8'): string;
+  },
+): RegisteredOperatorRepos;
+export function createLoadScenarioProbes(input: {
+  checkoutRoot: string;
+  operatorDataDir: string;
+  homeDir: string;
+  binaryAvailable(binaryName: string): boolean;
+  apiTokenAvailable(): boolean;
+  pathExists?(target: string): boolean;
+  readRegistered?(dataDir: string): RegisteredOperatorRepos;
+}): LoadScenarioProbes;
+export function planGateLoadScenario(input: {
+  env: Record<string, string | undefined>;
+  checkoutRoot: string;
+  operatorDataDir: string;
+  homeDir: string;
+  binaryAvailable(binaryName: string): boolean;
+  apiTokenAvailable(): boolean;
+  pathExists?(target: string): boolean;
+  readRegistered?(dataDir: string): RegisteredOperatorRepos;
+}): { request: LoadScenarioRequest; plan: LoadScenarioPlan };
 export function unwrapOperatorResult(payload: unknown, route: string): Record<string, unknown> | null;
 export function isActiveLaneStatus(status: unknown): boolean;
 export function parseWorktreePaths(output: string): string[];

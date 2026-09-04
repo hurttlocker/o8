@@ -6,7 +6,12 @@ import { promisify } from 'node:util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { WorktreeManager } from './manager';
-import { resolveWorktreeRootLayout } from './root-layout';
+import {
+  appendWorktreeCollisionSuffix,
+  isManagedPacketWorktreeId,
+  managedPacketWorktreeId,
+  resolveWorktreeRootLayout,
+} from './root-layout';
 
 vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/worktree/storage-telemetry')>(),
@@ -56,6 +61,22 @@ afterEach(async () => {
 });
 
 describe('external worktree root layout (#1594)', () => {
+  it('recognizes only exact packet ids and the manager collision suffix shape', () => {
+    const packetId = 'pkt-Collision_Proof';
+    const baseId = managedPacketWorktreeId(packetId)!;
+    const collisionId = appendWorktreeCollisionSuffix(baseId);
+
+    expect(isManagedPacketWorktreeId(baseId, packetId)).toBe(true);
+    expect(collisionId).toMatch(new RegExp(`^${baseId}-[a-z0-9]{4}$`));
+    expect(isManagedPacketWorktreeId(collisionId, packetId)).toBe(true);
+    expect(isManagedPacketWorktreeId(`${baseId}-retry`, packetId)).toBe(false);
+    expect(isManagedPacketWorktreeId(`${baseId}-abc`, packetId)).toBe(false);
+    expect(isManagedPacketWorktreeId(`${baseId}-abcde`, packetId)).toBe(false);
+    expect(isManagedPacketWorktreeId(`${baseId}-AB12`, packetId)).toBe(false);
+    expect(isManagedPacketWorktreeId(`${baseId}-ab_2`, packetId)).toBe(false);
+    expect(isManagedPacketWorktreeId(`prefix-${baseId}-ab12`, packetId)).toBe(false);
+  });
+
   it('honors the explicit worktree-root override', async () => {
     const repoRoot = await initRepo('o8-worktree-root-env-');
     const overrideRoot = await realpath(await mkdtemp(path.join(tmpdir(), 'o8-worktree-root-override-')));

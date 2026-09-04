@@ -6,7 +6,7 @@ import type {
   OwnedWorkspaceSpawnDecision,
   OwnedWorkspaceSpawnGuardInput,
 } from '@/lib/runtimes/shared/owned-session/workspace-spawn-guard';
-import { managedPacketWorktreeId } from '@/lib/worktree/root-layout';
+import { isManagedPacketWorktreeId } from '@/lib/worktree/root-layout';
 import { listWorkspaceSnapshotsByPacketId } from '@/lib/worktree/snapshot-state';
 import type { WorkspaceSnapshotRecord } from '@/lib/worktree/snapshot-state';
 import { materializeReplacementWorkspace } from './replacement-materialization';
@@ -82,7 +82,7 @@ export async function inspectOwnedWorkspaceMaterialization(
       // receipt below, so an arbitrary cwd cannot authorize itself.
       let packetRefusal: string | null = null;
       if (matches.length === 0 && input.binding.repositoryUuid === null
-        && path.basename(bindingPath) === managedPacketWorktreeId(packetId)) {
+        && isManagedPacketWorktreeId(path.basename(bindingPath), packetId)) {
         const lane = dependencies.findLaneByPacket(packetId);
         const laneRepoPath = lane?.repoPath?.trim() ? path.resolve(lane.repoPath) : null;
         // A packet-bound launch always carries its lane id, so a blank one is

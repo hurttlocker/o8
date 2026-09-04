@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import {
@@ -24,6 +24,9 @@ export const LOAD_UNAVAILABLE_REASONS = Object.freeze({
   loadRepoNotConfigured: 'load-repo-not-configured',
   loadRepoMissing: 'load-repo-missing',
   loadRepoNotIsolated: 'load-repo-not-isolated',
+  loadRepoIsReleaseCheckout: 'load-repo-is-release-checkout',
+  loadRepoRegistered: 'load-repo-is-registered-operator-repo',
+  registeredReposUnreadable: 'registered-operator-repos-unreadable',
   runtimeNotSupported: 'runtime-not-supported-by-load-scenario',
   workerRuntimeUnavailable: 'worker-runtime-unavailable',
   apiTokenUnavailable: 'api-token-unavailable',
@@ -90,9 +93,27 @@ export function planLoadScenario({ request, probes }) {
   if (!request.laneCount) return unavailable(LOAD_UNAVAILABLE_REASONS.notRequested);
   if (!request.repoPath) return unavailable(LOAD_UNAVAILABLE_REASONS.loadRepoNotConfigured);
   if (!probes.pathExists(request.repoPath)) return unavailable(LOAD_UNAVAILABLE_REASONS.loadRepoMissing);
-  // A load run dispatches real workers against this repo. It may only ever point
-  // at a disposable repo, never the operator's live profile.
+  // A load run dispatches real workers against this repo. It may only ever
+  // point at a disposable repo: never the operator's live profile, never the
+  // checkout this release is built from, and never a repository the operator
+  // has connected. An explicit temp clone clears all three.
   if (probes.isLiveOperatorPath(request.repoPath)) return unavailable(LOAD_UNAVAILABLE_REASONS.loadRepoNotIsolated);
+  if (probes.isReleaseCheckoutPath(request.repoPath)) {
+    return unavailable(LOAD_UNAVAILABLE_REASONS.loadRepoIsReleaseCheckout);
+  }
+  const registered = probes.registeredOperatorRepos();
+  // Not knowing which repos are the operator's is not permission to dispatch.
+  if (!registered.readable) {
+    return unavailable(LOAD_UNAVAILABLE_REASONS.registeredReposUnreadable, registered.detail);
+  }
+  const registeredMatch = findRegisteredOperatorRepo(request.repoPath, registered.paths);
+  if (registeredMatch) {
+    // The identity is digested: a release receipt names WHICH repo matched
+    // without publishing an operator path.
+    return unavailable(LOAD_UNAVAILABLE_REASONS.loadRepoRegistered, {
+      registeredRepoDigest: redactedDigest(registeredMatch),
+    });
+  }
   const binaryName = LOAD_RUNTIME_BINARIES[request.runtime];
   if (!binaryName) {
     return unavailable(LOAD_UNAVAILABLE_REASONS.runtimeNotSupported, { supported: Object.keys(LOAD_RUNTIME_BINARIES) });
@@ -111,9 +132,146 @@ export function planLoadScenario({ request, probes }) {
 }
 
 export function isLiveOperatorPath(target, homeDir) {
-  const resolved = path.resolve(target);
-  const liveDataDir = path.join(homeDir, '.o8');
+  const resolved = canonicalPath(target);
+  const liveDataDir = canonicalPath(path.join(homeDir, '.o8'));
   return resolved === liveDataDir || resolved.startsWith(`${liveDataDir}${path.sep}`);
+}
+
+function pathContains(parent, child) {
+  return child === parent || child.startsWith(`${parent}${path.sep}`);
+}
+
+function canonicalPath(target) {
+  try {
+    return realpathSync.native(target);
+  } catch {
+    return path.resolve(target);
+  }
+}
+
+/**
+ * Overlap in EITHER direction is disqualifying. A load repo nested inside a
+ * protected tree obviously is that tree's working copy, and a load repo that
+ * CONTAINS one puts the protected checkout inside the directory real workers
+ * are pointed at.
+ */
+export function pathsOverlap(left, right) {
+  const a = canonicalPath(left);
+  const b = canonicalPath(right);
+  return pathContains(a, b) || pathContains(b, a);
+}
+
+/**
+ * The checkout this release is being built from. Dispatching real workers into
+ * it would create branches and worktrees in the very tree that is about to be
+ * packaged, so the gate refuses rather than measuring against it.
+ */
+export function isReleaseCheckoutPath(target, checkoutRoot) {
+  return pathsOverlap(target, checkoutRoot);
+}
+
+/**
+ * Any repository the operator has connected. These hold real work; a load run
+ * is disposable by definition, so the two sets must never intersect.
+ */
+export function findRegisteredOperatorRepo(target, registeredPaths) {
+  return registeredPaths.find((registered) => pathsOverlap(target, registered)) ?? null;
+}
+
+/**
+ * Registered repository paths from the operator's LIVE profile. An absent
+ * registry is a real "nothing is registered"; an unparsable or unexpectedly
+ * shaped one is an UNKNOWN answer, and an unknown answer cannot clear a repo
+ * for real worker dispatch — the caller refuses instead of guessing.
+ */
+export function readRegisteredOperatorRepoPaths(dataDir, io = { readFileSync }) {
+  const registryPath = path.join(dataDir, 'repos.json');
+  let raw;
+  try {
+    raw = io.readFileSync(registryPath, 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') return { readable: true, paths: [] };
+    return { readable: false, detail: { registry: 'unreadable' } };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { readable: false, detail: { registry: 'unparsable' } };
+  }
+  const repos = Array.isArray(parsed)
+    ? parsed
+    : parsed && Array.isArray(parsed.repos)
+      ? parsed.repos
+      : null;
+  if (!repos) {
+    return { readable: false, detail: { registry: 'unexpected-shape' } };
+  }
+  const paths = [];
+  for (const repo of repos) {
+    const rawPath = typeof repo?.localPath === 'string'
+      ? repo.localPath
+      : typeof repo?.path === 'string'
+        ? repo.path
+        : '';
+    const localPath = rawPath.trim();
+    // A row that names no directory cannot BE the load repo, so skipping it
+    // never widens what this probe clears.
+    if (localPath) paths.push(path.resolve(localPath));
+  }
+  return { readable: true, paths };
+}
+
+/**
+ * The probe set the gate runs with, assembled here so the wiring itself is
+ * testable rather than living inline in the gate script.
+ */
+export function createLoadScenarioProbes({
+  checkoutRoot,
+  operatorDataDir,
+  homeDir,
+  binaryAvailable,
+  apiTokenAvailable,
+  pathExists = (target) => existsSync(target),
+  readRegistered = readRegisteredOperatorRepoPaths,
+}) {
+  return {
+    pathExists,
+    isLiveOperatorPath: (target) => isLiveOperatorPath(target, homeDir),
+    isReleaseCheckoutPath: (target) => isReleaseCheckoutPath(target, checkoutRoot),
+    registeredOperatorRepos: () => readRegistered(operatorDataDir),
+    binaryAvailable,
+    apiTokenAvailable,
+  };
+}
+
+/** The exact load-planning entry point used by the pre-ship gate. */
+export function planGateLoadScenario({
+  env,
+  checkoutRoot,
+  operatorDataDir,
+  homeDir,
+  binaryAvailable,
+  apiTokenAvailable,
+  pathExists,
+  readRegistered,
+}) {
+  const request = resolveLoadScenarioRequest(env);
+  return {
+    request,
+    plan: planLoadScenario({
+      request,
+      probes: createLoadScenarioProbes({
+        checkoutRoot,
+        operatorDataDir,
+        homeDir,
+        binaryAvailable,
+        apiTokenAvailable,
+        ...(pathExists ? { pathExists } : {}),
+        ...(readRegistered ? { readRegistered } : {}),
+      }),
+    }),
+  };
 }
 
 export function parseWorktreePaths(output) {

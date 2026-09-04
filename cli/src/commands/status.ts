@@ -95,6 +95,11 @@ function dispositionLabel(flag: ShippedDarkFlagStatus, isWarning: boolean): stri
   return 'awaiting promotion review (under threshold)';
 }
 
+function releaseAgeLabel(value: number | null): string {
+  if (value === null) return 'release age unknown';
+  return value === 1 ? '1 release' : `${value} releases`;
+}
+
 const RUNNING_STATUSES = new Set([
   'running',
   'launching',
@@ -232,7 +237,7 @@ export async function runStatus(mode: OutputMode): Promise<number> {
     if (shippedDarkFlags.length > 0) {
       printHumanHeading('shipped but dark');
       for (const flag of shippedDarkFlags) {
-        const age = flag.darkForReleases === 1 ? '1 release' : `${flag.darkForReleases} releases`;
+        const age = releaseAgeLabel(flag.darkForReleases);
         process.stdout.write(
           `  ${flag.tomlKey.padEnd(42)} ${age}  landed ${flag.landedRelease ?? 'unknown'}  ${dispositionLabel(flag, shippedDarkWarnings.includes(flag))}\n`,
         );

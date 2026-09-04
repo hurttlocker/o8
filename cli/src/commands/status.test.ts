@@ -139,6 +139,13 @@ describe('o8 status storage holds', () => {
               lifecycle: 'promotion-candidate',
               lifecycleRationale: null,
               needsAttention: false,
+            }, {
+              tomlKey: 'experimental.release_unknown',
+              landedRelease: null,
+              darkForReleases: null,
+              lifecycle: 'promotion-candidate',
+              lifecycleRationale: null,
+              needsAttention: false,
             }],
           },
         });
@@ -161,6 +168,9 @@ describe('o8 status storage holds', () => {
     expect(output).toContain('experimental.chat_enabled');
     expect(output).toContain('by design: Alpha-only casual chat tab.');
     expect(output).toContain('broadcast.voice');
+    expect(output).toContain('experimental.release_unknown');
+    expect(output).toContain('release age unknown');
+    expect(output).not.toContain('null releases');
     expect(output).toMatch(/dark flags 1/);
   });
 

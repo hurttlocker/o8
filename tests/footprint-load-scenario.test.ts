@@ -1,17 +1,21 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import {
   LOAD_RUNTIME_BINARIES,
   LOAD_SCENARIO_LIMITS,
   LOAD_UNAVAILABLE_REASONS,
   createHttpLoadDriver,
+  findRegisteredOperatorRepo,
   isActiveLaneStatus,
   isLiveOperatorPath,
+  isReleaseCheckoutPath,
   parseListeningPorts,
   parseWorktreePaths,
+  planGateLoadScenario,
   planLoadScenario,
+  readRegisteredOperatorRepoPaths,
   resolveLoadScenarioRequest,
   runLoadScenario,
   unwrapOperatorResult,
@@ -23,6 +27,8 @@ function allowingProbes(overrides: Record<string, unknown> = {}) {
   return {
     pathExists: () => true,
     isLiveOperatorPath: () => false,
+    isReleaseCheckoutPath: () => false,
+    registeredOperatorRepos: () => ({ readable: true as const, paths: [] as string[] }),
     binaryAvailable: () => true,
     apiTokenAvailable: () => true,
     ...overrides,
@@ -121,6 +127,16 @@ describe('load scenario configuration', () => {
       .toBe(LOAD_UNAVAILABLE_REASONS.loadRepoMissing);
     expect(unavailableReason(planLoadScenario({ request, probes: allowingProbes({ isLiveOperatorPath: () => true }) })))
       .toBe(LOAD_UNAVAILABLE_REASONS.loadRepoNotIsolated);
+    expect(unavailableReason(planLoadScenario({ request, probes: allowingProbes({ isReleaseCheckoutPath: () => true }) })))
+      .toBe(LOAD_UNAVAILABLE_REASONS.loadRepoIsReleaseCheckout);
+    expect(unavailableReason(planLoadScenario({
+      request,
+      probes: allowingProbes({ registeredOperatorRepos: () => ({ readable: true, paths: ['/tmp/load-repo'] }) }),
+    }))).toBe(LOAD_UNAVAILABLE_REASONS.loadRepoRegistered);
+    expect(unavailableReason(planLoadScenario({
+      request,
+      probes: allowingProbes({ registeredOperatorRepos: () => ({ readable: false, detail: { registry: 'unparsable' } }) }),
+    }))).toBe(LOAD_UNAVAILABLE_REASONS.registeredReposUnreadable);
     expect(unavailableReason(planLoadScenario({ request, probes: allowingProbes({ binaryAvailable: () => false }) })))
       .toBe(LOAD_UNAVAILABLE_REASONS.workerRuntimeUnavailable);
     expect(unavailableReason(planLoadScenario({ request, probes: allowingProbes({ apiTokenAvailable: () => false }) })))
@@ -152,6 +168,182 @@ describe('load scenario configuration', () => {
     expect(isLiveOperatorPath('/Users/operator/.o8/worktrees/x', '/Users/operator')).toBe(true);
     expect(isLiveOperatorPath('/tmp/load-repo', '/Users/operator')).toBe(false);
     expect(isLiveOperatorPath('/Users/operator/.o8-other', '/Users/operator')).toBe(false);
+  });
+
+  it('disqualifies overlap in either direction, not just nesting under the protected tree', () => {
+    expect(isReleaseCheckoutPath('/Users/operator/o8', '/Users/operator/o8')).toBe(true);
+    expect(isReleaseCheckoutPath('/Users/operator/o8/packages/cli', '/Users/operator/o8')).toBe(true);
+    // A load repo that CONTAINS the checkout puts it inside the dispatch target.
+    expect(isReleaseCheckoutPath('/Users/operator', '/Users/operator/o8')).toBe(true);
+    expect(isReleaseCheckoutPath('/tmp/o8-footprint-load', '/Users/operator/o8')).toBe(false);
+    // A sibling that merely shares a name prefix is a different directory.
+    expect(isReleaseCheckoutPath('/Users/operator/o8-scratch', '/Users/operator/o8')).toBe(false);
+    expect(findRegisteredOperatorRepo('/tmp/free', ['/Users/operator/o8'])).toBeNull();
+    expect(findRegisteredOperatorRepo('/Users/operator/o8/src', ['/a', '/Users/operator/o8']))
+      .toBe('/Users/operator/o8');
+  });
+});
+
+describe('load repo isolation against real operator state', () => {
+  const roots: string[] = [];
+
+  afterAll(() => {
+    for (const root of roots) rmSync(root, { recursive: true, force: true });
+  });
+
+  function fixture() {
+    const root = mkdtempSync(join(tmpdir(), 'o8-load-isolation-'));
+    roots.push(root);
+    const homeDir = join(root, 'home');
+    const operatorDataDir = join(homeDir, '.o8');
+    const checkoutRoot = join(homeDir, 'o8');
+    const registeredRepo = join(homeDir, 'projects', 'connected');
+    const disposableRepo = join(root, 'o8-footprint-load');
+    for (const dir of [operatorDataDir, checkoutRoot, registeredRepo, disposableRepo]) {
+      mkdirSync(dir, { recursive: true });
+    }
+    writeFileSync(join(operatorDataDir, 'repos.json'), JSON.stringify({
+      version: 1,
+      repos: [
+        { id: 'uuid-checkout', localPath: checkoutRoot },
+        { id: 'uuid-connected', localPath: registeredRepo },
+      ],
+    }));
+    return { root, homeDir, operatorDataDir, checkoutRoot, registeredRepo, disposableRepo };
+  }
+
+  function planFor(
+    repoPath: string,
+    paths: ReturnType<typeof fixture>,
+    overrides: Record<string, unknown> = {},
+  ) {
+    return planGateLoadScenario({
+      env: {
+        O8_FOOTPRINT_LOAD_LANES: '2',
+        O8_FOOTPRINT_LOAD_REPO: repoPath,
+      },
+      checkoutRoot: paths.checkoutRoot,
+      operatorDataDir: paths.operatorDataDir,
+      homeDir: paths.homeDir,
+      binaryAvailable: () => true,
+      apiTokenAvailable: () => true,
+      ...overrides,
+    }).plan;
+  }
+
+  it('clears an explicit disposable temp repo through the real probes', () => {
+    const paths = fixture();
+    expect(planFor(paths.disposableRepo, paths)).toEqual({
+      available: true,
+      laneCount: 2,
+      runtime: 'codex',
+      binaryName: 'codex',
+      repoPath: paths.disposableRepo,
+    });
+  });
+
+  it('refuses the release checkout it is building, and anything inside it', () => {
+    const paths = fixture();
+    expect(unavailableReason(planFor(paths.checkoutRoot, paths)))
+      .toBe(LOAD_UNAVAILABLE_REASONS.loadRepoIsReleaseCheckout);
+    const nested = join(paths.checkoutRoot, 'src');
+    mkdirSync(nested, { recursive: true });
+    expect(unavailableReason(planFor(nested, paths)))
+      .toBe(LOAD_UNAVAILABLE_REASONS.loadRepoIsReleaseCheckout);
+  });
+
+  it('refuses any repository the operator has registered, naming it only as a digest', () => {
+    const paths = fixture();
+    const refusal = planFor(paths.registeredRepo, paths);
+    expect(unavailableReason(refusal)).toBe(LOAD_UNAVAILABLE_REASONS.loadRepoRegistered);
+    if (refusal.available) throw new Error('expected a registered repo to be refused');
+    // The receipt names WHICH repo matched without publishing an operator path.
+    const detail = refusal.detail as { registeredRepoDigest?: string };
+    expect(detail.registeredRepoDigest).toMatch(/^[0-9a-f]{12}$/);
+    expect(JSON.stringify(refusal)).not.toContain(paths.registeredRepo);
+
+    // A load repo that CONTAINS a registered repo is refused for the same reason.
+    expect(unavailableReason(planFor(join(paths.homeDir, 'projects'), paths)))
+      .toBe(LOAD_UNAVAILABLE_REASONS.loadRepoRegistered);
+  });
+
+  it('refuses symlink aliases of the release checkout and registered repos', () => {
+    const paths = fixture();
+    const checkoutAlias = join(paths.root, 'checkout-alias');
+    const registeredAlias = join(paths.root, 'registered-alias');
+    const profileAlias = join(paths.root, 'profile-alias');
+    symlinkSync(paths.checkoutRoot, checkoutAlias, 'dir');
+    symlinkSync(paths.registeredRepo, registeredAlias, 'dir');
+    symlinkSync(paths.operatorDataDir, profileAlias, 'dir');
+
+    expect(unavailableReason(planFor(checkoutAlias, paths)))
+      .toBe(LOAD_UNAVAILABLE_REASONS.loadRepoIsReleaseCheckout);
+    expect(unavailableReason(planFor(registeredAlias, paths)))
+      .toBe(LOAD_UNAVAILABLE_REASONS.loadRepoRegistered);
+    expect(unavailableReason(planFor(profileAlias, paths)))
+      .toBe(LOAD_UNAVAILABLE_REASONS.loadRepoNotIsolated);
+  });
+
+  it('still refuses the live profile ahead of every other isolation check', () => {
+    const paths = fixture();
+    expect(unavailableReason(planFor(paths.operatorDataDir, paths)))
+      .toBe(LOAD_UNAVAILABLE_REASONS.loadRepoNotIsolated);
+  });
+
+  it('treats an unreadable registry as unknown and refuses, but an absent one as no repos', () => {
+    const paths = fixture();
+    const registryPath = join(paths.operatorDataDir, 'repos.json');
+
+    writeFileSync(registryPath, '{ not json');
+    expect(readRegisteredOperatorRepoPaths(paths.operatorDataDir))
+      .toEqual({ readable: false, detail: { registry: 'unparsable' } });
+    expect(unavailableReason(planFor(paths.disposableRepo, paths)))
+      .toBe(LOAD_UNAVAILABLE_REASONS.registeredReposUnreadable);
+
+    writeFileSync(registryPath, JSON.stringify({ version: 1 }));
+    expect(unavailableReason(planFor(paths.disposableRepo, paths)))
+      .toBe(LOAD_UNAVAILABLE_REASONS.registeredReposUnreadable);
+
+    expect(readRegisteredOperatorRepoPaths(paths.operatorDataDir, {
+      readFileSync: () => {
+        const error = new Error('permission denied') as NodeJS.ErrnoException;
+        error.code = 'EACCES';
+        throw error;
+      },
+    })).toEqual({ readable: false, detail: { registry: 'unreadable' } });
+
+    // Absence is a real answer — nothing is registered — so a disposable repo
+    // still clears without the operator having to connect anything first.
+    rmSync(registryPath);
+    expect(readRegisteredOperatorRepoPaths(paths.operatorDataDir)).toEqual({ readable: true, paths: [] });
+    expect(planFor(paths.disposableRepo, paths)).toMatchObject({ available: true });
+    // The checkout guard does not depend on the registry.
+    expect(unavailableReason(planFor(paths.checkoutRoot, paths)))
+      .toBe(LOAD_UNAVAILABLE_REASONS.loadRepoIsReleaseCheckout);
+  });
+
+  it('skips registry rows that name no directory instead of failing closed on them', () => {
+    const paths = fixture();
+    writeFileSync(join(paths.operatorDataDir, 'repos.json'), JSON.stringify({
+      version: 1,
+      repos: [{ id: 'uuid-blank' }, { id: 'uuid-empty', localPath: '   ' }, { id: 'ok', localPath: paths.registeredRepo }],
+    }));
+    expect(readRegisteredOperatorRepoPaths(paths.operatorDataDir))
+      .toEqual({ readable: true, paths: [paths.registeredRepo] });
+    expect(planFor(paths.disposableRepo, paths)).toMatchObject({ available: true });
+    expect(unavailableReason(planFor(paths.registeredRepo, paths)))
+      .toBe(LOAD_UNAVAILABLE_REASONS.loadRepoRegistered);
+  });
+
+  it('protects legacy array registries and legacy path fields', () => {
+    const paths = fixture();
+    writeFileSync(join(paths.operatorDataDir, 'repos.json'), JSON.stringify([
+      { id: 'legacy', path: paths.registeredRepo },
+    ]));
+    expect(readRegisteredOperatorRepoPaths(paths.operatorDataDir))
+      .toEqual({ readable: true, paths: [paths.registeredRepo] });
+    expect(unavailableReason(planFor(paths.registeredRepo, paths)))
+      .toBe(LOAD_UNAVAILABLE_REASONS.loadRepoRegistered);
   });
 });
 
