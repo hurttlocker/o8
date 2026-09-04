@@ -15,7 +15,12 @@ import {
 import { cloneRepoToDefaultLocation, RepoCloneError } from '@/lib/repos/clone';
 import { removeRepoPathFromProjects, repointRepoPathInProjects } from '@/lib/repos/project-path-mutations';
 import { removeRepoFromPool } from '@/lib/repos/remove';
-import { enrichRepoReadiness, enrichRepoReadinessList, invalidateRepoReadiness } from '@/lib/repos/readiness';
+import {
+  enrichRepoReadiness,
+  enrichRepoReadinessFromCache,
+  enrichRepoReadinessFresh,
+  invalidateRepoReadiness,
+} from '@/lib/repos/readiness';
 import { repointRepoPathReferences } from '@/lib/repos/path-repoint';
 import { assertOrchestratorRepoPath } from '@/lib/lane/repo-preflight';
 import { isOrchestratorHomePath } from '@/lib/orchestrator/repo-path';
@@ -196,8 +201,48 @@ export async function GET(request: Request) {
   }
 
   try {
-    const repos = await enrichRepoReadinessList(await listRepos());
-    return NextResponse.json({ repos: await Promise.all(repos.map(appendExistence)) }, { headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
+    const registryStartedAt = performance.now();
+    const registeredRepos = await listRepos();
+    const registryDurationMs = performance.now() - registryStartedAt;
+    const readinessStartedAt = performance.now();
+    const readinessSelector = params.get('readiness');
+    let repos;
+
+    if (readinessSelector) {
+      if (!registeredRepos.some((repo) => repo.id === readinessSelector)) {
+        return NextResponse.json(
+          { error: 'Registered repository not found.' },
+          { status: 404, headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } },
+        );
+      }
+      repos = await Promise.all(registeredRepos.map((repo) => (
+        repo.id === readinessSelector
+          ? enrichRepoReadinessFresh(repo)
+          : Promise.resolve(enrichRepoReadinessFromCache(repo))
+      )));
+    } else {
+      // Discovery is fleet-sized and runs on dashboard startup. Surface any
+      // readiness already known in this server process, but do not launch Git
+      // subprocesses for every registered repo. Exact checks are opt-in above.
+      repos = registeredRepos.map(enrichRepoReadinessFromCache);
+    }
+    const readinessDurationMs = performance.now() - readinessStartedAt;
+    const existenceStartedAt = performance.now();
+    const responseRepos = await Promise.all(repos.map(appendExistence));
+    const existenceDurationMs = performance.now() - existenceStartedAt;
+    return NextResponse.json(
+      { repos: responseRepos },
+      {
+        headers: {
+          'Server-Timing': [
+            `registry;dur=${registryDurationMs.toFixed(1)}`,
+            `readiness;dur=${readinessDurationMs.toFixed(1)}`,
+            `existence;dur=${existenceDurationMs.toFixed(1)}`,
+            `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}`,
+          ].join(', '),
+        },
+      },
+    );
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Unable to load repository registry.' },

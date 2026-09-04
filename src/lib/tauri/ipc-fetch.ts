@@ -120,6 +120,14 @@ export async function ipcFetch(
     return fetch(input, init);
   }
 
+  // The native repo reader intentionally exposes only the raw registry. Any
+  // query changes the HTTP route contract (for example, selected-repo
+  // readiness or the GitHub onboarding source), so it must reach that route
+  // instead of silently returning the unfiltered registry payload.
+  if (url.pathname === '/api/panel/repos' && url.search.length > 0) {
+    return fetch(input, init);
+  }
+
   try {
     const invoke = await getInvoke();
     const args = route.parseArgs?.(url) ?? {};

@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
 // Old Cortex Go binary removed — cortexRecall no longer available
-import { enrichRepoReadinessList } from '@/lib/repos/readiness';
+import { enrichRepoReadinessFromCache } from '@/lib/repos/readiness';
 import { listRepos } from '@/lib/repos/registry';
 import type { RepoReadinessState } from '@/lib/repos/types';
 
@@ -164,11 +164,11 @@ async function loadBaseContext() {
     readGitConfig('user.name'),
     readGitHubUsername(),
     listRepos()
-      .then((items) => enrichRepoReadinessList(items))
+      .then((items) => items.map(enrichRepoReadinessFromCache))
       .then((items) => items.map((repo) => ({
         name: repo.name,
         localPath: repo.localPath,
-        readinessState: repo.readiness.state,
+        readinessState: repo.readiness?.state ?? 'unknown',
       })))
       .catch(() => [] as BaseRepoContext[]),
     detectRuntimeNames(),

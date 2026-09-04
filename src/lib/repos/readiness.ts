@@ -84,6 +84,25 @@ export function invalidateRepoReadiness(...repoPaths: string[]) {
   }
 }
 
+/**
+ * Read the last readiness result without starting filesystem or Git work.
+ *
+ * Repository discovery is a hot, fleet-sized path. Callers that only need the
+ * registry must not turn one list request into several subprocesses per repo.
+ * Exact readiness remains available through getRepoReadiness for the selected
+ * repo and other safety-sensitive actions.
+ */
+export function getCachedRepoReadiness(repo: RepoReadinessInput): RepoReadiness | undefined {
+  const cached = readinessCache.get(repo.localPath);
+  if (!cached) return undefined;
+
+  const originOverride = getRepoOriginConfiguredOverride(repo.localPath);
+  if (originOverride !== null && cached.value.originConfigured !== originOverride) {
+    return { ...cached.value, originConfigured: originOverride };
+  }
+  return cached.value;
+}
+
 export async function getRepoReadiness(repo: RepoReadinessInput): Promise<RepoReadiness> {
   const cacheKey = repo.localPath;
   const cached = readinessCache.get(cacheKey);
@@ -96,12 +115,7 @@ export async function getRepoReadiness(repo: RepoReadinessInput): Promise<RepoRe
       // value immediately and refresh in the background so /api/panel/repos
       // never spends 60 ms doing ~5 git execs per repo on a dashboard render.
       // Cold misses still recompute synchronously (the else branch below).
-      if (!inFlightRefreshes.has(cacheKey)) {
-        const refresh = refreshRepoReadinessUncached(repo)
-          .finally(() => inFlightRefreshes.delete(cacheKey));
-        inFlightRefreshes.set(cacheKey, refresh);
-        void refresh.catch(() => undefined);
-      }
+      void refreshRepoReadiness(repo).catch(() => undefined);
     }
     if (originOverride !== null && cached.value.originConfigured !== originOverride) {
       return { ...cached.value, originConfigured: originOverride };
@@ -110,7 +124,18 @@ export async function getRepoReadiness(repo: RepoReadinessInput): Promise<RepoRe
   }
 
   // Cold miss — must compute synchronously so the first caller gets real data.
-  return refreshRepoReadinessUncached(repo);
+  return refreshRepoReadiness(repo);
+}
+
+function refreshRepoReadiness(repo: RepoReadinessInput): Promise<RepoReadiness> {
+  const cacheKey = repo.localPath;
+  const existing = inFlightRefreshes.get(cacheKey);
+  if (existing) return existing;
+
+  const refresh = refreshRepoReadinessUncached(repo)
+    .finally(() => inFlightRefreshes.delete(cacheKey));
+  inFlightRefreshes.set(cacheKey, refresh);
+  return refresh;
 }
 
 async function refreshRepoReadinessUncached(repo: RepoReadinessInput): Promise<RepoReadiness> {
@@ -223,6 +248,21 @@ export async function enrichRepoReadiness<T extends RepoReadinessInput>(repo: T)
     ...repo,
     readiness,
   };
+}
+
+export async function enrichRepoReadinessFresh<T extends RepoReadinessInput>(repo: T): Promise<T & { readiness: RepoReadiness }> {
+  const readiness = await refreshRepoReadiness(repo);
+  return {
+    ...repo,
+    readiness,
+  };
+}
+
+export function enrichRepoReadinessFromCache<T extends RepoReadinessInput>(repo: T): T & { readiness?: RepoReadiness } {
+  const readiness = getCachedRepoReadiness(repo);
+  const repoWithoutReadiness = { ...repo } as T & { readiness?: RepoReadiness };
+  delete repoWithoutReadiness.readiness;
+  return readiness ? { ...repoWithoutReadiness, readiness } : repoWithoutReadiness;
 }
 
 export async function enrichRepoReadinessList<T extends RepoReadinessInput>(repos: T[]): Promise<Array<T & { readiness: RepoReadiness }>> {

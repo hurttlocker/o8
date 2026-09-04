@@ -122,10 +122,16 @@ export function useAgentPanelState({
       }>;
     };
 
-    const repoEntry = (data.repos ?? []).find((repo) => repoSlugFromRemoteUrl(repo.remoteUrl ?? null) === request.repo);
+    let repoEntry = (data.repos ?? []).find((repo) => repoSlugFromRemoteUrl(repo.remoteUrl ?? null) === request.repo);
     if (!repoEntry) {
       throw new Error(`No local checkout is registered for ${request.repo}. Open the repo locally before launching an agent on it.`);
     }
+    const readinessResponse = await fetchOnce(`/api/panel/repos?readiness=${encodeURIComponent(repoEntry.id)}`);
+    if (!readinessResponse.ok) {
+      throw new Error(`Unable to verify the local checkout for ${request.repo}.`);
+    }
+    const readinessData = await readinessResponse.json() as { repos?: typeof data.repos };
+    repoEntry = (readinessData.repos ?? []).find((repo) => repo.id === repoEntry?.id) ?? repoEntry;
     if (repoEntry.readiness?.state === 'missing') {
       throw new Error(repoEntry.readiness.summary ?? `Repo folder not found at ${repoEntry.localPath}.`);
     }
