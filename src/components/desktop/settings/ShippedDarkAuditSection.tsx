@@ -5,13 +5,18 @@ import { useEffect, useState } from 'react';
 import { ActivityIcon } from './shared';
 import { SettingsGroup, SettingsRow, ValuePill } from './grouped';
 
+type ShippedDarkLifecycle = 'promotion-candidate' | 'deliberate-default-off' | 'promoted';
+
 interface ShippedDarkFlagStatus {
   tomlKey: string;
   codeDefault: unknown;
   operatorValue: unknown;
-  operatorValueSource: 'default' | 'file' | 'env';
+  operatorValueSource: 'env' | 'file' | 'profile' | 'default';
   landedRelease: string | null;
   darkForReleases: number | null;
+  lifecycle: ShippedDarkLifecycle;
+  lifecycleRationale: string | null;
+  needsAttention: boolean;
 }
 
 interface ShippedDarkAuditStatus {
@@ -20,8 +25,15 @@ interface ShippedDarkAuditStatus {
   currentRelease: string | null;
   thresholdReleases: number;
   checkedFlagCount: number;
+  attentionFlagCount: number;
   flags: ShippedDarkFlagStatus[];
 }
+
+const LIFECYCLE_LABELS: Record<ShippedDarkLifecycle, string> = {
+  'promotion-candidate': 'Awaiting promotion review',
+  'deliberate-default-off': 'Off by design',
+  promoted: 'Promoted',
+};
 
 function formatValue(value: unknown): string {
   if (typeof value === 'string') return value;
@@ -58,9 +70,11 @@ export function ShippedDarkAuditSection() {
     return () => { cancelled = true; };
   }, []);
 
-  const attentionCount = audit?.flags.filter((flag) => (
-    flag.darkForReleases !== null
-    && flag.darkForReleases >= audit.thresholdReleases
+  const attentionCount = audit?.attentionFlagCount ?? 0;
+  // Only declared deliberate flags are "by design" — an under-threshold
+  // promotion candidate is simply not overdue yet.
+  const byDesignCount = audit?.flags.filter((flag) => (
+    flag.lifecycle === 'deliberate-default-off'
   )).length ?? 0;
   const subtitle = error
     ? `Status unavailable: ${error}`
@@ -68,12 +82,12 @@ export function ShippedDarkAuditSection() {
       ? 'Reading the scheduled audit receipt'
       : audit.status === 'unverified'
         ? 'Waiting for the first scheduled receipt'
-        : `${audit.checkedFlagCount} flags checked · ${audit.flags.length} remain dark · ${formatCheckedAt(audit.checkedAt)}`;
+        : `${audit.checkedFlagCount} flags checked · ${audit.flags.length} remain dark (${byDesignCount} by design) · ${formatCheckedAt(audit.checkedAt)}`;
 
   return (
     <SettingsGroup
       header="Shipped feature audit"
-      footnote={`Runs at app launch and every 24 hours. Attention begins after ${audit?.thresholdReleases ?? 3} shipped releases without promotion.`}
+      footnote={`Runs at app launch and every 24 hours. Attention begins after ${audit?.thresholdReleases ?? 3} shipped releases for flags still awaiting a promotion decision; flags that are off by design stay listed without warning.`}
     >
       <SettingsRow
         icon={<ActivityIcon />}
@@ -90,12 +104,15 @@ export function ShippedDarkAuditSection() {
         const age = flag.darkForReleases === null
           ? 'Age unknown'
           : `${flag.darkForReleases} release${flag.darkForReleases === 1 ? '' : 's'}`;
+        const disposition = flag.lifecycleRationale
+          ? `${LIFECYCLE_LABELS[flag.lifecycle]} — ${flag.lifecycleRationale}`
+          : LIFECYCLE_LABELS[flag.lifecycle];
         return (
           <SettingsRow
             key={flag.tomlKey}
             label={flag.tomlKey}
-            subtitle={`Default ${formatValue(flag.codeDefault)} · operator ${formatValue(flag.operatorValue)} (${flag.operatorValueSource}) · landed ${flag.landedRelease ?? 'unknown'}`}
-            accessory={<ValuePill tone={flag.darkForReleases !== null && flag.darkForReleases >= audit.thresholdReleases ? 'destructive' : 'default'}>{age}</ValuePill>}
+            subtitle={`Default ${formatValue(flag.codeDefault)} · operator ${formatValue(flag.operatorValue)} (${flag.operatorValueSource}) · landed ${flag.landedRelease ?? 'unknown'} · ${age} · ${disposition}`}
+            accessory={<ValuePill tone={flag.needsAttention ? 'destructive' : 'default'}>{flag.needsAttention ? age : LIFECYCLE_LABELS[flag.lifecycle]}</ValuePill>}
             divider={index < audit.flags.length - 1}
           />
         );

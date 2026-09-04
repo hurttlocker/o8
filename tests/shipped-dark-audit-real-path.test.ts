@@ -10,7 +10,12 @@ const dataDir = mkdtempSync(path.join(os.tmpdir(), 'o8-shipped-dark-settings-'))
 const repoPath = mkdtempSync(path.join(os.tmpdir(), 'o8-shipped-dark-repo-'));
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
-const { auditShippedButDarkFlags } = await import('@/lib/operator/shipped-dark-audit');
+const {
+  auditShippedButDarkFlags,
+  isOverdueShippedDarkFlag,
+} = await import('@/lib/operator/shipped-dark-audit');
+const { SHIPPED_DARK_WARNING_RELEASES } = await import('@/lib/operator/shipped-dark-scheduler');
+const { isShippedDarkLifecycle } = await import('@/lib/operator/shipped-dark-manifest');
 const { OPERATOR_EXPERIMENTAL_OR_OPT_IN_FLAG_KEYS } = await import('@/lib/settings/toml');
 
 function git(...args: string[]): void {
@@ -90,7 +95,18 @@ describe.sequential('shipped-but-dark flag audit real path', () => {
       defaultFile: 'src/lib/operator/defaults.ts',
       landedRelease: 'v0.1.10',
       darkForReleases: 4,
+      lifecycle: 'deliberate-default-off',
     });
+    expect(chat?.lifecycleRationale).toBeTruthy();
+    // Deliberate posture is a source decision, so a checked-out audit reaches
+    // the same disposition the packaged manifest does.
+    expect(isOverdueShippedDarkFlag(chat!, SHIPPED_DARK_WARNING_RELEASES)).toBe(false);
+    // Every audited flag stays visible with an explicit disposition, and each
+    // deliberate default-off entry explains itself.
+    expect(audit.checkedFlags.filter((flag) => !isShippedDarkLifecycle(flag.lifecycle))).toEqual([]);
+    expect(audit.checkedFlags.filter((flag) => (
+      flag.lifecycle === 'deliberate-default-off' && !flag.lifecycleRationale
+    ))).toEqual([]);
     expect(audit.flags.some((flag) => flag.key === 'nativeBrowserView')).toBe(false);
     expect(audit.flags.find((flag) => flag.key === 'broadcastVoice')).toMatchObject({
       codeDefault: 'off',
@@ -122,10 +138,19 @@ describe.sequential('shipped-but-dark flag audit real path', () => {
       const audit = await auditShippedButDarkFlags();
       const currentPatch = Number.parseInt(packageJson.version.split('.')[2] ?? '', 10);
       expect(audit.currentRelease).toBe(packageJson.version);
-      expect(audit.flags.find((flag) => flag.key === 'experimentalChat')).toMatchObject({
+      const chat = audit.flags.find((flag) => flag.key === 'experimentalChat');
+      expect(chat).toMatchObject({
         landedRelease: '0.1.681',
         darkForReleases: currentPatch - 681,
+        lifecycle: 'deliberate-default-off',
       });
+      // Aged well past the threshold, yet deliberate posture keeps it quiet.
+      expect(chat!.darkForReleases).toBeGreaterThan(SHIPPED_DARK_WARNING_RELEASES);
+      expect(isOverdueShippedDarkFlag(chat!, SHIPPED_DARK_WARNING_RELEASES)).toBe(false);
+      expect(isOverdueShippedDarkFlag(
+        { lifecycle: 'promotion-candidate', darkForReleases: chat!.darkForReleases },
+        SHIPPED_DARK_WARNING_RELEASES,
+      )).toBe(true);
     } finally {
       process.chdir(originalCwd);
     }

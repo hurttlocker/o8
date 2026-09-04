@@ -12,12 +12,13 @@ const { ensureShippedDarkAuditBootHookMock } = vi.hoisted(() => ({
 vi.mock('@/lib/operator/shipped-dark-scheduler', () => ({
   ensureShippedDarkAuditBootHook: ensureShippedDarkAuditBootHookMock,
   currentShippedDarkAuditStatus: () => ({
-    schema: 'o8/shipped-dark-audit-status/v1',
+    schema: 'o8/shipped-dark-audit-status/v2',
     status: 'attention',
     checkedAt: '2026-08-27T12:05:00.000Z',
     currentRelease: '0.1.716',
     thresholdReleases: 3,
     checkedFlagCount: 14,
+    attentionFlagCount: 1,
     flags: [{
       tomlKey: 'experimental.chat_enabled',
       codeDefault: false,
@@ -25,6 +26,9 @@ vi.mock('@/lib/operator/shipped-dark-scheduler', () => ({
       operatorValueSource: 'default',
       landedRelease: '0.1.681',
       darkForReleases: 35,
+      lifecycle: 'promotion-candidate',
+      lifecycleRationale: null,
+      needsAttention: true,
     }],
   }),
 }));
@@ -58,9 +62,12 @@ describe('GET /api/panel/status', () => {
       shippedDarkAudit: {
         status: 'attention',
         checkedFlagCount: 14,
+        attentionFlagCount: 1,
         flags: [expect.objectContaining({
           tomlKey: 'experimental.chat_enabled',
           darkForReleases: 35,
+          lifecycle: 'promotion-candidate',
+          needsAttention: true,
         })],
       },
     });

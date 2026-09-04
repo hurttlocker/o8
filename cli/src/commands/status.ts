@@ -67,6 +67,10 @@ interface ShippedDarkFlagStatus {
   tomlKey: string;
   landedRelease: string | null;
   darkForReleases: number | null;
+  /** Absent on older servers; an unclassified flag stays a promotion candidate. */
+  lifecycle?: 'promotion-candidate' | 'deliberate-default-off' | 'promoted';
+  lifecycleRationale?: string | null;
+  needsAttention?: boolean;
 }
 
 interface PanelStatusResponse {
@@ -76,8 +80,19 @@ interface PanelStatusResponse {
     currentRelease?: string | null;
     thresholdReleases?: number;
     checkedFlagCount?: number;
+    attentionFlagCount?: number;
     flags?: ShippedDarkFlagStatus[];
   };
+}
+
+/** How a dark flag reads to the operator: warning, deliberate, or still young. */
+function dispositionLabel(flag: ShippedDarkFlagStatus, isWarning: boolean): string {
+  if (isWarning) return 'awaiting promotion review';
+  if (flag.lifecycle === 'deliberate-default-off') {
+    return `by design${flag.lifecycleRationale ? `: ${flag.lifecycleRationale}` : ''}`;
+  }
+  if (flag.lifecycle === 'promoted') return 'promoted';
+  return 'awaiting promotion review (under threshold)';
 }
 
 const RUNNING_STATUSES = new Set([
@@ -115,12 +130,22 @@ export async function runStatus(mode: OutputMode): Promise<number> {
       requiredReserveBytes: packet.storageAdmission?.requiredReserveBytes ?? null,
     }));
   const shippedDarkAudit = panelStatusRes.data?.shippedDarkAudit ?? null;
-  const shippedDarkWarnings = (shippedDarkAudit?.flags ?? [])
+  // Deliberate default-off flags stay in `shippedDarkAudit` for the operator to
+  // read; only unreviewed promotion candidates age into a warning.
+  const shippedDarkFlags = shippedDarkAudit?.flags ?? [];
+  const shippedDarkWarnings = shippedDarkFlags
     .filter((flag) => (
-      typeof flag.darkForReleases === 'number'
-      && typeof shippedDarkAudit?.thresholdReleases === 'number'
-      && flag.darkForReleases >= shippedDarkAudit.thresholdReleases
+      // The v2 server already decided this; only older payloads need the
+      // lifecycle + age recomputation below.
+      typeof flag.needsAttention === 'boolean'
+        ? flag.needsAttention
+        : (flag.lifecycle ?? 'promotion-candidate') === 'promotion-candidate'
+          && typeof flag.darkForReleases === 'number'
+          && typeof shippedDarkAudit?.thresholdReleases === 'number'
+          && flag.darkForReleases >= shippedDarkAudit.thresholdReleases
     ));
+  const shippedDarkByDesign = shippedDarkFlags
+    .filter((flag) => flag.lifecycle === 'deliberate-default-off');
 
   const running = activeLanes.filter((l) => RUNNING_STATUSES.has(l.status));
   // Review packets remain active but are not always included in an upstream
@@ -164,6 +189,7 @@ export async function runStatus(mode: OutputMode): Promise<number> {
     storageHolds,
     shippedDarkAudit,
     shippedDarkWarnings,
+    shippedDarkByDesign,
   };
 
   if (mode.human) {
@@ -203,12 +229,12 @@ export async function runStatus(mode: OutputMode): Promise<number> {
         process.stdout.write(`  ${hold.status.padEnd(15)} ${hold.packetId.padEnd(28)} ${hold.reason}\n`);
       }
     }
-    if (shippedDarkWarnings.length > 0) {
+    if (shippedDarkFlags.length > 0) {
       printHumanHeading('shipped but dark');
-      for (const flag of shippedDarkWarnings) {
+      for (const flag of shippedDarkFlags) {
         const age = flag.darkForReleases === 1 ? '1 release' : `${flag.darkForReleases} releases`;
         process.stdout.write(
-          `  ${flag.tomlKey.padEnd(42)} ${age}  landed ${flag.landedRelease ?? 'unknown'}\n`,
+          `  ${flag.tomlKey.padEnd(42)} ${age}  landed ${flag.landedRelease ?? 'unknown'}  ${dispositionLabel(flag, shippedDarkWarnings.includes(flag))}\n`,
         );
       }
     }

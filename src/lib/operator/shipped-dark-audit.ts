@@ -14,7 +14,12 @@ import {
   type OperatorDefaults,
   type SettingSource,
 } from './defaults';
-import { SHIPPED_DARK_FLAG_LANDING_RELEASES } from './shipped-dark-manifest';
+import {
+  DEFAULT_SHIPPED_DARK_LIFECYCLE,
+  isShippedDarkPromotionCandidate,
+  shippedDarkManifestEntry,
+  type ShippedDarkLifecycle,
+} from './shipped-dark-manifest';
 
 const execFileAsync = promisify(execFile);
 const DEFAULTS_FILE = 'src/lib/operator/defaults.ts';
@@ -38,6 +43,10 @@ export interface ShippedButDarkFlag {
   defaultFile: string;
   landedRelease: string | null;
   darkForReleases: number | null;
+  /** Declared disposition: only promotion candidates can become warnings. */
+  lifecycle: ShippedDarkLifecycle;
+  /** Why the flag ships off. Present for every deliberate default-off entry. */
+  lifecycleRationale: string | null;
 }
 
 export interface ShippedButDarkAudit {
@@ -139,6 +148,19 @@ async function findLanding(
 }
 
 /**
+ * True when a dark flag is an unreviewed promotion candidate that has aged past
+ * the warning threshold. Deliberate default-off flags stay visible and quiet.
+ */
+export function isOverdueShippedDarkFlag(
+  flag: Pick<ShippedButDarkFlag, 'lifecycle' | 'darkForReleases'>,
+  thresholdReleases: number,
+): boolean {
+  return isShippedDarkPromotionCandidate(flag.lifecycle)
+    && flag.darkForReleases !== null
+    && flag.darkForReleases >= thresholdReleases;
+}
+
+/**
  * Lists settings-backed feature flags that remain inactive in both the shipped
  * code default and the operator's active setting state.
  */
@@ -162,7 +184,8 @@ export async function auditShippedButDarkFlags(options: {
     async (key): Promise<ShippedButDarkFlag> => {
       const codeDefault = OPERATOR_DEFAULTS_FALLBACK[key];
       const defaultFile = FLAG_DEFAULT_FILES[key] ?? DEFAULTS_FILE;
-      const installedLandingRelease = SHIPPED_DARK_FLAG_LANDING_RELEASES[key] ?? null;
+      const manifestEntry = shippedDarkManifestEntry(key);
+      const installedLandingRelease = manifestEntry?.landedRelease ?? null;
       return {
         key,
         tomlKey: getOperatorDefaultsTomlKey(key),
@@ -170,6 +193,10 @@ export async function auditShippedButDarkFlags(options: {
         operatorValue: resolved.values[key],
         operatorValueSource: resolved.sources[key],
         defaultFile,
+        // Lifecycle is a source-declared decision, never a Git observation, so
+        // the installed runtime and a source checkout agree on disposition.
+        lifecycle: manifestEntry?.lifecycle ?? DEFAULT_SHIPPED_DARK_LIFECYCLE,
+        lifecycleRationale: manifestEntry?.rationale ?? null,
         ...(options.repoPath
           ? await findLanding(options.repoPath, key, defaultFile, releases)
           : {
