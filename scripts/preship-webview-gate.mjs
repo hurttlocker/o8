@@ -6,7 +6,22 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { collectFootprintReceipt, snapshotProcesses, webkitPids } from './lib/footprint-budget.mjs';
+import {
+  buildFootprintSeriesReceipt,
+  collectFootprintReceipt,
+  computeArtifactDigest,
+  resolveIdleSampleCount,
+  snapshotProcesses,
+  webkitPids,
+} from './lib/footprint-budget.mjs';
+import {
+  LOAD_UNAVAILABLE_REASONS,
+  createHttpLoadDriver,
+  isLiveOperatorPath,
+  planLoadScenario,
+  resolveLoadScenarioRequest,
+  runLoadScenario,
+} from './lib/footprint-budget-load.mjs';
 import { BOOT_PROBE_JS, classifyBootProbe } from './preship-gate-logic.mjs';
 
 // Per-phase deadlines (each phase gets its OWN fresh budget — a shared budget
@@ -152,6 +167,78 @@ function writeFootprintReceipt(appPath, receipt) {
   const outputPath = footprintReceiptPath(appPath);
   writeFileSync(outputPath, `${JSON.stringify(receipt, null, 2)}\n`);
   return outputPath;
+}
+
+// One idle observation on the already-running artifact. Repeating this is what
+// turns a single lucky reading into a distribution the receipt can defend.
+async function observeFootprintSample(context, scenario, laneCount) {
+  const before = snapshotProcesses();
+  await sleep(FOOTPRINT_OBSERVATION_MS);
+  const after = snapshotProcesses();
+  return collectFootprintReceipt({
+    rootPid: context.rootPid,
+    appPath: context.appPath,
+    dataDir: context.dataDir,
+    updaterArchivePath: context.updaterArchivePath,
+    webkitBaseline: context.webkitBaseline,
+    before,
+    after,
+    observationMs: FOOTPRINT_OBSERVATION_MS,
+    version: context.version,
+    gitSha: context.gitSha,
+    mode: context.mode,
+    scenario,
+    artifactDigest: context.artifactDigest,
+    ...(typeof laneCount === 'number' ? { laneCount } : {}),
+  });
+}
+
+async function collectFootprintSamples(context, sampleCount, scenario, laneCount) {
+  const samples = [];
+  for (let index = 0; index < sampleCount; index += 1) {
+    samples.push(await observeFootprintSample(context, scenario, laneCount));
+  }
+  return samples;
+}
+
+function commandOnPath(command) {
+  try {
+    execFileSync('/usr/bin/which', [command], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// The sidecar may land on a different port than the one requested; its chosen
+// value is written into the isolated data dir, which is what cleanup already
+// trusts. The load driver must talk to the same listener.
+function resolveChildApiPort(dataDir, fallback) {
+  const portPath = path.join(dataDir, 'api-port');
+  if (!existsSync(portPath)) return fallback;
+  const port = Number(readFileSync(portPath, 'utf8').trim());
+  return Number.isInteger(port) && port > 0 ? port : fallback;
+}
+
+function readGateToken(dataDir) {
+  const tokenPath = path.join(dataDir, 'ws-token');
+  return existsSync(tokenPath) ? readFileSync(tokenPath, 'utf8').trim() : '';
+}
+
+function planGateLoadScenario(dataDir) {
+  const request = resolveLoadScenarioRequest(process.env);
+  return {
+    request,
+    plan: planLoadScenario({
+      request,
+      probes: {
+        pathExists: (target) => existsSync(target),
+        isLiveOperatorPath: (target) => isLiveOperatorPath(target, os.homedir()),
+        binaryAvailable: (binaryName) => commandOnPath(binaryName),
+        apiTokenAvailable: () => readGateToken(dataDir).length > 0,
+      },
+    }),
+  };
 }
 
 function clearReleaseNote(appTar) {
@@ -445,6 +532,7 @@ async function main() {
   rmSync(`${socketPath}.token`, { force: true });
   if (existsSync(socketPath)) throw new Error(`socket path already exists: ${socketPath}`);
   const dataDir = mkdtempSync(path.join(os.tmpdir(), 'o8-bootgate-'));
+  const sampleCount = resolveIdleSampleCount(process.env.O8_FOOTPRINT_IDLE_SAMPLES);
   // Provision distinct free ports for the isolated child so it can never bind
   // (or be confused with) the operator's live :3001/:3002.
   const apiPort = await findFreePortFrom(3060);
@@ -488,25 +576,48 @@ async function main() {
     const mainVisible = await invokeTauri(client, 'plugin:window|is_visible', { label: 'main' });
     if (mainVisible !== false) throw new Error('main window remained visible before idle sampling');
     signalFailed = 'footprint-budget';
-    await sleep(FOOTPRINT_COOLDOWN_MS);
-    const footprintBefore = snapshotProcesses();
-    await sleep(FOOTPRINT_OBSERVATION_MS);
-    const footprintAfter = snapshotProcesses();
-    footprintReceipt = collectFootprintReceipt({
+    const footprintContext = {
       rootPid: child.pid,
       appPath: resolved.appPath,
       dataDir,
       updaterArchivePath: resolved.appTar,
       webkitBaseline,
-      before: footprintBefore,
-      after: footprintAfter,
-      observationMs: FOOTPRINT_OBSERVATION_MS,
       version: info.version,
       gitSha: info.gitSha,
       mode,
-      scenario: 'idle-hidden',
-    });
+      artifactDigest: computeArtifactDigest(resolved.appPath, {
+        version: info.version,
+        gitSha: info.gitSha,
+      }),
+    };
+    await sleep(FOOTPRINT_COOLDOWN_MS);
+    const idleSamples = await collectFootprintSamples(footprintContext, sampleCount, 'idle-hidden');
+
+    signalFailed = 'footprint-load-scenario';
+    const { plan } = planGateLoadScenario(dataDir);
+    let loadScenario = plan;
+    if (plan.available) {
+      loadScenario = await runLoadScenario({
+        plan,
+        driver: createHttpLoadDriver({
+          apiBase: `http://127.0.0.1:${resolveChildApiPort(dataDir, apiPort)}`,
+          token: readGateToken(dataDir),
+          repoPath: plan.repoPath,
+          runtime: plan.runtime,
+          rootPid: child.pid,
+        }),
+        sample: ({ laneCount }) => collectFootprintSamples(footprintContext, sampleCount, 'loaded-lanes', laneCount),
+      });
+    }
+
+    signalFailed = 'footprint-budget';
+    footprintReceipt = buildFootprintSeriesReceipt({ samples: idleSamples, loadScenario });
     const receiptPath = writeFootprintReceipt(resolved.appPath, footprintReceipt);
+    // The receipt lands FIRST so preserved residual state is on the record even
+    // when it fails the gate; the harness reports what survived, never deletes it.
+    if (loadScenario.reason === LOAD_UNAVAILABLE_REASONS.residualStatePreserved) {
+      throw new Error(`load scenario preserved residual state: ${JSON.stringify(loadScenario.teardown.residuals.counts)}`);
+    }
     if (footprintReceipt.verdict !== 'PASS') {
       const failed = footprintReceipt.checks
         .filter((check) => !check.pass)
@@ -533,8 +644,14 @@ async function main() {
       idlePhysicalBytes: footprintReceipt.metrics.idlePhysicalBytes,
       idleCpuPercent: footprintReceipt.metrics.idleCpuPercent,
       idleProcessChurn: footprintReceipt.metrics.idleProcessChurn,
+      footprintSampleCount: footprintReceipt.sampleCount,
+      loadScenarioAvailable: footprintReceipt.loadScenario?.available === true,
+      loadScenarioReason: footprintReceipt.loadScenario?.reason,
     });
     console.log(`[preship-webview-gate] footprint receipt ${receiptPath}`);
+    if (footprintReceipt.loadScenario?.available !== true) {
+      console.log(`[preship-webview-gate] loaded footprint not measured: ${footprintReceipt.loadScenario?.reason}`);
+    }
     console.log(`[preship-webview-gate] PASS real WKWebView booted ${path.basename(resolved.appPath)} in ${Date.now() - started}ms`);
   } catch (error) {
     writeAudit({

@@ -1,0 +1,131 @@
+import type { FootprintSampleAggregate, FootprintSampleInput } from './footprint-budget.d.mts';
+
+export const LOAD_SCENARIO_LIMITS: {
+  maxLaneCount: number;
+  activationTimeoutMs: number;
+  drainTimeoutMs: number;
+  pollMs: number;
+};
+
+export const LOAD_UNAVAILABLE_REASONS: Readonly<Record<string, string>>;
+export const LOAD_RUNTIME_BINARIES: Readonly<Record<string, string>>;
+export const LOAD_TERMINAL_LANE_STATUSES: readonly string[];
+export interface LoadScenarioRequest {
+  laneCount: number;
+  repoPath?: string | null;
+  runtime?: string;
+}
+
+export interface LoadScenarioResidualCounts {
+  lanes: number;
+  childProcesses: number;
+  worktrees: number;
+  listeners: number;
+}
+
+export interface LoadScenarioResiduals {
+  counts: LoadScenarioResidualCounts;
+  preservedWorktrees: Array<{ digest: string; insideLoadRepo: boolean }>;
+  preservedLanes: Array<{ packetDigest: string; status: string }>;
+}
+
+export interface LoadScenarioScope {
+  missionId: string | null;
+  packetIds: string[];
+}
+
+export interface LoadScenarioTeardown {
+  packetCount: number;
+  stopped: number;
+  refused: number;
+  residuals: LoadScenarioResiduals;
+}
+
+export type LoadScenarioPlan =
+  | { available: false; reason: string; detail?: unknown }
+  | { available: true; laneCount: number; runtime: string; binaryName: string; repoPath: string };
+
+export interface LoadScenarioBaseline {
+  activeLaneCount: number;
+  worktrees: Set<string>;
+  pids: Set<number>;
+  ports: Set<number>;
+}
+
+export interface LoadScenarioDisposition {
+  packetId: string;
+  stage: 'stop';
+  outcome: 'stopped' | 'refused';
+  message?: string;
+}
+
+export interface LoadScenarioDriver {
+  captureBaseline(): Promise<LoadScenarioBaseline>;
+  createScopedLanes(laneCount: number): Promise<LoadScenarioScope>;
+  dispatchScopedLanes(scope: LoadScenarioScope): Promise<void>;
+  waitForActiveLanes(scope: LoadScenarioScope, deadline?: number): Promise<boolean>;
+  releaseScopedLanes(scope: LoadScenarioScope): Promise<LoadScenarioDisposition[]>;
+  collectResiduals(baseline: LoadScenarioBaseline, scope: LoadScenarioScope): Promise<LoadScenarioResiduals>;
+}
+
+export type LoadScenarioResult =
+  | { available: false; reason: string; detail?: unknown; laneCount?: number; teardown?: LoadScenarioTeardown }
+  | {
+    available: true;
+    laneCount: number;
+    sampleCount: number;
+    samples: Array<{
+      index: number;
+      recordedAt: string;
+      metrics: FootprintSampleInput['metrics'];
+      verdict: 'PASS' | 'FAIL';
+      checks: FootprintSampleInput['checks'];
+    }>;
+    runtime: string;
+    aggregate: FootprintSampleAggregate;
+    teardown: LoadScenarioTeardown;
+  };
+
+export function resolveLoadScenarioRequest(
+  env?: Record<string, string | undefined>,
+  limits?: typeof LOAD_SCENARIO_LIMITS,
+): LoadScenarioRequest;
+
+export function planLoadScenario(input: {
+  request: LoadScenarioRequest;
+  probes: {
+    pathExists(target: string): boolean;
+    isLiveOperatorPath(target: string): boolean;
+    binaryAvailable(binaryName: string): boolean;
+    apiTokenAvailable(): boolean;
+  };
+}): LoadScenarioPlan;
+
+export function isLiveOperatorPath(target: string, homeDir: string): boolean;
+export function unwrapOperatorResult(payload: unknown, route: string): Record<string, unknown> | null;
+export function isActiveLaneStatus(status: unknown): boolean;
+export function parseWorktreePaths(output: string): string[];
+export function parseListeningPorts(output: string): Set<number>;
+export function listeningPortsForPids(
+  pids: Set<number>,
+  run?: (command: string, args: string[], options?: { encoding?: string }) => string,
+): Set<number>;
+
+export function createHttpLoadDriver(input: {
+  apiBase: string;
+  token: string;
+  repoPath: string;
+  runtime: string;
+  rootPid: number;
+  fetchImpl?: typeof fetch;
+  run?: (command: string, args: string[], options?: { encoding?: string }) => string;
+  snapshot?: (run?: unknown) => Map<number, { pid: number; ppid: number; cpuTimeSeconds: number; command: string }>;
+  limits?: typeof LOAD_SCENARIO_LIMITS;
+  now?: () => number;
+}): LoadScenarioDriver;
+
+export function runLoadScenario(input: {
+  plan: LoadScenarioPlan;
+  driver: LoadScenarioDriver;
+  sample(input: { laneCount: number }): Promise<FootprintSampleInput[]>;
+}): Promise<LoadScenarioResult>;

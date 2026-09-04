@@ -1493,6 +1493,13 @@
       ]
     },
     {
+      "path": "tests/footprint-load-route-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
       "path": "tests/github-broker-supervisor-sync-real-path.test.ts",
       "reasons": [
         "real-path"
