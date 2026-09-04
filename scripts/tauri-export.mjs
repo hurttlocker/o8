@@ -12,6 +12,7 @@ import { prepareNativeBundle } from './native-bundle.mjs';
 import { exportTauriSafetyHookResources } from './tauri-hook-resources.mjs';
 import { resolveReleaseConfig } from './lib/release-config.mjs';
 import { canonicalizeServerOnlyStubEnv } from './run-lib.mjs';
+import { assertTauriExportInputsSafe } from './lib/tauri-export-safety.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
@@ -32,16 +33,25 @@ try {
   loaderAppVersion = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version || 'dev';
 } catch { /* keep 'dev' */ }
 
-// Clean previous build
-if (existsSync(out)) rmSync(out, { recursive: true });
-mkdirSync(frontend, { recursive: true });
-mkdirSync(server, { recursive: true });
-
 // Verify standalone build
 if (!existsSync(standalone)) {
   console.error('❌ No standalone build at .next/standalone — run next build first');
   process.exit(1);
 }
+try {
+  assertTauriExportInputsSafe(standalone);
+} catch (error) {
+  console.error(`❌ Unsafe Tauri export input: ${error.message}`);
+  process.exit(1);
+}
+
+// Clean previous build only after every source path is known to be isolated.
+// A linked standalone node_modules can make out/server/node_modules resolve
+// back into the checkout; the native-module replacement below must never
+// delete the source package through that alias.
+if (existsSync(out)) rmSync(out, { recursive: true });
+mkdirSync(frontend, { recursive: true });
+mkdirSync(server, { recursive: true });
 
 // Managed worktree hook settings reference immutable files from the running
 // o8 installation. Keep those programs beside the packaged server so the
