@@ -6,6 +6,7 @@ import {
   LOAD_RUNTIME_BINARIES,
   LOAD_SCENARIO_LIMITS,
   LOAD_UNAVAILABLE_REASONS,
+  commandMatchesRuntime,
   createHttpLoadDriver,
   findRegisteredOperatorRepo,
   isActiveLaneStatus,
@@ -16,6 +17,7 @@ import {
   planGateLoadScenario,
   planLoadScenario,
   readRegisteredOperatorRepoPaths,
+  readProcessCwd,
   resolveLoadScenarioRequest,
   runLoadScenario,
   unwrapOperatorResult,
@@ -523,6 +525,7 @@ describe('load scenario driver', () => {
     agents: () => Array<Record<string, unknown>> | null;
     run?: (command: string, args: string[]) => string;
     snapshot?: () => Map<number, { pid: number; ppid: number; cpuTimeSeconds: number; command: string }>;
+    readCwd?: (pid: number) => string | null;
   }) {
     const requests: Array<{ route: string; body: Record<string, unknown> }> = [];
     const fetchImpl = (async (url: string, init?: { method?: string; body?: string }) => {
@@ -551,6 +554,7 @@ describe('load scenario driver', () => {
       }),
       snapshot: handlers.snapshot
         ?? (() => new Map([[100, { pid: 100, ppid: 1, cpuTimeSeconds: 0, command: '/bundle/o8' }]])),
+      readCwd: handlers.readCwd,
       limits: { ...LOAD_SCENARIO_LIMITS, activationTimeoutMs: 1_000, drainTimeoutMs: 1_000, pollMs: 1 },
     });
     return { driver, requests };
@@ -561,6 +565,13 @@ describe('load scenario driver', () => {
     expect([...parseListeningPorts('node 42 op 21u IPv4 TCP 127.0.0.1:3060 (LISTEN)\nnode 43 op 22u TCP *:47105 (LISTEN)\n')])
       .toEqual([3060, 47105]);
     expect([...parseListeningPorts('node 42 op 21u TCP 127.0.0.1:3060 (ESTABLISHED)')]).toEqual([]);
+    expect(commandMatchesRuntime('/usr/local/bin/codex exec --json', 'codex')).toBe(true);
+    expect(commandMatchesRuntime('/usr/local/bin/node /opt/bin/gemini/index.js', 'gemini')).toBe(true);
+    expect(commandMatchesRuntime('/bin/zsh -c echo codex', 'codex')).toBe(false);
+    expect(readProcessCwd(42, (_command, args) => {
+      expect(args).toEqual(['-a', '-p', '42', '-d', 'cwd', '-Fn']);
+      return 'p42\nfcwd\nn/private/tmp/load-repo\n';
+    })).toBe('/private/tmp/load-repo');
   });
 
   it('creates one mission carrying N lanes and reads the ids out of the result envelope', async () => {
@@ -572,11 +583,22 @@ describe('load scenario driver', () => {
           return { missionId: 'm-1', packets: [{ id: 'pkt-a', title: 'a', wave: 1 }, { id: 'pkt-b', title: 'b', wave: 1 }] };
         }
         if (route.endsWith('/dispatch')) {
-          agents = [{ packetId: 'pkt-a', status: 'running' }, { packetId: 'pkt-b', status: 'running' }];
+          agents = [
+            { packetId: 'pkt-a', status: 'running', repoPath: '/tmp/load-repo/a' },
+            { packetId: 'pkt-b', status: 'running', repoPath: '/tmp/load-repo/b' },
+          ];
           return { dispatched: 2 };
         }
         return { ok: true };
       },
+      snapshot: () => agents
+        ? new Map([
+            [100, { pid: 100, ppid: 1, cpuTimeSeconds: 0, command: '/bundle/o8' }],
+            [201, { pid: 201, ppid: 100, cpuTimeSeconds: 0, command: '/usr/local/bin/codex exec' }],
+            [202, { pid: 202, ppid: 100, cpuTimeSeconds: 0, command: '/usr/local/bin/codex exec' }],
+          ])
+        : new Map([[100, { pid: 100, ppid: 1, cpuTimeSeconds: 0, command: '/bundle/o8' }]]),
+      readCwd: (pid) => pid === 201 ? '/tmp/load-repo/a' : pid === 202 ? '/tmp/load-repo/b' : null,
     });
 
     const scope = await driver.createScopedLanes(2);
@@ -587,6 +609,21 @@ describe('load scenario driver', () => {
     expect((requests[0].body as { issues: unknown[] }).issues).toHaveLength(2);
     expect(JSON.stringify(requests[0].body)).toContain('Do not modify, create, or delete any file');
     expect(requests[1]).toMatchObject({ route: '/api/orchestrator/dispatch', body: { missionId: 'm-1' } });
+  });
+
+  it('does not accept stale running lane rows without live worker processes', async () => {
+    const { driver } = driverFixture({
+      agents: () => [
+        { packetId: 'pkt-a', status: 'running', repoPath: '/tmp/load-repo/a' },
+        { packetId: 'pkt-b', status: 'running', repoPath: '/tmp/load-repo/b' },
+      ],
+      post: () => ({}),
+    });
+
+    expect(await driver.waitForActiveLanes(
+      { missionId: 'm-1', packetIds: ['pkt-a', 'pkt-b'] },
+      Date.now() + 5,
+    )).toBe(false);
   });
 
   it('reports zero baseline lanes when the real status route answers not_found', async () => {

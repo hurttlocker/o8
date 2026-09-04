@@ -159,6 +159,11 @@ export function listeningPortsForPids(
   pids: Set<number>,
   run?: (command: string, args: string[], options?: { encoding?: string }) => string,
 ): Set<number>;
+export function readProcessCwd(
+  pid: number,
+  run?: (command: string, args: string[], options?: { encoding?: string }) => string,
+): string | null;
+export function commandMatchesRuntime(command: string, binaryName: string): boolean;
 
 export function createHttpLoadDriver(input: {
   apiBase: string;
@@ -169,6 +174,10 @@ export function createHttpLoadDriver(input: {
   fetchImpl?: typeof fetch;
   run?: (command: string, args: string[], options?: { encoding?: string }) => string;
   snapshot?: (run?: unknown) => Map<number, { pid: number; ppid: number; cpuTimeSeconds: number; command: string }>;
+  readCwd?: (
+    pid: number,
+    run?: (command: string, args: string[], options?: { encoding?: string }) => string,
+  ) => string | null;
   limits?: typeof LOAD_SCENARIO_LIMITS;
   now?: () => number;
 }): LoadScenarioDriver;

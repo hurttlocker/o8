@@ -304,6 +304,38 @@ export function listeningPortsForPids(pids, run = execFileSync) {
   }
 }
 
+export function readProcessCwd(pid, run = execFileSync) {
+  try {
+    const output = run('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'], { encoding: 'utf8' });
+    const cwd = String(output)
+      .split('\n')
+      .find((line) => line.startsWith('n'))
+      ?.slice(1)
+      .trim();
+    return cwd ? canonicalPath(cwd) : null;
+  } catch {
+    // A worker can exit between the process sweep and this probe. That is not
+    // live-worker evidence, so the activation check keeps waiting.
+    return null;
+  }
+}
+
+export function commandMatchesRuntime(command, binaryName) {
+  const candidates = String(command)
+    .trim()
+    .match(/"[^"]*"|'[^']*'|\S+/g)
+    ?.slice(0, 3)
+    .map((token) => token.replace(/^["']|["']$/g, ''))
+    ?? [];
+  return candidates.some((candidate) => {
+    const segments = candidate.split(/[\\/]/).filter(Boolean);
+    return segments.some((segment) => {
+      const stem = segment.replace(/\.(?:exe|[cm]?js)$/i, '');
+      return stem === binaryName || stem.startsWith(`${binaryName}-`);
+    });
+  });
+}
+
 // Every operator route answers `{ ok, result }` (see src/app/api/orchestrator/_utils.ts).
 // Reading a bare top-level field would silently see `undefined` forever.
 export function unwrapOperatorResult(payload, route) {
@@ -326,6 +358,7 @@ export function createHttpLoadDriver({
   fetchImpl = fetch,
   run = execFileSync,
   snapshot = snapshotProcesses,
+  readCwd = readProcessCwd,
   limits = LOAD_SCENARIO_LIMITS,
   now = () => Date.now(),
 }) {
@@ -352,6 +385,21 @@ export function createHttpLoadDriver({
   function ownedProcessState() {
     const processes = snapshot(run);
     return { processes, pids: descendantPids(processes, rootPid) };
+  }
+
+  function liveWorkerWorktrees() {
+    const binaryName = LOAD_RUNTIME_BINARIES[runtime];
+    if (!binaryName) return new Set();
+    const { processes, pids } = ownedProcessState();
+    const worktrees = new Set();
+    for (const pid of pids) {
+      if (pid === rootPid) continue;
+      const process = processes.get(pid);
+      if (!process || !commandMatchesRuntime(process.command, binaryName)) continue;
+      const cwd = readCwd(pid, run);
+      if (cwd) worktrees.add(canonicalPath(cwd));
+    }
+    return worktrees;
   }
 
   async function collectResiduals(baseline, scope) {
@@ -451,7 +499,15 @@ export function createHttpLoadDriver({
     async waitForActiveLanes(scope, deadline = now() + limits.activationTimeoutMs) {
       while (now() < deadline) {
         const active = (await scopedAgents(scope.packetIds)).filter((agent) => isActiveLaneStatus(agent?.status));
-        if (active.length >= scope.packetIds.length) return true;
+        const liveWorktrees = liveWorkerWorktrees();
+        const livePackets = new Set(active.flatMap((agent) => {
+          const worktree = typeof agent?.repoPath === 'string' ? canonicalPath(agent.repoPath) : null;
+          return worktree && liveWorktrees.has(worktree) ? [agent.packetId] : [];
+        }));
+        // A durable lane row can remain `running` briefly after its worker
+        // exits. Loaded footprint means N live runtime processes in N scoped
+        // worktrees, not N optimistic status records.
+        if (livePackets.size >= scope.packetIds.length) return true;
         await sleep(limits.pollMs);
       }
       return false;
