@@ -24,6 +24,7 @@ interface AgentMessageActivityProps {
 const COLLAPSED_KEY = 'o8:agent-panel:agent-messages-collapsed';
 const SEEN_SEQUENCES_KEY = 'o8:agent-panel:agent-messages-seen';
 const POLL_INTERVAL_MS = 15_000;
+const FETCH_TIMEOUT_MS = 12_000;
 const MESSAGE_LIMIT = 8;
 
 type SeenSequences = Record<string, number>;
@@ -108,42 +109,48 @@ function AgentMessageActivityBase({ repos }: AgentMessageActivityProps) {
   }, []);
 
   const fetchSnapshot = useCallback(async () => {
-    abortRef.current?.abort();
+    if (abortRef.current) return;
     const controller = new AbortController();
     abortRef.current = controller;
-    const [messagesResult, presenceResult] = await Promise.allSettled([
-      fetch(`/api/agents/message?scope=all&limit=${MESSAGE_LIMIT}`, { cache: 'no-store', signal: controller.signal }),
-      fetch('/api/agents/presence?scope=all', { cache: 'no-store', signal: controller.signal }),
-    ]);
-    let messages: AgentMessage[] = [];
-    let agents: AgentPresence[] = [];
-    if (messagesResult.status === 'fulfilled' && messagesResult.value.ok) {
-      const payload = await messagesResult.value.json() as { messages?: AgentMessage[] };
-      messages = payload.messages ?? [];
-    }
-    if (presenceResult.status === 'fulfilled' && presenceResult.value.ok) {
-      const payload = await presenceResult.value.json() as { agents?: AgentPresence[] };
-      agents = payload.agents ?? [];
-    }
-    const reposByPath = new Map(repos.map((repo) => [repo.localPath, repo]));
-    const snapshotsByPath = new Map<string, RepoSnapshot>();
-    const snapshotFor = (repoPath: string) => {
-      const repo = reposByPath.get(repoPath);
-      if (!repo) return null;
-      let snapshot = snapshotsByPath.get(repoPath);
-      if (!snapshot) {
-        snapshot = { repo, messages: [], agents: [] };
-        snapshotsByPath.set(repoPath, snapshot);
+    const timeout = window.setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const [messagesResult, presenceResult] = await Promise.allSettled([
+        fetch(`/api/agents/message?scope=all&limit=${MESSAGE_LIMIT}`, { cache: 'no-store', signal: controller.signal }),
+        fetch('/api/agents/presence?scope=all', { cache: 'no-store', signal: controller.signal }),
+      ]);
+      let messages: AgentMessage[] = [];
+      let agents: AgentPresence[] = [];
+      if (messagesResult.status === 'fulfilled' && messagesResult.value.ok) {
+        const payload = await messagesResult.value.json() as { messages?: AgentMessage[] };
+        messages = payload.messages ?? [];
       }
-      return snapshot;
-    };
-    for (const message of messages) snapshotFor(message.repo)?.messages.push(message);
-    for (const agent of agents) snapshotFor(agent.repo)?.agents.push(agent);
-    const next = Array.from(snapshotsByPath.values());
-    if (!controller.signal.aborted) {
-      setSnapshots(next);
-      setRefreshedAt(Date.now());
-      recordSeenSequences(next, !collapsedRef.current);
+      if (presenceResult.status === 'fulfilled' && presenceResult.value.ok) {
+        const payload = await presenceResult.value.json() as { agents?: AgentPresence[] };
+        agents = payload.agents ?? [];
+      }
+      const reposByPath = new Map(repos.map((repo) => [repo.localPath, repo]));
+      const snapshotsByPath = new Map<string, RepoSnapshot>();
+      const snapshotFor = (repoPath: string) => {
+        const repo = reposByPath.get(repoPath);
+        if (!repo) return null;
+        let snapshot = snapshotsByPath.get(repoPath);
+        if (!snapshot) {
+          snapshot = { repo, messages: [], agents: [] };
+          snapshotsByPath.set(repoPath, snapshot);
+        }
+        return snapshot;
+      };
+      for (const message of messages) snapshotFor(message.repo)?.messages.push(message);
+      for (const agent of agents) snapshotFor(agent.repo)?.agents.push(agent);
+      const next = Array.from(snapshotsByPath.values());
+      if (!controller.signal.aborted) {
+        setSnapshots(next);
+        setRefreshedAt(Date.now());
+        recordSeenSequences(next, !collapsedRef.current);
+      }
+    } finally {
+      window.clearTimeout(timeout);
+      if (abortRef.current === controller) abortRef.current = null;
     }
   }, [recordSeenSequences, repos]);
 
@@ -158,6 +165,7 @@ function AgentMessageActivityBase({ repos }: AgentMessageActivityProps) {
       window.clearInterval(interval);
       window.removeEventListener('o8:lifecycle-reconcile', refresh);
       abortRef.current?.abort();
+      abortRef.current = null;
     };
   }, [fetchSnapshot, repos.length]);
 

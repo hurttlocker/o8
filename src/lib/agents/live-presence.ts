@@ -86,12 +86,14 @@ function isAddressableSession(session: RuntimeSession): boolean {
     && Boolean(session.cwd.trim());
 }
 
-export async function reconcileLiveAgentPresence(
-  repo: string,
-  seams: LiveAgentPresenceSeams = defaultLiveAgentPresenceSeams,
-  sqlite: Database.Database = getSqlite(),
-): Promise<AgentPresence[]> {
-  const normalizedRepo = path.resolve(repo).replace(/\/+$/, '');
+interface ResolvedLiveSession {
+  session: RuntimeSession;
+  repo: string | null;
+}
+
+async function resolveLiveMessageSessions(
+  seams: LiveAgentPresenceSeams,
+): Promise<ResolvedLiveSession[]> {
   let sessions: RuntimeSession[];
   try {
     sessions = await seams.discoverSessions();
@@ -100,24 +102,35 @@ export async function reconcileLiveAgentPresence(
     return [];
   }
 
-  const candidates = sessions.filter(isAddressableSession);
-  const repoByCwd = new Map<string, Promise<string | null>>();
   const seenSessionKeys = new Set<string>();
-  const reconciled: AgentPresence[] = [];
-
-  for (const session of candidates) {
+  const candidates = sessions.filter((session) => {
+    if (!isAddressableSession(session)) return false;
     const identityKey = `${session.runtimeId}:${session.sessionKey}`;
-    if (seenSessionKeys.has(identityKey)) continue;
+    if (seenSessionKeys.has(identityKey)) return false;
     seenSessionKeys.add(identityKey);
-
-    let repoPromise = repoByCwd.get(session.cwd);
-    if (!repoPromise) {
-      repoPromise = seams.resolveRepoPath(session.cwd);
-      repoByCwd.set(session.cwd, repoPromise);
+    return true;
+  });
+  const repoByCwd = new Map<string, Promise<string | null>>();
+  for (const session of candidates) {
+    if (!repoByCwd.has(session.cwd)) {
+      repoByCwd.set(session.cwd, seams.resolveRepoPath(session.cwd).catch(() => null));
     }
-    const sessionRepo = await repoPromise;
-    if (!sessionRepo || path.resolve(sessionRepo).replace(/\/+$/, '') !== normalizedRepo) continue;
+  }
+  return Promise.all(candidates.map(async (session) => ({
+    session,
+    repo: await repoByCwd.get(session.cwd)!,
+  })));
+}
 
+export async function reconcileLiveAgentPresence(
+  repo: string,
+  seams: LiveAgentPresenceSeams = defaultLiveAgentPresenceSeams,
+  sqlite: Database.Database = getSqlite(),
+): Promise<AgentPresence[]> {
+  const normalizedRepo = path.resolve(repo).replace(/\/+$/, '');
+  const reconciled: AgentPresence[] = [];
+  for (const { session, repo: sessionRepo } of await resolveLiveMessageSessions(seams)) {
+    if (!sessionRepo || path.resolve(sessionRepo).replace(/\/+$/, '') !== normalizedRepo) continue;
     const agentId = liveSessionAgentId(session);
     reconciled.push(upsertAgentPresence({
       agentId,
@@ -139,28 +152,8 @@ export async function reconcileAllLiveAgentPresence(
   seams: LiveAgentPresenceSeams = defaultLiveAgentPresenceSeams,
   sqlite: Database.Database = getSqlite(),
 ): Promise<AgentPresence[]> {
-  let sessions: RuntimeSession[];
-  try {
-    sessions = await seams.discoverSessions();
-  } catch (error) {
-    console.warn('[agent-presence] Live runtime discovery failed:', error instanceof Error ? error.message : String(error));
-    return [];
-  }
-
-  const repoByCwd = new Map<string, Promise<string | null>>();
-  const seenSessionKeys = new Set<string>();
   const reconciled: AgentPresence[] = [];
-  for (const session of sessions.filter(isAddressableSession)) {
-    const identityKey = `${session.runtimeId}:${session.sessionKey}`;
-    if (seenSessionKeys.has(identityKey)) continue;
-    seenSessionKeys.add(identityKey);
-
-    let repoPromise = repoByCwd.get(session.cwd);
-    if (!repoPromise) {
-      repoPromise = seams.resolveRepoPath(session.cwd);
-      repoByCwd.set(session.cwd, repoPromise);
-    }
-    const repo = await repoPromise;
+  for (const { session, repo } of await resolveLiveMessageSessions(seams)) {
     if (!repo) continue;
     const normalizedRepo = path.resolve(repo).replace(/\/+$/, '');
     const agentId = liveSessionAgentId(session);

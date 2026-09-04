@@ -1,10 +1,12 @@
 import { existsSync } from 'node:fs';
-import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { WorktreeManager } from './manager';
+import { readWorktreeMetaSnapshot } from './metadata-store';
 import { resolveWorktreeRootLayout } from './root-layout';
 
 describe('passive worktree metadata reads', () => {
@@ -34,5 +36,46 @@ describe('passive worktree metadata reads', () => {
     await expect(manager.list()).resolves.toEqual([]);
     await expect(manager.listDependencyMaterializationAuthorities()).resolves.toEqual([]);
     expect(existsSync(worktreeBase)).toBe(false);
+  });
+
+  it('prefers durable transaction state when the metadata mirror is stale', async () => {
+    const sqlite = new Database(':memory:');
+    const worktreeBase = resolveWorktreeRootLayout(repoPath).primaryBase;
+    await mkdir(worktreeBase, { recursive: true });
+    await writeFile(path.join(worktreeBase, '.meta.json'), JSON.stringify({
+      version: 1,
+      worktrees: {},
+    }));
+    sqlite.exec(`
+      CREATE TABLE worktree_metadata_state (
+        metadata_root TEXT PRIMARY KEY,
+        payload_json TEXT NOT NULL,
+        mirror_identity_json TEXT,
+        updated_at INTEGER NOT NULL
+      )
+    `);
+    sqlite.prepare(`
+      INSERT INTO worktree_metadata_state
+        (metadata_root, payload_json, mirror_identity_json, updated_at)
+      VALUES (?, ?, NULL, ?)
+    `).run(worktreeBase, JSON.stringify({
+      version: 1,
+      worktrees: {
+        'packet-durable': {
+          id: 'packet-durable',
+          agentType: 'codex',
+          baseBranch: 'main',
+          createdAt: Date.now(),
+          claudeManaged: false,
+          taskName: 'durable recovery',
+          status: 'ready',
+        },
+      },
+    }), Date.now());
+
+    await expect(readWorktreeMetaSnapshot(repoPath, sqlite)).resolves.toMatchObject({
+      'packet-durable': { id: 'packet-durable', status: 'ready' },
+    });
+    sqlite.close();
   });
 });

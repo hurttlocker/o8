@@ -110,6 +110,8 @@ export function ensureAgentBusSchema(sqlite: Database.Database = getSqlite()): v
 
     CREATE INDEX IF NOT EXISTS idx_agent_presence_repo_seen
       ON agent_presence(repo_path, last_seen);
+    CREATE INDEX IF NOT EXISTS idx_agent_presence_seen
+      ON agent_presence(last_seen DESC, name ASC);
     CREATE INDEX IF NOT EXISTS idx_agent_presence_packet
       ON agent_presence(packet_id);
 
@@ -284,12 +286,19 @@ export function listAgentPresenceAcrossRepos(
   sqlite: Database.Database = getSqlite(),
 ): AgentPresence[] {
   ensureAgentBusSchema(sqlite);
+  if (options.includeStale) {
+    const rows = sqlite.prepare(`
+      SELECT * FROM agent_presence ORDER BY last_seen DESC, name ASC
+    `).all() as PresenceRow[];
+    return rows.map(mapPresence);
+  }
+  const cutoff = new Date((options.now ?? new Date()).getTime() - AGENT_PRESENCE_TTL_MS).toISOString();
   const rows = sqlite.prepare(`
-    SELECT * FROM agent_presence ORDER BY last_seen DESC, name ASC
-  `).all() as PresenceRow[];
-  if (options.includeStale) return rows.map(mapPresence);
-  const cutoff = (options.now ?? new Date()).getTime() - AGENT_PRESENCE_TTL_MS;
-  return rows.filter((row) => Date.parse(row.last_seen) >= cutoff).map(mapPresence);
+    SELECT * FROM agent_presence
+    WHERE last_seen >= ?
+    ORDER BY last_seen DESC, name ASC
+  `).all(cutoff) as PresenceRow[];
+  return rows.map(mapPresence);
 }
 
 export function isPresenceLive(presence: AgentPresence, now = Date.now()): boolean {

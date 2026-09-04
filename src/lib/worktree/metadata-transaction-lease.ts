@@ -269,6 +269,30 @@ export function readMetadataTransactionState(
   });
 }
 
+export function readMetadataTransactionStateSnapshot(
+  metadataRoot: string,
+  sqlite: Database.Database,
+): { payload: string; mirrorIdentity: { device: number; inode: number } | null } | null {
+  const schema = sqlite.prepare(`
+    SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'worktree_metadata_state'
+  `).get();
+  if (!schema) return null;
+  const row = sqlite.prepare(`
+    SELECT payload_json, mirror_identity_json
+    FROM worktree_metadata_state WHERE metadata_root = ?
+  `).get(path.resolve(metadataRoot)) as {
+    payload_json: string;
+    mirror_identity_json: string | null;
+  } | undefined;
+  if (!row) return null;
+  return {
+    payload: row.payload_json,
+    mirrorIdentity: row.mirror_identity_json
+      ? JSON.parse(row.mirror_identity_json) as { device: number; inode: number }
+      : null,
+  };
+}
+
 export function writeMetadataTransactionState(
   lease: MetadataTransactionLease,
   payload: string,

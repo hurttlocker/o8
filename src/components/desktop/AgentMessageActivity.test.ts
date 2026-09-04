@@ -190,4 +190,32 @@ describe('AgentMessageActivity', () => {
       '/api/agents/presence?scope=all',
     ]);
   });
+
+  it('does not overlap a lifecycle refresh with an active fleet read', async () => {
+    const releases: Array<(response: Response) => void> = [];
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => {
+      releases.push(resolve);
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await act(async () => {
+      root.render(createElement(AgentMessageActivity, {
+        repos: [{ name: 'o8', localPath: '/workspace/o8' }],
+      }));
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      window.dispatchEvent(new Event('o8:lifecycle-reconcile'));
+      await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      releases[0]?.(jsonResponse({ schema: 'o8/agents.exchanges/v1', messages: [] }));
+      releases[1]?.(jsonResponse({ schema: 'o8/agents.presence/v1', agents: [] }));
+      await Promise.resolve();
+    });
+  });
 });

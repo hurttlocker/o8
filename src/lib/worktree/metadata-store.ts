@@ -1,16 +1,20 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { lstat } from 'node:fs/promises';
+import { lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
+
+import type Database from 'better-sqlite3';
 
 import { readJsonFile } from '@/lib/fs/json';
 import {
   acquireMetadataTransactionLease,
   readMetadataTransactionState,
+  readMetadataTransactionStateSnapshot,
   releaseMetadataTransactionLease,
   writeMetadataTransactionState,
   type MetadataTransactionBoundary,
   type MetadataTransactionLease,
 } from '@/lib/worktree/metadata-transaction-lease';
+import { getSqlite } from '@/lib/db';
 import {
   assertManagedWorktreeMaterializationBoundary,
   observeManagedWorktreeRootIdentity,
@@ -190,8 +194,23 @@ async function readMeta(
  */
 export async function readWorktreeMetaSnapshot(
   repoPath: string,
+  sqlite: Database.Database = getSqlite(),
 ): Promise<Record<string, WorktreeMetaEntry>> {
-  const metaPath = path.join(resolveWorktreeRootLayout(repoPath).primaryBase, META_FILENAME);
+  const metadataRoot = resolveWorktreeRootLayout(repoPath).primaryBase;
+  const metaPath = path.join(metadataRoot, META_FILENAME);
+  const rootCandidates = [path.resolve(metadataRoot)];
+  try {
+    const canonicalRoot = await realpath(metadataRoot);
+    if (!rootCandidates.includes(canonicalRoot)) rootCandidates.unshift(canonicalRoot);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  for (const root of rootCandidates) {
+    const durableState = readMetadataTransactionStateSnapshot(root, sqlite);
+    if (durableState) {
+      return validatedMetaStore(JSON.parse(durableState.payload) as unknown, metaPath).worktrees;
+    }
+  }
   return readMeta(metaPath);
 }
 
