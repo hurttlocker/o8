@@ -134,3 +134,47 @@ export async function reconcileLiveAgentPresence(
 
   return reconciled;
 }
+
+export async function reconcileAllLiveAgentPresence(
+  seams: LiveAgentPresenceSeams = defaultLiveAgentPresenceSeams,
+  sqlite: Database.Database = getSqlite(),
+): Promise<AgentPresence[]> {
+  let sessions: RuntimeSession[];
+  try {
+    sessions = await seams.discoverSessions();
+  } catch (error) {
+    console.warn('[agent-presence] Live runtime discovery failed:', error instanceof Error ? error.message : String(error));
+    return [];
+  }
+
+  const repoByCwd = new Map<string, Promise<string | null>>();
+  const seenSessionKeys = new Set<string>();
+  const reconciled: AgentPresence[] = [];
+  for (const session of sessions.filter(isAddressableSession)) {
+    const identityKey = `${session.runtimeId}:${session.sessionKey}`;
+    if (seenSessionKeys.has(identityKey)) continue;
+    seenSessionKeys.add(identityKey);
+
+    let repoPromise = repoByCwd.get(session.cwd);
+    if (!repoPromise) {
+      repoPromise = seams.resolveRepoPath(session.cwd);
+      repoByCwd.set(session.cwd, repoPromise);
+    }
+    const repo = await repoPromise;
+    if (!repo) continue;
+    const normalizedRepo = path.resolve(repo).replace(/\/+$/, '');
+    const agentId = liveSessionAgentId(session);
+    reconciled.push(upsertAgentPresence({
+      agentId,
+      name: availableAutomaticAgentName(agentId, normalizedRepo, sqlite),
+      repo: normalizedRepo,
+      worktreePath: path.resolve(session.cwd),
+      runtime: session.runtimeId,
+      sessionKey: session.sessionKey,
+      laneId: null,
+      packetId: null,
+      lastSeen: seams.now().toISOString(),
+    }, sqlite));
+  }
+  return reconciled;
+}

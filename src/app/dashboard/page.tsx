@@ -1482,6 +1482,7 @@ function DashboardInner() {
     handleOpenRepoInDesktop,
     handleSelectRegisteredRepo,
     loadRegisteredRepos,
+    loadRepoWorktrees,
     openRepoWorkspaceModal,
     orchestratorWorkspaceTargets,
     focusRepoSetup,
@@ -2297,58 +2298,68 @@ function DashboardInner() {
       if (targetScope?.isWorktree && (!requestedBranch || requestedBranch === targetScope.branch)) {
         // Existing targeted worktree already matches the packet target.
       } else {
-      const existingWorktree = (allRepoWorktrees[rootRepo.localPath] ?? []).find((worktree) => worktree.branch === requestedBranch);
-      if (existingWorktree) {
-        targetScope = {
-          registryRepoId: rootRepo.id,
-          name: rootRepo.name,
-          localPath: existingWorktree.path,
-          branch: existingWorktree.branch,
-          readiness: null,
-          remoteUrl: rootRepo.remoteUrl ?? undefined,
-          isWorktree: true,
-          worktreeStatus: existingWorktree.status,
-        };
-      } else if (requestedBranch && requestedBranch !== currentBranch) {
-        const response = await fetch('/api/worktrees', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            repo: rootRepo.localPath,
-            agentType: packet.runtime,
-            taskName: `${packet.referenceLabel}-${packet.title}`,
-            branchName: requestedBranch,
-            baseBranch: currentBranch,
-            managed: packet.runtime === 'claude-code',
-            skipSetup: true,
-            isolationPreference: rootRepo.setup.workspaceIsolationPreference,
-          }),
-        });
-        const payload = await response.json().catch(() => ({})) as { worktree?: WorktreeInfo; error?: string };
-        if (!response.ok || !payload.worktree) {
-          throw new Error(payload.error ?? 'Unable to create orchestrator worktree lane.');
+        let existingWorktree: WorktreeInfo | undefined;
+        if (requestedBranch && requestedBranch !== currentBranch) {
+          let repoWorktrees = allRepoWorktrees[rootRepo.localPath] ?? [];
+          try {
+            repoWorktrees = (await loadRepoWorktrees(rootRepo.localPath)).worktrees;
+          } catch {
+            // Fall back to the last selected/target-repo snapshot. The create
+            // path still performs its own collision and branch checks.
+          }
+          existingWorktree = repoWorktrees.find((worktree) => worktree.branch === requestedBranch);
         }
-        setAllRepoWorktrees((current) => {
-          const existing = current[rootRepo.localPath] ?? [];
-          return {
-            ...current,
-            [rootRepo.localPath]: [
-              ...existing.filter((worktree) => worktree.id !== payload.worktree!.id),
-              payload.worktree!,
-            ],
+        if (existingWorktree) {
+          targetScope = {
+            registryRepoId: rootRepo.id,
+            name: rootRepo.name,
+            localPath: existingWorktree.path,
+            branch: existingWorktree.branch,
+            readiness: null,
+            remoteUrl: rootRepo.remoteUrl ?? undefined,
+            isWorktree: true,
+            worktreeStatus: existingWorktree.status,
           };
-        });
-        targetScope = {
-          registryRepoId: rootRepo.id,
-          name: rootRepo.name,
-          localPath: payload.worktree.path,
-          branch: payload.worktree.branch,
-          readiness: null,
-          remoteUrl: rootRepo.remoteUrl ?? undefined,
-          isWorktree: true,
-          worktreeStatus: payload.worktree.status,
-        };
-      }
+        } else if (requestedBranch && requestedBranch !== currentBranch) {
+          const response = await fetch('/api/worktrees', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              repo: rootRepo.localPath,
+              agentType: packet.runtime,
+              taskName: `${packet.referenceLabel}-${packet.title}`,
+              branchName: requestedBranch,
+              baseBranch: currentBranch,
+              managed: packet.runtime === 'claude-code',
+              skipSetup: true,
+              isolationPreference: rootRepo.setup.workspaceIsolationPreference,
+            }),
+          });
+          const payload = await response.json().catch(() => ({})) as { worktree?: WorktreeInfo; error?: string };
+          if (!response.ok || !payload.worktree) {
+            throw new Error(payload.error ?? 'Unable to create orchestrator worktree lane.');
+          }
+          setAllRepoWorktrees((current) => {
+            const existing = current[rootRepo.localPath] ?? [];
+            return {
+              ...current,
+              [rootRepo.localPath]: [
+                ...existing.filter((worktree) => worktree.id !== payload.worktree!.id),
+                payload.worktree!,
+              ],
+            };
+          });
+          targetScope = {
+            registryRepoId: rootRepo.id,
+            name: rootRepo.name,
+            localPath: payload.worktree.path,
+            branch: payload.worktree.branch,
+            readiness: null,
+            remoteUrl: rootRepo.remoteUrl ?? undefined,
+            isWorktree: true,
+            worktreeStatus: payload.worktree.status,
+          };
+        }
       }
     }
 
@@ -2425,6 +2436,7 @@ function DashboardInner() {
     enqueueFtuxMilestone,
     focusOrchestrationPacketLane,
     globalRepoEntries,
+    loadRepoWorktrees,
     setAllRepoWorktrees,
     thoughtsMissionState,
     waitForWorkspaceTerminalTarget,

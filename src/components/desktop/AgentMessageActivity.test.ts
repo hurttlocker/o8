@@ -57,8 +57,8 @@ describe('AgentMessageActivity', () => {
       return jsonResponse({
         schema: 'o8/agents.presence/v1',
         agents: [
-          { agentId: 'nova', name: 'Nova' },
-          { agentId: 'keen', name: 'Keen' },
+          { agentId: 'nova', name: 'Nova', repo: '/workspace/o8' },
+          { agentId: 'keen', name: 'Keen', repo: '/workspace/o8' },
         ],
       });
     });
@@ -161,5 +161,33 @@ describe('AgentMessageActivity', () => {
     expect(host.querySelector('[aria-label="1 agent messages"]')).toBeNull();
     const queued = Array.from(host.querySelectorAll('span')).find((node) => node.textContent === 'Queued');
     expect(queued?.style.color).toBe('var(--t-warning)');
+  });
+
+  it('uses two fleet reads instead of polling every repository', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith('/api/agents/message?')) {
+        return jsonResponse({ schema: 'o8/agents.exchanges/v1', messages: [] });
+      }
+      return jsonResponse({ schema: 'o8/agents.presence/v1', agents: [] });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await act(async () => {
+      root.render(createElement(AgentMessageActivity, {
+        repos: Array.from({ length: 250 }, (_, index) => ({
+          name: `repo-${index}`,
+          localPath: `/workspace/repo-${index}`,
+        })),
+      }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+      '/api/agents/message?scope=all&limit=8',
+      '/api/agents/presence?scope=all',
+    ]);
   });
 });

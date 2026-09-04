@@ -110,6 +110,20 @@ export function useGlobalRepoState({
   const selectedRepoWorktreeGenerationRef = useRef(0);
   const branchGenerationRef = useRef(0);
 
+  const loadRepoWorktrees = useCallback(async (repoPath: string): Promise<RepoWorktreeSummary> => {
+    const response = await ipcFetch(`/api/worktrees?repo=${encodeURIComponent(repoPath)}`);
+    const data = await response.json() as RepoWorktreeSummary & { error?: string };
+    if (!response.ok) {
+      throw new Error(data.error || 'Unable to load worktree summary.');
+    }
+    const worktrees = Array.isArray(data.worktrees) ? data.worktrees : [];
+    setAllRepoWorktrees((current) => ({
+      ...current,
+      [repoPath]: worktrees,
+    }));
+    return { ...data, worktrees };
+  }, []);
+
   const refreshSelectedRepoWorktrees = useCallback(async () => {
     if (!globalRepoEntry?.localPath) {
       setSelectedRepoWorktrees(null);
@@ -119,11 +133,7 @@ export function useGlobalRepoState({
     const generation = ++selectedRepoWorktreeGenerationRef.current;
     setSelectedRepoWorktreesLoading(true);
     try {
-      const response = await ipcFetch(`/api/worktrees?repo=${encodeURIComponent(repoPath)}`);
-      const data = await response.json() as RepoWorktreeSummary & { error?: string };
-      if (!response.ok) {
-        throw new Error(data.error || 'Unable to load worktree summary.');
-      }
+      const data = await loadRepoWorktrees(repoPath);
       if (generation !== selectedRepoWorktreeGenerationRef.current) return;
       selectedRepoWorktreeSnapshotsRef.current.set(repoPath, data);
       setSelectedRepoWorktrees(data);
@@ -132,7 +142,7 @@ export function useGlobalRepoState({
     } finally {
       if (generation === selectedRepoWorktreeGenerationRef.current) setSelectedRepoWorktreesLoading(false);
     }
-  }, [globalRepoEntry?.localPath]);
+  }, [globalRepoEntry?.localPath, loadRepoWorktrees]);
 
   const loadRegisteredRepos = useCallback(async () => {
     const cacheKey = 'panel:repos';
@@ -283,40 +293,6 @@ export function useGlobalRepoState({
     };
   }, [globalRepoEntry?.localPath, refreshSelectedRepoWorktrees, selectedRepoWorktreeRefreshNonce]);
 
-  useEffect(() => {
-    if (globalRepoEntries.length === 0) {
-      setAllRepoWorktrees({});
-      return;
-    }
-    let active = true;
-    async function fetchAllRepoWorktrees() {
-      const entries = await Promise.all(globalRepoEntries.map(async (repo) => {
-        try {
-          const response = await ipcFetch(`/api/worktrees?repo=${encodeURIComponent(repo.localPath)}`);
-          const data = await response.json() as RepoWorktreeSummary & { error?: string };
-          return [repo.localPath, Array.isArray(data.worktrees) ? data.worktrees : []] as const;
-        } catch {
-          return [repo.localPath, []] as const;
-        }
-      }));
-      if (!active) return;
-      setAllRepoWorktrees(Object.fromEntries(entries));
-    }
-    // Defer all-repo worktree scan — heavy operation, not needed for first paint
-    const initTimer = setTimeout(() => { void fetchAllRepoWorktrees(); }, 4_000);
-    // WS-driven: instant refresh on lifecycle events instead of 60s polling
-    const handler = () => { void fetchAllRepoWorktrees(); };
-    const wsEvents = ['o8:lifecycle-reconcile'];
-    for (const e of wsEvents) window.addEventListener(e, handler);
-    const fallbackId = window.setInterval(handler, 300_000);
-    return () => {
-      active = false;
-      clearTimeout(initTimer);
-      for (const e of wsEvents) window.removeEventListener(e, handler);
-      window.clearInterval(fallbackId);
-    };
-  }, [globalRepoEntries]);
-
   const handleOpenFolder = useCallback(async () => {
     let folderPath: string | null = null;
 
@@ -458,6 +434,7 @@ export function useGlobalRepoState({
     handleRemoveRegisteredRepo,
     handleSelectRegisteredRepo,
     loadRegisteredRepos,
+    loadRepoWorktrees,
     openRepoWorkspaceModal,
     orchestratorWorkspaceTargets,
     focusRepoSetup,

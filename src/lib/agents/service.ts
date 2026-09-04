@@ -18,6 +18,7 @@ import {
   availableAutomaticAgentName,
   type LiveAgentPresenceSeams,
   defaultLiveAgentPresenceSeams,
+  reconcileAllLiveAgentPresence,
   reconcileLiveAgentPresence,
 } from './live-presence';
 import {
@@ -33,7 +34,9 @@ import {
   isPresenceLive,
   listAgentInbox,
   listAgentPresence,
+  listAgentPresenceAcrossRepos,
   listRecentAgentMessages,
+  listRecentAgentMessagesAcrossRepos,
   persistAgentMessage,
   releaseAgentInboxWake,
   updateAgentMessageDelivery,
@@ -317,6 +320,22 @@ export async function readAgentPresence(
   return listAgentPresence(requestedRepo, {}, sqlite);
 }
 
+export async function readAllAgentPresence(
+  principal: RequestPrincipalContext,
+  sqlite: Database.Database = getSqlite(),
+  presenceSeams: LiveAgentPresenceSeams = defaultLiveAgentPresenceSeams,
+): Promise<AgentPresence[]> {
+  if (principal.role !== 'operator') {
+    throw new AgentBusError(
+      'Fleet agent presence requires an operator credential.',
+      'agent_presence_fleet_forbidden',
+      403,
+    );
+  }
+  await reconcileAllLiveAgentPresence(presenceSeams, sqlite);
+  return listAgentPresenceAcrossRepos({}, sqlite);
+}
+
 function parseCursor(cursor: string | null): number {
   if (!cursor) return 0;
   try {
@@ -389,6 +408,21 @@ export function readAgentExchanges(
     repo: resolve(repo),
     messages: listRecentAgentMessages(repo, input.limit, sqlite),
   };
+}
+
+export function readAllAgentExchanges(
+  limit: number,
+  principal: RequestPrincipalContext,
+  sqlite: Database.Database = getSqlite(),
+) {
+  if (principal.role !== 'operator') {
+    throw new AgentBusError(
+      'Recent agent exchanges require an operator credential.',
+      'agent_exchanges_forbidden',
+      403,
+    );
+  }
+  return { messages: listRecentAgentMessagesAcrossRepos(limit, sqlite) };
 }
 
 export function laneForPresenceHeartbeat(laneId: string): Lane | null {

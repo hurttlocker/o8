@@ -187,6 +187,31 @@ describe('agent message bus real path', () => {
       ],
     });
 
+    const fleetExchanges = await messageRoute.GET(request(
+      'http://localhost:3001/api/agents/message?scope=all&limit=2',
+      { token: OPERATOR_TOKEN },
+    ));
+    expect(fleetExchanges.status).toBe(200);
+    await expect(fleetExchanges.json()).resolves.toMatchObject({
+      schema: 'o8/agents.exchanges/v1',
+      messages: [
+        expect.objectContaining({ text: 'Please inspect the shared seam.' }),
+        expect.objectContaining({ text: 'Operator check.' }),
+      ],
+    });
+
+    const fleetPresence = await presenceRoute.GET(request(
+      'http://localhost:3001/api/agents/presence?scope=all',
+      { token: OPERATOR_TOKEN },
+    ));
+    expect(fleetPresence.status).toBe(200);
+    await expect(fleetPresence.json()).resolves.toMatchObject({
+      schema: 'o8/agents.presence/v1',
+      agents: expect.arrayContaining([
+        expect.objectContaining({ agentId: 'receiver-session', repo: repoPath }),
+      ]),
+    });
+
     const workerExchanges = await messageRoute.GET(request(
       `http://localhost:3001/api/agents/message?repo=${encodeURIComponent(repoPath)}`,
       { token: workerToken },
@@ -194,6 +219,15 @@ describe('agent message bus real path', () => {
     expect(workerExchanges.status).toBe(403);
     await expect(workerExchanges.json()).resolves.toMatchObject({
       error: { code: 'agent_exchanges_forbidden' },
+    });
+
+    const workerFleetPresence = await presenceRoute.GET(request(
+      'http://localhost:3001/api/agents/presence?scope=all',
+      { token: workerToken },
+    ));
+    expect(workerFleetPresence.status).toBe(403);
+    await expect(workerFleetPresence.json()).resolves.toMatchObject({
+      error: { code: 'agent_presence_fleet_forbidden' },
     });
 
     const broadcast = await broadcastEventsRoute.GET(request(

@@ -1,0 +1,252 @@
+{
+  "schema": "o8/interaction-baseline/v1",
+  "status": "observed",
+  "observedAt": "2026-09-04T21:31:11.541Z",
+  "observedFrom": {
+    "benchmarkVersion": "0.1.729",
+    "benchmarkGitSha": "7ad3feed6",
+    "measuredTarget": {
+      "appVersion": "0.1.729",
+      "buildGitSha": "f828f0328e69f04859918b175b2e514e36ec82dd",
+      "buildMode": "packaged",
+      "platform": "darwin",
+      "unavailableReason": null,
+      "serverReportedBuildGitSha": "f828f0328e69f04859918b175b2e514e36ec82dd",
+      "buildGitShaSource": "explicit-release-provenance",
+      "reportedBuildMode": "packaged",
+      "artifactTargetDigestSha256": "68ad496f2b90a19ebf7b8ea39e16b82d802667153f735f92a976b728cbede877",
+      "runtimeIdentityNote": null
+    },
+    "packagedArtifact": {
+      "appPath": "/Applications/o8.app",
+      "serverDir": "/Applications/o8.app/Contents/Resources/server",
+      "bundleVersion": "0.1.729",
+      "bundleBuildVersion": "0.1.729",
+      "bundleIdentifier": "ai.o8.desktop",
+      "executableName": "o8",
+      "executableSha256": "ee02a9a19e2d464738e56be5a7be43d059ba123a4e57ccb12905f9515cae5d2c",
+      "serverEntrySha256": "e2cab8cb9e7123cd01173974344133e975e15d61f8c7eda344de265555112b94",
+      "buildId": "vexLDaRdHs904qqBcFNxd",
+      "archiveSha256": "cb6317d39a0777ccbbadfd0d7f929b2328ef4a576e5dfb8750c98890f725b4fe",
+      "releaseGitSha": "f828f0328e69f04859918b175b2e514e36ec82dd",
+      "targetDigestSha256": "68ad496f2b90a19ebf7b8ea39e16b82d802667153f735f92a976b728cbede877",
+      "signing": {
+        "strictCodesign": true,
+        "gatekeeperAccepted": true,
+        "gatekeeperNotarized": true,
+        "gatekeeperSource": "Notarized Developer ID"
+      },
+      "complete": true,
+      "identityProblems": [],
+      "unavailableReason": null
+    },
+    "targetLane": {
+      "kind": "release",
+      "appPath": "/Applications/o8.app",
+      "releaseArtifact": {
+        "appPath": "/Applications/o8.app",
+        "serverDir": "/Applications/o8.app/Contents/Resources/server",
+        "bundleVersion": "0.1.729",
+        "bundleBuildVersion": "0.1.729",
+        "bundleIdentifier": "ai.o8.desktop",
+        "executableName": "o8",
+        "executableSha256": "ee02a9a19e2d464738e56be5a7be43d059ba123a4e57ccb12905f9515cae5d2c",
+        "serverEntrySha256": "e2cab8cb9e7123cd01173974344133e975e15d61f8c7eda344de265555112b94",
+        "buildId": "vexLDaRdHs904qqBcFNxd",
+        "archiveSha256": "cb6317d39a0777ccbbadfd0d7f929b2328ef4a576e5dfb8750c98890f725b4fe",
+        "releaseGitSha": "f828f0328e69f04859918b175b2e514e36ec82dd",
+        "targetDigestSha256": "68ad496f2b90a19ebf7b8ea39e16b82d802667153f735f92a976b728cbede877",
+        "signing": {
+          "strictCodesign": true,
+          "gatekeeperAccepted": true,
+          "gatekeeperNotarized": true,
+          "gatekeeperSource": "Notarized Developer ID"
+        },
+        "complete": true,
+        "identityProblems": [],
+        "unavailableReason": null
+      }
+    },
+    "fixtureDigests": [
+      {
+        "scale": 50,
+        "digest": "ae2e27323fe3f8c6"
+      },
+      {
+        "scale": 250,
+        "digest": "00a546672d0a5e7d"
+      },
+      {
+        "scale": 1000,
+        "digest": "389e9d0867190618"
+      }
+    ],
+    "host": {
+      "platform": "darwin",
+      "arch": "x64",
+      "cpuCount": 16,
+      "cpuModel": "Intel(R) Core(TM) i7-10700K CPU @ 3.80GHz",
+      "totalMemoryBytes": 68719476736,
+      "nodeVersion": "v22.23.2",
+      "osRelease": "25.6.0"
+    },
+    "contention": {
+      "before": {
+        "capturedAt": "2026-09-04T20:50:03.149Z",
+        "loadAverage": [
+          4.91,
+          5.5,
+          6.08
+        ],
+        "logicalCpuCount": 16,
+        "systemUptimeSeconds": 3431957,
+        "processCount": 1028,
+        "nodeProcessCount": 39,
+        "vitestProcessCount": 0,
+        "nextServerProcessCount": 2,
+        "websocketServerProcessCount": 1,
+        "note": "observational contention context only; the harness does not stop foreign processes"
+      },
+      "after": {
+        "capturedAt": "2026-09-04T21:31:11.536Z",
+        "loadAverage": [
+          19.44,
+          65.27,
+          79.08
+        ],
+        "logicalCpuCount": 16,
+        "systemUptimeSeconds": 3434425,
+        "processCount": 1038,
+        "nodeProcessCount": 37,
+        "vitestProcessCount": 0,
+        "nextServerProcessCount": 2,
+        "websocketServerProcessCount": 1,
+        "note": "observational contention context only; the harness does not stop foreign processes"
+      }
+    },
+    "samples": 15,
+    "runStatus": "fail"
+  },
+  "metrics": {
+    "dashboard_cold_ready_ms@50": {
+      "value": 457.8,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "warm_relaunch_ready_ms@50": {
+      "value": 389,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "first_interaction_accepted_ms@50": {
+      "value": 37846.7,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "composer_keystroke_to_paint_ms@50": {
+      "value": 43.2,
+      "statistic": "p50",
+      "scale": 50
+    },
+    "composer_keystroke_to_paint_p95_ms@50": {
+      "value": 47.9,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "design_arm_ms@50": {
+      "value": 106.3,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "design_hover_ms@50": {
+      "value": 157.2,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "design_select_ms@50": {
+      "value": 181.1,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "design_prompt_ready_ms@50": {
+      "value": 214.3,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "repo_inventory_ms@50": {
+      "value": 27.1,
+      "statistic": "p50",
+      "scale": 50
+    },
+    "repo_inventory_p95_ms@50": {
+      "value": 7224.5,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "soak_long_task_ms_per_minute@50": {
+      "value": 0,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "dashboard_cold_ready_ms@250": {
+      "value": 588.2,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "warm_relaunch_ready_ms@250": {
+      "value": 3236.3,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "fleet_reveal_ms@250": {
+      "value": 96.2,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "repo_inventory_ms@250": {
+      "value": 10000,
+      "statistic": "p50",
+      "scale": 250
+    },
+    "repo_inventory_p95_ms@250": {
+      "value": 10000,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "soak_long_task_ms_per_minute@250": {
+      "value": 371.94,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "dashboard_cold_ready_ms@1000": {
+      "value": 502.8,
+      "statistic": "p95",
+      "scale": 1000
+    },
+    "warm_relaunch_ready_ms@1000": {
+      "value": 1365.1,
+      "statistic": "p95",
+      "scale": 1000
+    },
+    "fleet_reveal_ms@1000": {
+      "value": 190.1,
+      "statistic": "p95",
+      "scale": 1000
+    },
+    "repo_inventory_ms@1000": {
+      "value": 10000,
+      "statistic": "p50",
+      "scale": 1000
+    },
+    "repo_inventory_p95_ms@1000": {
+      "value": 10000,
+      "statistic": "p95",
+      "scale": 1000
+    },
+    "soak_long_task_ms_per_minute@1000": {
+      "value": 2227.47,
+      "statistic": "p95",
+      "scale": 1000
+    }
+  }
+}

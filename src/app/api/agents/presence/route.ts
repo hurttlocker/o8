@@ -4,6 +4,7 @@ import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
 import {
   AgentBusError,
   joinAgentPresence,
+  readAllAgentPresence,
   readAgentPresence,
 } from '@/lib/agents/service';
 
@@ -20,10 +21,10 @@ function agentError(error: AgentBusError): Response {
 
 export async function GET(request: NextRequest): Promise<Response> {
   try {
-    const agents = await readAgentPresence(
-      request.nextUrl.searchParams.get('repo'),
-      resolveRequestPrincipalContext(request),
-    );
+    const principal = resolveRequestPrincipalContext(request);
+    const agents = request.nextUrl.searchParams.get('scope') === 'all'
+      ? await readAllAgentPresence(principal)
+      : await readAgentPresence(request.nextUrl.searchParams.get('repo'), principal);
     return Response.json({ schema: 'o8/agents.presence/v1', agents }, {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });

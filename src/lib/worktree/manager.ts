@@ -34,6 +34,7 @@ import type {
 import { getApfsCowCapability } from './apfs';
 import { worktreeActivityMtimeMs } from './activity';
 import {
+  readWorktreeMetaSnapshot,
   withWorktreeMetadataBoundary,
   withWorktreeMetaTransaction,
 } from './metadata-store';
@@ -1120,7 +1121,7 @@ export class WorktreeManager {
   async list(opts: { withDiskUsage?: boolean } = {}): Promise<WorktreeInfo[]> {
     const [gitWorktrees, meta] = await Promise.all([
       this.gitWorktreeList(),
-      this.loadAllMeta(),
+      readWorktreeMetaSnapshot(this.repoRoot),
     ]);
 
     const metaResults = await Promise.all(
@@ -1246,7 +1247,7 @@ export class WorktreeManager {
     path: string;
   } | null> {
     const id = path.basename(path.resolve(worktreePath));
-    const entry = (await this.loadAllMeta())[id];
+    const entry = (await readWorktreeMetaSnapshot(this.repoRoot))[id];
     if (!entry) return null;
     const managedPath = entry.claudeManaged
       ? path.join(this.repoRoot, CLAUDE_WORKTREE_DIR, id)
@@ -2838,7 +2839,7 @@ export class WorktreeManager {
     workspacePath: string;
     receipt: DependencyMaterializationReceipt;
   }>> {
-    return Object.values(await this.loadAllMeta()).flatMap((entry) => (
+    return Object.values(await readWorktreeMetaSnapshot(this.repoRoot)).flatMap((entry) => (
       entry.materializationIdentity && entry.dependencyMaterialization
         ? [{
             worktreeId: entry.id,

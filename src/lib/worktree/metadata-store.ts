@@ -183,6 +183,18 @@ async function readMeta(
   return validatedMetaStore(await readJsonFile<unknown>(metaPath), metaPath).worktrees;
 }
 
+/**
+ * Read the durable metadata mirror without acquiring a mutation lease or
+ * creating the managed worktree root. Inventory and startup reconciliation
+ * are snapshot reads; an untouched repository must remain untouched.
+ */
+export async function readWorktreeMetaSnapshot(
+  repoPath: string,
+): Promise<Record<string, WorktreeMetaEntry>> {
+  const metaPath = path.join(resolveWorktreeRootLayout(repoPath).primaryBase, META_FILENAME);
+  return readMeta(metaPath);
+}
+
 async function withMutationLock<T>(
   repoPath: string,
   boundary: WorktreeMetadataBoundary | undefined,

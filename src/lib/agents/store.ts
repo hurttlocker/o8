@@ -279,6 +279,19 @@ export function listAgentPresence(
   return rows.filter((row) => Date.parse(row.last_seen) >= cutoff).map(mapPresence);
 }
 
+export function listAgentPresenceAcrossRepos(
+  options: { now?: Date; includeStale?: boolean } = {},
+  sqlite: Database.Database = getSqlite(),
+): AgentPresence[] {
+  ensureAgentBusSchema(sqlite);
+  const rows = sqlite.prepare(`
+    SELECT * FROM agent_presence ORDER BY last_seen DESC, name ASC
+  `).all() as PresenceRow[];
+  if (options.includeStale) return rows.map(mapPresence);
+  const cutoff = (options.now ?? new Date()).getTime() - AGENT_PRESENCE_TTL_MS;
+  return rows.filter((row) => Date.parse(row.last_seen) >= cutoff).map(mapPresence);
+}
+
 export function isPresenceLive(presence: AgentPresence, now = Date.now()): boolean {
   const seen = Date.parse(presence.lastSeen);
   return Number.isFinite(seen) && now - seen <= AGENT_PRESENCE_TTL_MS;
@@ -493,5 +506,17 @@ export function listRecentAgentMessages(
     WHERE repo_path = ?
     ORDER BY sequence DESC LIMIT ?
   `).all(normalizeRepoPath(repo), limit) as MessageRow[];
+  return rows.map(mapMessage);
+}
+
+export function listRecentAgentMessagesAcrossRepos(
+  limit: number,
+  sqlite: Database.Database = getSqlite(),
+): AgentMessage[] {
+  ensureAgentBusSchema(sqlite);
+  const rows = sqlite.prepare(`
+    SELECT * FROM agent_messages
+    ORDER BY sequence DESC LIMIT ?
+  `).all(limit) as MessageRow[];
   return rows.map(mapMessage);
 }
