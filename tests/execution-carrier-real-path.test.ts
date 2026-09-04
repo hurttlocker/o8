@@ -3,7 +3,39 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import os from 'node:os';
 import path from 'node:path';
 
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
+
+const ensureDispatchBackendReadyMock = vi.hoisted(() => vi.fn(async () => ({
+  ready: true,
+  reason: 'test',
+  waitedMs: 0,
+  attempts: 1,
+  lastCheck: {
+    ready: true,
+    reason: 'test',
+    apiBase: 'http://127.0.0.1:1',
+    portSource: 'default' as const,
+    apiPortFilePresent: false,
+  },
+})));
+const measureHostVolumeMock = vi.hoisted(() => vi.fn(async () => ({
+  accountingStatus: 'observed' as const,
+  probePath: '/',
+  availableBytes: 90_000_000_000,
+  freeBytes: 90_000_000_000,
+  totalBytes: 100_000_000_000,
+  error: null,
+})));
+
+vi.mock('@/lib/runtimes/shared/dispatch-readiness', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/runtimes/shared/dispatch-readiness')>(),
+  ensureDispatchBackendReady: ensureDispatchBackendReadyMock,
+}));
+
+vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/worktree/storage-telemetry')>(),
+  measureHostVolume: measureHostVolumeMock,
+}));
 
 const testRoot = mkdtempSync(path.join(os.tmpdir(), 'o8-execution-carrier-'));
 const dataDir = path.join(testRoot, 'data');
@@ -13,10 +45,17 @@ const carrierPidFile = path.join(testRoot, 'carrier.pid');
 const childPidFile = path.join(testRoot, 'child.pid');
 const carrierArgsFile = path.join(testRoot, 'carrier.args');
 const shellInjectionSentinel = path.join(testRoot, 'argv-was-interpreted');
+const testStorageReserveRatio = 0.000001;
+const testStorageReserveFloorGb = 0.001;
 const priorEnv = new Map<string, string | undefined>();
 const controlledEnv = [
   'CORTEX_IDE_DATA_DIR', 'O8_DATA_DIR', 'CORTEX_IDE_OWNED_CODEX_ROOT',
   'O8_CODEX_BIN', 'O8_ORI_BIN', 'O8_CRASH_SURVIVABLE_WORKERS',
+  'O8_SUBSCRIPTION_PROFILE', 'O8_DEFAULT_DISPATCH_RUNTIME',
+  'O8_WORKER_SANDBOX', 'O8_WORKTREE_ROOT',
+  'O8_APFS_COW_WORKSPACES', 'O8_APFS_DEPENDENCY_IMAGES',
+  'O8_PACKAGED_APP', 'O8_DISPATCH_MODEL',
+  'O8_STORAGE_RESERVE_RATIO', 'O8_STORAGE_RESERVE_FLOOR_GB',
   'O8_SKIP_PRELAUNCH_TYPECHECK', 'O8_TEST_CARRIER_PID_FILE',
   'O8_TEST_CHILD_PID_FILE', 'O8_TEST_CARRIER_ARGS_FILE',
 ] as const;
@@ -119,6 +158,16 @@ wait "$child"
     process.env.O8_CODEX_BIN = fakeCodex;
     process.env.O8_ORI_BIN = fakeOri;
     process.env.O8_CRASH_SURVIVABLE_WORKERS = '1';
+    process.env.O8_SUBSCRIPTION_PROFILE = 'both';
+    process.env.O8_DEFAULT_DISPATCH_RUNTIME = 'codex';
+    process.env.O8_WORKER_SANDBOX = '0';
+    process.env.O8_WORKTREE_ROOT = path.join(testRoot, 'worktrees');
+    process.env.O8_APFS_COW_WORKSPACES = '0';
+    process.env.O8_APFS_DEPENDENCY_IMAGES = '0';
+    process.env.O8_PACKAGED_APP = '0';
+    delete process.env.O8_DISPATCH_MODEL;
+    process.env.O8_STORAGE_RESERVE_RATIO = String(testStorageReserveRatio);
+    process.env.O8_STORAGE_RESERVE_FLOOR_GB = String(testStorageReserveFloorGb);
     process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
     process.env.O8_TEST_CARRIER_PID_FILE = carrierPidFile;
     process.env.O8_TEST_CHILD_PID_FILE = childPidFile;
@@ -128,7 +177,15 @@ wait "$child"
     const { addRepo } = await import('@/lib/repos/registry');
     await addRepo(repoPath);
     const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
-    await updateOperatorDefaults({ defaultDispatchRuntime: 'codex', workerExecutionCarrier: 'ori' });
+    const defaults = await updateOperatorDefaults({ defaultDispatchRuntime: 'codex', workerExecutionCarrier: 'ori' });
+    expect(defaults.values).toMatchObject({
+      storageReserveRatio: testStorageReserveRatio,
+      storageReserveFloorGb: testStorageReserveFloorGb,
+    });
+    expect(defaults.sources).toMatchObject({
+      storageReserveRatio: 'env',
+      storageReserveFloorGb: 'env',
+    });
     const { createMission, dispatchMission } = await import('@/lib/orchestrator/operator-mission-service');
     const mission = await createMission({
       issues: [{ number: 2037, title: 'Prove execution carriers', body: '', url: '' }],
@@ -142,10 +199,19 @@ wait "$child"
     expect(packet.executionCarrier).toBe('ori');
     expect((await dispatchMission({ missionId: mission.missionId })).dispatched).toBe(1);
 
+    const dispatchedPacket = readOrchestratorControlPlaneState().packets
+      .find((candidate) => candidate.id === packetId)!;
+    expect(dispatchedPacket.storageAdmission).toMatchObject({
+      ownerId: packetId,
+      state: 'committed',
+    });
+
     const { findLaneByPacket, getLaneEvents } = await import('@/lib/lane/registry');
     const lane = findLaneByPacket(packet.id)!;
     expect(lane.worktreePath).toBeTruthy();
     expect(lane.worktreePath).not.toBe(repoPath);
+    expect(measureHostVolumeMock).toHaveBeenCalled();
+    expect(ensureDispatchBackendReadyMock).toHaveBeenCalledWith('codex', 'launch');
     const runtime = (await import('@/lib/runtimes')).getRuntime('codex')!;
     await waitUntil(async () => {
       const surface = (await runtime.discoverSessions()).find((candidate) => candidate.sessionKey === lane.sessionKey);
@@ -170,6 +236,7 @@ wait "$child"
     rmSync(childPidFile, { force: true });
     rmSync(carrierArgsFile, { force: true });
     expect((await runtime.resume(lane.sessionKey!, maliciousLookingPrompt)).ok).toBe(true);
+    expect(ensureDispatchBackendReadyMock).toHaveBeenCalledWith('codex', 'resume');
     await waitUntil(() => existsSync(carrierPidFile) && existsSync(childPidFile), 'carried resume processes did not start');
     const carrierPid = Number(readFileSync(carrierPidFile, 'utf8'));
     const childPid = Number(readFileSync(childPidFile, 'utf8'));
