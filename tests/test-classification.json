@@ -840,6 +840,12 @@
       ]
     },
     {
+      "path": "src/lib/worktree/metadata-snapshot-read.test.ts",
+      "reasons": [
+        "worktree-api"
+      ]
+    },
+    {
       "path": "src/lib/worktree/metadata-store-lock.test.ts",
       "reasons": [
         "child-process",
