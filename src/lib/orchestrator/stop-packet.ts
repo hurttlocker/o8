@@ -20,6 +20,7 @@ import {
 } from '@/lib/orchestrator/packet-lifecycle-guard';
 import { collectPacketLifecycleLanes } from '@/lib/orchestrator/packet-lifecycle-targets';
 import { unregisterWatchedAgent } from '@/lib/supervisor/agent-supervisor';
+import { terminatePacketManagedRuns } from '@/lib/runtimes/managed-runs/packet-lifecycle';
 
 export interface StopPacketResult {
   ok: boolean;
@@ -112,15 +113,31 @@ async function stopPacketInner(
   // Stopping an already-gone packet must return success in milliseconds, never
   // fall through to resetPacket's "not found" throw.
   if (lanes.length === 0 && !packetKnown) {
+    const managedRuns = await terminatePacketManagedRuns(packetId);
+    if (managedRuns.failures.length > 0) {
+      return {
+        ok: false,
+        packetId,
+        interruptedSessions: managedRuns.confirmed,
+        archivedLanes: 0,
+        worktreePruned: false,
+        killConfirmed: false,
+        stoppedReviewTurns: 0,
+        blockedReason: 'kill_unconfirmed',
+        note: `Stop could not confirm ${managedRuns.failures.length} packet-managed run${managedRuns.failures.length === 1 ? '' : 's'} exited. No lane or worktree state was changed.`,
+      };
+    }
     return {
       ok: true,
       packetId,
-      interruptedSessions: 0,
+      interruptedSessions: managedRuns.confirmed,
       archivedLanes: 0,
       worktreePruned: false,
       killConfirmed: true,
       stoppedReviewTurns: 0,
-      note: `Nothing to stop — no live lanes and no mission packet for ${packetId}.`,
+      note: managedRuns.confirmed > 0
+        ? `Stopped ${managedRuns.confirmed} packet-managed run${managedRuns.confirmed === 1 ? '' : 's'}; no live lanes or mission packet remained for ${packetId}.`
+        : `Nothing to stop — no live lanes and no mission packet for ${packetId}.`,
     };
   }
 
@@ -165,6 +182,28 @@ async function stopPacketInner(
     };
   }
 
+  // A worker can launch an o8-managed command in a separate tmux process tree.
+  // Once the worker itself is confirmed dead, no new packet-owned runs can be
+  // registered. Settle every already-registered run before archive/prune so a
+  // stopped packet cannot keep CPU, listeners, or a retired-worktree cwd alive.
+  const managedRuns = await terminatePacketManagedRuns(packetId);
+  if (managedRuns.failures.length > 0) {
+    if (stopGuard) {
+      await markPacketLifecycleFailure(stopGuard, 'kill_unconfirmed');
+    }
+    return {
+      ok: false,
+      packetId,
+      interruptedSessions: reaped + managedRuns.confirmed,
+      archivedLanes: 0,
+      worktreePruned: false,
+      killConfirmed: false,
+      stoppedReviewTurns,
+      blockedReason: 'kill_unconfirmed',
+      note: `Stop confirmed the worker session but could not confirm ${managedRuns.failures.length} packet-managed run${managedRuns.failures.length === 1 ? '' : 's'} exited. Packet parked kill_unconfirmed; worktree left intact.`,
+    };
+  }
+
   // #1528 — stop's contract is answered at kill-confirm. Hold the packet under
   // the lock NOW (cheap, blocks every relaunch path), then background the
   // archive + worktree prune: rm -rf of a node_modules-cloned worktree runs for
@@ -199,12 +238,12 @@ async function stopPacketInner(
   return {
     ok: true,
     packetId,
-    interruptedSessions: reaped,
+    interruptedSessions: reaped + managedRuns.confirmed,
     archivedLanes: 0,
     worktreePruned: false,
     killConfirmed: true,
     stoppedReviewTurns,
-    note: `Stopped packet ${packetId}: confirmed-killed ${reaped} live worker session${reaped === 1 ? '' : 's'}; stopped ${stoppedReviewTurns} review turn${stoppedReviewTurns === 1 ? '' : 's'}; held against relaunch. Archiving ${lanes.length} lane${lanes.length === 1 ? '' : 's'} + pruning the worktree in the background (audit via lane events). Not relaunched.`,
+    note: `Stopped packet ${packetId}: confirmed-killed ${reaped} live worker session${reaped === 1 ? '' : 's'} and ${managedRuns.confirmed} packet-managed run${managedRuns.confirmed === 1 ? '' : 's'}; stopped ${stoppedReviewTurns} review turn${stoppedReviewTurns === 1 ? '' : 's'}; held against relaunch. Archiving ${lanes.length} lane${lanes.length === 1 ? '' : 's'} + pruning the worktree in the background (audit via lane events). Not relaunched.`,
   };
 }
 

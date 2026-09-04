@@ -24,6 +24,9 @@ const h = vi.hoisted(() => ({
   cleanupFailure: false,
   handoffGate: null as Promise<void> | null,
   handoffStarted: 0,
+  managedRunStopCalls: [] as string[],
+  managedRunConfirmed: 0,
+  managedRunFailures: 0,
 }));
 vi.mock('@/lib/lane/reap-sessions', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/lane/reap-sessions')>();
@@ -79,6 +82,20 @@ vi.mock('@/lib/lane/no-changes-produced', () => ({
 }));
 vi.mock('@/lib/lane/owned-session-liveness', () => ({
   probeLaneSessionAlive: vi.fn(async () => false),
+}));
+vi.mock('@/lib/runtimes/managed-runs/packet-lifecycle', () => ({
+  terminatePacketManagedRuns: vi.fn(async (packetId: string) => {
+    h.managedRunStopCalls.push(packetId);
+    return {
+      targeted: h.managedRunConfirmed + h.managedRunFailures,
+      confirmed: h.managedRunConfirmed,
+      failures: Array.from({ length: h.managedRunFailures }, (_, index) => ({
+        id: `managed-run-${index}`,
+        session: `cortex-run-${index}`,
+        reason: 'termination_unconfirmed' as const,
+      })),
+    };
+  }),
 }));
 vi.mock('@/lib/lane/durable-review-approval', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/lane/durable-review-approval')>();
@@ -341,6 +358,9 @@ beforeEach(() => {
   h.cleanupFailure = false;
   h.handoffGate = null;
   h.handoffStarted = 0;
+  h.managedRunStopCalls = [];
+  h.managedRunConfirmed = 0;
+  h.managedRunFailures = 0;
   writeOrchestratorControlPlaneState({
     ...createEmptyOrchestratorMissionState(),
     missionId: `current-${crypto.randomUUID()}`,
@@ -586,6 +606,48 @@ describe('reset and stop preserve runtime truth', () => {
       lane: null,
     }), { timeout: 10_000 });
     expect(h.killStarted).toBe(2);
+  });
+
+  it('settles packet-managed runs after the worker dies and before cleanup', async () => {
+    const current = await createCurrentPacket('stop-managed-runs');
+    h.confirmed = true;
+    h.managedRunConfirmed = 1;
+
+    const response = await controlRoute.POST(post('/api/agent-control/action', {
+      ref: { kind: 'packet', id: current.packetId },
+      action: { kind: 'terminate' },
+      clientMutationId: 'stop-managed-runs',
+    }));
+
+    expect(response.status).toBe(200);
+    expect(h.managedRunStopCalls).toEqual([current.packetId]);
+    await vi.waitFor(() => expect(getLane(current.lane.id)?.status).toBe('archived'));
+  });
+
+  it('keeps the packet held when a packet-managed run cannot be confirmed dead', async () => {
+    const current = await createCurrentPacket('stop-managed-run-unconfirmed');
+    h.confirmed = true;
+    h.managedRunFailures = 1;
+
+    const response = await controlRoute.POST(post('/api/agent-control/action', {
+      ref: { kind: 'packet', id: current.packetId },
+      action: { kind: 'terminate' },
+      clientMutationId: 'stop-managed-run-unconfirmed',
+    }));
+
+    expect(response.status).toBe(409);
+    expect(h.managedRunStopCalls).toEqual([current.packetId]);
+    expect(readOrchestratorControlPlaneState().packets[0]).toMatchObject({
+      status: 'blocked',
+      queueState: 'held',
+      blockedReason: 'kill_unconfirmed',
+      lane: { laneId: current.lane.id, worktreePath: current.lane.worktreePath },
+    });
+    expect(getLane(current.lane.id)).toMatchObject({
+      status: 'running',
+      packetId: current.packetId,
+      worktreePath: current.lane.worktreePath,
+    });
   });
 
   it('refuses reset when kill is unconfirmed and preserves current packet bindings', async () => {
