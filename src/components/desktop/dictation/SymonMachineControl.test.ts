@@ -2,6 +2,7 @@
 
 import { act, createElement, type HTMLAttributes, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { renderToString } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const invoke = vi.fn(async (command: string) => {
@@ -76,6 +77,10 @@ describe('SymonMachineControl', () => {
     await act(async () => root.unmount());
     container.remove();
     vi.clearAllMocks();
+  });
+
+  it('keeps the hydration render empty until the Tauri surface is detected', () => {
+    expect(renderToString(createElement(SymonMachineControl))).toBe('');
   });
 
   it('uses a compact bottom-right trigger and reveals machine selection on demand', async () => {

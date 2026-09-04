@@ -92,6 +92,11 @@ export function SymonOrbStatusLine() {
 }
 
 export function SymonMachineControl() {
+  // Keep the server render and the client's hydration render identical. Tauri
+  // globals only exist in the webview, so reading isTauri() during render made
+  // the client insert this control where the server had rendered the voice
+  // status container. React then discarded and regenerated the whole subtree.
+  const [inTauri, setInTauri] = useState(false);
   const [active, setActive] = useState<SymonMachineIdentity>(DEFAULT_SYMON_MACHINE);
   const [machines, setMachines] = useState<ListedMachine[]>([
     { ...DEFAULT_SYMON_MACHINE, available: true },
@@ -104,6 +109,10 @@ export function SymonMachineControl() {
   const [rightOffset, setRightOffset] = useState(16);
   const minimized = useSymonOrbMinimized();
   const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setInTauri(isTauri());
+  }, []);
 
   // Track the CENTER pane's right edge (TileContainer's data-o8-workspace
   // root) so the orb keeps his seat beside the composer when the right panel
@@ -191,7 +200,7 @@ export function SymonMachineControl() {
     };
   }, [open]);
 
-  if (!isTauri()) return null;
+  if (!inTauri) return null;
   if (minimized) return null;
 
   return (
