@@ -97,6 +97,7 @@ const workspaceSpawnGuard: OwnedWorkspaceSpawnGuard = (input) => (
   inspectOwnedWorkspaceMaterialization(input, {
     listRepos: async () => [repo],
     assertManagedWorkspaceMaterialization,
+    findLaneByPacket: () => null,
   })
 );
 

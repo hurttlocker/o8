@@ -13,6 +13,7 @@ const {
   transitionWorkspaceSnapshot,
 } = await import('@/lib/worktree/snapshot-state');
 const { inspectOwnedWorkspaceMaterialization } = await import('./materialization-guard');
+const { LEGACY_WORKTREE_DIR_NAME } = await import('@/lib/worktree/root-layout');
 
 const materializedDependencies = {
   listRepos: async () => [{ id: '', localPath: '/tmp/repo' }],
@@ -21,6 +22,8 @@ const materializedDependencies = {
     inode: 2,
     canonicalPath: '/tmp/o8-guard-materialized',
   }),
+  // Registered repositories resolve from the registry alone.
+  findLaneByPacket: () => null,
 };
 
 let sequence = 0;
@@ -132,5 +135,148 @@ describe('owned workspace materialization guard', () => {
     `).run(corrupt.repositoryUuid, corrupt.packetId);
     await expect(inspectOwnedWorkspaceMaterialization(guardInput(corrupt)))
       .resolves.toMatchObject({ status: 'unknown', note: expect.stringContaining('could not be verified') });
+  });
+});
+
+describe('transient source repo ownership (no-snapshot branch)', () => {
+  const TRANSIENT_REPO = '/tmp/o8-opencode-smoke.CvBoWi';
+  const PACKET_ID = 'pkt-5436b404-8f9e-4dfe-b003-83893a701fa3';
+  const LANE_ID = 'lane-011a0ae5-1a5';
+  const MANAGED_ROOT = `/Users/o8/.o8/worktrees/o8-opencode-smoke.cvbowi-c08142afd275/${LEGACY_WORKTREE_DIR_NAME}`;
+  const WORKTREE = `${MANAGED_ROOT}/packet-${PACKET_ID}`;
+  const IDENTITY = { device: 16777222, inode: 496724602, canonicalPath: WORKTREE };
+
+  /** Only the repo that actually created the worktree holds the manager receipt. */
+  function receiptOwnedBy(ownerRepoPath: string, consulted: string[]) {
+    return async (repoPath: string, workspacePath: string) => {
+      consulted.push(repoPath);
+      if (path.resolve(repoPath) !== path.resolve(ownerRepoPath)
+        || path.resolve(workspacePath) !== path.resolve(WORKTREE)) {
+        throw new Error('Managed workspace metadata is absent or does not own this path.');
+      }
+      return IDENTITY;
+    };
+  }
+
+  function transientInput(overrides: Record<string, unknown> = {}) {
+    return {
+      surfaceId: `opencode-owned:${PACKET_ID}`,
+      sessionPacketId: PACKET_ID,
+      laneId: LANE_ID,
+      runtimeId: 'opencode',
+      mode: 'launch' as const,
+      binding: {
+        logicalWorkspaceId: `packet:${PACKET_ID}`,
+        // Transient repos are never saved to the registry, so no uuid is pinned.
+        repositoryUuid: null,
+        packetId: PACKET_ID,
+        cwd: WORKTREE,
+        version: 1,
+        verifiedAt: '2026-09-04T00:00:00.000Z',
+      },
+      repoPath: WORKTREE,
+      ...overrides,
+    };
+  }
+
+  it('consults the packet lane source repo that listRepos omits', async () => {
+    const consulted: string[] = [];
+    await expect(inspectOwnedWorkspaceMaterialization(transientInput(), {
+      // A registered repo exists but does not own the transient worktree.
+      listRepos: async () => [{ id: 'registered-uuid', localPath: '/Users/o8/o8' }],
+      assertManagedWorkspaceMaterialization: receiptOwnedBy(TRANSIENT_REPO, consulted),
+      findLaneByPacket: () => ({ id: LANE_ID, repoPath: TRANSIENT_REPO }),
+    })).resolves.toEqual({ status: 'available', source: 'materialized', materializationIdentity: IDENTITY });
+    // The exact source repo was asked, after the registry produced no owner.
+    expect(consulted).toEqual(['/Users/o8/o8', TRANSIENT_REPO]);
+  });
+
+  it('never lets the fallback bypass a pinned repository identity', async () => {
+    const consulted: string[] = [];
+    await expect(inspectOwnedWorkspaceMaterialization(transientInput({
+      binding: { ...transientInput().binding, repositoryUuid: 'registered-uuid' },
+    }), {
+      listRepos: async () => [{ id: 'registered-uuid', localPath: '/Users/o8/o8' }],
+      assertManagedWorkspaceMaterialization: receiptOwnedBy(TRANSIENT_REPO, consulted),
+      findLaneByPacket: () => ({ id: LANE_ID, repoPath: TRANSIENT_REPO }),
+    })).resolves.toMatchObject({
+      status: 'unknown',
+      note: 'Managed workspace metadata is absent or does not own this path.',
+    });
+    expect(consulted).toEqual(['/Users/o8/o8']);
+  });
+
+  it('keeps registered ambiguity failing closed without consulting the lane', async () => {
+    const consulted: string[] = [];
+    await expect(inspectOwnedWorkspaceMaterialization(transientInput(), {
+      listRepos: async () => [
+        { id: 'a', localPath: '/Users/o8/one' },
+        { id: 'b', localPath: '/Users/o8/two' },
+      ],
+      assertManagedWorkspaceMaterialization: async (repoPath: string) => {
+        consulted.push(repoPath);
+        return IDENTITY;
+      },
+      findLaneByPacket: () => ({ id: LANE_ID, repoPath: TRANSIENT_REPO }),
+    })).resolves.toMatchObject({ status: 'unknown', note: expect.stringContaining('ambiguous') });
+    expect(consulted).toEqual(['/Users/o8/one', '/Users/o8/two']);
+  });
+
+  it('refuses a cwd the packet lane source repo does not own', async () => {
+    const consulted: string[] = [];
+    await expect(inspectOwnedWorkspaceMaterialization(transientInput(), {
+      listRepos: async () => [],
+      // No repository holds a receipt for this path.
+      assertManagedWorkspaceMaterialization: receiptOwnedBy('/private/tmp/other-repo', consulted),
+      findLaneByPacket: () => ({ id: LANE_ID, repoPath: TRANSIENT_REPO }),
+    })).resolves.toMatchObject({
+      status: 'unknown',
+      note: 'Managed workspace metadata is absent or does not own this path.',
+    });
+    expect(consulted).toEqual([TRANSIENT_REPO]);
+  });
+
+  it('refuses an arbitrary cwd that is not this packet managed worktree slot', async () => {
+    const consulted: string[] = [];
+    const arbitrary = '/Users/o8/somewhere-else';
+    await expect(inspectOwnedWorkspaceMaterialization(transientInput({
+      binding: { ...transientInput().binding, cwd: arbitrary },
+      repoPath: arbitrary,
+    }), {
+      listRepos: async () => [],
+      assertManagedWorkspaceMaterialization: receiptOwnedBy(TRANSIENT_REPO, consulted),
+      findLaneByPacket: () => ({ id: LANE_ID, repoPath: TRANSIENT_REPO }),
+    })).resolves.toMatchObject({ status: 'unknown' });
+    expect(consulted).toEqual([]);
+  });
+
+  it('refuses when the launching lane is not the packet lane', async () => {
+    const consulted: string[] = [];
+    await expect(inspectOwnedWorkspaceMaterialization(transientInput({ laneId: 'lane-someone-else' }), {
+      listRepos: async () => [],
+      assertManagedWorkspaceMaterialization: receiptOwnedBy(TRANSIENT_REPO, consulted),
+      findLaneByPacket: () => ({ id: LANE_ID, repoPath: TRANSIENT_REPO }),
+    })).resolves.toMatchObject({ status: 'unknown' });
+    expect(consulted).toEqual([]);
+  });
+
+  it('refuses when the launch carries no lane identity', async () => {
+    const consulted: string[] = [];
+    await expect(inspectOwnedWorkspaceMaterialization(transientInput({ laneId: null }), {
+      listRepos: async () => [],
+      assertManagedWorkspaceMaterialization: receiptOwnedBy(TRANSIENT_REPO, consulted),
+      findLaneByPacket: () => ({ id: LANE_ID, repoPath: TRANSIENT_REPO }),
+    })).resolves.toMatchObject({ status: 'unknown' });
+    expect(consulted).toEqual([]);
+  });
+
+  it('refuses when the packet has no live lane', async () => {
+    const consulted: string[] = [];
+    await expect(inspectOwnedWorkspaceMaterialization(transientInput(), {
+      listRepos: async () => [],
+      assertManagedWorkspaceMaterialization: receiptOwnedBy(TRANSIENT_REPO, consulted),
+      findLaneByPacket: () => null,
+    })).resolves.toMatchObject({ status: 'unknown' });
+    expect(consulted).toEqual([]);
   });
 });

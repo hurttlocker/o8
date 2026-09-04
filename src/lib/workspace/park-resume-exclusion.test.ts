@@ -292,6 +292,7 @@ describe('owned run and workspace parking exclusion', () => {
     const guard: OwnedWorkspaceSpawnGuard = (input) => inspectOwnedWorkspaceMaterialization(input, {
       listRepos: async () => [f.repo],
       assertManagedWorkspaceMaterialization,
+      findLaneByPacket: () => null,
     });
     const f = fixture('apfs-cow-clone', guard);
     const retained = `${f.worktreePath}.retained`;
@@ -372,6 +373,7 @@ describe('owned run and workspace parking exclusion', () => {
         const decision = await inspectOwnedWorkspaceMaterialization(input, {
           listRepos: async () => [f.repo],
           assertManagedWorkspaceMaterialization,
+          findLaneByPacket: () => null,
         });
         if (pauseGuard && decision.status === 'available' && decision.source === 'materialized') {
           pauseGuard = false;
