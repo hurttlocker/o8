@@ -20,6 +20,26 @@ const PRIOR_SCORECARD_DIRS = (process.env.O8_BENCH_PRIOR_SCORECARD_DIRS || SCORE
   .filter(Boolean)
   .map((directory) => path.resolve(directory));
 const OPERATOR_TRIGGERED_NOT_RUN = 'operator-triggered — not run this release';
+// Mirrors INTERACTION_BUDGETS.noiseBandMs; scoring stays dependency-free so a
+// missing benchmark module cannot break the release scorecard.
+const INTERACTION_NOISE_BANDS = {
+  dashboard_cold_ready_ms: 150,
+  warm_relaunch_ready_ms: 150,
+  first_interaction_accepted_ms: 150,
+  fleet_reveal_ms: 150,
+  active_context_reveal_ms: 50,
+  composer_keystroke_to_paint_ms: 15,
+  composer_keystroke_to_paint_p95_ms: 40,
+  design_arm_ms: 50,
+  design_hover_ms: 50,
+  design_select_ms: 30,
+  design_prompt_ready_ms: 40,
+  design_screenshot_crop_ms: 40,
+  tab_switch_ms: 50,
+  repo_inventory_ms: 150,
+  repo_inventory_p95_ms: 300,
+  soak_long_task_ms_per_minute: 150,
+};
 
 function readJsonOptional(filePath) {
   try {
@@ -203,6 +223,58 @@ function buildSpeedTrack(speed, prior) {
     automatable: true,
     status: speed ? 'ok' : 'not run',
     metrics: result,
+  };
+}
+
+// The interaction track carries both halves of the gate: the absolute budget
+// verdict computed by the interaction harness, and the release-over-release
+// delta computed here against the previous scorecard.
+function buildInteractionsTrack(interactions, prior) {
+  if (!interactions) return { automatable: true, status: 'automated — not run this release' };
+  const runs = Array.isArray(interactions.runs) ? interactions.runs : [];
+  const metrics = {};
+  for (const run of runs) {
+    for (const result of run.budgets?.results ?? []) {
+      const name = `${result.metric}@${run.scale}`;
+      metrics[name] = {
+        ...metricEntry({
+          value: numberOrNull(result.value),
+          note: result.status === 'unavailable' ? result.reason : null,
+          direction: 'lower-better',
+          threshold: INTERACTION_NOISE_BANDS[result.metric] ?? 25,
+          prior: priorValue(prior, 'interactions', name),
+        }),
+        budgetMax: result.budgetMax ?? null,
+        budgetStatus: result.status,
+        acceptedBaselineValue: result.baselineValue ?? null,
+        acceptedBaselineDelta: result.deltaValue ?? null,
+        acceptedBaselineStatus: result.deltaStatus ?? null,
+      };
+    }
+  }
+  return {
+    automatable: true,
+    status: interactions.runStatus ?? 'unknown',
+    budgetManifest: interactions.budgetManifest ?? null,
+    baselineSource: interactions.baselineSource ?? null,
+    validity: interactions.validity ?? [],
+    targetLane: interactions.targetLane ?? null,
+    composedTerminalWorkload: interactions.composed?.terminalWorkload
+      ? {
+        status: interactions.composed.terminalWorkload.status,
+        commit: interactions.composed.terminalWorkload.commit ?? null,
+        provenanceNote: interactions.composed.terminalWorkload.provenanceNote ?? null,
+      }
+      : null,
+    fixtures: runs.map((run) => ({
+      scale: run.scale,
+      digest: run.fixture?.digest ?? null,
+      repoCount: run.fixture?.repoCount ?? null,
+      buildMode: run.stack?.buildMode ?? null,
+      falsificationBudgetFailed: run.falsification?.budgetFailed ?? false,
+      cleanup: run.cleanup?.status ?? null,
+    })),
+    metrics,
   };
 }
 
@@ -433,6 +505,7 @@ function renderMarkdown(card, priorSource) {
     ...(governanceScope ? [`Governance scope: ${governanceScope}`] : []),
     '',
     renderMetricRows('Speed', card.tracks.speed),
+    renderMetricRows('Interactions', card.tracks.interactions),
     renderMetricRows('Memory', card.tracks.memory),
     renderMetricRows('Governance', card.tracks.governance),
     renderMetricRows('Coding', card.tracks.coding),
@@ -469,6 +542,7 @@ function main() {
   const memory = readJsonOptional(path.join(LATEST_DIR, 'memory.json')).data;
   const governance = readJsonOptional(path.join(LATEST_DIR, 'governance.json')).data;
   const coding = readJsonOptional(path.join(LATEST_DIR, 'coding.json')).data;
+  const interactions = readJsonOptional(path.join(LATEST_DIR, 'interactions.json')).data;
 
   const card = {
     version,
@@ -479,6 +553,7 @@ function main() {
     comparedTo: priorSource,
     tracks: {
       speed: buildSpeedTrack(speed, prior),
+      interactions: buildInteractionsTrack(interactions, prior),
       memory: buildMemoryTrack(memory, prior),
       governance: buildGovernanceTrack(governance, prior),
       coding: buildCodingTrack(coding, prior),

@@ -1,0 +1,292 @@
+{
+  "schema": "o8/interaction-baseline/v1",
+  "status": "observed",
+  "observedAt": "2026-09-04T18:54:09.655Z",
+  "observedFrom": {
+    "benchmarkVersion": "0.1.728",
+    "benchmarkGitSha": "ba33a32ed",
+    "measuredTarget": {
+      "appVersion": "0.1.728",
+      "buildGitSha": "5236ea26af8214ca6241bb40aa39784fa6d5b0f8",
+      "buildMode": "packaged",
+      "platform": "darwin",
+      "unavailableReason": null,
+      "serverReportedBuildGitSha": null,
+      "buildGitShaSource": "explicit-release-provenance",
+      "reportedBuildMode": null,
+      "artifactTargetDigestSha256": "adeb27aa0d7718b322dbadefd80c205f67f74ffa466d1aaf832afab0dedb99ba",
+      "runtimeIdentityNote": "build Git SHA, build mode unavailable from running target"
+    },
+    "packagedArtifact": {
+      "appPath": "/tmp/o8-1697-baseline-1728.65tm1p/o8.app",
+      "serverDir": "/tmp/o8-1697-baseline-1728.65tm1p/o8.app/Contents/Resources/server",
+      "bundleVersion": "0.1.728",
+      "bundleBuildVersion": "0.1.728",
+      "bundleIdentifier": "ai.o8.desktop",
+      "executableName": "o8",
+      "executableSha256": "934cbaff955b3b8794c72fc554bcdeaaaa2e12496e737641df8cc82c1e20208e",
+      "serverEntrySha256": "265bdaa8cb71e81fc5aa5179533c7d464cc00cb2f346e7f213d60bceee3d9b2a",
+      "buildId": "CkWTRw4sITKYtO21fB9Jy",
+      "archiveSha256": "c9dea378aed0f0de6f46cc018a99d1078f6dee17e89e4d67cc242e05b241e70c",
+      "releaseGitSha": "5236ea26af8214ca6241bb40aa39784fa6d5b0f8",
+      "targetDigestSha256": "adeb27aa0d7718b322dbadefd80c205f67f74ffa466d1aaf832afab0dedb99ba",
+      "signing": {
+        "strictCodesign": true,
+        "gatekeeperAccepted": true,
+        "gatekeeperNotarized": true,
+        "gatekeeperSource": "Notarized Developer ID"
+      },
+      "complete": true,
+      "identityProblems": [],
+      "unavailableReason": null
+    },
+    "targetLane": {
+      "kind": "release",
+      "appPath": "/tmp/o8-1697-baseline-1728.65tm1p/o8.app",
+      "releaseArtifact": {
+        "appPath": "/tmp/o8-1697-baseline-1728.65tm1p/o8.app",
+        "serverDir": "/tmp/o8-1697-baseline-1728.65tm1p/o8.app/Contents/Resources/server",
+        "bundleVersion": "0.1.728",
+        "bundleBuildVersion": "0.1.728",
+        "bundleIdentifier": "ai.o8.desktop",
+        "executableName": "o8",
+        "executableSha256": "934cbaff955b3b8794c72fc554bcdeaaaa2e12496e737641df8cc82c1e20208e",
+        "serverEntrySha256": "265bdaa8cb71e81fc5aa5179533c7d464cc00cb2f346e7f213d60bceee3d9b2a",
+        "buildId": "CkWTRw4sITKYtO21fB9Jy",
+        "archiveSha256": "c9dea378aed0f0de6f46cc018a99d1078f6dee17e89e4d67cc242e05b241e70c",
+        "releaseGitSha": "5236ea26af8214ca6241bb40aa39784fa6d5b0f8",
+        "targetDigestSha256": "adeb27aa0d7718b322dbadefd80c205f67f74ffa466d1aaf832afab0dedb99ba",
+        "signing": {
+          "strictCodesign": true,
+          "gatekeeperAccepted": true,
+          "gatekeeperNotarized": true,
+          "gatekeeperSource": "Notarized Developer ID"
+        },
+        "complete": true,
+        "identityProblems": [],
+        "unavailableReason": null
+      }
+    },
+    "fixtureDigests": [
+      {
+        "scale": 50,
+        "digest": "ae2e27323fe3f8c6"
+      },
+      {
+        "scale": 250,
+        "digest": "00a546672d0a5e7d"
+      },
+      {
+        "scale": 1000,
+        "digest": "389e9d0867190618"
+      }
+    ],
+    "host": {
+      "platform": "darwin",
+      "arch": "x64",
+      "cpuCount": 16,
+      "cpuModel": "Intel(R) Core(TM) i7-10700K CPU @ 3.80GHz",
+      "totalMemoryBytes": 68719476736,
+      "nodeVersion": "v22.23.2",
+      "osRelease": "25.6.0"
+    },
+    "contention": {
+      "before": {
+        "capturedAt": "2026-09-04T18:07:29.795Z",
+        "loadAverage": [
+          58.55,
+          73.73,
+          75.61
+        ],
+        "logicalCpuCount": 16,
+        "systemUptimeSeconds": 3422203,
+        "processCount": 1033,
+        "nodeProcessCount": 35,
+        "vitestProcessCount": 0,
+        "nextServerProcessCount": 2,
+        "websocketServerProcessCount": 1,
+        "note": "observational contention context only; the harness does not stop foreign processes"
+      },
+      "after": {
+        "capturedAt": "2026-09-04T18:54:09.650Z",
+        "loadAverage": [
+          32.46,
+          111.02,
+          119.23
+        ],
+        "logicalCpuCount": 16,
+        "systemUptimeSeconds": 3425003,
+        "processCount": 1008,
+        "nodeProcessCount": 35,
+        "vitestProcessCount": 0,
+        "nextServerProcessCount": 2,
+        "websocketServerProcessCount": 1,
+        "note": "observational contention context only; the harness does not stop foreign processes"
+      }
+    },
+    "samples": 15,
+    "runStatus": "fail"
+  },
+  "metrics": {
+    "dashboard_cold_ready_ms@50": {
+      "value": 560.3,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "warm_relaunch_ready_ms@50": {
+      "value": 408.3,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "first_interaction_accepted_ms@50": {
+      "value": 44601.7,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "fleet_reveal_ms@50": {
+      "value": 47.4,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "active_context_reveal_ms@50": {
+      "value": 47.2,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "composer_keystroke_to_paint_ms@50": {
+      "value": 44.3,
+      "statistic": "p50",
+      "scale": 50
+    },
+    "composer_keystroke_to_paint_p95_ms@50": {
+      "value": 69.2,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "design_arm_ms@50": {
+      "value": 97.6,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "design_hover_ms@50": {
+      "value": 158.5,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "design_select_ms@50": {
+      "value": 282.1,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "design_prompt_ready_ms@50": {
+      "value": 314.8,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "tab_switch_ms@50": {
+      "value": 49.4,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "repo_inventory_ms@50": {
+      "value": 5.9,
+      "statistic": "p50",
+      "scale": 50
+    },
+    "repo_inventory_p95_ms@50": {
+      "value": 295.2,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "soak_long_task_ms_per_minute@50": {
+      "value": 0,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "dashboard_cold_ready_ms@250": {
+      "value": 591.3,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "warm_relaunch_ready_ms@250": {
+      "value": 592.7,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "fleet_reveal_ms@250": {
+      "value": 79,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "active_context_reveal_ms@250": {
+      "value": 46.1,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "composer_keystroke_to_paint_ms@250": {
+      "value": 42,
+      "statistic": "p50",
+      "scale": 250
+    },
+    "composer_keystroke_to_paint_p95_ms@250": {
+      "value": 55,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "design_arm_ms@250": {
+      "value": 92.7,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "tab_switch_ms@250": {
+      "value": 50,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "repo_inventory_ms@250": {
+      "value": 10000,
+      "statistic": "p50",
+      "scale": 250
+    },
+    "repo_inventory_p95_ms@250": {
+      "value": 10000,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "soak_long_task_ms_per_minute@250": {
+      "value": 618.44,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "dashboard_cold_ready_ms@1000": {
+      "value": 585.7,
+      "statistic": "p95",
+      "scale": 1000
+    },
+    "warm_relaunch_ready_ms@1000": {
+      "value": 556.9,
+      "statistic": "p95",
+      "scale": 1000
+    },
+    "design_arm_ms@1000": {
+      "value": 96.5,
+      "statistic": "p95",
+      "scale": 1000
+    },
+    "repo_inventory_ms@1000": {
+      "value": 10000,
+      "statistic": "p50",
+      "scale": 1000
+    },
+    "repo_inventory_p95_ms@1000": {
+      "value": 10000,
+      "statistic": "p95",
+      "scale": 1000
+    },
+    "soak_long_task_ms_per_minute@1000": {
+      "value": 2321.93,
+      "statistic": "p95",
+      "scale": 1000
+    }
+  }
+}

@@ -1027,6 +1027,12 @@
       ]
     },
     {
+      "path": "tests/bench-interactions.test.ts",
+      "reasons": [
+        "process-signal"
+      ]
+    },
+    {
       "path": "tests/bench-score-coding.test.ts",
       "reasons": [
         "child-process"

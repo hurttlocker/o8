@@ -1,0 +1,282 @@
+{
+  "schema": "o8/interaction-baseline/v1",
+  "status": "observed",
+  "observedAt": "2026-09-04T18:06:48.365Z",
+  "observedFrom": {
+    "benchmarkVersion": "0.1.728",
+    "benchmarkGitSha": "ba33a32ed",
+    "measuredTarget": {
+      "appVersion": "0.1.727",
+      "buildGitSha": "508c7a1e7208e4a729a9ca5afe4bcd64e0354cbd",
+      "buildMode": "packaged",
+      "platform": "darwin",
+      "unavailableReason": null,
+      "serverReportedBuildGitSha": null,
+      "buildGitShaSource": "explicit-release-provenance",
+      "reportedBuildMode": null,
+      "artifactTargetDigestSha256": "3b099494d394ad0e272591d45b9c912f00a8cec7dc65be1ec08b27868d8f78fe",
+      "runtimeIdentityNote": "build Git SHA, build mode unavailable from running target"
+    },
+    "packagedArtifact": {
+      "appPath": "/tmp/o8-1697-baseline-1727/o8.app",
+      "serverDir": "/tmp/o8-1697-baseline-1727/o8.app/Contents/Resources/server",
+      "bundleVersion": "0.1.727",
+      "bundleBuildVersion": "0.1.727",
+      "bundleIdentifier": "ai.o8.desktop",
+      "executableName": "o8",
+      "executableSha256": "cc2469da0ee928c25157511f81a79575233d53c602ffbebf17b2e7ec2427438b",
+      "serverEntrySha256": "7a4142ee7a1adbed37b32682d808cde910d6aeb08c7d965ee6418320e0fbf570",
+      "buildId": "kqnbdvnNCSoUZWaYnU7_O",
+      "archiveSha256": "29f8b6bd69c348b805e048ef0ca7e47a9531ce108e7247ba9bd1b1e87aefd4c0",
+      "releaseGitSha": "508c7a1e7208e4a729a9ca5afe4bcd64e0354cbd",
+      "targetDigestSha256": "3b099494d394ad0e272591d45b9c912f00a8cec7dc65be1ec08b27868d8f78fe",
+      "signing": {
+        "strictCodesign": true,
+        "gatekeeperAccepted": true,
+        "gatekeeperNotarized": true,
+        "gatekeeperSource": "Notarized Developer ID"
+      },
+      "complete": true,
+      "identityProblems": [],
+      "unavailableReason": null
+    },
+    "targetLane": {
+      "kind": "release",
+      "appPath": "/tmp/o8-1697-baseline-1727/o8.app",
+      "releaseArtifact": {
+        "appPath": "/tmp/o8-1697-baseline-1727/o8.app",
+        "serverDir": "/tmp/o8-1697-baseline-1727/o8.app/Contents/Resources/server",
+        "bundleVersion": "0.1.727",
+        "bundleBuildVersion": "0.1.727",
+        "bundleIdentifier": "ai.o8.desktop",
+        "executableName": "o8",
+        "executableSha256": "cc2469da0ee928c25157511f81a79575233d53c602ffbebf17b2e7ec2427438b",
+        "serverEntrySha256": "7a4142ee7a1adbed37b32682d808cde910d6aeb08c7d965ee6418320e0fbf570",
+        "buildId": "kqnbdvnNCSoUZWaYnU7_O",
+        "archiveSha256": "29f8b6bd69c348b805e048ef0ca7e47a9531ce108e7247ba9bd1b1e87aefd4c0",
+        "releaseGitSha": "508c7a1e7208e4a729a9ca5afe4bcd64e0354cbd",
+        "targetDigestSha256": "3b099494d394ad0e272591d45b9c912f00a8cec7dc65be1ec08b27868d8f78fe",
+        "signing": {
+          "strictCodesign": true,
+          "gatekeeperAccepted": true,
+          "gatekeeperNotarized": true,
+          "gatekeeperSource": "Notarized Developer ID"
+        },
+        "complete": true,
+        "identityProblems": [],
+        "unavailableReason": null
+      }
+    },
+    "fixtureDigests": [
+      {
+        "scale": 50,
+        "digest": "ae2e27323fe3f8c6"
+      },
+      {
+        "scale": 250,
+        "digest": "00a546672d0a5e7d"
+      },
+      {
+        "scale": 1000,
+        "digest": "389e9d0867190618"
+      }
+    ],
+    "host": {
+      "platform": "darwin",
+      "arch": "x64",
+      "cpuCount": 16,
+      "cpuModel": "Intel(R) Core(TM) i7-10700K CPU @ 3.80GHz",
+      "totalMemoryBytes": 68719476736,
+      "nodeVersion": "v22.23.2",
+      "osRelease": "25.6.0"
+    },
+    "contention": {
+      "before": {
+        "capturedAt": "2026-09-04T17:22:26.114Z",
+        "loadAverage": [
+          3.24,
+          30.39,
+          58.33
+        ],
+        "logicalCpuCount": 16,
+        "systemUptimeSeconds": 3419501,
+        "processCount": 1006,
+        "nodeProcessCount": 35,
+        "vitestProcessCount": 0,
+        "nextServerProcessCount": 2,
+        "websocketServerProcessCount": 1,
+        "note": "observational contention context only; the harness does not stop foreign processes"
+      },
+      "after": {
+        "capturedAt": "2026-09-04T18:06:48.361Z",
+        "loadAverage": [
+          112.17,
+          84.01,
+          79.15
+        ],
+        "logicalCpuCount": 16,
+        "systemUptimeSeconds": 3422162,
+        "processCount": 1030,
+        "nodeProcessCount": 35,
+        "vitestProcessCount": 0,
+        "nextServerProcessCount": 2,
+        "websocketServerProcessCount": 1,
+        "note": "observational contention context only; the harness does not stop foreign processes"
+      }
+    },
+    "samples": 15,
+    "runStatus": "fail"
+  },
+  "metrics": {
+    "dashboard_cold_ready_ms@50": {
+      "value": 649.3,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "warm_relaunch_ready_ms@50": {
+      "value": 556.7,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "first_interaction_accepted_ms@50": {
+      "value": 47160.5,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "fleet_reveal_ms@50": {
+      "value": 98.3,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "active_context_reveal_ms@50": {
+      "value": 54.4,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "composer_keystroke_to_paint_ms@50": {
+      "value": 39.4,
+      "statistic": "p50",
+      "scale": 50
+    },
+    "composer_keystroke_to_paint_p95_ms@50": {
+      "value": 48.1,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "design_arm_ms@50": {
+      "value": 94.2,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "design_hover_ms@50": {
+      "value": 262.1,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "design_select_ms@50": {
+      "value": 180.9,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "design_prompt_ready_ms@50": {
+      "value": 215.5,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "tab_switch_ms@50": {
+      "value": 40.9,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "repo_inventory_ms@50": {
+      "value": 7.1,
+      "statistic": "p50",
+      "scale": 50
+    },
+    "repo_inventory_p95_ms@50": {
+      "value": 6386.4,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "soak_long_task_ms_per_minute@50": {
+      "value": 0,
+      "statistic": "p95",
+      "scale": 50
+    },
+    "dashboard_cold_ready_ms@250": {
+      "value": 614,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "warm_relaunch_ready_ms@250": {
+      "value": 665.5,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "fleet_reveal_ms@250": {
+      "value": 418.9,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "active_context_reveal_ms@250": {
+      "value": 58.8,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "composer_keystroke_to_paint_ms@250": {
+      "value": 38.7,
+      "statistic": "p50",
+      "scale": 250
+    },
+    "composer_keystroke_to_paint_p95_ms@250": {
+      "value": 47.4,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "design_arm_ms@250": {
+      "value": 97,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "repo_inventory_ms@250": {
+      "value": 10000,
+      "statistic": "p50",
+      "scale": 250
+    },
+    "repo_inventory_p95_ms@250": {
+      "value": 10000,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "soak_long_task_ms_per_minute@250": {
+      "value": 334.61,
+      "statistic": "p95",
+      "scale": 250
+    },
+    "dashboard_cold_ready_ms@1000": {
+      "value": 508.3,
+      "statistic": "p95",
+      "scale": 1000
+    },
+    "warm_relaunch_ready_ms@1000": {
+      "value": 452.6,
+      "statistic": "p95",
+      "scale": 1000
+    },
+    "repo_inventory_ms@1000": {
+      "value": 10000,
+      "statistic": "p50",
+      "scale": 1000
+    },
+    "repo_inventory_p95_ms@1000": {
+      "value": 10000,
+      "statistic": "p95",
+      "scale": 1000
+    },
+    "soak_long_task_ms_per_minute@1000": {
+      "value": 3940.1,
+      "statistic": "p95",
+      "scale": 1000
+    }
+  }
+}

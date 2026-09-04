@@ -3,7 +3,7 @@ import {
   summarizeBrowserPerformanceEntries,
   targetFromPanelStatus,
 } from '../scripts/bench/measure-browser-boot.mjs';
-import { summarizeQuickScorecard } from '../scripts/bench/quick.mjs';
+import { summarizeInteractionReceipt, summarizeQuickScorecard } from '../scripts/bench/quick.mjs';
 
 describe('quick benchmark receipts', () => {
   it('counts only API boot requests and reports the largest client queue stall', () => {
@@ -58,5 +58,27 @@ describe('quick benchmark receipts', () => {
       platform: 'darwin',
       unavailableReason: 'build Git SHA, build mode unavailable from running target',
     });
+  });
+
+  it('preserves falsification execution proof in the quick summary', () => {
+    expect(summarizeInteractionReceipt({
+      runStatus: 'fail',
+      runs: [{
+        scale: 50,
+        falsification: {
+          injectedDelayMs: 500,
+          injectedDelayApplications: 6,
+          delayExecuted: true,
+          budgetFailed: true,
+        },
+      }],
+    }).falsification).toEqual([{
+      scale: 50,
+      injectedDelayMs: 500,
+      injectedDelayApplications: 6,
+      delayExecuted: true,
+      budgetFailed: true,
+      skippedReason: null,
+    }]);
   });
 });

@@ -159,7 +159,7 @@ export function cleanupTmuxSessions(sessionNames) {
   return cleaned;
 }
 
-export async function startIsolatedStack(root, seeded, requestedBuildMode = 'auto') {
+export async function startIsolatedStack(root, seeded, requestedBuildMode = 'auto', { runTag = null } = {}) {
   const apiPort = await freePort(root);
   let wsPort = await freePort(root);
   while (wsPort === apiPort) wsPort = await freePort(root);
@@ -180,6 +180,7 @@ export async function startIsolatedStack(root, seeded, requestedBuildMode = 'aut
     WS_TOKEN: token,
     O8_TERMINAL_BENCH: '1',
     O8_PERSISTENT_TERMINALS: '1',
+    O8_INTERACTION_RUN_TAG: runTag ?? '',
   };
   delete env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
   delete env.CLERK_PUBLISHABLE_KEY;

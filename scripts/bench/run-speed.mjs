@@ -275,6 +275,7 @@ function main() {
 
   writeSpeed(metrics, target ?? unavailableTarget('browser boot did not return target identity'));
   printSummary(metrics);
+  console.log('[bench:speed] interactions: npm run bench:interactions (quick) or npm run bench:interactions:full');
 }
 
 try {

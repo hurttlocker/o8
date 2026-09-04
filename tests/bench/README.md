@@ -4,7 +4,7 @@ This suite makes release claims measurable instead of anecdotal. It wraps the ex
 
 ## Tracks
 
-- Automatable: speed, memory, and governance.
+- Automatable: speed, interactions, memory, and governance.
 - Operator-triggered: coding. It remains `automatable:false` because collection launches paid external workers and must be started deliberately.
 
 ## Release Run
@@ -21,18 +21,24 @@ For the speed-only release preflight, run:
 npm run bench:quick
 ```
 
-The quick run stays under two minutes, writes `tests/bench/results/<version>.json`,
+`bench:quick` is the single command that generates the deterministic
+interaction fixtures, runs the bounded quick suite, and writes the
+machine-readable artifacts. The service-speed lane stays under two minutes; the
+interaction lane adds up to four more because it boots its own isolated stack.
+
+The quick run writes `tests/bench/results/<version>.json`,
 and compares its speed metrics with the previous release. The local ship
 preflight runs the same measurement in an ephemeral directory. A regression or
 missing measurement prints a warning but does not block an otherwise valid
 release.
 
 The receipt keeps benchmark-source identity separate from the running target.
-`version` and `gitSha` identify the checkout that ran the benchmark. `target`
-records the application version, baked build Git SHA, build mode, and platform
-reported by the live server. Older installed builds that predate the baked SHA
-return an explicit null and reason; the benchmark must not substitute the
-checkout SHA for the target build.
+`version` and `gitSha` identify the checkout that ran the benchmark. For a
+release observation, `target.buildGitSha` is the required full commit supplied
+as explicit release provenance and included in the artifact digest;
+`target.serverReportedBuildGitSha` preserves the live server claim separately.
+A non-null mismatch invalidates the receipt. The benchmark never substitutes
+the checkout SHA for the measured target build.
 
 Then read:
 
@@ -50,6 +56,72 @@ uses a fresh headless Chrome profile against the running build. If Chrome, the
 server, or a registered repository is unavailable, the scorecard records a
 named missing measurement instead of substituting a number.
 
+## Interaction Track
+
+The interaction track measures the operator-visible interaction loop rather than
+service latency: cold shell readiness, warm restored-state relaunch, first
+accepted input, the fleet reveal and active-context reveal at fixture scale,
+composer input, Design Mode (arm / hover / select / prompt-ready), the fleet
+inventory data path, and a bounded idle soak for long tasks, process count,
+memory growth and socket count.
+
+```sh
+npm run bench:interactions          # quick scale (50 repositories), source stack
+npm run bench:interactions:full     # scales 50/250/1000, 15 samples, 60s soak, bounded 10m boot
+npm run bench:interactions:release -- --archive-sha256=<64-hex> --release-git-sha=<40-hex>
+```
+
+`npm run bench:speed` does NOT run this harness — it prints a pointer to it.
+The service-speed lane stays short on purpose; `bench:quick` is the command that
+runs both and writes the combined artifacts.
+
+It generates a deterministic fleet fixture (scale + seed → stable digest) plus a
+seeded local fixture page for Design Mode, boots an isolated stack against them
+on free ports, and drives the real `/dashboard` surface in headless Chrome. It
+never reads or writes `~/.o8` and never touches the installed app's data.
+
+Two target lanes:
+
+- **source** (default) — builds the stack from this checkout.
+- **release** — runs the exact packaged server out of a shipped `.app` bundle
+  against an isolated data dir. This is the lane that produces per-release
+  baselines; two source stacks from one checkout are not two releases. Release
+  runs also require the release archive SHA-256 and full 40-hex commit SHA. The
+  explicit commit is part of the target digest; any non-null server-reported
+  commit is preserved separately and must match it.
+
+Terminal keystroke-to-paint at N=1/4/12 and rapid tab/pane switching are NOT
+re-derived here. The receipt **composes** the operator-locked terminal-workload
+lane (`tests/bench/results/terminal-workload-phase2.json`), re-runs its locked
+budget check, and reports the result with provenance — a weaker composer metric
+must not stand in for it.
+
+Three properties make the receipt trustworthy:
+
+- **Phase attribution.** Server wait, input delay, main-thread work and
+  presentation come from Navigation, Resource and Event Timing. React's commit
+  phase is not separately exposed by the platform, so it is an explicit null
+  with that reason rather than an invented split.
+- **A falsification probe.** Every run replays the exact trusted keypress and
+  paint observer on a harness-owned textarea with a deliberate main-thread
+  stall injected, records how many times the injector executed, and requires
+  the budget evaluator to reject it. A skipped probe, zero/missing execution
+  proof, or a delay that changed nothing is `invalid` and cannot write a
+  baseline.
+- **Cleanup proof.** The receipt records that no processes, ports, fixture data
+  dirs, owned tmux sessions or worktrees survived the run. Residue is `invalid`.
+
+The scenario order is fixed and is part of the measurement contract — changing it
+changes the numbers and invalidates comparison with earlier receipts.
+
+Absolute budgets, the reasoning behind each threshold, the release-baseline
+procedure, the artifact contract and the status ladder live in
+[`docs/operations/interaction-performance-budgets.md`](../../docs/operations/interaction-performance-budgets.md).
+Budgets are PROVISIONAL until two release baselines exist and the operator locks
+them. Absolute budgets only apply to `production` and `packaged` builds; a
+`next-dev` measurement is recorded with its value and an explicit unavailable
+reason, never a pass.
+
 Run governance alone with:
 
 ```sh
@@ -61,6 +133,8 @@ The governance command preflights 20 committed patch fixtures through TypeScript
 ## Thresholds
 
 - Latency metrics in milliseconds use an absolute ±25ms unchanged band.
+- Interaction metrics use per-metric noise bands (see the budget manifest); a
+  keystroke moving 1ms is noise, a tab switch moving 90ms is not.
 - Accuracy and rate metrics from 0 to 1 use an absolute ±0.05 unchanged band.
 - Judge variance is roughly ±5pp, so the ±0.05 threshold suppresses normal noise.
 - `socket_avg_conns` is informational and never receives a regression tag.
