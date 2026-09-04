@@ -53,6 +53,7 @@ export const LOAD_RUNTIME_BINARIES = Object.freeze({
 export const LOAD_TERMINAL_LANE_STATUSES = Object.freeze(['failed', 'completed', 'archived']);
 
 const RESIDUAL_IDENTITY_LIMIT = 64;
+const LOAD_WORKER_HOLD_SECONDS = 300;
 
 // close-unmerged accepts exactly adopted_elsewhere | superseded | spec_changed |
 // wontfix (src/lib/orchestrator/close-unmerged-shared.ts). Anything else is a
@@ -62,7 +63,8 @@ const RESIDUAL_IDENTITY_LIMIT = 64;
 const LOAD_TASK_BODY = [
   'Footprint load measurement lane.',
   'Do not modify, create, or delete any file. Do not run git write commands.',
-  'Read the repository README and report a one-line summary, then stop.',
+  'Read the repository README and prepare a one-line summary.',
+  `Then run /bin/sleep ${LOAD_WORKER_HOLD_SECONDS} before reporting; the harness will stop you after sampling.`,
 ].join('\n');
 
 export function resolveLoadScenarioRequest(env = process.env, limits = LOAD_SCENARIO_LIMITS) {

@@ -608,6 +608,7 @@ describe('load scenario driver', () => {
     expect(requests[0].route).toBe('/api/orchestrator/create-mission');
     expect((requests[0].body as { issues: unknown[] }).issues).toHaveLength(2);
     expect(JSON.stringify(requests[0].body)).toContain('Do not modify, create, or delete any file');
+    expect(JSON.stringify(requests[0].body)).toContain('/bin/sleep 300');
     expect(requests[1]).toMatchObject({ route: '/api/orchestrator/dispatch', body: { missionId: 'm-1' } });
   });
 
