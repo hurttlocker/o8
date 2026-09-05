@@ -158,11 +158,20 @@ pub(crate) fn replace_cache_for_test(tools: Vec<Value>, servers: Vec<ConnectedMc
 }
 
 #[cfg(test)]
+pub(crate) fn cache_test_guard() -> std::sync::MutexGuard<'static, ()> {
+    static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn empty_cache_adds_nothing_and_populated_cache_reaches_realtime_tools() {
+        let _guard = cache_test_guard();
         replace_cache_for_test(Vec::new(), Vec::new());
         assert!(!super::super::all_tools().iter().any(|tool| {
             tool.get("name")

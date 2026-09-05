@@ -351,6 +351,7 @@ mod tests {
 
     #[test]
     fn connected_servers_get_dynamic_may_require_approval_capabilities() {
+        let _guard = tools::symon_mcp::cache_test_guard();
         tools::symon_mcp::replace_cache_for_test(
             vec![json!({
                 "name": "mcp__fixture__echo",
