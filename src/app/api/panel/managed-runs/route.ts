@@ -12,6 +12,8 @@ import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/
 import { serverTimingHeaders } from '@/lib/performance/server-timing';
 import { getLane } from '@/lib/lane/registry';
 import { recordAutomationSourceEvent } from '@/lib/automations/source-events';
+import { inspectPacketManagedRunAdmission } from '@/lib/lane/packet-stop-hold';
+import { withPacketManagedRunLifecycleLock } from '@/lib/runtimes/managed-runs/packet-lifecycle';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -200,36 +202,53 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: 'field_too_long' }, { status: 400 });
   }
 
-  const rec: ManagedRunRecord = {
-    id: body.id,
-    session: body.session,
-    command: body.command,
-    title: body.title?.trim() || null,
-    cwd: body.cwd,
-    repo: body.repo ?? null,
-    packetId: body.packetId ?? null,
-    laneId: body.laneId ?? null,
-    panePid: typeof body.panePid === 'number' ? body.panePid : null,
-    processGroupId: typeof body.processGroupId === 'number' ? body.processGroupId : null,
-    processMarker: typeof body.processMarker === 'string' ? body.processMarker : null,
-    mode: body.mode === 'detach' ? 'detach' : 'stream',
-    startedAt: typeof body.startedAt === 'string' && body.startedAt.trim()
-      ? body.startedAt.trim()
-      : new Date().toISOString(),
-    finishedAt: null,
-    exitCode: null,
-    status: 'running',
-    termination: null,
+  const commitRegistration = () => {
+    const rec: ManagedRunRecord = {
+      id: body.id!,
+      session: body.session!,
+      command: body.command!,
+      title: body.title?.trim() || null,
+      cwd: body.cwd!,
+      repo: body.repo ?? null,
+      packetId: body.packetId ?? null,
+      laneId: body.laneId ?? null,
+      panePid: typeof body.panePid === 'number' ? body.panePid : null,
+      processGroupId: typeof body.processGroupId === 'number' ? body.processGroupId : null,
+      processMarker: typeof body.processMarker === 'string' ? body.processMarker : null,
+      mode: body.mode === 'detach' ? 'detach' : 'stream',
+      startedAt: typeof body.startedAt === 'string' && body.startedAt.trim()
+        ? body.startedAt.trim()
+        : new Date().toISOString(),
+      finishedAt: null,
+      exitCode: null,
+      status: 'running',
+      termination: null,
+    };
+    registerManagedRun(rec);
+    recordAutomationSourceEvent({
+      sourceKind: 'managed_run',
+      sourceId: rec.id,
+      repoPath: managedRunRepoPath(rec),
+      eventType: 'started',
+      fingerprint: `managed-run:${rec.id}:started:${rec.startedAt}`,
+      occurredAt: Date.parse(rec.startedAt) || Date.now(),
+      payload: { command: rec.command, mode: rec.mode, packetId: rec.packetId, laneId: rec.laneId },
+    });
+    return NextResponse.json({ ok: true, run: rec });
   };
-  registerManagedRun(rec);
-  recordAutomationSourceEvent({
-    sourceKind: 'managed_run',
-    sourceId: rec.id,
-    repoPath: managedRunRepoPath(rec),
-    eventType: 'started',
-    fingerprint: `managed-run:${rec.id}:started:${rec.startedAt}`,
-    occurredAt: Date.parse(rec.startedAt) || Date.now(),
-    payload: { command: rec.command, mode: rec.mode, packetId: rec.packetId, laneId: rec.laneId },
+
+  const packetId = body.packetId?.trim() ?? '';
+  if (!packetId) return commitRegistration();
+  return withPacketManagedRunLifecycleLock(packetId, () => {
+    const admission = inspectPacketManagedRunAdmission(packetId);
+    if (!admission.allowed) {
+      return NextResponse.json({
+        ok: false,
+        error: 'packet_not_accepting_managed_runs',
+        reason: admission.reason,
+        packetStatus: admission.status,
+      }, { status: 409 });
+    }
+    return commitRegistration();
   });
-  return NextResponse.json({ ok: true, run: rec });
 }

@@ -8,6 +8,9 @@ import type {
   ManagedRunRecord,
   ManagedRunTerminationReceipt,
 } from '@/lib/runtimes/managed-runs/types';
+import { chainOnKey } from '@/lib/util/keyed-promise-chain';
+
+const packetManagedRunLifecycleChains = new Map<string, Promise<unknown>>();
 
 export interface PacketManagedRunStopFailure {
   id: string;
@@ -61,6 +64,23 @@ const defaultDependencies: PacketManagedRunStopDependencies = {
 };
 
 /**
+ * Serialize packet-bound run registration with packet-run settlement.
+ *
+ * The packet hold itself is persisted before stop enters this lock. If a
+ * registration already owns the lock, it finishes first and the subsequent
+ * stop snapshot includes it. If stop owns the lock first, the registration
+ * waits and then observes the durable hold before it can admit new work.
+ */
+export function withPacketManagedRunLifecycleLock<T>(
+  packetId: string,
+  operation: () => Promise<T> | T,
+): Promise<T> {
+  const key = packetId.trim();
+  if (!key) return Promise.resolve(operation());
+  return chainOnKey(packetManagedRunLifecycleChains, key, async () => operation());
+}
+
+/**
  * Settle o8-managed commands started from a packet before its worktree is pruned.
  *
  * A worker runtime can launch `o8 run`, whose tmux-owned process tree deliberately
@@ -73,37 +93,39 @@ export async function terminatePacketManagedRuns(
   packetId: string,
   dependencies: Partial<PacketManagedRunStopDependencies> = {},
 ): Promise<PacketManagedRunStopReceipt> {
-  const deps = { ...defaultDependencies, ...dependencies };
-  const targets = (await deps.listRuns()).filter((run) => (
-    run.packetId === packetId && (run.status === 'running' || run.status === 'gone')
-  ));
-  const failures: PacketManagedRunStopFailure[] = [];
-  let confirmed = 0;
+  return withPacketManagedRunLifecycleLock(packetId, async () => {
+    const deps = { ...defaultDependencies, ...dependencies };
+    const targets = (await deps.listRuns()).filter((run) => (
+      run.packetId === packetId && (run.status === 'running' || run.status === 'gone')
+    ));
+    const failures: PacketManagedRunStopFailure[] = [];
+    let confirmed = 0;
 
-  for (const target of targets) {
-    let termination: ManagedRunTerminationReceipt;
-    try {
-      termination = await deps.terminate(target);
-    } catch {
-      failures.push({
-        id: target.id,
-        session: target.session,
-        reason: 'termination_error',
-      });
-      continue;
+    for (const target of targets) {
+      let termination: ManagedRunTerminationReceipt;
+      try {
+        termination = await deps.terminate(target);
+      } catch {
+        failures.push({
+          id: target.id,
+          session: target.session,
+          reason: 'termination_error',
+        });
+        continue;
+      }
+      if (!termination.confirmedDead) {
+        failures.push({
+          id: target.id,
+          session: target.session,
+          reason: 'termination_unconfirmed',
+        });
+        continue;
+      }
+      const settled = deps.markKilled(target.session, termination);
+      if (settled) deps.recordKilled(settled);
+      confirmed += 1;
     }
-    if (!termination.confirmedDead) {
-      failures.push({
-        id: target.id,
-        session: target.session,
-        reason: 'termination_unconfirmed',
-      });
-      continue;
-    }
-    const settled = deps.markKilled(target.session, termination);
-    if (settled) deps.recordKilled(settled);
-    confirmed += 1;
-  }
 
-  return { targeted: targets.length, confirmed, failures };
+    return { targeted: targets.length, confirmed, failures };
+  });
 }

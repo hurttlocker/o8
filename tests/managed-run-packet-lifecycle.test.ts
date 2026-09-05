@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { terminatePacketManagedRuns } from '@/lib/runtimes/managed-runs/packet-lifecycle';
+import {
+  terminatePacketManagedRuns,
+  withPacketManagedRunLifecycleLock,
+} from '@/lib/runtimes/managed-runs/packet-lifecycle';
 import type {
   ManagedRunRecord,
   ManagedRunTerminationReceipt,
@@ -83,5 +86,35 @@ describe('packet-owned managed-run settlement', () => {
       }],
     });
     expect(markKilled).not.toHaveBeenCalled();
+  });
+
+  it('serializes late registration behind packet-run settlement', async () => {
+    let releaseTermination!: () => void;
+    const terminationGate = new Promise<void>((resolve) => { releaseTermination = resolve; });
+    let terminationStarted = false;
+    let registrationStarted = false;
+
+    const stopping = terminatePacketManagedRuns('packet-one', {
+      listRuns: async () => [run('matching', 'packet-one')],
+      terminate: async () => {
+        terminationStarted = true;
+        await terminationGate;
+        return termination(true);
+      },
+      markKilled: () => null,
+      recordKilled: vi.fn(),
+    });
+    await vi.waitFor(() => expect(terminationStarted).toBe(true));
+
+    const registering = withPacketManagedRunLifecycleLock('packet-one', () => {
+      registrationStarted = true;
+    });
+    await Promise.resolve();
+    expect(registrationStarted).toBe(false);
+
+    releaseTermination();
+    await stopping;
+    await registering;
+    expect(registrationStarted).toBe(true);
   });
 });

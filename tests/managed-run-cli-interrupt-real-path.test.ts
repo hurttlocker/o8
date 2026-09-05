@@ -1,6 +1,15 @@
 import { spawn, spawnSync, execFileSync, type ChildProcess } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -12,6 +21,7 @@ const children: ChildProcess[] = [];
 const roots: string[] = [];
 const sessions: string[] = [];
 const tmuxAvailable = spawnSync('tmux', ['-V'], { stdio: 'ignore' }).status === 0;
+const tsxImport = import.meta.resolve('tsx');
 
 function markerPids(marker: string): number[] {
   try {
@@ -60,7 +70,7 @@ const code = await runRun({ human: false, verbose: false }, []);
 process.exit(code);
 `);
     const result = spawnSync(process.execPath, [
-      '--import', 'tsx',
+      '--import', tsxImport,
       harnessPath,
       'run', '--', process.execPath, '-e', 'console.log("normal-receipt"); process.exit(7)',
     ], {
@@ -155,7 +165,7 @@ process.exit(code);
       'setInterval(() => {}, 1000)',
     ].join(';');
     const cli = spawn(process.execPath, [
-      '--import', 'tsx',
+      '--import', tsxImport,
       harnessPath,
       'run', '--', process.execPath, '-e', command,
     ], {
@@ -238,7 +248,7 @@ process.exit(code);
 `);
     const command = 'process.stdout.write("before-term\\n"); setInterval(() => {}, 1000)';
     const cli = spawn(process.execPath, [
-      '--import', 'tsx',
+      '--import', tsxImport,
       harnessPath,
       'run', '--detach', '--', process.execPath, '-e', command,
     ], {
@@ -287,7 +297,7 @@ process.exit(code);
     });
 
     const last = spawnSync(process.execPath, [
-      '--import', 'tsx',
+      '--import', tsxImport,
       harnessPath,
       'run', '--last',
     ], {
@@ -307,5 +317,95 @@ process.exit(code);
       },
     });
     sessions.pop();
+  }, 25_000);
+
+  it('does not release a packet command when the server rejects its registration', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'o8-run-cli-held-packet-'));
+    roots.push(dataDir);
+    const worktreePath = join(dataDir, '.cortex-worktrees', 'packet-pkt-cli-held');
+    mkdirSync(worktreePath, { recursive: true });
+    const canonicalWorktreePath = realpathSync(worktreePath);
+    const commandMarker = join(dataDir, 'command-started');
+    let registerCalls = 0;
+    let commandStartedBeforeRejection = false;
+    const server = createServer(async (request, response) => {
+      response.setHeader('Content-Type', 'application/json');
+      if (request.url?.startsWith('/api/lanes') && request.method === 'GET') {
+        response.end(JSON.stringify({
+          lanes: [{
+            id: 'lane-cli-held',
+            packetId: 'pkt-cli-held',
+            worktreePath: canonicalWorktreePath,
+          }],
+        }));
+        return;
+      }
+      if (request.url === '/api/panel/managed-runs' && request.method === 'POST') {
+        registerCalls += 1;
+        commandStartedBeforeRejection = existsSync(commandMarker);
+        response.statusCode = 409;
+        response.end(JSON.stringify({
+          ok: false,
+          error: 'packet_not_accepting_managed_runs',
+          reason: 'packet_held',
+        }));
+        return;
+      }
+      response.statusCode = 404;
+      response.end(JSON.stringify({ error: 'not_found' }));
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('fixture server did not bind');
+
+    const harnessPath = join(dataDir, 'run-harness.mts');
+    const runCommandModule = new URL('../cli/src/commands/run.ts', import.meta.url).href;
+    writeFileSync(harnessPath, `
+import { runRun } from ${JSON.stringify(runCommandModule)};
+try {
+  const code = await runRun({ human: false, verbose: false }, []);
+  process.exit(code);
+} catch (error) {
+  process.stderr.write(String(error instanceof Error ? error.message : error));
+  process.exit(typeof error === 'object' && error && 'exit' in error ? Number(error.exit) : 1);
+}
+`);
+    const beforeSessions = new Set(execFileSync('tmux', ['list-sessions', '-F', '#{session_name}'], {
+      encoding: 'utf8',
+    }).trim().split('\n').filter(Boolean));
+    const cli = spawn(process.execPath, [
+      '--import', tsxImport,
+      harnessPath,
+      'run', '--detach', '--', process.execPath, '-e',
+      `require('node:fs').writeFileSync(${JSON.stringify(commandMarker)}, 'started')`,
+    ], {
+      cwd: canonicalWorktreePath,
+      env: {
+        ...process.env,
+        O8_API_PORT: String(address.port),
+        O8_API_TOKEN: 'test-token',
+        CORTEX_IDE_DATA_DIR: dataDir,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    children.push(cli);
+    let stdout = '';
+    let stderr = '';
+    cli.stdout?.on('data', (chunk) => { stdout += String(chunk); });
+    cli.stderr?.on('data', (chunk) => { stderr += String(chunk); });
+    const status = await new Promise<number | null>((resolve) => cli.once('exit', resolve));
+    children.pop();
+    const afterSessions = new Set(execFileSync('tmux', ['list-sessions', '-F', '#{session_name}'], {
+      encoding: 'utf8',
+    }).trim().split('\n').filter(Boolean));
+
+    expect(status, stderr).toBe(5);
+    expect(stderr).toContain('Packet-bound run was not started');
+    expect(stdout).toBe('');
+    expect(registerCalls).toBe(1);
+    expect(commandStartedBeforeRejection).toBe(false);
+    expect(existsSync(commandMarker)).toBe(false);
+    expect([...afterSessions].filter((session) => !beforeSessions.has(session))).toEqual([]);
   }, 25_000);
 });

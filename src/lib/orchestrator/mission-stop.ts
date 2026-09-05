@@ -22,6 +22,7 @@ import {
 } from '@/lib/orchestrator/lifecycle-mutation-lock';
 import { chainOnKey } from '@/lib/util/keyed-promise-chain';
 import { createMissionLifecycleHold } from '@/lib/orchestrator/mission-lifecycle-hold';
+import { terminatePacketManagedRuns } from '@/lib/runtimes/managed-runs/packet-lifecycle';
 
 const missionStopChains = new Map<string, Promise<unknown>>();
 const missionStopDepth = new Map<string, number>();
@@ -67,14 +68,37 @@ function markStoppedPacket(packet: OrchestratorPacket, stoppedAt: string): Orche
   };
 }
 
-async function stopPacketViaLaneCommand(packet: OrchestratorPacket): Promise<StopMissionPacketResult> {
-  if (isPacketTerminal(packet)) {
+async function settleTerminalPacketManagedRuns(
+  packet: OrchestratorPacket,
+  laneId: string | null,
+  terminalNote: string,
+): Promise<StopMissionPacketResult> {
+  const managedRuns = await terminatePacketManagedRuns(packet.id);
+  if (managedRuns.failures.length > 0) {
     return {
       packetId: packet.id,
-      status: 'already-terminal',
-      laneId: packet.lane?.laneId ?? null,
-      note: `Packet is already terminal (${packet.status}).`,
+      status: 'stop-failed',
+      laneId,
+      note: `${terminalNote} ${managedRuns.failures.length} packet-managed run${managedRuns.failures.length === 1 ? '' : 's'} could not be confirmed dead.`,
     };
+  }
+  return {
+    packetId: packet.id,
+    status: 'already-terminal',
+    laneId,
+    note: managedRuns.confirmed > 0
+      ? `${terminalNote} Stopped ${managedRuns.confirmed} packet-managed run${managedRuns.confirmed === 1 ? '' : 's'}.`
+      : terminalNote,
+  };
+}
+
+async function stopPacketViaLaneCommand(packet: OrchestratorPacket): Promise<StopMissionPacketResult> {
+  if (isPacketTerminal(packet)) {
+    return settleTerminalPacketManagedRuns(
+      packet,
+      packet.lane?.laneId ?? null,
+      `Packet is already terminal (${packet.status}).`,
+    );
   }
 
   const persistedBinding = packet.lane?.laneId ? getLane(packet.lane.laneId) : null;
@@ -83,12 +107,11 @@ async function stopPacketViaLaneCommand(packet: OrchestratorPacket): Promise<Sto
   const laneStatus = lane?.status ?? null;
   const sessionKey = packet.lane?.sessionKey?.trim() || lane?.sessionKey?.trim() || '';
   if (laneStatus && isWorkerTerminal(laneStatus) && !sessionKey) {
-    return {
-      packetId: packet.id,
-      status: 'already-terminal',
+    return settleTerminalPacketManagedRuns(
+      packet,
       laneId,
-      note: `Lane is already terminal (${laneStatus}).`,
-    };
+      `Lane is already terminal (${laneStatus}).`,
+    );
   }
   if (packet.lane && !persistedBinding && !laneId) {
     return stopPacketWithoutLaneRow(packet, null);
@@ -108,12 +131,11 @@ async function stopPacketViaLaneCommand(packet: OrchestratorPacket): Promise<Sto
     }
     if (!laneId) {
       if ((packet.status === 'failed' || packet.status === 'awaiting_review') && !sessionKey) {
-        return {
-          packetId: packet.id,
-          status: 'already-terminal',
-          laneId: null,
-          note: `Packet is already terminal (${packet.status}).`,
-        };
+        return settleTerminalPacketManagedRuns(
+          packet,
+          null,
+          `Packet is already terminal (${packet.status}).`,
+        );
       }
       if (packet.queueState === 'queued' && !packet.lane) {
         const guard = await holdPacketLifecycleMutation({ packetId: packet.id, kind: 'stop' });

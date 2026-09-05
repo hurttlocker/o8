@@ -31,7 +31,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { apiFetch, CliError, EXIT } from '../api.js';
 import { resolveConfig } from '../config.js';
-import { resolveLaneFromCwd } from './packet/worktree-resolve.js';
+import { detectWorktree, resolveLaneFromCwd } from './packet/worktree-resolve.js';
 import {
   exitCodeFromStatus,
   initializeManagedRunReceipt,
@@ -181,6 +181,23 @@ async function settleOwnedSessionLocally(
   return !ownedSessionAlive(session)
     && remaining !== null
     && remaining.length === 0;
+}
+
+async function discardUnreleasedManagedRun(input: {
+  session: string;
+  processGroupId: number | null;
+  processMarker: string;
+  paths: string[];
+}): Promise<boolean> {
+  const settled = await settleOwnedSessionLocally(
+    input.session,
+    input.processGroupId,
+    input.processMarker,
+  );
+  for (const path of input.paths) {
+    try { rmSync(path, { force: true }); } catch {}
+  }
+  return settled;
 }
 
 /**
@@ -358,6 +375,30 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
   const cmd = command.join(' ');
   const startedAt = new Date().toISOString();
   const processMarker = randomUUID().replace(/-/g, '');
+  const packetWorktree = detectWorktree(cwd);
+  let packetId: string | null = null;
+  let laneId: string | null = null;
+  if (packetWorktree) {
+    let lane: Awaited<ReturnType<typeof resolveLaneFromCwd>>;
+    try {
+      lane = await resolveLaneFromCwd();
+    } catch (error) {
+      throw new CliError(
+        'packet_context_unavailable',
+        `Packet-bound run refused because o8 could not verify the current packet: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof CliError ? error.exit : EXIT.CONNECTION_REFUSED,
+      );
+    }
+    if (!lane?.packetId) {
+      throw new CliError(
+        'packet_context_unavailable',
+        'Packet-bound run refused because the current worktree has no live packet binding.',
+        EXIT.CONFLICT,
+      );
+    }
+    packetId = lane.packetId;
+    laneId = lane.laneId;
+  }
 
   const base = join(tmpdir(), `o8-run-${id}`);
   const goFile = `${base}.go`;
@@ -498,37 +539,14 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
     );
   }
 
-  try {
-    writeFileSync(goFile, ''); // release — command starts now
-  } catch (error) {
-    process.off('SIGINT', onSigint);
-    try {
-      execFileSync('tmux', ['kill-session', '-t', session], {
-        windowsHide: true,
-        timeout: 5_000,
-        stdio: 'ignore',
-      });
-    } catch {}
-    for (const f of [logFile, exitFile, metadataFile, goFile, envFile]) {
-      try { rmSync(f, { force: true }); } catch {}
-    }
-    throw error;
-  }
-
-  // Resolve packet context (best effort) and register the run (soft — a down
-  // server must not block the agent's work; the command still runs in tmux).
+  // Register while the command is still held behind its go-gate. Packet-bound
+  // runs fail closed: the server serializes this registration with packet stop
+  // and rejects held/terminal packets, so work cannot appear after a successful
+  // stop snapshot. Operator runs outside packet worktrees retain the historical
+  // soft-registration behavior when the server is unavailable.
   const cfg = resolveConfig();
-  let packetId: string | null = null;
-  let laneId: string | null = null;
-  try {
-    const lane = await resolveLaneFromCwd();
-    if (lane) {
-      packetId = lane.packetId;
-      laneId = lane.laneId;
-    }
-  } catch { /* not in a packet worktree, or lanes API hiccup */ }
-
   let registered = false;
+  let registrationError: unknown = null;
   try {
     const res = await apiFetch<{ ok?: boolean }>(cfg, '/api/panel/managed-runs', {
       method: 'POST',
@@ -548,7 +566,48 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
       },
     });
     registered = Boolean(res.data?.ok);
-  } catch { /* server unreachable — degrade to run-without-visibility */ }
+  } catch (error) {
+    registrationError = error;
+  }
+
+  if (packetId && !registered) {
+    process.off('SIGINT', onSigint);
+    const settled = await discardUnreleasedManagedRun({
+      session,
+      processGroupId,
+      processMarker,
+      paths: [logFile, exitFile, metadataFile, goFile, envFile],
+    });
+    const detail = registrationError instanceof Error
+      ? registrationError.message
+      : 'the server declined registration';
+    throw new CliError(
+      'packet_run_registration_failed',
+      `Packet-bound run was not started: ${detail}${settled ? '' : ' The gated tmux process could not be confirmed dead.'}`,
+      registrationError instanceof CliError ? registrationError.exit : EXIT.CONFLICT,
+    );
+  }
+
+  try {
+    writeFileSync(goFile, ''); // release — command starts only after registration
+  } catch (error) {
+    process.off('SIGINT', onSigint);
+    await discardUnreleasedManagedRun({
+      session,
+      processGroupId,
+      processMarker,
+      paths: [logFile, exitFile, metadataFile, goFile, envFile],
+    });
+    if (registered) {
+      try {
+        await apiFetch(cfg, '/api/panel/managed-runs', {
+          method: 'POST',
+          body: { action: 'kill', session },
+        });
+      } catch { /* local settlement is authoritative for a command that never started */ }
+    }
+    throw error;
+  }
 
   if (detach) {
     if (mode.human) {

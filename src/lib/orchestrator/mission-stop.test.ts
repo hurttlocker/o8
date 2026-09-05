@@ -10,6 +10,10 @@ const stopMock = vi.hoisted(() => ({
   throws: new Set<string>(),
   gate: null as Promise<void> | null,
 }));
+const managedRunMock = vi.hoisted(() => ({
+  calls: [] as string[],
+  receipt: { targeted: 0, confirmed: 0, failures: [] as Array<Record<string, unknown>> },
+}));
 
 vi.mock('@/lib/lane/commands', () => ({
   dispatch: vi.fn(async (command: { verb: string; laneId: string }) => {
@@ -28,6 +32,12 @@ vi.mock('@/lib/lane/commands', () => ({
       lane: { id: command.laneId, status: 'paused', lastEventLabel: 'operator_stopped' },
       note: 'Stopped.',
     };
+  }),
+}));
+vi.mock('@/lib/runtimes/managed-runs/packet-lifecycle', () => ({
+  terminatePacketManagedRuns: vi.fn(async (packetId: string) => {
+    managedRunMock.calls.push(packetId);
+    return managedRunMock.receipt;
   }),
 }));
 
@@ -81,6 +91,8 @@ function laneBinding(repoPath: string, laneId: string): OrchestratorLaneBinding 
 describe('stopMission', () => {
   beforeEach(() => {
     stopMock.throws.clear();
+    managedRunMock.calls.length = 0;
+    managedRunMock.receipt = { targeted: 0, confirmed: 0, failures: [] };
   });
 
   it('fans out stop across mixed packet states and reports every outcome', async () => {
@@ -132,6 +144,7 @@ describe('stopMission', () => {
     const result = await stopMission('mission-stop-test');
 
     expect(stopMock.calls).toEqual([runningLane.id, failedStopLane.id]);
+    expect(managedRunMock.calls).toEqual(['already-terminal']);
     expect(result.packets).toEqual([
       {
         packetId: 'running',
@@ -196,6 +209,58 @@ describe('stopMission', () => {
         lastEventLabel: null,
       },
     ]);
+  });
+
+  it('settles packet-managed runs even when the packet is already terminal', async () => {
+    const repoPath = mkdtempSync(join(tmpdir(), 'o8-stop-terminal-runs-'));
+    managedRunMock.receipt = { targeted: 1, confirmed: 1, failures: [] };
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      missionId: 'mission-stop-terminal-runs',
+      repoPath,
+      packets: [packetFixture(repoPath, 'terminal-runs', {
+        status: 'archived',
+        queueState: 'held',
+        releaseState: 'released',
+      })],
+    });
+
+    const result = await stopMission('mission-stop-terminal-runs');
+
+    expect(managedRunMock.calls).toEqual(['terminal-runs']);
+    expect(result.packets).toEqual([{
+      packetId: 'terminal-runs',
+      status: 'already-terminal',
+      laneId: null,
+      note: 'Packet is already terminal (archived). Stopped 1 packet-managed run.',
+    }]);
+  });
+
+  it('reports an incomplete mission stop when a terminal packet run survives', async () => {
+    const repoPath = mkdtempSync(join(tmpdir(), 'o8-stop-terminal-run-failure-'));
+    managedRunMock.receipt = {
+      targeted: 1,
+      confirmed: 0,
+      failures: [{ id: 'run-stubborn', reason: 'termination_unconfirmed' }],
+    };
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      missionId: 'mission-stop-terminal-run-failure',
+      repoPath,
+      packets: [packetFixture(repoPath, 'terminal-run-failure', {
+        status: 'archived',
+        queueState: 'held',
+        releaseState: 'released',
+      })],
+    });
+
+    const result = await stopMission('mission-stop-terminal-run-failure');
+
+    expect(result.packets).toEqual([expect.objectContaining({
+      packetId: 'terminal-run-failure',
+      status: 'stop-failed',
+      note: expect.stringContaining('could not be confirmed dead'),
+    })]);
   });
 
   it('stops an awaiting-review packet when its lane still owns a live session', async () => {
