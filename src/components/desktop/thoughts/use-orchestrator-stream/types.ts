@@ -1,3 +1,4 @@
+import type { TaskArtifactActionStamp } from '@/lib/task-artifacts/types';
 import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
@@ -14,6 +15,8 @@ export interface OrchestratorSendHandle {
 }
 
 export interface OrchestratorSendOptions {
+  /** Interactive task artifact action riding this turn (#1699); the realtime server marks it delivered. */
+  taskArtifactAction?: TaskArtifactActionStamp;
   permissionMode?: OrchestratorPermissionMode;
   backend?: OrchestratorBackendId;
   thinkingEffort?: ThinkingEffort;

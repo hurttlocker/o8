@@ -6,6 +6,7 @@ import { O8_WEBVIEW_TOOLS, createO8WebviewToolHandlers } from '@/lib/mcp/o8-webv
 import { APPROVE_TOOLS, handleApprove, handleApproveAndMerge, handleMergePreview, handleReject } from '@/lib/mcp/operator-handlers/approve';
 import { AGENT_MESSAGE_TOOLS, handleAgentMessageInbox, handleAgentMessageSend } from '@/lib/mcp/operator-handlers/agents';
 import { CANVAS_TOOLS, handleCanvas, handleRender } from '@/lib/mcp/operator-handlers/canvas';
+import { TASK_ARTIFACT_TOOLS, handleTaskArtifact } from '@/lib/mcp/operator-handlers/task-artifact';
 import { BROADCAST_TOOLS, handleBroadcastPost, handleBroadcastSay, handleBroadcastToken } from '@/lib/mcp/operator-handlers/broadcast';
 import { CLOSE_PACKET_TOOLS, handleClosePacketUnmerged } from '@/lib/mcp/operator-handlers/close-packet';
 import { CORTEX_TOOLS, handleAsk, handleProposeObservation } from '@/lib/mcp/operator-handlers/cortex';
@@ -288,6 +289,7 @@ const TOOLS: McpTool[] = [
   ...UPDATE_TOOLS,
   ...O8_WEBVIEW_TOOLS,
   ...CANVAS_TOOLS,
+  ...TASK_ARTIFACT_TOOLS,
   ...LOOP_OBSERVABILITY_TOOLS,
   ...MISSION_TOOLS.filter((tool) => tool.name === 'create_mission'),
   ...MISSION_TOOLS.filter((tool) => tool.name === 'dispatch_mission'),
@@ -404,6 +406,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   o8_view_active_route: handleActiveRoute,
   o8_canvas: handleCanvas,
   o8_render: handleRender,
+  o8_task_artifact: handleTaskArtifact,
   o8_user_context: handleUserContext,
   create_mission: handleCreateMission,
   dispatch_mission: handleDispatchMission,

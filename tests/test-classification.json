@@ -2443,6 +2443,14 @@
       ]
     },
     {
+      "path": "tests/task-artifacts-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/terminal-rapid-generator.test.ts",
       "reasons": [
         "child-process",

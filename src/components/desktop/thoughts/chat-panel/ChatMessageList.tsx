@@ -9,6 +9,8 @@ import { mergeAdjacentToolOnlyEntries } from './ToolCallChipCluster';
 import { CollideProposalCard } from './CollideProposalCard';
 import { MissionCompleteGroupCard } from './MissionCompleteGroupCard';
 import { HandoffTranscriptCard } from './HandoffTranscriptCard';
+import { TaskArtifactCard, type TaskArtifactDeliverInput } from './TaskArtifactCard';
+import type { TaskArtifactView } from '@/lib/task-artifacts/types';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { noteUserScroll } from '@/lib/tts/scroll-follow';
 
@@ -21,6 +23,26 @@ type MissionRenderItem =
 
 function isPacketTerminalEntry(m: MobileTranscriptEntry): boolean {
   return m.statusEvent?.kind === 'mission-complete' || m.statusEvent?.kind === 'merge';
+}
+
+function placeTaskArtifacts(artifacts: TaskArtifactView[], messages: MobileTranscriptEntry[]): Map<number, TaskArtifactView[]> {
+  const buckets = new Map<number, TaskArtifactView[]>();
+  if (artifacts.length === 0) return buckets;
+  const sorted = [...artifacts].sort((a, b) => Date.parse(a.artifact.createdAt) - Date.parse(b.artifact.createdAt));
+  for (const entry of sorted) {
+    const createdAt = Date.parse(entry.artifact.createdAt);
+    let index = -1;
+    for (let i = 0; i < messages.length; i += 1) {
+      const ts = messages[i].timestamp ?? 0;
+      if (ts <= createdAt) index = i;
+      else break;
+    }
+    if (index === -1 && messages.length > 0) index = 0;
+    const bucket = buckets.get(index) ?? [];
+    bucket.push(entry);
+    buckets.set(index, bucket);
+  }
+  return buckets;
 }
 
 export function buildMissionRenderItems(messages: MobileTranscriptEntry[]): MissionRenderItem[] {
@@ -83,6 +105,10 @@ interface ChatMessageListProps {
   turnSummary?: TurnSummary | null;
   onScroll?: (event: React.UIEvent<HTMLDivElement>) => void;
   onRetryDelivery?: (clientMessageId: string) => void;
+  /** Interactive task artifacts attached to this thread (#1699), oldest first. */
+  taskArtifacts?: TaskArtifactView[];
+  taskArtifactThreadBusy?: boolean;
+  onTaskArtifactDeliver?: (input: TaskArtifactDeliverInput) => boolean;
 }
 
 export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(function ChatMessageList({
@@ -109,12 +135,31 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
   turnSummary = null,
   onScroll,
   onRetryDelivery,
+  taskArtifacts,
+  taskArtifactThreadBusy = false,
+  onTaskArtifactDeliver,
 }, chatEndRef) {
   // Parallel tool work emitted as separate tool-only assistant messages
   // renders as ONE merged cluster (a single counted "Running N commands"
   // line) instead of a stack of shimmer rows. Render-time derivation — the
   // underlying message state is untouched.
   const displayMessages = mergeAdjacentToolOnlyEntries(rawDisplayMessages);
+  // Each artifact renders after the last transcript entry that precedes its
+  // creation; anything newer than the transcript lands at the end. Key -1 is
+  // the "no entries yet" bucket.
+  const taskArtifactsByIndex = placeTaskArtifacts(taskArtifacts ?? [], displayMessages);
+  const renderTaskArtifacts = (index: number) => {
+    const bucket = taskArtifactsByIndex.get(index);
+    if (!bucket || !onTaskArtifactDeliver) return null;
+    return bucket.map((entry) => (
+      <TaskArtifactCard
+        key={entry.artifact.id}
+        artifactId={entry.artifact.id}
+        threadBusy={taskArtifactThreadBusy}
+        onDeliverToThread={onTaskArtifactDeliver}
+      />
+    ));
+  };
   // Phase 4 — chips strip renders when EITHER chips arrived OR a fetch is in
   // flight / just failed (placeholder). Both share the same anchor under the
   // last assistant message. Without the placeholder branch the strip would
@@ -253,6 +298,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
               {summaryAnchorsAfter && turnSummary ? (
                 <TurnSummaryCard summary={turnSummary} />
               ) : null}
+              {renderTaskArtifacts(index)}
               {showChipsHere ? (
                 <SuggestedReplies
                   chips={suggestedReplies ?? []}
@@ -268,6 +314,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
           );
         })}
 
+        {renderTaskArtifacts(-1)}
         {bottomContent}
 
         {isCompacting ? (
