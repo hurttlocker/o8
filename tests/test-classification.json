@@ -1136,6 +1136,13 @@
       ]
     },
     {
+      "path": "tests/claude-auth-preflight-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/claude-code-codex-orchestrator-live-smoke.test.ts",
       "reasons": [
         "child-process",

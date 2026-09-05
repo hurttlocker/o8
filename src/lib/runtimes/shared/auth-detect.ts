@@ -41,6 +41,7 @@ import { suggestMachineAuthProfile } from './auth-profile-suggestion';
 
 const execFileAsync = promisify(execFile);
 const CACHE_TTL_MS = 60_000;
+const UNKNOWN_CLAUDE_CACHE_TTL_MS = 5_000;
 const PROBE_TIMEOUT_MS = 1_500;
 const TRUSTED_KEYLESS_OPENCODE_MODELS = new Set([
   'opencode/deepseek-v4-flash-free',
@@ -636,7 +637,10 @@ export async function getRuntimeAuthSnapshot(): Promise<RuntimeAuthSnapshot> {
   while (true) {
     const generation = cacheGeneration;
     const cached = cache;
-    if (cached && Date.now() - cached.cachedAt < CACHE_TTL_MS) {
+    const cacheTtlMs = cached?.snapshot.statuses.claude.nativeLoginState === 'unknown'
+      ? UNKNOWN_CLAUDE_CACHE_TTL_MS
+      : CACHE_TTL_MS;
+    if (cached && Date.now() - cached.cachedAt < cacheTtlMs) {
       const opencode = await refreshOpencodeStatus();
       if (generation !== cacheGeneration || cache !== cached) continue;
       const snapshot = {

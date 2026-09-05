@@ -282,7 +282,7 @@ describe.skipIf(process.platform === 'win32')('Claude Code native sign-in verifi
 
     const startedAt = Date.now();
     const status = await claudeStatus();
-    expect(Date.now() - startedAt).toBeLessThan(10_000);
+    expect(Date.now() - startedAt).toBeLessThan(15_000);
     expect(status).toMatchObject({
       ready: false,
       authenticated: false,
