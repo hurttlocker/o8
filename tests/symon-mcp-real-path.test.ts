@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { createServer, type ServerResponse } from 'node:http';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -77,6 +78,71 @@ describe.sequential('Symon MCP real path', () => {
     if (priorIdleMs === undefined) delete process.env.O8_SYMON_MCP_IDLE_MS;
     else process.env.O8_SYMON_MCP_IDLE_MS = priorIdleMs;
   });
+
+  it.each(['enabled', 'symonInjection'] as const)(
+    'refuses stale HTTP discovery after revoking %s and preserves newer pending discovery',
+    async (flag) => {
+      const { insertExternalMcpServer, updateExternalMcpServer, removeExternalMcpServer } =
+        await import('@/lib/mcp/external-servers');
+      const { getSymonMcpCatalog, callSymonMcpTool } = await import('@/lib/mcp/symon-tools');
+      const pending: Array<{ response: ServerResponse; id: number }> = [];
+      let callCount = 0;
+      const http = createServer(async (incoming, response) => {
+        let raw = '';
+        for await (const chunk of incoming) raw += String(chunk);
+        const message = JSON.parse(raw) as { id: number; method: string };
+        if (message.method === 'notifications/initialized') {
+          response.writeHead(202).end();
+        } else if (message.method === 'tools/list') {
+          pending.push({ response, id: message.id });
+        } else {
+          if (message.method === 'tools/call') callCount += 1;
+          response.setHeader('content-type', 'application/json');
+          response.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: {} }));
+        }
+      });
+      await new Promise<void>((resolve) => http.listen(0, '127.0.0.1', resolve));
+      const address = http.address();
+      if (!address || typeof address === 'string') throw new Error('Missing fixture port');
+      const server = insertExternalMcpServer({
+        name: 'race', transport: 'http', command: `http://127.0.0.1:${address.port}`,
+        enabled: true, symonInjection: true,
+      });
+      const release = (index: number) => {
+        const item = pending[index]!;
+        item.response.setHeader('content-type', 'application/json');
+        item.response.end(JSON.stringify({ jsonrpc: '2.0', id: item.id, result: {
+          tools: [{ name: 'echo', inputSchema: { type: 'object', properties: {} } }],
+        } }));
+      };
+      try {
+        const oldRefresh = getSymonMcpCatalog({ refresh: true });
+        await waitFor(() => pending.length === 1);
+        updateExternalMcpServer(server.id, { [flag]: false });
+        expect((await getSymonMcpCatalog()).tools).toEqual([]);
+        await expect(callSymonMcpTool('mcp__race__echo', {})).rejects.toThrow('Unknown');
+
+        updateExternalMcpServer(server.id, { [flag]: true });
+        const newerRefresh = getSymonMcpCatalog({ refresh: true });
+        await waitFor(() => pending.length === 2);
+        release(0);
+        expect((await oldRefresh).tools).toEqual([]);
+        const joinedRefresh = getSymonMcpCatalog({ refresh: true });
+        release(1);
+        expect((await newerRefresh).tools.map((tool) => tool.name)).toEqual(['mcp__race__echo']);
+        expect((await joinedRefresh).tools.map((tool) => tool.name)).toEqual(['mcp__race__echo']);
+        expect(pending).toHaveLength(2);
+        updateExternalMcpServer(server.id, { [flag]: false });
+        expect((await getSymonMcpCatalog()).tools).toEqual([]);
+        await expect(callSymonMcpTool('mcp__race__echo', {})).rejects.toThrow('Unknown');
+        expect(callCount).toBe(0);
+      } finally {
+        removeExternalMcpServer(server.id);
+        http.closeAllConnections();
+        await new Promise<void>((resolve) => http.close(() => resolve()));
+      }
+    },
+  );
 
   it('discovers, calls, gates, invalidates, and idle-reaps an attached stdio server', async () => {
     const { GET } = await import('@/app/api/symon/mcp/tools/route');

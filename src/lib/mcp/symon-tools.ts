@@ -377,13 +377,16 @@ const pendingSessions = new Map<string, Promise<McpSession>>();
 const warnedUnavailable = new Set<string>();
 let catalogEntries: CatalogEntry[] | null = null;
 let catalogPromise: Promise<CatalogEntry[]> | null = null;
+let catalogGeneration = 0;
 
 async function getSession(server: ExternalMcpServerRecord): Promise<McpSession> {
   const existing = sessions.get(server.id);
   if (existing) return existing;
   const pending = pendingSessions.get(server.id);
   if (pending) return pending;
+  const generation = catalogGeneration;
   const creating = Promise.resolve().then(() => {
+    if (generation !== catalogGeneration) throw new Error('MCP registry changed');
     let session: McpSession;
     if (server.transport === 'stdio') {
       session = new StdioSession(server, () => {
@@ -394,7 +397,9 @@ async function getSession(server: ExternalMcpServerRecord): Promise<McpSession> 
     }
     sessions.set(server.id, session);
     return session;
-  }).finally(() => pendingSessions.delete(server.id));
+  }).finally(() => {
+    if (pendingSessions.get(server.id) === creating) pendingSessions.delete(server.id);
+  });
   pendingSessions.set(server.id, creating);
   return creating;
 }
@@ -406,6 +411,7 @@ function closeSessions(): void {
 }
 
 function invalidateAll(): void {
+  catalogGeneration += 1;
   catalogEntries = null;
   catalogPromise = null;
   closeSessions();
@@ -425,6 +431,7 @@ function externalToolName(serverName: string, toolName: string): string {
 }
 
 async function buildCatalog(): Promise<CatalogEntry[]> {
+  const generation = catalogGeneration;
   const servers = listEnabledExternalMcpServers().filter((server) => server.symonInjection);
   const candidates = (await Promise.all(servers.map(async (server) => {
     try {
@@ -440,6 +447,7 @@ async function buildCatalog(): Promise<CatalogEntry[]> {
         sourceToolName: tool.name,
       }));
     } catch {
+      if (generation !== catalogGeneration) return [];
       if (!warnedUnavailable.has(server.id)) {
         warnedUnavailable.add(server.id);
         console.warn(`[symon-mcp] Connected server "${server.name}" is unavailable; omitting its tools.`);
@@ -465,13 +473,19 @@ async function buildCatalog(): Promise<CatalogEntry[]> {
 async function entries(force = false): Promise<CatalogEntry[]> {
   if (!force && catalogEntries) return catalogEntries;
   if (catalogPromise) return catalogPromise;
-  catalogPromise = buildCatalog()
+  const generation = catalogGeneration;
+  const building = buildCatalog()
     .then((next) => {
+      // An old refresh must neither publish nor return revoked tools.
+      if (generation !== catalogGeneration) return [];
       catalogEntries = next;
       return next;
     })
-    .finally(() => { catalogPromise = null; });
-  return catalogPromise;
+    .finally(() => {
+      if (catalogPromise === building) catalogPromise = null;
+    });
+  catalogPromise = building;
+  return building;
 }
 
 export async function getSymonMcpCatalog(options?: { refresh?: boolean }): Promise<SymonMcpCatalog> {
