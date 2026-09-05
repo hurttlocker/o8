@@ -9,6 +9,7 @@ import {
   utimesSync,
   writeFileSync,
 } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -36,6 +37,27 @@ function fixture() {
   mkdirSync(join(root, '.next', 'cache', 'webpack'), { recursive: true });
   writeFileSync(join(root, '.next', 'cache', 'webpack', 'entry.bin'), 'compiled-source-a');
   return { root, cacheRoot };
+}
+
+function identityFixture() {
+  const { root } = fixture();
+  mkdirSync(join(root, 'src-tauri'), { recursive: true });
+  writeFileSync(join(root, 'package.json'), '{\n  "name": "o8",\n  "version": "0.1.0",\n  "dependencies": { "example": "1.0.0" }\n}\n');
+  writeFileSync(join(root, 'package-lock.json'), '{\n  "name": "o8",\n  "version": "0.1.0",\n  "lockfileVersion": 3,\n  "packages": {\n    "": { "name": "o8", "version": "0.1.0" },\n    "node_modules/example": { "version": "1.0.0" }\n  }\n}\n');
+  writeFileSync(join(root, 'src-tauri', 'Cargo.toml'), '[package]\nname = "o8"\nversion = "0.1.0"\n\n[dependencies]\nexample = "1.0.0"\n');
+  writeFileSync(join(root, 'src-tauri', 'Cargo.lock'), 'version = 4\n\n[[package]]\nname = "o8"\nversion = "0.1.0"\ndependencies = ["example"]\n\n[[package]]\nname = "example"\nversion = "1.0.0"\n');
+  writeFileSync(join(root, 'src-tauri', 'tauri.conf.json'), '{\n  "productName": "o8",\n  "version": "0.1.0",\n  "identifier": "com.o8.app"\n}\n');
+  execFileSync('git', ['init', '--quiet'], { cwd: root });
+  execFileSync('git', ['config', 'user.email', 'tests@example.com'], { cwd: root });
+  execFileSync('git', ['config', 'user.name', 'Release Cache Tests'], { cwd: root });
+  execFileSync('git', ['add', '.'], { cwd: root });
+  execFileSync('git', ['commit', '--quiet', '-m', 'fixture'], { cwd: root });
+  return root;
+}
+
+function commitFixtureChange(root: string) {
+  execFileSync('git', ['add', '.'], { cwd: root });
+  execFileSync('git', ['commit', '--quiet', '-m', 'change'], { cwd: root });
 }
 
 function identity(source: string): ReleaseBuildCacheIdentity {
@@ -206,6 +228,56 @@ describe('shared release build cache', () => {
       env: { ...process.env, NEXT_PUBLIC_CACHE_CANARY: 'two' },
     });
     expect(webA.compatibilitySha256).not.toBe(webB.compatibilitySha256);
+  });
+
+  it('keeps compatibility across synchronized o8 version changes while source identity changes', () => {
+    const root = identityFixture();
+    const webBefore = collectReleaseBuildCacheIdentity(root, 'web');
+    const nativeBefore = collectReleaseBuildCacheIdentity(root, 'native');
+
+    for (const path of ['package.json', 'package-lock.json', 'src-tauri/Cargo.toml', 'src-tauri/Cargo.lock', 'src-tauri/tauri.conf.json']) {
+      const absolute = join(root, path);
+      writeFileSync(absolute, readFileSync(absolute, 'utf8').replaceAll('0.1.0', '0.1.1'));
+    }
+    commitFixtureChange(root);
+
+    const webAfter = collectReleaseBuildCacheIdentity(root, 'web');
+    const nativeAfter = collectReleaseBuildCacheIdentity(root, 'native');
+    expect(webAfter.compatibilitySha256).toBe(webBefore.compatibilitySha256);
+    expect(nativeAfter.compatibilitySha256).toBe(nativeBefore.compatibilitySha256);
+    expect(webAfter.sourceSha256).not.toBe(webBefore.sourceSha256);
+    expect(nativeAfter.sourceSha256).not.toBe(nativeBefore.sourceSha256);
+    expect(webAfter.entrySha256).not.toBe(webBefore.entrySha256);
+    expect(nativeAfter.entrySha256).not.toBe(nativeBefore.entrySha256);
+  });
+
+  it('changes native compatibility when a Cargo.lock dependency version changes', () => {
+    const root = identityFixture();
+    const before = collectReleaseBuildCacheIdentity(root, 'native');
+    const cargoLock = join(root, 'src-tauri', 'Cargo.lock');
+    writeFileSync(cargoLock, readFileSync(cargoLock, 'utf8').replace('name = "example"\nversion = "1.0.0"', 'name = "example"\nversion = "2.0.0"'));
+    commitFixtureChange(root);
+
+    expect(collectReleaseBuildCacheIdentity(root, 'native').compatibilitySha256)
+      .not.toBe(before.compatibilitySha256);
+  });
+
+  it('changes compatibility when non-version manifest data or Cargo features change', () => {
+    const manifestRoot = identityFixture();
+    const manifestBefore = collectReleaseBuildCacheIdentity(manifestRoot, 'native');
+    const tauriConfig = join(manifestRoot, 'src-tauri', 'tauri.conf.json');
+    writeFileSync(tauriConfig, readFileSync(tauriConfig, 'utf8').replace('com.o8.app', 'com.o8.changed'));
+    commitFixtureChange(manifestRoot);
+    expect(collectReleaseBuildCacheIdentity(manifestRoot, 'native').compatibilitySha256)
+      .not.toBe(manifestBefore.compatibilitySha256);
+
+    const featureRoot = identityFixture();
+    const featureBefore = collectReleaseBuildCacheIdentity(featureRoot, 'native');
+    const cargoToml = join(featureRoot, 'src-tauri', 'Cargo.toml');
+    writeFileSync(cargoToml, `${readFileSync(cargoToml, 'utf8')}\n[features]\ncache-test = []\n`);
+    commitFixtureChange(featureRoot);
+    expect(collectReleaseBuildCacheIdentity(featureRoot, 'native').compatibilitySha256)
+      .not.toBe(featureBefore.compatibilitySha256);
   });
 
   it('restores a verified compatible entry across changed source state', async () => {

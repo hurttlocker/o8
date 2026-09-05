@@ -17,6 +17,7 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
+import { normalizeReleaseBuildCacheRecipeInput } from './release-build-cache-version-normalizer.mjs';
 
 export const RELEASE_BUILD_CACHE_SCHEMA = 'o8/release-build-cache-entry/v1';
 export const RELEASE_BUILD_CACHE_RECEIPT_SCHEMA = 'o8/release-build-cache-receipt/v1';
@@ -61,6 +62,7 @@ const PHASE_CONFIG = Object.freeze({
       'scripts/tauri-prebuild.mjs',
       'scripts/lib/release-config.mjs',
       'scripts/lib/release-build-cache.mjs',
+      'scripts/lib/release-build-cache-version-normalizer.mjs',
       'patches',
     ],
     toolchains: [['node', process.execPath, ['--version']], ['npm', 'npm', ['--version']]],
@@ -74,6 +76,7 @@ const PHASE_CONFIG = Object.freeze({
       'scripts/build-speech-local.mjs',
       'scripts/tauri-prebuild.mjs',
       'scripts/lib/release-build-cache.mjs',
+      'scripts/lib/release-build-cache-version-normalizer.mjs',
     ],
     toolchains: [['swift', 'swift', ['--version']]],
   }),
@@ -94,6 +97,7 @@ const PHASE_CONFIG = Object.freeze({
       'scripts/tauri-build.mjs',
       'scripts/tauri-prebuild.mjs',
       'scripts/lib/release-build-cache.mjs',
+      'scripts/lib/release-build-cache-version-normalizer.mjs',
     ],
     toolchains: [
       ['cargo', 'cargo', ['--version']],
@@ -143,7 +147,11 @@ function collectInputFiles(root, relativePath, results) {
   const metadata = lstatSync(absolute);
   if (metadata.isSymbolicLink()) throw new Error(`cache recipe input is a symbolic link: ${relativePath}`);
   if (metadata.isFile()) {
-    results.push({ path: relativePath.split(sep).join('/'), sha256: sha256Text(readFileSync(absolute)) });
+    const normalizedPath = relativePath.split(sep).join('/');
+    results.push({
+      path: normalizedPath,
+      sha256: sha256Text(normalizeReleaseBuildCacheRecipeInput(normalizedPath, readFileSync(absolute))),
+    });
     return;
   }
   if (!metadata.isDirectory()) return;
