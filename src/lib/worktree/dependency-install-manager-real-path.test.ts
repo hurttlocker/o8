@@ -103,9 +103,10 @@ afterEach(() => {
 
 describe('managed creation dependency recipe real path', () => {
   it.skipIf(process.platform !== 'darwin')(
-    'reuses lifecycle-enabled APFS dependencies and falls back when the recipe changes',
+    'reuses lifecycle-disabled APFS dependencies and falls back when the recipe changes',
     async () => {
       const { repo, setup } = createFixture();
+      setup.installCommand = 'npm ci --prefer-offline --ignore-scripts';
       process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
       process.env.O8_APFS_COW_WORKSPACES = '1';
       process.env.O8_APFS_DEPENDENCY_IMAGES = '1';
@@ -128,7 +129,7 @@ describe('managed creation dependency recipe real path', () => {
         expect(first.dependencyMaterialization?.mode).toBe('native');
         const readyDeadline = Date.now() + 90_000;
         while (readDependencySeedImage(first.dependencyRecipeKey!)?.state !== 'ready') {
-          if (Date.now() >= readyDeadline) throw new Error('First lifecycle dependency image was not published.');
+          if (Date.now() >= readyDeadline) throw new Error('First lifecycle-disabled dependency image was not published.');
           await new Promise((resolve) => setTimeout(resolve, 100));
         }
 
@@ -141,23 +142,23 @@ describe('managed creation dependency recipe real path', () => {
         });
         createdIds.push(second.id);
         const reuseMs = Math.round(performance.now() - reuseStartedAt);
-        console.info(`[apfs-dependency-lifecycle] first=${coldMs}ms reuse=${reuseMs}ms`);
+        console.info(`[apfs-dependency-disabled] first=${coldMs}ms reuse=${reuseMs}ms`);
         expect(second.dependencyMaterialization).toMatchObject({
           mode: 'image',
           recipeKey: first.dependencyRecipeKey,
         });
         const secondNodeModules = path.join(second.path, 'node_modules');
         expect(lstatSync(secondNodeModules).isSymbolicLink()).toBe(false);
-        expectPostinstallSentinel(second.path);
-        expect(execFileSync(
-          path.join(second.path, 'node_modules', '.bin', 'fixture-gate'),
-          { encoding: 'utf8' },
-        ).trim()).toBe('ready');
-        writeFileSync(
+        expect(existsSync(
           path.join(second.path, 'node_modules', 'postinstall-private', 'sentinel'),
+        )).toBe(false);
+        writeFileSync(
+          path.join(second.path, 'node_modules', 'second-only-mutation'),
           'second-only-mutation\n',
         );
-        expectPostinstallSentinel(first.path);
+        expect(existsSync(
+          path.join(first.path, 'node_modules', 'second-only-mutation'),
+        )).toBe(false);
 
         const manifestPath = path.join(repo, 'package.json');
         const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
@@ -165,9 +166,6 @@ describe('managed creation dependency recipe real path', () => {
           scripts: Record<string, string>;
         };
         manifest.version = '1.0.1';
-        manifest.scripts.postinstall = manifest.scripts.postinstall.replace(
-          'workspace-private', 'recipe-changed',
-        );
         writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`);
         execFileSync('npm', ['install', '--package-lock-only', '--ignore-scripts'], {
           cwd: repo,
@@ -184,7 +182,16 @@ describe('managed creation dependency recipe real path', () => {
         createdIds.push(fallback.id);
         expect(fallback.dependencyMaterialization?.mode).toBe('native');
         expect(fallback.dependencyRecipeKey).not.toBe(first.dependencyRecipeKey);
-        expectPostinstallSentinel(fallback.path, 'recipe-changed');
+        expect(existsSync(
+          path.join(fallback.path, 'node_modules', 'postinstall-private', 'sentinel'),
+        )).toBe(false);
+        const fallbackReadyDeadline = Date.now() + 90_000;
+        while (readDependencySeedImage(fallback.dependencyRecipeKey!)?.state !== 'ready') {
+          if (Date.now() >= fallbackReadyDeadline) {
+            throw new Error('Changed lifecycle-disabled dependency image was not published.');
+          }
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
       } finally {
         let cleanupError: unknown;
         for (const id of createdIds.reverse()) {

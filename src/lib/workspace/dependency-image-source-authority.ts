@@ -137,10 +137,11 @@ export async function digestDependencyTree(root: string): Promise<string> {
 function assertEligibleRecipe(recipe: DependencyInstallRecipe): void {
   if (recipe.packageManager !== 'npm'
     || recipe.lockfile.path !== 'package-lock.json'
+    || recipe.lifecycleScripts !== 'disabled'
     || recipe.localDependencyDigests.length !== 0
     || recipe.installArgs.includes('--workspaces')) {
     throw new DependencyImageRefusalError(
-      'The APFS dependency image pilot requires npm, package-lock.json, and no local or workspace dependencies.',
+      'The APFS dependency image pilot requires npm, package-lock.json, disabled lifecycle scripts, and no local or workspace dependencies.',
     );
   }
 }

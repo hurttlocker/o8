@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import {
   existsSync,
   linkSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -550,6 +551,18 @@ describe('package-manager-native dependency install contract', { timeout: 30_000
     expect(cachePaths[1]).not.toBe(cachePaths[0]);
     expect(cachePaths[0]).toContain(first.recipe.key);
     expect(cachePaths[1]).toContain(second.recipe.key);
+  });
+
+  it('creates a private empty dependency view after a successful no-dependency install', async () => {
+    const workspace = fixture('npm');
+    const receipt = await runDependencyInstall(workspace, commands.npm, {
+      cacheRoot: path.join(workspace, '.recipe-cache'),
+      resolveVersion: async () => versions.npm,
+      run: async () => {},
+    });
+
+    expect(receipt.privateViewVerified).toBe(true);
+    expect(lstatSync(path.join(workspace, 'node_modules')).isDirectory()).toBe(true);
   });
 
   it('shares only the native cache across concurrent installs of one recipe', async () => {

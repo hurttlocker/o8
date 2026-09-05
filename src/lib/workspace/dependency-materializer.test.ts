@@ -406,23 +406,9 @@ describe('dependency materializer policy boundary', () => {
     expect(detach).toHaveBeenCalledWith('post-mount-lease', { registryRoot: undefined });
   });
 
-  it('replays lifecycle hooks after an exact lifecycle-enabled image mount', async () => {
+  it('keeps lifecycle-enabled npm recipes on the native path without image lookup', async () => {
     const workspace = fixture();
-    const imageProvider = provider({
-      lookupReadyImage: vi.fn(async ({ recipe }) => ({
-        status: 'ready' as const,
-        authority: { recipeKey: recipe.key, generation: 'lifecycle-generation' },
-      })),
-      mount: vi.fn(async ({ workspacePath, recipe }) => {
-        mkdirSync(path.join(workspacePath, 'node_modules', 'fixture'), { recursive: true });
-        writeFileSync(path.join(workspacePath, 'node_modules', 'fixture', 'index.js'), 'mounted\n');
-        return {
-          leaseId: 'lifecycle-lease',
-          recipeKey: recipe.key,
-          generation: 'lifecycle-generation',
-        };
-      }),
-    });
+    const imageProvider = provider();
     const materializerOptions = options(imageProvider);
     const result = await materializeDependencyInstall(
       workspace,
@@ -430,11 +416,9 @@ describe('dependency materializer policy boundary', () => {
       materializerOptions,
     );
 
-    expect(result.receipt.mode).toBe('image');
-    expect(imageProvider.lookupReadyImage).toHaveBeenCalledTimes(1);
-    expect(materializerOptions.run).toHaveBeenCalledWith(expect.objectContaining({
-      args: ['rebuild'],
-    }));
+    expect(result.receipt.mode).toBe('native');
+    expect(imageProvider.lookupReadyImage).not.toHaveBeenCalled();
+    expect(queueDependencyImagePublication(workspace, result.receipt)).toBeNull();
   }, 15_000);
 
   it('adopts a crash-replayed prepared receipt before the workspace returns to mounted', async () => {

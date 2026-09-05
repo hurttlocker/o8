@@ -29,7 +29,6 @@ import {
   type DependencyInstallRecipe,
   type DependencyInstallReceipt,
 } from './dependency-install';
-import { replayDependencyLifecycle } from './dependency-lifecycle-replay';
 import { resolveApfsDependencyImagesOverride } from './dependency-image-policy';
 
 export { APFS_DEPENDENCY_IMAGES_ENV } from './dependency-image-policy';
@@ -151,6 +150,7 @@ export async function isDependencyImageRecipeEligible(
   return recipe.packageManager === 'npm'
     && recipe.installArgs[0] === 'ci'
     && recipe.lockfile.path === 'package-lock.json'
+    && recipe.lifecycleScripts === 'disabled'
     && recipe.localDependencyDigests.length === 0
     && !recipe.installArgs.includes('--workspaces')
     && packageManifestInputs.length === 1
@@ -470,15 +470,6 @@ export async function materializeDependencyInstall(
       );
     }
     await auditPrivateDependencyView(workspace);
-    if (recipe.lifecycleScripts === 'enabled') {
-      await replayDependencyLifecycle(workspace, recipe, {
-        run: options.run,
-        resolveVersion: options.resolveVersion,
-        cacheRoot: options.cacheRoot,
-        now: options.now,
-        materializationIdentity: options.materializationIdentity,
-      });
-    }
     await dependencyMaterializationWorkspaceIdentity(workspace, {
       canonicalPath: workspace,
       device: identity.device,
