@@ -346,6 +346,10 @@ export type LaneEventVerb =
   // An owned runtime child exited. Payload includes exit code/signal, stderr,
   // and whether the runtime emitted its protocol-level result event.
   | 'runtime_process_exit'
+  // Packet stop settled its separately owned `o8 run` process trees, or could
+  // not prove one of them dead. Payload: { packetId, targeted, confirmed, failures? }
+  | 'managed_runs_stopped'
+  | 'managed_run_stop_failed'
   // A native worker failed its isolated-config authentication preflight.
   | 'worker_not_authenticated'
   // An opted-in macOS worker sandbox blocked a concrete resource. Payload:

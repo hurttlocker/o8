@@ -59,6 +59,7 @@ import { withRepoActionRecovery } from '@/lib/lane/repo-action-lock';
 import { materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
 import { persistLanePacketHold } from '@/lib/lane/packet-stop-hold';
 import { killLaneSessionsConfirmed } from '@/lib/lane/reap-sessions';
+import { terminatePacketManagedRuns } from '@/lib/runtimes/managed-runs/packet-lifecycle';
 import {
   withWorkspaceMaterializedMutation,
   WorkspaceMutationUnavailableError,
@@ -336,6 +337,38 @@ async function dispatchUnlocked(
           note: `Stop guard is held, but the live worker did not exit: ${stopNote}`,
           lane: getLane(command.laneId) ?? undefined,
         };
+      }
+
+      // `o8 packet stop` and mission stop both enter through this lane command
+      // path. A packet-owned `o8 run --detach` lives in its own tmux process
+      // tree, so confirming only the worker session would leave that workload
+      // running against a held packet. Settle the packet-bound runs after the
+      // worker can no longer register new ones, while preserving runs owned by
+      // sibling packets.
+      if (lane.packetId) {
+        const managedRuns = await terminatePacketManagedRuns(lane.packetId);
+        if (managedRuns.failures.length > 0) {
+          appendEvent(command.laneId, 'managed_run_stop_failed', actor, {
+            packetId: lane.packetId,
+            targeted: managedRuns.targeted,
+            confirmed: managedRuns.confirmed,
+            failures: managedRuns.failures,
+          });
+          setLaneStatus(command.laneId, 'paused', actor, 'managed_run_stop_failed');
+          return {
+            ok: false,
+            laneId: command.laneId,
+            note: `Agent stopped, but ${managedRuns.failures.length} packet-managed run${managedRuns.failures.length === 1 ? '' : 's'} could not be confirmed dead. The packet remains held.`,
+            lane: getLane(command.laneId) ?? undefined,
+          };
+        }
+        if (managedRuns.confirmed > 0) {
+          appendEvent(command.laneId, 'managed_runs_stopped', actor, {
+            packetId: lane.packetId,
+            targeted: managedRuns.targeted,
+            confirmed: managedRuns.confirmed,
+          });
+        }
       }
 
       setLaneStatus(command.laneId, 'paused', actor, 'operator_stopped');
