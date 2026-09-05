@@ -2442,6 +2442,14 @@
       ]
     },
     {
+      "path": "tests/symon-mcp-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/symon-text-say-loop.test.ts",
       "reasons": [
         "child-process",

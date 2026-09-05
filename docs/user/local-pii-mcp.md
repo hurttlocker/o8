@@ -29,6 +29,7 @@ The model package comes from an index run by its authors, not PyPI. Pin the vers
    - **Env (optional):** `PAW_PII_PLACEHOLDER=[PII]`, `PAW_PII_PROGRAM_ID=…`
 3. Enable the server.
 4. Toggle **Attach to supported workers** so codex/claude-code packet workers receive the same stdio MCP (`workerInjection`).
+5. Toggle **Attach to Symon** separately if voice conversations should see these tools; every Symon call still shows the normal confirmation card.
 
 Enabled externals are assembled into the tool-spine for Claude/Codex orchestrator surfaces automatically (`src/lib/mcp/tool-spine/build.ts`).
 

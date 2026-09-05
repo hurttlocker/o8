@@ -213,6 +213,7 @@ describe('realtime-session-config — shared assembler', () => {
         },
       })),
       { type: 'function', name: 'spotify_play' },
+      { type: 'function', name: 'mcp__fixture__echo' },
       { type: 'function', name: 'o8_status', duplicate: true },
     ];
 
@@ -223,6 +224,7 @@ describe('realtime-session-config — shared assembler', () => {
     expect(selection.tools.map((tool) => tool.name)).toContain('symon_execute_plan');
     expect(selection.tools.map((tool) => tool.name)).not.toContain('send_email');
     expect(selection.tools.map((tool) => tool.name)).not.toContain('spotify_play');
+    expect(selection.tools.map((tool) => tool.name)).not.toContain('mcp__fixture__echo');
     for (const tool of selection.tools) {
       const parameters = tool.parameters as {
         properties: Record<string, unknown>;

@@ -524,6 +524,7 @@ export const externalMcpServers = sqliteTable('external_mcp_servers', {
   oauthToken: text('oauth_token'),
   enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
   workerInjection: integer('worker_injection', { mode: 'boolean' }).notNull().default(false),
+  symonInjection: integer('symon_injection', { mode: 'boolean' }).notNull().default(false),
   createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
   updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
 }, (table) => ({

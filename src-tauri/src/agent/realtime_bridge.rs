@@ -376,6 +376,37 @@ mod tests {
     }
 
     #[test]
+    fn realtime_attached_mcp_tool_stops_at_the_confirmation_gate() {
+        let data_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join(format!("realtime-mcp-gate-seam-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&data_dir);
+        std::fs::create_dir_all(&data_dir).unwrap();
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let result = super::super::store::with_test_data_dir(data_dir.clone(), || {
+            runtime
+                .block_on(realtime_invoke_tool_inner(
+                    None,
+                    "mcp__fixture__echo".to_string(),
+                    json!({ "value": "hello" }),
+                    Some("desktop-mcp-gate".to_string()),
+                    Some("mcp-call".to_string()),
+                    Some("use the connected server".to_string()),
+                    None,
+                ))
+                .unwrap()
+        });
+
+        assert_eq!(result["declined_by_user"], true);
+        assert_eq!(result["confirmation_outcome"], "rejected");
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
     fn realtime_command_persists_phone_utterance_and_session() {
         let data_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("target")

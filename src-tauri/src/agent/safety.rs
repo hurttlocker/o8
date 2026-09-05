@@ -329,4 +329,12 @@ mod tests {
         assert!(requires_individual_plan_confirmation("mac_shortcuts_run"));
         assert!(!requires_individual_plan_confirmation("mac_reminders_create"));
     }
+
+    #[test]
+    fn attached_mcp_tools_default_to_destructive() {
+        assert_eq!(
+            tool_safety_class("mcp__fixture__echo"),
+            SafetyClass::Destructive
+        );
+    }
 }

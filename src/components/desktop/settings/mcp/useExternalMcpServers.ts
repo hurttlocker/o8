@@ -7,6 +7,7 @@ import {
   type ExternalMcpServer,
 } from './shared';
 import { isNpxFamily } from '@/lib/mcp/npx-detection';
+import { isTauri } from '@/lib/tauri/bridge';
 
 export interface McpServerTestOutcome {
   ok: boolean;
@@ -38,6 +39,7 @@ export interface UseExternalMcpServersResult {
   }) => Promise<boolean>;
   toggle: (server: ExternalMcpServer) => Promise<void>;
   toggleWorkerInjection: (server: ExternalMcpServer) => Promise<void>;
+  toggleSymonInjection: (server: ExternalMcpServer) => Promise<void>;
   remove: (server: ExternalMcpServer) => Promise<void>;
   testingId: string | null;
   /** True when the in-flight test is for an npx-family command (extended timeout). */
@@ -191,6 +193,40 @@ export function useExternalMcpServers(): UseExternalMcpServersResult {
     }
   }, [load]);
 
+  const toggleSymonInjection = useCallback(async (server: ExternalMcpServer) => {
+    setActionId(server.id);
+    setNote(null);
+    try {
+      const res = await fetch('/api/setup/mcp-servers', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: server.id, symonInjection: !server.symonInjection }),
+      });
+      const body = await res.json().catch(() => ({})) as { error?: string };
+      if (!res.ok) {
+        throw new Error(body.error || 'Failed to update Symon attachment');
+      }
+      let refreshDeferred = false;
+      if (isTauri()) {
+        try {
+          const { invoke } = await import('@tauri-apps/api/core');
+          await invoke('symon_mcp_refresh');
+        } catch {
+          refreshDeferred = true;
+        }
+      }
+      setNote({
+        message: `${server.name} ${server.symonInjection ? 'detached from' : 'attached to'} Symon.${refreshDeferred ? ' The catalog refresh will retry automatically.' : ''}`,
+        ok: true,
+      });
+      await load();
+    } catch (e) {
+      setNote({ message: e instanceof Error ? e.message : 'Failed to update Symon attachment.', ok: false });
+    } finally {
+      setActionId(null);
+    }
+  }, [load]);
+
   const remove = useCallback(async (server: ExternalMcpServer) => {
     setActionId(server.id);
     setNote(null);
@@ -268,6 +304,7 @@ export function useExternalMcpServers(): UseExternalMcpServersResult {
     createServer,
     toggle,
     toggleWorkerInjection,
+    toggleSymonInjection,
     remove,
     testingId,
     testingNpxFamily,

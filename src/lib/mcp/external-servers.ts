@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { asc, eq } from 'drizzle-orm';
 import { externalMcpServers, getDb } from '@/lib/db';
+import { invalidateSymonMcpToolCache } from '@/lib/mcp/symon-tools-cache';
 
 export type ExternalMcpTransport = 'stdio' | 'http';
 
@@ -23,6 +24,7 @@ export interface ExternalMcpServerRecord {
   oauthToken: string | null;
   enabled: boolean;
   workerInjection: boolean;
+  symonInjection: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -41,11 +43,13 @@ export interface InsertExternalMcpServerInput {
   oauthToken?: string | null;
   enabled?: boolean;
   workerInjection?: boolean;
+  symonInjection?: boolean;
 }
 
 export interface UpdateExternalMcpServerInput {
   enabled?: boolean;
   workerInjection?: boolean;
+  symonInjection?: boolean;
 }
 
 interface ExternalMcpServerRow {
@@ -60,6 +64,7 @@ interface ExternalMcpServerRow {
   oauthToken: string | null;
   enabled: boolean;
   workerInjection: boolean;
+  symonInjection: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -237,6 +242,7 @@ export function insertExternalMcpServer(input: InsertExternalMcpServerInput): Ex
     oauthToken: input.oauthToken?.trim() || null,
     enabled: input.enabled ?? true,
     workerInjection: input.transport === 'stdio' && input.workerInjection === true,
+    symonInjection: input.symonInjection === true,
     createdAt: now,
     updatedAt: now,
   }).run();
@@ -245,6 +251,7 @@ export function insertExternalMcpServer(input: InsertExternalMcpServerInput): Ex
   if (!row) {
     throw new Error('Failed to create MCP server');
   }
+  invalidateSymonMcpToolCache();
   return toRecord(row as ExternalMcpServerRow);
 }
 
@@ -267,11 +274,12 @@ export function updateExternalMcpServer(
     throw new Error('Worker attachment is supported only for stdio MCP servers');
   }
 
-  const updates: Partial<Pick<ExternalMcpServerRow, 'enabled' | 'workerInjection' | 'updatedAt'>> = {
+  const updates: Partial<Pick<ExternalMcpServerRow, 'enabled' | 'workerInjection' | 'symonInjection' | 'updatedAt'>> = {
     updatedAt: now,
   };
   if (typeof input.enabled === 'boolean') updates.enabled = input.enabled;
   if (typeof input.workerInjection === 'boolean') updates.workerInjection = input.workerInjection;
+  if (typeof input.symonInjection === 'boolean') updates.symonInjection = input.symonInjection;
   const result = db.update(externalMcpServers)
     .set(updates)
     .where(eq(externalMcpServers.id, id))
@@ -282,6 +290,7 @@ export function updateExternalMcpServer(
   }
 
   const row = db.select().from(externalMcpServers).where(eq(externalMcpServers.id, id)).get();
+  invalidateSymonMcpToolCache();
   return row ? toRecord(row as ExternalMcpServerRow) : null;
 }
 
@@ -290,6 +299,7 @@ export function removeExternalMcpServer(id: string): boolean {
   const result = db.delete(externalMcpServers)
     .where(eq(externalMcpServers.id, id))
     .run();
+  if ((result.changes ?? 0) > 0) invalidateSymonMcpToolCache();
   return (result.changes ?? 0) > 0;
 }
 

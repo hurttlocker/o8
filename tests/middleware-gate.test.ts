@@ -548,6 +548,13 @@ describe('panelGateMiddleware — per-device capability scope', () => {
     expect(deviceRequest(pathname, method).status).toBe(200);
   });
 
+  it.each([
+    ['/api/symon/mcp/tools', 'GET'],
+    ['/api/symon/mcp/call', 'POST'],
+  ])('refuses paired devices direct access to Symon MCP tools: %s', (pathname, method) => {
+    expect(deviceRequest(pathname, method).status).toBe(403);
+  });
+
   it('allows the Ask generative-surface stream to enrolled devices', () => {
     // The o8/Life "Ask" surface streams from /api/mobile/genui/stream; it was
     // absent from the device allowlist, so a paired phone got a 403 "Device
