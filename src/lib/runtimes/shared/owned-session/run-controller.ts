@@ -627,7 +627,8 @@ export function createOwnedRunController({
       // the spawned process cwd. Keep both values aligned so a worker cannot
       // silently operate in the o8 server's own checkout.
       PWD: session.repoPath,
-      PATH: pathWithNodeRuntime(), NODE_ENV: 'development' as const,
+      PATH: pathWithNodeRuntime(),
+      NODE_ENV: 'development' as const,
       FORCE_COLOR: '0',
       NO_COLOR: '1',
       // Workers must never pop an OS browser: dev servers (CRA, storybook)
@@ -640,7 +641,6 @@ export function createOwnedRunController({
       ...(session.packetId ? { O8_WORKER_PACKET_ID: session.packetId } : {}),
       ...sandboxEnvExtra,
     };
-
     await ensureDispatchBackendReady(runtimeId, mode);
     const durableSession = await io.findSession(session.surfaceId);
     if (!durableSession) throw new Error('Owned session disappeared before its run could start.');
