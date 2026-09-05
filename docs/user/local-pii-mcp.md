@@ -16,9 +16,11 @@ pip install programasweights --extra-index-url https://pypi.programasweights.com
 python -m paw_pii.mcp_server   # stdio MCP: detect_pii, redact_pii
 ```
 
+The model package comes from an index run by its authors, not PyPI. Pin the version you tested and review that index before installing. The server is meant to run inference on-device; confirm it makes no network calls in your environment before trusting it with real transcripts.
+
 ## Register in Settings
 
-1. **Settings → MCP → Add external server**
+1. **Settings → MCP → add a server**
 2. Fields:
    - **Name:** `paw-pii` (pattern `^[A-Za-z0-9_-]+$`)
    - **Transport:** stdio
@@ -32,9 +34,11 @@ Enabled externals are assembled into the tool-spine for Claude/Codex orchestrato
 
 ## Register via API
 
+o8 picks its API port at launch and writes it to `~/.o8/api-port`. Calls from loopback need no bearer token. A non-loopback client must send `Authorization: Bearer $(cat ~/.o8/ws-token)`.
+
 ```bash
-curl -sS -X POST "http://127.0.0.1:3000/api/setup/mcp-servers" \
-  -H "Authorization: Bearer $O8_TOKEN" \
+O8_PORT=$(cat ~/.o8/api-port)
+curl -sS -X POST "http://127.0.0.1:${O8_PORT}/api/setup/mcp-servers" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "paw-pii",
@@ -63,4 +67,4 @@ curl -sS -X POST "http://127.0.0.1:3000/api/setup/mcp-servers" \
 - `src/lib/mcp/tool-spine/build.ts` — catalog assembly
 - `docs/user/operator-mcp-bridge.md` — operator MCP
 - `docs/internals/runtime-adapter-contract.md` — worker MCP injection
-- Issue tracking first-class follow-ups: see the linked GitHub issue on this PR
+- Follow-ups (builtin promotion, automatic pre-LLM scrub): [#2074](https://github.com/hurttlocker/o8/issues/2074)
