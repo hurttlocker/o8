@@ -551,8 +551,8 @@ describe('panelGateMiddleware — per-device capability scope', () => {
   it.each([
     ['/api/symon/mcp/tools', 'GET'],
     ['/api/symon/mcp/call', 'POST'],
-  ])('allows paired devices to use attached Symon MCP tools: %s', (pathname, method) => {
-    expect(deviceRequest(pathname, method).status).toBe(200);
+  ])('refuses paired devices direct access to Symon MCP tools: %s', (pathname, method) => {
+    expect(deviceRequest(pathname, method).status).toBe(403);
   });
 
   it('allows the Ask generative-surface stream to enrolled devices', () => {

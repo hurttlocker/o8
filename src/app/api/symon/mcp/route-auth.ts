@@ -9,7 +9,7 @@ export function authorizeSymonMcpRoute(request: Request): NextResponse | null {
       { status: 403 },
     );
   }
-  if (principal !== 'operator' && principal !== 'device') {
+  if (principal !== 'operator') {
     return NextResponse.json({ ok: false, error: 'Unauthorized.' }, { status: 401 });
   }
   return null;

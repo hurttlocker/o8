@@ -861,11 +861,11 @@ function ensureTables(sqlite: Database.Database): void {
       env_json TEXT,
       url TEXT,
       oauth_token TEXT,
-      enabled INTEGER NOT NULL DEFAULT 1, symon_injection INTEGER NOT NULL DEFAULT 0,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      symon_injection INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
-
     CREATE UNIQUE INDEX IF NOT EXISTS idx_github_prs_repo_number ON github_pull_requests(repo_full_name, number);
 
     -- Indexes for common queries

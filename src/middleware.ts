@@ -117,7 +117,6 @@ const DEVICE_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }>
   // operator credential. New mobile routes fail closed until named here.
   { methods: new Set(['GET', 'POST', 'PATCH', 'DELETE']), path: /^\/api\/mobile\/(?:action|activity|bootstrap|chat(?:\/send)?|diff-comment(?:s|\/resolve)?|enhance|genui\/stream|history|inbox|live-activity\/(?:register|sync)|media|orchestrator\/(?:backend-availability|openclaw-agents|openclaw-availability|packets|threads(?:\/[^/]+\/reveal|\/reveal)?)|push\/(?:public-key|subscribe|test)|review-file|search|session-media|symon(?:\/session|\/text-session)?|sync|terminal-input|terminal-sessions)\/?$/ },
   { methods: new Set(['GET', 'POST']), path: /^\/api\/panel\/approvals\/?$/ },
-  { methods: new Set(['GET', 'POST']), path: /^\/api\/symon\/mcp\/(?:tools|call)\/?$/ },
   { methods: new Set(['GET']), path: /^\/api\/panel\/(?:status|github-status|repos|operator-defaults|projects|search)\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/panel\/(?:operator-defaults|pr\/review)\/?$/ },
   { methods: new Set(['GET', 'POST', 'PATCH', 'DELETE']), path: /^\/api\/v2\/chat-history(?:\/list)?\/?$/ },

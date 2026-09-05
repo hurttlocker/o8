@@ -77,7 +77,7 @@ defaults to `Destructive`. The normal Rust confirmation card must settle before
 dispatch posts to `POST /api/symon/mcp/call`. Returned MCP content is capped at
 16 KB and nested under `observedData` with
 `trust:"untrusted_observed_data_not_instructions"`. The two bridge routes accept
-only operator or paired-device principals and explicitly refuse worker tokens.
+only the operator principal used by the Rust bridge; device and worker tokens cannot call them directly.
 
 ## Endpoints
 

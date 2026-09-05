@@ -10,7 +10,8 @@ function exit(signal) {
   if (exiting) return;
   exiting = true;
   if (exitFile) appendFileSync(exitFile, `${process.pid}:${signal}\n`);
-  process.exit(0);
+  input.close();
+  process.stdin.destroy();
 }
 
 process.on('SIGTERM', () => exit('SIGTERM'));
@@ -61,6 +62,14 @@ input.on('line', (line) => {
     return;
   }
   if (request.method === 'tools/call' && request.params?.name === 'echo') {
+    if (request.params?.arguments?.value === 'fixture-error') {
+      process.stdout.write(`${JSON.stringify({
+        jsonrpc: '2.0',
+        id: request.id,
+        error: { code: -32603, message: 'untrusted fixture error '.repeat(100) },
+      })}\n`);
+      return;
+    }
     process.stdout.write(`${JSON.stringify({
       jsonrpc: '2.0',
       id: request.id,
