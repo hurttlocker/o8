@@ -619,9 +619,10 @@ function nativeInvocation(
   authority: RecipeCacheAuthority,
   runtime: InstallRuntimePaths,
   executable: string,
+  args = recipe.installArgs,
 ): DependencyInstallInvocation {
   const env = isolatedInstallEnvironment(runtime);
-  const args = [...recipe.installArgs];
+  const invocationArgs = [...args];
   if (recipe.packageManager === 'npm') {
     env.npm_config_cache = authority.cache;
     env.npm_config_userconfig = runtime.emptyUserConfig;
@@ -630,7 +631,7 @@ function nativeInvocation(
   } else if (recipe.packageManager === 'pnpm') {
     env.npm_config_userconfig = runtime.emptyUserConfig;
     env.npm_config_globalconfig = runtime.emptyGlobalConfig;
-    args.push('--store-dir', authority.cache, '--package-import-method=copy');
+    invocationArgs.push('--store-dir', authority.cache, '--package-import-method=copy');
   } else if (recipe.packageManager === 'yarn') {
     env.YARN_CACHE_FOLDER = authority.cache;
     env.YARN_ENABLE_GLOBAL_CACHE = 'true';
@@ -641,7 +642,7 @@ function nativeInvocation(
   }
   return {
     command: executable,
-    args,
+    args: invocationArgs,
     cwd: workspacePath,
     timeoutMs: 45 * 60_000,
     env,
@@ -766,6 +767,18 @@ export async function runDependencyInstall(
   } finally {
     await retireInstallRuntime(runtime, options.afterRuntimeTreeCapture);
   }
+}
+export async function replayDependencyLifecycle(workspacePath: string, recipe: DependencyInstallRecipe, options: DependencyInstallOptions = {}): Promise<void> {
+  if (recipe.packageManager !== 'npm' || recipe.installArgs[0] !== 'ci' || recipe.lifecycleScripts !== 'enabled') throw new Error('Dependency lifecycle replay requires an enabled npm ci recipe.');
+  const authority = await ensureRecipeAuthority(path.resolve(options.cacheRoot ?? dependencyCacheRoot()), recipe);
+  const execution = await resolveReceiptedPackageManagerExecution(recipe.packageManager, recipe.packageManagerVersion, Boolean(options.resolveVersion));
+  const materializationIdentity = options.materializationIdentity ?? await captureWorktreeMaterializationIdentity(workspacePath);
+  const runtime = await createInstallRuntime(workspacePath, materializationIdentity);
+  try { const invocation = nativeInvocation(workspacePath, recipe, authority, runtime, execution.executable, ['rebuild']);
+    if (options.run) await options.run(invocation);
+    else await defaultRun(invocation, options.materializationIdentity);
+    await auditPrivateDependencyView(workspacePath);
+  } finally { await retireInstallRuntime(runtime, options.afterRuntimeTreeCapture); }
 }
 
 export async function measureDependencyTreeBytes(workspacePath: string): Promise<number> {

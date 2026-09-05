@@ -24,6 +24,7 @@ import { normalizedNamespacePath } from './dependency-image-device-authority';
 import {
   auditPrivateDependencyView,
   deriveDependencyInstallRecipe,
+  replayDependencyLifecycle,
   runDependencyInstall,
   type DependencyInstallOptions,
   type DependencyInstallRecipe,
@@ -150,7 +151,6 @@ export async function isDependencyImageRecipeEligible(
   return recipe.packageManager === 'npm'
     && recipe.installArgs[0] === 'ci'
     && recipe.lockfile.path === 'package-lock.json'
-    && recipe.lifecycleScripts === 'disabled'
     && recipe.localDependencyDigests.length === 0
     && !recipe.installArgs.includes('--workspaces')
     && packageManifestInputs.length === 1
@@ -367,10 +367,23 @@ export async function materializeDependencyInstall(
   }
 
   const provider = options.provider ?? APFS_DEPENDENCY_IMAGE_PROVIDER;
-  const availability = await provider.lookupReadyImage({
-    recipe,
-    registryRoot: options.imageRegistryRoot,
-  });
+  let availability: Awaited<ReturnType<DependencyImageProvider['lookupReadyImage']>>;
+  try {
+    availability = await provider.lookupReadyImage({
+      recipe,
+      registryRoot: options.imageRegistryRoot,
+    });
+  } catch (error) {
+    if (imageRequired) {
+      throw new DependencyMaterializationRefusalError(
+        `Exact dependency image remount lost ready-image authority: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
+    }
+    return runNativeMaterialization(
+      workspace, installCommand, recipe, identity, options, false,
+    );
+  }
   if (availability.status === 'missing') {
     if (imageRequired) {
       throw new DependencyMaterializationRefusalError(
@@ -382,6 +395,11 @@ export async function materializeDependencyInstall(
     );
   }
   if (availability.authority.recipeKey !== recipe.key) {
+    if (!imageRequired) {
+      return runNativeMaterialization(
+        workspace, installCommand, recipe, identity, options, false,
+      );
+    }
     throw new DependencyMaterializationRefusalError(
       'Ready dependency-image authority does not match the exact install recipe.',
     );
@@ -452,6 +470,15 @@ export async function materializeDependencyInstall(
       );
     }
     await auditPrivateDependencyView(workspace);
+    if (recipe.lifecycleScripts === 'enabled') {
+      await replayDependencyLifecycle(workspace, recipe, {
+        run: options.run,
+        resolveVersion: options.resolveVersion,
+        cacheRoot: options.cacheRoot,
+        now: options.now,
+        materializationIdentity: options.materializationIdentity,
+      });
+    }
     await dependencyMaterializationWorkspaceIdentity(workspace, {
       canonicalPath: workspace,
       device: identity.device,
@@ -469,6 +496,11 @@ export async function materializeDependencyInstall(
           { cause: error },
         );
       }
+    }
+    if (!imageRequired) {
+      return runNativeMaterialization(
+        workspace, installCommand, recipe, identity, options, false,
+      );
     }
     throw new DependencyMaterializationRefusalError(
       `Dependency image mount was refused: ${error instanceof Error ? error.message : String(error)}`,
