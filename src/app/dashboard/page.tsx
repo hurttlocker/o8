@@ -49,7 +49,6 @@ import { WorkspaceBootLoaderHost } from '@/components/desktop/workspace-terminal
 import { SpawnErrorToast } from '@/components/desktop/SpawnErrorToast';
 import { captureAnomaly } from '@/lib/telemetry/sentry-browser';
 import { recordSpawnEvent } from '@/lib/feedback/workspace-introspect';
-import { ThemeLab } from '@/components/desktop/dev/ThemeLab';
 import { RealtimeVoiceHost } from '@/components/desktop/dictation/RealtimeVoiceHost';
 import { SymonTextBridgeHost } from '@/components/desktop/dictation/SymonTextBridgeHost';
 import { NarrationSpeakerHost } from '@/components/desktop/dictation/NarrationSpeakerHost';
@@ -180,10 +179,11 @@ const LazyKeyboardShortcutsOverlay = retryingLazy(() => import('@/components/des
 const LazyDesignModeOverlay = retryingLazy(() => import('@/components/desktop/DesignModeOverlay').then(m => ({ default: m.DesignModeOverlay })), { label: 'Design mode' });
 const LazyO8ElementPanel = retryingLazy(() => import('@/components/desktop/O8ElementPanel').then(m => ({ default: m.O8ElementPanel })), { label: 'Element panel' });
 const LazyO8Panel = retryingLazy(() => import('@/components/desktop/O8Panel').then(m => ({ default: m.O8Panel })), { label: 'o8 panel' });
+const LazyThemeLab = retryingLazy(() => import('@/components/desktop/dev/ThemeLab').then(m => ({ default: m.ThemeLab })), { label: 'Theme lab' });
 // #888/#895 — packet-mode right panel (Spec / Agent Overview / Changes).
 import { OrchestratorDataProvider } from '@/components/desktop/orchestrator-data-context';
 import { useMissionCompleteDetector } from '@/components/desktop/thoughts/mission-complete-detector';
-import { ReviewPanel } from '@/components/desktop/review/ReviewPanel';
+const LazyReviewPanel = retryingLazy(() => import('@/components/desktop/review/ReviewPanel').then(m => ({ default: m.ReviewPanel })), { label: 'Review panel' });
 import { TileContainer } from '@/components/desktop/TileContainer';
 import { DashboardHydrationMarker } from './DashboardHydrationMarker';
 import {
@@ -4820,7 +4820,11 @@ function DashboardInner() {
     <DictationHost>
       <AttendanceHeartbeat />
       <FileOpenBridge onOpenFile={handleOpenFileInWorkspace} />
-      <ThemeLab />
+      {process.env.NODE_ENV === 'development' ? (
+        <Suspense fallback={null}>
+          <LazyThemeLab />
+        </Suspense>
+      ) : null}
       <UiZoomLayer />
       <RealtimeVoiceHost />
       <SymonTextBridgeHost />
@@ -5644,7 +5648,7 @@ function DashboardInner() {
                         onSelectedPacketChange={setSelectedPacketId}
             onOpenO8Panel={handleOpenO8Panel}
                       >
-                        <ReviewPanel repoPath={currentO8RepoPath} selectedFile={scopedO8SelectedFile} reviewLaneId={o8ReviewLaneId} />
+                        <LazyReviewPanel repoPath={currentO8RepoPath} selectedFile={scopedO8SelectedFile} reviewLaneId={o8ReviewLaneId} />
                       </OrchestratorDataProvider>
                     </Suspense>
                   </motion.div>
