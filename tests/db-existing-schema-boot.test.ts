@@ -19,6 +19,9 @@ describe('existing database boot migration', () => {
     const initialDb = await import('@/lib/db');
     initialDb.getSqlite();
     initialDb.closeDb();
+    // The top marker gates the boot migration; read the version rather than
+    // pinning it so a schema bump cannot silently turn this into a no-op run.
+    const topMarkerPath = join(dataDir, `.db-migrated-v${initialDb.DB_SCHEMA_VERSION}`);
 
     const fixture = new Database(dbPath);
     fixture.exec(`
@@ -50,7 +53,7 @@ describe('existing database boot migration', () => {
       );
     `);
     fixture.close();
-    unlinkSync(join(dataDir, '.db-migrated-v58'));
+    unlinkSync(topMarkerPath);
 
     vi.resetModules();
     const upgradedDb = await import('@/lib/db');
@@ -73,7 +76,7 @@ describe('existing database boot migration', () => {
       { name: 'idx_so_packet_id' },
       { name: 'idx_so_valid_to' },
     ]);
-    expect(existsSync(join(dataDir, '.db-migrated-v58'))).toBe(true);
+    expect(existsSync(topMarkerPath)).toBe(true);
 
     upgradedDb.closeDb();
   });
