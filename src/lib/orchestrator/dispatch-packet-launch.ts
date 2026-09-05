@@ -18,6 +18,8 @@ import type { PacketSpendCap } from './metered-spend';
 import { getProjectContext } from '@/lib/projects/context';
 import { resolveDefaultBranch } from '@/lib/repos/registry';
 import { assertRuntimeDispatchable } from '@/lib/runtimes/shared/auth-detect';
+import { assertExecutionCarrierDispatchable, type ExecutionCarrierPreflightEvidence } from '@/lib/runtimes/shared/execution-carrier-preflight';
+import { executionCarrierDefinition } from '@/lib/runtimes/shared/execution-carrier';
 import type {
   OrchestratorPacket,
   OrchestratorRuntime,
@@ -155,6 +157,12 @@ function recordPacketRouting(input: {
   });
 }
 
+function carrierAuditReason(packet: OrchestratorPacket, routing: WorkerRouting, reason: string): string {
+  return packet.executionCarrier
+    ? `${reason} Effective runtime: ${getRuntimeCapability(routing.selectedRuntime).label} via ${executionCarrierDefinition(packet.executionCarrier).label}; auth source: execution-carrier.`
+    : reason;
+}
+
 export async function launchPacketWithStorageAdmission(input: {
   packet: OrchestratorPacket;
   allPackets: OrchestratorPacket[];
@@ -169,15 +177,20 @@ export async function launchPacketWithStorageAdmission(input: {
   });
   const projectContext = await getProjectContext({ repoPath: packet.workspaceTargetPath });
   const baseBranch = await resolveDefaultBranch(packet.workspaceTargetPath!);
+  let carrierPreflight: ExecutionCarrierPreflightEvidence | null = null;
   try {
-    await assertRuntimeDispatchable(
-      workerRouting.selectedRuntime,
-      workerRouting.selectedModel,
-      packet.workspaceTargetPath,
-      // Retry / rerun relaunches a persisted packet, whose pinned carrier can differ
-      // from the stored worker profile the auth snapshot was computed against.
-      { claudeCodeCarrier: packet.claudeCodeCarrier ?? null },
-    );
+    if (packet.executionCarrier) {
+      carrierPreflight = await assertExecutionCarrierDispatchable(workerRouting.selectedRuntime, packet.executionCarrier);
+    } else {
+      await assertRuntimeDispatchable(
+        workerRouting.selectedRuntime,
+        workerRouting.selectedModel,
+        packet.workspaceTargetPath,
+        // Retry / rerun relaunches a persisted packet, whose pinned carrier can differ
+        // from the stored worker profile the auth snapshot was computed against.
+        { claudeCodeCarrier: packet.claudeCodeCarrier ?? null },
+      );
+    }
   } catch (error) {
     recordPacketRouting({
       packet,
@@ -225,7 +238,7 @@ export async function launchPacketWithStorageAdmission(input: {
       receiptKey: `packet-storage-launch:${admissionLease.receipt.reservationId}`,
       contextId: packet.id,
       status: fallback ? 'fallback' : 'selected',
-      reason: workerRouting.reason,
+      reason: carrierAuditReason(packet, workerRouting, workerRouting.reason),
       fallbackReason: fallback ? workerRouting.reason : null,
     });
     return result;
@@ -278,6 +291,18 @@ export async function launchPacketWithStorageAdmission(input: {
         storageAdmissionOwnerGeneration: launchGeneration,
         storageAdmissionReservationId: admissionLease.receipt.reservationId,
       });
+      if (carrierPreflight) {
+        recordLaneEvent(laneResult.laneId, 'execution_carrier_preflight', 'orchestrator', {
+          runtime: carrierPreflight.runtime,
+          runtimeBinary: carrierPreflight.runtimeBinaryName,
+          runtimeBinarySource: carrierPreflight.runtimeCli.source,
+          executionCarrier: carrierPreflight.executionCarrier,
+          carrierBinary: carrierPreflight.carrierBinaryName,
+          carrierBinarySource: carrierPreflight.carrierCli.source,
+          authSource: carrierPreflight.authSource,
+          authenticated: carrierPreflight.authenticated,
+        });
+      }
       launchResult = await dispatchLaneCommand({
         verb: 'launch_session',
         laneId: laneResult.laneId,
@@ -290,6 +315,7 @@ export async function launchPacketWithStorageAdmission(input: {
         model: workerRouting.selectedModel ?? undefined,
         claudeCodeModel: packet.claudeCodeModel ?? undefined,
         claudeCodeCarrier: packet.claudeCodeCarrier ?? undefined,
+        executionCarrier: packet.executionCarrier ?? undefined,
         spendCap,
         effort: workerRouting.selectedEffort ?? undefined,
         clientMutationId: `packet-launch:${packet.id}:${launchGeneration}`,
@@ -345,7 +371,7 @@ export async function launchPacketWithStorageAdmission(input: {
       receiptKey: claimKey,
       contextId: packet.id,
       status: fallback ? 'fallback' : 'selected',
-      reason: outcome.result.workerRouting.reason,
+      reason: carrierAuditReason(packet, outcome.result.workerRouting, outcome.result.workerRouting.reason),
       fallbackReason: fallback ? outcome.result.workerRouting.reason : null,
     });
     return outcome.result;

@@ -300,6 +300,39 @@ export function isPidAlive(pid?: number) {
   }
 }
 
+export function commandLineMatchesOwnedRun(
+  commandLine: string | null,
+  commandIdentity: string | undefined,
+  fallbackBinaryName: string,
+): boolean {
+  const identity = commandIdentity?.trim() || fallbackBinaryName;
+  if (!commandLine) return false;
+  const normalizedIdentity = identity.toLowerCase();
+  const identityIsPath = identity.includes('/') || identity.includes('\\');
+  if (identityIsPath) {
+    const normalizedCommandLine = commandLine.toLowerCase();
+    const quotedTokens = commandLine.match(/"[^"]*"|'[^']*'/g) ?? [];
+    if (quotedTokens.some((token) => token.slice(1, -1).toLowerCase() === normalizedIdentity)) return true;
+    let offset = normalizedCommandLine.indexOf(normalizedIdentity);
+    while (offset >= 0) {
+      const before = normalizedCommandLine[offset - 1];
+      const after = normalizedCommandLine[offset + normalizedIdentity.length];
+      const prefix = normalizedCommandLine.slice(0, offset);
+      const insideSingleQuotes = (prefix.match(/'/g)?.length ?? 0) % 2 === 1;
+      const insideDoubleQuotes = (prefix.match(/"/g)?.length ?? 0) % 2 === 1;
+      if (!insideSingleQuotes && !insideDoubleQuotes
+        && (!before || /\s/.test(before)) && (!after || /\s/.test(after))) return true;
+      offset = normalizedCommandLine.indexOf(normalizedIdentity, offset + 1);
+    }
+    return false;
+  }
+  const tokens = commandLine.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
+  return tokens.some((rawToken) => {
+    const token = rawToken.replace(/^["']|["']$/g, '').toLowerCase();
+    return path.basename(token) === normalizedIdentity || path.win32.basename(token) === normalizedIdentity;
+  });
+}
+
 export async function isOwnedRunAlive(run?: OwnedRunRecord | null): Promise<boolean> {
   if (!run) return false;
   // A run that already recorded a finish is terminal — never probe it (#1293).

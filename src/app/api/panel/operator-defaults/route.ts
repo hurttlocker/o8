@@ -29,6 +29,7 @@ import {
 } from '@/lib/operator/broadcast-commentary-defaults';
 import { isDispatchRuntime } from '@/lib/operator/defaults-env';
 import { isWorkerStartMode } from '@/lib/operator/worker-start-mode';
+import { isExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
 import { projectAgentRoleRoutes } from '@/lib/operator/role-routing';
 import { listRoleRoutingReceipts } from '@/lib/operator/role-routing-ledger';
 import {
@@ -310,6 +311,13 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
       throw new Error('defaultDispatchRuntime must name a dispatchable runtime.');
     }
     update.defaultDispatchRuntime = body.defaultDispatchRuntime;
+  }
+
+  if (body.workerExecutionCarrier !== undefined) {
+    if (body.workerExecutionCarrier !== null && !isExecutionCarrierId(body.workerExecutionCarrier)) {
+      throw new Error('workerExecutionCarrier must be "ori" or null.');
+    }
+    update.workerExecutionCarrier = body.workerExecutionCarrier;
   }
 
   if (body.workerStartMode !== undefined) {

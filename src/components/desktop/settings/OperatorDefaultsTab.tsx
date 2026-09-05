@@ -53,6 +53,11 @@ const PARALLEL_CAP_PRESETS: Array<{ key: string; label: string; value: number }>
 ];
 
 const DEFAULT_WORKER_RUNTIME_OPTIONS = DISPATCH_RUNTIME_OPTIONS;
+type ExecutionCarrierSelection = 'direct' | 'ori';
+const EXECUTION_CARRIER_OPTIONS: Array<{ value: ExecutionCarrierSelection; label: string; detail: string }> = [
+  { value: 'direct', label: 'Direct', detail: 'Launch the selected runtime CLI directly.' },
+  { value: 'ori', label: 'Ori', detail: 'Use Ori credentials and routing while Codex keeps session ownership.' },
+];
 
 type CliHouseStatus = NonNullable<OperatorDefaultsResponse['cliAuth']>['statuses']['codex'];
 
@@ -317,6 +322,9 @@ export function OperatorDefaultsTab() {
     }
     return 'Codex is the default worker — pick any available runtime to override';
   })();
+  const carrierCompatibilityReason = values.defaultDispatchRuntime === 'codex'
+    ? null
+    : 'Ori is available when the effective default worker is Codex.';
   const profileHint = cliAuth?.suggestedSubscriptionProfile.profile
     && cliAuth.suggestedSubscriptionProfile.profile !== activeProfile
     ? cliAuth.suggestedSubscriptionProfile
@@ -637,6 +645,24 @@ export function OperatorDefaultsTab() {
               />
             }
             disabled={Boolean(profileOverrideReason) || envLocked('defaultDispatchRuntime') || busyField === 'defaultDispatchRuntime'}
+            divider
+          />
+          <SettingsRow
+            icon={<RocketIcon />}
+            label="Execution carrier"
+            subtitle={carrierCompatibilityReason ?? 'Optional typed argv and credential wrapper. The runtime still owns sessions, transcripts, costs, and review.'}
+            accessory={
+              <PickerMenu<ExecutionCarrierSelection>
+                value={values.workerExecutionCarrier ?? 'direct'}
+                options={carrierCompatibilityReason ? EXECUTION_CARRIER_OPTIONS.slice(0, 1) : EXECUTION_CARRIER_OPTIONS}
+                onChange={(next) => { updateField('workerExecutionCarrier', next === 'direct' ? null : next); }}
+                disabled={busyField === 'workerExecutionCarrier'}
+                minWidth={150}
+                open={openDispatchPicker === 'execution-carrier'}
+                onOpenChange={(open) => setOpenDispatchPicker((current) => resolvePickerGroupOpen(current, 'execution-carrier', open))}
+              />
+            }
+            disabled={busyField === 'workerExecutionCarrier'}
             divider
           />
           <SettingsRow

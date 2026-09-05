@@ -18,6 +18,7 @@ import type { MergeCheckResult } from '@/lib/lane/preview-merge';
 import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 import type { OrchestratorRuntime, WorkerLaunchContext } from '@/lib/orchestrator/types';
 import type { PacketSpendCap } from '@/lib/orchestrator/metered-spend';
+import type { ExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
 import { isWorkerTerminal } from '@/lib/lane/terminal-states';
 
 // ── Lane Status ──
@@ -160,6 +161,7 @@ export type LaneCommand =
       model?: string;
       claudeCodeModel?: string;
       claudeCodeCarrier?: ClaudeCodeModelSource;
+      executionCarrier?: ExecutionCarrierId;
       spendCap?: PacketSpendCap;
       effort?: ThinkingEffort;
       /** Stable for one packet launch attempt so a crash can reconcile the owned session. */
@@ -287,6 +289,7 @@ export type LaneEventVerb =
   | 'explainer_completed'
   | 'explainer_failed'
   | 'runtime_drift'
+  | 'execution_carrier_preflight'
   | 'capacity_snapshot'
   | 'pr_merged_reconciled'
   | 'merged_by_ancestry_reconciled'

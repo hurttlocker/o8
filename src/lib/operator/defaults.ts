@@ -2,6 +2,7 @@ import 'server-only';
 import { CODEX_MODEL_IDS, isCodexModelId, isSupportedModelId, MODEL_IDS, SUPPORTED_MODEL_IDS } from '@/lib/models';
 import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import { isExecutionCarrierId, type ExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
 import type { UpdateAutoApply } from '@/lib/app-update/types';
 import { validateCredentialSafeUrl } from '@/lib/settings/credential-safe-url';
 import { applyApfsDependencyImagesUpdate, APFS_DEPENDENCY_IMAGES_FALLBACK, resolveStoredApfsDependencyImages, type ApfsDependencyImagesDefaults } from './apfs-dependency-images-default';
@@ -16,7 +17,7 @@ import {
 import { resolveWorkerEffortDefault } from './worker-effort-default';
 import { isWorkerStartMode, type WorkerStartMode } from './worker-start-mode';
 import { parseStoredJson } from './stored-json';
-import { assertRoutingCompatibility, routingUpdateTouchesCompatibility } from './routing-compatibility';
+import { assertExecutionCarrierRoutingCompatibility, assertRoutingCompatibility, routingUpdateTouchesCompatibility } from './routing-compatibility';
 import {
   coerceStoredTier,
   envTargetingTier,
@@ -24,9 +25,7 @@ import {
   mergeTier,
   type TargetingTier,
 } from './targeting-tier';
-
 export { isSubscriptionProfile };
-
 import { normalizeAcpModelId, isPlausibleAcpModelId } from '@/lib/orchestrator/acp-model-id';
 
 import { isOrchestratorBackendSetting, isReviewerBackendSetting, isCollideAggregator, isPrLinkDestination, sanitizeBranchPrefix, type OrchestratorBackendSetting, type ReviewerBackendSetting, type CollideAggregator, type PrLinkDestination } from './defaults-env';
@@ -107,18 +106,9 @@ export {
   ORCHESTRATOR_MODEL_OPTIONS,
   PARALLEL_CAP_PRESETS,
 } from './default-options';
-/**
- * Operator defaults — the dispatch/supervision knobs exposed in Settings
- * (one field per knob in {@link OperatorDefaults}; the count grows, don't
- * hardcode it in docs).
- * Resolution order (every knob): env var > persisted file > hardcoded fallback.
- * Canonical file: `~/.o8/settings.toml`. The legacy
- * `operator-defaults.json` remains a synchronized last-good fallback so an
- * invalid hand edit never prevents startup.
- * (override root with CORTEX_IDE_DATA_DIR). NOTE: `~/.cortex-ide/` is NOT
- * read — a stale copy of this file there silently does nothing (bit the
- * operator flow 2026-07-07; always verify against getOperatorDefaultsPath()).
- */
+/** Operator defaults exposed in Settings. Resolution: env > persisted file > fallback.
+ * Canonical file: `~/.o8/settings.toml`; the legacy JSON remains a last-good fallback.
+ * Override root with CORTEX_IDE_DATA_DIR. `~/.cortex-ide/` is not read. */
 export type SettingSource = 'env' | 'file' | 'profile' | 'default';
 export type RequireApproval = 'high-risk' | 'surface' | 'always' | 'never';
 
@@ -147,6 +137,7 @@ export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParki
   /** Model for dispatched opencode workers. Null = the adapter default. */
   opencodeWorkerModel: string | null;
   defaultDispatchRuntime: OrchestratorRuntime;
+  workerExecutionCarrier: ExecutionCarrierId | null;
   workerStartMode: WorkerStartMode;
   workerRuntimes: OrchestratorRuntime[];
   /** Default Codex worker effort. 'adaptive' preserves runtime default behavior. */
@@ -329,9 +320,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   ...REVIEW_CONTINUATION_FALLBACK,
   ...BROADCAST_COMMENTARY_FALLBACK,
   ...APFS_DEPENDENCY_IMAGES_FALLBACK,
-  // Operator-pinned: Opus 4.8 with max thinking is the default orchestrator
-  // brain. Subscription-billed via the REPL migration, so cost is the user's
-  // existing Claude Code MAX plan — not a per-token API charge.
+  // Operator-pinned subscription model; not a per-token API charge.
   thinkingEffort: 'max',
   promptCachingEnabled: true,
   mergeTestReplayEnabled: false,
@@ -340,6 +329,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   opencodeOrchestratorModel: null,
   opencodeWorkerModel: null,
   defaultDispatchRuntime: 'codex',
+  workerExecutionCarrier: null,
   workerStartMode: 'autonomous',
   workerRuntimes: ['codex'],
   codexWorkerEffort: 'adaptive',
@@ -356,11 +346,9 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   experimentalCanvas: false,
   nativeBrowserView: true,
   classAComposer: 'auto',
-  // ON by default post-#1097. Subscription pool, not Agent SDK pool. See the
-  // docstring above on the field for the rationale.
+  // ON by default post-#1097; subscription pool, not Agent SDK pool.
   inAppOrchestratorEnabled: true,
-  // ON by default — the free, fast (~2.7s warm), subscription-billed Brain for
-  // anyone with a Claude sub. Independent of the orchestrator toggle (2026-06-22).
+  // Subscription-billed Brain, independent of the orchestrator toggle.
   brainUseClaudeCli: true,
   workersUseBrain: 'auto',
   ...WORKSPACE_MANIFEST_POLICY_FALLBACK,
@@ -375,9 +363,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   quizGateEnabled: false,
   // Buy-in doc generation OFF by default — opt-in narrative for external sharing.
   buyinDocEnabled: false,
-  // Targeting Machine tiers. Both default to Codex (the shipping dispatch worker),
-  // differentiated by effort — cheap triage at low, premium action at high. The
-  // operator can point triage at a cheaper runtime/model (gemini, a local model).
+  // Targeting tiers default to Codex and differ by effort.
   targetingTriage: { runtime: 'codex', model: '', effort: 'low' },
   targetingAction: { runtime: 'codex', model: '', effort: 'high' },
   updateAutoApply: 'off',
@@ -410,6 +396,7 @@ interface StoredOperatorDefaults extends Partial<StorageReserveDefaults>, Partia
   opencodeOrchestratorModel?: string | null;
   opencodeWorkerModel?: string | null;
   defaultDispatchRuntime?: OrchestratorRuntime;
+  workerExecutionCarrier?: ExecutionCarrierId | null;
   defaultDispatchRuntimeExplicit?: boolean;
   workerStartMode?: WorkerStartMode;
   workerRuntimes?: OrchestratorRuntime[];
@@ -503,6 +490,9 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (isDispatchRuntime(stored.defaultDispatchRuntime)) {
     result.defaultDispatchRuntime = stored.defaultDispatchRuntime;
     result.defaultDispatchRuntimeExplicit = stored.defaultDispatchRuntimeExplicit !== false;
+  }
+  if (stored.workerExecutionCarrier === null || isExecutionCarrierId(stored.workerExecutionCarrier)) {
+    result.workerExecutionCarrier = stored.workerExecutionCarrier;
   }
   if (isWorkerStartMode(stored.workerStartMode)) result.workerStartMode = stored.workerStartMode;
   if (Array.isArray(stored.workerRuntimes)) {
@@ -706,6 +696,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
       fileValues.opencodeOrchestratorModel ?? OPERATOR_DEFAULTS_FALLBACK.opencodeOrchestratorModel,
     opencodeWorkerModel: fileValues.opencodeWorkerModel ?? OPERATOR_DEFAULTS_FALLBACK.opencodeWorkerModel,
     defaultDispatchRuntime,
+    workerExecutionCarrier: fileValues.workerExecutionCarrier !== undefined ? fileValues.workerExecutionCarrier : OPERATOR_DEFAULTS_FALLBACK.workerExecutionCarrier,
     workerStartMode: fileValues.workerStartMode ?? OPERATOR_DEFAULTS_FALLBACK.workerStartMode,
     workerRuntimes: fileValues.workerRuntimes ?? OPERATOR_DEFAULTS_FALLBACK.workerRuntimes,
     codexWorkerEffort:
@@ -777,6 +768,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     opencodeOrchestratorModel: fileValues.opencodeOrchestratorModel !== undefined ? 'file' : 'default',
     opencodeWorkerModel: fileValues.opencodeWorkerModel !== undefined ? 'file' : 'default',
     defaultDispatchRuntime: profileDefaults ? 'profile' : envRuntime !== null ? 'env' : fileValues.defaultDispatchRuntimeExplicit ? 'file' : 'default',
+    workerExecutionCarrier: fileValues.workerExecutionCarrier !== undefined ? 'file' : 'default',
     workerStartMode: fileValues.workerStartMode !== undefined ? 'file' : 'default',
     workerRuntimes: fileValues.workerRuntimes !== undefined ? 'file' : 'default',
     codexWorkerEffort:
@@ -932,6 +924,12 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>): Pr
     }
     stored.defaultDispatchRuntime = update.defaultDispatchRuntime;
     stored.defaultDispatchRuntimeExplicit = true;
+  }
+  if (update.workerExecutionCarrier !== undefined) {
+    if (update.workerExecutionCarrier !== null && !isExecutionCarrierId(update.workerExecutionCarrier)) {
+      throw new Error('workerExecutionCarrier must be "ori" or null.');
+    }
+    stored.workerExecutionCarrier = update.workerExecutionCarrier;
   }
   if (update.workerStartMode !== undefined) {
     if (!isWorkerStartMode(update.workerStartMode)) throw new Error('workerStartMode must be one of "autonomous", "huddle", or "adaptive".');
@@ -1118,7 +1116,7 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>): Pr
     ...OPERATOR_DEFAULTS_FALLBACK,
     ...fileValues,
   };
-  if (routingUpdateTouchesCompatibility(update)) assertRoutingCompatibility(canonicalValues);
+  if (routingUpdateTouchesCompatibility(update)) { assertRoutingCompatibility(canonicalValues); assertExecutionCarrierRoutingCompatibility(resolveDefaults(fileValues).values); }
   await persistOperatorDefaults(canonicalValues, stored, existingToml, revision);
 
   return getOperatorDefaults();

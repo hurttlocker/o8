@@ -5,6 +5,7 @@ import {
 } from './archive';
 import {
   OWNED_STALE_WINDOW_MS,
+  commandLineMatchesOwnedRun,
   isOwnedRunAlive,
   metadataPath,
   nowIso,
@@ -231,7 +232,7 @@ export function createFleetComputer({
           await signalBridgeTerminalSession(activeRun.tmuxSession, 'SIGINT');
         } else {
           const cmd = await pidCommandLine(activeRun.pid);
-          if (cmd && cmd.includes(adapter.binaryName)) {
+          if (commandLineMatchesOwnedRun(cmd, activeRun.commandIdentity, adapter.binaryName)) {
             if (process.platform === 'win32') {
               // A failed kill must NOT return early here: the orphan record and
               // saveSession below are the only trace this session ever existed,

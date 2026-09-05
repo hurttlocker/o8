@@ -12,6 +12,7 @@ import type {
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 import type { RuntimePresetId } from '@/lib/orchestrator/runtime-capabilities';
+import type { ExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
 
 export interface LoadedIssue {
   number: number;
@@ -44,6 +45,8 @@ export interface CreateMissionInput {
   claudeCodeModel?: string | null;
   /** Explicit per-packet carrier pin for Claude Code workers. */
   claudeCodeCarrier?: ClaudeCodeModelSource | null;
+  /** Optional execution wrapper. Omit to inherit the persisted operator setting. */
+  executionCarrier?: ExecutionCarrierId | null;
   /** Requested worker reasoning effort. Applied at launch only for runtimes with
    *  a reasoning-effort surface (codex/claude-code); a no-op elsewhere. Omit for
    *  today's behavior (runtime default). */

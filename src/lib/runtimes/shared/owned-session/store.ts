@@ -26,6 +26,7 @@ import {
   DEFAULT_AUTO_RETRY_DELAY_MS,
   OWNED_FLEET_TTL_MS,
   compactText,
+  commandLineMatchesOwnedRun,
   ensureDir,
   isPidAlive,
   nowIso,
@@ -345,7 +346,8 @@ export function createOwnedSessionStore(
         await signalBridgeTerminalSession(session.activeRun.tmuxSession, 'SIGINT');
       } else {
         const cmd = await pidCommandLine(session.activeRun.pid);
-        if (cmd && cmd.includes(adapter.binaryName)) {
+        const commandIdentity = session.activeRun.commandIdentity ?? adapter.binaryName;
+        if (commandLineMatchesOwnedRun(cmd, session.activeRun.commandIdentity, adapter.binaryName)) {
           // Windows has no process groups addressed by negative pid and no
           // SIGINT delivery to another tree; the CLI is also a grandchild of
           // the interpreter, so a single-pid kill would leave it running.
@@ -365,7 +367,7 @@ export function createOwnedSessionStore(
           }
         } else {
           console.warn(
-            `[owned-store] Skipping interrupt signal for ${surfaceId}: pid ${session.activeRun.pid} no longer matches an owned ${adapter.binaryName} run (${cmd ?? 'process gone'})`,
+            `[owned-store] Skipping interrupt signal for ${surfaceId}: pid ${session.activeRun.pid} no longer matches owned command ${commandIdentity} (${cmd ?? 'process gone'})`,
           );
         }
       }

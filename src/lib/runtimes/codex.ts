@@ -348,6 +348,7 @@ export const codexRuntime: AgentRuntime = {
       effort,
       laneId: opts.laneId,
       packetId: opts.packetId,
+      executionCarrier: opts.executionCarrier,
       // Codex is the DEFAULT worker runtime, so a read-only packet that skipped
       // this thread was read-only in prompt only for almost every dispatch.
       workMode: opts.workMode,

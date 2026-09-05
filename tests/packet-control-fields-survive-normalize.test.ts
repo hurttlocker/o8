@@ -16,6 +16,7 @@ import {
   normalizeOrchestratorMissionState,
 } from '@/lib/orchestrator/store';
 import { normalizeOrchestratorMissionStateForPersistence } from '@/lib/orchestrator/persisted-mission';
+import { normalizePacketExecutionCarrier } from '@/lib/orchestrator/normalize/decomposition';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
 const NOW = new Date('2026-01-01T00:00:00.000Z');
@@ -148,6 +149,7 @@ function fullPacketFixture() {
     assignedModel: 'gpt-5.5',
     claudeCodeModel: 'gateway/model-y',
     claudeCodeCarrier: 'openrouter',
+    executionCarrier: null,
     qualitySearch: {
       version: 1,
       role: 'robustness_complete',
@@ -250,6 +252,10 @@ function stateWithPacket(packet: OrchestratorPacket) {
 }
 
 describe('packet fields survive normalize', () => {
+  it('refuses an unknown persisted execution carrier instead of falling back to direct credentials', () => {
+    expect(() => normalizePacketExecutionCarrier('future-carrier')).toThrow(/refusing to fall back/i);
+  });
+
   it('preserves every packet key across a normalize round-trip', () => {
     vi.useFakeTimers();
     try {

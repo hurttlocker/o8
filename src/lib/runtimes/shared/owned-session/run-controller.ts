@@ -3,7 +3,6 @@ import { closeSync, openSync } from 'node:fs';
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-
 import { getOrCreateLocalWorkerToken } from '@/lib/auth/worker-token';
 import {
   bindPacketWorkerTokenProcess,
@@ -16,10 +15,10 @@ import { spawnBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
 import { ensureDispatchBackendReady } from '@/lib/runtimes/shared/dispatch-readiness';
 import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
+import { executionCarrierCommandIdentity, executionCarrierSandboxReadPaths, executionCarrierSpawnPath, resolveExecutionCarrierInvocation } from '@/lib/runtimes/shared/execution-carrier-launch';
 import { guardedWorkspaceInvocation } from '@/lib/worktree/materialization-execution';
 import { tmuxSessionName } from '@/lib/terminal/tmux';
 import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
-
 import { crashSurvivableWorkersEnabled } from './crash-survival';
 import { observeChildExit, readAbnormalStderrTail } from './exit-outcome';
 import { prepareOwnedLaunchArgs } from './launch-args';
@@ -535,8 +534,9 @@ export function createOwnedRunController({
       humanLabel,
     });
 
-    let spawnBinary = binary;
-    let spawnArgs = args;
+    const carrierLaunch = await resolveExecutionCarrierInvocation({ runtime: runtimeId as OrchestratorRuntime, runtimeConfig: session.runtimeConfig, runtimeBinary: binary, runtimeArgs: args });
+    let spawnBinary = carrierLaunch.command;
+    let spawnArgs = carrierLaunch.args;
     const sandboxEnvExtra: Record<string, string> = {};
     if (sandboxEnabled) {
       try {
@@ -545,9 +545,9 @@ export function createOwnedRunController({
           profileDir: path.join(session.sessionDir, RUNS_DIR),
           cwd: session.repoPath,
           repoPath: session.repoPath,
-          binary,
-          args,
-          extraReadPaths: workerMcp.sandboxReadPaths,
+          binary: spawnBinary,
+          args: spawnArgs,
+          extraReadPaths: executionCarrierSandboxReadPaths(workerMcp.sandboxReadPaths, carrierLaunch),
           finalAllowReadPaths: workerMcp.configPath ? [workerMcp.configPath] : undefined,
           // Read-only: repo stays readable, kernel refuses every write. Deny
           // paths come from the SAME git probe prepareWorkerSandbox uses to
@@ -627,7 +627,7 @@ export function createOwnedRunController({
       // the spawned process cwd. Keep both values aligned so a worker cannot
       // silently operate in the o8 server's own checkout.
       PWD: session.repoPath,
-      PATH: pathWithNodeRuntime(),
+      PATH: executionCarrierSpawnPath(pathWithNodeRuntime(), carrierLaunch),
       FORCE_COLOR: '0',
       NO_COLOR: '1',
       // Workers must never pop an OS browser: dev servers (CRA, storybook)
@@ -660,7 +660,7 @@ export function createOwnedRunController({
       prompt,
       startedAt: nowIso(),
       pid: 0,
-      commandIdentity: path.basename(spawnBinary),
+      commandIdentity: executionCarrierCommandIdentity(carrierLaunch, spawnBinary),
       processMarker: runId,
       spawnState: 'prepared',
       stdoutPath,
@@ -677,7 +677,7 @@ export function createOwnedRunController({
     await io.saveSession(session);
 
     try {
-      if (!crashSurvivableWorkersEnabled()) {
+      if (!carrierLaunch.carried && !crashSurvivableWorkersEnabled()) {
         try {
           const result = await spawnBridgeTerminalSession({
             sessionName: bridgeSessionName,

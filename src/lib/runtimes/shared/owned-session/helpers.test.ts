@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import {
+  commandLineMatchesOwnedRun,
   filterStderrNoise,
   isOwnedRunAlive,
   relativeAge,
@@ -38,6 +39,21 @@ describe('repoSlugFromOrigin', () => {
     expect(repoSlugFromOrigin('https://gitlab.com/team/repo.git')).toBeUndefined();
     expect(repoSlugFromOrigin('')).toBeUndefined();
     expect(repoSlugFromOrigin(undefined)).toBeUndefined();
+  });
+});
+
+describe('commandLineMatchesOwnedRun', () => {
+  it('recognizes a persisted carrier wrapper instead of requiring the runtime binary name', () => {
+    expect(commandLineMatchesOwnedRun('/usr/bin/ori codex exec --json', '/usr/bin/ori', 'codex')).toBe(true);
+    expect(commandLineMatchesOwnedRun('/Users/J Doe/.local/bin/ori codex exec --json', '/Users/J Doe/.local/bin/ori', 'codex')).toBe(true);
+    expect(commandLineMatchesOwnedRun('"/Users/J Doe/.local/bin/ori" codex exec --json', '/Users/J Doe/.local/bin/ori', 'codex')).toBe(true);
+    expect(commandLineMatchesOwnedRun('/Users/J Doe/.local/bin/original codex exec --json', '/Users/J Doe/.local/bin/ori', 'codex')).toBe(false);
+    expect(commandLineMatchesOwnedRun('/bin/sh -c "echo /usr/bin/ori"', '/usr/bin/ori', 'codex')).toBe(false);
+    expect(commandLineMatchesOwnedRun('/usr/bin/ori codex exec --json', undefined, 'codex')).toBe(true);
+    expect(commandLineMatchesOwnedRun('/usr/bin/node unrelated.js', 'ori', 'codex')).toBe(false);
+    expect(commandLineMatchesOwnedRun('/usr/bin/origami codexical', 'ori', 'codex')).toBe(false);
+    expect(commandLineMatchesOwnedRun('git fetch origin', 'ori', 'codex')).toBe(false);
+    expect(commandLineMatchesOwnedRun('/Users/victoria/bin/node task.js', 'ori', 'codex')).toBe(false);
   });
 });
 

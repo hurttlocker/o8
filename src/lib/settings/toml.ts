@@ -30,6 +30,7 @@ import { isTargetingTier } from '@/lib/operator/targeting-tier';
 import { isWorkerStartMode } from '@/lib/operator/worker-start-mode';
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { AUTHENTICATED_ENDPOINT_GUIDANCE, credentialBearingUrlPart } from './credential-safe-url';
+import { isExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
 
 type TomlRecord = Record<string, unknown>;
 
@@ -123,6 +124,16 @@ function acpModelIdField(section: string, key: string): TomlField<string | null>
         ? trimmed
         : invalid(tomlKey, `a model id shaped provider/model, optionally with a /low or /high suffix; received ${JSON.stringify(trimmed)}`);
     },
+  };
+}
+
+function executionCarrierField(section: string, key: string): TomlField<OperatorDefaults['workerExecutionCarrier']> {
+  return {
+    path: [section, key],
+    serialize: (value) => value ?? '',
+    parse: (value, tomlKey) => value === '' || value === null
+      ? null
+      : isExecutionCarrierId(value) ? value : invalid(tomlKey, '"ori" or an empty string'),
   };
 }
 
@@ -244,6 +255,7 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   opencodeOrchestratorModel: acpModelIdField('models', 'opencode_orchestrator_model'),
   opencodeWorkerModel: acpModelIdField('models', 'opencode_worker_model'),
   defaultDispatchRuntime: enumField('models', 'default_dispatch_runtime', 'a dispatchable runtime name', isDispatchRuntime),
+  workerExecutionCarrier: executionCarrierField('models', 'worker_execution_carrier'),
   workerStartMode: enumField('operator', 'worker_start_mode', 'one of "autonomous", "huddle", or "adaptive"', isWorkerStartMode),
   workerRuntimes: dispatchRuntimeListField('models', 'worker_runtimes'),
   codexWorkerEffort: enumField('models', 'codex_worker_effort', 'a valid thinking effort', isThinkingEffort),
