@@ -85,9 +85,11 @@ async function waitUntil(predicate: () => boolean | Promise<boolean>, message: s
 }
 
 function createRemoteRepo() {
-  const origin = path.join(testRoot, 'origin.git');
-  const seed = path.join(testRoot, 'seed');
-  const repo = path.join(testRoot, 'repo');
+  // Owned-runtime launches are restricted to paths under the home or data
+  // directory, so the fixture repo and worktrees live under the fixture data dir.
+  const origin = path.join(dataDir, 'origin.git');
+  const seed = path.join(dataDir, 'seed');
+  const repo = path.join(dataDir, 'repo');
   execFileSync('git', ['init', '--bare', origin], { stdio: 'pipe' });
   execFileSync('git', ['clone', origin, seed], { stdio: 'pipe' });
   git(seed, 'checkout', '-b', 'main');
@@ -127,6 +129,7 @@ describe.skipIf(process.platform === 'win32')('execution carrier isolated worktr
     const fakeCodex = path.join(runtimeDir, 'codex');
     const fakeOri = path.join(carrierDir, 'ori');
     writeExecutable(fakeCodex, `#!/bin/sh
+case "$1" in --version|-V) printf '%s\n' '0.0.0-test'; exit 0;; esac
 printf '%s\n' '{"type":"thread.started","thread_id":"carrier-thread"}'
 printf '%s\n' '{"type":"item.completed","item":{"id":"proof","type":"agent_message","text":"carrier transcript proof"}}'
 printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":5}}'
@@ -140,6 +143,7 @@ case " $* " in
 esac
 `);
     writeExecutable(fakeOri, `#!/bin/sh
+case "$1" in --version|-V) printf '%s\n' '0.0.0-test'; exit 0;; esac
 if [ "$1" = "auth" ]; then exit 0; fi
 printf '%s\n' "$$" > "$O8_TEST_CARRIER_PID_FILE"
 printf '%s\n' "$@" > "$O8_TEST_CARRIER_ARGS_FILE"
@@ -161,7 +165,7 @@ wait "$child"
     process.env.O8_SUBSCRIPTION_PROFILE = 'both';
     process.env.O8_DEFAULT_DISPATCH_RUNTIME = 'codex';
     process.env.O8_WORKER_SANDBOX = '0';
-    process.env.O8_WORKTREE_ROOT = path.join(testRoot, 'worktrees');
+    process.env.O8_WORKTREE_ROOT = path.join(dataDir, 'worktrees');
     process.env.O8_APFS_COW_WORKSPACES = '0';
     process.env.O8_APFS_DEPENDENCY_IMAGES = '0';
     delete process.env.O8_PACKAGED_APP;
@@ -219,7 +223,7 @@ wait "$child"
     }, 'initial carried Codex run did not reach ready-for-resume');
 
     const surface = (await runtime.discoverSessions()).find((candidate) => candidate.sessionKey === lane.sessionKey);
-    expect(surface).toMatchObject({ runtimeId: 'codex', ownership: 'o8-owned' });
+    expect(surface).toMatchObject({ runtimeId: 'codex', ownership: 'owned' });
     expect(await runtime.readTranscript(lane.sessionKey!)).toEqual(expect.arrayContaining([
       expect.objectContaining({ role: 'assistant', text: 'carrier transcript proof' }),
     ]));
