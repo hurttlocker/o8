@@ -112,6 +112,41 @@ describe('lane stop command', () => {
     expect(result.lane).toMatchObject({ status: 'paused', lastEventLabel: 'operator_stopped' });
   });
 
+  it('uses a durable worker-exit receipt before settling packet-owned runs', async () => {
+    const packetId = 'packet-stop-recorded-worker-exit';
+    const lane = createLane({
+      repoPath: process.cwd(),
+      branch: 'test/stop-command-recorded-worker-exit',
+      baseBranch: 'main',
+      runtime: 'codex',
+      label: 'recorded worker exit stop command test',
+      ownership: 'managed',
+      packetId,
+      actor: 'system',
+    });
+    await dispatch({ verb: 'attach_session', laneId: lane.id, sessionKey: 'codex-owned:exited' });
+    const { recordLaneEvent } = await import('@/lib/lane/events');
+    recordLaneEvent(lane.id, 'runtime_process_exit', 'system', {
+      surfaceId: 'codex-owned:exited',
+      exitCode: 0,
+      signal: null,
+      classification: 'clean-exit',
+    });
+    h.terminateManagedRuns.mockResolvedValueOnce({ targeted: 1, confirmed: 1, failures: [] });
+
+    const result = await dispatch({ verb: 'stop', laneId: lane.id, actor: 'user' });
+
+    expect(result.ok).toBe(true);
+    expect(h.kill).not.toHaveBeenCalled();
+    expect(h.terminateManagedRuns).toHaveBeenCalledWith(packetId);
+    expect(getLaneEvents(lane.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        verb: 'managed_runs_stopped',
+        payload: expect.objectContaining({ packetId, targeted: 1, confirmed: 1 }),
+      }),
+    ]));
+  });
+
   it('reports failure and keeps the held lane paused when managed-run death is unconfirmed', async () => {
     const packetId = 'packet-stop-unconfirmed-managed-run';
     const lane = createLane({

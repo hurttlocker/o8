@@ -59,6 +59,7 @@ import { withRepoActionRecovery } from '@/lib/lane/repo-action-lock';
 import { materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
 import { persistLanePacketHold } from '@/lib/lane/packet-stop-hold';
 import { killLaneSessionsConfirmed } from '@/lib/lane/reap-sessions';
+import { liveWorkerSessionLanes } from '@/lib/lane/worker-session-state';
 import { terminatePacketManagedRuns } from '@/lib/runtimes/managed-runs/packet-lifecycle';
 import {
   withWorkspaceMaterializedMutation,
@@ -314,13 +315,18 @@ async function dispatchUnlocked(
       let stopOk = true;
       let stopNote = 'No active session was attached.';
       if (lane.sessionKey) {
-        try {
-          const [result] = await killLaneSessionsConfirmed([lane]);
-          stopOk = Boolean(result?.confirmed || result?.alreadyDead);
-          stopNote = result?.note ?? 'No confirmed process result was returned.';
-        } catch (err) {
-          stopOk = false;
-          stopNote = err instanceof Error ? err.message : 'Interrupt failed.';
+        const liveWorkerLanes = liveWorkerSessionLanes([lane]);
+        if (liveWorkerLanes.length === 0) {
+          stopNote = 'Worker exit was already recorded.';
+        } else {
+          try {
+            const [result] = await killLaneSessionsConfirmed(liveWorkerLanes);
+            stopOk = Boolean(result?.confirmed || result?.alreadyDead);
+            stopNote = result?.note ?? 'No confirmed process result was returned.';
+          } catch (err) {
+            stopOk = false;
+            stopNote = err instanceof Error ? err.message : 'Interrupt failed.';
+          }
         }
       }
 
