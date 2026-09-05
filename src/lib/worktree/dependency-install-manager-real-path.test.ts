@@ -1,9 +1,9 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/worktree/storage-telemetry')>(),
@@ -31,6 +31,10 @@ import { WorktreeManager } from './manager';
 
 const roots: string[] = [];
 
+beforeEach(() => {
+  process.env.O8_APFS_DEPENDENCY_IMAGES = '0';
+});
+
 function git(cwd: string, ...args: string[]): void {
   execFileSync('git', args, { cwd, stdio: 'ignore' });
 }
@@ -48,7 +52,7 @@ function createFixture(): { repo: string; setup: RepoSetupConfig } {
     private: true,
     packageManager: `npm@${npmVersion}`,
     scripts: {
-      postinstall: "node -e \"const fs=require('fs');fs.mkdirSync('node_modules/postinstall-private',{recursive:true});fs.writeFileSync('node_modules/postinstall-private/sentinel','workspace-private\\n');fs.mkdirSync('node_modules/.bin',{recursive:true});fs.writeFileSync('node_modules/.bin/fixture-gate','#!/bin/sh\\necho ready\\n');fs.chmodSync('node_modules/.bin/fixture-gate',0o755)\"",
+      postinstall: "node -e \"const fs=require('fs');fs.mkdirSync('node_modules/postinstall-private',{recursive:true});fs.writeFileSync('node_modules/postinstall-private/sentinel',process.cwd()+'|workspace-private\\n');fs.mkdirSync('node_modules/.bin',{recursive:true});fs.writeFileSync('node_modules/.bin/fixture-gate','#!/bin/sh\\necho ready\\n');fs.chmodSync('node_modules/.bin/fixture-gate',0o755)\"",
     },
   }));
   execFileSync('npm', ['install', '--package-lock-only', '--ignore-scripts'], {
@@ -78,6 +82,17 @@ function createFixture(): { repo: string; setup: RepoSetupConfig } {
   };
 }
 
+function expectPostinstallSentinel(workspacePath: string, marker = 'workspace-private'): void {
+  const value = readFileSync(
+    path.join(workspacePath, 'node_modules', 'postinstall-private', 'sentinel'),
+    'utf8',
+  ).trimEnd();
+  const separator = value.lastIndexOf('|');
+  expect(separator).toBeGreaterThan(0);
+  expect(realpathSync(value.slice(0, separator))).toBe(realpathSync(workspacePath));
+  expect(value.slice(separator + 1)).toBe(marker);
+}
+
 afterEach(() => {
   delete process.env.O8_SKIP_PRELAUNCH_TYPECHECK;
   delete process.env.O8_WORKTREE_ROOT;
@@ -98,87 +113,89 @@ describe('managed creation dependency recipe real path', () => {
       roots.push(process.env.O8_WORKTREE_ROOT);
       const manager = new WorktreeManager(repo);
       Object.defineProperty(manager, 'injectSafetyHooks', { value: async () => {} });
+      const createdIds: string[] = [];
+      try {
+        const coldStartedAt = performance.now();
+        const first = await manager.create({
+          agentType: 'codex',
+          taskName: 'lifecycle dependency image seed',
+          baseBranch: 'main',
+          repoSetup: { ...setup, workspaceIsolationPreference: 'apfs-cow-clone' },
+        });
+        createdIds.push(first.id);
+        const coldMs = Math.round(performance.now() - coldStartedAt);
+        expect(first.isolationKind).toBe('apfs-cow-clone');
+        expect(first.dependencyMaterialization?.mode).toBe('native');
+        const readyDeadline = Date.now() + 90_000;
+        while (readDependencySeedImage(first.dependencyRecipeKey!)?.state !== 'ready') {
+          if (Date.now() >= readyDeadline) throw new Error('First lifecycle dependency image was not published.');
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
 
-      const coldStartedAt = performance.now();
-      const first = await manager.create({
-        agentType: 'codex',
-        taskName: 'lifecycle dependency image seed',
-        baseBranch: 'main',
-        repoSetup: { ...setup, workspaceIsolationPreference: 'apfs-cow-clone' },
-      });
-      const coldMs = Math.round(performance.now() - coldStartedAt);
-      expect(first.isolationKind).toBe('apfs-cow-clone');
-      expect(first.dependencyMaterialization?.mode).toBe('native');
-      const readyDeadline = Date.now() + 90_000;
-      while (readDependencySeedImage(first.dependencyRecipeKey!)?.state !== 'ready') {
-        if (Date.now() >= readyDeadline) throw new Error('First lifecycle dependency image was not published.');
-        await new Promise((resolve) => setTimeout(resolve, 100));
+        const reuseStartedAt = performance.now();
+        const second = await manager.create({
+          agentType: 'codex',
+          taskName: 'lifecycle dependency image reuse',
+          baseBranch: 'main',
+          repoSetup: { ...setup, workspaceIsolationPreference: 'apfs-cow-clone' },
+        });
+        createdIds.push(second.id);
+        const reuseMs = Math.round(performance.now() - reuseStartedAt);
+        console.info(`[apfs-dependency-lifecycle] first=${coldMs}ms reuse=${reuseMs}ms`);
+        expect(second.dependencyMaterialization).toMatchObject({
+          mode: 'image',
+          recipeKey: first.dependencyRecipeKey,
+        });
+        const secondNodeModules = path.join(second.path, 'node_modules');
+        expect(lstatSync(secondNodeModules).isSymbolicLink()).toBe(false);
+        expectPostinstallSentinel(second.path);
+        expect(execFileSync(
+          path.join(second.path, 'node_modules', '.bin', 'fixture-gate'),
+          { encoding: 'utf8' },
+        ).trim()).toBe('ready');
+        writeFileSync(
+          path.join(second.path, 'node_modules', 'postinstall-private', 'sentinel'),
+          'second-only-mutation\n',
+        );
+        expectPostinstallSentinel(first.path);
+
+        const manifestPath = path.join(repo, 'package.json');
+        const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+          version: string;
+          scripts: Record<string, string>;
+        };
+        manifest.version = '1.0.1';
+        manifest.scripts.postinstall = manifest.scripts.postinstall.replace(
+          'workspace-private', 'recipe-changed',
+        );
+        writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`);
+        execFileSync('npm', ['install', '--package-lock-only', '--ignore-scripts'], {
+          cwd: repo,
+          stdio: 'ignore',
+        });
+        git(repo, 'add', 'package.json', 'package-lock.json');
+        git(repo, '-c', 'user.name=o8-test', '-c', 'user.email=test@invalid', 'commit', '-qm', 'recipe drift');
+        const fallback = await manager.create({
+          agentType: 'codex',
+          taskName: 'lifecycle dependency recipe fallback',
+          baseBranch: 'main',
+          repoSetup: { ...setup, workspaceIsolationPreference: 'apfs-cow-clone' },
+        });
+        createdIds.push(fallback.id);
+        expect(fallback.dependencyMaterialization?.mode).toBe('native');
+        expect(fallback.dependencyRecipeKey).not.toBe(first.dependencyRecipeKey);
+        expectPostinstallSentinel(fallback.path, 'recipe-changed');
+      } finally {
+        let cleanupError: unknown;
+        for (const id of createdIds.reverse()) {
+          try {
+            await manager.cleanup(id, { force: true, deleteBranch: true });
+          } catch (error) {
+            cleanupError ??= error;
+          }
+        }
+        if (cleanupError) throw cleanupError;
       }
-
-      const reuseStartedAt = performance.now();
-      const second = await manager.create({
-        agentType: 'codex',
-        taskName: 'lifecycle dependency image reuse',
-        baseBranch: 'main',
-        repoSetup: { ...setup, workspaceIsolationPreference: 'apfs-cow-clone' },
-      });
-      const reuseMs = Math.round(performance.now() - reuseStartedAt);
-      console.info(`[apfs-dependency-lifecycle] first=${coldMs}ms reuse=${reuseMs}ms`);
-      expect(second.dependencyMaterialization).toMatchObject({
-        mode: 'image',
-        recipeKey: first.dependencyRecipeKey,
-      });
-      const secondNodeModules = path.join(second.path, 'node_modules');
-      expect(lstatSync(secondNodeModules).isSymbolicLink()).toBe(false);
-      expect(readFileSync(
-        path.join(second.path, 'node_modules', 'postinstall-private', 'sentinel'),
-        'utf8',
-      )).toBe('workspace-private\n');
-      expect(execFileSync(
-        path.join(second.path, 'node_modules', '.bin', 'fixture-gate'),
-        { encoding: 'utf8' },
-      ).trim()).toBe('ready');
-      writeFileSync(
-        path.join(second.path, 'node_modules', 'postinstall-private', 'sentinel'),
-        'second-only-mutation\n',
-      );
-      expect(readFileSync(
-        path.join(first.path, 'node_modules', 'postinstall-private', 'sentinel'),
-        'utf8',
-      )).toBe('workspace-private\n');
-
-      const manifestPath = path.join(repo, 'package.json');
-      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
-        version: string;
-        scripts: Record<string, string>;
-      };
-      manifest.version = '1.0.1';
-      manifest.scripts.postinstall = manifest.scripts.postinstall.replace(
-        'workspace-private', 'recipe-changed',
-      );
-      writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`);
-      execFileSync('npm', ['install', '--package-lock-only', '--ignore-scripts'], {
-        cwd: repo,
-        stdio: 'ignore',
-      });
-      git(repo, 'add', 'package.json', 'package-lock.json');
-      git(repo, '-c', 'user.name=o8-test', '-c', 'user.email=test@invalid', 'commit', '-qm', 'recipe drift');
-      const fallback = await manager.create({
-        agentType: 'codex',
-        taskName: 'lifecycle dependency recipe fallback',
-        baseBranch: 'main',
-        repoSetup: { ...setup, workspaceIsolationPreference: 'apfs-cow-clone' },
-      });
-      expect(fallback.dependencyMaterialization?.mode).toBe('native');
-      expect(fallback.dependencyRecipeKey).not.toBe(first.dependencyRecipeKey);
-      expect(readFileSync(
-        path.join(fallback.path, 'node_modules', 'postinstall-private', 'sentinel'),
-        'utf8',
-      )).toBe('recipe-changed\n');
-
-      await manager.cleanup(second.id, { force: true, deleteBranch: true });
-      await manager.cleanup(fallback.id, { force: true, deleteBranch: true });
-      await manager.cleanup(first.id, { force: true, deleteBranch: true });
     },
     180_000,
   );
@@ -212,12 +229,12 @@ describe('managed creation dependency recipe real path', () => {
     expect(second.dependencyRecipeKey).toBe(first.dependencyRecipeKey);
     expect((await manager.get(first.id))?.dependencyRecipeKey).toBe(first.dependencyRecipeKey);
     const relativeSentinel = path.join('node_modules', 'postinstall-private', 'sentinel');
-    expect(readFileSync(path.join(first.path, relativeSentinel), 'utf8')).toBe('workspace-private\n');
-    expect(readFileSync(path.join(second.path, relativeSentinel), 'utf8')).toBe('workspace-private\n');
+    expectPostinstallSentinel(first.path);
+    expectPostinstallSentinel(second.path);
     expect(existsSync(path.join(repo, relativeSentinel))).toBe(false);
 
     writeFileSync(path.join(first.path, relativeSentinel), 'first-only-mutation\n');
-    expect(readFileSync(path.join(second.path, relativeSentinel), 'utf8')).toBe('workspace-private\n');
+    expectPostinstallSentinel(second.path);
     expect(existsSync(path.join(repo, relativeSentinel))).toBe(false);
   }, 120_000);
 
@@ -244,10 +261,7 @@ describe('managed creation dependency recipe real path', () => {
 
     expect(recipeKey).toMatch(/^[0-9a-f]{64}$/);
     expect(existsSync(path.join(staleRoot, 'stale', 'marker'))).toBe(false);
-    expect(readFileSync(
-      path.join(staleRoot, 'postinstall-private', 'sentinel'),
-      'utf8',
-    )).toBe('workspace-private\n');
+    expectPostinstallSentinel(created.path);
   }, 120_000);
 
   it('keeps a killed install runtime inside the exact workspace cleanup authority', async () => {
@@ -466,9 +480,6 @@ describe('managed creation dependency recipe real path', () => {
       processProbe,
     });
     expect(restored, JSON.stringify(restored)).toMatchObject({ status: 'restored' });
-    expect(readFileSync(
-      path.join(created.path, 'node_modules', 'postinstall-private', 'sentinel'),
-      'utf8',
-    )).toBe('workspace-private\n');
+    expectPostinstallSentinel(created.path);
   }, 180_000);
 });

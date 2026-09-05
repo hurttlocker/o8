@@ -730,8 +730,7 @@ export async function auditPrivateDependencyView(workspacePath: string): Promise
 }
 
 export async function runDependencyInstall(
-  workspacePath: string,
-  installCommand: string,
+  workspacePath: string, installCommand: string,
   options: DependencyInstallOptions = {},
 ): Promise<DependencyInstallReceipt> {
   const parsed = parseInstallCommand(installCommand);
@@ -741,6 +740,24 @@ export async function runDependencyInstall(
     || JSON.stringify(recipe.installArgs) !== JSON.stringify(parsed.args)) {
     throw new Error('Prepared dependency recipe does not match the saved install command.');
   }
+  const packageManagerExecutable = await runReceiptedDependencyCommand(
+    workspacePath,
+    recipe,
+    recipe.installArgs,
+    options,
+  );
+  return {
+    recipe,
+    packageManagerExecutable,
+    privateViewVerified: true,
+    completedAt: (options.now ?? (() => new Date()))().toISOString(),
+  };
+}
+
+export async function runReceiptedDependencyCommand(
+  workspacePath: string, recipe: DependencyInstallRecipe, args: string[],
+  options: DependencyInstallOptions = {},
+): Promise<string> {
   const cacheRoot = path.resolve(options.cacheRoot ?? dependencyCacheRoot());
   const authority = await ensureRecipeAuthority(cacheRoot, recipe);
   const execution = await resolveReceiptedPackageManagerExecution(
@@ -753,32 +770,15 @@ export async function runDependencyInstall(
   const runtime = await createInstallRuntime(workspacePath, materializationIdentity);
   try {
     const invocation = nativeInvocation(
-      workspacePath, recipe, authority, runtime, execution.executable,
+      workspacePath, recipe, authority, runtime, execution.executable, args,
     );
     if (options.run) await options.run(invocation);
     else await defaultRun(invocation, options.materializationIdentity);
     await auditPrivateDependencyView(workspacePath);
-    return {
-      recipe,
-      packageManagerExecutable: execution.executable,
-      privateViewVerified: true,
-      completedAt: (options.now ?? (() => new Date()))().toISOString(),
-    };
+    return execution.executable;
   } finally {
     await retireInstallRuntime(runtime, options.afterRuntimeTreeCapture);
   }
-}
-export async function replayDependencyLifecycle(workspacePath: string, recipe: DependencyInstallRecipe, options: DependencyInstallOptions = {}): Promise<void> {
-  if (recipe.packageManager !== 'npm' || recipe.installArgs[0] !== 'ci' || recipe.lifecycleScripts !== 'enabled') throw new Error('Dependency lifecycle replay requires an enabled npm ci recipe.');
-  const authority = await ensureRecipeAuthority(path.resolve(options.cacheRoot ?? dependencyCacheRoot()), recipe);
-  const execution = await resolveReceiptedPackageManagerExecution(recipe.packageManager, recipe.packageManagerVersion, Boolean(options.resolveVersion));
-  const materializationIdentity = options.materializationIdentity ?? await captureWorktreeMaterializationIdentity(workspacePath);
-  const runtime = await createInstallRuntime(workspacePath, materializationIdentity);
-  try { const invocation = nativeInvocation(workspacePath, recipe, authority, runtime, execution.executable, ['rebuild']);
-    if (options.run) await options.run(invocation);
-    else await defaultRun(invocation, options.materializationIdentity);
-    await auditPrivateDependencyView(workspacePath);
-  } finally { await retireInstallRuntime(runtime, options.afterRuntimeTreeCapture); }
 }
 
 export async function measureDependencyTreeBytes(workspacePath: string): Promise<number> {

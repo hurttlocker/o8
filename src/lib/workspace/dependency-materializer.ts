@@ -24,12 +24,12 @@ import { normalizedNamespacePath } from './dependency-image-device-authority';
 import {
   auditPrivateDependencyView,
   deriveDependencyInstallRecipe,
-  replayDependencyLifecycle,
   runDependencyInstall,
   type DependencyInstallOptions,
   type DependencyInstallRecipe,
   type DependencyInstallReceipt,
 } from './dependency-install';
+import { replayDependencyLifecycle } from './dependency-lifecycle-replay';
 import { resolveApfsDependencyImagesOverride } from './dependency-image-policy';
 
 export { APFS_DEPENDENCY_IMAGES_ENV } from './dependency-image-policy';
