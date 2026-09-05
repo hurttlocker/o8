@@ -2437,6 +2437,7 @@
     {
       "path": "tests/symon-mcp-real-path.test.ts",
       "reasons": [
+        "network-listener",
         "process-signal",
         "real-path"
       ]
