@@ -266,11 +266,33 @@ fn build_catalog(
     catalog
 }
 
+fn connected_app_capabilities() -> Vec<SymonCapability> {
+    tools::symon_mcp::connected_servers()
+        .into_iter()
+        .map(|server| SymonCapability {
+            id: format!("connected_mcp_{}", server.id),
+            category: "Connected apps".to_string(),
+            title: server.name.clone(),
+            summary: format!(
+                "Use the operator-attached {} MCP server through the normal approval gate.",
+                server.name
+            ),
+            examples: vec![format!("Use {} to help with this task.", server.name)],
+            tool_names: server.tool_names,
+            availability: CapabilityAvailability::Ready,
+            availability_detail: None,
+            approval: CapabilityApproval::MayRequireApproval,
+        })
+        .collect()
+}
+
 pub fn catalog() -> Vec<SymonCapability> {
-    build_catalog(
+    let mut catalog = build_catalog(
         &registered_tool_names(),
         crate::mac_perms::screen_capture_granted_cmd(),
-    )
+    );
+    catalog.extend(connected_app_capabilities());
+    catalog
 }
 
 pub fn catalog_json() -> Value {
@@ -325,5 +347,29 @@ mod tests {
             CapabilityAvailability::SetupRequired
         );
         assert!(capability.availability_detail.is_some());
+    }
+
+    #[test]
+    fn connected_servers_get_dynamic_may_require_approval_capabilities() {
+        tools::symon_mcp::replace_cache_for_test(
+            vec![json!({
+                "name": "mcp__fixture__echo",
+                "description": "Echo a value.",
+                "parameters": { "type": "object", "properties": {}, "required": [] }
+            })],
+            vec![tools::symon_mcp::ConnectedMcpServer {
+                id: "fixture".to_string(),
+                name: "Fixture".to_string(),
+                tool_names: vec!["mcp__fixture__echo".to_string()],
+            }],
+        );
+        let capability = catalog()
+            .into_iter()
+            .find(|item| item.id == "connected_mcp_fixture")
+            .expect("connected app capability");
+        assert_eq!(capability.category, "Connected apps");
+        assert_eq!(capability.approval, CapabilityApproval::MayRequireApproval);
+        assert_eq!(capability.tool_names, vec!["mcp__fixture__echo"]);
+        tools::symon_mcp::replace_cache_for_test(Vec::new(), Vec::new());
     }
 }

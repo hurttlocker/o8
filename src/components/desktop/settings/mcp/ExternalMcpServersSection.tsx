@@ -61,6 +61,7 @@ export function ExternalMcpServersSection() {
     create,
     createServer,
     toggleWorkerInjection,
+    toggleSymonInjection,
     remove,
     testingId,
     testingNpxFamily,
@@ -502,6 +503,7 @@ export function ExternalMcpServersSection() {
               pendingRemoval={pendingRemoval === server.id}
               onTest={() => { void test(server); }}
               onToggleWorkerInjection={() => { void toggleWorkerInjection(server); }}
+              onToggleSymonInjection={() => { void toggleSymonInjection(server); }}
               onRemoveRequest={() => { setPendingRemoval(server.id); }}
               onRemoveConfirm={() => { setPendingRemoval(null); void remove(server); }}
               onRemoveCancel={() => { setPendingRemoval(null); }}

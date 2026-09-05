@@ -13,6 +13,7 @@ export interface ExternalMcpServer {
   envJson: string | null;
   enabled: boolean;
   workerInjection: boolean;
+  symonInjection: boolean;
   createdAt: string;
   updatedAt: string;
 }

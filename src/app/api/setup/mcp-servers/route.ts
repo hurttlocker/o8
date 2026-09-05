@@ -74,6 +74,7 @@ export async function POST(request: Request) {
       env?: unknown;
       enabled?: unknown;
       workerInjection?: unknown;
+      symonInjection?: unknown;
     };
 
     if (typeof body.name !== 'string' || !body.name.trim()) {
@@ -97,6 +98,7 @@ export async function POST(request: Request) {
       env: parseEnv(body.env),
       enabled: body.enabled !== false,
       workerInjection: body.transport === 'stdio' && body.workerInjection === true,
+      symonInjection: body.symonInjection === true,
     });
 
     // Fire-and-forget: warm the npm cache for npx-family commands so the
@@ -124,15 +126,17 @@ export async function PATCH(request: Request) {
       id?: unknown;
       enabled?: unknown;
       workerInjection?: unknown;
+      symonInjection?: unknown;
     };
     if (typeof body.id !== 'string' || !body.id.trim()) {
       return NextResponse.json({ error: 'Server id is required' }, { status: 400 });
     }
     const hasEnabled = typeof body.enabled === 'boolean';
     const hasWorkerInjection = typeof body.workerInjection === 'boolean';
-    if (!hasEnabled && !hasWorkerInjection) {
+    const hasSymonInjection = typeof body.symonInjection === 'boolean';
+    if (!hasEnabled && !hasWorkerInjection && !hasSymonInjection) {
       return NextResponse.json(
-        { error: 'Enabled or workerInjection must be a boolean' },
+        { error: 'Enabled, workerInjection, or symonInjection must be a boolean' },
         { status: 400 },
       );
     }
@@ -140,6 +144,7 @@ export async function PATCH(request: Request) {
     const server = updateExternalMcpServer(body.id, {
       ...(hasEnabled ? { enabled: body.enabled as boolean } : {}),
       ...(hasWorkerInjection ? { workerInjection: body.workerInjection as boolean } : {}),
+      ...(hasSymonInjection ? { symonInjection: body.symonInjection as boolean } : {}),
     });
     if (!server) {
       return NextResponse.json({ error: 'Server not found' }, { status: 404 });

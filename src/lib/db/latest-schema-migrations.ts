@@ -23,6 +23,7 @@ import { ensureV56ManagedSymonMessagesSchema } from '@/lib/db/v56-managed-symon-
 import { ensureV57CostLedgerAttributionSchema } from '@/lib/db/v57-cost-ledger-attribution-migration';
 import { ensureV58SpectatorRepoGrantsSchema } from '@/lib/db/v58-spectator-repo-grants-migration';
 import { ensureV59TaskArtifactsSchema } from '@/lib/db/v59-task-artifacts-migration';
+import { ensureV60SymonMcpInjectionSchema } from '@/lib/db/v60-symon-mcp-injection-migration';
 
 /**
  * Keep the current additive migrations behind one boot hook. `db/index.ts` is
@@ -57,4 +58,5 @@ export function ensurePostAutomationSchemas(sqlite: Database.Database): void {
   ensureV57CostLedgerAttributionSchema(sqlite);
   ensureV58SpectatorRepoGrantsSchema(sqlite);
   ensureV59TaskArtifactsSchema(sqlite);
+  ensureV60SymonMcpInjectionSchema(sqlite);
 }

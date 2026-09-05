@@ -30,6 +30,7 @@ export function ExternalMcpServerRow({
   pendingRemoval,
   onTest,
   onToggleWorkerInjection,
+  onToggleSymonInjection,
   onRemoveRequest,
   onRemoveConfirm,
   onRemoveCancel,
@@ -45,6 +46,7 @@ export function ExternalMcpServerRow({
   pendingRemoval: boolean;
   onTest: () => void;
   onToggleWorkerInjection: () => void;
+  onToggleSymonInjection: () => void;
   onRemoveRequest: () => void;
   onRemoveConfirm: () => void;
   onRemoveCancel: () => void;
@@ -149,6 +151,25 @@ export function ExternalMcpServerRow({
               />
             </span>
           ) : null}
+          <span style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 10,
+            color: 'var(--t-text-secondary)',
+            fontFamily: APP_FONT_STACK,
+            fontSize: 11,
+            fontWeight: 300,
+            letterSpacing: '-0.005em',
+          }}>
+            Attach to Symon
+            <SettingsToggleButton
+              checked={server.symonInjection}
+              onChange={onToggleSymonInjection}
+              disabled={busy || pendingRemoval}
+              activeLabel="Attached to Symon"
+              inactiveLabel="Not attached to Symon"
+            />
+          </span>
           <span style={{
             fontFamily: APP_FONT_STACK,
             fontSize: 11,

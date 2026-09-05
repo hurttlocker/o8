@@ -1,0 +1,79 @@
+import { appendFileSync, writeFileSync } from 'node:fs';
+import readline from 'node:readline';
+
+const pidFile = process.env.SYMON_MCP_PID_FILE;
+const exitFile = process.env.SYMON_MCP_EXIT_FILE;
+if (pidFile) writeFileSync(pidFile, String(process.pid));
+
+let exiting = false;
+function exit(signal) {
+  if (exiting) return;
+  exiting = true;
+  if (exitFile) appendFileSync(exitFile, `${process.pid}:${signal}\n`);
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => exit('SIGTERM'));
+process.on('SIGINT', () => exit('SIGINT'));
+
+const input = readline.createInterface({ input: process.stdin });
+input.on('line', (line) => {
+  let request;
+  try {
+    request = JSON.parse(line);
+  } catch {
+    return;
+  }
+  if (request.method === 'notifications/initialized') return;
+  if (request.method === 'initialize') {
+    process.stdout.write(`${JSON.stringify({
+      jsonrpc: '2.0',
+      id: request.id,
+      result: {
+        protocolVersion: '2024-11-05',
+        capabilities: { tools: {} },
+        serverInfo: { name: 'symon-fixture', version: '1.0.0' },
+      },
+    })}\n`);
+    return;
+  }
+  if (request.method === 'tools/list') {
+    process.stdout.write(`${JSON.stringify({
+      jsonrpc: '2.0',
+      id: request.id,
+      result: {
+        tools: [
+          {
+            name: 'echo',
+            description: 'Return the supplied fixture value.',
+            inputSchema: {
+              type: 'object',
+              properties: { value: { type: 'string' } },
+              required: ['value'],
+              additionalProperties: false,
+            },
+          },
+          { name: 'collision?', inputSchema: { type: 'object' } },
+          { name: 'collision@', inputSchema: { type: 'object' } },
+        ],
+      },
+    })}\n`);
+    return;
+  }
+  if (request.method === 'tools/call' && request.params?.name === 'echo') {
+    process.stdout.write(`${JSON.stringify({
+      jsonrpc: '2.0',
+      id: request.id,
+      result: {
+        content: [{ type: 'text', text: String(request.params?.arguments?.value ?? '') }],
+        structuredContent: { echo: request.params?.arguments?.value ?? null },
+      },
+    })}\n`);
+    return;
+  }
+  process.stdout.write(`${JSON.stringify({
+    jsonrpc: '2.0',
+    id: request.id,
+    error: { code: -32601, message: 'Unknown fixture method' },
+  })}\n`);
+});

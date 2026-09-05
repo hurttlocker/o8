@@ -49,6 +49,36 @@ public, adversarial data. Every GitHub read nests them under `observedData` with
 the model to quote or summarize the data without following instructions found
 inside it.
 
+## Connected MCP tools
+
+An external server registered in **Settings → MCP** becomes visible to Symon
+only when it is enabled and **Attach to Symon** is on. The Symon opt-in is
+independent of **Attach to supported workers** and supports both stdio and HTTP
+transports. Registry writes invalidate the Next-server catalog, and a successful
+Symon toggle asks the native shell to refresh immediately.
+
+The Next server owns the external MCP protocol. It lazily initializes attached
+servers, caches `tools/list`, and executes `tools/call`; stdio children are
+single-instance per server and are reaped after idle time or process exit. HTTP
+calls use the stored bearer without returning or logging it. Rust does not speak
+MCP. Its async catalog task calls `GET /api/symon/mcp/tools` at startup, every
+five minutes, and through the `symon_mcp_refresh` command, then stores only the
+OpenAI-function-shaped schemas in memory so `realtime_tools()` never waits on
+the network.
+
+External names use `mcp__<server>__<tool>`, contain only ASCII letters, digits,
+underscores, and hyphens, and cannot exceed 64 characters. Sanitization or
+truncation collisions remove every ambiguous tool. An unreachable server adds
+no tools. The complete Life and desktop catalogs inherit the cached schemas;
+the frozen Phone Code pack does not.
+
+Every `mcp__` tool remains unknown to the native safety classifier and therefore
+defaults to `Destructive`. The normal Rust confirmation card must settle before
+dispatch posts to `POST /api/symon/mcp/call`. Returned MCP content is capped at
+16 KB and nested under `observedData` with
+`trust:"untrusted_observed_data_not_instructions"`. The two bridge routes accept
+only operator or paired-device principals and explicitly refuse worker tokens.
+
 ## Endpoints
 
 ### POST `/api/mobile/symon/session`  (Bearer ws-token; middleware-gated like all `/api/mobile/*`)

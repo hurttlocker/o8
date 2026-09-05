@@ -31,6 +31,7 @@ pub mod o8_bridge;
 pub mod o8_ui;
 mod safe_file;
 pub mod terminal_ctl;
+pub mod symon_mcp;
 
 use super::{safety, TaskCtx};
 use chrono::{Datelike, Timelike};
@@ -44,7 +45,7 @@ pub(crate) use safe_file::{
 /// All tool schemas, in the `{name, description, parameters}` shape (which wraps
 /// directly into OpenAI's `function` object).
 pub fn all_tools() -> Vec<Value> {
-    vec![
+    let mut tools = vec![
         json!({
             "name": "symon_capabilities",
             "description": "Return Symon's truthful user-facing capability catalog. Use whenever the user asks what Symon can do, asks for examples, or wants to discover available actions. Summarize the ready capabilities and use their exact starter prompts as examples. Mention setup-required capabilities only with their availability detail.",
@@ -1240,7 +1241,9 @@ pub fn all_tools() -> Vec<Value> {
                 "required": ["name"]
             }
         }),
-    ]
+    ];
+    tools.extend(symon_mcp::cached_tool_schemas());
+    tools
 }
 
 /// Tools the model is allowed to see — Destructive ones are withheld entirely.
@@ -1281,6 +1284,10 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
         if safety::is_never_do_path(path) {
             return Err(format!("Path '{path}' is a protected system path"));
         }
+    }
+
+    if name.starts_with("mcp__") {
+        return Ok(symon_mcp::dispatch_tool_call(name, args).await);
     }
 
     match name {
