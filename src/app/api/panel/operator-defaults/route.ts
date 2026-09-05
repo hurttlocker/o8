@@ -74,9 +74,7 @@ function operatorDefaultsPayload(
   dispatchableRuntimes: DispatchableRuntimeInventory,
 ) {
   return {
-    ...data,
-    effectiveOverride: effectiveOverride(),
-    settingsToml,
+    ...operatorDefaultsValuesPayload(data, settingsToml),
     cliAuth,
     dispatchableRuntimes,
     roleRoutes: projectAgentRoleRoutes({
@@ -84,6 +82,17 @@ function operatorDefaultsPayload(
       sources: data.sources,
       dispatchableRuntimes,
     }),
+  };
+}
+
+function operatorDefaultsValuesPayload(
+  data: OperatorDefaultsData,
+  settingsToml: OperatorDefaultsTomlState,
+) {
+  return {
+    ...data,
+    effectiveOverride: effectiveOverride(),
+    settingsToml,
     recentRoleReceipts: listRoleRoutingReceipts({ limit: 60 }),
   };
 }
@@ -624,8 +633,16 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
   return update;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const valuesOnly = new URL(request.url).searchParams.get('include') === 'values';
+    if (valuesOnly) {
+      const [data, settingsToml] = await Promise.all([
+        getOperatorDefaults(),
+        getOperatorDefaultsTomlState(),
+      ]);
+      return response(operatorDefaultsValuesPayload(data, settingsToml));
+    }
     const [data, settingsToml, cliAuth] = await Promise.all([
       getOperatorDefaults(),
       getOperatorDefaultsTomlState(),

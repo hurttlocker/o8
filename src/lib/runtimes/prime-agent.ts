@@ -95,8 +95,8 @@ export const primeAgentRuntime: AgentRuntime = {
   displayName: 'Prime Agent',
   capabilities,
 
-  async discoverSessions(): Promise<RuntimeSession[]> {
-    if (!await hasPrimeAgentCli()) return [];
+  async discoverSessions(options = {}): Promise<RuntimeSession[]> {
+    if ((options.fresh ?? false) && !await hasPrimeAgentCli()) return [];
     const owned = await getOwnedPrimeAgentFleetAdditions().catch((error) => {
       console.warn('[prime-agent-runtime] discoverSessions owned fleet failed:', error);
       return null;

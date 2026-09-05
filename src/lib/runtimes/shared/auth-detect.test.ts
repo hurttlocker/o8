@@ -150,6 +150,36 @@ afterAll(() => {
 });
 
 describe("OpenCode readiness preflight", () => {
+  it("serves value-only operator defaults without probing runtime authentication", async () => {
+    invalidateRuntimeAuthCache();
+    scanAndLinkMock.mockClear();
+
+    const response = await operatorDefaultsRoute.GET(new Request(
+      "http://127.0.0.1/api/panel/operator-defaults?include=values",
+    ));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.values).toBeTypeOf("object");
+    expect(payload).not.toHaveProperty("cliAuth");
+    expect(payload).not.toHaveProperty("dispatchableRuntimes");
+    expect(scanAndLinkMock).not.toHaveBeenCalled();
+  });
+
+  it("coalesces concurrent cold auth snapshot reads", async () => {
+    invalidateRuntimeAuthCache();
+    scanAndLinkMock.mockClear();
+
+    const snapshots = await Promise.all(
+      Array.from({ length: 10 }, () => getRuntimeAuthSnapshot()),
+    );
+
+    expect(new Set(snapshots).size).toBe(1);
+    expect(
+      scanAndLinkMock.mock.calls.filter(([binary]) => binary === "opencode2"),
+    ).toHaveLength(1);
+  });
+
   it("reports the trusted keyless default as ready without claiming authentication", async () => {
     invalidateRuntimeAuthCache();
     const snapshot = await getRuntimeAuthSnapshot();
@@ -166,7 +196,9 @@ describe("OpenCode readiness preflight", () => {
     expect(status.detail).toContain("keyless dispatch");
     expect(status.fix).toBe("No action needed.");
 
-    const response = await operatorDefaultsRoute.GET();
+    const response = await operatorDefaultsRoute.GET(new Request(
+      "http://127.0.0.1/api/panel/operator-defaults",
+    ));
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
       dispatchableRuntimes: expect.arrayContaining([

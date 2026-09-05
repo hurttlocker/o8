@@ -63,7 +63,6 @@ import { useDefaultComposerSendBuffer } from './chat-panel/useDefaultComposerSen
 import { useAgentVoiceMode } from './chat-panel/useAgentVoiceMode';
 import { shouldApplyAutoRestoreAfterFetch } from './chat-panel/autoRestoreGuard';
 import { loadOrchestrationMode, persistOrchestrationMode, type ChatModelId, type OrchestrationMode } from '@/components/desktop/orchestrator/ModePicker';
-import { useReadyRuntimeCount } from './use-ready-runtimes';
 import {
   consumePendingComposerDraft,
   parseModeRoutingPrefix,
@@ -105,6 +104,7 @@ import type {
 } from './chat-panel/types';
 import {
   fetchThoughtsOperatorDefaults,
+  scheduleThoughtsRuntimeReadiness,
   THOUGHTS_OPERATOR_DEFAULTS_FALLBACK,
   type OrchestratorBackendSetting,
 } from './operator-defaults';
@@ -296,8 +296,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const [orchestrationMode, setOrchestrationMode] = useState<OrchestrationMode>(
     () => lockedMode ?? initialMode ?? 'fleet',
   );
-  // Installed runtime count → silent solo/fleet decision (see soloOrchestrator).
-  const readyRuntimeCount = useReadyRuntimeCount();
   const [singleRuntime, setSingleRuntime] = useState<OrchestratorRuntime>(
     () => initialSingleRuntime ?? 'codex',
   );
@@ -499,7 +497,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   // (dispatch). While the one-time probe is loading (null), default to fleet —
   // dispatch is the thesis, and never gate the orchestrator's tools on a
   // pending fetch.
-  const soloOrchestrator = readyRuntimeCount === 1 && lockedMode !== 'single' && !isChatMode;
+  const soloOrchestrator = operatorDefaults.readyRuntimeCount === 1 && lockedMode !== 'single' && !isChatMode;
   const isOrchestratorMode = !isSingleMode && !isChatMode && (targetAgentKey === '__claude__' || !sessionTargets.some((s) => s.key === targetAgentKey));
 
   const orchStream = useOrchestratorStream(isOrchestratorMode && orchestrationSettingsLoaded && !isChatMode ? resolvedRepoPath : null, {
@@ -528,7 +526,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
 
   useEffect(() => {
     const controller = new AbortController();
-
+    const cancelRuntimeReadiness = scheduleThoughtsRuntimeReadiness(controller.signal, (readyRuntimeCount) => {
+      setOperatorDefaults((current) => ({ ...current, readyRuntimeCount }));
+    });
     void (async () => {
       const defaults = await fetchThoughtsOperatorDefaults(controller.signal);
       if (controller.signal.aborted) return;
@@ -544,7 +544,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       setThinkingOverride(nextThinkingPreferences.thinkingOverride);
     })();
 
-    return () => controller.abort();
+    return () => { controller.abort(); cancelRuntimeReadiness(); };
   }, []);
 
   useEffect(() => {

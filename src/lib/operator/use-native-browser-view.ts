@@ -14,6 +14,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { fetchOperatorDefaultsValues } from '@/lib/operator/operator-defaults-values-client';
 
 let cached: boolean | null = null;
 
@@ -24,7 +25,7 @@ export function useNativeBrowserViewFlag(): boolean {
     // it's still unknown (first mount this session).
     if (cached !== null) return;
     let cancelled = false;
-    fetch('/api/panel/operator-defaults')
+    fetchOperatorDefaultsValues()
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (cancelled || !data || typeof data !== 'object') return;

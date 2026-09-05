@@ -109,7 +109,11 @@ describe('interaction fixtures', () => {
     const fixture = materializeFixture(plan, { root: fs.mkdtempSync(path.join(os.tmpdir(), 'o8-bench-test-')) });
     scratchDirs.push(fixture.dataDir);
     const registry = JSON.parse(fs.readFileSync(path.join(fixture.dataDir, 'repos.json'), 'utf8'));
+    const terminalState = JSON.parse(fs.readFileSync(path.join(fixture.dataDir, 'terminal-states', 'tile-root.json'), 'utf8'));
     expect(registry.repos).toHaveLength(3);
+    expect(terminalState.activeTabId).toBe('fixture-agent');
+    expect(terminalState.tabs.map((tab: { id: string }) => tab.id)).toEqual(plan.tabs.map((tab) => tab.id));
+    expect(fs.existsSync(path.join(fixture.dataDir, 'chat-history', 'thoughts-interaction-fixture.json'))).toBe(true);
     expect(fixture.digest).toBe(fixtureDigest(plan));
     expect(fixture.dataDir.startsWith(os.homedir() + '/.o8')).toBe(false);
     for (const repo of registry.repos) {
@@ -435,6 +439,8 @@ describe('cleanup verification', () => {
     const initial = new Map([
       [100, { pid: 100, ppid: 1, pgid: 100, command: 'node launcher --run-tag-1697' }],
       [101, { pid: 101, ppid: 100, pgid: 100, command: 'next-server (v16)' }],
+      [102, { pid: 102, ppid: 101, pgid: 100, command: '/usr/bin/git status --porcelain' }],
+      [103, { pid: 103, ppid: 101, pgid: 100, command: '/opt/homebrew/bin/gh issue view 1817 --repo example/repo' }],
     ]);
     const inventory = createOwnedProcessInventory('run-tag-1697', { harnessPid: 999 });
     addOwnedProcessRoot(inventory, 100, 'application-launcher', initial);
@@ -462,6 +468,9 @@ describe('cleanup verification', () => {
     });
     expect(signaled).toEqual([[101, 'SIGTERM']]);
     expect(result.survivors).toEqual([]);
+    expect(result.inventoriedByLabel.git).toBe(1);
+    expect(result.inventoriedByLabel['github-cli']).toBe(1);
+    expect(result.githubCliCommandShapes).toEqual({ 'gh issue view': 1 });
   });
 
   it('invalidates cleanup when the process inventory itself fails', async () => {

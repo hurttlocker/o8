@@ -174,7 +174,7 @@ export function TelemetryConsentCard({
     let alive = true;
     void (async () => {
       try {
-        const response = await request({}, { fresh: true });
+        const response = await request({}, { fresh: true, includeRuntime: false });
         const payload = await response.json().catch(() => ({})) as ConsentResponse;
         if (!response.ok) return;
         if (alive) {

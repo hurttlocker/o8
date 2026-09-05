@@ -34,14 +34,14 @@ afterAll(() => {
 
 describe.sequential('workspace parking mode real Settings path', () => {
   it('defaults to manual and persists pressure mode through POST, GET, and TOML', async () => {
-    expect((await (await GET()).json()).values.workspaceParkingMode).toBe('manual');
+    expect((await (await GET(new Request('http://127.0.0.1/api/panel/operator-defaults'))).json()).values.workspaceParkingMode).toBe('manual');
 
     const response = await POST(post({ workspaceParkingMode: 'pressure' }));
     const payload = await response.json();
     expect(response.status).toBe(200);
     expect(payload.values.workspaceParkingMode).toBe('pressure');
     expect(payload.sources.workspaceParkingMode).toBe('file');
-    expect((await (await GET()).json()).values.workspaceParkingMode).toBe('pressure');
+    expect((await (await GET(new Request('http://127.0.0.1/api/panel/operator-defaults'))).json()).values.workspaceParkingMode).toBe('pressure');
     expect(readFileSync(join(dataDir, 'settings.toml'), 'utf8'))
       .toContain('workspace_parking_mode = "pressure"');
   }, 15_000);
@@ -49,6 +49,6 @@ describe.sequential('workspace parking mode real Settings path', () => {
   it('rejects an unknown mode without changing the durable selection', async () => {
     const response = await POST(post({ workspaceParkingMode: 'automatic' }));
     expect(response.status).toBe(400);
-    expect((await (await GET()).json()).values.workspaceParkingMode).toBe('pressure');
+    expect((await (await GET(new Request('http://127.0.0.1/api/panel/operator-defaults'))).json()).values.workspaceParkingMode).toBe('pressure');
   }, 15_000);
 });

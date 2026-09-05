@@ -125,6 +125,14 @@ async function fetchOwnedSessionStates(sessionKeys: string[]): Promise<Record<st
   }
 }
 
+export function needsRuntimeSessionLivenessCheck(tabs: PersistedTabState['tabs']) {
+  return tabs.some((tab) => (
+    (tab.kind ?? 'terminal') === 'chat'
+    && !tab.orchestrationPacket
+    && Boolean(tab.chatSessionKey?.trim() || tab.claudeSessionId?.trim())
+  ));
+}
+
 /**
  * Pure logic for restoring persisted tab state.
  * Computes which tabs to restore, which tmux sessions to reattach,
@@ -151,6 +159,7 @@ export async function computeRestoredTabs(
     if (kind === 'chat' && !tab.orchestrationPacket) return true;
     return false;
   });
+  const needsRuntimeSessionCheck = needsRuntimeSessionLivenessCheck(saved.tabs);
 
   // Kick the archived-thread fetch off in parallel with the liveness check so
   // the two bounded probes overlap rather than serialize. Gated on actually
@@ -190,7 +199,10 @@ export async function computeRestoredTabs(
   if (validationMode === 'validated' && needsLivenessCheck) {
     try {
       const result = await Promise.race([
-        Promise.all([checkAliveSessions(tmuxNames), loadLiveRuntimeSessionKeys()]),
+        Promise.all([
+          checkAliveSessions(tmuxNames),
+          needsRuntimeSessionCheck ? loadLiveRuntimeSessionKeys() : Promise.resolve(new Set<PersistedRuntimeSessionKey>()),
+        ]),
         new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 2000)),
       ]);
       if (result === 'timeout') {

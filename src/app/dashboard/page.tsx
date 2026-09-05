@@ -141,6 +141,7 @@ import { useSessionState } from './hooks/useSessionState';
 import { useSettingsOverlayDismiss } from './hooks/useSettingsOverlayDismiss';
 import { shouldPresentWorkerInSplit } from '@/lib/orchestrator/worker-launch-context';
 import { useSetupWizard } from './hooks/useSetupWizard';
+import { useRightPanelPersistence } from './hooks/useRightPanelPersistence';
 import { useTileLayout } from './hooks/useTileLayout';
 import { useUIChrome } from './hooks/useUIChrome';
 import { useWorkspaceTerminal } from './hooks/useWorkspaceTerminal';
@@ -1032,8 +1033,16 @@ function DashboardInner() {
   // SSR-safe defaults; hydrate from localStorage in an effect so the
   // visibility/kind survives a reload but server and first client render
   // match (no hydration mismatch).
+  const [responsiveAutoCollapsed, setResponsiveAutoCollapsed] = useState({ left: false, right: false });
   const [chatVisible, setChatVisible] = useState(false);
   const [rightPanelKind, setRightPanelKind] = useState<'review' | 'o8'>('o8');
+  useRightPanelPersistence({
+    chatVisible,
+    rightPanelKind,
+    setChatVisible,
+    setRightPanelKind,
+    suspendVisiblePersistence: responsiveAutoCollapsed.right,
+  });
   // Keep each expensive panel instance alive after its first visit. Presentation
   // can collapse or crossfade, but reopening must not repay its chunk, queries,
   // observers, or local tab state.
@@ -1052,23 +1061,7 @@ function DashboardInner() {
   // number lives in viewportWidthRef for imperative reads.
   const [viewportBands, setViewportBands] = useState<{ compact: boolean; belowLeftCollapse: boolean } | null>(null);
   const viewportWidthRef = useRef<number | null>(null);
-  const [responsiveAutoCollapsed, setResponsiveAutoCollapsed] = useState({ left: false, right: false });
   const responsiveManualOpenRef = useRef({ left: false, right: false });
-  useEffect(() => {
-    try {
-      const visRaw = window.localStorage.getItem('o8:right-panel:visible');
-      const kindRaw = window.localStorage.getItem('o8:right-panel:kind');
-      if (visRaw === '1') setChatVisible(true);
-      if (kindRaw === 'o8' || kindRaw === 'review') setRightPanelKind(kindRaw);
-    } catch { /* ignore */ }
-  }, []);
-  useEffect(() => {
-    if (responsiveAutoCollapsed.right) return;
-    try { window.localStorage.setItem('o8:right-panel:visible', chatVisible ? '1' : '0'); } catch { /* ignore */ }
-  }, [chatVisible, responsiveAutoCollapsed.right]);
-  useEffect(() => {
-    try { window.localStorage.setItem('o8:right-panel:kind', rightPanelKind); } catch { /* ignore */ }
-  }, [rightPanelKind]);
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
     const update = () => {

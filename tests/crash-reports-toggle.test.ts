@@ -44,7 +44,7 @@ describe('crash reports toggle — real route round-trip', () => {
     // The exact resolver every node layer + the webview config route read.
     expect(resolveCrashReportsEnabledSync()).toBe(false);
 
-    const getRes = await GET();
+    const getRes = await GET(new Request('http://127.0.0.1/api/panel/operator-defaults'));
     const getPayload = await getRes.json();
     expect(getPayload.values.crashReportsEnabled).toBe(false);
 

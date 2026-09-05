@@ -37,6 +37,7 @@ const POLL_TIMEOUT_MS = 20_000;
 const DISABLED_BACKOFF_MS = 30_000;
 const ERROR_BACKOFF_MS = 8_000;
 const AMBIENT_CADENCE_MS = 90_000;
+const CAPABILITY_DEFER_MS = 5_000;
 
 interface NarrationPollResponse {
   ok: boolean;
@@ -63,7 +64,7 @@ async function speakAction(action: NarrationSpeechAction): Promise<void> {
 }
 
 export function NarrationSpeakerHost() {
-  const capability = useChatgptVoiceCapability();
+  const capability = useChatgptVoiceCapability({ deferMs: CAPABILITY_DEFER_MS });
 
   useEffect(() => {
     if (!isTauri()) return;

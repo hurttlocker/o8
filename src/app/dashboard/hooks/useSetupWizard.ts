@@ -18,17 +18,19 @@ export function useSetupWizard() {
         const configRes = await fetch('/api/setup/config');
         if (!configRes.ok) return;
         const config = await configRes.json();
+        // A completed install must not run the full CLI/auth detector during
+        // dashboard startup. That route probes several local binaries and can
+        // hold the server event loop long enough to delay UI chunks. Detection
+        // remains part of the onboarding and explicit settings paths.
+        if (config.setupComplete || config.completedAt) return;
+        // Paint onboarding before the optional detector finishes.
+        setSetupWizardOpen(true);
         try {
           const rawDetection = await loadSetupDetection();
           if (rawDetection) {
             setSetupDetection(normalizeDetection(rawDetection as Record<string, unknown>));
           }
         } catch { /* detection is optional for onboarding */ }
-        // Treat either flag as "done" — some older installs only have
-        // completedAt because of the schema-drift bug fixed 2026-04-09.
-        if (config.setupComplete || config.completedAt) return;
-        // Show the onboarding screen immediately — detection runs in background
-        setSetupWizardOpen(true);
       } catch { /* silent — don't block dashboard */ }
       finally { setSetupCheckComplete(true); }
     })();

@@ -270,11 +270,14 @@ export const codexRuntime: AgentRuntime = {
     ))?.identityId ?? null;
   },
 
-  async discoverSessions(): Promise<RuntimeSession[]> {
-    // Discover both user-launched (terminal) and IDE-owned sessions
+  async discoverSessions(options = {}): Promise<RuntimeSession[]> {
+    const fresh = options.fresh ?? false;
+    // Normal dashboard reads stay on o8-owned state. Full local Codex history
+    // discovery is reserved for explicit fresh reads so shell boot cannot
+    // stampede the host with CLI probes.
     const [discovered, owned] = await Promise.allSettled([
-      getCodexDiscoveredFleetAdditions({ fresh: true }),
-      getOwnedCodexFleetAdditions({ fresh: true }),
+      fresh ? getCodexDiscoveredFleetAdditions({ fresh: true }) : Promise.resolve({ agents: [] }),
+      getOwnedCodexFleetAdditions({ fresh }),
     ]);
 
     const sessions: RuntimeSession[] = [];

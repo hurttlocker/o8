@@ -63,6 +63,7 @@ import {
   type DispatchedWorkerLane,
 } from './dispatched-worker-lane';
 import { useOutsideWorkerLaunchBridge } from './useOutsideWorkerLaunchBridge';
+import { waitForWorkspaceTerminalHandle } from './workspace-terminal-readiness';
 interface UseWorkspaceTerminalArgs {
   activeTileId: string | null;
   contextualPanelHandlesRef: MutableRefObject<Map<string, ContextualPanelHandle>>;
@@ -178,7 +179,6 @@ export function useWorkspaceTerminal({
   const termCreatedRef = useRef(false);
   const terminalRef = useRef<TerminalHandle>(null);
   const workspaceTerminalHandlesRef = useRef<Map<string, TerminalTabHandle>>(new Map());
-  const pendingWorkspaceTerminalResolversRef = useRef<Map<string, (handle: TerminalTabHandle) => void>>(new Map());
   const [workspaceChatSessionByTileId, setWorkspaceChatSessionByTileId] = useState<Record<string, string | undefined>>({});
   const [workspaceChatSessionsByTileId, setWorkspaceChatSessionsByTileId] = useState<Record<string, MobileInboxSnapshot['sessions']>>({});
   const [automationLaneSessions, setAutomationLaneSessions] = useState<MobileInboxSnapshot['sessions']>([]);
@@ -231,15 +231,9 @@ export function useWorkspaceTerminal({
   const registerWorkspaceTerminalHandle = useCallback((tileId: string, handle: TerminalTabHandle | null) => {
     if (handle) {
       workspaceTerminalHandlesRef.current.set(tileId, handle);
-      const resolver = pendingWorkspaceTerminalResolversRef.current.get(tileId);
-      if (resolver) {
-        pendingWorkspaceTerminalResolversRef.current.delete(tileId);
-        resolver(handle);
-      }
       return;
     }
     workspaceTerminalHandlesRef.current.delete(tileId);
-    pendingWorkspaceTerminalResolversRef.current.delete(tileId);
   }, []);
 
   // Report-time forensics (GQXEZD): the silent "New session does nothing"
@@ -259,7 +253,6 @@ export function useWorkspaceTerminal({
         repoPath: leaf.content.kind === 'terminal' ? (leaf.content.repoPath ?? null) : undefined,
       })),
       handleTileIds: [...workspaceTerminalHandlesRef.current.keys()],
-      pendingResolverTileIds: [...pendingWorkspaceTerminalResolversRef.current.keys()],
     };
   }), []);
 
@@ -646,29 +639,15 @@ export function useWorkspaceTerminal({
       return { tileId, handle };
     }
     const ensuredTileId = ensureWorkspaceTerminalTile(repoPath, preferredTileId, activate);
-
-    for (let attempt = 0; attempt < 120; attempt += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 100));
-      const target = getPreferredWorkspaceTerminalTarget(repoPath, (ensuredTileId ?? preferredTileId) ?? undefined);
-      if (target) {
-        if (repoPath) {
-          setTerminalTileRepoScope(target.tileId, repoPath);
-        }
-        if (activate) setActiveTileId(target.tileId);
-        return target;
-      }
-    }
-
     if (ensuredTileId) {
-      const awaitedHandle = await new Promise<TerminalTabHandle | null>((resolve) => {
-        const timeoutId = window.setTimeout(() => {
-          pendingWorkspaceTerminalResolversRef.current.delete(ensuredTileId);
-          resolve(null);
-        }, 12_000);
-        pendingWorkspaceTerminalResolversRef.current.set(ensuredTileId, (handle) => {
-          window.clearTimeout(timeoutId);
-          resolve(handle);
-        });
+      // Read the handle map directly. The callbacks above close over the tile
+      // layout from the click render, so re-running layout-based selection
+      // while React mounts the new tile can never see that tile. The handle
+      // registry is mutable current state and becomes authoritative as soon as
+      // WorkspaceTerminal mounts.
+      const awaitedHandle = await waitForWorkspaceTerminalHandle({
+        read: () => workspaceTerminalHandlesRef.current.get(ensuredTileId) ?? null,
+        wait: (delayMs) => new Promise((resolve) => window.setTimeout(resolve, delayMs)),
       });
 
       if (awaitedHandle) {

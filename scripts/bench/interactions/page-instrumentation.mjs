@@ -2,14 +2,25 @@
 // serialized into the browser, so it must stay dependency-free.
 
 // Installed with page.addInitScript before any app code runs.
-export function instrumentationInitScript({ injectedDelayMs = 0 } = {}) {
+export function instrumentationInitScript({ injectedDelayMs = 0, selectedRepoId = null } = {}) {
+  // The dashboard persists its selected repository in sessionStorage while
+  // tab state lives in the isolated fixture data directory. Seed both halves
+  // of the same workspace so the app does not legitimately rebind tile-root
+  // to a different fleet repo before restoring the fixture tabs.
+  if (typeof selectedRepoId === 'string' && selectedRepoId) {
+    sessionStorage.setItem('cortex-global-repo-id', selectedRepoId);
+  }
   const state = {
     startedAt: performance.now(),
     longTasks: [],
     eventTimings: [],
     supported: { longtask: false, event: false, paint: false },
     hydratedAtMs: null,
+    activeWorkspaceId: null,
     activeTabId: null,
+    activeLabel: null,
+    activeWorkspaceTabIds: [],
+    workspaceEvents: [],
     injectedDelayMs,
     injectedDelayApplications: 0,
   };
@@ -67,8 +78,44 @@ export function instrumentationInitScript({ injectedDelayMs = 0 } = {}) {
   // The workspace announces its active tab with this event, so a tab switch
   // has an app-authored completion signal instead of a style heuristic.
   window.addEventListener('o8:workspace-active-label', (event) => {
-    const tabId = event?.detail?.tabId;
+    const detail = event?.detail;
+    const workspaceId = detail?.workspaceId;
+    state.workspaceEvents.push({
+      atMs: Number(performance.now().toFixed(2)),
+      workspaceId: typeof workspaceId === 'string' ? workspaceId : null,
+      tabId: typeof detail?.tabId === 'string' ? detail.tabId : null,
+      label: typeof detail?.label === 'string' ? detail.label : null,
+      tabIds: Array.isArray(detail?.tabs)
+        ? detail.tabs.map((tab) => tab?.id).filter((id) => typeof id === 'string')
+        : [],
+      activeWorkspaceSurface: detail?.activeWorkspaceSurface ?? null,
+      removed: detail?.removed === true,
+    });
+    if (state.workspaceEvents.length > 100) state.workspaceEvents.shift();
+    if (detail?.removed) {
+      if (workspaceId && workspaceId === state.activeWorkspaceId) {
+        state.activeWorkspaceId = null;
+        state.activeTabId = null;
+        state.activeLabel = null;
+        state.activeWorkspaceTabIds = [];
+      }
+      return;
+    }
+    // Split and transitioning layouts can keep more than one workspace root
+    // mounted. Inactive roots still broadcast their own tab state; accepting
+    // whichever event happened last makes a real tab switch look stuck and
+    // lets an inactive label satisfy active-context observation. Track only
+    // the root the app marks as the active workspace surface. Older builds
+    // that do not publish the field remain measurable.
+    if (detail?.activeWorkspaceSurface === false) return;
+    if (typeof workspaceId === 'string') state.activeWorkspaceId = workspaceId;
+    const tabId = detail?.tabId;
     if (typeof tabId === 'string' || tabId === null) state.activeTabId = tabId;
+    const label = detail?.label;
+    if (typeof label === 'string' || label === null) state.activeLabel = label;
+    state.activeWorkspaceTabIds = Array.isArray(detail?.tabs)
+      ? detail.tabs.map((tab) => tab?.id).filter((id) => typeof id === 'string')
+      : [];
   });
 
   if (injectedDelayMs > 0) {
@@ -434,7 +481,8 @@ export async function observeActiveContextReveal(input) {
     .some((element) => {
       const label = element.getAttribute('aria-label') || element.getAttribute('title') || '';
       return label.startsWith(`${repoName} ·`) || label.startsWith(`${repoName}/`) || label.startsWith(`${repoName} /`);
-    });
+    }) || [state?.activeLabel].some((label) => typeof label === 'string'
+      && (label.startsWith(`${repoName} ·`) || label.startsWith(`${repoName}/`) || label.startsWith(`${repoName} /`)));
   if (anchored()) {
     return { durationMs: null, note: `workspace was already anchored on ${repoName}` };
   }

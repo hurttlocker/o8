@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { applyCreatedTerminalSession, canPreserveScopedTabs, computeRestoredTabs, mergeUserSpawnedTabs, reconcileValidatedTabs, resetControllerRefs } from './terminal-restore';
+import { applyCreatedTerminalSession, canPreserveScopedTabs, computeRestoredTabs, mergeUserSpawnedTabs, needsRuntimeSessionLivenessCheck, reconcileValidatedTabs, resetControllerRefs } from './terminal-restore';
 import type { TerminalTab } from './types';
 
 function tab(overrides: Partial<TerminalTab>): TerminalTab {
@@ -14,6 +14,35 @@ function tab(overrides: Partial<TerminalTab>): TerminalTab {
     ...overrides,
   };
 }
+
+describe('needsRuntimeSessionLivenessCheck', () => {
+  it('skips fleet discovery for terminal-only and packet-owned restore state', () => {
+    expect(needsRuntimeSessionLivenessCheck([
+      { id: 'terminal', label: 'Terminal', kind: 'terminal', cliAgent: 'shell' },
+      {
+        id: 'packet',
+        label: 'Packet',
+        kind: 'chat',
+        cliAgent: 'codex',
+        chatSessionKey: 'codex-owned:packet',
+        orchestrationPacket: { packetId: 'packet-1' } as never,
+      },
+    ])).toBe(false);
+  });
+
+  it('requests discovery when restoring a user-linked runtime chat', () => {
+    expect(needsRuntimeSessionLivenessCheck([
+      {
+        id: 'runtime-chat',
+        label: 'Runtime chat',
+        kind: 'chat',
+        cliAgent: 'codex',
+        chatRuntime: 'codex',
+        chatSessionKey: 'codex:thread-1',
+      },
+    ])).toBe(true);
+  });
+});
 
 /**
  * GQXEZD (2026-07-16): the silent "New session does nothing" saga. On slow

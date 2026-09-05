@@ -121,7 +121,7 @@ export function TimelineExpanded() {
         setError(null);
         const [timelineRes, inboxRes] = await Promise.all([
           fetch('/api/panel/timeline', { cache: 'no-store' }).catch(() => null),
-          fetch('/api/mobile/inbox', { cache: 'no-store' }).catch(() => null),
+          fetch('/api/mobile/inbox?workspaceReview=0', { cache: 'no-store' }).catch(() => null),
         ]);
 
         if (timelineRes?.ok) {

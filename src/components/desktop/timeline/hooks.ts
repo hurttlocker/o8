@@ -4,6 +4,8 @@ import type { AgentSummary } from '@/lib/fleet/types';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import type { TimelineSegment } from './types';
 
+const INITIAL_TIMELINE_LOAD_DELAY_MS = 3_000;
+
 export function useTimelineData() {
   const [segments, setSegments] = useState<TimelineSegment[]>([]);
   const [windowMinutes, setWindowMinutes] = useState(0);
@@ -60,12 +62,13 @@ export function useTimelineData() {
   }, []);
 
   useEffect(() => {
-    fetchData();
+    const initialLoad = window.setTimeout(() => { void fetchData(); }, INITIAL_TIMELINE_LOAD_DELAY_MS);
     const handler = () => { fetchData(); };
     const wsEvents = ['o8:lifecycle-reconcile'];
     for (const e of wsEvents) window.addEventListener(e, handler);
     const fallbackId = setInterval(fetchData, 300_000);
     return () => {
+      window.clearTimeout(initialLoad);
       clearInterval(fallbackId);
       for (const e of wsEvents) window.removeEventListener(e, handler);
     };
@@ -79,7 +82,7 @@ export function useTimelineSessions() {
 
   const fetchSessions = useCallback(async () => {
     try {
-      const res = await fetchOnce('/api/mobile/inbox');
+      const res = await fetchOnce('/api/mobile/inbox?workspaceReview=0');
       if (!res.ok) return;
       const data = await res.json() as MobileInboxSnapshot;
       setSessions(data.sessions ?? []);
@@ -89,12 +92,13 @@ export function useTimelineSessions() {
   }, []);
 
   useEffect(() => {
-    void fetchSessions();
+    const initialLoad = window.setTimeout(() => { void fetchSessions(); }, INITIAL_TIMELINE_LOAD_DELAY_MS);
     const handler = () => { void fetchSessions(); };
     const wsEvents = ['o8:inbox', 'o8:lifecycle-reconcile'];
     for (const e of wsEvents) window.addEventListener(e, handler);
     const fallbackId = setInterval(fetchSessions, 300_000);
     return () => {
+      window.clearTimeout(initialLoad);
       clearInterval(fallbackId);
       for (const e of wsEvents) window.removeEventListener(e, handler);
     };

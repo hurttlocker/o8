@@ -175,9 +175,9 @@ export const opencodeRuntime: AgentRuntime = {
   displayName: 'OpenCode 2',
   capabilities,
 
-  async discoverSessions(): Promise<RuntimeSession[]> {
+  async discoverSessions(options = {}): Promise<RuntimeSession[]> {
     const [owned] = await Promise.allSettled([
-      getOwnedOpencodeFleetAdditions({ fresh: true }),
+      getOwnedOpencodeFleetAdditions({ fresh: options.fresh ?? false }),
     ]);
 
     const sessions: RuntimeSession[] = [];

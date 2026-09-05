@@ -25,6 +25,7 @@ import {
   listDispatchableRuntimes,
   type OrchestratorRuntime,
 } from '@/lib/orchestrator/runtime-capabilities';
+import { fetchOperatorDefaultsValues } from '@/lib/operator/operator-defaults-values-client';
 import type { WorkerStartMode } from '@/lib/operator/worker-start-mode';
 
 interface DispatchDefaults {
@@ -238,7 +239,7 @@ export function FleetWorkerChip({ compact = false }: { compact?: boolean }) {
 
   const refetch = useCallback(async () => {
     try {
-      const res = await fetch('/api/panel/operator-defaults', { cache: 'no-store' });
+      const res = await fetchOperatorDefaultsValues();
       if (!res.ok) return;
       const payload = await res.json() as {
         values?: Partial<DispatchDefaults>;

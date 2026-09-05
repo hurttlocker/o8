@@ -109,8 +109,9 @@ export async function measureDesignMode(page, fixtureUrl, targetBlockId, timeout
     const hoverPending = page.evaluate(observeDesignHover, { before, timeoutMs: 6_000 })
       .catch((error) => unavailableSample('Design Mode hover observation', error));
     await page.evaluate(() => true);
-    await page.mouse.move(blockPoint.x, blockPoint.y, { steps: 12 });
-    await page.mouse.move(blockPoint.x + 24, blockPoint.y + 18, { steps: 6 });
+    // Measure feedback after the pointer reaches the target, not the duration
+    // of an intentionally animated multi-step cursor journey across the page.
+    await page.mouse.move(blockPoint.x, blockPoint.y);
     const hover = await hoverPending;
 
     const selectPending = page.evaluate(observePaintedCondition, {
@@ -148,17 +149,42 @@ const RESTORE_FACETS = Object.freeze({
   terminal: '[data-o8-workspace-tab="fixture-terminal"]',
   agent: '[data-o8-workspace-tab="fixture-agent"]',
   canvas: '[data-o8-workspace-tab="fixture-canvas"]',
-  browser: '[data-o8-browser="panel"]',
+  browser: '[data-o8-browser="panel"], [data-o8-native-browser="panel"]',
 });
 
 async function facetEstablished(page, selector) {
   return page.locator(selector).count().then((count) => count > 0).catch(() => false);
 }
 
+async function readRestorePersistence(page) {
+  return page.evaluate(() => {
+    let browserScopes = [];
+    try {
+      const raw = window.localStorage.getItem('o8:browser-pane-state:v1');
+      const parsed = raw ? JSON.parse(raw) : null;
+      browserScopes = Array.isArray(parsed?.scopes)
+        ? parsed.scopes.map((scope) => ({
+          scopeKey: scope?.scopeKey ?? null,
+          tabCount: Array.isArray(scope?.tabs) ? scope.tabs.length : 0,
+          activeTabId: scope?.activeTabId ?? null,
+        }))
+        : [];
+    } catch { /* diagnostic only */ }
+    return {
+      rightPanelVisible: window.localStorage.getItem('o8:right-panel:visible'),
+      rightPanelKind: window.localStorage.getItem('o8:right-panel:kind'),
+      activeO8Tab: window.localStorage.getItem('o8ActiveTab'),
+      selectedRepoId: window.sessionStorage.getItem('cortex-global-repo-id'),
+      browserScopes,
+    };
+  }).catch(() => null);
+}
+
 export async function measureWarmRelaunch(context, page, baseUrl, timeoutMs, bootSampleFrom) {
   const established = Object.fromEntries(await Promise.all(Object.entries(RESTORE_FACETS).map(async ([name, selector]) => (
     [name, await facetEstablished(page, selector)]
   ))));
+  const beforePersistence = await readRestorePersistence(page);
   await Promise.race([
     page.close().catch(() => undefined),
     sleep(5_000),
@@ -174,6 +200,7 @@ export async function measureWarmRelaunch(context, page, baseUrl, timeoutMs, boo
         established: established[name], restored: false, readyMs: null, reason,
       }])),
       sample: { durationMs: null, note: reason },
+      persistence: { before: beforePersistence, after: null },
     };
   }
   try {
@@ -186,6 +213,7 @@ export async function measureWarmRelaunch(context, page, baseUrl, timeoutMs, boo
         established: established[name], restored: false, readyMs: null, reason,
       }])),
       sample: { durationMs: null, note: reason },
+      persistence: { before: beforePersistence, after: await readRestorePersistence(relaunched) },
     };
   }
 
@@ -218,6 +246,7 @@ export async function measureWarmRelaunch(context, page, baseUrl, timeoutMs, boo
   return {
     page: relaunched,
     facets,
+    persistence: { before: beforePersistence, after: await readRestorePersistence(relaunched) },
     sample: Number.isFinite(sample.durationMs)
       ? { ...sample, note: missing.length > 0 ? `warm restore missing: ${missing.join(', ')}` : null }
       : sample,

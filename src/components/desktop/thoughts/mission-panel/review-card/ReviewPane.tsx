@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { fetchOperatorDefaultsValues } from '@/lib/operator/operator-defaults-values-client';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import {
   DEFAULT_QUIZ_FILE_THRESHOLD,
@@ -90,7 +91,7 @@ export function ReviewPane({ packet, onActionComplete }: {
     let cancelled = false;
     (async () => {
       try {
-        const response = await fetch('/api/panel/operator-defaults', { cache: 'no-store' });
+        const response = await fetchOperatorDefaultsValues();
         if (!response.ok) return;
         const payload = await response.json() as { values?: { quizGateEnabled?: boolean } };
         if (!cancelled) setQuizGateEnabled(Boolean(payload.values?.quizGateEnabled));

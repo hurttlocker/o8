@@ -11,6 +11,7 @@
 
 import { useEffect, useState } from 'react';
 import type { PrLinkDestination } from '@/lib/operator/defaults-env';
+import { fetchOperatorDefaultsValues } from '@/lib/operator/operator-defaults-values-client';
 
 let cached: PrLinkDestination | null = null;
 
@@ -19,7 +20,7 @@ export function usePrLinkDestinationFlag(): PrLinkDestination {
   useEffect(() => {
     if (cached !== null) return;
     let cancelled = false;
-    fetch('/api/panel/operator-defaults')
+    fetchOperatorDefaultsValues()
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (cancelled || !data || typeof data !== 'object') return;

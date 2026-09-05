@@ -248,8 +248,10 @@ function relativeMobileAge(isoLike: string | null | undefined) {
   return `${Math.max(1, Math.round(delta / day))}d ago`;
 }
 
-let inboxCache: { snapshot: MobileInboxSnapshot; timestamp: number } | null = null;
-let inboxInflight: { generation: number; promise: Promise<MobileInboxSnapshot> } | null = null;
+type InboxCacheLane = 'full' | 'sessions';
+
+const inboxCache = new Map<InboxCacheLane, { snapshot: MobileInboxSnapshot; timestamp: number }>();
+const inboxInflight = new Map<InboxCacheLane, { generation: number; promise: Promise<MobileInboxSnapshot> }>();
 let inboxGeneration = 0;
 const INBOX_CACHE_TTL = 8000;
 
@@ -270,43 +272,56 @@ function limitMobileInboxSessions(snapshot: MobileInboxSnapshot, limit?: number)
 
 export function invalidateInboxCache() {
   inboxGeneration += 1;
-  inboxCache = null;
-  inboxInflight = null;
+  inboxCache.clear();
+  inboxInflight.clear();
   invalidateMobileBootstrapBroker();
 }
 
-export async function getMobileInboxSnapshot(options: { fresh?: boolean; limit?: number } = {}): Promise<MobileInboxSnapshot> {
+export async function getMobileInboxSnapshot(options: {
+  fresh?: boolean;
+  limit?: number;
+  includeWorkspaceReview?: boolean;
+} = {}): Promise<MobileInboxSnapshot> {
   const fresh = options.fresh ?? false;
+  const includeWorkspaceReview = options.includeWorkspaceReview !== false;
+  const cacheLane: InboxCacheLane = includeWorkspaceReview ? 'full' : 'sessions';
   const generation = inboxGeneration;
-  if (!fresh && inboxCache && Date.now() - inboxCache.timestamp < INBOX_CACHE_TTL) {
-    return limitMobileInboxSessions(inboxCache.snapshot, options.limit);
+  const cached = inboxCache.get(cacheLane);
+  if (!fresh && cached && Date.now() - cached.timestamp < INBOX_CACHE_TTL) {
+    return limitMobileInboxSessions(cached.snapshot, options.limit);
   }
 
-  if (!fresh && inboxInflight && inboxInflight.generation === generation) {
-    const snapshot = await inboxInflight.promise;
+  const inflight = inboxInflight.get(cacheLane);
+  if (!fresh && inflight && inflight.generation === generation) {
+    const snapshot = await inflight.promise;
     return limitMobileInboxSessions(snapshot, options.limit);
   }
 
-  const promise = (async () => {
-    try {
-      const snapshot = await buildMobileInboxSnapshot({ fresh });
-      if (generation === inboxGeneration) {
-        inboxCache = { snapshot, timestamp: Date.now() };
-      }
-      return snapshot;
-    } finally {
-      if (inboxInflight?.generation === generation) {
-        inboxInflight = null;
-      }
+  const promise = buildMobileInboxSnapshot({ fresh, includeWorkspaceReview }).then((snapshot) => {
+    if (generation === inboxGeneration) {
+      inboxCache.set(cacheLane, { snapshot, timestamp: Date.now() });
     }
-  })();
-  inboxInflight = { generation, promise };
+    return snapshot;
+  });
+  inboxInflight.set(cacheLane, { generation, promise });
+  promise.then(
+    () => {
+      if (inboxInflight.get(cacheLane)?.promise === promise) inboxInflight.delete(cacheLane);
+    },
+    () => {
+      if (inboxInflight.get(cacheLane)?.promise === promise) inboxInflight.delete(cacheLane);
+    },
+  );
   const snapshot = await promise;
   return limitMobileInboxSessions(snapshot, options.limit);
 }
 
-async function buildMobileInboxSnapshot(options: { fresh?: boolean } = {}): Promise<MobileInboxSnapshot> {
+async function buildMobileInboxSnapshot(options: {
+  fresh?: boolean;
+  includeWorkspaceReview?: boolean;
+} = {}): Promise<MobileInboxSnapshot> {
   const fresh = options.fresh ?? false;
+  const includeWorkspaceReview = options.includeWorkspaceReview !== false;
   const fleet = await getRuntimeInventorySnapshot({ fresh });
   const inventorySessions = fleet.agents
     .filter(shouldExposeMobileSession)
@@ -419,7 +434,12 @@ async function buildMobileInboxSnapshot(options: { fresh?: boolean } = {}): Prom
     ?? orderedSessions[0];
 
   const [reviewSnapshot, primaryTranscript] = await Promise.all([
-    getWorkspaceReviewSnapshot({ fresh }).catch(() => null),
+    includeWorkspaceReview
+      // Fleet events can request a fresh inbox many times per second. Session
+      // truth should follow that signal, but remote PR/issue review already has
+      // its own 20-second cache and must not be burst-refetched with the fleet.
+      ? getWorkspaceReviewSnapshot({ fresh: false }).catch(() => null)
+      : Promise.resolve(null),
     primarySession ? getMobileSessionTranscript(primarySession.sessionKey, 3, fresh).catch(() => []) : Promise.resolve([]),
   ]);
 

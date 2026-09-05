@@ -1,6 +1,7 @@
 'use client';
 
 import { useFounderStatus } from '@/lib/entitlement/use-founder-status';
+import { fetchOperatorDefaultsValues } from '@/lib/operator/operator-defaults-values-client';
 import { useRetryingRemoteFlag, type FlagCache } from '@/lib/operator/use-remote-flag';
 
 const cache: FlagCache = { value: null };
@@ -12,7 +13,8 @@ const cache: FlagCache = { value: null };
 // is off" screen, no header) until a manual reload.
 async function fetchFlag(signal?: AbortSignal): Promise<boolean | null> {
   try {
-    const response = await fetch('/api/panel/operator-defaults', { signal });
+    const response = await fetchOperatorDefaultsValues();
+    if (signal?.aborted) return null;
     if (!response.ok) return null;
     const data = await response.json().catch(() => null);
     if (!data || typeof data !== 'object') return null;

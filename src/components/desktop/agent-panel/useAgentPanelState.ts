@@ -375,16 +375,25 @@ export function useAgentPanelState({
   // Phase 4 friction fix #3: while the inventory snapshot is in stale mode
   // (the "Showing cached session state while the gateway reconnects" banner)
   // the 5-minute fallback poll is too slow to actually clear the banner —
-  // users see it sit indefinitely after a transient hiccup. Run a fast
-  // recovery poll (8s) WHILE we're in stale mode; the existing fetchAll
-  // logic flips fleetMeta back to 'live' as soon as the inventory snapshot
-  // rebuilds. The poll auto-stops once mode flips off 'stale'.
+  // users see it sit indefinitely after a transient hiccup. Try quickly once,
+  // then back off to the former 8-second cadence while stale so a longer
+  // outage does not keep the dashboard hot. The existing fetchAll logic flips
+  // fleetMeta back to 'live' as soon as the inventory snapshot rebuilds.
   useEffect(() => {
     if (fleetMeta?.mode !== 'stale') return undefined;
-    const id = setInterval(() => {
-      fetchNowRef.current?.();
-    }, 8000);
-    return () => clearInterval(id);
+    let delayMs = 2_000;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const schedule = () => {
+      timer = setTimeout(() => {
+        fetchNowRef.current?.();
+        delayMs = Math.min(delayMs * 2, 8_000);
+        schedule();
+      }, delayMs);
+    };
+    schedule();
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
   }, [fleetMeta?.mode]);
 
   const workspaceGroups = useMemo(() => buildWorkspaceGroups(agents), [agents]);

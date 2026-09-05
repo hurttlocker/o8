@@ -213,7 +213,7 @@ function stubOperatorDefaultsApi() {
           body: init?.body,
         }));
       }
-      return route.GET();
+      return route.GET(new Request('http://127.0.0.1/api/panel/operator-defaults'));
     }
     if (url.includes('/supervisor/watch') || url.includes('/internal/realtime')) {
       return Response.json({ ok: true });

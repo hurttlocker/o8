@@ -204,8 +204,8 @@ export const geminiRuntime: AgentRuntime = {
   capabilities,
   dispatchCapability,
 
-  async discoverSessions(): Promise<RuntimeSession[]> {
-    const owned = await getOwnedGeminiFleetAdditions({ fresh: true }).catch((err) => {
+  async discoverSessions(options = {}): Promise<RuntimeSession[]> {
+    const owned = await getOwnedGeminiFleetAdditions({ fresh: options.fresh ?? false }).catch((err) => {
       console.warn('[gemini-runtime] discoverSessions owned fleet failed:', err);
       return null;
     });

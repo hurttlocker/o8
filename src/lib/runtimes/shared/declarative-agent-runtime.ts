@@ -81,8 +81,8 @@ export function createDeclarativeAgentRuntime(
       streaming: true,
     },
 
-    async discoverSessions(): Promise<RuntimeSession[]> {
-      const fleet = await store.getFleetAdditions({ fresh: true });
+    async discoverSessions(discoveryOptions = {}): Promise<RuntimeSession[]> {
+      const fleet = await store.getFleetAdditions({ fresh: discoveryOptions.fresh ?? false });
       return fleet.agents.map((agent) => mapAgentToSession(options.runtimeId, agent));
     },
 

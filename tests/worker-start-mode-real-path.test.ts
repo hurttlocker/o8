@@ -30,7 +30,7 @@ afterAll(() => {
 
 describe.sequential('worker start mode real Settings path', () => {
   it('defaults to autonomous and persists an ask-first selection', async () => {
-    const initial = await (await GET()).json();
+    const initial = await (await GET(new Request('http://127.0.0.1/api/panel/operator-defaults'))).json();
     expect(initial.values.workerStartMode).toBe('autonomous');
 
     const response = await POST(post({ workerStartMode: 'huddle' }));
@@ -46,6 +46,6 @@ describe.sequential('worker start mode real Settings path', () => {
   it('rejects an unknown start mode without changing the saved choice', async () => {
     const response = await POST(post({ workerStartMode: 'surprise-me' }));
     expect(response.status).toBe(400);
-    expect((await (await GET()).json()).values.workerStartMode).toBe('huddle');
+    expect((await (await GET(new Request('http://127.0.0.1/api/panel/operator-defaults'))).json()).values.workerStartMode).toBe('huddle');
   });
 });

@@ -80,7 +80,7 @@ backend = "codex"
     expect(parseOperatorDefaultsToml(readFileSync(tomlPath, 'utf8')).apfsDependencyImages)
       .toBe(true);
 
-    const readResponse = await GET();
+    const readResponse = await GET(new Request('http://127.0.0.1/api/panel/operator-defaults'));
     expect((await readResponse.json()).values.apfsDependencyImages).toBe(true);
   });
 

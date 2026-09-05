@@ -141,6 +141,64 @@ describe('canonical runtime inventory discovery', () => {
     expect(snapshot.meta.note).toBe('Showing every discovered dispatchable runtime surface.');
   });
 
+  it('serves a cold dashboard snapshot immediately and lets an explicit fresh read expedite discovery', async () => {
+    const geminiRuntime = runtime('gemini');
+    const originalDiscovery = geminiRuntime.discoverSessions;
+    let releaseDiscovery!: () => void;
+    const discoveryGate = new Promise<void>((resolve) => {
+      releaseDiscovery = resolve;
+    });
+    const discovery = vi.spyOn(geminiRuntime, 'discoverSessions').mockImplementation(async (options) => {
+      await discoveryGate;
+      return originalDiscovery(options);
+    });
+    registryFixture.runtimes = [geminiRuntime];
+
+    const warming = await getRuntimeInventorySnapshot();
+
+    expect(warming).toMatchObject({
+      meta: {
+        mode: 'stale',
+        gatewayFreshness: 'warming',
+        observablePending: true,
+      },
+      agents: [],
+    });
+    expect(discovery).not.toHaveBeenCalled();
+
+    const freshPending = getRuntimeInventorySnapshot({ fresh: true });
+    await vi.waitFor(() => {
+      expect(discovery).toHaveBeenCalledWith({ fresh: true });
+    });
+    releaseDiscovery();
+
+    const fresh = await freshPending;
+    expect(fresh.meta.mode).toBe('live');
+    expect(fresh.agents.map((agent) => agent.runtime)).toEqual(['gemini']);
+  });
+
+  it('bounds cold runtime discovery so installed CLIs cannot stampede the app', async () => {
+    let activeDiscoveries = 0;
+    let peakDiscoveries = 0;
+    const runtimes = [runtime('gemini'), runtime('aider'), runtime('opencode'), runtime('cursor')];
+    for (const candidate of runtimes) {
+      const originalDiscovery = candidate.discoverSessions;
+      candidate.discoverSessions = async (options) => {
+        activeDiscoveries += 1;
+        peakDiscoveries = Math.max(peakDiscoveries, activeDiscoveries);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        activeDiscoveries -= 1;
+        return originalDiscovery(options);
+      };
+    }
+    registryFixture.runtimes = runtimes;
+
+    const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
+
+    expect(snapshot.agents).toHaveLength(4);
+    expect(peakDiscoveries).toBe(2);
+  });
+
   it('uses total unknown evidence for an invalid observation without dropping healthy sessions', async () => {
     const malformedRuntime = runtime('aider');
     const discoverSessions = malformedRuntime.discoverSessions;

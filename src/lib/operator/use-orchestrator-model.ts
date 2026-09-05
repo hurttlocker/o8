@@ -10,6 +10,7 @@
 
 import { useEffect, useState } from 'react';
 import { MODEL_IDS } from '@/lib/models';
+import { fetchOperatorDefaultsValues } from '@/lib/operator/operator-defaults-values-client';
 
 const FALLBACK_MODEL = MODEL_IDS.orchestratorDefault;
 
@@ -17,7 +18,8 @@ let cached: string | null = null;
 
 async function fetchModel(signal?: AbortSignal): Promise<string> {
   try {
-    const response = await fetch('/api/panel/operator-defaults', { signal });
+    const response = await fetchOperatorDefaultsValues();
+    if (signal?.aborted) return FALLBACK_MODEL;
     if (!response.ok) return FALLBACK_MODEL;
     const data = await response.json().catch(() => null);
     const model = typeof data?.values?.orchestratorModel === 'string' ? data.values.orchestratorModel.trim() : '';

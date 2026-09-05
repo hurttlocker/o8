@@ -35,7 +35,7 @@ afterAll(() => {
 
 describe('operator-defaults dispatchable runtime inventory', () => {
   it('exposes runtime id, label, and structured availability through the existing read route', async () => {
-    const response = await operatorDefaultsRoute.GET();
+    const response = await operatorDefaultsRoute.GET(new Request('http://127.0.0.1/api/panel/operator-defaults'));
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       dispatchableRuntimes: availability,
@@ -66,14 +66,14 @@ describe('operator-defaults dispatchable runtime inventory', () => {
       error: expect.stringContaining('not compatible with Codex'),
     });
 
-    const persisted = await operatorDefaultsRoute.GET();
+    const persisted = await operatorDefaultsRoute.GET(new Request('http://127.0.0.1/api/panel/operator-defaults'));
     await expect(persisted.json()).resolves.toMatchObject({
       values: { defaultDispatchModel: '' },
     });
   });
 
   it('applies the same compatibility guard to direct settings.toml saves', async () => {
-    const before = await operatorDefaultsRoute.GET();
+    const before = await operatorDefaultsRoute.GET(new Request('http://127.0.0.1/api/panel/operator-defaults'));
     const payload = await before.json();
     const response = await operatorDefaultsRoute.POST(new Request('http://127.0.0.1/api/panel/operator-defaults', {
       method: 'POST',

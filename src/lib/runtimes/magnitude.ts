@@ -45,7 +45,8 @@ export const magnitudeRuntime: AgentRuntime = {
   displayName: 'Magnitude',
   capabilities,
 
-  async discoverSessions(): Promise<RuntimeSession[]> {
+  async discoverSessions(options = {}): Promise<RuntimeSession[]> {
+    if (!(options.fresh ?? false)) return [];
     if (!await hasMagnitudeCli()) return [];
     // Live terminal processes are attached through the shared IDE session
     // registry. Upstream session files stay private until a stable transcript

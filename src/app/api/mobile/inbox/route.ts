@@ -13,7 +13,8 @@ export async function GET(req: NextRequest) {
     const rawLimit = req.nextUrl.searchParams.get('limit');
     const parsedLimit = rawLimit ? Number.parseInt(rawLimit, 10) : Number.NaN;
     const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : undefined;
-    const snapshot = await getMobileInboxSnapshot({ fresh, limit });
+    const includeWorkspaceReview = req.nextUrl.searchParams.get('workspaceReview') !== '0';
+    const snapshot = await getMobileInboxSnapshot({ fresh, limit, includeWorkspaceReview });
 
     return NextResponse.json(snapshot, {
       headers: {

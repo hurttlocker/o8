@@ -62,7 +62,7 @@ async function routeFetch(input: RequestInfo | URL, init?: RequestInit): Promise
   if (init?.method === 'POST') {
     return route.POST(new Request(`http://127.0.0.1${url}`, init));
   }
-  return route.GET();
+  return route.GET(new Request(`http://127.0.0.1${url}`, init));
 }
 
 afterAll(() => {
@@ -102,7 +102,7 @@ describe('onboarding runtime picker — real operator-defaults path', () => {
       workerRuntimes: ['claude-code', 'codex'],
     }, routeFetch);
 
-    const response = await route.GET();
+    const response = await route.GET(new Request('http://127.0.0.1/api/panel/operator-defaults'));
     const persisted = await response.json();
     expect(persisted.values.orchestratorBackend).toBe('claude');
     expect(persisted.values.defaultDispatchRuntime).toBe('claude-code');
@@ -125,7 +125,7 @@ describe('onboarding runtime picker — real operator-defaults path', () => {
     expect(afterLaterInstall.orchestratorRuntime).toBe('claude-code');
     expect(afterLaterInstall.workerRuntimes).toEqual(['claude-code', 'codex']);
 
-    const afterLaterInstallResponse = await route.GET();
+    const afterLaterInstallResponse = await route.GET(new Request('http://127.0.0.1/api/panel/operator-defaults'));
     await expect(afterLaterInstallResponse.json()).resolves.toMatchObject({
       values: {
         orchestratorBackend: 'claude',

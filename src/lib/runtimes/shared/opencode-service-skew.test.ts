@@ -141,7 +141,7 @@ describe('OpenCode resident service version readiness', () => {
     setOpencodeServiceProbeDependenciesForTests({ run });
     invalidateRuntimeAuthCache();
 
-    const readyResponse = await operatorDefaultsRoute.GET();
+    const readyResponse = await operatorDefaultsRoute.GET(new Request('http://127.0.0.1/api/panel/operator-defaults'));
     expect(readyResponse.status).toBe(200);
     await expect(readyResponse.json()).resolves.toMatchObject({
       dispatchableRuntimes: expect.arrayContaining([
@@ -161,7 +161,7 @@ describe('OpenCode resident service version readiness', () => {
     // outer 60s auth-snapshot cache is fresh, so force a fresh probe the same way an operator
     // manually re-checking readiness after a restart would.
     invalidateRuntimeAuthCache();
-    const readinessResponse = await operatorDefaultsRoute.GET();
+    const readinessResponse = await operatorDefaultsRoute.GET(new Request('http://127.0.0.1/api/panel/operator-defaults'));
     expect(readinessResponse.status).toBe(200);
     await expect(readinessResponse.json()).resolves.toMatchObject({
       cliAuth: {

@@ -28,6 +28,7 @@ interface FixReceipt {
 
 // The manifest only changes on release; the server caches for 6h anyway.
 const POLL_MS = 60 * 60 * 1000;
+const INITIAL_LOAD_DELAY_MS = 3_000;
 
 function relativeAge(ts: number): string {
   const days = Math.floor((Date.now() - ts) / 86_400_000);
@@ -53,12 +54,12 @@ export function FixedReportCard() {
   }, []);
 
   useEffect(() => {
-    // load() runs synchronously only as far as the fetch — every setState in it
-    // lands after an await, so this is not the cascading-render the rule guards.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load();
+    const initialLoad = window.setTimeout(() => { void load(); }, INITIAL_LOAD_DELAY_MS);
     const interval = window.setInterval(() => void load(), POLL_MS);
-    return () => window.clearInterval(interval);
+    return () => {
+      window.clearTimeout(initialLoad);
+      window.clearInterval(interval);
+    };
   }, [load]);
 
   // Show one at a time. Three "we fixed your bug" cards stacked reads as a

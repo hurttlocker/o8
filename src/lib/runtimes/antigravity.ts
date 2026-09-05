@@ -49,7 +49,8 @@ export const antigravityRuntime: AgentRuntime = {
   displayName: 'Antigravity',
   capabilities,
 
-  async discoverSessions(): Promise<RuntimeSession[]> {
+  async discoverSessions(options = {}): Promise<RuntimeSession[]> {
+    if (!(options.fresh ?? false)) return [];
     if (!await hasAntigravityCli()) return [];
     // Parser seam: official docs confirm `agy --print` for one-shot headless use,
     // but do not document a stable session id + streaming JSON contract.

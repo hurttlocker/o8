@@ -158,9 +158,9 @@ export const cursorRuntime: AgentRuntime = {
   displayName: 'Cursor',
   capabilities,
 
-  async discoverSessions(): Promise<RuntimeSession[]> {
-    if (!await hasCursorCli()) return [];
-    const owned = await getOwnedCursorFleetAdditions({ fresh: true }).catch((error) => {
+  async discoverSessions(options = {}): Promise<RuntimeSession[]> {
+    if ((options.fresh ?? false) && !await hasCursorCli()) return [];
+    const owned = await getOwnedCursorFleetAdditions({ fresh: options.fresh ?? false }).catch((error) => {
       console.warn('[cursor-runtime] discoverSessions owned fleet failed:', error);
       return null;
     });

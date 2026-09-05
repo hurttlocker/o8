@@ -25,6 +25,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { UpdateAutoApply } from '@/lib/app-update/types';
+import { fetchOperatorDefaultsValues } from '@/lib/operator/operator-defaults-values-client';
 import { isTauri, canUseTauriEvents } from '@/lib/tauri/bridge';
 import {
   BundleIntegrityWarning,
@@ -245,7 +246,7 @@ export function UpdateCard() {
   }, []);
 
   useEffect(() => {
-    fetch('/api/panel/operator-defaults', { cache: 'no-store' })
+    fetchOperatorDefaultsValues()
       .then(async (response) => {
         if (!response.ok) return;
         const payload = await response.json() as {

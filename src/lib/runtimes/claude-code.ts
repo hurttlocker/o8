@@ -752,10 +752,11 @@ export const claudeCodeRuntime: AgentRuntime = {
   capabilities,
   getCapacity: () => readClaudeRuntimeCapacity(),
 
-  async discoverSessions(): Promise<RuntimeSession[]> {
+  async discoverSessions(options = {}): Promise<RuntimeSession[]> {
+    const fresh = options.fresh ?? false;
     let projectDirs: string[];
     try {
-      projectDirs = await readdir(CLAUDE_PROJECTS_DIR);
+      projectDirs = fresh ? await readdir(CLAUDE_PROJECTS_DIR) : [];
     } catch {
       projectDirs = [];
     }
@@ -764,10 +765,9 @@ export const claudeCodeRuntime: AgentRuntime = {
       projectDirs.length > 0
         ? Promise.all(projectDirs.map((dir) => discoverProjectSessions(dir))).then((r) => r.flat())
         : Promise.resolve([]),
-      probeLiveClaudeProcesses(),
+      fresh ? probeLiveClaudeProcesses() : Promise.resolve({ processes: [], probed: false }),
     ]);
     const liveProcesses = liveProbe.processes;
-
     // Sort by most recent first
     allSessions.sort((a, b) => b.lastModified.getTime() - a.lastModified.getTime());
     const matchesLiveSession = createLiveClaudeSessionMatcher(liveProcesses);
@@ -908,7 +908,7 @@ export const claudeCodeRuntime: AgentRuntime = {
       });
     }
 
-    const owned = await getOwnedClaudeCodeFleetAdditions({ fresh: true }).catch((error) => {
+    const owned = await getOwnedClaudeCodeFleetAdditions({ fresh }).catch((error) => {
       console.error('[claude-code-runtime] owned-session discovery failed:', error);
       return null;
     });

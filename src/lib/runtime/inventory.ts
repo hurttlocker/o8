@@ -5,11 +5,11 @@ import path from 'node:path';
 import type { AgentRuntime, RuntimeSession, RuntimeSessionStatus } from '@/lib/runtimes/types';
 import type { AgentSummary, EventItem, FleetSnapshot, SquadSummary } from '@/lib/fleet/types';
 import { getAllRuntimes } from '@/lib/runtimes';
-import { listCurrentIdeRepoPaths } from '@/lib/runtime/ide-terminal-state';
 import { listIdeRuntimeSessions, listIdeRuntimeTabs, type IdeRuntimeSessionDescriptor } from '@/lib/runtime/ide-session-registry';
-import { getRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
 import { readSessionTransformCatalog } from '@/lib/runtime/session-transform-catalog';
 import { invalidateProcessCwdSnapshot } from '@/lib/runtime/process-cwd-snapshot';
+import { discoverRuntimeSessions } from '@/lib/runtime/inventory-discovery';
+import { isRegistryBackedRuntimeSession, selectRepoFallbackAgents } from '@/lib/runtime/inventory-selection';
 import {
   isDispatchableRuntime,
   ORCHESTRATOR_RUNTIMES,
@@ -30,6 +30,11 @@ export { debouncedSessionStatus } from '@/lib/terminal-status/debounce';
 const RUNTIME_INVENTORY_TTL_MS = 15_000;
 const RUNTIME_INVENTORY_FRESH_COALESCE_MS = 2_000;
 const RUNTIME_INVENTORY_IDLE_TTL_MS = 30_000;
+// The normal dashboard path is stale-while-revalidate. Give the shell enough
+// time to paint and accept its first interaction before starting CLI/session
+// discovery, which can fan out into multiple local subprocesses on a cold app
+// launch. An explicit fresh read expedites this same coalesced build.
+const RUNTIME_INVENTORY_BACKGROUND_DELAY_MS = 5_000;
 // Hard ceiling on how long a single snapshot build can take before we serve
 // the prior cached snapshot (or an empty shell) and let discovery finish in
 // the background. When the local codex sessions directory has hundreds of
@@ -37,7 +42,13 @@ const RUNTIME_INVENTORY_IDLE_TTL_MS = 30_000;
 // surfaces as a 'Load failed' TypeError in the Next.js dev overlay.
 const RUNTIME_INVENTORY_BUILD_TIMEOUT_MS = 3_500;
 const runtimeInventoryCache = new Map<string, { snapshot: FleetSnapshot; cachedAt: number; idle: boolean }>();
-const runtimeInventoryInflight = new Map<string, { generation: number; promise: Promise<FleetSnapshot> }>();
+interface RuntimeInventoryBuild {
+  generation: number;
+  promise: Promise<FleetSnapshot>;
+  expedite: (fresh: boolean) => void;
+}
+
+const runtimeInventoryInflight = new Map<string, RuntimeInventoryBuild>();
 let runtimeInventoryGeneration = 0;
 // #1293 — retire dead/orphaned owned-session corpses continuously, not just at
 // startup (ws-server). Debounced so a 15s inventory tick doesn't re-list every
@@ -380,60 +391,14 @@ function mapIdeGhostRuntimeTabToAgent(session: IdeRuntimeSessionDescriptor): Age
   };
 }
 
-function isRegistryBackedRuntimeSession(sessionKey: string) {
-  return Boolean(getRuntimeTerminalSession(sessionKey));
-}
-
-function normalizeInventoryWorkspacePath(workspace?: string | null) {
-  const trimmed = workspace?.trim();
-  if (!trimmed) return null;
-  const home = process.env.HOME ?? '';
-  const expanded = trimmed.startsWith('~/') && home
-    ? path.join(home, trimmed.slice(2))
-    : trimmed === '~' && home
-      ? home
-      : trimmed;
-  return path.normalize(expanded).toLowerCase();
-}
-
-function selectRepoFallbackAgents(agents: AgentSummary[], existingSessionKeys: Set<string>) {
-  const currentRepoPaths = new Set(listCurrentIdeRepoPaths());
-  if (currentRepoPaths.size === 0) return [] as AgentSummary[];
-
-  const selected: AgentSummary[] = [];
-  const seenRepoRuntime = new Set<string>();
-
-  for (const agent of agents) {
-    if (existingSessionKeys.has(agent.sessionKey)) continue;
-    if (!isDispatchableRuntime(agent.runtime)) continue;
-    if (!['running', 'reviewing', 'waiting'].includes(agent.status)) continue;
-    // Only include IDE-owned sessions as fallbacks — discovered user-terminal
-    // sessions shouldn't appear as phantom agents when the runtime restarts.
-    if (!agent.sessionKey.startsWith('codex-owned:') && !isRegistryBackedRuntimeSession(agent.sessionKey)) continue;
-
-    const workspaceKey = normalizeInventoryWorkspacePath(agent.runtimeSurface?.cwd ?? agent.workspace);
-    if (!workspaceKey || !currentRepoPaths.has(workspaceKey)) continue;
-
-    const bucketKey = `${agent.runtime}:${workspaceKey}`;
-    if (seenRepoRuntime.has(bucketKey)) continue;
-    seenRepoRuntime.add(bucketKey);
-    selected.push(agent);
-  }
-
-  return selected;
-}
-
-async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
+async function buildCliRuntimeSnapshot(options: { fresh: boolean }): Promise<FleetSnapshot> {
   const runtimes: AgentRuntime[] = getAllRuntimes()
     .filter((runtime) => runtime.capabilities.discover && isDispatchableRuntime(runtime.id));
   const ideSessions = listIdeRuntimeSessions();
   const ideTabs = listIdeRuntimeTabs();
   const ideSessionByKey = new Map(ideSessions.map((session) => [session.liveSessionKey ?? session.sessionKey, session]));
   const [results, transformCatalog] = await Promise.all([
-    Promise.allSettled(runtimes.map(async (runtime) => ({
-      runtime,
-      sessions: await runtime.discoverSessions(),
-    }))),
+    discoverRuntimeSessions(runtimes, options),
     readSessionTransformCatalog().catch(() => null),
   ]);
   const catalogedSessionKeys = new Set(
@@ -694,9 +659,11 @@ export async function getRuntimeInventorySnapshot(
 
   const inflight = runtimeInventoryInflight.get(cacheKey);
   if (inflight && inflight.generation === generation) {
-    // Race the inflight build against our hard timeout. If the build is slow
-    // (ghost-session flood), serve whatever cached snapshot we have rather
-    // than block the client for 7-10s.
+    if (!fresh) return cached?.snapshot ?? buildEmptyInventorySnapshot();
+
+    // Control actions that explicitly requested current state promote and
+    // expedite a deferred dashboard refresh, then retain the hard ceiling.
+    inflight.expedite(true);
     return Promise.race([
       inflight.promise,
       new Promise<FleetSnapshot>((resolve) => {
@@ -705,8 +672,22 @@ export async function getRuntimeInventorySnapshot(
     ]);
   }
 
-  const promise = (async () => {
-    const snapshot = await buildCliRuntimeSnapshot();
+  let startBuild!: () => void;
+  let started = false;
+  let freshRequested = fresh;
+  let backgroundTimer: ReturnType<typeof setTimeout> | null = null;
+  const startGate = new Promise<void>((resolve) => {
+    startBuild = () => {
+      if (started) return;
+      started = true;
+      if (backgroundTimer) clearTimeout(backgroundTimer);
+      backgroundTimer = null;
+      resolve();
+    };
+  });
+
+  const promise = startGate.then(async () => {
+    const snapshot = await buildCliRuntimeSnapshot({ fresh: freshRequested });
 
     // ── Reconcile lanes with discovered sessions ���─
     try {
@@ -768,19 +749,40 @@ export async function getRuntimeInventorySnapshot(
       });
     }
     return snapshot;
-  })();
+  });
 
-  runtimeInventoryInflight.set(cacheKey, { generation, promise });
-  promise.finally(() => {
+  const build: RuntimeInventoryBuild = {
+    generation,
+    promise,
+    expedite: (requestFresh) => {
+      if (requestFresh && !started) freshRequested = true;
+      startBuild();
+    },
+  };
+  runtimeInventoryInflight.set(cacheKey, build);
+  void promise.then(() => {
+    const current = runtimeInventoryInflight.get(cacheKey);
+    if (current?.promise === promise) {
+      runtimeInventoryInflight.delete(cacheKey);
+    }
+  }, () => {
     const current = runtimeInventoryInflight.get(cacheKey);
     if (current?.promise === promise) {
       runtimeInventoryInflight.delete(cacheKey);
     }
   });
 
-  // Same timeout race on the cold path: slow discovery falls back to cached
-  // data (or an empty shell on first boot) while the real build completes
-  // in the background and updates the cache for the next request.
+  if (fresh) {
+    startBuild();
+  } else {
+    backgroundTimer = setTimeout(startBuild, RUNTIME_INVENTORY_BACKGROUND_DELAY_MS);
+    backgroundTimer.unref?.();
+  }
+
+  // The dashboard never waits on local CLI discovery. A fresh control-plane
+  // caller still gets the existing bounded wait semantics.
+  if (!fresh) return cached?.snapshot ?? buildEmptyInventorySnapshot();
+
   return Promise.race([
     promise,
     new Promise<FleetSnapshot>((resolve) => {

@@ -17,6 +17,7 @@ import {
 } from '@/lib/workspace/lifecycle';
 import type { WorkspaceLifecycleRecordView, WorkspaceLifecycleSummaryView } from '@/lib/workspace/lifecycle-types';
 import { deriveWorkflowStage, type WorkflowStageBadge } from '@/lib/workflows/status';
+import { selectWorkspaceReadinessRepos } from './readiness-scope';
 
 const prCache = new Map<string, { prs: PRData[]; ts: number }>();
 const PR_CACHE_TTL_MS = 60_000;
@@ -297,16 +298,6 @@ async function collectWorkspaceLifecycle() {
     if (slug) repoSlugByName.set(entry.name, slug);
   }
 
-  await Promise.all(
-    registeredRepos.map(async (entry) => {
-      try {
-        repoReadinessByName.set(entry.name, await getRepoReadiness(entry));
-      } catch {
-        // Keep readiness optional if git/fs checks fail.
-      }
-    }),
-  );
-
   const fallbackSlugMap: Record<string, string> = {
     'cortex': 'hurttlocker/cortex',
     'parasite-network': 'hurttlocker/parasite-network',
@@ -330,7 +321,6 @@ async function collectWorkspaceLifecycle() {
     if (activeRepo && (!repoName || repoName === 'workspace')) {
       repoName = activeRepo.repo;
     }
-    if (repoName) repoSet.add(repoName);
     const branchName = activeRepo
       ? resolveGitBranch(activeRepo.path)
       : agent.runtimeSurface?.branch?.replace(/^surface\//, '') || agent.branch.replace(/^surface\//, '');
@@ -358,6 +348,24 @@ async function collectWorkspaceLifecycle() {
       const activeBranches = getActiveWorktreeBranches(prepared.repoPath);
       return activeBranches.has(branch);
     });
+
+  for (const prepared of preparedAgents) repoSet.add(prepared.repoName);
+
+  const readinessTargets = selectWorkspaceReadinessRepos({
+    registeredRepos,
+    workspaces: preparedAgents.map((prepared) => ({
+      repoName: prepared.repoName,
+      repoPath: prepared.repoPath,
+    })),
+  });
+  await Promise.all(readinessTargets.map(async ({ repo, repoNames }) => {
+    try {
+      const readiness = await getRepoReadiness(repo);
+      for (const repoName of repoNames) repoReadinessByName.set(repoName, readiness);
+    } catch {
+      // Keep readiness optional if git/fs checks fail.
+    }
+  }));
 
   const prsByBranch = new Map<string, PRData & { ghRepo: string }>();
   for (const repoName of repoSet) {

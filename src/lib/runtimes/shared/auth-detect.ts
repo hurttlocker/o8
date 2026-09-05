@@ -37,6 +37,7 @@ import {
   resolveDeepSeekHarnessLaunch,
 } from '@/lib/deepseek-harness/runtime-resolution';
 import { validateRuntimeModelSelection } from './model-compatibility';
+import { suggestMachineAuthProfile } from './auth-profile-suggestion';
 
 const execFileAsync = promisify(execFile);
 const CACHE_TTL_MS = 60_000;
@@ -105,6 +106,7 @@ export { DispatchPreflightError };
 
 let cache: { snapshot: RuntimeAuthSnapshot; cachedAt: number } | null = null;
 let cacheGeneration = 0;
+let snapshotRefresh: { generation: number; promise: Promise<RuntimeAuthSnapshot> } | null = null;
 // The OpenCode probe alone spawns 2-3 subprocesses (up to PROBE_TIMEOUT_MS each), so it gets its
 // own short TTL + in-flight coalescing on top of the general CACHE_TTL_MS cache below — otherwise
 // every getRuntimeAuthSnapshot() call inside a fresh main-cache window re-probes it unconditionally.
@@ -623,23 +625,10 @@ export function detectRuntimeAuthStatus(runtime: OrchestratorRuntime): Promise<R
   }
 }
 
-function suggestProfile(statuses: Record<RuntimeHouse, RuntimeAuthStatus>): MachineAuthProfileSuggestion {
-  // `ready` is the usability verdict; `authenticated` is credential evidence only.
-  // Gateway-backed Claude workers can be ready without native credential evidence.
-  const codexReady = statuses.codex.installed && statuses.codex.ready;
-  const claudeReady = statuses.claude.installed && statuses.claude.ready;
-  if (codexReady && !claudeReady) {
-    return { profile: 'codex-only', detail: 'Only Codex is signed in on this machine.' };
-  }
-  if (claudeReady && !codexReady) {
-    return { profile: 'claude-only', detail: 'Only Claude Code is signed in on this machine.' };
-  }
-  return { profile: null, detail: null };
-}
-
 export function invalidateRuntimeAuthCache(): void {
   cacheGeneration += 1;
   cache = null;
+  snapshotRefresh = null;
   opencodeRefresh = null;
 }
 
@@ -657,20 +646,32 @@ export async function getRuntimeAuthSnapshot(): Promise<RuntimeAuthSnapshot> {
       cache = { snapshot, cachedAt: cached.cachedAt };
       return snapshot;
     }
-    const entries = await Promise.all(listDispatchableRuntimes().map(async (runtime) => {
-      const house = getRuntimeCapability(runtime).authHouse;
-      if (!house) throw new Error(`Dispatchable runtime ${runtime} has no auth house.`);
-      if (runtime === 'opencode') {
-        return [house, await refreshOpencodeStatus()] as const;
-      }
-      return [house, await detectRuntimeAuthStatus(runtime)] as const;
-    }));
+    // The dashboard has several consumers of operator defaults. On a cold
+    // launch they can arrive before the first auth snapshot fills the cache.
+    // Coalesce that miss so one runtime probe set serves every caller instead
+    // of spawning the same CLI checks once per request.
+    let refresh = snapshotRefresh;
+    if (!refresh || refresh.generation !== generation) {
+      const promise = Promise.all(listDispatchableRuntimes().map(async (runtime) => {
+        const house = getRuntimeCapability(runtime).authHouse;
+        if (!house) throw new Error(`Dispatchable runtime ${runtime} has no auth house.`);
+        if (runtime === 'opencode') {
+          return [house, await refreshOpencodeStatus()] as const;
+        }
+        return [house, await detectRuntimeAuthStatus(runtime)] as const;
+      })).then((entries) => {
+        const statuses = Object.fromEntries(entries) as Record<RuntimeHouse, RuntimeAuthStatus>;
+        return {
+          statuses,
+          suggestedSubscriptionProfile: suggestMachineAuthProfile(statuses),
+        };
+      });
+      refresh = { generation, promise };
+      snapshotRefresh = refresh;
+    }
+    const snapshot = await refresh.promise;
     if (generation !== cacheGeneration) continue;
-    const statuses = Object.fromEntries(entries) as Record<RuntimeHouse, RuntimeAuthStatus>;
-    const snapshot = {
-      statuses,
-      suggestedSubscriptionProfile: suggestProfile(statuses),
-    };
+    if (snapshotRefresh === refresh) snapshotRefresh = null;
     cache = { snapshot, cachedAt: Date.now() };
     return snapshot;
   }

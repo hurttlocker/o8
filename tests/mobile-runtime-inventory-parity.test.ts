@@ -4,6 +4,7 @@ import type { AgentSummary, FleetSnapshot } from '@/lib/fleet/types';
 const inventoryFixture = vi.hoisted(() => ({
   snapshot: null as FleetSnapshot | null,
 }));
+const getWorkspaceReviewSnapshotMock = vi.hoisted(() => vi.fn(async () => null));
 
 vi.mock('@/lib/runtime/inventory', () => ({
   getRuntimeInventorySnapshot: vi.fn(async () => inventoryFixture.snapshot),
@@ -25,7 +26,7 @@ vi.mock('@/lib/runtime/pty-bridge', () => ({
 }));
 
 vi.mock('@/lib/review/workspace', () => ({
-  getWorkspaceReviewSnapshot: async () => null,
+  getWorkspaceReviewSnapshot: getWorkspaceReviewSnapshotMock,
 }));
 
 vi.mock('@/lib/render/bootstrap', () => ({
@@ -94,6 +95,7 @@ function runtimeAgent(runtime: 'gemini' | 'aider'): AgentSummary {
 describe('mobile full runtime inventory projection', () => {
   beforeEach(() => {
     invalidateInboxCache();
+    getWorkspaceReviewSnapshotMock.mockClear();
     inventoryFixture.snapshot = {
       generatedAt: new Date().toISOString(),
       meta: {
@@ -123,5 +125,16 @@ describe('mobile full runtime inventory projection', () => {
       { runtime: 'gemini', label: 'Gemini', accent: '#4285f4' },
       { runtime: 'aider', label: 'Aider', accent: '#dc2626' },
     ]);
+    expect(getWorkspaceReviewSnapshotMock).toHaveBeenCalledWith({ fresh: false });
+  });
+
+  it('skips the workspace review for sessions-only desktop timeline reads', async () => {
+    const snapshot = await getMobileInboxSnapshot({
+      fresh: true,
+      includeWorkspaceReview: false,
+    });
+
+    expect(snapshot.sessions).toHaveLength(2);
+    expect(getWorkspaceReviewSnapshotMock).not.toHaveBeenCalled();
   });
 });

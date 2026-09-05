@@ -42,7 +42,7 @@ describe('#1481 — review continuation toggle, real route round-trip', () => {
     // The exact resolver queueReviewContinuation gates on.
     expect(resolveReviewContinuationSync()).toBe(false);
 
-    const getRes = await GET();
+    const getRes = await GET(new Request('http://127.0.0.1/api/panel/operator-defaults'));
     const getPayload = await getRes.json();
     expect(getPayload.values.reviewContinuation).toBe(false);
 

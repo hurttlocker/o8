@@ -176,12 +176,12 @@ describe.sequential('APFS dependency images persisted default through production
     expect(persisted.effectiveOverride.apfsDependencyImages).toBeNull();
 
     process.env.O8_APFS_DEPENDENCY_IMAGES = '0';
-    const forcedOff = await (await GET()).json();
+    const forcedOff = await (await GET(new Request('http://127.0.0.1/api/panel/operator-defaults'))).json();
     expect(forcedOff.values.apfsDependencyImages).toBe(true);
     expect(forcedOff.effectiveOverride.apfsDependencyImages).toBe(false);
 
     process.env.O8_APFS_DEPENDENCY_IMAGES = '1';
-    const forcedOn = await (await GET()).json();
+    const forcedOn = await (await GET(new Request('http://127.0.0.1/api/panel/operator-defaults'))).json();
     expect(forcedOn.values.apfsDependencyImages).toBe(true);
     expect(forcedOn.effectiveOverride.apfsDependencyImages).toBe(true);
     delete process.env.O8_APFS_DEPENDENCY_IMAGES;

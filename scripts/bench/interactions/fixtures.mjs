@@ -136,6 +136,7 @@ export function materializeFixture(plan, { root = os.tmpdir() } = {}) {
     registry.push(repoEntry(plan, repo, index, repoPath, epochMs));
   }
   fs.mkdirSync(path.join(dataDir, 'terminal-states'), { recursive: true });
+  fs.mkdirSync(path.join(dataDir, 'chat-history'), { recursive: true });
   fs.writeFileSync(path.join(dataDir, 'setup.json'), JSON.stringify({ setupComplete: true, skippedSteps: [] }));
   fs.writeFileSync(path.join(dataDir, 'settings.toml'), [
     '[telemetry]',
@@ -161,7 +162,10 @@ export function materializeFixture(plan, { root = os.tmpdir() } = {}) {
   }));
   fs.writeFileSync(path.join(dataDir, 'terminal-states', 'tile-root.json'), JSON.stringify({
     version: 1,
-    activeTabId: 'fixture-chat',
+    // The shipped default hides the experimental casual-chat tab. Make the
+    // normal Orchestrator composer active so first-interaction timing measures
+    // a real operator path instead of waiting for a hidden tab to fall back.
+    activeTabId: 'fixture-agent',
     tabs: plan.tabs.map((tab) => ({
       id: tab.id,
       label: tab.label,
@@ -174,6 +178,13 @@ export function materializeFixture(plan, { root = os.tmpdir() } = {}) {
       canvasTab: tab.canvasTab,
     })),
     savedAt: new Date(epochMs).toISOString(),
+  }));
+  fs.writeFileSync(path.join(dataDir, 'chat-history', 'thoughts-interaction-fixture.json'), JSON.stringify({
+    title: 'Interaction fixture',
+    repoName: registry[0].name,
+    repoPath: registry[0].localPath,
+    savedAt: new Date(epochMs).toISOString(),
+    messages: [],
   }));
   // No project ledger is seeded on purpose. A seeded projects.json left the
   // workspace empty (no orchestrator surface, no composer), which removes the

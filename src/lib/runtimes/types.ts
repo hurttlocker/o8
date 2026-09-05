@@ -332,9 +332,10 @@ export interface AgentRuntime {
 
   /**
    * Find all sessions this runtime knows about.
-   * Called on initial load and periodic refresh.
+   * Passive reads should prefer o8-owned state and existing adapter caches;
+   * explicit fresh reads may probe external CLI history and live processes.
    */
-  discoverSessions(): Promise<RuntimeSession[]>;
+  discoverSessions(options?: { fresh?: boolean }): Promise<RuntimeSession[]>;
 
   // ── Transcript ──
 

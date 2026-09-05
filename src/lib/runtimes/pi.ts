@@ -94,8 +94,8 @@ export const piRuntime: AgentRuntime = {
     },
   },
 
-  async discoverSessions(): Promise<RuntimeSession[]> {
-    if (!(await piBinaryPresent())) return [];
+  async discoverSessions(options = {}): Promise<RuntimeSession[]> {
+    if ((options.fresh ?? false) && !(await piBinaryPresent())) return [];
     const owned = await getOwnedPiFleetAdditions().catch((error) => {
       console.warn('[pi-runtime] owned-session discovery failed:', error);
       return null;

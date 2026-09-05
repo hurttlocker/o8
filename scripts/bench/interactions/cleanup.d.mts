@@ -28,6 +28,7 @@ export interface ProcessTerminationReceipt {
   roots: Array<{ pid: number; label: string }>;
   inventoriedCount: number;
   inventoriedByLabel: Record<string, number>;
+  githubCliCommandShapes: Record<string, number>;
   initial: OwnedProcessSummary[];
   signaledTerm: number[];
   signaledKill: number[];

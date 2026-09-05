@@ -14,7 +14,7 @@
  *
  * Data sources (merged and deduped by sessionKey):
  *   /api/lanes?active=true — SQLite-backed lane rows (runtime-agnostic)
- *   /api/command-center/snapshot — fleet agent summaries
+ *   /api/runtime/inventory — fleet agent summaries
  *   /api/panel/repos — registered repo list (to map repoPath → short name)
  *
  * Subscribes to `o8:lane-lifecycle` + `o8:agent-lifecycle` for instant
@@ -322,7 +322,10 @@ function AgentPanelExtraAgentsBase({
         // terminal outcome alongside live rows. A completed no-op must remain
         // visible without flooding the rail with the full archive backlog.
         fetch('/api/lanes?active=false', { signal: controller.signal }),
-        fetch('/api/command-center/snapshot', { signal: controller.signal }),
+        // This row only consumes fleet agents. The former command-center
+        // snapshot also warmed review + browser domains, including network
+        // GitHub CLI calls, every time this sidebar mounted.
+        fetch('/api/runtime/inventory', { signal: controller.signal }),
         // Approvals feed the 'rejected' dot — the durable review verdict the
         // lane status alone can't tell us (a rejected lane still reads
         // 'reviewing'). Same source the merge beacon + banner use.
@@ -365,11 +368,8 @@ function AgentPanelExtraAgentsBase({
         setRejectedPacketIds(new Set(rejected.map((entry) => entry.packetId)));
       }
       if (snapshotRes.status === 'fulfilled' && snapshotRes.value.ok) {
-        const json = await snapshotRes.value.json() as {
-          agents?: AgentSummary[];
-          fleet?: { agents?: AgentSummary[] };
-        };
-        setAgents(json.fleet?.agents ?? json.agents ?? []);
+        const json = await snapshotRes.value.json() as { agents?: AgentSummary[] };
+        setAgents(json.agents ?? []);
       }
     } catch {
       // AbortError on teardown — silently ignore.

@@ -158,9 +158,9 @@ export const grokRuntime: AgentRuntime = {
   displayName: 'Grok Build',
   capabilities,
 
-  async discoverSessions(): Promise<RuntimeSession[]> {
-    if (!await hasGrokCli()) return [];
-    const owned = await getOwnedGrokFleetAdditions({ fresh: true }).catch((error) => {
+  async discoverSessions(options = {}): Promise<RuntimeSession[]> {
+    if ((options.fresh ?? false) && !await hasGrokCli()) return [];
+    const owned = await getOwnedGrokFleetAdditions({ fresh: options.fresh ?? false }).catch((error) => {
       console.warn('[grok-runtime] discoverSessions owned fleet failed:', error);
       return null;
     });

@@ -1,4 +1,8 @@
 import { storeSet } from '@/lib/tauri/bridge';
+import {
+  fetchOperatorDefaultsValues,
+  invalidateOperatorDefaultsValuesSnapshot,
+} from '@/lib/operator/operator-defaults-values-client';
 
 const OPERATOR_DEFAULTS_URL = '/api/panel/operator-defaults';
 const SNAPSHOT_TTL_MS = 1_000;
@@ -20,16 +24,20 @@ export function invalidateOperatorDefaultsSnapshot(): void {
   version += 1;
   snapshot = null;
   inFlight = null;
+  invalidateOperatorDefaultsValuesSnapshot();
 }
 
 export async function fetchOperatorDefaults(
   init: RequestInit = {},
-  options: { fresh?: boolean } = {},
+  options: { fresh?: boolean; includeRuntime?: boolean } = {},
 ): Promise<Response> {
   const method = (init.method ?? 'GET').toUpperCase();
   if (method !== 'GET') {
     invalidateOperatorDefaultsSnapshot();
     return fetch(OPERATOR_DEFAULTS_URL, init).then(syncTauriStore);
+  }
+  if (options.includeRuntime === false) {
+    return fetchOperatorDefaultsValues().then(syncTauriStore);
   }
   if (options.fresh) invalidateOperatorDefaultsSnapshot();
   if (snapshot && snapshot.expiresAt > Date.now()) return snapshot.response.clone();

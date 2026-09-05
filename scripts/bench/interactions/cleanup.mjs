@@ -44,7 +44,23 @@ function processLabel(command, fallback = 'descendant') {
   if (command.includes('scripts/start.mjs')) return 'application-launcher';
   if (command.includes('ws-server')) return 'websocket-server';
   if (command.includes('/server.js')) return 'packaged-server';
+  if (/(?:^|[\s/])git(?:\s|$)/.test(command)) return 'git';
+  if (/(?:^|[\s/])tmux(?:\s|$)/.test(command)) return 'tmux';
+  if (/(?:^|[\s/])ps(?:\s|$)/.test(command)) return 'process-probe';
+  if (/(?:^|[\s/])lsof(?:\s|$)/.test(command)) return 'socket-probe';
+  if (/(?:^|[\s/])gh(?:\s|$)/.test(command)) return 'github-cli';
   return fallback;
+}
+
+function githubCliCommandShape(command) {
+  const tokens = String(command).split(/\s+/).filter(Boolean);
+  const executableIndex = tokens.findIndex((token) => token === 'gh' || token.endsWith('/gh'));
+  if (executableIndex < 0) return 'gh';
+  const commandName = tokens[executableIndex + 1];
+  if (!commandName) return 'gh';
+  if (commandName === 'api') return 'gh api';
+  const subcommand = tokens[executableIndex + 2];
+  return ['gh', commandName, subcommand].filter(Boolean).join(' ');
 }
 
 export function createOwnedProcessInventory(runTag, { harnessPid = process.pid } = {}) {
@@ -170,8 +186,13 @@ export async function terminateAndWaitOwnedProcesses(inventory, {
   signalProcesses(survivors, 'SIGKILL', kill);
   survivors = await waitUntilGone(inventory, killMs, safeSnapshot, sleep);
   const inventoriedByLabel = {};
+  const githubCliCommandShapes = {};
   for (const process of inventory.processes.values()) {
     inventoriedByLabel[process.label] = (inventoriedByLabel[process.label] ?? 0) + 1;
+    if (process.label === 'github-cli') {
+      const shape = githubCliCommandShape(process.command);
+      githubCliCommandShapes[shape] = (githubCliCommandShapes[shape] ?? 0) + 1;
+    }
   }
   return {
     runTag: inventory.runTag,
@@ -179,6 +200,7 @@ export async function terminateAndWaitOwnedProcesses(inventory, {
     roots: [...inventory.roots].map(([pid, label]) => ({ pid, label })),
     inventoriedCount: inventory.processes.size,
     inventoriedByLabel,
+    githubCliCommandShapes,
     initial,
     signaledTerm,
     signaledKill,

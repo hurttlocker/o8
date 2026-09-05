@@ -90,14 +90,40 @@ async function readTarget(baseUrl, token) {
   }
 }
 
-async function openInstrumentedPage(browser, baseUrl, { injectedDelayMs = 0, bootTimeoutMs }) {
+async function openInstrumentedPage(browser, baseUrl, { injectedDelayMs = 0, bootTimeoutMs, selectedRepoId = null }) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await context.newPage();
   const consoleErrors = [];
+  const requestCounts = {};
+  const responseDiagnostics = [];
   page.on('console', (message) => {
     if (message.type() === 'error' && consoleErrors.length < 50) consoleErrors.push(message.text());
   });
-  await page.addInitScript(instrumentationInitScript, { injectedDelayMs });
+  page.on('response', (response) => {
+    let url;
+    try { url = new URL(response.url()); } catch { url = null; }
+    if (url?.pathname.startsWith('/api/')) {
+      requestCounts[url.pathname] = (requestCounts[url.pathname] ?? 0) + 1;
+    }
+    if (url?.pathname === '/api/panel/terminal-state' && responseDiagnostics.length < 20) {
+      const entry = { path: `${url.pathname}${url.search}`, status: response.status(), tabIds: [], activeTabId: null };
+      responseDiagnostics.push(entry);
+      void response.json().then((payload) => {
+        entry.tabIds = Array.isArray(payload?.tabs)
+          ? payload.tabs.map((tab) => tab?.id).filter((id) => typeof id === 'string')
+          : [];
+        entry.activeTabId = typeof payload?.activeTabId === 'string' ? payload.activeTabId : null;
+      }).catch(() => undefined);
+    }
+    if (response.status() < 400 || consoleErrors.length >= 50) return;
+    try {
+      const errorUrl = url ?? new URL(response.url());
+      consoleErrors.push(`[http ${response.status()}] ${errorUrl.pathname}${errorUrl.search}`);
+    } catch {
+      consoleErrors.push(`[http ${response.status()}] ${response.url()}`);
+    }
+  });
+  await page.addInitScript(instrumentationInitScript, { injectedDelayMs, selectedRepoId });
   let response;
   try {
     response = await page.goto(`${baseUrl}/dashboard`, { waitUntil: 'domcontentloaded', timeout: bootTimeoutMs });
@@ -106,11 +132,13 @@ async function openInstrumentedPage(browser, baseUrl, { injectedDelayMs = 0, boo
       context,
       page,
       consoleErrors,
+      requestCounts,
+      responseDiagnostics,
       unavailableReason: `dashboard navigation failed: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
   if (!response?.ok()) {
-    return { context, page, consoleErrors, unavailableReason: `/dashboard returned ${response?.status() ?? 'no response'}` };
+    return { context, page, consoleErrors, requestCounts, responseDiagnostics, unavailableReason: `/dashboard returned ${response?.status() ?? 'no response'}` };
   }
   let unavailableReason = null;
   try {
@@ -118,7 +146,7 @@ async function openInstrumentedPage(browser, baseUrl, { injectedDelayMs = 0, boo
   } catch {
     unavailableReason = `dashboard did not report hydration within ${bootTimeoutMs}ms`;
   }
-  return { context, page, consoleErrors, unavailableReason };
+  return { context, page, consoleErrors, requestCounts, responseDiagnostics, unavailableReason };
 }
 
 function unavailableObservation(label, error) {
@@ -269,11 +297,12 @@ async function sampleTabSwitches(page, tabIds, samples) {
     }
     const pending = page.evaluate(observeTabSwitch, targetTabId)
       .catch((error) => unavailableObservation('tab-switch observation', error));
-    // Click the label end of the pill. The centre of a crowded pill is where
-    // the close affordance sits, and closing a tab is not switching to it.
+    // Click the text span. The fixed leading slot morphs into the close button
+    // on hover, so a coordinate near the left edge can close the target tab
+    // instead of selecting it.
     try {
       await page.evaluate(() => true);
-      await locator.click({ timeout: 5_000, position: { x: 10, y: 13 } });
+      await locator.locator('span').last().click({ timeout: 5_000 });
     } catch (error) {
       await pending;
       results.push(unavailableObservation('tab-switch interaction', error));
@@ -360,12 +389,22 @@ async function measureScale({ browser, browserPid, scale, runConfig }) {
       runtimeIdentityNote: reportedTarget.unavailableReason,
       unavailableReason: null,
     };
-    const opened = await openInstrumentedPage(browser, baseUrl, { bootTimeoutMs: runConfig.bootTimeoutMs });
+    const opened = await openInstrumentedPage(browser, baseUrl, {
+      bootTimeoutMs: runConfig.bootTimeoutMs,
+      selectedRepoId: fixture.repoNames[0] ?? null,
+    });
     context = opened.context;
     let page = opened.page;
     const blocked = opened.unavailableReason;
 
     const coldBoot = blocked ? [] : [bootSampleFrom(await page.evaluate(readBootPhases))];
+    // Observe first composer readiness immediately after hydration. Starting
+    // this after the fleet reveal made the metric include benchmark setup
+    // (closing a default-open 1,000-row disclosure) even when the restored
+    // composer had already been interactive for seconds.
+    const composerPending = blocked
+      ? Promise.resolve({ durationMs: null, note: blocked })
+      : waitForComposer(page, runConfig.composerTimeoutMs);
     // Order is part of the measurement contract. The operator's first act after
     // the shell paints is to open the fleet, so the reveal is measured cold,
     // before anything else warms the repository path. Reordering these steps
@@ -373,20 +412,13 @@ async function measureScale({ browser, browserPid, scale, runConfig }) {
     const fleetReveal = blocked
       ? { durationMs: null, note: blocked }
       : await measureFleetReveal(page, scale, runConfig.revealTimeoutMs);
-    // Start observing composer readiness before the repository click. The
-    // active-context label may be absent and consume its full bound even when
-    // the click has already made the composer usable; awaiting sequentially
-    // would falsely add that label timeout to first-input readiness.
-    const composerPending = blocked
-      ? Promise.resolve({ durationMs: null, note: blocked })
-      : waitForComposer(page, runConfig.composerTimeoutMs);
-    const activeContext = blocked
-      ? { durationMs: null, note: blocked }
-      : await measureActiveContextReveal(page, fixtureRepoName(scale), runConfig.revealTimeoutMs);
     const composerReady = await composerPending;
     const keystrokes = blocked ? [] : await sampleKeystrokes(page, runConfig.samples);
+    // Measure tab switching inside the active restored workspace before the
+    // repo-row scenario opens a second repo-bound pane. Reading every pill in
+    // the split header can otherwise target an inactive sibling workspace.
     const tabIds = blocked ? [] : await page.evaluate(() => (
-      Array.from(document.querySelectorAll('[data-o8-workspace-tab]')).map((element) => element.getAttribute('data-o8-workspace-tab'))
+      globalThis.__o8Interactions?.activeWorkspaceTabIds ?? []
     ));
     const tabSwitches = blocked ? [] : await sampleTabSwitches(page, tabIds.filter(Boolean), runConfig.samples);
     const design = blocked
@@ -397,18 +429,73 @@ async function measureScale({ browser, browserPid, scale, runConfig }) {
         design_prompt_ready_ms: { durationMs: null, note: blocked },
       }
       : await measureDesignMode(page, fixturePage.url, fixturePage.targetBlockId, runConfig.bootTimeoutMs);
+    // Repository focus can layer another workspace over the browser controls.
+    // Keep Design Mode on the restored workspace, then measure repo focus last.
+    const activeContext = blocked
+      ? { durationMs: null, note: blocked }
+      : await measureActiveContextReveal(page, fixtureRepoName(scale), runConfig.revealTimeoutMs);
     const soak = blocked
       ? { unavailableReason: blocked }
       : await runSoak(page, stack, browserPid, runConfig.soakMs);
 
+    const coldPageDiagnostics = blocked ? null : await page.evaluate(() => ({
+      activeWorkspaceId: globalThis.__o8Interactions?.activeWorkspaceId ?? null,
+      activeTabId: globalThis.__o8Interactions?.activeTabId ?? null,
+      activeLabel: globalThis.__o8Interactions?.activeLabel ?? null,
+      workspaceEvents: globalThis.__o8Interactions?.workspaceEvents ?? [],
+      renderedTabIds: Array.from(document.querySelectorAll('[data-o8-workspace-tab]'))
+        .map((element) => element.getAttribute('data-o8-workspace-tab'))
+        .filter(Boolean),
+      slowResources: performance.getEntriesByType('resource')
+        .filter((entry) => entry.name.includes('/_next/static/'))
+        .sort((left, right) => right.duration - left.duration)
+        .slice(0, 20)
+        .map((entry) => ({
+          name: entry.name.split('/').pop(),
+          initiatorType: entry.initiatorType,
+          startTime: Number(entry.startTime.toFixed(2)),
+          durationMs: Number(entry.duration.toFixed(2)),
+          transferSize: entry.transferSize,
+          decodedBodySize: entry.decodedBodySize,
+        })),
+      slowApiResources: performance.getEntriesByType('resource')
+        .filter((entry) => entry.name.includes('/api/'))
+        .sort((left, right) => right.duration - left.duration)
+        .slice(0, 30)
+        .map((entry) => {
+          const url = new URL(entry.name);
+          return {
+            path: url.pathname,
+            startTime: Number(entry.startTime.toFixed(2)),
+            durationMs: Number(entry.duration.toFixed(2)),
+            transferSize: entry.transferSize,
+            decodedBodySize: entry.decodedBodySize,
+          };
+        }),
+      apiTimeline: performance.getEntriesByType('resource')
+        .filter((entry) => entry.name.includes('/api/'))
+        .sort((left, right) => left.startTime - right.startTime)
+        .slice(0, 100)
+        .map((entry) => {
+          const url = new URL(entry.name);
+          return {
+            path: url.pathname,
+            startTime: Number(entry.startTime.toFixed(2)),
+            durationMs: Number(entry.duration.toFixed(2)),
+          };
+        }),
+    })).catch(() => null);
+
     let warmRelaunch = { durationMs: null, note: blocked ?? 'warm relaunch not attempted' };
     let restoredState = null;
+    let restorePersistence = null;
     let inventory = [];
     if (!blocked) {
       const relaunch = await measureWarmRelaunch(context, page, baseUrl, runConfig.bootTimeoutMs, bootSampleFrom);
       page = relaunch.page;
       warmRelaunch = relaunch.sample;
       restoredState = relaunch.facets;
+      restorePersistence = relaunch.persistence;
     }
 
     const scenarios = {
@@ -514,12 +601,18 @@ async function measureScale({ browser, browserPid, scale, runConfig }) {
         releaseArtifact: closedStack.releaseArtifact ?? null,
       },
       warmRelaunchFacets: restoredState,
+      warmRelaunchPersistence: restorePersistence,
       scenarios,
       soak,
       falsification,
       cleanup,
       contention: { before: contentionBefore, after: contentionSnapshot() },
       consoleErrors: opened.consoleErrors,
+      diagnostics: {
+        coldPage: coldPageDiagnostics,
+        requestCounts: opened.requestCounts,
+        terminalStateResponses: opened.responseDiagnostics,
+      },
       browserContextCloseTimedOut: contextCloseTimedOut,
       durationMs: Date.now() - startedAt,
       unavailableReason: blocked,

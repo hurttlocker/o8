@@ -30,7 +30,7 @@ afterAll(() => {
 
 describe.sequential('first-run telemetry consent — real operator-defaults route', () => {
   it('starts unanswered with both sharing choices off', async () => {
-    const response = await GET();
+    const response = await GET(new Request('http://127.0.0.1/api/panel/operator-defaults'));
     const payload = await response.json();
 
     expect(response.status).toBe(200);
@@ -75,7 +75,7 @@ describe.sequential('first-run telemetry consent — real operator-defaults rout
       telemetryConsentAnswered: true,
     });
 
-    const followUp = await GET();
+    const followUp = await GET(new Request('http://127.0.0.1/api/panel/operator-defaults'));
     await expect(followUp.json()).resolves.toMatchObject({
       values: { telemetryConsentAnswered: true },
     });
