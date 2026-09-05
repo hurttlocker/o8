@@ -628,6 +628,7 @@ function buildEmptyInventorySnapshot(): FleetSnapshot {
       mirrorMode: 'current-session-first',
       gatewayFreshness: 'warming',
       observablePending: true,
+      warmingRetryAfterMs: RUNTIME_INVENTORY_BACKGROUND_DELAY_MS,
       note: 'Runtime inventory is still warming up — showing last known state.',
     },
     generatedAt: new Date().toISOString(),

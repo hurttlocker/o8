@@ -58,6 +58,76 @@ interface PendingRuntimeLaunch {
 
 const pendingRuntimeLaunches = new Map<string, PendingRuntimeLaunch>();
 
+interface InventoryFetchOptions {
+  inventoryFresh?: boolean;
+  allowWarmingRetry?: boolean;
+}
+
+interface AgentPanelFleetMeta extends Record<string, unknown> {
+  gatewayFreshness?: 'fresh' | 'stale' | 'warming';
+  gatewayReachable?: boolean;
+  warmingRetryAfterMs?: number;
+}
+
+interface InventoryFetchPhase {
+  agents: AgentDetail[];
+  meta: AgentPanelFleetMeta | null;
+  enrichment: Promise<[Response | null, Response | null]>;
+}
+
+export async function startAgentPanelInventoryFetch(
+  fetcher: (url: string) => Promise<Response>,
+  options: InventoryFetchOptions = {},
+  onInventory?: (inventory: Pick<InventoryFetchPhase, 'agents' | 'meta'>) => void,
+): Promise<InventoryFetchPhase | null> {
+  const inventoryUrl = options.inventoryFresh
+    ? '/api/runtime/inventory?fresh=1'
+    : '/api/runtime/inventory';
+  const inventoryPending = fetcher(inventoryUrl).catch(() => null);
+  const enrichment = Promise.all([
+    fetcher('/api/panel/workspaces').catch(() => null),
+    fetcher('/api/panel/repos').catch(() => null),
+  ]);
+  const inventoryResponse = await inventoryPending;
+  if (!inventoryResponse?.ok) return null;
+  const data = await inventoryResponse.json() as {
+    agents?: AgentDetail[];
+    meta?: AgentPanelFleetMeta | null;
+  };
+  const inventory = {
+    agents: data.agents ?? [],
+    meta: data.meta ?? null,
+    enrichment,
+  };
+  onInventory?.(inventory);
+  return inventory;
+}
+
+export function createWarmingInventoryScheduler(
+  refetch: (options: InventoryFetchOptions) => void,
+) {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  return {
+    update(meta: AgentPanelFleetMeta | null, allowRetry = true) {
+      if (meta?.gatewayFreshness !== 'warming') {
+        if (timer) clearTimeout(timer);
+        timer = null;
+        return;
+      }
+      const retryAfterMs = Number(meta.warmingRetryAfterMs);
+      if (!allowRetry || timer || !Number.isFinite(retryAfterMs) || retryAfterMs <= 0) return;
+      timer = setTimeout(() => {
+        timer = null;
+        refetch({ inventoryFresh: true, allowWarmingRetry: false });
+      }, Math.min(retryAfterMs, 30_000));
+    },
+    dispose() {
+      if (timer) clearTimeout(timer);
+      timer = null;
+    },
+  };
+}
+
 export function useAgentPanelState({
   selectedRepo,
   selectedRepoLocalPath,
@@ -219,29 +289,45 @@ export function useAgentPanelState({
   }, [panelSnapshotKey]);
 
   useEffect(() => {
-    async function fetchAll() {
+    const commitAgents = (nextAgents: AgentDetail[], generation: number) => {
+      if (generation !== inventoryGenerationRef.current) return;
+      setSWR(panelSnapshotKey, { agents: nextAgents });
+      onAgentsUpdate?.(nextAgents);
+      setAgents((current) => arraysMatchBy(current, nextAgents, agentFp) ? current : nextAgents);
+    };
+
+    const finishInitialInventoryLoad = (generation: number) => {
+      if (generation !== inventoryGenerationRef.current || inventoryLoadedRef.current) return;
+      inventoryLoadedRef.current = true;
+      setInventoryLoading(false);
+    };
+
+    const warmingScheduler = createWarmingInventoryScheduler((options) => {
+      void fetchAll(options);
+    });
+
+    async function fetchAll(options: InventoryFetchOptions = {}) {
       const generation = ++inventoryGenerationRef.current;
       if (!inventoryLoadedRef.current) setInventoryLoading(true);
       try {
-        const [inventoryResponse, workspacesResponse, reposResponse] = await Promise.all([
-          fetchOnce('/api/runtime/inventory').catch(() => null),
-          fetchOnce('/api/panel/workspaces').catch(() => null),
-          fetchOnce('/api/panel/repos').catch(() => null),
-        ]);
+        const inventory = await startAgentPanelInventoryFetch(fetchOnce, options, ({ agents, meta }) => {
+          if (generation !== inventoryGenerationRef.current) return;
+          setFleetMeta(meta);
+          setGatewayReachable(meta?.gatewayReachable ?? false);
+          setGatewayWarming(meta?.gatewayFreshness === 'warming');
+          commitAgents(agents, generation);
+          finishInitialInventoryLoad(generation);
+          warmingScheduler.update(meta, options.allowWarmingRetry !== false);
+        });
+        if (generation !== inventoryGenerationRef.current || !inventory) return;
 
-        let nextAgents: AgentDetail[] = [];
+        const nextAgents = inventory.agents;
+
+        // Inventory is authoritative row state and paints above. Workspace,
+        // repository, PR, diff, and worktree data only enrich those rows.
+        const [workspacesResponse, reposResponse] = await inventory.enrichment;
         let registeredRepoPaths = new Set<string>();
         let hasRegisteredRepoSnapshot = false;
-
-        if (inventoryResponse?.ok) {
-          const data = await inventoryResponse.json();
-          nextAgents = data.agents ?? [];
-          if (generation === inventoryGenerationRef.current) {
-            setFleetMeta(data.meta ?? null);
-            setGatewayReachable(data.meta?.gatewayReachable ?? false);
-            setGatewayWarming(data.meta?.gatewayFreshness === 'warming');
-          }
-        }
 
         const workspaceMap = new Map<string, {
           branch: string;
@@ -338,16 +424,11 @@ export function useAgentPanelState({
         });
 
         if (generation !== inventoryGenerationRef.current) return;
-        setSWR(panelSnapshotKey, { agents: filteredAgents });
-        onAgentsUpdate?.(filteredAgents);
-        setAgents((current) => arraysMatchBy(current, filteredAgents, agentFp) ? current : filteredAgents);
+        commitAgents(filteredAgents, generation);
       } catch {
         // Ignore background refresh failures.
       } finally {
-        if (generation === inventoryGenerationRef.current && !inventoryLoadedRef.current) {
-          inventoryLoadedRef.current = true;
-          setInventoryLoading(false);
-        }
+        finishInitialInventoryLoad(generation);
       }
     }
 
@@ -369,32 +450,9 @@ export function useAgentPanelState({
       clearInterval(fallbackId);
       for (const e of wsEvents) window.removeEventListener(e, handler);
       if (debounceTimer) clearTimeout(debounceTimer);
+      warmingScheduler.dispose();
     };
   }, [onAgentsUpdate, panelSnapshotKey, wsConnected]);
-
-  // Phase 4 friction fix #3: while the inventory snapshot is in stale mode
-  // (the "Showing cached session state while the gateway reconnects" banner)
-  // the 5-minute fallback poll is too slow to actually clear the banner —
-  // users see it sit indefinitely after a transient hiccup. Try quickly once,
-  // then back off to the former 8-second cadence while stale so a longer
-  // outage does not keep the dashboard hot. The existing fetchAll logic flips
-  // fleetMeta back to 'live' as soon as the inventory snapshot rebuilds.
-  useEffect(() => {
-    if (fleetMeta?.mode !== 'stale') return undefined;
-    let delayMs = 2_000;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const schedule = () => {
-      timer = setTimeout(() => {
-        fetchNowRef.current?.();
-        delayMs = Math.min(delayMs * 2, 8_000);
-        schedule();
-      }, delayMs);
-    };
-    schedule();
-    return () => {
-      if (timer) clearTimeout(timer);
-    };
-  }, [fleetMeta?.mode]);
 
   const workspaceGroups = useMemo(() => buildWorkspaceGroups(agents), [agents]);
   const inferredRepo = useMemo(() => {

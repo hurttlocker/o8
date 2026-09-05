@@ -161,6 +161,7 @@ describe('canonical runtime inventory discovery', () => {
         mode: 'stale',
         gatewayFreshness: 'warming',
         observablePending: true,
+        warmingRetryAfterMs: 5_000,
       },
       agents: [],
     });
