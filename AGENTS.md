@@ -153,6 +153,12 @@ o8 packet merge-preview [--packet <id>]                  # read-only five-layer 
 o8 packet review --approve [--expected-sha <sha>] [--commit-message "..."]   # records review, then uses the gated merge path
 o8 packet approve-merge [--packet <id>] [--commit-message "..."]   # worker context raises an operator card; it does not self-merge
 
+# Task artifacts — hand the operator a sandboxed form; its exact payload returns to you with a receipt
+o8 artifact create --title "<t>" --html <file> --actions <file.json>   # inside a packet worktree the target is your packet
+o8 artifact create ... --thread <thoughts-id> --repo <path> | --packet <id>   # operator-side targeting
+o8 artifact status <artifact-id>            # writable?, last receipt, accepted count
+o8 artifact receipts <artifact-id>          # every submission and its delivery state
+
 # Agent message bus — durable repo-scoped addressing with native delivery when available.
 o8 presence join --as <agent>               # external session: register name, runtime, repo, and worktree
 o8 msg send --to <agent> "<text>"            # persist, mirror to Broadcast, and deliver or queue

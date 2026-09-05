@@ -52,6 +52,8 @@ import { useOrchestratorStatusFeed } from './useOrchestratorStatusFeed';
 import { getPendingMissionCards } from './mission-complete-detector';
 import { useOrchestratorContextResidency } from '@/components/desktop/orchestrator/context-residency';
 import { ProfiledChatMessageList as ChatMessageList } from './chat-panel/ProfiledChatMessageList';
+import { useTaskArtifacts } from './chat-panel/useTaskArtifacts';
+import type { TaskArtifactDeliverInput } from './chat-panel/TaskArtifactCard';
 import { packetsForOrchestratorThread, SwarmStatusCard, type SwarmScoutView } from './chat-panel/SwarmStatusCard';
 import { ipcFetch } from '@/lib/tauri/ipc-fetch';
 import { track } from '@/lib/analytics/track';
@@ -1978,6 +1980,33 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     return true;
   }, [attachedImages, clearAttachments, handleTaskSend, isChatMode, isOrchestratorMode, orchStream, orchestratorBackend, orchestratorModel, permissionMode, runLocalOrchestratorSlash, sendOrchestrator, thinkingEffort, swarmEnabled, soloOrchestrator, collideEnabled, waitingForReply]);
 
+  // #1699 — interactive task artifacts attached to this thread. Their accepted
+  // actions return through the same send path as a typed message, stamped so
+  // the realtime server marks the receipt delivered on the exact thread.
+  const { artifacts: taskArtifacts } = useTaskArtifacts({
+    repoPath: resolvedRepoPath ?? null,
+    threadId,
+    enabled: isOrchestratorMode,
+    transcriptLength: displayMessages.length,
+  });
+  const deliverTaskArtifactAction = useCallback((input: TaskArtifactDeliverInput): boolean => {
+    if (!isOrchestratorMode || orchStream.status === 'busy') return false;
+    const { wireMessage, orchestrationMode: turnOrchestrationMode } = composeComposerTurnMessage(input.wireMessage, composerModeRef.current, swarmEnabled, soloOrchestrator);
+    track('orchestrator.message');
+    sendOrchestrator(input.displayMessage, {
+      permissionMode,
+      backend: composerBackendTurnOverride(orchestratorBackend),
+      thinkingEffort,
+      model: orchestratorModel,
+      wireMessage,
+      displayMessage: input.displayMessage,
+      orchestrationMode: turnOrchestrationMode,
+      collide: collideEnabled,
+      taskArtifactAction: { artifactId: input.artifactId, actionId: input.actionId },
+    });
+    return true;
+  }, [collideEnabled, isOrchestratorMode, orchStream.status, orchestratorBackend, orchestratorModel, permissionMode, sendOrchestrator, soloOrchestrator, swarmEnabled, thinkingEffort]);
+
   const dispatchBufferedOrchestratorSend = useCallback((text: string, images: Array<{ name: string; dataUri: string }>) => {
     if (!isOrchestratorMode) return null;
     const { displayMessage, wireMessage, orchestrationMode: turnOrchestrationMode } = composeComposerTurnMessage(text, composerModeRef.current, swarmEnabled, soloOrchestrator);
@@ -2227,6 +2256,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
             turnSummary={turnSummary}
             onRetryDelivery={orchStream.retryPendingSend}
             onScroll={loadOlderHistoryOnScroll}
+            taskArtifacts={taskArtifacts}
+            taskArtifactThreadBusy={orchStream.status === 'busy'}
+            onTaskArtifactDeliver={deliverTaskArtifactAction}
           />
         </div>
         {transcriptSideRail ?? null}

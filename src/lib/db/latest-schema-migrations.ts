@@ -22,6 +22,7 @@ import { ensureV55OutsiderAttentionSchema } from '@/lib/db/v55-outsider-attentio
 import { ensureV56ManagedSymonMessagesSchema } from '@/lib/db/v56-managed-symon-messages-migration';
 import { ensureV57CostLedgerAttributionSchema } from '@/lib/db/v57-cost-ledger-attribution-migration';
 import { ensureV58SpectatorRepoGrantsSchema } from '@/lib/db/v58-spectator-repo-grants-migration';
+import { ensureV59TaskArtifactsSchema } from '@/lib/db/v59-task-artifacts-migration';
 
 /**
  * Keep the current additive migrations behind one boot hook. `db/index.ts` is
@@ -55,4 +56,5 @@ export function ensurePostAutomationSchemas(sqlite: Database.Database): void {
   ensureV56ManagedSymonMessagesSchema(sqlite);
   ensureV57CostLedgerAttributionSchema(sqlite);
   ensureV58SpectatorRepoGrantsSchema(sqlite);
+  ensureV59TaskArtifactsSchema(sqlite);
 }

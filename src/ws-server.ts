@@ -42,6 +42,8 @@
  *   pong              — LOSSY: keepalive response, loss is harmless.
  */
 
+import { markThreadActionDelivered } from '@/lib/task-artifacts/service';
+import { TASK_ARTIFACT_ACTION_ID_PATTERN, TASK_ARTIFACT_ID_PATTERN, type TaskArtifactActionStamp } from '@/lib/task-artifacts/types';
 import { watch, existsSync } from 'node:fs';
 import { readFile, stat, access } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
@@ -1124,6 +1126,14 @@ function orchestratorSubKey(clientId: string, backend: OrchestratorBackendId, ag
 /** Composite key for `orchestratorInflightAborts` (`agent` is '' for codex/claude). */
 function orchestratorAbortKey(repoPath: string, backend: OrchestratorBackendId, agent: string, threadId: string | null): string {
   return `${repoPath}::${backend}::${agent}::${threadId ?? ''}`;
+}
+
+function readTaskArtifactActionStamp(raw: unknown): TaskArtifactActionStamp | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  if (typeof record.artifactId !== 'string' || !TASK_ARTIFACT_ID_PATTERN.test(record.artifactId)) return null;
+  if (typeof record.actionId !== 'string' || !TASK_ARTIFACT_ACTION_ID_PATTERN.test(record.actionId)) return null;
+  return { artifactId: record.artifactId, actionId: record.actionId };
 }
 
 function resolveMsgThreadId(msg: Record<string, unknown>): string | null {
@@ -5289,6 +5299,35 @@ async function handleOrchestratorSendMsgOnce(
     // that case the client already restored the draft and there is no turn to
     // start or persist.
     if (undoneOrchestratorUserMessageIds.has(userMessageId)) return;
+    // #1699 — a task-artifact action rides this turn. Prove it is still
+    // accepted and that this turn lands on the exact thread the artifact was
+    // created for, and mark it delivered exactly once. Any other answer means
+    // the payload must not reach a model.
+    const taskArtifactStamp = readTaskArtifactActionStamp(msg.taskArtifactAction);
+    if (msg.taskArtifactAction !== undefined && !taskArtifactStamp) {
+      const error = 'Malformed task artifact action stamp.';
+      send(client, {
+        channel: 'orchestrator',
+        event: 'error',
+        data: { error, repoPath, threadId, backend: activeBackend.id, agent: activeAgentTag, ...orchestratorCommandAckCorrelation(correlationId) },
+      });
+      if (correlationId) throw new OrchestratorSendRejectedBeforeAcceptance(error);
+      return;
+    }
+    if (taskArtifactStamp) {
+      const marked = markThreadActionDelivered(taskArtifactStamp, { repoPath, threadId });
+      if (!marked.ok) {
+        const error = `Task artifact action refused: ${marked.reason}.`;
+        console.warn(`[ws-server][task-artifacts] ${error} (${taskArtifactStamp.artifactId}/${taskArtifactStamp.actionId})`);
+        send(client, {
+          channel: 'orchestrator',
+          event: 'error',
+          data: { error, repoPath, threadId, backend: activeBackend.id, agent: activeAgentTag, ...orchestratorCommandAckCorrelation(correlationId) },
+        });
+        if (correlationId) throw new OrchestratorSendRejectedBeforeAcceptance(error);
+        return;
+      }
+    }
     const updatedThread = persistOrchestratorThreadUserMessageFromWire({
       message: msg,
       tabId: threadId,

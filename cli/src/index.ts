@@ -39,6 +39,7 @@ import {
 import { runInbox } from './commands/inbox.js';
 import { runHistory } from './commands/history.js';
 import { runLaneTouches } from './commands/lane.js';
+import { runArtifact } from './commands/artifact.js';
 import { runLease } from './commands/lease.js';
 import { isReceiptVerifyInvocation, runVerifyReceipt } from './commands/verify-receipt.js';
 import { runTruth } from './commands/truth.js';
@@ -249,6 +250,8 @@ commands:
   presence list|join   list live sessions or register an explicit external name
   cortex observe       propose a worker observation for the orchestrator
   lane touches         active lanes touching a path or packet diff
+  artifact create      attach an interactive task artifact to this packet or a thread (--title --html <file> --actions <file.json>)
+  artifact status|receipts <id>  writability + last receipt, or every submission
   lease acquire <resource> [--ttl 2h] [--wait]  acquire or queue for a named resource
   lease release <resource>  release a resource held by this agent process
   lease status <resource>   read the holder and FIFO queue for one resource
@@ -410,6 +413,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       if (secondary === 'observe') return runCortexObserve(args.mode, args.rest);
       throw unknownSubcommandError('cortex', secondary);
     }
+    case 'artifact':
+      return runArtifact(args.mode, secondary, args.rest);
     case 'lane': {
       if (secondary === 'touches') return runLaneTouches(args.mode, args.rest);
       throw unknownSubcommandError('lane', secondary);

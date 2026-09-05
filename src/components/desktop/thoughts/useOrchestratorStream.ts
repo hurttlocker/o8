@@ -1006,6 +1006,7 @@ export function useOrchestratorStream(
         collideBaseBackend,
         handoffMode: options?.handoffMode,
         attachments: options?.attachments,
+        taskArtifactAction: options?.taskArtifactAction,
       });
       const pendingRecord = {
         text: outboundMessage,
