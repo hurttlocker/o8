@@ -57,6 +57,12 @@
       ]
     },
     {
+      "path": "src/app/api/worktrees/batch/route.test.ts",
+      "reasons": [
+        "worktree-api"
+      ]
+    },
+    {
       "path": "src/app/api/worktrees/merge/route-real-path.test.ts",
       "reasons": [
         "apfs-tool",
@@ -92,6 +98,12 @@
         "git-cli",
         "real-path",
         "worktree-api"
+      ]
+    },
+    {
+      "path": "src/components/desktop/agent-panel/worktree-enrichment-scope.test.ts",
+      "reasons": [
+        "worktree"
       ]
     },
     {

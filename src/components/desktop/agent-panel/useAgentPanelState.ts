@@ -24,6 +24,7 @@ import type {
   AgentDetail,
   RepoTaskLaunchRequest,
 } from './types';
+import { deriveWorktreeEnrichmentRepoPaths } from './worktree-enrichment-scope';
 
 type PanelSnapshot = { agents: AgentDetail[] };
 
@@ -250,10 +251,12 @@ export function useAgentPanelState({
           repoReadiness?: RepoReadiness;
           workflowStage?: WorkflowStageBadge | null;
         }>();
+        const workspaceRepoScopes: Array<{ sessionKey: string; repoPath: string }> = [];
         if (workspacesResponse?.ok) {
           const workspacesData = await workspacesResponse.json();
           for (const workspace of workspacesData.workspaces ?? []) {
             if (!workspace.sessionKey) continue;
+            const repoPath = typeof workspace.repoPath === 'string' ? workspace.repoPath : '';
             workspaceMap.set(workspace.sessionKey, {
               branch: workspace.branch,
               pr: workspace.pr,
@@ -262,6 +265,7 @@ export function useAgentPanelState({
               repoReadiness: workspace.readiness,
               workflowStage: workspace.workflowStage ?? null,
             });
+            workspaceRepoScopes.push({ sessionKey: workspace.sessionKey, repoPath });
           }
         }
 
@@ -269,10 +273,15 @@ export function useAgentPanelState({
         if (reposResponse?.ok) {
           const reposData = await reposResponse.json() as { repos?: Array<{ localPath: string }> };
           hasRegisteredRepoSnapshot = true;
-          const repoPaths = Array.from(new Set((reposData.repos ?? [])
+          const allRepoPaths = Array.from(new Set((reposData.repos ?? [])
             .map((repo) => repo.localPath.trim().replace(/\/+$/, ''))
             .filter(Boolean)));
-          registeredRepoPaths = new Set(repoPaths);
+          registeredRepoPaths = new Set(allRepoPaths);
+          const repoPaths = deriveWorktreeEnrichmentRepoPaths({
+            agents: nextAgents,
+            workspaces: workspaceRepoScopes,
+            registeredRepoPaths: allRepoPaths,
+          });
 
           if (repoPaths.length > 0) {
             try {

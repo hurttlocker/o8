@@ -9,6 +9,37 @@ interface BatchListBody {
   repoPaths: string[];
 }
 
+const WORKTREE_LIST_CONCURRENCY = 4;
+const MAX_BATCH_REPO_PATHS = 64;
+
+async function mapSettledWithConcurrency<T, TResult>(
+  items: T[],
+  limit: number,
+  mapper: (item: T) => Promise<TResult>,
+): Promise<Array<PromiseSettledResult<TResult>>> {
+  if (items.length === 0) return [];
+
+  const results = new Array<PromiseSettledResult<TResult>>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.max(1, Math.min(limit, items.length));
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (true) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      if (currentIndex >= items.length) return;
+      try {
+        results[currentIndex] = {
+          status: 'fulfilled',
+          value: await mapper(items[currentIndex]!),
+        };
+      } catch (reason) {
+        results[currentIndex] = { status: 'rejected', reason };
+      }
+    }
+  }));
+  return results;
+}
+
 export async function POST(req: NextRequest) {
   const denied = requirePanelAuth(req);
   if (denied) return denied;
@@ -30,11 +61,23 @@ export async function POST(req: NextRequest) {
       .filter(Boolean),
   ));
 
-  const settled = await Promise.allSettled(
-    repoPaths.map(async (repoPath) => ({
+  if (repoPaths.length > MAX_BATCH_REPO_PATHS) {
+    return NextResponse.json(
+      {
+        error: `A worktree batch may include at most ${MAX_BATCH_REPO_PATHS} repositories.`,
+        maxRepoPaths: MAX_BATCH_REPO_PATHS,
+      },
+      { status: 413 },
+    );
+  }
+
+  const settled = await mapSettledWithConcurrency(
+    repoPaths,
+    WORKTREE_LIST_CONCURRENCY,
+    async (repoPath) => ({
       repoPath,
       worktrees: await getWorktreeManager(repoPath).list(),
-    })),
+    }),
   );
 
   const worktreesByRepo: Record<string, WorktreeInfo[]> = {};
