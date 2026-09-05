@@ -823,7 +823,9 @@
     {
       "path": "src/lib/worktree/dependency-install-manager-real-path.test.ts",
       "reasons": [
+        "apfs-tool",
         "child-process",
+        "executable-fixture",
         "git-cli",
         "process-signal",
         "real-path",
@@ -2149,6 +2151,8 @@
     {
       "path": "tests/release-build-cache.test.ts",
       "reasons": [
+        "child-process",
+        "git-cli",
         "native-build"
       ]
     },
