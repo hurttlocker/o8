@@ -39,6 +39,7 @@ describe('createOwnedSessionStore launch readiness gate', () => {
   let priorRoot: string | undefined;
   let priorBin: string | undefined;
   let priorCrashSurvival: string | undefined;
+  let priorNodeEnv: string | undefined;
 
   beforeEach(() => {
     tempRoot = mkdtempSync(path.join(process.cwd(), '.tmp-owned-store-'));
@@ -47,6 +48,7 @@ describe('createOwnedSessionStore launch readiness gate', () => {
     priorRoot = process.env.O8_TEST_OWNED_ROOT;
     priorBin = process.env.O8_TEST_BIN;
     priorCrashSurvival = process.env.O8_CRASH_SURVIVABLE_WORKERS;
+    priorNodeEnv = process.env.NODE_ENV;
     process.env.O8_TEST_OWNED_ROOT = path.join(tempRoot, 'sessions');
     process.env.O8_TEST_BIN = process.execPath;
     spawnMock.mockReturnValue({ pid: 42, unref: vi.fn(), once: vi.fn() });
@@ -63,6 +65,7 @@ describe('createOwnedSessionStore launch readiness gate', () => {
     else process.env.O8_TEST_BIN = priorBin;
     if (priorCrashSurvival === undefined) delete process.env.O8_CRASH_SURVIVABLE_WORKERS;
     else process.env.O8_CRASH_SURVIVABLE_WORKERS = priorCrashSurvival;
+    setNodeEnv(priorNodeEnv);
     rmSync(tempRoot, { recursive: true, force: true });
   });
 
@@ -101,6 +104,17 @@ describe('createOwnedSessionStore launch readiness gate', () => {
       cwd: repoPath,
       env: { PWD: repoPath },
     });
+  });
+
+  it('sets detached owned workers to development under a production parent', async () => {
+    const { createOwnedSessionStore } = await import('./store');
+    setNodeEnv('production');
+    ensureDispatchBackendReadyMock.mockResolvedValue(readyResult());
+
+    const store = createOwnedSessionStore(testAdapter());
+    await expect(store.launch({ cwd: repoPath, prompt: 'launch detached worker' })).resolves.toMatchObject({ ok: true });
+
+    expect(spawnMock.mock.calls[0]?.[2]).toMatchObject({ env: { NODE_ENV: 'development' } });
   });
 
   it('returns a failed launch with an install hint when the worker CLI is missing', async () => {
@@ -156,14 +170,16 @@ describe('createOwnedSessionStore launch readiness gate', () => {
     });
   });
 
-  it('passes the persisted prepared marker into bridge process creation', async () => {
+  it('passes the persisted prepared marker and development environment into bridge process creation', async () => {
     const { createOwnedSessionStore } = await import('./store');
     process.env.O8_CRASH_SURVIVABLE_WORKERS = '0';
+    setNodeEnv('production');
     ensureDispatchBackendReadyMock.mockResolvedValue(readyResult());
     spawnBridgeMock.mockImplementationOnce((options: { env?: Record<string, string>; sessionName: string }) => {
       const prepared = readSingleSession(process.env.O8_TEST_OWNED_ROOT!);
       expect(prepared.activeRun).toMatchObject({ spawnState: 'prepared', processMarker: expect.any(String) });
       expect(options.env?.O8_OWNED_RUN_MARKER).toBe(prepared.activeRun?.processMarker);
+      expect(options.env?.NODE_ENV).toBe('development');
       return { ok: true, sessionName: options.sessionName, pid: 43 };
     });
 
@@ -374,6 +390,12 @@ function readyResult(): DispatchBackendWaitResult {
       apiPortFilePresent: true,
     },
   };
+}
+
+function setNodeEnv(value: string | undefined): void {
+  const environment = process.env as Record<string, string | undefined>;
+  if (value === undefined) delete environment.NODE_ENV;
+  else environment.NODE_ENV = value;
 }
 
 async function waitUntil(predicate: () => boolean): Promise<void> {

@@ -627,7 +627,7 @@ export function createOwnedRunController({
       // the spawned process cwd. Keep both values aligned so a worker cannot
       // silently operate in the o8 server's own checkout.
       PWD: session.repoPath,
-      PATH: pathWithNodeRuntime(),
+      PATH: pathWithNodeRuntime(), NODE_ENV: 'development' as const,
       FORCE_COLOR: '0',
       NO_COLOR: '1',
       // Workers must never pop an OS browser: dev servers (CRA, storybook)
