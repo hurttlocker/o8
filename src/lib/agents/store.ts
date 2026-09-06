@@ -13,6 +13,7 @@ export type { AgentMessage, AgentMessageRefs, AgentPresence } from './types';
 
 export const AGENT_MESSAGE_TEXT_MAX_LENGTH = 4_000;
 export const AGENT_PRESENCE_TTL_MS = 6 * 60_000;
+// Re-wake after a bounded delay so a lost queued turn cannot silence a target indefinitely.
 export const AGENT_NATIVE_WAKE_TTL_MS = 15 * 60_000;
 
 export type AgentPresenceWriteResult = AgentPresence & {
@@ -396,6 +397,7 @@ export function claimAgentInboxWake(
     const state = ensureAgentInboxState(input.agent, sqlite);
     const wakeAt = state.native_wake_at ? Date.parse(state.native_wake_at) : Number.NaN;
     const wakeIsFresh = state.native_wake_session_key === input.agent.sessionKey
+      && state.acknowledged_sequence < state.native_wake_through_sequence
       && Number.isFinite(wakeAt)
       && now.getTime() - wakeAt < AGENT_NATIVE_WAKE_TTL_MS;
     if (wakeIsFresh) {

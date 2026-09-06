@@ -10,6 +10,7 @@ import { getSqlite } from '@/lib/db';
 import { findLaneByPacket, getLane } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
 import {
+  type AgentInboxWakeSeams,
   type AgentMessageDeliverySeams,
   defaultAgentMessageDeliverySeams,
   deliverAgentMessage,
@@ -219,41 +220,14 @@ export async function postAgentMessage(
     refs: messageRefs(body, lane),
   }, sqlite);
   if (!isPresenceLive(target)) return message;
-  const usesCodexInboxWake = target.runtime === 'codex' && target.sessionKey !== null;
-  if (usesCodexInboxWake) {
-    const claimedWake = claimAgentInboxWake({ agent: target, throughSequence: message.sequence }, sqlite);
-    if (!claimedWake) {
-      return updateAgentMessageDelivery(
-        message.id,
-        'poll',
-        'A Codex inbox wake is already pending; retained in the durable inbox.',
-        sqlite,
-      );
-    }
-    try {
-      const result = await deliverAgentMessage(message, target, seams);
-      if (result.delivery !== 'native') {
-        releaseAgentInboxWake(target, sqlite);
-        return updateAgentMessageDelivery(message.id, result.delivery, result.note, sqlite);
-      }
-      return updateAgentMessageDelivery(
-        message.id,
-        'poll',
-        'Codex inbox wake accepted; retained in the durable inbox until the target reads it.',
-        sqlite,
-      );
-    } catch (error) {
-      releaseAgentInboxWake(target, sqlite);
-      return updateAgentMessageDelivery(
-        message.id,
-        'poll',
-        `Live delivery deferred; retained in the durable inbox. ${error instanceof Error ? error.message : String(error)}`,
-        sqlite,
-      );
-    }
-  }
+  const wakeSeams: AgentInboxWakeSeams = {
+    claimCodexInboxWake: ({ target: wakeTarget, throughSequence }) => (
+      claimAgentInboxWake({ agent: wakeTarget, throughSequence }, sqlite)
+    ),
+    releaseCodexInboxWake: (wakeTarget) => releaseAgentInboxWake(wakeTarget, sqlite),
+  };
   try {
-    const result = await deliverAgentMessage(message, target, seams);
+    const result = await deliverAgentMessage(message, target, seams, wakeSeams);
     message = updateAgentMessageDelivery(message.id, result.delivery, result.note, sqlite);
   } catch (error) {
     message = updateAgentMessageDelivery(
