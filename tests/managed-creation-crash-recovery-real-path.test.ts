@@ -98,7 +98,7 @@ it.each(['git-worktree', 'apfs-cow-clone'] as const)(
   90_000,
 );
 
-it('reclaims an already absent managed directory once and preserves mismatch refusal', async () => {
+it('retires a claim-free absent directory once and preserves mismatch refusal', async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'o8-cleanup-absent-replay-'));
   const repoRoot = makeRepo(root);
   const dataDir = process.env.CORTEX_IDE_DATA_DIR!;
@@ -109,6 +109,7 @@ it('reclaims an already absent managed directory once and preserves mismatch ref
   const { captureWorktreeMaterializationIdentity } = await import('@/lib/worktree/materialization-identity');
   const { withWorktreeMetaTransaction } = await import('@/lib/worktree/metadata-store');
   const { resolveWorktreeRootLayout } = await import('@/lib/worktree/root-layout');
+  const { readExactWorkspaceClaim } = await import('@/lib/workspace/exact-workspace-claim-state');
   const { closeDb } = await import('@/lib/db');
   const layout = resolveWorktreeRootLayout(repoRoot);
   mkdirSync(layout.primaryBase, { recursive: true });
@@ -137,6 +138,7 @@ it('reclaims an already absent managed directory once and preserves mismatch ref
   writeFileSync(path.join(absentPath, 'owned.txt'), 'owned bytes');
   await saveEntry(absentId, absentPath);
   rmSync(absentPath, { recursive: true });
+  expect(readExactWorkspaceClaim('managed-retirement', repoRoot, absentId)).toBeNull();
 
   const mismatchId = 'packet-mismatched-retirement';
   const mismatchPath = path.join(layout.primaryBase, mismatchId);
@@ -149,14 +151,22 @@ it('reclaims an already absent managed directory once and preserves mismatch ref
   writeFileSync(path.join(mismatchPath, 'replacement.txt'), 'replacement bytes');
 
   const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  const manager = new WorktreeManager(repoRoot);
+  const cleanupSpy = vi.spyOn(manager, 'cleanup');
   try {
-    const manager = new WorktreeManager(repoRoot);
     const firstSweep = await manager.prune(0);
+    const absentSelectionsAfterFirst = cleanupSpy.mock.calls.filter(
+      ([worktreeId]) => worktreeId === absentId,
+    ).length;
     const metadataAfterFirst = await withWorktreeMetaTransaction(
       repoRoot,
       async (transaction) => (await transaction.readAll())[absentId],
     );
+    const claimAfterFirst = readExactWorkspaceClaim('managed-retirement', repoRoot, absentId);
     const secondSweep = await manager.prune(0);
+    const absentSelectionsAfterSecond = cleanupSpy.mock.calls.filter(
+      ([worktreeId]) => worktreeId === absentId,
+    ).length;
     const metadataAfterSecond = await withWorktreeMetaTransaction(
       repoRoot,
       async (transaction) => (await transaction.readAll())[absentId],
@@ -170,14 +180,20 @@ it('reclaims an already absent managed directory once and preserves mismatch ref
 
     expect({
       firstSweep,
+      absentSelectionsAfterFirst,
       metadataAfterFirst: Boolean(metadataAfterFirst),
+      claimAfterFirst,
       secondSweep,
+      absentSelectionsAfterSecond,
       metadataAfterSecond: Boolean(metadataAfterSecond),
       absentRefusals: absentRefusals.length,
     }).toEqual({
       firstSweep: [absentId],
+      absentSelectionsAfterFirst: 1,
       metadataAfterFirst: false,
+      claimAfterFirst: null,
       secondSweep: [],
+      absentSelectionsAfterSecond: 1,
       metadataAfterSecond: false,
       absentRefusals: 0,
     });
@@ -187,6 +203,7 @@ it('reclaims an already absent managed directory once and preserves mismatch ref
     expect(readFileSync(path.join(retainedMismatchPath, 'owned.txt'), 'utf8'))
       .toBe('owned bytes');
   } finally {
+    cleanupSpy.mockRestore();
     errorSpy.mockRestore();
     closeDb();
   }
