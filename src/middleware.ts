@@ -130,6 +130,7 @@ const DEVICE_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }>
   // gated per-principal, never loopback-trusted; its handler accepts operator +
   // device and still 403s a worker. Real-path coverage: tests/principal-authz.
   { methods: new Set(['POST']), path: /^\/api\/orchestrator\/steer-packet\/?$/ },
+  { methods: new Set(['GET']), path: /^\/api\/orchestrator\/merge-preview\/?$/ },
   // Phone-facing surfaces reached OUTSIDE /api/mobile/* (the app grew into these
   // and each failed closed until named). All device-safe: repo o8.md notes (read
   // + autosave write), fleet runtime inventory, review diffs, dictation + TTS.
@@ -170,6 +171,8 @@ const WORKER_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }>
   { methods: new Set(['GET', 'POST', 'PATCH', 'DELETE']), path: /^\/api\/repo-spec(?:\/|$)/ },
   { methods: new Set(['GET']), path: /^\/api\/tasks(?:\/[^/]+)?\/?$/ },
   { methods: new Set(['POST']), path: /^\/api\/tasks\/[^/]+\/(?:report|block)\/?$/ },
+  // Read-only admission is packet-bound again in the route handler.
+  { methods: new Set(['GET']), path: /^\/api\/orchestrator\/merge-preview\/?$/ },
 ];
 
 const SPECTATOR_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }> = [

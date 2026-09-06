@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { previewPacketMerge } from '@/lib/lane/preview-merge';
 import { branchUnresolvedPayload, LaneBranchUnresolvedError } from '@/lib/lane/review-target';
@@ -7,6 +6,7 @@ import {
   ImmutableReviewUnavailableError,
   immutableReviewUnavailablePayload,
 } from '@/lib/lane/review-source';
+import { operatorError } from '@/app/api/orchestrator/_utils';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -22,16 +22,22 @@ export const dynamic = 'force-dynamic';
  * Gated by the global middleware (loopback + token under /api/orchestrator/).
  */
 export async function GET(request: NextRequest) {
-  const denied = requirePanelAuth(request);
-  if (denied) return denied;
+  const principal = resolveRequestPrincipalContext(request);
+  if (principal.role !== 'operator' && principal.role !== 'device' && principal.role !== 'worker') {
+    return operatorError(
+      'unauthorized',
+      'Merge preview requires the operator credential, an enrolled device, or a packet-bound worker credential.',
+      401,
+    );
+  }
 
   const packetId = request.nextUrl.searchParams.get('packetId')?.trim();
-  if (!packetId) {
-    return NextResponse.json({ error: 'packetId is required.' }, { status: 400 });
-  }
-  const ownershipRefusal = workerPacketRefusal(resolveRequestPrincipalContext(request), packetId);
+  const ownershipRefusal = workerPacketRefusal(principal, packetId);
   if (ownershipRefusal) {
     return NextResponse.json({ ok: false, error: ownershipRefusal }, { status: 403 });
+  }
+  if (!packetId) {
+    return NextResponse.json({ error: 'packetId is required.' }, { status: 400 });
   }
 
   try {

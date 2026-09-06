@@ -19,7 +19,8 @@
  * The worker-token file + ws-token file are written to a temp data dir BEFORE any
  * import, because worker-token.ts and the DB resolve their dir at module load.
  */
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import os from 'node:os';
 import { join } from 'node:path';
@@ -65,6 +66,7 @@ const reset = await import('@/app/api/orchestrator/reset-packet/route');
 const rerun = await import('@/app/api/orchestrator/rerun-with-feedback/route');
 const sessionRules = await import('@/app/api/orchestrator/session-rules/route');
 const merge = await import('@/app/api/orchestrator/merge/route');
+const mergePreview = await import('@/app/api/orchestrator/merge-preview/route');
 const workspace = await import('@/app/api/orchestrator/workspace/route');
 const devServer = await import('@/app/api/panel/dev-server/route');
 const fileIo = await import('@/app/api/panel/file-io/route');
@@ -545,6 +547,116 @@ describe('principal-authz — workspace reads stay packet-bound', () => {
       error: { code: 'worker_packet_mismatch' },
     });
   });
+});
+
+describe('principal-authz — merge preview admits only the owning worker packet', () => {
+  it('keeps operator and device output unchanged while enforcing worker packet ownership', async () => {
+    const repoPath = mkdtempSync(join(os.tmpdir(), 'o8-merge-preview-authz-'));
+    const packetId = `pkt-merge-preview-owner-${Date.now()}`;
+    const otherPacketId = `${packetId}-other`;
+    const branch = `inline/${packetId}`;
+    const git = (...args: string[]) => execFileSync('git', args, {
+      cwd: repoPath,
+      stdio: 'pipe',
+    });
+
+    try {
+      git('init', '-q', '-b', 'main');
+      git('config', 'user.email', 'test@o8.dev');
+      git('config', 'user.name', 'o8 test');
+      writeFileSync(join(repoPath, 'README.md'), 'base\n');
+      git('add', 'README.md');
+      git('commit', '-q', '-m', 'base');
+      git('checkout', '-q', '-b', branch);
+      writeFileSync(join(repoPath, 'README.md'), 'base\npacket change\n');
+      git('add', 'README.md');
+      git('commit', '-q', '-m', 'packet change');
+
+      const { createLane } = await import('@/lib/lane/registry');
+      createLane({
+        label: 'merge preview authorization',
+        repoPath,
+        worktreePath: repoPath,
+        branch,
+        baseBranch: 'main',
+        runtime: 'codex',
+        packetId,
+      });
+
+      const ownedUrl = `http://localhost:3001/api/orchestrator/merge-preview?packetId=${packetId}`;
+      const otherUrl = `http://localhost:3001/api/orchestrator/merge-preview?packetId=${otherPacketId}`;
+      const operatorRequest = req(ownedUrl, { principal: 'operator', method: 'GET' });
+      expect(panelGateMiddleware(operatorRequest).status).toBe(200);
+      const operatorResponse = await mergePreview.GET(operatorRequest);
+      expect(operatorResponse.status).toBe(200);
+      const operatorBody = await operatorResponse.text();
+      expect(JSON.parse(operatorBody)).toMatchObject({
+        packetId,
+        checks: expect.any(Array),
+        blockers: expect.any(Array),
+        branch,
+      });
+
+      const workerToken = mintPacketWorkerToken(packetId);
+      const ownedWorkerRequest = req(ownedUrl, {
+        principal: 'worker',
+        method: 'GET',
+        workerToken,
+      });
+      expect(panelGateMiddleware(ownedWorkerRequest).status).toBe(200);
+      const ownedWorkerResponse = await mergePreview.GET(ownedWorkerRequest);
+      expect(ownedWorkerResponse.status).toBe(200);
+      expect(await ownedWorkerResponse.text()).toBe(operatorBody);
+
+      const deviceRequest = new NextRequest(ownedUrl, {
+        method: 'GET',
+        headers: { host: 'localhost:3001', authorization: `Bearer ${DEVICE_TOKEN}` },
+      });
+      expect(panelGateMiddleware(deviceRequest).status).toBe(200);
+      const deviceResponse = await mergePreview.GET(deviceRequest);
+      expect(deviceResponse.status).toBe(200);
+      expect(await deviceResponse.text()).toBe(operatorBody);
+
+      const mismatchRequest = req(otherUrl, {
+        principal: 'worker',
+        method: 'GET',
+        workerToken,
+      });
+      expect(panelGateMiddleware(mismatchRequest).status).toBe(200);
+      const mismatchResponse = await mergePreview.GET(mismatchRequest);
+      expect(mismatchResponse.status).toBe(403);
+      await expect(mismatchResponse.json()).resolves.toMatchObject({
+        ok: false,
+        error: { code: 'worker_packet_mismatch' },
+      });
+
+      const legacyWorkerRequest = req(ownedUrl, {
+        principal: 'worker',
+        method: 'GET',
+      });
+      expect(panelGateMiddleware(legacyWorkerRequest).status).toBe(200);
+      const legacyWorkerResponse = await mergePreview.GET(legacyWorkerRequest);
+      expect(legacyWorkerResponse.status).toBe(403);
+      await expect(legacyWorkerResponse.json()).resolves.toMatchObject({
+        ok: false,
+        error: { code: 'worker_packet_mismatch' },
+      });
+
+      const anonymousRequest = new NextRequest(ownedUrl, {
+        method: 'GET',
+        headers: { host: 'localhost:3001' },
+      });
+      expect(panelGateMiddleware(anonymousRequest).status).toBe(401);
+      const anonymousResponse = await mergePreview.GET(anonymousRequest);
+      expect(anonymousResponse.status).toBe(401);
+      await expect(anonymousResponse.json()).resolves.toMatchObject({
+        ok: false,
+        error: { code: 'unauthorized' },
+      });
+    } finally {
+      rmSync(repoPath, { recursive: true, force: true });
+    }
+  }, 20_000);
 });
 
 describe('principal-authz — worker credentials are bound to their persisted packet owner (#1644)', () => {

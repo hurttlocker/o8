@@ -155,11 +155,15 @@ const diffRoute = await import('@/app/api/lanes/[id]/diff/route');
 const mergePreviewRoute = await import('@/app/api/orchestrator/merge-preview/route');
 const reviewStateRoute = await import('@/app/api/orchestrator/review-state/route');
 const { closeDb } = await import('@/lib/db');
+const { getOrCreateWsToken } = await import('@/lib/ws-auth');
 
 function operatorGet(url: string) {
   return new NextRequest(url, {
     method: 'GET',
-    headers: { host: 'localhost:3001' },
+    headers: {
+      host: 'localhost:3001',
+      authorization: `Bearer ${getOrCreateWsToken()}`,
+    },
   });
 }
 
