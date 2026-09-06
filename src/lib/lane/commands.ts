@@ -57,6 +57,7 @@ import {
 import { commitDirtyWorktree, readHeadSha } from '@/lib/lane/worktree-merge-git';
 import { withRepoActionRecovery } from '@/lib/lane/repo-action-lock';
 import { materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
+import { enqueueLaneReview } from '@/lib/lane/review-queue';
 import { persistLanePacketHold } from '@/lib/lane/packet-stop-hold';
 import { killLaneSessionsConfirmed } from '@/lib/lane/reap-sessions';
 import { liveWorkerSessionLanes } from '@/lib/lane/worker-session-state';
@@ -569,6 +570,7 @@ async function dispatchUnlocked(
       }
 
       const updated = setLaneStatus(command.laneId, 'reviewing', actor, 'review_requested');
+      if (updated) enqueueLaneReview(updated);
       return { ok: true, laneId: command.laneId, note: 'Review requested.', lane: updated ?? undefined };
     }
 

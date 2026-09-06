@@ -18,9 +18,10 @@ process.env.CORTEX_IDE_DATA_DIR = dataDir;
 writeFileSync(join(dataDir, 'ws-token'), `${wsToken}\n`, 'utf-8');
 
 const closeRoute = await import('@/app/api/orchestrator/discard-packet/route');
-const { getDb, closeDb } = await import('@/lib/db');
+const { getDb, getSqlite, closeDb } = await import('@/lib/db');
 const { sessionOutcomes } = await import('@/lib/db/schema');
 const { createLane, getLane, getLaneEvents, setLaneStatus } = await import('@/lib/lane/registry');
+const { startReviewTurn } = await import('@/lib/lane/review-turn-state');
 const { recordMission } = await import('@/lib/db/missions-store');
 const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
 const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
@@ -111,7 +112,7 @@ function persistOpenCodeClosePacket(input: {
 }
 
 describe('close_packet_unmerged real path (#1570)', () => {
-  it('archives an awaiting-review packet and writes the explicit disposition to durable state', async () => {
+  it('archives an awaiting-review packet and stops its dangling terminal-attempt review turn', async () => {
     const packetId = 'pkt-close-unmerged-real-path';
     const repoPath = join(dataDir, 'repo');
     const lane = createLane({
@@ -158,6 +159,20 @@ describe('close_packet_unmerged real path (#1570)', () => {
 
     const db = getDb();
     expect(db).not.toBeNull();
+    const reviewId = 'review-close-terminal-attempt';
+    const reviewedHeadSha = 'a'.repeat(40);
+    getSqlite().prepare(
+      `INSERT INTO review_queue (
+         id, lane_id, repo_path, status, attempts, head_sha, created_at, updated_at
+       ) VALUES (?, ?, ?, 'completed', 0, ?, datetime('now'), datetime('now'))`,
+    ).run(reviewId, lane.id, repoPath, reviewedHeadSha);
+    const reviewTurnId = startReviewTurn({
+      laneId: lane.id,
+      threadId: `auto-review-${lane.id}-${reviewId}`,
+      backend: 'codex',
+      surface: 'auto-review',
+      expectedHeadSha: reviewedHeadSha,
+    });
 
     const response = await closeRoute.POST(operatorRequest({
       packetId,
@@ -171,6 +186,16 @@ describe('close_packet_unmerged real path (#1570)', () => {
         closed: true,
         disposition: 'adopted_elsewhere',
         packetId,
+        stoppedReviewTurns: 1,
+      },
+    });
+    expect(getLaneEvents(lane.id, 100).find((event) => (
+      event.verb === 'review_turn_stopped'
+      && event.payload.reviewTurnId === reviewTurnId
+    ))).toMatchObject({
+      payload: {
+        reason: 'packet_discarded',
+        abortRequested: false,
       },
     });
 

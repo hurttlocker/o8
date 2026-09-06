@@ -12,6 +12,10 @@ interface ReviewTurnEventPayload {
   expectedHeadSha?: unknown;
 }
 
+interface ReviewAttemptStatusRow {
+  status: string;
+}
+
 export interface ActiveReviewTurn {
   id: string;
   threadId: string | null;
@@ -47,7 +51,7 @@ export function startReviewTurn(input: {
   return reviewTurnId;
 }
 
-export function findActiveReviewTurn(laneId: string): ActiveReviewTurn | null {
+function findUnsettledReviewTurn(laneId: string): ActiveReviewTurn | null {
   const row = getSqlite().prepare(`
     SELECT verb, payload_json
     FROM lane_events
@@ -75,6 +79,34 @@ export function findActiveReviewTurn(laneId: string): ActiveReviewTurn | null {
   }
 }
 
+function reviewAttemptStatus(
+  laneId: string,
+  active: ActiveReviewTurn,
+): string | null {
+  if (active.surface !== 'auto-review' || !active.threadId) return null;
+  const prefix = `auto-review-${laneId}-`;
+  if (!active.threadId.startsWith(prefix)) return null;
+  const reviewId = active.threadId
+    .slice(prefix.length)
+    .replace(/-verdict-retry$/, '');
+  if (!reviewId) return null;
+  try {
+    const row = getSqlite().prepare(
+      'SELECT status FROM review_queue WHERE id = ? AND lane_id = ? LIMIT 1',
+    ).get(reviewId, laneId) as ReviewAttemptStatusRow | undefined;
+    return row?.status ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function findActiveReviewTurn(laneId: string): ActiveReviewTurn | null {
+  const active = findUnsettledReviewTurn(laneId);
+  if (!active) return null;
+  const attemptStatus = reviewAttemptStatus(laneId, active);
+  return attemptStatus && attemptStatus !== 'in_progress' ? null : active;
+}
+
 export function findActiveReviewTurnId(laneId: string): string | null {
   return findActiveReviewTurn(laneId)?.id ?? null;
 }
@@ -95,16 +127,18 @@ export function bindReviewTurnAbortController(
 
 export function stopActiveReviewTurn(input: {
   laneId: string;
-  reason: 'packet_discarded' | 'packet_stopped' | 'superseded';
+  reason: 'abandoned' | 'packet_discarded' | 'packet_stopped' | 'superseded';
 }): ReviewTurnStopResult | null {
-  const active = findActiveReviewTurn(input.laneId);
-  if (!active) return null;
-  const binding = reviewTurnAbortControllers.get(active.id);
-  const abortRequested = binding?.laneId === input.laneId;
-  if (abortRequested) {
+  const abortedTurnIds = new Set<string>();
+  for (const [reviewTurnId, binding] of reviewTurnAbortControllers) {
+    if (binding.laneId !== input.laneId) continue;
     binding.controller.abort(input.reason);
-    reviewTurnAbortControllers.delete(active.id);
+    reviewTurnAbortControllers.delete(reviewTurnId);
+    abortedTurnIds.add(reviewTurnId);
   }
+  const active = findUnsettledReviewTurn(input.laneId);
+  if (!active) return null;
+  const abortRequested = abortedTurnIds.has(active.id);
   recordLaneEvent(input.laneId, 'review_turn_stopped', 'system', {
     reviewTurnId: active.id,
     threadId: active.threadId,
