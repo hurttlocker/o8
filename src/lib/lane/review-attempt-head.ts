@@ -209,6 +209,7 @@ export function reclaimAbandonedReviewAttempts(options: {
         leaseMs,
         attempts,
       });
+      stopActiveReviewTurn({ laneId: row.lane_id, reason: 'abandoned' });
       if (status === 'failed') {
         surfaceReviewQueueBlocker({
           laneId: row.lane_id,

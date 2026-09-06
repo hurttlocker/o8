@@ -97,6 +97,14 @@ const { closeDb, getSqlite } = await import('@/lib/db');
 const reviewRoute = await import('@/app/api/orchestrator/review/route');
 const resetRoute = await import('@/app/api/orchestrator/reset-packet/route');
 const { drainReviewQueue, triggerAutoReview } = await import('@/lib/lane/auto-review');
+const { dispatch: dispatchLaneCommand } = await import('@/lib/lane/commands');
+const { reclaimAbandonedReviewAttempts } = await import('@/lib/lane/review-attempt-head');
+const { enqueueLaneReview } = await import('@/lib/lane/review-queue');
+const {
+  findActiveReviewTurn,
+  startReviewTurn,
+  stopActiveReviewTurn,
+} = await import('@/lib/lane/review-turn-state');
 const {
   createLane,
   getLane,
@@ -301,6 +309,163 @@ describe('superseded active reviewer turn (#2003)', () => {
     ))).toHaveLength(0);
     expect(reviewer.ensureStatuses).toEqual(['ready', 'ready']);
   });
+
+  it('accepts HEAD D after lease expiry abandons the HEAD A reviewer turn (#2084)', async () => {
+    const packetId = 'pkt-abandoned-review-turn-2084';
+    const branch = 'inline/abandoned-review-turn-2084';
+    const repoDir = createRepo(branch);
+    const lane = createLane({
+      repoPath: repoDir,
+      worktreePath: repoDir,
+      branch,
+      baseBranch: 'main',
+      runtime: 'codex',
+      label: 'abandoned review turn fixture',
+      packetId,
+    });
+    const headA = commitFile(repoDir, 'result-a.txt', 'head A\n', 'head A');
+    setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
+    persistCurrentMission(repoDir, packetFixture({ packetId, repoPath: repoDir, branch, laneId: lane.id }));
+
+    triggerAutoReview(getLane(lane.id)!);
+    reviewer.holdNextTurn = true;
+    const firstDrain = drainReviewQueue();
+    await vi.waitFor(() => {
+      expect(queueRows(lane.id)).toContainEqual(expect.objectContaining({
+        status: 'in_progress',
+        head_sha: headA,
+      }));
+      expect(reviewer.signals).toHaveLength(1);
+    });
+    const headATurn = getLaneEvents(lane.id, 100).find((event) => (
+      event.verb === 'review_turn_started' && event.payload.expectedHeadSha === headA
+    ));
+    expect(headATurn?.payload.reviewTurnId).toEqual(expect.any(String));
+
+    const rejected = await reviewRoute.POST(operatorPost('/api/orchestrator/review', {
+      packetId,
+      findings: [{
+        file: 'result-a.txt',
+        severity: 'warning',
+        description: 'The first review requires a successor commit.',
+        status: 'deferred',
+      }],
+      approved: false,
+      reviewedHeadSha: headA,
+      clientMutationId: 'reject-head-a-before-abandon-2084',
+    }));
+    expect(rejected.status).toBe(200);
+    await expect(rejected.json()).resolves.toMatchObject({
+      ok: true,
+      result: { recorded: true, reviewedHeadSha: headA },
+    });
+
+    setLaneStatus(lane.id, 'running', 'orchestrator', 'turn_sent');
+    getSqlite().prepare(
+      `UPDATE review_queue SET claimed_at = datetime('now', '-2 hours')
+       WHERE lane_id = ? AND status = 'in_progress'`,
+    ).run(lane.id);
+    expect(reclaimAbandonedReviewAttempts()).toBe(1);
+    expect(reviewer.signals[0]?.aborted).toBe(true);
+    expect(reviewer.signals[0]?.reason).toBe('abandoned');
+    await firstDrain;
+    expect(findActiveReviewTurn(lane.id)).toBeNull();
+
+    commitFile(repoDir, 'result-b.txt', 'head B\n', 'head B');
+    commitFile(repoDir, 'result-c.txt', 'head C\n', 'head C');
+    const headD = commitFile(repoDir, 'result-d.txt', 'head D\n', 'head D');
+    const reviewRequest = await dispatchLaneCommand({
+      verb: 'request_review',
+      laneId: lane.id,
+      actor: 'orchestrator',
+    });
+    expect(reviewRequest.ok).toBe(true);
+    expect(queueRows(lane.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ status: 'completed', head_sha: headA }),
+      expect.objectContaining({ status: 'pending', head_sha: headD }),
+    ]));
+
+    const response = await reviewRoute.POST(operatorPost('/api/orchestrator/review', {
+      packetId,
+      findings: [],
+      approved: true,
+      reviewedHeadSha: headD,
+      clientMutationId: 'review-head-d-after-abandon-2084',
+    }));
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      result: {
+        recorded: true,
+        reviewedHeadSha: headD,
+      },
+    });
+    expect(readOrchestratorControlPlaneState().packets.find((packet) => (
+      packet.id === packetId
+    ))?.review).toMatchObject({ approved: true, reviewedHeadSha: headD });
+
+    const events = getLaneEvents(lane.id, 200);
+    expect(events.find((event) => event.verb === 'review_turn_stopped')).toMatchObject({
+      payload: {
+        reviewTurnId: headATurn?.payload.reviewTurnId,
+        reason: 'abandoned',
+        abortRequested: true,
+      },
+    });
+    expect(events.find((event) => (
+      event.verb === 'review_turn_finished'
+      && event.payload.reviewTurnId === headATurn?.payload.reviewTurnId
+    ))).toMatchObject({ payload: { outcome: 'failed' } });
+    expect(events.filter((event) => event.verb === 'review_head_drift_rejected')).toHaveLength(0);
+  });
+
+  it('does not let a terminal auto-review attempt pin an operator submission to its old HEAD', async () => {
+    const packetId = 'pkt-terminal-review-attempt-2084';
+    const branch = 'inline/terminal-review-attempt-2084';
+    const repoDir = createRepo(branch);
+    const lane = createLane({
+      repoPath: repoDir,
+      worktreePath: repoDir,
+      branch,
+      baseBranch: 'main',
+      runtime: 'codex',
+      label: 'terminal review attempt fixture',
+      packetId,
+    });
+    const headA = commitFile(repoDir, 'head-a.txt', 'head A\n', 'head A');
+    setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
+    const queued = enqueueLaneReview(getLane(lane.id)!, { headSha: headA });
+    getSqlite().prepare(
+      `UPDATE review_queue SET status = 'completed' WHERE id = ?`,
+    ).run(queued.reviewId);
+    startReviewTurn({
+      laneId: lane.id,
+      threadId: `auto-review-${lane.id}-${queued.reviewId}`,
+      backend: 'codex',
+      surface: 'auto-review',
+      expectedHeadSha: headA,
+    });
+    const headD = commitFile(repoDir, 'head-d.txt', 'head D\n', 'head D');
+    persistCurrentMission(repoDir, packetFixture({ packetId, repoPath: repoDir, branch, laneId: lane.id }));
+
+    const response = await reviewRoute.POST(operatorPost('/api/orchestrator/review', {
+      packetId,
+      findings: [],
+      approved: true,
+      reviewedHeadSha: headD,
+      clientMutationId: 'review-current-head-after-terminal-attempt-2084',
+    }));
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      result: { recorded: true, reviewedHeadSha: headD },
+    });
+    expect(getLaneEvents(lane.id, 100).filter((event) => (
+      event.verb === 'review_head_drift_rejected'
+    ))).toHaveLength(0);
+    stopActiveReviewTurn({ laneId: lane.id, reason: 'abandoned' });
+  });
+
 });
 
 describe('retry_packet awaiting-input salvage (#2003)', () => {
