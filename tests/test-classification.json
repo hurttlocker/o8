@@ -2288,6 +2288,14 @@
       ]
     },
     {
+      "path": "tests/review-state-released-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/review-supersede-retry-real-path.test.ts",
       "reasons": [
         "child-process",
