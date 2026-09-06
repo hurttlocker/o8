@@ -21,8 +21,9 @@
  *   npm run ship
  */
 
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { buildManifest, readPublished, releaseRange, resolveNewFixes } from './lib/fixed-reports.mjs';
 import { publishFixed } from './publish-fixed.mjs';
@@ -30,6 +31,7 @@ import { syncReports } from './sync-reports.mjs';
 import { verifyNativeBundle } from './native-bundle.mjs';
 import { runShipWorkflow } from './lib/ship-broadcast.mjs';
 import { buildReleaseManifest } from './lib/release-manifest.mjs';
+import { buildLatestShip, scrubPublicText } from './lib/public-release.mjs';
 
 const REPO = 'hurttlocker/o8';
 const PUBLIC_MIRROR = 'hurttlocker/o8-releases';
@@ -98,6 +100,8 @@ if (process.argv[2] === '--verify-checkout-native-modules') {
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const version = pkg.version;
 const tag = `v${version}`;
+const dryRun = process.argv.includes('--dry-run');
+const dryRunOutDir = optionValue('--out-dir') || join(tmpdir(), 'o8-public-release-out');
 
 // The authoring toolchain stays pinned to Node 22 via package.json + .nvmrc.
 // Runtime ABI compatibility is independent of this guard: tauri-export now
@@ -107,6 +111,20 @@ if (nodeMajor !== 22) {
   console.error(`[release] FATAL: builds must run on Node 22 LTS (current: ${process.version})`);
   console.error(`[release] Run \`nvm use\` (reads .nvmrc) then retry npm run ship.`);
   process.exit(1);
+}
+
+if (dryRun) {
+  try {
+    publishPublicRelease({
+      publishedAt: resolvePublishedAt(),
+      dryRun: true,
+      outDir: dryRunOutDir,
+    });
+    process.exit(0);
+  } catch (error) {
+    console.error(`[release] dry run failed: ${error?.message ?? error}`);
+    process.exit(1);
+  }
 }
 
 if (process.argv[2] === '--ship') {
@@ -368,6 +386,26 @@ try {
 
   console.log(`[release-mirror] mirrored ${tag} to ${PUBLIC_MIRROR}`);
 
+  // Publish the page feeds from one local mirror checkout and one mirror commit.
+  // This runs only after the updater assets are available on the public mirror.
+  let publicFeedPublished = false;
+  try {
+    publishPublicRelease({ publishedAt: resolvePublishedAt(pubDate) });
+    publicFeedPublished = true;
+    console.log('[release] public changelog and latest ship synced (local path)');
+  } catch (err) {
+    console.error('[release] public feed sync failed (non-fatal):', err?.message ?? err);
+    console.error('[release] re-run manually: node scripts/release.mjs --dry-run');
+  }
+
+  if (publicFeedPublished) {
+    try {
+      archiveReleaseNotes();
+    } catch (err) {
+      console.error('[release] release notes archive failed (non-fatal):', err?.message ?? err);
+    }
+  }
+
   // Announce the fixes ONLY now — the mirror is what makes v${version} real, and
   // "fixed in v0.1.592" is a lie until an operator can actually install it.
   // Non-fatal: a Discord hiccup must never fail a shipped release. The next
@@ -427,14 +465,7 @@ function composeReleaseAnnouncement() {
       .filter((s) => /^(feat|perf|design)(\(.*\))?:/.test(s));
   } catch {}
   const bullets = subjects
-    .map((s) => s
-      .replace(/^(feat|perf|design)(\([^)]*\))?:\s*/, '')
-      .replace(/\s*\(#\d+\)/g, '')
-      .replace(/\s*#\d+/g, '')
-      // A trailing parenthetical in a subject is internal context
-      // ("(t3-connect answer)", codenames) — never community-facing.
-      .replace(/\s*\([^)]*\)\s*$/, '')
-      .trim())
+    .map((s) => scrubPublicText(s.replace(/^(feat|perf|design)(\([^)]*\))?:\s*/, '')))
     .filter(Boolean)
     .slice(0, 6)
     .map((s) => `- ${s.charAt(0).toUpperCase()}${s.slice(1)}`);
@@ -459,6 +490,87 @@ function composeReleaseAnnouncement() {
     ...(sourceLine ? [sourceLine] : []),
   ].join('\n');
   return { content, ping, reason: necessary ? 'necessary update' : (ping ? `big ship (${bullets.length} bullets)` : `small ship (${bullets.length} bullets)`) };
+}
+
+function optionValue(name) {
+  const index = process.argv.indexOf(name);
+  return index === -1 ? null : process.argv[index + 1] || null;
+}
+
+function releaseCommits() {
+  return execFileSync('git', [
+    'log',
+    '--format=%H%x09%s',
+    '--no-merges',
+    releaseRange(tag),
+  ], { cwd: root, encoding: 'utf8' })
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => {
+      const separator = line.indexOf('\t');
+      return { sha: line.slice(0, separator), subject: line.slice(separator + 1) };
+    });
+}
+
+function resolvePublishedAt(fallback) {
+  try {
+    return execFileSync('gh', [
+      'release', 'view', tag,
+      '--repo', REPO,
+      '--json', 'publishedAt',
+      '--jq', '.publishedAt',
+    ], { encoding: 'utf8' }).trim();
+  } catch {
+    return fallback || execFileSync('git', [
+      'show', '-s', '--format=%cI', tag,
+    ], { cwd: root, encoding: 'utf8' }).trim();
+  }
+}
+
+function publishPublicRelease({ publishedAt, dryRun: preview = false, outDir = null }) {
+  const notesPath = join(root, 'release-notes', 'next.md');
+  const notesMarkdown = existsSync(notesPath) ? readFileSync(notesPath, 'utf8') : '';
+  const latestShip = buildLatestShip({
+    version,
+    tag,
+    publishedAt,
+    releaseUrl: `https://github.com/${REPO}/releases/tag/${tag}`,
+    commits: releaseCommits(),
+    notesMarkdown,
+  });
+  const stagingDir = mkdtempSync(join(tmpdir(), 'o8-latest-ship-'));
+  const latestShipPath = join(stagingDir, 'latest-ship.json');
+
+  try {
+    writeFileSync(latestShipPath, `${JSON.stringify(latestShip, null, 2)}\n`);
+    const args = [
+      join(root, 'scripts', 'sync-public-changelog.sh'),
+      '--latest-ship', latestShipPath,
+    ];
+    if (preview) args.push('--dry-run', '--out-dir', outDir);
+    execFileSync('bash', args, { cwd: root, stdio: 'inherit' });
+  } finally {
+    rmSync(stagingDir, { recursive: true, force: true });
+  }
+}
+
+function archiveReleaseNotes() {
+  const nextPath = join(root, 'release-notes', 'next.md');
+  if (!existsSync(nextPath)) return;
+  const archivedPath = join(root, 'release-notes', `${version}.md`);
+  if (existsSync(archivedPath)) {
+    throw new Error(`release notes archive already exists: ${archivedPath}`);
+  }
+
+  renameSync(nextPath, archivedPath);
+  execFileSync('git', ['add', '--', nextPath, archivedPath], { cwd: root, stdio: 'inherit' });
+  execFileSync('git', [
+    'commit',
+    '-m', `docs: archive release notes ${version}`,
+    '--', nextPath, archivedPath,
+  ], { cwd: root, stdio: 'inherit' });
+  execFileSync('git', ['push', 'origin', 'HEAD'], { cwd: root, stdio: 'inherit' });
+  console.log(`[release] archived release notes at release-notes/${version}.md`);
 }
 
 async function announceRelease() {
