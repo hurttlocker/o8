@@ -15,8 +15,10 @@ describe('codexCliSupportsUltraEfforts', () => {
   });
 });
 
-describe('resolveCodexReasoningEffort (model clamp, unchanged)', () => {
-  it('passes max through on sol only', () => {
+describe('resolveCodexReasoningEffort', () => {
+  it('passes max and ultra through on Astra and Sol only', () => {
+    expect(resolveCodexReasoningEffort('max', 'gpt-6-astra')).toBe('max');
+    expect(resolveCodexReasoningEffort('ultra', 'gpt-6-astra')).toBe('ultra');
     expect(resolveCodexReasoningEffort('max', 'gpt-5.6-sol')).toBe('max');
     expect(resolveCodexReasoningEffort('max', 'gpt-5.5')).toBe('xhigh');
   });

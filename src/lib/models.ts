@@ -12,6 +12,7 @@ export const RAW_MODEL_IDS = {
   anthropicClaudeSonnet45: 'claude-sonnet-4-5',
   anthropicClaudeHaiku45: 'claude-haiku-4-5',
   anthropicClaudeHaiku45Dated: 'claude-haiku-4-5-20251001',
+  openAiGpt6Astra: 'gpt-6-astra',
   openAiGpt56Sol: 'gpt-5.6-sol',
   openAiGpt56Terra: 'gpt-5.6-terra',
   openAiGpt56Luna: 'gpt-5.6-luna',
@@ -32,6 +33,7 @@ export const SUPPORTED_MODEL_IDS = Object.freeze(
 );
 
 export const CODEX_MODEL_IDS = Object.freeze([
+  RAW_MODEL_IDS.openAiGpt6Astra,
   RAW_MODEL_IDS.openAiGpt56Sol,
   RAW_MODEL_IDS.openAiGpt56Terra,
   RAW_MODEL_IDS.openAiGpt56Luna,
@@ -51,9 +53,9 @@ export function isCodexModelId(value: unknown): value is ModelId {
 
 export const MODEL_IDS = {
   orchestratorDefault: RAW_MODEL_IDS.anthropicClaudeOpus48,
-  // Codex ORCHESTRATOR default (flagship, Opus-class) — the "just like 5.5 xhigh"
-  // slot, flipped to the 5.6 generation 2026-07-09. gpt-5.5 remains pickable.
-  codexDefault: RAW_MODEL_IDS.openAiGpt56Sol,
+  // Codex ORCHESTRATOR default. Worker and generic CLI defaults stay on the
+  // 5.6 family; gpt-5.6-sol remains pickable.
+  codexDefault: RAW_MODEL_IDS.openAiGpt6Astra,
   // Codex WORKER default (Sonnet-class, ~half Sol's price) for dispatched packets.
   codexWorkerDefault: RAW_MODEL_IDS.openAiGpt56Terra,
   // Codex SCOUT / cheap tier (Haiku-class) for triage-style work.
@@ -77,7 +79,7 @@ export const MODEL_IDS = {
 export const CROSS_HOUSE_MODEL_TIERS = {
   frontierOrchestrator: {
     anthropic: RAW_MODEL_IDS.anthropicClaudeOpus48,
-    openai: RAW_MODEL_IDS.openAiGpt56Sol,
+    openai: RAW_MODEL_IDS.openAiGpt6Astra,
   },
   reviewMechanical: {
     anthropic: RAW_MODEL_IDS.anthropicClaudeSonnet5,

@@ -67,6 +67,21 @@ backend = "codex"
     expect((await getOperatorDefaults()).values.orchestratorBackend).toBe('codex');
   });
 
+  it('persists the Astra orchestrator model through settings.toml and the route consumer', async () => {
+    const response = await POST(postDefaults({
+      settingsToml: `
+[models]
+orchestrator_model = "gpt-6-astra"
+`,
+      settingsTomlRevision: await currentRevision(),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(parseOperatorDefaultsToml(readFileSync(tomlPath, 'utf8')).orchestratorModel)
+      .toBe('gpt-6-astra');
+    expect((await getOperatorDefaults()).values.orchestratorModel).toBe('gpt-6-astra');
+  });
+
   it('persists APFS dependency images through the real route and store', async () => {
     expect((await getOperatorDefaults()).values.apfsDependencyImages)
       .toBe(process.platform === 'darwin');

@@ -17,7 +17,7 @@ export const DISPATCH_RUNTIME_OPTIONS: Array<{ value: OrchestratorRuntime; label
 
 export const ORCHESTRATOR_BACKEND_OPTIONS: Array<{ value: OrchestratorBackendSetting; label: string; detail: string }> = [
   { value: 'auto', label: 'Auto', detail: 'Follow the in-app orchestrator toggle below (Claude when on, Codex when off).' },
-  { value: 'codex', label: 'Codex', detail: 'Codex GPT-5.6 Sol xhigh through the connected Codex subscription.' },
+  { value: 'codex', label: 'Codex', detail: 'Codex GPT-6 Astra xhigh through the connected Codex subscription.' },
   { value: 'claude', label: 'Claude Code', detail: 'Resident Claude Code harness using the model source selected in Models.' },
   { value: 'openclaw', label: 'OpenClaw', detail: 'Governed openclaw orchestrator — dispatches Codex workers through o8.' },
   { value: 'hermes', label: 'Hermes', detail: 'Hermes via ACP — needs Hermes installed + a model provider configured (hermes setup).' },

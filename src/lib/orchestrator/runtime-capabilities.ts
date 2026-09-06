@@ -84,9 +84,9 @@ export const ORCHESTRATOR_RUNTIMES = {
     shortLabel: 'Codex',
     dispatchable: true,
     requiresModel: false,
-    // 2026-07-09: dispatched-worker default flipped to gpt-5.6-terra (Sonnet-class,
-    // ~half Sol's price). The codex ORCHESTRATOR default is gpt-5.6-sol (see
-    // MODEL_IDS.codexDefault); workers ride the cheaper Terra tier. gpt-5.5
+    // Dispatched workers default to gpt-5.6-terra. The Codex ORCHESTRATOR
+    // default is gpt-6-astra (see MODEL_IDS.codexDefault); workers stay on
+    // Terra. gpt-5.5
     // remains selectable. (History: gpt-5-codex → gpt-5.5 on 2026-04-30 after
     // upstream 400'd gpt-5-codex on ChatGPT-account Codex CLI.)
     defaultModel: MODEL_IDS.codexWorkerDefault,
@@ -103,7 +103,7 @@ export const ORCHESTRATOR_RUNTIMES = {
       rewind: true,
     },
     tier: 'frontier',
-    description: 'GPT-5.6 coding agent via `codex exec --json` (Sol orchestration · Terra workers). Full-access sandbox, thread resume.',
+    description: 'Codex coding agent via `codex exec --json` (Astra orchestration · Terra workers). Full-access sandbox, thread resume.',
   },
   'claude-code': {
     label: 'Claude Code',

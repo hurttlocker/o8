@@ -258,7 +258,7 @@ const IGNORE_USER_CONFIG = ['--ignore-user-config'];
  * Codex reasoning-effort flag. Emitted ONLY for an explicit tier — undefined /
  * 'adaptive' → [] so the launch stays at Codex's default (parity: unset effort
  * produces byte-identical args to before this feature). `max`/`ultra` pass
- * through ONLY on gpt-5.6-sol; every other model clamps to `xhigh` (shared with
+ * through only on flagship models; every other model clamps to `xhigh` (shared with
  * the orchestrator via resolveCodexReasoningEffort).
  */
 export function codexReasoningEffortArgs(effort?: ThinkingEffort, model?: string): string[] {

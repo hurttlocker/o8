@@ -3,6 +3,7 @@ import { ComposerPopover } from './chat-panel/ComposerPopover';
 import { type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorBackendSetting } from './operator-defaults';
 import { MODEL_IDS } from '@/lib/models';
+import { isCodexUltraCapableModel } from '@/lib/codex/reasoning-effort';
 import { useEntitlement } from '@/lib/entitlement/context';
 import { AcpModelPicker } from './AcpModelPicker';
 import { shortModelLabel as acpShortModelLabel } from '@/lib/orchestrator/acp-model-catalogue';
@@ -23,7 +24,7 @@ const EFFORT_LABELS: Record<ThinkingEffort, string> = {
 
 // Adaptive sits BETWEEN medium and high — that's the band it auto-picks in,
 // and its half-lit fourth bar reads the same way (operator, 2026-07-06).
-// 'ultra' is codex gpt-5.6-sol-only (appended dynamically below) — not in the
+// 'ultra' is Codex-flagship-only (appended dynamically below) — not in the
 // base list, so it never shows for Claude/Fable turns.
 const EFFORT_OPTIONS: ThinkingEffort[] = ['low', 'medium', 'adaptive', 'high', 'xhigh', 'max'];
 const EFFORT_LEVEL: Record<ThinkingEffort, number> = {
@@ -75,8 +76,8 @@ type ComposerModelGroup = {
 };
 
 // Grouped by house (Q ruling 2026-07-11): a Claude drawer and a Codex drawer,
-// models nested under each. Codex exposes Sol (flagship, Opus-class) AND Terra
-// (Sonnet-class) as orchestrator-worthy picks — both run as the codex
+// models nested under each. Codex exposes Astra, Sol, and Terra as
+// orchestrator-worthy picks. Each runs as the Codex
 // orchestrator model via resolveOrchestratorModelSync.
 const COMPOSER_MODEL_GROUPS: ComposerModelGroup[] = [
   {
@@ -93,6 +94,7 @@ const COMPOSER_MODEL_GROUPS: ComposerModelGroup[] = [
     key: 'codex',
     label: 'Codex',
     options: [
+      { value: MODEL_IDS.raw.openAiGpt6Astra, label: 'GPT-6 Astra', triggerLabel: 'Astra', backend: 'codex', model: MODEL_IDS.raw.openAiGpt6Astra, sub: 'orchestrator flagship' },
       { value: MODEL_IDS.raw.openAiGpt56Sol, label: 'GPT-5.6 Sol', triggerLabel: 'Sol', backend: 'codex', model: MODEL_IDS.raw.openAiGpt56Sol, sub: 'flagship · Fable-class' },
       { value: MODEL_IDS.raw.openAiGpt56Terra, label: 'GPT-5.6 Terra', triggerLabel: 'Terra', backend: 'codex', model: MODEL_IDS.raw.openAiGpt56Terra, sub: 'Sonnet-class worker' },
     ],
@@ -377,8 +379,8 @@ export function ModelThinkingChip({
       : group)
     : COMPOSER_MODEL_GROUPS;
   const baseEffortOptions = adaptiveEnabled ? EFFORT_OPTIONS : EFFORT_OPTIONS.filter((option) => option !== 'adaptive');
-  // 'ultra' (codex gpt-5.6-sol's internal-fan-out tier) is only selectable on the
-  // codex backend, whose composer model is always Sol. Every other backend caps
+  // 'ultra' (Codex flagship internal fan-out) is only selectable on the Codex
+  // backend. Every other backend caps
   // at 'max' — see resolveCodexReasoningEffort / claudeEffortFlagValue.
   const options = activeBackend === 'codex' ? [...baseEffortOptions, 'ultra' as ThinkingEffort] : baseEffortOptions;
   const selectedLabel = EFFORT_LABELS[effort];
@@ -695,9 +697,9 @@ export function ModelThinkingChip({
                               } else {
                                 onBackendChange?.(option.backend, option.model);
                               }
-                              // Codex/Sol keeps ultra available; Terra + any Claude
+                              // Codex flagships keep ultra available; Terra + any Claude
                               // model cap at max — drop a stale ultra selection.
-                              if (option.model !== MODEL_IDS.raw.openAiGpt56Sol && effort === 'ultra') onEffortChange?.('max');
+                              if (!isCodexUltraCapableModel(option.model) && effort === 'ultra') onEffortChange?.('max');
                               // Backends without fan-out must clear Collide/Swarm:
                               // a persisted `collide` flag replaces the selected
                               // backend with 'collide' at send time, so the turn

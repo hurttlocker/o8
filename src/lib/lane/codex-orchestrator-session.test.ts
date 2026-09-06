@@ -33,6 +33,15 @@ describe('codexOrchestratorModelFlags', () => {
     ]);
   });
 
+  it('emits the gpt-6-astra ultra tier', () => {
+    expect(codexOrchestratorModelFlags('gpt-6-astra', 'ultra')).toEqual([
+      '-c',
+      'model=gpt-6-astra',
+      '-c',
+      'model_reasoning_effort=ultra',
+    ]);
+  });
+
   it('expands an Ollama model to the --oss local form (no reasoning effort)', () => {
     expect(codexOrchestratorModelFlags('ollama:qwen2.5-coder:32b', 'xhigh')).toEqual([
       '--oss',

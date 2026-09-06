@@ -88,7 +88,7 @@ function TierLabel(tier: 'frontier' | 'standard' | 'local'): string {
 // Short, honest one-liners keyed off runtime-capabilities.ts (its `description`
 // strings run long; these fit a settings row).
 const RUNTIME_BLURB: Record<string, string> = {
-  codex: 'GPT-5.6 — Sol orchestrates, Terra works',
+  codex: 'GPT-6 Astra orchestrates, GPT-5.6 Terra works',
   'claude-code': 'Claude Code harness, native account or API gateway',
   gemini: 'Retired CLI adapter — existing lanes stay readable',
   opencode: 'OpenCode 2 multi-provider CLI, routes through your provider keys',

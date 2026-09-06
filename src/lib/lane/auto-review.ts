@@ -592,7 +592,7 @@ async function performAutoReview(review: QueuedReview): Promise<AutoReviewOutcom
 
   // Dual-path routing (epic #1044): the `inAppOrchestratorEnabled` toggle is
   // now a runtime selector, not an on/off gate.
-  //   - toggle OFF (default) → Codex GPT-5.6 Sol xhigh runs the review through
+  //   - toggle OFF (default) → Codex GPT-6 Astra xhigh runs the review through
   //     the connected Codex subscription.
   //   - toggle ON              → the resident Claude Code harness runs the
   //     review with the model source selected in Settings > Models.

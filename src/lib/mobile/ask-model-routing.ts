@@ -7,6 +7,7 @@ export const MOBILE_ASK_MODEL_IDS = [
   'claude-opus',
   'claude-fable',
   'codex-terra-xhigh',
+  'codex-astra-xhigh',
   'codex-sol-xhigh',
   'managed-free',
 ] as const;
@@ -38,7 +39,7 @@ export type MobileAskRoute =
   | {
     kind: 'codex';
     requestedModel: 'auto' | keyof typeof CODEX_CLI_MODELS;
-    cliModel: typeof MODEL_IDS.codexWorkerDefault | typeof MODEL_IDS.codexDefault;
+    cliModel: typeof MODEL_IDS.codexWorkerDefault | typeof MODEL_IDS.codexDefault | typeof MODEL_IDS.raw.openAiGpt56Sol;
     effort: MobileAskEffort;
   }
   | {
@@ -61,7 +62,8 @@ const CLAUDE_CLI_MODELS = {
 
 const CODEX_CLI_MODELS = {
   'codex-terra-xhigh': MODEL_IDS.codexWorkerDefault,
-  'codex-sol-xhigh': MODEL_IDS.codexDefault,
+  'codex-astra-xhigh': MODEL_IDS.codexDefault,
+  'codex-sol-xhigh': MODEL_IDS.raw.openAiGpt56Sol,
 } as const;
 
 const MODEL_COPY: Record<MobileAskModelId, Omit<MobileAskModel, 'id' | 'available'>> = {
@@ -87,6 +89,10 @@ const MODEL_COPY: Record<MobileAskModelId, Omit<MobileAskModel, 'id' | 'availabl
   },
   'codex-terra-xhigh': {
     label: 'Codex GPT-5.6 Terra',
+    detail: 'Uses the signed-in Codex CLI on this desktop.',
+  },
+  'codex-astra-xhigh': {
+    label: 'Codex GPT-6 Astra',
     detail: 'Uses the signed-in Codex CLI on this desktop.',
   },
   'codex-sol-xhigh': {
@@ -141,6 +147,7 @@ export function buildMobileAskModelCatalog(readiness: MobileAskReadiness): {
     'claude-opus': readiness.claude,
     'claude-fable': readiness.claude,
     'codex-terra-xhigh': readiness.codex,
+    'codex-astra-xhigh': readiness.codex,
     'codex-sol-xhigh': readiness.codex,
     'managed-free': true,
   };

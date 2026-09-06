@@ -75,4 +75,35 @@ describe('ModelThinkingChip Claude Code carrier truth', () => {
     expect(container.textContent).toContain('provider/frontier-model');
     expect(container.textContent).not.toContain('Opus 4.8');
   });
+
+  it('offers Astra without clearing an explicit ultra effort', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false } as Response)));
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      disconnect() {}
+    });
+    const onModelChange = vi.fn();
+    const onEffortChange = vi.fn();
+
+    await act(async () => {
+      root.render(createElement(ModelThinkingChip, {
+        modelLabel: 'Sol',
+        modelId: 'gpt-5.6-sol',
+        activeBackend: 'codex',
+        effort: 'ultra',
+        adaptiveEnabled: true,
+        onModelChange,
+        onEffortChange,
+      }));
+    });
+    const trigger = container.querySelector('button[aria-haspopup="menu"]');
+    await act(async () => { trigger?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const astra = [...document.body.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')]
+      .find((button) => button.textContent?.includes('GPT-6 Astra'));
+    expect(astra).toBeTruthy();
+
+    await act(async () => { astra?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(onModelChange).toHaveBeenCalledWith('gpt-6-astra');
+    expect(onEffortChange).not.toHaveBeenCalledWith('max');
+  });
 });

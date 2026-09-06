@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { MODEL_IDS } from '@/lib/models';
-import { ORCHESTRATOR_MODEL_OPTIONS } from './settings/dispatch-shared';
-import { CLAUDE_CLI_MODELS } from './workspace-terminal/constants';
+import { BRAIN_CODEX_MODEL_OPTIONS, ORCHESTRATOR_MODEL_OPTIONS } from './settings/dispatch-shared';
+import { CLI_RUNTIME_MODELS } from './llm-chat/shared';
+import { CLAUDE_CLI_MODELS, CODEX_CLI_MODELS } from './workspace-terminal/constants';
 
 /**
  * Three surfaces each keep a hand-written Claude model list. Until they are
@@ -12,6 +13,11 @@ import { CLAUDE_CLI_MODELS } from './workspace-terminal/constants';
 const CURRENT_CLAUDE_FLAGSHIPS = [
   MODEL_IDS.raw.anthropicClaudeOpus5,
   MODEL_IDS.raw.anthropicClaudeSonnet5,
+] as const;
+
+const CURRENT_CODEX_FLAGSHIPS = [
+  MODEL_IDS.raw.openAiGpt6Astra,
+  MODEL_IDS.raw.openAiGpt56Sol,
 ] as const;
 
 describe('Claude model picker coverage', () => {
@@ -33,6 +39,20 @@ describe('Claude model picker coverage', () => {
       expect(settingsOption?.label).not.toBe(id);
       expect(workspaceOption?.label.trim()).toBeTruthy();
       expect(workspaceOption?.label).not.toBe(id);
+    }
+  });
+});
+
+describe('Codex model picker coverage', () => {
+  it('offers Astra and Sol in settings and both CLI pickers', () => {
+    const settingsIds = BRAIN_CODEX_MODEL_OPTIONS.map((option) => option.value);
+    const workspaceIds = CODEX_CLI_MODELS.map((option) => option.id);
+    const chatIds = CLI_RUNTIME_MODELS.codex.map((option) => option.id.replace('cli:codex:', ''));
+
+    for (const id of CURRENT_CODEX_FLAGSHIPS) {
+      expect(settingsIds).toContain(id);
+      expect(workspaceIds).toContain(id);
+      expect(chatIds).toContain(id);
     }
   });
 });
