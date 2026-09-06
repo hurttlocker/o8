@@ -15,7 +15,7 @@ const inFlight = new Map<string, Promise<AutoCompactResult>>();
 type PersistedThread = { filePath: string; tabId: string; payload: Record<string, unknown>; messages: MobileTranscriptEntry[]; mtimeMs: number };
 export const ORCHESTRATOR_COMPACTION_PROVENANCE = {
   backend: 'codex',
-  model: MODEL_IDS.codexDefault,
+  model: MODEL_IDS.codexCliDefault,
   reasoningEffort: 'medium',
 } as const;
 export interface AutoCompactResult {
@@ -178,7 +178,7 @@ async function summarizeWithCodex(repoPath: string, prompt: string): Promise<Cod
       '-s',
       'read-only',
       '-c',
-      `model=${MODEL_IDS.codexDefault}`,
+      `model=${MODEL_IDS.codexCliDefault}`,
       '-c',
       'model_reasoning_effort=medium',
       '-C',

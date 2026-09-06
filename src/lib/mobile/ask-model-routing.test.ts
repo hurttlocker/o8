@@ -9,7 +9,7 @@ import {
 } from './ask-model-routing';
 
 describe('mobile Ask model routing', () => {
-  it('always returns the eight mobile-safe model ids with local availability', () => {
+  it('always returns the nine mobile-safe model ids with local availability', () => {
     const catalog = buildMobileAskModelCatalog({ claude: true, codex: false });
 
     expect(catalog.models.map((model) => model.id)).toEqual([
@@ -19,6 +19,7 @@ describe('mobile Ask model routing', () => {
       'claude-opus',
       'claude-fable',
       'codex-terra-xhigh',
+      'codex-astra-xhigh',
       'codex-sol-xhigh',
       'managed-free',
     ]);
@@ -29,6 +30,7 @@ describe('mobile Ask model routing', () => {
       ['claude-opus', true],
       ['claude-fable', true],
       ['codex-terra-xhigh', false],
+      ['codex-astra-xhigh', false],
       ['codex-sol-xhigh', false],
       ['managed-free', true],
     ]);
@@ -87,7 +89,13 @@ describe('mobile Ask model routing', () => {
     });
   });
 
-  it('routes explicit Sol through Codex at xhigh without changing Auto', () => {
+  it('routes explicit Astra and Sol through Codex at xhigh without changing Auto', () => {
+    expect(resolveMobileAskRoute('codex-astra-xhigh', { claude: true, codex: true })).toEqual({
+      kind: 'codex',
+      requestedModel: 'codex-astra-xhigh',
+      cliModel: 'gpt-6-astra',
+      effort: 'xhigh',
+    });
     expect(resolveMobileAskRoute('codex-sol-xhigh', { claude: true, codex: true })).toEqual({
       kind: 'codex',
       requestedModel: 'codex-sol-xhigh',
@@ -144,6 +152,7 @@ describe('mobile Ask model routing', () => {
     expect(resolveMobileAskEffort('claude-opus', 'medium')).toBe('medium');
     expect(resolveMobileAskEffort('claude-sonnet', 'low')).toBe('low');
     expect(resolveMobileAskEffort('claude-fable', 'medium')).toBe('medium');
+    expect(resolveMobileAskEffort('codex-astra-xhigh', 'medium')).toBe('medium');
     expect(resolveMobileAskEffort('codex-sol-xhigh', 'medium')).toBe('medium');
   });
 
@@ -166,6 +175,11 @@ describe('mobile Ask model routing', () => {
     expect(resolveMobileAskRoute('claude-fable', { claude: false, codex: true })).toEqual({
       kind: 'managed',
       requestedModel: 'claude-fable',
+      fallback: true,
+    });
+    expect(resolveMobileAskRoute('codex-astra-xhigh', { claude: true, codex: false })).toEqual({
+      kind: 'managed',
+      requestedModel: 'codex-astra-xhigh',
       fallback: true,
     });
     expect(resolveMobileAskRoute('codex-sol-xhigh', { claude: true, codex: false })).toEqual({

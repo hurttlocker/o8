@@ -188,6 +188,7 @@ export const CLI_RUNTIME_MODELS: Record<string, ModelOption[]> = {
   // operator MCP server (user's own Claude Code / Desktop session) instead.
   'claude-code': [],
   codex: [
+    { id: 'cli:codex:gpt-6-astra', label: 'GPT-6 Astra', provider: 'openai', color: '#10a37f', description: 'Orchestrator flagship', backend: 'cli', cliRuntime: 'codex', supportsThinking: true },
     { id: 'cli:codex:gpt-5.6-sol', label: 'GPT-5.6 Sol', provider: 'openai', color: '#10a37f', description: 'Flagship (Opus-class)', backend: 'cli', cliRuntime: 'codex', supportsThinking: true },
     { id: 'cli:codex:gpt-5.6-terra', label: 'GPT-5.6 Terra', provider: 'openai', color: '#10a37f', description: 'Balanced (Sonnet-class)', backend: 'cli', cliRuntime: 'codex', supportsThinking: true },
     { id: 'cli:codex:gpt-5.6-luna', label: 'GPT-5.6 Luna', provider: 'openai', color: '#10a37f', description: 'Fast + cheap (Haiku-class)', backend: 'cli', cliRuntime: 'codex', supportsThinking: true },

@@ -5,19 +5,16 @@ import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
  * (`reasoningEffortFromThinkingEffort`) and the worker launch surface
  * (`codexReasoningEffortArgs`) so the model gate lives in exactly one place.
  *
- * GPT-5.6 introduced two effort tiers above `xhigh`: `max` and `ultra` (ultra =
- * internal sub-agent fan-out, heavy token burn). Per operator ruling 2026-07-09
- * these two tiers are ONLY honored on the flagship `gpt-5.6-sol`; every other
- * model (terra, luna, gpt-5.5, gpt-5.4, locals) caps at `xhigh`. This mirrors
- * the historical `max → xhigh` clamp that existed before 5.6 shipped a real
- * `max` tier.
+ * The flagship models expose two effort tiers above `xhigh`: `max` and `ultra`
+ * (ultra = internal sub-agent fan-out, heavy token burn). Every other model
+ * (terra, luna, gpt-5.5, gpt-5.4, locals) caps at `xhigh`.
  */
 
-/** Only gpt-5.6-sol exposes the `max` + `ultra` reasoning tiers. */
+/** Only the Codex flagship models expose the `max` + `ultra` reasoning tiers. */
 export function isCodexUltraCapableModel(model?: string | null): boolean {
   const normalized = model?.trim().toLowerCase();
   if (!normalized) return false;
-  return normalized.includes('gpt-5.6-sol');
+  return normalized.includes('gpt-6-astra') || normalized.includes('gpt-5.6-sol');
 }
 
 /**
@@ -25,7 +22,7 @@ export function isCodexUltraCapableModel(model?: string | null): boolean {
  * `model_reasoning_effort` string for a given model. `effort` must be a concrete
  * tier (callers handle `adaptive`/undefined = runtime default separately).
  *
- * - `max` / `ultra` → passed through ONLY on gpt-5.6-sol; otherwise clamped to
+ * - `max` / `ultra` → passed through only on flagship models; otherwise clamped to
  *   `xhigh` (other models don't accept them).
  * - `low` / `medium` / `high` / `xhigh` → passed through verbatim.
  */

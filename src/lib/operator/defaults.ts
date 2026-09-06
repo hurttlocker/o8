@@ -214,7 +214,7 @@ export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParki
    * selected in Settings > Models. The source can be the native Claude Code
    * account, an API gateway, or the experimental local Codex subscription
    * carrier. Requires the `claude` CLI; the spawn errors if it is missing.
-   * Flip off to use Codex GPT-5.6 Sol through the connected Codex subscription.
+   * Flip off to use Codex GPT-6 Astra through the connected Codex subscription.
    */
   inAppOrchestratorEnabled: boolean;
   /**

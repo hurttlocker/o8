@@ -173,7 +173,7 @@ export const STATUS_TOOLS: McpTool[] = [
         orchestratorBackend: {
           type: 'string',
           enum: ['auto', 'codex', 'claude', 'openclaw', 'hermes', 'collide', 'fable', 'opencode'],
-          description: 'Active in-app orchestrator backend. Use "codex" for Codex GPT-5.5, "claude" for Claude Code, or "auto" for legacy toggle resolution.',
+          description: 'Active in-app orchestrator backend. Use "codex" for Codex GPT-6 Astra, "claude" for Claude Code, or "auto" for legacy toggle resolution.',
         },
         collideAggregator: {
           type: 'string',
@@ -192,7 +192,7 @@ export const STATUS_TOOLS: McpTool[] = [
         },
         brainCodexModel: {
           type: 'string',
-          enum: ['gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-5.6-luna', 'gpt-5.5'],
+          enum: ['gpt-6-astra', 'gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-5.6-luna', 'gpt-5.5'],
           description: 'Codex subscription model used for Engineering Brain classification and cited answers.',
         },
         brainCodexEffort: {

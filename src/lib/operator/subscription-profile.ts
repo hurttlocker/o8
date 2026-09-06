@@ -57,9 +57,8 @@ export function resolveSubscriptionProfileHouseDefaults(profile: SubscriptionPro
     return {
       orchestratorBackend: 'codex',
       defaultDispatchRuntime: 'codex',
-      // Codex-only workers ride the cheaper Terra tier; the orchestrator runs Sol
-      // (gpt-5.6-sol via resolveOrchestratorModelSync). Cheap→Sol escalation is
-      // wired below in frontierEscalationModelForCheapTier.
+      // Codex-only workers ride the cheaper Terra tier; the orchestrator runs
+      // Astra. Cheap→Sol worker escalation is wired below.
       defaultDispatchModel: MODEL_IDS.codexWorkerDefault,
       reviewerBackend: 'codex',
     };

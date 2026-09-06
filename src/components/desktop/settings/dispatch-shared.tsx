@@ -178,7 +178,7 @@ export const REQUIRE_APPROVAL_OPTIONS: Array<{ value: RequireApproval; label: st
 export const SUBSCRIPTION_PROFILE_OPTIONS: Array<{ value: SubscriptionProfile; label: string; detail: string }> = [
   { value: 'both', label: 'All available', detail: 'Use any installed dispatchable runtime; Codex remains the fallback until you choose one.' },
   { value: 'claude-only', label: 'Claude only', detail: 'Everything runs on your Claude subscription — Opus orchestrates, Sonnet works, escalates only when needed.' },
-  { value: 'codex-only', label: 'Codex / OpenAI only', detail: 'Everything runs on Codex / OpenAI — GPT-5.6 Sol orchestrates, Terra works, escalates to Sol when needed.' },
+  { value: 'codex-only', label: 'Codex / OpenAI only', detail: 'Everything runs on Codex / OpenAI — GPT-6 Astra orchestrates, Terra works, escalates to Sol when needed.' },
 ];
 
 export const THINKING_EFFORT_OPTIONS: Array<{ value: ThinkingEffort; label: string; detail: string }> = [
@@ -207,6 +207,7 @@ export const CLAUDE_WORKER_EFFORT_OPTIONS: Array<{ value: ThinkingEffort; label:
 ];
 
 export const BRAIN_CODEX_MODEL_OPTIONS: Array<{ value: string; label: string; detail: string }> = [
+  { value: MODEL_IDS.raw.openAiGpt6Astra, label: 'Astra', detail: 'Most capable model for complex, demanding work.' },
   { value: MODEL_IDS.raw.openAiGpt56Terra, label: 'Terra', detail: 'Balanced Brain answers and repo reasoning.' },
   { value: MODEL_IDS.raw.openAiGpt56Sol, label: 'Sol', detail: 'Frontier reasoning for the hardest questions.' },
   { value: MODEL_IDS.raw.openAiGpt56Luna, label: 'Luna', detail: 'Fast, inexpensive factual lookup.' },

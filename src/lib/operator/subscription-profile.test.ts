@@ -29,18 +29,18 @@ describe('subscription profile resolver', () => {
       profile: 'both',
       requestedRuntime: 'codex',
       requestedModel: null,
-      defaultDispatchModel: MODEL_IDS.codexDefault,
+      defaultDispatchModel: MODEL_IDS.raw.openAiGpt56Sol,
     })).toEqual({
       ok: true,
       requestedRuntime: 'codex',
-      requestedModel: MODEL_IDS.codexDefault,
+      requestedModel: MODEL_IDS.raw.openAiGpt56Sol,
     });
 
     expect(resolveSubscriptionProfileRouting({
       profile: 'both',
       requestedRuntime: 'codex',
       requestedModel: MODEL_IDS.codexWorkerDefault,
-      defaultDispatchModel: MODEL_IDS.codexDefault,
+      defaultDispatchModel: MODEL_IDS.raw.openAiGpt56Sol,
     })).toEqual({
       ok: true,
       requestedRuntime: 'codex',
@@ -73,9 +73,9 @@ describe('subscription profile resolver', () => {
       defaultDispatchModel: MODEL_IDS.codexWorkerDefault,
       reviewerBackend: 'codex',
     });
-    // Sanity: the codex worker default is the Terra tier, not the Sol orchestrator.
+    // The Codex worker default stays on Terra while Astra takes the orchestrator slot.
     expect(MODEL_IDS.codexWorkerDefault).toBe('gpt-5.6-terra');
-    expect(MODEL_IDS.codexDefault).toBe('gpt-5.6-sol');
+    expect(MODEL_IDS.codexDefault).toBe('gpt-6-astra');
   });
 
   it('classifies codex frontier (Sol) vs cheap tiers (Terra/Luna)', () => {
@@ -92,7 +92,7 @@ describe('subscription profile resolver', () => {
     expect(frontierEscalationModelForCheapTier({ profile: 'codex-only', runtime: 'codex', model: MODEL_IDS.codexWorkerDefault }))
       .toBe(MODEL_IDS.raw.openAiGpt56Sol);
     // A Sol worker is already frontier — no escalation.
-    expect(isSingleSubCheapTierWorker({ profile: 'codex-only', runtime: 'codex', model: MODEL_IDS.codexDefault })).toBe(false);
+    expect(isSingleSubCheapTierWorker({ profile: 'codex-only', runtime: 'codex', model: MODEL_IDS.raw.openAiGpt56Sol })).toBe(false);
     // Both-house never single-sub escalates.
     expect(frontierEscalationModelForCheapTier({ profile: 'both', runtime: 'codex', model: MODEL_IDS.codexWorkerDefault })).toBeNull();
     // Claude-only still escalates its cheap tier to Opus (unchanged).
@@ -141,7 +141,7 @@ describe('subscription profile resolver', () => {
       profile: 'claude-only',
       requestedRuntime: null,
       requestedModel: 'claude-opus-4-8',
-      defaultDispatchModel: MODEL_IDS.codexDefault,
+      defaultDispatchModel: MODEL_IDS.raw.openAiGpt56Sol,
     })).toEqual({
       ok: true,
       requestedRuntime: 'claude-code',
@@ -152,7 +152,7 @@ describe('subscription profile resolver', () => {
       profile: 'claude-only',
       requestedRuntime: null,
       requestedModel: null,
-      defaultDispatchModel: MODEL_IDS.codexDefault,
+      defaultDispatchModel: MODEL_IDS.raw.openAiGpt56Sol,
     })).toEqual({
       ok: true,
       requestedRuntime: 'claude-code',

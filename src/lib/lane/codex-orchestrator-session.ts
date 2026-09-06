@@ -27,8 +27,8 @@ import {
   readOrchestratorBackendSessionId,
   writeOrchestratorBackendSessionId,
 } from '@/lib/mobile/orchestrator-thread-history';
-import { ensureCodexHome } from './codex-orchestrator-config';
-export { ensureCodexHome, mergeCodexMcpConfig, stripPluginSections } from './codex-orchestrator-config';
+import { prepareCodexHome } from './codex-orchestrator-config';
+export { ensureCodexHome, mergeCodexMcpConfig, prepareCodexHome, stripPluginSections } from './codex-orchestrator-config';
 import { parseLocalModel } from '@/lib/codex/local-model';
 import { codexCliSupportsUltraEfforts, resolveCodexReasoningEffort } from '@/lib/codex/reasoning-effort';
 import { resolveDefaultDispatchModelSync } from '@/lib/operator/defaults';
@@ -215,9 +215,9 @@ function sandboxFlagsForMode(mode: CodexOrchestratorPermissionMode): string[] {
 
 function reasoningEffortFromThinkingEffort(effort: ThinkingEffort | undefined, model?: string): string {
   if (!effort || effort === 'adaptive') return 'xhigh';
-  // GPT-5.6 effort tiers: low, medium, high, xhigh, max, ultra. The `max`/`ultra`
-  // tiers are honored ONLY on gpt-5.6-sol; every other model (terra, luna,
-  // gpt-5.5, locals) clamps to xhigh — see resolveCodexReasoningEffort.
+  // Codex effort tiers: low, medium, high, xhigh, max, ultra. The `max`/`ultra`
+  // tiers are honored only on flagship models; every other model clamps to
+  // xhigh. See resolveCodexReasoningEffort.
   return resolveCodexReasoningEffort(effort, model);
 }
 
@@ -341,9 +341,7 @@ async function sendToCodexOrchestratorAttempt(
   };
   if (settleBeforeSpawnIfAborted()) return;
   const permissionMode: CodexOrchestratorPermissionMode = options.permissionMode ?? 'full';
-  const model = resolveOrchestratorModelSync(options.model);
-  const isLocalModel = !!parseLocalModel(model);
-  let reasoningEffort = reasoningEffortFromThinkingEffort(options.thinkingEffort, model);
+  let model = resolveOrchestratorModelSync(options.model);
 
   // Steer-Now / queue preempt: the ws-server aborts the prior turn's
   // controller before calling sendTurn, so a still-'busy' session here is a
@@ -386,15 +384,23 @@ async function sendToCodexOrchestratorAttempt(
   try {
     // A 'propose' turn gets the operator-stripped (read-only proposer) config —
     // Collide's dispatch lockout.
-    codexHome = ensureCodexHome(session.repoPath, options.toolProfile ?? 'full');
+    const prepared = prepareCodexHome(session.repoPath, options.toolProfile ?? 'full', model);
+    codexHome = prepared.codexHome;
+    model = prepared.model;
+    if (prepared.note) {
+      console.warn(`[codex-orchestrator-session] ${prepared.note}`);
+      onEvent({ type: 'thinking', text: prepared.note });
+    }
   } catch (err) {
     session.status = 'dead';
-    const note = `Failed to prepare Codex MCP config: ${err instanceof Error ? err.message : String(err)}`;
+    const note = `Failed to prepare Codex orchestrator config: ${err instanceof Error ? err.message : String(err)}`;
     onEvent({ type: 'error', error: note });
     onEvent({ type: 'done', sessionId: session.threadId, cost: null });
     return;
   }
   if (settleBeforeSpawnIfAborted()) return;
+  const isLocalModel = !!parseLocalModel(model);
+  let reasoningEffort = reasoningEffortFromThinkingEffort(options.thinkingEffort, model);
 
   const { resolveCli, CliNotFoundError } = await import('@/lib/runtimes/shared/cli-resolver');
   if (settleBeforeSpawnIfAborted()) return;
@@ -407,7 +413,7 @@ async function sendToCodexOrchestratorAttempt(
       extraEnvOverrides: ['CODEX_HOME'],
     });
     codexBin = resolved.path;
-    // The model-gated clamp (sol may use max/ultra) is not enough — the
+    // The model-gated clamp (flagship models may use max/ultra) is not enough — the
     // INSTALLED CLI must also understand the tier. An older codex refuses to
     // load config mentioning `max` and exits 1 before the first token.
     if ((reasoningEffort === 'max' || reasoningEffort === 'ultra') && !codexCliSupportsUltraEfforts(resolved.version)) {
