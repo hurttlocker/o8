@@ -179,7 +179,7 @@ describe.skipIf(process.platform === 'win32')('Claude Code native sign-in verifi
     }));
     expect(await claudeStatus()).toMatchObject({
       ready: false, authenticated: false, unavailableReason: 'needs_auth',
-      fix: expect.stringContaining('npm run worker:login'),
+      fix: expect.stringContaining('o8 worker login'),
     });
     const response = await createMissionRoute.POST(createMissionRequest(91_762_030));
     expect(response.status).toBe(400);
@@ -198,6 +198,60 @@ describe.skipIf(process.platform === 'win32')('Claude Code native sign-in verifi
     });
     await expect(assertRuntimeDispatchable('claude-code')).resolves.toBeUndefined();
   });
+
+  it('refreshes external token saves and removals through mission creation without expiring the broad cache', async () => {
+    authFixture.dedicatedTokenRequired = true;
+    vi.stubEnv('O8_MASTER_KEY', Buffer.alloc(32, 7).toString('base64url'));
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+    const tokenPath = path.join(dataRoot, 'native-worker-token.json');
+    const saveExternally = () => execFileSync(process.execPath, [
+      '--conditions=react-server', '--import', 'tsx', '--eval',
+      "const { saveNativeWorkerToken } = require('./src/lib/claude-code/worker-token.ts'); "
+        + "saveNativeWorkerToken('sk-ant-oat01-' + 'synthetic'.repeat(12)).catch(() => process.exit(1));",
+    ], { cwd: process.cwd(), env: process.env, timeout: 15_000, stdio: 'pipe' });
+    try {
+      const cold = await getRuntimeAuthSnapshot();
+      expect(cold.statuses.claude.ready).toBe(false);
+      const missing = await createMissionRoute.POST(createMissionRequest(91_762_040, { carrier: 'native' }));
+      expect(missing.status).toBe(400);
+
+      // A separate login process cannot invalidate this server's in-memory cache.
+      saveExternally();
+      const saved = await createMissionRoute.POST(createMissionRequest(91_762_041, { carrier: 'native' }));
+      expect(saved.status).toBe(201);
+      const savedBody = await saved.json();
+      expect(readOrchestratorControlPlaneState().packets.find(
+        (packet) => packet.id === savedBody.result.packets[0].id,
+      )).toMatchObject({ runtime: 'claude-code', claudeCodeCarrier: 'native' });
+
+      for (const invalidateToken of [
+        () => rmSync(tokenPath),
+        () => writeFileSync(tokenPath, '{"version":1,"ciphertext":"invalid","iv":"invalid"}'),
+      ]) {
+        saveExternally();
+        expect((await getRuntimeAuthSnapshot()).statuses.claude.ready).toBe(true);
+        invalidateToken();
+        const before = readOrchestratorControlPlaneState();
+        const removed = await createMissionRoute.POST(createMissionRequest(91_762_042, { carrier: 'native' }));
+        expect(removed.status).toBe(400);
+        expect(await removed.json()).toMatchObject({
+          ok: false, error: { code: 'dispatch_cli_auth_unavailable' },
+        });
+        expect(readOrchestratorControlPlaneState().packets.map((packet) => packet.id)).toEqual(
+          before.packets.map((packet) => packet.id),
+        );
+        const fresh = await getRuntimeAuthSnapshot();
+        expect(fresh.statuses.claude).toMatchObject({ ready: false, authenticated: false });
+        expect(fresh.suggestedSubscriptionProfile).toEqual(cold.suggestedSubscriptionProfile);
+        expect(fresh.statuses.codex).toBe(cold.statuses.codex);
+        await expect(assertRuntimeDispatchable('claude-code', null, repoPath, {
+          claudeCodeCarrier: 'codex-subscription',
+        })).resolves.toBeUndefined();
+      }
+    } finally {
+      clock.mockRestore();
+    }
+  }, 30_000);
 
   it('refuses stale marker files and empty OAuth fields as sign-in evidence', async () => {
     writeStaleMarkers();
