@@ -6,11 +6,14 @@ name: CI
 # direct pushes/day × ~17 job-minutes that was the entire Actions bill for
 # zero new signal. PRs are the un-gated lanes (PR agents), so event-driven CI
 # stays there.
-# A weekly run keeps dependency audits current; workflow_dispatch remains the
-# on-demand path for a full remote check against main.
+# A weekly run keeps integration coverage and dependency audits current;
+# workflow_dispatch remains the on-demand path for a full remote check against
+# main.
 on:
   pull_request:
     branches: [main]
+  schedule:
+    - cron: '17 5 * * 0'
   workflow_dispatch:
 
 permissions:
@@ -23,6 +26,7 @@ concurrency:
 jobs:
   typecheck:
     name: Type Check
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -45,6 +49,7 @@ jobs:
   # being linted). Warnings don't fail the job; errors do.
   lint:
     name: Lint
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -143,6 +148,7 @@ jobs:
 
   governance-smoke:
     name: Governance Smoke
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     # timeout is load-bearing: this job hung at the 6h GitHub ceiling 3x on
     # 2026-07-11 (open handle keeps node alive after the smoke passes) —
