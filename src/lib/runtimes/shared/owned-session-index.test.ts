@@ -118,4 +118,16 @@ describe('lookupOwnedActiveRun', () => {
 
     expect(await lookupOwnedActiveRunFresh('pi-owned:new')).toEqual({ pid: 8, tmuxSession: undefined });
   });
+
+  it('preserves the latest exact run marker through a fresh stop lookup', async () => {
+    const surfaceId = 'claude-code-owned:marker';
+    writeSession('marker', surfaceId, { pid: 8, processMarker: 'old-run' });
+    expect(await lookupOwnedActiveRun(surfaceId)).toMatchObject({ processMarker: 'old-run' });
+    writeSession('marker', surfaceId, {
+      pid: 9, processGroupId: 9, commandIdentity: 'sandbox-exec', processMarker: 'new-run',
+    });
+    expect(await lookupOwnedActiveRunFresh(surfaceId)).toMatchObject({
+      pid: 9, processGroupId: 9, commandIdentity: 'sandbox-exec', processMarker: 'new-run',
+    });
+  });
 });

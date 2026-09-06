@@ -110,3 +110,16 @@ export function transitionPostCompletionLaneToReviewing(
   const lane = setLaneStatus(laneId, 'reviewing', 'system', 'agent_completed');
   return { lane, packetId };
 }
+
+/** Hold failed turns for input; partial work has not passed completion verification. */
+export function transitionFailedPostCompletionLane(
+  laneId: string,
+  hasReviewableWork: boolean,
+): Lane | null {
+  return setLaneStatus(
+    laneId,
+    'awaiting_input',
+    'system',
+    hasReviewableWork ? 'agent_failed_work_present' : 'agent_failed',
+  );
+}

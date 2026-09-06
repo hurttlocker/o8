@@ -465,8 +465,9 @@ describe('ws-server runtime action transport', () => {
 
     expect(start).toBeGreaterThanOrEqual(0);
     expect(end).toBeGreaterThan(start);
-    expect(section).toContain('const clientMutationId = randomUUID()');
-    expect(section).toContain('clientMutationId }');
-    expect(section).toContain('fetchRuntimeLaunch(launchBody)');
+    expect(section).toContain('relaunchSupervisedAgent(prompt, repoPath, taskName, retryOfSurfaceId)');
+    const retrySource = readFileSync(join(process.cwd(), 'src/lib/supervisor/relaunch-agent.ts'), 'utf8');
+    expect(retrySource).toContain('const clientMutationId = randomUUID()');
+    expect(retrySource).toContain('fetchRuntimeLaunch(launchBody)');
   });
 });

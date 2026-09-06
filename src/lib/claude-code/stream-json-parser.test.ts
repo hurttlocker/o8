@@ -99,3 +99,80 @@ describe('stream-json parser usage truth', () => {
     }));
   });
 });
+
+describe('stream-json parser provider terminal truth', () => {
+  it.each([true, false])('waits past message stops for the outer result (failure: %s)', (failed) => {
+    const parser = createClaudeCodeStreamJsonParser();
+    const intermediate = parser.pushChunk(lines(
+      wrap({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Reading context.' } }),
+      wrap({ type: 'message_stop' }),
+      { type: 'message_stop' },
+      { type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'auto', pre_tokens: 58_671 } },
+      wrap({ type: 'message_stop' }),
+    ));
+    expect(intermediate.filter((event) => event.type === 'done')).toEqual([]);
+    expect(parser.flush().filter((event) => event.type === 'done')).toEqual([]);
+    const terminal = parser.pushChunk(lines({
+      type: 'result', subtype: 'success', is_error: failed,
+      result: failed ? 'Context refill limit reached' : 'Complete finding',
+      session_id: 'streamed-terminal',
+    })).filter((event) => event.type === 'done');
+    expect(terminal).toHaveLength(1);
+    expect(terminal[0]).toMatchObject({
+      type: 'done', subtype: 'success', sessionId: 'streamed-terminal',
+      text: failed ? 'Context refill limit reached' : 'Complete finding',
+      ...(failed ? { isError: true } : {}),
+    });
+    if (!failed) expect(terminal[0]).not.toHaveProperty('isError');
+  });
+
+  it.each([
+    {
+      name: 'is_error with an empty result',
+      event: { type: 'result', subtype: 'success', is_error: true, result: '' },
+      expectedText: '',
+    },
+    {
+      name: 'a non-success result subtype',
+      event: { type: 'result', subtype: 'error_during_execution', result: 'provider failed' },
+      expectedText: 'provider failed',
+    },
+  ])('marks $name as failed', ({ event, expectedText }) => {
+    const parser = createClaudeCodeStreamJsonParser();
+    const done = parser.pushChunk(lines(event)).find((entry) => entry.type === 'done');
+
+    expect(done).toMatchObject({ type: 'done', isError: true, text: expectedText });
+  });
+
+  it('preserves partial assistant text when the provider error result is empty', () => {
+    const parser = createClaudeCodeStreamJsonParser();
+    const events = parser.pushChunk(lines(
+      wrap({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'partial finding' } }),
+      { type: 'result', subtype: 'error_during_execution', is_error: true, result: '' },
+    ));
+
+    expect(events.find((entry) => entry.type === 'done')).toMatchObject({
+      type: 'done',
+      isError: true,
+      subtype: 'error_during_execution',
+      text: 'partial finding',
+    });
+  });
+
+  it('keeps a clean success successful', () => {
+    const parser = createClaudeCodeStreamJsonParser();
+    const done = parser.pushChunk(lines({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: 'complete',
+    })).find((entry) => entry.type === 'done');
+
+    expect(done).toEqual(expect.objectContaining({
+      type: 'done',
+      subtype: 'success',
+      text: 'complete',
+    }));
+    expect(done).not.toHaveProperty('isError');
+  });
+});

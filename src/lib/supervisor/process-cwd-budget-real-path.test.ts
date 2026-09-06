@@ -147,7 +147,7 @@ function supervisorCallbacks() {
     async fetchTranscript() { return []; },
     async steerAgent() {},
     async interruptAgent() {},
-    async relaunchAgent() { return null; },
+    async relaunchAgent() { return { status: 'held' as const, reason: 'test hold' }; },
     broadcastAgentUpdate() {},
     queueOrchestratorEscalation() {},
   };

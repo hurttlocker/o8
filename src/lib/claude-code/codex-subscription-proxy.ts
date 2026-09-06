@@ -19,6 +19,7 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
 import { browserOpenInvocation, findLatestCodexOAuthUrl } from './codex-subscription-oauth';
 import { hasClaudeEnvCredential, hasLiveClaudeOAuth } from './oauth-credential';
+import { nativeWorkerTokenEnv, WORKER_TOKEN_SETUP_HINT } from './worker-token';
 import type { ClaudeCodeModelSource } from './worker-profile-types';
 
 const DEFAULT_PORT = 8317;
@@ -336,49 +337,67 @@ export async function ensureCodexSubscriptionClaudeConfigDir(sessionDir: string)
   return ensureClaudeCodeWorkerConfigDir(sessionDir);
 }
 
+/** Workers use a dedicated inference token, never the operator's refresh store. */
+export async function claudeCodeWorkerCredentialEnv(
+  configDir: string,
+  source?: ClaudeCodeModelSource,
+): Promise<Record<string, string>> {
+  return {
+    CLAUDE_SECURESTORAGE_CONFIG_DIR: configDir,
+    ...(process.platform === 'darwin' && source === 'native' ? await nativeWorkerTokenEnv() : {}),
+  };
+}
+
 export async function ensureClaudeCodeWorkerConfigDir(
   sessionDir: string,
   source?: ClaudeCodeModelSource,
 ): Promise<string> {
+  return (await prepareClaudeCodeWorkerConfig(sessionDir, source)).configDir;
+}
+
+export async function prepareClaudeCodeWorkerConfig(
+  sessionDir: string,
+  source?: ClaudeCodeModelSource,
+): Promise<{ configDir: string; credentialEnv: Record<string, string> }> {
   const configDir = path.join(sessionDir, 'claude-code-worker-config');
+  const credentialEnv = await claudeCodeWorkerCredentialEnv(configDir, source);
   await mkdir(configDir, { recursive: true, mode: 0o700 });
   await chmod(configDir, 0o700);
   await rm(path.join(configDir, 'skills'), { recursive: true, force: true });
+  if (process.platform === 'darwin') {
+    // Remove only this session's obsolete snapshot; never touch the source store.
+    await rm(path.join(configDir, '.credentials.json'), { force: true });
+  }
   if (source === 'native') {
     // A non-empty ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN is decisive for the
     // native carrier at the readiness seam (detectNativeClaudeAuth skips the CLI probe
     // for it), and the spawned worker inherits this same environment. Demanding an
-    // OAuth snapshot on top of it would refuse a launch that preflight just approved,
-    // so on that path the snapshot is best-effort and the CLI assertion is skipped.
-    const envCredential = hasClaudeEnvCredential();
-    await seedNativeWorkerCredentials(configDir, { required: !envCredential });
-    if (!envCredential) await assertNativeWorkerAuthenticated(configDir);
+    // OAuth credential on top of it would refuse a launch that preflight approved.
+    const envCredential = hasClaudeEnvCredential({ ...process.env, ...credentialEnv });
+    if (process.platform === 'darwin') {
+      if (!envCredential) {
+        throw new ClaudeCodeWorkerAuthenticationError(`No dedicated worker credential is configured. ${WORKER_TOKEN_SETUP_HINT}`);
+      }
+    } else {
+      await seedNativeWorkerCredentials(configDir, { required: !envCredential });
+    }
+    if (!envCredential) {
+      await assertNativeWorkerAuthenticated(configDir, credentialEnv);
+    }
   }
-  return configDir;
+  return { configDir, credentialEnv };
 }
 
-// On the native carrier, the isolated config dir replaces the operator's real
-// CLAUDE_CONFIG_DIR (or ~/.claude), so a worker that spawns there is otherwise
-// logged out. Current macOS Claude Code stores the live OAuth object in the
-// "Claude Code-credentials" Keychain item, and that lookup does not survive a
-// config-dir swap. Other platforms store it at <config dir>/.credentials.json.
-// Snapshot the live credential into the isolated dir for this worker.
-// Never symlink — a symlink would let a worker rewrite the operator's file.
+// Non-Mac behavior is unchanged pending its own platform acceptance.
+// Mac workers do not copy the operator's refreshable credential.
 async function seedNativeWorkerCredentials(
   configDir: string,
   options: { required: boolean },
 ): Promise<void> {
   const sourceConfigDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
   const sourceCredentialsPath = path.join(sourceConfigDir, '.credentials.json');
-  const keychainCredentials = process.platform === 'darwin'
-    ? await execFileUtf8('/usr/bin/security', [
-        'find-generic-password', '-s', 'Claude Code-credentials', '-w',
-      ]).catch(() => '')
-    : '';
   const fileCredentials = await readFile(sourceCredentialsPath, 'utf8').catch(() => '');
-  const credentials = hasLiveClaudeOAuth(keychainCredentials)
-    ? keychainCredentials
-    : hasLiveClaudeOAuth(fileCredentials) ? fileCredentials : '';
+  const credentials = hasLiveClaudeOAuth(fileCredentials) ? fileCredentials : '';
   if (!credentials) {
     if (!options.required) return;
     throw new ClaudeCodeWorkerAuthenticationError('No live Claude OAuth credential was available to seed.');
@@ -388,7 +407,10 @@ async function seedNativeWorkerCredentials(
   await chmod(destCredentialsPath, 0o600);
 }
 
-async function assertNativeWorkerAuthenticated(configDir: string): Promise<void> {
+async function assertNativeWorkerAuthenticated(
+  configDir: string,
+  credentialEnv: Record<string, string>,
+): Promise<void> {
   let binary: string;
   try {
     binary = (await resolveCli({
@@ -402,10 +424,12 @@ async function assertNativeWorkerAuthenticated(configDir: string): Promise<void>
   }
   const raw = await execFileUtf8(binary, ['auth', 'status', '--json'], {
     ...process.env,
+    ...credentialEnv,
     CLAUDE_CONFIG_DIR: configDir,
   }).catch(() => '');
   try {
     if ((JSON.parse(raw) as { loggedIn?: boolean }).loggedIn === true) return;
   } catch {}
-  throw new ClaudeCodeWorkerAuthenticationError('Claude Code rejected the seeded credential.');
+  // This is local credential presence, not server-side token validation.
+  throw new ClaudeCodeWorkerAuthenticationError('The native CLI reports no login in the selected credential store.');
 }

@@ -190,7 +190,7 @@ describe('#1523 — clean child exit pushes completion to the supervisor', () =>
       fetchTranscript: vi.fn(async () => []),
       steerAgent: vi.fn(async () => undefined),
       interruptAgent: vi.fn(async () => undefined),
-      relaunchAgent: vi.fn(async () => null),
+      relaunchAgent: vi.fn(async () => ({ status: 'held' as const, reason: 'test hold' })),
       broadcastAgentUpdate: vi.fn(),
       queueOrchestratorEscalation: vi.fn(),
       onAgentCompletion,
@@ -228,7 +228,7 @@ describe('#1523 — clean child exit pushes completion to the supervisor', () =>
       fetchTranscript: vi.fn(async () => []),
       steerAgent: vi.fn(async () => undefined),
       interruptAgent: vi.fn(async () => undefined),
-      relaunchAgent: vi.fn(async () => null),
+      relaunchAgent: vi.fn(async () => ({ status: 'held' as const, reason: 'test hold' })),
       broadcastAgentUpdate,
       queueOrchestratorEscalation: vi.fn(),
       onAgentCompletion: vi.fn(async () => ({

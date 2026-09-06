@@ -6,7 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import { hasLiveClaudeOAuth } from '@/lib/claude-code/oauth-credential';
+import { hasClaudeEnvCredential, hasLiveClaudeOAuth } from '@/lib/claude-code/oauth-credential';
+import { readNativeWorkerToken, requiresNativeWorkerToken } from '@/lib/claude-code/worker-token';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 
 const execFileAsync = promisify(execFile);
@@ -82,7 +83,7 @@ export { hasClaudeEnvCredential } from '@/lib/claude-code/oauth-credential';
  * Deliberately does not read the macOS Keychain: `security find-generic-password`
  * can raise an ACL prompt, and readiness is polled. A live token in the config dir
  * or the account email Claude writes to ~/.claude.json is sufficient evidence.
- * The Keychain remains the seeding path's concern (seedNativeWorkerCredentials).
+ * Required worker credentials are checked separately before this fallback.
  */
 export async function hasStoredClaudeOAuthCredential(): Promise<boolean> {
   const configDir = process.env.CLAUDE_CONFIG_DIR?.trim() || path.join(os.homedir(), '.claude');
@@ -100,4 +101,20 @@ export async function hasStoredClaudeOAuthCredential(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** Required worker credentials take precedence over ordinary account metadata. */
+export async function detectNativeClaudeAuth(binaryPath: string): Promise<{
+  authenticated: boolean;
+  loginState: ClaudeLoginState;
+}> {
+  if (hasClaudeEnvCredential()) return { authenticated: true, loginState: 'logged_in' };
+  if (requiresNativeWorkerToken()) {
+    const authenticated = Boolean(await readNativeWorkerToken());
+    return { authenticated, loginState: authenticated ? 'logged_in' : 'logged_out' };
+  }
+  const loginState = await probeClaudeLoginState(binaryPath);
+  if (loginState === 'logged_in') return { authenticated: true, loginState };
+  if (loginState === 'logged_out') return { authenticated: false, loginState };
+  return { authenticated: await hasStoredClaudeOAuthCredential(), loginState };
 }

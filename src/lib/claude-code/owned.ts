@@ -1,3 +1,4 @@
+import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
@@ -36,7 +37,7 @@ import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 import { recordLaneEvent } from '@/lib/lane/events';
 import {
   ClaudeCodeWorkerAuthenticationError,
-  ensureClaudeCodeWorkerConfigDir,
+  prepareClaudeCodeWorkerConfig,
   ensureCodexSubscriptionProxyReady,
 } from '@/lib/claude-code/codex-subscription-proxy';
 
@@ -90,12 +91,24 @@ function parseClaudeOwnedRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog 
   const inputTokens = done?.inputTokens ?? usage?.inputTokens ?? 0;
   const cacheReadTokens = done?.cacheReadTokens ?? usage?.cacheReadTokens ?? 0;
   const contextTokens = inputTokens + cacheReadTokens;
+  const terminalMissing = !done && Boolean(run.childExit || run.finishedAt)
+    && run.outcome !== 'interrupted' && !run.interruptRequestedAt;
+  const providerFailed = done?.isError === true || terminalMissing;
 
   return {
     threadId: done?.sessionId,
     entries,
-    outcome: done ? 'finished' : 'running',
-    completedTurn: Boolean(done),
+    outcome: providerFailed ? 'failed' : done ? 'finished' : 'running',
+    completedTurn: Boolean(done && !providerFailed),
+    ...(providerFailed ? {
+      providerFailure: terminalMissing ? {
+        subtype: 'missing_result',
+        message: 'Worker exited without a terminal result.',
+      } : {
+        ...(done?.subtype ? { subtype: done.subtype } : {}),
+        ...(done?.text.trim() ? { message: done.text.trim() } : {}),
+      },
+    } : {}),
     ...(contextTokens > 0 ? {
       turnContextUsage: { inputTokens, cacheReadTokens, contextTokens },
     } : {}),
@@ -117,7 +130,11 @@ export const claudeCodeOwnedAdapter: OwnedRuntimeAdapter = {
     const source = configuredSource === 'openrouter' || configuredSource === 'codex-subscription'
       ? configuredSource
       : 'native';
-    const isolatedConfigDir = await ensureClaudeCodeWorkerConfigDir(session.sessionDir, source);
+    const { configDir: isolatedConfigDir, credentialEnv } = await prepareClaudeCodeWorkerConfig(session.sessionDir, source);
+    // Shell scratch must use the same private grant as other runtime state,
+    // not a shared system-temp directory outside the worker sandbox.
+    const isolatedScratchDir = path.join(isolatedConfigDir, 'tmp');
+    await mkdir(isolatedScratchDir, { recursive: true, mode: 0o700 });
     const key = source === 'openrouter' ? await resolveClaudeCodeWorkerGatewayKey() : null;
     if (source === 'openrouter' && !key) {
       throw new Error('This Claude Code worker is pinned to OpenRouter, but its API key is no longer configured. Add the key in Settings > Models > API keys before resuming it.');
@@ -132,6 +149,8 @@ export const claudeCodeOwnedAdapter: OwnedRuntimeAdapter = {
           connection.baseUrl,
         ),
         CLAUDE_CONFIG_DIR: isolatedConfigDir,
+        CLAUDE_CODE_TMPDIR: isolatedScratchDir,
+        ...credentialEnv,
       };
     }
     const env = buildClaudeCodeWorkerSpawnEnv(source, session.model, key);
@@ -149,7 +168,8 @@ export const claudeCodeOwnedAdapter: OwnedRuntimeAdapter = {
       );
     }
     env.CLAUDE_CONFIG_DIR = isolatedConfigDir;
-    return env;
+    env.CLAUDE_CODE_TMPDIR = isolatedScratchDir;
+    return { ...env, ...credentialEnv };
   },
   humanLabel: 'Owned Claude Code',
   squadShortName: 'Claude',

@@ -106,7 +106,7 @@ export async function probeOwnedRunProcessClaim(input: {
       windowsHide: true,
     });
     const marker = `O8_OWNED_RUN_MARKER=${input.marker}`;
-    return stdout.includes(marker)
+    return stdout.split(/\s+/).includes(marker)
       ? { state: 'match' }
       : { state: 'mismatch', detail: 'The claimed PID does not carry the authenticated worker process marker.' };
   } catch (error) {

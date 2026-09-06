@@ -24,7 +24,8 @@ export function hasRecordedWorkerExit(lane: Lane): boolean {
 export function hasRecordedCleanWorkerExit(lane: Lane): boolean {
   const event = newestWorkerProcessExit(lane);
   if (!event) return false;
-  const { classification, exitCode, signal } = event.payload;
+  const { classification, exitCode, runtimeOutcome, signal } = event.payload;
+  if (runtimeOutcome === 'failed') return false;
   return classification === 'clean-exit'
     || (exitCode === 0 && (signal === null || signal === undefined));
 }

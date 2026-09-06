@@ -11,7 +11,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, realpathSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -86,6 +86,52 @@ function indexOfSequence(args: string[], sequence: readonly string[]): number {
 }
 
 describe('owned Codex read-only argv', () => {
+  it.skipIf(process.platform !== 'darwin').each(['read-only', 'edit'] as const)(
+    'reads only the backing project config without reopening its checkout (%s)',
+    async (workMode) => {
+      // HOME placement is deliberate: the system-temp read grant would hide
+      // the real linked-worktree startup denial this test must reproduce.
+      const project = mkdtempSync(path.join(os.homedir(), '.o8-project-config-test-'));
+      const packet = path.join(tempRoot, `config-packet-${workMode}`);
+      const priorSandbox = process.env.O8_WORKER_SANDBOX;
+      try {
+        execFileSync('git', ['init', '-q', project]);
+        mkdirSync(path.join(project, '.codex'));
+        const config = path.join(project, '.codex', 'config.toml');
+        const neighboring = path.join(project, 'private-note.txt');
+        writeFileSync(config, '# project startup fixture\n');
+        writeFileSync(neighboring, 'not a worker input');
+        execFileSync('git', ['-C', project, 'add', '--', '.codex/config.toml']);
+        execFileSync('git', ['-C', project, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test',
+          'commit', '-qm', 'fixture']);
+        execFileSync('git', ['-C', project, 'worktree', 'add', '--detach', packet], { stdio: 'ignore' });
+        process.env.O8_WORKER_SANDBOX = 'on';
+        const result = await launchOwnedCodexSession({
+          cwd: packet, prompt: 'inspect the project configuration', workMode,
+        });
+        expect(result, result.note).toMatchObject({ ok: true });
+        const args = spawnMock.mock.calls[spawnMock.mock.calls.length - 1]![1] as string[];
+        const profile = args[args.indexOf(SANDBOX_EXEC_PATH) + 2]!;
+        expect(execFileSync(SANDBOX_EXEC_PATH, ['-f', profile, '/bin/cat', config], {
+          encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+        })).toBe('# project startup fixture\n');
+        expect(() => execFileSync(SANDBOX_EXEC_PATH, ['-f', profile, '/bin/cat', neighboring], {
+          stdio: 'ignore',
+        })).toThrow();
+        expect(() => execFileSync(SANDBOX_EXEC_PATH, ['-f', profile, process.execPath, '-e',
+          'require("node:fs").writeFileSync(process.argv[1], "changed")', config,
+        ], { stdio: 'ignore' })).toThrow();
+        expect(readFileSync(config, 'utf8')).toBe('# project startup fixture\n');
+        expect(execFileSync('git', ['-C', packet, 'status', '--porcelain'], { encoding: 'utf8' })).toBe('');
+      } finally {
+        if (priorSandbox === undefined) delete process.env.O8_WORKER_SANDBOX;
+        else process.env.O8_WORKER_SANDBOX = priorSandbox;
+        rmSync(packet, { recursive: true, force: true });
+        rmSync(project, { recursive: true, force: true });
+      }
+    },
+  );
+
   it('launches a read-only packet with approvals off and no nested inner sandbox', async () => {
     const args = await spawnedArgs('read-only');
     expect(indexOfSequence(args, CODEX_READ_ONLY_LAUNCH_FLAGS)).toBeGreaterThan(-1);

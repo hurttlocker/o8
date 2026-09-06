@@ -7,6 +7,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import os from 'node:os';
@@ -20,6 +21,7 @@ import {
   SandboxUnavailableError,
   SANDBOX_EXEC_PATH,
   assertNoRegrantOverlap,
+  assertNarrowRuntimeStateRegrants,
 } from './sandbox';
 import { isReadOnlyRuntimeConfig, resolveReadOnlySandboxPlan } from './work-mode';
 
@@ -606,6 +608,101 @@ describe('read-only enforcement — single git probe, fail-closed, correct order
     expect(() => assertNoRegrantOverlap(['/tmp/identity'], ['/tmp/wt'])).not.toThrow();
     // A shared string prefix that is not a path boundary is not an overlap.
     expect(() => assertNoRegrantOverlap(['/tmp/wt-other'], ['/tmp/wt'])).not.toThrow();
+  });
+
+  it('refuses runtime-state grants that contain HOME, data, or session roots', () => {
+    expect(() => assertNarrowRuntimeStateRegrants(
+      ['/Users/op'],
+      ['/Users/op', '/Users/op/.o8', '/Users/op/.o8/owned/session-1'],
+    )).toThrow(SandboxUnavailableError);
+    expect(() => assertNarrowRuntimeStateRegrants(
+      ['/Users/op/.o8'],
+      ['/Users/op', '/Users/op/.o8', '/Users/op/.o8/owned/session-1'],
+    )).toThrow(SandboxUnavailableError);
+    expect(() => assertNarrowRuntimeStateRegrants(
+      ['/Users/op/.o8/owned/session-1'],
+      ['/Users/op', '/Users/op/.o8', '/Users/op/.o8/owned/session-1'],
+    )).toThrow(SandboxUnavailableError);
+    expect(() => assertNarrowRuntimeStateRegrants(
+      ['/Users/op/.o8/owned/session-1/claude-code-worker-config'],
+      ['/Users/op', '/Users/op/.o8', '/Users/op/.o8/owned/session-1'],
+    )).not.toThrow();
+    expect(() => assertNarrowRuntimeStateRegrants(
+      ['relative/runtime-state'],
+      ['/Users/op'],
+    )).toThrow(SandboxUnavailableError);
+  });
+
+  it.skipIf(!isDarwin)('refuses a symlinked runtime-state grant that resolves to the session root', async () => {
+    const root = tmpRoot('o8-sbx-runtime-state-link-');
+    const home = path.join(root, 'home');
+    const worktree = path.join(home, 'repo');
+    const sessionDir = path.join(root, 'data', 'owned', 'session-1');
+    const profileDir = path.join(sessionDir, 'runs');
+    const configLink = path.join(sessionDir, 'claude-code-worker-config');
+    mkdirSync(worktree, { recursive: true });
+    mkdirSync(profileDir, { recursive: true });
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: worktree });
+    symlinkSync(sessionDir, configLink, 'dir');
+
+    await expect(prepareWorkerSandbox({
+      runId: 'symlink-runtime-state',
+      profileDir,
+      cwd: worktree,
+      repoPath: worktree,
+      binary: '/bin/sh',
+      args: [],
+      homeDir: home,
+      enforceReadOnly: true,
+      finalAllowReadWritePaths: [configLink],
+    })).rejects.toBeInstanceOf(SandboxUnavailableError);
+  });
+
+  it.skipIf(!isDarwin)('denies creation of missing policy files beneath a symlinked state root', async () => {
+    const root = tmpRoot('o8-sbx-missing-policy-');
+    const worktree = path.join(root, 'repo');
+    const config = path.join(root, 'session', 'config');
+    const alias = path.join(root, 'state-alias');
+    const profileDir = path.join(root, 'session', 'runs');
+    mkdirSync(worktree);
+    mkdirSync(config, { recursive: true });
+    mkdirSync(profileDir);
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: worktree });
+    symlinkSync(config, alias, 'dir');
+    const protectedFiles = ['settings.json', path.join('hooks', 'guard.js')];
+    const prepared = await prepareWorkerSandbox({
+      runId: 'missing-policy', profileDir, cwd: worktree, repoPath: worktree,
+      binary: '/bin/sh', args: [], enforceReadOnly: true,
+      finalAllowReadWritePaths: [alias],
+      finalImmutableWritePaths: protectedFiles.map((file) => path.join(alias, file)),
+    });
+    for (const file of protectedFiles) {
+      expect(existsSync(path.join(config, file))).toBe(false);
+      const canonical = path.join(realpathSync(config), file);
+      expect(prepared.profileText).toContain(`(literal "${canonical}")`);
+      for (const configRoot of [alias, config]) {
+        const destination = path.join(configRoot, file);
+        expect(() => execFileSync(SANDBOX_EXEC_PATH, [
+          '-f', prepared.profilePath, '/bin/sh', '-c',
+          `mkdir -p ${JSON.stringify(path.dirname(destination))} && printf blocked > ${JSON.stringify(destination)}`,
+        ], { stdio: 'ignore' })).toThrow();
+        expect(existsSync(path.join(config, file))).toBe(false);
+      }
+    }
+    // Ordinary scratch remains writable beneath the same prepared state root.
+    const scratch = path.join(alias, 'scratch.json');
+    execFileSync(SANDBOX_EXEC_PATH, [
+      '-f', prepared.profilePath, '/bin/sh', '-c', `printf allowed > ${JSON.stringify(scratch)}`,
+    ]);
+    expect(readFileSync(scratch, 'utf8')).toBe('allowed');
+
+    const dangling = path.join(root, 'dangling-state');
+    symlinkSync(path.join(root, 'future-state'), dangling, 'dir');
+    await expect(prepareWorkerSandbox({
+      runId: 'dangling-policy', profileDir, cwd: worktree, repoPath: worktree,
+      binary: '/bin/sh', args: [], enforceReadOnly: true,
+      finalAllowReadWritePaths: [dangling],
+    })).rejects.toBeInstanceOf(SandboxUnavailableError);
   });
 
   it.skipIf(!isDarwin)('refuses a read-only launch when the git probe resolves nothing', async () => {

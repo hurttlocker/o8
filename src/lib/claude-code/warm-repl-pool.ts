@@ -306,7 +306,7 @@ function runTurn(
         deltaText += evt.text;
         onDelta?.(evt.text);
       } else if (evt.type === 'done') {
-        finish(null, evt.text || deltaText);
+        finish(evt.isError ? new Error('Worker returned a failed result.') : null, evt.text || deltaText);
       }
     };
 

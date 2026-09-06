@@ -83,6 +83,118 @@ describe('createOwnedSessionStore child exit recording', () => {
     expect(run.childExit?.stderrTail).toContain('rmcp session-delete 404');
   }, 20_000);
 
+  it('persists provider failure truth when the real child exits zero', async () => {
+    const [{ createLane, getLaneEvents }, { createOwnedSessionStore }] = await Promise.all([
+      import('@/lib/lane/registry'),
+      import('./store'),
+    ]);
+    const lane = createLane({
+      repoPath,
+      branch: 'main',
+      runtime: 'claude-code',
+      label: 'provider error child exit',
+    });
+    const store = createOwnedSessionStore(testAdapter('provider-error'));
+
+    const launched = await store.launch({
+      cwd: repoPath,
+      prompt: 'provider exits zero with an error result',
+      laneId: lane.id,
+    });
+    const session = await waitForRecordedExit(launched.surfaceId);
+    const event = await waitForLaneEvent(lane.id, 'runtime_process_exit', getLaneEvents);
+
+    expect(session.recentRuns[0]).toMatchObject({
+      outcome: 'failed',
+      childExit: { code: 0, classification: 'clean-exit' },
+    });
+    expect(event.payload).toMatchObject({
+      exitCode: 0,
+      classification: 'clean-exit',
+      runtimeOutcome: 'failed',
+      completedTurn: false,
+      providerFailure: { subtype: 'success', message: 'Not logged in' },
+    });
+  }, 20_000);
+
+  it('reconciles a stored successful bridge run through tail and review using provider failure', async () => {
+    const { createOwnedSessionStore } = await import('./store');
+    const { deriveRunOutcome } = await import('./helpers');
+    const adapter = testAdapter('provider-error');
+    const store = createOwnedSessionStore(adapter);
+    const surfaceId = 'test-child-provider-error:bridge-failure';
+    await writeSession(surfaceId, 'bridge-failure');
+    const sessionPath = path.join(process.env.O8_TEST_CHILD_EXIT_ROOT!, 'bridge-failure', 'session.json');
+    const session = JSON.parse(await readFile(sessionPath, 'utf8')) as OwnedSessionRecord;
+    const run = session.recentRuns[0];
+    run.outcome = 'finished';
+    run.detachMode = 'bridge';
+    run.childExit = { code: 0, signal: null, classification: 'clean-exit' };
+    session.updatedAt = new Date().toISOString();
+    session.activeRun = undefined;
+    await writeFile(run.stdoutPath, '{"is_error":true}\n');
+    await writeFile(sessionPath, JSON.stringify(session));
+    const parsed = adapter.parseRunLog('{"is_error":true}', run);
+    expect(deriveRunOutcome(run, { ...parsed, completedTurn: true }, '', [])).toBe('failed');
+    expect(deriveRunOutcome({ ...run, outcome: 'interrupted' }, parsed, '', [])).toBe('interrupted');
+    expect(deriveRunOutcome({ ...run, interruptRequestedAt: new Date().toISOString() }, parsed, '', [])).toBe('interrupted');
+    expect((await store.getRuntimeTail(surfaceId)).groups[0]?.outcome).toBe('failed');
+    expect((await store.getReviewPacket(surfaceId)).lastRun?.outcome).toBe('failed');
+    const persisted = JSON.parse(await readFile(sessionPath, 'utf8')) as OwnedSessionRecord;
+    expect(persisted.recentRuns[0].outcome).toBe('failed');
+  });
+
+  it.each([false, true])('refuses a missing terminal result after child exit (warm transcript cache: %s)', async (warmCache) => {
+    const [{ createLane, getLaneEvents }, { createOwnedSessionStore }, { claudeCodeOwnedAdapter }] = await Promise.all([
+      import('@/lib/lane/registry'), import('./store'), import('@/lib/claude-code/owned'),
+    ]);
+    const lane = createLane({ repoPath, branch: 'main', runtime: 'claude-code' });
+    const stream = [
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'partial work' }] } },
+      { type: 'message_stop' }, { type: 'system', subtype: 'compact_boundary' },
+    ].map((event) => JSON.stringify(event)).join('\n') + '\n';
+    const readyPath = path.join(tempRoot, 'stream-ready');
+    const releasePath = path.join(tempRoot, 'release-child');
+    const script = `
+      const fs = require('node:fs');
+      process.stdout.write(${JSON.stringify(stream)}, () => {
+        fs.writeFileSync(${JSON.stringify(readyPath)}, 'ready');
+        setInterval(() => {
+          if (fs.existsSync(${JSON.stringify(releasePath)})) process.exit(0);
+        }, 10);
+        setTimeout(() => process.exit(3), 8000);
+      });
+    `;
+    const parseRunLog = vi.fn(claudeCodeOwnedAdapter.parseRunLog);
+    const store = createOwnedSessionStore({
+      ...testAdapter('provider-error'),
+      launchArgs: () => ['-e', script],
+      parseRunLog,
+    });
+    const launched = await store.launch({ cwd: repoPath, prompt: 'synthetic missing result', laneId: lane.id });
+    try {
+      await vi.waitFor(async () => expect(await readFile(readyPath, 'utf8')).toBe('ready'), { timeout: 3000 });
+      if (warmCache) {
+        const tail = await store.getRuntimeTail(launched.surfaceId);
+        expect(tail.groups[0]?.entries.some((entry) => entry.text === 'partial work')).toBe(true);
+        const parseCount = parseRunLog.mock.calls.length;
+        await store.getRuntimeTail(launched.surfaceId);
+        expect(parseRunLog).toHaveBeenCalledTimes(parseCount);
+      }
+    } finally {
+      await writeFile(releasePath, 'exit without further output');
+      await waitForRecordedExit(launched.surfaceId);
+    }
+    const session = await waitForRecordedExit(launched.surfaceId);
+    const event = await waitForLaneEvent(lane.id, 'runtime_process_exit', getLaneEvents);
+    expect(session.recentRuns[0]).toMatchObject({ outcome: 'failed', childExit: { code: 0 } });
+    expect(event.payload).toMatchObject({
+      runtimeOutcome: 'failed', completedTurn: false, providerFailure: { subtype: 'missing_result' },
+    });
+    expect(parseRunLog.mock.calls.some(([raw, run]) => raw === stream && run.childExit?.code === 0)).toBe(true);
+    expect((await store.getRuntimeTail(launched.surfaceId)).groups[0]?.outcome).toBe('failed');
+  }, 20_000);
+
   it.skipIf(process.platform !== 'darwin')('persists a readable lane event from a real sandbox-exec denial', async () => {
     const deniedPath = path.join(tempRoot, 'outside-packet.txt');
     await writeFile(deniedPath, 'must stay outside the packet\n', 'utf8');
@@ -166,6 +278,72 @@ describe('createOwnedSessionStore child exit recording', () => {
     await expect(access(path.join(`${process.env.O8_TEST_CHILD_EXIT_ROOT!}-archive`, 'orphan-active', 'session.json'))).resolves.toBeUndefined();
   });
 
+  it.each([false, true])('does not persist quoted source as a denial (failed child: %s)', async (failed) => {
+    const [{ createLane, getLaneEvents }, { createOwnedSessionStore }] = await Promise.all([
+      import('@/lib/lane/registry'), import('./store'),
+    ]);
+    const surfaceId = 'test-child-exit-1:quoted-source';
+    await writeSession(surfaceId, 'quoted-source');
+    const sessionPath = path.join(process.env.O8_TEST_CHILD_EXIT_ROOT!, 'quoted-source', 'session.json');
+    const session = JSON.parse(await readFile(sessionPath, 'utf8')) as OwnedSessionRecord;
+    const lane = createLane({ repoPath, branch: 'main', runtime: 'claude-code' });
+    session.laneId = lane.id;
+    session.createdAt = new Date().toISOString();
+    session.updatedAt = session.createdAt;
+    session.activeRun = undefined;
+    session.recentRuns[0].sandboxed = true;
+    session.recentRuns[0].childExit = {
+      code: failed ? 1 : 0, signal: null, classification: failed ? 'nonzero-exit' : 'clean-exit',
+    };
+    await writeFile(session.recentRuns[0].stdoutPath, JSON.stringify({
+      type: 'user', message: { content: [{ type: 'tool_result', is_error: false,
+        content: '(deny file-read* file-write* ' + 'quoted source '.repeat(1200)
+          + '\ncat: /example/secret: Operation not permitted',
+      }] },
+    }) + '\n');
+    await writeFile(sessionPath, JSON.stringify(session));
+    const store = createOwnedSessionStore(testAdapter('exit-1'));
+    await store.getRuntimeTail(surfaceId);
+    await store.getReviewPacket(surfaceId);
+    const persisted = JSON.parse(await readFile(sessionPath, 'utf8')) as OwnedSessionRecord;
+    expect(persisted.recentRuns[0].sandboxDenial).toBeUndefined();
+    expect(persisted.latestSummary).not.toContain('sandbox blocked');
+    expect(getLaneEvents(lane.id, 50).filter((event) => event.verb === 'sandbox_denied')).toEqual([]);
+  });
+
+  it.each(['stderr', 'failed-tool'] as const)('persists an actual %s denial once through tail and review', async (source) => {
+    const [{ createLane, getLaneEvents }, { createOwnedSessionStore }, { claudeCodeOwnedAdapter }] = await Promise.all([
+      import('@/lib/lane/registry'), import('./store'), import('@/lib/claude-code/owned'),
+    ]);
+    const surfaceId = 'test-child-exit-1:actual-denial';
+    await writeSession(surfaceId, 'actual-denial');
+    const sessionPath = path.join(process.env.O8_TEST_CHILD_EXIT_ROOT!, 'actual-denial', 'session.json');
+    const session = JSON.parse(await readFile(sessionPath, 'utf8')) as OwnedSessionRecord;
+    const lane = createLane({ repoPath, branch: 'main', runtime: 'claude-code' });
+    session.laneId = lane.id;
+    session.createdAt = new Date().toISOString();
+    session.updatedAt = session.createdAt;
+    session.activeRun = undefined;
+    session.recentRuns[0].sandboxed = true;
+    session.recentRuns[0].childExit = { code: 0, signal: null, classification: 'clean-exit' };
+    const diagnostic = 'cat: /example/secret: Operation not permitted';
+    const success = JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'Recovered' });
+    await writeFile(session.recentRuns[0].stderrPath, source === 'stderr' ? diagnostic : '');
+    await writeFile(session.recentRuns[0].stdoutPath, (source === 'failed-tool' ? JSON.stringify({
+      type: 'user', message: { content: [{ type: 'tool_result', is_error: true, content: diagnostic }] },
+    }) + '\n' : '') + success + '\n');
+    await writeFile(sessionPath, JSON.stringify(session));
+    const store = createOwnedSessionStore({ ...testAdapter('exit-1'), runtimeId: 'claude-code',
+      parseRunLog: claudeCodeOwnedAdapter.parseRunLog });
+    await store.getRuntimeTail(surfaceId);
+    await store.getReviewPacket(surfaceId);
+    const persisted = JSON.parse(await readFile(sessionPath, 'utf8')) as OwnedSessionRecord;
+    expect(persisted.recentRuns[0]).toMatchObject({ outcome: 'finished',
+      sandboxDenial: { operation: 'file-read', resource: '/example/secret' } });
+    expect(persisted.latestSummary).not.toContain('worker stopped');
+    expect(getLaneEvents(lane.id, 50).filter((event) => event.verb === 'sandbox_denied')).toHaveLength(1);
+  });
+
   it('keeps an old active owned session when a lane references its surface id', async () => {
     const { createOwnedSessionStore } = await import('./store');
     const store = createOwnedSessionStore(testAdapter('exit-1'));
@@ -177,7 +355,7 @@ describe('createOwnedSessionStore child exit recording', () => {
   });
 });
 
-function testAdapter(kind: 'exit-1' | 'sigkill' | 'sandbox-denial'): OwnedRuntimeAdapter {
+function testAdapter(kind: 'exit-1' | 'sigkill' | 'sandbox-denial' | 'provider-error'): OwnedRuntimeAdapter {
   return {
     runtimeId: `test-child-${kind}`,
     surfaceIdPrefix: `test-child-${kind}:`,
@@ -193,18 +371,27 @@ function testAdapter(kind: 'exit-1' | 'sigkill' | 'sandbox-denial'): OwnedRuntim
     resumeArgs: () => kind === 'sandbox-denial'
       ? [process.env.O8_TEST_SANDBOX_DENIED_PATH ?? '/missing-denial-path']
       : ['-e', childScript(kind)],
-    parseRunLog: (): ParsedRunLog => ({
-      entries: [],
-      outcome: 'running',
-      completedTurn: false,
-    }),
+    parseRunLog: (raw): ParsedRunLog => raw.includes('"is_error":true')
+      ? {
+          entries: [{ id: 'partial', kind: 'message', label: 'assistant', text: 'partial provider response' }],
+          outcome: 'failed',
+          completedTurn: false,
+          providerFailure: { subtype: 'success', message: 'Not logged in' },
+        }
+      : { entries: [], outcome: 'running', completedTurn: false },
   };
 }
 
-function childScript(kind: 'exit-1' | 'sigkill') {
+function childScript(kind: 'exit-1' | 'sigkill' | 'provider-error') {
   const stderrLine = 'rmcp session-delete 404 from fake child\\n';
   if (kind === 'exit-1') {
     return `process.stderr.write(${JSON.stringify(stderrLine)}); process.exit(1);`;
+  }
+  if (kind === 'provider-error') {
+    const result = JSON.stringify({
+      type: 'result', subtype: 'success', is_error: true, result: 'Not logged in',
+    });
+    return `process.stdout.write(${JSON.stringify(`${result}\n`)}); process.exit(0);`;
   }
   return `process.stderr.write(${JSON.stringify(stderrLine)}); process.stderr.write('', () => process.kill(process.pid, 'SIGKILL'));`;
 }
