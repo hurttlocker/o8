@@ -1,11 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   buildClaudeTerminalUserTurn,
   codexAgentInboxWakeText,
+  deliverAgentMessage,
   submitClaudeTerminalUserTurn,
   submitCodexQueuedUserTurn,
 } from './delivery';
+import { AGENT_NATIVE_WAKE_TTL_MS } from './store';
+import type { AgentMessage, AgentPresence } from './types';
 
 describe('buildClaudeTerminalUserTurn', () => {
   it('builds an idempotent Codex wake without embedding stale peer content', () => {
@@ -82,5 +85,76 @@ describe('buildClaudeTerminalUserTurn', () => {
       cwd: '/workspace/o8',
       codexHome: '/workspace/.codex',
     }]);
+  });
+
+  it('coalesces a Codex inbox wake until the durable cursor advances or the wake expires', async () => {
+    const target: AgentPresence = {
+      agentId: 'codex-session',
+      name: 'Receiver',
+      repo: '/workspace/o8',
+      worktreePath: '/workspace/o8',
+      runtime: 'codex',
+      sessionKey: 'codex:thread',
+      laneId: null,
+      packetId: null,
+      lastSeen: new Date().toISOString(),
+    };
+    const message = (sequence: number): AgentMessage => ({
+      schema: 'o8/agents.message-event/v1',
+      kind: 'message',
+      sequence,
+      id: `message-${sequence}`,
+      from: 'Sender',
+      to: target.name,
+      repo: target.repo,
+      text: `Update ${sequence}`,
+      refs: { laneId: null, packetId: null },
+      delivery: 'poll',
+      deliveryNote: null,
+      timestamp: new Date().toISOString(),
+    });
+    const sendCodex = vi.fn().mockResolvedValue(undefined);
+    let inboxCursor = 0;
+    let now = 1_000;
+    let wake: { sessionKey: string; throughSequence: number; sentAt: number } | null = null;
+    const wakeSeams = {
+      claimCodexInboxWake: ({
+        target: wakeTarget,
+        throughSequence,
+      }: { target: AgentPresence; throughSequence: number }) => {
+        if (wake !== null
+          && wake.sessionKey === wakeTarget.sessionKey
+          && inboxCursor < wake.throughSequence
+          && now - wake.sentAt < AGENT_NATIVE_WAKE_TTL_MS) {
+          wake.throughSequence = Math.max(wake.throughSequence, throughSequence);
+          return false;
+        }
+        wake = {
+          sessionKey: wakeTarget.sessionKey ?? '',
+          throughSequence,
+          sentAt: now,
+        };
+        return true;
+      },
+      releaseCodexInboxWake: () => {
+        wake = null;
+      },
+    };
+    const deliverySeams = {
+      sendClaude: vi.fn().mockResolvedValue(undefined),
+      sendCodex,
+    };
+
+    await deliverAgentMessage(message(1), target, deliverySeams, wakeSeams);
+    await deliverAgentMessage(message(2), target, deliverySeams, wakeSeams);
+    expect(sendCodex).toHaveBeenCalledTimes(1);
+
+    inboxCursor = 2;
+    await deliverAgentMessage(message(3), target, deliverySeams, wakeSeams);
+    expect(sendCodex).toHaveBeenCalledTimes(2);
+
+    now += AGENT_NATIVE_WAKE_TTL_MS;
+    await deliverAgentMessage(message(4), target, deliverySeams, wakeSeams);
+    expect(sendCodex).toHaveBeenCalledTimes(3);
   });
 });

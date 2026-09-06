@@ -5,7 +5,7 @@ import os from 'node:os';
 import { promisify } from 'node:util';
 
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
-import type { AgentMessage, AgentPresence } from './store';
+import type { AgentMessage, AgentPresence } from './types';
 
 const execFileAsync = promisify(execFile);
 
@@ -159,6 +159,14 @@ export interface AgentMessageDeliverySeams {
   sendCodex: (target: AgentPresence, text: string) => Promise<void>;
 }
 
+export interface AgentInboxWakeSeams {
+  claimCodexInboxWake: (input: {
+    target: AgentPresence;
+    throughSequence: number;
+  }) => boolean | Promise<boolean>;
+  releaseCodexInboxWake: (target: AgentPresence) => void | Promise<void>;
+}
+
 export function nativeAgentMessageText(message: AgentMessage): string {
   return [
     `[o8 peer message from ${message.from}]`,
@@ -226,10 +234,22 @@ export const defaultAgentMessageDeliverySeams: AgentMessageDeliverySeams = {
   sendCodex: defaultSendCodex,
 };
 
+export const defaultAgentInboxWakeSeams: AgentInboxWakeSeams = {
+  claimCodexInboxWake: async ({ target, throughSequence }) => {
+    const { claimAgentInboxWake } = await import('./store');
+    return claimAgentInboxWake({ agent: target, throughSequence });
+  },
+  releaseCodexInboxWake: async (target) => {
+    const { releaseAgentInboxWake } = await import('./store');
+    releaseAgentInboxWake(target);
+  },
+};
+
 export async function deliverAgentMessage(
   message: AgentMessage,
   target: AgentPresence,
   seams: AgentMessageDeliverySeams = defaultAgentMessageDeliverySeams,
+  wakeSeams: AgentInboxWakeSeams = defaultAgentInboxWakeSeams,
 ): Promise<{ delivery: AgentMessage['delivery']; note: string }> {
   if (!target.sessionKey) return { delivery: 'poll', note: 'Target polls the durable inbox.' };
   if (target.runtime === 'claude' || target.runtime === 'claude-code') {
@@ -237,8 +257,26 @@ export async function deliverAgentMessage(
     return { delivery: 'native', note: 'Submitted to the exact live Claude terminal session.' };
   }
   if (target.runtime === 'codex') {
-    await seams.sendCodex(target, codexAgentInboxWakeText());
-    return { delivery: 'native', note: 'Accepted by the exact Codex task queue as an inbox wake.' };
+    const claimedWake = await wakeSeams.claimCodexInboxWake({
+      target,
+      throughSequence: message.sequence,
+    });
+    if (!claimedWake) {
+      return {
+        delivery: 'poll',
+        note: 'A Codex inbox wake is already pending; retained in the durable inbox.',
+      };
+    }
+    try {
+      await seams.sendCodex(target, codexAgentInboxWakeText());
+      return {
+        delivery: 'poll',
+        note: 'Codex inbox wake accepted; retained in the durable inbox until the target reads it.',
+      };
+    } catch (error) {
+      await wakeSeams.releaseCodexInboxWake(target);
+      throw error;
+    }
   }
   return { delivery: 'poll', note: 'Target runtime polls the durable inbox.' };
 }
