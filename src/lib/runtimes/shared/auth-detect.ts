@@ -14,6 +14,7 @@ import {
   type RuntimeAuthHouse,
 } from '@/lib/orchestrator/runtime-capabilities';
 import { readClaudeCodeWorkerProfileSync } from '@/lib/claude-code/worker-profile';
+import { requiresNativeWorkerToken } from '@/lib/claude-code/worker-token';
 import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 import { claudeCarrierPresentation } from './claude-carrier-presentation';
 import { scanAndLink } from './cli-locate';
@@ -257,8 +258,7 @@ function claudeWorkerCarrier(): ClaudeCodeModelSource {
   }
 }
 
-async function detectClaude(): Promise<RuntimeAuthStatus> {
-  const binaryPath = scanAndLink('claude') ?? undefined;
+async function detectClaude(binaryPath = scanAndLink('claude') ?? undefined): Promise<RuntimeAuthStatus> {
   if (!binaryPath) {
     return nowStatus('claude', 'claude-code', {
       installed: false,
@@ -611,6 +611,15 @@ export function invalidateRuntimeAuthCache(): void {
   opencodeRefresh = null;
 }
 
+async function refreshNativeWorkerReadiness(snapshot: RuntimeAuthSnapshot): Promise<RuntimeAuthSnapshot> {
+  const binaryPath = snapshot.statuses.claude.binaryPath;
+  if (!requiresNativeWorkerToken() || !binaryPath) return snapshot;
+  // The operator login runs in another process and cannot invalidate this cache.
+  // Re-read only its encrypted credential, never the native CLI or other providers.
+  const statuses = { ...snapshot.statuses, claude: await detectClaude(binaryPath) };
+  return { statuses, suggestedSubscriptionProfile: suggestMachineAuthProfile(statuses) };
+}
+
 export async function getRuntimeAuthSnapshot(): Promise<RuntimeAuthSnapshot> {
   while (true) {
     const generation = cacheGeneration;
@@ -620,11 +629,11 @@ export async function getRuntimeAuthSnapshot(): Promise<RuntimeAuthSnapshot> {
       : CACHE_TTL_MS;
     if (cached && Date.now() - cached.cachedAt < cacheTtlMs) {
       const opencode = await refreshOpencodeStatus();
-      if (generation !== cacheGeneration || cache !== cached) continue;
-      const snapshot = {
+      const snapshot = await refreshNativeWorkerReadiness({
         ...cached.snapshot,
         statuses: { ...cached.snapshot.statuses, opencode },
-      };
+      });
+      if (generation !== cacheGeneration || cache !== cached) continue;
       cache = { snapshot, cachedAt: cached.cachedAt };
       return snapshot;
     }
@@ -651,7 +660,7 @@ export async function getRuntimeAuthSnapshot(): Promise<RuntimeAuthSnapshot> {
       refresh = { generation, promise };
       snapshotRefresh = refresh;
     }
-    const snapshot = await refresh.promise;
+    const snapshot = await refreshNativeWorkerReadiness(await refresh.promise);
     if (generation !== cacheGeneration) continue;
     if (snapshotRefresh === refresh) snapshotRefresh = null;
     cache = { snapshot, cachedAt: Date.now() };
