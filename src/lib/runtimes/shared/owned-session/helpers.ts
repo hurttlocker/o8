@@ -18,7 +18,7 @@ import type { RuntimeSurfaceLifecycle } from '@/lib/fleet/types';
 import { truncateText } from '@/lib/util/text';
 import { getDataDir } from '@/lib/data-dir-migration';
 
-import type { OwnedRunOutcome, OwnedRunRecord, ParsedRunLog } from './types';
+import type { OwnedChildExitOutcome, OwnedRunOutcome, OwnedRunRecord, ParsedRunLog } from './types';
 
 const execFileAsync = promisify(execFile);
 
@@ -334,6 +334,7 @@ export function deriveRunOutcome(
   if (run.outcome === 'interrupted' || run.interruptRequestedAt) {
     return 'interrupted';
   }
+  if (parsed.outcome === 'failed') return 'failed';
   if (parsed.completedTurn) {
     return 'finished';
   }
@@ -342,4 +343,28 @@ export function deriveRunOutcome(
     return 'failed';
   }
   return run.outcome === 'running' ? 'failed' : run.outcome;
+}
+
+/** Keep process exit and provider outcome distinct in the durable exit event. */
+export function ownedProcessExitPayload(
+  runtime: string,
+  surfaceId: string,
+  run: OwnedRunRecord,
+  childExit: OwnedChildExitOutcome,
+  parsed: ParsedRunLog | undefined,
+  stderr: string,
+) {
+  return {
+    runtime,
+    surfaceId,
+    runId: run.id,
+    exitCode: childExit.code,
+    signal: childExit.signal,
+    classification: childExit.classification,
+    runtimeOutcome: run.outcome,
+    stderr,
+    completedTurn: parsed?.completedTurn ?? false,
+    ...(parsed?.providerFailure ? { providerFailure: parsed.providerFailure } : {}),
+    ...(parsed?.turnContextUsage ?? {}),
+  };
 }

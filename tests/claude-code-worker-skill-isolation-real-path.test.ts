@@ -17,6 +17,8 @@ import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
 const spawnMock = vi.hoisted(() => vi.fn());
 const authStatusMock = vi.hoisted(() => ({ loggedIn: true }));
+const authProbeEnvMock = vi.hoisted(() => vi.fn());
+const keychainLookupMock = vi.hoisted(() => vi.fn());
 const ensureDispatchBackendReadyMock = vi.hoisted(() => vi.fn(async () => ({
   ready: true,
   reason: 'http_200',
@@ -30,11 +32,13 @@ vi.mock('node:child_process', async (importOriginal) => {
     ...actual,
     execFile: ((file: string, args: string[], options: unknown, callback: (...args: unknown[]) => void) => {
       if (file === '/usr/bin/security') {
+        keychainLookupMock();
         const error = Object.assign(new Error('test keychain item unavailable'), { code: 44 });
         callback(error, '', '');
         return {};
       }
       if (args[0] === 'auth' && args[1] === 'status') {
+        authProbeEnvMock((options as { env?: NodeJS.ProcessEnv }).env);
         callback(null, JSON.stringify({ loggedIn: authStatusMock.loggedIn }), '');
         return {};
       }
@@ -58,13 +62,16 @@ describe('Claude Code worker skill isolation real path', () => {
   let tempRoot: string;
   let repoPath: string;
   let fakeHome: string;
+  let dataDir: string;
+  let ownedRoot: string;
   const listeners = new Map<string, (...args: unknown[]) => void>();
 
   beforeAll(() => {
     tempRoot = mkdtempSync(path.join(os.homedir(), '.tmp-o8-claude-skill-isolation-'));
     fakeHome = path.join(tempRoot, 'operator-home');
     repoPath = path.join(fakeHome, 'repo');
-    const dataDir = path.join(tempRoot, 'data');
+    dataDir = path.join(tempRoot, 'data');
+    ownedRoot = path.join(dataDir, 'owned');
     mkdirSync(dataDir, { recursive: true });
     execFileSync('git', ['init', '-q', '-b', 'main', repoPath]);
     execFileSync('git', [
@@ -94,14 +101,23 @@ describe('Claude Code worker skill isolation real path', () => {
       'CORTEX_IDE_DATA_DIR',
       'CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT',
       'O8_CLAUDE_CODE_BIN',
+      'CLAUDE_CONFIG_DIR',
+      'CLAUDE_SECURESTORAGE_CONFIG_DIR',
+      'ANTHROPIC_API_KEY',
+      'CLAUDE_CODE_OAUTH_TOKEN',
+      'O8_MASTER_KEY',
     ]) {
       priorEnv[key] = process.env[key];
+    }
+    for (const key of ['CLAUDE_CONFIG_DIR', 'CLAUDE_SECURESTORAGE_CONFIG_DIR', 'ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN']) {
+      delete process.env[key];
     }
     process.env.HOME = fakeHome;
     process.env.O8_DATA_DIR = dataDir;
     process.env.CORTEX_IDE_DATA_DIR = dataDir;
-    process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT = path.join(tempRoot, 'owned');
+    process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT = ownedRoot;
     process.env.O8_CLAUDE_CODE_BIN = process.execPath;
+    process.env.O8_MASTER_KEY = Buffer.alloc(32, 7).toString('base64url');
 
     spawnMock.mockImplementation(() => {
       const child = {
@@ -173,6 +189,13 @@ describe('Claude Code worker skill isolation real path', () => {
       recoveryCount: 0,
       typecheckAutoRetries: 0,
       orchestratorThreadId: null,
+      launchContext: {
+        source: 'agent',
+        presentation: 'split',
+        repoContext: 'registered',
+        ...(process.platform === 'darwin' ? { workMode: 'read-only' as const } : {}),
+        caller: 'claude-code-worker-skill-isolation-real-path',
+      },
     } as OrchestratorPacket;
     const prompt = await buildPacketPrompt(packet, [], 'main', repoPath);
     await addRepo(repoPath);
@@ -216,9 +239,21 @@ describe('Claude Code worker skill isolation real path', () => {
     expect(prompt).not.toContain('Load a large unrelated reference tree.');
     const contextByTurn = [40_651, 41_024, 41_809, 42_331, 43_007];
     const launchCallStart = spawnMock.mock.calls.length;
+    const { saveNativeWorkerToken } = await import('@/lib/claude-code/worker-token');
+    const dedicatedToken = `sk-ant-oat01-${'synthetic'.repeat(12)}`;
+    if (process.platform === 'darwin') await saveNativeWorkerToken(dedicatedToken);
 
     for (const [turnIndex, contextTokens] of contextByTurn.entries()) {
+      delete process.env.CLAUDE_CONFIG_DIR;
+      delete process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
+      const selectedStore = path.join(fakeHome, '.claude');
+      mkdirSync(selectedStore, { recursive: true });
+      const sourceCredentialsPath = path.join(selectedStore, '.credentials.json');
+      writeFileSync(sourceCredentialsPath, JSON.stringify({
+        claudeAiOauth: { accessToken: `synthetic-access-${turnIndex}`, refreshToken: `synthetic-refresh-${turnIndex}` },
+      }));
       const inputTokens = 203 + turnIndex;
+      const providerFailed = turnIndex === contextByTurn.length - 1;
       const result = await dispatchLaneCommand({
         verb: 'launch_session',
         laneId: lane.id,
@@ -232,6 +267,9 @@ describe('Claude Code worker skill isolation real path', () => {
       const configDir = options.env.CLAUDE_CONFIG_DIR as string;
       expect(configDir.startsWith(fakeHome)).toBe(false);
       expect(existsSync(configDir)).toBe(true);
+      const scratchDir = path.join(configDir, 'tmp');
+      expect(options.env.CLAUDE_CODE_TMPDIR).toBe(scratchDir);
+      expect(statSync(scratchDir).mode & 0o777).toBe(0o700);
       expect(existsSync(path.join(configDir, 'skills'))).toBe(false);
       expect(args).toContain('--disable-slash-commands');
       expect(spawnMock.mock.results[spawnCallIndex]?.value.stdin.end).toHaveBeenCalledWith(
@@ -239,26 +277,74 @@ describe('Claude Code worker skill isolation real path', () => {
         'utf8',
       );
 
-      // Native carrier: the isolated config dir must be seeded with a copy of
-      // the operator's real credentials, but never their skills directory.
-      const sourceCredentialsPath = path.join(fakeHome, '.claude', '.credentials.json');
+      // Mac workers receive only the inference token, never a refresh-store copy.
       const seededCredentialsPath = path.join(configDir, '.credentials.json');
-      expect(existsSync(seededCredentialsPath)).toBe(true);
-      expect(readFileSync(seededCredentialsPath, 'utf8')).toBe(readFileSync(sourceCredentialsPath, 'utf8'));
-      expect(statSync(seededCredentialsPath).mode & 0o777).toBe(0o600);
+      if (process.platform === 'darwin') {
+        expect(options.env.CLAUDE_SECURESTORAGE_CONFIG_DIR).toBe(configDir);
+        expect(options.env.CLAUDE_CODE_OAUTH_TOKEN).toBe(dedicatedToken);
+        expect(authProbeEnvMock).not.toHaveBeenCalled();
+        expect(keychainLookupMock).not.toHaveBeenCalled();
+        expect(existsSync(seededCredentialsPath)).toBe(false);
+      } else {
+        expect(readFileSync(seededCredentialsPath, 'utf8')).toBe(readFileSync(sourceCredentialsPath, 'utf8'));
+        expect(statSync(seededCredentialsPath).mode & 0o777).toBe(0o600);
+      }
 
       const surfaceId = getLane(lane.id)?.sessionKey;
       if (!surfaceId) throw new Error(`Turn ${turnIndex + 1} did not attach a session.`);
-      const sessionDir = path.join(tempRoot, 'owned', surfaceId.replace('claude-code-owned:', ''));
+      const sessionDir = path.join(ownedRoot, surfaceId.replace('claude-code-owned:', ''));
+      if (process.platform === 'darwin') {
+        // The real macOS policy must re-open only this prepared config subtree
+        // after the relocated data-root denial. Never print credential content.
+        const { SANDBOX_EXEC_PATH } = await import('@/lib/runtimes/shared/owned-session/sandbox');
+        const sandboxIndex = args.indexOf(SANDBOX_EXEC_PATH);
+        expect(sandboxIndex).toBeGreaterThan(-1);
+        const profilePath = args[sandboxIndex + 2]!;
+        const profile = readFileSync(profilePath, 'utf8');
+        expect(profile.lastIndexOf(`(subpath "${configDir}")`))
+          .toBeGreaterThan(profile.indexOf(`(subpath "${dataDir}")`));
+        expect(existsSync(path.join(configDir, 'hooks'))).toBe(false);
+        expect(() => execFileSync(SANDBOX_EXEC_PATH, [
+          '-f', profilePath, process.execPath, '-e',
+          'require("node:fs").openSync(process.argv[1], "r+")', sourceCredentialsPath,
+        ], { stdio: 'ignore' })).toThrow();
+        expect(profile).not.toContain('.oauth_refresh.lock');
+        expect(() => execFileSync(SANDBOX_EXEC_PATH, [
+          '-f', profilePath, '/bin/cat', path.join(dataDir, 'native-worker-token.json'),
+        ], { stdio: 'ignore' })).toThrow();
+        expect(profile).not.toContain('login.keychain-db');
+        const compactedState = path.join(configDir, 'projects', 'repo', `compact-${turnIndex}.json`);
+        execFileSync(SANDBOX_EXEC_PATH, [
+          '-f', profilePath, '/bin/sh', '-c',
+          `mkdir -p ${JSON.stringify(path.dirname(compactedState))} && printf '{}' > ${JSON.stringify(compactedState)}`,
+        ], { stdio: 'ignore' });
+        expect(existsSync(compactedState)).toBe(true);
+
+        expect(() => execFileSync(SANDBOX_EXEC_PATH, [
+          '-f', profilePath, '/bin/cat', path.join(sessionDir, 'session.json'),
+        ], { stdio: 'ignore' })).toThrow();
+        expect(() => execFileSync(SANDBOX_EXEC_PATH, [
+          '-f', profilePath, '/bin/sh', '-c',
+          `printf changed > ${JSON.stringify(path.join(worktreePath, 'sandbox-write.txt'))}`,
+        ], { stdio: 'ignore' })).toThrow();
+      }
       const session = JSON.parse(readFileSync(path.join(sessionDir, 'session.json'), 'utf8')) as {
         recentRuns: Array<{ stdoutPath: string }>;
       };
+      expect(JSON.stringify(session)).not.toContain(dedicatedToken);
       const exitCountBefore = getLaneEvents(lane.id, 200)
         .filter((event) => event.verb === 'runtime_process_exit').length;
-      writeFileSync(session.recentRuns[0]!.stdoutPath, `${JSON.stringify({
+      const streamedMessages = [
+        { type: 'assistant', message: { content: [{ type: 'text', text: 'Inspecting the source.' }] } },
+        { type: 'stream_event', event: { type: 'message_stop' } },
+        { type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'auto', pre_tokens: 58_671 } },
+        { type: 'stream_event', event: { type: 'message_stop' } },
+      ].map((event) => JSON.stringify(event)).join('\n');
+      writeFileSync(session.recentRuns[0]!.stdoutPath, `${streamedMessages}\n${JSON.stringify({
         type: 'result',
         subtype: 'success',
-        result: 'done',
+        ...(providerFailed ? { is_error: true } : {}),
+        result: providerFailed ? 'Not logged in' : 'done',
         session_id: `claude-turn-isolation-${turnIndex + 1}`,
         usage: {
           input_tokens: inputTokens,
@@ -276,6 +362,13 @@ describe('Claude Code worker skill isolation real path', () => {
         inputTokens,
         cacheReadTokens: contextTokens - inputTokens,
         contextTokens,
+        ...(providerFailed ? {
+          exitCode: 0,
+          classification: 'clean-exit',
+          runtimeOutcome: 'failed',
+          completedTurn: false,
+          providerFailure: { subtype: 'success', message: 'Not logged in' },
+        } : {}),
       });
       expect(exitEvent?.payload).not.toHaveProperty('toolName', 'Skill');
       expect(contextTokens).toBeLessThan(50_000);
@@ -289,10 +382,16 @@ describe('Claude Code worker skill isolation real path', () => {
           ? null
           : contextTokens - contextByTurn[turnIndex - 1]!,
       });
+      if (providerFailed) {
+        expect(synced.packets[0]?.status).toBe('failed');
+        expect(synced.packets[0]?.status).not.toBe('awaiting_review');
+        expect(synced.packets[0]?.releaseState).not.toBe('released');
+      }
     }
+    rmSync(path.join(dataDir, 'native-worker-token.json'), { force: true });
   }, 30_000);
 
-  it('fails the persisted dispatch path before spawn when no live credential can be seeded', async () => {
+  it('fails the persisted dispatch path before spawn when no saved credential is available', async () => {
     const noCredsHome = path.join(tempRoot, 'operator-home-no-creds');
     mkdirSync(path.join(noCredsHome, '.claude'), { recursive: true });
     const noCredsRepoPath = path.join(noCredsHome, 'repo');
@@ -398,7 +497,7 @@ describe('Claude Code worker skill isolation real path', () => {
     ]));
   }, 30_000);
 
-  it('rejects a seeded credential when Claude Code reports the isolated config is logged out', async () => {
+  it.skipIf(process.platform === 'darwin')('rejects launch when the native CLI reports the selected store is logged out', async () => {
     const { ensureClaudeCodeWorkerConfigDir } = await import('@/lib/claude-code/codex-subscription-proxy');
     authStatusMock.loggedIn = false;
     try {
@@ -407,11 +506,31 @@ describe('Claude Code worker skill isolation real path', () => {
         'native',
       )).rejects.toMatchObject({
         code: 'worker_not_authenticated',
-        reason: 'Claude Code rejected the seeded credential.',
+        reason: 'The native CLI reports no login in the selected credential store.',
       });
     } finally {
       authStatusMock.loggedIn = true;
     }
+  });
+
+  it.skipIf(process.platform !== 'darwin')('refuses the operator login when a dedicated token is missing', async () => {
+    const { ensureClaudeCodeWorkerConfigDir } = await import('@/lib/claude-code/codex-subscription-proxy');
+    await expect(ensureClaudeCodeWorkerConfigDir(path.join(tempRoot, 'token-unavailable'), 'native'))
+      .rejects.toMatchObject({ code: 'worker_not_authenticated' });
+    expect(keychainLookupMock).not.toHaveBeenCalled();
+  });
+
+  it.skipIf(process.platform !== 'darwin')('removes only an obsolete worker snapshot before reusing its config', async () => {
+    const { ensureClaudeCodeWorkerConfigDir } = await import('@/lib/claude-code/codex-subscription-proxy');
+    const sessionDir = path.join(tempRoot, 'obsolete-snapshot');
+    const configDir = path.join(sessionDir, 'claude-code-worker-config');
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(path.join(configDir, '.credentials.json'), 'synthetic-obsolete-snapshot');
+    const sourcePath = path.join(fakeHome, '.claude', '.credentials.json');
+    const before = readFileSync(sourcePath, 'utf8');
+    await expect(ensureClaudeCodeWorkerConfigDir(sessionDir, 'native')).rejects.toMatchObject({ code: 'worker_not_authenticated' });
+    expect(existsSync(path.join(configDir, '.credentials.json'))).toBe(false);
+    expect(readFileSync(sourcePath, 'utf8')).toBe(before);
   });
 
   it('treats empty OAuth token fields as no credential and writes no worker snapshot', async () => {
@@ -429,7 +548,9 @@ describe('Claude Code worker skill isolation real path', () => {
       const { ensureClaudeCodeWorkerConfigDir } = await import('@/lib/claude-code/codex-subscription-proxy');
       await expect(ensureClaudeCodeWorkerConfigDir(sessionDir, 'native')).rejects.toMatchObject({
         code: 'worker_not_authenticated',
-        reason: 'No live Claude OAuth credential was available to seed.',
+        reason: process.platform === 'darwin'
+          ? 'No dedicated worker credential is configured. Run `npm run worker:login` from the application source checkout to connect a dedicated worker token.'
+          : 'No live Claude OAuth credential was available to seed.',
       });
       expect(existsSync(path.join(sessionDir, 'claude-code-worker-config', '.credentials.json'))).toBe(false);
     } finally {

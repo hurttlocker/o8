@@ -10,7 +10,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -327,5 +327,99 @@ describe('an unresolved durable work mode refuses the launch instead of widening
     expect(result.ok).toBe(true);
     expect(launched.length).toBe(before + 1);
     expect(launched[launched.length - 1]!.workMode).toBeUndefined();
+  });
+});
+
+describe('provider-failed turn lifecycle truth', () => {
+  it.each([true, false])('keeps a newer launch running after an old provider failure (same surface: %s)', async (sameSurface) => {
+    const packetId = await persistPacket('stale provider failure lifecycle', sameSurface ? 90_097_008 : 90_097_009, true);
+    const { attachSession, createLane, setLaneStatus } = await import('@/lib/lane/registry');
+    const { recordLaneEvent } = await import('@/lib/lane/events');
+    const { buildDomainLaneSummaries, syncOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+    const lane = createLane({ repoPath, branch: 'main', runtime: 'claude-code', label: 'relaunch', packetId });
+    const previousSurface = `claude-code-owned:${packetId}-previous`;
+    attachSession(lane.id, previousSurface, 'system');
+    setLaneStatus(lane.id, 'running', 'system', 'session_launched');
+    recordLaneEvent(lane.id, 'runtime_process_exit', 'system', {
+      surfaceId: previousSurface, runId: 'previous', exitCode: 0,
+      classification: 'clean-exit', runtimeOutcome: 'failed', completedTurn: false,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    attachSession(lane.id, sameSurface ? previousSurface : `claude-code-owned:${packetId}-new`, 'system');
+    setLaneStatus(lane.id, 'running', 'system', 'session_launched');
+    expect(buildDomainLaneSummaries().find((entry) => entry.laneId === lane.id)?.status).toBe('running');
+    const synced = await syncOrchestratorControlPlaneState();
+    expect(synced.packets.find((packet) => packet.id === packetId)?.status).toBe('running');
+  });
+
+  it('persists a zero-exit provider failure as failed instead of review or no-changes success', async () => {
+    const packetId = await persistPacket('provider failure lifecycle seam', 90_097_006, true);
+    const { attachSession, createLane, setLaneStatus } = await import('@/lib/lane/registry');
+    const { recordLaneEvent } = await import('@/lib/lane/events');
+    const { syncOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+    const lane = createLane({
+      repoPath,
+      branch: `test/provider-failure-${packetId}`,
+      runtime: 'claude-code',
+      label: 'provider failure lifecycle seam',
+      packetId,
+    });
+    attachSession(lane.id, `claude-code-owned:${packetId}`, 'system');
+    setLaneStatus(lane.id, 'running', 'system', 'session_launched');
+    recordLaneEvent(lane.id, 'runtime_process_exit', 'system', {
+      surfaceId: `claude-code-owned:${packetId}`,
+      exitCode: 0,
+      signal: null,
+      classification: 'clean-exit',
+      runtimeOutcome: 'failed',
+      completedTurn: false,
+      providerFailure: { subtype: 'success', message: 'Not logged in' },
+    });
+
+    const synced = await syncOrchestratorControlPlaneState();
+    const packet = synced.packets.find((candidate) => candidate.id === packetId);
+    expect(packet?.status).toBe('failed');
+    expect(packet?.status).not.toBe('awaiting_review');
+    expect(packet?.releaseState).not.toBe('released');
+    expect(packet?.lastEventLabel).not.toBe('read_only_completed');
+  });
+
+  it('holds failed partial work for input with its diff intact', async () => {
+    const packetId = await persistPacket('failed partial work lifecycle seam', 90_097_007, false);
+    const worktree = mkdtempSync(path.join(dataDir, 'failed-work-'));
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: worktree });
+    execFileSync('git', [
+      '-c', 'user.email=test@o8.test', '-c', 'user.name=o8-test',
+      'commit', '--allow-empty', '-m', 'seed',
+    ], { cwd: worktree });
+    const { createLane, getLane } = await import('@/lib/lane/registry');
+    const { probeNoChangesProduced } = await import('@/lib/lane/no-changes-produced');
+    const { transitionFailedPostCompletionLane } = await import('@/lib/supervisor/post-completion-packet');
+    const lane = createLane({
+      repoPath: worktree,
+      branch: 'main',
+      runtime: 'claude-code',
+      label: 'failed work review settlement',
+      packetId,
+    });
+
+    expect((await probeNoChangesProduced(worktree, 'main')).noChangesProduced).toBe(true);
+    expect(transitionFailedPostCompletionLane(lane.id, false)).toMatchObject({
+      status: 'awaiting_input',
+      lastEventLabel: 'agent_failed',
+    });
+
+    writeFileSync(path.join(worktree, 'partial.ts'), 'export const partial = true;\n');
+    const probe = await probeNoChangesProduced(worktree, 'main');
+    expect(probe.noChangesProduced).toBe(false);
+    expect(transitionFailedPostCompletionLane(lane.id, !probe.noChangesProduced)).toMatchObject({
+      status: 'awaiting_input',
+      lastEventLabel: 'agent_failed_work_present',
+    });
+    expect(getLane(lane.id)?.outcome).not.toBe('no_changes');
+    const { syncOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+    const synced = await syncOrchestratorControlPlaneState();
+    expect(synced.packets.find((candidate) => candidate.id === packetId)?.status).not.toBe('awaiting_review');
+    expect((await probeNoChangesProduced(worktree, 'main')).noChangesProduced).toBe(false);
   });
 });

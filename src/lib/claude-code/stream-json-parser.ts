@@ -19,6 +19,8 @@ export type ClaudeCodeStreamJsonParserEvent =
   | {
       type: 'done';
       text: string;
+      isError?: boolean;
+      subtype?: string;
       sessionId?: string;
       inputTokens?: number;
       outputTokens?: number;
@@ -300,10 +302,17 @@ export function createClaudeCodeStreamJsonParser(
     const sessionId = asString(event.session_id) ?? state.sessionId ?? undefined;
     if (sessionId) state.sessionId = sessionId;
     if (state.emittedDone) return;
-    const resultText = asString(event.result) ?? state.fullResponse;
+    const subtype = asString(event.subtype);
+    const isResult = event.type === 'result';
+    const isError = event.is_error === true
+      || (isResult && subtype !== undefined && subtype !== 'success');
+    const explicitResult = asString(event.result);
+    const resultText = explicitResult?.trim() ? explicitResult : state.fullResponse;
     const doneEvent: ClaudeCodeStreamJsonParserEvent = {
       type: 'done',
       text: resultText,
+      ...(isError ? { isError: true } : {}),
+      ...(subtype ? { subtype } : {}),
       ...(sessionId ? { sessionId } : {}),
       ...(typeof usage?.inputTokens === 'number' ? { inputTokens: usage.inputTokens } : {}),
       ...(typeof usage?.outputTokens === 'number' ? { outputTokens: usage.outputTokens } : {}),
@@ -465,7 +474,10 @@ export function createClaudeCodeStreamJsonParser(
       return events;
     }
 
-    if (type === 'message_stop' || type === 'result') {
+    // A streamed message_stop ends one model message, not the worker turn.
+    // Tool calls and compaction can follow it. Only the outer result carries
+    // terminal success/failure; consuming the first stop masks later errors.
+    if (type === 'result') {
       emitDone(event, events);
     }
 

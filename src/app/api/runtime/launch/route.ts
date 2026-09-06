@@ -15,6 +15,8 @@ import {
 import { RuntimeLaunchPostEffectError } from '@/lib/runtime/launch-governance';
 import { listLanes } from '@/lib/lane/registry';
 import { findOwnedLaunchByMutationId } from '@/lib/runtimes/shared/owned-session-index';
+import { isClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
+import { normalizePacketSpendCap } from '@/lib/orchestrator/metered-spend';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -33,7 +35,11 @@ function canonicalLaunchRequest(
     runtime: runtimeName as RuntimeLaunchRequest['runtime'],
     prompt: payload.prompt?.trim() ?? '',
     model: trimmed(payload.model),
+    claudeCodeModel: trimmed(payload.claudeCodeModel),
+    claudeCodeCarrier: payload.claudeCodeCarrier,
     effort: payload.effort,
+    workMode: payload.workMode,
+    spendCap: normalizePacketSpendCap(payload.spendCap),
     clientMutationId,
     cwd: payload.cwd?.trim() ?? '',
     repoPath: trimmed(payload.repoPath),
@@ -59,6 +65,12 @@ export async function POST(request: NextRequest) {
   }
   if (!payload || !clientMutationId) {
     return NextResponse.json({ error: 'clientMutationId is required for this launch route' }, { status: 400 });
+  }
+  if ((payload.claudeCodeModel !== undefined && typeof payload.claudeCodeModel !== 'string')
+    || (payload.claudeCodeCarrier !== undefined && !isClaudeCodeModelSource(payload.claudeCodeCarrier))
+    || (payload.workMode !== undefined && payload.workMode !== 'edit' && payload.workMode !== 'read-only')
+    || (payload.spendCap !== undefined && !normalizePacketSpendCap(payload.spendCap))) {
+    return NextResponse.json({ error: 'Invalid carrier, work mode, or spend cap for this launch.' }, { status: 400 });
   }
 
   const launchRequest = canonicalLaunchRequest(payload, runtimeName, clientMutationId);

@@ -7,7 +7,7 @@ export interface SandboxDenial {
 const OPERATION_NOT_PERMITTED = /operation not permitted/i;
 
 function trimResource(value: string): string {
-  return value.trim().replace(/^['"]|['"]$/g, '').replace(/[.,;]$/, '');
+  return value.trim().replace(/^['"]|['"]$/g, '').replace(/[.,;]$/, '').slice(0, 512);
 }
 
 function operationForCommand(command: string): SandboxDenial['operation'] {
@@ -21,10 +21,12 @@ function operationForCommand(command: string): SandboxDenial['operation'] {
 /** Parse the stderr forms emitted by macOS sandbox-exec and denied children. */
 export function detectSandboxDenial(raw: string): SandboxDenial | null {
   for (const originalLine of raw.split(/\r?\n/)) {
-    const line = originalLine.trim();
-    if (!line) continue;
+    const diagnostic = originalLine.trim();
+    if (!diagnostic || diagnostic.startsWith('{') || diagnostic.startsWith('[')) continue;
+    const line = diagnostic.slice(0, 1024);
 
-    const sandboxLog = line.match(/\bdeny(?:\(\d+\))?\s+(file-read[^ ]*|file-write[^ ]*|process-exec)\s+(.+)$/i);
+    // A policy expression or quoted source line is not a kernel diagnostic.
+    const sandboxLog = diagnostic.match(/^(?:Sandbox:\s+\S+\(\d+\)\s+)?deny(?:\(\d+\))?\s+(file-read(?:-[a-z-]+)?|file-write(?:-[a-z-]+)?|process-exec)\s+(\/.+)$/i);
     if (sandboxLog) {
       const operation = sandboxLog[1]?.toLowerCase().startsWith('file-read')
         ? 'file-read'
@@ -34,21 +36,21 @@ export function detectSandboxDenial(raw: string): SandboxDenial | null {
       return { operation, resource: trimResource(sandboxLog[2] ?? 'unknown resource'), line };
     }
 
-    const execFailure = line.match(/execvp\(\) of ['"](.+?)['"] failed:\s*Operation not permitted/i);
+    const execFailure = diagnostic.match(/^(?:sandbox-exec:\s*)?execvp\(\) of ['"](.+?)['"] failed:\s*Operation not permitted\s*$/i);
     if (execFailure) {
       return { operation: 'process-exec', resource: trimResource(execFailure[1] ?? ''), line };
     }
 
-    const modeFailure = line.match(/Unable to change file mode on (.+?):\s*Operation not permitted/i);
+    const modeFailure = diagnostic.match(/^(?:chmod:\s*)?Unable to change file mode on (.+?):\s*Operation not permitted\s*$/i);
     if (modeFailure) {
       return { operation: 'file-write', resource: trimResource(modeFailure[1] ?? ''), line };
     }
 
-    if (/sandbox-exec:\s*sandbox_apply:/i.test(line) && OPERATION_NOT_PERMITTED.test(line)) {
+    if (/^sandbox-exec:\s*sandbox_apply:/i.test(diagnostic) && OPERATION_NOT_PERMITTED.test(diagnostic)) {
       return { operation: 'sandbox-apply', resource: 'generated worker sandbox profile', line };
     }
 
-    const childFailure = line.match(/^([^:]+):\s+(.+?):\s*Operation not permitted\s*$/i);
+    const childFailure = diagnostic.match(/^([\w./-]+):\s+(.+?):\s*Operation not permitted\s*$/i);
     if (childFailure) {
       return {
         operation: operationForCommand(childFailure[1] ?? ''),
@@ -60,7 +62,39 @@ export function detectSandboxDenial(raw: string): SandboxDenial | null {
   return null;
 }
 
+/** Stdout is provider data, not stderr. Inspect only explicit failed tool envelopes. */
+export function detectRunSandboxDenial(runtime: string, stdout: string, stderr: string): SandboxDenial | null {
+  const stderrDenial = detectSandboxDenial(stderr);
+  if (stderrDenial) return stderrDenial;
+  for (const line of stdout.split(/\r?\n/)) {
+    let event;
+    try { event = JSON.parse(line); } catch { continue; }
+    if (!event || typeof event !== 'object') continue;
+    const diagnostics: string[] = [];
+    if (runtime === 'claude-code' && event.type === 'user' && Array.isArray(event.message?.content)) {
+      for (const result of event.message.content) {
+        if (result?.type !== 'tool_result' || result.is_error !== true) continue;
+        if (typeof result.content === 'string') diagnostics.push(result.content);
+        else if (Array.isArray(result.content)) {
+          for (const part of result.content) {
+            if (part?.type === 'text' && typeof part.text === 'string') diagnostics.push(part.text);
+          }
+        }
+      }
+    }
+    const item = event.item;
+    if (runtime === 'codex' && event.type === 'item.completed' && item?.type === 'command_execution'
+      && (item.status === 'failed' || (typeof item.exit_code === 'number' && item.exit_code !== 0))
+      && typeof item.aggregated_output === 'string') diagnostics.push(item.aggregated_output);
+    for (const diagnostic of diagnostics) {
+      const denial = detectSandboxDenial(diagnostic);
+      if (denial) return denial;
+    }
+  }
+  return null;
+}
+
 export function sandboxDenialOperatorMessage(runtime: string, denial: SandboxDenial): string {
   return `${runtime} worker sandbox blocked ${denial.operation} access to ${denial.resource}. `
-    + 'The worker stopped; review the opt-in sandbox profile before retrying.';
+    + 'Review the opt-in sandbox profile before retrying the blocked operation.';
 }

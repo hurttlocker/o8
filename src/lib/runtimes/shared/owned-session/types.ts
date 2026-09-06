@@ -201,6 +201,11 @@ export interface ParsedRunLog {
   entries: OwnedTailEntry[];
   outcome: OwnedRunOutcome;
   completedTurn: boolean;
+  /** Structured terminal failure reported by the provider despite a clean process exit. */
+  providerFailure?: {
+    subtype?: string;
+    message?: string;
+  };
   turnContextUsage?: LaneTurnContextUsage;
 }
 

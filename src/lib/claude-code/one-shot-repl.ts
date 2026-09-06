@@ -78,7 +78,7 @@ export function buildOneShotArgs(model: string, effort?: string): string[] {
 /**
  * One-shot turn against the REPL. Spawns, sends one user message, reads
  * stream-json until `result`, resolves with the assistant text. Rejects on
- * exit-without-result, timeout, or spawn error.
+ * a failed result, exit-without-result, timeout, or spawn error.
  */
 export async function askClaudeOneShot(
   prompt: string,
@@ -120,7 +120,7 @@ export async function askClaudeOneShot(
       for (const evt of events) {
         if (evt.type === 'done') {
           resultText = evt.text ?? resultText;
-          finish(null, resultText.trim());
+          finish(evt.isError ? new Error('Worker returned a failed result.') : null, resultText.trim());
           return;
         }
       }
@@ -141,7 +141,7 @@ export async function askClaudeOneShot(
       for (const evt of trailing) {
         if (evt.type === 'done') {
           resultText = evt.text ?? resultText;
-          finish(null, resultText.trim());
+          finish(evt.isError ? new Error('Worker returned a failed result.') : null, resultText.trim());
           return;
         }
       }

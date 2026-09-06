@@ -183,16 +183,20 @@ function hasUnreconciledRuntimeExit(lane: Lane, events: LaneEvent[]): boolean {
   if (!RUNTIME_EXIT_OVERRIDE_STATUSES.has(lane.status)) return false;
   const runtimeExit = events.findLast((event) => event.verb === 'runtime_process_exit');
   if (!runtimeExit) return false;
+  const exitSurfaceId = runtimeExit.payload.surfaceId;
+  if (typeof exitSurfaceId === 'string' && lane.sessionKey && exitSurfaceId !== lane.sessionKey) return false;
+  const exitAt = Date.parse(runtimeExit.timestamp);
+  const laneEventAt = lane.lastEventAt ? Date.parse(lane.lastEventAt) : 0;
+  if (!Number.isFinite(exitAt) || (Number.isFinite(laneEventAt) && exitAt < laneEventAt)) return false;
   const classification = runtimeExit.payload.classification;
   const exitCode = runtimeExit.payload.exitCode;
+  const runtimeOutcome = runtimeExit.payload.runtimeOutcome;
   const signal = runtimeExit.payload.signal;
+  if (runtimeOutcome === 'failed') return true;
   if (classification === 'clean-exit' || (exitCode === 0 && (signal === null || signal === undefined))) {
     return false;
   }
-  const exitAt = Date.parse(runtimeExit.timestamp);
-  const laneEventAt = lane.lastEventAt ? Date.parse(lane.lastEventAt) : 0;
-  if (!Number.isFinite(exitAt)) return false;
-  return !Number.isFinite(laneEventAt) || exitAt >= laneEventAt;
+  return true;
 }
 
 export function buildDomainLaneSummaries(): DomainLaneSummary[] {

@@ -67,7 +67,7 @@ export interface SupervisorCallbacks {
   fetchTranscript(sessionKey: string, limit: number): Promise<TranscriptEntry[]>;
   steerAgent(surfaceId: string, message: string): Promise<void>;
   interruptAgent(surfaceId: string): Promise<void>;
-  relaunchAgent(prompt: string, repoPath: string, taskName: string, retryOfSurfaceId?: string): Promise<string | null>;
+  relaunchAgent(prompt: string, repoPath: string, taskName: string, retryOfSurfaceId?: string): Promise<SupervisorRelaunchResult>;
   broadcastAgentUpdate(update: AgentUpdateEvent): void;
   queueOrchestratorEscalation(repoPath: string, message: string): void;
   onAgentProgress?: (surfaceId: string, lastMessage: string) => void;
@@ -77,6 +77,10 @@ export interface SupervisorCallbacks {
   ) => Promise<AgentCompletionDecision | void> | AgentCompletionDecision | void;
   onAgentRetry?: (oldSurfaceId: string, newSurfaceId: string) => void;
 }
+
+export type SupervisorRelaunchResult =
+  | { status: 'launched'; surfaceId: string }
+  | { status: 'held'; reason: string };
 
 export interface SupervisorFleetStatusSummary {
   repoPath: string;

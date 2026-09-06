@@ -10,9 +10,14 @@ const authFixture = vi.hoisted(() => ({
   home: '',
   claudeBinary: '',
   installed: true,
+  dedicatedTokenRequired: false,
 }));
 const symonBridgeFixture = vi.hoisted(() => ({
   selections: [] as Array<{ engine: string; model: string; effort: string } | undefined>,
+}));
+vi.mock('@/lib/claude-code/worker-token', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/claude-code/worker-token')>(),
+  requiresNativeWorkerToken: () => authFixture.dedicatedTokenRequired,
 }));
 
 vi.mock('node:os', async (importOriginal) => {
@@ -134,6 +139,8 @@ function createMissionRequest(issueNumber: number, overrides: {
 }
 
 beforeEach(async () => {
+  // Preserve coverage of the file-backed native path independently of the host.
+  authFixture.dedicatedTokenRequired = false;
   authFixture.installed = true;
   vi.stubEnv('ANTHROPIC_API_KEY', '');
   vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', '');
@@ -149,6 +156,8 @@ afterEach(() => {
   vi.unstubAllEnvs();
   invalidateRuntimeAuthCache();
   rmSync(claudeConfigDir, { recursive: true, force: true });
+  rmSync(path.join(authFixture.home, '.claude.json'), { force: true });
+  rmSync(path.join(dataRoot, 'native-worker-token.json'), { force: true });
 });
 
 afterAll(() => {
@@ -161,6 +170,35 @@ afterAll(() => {
 });
 
 describe.skipIf(process.platform === 'win32')('Claude Code native sign-in verification', () => {
+  it('refuses an ordinary Mac login through mission creation until a dedicated token is configured', async () => {
+    authFixture.dedicatedTokenRequired = true;
+    vi.stubEnv('O8_TEST_CLAUDE_MODE', 'logged_in');
+    // Main's account-metadata fallback must not bypass worker credentials.
+    writeFileSync(path.join(authFixture.home, '.claude.json'), JSON.stringify({
+      oauthAccount: { emailAddress: 'synthetic@example.invalid' },
+    }));
+    expect(await claudeStatus()).toMatchObject({
+      ready: false, authenticated: false, unavailableReason: 'needs_auth',
+      fix: expect.stringContaining('npm run worker:login'),
+    });
+    const response = await createMissionRoute.POST(createMissionRequest(91_762_030));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ ok: false, error: { code: 'dispatch_cli_auth_unavailable' } });
+  });
+
+  it('recognizes an encrypted Mac worker token without claiming live provider validation', async () => {
+    authFixture.dedicatedTokenRequired = true;
+    vi.stubEnv('O8_MASTER_KEY', Buffer.alloc(32, 7).toString('base64url'));
+    const { saveNativeWorkerToken } = await import('@/lib/claude-code/worker-token');
+    await saveNativeWorkerToken(`sk-ant-oat01-${'synthetic'.repeat(12)}`);
+    const status = await claudeStatus();
+    expect(status).toMatchObject({
+      ready: true, authenticated: true, unavailableReason: null,
+      detail: expect.stringContaining('provider acceptance is checked on launch'),
+    });
+    await expect(assertRuntimeDispatchable('claude-code')).resolves.toBeUndefined();
+  });
+
   it('refuses stale marker files and empty OAuth fields as sign-in evidence', async () => {
     writeStaleMarkers();
 
@@ -298,8 +336,9 @@ describe.skipIf(process.platform === 'win32')('Claude Code native sign-in verifi
     });
   }, 20_000);
 
-  it('falls back to real stored OAuth material when the probe is inconclusive', async () => {
+  it.each(['', '   ', 'padded'])('finds stored OAuth with config override %j when the probe is inconclusive', async (override) => {
     vi.stubEnv('O8_TEST_CLAUDE_MODE', 'malformed');
+    vi.stubEnv('CLAUDE_CONFIG_DIR', override === 'padded' ? `  ${claudeConfigDir}  ` : override);
     writeStaleMarkers({ claudeAiOauth: { accessToken: 'sk-ant-oat-live', refreshToken: '' } });
 
     expect(await claudeStatus()).toMatchObject({
@@ -309,6 +348,34 @@ describe.skipIf(process.platform === 'win32')('Claude Code native sign-in verifi
       unavailableReason: null,
       detail: 'Claude Code CLI is installed and signed in.',
     });
+  });
+
+  it('preserves ordinary account evidence when dedicated worker credentials are not required', async () => {
+    vi.stubEnv('O8_TEST_CLAUDE_MODE', 'malformed');
+    writeFileSync(path.join(authFixture.home, '.claude.json'), JSON.stringify({
+      oauthAccount: { emailAddress: 'synthetic@example.invalid' },
+    }));
+    expect(await claudeStatus()).toMatchObject({ ready: true, authenticated: true });
+  });
+
+  it('rechecks an unknown login after five seconds without manual invalidation', async () => {
+    vi.stubEnv('O8_TEST_CLAUDE_MODE', 'malformed');
+    let now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      invalidateRuntimeAuthCache();
+      expect((await getRuntimeAuthSnapshot()).statuses.claude).toMatchObject({
+        ready: false, nativeLoginState: 'unknown',
+      });
+      vi.stubEnv('O8_TEST_CLAUDE_MODE', 'logged_in');
+      expect((await getRuntimeAuthSnapshot()).statuses.claude.nativeLoginState).toBe('unknown');
+      now += 5_001;
+      expect((await getRuntimeAuthSnapshot()).statuses.claude).toMatchObject({
+        ready: true, nativeLoginState: 'logged_in',
+      });
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it('reports not_installed without probing when the CLI is absent', async () => {

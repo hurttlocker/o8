@@ -18,9 +18,7 @@ import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-typ
 import { claudeCarrierPresentation } from './claude-carrier-presentation';
 import { scanAndLink } from './cli-locate';
 import {
-  hasClaudeEnvCredential,
-  hasStoredClaudeOAuthCredential,
-  probeClaudeLoginState,
+  detectNativeClaudeAuth,
   type ClaudeLoginState,
 } from './claude-login-probe';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
@@ -257,26 +255,6 @@ function claudeWorkerCarrier(): ClaudeCodeModelSource {
   } catch {
     return 'native';
   }
-}
-
-/**
- * Native sign-in evidence, in decisiveness order.
- *
- * A non-empty env credential is decisive positive evidence and skips the subprocess.
- * Otherwise the installed CLI is asked directly; only an explicit `loggedIn:false`
- * is treated as decisive negative. An inconclusive probe falls back to real stored
- * OAuth material — never to marker files like ~/.claude/settings.json or
- * ~/.claude/projects, which survive a sign-out and used to fake authentication here.
- */
-async function detectNativeClaudeAuth(binaryPath: string): Promise<{
-  authenticated: boolean;
-  loginState: ClaudeLoginState;
-}> {
-  if (hasClaudeEnvCredential()) return { authenticated: true, loginState: 'logged_in' };
-  const loginState = await probeClaudeLoginState(binaryPath);
-  if (loginState === 'logged_in') return { authenticated: true, loginState };
-  if (loginState === 'logged_out') return { authenticated: false, loginState };
-  return { authenticated: await hasStoredClaudeOAuthCredential(), loginState };
 }
 
 async function detectClaude(): Promise<RuntimeAuthStatus> {

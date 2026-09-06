@@ -5,6 +5,10 @@ import { isBridgeSessionAlive, signalBridgeTerminalSession } from '@/lib/runtime
 import { lookupOwnedActiveRunFresh } from '@/lib/runtimes/shared/owned-session-index';
 import { isPidAlive, pidCommandLine } from '@/lib/runtimes/shared/owned-session/helpers';
 import { getOwnedSessionLifecycle } from '@/lib/runtimes/shared/owned-session-lifecycle';
+import {
+  probeOwnedRunProcessClaim,
+  resolveSpawnedProcessGroupId,
+} from '@/lib/runtimes/shared/owned-session/run-process-proof';
 
 export type InterruptEscalationSignal = 'SIGINT' | 'SIGTERM' | 'SIGKILL';
 
@@ -555,8 +559,28 @@ export async function escalateInterruptOwnedSurface(surfaceId: string): Promise<
     : false;
   if (activeRun.pid && !bridgeAlive) {
     const expectedCommand = activeRun.commandIdentity ?? commandLabel;
-    const commandLine = await pidCommandLine(activeRun.pid);
-    if (commandLine && !commandLine.includes(expectedCommand)) {
+    let identityMatches: boolean;
+    if (process.platform !== 'win32' && isPidAlive(activeRun.pid)) {
+      // A launcher can exec the runtime without changing PID. The persisted
+      // run marker survives that transition; a binary name does not. Require
+      // both the exact PID's marker and its recorded group before signaling.
+      // Missing/unknown proof must never fall back to a matching command name.
+      const claim = activeRun.processMarker ? await probeOwnedRunProcessClaim({
+        pid: activeRun.pid, marker: activeRun.processMarker, rootPid: activeRun.pid,
+      }) : null;
+      const group = claim?.state === 'match'
+        ? await resolveSpawnedProcessGroupId(activeRun.pid)
+        : undefined;
+      identityMatches = claim?.state === 'match'
+        && group !== undefined
+        && group === (activeRun.processGroupId ?? activeRun.pid);
+    } else {
+      const commandLine = await pidCommandLine(activeRun.pid);
+      identityMatches = commandLine
+        ? commandLine.includes(expectedCommand)
+        : !isPidAlive(activeRun.pid);
+    }
+    if (!identityMatches) {
       return {
         attempted: false,
         confirmedDead: false,
@@ -564,7 +588,7 @@ export async function escalateInterruptOwnedSurface(surfaceId: string): Promise<
         steps: [],
         pid: activeRun.pid,
         tmuxSession: activeRun.tmuxSession,
-        note: `Stored pid ${activeRun.pid} no longer matches the owned ${expectedCommand} run, so its process tree was not signaled or confirmed stopped.`,
+        note: `Stored pid ${activeRun.pid} could not be verified as the owned ${expectedCommand} run, so its process tree was not signaled or confirmed stopped. Legacy runs require an owner-verified stop before retry.`,
       };
     }
   }

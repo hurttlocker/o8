@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { getSqlite } from '@/lib/db';
 import type { WorkerLaunchContext } from '@/lib/orchestrator/types';
+import { retryWatchedAgent } from './retry-watched-agent';
 import type {
   AgentStatusEntry,
   SupervisorCallbacks,
@@ -422,6 +423,10 @@ async function pollWatchedAgent(
   now: number,
 ): Promise<void> {
   watched.lastPolledAt = now;
+  if (watched.completionReported) {
+    scheduleNextAgentPoll(watched, watched.lastStatus, watched.lastRuntimeStatus, now);
+    return;
+  }
   watched.lastRuntimeStatus = runtimeAgent?.status ?? null;
 
   const currentStatus = resolveStatus(runtimeAgent, watched, now);
@@ -644,31 +649,10 @@ async function handleStatusChange(
 
   if (status === 'failed') {
     if (watched.retryCount < MAX_RETRIES) {
-      watched.retryCount += 1;
-      recordWatchedAgentEvent(watched, now);
-      persistWatchedAgent(watched);
-      console.log(`[supervisor] Auto-retrying "${watched.name}" (attempt ${watched.retryCount})`);
-
-      callbacks.broadcastAgentUpdate({
-        surfaceId: watched.surfaceId,
-        name: watched.name,
-        status: 'retrying',
-        detail: `Agent "${watched.name}" failed — auto-retrying (attempt ${watched.retryCount})`,
-      });
-
-      try {
-        const newSurfaceId = await callbacks.relaunchAgent(
-          watched.prompt,
-          watched.repoPath,
-          `${watched.name} (retry ${watched.retryCount})`,
-          // #1292 ROOT — hand the failing session's key so the relaunch reuses
-          // its lane (existingLaneId) instead of auto-wrapping a fresh sibling.
-          watched.surfaceId,
-        );
-        if (newSurfaceId) {
-          // Update lane session binding so the new agent is tracked
-          callbacks.onAgentRetry?.(watched.surfaceId, newSurfaceId);
-
+      await retryWatchedAgent(watched, callbacks, {
+        persist: persistWatchedAgent,
+        scheduleCleanup: () => setTimeout(() => unregisterWatchedAgent(watched.surfaceId), COMPLETION_CLEANUP_MS),
+        replace(newSurfaceId) {
           watchedAgents.delete(watched.surfaceId);
           transcriptSourceCache.delete(watched.surfaceId);
           removePersistedAgent(watched.surfaceId);
@@ -680,10 +664,8 @@ async function handleStatusChange(
             newWatched.steerCount = watched.steerCount;
             persistWatchedAgent(newWatched);
           }
-        }
-      } catch (err) {
-        console.error(`[supervisor] Retry failed for "${watched.name}":`, err);
-      }
+        },
+      });
     } else {
       watched.completionReported = true;
       recordWatchedAgentEvent(watched, now);

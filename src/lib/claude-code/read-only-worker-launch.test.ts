@@ -28,13 +28,16 @@ vi.mock('@/lib/runtimes/shared/dispatch-readiness', async (importOriginal) => {
   return { ...actual, ensureDispatchBackendReady: vi.fn(async () => ({ ready: true, reason: 'http_200' })) };
 });
 
-// The worker config dir seeds real operator credentials; the argv contract does
-// not depend on it, so keep the fixture credential-free.
+// Keep config preparation real. Only the external subscription proxy is a fixture.
 vi.mock('@/lib/claude-code/codex-subscription-proxy', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/claude-code/codex-subscription-proxy')>();
   return {
     ...actual,
-    ensureClaudeCodeWorkerConfigDir: vi.fn(async (sessionDir: string) => sessionDir),
+    ensureCodexSubscriptionProxyReady: vi.fn(async () => ({
+      baseUrl: 'http://127.0.0.1:8317',
+      clientToken: 'test-token',
+      models: ['gpt-5.6-sol'],
+    })),
   };
 });
 
@@ -81,11 +84,15 @@ const { CLAUDE_READ_ONLY_DISALLOWED_TOOLS, CLAUDE_STRICT_MCP_CONFIG_FLAG } = awa
 const { SANDBOX_EXEC_PATH } = await import('@/lib/runtimes/shared/owned-session/sandbox');
 
 beforeEach(() => {
+  // An explicit synthetic credential avoids reading any operator login store.
+  vi.stubEnv('ANTHROPIC_API_KEY', '');
+  vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'synthetic-argv-fixture');
   spawnMock.mockReturnValue({ pid: 4242, unref: vi.fn(), once: vi.fn() });
   spawnBridgeMock.mockRejectedValue(new Error('bridge unavailable'));
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   spawnMock.mockReset();
   spawnBridgeMock.mockReset();
 });
@@ -103,6 +110,17 @@ async function spawnedArgs(workMode?: 'read-only'): Promise<string[]> {
   expect(result, result.note).toMatchObject({ ok: true });
   expect(spawnMock).toHaveBeenCalled();
   return spawnMock.mock.calls[spawnMock.mock.calls.length - 1]?.[1] as string[];
+}
+
+async function spawnedCall(carrier: 'native' | 'codex-subscription') {
+  const result = await launchOwnedClaudeCodeSession({
+    cwd: repoPath,
+    prompt: 'inspect the repository',
+    claudeCodeCarrier: carrier,
+    workMode: 'read-only',
+  });
+  expect(result, result.note).toMatchObject({ ok: true });
+  return spawnMock.mock.calls[spawnMock.mock.calls.length - 1]!;
 }
 
 describe('owned Claude Code read-only argv', () => {
@@ -194,6 +212,40 @@ describe('owned Claude Code read-only argv', () => {
     },
   );
 
+  it.skipIf(process.platform !== 'darwin').each(['native', 'codex-subscription'] as const)(
+    'prepares and narrowly re-opens mutable Claude state for the %s carrier',
+    async (carrier) => {
+      const [, args, options] = await spawnedCall(carrier);
+      const configDir = options.env.CLAUDE_CONFIG_DIR as string;
+      const sandboxIdx = (args as string[]).indexOf(SANDBOX_EXEC_PATH);
+      const profilePath = (args as string[])[sandboxIdx + 2]!;
+      const profile = readFileSync(profilePath, 'utf8');
+
+      expect(profile.lastIndexOf(`(subpath "${realpathSync(configDir)}")`))
+        .toBeGreaterThan(profile.indexOf(`(subpath "${realpathSync(tempRoot)}")`));
+      expect(profile.lastIndexOf(`(literal "${path.join(configDir, '.credentials.json')}")`))
+        .toBeGreaterThan(profile.lastIndexOf(`(subpath "${configDir}")`));
+      expect(existsSync(path.join(configDir, 'hooks'))).toBe(false);
+      expect(existsSync(path.join(configDir, 'skills'))).toBe(false);
+      expect(existsSync(path.join(configDir, '.credentials.json'))).toBe(false);
+
+      const projectsState = path.join(configDir, 'projects', 'repo', 'compaction.json');
+      execFileSync(SANDBOX_EXEC_PATH, [
+        '-f', profilePath, '/bin/sh', '-c',
+        `mkdir -p ${JSON.stringify(path.dirname(projectsState))} && printf compacted > ${JSON.stringify(projectsState)}`,
+      ], { stdio: 'ignore' });
+      expect(readFileSync(projectsState, 'utf8')).toBe('compacted');
+
+      expect(() => execFileSync(SANDBOX_EXEC_PATH, [
+        '-f', profilePath, '/bin/sh', '-c',
+        `printf replaced > ${JSON.stringify(path.join(configDir, '.credentials.json'))}`,
+      ], { stdio: 'ignore' })).toThrow();
+      expect(() => execFileSync(SANDBOX_EXEC_PATH, [
+        '-f', profilePath, '/bin/cat', path.join(path.dirname(configDir), 'session.json'),
+      ], { stdio: 'ignore' })).toThrow();
+    },
+  );
+
   it('builds the deny rule from the session runtimeConfig pin, not the caller', () => {
     const base = { cwd: repoPath, prompt: 'inspect' };
     expect(claudeCodeOwnedAdapter.launchArgs({ ...base, runtimeConfig: { workMode: 'read-only' } }))
@@ -206,3 +258,57 @@ describe('owned Claude Code read-only argv', () => {
       .not.toContain(CLAUDE_STRICT_MCP_CONFIG_FLAG);
   });
 });
+
+describe('owned Claude Code provider terminal outcome', () => {
+  const run = {
+    id: 'provider-result',
+    mode: 'launch' as const,
+    prompt: 'inspect',
+    startedAt: new Date(0).toISOString(),
+    pid: 0,
+    stdoutPath: '/tmp/provider-result.jsonl',
+    stderrPath: '/tmp/provider-result.stderr',
+    outcome: 'running' as const,
+  };
+
+  it('treats a zero-exit-shaped provider error result as a failed incomplete turn', () => {
+    const parsed = claudeCodeOwnedAdapter.parseRunLog(lines({
+      type: 'result',
+      subtype: 'success',
+      is_error: true,
+      result: 'Not logged in',
+      session_id: 'failed-provider-session',
+    }), run);
+
+    expect(parsed).toMatchObject({
+      threadId: 'failed-provider-session',
+      outcome: 'failed',
+      completedTurn: false,
+      providerFailure: { subtype: 'success', message: 'Not logged in' },
+    });
+  });
+
+  it('treats a clean provider result as a completed turn', () => {
+    expect(claudeCodeOwnedAdapter.parseRunLog(lines({
+      type: 'result', subtype: 'success', result: 'done',
+    }), run)).toMatchObject({ outcome: 'finished', completedTurn: true });
+  });
+
+  it('requires a terminal result only once the owned run has ended', () => {
+    const partial = lines({ type: 'message_stop' }, { type: 'system', subtype: 'compact_boundary' });
+    expect(claudeCodeOwnedAdapter.parseRunLog(partial, run)).toMatchObject({
+      outcome: 'running', completedTurn: false,
+    });
+    const exited = { ...run, childExit: { code: 0, signal: null, classification: 'clean-exit' as const } };
+    expect(claudeCodeOwnedAdapter.parseRunLog(partial, exited)).toMatchObject({
+      outcome: 'failed', completedTurn: false, providerFailure: { subtype: 'missing_result' },
+    });
+    expect(claudeCodeOwnedAdapter.parseRunLog(partial, {
+      ...exited, outcome: 'interrupted', interruptRequestedAt: new Date().toISOString(),
+    })).not.toHaveProperty('providerFailure');
+  });
+});
+
+function lines(...events: unknown[]): string {
+  return events.map((event) => `${JSON.stringify(event)}\n`).join('');
+}

@@ -27,6 +27,7 @@ export interface OwnedActiveRun {
   processGroupId?: number;
   tmuxSession?: string;
   commandIdentity?: string;
+  processMarker?: string;
 }
 
 export interface IndexedOwnedActiveRun extends OwnedActiveRun {
@@ -127,6 +128,9 @@ async function buildRootIndex(root: string): Promise<RootIndex> {
           tmuxSession: typeof parsed.activeRun.tmuxSession === 'string' ? parsed.activeRun.tmuxSession : undefined,
           commandIdentity: typeof parsed.activeRun.commandIdentity === 'string'
             ? parsed.activeRun.commandIdentity
+            : undefined,
+          processMarker: typeof parsed.activeRun.processMarker === 'string'
+            ? parsed.activeRun.processMarker
             : undefined,
         }
       : {});

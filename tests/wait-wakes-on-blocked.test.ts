@@ -57,15 +57,30 @@ describe('#1467 — wait_for_mission_ready wakes on blocked packets', () => {
       }],
     }));
 
-    const result = await handleWaitForMissionReady(
-      { packetId: 'pkt-rerun', timeoutMs: 1_000, pollIntervalMs: 1_000 },
-      readStatus,
-    );
-    const payload = parsePayload(result as { content?: Array<{ type: string; text?: string }> });
+    vi.useFakeTimers();
+    try {
+      let settled = false;
+      const pending = handleWaitForMissionReady(
+        { packetId: 'pkt-rerun', timeoutMs: 1_000, pollIntervalMs: 1_000 },
+        readStatus,
+      ).then((result) => {
+        settled = true;
+        return result;
+      });
 
-    expect(payload.wakeReason).toBe('timeout');
-    expect(payload.wakeReason).not.toBe('already-terminal');
-    expect(readStatus).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(999);
+      expect(settled).toBe(false);
+      expect(readStatus).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1);
+      const result = await pending;
+      const payload = parsePayload(result as { content?: Array<{ type: string; text?: string }> });
+      expect(payload.wakeReason).toBe('timeout');
+      expect(payload.wakeReason).not.toBe('already-terminal');
+      expect(readStatus).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('returns immediately when a reviewing lane is already awaiting review', async () => {

@@ -302,7 +302,6 @@ import {
   fetchWithRetry,
   fetchNextJson,
   fetchRuntimeAction,
-  fetchRuntimeLaunch,
 } from './lib/ws-server/next-fetch';
 import {
   decideStalePortRecovery,
@@ -9129,45 +9128,8 @@ async function bootstrapWsServer() {
         });
       },
       async relaunchAgent(prompt, repoPath, taskName, retryOfSurfaceId) {
-        // Packet relaunch must ALWAYS isolate. Without isolate:true, shouldIsolate()
-        // falls through to "active worktree count > 0" — when the original lane's
-        // worktree was archived before relaunch, the check returns false and codex
-        // boots at the main repo root, writing agent changes directly into main.
-        // Every packet needs its own worktree, regardless of fleet state.
-        //
-        // #1292 ROOT — reuse the FAILING session's lane instead of auto-wrapping a
-        // fresh sibling. Without existingLaneId the launch creates a brand-new lane
-        // (actions.ts auto-wrap), so each retry doubled the lane count. The
-        // supervisor's onAgentRetry then rebinds that lane to the new session,
-        // matching the existingLaneId "caller attaches the session" convention.
-        // Degrades gracefully: no match (lane already archived/gone) → undefined →
-        // prior behavior.
-        let existingLaneId: string | undefined;
-        let existingWorktree: string | undefined;
-        if (retryOfSurfaceId) {
-          try {
-            const { findLaneBySession } = await import('@/lib/lane/registry');
-            const lane = findLaneBySession(retryOfSurfaceId);
-            existingLaneId = lane?.id ?? undefined;
-            existingWorktree = lane?.worktreePath ?? undefined;
-          } catch { /* best-effort — fall back to a fresh lane */ }
-        }
-        // #1293 — RESUME the retry IN THE LANE'S EXISTING WORKTREE when it still
-        // exists. The old code always isolated a fresh worktree with the changed
-        // "(retry N)" taskName, which orphaned the prior session's committed work:
-        // the lane kept its original worktree_path while the new session ran in a
-        // disconnected `<task>-retry-N` tree (the silent-exit / retry-worktree
-        // disconnect that left the lane stuck `running`/`failed` and never
-        // reviewing). Reusing the worktree keeps the work in one place and the
-        // lane connected, so the next salvage finalizes it to review. Only
-        // isolate a fresh tree when the original is gone (the archived-worktree
-        // case the original comment guarded against booting at the main repo).
-        const clientMutationId = randomUUID();
-        const launchBody = (existingWorktree && existsSync(existingWorktree))
-          ? { runtime: 'codex', prompt, repoPath: existingWorktree, cwd: existingWorktree, taskName, isolate: false, skipSetup: true, existingLaneId, clientMutationId }
-          : { runtime: 'codex', prompt, repoPath, cwd: repoPath, taskName, isolate: true, existingLaneId, clientMutationId };
-        const data = await fetchRuntimeLaunch(launchBody);
-        return data.surfaceId || null;
+        const { relaunchSupervisedAgent } = await import('@/lib/supervisor/relaunch-agent');
+        return relaunchSupervisedAgent(prompt, repoPath, taskName, retryOfSurfaceId);
       },
       broadcastAgentUpdate(update: AgentUpdateEvent) {
         // #529 — Supervisor/agent lifecycle events go on a dedicated channel,
@@ -9531,7 +9493,10 @@ async function bootstrapWsServer() {
             return;
           }
 
-          setLaneStatus(lane.id, 'awaiting_input', 'system', 'agent_failed');
+          const failedProbe = await probeNoChangesProduced(completionCwd, lane.baseBranch)
+            .catch(() => ({ noChangesProduced: true }));
+          const { transitionFailedPostCompletionLane } = await import('@/lib/supervisor/post-completion-packet');
+          transitionFailedPostCompletionLane(lane.id, !failedProbe.noChangesProduced);
           console.log(`[supervisor] Agent ${surfaceId} failed, lane ${lane.id} -> awaiting_input`);
         } catch (error) {
           console.error('[supervisor] Completion callback failed:', error);

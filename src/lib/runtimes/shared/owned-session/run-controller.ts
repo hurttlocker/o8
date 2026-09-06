@@ -23,7 +23,7 @@ import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
 import { crashSurvivableWorkersEnabled } from './crash-survival';
 import { observeChildExit, readAbnormalStderrTail } from './exit-outcome';
 import { prepareOwnedLaunchArgs } from './launch-args';
-import { detectSandboxDenial, sandboxDenialOperatorMessage } from './sandbox-denial';
+import { detectSandboxDenial, detectRunSandboxDenial, sandboxDenialOperatorMessage } from './sandbox-denial';
 import {
   AUTO_RETRY_FRESHNESS_MS,
   MAX_AUTO_RETRIES,
@@ -33,6 +33,7 @@ import {
   ensureDir,
   isOwnedRunAlive,
   nowIso,
+  ownedProcessExitPayload,
   pathExists,
 } from './helpers';
 import { stageMissingCliRun } from './missing-cli';
@@ -45,6 +46,7 @@ import {
   workerSandboxEnabled,
 } from './sandbox';
 import { resolveReadOnlySandboxPlan } from './work-mode';
+import { preparedRuntimeStateSandboxPolicy } from './runtime-state-sandbox';
 import type { OwnedSessionIo } from './session-io';
 import type {
   OwnedChildExitOutcome,
@@ -94,8 +96,7 @@ export function createOwnedRunController({
 }): OwnedRunController {
   const pendingAutoRetries = new Set<string>();
   const runArtifactCache = new Map<string, {
-    stdoutKey: string;
-    stderrKey: string;
+    key: string;
     /** null = raw exceeded RAW_RETENTION_MAX_BYTES; re-read from disk on hit. */
     stdoutRaw: string | null;
     stderrRaw: string | null;
@@ -139,8 +140,11 @@ export function createOwnedRunController({
       statKey(run.stdoutPath),
       statKey(run.stderrPath),
     ]);
+    const key = JSON.stringify([
+      stdoutKey, stderrKey, run.outcome, run.finishedAt, run.interruptRequestedAt, run.childExit,
+    ]);
     const cached = runArtifactCache.get(run.id);
-    if (cached && cached.stdoutKey === stdoutKey && cached.stderrKey === stderrKey) {
+    if (cached?.key === key) {
       runArtifactCache.delete(run.id);
       runArtifactCache.set(run.id, cached);
       if (cached.stdoutRaw !== null && cached.stderrRaw !== null) {
@@ -160,8 +164,7 @@ export function createOwnedRunController({
 
     const withinRawCap = stdoutRaw.length + stderrRaw.length <= RAW_RETENTION_MAX_BYTES;
     const entry = {
-      stdoutKey,
-      stderrKey,
+      key,
       stdoutRaw: withinRawCap ? stdoutRaw : null,
       stderrRaw: withinRawCap ? stderrRaw : null,
       parsed: adapter.parseRunLog(
@@ -211,12 +214,15 @@ export function createOwnedRunController({
     let model: string | undefined;
     let latestPrompt = '';
     let sandboxDenial: OwnedRunRecord['sandboxDenial'];
+    let artifacts: Awaited<ReturnType<typeof readRunArtifacts>> | null = null;
     await withSurfaceLock(surfaceId, async () => {
       const current = await io.findSession(surfaceId);
       if (!current) return;
       laneId = current.laneId;
       model = current.model;
       latestPrompt = current.latestPrompt;
+      const currentRun = current.recentRuns.find((run) => run.id === runId);
+      artifacts = currentRun ? await readRunArtifacts({ ...currentRun, childExit }).catch(() => null) : null;
       let dirty = false;
       const finishedAt = nowIso();
       const applyExit = (run: OwnedRunRecord): OwnedRunRecord => {
@@ -224,6 +230,8 @@ export function createOwnedRunController({
         dirty = true;
         const nextOutcome = run.outcome === 'interrupted'
           ? 'interrupted'
+          : artifacts?.parsed.outcome === 'failed'
+            ? 'failed'
           : childExit.classification === 'clean-exit'
             ? 'finished'
             : 'failed';
@@ -254,22 +262,15 @@ export function createOwnedRunController({
     });
     invalidateFleetCache();
 
-    if (laneId && exitedRun) {
-      const artifacts = await readRunArtifacts(exitedRun).catch(() => null);
-      const stderr = compactText(artifacts?.stderrRaw || childExit.stderrTail || '', 4_000);
-      const rawFailure = `${artifacts?.stdoutRaw ?? ''}\n${artifacts?.stderrRaw ?? childExit.stderrTail ?? ''}`;
+    const recordedRun = exitedRun as OwnedRunRecord | null;
+    const recordedArtifacts = artifacts as Awaited<ReturnType<typeof readRunArtifacts>> | null;
+    if (laneId && recordedRun) {
+      const stderr = compactText(recordedArtifacts?.stderrRaw || childExit.stderrTail || '', 4_000);
+      const rawFailure = `${recordedArtifacts?.stdoutRaw ?? ''}\n${recordedArtifacts?.stderrRaw ?? childExit.stderrTail ?? ''}`;
       try {
-        recordLaneEvent(laneId, 'runtime_process_exit', 'system', {
-          runtime: runtimeId,
-          surfaceId,
-          runId,
-          exitCode: childExit.code,
-          signal: childExit.signal,
-          classification: childExit.classification,
-          stderr,
-          completedTurn: artifacts?.parsed.completedTurn ?? false,
-          ...(artifacts?.parsed.turnContextUsage ?? {}),
-        });
+        recordLaneEvent(laneId, 'runtime_process_exit', 'system', ownedProcessExitPayload(
+          runtimeId, surfaceId, recordedRun, childExit, recordedArtifacts?.parsed, stderr,
+        ));
       } catch (error) {
         console.warn(`[owned-store] Failed to record runtime_process_exit for lane ${laneId}:`, error);
       }
@@ -397,7 +398,7 @@ export function createOwnedRunController({
       }
 
       if (run.sandboxed && !run.sandboxDenial) {
-        const denial = detectSandboxDenial(`${stdoutRaw}\n${stderrRaw}`);
+        const denial = detectRunSandboxDenial(runtimeId, stdoutRaw, stderrRaw);
         if (denial) {
           run.sandboxDenial = denial;
           session.latestSummary = sandboxDenialOperatorMessage(runtimeId, denial);
@@ -534,6 +535,11 @@ export function createOwnedRunController({
       sandboxEnabled,
       humanLabel,
     });
+    // Prepare the exact isolated config root before Seatbelt is built.
+    const adapterEnv: Record<string, string> = adapter.extraSpawnEnv
+      ? await adapter.extraSpawnEnv(session)
+      : {};
+    const runtimeState = preparedRuntimeStateSandboxPolicy(adapter, session, adapterEnv);
 
     let spawnBinary = binary;
     let spawnArgs = args;
@@ -548,25 +554,16 @@ export function createOwnedRunController({
           binary,
           args,
           extraReadPaths: workerMcp.sandboxReadPaths,
+          readBackingProjectConfig: runtimeId === 'codex',
           finalAllowReadPaths: workerMcp.configPath ? [workerMcp.configPath] : undefined,
           // Read-only: repo stays readable, kernel refuses every write. Deny
           // paths come from the SAME git probe prepareWorkerSandbox uses to
           // grant access, and it throws if that probe resolves nothing.
           enforceReadOnly: readOnlySandbox.enforced,
-          finalAllowReadWritePaths: session.identity?.configHomeRef
-            ? [session.identity.configHomeRef]
+          finalAllowReadWritePaths: runtimeState.configHome
+            ? [runtimeState.configHome]
             : undefined,
-          finalImmutableWritePaths: session.identity?.configHomeRef
-            ? [
-                path.join(session.identity.configHomeRef, 'auth.json'),
-                path.join(session.identity.configHomeRef, 'config.toml'),
-                path.join(session.identity.configHomeRef, 'AGENTS.md'),
-                path.join(session.identity.configHomeRef, 'agents'),
-                path.join(session.identity.configHomeRef, 'plugins'),
-                path.join(session.identity.configHomeRef, 'rules'),
-                path.join(session.identity.configHomeRef, 'skills'),
-              ]
-            : undefined,
+          finalImmutableWritePaths: runtimeState.immutablePaths,
         });
         spawnBinary = prepared.binary;
         spawnArgs = prepared.args;
@@ -612,12 +609,6 @@ export function createOwnedRunController({
     let pendingDetachedExit: OwnedChildExitOutcome | undefined;
 
     const bridgeSessionName = tmuxSessionName(runtimeId, runId);
-    const adapterEnv: Record<string, string> = adapter.extraSpawnEnv
-      ? await adapter.extraSpawnEnv(session)
-      : {};
-    if (adapter.isolatedConfigHomeEnv && session.identity?.configHomeRef) {
-      adapterEnv[adapter.isolatedConfigHomeEnv] = session.identity.configHomeRef;
-    }
     const workerToken = session.packetId
       ? mintPacketWorkerToken(session.packetId, { processMarker: runId })
       : getOrCreateLocalWorkerToken();

@@ -11,6 +11,7 @@
   },
   "packageManager": "npm@11.8.0",
   "scripts": {
+    "worker:login": "node --import ./scripts/register-server-only-stub.mjs --import tsx scripts/connect-native-worker.ts",
     "predev:cleanup": "node scripts/dev.mjs cleanup",
     "dev": "node scripts/dev.mjs all",
     "dev:next": "node scripts/dev.mjs next",

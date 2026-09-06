@@ -28,12 +28,13 @@
  * caller refuses to spawn rather than silently running the worker unsandboxed.
  */
 
-import { realpath, writeFile } from 'node:fs/promises';
+import { lstat, realpath, writeFile } from 'node:fs/promises';
 import { access, constants as fsConstants } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import os from 'node:os';
 import path from 'node:path';
+import { backingProjectConfigPaths } from './project-config';
 
 const execFileAsync = promisify(execFile);
 
@@ -72,12 +73,28 @@ function regexFragment(value: string): string {
   return value.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&').replace(/"/g, '\\"');
 }
 
-/** best-effort realpath; falls back to the input when it doesn't resolve yet. */
+/** Resolve existing ancestors too, so missing policy files retain canonical denials. */
 async function safeRealpath(p: string): Promise<string> {
-  try {
-    return await realpath(p);
-  } catch {
-    return p;
+  let current = path.resolve(p);
+  const missing: string[] = [];
+  for (;;) {
+    try {
+      return path.join(await realpath(current), ...missing);
+    } catch (error) {
+      const parent = path.dirname(current);
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || parent === current) {
+        throw new SandboxUnavailableError(`Cannot resolve sandbox policy path '${p}'.`);
+      }
+      // A dangling symlink is not a missing tail: its eventual target could
+      // differ from this lexical path. Refuse it instead of guessing a grant.
+      const existing = await lstat(current).catch((statError: NodeJS.ErrnoException) => {
+        if (statError.code === 'ENOENT') return null;
+        throw new SandboxUnavailableError(`Cannot inspect sandbox policy path '${p}'.`);
+      });
+      if (existing) throw new SandboxUnavailableError(`Unresolved sandbox policy path '${p}'.`);
+      missing.unshift(path.basename(current));
+      current = parent;
+    }
   }
 }
 
@@ -112,6 +129,27 @@ export function assertNoRegrantOverlap(
         throw new SandboxUnavailableError(
           `Sandbox policy conflict: '${allowed}' is re-opened for writes while '${denied}' is `
           + 'write-denied. Refusing to build a profile whose allow and deny sets overlap.',
+        );
+      }
+    }
+  }
+}
+
+/** Refuse a runtime-state allow that resolves to a protected parent root. */
+export function assertNarrowRuntimeStateRegrants(
+  allowedPaths: string[],
+  protectedRoots: string[],
+): void {
+  for (const allowed of allowedPaths) {
+    if (!path.isAbsolute(allowed)) {
+      throw new SandboxUnavailableError(
+        `Sandbox runtime state path '${allowed}' is not absolute. Refusing an ambiguous regrant.`,
+      );
+    }
+    for (const protectedRoot of protectedRoots) {
+      if (pathIsWithin(protectedRoot, allowed)) {
+        throw new SandboxUnavailableError(
+          `Sandbox runtime state path '${allowed}' would re-open protected root '${protectedRoot}'.`,
         );
       }
     }
@@ -501,6 +539,8 @@ export interface PrepareWorkerSandboxInput {
   extraReadWritePaths?: string[];
   /** Extra read-only roots (e.g. node runtime dir, CLI binary dir). */
   extraReadPaths?: string[];
+  /** Read only the linked checkout's exact backing project configuration. */
+  readBackingProjectConfig?: boolean;
   extraDenyPaths?: string[];
   trustedReadWritePaths?: string[];
   finalDenyPaths?: string[];
@@ -600,6 +640,9 @@ export async function prepareWorkerSandbox(input: PrepareWorkerSandboxInput): Pr
     path.join(homeReal, '.cortex-ide'),
     ...configuredDataDirs,
   ]);
+  const projectConfigPaths = input.readBackingProjectConfig
+    ? await backingProjectConfigPaths(gitPaths, worktreeReal, [homeReal, ...dataSecretRoots])
+    : [];
   const workspacePaths = await resolveAll([
     input.cwd,
     worktreeReal,
@@ -638,9 +681,23 @@ export async function prepareWorkerSandbox(input: PrepareWorkerSandboxInput): Pr
   const readOnlyDenyWrite = input.enforceReadOnly
     ? workspacePaths
     : [];
-  const finalImmutableWrite = await resolveAll(input.finalImmutableWritePaths ?? []);
-  const finalAllowRead = await resolveAll(input.finalAllowReadPaths ?? []);
+  const finalImmutableWrite = await resolveAll([
+    ...(input.finalImmutableWritePaths ?? []), ...projectConfigPaths,
+  ]);
+  const finalAllowRead = await resolveAll([
+    ...(input.finalAllowReadPaths ?? []), ...projectConfigPaths,
+  ]);
   const finalAllowExec = await resolveAll(input.finalAllowExecPaths ?? []);
+
+  // Runtime state may live inside the denied o8 data tree, but its grant must
+  // stay narrower than HOME, any data root, and the session metadata root.
+  // resolveAll includes symlink targets, so an apparently narrow symlink cannot
+  // re-open one of those parents after canonicalisation.
+  assertNarrowRuntimeStateRegrants(finalAllowReadWrite, await resolveAll([
+    homeReal,
+    ...dataSecretRoots,
+    path.dirname(input.profileDir),
+  ]));
 
   // Order alone already keeps the read-only denial authoritative. This refuses
   // the launch outright when a caller ALSO tries to re-open something inside

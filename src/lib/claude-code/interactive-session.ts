@@ -268,21 +268,9 @@ function settleTurn(
 
 function flushActiveTurn(
   session: InternalClaudeCodeInteractiveSession,
-): boolean {
+): void {
   const turn = session.activeTurn;
-  if (!turn) return false;
-
-  let emittedDone = false;
-  for (const event of turn.parser.flush()) {
-    if (event.type === 'done' && event.sessionId) {
-      session.sessionId = event.sessionId;
-    }
-    if (event.type === 'done') {
-      emittedDone = true;
-    }
-    turn.onEvent(event);
-  }
-  return emittedDone;
+  if (turn) handleParserEvents(session, turn.parser.flush());
 }
 
 function handleParserEvents(
@@ -296,9 +284,16 @@ function handleParserEvents(
     if (event.type === 'done' && event.sessionId) {
       session.sessionId = event.sessionId;
     }
+    if (event.type === 'done' && event.isError) {
+      // Consumers use done to render success. Reject before forwarding it so
+      // the streaming route emits an error instead of a successful close.
+      settleTurn(session, new Error('Worker returned a failed result.'));
+      return;
+    }
     turn.onEvent(event);
     if (event.type === 'done') {
       settleTurn(session, null);
+      return;
     }
   }
 }
@@ -346,12 +341,8 @@ function attachProcessHandlers(session: InternalClaudeCodeInteractiveSession): v
 
   proc.on('close', (code, signal) => {
     markDead(session);
-    const emittedDone = flushActiveTurn(session);
+    flushActiveTurn(session);
     if (!session.activeTurn) return;
-    if (emittedDone) {
-      settleTurn(session, null);
-      return;
-    }
 
     const suffix = signal ? `signal ${signal}` : `code ${code ?? 'unknown'}`;
     const stderr = session.stderrBuffer.trim();
