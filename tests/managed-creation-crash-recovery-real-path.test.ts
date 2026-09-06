@@ -1,10 +1,19 @@
 import { spawn } from 'node:child_process';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 
 function makeRepo(root: string): string {
   const repoRoot = path.join(root, 'repo');
@@ -88,6 +97,117 @@ it.each(['git-worktree', 'apfs-cow-clone'] as const)(
   },
   90_000,
 );
+
+it('retires a claim-free absent directory once and preserves mismatch refusal', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'o8-cleanup-absent-replay-'));
+  const repoRoot = makeRepo(root);
+  const dataDir = process.env.CORTEX_IDE_DATA_DIR!;
+  const worktreeRoot = path.join(root, 'worktrees');
+  process.env.CORTEX_IDE_DATA_DIR = dataDir;
+  process.env.O8_WORKTREE_ROOT = worktreeRoot;
+  const { WorktreeManager } = await import('@/lib/worktree/manager');
+  const { captureWorktreeMaterializationIdentity } = await import('@/lib/worktree/materialization-identity');
+  const { withWorktreeMetaTransaction } = await import('@/lib/worktree/metadata-store');
+  const { resolveWorktreeRootLayout } = await import('@/lib/worktree/root-layout');
+  const { readExactWorkspaceClaim } = await import('@/lib/workspace/exact-workspace-claim-state');
+  const { closeDb } = await import('@/lib/db');
+  const layout = resolveWorktreeRootLayout(repoRoot);
+  mkdirSync(layout.primaryBase, { recursive: true });
+  const parentIdentity = await captureWorktreeMaterializationIdentity(layout.primaryBase);
+
+  const saveEntry = async (id: string, workspacePath: string) => {
+    const materializationIdentity = await captureWorktreeMaterializationIdentity(workspacePath);
+    await withWorktreeMetaTransaction(repoRoot, (transaction) => transaction.save(id, {
+      id,
+      agentType: 'worker',
+      baseBranch: 'main',
+      createdAt: Date.now(),
+      claudeManaged: false,
+      taskName: id,
+      branchName: `inline/${id}`,
+      status: 'ready',
+      isolationKind: 'apfs-cow-clone',
+      materializationIdentity,
+      materializationParentIdentity: parentIdentity,
+    }));
+  };
+
+  const absentId = 'packet-absent-retirement';
+  const absentPath = path.join(layout.primaryBase, absentId);
+  mkdirSync(absentPath);
+  writeFileSync(path.join(absentPath, 'owned.txt'), 'owned bytes');
+  await saveEntry(absentId, absentPath);
+  rmSync(absentPath, { recursive: true });
+  expect(readExactWorkspaceClaim('managed-retirement', repoRoot, absentId)).toBeNull();
+
+  const mismatchId = 'packet-mismatched-retirement';
+  const mismatchPath = path.join(layout.primaryBase, mismatchId);
+  const retainedMismatchPath = path.join(root, 'retained-mismatched-retirement');
+  mkdirSync(mismatchPath);
+  writeFileSync(path.join(mismatchPath, 'owned.txt'), 'owned bytes');
+  await saveEntry(mismatchId, mismatchPath);
+  renameSync(mismatchPath, retainedMismatchPath);
+  mkdirSync(mismatchPath);
+  writeFileSync(path.join(mismatchPath, 'replacement.txt'), 'replacement bytes');
+
+  const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  const manager = new WorktreeManager(repoRoot);
+  const cleanupSpy = vi.spyOn(manager, 'cleanup');
+  try {
+    const firstSweep = await manager.prune(0);
+    const absentSelectionsAfterFirst = cleanupSpy.mock.calls.filter(
+      ([worktreeId]) => worktreeId === absentId,
+    ).length;
+    const metadataAfterFirst = await withWorktreeMetaTransaction(
+      repoRoot,
+      async (transaction) => (await transaction.readAll())[absentId],
+    );
+    const claimAfterFirst = readExactWorkspaceClaim('managed-retirement', repoRoot, absentId);
+    const secondSweep = await manager.prune(0);
+    const absentSelectionsAfterSecond = cleanupSpy.mock.calls.filter(
+      ([worktreeId]) => worktreeId === absentId,
+    ).length;
+    const metadataAfterSecond = await withWorktreeMetaTransaction(
+      repoRoot,
+      async (transaction) => (await transaction.readAll())[absentId],
+    );
+    const mismatchRemoved = await manager.cleanup(
+      mismatchId, { force: true, overrideLiveGuard: true },
+    );
+    const absentRefusals = errorSpy.mock.calls.filter((args) => (
+      args.some((argument) => String(argument).includes(absentId))
+    ));
+
+    expect({
+      firstSweep,
+      absentSelectionsAfterFirst,
+      metadataAfterFirst: Boolean(metadataAfterFirst),
+      claimAfterFirst,
+      secondSweep,
+      absentSelectionsAfterSecond,
+      metadataAfterSecond: Boolean(metadataAfterSecond),
+      absentRefusals: absentRefusals.length,
+    }).toEqual({
+      firstSweep: [absentId],
+      absentSelectionsAfterFirst: 1,
+      metadataAfterFirst: false,
+      claimAfterFirst: null,
+      secondSweep: [],
+      absentSelectionsAfterSecond: 1,
+      metadataAfterSecond: false,
+      absentRefusals: 0,
+    });
+    expect(mismatchRemoved).toBe(false);
+    expect(readFileSync(path.join(mismatchPath, 'replacement.txt'), 'utf8'))
+      .toBe('replacement bytes');
+    expect(readFileSync(path.join(retainedMismatchPath, 'owned.txt'), 'utf8'))
+      .toBe('owned bytes');
+  } finally {
+    cleanupSpy.mockRestore();
+    errorSpy.mockRestore();
+    closeDb();
+  }
+}, 30_000);
 
 it.each(['pr', 'merge'] as const)('replays %s cleanup after a crash following the exact retirement rename', async (action) => {
   const root = mkdtempSync(path.join(os.tmpdir(), `o8-cleanup-${action}-crash-replay-`));
