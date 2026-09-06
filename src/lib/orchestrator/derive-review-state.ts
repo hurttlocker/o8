@@ -9,7 +9,6 @@
  */
 import type { Lane } from '@/lib/lane/types';
 import type { PacketDiffBaseResolution } from '@/lib/diff/base-resolution';
-import { isPacketReleased } from '@/lib/orchestrator/packet-state';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
 export type PacketReviewState =
@@ -70,9 +69,8 @@ function pickLatestTimestamp(candidates: Array<string | null | undefined>): stri
 /**
  * Deterministic state machine. Order matters — the first matching rule wins.
  *
- *   1. `merged`          — packet release flipped to `released`, the packet
- *                          is already `released`, or the lane reached the
- *                          terminal merged outcome.
+ *   1. `merged`          — the lane reached the terminal merged outcome, or
+ *                          the packet carries a merge receipt.
  *   2. `failed`          — lane or packet status is `failed`.
  *   3. `needs-revision`  — orchestrator rejected the diff OR the merge gate
  *                          flagged any blocking violation.
@@ -86,7 +84,10 @@ export function derivePacketReviewState(input: DeriveReviewStateInput): DeriveRe
   const now = new Date().toISOString();
 
   // 1. merged
-  if (isPacketReleased(packet) || (lane?.status === 'completed' && lane.outcome === 'merged')) {
+  if (
+    (lane?.status === 'completed' && lane.outcome === 'merged')
+    || Boolean(packet.releaseStatePayload?.mergeCommit?.trim())
+  ) {
     const ts = pickLatestTimestamp([
       orchestratorReview?.ts,
       mergeGate?.ts,
