@@ -8,9 +8,10 @@ import { NextRequest } from 'next/server';
 
 const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-notes-real-path-data-'));
 const tempDirs: string[] = [];
+const WS_TOKEN = 'operator-notes-real-path-token';
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
-writeFileSync(join(dataDir, 'ws-token'), 'operator-notes-real-path-token\n', 'utf8');
+writeFileSync(join(dataDir, 'ws-token'), `${WS_TOKEN}\n`, 'utf8');
 
 const mergePreviewRoute = await import('@/app/api/orchestrator/merge-preview/route');
 const { createLane, setLaneStatus } = await import('@/lib/lane/registry');
@@ -21,7 +22,10 @@ function git(cwd: string, args: string[]): void {
 }
 
 function operatorGet(url: string): NextRequest {
-  return new NextRequest(url, { method: 'GET', headers: { host: 'localhost:3001' } });
+  return new NextRequest(url, {
+    method: 'GET',
+    headers: { host: 'localhost:3001', authorization: `Bearer ${WS_TOKEN}` },
+  });
 }
 
 afterEach(() => {

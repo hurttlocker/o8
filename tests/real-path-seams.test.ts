@@ -268,7 +268,10 @@ function operatorReq(url: string, body: unknown): NextRequest {
   });
 }
 function operatorGet(url: string): NextRequest {
-  return new NextRequest(url, { method: 'GET', headers: { host: 'localhost:3001' } });
+  return new NextRequest(url, {
+    method: 'GET',
+    headers: { host: 'localhost:3001', authorization: `Bearer ${WS_TOKEN}` },
+  });
 }
 
 describe('seam B — a dispatched worker approve_and_merge raises an operator card (CRIT-1/HIGH-4)', () => {

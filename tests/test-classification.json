@@ -2068,6 +2068,8 @@
     {
       "path": "tests/principal-authz.test.ts",
       "reasons": [
+        "child-process",
+        "git-cli",
         "terminal-tool"
       ]
     },

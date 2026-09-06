@@ -134,9 +134,13 @@ describe('lane branch binding and governance diff targets', () => {
     const { NextRequest } = await import('next/server');
     const diffRoute = await import('@/app/api/lanes/[id]/diff/route');
     const previewRoute = await import('@/app/api/orchestrator/merge-preview/route');
+    const { getOrCreateWsToken } = await import('@/lib/ws-auth');
     const operatorGet = (url: string) => new NextRequest(url, {
       method: 'GET',
-      headers: { host: 'localhost:3001' },
+      headers: {
+        host: 'localhost:3001',
+        authorization: `Bearer ${getOrCreateWsToken()}`,
+      },
     });
 
     const diffResponse = await diffRoute.GET(
