@@ -166,12 +166,16 @@ done < <(git -C "$ROOT" log "$SOURCE_REF" --since="$LAST_SYNCED_DATE 00:00:00" -
 node "$SCRIPT_DIR/lib/merge-public-changelog.mjs" "$MIRROR_CHANGELOG" "$ADDITIONS" "$OUT_CHANGELOG"
 
 # Blocklist check
-BLOCKLIST=(Cortex Rainwater Symon Hurttlocker aqua-color OpenClaw NemoClaw PicoClaw Codex opencode Tauri Drizzle better-sqlite tmux Anthropic Claude Gemini GPT-4 GPT-5 Opus Sonnet Haiku xhigh BYOK Cursor Conductor monetization "API key" cortexrules CortexClient ".cortex" ".o8-ide")
+BLOCKLIST=(Cortex Rainwater Symon Hurttlocker aqua-color OpenClaw NemoClaw PicoClaw Codex opencode Tauri Drizzle better-sqlite tmux Anthropic Claude Gemini GPT-4 GPT-5 Opus Sonnet Haiku DeepSeek Qwen Ginsu Astra xhigh BYOK Cursor Conductor monetization "model rate" "pricing table" "API key" cortexrules CortexClient ".cortex" ".o8-ide")
 LEAKED=""
 for term in "${BLOCKLIST[@]}"; do
-  if grep -qi "$term" "$OUT_CHANGELOG"; then
-    LEAKED="$LEAKED\n  - '$term'"
-  fi
+  # Preserve byte-identical legacy entries while blocking any new occurrence.
+  while IFS= read -r leaked_line; do
+    if ! grep -Fqx -- "$leaked_line" "$MIRROR_CHANGELOG"; then
+      LEAKED="$LEAKED\n  - '$term'"
+      break
+    fi
+  done < <(grep -i -- "$term" "$OUT_CHANGELOG" || true)
 done
 if [ -n "$LEAKED" ]; then
   echo "BLOCKED — internal terms found in public changelog:$LEAKED" >&2

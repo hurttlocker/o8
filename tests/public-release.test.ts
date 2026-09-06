@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { mergePublicChangelog } from '../scripts/lib/merge-public-changelog.mjs';
 import { buildLatestShip } from '../scripts/lib/public-release.mjs';
 
 const roots: string[] = [];
@@ -122,5 +123,50 @@ describe('latest ship builder', () => {
       'Fixes',
     ]);
     expect(JSON.stringify(ship)).not.toMatch(/password|Astra|\[via-o8\]|Codex/i);
+  });
+});
+
+describe('public changelog merge', () => {
+  it('preserves old entries, skips duplicates, and is idempotent', () => {
+    const newestOldBlock = [
+      '## 2026-09-05',
+      '',
+      '- `abc1234` feat: existing newest entry',
+    ].join('\n');
+    const oldestOldBlock = [
+      '## 2026-09-04',
+      '',
+      '- `def5678` perf: existing oldest entry',
+    ].join('\n');
+    const existing = [
+      '# Changelog',
+      '',
+      'Existing mirror preamble.',
+      '',
+      newestOldBlock,
+      '',
+      oldestOldBlock,
+      '',
+    ].join('\n');
+    const additions = [
+      {
+        date: '2026-09-06',
+        hash: 'fedcba9',
+        line: '- `fedcba9` feat: new day entry',
+      },
+      {
+        date: '2026-09-05',
+        hash: 'abc1234',
+        line: '- `abc1234` feat: existing newest entry',
+      },
+    ];
+
+    const merged = mergePublicChangelog(existing, additions);
+
+    expect(merged).toContain(newestOldBlock);
+    expect(merged).toContain(oldestOldBlock);
+    expect(merged.match(/`abc1234`/g)).toHaveLength(1);
+    expect(merged).toContain('## 2026-09-06\n\n- `fedcba9` feat: new day entry');
+    expect(mergePublicChangelog(merged, additions)).toBe(merged);
   });
 });

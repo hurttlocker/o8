@@ -16,4 +16,6 @@ All of these GitHub and Git calls run locally and none has a per-call metered co
 
 The changelog page reads `CHANGELOG.md` and `latest-ship.json` from `raw.githubusercontent.com`. The site revalidates each source every 300 seconds. These reads are not metered.
 
+`latest-ship.json` deliberately carries a `Fixes` section for the current ship because the featured block tells users what changed for them, while `CHANGELOG.md` stays limited to `feat`, `perf`, and `design` entries as the public feature log.
+
 The page can render either source by itself. It shows the fallback text only when the changelog fetch yields no dated entries and the latest-ship fetch yields no valid release.
