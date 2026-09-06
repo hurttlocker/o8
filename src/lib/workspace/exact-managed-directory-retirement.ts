@@ -92,7 +92,7 @@ function verifyClaimInput(
 
 async function prepareRetirement(
   input: ExactManagedDirectoryRetirementInput,
-): Promise<ExactWorkspaceClaimRecord> {
+): Promise<ExactWorkspaceClaimRecord | null> {
   const requestedDirectoryPath = path.resolve(input.directoryPath);
   const parentIdentity = await captureParentIdentity(requestedDirectoryPath);
   const directoryPath = path.join(
@@ -115,6 +115,7 @@ async function prepareRetirement(
     verifyClaimInput(existing, input, parentIdentity);
     return existing;
   }
+  if (!(await directoryIdentity(directoryPath))) return null;
   await assertWorktreeMaterializationIdentity(directoryPath, input.identity);
   const operationId = randomUUID();
   const claimPath = path.join(parentIdentity.canonicalPath, `.o8-retired-managed-${operationId}`);
@@ -211,6 +212,7 @@ export async function retireExactManagedDirectory(
   input: ExactManagedDirectoryRetirementInput,
 ): Promise<void> {
   const claim = await prepareRetirement(input);
+  if (!claim) return;
   await finishClaim(claim, input.beforeRetirementRename, input.afterRetirementRename);
 }
 
