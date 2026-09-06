@@ -712,6 +712,7 @@ if (existsSync(DECOMPOSE_PROMPT_SRC)) {
 // sessions do not fail at `#!/usr/bin/env node`.
 const CLI_BUILD = join(root, 'cli', 'esbuild.config.mjs');
 const CLI_OUTPUT = join(root, 'cli', 'dist', 'o8.mjs');
+const CLI_WORKER_LOGIN_OUTPUT = join(root, 'cli', 'dist', 'worker-login.mjs');
 const CLI_BIN_DIR = join(server, 'bin');
 const CLI_BIN_DST = join(CLI_BIN_DIR, 'o8');
 const CLI_BUNDLE_DST = join(CLI_BIN_DIR, 'o8.mjs');
@@ -722,12 +723,13 @@ if (existsSync(CLI_BUILD)) {
     cwd: join(root, 'cli'),
     env: canonicalizeServerOnlyStubEnv(process.env),
   });
-  if (!existsSync(CLI_OUTPUT)) {
+  if (!existsSync(CLI_OUTPUT) || !existsSync(CLI_WORKER_LOGIN_OUTPUT)) {
     console.error(`❌ CLI build did not produce ${CLI_OUTPUT}`);
     process.exit(1);
   }
   mkdirSync(CLI_BIN_DIR, { recursive: true });
   cpSync(CLI_OUTPUT, CLI_BUNDLE_DST);
+  cpSync(CLI_WORKER_LOGIN_OUTPUT, join(CLI_BIN_DIR, 'worker-login.mjs'));
   writeFileSync(CLI_BIN_DST, `#!/bin/sh
 set -eu
 # Resolve the REAL script location through symlinks — o8 is invoked via

@@ -2637,6 +2637,13 @@
       ]
     },
     {
+      "path": "tests/worker-login-cli-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/worker-mcp-injection-codex-real-path.test.ts",
       "reasons": [
         "child-process",

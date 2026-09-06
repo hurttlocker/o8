@@ -9,7 +9,7 @@ import { decryptValue, encryptValue } from '@/lib/db/master-key';
 import { hasClaudeEnvCredential } from './oauth-credential';
 
 const TOKEN_FILE = 'native-worker-token.json';
-export const WORKER_TOKEN_SETUP_HINT = 'Run `npm run worker:login` from the application source checkout to connect a dedicated worker token.';
+export const WORKER_TOKEN_SETUP_HINT = 'Run `o8 worker login` in an operator terminal to connect a dedicated worker token. No source checkout is needed. Codex workers are unaffected.';
 export const requiresNativeWorkerToken = (): boolean => process.platform === 'darwin';
 
 /** An inference token, never the operator login's refresh credential. */

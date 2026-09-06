@@ -12,7 +12,8 @@ import { extractSetupWorkerToken, workerTokenSetupNeedsBrowser } from '../src/li
 // terminal: it prints the credential. This wrapper retains output in memory only.
 async function main(): Promise<void> {
   if (process.platform !== 'darwin') throw new Error('Mac acceptance required.');
-  if (process.env.O8_WORKER_TOKEN || process.env.O8_WORKER_PACKET_ID) throw new Error('Operator context required.');
+  if (process.env.O8_WORKER_TOKEN || process.env.O8_WORKER_PACKET_ID || process.env.O8_SPECTATOR_TOKEN
+    || /(?:^|[/\\])\.cortex-worktrees[/\\]packet-/.test(process.cwd())) throw new Error('Operator context required.');
   const binary = await resolveCli({ runtimeId: 'claude-code', binaryName: 'claude', envOverride: 'O8_CLAUDE_CODE_BIN' });
   const { spawn } = createRequire(import.meta.url)('node-pty') as typeof import('node-pty');
   const configDir = await mkdtemp(path.join(os.tmpdir(), 'o8-worker-login-'));
@@ -27,6 +28,9 @@ async function main(): Promise<void> {
     FORCE_COLOR: '0', NO_COLOR: '1',
   });
   delete env.BROWSER;
+  delete env.O8_MASTER_KEY;
+  delete env.O8_API_TOKEN;
+  delete env.O8_SPECTATOR_TOKEN;
   try {
     await new Promise<void>((resolve, reject) => {
       const child = spawn(binary.path, ['setup-token'], { cwd: configDir, env, cols: 1000, rows: 40 });
@@ -59,6 +63,7 @@ async function main(): Promise<void> {
         }
       });
       child.onExit(({ exitCode }) => {
+        if (settled) return;
         const token = extractSetupWorkerToken(raw, exitCode === 0);
         if (token) saving = saveNativeWorkerToken(token);
         if (saving) void saving.then(() => finish(true), () => finish(false));
