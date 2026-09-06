@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { promisify } from 'node:util';
 
 import { createApproval } from '@/lib/approvals/store';
+import { laneCreationBaseCommit } from '@/lib/lane/creation-base';
 import { getLaneEvents, listLanes, setLaneStatus } from '@/lib/lane/registry';
 import type { Lane, LaneRuntime, LaneStatus } from '@/lib/lane/types';
 import { getRuntime } from '@/lib/runtimes';
@@ -178,6 +179,13 @@ function latestRecordedMergeHeadSha(lane: Lane): string | null {
 async function laneMergeConfirmed(lane: Lane): Promise<boolean> {
   const laneHeadSha = (await readRefSha(lane.repoPath, lane.branch)) ?? latestRecordedMergeHeadSha(lane);
   if (laneHeadSha) {
+    const events = getLaneEvents(lane.id, 10_000);
+    const creationBase = laneCreationBaseCommit(events);
+    const recordedMerge = events.some((event) => (
+      event.verb === 'merge' && event.payload.laneHeadSha === laneHeadSha
+    ));
+    if (lane.outcome !== 'merged' && !recordedMerge
+      && (!creationBase || creationBase === laneHeadSha)) return false;
     return isAncestorCommit(lane.repoPath, laneHeadSha, lane.baseBranch);
   }
 

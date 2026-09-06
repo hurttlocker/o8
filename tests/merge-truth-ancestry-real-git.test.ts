@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
-const { appendEvent, createLane, getLane, setLaneStatus } = await import('@/lib/lane/registry');
+const { appendEvent, createLane, getLane, getLaneEvents, setLaneStatus } = await import('@/lib/lane/registry');
 const { reconcileOrphanedWorktrees } = await import('@/lib/lane/reconcile');
 const { listZombieLaneCandidates } = await import('@/lib/lane/reaper');
 const { sweepPacketsMergedByAncestry } = await import('@/lib/orchestrator/merged-by-ancestry');
@@ -90,9 +90,31 @@ afterAll(() => {
 });
 
 describe('merge truth by git ancestry', () => {
+  it('does not complete a failed no-work lane when its worktree is missing', async () => {
+    const repo = makeRepo('o8-no-work-missing-');
+    git(repo, ['checkout', '-b', 'inline/no-work-failed']);
+    const lane = createLane({
+      repoPath: repo,
+      worktreePath: missingWorktree(repo, 'missing-failed'),
+      branch: 'inline/no-work-failed',
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId: 'pkt-no-work-failed-missing',
+    });
+    const exit = { exitCode: 1, classification: 'nonzero-exit', runtimeOutcome: 'failed', completedTurn: false };
+    appendEvent(lane.id, 'runtime_process_exit', 'system', exit);
+    setLaneStatus(lane.id, 'awaiting_input', 'system', 'agent_failed');
+
+    await reconcileOrphanedWorktrees();
+    expect(getLane(lane.id)?.status).not.toBe('completed');
+    expect(getLane(lane.id)?.outcome).not.toBe('merged');
+    expect(getLaneEvents(lane.id).find((event) => event.verb === 'runtime_process_exit')?.payload).toEqual(exit);
+  });
+
   it('confirms a merged lane head with the lane head as ancestor and base as descendant', async () => {
     const repo = makeRepo('o8-merge-truth-merged-');
     git(repo, ['checkout', '-b', 'inline/merged']);
+    const creationBase = git(repo, ['rev-parse', 'HEAD']);
     writeFileSync(join(repo, 'feature.txt'), 'feature\n');
     const laneHead = commitAll(repo, 'feature');
     git(repo, ['checkout', 'main']);
@@ -107,6 +129,7 @@ describe('merge truth by git ancestry', () => {
       baseBranch: 'main',
       runtime: 'codex',
       packetId: 'pkt-merged',
+      baseCommit: creationBase,
     });
     setLaneStatus(lane.id, 'reviewing', 'system', 'review_ready');
 

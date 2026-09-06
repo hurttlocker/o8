@@ -45,4 +45,20 @@ await esbuild.build({
 });
 
 execSync(`chmod +x ${outFile}`);
+// Keep the private PTY setup flow in a separate bundle. It can use the server's
+// encrypted storage implementation without adding native modules to every CLI command.
+await esbuild.build({
+  entryPoints: [join(__dirname, '..', 'scripts', 'connect-native-worker.ts')],
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  target: 'node22',
+  banner: { js: ESM_BANNER },
+  alias: {
+    '@': join(__dirname, '..', 'src'),
+    'server-only': join(__dirname, '..', 'scripts', 'server-only-stub.js'),
+  },
+  external: ['node-pty'],
+  outfile: join(__dirname, 'dist', 'worker-login.mjs'),
+});
 console.log(`built ${outFile}`);
