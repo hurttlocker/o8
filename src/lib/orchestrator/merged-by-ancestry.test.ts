@@ -29,7 +29,7 @@ process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT = mkdtempSync(
   join(tmpdir(), 'o8-merged-by-ancestry-owned-claude-'),
 );
 
-const { appendEvent, createLane, deleteLane, getLane, setLaneStatus, updateLane } = await import('@/lib/lane/registry');
+const { appendEvent, createLane, deleteLane, getLane, getLaneEvents, setLaneStatus, updateLane } = await import('@/lib/lane/registry');
 const { triggerAutoReview } = await import('@/lib/lane/auto-review');
 const { getSqlite } = await import('@/lib/db');
 const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
@@ -183,6 +183,35 @@ afterEach(() => {
 });
 
 describe('merged-by-ancestry reconciliation', () => {
+  it.each([
+    { label: 'failed', laneStatus: 'failed', packetStatus: 'failed', eventLabel: 'agent_failed' },
+    { label: 'stopped', laneStatus: 'paused', packetStatus: 'blocked', eventLabel: 'operator_stopped' },
+    { label: 'stale review', laneStatus: 'reviewing', packetStatus: 'awaiting_review', eventLabel: 'ready_for_review' },
+  ] as const)('preserves $label no-work exit truth across repeated sweeps and base advances', async ({ label, laneStatus, packetStatus, eventLabel }) => {
+    const { clone, seed } = makeRepo('o8-no-work-exit');
+    const packetId = `pkt-no-work-${label}`;
+    const lane = seedPacket(clone, packetId);
+    const exit = { exitCode: 1, classification: 'nonzero-exit', runtimeOutcome: 'failed', completedTurn: false };
+    appendEvent(lane.id, 'runtime_process_exit', 'system', exit);
+    setLaneStatus(lane.id, laneStatus, 'system', eventLabel);
+    const state = readOrchestratorControlPlaneState();
+    state.packets[0]!.status = packetStatus;
+    writeOrchestratorControlPlaneState(state);
+
+    for (const advanceBase of [false, true]) {
+      if (advanceBase) {
+        writeFileSync(join(seed, 'later.txt'), 'unrelated base change\n');
+        commitAll(seed, 'advance base');
+        git(seed, ['push', 'origin', 'main']);
+      }
+      await sweepPacketsMergedByAncestry();
+      expect(persistedPacket(packetId)).toMatchObject({ status: packetStatus, releaseState: 'pending' });
+      expect(getLane(lane.id)).toMatchObject({ status: laneStatus });
+      expect(getLane(lane.id)?.outcome).not.toBe('merged');
+      expect(getLaneEvents(lane.id).find((event) => event.verb === 'runtime_process_exit')?.payload).toEqual(exit);
+    }
+  });
+
   it('releases packet and archives lane when branch head is ancestor of origin/main', async () => {
     const { clone, seed } = makeRepo('o8-merged-ancestor');
     writeFileSync(join(clone, 'packet.txt'), 'packet\n');
@@ -216,6 +245,21 @@ describe('merged-by-ancestry reconciliation', () => {
       last_error: 'Cancelled: merged_by_ancestry_reconcile',
     });
   }, 20_000);
+
+  it('preserves an operator stop that arrives after no-change detection', async () => {
+    const { clone } = makeRepo('o8-no-work-stop-race');
+    const lane = seedPacket(clone, 'pkt-stop-race');
+    h.beforeActivityAssessment = () => {
+      setLaneStatus(lane.id, 'paused', 'user', 'operator_stopped');
+      const state = readOrchestratorControlPlaneState();
+      state.packets[0]!.status = 'blocked';
+      writeOrchestratorControlPlaneState(state);
+    };
+
+    await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({ merged: 0 });
+    expect(persistedPacket('pkt-stop-race')).toMatchObject({ status: 'blocked', releaseState: 'pending' });
+    expect(getLane(lane.id)).toMatchObject({ status: 'paused', lastEventLabel: 'operator_stopped' });
+  });
 
   it('releases packet and archives lane when squash-equivalent content is on origin/main', async () => {
     const { clone, seed } = makeRepo('o8-merged-squash');

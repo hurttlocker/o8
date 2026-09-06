@@ -116,6 +116,22 @@ function hasDurableLaunchEvidence(candidate: Candidate): boolean {
   ));
 }
 
+function hasUnsuccessfulTurn(candidate: Candidate): boolean {
+  const lane = candidate.laneId ? getLane(candidate.laneId) ?? candidate.lane : candidate.lane;
+  if (candidate.packet?.status === 'failed' || candidate.packet?.status === 'blocked'
+    || lane?.status === 'failed' || lane?.status === 'paused') return true;
+  const exit = candidate.laneId
+    ? getLaneEvents(candidate.laneId, 10_000).slice().reverse()
+      .find((event) => event.verb === 'runtime_process_exit')?.payload
+    : null;
+  return Boolean(exit && (
+    exit.runtimeOutcome === 'failed'
+    || exit.runtimeOutcome === 'interrupted'
+    || exit.completedTurn === false
+    || (typeof exit.exitCode === 'number' && exit.exitCode !== 0)
+  ));
+}
+
 async function git(
   cwd: string,
   args: string[],
@@ -306,6 +322,7 @@ async function detectMergedByAncestry(candidate: Candidate): Promise<MergeEviden
     : null;
   const noChangesEligible = !laneAlreadyMerged
     && durableLaunch
+    && !hasUnsuccessfulTurn(candidate)
     && (
       candidate.packet === null || candidate.packet.status === 'awaiting_review'
     );
@@ -337,7 +354,10 @@ async function detectMergedByAncestry(candidate: Candidate): Promise<MergeEviden
   ]);
   if (!headSha || !baseSha) return null;
 
-  if (noChangesEligible && creationBaseCommit === headSha) {
+  if (!laneAlreadyMerged && creationBaseCommit === headSha) {
+    // An attempted turn does not prove work. Never let an unsuccessful
+    // no-change lane fall through to the reflexive ancestry check below.
+    if (!noChangesEligible) return null;
     return {
       kind: 'no-changes',
       repoPath,
@@ -352,7 +372,7 @@ async function detectMergedByAncestry(candidate: Candidate): Promise<MergeEviden
 
   const publishedBranchExists = branch !== baseBranch
     && await refExists(repoPath, `origin/${branch}`);
-  if (headSha === baseSha && !laneAlreadyMerged) {
+  if (headSha === baseSha && !laneAlreadyMerged && creationBaseCommit === null) {
     if (noChangesEligible
       && creationBaseCommit === null
       && (branch === baseBranch || !publishedBranchExists)) {
@@ -366,10 +386,17 @@ async function detectMergedByAncestry(candidate: Candidate): Promise<MergeEviden
         noChangesReason: 'branch_matches_base',
       };
     }
-    if (!durableLaunch) return null;
+    return null;
   }
 
   if (await isAncestor(repoPath, headSha, baseRef)) {
+    // Legacy lanes without a creation baseline need a recorded merge head;
+    // ancestry alone cannot distinguish untouched work from a real merge.
+    if (!creationBaseCommit && !laneAlreadyMerged && !(
+      candidate.laneId && getLaneEvents(candidate.laneId, 10_000).some((event) => (
+        event.verb === 'merge' && event.payload.laneHeadSha === headSha
+      ))
+    )) return null;
     return {
       kind: 'ancestor',
       repoPath,
@@ -572,6 +599,7 @@ async function releasePacket(candidate: Candidate, evidence: MergeEvidence): Pro
 }
 
 async function finishWithoutChanges(candidate: Candidate, evidence: MergeEvidence): Promise<boolean> {
+  if (hasUnsuccessfulTurn(candidate)) return false;
   if (!(await evidenceStillHolds(evidence))) {
     recordEvidenceDeclined(candidate, evidence);
     return false;
@@ -583,9 +611,11 @@ async function finishWithoutChanges(candidate: Candidate, evidence: MergeEvidenc
   const packetTitle = candidate.packet?.title ?? candidate.lane?.label ?? packetId ?? 'Dispatched packet';
 
   if (candidate.packet) {
+    let accepted = false;
     await withLockedState((state) => {
       const packet = state.packets.find((item) => item.id === candidate.packet?.id);
-      if (!packet) return;
+      if (!packet || hasUnsuccessfulTurn({ ...candidate, packet })) return;
+      accepted = true;
       packet.status = 'archived';
       packet.queueState = 'held';
       packet.blockedReason = null;
@@ -593,6 +623,7 @@ async function finishWithoutChanges(candidate: Candidate, evidence: MergeEvidenc
       packet.lastEventAt = finishedAt;
       packet.lastEventLabel = 'finished_no_changes';
     });
+    if (!accepted) return false;
   }
 
   if (candidate.laneId) {
