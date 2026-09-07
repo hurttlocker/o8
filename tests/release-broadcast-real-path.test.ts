@@ -16,6 +16,7 @@ interface Fixture {
   cleanupLog: string;
   stageLog: string;
   envLog: string;
+  channelLog: string;
 }
 
 function makeFixture(options: {
@@ -32,12 +33,14 @@ function makeFixture(options: {
   const cleanupLog = join(root, 'cleanup.log');
   const stageLog = join(root, 'stages.log');
   const envLog = join(root, 'env.json');
+  const channelLog = join(root, 'channels.jsonl');
   const planPath = join(root, 'plan.json');
 
   writeFileSync(stageStub, `
 import { appendFileSync } from 'node:fs';
 const stage = process.argv[2];
 appendFileSync(process.env.O8_STUB_STAGE_LOG, stage + '\\n');
+appendFileSync(process.env.O8_STUB_CHANNEL_LOG, JSON.stringify({ stage, channel: process.env.O8_RELEASE_CHANNEL ?? 'stable' }) + '\\n');
 if (stage === 'preflight' && process.env.O8_STUB_FAIL_PREFLIGHT === '1') process.exit(29);
 if (stage === 'build') {
   appendFileSync(process.env.O8_STUB_ENV_LOG, JSON.stringify({
@@ -90,12 +93,13 @@ if (process.env.O8_STUB_FAIL_BROADCAST === '1') process.exit(23);
     ],
   }));
 
-  return { root, planPath, broadcastPath, broadcastLog, cleanupLog, stageLog, envLog };
+  return { root, planPath, broadcastPath, broadcastLog, cleanupLog, stageLog, envLog, channelLog };
 }
 
-function runRelease(fixture: Fixture, failBroadcast = false) {
+function runRelease(fixture: Fixture, failBroadcast = false, preview = false) {
+  if (preview) writeFileSync(join(fixture.root, 'package.json'), JSON.stringify({ version: '0.1.741-preview.1' }));
   return spawnSync(process.execPath, [releaseScript, '--ship'], {
-    cwd: process.cwd(),
+    cwd: preview ? fixture.root : process.cwd(),
     encoding: 'utf8',
     env: {
       ...process.env,
@@ -107,6 +111,8 @@ function runRelease(fixture: Fixture, failBroadcast = false) {
       O8_STUB_CLEANUP_LOG: fixture.cleanupLog,
       O8_STUB_STAGE_LOG: fixture.stageLog,
       O8_STUB_ENV_LOG: fixture.envLog,
+      O8_STUB_CHANNEL_LOG: fixture.channelLog,
+      O8_RELEASE_CHANNEL: preview ? 'preview' : 'stable',
       O8_STUB_FAIL_BROADCAST: failBroadcast ? '1' : '0',
     },
   });
@@ -143,6 +149,16 @@ afterEach(() => {
 });
 
 describe('release Broadcast milestones through the release entry point', () => {
+  it('preserves preview selection through preflight, build, notarization and publication', () => {
+    const fixture = makeFixture();
+    const result = runRelease(fixture, false, true);
+    expect(result.status, result.stderr).toBe(0);
+    const records = readFileSync(fixture.channelLog, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    for (const stage of ['preflight', 'build', 'notarize', 'publish']) {
+      expect(records.find(record => record.stage === stage)).toEqual({ stage, channel: 'preview' });
+    }
+  });
+
   it('runs preflight before build and isolates every build worker from operator state', () => {
     const fixture = makeFixture();
     const result = runRelease(fixture);

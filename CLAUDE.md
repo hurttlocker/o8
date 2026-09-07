@@ -40,10 +40,11 @@ npm run build               # Next.js production build (webpack, not turbopack)
 npm run tauri:build         # Unsigned native macOS app
 npm run tauri:build:signed  # Signed (updater-ready) build, passes --features dev-mcp-plugin
 
-# Ship (local release — bypasses CI, publishes to GitHub)
-npm version patch            # bump + sync all manifests + tag (runs sync-version.mjs hook)
+# Ship (version PR must pass CI before local signed publication)
+npm version patch --no-git-tag-version # on a clean release branch; commit synced manifests in a PR
+# After the version PR merges, verify merged main and create its exact version tag.
 release_version=$(node -p "require('./package.json').version")
-git push origin main "refs/tags/v${release_version}:refs/tags/v${release_version}"
+git push origin "refs/tags/v${release_version}:refs/tags/v${release_version}"
 npm run ship                 # build signed + upload via scripts/release.mjs
 
 # Lint
@@ -411,9 +412,10 @@ Most are optional. Fresh clones boot with nothing set. Specific features gate on
 
 ## Git Practices
 
-- All work on `main` branch (no feature branches — rapid iteration mode)
+- Use short feature branches and pull requests into protected `main`.
 - `npx tsc --noEmit` before every commit
-- `git push origin main` after each commit
+- Required PR checks, up-to-date branches, and resolved conversations apply to administrators too. Push the feature branch, then merge only after the checks pass and the operator approves. Do not bypass protection for version bumps or generated archives.
+- See `docs/operations/release-channels.md` for stable and preview publication boundaries.
 
 ## Working in public
 
@@ -437,13 +439,14 @@ nvm use                        # reads .nvmrc → Node 22 LTS. REQUIRED for ABI
                                # compiled against the build-machine's NODE_MODULE_VERSION,
                                # and the runtime app requires Node ≥22.
                                # release.mjs hard-fails if node !== 22.x.
-npm version patch              # 0.1.X → 0.1.X+1 — sync-version.mjs hook updates
-                               # package.json + src-tauri/tauri.conf.json +
-                               # src-tauri/Cargo.toml in a single commit, then
-                               # npm creates the v0.1.X+1 tag
+npm version patch --no-git-tag-version
+                               # on a clean release branch; sync all manifests,
+                               # commit them, and open the version PR
+# Wait for required checks, merge the approved PR, and verify exact merged main.
 release_version=$(node -p "require('./package.json').version")
-git push origin main "refs/tags/v${release_version}:refs/tags/v${release_version}"
-                               # send main + only the current release tag
+git tag -a "v${release_version}" -m "Release v${release_version}"
+git push origin "refs/tags/v${release_version}:refs/tags/v${release_version}"
+                               # tag only the verified merged version commit
 npm run ship                    # cargo tauri build with signing key +
                                # dev-mcp-plugin feature, then
                                # scripts/release.mjs creates the GH release
@@ -454,7 +457,9 @@ The user's installed `o8.app` sees the new version via the `UpdateCard` componen
 
 ### Why local instead of CI
 
-GitHub Actions macOS runners failed because of billing, so the normal release runs locally. The CI release workflow (`.github/workflows/release.yml`) still exists as a **manual-only** fallback (`workflow_dispatch`) — the `v*` tag trigger was **removed** so publishing a release tag no longer starts billed macOS runners automatically. Push only the current tag; never use `git push --tags`, because unrelated historical tags can collide with remote history. Run the workflow on-demand from the Actions tab only when the local ship path is unavailable. It uses the same `TAURI_SIGNING_PRIVATE_KEY` secret; `gh release create` in the local script errors cleanly when the release already exists (use `--clobber` to replace assets).
+GitHub Actions macOS runners failed because of billing, so the normal release runs locally. The CI release workflow (`.github/workflows/release.yml`) is a **manual-only**, draft-preview fallback (`workflow_dispatch` on a preview-version tag). Publishing a tag does not start billed macOS runners automatically. Push only the current tag; never use `git push --tags`, because unrelated historical tags can collide with remote history. The fallback uses the same `TAURI_SIGNING_PRIVATE_KEY` secret, but it cannot publish stable. Preview assets cannot be clobbered. The local stable release still requires explicit operator approval; source CI is required before the version PR merges.
+
+For an approved preview, use a unique `X.Y.Z-preview.N` version and `O8_RELEASE_CHANNEL=preview npm run ship`. It publishes `preview.json` on prereleases in both repositories and skips stable feeds and announcements. This does not add app-side preview enrollment or isolate the daily database. See `docs/operations/release-channels.md` before use.
 
 ### Signing
 

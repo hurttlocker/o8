@@ -21,7 +21,7 @@
  *   npm run ship
  */
 
-import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -32,6 +32,7 @@ import { verifyNativeBundle } from './native-bundle.mjs';
 import { runShipWorkflow } from './lib/ship-broadcast.mjs';
 import { buildReleaseManifest } from './lib/release-manifest.mjs';
 import { buildLatestShip, scrubPublicText } from './lib/public-release.mjs';
+import { resolveReleaseChannel } from './lib/release-channel.mjs';
 
 const REPO = 'hurttlocker/o8';
 const PUBLIC_MIRROR = 'hurttlocker/o8-releases';
@@ -99,7 +100,14 @@ if (process.argv[2] === '--verify-checkout-native-modules') {
 
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const version = pkg.version;
-const tag = `v${version}`;
+let releaseChannel;
+try {
+  releaseChannel = resolveReleaseChannel(version);
+} catch (error) {
+  console.error(`[release] ${error.message}`);
+  process.exit(1);
+}
+const tag = releaseChannel.tag;
 const dryRun = process.argv.includes('--dry-run');
 const dryRunOutDir = optionValue('--out-dir') || join(tmpdir(), 'o8-public-release-out');
 
@@ -115,6 +123,10 @@ if (nodeMajor !== 22) {
 
 if (dryRun) {
   try {
+    if (releaseChannel.preview) {
+      console.log(JSON.stringify(releaseChannel, null, 2));
+      process.exit(0);
+    }
     publishPublicRelease({
       publishedAt: resolvePublishedAt(),
       dryRun: true,
@@ -125,6 +137,11 @@ if (dryRun) {
     console.error(`[release] dry run failed: ${error?.message ?? error}`);
     process.exit(1);
   }
+}
+
+if (releaseChannel.preview && (process.argv.includes('--announce') || process.argv.includes('--announce-preview'))) {
+  console.error('[release] Stable announcements are disabled for preview releases.');
+  process.exit(1);
 }
 
 if (process.argv[2] === '--ship') {
@@ -244,7 +261,7 @@ const latestNotes = gateReleaseNote ? `o8 ${tag} — ${gateReleaseNote}` : `o8 $
 // Same signed binary works on x86_64 natively and aarch64 under Rosetta, so
 // point both platforms at the same artifact until a native arm64 runner
 // exists. Still signed with the same minisign key the installed app trusts.
-const latestJsonPath = join(BUNDLE, 'macos', 'latest.json');
+const latestJsonPath = join(BUNDLE, 'macos', releaseChannel.manifestName);
 const fixedJsonPath = join(BUNDLE, 'macos', 'fixed.json');
 const { latestJson, uploadArgs } = buildReleaseManifest({
   bundleDir: BUNDLE,
@@ -254,7 +271,7 @@ const { latestJson, uploadArgs } = buildReleaseManifest({
   downloadBase,
   darwinSignature: signature,
   baseUploadAssets: [DMG, APP_TAR, APP_SIG],
-  trailingUploadAssets: [latestJsonPath, fixedJsonPath],
+  trailingUploadAssets: [latestJsonPath, ...(releaseChannel.publishStableEffects ? [fixedJsonPath] : [])],
 });
 writeFileSync(latestJsonPath, JSON.stringify(latestJson, null, 2));
 console.log(`[release] wrote ${latestJsonPath}`);
@@ -271,23 +288,27 @@ console.log(`[release] wrote ${latestJsonPath}`);
 // Mirror the intake channel into the local ledger first — a user's report was
 // recorded on THEIR machine, not ours, so without this every fix we ship for
 // someone else's bug resolves to "unknown id" and never reaches fixed.json.
-try {
-  const { status, fresh } = await syncReports();
-  if (status === 'disabled') {
-    console.log('[release] external intake reconciliation intentionally disabled; continuing with the local ledger');
+let pendingFixes = [];
+if (releaseChannel.publishStableEffects) {
+  try {
+    const { status, fresh } = await syncReports();
+    if (status === 'disabled') {
+      console.log('[release] external intake reconciliation intentionally disabled; continuing with the local ledger');
+    }
+    if (fresh.length > 0) console.log(`[release] imported ${fresh.length} report(s) from the intake channel`);
+  } catch (err) {
+    console.warn(`[release] ⚠ intake-channel sync failed: ${err?.message ?? err}`);
+    console.warn('[release]   only self-filed reports will resolve — fixes for other people\'s bugs will be skipped.');
   }
-  if (fresh.length > 0) console.log(`[release] imported ${fresh.length} report(s) from the intake channel`);
-} catch (err) {
-  console.warn(`[release] ⚠ intake-channel sync failed: ${err?.message ?? err}`);
-  console.warn('[release]   only self-filed reports will resolve — fixes for other people\'s bugs will be skipped.');
-}
-const { entries: pendingFixes, missing: unknownFixes } = resolveNewFixes(releaseRange(tag), version);
-const fixedManifest = buildManifest([...readPublished(), ...pendingFixes], pubDate);
-writeFileSync(fixedJsonPath, JSON.stringify(fixedManifest, null, 2));
-console.log(`[release] wrote ${fixedJsonPath} (${fixedManifest.fixed.length} fixed report${fixedManifest.fixed.length === 1 ? '' : 's'}, ${pendingFixes.length} new this release)`);
-if (unknownFixes.length > 0) {
-  console.warn(`[release] ⚠ ${unknownFixes.length} Fixes-Report trailer(s) name an id with no ledger entry — those reporters will NOT get a receipt:`);
-  for (const { id, commit } of unknownFixes) console.warn(`[release]   ${id} (${commit.sha})`);
+  const { entries, missing: unknownFixes } = resolveNewFixes(releaseRange(tag), version);
+  pendingFixes = entries;
+  const fixedManifest = buildManifest([...readPublished(), ...pendingFixes], pubDate);
+  writeFileSync(fixedJsonPath, JSON.stringify(fixedManifest, null, 2));
+  console.log(`[release] wrote ${fixedJsonPath} (${fixedManifest.fixed.length} fixed report${fixedManifest.fixed.length === 1 ? '' : 's'}, ${pendingFixes.length} new this release)`);
+  if (unknownFixes.length > 0) {
+    console.warn(`[release] ⚠ ${unknownFixes.length} Fixes-Report trailer(s) name an id with no ledger entry — those reporters will NOT get a receipt:`);
+    for (const { id, commit } of unknownFixes) console.warn(`[release]   ${id} (${commit.sha})`);
+  }
 }
 
 try {
@@ -295,7 +316,7 @@ try {
   console.log(`[release] tag ${tag} present on origin`);
 } catch {
   console.error(`[release] tag ${tag} is not on origin.`);
-  console.error(`[release] run: git push origin main refs/tags/${tag}:refs/tags/${tag}`);
+  console.error(`[release] After the version PR merges, push its exact tag: git push origin refs/tags/${tag}:refs/tags/${tag}`);
   process.exit(1);
 }
 
@@ -311,9 +332,10 @@ try {
 // build (the 2026-07-08 #1499 incident). Refuse unless explicitly overridden.
 if (releaseExists && process.env.O8_RELEASE_CLOBBER !== '1') {
   console.error(`[release] REFUSING: ${tag} is already published. Did you forget to bump?`);
-  console.error('[release]   npm version patch');
+  console.error('[release]   Prepare a fresh version PR with npm version patch --no-git-tag-version.');
+  console.error('[release]   Merge after required checks, verify merged main, then create the exact version tag.');
   console.error('[release]   release_version=$(node -p "require(\'./package.json\').version")');
-  console.error('[release]   git push origin main "refs/tags/v${release_version}:refs/tags/v${release_version}"');
+  console.error('[release]   git push origin "refs/tags/v${release_version}:refs/tags/v${release_version}"');
   console.error('[release]   npm run ship');
   console.error('[release] To deliberately replace the existing release assets in place:');
   console.error('[release]   O8_RELEASE_CLOBBER=1 npm run ship');
@@ -326,6 +348,7 @@ if (releaseExists) {
     'release', 'edit', tag,
     '--title', `o8 ${tag}`,
     '--notes', releaseNotes,
+    ...releaseChannel.githubFlags,
     '-R', REPO,
   ], { stdio: 'inherit' });
   execFileSync('gh', [
@@ -339,6 +362,7 @@ if (releaseExists) {
     'release', 'create', tag, ...uploadArgs,
     '--title', `o8 ${tag}`,
     '--notes', releaseNotes,
+    ...releaseChannel.githubFlags,
     '-R', REPO,
   ], { stdio: 'inherit' });
 }
@@ -362,11 +386,15 @@ try {
   } catch {}
 
   if (mirrorExists) {
+    if (releaseChannel.preview) {
+      throw new Error('Preview mirror artifacts already exist; use a new preview version.');
+    }
     console.log(`[release-mirror] ${tag} already exists on ${PUBLIC_MIRROR} — replacing assets`);
     execFileSync('gh', [
       'release', 'edit', tag,
       '--title', `o8 ${tag}`,
       '--notes', mirrorNotes,
+      ...releaseChannel.githubFlags,
       '-R', PUBLIC_MIRROR,
     ], { stdio: 'inherit' });
     execFileSync('gh', [
@@ -380,12 +408,17 @@ try {
       'release', 'create', tag, ...uploadArgs,
       '--title', `o8 ${tag}`,
       '--notes', mirrorNotes,
+      ...releaseChannel.githubFlags,
       '-R', PUBLIC_MIRROR,
     ], { stdio: 'inherit' });
   }
 
   console.log(`[release-mirror] mirrored ${tag} to ${PUBLIC_MIRROR}`);
 
+  if (releaseChannel.preview) {
+    console.log('[release] Preview published for explicit tag downloads; the stable updater and announcements are unchanged.');
+    process.exit(0);
+  }
   // Publish the page feeds from one local mirror checkout and one mirror commit.
   // This runs only after the updater assets are available on the public mirror.
   let publicFeedPublished = false;
@@ -398,12 +431,8 @@ try {
     console.error('[release] re-run manually: node scripts/release.mjs --dry-run');
   }
 
-  if (publicFeedPublished) {
-    try {
-      archiveReleaseNotes();
-    } catch (err) {
-      console.error('[release] release notes archive failed (non-fatal):', err?.message ?? err);
-    }
+  if (publicFeedPublished && existsSync(join(root, 'release-notes', 'next.md'))) {
+    console.log('[release] Archive release-notes/next.md through a follow-up PR; protected main is not modified by publication.');
   }
 
   // Announce the fixes ONLY now — the mirror is what makes v${version} real, and
@@ -429,6 +458,7 @@ try {
 } catch (err) {
   console.error(`[release-mirror] failed to mirror ${tag} to ${PUBLIC_MIRROR}:`, err?.message ?? err);
   console.error(`[release-mirror] private publish above is unaffected — auto-update will not pick up this version until the mirror succeeds`);
+  if (releaseChannel.preview) process.exit(1);
 }
 
 console.log(`[release] the installed o8.app will pick up the update on next launch`);
@@ -552,25 +582,6 @@ function publishPublicRelease({ publishedAt, dryRun: preview = false, outDir = n
   } finally {
     rmSync(stagingDir, { recursive: true, force: true });
   }
-}
-
-function archiveReleaseNotes() {
-  const nextPath = join(root, 'release-notes', 'next.md');
-  if (!existsSync(nextPath)) return;
-  const archivedPath = join(root, 'release-notes', `${version}.md`);
-  if (existsSync(archivedPath)) {
-    throw new Error(`release notes archive already exists: ${archivedPath}`);
-  }
-
-  renameSync(nextPath, archivedPath);
-  execFileSync('git', ['add', '--', nextPath, archivedPath], { cwd: root, stdio: 'inherit' });
-  execFileSync('git', [
-    'commit',
-    '-m', `docs: archive release notes ${version}`,
-    '--', nextPath, archivedPath,
-  ], { cwd: root, stdio: 'inherit' });
-  execFileSync('git', ['push', 'origin', 'HEAD'], { cwd: root, stdio: 'inherit' });
-  console.log(`[release] archived release notes at release-notes/${version}.md`);
 }
 
 async function announceRelease() {
