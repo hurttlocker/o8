@@ -20,11 +20,13 @@ process.env.O8_DATA_DIR = dataDir;
 const { closeDb } = await import('@/lib/db');
 const { createLane, getLane, setLaneStatus, updateLane } = await import('@/lib/lane/registry');
 const { recordLaneEvent } = await import('@/lib/lane/events');
-const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+const { holdPacketLifecycleMutation } = await import('@/lib/orchestrator/packet-lifecycle-guard');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const { getOrCreateWsToken } = await import('@/lib/ws-auth');
 const { findManagedRun } = await import('@/lib/runtimes/managed-runs/registry');
 const steerRoute = await import('@/app/api/orchestrator/steer-packet/route');
+const stateRoute = await import('@/app/api/orchestrator/state/route');
 const runsRoute = await import('@/app/api/panel/managed-runs/route');
 
 let sequence = 0;
@@ -53,8 +55,8 @@ function fixture(operatorStopped = false) {
   return { packet, lane, sessionKey };
 }
 
-function request(path: string, body: unknown) {
-  return new NextRequest(`http://localhost${path}`, { method: 'POST', headers: {
+function request(path: string, body: unknown, method = 'POST') {
+  return new NextRequest(`http://localhost${path}`, { method, headers: {
     authorization: `Bearer ${getOrCreateWsToken()}`, 'content-type': 'application/json',
   }, body: JSON.stringify(body) });
 }
@@ -134,6 +136,35 @@ describe('steered-turn managed-run admission through production routes', () => {
     expect((await register(packet)).status).toBe(200);
     updateLane(lane.id, { sessionKey: 'claude-code-owned:unaccepted-successor' });
     expect((await register(packet, 'rebound')).status).toBe(409);
+  });
+
+  it('cannot revive accepted-run admission by replaying a snapshot after Stop', async () => {
+    const { packet } = fixture();
+    expect((await steer(packet.id)).status).toBe(200);
+    expect((await register(packet, 'beforeStop')).status).toBe(200);
+    const cached = readOrchestratorControlPlaneState();
+    const guard = await holdPacketLifecycleMutation({ packetId: packet.id, kind: 'stop' });
+
+    expect((await stateRoute.POST(request('/api/orchestrator/state', { mission: cached }))).status).toBe(200);
+    closeDb();
+    expect(readOrchestratorControlPlaneState().packets[0]).toMatchObject({
+      operatorStopped: true, queueState: 'held', releaseStatePayload: { source: guard?.source },
+    });
+    expect((await register(packet, 'afterStop')).status).toBe(409);
+    expect(findManagedRun(`run${sequence}afterStop`)).toBeNull();
+  });
+
+  it('refuses further managed runs when an accepted turn is archived through the state API', async () => {
+    const { packet } = fixture();
+    expect((await steer(packet.id)).status).toBe(200);
+    expect((await register(packet, 'beforeArchive')).status).toBe(200);
+    const archivedAt = new Date().toISOString();
+    expect((await stateRoute.PATCH(request('/api/orchestrator/state', {
+      packetId: packet.id, updates: { archivedAt },
+    }, 'PATCH'))).status).toBe(200);
+    expect(readOrchestratorControlPlaneState().packets[0]?.archivedAt).toBe(archivedAt);
+    expect((await register(packet, 'afterArchive')).status).toBe(409);
+    expect(findManagedRun(`run${sequence}afterArchive`)).toBeNull();
   });
 
   it.each(['archived', 'released'] as const)('does not steer a %s packet', async (state) => {

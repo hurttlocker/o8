@@ -12,6 +12,7 @@ import { listApprovals } from '@/lib/approvals/store';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { resolveAgentSummaryStatuses } from '@/lib/orchestrator/operator-status-model';
 import { packetStatusWriteRejection } from '@/lib/orchestrator/packet-patch-policy';
+import { normalizePacketStorageAdmissionEpoch } from '@/lib/orchestrator/packet-storage-admission-normalize';
 import { autoResolveMergedPacketVerificationIncidents } from '@/lib/supervisor/merged-incident-resolution';
 import { listTerminalReviewQueueEvidence } from '@/lib/terminal-status/store';
 import { resolveTerminalStatusEvidence } from '@/lib/terminal-status/resolve';
@@ -194,14 +195,33 @@ function mergeClientMissionUnderLock(
   // Identity matches (or server has no mission yet): accept the body,
   // but pin identity fields to the server's values so a client that
   // synthesized partial state can't overwrite them to empty/different
-  // strings. Packet-level updates flow through as-is.
+  // strings. A whole-client snapshot is not a lifecycle command: it must not
+  // erase a server hold, replay an older hold after reset, or cross a reset's
+  // generation floor. Targeted metadata PATCHes still work on held packets.
+  const serverPackets = new Map(current.packets.map((packet) => [packet.id, packet]));
   const packets: OrchestratorPacket[] = Array.isArray(incoming.packets)
     ? incoming.packets.map((packet) => {
-        const persisted = { ...packet };
+        const serverPacket = serverPackets.get(packet.id);
+        const preserveLifecycle = serverPacket && (
+          serverPacket.operatorStopped === true
+          || packet.operatorStopped === true
+          || normalizePacketStorageAdmissionEpoch(serverPacket.storageAdmissionEpoch)
+            !== normalizePacketStorageAdmissionEpoch(packet.storageAdmissionEpoch)
+        );
+        const persisted = { ...(preserveLifecycle ? serverPacket : packet) };
         delete persisted.statusEvidence;
         return persisted;
       })
     : [];
+  // An old snapshot may not contain the packet at all. Omitting it cannot
+  // delete the durable stop or a packet whose lifecycle has since advanced.
+  const incomingIds = new Set(packets.map((packet) => packet.id));
+  for (const packet of current.packets) {
+    if (!incomingIds.has(packet.id) && (packet.operatorStopped === true
+      || normalizePacketStorageAdmissionEpoch(packet.storageAdmissionEpoch) > 1)) {
+      packets.push(packet);
+    }
+  }
   return {
     ...incoming,
     missionId: current.missionId || incoming.missionId,
@@ -210,6 +230,7 @@ function mergeClientMissionUnderLock(
     repoPath: current.repoPath ?? incoming.repoPath,
     runtime: current.runtime || incoming.runtime,
     constraints: current.constraints ?? incoming.constraints,
+    lifecycleHold: current.lifecycleHold,
     packets,
   };
 }
