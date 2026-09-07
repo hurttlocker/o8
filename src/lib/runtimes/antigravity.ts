@@ -8,7 +8,6 @@ import type {
   RuntimeTelemetry,
   RuntimeTranscriptEntry,
 } from './types';
-import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
 
 const capabilities: RuntimeCapabilities = {
   discover: true,
@@ -20,22 +19,6 @@ const capabilities: RuntimeCapabilities = {
   costTelemetry: false,
   streaming: false,
 };
-
-async function hasAntigravityCli(): Promise<boolean> {
-  try {
-    await resolveCli({
-      runtimeId: 'antigravity',
-      binaryName: 'agy',
-      envOverride: 'O8_ANTIGRAVITY_BIN',
-      aliases: ['antigravity'],
-      extraEnvOverrides: ['ANTIGRAVITY_BIN'],
-    });
-    return true;
-  } catch (error) {
-    if (error instanceof CliNotFoundError) return false;
-    throw error;
-  }
-}
 
 function unavailable(action: string): RuntimeActionResult {
   return {
@@ -49,9 +32,7 @@ export const antigravityRuntime: AgentRuntime = {
   displayName: 'Antigravity',
   capabilities,
 
-  async discoverSessions(options = {}): Promise<RuntimeSession[]> {
-    if (!(options.fresh ?? false)) return [];
-    if (!await hasAntigravityCli()) return [];
+  async discoverSessions(): Promise<RuntimeSession[]> {
     // Parser seam: official docs confirm `agy --print` for one-shot headless use,
     // but do not document a stable session id + streaming JSON contract.
     return [];

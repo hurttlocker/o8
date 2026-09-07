@@ -9,7 +9,6 @@ import type {
   LaunchOptions,
 } from './types';
 import { parseGrokSessionCost } from '@/lib/runtimes/grok-cost-parser';
-import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
 import { ownedTailToRuntimeTranscript } from '@/lib/runtimes/shared/owned-transcript';
 import { monitorUsageDispatch, usageSnapshotFromTelemetry } from '@/lib/usage-log';
 import {
@@ -59,21 +58,6 @@ type OwnedAgentLike = {
     cwd?: string;
   };
 };
-
-async function hasGrokCli(): Promise<boolean> {
-  try {
-    await resolveCli({
-      runtimeId: 'grok',
-      binaryName: 'grok',
-      envOverride: 'O8_GROK_BIN',
-      extraEnvOverrides: ['GROK_BUILD_BIN'],
-    });
-    return true;
-  } catch (error) {
-    if (error instanceof CliNotFoundError) return false;
-    throw error;
-  }
-}
 
 function mapStatus(rawStatus: string): RuntimeSession['status'] {
   return rawStatus === 'completed' || rawStatus === 'finished' ? 'completed'
@@ -159,7 +143,7 @@ export const grokRuntime: AgentRuntime = {
   capabilities,
 
   async discoverSessions(options = {}): Promise<RuntimeSession[]> {
-    if ((options.fresh ?? false) && !await hasGrokCli()) return [];
+    // Fresh means fresh session state, not a repeated installation probe.
     const owned = await getOwnedGrokFleetAdditions({ fresh: options.fresh ?? false }).catch((error) => {
       console.warn('[grok-runtime] discoverSessions owned fleet failed:', error);
       return null;

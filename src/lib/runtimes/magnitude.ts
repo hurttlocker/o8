@@ -6,7 +6,6 @@ import type {
   RuntimeTelemetry,
   RuntimeTranscriptEntry,
 } from './types';
-import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
 
 const capabilities = {
   discover: true,
@@ -18,20 +17,6 @@ const capabilities = {
   costTelemetry: false,
   streaming: false,
 } as const;
-
-async function hasMagnitudeCli(): Promise<boolean> {
-  try {
-    await resolveCli({
-      runtimeId: 'magnitude',
-      binaryName: 'magnitude',
-      envOverride: 'O8_MAGNITUDE_BIN',
-    });
-    return true;
-  } catch (error) {
-    if (error instanceof CliNotFoundError) return false;
-    throw error;
-  }
-}
 
 function unavailable(action: string): RuntimeActionResult {
   return {
@@ -45,9 +30,7 @@ export const magnitudeRuntime: AgentRuntime = {
   displayName: 'Magnitude',
   capabilities,
 
-  async discoverSessions(options = {}): Promise<RuntimeSession[]> {
-    if (!(options.fresh ?? false)) return [];
-    if (!await hasMagnitudeCli()) return [];
+  async discoverSessions(): Promise<RuntimeSession[]> {
     // Live terminal processes are attached through the shared IDE session
     // registry. Upstream session files stay private until a stable transcript
     // or daemon RPC contract is available.
