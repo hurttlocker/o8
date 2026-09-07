@@ -43,6 +43,10 @@ jobs:
       - run: npm ci --prefer-offline
       - run: npm run protocol:check
       - run: npm run typecheck
+      # These bounded publication fixtures never contact release services or
+      # build an app. Keep the stable/preview boundary on every PR.
+      - name: Release channel policy
+        run: npx vitest run tests/release-channel-real-path.test.ts
 
   # Lint restored to the PR lane 2026-07-18 (#1547): the error debt is burned
   # to zero on main (the old 398 baseline was mostly a stale nested worktree
