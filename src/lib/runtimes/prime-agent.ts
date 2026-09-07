@@ -9,7 +9,6 @@ import type {
   LaunchOptions,
 } from './types';
 import { parsePrimeAgentSessionCost } from '@/lib/runtimes/prime-agent-cost-parser';
-import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
 import { ownedTailToRuntimeTranscript } from '@/lib/runtimes/shared/owned-transcript';
 import {
   continueOwnedPrimeAgentSession,
@@ -33,20 +32,6 @@ const capabilities: RuntimeCapabilities = {
 };
 
 type OwnedAgentLike = Awaited<ReturnType<typeof getOwnedPrimeAgentFleetAdditions>>['agents'][number];
-
-async function hasPrimeAgentCli(): Promise<boolean> {
-  try {
-    await resolveCli({
-      runtimeId: 'prime-agent',
-      binaryName: 'prime-agent',
-      envOverride: 'O8_PRIME_AGENT_BIN',
-    });
-    return true;
-  } catch (error) {
-    if (error instanceof CliNotFoundError) return false;
-    throw error;
-  }
-}
 
 function mapStatus(rawStatus: string): RuntimeSession['status'] {
   return rawStatus === 'completed' || rawStatus === 'finished' ? 'completed'
@@ -95,8 +80,8 @@ export const primeAgentRuntime: AgentRuntime = {
   displayName: 'Prime Agent',
   capabilities,
 
-  async discoverSessions(options = {}): Promise<RuntimeSession[]> {
-    if ((options.fresh ?? false) && !await hasPrimeAgentCli()) return [];
+  async discoverSessions(): Promise<RuntimeSession[]> {
+    // Saved sessions remain discoverable without probing the launch executable.
     const owned = await getOwnedPrimeAgentFleetAdditions().catch((error) => {
       console.warn('[prime-agent-runtime] discoverSessions owned fleet failed:', error);
       return null;

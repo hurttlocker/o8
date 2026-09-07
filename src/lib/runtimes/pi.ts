@@ -9,7 +9,6 @@ import type {
   RuntimeTranscriptEntry,
 } from './types';
 import { parsePiSessionCost } from '@/lib/runtimes/pi-cost-parser';
-import { resolveCli, CliNotFoundError } from '@/lib/runtimes/shared/cli-resolver';
 import { ownedTailToRuntimeTranscript } from '@/lib/runtimes/shared/owned-transcript';
 import {
   getOwnedPiFleetAdditions,
@@ -33,21 +32,6 @@ const capabilities: RuntimeCapabilities = {
 };
 
 type OwnedAgentLike = Awaited<ReturnType<typeof getOwnedPiFleetAdditions>>['agents'][number];
-
-async function piBinaryPresent(): Promise<boolean> {
-  try {
-    await resolveCli({
-      runtimeId: 'pi',
-      binaryName: 'pi',
-      envOverride: 'O8_PI_BIN',
-      versionArgs: ['--version'],
-    });
-    return true;
-  } catch (error) {
-    if (error instanceof CliNotFoundError) return false;
-    return false;
-  }
-}
 
 function mapAgentToSession(agent: OwnedAgentLike): RuntimeSession {
   const surface = agent.runtimeSurface;
@@ -94,8 +78,9 @@ export const piRuntime: AgentRuntime = {
     },
   },
 
-  async discoverSessions(options = {}): Promise<RuntimeSession[]> {
-    if ((options.fresh ?? false) && !(await piBinaryPresent())) return [];
+  async discoverSessions(): Promise<RuntimeSession[]> {
+    // Discovery reads durable sessions, including history after uninstall.
+    // Resolve the executable only when launching/resuming, not on inventory polls.
     const owned = await getOwnedPiFleetAdditions().catch((error) => {
       console.warn('[pi-runtime] owned-session discovery failed:', error);
       return null;

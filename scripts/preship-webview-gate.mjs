@@ -21,6 +21,7 @@ import {
   runLoadScenario,
 } from './lib/footprint-budget-load.mjs';
 import { BOOT_PROBE_JS, classifyBootProbe } from './preship-gate-logic.mjs';
+import { cleanupGate, loadTeardownProvesClean } from './lib/preship-gate-cleanup.mjs';
 
 // Per-phase deadlines (each phase gets its OWN fresh budget — a shared budget
 // let a slow cold boot under machine load starve the later route/health checks
@@ -445,37 +446,6 @@ function resolveAppTarget(mode, target) {
   };
 }
 
-function listenerGone(port) {
-  return new Promise((resolve) => {
-    const socket = net.createConnection({ host: '127.0.0.1', port });
-    socket.once('connect', () => {
-      socket.destroy();
-      resolve(false);
-    });
-    socket.once('error', () => resolve(true));
-  });
-}
-
-async function killProcessGroup(child) {
-  if (!child?.pid) return;
-  try { process.kill(-child.pid, 'SIGTERM'); } catch {}
-  await sleep(3000);
-  try { process.kill(-child.pid, 'SIGKILL'); } catch {}
-}
-
-async function cleanup({ client, child, dataDir, socketPath }) {
-  client?.dispose();
-  await killProcessGroup(child);
-  const apiPortPath = dataDir ? path.join(dataDir, 'api-port') : null;
-  const apiPort = apiPortPath && existsSync(apiPortPath) ? Number(readFileSync(apiPortPath, 'utf8')) : null;
-  if (dataDir) rmSync(dataDir, { recursive: true, force: true });
-  rmSync(socketPath, { force: true });
-  rmSync(`${socketPath}.token`, { force: true });
-  if (apiPort && !(await listenerGone(apiPort))) {
-    throw new Error(`child API port still has a listener after cleanup: ${apiPort}`);
-  }
-}
-
 function bypass(mode, appTar, info) {
   const reason = (process.env.O8_GATE_BYPASS_REASON ?? '').trim();
   if (!reason) {
@@ -536,6 +506,7 @@ async function main() {
   let signalFailed = 'unknown';
   let capturedConsoleErrors = [];
   let footprintReceipt;
+  let preserveDataDir = false;
 
   try {
     child = spawn(machO, [], {
@@ -597,6 +568,7 @@ async function main() {
     });
     let loadScenario = plan;
     if (plan.available) {
+      preserveDataDir = true;
       loadScenario = await runLoadScenario({
         plan,
         driver: createHttpLoadDriver({
@@ -608,6 +580,7 @@ async function main() {
         }),
         sample: ({ laneCount }) => collectFootprintSamples(footprintContext, sampleCount, 'loaded-lanes', laneCount),
       });
+      preserveDataDir = !loadTeardownProvesClean(loadScenario);
     }
 
     signalFailed = 'footprint-budget';
@@ -677,7 +650,7 @@ async function main() {
     console.error(`[preship-webview-gate] child stdout tail:\n${tail(stdout)}`);
     process.exitCode = 1;
   } finally {
-    await cleanup({ client, child, dataDir, socketPath });
+    await cleanupGate({ client, child, dataDir, socketPath, preserveDataDir });
   }
 }
 

@@ -9,7 +9,6 @@ import type {
   LaunchOptions,
 } from './types';
 import { parseCursorSessionCost } from '@/lib/runtimes/cursor-cost-parser';
-import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
 import { ownedTailToRuntimeTranscript } from '@/lib/runtimes/shared/owned-transcript';
 import { monitorUsageDispatch, usageSnapshotFromTelemetry } from '@/lib/usage-log';
 import {
@@ -59,21 +58,6 @@ type OwnedAgentLike = {
     cwd?: string;
   };
 };
-
-async function hasCursorCli(): Promise<boolean> {
-  try {
-    await resolveCli({
-      runtimeId: 'cursor',
-      binaryName: 'cursor-agent',
-      envOverride: 'O8_CURSOR_BIN',
-      extraEnvOverrides: ['CURSOR_AGENT_BIN'],
-    });
-    return true;
-  } catch (error) {
-    if (error instanceof CliNotFoundError) return false;
-    throw error;
-  }
-}
 
 function mapStatus(rawStatus: string): RuntimeSession['status'] {
   return rawStatus === 'completed' || rawStatus === 'finished' ? 'completed'
@@ -159,7 +143,7 @@ export const cursorRuntime: AgentRuntime = {
   capabilities,
 
   async discoverSessions(options = {}): Promise<RuntimeSession[]> {
-    if ((options.fresh ?? false) && !await hasCursorCli()) return [];
+    // Fresh means fresh session state, not a repeated installation probe.
     const owned = await getOwnedCursorFleetAdditions({ fresh: options.fresh ?? false }).catch((error) => {
       console.warn('[cursor-runtime] discoverSessions owned fleet failed:', error);
       return null;

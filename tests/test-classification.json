@@ -2079,6 +2079,14 @@
       ]
     },
     {
+      "path": "tests/preship-cleanup-residuals.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal"
+      ]
+    },
+    {
       "path": "tests/principal-authz.test.ts",
       "reasons": [
         "child-process",

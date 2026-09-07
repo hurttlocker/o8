@@ -5,9 +5,10 @@ import {
   adHocLaneTitle,
 } from '@/lib/orchestrator/display';
 import {
-  persistOrchestratorMissionState,
   readOrchestratorMissionState,
+  updateOrchestratorMissionState,
 } from '@/lib/orchestrator/store';
+import type { OrchestratorStateApiResponse } from '@/lib/orchestrator/types';
 import { ANSI_RE, CLAUDE_CLI_MODELS, CODEX_CLI_MODELS, GEMINI_CLI_MODELS, getOpenCodeModels, CLI_AGENTS, IGNORED_PORTS, LOCALHOST_RE } from '@/components/desktop/workspace-terminal/constants';
 import type {
   LocalhostPreview,
@@ -286,12 +287,17 @@ export function archivePacket(packetId: string | null | undefined): void {
   const missionState = readOrchestratorMissionState();
   const packet = missionState.packets.find((entry) => entry.id === packetId);
   if (!packet || packet.archivedAt) return;
-  void persistOrchestratorMissionState({
-    ...missionState,
-    packets: missionState.packets.map((entry) => (
-      entry.id === packetId ? { ...entry, archivedAt: new Date().toISOString() } : entry
-    )),
-  });
+  // Send only the archive intent. Posting this tab's cached mission can undo a
+  // sibling's stop while its worker is still waiting for kill confirmation.
+  void fetch('/api/orchestrator/state', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ packetId, updates: { archivedAt: new Date().toISOString() } }),
+  }).then(async (response) => {
+    if (!response.ok) return;
+    const payload = await response.json() as Partial<OrchestratorStateApiResponse>;
+    if (payload.mission) updateOrchestratorMissionState(payload.mission);
+  }).catch(() => { /* Keep the current cache when the archive write fails. */ });
 }
 
 /* ------------------------------------------------------------------ */
