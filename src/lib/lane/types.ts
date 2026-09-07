@@ -459,6 +459,8 @@ export type LaneEventVerb =
   | 'rules_applied'
   // Packet steer injected into an existing warm session. Payload: { packetId, source, message }
   | 'steered_packet'
+  // Accepted steered turn may register managed runs until its next lifecycle boundary.
+  | 'steer_run_admitted'
   // Design Mode follow-up reused the packet's warm lane. Payload: { packetId, elementSummary }
   | 'ui_loop_steered'
   // Design Mode steer did not settle before its writer deadline. Payload: { packetId, laneId, waitedMs }

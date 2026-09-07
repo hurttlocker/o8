@@ -84,6 +84,12 @@ vi.mock('@/lib/lane/review-quota-fallback', async () => {
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
 vi.mock('@/lib/command-center/snapshot', () => ({ invalidateCommandCenterSnapshotCaches: vi.fn() }));
 vi.mock('@/lib/mobile/inbox', () => ({ invalidateInboxCache: vi.fn() }));
+// These fixtures own Git and review state, not installed runtime discovery.
+// A host inventory probe can outlive the held-turn assertion and contaminate
+// the next test's serialized review slot.
+vi.mock('@/lib/runtime/inventory', () => ({
+  getRuntimeInventorySnapshot: vi.fn(async () => ({ agents: [], runtimes: [] })),
+}));
 
 const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-steer-settlement-data-'));
 writeFileSync(join(dataDir, 'ws-token'), 'steer-settlement-ws-token-0123456789\n', 'utf8');
