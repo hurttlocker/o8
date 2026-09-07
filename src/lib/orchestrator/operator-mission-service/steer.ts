@@ -17,6 +17,7 @@
 import { findLaneByPacket, setLaneStatus } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
 import { recordLaneEvent } from '@/lib/lane/events';
+import { packetSteerHoldReason } from '@/lib/lane/packet-stop-hold';
 import { rebindLaneSessionIfChanged } from '@/lib/lane/session-rebind';
 import {
   findMissionRegistryEntryByPacketId,
@@ -182,12 +183,16 @@ export async function steerPacket({
   }
 
   const steerSource = normalizeSource(source);
+  const holdReason = packetSteerHoldReason(packetId);
+  if (holdReason) {
+    throw new SteerPacketUnavailableError(`Packet cannot be steered while ${holdReason}.`);
+  }
   const steerStartedMs = Date.now();
   // From the first durable event onward, a thrown call can no longer prove
   // that no visible or provider-side effect landed. All failures below this
   // boundary are typed so routes can finalize a receipt before responding.
   try {
-    recordLaneEvent(lane.id, 'steered_packet', 'orchestrator', {
+    const steerEvent = recordLaneEvent(lane.id, 'steered_packet', 'orchestrator', {
       packetId,
       source: steerSource,
       message,
@@ -211,7 +216,9 @@ export async function steerPacket({
       // process spawn. A lane that went terminal mid-steer must not get a
       // fresh runtime editing its worktree.
       const freshLane = canTryOwnedResumeFallback ? findLaneByPacket(packetId) : null;
-      const laneStillLive = freshLane?.id === lane.id && freshLane.sessionKey === lane.sessionKey;
+      const laneStillLive = freshLane?.id === lane.id
+        && freshLane.sessionKey === lane.sessionKey
+        && !packetSteerHoldReason(packetId);
       const resumed = canTryOwnedResumeFallback && laneStillLive
         ? await resumeExitedOwnedCodexSession(lane.sessionKey, message)
         : canTryOwnedResumeFallback
@@ -256,10 +263,24 @@ export async function steerPacket({
     // unavailable steer must leave the alignment prompt armed for recovery.
     await markAlignmentResolved(packetId);
 
+    const acceptedHoldReason = packetSteerHoldReason(packetId);
+    if (acceptedHoldReason) {
+      throw new SteerPacketUnavailableError(
+        `Packet became ${acceptedHoldReason} while the steer was in flight.`, 'terminal',
+      );
+    }
+    const acceptedSessionKey = result.ok && result.sessionKey ? result.sessionKey : lane.sessionKey;
+    const acceptedLane = findLaneByPacket(packetId);
+    if (acceptedLane?.id !== lane.id || acceptedLane.sessionKey !== acceptedSessionKey) {
+      throw new SteerPacketUnavailableError('Packet session changed while the steer was in flight.', 'terminal');
+    }
     const updated = setLaneStatus(lane.id, 'running', 'orchestrator', 'steered_packet');
     if (!updated || updated.status !== 'running') {
       throw new SteerPacketUnavailableError(NO_STEERABLE_SESSION, 'terminal');
     }
+    recordLaneEvent(lane.id, 'steer_run_admitted', 'orchestrator', {
+      packetId, sessionKey: updated.sessionKey, clientMutationId, steerEventId: steerEvent.id,
+    });
 
     return { packetId, laneId: lane.id, note: steeredNote };
   } catch (error) {
