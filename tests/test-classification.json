@@ -2420,6 +2420,12 @@
       ]
     },
     {
+      "path": "tests/steer-managed-run-admission-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/steer-packet-owned-resume.test.ts",
       "reasons": [
         "child-process"
