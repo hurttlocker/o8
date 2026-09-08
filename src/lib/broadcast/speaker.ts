@@ -482,14 +482,19 @@ export class BroadcastSpeaker {
           for (const text of line.representedTexts) this.recentTexts.set(this.textKey(text), spokenAt);
           for (const fact of line.factKeys ?? []) this.recentFacts.set(fact, spokenAt);
           await speak(line.text);
-          if (line.id.startsWith('broadcast:')) {
-            const heardAt = new Date().toISOString();
-            sqlite.prepare(`
-              UPDATE broadcast_events
-              SET metadata_json = json_set(metadata_json, '$.speechHeardAt', ?)
-              WHERE id = ?
-            `).run(heardAt, line.id.slice('broadcast:'.length));
-          }
+          const heardAt = new Date().toISOString();
+          const recordHeard = sqlite.prepare(`
+            UPDATE broadcast_events
+            SET metadata_json = json_set(metadata_json, '$.speechHeardAt', ?)
+            WHERE id = ?
+          `);
+          // A condensed line also delivers the events it represents. Retain
+          // their receipts so an explicit catch-up cannot speak them again.
+          sqlite.transaction(() => {
+            for (const id of line.representedIds) {
+              if (id.startsWith('broadcast:')) recordHeard.run(heardAt, id.slice('broadcast:'.length));
+            }
+          })();
         } catch (error) {
           console.warn(`[broadcast-speaker] ${error instanceof Error ? error.message : String(error)}`);
         }
@@ -573,10 +578,11 @@ export class BroadcastSpeaker {
         this.cursor = page.cursor;
         hasMore = page.hasMore;
         for (const line of page.commentary) {
-          const normalSpeechEnabled = settings.broadcastVoice === 'on'
-            && !quiet
-            && (!initialPoll || this.options.includeExisting === true);
-          if (normalSpeechEnabled || line.priority) this.enqueue(line, sqlite, now.getTime());
+          // Priority means speak on demand, not replay historical requests
+          // on every startup. Bootstrap advances every page without speaking.
+          const maySpeak = !initialPoll || this.options.includeExisting === true;
+          const normalSpeechEnabled = settings.broadcastVoice === 'on' && !quiet;
+          if (maySpeak && (normalSpeechEnabled || line.priority)) this.enqueue(line, sqlite, now.getTime());
         }
       }
       this.commentaryInitialized = true;
