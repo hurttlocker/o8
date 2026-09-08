@@ -1112,6 +1112,12 @@
       ]
     },
     {
+      "path": "tests/broadcast-commentary-settings-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/broadcast-director-real-path.test.ts",
       "reasons": [
         "real-path"
