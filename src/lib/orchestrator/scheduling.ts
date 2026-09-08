@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 import { surfaceEdgeCases } from '@/lib/dispatch/edge-case-surfacer';
 import { computeReadBudget, resolveModelTier } from '@/lib/dispatch/read-budget';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
-import { getLane, findLaneByPacket, listLanes } from '@/lib/lane/registry';
+import { getLane, findLaneByPacket, listActiveLanes } from '@/lib/lane/registry';
 import { salvagedWorkBlockReason } from '@/lib/supervisor/heal-guard';
 import { isGitWorkTreeSync } from '@/lib/lane/repo-preflight';
 import { resolveOverlapGateSync, resolveParallelCapSync } from '@/lib/operator/defaults';
@@ -55,7 +55,7 @@ export interface DispatchLaunchBudget {
 
 export function buildRemainingLaunchBudget(): DispatchLaunchBudget {
   const parallelCap = resolveParallelCapSync();
-  const activeLanes = listLanes().filter((lane) => lane.status === 'launching' || lane.status === 'running');
+  const activeLanes = listActiveLanes().filter((lane) => lane.status === 'launching' || lane.status === 'running');
   const perRuntime: Partial<Record<OrchestratorRuntime, number>> = {};
   for (const runtime of Object.keys(RUNTIME_PARALLEL_CAP) as OrchestratorRuntime[]) {
     const cap = RUNTIME_PARALLEL_CAP[runtime];

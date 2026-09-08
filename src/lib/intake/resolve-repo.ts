@@ -5,27 +5,11 @@
 
 import 'server-only';
 
-import { execSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
-
-function getRemoteSlug(repoPath: string): string | null {
-  try {
-    const remote = execSync('git remote get-url origin', {
-      windowsHide: true,
-      cwd: repoPath,
-      timeout: 3000,
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
-    const match = remote.match(/[:/]([^/]+\/[^/.]+?)(?:\.git)?$/);
-    return match?.[1]?.toLowerCase() ?? null;
-  } catch {
-    return null;
-  }
-}
+import { getRemoteSlug } from './remote-slug';
 
 export function resolveRepoPath(repoFullName: string): string | null {
   const target = repoFullName.toLowerCase();

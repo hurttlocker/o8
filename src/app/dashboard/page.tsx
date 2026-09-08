@@ -40,7 +40,6 @@ import { DesktopCloseCoordinator } from '@/components/desktop/DesktopCloseCoordi
 import { useProjects, type ProjectRecord } from '@/components/desktop/repo-registry/useProjects';
 import type { CommandPaletteActionItem } from '@/components/desktop/CommandPalette';
 import { useCommandPaletteHotkey } from '@/components/desktop/use-command-palette-hotkey';
-import { SessionTimeline } from '@/components/desktop/SessionTimeline';
 import { DictationHost } from '@/components/desktop/dictation/DictationHost';
 import { BrowserPipCard, BROWSER_PIP_EVENT } from '@/components/desktop/BrowserPipCard';
 import { O8SpecPipCard, O8_SPEC_PIP_EVENT } from '@/components/desktop/O8SpecPipCard';
@@ -710,7 +709,6 @@ function DashboardInner() {
     activeNavSection, setActiveNavSection,
     settingsInitialTab,
     sidebarVisible, setSidebarVisible,
-    timelineVisible,
     desktopDraftInjection, setDesktopDraftInjection,
     thoughtsDraftInjection, setThoughtsDraftInjection,
     thoughtsImageInjection, setThoughtsImageInjection,
@@ -4402,10 +4400,10 @@ function DashboardInner() {
     workspaceTerminalResetNonceByTileId,
     workspacePreviews,
   ]);
-  const showAgentPanelFtux = activeFtuxMilestone === 'firstAgentSpawned';
+  const showCompletionFtux = activeFtuxMilestone === 'firstCompletion';
+  const showAgentPanelFtux = activeFtuxMilestone === 'firstAgentSpawned' || showCompletionFtux;
   const showCanvasFtux = activeFtuxMilestone === 'firstFileChange';
   const showApprovalFtux = activeFtuxMilestone === 'firstApproval';
-  const showCompletionFtux = activeFtuxMilestone === 'firstCompletion' && timelineVisible;
   const showMobileFtux = activeFtuxMilestone === 'firstMobilePrompt';
   const changedFileLabel = ftuxFirstChangedFile?.path.split('/').pop() ?? 'your latest edit';
   const mobilePromptBody = mobileRemoteHref.startsWith('http')
@@ -5017,7 +5015,7 @@ function DashboardInner() {
               alignSelf: 'flex-end',
               marginTop: 12,
               marginRight: 16,
-              marginBottom: timelineVisible ? 0 : 12,
+              marginBottom: 12,
               marginLeft: 16,
               minHeight: 44,
               padding: '12px 14px',
@@ -5087,44 +5085,6 @@ function DashboardInner() {
         ) : null}
       </AnimatePresence>
 
-      {/* ── Session Timeline — always mounted so toggling doesn't refetch. ── */}
-      <div style={{ position: 'relative', zIndex: 1, display: timelineVisible ? 'block' : 'none' }}>
-          <GuidedDiscoveryHalo active={showCompletionFtux} borderRadius={18} />
-          <GuidedDiscoveryCoachmark
-            visible={showCompletionFtux}
-            position="top-right"
-            title="Completed sessions land here"
-            body="The timeline keeps the latest run in view, and the activity feed on the left will start surfacing the related commit trail."
-            actions={[
-              {
-                label: 'Open session replay',
-                onClick: () => {
-                  dismissFtuxMilestone();
-                  openCanvasTab({
-                    id: 'timeline:session',
-                    kind: 'timeline',
-                    label: 'Session Replay',
-                    resourceId: 'session',
-                  });
-                },
-                emphasized: true,
-              },
-            ]}
-          />
-          <SessionTimeline
-            repoPath={globalRepoEntry?.localPath ?? activeWorkspace ?? null}
-            repoName={globalRepoEntry?.name ?? null}
-            onExpand={() => {
-              openCanvasTab({
-                id: 'timeline:session',
-                kind: 'timeline',
-                label: 'Session Replay',
-                resourceId: 'session',
-              });
-            }}
-          />
-        </div>
-
       {/* ── Main Layout (horizontal) ── */}
       <div data-mcp-scope="main-layout" style={{
         flex: 1,
@@ -5162,8 +5122,10 @@ function DashboardInner() {
             <GuidedDiscoveryCoachmark
               visible={showAgentPanelFtux}
               position="top-left"
-              title="Live agent sessions appear here"
-              body="When you dispatch work, Cortex expands this rail and keeps the active session card within reach."
+              title={showCompletionFtux ? 'Completed sessions are saved' : 'Live agent sessions appear here'}
+              body={showCompletionFtux
+                ? 'Open Archived in Chats to revisit finished work.'
+                : 'When you dispatch work, the sidebar keeps the active session card within reach.'}
             />
             {agentPanelElement}
           </div>

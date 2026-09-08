@@ -1,36 +1,13 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { NavSection } from '@/app/dashboard/types';
 import type { SettingsTab } from '@/components/desktop/SettingsPage';
-import {
-  readTimelineVisible,
-  subscribeTimelineVisible,
-  writeTimelineVisible,
-} from '@/lib/appearance/timeline';
-
-// Stable server snapshot — the timeline div is hidden until hydration finishes,
-// which avoids a mismatch against localStorage-driven client state. Hydration
-// runs the subscribe effect and a rerender flips the visibility to the real
-// value. Brief flicker on first paint is the price for correct SSR.
-const getTimelineServerSnapshot = () => false;
-
 export function useUIChrome() {
   // ── Navigation ──
   const [activeNavSection, setActiveNavSection] = useState<NavSection>('agents');
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>('general');
 
-  // ── Sidebar + Timeline ──
+  // ── Sidebar ──
   const [sidebarVisible, setSidebarVisible] = useState(true);
-  const timelineVisible = useSyncExternalStore(
-    subscribeTimelineVisible,
-    readTimelineVisible,
-    getTimelineServerSnapshot,
-  );
-  const setTimelineVisible = useCallback((
-    value: boolean | ((previous: boolean) => boolean),
-  ) => {
-    const next = typeof value === 'function' ? value(readTimelineVisible()) : value;
-    writeTimelineVisible(next);
-  }, []);
 
   // ── Overlay state ──
   const [searchOpen, setSearchOpen] = useState(false);
@@ -72,11 +49,9 @@ export function useUIChrome() {
     setSettingsInitialTab,
     handleOpenSettingsTab,
 
-    // Sidebar + Timeline
+    // Sidebar
     sidebarVisible,
     setSidebarVisible,
-    timelineVisible,
-    setTimelineVisible,
 
     // Overlays
     searchOpen,

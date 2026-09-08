@@ -1631,6 +1631,13 @@
       ]
     },
     {
+      "path": "tests/intake-remote-idle.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
       "path": "tests/lane-branch-binding-diff.test.ts",
       "reasons": [
         "child-process",
@@ -2229,6 +2236,13 @@
         "child-process",
         "git-cli",
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/repo-preflight-idle.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
       ]
     },
     {

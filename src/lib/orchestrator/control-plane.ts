@@ -202,8 +202,8 @@ function hasUnreconciledRuntimeExit(lane: Lane, events: LaneEvent[]): boolean {
 export function buildDomainLaneSummaries(packetIds?: ReadonlySet<string>): DomainLaneSummary[] {
   if (packetIds?.size === 0) return [];
   const mergePolicy = currentLaneMergePolicy();
-  return listLanes()
-    .filter((lane) => lane.packetId && (!packetIds || packetIds.has(lane.packetId)))
+  return listLanes(packetIds)
+    .filter((lane) => lane.packetId)
     .map((lane) => {
       const events = getLaneEvents(lane.id, 100);
       const recovery = recoveryInfoFromLaneEvents(events);

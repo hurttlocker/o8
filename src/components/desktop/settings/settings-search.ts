@@ -86,7 +86,6 @@ export const SETTINGS_SEARCH_REGISTRY: SettingsSearchEntry[] = [
   { tab: 'about', tabLabel: 'About', group: "Links", label: "GitHub", description: "hurttlocker/o8" },
   { tab: 'about', tabLabel: 'About', group: "Links", label: "Releases", description: "Changelog and downloads" },
   { tab: 'about', tabLabel: 'About', group: "Onboarding", label: "Replay onboarding", description: "Replays the welcome flow (intro, repos, runtimes)" },
-  { tab: 'appearance', tabLabel: 'Appearance', group: "Interface", label: "Session timeline", description: "Activity strip below the title bar" },
   { tab: 'appearance', tabLabel: 'Appearance', group: "Interface", label: "Window chrome", description: "Glass follows your wallpaper; solid is opaque (System/Glass/Solid)" },
   { tab: 'appearance', tabLabel: 'Appearance', group: "Palette", label: "Palette", description: "Selectable theme preview cards; founders-only palettes hidden unless founders", founders: true },
   { tab: 'billing', tabLabel: 'Plan & Billing', label: "Have a license key?", description: "Founding passes activate here \u2014 or just sign in (expander row)" },

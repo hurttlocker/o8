@@ -76,12 +76,14 @@ describe('mission-scoped persisted lane reconciliation', () => {
       laneSnapshots: [], runtimeTruth: [], domainLanes: all,
     });
     const events = vi.spyOn(registry, 'getLaneEvents');
+    const lanes = vi.spyOn(registry, 'listLanes');
 
     // Read the mission back through the same default entry point used by
     // headless reconciliation, not a helper supplied with a prefiltered list.
     const actual = reconcileOrchestratorControlPlaneState();
 
     expect(actual).toEqual(expected);
+    expect(lanes).toHaveBeenCalledExactlyOnceWith(new Set([first.packet.id, second.packet.id]));
     expect(events.mock.calls.map(([id]) => id)).toEqual([first.lane.id, second.lane.id]);
     expect(buildDomainLaneSummaries(new Set([first.packet.id]))[0]?.status).toBe('failed');
   });
