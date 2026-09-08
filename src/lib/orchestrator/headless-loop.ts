@@ -131,6 +131,14 @@ function countActivePackets(state: OrchestratorMissionState) {
   return state.packets.filter((packet) => packet.status === 'launching' || packet.status === 'running').length;
 }
 
+function hasWorktreeMaintenanceDemand(state: OrchestratorMissionState) {
+  return state.packets.some((packet) => !packet.archivedAt && packet.releaseState !== 'released' && (
+    packet.status === 'launching'
+    || packet.status === 'running'
+    || (!packet.operatorStopped && packet.queueState === 'queued' && packet.storageAdmission?.state === 'held')
+  ));
+}
+
 function hasPendingHeadlessWork(state: OrchestratorMissionState) {
   return state.packets.some((packet) => {
     if (packet.archivedAt || packet.releaseState === 'released') {
@@ -228,25 +236,30 @@ async function runRegistryMissionTicks(
   releasedPacketIds: string[],
 ) {
   let launched = 0;
+  let maintenanceNeeded = false;
   for (const entry of listActiveMissionRegistryEntries(currentMissionId)) {
-    const { result: entryLaunched } = await withMissionRegistryState(entry.id, async (fresh) => {
+    const { result: activity } = await withMissionRegistryState(entry.id, async (fresh) => {
       const withReleases = markReleasedPackets(fresh, releasedPacketIds);
       const reconciled = reconcileOrchestratorControlPlaneState(withReleases);
       const fanned = fanOutComparisonPackets(reconciled);
       const budget = buildRemainingLaunchBudget();
       if (!missionHasPendingHeadlessWork(fanned) || budget.maxLaunches <= 0) {
-        return { state: fanned, result: 0 };
+        return { state: fanned, result: { launched: 0, maintenanceNeeded: hasWorktreeMaintenanceDemand(fanned) } };
       }
       const dispatched = await runDispatchTick(fanned, {
         launchBudget: budget,
         enforceBootRecoveryGuard: true,
         missionArchived: entry.archivedAt !== null,
       });
-      return { state: dispatched, result: countLaunchedPackets(fanned, dispatched) };
+      return {
+        state: dispatched,
+        result: { launched: countLaunchedPackets(fanned, dispatched), maintenanceNeeded: hasWorktreeMaintenanceDemand(dispatched) },
+      };
     });
-    launched += entryLaunched;
+    launched += activity.launched;
+    maintenanceNeeded ||= activity.maintenanceNeeded;
   }
-  return launched;
+  return { launched, maintenanceNeeded };
 }
 
 async function executeHeadlessSprintTick(): Promise<HeadlessSprintTickResult> {
@@ -297,13 +310,18 @@ async function executeHeadlessSprintTick(): Promise<HeadlessSprintTickResult> {
       mission,
     } satisfies HeadlessSprintTickResult;
   });
-  const registryLaunched = await runRegistryMissionTicks(result.mission.missionId, releasedPacketIds);
+  const registryActivity = await runRegistryMissionTicks(result.mission.missionId, releasedPacketIds);
   const tickResult = {
     ...result,
-    launched: result.launched + registryLaunched,
+    launched: result.launched + registryActivity.launched,
   };
 
   const archivedCompleted = archiveCompletedLanes();
+  let maintenanceNeeded = tickResult.launched > 0
+    || hasWorktreeMaintenanceDemand(tickResult.mission)
+    || registryActivity.maintenanceNeeded
+    || archivedCompleted > 0
+    || releasedPacketIds.length > 0;
   if (archivedCompleted > 0) {
     console.log(`[headless] Archived ${archivedCompleted} completed lane${archivedCompleted === 1 ? '' : 's'}`);
   }
@@ -312,12 +330,16 @@ async function executeHeadlessSprintTick(): Promise<HeadlessSprintTickResult> {
     if (lastCompletedMissionId !== missionId) {
       lastCompletedMissionId = missionId;
       lastPruneAt = 0;
+      maintenanceNeeded = true;
       console.log(`[headless] Mission ${missionId} reached terminal state`);
     }
   } else if (lastCompletedMissionId === missionId) {
     lastCompletedMissionId = '';
   }
-  await pruneWorktreesIfDue(tickResult.mission);
+  // Dormant queued records still get reconciliation and recovery checks, but
+  // must not cause repeated filesystem sweeps. Keep maintenance for active
+  // work, terminal transitions and storage holds that cleanup can unblock.
+  if (maintenanceNeeded) await pruneWorktreesIfDue(tickResult.mission);
 
   return tickResult;
 }

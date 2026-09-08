@@ -158,7 +158,50 @@ describe('DesktopWebSocketProvider transcript delivery', () => {
     host.remove();
     document.head.querySelectorAll('meta').forEach((meta) => meta.remove());
     vi.useRealTimers();
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it('pauses only review scanning while hidden and keeps transcript delivery connected', () => {
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    act(() => root.render(createElement(TestTree, { observers: ['worker-a:primary'] })));
+    const socket = FakeWebSocket.instances[0]!;
+    act(() => socket.open());
+    expect(socket.sent[0]).toEqual({ type: 'review-visibility', visible: true });
+    const subscriptions = realtimeSubscribeFrames(socket).length;
+
+    visibility.mockReturnValue('hidden');
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    expect(socket.sent.filter((frame) => frame.type === 'review-visibility')).toEqual([
+      { type: 'review-visibility', visible: true },
+      { type: 'review-visibility', visible: false },
+    ]);
+    expect(realtimeSubscribeFrames(socket)).toHaveLength(subscriptions);
+    expect(socket.readyState).toBe(FakeWebSocket.OPEN);
+    act(() => socket.message(historyFrame('worker-a', 1, [{
+      id: 'hidden-answer', role: 'assistant', text: 'Arrived while hidden',
+    }])));
+    expect(transcriptStore.getSlice('worker-a').messages[0]?.id).toBe('hidden-answer');
+
+    visibility.mockReturnValue('visible');
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    expect(socket.sent.at(-1)).toEqual({ type: 'review-visibility', visible: true });
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  it('sends hidden review state before subscriptions on initial connect and reconnect', () => {
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    act(() => root.render(createElement(TestTree, { observers: [] })));
+    const first = FakeWebSocket.instances[0]!;
+    act(() => first.open());
+    expect(first.sent[0]).toEqual({ type: 'review-visibility', visible: false });
+    act(() => first.disconnect());
+    act(() => vi.advanceTimersByTime(1_000));
+    const second = FakeWebSocket.instances[1]!;
+    act(() => second.open());
+    expect(second.sent[0]).toEqual({ type: 'review-visibility', visible: false });
+    expect(realtimeSubscribeFrames(second).at(-1)?.subscriptions).toEqual([{ stream: 'global' }]);
   });
 
   it('fans realtime history frames into the transcript store without replay duplicates', () => {

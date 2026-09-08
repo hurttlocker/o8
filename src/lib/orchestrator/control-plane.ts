@@ -199,10 +199,11 @@ function hasUnreconciledRuntimeExit(lane: Lane, events: LaneEvent[]): boolean {
   return true;
 }
 
-export function buildDomainLaneSummaries(): DomainLaneSummary[] {
+export function buildDomainLaneSummaries(packetIds?: ReadonlySet<string>): DomainLaneSummary[] {
+  if (packetIds?.size === 0) return [];
   const mergePolicy = currentLaneMergePolicy();
   return listLanes()
-    .filter((lane) => lane.packetId)
+    .filter((lane) => lane.packetId && (!packetIds || packetIds.has(lane.packetId)))
     .map((lane) => {
       const events = getLaneEvents(lane.id, 100);
       const recovery = recoveryInfoFromLaneEvents(events);
@@ -251,22 +252,26 @@ async function buildRuntimeTruthSummaries(domainLanes: DomainLaneSummary[]): Pro
 export function reconcileOrchestratorControlPlaneState(
   state?: OrchestratorMissionState,
   runtimeTruth: OrchestratorRuntimeTruth[] = [],
-  domainLanes: DomainLaneSummary[] = buildDomainLaneSummaries(),
+  domainLanes?: DomainLaneSummary[],
 ) {
   const current = normalizeOrchestratorMissionState(state ?? readOrchestratorControlPlaneState());
   return reconcileOrchestratorMissionState(current, {
     laneSnapshots: [],
     runtimeTruth,
-    domainLanes,
+    // A mission consumes lane truth only by its own packet IDs. Reading every
+    // other mission's event history on each tick multiplies idle work by the
+    // saved fleet size without changing this mission's reconciliation.
+    domainLanes: domainLanes ?? buildDomainLaneSummaries(new Set(current.packets.map((packet) => packet.id))),
   });
 }
 
 export async function syncOrchestratorControlPlaneState(state?: OrchestratorMissionState) {
   await acquireLock();
   try {
-    const domainLanes = buildDomainLaneSummaries();
+    const current = normalizeOrchestratorMissionState(state ?? readOrchestratorControlPlaneState());
+    const domainLanes = buildDomainLaneSummaries(new Set(current.packets.map((packet) => packet.id)));
     const runtimeTruth = await buildRuntimeTruthSummaries(domainLanes).catch(() => []);
-    const reconciled = reconcileOrchestratorControlPlaneState(state, runtimeTruth, domainLanes);
+    const reconciled = reconcileOrchestratorControlPlaneState(current, runtimeTruth, domainLanes);
     return writeOrchestratorControlPlaneState(reconciled);
   } finally {
     releaseLock();
@@ -318,9 +323,10 @@ export async function withLockedState<T>(
       && 'lanes' in (result as object)
         ? (result as unknown as OrchestratorMissionState)
         : current;
-    const domainLanes = buildDomainLaneSummaries();
+    const mission = normalizeOrchestratorMissionState(basisForReconcile);
+    const domainLanes = buildDomainLaneSummaries(new Set(mission.packets.map((packet) => packet.id)));
     const runtimeTruth = await buildRuntimeTruthSummaries(domainLanes).catch(() => []);
-    const reconciled = reconcileOrchestratorControlPlaneState(basisForReconcile, runtimeTruth, domainLanes);
+    const reconciled = reconcileOrchestratorControlPlaneState(mission, runtimeTruth, domainLanes);
     const state = writeOrchestratorControlPlaneState(reconciled);
     return { result, state };
   } finally {
