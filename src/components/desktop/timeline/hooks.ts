@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { fetchOnce } from '@/lib/panel/fetch-cache';
+import { REALTIME_FALLBACK_REFRESH_MS, startDurableRefresh } from '@/lib/panel/durable-refresh';
 import type { AgentSummary } from '@/lib/fleet/types';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import type { TimelineSegment } from './types';
@@ -63,14 +64,14 @@ export function useTimelineData() {
 
   useEffect(() => {
     const initialLoad = window.setTimeout(() => { void fetchData(); }, INITIAL_TIMELINE_LOAD_DELAY_MS);
-    const handler = () => { fetchData(); };
-    const wsEvents = ['o8:lifecycle-reconcile'];
-    for (const e of wsEvents) window.addEventListener(e, handler);
-    const fallbackId = setInterval(fetchData, 300_000);
+    const stopRefresh = startDurableRefresh({
+      refresh: fetchData,
+      intervalMs: REALTIME_FALLBACK_REFRESH_MS,
+      events: ['o8:lifecycle-reconcile'],
+    });
     return () => {
       window.clearTimeout(initialLoad);
-      clearInterval(fallbackId);
-      for (const e of wsEvents) window.removeEventListener(e, handler);
+      stopRefresh();
     };
   }, [fetchData]);
 
@@ -93,14 +94,14 @@ export function useTimelineSessions() {
 
   useEffect(() => {
     const initialLoad = window.setTimeout(() => { void fetchSessions(); }, INITIAL_TIMELINE_LOAD_DELAY_MS);
-    const handler = () => { void fetchSessions(); };
-    const wsEvents = ['o8:inbox', 'o8:lifecycle-reconcile'];
-    for (const e of wsEvents) window.addEventListener(e, handler);
-    const fallbackId = setInterval(fetchSessions, 300_000);
+    const stopRefresh = startDurableRefresh({
+      refresh: fetchSessions,
+      intervalMs: REALTIME_FALLBACK_REFRESH_MS,
+      events: ['o8:inbox', 'o8:lifecycle-reconcile'],
+    });
     return () => {
       window.clearTimeout(initialLoad);
-      clearInterval(fallbackId);
-      for (const e of wsEvents) window.removeEventListener(e, handler);
+      stopRefresh();
     };
   }, [fetchSessions]);
 

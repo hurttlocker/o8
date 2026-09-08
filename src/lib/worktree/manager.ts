@@ -21,6 +21,7 @@
 
 import { access, lstat, realpath, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
+import { mayHaveGitRepositoryContext } from '@/lib/git/repository-context';
 import type {
   CleanupOptions,
   ConflictReport,
@@ -2491,6 +2492,7 @@ export class WorktreeManager {
   }
 
   private async gitWorktreeList(): Promise<Array<{ path: string; branch?: string }>> {
+    if (!await mayHaveGitRepositoryContext(this.repoRoot)) return [];
     try {
       const { stdout } = await execFileAsync('git', ['worktree', 'list', '--porcelain'], {
         windowsHide: true,

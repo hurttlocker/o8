@@ -136,6 +136,7 @@ import {
 import { OrchestratorThreadProjectError } from './lib/mobile/orchestrator-thread-project';
 import { persistOrchestratorThreadUserMessageFromWire } from './lib/ws-server/orchestrator-thread-send';
 import { getLiveReviewChangeSet } from './lib/review/live-changes';
+import { mayHaveGitRepositoryContext } from './lib/git/repository-context';
 import { deriveIdempotencyKey, withIdempotency } from './lib/orchestrator/idempotency-store';
 import { isManualThinkingEffort, type ManualThinkingEffort } from './lib/orchestrator/thinking-effort';
 import { withSessionRules } from './lib/orchestrator/session-rules-prompt';
@@ -8329,6 +8330,7 @@ const REVIEW_POLL_INTERVAL_MS = 10_000;
 const REVIEW_SCAN_CONCURRENCY = 3;
 let reviewRefreshInFlight = false;
 let reviewRefreshRerequest = false;
+let reviewRuntimeRefreshRequested = false;
 
 async function pruneOrphanedCodexWorktreeBranches(repoPath: string): Promise<number> {
   // `git worktree prune` only removes admin entries for deleted git-worktree
@@ -8448,16 +8450,18 @@ async function getReviewWatchTargets() {
   return targets;
 }
 
-function broadcastDiffStats() {
+async function broadcastDiffStats() {
   if (!hasReviewSubscribers()) return;
+  if (!await mayHaveGitRepositoryContext(REPO_ROOT)) return;
 
-  execFile('sh', ['-c', 'git diff --shortstat origin/main..HEAD 2>/dev/null; git diff --shortstat 2>/dev/null'], {
-    windowsHide: true,
-    cwd: REPO_ROOT,
-    encoding: 'utf-8',
-    timeout: 5000,
-  }, (err, stdout) => {
-    if (err || !stdout) return;
+  try {
+    const { stdout } = await execFileAsync('sh', ['-c', 'git diff --shortstat origin/main..HEAD 2>/dev/null; git diff --shortstat 2>/dev/null'], {
+      windowsHide: true,
+      cwd: REPO_ROOT,
+      encoding: 'utf-8',
+      timeout: 5000,
+    });
+    if (!stdout) return;
     const stat = stdout.trim();
 
     let additions = 0, deletions = 0, files = 0;
@@ -8475,7 +8479,9 @@ function broadcastDiffStats() {
     lastDiffHash = hash;
 
     broadcast({ channel: 'review', event: 'diff-stats', data: { kind: 'diff-stats', additions, deletions, files } });
-  });
+  } catch {
+    // Preserve the last snapshot through transient Git failures.
+  }
 }
 
 // #1484 — incremental review scan. The 10s poll used to run a git change-set
@@ -8546,13 +8552,15 @@ async function reviewTargetStatKey(workspacePath: string): Promise<string> {
 }
 
 async function broadcastReviewFileChanges() {
-  if (!hasReviewSubscribers()) return;
+  if (!hasReviewSubscribers()) return false;
 
   const targets = await getReviewWatchTargets();
   const liveTargetKeys = new Set(targets.map((target) => target.workspacePath));
+  let changed = false;
 
   for (const key of [...reviewTargetHashes.keys()]) {
     if (!liveTargetKeys.has(key)) {
+      changed = true;
       reviewTargetHashes.delete(key);
       // F20 — the stat-gate maps grow with worktree churn unless pruned with
       // their target.
@@ -8588,6 +8596,7 @@ async function broadcastReviewFileChanges() {
         return;
       }
       reviewTargetHashes.set(target.workspacePath, hash);
+      changed = true;
 
       broadcast({
         channel: 'review',
@@ -8622,6 +8631,7 @@ async function broadcastReviewFileChanges() {
       }
     } catch {
       // Ignore transient git failures on disappearing worktrees
+      changed = true;
     }
   };
 
@@ -8634,6 +8644,7 @@ async function broadcastReviewFileChanges() {
     }
   });
   await Promise.all(workers);
+  return changed;
 }
 
 function hasReviewSubscribers() {
@@ -8653,17 +8664,24 @@ async function runCoalescedReviewRefresh() {
   try {
     do {
       reviewRefreshRerequest = false;
-      await broadcastReviewFileChanges();
-      broadcastDiffStats();
-      scheduleRealtimeRuntimeRefresh({ reason: 'review.refresh', fresh: true });
-      scheduleRealtimeMobileInboxRefresh(250, true);
+      const refreshRuntime = reviewRuntimeRefreshRequested;
+      reviewRuntimeRefreshRequested = false;
+      const changed = await broadcastReviewFileChanges();
+      await broadcastDiffStats();
+      // An unchanged review timer is not evidence of a runtime change. Keep
+      // explicit filesystem signals and safety-scan discoveries immediate.
+      if (refreshRuntime || changed) {
+        scheduleRealtimeRuntimeRefresh({ reason: 'review.refresh', fresh: true });
+        scheduleRealtimeMobileInboxRefresh(250, true);
+      }
     } while (reviewRefreshRerequest);
   } finally {
     reviewRefreshInFlight = false;
   }
 }
 
-function scheduleReviewRefresh(delayMs = 500) {
+function scheduleReviewRefresh(delayMs = 500, refreshRuntime = true) {
+  reviewRuntimeRefreshRequested ||= refreshRuntime;
   if (diffDebounceTimer) clearTimeout(diffDebounceTimer);
   diffDebounceTimer = setTimeout(() => {
     diffDebounceTimer = null;
@@ -8772,7 +8790,7 @@ setInterval(() => {
 }, 30_000).unref?.();
 
 reviewPollTimer = setInterval(() => {
-  scheduleReviewRefresh(0);
+  scheduleReviewRefresh(0, false);
 }, REVIEW_POLL_INTERVAL_MS);
 if (reviewPollTimer.unref) reviewPollTimer.unref();
 

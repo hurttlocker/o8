@@ -2311,6 +2311,16 @@
       ]
     },
     {
+      "path": "tests/review-idle-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/review-stall-reconcile-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -2768,6 +2778,15 @@
       "path": "tests/workspace-parking-mode-real-path.test.ts",
       "reasons": [
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/worktree-conflict-idle-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree"
       ]
     },
     {
