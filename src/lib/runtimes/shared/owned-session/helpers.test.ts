@@ -110,19 +110,19 @@ describe('relativeAge', () => {
     for (const bad of ['', 'not-a-date', '2026-13-45T99:99:99Z', 'undefined']) {
       const rendered = relativeAge(bad);
       expect(rendered).not.toContain('NaN');
-      expect(rendered).toBe('just now');
+      expect(rendered).toBe('unknown');
     }
   });
 
   it('still buckets real timestamps', () => {
     const now = Date.now();
-    expect(relativeAge(new Date(now - 5_000).toISOString())).toBe('just now');
+    expect(relativeAge(new Date(now - 5_000).toISOString())).toBe('5s ago');
     expect(relativeAge(new Date(now - 5 * 60_000).toISOString())).toBe('5m ago');
     expect(relativeAge(new Date(now - 3 * 3_600_000).toISOString())).toBe('3h ago');
     expect(relativeAge(new Date(now - 2 * 86_400_000).toISOString())).toBe('2d ago');
   });
 
   it('treats a missing stamp the same as an unparseable one', () => {
-    expect(relativeAge(undefined)).toBe('just now');
+    expect(relativeAge(undefined)).toBe('unknown');
   });
 });

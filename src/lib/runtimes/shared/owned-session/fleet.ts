@@ -1,4 +1,5 @@
 import { signalBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
+import { timestampMillis } from '@/lib/util/relative-age';
 
 import {
   archiveOwnedSessionDir,
@@ -108,6 +109,7 @@ export function createFleetComputer({
         const runtimeSurface = buildRuntimeSurface(lifecycleContext, session, running);
         const lifecycle = runtimeSurface.lifecycle;
         const lastRun = latestRun(session);
+        const activityTimestamp = lastRun?.finishedAt ?? lastRun?.startedAt ?? session.createdAt;
         const lifecycleLabel = lifecycle?.availability === 'running'
           ? 'owned active'
           : lifecycle?.lastOutcome === 'failed'
@@ -129,7 +131,8 @@ export function createFleetComputer({
           branch: session.branch ?? 'detached',
           sessionKey: session.surfaceId,
           approvalStatus: 'none',
-          lastEventAt: relativeAge(lastRun?.finishedAt ?? lastRun?.startedAt ?? session.createdAt),
+          lastEventAt: relativeAge(activityTimestamp),
+          lastActivityAt: timestampMillis(activityTimestamp),
           context: {
             usedPercent: 0,
             trend: running ? 'rising' : 'stable',

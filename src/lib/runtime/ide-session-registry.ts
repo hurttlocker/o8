@@ -25,9 +25,9 @@ export interface IdeRuntimeSessionDescriptor {
 function canonicalizeSessionKey(runtime: 'codex' | 'claude-code', raw: string) {
   const trimmed = raw.trim();
   if (!trimmed) return null;
+  if (trimmed.startsWith(`${runtime}-owned:`)) return trimmed;
   if (runtime === 'codex' && (
     trimmed.startsWith('codex:')
-    || trimmed.startsWith('codex-owned:')
     || trimmed.startsWith('codex-discovered:')
     || trimmed.startsWith('codex-live:')
   )) {

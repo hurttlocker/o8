@@ -1545,6 +1545,15 @@
       ]
     },
     {
+      "path": "tests/fleet-status-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/footprint-load-route-path.test.ts",
       "reasons": [
         "child-process",
