@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { SettingsGroup, SettingsRow, ValuePill } from './grouped';
-import { APP_FONT_STACK } from './shared';
+import { APP_FONT_STACK, SettingsToggleButton } from './shared';
 import { fetchOperatorDefaults } from './operator-defaults-client';
 
 interface AttentionSettings {
+  broadcastCommentary: 'off' | 'interval';
   broadcastVoice: 'off' | 'on';
   broadcastCommentaryMaxPerHour: number;
   broadcastVoiceLullMinutes: number;
@@ -24,6 +25,7 @@ interface AttentionSettings {
 }
 
 const FALLBACK: AttentionSettings = {
+  broadcastCommentary: 'off',
   broadcastVoice: 'off',
   broadcastCommentaryMaxPerHour: 12,
   broadcastVoiceLullMinutes: 6,
@@ -128,8 +130,24 @@ export function SymonAttentionSettingsSection() {
       >
         <SettingsRow
           icon={<BellGlyph />}
+          label="Automatic AI commentary"
+          subtitle="Generate periodic activity summaries using your model allowance. Turning this off keeps messages and approvals available."
+          accessory={
+            <SettingsToggleButton
+              checked={settings.broadcastCommentary === 'interval'}
+              onChange={(next) => { void save('broadcastCommentary', next ? 'interval' : 'off'); }}
+              activeLabel="Automatic AI commentary"
+              inactiveLabel="Automatic AI commentary"
+              disabled={disabled}
+            />
+          }
+          disabled={disabled}
+          divider
+        />
+        <SettingsRow
+          icon={<BellGlyph />}
           label="Spoken updates"
-          subtitle="Let Symon tell you when subscribed work needs attention"
+          subtitle="Read commentary and subscribed work updates aloud. Does not turn AI commentary generation on or off."
           checked={enabled}
           onToggle={(next) => { void save('broadcastVoice', next ? 'on' : 'off'); }}
           disabled={disabled}

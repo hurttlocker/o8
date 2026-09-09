@@ -9,6 +9,8 @@
  *   if (isTauri()) { ... }
  */
 
+import { subscribeTauriEvent } from './events';
+
 // ── Detection ──
 
 /**
@@ -240,13 +242,7 @@ export async function peekPendingFileOpens(): Promise<string[]> {
 export async function onFileOpenRequest(handler: (paths: string[]) => void): Promise<(() => void) | null> {
   // Main-window only — this listener in the native browser-view ACL-denies.
   if (!canUseTauriEvents()) return null;
-  try {
-    const { listen } = await import('@tauri-apps/api/event');
-    return await listen<string[]>('file-open-request', (event) => handler(event.payload ?? []));
-  } catch (err) {
-    console.error('[tauri-bridge] listen file-open-request failed:', err);
-    return null;
-  }
+  return subscribeTauriEvent<string[]>('file-open-request', (event) => handler(event.payload ?? []));
 }
 
 // ── Notifications ──

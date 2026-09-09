@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, or, type SQL } from 'drizzle-orm';
+import { and, desc, eq, gte, or, sql, type SQL } from 'drizzle-orm';
 import {
   buildApprovalContextMatchPredicate, extractApprovalContextIds,
   isOrchestratorReviewApproval,
@@ -267,6 +267,13 @@ export function approvalSeverity(risk: ApprovalRisk): EventSeverity {
 }
 
 export function listApprovals(options: { status?: ApprovalRecord['status'] | 'all'; sessionKey?: string; projectId?: string | null } = {}) {
+  return listInboxApprovals(options);
+}
+
+function listInboxApprovals(
+  options: { status?: ApprovalRecord['status'] | 'all'; sessionKey?: string; projectId?: string | null },
+  predicate?: SQL,
+) {
   const { status = 'pending', sessionKey } = options;
   const projectId = options.projectId === undefined
     ? getActiveProjectScopeForRepoSync().projectId
@@ -281,74 +288,26 @@ export function listApprovals(options: { status?: ApprovalRecord['status'] | 'al
     }
   }
 
-  const db = getApprovalDb();
-
-  if (status === 'all' && sessionKey) {
-    const conditions = [eq(approvalsTable.sessionKey, sessionKey)];
-    if (projectId) conditions.push(eq(approvalsTable.projectId, projectId));
-    return db
-      .select()
-      .from(approvalsTable)
-      .where(and(...conditions))
-      .orderBy(desc(approvalsTable.createdAt))
-      .all()
-      .map((row) => mapApprovalRow(row)!)
-      .filter((approval): approval is ApprovalRecord => approval !== null)
-      .filter(belongsInOperatorInbox);
-  }
-
-  if (status !== 'all' && sessionKey) {
-    const conditions = [
-      eq(approvalsTable.status, status),
-      eq(approvalsTable.sessionKey, sessionKey),
-    ];
-    if (projectId) conditions.push(eq(approvalsTable.projectId, projectId));
-    return db
-      .select()
-      .from(approvalsTable)
-      .where(and(...conditions))
-      .orderBy(desc(approvalsTable.createdAt))
-      .all()
-      .map((row) => mapApprovalRow(row)!)
-      .filter((approval): approval is ApprovalRecord => approval !== null)
-      .filter(belongsInOperatorInbox);
-  }
-
-  if (status !== 'all') {
-    const conditions = [eq(approvalsTable.status, status)];
-    if (projectId) conditions.push(eq(approvalsTable.projectId, projectId));
-    return db
-      .select()
-      .from(approvalsTable)
-      .where(and(...conditions))
-      .orderBy(desc(approvalsTable.createdAt))
-      .all()
-      .map((row) => mapApprovalRow(row)!)
-      .filter((approval): approval is ApprovalRecord => approval !== null)
-      .filter(belongsInOperatorInbox);
-  }
-
-  const rows = projectId
-    ? db
-      .select()
-      .from(approvalsTable)
-      .where(eq(approvalsTable.projectId, projectId))
-      .orderBy(desc(approvalsTable.createdAt))
-      .all()
-    : db
-      .select()
-      .from(approvalsTable)
-      .orderBy(desc(approvalsTable.createdAt))
-      .all();
-
-  return rows
-    .map((row) => mapApprovalRow(row)!)
-    .filter((approval): approval is ApprovalRecord => approval !== null)
+  const conditions: SQL[] = predicate ? [predicate] : [];
+  if (status !== 'all') conditions.push(eq(approvalsTable.status, status));
+  if (sessionKey) conditions.push(eq(approvalsTable.sessionKey, sessionKey));
+  if (projectId) conditions.push(eq(approvalsTable.projectId, projectId));
+  return mapApprovalRows(getApprovalDb()
+    .select()
+    .from(approvalsTable)
+    .where(and(...conditions))
+    .orderBy(desc(approvalsTable.createdAt))
+    .all())
     .filter(belongsInOperatorInbox);
 }
 
 export function listUnsettledApprovalContinuations(options: { sessionKey?: string; projectId?: string | null } = {}) {
-  return listApprovals({ status: 'all', ...options }).filter((approval) => {
+  // Filter before decoding historical args, diffs, and audit trails. Malformed
+  // legacy JSON remains an absent resolution, just as mapApprovalRow treats it.
+  const unsettledResolution = sql`CASE WHEN json_valid(${approvalsTable.resolutionJson})
+    THEN json_extract(${approvalsTable.resolutionJson}, '$.continuationStatus')
+    END IN ('pending', 'outcome_unknown')`;
+  return listInboxApprovals({ status: 'all', ...options }, unsettledResolution).filter((approval) => {
     const unsettled = approval.resolution?.continuationStatus === 'pending'
       || approval.resolution?.continuationStatus === 'outcome_unknown';
     if (!unsettled || approval.continuation?.kind !== 'lane') return unsettled;

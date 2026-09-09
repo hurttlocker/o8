@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ensureV43ResourceLeaseSchema } from '@/lib/db/v43-resource-leases-migration';
 import { ensureV44BroadcastSchema } from '@/lib/db/v44-broadcast-migration';
@@ -63,11 +63,51 @@ function addLaneEvent(
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   delete process.env.O8_BROADCAST_TEST_SECRET;
   while (openDatabases.length > 0) openDatabases.pop()?.close();
 });
 
 describe('Broadcast event projection', () => {
+  it('skips the union scan when every source is caught up, without caching a negative result', () => {
+    const sqlite = fixture();
+    addLaneEvent(sqlite, 'first', 'message', { message: 'first' }, '2026-08-21T12:00:00.000Z');
+    const first = listBroadcastEvents({}, sqlite);
+    const prepare = vi.spyOn(sqlite, 'prepare');
+    const idle = listBroadcastEvents({ cursor: first.cursor }, sqlite);
+    expect(idle).toEqual({ schema: 'o8/broadcast.events/v1', events: [], cursor: first.cursor, hasMore: false });
+    expect(prepare.mock.calls.some(([sql]) => sql.includes('UNION ALL'))).toBe(false);
+
+    // A fresh sequence must be delivered even if its timestamp went backwards.
+    addLaneEvent(sqlite, 'next', 'message', { message: 'next' }, '2026-08-20T12:00:00.000Z');
+    expect(listBroadcastEvents({ cursor: idle.cursor }, sqlite).events.map((event) => event.detail)).toEqual(['next']);
+  });
+
+  it.each(['lease', 'approval_create', 'approval_event', 'broadcast'])('detects a new %s row after an empty poll', (source) => {
+    const sqlite = fixture();
+    sqlite.prepare('INSERT INTO approvals VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run('existing-approval', 'lane-one', 'packet-one', 'Existing', 'medium', 'pending', 1);
+    const cursor = listBroadcastEvents({}, sqlite).cursor;
+    expect(listBroadcastEvents({ cursor }, sqlite).events).toEqual([]);
+    if (source === 'lease') {
+      sqlite.prepare(`INSERT INTO resource_lease_events (id, resource, verb, actor, payload_json, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?)`).run('new', 'repo-tree:fixture', 'acquired', 'operator', '{}', '2026-08-21T12:00:00.000Z');
+    } else if (source === 'approval_create') {
+      sqlite.prepare('INSERT INTO approvals VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run('new', 'lane-one', 'packet-one', 'New', 'medium', 'pending', 2);
+    } else if (source === 'approval_event') {
+      sqlite.prepare('INSERT INTO approval_events VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run('new', 'existing-approval', 'approved', 'operator', null, '{}', 2);
+    } else {
+      sqlite.prepare(`INSERT INTO broadcast_events (id, actor, kind, text, metadata_json, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)`).run('new', 'operator', 'commentary', 'New line', '{}', '2026-08-21T12:00:00.000Z');
+    }
+    const next = listBroadcastEvents({ cursor }, sqlite);
+    expect(next.events).toHaveLength(1);
+    expect(next.cursor).not.toBe(cursor);
+    expect(next.hasMore).toBe(false);
+  });
+
   it('classifies the initial ledger kinds and recursively redacts secrets and home paths', () => {
     const sqlite = fixture();
     process.env.O8_BROADCAST_TEST_SECRET = 'environment-secret-value';

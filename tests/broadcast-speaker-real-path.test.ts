@@ -140,8 +140,62 @@ describe('Broadcast speaker real path', () => {
       'Queued line 5.',
     ]);
     expect(maxActive).toBe(1);
+    const delivered = getSqlite().prepare(`
+      SELECT json_extract(metadata_json, '$.speechHeardAt') AS heardAt
+      FROM broadcast_events WHERE text LIKE 'Queued line %' OR text = 'Priority line.'
+    `).all() as Array<{ heardAt: string | null }>;
+    expect(delivered).toHaveLength(6);
+    expect(delivered.every((row) => typeof row.heardAt === 'string')).toBe(true);
+    const catchUp = await loadCommentary(null);
+    expect(catchUp.commentary.filter((line) => line.text.startsWith('Queued line') || line.text === 'Priority line.'))
+      .toEqual(expect.arrayContaining(Array.from({ length: 6 }, () => expect.objectContaining({ suppressed: true }))));
     const empty = await loadCommentary(speaker.state().cursor);
     expect(empty.commentary).toEqual([]);
+  });
+
+  it('skips historical priority speech across startup pages and still delivers a fresh explicit request while muted', async () => {
+    const base = new Date('2026-08-01T12:00:00.000Z');
+    const sqlite = getSqlite();
+    for (let index = 0; index < 105; index += 1) {
+      appendBroadcastEvent({ kind: 'commentary', actor: 'symon', text: `Historical voice test ${index}.` }, {
+        sqlite,
+        now: new Date(base.getTime() + index),
+        metadata: { speechPriority: true, onDemand: true },
+      });
+    }
+    const speak = vi.fn(async () => undefined);
+    const loader = vi.fn(loadCommentary);
+    const settings = { ...voiceOn, broadcastVoice: 'off' as const, quietHours: 'on' as const,
+      quietStart: '08:00', quietEnd: '08:00' };
+    const speaker = new BroadcastSpeaker({ sqlite, speak, loadCommentary: loader });
+    await speaker.tick({ settings });
+    await speaker.flush();
+    expect(loader.mock.calls.length).toBeGreaterThan(1);
+    expect(speak).not.toHaveBeenCalled();
+    expect(speaker.state()).toMatchObject({ queued: 0, speaking: false });
+
+    const response = await sayRoute.POST(operatorRequest('http://localhost:3001/api/broadcast/say', {
+      text: 'Fresh requested voice check.',
+    }));
+    expect(response.status).toBe(200);
+    const { event } = await response.json() as { event: { id: string } };
+    await speaker.tick({ settings });
+    await speaker.flush();
+    expect(speak).toHaveBeenCalledExactlyOnceWith('Fresh requested voice check.');
+    const receipt = sqlite.prepare(`
+      SELECT json_extract(metadata_json, '$.speechHeardAt') AS heardAt FROM broadcast_events WHERE id = ?
+    `).get(event.id) as { heardAt: string };
+    expect(Number.isFinite(Date.parse(receipt.heardAt))).toBe(true);
+
+    const restarted = new BroadcastSpeaker({ sqlite, speak, loadCommentary });
+    await restarted.tick({ settings });
+    await restarted.flush();
+    expect(speak).toHaveBeenCalledTimes(1);
+    expect(sqlite.prepare("SELECT COUNT(*) AS count FROM broadcast_events WHERE text LIKE 'Historical voice test %'").get())
+      .toEqual({ count: 105 });
+
+    const deliveredPage = await loadCommentary(speaker.state().cursor);
+    expect(deliveredPage.commentary).toEqual([]);
   });
 
   it('coalesces a persisted merge, approval, and verdict burst without repeating or overlapping facts', async () => {
@@ -314,9 +368,7 @@ describe('Broadcast speaker real path', () => {
     });
     await speaker.tick({ settings: voiceOn });
     await speaker.flush();
-    // A priority line from the earlier route-path case is intentionally
-    // restart-safe. This case begins after that durable delivery completes.
-    spoken.length = 0;
+    expect(spoken).toEqual([]);
 
     const suffix = Date.now();
     const lane = createLane({

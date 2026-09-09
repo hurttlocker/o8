@@ -86,7 +86,7 @@ export function useFtuxMilestones({
   }, [activeFtuxMilestone]);
 
   useEffect(() => {
-    if (activeFtuxMilestone !== 'firstAgentSpawned') {
+    if (activeFtuxMilestone !== 'firstAgentSpawned' && activeFtuxMilestone !== 'firstCompletion') {
       return;
     }
 

@@ -943,6 +943,8 @@ interface ClientState {
   alive: boolean;
   terminalSessions: Set<string>;
   realtimeSubscriptions: RealtimeSubscription[];
+  /** Only gates review scans; durable subscriptions remain connected. */
+  reviewVisible: boolean;
   realtimeCapabilities: Set<RealtimeOptionalFeature>;
   realtimeNegotiation: 'pending' | 'legacy' | 'negotiated' | 'incompatible';
   realtimeClient?: Omit<RealtimeClientHello, 'type'>;
@@ -3641,6 +3643,17 @@ function handleClientMessage(client: ClientState, raw: string) {
     }
     case 'realtime-negotiate': {
       negotiateRealtimeProtocol(client, msg);
+      break;
+    }
+    case 'review-visibility': {
+      if (typeof msg.visible !== 'boolean' || msg.visible === client.reviewVisible) break;
+      client.reviewVisible = msg.visible;
+      if (client.reviewVisible) {
+        // Edits can arrive without watcher signals while every reviewer is
+        // hidden. Reopening must repair the entire review view immediately.
+        lastReviewFullSweepAt = 0;
+        scheduleReviewRefresh(0, false);
+      }
       break;
     }
     case 'realtime-subscribe': {
@@ -8224,6 +8237,7 @@ wss.on('connection', (ws, req) => {
     alive: true,
     terminalSessions: new Set(),
     realtimeSubscriptions: [],
+    reviewVisible: true,
     realtimeCapabilities: new Set(),
     realtimeNegotiation: 'pending',
     packetTailSubscriptions: new Set(),
@@ -8649,7 +8663,7 @@ async function broadcastReviewFileChanges() {
 
 function hasReviewSubscribers() {
   for (const client of clients.values()) {
-    if (client.ws.readyState !== WebSocket.OPEN) continue;
+    if (client.ws.readyState !== WebSocket.OPEN || !client.reviewVisible) continue;
     if (client.realtimeSubscriptions.some((subscription) => subscription.stream === 'global')) return true;
   }
   return false;
