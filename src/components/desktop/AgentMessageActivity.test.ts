@@ -13,6 +13,15 @@ function jsonResponse(body: unknown): Response {
   });
 }
 
+function messageFor(id: string, sequence: number, repo = '/workspace/o8'): AgentMessage {
+  return {
+    schema: 'o8/agents.message-event/v1', kind: 'message', sequence, id,
+    from: 'sender', to: 'receiver', repo, text: id,
+    refs: { laneId: null, packetId: null }, delivery: 'native',
+    deliveryNote: null, timestamp: new Date().toISOString(),
+  };
+}
+
 describe('AgentMessageActivity', () => {
   let host: HTMLDivElement;
   let root: Root;
@@ -29,6 +38,7 @@ describe('AgentMessageActivity', () => {
     await act(async () => root.unmount());
     host.remove();
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it('starts collapsed and keeps successful delivery quiet in the message metadata', async () => {
@@ -216,6 +226,152 @@ describe('AgentMessageActivity', () => {
       releases[0]?.(jsonResponse({ schema: 'o8/agents.exchanges/v1', messages: [] }));
       releases[1]?.(jsonResponse({ schema: 'o8/agents.presence/v1', agents: [] }));
       await Promise.resolve();
+    });
+  });
+
+  describe('response-body failures', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      window.localStorage.setItem('o8:agent-panel:agent-messages-collapsed', '0');
+    });
+
+    async function mount() {
+      await act(async () => {
+        root.render(createElement(AgentMessageActivity, {
+          repos: [{ name: 'o8', localPath: '/workspace/o8' }],
+        }));
+      });
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    }
+
+    it.each(['messages', 'agents'])('retains %s after a bad body while updating the healthy endpoint', async (failed) => {
+      let phase: 'initial' | 'invalid' | 'empty' = 'initial';
+      vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+        const field = String(input).startsWith('/api/agents/message?') ? 'messages' : 'agents';
+        if (phase === 'invalid' && field === failed) return new Response('{');
+        if (phase === 'empty') return jsonResponse({ [field]: [] });
+        return jsonResponse({ [field]: field === 'messages'
+          ? [messageFor(`${phase}-message`, phase === 'initial' ? 1 : 2)]
+          : [{ agentId: phase, name: `${phase}-agent`, repo: '/workspace/o8' }] });
+      }));
+      await mount();
+      expect(host.textContent).toContain('initial-message');
+      expect(host.textContent).toContain('initial-agent');
+
+      phase = 'invalid';
+      await act(async () => { window.dispatchEvent(new Event('o8:lifecycle-reconcile')); });
+      expect(host.textContent).toContain(failed === 'messages' ? 'initial-message' : 'invalid-message');
+      expect(host.textContent).toContain(failed === 'agents' ? 'initial-agent' : 'invalid-agent');
+
+      phase = 'empty';
+      await act(async () => { window.dispatchEvent(new Event('o8:lifecycle-reconcile')); });
+      expect(host.textContent).toBe('');
+    });
+
+    it.each(['collection', 'entry'])('retains good data when both payloads have an invalid %s shape and recovers', async (shape) => {
+      let valid = true;
+      vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).startsWith('/api/agents/message?')) {
+          return jsonResponse(valid ? { messages: [messageFor('saved-message', 1)] } : { messages: shape === 'collection' ? {} : [null] });
+        }
+        return jsonResponse(valid ? { agents: [] } : shape === 'collection' ? null : { agents: [{ repo: {} }] });
+      }));
+      await mount();
+      valid = false;
+      await act(async () => { window.dispatchEvent(new Event('o8:lifecycle-reconcile')); });
+      expect(host.textContent).toContain('saved-message');
+      valid = true;
+      await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+      expect(host.textContent).toContain('saved-message');
+    });
+
+    it.each(['network', 'unavailable', 'unauthorized', 'forbidden'])('handles %s responses without treating failure as a successful empty snapshot', async (failure) => {
+      let failed = false;
+      vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+        if (failed) {
+          if (failure === 'network') throw new TypeError('Network unavailable');
+          return new Response('', { status: failure === 'unavailable' ? 503 : failure === 'unauthorized' ? 401 : 403 });
+        }
+        return jsonResponse(String(input).startsWith('/api/agents/message?')
+          ? { messages: [messageFor('saved-message', 1)] }
+          : { agents: [{ agentId: 'saved', name: 'saved-agent', repo: '/workspace/o8' }] });
+      }));
+      await mount();
+      failed = true;
+      await act(async () => { window.dispatchEvent(new Event('o8:lifecycle-reconcile')); });
+      if (failure === 'unauthorized' || failure === 'forbidden') expect(host.textContent).toBe('');
+      else {
+        expect(host.textContent).toContain('saved-message');
+        expect(host.textContent).toContain('saved-agent');
+      }
+      failed = false;
+      await act(async () => { window.dispatchEvent(new Event('o8:lifecycle-reconcile')); });
+      expect(host.textContent).toContain('saved-message');
+    });
+
+    it('settles an aborted body read at the deadline and permits the next poll', async () => {
+      let stall = false;
+      const signals: AbortSignal[] = [];
+      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (stall) {
+          const signal = init?.signal as AbortSignal;
+          signals.push(signal);
+          return new Response(new ReadableStream({
+            start(controller) {
+              signal.addEventListener('abort', () => {
+                controller.error(new DOMException('The body read was aborted', 'AbortError'));
+              }, { once: true });
+            },
+          }));
+        }
+        return jsonResponse(String(input).startsWith('/api/agents/message?')
+          ? { messages: [messageFor('saved-message', 1)] } : { agents: [] });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      await mount();
+      stall = true;
+      await act(async () => { window.dispatchEvent(new Event('o8:lifecycle-reconcile')); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(12_000); });
+      expect(signals).toHaveLength(2);
+      expect(signals.every((signal) => signal.aborted)).toBe(true);
+      expect(host.textContent).toContain('saved-message');
+      stall = false;
+      await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+      expect(fetchMock).toHaveBeenCalledTimes(6);
+      expect(host.textContent).toContain('saved-message');
+    });
+
+    it('discards a late body from a disposed request without releasing the new request lock', async () => {
+      const pending: Array<(body: string) => void> = [];
+      const fetchMock = vi.fn(async () => new Response(new ReadableStream({
+        start(controller) {
+          pending.push((body) => {
+            controller.enqueue(new TextEncoder().encode(body));
+            controller.close();
+          });
+        },
+      })));
+      vi.stubGlobal('fetch', fetchMock);
+      await mount();
+      await act(async () => {
+        root.render(createElement(AgentMessageActivity, {
+          repos: [{ name: 'next', localPath: '/workspace/next' }],
+        }));
+      });
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+      await act(async () => {
+        pending[0](JSON.stringify({ messages: [messageFor('late-message', 1)] }));
+        pending[1](JSON.stringify({ agents: [] }));
+      });
+      expect(host.textContent).not.toContain('late-message');
+      await act(async () => { window.dispatchEvent(new Event('o8:lifecycle-reconcile')); });
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+      await act(async () => {
+        pending[2](JSON.stringify({ messages: [messageFor('current-message', 2, '/workspace/next')] }));
+        pending[3](JSON.stringify({ agents: [] }));
+      });
+      expect(host.textContent).toContain('current-message');
     });
   });
 });

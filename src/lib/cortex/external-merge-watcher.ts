@@ -23,8 +23,8 @@
  *
  * Cost shape:
  *   - First run on a cold cursor scans up to MAX_COMMITS_FIRST_RUN merges.
- *   - Steady state hits `git log` once per repo per 5 min and stops at the
- *     cursor — typically 0–2 commits to walk.
+ *   - Unchanged files-backed branch tips skip Git entirely. New or uncertain
+ *     tips use `git log` and stop at the cursor.
  */
 
 import 'server-only';
@@ -37,6 +37,7 @@ import { promisify } from 'node:util';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { appendDirectiveTrailer } from '@/lib/cortex/directive-merges';
 import { listRepos } from '@/lib/repos/registry';
+import { readPollBranchTip } from '@/lib/git/poll-branch-tip';
 
 const execFileAsync = promisify(execFile);
 
@@ -116,9 +117,9 @@ async function resolvePollRef(repoPath: string, defaultBranch: string): Promise<
       windowsHide: true,
       timeout: 5_000,
     });
-    return `origin/${defaultBranch}`;
+    return `refs/remotes/origin/${defaultBranch}`;
   } catch {
-    return defaultBranch;
+    return `refs/heads/${defaultBranch}`;
   }
 }
 
@@ -243,8 +244,10 @@ export async function ingestExternalMerges(): Promise<{
     if (!repoPath || !existsSync(repoPath)) continue;
 
     try {
-      const ref = await resolvePollRef(repoPath, repo.defaultBranch || 'main');
       const cursor = state.cursors[repoPath];
+      const branch = repo.defaultBranch || 'main';
+      if (cursor && await readPollBranchTip(repoPath, branch) === cursor) continue;
+      const ref = await resolvePollRef(repoPath, branch);
       const limit = cursor ? MAX_COMMITS_INCREMENTAL : MAX_COMMITS_FIRST_RUN;
       const recent = await readRecentMerges(repoPath, ref, limit);
       if (recent.length === 0) continue;

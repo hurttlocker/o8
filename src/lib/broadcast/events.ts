@@ -243,6 +243,13 @@ function rawRowsAfter(
   cursor: BroadcastCursor,
   limit: number,
 ): RawBroadcastRow[] {
+  // Five indexed head lookups avoid sorting/projecting the combined history on
+  // every idle poll. Read fresh each time; never cache away another process's event.
+  const head = currentCursor(sqlite);
+  if (Object.entries(head.positions).every(([source, position]) => (
+    position <= cursor.positions[source as keyof BroadcastCursor['positions']]
+  ))) return [];
+
   return sqlite.prepare(`
     SELECT * FROM (${EVENT_UNION_SQL})
     WHERE (raw_source = 'lane' AND ordinal > ?)

@@ -195,6 +195,13 @@
       ]
     },
     {
+      "path": "src/lib/cortex/external-merge-watcher.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
       "path": "src/lib/db/v41-workspace-retirement-migration.test.ts",
       "reasons": [
         "child-process"
