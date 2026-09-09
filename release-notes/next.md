@@ -1,0 +1,3 @@
+- Finish writing large CLI replies before exit, including piped JSON output and slow readers.
+- Preserve the selected model and reasoning effort when continuing owned workers, including local-model sessions.
+- Restore branch merge-gate loading and limit the reviewed CLI shutdown exception to the exact approved wrapper.
