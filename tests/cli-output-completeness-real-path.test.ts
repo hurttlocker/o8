@@ -4,7 +4,7 @@
  *
  * `process.stdout` is asynchronous when it is a pipe — Node writes what the OS
  * pipe accepts (64 KiB on macOS) and buffers the remainder in userspace. The
- * CLI's top-level `process.exit()` used to run before that buffer drained, so a
+ * CLI used to terminate before that buffer drained, so a
  * large payload exited 0 while the consumer saw exactly one pipe buffer of
  * truncated JSON. The same payload redirected to a regular file (a synchronous
  * fd) was complete, which is why this never showed up in file-based checks.
