@@ -36,7 +36,7 @@ export interface CurrentAssistantStreamState {
   /** Frozen reasoning duration — stamped once when the first answer token or
    *  tool call ends the thinking phase. */
   thinkingDurationMs?: number | null;
-  /** True for TOKEN-streaming backends (the o8 proxy rail): chunks are
+  /** True for token-streaming backends (the o8 proxy rail and ACP): chunks are
    *  verbatim slices of one continuous string and must be concatenated with
    *  no separator. Block-emitting backends (Claude REPL, Codex items) send
    *  complete segments where the '\n' join glue is correct — injecting '\n'
@@ -94,8 +94,8 @@ interface CreateOrchestratorMessageHandlerOptions {
   wsRef: RefLike<WebSocket | null>;
 }
 
-/** Backends whose text events are token slices, not complete blocks. */
-const VERBATIM_STREAM_BACKENDS = new Set(['o8']);
+/** ACP message/thought chunks and proxy deltas are verbatim text slices. */
+const VERBATIM_STREAM_BACKENDS = new Set(['o8', 'acp', 'hermes', 'opencode']);
 
 // RC1 seam 3 — stale-busy reconcile window. A subscribe/reconnect snapshot must
 // NOT downgrade a genuinely live 'busy' (the first-turn re-subscribe race: a
