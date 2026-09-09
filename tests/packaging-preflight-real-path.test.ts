@@ -29,8 +29,10 @@ function fixture() {
   return { root, app, server };
 }
 
-function putCache(server: string) {
-  const file = join(server, '.next/cache/webpack/server-production/3.pack');
+function putCache(server: string, kind: 'cache' | 'dev' = 'cache') {
+  const file = join(server, kind === 'dev'
+    ? '.next/dev/cache/turbopack/v16.3.4/00000098.sst'
+    : '.next/cache/webpack/server-production/3.pack');
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, 'compiler-only');
   return file;
@@ -41,11 +43,16 @@ afterEach(() => {
 });
 
 describe('packaging preflight through real filesystem and script entry points', () => {
+  it('keeps development startup from rewriting repository-authored agent instructions', () => {
+    expect(nextConfig.agentRules).toBe(false);
+  });
+
   it('uses the tracing matcher to exclude build cache without excluding runtime assets', () => {
     const patterns = nextConfig.outputFileTracingExcludes!['*'].map(pattern => join(sourceRoot, pattern));
     const excluded = picomatch(patterns, { dot: true, contains: true });
     for (const file of ['.next/cache/.tsbuildinfo', '.next/cache/webpack/server-production/3.pack',
-      '.next/cache/webpack/client-production/index.pack.old']) {
+      '.next/cache/webpack/client-production/index.pack.old',
+      '.next/dev/cache/turbopack/v16.3.4/00000098.sst', '.next/dev/server/app/page.js']) {
       expect(excluded(join(sourceRoot, file)), file).toBe(true);
     }
     for (const file of ['.next/server/app/page.js', '.next/static/chunks/main.js',
@@ -55,20 +62,20 @@ describe('packaging preflight through real filesystem and script entry points', 
     }
   });
 
-  it('rejects a cache directory and a dangling cache link without changing input', () => {
+  it.each(['cache', 'dev'] as const)('rejects a %s directory and a dangling link without changing input', (kind) => {
     const f = fixture();
-    const cacheFile = putCache(f.server);
-    expect(() => assertTauriExportInputsSafe(f.server)).toThrow('contains .next/cache');
+    const cacheFile = putCache(f.server, kind);
+    expect(() => assertTauriExportInputsSafe(f.server)).toThrow(`contains .next/${kind}`);
     expect(readFileSync(cacheFile, 'utf8')).toBe('compiler-only');
     const linked = fixture();
-    symlinkSync(join(linked.root, 'missing-cache'), join(linked.server, '.next/cache'), 'dir');
-    expect(() => assertTauriExportInputsSafe(linked.server)).toThrow('contains .next/cache');
+    symlinkSync(join(linked.root, 'missing-cache'), join(linked.server, '.next', kind), 'dir');
+    expect(() => assertTauriExportInputsSafe(linked.server)).toThrow(`contains .next/${kind}`);
   });
 
-  it('rejects traced cache before the actual exporter clears previous staging', () => {
+  it.each(['cache', 'dev'] as const)('rejects traced %s before the actual exporter clears previous staging', (kind) => {
     const f = fixture();
     const standalone = join(f.root, '.next/standalone');
-    const cacheFile = putCache(standalone);
+    const cacheFile = putCache(standalone, kind);
     const sentinel = join(f.root, 'out/keep.txt');
     mkdirSync(dirname(sentinel), { recursive: true });
     writeFileSync(sentinel, 'previous-output');
@@ -83,7 +90,7 @@ describe('packaging preflight through real filesystem and script entry points', 
       env: { NODE_ENV: 'test', PATH: process.env.PATH, HOME: f.root },
     });
     expect(result.status, result.stderr).toBe(1);
-    expect(result.stderr).toContain('contains .next/cache');
+    expect(result.stderr).toContain(`contains .next/${kind}`);
     expect(readFileSync(sentinel, 'utf8')).toBe('previous-output');
     expect(readFileSync(cacheFile, 'utf8')).toBe('compiler-only');
   });
@@ -110,10 +117,10 @@ describe('packaging preflight through real filesystem and script entry points', 
     expect(existsSync(archive)).toBe(true);
   });
 
-  it.each(['bundle', 'archive', 'cache', 'safe'] as const)(
+  it.each(['bundle', 'archive', 'cache', 'dev', 'safe'] as const)(
     'guards the actual signing entry point for %s input before platform operations', (scenario) => {
       const f = fixture();
-      if (scenario === 'cache') putCache(f.server);
+      if (scenario === 'cache' || scenario === 'dev') putCache(f.server, scenario);
       const log = join(f.root, 'calls.jsonl');
       // Simulate only process/platform edges. The actual signing entry point,
       // size policy, cache guard, stat reads and temp cleanup execute unchanged.
@@ -147,7 +154,7 @@ export function execFileSync(command, args) {
         expect(result.stderr).toContain('PLATFORM_BOUNDARY_REACHED');
         expect(calls.at(-1)?.command).toBe('codesign');
       } else {
-        expect(result.stderr).toContain(scenario === 'cache' ? 'contains .next/cache'
+        expect(result.stderr).toContain(scenario === 'cache' || scenario === 'dev' ? `contains .next/${scenario}`
           : scenario === 'bundle' ? 'appBundleBytes' : 'updaterArchiveBytes');
         expect(calls.every(call => ['cat', 'du', 'tar'].includes(call.command))).toBe(true);
       }

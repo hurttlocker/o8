@@ -13,10 +13,12 @@ export function assertTauriExportInputsSafe(standaloneRoot) {
     );
   }
 
-  const cache = join(standaloneRoot, '.next', 'cache');
   // lstat also catches dangling links. Never silently package or delete a
-  // traced cache: reject before the exporter clears its previous output.
-  if (lstatSync(cache, { throwIfNoEntry: false })) {
-    throw new Error('standalone build contains .next/cache; exclude build cache from tracing and rebuild before packaging');
+  // traced cache or development tree: reject before clearing previous output.
+  for (const directory of ['cache', 'dev']) {
+    const generated = join(standaloneRoot, '.next', directory);
+    if (lstatSync(generated, { throwIfNoEntry: false })) {
+      throw new Error(`standalone build contains .next/${directory}; exclude build-only files from tracing and rebuild before packaging`);
+    }
   }
 }

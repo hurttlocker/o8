@@ -2,6 +2,8 @@ import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   output: 'standalone',
+  // Repository instructions are maintained by the operator, not dev startup.
+  agentRules: false,
   outputFileTracingRoot: __dirname,
   outputFileTracingExcludes: {
     // sharp is Next's image optimizer, pulled in transitively. `images.unoptimized`
@@ -15,6 +17,7 @@ const nextConfig: NextConfig = {
       // Build cache can enter route traces through filesystem reads. Keep it
       // available to the compiler, but never copy it into the runtime bundle.
       './.next/cache/**/*',
+      './.next/dev/**/*',
       '**/node_modules/sharp/**/*',
       '**/node_modules/@img/**/*',
     ],
