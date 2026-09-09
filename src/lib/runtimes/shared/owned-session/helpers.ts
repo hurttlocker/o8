@@ -60,22 +60,7 @@ export function shortHome(value: string) {
   return value.replace(`${os.homedir()}/`, '~/');
 }
 
-export function relativeAge(timestampIso?: string) {
-  if (!timestampIso) return 'just now';
-  const parsed = new Date(timestampIso).getTime();
-  // An unparseable stamp made every comparison below NaN, so all four guards
-  // fell through and the surface rendered "NaNd ago". Treat it like a missing
-  // stamp -- the same answer, and an honest one (#1859).
-  if (Number.isNaN(parsed)) return 'just now';
-  const ageMs = Math.max(0, Date.now() - parsed);
-  const minute = 60_000;
-  const hour = 60 * minute;
-  const day = 24 * hour;
-  if (ageMs < minute) return 'just now';
-  if (ageMs < hour) return `${Math.max(1, Math.round(ageMs / minute))}m ago`;
-  if (ageMs < day) return `${Math.max(1, Math.round(ageMs / hour))}h ago`;
-  return `${Math.max(1, Math.round(ageMs / day))}d ago`;
-}
+export { relativeAge } from '@/lib/util/relative-age';
 
 export function lifecycleAvailabilityLabel(availability?: RuntimeSurfaceLifecycle['availability']) {
   switch (availability) {
