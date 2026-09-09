@@ -30,6 +30,14 @@ describe('branch merge gate script', () => {
     expect(match?.[1]?.startsWith('file://')).toBe(true);
   });
 
+  it('loads the existing server bootstrap before importing the branch gate', () => {
+    const script = branchGateScript('/repo');
+    const bootstrap = `await import(${JSON.stringify(pathToFileURL(path.join('/repo', 'scripts', 'register-server-only-stub.mjs')).href)})`;
+    const gate = `await import(${JSON.stringify(pathToFileURL(path.join('/repo', 'src', 'lib', 'lane', 'merge-gate.ts')).href)})`;
+    expect(script.indexOf(bootstrap)).toBeGreaterThan(-1);
+    expect(script.indexOf(bootstrap)).toBeLessThan(script.indexOf(gate));
+  });
+
   it('actually runs from a directory that is not the repo', () => {
     // The point of the whole exercise: assertions on the generated STRING miss
     // any other syntax error, and this path is fail-closed, so an unrunnable
