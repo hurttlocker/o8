@@ -1,0 +1,5 @@
+- Reduce idle background work with narrower history reads and suspended hidden review scans.
+- Exclude compiler caches from the app bundle and reject oversized packages before signing and notarization.
+- Make automatic AI commentary optional, suppress unnecessary startup speech, and retire the unused session timeline from desktop navigation.
+- Preserve spacing and Markdown in streamed replies, and correct fleet session identity and activity-age reporting.
+- Update framework, provider, and test dependencies while preserving local build and test compatibility fixes.
