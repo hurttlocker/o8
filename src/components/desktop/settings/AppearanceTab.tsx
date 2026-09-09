@@ -1,21 +1,14 @@
 'use client';
 
-import { useSyncExternalStore } from 'react';
 import { useTheme, type ReduceTransparency } from '@/lib/theme/context';
 import { useEntitlement } from '@/lib/entitlement/context';
 import type { ThemePalette } from '@/lib/theme/registry';
-import {
-  readTimelineVisible,
-  subscribeTimelineVisible,
-  writeTimelineVisible,
-} from '@/lib/appearance/timeline';
 import {
   APP_FONT_STACK,
   RAMS_ACCENT,
   RAMS_HAIRLINE_SOFT,
   RAMS_INK_QUIET,
   RAMS_CONTROL_ACTIVE_BORDER,
-  ActivityIcon,
   LayersIcon,
   SettingsSegmented,
   TabHeading,
@@ -203,20 +196,6 @@ function PalettePreviewCard({
 const GLASS_LOCK_HINT = 'Locked by All glass — dark glass while it’s on';
 const GLASS_LOCK_OPACITY = 0.45;
 
-// ── Session Timeline visibility toggle ──────────────────────────────────────
-
-const noopSubscribe = () => () => {};
-const falseSnapshot = () => false;
-
-function useTimelineVisible(): [boolean, (next: boolean) => void] {
-  const visible = useSyncExternalStore(
-    typeof window !== 'undefined' ? subscribeTimelineVisible : noopSubscribe,
-    typeof window !== 'undefined' ? readTimelineVisible : falseSnapshot,
-    falseSnapshot,
-  );
-  return [visible, writeTimelineVisible];
-}
-
 // ── Appearance Tab ──────────────────────────────────────────────────────────
 
 export function AppearanceTab() {
@@ -229,7 +208,6 @@ export function AppearanceTab() {
     workspaceGlass,
     setWorkspaceGlass,
   } = useTheme();
-  const [timelineVisible, setTimelineVisible] = useTimelineVisible();
   const { founder, plan } = useEntitlement();
   const foundersMode = founder !== null || plan === 'founder';
   // Free keeps the core o8 theme (light/dark); founders-flagged palettes are
@@ -290,16 +268,8 @@ export function AppearanceTab() {
       <section style={{ marginTop: 36 }}>
         <SettingsGroup
           header="Interface"
-          footnote="The session timeline is the live 24-hour activity strip below the title bar — every Codex and Claude session on this machine, red where errors showed up. Solid chrome swaps the translucent glass for opaque panels: easier on the eyes if the wallpaper bleed reads busy or low-contrast."
+          footnote="Solid chrome replaces translucent glass with opaque panels when wallpaper makes the interface harder to read."
         >
-          <SettingsRow
-            icon={<ActivityIcon />}
-            label="Session timeline"
-            subtitle="Activity strip below the title bar"
-            checked={timelineVisible}
-            onToggle={setTimelineVisible}
-            divider
-          />
           <SettingsRow
             icon={<LayersIcon />}
             label="Window chrome"

@@ -370,6 +370,9 @@ describe('headless mission registry dispatch', () => {
       return { state: current, result: null };
     });
 
+    // The launcher above is a fixture, so there is no owned runtime process
+    // from which the production stop path can obtain an exit receipt.
+    retrySalvageKillSeam.forceConfirmed = true;
     const retryResult = parseJsonResult<{ reset?: boolean }>(await handleRetryPacket({
       packetId: packetId!,
       reason: 'retry archived packet',
@@ -537,6 +540,7 @@ describe('headless mission registry dispatch', () => {
     setLaneStatus(staleLane.id, 'failed', 'system', 'older_committed_result');
     setLaneStatus(currentLane.id, 'running', 'system', 'current_live_generation');
 
+    retrySalvageKillSeam.forceConfirmed = true;
     const retry = parseJsonResult<{ reset?: boolean; salvaged?: boolean }>(await handleRetryPacket({ packetId }));
     expect(retry.reset).toBe(true);
     expect(retry.salvaged).not.toBe(true);

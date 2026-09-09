@@ -17,6 +17,7 @@ import {
 import { getAllEvents, getLaneEvents, listLanes } from '@/lib/lane/registry';
 import type { Lane, LaneEvent } from '@/lib/lane/types';
 import { debouncedSessionStatus } from '@/lib/terminal-status/debounce';
+import { relativeAge, timestampMillis } from '@/lib/util/relative-age';
 import {
   compareTerminalStatusEvidence,
   resolveTerminalStatusEvidence,
@@ -69,18 +70,6 @@ function inventoryHasOwnedOrLiveSession(snapshot: FleetSnapshot): boolean {
     agent.runtimeSurface?.ownership === 'owned'
     || ['running', 'waiting', 'reviewing', 'huddling'].includes(agent.status)
   ));
-}
-
-function relativeAge(timestamp: Date) {
-  const delta = Math.max(0, Date.now() - timestamp.getTime());
-  const minute = 60_000;
-  const hour = 60 * minute;
-  const day = 24 * hour;
-
-  if (delta < minute) return 'just now';
-  if (delta < hour) return `${Math.max(1, Math.round(delta / minute))}m ago`;
-  if (delta < day) return `${Math.max(1, Math.round(delta / hour))}h ago`;
-  return `${Math.max(1, Math.round(delta / day))}d ago`;
 }
 
 function shortenHomePath(filePath: string) {
@@ -239,7 +228,7 @@ function mapRuntimeSessionToAgent(
     sessionKey: session.sessionKey,
     approvalStatus: 'none',
     lastEventAt: relativeAge(session.lastActivityAt),
-    lastActivityAt: session.lastActivityAt.getTime(),
+    lastActivityAt: timestampMillis(session.lastActivityAt),
     context: {
       usedPercent: contextUsed,
       trend: contextUsed >= 60 ? 'rising' : 'stable',
@@ -355,8 +344,8 @@ function mapIdeGhostRuntimeTabToAgent(session: IdeRuntimeSessionDescriptor): Age
     branch: 'unknown',
     sessionKey: session.sessionKey,
     approvalStatus: 'none',
-    lastEventAt: relativeAge(new Date(session.savedAt ?? Date.now())),
-    lastActivityAt: Number.isNaN(parsedLastActivity) ? Date.now() : parsedLastActivity,
+    lastEventAt: relativeAge(session.savedAt),
+    lastActivityAt: timestampMillis(session.savedAt),
     context: {
       usedPercent: 0,
       trend: 'stable',

@@ -204,4 +204,43 @@ describe('review refresh through the real WebSocket server', () => {
     releaseSnapshot?.();
     await waitFor(() => freshReads() >= before + 2, 'second explicit fresh snapshot');
   });
+
+  it('suspends hidden-only review scans but keeps the connection and explicit refresh alive', async () => {
+    socket!.send(JSON.stringify({ type: 'review-visibility', visible: false }));
+    // Let the already-owned diff complete before counting quiescent work.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const before = diffCalls();
+    writeFileSync(join(reviewRoot, 'hidden.txt'), 'edit while hidden\n');
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    expect(diffCalls()).toBe(before);
+    expect(socket!.readyState).toBe(WebSocket.OPEN);
+    socket!.send(JSON.stringify({ type: 'ping' }));
+    await waitFor(() => frames.some((frame) => frame.channel === 'pong'), 'hidden connection pong');
+    const readsBefore = freshReads();
+    await refresh();
+    await waitFor(() => freshReads() > readsBefore, 'explicit refresh while hidden');
+
+    socket!.send(JSON.stringify({ type: 'review-visibility', visible: true }));
+    await waitFor(() => frames.some((frame) => frame.data?.changedFiles?.some((file) => file.path === 'hidden.txt')),
+      'reopen catches hidden edit');
+    expect(diffCalls()).toBeGreaterThan(before);
+  });
+
+  it('does not let a hidden desktop suppress a second visible or legacy global subscriber', async () => {
+    socket!.send(JSON.stringify({ type: 'review-visibility', visible: false }));
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const before = diffCalls();
+    const second = new WebSocket(`ws://127.0.0.1:${wsPort}/ws?token=${token}`);
+    try {
+      await once(second, 'open');
+      // Older clients and mobile do not send a visibility hint. Invalid input
+      // must not silently turn their default-visible subscription off.
+      second.send(JSON.stringify({ type: 'review-visibility', visible: 'false' }));
+      second.send(JSON.stringify({ type: 'realtime-subscribe', subscriptions: [{ stream: 'global' }] }));
+      await waitFor(() => diffCalls() > before, 'second subscriber review scan');
+    } finally {
+      second.terminate();
+      socket!.send(JSON.stringify({ type: 'review-visibility', visible: true }));
+    }
+  });
 });

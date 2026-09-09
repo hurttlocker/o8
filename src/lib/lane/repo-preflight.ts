@@ -1,6 +1,24 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { isOrchestratorHomePath } from '@/lib/orchestrator/repo-path';
+
+function couldContainGitWorkTree(repoPath: string): boolean {
+  // Explicit Git environment may locate metadata outside the cwd ancestry.
+  if (process.env.GIT_DIR || process.env.GIT_WORK_TREE) return true;
+  try {
+    let directory = realpathSync(repoPath);
+    for (;;) {
+      if (existsSync(join(directory, '.git'))
+        || (existsSync(join(directory, 'HEAD')) && existsSync(join(directory, 'objects')))) return true;
+      const parent = dirname(directory);
+      if (parent === directory) return false;
+      directory = parent;
+    }
+  } catch {
+    return true; // An uncertain filesystem probe still gets Git's verdict.
+  }
+}
 
 /**
  * #1551 — repo-path preflight shared by BOTH orchestrator spawn paths.
@@ -21,6 +39,9 @@ export function isGitWorkTreeSync(repoPath: string): boolean {
   // the explicit `stdio` keeps git's stderr piped (and discarded) for the
   // folder-exists-but-isn't-a-repo case, which the catch below already handles.
   if (!repoPath || !existsSync(repoPath)) return false;
+  // Queued non-repository folders are checked on every recovery tick. A fresh
+  // metadata check avoids spawning Git for them and detects a later git init.
+  if (!couldContainGitWorkTree(repoPath)) return false;
   try {
     return execFileSync('git', ['-C', repoPath, 'rev-parse', '--is-inside-work-tree'], {
       windowsHide: true,

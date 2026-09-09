@@ -25,10 +25,13 @@
  * AFTER hydration, never before. Inert outside Tauri. Mounted once.
  */
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { isTauri, onFileOpenRequest, takePendingFileOpens } from '@/lib/tauri/bridge';
 
 export function FileOpenBridge({ onOpenFile }: { onOpenFile?: (path: string) => void }) {
+  const onOpenFileRef = useRef(onOpenFile);
+  useEffect(() => { onOpenFileRef.current = onOpenFile; }, [onOpenFile]);
+
   useEffect(() => {
     if (!isTauri()) return;
     let disposed = false;
@@ -39,7 +42,7 @@ export function FileOpenBridge({ onOpenFile }: { onOpenFile?: (path: string) => 
     const drain = () => {
       void takePendingFileOpens().then((paths) => {
         if (disposed) return;
-        paths.forEach((path) => { if (path) onOpenFile?.(path); });
+        paths.forEach((path) => { if (path) onOpenFileRef.current?.(path); });
       });
     };
     drain();
@@ -51,7 +54,7 @@ export function FileOpenBridge({ onOpenFile }: { onOpenFile?: (path: string) => 
       disposed = true;
       unlisten?.();
     };
-  }, [onOpenFile]);
+  }, []);
 
   return null;
 }

@@ -51,7 +51,6 @@ import {
   MermaidViewer,
   PortPreview,
   ReadmeViewer,
-  TimelineExpanded,
   TranscriptViewer,
 } from './canvas/index';
 import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
@@ -466,7 +465,8 @@ const TabContent = memo(function TabContent({
           case 'welcome':
             return <CanvasEmpty selectedRepo={selectedRepo} mode="welcome" />;
           case 'timeline':
-            return <TimelineExpanded />;
+            // Old saved tabs must not remount the retired timeline or its polling.
+            return <CanvasEmpty selectedRepo={selectedRepo} mode="idle" />;
           case 'audit-log':
             return <AuditLogPanel />;
           case 'mermaid':

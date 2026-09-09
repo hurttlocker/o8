@@ -102,31 +102,49 @@ const workspaceChangesControllers = new Map<string, WorkspaceChangesController>(
 const activeWorkspaceChangesControllers = new Map<WorkspaceChangesController, number>();
 let workspaceChangesFallbackId: number | null = null;
 let workspaceChangesRefreshQueued = false;
+let workspaceChangesRefreshPending = false;
+let workspaceChangesRefreshInFlight = false;
 
 function refreshActiveWorkspaceChanges() {
   return Promise.all([...activeWorkspaceChangesControllers.keys()].map((controller) => controller.refresh()));
 }
 
 function scheduleActiveWorkspaceChangesRefresh() {
-  if (workspaceChangesRefreshQueued) return;
+  if (activeWorkspaceChangesControllers.size === 0) return;
+  workspaceChangesRefreshPending = true;
+  if (document.visibilityState === 'hidden' || workspaceChangesRefreshInFlight || workspaceChangesRefreshQueued) return;
   workspaceChangesRefreshQueued = true;
   queueMicrotask(() => {
     workspaceChangesRefreshQueued = false;
-    void refreshActiveWorkspaceChanges();
+    // Visibility or the last subscriber can change before this microtask runs.
+    if (!workspaceChangesRefreshPending || document.visibilityState === 'hidden') return;
+    workspaceChangesRefreshPending = false;
+    workspaceChangesRefreshInFlight = true;
+    void refreshActiveWorkspaceChanges().finally(() => {
+      workspaceChangesRefreshInFlight = false;
+      if (workspaceChangesRefreshPending) scheduleActiveWorkspaceChangesRefresh();
+    });
   });
+}
+
+function reconcileWorkspaceChangesVisibility() {
+  if (workspaceChangesRefreshPending) scheduleActiveWorkspaceChangesRefresh();
 }
 
 function syncWorkspaceChangesLifecycle() {
   if (typeof window === 'undefined') return;
   if (activeWorkspaceChangesControllers.size > 0 && workspaceChangesFallbackId === null) {
     window.addEventListener('o8:lifecycle-reconcile', scheduleActiveWorkspaceChangesRefresh);
+    document.addEventListener('visibilitychange', reconcileWorkspaceChangesVisibility);
     workspaceChangesFallbackId = window.setInterval(scheduleActiveWorkspaceChangesRefresh, 300_000);
     return;
   }
   if (activeWorkspaceChangesControllers.size === 0 && workspaceChangesFallbackId !== null) {
     window.removeEventListener('o8:lifecycle-reconcile', scheduleActiveWorkspaceChangesRefresh);
+    document.removeEventListener('visibilitychange', reconcileWorkspaceChangesVisibility);
     window.clearInterval(workspaceChangesFallbackId);
     workspaceChangesFallbackId = null;
+    workspaceChangesRefreshPending = false;
   }
 }
 

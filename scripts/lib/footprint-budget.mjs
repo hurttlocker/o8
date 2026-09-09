@@ -269,7 +269,7 @@ export function buildChurnIdentities({ spawned, exited, before, after, beforeOwn
   };
 }
 
-function measureDiskBytes(target, run = execFileSync) {
+export function measureDiskBytes(target, run = execFileSync) {
   const output = run('du', ['-sk', target], { encoding: 'utf8' });
   const kib = Number(String(output).trim().split(/\s+/)[0]);
   if (!Number.isFinite(kib) || kib < 0) throw new Error(`invalid disk usage for ${target}`);

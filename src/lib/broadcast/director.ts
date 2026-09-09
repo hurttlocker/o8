@@ -125,6 +125,10 @@ export async function runBroadcastDirectorOnce(options: {
       : resolveBrainCodexRouteSync();
     const runner = options.runner ?? callCodex;
     const output = (await runner(buildBroadcastCommentaryPrompt(newEvents, recent), route)).trim();
+    // A setting changed while the model was running applies before publication.
+    if (!options.settings && resolveBroadcastDirectorSettings().broadcastCommentary === 'off') {
+      return { status: 'skipped', reason: 'off' };
+    }
     const text = speakableText(output);
     if (!text) throw new Error('Broadcast commentary runner returned no text.');
     // The commentary call above is an await, so the count read before it is

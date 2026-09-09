@@ -932,7 +932,7 @@ export const claudeCodeRuntime: AgentRuntime = {
             canInterrupt: agent.runtimeSurface?.capabilities?.interrupt ?? false,
             canReviewDiffs: agent.runtimeSurface?.capabilities?.diffContext ?? true,
           },
-          lastActivityAt: new Date(agent.lastEventAt),
+          lastActivityAt: new Date(agent.lastActivityAt ?? Number.NaN),
           initialTask: agent.currentTask,
           model: agent.model,
           lifecycle,

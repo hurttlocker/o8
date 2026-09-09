@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { and, asc, desc, eq, gt, isNotNull, ne, notInArray } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNotNull, ne, notInArray } from 'drizzle-orm';
 import { expireStaleApprovals, listApprovalsForContext } from '@/lib/approvals/store';
 import { getDb, getSqlite, laneEvents, lanes } from '@/lib/db';
 import { recordDispatchRule } from '@/lib/dispatch/rules-store';
@@ -232,16 +232,6 @@ async function captureReviewBoundaryScreenshot(
   }
 }
 
-function getOrderedLaneList(): Lane[] {
-  return getLaneDb()
-    .select()
-    .from(lanes)
-    .orderBy(asc(lanes.createdAt))
-    .all()
-    .map((row) => mapLaneRow(row)!)
-    .filter((lane): lane is Lane => lane !== null);
-}
-
 function getFilteredLaneList(
   whereClause?: ReturnType<typeof and>,
 ): Lane[] {
@@ -325,8 +315,9 @@ export function getLane(laneId: string): Lane | null {
   return mapLaneRow(row);
 }
 
-export function listLanes(): Lane[] {
-  return getOrderedLaneList();
+export function listLanes(packetIds?: ReadonlySet<string>): Lane[] {
+  if (packetIds?.size === 0) return [];
+  return getFilteredLaneList(packetIds ? inArray(lanes.packetId, [...packetIds]) : undefined);
 }
 
 export function listActiveLanes(): Lane[] {
