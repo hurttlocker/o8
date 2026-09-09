@@ -32,7 +32,8 @@ export function GET(request: NextRequest) {
         text: event.detail ?? '',
         timestamp: event.timestamp,
         ...(event.payload.speechPriority === true ? { priority: true } : {}),
-        ...(event.payload.speechSuppressed === true ? { suppressed: true } : {}),
+        ...(event.payload.speechSuppressed === true || typeof event.payload.speechHeardAt === 'string'
+          ? { suppressed: true } : {}),
       })),
       cursor: page.cursor,
       hasMore: page.hasMore,

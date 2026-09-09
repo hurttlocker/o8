@@ -22,6 +22,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, statSync, rmSync, readFileSync, mkdirSync, symlinkSync, cpSync } from 'node:fs';
 import { join } from 'node:path';
 import { stapleAndValidate, submitForNotarization } from './lib/notarization.mjs';
+import { assertMacPackageSize } from './lib/mac-package-size.mjs';
 
 const REQUIRED = ['APPLE_SIGNING_IDENTITY', 'APPLE_ID', 'APPLE_PASSWORD', 'APPLE_TEAM_ID'];
 for (const key of REQUIRED) {
@@ -59,6 +60,9 @@ if (!existsSync(APP)) {
   console.error(`[sign-and-notarize] run cargo tauri build first`);
   process.exit(1);
 }
+
+// Reject cache contamination and size regressions before signing or uploading.
+console.log('[sign-and-notarize] package size preflight', assertMacPackageSize(APP));
 
 // #1163: the gate launches a DISPOSABLE 2nd copy of o8.app from /tmp to test
 // it, and that child intermittently PANICS (resource-dir resolution / wry event
@@ -193,6 +197,9 @@ execFileSync('tar', ['czf', TAR, '-C', join(BUNDLE, 'macos'), 'o8.app'], {
   stdio: 'inherit',
   env: { ...process.env, COPYFILE_DISABLE: '1' },
 });
+
+// Recheck the final signed/stapled bytes before updater signing or DMG upload.
+console.log('[sign-and-notarize] final package size', assertMacPackageSize(APP, TAR));
 
 console.log('[sign-and-notarize] minisign-signing the new tar.gz');
 // Newer cargo-tauri-cli rejects `--private-key-path` when

@@ -3,6 +3,7 @@
 
 import { Suspense, useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { isTauri, canUseTauriEvents, browserViewHide } from '@/lib/tauri/bridge';
+import { subscribeTauriEvent } from '@/lib/tauri/events';
 import { track } from '@/lib/analytics/track';
 import { AnimatePresence, motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
@@ -40,7 +41,6 @@ import { DesktopCloseCoordinator } from '@/components/desktop/DesktopCloseCoordi
 import { useProjects, type ProjectRecord } from '@/components/desktop/repo-registry/useProjects';
 import type { CommandPaletteActionItem } from '@/components/desktop/CommandPalette';
 import { useCommandPaletteHotkey } from '@/components/desktop/use-command-palette-hotkey';
-import { SessionTimeline } from '@/components/desktop/SessionTimeline';
 import { DictationHost } from '@/components/desktop/dictation/DictationHost';
 import { BrowserPipCard, BROWSER_PIP_EVENT } from '@/components/desktop/BrowserPipCard';
 import { O8SpecPipCard, O8_SPEC_PIP_EVENT } from '@/components/desktop/O8SpecPipCard';
@@ -710,7 +710,6 @@ function DashboardInner() {
     activeNavSection, setActiveNavSection,
     settingsInitialTab,
     sidebarVisible, setSidebarVisible,
-    timelineVisible,
     desktopDraftInjection, setDesktopDraftInjection,
     thoughtsDraftInjection, setThoughtsDraftInjection,
     thoughtsImageInjection, setThoughtsImageInjection,
@@ -4402,10 +4401,10 @@ function DashboardInner() {
     workspaceTerminalResetNonceByTileId,
     workspacePreviews,
   ]);
-  const showAgentPanelFtux = activeFtuxMilestone === 'firstAgentSpawned';
+  const showCompletionFtux = activeFtuxMilestone === 'firstCompletion';
+  const showAgentPanelFtux = activeFtuxMilestone === 'firstAgentSpawned' || showCompletionFtux;
   const showCanvasFtux = activeFtuxMilestone === 'firstFileChange';
   const showApprovalFtux = activeFtuxMilestone === 'firstApproval';
-  const showCompletionFtux = activeFtuxMilestone === 'firstCompletion' && timelineVisible;
   const showMobileFtux = activeFtuxMilestone === 'firstMobilePrompt';
   const changedFileLabel = ftuxFirstChangedFile?.path.split('/').pop() ?? 'your latest edit';
   const mobilePromptBody = mobileRemoteHref.startsWith('http')
@@ -4540,8 +4539,6 @@ function DashboardInner() {
   // standalone window directly).
   useEffect(() => {
     if (!canUseTauriEvents()) return;
-    let unlisten: (() => void) | null = null;
-    let disposed = false;
     const O8_TAB_SURFACES: Record<string, O8Tab> = {
       inbox: 'inbox',
       prs: 'prs',
@@ -4553,8 +4550,7 @@ function DashboardInner() {
       terminal: 'terminal',
       browser: 'browser',
     };
-    import('@tauri-apps/api/event')
-      .then(({ listen }) => listen<{ surface: string; url?: string }>('o8:ui-command', (event) => {
+    return subscribeTauriEvent<{ surface: string; url?: string }>('o8:ui-command', (event) => {
         const surface = event.payload?.surface ?? '';
         if (surface === 'settings') {
           handleOpenSettingsTab('git-prs');
@@ -4634,16 +4630,7 @@ function DashboardInner() {
             window.dispatchEvent(new CustomEvent('o8:open-browser', { detail: { url } }));
           }, 250);
         }
-      }))
-      .then((un) => {
-        if (disposed) { un(); return; }
-        unlisten = un;
-      })
-      .catch(() => { /* noop — never let the listener break the dashboard */ });
-    return () => {
-      disposed = true;
-      if (unlisten) { try { unlisten(); } catch { /* noop */ } }
-    };
+      });
   }, [handleOpenSettingsTab, openMobilePairing, openRightPanelFromUser, setThoughtsDraftInjection, setPalette, setReduceTransparency, workspaceGlass, setWorkspaceGlass]);
 
   // ── Voice P3: ⌘⇧, global shortcut → open the settings overlay ──
@@ -4652,19 +4639,7 @@ function DashboardInner() {
   // Rust directly). Toggling matches the in-app ⌘, binding above. Tauri-only.
   useEffect(() => {
     if (!canUseTauriEvents()) return;
-    let unlisten: (() => void) | null = null;
-    let disposed = false;
-    import('@tauri-apps/api/event')
-      .then(({ listen }) => listen('o8:open-settings', () => { toggleSettingsOverlay(); }))
-      .then((un) => {
-        if (disposed) { un(); return; }
-        unlisten = un;
-      })
-      .catch(() => { /* noop — never let the listener break the dashboard */ });
-    return () => {
-      disposed = true;
-      if (unlisten) { try { unlisten(); } catch { /* noop */ } }
-    };
+    return subscribeTauriEvent('o8:open-settings', () => { toggleSettingsOverlay(); });
   }, [toggleSettingsOverlay]);
 
   // ── Voice P4: Ctrl+Shift+R while o8 is frontmost → speak o8's OWN webview selection ──
@@ -4674,10 +4649,7 @@ function DashboardInner() {
   // native TTS engine. For other apps the Rust side grabs the selection itself.
   useEffect(() => {
     if (!canUseTauriEvents()) return;
-    let unlisten: (() => void) | null = null;
-    let disposed = false;
-    import('@tauri-apps/api/event')
-      .then(({ listen }) => listen('o8:speak-selection', () => {
+    return subscribeTauriEvent('o8:speak-selection', () => {
         // xterm selections are NOT DOM selections — when the DOM has nothing,
         // fall back to any live terminal's own selection so the read chord
         // works inside terminal tabs (Claude Code TUIs included).
@@ -4694,16 +4666,7 @@ function DashboardInner() {
         import('@tauri-apps/api/core')
           .then(({ invoke }) => invoke('tts_speak', { text }))
           .catch((err) => { console.warn('[speak-selection] tts_speak failed:', err); });
-      }))
-      .then((un) => {
-        if (disposed) { un(); return; }
-        unlisten = un;
-      })
-      .catch(() => { /* noop — never let the listener break the dashboard */ });
-    return () => {
-      disposed = true;
-      if (unlisten) { try { unlisten(); } catch { /* noop */ } }
-    };
+      });
   }, []);
 
   const showSidebarColumn = sidebarVisible && !compactShell;
@@ -5017,7 +4980,7 @@ function DashboardInner() {
               alignSelf: 'flex-end',
               marginTop: 12,
               marginRight: 16,
-              marginBottom: timelineVisible ? 0 : 12,
+              marginBottom: 12,
               marginLeft: 16,
               minHeight: 44,
               padding: '12px 14px',
@@ -5087,44 +5050,6 @@ function DashboardInner() {
         ) : null}
       </AnimatePresence>
 
-      {/* ── Session Timeline — always mounted so toggling doesn't refetch. ── */}
-      <div style={{ position: 'relative', zIndex: 1, display: timelineVisible ? 'block' : 'none' }}>
-          <GuidedDiscoveryHalo active={showCompletionFtux} borderRadius={18} />
-          <GuidedDiscoveryCoachmark
-            visible={showCompletionFtux}
-            position="top-right"
-            title="Completed sessions land here"
-            body="The timeline keeps the latest run in view, and the activity feed on the left will start surfacing the related commit trail."
-            actions={[
-              {
-                label: 'Open session replay',
-                onClick: () => {
-                  dismissFtuxMilestone();
-                  openCanvasTab({
-                    id: 'timeline:session',
-                    kind: 'timeline',
-                    label: 'Session Replay',
-                    resourceId: 'session',
-                  });
-                },
-                emphasized: true,
-              },
-            ]}
-          />
-          <SessionTimeline
-            repoPath={globalRepoEntry?.localPath ?? activeWorkspace ?? null}
-            repoName={globalRepoEntry?.name ?? null}
-            onExpand={() => {
-              openCanvasTab({
-                id: 'timeline:session',
-                kind: 'timeline',
-                label: 'Session Replay',
-                resourceId: 'session',
-              });
-            }}
-          />
-        </div>
-
       {/* ── Main Layout (horizontal) ── */}
       <div data-mcp-scope="main-layout" style={{
         flex: 1,
@@ -5162,8 +5087,10 @@ function DashboardInner() {
             <GuidedDiscoveryCoachmark
               visible={showAgentPanelFtux}
               position="top-left"
-              title="Live agent sessions appear here"
-              body="When you dispatch work, Cortex expands this rail and keeps the active session card within reach."
+              title={showCompletionFtux ? 'Completed sessions are saved' : 'Live agent sessions appear here'}
+              body={showCompletionFtux
+                ? 'Open Archived in Chats to revisit finished work.'
+                : 'When you dispatch work, the sidebar keeps the active session card within reach.'}
             />
             {agentPanelElement}
           </div>

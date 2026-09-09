@@ -452,6 +452,10 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
         const isReconnect = hasOpenedRef.current;
         hasOpenedRef.current = true;
         wsRef.current = ws;
+        // Keep durable inbox/transcript streams connected while a hidden
+        // dashboard stops requesting background Git review scans.
+        lastReviewVisible = undefined;
+        syncReviewVisibility();
         // The legacy history channel can follow one session. Realtime carries
         // every ref-counted session through the accumulated subscription set.
         const key = activeSessionKeyRef.current;
@@ -487,10 +491,22 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
       ws.onerror = () => { /* onclose handles reconnect */ };
     }
 
+    let lastReviewVisible: boolean | undefined;
+    function syncReviewVisibility() {
+      const socket = wsRef.current;
+      if (socket?.readyState !== WebSocket.OPEN) return;
+      const visible = document.visibilityState !== 'hidden';
+      if (visible === lastReviewVisible) return;
+      socket.send(JSON.stringify({ type: 'review-visibility', visible }));
+      lastReviewVisible = visible;
+    }
+
+    document.addEventListener('visibilitychange', syncReviewVisibility);
     connect();
 
     return () => {
       disposedRef.current = true;
+      document.removeEventListener('visibilitychange', syncReviewVisibility);
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
       if (pingTimerRef.current) clearInterval(pingTimerRef.current);
       if (realtimeSubscriptionSyncTimerRef.current) clearTimeout(realtimeSubscriptionSyncTimerRef.current);

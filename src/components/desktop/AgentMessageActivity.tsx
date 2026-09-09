@@ -78,6 +78,11 @@ function uniqueSnapshots(snapshots: RepoSnapshot[]) {
   return { messages, agents };
 }
 
+function hasStringFields(value: unknown, fields: string[]): boolean {
+  return value !== null && typeof value === 'object'
+    && fields.every((field) => typeof (value as Record<string, unknown>)[field] === 'string');
+}
+
 function AgentMessageActivityBase({ repos }: AgentMessageActivityProps) {
   const [snapshots, setSnapshots] = useState<RepoSnapshot[]>([]);
   const [refreshedAt, setRefreshedAt] = useState(0);
@@ -89,6 +94,7 @@ function AgentMessageActivityBase({ repos }: AgentMessageActivityProps) {
   });
   const [seenSequences, setSeenSequences] = useState<SeenSequences>(readSeenSequences);
   const abortRef = useRef<AbortController | null>(null);
+  const fleetSnapshotRef = useRef<{ messages: AgentMessage[]; agents: AgentPresence[] }>({ messages: [], agents: [] });
   const collapsedRef = useRef(collapsed);
   const seenSequencesRef = useRef(seenSequences);
 
@@ -115,19 +121,33 @@ function AgentMessageActivityBase({ repos }: AgentMessageActivityProps) {
     const timeout = window.setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
     try {
       const [messagesResult, presenceResult] = await Promise.allSettled([
-        fetch(`/api/agents/message?scope=all&limit=${MESSAGE_LIMIT}`, { cache: 'no-store', signal: controller.signal }),
-        fetch('/api/agents/presence?scope=all', { cache: 'no-store', signal: controller.signal }),
+        fetch(`/api/agents/message?scope=all&limit=${MESSAGE_LIMIT}`, { cache: 'no-store', signal: controller.signal })
+          .then((response) => {
+            if (response.status === 401 || response.status === 403) return { messages: [] };
+            return response.ok ? response.json() : null;
+          }),
+        fetch('/api/agents/presence?scope=all', { cache: 'no-store', signal: controller.signal })
+          .then((response) => {
+            if (response.status === 401 || response.status === 403) return { agents: [] };
+            return response.ok ? response.json() : null;
+          }),
       ]);
-      let messages: AgentMessage[] = [];
-      let agents: AgentPresence[] = [];
-      if (messagesResult.status === 'fulfilled' && messagesResult.value.ok) {
-        const payload = await messagesResult.value.json() as { messages?: AgentMessage[] };
-        messages = payload.messages ?? [];
-      }
-      if (presenceResult.status === 'fulfilled' && presenceResult.value.ok) {
-        const payload = await presenceResult.value.json() as { agents?: AgentPresence[] };
-        agents = payload.agents ?? [];
-      }
+      if (controller.signal.aborted) return;
+      // Body reads can reject after successful headers. Keep the last good half
+      // of the fleet snapshot when either endpoint fails or returns invalid JSON.
+      const nextMessages = messagesResult.status === 'fulfilled' ? messagesResult.value?.messages : null;
+      const nextAgents = presenceResult.status === 'fulfilled' ? presenceResult.value?.agents : null;
+      const validMessages = Array.isArray(nextMessages) && nextMessages.every((message) => (
+        hasStringFields(message, ['id', 'repo', 'from', 'to', 'text', 'timestamp'])
+        && Number.isFinite(message.sequence)
+        && ['native', 'poll', 'failed'].includes(message.delivery)
+        && (message.deliveryNote == null || typeof message.deliveryNote === 'string')
+      ));
+      const validAgents = Array.isArray(nextAgents) && nextAgents.every((agent) => hasStringFields(agent, ['agentId', 'repo', 'name']));
+      if (!validMessages && !validAgents) return;
+      const messages: AgentMessage[] = validMessages ? nextMessages : fleetSnapshotRef.current.messages;
+      const agents: AgentPresence[] = validAgents ? nextAgents : fleetSnapshotRef.current.agents;
+      fleetSnapshotRef.current = { messages, agents };
       const reposByPath = new Map(repos.map((repo) => [repo.localPath, repo]));
       const snapshotsByPath = new Map<string, RepoSnapshot>();
       const snapshotFor = (repoPath: string) => {

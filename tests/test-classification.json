@@ -195,6 +195,13 @@
       ]
     },
     {
+      "path": "src/lib/cortex/external-merge-watcher.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
       "path": "src/lib/db/v41-workspace-retirement-migration.test.ts",
       "reasons": [
         "child-process"
@@ -1112,6 +1119,12 @@
       ]
     },
     {
+      "path": "tests/broadcast-commentary-settings-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/broadcast-director-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -1640,6 +1653,13 @@
       ]
     },
     {
+      "path": "tests/intake-remote-idle.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
       "path": "tests/lane-branch-binding-diff.test.ts",
       "reasons": [
         "child-process",
@@ -2038,6 +2058,14 @@
       ]
     },
     {
+      "path": "tests/packaging-preflight-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/packet-discard-missing-worktree-real-path.test.ts",
       "reasons": [
         "real-path",
@@ -2238,6 +2266,13 @@
         "child-process",
         "git-cli",
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/repo-preflight-idle.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
       ]
     },
     {
