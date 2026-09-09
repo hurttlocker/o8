@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -318,4 +318,46 @@ describe('merge gate governance invariants', () => {
       }),
     ]));
   }, 20_000);
+
+  it('allows the exact reviewed CLI flush wrapper through the real Git gate', async () => {
+    const repoPath = initRepo();
+    git(repoPath, ['checkout', '-q', '-b', 'feature/merge-gate-test']);
+    mkdirSync(join(repoPath, 'cli/src'), { recursive: true });
+    const wrapper = readFileSync(join(process.cwd(), 'cli/src/exit.ts'), 'utf8');
+    writeFileSync(join(repoPath, 'cli/src/exit.ts'), wrapper);
+    commitAll(repoPath, 'fix: flush CLI output before termination');
+
+    const result = await runMergeGate(laneFixture(repoPath));
+    expect(result.passed).toBe(true);
+    expect(result.violations.filter((violation) => violation.category === 'security')).toEqual([]);
+  }, 20_000);
+
+  it.each(['modified', 'duplicated', 'other-file', 'dirty-worktree'] as const)(
+    'keeps unreviewed termination blocked: %s',
+    async (kind) => {
+      const repoPath = initRepo();
+      git(repoPath, ['checkout', '-q', '-b', 'feature/merge-gate-test']);
+      mkdirSync(join(repoPath, 'cli/src'), { recursive: true });
+      const wrapper = readFileSync(join(process.cwd(), 'cli/src/exit.ts'), 'utf8');
+      const modified = wrapper.replace('FLUSH_TIMEOUT_MS = 10_000', 'FLUSH_TIMEOUT_MS = 0');
+      const file = kind === 'other-file' ? 'cli/src/other-exit.ts' : 'cli/src/exit.ts';
+      // Keep an approved copy present too, so an allowed file cannot exempt
+      // another file's termination calls.
+      writeFileSync(join(repoPath, 'cli/src/exit.ts'), wrapper);
+      writeFileSync(join(repoPath, file), kind === 'duplicated'
+        ? wrapper + wrapper : kind === 'other-file' ? wrapper : modified);
+      commitAll(repoPath, 'test: unreviewed termination candidate');
+      if (kind === 'dirty-worktree') {
+        // Only the candidate commit can qualify, not a safe unstaged copy.
+        writeFileSync(join(repoPath, file), wrapper);
+      }
+
+      const result = await runMergeGate(laneFixture(repoPath));
+      expect(result.passed).toBe(false);
+      expect(result.violations).toEqual(expect.arrayContaining([
+        expect.objectContaining({ category: 'security', severity: 'block', file }),
+      ]));
+    },
+    20_000,
+  );
 });

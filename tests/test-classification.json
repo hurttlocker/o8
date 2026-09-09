@@ -1234,6 +1234,15 @@
       ]
     },
     {
+      "path": "tests/cli-output-completeness-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/cli-packet-target-parsing.test.ts",
       "reasons": [
         "worktree-api"
@@ -2047,6 +2056,15 @@
       "path": "tests/outsider-waiting-inbox-real-path.test.ts",
       "reasons": [
         "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/owned-codex-resume-pinning-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
         "git-cli",
         "real-path"
       ]

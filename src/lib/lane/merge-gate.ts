@@ -18,6 +18,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
@@ -58,6 +59,12 @@ const BUDGET_BLOCK_MULTIPLIER = 3;
 // ── Security Patterns (hard-block tier) ──
 // These are a subset of auto-review's patterns, elevated to enforcement.
 // Only patterns that indicate genuine injection risk are hard-blocks.
+
+const PROCESS_EXIT_PATTERN = /\bprocess\.exit\s*\(/;
+const REVIEWED_CLI_EXIT_FILE = 'cli/src/exit.ts';
+// This reviewed wrapper drains output before terminating a one-shot CLI. Pin
+// its entire committed contents when allowing new termination calls.
+const REVIEWED_CLI_EXIT_SHA256 = '538866e90234deda04c1626cf6ecae0d1a930edf3deb798e7f0d30de4d5c9823';
 
 const HARD_BLOCK_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
   // Injection vectors
@@ -130,9 +137,11 @@ const BRANCH_GATE_JSON_MARKER = '__O8_BRANCH_MERGE_GATE_RESULT__';
  */
 export function branchGateScript(cwd: string): string {
   const gateModule = pathToFileURL(path.join(cwd, 'src', 'lib', 'lane', 'merge-gate.ts')).href;
+  const serverOnlyStub = pathToFileURL(path.join(cwd, 'scripts', 'register-server-only-stub.mjs')).href;
   return `
 (async () => {
   console.log = (...args) => process.stderr.write(args.map(String).join(' ') + '\\n');
+  await import(${JSON.stringify(serverOnlyStub)});
   const loaded = await import(${JSON.stringify(gateModule)});
   const api = loaded.runMergeGate ? loaded : (loaded.default ?? loaded['module.exports']);
   const lane = JSON.parse(process.env.${BRANCH_GATE_LANE_ENV} ?? '{}');
@@ -156,10 +165,10 @@ function parseGitDiffFilePath(line: string): string | null {
   return path.startsWith('b/') ? path.slice(2) : path;
 }
 
-function getAddedLines(cwd: string, baseBranch: string): AddedDiffLine[] {
+function getAddedLines(cwd: string, baseBranch: string, headSha: string): AddedDiffLine[] {
   if (!isSafeGitRef(baseBranch)) return [];
   try {
-    const diff = execFileSync('git', ['diff', `${baseBranch}...HEAD`, '--no-color'], {
+    const diff = execFileSync('git', ['diff', `${baseBranch}...${headSha}`, '--no-color'], {
       windowsHide: true,
       cwd,
       timeout: 15_000,
@@ -404,13 +413,30 @@ function isCanonicalWebviewLatchBridge(file: string | null, text: string): boole
   return text.slice(1).replace(/\s+/g, '') === WEBVIEW_LATCH_BRIDGE_CALL;
 }
 
-function checkSecurityPatterns(addedLines: AddedDiffLine[]): MergeViolation[] {
+function hasReviewedCliExit(cwd: string, headSha: string): boolean {
+  try {
+    const contents = execFileSync('git', ['show', `${headSha}:${REVIEWED_CLI_EXIT_FILE}`], {
+      cwd, windowsHide: true, timeout: 5_000, maxBuffer: 64 * 1024,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return createHash('sha256').update(contents).digest('hex') === REVIEWED_CLI_EXIT_SHA256;
+  } catch {
+    return false;
+  }
+}
+
+function checkSecurityPatterns(cwd: string, headSha: string, addedLines: AddedDiffLine[]): MergeViolation[] {
   const violations: MergeViolation[] = [];
+  const reviewedCliExit = addedLines.some(({ file, text }) => (
+    file === REVIEWED_CLI_EXIT_FILE && PROCESS_EXIT_PATTERN.test(text)
+  )) && hasReviewedCliExit(cwd, headSha);
 
   for (const { pattern, label } of HARD_BLOCK_PATTERNS) {
     for (const { file, text } of addedLines) {
       if (isSecurityScanExemptPath(file)) continue;
       if (isCanonicalWebviewLatchBridge(file, text)) continue;
+      // Only the termination pattern is allowed, never a whole-file exemption.
+      if (pattern.source === PROCESS_EXIT_PATTERN.source && file === REVIEWED_CLI_EXIT_FILE && reviewedCliExit) continue;
 
       if (pattern.test(text)) {
         violations.push({
@@ -614,8 +640,8 @@ export async function runMergeGate(
     };
   }
 
-  const addedLines = getAddedLines(cwd, comparisonRef);
-  const securityViolations = checkSecurityPatterns(addedLines);
+  const addedLines = getAddedLines(cwd, comparisonRef, headSha);
+  const securityViolations = checkSecurityPatterns(cwd, headSha, addedLines);
   const scopePartitionViolations = checkScopePartitionHeuristics(addedLines);
   const budgetViolations = checkDiffBudgets(cwd, comparisonRef, lane.repoPath, orchestratorApproved);
   const importViolations = checkUntrackedImportViolations(cwd, comparisonRef);

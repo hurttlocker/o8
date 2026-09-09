@@ -98,6 +98,7 @@ import {
 } from './commands/task.js';
 import { runUpdate } from './commands/update.js';
 import { printError, type OutputMode } from './output.js';
+import { exitAfterFlush } from './exit.js';
 import { CliError, EXIT } from './api.js';
 
 function unknownSubcommandError(group: string, sub: string | undefined): CliError {
@@ -501,7 +502,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
 const parsed = parseArgs(process.argv.slice(2));
 try {
   const code = await dispatch(parsed);
-  process.exit(code);
+  await exitAfterFlush(code);
 } catch (err) {
-  process.exit(printError(err, parsed.mode));
+  await exitAfterFlush(printError(err, parsed.mode));
 }

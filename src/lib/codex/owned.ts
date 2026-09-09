@@ -4,11 +4,6 @@
  * This file is the Codex-specific adapter on top of the generic
  * owned-session primitive (`@/lib/runtimes/shared/owned-session`).
  *
- * Every public export here preserves the exact same signature and semantics
- * the Codex implementation had before Wave 2b. Callers across the codebase
- * (runtime registry, mobile history, API routes, command-center snapshot)
- * continue to import the same names with no behavioural change.
- *
  * What's Codex-specific and lives here:
  *   - launchArgs / resumeArgs (Codex exec CLI flags, danger-full-access sandbox)
  *   - parseRunLog (Codex JSONL stream: thread.started, turn.started, event_msg,
@@ -44,7 +39,7 @@ import {
   workerMcpServerNameIsValid,
   type ResolvedWorkerMcpServer,
 } from '@/lib/mcp/worker-injection';
-import { codexModelArgs } from './local-model';
+import { codexModelArgs, parseLocalModel } from './local-model';
 import { resolveCodexReasoningEffort } from './reasoning-effort';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { getDataDir } from '@/lib/data-dir-migration';
@@ -316,22 +311,25 @@ export function codexResumeArgs(ctx: {
   threadId: string;
   prompt: string;
   model?: string;
+  effort?: ThinkingEffort;
   workerMcpServers?: ResolvedWorkerMcpServer[];
   runtimeConfig?: Record<string, string>;
 }): string[] {
+  const local = parseLocalModel(ctx.model);
   return [
     'exec',
+    // Local-provider flags belong to exec, not its resume subcommand.
+    ...(local ? ['--oss', '--local-provider', local.provider] : []),
     'resume',
     ctx.threadId,
     '--json',
-    // NOTE: `codex exec resume` accepts --dangerously-bypass-approvals-and-sandbox
-    // but has NO `-s/--sandbox` flag (unlike `codex exec`) — passing `-s` makes the
-    // CLI exit 2 before the turn starts. Live-hit 2026-07-05: every steer-resume
-    // (#1415) failed silently until dropped — so read-only uses `-c` instead.
+    // Resume has no -s/--sandbox flag; read-only must use -c instead (#1415).
     ...codexSandboxResumeArgs(isReadOnlyRuntimeConfig(ctx.runtimeConfig)),
     ...DISABLE_IMAGE_TOOL,
     ...IGNORE_USER_CONFIG,
     ...codexWorkerMcpOverrideArgs(ctx.workerMcpServers ?? []),
+    ...(local ? ['--model', local.model] : codexModelArgs(ctx.model)),
+    ...codexReasoningEffortArgs(ctx.effort, ctx.model),
     ctx.prompt,
   ];
 }

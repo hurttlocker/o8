@@ -66,6 +66,7 @@ export async function prepareOwnedLaunchArgs({
     sessionDir: session.sessionDir,
     prompt,
     model: session.model,
+    effort: session.effort,
     workerMcpServers: workerMcp.servers,
     // A resumed read-only packet must stay read-only: the pin lives on the
     // session, so the mode survives even when the resume caller knows nothing.
