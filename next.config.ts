@@ -10,7 +10,14 @@ const nextConfig: NextConfig = {
     // breaks the Linux AppImage: linuxdeploy dependency-walks the bundled server's
     // ELFs and dies on sharp's own libvips-cpp, whose soname no system libvips can
     // match (#1747). Excluding dead weight beats teaching the bundler to carry it.
-    '*': ['./.cortex-worktrees/**/*', '**/node_modules/sharp/**/*', '**/node_modules/@img/**/*'],
+    '*': [
+      './.cortex-worktrees/**/*',
+      // Build cache can enter route traces through filesystem reads. Keep it
+      // available to the compiler, but never copy it into the runtime bundle.
+      './.next/cache/**/*',
+      '**/node_modules/sharp/**/*',
+      '**/node_modules/@img/**/*',
+    ],
   },
   serverExternalPackages: ['better-sqlite3'], // Native module — must be bundled explicitly
   reactStrictMode: true,
