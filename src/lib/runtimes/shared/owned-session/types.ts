@@ -350,6 +350,7 @@ export interface OwnedRuntimeAdapter {
     sessionDir?: string;
     prompt: string;
     model?: string;
+    effort?: ThinkingEffort;
     workerMcpServers?: ResolvedWorkerMcpServer[];
     /** Config pinned when the session was created (carrier, spend cap, work mode). */
     runtimeConfig?: Record<string, string>;
