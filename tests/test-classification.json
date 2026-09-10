@@ -1076,7 +1076,6 @@
     {
       "path": "tests/bench-design-gesture-real-path.test.ts",
       "reasons": [
-        "child-process",
         "real-path"
       ]
     },

@@ -160,7 +160,7 @@ export function cleanupTmuxSessions(sessionNames) {
   return cleaned;
 }
 
-export async function startIsolatedStack(root, seeded, requestedBuildMode = 'auto', { runTag = null } = {}) {
+export async function startIsolatedStack(root, seeded, requestedBuildMode = 'auto', { runTag = null, cpuProfile = false } = {}) {
   const apiPort = await freePort(root);
   let wsPort = await freePort(root);
   while (wsPort === apiPort) wsPort = await freePort(root);
@@ -178,6 +178,7 @@ export async function startIsolatedStack(root, seeded, requestedBuildMode = 'aut
     O8_DATA_DIR: seeded.dataDir,
     CORTEX_IDE_DATA_DIR: seeded.dataDir,
     CORTEX_IDE_REPO_ROOT: seeded.repoDir,
+    CORTEX_IDE_REVIEW_REPO_ROOT: seeded.repoDir,
     WS_TOKEN: token,
     O8_TERMINAL_BENCH: '1',
     O8_PERSISTENT_TERMINALS: '1',
@@ -190,7 +191,10 @@ export async function startIsolatedStack(root, seeded, requestedBuildMode = 'aut
   const nextArgs = buildMode === 'production' ? ['scripts/start.mjs'] : ['scripts/dev.mjs', 'next'];
   const next = spawn(process.execPath, nextArgs, { cwd: root, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
   const stubUrl = pathToFileURL(path.join(root, 'scripts/register-server-only-stub.mjs')).href;
-  const ws = spawn(process.execPath, [path.join(root, 'node_modules/tsx/dist/cli.mjs'), 'src/ws-server.ts'], {
+  const wsArgs = cpuProfile
+    ? ['--inspect=127.0.0.1:0', '--import', 'tsx', 'src/ws-server.ts']
+    : [path.join(root, 'node_modules/tsx/dist/cli.mjs'), 'src/ws-server.ts'];
+  const ws = spawn(process.execPath, wsArgs, {
     cwd: root,
     env: { ...env, NODE_OPTIONS: [env.NODE_OPTIONS, `--import=${stubUrl}`].filter(Boolean).join(' ') },
     detached: true,
@@ -215,6 +219,7 @@ export async function startIsolatedStack(root, seeded, requestedBuildMode = 'aut
     devModeCpuWarning: buildMode === 'next-dev',
     nextPid: next.pid,
     wsPid: ws.pid,
+    reviewRootIsolated: wsLog().includes(`[ws-server] Watching git at ${path.join(seeded.repoDir, '.git')} for diff changes`),
     logs: { next: nextLog, ws: wsLog },
     close: async () => {
       await Promise.all([stopProcessGroup(next), stopProcessGroup(ws)]);
@@ -300,6 +305,12 @@ export function measureProcessGroupMemory(processes, groups) {
   }));
   Object.defineProperty(physicalBytes, 'unavailable', { value: unavailableByGroup });
   return physicalBytes;
+}
+
+export function snapshotProcessCounters(takeSnapshot = snapshotProcesses, clock = () => performance.now()) {
+  const startedAtMs = clock();
+  const processes = takeSnapshot();
+  return { processes, sampledAtMs: (startedAtMs + clock()) / 2 };
 }
 
 export function measureProcessGroups(

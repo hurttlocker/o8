@@ -31,6 +31,9 @@ function finite(value) {
 export function checkTerminalWorkloadBudgets(receipt) {
   const failures = [];
   const budget = LOCKED_TERMINAL_WORKLOAD_BUDGETS;
+  if (receipt?.diagnosticCpuProfile) {
+    failures.push('CPU-profiled diagnostic runs cannot satisfy acceptance budgets');
+  }
   if (receipt?.schema !== 'o8/terminal-workload/v1') {
     failures.push(`schema must be o8/terminal-workload/v1, received ${receipt?.schema ?? 'missing'}`);
     return failures;

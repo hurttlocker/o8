@@ -48,6 +48,12 @@ describe('terminal workload locked budgets', () => {
     expect(checkTerminalWorkloadBudgets(receipt())).toEqual([]);
   });
 
+  it('rejects diagnostic CPU profiles even when measured values pass', () => {
+    expect(checkTerminalWorkloadBudgets({ ...receipt(), diagnosticCpuProfile: true })).toContain(
+      'CPU-profiled diagnostic runs cannot satisfy acceptance budgets',
+    );
+  });
+
   it('enforces the strict N=12 realtime improvement gate', () => {
     const candidate = receipt();
     candidate.summary[12].processCpuPercent.realtimeServer = distribution(25, 30);
