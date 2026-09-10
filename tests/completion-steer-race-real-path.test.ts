@@ -90,10 +90,16 @@ function request(path: string, body: unknown) {
     authorization: `Bearer ${getOrCreateWsToken()}`, 'content-type': 'application/json',
   }, body: JSON.stringify(body) });
 }
-function steer(packetId: string) {
-  return steerRoute.POST(request('/api/orchestrator/steer-packet', {
+async function steer(packetId: string) {
+  const response = steerRoute.POST(request('/api/orchestrator/steer-packet', {
     packetId, message: 'Run the next verification', idempotencyKey: `steer-${packetId}`,
   }));
+  // The route reads the request before scheduling its startup probe. Advance
+  // fake time until it settles, rather than racing a one-shot clock advance.
+  let settled = false;
+  void response.then(() => { settled = true; }, () => { settled = true; });
+  await vi.waitFor(() => expect(settled).toBe(true), { timeout: 5_000 });
+  return response;
 }
 function register(packet: OrchestratorPacket, suffix: string) {
   const id = `race${sequence}${suffix}`;
