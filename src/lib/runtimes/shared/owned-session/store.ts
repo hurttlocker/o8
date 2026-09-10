@@ -35,6 +35,7 @@ import {
   validateWorkspace,
 } from './helpers';
 import { createOwnedSessionIo } from './session-io';
+import { registerOwnedStopHandler } from './stop-outcome';
 import { createOwnedRunController } from './run-controller';
 import { createReviewTailController } from './review-tail';
 import {
@@ -103,6 +104,7 @@ export function createOwnedSessionStore(
     surfacePrefix,
     invalidateFleetCache,
   });
+  registerOwnedStopHandler(surfacePrefix, io, withSurfaceLock, invalidateFleetCache);
   const runController = createOwnedRunController({
     adapter,
     runtimeId,
@@ -628,8 +630,8 @@ export function createOwnedSessionStore(
     launch,
     resume,
     interrupt,
-    getRuntimeTail: reviewTailController.getRuntimeTail,
-    getReviewPacket: reviewTailController.getReviewPacket,
+    getRuntimeTail: (surfaceId, limit) => withSurfaceLock(surfaceId, () => reviewTailController.getRuntimeTail(surfaceId, limit)),
+    getReviewPacket: (surfaceId) => withSurfaceLock(surfaceId, () => reviewTailController.getReviewPacket(surfaceId)),
     getFleetAdditions,
     sessionState: (surfaceId) => readOwnedSessionState(root, surfaceId, surfacePrefix),
     archiveSession: io.archiveSession,

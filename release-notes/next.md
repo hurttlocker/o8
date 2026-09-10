@@ -1,3 +1,3 @@
-- Finish writing large CLI replies before exit, including piped JSON output and slow readers.
-- Preserve the selected model and reasoning effort when continuing owned workers, including local-model sessions.
-- Restore branch merge-gate loading and limit the reviewed CLI shutdown exception to the exact approved wrapper.
+- Continue owned worker conversations using their saved session and runtime settings.
+- Keep late completion callbacks from settling a newer follow-up turn.
+- Record delivered operator Stops as interruptions while preserving failure reports for unrequested signal exits.

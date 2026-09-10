@@ -5,6 +5,7 @@ import { isBridgeSessionAlive, signalBridgeTerminalSession } from '@/lib/runtime
 import { lookupOwnedActiveRunFresh } from '@/lib/runtimes/shared/owned-session-index';
 import { isPidAlive, pidCommandLine } from '@/lib/runtimes/shared/owned-session/helpers';
 import { getOwnedSessionLifecycle } from '@/lib/runtimes/shared/owned-session-lifecycle';
+import { withOwnedStopOutcome } from '@/lib/runtimes/shared/owned-session/stop-outcome';
 import {
   probeOwnedRunProcessClaim,
   resolveSpawnedProcessGroupId,
@@ -593,10 +594,10 @@ export async function escalateInterruptOwnedSurface(surfaceId: string): Promise<
     }
   }
 
-  return escalateInterrupt({
+  return withOwnedStopOutcome(surfaceId, activeRun, () => escalateInterrupt({
     pid: activeRun.pid,
     processGroupId: activeRun.processGroupId,
     tmuxSession: activeRun.tmuxSession,
     commandLabel,
-  });
+  }));
 }

@@ -228,7 +228,7 @@ export function createOwnedRunController({
       const applyExit = (run: OwnedRunRecord): OwnedRunRecord => {
         if (run.id !== runId) return run;
         dirty = true;
-        const nextOutcome = run.outcome === 'interrupted'
+        const nextOutcome = run.outcome === 'interrupted' || run.interruptRequestedAt
           ? 'interrupted'
           : artifacts?.parsed.outcome === 'failed'
             ? 'failed'

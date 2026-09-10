@@ -23,6 +23,7 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { listOwnedSessionLifecycles } from './owned-session-lifecycle';
 
 export interface OwnedActiveRun {
+  id?: string;
   pid?: number;
   processGroupId?: number;
   tmuxSession?: string;
@@ -121,6 +122,7 @@ async function buildRootIndex(root: string): Promise<RootIndex> {
     if (typeof parsed.surfaceId !== 'string') return;
     index.set(parsed.surfaceId, parsed.activeRun
       ? {
+          id: typeof parsed.activeRun.id === 'string' ? parsed.activeRun.id : undefined,
           pid: typeof parsed.activeRun.pid === 'number' ? parsed.activeRun.pid : undefined,
           processGroupId: typeof parsed.activeRun.processGroupId === 'number'
             ? parsed.activeRun.processGroupId
