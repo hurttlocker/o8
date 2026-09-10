@@ -71,9 +71,9 @@ Nothing converts a Stop into a fresh conversation on its own.
   died by signal."
 - The session record, its saved conversation id and its pins are not erased by the
   interruption itself, which is not a promise the conversation can be picked back up.
-- `o8 packet stop` confirmed-kills the worker, holds the packet (`operatorStopped` /
-  `blocked` / `operator_stopped`), then archives its lanes and prunes the worktree in
-  the background.
+- `o8 packet stop` holds the packet and confirms worker and managed-run death before
+  pausing the lane. The higher-level packet Stop route separately schedules lane
+  archive and worktree pruning after confirmation; CLI Stop does not promise cleanup.
 - While the hold stands, continuation is refused: "Packet cannot be steered while
   operator_stopped." A steer is not authority to undo an operator stop, an archive, or
   a proven release.
