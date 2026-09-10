@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   continueOwnedCodexSession: vi.fn(),
+  continueOwnedClaudeCodeSession: vi.fn(),
   getRuntimeInventorySnapshot: vi.fn(),
   listLanes: vi.fn(),
   recordLaneEvent: vi.fn(),
@@ -31,6 +32,11 @@ vi.mock('@/lib/codex/owned', () => ({
   setOwnedCodexReviewDisposition: vi.fn(),
 }));
 
+vi.mock('@/lib/claude-code/owned', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/claude-code/owned')>(),
+  continueOwnedClaudeCodeSession: mocks.continueOwnedClaudeCodeSession,
+}));
+
 vi.mock('@/lib/runtime/interrupt-escalation', () => ({
   escalateInterrupt: mocks.escalateInterrupt,
   escalateInterruptOwnedSurface: mocks.escalateInterruptOwnedSurface,
@@ -44,6 +50,7 @@ vi.mock('@/lib/runtimes', async (importOriginal) => ({
 describe('performRuntimeAction owned surface resolution', () => {
   beforeEach(() => {
     mocks.continueOwnedCodexSession.mockReset();
+    mocks.continueOwnedClaudeCodeSession.mockReset();
     mocks.getRuntimeInventorySnapshot.mockReset();
     mocks.getRuntimeInventorySnapshot.mockResolvedValue({ agents: [] });
     mocks.listLanes.mockReset();
@@ -104,6 +111,30 @@ describe('performRuntimeAction owned surface resolution', () => {
     expect(result.note).not.toMatch(/IDE-owned|thread id/i);
     expect(mocks.continueOwnedCodexSession).not.toHaveBeenCalled();
     expect(mocks.recordLaneEvent).not.toHaveBeenCalled();
+  });
+
+  it('reaches Claude continuation through the cached inventory and registry capability gates', async () => {
+    const surfaceId = 'claude-code-owned:ready';
+    mocks.getRuntimeInventorySnapshot.mockResolvedValue({ agents: [{
+      id: surfaceId, sessionKey: surfaceId, runtime: 'claude-code',
+      runtimeSurface: { id: surfaceId, ownership: 'owned', capabilities: { sendInput: true } },
+    }] });
+    const { claudeCodeRuntime } = await import('@/lib/runtimes/claude-code');
+    mocks.getRuntime.mockReturnValue(claudeCodeRuntime);
+    mocks.continueOwnedClaudeCodeSession.mockResolvedValue({ ok: true, note: 'queued' });
+    const { performRuntimeAction } = await import('./actions');
+    expect(await performRuntimeAction({ action: 'steer', surfaceId, message: 'follow up' }))
+      .toMatchObject({ ok: true, status: 'queued', sessionKey: surfaceId, runtime: 'claude-code' });
+    expect(mocks.continueOwnedClaudeCodeSession).toHaveBeenCalledExactlyOnceWith(surfaceId, 'follow up');
+  });
+
+  it('returns a structured busy result for Claude without starting a second turn', async () => {
+    const surfaceId = 'claude-code-owned:busy';
+    mocks.continueOwnedClaudeCodeSession.mockRejectedValue(new Error('This owned Claude session still has an active run.'));
+    const { performRuntimeAction } = await import('./actions');
+    expect(await performRuntimeAction({ action: 'steer', surfaceId, message: 'wait' }))
+      .toMatchObject({ ok: false, status: 'unavailable', note: expect.stringContaining('active run') });
+    expect(mocks.continueOwnedClaudeCodeSession).toHaveBeenCalledTimes(1);
   });
 
   it('audits an owned Codex steer only after the runtime accepts it', async () => {

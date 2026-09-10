@@ -28,16 +28,13 @@ export async function prepareOwnedLaunchArgs({
   sandboxEnabled: boolean;
   humanLabel: string;
 }): Promise<PreparedOwnedLaunchArgs> {
-  const workerMcp: PreparedOwnedWorkerMcpConfig = mode === 'launch'
-    || adapter.workerMcpInjection === 'config-override'
-    ? await prepareOwnedWorkerMcpConfig({
-        adapter,
-        session,
-        runId,
-        mode,
-        sandboxEnabled,
-      })
-    : { sandboxReadPaths: [], servers: [] };
+  const workerMcp = await prepareOwnedWorkerMcpConfig({
+    adapter,
+    session,
+    runId,
+    mode,
+    sandboxEnabled,
+  });
 
   if (mode === 'launch') {
     return {
@@ -67,6 +64,7 @@ export async function prepareOwnedLaunchArgs({
     prompt,
     model: session.model,
     effort: session.effort,
+    workerMcpConfigPath: workerMcp.configPath,
     workerMcpServers: workerMcp.servers,
     // A resumed read-only packet must stay read-only: the pin lives on the
     // session, so the mode survives even when the resume caller knows nothing.
@@ -77,7 +75,12 @@ export async function prepareOwnedLaunchArgs({
   }
   return {
     args,
-    stdinPayload: null,
+    stdinPayload: adapter.resumeStdin?.({
+      cwd: session.repoPath,
+      prompt,
+      model: session.model,
+      effort: session.effort,
+    }) ?? null,
     workerMcp,
   };
 }

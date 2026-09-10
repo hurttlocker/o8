@@ -2067,6 +2067,16 @@
       ]
     },
     {
+      "path": "tests/owned-claude-continuation-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/owned-codex-resume-pinning-real-path.test.ts",
       "reasons": [
         "child-process",
