@@ -5,6 +5,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { BENCH_TMUX_SERVER_NAME, benchTmuxArgs } from '../tmux-scope.mjs';
 import {
   descendantPids,
   measureProcessPhysicalBytes,
@@ -152,7 +153,7 @@ export function cleanupTmuxSessions(sessionNames) {
   for (const sessionName of new Set(sessionNames)) {
     if (!/^cortex-dash-[a-f0-9]{32}$/.test(sessionName)) continue;
     try {
-      execFileSync('tmux', ['kill-session', '-t', sessionName], { stdio: 'ignore' });
+      execFileSync('tmux', benchTmuxArgs('kill-session', '-t', `=${sessionName}`), { stdio: 'ignore' });
       cleaned.push(sessionName);
     } catch { /* absent */ }
   }
@@ -180,6 +181,7 @@ export async function startIsolatedStack(root, seeded, requestedBuildMode = 'aut
     WS_TOKEN: token,
     O8_TERMINAL_BENCH: '1',
     O8_PERSISTENT_TERMINALS: '1',
+    O8_DASH_TMUX_SERVER_NAME: BENCH_TMUX_SERVER_NAME,
     O8_INTERACTION_RUN_TAG: runTag ?? '',
   };
   delete env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;

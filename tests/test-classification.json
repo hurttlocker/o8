@@ -1092,6 +1092,14 @@
       ]
     },
     {
+      "path": "tests/bench-tmux-scope-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path",
+        "terminal-tool"
+      ]
+    },
+    {
       "path": "tests/bench/coding-arm-outcome.test.ts",
       "reasons": [
         "child-process",

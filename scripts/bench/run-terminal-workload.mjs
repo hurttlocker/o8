@@ -24,6 +24,7 @@ import { summarizeSamples } from './terminal-workload/statistics.mjs';
 import { assertTerminalWorkloadBudgets } from './terminal-workload/budgets.mjs';
 import { ensureVisibleTerminal } from './terminal-workload/browser-state.mjs';
 import { classifyKeystrokeTimeout } from './terminal-workload/keystroke-measurement.mjs';
+import { BENCH_TMUX_SERVER_NAME, benchTmuxArgs } from './tmux-scope.mjs';
 
 const ROOT = process.cwd();
 
@@ -573,13 +574,13 @@ function terminalScreenOracle(value) {
 
 function captureTmuxText(sessionName) {
   // #1979: tmux CSI n S scrolling cannot preserve history in xterm.js; screen state remains authoritative.
-  return execFileSync('tmux', ['capture-pane', '-p', '-t', sessionName], { encoding: 'utf8' });
+  return execFileSync('tmux', benchTmuxArgs('capture-pane', '-p', '-t', `=${sessionName}:`), { encoding: 'utf8' });
 }
 
 function captureTmuxSize(sessionName) {
   const value = execFileSync(
     'tmux',
-    ['display-message', '-p', '-t', sessionName, '#{pane_width} #{pane_height}'],
+    benchTmuxArgs('display-message', '-p', '-t', `=${sessionName}:`, '#{pane_width} #{pane_height}'),
     { encoding: 'utf8' },
   ).trim();
   const [cols, rows] = value.split(/\s+/u).map(Number);
@@ -1191,6 +1192,7 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
       sessionCount,
       sampleIndex,
       runPrefix,
+      tmuxServerName: BENCH_TMUX_SERVER_NAME,
       error: error instanceof Error ? { message: error.message, stack: error.stack } : String(error),
       dashboard: page && !page.isClosed() ? await dashboardDiagnostic(page, seeded.tabs).catch(() => null) : null,
       browserConsole,
@@ -1276,6 +1278,7 @@ async function main() {
     ...machineClass(),
     fixture: {
       id: 'terminal-ansi-alt-screen-visibility-v2',
+      tmuxServerName: BENCH_TMUX_SERVER_NAME,
       sessionCounts: runConfig.sessionCounts,
       samplesPerSessionCount: runConfig.samples,
       bytesPerSecondPerSession: runConfig.bytesPerSecond,
