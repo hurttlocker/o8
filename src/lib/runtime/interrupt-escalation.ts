@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 
 import { isBridgeSessionAlive, signalBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
 import { lookupOwnedActiveRunFresh } from '@/lib/runtimes/shared/owned-session-index';
-import { isPidAlive, pidCommandLine } from '@/lib/runtimes/shared/owned-session/helpers';
+import { commandLineMatchesOwnedRun, isPidAlive, pidCommandLine } from '@/lib/runtimes/shared/owned-session/helpers';
 import { getOwnedSessionLifecycle } from '@/lib/runtimes/shared/owned-session-lifecycle';
 import { withOwnedStopOutcome } from '@/lib/runtimes/shared/owned-session/stop-outcome';
 import {
@@ -589,7 +589,7 @@ export async function escalateInterruptOwnedSurface(surfaceId: string): Promise<
     } else {
       const commandLine = await pidCommandLine(activeRun.pid);
       identityMatches = commandLine
-        ? commandLine.includes(expectedCommand)
+        ? commandLineMatchesOwnedRun(commandLine, activeRun.commandIdentity, commandLabel)
         : !isPidAlive(activeRun.pid);
     }
     if (!identityMatches) {

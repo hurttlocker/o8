@@ -1,6 +1,7 @@
 import type { OrchestratorPacket, OrchestratorPacketType } from '@/lib/orchestrator/types';
 import { normalizePacketTaskContract } from '@/lib/orchestrator/packet-task-contract';
 import { normalizeWorkerLaunchContext } from '@/lib/orchestrator/worker-launch-context';
+import { isExecutionCarrierId, UnknownExecutionCarrierError } from '@/lib/runtimes/shared/execution-carrier';
 
 /**
  * Narrow an arbitrary value to a known packet type tag. Only `decompose` is
@@ -48,6 +49,12 @@ export function normalizeClaudeCodePacketPins(
       ? carrier
       : null,
   };
+}
+
+export function normalizePacketExecutionCarrier(value: unknown): OrchestratorPacket['executionCarrier'] {
+  if (value === null || value === undefined) return null;
+  if (isExecutionCarrierId(value)) return value;
+  throw new UnknownExecutionCarrierError(value);
 }
 
 /**

@@ -1493,6 +1493,16 @@
       ]
     },
     {
+      "path": "tests/execution-carrier-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/feedback-sync-reports.test.ts",
       "reasons": [
         "executable-fixture"
@@ -2096,6 +2106,14 @@
       "reasons": [
         "child-process",
         "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/owned-carrier-signal-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
         "real-path"
       ]
     },

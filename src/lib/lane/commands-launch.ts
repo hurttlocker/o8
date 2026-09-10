@@ -222,6 +222,7 @@ export async function launchSession(
       model: command.model,
       claudeCodeModel: command.claudeCodeModel,
       claudeCodeCarrier: command.claudeCodeCarrier,
+      executionCarrier: command.executionCarrier,
       effort: command.effort,
       clientMutationId: command.clientMutationId,
       isolate: !lane.worktreePath,

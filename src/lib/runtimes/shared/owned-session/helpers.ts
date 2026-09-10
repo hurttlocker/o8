@@ -19,6 +19,7 @@ import { truncateText } from '@/lib/util/text';
 import { getDataDir } from '@/lib/data-dir-migration';
 
 import type { OwnedChildExitOutcome, OwnedRunOutcome, OwnedRunRecord, ParsedRunLog } from './types';
+import { probeOwnedRunProcessClaim, resolveSpawnedProcessGroupId } from './run-process-proof';
 
 const execFileAsync = promisify(execFile);
 
@@ -283,6 +284,50 @@ export function isPidAlive(pid?: number) {
     if ((error as NodeJS.ErrnoException)?.code === 'EPERM') return true;
     return false;
   }
+}
+
+export function commandLineMatchesOwnedRun(
+  commandLine: string | null,
+  commandIdentity: string | undefined,
+  fallbackBinaryName: string,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  const identity = commandIdentity?.trim() || fallbackBinaryName;
+  if (!commandLine) return false;
+  const normalize = (value: string) => platform === 'win32' ? value.toLowerCase() : value;
+  const normalizedIdentity = normalize(identity);
+  const tokens = commandLine.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
+  const unquote = (token: string) => token.replace(/^["']|["']$/g, '');
+  // cliInvocation uses exactly cmd.exe /d /c <CLI> for Windows script shims.
+  // Only that executable position is authority, never a later argv mention.
+  if (platform === 'win32' && path.win32.basename(unquote(tokens[0] ?? '')).toLowerCase() === 'cmd.exe'
+    && tokens[1]?.toLowerCase() === '/d' && tokens[2]?.toLowerCase() === '/c') {
+    return commandLineMatchesOwnedRun(tokens.slice(3).join(' '), commandIdentity, fallbackBinaryName, platform);
+  }
+  const identityIsPath = identity.includes('/') || identity.includes('\\');
+  if (identityIsPath) {
+    const normalizedCommandLine = normalize(commandLine.trimStart());
+    return [normalizedIdentity, `"${normalizedIdentity}"`, `'${normalizedIdentity}'`].some((prefix) => (
+      normalizedCommandLine.startsWith(prefix)
+      && (!normalizedCommandLine[prefix.length] || /\s/.test(normalizedCommandLine[prefix.length]!))
+    ));
+  }
+  const token = normalize(unquote(tokens[0] ?? ''));
+  const basename = platform === 'win32' ? path.win32.basename(token) : path.basename(token);
+  return basename === normalizedIdentity || (platform === 'win32' && !path.win32.extname(identity)
+    && ['.cmd', '.exe', '.com'].some((extension) => basename === `${normalizedIdentity}${extension}`));
+}
+
+/** POSIX run ownership survives wrapper exec; an argv mention does not prove ownership. */
+export async function canSignalOwnedRun(run: OwnedRunRecord, fallbackBinaryName: string): Promise<boolean> {
+  if (process.platform === 'win32') {
+    return commandLineMatchesOwnedRun(await pidCommandLine(run.pid), run.commandIdentity, fallbackBinaryName);
+  }
+  if (!run.processMarker) return false;
+  const claim = await probeOwnedRunProcessClaim({ pid: run.pid, marker: run.processMarker, rootPid: run.pid });
+  if (claim.state !== 'match') return false;
+  const group = await resolveSpawnedProcessGroupId(run.pid);
+  return group !== undefined && group === (run.processGroupId ?? run.pid);
 }
 
 export async function isOwnedRunAlive(run?: OwnedRunRecord | null): Promise<boolean> {

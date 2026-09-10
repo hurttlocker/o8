@@ -46,10 +46,9 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { codexSandboxLaunchArgs, codexSandboxResumeArgs } from '@/lib/codex/read-only-args';
 import type { WorkerWorkMode } from '@/lib/orchestrator/types';
 import { isReadOnlyRuntimeConfig, workModeRuntimeConfig } from '@/lib/runtimes/shared/owned-session/work-mode';
-
+import { executionCarrierRuntimeConfig, type ExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
 // Re-export the fleet additions shape under its original Codex name.
 export type { OwnedCodexFleetAdditions } from '@/lib/runtimes/shared/owned-session';
-
 // ── Codex-specific types (preserved signatures) ──────────────────────────────
 
 export type OwnedCodexLaunchRequest = {
@@ -62,6 +61,7 @@ export type OwnedCodexLaunchRequest = {
   packetId?: string;
   /** Durable packet work mode; 'read-only' hardens argv and the OS sandbox. */
   workMode?: WorkerWorkMode;
+  executionCarrier?: ExecutionCarrierId;
 };
 
 export type OwnedCodexLaunchResponse = {
@@ -72,7 +72,6 @@ export type OwnedCodexLaunchResponse = {
 };
 
 type OwnedReviewDisposition = 'watching' | 'resolved';
-
 // ── Codex JSONL helpers ──────────────────────────────────────────────────────
 
 function safeObject(value: unknown): Record<string, unknown> | null {
@@ -80,7 +79,6 @@ function safeObject(value: unknown): Record<string, unknown> | null {
     ? value as Record<string, unknown>
     : null;
 }
-
 function parseJsonObject(value: unknown): Record<string, unknown> | null {
   if (typeof value === 'string') {
     try {
@@ -91,7 +89,6 @@ function parseJsonObject(value: unknown): Record<string, unknown> | null {
   }
   return safeObject(value);
 }
-
 function readStringField(source: Record<string, unknown> | null, ...keys: string[]) {
   if (!source) return undefined;
   for (const key of keys) {
@@ -749,7 +746,10 @@ export async function launchOwnedCodexSession(
     ...request,
     // Pinned like the model/carrier pins, so retry/resume/rerun of a read-only
     // packet stays read-only even if the caller omits the mode.
-    runtimeConfig: workModeRuntimeConfig(request.workMode),
+    runtimeConfig: {
+      ...workModeRuntimeConfig(request.workMode),
+      ...executionCarrierRuntimeConfig(request.executionCarrier),
+    },
   });
   return {
     ok: result.ok,

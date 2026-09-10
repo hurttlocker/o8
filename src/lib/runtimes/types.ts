@@ -5,6 +5,7 @@ import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 import type { PacketCostSource, PacketSpendCap } from '@/lib/orchestrator/metered-spend';
 import type { WorkerWorkMode } from '@/lib/orchestrator/types';
+import type { ExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
 
 /**
  * Universal Agent Runtime Contract
@@ -272,6 +273,7 @@ export interface LaunchOptions {
   /** Explicit packet-only model/carrier pins for the Claude Code adapter. */
   claudeCodeModel?: string;
   claudeCodeCarrier?: ClaudeCodeModelSource;
+  executionCarrier?: ExecutionCarrierId;
   /** Requested reasoning effort — applied per-runtime (codex today); a no-op elsewhere. */
   effort?: ThinkingEffort;
   worktreeFlag?: string;

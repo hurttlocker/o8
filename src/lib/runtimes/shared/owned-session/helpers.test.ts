@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import {
+  commandLineMatchesOwnedRun,
   filterStderrNoise,
   isOwnedRunAlive,
   relativeAge,
@@ -38,6 +39,32 @@ describe('repoSlugFromOrigin', () => {
     expect(repoSlugFromOrigin('https://gitlab.com/team/repo.git')).toBeUndefined();
     expect(repoSlugFromOrigin('')).toBeUndefined();
     expect(repoSlugFromOrigin(undefined)).toBeUndefined();
+  });
+});
+
+describe('commandLineMatchesOwnedRun', () => {
+  it('recognizes only the executable position in a Windows CLI invocation', () => {
+    const binary = 'C:\\Program Files\\runtime\\codex.cmd';
+    expect(commandLineMatchesOwnedRun(`C:\\Windows\\system32\\cmd.exe /d /c "${binary}" exec`, binary, 'codex', 'win32')).toBe(true);
+    expect(commandLineMatchesOwnedRun(`cmd.exe /d /c "${binary}" exec`, undefined, 'codex', 'win32')).toBe(true);
+    expect(commandLineMatchesOwnedRun(`cmd.exe /d /c type "${binary}"`, binary, 'codex', 'win32')).toBe(false);
+    expect(commandLineMatchesOwnedRun(`node.exe viewer.js "${binary}"`, binary, 'codex', 'win32')).toBe(false);
+    expect(commandLineMatchesOwnedRun('"C:\\Tools\\ori.exe" codex exec', 'C:\\Tools\\ori.exe', 'codex', 'win32')).toBe(true);
+  });
+  it('recognizes a persisted carrier wrapper instead of requiring the runtime binary name', () => {
+    expect(commandLineMatchesOwnedRun('/usr/bin/ori codex exec --json', '/usr/bin/ori', 'codex')).toBe(true);
+    expect(commandLineMatchesOwnedRun('/Users/J Doe/.local/bin/ori codex exec --json', '/Users/J Doe/.local/bin/ori', 'codex')).toBe(true);
+    expect(commandLineMatchesOwnedRun('"/Users/J Doe/.local/bin/ori" codex exec --json', '/Users/J Doe/.local/bin/ori', 'codex')).toBe(true);
+    expect(commandLineMatchesOwnedRun('/Users/J Doe/.local/bin/original codex exec --json', '/Users/J Doe/.local/bin/ori', 'codex')).toBe(false);
+    expect(commandLineMatchesOwnedRun('/bin/sh -c "echo /usr/bin/ori"', '/usr/bin/ori', 'codex')).toBe(false);
+    expect(commandLineMatchesOwnedRun('/usr/bin/ori codex exec --json', undefined, 'codex')).toBe(false);
+    expect(commandLineMatchesOwnedRun('/bin/cat /usr/bin/ori', '/usr/bin/ori', 'codex')).toBe(false);
+    expect(commandLineMatchesOwnedRun('/usr/bin/node viewer.js /usr/bin/ori', '/usr/bin/ori', 'codex')).toBe(false);
+    expect(commandLineMatchesOwnedRun('/bin/cat "/usr/bin/ori"', '/usr/bin/ori', 'codex')).toBe(false);
+    expect(commandLineMatchesOwnedRun('/usr/bin/node unrelated.js', 'ori', 'codex')).toBe(false);
+    expect(commandLineMatchesOwnedRun('/usr/bin/origami codexical', 'ori', 'codex')).toBe(false);
+    expect(commandLineMatchesOwnedRun('git fetch origin', 'ori', 'codex')).toBe(false);
+    expect(commandLineMatchesOwnedRun('/Users/victoria/bin/node task.js', 'ori', 'codex')).toBe(false);
   });
 });
 

@@ -6,13 +6,13 @@ import {
 } from './archive';
 import {
   OWNED_STALE_WINDOW_MS,
+  canSignalOwnedRun,
   isOwnedRunAlive,
   metadataPath,
   nowIso,
   pathExists,
   forceKillTreeWindows,
   isPidAlive,
-  pidCommandLine,
   relativeAge,
   shortHome,
 } from './helpers';
@@ -238,8 +238,7 @@ export function createFleetComputer({
         if (activeRun.tmuxSession) {
           await signalBridgeTerminalSession(activeRun.tmuxSession, 'SIGINT');
         } else {
-          const cmd = await pidCommandLine(activeRun.pid);
-          if (cmd && cmd.includes(adapter.binaryName)) {
+          if (await canSignalOwnedRun(activeRun, adapter.binaryName)) {
             if (process.platform === 'win32') {
               // A failed kill must NOT return early here: the orphan record and
               // saveSession below are the only trace this session ever existed,
@@ -268,8 +267,10 @@ export function createFleetComputer({
                 }
               }
             } else {
-              process.kill(-activeRun.pid, 'SIGINT');
+              process.kill(-(activeRun.processGroupId ?? activeRun.pid), 'SIGINT');
             }
+          } else {
+            return false;
           }
         }
       } catch (error) {

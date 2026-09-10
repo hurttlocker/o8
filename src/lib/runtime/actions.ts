@@ -5,6 +5,7 @@ import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 import type { OrchestratorRuntime, WorkerWorkMode } from '@/lib/orchestrator/types';
 import type { PacketSpendCap } from '@/lib/orchestrator/metered-spend';
+import type { ExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
 import {
   listDeclarativeRuntimes,
 } from '@/lib/orchestrator/runtime-capabilities';
@@ -75,6 +76,7 @@ export interface RuntimeLaunchRequest {
   model?: string;
   claudeCodeModel?: string;
   claudeCodeCarrier?: ClaudeCodeModelSource;
+  executionCarrier?: ExecutionCarrierId;
   /** Requested reasoning effort — passed to the runtime's launch; per-runtime no-op. */
   effort?: ThinkingEffort;
   clientMutationId?: string;
@@ -365,6 +367,7 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
     model: payload.model,
     claudeCodeModel: payload.claudeCodeModel,
     claudeCodeCarrier: payload.claudeCodeCarrier,
+    executionCarrier: payload.executionCarrier,
     effort: payload.effort,
     worktreeFlag: launchWorktree?.claudeWorktreeFlag,
     worktreePath: launchWorktree?.worktree?.path,
