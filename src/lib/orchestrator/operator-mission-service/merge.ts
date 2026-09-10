@@ -5,8 +5,12 @@ import type { WorktreeInfo } from '@/lib/worktree/types';
 import type { ApproveAndMergeInput, MergePacketResult, PickComparisonWinnerInput } from './types';
 import { autoResolveMergedPacketVerificationIncidents } from '@/lib/supervisor/merged-incident-resolution';
 import { attachQualitySearchReceipt, ensureComparisonWinnerReview, resolveQualitySearchComparison } from './quality-search-selection';
-import { alreadyReleasedResultForPacket, buildAlreadyReleasedResult } from './release-truth';
+import { alreadyReleasedResultForPacketId } from './release-truth';
+export { isTerminalReleaseLane } from './release-truth';
+import { HeadShaMismatchError } from './merge-head-error';
+export { HeadShaMismatchError, isHeadShaMismatchError } from './merge-head-error';
 import { markPacketReleased } from '@/lib/orchestrator/packet-release-truth';
+import { packetReleaseGeneration, packetReleaseIdentityIsCurrent } from '@/lib/orchestrator/release-ownership';
 import { withPacketMergeWorkspace } from './merge-workspace-guard';
 import { selectMergeSequence } from './merge-order';
 export { selectMergeSequence } from './merge-order';
@@ -26,7 +30,6 @@ const loadDispatch = () => import('@/lib/orchestrator/dispatch');
 const loadWorktreeCleanup = () => import('@/lib/orchestrator/worktree-cleanup');
 const loadWorktreeConflicts = () => import('@/lib/worktree/conflicts');
 const loadWorktreeLaunch = () => import('@/lib/worktree/launch');
-const loadMergeTruth = () => import('./merge-truth');
 const loadPostMergeCleanup = () => import('./post-merge-cleanup');
 const loadReviewCarry = () => import('./review-carry');
 const loadReview = () => import('./review');
@@ -64,66 +67,10 @@ interface OrderedMergeCandidate extends MergeOrderCandidate {
   overlappingWorktreeIds: Set<string>;
 }
 
-export class HeadShaMismatchError extends Error {
-  readonly packetId: string;
-  readonly expectedHeadSha: string;
-  readonly currentHeadSha: string;
-
-  constructor(packetId: string, expectedHeadSha: string, currentHeadSha: string) {
-    super(`Worktree HEAD changed since review for packet ${packetId}: expected ${expectedHeadSha}, current ${currentHeadSha}. Re-review before merging.`);
-    this.name = 'HeadShaMismatchError';
-    this.packetId = packetId;
-    this.expectedHeadSha = expectedHeadSha;
-    this.currentHeadSha = currentHeadSha;
-  }
-}
-
-export function isHeadShaMismatchError(error: unknown): error is HeadShaMismatchError {
-  return error instanceof HeadShaMismatchError;
-}
-
 function isPacketAwaitingMerge(packet: OrchestratorPacket) {
   return packet.status === 'awaiting_review'
     && packet.releaseState !== 'released'
     && packet.review?.approved !== false;
-}
-
-/** Exported for the lane-rebind vitest suite (#1214) — not part of the public API. */
-export async function isTerminalReleaseLane(packetId: string) {
-  const { getLaneEvents, listLanes } = await loadLaneRegistry();
-  return listLanes().some((lane) => {
-    if (lane.packetId !== packetId) return false;
-    if (lane.status === 'completed') return true;
-    if (lane.status !== 'archived') return false;
-    // #1214 — archived alone is NOT release evidence: lanes archive after
-    // worker death too (e.g. silent_exit_no_work), and a dead lane that kept
-    // its packet binding must not short-circuit the recovery lane's merge.
-    // Require the lane to have actually passed through 'completed' (only set
-    // once a merge landed) before claiming the packet was released.
-    return getLaneEvents(lane.id).some((event) =>
-      event.verb === 'status_change' && event.payload.status === 'completed'
-    );
-  });
-}
-
-async function alreadyReleasedResultForPacketId(packetId: string, packets: OrchestratorPacket[]) {
-  const { findLatestLaneByPacket, getLaneEvents } = await loadLaneRegistry();
-  const lane = findLatestLaneByPacket(packetId);
-  const packet = packets.find((candidate) => candidate.id === packetId);
-  const packetResult = await alreadyReleasedResultForPacket(packet, lane);
-  if (packetResult) return packetResult;
-  if (await isTerminalReleaseLane(packetId) && lane?.repoPath) {
-    const laneHeadSha = getLaneEvents(lane.id).slice().reverse()
-      .map((event) => event.payload.laneHeadSha)
-      .find((sha): sha is string => typeof sha === 'string' && sha.trim().length > 0)?.trim();
-    if (laneHeadSha) {
-      const { isAncestorCommit, readGitHead } = await loadMergeTruth();
-      if (await isAncestorCommit(lane.repoPath, laneHeadSha, 'HEAD')) {
-        return buildAlreadyReleasedResult(await readGitHead(lane.repoPath));
-      }
-    }
-  }
-  return null;
 }
 
 async function getWaveMergeOrder(
@@ -331,6 +278,7 @@ async function dispatchPacketMerge(
   if (!workspaceLockHeld) {
     return withPacketMergeWorkspace(lane, () => dispatchPacketMerge(packet, input, actor, true));
   }
+  const releaseGeneration = packetReleaseGeneration(packet, lane.id);
   let carriedReviewedHeadSha: string | undefined;
   const reviewedHead = await checkReviewedHeadIntegrity(lane, lane.worktreePath || lane.repoPath);
   if (!reviewedHead.ok) {
@@ -514,7 +462,7 @@ async function dispatchPacketMerge(
   if (result.ok) {
     await withLockedState((fresh) => {
       const packetState = fresh.packets.find((candidate) => candidate.id === input.packetId);
-      if (!packetState) return;
+      if (!packetState || !packetReleaseIdentityIsCurrent(packetState, lane.id, releaseGeneration)) return;
       markPacketReleased(packetState, {
         source: 'approve_and_merge',
         mergeCommit: result.mergeSha ?? null,

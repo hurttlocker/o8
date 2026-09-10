@@ -14,6 +14,7 @@ import {
 import { MergedByAncestryBackoff } from '@/lib/orchestrator/merged-by-ancestry-backoff';
 import { packetTerminalState } from '@/lib/orchestrator/packet-state';
 import { markPacketReleased } from '@/lib/orchestrator/packet-release-truth';
+import { packetReleaseGeneration, packetReleaseIdentityIsCurrent, verifyCurrentLaneHead } from './release-ownership';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { enqueueInboxItem } from '@/lib/supervisor/inbox';
 import { autoResolveMergedPacketVerificationIncidents } from '@/lib/supervisor/merged-incident-resolution';
@@ -535,20 +536,39 @@ function recordEvidenceDeclined(candidate: Candidate, evidence: MergeEvidence): 
   });
 }
 
-async function releasePacket(candidate: Candidate, evidence: MergeEvidence): Promise<boolean> {
+async function releasePacket(candidate: Candidate, evidence: MergeEvidence, generation: string | null): Promise<boolean> {
   if (!(await evidenceStillHolds(evidence))) {
     recordEvidenceDeclined(candidate, evidence);
     return false;
   }
 
   const releasedAt = new Date().toISOString();
+  const { cancelAutoReviewForLane } = await import('@/lib/lane/auto-review');
+  const archive = () => {
+    if (!candidate.laneId) return;
+    cancelAutoReviewForLane(candidate.laneId, MERGED_BY_ANCESTRY_SOURCE);
+    appendEvent(candidate.laneId, 'merged_by_ancestry_reconciled', 'system', {
+      packetId: candidate.packet?.id ?? candidate.lane?.packetId ?? null,
+      evidenceKind: evidence.kind, branchRef: evidence.branchRef, baseRef: evidence.baseRef,
+      headSha: evidence.headSha, baseSha: evidence.baseSha,
+      mergeBaseSha: evidence.mergeBaseSha ?? null, patchId: evidence.patchId ?? null,
+    });
+    archiveLane(candidate.laneId, 'system', { outcome: 'merged',
+      outcomeNote: `Merged by ${evidence.kind === 'ancestor' ? 'ancestry' : 'patch identity'} into ${evidence.baseRef}.` });
+  };
   if (candidate.packet) {
     const packetId = candidate.packet.id;
-    await withLockedState((state) => {
+    const { result: accepted } = await withLockedState(async (state) => {
       const packet = state.packets.find((item) => item.id === packetId);
-      if (!packet) return;
+      if (!packet || !candidate.laneId || !generation
+        || !packetReleaseIdentityIsCurrent(packet, candidate.laneId, generation)) return false;
       const terminal = packetTerminalState(packet);
-      if (terminal === 'released' || terminal === 'archived') return;
+      if (terminal === 'released' || terminal === 'archived') return false;
+      const lane = getLane(candidate.laneId);
+      if (!lane || !PACKET_LANE_SWEEPABLE_STATUSES.has(lane.status)) return false;
+      if (!(await verifyCurrentLaneHead(lane, evidence.headSha))) return false;
+      if (await revParse(evidence.repoPath, evidence.baseRef) !== evidence.baseSha
+        || !packetReleaseIdentityIsCurrent(packet, lane.id, generation)) return false;
 
       markPacketReleased(packet, {
         source: MERGED_BY_ANCESTRY_SOURCE,
@@ -565,26 +585,15 @@ async function releasePacket(candidate: Candidate, evidence: MergeEvidence): Pro
         packet.lane.lastEventAt = releasedAt;
         packet.lane.lastEventLabel = packet.lastEventLabel;
       }
+      archive();
+      return true;
     });
-  }
-
-  if (candidate.laneId) {
-    const { cancelAutoReviewForLane } = await import('@/lib/lane/auto-review');
-    cancelAutoReviewForLane(candidate.laneId, MERGED_BY_ANCESTRY_SOURCE);
-    appendEvent(candidate.laneId, 'merged_by_ancestry_reconciled', 'system', {
-      packetId: candidate.packet?.id ?? candidate.lane?.packetId ?? null,
-      evidenceKind: evidence.kind,
-      branchRef: evidence.branchRef,
-      baseRef: evidence.baseRef,
-      headSha: evidence.headSha,
-      baseSha: evidence.baseSha,
-      mergeBaseSha: evidence.mergeBaseSha ?? null,
-      patchId: evidence.patchId ?? null,
-    });
-    archiveLane(candidate.laneId, 'system', {
-      outcome: 'merged',
-      outcomeNote: `Merged by ${evidence.kind === 'ancestor' ? 'ancestry' : 'patch identity'} into ${evidence.baseRef}.`,
-    });
+    if (!accepted) return false;
+  } else {
+    const current = candidate.laneId ? getLane(candidate.laneId) : null;
+    if (current && (!LANE_ONLY_SWEEPABLE_STATUSES.has(current.status)
+      || current.sessionKey !== candidate.lane?.sessionKey)) return false;
+    archive();
   }
 
   const incidentPacketId = candidate.packet?.id ?? candidate.lane?.packetId ?? null;
@@ -598,7 +607,7 @@ async function releasePacket(candidate: Candidate, evidence: MergeEvidence): Pro
   return true;
 }
 
-async function finishWithoutChanges(candidate: Candidate, evidence: MergeEvidence): Promise<boolean> {
+async function finishWithoutChanges(candidate: Candidate, evidence: MergeEvidence, generation: string | null): Promise<boolean> {
   if (hasUnsuccessfulTurn(candidate)) return false;
   if (!(await evidenceStillHolds(evidence))) {
     recordEvidenceDeclined(candidate, evidence);
@@ -614,7 +623,9 @@ async function finishWithoutChanges(candidate: Candidate, evidence: MergeEvidenc
     let accepted = false;
     await withLockedState((state) => {
       const packet = state.packets.find((item) => item.id === candidate.packet?.id);
-      if (!packet || hasUnsuccessfulTurn({ ...candidate, packet })) return;
+      if (!packet || !candidate.laneId || !generation
+        || !packetReleaseIdentityIsCurrent(packet, candidate.laneId, generation)
+        || hasUnsuccessfulTurn({ ...candidate, packet })) return;
       accepted = true;
       packet.status = 'archived';
       packet.queueState = 'held';
@@ -695,6 +706,8 @@ export async function sweepPacketsMergedByAncestry(): Promise<MergedByAncestrySw
       continue;
     }
     try {
+      const generation = candidate.packet && candidate.laneId
+        ? packetReleaseGeneration(candidate.packet, candidate.laneId) : null;
       const evidence = await detectMergedByAncestry(candidate);
       detectBackoff.recordSuccess(key);
       if (!evidence) {
@@ -715,8 +728,8 @@ export async function sweepPacketsMergedByAncestry(): Promise<MergedByAncestrySw
         }
       }
       const settled = evidence.kind === 'no-changes'
-        ? await finishWithoutChanges(candidate, evidence)
-        : await releasePacket(candidate, evidence);
+        ? await finishWithoutChanges(candidate, evidence, generation)
+        : await releasePacket(candidate, evidence, generation);
       if (settled) merged += 1;
       else skipped += 1;
     } catch (error) {

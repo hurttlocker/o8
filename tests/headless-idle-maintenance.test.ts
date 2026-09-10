@@ -126,13 +126,14 @@ describe('headless idle worktree maintenance', () => {
     expect(prune).toHaveBeenCalledExactlyOnceWith(repoPath);
   });
 
-  it('runs the terminal cleanup pass after an explicit release', async () => {
+  it('cannot create release evidence from a raw packet ID', async () => {
     const current = mission();
     writeOrchestratorControlPlaneState(current);
 
-    await runHeadlessSprintTick({ releasePacketIds: [current.packets[0].id] });
+    // An old in-process caller can still supply extra JavaScript arguments.
+    await Reflect.apply(runHeadlessSprintTick, null, [{ releasePacketIds: [current.packets[0].id] }]);
 
-    expect(prune).toHaveBeenCalledExactlyOnceWith(repoPath);
-    expect(readOrchestratorControlPlaneState().packets[0]?.releaseState).toBe('released');
+    expect(prune).not.toHaveBeenCalled();
+    expect(readOrchestratorControlPlaneState().packets[0]?.releaseState).toBe('pending');
   });
 });

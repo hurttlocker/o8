@@ -360,6 +360,8 @@ export const githubPullRequests = sqliteTable('github_pull_requests', {
   authorLogin: text('author_login'),
   body: text('body'),
   headRefName: text('head_ref_name'),
+  headSha: text('head_sha'),
+  mergeCommit: text('merge_commit'),
   baseRefName: text('base_ref_name'),
   additions: integer('additions').notNull().default(0),
   deletions: integer('deletions').notNull().default(0),

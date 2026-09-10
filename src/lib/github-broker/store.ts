@@ -58,6 +58,8 @@ export interface GitHubPullRequestSnapshot {
   updatedAt: string;
   closedAt: string | null;
   mergedAt: string | null;
+  headSha?: string | null;
+  mergeCommit?: string | null;
 }
 
 export interface GitHubThreadAttentionSnapshot {
@@ -90,6 +92,8 @@ type GitHubPullRequestRow = {
   updatedAt: string | null;
   closedAt: string | null;
   mergedAt: string | null;
+  headSha: string | null;
+  mergeCommit: string | null;
 };
 
 function parseJson<T>(value: string | null | undefined, fallback: T): T {
@@ -122,6 +126,8 @@ function mapPullRequestRow(row: GitHubPullRequestRow): GitHubPullRequestSnapshot
     updatedAt: row.updatedAt ?? row.createdAt ?? '',
     closedAt: row.closedAt,
     mergedAt: row.mergedAt,
+    headSha: row.headSha,
+    mergeCommit: row.mergeCommit,
   };
 }
 
@@ -246,8 +252,8 @@ export function upsertGitHubPullRequest(pull: GitHubPullRequestSnapshot) {
     INSERT INTO github_pull_requests (
       pull_request_id, repo_full_name, number, title, state, author_login, body, head_ref_name,
       base_ref_name, additions, deletions, changed_files, review_decision, status_checks_json,
-      url, created_at, updated_at, closed_at, merged_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      url, created_at, updated_at, closed_at, merged_at, head_sha, merge_commit
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(pull_request_id) DO UPDATE SET
       repo_full_name = excluded.repo_full_name,
       number = excluded.number,
@@ -266,7 +272,9 @@ export function upsertGitHubPullRequest(pull: GitHubPullRequestSnapshot) {
       created_at = excluded.created_at,
       updated_at = excluded.updated_at,
       closed_at = excluded.closed_at,
-      merged_at = excluded.merged_at
+      merged_at = excluded.merged_at,
+      head_sha = excluded.head_sha,
+      merge_commit = excluded.merge_commit
   `).run(
     pull.pullRequestId,
     pull.repoFullName,
@@ -287,6 +295,8 @@ export function upsertGitHubPullRequest(pull: GitHubPullRequestSnapshot) {
     pull.updatedAt,
     pull.closedAt,
     pull.mergedAt,
+    pull.headSha ?? null,
+    pull.mergeCommit ?? null,
   );
 }
 
@@ -399,8 +409,8 @@ export function replaceGitHubPullRequests(repoFullName: string, pulls: GitHubPul
     INSERT INTO github_pull_requests (
       pull_request_id, repo_full_name, number, title, state, author_login, body, head_ref_name,
       base_ref_name, additions, deletions, changed_files, review_decision, status_checks_json,
-      url, created_at, updated_at, closed_at, merged_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      url, created_at, updated_at, closed_at, merged_at, head_sha, merge_commit
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(pull_request_id) DO UPDATE SET
       repo_full_name = excluded.repo_full_name,
       number = excluded.number,
@@ -419,7 +429,9 @@ export function replaceGitHubPullRequests(repoFullName: string, pulls: GitHubPul
       created_at = excluded.created_at,
       updated_at = excluded.updated_at,
       closed_at = excluded.closed_at,
-      merged_at = excluded.merged_at
+      merged_at = excluded.merged_at,
+      head_sha = excluded.head_sha,
+      merge_commit = excluded.merge_commit
   `);
 
   const closeMissing = sqlite.prepare(`
@@ -451,6 +463,8 @@ export function replaceGitHubPullRequests(repoFullName: string, pulls: GitHubPul
         pull.updatedAt,
         pull.closedAt,
         pull.mergedAt,
+        pull.headSha ?? null,
+        pull.mergeCommit ?? null,
       );
     }
   });
@@ -547,7 +561,7 @@ export function listGitHubPullRequests(repoFullName: string): GitHubPullRequestS
            author_login as authorLogin, body, head_ref_name as headRefName, base_ref_name as baseRefName,
            additions, deletions, changed_files as changedFiles, review_decision as reviewDecision,
            status_checks_json as statusChecksJson, url, created_at as createdAt, updated_at as updatedAt,
-           closed_at as closedAt, merged_at as mergedAt
+           closed_at as closedAt, merged_at as mergedAt, head_sha as headSha, merge_commit as mergeCommit
     FROM github_pull_requests
     WHERE repo_full_name = ? AND state = 'open'
     ORDER BY datetime(COALESCE(updated_at, created_at)) DESC
@@ -564,7 +578,7 @@ export function getGitHubPullRequestByNumber(repoFullName: string, prNumber: num
            author_login as authorLogin, body, head_ref_name as headRefName, base_ref_name as baseRefName,
            additions, deletions, changed_files as changedFiles, review_decision as reviewDecision,
            status_checks_json as statusChecksJson, url, created_at as createdAt, updated_at as updatedAt,
-           closed_at as closedAt, merged_at as mergedAt
+           closed_at as closedAt, merged_at as mergedAt, head_sha as headSha, merge_commit as mergeCommit
     FROM github_pull_requests
     WHERE repo_full_name = ? AND number = ?
     LIMIT 1
@@ -579,7 +593,7 @@ export function getGitHubPullRequestByHead(repoFullName: string, headRefName: st
            author_login as authorLogin, body, head_ref_name as headRefName, base_ref_name as baseRefName,
            additions, deletions, changed_files as changedFiles, review_decision as reviewDecision,
            status_checks_json as statusChecksJson, url, created_at as createdAt, updated_at as updatedAt,
-           closed_at as closedAt, merged_at as mergedAt
+           closed_at as closedAt, merged_at as mergedAt, head_sha as headSha, merge_commit as mergeCommit
     FROM github_pull_requests
     WHERE repo_full_name = ? AND head_ref_name = ?
     ORDER BY datetime(COALESCE(updated_at, created_at)) DESC

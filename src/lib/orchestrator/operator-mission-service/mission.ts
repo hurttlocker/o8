@@ -6,7 +6,7 @@ import { buildDagMetadata, buildDependencyGraph } from '@/lib/orchestrator/dag';
 import { applyPacketScopePolicy, buildRemainingLaunchBudget, computePredictedFiles, runDispatchTick } from '@/lib/orchestrator/dispatch';
 import { findLaneByPacket, getLaneEvents, listLanes } from '@/lib/lane/registry';
 import { recoveryInfoFromLaneEvents } from '@/lib/lane/recovery-info';
-import { resolveBranchPrefixSync } from '@/lib/operator/defaults';
+import { getOperatorDefaultsSync, resolveBranchPrefixSync } from '@/lib/operator/defaults';
 import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
 import { listArtifacts, toArtifactRef } from '@/lib/artifacts/store';
 import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
@@ -21,6 +21,7 @@ import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { bindWorkerLaunchParent } from '@/lib/orchestrator/worker-launch-context';
 import { assertQualitySearchMissionCompatibility, resolveTaskContractRequired } from '@/lib/orchestrator/task-contract-required';
 import { withMissionHandoffBarrier } from '@/lib/orchestrator/lifecycle-mutation-lock';
+import { assertExecutionCarrierCompatible, isExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
 import { releaseAbandonedMissionLifecycleHold } from '@/lib/orchestrator/mission-lifecycle-hold';
 import { getTopRulesForPacket, readRepoScopedRules } from '@/lib/dispatch/rules-store';
 import { prepareMissionBranches, type MissionBranchDecision } from './branch-cleanup';
@@ -141,6 +142,25 @@ export async function createMission(input: CreateMissionInput) {
     requestedEffort: input.requestedEffort,
     source: 'mission-create',
   });
+  const executionCarrier = input.executionCarrier === undefined
+    ? getOperatorDefaultsSync().values.workerExecutionCarrier
+    : input.executionCarrier;
+  if (executionCarrier !== null && !isExecutionCarrierId(executionCarrier)) {
+    throw new Error('executionCarrier must be "ori" or null.');
+  }
+  const packetRoutings = loadedIssues.map((issue) => issue.runtime
+    ? resolveWorkerRouting({
+        workerIntent: input.workerIntent,
+        requestedProvider: input.requestedProvider,
+        requestedRuntime: issue.runtime,
+        requestedModel: resolveRuntimePresetModel(input.runtimePreset, issue.runtime, input.requestedModel, input.claudeCodeCarrier),
+        requestedEffort: input.requestedEffort,
+        source: 'mission-create-packet',
+      })
+    : workerRouting);
+  if (executionCarrier) {
+    for (const routing of packetRoutings) assertExecutionCarrierCompatible(executionCarrier, routing.selectedRuntime);
+  }
   const branchPreparation = await prepareMissionBranches({
     repoPath,
     candidates: loadedIssues.map((issue, index) => ({
@@ -168,16 +188,7 @@ export async function createMission(input: CreateMissionInput) {
     // Per-issue runtime — a mission can mix Codex + Gemini packets (the swarm
     // "split coding/thinking" path). When the issue pins its own runtime, route
     // that packet through it; otherwise inherit the mission-level routing.
-    const packetRouting = issue.runtime
-      ? resolveWorkerRouting({
-          workerIntent: input.workerIntent,
-          requestedProvider: input.requestedProvider,
-          requestedRuntime: issue.runtime,
-          requestedModel: resolveRuntimePresetModel(input.runtimePreset, issue.runtime, input.requestedModel, input.claudeCodeCarrier),
-          requestedEffort: input.requestedEffort,
-          source: 'mission-create-packet',
-        })
-      : workerRouting;
+    const packetRouting = packetRoutings[index]!;
 
     // #453/#inline-branch-hardening — Inline tasks carry their unique issue
     // number in the branch to avoid same-title mission collisions.
@@ -236,6 +247,7 @@ export async function createMission(input: CreateMissionInput) {
       lane: null,
       assignedModel: packetRouting.selectedModel,
       ...(packetRouting.selectedRuntime === 'claude-code' ? { claudeCodeModel: input.claudeCodeModel?.trim() || null, claudeCodeCarrier: input.claudeCodeCarrier ?? null } : {}),
+      ...(executionCarrier ? { executionCarrier } : {}),
       workerIntent: packetRouting.workerIntent,
       workerRouting: packetRouting,
       dispatchRuntimePin: packetRouting.requestedRuntime ?? packetRouting.selectedRuntime,

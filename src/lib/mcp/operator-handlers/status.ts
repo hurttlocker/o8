@@ -294,6 +294,11 @@ export const STATUS_TOOLS: McpTool[] = [
           enum: listDispatchableRuntimes(),
           description: 'Default worker runtime for dispatches.',
         },
+        workerExecutionCarrier: {
+          type: 'string',
+          enum: ['ori', ''],
+          description: 'Allowlisted worker execution carrier. Use "ori" for Ori or an empty string for direct runtime launch.',
+        },
         defaultDispatchModel: {
           type: 'string',
           description: 'Default worker model id. Pass an empty string to restore the selected runtime default.',
@@ -383,6 +388,7 @@ const OPERATOR_DEFAULTS_KEYS = [
   'uiLoopMaxDiffFiles',
   'uiLoopPreviewTimeoutMs',
   'defaultDispatchRuntime',
+  'workerExecutionCarrier',
   'defaultDispatchModel',
   'opencodeOrchestratorModel',
   'opencodeWorkerModel',
@@ -420,7 +426,7 @@ export async function handleOperatorDefaults(args: Record<string, unknown>): Pro
     for (const key of OPERATOR_DEFAULTS_KEYS) {
       if (args[key] !== undefined) update[key] = args[key];
     }
-    const EMPTY_STRING_MEANS_NULL = new Set(['opencodeOrchestratorModel', 'opencodeWorkerModel']);
+    const EMPTY_STRING_MEANS_NULL = new Set(['opencodeOrchestratorModel', 'opencodeWorkerModel', 'workerExecutionCarrier']);
     for (const key of EMPTY_STRING_MEANS_NULL) {
       if (update[key] === '') update[key] = null;
     }

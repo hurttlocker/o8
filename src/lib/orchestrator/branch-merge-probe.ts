@@ -15,6 +15,7 @@ export interface BranchMergeProbeInput {
 export interface BranchMergeProbeResult {
   merged: boolean;
   mergeCommit: string | null;
+  headSha: string;
   ahead: number;
 }
 
@@ -53,9 +54,8 @@ async function readAheadCount(repoPath: string, baseRef: string, branch: string)
   return ahead;
 }
 
-async function readShortSha(repoPath: string, ref: string): Promise<string | null> {
-  const output = await gitValue(repoPath, ['rev-parse', '--short', ref]);
-  return output || null;
+async function readSha(repoPath: string, ref: string): Promise<string> {
+  return gitValue(repoPath, ['rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`]);
 }
 
 export async function probeBranchMerged(input: BranchMergeProbeInput): Promise<BranchMergeProbeResult> {
@@ -67,11 +67,13 @@ export async function probeBranchMerged(input: BranchMergeProbeInput): Promise<B
   const branch = normalizeRef(input.branch, 'branch');
   const base = normalizeRef(input.base, 'base');
   const baseRef = `origin/${base}`;
-  const ahead = await readAheadCount(repoPath, baseRef, branch);
+  const [headSha, baseSha] = await Promise.all([readSha(repoPath, branch), readSha(repoPath, baseRef)]);
+  const ahead = await readAheadCount(repoPath, baseSha, headSha);
 
   return {
     merged: ahead === 0,
-    mergeCommit: ahead === 0 ? await readShortSha(repoPath, baseRef) : null,
+    mergeCommit: ahead === 0 ? baseSha : null,
+    headSha,
     ahead,
   };
 }

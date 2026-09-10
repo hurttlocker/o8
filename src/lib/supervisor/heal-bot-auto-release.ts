@@ -3,6 +3,7 @@ import { findLaneByPacket, getLane, setLaneStatus } from '@/lib/lane/registry';
 import { probeBranchMerged } from '@/lib/orchestrator/branch-merge-probe';
 import { readOrchestratorControlPlaneState, withLockedState } from '@/lib/orchestrator/control-plane';
 import { markPacketReleased } from '@/lib/orchestrator/packet-release-truth';
+import { packetReleaseGeneration, packetReleaseIdentityIsCurrent, verifyCurrentLaneHead } from '@/lib/orchestrator/release-ownership';
 
 const AUTO_RELEASE_PROBE_RETRY_MS = 60_000;
 const AUTO_RELEASE_MIN_EVENT_AGE_MS = 30_000;
@@ -37,6 +38,7 @@ export async function runAwaitingReviewAutoReleaseSweep(): Promise<void> {
     const branch = worktreePath ? 'HEAD' : lane.branch || 'HEAD';
     const displayBranch = lane.branch || branch;
     const base = lane.baseBranch || 'main';
+    const generation = packetReleaseGeneration(packet, lane.id);
 
     try {
       const probe = await probeBranchMerged({ repoPath: probeRepoPath, branch, base });
@@ -49,14 +51,20 @@ export async function runAwaitingReviewAutoReleaseSweep(): Promise<void> {
       }
 
       const releasedAt = new Date().toISOString();
-      if (lane.status !== 'completed') setLaneStatus(lane.id, 'completed', 'system', 'merged');
-      const { result: released } = await withLockedState((current) => {
+      const { result: released } = await withLockedState(async (current) => {
         const packetState = current.packets.find((candidate) => candidate.id === packet.id);
-        if (!packetState || packetState.releaseState === 'released' || packetState.status !== 'awaiting_review') return false;
+        if (!packetState || packetState.status !== 'awaiting_review'
+          || !packetReleaseIdentityIsCurrent(packetState, lane.id, generation)) return false;
+        if (!(await verifyCurrentLaneHead(lane, probe.headSha))) return false;
+        const finalLane = getLane(lane.id);
+        if (!finalLane || !['reviewing', 'completed'].includes(finalLane.status)
+          || finalLane.branch !== lane.branch || finalLane.worktreePath !== lane.worktreePath
+          || !packetReleaseIdentityIsCurrent(packetState, lane.id, generation)) return false;
 
         markPacketReleased(packetState, {
           source: 'heal_bot_auto_release',
           mergeCommit: probe.mergeCommit,
+          headSha: probe.headSha,
           evidenceKind: 'branch_merged_probe',
           releasedAt,
         });
@@ -67,6 +75,7 @@ export async function runAwaitingReviewAutoReleaseSweep(): Promise<void> {
           packetState.lane.lastEventLabel = 'merged';
         }
         current.updatedAt = releasedAt;
+        if (getLane(lane.id)?.status !== 'completed') setLaneStatus(lane.id, 'completed', 'system', 'merged');
         return true;
       });
 

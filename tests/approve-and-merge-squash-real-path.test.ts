@@ -9,6 +9,16 @@ import { NextRequest } from 'next/server';
 
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
+const lifecycle = vi.hoisted(() => ({ afterMerge: null as (() => void) | null }));
+vi.mock('@/lib/lane/commands', async (original) => {
+  const actual = await original<typeof import('@/lib/lane/commands')>();
+  return { ...actual, dispatch: async (...args: Parameters<typeof actual.dispatch>) => {
+    const result = await actual.dispatch(...args);
+    if (args[0].verb === 'merge' && result.ok) lifecycle.afterMerge?.();
+    return result;
+  } };
+});
+
 const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-governed-squash-'));
 const originalDataDir = process.env.CORTEX_IDE_DATA_DIR;
 const originalO8DataDir = process.env.O8_DATA_DIR;
@@ -38,7 +48,7 @@ const { recordOrchestratorReview } = await import('@/lib/approvals/store');
 const { AGENT_COMMIT_TRAILER } = await import('@/lib/lane/commit-attribution');
 const { createLane } = await import('@/lib/lane/registry');
 const { recordMission } = await import('@/lib/db/missions-store');
-const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const {
   createEmptyOrchestratorMissionState,
   normalizeOrchestratorMissionState,
@@ -210,6 +220,7 @@ beforeAll(async () => {
 });
 
 afterEach(() => {
+  lifecycle.afterMerge = null;
   writeOrchestratorControlPlaneState(createEmptyOrchestratorMissionState());
   __resetIdempotencyStoreForTests();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -223,6 +234,20 @@ afterAll(() => {
 });
 
 describe('approve_and_merge governed squash through the route handler', () => {
+  it('does not attach a landed merge to a successor attempt that arrived before release persistence', async () => {
+    const fixture = await createFixture('successor-attempt');
+    lifecycle.afterMerge = () => {
+      const state = readOrchestratorControlPlaneState();
+      state.packets[0].attemptCount = (state.packets[0].attemptCount ?? 0) + 1;
+      state.packets[0].operatorStopped = true;
+      writeOrchestratorControlPlaneState(state);
+    };
+    const response = await mergeRoute.POST(mergeRequest(fixture.packetId));
+    expect(response.status).toBe(200);
+    expect(git(fixture.repo, ['rev-list', '--count', `${fixture.baseSha}..refs/heads/main`])).toBe('1');
+    expect(readOrchestratorControlPlaneState().packets[0]).toMatchObject({ operatorStopped: true, releaseState: 'pending' });
+  }, 60_000);
+
   it('lands one attributed commit with the explicit message', async () => {
     const fixture = await createFixture('explicit-message');
     const commitMessage = 'fix: land the reviewed packet as one commit';

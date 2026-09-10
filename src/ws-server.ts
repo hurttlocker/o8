@@ -195,13 +195,10 @@ import { isTerminalLaneStatus } from './lib/lane/types';
 import type { Lane } from './lib/lane/types';
 import { getPacketTailBatch, type PacketTailEvent } from './lib/lane/packet-tail';
 import {
-  hasFreshSelfReviewTranscriptActivity,
-  preserveSelfReviewStallWork,
   probeSelfReviewStall,
   resetSelfReviewStallGuard,
   type SelfReviewStallDecision,
 } from './lib/supervisor/self-review-stall-guard';
-import { recordSelfReviewInterruptFailure } from './lib/ws-server/self-review-transition';
 import { invalidateReviewingLaneForWorkerActivity } from './lib/supervisor/review-invalidation';
 import {
   enqueueSupervisorInboxItem,
@@ -758,116 +755,16 @@ async function forceCodexSelfReviewToReview(
   lane: Lane,
   decision: Extract<SelfReviewStallDecision, { kind: 'force-review' }>,
 ): Promise<void> {
-  const cwd = decision.cwd || lane.worktreePath || lane.repoPath;
-  console.warn(`[supervisor] Forcing Codex self-review stall to review lane=${lane.id} session=${surfaceId}: ${decision.reason}`);
-
-  const preservation = await preserveSelfReviewStallWork(lane, cwd);
-  if (await yieldSelfReviewForceToFreshActivity(surfaceId, lane)) return;
-  if (preservation.error) {
-    await parkSelfReviewStallForOrchestrator(
-      surfaceId,
-      lane,
-      `Auto-commit failed: ${preservation.error}`,
-      preservation.captureRef,
-    );
-    return;
-  }
-
-  if (!preservation.hasReviewableDiff) {
-    await parkSelfReviewStallForOrchestrator(
-      surfaceId,
-      lane,
-      'No reviewable commit remained after preserving the worktree.',
-      preservation.captureRef,
-    );
-    return;
-  }
-
-  const { runCompletionVerification } = await import('@/lib/supervisor/completion-verification');
-  const verification = await runCompletionVerification(cwd, lane.baseBranch);
-  if (await yieldSelfReviewForceToFreshActivity(surfaceId, lane)) return;
-  if (!verification.ok) {
-    await parkSelfReviewStallForOrchestrator(
-      surfaceId,
-      lane,
-      `Preserved work failed ${verification.kind}; operator review is required.`,
-      preservation.captureRef,
-    );
-    return;
-  }
-
-  if (lane.packetId) {
-    try {
-      const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');
-      await capturePacketCompletionContext(lane.packetId, surfaceId);
-    } catch (error) {
-      console.error(`[context-relay] Failed to capture self-review stall context for packet ${lane.packetId}:`, error);
-    }
-  }
-
-  try {
-    await fetchRuntimeAction({
-      action: 'interrupt',
-      surfaceId,
-      clientMutationId: randomUUID(),
-    });
-  } catch (error) {
-    const reason = recordSelfReviewInterruptFailure({ laneId: lane.id, surfaceId, error });
-    resetSelfReviewStallGuard(surfaceId);
-    const detail = `Self-review work was preserved, but the runtime is still active because interrupt failed: ${reason}`;
-    console.warn(`[supervisor] ${detail}`);
-    broadcast({
-      channel: 'supervisor',
-      event: 'agent-update',
-      data: { surfaceId, name: lane.label, status: 'stuck', detail, repoPath: lane.repoPath } satisfies AgentUpdateEvent,
-    });
-    queueOrchestratorEscalation(lane.repoPath, [
-      `[SUPERVISOR] Agent "${lane.label}" (${surfaceId}) could not be stopped after its work was preserved.`,
-      `Lane: ${lane.id}`,
-      `Reason: ${reason}`,
-      '',
-      'The runtime remains bound and the lane remains active. Confirm the stop before moving this work to review.',
-    ].join('\n'));
-    return;
-  }
-
-  unregisterWatchedAgent(surfaceId);
-  const { updateLane } = await import('@/lib/lane/registry');
-  const updated = updateLane(lane.id, {
-    status: 'reviewing',
-    sessionKey: null,
-    lastEventAt: new Date().toISOString(),
-    lastEventLabel: 'self_review_stall_forced',
-  }, 'system');
-  if (updated) {
-    await enqueueAutoReview(updated.id);
-    await triggerHeadlessSprintTick();
-    queueReviewContinuation(updated);
-  }
-
-  resetSelfReviewStallGuard(surfaceId);
-  broadcast({
-    channel: 'supervisor',
-    event: 'agent-update',
-    data: {
-      surfaceId,
-      name: lane.label,
-      status: 'completed',
-      detail: preservation.committed
-        ? 'Self-review stalled after verification; worktree was committed and moved to review.'
-        : 'Self-review stalled after verification; existing commit was moved to review.',
-      repoPath: lane.repoPath,
-    } satisfies AgentUpdateEvent,
+  const { forceSelfReviewToReview } = await import('@/lib/supervisor/force-self-review');
+  await forceSelfReviewToReview(surfaceId, lane, decision, {
+    park: parkSelfReviewStallForOrchestrator,
+    unregister: unregisterWatchedAgent,
+    enqueueAutoReview,
+    triggerHeadlessSprintTick,
+    queueReviewContinuation,
+    broadcastUpdate: (data) => broadcast({ channel: 'supervisor', event: 'agent-update', data }),
+    escalate: queueOrchestratorEscalation,
   });
-}
-
-async function yieldSelfReviewForceToFreshActivity(surfaceId: string, lane: Lane): Promise<boolean> {
-  if (!(await hasFreshSelfReviewTranscriptActivity(surfaceId))) return false;
-  resetSelfReviewStallGuard(surfaceId);
-  console.log(
-    `[supervisor] Self-review force deferred for lane=${lane.id} session=${surfaceId}: transcript activity resumed.`,
-  );
-  return true;
 }
 
 async function parkSelfReviewStallForOrchestrator(
@@ -875,8 +772,10 @@ async function parkSelfReviewStallForOrchestrator(
   lane: Lane,
   reason: string,
   captureRef?: string,
+  checkCurrent?: () => void,
 ): Promise<void> {
   const { appendEvent, setLaneStatus } = await import('@/lib/lane/registry');
+  checkCurrent?.();
   appendEvent(lane.id, 'update', 'system', {
     event: 'self_review_stall_escalated',
     reason,

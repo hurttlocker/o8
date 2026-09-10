@@ -10,9 +10,11 @@ process.env.CORTEX_IDE_DATA_DIR = dataDir;
 const {
   getOperatorDefaults,
   getOperatorDefaultsTomlPath,
+  OPERATOR_DEFAULTS_FALLBACK,
   updateOperatorDefaults,
 } = await import('./defaults');
 const { parseOperatorDefaultsToml } = await import('@/lib/settings/toml');
+const { assertRoutingTomlCompatibility } = await import('./routing-compatibility');
 
 /**
  * Evaporation guard: updateOperatorDefaults copies each field from the update
@@ -72,7 +74,7 @@ const NON_DEFAULT_UPDATE = {
   crossHouseWorkerFallback: true,
   orchestratorBackend: 'collide',
   reviewerBackend: 'codex',
-  packetExplainerEnabled: false,
+  packetExplainerEnabled: true,
   quizGateEnabled: true,
   buyinDocEnabled: true,
   updateAutoApply: 'idle',
@@ -92,6 +94,12 @@ const NON_DEFAULT_UPDATE = {
 } as const;
 
 describe('updateOperatorDefaults round-trip', () => {
+  it('defaults optional explainers and quiz gates off without disabling explicit opt-in', async () => {
+    expect((await getOperatorDefaults()).values).toMatchObject({
+      packetExplainerEnabled: false,
+      quizGateEnabled: false,
+    });
+  });
   it('migrates the legacy autoApplyUpdates value to updateAutoApply', async () => {
     writeFileSync(join(dataDir, 'operator-defaults.json'), JSON.stringify({
       autoApplyUpdates: 'when-idle',
@@ -111,6 +119,38 @@ describe('updateOperatorDefaults round-trip', () => {
     await updateOperatorDefaults({ reviewerBackend: 'codex' });
     const after = await updateOperatorDefaults({ parallelCap: 5 });
     expect(after.values.reviewerBackend).toBe('codex');
+  });
+
+  it('clears the persisted execution carrier back to direct launch', async () => {
+    await updateOperatorDefaults({ defaultDispatchRuntime: 'codex', workerExecutionCarrier: 'ori' });
+    const cleared = await updateOperatorDefaults({ workerExecutionCarrier: null });
+    expect(cleared.values.workerExecutionCarrier).toBeNull();
+    expect(parseOperatorDefaultsToml(readFileSync(getOperatorDefaultsTomlPath(), 'utf8')).workerExecutionCarrier).toBeNull();
+  });
+
+  it('rejects an execution carrier that is incompatible with the effective default runtime', async () => {
+    await updateOperatorDefaults({ defaultDispatchRuntime: 'claude-code' });
+    await expect(updateOperatorDefaults({ workerExecutionCarrier: 'ori' })).rejects.toThrow(/incompatible/);
+  });
+
+  it('honors environment-selected runtime precedence when validating updates and TOML', async () => {
+    const priorRuntime = process.env.O8_DEFAULT_DISPATCH_RUNTIME;
+    const priorProfile = process.env.O8_SUBSCRIPTION_PROFILE;
+    process.env.O8_DEFAULT_DISPATCH_RUNTIME = 'claude-code';
+    process.env.O8_SUBSCRIPTION_PROFILE = 'both';
+    try {
+      await expect(updateOperatorDefaults({ defaultDispatchRuntime: 'codex', workerExecutionCarrier: 'ori' }))
+        .rejects.toThrow(/effective default runtime 'claude-code'/);
+      expect(() => assertRoutingTomlCompatibility(
+        '[models]\ndefault_dispatch_runtime = "codex"\nworker_execution_carrier = "ori"\n',
+        OPERATOR_DEFAULTS_FALLBACK,
+      )).toThrow(/effective default runtime 'claude-code'/);
+    } finally {
+      if (priorRuntime === undefined) delete process.env.O8_DEFAULT_DISPATCH_RUNTIME;
+      else process.env.O8_DEFAULT_DISPATCH_RUNTIME = priorRuntime;
+      if (priorProfile === undefined) delete process.env.O8_SUBSCRIPTION_PROFILE;
+      else process.env.O8_SUBSCRIPTION_PROFILE = priorProfile;
+    }
   });
 
   it('subscriptionProfile persists and flips the effective house defaults', async () => {

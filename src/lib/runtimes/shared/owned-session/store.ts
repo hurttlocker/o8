@@ -26,11 +26,11 @@ import {
   DEFAULT_AUTO_RETRY_DELAY_MS,
   OWNED_FLEET_TTL_MS,
   compactText,
+  canSignalOwnedRun,
   ensureDir,
   isPidAlive,
   nowIso,
   forceKillTreeWindows,
-  pidCommandLine,
   resolveRepoContext,
   validateWorkspace,
 } from './helpers';
@@ -346,8 +346,8 @@ export function createOwnedSessionStore(
       if (session.activeRun.tmuxSession) {
         await signalBridgeTerminalSession(session.activeRun.tmuxSession, 'SIGINT');
       } else {
-        const cmd = await pidCommandLine(session.activeRun.pid);
-        if (cmd && cmd.includes(adapter.binaryName)) {
+        const commandIdentity = session.activeRun.commandIdentity ?? adapter.binaryName;
+        if (await canSignalOwnedRun(session.activeRun, adapter.binaryName)) {
           // Windows has no process groups addressed by negative pid and no
           // SIGINT delivery to another tree; the CLI is also a grandchild of
           // the interpreter, so a single-pid kill would leave it running.
@@ -363,12 +363,10 @@ export function createOwnedSessionStore(
               throw new Error(`taskkill could not stop pid ${session.activeRun.pid}`);
             }
           } else {
-            process.kill(-session.activeRun.pid, 'SIGINT');
+            process.kill(-(session.activeRun.processGroupId ?? session.activeRun.pid), 'SIGINT');
           }
         } else {
-          console.warn(
-            `[owned-store] Skipping interrupt signal for ${surfaceId}: pid ${session.activeRun.pid} no longer matches an owned ${adapter.binaryName} run (${cmd ?? 'process gone'})`,
-          );
+          return { interrupted: false, note: `Ownership of the active ${commandIdentity} process could not be verified; no signal was sent and the run remains held.` };
         }
       }
       session.activeRun = {

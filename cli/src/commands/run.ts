@@ -55,6 +55,10 @@ const RUN_LEADING_FLAGS = new Set([
 
 /** env vars that must NOT leak into the pane (confuse tmux / cwd). */
 const ENV_DENYLIST = new Set(['_', 'PWD', 'OLDPWD', 'SHLVL', 'TMUX', 'TMUX_PANE']);
+const CALLER_ROUTING_ENV = [
+  'O8_API_PORT', 'O8_WS_PORT', 'WS_PORT', 'O8_API_TOKEN', 'O8_WORKER_TOKEN',
+  'O8_WORKER_PACKET_ID', 'O8_SPECTATOR_TOKEN', 'O8_DATA_DIR', 'CORTEX_IDE_DATA_DIR',
+] as const;
 const LEGACY_SERVER_ONLY_STUB_NODE_OPTION = '--import=./scripts/register-server-only-stub.mjs';
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -72,7 +76,9 @@ export function managedRunEnvironmentLines(
   // Clear the dangerous Node preload first, then restore the caller's value if
   // one exists. The legacy repo-relative preload must become absolute before a
   // managed child changes directory.
-  const lines = ['unset NODE_OPTIONS'];
+  // Absence is meaningful too: an operator must not inherit a previous
+  // worker's credential or a development port from the terminal server.
+  const lines = ['unset NODE_OPTIONS', ...CALLER_ROUTING_ENV.map((key) => `unset ${key}`)];
   for (const [key, rawValue] of Object.entries(env)) {
     if (rawValue == null) continue;
     if (ENV_DENYLIST.has(key)) continue;

@@ -1039,6 +1039,14 @@
       ]
     },
     {
+      "path": "tests/automatic-release-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/automation-fire-spine-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -1485,6 +1493,16 @@
       ]
     },
     {
+      "path": "tests/execution-carrier-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/feedback-sync-reports.test.ts",
       "reasons": [
         "executable-fixture"
@@ -1579,6 +1597,14 @@
       "reasons": [
         "child-process",
         "git-cli"
+      ]
+    },
+    {
+      "path": "tests/forced-review-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
       ]
     },
     {
@@ -1786,6 +1812,17 @@
       "path": "tests/managed-run-registry-termination.test.ts",
       "reasons": [
         "process-signal"
+      ]
+    },
+    {
+      "path": "tests/managed-run-routing-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "network-listener",
+        "process-signal",
+        "real-path",
+        "terminal-tool"
       ]
     },
     {
@@ -2073,6 +2110,14 @@
       ]
     },
     {
+      "path": "tests/owned-carrier-signal-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/owned-claude-continuation-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -2115,6 +2160,14 @@
     {
       "path": "tests/packet-explainer-priority-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/packet-explainer-restart-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
         "real-path"
       ]
     },
@@ -2290,6 +2343,14 @@
       "reasons": [
         "git-cli",
         "native-build"
+      ]
+    },
+    {
+      "path": "tests/release-truth-entry-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
       ]
     },
     {

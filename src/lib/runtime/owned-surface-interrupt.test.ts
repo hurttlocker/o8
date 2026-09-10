@@ -17,7 +17,8 @@ vi.mock('@/lib/runtime/pty-bridge', () => ({
 vi.mock('@/lib/runtimes/shared/owned-session-index', () => ({
   lookupOwnedActiveRunFresh: mocks.lookupRun,
 }));
-vi.mock('@/lib/runtimes/shared/owned-session/helpers', () => ({
+vi.mock('@/lib/runtimes/shared/owned-session/helpers', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/runtimes/shared/owned-session/helpers')>(),
   isPidAlive: mocks.pidAlive,
   pidCommandLine: mocks.pidCommandLine,
 }));

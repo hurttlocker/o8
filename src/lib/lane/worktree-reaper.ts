@@ -244,32 +244,24 @@ async function archiveMergedPullRequestLane(
   repoFullName: string,
   pull: GitHubPullRequestSnapshot,
   match: 'prNumber' | 'headRefName',
-): Promise<void> {
-  console.log(`[worktree-reaper] ${lane.id} PR #${pull.number} merged at ${pull.mergedAt} — archiving`);
+): Promise<boolean> {
   const mergedClean = await stampPrMergedClean(lane, pull);
-  archiveLane(lane.id, 'system');
-  // PR-mode parity (#1386 family): a PR merged on GitHub is this packet's
-  // merge — release it so sequential dependents (wave 2+) launch, exactly as
-  // approve_and_merge would have. The headless tick applies the release to the
-  // current mission and every registry mission.
-  if (lane.packetId) {
-    try {
-      const { queueHeadlessPacketRelease } = await import('@/lib/orchestrator/headless-loop');
-      queueHeadlessPacketRelease([lane.packetId]);
-    } catch (error) {
-      console.warn(`[worktree-reaper] Failed to queue packet release for ${lane.packetId}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-  appendEvent(lane.id, 'pr_merged_reconciled', 'system', {
-    repoFullName,
-    prNumber: pull.number,
-    mergedAt: pull.mergedAt,
-    match,
-    mergedClean: mergedClean.mergedClean,
-    mergedCleanReason: mergedClean.reason,
-    reviewedHeadSha: mergedClean.reviewedHeadSha ?? null,
-    comparisonRef: mergedClean.comparisonRef ?? null,
+  const { releaseMergedPullRequestPacket } = await import('@/lib/orchestrator/automatic-release');
+  const release = await releaseMergedPullRequestPacket(lane, pull, () => {
+    console.log(`[worktree-reaper] ${lane.id} PR #${pull.number} merged at ${pull.mergedAt} — archiving`);
+    archiveLane(lane.id, 'system');
+    appendEvent(lane.id, 'pr_merged_reconciled', 'system', {
+      repoFullName,
+      prNumber: pull.number,
+      mergedAt: pull.mergedAt,
+      match,
+      mergedClean: mergedClean.mergedClean,
+      mergedCleanReason: mergedClean.reason,
+      reviewedHeadSha: mergedClean.reviewedHeadSha ?? null,
+      comparisonRef: mergedClean.comparisonRef ?? null,
+    });
   });
+  return release !== 'held';
 }
 
 function stampLanePullRequestNumber(lane: Lane, pull: GitHubPullRequestSnapshot): void {
@@ -299,8 +291,8 @@ async function reconcileMergedPullRequest(
   if (prNumber !== null) {
     let pull = getGitHubPullRequestByNumber(repoFullName, prNumber);
     if (pull?.mergedAt) {
-      await archiveMergedPullRequestLane(lane, repoFullName, pull, 'prNumber');
-      return { archived: true, refreshed: false };
+      const archived = await archiveMergedPullRequestLane(lane, repoFullName, pull, 'prNumber');
+      if (archived || (pull.headSha && pull.mergeCommit)) return { archived, refreshed: false };
     }
 
     if (allowTargetedRefresh) {
@@ -308,8 +300,7 @@ async function reconcileMergedPullRequest(
       const refreshed = await ensureGitHubPullRequest(repoFullName, prNumber);
       pull = refreshed.pr;
       if (pull?.mergedAt) {
-        await archiveMergedPullRequestLane(lane, repoFullName, pull, 'prNumber');
-        return { archived: true, refreshed: true };
+        return { archived: await archiveMergedPullRequestLane(lane, repoFullName, pull, 'prNumber'), refreshed: true };
       }
       return { archived: false, refreshed: true };
     }
@@ -321,10 +312,10 @@ async function reconcileMergedPullRequest(
   if (legacyPull) {
     stampLanePullRequestNumber(lane, legacyPull);
     if (legacyPull.mergedAt) {
-      await archiveMergedPullRequestLane(lane, repoFullName, legacyPull, 'headRefName');
-      return { archived: true, refreshed: false };
+      const archived = await archiveMergedPullRequestLane(lane, repoFullName, legacyPull, 'headRefName');
+      if (archived || (legacyPull.headSha && legacyPull.mergeCommit)) return { archived, refreshed: false };
     }
-    return { archived: false, refreshed: false };
+    if (!legacyPull.mergedAt) return { archived: false, refreshed: false };
   }
 
   if (allowTargetedRefresh) {
@@ -334,8 +325,7 @@ async function reconcileMergedPullRequest(
     if (pull) {
       stampLanePullRequestNumber(lane, pull);
       if (pull.mergedAt) {
-        await archiveMergedPullRequestLane(lane, repoFullName, pull, 'headRefName');
-        return { archived: true, refreshed: true };
+        return { archived: await archiveMergedPullRequestLane(lane, repoFullName, pull, 'headRefName'), refreshed: true };
       }
     }
     return { archived: false, refreshed: true };

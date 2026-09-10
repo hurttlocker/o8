@@ -15,7 +15,6 @@ const targetedHeadRefreshes = new Map<string, {
   closedAt?: string | null;
   mergedAt?: string | null;
 }>();
-const queueHeadlessPacketReleaseMock = vi.hoisted(() => vi.fn());
 
 vi.doMock('@/lib/github-broker/sync', () => ({
   ensureGitHubPullRequest: vi.fn(async (repoFullName: string, prNumber: number) => {
@@ -69,17 +68,6 @@ vi.doMock('@/lib/worktree/live-process-guard', () => ({
   allowWorktreeRemoval: vi.fn(async () => true),
 }));
 
-vi.doMock('@/lib/orchestrator/headless-loop', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/orchestrator/headless-loop')>();
-  return {
-    ...actual,
-    queueHeadlessPacketRelease: (packetIds: string[]) => {
-      queueHeadlessPacketReleaseMock(packetIds);
-      actual.queueHeadlessPacketRelease(packetIds);
-    },
-  };
-});
-
 const { closeDb, getSqlite } = await import('@/lib/db');
 const { createLane, getLane, getLaneEvents } = await import('@/lib/lane/registry');
 const { runWorktreeReaperTick } = await import('@/lib/lane/worktree-reaper');
@@ -97,7 +85,6 @@ afterAll(() => {
 
 afterEach(() => {
   targetedHeadRefreshes.clear();
-  queueHeadlessPacketReleaseMock.mockClear();
 });
 
 function git(cwd: string, args: string[]): string {
@@ -583,7 +570,7 @@ describe('worktree reaper PR merge reconciliation', () => {
   });
 });
 
-  it('queues the packet release when a PR-merged lane is reconciled (sequential wave parity)', { timeout: 20_000 }, async () => {
+  it('does not invent a packet release for a lane absent from durable missions', { timeout: 20_000 }, async () => {
     const repoPath = makeRepo();
     const lane = createLane({
       repoPath,
@@ -604,5 +591,6 @@ describe('worktree reaper PR merge reconciliation', () => {
     await runWorktreeReaperTick();
 
     expect(getLane(lane.id)?.status).toBe('archived');
-    expect(queueHeadlessPacketReleaseMock).toHaveBeenCalledWith(['pkt-pr-merged-release']);
+    const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+    expect(readOrchestratorControlPlaneState().packets.some((packet) => packet.id === lane.packetId)).toBe(false);
   });

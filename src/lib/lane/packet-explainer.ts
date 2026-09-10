@@ -15,6 +15,7 @@
  * inside the sandboxed iframe, so the approve-gate logic stays in the app.
  */
 
+import { createHash, randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { readFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -31,13 +32,13 @@ import { runReviewerTurnWithQuotaFallback } from './review-quota-fallback';
 import type { Lane } from './types';
 
 /**
- * The file the backend agent is told to write in the worktree root. PER-PACKET
- * so two lanes reviewing in the same repo (worktreePath falling back to
- * repoPath) never race on a single fixed path.
+ * The scratch file is unique per attempt, including retries of the same packet.
+ * A detached older writer cannot replace or delete its successor's output.
  */
-function explainerFilename(packetId: string): string {
+function explainerFilename(packetId: string, generationId: string): string {
   const safe = packetId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 96) || 'packet';
-  return `.o8-packet-explainer-${safe}.html`;
+  const attempt = createHash('sha256').update(generationId).digest('hex').slice(0, 16);
+  return `.o8-packet-explainer-${safe}-${attempt}.html`;
 }
 
 export interface GenerateExplainerParams {
@@ -50,6 +51,9 @@ export interface GenerateExplainerParams {
   deviationsRaw: string | null;
   reviewContext: string;
   signal?: AbortSignal;
+  generationId?: string;
+  /** Evaluated again under the packet lock before publishing a late result. */
+  isCurrent?: () => boolean;
 }
 
 export interface PacketExplainerGenerationResult {
@@ -105,7 +109,7 @@ export function parseExplainerQuiz(html: string): PacketExplainerQuiz | null {
   return questions.length >= 3 ? { questions } : null;
 }
 
-function buildExplainerPrompt(params: GenerateExplainerParams): string {
+function buildExplainerPrompt(params: GenerateExplainerParams, generationId: string): string {
   return [
     `Write a self-contained HTML "packet explainer" for a code change under review, so a human who does NOT read diffs can understand and verify it.`,
     ``,
@@ -119,7 +123,7 @@ function buildExplainerPrompt(params: GenerateExplainerParams): string {
     `Reviewer context (findings so far):`,
     params.reviewContext || '(none yet)',
     ``,
-    `Produce a SINGLE self-contained .html file at the worktree root named exactly \`${explainerFilename(params.packetId)}\`.`,
+    `Produce a SINGLE self-contained .html file at the worktree root named exactly \`${explainerFilename(params.packetId, generationId)}\`.`,
     `Requirements for the file:`,
     `- Inline all CSS; no external assets, no network requests.`,
     `- Sections: what & why (plain language), annotated key hunks (the 2-4 most important changes), data flow touched, deviations from brief, risk notes.`,
@@ -141,20 +145,23 @@ export async function generatePacketExplainer(
   params: GenerateExplainerParams,
 ): Promise<PacketExplainerGenerationResult> {
   const startedAt = Date.now();
+  const generationId = params.generationId ?? `thoughts-explainer-${randomUUID()}`;
+  const isCurrent = () => !params.signal?.aborted && (params.isCurrent?.() ?? true);
   let observedBackend: string | null = null;
   let observedCost: number | null = null;
   const { patchMissionPacket } = await import('@/lib/orchestrator/operator-mission-service/packet-patch');
   const stamp = async (explainer: NonNullable<import('@/lib/orchestrator/types').OrchestratorPacket['explainer']>) => {
     try {
-      await patchMissionPacket(params.packetId, { explainer });
+      await patchMissionPacket(params.packetId, { explainer }, isCurrent);
     } catch (error) {
       console.warn(`[explainer] Failed to stamp explainer status for packet ${params.packetId}:`, error);
     }
   };
 
   try {
-    const threadId = `explainer-${params.lane.id}`;
-    const prompt = buildExplainerPrompt(params);
+    if (!isCurrent()) return { outcome: 'deferred', backend: null, durationMs: 0, approximateCost: null };
+    const threadId = generationId;
+    const prompt = buildExplainerPrompt(params, generationId);
     const turn = await runReviewerTurnWithQuotaFallback({
       laneId: params.lane.id,
       repoPath: params.lane.repoPath,
@@ -170,13 +177,13 @@ export async function generatePacketExplainer(
     });
     observedBackend = turn.backend;
     observedCost = turn.approximateCost;
-    if (params.signal?.aborted) {
+    if (!isCurrent()) {
       return {
         outcome: 'deferred',
         backend: turn.backend,
         durationMs: Date.now() - startedAt,
         approximateCost: turn.approximateCost,
-        reason: 'correctness review took priority',
+        reason: 'explainer was cancelled or superseded',
       };
     }
     if (turn.unavailableReason === 'session_busy') {
@@ -191,8 +198,12 @@ export async function generatePacketExplainer(
     if (!turn.ok) throw new Error(turn.errors.join('; ') || 'reviewer turn failed');
 
     const worktree = params.lane.worktreePath || params.lane.repoPath;
-    const scratchPath = join(worktree, explainerFilename(params.packetId));
+    const scratchPath = join(worktree, explainerFilename(params.packetId, generationId));
     const html = await readFile(scratchPath, 'utf8');
+    if (!isCurrent()) {
+      return { outcome: 'deferred', backend: turn.backend, durationMs: Date.now() - startedAt,
+        approximateCost: turn.approximateCost, reason: 'explainer was superseded while reading output' };
+    }
     if (!html.trim()) {
       throw new Error('explainer file was empty');
     }
@@ -240,7 +251,7 @@ export async function generatePacketExplainer(
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (params.signal?.aborted) {
+    if (!isCurrent()) {
       return {
         outcome: 'deferred',
         backend: observedBackend,

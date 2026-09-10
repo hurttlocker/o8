@@ -20,6 +20,10 @@ import {
   resolveRuntimePreset,
 } from '@/lib/orchestrator/runtime-capabilities';
 import { assertRuntimeDispatchable, DispatchPreflightError } from '@/lib/runtimes/shared/auth-detect';
+import {
+  assertExecutionCarrierDispatchable,
+  ExecutionCarrierPreflightError,
+} from '@/lib/runtimes/shared/execution-carrier-preflight';
 import { ControlPlaneLockTimeoutError } from '@/lib/orchestrator/control-plane';
 import { resolveRequestPrincipalContext } from '@/lib/auth/principal';
 import type { PacketDispatcherAttribution } from '@/lib/orchestrator/types';
@@ -262,13 +266,18 @@ export async function POST(request: NextRequest) {
     // stored worker profile: a mission pinned to openrouter / codex-subscription never
     // touches the native CLI login, so a logged-out native CLI must not refuse it.
     const preflightCarrier = { claudeCodeCarrier };
-    await assertRuntimeDispatchable(
-      workerRouting.selectedRuntime, workerRouting.selectedModel, repoPath, preflightCarrier,
-    );
-    for (const issueRouting of issueRoutings) {
+    const preflightRuntime = async (routing: typeof workerRouting) => {
+      if (defaults.workerExecutionCarrier) {
+        await assertExecutionCarrierDispatchable(routing.selectedRuntime, defaults.workerExecutionCarrier);
+        return;
+      }
       await assertRuntimeDispatchable(
-        issueRouting.selectedRuntime, issueRouting.selectedModel, repoPath, preflightCarrier,
+        routing.selectedRuntime, routing.selectedModel, repoPath, preflightCarrier,
       );
+    };
+    await preflightRuntime(workerRouting);
+    for (const issueRouting of issueRoutings) {
+      await preflightRuntime(issueRouting);
     }
   } catch (error) {
     if (error instanceof DispatchPreflightError) {
@@ -278,6 +287,12 @@ export async function POST(request: NextRequest) {
         installed: error.status.installed,
         authenticated: error.status.authenticated,
         unavailableReason: error.status.unavailableReason,
+      });
+    }
+    if (error instanceof ExecutionCarrierPreflightError) {
+      return operatorError(error.failure, error.message, 400, {
+        runtime: workerRouting.selectedRuntime,
+        executionCarrier: defaults.workerExecutionCarrier,
       });
     }
     const message = error instanceof Error ? error.message : 'Runtime readiness check failed.';

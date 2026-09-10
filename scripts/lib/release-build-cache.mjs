@@ -119,6 +119,12 @@ function sha256Text(value) {
   return createHash('sha256').update(value).digest('hex');
 }
 
+function nativeCheckoutIdentity(root) {
+  // Native build scripts retain absolute permission/output paths. Do not
+  // expose the path in receipts or mistake a relocated cache for reusable work.
+  return sha256Text(stableJson({ path: resolve(root), realpath: realpathSync(root) }));
+}
+
 async function sha256File(path) {
   const hash = createHash('sha256');
   for await (const chunk of createReadStream(path)) hash.update(chunk);
@@ -415,6 +421,12 @@ async function verifyCacheEntry(root, identity, manifestPath) {
     || stableJson(manifest.excludes) !== stableJson(expected.excludes)) {
     return { valid: false, reason: 'target_contract_mismatch' };
   }
+  if (identity.phase === 'native') {
+    if (!manifest.nativeCheckoutSha256) return { valid: false, reason: 'native_checkout_unverified' };
+    if (manifest.nativeCheckoutSha256 !== nativeCheckoutIdentity(root)) {
+      return { valid: false, reason: 'native_checkout_mismatch' };
+    }
+  }
   const archivePath = join(dirname(manifestPath), basename(manifest.archive.name));
   if (!existsSync(archivePath)) return { valid: false, reason: 'archive_missing' };
   const size = statSync(archivePath).size;
@@ -681,6 +693,7 @@ export async function captureReleaseBuildCache(root, phase, options = {}) {
       sourceSha256: identity.sourceSha256,
       source: identity.source,
       compatibility: identity.compatibility,
+      ...(phase === 'native' ? { nativeCheckoutSha256: nativeCheckoutIdentity(root) } : {}),
       targets: config.targets,
       excludes: config.excludes,
       buildDurationMs: options.buildDurationMs ?? null,

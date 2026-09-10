@@ -10,8 +10,13 @@ import type { OrchestratorPacket } from '@/lib/orchestrator/types';
  * Used by the review pipeline to stamp packet-scoped review artifacts
  * (deviations #1490, explainer #1491) that the surfaces read back.
  */
-export async function patchMissionPacket(packetId: string, patch: Partial<OrchestratorPacket>): Promise<boolean> {
+export async function patchMissionPacket(
+  packetId: string,
+  patch: Partial<OrchestratorPacket>,
+  isCurrent: () => boolean = () => true,
+): Promise<boolean> {
   const { result } = await withLockedState((state) => {
+    if (!isCurrent()) return false;
     const index = state.packets.findIndex((candidate) => candidate.id === packetId);
     if (index === -1) return false;
     state.packets[index] = { ...state.packets[index], ...patch };

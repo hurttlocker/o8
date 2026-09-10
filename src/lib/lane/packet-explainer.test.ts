@@ -86,7 +86,7 @@ describe('generatePacketExplainer', () => {
   it('keeps the durable report artifact and removes the worktree scratch HTML', async () => {
     const worktree = mkdtempSync(join(os.tmpdir(), 'o8-explainer-worktree-'));
     const packetId = `pkt-cleanup-${Date.now()}`;
-    const scratchPath = join(worktree, `.o8-packet-explainer-${packetId}.html`);
+    let scratchPath = '';
     const html = `<html><body><h1>Packet proof</h1><script type="application/json" id="o8-quiz">${quizJson}</script></body></html>`;
     const lane = createLane({
       repoPath: worktree,
@@ -98,7 +98,9 @@ describe('generatePacketExplainer', () => {
 
     explainerMocks.patchMissionPacket.mockClear();
     explainerMocks.sendTurn.mockReset();
-    explainerMocks.sendTurn.mockImplementationOnce(async () => {
+    explainerMocks.sendTurn.mockImplementationOnce(async (_repo, prompt, _onEvent, options) => {
+      expect(options.threadId).toMatch(/^thoughts-explainer-/);
+      scratchPath = join(worktree, prompt.match(/named exactly `([^`]+)`/)[1]);
       writeFileSync(scratchPath, html, 'utf8');
     });
 
@@ -123,6 +125,34 @@ describe('generatePacketExplainer', () => {
       expect.objectContaining({
         explainer: expect.objectContaining({ status: 'ready', artifactId: reports[0].id }),
       }),
+      expect.any(Function),
     );
+  });
+
+  it('does not publish a superseded generation or reuse another attempt output file', async () => {
+    const worktree = mkdtempSync(join(os.tmpdir(), 'o8-explainer-fence-'));
+    const packetId = `pkt-fence-${Date.now()}`;
+    const lane = createLane({ repoPath: worktree, worktreePath: worktree,
+      branch: 'inline/explainer-fence', runtime: 'codex', packetId });
+    let current = true;
+    const files: string[] = [];
+    explainerMocks.patchMissionPacket.mockClear();
+    explainerMocks.sendTurn.mockReset();
+    explainerMocks.sendTurn.mockImplementation(async (_repo, prompt) => {
+      const output = join(worktree, prompt.match(/named exactly `([^`]+)`/)[1]);
+      files.push(output);
+      writeFileSync(output, '<html>Report</html>');
+      current = false;
+    });
+    const params = { lane, packetId, packetTitle: 'Fence', packetSummary: '',
+      diffSummary: '', changedFileCount: 1, deviationsRaw: null, reviewContext: '',
+      isCurrent: () => current };
+    expect((await generatePacketExplainer(params)).outcome).toBe('deferred');
+    current = true;
+    expect((await generatePacketExplainer(params)).outcome).toBe('deferred');
+    expect(new Set(files).size).toBe(2);
+    expect(files.every(existsSync)).toBe(true);
+    expect(listArtifacts({ packetId })).toHaveLength(0);
+    expect(explainerMocks.patchMissionPacket).not.toHaveBeenCalled();
   });
 });

@@ -28,11 +28,12 @@ const {
 } = await import('@/lib/supervisor/inbox');
 const {
   invalidateGitHubSync,
+  getGitHubPullRequestByNumber,
   updateGitHubThreadAttention,
   upsertGitHubIssue,
   upsertGitHubPullRequest,
 } = await import('./store');
-const { ensureGitHubIssues, ensureGitHubPullRequests } = await import('./sync');
+const { ensureGitHubIssues, ensureGitHubPullRequests, ensureGitHubPullRequest } = await import('./sync');
 
 const NOW = new Date('2026-08-27T16:00:00.000Z');
 
@@ -203,6 +204,15 @@ afterAll(() => {
 });
 
 describe('GitHub outsider attention sync', () => {
+  it('persists immutable merge evidence from a targeted pull response over a legacy mirror row', async () => {
+    upsertGitHubPullRequest(pullRequestSnapshot(77, 'closed', NOW.toISOString()));
+    const headSha = 'a'.repeat(40), mergeCommit = 'b'.repeat(40);
+    installationFetchMock.mockResolvedValue(fetched({ ...pullRequestPayload(77, 'closed', NOW.toISOString()),
+      merged_at: NOW.toISOString(), merge_commit_sha: mergeCommit, head: { ref: 'work', sha: headSha } }));
+    expect((await ensureGitHubPullRequest('example/widgets', 77)).error).toBeNull();
+    expect(getGitHubPullRequestByNumber('example/widgets', 77)).toMatchObject({ headSha, mergeCommit });
+  });
+
   it('keeps the latest human and insider comments across ascending comment pages', async () => {
     installationFetchMock.mockImplementation(async (_repo: string, path: string) => {
       if (path.includes('/comments?') && path.endsWith('page=2')) {

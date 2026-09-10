@@ -9,6 +9,7 @@ import type { PacketSpendCap, PacketSpendTelemetry } from '@/lib/orchestrator/me
 import type { PacketContextTelemetry } from '@/lib/orchestrator/packet-context-telemetry';
 import type { AgentSummary } from '@/lib/fleet/types';
 import type { TerminalStatusEvidence } from '@/lib/terminal-status/resolve';
+import type { ExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
 
 export type { OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 export type OrchestratorExecutionMode = 'fleet' | 'single' | 'fusion';
@@ -381,6 +382,8 @@ export interface OrchestratorPacket {
   claudeCodeModel?: string | null;
   /** Explicit carrier pin for a Claude Code packet. It wins over the global worker profile. */
   claudeCodeCarrier?: ClaudeCodeModelSource | null;
+  /** Optional argv/credential wrapper. The runtime remains the session identity owner. */
+  executionCarrier?: ExecutionCarrierId | null;
   /** Opt-in two-candidate search state. The seed has a null role; fan-out
    * assigns one bounded role to each isolated candidate. */
   qualitySearch?: QualitySearchPacketState;

@@ -322,7 +322,7 @@ describe('completion and steer overlap through production callbacks and routes',
       entered.resolve();
       return Promise.resolve({ noChangesProduced: true });
     });
-    h.capture.mockResolvedValue({ selfReview: { passed: true, decision: 'finding_ready',
+    h.capture.mockResolvedValue({ packetId: packet.id, sessionKey, selfReview: { passed: true, decision: 'finding_ready',
       outcome: 'Inspection complete', evidence: ['Observed result'], residual: 'No changes required' } });
     const completion = ingestAgentCompletionSignal(sessionKey);
     await entered.promise;
@@ -379,8 +379,10 @@ describe('completion and steer overlap through production callbacks and routes',
     const bridge = source.slice(bridgeStart, source.indexOf('\nasync function ', bridgeStart + 1));
     expect(bridge).toContain('triggerHeadlessSprintTick()');
     expect(bridge).not.toContain('releasePacketIds');
-    const stallStart = source.indexOf("lastEventLabel: 'self_review_stall_forced'");
-    const stall = source.slice(stallStart, source.indexOf('resetSelfReviewStallGuard(surfaceId)', stallStart));
-    expect(stall).toContain('await triggerHeadlessSprintTick();');
+    const stallStart = source.indexOf('async function forceCodexSelfReviewToReview(');
+    const stall = source.slice(stallStart, source.indexOf('\nasync function ', stallStart + 1));
+    expect(stall).toContain("import('@/lib/supervisor/force-self-review')");
+    expect(stall).toContain('await forceSelfReviewToReview(surfaceId, lane, decision, {');
+    expect(stall).toContain('triggerHeadlessSprintTick,');
   });
 });
