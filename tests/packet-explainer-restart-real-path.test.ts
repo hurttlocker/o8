@@ -6,6 +6,13 @@ import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 const backendMocks = vi.hoisted(() => ({ sendTurn: vi.fn() }));
+vi.mock('@/lib/telemetry/crash-capture', () => ({ installProcessCrashCapture: vi.fn() }));
+vi.mock('@/lib/telemetry/uploader', () => ({ startTelemetryUploadLoop: vi.fn() }));
+vi.mock('@/lib/telemetry/sentry-node', () => ({ initSentryNode: vi.fn() }));
+vi.mock('@/lib/mobile/orchestrator-thread-history', () => ({
+  repairComposerPreamblePollution: vi.fn(), repairFlippedOrchestratorTranscripts: vi.fn(),
+}));
+vi.mock('@/lib/search/backfill', () => ({ runUnifiedSearchBackfills: vi.fn() }));
 vi.mock('@/lib/lane/orchestrator-backends/registry', () => {
   const backend = { id: 'codex', label: 'Fixture',
     ensureSession: () => ({ status: 'ready' }), sendTurn: backendMocks.sendTurn };
@@ -27,9 +34,19 @@ const { listArtifacts } = await import('@/lib/artifacts/store');
 const { explainerThreadId, ownsCurrentExplainer } = await import('@/lib/lane/packet-explainer-ownership');
 const children: ChildProcess[] = [];
 const providerPids: number[] = [];
+const serverRuntime = globalThis as typeof globalThis & {
+  __o8ReviewQueueDrain?: { stop: () => void };
+};
+
+function stopServerDrain() {
+  serverRuntime.__o8ReviewQueueDrain?.stop();
+  delete serverRuntime.__o8ReviewQueueDrain;
+}
 
 beforeAll(async () => { await updateOperatorDefaults({ packetExplainerEnabled: true }); });
 afterAll(() => {
+  stopServerDrain();
+  vi.unstubAllEnvs();
   for (const child of children) if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
   for (const pid of providerPids) {
     try { process.kill(-pid, 'SIGKILL'); } catch { /* fixture already gone */ }
@@ -60,7 +77,7 @@ function completedReport() {
 }
 
 describe('explainer process and durable queue restart contract', () => {
-  it('does not reclaim after owner SIGKILL until its detached provider has exited', async () => {
+  it('recovers through packaged server startup only after its detached provider has exited', async () => {
     const { lane, id } = await enqueue('abrupt-restart');
     const host = spawn(process.execPath, [
       '--import', './scripts/register-server-only-stub.mjs', '--import', 'tsx',
@@ -90,18 +107,30 @@ describe('explainer process and durable queue restart contract', () => {
     expect(isPidAlive(message.providerPid)).toBe(true);
     completedReport();
     backendMocks.sendTurn.mockClear();
-    const stop = startPacketExplainerQueueDrain();
-    await drainPacketExplainerQueue();
-    stop();
-    expect(queueRow(id)).toMatchObject({ status: 'in_progress', claim_owner: owner });
-    expect(backendMocks.sendTurn).not.toHaveBeenCalled();
+    vi.stubEnv('NEXT_RUNTIME', 'nodejs');
+    vi.stubEnv('O8_PACKAGED_APP', '1');
+    vi.stubEnv('NEXT_PHASE', undefined);
+    const { register } = await import('@/instrumentation');
+    try {
+      await register();
+      await vi.waitFor(() => expect(serverRuntime.__o8ReviewQueueDrain).toBeDefined(), { timeout: 10_000 });
+      expect(queueRow(id)).toMatchObject({ status: 'in_progress', claim_owner: owner });
+      expect(backendMocks.sendTurn).not.toHaveBeenCalled();
 
-    process.kill(-message.providerPid, 'SIGTERM');
-    await vi.waitFor(() => expect(isPidAlive(message.providerPid)).toBe(false));
-    await drainPacketExplainerQueue();
-    expect(backendMocks.sendTurn).toHaveBeenCalledOnce();
-    expect(queueRow(id)).toMatchObject({ status: 'completed', outcome: 'ready' });
-    expect(listArtifacts({ packetId: lane.packetId! })).toHaveLength(1);
+      process.kill(-message.providerPid, 'SIGTERM');
+      await vi.waitFor(() => expect(isPidAlive(message.providerPid)).toBe(false));
+      // No sibling request or manual drain tick: the restarted server owns recovery.
+      await vi.waitFor(() => expect(queueRow(id)).toMatchObject({
+        status: 'completed', outcome: 'ready',
+      }), { timeout: 8_000 });
+      expect(backendMocks.sendTurn).toHaveBeenCalledOnce();
+      expect(listArtifacts({ packetId: lane.packetId! })).toHaveLength(1);
+    } finally {
+      // Finish the fire-and-forget import before teardown, including on timeout.
+      await import('@/lib/lane/review-drain-bootstrap');
+      stopServerDrain();
+      vi.unstubAllEnvs();
+    }
   });
 
   it('keeps an aborted claim until provider exit, even if its ledger already says completed', async () => {
