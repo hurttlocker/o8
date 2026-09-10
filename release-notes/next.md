@@ -1,3 +1,2 @@
-- Continue owned worker conversations using their saved session and runtime settings.
-- Keep late completion callbacks from settling a newer follow-up turn.
-- Record delivered operator Stops as interruptions while preserving failure reports for unrequested signal exits.
+- Verify the current worker process before confirming Stop, even when an earlier turn already finished.
+- Keep Stop unconfirmed while a new worker turn is preparing, and avoid counting an already-idle session as newly interrupted.
