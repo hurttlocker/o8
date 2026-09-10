@@ -1,5 +1,6 @@
 import { getLaneEvents } from '@/lib/lane/registry';
 import type { Lane, LaneEvent } from '@/lib/lane/types';
+import { ownedRoots } from '@/lib/runtimes/shared/owned-session-index';
 
 function eventMatchesWorkerSession(event: LaneEvent, lane: Lane): boolean {
   if (event.verb !== 'runtime_process_exit') return false;
@@ -31,15 +32,21 @@ export function hasRecordedCleanWorkerExit(lane: Lane): boolean {
 }
 
 /**
- * Return one target per worker session that has no durable exit receipt.
+ * Return one target per worker session that still needs death confirmation.
+ * Owned sessions can resume after a recorded exit. Always send them through
+ * the fresh saved-run lookup and identity-checked kill path, including settled
+ * sessions (already dead) and prepared runs (not yet safe to declare dead).
  * Review turns are tracked separately and never enter this worker kill set.
  */
 export function liveWorkerSessionLanes(lanes: Lane[]): Lane[] {
   const seen = new Set<string>();
   const live: Lane[] = [];
+  const roots = ownedRoots();
   for (const lane of lanes) {
     const sessionKey = lane.sessionKey?.trim();
-    if (!sessionKey || hasRecordedWorkerExit(lane)) continue;
+    if (!sessionKey) continue;
+    const owned = roots.some(({ marker }) => sessionKey.startsWith(marker));
+    if (!owned && hasRecordedWorkerExit(lane)) continue;
     const key = `${lane.runtime}\0${sessionKey}`;
     if (seen.has(key)) continue;
     seen.add(key);

@@ -158,7 +158,7 @@ async function stopPacketInner(
   }
 
   const kills = await killLaneSessionsConfirmed(liveWorkerSessionLanes(lanes));
-  const reaped = kills.filter((kill) => kill.confirmed || kill.alreadyDead).length;
+  const reaped = kills.filter((kill) => kill.confirmed && !kill.alreadyDead).length;
   const survivors = kills.filter((kill) => !kill.confirmed && !kill.alreadyDead);
 
   if (survivors.length > 0) {

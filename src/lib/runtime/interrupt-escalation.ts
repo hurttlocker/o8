@@ -543,6 +543,17 @@ export async function escalateInterruptOwnedSurface(surfaceId: string): Promise<
   }
 
   if (!activeRun.pid && !activeRun.tmuxSession) {
+    // The index returns {} only for a cleared activeRun. A prepared run has
+    // identity fields but no process yet; its pending spawn is not exit proof.
+    if (Object.keys(activeRun).length > 0) {
+      return {
+        attempted: false,
+        confirmedDead: false,
+        alreadyDead: false,
+        steps: [],
+        note: 'The owned run has no process identity yet; Stop remains held until its process state can be confirmed.',
+      };
+    }
     return {
       attempted: false,
       confirmedDead: true,
