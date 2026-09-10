@@ -90,8 +90,12 @@ ignored raw directory; each raw sample is below 200 KiB.
 Terminal-grid setup waits are bounded at 30 seconds and excluded from every measured latency.
 Visible-input polling reads 1,000 terminal lines. A timeout records whether the
 marker reached the auxiliary stream, the panel write path, and a painted xterm
-frame before it assigns `painted-but-missed`, `not-delivered`, or
-`delivered-not-painted`.
+frame before it assigns `painted-but-missed`, `not-delivered`,
+`delivered-not-painted`, or `aux-delivered-panel-unobserved`. Auxiliary receipt
+alone does not prove the visible panel received the marker. Delivery tracking
+checks a complete output chunk before truncating its retained tail. Any input
+timeout fails the receipt, including N=1 and N=4; the numeric latency ceilings
+remain the locked N=12 checks.
 
 ### Attribution
 

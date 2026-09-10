@@ -1074,6 +1074,13 @@
       ]
     },
     {
+      "path": "tests/bench-design-gesture-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/bench-interactions.test.ts",
       "reasons": [
         "process-signal"

@@ -18,3 +18,5 @@ export interface BenchmarkTargetIdentity {
 }
 
 export function targetFromPanelStatus(payload: unknown): BenchmarkTargetIdentity;
+
+export function resolveBrowserPath(): string | null;

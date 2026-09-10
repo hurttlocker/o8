@@ -588,28 +588,48 @@ export async function observeDesignHover(input) {
 }
 
 // Runs inside the page: waits for a DOM predicate to hold and reports the frame
-// it painted on. Used for the Design Mode arm and select boundaries.
+// it painted on. Gesture measurements start at the trusted input boundary,
+// not observer installation or the time spent drawing before pointer release.
 export async function observePaintedCondition(input) {
-  const { selector, timeoutMs, requireFocusInside } = input;
+  const { selector, timeoutMs, requireFocusInside, triggerEvent, triggerSelector } = input;
   const started = performance.now();
   return new Promise((resolve) => {
     const deadline = started + timeoutMs;
+    let triggerAt = triggerEvent ? null : started;
+    let triggerTrusted = null;
+    const onTrigger = (event) => {
+      if (triggerAt !== null || !event.isTrusted) return;
+      if (triggerSelector && (!(event.target instanceof Element) || !event.target.closest(triggerSelector))) return;
+      triggerAt = event.timeStamp;
+      triggerTrusted = event.isTrusted;
+    };
+    if (triggerEvent) window.addEventListener(triggerEvent, onTrigger, true);
+    const finish = (paintedAt, note = null) => {
+      if (triggerEvent) window.removeEventListener(triggerEvent, onTrigger, true);
+      resolve({
+        durationMs: paintedAt !== null && triggerAt !== null
+          ? Number((paintedAt - triggerAt).toFixed(2)) : null,
+        observerStartedAt: started,
+        triggerAt,
+        triggerTrusted,
+        paintedAt,
+        triggerEvent: triggerEvent ?? null,
+        note,
+      });
+    };
     const poll = () => {
       const element = document.querySelector(selector);
       const focusOk = !requireFocusInside || (element ? element.contains(document.activeElement) : false);
-      if (element && focusOk) {
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve({
-          durationMs: Number((performance.now() - started).toFixed(2)),
-        })));
+      if (triggerAt !== null && element && focusOk) {
+        requestAnimationFrame(() => requestAnimationFrame(() => finish(performance.now())));
         return;
       }
       if (performance.now() > deadline) {
-        resolve({
-          durationMs: null,
-          note: requireFocusInside
+        finish(null, triggerAt === null
+          ? `no trusted ${triggerEvent} on ${triggerSelector ?? 'window'} within ${timeoutMs}ms`
+          : requireFocusInside
             ? `${selector} never took focus within ${timeoutMs}ms`
-            : `${selector} never painted within ${timeoutMs}ms`,
-        });
+            : `${selector} never painted within ${timeoutMs}ms`);
         return;
       }
       requestAnimationFrame(poll);

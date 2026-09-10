@@ -81,8 +81,10 @@ export function checkTerminalWorkloadBudgets(receipt) {
   );
   assertMax('keystroke-to-paint p50', n12.keystrokeToPaintMs?.p50, budget.keystrokeToPaintMsP50Max);
   assertMax('keystroke-to-paint p95', n12.keystrokeToPaintMs?.p95, budget.keystrokeToPaintMsP95Max);
-  if ((n12.keystrokeToPaintTimeouts ?? 0) !== 0) {
-    failures.push(`visible-input timeouts must be zero, received ${n12.keystrokeToPaintTimeouts}`);
+  for (const [count, summary] of Object.entries(receipt.summary ?? {})) {
+    if ((summary.keystrokeToPaintTimeouts ?? 0) !== 0) {
+      failures.push(`N=${count} visible-input timeouts must be zero, received ${summary.keystrokeToPaintTimeouts}`);
+    }
   }
   const renderN1 = n1.attribution?.renderEvents?.p95;
   const renderN12 = n12.attribution?.renderEvents?.p95;
