@@ -340,6 +340,9 @@ export interface OwnedRuntimeAdapter {
   /** Optional stdin payload for runtimes launched as interactive stream processors. */
   launchStdin?(ctx: { cwd: string; prompt: string; model?: string; effort?: ThinkingEffort }): string | null;
 
+  /** Optional input for a fresh process continuing a saved conversation. */
+  resumeStdin?(ctx: { cwd: string; prompt: string; model?: string; effort?: ThinkingEffort }): string | null;
+
   /**
    * Build argv for a resume run. Return null to signal this runtime cannot
    * thread-resume via CLI — the store will raise a friendly "no resume
@@ -351,6 +354,7 @@ export interface OwnedRuntimeAdapter {
     prompt: string;
     model?: string;
     effort?: ThinkingEffort;
+    workerMcpConfigPath?: string;
     workerMcpServers?: ResolvedWorkerMcpServer[];
     /** Config pinned when the session was created (carrier, spend cap, work mode). */
     runtimeConfig?: Record<string, string>;

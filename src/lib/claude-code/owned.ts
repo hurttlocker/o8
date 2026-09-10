@@ -185,12 +185,29 @@ export const claudeCodeOwnedAdapter: OwnedRuntimeAdapter = {
     ...(workerMcpConfigPath ? ['--mcp-config', workerMcpConfigPath] : []),
   ],
   launchStdin: ({ prompt }) => buildClaudeStreamJsonUserPayload(prompt),
-  resumeArgs: () => null,
+  resumeArgs: ({ threadId, model, effort, workerMcpConfigPath, runtimeConfig }) => {
+    // Owned workers must address a saved provider UUID, never a session name,
+    // path, or the provider's most-recent-session fallback.
+    if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(threadId)) {
+      throw new Error('The saved Claude Code session ID is invalid. No continuation was started.');
+    }
+    return [
+      ...buildClaudeStreamJsonArgs(model ?? null, 'bypassPermissions', threadId, effort),
+      ...claudeReadOnlyLockoutArgs(isReadOnlyRuntimeConfig(runtimeConfig)),
+      '--disable-slash-commands',
+      ...(workerMcpConfigPath ? ['--mcp-config', workerMcpConfigPath] : []),
+    ];
+  },
+  resumeStdin: ({ prompt }) => buildClaudeStreamJsonUserPayload(prompt),
   parseRunLog: parseClaudeOwnedRunLog,
   launchGroupLabel: 'Stream-json worker turn',
 };
 
 const claudeCodeOwnedStore = createOwnedSessionStore(claudeCodeOwnedAdapter);
+
+export async function continueOwnedClaudeCodeSession(surfaceId: string, prompt: string) {
+  return claudeCodeOwnedStore.resume(surfaceId, prompt);
+}
 
 export function invalidateOwnedClaudeCodeFleetCache(): void {
   claudeCodeOwnedStore.invalidateFleetCache();

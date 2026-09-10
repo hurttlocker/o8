@@ -70,6 +70,8 @@ const controlledEnvKeys = [
   'O8_CRASH_SURVIVABLE_WORKERS',
   'O8_SKIP_PRELAUNCH_TYPECHECK',
   'O8_WORKER_SANDBOX',
+  'ANTHROPIC_API_KEY',
+  'CLAUDE_CODE_OAUTH_TOKEN',
 ] as const;
 
 function packet(packetId: string, branch: string): OrchestratorPacket {
@@ -168,6 +170,8 @@ describe.sequential('worker MCP injection real path', () => {
     process.env.O8_CRASH_SURVIVABLE_WORKERS = '1';
     process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
     delete process.env.O8_WORKER_SANDBOX;
+    process.env.ANTHROPIC_API_KEY = '';
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'synthetic-mcp-fixture';
 
     spawnMock.mockImplementation(() => ({
       pid: 424_242,
@@ -267,7 +271,7 @@ describe.sequential('worker MCP injection real path', () => {
       prompt: firstPrompt,
       actor: 'orchestrator',
     });
-    expect(firstLaunch.ok).toBe(true);
+    expect(firstLaunch.ok, firstLaunch.note).toBe(true);
     const firstArgs = spawnedArgs(firstCall);
     const configFlag = firstArgs.indexOf('--mcp-config');
     expect(configFlag).toBeGreaterThan(-1);
@@ -302,16 +306,21 @@ describe.sequential('worker MCP injection real path', () => {
       'utf8',
     )) as OwnedSessionRecord;
     const { claudeCodeOwnedAdapter } = await import('@/lib/claude-code/owned');
-    const { prepareOwnedWorkerMcpConfig } = await import(
-      '@/lib/runtimes/shared/owned-session/worker-mcp-config'
+    const { prepareOwnedLaunchArgs } = await import(
+      '@/lib/runtimes/shared/owned-session/launch-args'
     );
-    const replacement = await prepareOwnedWorkerMcpConfig({
+    const continued = await prepareOwnedLaunchArgs({
       adapter: claudeCodeOwnedAdapter,
-      session,
+      session: { ...session, threadId: 'f4561e47-70ac-4a72-9406-a340d3ea115e' },
       runId: 'replacement',
-      mode: 'launch',
+      prompt: 'Verify the attached tools again',
+      mode: 'resume',
       sandboxEnabled: false,
+      humanLabel: 'Owned Claude Code',
     });
+    const replacement = continued.workerMcp;
+    expect(continued.args[continued.args.indexOf('--mcp-config') + 1]).toBe(replacement.configPath);
+    expect(JSON.parse(continued.stdinPayload!).message.content).toBe('Verify the attached tools again');
     expect(existsSync(configPath)).toBe(false);
     expect(existsSync(staleConfigPath)).toBe(false);
     expect(replacement.configPath).toBe(path.join(

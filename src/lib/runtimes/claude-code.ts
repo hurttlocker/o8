@@ -34,6 +34,7 @@ import {
   getOwnedClaudeCodeFleetAdditions,
   getOwnedClaudeCodeRuntimeTail,
   launchOwnedClaudeCodeSession,
+  continueOwnedClaudeCodeSession,
 } from '@/lib/claude-code/owned';
 import { resolveDefaultWorkerEffortSync } from '@/lib/operator/defaults';
 import { readClaudeRuntimeCapacity } from '@/lib/usage/cli-scrape';
@@ -61,12 +62,8 @@ const capabilities: RuntimeCapabilities = {
   discover: true,
   readTranscript: true,
   launch: true,
-  // Honesty (#1602): the adapter's resume() is intentionally disabled — owned
-  // Claude workers are one-prompt-per-launch and discovered sessions don't
-  // resume through the stream-json owned path. Declaring false lets the
-  // steer/resume gates fail cleanly ("not supported") instead of passing the
-  // gate and hitting an always-erroring resume().
-  resume: false,
+  // Only owned workers can continue; discovered sessions remain watch-only.
+  resume: true,
   interrupt: true,
   reviewDiffs: true,
   costTelemetry: true,
@@ -794,7 +791,7 @@ export const claudeCodeRuntime: AgentRuntime = {
         status,
         ownership,
         sessionCapabilities: {
-          canSendInput: status !== 'failed',
+          canSendInput: false,
           canInterrupt: status === 'running',
           canReviewDiffs: true,
         },
@@ -894,7 +891,7 @@ export const claudeCodeRuntime: AgentRuntime = {
         status: 'running',
         ownership,
         sessionCapabilities: {
-          canSendInput: true,
+          canSendInput: false,
           canInterrupt: true,
           canReviewDiffs: Boolean(realSessionId),
         },
@@ -928,7 +925,7 @@ export const claudeCodeRuntime: AgentRuntime = {
           status: agent.status === 'running' ? 'running' : agent.status === 'failed' ? 'failed' : 'reviewing',
           ownership: 'owned',
           sessionCapabilities: {
-            canSendInput: false,
+            canSendInput: agent.runtimeSurface?.capabilities?.sendInput ?? false,
             canInterrupt: agent.runtimeSurface?.capabilities?.interrupt ?? false,
             canReviewDiffs: agent.runtimeSurface?.capabilities?.diffContext ?? true,
           },
@@ -1091,14 +1088,16 @@ export const claudeCodeRuntime: AgentRuntime = {
       sideEffect: result.sideEffect,
     };
   },
-  async resume(): Promise<RuntimeActionResult> {
-    // Resume for discovered Claude sessions stays disabled: `claude --continue`
-    // is not the owned interactive stream-json worker path. Owned dispatched
-    // workers are intentionally one prompt per launch.
-    return {
-      ok: false,
-      note: 'Claude Code resume is disabled. Continue the conversation in your own Claude Code client; o8 will pick up the updated transcript via JSONL discovery.',
-    };
+  async resume(sessionKey: string, prompt: string): Promise<RuntimeActionResult> {
+    if (!sessionKey.startsWith('claude-code-owned:')) {
+      return { ok: false, sessionKey, note: 'Only owned Claude Code workers can continue through o8. Continue discovered sessions in their original client.' };
+    }
+    if (!prompt.trim()) return { ok: false, sessionKey, note: 'A follow-up message is required.' };
+    try {
+      return { ...await continueOwnedClaudeCodeSession(sessionKey, prompt.trim()), sessionKey };
+    } catch (error) {
+      return { ok: false, sessionKey, note: error instanceof Error ? error.message : 'Claude Code continuation failed.' };
+    }
   },
 
   async interrupt(sessionKey: string): Promise<RuntimeActionResult> {

@@ -95,21 +95,23 @@ function stderrPathForStdout(stdoutPath: string): string {
 }
 
 async function readStartupFailureHead(surfaceId: string, sinceMs: number): Promise<string | null> {
-  if (!surfaceId.startsWith('codex-owned:')) return null;
+  const isClaude = surfaceId.startsWith('claude-code-owned:');
+  if (!isClaude && !surfaceId.startsWith('codex-owned:')) return null;
   await new Promise((resolve) => setTimeout(resolve, STARTUP_FAILURE_PROBE_MS));
-  const sources = await getOwnedCodexTelemetrySources(surfaceId);
+  const claude = isClaude ? await import('@/lib/claude-code/owned') : null;
+  const sources = await (claude?.getOwnedClaudeCodeTelemetrySources ?? getOwnedCodexTelemetrySources)(surfaceId);
   const stdoutPath = sources?.stdoutPaths[sources.stdoutPaths.length - 1];
   if (!stdoutPath) return null;
   const { readFile } = await import('node:fs/promises');
   const stderr = await readFile(stderrPathForStdout(stdoutPath), 'utf8').catch(() => '');
-  const tail = await getOwnedCodexRuntimeTail(surfaceId).catch(() => null);
+  const tail = await (claude?.getOwnedClaudeCodeRuntimeTail ?? getOwnedCodexRuntimeTail)(surfaceId).catch(() => null);
   const lifecycle = tail?.surface.lifecycle;
   // Only a run STARTED BY THIS STEER counts — a previous resume's failure must
   // not flag a fresh, healthy steer (caught by the #1415 regression test).
   const lastRunStartedMs = lifecycle?.lastRunStartedAt ? Date.parse(lifecycle.lastRunStartedAt) : NaN;
   const startedByThisSteer = Number.isFinite(lastRunStartedMs) && lastRunStartedMs >= sinceMs - 1_000;
   if (startedByThisSteer && lifecycle?.lastRunMode === 'resume' && lifecycle.lastOutcome === 'failed') {
-    return (stderr.trim() || lifecycle.summary || 'owned Codex resume exited non-zero')
+    return (stderr.trim() || lifecycle.summary || 'owned worker continuation failed')
       .replace(/\s+/g, ' ')
       .slice(0, 500);
   }

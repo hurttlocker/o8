@@ -124,6 +124,18 @@ async function spawnedCall(carrier: 'native' | 'codex-subscription') {
 }
 
 describe('owned Claude Code read-only argv', () => {
+  it('preserves the write-tool and MCP restrictions on a resumed read-only session', () => {
+    const args = claudeCodeOwnedAdapter.resumeArgs({
+      threadId: '284368b4-5830-4939-890f-8739f792b608', prompt: 'inspect again',
+      model: 'claude-opus-5', effort: 'high', runtimeConfig: { workMode: 'read-only' },
+    })!;
+    expect(args).toContain('--resume');
+    expect(args).toContain(CLAUDE_STRICT_MCP_CONFIG_FLAG);
+    const denyIndex = args.indexOf('--disallowedTools');
+    expect(denyIndex).toBeGreaterThan(-1);
+    for (const tool of CLAUDE_READ_ONLY_DISALLOWED_TOOLS) expect(args.indexOf(tool)).toBeGreaterThan(denyIndex);
+  });
+
   it('denies the native write tools for a read-only launch', async () => {
     const args = await spawnedArgs('read-only');
     const denyIndex = args.indexOf('--disallowedTools');

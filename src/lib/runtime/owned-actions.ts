@@ -1,4 +1,5 @@
 import { continueOwnedCodexSession } from '@/lib/codex/owned';
+import { continueOwnedClaudeCodeSession } from '@/lib/claude-code/owned';
 import { escalateInterruptOwnedSurface } from '@/lib/runtime/interrupt-escalation';
 import type { RuntimeActionRequest, RuntimeActionResult } from '@/lib/runtime/actions';
 
@@ -35,11 +36,10 @@ export async function performOwnedActionWithoutInventory(
     if (!message) {
       return actionUnavailable(payload, surfaceId, runtime, `message is required to steer an owned ${runtime} session`);
     }
-    if (runtime !== 'codex') {
-      return actionUnavailable(payload, surfaceId, runtime, 'Claude Code owned sessions do not support resume/steer.');
-    }
     try {
-      const result = await continueOwnedCodexSession(surfaceId, message);
+      const result = await (runtime === 'codex'
+        ? continueOwnedCodexSession(surfaceId, message)
+        : continueOwnedClaudeCodeSession(surfaceId, message));
       return {
         ok: result.ok,
         action: payload.action,
@@ -55,7 +55,7 @@ export async function performOwnedActionWithoutInventory(
         payload,
         surfaceId,
         runtime,
-        error instanceof Error ? error.message : 'Owned Codex session could not be steered.',
+        error instanceof Error ? error.message : `Owned ${runtime} session could not be steered.`,
       );
     }
   }
