@@ -95,7 +95,7 @@ CI currently runs on pull requests and manual dispatch. PRs run typecheck, unit 
 
 ## Commits and Coordination
 
-Use focused, imperative Conventional Commit subjects such as `fix: prevent stale transcript replay`. In packet worktrees, use `o8 packet commit -m "..."` so staging respects packet scope. Outside a packet, do not commit, push, version-bump, ship, or open a PR unless the user requested that action.
+Use focused, imperative Conventional Commit subjects such as `fix: prevent stale transcript replay`. In packet worktrees, use `o8 packet commit -m "..."` so staging respects packet scope. Outside a packet, a task that changes code includes committing it on a branch, pushing, and opening its PR; do not stop to ask for those. Merging, version bumps, shipping, and releases wait for an explicit request or the operator's standing rules; do the allowed part first, hold the gated part, and ask only about that.
 
 When multiple agents are active in the same repository, use `o8 team who`, `o8 team status`, `o8 team tell`, and named leases to coordinate shared operations. Use `o8 lane touches --path <file>` before editing a file another packet may own. Do not install coordination hooks with `o8 team init` unless the operator explicitly asks for them.
 
