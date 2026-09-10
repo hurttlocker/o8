@@ -1321,6 +1321,12 @@
       ]
     },
     {
+      "path": "tests/completion-steer-race-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/confirmed-kill.test.ts",
       "reasons": [
         "child-process",

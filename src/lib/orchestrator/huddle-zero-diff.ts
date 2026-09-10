@@ -39,7 +39,11 @@ export interface HuddleZeroDiffResult {
   lane?: Lane;
 }
 
-export async function parkHuddleReadyZeroDiffLane(lane: Lane): Promise<HuddleZeroDiffResult> {
+export async function parkHuddleReadyZeroDiffLane(
+  lane: Lane,
+  assertCurrent: () => void = () => {},
+): Promise<HuddleZeroDiffResult> {
+  assertCurrent();
   const packetId = lane.packetId?.trim();
   if (!packetId) return { parked: false };
 
@@ -63,6 +67,7 @@ export async function parkHuddleReadyZeroDiffLane(lane: Lane): Promise<HuddleZer
   ) {
     const blockedAt = currentLane.lastEventAt ?? new Date().toISOString();
     await withLockedState((current) => {
+      assertCurrent();
       const currentPacket = current.packets.find((candidate) => candidate.id === packetId);
       if (!currentPacket) return;
       currentPacket.status = 'blocked';
@@ -99,6 +104,7 @@ export async function parkHuddleReadyZeroDiffLane(lane: Lane): Promise<HuddleZer
   if (!alignmentArmed) return { parked: false };
 
   const huddleReady = hasPersistedHuddleReport(lane.id) || await transcriptEndsWithPlan(lane);
+  assertCurrent();
   if (!huddleReady) {
     console.log(`[lane-lifecycle] Alignment-armed packet ${packetId} exited zero-diff without an explicit plan signal; parking for orchestrator anyway (#1496).`);
   }
@@ -107,6 +113,7 @@ export async function parkHuddleReadyZeroDiffLane(lane: Lane): Promise<HuddleZer
   const parkedLane = setLaneStatus(lane.id, 'awaiting_orchestrator', 'system', HUDDLE_READY_EVENT_LABEL) ?? lane;
 
   await withLockedState((current) => {
+    assertCurrent();
     const currentPacket = current.packets.find((candidate) => candidate.id === packetId);
     if (!currentPacket) return;
     currentPacket.status = 'blocked';
