@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
@@ -89,13 +89,15 @@ function bindWorker(pid: number, marker: string | undefined, processGroupId = pi
   setLaneStatus(lane.id, 'running', 'system', 'test_running');
   const sessionDir = join(dataDir, 'owned-claude-code', id);
   mkdirSync(sessionDir, { recursive: true });
+  const run = {
+    id: marker, pid, processGroupId, processMarker: marker,
+    commandIdentity, spawnState: 'spawned', sandboxed: commandIdentity === 'sandbox-exec',
+    outcome: 'running', startedAt: new Date().toISOString(),
+    stdoutPath: join(sessionDir, 'run.jsonl'), stderrPath: join(sessionDir, 'run.stderr.log'),
+  };
   writeFileSync(join(sessionDir, 'session.json'), JSON.stringify({
-    surfaceId, repoPath, cwd: repoPath, laneId: lane.id, packetId,
-    activeRun: {
-      id: marker, pid, processGroupId, processMarker: marker,
-      commandIdentity, spawnState: 'spawned', sandboxed: commandIdentity === 'sandbox-exec',
-      outcome: 'running', startedAt: new Date().toISOString(),
-    },
+    surfaceId, sessionDir, repoPath, cwd: repoPath, laneId: lane.id, packetId,
+    activeRun: run, recentRuns: [run],
   }));
   const packet: OrchestratorPacket = {
     id: packetId, referenceLabel: 'stop', title: 'sandbox stop', summary: 'stop identity',
@@ -114,7 +116,7 @@ function bindWorker(pid: number, marker: string | undefined, processGroupId = pi
     ...createEmptyOrchestratorMissionState(),
     missionId: 'mission-' + id, repoPath, packets: [packet],
   });
-  return { packetId, laneId: lane.id };
+  return { packetId, laneId: lane.id, sessionDir };
 }
 
 function stop(packetId: string) {
@@ -133,6 +135,8 @@ describe.skipIf(process.platform !== 'darwin')('sandboxed owned stop through the
     const response = await stop(target.packetId);
     expect(response.status).toBe(200);
     expect(isPidAlive(child.pid!)).toBe(false);
+    expect(JSON.parse(readFileSync(join(target.sessionDir, 'session.json'), 'utf8')).recentRuns[0])
+      .toMatchObject({ outcome: 'interrupted', interruptRequestedAt: expect.any(String) });
     closeDb();
     expect(readOrchestratorControlPlaneState().packets[0]).toMatchObject({
       operatorStopped: true, queueState: 'held', blockedReason: 'operator_stopped',

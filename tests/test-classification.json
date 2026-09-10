@@ -592,6 +592,12 @@
       ]
     },
     {
+      "path": "src/lib/runtimes/shared/owned-session/stop-outcome.test.ts",
+      "reasons": [
+        "process-signal"
+      ]
+    },
+    {
       "path": "src/lib/runtimes/shared/owned-session/store-child-exit.test.ts",
       "reasons": [
         "child-process",

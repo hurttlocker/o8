@@ -81,8 +81,13 @@ export function createFleetComputer({
           const filePath = metadataPath(sessionDir);
           if (!(await pathExists(filePath))) return null;
           const session = await io.loadSession(sessionDir);
-          await runController.refreshSession(session);
-          return session;
+          return withSurfaceLock(session.surfaceId, async () => {
+            // Stop, resume or exit recording may have changed the run while
+            // this inventory read waited. Never write that stale snapshot back.
+            const current = await io.loadSession(sessionDir);
+            await runController.refreshSession(current);
+            return current;
+          });
         } catch {
           return null;
         }

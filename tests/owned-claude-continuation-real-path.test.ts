@@ -49,6 +49,8 @@ if (args.includes('--version')) {
   }) + '\\n');
   if (prompt === 'hold') {
     setInterval(() => {}, 1000);
+  } else if (prompt === 'external-signal') {
+    process.kill(process.pid, 'SIGINT');
   } else {
     if (!missing) writeFileSync(statePath, JSON.stringify(history));
     console.log(JSON.stringify({ type: 'result', subtype: missing ? 'error_during_execution' : 'success',
@@ -61,6 +63,7 @@ chmodSync(binary, 0o700);
 
 const {
   launchOwnedClaudeCodeSession, archiveOwnedClaudeCodeSession, getOwnedClaudeCodeRuntimeTail,
+  getOwnedClaudeCodeFleetAdditions,
 } = await import('@/lib/claude-code/owned');
 const { claudeCodeRuntime } = await import('@/lib/runtimes/claude-code');
 const { performRuntimeAction } = await import('@/lib/runtime/actions');
@@ -202,15 +205,24 @@ describe.skipIf(process.platform === 'win32')('owned Claude continuation through
         .toMatchObject({ ok: false, note: expect.stringContaining('active run') });
       expect(receipts(repoPath)).toHaveLength(2);
     } finally {
-      expect(await performRuntimeAction({ action: 'stop', surfaceId }))
-        .toMatchObject({ ok: true, status: 'completed', aborted: true });
+      const stop = performRuntimeAction({ action: 'stop', surfaceId });
+      await Promise.all([getOwnedClaudeCodeRuntimeTail(surfaceId), getOwnedClaudeCodeFleetAdditions({ fresh: true })]);
+      expect(await stop).toMatchObject({ ok: true, status: 'completed', aborted: true });
     }
-    // The existing escalation path reports a signaled exit as failed because
-    // it does not stamp the store's interrupt intent. Death is proved below;
-    // this test does not claim that separate status-classification gap is fixed.
-    const stopped = await settled(surfaceId, 2, 'failed');
+    const stopped = await settled(surfaceId, 2, 'interrupted');
+    expect(stopped.recentRuns[0].interruptRequestedAt).toEqual(expect.any(String));
+    expect(stopped.recentRuns[1].outcome).toBe('finished');
     expect(stopped.recentRuns[0].childExit?.signal).toBe('SIGINT');
+    expect((await getOwnedClaudeCodeRuntimeTail(surfaceId))?.surface.lifecycle?.lastOutcome).toBe('interrupted');
     expect(() => process.kill(activePid!, 0)).toThrow();
     expect(receipts(repoPath)).toHaveLength(2);
   }, 20_000);
+
+  it('keeps an unrequested signal exit failed instead of treating all signals as Stop', async () => {
+    const { surfaceId } = await launch('external-signal');
+    expect(await claudeCodeRuntime.resume(surfaceId, 'external-signal')).toMatchObject({ ok: true });
+    const failed = await settled(surfaceId, 2, 'failed');
+    expect(failed.recentRuns[0].childExit?.signal).toBe('SIGINT');
+    expect(failed.recentRuns[0].interruptRequestedAt).toBeUndefined();
+  });
 });
