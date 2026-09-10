@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createLane, getLaneEvents } from '@/lib/lane/registry';
 import { dispatch } from './commands';
+import { liveWorkerSessionLanes } from './worker-session-state';
 
 const h = vi.hoisted(() => ({
   kill: vi.fn(),
@@ -25,6 +26,16 @@ describe('lane stop command', () => {
     h.persistHold.mockResolvedValue(true);
     h.terminateManagedRuns.mockReset();
     h.terminateManagedRuns.mockResolvedValue({ targeted: 0, confirmed: 0, failures: [] });
+  });
+
+  it('checks a shared owned session only once when multiple lanes refer to it', () => {
+    const lane = createLane({
+      repoPath: process.cwd(), branch: 'test/stop-shared-session', runtime: 'codex',
+      sessionKey: 'codex-owned:shared',
+    });
+    expect(liveWorkerSessionLanes([
+      lane, { ...lane, id: lane.id + '-duplicate' }, { ...lane, sessionKey: null },
+    ])).toEqual([lane]);
   });
 
   it('does not mark paused when the worker survives stop escalation', async () => {
@@ -112,7 +123,7 @@ describe('lane stop command', () => {
     expect(result.lane).toMatchObject({ status: 'paused', lastEventLabel: 'operator_stopped' });
   });
 
-  it('uses a durable worker-exit receipt before settling packet-owned runs', async () => {
+  it('rechecks an owned session despite a durable exit receipt before settling packet-owned runs', async () => {
     const packetId = 'packet-stop-recorded-worker-exit';
     const lane = createLane({
       repoPath: process.cwd(),
@@ -134,10 +145,21 @@ describe('lane stop command', () => {
     });
     h.terminateManagedRuns.mockResolvedValueOnce({ targeted: 1, confirmed: 1, failures: [] });
 
+    h.kill.mockResolvedValueOnce([{
+      laneId: lane.id,
+      sessionKey: 'codex-owned:exited',
+      runtime: 'codex',
+      confirmed: true,
+      alreadyDead: true,
+      stages: [],
+      note: 'The current owned record has no active run.',
+    }]);
+
     const result = await dispatch({ verb: 'stop', laneId: lane.id, actor: 'user' });
 
     expect(result.ok).toBe(true);
-    expect(h.kill).not.toHaveBeenCalled();
+    expect(h.kill).toHaveBeenCalledWith([expect.objectContaining({ id: lane.id })]);
+    expect(h.kill.mock.invocationCallOrder[0]).toBeLessThan(h.terminateManagedRuns.mock.invocationCallOrder[0]);
     expect(h.terminateManagedRuns).toHaveBeenCalledWith(packetId);
     expect(getLaneEvents(lane.id)).toEqual(expect.arrayContaining([
       expect.objectContaining({

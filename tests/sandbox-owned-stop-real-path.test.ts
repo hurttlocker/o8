@@ -23,8 +23,11 @@ writeFileSync(join(dataDir, 'ws-token'), token);
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT = join(dataDir, 'owned-claude-code');
+process.env.CORTEX_IDE_OWNED_CODEX_ROOT = join(dataDir, 'owned-codex');
 
 const { POST } = await import('@/app/api/orchestrator/stop-packet/route');
+const laneRoute = await import('@/app/api/lanes/route');
+const { recordLaneEvent } = await import('@/lib/lane/events');
 const { createLane, getLaneEvents, setLaneStatus } = await import('@/lib/lane/registry');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } =
@@ -78,16 +81,19 @@ async function spawnWorker(marker: string) {
   return child;
 }
 
-function bindWorker(pid: number, marker: string | undefined, processGroupId = pid, commandIdentity = 'sandbox-exec') {
+function bindWorker(
+  pid: number, marker: string | undefined, processGroupId = pid,
+  commandIdentity = 'sandbox-exec', runtime: 'claude-code' | 'codex' = 'claude-code',
+) {
   const id = randomUUID();
-  const surfaceId = 'claude-code-owned:' + id;
+  const surfaceId = runtime + '-owned:' + id;
   const packetId = 'pkt-' + id;
   const lane = createLane({
-    repoPath, branch: 'inline/stop-' + id, runtime: 'claude-code',
+    repoPath, branch: 'inline/stop-' + id, runtime,
     packetId, sessionKey: surfaceId,
   });
   setLaneStatus(lane.id, 'running', 'system', 'test_running');
-  const sessionDir = join(dataDir, 'owned-claude-code', id);
+  const sessionDir = join(dataDir, 'owned-' + runtime, id);
   mkdirSync(sessionDir, { recursive: true });
   const run = {
     id: marker, pid, processGroupId, processMarker: marker,
@@ -101,14 +107,14 @@ function bindWorker(pid: number, marker: string | undefined, processGroupId = pi
   }));
   const packet: OrchestratorPacket = {
     id: packetId, referenceLabel: 'stop', title: 'sandbox stop', summary: 'stop identity',
-    workspaceTargetPath: repoPath, branchTarget: lane.branch, runtime: 'claude-code',
+    workspaceTargetPath: repoPath, branchTarget: lane.branch, runtime,
     dependencyLabels: [], dependencyPacketIds: [], queueState: 'queued',
     releaseState: 'pending', status: 'running', blockedReason: null,
     lastEventAt: null, lastEventLabel: null, archivedAt: null, review: null,
     orchestratorThreadId: null, operatorStopped: false,
     lane: {
       tileId: lane.id, tabId: lane.id, repoPath, worktreePath: null,
-      runtime: 'claude-code', sessionKey: surfaceId, laneId: lane.id,
+      runtime, sessionKey: surfaceId, laneId: lane.id,
       lastHeartbeatAt: null, lastEventAt: null, lastEventLabel: null,
     },
   };
@@ -128,6 +134,77 @@ function stop(packetId: string) {
 }
 
 describe.skipIf(process.platform !== 'darwin')('sandboxed owned stop through the production route', () => {
+  describe.each([
+    ['packet', 'claude-code'], ['lane', 'claude-code'],
+    ['packet', 'codex'], ['lane', 'codex'],
+  ] as const)('%s Stop after a completed %s turn', (entry, runtime) => {
+    async function stopTarget(target: ReturnType<typeof bindWorker>) {
+      if (entry === 'packet') return stop(target.packetId);
+      return laneRoute.POST(new NextRequest('http://localhost/api/lanes', {
+        method: 'POST',
+        headers: { host: 'localhost', authorization: 'Bearer ' + token, 'content-type': 'application/json' },
+        body: JSON.stringify({ verb: 'stop', laneId: target.laneId }),
+      }));
+    }
+
+    function recordPreviousExit(target: ReturnType<typeof bindWorker>) {
+      const saved = JSON.parse(readFileSync(join(target.sessionDir, 'session.json'), 'utf8'));
+      recordLaneEvent(target.laneId, 'runtime_process_exit', 'system', {
+        surfaceId: saved.surfaceId, runId: 'previous-completed-run',
+        classification: 'clean-exit', exitCode: 0, runtimeOutcome: 'finished',
+      });
+    }
+
+    it('kills the current resumed run despite an earlier same-session exit', async () => {
+      const marker = randomUUID();
+      const child = await spawnWorker(marker);
+      const target = bindWorker(child.pid!, marker, child.pid!, 'sandbox-exec', runtime);
+      recordPreviousExit(target);
+      // No admission event is required: saved process truth also covers the
+      // interval before resume admission is recorded and delayed exit events.
+      const response = await stopTarget(target);
+      expect(response.status).toBe(200);
+      expect(isPidAlive(child.pid!)).toBe(false);
+      expect(JSON.parse(readFileSync(join(target.sessionDir, 'session.json'), 'utf8')).recentRuns[0])
+        .toMatchObject({ id: marker, outcome: 'interrupted', interruptRequestedAt: expect.any(String) });
+      expect(getLaneEvents(target.laneId, 50).filter((event) => event.verb === 'kill_escalated'))
+        .toEqual([expect.objectContaining({ payload: expect.objectContaining({ pid: child.pid, confirmed: true }) })]);
+      expect(readOrchestratorControlPlaneState().packets[0].operatorStopped).toBe(true);
+    });
+
+    it('keeps identity-mismatched resumed workers held instead of claiming they exited', async () => {
+      const child = await spawnWorker(randomUUID());
+      const target = bindWorker(child.pid!, randomUUID(), child.pid!, 'sandbox-exec', runtime);
+      recordPreviousExit(target);
+      const response = await stopTarget(target);
+      const body = await response.json();
+      expect(entry === 'packet' ? response.status === 409 : body.ok === false).toBe(true);
+      expect(isPidAlive(child.pid!)).toBe(true);
+      expect(getLaneEvents(target.laneId, 50).filter((event) => event.verb === 'kill_escalated')).toEqual([]);
+      expect(readOrchestratorControlPlaneState().packets[0].operatorStopped).toBe(true);
+    });
+
+    it.each(['prepared', 'missing', 'settled'] as const)('handles a %s saved run without stale exit proof', async (state) => {
+      const target = bindWorker(0, randomUUID(), 0, 'sandbox-exec', runtime);
+      recordPreviousExit(target);
+      const sessionPath = join(target.sessionDir, 'session.json');
+      const saved = JSON.parse(readFileSync(sessionPath, 'utf8'));
+      if (state === 'prepared') saved.activeRun.spawnState = 'prepared';
+      if (state === 'settled') saved.activeRun = null;
+      if (state === 'missing') rmSync(sessionPath);
+      else writeFileSync(sessionPath, JSON.stringify(saved));
+      const response = await stopTarget(target);
+      const body = await response.json();
+      expect(body.ok).toBe(state === 'settled');
+      if (state === 'settled' && entry === 'packet') {
+        expect(body.result).toMatchObject({ interruptedSessions: 0, killConfirmed: true });
+      }
+      if (state !== 'settled' && entry === 'packet') expect(response.status).toBe(409);
+      expect(getLaneEvents(target.laneId, 50).filter((event) => event.verb === 'kill_escalated')).toEqual([]);
+      expect(readOrchestratorControlPlaneState().packets[0].operatorStopped).toBe(true);
+    });
+  });
+
   it('stops after wrapper exec and persists confirmed kill and operator hold', async () => {
     const marker = randomUUID();
     const child = await spawnWorker(marker);
