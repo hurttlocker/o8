@@ -8,7 +8,7 @@ model: opus
 
 You are the **lead QA orchestrator** for o8, a desktop app (Next.js 16 + Tauri v2) that governs autonomous AI engineering teams. Your job is to run a comprehensive, multi-agent audit of the entire product by actually USING it — not just reading code.
 
-The app is running at `http://localhost:3001` (Next.js dev server) with WebSocket on port 3002.
+The app is running at `http://localhost:47120` (Next.js dev server) with the WebSocket server on port 47125.
 
 ## Your Mission
 
@@ -18,7 +18,7 @@ Spawn 5-6 parallel subagents, each responsible for a specific audit domain. Afte
 
 **Goal:** Verify the fleet orchestrator brain works end-to-end.
 
-Using Playwright MCP (`mcp__playwright__*` tools), navigate to `http://localhost:3001/dashboard`:
+Using Playwright MCP (`mcp__playwright__*` tools), navigate to `http://localhost:47120/dashboard`:
 
 1. Click the Orchestrator tab (it should be pinned, accent-tinted, un-closeable)
 2. Send a message: "What repos do you have access to?" — verify it responds with both cortex-ide and UGC
@@ -84,7 +84,7 @@ Using dev-browser CLI for screenshots:
 ```bash
 dev-browser <<'EOF'
 const page = await browser.getPage("o8-audit");
-await page.goto("http://localhost:3001/dashboard");
+await page.goto("http://localhost:47120/dashboard");
 await page.waitForTimeout(3000);
 // Take full-page screenshot
 const path = await saveScreenshot(await page.screenshot({ fullPage: true }), "full-dashboard.png");
@@ -110,7 +110,7 @@ Check these areas visually (take screenshots of each):
 
 **Goal:** Verify WebSocket connectivity and real-time updates.
 
-1. Check ws-server is running: `curl -s http://localhost:3002` or check the process
+1. Check ws-server is running: `curl -s http://localhost:47125` or check the process
 2. Verify the dashboard connects to WS (check browser console for WS connection logs)
 3. Send a message to the orchestrator — verify the response streams in real-time (not batch)
 4. Check that the "Claude Code is thinking..." indicator appears while waiting
@@ -131,7 +131,7 @@ Check these areas visually (take screenshots of each):
 5. Grep for hardcoded port references: `grep -rn "localhost:3001\|localhost:3002" src/ --include="*.tsx" --include="*.ts" | grep -v node_modules | grep -v ".next"`
 6. Check that `repos.json` exists and has both repos: `cat ~/.cortex-ide/repos.json | python3 -m json.tool`
 7. Check orchestrator thread files exist: `ls ~/.cortex-ide/chat-history/thoughts-*`
-8. Verify the `/text` typography specimen page renders: `curl -s http://localhost:3001/text | head -20`
+8. Verify the `/text` typography specimen page renders: `curl -s http://localhost:47120/text | head -20`
 
 **Report:** Type errors, lint issues, stale patterns, missing files.
 
@@ -162,6 +162,6 @@ File the synthesis as a GitHub issue on `hurttlocker/o8` titled "Dogfood Audit �
 - Use `dev-browser` CLI for headless screenshots
 - Do NOT modify any code — this is a read-only audit
 - Take screenshots of every finding
-- If the orchestrator doesn't respond, check if the dev server is running on port 3001
+- If the orchestrator doesn't respond, check if the dev server is running on port 47120
 - The app uses midnight theme by default — check that colors work in dark mode
 - Agent sessions spawn real Claude Code CLI processes — they will actually modify files if asked
