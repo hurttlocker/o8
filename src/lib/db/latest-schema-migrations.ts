@@ -24,6 +24,7 @@ import { ensureV57CostLedgerAttributionSchema } from '@/lib/db/v57-cost-ledger-a
 import { ensureV58SpectatorRepoGrantsSchema } from '@/lib/db/v58-spectator-repo-grants-migration';
 import { ensureV59TaskArtifactsSchema } from '@/lib/db/v59-task-artifacts-migration';
 import { ensureV60SymonMcpInjectionSchema } from '@/lib/db/v60-symon-mcp-injection-migration';
+import { ensureV61PrMergeEvidenceSchema } from '@/lib/db/v61-pr-merge-evidence-migration';
 
 /**
  * Keep the current additive migrations behind one boot hook. `db/index.ts` is
@@ -59,4 +60,5 @@ export function ensurePostAutomationSchemas(sqlite: Database.Database): void {
   ensureV58SpectatorRepoGrantsSchema(sqlite);
   ensureV59TaskArtifactsSchema(sqlite);
   ensureV60SymonMcpInjectionSchema(sqlite);
+  ensureV61PrMergeEvidenceSchema(sqlite);
 }

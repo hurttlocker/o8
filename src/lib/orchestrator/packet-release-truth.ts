@@ -60,7 +60,8 @@ export function hasCanonicalReleaseEvidence(
     return evidenceKind === '' || evidenceKind === 'read_only_no_merge_required';
   }
   if (source === 'headless_released') {
-    return evidenceKind === 'headless_loop';
+    return evidenceKind === 'pull_request_merged' && mergeCommit.length > 0
+      && Boolean(payload?.headSha?.trim());
   }
   if (
     source === 'approve_and_merge'
@@ -115,7 +116,8 @@ export function clearUnprovenReleaseClaim(packet: ReleasablePacket): boolean {
   packet.releaseState = 'pending';
   packet.releaseStatePayload = null;
   if (packet.status === 'released') packet.status = 'awaiting_review';
-  if (packet.queueState === 'held') packet.queueState = 'queued';
+  // Invalid historical receipts need review, not an automatic new worker.
+  packet.queueState = 'held';
   packet.blockedReason = 'Release evidence is missing; review recovery is required.';
   return true;
 }

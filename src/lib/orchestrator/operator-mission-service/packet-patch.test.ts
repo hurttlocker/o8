@@ -42,6 +42,17 @@ function packet(id: string, title: string): OrchestratorPacket {
 }
 
 describe('patchMissionPacket', () => {
+  it('checks generation ownership after acquiring the packet lock and preserves newer output', async () => {
+    const current = { ...packet('pkt-generation', 'Generation'),
+      explainer: { status: 'ready' as const, artifactId: 'newer-artifact' } };
+    writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(),
+      missionId: 'mission-generation', packets: [current] });
+    const before = readOrchestratorControlPlaneState().packets[0].explainer;
+    await expect(patchMissionPacket(current.id, {
+      explainer: { status: 'failed', error: 'late failure' },
+    }, () => false)).resolves.toBe(false);
+    expect(readOrchestratorControlPlaneState().packets[0].explainer).toEqual(before);
+  });
   it('preserves a packet added by another process after this process cached mission state', async () => {
     const alpha = packet('pkt-alpha', 'Alpha');
     const beta = packet('pkt-beta', 'Beta');

@@ -1,10 +1,11 @@
-import { updateLane } from '@/lib/lane/registry';
+import { getLane, updateLane } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
 import { readOrchestratorControlPlaneState, withLockedState } from '@/lib/orchestrator/control-plane';
-import { withMissionRegistryState } from '@/lib/orchestrator/mission-registry';
+import { findMissionRegistryEntryByPacketId, withMissionRegistryState } from '@/lib/orchestrator/mission-registry';
 import { resolvePacketLaunchContext } from '@/lib/orchestrator/packet-launch-context';
 import { markPacketReleased } from '@/lib/orchestrator/packet-release-truth';
 import type { OrchestratorPacket, PacketContext } from '@/lib/orchestrator/types';
+import { packetReleaseGeneration, packetReleaseIdentityIsCurrent } from './release-ownership';
 
 export const READ_ONLY_COMPLETED_EVENT_LABEL = 'read_only_completed';
 
@@ -88,72 +89,38 @@ export async function completeReadOnlyZeroDiffLane(
 ): Promise<ReadOnlyCompletionResult> {
   const packetId = lane.packetId?.trim();
   if (!packetId) return { completed: false };
-
-  const resolved = resolvePacketLaunchContext(packetId);
-  if (!isReadOnlyPacketLane(lane) || !resolved) return { completed: false };
-
+  const currentPacket = readOrchestratorControlPlaneState().packets.find((packet) => packet.id === packetId);
+  const entry = !currentPacket ? findMissionRegistryEntryByPacketId(packetId, { includeArchived: true }) : null;
+  const snapshot = currentPacket ?? entry?.mission.packets.find((packet) => packet.id === packetId);
+  if (!snapshot || snapshot.launchContext?.workMode !== 'read-only') return { completed: false };
+  const generation = packetReleaseGeneration(snapshot, lane.id);
   const completedAt = new Date().toISOString();
-  if (!hasCompleteReadOnlyReceipt(context)) {
-    const detail = `Packet ${packetId} ended its read-only run without a complete Outcome, Evidence, Residual, and finding_ready receipt.`;
-    const blockedLane = updateLane(lane.id, {
-      status: 'awaiting_input',
-      outcome: null,
-      outcomeNote: detail,
+  const hasReceipt = hasCompleteReadOnlyReceipt(context) && context?.packetId === packetId
+    && (!lane.sessionKey || context?.sessionKey === lane.sessionKey);
+  const detail = `Packet ${packetId} ended its read-only run without a complete Outcome, Evidence, Residual, and finding_ready receipt.`;
+  const apply = (packet: OrchestratorPacket | undefined): ReadOnlyCompletionResult => {
+    const freshLane = getLane(lane.id);
+    if (!packet || !freshLane || packet.launchContext?.workMode !== 'read-only'
+      || freshLane.sessionKey !== lane.sessionKey || ['paused', 'archived'].includes(freshLane.status)
+      || !packetReleaseIdentityIsCurrent(packet, lane.id, generation)) return { completed: false };
+    const settledLane = updateLane(lane.id, {
+      status: hasReceipt ? 'completed' : 'awaiting_input',
+      outcome: hasReceipt ? 'no_changes' : null,
+      outcomeNote: hasReceipt ? context!.selfReview!.outcome!.trim() : detail,
       lastEventAt: completedAt,
-      lastEventLabel: 'read_only_evidence_missing',
-    }, 'system') ?? lane;
-
-    const current = readOrchestratorControlPlaneState();
-    if (current.packets.some((packet) => packet.id === packetId)) {
-      await withLockedState((state) => {
-        const packet = state.packets.find((candidate) => candidate.id === packetId);
-        if (packet) markPacketEvidenceMissing(packet, completedAt, blockedLane);
-      });
-    }
-
-    if (resolved.missionId) {
-      try {
-        await withMissionRegistryState(resolved.missionId, (state) => {
-          const packet = state.packets.find((candidate) => candidate.id === packetId);
-          if (packet) markPacketEvidenceMissing(packet, completedAt, blockedLane);
-          return { state, result: null };
-        });
-      } catch (error) {
-        console.warn(`[read-only-completion] Failed to block mission ${resolved.missionId}:`, error);
-      }
-    }
-
-    return { completed: false, blocked: true, detail, lane: blockedLane };
+      lastEventLabel: hasReceipt ? READ_ONLY_COMPLETED_EVENT_LABEL : 'read_only_evidence_missing',
+    }, 'system') ?? freshLane;
+    if (hasReceipt) markPacketCompleted(packet, completedAt, settledLane);
+    else markPacketEvidenceMissing(packet, completedAt, settledLane);
+    return hasReceipt ? { completed: true, lane: settledLane }
+      : { completed: false, blocked: true, detail, lane: settledLane };
+  };
+  // Mutate the durable owner only. The headless tick mirrors current missions;
+  // a second unlocked lookup here could apply this old result to a new owner.
+  if (currentPacket) {
+    return (await withLockedState((state) => apply(state.packets.find((packet) => packet.id === packetId)))).result;
   }
-
-  const completedLane = updateLane(lane.id, {
-    status: 'completed',
-    outcome: 'no_changes',
-    outcomeNote: context?.selfReview?.outcome?.trim()
-      || 'Read-only inspection completed without repository changes.',
-    lastEventAt: completedAt,
-    lastEventLabel: READ_ONLY_COMPLETED_EVENT_LABEL,
-  }, 'system') ?? lane;
-
-  const current = readOrchestratorControlPlaneState();
-  if (current.packets.some((packet) => packet.id === packetId)) {
-    await withLockedState((state) => {
-      const packet = state.packets.find((candidate) => candidate.id === packetId);
-      if (packet) markPacketCompleted(packet, completedAt, completedLane);
-    });
-  }
-
-  if (resolved.missionId) {
-    try {
-      await withMissionRegistryState(resolved.missionId, (state) => {
-        const packet = state.packets.find((candidate) => candidate.id === packetId);
-        if (packet) markPacketCompleted(packet, completedAt, completedLane);
-        return { state, result: null };
-      });
-    } catch (error) {
-      console.warn(`[read-only-completion] Failed to update mission ${resolved.missionId}:`, error);
-    }
-  }
-
-  return { completed: true, lane: completedLane };
+  return (await withMissionRegistryState(entry!.id, (state) => ({
+    state, result: apply(state.packets.find((packet) => packet.id === packetId)),
+  }))).result;
 }

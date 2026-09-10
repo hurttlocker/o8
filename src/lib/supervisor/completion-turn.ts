@@ -9,24 +9,27 @@ export class SupersededCompletionError extends Error {
   }
 }
 
-function turnCursor(laneId: string): number {
+function turnCursor(laneId: string, allowRuntimeExit: boolean): number {
   const row = getSqlite().prepare(`
     SELECT rowid FROM lane_events WHERE lane_id = ? AND verb IN (
       'steered_packet', 'steer_run_admitted', 'steer_failed', 'runtime_process_exit'
-    ) ORDER BY rowid DESC LIMIT 1
-  `).get(laneId) as { rowid: number } | undefined;
+    ) AND (? = 0 OR verb != 'runtime_process_exit') ORDER BY rowid DESC LIMIT 1
+  `).get(laneId, allowRuntimeExit ? 1 : 0) as { rowid: number } | undefined;
   return row?.rowid ?? 0;
 }
 
 /** Durable insertion order also distinguishes two turns in one millisecond. */
-export function createCompletionTurnGuard(lane: Lane) {
-  const cursor = turnCursor(lane.id);
+export function createCompletionTurnGuard(lane: Lane, options: { allowRuntimeExit?: boolean } = {}) {
+  // Forced review intentionally interrupts this runtime. Its exit is expected;
+  // new user turns and durable Stop/archive holds still supersede the transition.
+  const allowRuntimeExit = options.allowRuntimeExit === true;
+  const cursor = turnCursor(lane.id, allowRuntimeExit);
   function check(): void {
     const current = getLane(lane.id);
     if (!current || current.sessionKey !== lane.sessionKey || current.packetId !== lane.packetId
       || ['paused', 'merging', 'completed', 'archived'].includes(current.status)
       || (current.packetId && packetSteerHoldReason(current.packetId))
-      || turnCursor(lane.id) !== cursor) {
+      || turnCursor(lane.id, allowRuntimeExit) !== cursor) {
       throw new SupersededCompletionError();
     }
   }

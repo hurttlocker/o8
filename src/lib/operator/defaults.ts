@@ -248,7 +248,7 @@ export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParki
   /** Which backend runs lane auto-reviews. 'follow' rides orchestratorBackend. */
   reviewerBackend: ReviewerBackendSetting;
   /**
-   * HTML packet explainer generation (#1491). **On by default** — when a packet
+   * HTML packet explainer generation (#1491). **Off by default** — when enabled and a packet
    * reaches review, a self-contained explainer + quiz is generated
    * fire-and-forget and stored as a report artifact. Non-blocking; failure
    * degrades the review surface to the raw diff. Env: `O8_EXPLAINER`.
@@ -371,7 +371,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   // 'follow' → reviews ride the orchestrator backend (pre-split behavior).
   reviewerBackend: 'follow',
   // Explainer generation ON (non-blocking); quiz gate OFF (opt-in speed bump).
-  packetExplainerEnabled: true,
+  packetExplainerEnabled: false,
   quizGateEnabled: false,
   // Buy-in doc generation OFF by default — opt-in narrative for external sharing.
   buyinDocEnabled: false,
@@ -1236,7 +1236,7 @@ export function resolveReviewerBackendSync(): ReviewerBackendSetting {
   return getOperatorDefaultsSync().values.reviewerBackend;
 }
 
-/** Whether packet explainer generation is enabled (#1491, default on). */
+/** Whether packet explainer generation is enabled (#1491, default off). */
 export function resolvePacketExplainerEnabledSync(): boolean {
   return getOperatorDefaultsSync().values.packetExplainerEnabled;
 }

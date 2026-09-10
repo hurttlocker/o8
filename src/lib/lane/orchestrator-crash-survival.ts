@@ -226,6 +226,12 @@ export function listOrchestratorTurnsForThread(threadId: string): OrchestratorTu
     .sort((left, right) => right.startedAt - left.startedAt);
 }
 
+/** Includes settled records: abort acknowledgement does not prove process exit. */
+export function listOrchestratorTurnsForSessions(sessionNames: readonly string[]): OrchestratorTurnRecord[] {
+  const names = new Set(sessionNames);
+  return readAllTurnRecords().filter((record) => names.has(record.sessionName));
+}
+
 export function isPidAlive(pid?: number): boolean {
   if (!pid) return false;
   try {

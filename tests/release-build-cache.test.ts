@@ -80,6 +80,45 @@ function nativeIdentity(source: string): ReleaseBuildCacheIdentity {
 }
 
 describe('shared release build cache', () => {
+  it('rejects native output from a deleted producer checkout before replacing destination files', async () => {
+    const { root: producer, cacheRoot } = fixture();
+    const { root: destination } = fixture();
+    const target = 'src-tauri/target/release';
+    const permission = 'build/tauri-fixture/out/permissions/default.json';
+    mkdirSync(join(producer, target, 'build/tauri-fixture/out/permissions'), { recursive: true });
+    writeFileSync(join(producer, target, permission), '{}');
+    writeFileSync(join(producer, target, 'build/tauri-fixture/output'), join(producer, target, permission));
+    expect(await captureReleaseBuildCache(producer, 'native', { cacheRoot, identity: nativeIdentity('a') }))
+      .toMatchObject({ status: 'captured' });
+    mkdirSync(join(destination, target), { recursive: true });
+    writeFileSync(join(destination, target, 'keep.bin'), 'destination output');
+    rmSync(producer, { recursive: true, force: true });
+    expect(await restoreReleaseBuildCache(destination, 'native', { cacheRoot, identity: nativeIdentity('b') }))
+      .toMatchObject({ status: 'miss', reason: 'native_checkout_mismatch' });
+    expect(readFileSync(join(destination, target, 'keep.bin'), 'utf8')).toBe('destination output');
+    expect(existsSync(join(destination, target, permission))).toBe(false);
+    expect(readdirSync(cacheRoot).some((name) => name.startsWith('.restore-'))).toBe(false);
+  });
+
+  it('rejects legacy native entries without checkout proof while preserving cross-checkout web reuse', async () => {
+    const { root, cacheRoot } = fixture();
+    const { root: destination } = fixture();
+    mkdirSync(join(root, 'src-tauri/target/release'), { recursive: true });
+    writeFileSync(join(root, 'src-tauri/target/release/artifact.bin'), 'native compiler output');
+    await captureReleaseBuildCache(root, 'native', { cacheRoot, identity: nativeIdentity('a') });
+    const manifestPath = join(cacheRoot, 'entries/native/compatibility-a/entry-a.json');
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    expect(JSON.stringify(manifest)).not.toContain(root);
+    delete manifest.nativeCheckoutSha256;
+    writeFileSync(manifestPath, JSON.stringify(manifest));
+    expect(await restoreReleaseBuildCache(root, 'native', { cacheRoot, identity: nativeIdentity('a') }))
+      .toMatchObject({ status: 'miss', reason: 'native_checkout_unverified' });
+    await captureReleaseBuildCache(root, 'web', { cacheRoot, identity: identity('a') });
+    expect(await restoreReleaseBuildCache(destination, 'web', { cacheRoot, identity: identity('b') }))
+      .toMatchObject({ status: 'hit_compatible', reason: 'verified' });
+    expect(readFileSync(join(destination, '.next/cache/webpack/entry.bin'), 'utf8')).toBe('compiled-source-a');
+  });
+
   it('uses a configured external root only while its mount marker identity matches', async () => {
     const { root } = fixture();
     const volumeRoot = mkdtempSync(join(tmpdir(), 'o8-release-cache-volume-'));

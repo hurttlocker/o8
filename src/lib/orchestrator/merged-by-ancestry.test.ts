@@ -290,6 +290,27 @@ describe('merged-by-ancestry reconciliation', () => {
     ))).toEqual([]);
   }, 20_000);
 
+  it.each(['stop', 'new-steer', 'new-attempt'] as const)('rejects old merge evidence after %s wins during the sweep', async (change) => {
+    const { clone, seed } = makeRepo(`o8-merge-generation-${change}`);
+    writeFileSync(join(clone, 'work.txt'), 'merged work');
+    commitAll(clone, 'work');
+    git(clone, ['push', 'origin', 'packet']);
+    git(seed, ['fetch', 'origin', 'packet', '--quiet']);
+    git(seed, ['merge', '--ff-only', 'origin/packet']);
+    git(seed, ['push', 'origin', 'main']);
+    const lane = seedPacket(clone, `pkt-generation-${change}`);
+    h.beforeActivityAssessment = () => {
+      const state = readOrchestratorControlPlaneState();
+      if (change === 'stop') state.packets[0].operatorStopped = true;
+      if (change === 'new-attempt') state.packets[0].attemptCount = (state.packets[0].attemptCount ?? 0) + 1;
+      if (change === 'new-steer') appendEvent(lane.id, 'steered_packet', 'user', { message: 'new work' });
+      writeOrchestratorControlPlaneState(state);
+    };
+    expect((await sweepPacketsMergedByAncestry()).merged).toBe(0);
+    expect(persistedPacket(`pkt-generation-${change}`)?.releaseState).toBe('pending');
+    expect(getLane(lane.id)?.status).toBe('reviewing');
+  });
+
   it('leaves unmerged branch content untouched', async () => {
     const { clone } = makeRepo('o8-merged-unmerged');
     writeFileSync(join(clone, 'packet.txt'), 'packet\n');

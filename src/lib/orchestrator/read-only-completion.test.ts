@@ -10,6 +10,7 @@ const { createLane, getLane, setLaneStatus } = await import('@/lib/lane/registry
 const {
   readOrchestratorControlPlaneState,
   writeOrchestratorControlPlaneState,
+  withControlPlaneLock,
 } = await import('@/lib/orchestrator/control-plane');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const {
@@ -85,6 +86,28 @@ function completionContext(packetId: string): PacketContext {
 }
 
 describe('read-only zero-diff completion', () => {
+  it('does not release or retire a lane when Stop wins the persistence lock', async () => {
+    const lane = seed('pkt-read-only-stop-race', true);
+    let completion!: ReturnType<typeof completeReadOnlyZeroDiffLane>;
+    await withControlPlaneLock(async () => {
+      completion = completeReadOnlyZeroDiffLane(lane, completionContext(lane.packetId!));
+      const state = readOrchestratorControlPlaneState();
+      state.packets[0].operatorStopped = true;
+      writeOrchestratorControlPlaneState(state);
+    });
+    expect((await completion).completed).toBe(false);
+    expect(getLane(lane.id)?.status).toBe('running');
+    expect(readOrchestratorControlPlaneState().packets[0]).toMatchObject({ operatorStopped: true, releaseState: 'pending' });
+  });
+
+  it('refuses a finding receipt from a different session', async () => {
+    const lane = seed('pkt-read-only-other-turn', true);
+    expect(await completeReadOnlyZeroDiffLane(lane, {
+      ...completionContext(lane.packetId!), sessionKey: 'different-session',
+    })).toMatchObject({ completed: false, blocked: true });
+    expect(readOrchestratorControlPlaneState().packets[0].releaseState).toBe('pending');
+  });
+
   it('waits for the final self-review when the runtime completion beats transcript persistence', async () => {
     let captures = 0;
     const context = await captureSettledReadOnlyCompletionContext(async () => {

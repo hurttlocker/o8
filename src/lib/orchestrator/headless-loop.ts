@@ -11,9 +11,7 @@ import { buildDagMetadata, hasLaneBinding } from '@/lib/orchestrator/dag';
 import { buildRemainingLaunchBudget, runDispatchTick } from '@/lib/orchestrator/dispatch';
 import { applyHeadlessTickDeadline } from '@/lib/orchestrator/headless-tick-deadline';
 import { hasRegistryPendingHeadlessWork, listActiveMissionRegistryEntries, missionHasPendingHeadlessWork, persistMissionRegistryState, withMissionRegistryState } from '@/lib/orchestrator/mission-registry';
-import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
 import type { OrchestratorMissionState } from '@/lib/orchestrator/types';
-import { markPacketReleased } from '@/lib/orchestrator/packet-release-truth';
 
 const DEFAULT_INTERVAL_MS = 10_000;
 const MIN_INTERVAL_MS = 1_000;
@@ -30,81 +28,10 @@ interface HeadlessSprintTickResult {
 let loopTimer: ReturnType<typeof setInterval> | null = null;
 let tickPromise: Promise<HeadlessSprintTickResult> | null = null;
 let rerunRequested = false;
-const queuedReleasePacketIds = new Set<string>();
 let lastPruneAt = 0;
 let prunePromise: Promise<void> | null = null;
 let lastCompletedMissionId = '';
 let silentIdleTickCount = 0;
-
-function queueReleasedPackets(packetIds?: string[]) {
-  for (const packetId of packetIds ?? []) {
-    const normalized = packetId.trim();
-    if (normalized) {
-      queuedReleasePacketIds.add(normalized);
-    }
-  }
-}
-
-/**
- * Public enqueue for packet releases that happen OUTSIDE approve_and_merge —
- * the PR-mode reconciler archives a lane when its PR merges on GitHub, but the
- * packet's releaseState only ever flipped inside the merge path, so wave 2+ of
- * a sequential mission blocked forever on "waiting to be explicitly released"
- * (live-hit 2026-07-04, the #1389 wave itself; third member of the PR-mode
- * bypass family on #1386). The next tick applies queued releases to the
- * current mission AND every registry mission.
- */
-export function queueHeadlessPacketRelease(packetIds: string[]) {
-  queueReleasedPackets(packetIds);
-}
-
-function drainReleasedPackets() {
-  const packetIds = [...queuedReleasePacketIds];
-  queuedReleasePacketIds.clear();
-  return packetIds;
-}
-
-function markReleasedPackets(
-  state: OrchestratorMissionState,
-  packetIds: string[],
-): OrchestratorMissionState {
-  if (packetIds.length === 0) {
-    return state;
-  }
-
-  const packetIdSet = new Set(packetIds);
-  const releasedAt = new Date().toISOString();
-  let changed = false;
-
-  const packets = state.packets.map((packet) => {
-    if (!packetIdSet.has(packet.id) || packet.releaseState === 'released') {
-      return packet;
-    }
-
-    changed = true;
-    const releasedPacket = { ...packet };
-    markPacketReleased(releasedPacket, {
-      source: 'headless_released',
-      evidenceKind: 'headless_loop',
-      releasedAt,
-    });
-    return {
-      ...releasedPacket,
-      lastEventAt: releasedAt,
-      lastEventLabel: 'headless_released',
-    };
-  });
-
-  if (!changed) {
-    return state;
-  }
-
-  return normalizeOrchestratorMissionState({
-    ...state,
-    packets,
-    updatedAt: releasedAt,
-  });
-}
 
 function countLaunchedPackets(
   beforeDispatch: OrchestratorMissionState,
@@ -165,10 +92,6 @@ function buildIdleTickResult(mission: OrchestratorMissionState): HeadlessSprintT
 }
 
 function maybeShortCircuitIdleTick(): HeadlessSprintTickResult | null {
-  if (queuedReleasePacketIds.size > 0) {
-    return null;
-  }
-
   const mission = readOrchestratorControlPlaneState();
   if (hasPendingHeadlessWork(mission)) {
     silentIdleTickCount = 0;
@@ -233,14 +156,12 @@ async function pruneWorktreesIfDue(state: OrchestratorMissionState) {
 
 async function runRegistryMissionTicks(
   currentMissionId: string | null | undefined,
-  releasedPacketIds: string[],
 ) {
   let launched = 0;
   let maintenanceNeeded = false;
   for (const entry of listActiveMissionRegistryEntries(currentMissionId)) {
     const { result: activity } = await withMissionRegistryState(entry.id, async (fresh) => {
-      const withReleases = markReleasedPackets(fresh, releasedPacketIds);
-      const reconciled = reconcileOrchestratorControlPlaneState(withReleases);
+      const reconciled = reconcileOrchestratorControlPlaneState(fresh);
       const fanned = fanOutComparisonPackets(reconciled);
       const budget = buildRemainingLaunchBudget();
       if (!missionHasPendingHeadlessWork(fanned) || budget.maxLaunches <= 0) {
@@ -263,12 +184,10 @@ async function runRegistryMissionTicks(
 }
 
 async function executeHeadlessSprintTick(): Promise<HeadlessSprintTickResult> {
-  const releasedPacketIds = drainReleasedPackets();
   // #460 — Acquire the control-plane lock so concurrent API operations
   // (reset_packet, etc.) don't race our read-modify-write cycle.
   const { result } = await withLockedState(async (current) => {
-    const withReleases = markReleasedPackets(current, releasedPacketIds);
-    const reconciled = reconcileOrchestratorControlPlaneState(withReleases);
+    const reconciled = reconcileOrchestratorControlPlaneState(current);
     // #1293 — best-of-N fan-out: a seed packet (comparisonModels set, no
     // comparisonGroupId) is consumed by fanOutComparisonPackets — replaced by
     // its N sibling candidates. Persist that consumption BEFORE dispatch so a
@@ -310,7 +229,7 @@ async function executeHeadlessSprintTick(): Promise<HeadlessSprintTickResult> {
       mission,
     } satisfies HeadlessSprintTickResult;
   });
-  const registryActivity = await runRegistryMissionTicks(result.mission.missionId, releasedPacketIds);
+  const registryActivity = await runRegistryMissionTicks(result.mission.missionId);
   const tickResult = {
     ...result,
     launched: result.launched + registryActivity.launched,
@@ -320,8 +239,7 @@ async function executeHeadlessSprintTick(): Promise<HeadlessSprintTickResult> {
   let maintenanceNeeded = tickResult.launched > 0
     || hasWorktreeMaintenanceDemand(tickResult.mission)
     || registryActivity.maintenanceNeeded
-    || archivedCompleted > 0
-    || releasedPacketIds.length > 0;
+    || archivedCompleted > 0;
   if (archivedCompleted > 0) {
     console.log(`[headless] Archived ${archivedCompleted} completed lane${archivedCompleted === 1 ? '' : 's'}`);
   }
@@ -344,9 +262,7 @@ async function executeHeadlessSprintTick(): Promise<HeadlessSprintTickResult> {
   return tickResult;
 }
 
-export async function runHeadlessSprintTick(options: { releasePacketIds?: string[] } = {}) {
-  queueReleasedPackets(options.releasePacketIds);
-
+export async function runHeadlessSprintTick() {
   if (tickPromise) {
     rerunRequested = true;
     return tickPromise;
@@ -373,7 +289,7 @@ export async function runHeadlessSprintTick(options: { releasePacketIds?: string
       rerunRequested = false;
       silentIdleTickCount = 0;
       result = await executeHeadlessSprintTick();
-    } while (rerunRequested || queuedReleasePacketIds.size > 0);
+    } while (rerunRequested);
 
     return result;
   })();

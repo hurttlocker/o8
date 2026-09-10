@@ -298,6 +298,7 @@ const EXPLICIT_OPT_IN_FLAG_KEYS = [
   'broadcastVoice',
   'apfsDependencyImages',
   'mergeTestReplayEnabled',
+  'packetExplainerEnabled',
   'quizGateEnabled',
   'buyinDocEnabled',
   'productTelemetryEnabled',

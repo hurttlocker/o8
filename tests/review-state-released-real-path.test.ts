@@ -124,8 +124,9 @@ describe('review state for released but unmerged packets through the real route'
     });
     expect(readOrchestratorControlPlaneState().packets[0]).toMatchObject({
       id: packetId,
-      releaseState: 'released',
-      releaseStatePayload: { mergeCommit: null },
+      releaseState: 'pending',
+      releaseStatePayload: null,
+      queueState: 'held',
     });
   });
 });

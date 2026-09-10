@@ -5,6 +5,9 @@ import { resolvePacketExplainerEnabledSync } from '@/lib/operator/defaults';
 import { recordLaneEvent } from './events';
 import { getLane } from './registry';
 import {
+  explainerThreadId, hasUnsettledExplainerProcess, isLatestExplainer, ownsCurrentExplainer, recoverExplainerClaims,
+} from './packet-explainer-ownership';
+import {
   generatePacketExplainer,
   type GenerateExplainerParams,
   type PacketExplainerGenerationResult,
@@ -13,7 +16,7 @@ import {
 const DRAIN_INTERVAL_MS = 5_000;
 const MAX_EXPLAINER_ATTEMPTS = 3;
 
-type StoredExplainerPayload = Omit<GenerateExplainerParams, 'lane' | 'signal'>;
+type StoredExplainerPayload = Omit<GenerateExplainerParams, 'lane' | 'signal' | 'generationId' | 'isCurrent'>;
 
 interface QueuedExplainer {
   id: string;
@@ -48,10 +51,11 @@ function millisecondsSince(value: string): number {
 async function stampPacket(
   packetId: string,
   explainer: NonNullable<import('@/lib/orchestrator/types').OrchestratorPacket['explainer']>,
+  isCurrent: () => boolean,
 ): Promise<void> {
   try {
     const { patchMissionPacket } = await import('@/lib/orchestrator/operator-mission-service/packet-patch');
-    await patchMissionPacket(packetId, { explainer });
+    await patchMissionPacket(packetId, { explainer }, isCurrent);
   } catch (error) {
     console.warn(`[explainer-queue] Failed to stamp packet ${packetId}:`, error);
   }
@@ -60,7 +64,9 @@ async function stampPacket(
 function claimNextExplainer(): QueuedExplainer | null {
   if (hasCorrectnessReviewDemand()) return null;
   return getSqlite().transaction(() => {
-    if (hasCorrectnessReviewDemand()) return null;
+    if (hasCorrectnessReviewDemand() || getSqlite().prepare(
+      "SELECT 1 FROM explainer_queue WHERE status = 'in_progress' LIMIT 1",
+    ).get()) return null;
     const row = getSqlite().prepare(
       `SELECT id, packet_id, lane_id, repo_path, payload_json, attempts,
               contention_count, created_at
@@ -70,16 +76,22 @@ function claimNextExplainer(): QueuedExplainer | null {
     ).get() as Omit<QueuedExplainer, 'claim_owner'> | undefined;
     if (!row) return null;
     const claimOwner = `explainer-owner-${process.pid}-${randomUUID().slice(0, 8)}`;
+    let payloadJson = row.payload_json;
+    try {
+      payloadJson = JSON.stringify({ ...JSON.parse(row.payload_json),
+        generationId: explainerThreadId({ ...row, claim_owner: claimOwner }),
+      });
+    } catch { /* Preserve corrupt payloads for the drain's failure handling. */ }
     const claimed = getSqlite().prepare(
       `UPDATE explainer_queue
        SET status = 'in_progress', claimed_at = datetime('now'), claim_owner = ?,
-           queue_wait_ms = ?, updated_at = datetime('now')
+           queue_wait_ms = ?, payload_json = ?, updated_at = datetime('now')
        WHERE id = ? AND status = 'pending'
          AND NOT EXISTS (
            SELECT 1 FROM review_queue WHERE status IN ('pending', 'in_progress')
          )`,
-    ).run(claimOwner, millisecondsSince(row.created_at), row.id);
-    return claimed.changes === 1 ? { ...row, claim_owner: claimOwner } : null;
+    ).run(claimOwner, millisecondsSince(row.created_at), payloadJson, row.id);
+    return claimed.changes === 1 ? { ...row, payload_json: payloadJson, claim_owner: claimOwner } : null;
   })();
 }
 
@@ -87,6 +99,15 @@ function settleDeferred(
   row: QueuedExplainer,
   result: PacketExplainerGenerationResult,
 ): void {
+  // Backends can acknowledge abort before the detached provider actually exits.
+  // Keep the claim fenced until a later tick confirms the entire group is gone.
+  if (hasUnsettledExplainerProcess(row)) {
+    getSqlite().prepare(`
+      UPDATE explainer_queue SET outcome = 'awaiting_exit', last_error = ?, updated_at = datetime('now')
+      WHERE id = ? AND status = 'in_progress' AND claim_owner = ?
+    `).run(result.reason ?? 'Waiting for interrupted provider exit', row.id, row.claim_owner);
+    return;
+  }
   getSqlite().prepare(
     `UPDATE explainer_queue
      SET status = 'pending', contention_count = contention_count + 1,
@@ -117,6 +138,7 @@ async function settleFailed(
   payload: StoredExplainerPayload,
   result: PacketExplainerGenerationResult,
 ): Promise<void> {
+  if (!ownsCurrentExplainer(row)) return;
   const attempts = row.attempts + 1;
   const terminal = attempts >= MAX_EXPLAINER_ATTEMPTS;
   getSqlite().prepare(
@@ -154,7 +176,7 @@ async function settleFailed(
       changedFileCount: payload.changedFileCount,
       generatedAt: new Date().toISOString(),
       error: (result.reason ?? 'explainer generation failed').slice(0, 300),
-    });
+    }, () => isLatestExplainer(row.id));
   }
 }
 
@@ -191,7 +213,7 @@ export async function enqueuePacketExplainer(
     status: 'generating',
     changedFileCount: params.changedFileCount,
     generatedAt: null,
-  });
+  }, () => isLatestExplainer(id));
   recordLaneEvent(params.lane.id, 'explainer_queued', 'system', {
     packetId: params.packetId,
     explainerId: id,
@@ -208,7 +230,12 @@ export function notifyCorrectnessReviewQueued(): void {
 export async function drainPacketExplainerQueue(
   runner: ExplainerRunner = generatePacketExplainer,
 ): Promise<void> {
-  if (activeExplainer || !resolvePacketExplainerEnabledSync()) return;
+  if (!resolvePacketExplainerEnabledSync()) {
+    activeExplainer?.controller.abort('packet explainer disabled');
+    return;
+  }
+  if (activeExplainer) return;
+  recoverExplainerClaims();
   const row = claimNextExplainer();
   if (!row) return;
   const lane = getLane(row.lane_id);
@@ -242,8 +269,19 @@ export async function drainPacketExplainerQueue(
     queueWaitMs: millisecondsSince(row.created_at),
   });
   try {
-    const result = await runner({ ...payload, lane, signal: controller.signal });
-    if (result.outcome === 'ready') {
+    const result = await runner({ ...payload, lane, signal: controller.signal,
+      generationId: explainerThreadId(row),
+      isCurrent: () => ownsCurrentExplainer(row) && resolvePacketExplainerEnabledSync(),
+    });
+    if (result.outcome !== 'ready' && hasUnsettledExplainerProcess(row)) {
+      settleDeferred(row, result);
+    } else if (!ownsCurrentExplainer(row) && !controller.signal.aborted) {
+      getSqlite().prepare(`
+        UPDATE explainer_queue SET status = 'completed', outcome = 'superseded',
+          completed_at = datetime('now'), claimed_at = NULL, claim_owner = NULL
+        WHERE id = ? AND status = 'in_progress' AND claim_owner = ?
+      `).run(row.id, row.claim_owner);
+    } else if (result.outcome === 'ready' && !controller.signal.aborted) {
       getSqlite().prepare(
         `UPDATE explainer_queue
          SET status = 'completed', backend = ?, turn_duration_ms = ?,
@@ -268,26 +306,22 @@ export async function drainPacketExplainerQueue(
       await settleFailed(row, payload, result);
     }
   } catch (error) {
-    await settleFailed(row, payload, {
+    const result: PacketExplainerGenerationResult = {
       outcome: 'failed',
       backend: null,
       durationMs: 0,
       approximateCost: null,
       reason: error instanceof Error ? error.message : String(error),
-    });
+    };
+    if (hasUnsettledExplainerProcess(row)) settleDeferred(row, result);
+    else await settleFailed(row, payload, result);
   } finally {
-    if (activeExplainer?.row.id === row.id) activeExplainer = null;
+    if (activeExplainer?.row.claim_owner === row.claim_owner) activeExplainer = null;
   }
 }
 
 export function startPacketExplainerQueueDrain(): () => void {
   if (drainTimer) return () => { /* already running */ };
-  getSqlite().prepare(
-    `UPDATE explainer_queue
-     SET status = 'pending', last_error = 'Recovered after process restart',
-         claimed_at = NULL, claim_owner = NULL, updated_at = datetime('now')
-     WHERE status = 'in_progress'`,
-  ).run();
   drainTimer = setInterval(() => {
     void drainPacketExplainerQueue().catch((error) => {
       console.error('[explainer-queue] Drain error:', error);

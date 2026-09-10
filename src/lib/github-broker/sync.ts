@@ -108,9 +108,10 @@ type GitHubPullRequestPayload = {
   updated_at?: string;
   closed_at?: string | null;
   merged_at?: string | null;
+  merge_commit_sha?: string | null;
   user?: { login?: string | null; type?: string | null } | null;
   author_association?: string | null;
-  head?: { ref?: string | null };
+  head?: { ref?: string | null; sha?: string | null };
   base?: { ref?: string | null };
   additions?: number;
   deletions?: number;
@@ -265,6 +266,8 @@ function mapPullRequestSnapshot(
     updatedAt: detail.updated_at ?? item.updated_at ?? item.created_at ?? '',
     closedAt: detail.closed_at ?? item.closed_at ?? null,
     mergedAt: detail.merged_at ?? item.merged_at ?? null,
+    headSha: detail.head?.sha ?? item.head?.sha ?? null,
+    mergeCommit: detail.merge_commit_sha ?? item.merge_commit_sha ?? null,
   };
 }
 
