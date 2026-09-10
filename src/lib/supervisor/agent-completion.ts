@@ -7,7 +7,7 @@ import { createCompletionTurnGuard, SupersededCompletionError } from './completi
 
 interface CompletionDependencies {
   enqueueAutoReview(laneId: string): Promise<unknown>;
-  triggerHeadlessSprintTick(packetIds?: string[]): Promise<unknown>;
+  triggerHeadlessSprintTick(): Promise<unknown>;
   queueReviewContinuation(lane: Lane): void;
   enqueueVerificationFailureInboxItem(input: {
     repoPath: string;
@@ -335,7 +335,8 @@ export async function handleAgentCompletion(
         void enqueueAutoReview(updated.id).catch((err) => {
           console.warn(`[supervisor] enqueueAutoReview kicked off but errored (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
         });
-        void triggerHeadlessSprintTick(packetId ? [packetId] : undefined).catch((err) => {
+        // Reviewable work is not a release. Only wake dependency scheduling.
+        void triggerHeadlessSprintTick().catch((err) => {
           console.warn(`[supervisor] triggerHeadlessSprintTick errored (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
         });
         queueReviewContinuation({ ...updated, packetId: packetId ?? updated.packetId });

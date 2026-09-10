@@ -26,6 +26,7 @@ vi.mock('@/lib/supervisor/completion-verification', () => ({
 }));
 vi.mock('@/lib/orchestrator/context-relay', () => ({ capturePacketCompletionContext: h.capture }));
 vi.mock('@/lib/runtime/transcript', () => ({ readRuntimeTranscript: h.transcript }));
+vi.mock('@/lib/lane/worktree-cleanup', () => ({ pruneRepoWorktrees: vi.fn(async () => []) }));
 
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-completion-steer-race-'));
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
@@ -42,6 +43,9 @@ const { getWatchedAgents, ingestAgentCompletionSignal, registerWatchedAgent,
   startSupervisorLoop, stopSupervisorLoop, unregisterWatchedAgent } = await import('@/lib/supervisor/agent-supervisor');
 const steerRoute = await import('@/app/api/orchestrator/steer-packet/route');
 const runsRoute = await import('@/app/api/panel/managed-runs/route');
+const headlessRoute = await import('@/app/api/orchestrator/headless-tick/route');
+const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
+const { recordMission } = await import('@/lib/db/missions-store');
 
 const dependencies = {
   enqueueAutoReview: vi.fn(async () => {}),
@@ -118,6 +122,7 @@ function delayVerification() {
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
+  dependencies.triggerHeadlessSprintTick.mockReset().mockResolvedValue(undefined);
   h.perform.mockReset();
   h.verify.mockReset().mockResolvedValue(verified);
   h.commit.mockReset().mockResolvedValue(false);
@@ -142,6 +147,69 @@ afterEach(() => {
 afterAll(() => { closeDb(); rmSync(dataDir, { recursive: true, force: true }); });
 
 describe('completion and steer overlap through production callbacks and routes', () => {
+  it.each(['current', 'registry'] as const)('keeps fully settled %s work reviewable across repeated continuation', async (location) => {
+    const { packet, lane, sessionKey } = fixture();
+    const missionId = `mission-${packet.id}`;
+    if (location === 'registry') {
+      recordMission({
+        id: missionId, repoPath: lane.repoPath, runtime: 'claude-code',
+        prompt: 'Verify repeated continuation', summary: 'Review without release',
+        constraints: '', packetMeta: [], totalWaves: 1,
+        missionState: readOrchestratorControlPlaneState(),
+      });
+      expect(readMissionRegistryEntry(missionId)?.mission.packets[0]?.id).toBe(packet.id);
+      writeOrchestratorControlPlaneState(createEmptyOrchestratorMissionState());
+    }
+    let tick: Promise<void> = Promise.resolve();
+    // Preserve the bridge's former argument mapping so an accidental release
+    // list reaches the real route rather than disappearing into a no-op stub.
+    dependencies.triggerHeadlessSprintTick.mockImplementation((releasePacketIds?: string[]) => {
+      tick = headlessRoute.POST(request('/api/orchestrator/headless-tick',
+        releasePacketIds ? { releasePacketIds } : {})).then(async (response) => {
+        expect(response.status, await response.clone().text()).toBe(200);
+      });
+      return tick;
+    });
+    for (let turn = 0; turn < 3; turn += 1) {
+      await handleAgentCompletion(sessionKey, 'completed', dependencies);
+      await tick;
+      closeDb();
+      const saved = location === 'current' ? readOrchestratorControlPlaneState()
+        : readMissionRegistryEntry(missionId, { includeArchived: true })?.mission;
+      expect(saved?.packets.find((p) => p.id === packet.id)).toMatchObject({ releaseState: 'pending' });
+      expect(getLane(lane.id)?.status).toBe('reviewing');
+      expect(dependencies.triggerHeadlessSprintTick).toHaveBeenLastCalledWith();
+      expect((await register(packet, `closed${turn}`)).status).toBe(409);
+      // A distinct operator mutation per turn, not an idempotent replay.
+      const response = steerRoute.POST(request('/api/orchestrator/steer-packet', {
+        packetId: packet.id, message: `Review correction ${turn}`, idempotencyKey: `repeat-${packet.id}-${turn}`,
+      }));
+      let settled = false;
+      void response.finally(() => { settled = true; });
+      await vi.waitFor(() => expect(settled).toBe(true), { timeout: 5_000 });
+      expect((await response).status).toBe(200);
+      expect((await register(packet, `active${turn}`)).status).toBe(200);
+      recordLaneEvent(lane.id, 'runtime_process_exit', 'system', { surfaceId: sessionKey, exitCode: 0 });
+    }
+    expect(h.perform).toHaveBeenCalledTimes(3);
+    await persistLanePacketHold(packet.id);
+    setLaneStatus(lane.id, 'paused', 'user', 'operator_stopped');
+    expect((await steer(packet.id)).status).toBe(409);
+    expect((await register(packet, 'stopped')).status).toBe(409);
+    expect(h.perform).toHaveBeenCalledTimes(3);
+  });
+
+  it('rejects raw release IDs at the scheduler route without changing review state', async () => {
+    const { packet, lane } = fixture();
+    const response = await headlessRoute.POST(request('/api/orchestrator/headless-tick', {
+      releasePacketIds: [packet.id],
+    }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: 'release_requires_merge_evidence' });
+    expect(readOrchestratorControlPlaneState().packets[0]?.releaseState).toBe('pending');
+    expect(getLane(lane.id)?.status).toBe('reviewing');
+  });
+
   it.each(['pass', 'fail', 'throw'] as const)('discards a delayed %s result while the next turn remains admitted', async (outcome) => {
     const { packet, lane, sessionKey } = fixture();
     const delayed = delayVerification();
@@ -307,5 +375,12 @@ describe('completion and steer overlap through production callbacks and routes',
     expect(callback).toContain("import('@/lib/supervisor/agent-completion')");
     expect(callback).toContain('handleAgentCompletion(surfaceId, outcome, {');
     expect(callback).not.toContain('setLaneStatus(');
+    const bridgeStart = source.indexOf('async function triggerHeadlessSprintTick(');
+    const bridge = source.slice(bridgeStart, source.indexOf('\nasync function ', bridgeStart + 1));
+    expect(bridge).toContain('triggerHeadlessSprintTick()');
+    expect(bridge).not.toContain('releasePacketIds');
+    const stallStart = source.indexOf("lastEventLabel: 'self_review_stall_forced'");
+    const stall = source.slice(stallStart, source.indexOf('resetSelfReviewStallGuard(surfaceId)', stallStart));
+    expect(stall).toContain('await triggerHeadlessSprintTick();');
   });
 });

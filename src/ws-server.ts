@@ -468,10 +468,10 @@ async function fetchRuntimeTranscript(sessionKey: string, limit: number) {
   return payload.transcript ?? [];
 }
 
-async function triggerHeadlessSprintTick(releasePacketIds?: string[]) {
+async function triggerHeadlessSprintTick() {
   return fetchNextJson<{ ok: boolean }>('/api/orchestrator/headless-tick', {
     method: 'POST',
-    body: releasePacketIds && releasePacketIds.length > 0 ? { releasePacketIds } : {},
+    body: {},
     // A cold launch can spend up to three minutes in the required base
     // typecheck. The headless loop grants fresh launches a four-minute bound
     // while retaining the 30s wedge deadline for ordinary ticks, so keep this
@@ -841,7 +841,7 @@ async function forceCodexSelfReviewToReview(
   }, 'system');
   if (updated) {
     await enqueueAutoReview(updated.id);
-    await triggerHeadlessSprintTick(updated.packetId ? [updated.packetId] : undefined);
+    await triggerHeadlessSprintTick();
     queueReviewContinuation(updated);
   }
 

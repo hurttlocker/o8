@@ -9,15 +9,17 @@ export async function POST(request: NextRequest) {
   const denied = requirePanelAuth(request);
   if (denied) return denied;
 
-  const body = await request.json().catch(() => ({})) as { releasePacketIds?: unknown };
-  const releasePacketIds = Array.isArray(body.releasePacketIds)
-    ? body.releasePacketIds
-      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-      .map((value) => value.trim())
-    : undefined;
+  const body: unknown = await request.json().catch(() => ({}));
+  if (body && typeof body === 'object' && 'releasePacketIds' in body) {
+    return NextResponse.json({
+      ok: false,
+      error: 'release_requires_merge_evidence',
+      message: 'A scheduler wake cannot release packets. Use the reviewed merge path.',
+    }, { status: 400, headers: { 'Cache-Control': 'no-store, max-age=0' } });
+  }
 
   try {
-    const result = await runHeadlessSprintTick({ releasePacketIds });
+    const result = await runHeadlessSprintTick();
     return NextResponse.json({
       ok: true,
       launched: result.launched,
