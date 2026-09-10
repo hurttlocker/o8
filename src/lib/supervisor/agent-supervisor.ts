@@ -247,8 +247,9 @@ export function registerWatchedAgent(
   });
 }
 
-export function unregisterWatchedAgent(surfaceId: string): void {
+export function unregisterWatchedAgent(surfaceId: string, expectedWatch?: WatchedAgent): void {
   const agent = watchedAgents.get(surfaceId);
+  if (expectedWatch && agent !== expectedWatch) return;
   if (agent) {
     console.log(`[supervisor] Unwatching agent "${agent.name}" (${surfaceId})`);
     watchedAgents.delete(surfaceId);
@@ -593,10 +594,7 @@ async function handleStatusChange(
   now: number,
 ): Promise<void> {
   if (!callbacks) return;
-  // Completion is a terminal state. Once reported, subsequent polling ticks
-  // must not re-enter this handler and fire a second onAgentCompletion — that
-  // path overwrote a successfully-merged lane back to awaiting_input/agent_failed
-  // when the codex PTY exited after the auto-merge finished (#531).
+  // Reserve completion once; an older callback must never overwrite a successor.
   if (watched.completionReported) return;
 
   const duration = Math.round((now - watched.registeredAt) / 1000);
@@ -608,8 +606,10 @@ async function handleStatusChange(
     watched.completionReported = true;
     persistWatchedAgent(watched);
     const completionDecision = await callbacks.onAgentCompletion?.(watched.surfaceId, 'completed');
-    if (completionDecision?.resume) {
+    if (watchedAgents.get(watched.surfaceId) !== watched) return;
+    if (completionDecision?.superseded || completionDecision?.resume) {
       resumeWatchedAgentAfterCompletionCheck(watched, now);
+      if (completionDecision.superseded) return;
       callbacks.broadcastAgentUpdate({
         surfaceId: watched.surfaceId,
         name: watched.name,
@@ -629,7 +629,7 @@ async function handleStatusChange(
         duration,
         detail: completionDecision.detail ?? `Agent "${watched.name}" failed post-completion verification and needs operator input`,
       });
-      setTimeout(() => unregisterWatchedAgent(watched.surfaceId), COMPLETION_CLEANUP_MS);
+      setTimeout(() => unregisterWatchedAgent(watched.surfaceId, watched), COMPLETION_CLEANUP_MS);
       return;
     }
 
@@ -643,7 +643,7 @@ async function handleStatusChange(
       detail: completionDecision?.detail ?? `Agent "${watched.name}" completed (${formatDuration(duration)})`,
     });
 
-    setTimeout(() => unregisterWatchedAgent(watched.surfaceId), COMPLETION_CLEANUP_MS);
+    setTimeout(() => unregisterWatchedAgent(watched.surfaceId, watched), COMPLETION_CLEANUP_MS);
     return;
   }
 
@@ -651,7 +651,7 @@ async function handleStatusChange(
     if (watched.retryCount < MAX_RETRIES) {
       await retryWatchedAgent(watched, callbacks, {
         persist: persistWatchedAgent,
-        scheduleCleanup: () => setTimeout(() => unregisterWatchedAgent(watched.surfaceId), COMPLETION_CLEANUP_MS),
+        scheduleCleanup: () => setTimeout(() => unregisterWatchedAgent(watched.surfaceId, watched), COMPLETION_CLEANUP_MS),
         replace(newSurfaceId) {
           watchedAgents.delete(watched.surfaceId);
           transcriptSourceCache.delete(watched.surfaceId);
@@ -700,7 +700,7 @@ async function handleStatusChange(
         ].join('\n'),
       );
 
-      setTimeout(() => unregisterWatchedAgent(watched.surfaceId), COMPLETION_CLEANUP_MS);
+      setTimeout(() => unregisterWatchedAgent(watched.surfaceId, watched), COMPLETION_CLEANUP_MS);
     }
   }
 
@@ -715,7 +715,7 @@ async function handleStatusChange(
       duration,
       detail: `Agent "${watched.name}" was interrupted`,
     });
-    setTimeout(() => unregisterWatchedAgent(watched.surfaceId), COMPLETION_CLEANUP_MS);
+    setTimeout(() => unregisterWatchedAgent(watched.surfaceId, watched), COMPLETION_CLEANUP_MS);
   }
 }
 
@@ -801,7 +801,7 @@ async function checkStuck(
       ].join('\n'),
     );
 
-    setTimeout(() => unregisterWatchedAgent(watched.surfaceId), COMPLETION_CLEANUP_MS);
+    setTimeout(() => unregisterWatchedAgent(watched.surfaceId, watched), COMPLETION_CLEANUP_MS);
   }
 }
 

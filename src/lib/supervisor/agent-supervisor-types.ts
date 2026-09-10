@@ -57,6 +57,7 @@ export interface AgentUpdateEvent {
 }
 
 export interface AgentCompletionDecision {
+  superseded?: boolean;
   block?: boolean;
   resume?: boolean;
   detail?: string;
