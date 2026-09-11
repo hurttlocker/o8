@@ -28,6 +28,9 @@ export interface WorkspaceChangesState {
   files: ReviewChangedFile[];
   loading: boolean;
   error: string | null;
+  /** #2144 — the route's error code, when it reported one. Lets a consumer
+   *  distinguish an unrecoverable lane from a diff that merely failed to load. */
+  errorCode?: string | null;
   totalAdditions: number;
   totalDeletions: number;
   dirtyFileSet: Set<string>;

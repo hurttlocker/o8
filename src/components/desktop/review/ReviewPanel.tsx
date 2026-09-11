@@ -26,6 +26,8 @@ import { PanelMessage } from './panel/DiffView';
 import { ReviewFileRow, ToolbarButton, MenuItem } from './panel/ReviewFileRow';
 import { FilesDrawer } from './panel/FilesDrawer';
 import { ReviewSkeleton } from './panel/ReviewSkeleton';
+import { MissingWorktreeNotice } from './panel/MissingWorktreeNotice';
+import { WORKTREE_MISSING_CODE } from '@/lib/lane/review-target-codes';
 
 /**
  * ReviewPanel — the dedicated Review surface for the right panel's `review`
@@ -384,7 +386,17 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
         ) : changes.loading && !hasFiles ? (
           <ReviewSkeleton />
         ) : changes.error ? (
-          <PanelMessage text={changes.error} tone="error" />
+          // #2144 — a lane whose checkout is gone is unrecoverable, not
+          // retryable, so it gets its own state plus the action that ends it.
+          reviewLaneId && changes.errorCode === WORKTREE_MISSING_CODE ? (
+            <MissingWorktreeNotice
+              laneId={reviewLaneId}
+              detail={changes.error}
+              onDiscarded={() => { void changes.refresh(); }}
+            />
+          ) : (
+            <PanelMessage text={changes.error} tone="error" />
+          )
         ) : !hasFiles ? (
           <PanelMessage text={reviewLaneId ? 'No branch diff to review.' : 'Working tree clean — nothing to review.'} />
         ) : visible.length === 0 ? (
