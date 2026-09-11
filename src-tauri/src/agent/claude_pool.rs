@@ -105,8 +105,10 @@ pub fn acquire(bin: &str, model: &str, mcp_cfg: &str) -> Option<ClaudeSession> {
 }
 
 /// Keydown convenience: resolve the normal voice planner and warm it when the
-/// shared CLI inventory selects Claude. Codex starts on demand because its
-/// current subscription CLI protocol has no equivalent idle REPL to prewarm.
+/// shared CLI inventory selects Claude. The Codex seat holds a resident
+/// app-server child too (#2155), but it boots on the task's first turn rather
+/// than on the keydown — an idle app-server child per keypress would outlive
+/// far more keydowns than it serves.
 /// Called from the Right-Option down edge (`fn_hotkey::begin_agent_dictation`).
 pub fn prewarm_agent() {
     let super::planner_route::PlannerRouting::Selected(selection) =
