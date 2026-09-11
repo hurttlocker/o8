@@ -109,6 +109,13 @@ a server that does not honor the lightweight request. Both request counts remain
 in each sample. This removes observer work, not product work, and does not change
 any budget or correctness requirement.
 
+Contract v4 starts the browser counters after pre-workload memory probes and
+captures them before post-workload memory probes. Browser frame and long-task
+rates use the browser counters' own clock interval, not a shorter runner interval.
+Earlier receipts could report inflated rates, even more than the display cadence,
+because slow memory inspection extended the counter window without extending its
+denominator. Raw older results remain historical evidence, not comparable v4 rates.
+
 Terminal-grid setup waits are bounded at 30 seconds and excluded from every measured latency.
 Visible-input polling reads 1,000 terminal lines. A timeout records whether the
 marker reached the auxiliary stream, the panel write path, and a painted xterm
