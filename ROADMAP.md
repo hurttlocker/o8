@@ -4,6 +4,18 @@ o8 is for one operator running several coding agents at once. It turns work into
 
 Taste is a gate on every row here, not a pillar of its own. A change that reads badly, responds slowly, or behaves unpredictably is not finished, whichever pillar it belongs to.
 
+## At a glance
+
+Seven pillars. One line each.
+
+1. **Governance is the product.** Workers cannot merge their own work; every decision and failure is recorded and visible.
+2. **Organizational memory.** Rules and past outcomes stay with the project, not with one model vendor.
+3. **Runs on your subscriptions.** The coding-agent CLIs you already pay for, behind one runtime contract.
+4. **One control plane, every surface.** Desktop, phone, CLI, MCP, headless, voice. Same verbs, different authority.
+5. **Smooth for people and for agents.** Fast and legible for a person; drivable through a real interface for a program.
+6. **Runs where you are.** Light on the machine, on the machine you have. Mac today, Linux one proof away, Windows help wanted.
+7. **Ahead.** The bets for 2027 and 2028, with what we are already doing on each.
+
 ## Now
 
 The maintainer's focus for September 2026. Three arcs, each one gap from its next milestone.
@@ -13,6 +25,7 @@ The maintainer's focus for September 2026. Three arcs, each one gap from its nex
 | Linux | Prove that a fresh mainstream distro installs o8, launches it, dispatches a packet, and merges it. Nine of ten children are shipped; this is the one that makes Linux usable. | [#2060](https://github.com/hurttlocker/o8/issues/2060) |
 | Lane lifecycle and recovery honesty | Two failure modes still hide: a packet refused at dispatch preflight retries forever without surfacing, and superseding a mission leaves its packets live. | [#2195](https://github.com/hurttlocker/o8/issues/2195), [#2196](https://github.com/hurttlocker/o8/issues/2196) |
 | Runtime readiness | An authenticated OpenCode 2 install can still be refused dispatch because the CLI reports an empty provider list. Readiness checks are written per CLI; a shared conformance check would have caught this before a user did. | [#2194](https://github.com/hurttlocker/o8/issues/2194), [#2200](https://github.com/hurttlocker/o8/issues/2200) |
+| First ten minutes | Nobody has measured how long a stranger takes from download to a first merged packet, or where they stall. The number goes here once it exists. | [#2211](https://github.com/hurttlocker/o8/issues/2211) |
 
 ## How to read this
 
@@ -20,7 +33,7 @@ Each open arc has one tracking issue. Its checklist is the real progress; the pe
 
 Read the Gap column before the percent. Most open arcs are one child from done. That says the maintainer files small issues; it does not say the work is nearly finished.
 
-Frontier arcs carry a question and a verdict instead of a percent. They are not committed work. A Frontier arc moves into a pillar when it ships its first child.
+Ahead rows are bets, not committed arcs. Each names the outcome we are betting on, what already exists toward it, and the next child. A bet moves into a pillar when that child ships.
 
 `node scripts/roadmap-status.mjs` recomputes the percents from the tracking issues. It prints a table and does not rewrite this file.
 
@@ -37,6 +50,7 @@ Execution is separated from approval. Workers cannot merge their own packets, ev
 | Worker capability boundaries | A worker cannot read or reach anything its packet does not grant. | 75% | Native workers run under the operator's user account and can read the operator's environment. | [#2198](https://github.com/hurttlocker/o8/issues/2198) |
 | Broadcast: the audit trail as a live feed | The operator watches the audit trail instead of only querying it. | 100% | none | shipped in 0.1.717 |
 | Contributor-ready public repo | An outside pull request gets green checks and a human reply without maintainer plumbing. | 85% | This roadmap and the claiming protocol are new. No outside claim has gone through them yet. | [#2199](https://github.com/hurttlocker/o8/issues/2199) |
+| First-diff quality | A governed packet's first diff scores at least as well as the raw model coding alone on the same issue. | 0% | Two blind benchmarks, two months and two model generations apart, both lost three of three to the raw model, and both lost the same two ways: over-engineering and missed sub-requirements. Nobody owns this yet. | [#1684](https://github.com/hurttlocker/o8/issues/1684) |
 
 ## 2. Organizational memory
 
@@ -80,7 +94,7 @@ Two lanes, one pillar. The people lane covers the surfaces a person works in. Th
 
 | Arc | Done means | Status | Gap | Where |
 | --- | --- | --- | --- | --- |
-| Canvas IDE parity | A full editing session happens on the canvas: open a file by name, search the repo, edit, diff, commit. | open | The seven carved children are shipped. The rest of the scope is not yet carved into issues. | [#1664](https://github.com/hurttlocker/o8/issues/1664) |
+| Canvas IDE parity | A full editing session happens on the canvas: open a file by name, search the repo, edit, diff, commit. | 100% of carved scope | The seven carved children are shipped and the epic is closed. Further canvas work will be filed as new children here. | shipped in 0.1.722, [#1664](https://github.com/hurttlocker/o8/issues/1664) |
 | Rich Markdown editor | Editing a document in o8 never corrupts it. | 100% | none | shipped in 0.1.722 |
 | Design Mode loop | "Change this button" is one bounded loop with a before-and-after proof card. | 85% | Screenshot crop timing is not measured through the supported capture path. | [#1695](https://github.com/hurttlocker/o8/issues/1695) |
 | Interaction budgets | Boot, typing, navigation, and scale each have a measured budget that a regression can fail. | 100% | none | shipped in 0.1.748 |
@@ -91,8 +105,7 @@ Two lanes, one pillar. The people lane covers the surfaces a person works in. Th
 | --- | --- | --- | --- | --- |
 | Control surfaces, not scraping | Every operator action is reachable from the CLI, MCP, and the webview socket. | 100% | none | shipped in 0.1.749 |
 | CLI and MCP symmetry | The same control verb reaches the same governed route from an operator surface and from a worker context. | 100% | none | shipped in 0.1.738 |
-
-Both rows in this lane are shipped. The lane has no open arc, which means the next agent-facing gap has not been named yet.
+| Agent-facing API manifest | One manifest lists every operator verb and its surfaces, and CI fails when a verb exists on one surface and not another. | 0% | No manifest exists; parity between the CLI, MCP, and the webview socket is checked by hand. | [#2212](https://github.com/hurttlocker/o8/issues/2212) |
 
 ## 6. Runs where you are
 
@@ -109,18 +122,18 @@ o8 should be light on the machine it runs on, and it should run on the machine y
 
 Windows is help wanted. No maintainer has a Windows machine to verify on, so this arc needs a contributor who does. The port audit is written, with file-and-line evidence, in `docs/internals/port-audit-windows.md`.
 
-## 7. Frontier
+## 7. Ahead
 
-Directions we are looking at, not committed work. Each row names the question it has to answer. "Exploring" means the question is open and worth answering. "Parked" means we know what it would take and are not doing it now. Verdicts are reviewed at the start of each month, and a row that ships its first child moves into a pillar.
+The bets for 2027 and 2028. Each row is an outcome we think operators will need, what already exists in o8 toward it, and the next child that would move it. A bet moves into a pillar when that child ships. Rows are reviewed at the start of each month; a bet nobody has touched in a quarter gets cut, not carried.
 
-| Arc | Question it must answer | Verdict | Since | Where |
-| --- | --- | --- | --- | --- |
-| Connector layer for external tools | Does a connector catalog belong in o8, or in the runtimes that already have one? | exploring | 2026-08-01 | [#1665](https://github.com/hurttlocker/o8/issues/1665) |
-| Portable worker environments | Can a packet's environment move to another machine without a rebuild? | exploring | 2026-08-03 | [#1690](https://github.com/hurttlocker/o8/issues/1690) |
-| Cross-device execution continuity | Can a session started on the desktop continue from the phone under the same authority rules? | exploring | 2026-08-04 | [#1727](https://github.com/hurttlocker/o8/issues/1727) |
-| Worker OS sandbox as the default | Can the opt-in sandbox run the daily profile with no regressions? | parked | 2026-08-01 | [#1657](https://github.com/hurttlocker/o8/issues/1657) |
-| Multiplayer workspace identity | Can two operators share a workspace without weakening the approval path? | parked | 2026-08-26 | [#1875](https://github.com/hurttlocker/o8/issues/1875) |
-| Client-delegation transport for the voice planning seat | Can the voice transport run on a subscription instead of an API key? | parked | 2026-09-11 | [#2166](https://github.com/hurttlocker/o8/issues/2166) |
+| Bet | What already exists | Next child | Where |
+| --- | --- | --- | --- |
+| Agents that work while you are away, wherever they run. Hosted, remote, or local workers, days-long missions, the same packet and merge gate. | Headless o8, the mobile relay, crash survival, the durable execution spine. | A portable worker environment profile so a packet can be placed on a remote worker without changing its runtime contract. | [#1690](https://github.com/hurttlocker/o8/issues/1690), [#1727](https://github.com/hurttlocker/o8/issues/1727) |
+| The right model for each packet, chosen and escalated by o8. A failed packet retries on a stronger tier without the operator choosing. | The carrier registry, per-packet model pins, the merge-failure escalation chain. | A worker escalation ladder that retries a failed packet on the next tier. | [#2209](https://github.com/hurttlocker/o8/issues/2209) |
+| Proof that travels. Receipts and control that systems outside o8 can verify and plug into, so o8 is the human gate inside other people's agent graphs. | Signed packet receipts and truth queries, the ACP orchestrator backend, MCP on both sides. | A receipt format another organization can verify without an o8 install. | [#1997](https://github.com/hurttlocker/o8/issues/1997), [#1998](https://github.com/hurttlocker/o8/issues/1998) |
+| Nothing leaves the machine unless you say so. Local and on-device models as a real mode with a test that proves it. | Local endpoint probes, the local chat tier for the Brain, an audit of surfaces without a local path. | An egress assertion test across a full packet lifecycle. | [#1451](https://github.com/hurttlocker/o8/issues/1451) |
+| Two operators, one approval path. Teams share a workspace without weakening who can approve what. | Principal-based authorization for operator, worker, and remote callers. | A workspace identity and role model. | [#1875](https://github.com/hurttlocker/o8/issues/1875) |
+| Agents that use the screen, not only the repo. A packet can drive a browser or a GUI with the same isolation, review, and receipt. | The embedded browser agent and its governed verbs. | Computer-use as a worker capability behind the packet contract. | not yet filed |
 
 ## Claiming work
 
