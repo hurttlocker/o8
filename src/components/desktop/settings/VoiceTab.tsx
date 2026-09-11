@@ -27,6 +27,8 @@ import {
   agentSetEscalation,
   voicePrefsGet,
   voicePrefsSet,
+  externalKeyboardFnState,
+  type ExternalKeyboardFnState,
 } from '@/lib/tauri/bridge';
 import {
   APP_FONT_STACK,
@@ -144,6 +146,9 @@ export function VoiceTab() {
   const [groqKeySaving, setGroqKeySaving] = useState(false);
   const [partialsSurface, setPartialsSurface] = useState<'caret' | 'hud' | 'off'>('caret');
   const [leftControlAsFn, setLeftControlAsFn] = useState(false);
+  // #2158: the EFFECTIVE remap state — the pref ANDed with "a non-Apple external
+  // keyboard is attached". Null until the first read (or outside Tauri).
+  const [externalFn, setExternalFn] = useState<ExternalKeyboardFnState | null>(null);
   const dictationMode = useSyncExternalStore(
     typeof window !== 'undefined' ? subscribeDictationInputMode : noopSubscribe,
     typeof window !== 'undefined' ? readDictationInputMode : dictationModeFallback,
@@ -177,6 +182,7 @@ export function VoiceTab() {
     setLeftControlAsFn(
       Boolean(prefs && (prefs as Record<string, unknown>).external_symon_left_control === true),
     );
+    setExternalFn(await externalKeyboardFnState().catch(() => null));
     // Background mode was retired from the UI (operator, 2026-07-06) — self-heal
     // any stuck-on state so nobody is left with a hidden Dock icon and no way back.
     if (bg) void backgroundModeSet(false);
@@ -194,6 +200,32 @@ export function VoiceTab() {
     return () => window.removeEventListener('focus', onFocus);
   }, [tauri, refreshPermissions]);
 
+  // #2158: the native watcher re-reads the attached keyboards every couple of
+  // seconds, so plugging or unplugging a board changes the remap with no UI
+  // action. Poll while the tab is open so the status line under the toggle
+  // tracks it, and refresh on focus like the permission rows do.
+  useEffect(() => {
+    if (!tauri) return;
+    let cancelled = false;
+    const read = async () => {
+      const next = await externalKeyboardFnState().catch(() => null);
+      if (cancelled) return;
+      setExternalFn(next);
+      // Native truth wins over the optimistic segment value, so a pref written
+      // from the standalone voice-settings window shows up here too.
+      if (next) setLeftControlAsFn(next.enabled);
+    };
+    void read();
+    const timer = window.setInterval(() => { void read(); }, 3000);
+    const onFocus = () => { void read(); };
+    window.addEventListener('focus', onFocus);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [tauri]);
+
   const handleEscalation = useCallback((next: 'off' | 'auto' | 'deep') => {
     setEscalation(next);
     void agentSetEscalation(next);
@@ -204,10 +236,13 @@ export function VoiceTab() {
     void voicePrefsSet('dictation_partials_surface', next);
   }, []);
 
-  const handleLeftControlAsFn = useCallback((next: 'off' | 'left_control') => {
+  const handleLeftControlAsFn = useCallback(async (next: 'off' | 'left_control') => {
     const enabled = next === 'left_control';
     setLeftControlAsFn(enabled);
-    void voicePrefsSet('external_symon_left_control', enabled);
+    await voicePrefsSet('external_symon_left_control', enabled);
+    // The native side re-evaluates the attached keyboards on this write, so the
+    // status line can settle immediately instead of waiting for the next poll.
+    setExternalFn(await externalKeyboardFnState().catch(() => null));
   }, []);
 
   const handleGroqKeySave = useCallback(async () => {
@@ -369,11 +404,30 @@ export function VoiceTab() {
               <SettingsRow
                 icon={<MicIcon />}
                 label="External keyboard Fn"
-                subtitle="Use bottom-left Control for the same hold-to-dictate and double-tap hands-free gestures as Fn"
+                subtitle={
+                  <>
+                    Makes bottom-left Control act as Fn — hold it to dictate, double-tap it for
+                    hands-free. Only while a non-Apple external keyboard is attached, so Control
+                    stays an ordinary modifier on Apple boards.
+                    {leftControlAsFn ? (
+                      <span
+                        style={{
+                          display: 'block',
+                          marginTop: 4,
+                          color: externalFn?.active ? RAMS_ACCENT : 'var(--t-text-faint)',
+                        }}
+                      >
+                        {externalFn?.active
+                          ? `Active: ${externalFn.keyboard ?? 'external keyboard'}`
+                          : 'Waiting for an external non-Apple keyboard'}
+                      </span>
+                    ) : null}
+                  </>
+                }
                 accessory={
                   <SettingsSegmented
                     value={leftControlAsFn ? 'left_control' : 'off'}
-                    onChange={(v) => handleLeftControlAsFn(v as 'off' | 'left_control')}
+                    onChange={(v) => { void handleLeftControlAsFn(v as 'off' | 'left_control'); }}
                     options={[
                       { value: 'off', label: 'Fn only' },
                       { value: 'left_control', label: 'Bottom-left Ctrl' },
@@ -517,7 +571,7 @@ export function VoiceTab() {
           letterSpacing: '0.04em',
         }}
       >
-        <span style={{ color: RAMS_ACCENT }}>{leftControlAsFn ? 'LEFT CTRL / FN' : 'FN'}</span> &nbsp; Dictate &nbsp;·&nbsp; <span style={{ color: RAMS_ACCENT }}>RIGHT OPTION</span> &nbsp; Talk to Symon
+        <span style={{ color: RAMS_ACCENT }}>{externalFn?.active ? 'LEFT CTRL / FN' : 'FN'}</span> &nbsp; Dictate &nbsp;·&nbsp; <span style={{ color: RAMS_ACCENT }}>RIGHT OPTION</span> &nbsp; Talk to Symon
       </p>
     </div>
   );
