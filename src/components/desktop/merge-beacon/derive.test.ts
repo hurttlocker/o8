@@ -152,6 +152,20 @@ describe('deriveParkedLanes', () => {
     expect(parked.map((p) => p.laneId)).toEqual(['real']); // the hygiene lane never parks the gate
   });
 
+  // #2144 — the mission-bar badge and the always-on-top overlay pill both count
+  // this array, so discarding an escalated lane only clears them if the lane
+  // genuinely leaves the bucket once it lands on `archived`.
+  it('drops a discarded escalated lane once it archives, so the count reaches zero', () => {
+    const escalated = [lane({ laneId: 'orphan', status: 'awaiting_human', packetId: 'pkt-orphan' })];
+    expect(deriveParkedLaneBuckets(escalated).escalated.map((p) => p.laneId)).toEqual(['orphan']);
+
+    const discarded = [lane({ laneId: 'orphan', status: 'archived', packetId: 'pkt-orphan' })];
+    const buckets = deriveParkedLaneBuckets(discarded);
+    expect(buckets.escalated).toEqual([]);
+    expect(buckets.all).toEqual([]);
+    expect(deriveParkedLanes(discarded)).toEqual([]);
+  });
+
   it('a rejected non-gating packet also stays out of the beacon', () => {
     const lanes = [lane({ laneId: 'hygiene-rej', status: 'reviewing', packetId: 'decompose-9' })];
     const reviews: ReviewApprovalSummary[] = [

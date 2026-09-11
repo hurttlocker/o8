@@ -4,12 +4,32 @@ import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import { checkPruneGate } from './prune-gate';
+import { markLaneWorktreeOrphaned } from './orphaned-lane';
 import { allowWorktreeRemoval } from '@/lib/worktree/live-process-guard';
 
 const execFileAsync = promisify(execFile);
 
 function formatError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * #2144 — a removal that goes through while the owning lane is still open
+ * leaves that lane pointing at a path that no longer exists. The prune gate
+ * refuses most of those, but an operator force gets through by design, and the
+ * already-absent branch below never consulted a lane at all. Stamp the lane at
+ * removal time rather than letting it fail at render an hour later. The lane's
+ * STATUS is untouched: an escalated lane is still blocked on a human.
+ */
+function markOwningLaneOrphaned(laneId: string | undefined, logPrefix: string) {
+  if (!laneId) return;
+  try {
+    if (markLaneWorktreeOrphaned(laneId)) {
+      console.warn(`[${logPrefix}] Lane ${laneId} is still open and its worktree was removed — marked orphaned.`);
+    }
+  } catch (error) {
+    console.warn(`[${logPrefix}] failed to mark lane ${laneId} orphaned: ${formatError(error)}`);
+  }
 }
 
 async function pruneWorktrees(repoRoot: string, logPrefix: string) {
@@ -68,6 +88,7 @@ export async function removeCortexWorktreePath(input: {
 
   if (!existsSync(input.worktreePath)) {
     console.warn(`[${logPrefix}] Worktree ${input.worktreePath}${label} is already absent.`);
+    markOwningLaneOrphaned(input.laneId, logPrefix);
     await pruneWorktrees(input.repoRoot, logPrefix);
     return true;
   }
@@ -83,6 +104,7 @@ export async function removeCortexWorktreePath(input: {
       cwd: input.repoRoot,
       timeout: 15_000,
     });
+    markOwningLaneOrphaned(input.laneId, logPrefix);
     await pruneWorktrees(input.repoRoot, logPrefix);
     return true;
   } catch (error) {
@@ -95,6 +117,7 @@ export async function removeCortexWorktreePath(input: {
       overrideLiveGuard: input.overrideLiveGuard,
     }))) return false;
     rmSync(input.worktreePath, { recursive: true, force: true });
+    markOwningLaneOrphaned(input.laneId, logPrefix);
     await pruneWorktrees(input.repoRoot, logPrefix);
     return !existsSync(input.worktreePath);
   } catch (error) {

@@ -3,6 +3,8 @@ import { allowWorktreeRemoval } from '@/lib/worktree/live-process-guard';
 import { execFileSync } from 'node:child_process';
 import { isSafeGitRef } from '@/lib/git/refs';
 import { getBranchSnapshot, getCachedBranchSnapshot, refreshBranchSnapshot } from '@/lib/panel/branch-snapshot';
+import { findLaneByRepoAndBranch } from '@/lib/lane/registry';
+import { markLaneWorktreeOrphaned } from '@/lib/lane/orphaned-lane';
 
 export const dynamic = 'force-dynamic';
 
@@ -295,6 +297,13 @@ export async function DELETE(req: NextRequest) {
           }
           git(repoPath, ['worktree', 'remove', currentPath, ...(force ? ['--force'] : [])], 10000);
           worktreeRemoved = true;
+          // #2144 — this gesture knows nothing about lanes, so a lane that is
+          // still open against this branch would only discover the loss the
+          // next time something tried to read its diff. Record it now.
+          try {
+            const owningLane = findLaneByRepoAndBranch(repoPath, branch);
+            if (owningLane) markLaneWorktreeOrphaned(owningLane.id);
+          } catch { /* marking is best-effort; the removal already happened */ }
           break;
         }
       }

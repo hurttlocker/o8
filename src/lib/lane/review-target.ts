@@ -2,20 +2,26 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 
 import { isSafeGitRef } from '@/lib/git/refs';
+import {
+  BRANCH_UNRESOLVED_CODE,
+  WORKTREE_MISSING_CODE,
+  type LaneReviewTargetErrorCode,
+} from './review-target-codes';
 import type { Lane } from './types';
 
-export const BRANCH_UNRESOLVED_CODE = 'branch_unresolved' as const;
+export { BRANCH_UNRESOLVED_CODE, WORKTREE_MISSING_CODE, type LaneReviewTargetErrorCode };
 
 export class LaneBranchUnresolvedError extends Error {
-  readonly code = BRANCH_UNRESOLVED_CODE;
-
   constructor(
     readonly lane: Pick<Lane, 'id' | 'branch' | 'repoPath' | 'worktreePath'>,
     readonly reason: string,
+    readonly code: LaneReviewTargetErrorCode = BRANCH_UNRESOLVED_CODE,
   ) {
     super(
-      `Branch unresolved for lane ${lane.id}: recorded branch "${lane.branch}" ${reason}. `
-      + `Refusing to fall back to the repo checkout at ${lane.repoPath}.`,
+      code === WORKTREE_MISSING_CODE
+        ? `Lane ${lane.id} ${reason}; there is nothing left on disk to diff.`
+        : `Branch unresolved for lane ${lane.id}: recorded branch "${lane.branch}" ${reason}. `
+          + `Refusing to fall back to the repo checkout at ${lane.repoPath}.`,
     );
     this.name = 'LaneBranchUnresolvedError';
   }
@@ -29,7 +35,7 @@ export interface LaneReviewTarget {
 export interface BranchUnresolvedPayload {
   ok: false;
   error: {
-    code: typeof BRANCH_UNRESOLVED_CODE;
+    code: LaneReviewTargetErrorCode;
     message: string;
     laneId: string;
     branch: string;
@@ -61,7 +67,11 @@ function worktreeForBranch(repoPath: string, branch: string): string | null {
 
 function validateTarget(lane: Lane, candidatePath: string): LaneReviewTarget {
   if (!existsSync(candidatePath)) {
-    throw new LaneBranchUnresolvedError(lane, `points to missing worktree ${candidatePath}`);
+    throw new LaneBranchUnresolvedError(
+      lane,
+      `recorded its worktree at ${candidatePath}, and that path is no longer on disk`,
+      WORKTREE_MISSING_CODE,
+    );
   }
 
   try {
@@ -97,10 +107,14 @@ export function resolveLaneReviewTarget(lane: Lane): LaneReviewTarget {
     const discoveredPath = worktreeForBranch(lane.repoPath, lane.branch);
     if (discoveredPath) return validateTarget(lane, discoveredPath);
     const branchExists = git(lane.repoPath, ['show-ref', '--verify', '--hash', `refs/heads/${lane.branch}`]);
-    throw new LaneBranchUnresolvedError(
-      lane,
-      branchExists ? 'has no attached worktree' : 'does not exist',
-    );
+    if (branchExists) {
+      throw new LaneBranchUnresolvedError(
+        lane,
+        `kept branch "${lane.branch}" but no worktree is attached to it any more`,
+        WORKTREE_MISSING_CODE,
+      );
+    }
+    throw new LaneBranchUnresolvedError(lane, 'does not exist');
   } catch (error) {
     if (error instanceof LaneBranchUnresolvedError) throw error;
     throw new LaneBranchUnresolvedError(lane, 'does not exist');
