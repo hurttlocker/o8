@@ -28,6 +28,7 @@ mod no_window;
 mod overlay_geometry;
 mod paste;
 mod point_overlay;
+mod presentation;
 #[cfg(target_os = "macos")]
 mod screen_localization;
 mod shell_env;
@@ -3690,6 +3691,17 @@ fn notify_review_ready(
     body: String,
     packet_id: Option<String>,
 ) -> Result<(), String> {
+    // #2150 — the banner is opt-out now, and #2147's quiet mode forces it off
+    // for its duration. Both live in `presentation::should_deliver_review_notification`
+    // so the native path and the server-side push path can never disagree about
+    // what "suppressed" means. A suppressed call is a silent success: the caller
+    // asked for a courtesy, not for a guarantee.
+    if !presentation::should_deliver_review_notification(
+        presentation::is_quiet_mode_active(),
+        presentation::review_notifications_enabled(),
+    ) {
+        return Ok(());
+    }
     let display_title = if title.is_empty() {
         "Awaiting review".to_string()
     } else {
@@ -3719,6 +3731,53 @@ fn notify_review_ready(
         }),
     );
     Ok(())
+}
+
+/// Tauri command: turn presentation (quiet) mode on or off (#2147).
+///
+/// One switch for every surface that can appear over a screen share: the four
+/// satellite overlay windows go down, native review notifications stop, and the
+/// in-app coach cards / status pills / toasts stop (the webview listens for the
+/// `o8:quiet-mode-changed` event this emits). Leaving the mode restores exactly
+/// the overlays that were up, in the positions they held.
+#[tauri::command]
+fn presentation_quiet_mode_set(app: AppHandle, active: bool) -> serde_json::Value {
+    let mut overlays = presentation::TauriOverlays { app: &app };
+    let resolved = presentation::apply_quiet_mode(&mut overlays, active);
+    let payload = presentation_quiet_mode_state();
+    // Every window, including the satellites, learns the new mode. The main
+    // window's React tree gates its own suppressible surfaces on this.
+    let _ = app.emit("o8:quiet-mode-changed", payload.clone());
+    log::info!("[quiet-mode] active={resolved}");
+    payload
+}
+
+/// Tauri command: read the current mode. A caller (a recording script, an
+/// agent, the settings row) confirms quiet mode is live BEFORE it starts.
+#[tauri::command]
+fn presentation_quiet_mode_get() -> serde_json::Value {
+    presentation_quiet_mode_state()
+}
+
+fn presentation_quiet_mode_state() -> serde_json::Value {
+    serde_json::json!({
+        "active": presentation::is_quiet_mode_active(),
+        "suppressedOverlays": presentation::suppressed_overlay_labels(),
+        "reviewNotificationsEnabled": presentation::review_notifications_enabled(),
+        "reviewNotificationsDelivering": presentation::should_deliver_review_notification(
+            presentation::is_quiet_mode_active(),
+            presentation::review_notifications_enabled(),
+        ),
+    })
+}
+
+/// Tauri command: mirror the `notificationsReviewReady` operator default into
+/// the native shell (#2150). The webview pushes this whenever operator defaults
+/// load or change; the Rust side holds no opinion of its own about the setting,
+/// it only enforces the last value it was told plus quiet mode.
+#[tauri::command]
+fn set_review_notifications_enabled(enabled: bool) {
+    presentation::set_review_notifications_enabled(enabled);
 }
 
 // Heal saved window state before tauri-plugin-window-state reads it. Symon's
@@ -7806,6 +7865,9 @@ pub fn run() {
             peek_pending_file_opens,
             take_pending_auth_callbacks,
             notify_review_ready,
+            presentation_quiet_mode_set,
+            presentation_quiet_mode_get,
+            set_review_notifications_enabled,
             record_console_error,
             read_dropped_file,
             mcp_result,

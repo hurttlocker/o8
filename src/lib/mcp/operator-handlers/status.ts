@@ -247,6 +247,15 @@ export const STATUS_TOOLS: McpTool[] = [
         broadcastVoiceCalendar: { type: 'boolean', description: 'Speak imminent timed Calendar events when access is already granted.' },
         broadcastVoiceCalendarLeadMinutes: { type: 'number', description: 'Minutes before a Calendar event becomes eligible for one callout.' },
         broadcastVoiceTimeCheckins: { type: 'boolean', description: 'Speak one focus-aware update after a quiet-work interval.' },
+        presentationQuietMode: {
+          type: 'boolean',
+          description: 'Presentation (quiet) mode. While on, overlay windows, coach cards, non-critical status pills and toasts, and native review notifications all stay down. Approvals and errors still show.',
+        },
+        notificationsReviewReady: {
+          type: 'string',
+          enum: ['off', 'on'],
+          description: 'Native "ready for review" desktop banner. Quiet mode forces this off while it is active.',
+        },
         claudeWorkerEffort: {
           type: 'string',
           enum: ['adaptive', 'low', 'medium', 'high', 'max', 'xhigh'],
@@ -378,6 +387,8 @@ const OPERATOR_DEFAULTS_KEYS = [
   'broadcastVoiceCalendar',
   'broadcastVoiceCalendarLeadMinutes',
   'broadcastVoiceTimeCheckins',
+  'presentationQuietMode',
+  'notificationsReviewReady',
   'overlapGate',
   'parallelCap',
   'meteredPacketCostCapUsd',

@@ -331,6 +331,8 @@ describe('MCP operator defaults and dispatch routing', () => {
       broadcastCommentaryIntervalMinutes: expect.any(Object),
       broadcastCommentaryMinNewEvents: expect.any(Object),
       broadcastCommentaryMaxPerHour: expect.any(Object),
+      presentationQuietMode: expect.any(Object),
+      notificationsReviewReady: expect.objectContaining({ enum: ['off', 'on'] }),
       brainUseClaudeCli: expect.any(Object),
       defaultDispatchModel: expect.any(Object),
       workerExecutionCarrier: expect.objectContaining({ enum: ['ori', ''] }),
@@ -368,6 +370,8 @@ describe('MCP operator defaults and dispatch routing', () => {
       broadcastCommentaryIntervalMinutes: 6,
       broadcastCommentaryMinNewEvents: 4,
       broadcastCommentaryMaxPerHour: 10,
+      presentationQuietMode: true,
+      notificationsReviewReady: 'off',
     });
     expect(result.isError).not.toBe(true);
     expect(resultJson(result).values).toMatchObject({
@@ -387,6 +391,8 @@ describe('MCP operator defaults and dispatch routing', () => {
       broadcastCommentaryIntervalMinutes: 6,
       broadcastCommentaryMinNewEvents: 4,
       broadcastCommentaryMaxPerHour: 10,
+      presentationQuietMode: true,
+      notificationsReviewReady: 'off',
     });
 
     const { getOperatorDefaults } = await import('@/lib/operator/defaults');
@@ -407,6 +413,8 @@ describe('MCP operator defaults and dispatch routing', () => {
       broadcastCommentaryIntervalMinutes: 6,
       broadcastCommentaryMinNewEvents: 4,
       broadcastCommentaryMaxPerHour: 10,
+      presentationQuietMode: true,
+      notificationsReviewReady: 'off',
     });
   }, 15_000);
 

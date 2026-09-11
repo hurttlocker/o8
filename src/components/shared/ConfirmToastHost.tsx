@@ -22,6 +22,8 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { AlertTriangle, AlertCircle, CheckCircle2 } from '@/components/desktop/lucide-shims';
+import { getQuietModeSnapshot } from '@/lib/presentation/quiet-mode-client';
+import { noticeIsVisible } from '@/lib/presentation/quiet-mode-policy';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -83,8 +85,16 @@ export function requestPrompt(opts: PromptOpts): Promise<string | null> {
   });
 }
 
-/** Branded transient toast. Replaces window.alert (default kind 'error'). */
+/**
+ * Branded transient toast. Replaces window.alert (default kind 'error').
+ *
+ * #2147 — quiet mode drops the informational and success toasts and keeps the
+ * error ones. This is the single toast entry point in the app, so gating here
+ * covers every caller. `requestConfirm` / `requestPrompt` are deliberately NOT
+ * gated: the operator asked for those, and a caller is awaiting the answer.
+ */
 export function toast(message: string, kind: ToastKind = 'error') {
+  if (!noticeIsVisible(kind === 'error' ? 'error' : 'toast', getQuietModeSnapshot())) return;
   const id = seq++;
   toastList = [...toastList, { id, message, kind }].slice(-4);
   emit();

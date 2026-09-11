@@ -27,6 +27,7 @@ import {
   isBroadcastVoiceClockTime,
   isBroadcastVoiceQuietHoursMode,
 } from '@/lib/operator/broadcast-commentary-defaults';
+import { isReviewReadyNotifications } from '@/lib/operator/presentation-defaults';
 import { isDispatchRuntime } from '@/lib/operator/defaults-env';
 import { isWorkerStartMode } from '@/lib/operator/worker-start-mode';
 import { isExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
@@ -260,6 +261,20 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
       throw new Error(`${field} must be an integer from 1 through ${maximum}.`);
     }
     update[field] = Number(value);
+  }
+
+  if (body.presentationQuietMode !== undefined) {
+    if (typeof body.presentationQuietMode !== 'boolean') {
+      throw new Error('presentationQuietMode must be boolean.');
+    }
+    update.presentationQuietMode = body.presentationQuietMode;
+  }
+
+  if (body.notificationsReviewReady !== undefined) {
+    if (!isReviewReadyNotifications(body.notificationsReviewReady)) {
+      throw new Error('notificationsReviewReady must be "off" or "on".');
+    }
+    update.notificationsReviewReady = body.notificationsReviewReady;
   }
 
   if (body.apfsDependencyImages !== undefined) {

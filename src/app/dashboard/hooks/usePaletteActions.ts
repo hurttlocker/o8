@@ -1,5 +1,6 @@
 import { useMemo, type Dispatch, type SetStateAction } from 'react';
-import { requestConfirm } from '@/components/shared/ConfirmToastHost';
+import { requestConfirm, toast } from '@/components/shared/ConfirmToastHost';
+import { setQuietMode, useQuietMode } from '@/lib/presentation/quiet-mode-client';
 import type { SettingsTab } from '@/components/desktop/SettingsPage';
 import type { WsConnectionState } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import type { CommandPaletteAction } from '@/components/shared/UniversalSearch';
@@ -136,6 +137,10 @@ export function usePaletteActions({
   setSidebarVisible,
   setRightPanelMode,
 }: UsePaletteActionsArgs) {
+  // #2147 — the palette is the fast path: quiet mode is turned on seconds before
+  // a screen share starts, which is exactly when digging through Settings is the
+  // wrong ask.
+  const quietMode = useQuietMode();
   return useMemo<CommandPaletteAction[]>(() => {
     const actions: CommandPaletteAction[] = [];
     const workflowContextAgent = currentReviewAgent ?? selectedSessionAgent ?? scopedRepoAgents[0] ?? null;
@@ -568,6 +573,26 @@ export function usePaletteActions({
     }
 
     actions.push({
+      id: 'presentation:quiet-mode',
+      category: 'settings',
+      title: quietMode ? 'Turn off quiet mode' : 'Turn on quiet mode',
+      detail: quietMode
+        ? 'Bring back the overlay windows, coach cards, pills and review notifications.'
+        : 'Hide overlay windows, coach cards, non-critical pills and toasts, and review notifications. Approvals and errors still show.',
+      stateLabel: quietMode ? 'On' : 'Off',
+      stateTone: quietMode ? 'purple' : 'slate',
+      keywords: ['quiet', 'presentation', 'demo', 'screen share', 'record', 'overlay', 'notifications', 'do not disturb'],
+      priority: 240,
+      run: async () => {
+        try {
+          await setQuietMode(!quietMode);
+        } catch (error) {
+          toast(error instanceof Error ? error.message : 'Quiet mode could not be saved.');
+        }
+      },
+    });
+
+    actions.push({
       id: 'settings:connectors',
       category: 'settings',
       title: 'Open connector settings',
@@ -825,5 +850,6 @@ export function usePaletteActions({
     setSetupWizardOpen,
     setSidebarVisible,
     setRightPanelMode,
+    quietMode,
   ]);
 }

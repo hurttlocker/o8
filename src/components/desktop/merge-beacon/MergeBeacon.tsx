@@ -23,6 +23,8 @@
 import { memo, useEffect, useState } from 'react';
 import { actionReceiptIsInProgress, correlatedActionIsUnsettled, fetchCorrelatedActionReceipt } from '@/lib/orchestrator/action-receipt';
 import { useCorrelatedActionLatch } from '@/components/desktop/use-correlated-action-latch';
+import { useQuietMode } from '@/lib/presentation/quiet-mode-client';
+import { noticeIsVisible } from '@/lib/presentation/quiet-mode-policy';
 import type { ParkedLane } from './derive';
 
 function MergeGlyph({ size = 12, color = 'currentColor' }: { size?: number; color?: string }) {
@@ -72,6 +74,11 @@ function MergeBeaconBase({
   const awaitingMerge = parked.filter((lane) => lane.reviewState === 'awaiting-merge');
   const { busy, begin: beginMerge, settle: settleMerge } = useCorrelatedActionLatch<'merge'>();
   const merging = busy === 'merge';
+  // #2147 — the whole cluster is a count pill plus its action. It is the
+  // "N escalated" badge the issue names, so quiet mode takes it down; the merge
+  // it fronts is still reachable from the Inbox and the review surface.
+  const quietMode = useQuietMode();
+  if (!noticeIsVisible('status-pill', quietMode)) return null;
   if (compact || parked.length === 0) return null;
 
   const escalatedCount = escalated.length;

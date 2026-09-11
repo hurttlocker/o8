@@ -81,6 +81,7 @@ import { applyWorkspaceParkingUpdate, resolveStoredWorkspaceParking, resolveWork
 import { applyMeteredPacketCapUpdate, METERED_PACKET_CAP_FALLBACK, resolveMeteredPacketCapSettings, resolveStoredMeteredPacketCap, type MeteredPacketCapDefaults } from './metered-packet-cap-defaults';
 import { applyUiLoopUpdate, resolveStoredUiLoopDefaults, resolveUiLoopSettings, UI_LOOP_FALLBACK, type UiLoopDefaults } from './ui-loop-defaults';
 import { applyBroadcastCommentaryUpdate, BROADCAST_COMMENTARY_FALLBACK, broadcastCommentarySettingSources, resolveBroadcastCommentaryDefaults, resolveStoredBroadcastCommentary, type BroadcastCommentaryDefaults } from './broadcast-commentary-defaults';
+import { applyPresentationUpdate, PRESENTATION_FALLBACK, presentationSettingSources, resolvePresentationDefaults, resolveStoredPresentation, type PresentationDefaults } from './presentation-defaults';
 import { applyReviewContinuationUpdate, REVIEW_CONTINUATION_FALLBACK, resolveStoredReviewContinuation, type ReviewContinuationDefault } from './review-continuation-default';
 import { applyWorkspaceManifestPolicyUpdate, resolveStoredWorkspaceManifestPolicy, resolveWorkspaceManifestPolicySettings, WORKSPACE_MANIFEST_POLICY_FALLBACK, type WorkspaceManifestPolicyDefault } from './workspace-manifest-policy-default';
 import {
@@ -114,7 +115,7 @@ export type RequireApproval = 'high-risk' | 'surface' | 'always' | 'never';
 
 export function isRequireApproval(value: unknown): value is RequireApproval { return value === 'high-risk' || value === 'surface' || value === 'always' || value === 'never'; }
 
-export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParkingDefaults, ApfsDependencyImagesDefaults, MeteredPacketCapDefaults, UiLoopDefaults, BroadcastCommentaryDefaults, ReviewContinuationDefault, WorkspaceManifestPolicyDefault {
+export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParkingDefaults, ApfsDependencyImagesDefaults, MeteredPacketCapDefaults, UiLoopDefaults, BroadcastCommentaryDefaults, PresentationDefaults, ReviewContinuationDefault, WorkspaceManifestPolicyDefault {
   subscriptionProfile: SubscriptionProfile;
   parallelCap: number;
   overlapGate: OverlapGateMode;
@@ -319,6 +320,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   supervisorAutoEscalate: false,
   ...REVIEW_CONTINUATION_FALLBACK,
   ...BROADCAST_COMMENTARY_FALLBACK,
+  ...PRESENTATION_FALLBACK,
   ...APFS_DEPENDENCY_IMAGES_FALLBACK,
   // Operator-pinned subscription model; not a per-token API charge.
   thinkingEffort: 'max',
@@ -382,7 +384,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   worktreeMaxTotalGb: 20,
   ...STORAGE_RESERVE_FALLBACK, ...WORKSPACE_PARKING_FALLBACK, ...METERED_PACKET_CAP_FALLBACK, ...UI_LOOP_FALLBACK,
 };
-interface StoredOperatorDefaults extends Partial<StorageReserveDefaults>, Partial<WorkspaceParkingDefaults>, Partial<ApfsDependencyImagesDefaults>, Partial<MeteredPacketCapDefaults>, Partial<UiLoopDefaults>, Partial<BroadcastCommentaryDefaults>, Partial<ReviewContinuationDefault>, Partial<WorkspaceManifestPolicyDefault> {
+interface StoredOperatorDefaults extends Partial<StorageReserveDefaults>, Partial<WorkspaceParkingDefaults>, Partial<ApfsDependencyImagesDefaults>, Partial<MeteredPacketCapDefaults>, Partial<UiLoopDefaults>, Partial<BroadcastCommentaryDefaults>, Partial<PresentationDefaults>, Partial<ReviewContinuationDefault>, Partial<WorkspaceManifestPolicyDefault> {
   subscriptionProfile?: SubscriptionProfile;
   parallelCap?: number;
   overlapGate?: OverlapGateMode;
@@ -465,6 +467,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   }
   Object.assign(result, resolveStoredReviewContinuation(stored));
   Object.assign(result, resolveStoredBroadcastCommentary(stored));
+  Object.assign(result, resolveStoredPresentation(stored));
   Object.assign(result, resolveStoredApfsDependencyImages(stored));
   if (stored.thinkingEffort && isThinkingEffort(stored.thinkingEffort)) {
     result.thinkingEffort = stored.thinkingEffort;
@@ -684,6 +687,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
       envEsc ?? fileValues.supervisorAutoEscalate ?? OPERATOR_DEFAULTS_FALLBACK.supervisorAutoEscalate,
     reviewContinuation: fileValues.reviewContinuation ?? OPERATOR_DEFAULTS_FALLBACK.reviewContinuation,
     ...resolveBroadcastCommentaryDefaults(fileValues),
+    ...resolvePresentationDefaults(fileValues),
     apfsDependencyImages: fileValues.apfsDependencyImages ?? OPERATOR_DEFAULTS_FALLBACK.apfsDependencyImages,
     thinkingEffort: envThink ?? fileValues.thinkingEffort ?? OPERATOR_DEFAULTS_FALLBACK.thinkingEffort,
     promptCachingEnabled:
@@ -758,6 +762,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
       envEsc !== null ? 'env' : fileValues.supervisorAutoEscalate !== undefined ? 'file' : 'default',
     reviewContinuation: fileValues.reviewContinuation !== undefined ? 'file' : 'default',
     ...broadcastCommentarySettingSources(fileValues),
+    ...presentationSettingSources(fileValues),
     apfsDependencyImages: fileValues.apfsDependencyImages !== undefined ? 'file' : 'default',
     thinkingEffort: envThink !== null ? 'env' : fileValues.thinkingEffort !== undefined ? 'file' : 'default',
     promptCachingEnabled:
@@ -880,6 +885,7 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>): Pr
   }
   applyReviewContinuationUpdate(stored, update);
   applyBroadcastCommentaryUpdate(stored, update);
+  applyPresentationUpdate(stored, update);
   applyApfsDependencyImagesUpdate(stored, update);
   if (update.thinkingEffort !== undefined) {
     if (!isThinkingEffort(update.thinkingEffort)) {

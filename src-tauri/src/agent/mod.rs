@@ -2217,6 +2217,12 @@ pub fn spawn_background_brain_task(app: tauri::AppHandle, task: String) {
 /// Script Editor icon.
 fn notify_done(app: &tauri::AppHandle, result: &str) {
     use tauri_plugin_notification::NotificationExt;
+    // #2147 — a background task finishing is a convenience banner, not something
+    // the operator is blocked on, so quiet mode takes it down for the duration.
+    // Unlike the review banner it has no standing preference of its own.
+    if crate::presentation::notice_blocked(crate::presentation::NoticeKind::BackgroundBrainDone) {
+        return;
+    }
     let body: String = result.chars().take(160).collect();
     let _ = app
         .notification()

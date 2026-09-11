@@ -47,6 +47,7 @@ export type ReviewerBackendSetting = 'follow' | 'codex' | 'claude';
 export type { UpdateAutoApply };
 export type CollideAggregator = 'auto' | 'claude' | 'codex';
 export type PrLinkDestination = 'in-app' | 'browser';
+export type ReviewReadyNotifications = 'off' | 'on';
 export type RequireApproval = 'high-risk' | 'surface' | 'always' | 'never';
 
 export interface TargetingTierUI {
@@ -120,6 +121,10 @@ export interface OperatorDefaults {
   branchPrefix: string;
   commitAttributionEnabled: boolean;
   prLinkDestination: PrLinkDestination;
+  /** Presentation (quiet) mode — suppresses every non-critical surface (#2147). */
+  presentationQuietMode: boolean;
+  /** Native "ready for review" banner (#2150). Quiet mode forces it off. */
+  notificationsReviewReady: ReviewReadyNotifications;
 }
 
 type ProfileControlledSetting = 'orchestratorBackend' | 'reviewerBackend' | 'defaultDispatchRuntime';

@@ -32,6 +32,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { isTauri } from '@/lib/tauri/bridge';
+import {
+  PARKED_LANES_STALE_AFTER_MS,
+  parkedSnapshotIsStale,
+  parkedSnapshotIsUsable,
+  type ParkedLanesStatusPayload,
+} from '@/lib/presentation/parked-lanes-snapshot';
 import { DockNotchSurface } from '@/components/desktop/dictation/DockNotchSurface';
 import { formatPlanProgressGlint, type PlanProgressEvent, type PlanProgressGlint } from '@/components/desktop/dictation/planPresentation';
 import { useDockFileDrop, type StagedChip } from '@/components/desktop/dictation/useDockFileDrop';
@@ -73,7 +79,7 @@ type TtsControlState = 'idle' | 'playing' | 'paused';
 /** Ask answer panel (voice P4 C3). */
 type AskMode = 'idle' | 'listening' | 'answer';
 type WorkerSnapshot = { count: number; working: number; waiting: number; repos: string[] };
-type ParkedLaneSnapshot = { waiting: number; repos: string[]; tooltip: string | null };
+type ParkedLaneSnapshot = { waiting: number; repos: string[]; tooltip: string | null; receivedAt: number };
 type DockGlint = PlanProgressGlint;
 const ASK_IDLE_COLLAPSE_MS = 45_000; // auto-collapse the panel after idle
 const ASK_RESUME_WINDOW_MS = 60_000; // preserve the thread if reopened within
@@ -724,9 +730,18 @@ export default function DictationPillPage() {
       .then((u) => { workerUnlisten = u; })
       .catch((err) => dockLog(`worker-status subscribe failed: ${err instanceof Error ? err.message : String(err)}`));
     import('@tauri-apps/api/event')
-      .then(({ listen }) => listen<{ count?: number; waiting?: number; repos?: string[]; tooltip?: string }>('o8:parked-lanes-status', (e) => {
-        const waiting = Math.max(0, e.payload?.waiting ?? e.payload?.count ?? 0);
-        setParkedWorkers({ waiting, repos: e.payload?.repos ?? [], tooltip: e.payload?.tooltip ?? null });
+      .then(({ listen }) => listen<ParkedLanesStatusPayload>('o8:parked-lanes-status', (e) => {
+        // #2147 — an unstamped or already-expired payload is dropped. This
+        // window outlives the dashboard, so without the check a count from a
+        // previous run paints here indefinitely.
+        if (!e.payload || !parkedSnapshotIsUsable(e.payload, Date.now())) return;
+        const waiting = Math.max(0, e.payload.waiting ?? e.payload.count ?? 0);
+        setParkedWorkers({
+          waiting,
+          repos: e.payload.repos ?? [],
+          tooltip: e.payload.tooltip ?? null,
+          receivedAt: Date.now(),
+        });
         if (waiting === 0) setShowWorkers(false);
       }))
       .then((u) => { parkedUnlisten = u; })
@@ -736,6 +751,25 @@ export default function DictationPillPage() {
       parkedUnlisten?.();
       if (showWorkersTimerRef.current) clearTimeout(showWorkersTimerRef.current);
     };
+  }, []);
+
+  // #2147 — expire the parked-lane snapshot when the dashboard stops
+  // heartbeating it (reload, quit-to-tray, crashed render). Dropping it beats
+  // showing a count that no longer describes anything in flight. The sweep reads
+  // through a ref so the interval never has to re-subscribe, and so the staleness
+  // check stays outside a state updater.
+  const parkedWorkersRef = useRef(parkedWorkers);
+  useEffect(() => { parkedWorkersRef.current = parkedWorkers; }, [parkedWorkers]);
+  useEffect(() => {
+    if (!isTauri()) return;
+    const sweep = setInterval(() => {
+      const current = parkedWorkersRef.current;
+      if (!current) return;
+      if (!parkedSnapshotIsStale({ emittedAt: current.receivedAt }, Date.now())) return;
+      setParkedWorkers(null);
+      setShowWorkers(false);
+    }, Math.round(PARKED_LANES_STALE_AFTER_MS / 3));
+    return () => clearInterval(sweep);
   }, []);
 
   // ── Symon voice agent events (o8:agent-confirm / o8:agent-task-event) ──
