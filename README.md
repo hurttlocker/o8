@@ -16,7 +16,7 @@ Where o8 is going, and what is open: [ROADMAP.md](./ROADMAP.md)
 
 **Run a fleet of coding agents. Approve what ships.**
 
-Any agent CLI you already pay for, Claude Code, Codex, Gemini, Aider, Goose, and thirteen more, can do real engineering work in isolated git worktrees, and nothing merges without your approval.
+Any agent CLI you already pay for, Claude Code, Codex, Grok Build, DeepSeek Harness, OpenCode, Gemini, and twelve more, can do real engineering work in isolated git worktrees, and nothing merges without your approval.
 
 The labs each ship their own agent and hope you live inside it. o8 is the neutral cockpit above all of them: one surface to dispatch, watch, review, and ship — with an audit trail for every decision. It runs on your machine, against your own subscriptions and keys. Free, MIT, complete.
 
@@ -152,7 +152,7 @@ npm run dev             # web loop — Next.js :47120 + WS :47125
 
 That loop needs no POSIX shell, so a Windows clone builds without Git Bash or any `script-shell` configuration. The only scripts that still want `bash` are the `measure:*` diagnostics and the release chain (`ship`, `tauri:build:signed`), which are macOS-only regardless.
 
-Bring at least one agent CLI you already use (`claude`, `codex`, `gemini`, `aider`, `3code`, …) — the first-run picker finds them. No API keys required to start; [`.env.example`](./.env.example) documents every optional one.
+Bring at least one agent CLI you already use (`claude`, `codex`, `grok`, `opencode`, `gemini`, …) — the first-run picker finds them. No API keys required to start; [`.env.example`](./.env.example) documents every optional one.
 
 ### Phone
 
