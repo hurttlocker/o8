@@ -5,6 +5,7 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
+import { benchTmuxArgs } from '../tmux-scope.mjs';
 
 const PROCESS_LINE = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/;
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -223,7 +224,7 @@ export async function portFree(port) {
 
 export function listTmuxSessions() {
   try {
-    return execFileSync('tmux', ['list-sessions', '-F', '#{session_name}'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+    return execFileSync('tmux', benchTmuxArgs('list-sessions', '-F', '#{session_name}'), { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
       .split('\n').map((line) => line.trim()).filter(Boolean);
   } catch {
     return [];
@@ -232,27 +233,16 @@ export function listTmuxSessions() {
 
 export function ownedTmuxSessions(dataDir) {
   if (!dataDir) return [];
-  try {
-    const output = execFileSync('tmux', ['list-panes', '-a', '-F', '#{session_name}\t#{pane_current_path}'], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    const owned = new Set();
-    for (const line of output.split('\n')) {
-      const [sessionName, panePath] = line.split('\t');
-      if (sessionName && panePath && panePath.startsWith(dataDir)) owned.add(sessionName);
-    }
-    return [...owned];
-  } catch {
-    return [];
-  }
+  // The server namespace is unique to this harness. A login shell can cd away
+  // from the fixture, so current directory is not a durable ownership signal.
+  return listTmuxSessions();
 }
 
 export function killTmuxSessions(sessionNames) {
   const killed = [];
   for (const sessionName of new Set(sessionNames)) {
     try {
-      execFileSync('tmux', ['kill-session', '-t', sessionName], { stdio: 'ignore' });
+      execFileSync('tmux', benchTmuxArgs('kill-session', '-t', `=${sessionName}`), { stdio: 'ignore' });
       killed.push(sessionName);
     } catch { /* already gone */ }
   }

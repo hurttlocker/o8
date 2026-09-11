@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLane } from '@/lib/lane/registry';
 import { requirePanelAuth } from '@/lib/panel/auth';
-import { startReviewQueueDrain, triggerAutoReview } from '@/lib/lane/auto-review';
+import { triggerAutoReview } from '@/lib/lane/auto-review';
+import { ensureReviewQueueDrainStarted } from '@/lib/lane/review-drain-bootstrap';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-let reviewDrainStarted = false;
 
 export async function POST(request: NextRequest) {
   const denied = requirePanelAuth(request);
@@ -16,10 +15,7 @@ export async function POST(request: NextRequest) {
   const action = typeof body.action === 'string' ? body.action : '';
 
   if (action === 'start') {
-    if (!reviewDrainStarted) {
-      startReviewQueueDrain();
-      reviewDrainStarted = true;
-    }
+    ensureReviewQueueDrainStarted();
     return NextResponse.json({ ok: true }, {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });

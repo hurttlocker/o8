@@ -2,14 +2,20 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   fetch: vi.fn(),
   pythonSpawn: vi.fn(),
   warmupOpenRouter: vi.fn(),
   ensureEdgeTtsInstalled: vi.fn(),
+  ensureReviewQueueDrainStarted: vi.fn(),
 }));
+
+vi.mock('@/lib/lane/review-drain-bootstrap', () => ({
+  ensureReviewQueueDrainStarted: mocks.ensureReviewQueueDrainStarted,
+}));
+vi.mock('@/lib/search/backfill', () => ({ runUnifiedSearchBackfills: vi.fn() }));
 
 vi.mock('@/lib/telemetry/crash-capture', () => ({
   installProcessCrashCapture: vi.fn(),
@@ -38,12 +44,23 @@ vi.mock('@/lib/tts/ensure-edge-tts', () => ({
 const priorNextRuntime = process.env.NEXT_RUNTIME;
 const priorO8DataDir = process.env.O8_DATA_DIR;
 const priorCortexDataDir = process.env.CORTEX_IDE_DATA_DIR;
+const priorPackagedApp = process.env.O8_PACKAGED_APP;
+const priorNextPhase = process.env.NEXT_PHASE;
 const dataDir = mkdtempSync(path.join(os.tmpdir(), 'o8-cold-start-instrumentation-'));
 
 beforeAll(() => {
   process.env.NEXT_RUNTIME = 'nodejs';
   process.env.O8_DATA_DIR = dataDir;
   delete process.env.CORTEX_IDE_DATA_DIR;
+  delete process.env.O8_PACKAGED_APP;
+  delete process.env.NEXT_PHASE;
+});
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  process.env.NEXT_RUNTIME = 'nodejs';
+  delete process.env.O8_PACKAGED_APP;
+  delete process.env.NEXT_PHASE;
 });
 
 afterAll(() => {
@@ -54,6 +71,10 @@ afterAll(() => {
   else process.env.O8_DATA_DIR = priorO8DataDir;
   if (priorCortexDataDir === undefined) delete process.env.CORTEX_IDE_DATA_DIR;
   else process.env.CORTEX_IDE_DATA_DIR = priorCortexDataDir;
+  if (priorPackagedApp === undefined) delete process.env.O8_PACKAGED_APP;
+  else process.env.O8_PACKAGED_APP = priorPackagedApp;
+  if (priorNextPhase === undefined) delete process.env.NEXT_PHASE;
+  else process.env.NEXT_PHASE = priorNextPhase;
   rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -69,5 +90,29 @@ describe('cold-start instrumentation', () => {
     expect(mocks.fetch).not.toHaveBeenCalled();
     expect(mocks.ensureEdgeTtsInstalled).not.toHaveBeenCalled();
     expect(mocks.pythonSpawn).not.toHaveBeenCalled();
+    expect(mocks.ensureReviewQueueDrainStarted).not.toHaveBeenCalled();
+  });
+
+  it('starts packaged server queues without a sibling request', async () => {
+    process.env.O8_PACKAGED_APP = '1';
+    const { register } = await import('@/instrumentation');
+    await register();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(mocks.ensureReviewQueueDrainStarted).toHaveBeenCalledTimes(1);
+    expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+
+  it('does not start queues during a production build or in the edge runtime', async () => {
+    process.env.O8_PACKAGED_APP = '1';
+    process.env.NEXT_PHASE = 'phase-production-build';
+    const { register } = await import('@/instrumentation');
+    await register();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(mocks.ensureReviewQueueDrainStarted).not.toHaveBeenCalled();
+    delete process.env.NEXT_PHASE;
+    process.env.NEXT_RUNTIME = 'edge';
+    await register();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(mocks.ensureReviewQueueDrainStarted).not.toHaveBeenCalled();
   });
 });

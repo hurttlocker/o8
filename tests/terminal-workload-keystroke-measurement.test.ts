@@ -14,9 +14,17 @@ describe('terminal workload keystroke timeout classification', () => {
   it('distinguishes delivery without a painted frame', () => {
     expect(classifyKeystrokeTimeout({
       auxDeliveredAt: 100,
-      panelDeliveredAt: null,
+      panelDeliveredAt: 102,
       panelPaintedAt: null,
     })).toBe('delivered-not-painted');
+  });
+
+  it('does not mistake auxiliary delivery for visible-panel delivery', () => {
+    expect(classifyKeystrokeTimeout({
+      auxDeliveredAt: 100,
+      panelDeliveredAt: null,
+      panelPaintedAt: null,
+    })).toBe('aux-delivered-panel-unobserved');
   });
 
   it('distinguishes a marker that never reached either delivery path', () => {

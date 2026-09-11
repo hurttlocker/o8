@@ -9,6 +9,7 @@ import { recordXtermSelectionSnapshot, registerXtermSelectionSource } from '@/co
 import { retainInlineTerminalImages, TERMINAL_SCROLLBACK_LINES } from '@/lib/terminal/client-retention';
 import { ClientTerminalHiddenBuffer } from '@/components/desktop/workspace-terminal/terminal-hidden-buffer';
 import { recordTerminalDiagnostic } from '@/components/desktop/workspace-terminal/terminal-diagnostics';
+import { decodeTerminalBase64 } from './terminal-base64';
 import {
   recordTerminalBenchDelivery,
   recordTerminalBenchDimensions,
@@ -238,7 +239,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
       cancelReveal(true);
       try {
         if (!terminalBenchEnabled()) {
-          const bytes = Uint8Array.from(atob(data), (char) => char.charCodeAt(0));
+          const bytes = decodeTerminalBase64(data);
           if (!visibleRef.current || awaitingVisibilityRef.current) {
             queueHiddenBytes(bytes);
             return;
@@ -247,7 +248,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
           return;
         }
         const decodeStartedAt = performance.now();
-        const bytes = Uint8Array.from(atob(data), (char) => char.charCodeAt(0));
+        const bytes = decodeTerminalBase64(data);
         const decodeMs = performance.now() - decodeStartedAt;
         const visibleAtWrite = visibleRef.current;
         const sessionNameAtWrite = tmuxSessionRef.current;
@@ -342,7 +343,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
       hiddenNeedsResyncRef.current = false;
       try {
         termRef.current.reset();
-        const bytes = Uint8Array.from(atob(data), (char) => char.charCodeAt(0));
+        const bytes = decodeTerminalBase64(data);
         if (bytes.byteLength === 0) {
           flushHiddenBytes(epoch);
         } else {
@@ -565,7 +566,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
                 if (!termRef.current) return;
                 for (const chunk of chunks) {
                   try {
-                    const bytes = Uint8Array.from(atob(chunk), (char) => char.charCodeAt(0));
+                    const bytes = decodeTerminalBase64(chunk);
                     termRef.current.write(bytes);
                   } catch {
                     // skip malformed chunk

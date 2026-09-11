@@ -16,6 +16,7 @@ import {
   measureProcessGroups,
   resolveProcessGroups,
   seedFixtureState,
+  snapshotProcessCounters,
   sleep,
   startIsolatedStack,
 } from './terminal-workload/runtime.mjs';
@@ -24,6 +25,8 @@ import { summarizeSamples } from './terminal-workload/statistics.mjs';
 import { assertTerminalWorkloadBudgets } from './terminal-workload/budgets.mjs';
 import { ensureVisibleTerminal } from './terminal-workload/browser-state.mjs';
 import { classifyKeystrokeTimeout } from './terminal-workload/keystroke-measurement.mjs';
+import { startCpuProfiles } from './terminal-workload/cpu-profile.mjs';
+import { BENCH_TMUX_SERVER_NAME, benchTmuxArgs } from './tmux-scope.mjs';
 
 const ROOT = process.cwd();
 
@@ -54,6 +57,7 @@ function config() {
     chunkMs,
     seed,
     check: process.argv.includes('--check'),
+    cpuProfile: process.argv.includes('--cpu-profile'),
     requestedBuildMode: String(option('build-mode', 'auto')),
     rawDir: path.resolve(option('output-dir', path.join(ROOT, 'tests/bench/latest/terminal-workload', runId))),
     receiptPath: path.resolve(option('receipt', path.join(ROOT, 'tests/bench/results/terminal-workload-phase2.json'))),
@@ -573,13 +577,13 @@ function terminalScreenOracle(value) {
 
 function captureTmuxText(sessionName) {
   // #1979: tmux CSI n S scrolling cannot preserve history in xterm.js; screen state remains authoritative.
-  return execFileSync('tmux', ['capture-pane', '-p', '-t', sessionName], { encoding: 'utf8' });
+  return execFileSync('tmux', benchTmuxArgs('capture-pane', '-p', '-t', `=${sessionName}:`), { encoding: 'utf8' });
 }
 
 function captureTmuxSize(sessionName) {
   const value = execFileSync(
     'tmux',
-    ['display-message', '-p', '-t', sessionName, '#{pane_width} #{pane_height}'],
+    benchTmuxArgs('display-message', '-p', '-t', `=${sessionName}:`, '#{pane_width} #{pane_height}'),
     { encoding: 'utf8' },
   ).trim();
   const [cols, rows] = value.split(/\s+/u).map(Number);
@@ -932,10 +936,12 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
   let context;
   let page;
   let clients = [];
+  let stopCpuProfiles;
   const browserConsole = [];
   const httpFailures = [];
   try {
-    stack = await startIsolatedStack(ROOT, seeded, runConfig.requestedBuildMode);
+    stack = await startIsolatedStack(ROOT, seeded, runConfig.requestedBuildMode, { cpuProfile: runConfig.cpuProfile });
+    if (!stack.reviewRootIsolated) throw new Error('realtime review watcher did not confirm the isolated fixture root');
     context = await browser.newContext({ viewport: { width: 1000, height: 800 } });
     page = await context.newPage();
     page.on('console', (message) => {
@@ -993,10 +999,22 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
     await resetPageMeasurement(page);
     const deliveryStarts = seeded.tabs.map((tab, index) => clients[index].terminalDelivery(tab.sessionName));
 
-    const before = snapshotProcesses();
-    const groups = resolveProcessGroups(before, stack, browserPid);
+    if (runConfig.cpuProfile) {
+      stopCpuProfiles = await startCpuProfiles({
+        context, page, stack, directory: runConfig.rawDir, label: `n${sessionCount}-sample-${sampleIndex}`,
+      });
+    }
+
+    const inventoryBeforeProbe = snapshotProcesses();
+    const groups = resolveProcessGroups(inventoryBeforeProbe, stack, browserPid);
+    const memoryProbeStartedAt = globalThis.performance.now();
+    const physicalBytesStart = measureProcessGroupMemory(inventoryBeforeProbe, groups);
+    const memoryProbeMs = globalThis.performance.now() - memoryProbeStartedAt;
+    // The CPU counters and denominator must cover the same interval. Memory
+    // probes can take seconds and run before the workload is released.
+    const beforeSnapshot = snapshotProcessCounters();
+    const before = beforeSnapshot.processes;
     const processPidTreeStart = describeProcessPidTree(before, groups);
-    const physicalBytesStart = measureProcessGroupMemory(before, groups);
     for (const [index, tab] of seeded.tabs.entries()) {
       clients[index].send({
         type: 'terminal-input',
@@ -1078,11 +1096,13 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
       (tab) => `O8_WORKLOAD_DONE_${tab.sessionName}_${sampleSeed}`,
     ), runConfig.durationMs + 30000);
     const observationMs = Date.now() - observationStartedAt;
-    const after = snapshotProcesses();
+    const afterSnapshot = snapshotProcessCounters();
+    const after = afterSnapshot.processes;
+    const cpuObservationMs = afterSnapshot.sampledAtMs - beforeSnapshot.sampledAtMs;
     const groupsAfter = resolveProcessGroups(after, stack, browserPid);
     const processPidTreeEnd = describeProcessPidTree(after, groupsAfter);
     const physicalBytesEnd = measureProcessGroupMemory(after, groupsAfter);
-    const processes = measureProcessGroups(before, after, groups, observationMs, physicalBytesStart, physicalBytesEnd);
+    const processes = measureProcessGroups(before, after, groups, cpuObservationMs, physicalBytesStart, physicalBytesEnd);
     const rawBrowser = await readPageStats(page);
     const rawServer = (await clients[0].request('terminal-bench-stats')).data.snapshot;
     const hiddenOverflowClass = mountedHidden
@@ -1093,6 +1113,7 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
       throw new Error(`hidden client buffer did not overflow for ${mountedHidden.sessionName}`);
     }
     const performance = await readPerformance(page, observationMs);
+    await stopCpuProfiles?.();
     const resyncUnsettledCount = rawBrowser.diagnostics.filter((diagnostic) => (
       diagnostic.code === 'terminal_resync_unsettled'
     )).length;
@@ -1140,6 +1161,8 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
       buildMode: stack.buildMode,
       devModeCpuWarning: stack.devModeCpuWarning,
       observationMs,
+      measurementTiming: { memoryProbeMs: round(memoryProbeMs), cpuObservationMs: round(cpuObservationMs) },
+      reviewRootIsolated: stack.reviewRootIsolated,
       orchestratorLaunches,
       hiddenOverflowClass,
       inventory: {
@@ -1191,6 +1214,7 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
       sessionCount,
       sampleIndex,
       runPrefix,
+      tmuxServerName: BENCH_TMUX_SERVER_NAME,
       error: error instanceof Error ? { message: error.message, stack: error.stack } : String(error),
       dashboard: page && !page.isClosed() ? await dashboardDiagnostic(page, seeded.tabs).catch(() => null) : null,
       browserConsole,
@@ -1204,6 +1228,7 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
     fs.writeFileSync(path.join(runConfig.rawDir, `failure-n${sessionCount}-sample-${sampleIndex}.json`), JSON.stringify(failure, null, 2));
     throw error;
   } finally {
+    await stopCpuProfiles?.().catch((error) => process.stderr.write(`[bench:terminal] profile cleanup: ${error.message}\n`));
     if (context) await context.close().catch(() => undefined);
     await Promise.all(clients.map((client) => client.close().catch(() => undefined)));
     if (stack) await stack.close().catch(() => undefined);
@@ -1273,9 +1298,12 @@ async function main() {
     ...gitInfo(),
     buildMode: buildModes.length === 1 ? buildModes[0] : 'mixed',
     devModeCpuWarning: samples.some((sample) => sample.devModeCpuWarning),
+    diagnosticCpuProfile: runConfig.cpuProfile,
+    measurementContractVersion: 2,
     ...machineClass(),
     fixture: {
       id: 'terminal-ansi-alt-screen-visibility-v2',
+      tmuxServerName: BENCH_TMUX_SERVER_NAME,
       sessionCounts: runConfig.sessionCounts,
       samplesPerSessionCount: runConfig.samples,
       bytesPerSecondPerSession: runConfig.bytesPerSecond,
