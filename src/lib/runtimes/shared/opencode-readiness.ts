@@ -512,27 +512,36 @@ export async function probeOpencodeServiceVersion(
   };
 }
 
-export interface OpencodeAuthListProbeDependencies {
+export interface OpencodeCliProbeDependencies {
   run(args: string[]): Promise<string>;
 }
 
-let authListProbeDependenciesForTests: OpencodeAuthListProbeDependencies | null = null;
+let cliProbeDependenciesForTests: OpencodeCliProbeDependencies | null = null;
 
-export function setOpencodeAuthListProbeDependenciesForTests(
-  dependencies: OpencodeAuthListProbeDependencies | null,
+export function setOpencodeCliProbeDependenciesForTests(
+  dependencies: OpencodeCliProbeDependencies | null,
 ): void {
-  authListProbeDependenciesForTests = dependencies;
+  cliProbeDependenciesForTests = dependencies;
 }
 
-async function runOpencodeJsonProbe(binaryPath: string, args: string[]): Promise<string> {
+async function runOpencodeCliProbe(binaryPath: string, args: string[]): Promise<string> {
   const invocation = cliInvocation(binaryPath, args);
   const { stdout } = await execFileAsync(invocation.command, invocation.args, {
     windowsHide: true,
     timeout: SERVICE_PROBE_TIMEOUT_MS,
     env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1" },
-    maxBuffer: 64 * 1024,
+    maxBuffer: 256 * 1024,
   });
   return stdout;
+}
+
+function cliProbeRunner(
+  binaryPath?: string | null,
+  dependencies?: OpencodeCliProbeDependencies,
+): ((args: string[]) => Promise<string>) | null {
+  const injected = dependencies ?? cliProbeDependenciesForTests;
+  if (injected) return injected.run;
+  return binaryPath ? (args: string[]) => runOpencodeCliProbe(binaryPath, args) : null;
 }
 
 /**
@@ -540,17 +549,17 @@ async function runOpencodeJsonProbe(binaryPath: string, args: string[]): Promise
  * keeps in its own store as well as provider environment keys. Returns null
  * when the CLI cannot answer — an indeterminate probe must never be read as
  * "no providers", which is the failure this exists to stop.
+ *
+ * An answer that names nothing is indeterminate for the same reason: OpenCode 2
+ * keeps credentials server-side, out of this listing's reach, so a successful
+ * empty payload reports the absence of local records rather than the absence of
+ * credentials.
  */
 export async function opencodeCliProviders(
   binaryPath?: string | null,
-  dependencies?: OpencodeAuthListProbeDependencies,
+  dependencies?: OpencodeCliProbeDependencies,
 ): Promise<Set<string> | null> {
-  const injected = dependencies ?? authListProbeDependenciesForTests;
-  const run = injected
-    ? injected.run
-    : binaryPath
-      ? (args: string[]) => runOpencodeJsonProbe(binaryPath, args)
-      : null;
+  const run = cliProbeRunner(binaryPath, dependencies);
   if (!run) return null;
 
   let payload: unknown;
@@ -570,8 +579,58 @@ export async function opencodeCliProviders(
     recognized += 1;
     if (entry.connections.length > 0) providers.add(id);
   }
-  // A payload we could not read at all is indeterminate, not empty.
-  return payload.length > 0 && recognized === 0 ? null : providers;
+  // A payload that named nothing we could read is indeterminate, not empty.
+  return recognized === 0 ? null : providers;
+}
+
+/**
+ * Model ids this install can actually resolve, as the CLI reports them. The
+ * listing is scoped to what the install can reach — an install with nothing
+ * connected lists nothing at all — so a model it names is evidence the CLI will
+ * dispatch that model, including through credentials it holds server-side where
+ * neither the auth listing nor the credential file can see them.
+ *
+ * Returns null when the CLI cannot answer or names nothing.
+ */
+export async function opencodeCliModels(
+  binaryPath?: string | null,
+  dependencies?: OpencodeCliProbeDependencies,
+): Promise<Set<string> | null> {
+  const run = cliProbeRunner(binaryPath, dependencies);
+  if (!run) return null;
+
+  let output: string;
+  try {
+    output = await run(["models"]);
+  } catch {
+    return null;
+  }
+
+  const models = new Set<string>();
+  for (const line of output.split("\n")) {
+    const id = line.trim();
+    // Every id the listing emits is `provider/model`; anything else is chrome.
+    if (id && providerIdForModel(id)) models.add(id);
+  }
+  return models.size > 0 ? models : null;
+}
+
+/**
+ * Whether the CLI will resolve this model id. An effort-suffixed pin
+ * (`provider/model/high`) resolves through the base model the listing names.
+ */
+export async function opencodeCliResolvesModel(
+  binaryPath: string | null | undefined,
+  model: string,
+  dependencies?: OpencodeCliProbeDependencies,
+): Promise<boolean> {
+  const id = model.trim();
+  if (!id) return false;
+  const models = await opencodeCliModels(binaryPath, dependencies);
+  if (!models) return false;
+  if (models.has(id)) return true;
+  const base = id.slice(0, id.lastIndexOf("/"));
+  return Boolean(providerIdForModel(base)) && models.has(base);
 }
 
 /**

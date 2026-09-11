@@ -6,9 +6,18 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const {
   opencodeAuthenticatedProviders,
+  opencodeCliModels,
   opencodeCliProviders,
-  setOpencodeAuthListProbeDependenciesForTests,
+  opencodeCliResolvesModel,
+  setOpencodeCliProbeDependenciesForTests,
 } = await import('./opencode-readiness');
+
+/** Shape of `models`: one `provider/model` id per line. */
+const MODELS_PAYLOAD = [
+  'opencode/nemotron-3.5-lightning-free',
+  'openrouter/deepseek/deepseek-v4.1-flash',
+  'xai/grok-4',
+].join('\n') + '\n';
 
 const CLI_PATH = '/test-bin/opencode2';
 
@@ -31,7 +40,7 @@ function writeLegacyAuthFile(providers: Record<string, unknown>): void {
 
 function stubCli(run: (args: string[]) => Promise<string>): string[][] {
   const calls: string[][] = [];
-  setOpencodeAuthListProbeDependenciesForTests({
+  setOpencodeCliProbeDependenciesForTests({
     run: (args) => {
       calls.push(args);
       return run(args);
@@ -49,7 +58,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  setOpencodeAuthListProbeDependenciesForTests(null);
+  setOpencodeCliProbeDependenciesForTests(null);
   if (savedDataHome === undefined) delete process.env.XDG_DATA_HOME;
   else process.env.XDG_DATA_HOME = savedDataHome;
   if (savedAuthContent === undefined) delete process.env.OPENCODE_AUTH_CONTENT;
@@ -110,15 +119,82 @@ describe('opencodeCliProviders', () => {
     await expect(opencodeCliProviders(null)).resolves.toBeNull();
   });
 
-  it('returns an empty set when the CLI reports nothing connected', async () => {
+  it('treats an empty payload as indeterminate, since credentials can live server-side', async () => {
     stubCli(async () => '[]');
 
-    await expect(opencodeCliProviders(CLI_PATH)).resolves.toEqual(new Set());
+    await expect(opencodeCliProviders(CLI_PATH)).resolves.toBeNull();
   });
 
   it('returns null when the CLI emits output that is not JSON', async () => {
     stubCli(async () => 'No authenticated integrations');
 
     await expect(opencodeCliProviders(CLI_PATH)).resolves.toBeNull();
+  });
+});
+
+describe('opencodeCliModels', () => {
+  it('reads the ids the CLI says it can resolve', async () => {
+    const calls = stubCli(async () => MODELS_PAYLOAD);
+
+    await expect(opencodeCliModels(CLI_PATH)).resolves.toEqual(
+      new Set([
+        'opencode/nemotron-3.5-lightning-free',
+        'openrouter/deepseek/deepseek-v4.1-flash',
+        'xai/grok-4',
+      ]),
+    );
+    expect(calls).toEqual([['models']]);
+  });
+
+  it('returns null without a CLI to ask', async () => {
+    await expect(opencodeCliModels(null)).resolves.toBeNull();
+  });
+
+  it('returns null when the CLI names nothing', async () => {
+    stubCli(async () => '\n');
+
+    await expect(opencodeCliModels(CLI_PATH)).resolves.toBeNull();
+  });
+
+  it('drops output that is not a provider-qualified id', async () => {
+    stubCli(async () => 'No models available\nopencode/mimo-v2.5-free\n');
+
+    await expect(opencodeCliModels(CLI_PATH)).resolves.toEqual(
+      new Set(['opencode/mimo-v2.5-free']),
+    );
+  });
+});
+
+describe('opencodeCliResolvesModel', () => {
+  it('matches an id the listing names', async () => {
+    stubCli(async () => MODELS_PAYLOAD);
+
+    await expect(
+      opencodeCliResolvesModel(CLI_PATH, 'openrouter/deepseek/deepseek-v4.1-flash'),
+    ).resolves.toBe(true);
+  });
+
+  it('matches an effort pin through its base model', async () => {
+    stubCli(async () => MODELS_PAYLOAD);
+
+    await expect(
+      opencodeCliResolvesModel(CLI_PATH, 'opencode/nemotron-3.5-lightning-free/high'),
+    ).resolves.toBe(true);
+  });
+
+  it('does not match a model the listing leaves out', async () => {
+    stubCli(async () => MODELS_PAYLOAD);
+
+    await expect(
+      opencodeCliResolvesModel(CLI_PATH, 'anthropic/claude-opus-4-8'),
+    ).resolves.toBe(false);
+  });
+
+  it('does not promote a provider id into a model match', async () => {
+    stubCli(async () => 'opencode\nopencode/mimo-v2.5-free\n');
+
+    await expect(
+      opencodeCliResolvesModel(CLI_PATH, 'opencode/big-pickle'),
+    ).resolves.toBe(false);
   });
 });
