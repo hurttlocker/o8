@@ -53,5 +53,7 @@ export const STALE_CLEANUP_SIGNALS = new Set([
   'relaunch_error',
   'session_lost',
   'zero_diff_failed',
+  'zero_diff_runtime_error',
+  'zero_diff_unclassified',
   'silent_exit_work_present',
 ]);

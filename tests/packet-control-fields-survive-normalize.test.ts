@@ -53,6 +53,7 @@ function fullPacketFixture() {
     uiLoopIterations: 3,
     uiLoopStartedAt: '2026-01-01T00:00:00.000Z',
     stallRetries: 2,
+    zeroDiffRuntimeRetries: 1,
     launchAttempts: 3,
     operatorStopped: true,
     spendCap: { carrier: 'openrouter', costUsd: 1, inputTokens: 500_000 },

@@ -360,6 +360,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     typecheckAutoRetries: normalizeAttemptCount(packet.typecheckAutoRetries),
     leaseWaitAutoRetries: normalizeAttemptCount(packet.leaseWaitAutoRetries), uiLoopIterations: normalizeAttemptCount(packet.uiLoopIterations), uiLoopStartedAt: typeof packet.uiLoopStartedAt === 'string' && Number.isFinite(Date.parse(packet.uiLoopStartedAt)) ? packet.uiLoopStartedAt : undefined,
     stallRetries: normalizeAttemptCount(packet.stallRetries),
+    zeroDiffRuntimeRetries: normalizeAttemptCount(packet.zeroDiffRuntimeRetries),
     launchAttempts: normalizeAttemptCount(packet.launchAttempts),
     operatorStopped: packet.operatorStopped === true ? true : undefined,
     spendCap: normalizePacketSpendCap(packet.spendCap), spendTelemetry: normalizePacketSpendTelemetry(packet.spendTelemetry),
