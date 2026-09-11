@@ -44,6 +44,7 @@ Project rules and prior outcomes stay attached to the project, not to one model 
 | Arc | Done means | State | Gap | Where |
 | --- | --- | --- | --- | --- |
 | Cost and capacity ledger | The ledger's number and the provider's invoice agree. | open | Nothing measures what role routing and context controls save. | [#1791](https://github.com/hurttlocker/o8/issues/1791) |
+| Memory the operator shapes | What the operator rejects, steers, or edits becomes memory the Brain and the next worker retrieve, and any single retained item can be deleted. | open | Rejection and steer reasons are stored for audit and read by no retriever; the schema's rework flag is never written; the only way to forget one rule is to reset the whole database. | [#2221](https://github.com/hurttlocker/o8/issues/2221) |
 
 ## 3. Runs on your subscriptions
 
