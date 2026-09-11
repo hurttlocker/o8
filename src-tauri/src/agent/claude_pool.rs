@@ -105,7 +105,7 @@ pub fn acquire(bin: &str, model: &str, mcp_cfg: &str) -> Option<ClaudeSession> {
 }
 
 /// Keydown convenience: resolve the normal voice planner and warm it when the
-/// shared CLI inventory selects Claude. The Codex seat holds a resident
+/// planner registry seats the resident stream-json transport. The Codex seat holds a resident
 /// app-server child too (#2155), but it boots on the task's first turn rather
 /// than on the keydown — an idle app-server child per keypress would outlive
 /// far more keydowns than it serves.
@@ -116,11 +116,11 @@ pub fn prewarm_agent() {
     else {
         return;
     };
-    if selection.provider != super::planner_route::PlannerProvider::Claude {
+    if selection.provider.transport != super::planner_route::PlannerTransport::ClaudeStreamJson {
         return;
     }
     match super::claude::ensure_empty_mcp_config() {
-        Ok(mcp) => prewarm(&selection.binary, selection.model, &mcp),
+        Ok(mcp) => prewarm(&selection.binary, selection.model_label(), &mcp),
         Err(e) => log::warn!("[symon-agent] prewarm_agent: mcp config failed: {e}"),
     }
 }

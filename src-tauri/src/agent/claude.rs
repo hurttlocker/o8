@@ -571,24 +571,28 @@ async fn run_loop_with_fallback(
     correlation: Option<ConfirmCorrelation>,
 ) -> Result<LoopResult, String> {
     let mut binary = bin.to_string();
-    let mut model = super::planner_route::effective_claude_model(requested_model);
+    let mut model = super::planner_route::effective_claude_model(requested_model).to_string();
     loop {
-        match run_loop_once(&binary, model, intent, ctx, mcp_cfg, correlation.clone()).await {
+        match run_loop_once(&binary, &model, intent, ctx, mcp_cfg, correlation.clone()).await {
             Ok(result) => return Ok(result),
-            Err(error) if should_retry_with_claude_fallback(model, &error) => {
-                let Some(fallback) =
-                    super::planner_route::claude_fallback_selection(&binary, model)
+            Err(error) if should_retry_with_claude_fallback(&model, &error) => {
+                // The degrade chain only ever rewrites Claude ids, so the
+                // fallback seat always carries one.
+                let Some(next) = super::planner_route::claude_fallback_selection(&binary, &model)
+                    .and_then(|fallback| {
+                        fallback.model.map(|next| (fallback.binary, next, fallback.effort))
+                    })
                 else {
                     return Err(error);
                 };
-                super::planner_route::remember_claude_model_unavailable(model);
+                super::planner_route::remember_claude_model_unavailable(&model);
                 log::warn!(
                     "[symon-agent] {model} unavailable; retrying with {} / {}",
-                    fallback.model,
-                    fallback.effort
+                    next.1,
+                    next.2
                 );
-                binary = fallback.binary;
-                model = fallback.model;
+                binary = next.0;
+                model = next.1;
             }
             Err(error) => return Err(error),
         }

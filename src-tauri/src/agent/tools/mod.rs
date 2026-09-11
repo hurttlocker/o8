@@ -1375,13 +1375,17 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
                 }
                 o8_bridge::dispatch(args).await
             } else {
-                // Heavy personal/Mac task → hand to the background Claude brain and
-                // let the front brain ack instantly. Fire-and-forget; results reach
+                // Heavy personal/Mac task → hand to the background brain and let
+                // the front brain ack instantly. Fire-and-forget; results reach
                 // the user via the dock + TTS when the background run finishes.
-                super::spawn_claude_task(ctx.app_handle()?.clone(), task);
+                // Which runtime actually takes the seat is the operator's Symon
+                // brain setting (#2156), so nothing here names one — the input
+                // `target` values stay put for schema compatibility, and
+                // `run_agent_inner` logs the seat that resolved.
+                super::spawn_background_brain_task(ctx.app_handle()?.clone(), task);
                 Ok(json!({
                     "status": "handed_off",
-                    "target": "claude_brain",
+                    "target": "background_brain",
                     "message": "A more capable background brain is now working on this. Give the user a short spoken acknowledgement (e.g. \"On it — I'll get that going and let you know.\") and do not call more tools."
                 }))
             }

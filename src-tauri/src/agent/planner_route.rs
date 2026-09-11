@@ -1,30 +1,42 @@
-//! Symon planner selection from the shared native CLI inventory.
+//! Symon planner selection — a registry of text-planner adapters (#2156).
+//!
+//! ## The registry
+//! Every entry in `PLANNER_ADAPTERS` describes one CLI that can sit behind the
+//! JSON-action planner protocol: the binary to look for (and the env overrides
+//! that locate it), the transport its session factory uses, the model ids for
+//! its worker and builder rungs, and how a reasoning effort reaches it. The
+//! protocol itself never varies — `TextPlannerSession` in `claude.rs` is the
+//! contract, and adapters differ only in spawn and transport — so adding a
+//! runtime is a registry row plus a session type, not a new branch in the loop.
 //!
 //! ## Tier discipline (#2155)
 //! The planner runs bounded multi-step Mac tasks over the native tool catalog.
 //! That is a worker/builder seat, so the FRONTIER orchestrator model is never
 //! the default here — a background seat that inherits the orchestrator tier is
 //! the same footgun as a subagent inheriting its parent's model. With no
-//! operator pin the route seats:
+//! operator pin each entry seats its own `default_tier`:
 //!
-//! * Claude → Sonnet 5 (worker tier) at the CLI's default reasoning — the
-//!   `--effort` flag rides the BUILDER tier only.
-//! * Codex → `gpt-5.6-sol` (builder tier) at `high`.
+//! * Claude → Sonnet 5 (worker rung) at the CLI's default reasoning — the
+//!   `--effort` flag rides the BUILDER rung only.
+//! * Codex → `gpt-5.6-sol` (builder rung) at `high`.
+//! * opencode → whatever model the operator already configured for it.
 //!
 //! The other rung of each ladder (Claude Opus 5 at `high`, Codex
 //! `gpt-5.6-terra` at `medium`) and the frontier id itself stay reachable
-//! through `resolve_bound`, so an explicit operator pin can still choose any
-//! catalog model, Fable included.
+//! through an operator pin or `resolve_bound`.
 //!
 //! ## Provider preference
-//! When both CLIs are installed the route follows the operator's orchestrator
-//! backend (`~/.o8/operator-defaults.json`), falling back to Codex. See
-//! `preferred_provider_from` for the mapping.
+//! The operator's "Symon brain" setting (Settings → Voice) picks the provider
+//! outright. Left on `auto` the route follows their orchestrator backend
+//! (`~/.o8/operator-defaults.json`), falling back to Codex — see
+//! `preferred_provider_from`. A chosen provider whose binary is missing falls
+//! through `OPEN_PREFERENCE`, which reaches for open runtimes first.
 
 use serde_json::Value;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-pub(crate) const NO_AGENT_CLI_MESSAGE: &str = "no agent CLI found — install claude or codex";
+pub(crate) const NO_AGENT_CLI_MESSAGE: &str =
+    "no agent CLI found — install opencode, codex, or claude";
 const INVALID_PLANNER_SELECTION_MESSAGE: &str = "invalid or unavailable Symon planner selection";
 static CLAUDE_FABLE_UNAVAILABLE: AtomicBool = AtomicBool::new(false);
 static CLAUDE_OPUS_5_UNAVAILABLE: AtomicBool = AtomicBool::new(false);
@@ -39,23 +51,235 @@ pub(crate) const DEFAULT_CODEX_PLANNER_MODEL: &str = crate::models::CODEX_GPT_5_
 /// Worker-tier Codex planner, reachable through an operator pin.
 pub(crate) const WORKER_CODEX_PLANNER_MODEL: &str = crate::models::CODEX_GPT_5_6_TERRA;
 
+/// Reported effort for an adapter that takes its reasoning setting from the
+/// operator's own runtime config rather than from o8.
+pub(crate) const RUNTIME_CONFIGURED_EFFORT: &str = "default";
+
+/// Voice-pref keys for the Symon brain setting. Written by `voice_prefs_set`
+/// (→ `stt::keys::set_pref`) and read back out of the same JSON file here, so a
+/// settings change applies to the next task with no relaunch.
+pub(crate) const BRAIN_PROVIDER_PREF: &str = "symon_brain_provider";
+pub(crate) const BRAIN_TIER_PREF: &str = "symon_brain_tier";
+pub(crate) const BRAIN_MODEL_PREF: &str = "symon_brain_model";
+
+/// How a planner session is spawned and how turns ride it. One variant per
+/// session factory; the JSON-action protocol above it is identical for all.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PlannerProvider {
-    Claude,
-    Codex,
+pub(crate) enum PlannerTransport {
+    /// Resident `claude --input-format stream-json` child, one per task.
+    ClaudeStreamJson,
+    /// Resident `codex app-server --stdio` child, degrading to per-turn
+    /// `codex exec` / `exec resume` when the handshake fails.
+    CodexAppServer,
+    /// Per-turn `opencode run --format json`, resumed with `--session <id>`.
+    OpencodeRun,
+}
+
+/// How the seat's reasoning effort reaches the CLI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PlannerEffort {
+    /// `--effort <tier>`, and only on the builder rung — the worker rung runs
+    /// at the CLI default so the model-keyed warm pool stays coherent.
+    ClaudeBuilderFlag,
+    /// `-c model_reasoning_effort=<tier>` on every spawn.
+    CodexReasoningEffort,
+    /// o8 passes nothing. The CLI's accepted reasoning names are per-provider
+    /// and per-model, so an adapter whose model comes from the operator's own
+    /// config is never handed a guessed one.
+    RuntimeConfigured,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PlannerTier {
+    Worker,
+    Builder,
+}
+
+impl PlannerTier {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            PlannerTier::Worker => "worker",
+            PlannerTier::Builder => "builder",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        match value.trim() {
+            "worker" => Some(PlannerTier::Worker),
+            "builder" => Some(PlannerTier::Builder),
+            _ => None,
+        }
+    }
+}
+
+/// One row of the planner registry.
+pub(crate) struct PlannerAdapter {
+    /// Stable id — the operator setting value, the log tag, and the `engine`
+    /// the bound (phone) surface sends back.
+    pub id: &'static str,
+    /// Operator-facing name for the settings row.
+    pub label: &'static str,
+    /// Executable looked for on PATH and in the well-known CLI bin dirs.
+    pub binary: &'static str,
+    /// Env vars consulted before the PATH scan, in order.
+    pub binary_env: &'static [&'static str],
+    /// Session factory shape.
+    pub transport: PlannerTransport,
+    /// Worker-rung model id, or `None` when o8 pins no model for this adapter
+    /// and the CLI runs whatever the operator configured. Open runtimes take
+    /// `None`: which models they can reach depends on the operator's own
+    /// provider credentials, so an o8-side pin would name a model a large
+    /// share of installs cannot run.
+    pub worker_model: Option<&'static str>,
+    /// Builder-rung model id, same `None` rule.
+    pub builder_model: Option<&'static str>,
+    /// The rung this adapter seats when the operator has picked no tier. It is
+    /// per-adapter rather than a global constant because the ladders are not
+    /// symmetric: Codex `gpt-5.6-sol` is the builder rung AND the cheapest
+    /// capable Codex planner seat, which is what #2155 shipped as its default.
+    pub default_tier: PlannerTier,
+    /// How effort is passed.
+    pub effort: PlannerEffort,
+    /// Model ids an operator pin may name. Empty means the adapter takes any
+    /// `provider/model` id, because its catalog is the operator's, not ours.
+    pub pinnable_models: &'static [&'static str],
+}
+
+impl PlannerAdapter {
+    /// Does this adapter accept `model` as an operator pin? Catalog adapters
+    /// allow-list their ids (a raw CLI value must never reach the spawn);
+    /// open-catalog adapters validate the `provider/model` shape instead.
+    pub(crate) fn accepts_model(&self, model: &str) -> bool {
+        let model = model.trim();
+        if model.is_empty() {
+            return false;
+        }
+        if !self.pinnable_models.is_empty() {
+            return self.pinnable_models.contains(&model);
+        }
+        model.len() <= 120
+            && model.contains('/')
+            && model.chars().all(|c| {
+                c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '_' | '.' | ':')
+            })
+    }
+
+    fn accepts_effort(&self, effort: &str) -> bool {
+        matches!(effort, "low" | "medium" | "high" | "xhigh")
+            || (self.effort == PlannerEffort::RuntimeConfigured
+                && effort == RUNTIME_CONFIGURED_EFFORT)
+    }
+
+    fn tier_model(&self, tier: PlannerTier) -> Option<&'static str> {
+        match tier {
+            PlannerTier::Worker => self.worker_model,
+            PlannerTier::Builder => self.builder_model,
+        }
+    }
+}
+
+/// Identity is the id — two rows never share one, and comparing the whole
+/// struct would drag the model tables into every assertion.
+impl PartialEq for PlannerAdapter {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+impl Eq for PlannerAdapter {}
+
+impl std::fmt::Debug for PlannerAdapter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.id)
+    }
+}
+
+const CLAUDE_ADAPTER: PlannerAdapter = PlannerAdapter {
+    id: "claude",
+    label: "Claude",
+    binary: "claude",
+    binary_env: &["O8_CLAUDE_CODE_BIN", "CLAUDE_BIN"],
+    transport: PlannerTransport::ClaudeStreamJson,
+    worker_model: Some(DEFAULT_CLAUDE_PLANNER_MODEL),
+    builder_model: Some(BUILDER_CLAUDE_PLANNER_MODEL),
+    default_tier: PlannerTier::Worker,
+    effort: PlannerEffort::ClaudeBuilderFlag,
+    pinnable_models: &[
+        crate::models::CLAUDE_OPUS_4_8,
+        crate::models::CLAUDE_OPUS_5,
+        crate::models::CLAUDE_SONNET_5,
+        crate::models::CLAUDE_HAIKU_4_5_DATED,
+        crate::models::CLAUDE_FABLE_5,
+    ],
+};
+
+const CODEX_ADAPTER: PlannerAdapter = PlannerAdapter {
+    id: "codex",
+    label: "Codex",
+    binary: "codex",
+    binary_env: &["O8_CODEX_BIN", "CODEX_BIN"],
+    transport: PlannerTransport::CodexAppServer,
+    worker_model: Some(WORKER_CODEX_PLANNER_MODEL),
+    builder_model: Some(DEFAULT_CODEX_PLANNER_MODEL),
+    default_tier: PlannerTier::Builder,
+    effort: PlannerEffort::CodexReasoningEffort,
+    pinnable_models: &[
+        crate::models::CODEX_GPT_5_6_SOL,
+        crate::models::CODEX_GPT_5_6_TERRA,
+    ],
+};
+
+const OPENCODE_ADAPTER: PlannerAdapter = PlannerAdapter {
+    id: "opencode",
+    label: "opencode",
+    binary: "opencode",
+    binary_env: &["O8_OPENCODE_BIN", "OPENCODE_BIN"],
+    transport: PlannerTransport::OpencodeRun,
+    worker_model: None,
+    builder_model: None,
+    default_tier: PlannerTier::Worker,
+    effort: PlannerEffort::RuntimeConfigured,
+    pinnable_models: &[],
+};
+
+pub(crate) static PLANNER_ADAPTERS: &[PlannerAdapter] =
+    &[CLAUDE_ADAPTER, CODEX_ADAPTER, OPENCODE_ADAPTER];
+
+/// Fallback order when the operator's chosen provider is not installed: open
+/// runtimes first, so a machine with no proprietary CLI still has a brain.
+const OPEN_PREFERENCE: [&str; 3] = ["opencode", "codex", "claude"];
+
+/// The pair the route shipped with before the registry (#2155). Left on `auto`
+/// it is still tried first and in this order, so an install that resolved a
+/// seat then resolves the same seat now; `OPEN_PREFERENCE` only extends the
+/// tail, which used to be "no agent CLI found".
+const DEFAULT_PAIR: [&str; 2] = ["codex", "claude"];
+
+pub(crate) fn adapter_by_id(id: &str) -> Option<&'static PlannerAdapter> {
+    PLANNER_ADAPTERS.iter().find(|adapter| adapter.id == id)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PlannerSelection {
-    pub provider: PlannerProvider,
+    pub provider: &'static PlannerAdapter,
     pub binary: String,
-    pub model: &'static str,
+    /// Resolved model id, or `None` when the adapter defers to the model the
+    /// operator configured for it.
+    pub model: Option<String>,
     /// The reasoning tier this seat actually runs at. On the Codex path it is
     /// passed straight through as `model_reasoning_effort`. On the Claude path
     /// the CLI only receives an `--effort` flag for the builder tier, so a
     /// worker-tier seat reports `medium` — the CLI default it runs at — rather
-    /// than a flag value nothing passes.
+    /// than a flag value nothing passes. An adapter that takes its reasoning
+    /// from the operator's own config reports `default`.
     pub effort: &'static str,
+}
+
+impl PlannerSelection {
+    /// Model name for logs, the task ledger and the settings status line. Falls
+    /// back to the adapter id when the seat carries no o8-side model.
+    pub(crate) fn model_label(&self) -> &str {
+        self.model.as_deref().unwrap_or(self.provider.id)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,29 +288,25 @@ pub(crate) enum PlannerRouting {
     Unavailable { message: &'static str },
 }
 
-fn locate_planner_binary(binary: &str) -> Option<String> {
-    match binary {
-        "claude" => crate::cli_locate::resolve_binary("claude", &["O8_CLAUDE_CODE_BIN", "CLAUDE_BIN"]),
-        "codex" => crate::cli_locate::resolve_binary("codex", &["O8_CODEX_BIN", "CODEX_BIN"]),
-        _ => None,
-    }
+/// The operator's Symon brain setting, as stored.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct BrainSetting {
+    /// `None` when the setting is unset or on `auto`.
+    pub provider: Option<String>,
+    pub tier: Option<PlannerTier>,
+    pub model: Option<String>,
+}
+
+fn locate_planner_binary(adapter: &PlannerAdapter) -> Option<String> {
+    crate::cli_locate::resolve_binary(adapter.binary, adapter.binary_env)
 }
 
 pub(crate) fn resolve() -> PlannerRouting {
-    resolve_with(
-        preferred_provider(),
-        effective_claude_model(DEFAULT_CLAUDE_PLANNER_MODEL),
-        locate_planner_binary,
-    )
+    resolve_with(&read_brain_setting(), preferred_provider(), locate_planner_binary)
 }
 
 pub(crate) fn resolve_bound(engine: &str, model: &str, effort: &str) -> PlannerRouting {
-    resolve_bound_with(
-        engine,
-        effective_claude_model(model),
-        effort,
-        locate_planner_binary,
-    )
+    resolve_bound_with(engine, model, effort, locate_planner_binary)
 }
 
 /// The `--effort` flag a Claude planner model is spawned with, or `None` to
@@ -113,8 +333,8 @@ fn codex_planner_effort(model: &str) -> &'static str {
     }
 }
 
-/// The provider the route reaches for first when both CLIs are installed.
-pub(crate) fn preferred_provider() -> PlannerProvider {
+/// The provider the route reaches for first when the setting is on `auto`.
+pub(crate) fn preferred_provider() -> &'static PlannerAdapter {
     preferred_provider_from(read_operator_defaults().as_ref())
 }
 
@@ -128,7 +348,40 @@ fn read_operator_defaults() -> Option<Value> {
     serde_json::from_str::<Value>(&raw).ok()
 }
 
-/// Map the operator's `orchestratorBackend` onto a planner provider.
+/// `~/.o8/dictation.json` — the voice-pref store `voice_prefs_set` writes. Read
+/// straight off disk rather than through `stt::keys`' mtime cache: the planner
+/// resolves once per task, and a plain read keeps one file as the truth with no
+/// second cached copy to go stale.
+fn read_voice_prefs() -> Option<Value> {
+    let raw = std::fs::read_to_string(super::agent_data_dir().join("dictation.json")).ok()?;
+    serde_json::from_str::<Value>(&raw).ok()
+}
+
+pub(crate) fn read_brain_setting() -> BrainSetting {
+    brain_setting_from(read_voice_prefs().as_ref())
+}
+
+fn brain_setting_from(prefs: Option<&Value>) -> BrainSetting {
+    let Some(prefs) = prefs else {
+        return BrainSetting::default();
+    };
+    let string = |key: &str| {
+        prefs
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    };
+    BrainSetting {
+        provider: string(BRAIN_PROVIDER_PREF)
+            .filter(|value| *value != "auto")
+            .map(str::to_string),
+        tier: string(BRAIN_TIER_PREF).and_then(PlannerTier::parse),
+        model: string(BRAIN_MODEL_PREF).map(str::to_string),
+    }
+}
+
+/// Map the operator's `orchestratorBackend` onto a planner adapter.
 ///
 /// `claude`, `collide` and `fable` all run the Claude harness, so they seat the
 /// Claude planner. `auto` defers to the legacy `inAppOrchestratorEnabled`
@@ -136,18 +389,20 @@ fn read_operator_defaults() -> Option<Value> {
 /// `hermes` carry no local-CLI signal (they are governed profiles that only
 /// dispatch), so they take the default with everything else: **Codex**, because
 /// the Codex seat is subscription-billed and is the orchestrator default.
-fn preferred_provider_from(defaults: Option<&Value>) -> PlannerProvider {
+fn preferred_provider_from(defaults: Option<&Value>) -> &'static PlannerAdapter {
+    let claude = &CLAUDE_ADAPTER;
+    let codex = &CODEX_ADAPTER;
     let Some(defaults) = defaults else {
-        return PlannerProvider::Codex;
+        return codex;
     };
     match defaults.get("orchestratorBackend").and_then(Value::as_str) {
-        Some("claude") | Some("collide") | Some("fable") => PlannerProvider::Claude,
-        Some("codex") => PlannerProvider::Codex,
+        Some("claude") | Some("collide") | Some("fable") => claude,
+        Some("codex") => codex,
         Some("auto") => match defaults.get("inAppOrchestratorEnabled").and_then(Value::as_bool) {
-            Some(true) => PlannerProvider::Claude,
-            _ => PlannerProvider::Codex,
+            Some(true) => claude,
+            _ => codex,
         },
-        _ => PlannerProvider::Codex,
+        _ => codex,
     }
 }
 
@@ -180,7 +435,12 @@ pub(crate) fn claude_fallback_selection(binary: &str, model: &str) -> Option<Pla
         crate::models::CLAUDE_OPUS_5 => crate::models::CLAUDE_OPUS_4_8,
         _ => return None,
     };
-    Some(claude_selection(binary.to_string(), model))
+    Some(PlannerSelection {
+        provider: &CLAUDE_ADAPTER,
+        binary: binary.to_string(),
+        model: Some(model.to_string()),
+        effort: claude_planner_effort(model),
+    })
 }
 
 pub(crate) fn remember_claude_model_unavailable(model: &str) {
@@ -191,113 +451,140 @@ pub(crate) fn remember_claude_model_unavailable(model: &str) {
     }
 }
 
-fn claude_selection(binary: String, model: &'static str) -> PlannerSelection {
-    PlannerSelection {
-        provider: PlannerProvider::Claude,
-        binary,
-        model,
-        effort: claude_planner_effort(model),
+/// The degrade chain only rewrites Claude ids; every other adapter's catalog is
+/// its own.
+fn effective_model_for(adapter: &PlannerAdapter, model: &str) -> String {
+    match adapter.transport {
+        PlannerTransport::ClaudeStreamJson => effective_claude_model(model).to_string(),
+        _ => model.to_string(),
     }
 }
 
-fn codex_selection(binary: String, model: &'static str) -> PlannerSelection {
+fn effort_for(adapter: &PlannerAdapter, model: Option<&str>) -> &'static str {
+    match adapter.effort {
+        PlannerEffort::ClaudeBuilderFlag => model.map_or("medium", claude_planner_effort),
+        PlannerEffort::CodexReasoningEffort => model.map_or("high", codex_planner_effort),
+        PlannerEffort::RuntimeConfigured => RUNTIME_CONFIGURED_EFFORT,
+    }
+}
+
+/// Narrow a validated effort back to a `'static` string.
+fn static_effort(effort: &str) -> &'static str {
+    match effort {
+        "low" => "low",
+        "high" => "high",
+        "xhigh" => "xhigh",
+        RUNTIME_CONFIGURED_EFFORT => RUNTIME_CONFIGURED_EFFORT,
+        _ => "medium",
+    }
+}
+
+fn selection_for(
+    adapter: &'static PlannerAdapter,
+    binary: String,
+    tier: Option<PlannerTier>,
+    pin: Option<&str>,
+) -> PlannerSelection {
+    // A pin only applies to the adapter it is valid for — a Claude id left over
+    // from an earlier provider choice must not ride an opencode spawn.
+    let model = pin
+        .filter(|pin| adapter.accepts_model(pin))
+        .map(|pin| effective_model_for(adapter, pin))
+        .or_else(|| {
+            adapter
+                .tier_model(tier.unwrap_or(adapter.default_tier))
+                .map(|model| effective_model_for(adapter, model))
+        });
     PlannerSelection {
-        provider: PlannerProvider::Codex,
+        provider: adapter,
         binary,
+        effort: effort_for(adapter, model.as_deref()),
         model,
-        effort: codex_planner_effort(model),
+    }
+}
+
+/// Adapters to try, in order. An explicitly chosen provider leads; `auto`
+/// leads with the orchestrator-backend preference and the pair that preference
+/// shipped with. Either way the tail is `OPEN_PREFERENCE`, so a machine
+/// carrying only an open runtime still resolves a seat.
+fn resolution_order(
+    chosen: Option<&str>,
+    preferred: &'static PlannerAdapter,
+) -> Vec<&'static PlannerAdapter> {
+    let mut order: Vec<&'static PlannerAdapter> = Vec::new();
+    match chosen.and_then(adapter_by_id) {
+        Some(adapter) => order.push(adapter),
+        None => {
+            order.push(preferred);
+            for id in DEFAULT_PAIR {
+                push_unique(&mut order, id);
+            }
+        }
+    }
+    for id in OPEN_PREFERENCE {
+        push_unique(&mut order, id);
+    }
+    order
+}
+
+fn push_unique(order: &mut Vec<&'static PlannerAdapter>, id: &str) {
+    let Some(adapter) = adapter_by_id(id) else {
+        return;
+    };
+    if !order.iter().any(|seen| seen.id == adapter.id) {
+        order.push(adapter);
     }
 }
 
 fn resolve_bound_with<F>(engine: &str, model: &str, effort: &str, mut locate: F) -> PlannerRouting
 where
-    F: FnMut(&str) -> Option<String>,
+    F: FnMut(&PlannerAdapter) -> Option<String>,
 {
-    let provider = match (engine, model) {
-        ("claude", crate::models::CLAUDE_OPUS_4_8)
-        | ("claude", crate::models::CLAUDE_OPUS_5)
-        | ("claude", crate::models::CLAUDE_SONNET_5)
-        | ("claude", crate::models::CLAUDE_HAIKU_4_5_DATED)
-        | ("claude", crate::models::CLAUDE_FABLE_5) => PlannerProvider::Claude,
-        ("codex", crate::models::CODEX_GPT_5_6_SOL)
-        | ("codex", crate::models::CODEX_GPT_5_6_TERRA) => PlannerProvider::Codex,
-        _ => {
-            return PlannerRouting::Unavailable {
-                message: INVALID_PLANNER_SELECTION_MESSAGE,
-            }
-        }
+    let unavailable = PlannerRouting::Unavailable {
+        message: INVALID_PLANNER_SELECTION_MESSAGE,
     };
-    let effort = match effort {
-        "low" => "low",
-        "medium" => "medium",
-        "high" => "high",
-        "xhigh" => "xhigh",
-        _ => {
-            return PlannerRouting::Unavailable {
-                message: INVALID_PLANNER_SELECTION_MESSAGE,
-            }
-        }
+    let Some(adapter) = adapter_by_id(engine) else {
+        return unavailable;
     };
-    let binary_name = match provider {
-        PlannerProvider::Claude => "claude",
-        PlannerProvider::Codex => "codex",
+    if !adapter.accepts_model(model) || !adapter.accepts_effort(effort) {
+        return unavailable;
+    }
+    let Some(binary) = locate(adapter) else {
+        return unavailable;
     };
-    let Some(binary) = locate(binary_name) else {
-        return PlannerRouting::Unavailable {
-            message: INVALID_PLANNER_SELECTION_MESSAGE,
-        };
-    };
-    let model = match model {
-        crate::models::CLAUDE_OPUS_4_8 => crate::models::CLAUDE_OPUS_4_8,
-        crate::models::CLAUDE_OPUS_5 => crate::models::CLAUDE_OPUS_5,
-        crate::models::CLAUDE_SONNET_5 => crate::models::CLAUDE_SONNET_5,
-        crate::models::CLAUDE_HAIKU_4_5_DATED => crate::models::CLAUDE_HAIKU_4_5_DATED,
-        crate::models::CLAUDE_FABLE_5 => crate::models::CLAUDE_FABLE_5,
-        crate::models::CODEX_GPT_5_6_SOL => crate::models::CODEX_GPT_5_6_SOL,
-        crate::models::CODEX_GPT_5_6_TERRA => crate::models::CODEX_GPT_5_6_TERRA,
-        _ => unreachable!("model was allow-listed above"),
-    };
+    let model = effective_model_for(adapter, model);
     PlannerRouting::Selected(PlannerSelection {
-        provider,
+        provider: adapter,
         binary,
         // A pinned Claude seat still only gets `--effort` on the builder tier,
         // so report the tier the spawn actually uses rather than the requested
-        // value. The Codex path applies the request verbatim.
-        effort: match provider {
-            PlannerProvider::Claude => claude_planner_effort(model),
-            PlannerProvider::Codex => effort,
+        // value. The Codex path applies the request verbatim, and an adapter
+        // that takes its reasoning from the operator's config reports that.
+        effort: match adapter.effort {
+            PlannerEffort::ClaudeBuilderFlag => claude_planner_effort(&model),
+            PlannerEffort::CodexReasoningEffort => static_effort(effort),
+            PlannerEffort::RuntimeConfigured => RUNTIME_CONFIGURED_EFFORT,
         },
-        model,
+        model: Some(model),
     })
 }
 
 fn resolve_with<F>(
-    preferred: PlannerProvider,
-    claude_model: &'static str,
+    setting: &BrainSetting,
+    preferred: &'static PlannerAdapter,
     mut locate: F,
 ) -> PlannerRouting
 where
-    F: FnMut(&str) -> Option<String>,
+    F: FnMut(&PlannerAdapter) -> Option<String>,
 {
-    let order = match preferred {
-        PlannerProvider::Codex => [PlannerProvider::Codex, PlannerProvider::Claude],
-        PlannerProvider::Claude => [PlannerProvider::Claude, PlannerProvider::Codex],
-    };
-    for provider in order {
-        match provider {
-            PlannerProvider::Claude => {
-                if let Some(binary) = locate("claude") {
-                    return PlannerRouting::Selected(claude_selection(binary, claude_model));
-                }
-            }
-            PlannerProvider::Codex => {
-                if let Some(binary) = locate("codex") {
-                    return PlannerRouting::Selected(codex_selection(
-                        binary,
-                        DEFAULT_CODEX_PLANNER_MODEL,
-                    ));
-                }
-            }
+    for adapter in resolution_order(setting.provider.as_deref(), preferred) {
+        if let Some(binary) = locate(adapter) {
+            return PlannerRouting::Selected(selection_for(
+                adapter,
+                binary,
+                setting.tier,
+                setting.model.as_deref(),
+            ));
         }
     }
     PlannerRouting::Unavailable {
@@ -305,224 +592,93 @@ where
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
+// ── settings surface ────────────────────────────────────────────────────────
 
-    fn both_installed(name: &str) -> Option<String> {
-        Some(format!("/mock/{name}"))
-    }
-
-    fn default_claude_model() -> &'static str {
-        effective_claude_model_with_availability(DEFAULT_CLAUDE_PLANNER_MODEL, false, false)
-    }
-
-    #[test]
-    fn no_pin_never_seats_the_frontier_orchestrator_model() {
-        for preferred in [PlannerProvider::Claude, PlannerProvider::Codex] {
-            let PlannerRouting::Selected(selection) =
-                resolve_with(preferred, default_claude_model(), both_installed)
-            else {
-                panic!("both CLIs installed must resolve");
-            };
-            assert_ne!(
-                selection.model,
-                crate::models::CLAUDE_FABLE_5,
-                "the background planner must never default to the frontier orchestrator id"
-            );
-            assert_ne!(selection.model, crate::models::CLAUDE_OPUS_4_8);
-        }
-    }
-
-    #[test]
-    fn default_tiers_are_sonnet_flag_free_and_codex_sol_high() {
-        assert_eq!(
-            resolve_with(PlannerProvider::Claude, default_claude_model(), both_installed),
-            PlannerRouting::Selected(PlannerSelection {
-                provider: PlannerProvider::Claude,
-                binary: "/mock/claude".to_string(),
-                model: crate::models::CLAUDE_SONNET_5,
-                effort: "medium",
-            })
-        );
-        // The Claude worker tier is spawned WITHOUT an `--effort` flag; only the
-        // builder tier carries one.
-        assert_eq!(claude_effort_flag(crate::models::CLAUDE_SONNET_5), None);
-        assert_eq!(
-            claude_effort_flag(BUILDER_CLAUDE_PLANNER_MODEL),
-            Some("high")
-        );
-        assert_eq!(claude_effort_flag(crate::models::CLAUDE_FABLE_5), Some("high"));
-
-        assert_eq!(
-            resolve_with(PlannerProvider::Codex, default_claude_model(), both_installed),
-            PlannerRouting::Selected(PlannerSelection {
-                provider: PlannerProvider::Codex,
-                binary: "/mock/codex".to_string(),
-                model: DEFAULT_CODEX_PLANNER_MODEL,
-                effort: "high",
-            })
-        );
-        assert_eq!(codex_planner_effort(WORKER_CODEX_PLANNER_MODEL), "medium");
-    }
-
-    #[test]
-    fn preference_falls_through_to_the_installed_cli_and_reports_no_cli() {
-        // Codex preferred but absent → the Claude worker seat still wins.
-        assert_eq!(
-            resolve_with(PlannerProvider::Codex, default_claude_model(), |name| {
-                (name == "claude").then(|| "/mock/claude".to_string())
-            }),
-            PlannerRouting::Selected(PlannerSelection {
-                provider: PlannerProvider::Claude,
-                binary: "/mock/claude".to_string(),
-                model: crate::models::CLAUDE_SONNET_5,
-                effort: "medium",
-            })
-        );
-        // Claude preferred but absent → Codex builder seat.
-        assert_eq!(
-            resolve_with(PlannerProvider::Claude, default_claude_model(), |name| {
-                (name == "codex").then(|| "/mock/codex".to_string())
-            }),
-            PlannerRouting::Selected(PlannerSelection {
-                provider: PlannerProvider::Codex,
-                binary: "/mock/codex".to_string(),
-                model: DEFAULT_CODEX_PLANNER_MODEL,
-                effort: "high",
-            })
-        );
-        assert_eq!(
-            resolve_with(PlannerProvider::Claude, default_claude_model(), |_| None),
-            PlannerRouting::Unavailable {
-                message: NO_AGENT_CLI_MESSAGE,
-            }
-        );
-    }
-
-    #[test]
-    fn orchestrator_backend_setting_picks_the_planner_provider() {
-        for (backend, expected) in [
-            ("codex", PlannerProvider::Codex),
-            ("claude", PlannerProvider::Claude),
-            ("collide", PlannerProvider::Claude),
-            ("fable", PlannerProvider::Claude),
-            ("openclaw", PlannerProvider::Codex),
-            ("hermes", PlannerProvider::Codex),
-            ("something-new", PlannerProvider::Codex),
-        ] {
-            assert_eq!(
-                preferred_provider_from(Some(&json!({ "orchestratorBackend": backend }))),
-                expected,
-                "backend {backend}"
-            );
-        }
-        assert_eq!(
-            preferred_provider_from(Some(
-                &json!({ "orchestratorBackend": "auto", "inAppOrchestratorEnabled": true })
-            )),
-            PlannerProvider::Claude
-        );
-        assert_eq!(
-            preferred_provider_from(Some(
-                &json!({ "orchestratorBackend": "auto", "inAppOrchestratorEnabled": false })
-            )),
-            PlannerProvider::Codex
-        );
-        assert_eq!(preferred_provider_from(Some(&json!({}))), PlannerProvider::Codex);
-        assert_eq!(preferred_provider_from(None), PlannerProvider::Codex);
-    }
-
-    #[test]
-    fn bound_selection_accepts_catalog_models_and_rejects_raw_cli_values() {
-        assert_eq!(
-            resolve_bound_with("codex", crate::models::CODEX_GPT_5_6_SOL, "xhigh", |name| {
-                (name == "codex").then(|| "/mock/codex".to_string())
-            }),
-            PlannerRouting::Selected(PlannerSelection {
-                provider: PlannerProvider::Codex,
-                binary: "/mock/codex".to_string(),
-                model: crate::models::CODEX_GPT_5_6_SOL,
-                effort: "xhigh",
-            })
-        );
-        // An explicit pin may still seat the frontier model.
-        assert_eq!(
-            resolve_bound_with("claude", crate::models::CLAUDE_FABLE_5, "high", |_| Some(
-                "/mock/claude".into()
-            )),
-            PlannerRouting::Selected(PlannerSelection {
-                provider: PlannerProvider::Claude,
-                binary: "/mock/claude".to_string(),
-                model: crate::models::CLAUDE_FABLE_5,
-                effort: "high",
-            })
-        );
-        assert_eq!(
-            resolve_bound_with("codex", "gpt-unknown", "xhigh", |_| Some(
-                "/mock/codex".into()
-            )),
-            PlannerRouting::Unavailable {
-                message: INVALID_PLANNER_SELECTION_MESSAGE,
-            }
-        );
-        assert_eq!(
-            resolve_bound_with("claude", crate::models::CLAUDE_OPUS_5, "ultra", |_| {
-                Some("/mock/claude".into())
-            }),
-            PlannerRouting::Unavailable {
-                message: INVALID_PLANNER_SELECTION_MESSAGE,
-            }
-        );
-    }
-
-    #[test]
-    fn unavailable_models_advance_the_high_effort_fallback_chain() {
-        assert_eq!(
-            claude_fallback_selection("/mock/claude", crate::models::CLAUDE_FABLE_5),
-            Some(PlannerSelection {
-                provider: PlannerProvider::Claude,
-                binary: "/mock/claude".to_string(),
-                model: crate::models::CLAUDE_OPUS_5,
-                effort: "high",
-            })
-        );
-        assert_eq!(
-            claude_fallback_selection("/mock/claude", crate::models::CLAUDE_OPUS_5),
-            Some(PlannerSelection {
-                provider: PlannerProvider::Claude,
-                binary: "/mock/claude".to_string(),
-                model: crate::models::CLAUDE_OPUS_4_8,
-                effort: "high",
-            })
-        );
-        assert_eq!(
-            claude_fallback_selection("/mock/claude", crate::models::CLAUDE_OPUS_4_8),
-            None
-        );
-
-        assert_eq!(
-            effective_claude_model_with_availability(crate::models::CLAUDE_FABLE_5, false, false),
-            crate::models::CLAUDE_FABLE_5
-        );
-        assert_eq!(
-            effective_claude_model_with_availability(crate::models::CLAUDE_FABLE_5, true, false),
-            crate::models::CLAUDE_OPUS_5
-        );
-        assert_eq!(
-            effective_claude_model_with_availability(crate::models::CLAUDE_FABLE_5, true, true),
-            crate::models::CLAUDE_OPUS_4_8
-        );
-        assert_eq!(
-            effective_claude_model_with_availability(crate::models::CLAUDE_OPUS_5, false, true),
-            crate::models::CLAUDE_OPUS_4_8
-        );
-        // The worker default is the base rung — it has no lower fallback and is
-        // never rewritten by the degrade chain.
-        assert_eq!(
-            effective_claude_model_with_availability(DEFAULT_CLAUDE_PLANNER_MODEL, true, true),
-            crate::models::CLAUDE_SONNET_5
-        );
-    }
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SymonBrainAdapterState {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub installed: bool,
+    /// True when the adapter takes its model from the operator's own runtime
+    /// config, so the settings panel can say so instead of showing a blank pin.
+    pub runtime_configured_model: bool,
 }
+
+/// What Settings → Voice renders for the Symon brain row: the stored setting,
+/// which adapters are actually installed, and the seat the route resolves right
+/// now — so "not installed, falling back" is visible rather than silent.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SymonBrainState {
+    pub provider: String,
+    pub tier: String,
+    pub model: Option<String>,
+    pub adapters: Vec<SymonBrainAdapterState>,
+    pub resolved_provider: Option<&'static str>,
+    pub resolved_label: Option<&'static str>,
+    pub resolved_model: Option<String>,
+    pub resolved_effort: Option<&'static str>,
+    /// The chosen provider, when its binary is missing and the route fell
+    /// through to another entry.
+    pub fell_back_from: Option<String>,
+    pub detail: Option<&'static str>,
+}
+
+pub fn brain_state() -> SymonBrainState {
+    brain_state_with(&read_brain_setting(), preferred_provider(), locate_planner_binary)
+}
+
+fn brain_state_with<F>(
+    setting: &BrainSetting,
+    preferred: &'static PlannerAdapter,
+    mut locate: F,
+) -> SymonBrainState
+where
+    F: FnMut(&PlannerAdapter) -> Option<String>,
+{
+    let adapters = PLANNER_ADAPTERS
+        .iter()
+        .map(|adapter| SymonBrainAdapterState {
+            id: adapter.id,
+            label: adapter.label,
+            installed: locate(adapter).is_some(),
+            runtime_configured_model: adapter.worker_model.is_none(),
+        })
+        .collect();
+    let routing = resolve_with(setting, preferred, &mut locate);
+    let mut state = SymonBrainState {
+        provider: setting.provider.clone().unwrap_or_else(|| "auto".to_string()),
+        tier: setting
+            .tier
+            .map_or("auto", PlannerTier::as_str)
+            .to_string(),
+        model: setting.model.clone(),
+        adapters,
+        resolved_provider: None,
+        resolved_label: None,
+        resolved_model: None,
+        resolved_effort: None,
+        fell_back_from: None,
+        detail: None,
+    };
+    match routing {
+        PlannerRouting::Selected(selection) => {
+            if let Some(chosen) = setting.provider.as_deref() {
+                if chosen != selection.provider.id {
+                    state.fell_back_from = Some(chosen.to_string());
+                }
+            }
+            state.resolved_provider = Some(selection.provider.id);
+            state.resolved_label = Some(selection.provider.label);
+            state.resolved_model = selection.model;
+            state.resolved_effort = Some(selection.effort);
+        }
+        PlannerRouting::Unavailable { message } => state.detail = Some(message),
+    }
+    state
+}
+
+#[cfg(test)]
+#[path = "planner_route_tests.rs"]
+mod tests;
