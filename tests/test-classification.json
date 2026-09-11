@@ -1106,6 +1106,12 @@
       ]
     },
     {
+      "path": "tests/bench-startup-readiness-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/bench-tmux-scope-real-path.test.ts",
       "reasons": [
         "child-process",
