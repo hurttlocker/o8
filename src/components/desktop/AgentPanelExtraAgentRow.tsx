@@ -198,6 +198,9 @@ export function ExtraAgentRowView({
   return (
     <button
       type="button"
+      // Stable handle for AT/automation (#2146): row.key is `lane:<id>` /
+      // `agent:<sessionKey>`, so it survives a rename of row.name.
+      data-o8-agent-row={row.key}
       disabled={!canInteract}
       onClick={handleClick}
       onContextMenu={(event) => {
