@@ -72,9 +72,9 @@ npm run bench:interactions:full -- \
 ```
 
 Each release run writes `tests/bench/results/interactions-baseline-release-<appVersion>.json`,
-so the two coexist and can be diffed. The budgets below stay `provisional`
-(`INTERACTION_BUDGETS.status === 'provisional'`, `lockedBy === null`) until both
-exist and the operator locks them.
+so the two coexist and can be diffed. Exported observations remain `observed`;
+writing an observation does not grant acceptance. The September 11 v1 decision
+below locks the unchanged budget manifest after observing two shipped builds.
 
 Release observations require all three independent provenance links: the
 notarized `.app`, the SHA-256 of its release archive, and a full 40-hex release
@@ -155,16 +155,18 @@ spinner; 3s+ named stages). A surface over its tier either gets faster or grows
 the feedback its tier demands. The terminal-derived ceilings come from
 `scripts/bench/terminal-workload/budgets.mjs`, which the operator already locked.
 
-**These budgets are PROVISIONAL** until two release baselines exist and the
-operator locks them. See the release lane above.
+**These budgets are locked for v1** by `operator-acceptance-2026-09-11`.
+Every numeric ceiling and comparison band is unchanged from the provisional
+manifest. The crop capability remains an explicit unavailable under #2175.
 
 ### Absolute plus delta
 
 Every metric is reported three ways, and a run fails on either gate:
 
 - **Absolute** — value against the budget above.
-- **Accepted baseline delta** — value against the accepted baseline, with a
-  per-metric noise band measured from repeated runs of the same build.
+- **Accepted baseline delta** — value against the accepted baseline, with the
+  unchanged per-metric comparison band. The v1 bands are conservative policy
+  values, not empirically calibrated noise estimates from repeated launches.
 - **Release delta** — the scorecard compares the metric against the previous
   release's scorecard.
 
@@ -226,3 +228,51 @@ screenshot crop is unimplemented, a clean run reports `incomplete` by design.
 ## Measured baseline
 
 <!-- MEASURED-BASELINE -->
+
+### Accepted v1 reference, September 11, 2026
+
+The operator accepted the 0.1.747 reference after the corrected instrument
+measured the exact signed, notarized 0.1.746 and 0.1.747 release artifacts.
+The public, path-sanitized reference is
+[`macos-x64-0.1.747.json`](../../scripts/bench/interactions/baselines/macos-x64-0.1.747.json).
+It contains all 45 available metric observations, exact artifact and instrument
+identities, host class, sample bounds, raw receipt digests, and the decision.
+
+| Released artifact | Startup at 50 / 250 / 1,000 rows | Absolute metric rows |
+| --- | --- | --- |
+| 0.1.746 | 1,027 / 1,253.2 / 929.7 ms | 45 passed, zero failed |
+| 0.1.747 | 1,055.1 / 997.5 / 1,083 ms | 45 passed, zero failed |
+
+These runs used packaged services and a browser, not native-window launch timing.
+Each scale has seven input/tab samples, a 12-second quick soak and one startup
+observation; that startup value is not a population percentile. Earlier full
+observations with 15 samples and 60-second soaks are retained separately. Old
+startup clocks are not comparable with the corrected method.
+
+Acceptance does not rewrite the raw checks. The 0.1.747 raw comparison still
+fails because 1,083 ms is 153.3 ms above the earlier 929.7 ms, exceeding the
+unchanged 150 ms band. The operator accepted that single reference-selection
+exception while retaining the 2,000 ms absolute ceiling. Future regressions
+still fail at the original band. All six scale runs passed artifact identity,
+deliberate-delay falsification and cleanup, with zero browser survivors.
+
+Screenshot crop remains null at all three scales. #2175 owns the missing capture
+measurement; its existing 500 ms ceiling is not removed or increased. The runner
+continues to report unavailable/incomplete for that path. Terminal composition is
+historical for these released artifacts. The separate terminal-workload lane has
+its own measured acceptance and is not silently relabeled as current-release proof.
+
+For a comparable local run, select the accepted reference explicitly:
+
+```sh
+npm run bench:interactions:full -- \
+  --target=release:/path/to/o8.app \
+  --archive-sha256=<64-hex> --release-git-sha=<40-hex> \
+  --baseline=scripts/bench/interactions/baselines/macos-x64-0.1.747.json
+```
+
+Compare matching measurement methods, fixture scales and host class; preserve
+sample/soak differences and host contention in the report. This machine-specific
+reference is not silently selected for other hardware by the default command.
+The acceptance closes #1697's v1 measurement and budget deliverable, not every
+future optimization, every runtime, or an eight-hour endurance test.
