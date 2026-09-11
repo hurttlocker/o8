@@ -1,15 +1,14 @@
 name: CI
 
-# PR-triggered since 2026-07-08 (Actions-billing discipline, Q ruling). The push
-# trigger re-verified work the LOCAL gate already ran (npx tsc --noEmit + npm
-# test before every commit per CLAUDE.md, real build at ship time) — at ~20
-# direct pushes/day × ~17 job-minutes that was the entire Actions bill for
-# zero new signal. PRs are the un-gated lanes (PR agents), so event-driven CI
-# stays there.
+# Runs on every pull request and on every push to main. The repo is public,
+# so Linux and Windows runners are free; the main-branch run keeps the README
+# badge and the default-branch status honest after each merge (Q ruling
+# 2026-09-11, reversing the PR-only rule from the private-repo days).
 # A weekly run keeps integration coverage and dependency audits current;
-# workflow_dispatch remains the on-demand path for a full remote check against
-# main.
+# workflow_dispatch remains the on-demand path for a full remote check.
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
   schedule:
@@ -216,7 +215,7 @@ jobs:
   # the rest of event CI.
   rust-check-windows:
     name: Rust Compile Gate (Windows)
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -257,3 +256,25 @@ jobs:
       - run: mkdir -p out/frontend out/server
       - run: cargo check --locked
         working-directory: src-tauri
+
+  roadmap-check:
+    name: Roadmap Drift Check
+    if: github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Fails when a tracking-issue checklist claims a child shipped that is
+      # still open, or when ROADMAP.md's Now section links a closed issue.
+      # Closed-but-unreleased children are listed as awaiting release, not
+      # failed. Read-only; touches no files.
+      - name: Check ROADMAP.md against the tracking issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/roadmap-status.mjs --check

@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/hurttlocker/o8/actions/workflows/ci.yml/badge.svg)](https://github.com/hurttlocker/o8/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE) [![Release](https://img.shields.io/github/v/release/hurttlocker/o8)](https://github.com/hurttlocker/o8/releases) [![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white)](https://o8.run/discord) [![Benchmark](https://img.shields.io/badge/benchmark-published%20with%20losses-8A5CF6)](./docs/user/honest-benchmark-2026-08.md)
 
-o8 is an open-source desktop control room for AI coding agents.
+o8 is an open-source control room for AI coding agents. It is the governance layer above them: the agents do the work in isolated worktrees, and nothing merges without you.
 
 [Download the latest signed macOS build](https://github.com/hurttlocker/o8/releases) · [Build from source](#quickstart)
 
@@ -16,11 +16,11 @@ Where o8 is going, and what is open: [ROADMAP.md](./ROADMAP.md)
 
 **Run a fleet of coding agents. Approve what ships.**
 
-Any agent CLI you already pay for — Claude Code, Codex, Gemini, Aider, Goose, and eight more — can do real engineering work in isolated git worktrees, and nothing merges without your approval.
+Any agent CLI you already pay for, Claude Code, Codex, Gemini, Aider, Goose, and thirteen more, can do real engineering work in isolated git worktrees, and nothing merges without your approval.
 
 The labs each ship their own agent and hope you live inside it. o8 is the neutral cockpit above all of them: one surface to dispatch, watch, review, and ship — with an audit trail for every decision. It runs on your machine, against your own subscriptions and keys. Free, MIT, complete.
 
-> **If Cursor is an editor with an agent inside, o8 is the inverse: agents with a control room around them.**
+> **Most tools are an editor with an agent inside. o8 is the inverse: agents with a control room around them.**
 
 ---
 
@@ -30,7 +30,7 @@ Coding agents got good. Managing them didn't. Run more than one and your day bec
 
 o8's answer:
 
-- **Any runtime, one contract.** 13 agent CLIs behind one adapter interface. Orchestrate with the model you trust, dispatch work to whichever is best (or cheapest) for the job. Swap vendors without changing how you work.
+- **Any runtime, one contract.** 18 agent CLIs behind one adapter interface. Orchestrate with the model you trust, dispatch work to whichever is best (or cheapest) for the job. Swap vendors without changing how you work.
 - **Governance is the product.** Every worker runs in an isolated worktree. Every diff gets reviewed — by you, or by an orchestrator model you've delegated to — before it touches your branch. Every approval, rejection, escalation, and merge is recorded.
 - **Memory that compounds.** An organizational-memory layer (Cortex) turns session outcomes into durable directives, and an **Engineering Brain** answers questions about your repo and your fleet's history with citations — "what did the agents ship yesterday?" is a query, not an archaeological dig.
 - **Operate from anywhere.** A paired iPhone app and mobile web surface: watch the fleet, steer a session, approve a merge from wherever you are.
@@ -47,8 +47,11 @@ Nothing is reported back to us unless you switch it on. Product telemetry, crash
 
 | Orchestrate or work | Workers (dispatchable) |
 |---|---|
-| Claude Code · Codex | Gemini CLI · opencode · Cursor CLI · Grok CLI · pi |
+| Claude Code · Codex · OpenCode 2 | Gemini · Cursor · Grok Build · Pi · GitHub Copilot CLI · Crush |
 | | Aider · Goose · Kimi Code · OpenHands · Qwen Code · Qoder |
+| | 3code · Prime Agent · DeepSeek Harness |
+
+Eighteen runtimes dispatch today. The count is enforced by a test against the runtime registry, so this table and the app agree. Governed Hermes and openclaw backends can also orchestrate; they dispatch only through o8.
 
 A first-run picker discovers what's installed and lets you choose your orchestrator + workers. No vendor pin — Codex is a default, not a requirement. Adding a runtime is a small, documented patch ([`docs/internals/runtime-adapter-contract.md`](./docs/internals/runtime-adapter-contract.md)) — community adapters welcome.
 
@@ -127,7 +130,7 @@ Free tier uses on-device Apple transcription or your own Whisper key. An optiona
 
 ## Quickstart
 
-macOS has signed releases today. Windows 11 is runtime-verified and produces MSI and NSIS installers. Linux produces deb, rpm, and AppImage packages; public signing, update channels, and Linux desktop verification remain open. The deb/rpm packages declare a `nodejs (>= 22)` dependency so a clean install has the system Node the app's sidecar requires; voice dictation, the native browser pane, and the native folder/file picker are macOS-only — see the [Linux surface support table](./docs/internals/port-audit-linux.md#linux-surface-support-table) for the fallback each one uses.
+macOS has signed releases today. Linux and Windows do not yet: Linux is one runtime proof away from a published build, and Windows needs a contributor with Windows hardware. Both are tracked in [ROADMAP.md](./ROADMAP.md), and the port audits ([Linux](./docs/internals/port-audit-linux.md), [Windows](./docs/internals/port-audit-windows.md)) list every remaining blocker with file-and-line evidence. Voice dictation, the native browser pane, and the native folder and file picker are macOS-only.
 
 **Easiest:** download the latest signed build from [Releases](https://github.com/hurttlocker/o8/releases) — auto-updates included.
 
@@ -145,7 +148,7 @@ npm install
 npm run dev             # web loop — Next.js :47120 + WS :47125
 ```
 
-`npm run dev` is the whole loop for web/UI work. For the native desktop shell — a much longer first build, and what you need for anything touching Tauri — run `npm run tauri:dev` instead. Ctrl-C shuts down the coordinated stack; `npm run dev:cleanup` is the recovery path after a hard kill.
+`npm run dev` is the whole loop for web/UI work. For the native desktop shell — a much longer first build, and what you need for anything touching Tauri — run `npm run tauri:dev` instead. Ctrl-C shuts down the coordinated stack; `node scripts/dev.mjs cleanup` is the recovery path after a hard kill.
 
 That loop needs no POSIX shell, so a Windows clone builds without Git Bash or any `script-shell` configuration. The only scripts that still want `bash` are the `measure:*` diagnostics and the release chain (`ship`, `tauri:build:signed`), which are macOS-only regardless.
 
@@ -158,6 +161,10 @@ Bring at least one agent CLI you already use (`claude`, `codex`, `gemini`, `aide
 - **iOS app:** Pair by QR in seconds — beta access via [o8.run](https://o8.run).
 - **Any phone:** the mobile web surface ships in this repo — pair any device on your network through the browser, no app needed.
 - **Build your own:** the pairing protocol and WebSocket surface are open in this repo. Third-party clients are welcome.
+
+### Headless
+
+`o8 serve` runs the control plane on a machine with no screen: the server, the supervisor, and the WebSocket layer, with the same governance gates. Pair a phone to it, drive it from the `o8` CLI or any MCP client, or attach the desktop later.
 
 ### Connect Claude (or any MCP client)
 
