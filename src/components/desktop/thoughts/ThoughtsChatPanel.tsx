@@ -2158,6 +2158,11 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   // active assistant turn's Task tool calls. Status is tied to the turn
   // (busy → running) rather than per-tool completion: parallel scouts fire
   // together and the serial tool-done heuristic can't track them individually.
+  // Worker packets this thread dispatched. One list, two consumers: the crew
+  // card's rows and the composer status bar's worker count — so the number
+  // under the composer is the number of rows on screen (#2148).
+  const threadWorkerPackets = packetsForOrchestratorThread(missionState?.packets ?? [], threadId);
+
   const orchestratorScouts: SwarmScoutView[] = (() => {
     if (!isOrchestratorMode) return [];
     const assistants = displayMessages.filter((message) => message.role === 'assistant');
@@ -2240,7 +2245,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
             topContent={transcriptTopContent}
             bottomContent={isOrchestratorMode && displayMessages.length > 0 ? (
               <SwarmStatusCard
-                packets={packetsForOrchestratorThread(missionState?.packets ?? [], threadId)}
+                packets={threadWorkerPackets}
                 scouts={orchestratorScouts}
                 onFocusPacket={onLaunchPacket ? (packet) => { void onLaunchPacket(packet); } : undefined}
               />
@@ -2320,6 +2325,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         isSingleMode={isSingleMode}
         displayWaiting={displayWaiting}
         chatMessages={displayMessages}
+        workerPackets={threadWorkerPackets}
         activeTargetLabel={activeTargetLabel}
         targetAgentExists={Boolean(targetAgent)}
         // Feed the EFFECTIVE transcript (orchestrator streams live into

@@ -6,6 +6,7 @@ import { composerModeSpec, type ComposerMode } from '../composer-mode';
 import type { OrchestratorBackendSetting } from '../operator-defaults';
 import { SlashCommandPicker } from './SlashCommandPicker';
 import { ComposerStatusBar } from './ComposerStatusBar';
+import type { ComposerActivityPacket } from '@/lib/orchestrator/composer-activity';
 import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import type { OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
 import { getOrchestratorSlashCommandSuggestions, type OrchestratorSlashCommandDefinition } from '@/lib/slash-commands';
@@ -25,6 +26,8 @@ interface ComposerAreaProps {
   isSingleMode?: boolean;
   displayWaiting: boolean;
   chatMessages: MobileTranscriptEntry[];
+  /** Packets this thread dispatched — the status bar counts the live ones. */
+  workerPackets?: readonly ComposerActivityPacket[];
   activeTargetLabel: string;
   targetAgentExists: boolean;
   thoughtsBodyBackground: string;
@@ -90,6 +93,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   isSingleMode = false,
   displayWaiting,
   chatMessages,
+  workerPackets,
   activeTargetLabel,
   targetAgentExists,
   enhancing,
@@ -329,6 +333,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
         <ComposerStatusBar
           displayWaiting={displayWaiting}
           runningTools={runningTools}
+          workerPackets={workerPackets}
           activeTargetLabel={activeTargetLabel}
           latestUserMessageId={latestUserMessageId}
           latestUserMessageAt={latestUserEntry?.timestamp ?? null}

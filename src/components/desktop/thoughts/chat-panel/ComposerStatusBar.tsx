@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AgentStatusDot } from '@/components/desktop/AgentStatusDot';
 import type { MobileTranscriptToolCall } from '@/lib/mobile/types';
+import { pluralizeActivity, summarizeComposerActivity, type ComposerActivityPacket } from '@/lib/orchestrator/composer-activity';
 
 function formatElapsed(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -14,6 +15,7 @@ function formatElapsed(ms: number): string {
 export function ComposerStatusBar({
   displayWaiting,
   runningTools,
+  workerPackets = [],
   activeTargetLabel,
   latestUserMessageId,
   latestUserMessageAt,
@@ -21,6 +23,12 @@ export function ComposerStatusBar({
 }: {
   displayWaiting: boolean;
   runningTools: MobileTranscriptToolCall[];
+  /**
+   * Packets this thread dispatched — the same list the crew card renders. The
+   * bar counts the live ones as WORKERS, separately from the orchestrator's own
+   * turn, and stays on screen while they run (#2148).
+   */
+  workerPackets?: readonly ComposerActivityPacket[];
   activeTargetLabel: string;
   latestUserMessageId: string | null;
   /** Timestamp (ms) of that message — gates the latch to FRESH sends. */
@@ -36,7 +44,16 @@ export function ComposerStatusBar({
   const prevLatestUserMessageIdRef = useRef<string | null>(latestUserMessageId);
   const hasRunningTools = runningTools.length > 0;
   const [turnLatched, setTurnLatched] = useState(false);
-  const active = displayWaiting || hasRunningTools || turnLatched;
+  const activity = summarizeComposerActivity({
+    runningToolCount: runningTools.length,
+    packets: workerPackets,
+  });
+  // A Multitask turn ends the moment the launch calls return, so the
+  // orchestrator goes idle while its workers are just starting. Dispatched
+  // workers keep the bar alive on their own (#2148); the latch effects below
+  // still release on the orchestrator's own terms.
+  const orchestratorBusy = displayWaiting || hasRunningTools || turnLatched;
+  const active = orchestratorBusy || activity.workerCount > 0;
 
   useEffect(() => {
     const risingEdge = displayWaiting && !prevDisplayWaitingRef.current;
@@ -108,11 +125,27 @@ export function ComposerStatusBar({
     ? runningTools.slice(0, 2).map((t) => t.name).join(', ') + (runningTools.length > 2 ? ` +${runningTools.length - 2}` : '')
     : null;
 
+  // `N running` read as a worker count while it only ever counted the
+  // orchestrator's tool calls. Each side now names itself (#2148).
+  const activityParts: string[] = [];
+  if (activity.orchestratorToolCount > 0) activityParts.push(pluralizeActivity(activity.orchestratorToolCount, 'tool'));
+  if (activity.workerCount > 0) activityParts.push(pluralizeActivity(activity.workerCount, 'worker'));
+  const workersRunning = activity.workerCount > 0 ? `${pluralizeActivity(activity.workerCount, 'worker')} running` : null;
+  const ariaLabel = orchestratorBusy
+    ? `${activeTargetLabel} working for ${formatElapsed(elapsed)}${workersRunning ? `, ${workersRunning}` : ''}`
+    : `${workersRunning} for ${formatElapsed(elapsed)}`;
+
   return (
     <div
       role="status"
       aria-live="polite"
-      aria-label={`${activeTargetLabel} working for ${formatElapsed(elapsed)}`}
+      aria-label={ariaLabel}
+      // Discrete counts for callers that need the split without parsing the
+      // rendered text (#2148 acceptance).
+      data-composer-activity=""
+      data-orchestrator-busy={orchestratorBusy ? 'true' : 'false'}
+      data-orchestrator-tools={activity.orchestratorToolCount}
+      data-worker-count={activity.workerCount}
       title={runningSummary ? `Running ${runningSummary}` : undefined}
       style={{
         display: 'inline-flex',
@@ -141,14 +174,14 @@ export function ComposerStatusBar({
       }}>
         {formatElapsed(elapsed)}
       </span>
-      {hasRunningTools ? (
+      {activityParts.length > 0 ? (
         <span style={{
           fontSize: 11.5,
           fontWeight: 400,
           letterSpacing: '0',
           color: 'var(--t-text-faint)',
         }}>
-          {`· ${runningTools.length} running`}
+          {activityParts.map((part) => `· ${part}`).join(' ')}
         </span>
       ) : null}
     </div>
