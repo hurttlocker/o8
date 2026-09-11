@@ -1139,6 +1139,7 @@ async function runSample({ browser, browserPid, runConfig, sessionCount, sampleI
     browserSummary.xtermImportMs = xtermImportDuration(browserConsole);
     const serverSummary = deriveServer(rawServer, seeded.tabs, browserSummary.neverMountedSessionNames);
     serverSummary.benchStatsRequests = clients.reduce((total, client) => total + client.benchStatsRequests, 0);
+    serverSummary.outputTailRequests = clients.reduce((total, client) => total + client.outputTailRequests, 0);
     serverSummary.hiddenDeliveredBytesPerHiddenClient = hiddenDeliveredBytesPerHiddenClient;
     serverSummary.hiddenDeliveriesPerHiddenClient = hiddenDeliveriesPerHiddenClient;
     const replayRisk = {
@@ -1299,7 +1300,7 @@ async function main() {
     buildMode: buildModes.length === 1 ? buildModes[0] : 'mixed',
     devModeCpuWarning: samples.some((sample) => sample.devModeCpuWarning),
     diagnosticCpuProfile: runConfig.cpuProfile,
-    measurementContractVersion: 2,
+    measurementContractVersion: 3,
     ...machineClass(),
     fixture: {
       id: 'terminal-ansi-alt-screen-visibility-v2',

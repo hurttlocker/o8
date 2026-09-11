@@ -100,6 +100,15 @@ profiles beside the raw samples. These runs include profiler overhead and are
 explicitly rejected by the budget checker, even if their numbers are below the
 limits. An ordinary, unprofiled run is required for acceptance.
 
+Measurement contract v3 also separates marker polling from full correctness
+snapshots. The shared 250 ms marker poll reads only bounded output tails; it no
+longer joins and scans every terminal's retained history during each tick. Full
+snapshots still inspect retained alternate-screen sequences before the correctness
+assertions. The response schemas distinguish these paths, and the runner refuses
+a server that does not honor the lightweight request. Both request counts remain
+in each sample. This removes observer work, not product work, and does not change
+any budget or correctness requirement.
+
 Terminal-grid setup waits are bounded at 30 seconds and excluded from every measured latency.
 Visible-input polling reads 1,000 terminal lines. A timeout records whether the
 marker reached the auxiliary stream, the panel write path, and a painted xterm
